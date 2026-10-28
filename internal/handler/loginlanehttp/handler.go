@@ -36,7 +36,8 @@
 // # Переданная личность НЕ читается
 //
 // На этой поверхности личность производит ОДИН механизм — носитель, судимый
-// службой по записи (Р16, KAN-SOLE-01). Заголовков `x-kacho-*` слушатель не
+// службой по записи (Р16, KAN-SOLE-01). Заголовков переданной личности
+// (`principalwire.Namespace`) слушатель не
 // читает вовсе — ни в голой, ни в мостовой форме: пары извлечения переданной
 // личности здесь нет, и субъект берётся из `kaname_session`.
 //
@@ -70,6 +71,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
 )
 
@@ -283,6 +285,9 @@ type Config struct {
 	// Verification — клетки отказов положения на путях полосы (kaname#456,
 	// П13); nil — не считаются.
 	Verification humansession.AddressVerificationObserver
+	// ServiceNameForm — форма имени службы, объявленная установкой: ею учётка
+	// сертификата пира разбирается в имя службы, и допускается ровно край.
+	ServiceNameForm servicesan.Form
 }
 
 // Handler — слушатель полосы формы.
@@ -300,6 +305,8 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 		return nil, fmt.Errorf("login lane: session ttl must be positive")
 	case !cfg.TrustDomain.IsDeclared():
 		return nil, fmt.Errorf("login lane: trust domain must be declared — without it no caller is admitted")
+	case !cfg.ServiceNameForm.Valid():
+		return nil, fmt.Errorf("login lane: service name form must be declared — without it no caller is admitted")
 	case lane == nil:
 		return nil, fmt.Errorf("login lane: verbs required")
 	}
@@ -352,7 +359,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // callerIsGateway — ярус допуска (Р16, форма Ф-т на HTTP-слушателе).
 func (h *Handler) callerIsGateway(r *http.Request) bool {
-	return authzguard.PeerIsGateway(h.cfg.TrustDomain, r.TLS)
+	return authzguard.PeerIsGateway(h.cfg.TrustDomain, h.cfg.ServiceNameForm, r.TLS)
 }
 
 // method — отказ на неверный метод в форме, ОДНОЙ у обеих HTTP-поверхностей
@@ -929,14 +936,28 @@ func (h *Handler) confirmSecondFactor(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"backupCodes": out.BackupCodes,
-		"session":     sessionJSON(out.View),
-		"assurance":   assuranceJSON(out.Assurance),
+		"backupCodes":   out.BackupCodes,
+		"backupCodeSet": backupCodeSetJSON(out.BackupCodeSet),
+		"session":       sessionJSON(out.View),
+		"assurance":     assuranceJSON(out.Assurance),
 	})
 }
 
+// backupCodeSetJSON — состояние набора запасных кодов наружу (kaname#297 Р2):
+// ЕДИНСТВЕННЫЙ писатель ключа `backupCodeSet` во всех ответах раздела. Ключи
+// закрыты — `remaining`, `total`, `issuedAt` и `lastUsedAt` (нет ключа — из
+// набора не тратили); кодов и материала нет.
+func backupCodeSetJSON(v humansession.BackupCodeSetView) map[string]any {
+	set := map[string]any{"remaining": v.Remaining, "total": v.Total, "issuedAt": moment(v.IssuedAt)}
+	if v.LastUsed {
+		set["lastUsedAt"] = moment(v.LastUsedAt)
+	}
+	return set
+}
+
 // secondFactorStatus — чтение состояния (Р4): без признака; две формы тела —
-// `pending` и `active`; ключ `backupCodes` — только у заведённого.
+// `pending` и `active`; ключ `backupCodeSet` — только у заведённого фактора с
+// прочитанным набором (kaname#297 Р4: «сводки нет» — отсутствие ключа).
 func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
 	if !h.admitted(w, r, PathSecondFactor, humansession.TextRequestNotPerformed) {
 		return
@@ -967,15 +988,8 @@ func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
 		"accessKeys":    map[string]any{"available": out.AccessKeysAvailable},
 		"stepUpMethods": methods,
 	}
-	if out.BackupCodes != nil {
-		codes := map[string]any{
-			"remaining": out.BackupCodes.Remaining, "total": out.BackupCodes.Total,
-			"issuedAt": moment(out.BackupCodes.IssuedAt),
-		}
-		if out.BackupCodes.LastUsed {
-			codes["lastUsedAt"] = moment(out.BackupCodes.LastUsedAt)
-		}
-		body["backupCodes"] = codes
+	if out.BackupCodeSet != nil {
+		body["backupCodeSet"] = backupCodeSetJSON(*out.BackupCodeSet)
 	}
 	writeJSON(w, http.StatusOK, body)
 }
@@ -1006,11 +1020,8 @@ func (h *Handler) removeSecondFactor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
-	body := map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)}
-	if out.BackupCodesRemaining != nil {
-		body["backupCodesRemaining"] = *out.BackupCodesRemaining
-	}
-	writeJSON(w, http.StatusOK, body)
+	// Набора после снятия нет — ключа `backupCodeSet` нет (kaname#297 Р4).
+	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)})
 }
 
 // regenerateBackupCodes — Ф12-25: новый набор один раз, ответ как у церемонии.
@@ -1040,9 +1051,10 @@ func (h *Handler) regenerateBackupCodes(w http.ResponseWriter, r *http.Request) 
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"backupCodes": out.BackupCodes,
-		"session":     sessionJSON(out.View),
-		"assurance":   assuranceJSON(out.Assurance),
+		"backupCodes":   out.BackupCodes,
+		"backupCodeSet": backupCodeSetJSON(out.BackupCodeSet),
+		"session":       sessionJSON(out.View),
+		"assurance":     assuranceJSON(out.Assurance),
 	})
 }
 
@@ -1085,8 +1097,8 @@ func (h *Handler) stepUp(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	body := map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)}
-	if out.BackupCodesRemaining != nil {
-		body["backupCodesRemaining"] = *out.BackupCodesRemaining
+	if out.BackupCodeSet != nil {
+		body["backupCodeSet"] = backupCodeSetJSON(*out.BackupCodeSet)
 	}
 	writeJSON(w, http.StatusOK, body)
 }

@@ -16,8 +16,7 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 // аккаунтов у человека может быть несколько.
 //
 // Личность заводят регистрация и активация приглашения в исходе подтверждения
-// адреса — обе на полосе входа самой службы — и внутренний
-// `InternalUserService.UpsertFromIdentity` (см. `external_id`, `invite_status`).
+// адреса — обе на полосе входа самой службы (см. `external_id`, `invite_status`).
 //
 // Resource id prefix: `usr` (concatenated form, `ids.NewID`).
 message User {
@@ -42,9 +41,8 @@ message User {
 
   // Идентичность субъекта входа. Регистрация и активация приглашения в исходе
   // подтверждения адреса (kaname#456) пишут значение, отчеканенное полосой
-  // входа службы, — `own:sub-<…>`; внутренний
-  // `InternalUserService.UpsertFromIdentity` пишет значение, которое приносит
-  // его вызывающий. Уникально на всю установку, после записи не меняется.
+  // входа службы, — `own:sub-<…>`. Уникально на всю установку, после записи
+  // не меняется.
   // Пусто у PENDING.
   string external_id = 2;
 
@@ -53,9 +51,8 @@ message User {
   // приглашения, а не заводит вторую.
   string email = 3;
 
-  // Human-readable display name. Задаёт пригласивший при Invite либо
-  // вызывающий `InternalUserService.UpsertFromIdentity`; не задано — берётся
-  // локальная часть адреса (до `@`).
+  // Human-readable display name. Задаёт пригласивший при Invite; не задано —
+  // берётся локальная часть адреса (до `@`).
   string display_name = 4;
 
   // Creation timestamp.
@@ -67,8 +64,7 @@ message User {
   //   входит в положение подтверждения; приглашение активирует подтверждение
   //   адреса, пока приглашение живо.
   // ACTIVE  — личность заведена, external_id заполнен: регистрацией без
-  //   приглашения, подтверждением адреса живого приглашения либо внутренним
-  //   `InternalUserService.UpsertFromIdentity`.
+  //   приглашения либо подтверждением адреса живого приглашения.
   // BLOCKED — вход на платформу запрещён (`UserService.Block`; снимается
   //   `UserService.Unblock`).
   //

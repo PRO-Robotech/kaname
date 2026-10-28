@@ -142,6 +142,15 @@ func (uc *PlanUseCase) Execute(ctx context.Context, module string) (*iamv1.PlanM
 		return nil, shared.MapRepoErr(err)
 	}
 
+	// ИСХОД РЕДАКЦИИ — тем же решателем, что у применителя (kaname#865,
+	// условие CE-07), над парой, прочитанной в том же снимке, что отпечаток
+	// состояния. Вердикт редакции старше вердикта опоры (Д4): `Apply` отказывает
+	// по редакции первым пишущим оператором, раньше сверки опоры. Перечни и
+	// числа плана считаются при любом вердикте.
+	declaredEdition := modulecatalog.DeclaredEdition(m)
+	revision := modulecatalog.JudgeRevision(ps.Applied, declaredEdition)
+	verdict := modulecatalog.PlanVerdict(anchor, revision)
+
 	withdrawnResourceNames := dottedResources(staleResources)
 	withdrawnVerbNames := dottedVerbs(staleVerbs)
 	writtenResources, writtenVerbs := writtenCounts(liveOfModule, declared)
@@ -175,7 +184,13 @@ func (uc *PlanUseCase) Execute(ctx context.Context, module string) (*iamv1.PlanM
 		BeyondAnchorExtra:                   anchor.BeyondAnchorExtra,
 		BeyondAnchorMissing:                 anchor.BeyondAnchorMissing,
 		WithdrawnRows:                       anchor.WithdrawnRows,
-		Verdict:                             verdictToProto(anchor.Verdict),
+		Verdict:                             verdictToProto(verdict),
+		// Отпечаток едет ровно вместе со своим номером: отпечаток без номера
+		// ничего не сравнивает (Д5). Отсутствие пары — отсутствие полей.
+		ManifestRevision: revisionOf(declaredEdition),
+		ManifestDigest:   digestOf(declaredEdition),
+		AppliedRevision:  revisionOf(ps.Applied),
+		AppliedDigest:    digestOf(ps.Applied),
 	}, nil
 }
 
@@ -248,7 +263,7 @@ func (uc *PlanUseCase) readState(ctx context.Context) (modulecatalog.CatalogStat
 // verdictToProto — перечисление вердикта на проводе.
 //
 // Неназванный вердикт остаётся `UNSPECIFIED` НАМЕРЕННО: подставив ему одно из
-// двух значений, мы объявили бы клиенту исход, которого производитель не
+// известных значений, мы объявили бы клиенту исход, которого производитель не
 // называл.
 func verdictToProto(v modulecatalog.Verdict) iamv1.ModulePlanVerdict {
 	switch v {
@@ -256,6 +271,10 @@ func verdictToProto(v modulecatalog.Verdict) iamv1.ModulePlanVerdict {
 		return iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_APPLY
 	case modulecatalog.VerdictWouldBeRefusedBeyondAnchor:
 		return iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR
+	case modulecatalog.VerdictWouldBeRefusedStaleRevision:
+		return iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION
+	case modulecatalog.VerdictWouldBeRefusedRevisionConflict:
+		return iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT
 	default:
 		return iamv1.ModulePlanVerdict_MODULE_PLAN_VERDICT_UNSPECIFIED
 	}
@@ -286,7 +305,8 @@ func rowsOfModule(all catalog.Rows, module string) catalog.Rows {
 //
 // Считается по тому же признаку, по которому применитель отличает «записано» от
 // «уже стояло»: строка нова, если её ключа нет среди живых ЛИБО её форма
-// (имя типа модели / признак словаря) отличается от объявленной.
+// (имя типа модели, указатели и признак контейнера — `ResourceRow.SameForm`;
+// признак словаря у действия) отличается от объявленной.
 func writtenCounts(live catalog.Rows, declared modulecatalog.Declared) (int32, int32) {
 	liveRes := make(map[string]catalog.ResourceRow, len(live.Resources))
 	for _, r := range live.Resources {
@@ -300,7 +320,7 @@ func writtenCounts(live catalog.Rows, declared modulecatalog.Declared) (int32, i
 	var res, verbs int32
 	for _, r := range declared.Resources {
 		cur, ok := liveRes[dottedResource(r)]
-		if !ok || cur.ObjectType != r.ObjectType {
+		if !ok || !cur.SameForm(r) {
 			res++
 		}
 	}

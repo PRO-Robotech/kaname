@@ -9,7 +9,9 @@ package modelcompose_test
 // Три пробы одной правки, каждая меняет ровно один факт против соседней:
 //
 //	1  манифест несёт `user:*` у типа КАНОНА → блок с `system_class`,
-//	   побайтово равный каноническому, и композиция его подтверждает;
+//	   побайтово равный каноническому, и композиция его подтверждает
+//	   (манифест registry целиком: блок репозитория канона несёт следствие
+//	   ключа контейнера, kaname#856);
 //	2  тот же `user:*` у НОВОГО типа модуля → перевод не открывает модулю
 //	   дорогу к классу: допуск даёт находку Д3 с записью `system_class`;
 //	3  законный близнец пробы 2 без `user:*` → блок прежний, Д3 молчит.
@@ -22,45 +24,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/modelcompose"
 	"github.com/PRO-Robotech/kaname/internal/modelrender"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
 )
-
-// registryRepositoryManifest — ресурс `repositories` манифеста registry платформы
-// в той форме, в какой его несёт ствол kacho сегодня: слово `user:*` в составе
-// субъектов действия `get`. Проза примечаний — дословно его же: перевод её не
-// трогает, и равенство канону это утверждает.
-const registryRepositoryManifest = `apiVersion: iam/v1
-module: registry
-resources:
-  - name: repositories
-    objectType: registry_repository
-    parents:
-      - {name: parent, type: registry_registry}
-    producer: authored
-    notes:
-      - before: super_admin
-        text: |
-          # A repository has no project pointer of its own — it is a child of its
-          # registry, and the registry is the one anchored to a project.
-      - before: v_get
-        text: |
-          # RG-1 D-7: ` + "`user:*`" + ` public-read wildcard — anonymous pull of a PUBLIC repo.
-          # The wildcard grants v_get ONLY on repos that ALSO carry an explicit
-          # ` + "`user:* v_get`" + ` tuple emitted by the registry overlay (visibility=PUBLIC);
-          # absent that tuple ` + "`user:*`" + ` has no access → uniform 404. ONLY v_get gains
-          # the wildcard — no write relation does (anon is a read-only floor, B14).
-          # #64 Defect A: v_* derive from ` + "`owner`" + ` (repo creator/pusher owner-tuple) so
-          # the repo owner fully manages their own repository; ` + "`user:*`" + ` wildcard stays
-          # on v_get ONLY (anonymous public-read floor, B14).
-    relations:
-      - name: owner
-        definition: '[user, service_account]'
-        position: beforeTiers
-    verbs:
-      - {name: get, subjects: ['user:*', user, service_account, 'group#member'], from: [owner, super_admin]}
-      - {name: list, from: [owner, super_admin]}
-      - {name: update, from: [owner, super_admin]}
-      - {name: delete, from: [owner, super_admin]}
-`
 
 func loadOne(t *testing.T, doc string) *manifest.Manifest {
 	t.Helper()
@@ -94,8 +59,21 @@ func TestSC829_PublicWildcardWordRendersAsTheClassAndEqualsTheCanon(t *testing.T
 		t.Fatalf("канон не несёт класса в v_get registry_repository — предпосылка отпала:\n%s", want)
 	}
 
-	m := loadOne(t, registryRepositoryManifest)
-	got, err := modelrender.Render(m.Resources[0])
+	// Манифест — registry ЦЕЛИКОМ, с контейнером `registries`: блок
+	// репозитория канона несёт `public_reader from parent` (kaname#856), а это
+	// следствие ключа контейнера ТОГО ЖЕ документа. Один ресурс `repositories`
+	// рендерит прежнюю редакцию (Р10), и равенство канону на нём не определено.
+	m := loadRegistryWithContainer(t)
+	var repo manifest.Resource
+	for _, r := range m.Resources {
+		if r.ObjectType == "registry_repository" {
+			repo = r
+		}
+	}
+	// Форма, в которой блок судят против канона: запись субъекта переводится
+	// сборщиком, проза примечаний — переводом прозы (kaname#855); фикстура П6
+	// несёт обе прежние записи.
+	got, err := modelrender.RenderForCanon(repo)
 	if err != nil {
 		t.Fatalf("рендер отказал: %v", err)
 	}
@@ -109,9 +87,29 @@ func TestSC829_PublicWildcardWordRendersAsTheClassAndEqualsTheCanon(t *testing.T
 	if cerr != nil {
 		t.Fatalf("композиция отвергла блок, равный канону: %v", cerr)
 	}
-	if len(rep.Reaffirmed) != 1 || rep.Reaffirmed[0] != "registry_repository" || len(rep.Composed) != 0 {
-		t.Fatalf("ожидалось подтверждение ровно registry_repository и ноль добавленных: %s", rep.Census())
+	if len(rep.Reaffirmed) != 2 || rep.Reaffirmed[1] != "registry_repository" || len(rep.Composed) != 0 ||
+		len(rep.PriorEdition) != 0 {
+		t.Fatalf("ожидалось подтверждение ровно registry_registry и registry_repository, ноль добавленных "+
+			"и ноль прежней редакции: %s", rep.Census())
 	}
+}
+
+// loadRegistryWithContainer — манифест registry новой редакции (фикстура П6):
+// слово `user:*` у действия `get` репозитория и ключ публичного чтения у реестра.
+func loadRegistryWithContainer(t *testing.T) *manifest.Manifest {
+	t.Helper()
+	doc, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
+	if err != nil {
+		t.Fatalf("фикстура: %v", err)
+	}
+	if !strings.Contains(string(doc), "subjects: ['user:*'") {
+		t.Fatalf("фикстура не несёт слова user:* в составе субъектов — проба перевода беспредметна")
+	}
+	m, err := manifest.Load(doc)
+	if err != nil {
+		t.Fatalf("загрузчик отверг фикстуру: %v", err)
+	}
+	return m
 }
 
 const newModuleWithWildcard = `apiVersion: iam/v1

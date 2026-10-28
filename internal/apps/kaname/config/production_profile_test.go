@@ -48,6 +48,7 @@ func registryTokenLaneSettings() config.RegistryTokenConfig {
 	return config.RegistryTokenConfig{
 		Endpoint: "tcp://0.0.0.0:9096",
 		Service:  "registry.kacho.local",
+		Issuer:   probeIssuer,
 	}
 }
 

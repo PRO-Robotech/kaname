@@ -19,9 +19,9 @@
 // This is a COARSE "is this a legitimate internal reader" gate (defense-in-depth
 // against a compromised module holding a valid cert but not authorized to read
 // IAM) — NOT a per-resource viewer-check. Per-user authz is the api-gateway's
-// job, run BEFORE it forwards to :9091. The floor never ReBACs the forwarded
-// end-user principal (x-kacho-principal-*) — the subject of the Check is the
-// caller MODULE-SA, not the end user.
+// job, run BEFORE it forwards to :9091. Переданного принципала конечного
+// пользователя (`principalwire.MetaPrincipalPrefix`) пол моделью прав не судит
+// никогда: субъект проверки — учётка вызывающего МОДУЛЯ, а не пользователь.
 //
 // Default-OFF / production-mode-only: in dev/newman (no mTLS, FGA-on-internal
 // disabled) the floor is a NO-OP pass-through, byte-identical to today — the
@@ -63,6 +63,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 const (
@@ -95,8 +96,8 @@ const (
 //   - InternalIAMService/{RegisterResource,UnregisterResource}
 //     — fga_writer-gated mutations.
 //   - ForceLogout / Cluster GrantAdmin/RevokeAdmin / Authorize
-//     WriteTuples/ReloadModel / SessionRevocations Revoke /
-//     UpsertFromIdentity — gateway-only / admin-tier mutations.
+//     WriteTuples/ReloadModel / SessionRevocations Revoke — gateway-only /
+//     admin-tier mutations.
 func ReadFloorRPCs() []string {
 	return []string{
 		// InternalIAMService — service→service read lookups.
@@ -141,16 +142,23 @@ type SystemViewerFloor struct {
 	prodMode bool
 	// readFloor — the set of full-method names under the floor.
 	readFloor map[string]struct{}
+	// form — форма имени службы, объявленная установкой: ею учётка
+	// сертификата разбирается в учётку модуля. Нулевая не узнаёт никого.
+	form servicesan.Form
 }
 
 // NewSystemViewerFloor builds the floor over the given READ-RPC set. Defaults to
 // dev-mode (no-op); use WithProductionMode to enable strict enforcement.
-func NewSystemViewerFloor(checker RelationChecker, readFloorRPCs []string) *SystemViewerFloor {
+//
+// form — форма имени службы, объявленная установкой (cfg.AuthN.ServiceNameForm());
+// параметр обязателен и позиционен: нулевая форма не узнаёт никого, и забытая
+// сборкой она отвергала бы каждого читателя молча.
+func NewSystemViewerFloor(checker RelationChecker, readFloorRPCs []string, form servicesan.Form) *SystemViewerFloor {
 	m := make(map[string]struct{}, len(readFloorRPCs))
 	for _, rpc := range readFloorRPCs {
 		m[rpc] = struct{}{}
 	}
-	return &SystemViewerFloor{checker: checker, readFloor: m}
+	return &SystemViewerFloor{checker: checker, readFloor: m, form: form}
 }
 
 // WithProductionMode toggles strict fail-closed enforcement (production AuthN).
@@ -190,7 +198,7 @@ func (f *SystemViewerFloor) allow(ctx context.Context, fullMethod string) error 
 	if !verified || san == "" {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
-	sva, ok := SANToServiceAccountID(grpcsrv.CertIdentityDomainFromContext(ctx), san)
+	sva, ok := SANToServiceAccountID(grpcsrv.CertIdentityDomainFromContext(ctx), f.form, san)
 	if !ok {
 		// Malformed / foreign-trust-domain SAN → not a module identity.
 		return status.Error(codes.PermissionDenied, "permission denied")

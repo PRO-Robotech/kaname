@@ -97,7 +97,17 @@ func Run(root string, stdout, stderr io.Writer) int {
 			"проверка прав НЕ ИСПОЛНЯЛАСЬ: канон модели прав не разобран: %v\n", oraErr)
 		return ExitNotRun
 	}
-	report := manifest.CheckTree(root, manifest.WithRelationOracle(relationOracle))
+	// Родство типов канона (kaname#951) — тем же каноном и тем же исходом на
+	// отказе: судья вложенных правил без него отверг бы манифест модуля без
+	// раздела `resources`, который принимает путь старта.
+	typeCanon, canonErr := manifestoracle.CanonTypes()
+	if canonErr != nil {
+		_, _ = fmt.Fprintf(stderr,
+			"проверка прав НЕ ИСПОЛНЯЛАСЬ: канон модели прав не разобран: %v\n", canonErr)
+		return ExitNotRun
+	}
+	loadOpts := []manifest.LoadOption{manifest.WithRelationOracle(relationOracle), manifest.WithTypeCanon(typeCanon)}
+	report := manifest.CheckTree(root, loadOpts...)
 
 	// Перепись печатается ВСЕГДА и первой: без неё зелёный вердикт неотличим от
 	// вердикта обхода, не прочитавшего ничего.
@@ -110,7 +120,7 @@ func Run(root string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "НАХОДКА: %s\n", f)
 	}
 
-	rightsCode := checkRights(root, report.Paths, relationOracle, stdout, stderr)
+	rightsCode := checkRights(root, report.Paths, loadOpts, stdout, stderr)
 
 	code := report.ExitCode()
 	if code == manifest.CheckOK && rightsCode != manifest.CheckOK {
@@ -163,7 +173,7 @@ func ParseRoot(prog string, args []string) (string, error) {
 //
 // Обход манифестов НЕ повторяется: пути приходят от единственного обходчика.
 // Повторяется только чтение файла — судит его по-прежнему один загрузчик.
-func checkRights(root string, paths []string, relationOracle manifest.RelationOracle,
+func checkRights(root string, paths []string, loadOpts []manifest.LoadOption,
 	stdout, stderr io.Writer,
 ) int {
 	if len(paths) == 0 {
@@ -235,7 +245,7 @@ func checkRights(root string, paths []string, relationOracle manifest.RelationOr
 			code = manifest.CheckFailed
 			continue
 		}
-		m, err := manifest.Load(data, manifest.WithRelationOracle(relationOracle))
+		m, err := manifest.Load(data, loadOpts...)
 		if err != nil {
 			// Форму уже осудил обход, и его код возврата это учёл; здесь просто
 			// нечего судить дальше.

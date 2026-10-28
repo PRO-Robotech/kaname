@@ -1,0 +1,227 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/nested-rule-reaches-descendants-of-a-named-container.md
+  sha256: 492428179d619f7a0accaf2a8d2d99d0cec0ae532654ed9d76a75df82d127062
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: 422d1bc6f
+  content_commit: null
+  content_commit_note: документ не закоммичен (неотслеживаемый файл копии tmp/kaname-874-acceptance)
+  branch: acceptance/874-container-target-covers-descendants
+  task: PRO-Robotech/kaname#874
+  related_tasks: [PRO-Robotech/kaname#857, PRO-Robotech/kaname#856, PRO-Robotech/kacho#3274]
+  lines: 467
+  round: 1
+  round_scope: >-
+    Первый круг. Решения диспетчера В1–В5 (раздел документа) не переоткрываются; замечания
+    ниже их не оспаривают, а называют следствия, которых документ не учёл.
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/kaname-874-acceptance @ 422d1bc6f → 49242817…d127062
+    (совпало с заданием).
+  measurement_revisions: >-
+    kaname — git show 422d1bc6f; kacho — git show a95248464 в project/kacho; трекер —
+    gh issue view на 2026-10-17 (kaname#857 CLOSED, #874 OPEN, kacho#3274 OPEN).
+  neighbours_pinned:
+    anonymous-and-authenticated-are-subject-classes.md: 198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9
+    module-manifest-roles-and-seed-grants.md: fc75beed6e2b2006774ae9156307f3c1f543111801e929aac10e8be1a48fffb5
+  neighbours_note: >-
+    второй отпечаток измерен рецензентом — в таблице «Опора» документа его нет (M3).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-17T15:55:00+03:00'
+
+blocking:
+  - id: B1
+    kind: SCOPE
+    title: охват на allInScope противоречит одобренному исходу соседа SC-68 Б2
+    finding: >-
+      «Вне объёма» п. 2 (строки 45-49) и Р3 п. 2: на `allInScope` и пустой цели вложенное
+      правило не даёт ничего сверх правил верхнего уровня. Роль `registry.public.read` после
+      Р5 держит `registry.repositories` ТОЛЬКО вложенным правилом. Сосед, SC-68 Б2
+      (anonymous-and-authenticated-are-subject-classes.md, строки 1325-1331 редакции 11):
+      `usr-D` с той же ролью и целью `{"allInScope":{}}` → `v_get` на `…02/app` → true,
+      `BatchCheck` `[true, true, true, true]`. По семантике этого документа `…01/app` и
+      `…02/app` там → false. Строка 62 («Исходы SC-60…73 не меняются») поэтому ложна.
+    predicate: >-
+      sed -n 45,49p <док>; sed -n 1325,1331p <сосед ред. 11>; роль — строки 186-187 и П1 таблица
+    fix_options: >-
+      (а) правка SC-68 Б2 соседа: другая роль для Б2 с правилом верхнего уровня над
+      repositories либо исход `…0x/app → false` с новым доказательством живости Y и `…02/app`;
+      (б) охват вложенного правила на allInScope — «все контейнеры области», это расширение
+      объёма В-решения. Выбор — диспетчер; рекомендация — (а): объём документа не растёт.
+  - id: B2
+    kind: COVERAGE
+    title: заявленные исходы без сценария
+    finding: >-
+      (1) Вложенное правило на `allInScope` и `{}` не даёт ничего сверх верхнего уровня
+      (строки 47-49) — сценария нет. Это граница поверхности: реализация, которая проецирует
+      вложенный тип в проекцию глаголов роли, на allInScope молча отдаст все репозитории
+      области; держателя нет. Предикат снятия задачи #874 требует прямо: «Законные близнецы:
+      `allInScope`, пустая цель» (gh issue view 874 -R PRO-Robotech/kaname) — в документе их нет.
+      (2) Цель, называющая объект типа, покрытого только вложенным правилом, отвергается
+      воротами 3 (строки 140-143) — сценария нет. Сегодня `CoversType` читает только
+      правила верхнего уровня (structural_gates.go, ворота 3); правка домена `Rule` под
+      `children` этот исход меняет незаметно.
+      (3) Отказ `children` на `Update` (Р4, строка 159) — ND-04 (ж) держит только `POST`.
+      (4) «Нет второй дороги» (Р5, ND-10) утверждена только для `anonymous`, а Р5 говорит о
+      двух классах; `authenticated` без пробы.
+    fix: >-
+      ND-11: `registry.reader` человеку с целью `{"allInScope":{}}` → X и Y true,
+      `…01/app` false; близнец ND-02. ND-12: та же роль с целью `[registry.repositories
+      …01/app]` → FAILED_PRECONDITION текстом ворот 3 дословно; близнец ND-02 (цель X).
+      ND-04 (ж) — тем же телом через `PATCH`. ND-10 — обоими классами.
+  - id: B3
+    kind: PRODUCER
+    title: держатель SC-68 Б1 назван в документе, которого нет у соседа
+    finding: >-
+      Р5 (строки 202-204): «после редакции 11 SC-68 Б1 держит ND-02». В редакции 11 соседа
+      такого текста нет: строка производителя SC-68 и DoD S5 по-прежнему называют
+      `-run '^Test(Ask|Batch)_SC68_'`, а этот шаблон на 422d1bc6f даёт ноль функций, то есть
+      `ok` без единого исполненного теста. Это тот же предмет, что B2 записи соседа
+      c3fda648…; закрывается правкой соседа, здесь — ссылкой на неё.
+    predicate: >-
+      git grep -c 'func Test\(Ask\|Batch\)_SC68_' 422d1bc6f -- internal → код 1, пусто
+
+  - id: B4
+    kind: CONSTRUCTIBILITY
+    title: «Дано» ND-09 в написанном виде переноса не производит — опровергнуто посевом
+    finding: >-
+      ND-09 «Когда»: служба-владелец повторно регистрирует `…01/moved` с цепью на Y. Посев
+      на 422d1bc6f (форма регистрации — `registerRepository` П1, `source_version` не задан):
+      регистрация принята, но рёбра предков остались прежними —
+      `[registry_registry:reg00000000000000001 project:… account:…]`. Причина в коде:
+      рёбра заменяются только когда применилась строка зеркала (`upsertParentEdges` зовётся
+      при `applied`, emitter.go:301-310), а `StmtInsertOrSupersede` обновляет строку лишь
+      при `source_version` строго новее хранимого. Р3 («регистрация заменяет рёбра
+      целиком», строки 137-139) верна только для более новой версии. Проба по ND-09 как
+      написана была бы красной из-за «Дано», а не из-за продукта.
+    predicate: >-
+      heavy-slot.sh integration -- go test ./internal/apps/kaname/api/access_binding/
+      -run '^TestSeedND874_' -count=1 -v (временный посев, ветка-черновик 9981c4ad2,
+      внешний кластер, ns t874-heavy-integration-be38 снят) → TestSeedND874_ReRegisterMovesParentChain
+      FAIL: «does not contain registry_registry:reg00000000000000002».
+    fix: >-
+      ND-09 «Когда»: повторная регистрация с `source_version` строго новее прежней (оба
+      вызова — `parent` и `owner`); Р3 — то же условие словами. Близнец — та же повторная
+      регистрация без более новой версии: права не переносятся.
+
+important:
+  - id: M1
+    kind: PRODUCER
+    note: >-
+      Строка производителя ND-05: «текст (в) уже производят». Текст — да, условие — нет:
+      `PublicReadContainer.CoveredChild` (internal/domain/public_read.go:37-45) перебирает
+      только правила верхнего уровня, у `registry.reader` ребёнок лишь вложенный, и на
+      стволе ворота такую выдачу пропускают. Чтение вложенных правил в `CoveredChild` и в
+      `GrantsReadsOnly` (ворота SC-21, Р5 п. 2; internal/domain/system_class.go:182 перебирает
+      только `r.Rules`), а также в стражах базы `kaname.role_grants_reads_only` и
+      `kaname.access_binding_subject_class_reads_only` — заказ; назвать его.
+  - id: M2
+    kind: FORMAT
+    note: >-
+      ND-05 (в): «при манифесте прежней редакции (`deliverPriorEdition`)». С одной прежней
+      редакцией роли `rolb812261cfaa239694` нет, и отказ — `Role … not found`
+      (system_class_gates.go:116; сосед, строка 1361). Строится только «П1, затем
+      `deliverPriorEdition`» — раздел roles не объявлен, роль остаётся живой (retire.go:91);
+      так и написать. Посев это подтвердил (см. constructibility_runs).
+  - id: M3
+    kind: FORMAT
+    note: >-
+      таблица «Опора»: у `module-manifest-roles-and-seed-grants.md` нет отпечатка (fa-b7) —
+      fc75beed…8af8e47ba.
+  - id: M4
+    kind: FORMAT
+    note: >-
+      `upsertParentEdges` — emitter.go:354, строка 381 — оператор INSERT внутри него (строки 103,
+      412 документа).
+  - id: M5
+    kind: FORMAT
+    note: >-
+      П2 требует двух кодов в одной пробе («служба ствола», затем «код изменения»). Дефолт
+      рецензента: «до» строится тем же кодом изменения, доставляющим фикстуру прежней формы
+      (правило без children загрузчик принимает), «перезапуск» — новые use-case поверх той же
+      базы, как `applyDelivered`. Записать так в П2.
+  - id: M6
+    kind: FORMAT
+    note: >-
+      ND-10 и снятие объявления: в пробе соседа public_reader снимается явным полным проходом
+      `rec.ReconcileBinding` после доставки. «Опрос доходит до false» без названного прохода —
+      назвать, кто его запускает (как у соседа).
+
+  - id: M7
+    kind: FORMAT
+    note: >-
+      ND-04 (ж): назван текст, но не поле `BadRequest.field_violations[0].field`
+      (`shared.InvalidArg(field, desc)`, образец — handler.go:49 «permissions»). Записать
+      значение: `children` либо `rules[0].children`.
+
+summary:
+  scenarios_total: 10
+  scenarios_by_group: {positive: 4, negative: 4, edge: 2}
+  producers_named: 10 of 10 (статус «уже производит» у ND-05 (в) неточен — M1)
+  twins_named: 10 of 10 (у ND-02 отрицания Y — внутри сценария, близнец X)
+  blocking: 4
+  blocking_kinds: [SCOPE, COVERAGE, PRODUCER, CONSTRUCTIBILITY]
+  constructibility: >-
+    посеяно 4 из 9 нетривиальных «Дано», «не выполнилось» 5. Посеяно на 422d1bc6f (внешний
+    кластер, слот integration): П1-мир П6 (newPCRWorld) — 14 из 14 проб TestPublicContainerRead_
+    зелёные; #857 — 8 из 8 TestTarget_ зелёные (ND-01, ND-07 (а) точная ось); ND-05 (в) и
+    ND-10 — «П1, затем deliverPriorEdition» строится: роль модуля жива (раздел roles не
+    объявлен), объявление контейнера снято, выдача классу отвергается текстом SC-65
+    дословно; ND-09 — в написанном виде НЕ строится (B4). Не выполнилось: П1 с ролями в
+    форме children, ND-02/03/04/05 (а)(б)(г)/06/08 — на стволе `children` отвергается
+    схемой (additionalProperties: false), фикстура probemod.children заказана; это
+    ожидаемое красное «Дано» до кода, а не дефект документа.
+  constructibility_runs:
+    - command: heavy-slot.sh integration -- go test ./internal/repo/kaname/pg/relverdict/ -run '^TestTarget_' -count=1 -v
+      revision: 422d1bc6f (+ временный посев в отдельной копии tmp/kaname-874-seed, коммит 9981c4ad2, не публикуется)
+      result: код 0; PASS 8, FAIL 0
+    - command: heavy-slot.sh integration -- go test ./internal/apps/kaname/api/access_binding/ -run '^(TestSeedND874_|TestPublicContainerRead_)' -count=1 -v
+      revision: 9981c4ad2 = 422d1bc6f + один файл посева
+      result: >-
+        код 1; PASS 15 (TestPublicContainerRead_ 14 из 14, посев ND-05 (в)/ND-10), FAIL 1
+        (посев ND-09 — B4)
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: вердикт — возврат; одобрения нет
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 492428179d619f7a0accaf2a8d2d99d0cec0ae532654ed9d76a75df82d127062 · ред. 1, круг 1: блокирующих 4 (SCOPE, COVERAGE, PRODUCER, CONSTRUCTIBILITY)"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#874
+  status: not_performed
+  published: false
+  note: публикует курьер; до публикации блок честно not_performed
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: null
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: []

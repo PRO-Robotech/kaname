@@ -42,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // insertActiveBinding is a small helper that Inserts+Commits one ACTIVE binding
@@ -51,7 +52,7 @@ func insertActiveBinding(t *testing.T, ctx context.Context, repo *kanamepg.Repos
 	t.Helper()
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	_, err = w.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: accID,
 		DeletionProtection: protected,
@@ -224,7 +225,7 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 				out <- res{id, werr}
 				return
 			}
-			_, ierr := gw.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+			_, ierr := bindingset.Insert(ctx, gw.AccessBindingsW(), domain.AccessBinding{
 				ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 				RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: accID,
 			})
@@ -269,7 +270,7 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 	regrantID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	regranted, err := w2.AccessBindingsW().Insert(ctx, domain.AccessBinding{
+	regranted, err := bindingset.Insert(ctx, w2.AccessBindingsW(), domain.AccessBinding{
 		ID: regrantID, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: accID,
 	})

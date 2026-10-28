@@ -46,7 +46,7 @@ func handlerWithUnavailableBackend() *Handler {
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: nil,
 	})
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil))
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil), probeModuleForm)
 }
 
 func TestAuthorizeCheck_TraceIdReachesTheLog(t *testing.T) {

@@ -50,6 +50,7 @@ import ssl
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -67,18 +68,26 @@ checked = 0
 class Answer:
     """Ответ фронта: код, тело и то, состоялось ли рукопожатие вовсе."""
 
-    def __init__(self, status: int | None, body: str, handshake: bool, why: str = ""):
+    def __init__(self, status: int | None, body: str, handshake: bool, why: str = "",
+                 transport: bool = False):
         self.status, self.body, self.handshake, self.why = status, body, handshake, why
+        # transport — отказ ДО TLS и HTTP: соединение не принято либо сброшено.
+        self.transport = transport
 
 
-def ask(url: str, *, ca: str, cert: str | None, key: str | None,
-        method: str = "GET", timeout: float = 15.0) -> Answer:
-    ctx = ssl.create_default_context(cafile=ca)
-    # Имя в сертификате стенда — `localhost`; проверка имени ОСТАЁТСЯ включённой:
-    # снять её значило бы перестать проверять то, ради чего mTLS и включён.
-    if cert and key:
-        ctx.load_cert_chain(cert, key)
-    req = urllib.request.Request(url, method=method)
+# ОКНО ТРАНСПОРТА (kaname#869). На внешнем кластере слушатели службы доходят до
+# машины пробросом, и отказ рукопожатия, который проверка вызывает НАМЕРЕННО,
+# гасит проброс своего порта; держатель (`stand-own.sh`, ext_forward_keep) его
+# поднимает. Запрос С сертификатом, получивший отказ ТРАНСПОРТА (соединение не
+# принято либо сброшено до ответа), повторяется в этом окне: ждётся условие —
+# слушатель снова принимает, — а не время наугад. Отказ рукопожатия по TLS и любой
+# ответ HTTP не повторяются никогда, и запрос БЕЗ сертификата — тоже: его отказ и
+# есть предмет проверки. Окно истекло — прежний исход «соединение не состоялось».
+TRANSPORT_WINDOW_S = 15.0
+TRANSPORT_POLL_S = 0.25
+
+
+def _ask_once(req: urllib.request.Request, ctx: ssl.SSLContext, timeout: float) -> Answer:
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
             return Answer(resp.status, resp.read().decode("utf-8", "replace"), True)
@@ -87,7 +96,30 @@ def ask(url: str, *, ca: str, cert: str | None, key: str | None,
     except ssl.SSLError as e:
         return Answer(None, "", False, f"рукопожатие отклонено: {e}")
     except (urllib.error.URLError, OSError, socket.timeout) as e:
-        return Answer(None, "", False, f"соединение не состоялось: {e}")
+        return Answer(None, "", False, f"соединение не состоялось: {e}", transport=True)
+
+
+def ask(url: str, *, ca: str, cert: str | None, key: str | None,
+        method: str = "GET", timeout: float = 15.0,
+        window: float | None = None, clock=time.monotonic, sleep=time.sleep) -> Answer:
+    ctx = ssl.create_default_context(cafile=ca)
+    # Имя в сертификате стенда — `localhost`; проверка имени ОСТАЁТСЯ включённой:
+    # снять её значило бы перестать проверять то, ради чего mTLS и включён.
+    if cert and key:
+        ctx.load_cert_chain(cert, key)
+    req = urllib.request.Request(url, method=method)
+    a = _ask_once(req, ctx, timeout)
+    if not (cert and key):
+        return a
+    deadline = clock() + (TRANSPORT_WINDOW_S if window is None else window)
+    tries = 1
+    while a.transport and clock() < deadline:
+        sleep(TRANSPORT_POLL_S)
+        a = _ask_once(req, ctx, timeout)
+        tries += 1
+    if tries > 1:
+        a.why = f"{a.why} (попыток транспорта {tries})".strip()
+    return a
 
 
 # INTERNAL_PROBE_PATH — внутренний путь, на котором проверяются ОБА свойства:
@@ -454,6 +486,47 @@ def self_test(pki: pathlib.Path) -> int:
                 not empty[own_name] and not empty[road_name], str(empty))
     _self_check("поверхность не ответила — утверждение о дороге падает, а не проходит",
                 not verdicts(None, "")[road_name])
+
+    # Ось 4: окно транспорта (kaname#869) — в обе стороны на одном факте:
+    # слушатель вернулся внутри окна — ответ получен; не вернулся — прежний исход
+    # «соединение не состоялось»; запрос без сертификата не повторяется вовсе.
+    free = socket.socket()
+    free.bind(("127.0.0.1", 0))
+    _, late_port = free.getsockname()
+    free.close()
+    late = {}
+
+    def _late_listener():
+        time.sleep(1.0)
+        lctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        lctx.load_cert_chain(str(pki / "srv.crt"), str(pki / "srv.key"))
+        lsrv = http.server.HTTPServer(("127.0.0.1", late_port), _Stub)
+        lsrv.socket = lctx.wrap_socket(lsrv.socket, server_side=True)
+        late["srv"] = lsrv
+        lsrv.serve_forever()
+
+    threading.Thread(target=_late_listener, daemon=True).start()
+    try:
+        a = ask(f"https://localhost:{late_port}/iam/v1/accounts", ca=str(pki / "ca.crt"),
+                cert=str(pki / "srv.crt"), key=str(pki / "srv.key"), window=10.0)
+        _self_check("проброс вернулся внутри окна — запрос с сертификатом получил ответ",
+                    a.status == 200, f"код {a.status}, {a.why}")
+    finally:
+        if "srv" in late:
+            late["srv"].shutdown()
+    free = socket.socket()
+    free.bind(("127.0.0.1", 0))
+    _, dead_port = free.getsockname()
+    free.close()
+    a = ask(f"https://localhost:{dead_port}/iam/v1/accounts", ca=str(pki / "ca.crt"),
+            cert=str(pki / "srv.crt"), key=str(pki / "srv.key"), window=0.6)
+    _self_check("слушатель не вернулся за окно — «соединение не состоялось», а не ответ",
+                a.status is None and "попыток транспорта" in a.why, f"код {a.status}, {a.why}")
+    calls = []
+    a = ask(f"https://localhost:{dead_port}/iam/v1/accounts", ca=str(pki / "ca.crt"),
+            cert=None, key=None, window=5.0, sleep=lambda s_: calls.append(s_))
+    _self_check("запрос без сертификата не повторяется: его отказ — предмет проверки",
+                not calls and a.status is None, f"пауз {len(calls)}, {a.why}")
 
     print()
     if _SELF_FAILURES:

@@ -81,6 +81,11 @@ type Declared struct {
 	// Module — модуль оболочки манифеста. Один: применитель применяет один
 	// манифест, а не сводит несколько.
 	Module string
+	// ClassGrantsOnlyOnContainers — модуль объявил ключ оболочки S7
+	// (`classGrantsOnlyOnContainers: true`, kaname#950): строка модуля несёт его
+	// в `catalog_module.class_grants_only_on_containers`, и ворота выдачи классу
+	// судят по нему с той же доставки, что и признак контейнера.
+	ClassGrantsOnlyOnContainers bool
 	// Resources — грантуемые пары в порядке точечного ключа.
 	Resources []catalog.ResourceRow
 	// Verbs — пары «ресурс × действие» ОБЕИХ половин словаря: сначала
@@ -102,7 +107,7 @@ type Declared struct {
 // бы недетерминированный порядок операторов и сделал бы отказ на конкурентном
 // применении зависящим от прогона.
 func RowsOf(m *manifest.Manifest) (Declared, error) {
-	out := Declared{Module: m.Module}
+	out := Declared{Module: m.Module, ClassGrantsOnlyOnContainers: m.DeclaresClassGrantsOnlyOnContainers()}
 
 	resources := make([]manifest.Resource, len(m.Resources))
 	copy(resources, m.Resources)
@@ -123,8 +128,17 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 		// имя типа сам (`manifest.Resource.ObjectType`, поле обязательное).
 		// Потеряй деривация это поле — ресурс доехал бы до строки безымянным, и
 		// читатель пропустил бы его молча при действующей на вид роли (kacho#1816).
+		// Указатели и признак контейнера публичного чтения — тоже ДОСЛОВНО: по
+		// ним разворачивание выдачи классу решает, писать ли `public_reader`, и
+		// ворота выдачи — объявлен ли тип цели (kaname#856). Источник «тип
+		// объявлен» — живой каталог из доставленных манифестов, а не литерал.
+		parentTypes := make([]string, 0, len(r.Parents))
+		for _, p := range r.Parents {
+			parentTypes = append(parentTypes, p.Type)
+		}
 		out.Resources = append(out.Resources, catalog.ResourceRow{
 			Module: m.Module, Resource: r.Name, ObjectType: r.ObjectType,
+			ParentTypes: parentTypes, PublicReadToChildren: r.PassesPublicRead(),
 		})
 
 		// declaredBy — токен → имя, каким его написал манифест. Нужен ИМЕННО для

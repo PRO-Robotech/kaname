@@ -127,6 +127,9 @@ type gammaFixture struct {
 	accID  domain.AccountID
 	member domain.UserID
 	role   domain.RoleID
+	// owner — владелец аккаунта фикстуры: путь владельца даёт право отзывать и
+	// удалять выдачи области (пробы гонки форварда со снятием, kaname#923).
+	owner domain.UserID
 }
 
 func setupGamma(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix string) gammaFixture {
@@ -138,5 +141,5 @@ func setupGamma(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix st
 	prj := seedProject(t, ctx, repo, acc.ID, "prj-prod-"+suffix)
 	prjOth := seedProject(t, ctx, repo, acc.ID, "prj-other-"+suffix)
 	role := seedComputeEditorRole(t, ctx, pool, prj.ID, "ce_"+suffix)
-	return gammaFixture{repo: repo, prj: prj.ID, prjOth: prjOth.ID, accID: acc.ID, member: member, role: role}
+	return gammaFixture{repo: repo, prj: prj.ID, prjOth: prjOth.ID, accID: acc.ID, member: member, role: role, owner: owner}
 }

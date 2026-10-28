@@ -27,6 +27,7 @@ func loginLaneCfg() config.Config {
 	cfg := productionRootCfg("9097")
 	cfg.APIServer.LoginLaneEndpoint = "tcp://0.0.0.0:9098"
 	cfg.AuthN.TrustDomainName = "kacho.cloud"
+	cfg.AuthN.ServiceNameFormRaw = probeServiceNameFormRaw
 	cfg.AuthN.Login = config.LoginLaneConfig{
 		SessionTTL: 24 * 3600e9, CookieDomain: config.CookieDomainNone,
 		AddressAttempts: 5, AddressWindow: 15 * 60e9, SourceAttempts: 50, SourceWindow: 15 * 60e9,

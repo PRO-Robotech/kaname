@@ -120,23 +120,41 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// ModulePlanVerdict — what `Apply` would do with this plan, as far as the parity
-// anchor is concerned.
+// ModulePlanVerdict — what `Apply` would do with this plan.
 //
-// The verdict is NOT a second expression of the lists below it: it is the
-// existing accessor of the parity census (`MissingRows` or `ExtraRows` non-empty),
-// so there is nothing for it to diverge from. Note in particular that
-// `withdrawn_rows` does NOT enter it — a withdrawal that leaves evidence is
-// lawful by construction.
+// Two judgements enter it, and their PRECEDENCE repeats the order in which
+// `Apply` refuses: the manifest revision is compared with the applied one by the
+// FIRST writing statement of the transaction, the parity anchor is checked just
+// before the commit. So a stale revision or a revision conflict yields its own
+// verdict whatever the anchor says (`WOULD_BE_REFUSED_BEYOND_ANCHOR` included);
+// the anchor verdict is given only when the revision passes — the module has no
+// applied revision, the manifest revision is newer, or it is equal with an equal
+// content digest.
+//
+// The anchor part is NOT a second expression of the lists of the response: it is
+// the existing accessor of the parity census (`MissingRows` or `ExtraRows`
+// non-empty), so there is nothing for it to diverge from. `withdrawn_rows` does
+// NOT enter it — a withdrawal that leaves evidence is lawful by construction. The
+// lists and counts of the plan are computed under every verdict.
 type ModulePlanVerdict int32
 
 const (
 	ModulePlanVerdict_MODULE_PLAN_VERDICT_UNSPECIFIED ModulePlanVerdict = 0
-	// Applying converges with the anchor: the next boot proceeds.
+	// Applying converges with the anchor and the revision passes: the next boot
+	// proceeds.
 	ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_APPLY ModulePlanVerdict = 1
 	// Applying would step outside the anchor and is refused inside the transaction,
 	// before the commit. Repaired by editing the source, not by retrying.
 	ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR ModulePlanVerdict = 2
+	// The manifest revision is OLDER than the applied one (or, while the
+	// `revision` key is optional, the manifest declares none over an applied
+	// revision): `Apply` refuses and writes nothing. A rollback is expressed by a
+	// new, greater revision carrying the old content.
+	ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION ModulePlanVerdict = 3
+	// The manifest revision EQUALS the applied one, but its content digest
+	// differs: `Apply` refuses and writes nothing. A content change is expressed
+	// by a new, greater revision.
+	ModulePlanVerdict_MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT ModulePlanVerdict = 4
 )
 
 // Enum value maps for ModulePlanVerdict.
@@ -145,11 +163,15 @@ var (
 		0: "MODULE_PLAN_VERDICT_UNSPECIFIED",
 		1: "MODULE_PLAN_VERDICT_WOULD_APPLY",
 		2: "MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR",
+		3: "MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION",
+		4: "MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT",
 	}
 	ModulePlanVerdict_value = map[string]int32{
-		"MODULE_PLAN_VERDICT_UNSPECIFIED":                    0,
-		"MODULE_PLAN_VERDICT_WOULD_APPLY":                    1,
-		"MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR": 2,
+		"MODULE_PLAN_VERDICT_UNSPECIFIED":                        0,
+		"MODULE_PLAN_VERDICT_WOULD_APPLY":                        1,
+		"MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR":     2,
+		"MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION":    3,
+		"MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT": 4,
 	}
 )
 
@@ -337,8 +359,24 @@ type PlanModuleResponse struct {
 	//
 	// Sorted lexicographically; not capped, same reasoning as the two above.
 	WithdrawnRows []string `protobuf:"bytes,17,rep,name=withdrawn_rows,json=withdrawnRows,proto3" json:"withdrawn_rows,omitempty"`
-	// Verdict of the parity anchor over the hypothetical post-application state.
-	Verdict       ModulePlanVerdict `protobuf:"varint,18,opt,name=verdict,proto3,enum=kaname.cloud.iam.v1.ModulePlanVerdict" json:"verdict,omitempty"`
+	// Verdict of the plan: the revision comparison first, then the parity anchor
+	// over the hypothetical post-application state (see `ModulePlanVerdict`).
+	Verdict ModulePlanVerdict `protobuf:"varint,18,opt,name=verdict,proto3,enum=kaname.cloud.iam.v1.ModulePlanVerdict" json:"verdict,omitempty"`
+	// Revision declared by the delivered manifest (its `revision` key). ABSENT
+	// when the manifest declares none — absence is not zero, and zero is never a
+	// revision.
+	ManifestRevision *int64 `protobuf:"varint,19,opt,name=manifest_revision,json=manifestRevision,proto3,oneof" json:"manifest_revision,omitempty"`
+	// Revision last applied to this module's catalog. ABSENT when the module was
+	// never applied with a declared revision.
+	AppliedRevision *int64 `protobuf:"varint,20,opt,name=applied_revision,json=appliedRevision,proto3,oneof" json:"applied_revision,omitempty"`
+	// Content digest of the delivered manifest: `sha256:` and 64 lowercase hex
+	// digits over the canonical form of the document (JCS over the YAML node
+	// tree). Present exactly when `manifest_revision` is: a digest without a
+	// revision compares nothing.
+	ManifestDigest *string `protobuf:"bytes,21,opt,name=manifest_digest,json=manifestDigest,proto3,oneof" json:"manifest_digest,omitempty"`
+	// Content digest of the applied revision. Present exactly when
+	// `applied_revision` is.
+	AppliedDigest *string `protobuf:"bytes,22,opt,name=applied_digest,json=appliedDigest,proto3,oneof" json:"applied_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -497,6 +535,34 @@ func (x *PlanModuleResponse) GetVerdict() ModulePlanVerdict {
 		return x.Verdict
 	}
 	return ModulePlanVerdict_MODULE_PLAN_VERDICT_UNSPECIFIED
+}
+
+func (x *PlanModuleResponse) GetManifestRevision() int64 {
+	if x != nil && x.ManifestRevision != nil {
+		return *x.ManifestRevision
+	}
+	return 0
+}
+
+func (x *PlanModuleResponse) GetAppliedRevision() int64 {
+	if x != nil && x.AppliedRevision != nil {
+		return *x.AppliedRevision
+	}
+	return 0
+}
+
+func (x *PlanModuleResponse) GetManifestDigest() string {
+	if x != nil && x.ManifestDigest != nil {
+		return *x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *PlanModuleResponse) GetAppliedDigest() string {
+	if x != nil && x.AppliedDigest != nil {
+		return *x.AppliedDigest
+	}
+	return ""
 }
 
 // ApplyModuleRequest — payload for `Apply`.
@@ -695,8 +761,18 @@ type ApplyModuleResponse struct {
 	PrunedSelectorRows        int32 `protobuf:"varint,12,opt,name=pruned_selector_rows,json=prunedSelectorRows,proto3" json:"pruned_selector_rows,omitempty"`
 	PrunedSelectorRowsDropped int32 `protobuf:"varint,13,opt,name=pruned_selector_rows_dropped,json=prunedSelectorRowsDropped,proto3" json:"pruned_selector_rows_dropped,omitempty"`
 	PrunedSelectorTypes       int32 `protobuf:"varint,14,opt,name=pruned_selector_types,json=prunedSelectorTypes,proto3" json:"pruned_selector_types,omitempty"`
-	unknownFields             protoimpl.UnknownFields
-	sizeCache                 protoimpl.SizeCache
+	// Revision applied to the module's catalog AFTER this application. ABSENT
+	// when the module has none — the manifest declares no revision and none was
+	// applied before. Moving the revision alone is NOT a catalog change:
+	// `changed` keeps speaking of the module, resource and verb rows.
+	AppliedRevision *int64 `protobuf:"varint,15,opt,name=applied_revision,json=appliedRevision,proto3,oneof" json:"applied_revision,omitempty"`
+	// Revision that was applied BEFORE this application. ABSENT when there was
+	// none.
+	PreviousAppliedRevision *int64 `protobuf:"varint,16,opt,name=previous_applied_revision,json=previousAppliedRevision,proto3,oneof" json:"previous_applied_revision,omitempty"`
+	// Content digest of `applied_revision`. Present exactly when it is.
+	AppliedDigest *string `protobuf:"bytes,17,opt,name=applied_digest,json=appliedDigest,proto3,oneof" json:"applied_digest,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ApplyModuleResponse) Reset() {
@@ -825,6 +901,27 @@ func (x *ApplyModuleResponse) GetPrunedSelectorTypes() int32 {
 		return x.PrunedSelectorTypes
 	}
 	return 0
+}
+
+func (x *ApplyModuleResponse) GetAppliedRevision() int64 {
+	if x != nil && x.AppliedRevision != nil {
+		return *x.AppliedRevision
+	}
+	return 0
+}
+
+func (x *ApplyModuleResponse) GetPreviousAppliedRevision() int64 {
+	if x != nil && x.PreviousAppliedRevision != nil {
+		return *x.PreviousAppliedRevision
+	}
+	return 0
+}
+
+func (x *ApplyModuleResponse) GetAppliedDigest() string {
+	if x != nil && x.AppliedDigest != nil {
+		return *x.AppliedDigest
+	}
+	return ""
 }
 
 // GetModuleRequest — payload for `Get`.
@@ -1017,7 +1114,12 @@ type ModuleCatalog struct {
 	// preserved — compare by membership, not by index.
 	Resources []*ModuleResourceRow `protobuf:"bytes,2,rep,name=resources,proto3" json:"resources,omitempty"`
 	// Live verbs of the module. A SET, on the same terms as `resources`.
-	Verbs         []*ModuleVerbRow `protobuf:"bytes,3,rep,name=verbs,proto3" json:"verbs,omitempty"`
+	Verbs []*ModuleVerbRow `protobuf:"bytes,3,rep,name=verbs,proto3" json:"verbs,omitempty"`
+	// Revision last applied to the module's catalog. ABSENT when the module was
+	// never applied with a declared revision.
+	AppliedRevision *int64 `protobuf:"varint,4,opt,name=applied_revision,json=appliedRevision,proto3,oneof" json:"applied_revision,omitempty"`
+	// Content digest of `applied_revision`. Present exactly when it is.
+	AppliedDigest *string `protobuf:"bytes,5,opt,name=applied_digest,json=appliedDigest,proto3,oneof" json:"applied_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1071,6 +1173,20 @@ func (x *ModuleCatalog) GetVerbs() []*ModuleVerbRow {
 		return x.Verbs
 	}
 	return nil
+}
+
+func (x *ModuleCatalog) GetAppliedRevision() int64 {
+	if x != nil && x.AppliedRevision != nil {
+		return *x.AppliedRevision
+	}
+	return 0
+}
+
+func (x *ModuleCatalog) GetAppliedDigest() string {
+	if x != nil && x.AppliedDigest != nil {
+		return *x.AppliedDigest
+	}
+	return ""
 }
 
 // ListModulesRequest — no fields.
@@ -1231,7 +1347,8 @@ const file_kaname_cloud_iam_v1_internal_module_service_proto_rawDesc = "" +
 	"\n" +
 	"1kaname/cloud/iam/v1/internal_module_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"+\n" +
 	"\x11PlanModuleRequest\x12\x16\n" +
-	"\x06module\x18\x01 \x01(\tR\x06module\"\x80\b\n" +
+	"\x06module\x18\x01 \x01(\tR\x06module\"\x8e\n" +
+	"\n" +
 	"\x12PlanModuleResponse\x12\x16\n" +
 	"\x06module\x18\x01 \x01(\tR\x06module\x12/\n" +
 	"\x13withdrawn_resources\x18\x02 \x03(\tR\x12withdrawnResources\x12'\n" +
@@ -1251,7 +1368,15 @@ const file_kaname_cloud_iam_v1_internal_module_service_proto_rawDesc = "" +
 	"\x13beyond_anchor_extra\x18\x0f \x03(\tR\x11beyondAnchorExtra\x122\n" +
 	"\x15beyond_anchor_missing\x18\x10 \x03(\tR\x13beyondAnchorMissing\x12%\n" +
 	"\x0ewithdrawn_rows\x18\x11 \x03(\tR\rwithdrawnRows\x12@\n" +
-	"\averdict\x18\x12 \x01(\x0e2&.kaname.cloud.iam.v1.ModulePlanVerdictR\averdict\"\x86\x02\n" +
+	"\averdict\x18\x12 \x01(\x0e2&.kaname.cloud.iam.v1.ModulePlanVerdictR\averdict\x120\n" +
+	"\x11manifest_revision\x18\x13 \x01(\x03H\x00R\x10manifestRevision\x88\x01\x01\x12.\n" +
+	"\x10applied_revision\x18\x14 \x01(\x03H\x01R\x0fappliedRevision\x88\x01\x01\x12,\n" +
+	"\x0fmanifest_digest\x18\x15 \x01(\tH\x02R\x0emanifestDigest\x88\x01\x01\x12*\n" +
+	"\x0eapplied_digest\x18\x16 \x01(\tH\x03R\rappliedDigest\x88\x01\x01B\x14\n" +
+	"\x12_manifest_revisionB\x13\n" +
+	"\x11_applied_revisionB\x12\n" +
+	"\x10_manifest_digestB\x11\n" +
+	"\x0f_applied_digest\"\x86\x02\n" +
 	"\x12ApplyModuleRequest\x12\x16\n" +
 	"\x06module\x18\x01 \x01(\tR\x06module\x12%\n" +
 	"\x0eexpected_state\x18\x02 \x01(\tR\rexpectedState\x12:\n" +
@@ -1260,7 +1385,7 @@ const file_kaname_cloud_iam_v1_internal_module_service_proto_rawDesc = "" +
 	"\x18_max_resettled_rule_refsB\x1b\n" +
 	"\x19_max_resettled_role_verbs\"-\n" +
 	"\x13ApplyModuleMetadata\x12\x16\n" +
-	"\x06module\x18\x01 \x01(\tR\x06module\"\x9b\x05\n" +
+	"\x06module\x18\x01 \x01(\tR\x06module\"\xfe\x06\n" +
 	"\x13ApplyModuleResponse\x12\x16\n" +
 	"\x06module\x18\x01 \x01(\tR\x06module\x12\x18\n" +
 	"\achanged\x18\x02 \x01(\bR\achanged\x12%\n" +
@@ -1276,7 +1401,13 @@ const file_kaname_cloud_iam_v1_internal_module_service_proto_rawDesc = "" +
 	"\x1cplanned_resettled_role_verbs\x18\v \x01(\x05R\x19plannedResettledRoleVerbs\x120\n" +
 	"\x14pruned_selector_rows\x18\f \x01(\x05R\x12prunedSelectorRows\x12?\n" +
 	"\x1cpruned_selector_rows_dropped\x18\r \x01(\x05R\x19prunedSelectorRowsDropped\x122\n" +
-	"\x15pruned_selector_types\x18\x0e \x01(\x05R\x13prunedSelectorTypes\"*\n" +
+	"\x15pruned_selector_types\x18\x0e \x01(\x05R\x13prunedSelectorTypes\x12.\n" +
+	"\x10applied_revision\x18\x0f \x01(\x03H\x00R\x0fappliedRevision\x88\x01\x01\x12?\n" +
+	"\x19previous_applied_revision\x18\x10 \x01(\x03H\x01R\x17previousAppliedRevision\x88\x01\x01\x12*\n" +
+	"\x0eapplied_digest\x18\x11 \x01(\tH\x02R\rappliedDigest\x88\x01\x01B\x13\n" +
+	"\x11_applied_revisionB\x1c\n" +
+	"\x1a_previous_applied_revisionB\x11\n" +
+	"\x0f_applied_digest\"*\n" +
 	"\x10GetModuleRequest\x12\x16\n" +
 	"\x06module\x18\x01 \x01(\tR\x06module\"P\n" +
 	"\x11ModuleResourceRow\x12\x1a\n" +
@@ -1287,22 +1418,28 @@ const file_kaname_cloud_iam_v1_internal_module_service_proto_rawDesc = "" +
 	"\bresource\x18\x01 \x01(\tR\bresource\x12\x12\n" +
 	"\x04verb\x18\x02 \x01(\tR\x04verb\x12\x1d\n" +
 	"\n" +
-	"per_object\x18\x03 \x01(\bR\tperObject\"\xa7\x01\n" +
+	"per_object\x18\x03 \x01(\bR\tperObject\"\xab\x02\n" +
 	"\rModuleCatalog\x12\x16\n" +
 	"\x06module\x18\x01 \x01(\tR\x06module\x12D\n" +
 	"\tresources\x18\x02 \x03(\v2&.kaname.cloud.iam.v1.ModuleResourceRowR\tresources\x128\n" +
-	"\x05verbs\x18\x03 \x03(\v2\".kaname.cloud.iam.v1.ModuleVerbRowR\x05verbs\"\x14\n" +
+	"\x05verbs\x18\x03 \x03(\v2\".kaname.cloud.iam.v1.ModuleVerbRowR\x05verbs\x12.\n" +
+	"\x10applied_revision\x18\x04 \x01(\x03H\x00R\x0fappliedRevision\x88\x01\x01\x12*\n" +
+	"\x0eapplied_digest\x18\x05 \x01(\tH\x01R\rappliedDigest\x88\x01\x01B\x13\n" +
+	"\x11_applied_revisionB\x11\n" +
+	"\x0f_applied_digest\"\x14\n" +
 	"\x12ListModulesRequest\"\x7f\n" +
 	"\rModuleSummary\x12\x16\n" +
 	"\x06module\x18\x01 \x01(\tR\x06module\x12.\n" +
 	"\x13live_resource_count\x18\x02 \x01(\x05R\x11liveResourceCount\x12&\n" +
 	"\x0flive_verb_count\x18\x03 \x01(\x05R\rliveVerbCount\"S\n" +
 	"\x13ListModulesResponse\x12<\n" +
-	"\amodules\x18\x01 \x03(\v2\".kaname.cloud.iam.v1.ModuleSummaryR\amodules*\x95\x01\n" +
+	"\amodules\x18\x01 \x03(\v2\".kaname.cloud.iam.v1.ModuleSummaryR\amodules*\x8a\x02\n" +
 	"\x11ModulePlanVerdict\x12#\n" +
 	"\x1fMODULE_PLAN_VERDICT_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fMODULE_PLAN_VERDICT_WOULD_APPLY\x10\x01\x126\n" +
-	"2MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR\x10\x022\xb5\x06\n" +
+	"2MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR\x10\x02\x127\n" +
+	"3MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_STALE_REVISION\x10\x03\x12:\n" +
+	"6MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_REVISION_CONFLICT\x10\x042\xb5\x06\n" +
 	"\x15InternalModuleService\x12\xc0\x01\n" +
 	"\x04Plan\x12&.kaname.cloud.iam.v1.PlanModuleRequest\x1a'.kaname.cloud.iam.v1.PlanModuleResponse\"g\x8a\xb5\x18\x10iam.modules.plan\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02(\x12&/iam/v1/internal/modules/{module}:plan\x12\xeb\x01\n" +
@@ -1369,7 +1506,10 @@ func file_kaname_cloud_iam_v1_internal_module_service_proto_init() {
 	if File_kaname_cloud_iam_v1_internal_module_service_proto != nil {
 		return
 	}
+	file_kaname_cloud_iam_v1_internal_module_service_proto_msgTypes[1].OneofWrappers = []any{}
 	file_kaname_cloud_iam_v1_internal_module_service_proto_msgTypes[2].OneofWrappers = []any{}
+	file_kaname_cloud_iam_v1_internal_module_service_proto_msgTypes[4].OneofWrappers = []any{}
+	file_kaname_cloud_iam_v1_internal_module_service_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

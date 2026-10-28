@@ -13,6 +13,8 @@ import (
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"go.uber.org/multierr"
+
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // Validate checks Config invariants (pure function — no logger, no
@@ -82,7 +84,7 @@ func (c Config) Validate() error {
 	// ключу служебной учётки две, и объявления обеих сверяются здесь — иначе
 	// одна выдаёт удостоверение туда, куда вторая его отвергает, и решал это
 	// не оператор, а порядок, в котором писались полосы.
-	errs = multierr.Append(errs, c.APIServer.RegistryToken.Validate(c.AuthN.ClientToken))
+	errs = multierr.Append(errs, c.APIServer.RegistryToken.Validate(c.AuthN.ClientToken, c.AuthN.TrustDomain()))
 
 	// Страж над половиной ВЫДАЧИ у контроля связанных с отправителем токенов
 	// (задача kacho#1137). Действует в любом режиме: величина, у которой нет
@@ -208,6 +210,7 @@ func (c Config) Validate() error {
 	// `runServe`.
 	errs = multierr.Append(errs, c.validateTrustedForwarders())
 	errs = multierr.Append(errs, c.validateTrustDomain())
+	errs = multierr.Append(errs, c.validateServiceNameForm())
 
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
@@ -383,6 +386,23 @@ func (c Config) validateTrustDomain() error {
 	return c.AuthN.TrustDomain().Require(grpcsrv.TrustDomainGate{
 		Knob: "authn.trust-domain (env KANAME_AUTHN__TRUST_DOMAIN)",
 	})
+}
+
+// validateServiceNameForm отказывает в пуске процессу, чья установка не назвала
+// форму имени службы либо назвала её незаконной записью (kaname#308).
+//
+// Домен выше отвечает, чьи предъявители наши; форма — кто из них какой модуль.
+// По необъявленной форме модулем не узнаётся НИ ОДИН сертификат: процесс,
+// поднявшийся без неё, отверг бы каждого соседа и сам край — молча, отказом,
+// неотличимым от вызова без личности. Поэтому отказ — на ЛЮБОМ старте, как у
+// домена, и опт-ина «поднимусь без формы» нет.
+//
+// Сверка круга отправителей с формой живёт в композиционном корне
+// (страж корня requireForwardersRecognised): законный отправитель — и
+// собственный REST-фронт службы, а его имя известно только из сертификата,
+// который корень читает. Здесь судится сама запись формы.
+func (c Config) validateServiceNameForm() error {
+	return c.AuthN.ServiceNameForm().Require(servicesan.Gate{Knob: ServiceNameFormKnob})
 }
 
 // validateMode ensures Mode is a known ENUM value.

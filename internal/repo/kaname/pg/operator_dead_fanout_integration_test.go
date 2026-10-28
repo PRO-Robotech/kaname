@@ -69,6 +69,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // Детерминированные выражения идентичности оператора — те же, что в посеве 0009
@@ -219,10 +220,10 @@ func seedLivePrincipalBoundToResolvableRole(
 	require.NoError(t, err, "контроль: не удалось создать живого принципала")
 
 	_, err = pool.Exec(ctx,
-		`INSERT INTO kaname.access_bindings
+		bindingset.With(`INSERT INTO kaname.access_bindings
 		   (id, subject_type, subject_id, role_id, resource_type, resource_id, scope, status)
 		 VALUES ($1, 'service_account', $2, $3, 'cluster', 'cluster_root', 1, 'ACTIVE')
-		 ON CONFLICT DO NOTHING`, bindingID, subjectID, roleID)
+		 ON CONFLICT DO NOTHING`), bindingID, subjectID, roleID)
 	require.NoError(t, err, "контроль: не удалось выдать живому принципалу привязку")
 
 	require.NoError(t, bootSeedRuleSides(ctx, pool),

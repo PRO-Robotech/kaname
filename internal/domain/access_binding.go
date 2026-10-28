@@ -139,10 +139,14 @@ func (b AccessBinding) Validate() error {
 	}
 	// Подстановочный субъект («любой аутентифицированный») — тоже только у
 	// системной выдачи: это единственный субъект, которого нельзя ни назвать, ни
-	// отозвать поимённо.
-	if b.SubjectID == "*" && !(b.System && b.SubjectType == "user") {
-		errs = multierr.Append(errs, fmt.Errorf(
-			"Illegal argument subject_id %q on a non-system access binding", b.SubjectID))
+	// отозвать поимённо. Судится КАЖДЫЙ член набора, а не только пара —
+	// проекция первого (kaname#917).
+	for _, s := range append([]Subject{{Type: b.SubjectType, ID: b.SubjectID}}, b.Subjects...) {
+		if s.ID == "*" && !(b.System && s.Type == SubjectTypeUser) {
+			errs = multierr.Append(errs, fmt.Errorf(
+				"Illegal argument subject_id %q on a non-system access binding", s.ID))
+			break
+		}
 	}
 	// Cluster is a singleton scope — resource_id MUST equal
 	// ClusterSingletonID. Any other value is rejected up-front so callers

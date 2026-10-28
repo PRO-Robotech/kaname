@@ -156,9 +156,6 @@ func (r *fakeUserRdr) GetByAccountEmail(context.Context, domain.AccountID, domai
 func (r *fakeUserRdr) FindPendingByEmail(context.Context, domain.Email) ([]domain.User, error) {
 	return nil, nil
 }
-func (r *fakeUserRdr) FindActiveByExternalID(context.Context, domain.ExternalSubject) ([]domain.User, error) {
-	return nil, nil
-}
 func (r *fakeUserRdr) FindByExternalIDInStatuses(context.Context, domain.ExternalSubject, []domain.InviteStatus) ([]domain.User, error) {
 	return nil, nil
 }
@@ -207,9 +204,6 @@ func (r *fakeABRdr) ListActiveByRole(context.Context, domain.RoleID) ([]domain.A
 }
 func (r *fakeABRdr) CountActiveByRole(context.Context, domain.RoleID) (int, error) { return 0, nil }
 func (r *fakeABRdr) SelectEmittedTuplesBySource(context.Context, domain.AccessBindingID, string) ([]access_binding.RelationTuple, error) {
-	return nil, nil
-}
-func (r *fakeABRdr) SelectTuplesClaimedByOtherActiveBindings(context.Context, domain.AccessBindingID, []access_binding.RelationTuple) ([]access_binding.RelationTuple, error) {
 	return nil, nil
 }
 func (r *fakeABRdr) ListByRole(context.Context, domain.RoleID, access_binding.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
@@ -619,4 +613,14 @@ func (_ *fakeRoleRdr) BoundToSystemClass(context.Context, domain.RoleID) (bool, 
 // GrantorLastPresentedAt — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *fakeABRdr) GrantorLastPresentedAt(context.Context, domain.UserID) (time.Time, bool, error) {
 	return time.Time{}, false, nil
+}
+
+// PublicReadContainer — публичное чтение контейнера (kaname#856) этим дублёром не
+// судится: тип цели не объявлен, детей нет.
+func (_ *fakeABRdr) PublicReadContainer(context.Context, string) (domain.PublicReadContainer, error) {
+	return domain.PublicReadContainer{}, nil
+}
+
+func (_ *fakeABRdr) ClassGrantsKeyedModules(context.Context) (domain.ClassGrantsKeyedModules, error) {
+	return domain.ClassGrantsKeyedModules{}, nil
 }

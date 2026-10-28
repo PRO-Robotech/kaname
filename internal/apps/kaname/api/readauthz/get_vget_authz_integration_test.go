@@ -63,6 +63,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
@@ -174,18 +175,16 @@ func seedGetGrant(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 			role, catalog)
 		mustExec(t, ctx, pool,
 			`INSERT INTO kaname.role_rule_selectors
-			   (role_id, rule_fp, arm, object_types, match_labels)
-			 VALUES ($1, $2, 'anchor', ARRAY[$3::text], '{}'::jsonb)`,
+			   (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+			 VALUES ($1, $2, 'anchor', ARRAY[$3::text], '{}'::jsonb,
+			         jsonb_build_object($3::text, jsonb_build_array('get')))`,
 			role, "fp-"+catalog, catalog)
 	}
 	mustExec(t, ctx, pool,
-		`INSERT INTO kaname.access_bindings
+		bindingset.With(`INSERT INTO kaname.access_bindings
 		   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		 VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`,
+		 VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`),
 		binding, subjectID, role, string(acc))
-	mustExec(t, ctx, pool,
-		`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
-		 VALUES ($1, 'user', $2)`, binding, subjectID)
 }
 
 // seedObjectGrant выдаёт глагол `get` на ОДИН названный объект — область выдачи
@@ -202,16 +201,14 @@ func seedObjectGrant(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 		role, catalog)
 	mustExec(t, ctx, pool,
 		`INSERT INTO kaname.role_rule_selectors
-		   (role_id, rule_fp, arm, object_types, match_labels)
-		 VALUES ($1, 'fp-obj', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, role, catalog)
+		   (role_id, rule_fp, arm, object_types, match_labels, verbs_by_type)
+		 VALUES ($1, 'fp-obj', 'anchor', ARRAY[$2::text], '{}'::jsonb,
+		         jsonb_build_object($2::text, jsonb_build_array('get')))`, role, catalog)
 	mustExec(t, ctx, pool,
-		`INSERT INTO kaname.access_bindings
+		bindingset.With(`INSERT INTO kaname.access_bindings
 		   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-		 VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`,
+		 VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`),
 		binding, subjectID, role, objectType, objectID)
-	mustExec(t, ctx, pool,
-		`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
-		 VALUES ($1, 'user', $2)`, binding, subjectID)
 }
 
 // pointerThroughJournal кладёт отношение ЧЕРЕЗ ЖУРНАЛ — тем же путём, каким его

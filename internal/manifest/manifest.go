@@ -167,6 +167,19 @@ var supportedAPIVersions = []string{"iam/v1"}
 type Manifest struct {
 	APIVersion string `yaml:"apiVersion"`
 	Module     string `yaml:"module"`
+	// RevisionKey — место ключа `revision` (номер редакции, kaname#865) в
+	// строгом разборе. Значения не несёт: номер судится по узлу документа и
+	// читается [Manifest.Revision] — см. revision.go.
+	RevisionKey revisionKey `yaml:"revision"`
+	// ClassGrantsOnlyOnContainers — ключ оболочки стадии S7 (kaname#950): модуль
+	// принимает выдачу системному классу, достающую до его типов, только на
+	// объявленном контейнере публичного чтения — см. classgrants.go.
+	//
+	// Указатель по тому же доводу, что `Resource.PublicReadToChildren`: значение
+	// выражается ОДНИМ способом — ключ отсутствует либо равен true; `false`
+	// отличим от отсутствия только указателем, и загрузка его отвергает (SC-80
+	// (б)). Читатели спрашивают [Manifest.DeclaresClassGrantsOnlyOnContainers].
+	ClassGrantsOnlyOnContainers *bool `yaml:"classGrantsOnlyOnContainers"`
 	// Resources — что модуль объявляет платформе о своих правах. Раздел
 	// НЕОДНОРОДЕН: часть ключей порождается из аннотаций, часть пишет человек —
 	// см. resources.go.
@@ -216,6 +229,16 @@ type Manifest struct {
 	// полем — и оно попало бы в набор ключей, то есть автор смог бы соврать о
 	// том, назвал ли он раздел.
 	rolesDeclared bool
+
+	// revision / revisionDeclared — номер редакции, объявленный документом, и
+	// признак объявления (revision.go). Неэкспортируемые по тому же доводу,
+	// что `rolesDeclared`: это факт о ДОКУМЕНТЕ, и собранный структурой
+	// манифест соврать о нём не вправе.
+	revision         int64
+	revisionDeclared bool
+	// digest — отпечаток содержимого документа (digest.go), посчитанный над
+	// тем же деревом узлов, которое судил загрузчик.
+	digest string
 }
 
 // Linkage — объём, осмотренный валидатором связности при загрузке.
@@ -408,6 +431,18 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	if err := refuseNullSeed(doc); err != nil {
 		return nil, err
 	}
+	// Номер редакции — по УЗЛУ, до строгого разбора: разбор приводит `1.5` к
+	// 1 молча, и отказ на нецелое производит только тег (revision.go).
+	revision, revisionDeclared, rerr := judgeRevision(doc)
+	if rerr != nil {
+		return nil, rerr
+	}
+	// Ключи `module` и `children` у вложенного правила роли — по сырому узлу,
+	// ДО строгого разбора: он отверг бы их общим «неизвестное поле», не назвав
+	// причины (kaname#874, rolechildren.go).
+	if err := refuseNestedChildKeys(doc); err != nil {
+		return nil, err
+	}
 	// ЗДЕСЬ СТОЯЛ пред-разборный отказ по ключу `verbs` в правиле роли. Он снят
 	// ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ (kacho#1844): поимённая форма права вернулась —
 	// вместе с проверкой её полноты по классу, как и предписывал §10 п. 2
@@ -442,8 +477,9 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 
 	// Разделы судятся В ПОРЯДКЕ ДОКУМЕНТА, и находки собираются ВСЕ: названная
 	// первая заставила бы автора чинить их по одной, по прогону на каждую.
-	faults := validateResources(&m, doc, referent)
-	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules))...)
+	faults := validateClassGrants(&m, doc)
+	faults = append(faults, validateResources(&m, doc, referent)...)
+	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules), loadOpts.canon)...)
 	faults = append(faults, validateDeprecatedVerbs(&m, doc)...)
 
 	// Связность — последняя ступень той же загрузки; почему не отдельным
@@ -463,6 +499,15 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 		return nil, errors.Join(faults...)
 	}
 	m.linkage = census
+	linkPublicRead(&m)
+	m.revision, m.revisionDeclared = revision, revisionDeclared
+	// Отпечаток — над ТЕМ ЖЕ деревом узлов и только для принятого документа:
+	// отвергнутый наружу не отдаётся вовсе, и считать его отпечаток незачем.
+	digest, derr := digestOfNode(doc)
+	if derr != nil {
+		return nil, fmt.Errorf("%w: %w", ErrShape, derr)
+	}
+	m.digest = digest
 	return &m, nil
 }
 

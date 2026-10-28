@@ -288,7 +288,8 @@ func TestUserInvite_ConcurrentBootstrap_RaceSafe(t *testing.T) {
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
-	actives, err := rd.Users().FindActiveByExternalID(ctx, ext)
+	actives, err := rd.Users().FindByExternalIDInStatuses(ctx, ext,
+		[]domain.InviteStatus{domain.InviteStatusActive})
 	require.NoError(t, err)
 	assert.Len(t, actives, 1, "действующая строка личности одна — дублей не завелось")
 }

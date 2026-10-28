@@ -33,9 +33,13 @@ func TestSystemClass_VerbFilterMatchesTheDomainRule(t *testing.T) {
 		}
 	}
 	// Каждая ветвь выдач несёт фильтр: четыре соединения с проекцией глаголов.
-	for name, sql := range map[string]string{
-		"вопрос": verdictQuerySQL(""), "страница": verdictManyQuerySQL(""), "перечень": listQuerySQL(""),
-	} {
+	forms := map[string]string{}
+	for _, nesting := range []bool{false, true} {
+		forms["вопрос, "+nestingName(nesting)] = mustAssemble(withNesting(verdictQuerySQL, nesting))("")
+		forms["страница, "+nestingName(nesting)] = mustAssemble(withNesting(verdictManyQuerySQL, nesting))("")
+		forms["перечень, "+nestingName(nesting)] = mustAssemble(withNesting(listQuerySQL, nesting))("")
+	}
+	for name, sql := range forms {
 		if !strings.Contains(sql, classVerbFilterSQL) {
 			t.Errorf("форма «%s»: ветвь выдач без фильтра класса", name)
 		}
@@ -64,6 +68,60 @@ func TestSystemClass_ClassSlotsCarryEveryClass(t *testing.T) {
 		}
 		if !slices.Equal(got, classes) && !(len(got) == 0 && len(classes) == 0) {
 			t.Errorf("слоты %q = %v, классы %v", sp, got, classes)
+		}
+	}
+}
+
+// TestSpeakerClass_EachFormDerivesItOnlyForAnExistingPrincipal — класс
+// говорящего выводится лишь при живой строке учётки, на каждой из трёх форм
+// (kaname#909): классы положены говорящему с личностью (Р2), а личность —
+// строка учётки, а не вид записи.
+//
+// Предмет судится текстом СОБРАННОЙ формы: обе строки класса в паре колонок
+// несут предикат существования, а текстовая форма берёт классы из пары, а не
+// вторым написанием параметров. Виды, которым производитель классов
+// (`domain.SpeakerClasses`) их отдаёт, названы предикатом поимённо со своей
+// таблицей: вид, получивший классы без таблицы, — находка.
+func TestSpeakerClass_EachFormDerivesItOnlyForAnExistingPrincipal(t *testing.T) {
+	tableOf := map[domain.SubjectType]string{
+		domain.SubjectTypeUser:           "kaname.users",
+		domain.SubjectTypeServiceAccount: "kaname.service_accounts",
+	}
+	kinds := []domain.SubjectType{
+		domain.SubjectTypeUser, domain.SubjectTypeServiceAccount,
+		domain.SubjectTypeGroup, domain.SubjectTypeSystemClass,
+	}
+	guardedRow := regexp.MustCompile(`'system_class', \$1[01]::text, 'class'\s+WHERE\s`)
+	bareTextRow := regexp.MustCompile(`'system_class:' \|\| \$1[01]::text`)
+
+	forms := map[string]string{}
+	for _, nesting := range []bool{false, true} {
+		forms["вопрос, "+nestingName(nesting)] = mustAssemble(withNesting(verdictQuerySQL, nesting))("")
+		forms["страница, "+nestingName(nesting)] = mustAssemble(withNesting(verdictManyQuerySQL, nesting))("")
+		forms["перечень, "+nestingName(nesting)] = mustAssemble(withNesting(listQuerySQL, nesting))("")
+	}
+	if len(forms) != 6 {
+		t.Fatalf("форм осмотрено %d, ждали 6", len(forms))
+	}
+	for name, sql := range forms {
+		if n := len(guardedRow.FindAllString(sql, -1)); n != 2 {
+			t.Errorf("форма «%s»: строк класса под предикатом существования %d, ждали 2", name, n)
+		}
+		if bareTextRow.MatchString(sql) {
+			t.Errorf("форма «%s»: текстовая форма выводит класс из параметра, минуя предикат существования", name)
+		}
+		for _, kind := range kinds {
+			if len(domain.SpeakerClasses(string(kind)+":x")) == 0 {
+				continue
+			}
+			table, ok := tableOf[kind]
+			if !ok {
+				t.Errorf("форма «%s»: вид %s получает классы, а таблицы существования у предиката нет", name, kind)
+				continue
+			}
+			if !strings.Contains(sql, "= '"+string(kind)+"'") || !strings.Contains(sql, "FROM "+table) {
+				t.Errorf("форма «%s»: вид %s получает классы без проверки строки в %s", name, kind, table)
+			}
 		}
 	}
 }

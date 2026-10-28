@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // recordingReconciler records which reconcile entry point the use-case picked.
@@ -123,7 +124,7 @@ func TestCreateAccessBinding_ObjectPass_UsesProvenNewEntryPoint(t *testing.T) {
 		domain.Permissions{"iam.access_bindings.get", "iam.access_bindings.update"})
 	rec := &recordingReconciler{}
 
-	createUC := NewCreateAccessBindingUseCase(repo, newFakeOpsRepo()).
+	createUC := NewCreateAccessBindingUseCase(repo, newFakeOpsRepo(), catalogfixture.Source()).
 		WithRelationStore(newRecordingFGA(), nil).
 		WithReconciler(rec)
 	_, err := createUC.Execute(newOwnerContext(ownerID), domain.AccessBinding{

@@ -38,7 +38,7 @@ package reconcile
 //   - The forward path is ADDITIVE: it only WRITES the one new object's ACTIVE member +
 //     tuples and NEVER deletes anything. Two forward passes for DIFFERENT objects (R1,
 //     R2) of the SAME binding touch DISJOINT rows (member keyed by object, fga_outbox
-//     append-only, ledger keyed by (binding,user,relation,object)) → they do not
+//     append-only, ledger keyed by (binding,member,user,relation,object)) → they do not
 //     conflict → they need no mutual serialization. So forward does NOT take the
 //     EXCLUSIVE lock; N registrations proceed CONCURRENTLY (the fix).
 //   - Idempotency (forward re-run, or forward + the async full backstop both emitting
@@ -84,6 +84,34 @@ package reconcile
 //   - идемпотентность повторного прохода обеспечивается ниже по течению (UPSERT
 //     члена, INSERT … ON CONFLICT реестра, already_exists как «применено» у дренажа,
 //     read-delta синхронного писателя) — она никогда не держалась на блокировке.
+//
+// ЗАМОК СТРОКИ ВЫДАЧИ — `FOR KEY SHARE`, и он не о пропускной способности, а о
+// СНЯТИИ (kaname#919). Форвард решает «выдача жива» чтением её фактов и пишет члена,
+// реестр и строку журнала позже, в той же транзакции. Снятие выдачи — истечение срока,
+// отзыв, удаление, снос её области (удаление проекта или аккаунта) — читает набор её
+// членов или реестр; записи форварда, легшие после
+// этого чтения, снимать было бы некому — полный проход и сведение пропускают
+// не-ACTIVE выдачу, а прямой факт вердикт читает и без неё. Поэтому факты выдачи
+// форвард читает под `FOR KEY SHARE` (LoadBinding(s)ForForward), а каждое снятие берёт
+// строку `FOR UPDATE` до этого чтения (LockBindingForDeactivation у истечения,
+// GetForDeactivation у отзыва, удаления и сноса области, kaname#923): из режимов строки только эти
+// два конфликтуют между собой, и снятие видит все записи форварда, а форвард,
+// пришедший позже, читает выдачу снятой. С `FOR NO KEY UPDATE` полного прохода `FOR KEY SHARE`
+// совместим, поэтому всё сказанное выше про очередь остаётся верным; тот же режим
+// дочерние вставки форварда и так брали на этой строке проверкой внешнего ключа —
+// новым стал только момент. Гонку держат
+// reconcile_forward_expiry_race_integration_test.go (истечение) и
+// reconcile_forward_deactivation_race_integration_test.go (отзыв, удаление) — первый
+// порядок; снос области (удаление проекта и аккаунта) берёт те же замки
+// (shared.RevokeBindingsInScope).
+//
+// Замка строки мало: исход снятия решает и ВЕРСИЯ строки журнала — свёртка в
+// прямой факт снимает факт, лишь если его версия не новее версии строки снятия.
+// Строка снятия несёт момент своей вставки, а не начало транзакции
+// (fga_outbox, deleteStamp): иначе снятие, открывшее транзакцию раньше форварда и
+// получившее строку после его коммита, писало бы строку старше факта, и факт её
+// переживал. Оба порядка начала транзакций держит
+// reconcile_deactivation_order_race_integration_test.go.
 //
 // ПОЧЕМУ ОДНОВРЕМЕННЫЙ delete-stale ПОЛНОГО ПРОХОДА НЕ СНОСИТ ТО, ЧТО ПИШЕТ ФОРВАРД
 // (это же рассуждение стояло здесь и раньше, в разделе «CORRECTNESS ENVELOPE», и
@@ -184,8 +212,10 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 		// БЕЗ advisory-блокировки — ни EXCLUSIVE, ни SHARE (см. «LOCK CHOICE» в шапке
 		// файла): аддитивный проход не удаляет ничего, а перекрёстного ожидания с полным
 		// проходом больше нет by construction — тот держит строку в режиме
-		// `FOR NO KEY UPDATE`, который с `FOR KEY SHARE` дочерних вставок не конфликтует.
-		bs, ok, err := s.LoadBindingUnlocked(ctx, bindingID)
+		// `FOR NO KEY UPDATE`, который с `FOR KEY SHARE` не конфликтует. Строку выдачи
+		// чтение берёт `FOR KEY SHARE` — «выдача жива» верно до коммита против её
+		// снятия (шапка файла, «ЗАМОК СТРОКИ ВЫДАЧИ»).
+		bs, ok, err := s.LoadBindingForForward(ctx, bindingID)
 		if err != nil {
 			return fmt.Errorf("forward binding: load %s: %w", bindingID, err)
 		}
@@ -397,6 +427,9 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 			// present; a stray call simply defers to the async backstop.
 			return nil
 		}
+		// Предки объекта — для вложенных правил выдач (kaname#874): не более одного
+		// раза на веер и лишь по спросу выдачи с вложенным правилом.
+		ancestors := r.ancestorsOf(ctx, s, objectType, objectID, ok)
 		// Candidate bindings whose selector matches this object, INCLUDING bindings with no
 		// member row yet (the brand-new-object case). This is the SAME fast-path source the
 		// full ReconcileObject uses (feed-agnostic verdict downstream). NOTE (doc-truthfulness,
@@ -425,10 +458,12 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 		// выдачу. Стоимость прохода задаётся размером веера (p50 = 9 кандидатов, хвост
 		// 227 по дереву выдач), и поштучное чтение делало её линейной по числу выдач
 		// СОСЕДЕЙ, хотя изменился ровно один объект. Проекция та же (bindingScopeFrom у
-		// адаптера — единственная точка вывода), блокировок пакетное чтение не берёт, как
-		// не брало и поштучное.
+		// адаптера — единственная точка вывода). Строки выдач чтение берёт `FOR KEY SHARE`
+		// одним оператором в порядке id — до первой записи прохода, чтобы «выдача жива»
+		// оставалось верным до коммита против её снятия (шапка файла, «ЗАМОК СТРОКИ
+		// ВЫДАЧИ»).
 		ids := dedupSortBindingIDs(matching)
-		scopes, err := s.LoadBindingsUnlocked(ctx, ids)
+		scopes, err := s.LoadBindingsForForward(ctx, ids)
 		if err != nil {
 			return fmt.Errorf("forward: load bindings %s:%s: %w", objectType, objectID, err)
 		}
@@ -437,7 +472,7 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 			if !ok || !bs.Active {
 				continue // удалена / не ACTIVE — материализовать нечего (тот же исход, что был)
 			}
-			if err := r.forwardObjectForBinding(ctx, s, bs, obj, col, w); err != nil {
+			if err := r.forwardObjectForBinding(ctx, s, bs, obj, ancestors, col, w); err != nil {
 				return err
 			}
 		}
@@ -467,7 +502,8 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 // no-op; выдачи, которой уже нет или которая не ACTIVE, вызывающий сюда не приносит.
 // Non-ACTIVE per-object verdicts (REJECTED containment) are LEFT to the async full
 // backstop — the additive path never writes a non-grant.
-func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileStore, bs BindingScope, obj domain.MirrorObject, col *syncFGACollector, w *forwardWriteSet) error {
+func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileStore, bs BindingScope, obj domain.MirrorObject,
+	ancestors *ancestorMemo, col *syncFGACollector, w *forwardWriteSet) error {
 	// The object's desired members under this binding — derived by the SHARED
 	// desiredMembersForObject (per-object target least-priv, arm match, containment
 	// verdict, scope-self anchor), so the forward fast-path, the object-narrowed full
@@ -475,7 +511,11 @@ func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileSto
 	// `*.*` binding carries selectors with EMPTY ObjectTypes (the D-9 flat short-circuit
 	// owns cluster super-admin), so nothing matches → no per-object materialization on
 	// cluster (short-circuit preserved).
-	for _, dm := range desiredMembersForObject(r.cat.Facts(), bs, obj) {
+	anc, err := ancestors.forBinding(bs)
+	if err != nil {
+		return fmt.Errorf("forward: %w", err)
+	}
+	for _, dm := range desiredMembersForObject(r.cat.Facts(), bs, obj, anc) {
 		if dm.Status != domain.VerificationActive {
 			// A REJECTED containment verdict: the additive forward path materializes only
 			// ACTIVE grants; the async full backstop owns the REJECTED member row +
@@ -534,12 +574,12 @@ func (r *Reconciler) materializeForwardMember(_ context.Context, _ ReconcileStor
 	// in the pass collector, whose surviving consumer is the deletion subtraction. Per-pass
 	// de-dup — never across passes, so a re-grant after a revoke is always re-emitted.
 	w.fresh = append(w.fresh, col.collectNew(dm.Tuples)...)
-	// Co-commit the emitted member-tuple into the ledger — the symmetric revoke +
-	// Role.Update reconcile both rest on it (ban #10). The INSERT is
-	// `ON CONFLICT (binding_id,fga_user,relation,object) DO UPDATE SET source='member'`
-	// (idempotent — a re-emit / async-full-backstop overlap re-tags at most, never dups).
+	// Кортежи члена ложатся в реестр под его координатой той же транзакцией: на реестре
+	// стоят симметричное снятие и сверка Role.Update (ban #10). Вставка — `ON CONFLICT
+	// (<полный ключ>) DO NOTHING`: повтор форварда и наложение асинхронного полного
+	// прохода ничего не пишут дважды.
 	for _, t := range dm.Tuples {
-		w.ledger = append(w.ledger, EmittedTupleRef{BindingID: bs.BindingID, Tuple: t})
+		w.ledger = append(w.ledger, EmittedTupleRef{BindingID: bs.BindingID, Member: desiredCoord(dm), Tuple: t})
 	}
 	return nil
 }

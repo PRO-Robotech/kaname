@@ -40,7 +40,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/credsecret"
@@ -73,6 +75,10 @@ var unauthorizedBody = `{"error":"unauthorized","error_description":` +
 	`"this lane issues registry tokens for the Kacho basic access token: docker login -u <credential id> -p ` +
 	credsecret.Mark + `<credential id>_<secret>"}`
 
+// tooManyBody — тело отказа по темпу анонимной выдачи: фиксированное, та же
+// форма, что у отказа по темпу токен-эндпоинта платформы.
+const tooManyBody = `{"error":"temporarily_unavailable"}`
+
 // TokenPath — the token endpoint path. MUST equal the data-plane's Bearer realm
 // path (the WWW-Authenticate realm), so verifiers and docker clients resolve the
 // same URL.
@@ -95,18 +101,23 @@ func NewMux(token http.Handler) *http.ServeMux {
 // whether that path is configured (else the handler fails closed to a challenge).
 type TokenIssuer interface {
 	Execute(ctx context.Context, in registrytokenuc.IssueInput) (registrytokenuc.IssueOutput, error)
-	ExecuteAnonymous(ctx context.Context, service string) (registrytokenuc.IssueOutput, error)
+	ExecuteAnonymous(ctx context.Context, in registrytokenuc.AnonymousInput) (registrytokenuc.IssueOutput, error)
 	AnonymousEnabled() bool
 }
 
 // Config — handler config (the WWW-Authenticate realm + default service name).
 type Config struct {
-	// Realm — the token-endpoint URL advertised in WWW-Authenticate (must match
-	// the data-plane's Bearer realm, e.g. https://api.kacho.local/iam/token).
+	// Realm — адрес выдачи удостоверений, объявляемый в WWW-Authenticate; обязан
+	// совпадать с областью Bearer плоскости данных (например,
+	// https://iam.example.invalid/iam/token).
 	Realm string
 	// DefaultService — the service name used in WWW-Authenticate when the request
 	// omits ?service= (e.g. registry.kacho.local).
 	DefaultService string
+	// Source — адрес источника запроса по правилу поверхности выдачи
+	// (`internal/issuingsource`, Р7): ключ темпа анонимной выдачи (kaname#928).
+	// nil — источник не различается, и все анонимные входы делят один ключ.
+	Source func(*http.Request) string
 }
 
 // TokenHandler — the `/iam/token` endpoint.
@@ -180,7 +191,10 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.challenge(w, service)
 			return
 		}
-		out, err := h.issuer.ExecuteAnonymous(r.Context(), requested)
+		out, err := h.issuer.ExecuteAnonymous(r.Context(), registrytokenuc.AnonymousInput{
+			Service: requested,
+			Source:  h.source(r),
+		})
 		if err != nil {
 			h.writeError(w, service, err)
 			return
@@ -204,12 +218,27 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.writeToken(w, out)
 }
 
+// source — ключ темпа анонимной выдачи по правилу, поданному сборкой.
+func (h *TokenHandler) source(r *http.Request) string {
+	if h.cfg.Source == nil {
+		return ""
+	}
+	return h.cfg.Source(r)
+}
+
 // writeError maps a use-case failure to the fail-closed HTTP response: an
 // unavailable issuer (our signer or the basic-credential authority) → 503 (no
 // token); any auth failure → 401 challenge; anything else → 500. No raw
 // signer/network error ever leaks (fixed text).
 func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err error) {
+	var paced *registrytokenuc.AnonymousPaceExceededError
 	switch {
+	case errors.As(err, &paced):
+		// Источник исчерпал темп анонимной выдачи (kaname#928): та же форма
+		// отказа, что у темпа токен-эндпоинта платформы. Исход уже в переписи
+		// полосы; строки журнала на каждый отказ нет — под потоком она сама
+		// стала бы нагрузкой.
+		writeRetryLater(w, paced.RetryAfter)
 	case errors.Is(err, registrytokenuc.ErrIssuerUnavailable):
 		// Причина — в журнал, тело — фиксированное. Разные адресаты, разные
 		// требования: клиенту различать нечего (оракул), нам различать
@@ -276,6 +305,18 @@ func (h *TokenHandler) logBasicRefusal(err error, service string) {
 		h.logger.Warn("docker token: basic credential refused",
 			"outcome", registrytokenuc.OutcomeBasicPrincipalKindRefused, "service", service)
 	}
+}
+
+// writeRetryLater — 429 и срок ожидания целыми секундами, округлённый ВВЕРХ:
+// повтор, названный раньше, чем темп освободится, снова получил бы отказ, а
+// ноль секунд значил бы «повторите сразу».
+func writeRetryLater(w http.ResponseWriter, after time.Duration) {
+	secs := int64(math.Ceil(after.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.FormatInt(secs, 10))
+	http.Error(w, tooManyBody, http.StatusTooManyRequests)
 }
 
 // writeToken writes the 200 Docker Registry v2 token body.

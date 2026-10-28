@@ -34,6 +34,7 @@ import (
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
@@ -508,6 +509,19 @@ func (w *fakeAccountABWriter) Insert(_ context.Context, b domain.AccessBinding) 
 	w.parent.mu.Unlock()
 	b.CreatedAt = time.Now().UTC()
 	return b, nil
+}
+
+// GetForDeactivation — замок снятия строки выдачи, который дренаж Account.Delete
+// берёт до чтения ведомости; строки нет — NotFound, как у настоящего репозитория.
+func (w *fakeAccountABWriter) GetForDeactivation(_ context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	w.parent.mu.Lock()
+	defer w.parent.mu.Unlock()
+	for _, b := range w.parent.ownerBindings {
+		if b.ID == id {
+			return b, nil
+		}
+	}
+	return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
 }
 
 func (w *fakeAccountABWriter) InsertSubjects(context.Context, domain.AccessBindingID, []domain.Subject) error {

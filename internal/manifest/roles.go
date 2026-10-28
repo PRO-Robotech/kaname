@@ -162,6 +162,12 @@ var (
 	// — часть контракта отказа, и переименование его без смены предмета сделало
 	// бы ложью каждое место, которое на него ссылается.
 	ErrRoleDescriptionTooShort = errors.New("manifest: role description is shorter than the declared bound")
+	// ErrRoleDescriptionTooLong — назначение роли длиннее предела доменного
+	// типа. Судья — `domain.Description`, тот же, что у применителя ролей:
+	// загрузчик, принявший такое назначение, отдал бы доставку, которая не
+	// применится, и отказ пришёл бы на старте службы, а не автору манифеста
+	// (kaname#867).
+	ErrRoleDescriptionTooLong = errors.New("manifest: role description is longer than the domain bound")
 	// ErrRoleRulesRequired — роль не несёт ни одного правила: выданная, она не
 	// даёт НИ ОДНОГО права.
 	ErrRoleRulesRequired = errors.New("manifest: role grants nothing")
@@ -295,6 +301,10 @@ type Rule struct {
 	Verbs         []string          `yaml:"verbs"`
 	ResourceNames []string          `yaml:"resourceNames"`
 	MatchLabels   map[string]string `yaml:"matchLabels"`
+	// Children — вложенные правила (kaname#874, rolechildren.go): правила над
+	// типами, лежащими под ЕДИНСТВЕННЫМ ресурсом этого правила по объявленным
+	// `parents`, на любой глубине. nil — ключа нет; пустой перечень — находка.
+	Children []ChildRule `yaml:"children"`
 }
 
 // ruleKeyToDomainField — СЛОВАРЬ объявленных расхождений «ключ манифеста → поле
@@ -336,6 +346,7 @@ func (r Rule) DomainRule() domain.Rule {
 		Verbs:         r.Classes,
 		ResourceNames: r.ResourceNames,
 		MatchLabels:   r.MatchLabels,
+		Children:      domainChildren(r.Children, false),
 	}
 }
 
@@ -368,6 +379,7 @@ func (r Rule) formRule() domain.Rule {
 		Verbs:         values,
 		ResourceNames: r.ResourceNames,
 		MatchLabels:   r.MatchLabels,
+		Children:      domainChildren(r.Children, true),
 	}
 }
 
@@ -377,7 +389,11 @@ func (r Rule) formRule() domain.Rule {
 // вызывающим (moduleset.go) и здесь не добывается: прежде набор брался у
 // перечня, порождённого сборкой, и правило модуля оператора отвергалось
 // «unknown module» при том, что его манифест доставку уже прошёл.
-func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet) []error {
+//
+// `canon` — родство типов канона для судьи вложенных правил (kaname#951); тоже
+// вносится вызывающим ([WithTypeCanon]), `nil` — судится только раздел
+// `resources` документа.
+func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet, canon TypeCanon) []error {
 	var faults []error
 	seen := map[string]int{}
 
@@ -403,6 +419,14 @@ func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet) []erro
 				faults = append(faults, formFaults...)
 				continue
 			}
+			// Форма вложенности — РАНЬШЕ судьи домена: её находки называют
+			// причину с координатой, а домен на той же форме ответил бы своим
+			// общим текстом (у `*` владельца — «подстановка только системная»),
+			// не сказав, что не так с вложенностью (kaname#874, ND-04).
+			if nestFaults := validateRuleChildren(m, rule, doc, i, j, canon); len(nestFaults) > 0 {
+				faults = append(faults, nestFaults...)
+				continue
+			}
 			if err := rule.formRule().Validate(domain.TenantPolicy(), modules); err != nil {
 				faults = append(faults, linkFault{
 					kind:   ErrRoleRuleInvalid,
@@ -417,6 +441,12 @@ func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet) []erro
 			}
 			faults = append(faults, validateRuleOwnership(role, rule, m.Module, doc, i, j)...)
 			faults = append(faults, validateRuleNamedVerbs(m, rule, role.ID, doc, i, j)...)
+			for k, child := range rule.Children {
+				faults = append(faults, validateNamedVerbsAt(m,
+					Rule{Module: rule.Module, Resources: child.Resources, Verbs: child.Verbs}, role.ID, doc,
+					fmt.Sprintf("roles[%d].rules[%d].children[%d]", i, j, k),
+					"roles", i, "rules", j, "children", k)...)
+			}
 		}
 	}
 	return faults
@@ -601,6 +631,18 @@ func validateRoleProse(role *Role, doc *yaml.Node, i int) []error {
 				"объявлением роль лишилась бы назначения, которое у неё есть",
 				i, utf8.RuneCountInString(strings.TrimSpace(role.Description)),
 				minRoleDescriptionRunes),
+		})
+	}
+	// Верхний предел судит ДОМЕННЫЙ тип — тот же судья, что у применителя ролей
+	// (`domain.Role.Validate`), в тех же единицах (знаки). Второй предел здесь
+	// не выписывается: разошёлся бы с доменным молча (kaname#867).
+	if err := domain.Description(role.Description).Validate(); err != nil {
+		faults = append(faults, linkFault{
+			kind:  ErrRoleDescriptionTooLong,
+			coord: locate(doc, "roles", i),
+			detail: fmt.Sprintf("roles[%d].description: %d знаков, допускается не более %d — "+
+				"применитель ролей отверг бы такое назначение на старте службы: %v",
+				i, utf8.RuneCountInString(role.Description), domain.DescriptionMax, err),
 		})
 	}
 	return faults

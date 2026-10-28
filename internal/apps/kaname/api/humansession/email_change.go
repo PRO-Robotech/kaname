@@ -18,9 +18,15 @@ package humansession
 //
 // # Порядок суждения запроса — несущий
 //
-//	сессия · положение (адрес подтверждён) · уровень · свежесть · форма адреса ·
-//	«отличен от текущего» · уровень чтением транзакции · «отличен от текущего»
-//	и темп человека оператором записи · окно адресата · запись
+//	присутствие поля · сессия · положение (адрес подтверждён) · уровень ·
+//	свежесть · форма адреса · «отличен от текущего» · уровень чтением
+//	транзакции · «отличен от текущего» и темп человека оператором записи ·
+//	окно адресата · запись
+//
+// Незаполненное обязательное поле называется ПЕРВЫМ, до сессии — как у
+// соседей полосы (заведение пароля, повышение, завершение сессий) и как
+// объявляет страница полосы (kaname#739). Отказ поля ничего не сообщает о
+// сессии и ничего не тратит.
 //
 // «Отличен от текущего» до транзакции судит адрес, прочитанный вместе с
 // сессией, — это ранний отказ, и он ничего не разрешает: решает условие
@@ -327,6 +333,12 @@ func NewRequestEmailChangeUseCase(d EmailChangeDeps) (*RequestEmailChangeUseCase
 // Execute — запрос смены (порядок суждения — шапка файла).
 func (uc *RequestEmailChangeUseCase) Execute(ctx context.Context, in RequestEmailChangeInput) (RequestEmailChangeOutput, error) {
 	now := uc.d.Now().UTC()
+	// Присутствие — то же приведение, что у суждения формы ниже (`AddressKey`):
+	// пробелы — не адрес.
+	if AddressKey(in.NewEmail) == "" {
+		uc.d.Observer.EmailChangeObserved(EmailChangeFieldRefused)
+		return RequestEmailChangeOutput{}, FieldRequired(fieldNewEmail)
+	}
 	resolved, err := resolveForEmailChange(ctx, uc.d, in.Bearer, now)
 	if err != nil {
 		return RequestEmailChangeOutput{}, err
@@ -473,24 +485,24 @@ func NewConfirmEmailChangeUseCase(d EmailChangeDeps) (*ConfirmEmailChangeUseCase
 	return &ConfirmEmailChangeUseCase{d: d}, nil
 }
 
-// Execute — предъявление кода: сессия · положение · уровень · форма
-// (`code: required`) · уровень чтением транзакции · код · исход одной
-// транзакцией. Свежести предъявление не требует (Р2): решение принято на
+// Execute — предъявление кода: присутствие кода (`code: required`, до сессии —
+// kaname#739) · сессия · положение · уровень · уровень чтением транзакции ·
+// код · исход одной транзакцией. Свежести предъявление не требует (Р2): решение принято на
 // запросе, владение ящиком доказывает код. Уровня требует: адрес меняет
 // предъявление, и порог судит ту сессию, которая его меняет.
 func (uc *ConfirmEmailChangeUseCase) Execute(ctx context.Context, in ConfirmEmailChangeInput) (ConfirmEmailChangeOutput, error) {
 	now := uc.d.Now().UTC()
+	presented := domain.PresentedVerificationCode(in.Code)
+	if presented.IsZero() {
+		uc.d.Observer.EmailChangeObserved(EmailChangeFieldRefused)
+		return ConfirmEmailChangeOutput{}, FieldRequired("code")
+	}
 	resolved, err := resolveForEmailChange(ctx, uc.d, in.Bearer, now)
 	if err != nil {
 		return ConfirmEmailChangeOutput{}, err
 	}
 	if err := requireEmailChangeLevel(ctx, uc.d, resolved, uc.d.Methods.Get, uc.d.Methods.AccessKeyEnrolled); err != nil {
 		return ConfirmEmailChangeOutput{}, err
-	}
-	presented := domain.PresentedVerificationCode(in.Code)
-	if presented.IsZero() {
-		uc.d.Observer.EmailChangeObserved(EmailChangeFieldRefused)
-		return ConfirmEmailChangeOutput{}, FieldRequired("code")
 	}
 	bearer, err := domain.NewSessionBearer()
 	if err != nil {

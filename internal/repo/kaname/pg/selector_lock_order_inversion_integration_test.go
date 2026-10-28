@@ -136,7 +136,7 @@ func TestSelectorWriteTakesTheCatalogRowLockBeforeTheSelectorRows(t *testing.T) 
 			return
 		}
 		rerr := w.RolesW().ReplaceRuleSelectors(ctx, role, []domain.RuleSelector{{
-			RuleFP: "fp-lockorder", Arm: domain.ArmAnchor, ObjectTypes: []string{doomed},
+			RuleFP: "fp-lockorder", Arm: domain.ArmAnchor, ObjectTypes: []string{doomed}, Grants: map[string][]string{},
 		}})
 		if rerr != nil {
 			_ = w.Rollback(ctx)
@@ -213,7 +213,7 @@ func TestLoneSelectorWriteAgainstALiveCatalogPasses(t *testing.T) {
 			return
 		}
 		if rerr := w.RolesW().ReplaceRuleSelectors(ctx, role, []domain.RuleSelector{{
-			RuleFP: "fp-lockorder-ok", Arm: domain.ArmAnchor, ObjectTypes: []string{alive},
+			RuleFP: "fp-lockorder-ok", Arm: domain.ArmAnchor, ObjectTypes: []string{alive}, Grants: map[string][]string{},
 		}}); rerr != nil {
 			_ = w.Rollback(ctx)
 			done <- rerr

@@ -83,9 +83,6 @@ func (r *fakeUserRdr) GetByAccountEmail(_ context.Context, _ domain.AccountID, e
 func (r *fakeUserRdr) FindPendingByEmail(context.Context, domain.Email) ([]domain.User, error) {
 	return nil, nil
 }
-func (r *fakeUserRdr) FindActiveByExternalID(context.Context, domain.ExternalSubject) ([]domain.User, error) {
-	return nil, nil
-}
 
 // FindByExternalIDInStatuses отдаёт строку личности КАК ЕСТЬ, если её состояние
 // входит в запрошенный набор: use-case судит состояние сам, поэтому фейк не

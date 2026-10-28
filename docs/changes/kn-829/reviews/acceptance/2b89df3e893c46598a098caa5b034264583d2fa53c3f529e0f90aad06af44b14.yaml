@@ -1,0 +1,120 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: 2b89df3e893c46598a098caa5b034264583d2fa53c3f529e0f90aad06af44b14
+  revision: 7
+  static_status: DRAFT
+  static_status_note: >-
+    Слово в шапке документа — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: b20866a67
+  content_commit: none (правка не закоммичена на момент ревью)
+  branch: 3238-acc-sc18
+  task: PRO-Robotech/kaname#829
+  related_tasks: [PRO-Robotech/kacho#3238]
+  round: 1
+  round_scope: >-
+    Проверка исполнения решения диспетчера Д8 (окончательное, не переоткрывается): краевая
+    половина SC-18 после отзыва — 404 / NOT_FOUND (код 5), а не 403. Судится только дельта к
+    одобренной редакции 6 (14fba0c2…) и непротиворечивость с прочими сценариями о скрытии
+    существования.
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/3238-acc → 2b89df3e…4b14 (совпало с заданием);
+    git show HEAD:<док> | sha256sum @ b20866a67 → 14fba0c2…5056c (база дельты = одобренная редакция 6)
+  measurement_revisions: >-
+    kaname — рабочее дерево tmp/3238-acc над b20866a67 (git diff, grep); kacho — a95248464
+    (describe.go, network/get.go, gateway/internal/middleware/permission_denied_response.go),
+    b55702484 (gateway/tests/newman/cases/system_class_anonymous_edge.py).
+
+verdict: APPROVED
+verdict_note: >-
+  проверка исполнения Д8 — дельта внесена верно: исход 404/NOT_FOUND с дословным текстом,
+  основание, производитель и его текущее расхождение названы; сценарий S1 SC-18 не тронут;
+  противоречий с SC-32 и SC-39 нет.
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-16T12:00:00+03:00'
+
+execution_check:
+  delta: >-
+    git diff в копии: 1 файл, +36 −5 — история ревью (три строки дописаны, прежние не изменены),
+    шапка (дата, редакция 7), пункт DoD S3 «SC-18 через край», новый раздел «Редакция 7: что исправлено».
+  checks:
+    - id: outcome
+      result: pass
+      evidence: >-
+        DoD S3: 404 / NOT_FOUND (код 5), текст `Network <id> not found`; производитель текста на
+        крае — kacho gateway/internal/middleware/permission_denied_response.go:185
+        ("vpc_network": "Network %s not found") @a95248464; тот же текст у отсутствующей сети —
+        services/vpc/internal/repo/kacho/pg/network.go:227 @a95248464.
+    - id: basis
+      result: pass
+      evidence: >-
+        services/vpc/cmd/vpc/describe.go:54-57 (скрытие по форме v_get, не аннотацией), :82
+        hideExistenceForms, :317 HideExistence; network/get.go — шапка «Deny на СУЩЕСТВУЮЩЕМ
+        объекте interceptor превращает в NotFound» @a95248464. Документ точнее формулировки
+        задания («hide_existence в каталоге»): скрытие — по форме, исход тот же.
+    - id: twin
+      result: pass
+      evidence: положительный близнец — чтение 200 до отзыва; отличие один факт — наличие выдачи.
+    - id: producer
+      result: pass
+      evidence: >-
+        newman kacho system_class_anonymous_edge; сегодня утверждает 403 (строки 22-24, 242,
+        243, 268, 275-276 @b55702484) — расхождение названо в документе, правка — S3.
+    - id: s1_untouched
+      result: pass
+      evidence: тело SC-18 (Check kaname, allowed true/false) не входит в дифф.
+    - id: consistency_hide_existence
+      result: pass
+      evidence: >-
+        SC-32 — аноним без выдачи → UNAUTHENTICATED побайтово (другой класс субъекта, отказ слоя
+        аутентификации); SC-39 — реестр, близнец 404 «не найдено»; Р5 — расширение поверхности
+        без изменения. Новый исход не противоречит ни одному.
+    - id: counts
+      result: pass
+      evidence: grep -c '^#### SC-' → 49, совпадает с объявленным в разделе «Редакция 7».
+
+summary:
+  blocking: 0
+  kinds: []
+minor:
+  - >-
+    Кейс newman правится целиком, не только итоговое утверждение: предпосылка «без выдачи
+    посторонний не читает» (строки 242-243) и условие опроса (`!== 403`, строка 268) тоже
+    переходят на 404 / code 5 — иначе опрос выйдет по сроку.
+constructibility:
+  seeded: 0
+  of: 0
+  not_performed: 0
+  note: >-
+    Дельта нового Given не вводит; Given SC-18 (выдача authenticated, отзыв) строится той же
+    коллекцией и не менялся с одобренной редакции 6.
+route_signs:
+  proto: no
+  schema: no
+  public_rpc: no
+  ui: no
+  new_domain: no
+  security_surface: no (исход отказа приведён к действующему инварианту скрытия, поверхность не расширена)
+
+event_body: "acceptance-reviewer · APPROVED · sha256 2b89df3e893c46598a098caa5b034264583d2fa53c3f529e0f90aad06af44b14 · проверка исполнения Д8 (ред. 7)"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#829
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c.yaml
+    - docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d.yaml

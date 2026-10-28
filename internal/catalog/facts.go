@@ -67,6 +67,18 @@ type Facts struct {
 	// из двух снимков — ресурс оказался бы в обоих перечнях сразу либо ни в
 	// одном (kacho#1814, IAM-SUC-09).
 	retired []RetiredEntry
+	// containers — точечный тип → его сведения о публичном чтении: объявлен ли
+	// он контейнером и какие живые типы указывают на него (kaname#856).
+	containers map[string]containerFact
+}
+
+// containerFact — сведения одного типа о публичном чтении детям.
+type containerFact struct {
+	module   string
+	declared bool
+	// children — точечные типы живых строк, чей указатель называет этот тип,
+	// отсортированно, вместе с модулем строки.
+	children []ResourceEntry
 }
 
 // RetiredEntry — одна СНЯТАЯ пара каталога и её преемник.
@@ -231,6 +243,7 @@ func NewFacts(h Halves) (*Facts, error) {
 		fgaTypeByDotted: fgaTypeByDotted,
 		resources:       resources,
 		retired:         retired,
+		containers:      containersOf(rows.Resources),
 	}
 	for dotted, verbs := range byDotted {
 		// Имя типа есть у КАЖДОЙ живой строки: строка без него отвергнута выше,
@@ -461,19 +474,15 @@ func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string) []str
 //
 // Порознь каждое направление выполнимо портом, который не производит пар
 // НИКОГДА, — поэтому утверждаются оба.
+//
+// Проекция роли есть ОБЪЕДИНЕНИЕ глаголов её правил (`GrantSelectors`): одно
+// вычисление на обе стороны, и разойтись роль с правилом не может.
 func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain.RoleVerb {
 	seen := make(map[domain.RoleVerb]bool)
 	out := make([]domain.RoleVerb, 0, len(selectors))
-	for _, sel := range selectors {
+	for _, sel := range f.GrantSelectors(selectors) {
 		for _, dotted := range sel.ObjectTypes {
-			if dotted == "" {
-				continue
-			}
-			fgaType, ok := f.FGAObjectType(dotted)
-			if !ok {
-				continue
-			}
-			for _, verb := range f.GrantedVerbs(fgaType, sel.Verbs, f.VerbsOfType(fgaType)) {
+			for _, verb := range sel.Grants[dotted] {
 				pair := domain.RoleVerb{ObjectType: dotted, Verb: verb}
 				if seen[pair] {
 					continue
@@ -481,6 +490,106 @@ func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain
 				seen[pair] = true
 				out = append(out, pair)
 			}
+		}
+	}
+	return out
+}
+
+// GrantSelectors — селекторы с глаголами, которые каждое ПРАВИЛО даёт на каждом
+// своём типе (`RuleSelector.Grants`), по живому каталогу (kaname#878).
+//
+// Решение о доступе судит глагол ПО ПРАВИЛУ: объект получает глагол только от
+// того правила, чей селектор его выбрал. Проекция роли (`RoleVerbsFromSelectors`)
+// — объединение этих наборов; держать глагол на уровне роли и охват на уровне
+// правила значило бы сочетать глагол одного правила с охватом другого.
+//
+// Тип, которого живой каталог не знает либо которому правило не даёт ни одного
+// глагола, ключа не получает: «тип есть в охвате, глаголов нет» и «типа нет»
+// для решения одинаковы — глагола нет. Карта при этом НЕ nil и у такого
+// селектора: nil означает «не вычислено», и писатель его отвергает.
+//
+// Возвращаются КОПИИ: вход вызывающему принадлежит, и портить его заполнением на
+// месте нельзя.
+func (f *Facts) GrantSelectors(selectors []domain.RuleSelector) []domain.RuleSelector {
+	out := make([]domain.RuleSelector, len(selectors))
+	for i, sel := range selectors {
+		grants := make(map[string][]string, len(sel.ObjectTypes))
+		for _, dotted := range sel.ObjectTypes {
+			if _, done := grants[dotted]; done || dotted == "" {
+				continue
+			}
+			fgaType, ok := f.FGAObjectType(dotted)
+			if !ok {
+				continue
+			}
+			verbs := f.GrantedVerbs(fgaType, sel.Verbs, f.VerbsOfType(fgaType))
+			if len(verbs) == 0 {
+				continue
+			}
+			grants[dotted] = verbs
+		}
+		sel.Grants = grants
+		out[i] = sel
+	}
+	return out
+}
+
+// containersOf — сведения о публичном чтении детям по каждому живому типу.
+//
+// Связь «ребёнок → контейнер» читается из указателей строки ребёнка: тип модели
+// контейнера стоит среди её `ParentTypes`. Точечное имя контейнера восстанавливается
+// по имени типа модели его же строки — переходник тот же, что у
+// [Facts.FGAObjectType], в обратную сторону, и читается он из тех же строк.
+func containersOf(rows []ResourceRow) map[string]containerFact {
+	dottedByFGA := make(map[string]string, len(rows))
+	out := make(map[string]containerFact, len(rows))
+	for _, r := range rows {
+		dotted := r.Module + "." + r.Resource
+		dottedByFGA[r.ObjectType] = dotted
+		c := out[dotted]
+		c.module = r.Module
+		c.declared = r.PublicReadToChildren
+		out[dotted] = c
+	}
+	for _, r := range rows {
+		for _, pt := range r.ParentTypes {
+			parent, ok := dottedByFGA[pt]
+			if !ok {
+				continue
+			}
+			c := out[parent]
+			c.children = append(c.children, ResourceEntry{Module: r.Module, Resource: r.Resource, ObjectType: r.ObjectType})
+			out[parent] = c
+		}
+	}
+	for k, c := range out {
+		sort.Slice(c.children, func(i, j int) bool {
+			if c.children[i].Module != c.children[j].Module {
+				return c.children[i].Module < c.children[j].Module
+			}
+			return c.children[i].Resource < c.children[j].Resource
+		})
+		out[k] = c
+	}
+	return out
+}
+
+// PublicReadChildren — точечные типы, которым передаёт публичное чтение тип
+// `dotted`: дети ТОГО ЖЕ модуля, если тип объявлен контейнером; nil, если не
+// объявлен либо в каталоге его нет.
+//
+// Ребёнок чужого модуля наследования не получает (Р9 «Способ», допущение автора
+// приёмки): его блок не несёт `public_reader from <указатель>`, и открывать
+// по нему контейнер значило бы писать отношение, которого никто не читает.
+func (f *Facts) PublicReadChildren(dotted string) []string {
+	c, ok := f.containers[dotted]
+	if !ok || !c.declared {
+		return nil
+	}
+	var out []string
+	for _, ch := range c.children {
+		if ch.Module == c.module {
+			out = append(out, ch.Module+"."+ch.Resource)
 		}
 	}
 	return out

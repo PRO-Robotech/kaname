@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/exchangepace"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -24,9 +25,9 @@ type BuildConfig struct {
 	// поля причина не уходила никуда, и разные по природе отказы выглядели
 	// одинаково. nil допустим — тогда журналирования нет.
 	Logger *slog.Logger
-	// Realm — the WWW-Authenticate realm URL advertised to docker clients
-	// (e.g. https://api.kacho.local/iam/token). Must match the data-plane's
-	// advertised Bearer realm.
+	// Realm — адрес области WWW-Authenticate, объявляемый клиентам docker
+	// (например, https://iam.example.invalid/iam/token). Обязан совпадать с
+	// областью Bearer, которую объявляет плоскость данных.
 	Realm string
 	// Service — the default registry service name (→ requested token audience +
 	// WWW-Authenticate service, e.g. registry.kacho.local).
@@ -39,6 +40,12 @@ type BuildConfig struct {
 	// подстановочного `user:*`. Пусто (умолчание) — анонимный поток ВЫКЛЮЧЕН, и
 	// вход без удостоверения получает 401-вызов (secure-by-default).
 	AnonymousClientID string
+	// AnonymousPerSourcePerSec — темп анонимной выдачи: входов без
+	// удостоверения в секунду на источник, на процесс (kaname#928).
+	AnonymousPerSourcePerSec int
+	// Source — адрес источника запроса по правилу поверхности выдачи
+	// (`internal/issuingsource`, Р7): ключ темпа анонимной выдачи.
+	Source func(*http.Request) string
 	// Signer — НАШ подписант, ЕДИНСТВЕННЫЙ издатель полосы. Обязателен: без него
 	// сборка отказывает (kaname#494), другого издателя у полосы нет.
 	Signer *tokensigner.Signer
@@ -116,6 +123,22 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 			"registrytokenwire: api-server.registry-token.service is empty — it is the audience this " +
 				"lane is declared to mint for, and an unset one means «mint for whatever the caller names»")
 	}
+	// ТЕМП АНОНИМНОЙ ВЫДАЧИ (kaname#928) строится ТОЛЬКО при объявленном
+	// анонимном потоке; построитель варианта использования поток без темпа не
+	// пускает, а темп без источника делил бы один ключ на всех анонимных
+	// вызывающих.
+	anonymous := registrytokenuc.AnonymousIdentity{ClientID: cfg.AnonymousClientID}
+	if cfg.AnonymousClientID != "" {
+		if cfg.Source == nil {
+			return nil, fmt.Errorf(
+				"registrytokenwire: the anonymous lane is declared, but the source address rule is not wired")
+		}
+		pace, perr := exchangepace.New(cfg.AnonymousPerSourcePerSec, time.Now)
+		if perr != nil {
+			return nil, fmt.Errorf("registrytokenwire: api-server.registry-token.anonymous-per-source-per-sec: %w", perr)
+		}
+		anonymous.Pace = pace
+	}
 	useCase, err := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
 		// Внешняя граница ЭТОЙ полосы — служба реестра, объявленная посадкой.
 		// Ровно её реестр называет докер-клиенту в вызове на аутентификацию, и
@@ -127,7 +150,7 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 		Scope:            cfg.Scope,
 		// Anonymous-pull identity (RG-1 D-7). Empty → anonymous pull disabled
 		// (no-Basic-creds → 401 challenge).
-		Anonymous: registrytokenuc.AnonymousIdentity{ClientID: cfg.AnonymousClientID},
+		Anonymous: anonymous,
 	}, NewLocalMinter(cfg.Signer, cfg.TokenTTL))
 	if err != nil {
 		return nil, fmt.Errorf("registrytokenwire: %w", err)
@@ -171,6 +194,7 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 	tokenHandler := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{
 		Realm:          cfg.Realm,
 		DefaultService: cfg.Service,
+		Source:         cfg.Source,
 	}, useCase).WithLogger(cfg.Logger)
 
 	return registrytokenhttp.NewMux(tokenHandler), nil

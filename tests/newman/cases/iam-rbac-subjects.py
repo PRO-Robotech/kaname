@@ -54,8 +54,8 @@ subject_id) within-service reference at the DB level (phantom-grant / delete-rac
 hard-rule #10), so a made-up `usr-*`/`grp-*` string is rejected 23503 →
 FAILED_PRECONDITION at Create. The create/projection cases therefore mint a fresh
 REAL user per run via `mint_user()` (the PUBLIC UserService.Invite flow — a PENDING
-user row that satisfies the existence trigger; UpsertFromIdentity is Internal-only,
-no public REST route) and, for the multi-subject case, create a fresh REAL group; the
+user row that satisfies the existence trigger; there is no other user-mint path
+a tenant admin can drive over REST) and, for the multi-subject case, create a fresh REAL group; the
 ExpandAccess case likewise uses
 a REAL group with REAL user members (the group_members trigger requires existing users)
 so the userset can resolve to concrete principals. Each minted principal is runId-scoped
@@ -342,10 +342,8 @@ def mint_user(env_var, ext, auth="jwtAccountAdminA"):
     string that was never created is rejected 23503 → FAILED_PRECONDITION at Create,
     so subjects can no longer be made up on the fly.
 
-    WHY INVITE (not UpsertFromIdentity): UpsertFromIdentity is an Internal* RPC with
-    no PUBLIC REST route — it lives ONLY on the cluster-internal listener
-    (:8081), so POSTing it at the public {{baseUrl}} (:8080) returns 404 (ban #6). The
-    PUBLIC user-mint path a tenant admin can drive over REST is Invite: it INSERTs a
+    WHY INVITE: the PUBLIC user-mint path a tenant admin can drive over REST is
+    Invite (the internal provisioning verb is retired, kaname#929): it INSERTs a
     PENDING user row (invite.go InsertPending) and returns metadata.userId synchronously.
     The row EXISTS in kaname.users, so the 0049 trigger (existence, status-agnostic)
     passes and the id is a valid binding subject. email is runId-scoped → a distinct real

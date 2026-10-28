@@ -39,8 +39,12 @@ func TestRegistryTokenListener_ConfiguredSeparatePort(t *testing.T) {
 			t.Errorf("registry token addr %q == %s addr — must be a separate port", addr, name)
 		}
 	}
-	if got := tok.TokenIssuer(); got != "https://api.kacho.local/iam/token" {
-		t.Errorf("TokenIssuer() = %q, want https://api.kacho.local/iam/token", got)
+	// ИЗДАТЕЛЬ УМОЛЧАНИЯ НЕ ИМЕЕТ (kaname#309): это адрес полосы ЭТОЙ установки.
+	// Прежде проба закрепляла встроенное умолчание, называвшее координату
+	// соседнего продукта, — то есть утверждала ровно тот дефект, из-за которого
+	// страж старта по издателю не исполнялся ни разу.
+	if got := tok.TokenIssuer(); got != "" {
+		t.Errorf("TokenIssuer() = %q, want empty (издателя объявляет посадка, а не код)", got)
 	}
 	// АДРЕСАТ УМОЛЧАНИЯ НЕ ИМЕЕТ (задача kacho#1184): имя службы реестра объявляет
 	// посадка ОДИН раз на обе стороны полосы (`global.kacho.registry.serviceAud`),
@@ -67,11 +71,14 @@ func TestServeWiresRegistryTokenListener(t *testing.T) {
 	for _, want := range []string{
 		"registrytokenwire.Build(",
 		"cfg.APIServer.RegistryToken.ListenAddress()",
-		"cfg.APIServer.RegistryToken.TokenIssuer()",
-		"cfg.APIServer.RegistryToken.TokenService()",
+		// Вход сборки перелагается из настройки ОДНОЙ функцией: проба
+		// переложения (serve_registry_token_anonymous_test.go) судит ровно её.
+		"registryTokenBuildConfig(cfg.APIServer.RegistryToken,",
+		"rt.TokenIssuer()",
+		"rt.TokenService()",
 		// НАШ подписант — единственный издатель полосы (kaname#494): корень,
 		// не подающий его, получил бы отказ сборки на каждом старте.
-		"Signer:   tokenSigner,",
+		"signer: tokenSigner,",
 		// Подъём, гашение и строка самоотчёта переехали в профиль не-gRPC
 		// поверхности: докладывает о себе она сама, и доклад несёт то, чего прежняя
 		// строка не несла никогда, — досягаемость и решение об аутентификации.
@@ -90,6 +97,10 @@ func TestServeWiresRegistryTokenListener(t *testing.T) {
 // CONFIGURED issuer-realm and the DECLARED lane addressee (умолчания у него нет). No DB is required — the challenge
 // precedes any DB-backed validator/signer call, so a nil pool is safe here.
 func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
+	// Издатель ОБЪЯВЛЯЕТСЯ переменной процесса: умолчания у него нет (kaname#309),
+	// и проба утверждает, что объявленное доезжает до вызова на аутентификацию.
+	const laneIssuer = "https://access.example.test/iam/token"
+	t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__ISSUER", laneIssuer)
 	cfg, err := config.Load("")
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -121,7 +132,7 @@ func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 	if !strings.HasPrefix(ch, "Bearer ") {
 		t.Errorf("WWW-Authenticate = %q, want a Bearer challenge", ch)
 	}
-	if !strings.Contains(ch, `realm="https://api.kacho.local/iam/token"`) {
+	if !strings.Contains(ch, `realm="`+laneIssuer+`"`) {
 		t.Errorf("WWW-Authenticate = %q, want realm from the configured issuer", ch)
 	}
 	if !strings.Contains(ch, `service="`+laneService+`"`) {

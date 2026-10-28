@@ -39,6 +39,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 func bindingCount(t *testing.T, ctx context.Context, repo *kanamepg.Repository, roleID domain.RoleID, resourceType, resourceID string) int {
@@ -66,7 +68,7 @@ func TestCreate_ScopeEnforcement_ListCreateParity(t *testing.T) {
 	pool := poolFromDSN(t, dsn)
 	repo := kanamepg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 
 	ownerA := mustSeedUser(t, ctx, pool, "ce12a")
@@ -121,7 +123,7 @@ func TestCreate_ScopeEnforcement_ConcurrentMisScoped_BothRejected(t *testing.T) 
 	pool := poolFromDSN(t, dsn)
 	repo := kanamepg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 
 	ownerA := mustSeedUser(t, ctx, pool, "ce12ba")
@@ -171,7 +173,7 @@ func TestCreate_ScopeEnforcement_AccountRoleOnCluster_FailedPrecondition(t *test
 	pool := poolFromDSN(t, dsn)
 	repo := kanamepg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 
 	admin := mustSeedUser(t, ctx, pool, "ce13")
@@ -209,7 +211,7 @@ func TestCreate_RoleMissing_FailedPrecondition(t *testing.T) {
 	pool := poolFromDSN(t, dsn)
 	repo := kanamepg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kaname")
-	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithRelationStore(allowRelationStore{}, nil)
 
 	admin := mustSeedUser(t, ctx, pool, "cerm")
@@ -265,10 +267,10 @@ func TestCreate_ForwardOnly_LegacyMisScopedSurvives(t *testing.T) {
 	_, err := pool.Exec(ctx,
 		`ALTER TABLE kaname.access_bindings DISABLE TRIGGER access_bindings_role_assignable_trg`)
 	require.NoError(t, err, "suspend the assignability trigger to seed a pre-rule row")
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, bindingset.With(`
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, granted_by_user_id)
-		VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $5)`,
+		VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE', $5)`),
 		string(legacyID), string(member), string(bcustom), string(accA), string(ownerA))
 	require.NoError(t, err, "seed pre-1.5 mis-scoped binding directly")
 	_, rerr := pool.Exec(ctx,

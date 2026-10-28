@@ -29,8 +29,8 @@ func platform(audiences string) config.ClientTokenConfig {
 func TestLaneAudienceMustBeInsideThePlatformDeclaration(t *testing.T) {
 	// ОТРИЦАНИЕ.
 	err := config.RegistryTokenConfig{
-		Endpoint: "tcp://0.0.0.0:9096", Service: "sts.example.com",
-	}.Validate(platform("https://api.kacho.cloud,registry.kacho.local"))
+		Endpoint: "tcp://0.0.0.0:9096", Issuer: probeIssuer, Service: "sts.example.com",
+	}.Validate(platform("https://api.kacho.cloud,registry.kacho.local"), noTrustDomain)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "api-server.registry-token.service",
 		"отказ обязан назвать настройку — его читает оператор, а не предъявитель")
@@ -39,8 +39,8 @@ func TestLaneAudienceMustBeInsideThePlatformDeclaration(t *testing.T) {
 
 	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: объявленный обеими сторонами адресат проходит.
 	require.NoError(t, config.RegistryTokenConfig{
-		Endpoint: "tcp://0.0.0.0:9096", Service: "registry.kacho.local",
-	}.Validate(platform("https://api.kacho.cloud,registry.kacho.local")))
+		Endpoint: "tcp://0.0.0.0:9096", Issuer: probeIssuer, Service: "registry.kacho.local",
+	}.Validate(platform("https://api.kacho.cloud,registry.kacho.local"), noTrustDomain))
 }
 
 // TestGuardJudgesTheEffectiveAudience — страж судит ДЕЙСТВУЮЩИЙ адресат, а не
@@ -60,14 +60,14 @@ func TestLaneAudienceMustBeInsideThePlatformDeclaration(t *testing.T) {
 // пробелами судится обрезанной.
 func TestGuardJudgesTheEffectiveAudience(t *testing.T) {
 	// ОТРИЦАНИЕ (а): пробельная строка — не объявление.
-	err := config.RegistryTokenConfig{Endpoint: "tcp://0.0.0.0:9096", Service: "   "}.
-		Validate(platform("registry.kacho.local"))
+	err := config.RegistryTokenConfig{Endpoint: "tcp://0.0.0.0:9096", Issuer: probeIssuer, Service: "   "}.
+		Validate(platform("registry.kacho.local"), noTrustDomain)
 	require.Error(t, err, "пробельный адресат обязан читаться как необъявленный")
 	require.Contains(t, err.Error(), "api-server.registry-token.service")
 
 	// ОТРИЦАНИЕ (б): объявленный, но вне перечня платформы — судится обрезанным.
-	err = config.RegistryTokenConfig{Endpoint: "tcp://0.0.0.0:9096", Service: "  sts.example.com  "}.
-		Validate(platform("https://api.kacho.cloud"))
+	err = config.RegistryTokenConfig{Endpoint: "tcp://0.0.0.0:9096", Issuer: probeIssuer, Service: "  sts.example.com  "}.
+		Validate(platform("https://api.kacho.cloud"), noTrustDomain)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `"sts.example.com"`,
 		"отказ обязан назвать ДЕЙСТВУЮЩИЙ адресат — обрезанный, а не сырое поле профиля")
@@ -76,8 +76,8 @@ func TestGuardJudgesTheEffectiveAudience(t *testing.T) {
 	// его называет, проходит. Без него оба отрицания зеленели бы на страже,
 	// отвергающем всё.
 	require.NoError(t, config.RegistryTokenConfig{
-		Endpoint: "tcp://0.0.0.0:9096", Service: "  registry.kacho.local  ",
-	}.Validate(platform("https://api.kacho.cloud,registry.kacho.local")))
+		Endpoint: "tcp://0.0.0.0:9096", Issuer: probeIssuer, Service: "  registry.kacho.local  ",
+	}.Validate(platform("https://api.kacho.cloud,registry.kacho.local"), noTrustDomain))
 }
 
 // TestGuardHasNoSubjectWithoutALane — у стража без предмета отказа нет.
@@ -87,17 +87,17 @@ func TestGuardJudgesTheEffectiveAudience(t *testing.T) {
 // Отказ в этих состояниях был бы отказом в старте без предмета.
 func TestGuardHasNoSubjectWithoutALane(t *testing.T) {
 	require.NoError(t, config.RegistryTokenConfig{Service: "sts.example.com"}.
-		Validate(platform("registry.kacho.local")), "слушателя нет — предмета нет")
+		Validate(platform("registry.kacho.local"), noTrustDomain), "слушателя нет — предмета нет")
 	require.NoError(t, config.RegistryTokenConfig{
-		Endpoint: "tcp://0.0.0.0:9096", Service: "sts.example.com",
-	}.Validate(config.ClientTokenConfig{}), "перечень платформы не объявлен — сверять не с чем")
+		Endpoint: "tcp://0.0.0.0:9096", Issuer: probeIssuer, Service: "sts.example.com",
+	}.Validate(config.ClientTokenConfig{}, noTrustDomain), "перечень платформы не объявлен — сверять не с чем")
 
 	// Пустой перечень при ВКЛЮЧЁННОМ эндпоинте — предмет соседнего стража, и он
 	// о нём говорит сам. Второе сообщение о том же предмете разошлось бы с
 	// первым; проба закрепляет, что второго тут нет.
 	require.NoError(t, config.RegistryTokenConfig{
-		Endpoint: "tcp://0.0.0.0:9096", Service: "sts.example.com",
-	}.Validate(config.ClientTokenConfig{Enabled: true, AllowedAudiences: " , "}))
+		Endpoint: "tcp://0.0.0.0:9096", Issuer: probeIssuer, Service: "sts.example.com",
+	}.Validate(config.ClientTokenConfig{Enabled: true, AllowedAudiences: " , "}, noTrustDomain))
 }
 
 // TestLaneAudienceMustBeDeclaredNotDefaulted — страж старта ловит
@@ -120,7 +120,7 @@ func TestGuardHasNoSubjectWithoutALane(t *testing.T) {
 func TestLaneAudienceMustBeDeclaredNotDefaulted(t *testing.T) {
 	// ОТРИЦАНИЕ: слушатель полосы поднят, адресат не объявлен.
 	err := config.RegistryTokenConfig{Endpoint: "tcp://0.0.0.0:9096"}.
-		Validate(platform("registry.kacho.local"))
+		Validate(platform("registry.kacho.local"), noTrustDomain)
 	require.Error(t, err, "полоса поднята с необъявленным адресатом — старт обязан быть отвергнут")
 
 	// Отказ называет ОБЕ величины: свою настройку и ту сторону, из которой она
@@ -136,11 +136,11 @@ func TestLaneAudienceMustBeDeclaredNotDefaulted(t *testing.T) {
 	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: объявленный адресат при том же перечне проходит.
 	// Без него отказ выше был бы неотличим от стража, отвергающего всё.
 	require.NoError(t, config.RegistryTokenConfig{
-		Endpoint: "tcp://0.0.0.0:9096", Service: "registry.kacho.local",
-	}.Validate(platform("registry.kacho.local")))
+		Endpoint: "tcp://0.0.0.0:9096", Issuer: probeIssuer, Service: "registry.kacho.local",
+	}.Validate(platform("registry.kacho.local"), noTrustDomain))
 
 	// ГРАНИЦА: слушателя нет — полосы нет, объявлять нечего, отказывать не за что.
-	require.NoError(t, config.RegistryTokenConfig{}.Validate(platform("registry.kacho.local")),
+	require.NoError(t, config.RegistryTokenConfig{}.Validate(platform("registry.kacho.local"), noTrustDomain),
 		"без слушателя у стража нет предмета")
 }
 

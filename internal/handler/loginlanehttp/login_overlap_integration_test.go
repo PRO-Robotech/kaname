@@ -495,7 +495,7 @@ func TestLoginOverlap_KN_OVL_08_RefusalByTheCutoffDoesNotConsumeTheCode(t *testi
 
 	retry := h.startLogin(t, p, integrationPassword, code).await(t, "повторный вход P")
 	if assert.Equal(t, http.StatusOK, retry.status, "повторный вход паролем и тем же кодом c обязан выдать сессию: %s", retry.body) {
-		assert.Equal(t, passwordverify.BackupCodeCount-1, h.backupCodesRemaining(t, retry.bearer),
+		assert.Equal(t, passwordverify.BackupCodeCount-1, h.backupCodeSetRemaining(t, retry.bearer),
 			"остаток набора на один меньше полного: код потреблён ровно один раз — повтором")
 	}
 }
@@ -707,7 +707,7 @@ func TestLoginOverlap_KN_OVL_10_2_ACaptureThatDidNotAnswerLeavesTheCodeUnconsume
 	h.store.failCapture.Store(false)
 	retry := h.startLogin(t, p, integrationPassword, code).await(t, "повторный вход P")
 	if assert.Equal(t, http.StatusOK, retry.status, "повтор тем же кодом c при ответившем захвате обязан выдать сессию: %s", retry.body) {
-		assert.Equal(t, passwordverify.BackupCodeCount-1, h.backupCodesRemaining(t, retry.bearer),
+		assert.Equal(t, passwordverify.BackupCodeCount-1, h.backupCodeSetRemaining(t, retry.bearer),
 			"остаток набора на один меньше полного: код потреблён ровно один раз — повтором")
 	}
 }

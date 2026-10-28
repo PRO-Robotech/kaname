@@ -93,7 +93,13 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// Выдача: субъект, роль, область, цель, срок и метки прислал вызывающий.
 	// Выдавшего и отозвавшего называет служба по проверенному принципалу;
 	// состояние, отзыв, ярус и форму отношения системной выдачи ставит служба —
-	// на пути вызывающего отношение пусто, и его проверки молчат.
+	// на пути вызывающего отношение пусто, и его проверки молчат. Форму цели
+	// (`access_bindings_target_form_ck`, kaname#863) сериализует служба
+	// (`relverdict.EncodeTarget`) из уже разобранного запроса: вызывающий шлёт
+	// поля контракта, а не JSON колонки, и формы вне контракта ему прислать
+	// нечем — её отказ есть дефект писателя. Число элементов перечня
+	// (`access_bindings_target_resources_card_ck`) — длина присланного списка,
+	// и оно остаётся полосой ввода.
 	"access_bindings": {
 		caller: []string{
 			"access_bindings_expires_future_ck",
@@ -113,6 +119,7 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"access_bindings_revoked_consistency_ck",
 			"access_bindings_scope_ck",
 			"access_bindings_status_ck",
+			"access_bindings_target_form_ck",
 		},
 	},
 	// Вызов ключа доступа — вызов, назначение и срок чеканит служба.
@@ -176,17 +183,31 @@ var checkValueLanes = map[string]*checkTableLanes{
 		},
 	},
 	// Каталог модуля: имя модуля — из манифеста; живость и снятие — служба.
+	// Номер применённой редакции — из манифеста как есть (ключ `revision`,
+	// kaname#865); отпечаток содержимого считает служба над деревом узлов
+	// документа, и пару из номера и отпечатка пишет оператор
+	// сравнения-и-записи службы.
 	"catalog_module": {
-		caller:  []string{"catalog_module_nonempty", "catalog_module_undotted"},
-		service: []string{"catalog_module_live_matches_retired"},
+		caller: []string{
+			"catalog_module_applied_revision_positive",
+			"catalog_module_nonempty",
+			"catalog_module_undotted",
+		},
+		service: []string{
+			"catalog_module_applied_digest_form",
+			"catalog_module_applied_pair",
+			"catalog_module_live_matches_retired",
+		},
 	},
-	// Каталог ресурса: модуль, ресурс и тип модели — из манифеста; точечное имя
-	// склеивает служба, живость, снятие и преемника ставит служба.
+	// Каталог ресурса: модуль, ресурс, тип модели и типы указателей — из
+	// манифеста; точечное имя склеивает служба, живость, снятие и преемника
+	// ставит служба.
 	"catalog_resource": {
 		caller: []string{
 			"catalog_resource_module_undotted",
 			"catalog_resource_nonempty",
 			"catalog_resource_object_type_form",
+			"catalog_resource_parent_types_form",
 			"catalog_resource_resource_undotted",
 		},
 		service: []string{
@@ -317,6 +338,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"refresh_tokens": nil,
 	// Факт отношения выводит триггер схемы из очереди кортежей.
 	"relation_fact": nil,
+	// Надгробие факта отношения пишет та же свёртка журнала из очереди кортежей.
+	"relation_fact_removal": nil,
 	// Журнал ресурсов — событие пишет служба.
 	"resource_journal": nil,
 	// Зеркало чужого ресурса: тип и идентификатор прислала служба-владелец;
@@ -362,18 +385,28 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// присланного типа судит триггер, поднимающий отказ по имени
 	// `role_rule_selectors_types_live`: таблицы он сегодня не называет, но
 	// назвавший её отказ обязан остаться вводом.
+	//
+	// Контейнер вложенного селектора (kaname#874) делится так же: тип, ветвь,
+	// имена и метки контейнера — из присланного правила-владельца (манифест
+	// модуля), форму объекта его меток ставит служба.
 	"role_rule_selectors": {
 		caller: []string{
 			"role_rule_selectors_arm_shape",
+			"role_rule_selectors_container_labels_valid",
+			"role_rule_selectors_container_not_own_type",
+			"role_rule_selectors_container_shape",
 			"role_rule_selectors_labels_valid",
 			"role_rule_selectors_types_live",
 			"role_rule_selectors_types_nonempty",
 		},
 		service: []string{
 			"role_rule_selectors_arm_valid",
+			"role_rule_selectors_container_labels_obj",
 			"role_rule_selectors_fp_nonempty",
 			"role_rule_selectors_labels_obj",
 			"role_rule_selectors_live_true",
+			// Карту глаголов правила вычисляет служба из каталога (kaname#878).
+			"role_rule_selectors_verbs_valid",
 		},
 	},
 	// Сокращение селектора — следствие снятия каталога, пишет служба.

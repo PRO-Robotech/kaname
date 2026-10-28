@@ -35,6 +35,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
@@ -54,6 +55,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
+	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
@@ -323,7 +325,12 @@ func runServe(cfg config.Config) error {
 	// Отказ ФАТАЛЕН на каждом звене: собранная модель, не прошедшая допуск, —
 	// это данные оператора, расширяющие модель прав установки, и мягкий проход
 	// здесь означал бы контроль, который не откажет ни разу.
-	if cErr := installComposedModel(logger, deliveredManifests); cErr != nil {
+	//
+	// Отчёт композиции корень сохраняет: из него шаг «модель против каталога»
+	// ниже узнаёт, какой модуль принёс в модель процесса тип вне канона
+	// (kaname#865, Д10) — второй композиции для этого не заводится.
+	composedReport, cErr := installComposedModel(logger, deliveredManifests)
+	if cErr != nil {
 		return cErr
 	}
 
@@ -347,8 +354,24 @@ func runServe(cfg config.Config) error {
 	// вызову конструктора в правой части, и цепочка увела бы применителя
 	// из-под его наблюдения — молча.
 	catalogApplier = catalogApplier.WithObserver(metricsReg.NewModuleCatalogRecorder())
-	if aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests); aErr != nil {
+	// Применённые ПОЛНОСТЬЮ — ровно они едут применителям ролей и посева ниже
+	// (kaname#865, Д3): модуль, пропущенный как младшая редакция либо
+	// отвергнутый конфликтом содержимого, не получает и их. Опора паритета выше
+	// и страж ниже судят доставку целиком, как прежде.
+	appliedManifests, notAppliedManifests, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
+	if aErr != nil {
 		return aErr
+	}
+
+	// МОДЕЛЬ ПРОТИВ КАТАЛОГА — сразу за применителем каталога и ДО стража
+	// паритета, ролей и посева (kaname#865, Д10). Модель процесса выше собрана
+	// из всей доставки; модуль, документ которого каталог пропустил либо
+	// отверг и который принёс в модель тип вне канона, останавливает пуск:
+	// модель доступа не собирается из документа, который каталог отверг. Довод
+	// — шапка `model_catalog_agreement.go`; порядок и доводы держит гейт
+	// `model_catalog_agreement_wiring_test.go`.
+	if mcErr := assertModelAgreesWithCatalog(logger, notAppliedManifests, composedReport); mcErr != nil {
+		return mcErr
 	}
 
 	catalogRepo := kanamepg.NewCatalogRepo(pool)
@@ -429,7 +452,7 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("роли модуля: %w", rrErr)
 	}
 	rolesApplier := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanameRepo), rolesRights)
-	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, deliveredManifests); raErr != nil {
+	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
 		return raErr
 	}
 
@@ -445,17 +468,24 @@ func runServe(cfg config.Config) error {
 	// службы; своё доставкой не связано.
 	//
 	// Свой манифест читается ЗДЕСЬ и подаётся применителю посева ОТДЕЛЬНЫМ
-	// доводом — в перечень `deliveredManifests` он не подмешивается: тот
-	// читают пятеро, а получатель у своего манифеста ровно один (Р3 приёмки
-	// MRW-1). Довод о месте, порядке и о том, почему отказ фатален, — шапка
-	// `module_seed_apply.go`; порядок и раздельность доводов держит гейт
+	// доводом — в перечень доставки он не подмешивается: доставку читают
+	// несколько потребителей старта, а получатель у своего манифеста ровно один
+	// (Р3 приёмки MRW-1). Довод о месте, порядке и о том, почему отказ фатален,
+	// — шапка `module_seed_apply.go`; порядок и раздельность доводов держит гейт
 	// `module_seed_apply_wiring_test.go`, а не этот комментарий.
+	//
+	// Доставленные едут сюда ПРИМЕНЁННЫМИ (kaname#865, Д3): модуль доставки,
+	// пропущенный как младшая редакция либо отвергнутый конфликтом, посева не
+	// получает. Свой манифест службы этим отбором НЕ сужается и подаётся всегда:
+	// он встроен в образ, доставкой не связан, и порядок редакций доставки о нём
+	// не говорит ничего — модуль `iam` доставки и встроенный документ суть два
+	// разных входа.
 	ownManifest, omErr := loadOwnManifest(logger)
 	if omErr != nil {
 		return omErr
 	}
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
-	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, deliveredManifests); seErr != nil {
+	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
 		return seErr
 	}
 
@@ -687,6 +717,14 @@ func runServe(cfg config.Config) error {
 	); err != nil {
 		return err
 	}
+	// Круг отправителей — тем же предикатом, которым его записи разберёт
+	// транспорт (kaname#308): форма имени службы в объявленном домене либо имя
+	// собственного фронта, только что выведенное из его сертификата. Запись,
+	// которую пол не узнает, прошла бы взаимный TLS и получала бы отказ на
+	// каждом вызове при зелёных стражах старта (см. forwarderform.go).
+	if err := requireForwardersRecognised(cfg.AuthN, ownFrontSAN); err != nil {
+		return err
+	}
 	// Различимость адресов поверхностей судится НЕ ЗДЕСЬ, а там, где собран срез
 	// подъёма: сверять надо ВСЕ поверхности, а адреса не-gRPC приходят профилем
 	// поверхности, которого на этом шаге ещё нет. Прежде страж стоял здесь и
@@ -740,7 +778,8 @@ func runServe(cfg config.Config) error {
 	// круг края он не проходит никогда, потому что краем не является и о том,
 	// кто за ним стоит, ничего не сообщает. Величина взята из сертификата,
 	// который фронт предъявляет, — разойтись с проводом ей нечем.
-	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
+	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs(),
+		cfg.AuthN.ServiceNameForm()).
 		WithSANAllowlist(map[string][]string{
 			authzguard.BootstrapMintFullMethod: cfg.AuthN.BootstrapMint.AllowedSANs(),
 		}).
@@ -768,7 +807,8 @@ func runServe(cfg config.Config) error {
 	// движку мимо второго шанса и мимо сравнения форм. Страж при этом
 	// присутствовал, был провязан и исполнялся — снаружи неотличимо от
 	// исправного.
-	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(svcs.ownGates, authzguard.ReadFloorRPCs()).
+	internalSystemViewerFloor := authzguard.NewSystemViewerFloor(svcs.ownGates, authzguard.ReadFloorRPCs(),
+		cfg.AuthN.ServiceNameForm()).
 		WithProductionMode(productionMode)
 
 	// Per-RPC `required_acr_min` (step-up) FLOOR on the internal
@@ -814,7 +854,8 @@ func runServe(cfg config.Config) error {
 		// Реализация порта присутствия удостоверения: КЛЮЧ метаданных и
 		// объявленная схема предъявления живут у читателя, и второй их разбор
 		// разошёлся бы с первым молча — на входе, который оба считают годным.
-		presentedcred.Presented)
+		presentedcred.Presented,
+		cfg.AuthN.ServiceNameForm())
 
 	// РУБЕЖ ПОЛОЖЕНИЯ ПОДТВЕРЖДЕНИЯ (kaname#456, Р4б, Р4в) — ОДНО значение на
 	// оба слушателя и обе полосы, сразу после политики вызывающего: человек с
@@ -1189,18 +1230,46 @@ func runServe(cfg config.Config) error {
 	// материал в поле пароля снят задачей kacho#1143 и принимается лишь пока открыто
 	// объявленное оператором окно перехода (ручка ниже).
 	registryTokenAddr := cfg.APIServer.RegistryToken.ListenAddress()
-	// Мгновение окна перехода берётся у настройки РАЗОБРАННЫМ. Неразборчивое
-	// значение сюда не доходит: его отвергает страж старта
+	// Вход сборки полосы ПЕРЕЛАГАЕТСЯ из настройки одной функцией
+	// (registryTokenBuildConfig ниже): всякая ручка полосы доезжает до сборки
+	// через неё, и проба переложения судит ровно то, что получает сборка.
+	//
+	// Неразборчивое значение сюда не доходит: его отвергает страж старта
 	// `RegistryTokenConfig.Validate` — его зовёт `config.Config.Validate`, а её,
 	// в свою очередь, `main` ДО `runServe`, и на её отказе процесс выходит
 	// кодом 1. Отказ ниже поэтому недостижим на живой посадке и стоит здесь
 	// затем, чтобы значение не оказалось использовано неразобранным, если
 	// когда-нибудь эту функцию позовут в обход `main`.
-	registryTokenKeyMaterialWindow, kmwErr := cfg.APIServer.RegistryToken.KeyMaterialWindowUntil()
-	if kmwErr != nil {
-		return fmt.Errorf("registry token shim: %w", kmwErr)
+	// Адрес источника осей темпа — ОДНО правило на все точки поверхности выдачи
+	// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края только
+	// при проверенном сертификате края, иначе адрес пира. Строится до сборки
+	// докерной полосы: её анонимная выдача — тоже точка этой поверхности
+	// (kaname#928), и на ней адрес берётся ещё и у объявленного доверенного
+	// пересыльщика — прокси реестра (kaname#930). Режим слушателя, при котором
+	// край и пересыльщик вообще узнаваемы, требует страж
+	// requireIssuingListenerAsksForACertificate.
+	issuingSource := issuingsource.New(cfg.AuthN.TrustDomain(), cfg.AuthN.ServiceNameForm())
+	registryTokenBuild, rtErr := registryTokenBuildConfig(cfg.APIServer.RegistryToken, registryTokenRuntime{
+		logger: logger,
+		source: issuingSource,
+		// НАШ подписант — единственный издатель полосы. Выключенная своя
+		// чеканка даёт здесь nil, и сборка отказывает в старте, называя оба
+		// выхода (kaname#494): другого издателя у полосы нет.
+		signer: tokenSigner,
+		// Счётчик исходов провязывается БЕЗУСЛОВНО, а не вместе с окном:
+		// он обязан считать и отказы прежнему виду, то есть работать именно
+		// на посадке БЕЗ окна — иначе оператор, у которого обновление
+		// сломало вход арендаторам, узнаёт об этом из жалобы.
+		credentialKindObserver: metricsReg.RegistryTokenCredentialKindRecorder(),
+		// Предел ОДНОГО обращения авторитета о базовом секрете к базе — тот
+		// же, что у полос выдачи токена: оператор этой полосы для строки
+		// человека читает и отсечку отзыва-всех (kaname#379).
+		basicCredentialTimeout: credentialLanePeerTimeout,
+	})
+	if rtErr != nil {
+		return fmt.Errorf("registry token shim: %w", rtErr)
 	}
-	if !registryTokenKeyMaterialWindow.IsZero() {
+	if registryTokenKeyMaterialWindow := registryTokenBuild.KeyMaterialWindowUntil; !registryTokenKeyMaterialWindow.IsZero() {
 		// Открытое окно — ОСЛАБЛЕНИЕ ПОСАДКИ, и оно обязано быть заметно в
 		// самоотчёте процесса: посадка, о которой процесс молчит, отличима от
 		// строгой только чтением настройки, а её при разборе инцидента читают
@@ -1215,34 +1284,14 @@ func runServe(cfg config.Config) error {
 	}
 	var registryTokenHandler http.Handler
 	if registryTokenAddr != "" {
-		mux, berr := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
-			Realm:   cfg.APIServer.RegistryToken.TokenIssuer(),
-			Service: cfg.APIServer.RegistryToken.TokenService(),
-			Logger:  logger,
-			// НАШ подписант — единственный издатель полосы. Выключенная своя
-			// чеканка даёт здесь nil, и сборка отказывает в старте, называя оба
-			// выхода (kaname#494): другого издателя у полосы нет.
-			Signer:   tokenSigner,
-			TokenTTL: cfg.APIServer.RegistryToken.TokenTTL(),
-			// ОКНО ПЕРЕХОДА ЛОМАЮЩЕГО ИЗМЕНЕНИЯ kacho#1143 — уже РАЗОБРАННОЕ выше:
-			// сборка полосы получает мгновение, а не строку, и своего разбора
-			// не заводит. Второй разборщик того же значения разошёлся бы с
-			// первым молча — и разошёлся бы именно там, где расхождение не
-			// видно, потому что на годном входе оба отвечают одинаково.
-			KeyMaterialWindowUntil: registryTokenKeyMaterialWindow,
-			// Счётчик исходов провязывается БЕЗУСЛОВНО, а не вместе с окном:
-			// он обязан считать и отказы прежнему виду, то есть работать именно
-			// на посадке БЕЗ окна — иначе оператор, у которого обновление
-			// сломало вход арендаторам, узнаёт об этом из жалобы.
-			CredentialKindObserver: metricsReg.RegistryTokenCredentialKindRecorder(),
-			// Предел ОДНОГО обращения авторитета о базовом секрете к базе — тот
-			// же, что у полос выдачи токена: оператор этой полосы для строки
-			// человека читает и отсечку отзыва-всех (kaname#379).
-			BasicCredentialTimeout: credentialLanePeerTimeout,
-		})
+		mux, berr := registrytokenwire.Build(pool, registryTokenBuild)
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)
 		}
+		// Перепись точки анонимной выдачи правила адреса источника — вплотную
+		// к сборке полосы (kaname#930): рост её клетки отличает неверно
+		// названного пересыльщика от залпа одного клиента.
+		metricsReg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(issuingSource))
 		// Токен-эндпоинт платформы (задача kacho#898) монтируется на ЭТУ ЖЕ
 		// поверхность, а не заводит свою. Вид выдачи «учётные данные клиента»
 		// задан формой запроса, а не нашим выбором порта; второй внешний
@@ -1260,14 +1309,11 @@ func runServe(cfg config.Config) error {
 		// выключенном эндпоинте (только вне боевого режима) — nil, и её пути
 		// здесь не резолвятся.
 		//
-		// Адрес источника осей темпа — ОДНО правило на обе точки поверхности
-		// (приёмка ceremony-pace-is-named-by-number.md, Р7): адрес от края
-		// только при проверенном сертификате края, иначе адрес пира. Режим
-		// слушателя, при котором край вообще узнаваем, требует страж
-		// requireIssuingListenerAsksForACertificate выше.
-		issuingSource := issuingsource.New(cfg.AuthN.TrustDomain())
+		// Адрес источника осей темпа — то же правило issuingSource, что у
+		// докерной полосы выше: одно на все точки поверхности.
 		ceremony, cerr := buildCeremonySurface(pool, cfg, tokenSigner,
-			ceremonyKeySource(signingKeystore), lane.secretChecker(), metricsReg.LoginLaneRecorder(), issuingSource, logger)
+			ceremonyKeySource(signingKeystore), lane.secretChecker(), lane.secretCheckCost(),
+			metricsReg.LoginLaneRecorder(), issuingSource, logger)
 		if cerr != nil {
 			return fmt.Errorf("ceremony: %w", cerr)
 		}
@@ -2174,6 +2220,35 @@ func runServe(cfg config.Config) error {
 		return nil
 	})
 
+	// Пересчёт ОЧЕРЕДИ глаголов правил (kaname#878) — своя задача, а не шаг
+	// досева: он идёт, пока жив процесс (очередь пополняется и после опустения —
+	// перекатка, сорванный пересчёт на старте), и досев за ним не ждёт. Пока роль в очереди, её строки селекторов несут верхнюю границу
+	// глаголов («по роли»), и окно миграции открыто — поэтому перепись КАЖДОГО
+	// прохода печатается с длиной очереди, а отказ прохода — уровнем Error.
+	// Старт он не роняет: отказ роли оставляет её в очереди до следующего
+	// прохода, а не отнимает доступ. Снимается вместе с переходным стражем схемы
+	// при пустой очереди на всех установках (шапка `seed/selector_verbs_queue.go`).
+	tasks = append(tasks, func() error {
+		derr := seed.DrainSelectorVerbsQueue(taskCtx, kanameRepo, pool, catalogSnapshot,
+			selectorVerbsQueueRetry, func(c seed.SelectorVerbsCensus, perr error) {
+				attrs := []any{
+					slog.Int("roles_examined", c.Examined),
+					slog.Int("roles_regrained", c.Regrained),
+					slog.Int("roles_failed", c.Failed),
+					slog.Int("queue_pending", c.Pending),
+				}
+				if perr != nil {
+					logger.Error("пересчёт очереди глаголов правил отказал", append(attrs, slog.Any("err", perr))...)
+					return
+				}
+				logger.Info("перепись пересчёта очереди глаголов правил", attrs...)
+			})
+		if derr != nil && taskCtx.Err() == nil {
+			logger.Error("пересчёт очереди глаголов правил остановлен", slog.Any("err", derr))
+		}
+		return nil
+	})
+
 	// Уборки по сроку — ресурсного журнала подписки (своим уборщиком, довод в
 	// `subscription_wiring.go`) и таблиц службы — запускаются ЗДЕСЬ: после
 	// последнего отказа старта и на корневом контексте задач (#253, шапка
@@ -2344,4 +2419,63 @@ func requireRegistryTokenTLS(productionMode bool, addr string, mtlsCfg config.MT
 			addr)
 	}
 	return nil
+}
+
+// registryTokenRuntime — входы сборки докерной полосы, которые даёт не
+// настройка, а композиционный корень: журнал, подписант, счётчик исходов и
+// предел обращения авторитета к базе.
+type registryTokenRuntime struct {
+	logger                 *slog.Logger
+	signer                 *tokensigner.Signer
+	credentialKindObserver registrytokenuc.CredentialKindObserver
+	basicCredentialTimeout time.Duration
+	// source — правило адреса источника поверхности выдачи (Р7): ключ темпа
+	// анонимной выдачи (kaname#928). Одно на все точки поверхности.
+	source *issuingsource.Rule
+}
+
+// registryTokenBuildConfig — ЕДИНСТВЕННОЕ переложение настройки докерной полосы
+// в вход её сборки.
+//
+// Функция отдельна от runServe затем, чтобы проба переложения судила тот самый
+// вход, который получает сборка на живой посадке: ручка, объявленная в
+// настройке и не переложенная сюда, — ручка без читателя (контроль на вид
+// есть, предмета у него нет), и увидеть это можно только исходом сборки,
+// собранной из настройки.
+func registryTokenBuildConfig(rt config.RegistryTokenConfig, run registryTokenRuntime) (registrytokenwire.BuildConfig, error) {
+	// Мгновение окна перехода берётся у настройки РАЗОБРАННЫМ: сборка полосы
+	// получает мгновение, а не строку, и своего разбора не заводит. Второй
+	// разборщик того же значения разошёлся бы с первым молча — и разошёлся бы
+	// именно там, где расхождение не видно, потому что на годном входе оба
+	// отвечают одинаково.
+	window, err := rt.KeyMaterialWindowUntil()
+	if err != nil {
+		return registrytokenwire.BuildConfig{}, err
+	}
+	// Публичный принципал анонимного чтения (kaname#495) — тоже разобранным
+	// стражем формы. Пустое — анонимный поток выключен, и вход без
+	// удостоверения получает 401-вызов (fail-closed).
+	anonymous, err := rt.AnonymousPrincipal()
+	if err != nil {
+		return registrytokenwire.BuildConfig{}, err
+	}
+	var source func(*http.Request) string
+	if run.source != nil {
+		// Доверенный пересыльщик точки (kaname#930) переносится как есть: его
+		// форму в домене доверия разобрал страж старта `RegistryTokenConfig.Validate`.
+		source = run.source.RegistryTokenPoint(rt.AnonymousForwarderSAN)
+	}
+	return registrytokenwire.BuildConfig{
+		AnonymousClientID:        anonymous,
+		AnonymousPerSourcePerSec: rt.AnonymousPerSourcePerSec,
+		Source:                   source,
+		Realm:                    rt.TokenIssuer(),
+		Service:                  rt.TokenService(),
+		Logger:                   run.logger,
+		Signer:                   run.signer,
+		TokenTTL:                 rt.TokenTTL(),
+		KeyMaterialWindowUntil:   window,
+		CredentialKindObserver:   run.credentialKindObserver,
+		BasicCredentialTimeout:   run.basicCredentialTimeout,
+	}, nil
 }

@@ -50,6 +50,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
 // raceRole — живая роль модуля со своими проекциями, субъектом и аккаунтом.
@@ -173,10 +174,10 @@ func TestIAMRW126RetirementAgainstANewGrant(t *testing.T) {
 			// без срока проба висела бы, а не отвечала.
 			c, cancel := context.WithTimeout(ctx, 20*time.Second)
 			defer cancel()
-			_, err := pool.Exec(c, `
+			_, err := pool.Exec(c, bindingset.With(`
 				INSERT INTO kaname.access_bindings
 				       (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-				VALUES ($1, 'user', $2, $3, 'cluster', $4, 'ACTIVE')`,
+				VALUES ($1, 'user', $2, $3, 'cluster', $4, 'ACTIVE')`),
 				fmt.Sprintf("acb_rwrace%02d", i), "usr_rwracegrant", string(id),
 				domain.ClusterSingletonID)
 			mu.Lock()

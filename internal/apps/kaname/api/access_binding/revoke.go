@@ -13,16 +13,17 @@ package access_binding
 //     removed in the same writer-tx, so access is denied once the Operation is
 //     done — the two paths differ only in row-retention, not in access outcome.
 //
-// The tuple-removal is identical to Delete: it revokes the PERSISTED emitted-set
-// (access_binding_emitted_tuples) MINUS whatever another ACTIVE binding still claims
-// (partitionRevokeSet), not a re-derive from the binding's CURRENT role — so a
-// Role.Update between grant and revoke cannot orphan tuples, and a sibling ACTIVE
-// binding's access is never stripped along with this one's.
-// "The SAME writer-tx" opens with the binding's EXCLUSIVE advisory lock (see doRevoke).
-// Здесь стояло, что этим отзыв разведён с аддитивным форвардом, «берущим SHARE-близнеца
-// того же ключа». Форвард advisory-блокировку НЕ БЕРЁТ (снята 2026-08-05, см.
-// reconcile/forward.go «LOCK CHOICE»), поэтому утверждение описывало код, которого нет;
-// оставшийся разъезд назван у doRevoke и открыт как отдельная задача.
+// Снятие кортежей — как у Delete: строки снятия на СОХРАНЁННЫЙ реестр выдачи
+// (access_binding_emitted_tuples), а не на набор, выведенный из ТЕКУЩЕЙ роли, —
+// поэтому Role.Update между выдачей и отзывом кортежей не осиротит. Не снимает ли это
+// доступ, который даёт другая действующая выдача того же субъекта, решает не
+// use-case, а свёртка строки снятия: под замком строки факта, свежим снимком
+// (миграция 20261019180000, kaname#919). Снимок соседей, прочитанный здесь до
+// вставки строки, устаревал раньше, чем применялся.
+// Writer-транзакция отзыва открывается EXCLUSIVE advisory-замком выдачи, а строку
+// выдачи берёт `FOR UPDATE` до чтения реестра (см. doRevoke): первый разводит отзыв
+// с полным проходом, истечением и вторым отзывом, второй — с аддитивным форвардом,
+// который advisory не берёт и решает «выдача жива» под `FOR KEY SHARE` (kaname#923).
 // Отзыв действует С КОММИТА: строка снятия, положенная в журнал намерений ТОЙ ЖЕ
 // writer-tx, снимает прямой факт триггером журнала. Прежде здесь был синхронный
 // пост-коммитный вызов в чужое хранилище — он закрывал окно до дренажа; хранилища
@@ -50,7 +51,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
-	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
 type RevokeAccessBindingUseCase struct {
@@ -147,27 +147,38 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 			_ = w.Rollback(ctx)
 		}
 	}()
-	// Take the binding's EXCLUSIVE xact advisory lock as the FIRST statement of the
-	// writer-tx — the SAME pg_advisory_xact_lock(hashtext(binding_id)) key the
-	// reconciler's FULL pass uses (reconcile_adapter.go AcquireBindingLock). Этим
-	// держится взаимное исключение отзыва с полным проходом, истечением срока и вторым
-	// отзывом: ни один из них не вклинится между снимком реестра и коммитом.
+	// ПОРЯДОК ЗАМКОВ транзакции отзыва — тот же, что у удаления и истечения срока
+	// (reconcile.ExpireBinding):
 	//
-	// ЧТО ЭТА БЛОКИРОВКА НЕ ЗАКРЫВАЕТ (сказано прямо, чтобы следующий не достроил).
-	// Прежняя редакция объясняла её тем, что аддитивный форвард берёт SHARE-близнеца
-	// того же ключа. Форвард advisory-блокировку не берёт вовсе (снята 2026-08-05,
-	// reconcile/forward.go «LOCK CHOICE»), поэтому контрагента у EXCLUSIVE на этой
-	// стороне нет. Существенно же то, что ни одна xact-блокировка и не могла бы это
-	// закрыть: применение к хранилищу прав у ОБЕИХ сторон — и у выдачи, и у отзыва —
-	// происходит ПОСЛЕ коммита своей транзакции, то есть заведомо вне блокировки.
-	// Значит порядок применения обязан обеспечиваться на уровне применения, а не
-	// транзакции; предмет наблюдаем как кортежи, которых не держит ни одна выдача, и
-	// ведётся отдельной задачей.
+	//	1  advisory-замок выдачи   pg_advisory_xact_lock(hashtext(id)) — против полного прохода, истечения, второго отзыва
+	//	2  строка access_bindings   FOR UPDATE (GetForDeactivation) — против аддитивного форварда
+	//	3  строка access_bindings   CAS RevokeGuarded — уже покрыт шагом 2
+	//	4  дочерние строки и журналы  чтение реестра, строки журналов намерений, смены субъекта, аудита
+	//
+	// Шаг 1 — та же пара ключа, что у полного прохода (AcquireBindingLock): ни один из
+	// названных путей не вклинится между снимком реестра и коммитом. Аддитивный форвард
+	// advisory не берёт (reconcile/forward.go «LOCK CHOICE») и решает «выдача жива»
+	// чтением под `FOR KEY SHARE`, а пишет члена, реестр и строку журнала позже, в своей
+	// транзакции. Применение к прямому факту у обеих сторон идёт В ТОЙ ЖЕ транзакции —
+	// триггером журнала намерений, — поэтому порядок держит строчный замок шага 2: из
+	// режимов строки только `FOR UPDATE` конфликтует с `FOR KEY SHARE`. Без него CAS
+	// (`FOR NO KEY UPDATE`) с форвардом не пересекался, реестр читался до записи
+	// форварда, и прямой факт форварда переживал отзыв (kaname#923). Строк каталога
+	// (`catalog_module`, `catalog_resource`, порядок 2р→2а→4 применителей, kaname#913)
+	// транзакция не берёт, поэтому ребра ожидания с ними нет.
+	//
+	// Замка строки мало: исход снятия решает и ВЕРСИЯ строки журнала — свёртка в
+	// прямой факт снимает факт, лишь если его версия не новее версии строки снятия.
+	// Строка снятия несёт момент своей вставки, а не начало транзакции
+	// (fga_outbox, deleteStamp): иначе снятие, открывшее транзакцию раньше форварда и
+	// получившее строку после его коммита, писало бы строку старше факта, и факт её
+	// переживал. Оба порядка начала транзакций держит
+	// reconcile_deactivation_order_race_integration_test.go.
 	if err := w.AdvisoryXactLock(ctx, string(id)); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	// Read the binding within the writer-tx for the event dimensions.
-	binding, err := w.AccessBindings().Get(ctx, id)
+	// Строка выдачи — под замком снятия (шаг 2), она же даёт измерения событий.
+	binding, err := w.AccessBindingsW().GetForDeactivation(ctx, id)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
@@ -190,49 +201,35 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 	}
 	// SYMMETRIC revoke from the PERSISTED emitted-set (what THIS binding emitted at
 	// grant / last reconcile) — NOT a re-derive from the CURRENT role.
-	// Read AFTER the CAS so the snapshot is taken with the row already REVOKED:
-	// defense-in-depth on top of the advisory lock above, so no ledger row added
-	// while the binding was still ACTIVE can fall outside the delete-set.
+	// Читается ПОСЛЕ замка строки и CAS: форвард, решивший «выдача жива», к этому
+	// моменту зафиксирован, и его записи реестра входят в снимаемый набор; форвард,
+	// пришедший позже, прочитает выдачу REVOKED и писать не станет.
 	stored, err := w.AccessBindings().SelectEmittedTuples(ctx, id)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	// CROSS-BINDING SHARED TUPLES (access-loss fix, mirror of Delete): the ledger is
-	// per-binding while a relation fact is not refcounted, so subtract the tuples
-	// another ACTIVE binding still claims — a soft revoke must not strip access a
-	// sibling ACTIVE binding independently grants (see revoke_set.go).
-	revokeTuples, retained, err := partitionRevokeSet(ctx, w.AccessBindings(), id, stored)
-	if err != nil {
-		return nil, shared.MapRepoErr(err)
-	}
-	if len(retained) > 0 && u.logger != nil {
-		u.logger.Info("access_binding revoke: tuples retained — still granted by another ACTIVE binding",
-			"binding_id", string(id), "retained_count", len(retained), "revoked_count", len(revokeTuples))
-	}
-	// Atomic revoke emit-in-tx (same writer-tx as the status transition). Carries the
-	// SAME cross-binding-filtered set as the post-commit sync removal below.
-	if err := w.AccessBindingsW().EmitRelationDelete(ctx, revokeTuples); err != nil {
+	// Строки снятия — на ВЕСЬ реестр выдачи. Общий кортеж, который держит другая
+	// действующая выдача, свёртка строки не снимает: вопрос о держателях она задаёт
+	// под замком строки факта, после коммита любого, кто держит эту строку
+	// (kaname#919). Выдача к этому моменту уже REVOKED, поэтому свой реестр её факт
+	// не держит.
+	if err := w.AccessBindingsW().EmitRelationDelete(ctx, stored); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
 	// Subject-change outbox (authz-cache invalidation — access removed).
 	// НА КАЖДОГО субъекта привязки, а не на легаси-одиночку: см.
 	// emitSubjectChangeForEverySubject.
-	if err := emitSubjectChangeForEverySubject(ctx, w.AccessBindings().ListSubjects, w.AccessBindingsW().EmitSubjectChangeEvent,
-		binding, "binding_revoke", "binding_delete"); err != nil {
+	subjects, err := bindingSubjectsOf(ctx, w.AccessBindings().ListSubjects, binding)
+	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	// Durable compliance audit event in the SAME writer-tx (ban #10).
-	if err := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
-		EventType:       abrepo.AuditEventTypeRevoked,
-		Actor:           revokeActor,
-		SubjectType:     string(binding.SubjectType),
-		SubjectID:       string(binding.SubjectID),
-		ResourceType:    string(binding.ResourceType),
-		ResourceID:      binding.ResourceID,
-		RoleID:          string(binding.RoleID),
-		BindingID:       string(binding.ID),
-		TenantAccountID: auditTenantAccountID(binding),
-	}); err != nil {
+	if err := emitSubjectChangeFor(ctx, w.AccessBindingsW().EmitSubjectChangeEvent, subjects,
+		"binding_revoke", "binding_delete"); err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
+	// Durable compliance audit event in the SAME writer-tx (ban #10) — на каждого
+	// субъекта, симметрично аудиту создания.
+	if err := revokedAuditFor(ctx, w.AccessBindingsW().EmitAuditEvent, subjects, revokeActor, binding); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
 	if err := w.Commit(ctx); err != nil {

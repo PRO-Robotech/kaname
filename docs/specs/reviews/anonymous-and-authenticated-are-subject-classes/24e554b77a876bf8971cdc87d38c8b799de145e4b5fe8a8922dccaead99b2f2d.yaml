@@ -1,0 +1,171 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: 24e554b77a876bf8971cdc87d38c8b799de145e4b5fe8a8922dccaead99b2f2d
+  revision: 9
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: 94626b576
+  content_commit: d3431156f
+  branch: '856'
+  task: PRO-Robotech/kaname#856
+  related_tasks: [PRO-Robotech/kaname#857, PRO-Robotech/kaname#858, PRO-Robotech/kacho#3274]
+  lines: 1679
+  round: 2
+  round_scope: >-
+    Второй и последний круг дельты S5 (fa-b8): проверка исполнения B1–B6 и M1–M4 записи
+    447e8264… по дельте git diff 94626b576 d3431156f по документу (+231/−124). Вне дельты
+    переоткрытий нет. Новое замечание N1 — о тексте, который внесла сама дельта (строка
+    339 и близнец SC-65, строка 1188).
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc.yaml
+  predecessor_record_note: >-
+    коммит d3431156f правит в записи 447e8264… только блок event (not_performed →
+    performed, адрес комментария kaname#856) — это шаг курьера, разрешённый решением
+    владельца 2026-10-04; вердикт и замечания записи не тронуты.
+  fingerprint_predicate: >-
+    sha256sum <док> в копии tmp/kn-856 @ d3431156f → 24e554b7…99b2f2d (совпало с заданием).
+  measurement_revisions: >-
+    kaname — дерево d3431156f; kacho — git show a95248464 в project/kacho; трекер —
+    gh issue view на 2026-10-17.
+  neighbours_pinned:
+    module-manifest-relation-grant.md: 1be08963319c6703d63b767a814e47346a311c72e74cc0381aff4e87af8e47ba
+    register-resource-checks-the-module-vocabulary.md: e7d64c5e5c5c9430582510fea92a488228e1a936d010b33fc4810e7774d3a3fc
+    composed-model-admits-only-what-it-owns.md: 9f1b5a8546b6803a9895eff59383c7e51fa513685416d251a9efccc3ad77f50d
+    model-composes-at-boot-from-delivered-manifests.md: 5612a1b4612a4e4502b066246a7ad30ef013e7f6aa92105bff6683ee0b0d18ed
+    retired-resource-names-its-successor.md: 966117c09d00c47cc03c1d51c78e6c3f1b51bbdecfc6c10847b064cabb83657c
+    model-generated-from-manifest.md: 3e7daf127fd8ad4e939008c3e66408c5c5e4752aeadbe9a36106ba30983ac94f
+    module-manifest-roles-and-seed-grants.md: fc75beed6e2b2006774ae9156307f3c1f543111801e929aac10e8be1a48fffb5
+  neighbours_note: соседи в дельте не правились — отпечатки те же, что в круге 1 (fa-b7)
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-17T00:30:00+03:00'
+
+summary:
+  scenarios_in_delta: 13
+  scenarios_total: 62
+  round1_closed: 10 of 10 (B1–B6, M1–M4)
+  new_blocking: 1
+  blocking_kinds: [NEGATIVE]
+  constructibility: >-
+    посева нет (изоляция заданием не названа — «не выполнилось»); по коду: SC-65 строится
+    (роль над iam.project — образец role/create_scope_test.go:37; ворота 3 пропускают),
+    SC-70 (г) строится (примечание ресурса переносится в блок: поле notes,
+    internal/manifest/resources.go:416-418; у registries якорь before v_get), SC-72 — та же
+    пара манифестов, что SC-70.
+
+execution_check:
+  - item: B1 FORMAT
+    result: >-
+      закрыт. go test ./internal/check/ -run 'TestAcceptance(Probe|Path)CoordinateResolves'
+      -count=1 -v @d3431156f → PASS обеих (приёмок 73; координат проб 1236, путей 1162),
+      ok 32.8 s. Пробы kacho — с домом PRO-Robotech/kacho:…; будущие пробы — шаблоном -run.
+  - item: B2 CONSTRUCTIBILITY
+    result: >-
+      закрыт. П6 — rol-proj-reg-read (iam.project и registry.registries); SC-65 на ней,
+      близнец — та же роль с целью X, контроль — SC-60; строка производителя называет
+      порядок ворот (ворота 3 раньше ворот класса — create.go, structural_gates.go:128-135).
+  - item: B3 CONSTRUCTIBILITY
+    result: >-
+      закрыт. SC-70 (в) — находка загрузки текстом SC-71 (б); (г) — расхождение одного слова
+      примечания, проходит загрузку, отказ Compose; близнецы (б)/(в), (б)/(г).
+  - item: B4 COVERAGE
+    result: >-
+      закрыт. Р10 — решение диспетчера с четырьмя границами; хеши двух блоков сверены:
+      git show a7a726802:proto/kaname/cloud/iam/v1/fga_model.fga | sed -n 1303,1332p |
+      sha256sum → b115c3c1…b240359, sed -n 1334,1355p → d2aafdbd…7aaa69 — совпали;
+      преемник gh issue view 858 -R PRO-Robotech/kaname → OPEN «снять временный приём прежних
+      блоков registry после выкатки kacho»; SC-72 — конец перехода с близнецом и предикатом
+      снятия; строка соседа model-composes-at-boot… с исключением до #858.
+  - item: B5 PRODUCER
+    result: >-
+      закрыт. kaname#857 — в У4, вводной S5, SC-68, строке производителя, инварианте 7, DoD S5.
+  - item: B6 TWIN
+    result: >-
+      закрыт. SC-68 часть А (класс) и часть Б в мире без выдачи ПЧ: Б0 (без выдач — «нет»),
+      Б1 (собственная выдача на X), Б2 (allInScope — Y и …02/app «да»); каждое отличие — один факт.
+  - item: M1
+    result: >-
+      исполнен по форме (два пути названы), но текстом, который открывает N1.
+  - item: M2
+    result: >-
+      закрыт — инвариант 7 сужен до Check и BatchCheck.
+  - item: M3
+    result: >-
+      закрыт — SC-65 «И (человеку отказа нет)», отличие — вид субъекта.
+  - item: M4
+    result: >-
+      закрыт — П6 и SC-60: регистрирует служба-владелец, usr-A — поле владельца.
+
+blocking:
+  - id: N1
+    kind: NEGATIVE
+    scenarios: [Р9 «Сужение по цели», SC-65 близнец, SC-61]
+    note: >-
+      Дельта (строка 339) записала: системный класс достаёт до потомков объявленного
+      контейнера через public_reader, «правило роли над типом-ребёнком для этого не
+      требуется». Близнец SC-65 (строка 1188) это закрепляет: выдача анониму роли
+      rol-proj-reg-read (правило над iam.project и registry.registries, без
+      registry.repositories) на X принимается. По «Способу» такая выдача пишет public_reader
+      на X. Следствие: выдача классу роли, которая репозитории не покрывает (в том числе
+      rol-reg-get — только get над registry.registries), открывает анониму get и list на
+      каждом репозитории реестра. Это противоречит решению владельца 1 (строка 298:
+      «держатель registries:get репозитории сегодня не читает и читать не начинает») и
+      расширяет поверхность сверх названного в абзаце «Расширение поверхности названо»
+      (ban18-q-security). Отрицания на это нет ни в одном сценарии. Нужно (рекомендация):
+      public_reader пишется, только если правило роли покрывает тип-ребёнок объявленного
+      контейнера, — это симметрично узкому охвату SC-65. Добавить отрицание: выдача анониму
+      rol-reg-get на X материализована → get и list на …01/app → false; близнец — SC-60
+      (роль registry.public.read), отличие — одно: покрывает ли правило роли тип-ребёнок.
+      Строку 339 и «Способ» привести к этому. Если диспетчер решит иначе (класс достаёт до
+      потомков при любой роли чтения), это расширение нужно назвать в абзаце о поверхности
+      и как исключение из решения владельца 1.
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: >-
+    вердикт — CHANGES_REQUESTED; одобрения нет. Третьего круга нет (fa-b8) — спор по N1 решает диспетчер
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 24e554b77a876bf8971cdc87d38c8b799de145e4b5fe8a8922dccaead99b2f2d · ред. 9, круг 2 дельты S5: B1–B6, M1–M4 закрыты; блокирующее N1 NEGATIVE (класс достаёт до потомков без правила роли над типом-ребёнком)"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#856
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+    - 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml
+    - fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e.yaml
+    - ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51.yaml
+    - 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d.yaml
+    - 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c.yaml
+    - 447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc.yaml

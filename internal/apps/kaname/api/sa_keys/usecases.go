@@ -324,8 +324,10 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 		return nil, status.Errorf(codes.InvalidArgument,
 			"ttl_seconds must be <= %d (%s)", int64(u.MaxTTL.Seconds()), u.MaxTTL)
 	}
-	if len(in.Description) > 256 {
-		return nil, status.Error(codes.InvalidArgument, "description too long (max 256)")
+	// Предел описания судит ДОМЕННЫЙ тип — в знаках, как ограничение схемы;
+	// `len()` здесь мерил бы байты и отвергал кириллицу вдвое раньше (kaname#864).
+	if err := domain.Description(in.Description).Validate(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	for i, ts := range in.TrustedSubjects {
 		if err := ts.Validate(); err != nil {

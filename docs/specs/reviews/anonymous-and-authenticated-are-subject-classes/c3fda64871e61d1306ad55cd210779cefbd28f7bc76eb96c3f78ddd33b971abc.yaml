@@ -1,0 +1,171 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: c3fda64871e61d1306ad55cd210779cefbd28f7bc76eb96c3f78ddd33b971abc
+  revision: 11
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа намеренно не правлена.
+  base_commit: 422d1bc6f
+  content_commit: null
+  content_commit_note: правка не закоммичена (изменённый отслеживаемый файл копии tmp/kaname-874-acceptance)
+  branch: acceptance/874-container-target-covers-descendants
+  task: PRO-Robotech/kaname#874
+  related_tasks: [PRO-Robotech/kaname#856, PRO-Robotech/kaname#857, PRO-Robotech/kacho#3274]
+  lines: 1774
+  round: 1
+  round_scope: >-
+    Ревью дельты редакции 11 к одобренной редакции 10 (198db838…, запись
+    198db838….yaml). Судится только git diff HEAD по документу (+63/−22) и следствия этой
+    дельты вне диффа (ban19-review-subject-only). Вне дельты переоткрытий нет.
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> → c3fda648…b971abc (совпало с заданием); git show HEAD:<док> | sha256sum →
+    198db838…6be61aac9 — база дельты и есть одобренная редакция 10.
+  measurement_revisions: >-
+    kaname — git show 422d1bc6f; трекер — gh issue view на 2026-10-17.
+  neighbours_pinned:
+    nested-rule-reaches-descendants-of-a-named-container.md: 492428179d619f7a0accaf2a8d2d99d0cec0ae532654ed9d76a75df82d127062
+  neighbours_note: >-
+    сосед по В4 — редакция 1, не одобрена (запись 49242817….yaml — возврат). Ссылка в
+    редакции 11 (строка 1761) называет редакцию, но не отпечаток (fa-b7).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-17T15:55:00+03:00'
+
+delta_check:
+  - item: Р9 п. 4 и П6 — форма роли
+    result: >-
+      исполнено (строки 319-323, 569-571); id rolb1325b011aa17211d = 'rol'||md5(имя)[:17]
+      перемерен.
+  - item: Р9 У1, «Сужение по цели», «Расширение поверхности»
+    result: >-
+      исполнено и согласовано с соседом Р5 (условия: прямой ребёнок, ровно get и list, без
+      сужения; ветвь выдач вложенное правило классу не применяет). Утверждение о стволе
+      (grantarm.go:45 «Сравнение ТОЧНОЕ», держателя SC-68 Б1 нет) перемерено — верно.
+  - item: близнец SC-73, SC-65 «И»
+    result: исполнено; у SC-65 «И» отличие — один факт.
+  - item: история review, номер редакции в шапке
+    result: исполнено (замечание R1 записи 198db838… закрыто).
+  - item: «Исходы SC-60…73 и DoD S5 не меняются»
+    result: >-
+      не подтверждено — B1 и B2.
+
+blocking:
+  - id: B1
+    kind: SCOPE
+    title: смена формы роли меняет исход SC-68 Б2, а дельта объявляет исходы неизменными
+    finding: >-
+      SC-68 Б2 (строки 1325-1331): `usr-D` с ролью rolb1325b011aa17211d и целью
+      `{"allInScope":{}}` → `v_get` на `…02/app` → true, BatchCheck `[true, true, true,
+      true]`. В редакции 11 роль держит `registry.repositories` только вложенным правилом, а
+      сосед (nested-rule…, «Вне объёма» п. 2, строки 45-49) говорит: на `allInScope` вложенное
+      правило не даёт ничего сверх правил верхнего уровня. Значит `…01/app` и `…02/app` в Б2
+      → false, и Б2 больше не доказывает живость Y и `…02/app`. Раздел «Редакция 11» (строка
+      1762) и история в шапке (строка 73) утверждают обратное.
+    fix: >-
+      Связано с B1 записи соседа 49242817…; выбор — диспетчер. Рекомендация: Б2 — ролью с
+      правилом верхнего уровня над `registry.repositories` и отдельным базовым миром, либо
+      исход `…0x/app → false` и живость Y и `…02/app` другим контролем; поправить строку
+      «исходы не меняются».
+  - id: B2
+    kind: DoD
+    title: держатель SC-68 — шаблон без единой пробы, а дельта сама это измерила
+    finding: >-
+      Дельта (строки 375-376) записала: держателя SC-68 Б1 в дереве нет, `git grep -c
+      'func Test\(Ask\|Batch\)_SC68_' 422d1bc6f` → пусто (перемерено: код 1). DoD S5 (строка
+      1578) и строка производителя SC-68 по-прежнему называют `-run '^Test(Ask|Batch)_SC68_'`
+      и `DoD-proof` задачи #857 доказательством SC-68. Такой прогон даёт `ok` при нуле
+      исполненных тестов. #857 закрыта; её пробы — `TestTarget_*` (DoD-proof @91b216f3c и
+      ранее), Б1 они не утверждают. Сосед (nested-rule…, строки 202-204) говорит: «после
+      редакции 11 SC-68 Б1 держит ND-02», но в редакции 11 этого нет.
+    fix: >-
+      SC-68, строка производителя SC-68, DoD S5: держатели — `^TestTarget_` (сужение, часть
+      А и Б0) и ND-02 соседа (Б1, `…01/app` → true); шаблон без функций убрать.
+
+important:
+  - id: M1
+    kind: FORMAT
+    note: >-
+      строка 574: «Содержимое фикстуры — та редакция манифеста, которую вносит kacho#3274».
+      Сосед (П1) добавляет в ту же фикстуру ещё четыре пробных роли (registry.reader,
+      registry.viewer, registry.reader_get, registry.reader_named), которых kacho#3274 не
+      вносит. Блоков модели это не трогает (SC-70 (б) судит блоки), но утверждение станет
+      ложным: «раздел resources и роль registry.public.read — те, что вносит kacho#3274;
+      прочие роли — пробные».
+  - id: M2
+    kind: TWIN
+    note: >-
+      повтор R2 записи 198db838…: близнец SC-73 (SC-60) отличается ролью в двух фактах
+      (глагол list на registries и вложенное правило). Новая формулировка «один факт» (строки
+      1193-1196) это прячет; сравнивать в пробе SC-73 только v_get.
+  - id: M3
+    kind: FORMAT
+    note: >-
+      повтор R3: DoD S5, строка 1583 — «по SC-60…67 и SC-69», шаблон -run включает 73.
+
+summary:
+  scenarios_total: 63
+  scenarios_in_delta: 3 (SC-65, SC-68 — следствие, SC-73)
+  blocking: 2
+  blocking_kinds: [SCOPE, DoD]
+  constructibility: >-
+    посеяно: мир П6 на 422d1bc6f с фикстурой ПРЕЖНЕЙ формы роли — 14 из 14
+    TestPublicContainerRead_ зелёные (SC-60…67, 69, 70 (а), 73 и три пробы сужения), код 0
+    по этим функциям; прогон — внешний кластер, слот integration, ns снят. Форма редакции 11
+    (`children`) на стволе не строится: схема манифеста закрыта (`additionalProperties:
+    false`), ключ заказан соседом — «не выполнилось», не красное. SC-68 Б2 в форме
+    редакции 11 по семантике соседа даёт `…0x/app → false` (B1) — прочитано, не посеяно.
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: >-
+    вердикт — возврат; одобрение 198db838… относится к редакции 10 и на редакцию 11 не
+    переносится
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 c3fda64871e61d1306ad55cd210779cefbd28f7bc76eb96c3f78ddd33b971abc · ред. 11, дельта к 198db838…: блокирующих 2 (SCOPE — SC-68 Б2, DoD — держатель SC-68)"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#874
+  status: not_performed
+  published: false
+  note: публикует курьер; до публикации блок честно not_performed
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: null
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+    - 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml
+    - fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e.yaml
+    - ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51.yaml
+    - 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d.yaml
+    - 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c.yaml
+    - 447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc.yaml
+    - 24e554b77a876bf8971cdc87d38c8b799de145e4b5fe8a8922dccaead99b2f2d.yaml
+    - 198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9.yaml

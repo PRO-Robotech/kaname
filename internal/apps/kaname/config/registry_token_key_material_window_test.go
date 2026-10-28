@@ -49,6 +49,7 @@ func TestKeyMaterialWindow_MalformedValueRefusesToStart(t *testing.T) {
 			c := config.RegistryTokenConfig{
 				Endpoint:                  "tcp://0.0.0.0:9096",
 				Service:                   "registry.kacho.local",
+				Issuer:                    probeIssuer,
 				KeyMaterialWindowUntilRaw: raw,
 			}
 			_, err := c.KeyMaterialWindowUntil()
@@ -58,7 +59,7 @@ func TestKeyMaterialWindow_MalformedValueRefusesToStart(t *testing.T) {
 			require.Contains(t, err.Error(), "key-material-window-until",
 				"отказ обязан называть НАСТРОЙКУ — иначе оператор ищет вслепую: %v", err)
 
-			require.Error(t, c.Validate(config.ClientTokenConfig{}),
+			require.Error(t, c.Validate(config.ClientTokenConfig{}, noTrustDomain),
 				"страж старта обязан подхватывать тот же отказ: разобранное только на "+
 					"пути запроса означает, что процесс поднялся с настройкой, которой нет")
 		})
@@ -73,13 +74,14 @@ func TestKeyMaterialWindow_DeclaredInstantIsParsedAndUnboundedIsUnexpressible(t 
 	c := config.RegistryTokenConfig{
 		Endpoint:                  "tcp://0.0.0.0:9096",
 		Service:                   "registry.kacho.local",
+		Issuer:                    probeIssuer,
 		KeyMaterialWindowUntilRaw: declared,
 	}
 
 	until, err := c.KeyMaterialWindowUntil()
 	require.NoError(t, err, "годное мгновение обязано приниматься")
 	require.Equal(t, time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC), until.UTC())
-	require.NoError(t, c.Validate(config.ClientTokenConfig{}))
+	require.NoError(t, c.Validate(config.ClientTokenConfig{}, noTrustDomain))
 }
 
 // ИМЯ ENV, обещанное оператору, обязано менять исход загрузки — по образцу

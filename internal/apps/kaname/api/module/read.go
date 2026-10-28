@@ -41,15 +41,21 @@ type liveSource interface {
 	ReadLiveCatalog(ctx context.Context) (catalog.Rows, error)
 }
 
-// GetUseCase — живые строки ОДНОГО модуля.
+// GetUseCase — живые строки ОДНОГО модуля и его применённая редакция.
 type GetUseCase struct {
 	catalogs liveSource
+	// editions — читатель применённой пары редакции (kaname#865). nil ⇒ отказ:
+	// ответ без поля редакции означал бы «модуль не применялся с редакцией», то
+	// есть утверждение, которого никто не проверял.
+	editions AppliedEditionSource
 	// adminCheck — гейт права. nil ⇒ fail-closed (см. authz.go).
 	adminCheck adminChecker
 }
 
 // NewGetUseCase — конструктор.
-func NewGetUseCase(c liveSource) *GetUseCase { return &GetUseCase{catalogs: c} }
+func NewGetUseCase(c liveSource, e AppliedEditionSource) *GetUseCase {
+	return &GetUseCase{catalogs: c, editions: e}
+}
 
 // WithAdminChecker — провязка гейта права. Только композиционный корень.
 func (uc *GetUseCase) WithAdminChecker(c adminChecker) *GetUseCase {
@@ -71,6 +77,10 @@ func (uc *GetUseCase) Execute(ctx context.Context, module string) (*iamv1.Module
 		return nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"читатель каталога не провязан"))
 	}
+	if uc.editions == nil {
+		return nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"читатель применённой редакции модуля не провязан"))
+	}
 	live, err := uc.catalogs.ReadLiveCatalog(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(fmt.Errorf("прочитать живой каталог: %w", err))
@@ -84,10 +94,18 @@ func (uc *GetUseCase) Execute(ctx context.Context, module string) (*iamv1.Module
 			"Module %s not found", module))
 	}
 
+	edition, err := uc.editions.ReadAppliedEdition(ctx, module)
+	if err != nil {
+		return nil, shared.MapRepoErr(fmt.Errorf("прочитать применённую редакцию модуля: %w", err))
+	}
+
 	out := &iamv1.ModuleCatalog{
 		Module:    module,
 		Resources: make([]*iamv1.ModuleResourceRow, 0, len(rows.Resources)),
 		Verbs:     make([]*iamv1.ModuleVerbRow, 0, len(rows.Verbs)),
+		// Пара — ровно вместе: отпечаток без номера ничего не сравнивает (Д5).
+		AppliedRevision: revisionOf(edition),
+		AppliedDigest:   digestOf(edition),
 	}
 	for _, r := range rows.Resources {
 		// Имя ресурса идёт БЕЗ приставки модуля: модуль назван оболочкой один раз.
