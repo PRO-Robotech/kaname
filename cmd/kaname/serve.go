@@ -1003,8 +1003,11 @@ func runServe(cfg config.Config) error {
 	// цепочки (IAM-PNE-1-21 А, самопроверка анонима): они судят ту цепочку,
 	// что уезжает в слушатель, а не собранную рядом копию. Порядок звеньев и
 	// доводы — в шапке `publicListenerChain`.
-	publicUnaryLinks, publicStreamLinks := publicListenerChain(cfg, logger, latency, permRegistry,
+	publicUnaryLinks, publicStreamLinks, err := publicListenerChain(cfg, logger, latency, permRegistry,
 		presentedReader, publicCallerPolicy, addressGate, publicObjectDoor)
+	if err != nil {
+		return fmt.Errorf("цепочка публичного слушателя: %w", err)
+	}
 	grpcSrv := grpcsrv.NewServer(
 		publicServerCreds,
 		grpc.ChainUnaryInterceptor(publicUnaryLinks...),
@@ -2515,15 +2518,24 @@ func publicListenerChain(
 	publicCallerPolicy *authzguard.PublicCallerPolicy,
 	addressGate *authzguard.AddressGate,
 	publicObjectDoor *authzguard.OwnDoor,
-) (publicUnaryLinks []grpc.UnaryServerInterceptor, publicStreamLinks []grpc.StreamServerInterceptor) {
+) (publicUnaryLinks []grpc.UnaryServerInterceptor, publicStreamLinks []grpc.StreamServerInterceptor, err error) {
+	// Звено формы идентификатора строится из ТОЙ ЖЕ двери, которая стоит за
+	// ним: оно читает её карту, и отказ сборки (нет судьи, судья не знает вида
+	// глагола класса) — отказ старта, а не цепочка без звена.
+	publicIDFormLink, err := publicObjectDoor.FormUnary(publicIDForm{})
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// Anti-anonymous guard перед мутирующими RPC: минимальная защита от
 	// анонимного создания Account/Project/AccessBinding/Group/SA/Role
 	// в дополнение к вопросу о доступе через AuthorizeService.
 	//
-	// Порядок: измеритель задержки (оборачивает всё) → recovery → личность вызывающего
-	// (publicIdentityUnary: сертификат, переданная личность от разрешённого
-	// отправителя, затем предъявленное удостоверение) → пер-RPC политика
-	// вызывающего → анти-аноним.
+	// Порядок: измеритель задержки (оборачивает всё) → recovery → обогатитель
+	// отказа → личность вызывающего (publicIdentityUnary: сертификат, переданная
+	// личность от разрешённого отправителя, затем предъявленное удостоверение) →
+	// пер-RPC политика вызывающего → ворота адреса → анти-аноним → форма
+	// идентификатора → дверь.
 	publicUnary := append([]grpc.UnaryServerInterceptor{
 		// Измеритель задержки первым — он оборачивает цепочку целиком, поэтому
 		// длительность и код накрывают ВЕСЬ вызов, включая вопрос о доступе.
@@ -2547,6 +2559,10 @@ func publicListenerChain(
 		publicCallerPolicy.Unary(),
 		addressGate.Unary(),
 		authzguard.AntiAnonymousUnary(logger),
+		// Форма идентификатора — после подлинности (анониму она не отвечает) и
+		// ДО вопроса о праве: ответ на неверную форму не зависит ни от
+		// выданного, ни от того, администратор ли вызывающий (kaname#168).
+		publicIDFormLink,
 		// Дверь — ПОСЛЕДНЕЙ: субъект к этому месту уже назван и уже отсечён,
 		// если он аноним, поэтому вопрос к модели задаётся только о том, кого
 		// есть о чём спрашивать. Обратный порядок тратил бы обращение к модели
@@ -2570,7 +2586,11 @@ func publicListenerChain(
 		// дверью — это различие, которого никто не принимал, и обнаружилось бы
 		// оно первым же стримовым RPC. Соседняя политика провязана на обе полосы
 		// по той же причине.
+		//
+		// Звена формы на этой полосе НЕТ, и это решение, а не пропуск: в классе
+		// формы потоковых глаголов ноль, и проба
+		// `TestIAM_PNE_1_21_A_FormStageHasNoStreamLane` краснеет на первом.
 		publicObjectDoor.Stream(),
 	)
-	return publicUnary, publicStream
+	return publicUnary, publicStream, nil
 }

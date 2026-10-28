@@ -167,8 +167,11 @@ func testPublicChain(t testing.TB, in testPublicChainInputs) grpc.UnaryServerInt
 	if err != nil {
 		t.Fatalf("дверь не собрана — условие пробы не создано: %v", err)
 	}
-	unary, _ := publicChainUnderProbe(fwdCfg(fwdGatewaySAN, fwdVPCSAN), quiet, latency, in.catalog, in.reader,
+	unary, _, err := publicChainUnderProbe(fwdCfg(fwdGatewaySAN, fwdVPCSAN), quiet, latency, in.catalog, in.reader,
 		policy, authzguard.NewAddressGate(chainRevocations{}), door)
+	if err != nil {
+		t.Fatalf("публичная цепочка не собрана сборщиком корня: %v", err)
+	}
 	return chainUnaryServer(unary...)
 }
 
@@ -562,4 +565,57 @@ func formProbeOneWiring(t *testing.T) []string {
 			" — цепочка, которую судит проба, не та, что уезжает в публичный слушатель")
 	}
 	return out
+}
+
+// formProbeStreams — потоковый ли метод: по дескриптору контракта.
+func formProbeStreams(method string) bool {
+	trimmed := strings.TrimPrefix(method, "/")
+	slash := strings.LastIndex(trimmed, "/")
+	desc, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(trimmed[:slash]))
+	if err != nil {
+		return false
+	}
+	sd, ok := desc.(protoreflect.ServiceDescriptor)
+	if !ok {
+		return false
+	}
+	md := sd.Methods().ByName(protoreflect.Name(trimmed[slash+1:]))
+	return md != nil && (md.IsStreamingClient() || md.IsStreamingServer())
+}
+
+// formProbeStreamingVerbs — глаголы класса, идущие потоковой полосой.
+func formProbeStreamingVerbs(class []formProbeVerb, streams func(string) bool) []string {
+	var out []string
+	for _, v := range class {
+		if streams(v.method) {
+			out = append(out, v.method)
+		}
+	}
+	return out
+}
+
+// TestIAM_PNE_1_21_A_FormStageHasNoStreamLane — звено формы стоит только на
+// однократной полосе публичного слушателя (условие KE-8 разбора, исход «Б»).
+// Это верно, пока в классе нет потоковых глаголов; первый такой глагол обязан
+// покраснить пробу, а не пройти мимо звена молча. Вторая половина — инъекция:
+// тот же распознаватель на подставленном «потоковом» глаголе называет его.
+func TestIAM_PNE_1_21_A_FormStageHasNoStreamLane(t *testing.T) {
+	class, _ := formProbeClass(t)
+	if len(class) == 0 {
+		t.Fatal("в классе ноль глаголов — обход беспредметен, это не зелёное")
+	}
+	streaming := formProbeStreamingVerbs(class, formProbeStreams)
+	t.Logf("перепись полосы потока: глаголов класса %d · потоковых среди них %d", len(class), len(streaming))
+	if len(streaming) > 0 {
+		t.Errorf("глаголы класса формы идут потоковой полосой, где звена формы нет (%d): %s — "+
+			"провяжите звено формы на publicStream той же семантикой, что дверь",
+			len(streaming), strings.Join(streaming, ", "))
+	}
+	t.Run("инъекция: потоковый глагол класса назван", func(t *testing.T) {
+		victim := class[0].method
+		got := formProbeStreamingVerbs(class, func(m string) bool { return m == victim })
+		if len(got) != 1 || got[0] != victim {
+			t.Fatalf("распознаватель не назвал подставленный потоковый глагол %s: %v", victim, got)
+		}
+	})
 }

@@ -308,7 +308,7 @@ func NewOwnDoor(opts OwnDoorOptions) (*OwnDoor, error) {
 		Logger:              logger,
 		CheckTimeout:        opts.CheckTimeout,
 		DenyRateLimitPerSec: opts.DenyRateLimitPerSec,
-	}), bypass: bypass}, nil
+	}), bypass: bypass, full: full}, nil
 }
 
 // OwnDoor — собственная дверь iam вместе с поправкой на вопросы о правах.
@@ -324,6 +324,11 @@ type OwnDoor struct {
 	// раз: сравнение по срезу на каждом запросе было бы линейным поиском на
 	// горячем пути.
 	bypass map[string]authz.ObjectExtractor
+	// full — карта, которую спрашивает звено (с якорем роли). Её же читает
+	// звено формы (`FormUnary`): вид и идентификатор, о которых судит форма,
+	// обязаны быть ровно теми, о которых дверь спросила бы модель секундой
+	// позже.
+	full authz.RPCMap
 }
 
 // callerNamed — назван ли вызывающий арендатором.

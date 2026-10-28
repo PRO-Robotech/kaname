@@ -3,7 +3,8 @@
 
 package authzguard
 
-// own_door_form.go — класс глаголов, у которых дверь спрашивает модель о
+// own_door_form.go — звено формы идентификатора перед собственной дверью iam и
+// класс глаголов, которые оно судит: те, у кого дверь спрашивает модель о
 // КОНКРЕТНОМ объекте, имя которого принесло поле запроса (kaname#168, приёмка
 // `non-empty-project-is-not-deleted.md` §11).
 //
@@ -18,10 +19,15 @@ package authzguard
 // перечня глаголов и без чтения каталога.
 
 import (
+	"context"
+	"fmt"
 	"sort"
+	"strings"
 
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/PRO-Robotech/corelib/authz"
 	"github.com/PRO-Robotech/corelib/authz/catalogderive"
 )
 
@@ -70,4 +76,124 @@ func ObjectScopedRPCs() []ObjectScopedRPC {
 		})
 	sort.Slice(out, func(i, j int) bool { return out[i].Method < out[j].Method })
 	return out
+}
+
+// IDFormJudge — порт формы идентификатора: судья, которым обработчики службы
+// отвечают на свой идентификатор (`shared.ValidateResourceID`).
+//
+// Портом, а не импортом, потому что форма живёт в прикладном пакете с
+// репозиториями, а звено — в транспортном страже: прямой импорт развернул бы
+// направление зависимостей, и одно ребро обратно дало бы цикл. Судью приносит
+// композиционный корень (`cmd/kaname`, `publicIDForm`).
+type IDFormJudge interface {
+	// Judges — знает ли судья форму идентификатора объекта этого вида.
+	Judges(objectType string) bool
+	// Check — nil на годной форме; иначе отказ `INVALID_ARGUMENT` с текстом,
+	// которым на тот же вход ответил бы обработчик.
+	Check(objectType, objectID string) error
+}
+
+// FormUnary — звено формы идентификатора публичного слушателя (kaname#168).
+//
+// # Место в цепочке
+//
+// После политики вызывающего, ворот адреса и анти-анонимного рубежа, до
+// двери (`Unary`). После подлинности — потому что анониму форма не отвечает,
+// как не отвечает и край платформы. До вопроса о праве — потому что иначе
+// ответ на один и тот же негодный ввод зависел бы от выданного: распорядитель
+// получал `403`, администратор облака — `400` от обработчика, а у шести `Get`
+// отказ и вовсе переодевался сокрытием существования в `404`. Строка неверной
+// формы не существует ни при каком состоянии базы, поэтому ответ о форме
+// оракула существования не открывает.
+//
+// # Что судится — и что нет
+//
+// Звено отвечает ТОЛЬКО там, где дверь спросила бы модель об объекте:
+//   - глагол — из класса `ObjectScopedRPCs`; вид объекта у него выбирает не
+//     запрос, а аннотация;
+//   - вызывающий назван (`callerNamed`, тот же предикат, что у двери) и вопрос
+//     не уходит своему решателю (`questionGoesToItsOwnDecider` — тот же метод);
+//   - извлечение удалось и идентификатор не пуст. Пустое — не неверная форма, а
+//     отсутствие: его канон — другой текст, а у `RoleService/Create` и
+//     `AuthorizeService/BatchCheck` пустое законно.
+//
+// Во всех прочих случаях звено пропускает запрос к двери без изменений. Сверх
+// судьи формы оно не проверяет ничего: алфавит внутри правильной длины и
+// приставки — вне правки (§11.4 приёмки).
+//
+// Вид и идентификатор берутся извлекателем ТОЙ ЖЕ карты, что у двери, — с
+// якорем роли: у `RoleService/Create` судится форма той области, о которой
+// спросила бы дверь (канонический ярус, затем легаси-поля).
+//
+// # Побайтовость с обработчиком — на одноякорном входе
+//
+// Текст отказа — текст судьи, тот же, что дал бы обработчик. Равенство верно,
+// пока запрос несёт ровно одно поле области и других дефектов: при двух
+// якорях `RoleService/Create` обработчик ответил бы «exactly one of…», а при
+// другом дефекте тела — о нём, раньше формы. Звено отвечает о форме первым,
+// как того требует канон («неверная форма — первым шагом глагола»).
+//
+// # Наблюдаемость
+//
+// Отказ формы журнал не пишет и в бюджет отказов двери (её `DenyRateLimitPerSec`
+// и счёт отказов) не входит: вопрос модели не задаётся, отказ дешёв. Виден он
+// в серии измерителя задержки `handled{grpc_code="InvalidArgument"}` —
+// неотличимо от отказа обработчика; отдельной серии это изменение не заводит.
+//
+// # Потоковой полосы у звена нет
+//
+// Публичных потоковых RPC в классе ноль, и звено стоит только на однократной
+// полосе. Это не умолчание: проба `TestIAM_PNE_1_21_A_FormStageHasNoStreamLane`
+// краснеет на первом потоковом глаголе класса.
+//
+// # Отказ сборки — отказ старта
+//
+// Судьи нет, класс пуст, глагол класса не выводится в карту двери либо судья
+// не знает его вида — звено не собирается. Тихое «не проверять» оставило бы
+// цепочку на вид провязанной.
+func (d *OwnDoor) FormUnary(judge IDFormJudge) (grpc.UnaryServerInterceptor, error) {
+	if judge == nil {
+		return nil, fmt.Errorf("authzguard: звено формы идентификатора не собирается — судья формы не принесён")
+	}
+	class := ObjectScopedRPCs()
+	if len(class) == 0 {
+		return nil, fmt.Errorf("authzguard: звено формы идентификатора не собирается — класс глаголов пуст")
+	}
+	extractors := make(map[string]authz.ObjectExtractor, len(class))
+	for _, rpc := range class {
+		entry, mapped := d.full[rpc.Method]
+		if !mapped || entry.Extract == nil {
+			return nil, fmt.Errorf("authzguard: звено формы идентификатора не собирается — "+
+				"глагола %s нет в карте двери", rpc.Method)
+		}
+		if !judge.Judges(rpc.ObjectType) {
+			return nil, fmt.Errorf("authzguard: звено формы идентификатора не собирается — "+
+				"судья не знает формы вида %q (глагол %s)", rpc.ObjectType, rpc.Method)
+		}
+		extractors[rpc.Method] = entry.Extract
+	}
+	// Якорь роли называет область аккаунта либо проекта, а не только вид из
+	// аннотации: оба вида судья обязан знать так же.
+	for _, objectType := range roleAnchorObjectTypes {
+		if !judge.Judges(objectType) {
+			return nil, fmt.Errorf("authzguard: звено формы идентификатора не собирается — "+
+				"судья не знает формы вида %q (якорь роли)", objectType)
+		}
+	}
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		extract, judged := extractors[info.FullMethod]
+		if !judged || !callerNamed(ctx) || d.questionGoesToItsOwnDecider(ctx, info.FullMethod, req) {
+			return handler(ctx, req)
+		}
+		objectType, objectID, err := extract(req)
+		if err != nil || strings.TrimSpace(objectID) == "" {
+			// Извлечение отказало либо поля нет — судить нечего; вопрос
+			// остаётся двери и обработчику, как и до звена.
+			return handler(ctx, req)
+		}
+		if err := judge.Check(objectType, objectID); err != nil {
+			return nil, err
+		}
+		return handler(ctx, req)
+	}, nil
 }
