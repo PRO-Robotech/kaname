@@ -170,6 +170,10 @@ func TestSubjectCutoff_KN_SCL_10_DoorStaysVisiblyTheSameUnderTheMirror(t *testin
 	}
 }
 
+// cutoffRoundMarks — знаки раундов KN-SCL-11: алфавит генератора, в нём нет
+// знаков, которые свёртка Р6а сводит друг к другу.
+const cutoffRoundMarks = "abcdefghjkmnpqrstvwxyz"
+
 // KN-SCL-11 — дверь и блокировка одного человека параллельно.
 //
 // Форма — `concurrent-integration-test`: 20 раундов, в каждом две горутины на
@@ -183,7 +187,10 @@ func TestSubjectCutoff_KN_SCL_11_DoorAndBlockRaceOnOnePerson(t *testing.T) {
 	const rounds = 20
 	doorWon, blockWon := 0, 0
 	for i := 0; i < rounds; i++ {
-		u := cutoffPerson(t, ctx, pool, "scl11r"+string(rune('a'+i)))
+		// Знак раунда — из алфавита генератора, без `i`, `l`, `o`, `u`: свёртка
+		// правила Р6а (kaname#1052) сводит `i` и `l` к одной строке, и аккаунт
+		// раунда `l` занял бы строку аккаунта раунда `i`.
+		u := cutoffPerson(t, ctx, pool, "scl11r"+string(cutoffRoundMarks[i]))
 		var (
 			wg              sync.WaitGroup
 			doorErr, blkErr error
