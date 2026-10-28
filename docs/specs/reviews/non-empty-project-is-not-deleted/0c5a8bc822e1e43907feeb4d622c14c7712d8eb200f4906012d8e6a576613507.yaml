@@ -35,15 +35,26 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-29'
 
 event:
-  type: none
-  status: not_performed
-  published: false
-  publication_expected_from_orchestrator: true
-  body: "acceptance-reviewer · APPROVED · sha256 0c5a8bc822e1e43907feeb4d622c14c7712d8eb200f4906012d8e6a576613507"
-  rationale: >-
-    Роль полномочия не даёт (change-graph.md §3): одобрение действует с момента
-    внешнего события. Событие публикует курьер (git-operator) и тем же заходом
-    приводит этот блок к факту — status: performed и адрес события.
+  type: issue_comment
+  target: PRO-Robotech/kaname#168
+  status: performed
+  published: true
+  database_id: 6481608368
+  node_id: IC_kwDOUO26pM8AAAABglV-sA
+  url: https://github.com/PRO-Robotech/kaname/issues/168#issuecomment-6481608368
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6481608368
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: "2026-10-28T21:53:26Z"
+  body: acceptance-reviewer · APPROVED · sha256 0c5a8bc822e1e43907feeb4d622c14c7712d8eb200f4906012d8e6a576613507
+  body_sha256: f46b93c9103c58ab75898ab9819bbbf787564b3003fc09d8f2d96623e1be9fae
+  subject_sha256: 0c5a8bc822e1e43907feeb4d622c14c7712d8eb200f4906012d8e6a576613507
+  subject_revision_commit: a45e98eefbc6adc355ff1f0052f362876ff79981
+  subject_revision_on_origin: false
+  verdict: APPROVED
+  publication_mode: 'git-operator: gh api POST repos/PRO-Robotech/kaname/issues/168/comments'
+  publication_note: Ревизия документа закоммичена локально в ветку и на origin ещё не отправлена (по заданию ветку отправляет исполнитель кода); тело события несёт отпечаток содержимого, сверяемый по файлу на любой ревизии.
 
 attribution:
   reviewer_kind: claude_agent
