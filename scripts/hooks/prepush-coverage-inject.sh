@@ -33,13 +33,29 @@
 #     обхода на синтетическом модуле, пара одно-фактных близнецов: файл Go
 #     отформатирован — отправка проходит, «исполнено 6 из 6»; тот же файл без
 #     отступа — отказ, красная ровно группа gofmt, файл назван.
+#  D. СЛУЖЕБНЫЙ РЕЖИМ НЕДОСТИЖИМ ОТПРАВКОЙ (SEC-942-k1-1). Имя удалённого git
+#     подаёт хуку первым доводом, и выбирает его отправляющий. Настоящий хук,
+#     настоящий `git push -- <имя> …` на удалённый, названный доводом служебного
+#     режима: «--kaname-prepush-coverage» — проверки исполнены (6 из 6, таблицы
+#     ведомости нет); «--kaname-prepush-in-memory-scope» — то же, и потолок не
+#     объявлен выставленным, когда области нет.
+#
+# Судья подписи хука (tools/clagate) собирается из исходников ЭТОГО дерева:
+# переходник `go` песочниц уводит сборку судьи в корень дерева (форма соседей —
+# prepush-added-files-inject.sh, prepush-budget-inject.sh), а ведомость
+# `cla-ledger.yaml` песочницы объявляет её учётную запись своей. Оси от этого не
+# слабеют: судья настоящий и судит каждую отправку опыта.
 #
 # --self-test добавляет инъекции на копиях настоящих входов, по одному факту:
 #  A1 в копию ci.yml дописан шаг с `run:` без строки ведомости — красное, ключ назван;
 #  A2 законный близнец — дописан шаг `uses:` без `run:` — молчание;
 #  A3 в копию хука дописана строка ведомости без шага — красное, ключ назван;
 #  B1 копия хука выходит на обходе молча (`exit 0` до перечня) — красное при коде 0;
-#  B2 копия хука печатает лишь две строки перечня — красное, недостающая метка названа.
+#  B2 копия хука печатает лишь две строки перечня — красное, недостающая метка названа;
+#  D1 копия хука узнаёт режим ведомости по одному тексту первого довода — красное:
+#     отправка на удалённый с таким именем ушла в режим ведомости без проверок;
+#  D2 копия хука узнаёт перезапуск в области по одному тексту первого довода —
+#     красное: напечатан потолок памяти, которого нет.
 # Контроль (настоящий хук, настоящий ci.yml) обязан быть зелёным в том же прогоне.
 #
 # Исходы: 0 — всё исполнено и сошлось; 1 — находка либо инъекция не поймана;
@@ -164,9 +180,35 @@ mkdir -p "$stub"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$stub/systemd-run"
 chmod +x "$stub/systemd-run"
 
+# Судья подписи — НАСТОЯЩИЙ (kaname#459): хук до обхода собирает его
+# `go build ./tools/clagate/cmd/clagate`, а исходников судьи в песочнице нет.
+# Переходник уводит в корень ЭТОГО дерева ровно эту сборку, без VCS-отметки;
+# прочие вызовы go идут настоящему go как есть. Нет go — песочницы не собрать.
+REAL_GO="$(command -v go 2>/dev/null || true)"
+if [ -n "$REAL_GO" ]; then
+    [ -d "$ROOT/tools/clagate/cmd/clagate" ] || { echo "prepush-coverage-inject: НЕ ИСПОЛНЯЛОСЬ — нет $ROOT/tools/clagate/cmd/clagate" >&2; exit 2; }
+    cat > "$stub/go" <<GO
+#!/usr/bin/env bash
+case " \$* " in
+    *" ./tools/clagate/cmd/clagate "*)
+        cd '$ROOT' || exit 97
+        export GOFLAGS="\${GOFLAGS:+\$GOFLAGS }-buildvcs=false" ;;
+esac
+exec '$REAL_GO' "\$@"
+GO
+    chmod +x "$stub/go"
+fi
+
+# sandbox_ledger <каталог> — ведомость подписи песочницы: её учётная запись своя.
+sandbox_ledger() {
+    printf 'scope:\n  - .\nowners:\n  - email: probe@example.invalid\n    note: корневая учётная запись песочницы — подпись опыта\nsignatories: []\nwaivers: []\n' \
+        > "$1/cla-ledger.yaml"
+}
+
 # bypass_case <имя> <хук> — выставляет out, rc, pushed.
 bypass_case() {
     local d="$work/$1"
+    [ -n "$REAL_GO" ] || return 1
     mkdir -p "$d/scripts/hooks" || return 1
     cp "$2" "$d/scripts/hooks/pre-push" || return 1
     local f
@@ -178,6 +220,7 @@ bypass_case() {
     # пережившие предмет — отказ пришёл бы от соседа, а не от обхода.
     chmod +x "$d/scripts/hooks/"*
     echo probe > "$d/README.txt"
+    sandbox_ledger "$d"
     git -C "$d" init -q . && git -C "$d" add -A && git -C "$d" commit -q -m "#1 фикстура опыта" || return 1
     git init --bare -q "$d.git" && git -C "$d" remote add origin "$d.git" || return 1
     ( cd "$d" && bash scripts/hooks/install.sh install ) >/dev/null 2>&1 || return 1
@@ -233,7 +276,7 @@ esac
 
 echo "── ось B: обход громок — по тексту вывода настоящего хука"
 if ! bypass_case control "$HOOK"; then
-    void "песочница контроля не собрана"
+    void "песочница контроля не собрана$([ -n "$REAL_GO" ] || echo ' — нет go: судью подписи хука не собрать')"
 else
     res="$(judge_bypass "$HOOK")"; brc=$?
     printf '%s\n' "$res" | sed 's/^/     /'
@@ -246,12 +289,13 @@ fi
 
 # ── ОСЬ C: НЕОТФОРМАТИРОВАННОЕ ОТВЕРГНУТО, БЛИЗНЕЦ ПРОХОДИТ ─────────────────
 #
-# module_case <имя> <тело fmt.go> — синтетический модуль с настоящим хуком и
-# всеми его группами; отправка без обхода. Выставляет out, rc.
+# module_case <имя> <тело fmt.go> [<хук> [<имя удалённого>]] — синтетический
+# модуль с хуком (по умолчанию настоящим) и всеми его группами; отправка без
+# обхода настоящим `git push -- <имя> …` (по умолчанию origin). Выставляет out, rc.
 module_case() {
-    local d="$work/$1" f
+    local d="$work/$1" f hook="${3:-$HOOK}" rname="${4:-origin}"
     mkdir -p "$d/scripts/hooks" "$d/.github/scripts" || return 1
-    cp "$HOOK" "$d/scripts/hooks/pre-push" || return 1
+    cp "$hook" "$d/scripts/hooks/pre-push" || return 1
     for f in install.sh prepush-rule.sh branch-rule.sh prepush-added-files.sh prepush-classify.sh; do
         cp "$ROOT/scripts/hooks/$f" "$d/scripts/hooks/$f" || return 1
     done
@@ -261,10 +305,11 @@ module_case() {
     printf '%s\n' "$2" > "$d/fmt.go"
     printf 'package fmtprobe\n\nimport "testing"\n\nfunc TestFmtProbe(t *testing.T) {\n\tif Probe() != 1 {\n\t\tt.Fatal("Probe")\n\t}\n}\n' > "$d/fmt_test.go"
     printf '.PHONY: vet audit-list-filter\nvet:\n\t@go vet ./...\naudit-list-filter:\n\t@echo ok\n' > "$d/Makefile"
+    sandbox_ledger "$d"
     git -C "$d" init -q . && git -C "$d" add -A && git -C "$d" commit -q -m "#1 фикстура опыта" || return 1
-    git init --bare -q "$d.git" && git -C "$d" remote add origin "$d.git" || return 1
+    git init --bare -q "$d.git" && git -C "$d" remote add -- "$rname" "$d.git" || return 1
     ( cd "$d" && bash scripts/hooks/install.sh install ) >/dev/null 2>&1 || return 1
-    out="$(cd "$d" && PATH="$stub:$PATH" git push origin HEAD:refs/heads/1 2>&1)"
+    out="$(cd "$d" && PATH="$stub:$PATH" git push -- "$rname" HEAD:refs/heads/1 2>&1)"
     rc=$?
     return 0
 }
@@ -291,6 +336,62 @@ else
             bad "инъекция C НЕ ПОЙМАНА как ждали (код $rc): $(printf '%s' "$out" | grep -E 'красные|требуется|ОТКАЗ|зелёное' | head -4)"
         fi
     else void "песочница инъекции C не собрана"; fi
+fi
+
+# ── ОСЬ D: СЛУЖЕБНЫЙ РЕЖИМ НЕДОСТИЖИМ ОТПРАВКОЙ (SEC-942-k1-1) ───────────────
+#
+# judge_gitform <coverage|scope> — по выводу out и коду rc отправки настоящим
+# git на удалённый, названный доводом служебного режима; печатает недостачи
+# строкой «НЕТ …» либо «ЛОЖЬ …», код 0 — проверки исполнены и о потолке не солгано.
+judge_gitform() {
+    local miss=0
+    if ! printf '%s\n' "$out" | grep -qE '^(pre-push:|группа	)'; then
+        echo "ПРЕДПОСЫЛКА: хук не исполнялся — ни строки «pre-push:», ни строки режима ведомости"; return 2
+    fi
+    if printf '%s\n' "$out" | grep -qE '^(группа|шаг)	'; then
+        echo "ЛОЖЬ: отправка ушла в режим ведомости — стражи и проверки не исполнены (код $rc)"; miss=$((miss + 1))
+    fi
+    [ "$rc" -eq 0 ] || { echo "НЕТ кода 0: код $rc — $(printf '%s\n' "$out" | grep -E 'красные|ОТКАЗ|НЕ ВЫПОЛНИЛОСЬ' | head -3 | tr '\n' ';')"; miss=$((miss + 1)); }
+    printf '%s' "$out" | grep -q 'зелёное — исполнено 6 из 6 групп' \
+        || { echo "НЕТ строки «зелёное — исполнено 6 из 6 групп»: проверки не исполнены"; miss=$((miss + 1)); }
+    if [ "$1" = scope ]; then
+        # Переходник systemd-run песочницы отказывает: области нет, и хук обязан
+        # сказать «не выставлен», а не напечатать потолок.
+        if printf '%s' "$out" | grep -q 'pre-push: память — MemoryMax='; then
+            echo "ЛОЖЬ: напечатан потолок памяти, а области нет (systemd-run песочницы отказывает)"; miss=$((miss + 1))
+        fi
+        printf '%s' "$out" | grep -q 'pre-push: память — потолок памяти не выставлен' \
+            || { echo "НЕТ строки «потолок памяти не выставлен»"; miss=$((miss + 1)); }
+    fi
+    echo "недостач: $miss"
+    [ "$miss" -eq 0 ]
+}
+
+# gitform_case <имя> <coverage|scope> <хук> — выставляет res и jrc.
+FMT_OK="$(printf 'package fmtprobe\n\nfunc Probe() int {\n\treturn 1\n}')"
+gitform_case() {
+    local rname='--kaname-prepush-coverage'
+    [ "$2" = scope ] && rname='--kaname-prepush-in-memory-scope'
+    module_case "$1" "$FMT_OK" "$3" "$rname" || return 1
+    res="$(judge_gitform "$2")"; jrc=$?
+    return 0
+}
+
+echo "── ось D: служебный режим хука недостижим отправкой на удалённый с таким именем"
+if [ -n "$c_missing" ]; then
+    void "ось D (режим ведомости) не исполнялась — нет в PATH:$c_missing"
+    void "ось D (область памяти) не исполнялась — нет в PATH:$c_missing"
+else
+    for mode in coverage scope; do
+        if gitform_case "gitform-$mode" "$mode" "$HOOK"; then
+            printf '%s\n' "$res" | sed 's/^/     /'
+            case "$jrc" in
+                0) ok "D/$mode: отправка на удалённый с именем служебного довода — проверки исполнены (6 из 6)$([ "$mode" = scope ] && echo ', потолок не объявлен ложно')" ;;
+                1) bad "D/$mode: служебный режим достижим отправкой (недостачи выше)" ;;
+                *) void "D/$mode не исполнялась: $(printf '%s' "$res" | tail -1)" ;;
+            esac
+        else void "песочница D/$mode не собрана"; fi
+    done
 fi
 
 if [ "$SELF_TEST" -eq 1 ]; then
@@ -352,6 +453,26 @@ PY
             res="$(judge_bypass "$work/hook-b2")"; expect_red B2 $? "$res" "НЕТ в перечне: proto — buf lint"
         else void "песочница B2 не собрана"; fi
     else void "инъекция B2 не легла в копию хука"; fi
+
+    # D1, D2 — прежняя форма признака служебного режима: один текст первого
+    # довода, без числа доводов. Каждая инъекция роняет ровно свой признак.
+    echo "── D1: режим ведомости узнаётся по одному тексту первого довода"
+    cp "$HOOK" "$work/hook-d1"
+    sed -i "s/^if \[ \"\$#\" -eq 1 \] && \[ \"\$1\" = '--kaname-prepush-coverage' \]; then\$/if [ \"\${1:-}\" = '--kaname-prepush-coverage' ]; then/" "$work/hook-d1"
+    if grep -q "^if \[ \"\${1:-}\" = '--kaname-prepush-coverage' \]; then\$" "$work/hook-d1"; then
+        if [ -n "$c_missing" ]; then void "D1 не исполнялась — нет в PATH:$c_missing"
+        elif gitform_case d1 coverage "$work/hook-d1"; then expect_red D1 "$jrc" "$res" "ЛОЖЬ: отправка ушла в режим ведомости"
+        else void "песочница D1 не собрана"; fi
+    else void "инъекция D1 не легла в копию хука"; fi
+
+    echo "── D2: перезапуск в области узнаётся по одному тексту первого довода"
+    cp "$HOOK" "$work/hook-d2"
+    sed -i 's/^if \[ "\$#" -eq 3 \] && \[ "\$1" = "\$SCOPE_ARG" \]; then$/if [ "${1:-}" = "$SCOPE_ARG" ]; then/' "$work/hook-d2"
+    if grep -q '^if \[ "${1:-}" = "\$SCOPE_ARG" \]; then$' "$work/hook-d2"; then
+        if [ -n "$c_missing" ]; then void "D2 не исполнялась — нет в PATH:$c_missing"
+        elif gitform_case d2 scope "$work/hook-d2"; then expect_red D2 "$jrc" "$res" "ЛОЖЬ: напечатан потолок памяти"
+        else void "песочница D2 не собрана"; fi
+    else void "инъекция D2 не легла в копию хука"; fi
 fi
 
 echo
@@ -359,7 +480,7 @@ echo "=== prepush-coverage-inject: перепись ==="
 echo "утверждений исполнено : $checks"
 echo "из них не сошлось     : $failed"
 echo "условие не создано    : $unmet  (в зачёт прохода НЕ идёт)"
-want=4; [ "$SELF_TEST" -eq 1 ] && want=10
+want=6; [ "$SELF_TEST" -eq 1 ] && want=14
 echo "утверждений объявлено : $want"
 if [ "$failed" -gt 0 ]; then
     echo "ОТКАЗ: перечень непроверенного хука разошёлся с конвейером либо обход молчит." >&2; exit 1
