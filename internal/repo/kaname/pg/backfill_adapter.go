@@ -3,19 +3,18 @@
 
 package pg
 
-// backfill_adapter.go — pgx adapter for the
-// seed.BackfillStore + seed.VerifyStore ports (Clean Architecture: the backfill
-// runner + verify-gate use-cases depend only on those ports; this is the only place
-// that touches pgx for them).
+// backfill_adapter.go — pgx-адаптер портов seed.BackfillStore и seed.VerifyStore
+// (чистая архитектура: подмётка и страж сверки зависят только от этих портов, и
+// это единственное место, где они касаются pgx).
 //
-// The backfill sweep (seed.BackfillRunner) lists active bindings in chunks and
-// reconciles each through the EXISTING reconcile use-case (its own writer-tx +
-// per-binding advisory lock) — so this adapter holds NO reconcile SQL; it owns only
-// the singleton-lock + chunked listing + the verify-gate reads/forward-smoke seed.
+// Подмётка (seed.BackfillRunner) перечисляет активные выдачи порциями и сводит
+// каждую СУЩЕСТВУЮЩИМ use-case сведения (своя пишущая транзакция и
+// рекомендательная блокировка на выдачу), поэтому SQL сведения здесь нет. Адаптер
+// держит блокировку-одиночку, порционный перечень и ЧТЕНИЯ стража сверки; в
+// таблицы он ничего не пишет — дымовой посев зеркала снят (#148).
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -207,66 +206,6 @@ func (a *BackfillAdapter) ListOwnerBindingsMissingMembers(ctx context.Context) (
 	return out, rows.Err()
 }
 
-// SeedSmokeMirrorObject creates a synthetic resource_mirror row (project/account
-// parented + labels) for the forward-smoke (verify-gate). A now() source_version
-// wins any monotonic-version guard.
-func (a *BackfillAdapter) SeedSmokeMirrorObject(ctx context.Context, objectType, objectID, parentProject, parentAccount string, labels map[string]string) error {
-	labelsJSON, err := json.Marshal(labels)
-	if err != nil {
-		return fmt.Errorf("backfill: marshal smoke labels: %w", err)
-	}
-	if len(labels) == 0 {
-		labelsJSON = []byte("{}")
-	}
-	// Условие каталога — то же, каким его спрашивает эталонная полоса
-	// (`resource_mirror.UpsertTx`). Дымовая проба кладёт строку в БОЕВУЮ таблицу
-	// поднятого кластера, а не в свою: тип, снятый из каталога, производитель бы
-	// отверг, и обойти его здесь значило бы записать то, что продукт не
-	// принимает. Инвариант, выраженный в одном операторе из нескольких, — это
-	// инвариант, которого нет.
-	//
-	// Явные приведения обязательны: в списке `SELECT` тип параметра не выводится
-	// из колонки назначения, как он выводился в форме `VALUES`.
-	tag, err := a.pool.Exec(ctx,
-		`INSERT INTO kaname.resource_mirror
-		   (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		 SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, now(), now()
-		  WHERE EXISTS (
-		    SELECT 1 FROM kaname.catalog_resource WHERE dotted = $1 AND live
-		  )
-		 ON CONFLICT (object_type, object_id) DO UPDATE
-		    SET parent_project_id = EXCLUDED.parent_project_id,
-		        parent_account_id = EXCLUDED.parent_account_id,
-		        labels            = EXCLUDED.labels,
-		        source_version    = now(),
-		        updated_at        = now()`,
-		objectType, objectID, parentProject, parentAccount, string(labelsJSON))
-	if err != nil {
-		return fmt.Errorf("backfill: seed smoke mirror object %s:%s: %w", objectType, objectID, err)
-	}
-	// Ноль строк здесь означает РОВНО «тип не живой»: ветка `DO UPDATE` условия
-	// не несёт, поэтому на живом типе она применяется всегда. Отказ НАЗЫВАЕТ
-	// причину: без него дымовая проба сказала бы «объект не материализовался» —
-	// то есть обвинила бы прямой путь в том, чего он не делал.
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("backfill: seed smoke mirror object %s:%s: resource type %q "+
-			"is not a live entry of the platform resource catalog",
-			objectType, objectID, objectType)
-	}
-	return nil
-}
-
-// RemoveSmokeMirrorObject removes the synthetic forward-smoke mirror row.
-func (a *BackfillAdapter) RemoveSmokeMirrorObject(ctx context.Context, objectType, objectID string) error {
-	_, err := a.pool.Exec(ctx,
-		`DELETE FROM kaname.resource_mirror WHERE object_type = $1 AND object_id = $2`,
-		objectType, objectID)
-	if err != nil {
-		return fmt.Errorf("backfill: remove smoke mirror object %s:%s: %w", objectType, objectID, err)
-	}
-	return nil
-}
-
 // ListActiveBindingRelationChecks returns, for every ACTIVE binding, the per-object
 // v_* read-enforcement tuples (v_get / v_list) the relation-satisfies-action gate
 // must Check against real FGA. These are the cutover-critical relations: the
@@ -299,17 +238,4 @@ func (a *BackfillAdapter) ListActiveBindingRelationChecks(ctx context.Context) (
 		out = append(out, c)
 	}
 	return out, rows.Err()
-}
-
-// LedgerHasObject reports whether the binding's ledger records ANY tuple on the
-// given fga-object (forward-smoke success check).
-func (a *BackfillAdapter) LedgerHasObject(ctx context.Context, bindingID domain.AccessBindingID, fgaObject string) (bool, error) {
-	var n int
-	if err := a.pool.QueryRow(ctx,
-		`SELECT count(*) FROM kaname.access_binding_emitted_tuples
-		  WHERE binding_id = $1 AND object = $2`,
-		string(bindingID), fgaObject).Scan(&n); err != nil {
-		return false, fmt.Errorf("backfill: ledger has object %s for binding %s: %w", fgaObject, bindingID, err)
-	}
-	return n > 0, nil
 }

@@ -2023,7 +2023,7 @@ func runServe(cfg config.Config) error {
 		backfillRunner.RunEvery(taskCtx, convergeWindows.Interval)
 		return nil
 	})
-	verifyGate := seed.NewVerifyGate(reconcileEngine, backfillAdapter,
+	verifyGate := seed.NewVerifyGate(backfillAdapter,
 		logger.With(slog.String("component", "p8_verify_gate"))).
 		// Design-B cutover gate: a REAL FGA Check per active binding's
 		// required-relation triple — proves the materialized v_* tuple RESOLVES the
@@ -2259,9 +2259,11 @@ func runServe(cfg config.Config) error {
 			//
 			// Свойство, которое проба утверждала, покрыто интеграционно и без неё:
 			// прямая материализация свежего объекта проверяется против настоящего
-			// сведения (`Test224_OwnerWildcard_ForwardMaterializesContent`), и эта
-			// проверка исполняется конвейером, тогда как отчёт на старте ничего не
-			// гейтил.
+			// сведения — селекторная полоса
+			// (`TestP8_05_VerifyGate_NoAccessLoss_ForwardMaterializes`), владельческая
+			// (`Test224_OwnerWildcard_ForwardMaterializesContent`), и эти проверки
+			// исполняются конвейером, тогда как отчёт на старте ничего не гейтил.
+			// Сам механизм вместе с методами порта снят из дерева (#148).
 			// Отчёт о том, РАЗРЕШАЮТСЯ ли материализованные чтения (F-12 / VBC-19):
 			// настоящий Check по каждой тройке v_* активной выдачи. Именно отчёт:
 			// вызывающий журналирует вердикт и ничего не переключает (#119).

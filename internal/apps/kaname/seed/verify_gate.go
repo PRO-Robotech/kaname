@@ -3,48 +3,37 @@
 
 package seed
 
-// verify_gate.go — the continuous, forward-aware verify-gate. This is the
-// CONTRACT-PHASE GATE: the contract phase (which removes the FGA derivation
-// cascade + scope_grant) is permitted ONLY when this gate reports 100%
-// no-access-loss AND a live forward-smoke on a freshly-created resource passes.
+// verify_gate.go — непрерывный страж сверки перед фазой контракта. Фаза
+// контракта (она снимает каскад вывода FGA и scope_grant) допустима ТОЛЬКО
+// тогда, когда страж сообщает 100% отсутствия потери доступа.
 //
-// Two assertions:
+// Утверждений два, оба — ЧТЕНИЕ, страж ничего не пишет:
 //
-//   Verify — for every ACTIVE binding the RECONCILER decided to materialize (it has
-//     ≥1 ACTIVE access_binding_target_member — the reconciler's own verdict, not a
-//     heuristic), the access_binding_emitted_tuples ledger MUST be non-empty. An
-//     ACTIVE member with an empty ledger is a NO-ACCESS-LOSS FAILURE (after the
-//     contract phase removes the cascade, that operator would resolve to denied) →
-//     the gate reports NoAccessLoss=false and lists the offending binding. A binding
-//     the reconciler leaves with no ACTIVE members (a cluster-scoped `*.*.*` super-
-//     admin served by the cluster-admin short-circuit, a thin permissions-only role, a
-//     selector matching nothing) expects no ledger and is NOT a failure.
+//   Verify — у каждой ACTIVE-выдачи, которую СВЕДЕНИЕ решило материализовать
+//     (у неё ≥1 ACTIVE-строка access_binding_target_members — вердикт самого
+//     сведения, а не эвристика), ведомость access_binding_emitted_tuples обязана
+//     быть непустой. ACTIVE-член при пустой ведомости — ПОТЕРЯ ДОСТУПА: после
+//     снятия каскада оператор получил бы отказ, и страж сообщает
+//     NoAccessLoss=false с названной выдачей. Выдача, которой сведение не
+//     оставило ACTIVE-членов (кластерный `*.*.*`, обслуживаемый коротким путём
+//     администратора кластера, роль только с правами, селектор без совпадений),
+//     ведомости не ждёт и находкой не является.
 //
-//   ForwardSmoke — create a synthetic resource matching a selector binding
-//     (ARM_ANCHOR/ARM_LABELS on a concrete mirror type, OR the OWNER `*.*.*`
-//     wildcard binding) AFTER the backfill, drive the forward path (ReconcileObject
-//     on the mirror change), assert that binding's content tuple materialized, then
-//     remove the synthetic object. This proves the forward-materialization path is
-//     LIVE for BOTH the regular-selector path AND
-//     the owner content path. Without it a resource created in the
-//     contract window would never get its tuple and its grantee would silently lose
-//     access.
+//   VerifyRelationSatisfiesAction — настоящий Check по каждой тройке v_*
+//     активной выдачи: материализованный кортеж обязан РАЗРЕШАТЬ отношение,
+//     которым каталог гейтит чтение, а не просто лежать в ведомости.
 //
-//     NOTE: the OWNER `*.*.*` role now DOES
-//     forward-materialize CONTENT for a BOUNDED scope (ACCOUNT/PROJECT) — the
-//     wildcard rule expands to the full materializable type set
-//     (domain.MaterializingSelectorsInScope), so the reconciler emits a per-object
-//     tuple on every object inside the account. The verify-gate forward-smoke is now
-//     run against the OWNER binding too (a POSITIVE owner-content no-access-loss
-//     check), not only the regular-selector path: this is the assertion the old gate
-//     could NOT make, because owner content never materialized and the
-//     active_members-derived Verify always passed it as 0-expected. A GLOBAL/CLUSTER
-//     `*.*.*` (cluster super-admin) still does NOT per-object materialize — it is the
-//     cluster-admin flat short-circuit, so an owner-content smoke is meaningful ONLY for a
-//     bounded-scope owner binding (the contract-phase gate runs it there).
+// Живость прямого пути (объект, заведённый после выдачи, получает кортеж)
+// страж НЕ утверждает. Прежде это делала дымовая проба: она клала синтетику в
+// боевое зеркало, сводила её и снимала. Прод-потребителя у неё не было с #119,
+// и она снята вместе со своими методами порта (#148). Свойство утверждается
+// интеграционно против настоящего сведения: селекторная полоса —
+// TestP8_05_VerifyGate_NoAccessLoss_ForwardMaterializes и
+// TestReconcileForward_04_Backstop_FullConverges_NoDuplicate, владельческая —
+// Test224_OwnerWildcard_ForwardMaterializesContent.
 //
-// Clean Architecture: depends only on the ReconcileEngine surface + the narrow
-// VerifyStore port (implemented by the pg BackfillAdapter). No pgx here.
+// Чистая архитектура: зависит только от узкого порта VerifyStore (его
+// реализует pg BackfillAdapter) и порта Check. pgx здесь нет.
 
 import (
 	"context"
@@ -52,14 +41,8 @@ import (
 	"log/slog"
 
 	"github.com/PRO-Robotech/kaname/internal/admission"
-	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
-
-// VerifyReconcileEngine — the reconcile surface the forward-smoke drives.
-type VerifyReconcileEngine interface {
-	ReconcileObject(ctx context.Context, objectType, objectID string) error
-}
 
 // VerifyRelationChecker — the REAL Check port the relation-satisfies-action gate
 // uses (Design-B). Implemented by the decision door (internal/authzcascade) over the
@@ -125,17 +108,6 @@ type VerifyStore interface {
 	// — a sentinel the active_members-derived Verify cannot otherwise see, computable
 	// without false positives (no over-flagging of legitimately-empty bindings).
 	ListOwnerBindingsMissingMembers(ctx context.Context) ([]domain.AccessBindingID, error)
-
-	// SeedSmokeMirrorObject / RemoveSmokeMirrorObject create/remove a synthetic
-	// resource_mirror row under a project (so a project/account-scoped selector
-	// binding's IsContainedIn matches it) for the forward-smoke. The synthetic
-	// object is removed after the smoke so it never pollutes real membership.
-	SeedSmokeMirrorObject(ctx context.Context, objectType, objectID, parentProject, parentAccount string, labels map[string]string) error
-	RemoveSmokeMirrorObject(ctx context.Context, objectType, objectID string) error
-
-	// LedgerHasObject reports whether the binding's ledger records ANY tuple on the
-	// given fga-object (e.g. "vpc_network:<id>") — the forward-smoke success check.
-	LedgerHasObject(ctx context.Context, bindingID domain.AccessBindingID, fgaObject string) (bool, error)
 
 	// ListActiveBindingRelationChecks returns, for every ACTIVE binding that
 	// materialized ≥1 per-object tuple, the (subject, enforcement-relation, object)
@@ -260,20 +232,20 @@ func (r VerifyReport) reasonAttrs() []any {
 	}
 }
 
-// VerifyGate — the contract-phase gate.
+// VerifyGate — страж сверки перед фазой контракта.
 type VerifyGate struct {
-	engine  VerifyReconcileEngine
 	store   VerifyStore
 	logger  *slog.Logger
-	checker VerifyRelationChecker // relation-satisfies-action; nil → skip
+	checker VerifyRelationChecker // отношение разрешает действие; nil — пропуск
 }
 
-// NewVerifyGate constructs the gate.
-func NewVerifyGate(engine VerifyReconcileEngine, store VerifyStore, logger *slog.Logger) *VerifyGate {
+// NewVerifyGate собирает стража. Сведения он не зовёт и ничего не пишет: оба
+// утверждения — чтение ведомости и настоящий Check (#148).
+func NewVerifyGate(store VerifyStore, logger *slog.Logger) *VerifyGate {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &VerifyGate{engine: engine, store: store, logger: logger}
+	return &VerifyGate{store: store, logger: logger}
 }
 
 // WithRelationChecker wires the real-FGA Check port the relation-satisfies-action
@@ -406,105 +378,4 @@ func (g *VerifyGate) Verify(ctx context.Context) (VerifyReport, error) {
 			slog.Int("bindings_checked", report.BindingsChecked))
 	}
 	return report, nil
-}
-
-// ForwardSmokeSpec describes the live forward-smoke: a fresh resource
-// matching a REGULAR selector binding. ExpectBinding is the selector binding whose
-// ledger MUST gain the content tuple; ObjectType/ObjectID is the synthetic resource;
-// ParentProject/ParentAccount place it inside the binding's scope; Labels let it
-// match an ARM_LABELS selector (empty for ARM_ANCHOR `all`).
-type ForwardSmokeSpec struct {
-	ExpectBinding domain.AccessBindingID
-	ObjectType    string // dotted mirror type, e.g. "vpc.network"
-	ObjectID      string
-	ParentProject string
-	ParentAccount string
-	Labels        map[string]string
-}
-
-// ForwardSmoke proves the forward-materialization path is live: it creates the
-// synthetic resource, drives the forward path (ReconcileObject), asserts the
-// selector binding's content tuple materialized, then removes the synthetic object.
-// Returns false (not an error) when the smoke object did not materialize — a
-// forward-path regression the contract phase must block on.
-func (g *VerifyGate) ForwardSmoke(ctx context.Context, spec ForwardSmokeSpec) (bool, error) {
-	if spec.ExpectBinding == "" || spec.ObjectType == "" || spec.ObjectID == "" {
-		return false, fmt.Errorf("verify-gate: forward-smoke spec incomplete (binding/type/id required)")
-	}
-	fgaObject := fgaObjectForSmoke(spec.ObjectType, spec.ObjectID)
-	if fgaObject == "" {
-		return false, fmt.Errorf("verify-gate: forward-smoke object type %q is not in the closed FGA table", spec.ObjectType)
-	}
-
-	if err := g.store.SeedSmokeMirrorObject(ctx, spec.ObjectType, spec.ObjectID,
-		spec.ParentProject, spec.ParentAccount, spec.Labels); err != nil {
-		return false, fmt.Errorf("verify-gate: seed smoke object: %w", err)
-	}
-	// УБОРКА СНИМАЕТ ВСЁ, ЧТО ПРОБА ЗАВЕЛА, А НЕ ТОЛЬКО СТРОКУ ЗЕРКАЛА (#119).
-	//
-	// Строка зеркала — не единственный след: сведение, которым проба и доказывает
-	// прямой путь, пишет по её объекту строки ведомости. Снятое зеркало их не
-	// уносит, и следующий страж читает ведомость и честно находит
-	// материализованное чтение на объекте, которого больше нет. На чистой
-	// установке это печатается отказом о СОБСТВЕННОЙ синтетике, неотличимым от
-	// поломки.
-	//
-	// Поэтому уборка: снять зеркало → свести объект ЕЩЁ РАЗ (желаемый набор
-	// пуст, сведение снимает написанное) → убедиться, что ведомость его не
-	// несёт. Всё три шага best-effort и не роняют старт — но остаток НАЗЫВАЕТСЯ,
-	// иначе половинная уборка снова станет невидимой.
-	defer func() {
-		if rerr := g.store.RemoveSmokeMirrorObject(ctx, spec.ObjectType, spec.ObjectID); rerr != nil {
-			g.logger.WarnContext(ctx, "verify-gate: smoke object cleanup failed",
-				slog.String("object_id", spec.ObjectID), slog.Any("err", rerr))
-			return
-		}
-		if rerr := g.engine.ReconcileObject(ctx, spec.ObjectType, spec.ObjectID); rerr != nil {
-			g.logger.WarnContext(ctx, "verify-gate: smoke object retraction reconcile failed",
-				slog.String("object", fgaObject), slog.Any("err", rerr))
-			return
-		}
-		residue, rerr := g.store.LedgerHasObject(ctx, spec.ExpectBinding, fgaObject)
-		switch {
-		case rerr != nil:
-			g.logger.WarnContext(ctx, "verify-gate: smoke object residue check failed",
-				slog.String("object", fgaObject), slog.Any("err", rerr))
-		case residue:
-			g.logger.WarnContext(ctx, "verify-gate: smoke object left ledger rows behind",
-				slog.String("binding_id", string(spec.ExpectBinding)),
-				slog.String("object", fgaObject))
-		}
-	}()
-
-	if err := g.engine.ReconcileObject(ctx, spec.ObjectType, spec.ObjectID); err != nil {
-		return false, fmt.Errorf("verify-gate: forward reconcile smoke object: %w", err)
-	}
-
-	materialized, err := g.store.LedgerHasObject(ctx, spec.ExpectBinding, fgaObject)
-	if err != nil {
-		return false, fmt.Errorf("verify-gate: ledger check smoke object: %w", err)
-	}
-	if !materialized {
-		g.logger.WarnContext(ctx, "verify-gate: forward-smoke FAILED — fresh resource not materialized",
-			slog.String("binding_id", string(spec.ExpectBinding)), slog.String("object", fgaObject))
-	}
-	return materialized, nil
-}
-
-// fgaObjectForSmoke builds the FGA object ("<fga_type>:<id>") the forward-smoke
-// looks up in the ledger, using the SAME canonical authzmap mapping the reconciler
-// uses to WRITE the ledger row (authzmap.FGAObjectType → SplitObjectType on the
-// FIRST dot + the closed objectTypes table). This guarantees the lookup key is
-// byte-identical to what applyDiff records for EVERY closed-table type — not only
-// the ones where a naive `.`→`_` substitution happens to coincide (the
-// old hand-rolled byte loop diverged for ~13 of 22 types, e.g. vpc.securityGroup →
-// vpc_security_group, iam.account → account). An unknown / multi-dot type returns ""
-// (no ledger row can exist for it) so the smoke fails closed rather than fabricating
-// an arbitrary FGA object.
-func fgaObjectForSmoke(dotted, objectID string) string {
-	fgaType, ok := authzmap.FGAObjectType(dotted)
-	if !ok {
-		return ""
-	}
-	return fgaType + ":" + objectID
 }

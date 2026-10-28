@@ -72,7 +72,7 @@ func TestVerifyGate_VBC19_RelationSatisfiesAction_AllAllow(t *testing.T) {
 		"vpc_network:vpcn_y": true,
 	}}
 
-	gate := NewVerifyGate(panicEngine{}, store, nil).WithRelationChecker(chk)
+	gate := NewVerifyGate(store, nil).WithRelationChecker(chk)
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 	assert.True(t, report.NoAccessLoss,
@@ -94,7 +94,7 @@ func TestVerifyGate_VBC20_CutoverBlockedUntilVGetBackfilled(t *testing.T) {
 		// iam_role:rol_y absent → DENY (tier-only historical ledger, no v_get).
 	}}
 
-	gate := NewVerifyGate(panicEngine{}, store, nil).WithRelationChecker(chk)
+	gate := NewVerifyGate(store, nil).WithRelationChecker(chk)
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 	assert.False(t, report.NoAccessLoss,
@@ -107,7 +107,7 @@ func TestVerifyGate_VBC19_NilChecker_SkipNonFatal(t *testing.T) {
 	// An unwired RelationChecker (nil) makes the relation-satisfies gate a non-fatal
 	// skip (ran=false) — the boot must not crash when the FGA checker is degraded.
 	store := relCheckStore{}
-	gate := NewVerifyGate(panicEngine{}, store, nil) // no WithRelationChecker
+	gate := NewVerifyGate(store, nil) // no WithRelationChecker
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 	assert.True(t, report.NoAccessLoss, "nil checker → non-fatal skip (no assertion made)")

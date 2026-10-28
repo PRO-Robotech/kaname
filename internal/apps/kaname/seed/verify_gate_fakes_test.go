@@ -28,25 +28,6 @@ func (s stubVerifyStore) ListOwnerBindingsMissingMembers(context.Context) ([]dom
 	panic("ListOwnerBindingsMissingMembers not expected")
 }
 
-func (s stubVerifyStore) SeedSmokeMirrorObject(context.Context, string, string, string, string, map[string]string) error {
-	panic("SeedSmokeMirrorObject not expected")
-}
-
-func (s stubVerifyStore) RemoveSmokeMirrorObject(context.Context, string, string) error {
-	panic("RemoveSmokeMirrorObject not expected")
-}
-
-func (s stubVerifyStore) LedgerHasObject(context.Context, domain.AccessBindingID, string) (bool, error) {
-	panic("LedgerHasObject not expected")
-}
-
 func (s stubVerifyStore) ListActiveBindingRelationChecks(context.Context) ([]BindingRelationCheck, error) {
 	panic("ListActiveBindingRelationChecks not expected")
-}
-
-// panicEngine роняет пробу, если сведение вызвано там, где проба его не ждёт.
-type panicEngine struct{}
-
-func (panicEngine) ReconcileObject(context.Context, string, string) error {
-	panic("ReconcileObject not expected")
 }

@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
-	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -199,43 +198,4 @@ func rec224ReconcileObject(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 	t.Helper()
 	rec, _ := newReconciler(pool)
 	return rec.ReconcileObject(ctx, objType, objID)
-}
-
-// Test224_VerifyGate_OwnerContentForwardSmoke — КФ-4 verify-gate EXTENSION (item 2):
-// a POSITIVE owner-content no-access-loss check. Drives the verify-gate forward-smoke
-// against the OWNER binding (not a regular selector binding): a fresh resource in the
-// account must materialize the owner's per-object content tuple BEFORE contract. This
-// is the assertion the old gate could NOT make (КФ-БАГ-1 — owner content never
-// materialized, and the active_members-derived Verify always passed it as 0-expected).
-// RED before kacho-iam#224, GREEN after.
-func Test224_VerifyGate_OwnerContentForwardSmoke(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, setupTestDB(t))
-	require.NoError(t, err)
-	defer pool.Close()
-	repo := kanamepg.New(pool, nil)
-
-	owner := mustSeedUser(t, ctx, pool, "o224vg")
-	acc := seedAccount(t, ctx, repo, "acc-224-vg", owner)
-	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
-	ownerBID := ownerBindingFor(t, ctx, pool, acc.ID)
-
-	_, gate := newBackfill(pool)
-
-	// Forward-smoke against the OWNER binding: a fresh vpc.network in the account must
-	// get the owner's content tuple via the forward path (D-4). The owner rule is
-	// ARM_ANCHOR(all) wildcard → no labels (empty Labels matches the anchor selector).
-	fresh := ids.NewID("net")
-	smoke, err := gate.ForwardSmoke(ctx, seed.ForwardSmokeSpec{
-		ExpectBinding: ownerBID,
-		ObjectType:    "vpc.network",
-		ObjectID:      fresh,
-		ParentAccount: string(acc.ID),
-	})
-	require.NoError(t, err)
-	assert.True(t, smoke,
-		"verify-gate forward-smoke on the OWNER binding must materialize owner content on a fresh resource (kacho-iam#224 КФ-4)")
 }

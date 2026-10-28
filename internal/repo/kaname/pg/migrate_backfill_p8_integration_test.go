@@ -17,10 +17,9 @@ package pg_test
 //      under a process-wide pg_advisory_xact_lock; chunked tx-size bound).
 //      Each binding is reconciled by the SAME single materialization path
 //      (reconciler) → its per-object FGA tuples land in the ledger.
-//   3. verify-gate (continuous/forward-aware): every active binding's new
-//      explicit tuples are materialized (no-access-loss) + a forward-smoke on a
-//      freshly-created resource confirms the forward path is live (gate for the
-//      contract phase).
+//   3. страж сверки (непрерывный): у каждой активной выдачи её явные кортежи
+//      материализованы (нет потери доступа). Живость прямого пути на свежем
+//      объекте утверждает проба P8-05 настоящим сведением, а не страж (#148).
 //
 // Coverage:
 //   - backfill does not lose operator access (post-backfill ledger present).
@@ -29,7 +28,7 @@ package pg_test
 //   - replica coordination: N concurrent RunOnce → exactly one executes the
 //     sweep (singleton advisory-lock), no duplicate ledger rows.
 //   - chunked tx-size bound (sweep does not reconcile all bindings in one tx).
-//   - forward-aware verify-gate: 100% no-access-loss + live forward-smoke.
+//   - страж сверки: 100% отсутствия потери доступа; прямой путь на свежем объекте.
 //
 // Run: `make test` (testcontainers + Docker). Skipped under -short.
 
@@ -38,6 +37,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -103,7 +103,7 @@ func newBackfill(pool *pgxpool.Pool) (*seed.BackfillRunner, *seed.VerifyGate) {
 	rec, _ := newReconciler(pool)
 	adapter := kanamepg.NewBackfillAdapter(pool)
 	runner := seed.NewBackfillRunner(rec, adapter, seed.BackfillConfig{ChunkSize: 2})
-	gate := seed.NewVerifyGate(rec, adapter, nil)
+	gate := seed.NewVerifyGate(adapter, nil)
 	return runner, gate
 }
 
@@ -342,9 +342,22 @@ func TestP8_04_ChunkedTxSizeBound(t *testing.T) {
 	assert.GreaterOrEqual(t, res.Chunks, 3, "work split into bounded chunks (КФ-5)")
 }
 
-// ── forward-aware verify-gate — no-access-loss + forward-smoke ──
+// ── страж сверки: нет потери доступа + прямая материализация свежего объекта ──
 
-func TestP8_05_VerifyGate_NoAccessLoss_ForwardSmoke(t *testing.T) {
+// TestP8_05_VerifyGate_NoAccessLoss_ForwardMaterializes — после подмётки страж
+// сверки сообщает 100% отсутствия потери доступа, а объект, заведённый ПОСЛЕ
+// выдачи, получает кортеж обычной селекторной выдачи прямым путём сведения.
+//
+// Прежде вторую половину утверждала дымовая проба стража (`ForwardSmoke`): она
+// сама клала синтетику в боевое зеркало, сводила её и снимала. Механизм снят
+// (#148) — прод-потребителя у него не было с #119, а единственным потребителем
+// была эта проба. Свойство, которое он доказывал, утверждается здесь напрямую:
+// строка зеркала — тем же оператором, каким её кладёт регистрация в пробах
+// сведения, и настоящее `ReconcileObject` по ней, без посредника в прод-коде.
+//
+// Это селекторная полоса (ARM_ANCHOR обычной роли на проекте, `vpc.network`);
+// владельческая покрыта `Test224_OwnerWildcard_ForwardMaterializesContent`.
+func TestP8_05_VerifyGate_NoAccessLoss_ForwardMaterializes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -361,10 +374,7 @@ func TestP8_05_VerifyGate_NoAccessLoss_ForwardSmoke(t *testing.T) {
 	prj := seedProject(t, ctx, repo, acc.ID, "p8-verify-prj")
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 
-	// A REGULAR ARM_ANCHOR selector binding (vpc.network get, all) on the project —
-	// the implemented + bounded forward path the verify-gate smokes with a matching
-	// selector; the owner `*.*.*` content-forward is a separate contract-phase
-	// concern, NOT smoked here.
+	// Обычная селекторная выдача ARM_ANCHOR (vpc.network get, all) на проекте.
 	selRole := seedAccountRulesRole(t, ctx, pool, repo, acc.ID, "p8_net_viewer",
 		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get"}}})
 	selBinding := insertThinBindingScope(t, ctx, repo, member, selRole, "project", string(prj.ID), domain.ScopeProject)
@@ -373,9 +383,6 @@ func TestP8_05_VerifyGate_NoAccessLoss_ForwardSmoke(t *testing.T) {
 	_, err = runner.RunOnce(ctx)
 	require.NoError(t, err)
 
-	// Verify-gate: every active binding's explicit tuples are materialized
-	// (no-access-loss) AND a forward-smoke on a freshly-created resource confirms
-	// the forward path is live (gate for the contract phase).
 	report, err := gate.Verify(ctx)
 	require.NoError(t, err)
 	assert.True(t, report.NoAccessLoss,
@@ -383,35 +390,21 @@ func TestP8_05_VerifyGate_NoAccessLoss_ForwardSmoke(t *testing.T) {
 	assert.Empty(t, report.Failures, "no binding without materialized explicit tuples")
 	assert.GreaterOrEqual(t, report.BindingsChecked, 2, "owner-binding + selector binding checked")
 
-	// Forward-smoke: a vpc.network created in the project AFTER the grant must be
-	// picked up by the forward path (ReconcileObject on its mirror change) — the
-	// selector binding's ARM_ANCHOR rule materializes its tuple.
+	// Объект, которого при выдаче не было: до сведения кортежа на нём нет, после
+	// прямого пути — есть. Пара «до/после» отличает материализацию сведением от
+	// кортежа, оставшегося от подмётки.
 	fresh := ids.NewID("net")
-	smoke, err := gate.ForwardSmoke(ctx, seed.ForwardSmokeSpec{
-		ExpectBinding: selBinding,
-		ObjectType:    "vpc.network",
-		ObjectID:      fresh,
-		ParentProject: string(prj.ID),
-		ParentAccount: string(acc.ID),
-	})
-	require.NoError(t, err)
-	assert.True(t, smoke, "live forward-smoke on a fresh resource passes (КФ-4/H-06 gate)")
+	freshObject := "vpc_network:" + fresh
+	memberUser := "user:" + string(member)
+	seedMirrorRow(t, ctx, pool, "vpc.network", fresh, string(prj.ID), string(acc.ID), nil, time.Now())
+	require.False(t, ledgerHasTuple(t, ctx, pool, selBinding, memberUser, "v_get", freshObject),
+		"до сведения у свежего объекта кортежа нет — иначе утверждение ниже ничего не доказывает")
 
-	// ЗДЕСЬ УТВЕРЖДАЛСЯ ОСТАТОК — и теперь утверждается его ОТСУТСТВИЕ (kaname#119).
-	//
-	// Прежняя редакция требовала, чтобы строка ведомости по синтетическому объекту
-	// СОХРАНИЛАСЬ после пробы, и прямо это объясняла: «зеркало снято, а ведомость
-	// остаётся». Ровно этот остаток и печатался потом отказом о собственной
-	// синтетике: следующий страж читает ведомость и честно находит материализованное
-	// чтение на объекте, которого больше нет.
-	//
-	// Свойство, ради которого строка проверялась, никуда не делось и утверждается
-	// СТРОКОЙ ВЫШЕ: `smoke == true` означает, что прямой путь материализовал кортеж
-	// — проба увидела его в ведомости ДО уборки. Оставить оба утверждения нельзя:
-	// второе требует, чтобы уборки не было.
-	assert.False(t, ledgerHasTuple(t, ctx, pool, selBinding, "user:"+string(member), "v_get", "vpc_network:"+fresh),
-		"проба обязана убрать ВСЁ, что завела: строка ведомости по снятому синтетическому "+
-			"объекту читается следующим стражем как материализованное чтение на несуществующем")
+	rec, _ := newReconciler(pool)
+	require.NoError(t, rec.ReconcileObject(ctx, "vpc.network", fresh))
+	assert.True(t, ledgerHasTuple(t, ctx, pool, selBinding, memberUser, "v_get", freshObject),
+		"прямой путь обязан материализовать кортеж селекторной выдачи на объекте, "+
+			"заведённом после выдачи (КФ-4/H-06)")
 }
 
 // ── revoked owner-binding must NOT block re-grant on backfill ───
