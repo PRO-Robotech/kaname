@@ -31,34 +31,34 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ancRef := fs.String("ancestor-ref", "", "ревизия общего предка головы и базы")
 	ancUnknown := fs.String("ancestor-unknown", "", "почему общий предок не установлен")
 	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: вызов вне формы: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: вызов вне формы: %v\n", err)
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: нужен ровно один довод — "+
+		_, _ = fmt.Fprintln(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: нужен ровно один довод — "+
 			"путь к перечню объявленных разрывов")
 		return 2
 	}
 	known := *ancFindings != "" || *ancRef != ""
 	if known && (*ancFindings == "" || *ancRef == "") {
-		fmt.Fprintln(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: --ancestor-findings и --ancestor-ref "+
+		_, _ = fmt.Fprintln(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: --ancestor-findings и --ancestor-ref "+
 			"даются вместе — находки предка без его ревизии некому приписать")
 		return 2
 	}
 	if known && *ancUnknown != "" {
-		fmt.Fprintln(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: предок и установлен, и не установлен — "+
+		_, _ = fmt.Fprintln(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: предок и установлен, и не установлен — "+
 			"--ancestor-unknown исключает --ancestor-findings")
 		return 2
 	}
 
 	decls, err := LoadDeclarations(fs.Arg(0))
 	if err != nil {
-		fmt.Fprintf(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: %v\n", err)
 		return 2
 	}
 	findings, err := ParseFindings(stdin)
 	if err != nil {
-		fmt.Fprintf(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "ПРОВЕРКА НЕ ИСПОЛНЯЛАСЬ: %v\n", err)
 		return 2
 	}
 	res := Adjudicate(findings, decls)
@@ -68,7 +68,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case *ancUnknown != "":
 		res.SetAncestor(Ancestor{Unknown: *ancUnknown})
 	}
-	fmt.Fprint(stdout, res.Report())
+	_, _ = fmt.Fprint(stdout, res.Report())
 	if !res.Clean() {
 		return 1
 	}

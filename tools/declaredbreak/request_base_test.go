@@ -106,18 +106,25 @@ func (s *scene) commit(fields []int, note string) string {
 		"proto/probe/v1/m.proto":     protoWith(fields),
 		"NOTE":                       note + "\n",
 	}
-	for p, body := range files {
-		full := filepath.Join(s.work, p)
-		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
-			s.t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
-			s.t.Fatal(err)
-		}
-	}
+	writeTree(s.t, s.work, files)
 	s.git(s.work, "add", "-A")
 	s.git(s.work, "commit", "-q", "-m", note)
 	return s.git(s.work, "rev-parse", "HEAD")
+}
+
+// writeTree — файлы сцены под корнем root. Корень — рабочая копия сцены в
+// t.TempDir(), его назначает вызывающий.
+func writeTree(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for p, body := range files {
+		full := filepath.Join(root, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // pullRequest — коммит слияния головы head с базой base под refs/pull/1/merge.
