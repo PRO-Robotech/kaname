@@ -60,11 +60,14 @@ import (
 
 // hintDirs — каталоги, чьи пробы печатают команды пересъёма.
 //
-// Оба, а не один: гейт свежести сетки живёт в `scalegrid`, гейт свежести объёма
-// матрицы — в `relverdict`, и негодная подсказка нашлась в КАЖДОМ.
+// Три, а не два: гейт свежести сетки живёт в `scalegrid`, гейт свежести объёма
+// матрицы — в `relverdict`, и негодная подсказка нашлась в КАЖДОМ; прибор записи
+// и удаления печатает свою из каталога хранилища, и там её не судил никто
+// (kaname#141).
 var hintDirs = []string{
 	"services/iam/internal/repo/kaname/pg/relverdict",
 	"services/iam/internal/repo/kaname/pg/scalegrid",
+	"internal/repo/kaname/pg",
 }
 
 // resnapshotCommand — одна найденная команда: где записана и что просит запустить.
