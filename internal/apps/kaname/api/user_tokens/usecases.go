@@ -47,7 +47,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/corelib/ids"
@@ -834,10 +833,14 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 
 // revokeUserTokenResponse — ЕДИНСТВЕННЫЙ производитель тела успешного отзыва:
 // его получает только отзыв, снявший строку.
+//
+// Момент снятия — часы процесса после фиксации, усечённые до секунды общим
+// помощником (`shared.TimestampProto`): время на проводе — целые секунды, как
+// `createdAt` той же операции (kaname#1074).
 func revokeUserTokenResponse(tokenID domain.UserOAuthClientID) (*anypb.Any, error) {
 	return anypb.New(&iamv1.RevokeUserTokenResponse{
 		TokenId:   string(tokenID),
-		RevokedAt: timestamppb.Now(),
+		RevokedAt: shared.TimestampProto(time.Now()),
 	})
 }
 
