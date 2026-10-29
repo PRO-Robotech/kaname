@@ -1,11 +1,11 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package operationresolver implements the IAM operations.Resolver: given the
-// metadata of an orphaned operation (a row left done=false because the worker
-// process died mid-flight), it determines the terminal outcome by reading the
-// committed reality of the resource. The reconciler engine lives in corelib; this
-// resolver knows the IAM metadata types and resource tables.
+// Package operationresolver реализует `operations.Resolver` службы доступа: по
+// метаданным осиротевшей операции (строка осталась `done=false`, потому что
+// процесс исполнителя умер на полпути) он определяет терминальный исход, читая
+// зафиксированное состояние ресурса. Движок сверки живёт в фундаменте; этот
+// резолвер знает типы метаданных и таблицы ресурсов службы.
 package operationresolver
 
 import (
@@ -141,14 +141,13 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 	case *iamv1.UpdateUserMetadata:
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
 	case *iamv1.BlockUserMetadata:
-		// Block/Unblock RETAIN the membership row and change its state, so both
-		// resolve like an Update (resource present afterwards → response = the
-		// user), never like a Delete. Without these two cases an ORPHANED block —
-		// the worker died between minting the Operation and committing — falls to
-		// the default arm, is skipped forever, and the Operation stays `done=false`
-		// while being re-claimed on every sweep. The administrator who suspended
-		// someone during an incident would be left polling an answer that never
-		// comes.
+		// Блокировка и разблокировка СОХРАНЯЮТ строку членства и меняют её
+		// состояние, поэтому обе разрешаются как правка (ресурс после операции есть
+		// → ответ — человек), а не как снятие. Без этих двух ветвей ОСИРОТЕВШАЯ
+		// блокировка — исполнитель умер между чеканкой операции и коммитом — падала
+		// бы в ветвь по умолчанию, пропускалась бы вечно, и операция оставалась бы
+		// `done=false`, перехватываемая каждым обходом. Администратор, отстранивший
+		// человека во время инцидента, опрашивал бы ответ, который не придёт.
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
 	case *iamv1.UnblockUserMetadata:
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
@@ -187,14 +186,14 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 	case *iamv1.DeleteServiceAccountMetadata:
 		return resolveExistence(ctx, kindDelete, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)
 	case *iamv1.DisableServiceAccountMetadata:
-		// Disable/Enable RETAIN the row and change its state, so both resolve like
-		// an Update (resource present afterwards → response = the service account),
-		// never like a Delete. Without these two cases an ORPHANED disable — the
-		// worker died between minting the Operation and committing — falls to the
-		// default arm, is skipped forever, and the Operation stays `done=false`
-		// while being re-claimed on every sweep. The operator who pulled a machine
-		// identity during an incident would be left polling an answer that never
-		// comes.
+		// Выключение и включение СОХРАНЯЮТ строку и меняют её состояние, поэтому
+		// обе разрешаются как правка (ресурс после операции есть → ответ —
+		// служебная учётка), а не как снятие. Без этих двух ветвей ОСИРОТЕВШЕЕ
+		// выключение — исполнитель умер между чеканкой операции и коммитом — падало
+		// бы в ветвь по умолчанию, пропускалось бы вечно, и операция оставалась бы
+		// `done=false`, перехватываемая каждым обходом. Оператор, отозвавший
+		// машинную личность во время инцидента, опрашивал бы ответ, который не
+		// придёт.
 		return resolveExistence(ctx, kindUpdate, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)
 	case *iamv1.EnableServiceAccountMetadata:
 		return resolveExistence(ctx, kindUpdate, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)
@@ -220,9 +219,9 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 	case *iamv1.DeleteAccessBindingMetadata:
 		return resolveExistence(ctx, kindDelete, m.GetAccessBindingId(), rd.AccessBindings().Get, marshalAccessBinding)
 	case *iamv1.RevokeAccessBindingMetadata:
-		// Soft-revoke RETAINS the row (status→REVOKED), so it resolves like an
-		// Update (resource present after the op → response = the REVOKED binding),
-		// NOT like Delete (which resolves to absence).
+		// Мягкий отзыв СОХРАНЯЕТ строку (состояние → REVOKED), поэтому разрешается
+		// как правка (ресурс после операции есть → ответ — отозванная привязка), а
+		// НЕ как снятие, которое разрешается по отсутствию.
 		return resolveExistence(ctx, kindUpdate, m.GetAccessBindingId(), rd.AccessBindings().Get, marshalAccessBinding)
 
 	// Делегирования права выдавать (kaname#986). Заведение вставляет строку

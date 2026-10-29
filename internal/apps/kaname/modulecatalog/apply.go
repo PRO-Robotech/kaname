@@ -187,7 +187,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/PRO-Robotech/corelib/operations"
@@ -857,7 +857,7 @@ func touchedRoles(sets ...[]domain.RoleID) []domain.RoleID {
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }
 

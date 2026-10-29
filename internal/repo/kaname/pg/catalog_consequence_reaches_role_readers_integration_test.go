@@ -327,20 +327,11 @@ func preview(r *iamv1.Role) string {
 // ─────────────────────────────────────────────────────────────────────────────
 // Часть I — событие, и часть II на том же применении Ω-widgets
 
-// TestCCR_OmegaWidgets — IAM-CCR-01, -03, -06, -08, -12, -13, -14, -15, -17,
+// TestCCR_OmegaWidgets — IAM-CCR-01, -03, -06, -12, -13, -14, -15, -17,
 // -18, -19: одно применение Ω-widgets, все утверждения о его исходе.
 func TestCCR_OmegaWidgets(t *testing.T) {
 	w := buildCCRWorld(t, "a", "b", "c", "d", "e", "f", "w", "p")
 	a := w.roles["a"]
-
-	// -08, «Дано»: версия и момент правки роли A до применения.
-	rd, err := w.repo.Reader(w.ctx)
-	require.NoError(t, err)
-	_, v0, err := rd.Roles().GetWithVersion(w.ctx, a)
-	require.NoError(t, err)
-	_ = rd.Rollback(w.ctx)
-	var updatedBefore time.Time
-	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT updated_at FROM kaname.roles WHERE id = $1`, string(a)).Scan(&updatedBefore))
 
 	// D до применения: квалификатор редактора с основанием.
 	require.Equal(t, "[get update] | [get update delete*] | [delete*]", preview(w.read(t, w.snap, w.roles["d"])),
@@ -466,25 +457,43 @@ func TestCCR_OmegaWidgets(t *testing.T) {
 		require.Equalf(t, []string{"list"}, got.GetAuthoredVerbs(), "IAM-CCR-18: %s authored", name)
 		require.Equalf(t, []string{"list"}, got.GetEffectiveVerbs(), "IAM-CCR-18: %s effective", name)
 	}
+}
 
-	// ── IAM-CCR-08 — последним: правка правил даёт своё событие ──────────────
-	rd2, err := w.repo.Reader(w.ctx)
+// TestCCR08_RoleRowIsNotWritten — IAM-CCR-08: применение строку роли не
+// пишет — версия и `updated_at` прежние, правка ПРАВИЛ арендатора по версии,
+// снятой до применения, принята.
+func TestCCR08_RoleRowIsNotWritten(t *testing.T) {
+	w := buildCCRWorld(t, "a")
+	a := w.roles["a"]
+	version := func() string {
+		rd, err := w.repo.Reader(w.ctx)
+		require.NoError(t, err)
+		defer func() { _ = rd.Rollback(w.ctx) }()
+		_, v, err := rd.Roles().GetWithVersion(w.ctx, a)
+		require.NoError(t, err)
+		return v
+	}
+	updatedAt := func() time.Time {
+		var at time.Time
+		require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT updated_at FROM kaname.roles WHERE id = $1`, string(a)).Scan(&at))
+		return at
+	}
+	v0, at0 := version(), updatedAt()
+
+	_, err := applierOver(t, w.pool).Apply(w.ctx, ccrOmegaWidgets())
 	require.NoError(t, err)
-	_, v1, err := rd2.Roles().GetWithVersion(w.ctx, a)
-	require.NoError(t, err)
-	_ = rd2.Rollback(w.ctx)
 	require.Positive(t, w.ledgerCount(t, `SELECT count(*) FROM kaname.role_grant_orphan WHERE role_id = $1`, a),
 		"IAM-CCR-08: применение A не тронуло — «ничего не сдвинулось» было бы вакуумным")
-	var updatedAfter time.Time
-	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT updated_at FROM kaname.roles WHERE id = $1`, string(a)).Scan(&updatedAfter))
-	require.Equal(t, v0, v1, "IAM-CCR-08: версия роли A сдвинулась — строка роли переписана")
-	require.True(t, updatedBefore.Equal(updatedAfter), "IAM-CCR-08: updated_at роли A сдвинулся")
-	op8, err := roleapp.NewUpdateRoleUseCase(w.repo, ops, w.snap).Execute(w.callerCtx(), roleapp.UpdateRoleInput{
+	require.Equal(t, v0, version(), "IAM-CCR-08: версия роли A сдвинулась — строка роли переписана")
+	require.True(t, at0.Equal(updatedAt()), "IAM-CCR-08: updated_at роли A сдвинулся")
+
+	ops := operations.NewRepo(w.pool, "kaname")
+	op, err := roleapp.NewUpdateRoleUseCase(w.repo, ops, w.snap).Execute(w.callerCtx(), roleapp.UpdateRoleInput{
 		ID: a, Rules: domain.Rules{{Module: applierProbeModule, Resources: []string{"gadgets"}, Verbs: []string{"list"}}},
 		UpdateMask: []string{"rules"}, ResourceVersion: v0})
 	require.NoError(t, err, "IAM-CCR-08: правка правил по прежней версии отвергнута синхронно")
-	done8 := awaitOperation(t, w.ctx, ops, op8.ID)
-	require.Nil(t, done8.Error, "IAM-CCR-08: операция правки правил по прежней версии отказала")
+	require.Nil(t, awaitOperation(t, w.ctx, ops, op.ID).Error,
+		"IAM-CCR-08: операция правки правил по прежней версии отказала")
 }
 
 // listPreview — роль из ответа списка (страницы до той, где она есть).

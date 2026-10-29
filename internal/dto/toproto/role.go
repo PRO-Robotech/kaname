@@ -50,11 +50,11 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 	if !r.UpdatedAt.IsZero() {
 		updatedAt = timestamppb.New(r.UpdatedAt.Truncate(tsTruncate))
 	}
-	// RBAC rules-model 2026: rules[] is the PUBLIC API surface;
-	// permissions[] is the INTERNAL compiled projection and is NOT populated in the
-	// public Get/List response (left empty). For a legacy permissions-only role
-	// (no rules) rules[] is empty and permissions still stays empty in the public
-	// projection — clients render the role from rules[].
+	// Модель правил RBAC 2026: `rules[]` — ПУБЛИЧНАЯ поверхность API, а
+	// `permissions[]` — ВНУТРЕННЯЯ скомпилированная проекция, и в публичном ответе
+	// `Get`/`List` она не заполняется (остаётся пустой). У унаследованной роли без
+	// правил `rules[]` пуст, а `permissions` в публичной проекции всё равно пуст —
+	// клиенты рисуют роль по `rules[]`.
 	rules := make([]*iamv1.Rule, 0, len(r.Rules))
 	for _, rl := range r.Rules {
 		rules = append(rules, &iamv1.Rule{
@@ -77,11 +77,11 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 		Name:        string(r.Name),
 		Description: string(r.Description),
 		Rules:       rules,
-		// redesign-2026 F4: is_system is DERIVED from the definition tier
-		// (tierType==iam.cluster ⇔ cluster_id set), not the stored flag.
+		// redesign-2026 F4: `is_system` ВЫВОДИТСЯ из яруса определения
+		// (`tierType==iam.cluster` ⇔ задан `cluster_id`), а не берётся из хранимого флага.
 		IsSystem: r.IsSystemDerived(),
-		// redesign-2026 F4: definitionTier dotted projection over the typed scope
-		// columns; the word "scope" is reserved for the AccessBinding anchor.
+		// redesign-2026 F4: `definitionTier` — точечная проекция типизированных колонок
+		// области; слово «scope» закреплено за якорем привязки доступа.
 		DefinitionTier: &iamv1.DefinitionTier{
 			TierType: r.DefinitionTierType(),
 			TierId:   r.DefinitionTierID(),
@@ -90,8 +90,8 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 		UpdatedAt:       updatedAt,
 		CreatedByUserId: string(r.CreatedByUserID),
 		Labels:          labelsToStringMap(r.Labels),
-		// redesign-2026 F6: honest effective-verb preview + catalog metadata
-		// (output-only derived; editor's effective set carries `delete*`).
+		// redesign-2026 F6: честное превью глаголов и метаданные каталога (производное,
+		// только на выходе; фактический набор редактора несёт `delete*`).
 		AuthoredVerbs:  r.AuthoredVerbs(r.TypeVerbs),
 		EffectiveVerbs: r.EffectiveVerbs(r.TypeVerbs),
 		VerbNotes:      r.VerbNotes(r.TypeVerbs),
@@ -123,8 +123,8 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 		// Нулевое состояние приезжает нулевым сообщением: «этим ответом не
 		// вычислено», ровно как `ROLE_HEALTH_UNSPECIFIED` рядом.
 		Lifecycle: roleLifecycleToPb(r.Lifecycle),
-		// Permissions intentionally omitted (internal compiled; not on the public
-		// API surface — R-7/F5). Read compiled perms via InternalIAMService.GetRoleCompiled.
+		// `Permissions` опущены намеренно: внутренняя скомпилированная проекция, не
+		// публичная поверхность API (R-7/F5); читаются `InternalIAMService.GetRoleCompiled`.
 	}, nil
 }
 
