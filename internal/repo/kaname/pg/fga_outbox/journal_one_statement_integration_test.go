@@ -89,6 +89,46 @@ func TestEmitJournalTx_RefusesATupleBothWrittenAndDeleted(t *testing.T) {
 	require.EqualError(t, err, "fga_outbox: tuple project:prj_both617#admin@user:usr_both617 is both written and deleted in one call")
 }
 
+// TestEmitJournalTx_MixedKeyFoldsToTheIntendedFacts — ключ, у которого в одном вызове
+// есть и выдача, и снятие, разбит на строки по отношению; свёртка даёт ровно
+// намеренное: выданное стоит, снятое снято, нетронутое на месте.
+func TestEmitJournalTx_MixedKeyFoldsToTheIntendedFacts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	t.Cleanup(cancel)
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	k := swapTuples("usr_fold617", "prj_fold617")
+
+	seed, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	require.NoError(t, fga_outbox.EmitWriteTx(ctx, seed, k.tuples([]string{"editor", "viewer"})))
+	require.NoError(t, seed.Commit(ctx))
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	require.NoError(t, k.emit([]string{"admin", "owner"}, []string{"viewer"})(ctx, tx))
+	require.NoError(t, tx.Commit(ctx))
+
+	rows, err := pool.Query(ctx,
+		`SELECT relation FROM kaname.relation_fact
+		  WHERE object_type = 'project' AND object_id = 'prj_fold617' AND subject = $1 ORDER BY relation`, k.user)
+	require.NoError(t, err)
+	got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	require.NoError(t, err)
+	require.Equal(t, []string{"admin", "editor", "owner"}, got)
+
+	var journal int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kaname.fga_outbox WHERE payload->>'object' = $1 AND payload->'relations' IS NULL`,
+		k.object).Scan(&journal))
+	require.Equal(t, 3, journal, "ключ с выдачей и снятием — строка на отношение (admin, owner, viewer); засев — одна строка-набор")
+}
+
 // swapKey — отношения одного субъекта на одном объекте.
 type swapKey struct {
 	user, object string
