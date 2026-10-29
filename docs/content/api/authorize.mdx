@@ -148,7 +148,9 @@ per-subject/per-resource решение принимает обработчик.
 <ApiOperation method="POST" endpoint="/iam/v1/authorize:listSubjects">
 
 Возвращает всех субъектов с `action` на данном ресурсе (виджет «кто имеет доступ»).
-Page size ≤ 1000. Опциональный `subjectTypeFilter`.
+Размер страницы — по правилу платформы: `pageSize` в `[0..1000]`, `0` — умолчание 50;
+значение вне диапазона отвергается `INVALID_ARGUMENT` с нарушением поля `page_size` (раньше
+проверки прав вызывающего). Опциональный `subjectTypeFilter`.
 
 </ApiOperation>
 

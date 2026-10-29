@@ -391,8 +391,9 @@ type ListSubjectsRequest struct {
 	Resource *ResourceRef `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
 	// Action string. 1-128 chars.
 	Action string `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
-	// Page size; default 500 — a page of relation holders, larger than the 50
-	// rows every other List of the service returns on 0; max 1000.
+	// Page size. 0 selects the platform default (50), the same one every List of
+	// the service applies; a value outside [0..1000] is rejected with
+	// INVALID_ARGUMENT rather than clamped.
 	PageSize int64 `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken string `protobuf:"bytes,4,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`

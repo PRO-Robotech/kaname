@@ -38,20 +38,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
 // pageSizeOwnDefault — поля, чей List применяет НЕ умолчание службы, и число,
 // которое он применяет на деле. Число берётся из кода, а не выписывается:
 // разойдись код и контракт — проба краснеет.
 //
-// ListSubjects отдаёт страницу держателей отношения из разбора модели
-// (`relverdict.DefaultPageSize`), а не страницу строк службы. Расхождение с
-// конвенцией платформы — предмет kaname#845; снимается вместе с ним: тот же
-// коммит удаляет запись, и комментарий контракта называет 50.
-var pageSizeOwnDefault = map[string]int{
-	"ListSubjectsRequest.PageSize": relverdict.DefaultPageSize,
-}
+// Пустой перечень — цель, а не отказ: каждое поле судится умолчанием службы.
+// Последняя запись (`ListSubjectsRequest.PageSize`, 500 из разбора модели)
+// снята приёмкой kaname#615 (LSP-10): глагол применяет правило платформы, и
+// его поле судится тем же числом, что прочие.
+var pageSizeOwnDefault = map[string]int{}
 
 // namedDefault — число, которое проза называет умолчанием: «Default value: N»,
 // «default N», «platform default (N)».
