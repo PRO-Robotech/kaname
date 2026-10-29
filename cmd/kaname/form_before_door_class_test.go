@@ -57,8 +57,11 @@ package main
 // корня `publicListenerChain` (`serve.go`), от измерителя задержки до двери.
 // Свои у пробы лишь звенья с зависимостями мира (политика, ворота адреса,
 // дверь с решателем-подделкой). Проба утверждает и это: функция, собравшая
-// её цепочку, объявлена вне тестовых файлов и её зовёт корень, — иначе она
-// судила бы вторую проводку.
+// её цепочку, объявлена вне тестовых файлов, её зовёт корень, и собранная
+// цепочка доходит именно до ПУБЛИЧНОГО слушателя — сервера, на котором корень
+// монтирует публичные службы и который обслуживает слушатель публичного адреса
+// (`formProbeChainReachesListener`), — иначе она судила бы вторую проводку
+// либо цепочку, уехавшую во внутренний слушатель.
 //
 // # Чем проба НЕ является
 //
@@ -70,9 +73,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io"
 	"log/slog"
 	"os"
@@ -97,6 +102,7 @@ import (
 	"github.com/PRO-Robotech/corelib/authz/catalogderive"
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -693,6 +699,46 @@ func TestIAM_PNE_1_21_A_FormIsAnsweredBeforeTheDoorOnEveryObjectScopedRPC(t *tes
 	}
 }
 
+// formProbeFuncName — короткое имя функции прод-кода, как его пишет вызов в
+// исходнике корня: по указателю на саму функцию, а не литералом, — переименование
+// ломает сборку пробы, а не оставляет стража искать прежнее имя.
+func formProbeFuncName(f any) string {
+	fn := runtime.FuncForPC(reflect.ValueOf(f).Pointer())
+	if fn == nil {
+		return ""
+	}
+	return fn.Name()[strings.LastIndex(fn.Name(), ".")+1:]
+}
+
+// formProbeRootAnchors — якоря стража провязки у настоящего корня, выведенные
+// из функций и типов, которые корень зовёт: конструктор сервера, монтирование
+// публичных служб (по нему же проба выводит класс — `formProbePublicMethods`),
+// поле раздела API-сервера в конфигурации и его метод публичного адреса.
+func formProbeRootAnchors(t *testing.T, assembler string) formProbeAnchors {
+	t.Helper()
+	an := formProbeAnchors{
+		assembler:      assembler,
+		newServer:      formProbeFuncName(grpcsrv.NewServer),
+		registerPublic: formProbeFuncName(registerPublicServices),
+		addrMethod:     formProbeFuncName(config.APIServerConfig.ListenAddress),
+	}
+	var fields []string
+	root := reflect.TypeOf(config.Config{})
+	for i := 0; i < root.NumField(); i++ {
+		if root.Field(i).Type == reflect.TypeOf(config.APIServerConfig{}) {
+			fields = append(fields, root.Field(i).Name)
+		}
+	}
+	if len(fields) != 1 {
+		t.Fatalf("раздел API-сервера в конфигурации корня — полей %d (%v), ожидалось одно: публичный адрес не опознать", len(fields), fields)
+	}
+	an.addrField = fields[0]
+	if an.newServer == "" || an.registerPublic == "" || an.addrMethod == "" {
+		t.Fatalf("якоря стража провязки не опознаны средой исполнения: %+v", an)
+	}
+	return an
+}
+
 // formProbeOneWiring — функция, собравшая цепочку пробы, объявлена вне тестовых
 // файлов пакета, и её зовёт не-тестовый код корня. Нарушения — строками.
 func formProbeOneWiring(t *testing.T) []string {
@@ -702,7 +748,8 @@ func formProbeOneWiring(t *testing.T) []string {
 		return []string{"сборщик цепочки пробы не опознан средой исполнения"}
 	}
 	file, _ := fn.FileLine(fn.Entry())
-	name := fn.Name()[strings.LastIndex(fn.Name(), ".")+1:]
+	name := formProbeFuncName(publicChainUnderProbe)
+	anchors := formProbeRootAnchors(t, name)
 	var out []string
 	if strings.HasSuffix(file, "_test.go") {
 		out = append(out, "цепочку пробы собирает "+name+" из тестового файла "+filepath.Base(file)+
@@ -744,22 +791,90 @@ func formProbeOneWiring(t *testing.T) []string {
 			" — цепочка, которую судит проба, не та, что уезжает в публичный слушатель")
 		return out
 	}
-	return append(out, formProbeChainReachesListener(files, name)...)
+	return append(out, formProbeChainReachesListener(fset, files, anchors)...)
 }
 
 // formProbeChainInterceptors — куда обязан уехать каждый результат сборщика
 // цепочки, по позиции: однократная полоса, затем потоковая.
 var formProbeChainInterceptors = []string{"ChainUnaryInterceptor", "ChainStreamInterceptor"}
 
+// formProbeInterceptorOptions — параметры gRPC-сервера, добавляющие звенья
+// цепочки: сверх собранной корнем на публичном сервере их быть не должно.
+var formProbeInterceptorOptions = map[string]bool{
+	"UnaryInterceptor": true, "StreamInterceptor": true,
+	"ChainUnaryInterceptor": true, "ChainStreamInterceptor": true,
+}
+
+// formProbeAnchors — имена, по которым страж узнаёт в корне сборщик цепочки,
+// конструктор сервера, монтирование публичных служб и публичный адрес. У
+// настоящего корня они ВЫВОДЯТСЯ (`formProbeRootAnchors`), у синтетического —
+// литералами таблицы инъекций.
+type formProbeAnchors struct {
+	assembler      string // сборщик цепочки публичного слушателя
+	newServer      string // конструктор gRPC-сервера
+	registerPublic string // монтирует публичные службы — по нему проба выводит класс
+	addrField      string // поле раздела API-сервера в конфигурации корня
+	addrMethod     string // метод раздела, отдающий публичный адрес
+}
+
+// formProbeNoImports — импортёр разбора типов, не читающий ни одного пакета:
+// стражу нужна только тождественность объектов внутри корня (какой перечень
+// раскрыт, какой сервер обслуживает слушатель), а не типы зависимостей.
+type formProbeNoImports struct{}
+
+func (formProbeNoImports) Import(path string) (*types.Package, error) {
+	return nil, errors.New("страж провязки зависимостей не читает: " + path)
+}
+
 // formProbeChainReachesListener — собранная корнем цепочка доходит до
-// слушателя: каждое присваивание результата сборщика name в не-тестовом коде
-// раскрывается (`…`) в `grpc.ChainUnaryInterceptor` и `grpc.ChainStreamInterceptor`
-// той же функции. Звено, собранное и выброшенное (`_`) либо подменённое другим
-// перечнем, — нарушение: проба судила бы цепочку, которой слушатель не несёт.
-// Перечень, раскрытый под тем же именем, но переписанный после сборки
-// (`formProbeReassigned`), — то же нарушение. Присваиваний ноль — тоже
-// нарушение: зов без результата не провязка.
-func formProbeChainReachesListener(files []*ast.File, name string) []string {
+// ПУБЛИЧНОГО слушателя (K6-N2), а не просто раскрыта где-то в той же функции.
+// По каждому результату сборщика `an.assembler` в не-тестовом коде страж
+// проходит путь от сборки до слушателя по ТОЖДЕСТВУ объектов (разбор типов
+// пакета корня, `go/types`), а не по совпадению имён:
+//
+//  1. результат присвоен имени, и имя РОЖДЕНО этой сборкой (`:=`): перечень,
+//     объявленный раньше, мог быть раскрыт или записан до неё (O01);
+//  2. помимо сборки перечень употреблён РОВНО ОДИН раз — раскрытием (`…`) в
+//     `grpc.ChainUnaryInterceptor` либо `grpc.ChainStreamInterceptor`; любое
+//     другое употребление — запись (`=`, `+=`, элемент, перебор), второе имя
+//     того же среза (O04), взятие адреса, передача функции — нарушение: через
+//     него раскрывается уже не собранная цепочка. Одноимённый перечень другого
+//     объекта — параметр (O02) или именованный результат (O05) замыкания,
+//     затенение в блоке — не раскрытие собранного;
+//  3. раскрытие — прямой довод конструктора сервера `an.newServer`, и других
+//     звеньев (`grpc.UnaryInterceptor`, ещё одной `Chain…`) этот вызов не несёт;
+//  4. сервер присвоен имени, и имя после этого не переписано и адрес его не
+//     взят;
+//  5. на этом сервере корень монтирует публичные службы (`an.registerPublic` —
+//     та же функция, по которой проба выводит класс глаголов);
+//  6. этот сервер обслуживает (`Serve`) слушатель, рождённый `net.Listen` на
+//     адресе `<…>.<an.addrField>.<an.addrMethod>()`, и ни слушатель, ни адрес
+//     после рождения не переписаны.
+//
+// Перестановка цепочек публичного и внутреннего серверов (O03), монтирования
+// служб либо слушателей ломает шаги 5–6. Присваиваний сборщика ноль — тоже
+// нарушение: зов без результата не провязка. На результат — одно нарушение,
+// первое по пути: следующие шаги от предыдущего зависят.
+//
+// Граница — чего страж не видит, и чем это держится:
+//   - что делает со своим результатом сам сборщик после возврата (хранит ссылку
+//     на срез и пишет в неё позже) — страж судит употребления в корне, а не
+//     тело сборщика; это тело — чистая сборка из доводов, и её судит сама
+//     проба, исполняя цепочку, которую сборщик вернул;
+//   - что `an.newServer` делает с переданными ему параметрами (фундамент
+//     `corelib/grpcsrv`, его пробы) и какие службы монтирует `an.registerPublic`
+//     (их судит проба: класс выводится из того же вызова);
+//   - запись в переменную через отражение либо `unsafe` — в корне таких форм
+//     нет, и разбор исходника их не различает в принципе;
+//   - провязку вне функции, где стоит сборка: перечень, сервер, слушатель и
+//     адрес обязаны жить в одной функции, иначе — нарушение «не раскрыт» либо
+//     «не обслуживает», а не молчание.
+func formProbeChainReachesListener(fset *token.FileSet, files []*ast.File, an formProbeAnchors) []string {
+	info := &types.Info{Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}}
+	conf := types.Config{Importer: formProbeNoImports{}, Error: func(error) {}}
+	// Ошибки типов ожидаемы (зависимостей разбор не читает) и вердиктом не
+	// являются: тождество объектов корня от них не зависит.
+	_, _ = conf.Check("main", fset, files, info)
 	var (
 		out      []string
 		assigned int
@@ -770,34 +885,16 @@ func formProbeChainReachesListener(files []*ast.File, name string) []string {
 			if !ok || fn.Body == nil {
 				continue
 			}
+			w := newFormProbeWiring(fset, info, fn.Body)
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				as, ok := n.(*ast.AssignStmt)
-				if !ok || len(as.Rhs) != 1 {
-					return true
-				}
-				c, ok := as.Rhs[0].(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				if id, ok := c.Fun.(*ast.Ident); !ok || id.Name != name {
+				if !ok || len(as.Rhs) != 1 || formProbeCallee(as.Rhs[0]) != an.assembler {
 					return true
 				}
 				assigned++
 				for i, interceptor := range formProbeChainInterceptors {
-					var links string
-					if i < len(as.Lhs) {
-						if id, ok := as.Lhs[i].(*ast.Ident); ok && id.Name != "_" {
-							links = id.Name
-						}
-					}
-					if links == "" || !formProbeSpreadInto(fn.Body, interceptor, links) {
-						out = append(out, fn.Name.Name+": результат "+strconv.Itoa(i+1)+" сборщика "+name+
-							" не раскрыт в grpc."+interceptor+" — цепочка собрана, но в слушатель не уезжает")
-						continue
-					}
-					if where := formProbeReassigned(fn.Body, as, name, links); where != "" {
-						out = append(out, fn.Name.Name+": результат "+strconv.Itoa(i+1)+" сборщика "+name+
-							" ("+links+") переприсвоен после сборки ("+where+") — раскрывается уже не собранная цепочка")
+					if why := w.linkProblem(as, i, interceptor, an); why != "" {
+						out = append(out, fn.Name.Name+": результат "+strconv.Itoa(i+1)+" сборщика "+an.assembler+" "+why)
 					}
 				}
 				return true
@@ -805,100 +902,407 @@ func formProbeChainReachesListener(files []*ast.File, name string) []string {
 		}
 	}
 	if assigned == 0 {
-		out = append(out, "результат "+name+" не присвоен ни в одной функции корня — до слушателя ему не дойти")
+		out = append(out, "результат "+an.assembler+" не присвоен ни в одной функции корня — до слушателя ему не дойти")
 	}
 	return out
 }
 
-// formProbeReassigned — пишется ли перечень links после его сборки assembly
-// внутри body: первая такая запись строкой формы, либо пусто.
-//
-// Отказ — на ЛЮБУЮ запись после сборки, а не только «между сборкой и
-// раскрытием»: в цикле либо замыкании запись, стоящая текстом после
-// раскрытия, исполняется до следующего, и лексический порядок о порядке
-// исполнения не говорит. Записью считаются: присваивание самому перечню
-// (`=` и `:=` с ним в левой части, `+=`), его элементу (`links[i] =`), ключ и
-// значение перебора (`for _, links = range`) и объявление того же имени
-// (`var links = …`) — затенённое имя раскрывает уже не собранный перечень.
-// Повторный вызов самого сборщика записью не считается: это сборка, а не
-// подмена. Граница: запись через указатель (`p := &links; *p = …`) и
-// передачу перечня функции, пишущей в его элементы, страж не видит — в корне
-// таких форм нет, и цена их распознавания — разбор потока данных.
-func formProbeReassigned(body *ast.BlockStmt, assembly *ast.AssignStmt, assembler, links string) string {
-	root := func(e ast.Expr) string {
-		for {
-			switch x := e.(type) {
-			case *ast.Ident:
-				return x.Name
-			case *ast.IndexExpr:
-				e = x.X
-			case *ast.ParenExpr:
-				e = x.X
-			default:
-				return ""
-			}
-		}
+// formProbeCallee — имя вызываемого: `f(…)` и `<пакет>.f(…)`; не вызов — пусто.
+func formProbeCallee(e ast.Expr) string {
+	c, ok := e.(*ast.CallExpr)
+	if !ok {
+		return ""
 	}
-	isAssembly := func(rhs []ast.Expr) bool {
-		if len(rhs) != 1 {
-			return false
-		}
-		c, ok := rhs[0].(*ast.CallExpr)
-		if !ok {
-			return false
-		}
-		id, ok := c.Fun.(*ast.Ident)
-		return ok && id.Name == assembler
+	switch fn := c.Fun.(type) {
+	case *ast.Ident:
+		return fn.Name
+	case *ast.SelectorExpr:
+		return fn.Sel.Name
 	}
-	var where string
+	return ""
+}
+
+// formProbeWiring — одна функция корня: родитель каждого узла и объявление и
+// употребления каждого объекта внутри неё.
+type formProbeWiring struct {
+	fset   *token.FileSet
+	info   *types.Info
+	body   *ast.BlockStmt
+	parent map[ast.Node]ast.Node
+	def    map[types.Object]*ast.Ident
+	uses   map[types.Object][]*ast.Ident
+}
+
+func newFormProbeWiring(fset *token.FileSet, info *types.Info, body *ast.BlockStmt) *formProbeWiring {
+	w := &formProbeWiring{fset: fset, info: info, body: body, parent: map[ast.Node]ast.Node{},
+		def: map[types.Object]*ast.Ident{}, uses: map[types.Object][]*ast.Ident{}}
+	var stack []ast.Node
 	ast.Inspect(body, func(n ast.Node) bool {
-		if where != "" || n == nil || n.Pos() <= assembly.End() {
-			return where == ""
+		if n == nil {
+			stack = stack[:len(stack)-1]
+			return false
 		}
-		switch x := n.(type) {
-		case *ast.AssignStmt:
-			if isAssembly(x.Rhs) {
-				return true
+		if len(stack) > 0 {
+			w.parent[n] = stack[len(stack)-1]
+		}
+		stack = append(stack, n)
+		if id, ok := n.(*ast.Ident); ok {
+			if obj := info.Defs[id]; obj != nil {
+				w.def[obj] = id
 			}
-			for _, l := range x.Lhs {
-				if root(l) == links {
-					where = "присваивание " + x.Tok.String()
+			if obj := info.Uses[id]; obj != nil {
+				w.uses[obj] = append(w.uses[obj], id)
+			}
+		}
+		return true
+	})
+	return w
+}
+
+func (w *formProbeWiring) line(n ast.Node) string {
+	return "строка " + strconv.Itoa(w.fset.Position(n.Pos()).Line)
+}
+
+func (w *formProbeWiring) object(e ast.Expr) types.Object {
+	id, ok := e.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	if obj := w.info.Defs[id]; obj != nil {
+		return obj
+	}
+	return w.info.Uses[id]
+}
+
+// spreadOf — раскрытие `<пакет>.<interceptor>(id...)` с ровно этим доводом.
+func (w *formProbeWiring) spreadOf(id *ast.Ident, interceptor string) *ast.CallExpr {
+	c, ok := w.parent[id].(*ast.CallExpr)
+	if !ok || c.Ellipsis == token.NoPos || len(c.Args) != 1 || c.Args[0] != id {
+		return nil
+	}
+	if sel, ok := c.Fun.(*ast.SelectorExpr); !ok || sel.Sel.Name != interceptor {
+		return nil
+	}
+	return c
+}
+
+// touch — как употреблён перечень помимо раскрытия: строкой для отказа.
+func (w *formProbeWiring) touch(id *ast.Ident) string {
+	how := "употребление"
+	switch p := w.parent[id].(type) {
+	case *ast.AssignStmt:
+		how = "значение присваивания — второе имя того же среза"
+		for _, l := range p.Lhs {
+			if l == id {
+				how = "присваивание " + p.Tok.String()
+			}
+		}
+	case *ast.IndexExpr:
+		how = "элемент"
+		if as, ok := w.parent[p].(*ast.AssignStmt); ok {
+			for _, l := range as.Lhs {
+				if l == p {
+					how = "запись элемента"
 				}
+			}
+		}
+	case *ast.UnaryExpr:
+		if p.Op == token.AND {
+			how = "взят адрес"
+		}
+	case *ast.CallExpr:
+		how = "довод вызова " + formProbeCallee(p)
+		if p.Ellipsis != token.NoPos {
+			how = "раскрыт ещё раз в " + formProbeCallee(p)
+		}
+	case *ast.RangeStmt:
+		how = "перебор range"
+	case *ast.ValueSpec:
+		how = "значение объявления var — второе имя того же среза"
+	}
+	return w.line(id) + ": " + how
+}
+
+// written — запись в объект после его рождения: присваивание (кроме except),
+// взятие адреса, ключ или значение перебора. Пусто — не записан.
+func (w *formProbeWiring) written(obj types.Object, except ast.Node) string {
+	for _, u := range w.uses[obj] {
+		switch p := w.parent[u].(type) {
+		case *ast.AssignStmt:
+			if ast.Node(p) == except {
+				continue
+			}
+			for _, l := range p.Lhs {
+				if l == u {
+					return w.line(u) + ": присваивание " + p.Tok.String()
+				}
+			}
+		case *ast.UnaryExpr:
+			if p.Op == token.AND {
+				return w.line(u) + ": взят адрес"
 			}
 		case *ast.RangeStmt:
-			if (x.Key != nil && root(x.Key) == links) || (x.Value != nil && root(x.Value) == links) {
-				where = "перебор range"
+			if p.Key == u || p.Value == u {
+				return w.line(u) + ": перебор range"
 			}
-		case *ast.ValueSpec:
-			for _, id := range x.Names {
-				if id.Name == links {
-					where = "объявление var"
+		}
+	}
+	return ""
+}
+
+// definition — выражение, которым объект рождён в этой функции (`:=` либо
+// `var … = …`); nil — рождён не здесь либо без значения.
+func (w *formProbeWiring) definition(obj types.Object) ast.Expr {
+	id := w.def[obj]
+	if id == nil {
+		return nil
+	}
+	pick := func(names []ast.Expr, values []ast.Expr) ast.Expr {
+		for i, n := range names {
+			if n != id {
+				continue
+			}
+			switch {
+			case len(values) == len(names):
+				return values[i]
+			case len(values) == 1:
+				return values[0]
+			}
+		}
+		return nil
+	}
+	switch p := w.parent[id].(type) {
+	case *ast.AssignStmt:
+		if p.Tok == token.DEFINE {
+			return pick(p.Lhs, p.Rhs)
+		}
+	case *ast.ValueSpec:
+		names := make([]ast.Expr, len(p.Names))
+		for i, n := range p.Names {
+			names[i] = n
+		}
+		return pick(names, p.Values)
+	}
+	return nil
+}
+
+// linkProblem — путь результата i сборки as до публичного слушателя (шаги 1–6
+// шапки `formProbeChainReachesListener`); первое нарушение строкой, либо пусто.
+func (w *formProbeWiring) linkProblem(as *ast.AssignStmt, i int, interceptor string, an formProbeAnchors) string {
+	var id *ast.Ident
+	if i < len(as.Lhs) {
+		id, _ = as.Lhs[i].(*ast.Ident)
+	}
+	if id == nil || id.Name == "_" {
+		return "выброшен — цепочка собрана, но в слушатель не уезжает"
+	}
+	links := w.info.Defs[id]
+	if links == nil {
+		return "(" + id.Name + ") объявлен не этой сборкой (" + w.line(as) + ") — перечень, живший до неё, " +
+			"мог быть раскрыт или записан раньше сборки"
+	}
+	// Шаг 2: одно употребление — раскрытие; всё прочее — нарушение.
+	var (
+		spread  *ast.CallExpr
+		touched []string
+	)
+	for _, u := range w.uses[links] {
+		if c := w.spreadOf(u, interceptor); c != nil && spread == nil {
+			spread = c
+			continue
+		}
+		touched = append(touched, w.touch(u))
+	}
+	if len(touched) > 0 {
+		return "(" + id.Name + ") после сборки употреблён не раскрытием (" + strings.Join(touched, "; ") +
+			") — раскрывается уже не собранная цепочка"
+	}
+	if spread == nil {
+		why := "(" + id.Name + ") не раскрыт в grpc." + interceptor + " — цепочка собрана, но в слушатель не уезжает"
+		if shadow := w.shadowSpread(id.Name, interceptor); shadow != "" {
+			why += "; раскрыт одноимённый, но другой перечень (" + shadow + ") — затенение имени"
+		}
+		return why
+	}
+	// Шаг 3: прямой довод конструктора сервера, без лишних звеньев.
+	srvCall, ok := w.parent[spread].(*ast.CallExpr)
+	if !ok || formProbeCallee(srvCall) != an.newServer || !formProbeIsArg(srvCall, spread) {
+		return "(" + id.Name + ") раскрыт не прямым доводом " + an.newServer + " (" + w.line(spread) +
+			") — до какого слушателя он доходит, не доказать"
+	}
+	assembled := map[types.Object]bool{}
+	for _, l := range as.Lhs {
+		if obj := w.object(l); obj != nil {
+			assembled[obj] = true
+		}
+	}
+	for _, a := range srvCall.Args {
+		c, ok := a.(*ast.CallExpr)
+		if !ok || !formProbeInterceptorOptions[formProbeCallee(c)] {
+			continue
+		}
+		if len(c.Args) == 1 && assembled[w.object(c.Args[0])] {
+			continue
+		}
+		return "попадает в сервер (" + w.line(srvCall) + "), который несёт сверх неё звенья (" + w.line(c) + ": grpc." +
+			formProbeCallee(c) + ") — слушатель исполняет не ту цепочку, что судит проба"
+	}
+	// Шаг 4: сервер присвоен имени и не переписан.
+	srvAssign, ok := w.parent[srvCall].(*ast.AssignStmt)
+	var srv types.Object
+	if ok && len(srvAssign.Lhs) == 1 && len(srvAssign.Rhs) == 1 {
+		srv = w.object(srvAssign.Lhs[0])
+	}
+	if srv == nil || srv.Name() == "_" {
+		return "попадает в сервер (" + w.line(srvCall) + "), не присвоенный имени, — до слушателя не проследить"
+	}
+	if where := w.written(srv, srvAssign); where != "" {
+		return "попадает в сервер " + srv.Name() + ", переписанный после сборки (" + where +
+			") — слушатель обслуживает уже другой сервер"
+	}
+	// Шаг 5: на нём монтируются публичные службы.
+	if !w.registersOn(srv, an.registerPublic) {
+		return "попадает в сервер " + srv.Name() + ", на котором корень НЕ монтирует публичные службы (" +
+			an.registerPublic + ") — цепочка уезжает не в публичный сервер"
+	}
+	// Шаг 6: он обслуживает слушатель публичного адреса.
+	if why := w.servesPublic(srv, an); why != "" {
+		return "попадает в сервер " + srv.Name() + ", который " + why
+	}
+	return ""
+}
+
+// shadowSpread — раскрытие в interceptor одноимённого перечня ДРУГОГО объекта:
+// где раскрыт и где объявлен; пусто — такого нет.
+func (w *formProbeWiring) shadowSpread(name, interceptor string) string {
+	var where string
+	ast.Inspect(w.body, func(n ast.Node) bool {
+		id, ok := n.(*ast.Ident)
+		if !ok || where != "" || id.Name != name || w.spreadOf(id, interceptor) == nil {
+			return where == ""
+		}
+		where = "раскрыт в " + w.line(id)
+		if obj := w.object(id); obj != nil {
+			if d := w.def[obj]; d != nil {
+				where += ", объявлен в " + w.line(d)
+				// Параметр и результат: имя → поле → перечень полей → тип функции.
+				if _, ok := w.parent[w.parent[w.parent[d]]].(*ast.FuncType); ok {
+					where += " параметром либо результатом замыкания"
 				}
 			}
 		}
-		return where == ""
+		return false
 	})
 	return where
 }
 
-// formProbeSpreadInto — раскрывается ли перечень links в вызов interceptor
-// внутри body: `<пакет>.<interceptor>(links...)`.
-func formProbeSpreadInto(body *ast.BlockStmt, interceptor, links string) bool {
+// registersOn — монтирует ли вызов name службы на сервер srv: srv употреблён в
+// первом доводе `name(…)` (прямо либо через обёртку допуска).
+func (w *formProbeWiring) registersOn(srv types.Object, name string) bool {
 	found := false
-	ast.Inspect(body, func(n ast.Node) bool {
+	ast.Inspect(w.body, func(n ast.Node) bool {
 		c, ok := n.(*ast.CallExpr)
-		if !ok || c.Ellipsis == token.NoPos || len(c.Args) != 1 {
+		if !ok || found {
+			return !found
+		}
+		if fn, ok := c.Fun.(*ast.Ident); !ok || fn.Name != name || len(c.Args) == 0 {
 			return true
 		}
-		if sel, ok := c.Fun.(*ast.SelectorExpr); !ok || sel.Sel.Name != interceptor {
-			return true
-		}
-		if id, ok := c.Args[0].(*ast.Ident); ok && id.Name == links {
-			found = true
-		}
-		return true
+		ast.Inspect(c.Args[0], func(m ast.Node) bool {
+			if id, ok := m.(*ast.Ident); ok && w.object(id) == srv {
+				found = true
+			}
+			return !found
+		})
+		return !found
 	})
 	return found
+}
+
+// servesPublic — каждый `srv.Serve(l)` обслуживает слушатель публичного адреса,
+// и такой вызов есть; иначе — почему нет.
+func (w *formProbeWiring) servesPublic(srv types.Object, an formProbeAnchors) string {
+	served := 0
+	for _, u := range w.uses[srv] {
+		sel, ok := w.parent[u].(*ast.SelectorExpr)
+		if !ok || sel.X != u || sel.Sel.Name != "Serve" {
+			continue
+		}
+		call, ok := w.parent[sel].(*ast.CallExpr)
+		if !ok || call.Fun != sel || len(call.Args) != 1 {
+			continue
+		}
+		served++
+		if why := w.publicListener(call.Args[0], an); why != "" {
+			return "обслуживает (" + w.line(call) + ") слушатель " + why
+		}
+	}
+	if served == 0 {
+		return "ни одним вызовом Serve не обслуживает слушатель — до публичного слушателя цепочка не доходит"
+	}
+	return ""
+}
+
+// publicListener — слушатель рождён `net.Listen` на публичном адресе и не
+// переписан; иначе — почему нет.
+func (w *formProbeWiring) publicListener(e ast.Expr, an formProbeAnchors) string {
+	lis := w.object(e)
+	if lis == nil {
+		return "не именем — его адрес не проследить"
+	}
+	birth, ok := w.definition(lis).(*ast.CallExpr)
+	if !ok || !formProbeIsNetListen(birth) {
+		return lis.Name() + ", не рождённый net.Listen в этой функции, — его адрес не проследить"
+	}
+	if where := w.written(lis, nil); where != "" {
+		return lis.Name() + ", переписанный после рождения (" + where + ")"
+	}
+	addr := birth.Args[1]
+	if obj := w.object(addr); obj != nil {
+		if where := w.written(obj, nil); where != "" {
+			return lis.Name() + " на адресе " + obj.Name() + ", переписанном после рождения (" + where + ")"
+		}
+		addr = w.definition(obj)
+	}
+	if !formProbePublicAddr(addr, an) {
+		return lis.Name() + " НЕ на публичном адресе (<…>." + an.addrField + "." + an.addrMethod +
+			"()) — цепочка уезжает не в публичный слушатель"
+	}
+	return ""
+}
+
+// formProbeIsArg — e стоит доводом вызова c.
+func formProbeIsArg(c *ast.CallExpr, e ast.Expr) bool {
+	for _, a := range c.Args {
+		if a == e {
+			return true
+		}
+	}
+	return false
+}
+
+// formProbeIsNetListen — вызов есть `net.Listen(<сеть>, <адрес>)`.
+func formProbeIsNetListen(c *ast.CallExpr) bool {
+	sel, ok := c.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Listen" || len(c.Args) != 2 {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "net"
+}
+
+// formProbePublicAddr — выражение есть `<…>.<addrField>.<addrMethod>()`.
+func formProbePublicAddr(e ast.Expr, an formProbeAnchors) bool {
+	c, ok := e.(*ast.CallExpr)
+	if !ok || len(c.Args) != 0 {
+		return false
+	}
+	sel, ok := c.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != an.addrMethod {
+		return false
+	}
+	field, ok := sel.X.(*ast.SelectorExpr)
+	return ok && field.Sel.Name == an.addrField
 }
 
 // formProbeStreams — потоковый ли метод: по дескриптору контракта.
@@ -988,42 +1392,184 @@ func TestIAM_PNE_1_21_A_ClassCrossCheckNamesANarrowedVerb(t *testing.T) {
 	}
 }
 
+// formProbeLawfulRoot — синтетический корень с ДВУМЯ серверами, как у
+// `runServe`: публичный (сборщик `chain`, публичные службы, публичный адрес) и
+// внутренний (свой перечень `iu`/`is`, внутренние службы и адрес). Без второго
+// сервера перестановку цепочек слушателей (O03) таблица различить не могла бы.
+const formProbeLawfulRoot = `package main
+func serve() {
+	u, s, err := chain()
+	_ = err
+	pub := grpcsrv.NewServer(pubCreds, grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...))
+	in := grpcsrv.NewServer(inCreds, grpc.ChainUnaryInterceptor(iu...), grpc.ChainStreamInterceptor(is...))
+	registerPublicServices(adm.Registrar(pub), svcs)
+	registerInternalServices(adm.Registrar(in), svcs)
+	addr := cfg.APIServer.ListenAddress()
+	lis, err := net.Listen("tcp", addr)
+	ilis, err := net.Listen("tcp", cfg.APIServer.InternalListenAddress())
+	run(func() error { return pub.Serve(lis) })
+	run(func() error { return in.Serve(ilis) })
+}
+`
+
+// formProbeSyntheticAnchors — якоря синтетического корня.
+var formProbeSyntheticAnchors = formProbeAnchors{
+	assembler: "chain", newServer: "NewServer", registerPublic: "registerPublicServices",
+	addrField: "APIServer", addrMethod: "ListenAddress",
+}
+
 // TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection — страж «собранная
-// цепочка доходит до слушателя» на синтетическом корне: законная проводка
-// молчит, выброшенный, подменённый и переписанный после сборки результат
-// названы; запись в соседнюю переменную той же сборки — молчит.
+// цепочка доходит до ПУБЛИЧНОГО слушателя» на синтетическом корне. Каждая
+// строка меняет законный корень ОДНОЙ правкой (замена фрагмента, который в
+// корне встречается ровно один раз — иначе инъекция не применена и строка
+// падает сама). Законные близнецы молчат; формы O01–O05 возврата
+// check-verifier и прежние формы переприсваивания названы с причиной.
 func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
 	const (
-		head         = "package main\nfunc serve() {\n"
-		lawfulSpread = "srv(grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...))\n"
+		pubLine = "pub := grpcsrv.NewServer(pubCreds, grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...))"
+		inLine  = "in := grpcsrv.NewServer(inCreds, grpc.ChainUnaryInterceptor(iu...), grpc.ChainStreamInterceptor(is...))"
+		pubArgs = "grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...))"
+		pubVar  = "var pub *grpc.Server\n\t"
+		pubSet  = "pub = grpcsrv.NewServer(pubCreds, " + pubArgs
+		after   = "_ = err\n"
 	)
+	type edit struct{ old, new string }
 	for name, tc := range map[string]struct {
-		body string
-		want int
+		edits []edit
+		want  int
+		// texts — причины: каждое нарушение называет одну из них, и каждая
+		// названа хотя бы одним нарушением.
+		texts []string
 	}{
-		"законная проводка":     {"u, s, err := chain()\n_ = err\nsrv(grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...))\n", 0},
-		"однократная выброшена": {"_, s, err := chain()\n_ = err\nsrv(grpc.ChainUnaryInterceptor(other...), grpc.ChainStreamInterceptor(s...))\n", 1},
-		"обе подменены":         {"u, s, err := chain()\n_, _, _ = u, s, err\nsrv(grpc.ChainUnaryInterceptor(other...), grpc.ChainStreamInterceptor(other...))\n", 2},
-		"результат не присвоен": {"chain()\n", 1},
-		// Переприсваивание перечня после сборки — один факт против законной
-		// проводки: раскрыт тот же идентификатор, но уже не собранный сборщиком.
-		"однократная переприсвоена": {"u, s, err := chain()\n_ = err\nu = other\n" + lawfulSpread, 1},
-		"потоковая дописана":        {"u, s, err := chain()\n_ = err\ns = append(s, extra)\n" + lawfulSpread, 1},
-		"элемент подменён":          {"u, s, err := chain()\n_ = err\nu[0] = extra\n" + lawfulSpread, 1},
-		"многозначное присваивание": {"u, s, err := chain()\n_ = err\nx, s := 1, other\n_ = x\n" + lawfulSpread, 1},
-		"перебором по перечню":      {"u, s, err := chain()\n_ = err\nfor _, u = range lists {\n}\n" + lawfulSpread, 1},
-		"затенена во вложенном блоке": {"u, s, err := chain()\n_ = err\nif ok {\nvar u = other\n" +
-			lawfulSpread + "}\n", 1},
-		"обе переприсвоены":            {"u, s, err := chain()\n_ = err\nu, s = other, other\n" + lawfulSpread, 2},
-		"соседняя переменная — молчит": {"u, s, err := chain()\nerr = nil\n_ = err\n" + lawfulSpread, 0},
+		"законная проводка — молчит": {nil, 0, nil},
+		"законная: сервер объявлен var и присвоен = — молчит": {
+			[]edit{{pubLine, pubVar + pubSet}}, 0, nil},
+		"законная: адрес прямым доводом Listen — молчит": {
+			[]edit{{`net.Listen("tcp", addr)`, `net.Listen("tcp", cfg.APIServer.ListenAddress())`}}, 0, nil},
+		"законная: соседняя переменная сборки записана — молчит": {
+			[]edit{{after, "err = nil\n\t" + after}}, 0, nil},
+
+		// O03 — слушатель не различался: перестановки внутри одной функции.
+		"O03 цепочки публичного и внутреннего серверов переставлены": {
+			[]edit{{pubLine, "pub := grpcsrv.NewServer(pubCreds, grpc.ChainUnaryInterceptor(iu...), grpc.ChainStreamInterceptor(is...))"},
+				{inLine, "in := grpcsrv.NewServer(inCreds, " + pubArgs}},
+			2, []string{"попадает в сервер in, на котором корень НЕ монтирует публичные службы"}},
+		"O03 переставлена одна однократная полоса": {
+			[]edit{{"(u...), grpc.ChainStreamInterceptor(s...))", "(iu...), grpc.ChainStreamInterceptor(s...))"},
+				{"(iu...), grpc.ChainStreamInterceptor(is...))", "(u...), grpc.ChainStreamInterceptor(is...))"}},
+			2, []string{"попадает в сервер in, на котором корень НЕ монтирует публичные службы", "несёт сверх неё звенья"}},
+		"O03 публичные службы смонтированы на внутренний сервер": {
+			[]edit{{"registerPublicServices(adm.Registrar(pub)", "registerPublicServices(adm.Registrar(in)"}},
+			2, []string{"НЕ монтирует публичные службы (registerPublicServices)"}},
+		"O03 слушатели серверов переставлены": {
+			[]edit{{"pub.Serve(lis)", "pub.Serve(ilis)"}, {"in.Serve(ilis)", "in.Serve(lis)"}},
+			2, []string{"слушатель ilis НЕ на публичном адресе"}},
+		"O03 публичный слушатель открыт на внутреннем адресе": {
+			[]edit{{"addr := cfg.APIServer.ListenAddress()", "addr := cfg.APIServer.InternalListenAddress()"}},
+			2, []string{"НЕ на публичном адресе"}},
+		"O03 публичный сервер не обслуживает ни одного слушателя": {
+			[]edit{{"run(func() error { return pub.Serve(lis) })\n", ""}},
+			2, []string{"ни одним вызовом Serve"}},
+		"O03 публичный сервер несёт сверх цепочки звено": {
+			[]edit{{pubArgs, "grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...), grpc.UnaryInterceptor(bypass))"}},
+			2, []string{"несёт сверх неё звенья"}},
+		"O03 сервер переписан после сборки": {
+			[]edit{{"registerInternalServices", "pub = in\n\tregisterInternalServices"}},
+			2, []string{"переписанный после сборки"}},
+		"O03 слушатель переписан после рождения": {
+			[]edit{{"run(func() error { return pub.Serve(lis) })", "lis = ilis\n\trun(func() error { return pub.Serve(lis) })"}},
+			2, []string{"переписанный после рождения"}},
+		"раскрыт не прямым доводом конструктора сервера": {
+			[]edit{{"pub := grpcsrv.NewServer(pubCreds, grpc.ChainUnaryInterceptor(u...),",
+				"opt := grpc.ChainUnaryInterceptor(u...)\n\tpub := grpcsrv.NewServer(pubCreds, opt,"}},
+			1, []string{"раскрыт не прямым доводом NewServer"}},
+
+		// O01 — раскрытие до сборки: перечень объявлен раньше и раскрыт до неё.
+		"O01 раскрытие до сборки": {
+			[]edit{{"u, s, err := chain()\n\t_ = err\n\t" + pubLine,
+				"var u, s []X\n\tvar err error\n\t" + pubLine + "\n\tu, s, err = chain()\n\t_ = err"}},
+			2, []string{"объявлен не этой сборкой"}},
+		// O02, O05 — одноимённый перечень замыкания (тот же класс, что var в блоке).
+		"O02 параметр замыкания затеняет перечень": {
+			[]edit{{pubLine, pubVar + "func(u []X) {\n\t\t" + pubSet + "\n\t}(other)"}},
+			1, []string{"раскрыт одноимённый, но другой перечень"}},
+		"O05 именованный результат замыкания затеняет перечень": {
+			[]edit{{pubLine, pubVar + "func() (u []X) {\n\t\t" + pubSet + "\n\t\treturn\n\t}()"}},
+			1, []string{"параметром либо результатом замыкания"}},
+		"затенение объявлением var во вложенном блоке": {
+			[]edit{{pubLine, pubVar + "if ok {\n\t\tvar u = other\n\t\t" + pubSet + "\n\t}"}},
+			1, []string{"раскрыт одноимённый, но другой перечень"}},
+		// O04 — второе имя того же среза и родственные формы утечки.
+		"O04 второе имя того же среза": {
+			[]edit{{after, after + "\tv := u\n\tv[0] = extra\n"}},
+			1, []string{"второе имя того же среза"}},
+		"взят адрес перечня": {
+			[]edit{{after, after + "\tp := &u\n\t(*p)[0] = extra\n"}},
+			1, []string{"взят адрес"}},
+		"перечень передан функции": {
+			[]edit{{after, after + "\tmutate(s)\n"}},
+			1, []string{"довод вызова mutate"}},
+		"раскрыт ещё раз в другом сервере": {
+			[]edit{{inLine, "in := grpcsrv.NewServer(inCreds, grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(is...))"}},
+			1, []string{"раскрыт ещё раз в ChainUnaryInterceptor"}},
+
+		// Прежние формы: результат выброшен, подменён, переприсвоен.
+		"однократная выброшена": {
+			[]edit{{"u, s, err := chain()", "_, s, err := chain()"}}, 2, []string{"выброшен", "несёт сверх неё звенья"}},
+		"обе подменены": {
+			[]edit{{pubArgs, "grpc.ChainUnaryInterceptor(other...), grpc.ChainStreamInterceptor(other...))"}},
+			2, []string{"не раскрыт в grpc."}},
+		"результат не присвоен": {
+			[]edit{{"u, s, err := chain()", "chain()"}}, 1, []string{"не присвоен ни в одной функции"}},
+		"однократная переприсвоена": {
+			[]edit{{after, after + "\tu = other\n"}}, 1, []string{"присваивание ="}},
+		"потоковая дописана": {
+			[]edit{{after, after + "\ts = append(s, extra)\n"}}, 1, []string{"присваивание ="}},
+		"элемент подменён": {
+			[]edit{{after, after + "\tu[0] = extra\n"}}, 1, []string{"запись элемента"}},
+		"многозначное присваивание": {
+			[]edit{{after, after + "\tx, s := 1, other\n\t_ = x\n"}}, 1, []string{"присваивание :="}},
+		"перебором по перечню": {
+			[]edit{{after, after + "\tfor _, u = range lists {\n\t}\n"}}, 1, []string{"перебор range"}},
+		"обе переприсвоены": {
+			[]edit{{after, after + "\tu, s = other, other\n"}}, 2, []string{"присваивание ="}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f, err := parser.ParseFile(token.NewFileSet(), "root.go", head+tc.body+"}\n", 0)
-			if err != nil {
-				t.Fatalf("синтетический корень не разобран: %v", err)
+			src := formProbeLawfulRoot
+			for _, e := range tc.edits {
+				if n := strings.Count(src, e.old); n != 1 {
+					t.Fatalf("инъекция не применена: фрагмент %q в корне встречается %d раз, ожидался 1", e.old, n)
+				}
+				src = strings.Replace(src, e.old, e.new, 1)
 			}
-			if got := formProbeChainReachesListener([]*ast.File{f}, "chain"); len(got) != tc.want {
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, "root.go", src, 0)
+			if err != nil {
+				t.Fatalf("синтетический корень не разобран: %v\n%s", err, src)
+			}
+			got := formProbeChainReachesListener(fset, []*ast.File{f}, formProbeSyntheticAnchors)
+			if len(got) != tc.want {
 				t.Fatalf("нарушений %d, ожидалось %d: %v", len(got), tc.want, got)
+			}
+			named := map[string]bool{}
+			for _, g := range got {
+				matched := false
+				for _, text := range tc.texts {
+					if strings.Contains(g, text) {
+						matched, named[text] = true, true
+					}
+				}
+				if !matched {
+					t.Errorf("нарушение не называет ни одной из причин %q: %s", tc.texts, g)
+				}
+			}
+			for _, text := range tc.texts {
+				if !named[text] {
+					t.Errorf("причину %q не назвало ни одно нарушение: %v", text, got)
+				}
+			}
+			if tc.want > 0 {
+				t.Logf("%s", strings.Join(got, "\n"))
 			}
 		})
 	}
