@@ -70,7 +70,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -360,7 +359,8 @@ func callerNamed(ctx context.Context) bool {
 //     Отвечаем «область названа», чтобы полоса `Check` осталась ровно той же;
 //   - извлечение отказало — мы НЕ УСТАНОВИЛИ, что области нет. Дверь остаётся:
 //     неполученный ответ не есть «спрашивать не о чем»;
-//   - идентификатор пуст — области нет, и вопрос решает его решатель.
+//   - идентификатор отсутствует (`objectIDAbsent`) — области нет, и вопрос
+//     решает его решатель.
 func questionNamesNoScope(extract authz.ObjectExtractor, req any) bool {
 	if extract == nil {
 		return false
@@ -369,7 +369,24 @@ func questionNamesNoScope(extract authz.ObjectExtractor, req any) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(id) == ""
+	return objectIDAbsent(id)
+}
+
+// objectIDAbsent — извлечённый идентификатор объекта ОТСУТСТВУЕТ.
+//
+// Определение одно на пакет: им судят и дверь (`questionNamesNoScope` —
+// уходит ли вопрос своему решателю), и звено формы (`FormUnary` — есть ли что
+// судить). Два определения разошлись бы ровно на граничном входе: звено
+// отвергло бы строку как неверную форму, а дверь сочла бы ту же строку
+// отсутствием и отдала вопрос обработчику, — и шапка звена солгала бы о его
+// месте в цепочке. Паритет держит проба
+// `TestOwnDoor_FormLinkAndDoorShareOneDefinitionOfAbsence`.
+//
+// Отсутствие — только пустая строка: извлекатель отдаёт поле сырым, а строка
+// из одних пробелов — не отсутствие, а неверная форма: идентификатором она не
+// бывает ни при каком состоянии базы.
+func objectIDAbsent(id string) bool {
+	return id == ""
 }
 
 // questionGoesToItsOwnDecider — вопрос о правах решает `caller_authority.go`, а

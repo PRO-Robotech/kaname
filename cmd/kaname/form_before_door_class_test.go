@@ -756,7 +756,9 @@ var formProbeChainInterceptors = []string{"ChainUnaryInterceptor", "ChainStreamI
 // раскрывается (`…`) в `grpc.ChainUnaryInterceptor` и `grpc.ChainStreamInterceptor`
 // той же функции. Звено, собранное и выброшенное (`_`) либо подменённое другим
 // перечнем, — нарушение: проба судила бы цепочку, которой слушатель не несёт.
-// Присваиваний ноль — тоже нарушение: зов без результата не провязка.
+// Перечень, раскрытый под тем же именем, но переписанный после сборки
+// (`formProbeReassigned`), — то же нарушение. Присваиваний ноль — тоже
+// нарушение: зов без результата не провязка.
 func formProbeChainReachesListener(files []*ast.File, name string) []string {
 	var (
 		out      []string
@@ -791,6 +793,11 @@ func formProbeChainReachesListener(files []*ast.File, name string) []string {
 					if links == "" || !formProbeSpreadInto(fn.Body, interceptor, links) {
 						out = append(out, fn.Name.Name+": результат "+strconv.Itoa(i+1)+" сборщика "+name+
 							" не раскрыт в grpc."+interceptor+" — цепочка собрана, но в слушатель не уезжает")
+						continue
+					}
+					if where := formProbeReassigned(fn.Body, as, name, links); where != "" {
+						out = append(out, fn.Name.Name+": результат "+strconv.Itoa(i+1)+" сборщика "+name+
+							" ("+links+") переприсвоен после сборки ("+where+") — раскрывается уже не собранная цепочка")
 					}
 				}
 				return true
@@ -801,6 +808,77 @@ func formProbeChainReachesListener(files []*ast.File, name string) []string {
 		out = append(out, "результат "+name+" не присвоен ни в одной функции корня — до слушателя ему не дойти")
 	}
 	return out
+}
+
+// formProbeReassigned — пишется ли перечень links после его сборки assembly
+// внутри body: первая такая запись строкой формы, либо пусто.
+//
+// Отказ — на ЛЮБУЮ запись после сборки, а не только «между сборкой и
+// раскрытием»: в цикле либо замыкании запись, стоящая текстом после
+// раскрытия, исполняется до следующего, и лексический порядок о порядке
+// исполнения не говорит. Записью считаются: присваивание самому перечню
+// (`=` и `:=` с ним в левой части, `+=`), его элементу (`links[i] =`), ключ и
+// значение перебора (`for _, links = range`) и объявление того же имени
+// (`var links = …`) — затенённое имя раскрывает уже не собранный перечень.
+// Повторный вызов самого сборщика записью не считается: это сборка, а не
+// подмена. Граница: запись через указатель (`p := &links; *p = …`) и
+// передачу перечня функции, пишущей в его элементы, страж не видит — в корне
+// таких форм нет, и цена их распознавания — разбор потока данных.
+func formProbeReassigned(body *ast.BlockStmt, assembly *ast.AssignStmt, assembler, links string) string {
+	root := func(e ast.Expr) string {
+		for {
+			switch x := e.(type) {
+			case *ast.Ident:
+				return x.Name
+			case *ast.IndexExpr:
+				e = x.X
+			case *ast.ParenExpr:
+				e = x.X
+			default:
+				return ""
+			}
+		}
+	}
+	isAssembly := func(rhs []ast.Expr) bool {
+		if len(rhs) != 1 {
+			return false
+		}
+		c, ok := rhs[0].(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		id, ok := c.Fun.(*ast.Ident)
+		return ok && id.Name == assembler
+	}
+	var where string
+	ast.Inspect(body, func(n ast.Node) bool {
+		if where != "" || n == nil || n.Pos() <= assembly.End() {
+			return where == ""
+		}
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			if isAssembly(x.Rhs) {
+				return true
+			}
+			for _, l := range x.Lhs {
+				if root(l) == links {
+					where = "присваивание " + x.Tok.String()
+				}
+			}
+		case *ast.RangeStmt:
+			if (x.Key != nil && root(x.Key) == links) || (x.Value != nil && root(x.Value) == links) {
+				where = "перебор range"
+			}
+		case *ast.ValueSpec:
+			for _, id := range x.Names {
+				if id.Name == links {
+					where = "объявление var"
+				}
+			}
+		}
+		return where == ""
+	})
+	return where
 }
 
 // formProbeSpreadInto — раскрывается ли перечень links в вызов interceptor
@@ -912,7 +990,8 @@ func TestIAM_PNE_1_21_A_ClassCrossCheckNamesANarrowedVerb(t *testing.T) {
 
 // TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection — страж «собранная
 // цепочка доходит до слушателя» на синтетическом корне: законная проводка
-// молчит, выброшенный и подменённый результат названы.
+// молчит, выброшенный, подменённый и переписанный после сборки результат
+// названы; запись в соседнюю переменную той же сборки — молчит.
 func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
 	const (
 		head         = "package main\nfunc serve() {\n"
