@@ -24,6 +24,7 @@ package pg_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,25 +146,16 @@ func TestModuleRoleRetirementOfOneRoleLaysOneStatement(t *testing.T) {
 	assert.Equal(t, 1, c.MaxPerTx, "близнец: одна снятая роль — один оператор на любой ревизии")
 }
 
-// seedGrantOnlyManifest — посев одной выдачи без вступления в группу: один
-// кортеж журнала (близнец посева с выдачей и вступлением).
-const seedGrantOnlyManifest = `
-apiVersion: iam/v1
-module: vpc
-resources: []
-seed:
-  serviceAccounts:
-    - name: kacho-vpc
-      account: kacho-system
-      description: "Module SA: kacho-vpc (SEC-C least-priv)"
-  accessBindings:
-    - subjects:
-        - {type: serviceAccount, name: kacho-vpc}
-      grantedRelation: system_viewer
-      scopeType: iam.cluster
-      scopeId: cluster_root
-      target: allInScope
-`
+// seedGrantOnlyManifest — манифест пробы посева без раздела вступлений: одна
+// выдача, один кортеж журнала (близнец посева с выдачей и вступлением). Выводится
+// из seedProbeManifest, а не пишется вторым литералом: имена посевной личности
+// живут одним местом (перепись `seed-identity-names-its-own-service`).
+func seedGrantOnlyManifest(t *testing.T) string {
+	t.Helper()
+	doc, joins, ok := strings.Cut(seedProbeManifest, "  joins:")
+	require.True(t, ok && joins != "", "предпосылка: манифест пробы посева несёт раздел вступлений")
+	return doc
+}
 
 func applySeedCounted(t *testing.T, doc string) journalstmt.Census {
 	t.Helper()
@@ -191,6 +183,6 @@ func TestModuleSeedWithGrantAndJoinLaysItsJournalInOneStatement(t *testing.T) {
 
 func TestModuleSeedWithOneGrantLaysOneStatement(t *testing.T) {
 	skipShort(t)
-	c := applySeedCounted(t, seedGrantOnlyManifest)
+	c := applySeedCounted(t, seedGrantOnlyManifest(t))
 	assert.Equal(t, 1, c.MaxPerTx, "близнец: один кортеж посева — один оператор на любой ревизии")
 }
