@@ -15,7 +15,7 @@ package user
 // двойник писателя: утверждается то, что положила база.
 //
 // Близнецы — пути той же транзакции с ОДНИМ набором кортежей (приглашение без
-// проекта, регистрация без приглашения): один оператор на любой ревизии, и
+// проекта, активация без личных ресурсов): один оператор на любой ревизии, и
 // счётчик, читающий «один», отличим от счётчика, читающего что угодно.
 
 import (
@@ -35,6 +35,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/journalstmt"
 )
 
@@ -125,58 +126,62 @@ func TestInvite_WithoutProjectLaysOneStatement(t *testing.T) {
 	assert.Equal(t, 1, c.MaxPerTx, "близнец: один набор кортежей — один оператор на любой ревизии")
 }
 
-func TestActivateInviteOnVerification_LaysItsJournalInOneStatement(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	w, exec := newJournalWorld(t)
-	email := fmt.Sprintf("jrn617-act-%s@example.test", strings.ToLower(w.prj[4:10]))
+// pendingInvitee приглашает адрес без проекта и готовит строку к активации так,
+// как её готовит полоса формы: способ входа записан на строку приглашения
+// регистрацией (kaname#456), адрес подтверждён. Без способа входа действующую
+// личность база не фиксирует (`users_active_has_a_way_in_fk`).
+func (w *journalWorld) pendingInvitee(t *testing.T, exec func(string, ...any), tag string) domain.User {
+	t.Helper()
+	email := fmt.Sprintf("jrn617-%s-%s@example.test", tag, strings.ToLower(w.prj[4:10]))
 	w.invite(t, email, false)
-
 	rd, err := w.repo.Reader(w.ctx)
 	require.NoError(t, err)
 	pendings, err := rd.Users().FindPendingByEmail(w.ctx, domain.Email(email))
 	_ = rd.Rollback(w.ctx)
 	require.NoError(t, err)
 	require.Len(t, pendings, 1, "предпосылка: приглашение завело строку PENDING")
-	// Отметка подтверждения адреса — условие оператора активации; ставит её
-	// полоса подтверждения раньше той же транзакцией, здесь — фикстура.
+	exec(activewayin.InviteePasswordSQL, string(pendings[0].ID))
 	exec(`UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, string(pendings[0].ID))
-	w.probe.Reset(t, w.ctx)
+	return pendings[0]
+}
 
+// activateCounted исполняет шаг активации в своей транзакции и возвращает перепись.
+func (w *journalWorld) activateCounted(t *testing.T, step func(Writer) error) journalstmt.Census {
+	t.Helper()
+	w.probe.Reset(t, w.ctx)
 	wr, err := w.repo.Writer(w.ctx)
 	require.NoError(t, err)
 	defer func() { _ = wr.Rollback(context.Background()) }()
-	_, err = ActivateInviteOnVerificationTx(w.ctx, wr, pendings[0], string(pendings[0].ID))
-	require.NoError(t, err, "активация приглашения в исходе подтверждения")
+	require.NoError(t, step(wr), "шаг активации приглашения")
 	require.NoError(t, wr.Commit(w.ctx))
-
 	c := w.probe.Count(t, w.ctx)
 	t.Logf("перепись журнала: транзакций %d, операторов %d, наибольшее на транзакцию %d", c.Transactions, c.Statements, c.MaxPerTx)
 	require.Positive(t, c.Statements, "предпосылка: активация писала журнал")
-	assert.Equal(t, 1, c.MaxPerTx, "активация кладёт указатель личности и личные ресурсы одним оператором журнала")
+	return c
 }
 
-func TestRegisterMirror_WithoutInviteLaysOneStatement(t *testing.T) {
+func TestActivateInviteOnVerification_LaysItsJournalInOneStatement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
-	w, _ := newJournalWorld(t)
-	w.probe.Reset(t, w.ctx)
-
-	wr, err := w.repo.Writer(w.ctx)
-	require.NoError(t, err)
-	defer func() { _ = wr.Rollback(context.Background()) }()
-	_, err = RegisterMirrorTx(w.ctx, wr, MirrorInput{
-		Email:           domain.Email(fmt.Sprintf("jrn617-reg-%s@example.test", strings.ToLower(w.prj[4:10]))),
-		ExternalID:      domain.NewOwnLaneSubject(),
-		CandidateUserID: domain.UserID(ids.NewID(domain.PrefixUser)),
-		Actor:           "jrn617",
+	w, exec := newJournalWorld(t)
+	p := w.pendingInvitee(t, exec, "act")
+	c := w.activateCounted(t, func(wr Writer) error {
+		_, err := ActivateInviteOnVerificationTx(w.ctx, wr, p, string(p.ID))
+		return err
 	})
-	require.NoError(t, err, "регистрация нового адреса")
-	require.NoError(t, wr.Commit(w.ctx))
+	assert.Equal(t, 1, c.MaxPerTx, "активация кладёт указатель личности и личные ресурсы одним оператором журнала")
+}
 
-	c := w.probe.Count(t, w.ctx)
-	require.Positive(t, c.Statements, "предпосылка: регистрация писала журнал")
-	assert.Equal(t, 1, c.MaxPerTx, "близнец: личные ресурсы одним набором — один оператор на любой ревизии")
+func TestActivateInvite_AloneLaysOneStatement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	w, exec := newJournalWorld(t)
+	p := w.pendingInvitee(t, exec, "one")
+	c := w.activateCounted(t, func(wr Writer) error {
+		_, err := ActivateInviteTx(w.ctx, wr, p, domain.NewOwnLaneSubject(), "", string(p.ID))
+		return err
+	})
+	assert.Equal(t, 1, c.MaxPerTx, "близнец: одна активация без личных ресурсов — один оператор на любой ревизии")
 }
