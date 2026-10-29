@@ -346,6 +346,9 @@ type fakeRepo struct {
 	mu          sync.Mutex
 	insertCount int
 	fgaEmitted  []service.RelationTuple
+	// fgaJournalCalls — сколько операторов журнала прав положила транзакция
+	// (kaname#617: один на транзакцию).
+	fgaJournalCalls int
 	// ownerBindings records the owner AccessBinding(s) co-committed by
 	// Account.Create.
 	ownerBindings []domain.AccessBinding
@@ -435,6 +438,7 @@ type fakeWriter struct {
 func (w *fakeWriter) EmitFGARelationWrite(_ context.Context, tuples []service.RelationTuple) error {
 	w.repo.mu.Lock()
 	w.repo.fgaEmitted = append(w.repo.fgaEmitted, tuples...)
+	w.repo.fgaJournalCalls++
 	w.repo.mu.Unlock()
 	return nil
 }

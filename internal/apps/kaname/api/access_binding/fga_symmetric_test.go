@@ -1033,6 +1033,7 @@ func (w *fakeABWtr) EmitSubjectChangeEvent(_ context.Context, _ ab_repo.SubjectC
 
 // Capture emitted FGA tuples for the symmetric test below.
 func (w *fakeABWtr) EmitRelationWrite(_ context.Context, tuples []ab_repo.RelationTuple) error {
+	w.repo.recordTxOp("emit_relation_write")
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
 	w.repo.fgaWritten = append(w.repo.fgaWritten, tuples...)
