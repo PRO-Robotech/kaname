@@ -253,8 +253,30 @@ const ProbeFailureMark = "ПРОБЫ УПАЛИ:"
 // подстрокой зеленел бы на собственном объяснении и переводил бы в «упали
 // пробы» цель, отказавшую по-настоящему.
 func IsProbeFailure(output string) bool {
+	return anyLineStartsWith(output, ProbeFailureMark)
+}
+
+// goTestFailLine — строка, которой `go test` сам объявляет упавшую пробу. Её
+// печатает цель, зовущая `go test` напрямую (`cla-check`), — второй производитель
+// признака «проба упала» рядом с ProbeFailureMark рецепта проб модуля.
+const goTestFailLine = "--- FAIL:"
+
+// probeFailed — упала ли среди исполненных целью проб хоть одна: объявил это
+// рецепт проб модуля своей меткой либо `go test` своей строкой.
+//
+// Спрашивается РАНЬШЕ метки третьего исхода, и это несущий порядок. Упавшая
+// проба — вердикт, и рецепт печатает её текст как есть: слова метки, стоящие в
+// тексте отказа первыми на строке (вторая строка `t.Fatal`, отступ продолжения
+// у `go test`), подали бы красное третьим исходом — «находок 0 · условие не
+// создано 1», то есть зелёный гейт на красной пробе (задача #618).
+func probeFailed(output string) bool {
+	return IsProbeFailure(output) || anyLineStartsWith(output, goTestFailLine)
+}
+
+// anyLineStartsWith — стоит ли mark ПЕРВЫМ на какой-либо строке, после отступа.
+func anyLineStartsWith(output, mark string) bool {
 	for _, ln := range strings.Split(output, "\n") {
-		if strings.HasPrefix(strings.TrimLeft(ln, " \t"), ProbeFailureMark) {
+		if strings.HasPrefix(strings.TrimLeft(ln, " \t"), mark) {
 			return true
 		}
 	}
@@ -292,12 +314,7 @@ const UnmetPremiseMark = "УСЛОВИЕ НЕ СОЗДАНО"
 // Отступ слева снимается: `make` печатает вывод рецепта как есть, а рецепт
 // вправе отступать текст отказа.
 func IsUnmetPremise(output string) bool {
-	for _, ln := range strings.Split(output, "\n") {
-		if strings.HasPrefix(strings.TrimLeft(ln, " \t"), UnmetPremiseMark) {
-			return true
-		}
-	}
-	return false
+	return anyLineStartsWith(output, UnmetPremiseMark)
 }
 
 // Unmet — цель, у которой НЕ СОЗДАНО УСЛОВИЕ: она сказала это своим текстом.
@@ -331,8 +348,10 @@ func (u Unmet) String() string {
 // Исходов три, и каждый возвращается своим значением:
 //
 //	годно            — цель вышла кодом 0;
-//	находка          — цель вышла ненулевым и метки третьего исхода не печатала;
-//	условие не создано — цель вышла ненулевым и НАЗВАЛА предпосылку меткой.
+//	находка          — цель вышла ненулевым и метки третьего исхода не печатала
+//	                   либо упала исполненная ею проба (метка тогда не в счёт);
+//	условие не создано — цель вышла ненулевым, НАЗВАЛА предпосылку меткой и
+//	                     ни одна исполненная ею проба не упала (probeFailed).
 //
 // Находка при этом бывает ДВУХ РОДОВ, и род решает, что она скажет читателю:
 // отказала сама цель — либо цель дошла до конца и упали исполненные ею пробы
@@ -353,7 +372,7 @@ func RunTargets(dir string, targets []Target, run func(dir, target string) (int,
 		if code == 0 {
 			continue
 		}
-		if IsUnmetPremise(output) {
+		if !probeFailed(output) && IsUnmetPremise(output) {
 			unmet = append(unmet, Unmet{Target: t, Code: code, Tail: Tail(output, targetTailLines)})
 			continue
 		}
