@@ -191,9 +191,24 @@ type DeadPathCoordinate struct {
 	Note  string
 }
 
-// AcceptancePathCoordinateExemptions — ВЕДОМОСТЬ ПУСТА, и это её цель, а не её
-// поломка. Заводя запись — назови номер задачи и предикат снятия рядом.
-var AcceptancePathCoordinateExemptions []DeadPathCoordinate
+// AcceptancePathCoordinateExemptions — ведомость послаблений; пустая — её цель,
+// а не поломка. Заводя запись — назови номер задачи и предикат снятия рядом.
+var AcceptancePathCoordinateExemptions = []DeadPathCoordinate{
+	// Перечень «посеянного вопреки длине» снят задачей kaname#543 вместе со своим
+	// файлом: системные роли переведены на id канонической формы, исключать стало
+	// нечего. Одобренная приёмка account-id-may-be-supplied-at-create.md (kaname#549)
+	// называет файл в предикате DoD п.6 («`id чеканит сервер` — пусто»); снятый
+	// файл даёт ту же пустоту, но по отсутствию предмета, а правка текста сменила
+	// бы отпечаток одобренного документа.
+	// ПРЕДИКАТ СНЯТИЯ: следующая редакция приёмки не называет путь — тогда запись
+	// истекает сама (путь больше не стоит ни в одном документе).
+	{
+		Path:  "internal/domain/seeded_ids.go",
+		Docs:  []string{"docs/engineering/acceptance/account-id-may-be-supplied-at-create.md"},
+		Issue: 543,
+		Note:  "файл снят вместе с перечнем посеянного: системные роли переведены на каноническую форму (kaname#543)",
+	},
+}
 
 // PathCoordinatesIn разбирает документ: возвращает СУДИМЫЕ координаты и то, что
 // разбор видел, но судить не стал.

@@ -997,9 +997,9 @@ git grep -o 'corevalidate\.ResourceID('   -- 'services/iam/**/*.go' ':!*_test.go
 **Что было.** Роль `kacho-system.viewer` свод посеял идентификатором длиной 21,
 и строгая проверка, стоящая первым стейтментом каждого глагола роли, объявляла
 `INVALID_ARGUMENT` на id, который служба сама выдавала в ответе `List`. Задача
-kacho#1808 закрыла это вторым плечом — закрытым перечнем посеянного
-(`domain.SeededResourceIDs()`) под гейтом предмета
-`TestSeededIDExceptionsHaveASubject`.
+kacho#1808 закрыла это вторым плечом — закрытым перечнем посеянного в
+`internal/domain` под собственным гейтом предмета (запись обязана быть посеяна
+миграцией и отвергнута чеканной формой).
 
 **Что стало.** Задача kaname#543 (приёмка
 `docs/engineering/acceptance/system-roles-carry-canonical-ids.md`) перевела обе
