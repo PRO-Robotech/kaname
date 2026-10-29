@@ -30,7 +30,9 @@
 //
 // # Что судится текстом и в каком виде
 //
-// Исполняемая часть: комментарии `--` и `/* */` сняты, кавычки идентификаторов
+// Текст разбирается ОДНИМ проходом владельца разбора SQL миграций (`internal/migrations`,
+// `SQLBlankComments`, `SQLBlankStrings`, разрез `MigrationUpText`). Исполняемая
+// часть: комментарии `--` и `/* */` сняты, кавычки идентификаторов
 // сняты, регистр сведён, тела строковых литералов вынуты отдельно. Тела в
 // долларовых кавычках (`DO $$ … $$`, тела подпрограмм) судятся как код: в них
 // стоит исполняемый SQL. Формы записи — все, какие есть у Postgres для строк
@@ -58,16 +60,14 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // RoleCompositionFunction — функция события, которую обязан звать раздел.
 const RoleCompositionFunction = "kaname.resource_journal_emit_role_composition"
 
 var (
-	gooseUpMarkRe   = regexp.MustCompile(`(?mi)^[ \t]*--[ \t]*\+goose[ \t]+Up\b`)
-	gooseDownMarkRe = regexp.MustCompile(`(?mi)^[ \t]*--[ \t]*\+goose[ \t]+Down\b`)
-	gooseNoTxRe     = regexp.MustCompile(`(?mi)^[ \t]*--[ \t]*\+goose[ \t]+NO[ \t]+TRANSACTION\b`)
-
 	subtableNameRe = `(?:kaname\s*\.\s*)?(role_verb|role_rule_ref|role_rule_selectors)\b`
 	rowWriteRe     = regexp.MustCompile(`\b(?:insert\s+into|delete\s+from|merge\s+into|update)\s+(?:only\s+)?` + subtableNameRe)
 	copyFromRe     = regexp.MustCompile(`\bcopy\s+` + subtableNameRe + `[^;]*?\bfrom\b`)
@@ -76,7 +76,6 @@ var (
 	literalNameRe  = regexp.MustCompile(`\b(role_verb|role_rule_ref|role_rule_selectors)\b`)
 	emitCallRe     = regexp.MustCompile(`\bkaname\s*\.\s*resource_journal_emit_role_composition\s*\(`)
 	emitDeclRe     = regexp.MustCompile(`\bcreate\s+(?:or\s+replace\s+)?function\s+kaname\s*\.\s*resource_journal_emit_role_composition\b`)
-	dollarTagRe    = regexp.MustCompile(`^\$([A-Za-z_][A-Za-z0-9_]*)?\$`)
 )
 
 // RoleSubtableFinding — раздел миграции, нарушивший §3.2а.
@@ -137,7 +136,7 @@ func AuditRoleSubtableWriters(corpus TreeCorpus) ([]RoleSubtableFinding, RoleSub
 			continue
 		}
 		body := corpus[rel]
-		p := parsed{rel: rel, version: v.Value, noTx: gooseNoTxRe.MatchString(body), sections: splitRoleSubtableSections(body)}
+		p := parsed{rel: rel, version: v.Value, noTx: noTransaction(body), sections: splitRoleSubtableSections(body)}
 		census.Files++
 		census.Sections += len(p.sections)
 		files = append(files, p)
@@ -189,7 +188,8 @@ func AuditRoleSubtableWriters(corpus TreeCorpus) ([]RoleSubtableFinding, RoleSub
 				switch {
 				case f.noTx:
 					findings = append(findings, RoleSubtableFinding{File: f.rel, Section: s.name, Table: tbl,
-						Why: "раздел без транзакции (-- +goose NO TRANSACTION) пишет подтаблицу роли — запись " +
+						Why: "раздел файла под директивой мигратора «без транзакции» (NO TRANSACTION) пишет " +
+							"подтаблицу роли — запись " +
 							"и событие не атомарны"})
 				case !s.calls:
 					findings = append(findings, RoleSubtableFinding{File: f.rel, Section: s.name, Table: tbl,
@@ -206,25 +206,48 @@ func AuditRoleSubtableWriters(corpus TreeCorpus) ([]RoleSubtableFinding, RoleSub
 }
 
 // splitRoleSubtableSections режет файл на разделы `goose` и судит каждый.
-// Маркеры читаются в СЫРОМ тексте: они сами — комментарии.
+// Разрез — у его ЕДИНСТВЕННОГО объявления (`migrations.MigrationUpText`,
+// `migrations.SectionDownMarker`): маркеры читаются в СЫРОМ тексте, потому что
+// сами они — комментарии, а второе написание директивы разошлось бы с первым
+// молча.
 func splitRoleSubtableSections(body string) []roleSubtableSection {
-	up, down := body, ""
-	if loc := gooseDownMarkRe.FindStringIndex(body); loc != nil {
-		up, down = body[:loc[0]], body[loc[1]:]
-	}
-	if loc := gooseUpMarkRe.FindStringIndex(up); loc != nil {
-		up = up[loc[1]:]
-	}
-	out := []roleSubtableSection{judgeRoleSubtableSection("Up", up)}
-	if down != "" {
-		out = append(out, judgeRoleSubtableSection("Down", down))
+	out := []roleSubtableSection{judgeRoleSubtableSection("Up", migrations.MigrationUpText(body))}
+	if i := strings.Index(body, migrations.SectionDownMarker); i >= 0 {
+		out = append(out, judgeRoleSubtableSection("Down", body[i+len(migrations.SectionDownMarker):]))
 	}
 	return out
 }
 
+// noTransaction — файл объявляет директиву мигратора «без транзакции». Стем
+// директивы берётся у владельца разреза, а не выписывается вторым местом.
+func noTransaction(body string) bool {
+	return strings.Contains(body, migrations.SectionMarkerStem+"NO TRANSACTION")
+}
+
 // judgeRoleSubtableSection — что раздел пишет, зовёт и заводит.
+//
+// Текст разбирается ОДНИМ проходом владельца (`migrations.SQLBlankComments`,
+// `migrations.SQLBlankStrings`): своего разбора SQL у гейта нет. Исполняемая
+// часть — текст без комментариев и без содержимого строковых литералов, без
+// кавычек идентификаторов и в одном регистре. Содержимое литералов — то, чем
+// исполняемая часть отличается от текста с забеленными комментариями: на его
+// месте в литеральной части стоят сами знаки, вне литералов — пробелы.
+//
+// Граница разбора владельца названа: строку вида `E'…'` с экранированной
+// кавычкой он читает по правилам обычной строки — лишняя находка либо
+// пропуск ровно на такой форме, и ни одной такой миграции в цепочке нет.
 func judgeRoleSubtableSection(name, text string) roleSubtableSection {
-	code, literals := sqlExecutablePart(text)
+	noComments := migrations.SQLBlankComments(text)
+	executable := migrations.SQLBlankStrings(noComments)
+	literal := make([]byte, len(noComments))
+	for i := range literal {
+		literal[i] = ' '
+		if executable[i] != noComments[i] {
+			literal[i] = noComments[i]
+		}
+	}
+	code := strings.ToLower(strings.ReplaceAll(executable, `"`, ""))
+
 	s := roleSubtableSection{name: name}
 	seen := map[string]bool{}
 	add := func(tbl string) {
@@ -246,102 +269,8 @@ func judgeRoleSubtableSection(name, text string) roleSubtableSection {
 			}
 		}
 	}
-	for _, lit := range literals {
-		if literalNameRe.MatchString(strings.ToLower(lit)) {
-			s.literal = true
-			break
-		}
-	}
+	s.literal = literalNameRe.MatchString(strings.ToLower(string(literal)))
 	s.calls = emitCallRe.MatchString(code)
 	s.declares = emitDeclRe.MatchString(code)
 	return s
-}
-
-// sqlExecutablePart — исполняемая часть текста SQL и тела строковых литералов.
-//
-// Код: комментарии сняты, кавычки идентификаторов сняты, регистр сведён, тело
-// строкового литерала заменено пробелами; ограничители долларовых кавычек
-// заменены пробелами, а тело оставлено кодом. Литералы — отдельно, как есть.
-func sqlExecutablePart(s string) (code string, literals []string) {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '-' && i+1 < len(s) && s[i+1] == '-':
-			for i < len(s) && s[i] != '\n' {
-				i++
-			}
-			b.WriteByte('\n')
-		case c == '/' && i+1 < len(s) && s[i+1] == '*':
-			depth := 0
-			for i < len(s) {
-				if s[i] == '/' && i+1 < len(s) && s[i+1] == '*' {
-					depth++
-					i += 2
-					continue
-				}
-				if s[i] == '*' && i+1 < len(s) && s[i+1] == '/' {
-					depth--
-					i += 2
-					if depth == 0 {
-						break
-					}
-					continue
-				}
-				i++
-			}
-			i--
-			b.WriteByte(' ')
-		case c == '\'':
-			escaped := i > 0 && (s[i-1] == 'E' || s[i-1] == 'e') && (i < 2 || !isSQLIdentByte(s[i-2]))
-			var lit strings.Builder
-			j := i + 1
-			for ; j < len(s); j++ {
-				if escaped && s[j] == '\\' && j+1 < len(s) {
-					lit.WriteByte(s[j+1])
-					j++
-					continue
-				}
-				if s[j] == '\'' {
-					if j+1 < len(s) && s[j+1] == '\'' {
-						lit.WriteByte('\'')
-						j++
-						continue
-					}
-					break
-				}
-				lit.WriteByte(s[j])
-			}
-			literals = append(literals, lit.String())
-			b.WriteByte(' ')
-			i = j
-		case c == '"':
-			j := i + 1
-			for ; j < len(s) && s[j] != '"'; j++ {
-				b.WriteByte(toLowerASCII(s[j]))
-			}
-			i = j
-		case c == '$':
-			if m := dollarTagRe.FindString(s[i:]); m != "" && (i == 0 || !isSQLIdentByte(s[i-1])) {
-				b.WriteByte(' ')
-				i += len(m) - 1
-				continue
-			}
-			b.WriteByte(c)
-		default:
-			b.WriteByte(toLowerASCII(c))
-		}
-	}
-	return b.String(), literals
-}
-
-func isSQLIdentByte(c byte) bool {
-	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-}
-
-func toLowerASCII(c byte) byte {
-	if c >= 'A' && c <= 'Z' {
-		return c + ('a' - 'A')
-	}
-	return c
 }
