@@ -111,6 +111,7 @@ func TestRoleUpdate_C21_FanoutWithinBound_Runs(t *testing.T) {
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID178b, "viewer",
 		domain.Permissions{"compute.instance.*.get"})
 	repo.setRoleCustom(accountID)
+	repo.answerRoleSegments()
 	opsRepo := newFakeOpsRepo()
 	fan := newFakeFanout(3)
 

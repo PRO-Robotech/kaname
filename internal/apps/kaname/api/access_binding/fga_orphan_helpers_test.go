@@ -85,6 +85,14 @@ func (r *abFakeRepo) setRoleCustom(accountID string) {
 	r.accountID = accountID
 }
 
+// answerRoleSegments — дублёр отвечает на вопрос о сегментах роли «держится
+// всё»: эхо правки роли несёт признак превью (kaname#76).
+func (r *abFakeRepo) answerRoleSegments() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.roleSegmentsAnswered = true
+}
+
 // InsertEmittedTuples — fake of the persisted exact emitted-set co-commit. Set
 // semantics (PK on the natural key) — repeated inserts of the same tuple are a
 // no-op (ON CONFLICT DO NOTHING parity); insertion order is preserved on

@@ -3,14 +3,18 @@
 
 package domain
 
-// role_effective_verbs.go — redesign-2026 F6. The honest effective-verb preview
-// surfaced by RoleService (authored vs effective). authoredVerbs is the deduped,
-// canonically-ordered union of the verbs the role's rules grant (`*` expands to
-// the verb set OF THE TYPE the rule addresses). effectiveVerbs adds the editor
-// `delete*` qualifier: a role that grants `update` but not `delete`/`*` is
-// editor-tier, and an editor MAY delete the in-scope leaf objects it edits
-// (co-materialized), but NOT the account/project anchor — the verbNote states this
-// verbatim so the least-privilege preview never under-promises.
+// role_effective_verbs.go — честное превью глаголов роли, которое отдаёт
+// служба ролей (redesign-2026 F6): по букве правил и фактически. `authoredVerbs`
+// — объединение глаголов правил роли по СЕГМЕНТАМ, которые роль сегодня держит,
+// без повторов и в каноническом порядке; `*` разворачивается набором только тех
+// ресурсов правила, чей якорь держится; правило без адресуемых ресурсов даёт
+// свои глаголы как прежде; глагол ЯРУСНОЙ ПАРЫ судится живой строкой каталога
+// этой пары (kaname#76, приёмка `catalog-consequence-reaches-role-readers.md`
+// §2.3). `effectiveVerbs` добавляет квалификатор редактора `delete*`: роль,
+// дающая `update` без `delete` и без `*`, — редактор, и редактор вправе удалять
+// листовые объекты своей области (доматериализуется), но НЕ сам аккаунт или
+// проект; заметка говорит это дословно, чтобы превью наименьших прав не
+// обещало меньше выданного.
 //
 // XC-3 S1Ф2 — что здесь изменилось и почему это не косметика. Превью держало
 // СОБСТВЕННЫЙ список глаголов, в который разворачивалась подстановка. Список ни с
@@ -30,11 +34,12 @@ package domain
 // материализацией; разворот отсюда убран, осталось только старшинство вывода.
 var verbDisplayPrecedence = []string{"get", "list", "create", "update", "delete"}
 
-// EditorDeleteVerb is the qualifier appended to an editor-tier role's effective
-// verbs (delete of in-scope leaf objects, not the anchor).
+// EditorDeleteVerb — квалификатор, добавляемый к фактическим глаголам
+// роли-редактора: удаление листовых объектов области, но не якоря.
 const EditorDeleteVerb = "delete*"
 
-// EditorDeleteNote is the verbatim explanation of the editor delete-qualifier.
+// EditorDeleteNote — дословное пояснение квалификатора редактора. Текст наружу,
+// контракт ответа: его не переводят.
 const EditorDeleteNote = "co-materialized on in-scope leaf objects, NOT on the account/project anchor itself"
 
 // TypeVerbLookup — набор глаголов, объявленный типом (module, resource);
@@ -85,12 +90,17 @@ func WithCommonFallback(lookup TypeVerbLookup, common []string) TypeVerbLookup {
 // ресурсы модуля домен не может (каталог ему не принадлежит), поэтому такая пара
 // уходит в lookup как есть и решение о ней принимает вызывающий.
 func (r Rule) ruleVerbSet(lookup TypeVerbLookup) []string {
+	return r.ruleVerbSetOf(lookup, r.Resources)
+}
+
+// ruleVerbSetOf — то же объединение по названным ресурсам правила.
+func (r Rule) ruleVerbSetOf(lookup TypeVerbLookup, resources []string) []string {
 	if lookup == nil {
 		return nil
 	}
 	seen := map[string]bool{}
 	var out []string
-	for _, res := range r.Resources {
+	for _, res := range resources {
 		verbs, ok := lookup(r.Module, res)
 		if !ok {
 			continue
@@ -106,30 +116,104 @@ func (r Rule) ruleVerbSet(lookup TypeVerbLookup) []string {
 	return out
 }
 
-// expandedVerbSet returns the deduped verb set the role grants, with `*` expanded
-// to the verb set of the type(s) the producing rule addresses, plus whether any
-// rule used the `*` wildcard.
-func (r Role) expandedVerbSet(lookup TypeVerbLookup) (set map[string]bool, wildcard bool) {
+// hasWildcardVerb — правило называет подстановку глагола. Такое правило
+// объявляет на каждом своём ресурсе ОДИН сегмент — якорь ([RuleRefsOf]).
+func (r Rule) hasWildcardVerb() bool {
+	for _, v := range r.Verbs {
+		if v == wildcard {
+			return true
+		}
+	}
+	return false
+}
+
+// addressable — ресурс правила объявляет сегменты: ни модуль, ни ресурс не
+// подстановка. Тот же признак, которым [RuleRefsOf] решает, класть ли сегмент.
+func (r Rule) addressable(res string) bool {
+	return r.Module != wildcard && res != wildcard
+}
+
+// expandedVerbSet — множество глаголов превью роли по формуле §2.3 приёмки
+// `catalog-consequence-reaches-role-readers.md` и признак «правило называет
+// подстановку глагола».
+//
+// Ресурс правила судится ПОРОЗНЬ, и формула одна на каждый:
+//
+//   - ресурс НЕадресуемый (`*` в модуле либо в ресурсе) сегментов не объявляет,
+//     признаку о нём сказать нечего — его явные глаголы и разворот подстановки
+//     идут как прежде;
+//   - адресуемый ресурс даёт явный глагол, если проекция выдач держит его
+//     сегмент «тип + глагол» (у правила с подстановкой глагола сегмент один —
+//     якорь), а подстановку — набором своего типа, если держится якорь;
+//   - глагол ЯРУСНОЙ ПАРЫ выведен из суждения: класс ярусный, набор пары
+//     резолвится, и глагола в нём нет — то есть строка каталога пары ярусная.
+//     Пара, объявившая тот же класс пообъектно, и пара снятого ресурса ветви не
+//     получают.
+//
+// Гранулярность — СЕГМЕНТ, а не правило: держащийся сегмент даёт свой глагол,
+// а не все глаголы правила.
+//
+// Признак не прочитан — судить нечем, и превью считается по букве правил: отказ
+// за такую роль несёт перевод в ответ (см. [PreviewHolding]).
+func (r Role) expandedVerbSet(lookup TypeVerbLookup) (set map[string]bool, wildcardVerb bool) {
 	set = map[string]bool{}
-	for _, rule := range r.Rules {
-		for _, v := range rule.Verbs {
-			if v == "*" {
-				wildcard = true
-				for _, c := range rule.ruleVerbSet(lookup) {
-					set[NormalizeVerb(c)] = true
-				}
-				continue
-			}
-			// Приведение ТОЙ ЖЕ точкой, что и на эмиссии: иначе одно слово в двух
-			// написаниях дало бы в превью две записи, а материализация — одну.
+	add := func(verbs ...string) {
+		for _, v := range verbs {
 			set[NormalizeVerb(v)] = true
 		}
 	}
-	return set, wildcard
+	for _, rule := range r.Rules {
+		anchorOnly := rule.hasWildcardVerb()
+		wildcardVerb = wildcardVerb || anchorOnly
+		judged := r.Holding.Read()
+		if !judged || len(rule.Resources) == 0 {
+			for _, v := range rule.Verbs {
+				if v == wildcard {
+					add(rule.ruleVerbSet(lookup)...)
+					continue
+				}
+				// Приведение ТОЙ ЖЕ точкой, что и на эмиссии: иначе одно слово в
+				// двух написаниях дало бы в превью две записи, а материализация —
+				// одну.
+				add(v)
+			}
+			continue
+		}
+		for _, res := range rule.Resources {
+			if !rule.addressable(res) {
+				for _, v := range rule.Verbs {
+					if v == wildcard {
+						add(rule.ruleVerbSetOf(lookup, []string{res})...)
+						continue
+					}
+					add(v)
+				}
+				continue
+			}
+			dotted := RoleRuleRef{Module: rule.Module, Resource: res}.Dotted()
+			for _, v := range rule.Verbs {
+				if v == wildcard {
+					if r.Holding.holds(dotted, "") {
+						add(rule.ruleVerbSetOf(lookup, []string{res})...)
+					}
+					continue
+				}
+				nv := NormalizeVerb(v)
+				seg := nv
+				if anchorOnly {
+					seg = ""
+				}
+				if r.Holding.holds(dotted, seg) || r.Holding.tierPair(lookup, rule.Module, res, nv) {
+					add(nv)
+				}
+			}
+		}
+	}
+	return set, wildcardVerb
 }
 
-// orderVerbs returns the verbs of set in canonical display order, verbs outside
-// the precedence list appended in deterministic (sorted) order.
+// orderVerbs — глаголы множества в каноническом порядке показа; глаголы вне
+// старшинства идут после, в детерминированном (отсортированном) порядке.
 func orderVerbs(set map[string]bool) []string {
 	out := make([]string, 0, len(set))
 	seen := map[string]bool{}
@@ -139,7 +223,7 @@ func orderVerbs(set map[string]bool) []string {
 			seen[c] = true
 		}
 	}
-	// deterministic tail for any verb outside the display precedence.
+	// Детерминированный хвост: глаголы вне старшинства показа.
 	extra := make([]string, 0)
 	for v := range set {
 		if !seen[v] {
@@ -166,9 +250,9 @@ func OrderVerbsForDisplay(verbs []string) []string {
 	return orderVerbs(set)
 }
 
-// AuthoredVerbs is the deduped, canonically-ordered union of the role's rule verbs
-// (`*` expands to the verb set of the addressed type). Empty for a label-only /
-// rules-less role.
+// AuthoredVerbs — объединение глаголов правил роли по сегментам, которые роль
+// держит, без повторов и в каноническом порядке (формула — [Role.expandedVerbSet]).
+// Пусто у роли, выданной одними метками, и у роли без правил.
 func (r Role) AuthoredVerbs(lookup TypeVerbLookup) []string {
 	set, _ := r.expandedVerbSet(lookup)
 	return orderVerbs(set)
@@ -180,16 +264,19 @@ func (r Role) AuthoredVerbs(lookup TypeVerbLookup) []string {
 // Последнее условие — то же, что у материализации (`RulePolicy.UpdateImpliesDelete`,
 // kaname#1006): роль модуля удаление к правке не получает, и превью, обещавшее
 // ей `delete*`, разошлось бы с выданным.
+//
+// Выводится из СУЖЕННОГО множества: квалификатор уходит вместе со своим
+// основанием, отдельного правила для него нет.
 func (r Role) isEditorTier(lookup TypeVerbLookup) bool {
 	if !PolicyOfRole(r.IsSystem, r.OwnerModule).UpdateImpliesDelete() {
 		return false
 	}
-	set, wildcard := r.expandedVerbSet(lookup)
-	return !wildcard && set["update"] && !set["delete"]
+	set, wildcardVerb := r.expandedVerbSet(lookup)
+	return !wildcardVerb && set["update"] && !set["delete"]
 }
 
-// EffectiveVerbs is AuthoredVerbs plus the editor `delete*` qualifier for an
-// editor-tier role.
+// EffectiveVerbs — [Role.AuthoredVerbs] плюс квалификатор редактора `delete*` у
+// роли-редактора.
 func (r Role) EffectiveVerbs(lookup TypeVerbLookup) []string {
 	authored := r.AuthoredVerbs(lookup)
 	if r.isEditorTier(lookup) {
@@ -198,8 +285,8 @@ func (r Role) EffectiveVerbs(lookup TypeVerbLookup) []string {
 	return authored
 }
 
-// VerbNotes returns the per-verb clarifications for the effective preview. Only
-// the editor `delete*` qualifier carries a note today.
+// VerbNotes — пояснения к производным глаголам фактического превью, ключ — сам
+// глагол. Сегодня пояснение несёт только квалификатор редактора `delete*`.
 func (r Role) VerbNotes(lookup TypeVerbLookup) map[string]string {
 	if r.isEditorTier(lookup) {
 		return map[string]string{EditorDeleteVerb: EditorDeleteNote}
@@ -207,7 +294,8 @@ func (r Role) VerbNotes(lookup TypeVerbLookup) map[string]string {
 	return map[string]string{}
 }
 
-// sortStrings — tiny in-place ascending sort (avoids importing sort for one call).
+// sortStrings — малая сортировка по возрастанию на месте: ради одного вызова
+// пакет сортировки не импортируется.
 func sortStrings(s []string) {
 	for i := 1; i < len(s); i++ {
 		for j := i; j > 0 && s[j-1] > s[j]; j-- {

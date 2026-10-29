@@ -291,7 +291,9 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.role", string(inserted.ID)); rerr != nil {
 				return domain.Role{}, rerr
 			}
-			return inserted, nil
+			// Признак превью — в ЭТОЙ транзакции и после записи проекций (kaname#76):
+			// эхо описывает роль, которую она записала, а писатель несёт читателя.
+			return shared.WithPreviewHolding(ctx, w, u.cat, inserted)
 		})
 	if err != nil {
 		return nil, err

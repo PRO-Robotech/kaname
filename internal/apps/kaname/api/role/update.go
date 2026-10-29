@@ -285,104 +285,121 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 }
 
 func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []string, actor string, changed []string, expectedVersion string) (*anypb.Any, error) {
+	// Признак превью — в ТОЙ ЖЕ транзакции и после записи проекций (kaname#76): эхо
+	// описывает роль, которую эта транзакция записала, на обоих путях возврата.
 	updated, err := shared.DoWithWriteTx(ctx, u.repo,
 		func(ctx context.Context, w Writer) (domain.Role, error) {
-			// xmin-CAS: the worker-tx UPDATE is guarded by the version
-			// captured on the sync path. A concurrent Role.Update that committed first
-			// bumped xmin → this CAS matches 0 rows → ErrFailedPrecondition and the
-			// whole writer-tx (incl. the reconcile fan-out below) rolls back.
-			if slices.Contains(changed, "rules") {
-				if gerr := w.RolesW().GuardSystemClassReads(ctx, r.ID, r.GrantsReadsOnly()); gerr != nil {
-					return domain.Role{}, gerr
-				}
+			upd, werr := u.writeUpdate(ctx, w, r, mask, actor, changed, expectedVersion)
+			if werr != nil {
+				return domain.Role{}, werr
 			}
-			upd, uerr := w.RolesW().UpdateCAS(ctx, r, mask, expectedVersion)
-			if uerr != nil {
-				return domain.Role{}, uerr
-			}
-			if len(changed) == 0 {
-				return upd, nil
-			}
-			// When the rules (→ compiled permissions) changed, reconcile the
-			// FGA tuples of the role's ACTIVE bindings to the new permissions IN THIS
-			// writer-tx (atomic with the role UPDATE, ban #10). Without this an active
-			// binding keeps its old-tier FGA tuple after a downgrade (orphan = standing
-			// privilege). Bounded fan-out (active bindings of this single role),
-			// idempotent (unchanged tier → empty delta). nil-safe: in unit tests of
-			// the non-rules paths the reconciler may be unwired.
-			if u.reconciler != nil && slices.Contains(changed, "rules") {
-				if rerr := u.reconciler.ReconcileRoleTuples(ctx, w, upd.ID, upd); rerr != nil {
-					return domain.Role{}, rerr
-				}
-			}
-			// RBAC explicit-model: sync role_rule_selectors with the new
-			// UNIFIED materializing rules (anchor/names/labels) in the SAME writer-tx
-			// (ban #10) so the post-commit membership fan-out (and the reconciler
-			// fast-path / sweep) see the new selectors. A removed rule drops its
-			// selector here; the per-binding membership re-materialize (eager-revoke by
-			// rule_fp) runs post-commit.
-			if slices.Contains(changed, "rules") {
-				// Каталожный факт — один на обе стороны (довод — на создании).
-				facts := u.cat.Facts()
-				// Политика — та же, которой правила судились (kaname#1006).
-				policy := domain.PolicyOfRole(r.IsSystem, r.OwnerModule)
-				if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID,
-					facts.GrantSelectors(upd.Rules.MaterializingSelectors(), policy)); serr != nil {
-					return domain.Role{}, serr
-				}
-				// Та же пара, что на создании: снятый из правил глагол обязан
-				// исчезнуть из проекции, иначе отзыв права не применяется — молча,
-				// потому что добавление проходит успешно.
-				if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
-					facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors(), policy)); verr != nil {
-					return domain.Role{}, verr
-				}
-				// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и
-				// пишется она в той же транзакции по той же причине. Отличие от двух
-				// предыдущих в том, ЧТО кладётся: те несут только резолвящееся, эта —
-				// КАЖДЫЙ объявленный сегмент. На ней стоят ключи в каталог, и именно
-				// она отвергает правило, называющее ресурс или глагол, которых на
-				// платформе нет либо больше нет (kacho#1030, миграция 20260901113757).
-				//
-				// Своей проверки каталога здесь НЕТ намеренно: между «спросить» и
-				// «записать» помещается снятие ресурса, и правило пережило бы свой
-				// референт (запрет #10). Судит ОПЕРАТОР ВСТАВКИ.
-				if rerr := w.RolesW().ReplaceRuleRefs(ctx, upd.ID,
-					domain.RuleRefsOf(upd.Rules)); rerr != nil {
-					return domain.Role{}, rerr
-				}
-			}
-			// changed_fields records WHAT changed (e.g. ["permissions"]) — the
-			// full permissions set is intentionally NOT embedded.
-			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
-				EventType:       auditEventRoleUpdated,
-				TenantAccountID: string(upd.AccountID),
-				Payload: map[string]any{
-					"actor":          actor,
-					"resource_type":  "role",
-					"resource_id":    string(upd.ID),
-					"account_id":     string(upd.AccountID),
-					"changed_fields": changed,
-				},
-			}); aerr != nil {
-				return domain.Role{}, aerr
-			}
-			// Изменение own-resource labels может изменить membership iam-direct
-			// селектора (правило, матчащее iam.role по меткам). Co-commit reconcile-event
-			// в ЭТОЙ writer-tx (ban #10, паритет с user/SA Update) — reconciler ре-оценит
-			// затронутые iam.role selector-биндинги (≤2s): label add → грант появляется,
-			// label remove/change → eager fall-out. Только при изменении labels.
-			if slices.Contains(changed, "labels") {
-				if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.role", string(upd.ID)); rerr != nil {
-					return domain.Role{}, rerr
-				}
-			}
-			return upd, nil
+			return shared.WithPreviewHolding(ctx, w, u.cat, upd)
 		})
 	if err != nil {
 		return nil, err
 	}
+	return u.afterUpdate(ctx, updated, changed)
+}
 
+// writeUpdate — записи правки в транзакции записи: строка роли под сторожем
+// версии, кортежи привязок, три проекции правил, аудит и событие сверки.
+func (u *UpdateRoleUseCase) writeUpdate(ctx context.Context, w Writer, r domain.Role, mask []string,
+	actor string, changed []string, expectedVersion string) (domain.Role, error) {
+	// xmin-CAS: the worker-tx UPDATE is guarded by the version
+	// captured on the sync path. A concurrent Role.Update that committed first
+	// bumped xmin → this CAS matches 0 rows → ErrFailedPrecondition and the
+	// whole writer-tx (incl. the reconcile fan-out below) rolls back.
+	if slices.Contains(changed, "rules") {
+		if gerr := w.RolesW().GuardSystemClassReads(ctx, r.ID, r.GrantsReadsOnly()); gerr != nil {
+			return domain.Role{}, gerr
+		}
+	}
+	upd, uerr := w.RolesW().UpdateCAS(ctx, r, mask, expectedVersion)
+	if uerr != nil {
+		return domain.Role{}, uerr
+	}
+	if len(changed) == 0 {
+		return upd, nil
+	}
+	// When the rules (→ compiled permissions) changed, reconcile the
+	// FGA tuples of the role's ACTIVE bindings to the new permissions IN THIS
+	// writer-tx (atomic with the role UPDATE, ban #10). Without this an active
+	// binding keeps its old-tier FGA tuple after a downgrade (orphan = standing
+	// privilege). Bounded fan-out (active bindings of this single role),
+	// idempotent (unchanged tier → empty delta). nil-safe: in unit tests of
+	// the non-rules paths the reconciler may be unwired.
+	if u.reconciler != nil && slices.Contains(changed, "rules") {
+		if rerr := u.reconciler.ReconcileRoleTuples(ctx, w, upd.ID, upd); rerr != nil {
+			return domain.Role{}, rerr
+		}
+	}
+	// RBAC explicit-model: sync role_rule_selectors with the new
+	// UNIFIED materializing rules (anchor/names/labels) in the SAME writer-tx
+	// (ban #10) so the post-commit membership fan-out (and the reconciler
+	// fast-path / sweep) see the new selectors. A removed rule drops its
+	// selector here; the per-binding membership re-materialize (eager-revoke by
+	// rule_fp) runs post-commit.
+	if slices.Contains(changed, "rules") {
+		// Каталожный факт — один на обе стороны (довод — на создании).
+		facts := u.cat.Facts()
+		// Политика — та же, которой правила судились (kaname#1006).
+		policy := domain.PolicyOfRole(r.IsSystem, r.OwnerModule)
+		if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID,
+			facts.GrantSelectors(upd.Rules.MaterializingSelectors(), policy)); serr != nil {
+			return domain.Role{}, serr
+		}
+		// Та же пара, что на создании: снятый из правил глагол обязан
+		// исчезнуть из проекции, иначе отзыв права не применяется — молча,
+		// потому что добавление проходит успешно.
+		if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
+			facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors(), policy)); verr != nil {
+			return domain.Role{}, verr
+		}
+		// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и
+		// пишется она в той же транзакции по той же причине. Отличие от двух
+		// предыдущих в том, ЧТО кладётся: те несут только резолвящееся, эта —
+		// КАЖДЫЙ объявленный сегмент. На ней стоят ключи в каталог, и именно
+		// она отвергает правило, называющее ресурс или глагол, которых на
+		// платформе нет либо больше нет (kacho#1030, миграция 20260901113757).
+		//
+		// Своей проверки каталога здесь НЕТ намеренно: между «спросить» и
+		// «записать» помещается снятие ресурса, и правило пережило бы свой
+		// референт (запрет #10). Судит ОПЕРАТОР ВСТАВКИ.
+		if rerr := w.RolesW().ReplaceRuleRefs(ctx, upd.ID,
+			domain.RuleRefsOf(upd.Rules)); rerr != nil {
+			return domain.Role{}, rerr
+		}
+	}
+	// changed_fields records WHAT changed (e.g. ["permissions"]) — the
+	// full permissions set is intentionally NOT embedded.
+	if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
+		EventType:       auditEventRoleUpdated,
+		TenantAccountID: string(upd.AccountID),
+		Payload: map[string]any{
+			"actor":          actor,
+			"resource_type":  "role",
+			"resource_id":    string(upd.ID),
+			"account_id":     string(upd.AccountID),
+			"changed_fields": changed,
+		},
+	}); aerr != nil {
+		return domain.Role{}, aerr
+	}
+	// Изменение own-resource labels может изменить membership iam-direct
+	// селектора (правило, матчащее iam.role по меткам). Co-commit reconcile-event
+	// в ЭТОЙ writer-tx (ban #10, паритет с user/SA Update) — reconciler ре-оценит
+	// затронутые iam.role selector-биндинги (≤2s): label add → грант появляется,
+	// label remove/change → eager fall-out. Только при изменении labels.
+	if slices.Contains(changed, "labels") {
+		if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.role", string(upd.ID)); rerr != nil {
+			return domain.Role{}, rerr
+		}
+	}
+	return upd, nil
+}
+
+// afterUpdate — шаги после фиксации правки и эхо операции.
+func (u *UpdateRoleUseCase) afterUpdate(ctx context.Context, updated domain.Role, changed []string) (*anypb.Any, error) {
 	// OWN-RESOURCE label change ⇒ who may reach THIS role may have flipped ⇒
 	// re-materialize this ONE object now instead of waiting out the FIFO reconcile
 	// queue. iam.role is label-selectable, so clearing a label an ARM_LABELS grant

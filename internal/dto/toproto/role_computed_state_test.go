@@ -60,6 +60,9 @@ func roleWithComputedState() domain.Role {
 			return []string{"get", "list", "create", "update", "delete"}, true
 		},
 		Integrity: domain.HealthOf(2, 1),
+		// Признак превью — «держится всё» (kaname#76): он не вычисленное состояние
+		// роли, а вход перевода, и проекция ответа операции его не снимает.
+		Holding: domain.PreviewHoldingOf(nil, nil),
 		Lifecycle: domain.RoleLifecycle{
 			State:         domain.RoleLifecycleWithdrawn,
 			RetiredAt:     time.Date(2026, 9, 3, 13, 15, 44, 0, time.UTC),

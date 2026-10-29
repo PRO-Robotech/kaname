@@ -22,5 +22,8 @@ import (
 // withPreviewLookup вешает на роль набор глаголов типа по посеянному каталогу.
 func withPreviewLookup(r domain.Role) domain.Role {
 	r.TypeVerbs = catalogfixture.Facts().RolePreviewLookup()
+	// Признак превью — «держится всё» (kaname#76): предмет этих проб — набор типа,
+	// а не проекция выдач, и перевод без признака отказывает.
+	r.Holding = domain.PreviewHoldingOf(nil, nil)
 	return r
 }

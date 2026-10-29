@@ -25,6 +25,7 @@ func readProjectionRole() domain.Role {
 		Rules: domain.Rules{{Module: "registry", Resources: []string{"registries"}, Verbs: []string{"get", "list"},
 			Children: []domain.Rule{{Resources: []string{"repositories"}, Verbs: []string{"get", "list"}}}}},
 		Integrity:  domain.HealthOf(4, 0),
+		Holding:    domain.PreviewHoldingOf(nil, nil),
 		RuleStates: domain.RuleStatesOf(nil, nil, nil),
 	}
 }

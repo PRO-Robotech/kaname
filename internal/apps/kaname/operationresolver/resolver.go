@@ -18,6 +18,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/operations"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/dto"
@@ -206,9 +207,9 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		return resolveExistence(ctx, kindDelete, m.GetGroupId(), rd.Groups().Get, marshalGroup)
 
 	case *iamv1.CreateRoleMetadata:
-		return resolveExistence(ctx, kindCreate, m.GetRoleId(), rd.Roles().Get, r.marshalRole)
+		return resolveExistence(ctx, kindCreate, m.GetRoleId(), r.roleWithHolding(rd), r.marshalRole)
 	case *iamv1.UpdateRoleMetadata:
-		return resolveExistence(ctx, kindUpdate, m.GetRoleId(), rd.Roles().Get, r.marshalRole)
+		return resolveExistence(ctx, kindUpdate, m.GetRoleId(), r.roleWithHolding(rd), r.marshalRole)
 	case *iamv1.DeleteRoleMetadata:
 		return resolveExistence(ctx, kindDelete, m.GetRoleId(), rd.Roles().Get, r.marshalRole)
 
@@ -448,6 +449,20 @@ func marshalGroup(g domain.Group) (*anypb.Any, error) {
 		return nil, err
 	}
 	return anypb.New(dst)
+}
+
+// roleWithHolding — чтение роли с признаком превью в ТОЙ ЖЕ транзакции
+// резолвера (kaname#76): признак описывает роль, которую резолвер отдаёт, и
+// задаётся там, где роль прочитана. Отсутствие роли приходит прежним отказом
+// чтения — его исход решает `resolveExistence`.
+func (r *Resolver) roleWithHolding(rd kanamerepo.Reader) func(context.Context, domain.RoleID) (domain.Role, error) {
+	return func(ctx context.Context, id domain.RoleID) (domain.Role, error) {
+		role, err := rd.Roles().Get(ctx, id)
+		if err != nil {
+			return domain.Role{}, err
+		}
+		return shared.WithPreviewHolding(ctx, rd, r.cat, role)
+	}
 }
 
 // marshalRole — проекция роли для терминального ответа операции.

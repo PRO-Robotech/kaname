@@ -82,6 +82,7 @@ func TestRoleUpdate_FailingMembershipPass_StillReportsTheCommittedChangeAsDone(t
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID178b, "viewer",
 		domain.Permissions{"compute.instance.*.get"})
 	repo.setRoleCustom(accountID)
+	repo.answerRoleSegments()
 	opsRepo := newFakeOpsRepo()
 	fan := &failingFanout{count: 3, failed: errors.New("canceling statement due to statement timeout")}
 

@@ -74,8 +74,28 @@ func (h PreviewHolding) holds(objectType, verb string) bool {
 	return !h.unheld[segmentKey(objectType, verb)]
 }
 
-// tierOnlyClass — глагол принадлежит классу, действующему ярусом.
-func (h PreviewHolding) tierOnlyClass(verb string) bool { return h.tierOnly[verb] }
+// tierPair — глагол на паре «модуль + ресурс» ЯРУСНЫЙ: класс действует ярусом,
+// набор глаголов пары резолвится, и глагола в нём нет — набор типа ярусную
+// строку каталога не принимает. Решает ПАРА, а не класс: пара, объявившая тот
+// же класс пообъектно, глагол в наборе несёт и судится проекцией выдач; пара,
+// чей набор не резолвится (ресурс снят либо неизвестен), ярусной ветви не
+// получает вовсе — иначе глагол по снятому ресурсу оставался бы в превью
+// навсегда.
+func (h PreviewHolding) tierPair(lookup TypeVerbLookup, module, resource, verb string) bool {
+	if !h.tierOnly[verb] || lookup == nil {
+		return false
+	}
+	verbs, ok := lookup(module, resource)
+	if !ok {
+		return false
+	}
+	for _, v := range verbs {
+		if NormalizeVerb(v) == verb {
+			return false
+		}
+	}
+	return true
+}
 
 // segmentKey — ключ сегмента. Разделитель вне алфавита имён типа и глагола:
 // склейка без него свела бы разные пары в один ключ.

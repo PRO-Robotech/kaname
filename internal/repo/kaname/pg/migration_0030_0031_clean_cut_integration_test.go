@@ -254,6 +254,9 @@ func TestMigration_F52_SystemRolePublicDTOEmptyPermissions(t *testing.T) {
 	// Проба зовёт преобразование напрямую, минуя use-case, поэтому провязывает
 	// сама — тем же производителем, а не своей копией набора.
 	got.TypeVerbs = catalogfixture.Facts().RolePreviewLookup()
+	// Признак превью — тем же доводом (kaname#76): «держится всё», предмет пробы
+	// не проекция выдач.
+	got.Holding = domain.PreviewHoldingOf(nil, nil)
 
 	var pb *iamv1.Role
 	require.NoError(t, dto.Transfer(dto.FromTo(got, &pb)))

@@ -340,6 +340,11 @@ type abFakeRepo struct {
 	// (IsSystem=false, AccountID=accountID) so Role.Update account-owner
 	// authority + assignability gates pass (reconcile fan-out tests).
 	roleIsCustom bool
+	// roleSegmentsAnswered — дублёр отвечает на вопрос о сегментах роли «держится
+	// всё» (kaname#76). Ставят его ТОЛЬКО пробы, зовущие эхо правки роли: эхо
+	// несёт признак превью и спрашивает его в транзакции правки. Прочим пробам
+	// вопрос не предмет, и дублёр по умолчанию отказывает.
+	roleSegmentsAnswered bool
 	// abSubjects — access_binding_subjects backing store, keyed by
 	// binding id → ordered subjects. Mutated by InsertSubjects/DeleteSubject.
 	abSubjects map[domain.AccessBindingID][]domain.Subject
@@ -1266,6 +1271,11 @@ func (r *fakeRoleRdr) PrunedSelectorTypes(context.Context, []domain.RoleID) (map
 }
 
 func (r *fakeRoleRdr) UnresolvedSegments(context.Context, []domain.RoleSegment) (map[domain.RoleID][]domain.RoleSegment, error) {
+	r.repo.mu.Lock()
+	defer r.repo.mu.Unlock()
+	if r.repo.roleSegmentsAnswered {
+		return map[domain.RoleID][]domain.RoleSegment{}, nil
+	}
 	return nil, stderrors.New("UnresolvedSegments не предмет этих проб")
 }
 

@@ -85,6 +85,8 @@ func TestRolePreviewNamesTheVerbsOfTheAppliedType(t *testing.T) {
 			{Module: "billing", Resources: []string{"invoice"}, Verbs: []string{"*"}},
 		},
 		TypeVerbs: facts.RolePreviewLookup(),
+		// Признак превью — «держится всё» (kaname#76): предмет пробы — набор типа.
+		Holding: domain.PreviewHoldingOf(nil, nil),
 	}
 
 	pb, err := roleObj{}.toPb(r)
@@ -122,6 +124,8 @@ func TestRolePreviewStillShowsEveryVerbForTheWildcardRole(t *testing.T) {
 			{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}},
 		},
 		TypeVerbs: facts.RolePreviewLookup(),
+		// Признак превью — «держится всё» (kaname#76): предмет пробы — набор типа.
+		Holding: domain.PreviewHoldingOf(nil, nil),
 	}
 
 	pb, err := roleObj{}.toPb(r)

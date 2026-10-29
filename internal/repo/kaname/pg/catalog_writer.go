@@ -40,6 +40,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -604,17 +605,21 @@ func (w catalogWriter) ResettleTenantProjections(
 	// между ними помещается состояние «право отобрано и нигде не записано».
 	// Порядок внутри оператора задан ПОТОКОМ ДАННЫХ, а не порядком записи веток:
 	// `moved` читает выход `dropped`, поэтому вставка не может опередить снятие.
+	var ruleRefRoles, roleVerbRoles []string
 	if err := w.tx.QueryRow(ctx, resettleRuleRefSQL,
 		resModules, resNames, verbModules, verbResources, verbNames, reason, appliedBy,
-	).Scan(&out.RuleRefs); err != nil {
+	).Scan(&out.RuleRefs, &ruleRefRoles); err != nil {
 		return out, fmt.Errorf("переселить объявления правил: %w", err)
 	}
 
 	if err := w.tx.QueryRow(ctx, resettleRoleVerbSQL,
 		resModules, resNames, verbModules, verbResources, verbNames, reason, appliedBy,
-	).Scan(&out.RoleVerbs); err != nil {
+	).Scan(&out.RoleVerbs, &roleVerbRoles); err != nil {
 		return out, fmt.Errorf("переселить выдачи глаголов: %w", err)
 	}
+	// Тронутые роли — объединение ВЫХОДОВ двух операторов (kaname#76): вход
+	// события роли. Повтор роли между популяциями гасит функция события.
+	out.Roles = roleIDsOf(ruleRefRoles, roleVerbRoles)
 	return out, nil
 }
 
@@ -785,7 +790,10 @@ func (w catalogWriter) PruneRetiredSelectorTypes(
 	resources []catalog.ResourceRow,
 	appliedBy string,
 ) (modulecatalog.Pruned, error) {
-	var out modulecatalog.Pruned
+	var (
+		out   modulecatalog.Pruned
+		roles []string
+	)
 	if len(resources) == 0 {
 		return out, nil
 	}
@@ -831,10 +839,36 @@ func (w catalogWriter) PruneRetiredSelectorTypes(
 		)
 		SELECT (SELECT count(*) FROM stripped),
 		       (SELECT count(*) FROM emptied),
-		       (SELECT coalesce(sum(cardinality(was) - cardinality(alive)), 0) FROM changed)`,
+		       (SELECT coalesce(sum(cardinality(was) - cardinality(alive)), 0) FROM changed),
+		       (SELECT coalesce(array_agg(DISTINCT role_id ORDER BY role_id), ARRAY[]::text[]) FROM cut)`,
 		resModules, resNames, verbModules, verbResources, verbNames, appliedBy,
-	).Scan(&out.Rows, &out.Dropped, &out.Elements); err != nil {
+	).Scan(&out.Rows, &out.Dropped, &out.Elements, &roles); err != nil {
 		return out, fmt.Errorf("вырезать снятые типы из селекторов: %w", err)
 	}
+	// Тронутые роли — ВЫХОД вырезания (`cut`), а не признак таблицы (kaname#76):
+	// строка попадает в него только укороченной либо снятой, то есть роль в нём —
+	// роль, у которой отбор действительно сузился.
+	out.Roles = roleIDsOf(roles)
 	return out, nil
+}
+
+// roleIDsOf — объединение идентификаторов ролей из выходов операторов, без
+// повторов и по порядку: вход события роли детерминирован.
+func roleIDsOf(sets ...[]string) []domain.RoleID {
+	seen := map[string]bool{}
+	var ids []string
+	for _, set := range sets {
+		for _, id := range set {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	sort.Strings(ids)
+	out := make([]domain.RoleID, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, domain.RoleID(id))
+	}
+	return out
 }

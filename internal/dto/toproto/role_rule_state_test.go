@@ -34,6 +34,8 @@ func roleWithStates(states []domain.RuleState) domain.Role {
 			}
 			return nil, false
 		},
+		// Признак превью — «держится всё» (kaname#76): предмет пробы — состояние правила.
+		Holding:    domain.PreviewHoldingOf(nil, nil),
 		RuleStates: states,
 	}
 }
