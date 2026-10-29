@@ -306,6 +306,17 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.ReadinessRecorder([]string{"database"}) },
 		Why:   "все ряды в нуле — ТРЕТЬЕ состояние: готовность не оценивали ни разу",
 	},
+	// ── РАЗМЕР МАТЕРИАЛИЗАЦИИ ПРИВЯЗКИ (kaname#157) — один конструктор ─────
+	BindingMaterializationObjectsMetric: {
+		Cells: len(BindingMaterializationLanes),
+		Build: func(r *Registry) { r.BindingMaterializationRecorder() },
+		Why:   "полоса обхода без клетки читалась бы как полоса без трафика — ровно тот дефект, ради которого метка заведена",
+	},
+	BindingMaterializationTuplesMetric: {
+		Cells: len(BindingMaterializationLanes),
+		Build: func(r *Registry) { r.BindingMaterializationRecorder() },
+		Why:   "то же, что у соседа: кортежи по полосе читаются только вместе с объектами той же полосы",
+	},
 	ExpiredCredentialReclaimPassesMetric: {
 		Cells: 2,
 		Build: func(r *Registry) { r.ExpiredCredentialSweepRecorder([]string{"ok", "error"}) },

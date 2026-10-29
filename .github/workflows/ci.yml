@@ -77,7 +77,17 @@ on:
       - main
       - '[0-9]+'
     types: [opened, synchronize, reopened, ready_for_review]
+  # Ручной запуск — штатный путь для запроса в ветку, на которую триггер
+  # прогона не заводит. Вход `base` — база такого запроса: с ней шаг адъюдикации
+  # сравнивает контракты (kaname#1055); без него отставание ветки эпика от `main`
+  # читалось бы удалением. Провязку держит `tools/declaredbreak`
+  # TestManualRunNamesItsBase.
   workflow_dispatch:
+    inputs:
+      base:
+        description: база сравнения контрактов — ветка, в которую идёт запрос
+        type: string
+        default: main
 
 permissions:
   contents: read
@@ -207,6 +217,14 @@ jobs:
       # Исход — кодом: 0 · 1 · 2 (предпосылки нет).
       - name: страж новых blob'ов отправки — проба
         run: bash scripts/hooks/prepush-added-files-inject.sh
+
+      # ШЕСТАЯ — ПЕРЕЧЕНЬ НЕПРОВЕРЕННОГО (kaname#273). Каждый шаг этого файла с
+      # `run:` — строка ведомости хука (`CI_LEDGER`), сверка в обе стороны; обход
+      # KANAME_SKIP_PREPUSH судится по ТЕКСТУ вывода настоящего хука, не по коду
+      # 0. Новый шаг здесь без строки ведомости роняет этот шаг. Исход — кодом:
+      # 0 · 1 · 2 (предпосылки нет).
+      - name: хук отправки — перечень непроверенного выведен из конвейера, обход громок — опыт
+        run: bash scripts/hooks/prepush-coverage-inject.sh --self-test
 
       - name: сборка
         run: go build ./...
@@ -506,14 +524,17 @@ jobs:
       # БАЗА СРАВНЕНИЯ — БАЗА ЗАПРОСА, А НЕ `main` (kaname#1055). Запрос в ветку
       # эпика, отставшую от `main`, сравнением с `main` получал «разрывы», которых
       # голова не вносила: PR kaname#977 с нулевым диффом контрактов к своей базе был
-      # красен шестью чужими изменениями `main`. Базу берёт сценарий из
-      # GITHUB_BASE_REF (на push её нет — `main`), голову запроса — из HEAD_SHA;
-      # отказ называет по каждой находке, есть ли её предмет в общем предке.
-      # Сравнение с базой держит проба TestStepJudgesTheRequestAgainstItsBase
+      # красен шестью чужими изменениями `main`. На запросе база — первый родитель
+      # коммита слияния, то есть та, с которой он собран, а не вершина ветки в
+      # момент шага; имя базы — BASE_REF: база запроса, на ручном запуске — вход
+      # `base`, на push — пусто, то есть `main`. Голову запроса сценарий берёт из
+      # HEAD_SHA; отказ называет по каждой находке, есть ли её предмет в общем
+      # предке. Сравнение с базой держит проба TestStepJudgesTheRequestAgainstItsBase
       # шагом ниже — на настоящем buf.
       - name: adjudicate breaking (vs база запроса)
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_REF: ${{ github.base_ref || inputs.base }}
         run: |
           set -uo pipefail
           go build -o "$RUNNER_TEMP/adjudicate" ./tools/declaredbreak/cmd/adjudicate-declared-breaks

@@ -182,13 +182,14 @@ jobs:
           # с пустым местом. Поэтому величины берутся ПРИСВАИВАНИЕМ: его код — код
           # подстановки, и errexit его видит.
           #
-          # Оговорка названа прямо: у `v_pytest` в присваивании стоит конвейер, а код
-          # конвейера — код ПОСЛЕДНЕЙ команды (`head`), то есть ноль и там. Именно
-          # поэтому pytest спрошен отдельной строкой выше, а не печатью.
+          # У `v_pytest` в присваивании стоит конвейер: под `pipefail` (оболочка `run`
+          # по умолчанию — `bash -eo pipefail`) его код — код pytest, если читатель
+          # дочитывает трубу. Поэтому первая строка берётся `sed -n 1p`, а не `head`:
+          # `head` закрыл бы трубу раньше писателя, и SIGPIPE дал бы шагу 141 (kaname#1001).
           v_python=$(python3 -V | cut -d' ' -f2)
           v_node=$(node --version)
           v_jq=$(jq --version)
-          v_pytest=$(python3 -m pytest --version 2>&1 | head -1)
+          v_pytest=$(python3 -m pytest --version 2>&1 | sed -n 1p)
           v_yaml=$(python3 -c 'import yaml; print(yaml.__version__)')
           echo "инструменты на месте: python3 $v_python, node $v_node, jq $v_jq, pytest $v_pytest, pyyaml $v_yaml"
 
@@ -256,7 +257,10 @@ jobs:
           if ! git diff --quiet -- tests/newman/collections; then
             echo "::error title=Дерево и генератор разошлись::перегенерация изменила коллекции"
             git diff --stat -- tests/newman/collections
-            git diff -- tests/newman/collections | head -60
+            # Не `head`: под `pipefail` он закрывает трубу раньше `git diff`, тот
+            # получает SIGPIPE, и `-e` обрывает шаг кодом 141 до `exit 1` (kaname#1001).
+            # `sed` дочитывает весь дифф, печатает 60 строк, и код шага — 1.
+            git diff -- tests/newman/collections | sed -n '1,60p'
             exit 1
           fi
           echo "ЗЕЛЁНЫЙ: перегенерация не изменила ни одного байта коллекций."
@@ -537,7 +541,7 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::инструментов нет:$missing (установка rc=$rc) — коллекция НЕ гонялась, вердикта о дереве нет"
             exit 1
           fi
-          echo "инструменты на месте: newman $(newman --version), grpcurl $(grpcurl --version 2>&1 | head -1), jq $(jq --version), pyyaml $(python3 -c 'import yaml; print(yaml.__version__)')"
+          echo "инструменты на месте: newman $(newman --version), grpcurl $(grpcurl --version 2>&1 | sed -n 1p), jq $(jq --version), pyyaml $(python3 -c 'import yaml; print(yaml.__version__)')"
 
       # ПОСЕВ ВЫНОСИТ ВЕРДИКТ (его отказ обвиняет продукт), значит его способность
       # УПАСТЬ доказывается ДО того, как вердикту поверят. Самопроверка стенда не
@@ -918,7 +922,7 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::инструментов нет:$missing (установка rc=$rc) — коллекции НЕ гонялись, вердикта о дереве нет"
             exit 1
           fi
-          echo "инструменты на месте: newman $(newman --version), grpcurl $(grpcurl --version 2>&1 | head -1), jq $(jq --version), pyyaml $(python3 -c 'import yaml; print(yaml.__version__)')"
+          echo "инструменты на месте: newman $(newman --version), grpcurl $(grpcurl --version 2>&1 | sed -n 1p), jq $(jq --version), pyyaml $(python3 -c 'import yaml; print(yaml.__version__)')"
 
       # Каждый посев выносит вердикт (его отказ обвиняет продукт), значит его
       # способность упасть доказывается ДО того, как вердикту поверят, — и каждый
@@ -1264,7 +1268,7 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::инструментов нет:$missing (установка rc=$rc) — стенд НЕ поднимался, вердикта о дереве нет"
             exit 1
           fi
-          echo "инструменты на месте: kind $(kind --version), helm $(helm version --short), newman $(newman --version), grpcurl $(grpcurl --version 2>&1 | head -1)"
+          echo "инструменты на месте: kind $(kind --version), helm $(helm version --short), newman $(newman --version), grpcurl $(grpcurl --version 2>&1 | sed -n 1p)"
 
       # Каждое различение исходов доказывается ДО того, как его вердикту поверят,
       # и каждое — своим шагом: код возврата каждой самопроверки читается отдельно.

@@ -93,8 +93,8 @@ func loginLaneOutcomeSideLedger() map[string]sideVerdict {
 		"access-key-login/challenge-issued":   caller("выдано испытание — успех шага"),
 		"access-key-login/signature":          caller("подпись не сошлась — предъявитель"),
 		"access-key-login/credential-unknown": caller("ключ неизвестен либо снят — предъявитель"),
-		"access-key-login/origin":             caller("чужое происхождение — предъявитель"),
-		"access-key-login/rp-id-hash":         caller("не та доверяющая сторона — предъявитель"),
+		"access-key-login/origin":             {rule: ruleAccessKeyBinding, why: "происхождение консоли вне привязки — посадка разъехалась с доменом (kaname#310)"},
+		"access-key-login/rp-id-hash":         {rule: ruleAccessKeyBinding, why: "доверяющая сторона не наша — посадка разъехалась с доменом (kaname#310)"},
 		"access-key-login/presence":           caller("присутствие не подтверждено — предъявитель"),
 		"access-key-login/counter":            caller("счётчик не вырос — предъявитель"),
 		"access-key-login/challenge":          caller("испытания нет либо оно предъявлено — порядок шагов"),
@@ -106,8 +106,8 @@ func loginLaneOutcomeSideLedger() map[string]sideVerdict {
 		"step-up-access-key/challenge-issued":   caller("выдано испытание — успех шага"),
 		"step-up-access-key/signature":          caller("подпись не сошлась — предъявитель"),
 		"step-up-access-key/credential-unknown": caller("ключ неизвестен либо чужой — предъявитель"),
-		"step-up-access-key/origin":             caller("чужое происхождение — предъявитель"),
-		"step-up-access-key/rp-id-hash":         caller("не та доверяющая сторона — предъявитель"),
+		"step-up-access-key/origin":             {rule: ruleAccessKeyBinding, why: "происхождение консоли вне привязки — посадка разъехалась с доменом (kaname#310)"},
+		"step-up-access-key/rp-id-hash":         {rule: ruleAccessKeyBinding, why: "доверяющая сторона не наша — посадка разъехалась с доменом (kaname#310)"},
 		"step-up-access-key/presence":           caller("присутствие не подтверждено — предъявитель"),
 		"step-up-access-key/counter":            caller("счётчик не вырос — предъявитель"),
 		"step-up-access-key/challenge":          caller("испытания этой сессии нет — порядок шагов"),
@@ -141,7 +141,9 @@ func TestLoginLaneOurSideOutcomesAreCountedByTheLaneRule(t *testing.T) {
 			}
 			require.NotNil(t, lane, "правила %s в объекте нет", ruleLaneFailing)
 			for _, v := range values {
-				if ledger[v.key].rule == "" {
+				// Исходы разъезда привязки считает правило ключей; движок для
+				// него — в access_key_alert_rules_test.go.
+				if ledger[v.key].rule != ruleLaneFailing {
 					continue
 				}
 				require.Truef(t, engineReadsCell(t, lane.Expr, v.cell),
@@ -160,12 +162,20 @@ const lawfulLoginLaneOutcomesExpr = `sum(increase(kaname_login_outcomes_total{ou
   + sum(increase(kaname_access_key_login_outcomes_total{outcome="store-failed"}[10m]))
   + sum(increase(kaname_step_up_access_key_outcomes_total{outcome="store-failed"}[10m])) > 0`
 
+// loginLaneLedgerRules — правило полосы входа с выражением expr, законное
+// правило ёмкости и законное правило привязки ключей.
+func loginLaneLedgerRules(expr string) []alertRule {
+	return append(injectedRules(expr, lawfulCapacityExpr),
+		alertRule{Alert: ruleAccessKeyBinding, Expr: lawfulAccessKeyBindingExpr})
+}
+
 func TestLoginLaneOutcomesLedgerInjection_ControlIsSilent(t *testing.T) {
 	census, findings := judgeSideLedger(loginLaneOutcomeProducerValues(), loginLaneOutcomeSideLedger(),
-		injectedRules(lawfulLoginLaneOutcomesExpr, lawfulCapacityExpr))
+		loginLaneLedgerRules(lawfulLoginLaneOutcomesExpr))
 	require.Empty(t, findings)
 	require.Equal(t, census.values, census.ours+census.caller)
-	require.Equal(t, 5, census.ours)
+	// пять исходов хранилища и четыре исхода разъезда привязки ключей
+	require.Equal(t, 9, census.ours)
 }
 
 func TestLoginLaneOutcomesLedgerInjection_DroppedTermIsFound(t *testing.T) {
@@ -173,7 +183,7 @@ func TestLoginLaneOutcomesLedgerInjection_DroppedTermIsFound(t *testing.T) {
 		"\n  + sum(increase(kaname_email_change_outcomes_total{outcome=\"mark-not-reapplied\"}[10m]))", "", 1)
 	require.NotEqual(t, lawfulLoginLaneOutcomesExpr, dropped, "инъекция не сняла слагаемое")
 	_, findings := judgeSideLedger(loginLaneOutcomeProducerValues(), loginLaneOutcomeSideLedger(),
-		injectedRules(dropped, lawfulCapacityExpr))
+		loginLaneLedgerRules(dropped))
 	require.Len(t, findings, 1, "%v", findings)
 	require.Contains(t, findings[0], "email-change/mark-not-reapplied: наша сторона, а правило KanameLoginLaneFailing не считает клетку")
 }
@@ -183,6 +193,6 @@ func TestLoginLaneOutcomesLedgerInjection_CallerSideCountedIsFound(t *testing.T)
 		`kaname_access_key_login_outcomes_total{outcome="store-failed"}`,
 		`kaname_access_key_login_outcomes_total{outcome=~"store-failed|signature"}`, 1)
 	_, findings := judgeSideLedger(loginLaneOutcomeProducerValues(), loginLaneOutcomeSideLedger(),
-		injectedRules(wide, lawfulCapacityExpr))
+		loginLaneLedgerRules(wide))
 	require.Contains(t, strings.Join(findings, "\n"), "access-key-login/signature: сторона вызывающего, а правило KanameLoginLaneFailing")
 }

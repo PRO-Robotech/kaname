@@ -7,69 +7,139 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// BindingMaterializationRecorder measures HOW BIG one binding's materialization is:
-// how many objects its selectors matched, and how many tuples those objects produce.
+// BindingMaterializationRecorder меряет, НАСКОЛЬКО ВЕЛИКА материализация одной
+// привязки: сколько объектов отобрали её селекторы и сколько кортежей эти
+// объекты дают.
 //
-// WHY THIS IS MEASURED AT ALL. Access below the three cascading levels is materialized
-// PER OBJECT, so a single grant expands into as many tuples as the selector matches
-// objects, times the verbs the rule carries. Nothing counted that expansion, which made
-// "this grant grew large" indistinguishable from "this grant is ordinary" — right up
-// until the size stops fitting whatever the model can hold. And it does not stop there
-// where the grant was issued: the expansion is written by the reconciler, so the wall is
-// hit later, on somebody else's request, by a path that never mentions the binding.
+// ЗАЧЕМ ЭТО МЕРЯТЬ. Доступ ниже трёх каскадных уровней материализуется ПО
+// ОБЪЕКТУ, поэтому одна выдача разворачивается в столько кортежей, сколько
+// объектов отобрал селектор, помноженное на глаголы правила. Этого разворота не
+// считал никто, и «выдача разрослась» было неотличимо от «выдача обычная» —
+// ровно до того момента, когда размер перестаёт помещаться в то, что держит
+// модель. И упирается это не там, где выдачу выписали: разворот пишет
+// реконсайлер, поэтому в стену упирается позже чужой запрос, по пути, который
+// о привязке ничего не говорит.
 //
-// WHY NO CEILING IS ENFORCED HERE. The size a binding may reach has not been measured,
-// and a limit picked before the measurement would either refuse legitimate grants or sit
-// above everything and refuse nothing — the second being the more expensive mistake,
-// because it looks like a control. So: measure first, then decide the number. This
-// recorder is the measurement; it refuses nothing.
+// ПОЧЕМУ ЗДЕСЬ НЕТ ПОТОЛКА. Величина, которой привязка может достичь, не
+// измерена, а предел, назначенный до замера, либо отвергнет законную выдачу,
+// либо встанет выше всего и не отвергнет ничего — и вторая ошибка дороже, потому
+// что выглядит контролем. Поэтому сперва замер, потом число. Этот приёмник и
+// есть замер; он не отвергает ничего.
 //
-// WHY HISTOGRAMS AND NOT GAUGES. The question is a distribution — «how large do bindings
-// get, and is the tail moving?» — not a last-value. A gauge would report whichever
-// binding the reconciler happened to touch last, which answers nothing about the tail
-// that matters. Buckets are exponential and reach four figures, so a binding an order of
-// magnitude past the ordinary lands in its own bucket rather than in `+Inf` together
-// with everything else large.
+// ПОЧЕМУ ГИСТОГРАММЫ, А НЕ ДАТЧИКИ. Вопрос — о распределении («насколько
+// крупными бывают привязки и сдвигается ли хвост»), а не о последнем значении.
+// Датчик показал бы ту привязку, которой реконсайлер коснулся последней, и не
+// ответил бы ничего о хвосте. Корзины экспоненциальны и доходят до четырёх
+// знаков, поэтому привязка на порядок крупнее обычной попадает в свою корзину, а
+// не в `+Inf` вместе со всем крупным.
 //
-// The label set is EMPTY on purpose: binding id, scope and role would be unbounded
-// cardinality straight from tenant data. The distribution answers the question; naming
-// the individual binding is the job of the trail the reconciler already writes.
+// ЕДИНСТВЕННАЯ МЕТКА — ПОЛОСА (`lane`), kaname#157. Материализуют привязки две
+// полосы, и они отвечают на разные вопросы: путь запроса (выдача, правка роли,
+// привязка владельца, первый вход) — «сколько стоит то, что арендатор сделал
+// сейчас», фоновый обход (воркер очереди реконсайла, подмётка, истечение срока,
+// догон и проверка на старте) — «сколько стоит поддерживать то, что уже
+// выдано». Слитые в один ряд, они не читаются ни так, ни так; ряд только пути
+// запроса читался бы как полный, и полоса обхода выглядела бы полосой без
+// трафика. Набор полос ЗАКРЫТ ([BindingMaterializationLanes]), и обе клетки
+// заводятся нулём при регистрации.
+//
+// Идентификатор привязки, область и роль меткой не становятся НАМЕРЕННО: это
+// неограниченная кардинальность прямо из данных арендатора. На вопрос отвечает
+// распределение; назвать конкретную привязку — дело журнала, который
+// реконсайлер уже пишет.
 type BindingMaterializationRecorder struct {
-	objects prometheus.Histogram
-	tuples  prometheus.Histogram
+	objects *prometheus.HistogramVec
+	tuples  *prometheus.HistogramVec
 }
+
+// BindingMaterializationLane — приёмник ОДНОЙ полосы. Его и получает
+// реконсайлер через свой узкий порт: полоса закрепляется при сборке экземпляра,
+// а не выбирается на каждом проходе, поэтому записать проход «не в ту полосу»
+// реконсайлеру нечем.
+type BindingMaterializationLane struct {
+	objects prometheus.Observer
+	tuples  prometheus.Observer
+}
+
+const (
+	// BindingMaterializationObjectsMetric — имя семейства числа объектов.
+	BindingMaterializationObjectsMetric = Namespace + "_binding_materialization_objects"
+	// BindingMaterializationTuplesMetric — имя семейства числа кортежей.
+	BindingMaterializationTuplesMetric = Namespace + "_binding_materialization_tuples"
+
+	// BindingMaterializationLaneRequest — материализация на пути запроса.
+	BindingMaterializationLaneRequest = "request"
+	// BindingMaterializationLaneSweep — материализация фонового обхода.
+	BindingMaterializationLaneSweep = "sweep"
+)
+
+// BindingMaterializationLanes — ЗАКРЫТЫЙ набор полос; клетки обеих величин
+// заводятся по нему.
+var BindingMaterializationLanes = []string{BindingMaterializationLaneRequest, BindingMaterializationLaneSweep}
 
 // bindingSizeBuckets — общие корзины для обеих величин. Одинаковые намеренно:
 // величины сравнивают друг с другом (кортежей на объект — это их отношение), и
 // разные корзины сделали бы сравнение неверным на глаз.
 var bindingSizeBuckets = []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000}
 
-// NewBindingMaterializationRecorder registers the collectors in this registry and
-// returns the adapter the reconciler consumes through its narrow port. Call once at boot.
-func (r *Registry) NewBindingMaterializationRecorder() *BindingMaterializationRecorder {
-	rec := &BindingMaterializationRecorder{
-		objects: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name:    Namespace + "_binding_materialization_objects",
-			Help:    "Objects matched by one access binding's selectors during a reconcile pass.",
-			Buckets: bindingSizeBuckets,
-		}),
-		tuples: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name: Namespace + "_binding_materialization_tuples",
-			Help: "Authorization tuples one access binding's reconcile pass materializes " +
-				"(objects × the verbs of the rule that matched them).",
-			Buckets: bindingSizeBuckets,
-		}),
-	}
-	r.reg.MustRegister(rec.objects, rec.tuples)
-	return rec
+// BindingMaterializationRecorder возвращает ЕДИНСТВЕННЫЙ приёмник этого
+// реестра, регистрируя семейства при первом обращении. Полосы берутся у него
+// ([BindingMaterializationRecorder.RequestLane], [BindingMaterializationRecorder.SweepLane])
+// в разных местах композиционного корня.
+func (r *Registry) BindingMaterializationRecorder() *BindingMaterializationRecorder {
+	r.bindingSizeOnce.Do(func() {
+		rec := &BindingMaterializationRecorder{
+			objects: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Name: BindingMaterializationObjectsMetric,
+				Help: "Objects matched by one access binding's selectors during a reconcile pass, " +
+					"by lane: request (the tenant's call) or sweep (background reconcile).",
+				Buckets: bindingSizeBuckets,
+			}, []string{"lane"}),
+			tuples: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Name: BindingMaterializationTuplesMetric,
+				Help: "Authorization tuples one access binding's reconcile pass materializes " +
+					"(objects × the verbs of the rule that matched them), by lane: request or sweep.",
+				Buckets: bindingSizeBuckets,
+			}, []string{"lane"}),
+		}
+		// Клетки закрытого набора — нулём ПРИ РЕГИСТРАЦИИ: вектор без детей не
+		// отдаёт на провод ничего, и «полоса не провязана» стала бы неотличима
+		// от «полоса провязана и ни разу не материализовала».
+		for _, lane := range BindingMaterializationLanes {
+			rec.objects.WithLabelValues(lane)
+			rec.tuples.WithLabelValues(lane)
+		}
+		r.reg.MustRegister(rec.objects, rec.tuples)
+		r.bindingSize = rec
+	})
+	return r.bindingSize
 }
 
-// ObserveBindingMaterialization records the size of ONE binding's desired set.
+// RequestLane — приёмник полосы пути запроса.
+func (rec *BindingMaterializationRecorder) RequestLane() *BindingMaterializationLane {
+	return rec.lane(BindingMaterializationLaneRequest)
+}
+
+// SweepLane — приёмник полосы фонового обхода.
+func (rec *BindingMaterializationRecorder) SweepLane() *BindingMaterializationLane {
+	return rec.lane(BindingMaterializationLaneSweep)
+}
+
+func (rec *BindingMaterializationRecorder) lane(lane string) *BindingMaterializationLane {
+	return &BindingMaterializationLane{
+		objects: rec.objects.WithLabelValues(lane),
+		tuples:  rec.tuples.WithLabelValues(lane),
+	}
+}
+
+// ObserveBindingMaterialization записывает размер желаемого набора ОДНОЙ
+// привязки в ряд своей полосы.
 //
-// A pass that matched nothing is recorded too, as a zero: «this binding materializes
-// nothing» is a real and interesting state — a selector that stopped matching looks
-// exactly like a binding nobody reconciles unless the empty pass is counted.
-func (rec *BindingMaterializationRecorder) ObserveBindingMaterialization(objects, tuples int) {
-	rec.objects.Observe(float64(objects))
-	rec.tuples.Observe(float64(tuples))
+// Проход, не отобравший ничего, записывается тоже — нулём: «эта привязка не
+// материализует ничего» — настоящее и интересное состояние, и селектор,
+// переставший отбирать, без учёта пустого прохода выглядит ровно как привязка,
+// которую никто не согласует.
+func (l *BindingMaterializationLane) ObserveBindingMaterialization(objects, tuples int) {
+	l.objects.Observe(float64(objects))
+	l.tuples.Observe(float64(tuples))
 }

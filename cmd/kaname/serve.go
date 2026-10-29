@@ -33,7 +33,6 @@ import (
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	"github.com/PRO-Robotech/corelib/servicehost"
 
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
@@ -1965,8 +1964,10 @@ func runServe(cfg config.Config) error {
 	// expires TTL-elapsed bindings (D9 eager-revoke). In-process worker (no new
 	// deploy); non-fatal by contract.
 	reconcileAdapter := kanamepg.NewReconcileAdapter(pool, catalogSnapshot)
-	reconcileEngine := reconcile.New(reconcileAdapter,
-		logger.With(slog.String("component", "rsab_reconciler")), catalogSnapshot)
+	// Размер материализаций обхода пишется в полосу `lane="sweep"` той же
+	// гистограммы, что у пути запроса (kaname#157): полоса закреплена сборщиком.
+	reconcileEngine := newSweepBindingReconciler(reconcileAdapter,
+		logger.With(slog.String("component", "rsab_reconciler")), catalogSnapshot, metricsReg)
 	// resource_reconcile_outbox дренажится NOTIFY-driven (паритет с fga_outbox drainer):
 	// AFTER INSERT триггер (миграция 0042) шлет pg_notify на канал
 	// kaname_resource_reconcile_outbox, reconcileAdapter LISTEN'ит его и будит worker —

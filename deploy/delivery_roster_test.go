@@ -67,6 +67,7 @@ import (
 var deliveryRoster = []string{
 	"Chart.yaml",
 	"absence_rules_ring_without_series_test.go",
+	"access_key_alert_rules_test.go",
 	"alert_rules_delivered_injection_test.go",
 	"alert_rules_delivered_test.go",
 	"anonymous_registry_lane_render_test.go",

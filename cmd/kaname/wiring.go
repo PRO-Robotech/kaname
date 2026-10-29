@@ -133,8 +133,8 @@ type services struct {
 	// наружу для полосы своего входа: регистрация человека материализует его
 	// собственническую выдачу (`buildLoginLane`).
 	//
-	// Полем, а не вторым построением. Шапка построения ниже обещает «created once
-	// here so every consumer drives the same instance», и до задачи #116 это было
+	// Полем, а не вторым построением. Шапка построения ниже обещает, что все
+	// потребители пути запроса водят один экземпляр, и до задачи #116 это было
 	// неправдой: хук внешнего поставщика (снят, kaname#363) собирал свой
 	// экземпляр БЕЗ приёмника размера, поэтому гистограмма не видела живой
 	// полосы регистрации человека — и выглядела при этом полной. Гистограмма, не
@@ -321,26 +321,24 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		os.Exit(1)
 	}
 
-	// rsabReconciler — the SINGLE per-object materialization engine of the REQUEST
-	// PATH (RBAC explicit-model 2026 P4). Shared by AccessBinding.Create, the
-	// Role.Update membership fan-out, the P6 Account.Create owner auto-binding
-	// materialization (C-01/C-01b) AND the first-login provision hook, which takes
-	// this very instance through `services.bindingReconciler` — it used to build
-	// its own, without the size recorder (#116).
+	// rsabReconciler — ЕДИНСТВЕННЫЙ экземпляр материализации привязки ПУТИ ЗАПРОСА
+	// (явная модель прав 2026, P4): его водят AccessBinding.Create, разнос членства
+	// при Role.Update, материализация собственнической привязки при Account.Create
+	// (C-01/C-01b) И полоса первого входа — она берёт этот же экземпляр через
+	// `services.bindingReconciler`, а прежде строила свой, без приёмника размера (#116).
 	//
-	// «Every consumer» здесь означает потребителей ПУТИ ЗАПРОСА, и это не оговорка:
-	// фоновый воркер обхода (`serve.go`) строит свой экземпляр со своим именем
-	// в журнале, и его материализации в эту гистограмму НЕ попадают. Решение
-	// о том, должны ли они туда попадать, не принималось — предмет заведён
-	// задачей #157.
-	rsabReconciler := reconcileapp.New(kanamepg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
-	if metricsReg != nil {
-		// Размер материализации привязки — измерение, не потолок. Он ничего не
-		// отвергает: величина, которой привязка может достичь, не измерена, а предел,
-		// назначенный до замера, либо отвергнет законную выдачу, либо не отвергнет
-		// ничего, оставаясь на вид контролем.
-		rsabReconciler = rsabReconciler.WithSizeRecorder(metricsReg.NewBindingMaterializationRecorder())
-	}
+	// Полоса наблюдения размера закреплена сборщиком (`binding_reconcilers.go`), а
+	// не выбирается здесь: путь запроса пишет в `lane="request"`. Фоновый обход
+	// (`serve.go`) строит свой экземпляр со своим именем в журнале и пишет в
+	// `lane="sweep"` той же гистограммы — решение kaname#157: обход входит в
+	// измерение, но с путём запроса не смешивается.
+	//
+	// Размер материализации привязки — измерение, не потолок. Он ничего не
+	// отвергает: величина, которой привязка может достичь, не измерена, а предел,
+	// назначенный до замера, либо отвергнет законную выдачу, либо не отвергнет
+	// ничего, оставаясь на вид контролем.
+	rsabReconciler := newRequestBindingReconciler(kanamepg.NewReconcileAdapter(pool, catalogSource),
+		logger, catalogSource, metricsReg)
 
 	// AccountService.
 	accountCreate := accountapp.NewCreateAccountUseCase(kanameRepo, opsRepo).

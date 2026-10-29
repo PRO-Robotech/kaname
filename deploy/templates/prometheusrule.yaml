@@ -173,6 +173,32 @@ spec:
           annotations:
             summary: "ёмкость проверяющего пароля исчерпана — отказано по нагрузке. Проверяющий один: вход паролем, повышение уровня паролем, сверка секрета клиента церемонией и запасной код второго фактора; причина — в outcome и method. Величина authn.login.verifier-capacity. Если растёт только kaname_password_verifier_ceremony_share_exhausted_total — занята доля церемонии на токен-эндпоинте, людям вход сохранён: смотреть обращения за токеном церемонии, а не поднимать ёмкость входа"
 
+        # КЛЮЧИ ДОСТУПА (kaname#310). Человек получает единый отказ ключа, причина
+        # видна лишь в ряде. Отказ происхождения либо доверяющей стороны — признак
+        # того, что консоль открыта по адресу, которого привязка
+        # `authn.access-keys.*` не знает: браузер подписывает испытание только
+        # своей доверяющей стороне, и ошибкой человека этот отказ не бывает.
+        # Выдержка дольше окна НАМЕРЕННО: одиночный отказ гаснет раньше, чем
+        # истечёт выдержка, а разъезд привязки отказывает каждому входу подряд.
+        # Регрессия счётчика подписи — клонированный аутентификатор либо повтор
+        # утверждения: одно событие уже предмет разбора, выдержки нет.
+        - alert: KanameAccessKeyBindingMismatch
+          expr: |
+            sum(increase(kaname_access_key_refusals_total{reason="origin-not-allowed"}[10m]))
+              + sum(increase(kaname_access_key_refusals_total{reason="rp-id-mismatch"}[10m]))
+              + sum(increase(kaname_access_key_login_outcomes_total{outcome="origin"}[10m]))
+              + sum(increase(kaname_access_key_login_outcomes_total{outcome="rp-id-hash"}[10m]))
+              + sum(increase(kaname_step_up_access_key_outcomes_total{outcome="origin"}[10m]))
+              + sum(increase(kaname_step_up_access_key_outcomes_total{outcome="rp-id-hash"}[10m])) > 0
+          for: 15m
+          annotations:
+            summary: "ключи доступа отвергаются по происхождению либо доверяющей стороне — консоль открыта по адресу, которого привязка не знает; человек видит единый отказ и теряет вход ключом. Сверить authn.access-keys.* с доменом и происхождением консоли; причина — в reason и outcome"
+
+        - alert: KanameAccessKeySignCountRegressed
+          expr: sum(increase(kaname_access_key_sign_count_regressions_total[1h])) > 0
+          annotations:
+            summary: "утверждение ключа доступа отвергнуто: счётчик подписи не вырос над хранимым — клонированный аутентификатор либо повтор утверждения. Найти ключ и человека по журналу и разобрать; это предмет разбора, а не шум"
+
         # ПОЧТОВАЯ ПОЛОСА (kaname#733). Через узел уходят коды подтверждения
         # адреса, восстановления доступа и смены адреса: письмо, которое не ушло,
         # оставляет человека на экране подтверждения либо без доступа, и сам он

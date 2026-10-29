@@ -133,6 +133,11 @@ func TestGateRunsWhereItsSubjectExpires(t *testing.T) {
 // Без разбора сетевой отказ (`buf` не достал базу сравнения) даёт пустой вывод, и
 // адъюдикатор честно печатает «находок 0» — то есть третья категория предъявлена
 // как вердикт «разрывов нет».
+//
+// Эта проба читает ТЕКСТ и держит лишь то, что разбор кода в сценарии записан.
+// Исполняется ли он, держит поведением пункт «buf против базы отказал — третий
+// исход 2» пробы TestStepJudgesTheRequestAgainstItsBase: мутант
+// «`*) return 2` → `*) return 0`» здесь зелен, там красен.
 func TestGateReadsBufReturnCode(t *testing.T) {
 	wf := readWorkflow(t)
 	steps := adjudicationSteps(wf)
@@ -220,6 +225,45 @@ func TestStepNamesTheRequestHead(t *testing.T) {
 			if !strings.Contains(v, "github.event.pull_request.head.sha") || !strings.Contains(v, "github.sha") {
 				t.Errorf("задание %s: HEAD_SHA шага адъюдикации — %q, а не голова запроса "+
 					"с откатом на коммит прогона", job, v)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("шагов адъюдикации нет — ось беспредметна")
+	}
+}
+
+// TestManualRunNamesItsBase — ручной запуск называет базу сравнения.
+//
+// Ручной запуск — штатный путь для запроса в ветку эпика, на который триггер не
+// заводит прогона: без входа `base` он сравнивал бы с `main`, и отставание эпика
+// от ствола читалось бы удалением. Поэтому у `workflow_dispatch` есть вход `base`
+// с умолчанием `main`, а шаг адъюдикации отдаёт сценарию в BASE_REF базу запроса
+// и, когда её нет, — этот вход. Что сценарий BASE_REF ЧИТАЕТ, держит поведением
+// TestStepJudgesTheRequestAgainstItsBase («ручной запуск с base=эпик …»).
+func TestManualRunNamesItsBase(t *testing.T) {
+	wf := readWorkflow(t)
+	disp, ok := wf.On["workflow_dispatch"].(map[string]any)
+	if !ok {
+		t.Fatalf("у workflow_dispatch нет объявления входов (%T) — ручной запуск сравнивал бы только с main",
+			wf.On["workflow_dispatch"])
+	}
+	inputs, _ := disp["inputs"].(map[string]any)
+	base, _ := inputs["base"].(map[string]any)
+	if base == nil {
+		t.Fatal("у workflow_dispatch нет входа base — ручной запуск в ветку эпика сравнивался бы с main")
+	}
+	if d, _ := base["default"].(string); d != "main" {
+		t.Errorf("умолчание входа base — %q, а не main", d)
+	}
+	n := 0
+	for job, ss := range adjudicationSteps(wf) {
+		for _, s := range ss {
+			n++
+			v := s.Env["BASE_REF"]
+			if !strings.Contains(v, "github.base_ref") || !strings.Contains(v, "inputs.base") {
+				t.Errorf("задание %s: BASE_REF шага адъюдикации — %q, а не база запроса с откатом "+
+					"на вход base ручного запуска", job, v)
 			}
 		}
 	}

@@ -19,8 +19,12 @@ package shared
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"runtime"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -85,4 +89,141 @@ func LogMappedErr(ctx context.Context, logger *slog.Logger, op string, err, gerr
 			slog.String("err_type", fmt.Sprintf("%T", err)))
 	}
 	return gerr
+}
+
+// unclassifiedMsg — сообщение записи о неразобранном отказе хранилища.
+// Постоянное, чтобы запись находилась поиском по журналу одной строкой.
+const unclassifiedMsg = "repository error is not classified"
+
+// chainDepthLimit — сколько звеньев цепочки называет запись. Цепочка строится
+// обёртками вызывающих и на деле короче десятка; предел нужен лишь затем, чтобы
+// чужой тип с самоссылающимся `Unwrap` не превратил запись в бесконечный обход.
+const chainDepthLimit = 32
+
+// journalUnclassified называет журналу СТРУКТУРУ отказа, который не опознала
+// ни одна ветка [MapRepoErr] (kaname#662).
+//
+// # Почему здесь, а не у восьмидесяти четырёх вызывающих
+//
+// Неразобранный отказ на проводе — `internal error`, и других читателей у него
+// нет: логгера нет ни у хранилища, ни у большинства use-case. До этой записи
+// 500 на стенде разбирали без единой строки о причине. Вопрос «писать ли»
+// ответа на домен не имеет, поэтому решается в переводчике, а не копией у
+// каждого вызывающего — как и у [LogMappedErr].
+//
+// # Что пишется — и почему не текст
+//
+// Текст цепочки — это текст драйвера и обёрток вызывающего, а они несут
+// значения арендатора: адрес почты в обёртке, введённое значение в «invalid
+// input syntax», идентификаторы. Журнал читает оператор, и такой текст в нём —
+// утечка данных арендатора в чужую зону доступа. Поэтому запись несёт только
+// то, что задаёт КОД, а не данные:
+//
+//   - `site`, `at` — функция и файл:строка вызывающего переводчик;
+//   - `err_type` — конкретный тип ошибки;
+//   - `err_chain` — типы всех звеньев цепочки по порядку обёртки (ветвление
+//     `errors.Join` — в квадратных скобках): «не дозвонились», «не просканировали»
+//     и «отказала база» различаются типом сразу;
+//   - `sqlstate` — код состояния, если звено его несёт (метод `SQLState()`,
+//     форма `pgconn.PgError`; пакет драйвера здесь не импортируется — слой
+//     переводчика от драйвера свободен). Поле пишется, только когда код есть:
+//     пустое значение читалось бы как «код есть и он пуст».
+//
+// Уровень — ERROR: неразобранный отказ — всегда дефект службы, не арендатора.
+// Журнал — общий для процесса (`slog.Default`, задан композиционным корнем),
+// берётся в момент записи, а не при сборке пакета. Контекста вызова у записи
+// нет: у [MapRepoErr] его нет в подписи, а обработчик журнала службы (JSON
+// фундамента) из контекста ничего не читает.
+//
+// # Когда запись молчит
+//
+// Отказ, поданный в обёртке [contextEnded], пришёл после конца контекста
+// вызова: [MapRepoErrAt] отвечает на него недоступностью, это конец срока, а не
+// поломка, и записи уровня ERROR о нём нет.
+func journalUnclassified(err error) {
+	var ended *contextEnded
+	if stderrors.As(err, &ended) {
+		return
+	}
+	attrs := make([]any, 0, 5)
+	if site, at, ok := mapperCaller(); ok {
+		attrs = append(attrs, slog.String("site", site), slog.String("at", at))
+	}
+	attrs = append(attrs,
+		slog.String("err_type", fmt.Sprintf("%T", err)),
+		slog.String("err_chain", errChainShape(err, 0)))
+	var coded interface{ SQLState() string }
+	if stderrors.As(err, &coded) {
+		if state := coded.SQLState(); state != "" {
+			attrs = append(attrs, slog.String("sqlstate", state))
+		}
+	}
+	slog.Default().Error(unclassifiedMsg, attrs...)
+}
+
+// mapperCaller — первая рамка стека вне переводчика: тот, кто позвал
+// [MapRepoErr] либо [MapRepoErrAt]. Рамки отсеиваются по имени функции, а не
+// числом пропуска: число пропуска ломается встраиванием и любой новой
+// промежуточной функцией молча.
+//
+// Путь пакета не выписан литералом, а берётся из собственной рамки: литерал
+// пережил бы переезд пакета и перестал бы отсеивать что-либо, не покраснев.
+func mapperCaller() (site, at string, ok bool) {
+	var pcs [8]uintptr
+	n := runtime.Callers(1, pcs[:])
+	frames := runtime.CallersFrames(pcs[:n])
+	self, more := frames.Next()
+	pkg := strings.TrimSuffix(self.Function, "mapperCaller")
+	for more {
+		var f runtime.Frame
+		f, more = frames.Next()
+		if f.Function == "" {
+			return "", "", false
+		}
+		if !isMapperFrame(pkg, f.Function) {
+			return f.Function, fmt.Sprintf("%s:%d", filepath.Base(f.File), f.Line), true
+		}
+	}
+	return "", "", false
+}
+
+// mapperFrames — функции переводчика, чьи рамки лежат между записью и её
+// вызывающим.
+var mapperFrames = [...]string{"MapRepoErr", "MapRepoErrAt", "journalUnclassified"}
+
+// isMapperFrame — принадлежит ли рамка переводчику; pkg — путь пакета с
+// завершающей точкой.
+func isMapperFrame(pkg, fn string) bool {
+	for _, name := range mapperFrames {
+		if fn == pkg+name {
+			return true
+		}
+	}
+	return false
+}
+
+// errChainShape — типы звеньев цепочки по порядку обёртки. Текст звеньев не
+// читается вовсе: ни `Error()`, ни поля.
+func errChainShape(err error, depth int) string {
+	if err == nil {
+		return "<nil>"
+	}
+	if depth >= chainDepthLimit {
+		return "…"
+	}
+	name := fmt.Sprintf("%T", err)
+	switch u := err.(type) {
+	case interface{ Unwrap() []error }:
+		inner := u.Unwrap()
+		parts := make([]string, 0, len(inner))
+		for _, e := range inner {
+			parts = append(parts, errChainShape(e, depth+1))
+		}
+		return name + " > [" + strings.Join(parts, " | ") + "]"
+	case interface{ Unwrap() error }:
+		if next := u.Unwrap(); next != nil {
+			return name + " > " + errChainShape(next, depth+1)
+		}
+	}
+	return name
 }
