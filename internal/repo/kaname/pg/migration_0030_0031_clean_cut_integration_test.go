@@ -155,11 +155,12 @@ func TestMigration_F53_IdStability(t *testing.T) {
 	assert.Equal(t, mdID("view"), idOf("view"), "F-53: view id must stay 'rol'||md5('view')[1..17]")
 	assert.Equal(t, mdID("admin"), idOf("admin"), "F-53: admin id must stay 'rol'||md5('admin')[1..17]")
 	// Роли ищутся ОБЪЯВЛЕННЫМ именем: перевод имени (kacho#2554) идентификатор не
-	// двигает, и ровно это здесь утверждается — имя ушло, литерал остался.
+	// двигает. Двигает его ровно одна миграция — перевод на каноническую форму
+	// (kaname#543), и после всей цепочки id роли по имени равен константе домена.
 	assert.Equal(t, domain.SystemViewerRoleID, idOf(domain.SystemViewerRoleName),
-		"F-53: system.viewer id must stay the literal rol000000000sysviewer")
+		"F-53: system.viewer id must equal domain.SystemViewerRoleID (kaname#543 moved it once, by migration)")
 	assert.Equal(t, domain.SystemAdminRoleID, idOf(domain.SystemAdminRoleName),
-		"F-53: system.admin id must stay the literal rol000000000sysadmin")
+		"F-53: system.admin id must equal domain.SystemAdminRoleID (kaname#543 moved it once, by migration)")
 }
 
 // TestMigration_F53_AccessNotSevered — the FK-child cohort and the role rows are

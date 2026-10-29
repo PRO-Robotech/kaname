@@ -221,3 +221,75 @@ func AuditGrantRoleReassignment(corpus []GrantMigrationSource) (moves []string, 
 	sort.Strings(moves)
 	return moves, statements
 }
+
+// ── ПЕРЕВОД ID РОЛИ ───────────────────────────────────────────────────────────
+//
+// Оператор, меняющий первичный ключ роли, при ключах `ON UPDATE CASCADE` уносит
+// за строкой роли каждую выдачу — и гейт переносов выше этого не видит: он
+// читает присваивания `role_id` выдаче, а каскад их не пишет. Перевод id ОДНОЙ
+// роли переносом между ролями не является (первичный ключ уникален, слить выдачу
+// с чужой ролью каскад не может), но тот же приём, применённый молча, спрятал бы
+// от контроля всё, что угодно. Поэтому каждый такой оператор корпуса назван
+// храповиком по имени файла: новый — находка, запись без предмета — тоже.
+
+// reRoleUpdateHead — начало оператора правки строки роли.
+var reRoleUpdateHead = regexp.MustCompile(`(?i)update\s+(?:only\s+)?(?:kaname\s*\.\s*)?roles\b(?:\s+(?:as\s+)?[a-z_]\w*)?\s+set\b`)
+
+// reRoleAssignID — присваивание первичного ключа в списке SET.
+var reRoleAssignID = regexp.MustCompile(`(?i)\bid\s*=`)
+
+// RoleIDRenameRatchet — миграции, которым перевод id роли разрешён. Единственная
+// — перевод двух системных ролей на id канонической формы (kaname#543, приёмка
+// system-roles-carry-canonical-ids.md).
+var RoleIDRenameRatchet = []string{
+	"20261029150000_system_roles_carry_canonical_ids.sql",
+}
+
+// AuditRoleIDRenames — миграции, чья накатная половина меняет id роли, и число
+// осмотренных операторов правки роли.
+func AuditRoleIDRenames(corpus []GrantMigrationSource) (renames []string, statements int) {
+	for _, m := range corpus {
+		up := SQLBlankStrings(MigrationUpSection(m.Body))
+		for _, loc := range reRoleUpdateHead.FindAllStringIndex(up, -1) {
+			statements++
+			rest := up[loc[1]:]
+			stop := len(rest)
+			if g := reGrantWhereOrEnd.FindStringIndex(rest); g != nil {
+				stop = g[0]
+			}
+			if reRoleAssignID.MatchString(rest[:stop]) {
+				renames = append(renames, m.Name)
+				break
+			}
+		}
+	}
+	sort.Strings(renames)
+	return renames, statements
+}
+
+// RoleIDRenameFindings — расхождение корпуса с храповиком в обе стороны.
+func RoleIDRenameFindings(renames, ratchet []string) []string {
+	seen := map[string]bool{}
+	for _, r := range renames {
+		seen[r] = true
+	}
+	allowed := map[string]bool{}
+	for _, r := range ratchet {
+		allowed[r] = true
+	}
+	var out []string
+	for _, r := range renames {
+		if !allowed[r] {
+			out = append(out, r+": миграция меняет id роли, а храповик её не называет — "+
+				"каскад унёс бы за ролью выдачи мимо гейта переносов")
+		}
+	}
+	for _, r := range ratchet {
+		if !seen[r] {
+			out = append(out, r+": храповик называет миграцию, которая id роли не меняет "+
+				"либо которой нет, — запись пережила свой предмет и снимается")
+		}
+	}
+	sort.Strings(out)
+	return out
+}

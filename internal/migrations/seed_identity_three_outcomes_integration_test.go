@@ -22,18 +22,41 @@
 package migrations_test
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // seedIdentityMigration — миграция перевода посевной идентичности.
 const seedIdentityMigration = "20260913144108_seed_identity_leaves_the_platform_brand.sql"
+
+// systemRoleNamesMigration — миграция перевода имён двух встроенных ролей, и её
+// версия: тело адресует роли id свода, поэтому его шов пробуется на цепочке,
+// остановленной на ней самой.
+const (
+	systemRoleNamesMigration = "20260913143007_system_role_names_leave_the_platform_brand.sql"
+	systemRoleNamesVersion   = int64(20260913143007)
+)
+
+// upIAMMigrationsTo — цепочка до версии `version` включительно.
+func upIAMMigrationsTo(t *testing.T, dsn string, version int64) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	require.NoErrorf(t, goose.UpTo(db, ".", version),
+		"цепочка обязана доходить до %d — иначе мир пробы не тот, в котором тело исполняется", version)
+	return db
+}
 
 // upBodyOf — исполняемая часть наката: аннотации goose сами являются
 // комментариями, поэтому забеливаются вместе с прозой, а тело блока остаётся.
@@ -124,15 +147,23 @@ func TestSystemRoleNames_ThirdSpellingIsRefused(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
-	db := upAllIAMMigrations(t, pgtest.NewEmptyDB(t))
+	// Мир — цепочка ДО перевода имён включительно, а не вся: тело перевода
+	// адресует роли тем id, которым их посеял свод, а поздняя миграция kaname#543
+	// переводит их id. На всей цепочке тело отказало бы отсутствием строки, и
+	// отказ «третье написание» остался бы непроверенным.
+	db := upIAMMigrationsTo(t, pgtest.NewEmptyDB(t), systemRoleNamesVersion)
 	defer func() { _ = db.Close() }()
 
 	const chosenByOperator = "acme.superuser"
-	_, err := db.Exec(
-		`UPDATE kaname.roles SET name = $1 WHERE id = 'rol000000000sysadmin'`, chosenByOperator)
+	res, err := db.Exec(
+		`UPDATE kaname.roles SET name = $1 WHERE name = $2 AND is_system`,
+		chosenByOperator, domain.SystemAdminRoleName)
 	require.NoError(t, err, "предпосылка пробы не создана")
+	n, err := res.RowsAffected()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n, "предпосылка пробы не создана: роль system.admin не найдена по имени")
 
-	body := upBodyOf(t, "20260913143007_system_role_names_leave_the_platform_brand.sql")
+	body := upBodyOf(t, systemRoleNamesMigration)
 	_, err = db.Exec(body)
 	require.Error(t, err, "тело наката приняло ТРЕТЬЕ написание имени роли")
 	require.True(t, strings.Contains(err.Error(), chosenByOperator),

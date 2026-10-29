@@ -54,7 +54,7 @@ func insertActiveBinding(t *testing.T, ctx context.Context, repo *kanamepg.Repos
 	require.NoError(t, err)
 	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
-		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: accID,
+		RoleID: domain.SystemViewerRoleID, ResourceType: "account", ResourceID: accID,
 		DeletionProtection: protected,
 	})
 	require.NoError(t, err)
@@ -227,7 +227,7 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 			}
 			_, ierr := bindingset.Insert(ctx, gw.AccessBindingsW(), domain.AccessBinding{
 				ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
-				RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: accID,
+				RoleID: domain.SystemViewerRoleID, ResourceType: "account", ResourceID: accID,
 			})
 			if ierr != nil {
 				_ = gw.Rollback(ctx)
@@ -272,7 +272,7 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 	require.NoError(t, err)
 	regranted, err := bindingset.Insert(ctx, w2.AccessBindingsW(), domain.AccessBinding{
 		ID: regrantID, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
-		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: accID,
+		RoleID: domain.SystemViewerRoleID, ResourceType: "account", ResourceID: accID,
 	})
 	require.NoError(t, err, "re-grant after revoke must succeed — revoked row frees the slot")
 	require.NoError(t, w2.Commit(ctx))

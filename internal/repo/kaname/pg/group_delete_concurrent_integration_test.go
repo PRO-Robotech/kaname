@@ -108,7 +108,7 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 			ID:           domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
 			SubjectType:  domain.SubjectTypeGroup,
 			SubjectID:    domain.SubjectID(g.ID),
-			RoleID:       "rol000000000sysviewer",
+			RoleID:       domain.SystemViewerRoleID,
 			ResourceType: "account",
 			ResourceID:   string(acc.ID),
 		})
@@ -157,7 +157,7 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 			ID:           bindingID,
 			SubjectType:  domain.SubjectTypeUser,
 			SubjectID:    domain.SubjectID(uid),
-			RoleID:       "rol000000000sysviewer",
+			RoleID:       domain.SystemViewerRoleID,
 			ResourceType: "account",
 			ResourceID:   string(acc.ID),
 		})

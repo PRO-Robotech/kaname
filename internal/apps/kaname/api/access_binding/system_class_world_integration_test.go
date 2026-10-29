@@ -96,7 +96,15 @@ func newSCWorld(t *testing.T) *scWorld {
 		t.Skip("нужен Postgres: пропуск в -short")
 	}
 	ctx := context.Background()
-	pool := poolFromDSN(t, setupTestDB(t))
+	return seedSCWorld(t, ctx, wireSCWorld(t, ctx, poolFromDSN(t, setupTestDB(t))))
+}
+
+// wireSCWorld собирает части мира над готовой базой — те же, что корень службы
+// (`cmd/kaname/wiring.go`), без посева. Вынесено, чтобы мир другой приёмки, которому
+// база нужна на версии ДО испытуемой миграции, собирался теми же конструкторами, а
+// не своей копией провязки.
+func wireSCWorld(t *testing.T, ctx context.Context, pool *pgxpool.Pool) *scWorld {
+	t.Helper()
 	repo := kanamepg.New(pool, nil)
 	ops := operations.NewRepo(pool, "kaname")
 	door := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
@@ -118,9 +126,13 @@ func newSCWorld(t *testing.T) *scWorld {
 		ClusterAdminChecker: door,
 	})
 	authz := authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).WithModuleRoster(moduleroster.Roster(t))
+	return &scWorld{t: t, ctx: ctx, pool: pool, repo: repo, ops: ops, door: door, rec: rec, ab: ab, authz: authz}
+}
 
-	w := &scWorld{t: t, ctx: ctx, pool: pool, repo: repo, ops: ops, door: door, rec: rec, ab: ab, authz: authz}
-
+// seedSCWorld — посев П1 поверх собранного мира.
+func seedSCWorld(t *testing.T, ctx context.Context, w *scWorld) *scWorld {
+	t.Helper()
+	pool, repo := w.pool, w.repo
 	// Арендатор acc-A: владелец usr-A, проект prj-A, человек usr-B, учётка sva-A.
 	w.usrA = mustSeedUser(t, ctx, pool, "sca")
 	w.accA = seedAccountByOwner(t, ctx, pool, "acc-sc-a", w.usrA)
