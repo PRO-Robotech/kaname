@@ -3,40 +3,41 @@
 
 package access_binding
 
-// fga_symmetric_test.go — symmetric grant/revoke regression test.
+// fga_symmetric_test.go — регрессионная проба симметрии выдачи и отзыва.
 //
-// Contract: the production path states tuples via EmitRelationWrite /
-// EmitRelationDelete IN THE WRITER-TX. Both Create and Delete state identical tuple
-// sets, so grant and revoke are byte-symmetric — a revoke that removed a different
-// set than the grant added would leave access behind or strip access it never gave.
+// Контракт: прод-путь заявляет кортежи через EmitRelationWrite /
+// EmitRelationDelete В ТРАНЗАКЦИИ ПИСАТЕЛЯ. Create и Delete заявляют одинаковые
+// наборы кортежей, так что выдача и отзыв побайтно симметричны: отзыв, снявший не
+// тот набор, что добавила выдача, оставил бы доступ либо отнял бы невыданный.
 //
-// # What "in the writer-tx" now means, and why this file lost its second half
+// # Что теперь значит «в транзакции писателя» и почему файл лишился второй половины
 //
-// The journal `kaname.fga_outbox` used to be an at-least-once queue toward an
-// EXTERNAL relation engine, drained asynchronously. Because that drain lagged, the
-// use-cases additionally removed the same set from the engine SYNCHRONOUSLY after
-// commit, through clients.RelationStore.DeleteTuples, and this file asserted both
-// halves.
+// Журнал `kaname.fga_outbox` прежде был очередью «хотя бы раз» к ВНЕШНЕМУ движку
+// отношений и дренировался асинхронно. Дренаж отставал, поэтому use-case вдобавок
+// СИНХРОННО снимал тот же набор с движка после фиксации — через
+// clients.RelationStore.DeleteTuples, и этот файл утверждал обе
+// половины.
 //
-// Stage S6 removed the engine. The journal stayed and changed role: a database
-// trigger (`relation_fact_follows_journal`, migrations 0098/0100) folds every journal
-// row into `kaname.relation_fact` — the table a verdict is read from — IN THE SAME
-// TRANSACTION as the INSERT. So the revoke is effective at commit, which is earlier
-// and stricter than "synchronously, just after commit"; and the port through which
-// the second half was asserted no longer carries DeleteTuples at all.
+// Этап S6 снял движок. Журнал остался и сменил роль: триггер базы
+// (`relation_fact_follows_journal`, миграции 0098/0100) сворачивает каждую строку
+// журнала в `kaname.relation_fact` — таблицу, из которой читается вердикт, — В ТОЙ
+// ЖЕ ТРАНЗАКЦИИ, что INSERT. Значит, отзыв действует с фиксации, а это раньше и
+// строже, чем «синхронно, сразу после фиксации»; а порт, через который
+// утверждалась вторая половина, DeleteTuples больше не несёт вовсе.
 //
-// Keeping those assertions would have made them true by construction of the fake's
-// own type: with no method to call, "the set was not removed" could never go red for
-// a product reason. They are dropped, the reason is written here rather than deleted,
-// and what remains is the half that has a producer — the set stated in the writer-tx.
+// Оставленные, те утверждения стали бы истинны по устройству самого типа дублёра:
+// без метода, который можно позвать, «набор не снят» никогда не покраснел бы по
+// причине в продукте. Они сняты, причина записана здесь, а не стёрта, и осталась
+// та половина, у которой есть производитель, — набор, заявленный в транзакции писателя.
 //
-// The test does NOT use testcontainers (no Postgres required). It wires in-memory
-// fakes for the Repository and operations.Repo, exercises the full Create→Delete
-// round-trip through both use-cases, and asserts:
+// Проба НЕ использует testcontainers (Postgres не нужен). Она провязывает дублёры
+// в памяти для Repository и operations.Repo, проводит полный круг Create→Delete
+// через оба use-case и утверждает:
 //
-//  1. Create states ≥2 tuples (role-relation + hierarchy for project-scoped).
-//  2. Delete states exactly the same set (grant is fully revoked).
-//  3. For an account-scoped binding: Create states 1 tuple, Delete states 1 tuple.
+//  1. Create заявляет ≥2 кортежей (отношение роли + иерархия для привязки к проекту).
+//  2. Delete заявляет ровно тот же набор (выдача отозвана целиком).
+//  3. Для привязки к аккаунту: Create заявляет 2 кортежа (отношение роли +
+//     иерархия родителя-аккаунта), Delete — тот же набор.
 
 import (
 	"context"
@@ -73,30 +74,30 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
-// ─── Symmetric FGA grant/revoke ────────────────────────────────────────────
+// ─── Симметрия выдачи и отзыва FGA ─────────────────────────────────────────
 
-// TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet asserts the
-// emit-in-tx contract — the tuple set stated by Create (EmitRelationWrite) is
-// byte-identical to the set stated by Delete (EmitRelationDelete). The projection
-// of those rows into the fact table a verdict is read from is exercised against a
-// real Postgres by the relverdict integration suite.
+// TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet утверждает контракт
+// эмиссии в транзакции: набор кортежей, заявленный Create (EmitRelationWrite),
+// побайтно совпадает с набором, заявленным Delete (EmitRelationDelete). Проекцию
+// этих строк в таблицу фактов, из которой читается вердикт, проверяет на
+// настоящем Postgres интеграционный набор relverdict.
 func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	const (
 		roleID     = "rol_viewer_test_001-"
-		roleName   = "kaname.view" // legacy name kept for context; mapping is permission-based
+		roleName   = "kaname.view" // прежнее имя оставлено для контекста; сопоставление идёт по permissions
 		subjectID  = "usr_test_subject----"
 		resourceID = "prj_test_project----"
 		ownerID    = "usr_test_owner------"
 		accountID  = "acc_test_account----"
 	)
 
-	// Viewer-class permissions → relation "viewer" via PermissionsToRelations.
+	// Permissions класса наблюдателя → отношение "viewer" через PermissionsToRelations.
 	perms := domain.Permissions{"iam.access_bindings.get", "iam.access_bindings.list"}
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID, roleName, perms)
 	opsRepo := newFakeOpsRepo()
-	fga := newRecordingFGA() // wired via WithRelationStore: the READ side (grant-authority)
+	fga := newRecordingFGA() // провязан через WithRelationStore: сторона ЧТЕНИЯ (полномочие выдачи)
 
-	// Context with the account owner as principal → passes requireGrantAuthority.
+	// Контекст с владельцем аккаунта как принципалом → requireGrantAuthority пропускает.
 	ctx := newOwnerContext(ownerID)
 
 	// ── Create ────────────────────────────────────────────────────────────────
@@ -114,24 +115,24 @@ func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	require.NoError(t, err, "Create.Execute must succeed")
 	require.NotNil(t, opCreate)
 
-	// Wait for async worker.
+	// Ожидание асинхронного исполнителя.
 	waitCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	require.NoError(t, operations.Wait(waitCtx), "async Create worker must complete")
 
-	// Journal rows captured via the writer-iface fake.
+	// Строки журнала, захваченные дублёром интерфейса писателя.
 	writtenTuples := repo.drainFGAWritten()
 	require.GreaterOrEqual(t, len(writtenTuples), 2,
 		"Create must state ≥2 journal tuples (role-relation + hierarchy)")
 
-	// Verify role-relation tuple.
+	// Проверка кортежа отношения роли.
 	assert.Contains(t, writtenTuples, ab_repo.RelationTuple{
 		User:     "user:" + subjectID,
 		Relation: "viewer",
 		Object:   "project:" + resourceID,
 	}, "Create must state the role-relation tuple in the journal")
 
-	// Verify hierarchy tuple (required for Get/Delete authz cascade).
+	// Проверка кортежа иерархии (нужен каскаду authz для Get/Delete).
 	abID := repo.lastInsertedID()
 	require.NotEmpty(t, abID, "repo must record the inserted AB id")
 	assert.Contains(t, writtenTuples, ab_repo.RelationTuple{
@@ -166,11 +167,11 @@ func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 }
 
 // TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple —
-// account-scoped bindings state the role-relation tuple PLUS the
-// `account`-parent hierarchy tuple in the journal, so the model's
-// `viewer from account` cascade makes the binding object readable by the
-// account owner (Get/List/Delete). Without the hierarchy tuple every
-// account-scoped binding 403'd on read (newman-e2e iam-access-binding cascade).
+// привязки к аккаунту заявляют в журнале кортеж отношения роли ПЛЮС кортеж
+// иерархии с родителем `account`, чтобы каскад модели `viewer from account`
+// делал объект привязки читаемым для владельца аккаунта (Get/List/Delete). Без
+// кортежа иерархии каждая привязка к аккаунту отвечала на чтение 403 (каскад
+// iam-access-binding в newman-e2e).
 func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T) {
 	const (
 		roleID    = "rol_admin_test_002--"
@@ -181,12 +182,12 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 		accountID = "acc_test_account----"
 	)
 
-	// Admin-class permissions → relation "admin". The permission NAMES the account
-	// on purpose: level 3 on an account anchor is only emitted when the role covers
-	// iam.account, because account:<A>#admin is a cascade source (see
-	// tuples.go::capSynthesizedAccountAdmin). The subject of this test is the
-	// create/delete symmetry of the emitted set, so it wants the strongest tier —
-	// authored rather than synthesized.
+	// Permissions класса администратора → отношение "admin". Permission НАЗЫВАЕТ
+	// аккаунт намеренно: уровень 3 на якоре-аккаунте эмитируется, лишь когда роль
+	// покрывает iam.account, потому что account:<A>#admin — источник каскада (см.
+	// tuples.go::capSynthesizedAccountAdmin). Предмет пробы — симметрия
+	// эмитированного набора при создании и удалении, поэтому ей нужен сильнейший
+	// ярус — записанный автором, а не синтезированный.
 	perms := domain.Permissions{"iam.account.admin"}
 	repo := newABFakeRepo(ownerID, accountID, resID, roleID, roleName, perms)
 	opsRepo := newFakeOpsRepo()
@@ -198,7 +199,7 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 		SubjectType:  "user",
 		SubjectID:    domain.SubjectID(subjectID),
 		RoleID:       domain.RoleID(roleID),
-		ResourceType: "account", // account anchor — states its own `account`-parent pointer
+		ResourceType: "account", // якорь-аккаунт — заявляет собственный указатель на родителя `account`
 		ResourceID:   resID,
 	}
 	_, err := createUC.Execute(ctx, binding)
@@ -233,30 +234,29 @@ func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T)
 	require.Equal(t, written, deleted, "Delete must state the same single tuple Create stated")
 }
 
-// ─── relation-store stub ─────────────────────────────────────────────────────
+// ─── заглушка хранилища отношений ────────────────────────────────────────────
 
-// recordingFGA — clients.RelationStore for the READ side of these use-cases:
-// requireGrantAuthority asks it whether the caller may hand out this grant, and it
-// answers yes so a fixture can get past that gate and reach the subject under test.
+// recordingFGA — clients.RelationStore для стороны ЧТЕНИЯ этих use-case:
+// requireGrantAuthority спрашивает его, вправе ли вызывающий выдать это право, и
+// он отвечает «да», чтобы фикстура прошла ворота и дошла до предмета пробы.
 //
-// # It no longer records anything, and the name is a debt this change did not pay
+// # Он больше ничего не записывает, а имя расходится с этим, и это изменение его не меняло
 //
-// It carried WriteTuples/DeleteTuples with the sets they were handed, because
-// clients.RelationStore declared them: the port stood for someone ELSE'S storage,
-// and a revoke reached that storage through it. Stage S6 removed the external
-// engine; the port kept only the question (Check). There is nowhere to write any
-// more — a grant becomes an answer by the SAME COMMIT that records it (journal →
-// trigger `relation_fact_follows_journal` → `relation_fact`).
+// Он нёс WriteTuples/DeleteTuples с переданными наборами, потому что их объявлял
+// clients.RelationStore: порт стоял за ЧУЖИМ хранилищем, и отзыв доходил до этого
+// хранилища через него. Этап S6 снял внешний движок; у порта остался лишь вопрос
+// (Check). Писать больше некуда: выдача становится ответом в ТОЙ ЖЕ ФИКСАЦИИ, что
+// её записывает (журнал → триггер `relation_fact_follows_journal` → `relation_fact`).
 //
-// The recording side is removed rather than left in place. A method standing for a
-// port method that no longer exists has no caller: nothing can exercise it, so
-// nothing asserted about it can ever go red for a product reason, and a fake that
-// offers it looks like it stands for a wider surface than it does.
+// Записывающая сторона снята, а не оставлена. Метод, стоящий за несуществующим
+// больше методом порта, некому звать: исполнить его нечем, значит, никакое
+// утверждение о нём не покраснеет по причине в продукте, а дублёр, который его
+// предлагает, выглядит стоящим за более широкой поверхностью, чем на деле.
 //
-// The NAME stays because eight files of this package name this type or its
-// constructor and they are not this change's subject; renaming it here would edit
-// them. What was false was what the type DID, and that is what is corrected —
-// with the mismatch written down rather than left for the next reader to discover.
+// ИМЯ осталось, потому что этот тип или его конструктор называют восемь файлов
+// пакета, и они не предмет этого изменения; переименование здесь правило бы их.
+// Ложным было то, что тип ДЕЛАЛ, — это и исправлено, а расхождение записано, а не
+// оставлено на открытие следующему читателю.
 type recordingFGA struct{}
 
 func newRecordingFGA() *recordingFGA { return &recordingFGA{} }
@@ -265,7 +265,7 @@ func (r *recordingFGA) Check(_ context.Context, _, _, _ string) (bool, error) { 
 
 var _ clients.RelationStore = (*recordingFGA)(nil)
 
-// ─── in-memory fake Repository ───────────────────────────────────────────────
+// ─── поддельный Repository в памяти ──────────────────────────────────────────
 
 type abFakeRepo struct {
 	mu              sync.Mutex
@@ -275,78 +275,84 @@ type abFakeRepo struct {
 	roleID          string
 	roleName        string
 	rolePermissions domain.Permissions
-	// roleRules — when set, the fake Roles().Get returns a RULES-role (RBAC
-	// rules-model) so the create + reconcile exercise the
-	// type-scoped scope_grant emit path (rulesBindingTuples), not the legacy
-	// whole-role anchor collapse. Empty ⇒ legacy permission-only role.
+	// roleRules — если задано, поддельный Roles().Get отдаёт роль ПРАВИЛ (модель
+	// правил RBAC), чтобы создание и сверка шли путём эмиссии scope_grant по
+	// типу (rulesBindingTuples), а не прежним схлопыванием всей роли в якорь.
+	// Пусто ⇒ прежняя роль из одних permissions.
 	roleRules domain.Rules
-	ab        *domain.AccessBinding // last inserted
-	// Captured journal (`kaname.fga_outbox`) emit-in-tx tuples — the rows a
-	// trigger folds into `kaname.relation_fact` inside the same transaction.
+	ab        *domain.AccessBinding // последняя вставленная
+	// Захваченные кортежи журнала (`kaname.fga_outbox`), эмитированные в
+	// транзакции, — строки, которые триггер сворачивает в `kaname.relation_fact`
+	// в той же транзакции.
 	fgaWritten []ab_repo.RelationTuple
 	fgaDeleted []ab_repo.RelationTuple
-	// Captured audit_outbox compliance events emitted in the writer-tx.
+	// Захваченные события соответствия audit_outbox, эмитированные в транзакции писателя.
 	auditEvents []ab_repo.AuditEvent
-	// groupMembers — backing store for the IsMember adapter.
-	// Map key: "<groupID>|<memberType>|<memberID>". Presence ⇒ membership.
-	// Test helpers AddGroupMember / removeGroupMember mutate it.
+	// groupMembers — хранилище за адаптером IsMember.
+	// Ключ карты: "<groupID>|<memberType>|<memberID>". Наличие ⇒ членство.
+	// Меняют его помощники проб AddGroupMember / removeGroupMember.
 	groupMembers map[string]struct{}
-	// lbaRows — fixture rows returned by ListByAccount. Seed via
-	// seedABListByAccount; used by ListByAccountUseCase unit tests.
+	// lbaRows — фикстурные строки ListByAccount. Засеваются
+	// seedABListByAccount; используются unit-пробами ListByAccountUseCase.
 	lbaRows []domain.AccessBinding
 	// lbrRows — фикстурные строки ListByRole. Засевается seedABListByRole;
 	// используется пробами стоимости страницы (kacho#2054). Пусто ⇒ читается
 	// одиночная `ab`, как было, поэтому существующие пробы не задеты.
 	lbrRows []domain.AccessBinding
-	// lbsRows — fixture rows returned by ListByScope. Seed via seedABListByScope;
-	// used by the viewer ∪ v_list union-floor unit tests. Also the source rows for
-	// the unified List fake.
+	// lbsRows — фикстурные строки ListByScope. Засеваются seedABListByScope;
+	// используются unit-пробами нижней границы объединения viewer ∪ v_list. Они же —
+	// исходные строки дублёра единого List.
 	lbsRows []domain.AccessBinding
 	// lbsubRows — фикстурные строки чтения ListBySubject. Засеваются
 	// seedABListBySubject. До kacho#1352 это чтение отдавало пустоту всегда, и дублёр
 	// отвечал тем же — на пустом ответе сужение утверждать нечем: «чужого нет»
 	// зеленело бы на полностью сломанной полосе.
 	lbsubRows []domain.AccessBinding
-	// lastListFilter — the ListFilter the unified List last received (F11 tests
-	// assert the use-case's VisibleIDs push-down + predicate mapping).
+	// lastListFilter — ListFilter, последним полученный единым List (пробы F11
+	// утверждают спуск VisibleIDs из use-case и сопоставление предиката).
 	lastListFilter ab_repo.ListFilter
 	// projectAccounts — проект → аккаунт, которому он принадлежит. Питает фан-аут
 	// `List(account_id)` в дублёре (rowInAccountScope). Пусто ⇒ ни один проект
 	// ни в каком аккаунте, и это намеренно строгое умолчание.
 	projectAccounts map[string]string
-	// materializedAt — reconciler-ledger fixture backing
-	// ListMaterializedAtForBindings (AccessBinding.materialized_at). Seed via
-	// seedMaterializedAt; an absent binding reports nothing (= not yet live).
+	// materializedAt — фикстура ведомости сверщика, на которой стоит
+	// ListMaterializedAtForBindings (AccessBinding.materialized_at). Засевается
+	// seedMaterializedAt; о незасеянной привязке не сообщается ничего (= ещё не действует).
 	materializedAt map[domain.AccessBindingID]time.Time
-	// lastByScopeType / lastByScopeID — the scope anchor ListByScope last received.
-	// The handler resolves the canonical dotted `scope_type` (or the legacy bare
-	// `resource_type`) to the bare within-service kind BEFORE the use-case, so these
-	// pin that resolution (scope_coordinate_test.go).
+	// lastByScopeType / lastByScopeID — якорь области, последним полученный ListByScope.
+	// Обработчик сводит канонический `scope_type` с точкой (или прежний голый
+	// `resource_type`) к голому виду внутри службы ДО use-case, и эти поля
+	// закрепляют это сведение (scope_coordinate_test.go).
 	lastByScopeType domain.ResourceType
 	lastByScopeID   string
-	// reconcileObjs — object ids for which a reconcile-event was emitted in the
-	// writer-tx (labels co-commit). Drained via drainReconcileObjects.
+	// reconcileObjs — id объектов, для которых в транзакции писателя эмитировано
+	// событие сверки (совместная фиксация меток). Выбираются drainReconcileObjects.
 	reconcileObjs []string
-	// users / serviceAccounts / groups — id→accountID store backing the fake
-	// Users()/ServiceAccounts()/Groups() readers (existence +
-	// home-account resolution for ListSubjectPrivileges). Absence ⇒ ErrNotFound.
+	// users / serviceAccounts / groups — хранилище id→accountID за поддельными
+	// читателями Users()/ServiceAccounts()/Groups() (существование и
+	// домашний аккаунт для ListSubjectPrivileges). Нет записи ⇒ ErrNotFound.
 	users           map[string]string
 	serviceAccounts map[string]string
 	groups          map[string]string
-	// spRows — fixture rows returned by AccessBindings().ListSubjectPrivileges.
-	// Seed via seedSubjectPrivileges; used by ListSubjectPrivilegesUseCase tests.
+	// spRows — фикстурные строки AccessBindings().ListSubjectPrivileges.
+	// Засеваются seedSubjectPrivileges; используются пробами ListSubjectPrivilegesUseCase.
 	spRows []domain.SubjectPrivilege
-	// roleIsCustom — when true the fake Roles().Get returns a CUSTOM role
-	// (IsSystem=false, AccountID=accountID) so Role.Update account-owner
-	// authority + assignability gates pass (reconcile fan-out tests).
+	// roleIsCustom — при true поддельный Roles().Get отдаёт ПОЛЬЗОВАТЕЛЬСКУЮ роль
+	// (IsSystem=false, AccountID=accountID), чтобы ворота Role.Update — полномочие
+	// владельца аккаунта и назначаемость — пропускали (пробы веера сверки).
 	roleIsCustom bool
-	// abSubjects — access_binding_subjects backing store, keyed by
-	// binding id → ordered subjects. Mutated by InsertSubjects/DeleteSubject.
+	// roleSegmentsAnswered — дублёр отвечает на вопрос о сегментах роли «держится
+	// всё» (kaname#76). Ставят его ТОЛЬКО пробы, зовущие эхо правки роли: эхо
+	// несёт признак превью и спрашивает его в транзакции правки. Прочим пробам
+	// вопрос не предмет, и дублёр по умолчанию отказывает.
+	roleSegmentsAnswered bool
+	// abSubjects — хранилище access_binding_subjects с ключом
+	// id привязки → упорядоченные субъекты. Меняют его InsertSubjects/DeleteSubject.
 	abSubjects map[domain.AccessBindingID][]domain.Subject
-	// forceGetErr — when set, fakeABRdr.Get returns this error unconditionally
-	// instead of the normal found/not-found lookup. Used by
-	// get_error_mapping_test.go to simulate a transient (non-not-found) Reader
-	// failure on the Update/Delete existence-check Get.
+	// forceGetErr — если задано, fakeABRdr.Get безусловно отдаёт эту ошибку
+	// вместо обычного поиска «найдено / не найдено». Использует его
+	// get_error_mapping_test.go, чтобы имитировать преходящий (не «не найдено»)
+	// отказ Reader на Get проверки существования в Update/Delete.
 	forceGetErr error
 	// membersOfGroupsErr — отказ чтения состава групп. Ручка нужна, потому что
 	// «полнота перечисления» держится ТОЛЬКО тем, что отказ соседа отказывает
@@ -361,44 +367,45 @@ type abFakeRepo struct {
 	// Настоящий читатель объявляет это, упершись в предел выборки; дублёру
 	// предел ни к чему, а признак нужен — иначе путь его переноса не проверен.
 	incompleteGroups []domain.GroupID
-	// emittedTuples — persisted exact emitted-set per binding
-	// (access_binding_emitted_tuples), keyed by binding id. Co-committing
-	// the grant tuples here lets revoke/Role.Update use the stored set
-	// (not a re-derive from the mutable role). Set semantics on the tuple
-	// (dedupe), but INSERTION ORDER is preserved on read-back: the real pg repo
-	// returns a deterministic `ORDER BY relation, object, fga_user` and the
-	// symmetric-revoke contract is set-based (the journal's projection applies a set),
-	// yet TestFGASymmetric asserts byte-equality of the write-set vs the
-	// delete-set. Insertion order makes SelectEmittedTuples deterministic AND
-	// equal to the order EmitRelationWrite captured (create.go feeds the SAME
-	// `tuples` slice to EmitRelationWrite and InsertEmittedTuples), so the
-	// round-trip is order-stable without an unordered Go-map shuffle. A plain
-	// `map[tuple]struct{}` iterates in random order ⇒ require.Equal flakes/fails.
+	// emittedTuples — хранимый точный эмитированный набор каждой привязки
+	// (access_binding_emitted_tuples) с ключом id привязки. Совместная фиксация
+	// кортежей выдачи здесь позволяет отзыву и Role.Update брать хранимый набор
+	// (а не выводить заново из изменчивой роли). У кортежа семантика множества
+	// (без повторов), но ПОРЯДОК ВСТАВКИ при чтении сохраняется: настоящий repo
+	// на pg отдаёт детерминированный `ORDER BY relation, object, fga_user`, и
+	// контракт симметричного отзыва — по множеству (проекция журнала применяет
+	// множество), однако TestFGASymmetric утверждает побайтное равенство набора
+	// записи и набора удаления. Порядок вставки делает SelectEmittedTuples
+	// детерминированным И равным порядку, захваченному EmitRelationWrite (create.go
+	// подаёт ОДИН И ТОТ ЖЕ срез `tuples` в EmitRelationWrite и InsertEmittedTuples),
+	// так что круг устойчив по порядку без перемешивания неупорядоченной карты Go.
+	// Голый `map[tuple]struct{}` обходится в случайном порядке ⇒ require.Equal
+	// мерцает или падает.
 	emittedTuples map[domain.AccessBindingID]*orderedTupleSet
-	// txOps — ordered trace of the writer-tx port calls that carry a DB-level
-	// serialization contract (advisory-lock / ledger-read / status-CAS). Lets a
-	// unit test pin the ORDER those statements are issued in, which is what makes
-	// the revoke critical-section race-free (ban #10) — see revoke_test.go.
+	// txOps — упорядоченный след вызовов порта транзакции писателя, несущих
+	// контракт сериализации на уровне базы (advisory-lock / чтение ведомости /
+	// CAS статуса). Позволяет unit-пробе закрепить ПОРЯДОК этих операторов — именно
+	// он делает критическую секцию отзыва свободной от гонок (ban #10), см. revoke_test.go.
 	txOps []string
 }
 
-// recordTxOp appends one writer-tx port call to the ordered trace.
+// recordTxOp дописывает один вызов порта транзакции писателя в упорядоченный след.
 func (r *abFakeRepo) recordTxOp(op string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.txOps = append(r.txOps, op)
 }
 
-// resetTxOpTrace drops the marks recorded so far, so a probe whose subject is ONE
-// transaction is not reading another one's. Without it a fixture that grants before
-// it revokes cannot tell the two transactions apart in a single flat trace.
+// resetTxOpTrace сбрасывает записанные до сих пор отметки, чтобы проба, чей
+// предмет — ОДНА транзакция, не читала чужую. Без него фикстура, выдающая до
+// отзыва, не различит двух транзакций в одном плоском следе.
 func (r *abFakeRepo) resetTxOpTrace() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.txOps = nil
 }
 
-// txOpTrace returns a copy of the recorded writer-tx port-call order.
+// txOpTrace отдаёт копию записанного порядка вызовов порта транзакции писателя.
 func (r *abFakeRepo) txOpTrace() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -407,8 +414,9 @@ func (r *abFakeRepo) txOpTrace() []string {
 	return out
 }
 
-// AddUser — test helper. Registers a User id with its home account so the fake
-// Users() reader resolves it (existence + account_id for the 1.3 authz gate).
+// AddUser — помощник проб. Регистрирует id пользователя с его домашним
+// аккаунтом, чтобы поддельный читатель Users() его находил (существование и
+// account_id для ворот authz 1.3).
 func (r *abFakeRepo) AddUser(userID, accountID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -418,8 +426,8 @@ func (r *abFakeRepo) AddUser(userID, accountID string) {
 	r.users[userID] = accountID
 }
 
-// AddServiceAccount — test helper. Registers a ServiceAccount id with its home
-// account so the fake ServiceAccounts() reader resolves it.
+// AddServiceAccount — помощник проб. Регистрирует id сервисной учётки с её
+// домашним аккаунтом, чтобы поддельный читатель ServiceAccounts() её находил.
 func (r *abFakeRepo) AddServiceAccount(saID, accountID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -429,9 +437,9 @@ func (r *abFakeRepo) AddServiceAccount(saID, accountID string) {
 	r.serviceAccounts[saID] = accountID
 }
 
-// AddGroup — test helper. Registers a Group id with its home account so the
-// fake Groups() reader resolves it (existence + account_id for the 1.3b authz
-// gate on subject_type=group).
+// AddGroup — помощник проб. Регистрирует id группы с её домашним аккаунтом,
+// чтобы поддельный читатель Groups() её находил (существование и account_id для
+// ворот authz 1.3b при subject_type=group).
 func (r *abFakeRepo) AddGroup(groupID, accountID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -441,16 +449,16 @@ func (r *abFakeRepo) AddGroup(groupID, accountID string) {
 	r.groups[groupID] = accountID
 }
 
-// seedSubjectPrivileges — test helper. Replaces the fixture rows returned by
-// the fake AccessBindings().ListSubjectPrivileges.
+// seedSubjectPrivileges — помощник проб. Заменяет фикстурные строки, которые
+// отдаёт поддельный AccessBindings().ListSubjectPrivileges.
 func (r *abFakeRepo) seedSubjectPrivileges(rows []domain.SubjectPrivilege) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.spRows = append(r.spRows[:0], rows...)
 }
 
-// seedMaterializedAt — test helper. Records the instant a binding's per-object
-// access became live, as the reconciler ledger would.
+// seedMaterializedAt — помощник проб. Записывает момент, когда пообъектный доступ
+// привязки начал действовать, как это сделала бы ведомость сверщика.
 func (r *abFakeRepo) seedMaterializedAt(id domain.AccessBindingID, at time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -460,9 +468,9 @@ func (r *abFakeRepo) seedMaterializedAt(id domain.AccessBindingID, at time.Time)
 	r.materializedAt[id] = at
 }
 
-// seedABListByAccount — test helper. Replaces the fixture rows returned by
-// the fake fakeABRdr.ListByAccount.
-// seedABListBySubject replaces the fixture rows returned by the fake
+// seedABListByAccount — помощник проб. Заменяет фикстурные строки, которые
+// отдаёт поддельный fakeABRdr.ListByAccount.
+// seedABListBySubject заменяет фикстурные строки, которые отдаёт поддельный
 // ListBySubject.
 func seedABListBySubject(r *abFakeRepo, rows []domain.AccessBinding) {
 	r.mu.Lock()
@@ -476,8 +484,8 @@ func (r *abFakeRepo) seedABListByAccount(rows []domain.AccessBinding) {
 	r.lbaRows = append(r.lbaRows[:0], rows...)
 }
 
-// AddGroupMember — test helper. Stores membership triple so
-// the use-case's requireGroupMembership lookup returns true for this caller.
+// AddGroupMember — помощник проб. Хранит тройку членства, чтобы поиск
+// requireGroupMembership в use-case отвечал для этого вызывающего true.
 func (r *abFakeRepo) AddGroupMember(groupID, memberType, memberID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -528,7 +536,7 @@ func seedProjectAccount(repo *abFakeRepo, projectID, accountID string) {
 	repo.projectAccounts[projectID] = accountID
 }
 
-// drainFGAWritten — captured fga_outbox grant emits since last drain.
+// drainFGAWritten — захваченные эмиссии выдачи в fga_outbox с прошлой выборки.
 func (r *abFakeRepo) drainFGAWritten() []ab_repo.RelationTuple {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -538,7 +546,7 @@ func (r *abFakeRepo) drainFGAWritten() []ab_repo.RelationTuple {
 	return out
 }
 
-// drainFGADeleted — captured fga_outbox revoke emits since last drain.
+// drainFGADeleted — захваченные эмиссии отзыва в fga_outbox с прошлой выборки.
 func (r *abFakeRepo) drainFGADeleted() []ab_repo.RelationTuple {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -548,7 +556,7 @@ func (r *abFakeRepo) drainFGADeleted() []ab_repo.RelationTuple {
 	return out
 }
 
-// drainAuditEvents — captured audit_outbox compliance events since last drain.
+// drainAuditEvents — захваченные события соответствия audit_outbox с прошлой выборки.
 func (r *abFakeRepo) drainAuditEvents() []ab_repo.AuditEvent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -577,7 +585,7 @@ func (r *abFakeRepo) Close() {}
 
 var _ kanamerepo.Repository = (*abFakeRepo)(nil)
 
-// abFakeReader implements kanamerepo.Reader.
+// abFakeReader реализует kanamerepo.Reader.
 type abFakeReader struct{ repo *abFakeRepo }
 
 func (rd *abFakeReader) Accounts() acct_repo.ReaderIface      { return &fakeAcctRdr{repo: rd.repo} }
@@ -598,7 +606,7 @@ func (rd *abFakeReader) AccessBindings() ab_repo.ReaderIface { return &fakeABRdr
 func (rd *abFakeReader) Commit(_ context.Context) error      { return nil }
 func (rd *abFakeReader) Rollback(_ context.Context) error    { return nil }
 
-// abFakeWriter implements kanamerepo.Writer.
+// abFakeWriter реализует kanamerepo.Writer.
 type abFakeWriter struct {
 	abFakeReader
 }
@@ -622,16 +630,16 @@ func (w *abFakeWriter) AdvisoryXactLock(_ context.Context, key string) error {
 	return nil
 }
 
-// Commit closes the writer-tx and marks the trace, so a probe can tell what was
-// stated INSIDE the transaction from what happened after it. abFakeReader.Commit is
-// shadowed deliberately: the reader's commit is not the boundary anything here is
-// about.
+// Commit закрывает транзакцию писателя и ставит отметку в след, чтобы проба
+// отличала заявленное ВНУТРИ транзакции от случившегося после неё.
+// abFakeReader.Commit перекрыт намеренно: фиксация читателя — не та граница, о
+// которой здесь что-либо утверждается.
 func (w *abFakeWriter) Commit(_ context.Context) error {
 	w.repo.recordTxOp("commit")
 	return nil
 }
 
-// fakeAcctRdr — account Reader; returns Account with the configured owner.
+// fakeAcctRdr — читатель аккаунтов; отдаёт Account с заданным владельцем.
 type fakeAcctRdr struct{ repo *abFakeRepo }
 
 func (a *fakeAcctRdr) Get(_ context.Context, id domain.AccountID) (domain.Account, error) {
@@ -650,7 +658,7 @@ func (a *fakeAcctRdr) CountAccountsByOwner(_ context.Context, _ domain.UserID) (
 	return 0, nil
 }
 
-// fakeProjRdr — project Reader; returns Project pointing to the fake account.
+// fakeProjRdr — читатель проектов; отдаёт Project, указывающий на поддельный аккаунт.
 type fakeProjRdr struct{ repo *abFakeRepo }
 
 func (p *fakeProjRdr) Get(_ context.Context, id domain.ProjectID) (domain.Project, error) {
@@ -666,19 +674,19 @@ func (p *fakeProjRdr) CountByAccount(_ context.Context, _ domain.AccountID) (int
 	return 0, nil
 }
 
-// fakeRoleRdr — role Reader; returns the configured role for the configured id.
+// fakeRoleRdr — читатель ролей; отдаёт заданную роль по заданному id.
 type fakeRoleRdr struct{ repo *abFakeRepo }
 
 func (r *fakeRoleRdr) Get(_ context.Context, id domain.RoleID) (domain.Role, error) {
 	r.repo.mu.Lock()
 	defer r.repo.mu.Unlock()
 	if string(id) == r.repo.roleID {
-		// Permission-based mapping. Populate Permissions[]
-		// so PermissionsToRelations can derive the FGA tier.
+		// Сопоставление по permissions. Permissions[] заполняется,
+		// чтобы PermissionsToRelations мог вывести ярус FGA.
 		if r.repo.roleIsCustom {
-			// CUSTOM role: owned by the account so Role.Update
-			// account-owner authority + assignability gates pass; the
-			// reconcile fan-out exercises the live permissions.
+			// ПОЛЬЗОВАТЕЛЬСКАЯ роль: ею владеет аккаунт, чтобы ворота Role.Update —
+			// полномочие владельца аккаунта и назначаемость — пропускали; веер
+			// сверки работает с действующими permissions.
 			return domain.Role{
 				ID:          id,
 				Name:        domain.RoleName(r.repo.roleName),
@@ -688,9 +696,9 @@ func (r *fakeRoleRdr) Get(_ context.Context, id domain.RoleID) (domain.Role, err
 				Rules:       r.repo.roleRules,
 			}, nil
 		}
-		// Default: IsSystem so the scope-enforcement
-		// (domain.IsRoleAssignable) treats it as assignable on any resource —
-		// the symmetric suite exercises FGA tuple symmetry, not role-scope.
+		// По умолчанию — IsSystem, чтобы проверка области
+		// (domain.IsRoleAssignable) считала роль назначаемой на любой ресурс:
+		// набор о симметрии проверяет симметрию кортежей FGA, а не область роли.
 		return domain.Role{
 			ID:          id,
 			Name:        domain.RoleName(r.repo.roleName),
@@ -700,9 +708,9 @@ func (r *fakeRoleRdr) Get(_ context.Context, id domain.RoleID) (domain.Role, err
 			Rules:       r.repo.roleRules,
 		}, nil
 	}
-	// Fidelity with the real pg role repo (role_repo.go): an absent role is the
-	// canonical wrapped ErrNotFound with the contract text, so use-case gates that
-	// branch on iamerr.ErrNotFound behave as they do in production.
+	// Верность настоящему repo ролей на pg (role_repo.go): отсутствующая роль — это
+	// канонический обёрнутый ErrNotFound с текстом контракта, так что ворота
+	// use-case, ветвящиеся по iamerr.ErrNotFound, ведут себя как в проде.
 	return domain.Role{}, iamerr.Wrapf(iamerr.ErrNotFound, "Role %s not found", id)
 }
 func (r *fakeRoleRdr) GetWithVersion(ctx context.Context, id domain.RoleID) (domain.Role, string, error) {
@@ -716,7 +724,7 @@ func (r *fakeRoleRdr) ListAssignable(_ context.Context, _, _ string, _ role_repo
 	return nil, "", nil
 }
 
-// fakeABRdr — access_binding Reader; returns last-inserted AB by id.
+// fakeABRdr — читатель access_binding; отдаёт по id последнюю вставленную привязку.
 type fakeABRdr struct{ repo *abFakeRepo }
 
 // ListActiveHoldingMembership — предмета этой пробы не касается: она не исключает
@@ -742,8 +750,8 @@ func (a *fakeABRdr) List(_ context.Context, f ab_repo.ListFilter) ([]domain.Acce
 	a.repo.mu.Lock()
 	defer a.repo.mu.Unlock()
 	a.repo.lastListFilter = f
-	// No visibility predicate: read visibility is applied by the use-case to the
-	// rows this returns (internal/authzfilter), mirroring the pg repo.
+	// Предиката видимости нет: видимость чтения применяет use-case к отданным
+	// здесь строкам (internal/authzfilter), как и у repo на pg.
 	var out []domain.AccessBinding
 	for _, b := range a.repo.lbsRows {
 		// AccountID — фан-аут «аккаунт плюс каждый его проект», ровно как в
@@ -814,8 +822,8 @@ func (a *fakeABRdr) ListSubjectPrivileges(_ context.Context, _ domain.SubjectTyp
 	return out, "", nil
 }
 
-// fakeUserRdr — minimal user.ReaderIface for ListSubjectPrivileges existence +
-// home-account resolution. Only Get is exercised.
+// fakeUserRdr — наименьший user.ReaderIface для ListSubjectPrivileges:
+// существование и домашний аккаунт. Исполняется только Get.
 type fakeUserRdr struct{ repo *abFakeRepo }
 
 func (u *fakeUserRdr) Get(_ context.Context, id domain.UserID) (domain.User, error) {
@@ -849,7 +857,7 @@ func (u *fakeUserRdr) ListAccountsForUser(_ context.Context, _ domain.UserID) ([
 	return nil, nil
 }
 
-// fakeSARdr — minimal service_account.ReaderIface for ListSubjectPrivileges.
+// fakeSARdr — наименьший service_account.ReaderIface для ListSubjectPrivileges.
 type fakeSARdr struct{ repo *abFakeRepo }
 
 func (s *fakeSARdr) Get(_ context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
@@ -865,9 +873,9 @@ func (s *fakeSARdr) List(_ context.Context, _ sa_repo.ListFilter) ([]domain.Serv
 	return nil, "", nil
 }
 
-// fakeGroupRdr — fake Groups reader supporting IsMember lookups.
-// Minimal group.ReaderIface implementation backing IsMember-based
-// authorisation in ListAccessBindingsBySubject. Other methods unused.
+// fakeGroupRdr — поддельный читатель групп с поиском IsMember.
+// Наименьшая реализация group.ReaderIface, на которой стоит авторизация по
+// IsMember в ListAccessBindingsBySubject. Прочие методы не используются.
 type fakeGroupRdr struct{ repo *abFakeRepo }
 
 func (g *fakeGroupRdr) Get(_ context.Context, id domain.GroupID) (domain.Group, error) {
@@ -934,7 +942,7 @@ func (g *fakeGroupRdr) IsMember(_ context.Context, groupID domain.GroupID, membe
 	return ok, nil
 }
 
-// fakeABWtr — access_binding Writer; stores Insert result, clears on Delete.
+// fakeABWtr — писатель access_binding; хранит итог Insert, очищает на Delete.
 type fakeABWtr struct{ repo *abFakeRepo }
 
 // GetForDeactivation — то же чтение, что у фейка читателя: замка строки у фейка нет,
@@ -1031,7 +1039,7 @@ func (w *fakeABWtr) EmitSubjectChangeEvent(_ context.Context, _ ab_repo.SubjectC
 	return nil
 }
 
-// Capture emitted FGA tuples for the symmetric test below.
+// Захват эмитированных кортежей FGA для пробы симметрии выше.
 func (w *fakeABWtr) EmitRelationWrite(_ context.Context, tuples []ab_repo.RelationTuple) error {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
@@ -1039,15 +1047,15 @@ func (w *fakeABWtr) EmitRelationWrite(_ context.Context, tuples []ab_repo.Relati
 	return nil
 }
 
-// EmitRelationDelete also leaves a mark in the writer-tx trace.
+// EmitRelationDelete вдобавок оставляет отметку в следе транзакции писателя.
 //
-// The mark is what lets a probe assert WHEN the revoke set is stated, and "when" is
-// the whole property now: the trigger on the journal applies the row to the fact
-// table inside the same transaction, so a set stated BEFORE the commit is denied
-// AT the commit — whereas a set stated after it would be a second, separate write
-// that could be lost between the two. Without the mark the ordering is invisible to
-// every probe in this package, and a move of the emit out of the transaction would
-// keep every set-equality assertion green.
+// Отметка позволяет пробе утверждать, КОГДА заявлен набор отзыва, а «когда»
+// теперь и есть всё свойство: триггер на журнале применяет строку к таблице
+// фактов в той же транзакции, так что набор, заявленный ДО фиксации, отказывает
+// В МОМЕНТ фиксации, — тогда как набор, заявленный после неё, был бы второй,
+// отдельной записью, которая может потеряться между ними. Без отметки порядок
+// невидим всем пробам пакета, и вынос эмиссии из транзакции оставил бы зелёными
+// все утверждения о равенстве наборов.
 func (w *fakeABWtr) EmitRelationDelete(_ context.Context, tuples []ab_repo.RelationTuple) error {
 	w.repo.recordTxOp("emit_relation_delete")
 	w.repo.mu.Lock()
@@ -1056,7 +1064,7 @@ func (w *fakeABWtr) EmitRelationDelete(_ context.Context, tuples []ab_repo.Relat
 	return nil
 }
 
-// EmitAuditEvent captures the audit_outbox compliance event for assertions.
+// EmitAuditEvent захватывает событие соответствия audit_outbox для утверждений.
 func (w *fakeABWtr) EmitAuditEvent(_ context.Context, ev ab_repo.AuditEvent) error {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
@@ -1074,7 +1082,7 @@ func (w *fakeABWtr) TransitionStatus(
 	return domain.AccessBinding{}, stderrors.New("TransitionStatus: not implemented in fake")
 }
 
-// ─── fake operations.Repo ───────────────────────────────────────────────────
+// ─── поддельный operations.Repo ─────────────────────────────────────────────
 
 type fakeOpsRepo struct {
 	mu  sync.Mutex
@@ -1143,10 +1151,10 @@ func (r *fakeOpsRepo) Cancel(_ context.Context, id string) error {
 
 var _ operations.Repo = (*fakeOpsRepo)(nil)
 
-// ─── context helper ──────────────────────────────────────────────────────────
+// ─── помощник контекста ──────────────────────────────────────────────────────
 
-// newOwnerContext returns a context carrying the owner user as the authenticated
-// principal (passes requireGrantAuthority IsSelf/owner check).
+// newOwnerContext отдаёт контекст, несущий пользователя-владельца как
+// подлинный принципал (проходит проверку IsSelf/владельца в requireGrantAuthority).
 func newOwnerContext(ownerID string) context.Context {
 	return operations.WithPrincipal(context.Background(), operations.Principal{
 		ID:   ownerID,
@@ -1154,8 +1162,9 @@ func newOwnerContext(ownerID string) context.Context {
 	})
 }
 
-// EmitReconcileEvent — records the (objectType, objectID) so the labels
-// co-commit can be asserted (iam.accessBinding reconcile trigger on a label change).
+// EmitReconcileEvent — записывает (objectType, objectID), чтобы можно было
+// утверждать совместную фиксацию меток (событие сверки iam.accessBinding на
+// смене метки).
 func (w *abFakeWriter) EmitReconcileEvent(_ context.Context, _, objectType, objectID string) error {
 	if objectType == "iam.accessBinding" {
 		w.repo.mu.Lock()
@@ -1165,8 +1174,8 @@ func (w *abFakeWriter) EmitReconcileEvent(_ context.Context, _, objectType, obje
 	return nil
 }
 
-// drainReconcileObjects returns the object ids for which a reconcile-event was
-// emitted in the writer-tx (labels co-commit assertion).
+// drainReconcileObjects отдаёт id объектов, для которых в транзакции писателя
+// эмитировано событие сверки (утверждение о совместной фиксации меток).
 func (r *abFakeRepo) drainReconcileObjects() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1266,6 +1275,11 @@ func (r *fakeRoleRdr) PrunedSelectorTypes(context.Context, []domain.RoleID) (map
 }
 
 func (r *fakeRoleRdr) UnresolvedSegments(context.Context, []domain.RoleSegment) (map[domain.RoleID][]domain.RoleSegment, error) {
+	r.repo.mu.Lock()
+	defer r.repo.mu.Unlock()
+	if r.repo.roleSegmentsAnswered {
+		return map[domain.RoleID][]domain.RoleSegment{}, nil
+	}
 	return nil, stderrors.New("UnresolvedSegments не предмет этих проб")
 }
 

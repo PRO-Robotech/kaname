@@ -3,11 +3,11 @@
 
 package access_binding
 
-// fga_orphan_helpers_test.go — test scaffolding for the orphan-tuple
-// regression suite (fga_orphan_test.go): fake-repo extensions for the persisted
-// emitted-tuple store + active-by-role listing, a fake Role writer, and the
-// Role.Update use-case wiring (real UpdateRoleUseCase + real RoleTupleReconciler
-// over the fake repo).
+// fga_orphan_helpers_test.go — подмости регрессионного набора о кортежах-сиротах
+// (fga_orphan_test.go): расширения поддельного repo для хранимого набора
+// эмитированных кортежей и перечня активных привязок роли, поддельный писатель
+// Role и провязка use-case Role.Update (настоящие UpdateRoleUseCase и
+// RoleTupleReconciler поверх поддельного repo).
 
 import (
 	"context"
@@ -20,28 +20,28 @@ import (
 	gdrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/grant_delegation"
 )
 
-// ─── ordered, deduped emitted-tuple store ────────────────────────────────────
+// ─── упорядоченное хранилище эмитированных кортежей без повторов ───────────────
 
-// orderedTupleSet models the access_binding_emitted_tuples ledger of ONE binding
-// in the fake repo: set semantics (PK on the natural key ⇒ dedupe) WITH
-// insertion order preserved on read-back. The real pg SelectEmittedTuples returns
-// a deterministic `ORDER BY relation, object, fga_user`; the fake returns
-// insertion order. Both are valid for the SET-based symmetric-revoke contract
-// (the projection of the journal applies a set), but a raw `map[tuple]struct{}` iterates
-// in RANDOM order, which makes TestFGASymmetric's require.Equal(written, deleted)
-// flaky/failing. Insertion order is deterministic AND matches the order in which
-// create.go captured the write-set (it feeds the SAME `tuples` slice to both
-// EmitRelationWrite and InsertEmittedTuples), so the round-trip is byte-stable.
+// orderedTupleSet моделирует в поддельном repo ведомость access_binding_emitted_tuples
+// ОДНОЙ привязки: семантика множества (PK по естественному ключу ⇒ без повторов)
+// С сохранением порядка вставки при чтении. Настоящий SelectEmittedTuples на pg
+// отдаёт детерминированный `ORDER BY relation, object, fga_user`; дублёр — порядок
+// вставки. Для контракта симметричного отзыва по МНОЖЕСТВУ годятся оба (проекция
+// журнала применяет множество), но голый `map[tuple]struct{}` обходится в
+// СЛУЧАЙНОМ порядке, и require.Equal(written, deleted) в TestFGASymmetric от этого
+// мерцает или падает. Порядок вставки детерминирован И совпадает с порядком, в
+// котором create.go захватил набор записи (он подаёт ОДИН И ТОТ ЖЕ срез `tuples`
+// и в EmitRelationWrite, и в InsertEmittedTuples), так что круг побайтно устойчив.
 type orderedTupleSet struct {
-	order []ab_repo.RelationTuple            // insertion order, deduped
-	seen  map[ab_repo.RelationTuple]struct{} // membership for dedupe
+	order []ab_repo.RelationTuple            // порядок вставки, без повторов
+	seen  map[ab_repo.RelationTuple]struct{} // членство для отсева повторов
 }
 
 func newOrderedTupleSet() *orderedTupleSet {
 	return &orderedTupleSet{seen: map[ab_repo.RelationTuple]struct{}{}}
 }
 
-// add appends a tuple if not already present (ON CONFLICT DO NOTHING parity).
+// add дописывает кортеж, если его ещё нет (паритет с ON CONFLICT DO NOTHING).
 func (s *orderedTupleSet) add(t ab_repo.RelationTuple) {
 	if _, dup := s.seen[t]; dup {
 		return
@@ -50,34 +50,35 @@ func (s *orderedTupleSet) add(t ab_repo.RelationTuple) {
 	s.order = append(s.order, t)
 }
 
-// list returns a copy in insertion order.
+// list отдаёт копию в порядке вставки.
 func (s *orderedTupleSet) list() []ab_repo.RelationTuple {
 	out := make([]ab_repo.RelationTuple, len(s.order))
 	copy(out, s.order)
 	return out
 }
 
-// ─── fake-repo extensions ────────────────────────────────────────────────────
+// ─── расширения поддельного repo ─────────────────────────────────────────────
 
-// setRolePermissions mutates the backing role's permissions (simulates a
-// Role.Update of the role's permissions between grant and revoke).
+// setRolePermissions меняет permissions стоящей за дублёром роли (имитирует
+// Role.Update её permissions между выдачей и отзывом).
 func (r *abFakeRepo) setRolePermissions(p domain.Permissions) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.rolePermissions = p
 }
 
-// setRoleRules marks the backing role as a RULES-role (RBAC rules-model) so the
-// create + reconcile exercise the type-scoped scope_grant emit
-// path (rulesBindingTuples) instead of the legacy whole-role anchor collapse.
+// setRoleRules помечает стоящую за дублёром роль как роль ПРАВИЛ (модель правил
+// RBAC), чтобы создание и сверка шли путём эмиссии scope_grant по типу
+// (rulesBindingTuples), а не прежним схлопыванием всей роли в якорь.
 func (r *abFakeRepo) setRoleRules(rules domain.Rules) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.roleRules = rules
 }
 
-// setRoleCustom marks the backing role as a CUSTOM role owned by accountID so
-// the Role.Update account-owner authority + assignability gates pass.
+// setRoleCustom помечает стоящую за дублёром роль как ПОЛЬЗОВАТЕЛЬСКУЮ, которой
+// владеет accountID, чтобы ворота Role.Update — полномочие владельца аккаунта и
+// назначаемость — пропускали.
 func (r *abFakeRepo) setRoleCustom(accountID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -85,10 +86,18 @@ func (r *abFakeRepo) setRoleCustom(accountID string) {
 	r.accountID = accountID
 }
 
-// InsertEmittedTuples — fake of the persisted exact emitted-set co-commit. Set
-// semantics (PK on the natural key) — repeated inserts of the same tuple are a
-// no-op (ON CONFLICT DO NOTHING parity); insertion order is preserved on
-// read-back so the round-trip is deterministic (orderedTupleSet doc).
+// answerRoleSegments — дублёр отвечает на вопрос о сегментах роли «держится
+// всё»: эхо правки роли несёт признак превью (kaname#76).
+func (r *abFakeRepo) answerRoleSegments() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.roleSegmentsAnswered = true
+}
+
+// InsertEmittedTuples — дублёр совместной фиксации точного эмитированного набора.
+// Семантика множества (PK по естественному ключу): повторная вставка того же
+// кортежа — холостой ход (паритет с ON CONFLICT DO NOTHING); порядок вставки при
+// чтении сохраняется, так что круг детерминирован (см. описание orderedTupleSet).
 func (w *fakeABWtr) InsertEmittedTuples(_ context.Context, id domain.AccessBindingID, tuples []ab_repo.RelationTuple) error {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
@@ -104,9 +113,9 @@ func (w *fakeABWtr) InsertEmittedTuples(_ context.Context, id domain.AccessBindi
 	return nil
 }
 
-// ReplaceEmittedTuples — fake of the reconcile wholesale-replace (delete-all +
-// insert the new set) inside the writer-tx. The new set keeps the supplied
-// insertion order.
+// ReplaceEmittedTuples — дублёр полной замены при сверке (снять всё и вставить
+// новый набор) внутри транзакции писателя. Новый набор сохраняет переданный
+// порядок вставки.
 func (w *fakeABWtr) ReplaceEmittedTuples(_ context.Context, id domain.AccessBindingID, tuples []ab_repo.RelationTuple) error {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
@@ -121,10 +130,10 @@ func (w *fakeABWtr) ReplaceEmittedTuples(_ context.Context, id domain.AccessBind
 	return nil
 }
 
-// SelectEmittedTuples — fake of the stored-set read on the reader side
-// (revoke / reconcile diff base). Returns the exact persisted set in insertion
-// order (deterministic; the real pg repo orders by relation,object,fga_user —
-// both are valid for the set-based symmetric-revoke contract).
+// SelectEmittedTuples — дублёр чтения хранимого набора на стороне читателя (база
+// разности для отзыва и сверки). Отдаёт точный хранимый набор в порядке вставки
+// (детерминированно; настоящий repo на pg упорядочивает по relation,object,fga_user —
+// для контракта симметричного отзыва по множеству годятся оба).
 func (rd *fakeABRdr) SelectEmittedTuples(_ context.Context, id domain.AccessBindingID) ([]ab_repo.RelationTuple, error) {
 	rd.repo.recordTxOp("select_emitted_tuples:" + string(id))
 	rd.repo.mu.Lock()
@@ -135,9 +144,9 @@ func (rd *fakeABRdr) SelectEmittedTuples(_ context.Context, id domain.AccessBind
 	return nil, nil
 }
 
-// ListActiveByRole — fake of the Role.Update fan-out lister: ACTIVE bindings of
-// a role. The fake stores a single binding (sufficient for the unit tests); it
-// is returned when its RoleID matches and it is not REVOKED.
+// ListActiveByRole — дублёр перечня веера Role.Update: АКТИВНЫЕ привязки роли.
+// Дублёр хранит одну привязку (для unit-проб этого хватает); она отдаётся, когда
+// её RoleID совпадает и она не REVOKED.
 func (rd *fakeABRdr) CountActiveByRole(_ context.Context, _ domain.RoleID) (int, error) {
 	return 0, nil
 }
@@ -155,18 +164,18 @@ func (rd *fakeABRdr) ListActiveByRole(_ context.Context, roleID domain.RoleID) (
 	return []domain.AccessBinding{cp}, nil
 }
 
-// SelectEmittedTuplesBySource — the fake stores only binding-level emitted tuples
-// (no ARM_LABELS members in these unit tests), so it returns the full stored set
-// regardless of source (the real pg repo filters by the `source` column).
+// SelectEmittedTuplesBySource — дублёр хранит лишь кортежи уровня привязки (членов
+// ARM_LABELS в этих unit-пробах нет), поэтому отдаёт весь хранимый набор независимо
+// от источника (настоящий repo на pg фильтрует по столбцу `source`).
 func (rd *fakeABRdr) SelectEmittedTuplesBySource(ctx context.Context, id domain.AccessBindingID, _ string) ([]ab_repo.RelationTuple, error) {
 	return rd.SelectEmittedTuples(ctx, id)
 }
 
-// ─── multi-subject fake extensions (subjects[] + ListByRole) ─────────────────
+// ─── расширения дублёра для нескольких субъектов (subjects[] + ListByRole) ────
 
-// ListByRole — fake of the audit lister: ACTIVE (non-revoked) binding of a
-// role. The fake stores one binding (sufficient for unit tests); returns it when
-// its RoleID matches and it is not REVOKED (unless IncludeRevoked).
+// ListByRole — дублёр перечня аудита: АКТИВНАЯ (не отозванная) привязка роли.
+// Дублёр хранит одну привязку (для unit-проб этого хватает); отдаёт её, когда её
+// RoleID совпадает и она не REVOKED (если не задан IncludeRevoked).
 func (rd *fakeABRdr) ListByRole(_ context.Context, roleID domain.RoleID, f ab_repo.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
 	rd.repo.mu.Lock()
 	defer rd.repo.mu.Unlock()
@@ -196,8 +205,8 @@ func (rd *fakeABRdr) ListByRole(_ context.Context, roleID domain.RoleID, f ab_re
 	return []domain.AccessBinding{cp}, "", nil
 }
 
-// ListSubjects — fake of the multi-subject read. Returns the per-binding
-// subjects recorded by InsertSubjects (insertion order preserved).
+// ListSubjects — дублёр чтения нескольких субъектов. Отдаёт субъекты привязки,
+// записанные InsertSubjects (порядок вставки сохранён).
 func (rd *fakeABRdr) ListSubjects(_ context.Context, id domain.AccessBindingID) ([]domain.Subject, error) {
 	rd.repo.mu.Lock()
 	defer rd.repo.mu.Unlock()
@@ -207,7 +216,7 @@ func (rd *fakeABRdr) ListSubjects(_ context.Context, id domain.AccessBindingID) 
 	return out, nil
 }
 
-// ListSubjectsForBindings — batch fake.
+// ListSubjectsForBindings — пакетный дублёр.
 func (rd *fakeABRdr) ListSubjectsForBindings(_ context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID][]domain.Subject, error) {
 	rd.repo.mu.Lock()
 	defer rd.repo.mu.Unlock()
@@ -222,9 +231,9 @@ func (rd *fakeABRdr) ListSubjectsForBindings(_ context.Context, ids []domain.Acc
 	return out, nil
 }
 
-// ListMaterializedAtForBindings — batch fake of the reconciler-ledger read that
-// backs AccessBinding.materialized_at. Only bindings seeded via
-// seedMaterializedAt appear (mirrors the real repo: no ACTIVE member ⇒ absent).
+// ListMaterializedAtForBindings — пакетный дублёр чтения ведомости сверщика, на
+// которой стоит AccessBinding.materialized_at. Видны лишь привязки, засеянные
+// seedMaterializedAt (как в настоящем repo: нет АКТИВНОГО члена ⇒ записи нет).
 func (rd *fakeABRdr) ListMaterializedAtForBindings(_ context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]time.Time, error) {
 	rd.repo.mu.Lock()
 	defer rd.repo.mu.Unlock()
@@ -237,7 +246,7 @@ func (rd *fakeABRdr) ListMaterializedAtForBindings(_ context.Context, ids []doma
 	return out, nil
 }
 
-// InsertSubjects — fake of the per-subject child-table persist (idempotent set).
+// InsertSubjects — дублёр записи в дочернюю таблицу субъектов (идемпотентное множество).
 func (w *fakeABWtr) InsertSubjects(_ context.Context, id domain.AccessBindingID, subjects []domain.Subject) error {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
@@ -260,7 +269,7 @@ func (w *fakeABWtr) InsertSubjects(_ context.Context, id domain.AccessBindingID,
 	return nil
 }
 
-// DeleteSubject — fake of the per-subject revoke.
+// DeleteSubject — дублёр отзыва одного субъекта.
 func (w *fakeABWtr) DeleteSubject(_ context.Context, id domain.AccessBindingID, subject domain.Subject) (bool, error) {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
@@ -278,9 +287,9 @@ func (w *fakeABWtr) DeleteSubject(_ context.Context, id domain.AccessBindingID, 
 	return found, nil
 }
 
-// ─── fake Role writer ────────────────────────────────────────────────────────
+// ─── поддельный писатель Role ────────────────────────────────────────────────
 
-// fakeRoleWtr — minimal role.WriterIface for the Role.Update doUpdate path.
+// fakeRoleWtr — наименьший role.WriterIface для пути doUpdate в Role.Update.
 type fakeRoleWtr struct{ repo *abFakeRepo }
 
 func (w *fakeRoleWtr) Insert(_ context.Context, r domain.Role) (domain.Role, error) {
@@ -290,16 +299,16 @@ func (w *fakeRoleWtr) Insert(_ context.Context, r domain.Role) (domain.Role, err
 func (w *fakeRoleWtr) Update(_ context.Context, r domain.Role, _ []string) (domain.Role, error) {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
-	// Persist the new permissions AND rules into the fake's backing store so a
-	// subsequent Roles().Get reflects the update (the reconcile reads the role back).
+	// Новые permissions И rules кладутся в хранилище дублёра, чтобы следующий
+	// Roles().Get видел правку (сверка читает роль заново).
 	w.repo.rolePermissions = r.Permissions
 	w.repo.roleRules = r.Rules
 	return r, nil
 }
 
 func (w *fakeRoleWtr) UpdateCAS(ctx context.Context, r domain.Role, mask []string, _ string) (domain.Role, error) {
-	// The fake ignores the OCC token (single-threaded unit tests) — the xmin-CAS is
-	// exercised by the role_occ integration test against real Postgres.
+	// Дублёр пропускает маркер OCC (unit-пробы однопоточны) — xmin-CAS проверяет
+	// интеграционная проба role_occ на настоящем Postgres.
 	return w.Update(ctx, r, mask)
 }
 
@@ -340,12 +349,12 @@ func (w *fakeRoleWtr) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.R
 	return nil
 }
 
-// ─── Role.Update use-case wiring ─────────────────────────────────────────────
+// ─── провязка use-case Role.Update ───────────────────────────────────────────
 
-// roleUpdateInput builds an UpdateRoleInput that changes only the role's rules
-// (update_mask=["rules"]). The use-case recompiles rules→permissions, so the
-// reconcile fan-out diffs against the new compiled set just as before. `rules`
-// is the rules-model 2026 authored input (replaces the legacy permissions input).
+// roleUpdateInput строит UpdateRoleInput, меняющий только rules роли
+// (update_mask=["rules"]). Use-case заново компилирует rules→permissions, так что
+// веер сверки считает разность с новым скомпилированным набором, как и прежде.
+// `rules` — авторский вход модели правил 2026 (заменяет прежний вход permissions).
 func roleUpdateInput(roleID string, rules domain.Rules) roleapp.UpdateRoleInput {
 	return roleapp.UpdateRoleInput{
 		ID:         domain.RoleID(roleID),

@@ -54,37 +54,18 @@ func attachIntegrity(ctx context.Context, rd kanamerepo.Reader, cat catalog.Sour
 	}
 	facts := cat.Facts()
 	lookup := facts.RolePreviewLookup()
-	declared := make(map[domain.RoleID]int, len(roles))
-	segments := make([]domain.RoleSegment, 0, len(roles))
-	for _, r := range roles {
-		segs := domain.SegmentsOf(r.ID, r.Rules)
-		declared[r.ID] = len(segs)
-		for _, s := range segs {
-			// Контейнерное действие (kaname#1003, Р2а) проекции «роль → тип ×
-			// глагол» не даёт by construction: его право — отношение на родителе,
-			// и производит его каталог (`catalog_verb.container_relation`), а не
-			// строка `role_verb`. Сегмент, чьё действие каталог объявляет
-			// контейнерным, разрешён самим объявлением; спроси его у `role_verb` —
-			// и роль создателя читалась бы ДЕГРАДИРОВАННОЙ, давая ровно то, что
-			// объявляет (SAC-41).
-			if _, ok := facts.ContainerVerb(s.ObjectType, s.Verb); ok {
-				continue
-			}
-			segments = append(segments, s)
-		}
-	}
-
+	// Вопрос о сегментах — ОДИН помощник на целость и на признак превью всех
+	// четырёх мест провязки (kaname#76): контейнерное действие (kaname#1003, Р2а)
+	// он не спрашивает — его право производит каталог, а не строка `role_verb`.
+	//
 	// Срез, а не счётчик: величину роли даёт его длина, а состав нужен правилу
-	// (kacho#1962). Второй вопрос об одном предмете разошёлся бы с первым молча — оба
-	// возвращают правдоподобные числа на любом входе.
-	unresolved := map[domain.RoleID][]domain.RoleSegment{}
-	if len(segments) > 0 {
-		got, err := rd.Roles().UnresolvedSegments(ctx, segments)
-		if err != nil {
-			return shared.MapRepoErr(err)
-		}
-		unresolved = got
+	// (kacho#1962) и превью. Второй вопрос об одном предмете разошёлся бы с первым
+	// молча — оба возвращают правдоподобные числа на любом входе.
+	answer, err := shared.AskRoleSegments(ctx, rd, facts, roles)
+	if err != nil {
+		return err
 	}
+	declared, unresolved := answer.Declared, answer.Unresolved
 	// Ведомость переселения читается ТЕМ ЖЕ вопросом на страницу и в ТОЙ ЖЕ
 	// транзакции: она ОБЪЯСНЯЕТ состояние, поэтому приехать из другого снимка не
 	// вправе — иначе объяснение относилось бы к другому состоянию, чем счётчики
@@ -135,6 +116,9 @@ func attachIntegrity(ctx context.Context, rd kanamerepo.Reader, cat catalog.Sour
 		// утверждать о праве по молчанию.
 		roles[i].Lifecycle = lifecycles[id]
 		roles[i].TypeVerbs = lookup
+		// Признак превью — из ТОГО ЖЕ ответа, что целость (kaname#76): превью и
+		// `health` выводят разное из одного признака и в один предикат не сводятся.
+		roles[i].Holding = answer.Holding(id)
 		// Состояние правила вешается ЗДЕСЬ ЖЕ и из ТЕХ ЖЕ величин, которыми
 		// выведена целость роли выше: иначе слово и счётчики приехали бы из
 		// разных снимков и могли бы не сойтись (kacho#1962). Второго вопроса к

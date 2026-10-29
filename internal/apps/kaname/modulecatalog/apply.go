@@ -187,11 +187,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -293,6 +295,11 @@ type CatalogWriter interface {
 	// нет, коммит ⇒ след есть. Второго пути записи в чужую транзакцию в дереве не
 	// заводится — он там один.
 	EmitApplied(ctx context.Context, ev AppliedEvent) error
+	// EmitRoleComposition кладёт в журнал подписки В ТОЙ ЖЕ транзакции ровно
+	// одно событие `iam_role UPDATED` на каждую названную роль, чья строка жива
+	// (kaname#76): состав роли сменился, а строка роли — нет. Повтор роли в
+	// пределах транзакции гасит функция базы, а не вызывающий.
+	EmitRoleComposition(ctx context.Context, roles []domain.RoleID) error
 }
 
 // Pruned — сколько вырезано из третьей проекции.
@@ -310,6 +317,10 @@ type Pruned struct {
 	Dropped int
 	// Elements — элементов массива вырезано суммарно, по обеим ветвям.
 	Elements int
+	// Roles — роли, у которых этот оператор укоротил либо снял строку отбора:
+	// ВЫХОД оператора, а не признак таблицы (kaname#76). Перепись применения и
+	// след его не несут — это вход события роли, а не величина последствий.
+	Roles []domain.RoleID
 }
 
 // TxRunner — исполнение под ОДНОЙ транзакцией записи. Все шаги ложатся вместе
@@ -327,6 +338,11 @@ type TxRunner interface {
 type Resettled struct {
 	RuleRefs  int
 	RoleVerbs int
+	// Roles — роли, у которых операторы переселения сняли хотя бы одну строку,
+	// по обеим популяциям вместе: ВЫХОД операторов, а не ведомость (kaname#76).
+	// Ведомость для этого негодна — вставка на повторной паре гасится её
+	// ключом, и роль, отзываемая второй раз, пропала бы.
+	Roles []domain.RoleID
 }
 
 // Report — перепись применения. Печатается числами, потому что «применено» без
@@ -713,6 +729,7 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 		// только элементы, называющие ЖИВУЮ строку каталога. Стой оно раньше,
 		// снимаемая строка была бы ещё жива и уцелела бы ровно та, ради которой
 		// вырезание и делается. Довод целиком — `prune.go`.
+		var prunedRoles []domain.RoleID
 		if len(staleResources) > 0 {
 			pruned, perr := w.PruneRetiredSelectorTypes(ctx, staleResources, who.id)
 			if perr != nil {
@@ -722,6 +739,7 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 			rep.PrunedSelectorRows = pruned.Rows
 			rep.PrunedSelectorRowsDropped = pruned.Dropped
 			rep.PrunedSelectorTypes = pruned.Elements
+			prunedRoles = pruned.Roles
 		}
 
 		// Шаг 9 — ПОТОЛКИ последствий, до коммита и только на пути глагола.
@@ -766,6 +784,32 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 			}
 		}
 
+		// Шаг 10а — СОБЫТИЕ РОЛИ (kaname#76): роль, у которой эта транзакция
+		// отобрала хотя бы одну строку любой из трёх проекций, получает РОВНО одно
+		// событие `iam_role UPDATED`, строка роли при этом не пишется.
+		//
+		// Множество — объединение ВЫХОДОВ операторов отбора, а не ведомостей:
+		// пустой отбор даёт пустое множество без отдельной ветви, а роль,
+		// отзываемая второй раз, в ведомость не попадает — её вставку гасит ключ.
+		//
+		// Шаг стоит ПОЗДНО, после снятия и вырезания, потолков и сверки опоры, и
+		// это несущее: транзакция, писавшая в журнал, держит порог доставки всего
+		// потока службы — всех видов и всех арендаторов — до своей фиксации, а до
+		// этого места транзакция применения в журнал не пишет вовсе. Ранняя запись
+		// растянула бы задержку доставки на снятие действий и ресурсов и на
+		// вырезание отбора. Полоса здесь не читается: шаги последствий у обеих
+		// полос — один код.
+		//
+		// В той же транзакции: отказ журнала откатывает применение целиком.
+		// Эмиссия после фиксации отдельным соединением была бы тем самым
+		// dual-write, который шаг 11 запрещает для следа, — довод тот же.
+		if roles := touchedRoles(rep.Resettled.Roles, prunedRoles); len(roles) > 0 {
+			if eerr := w.EmitRoleComposition(ctx, roles); eerr != nil {
+				return fmt.Errorf("%w: событие состава ролей модуля %s: %w",
+					ErrWriteFailed, declared.Module, eerr)
+			}
+		}
+
 		// Шаг 11 — СЛЕД, В ТОЙ ЖЕ транзакции и ПОСЛЕДНИМ.
 		//
 		// Последним, потому что след несёт ФАКТИЧЕСКИЕ числа последствий, а не
@@ -797,6 +841,24 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 		return rep, err
 	}
 	return rep, nil
+}
+
+// touchedRoles — объединение ролей из выходов операторов отбора, без повторов и
+// по порядку: вход события роли детерминирован, и функция события зовётся
+// ОДИН раз на транзакцию применения.
+func touchedRoles(sets ...[]domain.RoleID) []domain.RoleID {
+	seen := map[domain.RoleID]bool{}
+	var out []domain.RoleID
+	for _, set := range sets {
+		for _, id := range set {
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // Withdrawn — живые строки модуля, которых манифест больше не объявляет.

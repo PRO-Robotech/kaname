@@ -10,15 +10,15 @@ import (
 	"go.uber.org/multierr"
 )
 
-// Role — multi-scope. Exactly one scope field is non-NULL:
-//   - is_system=true + ClusterID set: system role (`system.admin`, ...).
-//   - is_system=false + AccountID set: account-scoped custom role.
-//   - is_system=false + ProjectID set: project-scoped custom role.
+// Role — роль нескольких ярусов. Непусто ровно одно поле области:
+//   - `is_system=true` и задан `ClusterID`: системная роль (`system.admin`, …);
+//   - `is_system=false` и задан `AccountID`: своя роль уровня аккаунта;
+//   - `is_system=false` и задан `ProjectID`: своя роль уровня проекта.
 //
-// Enforced by DB CHECK `roles_definition_tier_xor` + a partial UNIQUE per scope.
-// Domain.Validate duplicates the CHECK to give friendly errors before
-// reaching the DB. (The legacy B2B-tenant role scope was removed; a custom
-// role is scoped to exactly one of {account, project}.)
+// Держит это база — проверка `roles_definition_tier_xor` и частичный UNIQUE на
+// каждую область. [Role.Validate] повторяет проверку, чтобы понятный отказ
+// пришёл раньше базы. (Прежняя область роли арендатора-организации снята: своя
+// роль принадлежит ровно одному из {аккаунт, проект}.)
 type Role struct {
 	ID          RoleID
 	ClusterID   ClusterID // set for system role
@@ -26,12 +26,14 @@ type Role struct {
 	ProjectID   ProjectID // set for project-scoped custom
 	Name        RoleName
 	Description Description
-	// Rules — authored policy (RBAC rules-model 2026). Source of truth + public
-	// API surface. Compiled into Permissions (internal, FGA-emit) by CompileRules.
+	// Rules — авторская политика (модель правил RBAC 2026): источник истины и
+	// публичная поверхность API. Компилируется в `Permissions` (внутренняя форма
+	// для эмиссии кортежей) функцией [CompileRules].
 	Rules Rules
-	// Permissions — INTERNAL compiled form (anchor/names arms; match_labels NOT
-	// compiled). Derived from Rules via CompileRules; NOT a public API field for
-	// rules-roles. Legacy permissions-only roles (no Rules) keep their stored set.
+	// Permissions — ВНУТРЕННЯЯ скомпилированная форма (ветви якоря и имён; отбор
+	// по меткам НЕ компилируется). Выводится из `Rules` функцией [CompileRules];
+	// у роли с правилами публичным полем API НЕ является. Унаследованная роль без
+	// правил хранит свой набор как есть.
 	Permissions Permissions
 	IsSystem    bool
 	// OwnerModule — модуль, которому роль принадлежит. Пусто у ПЛАТФОРМЕННОЙ
@@ -47,9 +49,9 @@ type Role struct {
 	// (задача продукта kacho#1032, тип изменения — ВВОДЯЩЕЕ, без нового поля API).
 	OwnerModule string
 	CreatedAt   time.Time
-	// CreatedByUserID — authoring principal (governance/audit). Optional.
+	// CreatedByUserID — автор роли (управление и аудит). Необязательно.
 	CreatedByUserID UserID
-	// UpdatedAt — last-mutation timestamp. Zero until first Update.
+	// UpdatedAt — момент последней правки. Нулевой до первой правки.
 	UpdatedAt time.Time
 	// Labels — tenant-facing метки САМОГО ресурса Role (НЕ путать с
 	// Rule.MatchLabels, отбирающим объекты под грантом). Делают Role
@@ -111,8 +113,11 @@ type Role struct {
 	RuleStates []RuleState
 
 	// TypeVerbs — набор глаголов ТИПА, каким его объявляет ЖИВАЯ строка каталога
-	// (kacho#1994). Тем же набором идёт материализация, поэтому превью и эмиссия не
-	// могут разойтись.
+	// (kacho#1994). Набор общий с материализацией; явный глагол правила превью
+	// судит по сегменту, который держит проекция выдач ([Role.Holding], kaname#76).
+	// Границ, где превью и выдача расходятся, ДВЕ: подстановка на живом типе после
+	// снятия действия (следует снимку) и ЯРУСНЫЙ глагол, чей сегмент проекция не
+	// держит никогда.
 	//
 	// ПРИХОДИТ ПРОВЯЗКОЙ, НЕ ХРАНИТСЯ — как и `Integrity` рядом: колонки у неё
 	// нет, писатель её не пишет, [Role.Validate] её не судит. Отличие от
@@ -121,6 +126,15 @@ type Role struct {
 	// порождённому сборкой, неотличим от честного превью, поэтому «нечем
 	// ответить» обязано быть отказом, а не тихим запасным путём.
 	TypeVerbs TypeVerbLookup
+
+	// Holding — признак превью: какие объявленные сегменты роли проекция выдач
+	// держит (kaname#76). Довод целиком — [PreviewHolding].
+	//
+	// ПРИХОДИТ ПРОВЯЗКОЙ, НЕ ХРАНИТСЯ — как `TypeVerbs` рядом, и нулевое значение
+	// у него то же: ОТКАЗ перевода роли в ответ, а не полное превью. Читается в
+	// транзакции, описывающей роль: у чтений — в транзакции чтения, у эха мутации
+	// — в её транзакции записи после записи проекций.
+	Holding PreviewHolding
 
 	// HeldNames — НЕ ХРАНИТСЯ. Ключи объектов, названные в `resourceNames`
 	// правил, которые на приёме роли были зарегистрированы (Р8 приёмки
@@ -161,20 +175,19 @@ func (rs Rules) NamedKeys() []RuleNameHold {
 	return out
 }
 
-// Validate — multi-scope XOR formula + rules/permissions.
+// Validate — формула «ровно одна область» плюс правила либо права.
 //
-// A role is valid when EITHER it carries authored Rules (the rules-model 2026
-// authority) OR a legacy compiled Permissions set (back-compat read of
-// pre-rules roles).
+// Роль годна, когда несёт ЛИБО авторские правила (источник истины модели
+// правил 2026), ЛИБО унаследованный скомпилированный набор прав (обратно
+// совместимое чтение ролей до правил).
 //
-// When Rules is set (a rules-role) it is validated through Rules.Validate with
-// the policy derived from the row ([PolicyOfRole] of IsSystem + OwnerModule) and
-// the compiled Permissions projection is validated
-// for the 4-seg grammar + cap ONLY — NOT the ≥1 lower bound (ValidateCompiled): a
-// label-only role (all rules ARM_LABELS) compiles to an EMPTY permission set by
-// design and must be accepted. The ≥1 floor is retained for the LEGACY
-// permissions-only path (no Rules) so a degenerate legacy role with an
-// empty set cannot exist.
+// Роль с правилами судится [Rules.Validate] с политикой, выведенной из строки
+// ([PolicyOfRole] по `IsSystem` и `OwnerModule`), а её скомпилированная проекция
+// — ТОЛЬКО по грамматике из четырёх сегментов и потолку, БЕЗ нижней границы «не
+// меньше одного» (`ValidateCompiled`): роль меток (все правила — ветвь меток)
+// компилируется в ПУСТОЙ набор по замыслу и обязана приниматься. Нижняя граница
+// оставлена УНАСЛЕДОВАННОМУ пути без правил, чтобы вырожденной роли с пустым
+// набором не было.
 // `modules` — набор модулей платформы, каким его знает вызывающий: правило роли
 // называет модуль, а домен закрытого набора не объявляет (module_set.go).
 func (r Role) Validate(modules ModuleSet) error {
@@ -189,7 +202,7 @@ func (r Role) Validate(modules ModuleSet) error {
 	switch {
 	case len(r.Rules) > 0:
 		errs = multierr.Append(errs, r.Rules.Validate(PolicyOfRole(r.IsSystem, r.OwnerModule), modules))
-		// Rules-role: the compiled set may legitimately be empty (label-only).
+		// Роль с правилами: скомпилированный набор законно пуст у роли меток.
 		errs = multierr.Append(errs, r.Permissions.ValidateCompiled())
 	case len(r.Permissions) == 0:
 		// Роль без правил и без прав — роль, все правила которой потеряли
@@ -197,7 +210,7 @@ func (r Role) Validate(modules ModuleSet) error {
 		// формой законна; вход `RoleService.Create`/`Update` её не строит — он
 		// требует 1..64 правил своим правилом входа.
 	default:
-		// Legacy permissions-only role: must carry ≥1 permission.
+		// Унаследованная роль без правил обязана нести хотя бы одно право.
 		errs = multierr.Append(errs, r.Permissions.Validate())
 	}
 
@@ -206,13 +219,13 @@ func (r Role) Validate(modules ModuleSet) error {
 	projectSet := r.ProjectID != ""
 
 	if r.IsSystem {
-		// system: cluster_id only; the rest empty.
+		// Системная: только `cluster_id`, прочее пусто.
 		if !clusterSet || accountSet || projectSet {
 			errs = multierr.Append(errs, fmt.Errorf(
 				"Illegal argument: system role must have only cluster_id set"))
 		}
 	} else {
-		// custom: cluster_id IS NULL, and exactly one of {account, project}.
+		// Своя: `cluster_id` пуст, и задано ровно одно из {аккаунт, проект}.
 		if clusterSet {
 			errs = multierr.Append(errs, fmt.Errorf(
 				"Illegal argument: custom role must not have cluster_id"))

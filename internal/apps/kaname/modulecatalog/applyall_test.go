@@ -24,6 +24,7 @@ package modulecatalog_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -182,6 +184,14 @@ func (w *recordingWriter) ConfirmModuleState(context.Context, string, string) (b
 func (w *recordingWriter) EmitApplied(_ context.Context, ev modulecatalog.AppliedEvent) error {
 	w.calls = append(w.calls, "audit:"+ev.Actor+":"+ev.Source)
 	w.audited = append(w.audited, ev)
+	return nil
+}
+
+// EmitRoleComposition — событие роли (kaname#76). Подставные операторы отбора
+// этого писателя ролей не отдают, поэтому вызова здесь быть не должно; если он
+// случится, журнал вызовов его назовёт.
+func (w *recordingWriter) EmitRoleComposition(_ context.Context, roles []domain.RoleID) error {
+	w.calls = append(w.calls, fmt.Sprintf("role_composition:%d", len(roles)))
 	return nil
 }
 

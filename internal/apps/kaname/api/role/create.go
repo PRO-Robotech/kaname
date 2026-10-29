@@ -27,21 +27,23 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
-// ObjectReconciler — narrow port (rbac-contract-a-fix, C-01b): SYNCHRONOUSLY
-// materialize the per-object access of every binding whose selector matches the
-// freshly-created iam_role, right after Create commits. The flat rights model
-// dropped the `<rel> from account` ACCESS cascade on iam_role, so the owner's /
-// account-admin's per-object tuple is materialized per-object; the sync call
-// closes the GET-after-create race the async drain would otherwise lose.
-// Implemented by reconcile.Reconciler. nil-safe (the reconcile event + sweep are
-// the at-least-once backstop).
+// ObjectReconciler — узкий порт (rbac-contract-a-fix, C-01b): СИНХРОННО
+// материализует пообъектный доступ каждой привязки, чей селектор совпадает со
+// свежесозданной ролью, сразу после фиксации создания. Плоская модель прав
+// сняла каскад доступа `<rel> from account` у `iam_role`, поэтому пообъектный
+// кортеж владельца и администратора аккаунта материализуется пообъектно;
+// синхронный вызов закрывает гонку «чтение после создания», которую
+// асинхронная выборка иначе проигрывала бы. Реализует `reconcile.Reconciler`.
+// Может быть не провязан: событие сверки и обход — страховка «хотя бы раз».
 type ObjectReconciler interface {
-	// ReconcileObjectForward is the ADDITIVE forward fast-path for the freshly-created
-	// role-AS-OBJECT (iam.role): it materializes ONLY that new role's per-object
-	// owner/admin tuples across the matching bindings while holding NO advisory lock at
-	// all (neither EXCLUSIVE nor SHARE, no O(scope) recompute), the throughput fix for the owner-tuple
-	// materialization lag under a parallel role-create burst. It transparently delegates
-	// to the FULL ReconcileObject if the object already has members (delete-stale guard).
+	// ReconcileObjectForwardNoStale — ДОБАВЛЯЮЩИЙ быстрый путь для свежесозданной
+	// роли КАК ОБЪЕКТА (`iam.role`): материализует ТОЛЬКО пообъектные кортежи
+	// владельца и администратора этой роли по совпавшим привязкам и не держит
+	// консультативного замка ВОВСЕ (ни исключительного, ни разделяемого, без
+	// пересчёта области) — устранение отставания материализации кортежа
+	// владельца при всплеске параллельных созданий. Если у объекта уже есть
+	// члены, прозрачно уходит на ПОЛНЫЙ `ReconcileObject` (сторож снятия
+	// устаревшего).
 	ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error
 	// ReconcileObjectForward — СТОРОЖЕВОЙ вход того же прохода: он сперва читает,
 	// есть ли у объекта члены, и при непустом наборе уходит на полный проход ради
@@ -49,9 +51,9 @@ type ObjectReconciler interface {
 	// остаётся в порту: его зовёт правка того же пакета, где прежние факты есть
 	// и снятие устаревших — как раз предмет.
 	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error
-	// ReconcileObject is the FULL EXCLUSIVE object-fan-out (async at-least-once backstop —
-	// delete-stale / audit / sweep), driven by the reconcile worker off the co-committed
-	// reconcile-outbox event, not the create hot-path.
+	// ReconcileObject — ПОЛНЫЙ исключительный проход по объекту (асинхронная
+	// страховка «хотя бы раз»: снятие устаревшего, аудит, обход); его гонит исполнитель
+	// сверки по событию, зафиксированному вместе с созданием, а не горячий путь создания.
 	ReconcileObject(ctx context.Context, objectType, objectID string) error
 }
 
@@ -63,10 +65,10 @@ type CreateRoleUseCase struct {
 	// пустая проекция — это не «наблюдение выключено», а вердикт, определённый
 	// наполовину.
 	cat catalog.Source
-	// Optional FGA hierarchy-tuple writer. Writes
-	// `iam_role:<id>#account@account:<acc>` after a successful custom-role
-	// INSERT so iam_role-scoped authz cascades resolve (`admin from account`).
-	// System roles are seeded via migration and never reach this path.
+	// Необязательный писатель кортежа иерархии: после успешной вставки своей роли
+	// пишет `iam_role:<id>#account@account:<acc>`, чтобы каскады прав в области
+	// `iam_role` разрешались (`admin from account`). Системные роли сеются миграцией
+	// и сюда не доходят никогда.
 	relations  clients.RelationStore
 	reconciler ObjectReconciler // rbac-contract-a-fix — optional, nil-safe
 	logger     *slog.Logger
@@ -86,15 +88,15 @@ func NewCreateRoleUseCase(r Repo, opsRepo operations.Repo, cat catalog.Source) *
 	return &CreateRoleUseCase{repo: r, opsRepo: opsRepo, cat: cat}
 }
 
-// WithRelationStore wires the role→account hierarchy-tuple writer.
+// WithRelationStore провязывает писатель кортежа иерархии «роль → аккаунт».
 func (u *CreateRoleUseCase) WithRelationStore(relations clients.RelationStore, logger *slog.Logger) *CreateRoleUseCase {
 	u.relations = relations
 	u.logger = logger
 	return u
 }
 
-// WithObjectReconciler wires the post-commit synchronous per-object materializer
-// (rbac-contract-a-fix, C-01b). nil-safe.
+// WithObjectReconciler провязывает синхронную пообъектную материализацию после
+// фиксации (rbac-contract-a-fix, C-01b). Может быть не провязан.
 func (u *CreateRoleUseCase) WithObjectReconciler(r ObjectReconciler) *CreateRoleUseCase {
 	u.reconciler = r
 	return u
@@ -105,9 +107,9 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
-	// kacho-iam#212: a custom role is EXACTLY ONE scope — account XOR project. System
-	// roles are seeded via migration, never via this RPC. The DB CHECK
-	// roles_definition_tier_xor is the backstop; this gives a friendly sync error first.
+	// kacho-iam#212: своя роль принадлежит РОВНО ОДНОЙ области — аккаунту либо проекту.
+	// Системные роли сеются миграцией и через этот вызов не заводятся никогда. Страховка
+	// — проверка базы `roles_definition_tier_xor`; здесь — понятный синхронный отказ раньше.
 	accountSet := r.AccountID != ""
 	projectSet := r.ProjectID != ""
 	switch {
@@ -126,18 +128,18 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	}
 	// Sync: enforce is_system=false (только custom).
 	r.IsSystem = false
-	// RBAC rules-model 2026 (A): the authored rules are the input; compile them
-	// into the INTERNAL permissions projection (anchor/names arms; matchLabels NOT
-	// compiled) and store BOTH. Compilation also enforces the ≤1024 compiled-cap
-	// (A-12). rules[] non-empty is required (legacy permissions-only Create is no
-	// longer accepted on the API — A requires rules; legacy roles stay valid on read).
+	// Модель правил 2026 (A): вход — авторские правила; они компилируются во
+	// ВНУТРЕННЮЮ проекцию прав (ветви якоря и имён; отбор по меткам НЕ
+	// компилируется), и хранятся ОБЕ. Компиляция же держит потолок скомпилированного
+	// 1024 (A-12). Непустые `rules[]` обязательны: создание одними правами API больше
+	// не принимает (A требует правил); унаследованные роли на чтении остаются годными.
 	if len(r.Rules) == 0 {
 		return nil, shared.InvalidArg("rules", "Illegal argument rules (must be non-empty)")
 	}
-	// Validate the authored rules FIRST (cardinality / wildcard / XOR / feed-gate),
-	// so a malformed rule surfaces its specific error (A-05/A-10/A-13) rather than a
-	// misleading compiled-cap message. Only a well-formed rule set is then compiled;
-	// the compiler enforces the ≤1024 compiled-cap (A-12).
+	// Авторские правила судятся ПЕРВЫМИ (мощность, подстановка, «ровно одно», лента),
+	// чтобы негодное правило получило свой точный отказ (A-05/A-10/A-13), а не
+	// сбивающий отказ потолка компиляции. Компилируется только годный набор;
+	// компилятор держит потолок 1024 (A-12).
 	// Набор модулей — ЖИВЫЕ строки каталога, а не литерал: снятый модуль
 	// обязан перестать приниматься без перезапуска службы, а заведённый строкой
 	// — начать приниматься без релиза (kacho#1927). Снимок один и тот же, что у
@@ -147,14 +149,14 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	if verr := r.Rules.Validate(domain.PolicyOfRole(r.IsSystem, r.OwnerModule), facts); verr != nil {
 		return nil, shared.MapValidationErr(verr)
 	}
-	// Grantable-token gate: the resource segment must be a PUBLISHED
-	// `(module,resource)` pair, not merely a grammar-valid token. Without this a
-	// typo'd token compiles into a role that reconciles to ZERO tuples (the
-	// reconciler's fgaObjectType fail-closed-SKIPs an unknown key), so the grantee
-	// 403s forever with no signal on the role, the binding or the Operation. Runs
-	// AFTER Rule.Validate so the wildcard/XOR/feed errors surface first (they are
-	// more specific), and BEFORE CompileRules so the compiled projection never
-	// carries an ungrantable token.
+	// Ворота выдаваемого токена: сегмент ресурса обязан быть ОПУБЛИКОВАННОЙ парой
+	// `(module,resource)`, а не просто грамматически годным токеном. Без этого токен
+	// с опечаткой компилировался бы в роль, сверяемую в НОЛЬ кортежей (сверка,
+	// закрываясь, ПРОПУСКАЕТ неизвестный ключ), и получатель вечно получал бы 403 без
+	// сигнала на роли, привязке или операции. Стоит ПОСЛЕ `Rule.Validate`, чтобы отказы
+	// подстановки, «ровно одного» и ленты пришли первыми (они точнее), и ДО
+	// `CompileRules`, чтобы скомпилированная проекция никогда не несла невыдаваемого
+	// токена.
 	// Источник — ТОТ ЖЕ снимок живых строк, которым выше судился сегмент МОДУЛЯ
 	// и ниже строится проекция глаголов (kacho#1993): обе стороны правила обязаны
 	// судиться согласованным множеством, а не двумя моментами времени и не двумя
@@ -205,11 +207,11 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			if ierr != nil {
 				return domain.Role{}, ierr
 			}
-			// RBAC explicit-model 2026 P4 (КФ-3): sync role_rule_selectors with the
-			// role's UNIFIED materializing rules (anchor/names/labels) in the SAME
-			// writer-tx (ban #10) so the reconciler's fast-path / sweep can find
-			// bindings carrying this role on a mirror-change event (forward-mat, D-4).
-			// No-op when the role has no materializing rules (legacy permissions-only).
+			// Явная модель 2026 P4 (КФ-3): `role_rule_selectors` приводятся к ЕДИНЫМ
+			// материализующим правилам роли (якорь, имена, метки) в ТОЙ ЖЕ транзакции
+			// записи (запрет #10), чтобы быстрый путь сверки и обход нашли привязки,
+			// несущие эту роль, по событию смены зеркала (forward-mat, D-4). Ничего не
+			// делает, когда материализующих правил у роли нет (унаследованная роль прав).
 			//
 			// Каталожный факт берётся ОДИН на обе стороны: глаголы правил в
 			// селекторах и проекция роли — объединение тех же наборов (kaname#878),
@@ -245,8 +247,8 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 				domain.RuleRefsOf(inserted.Rules)); rerr != nil {
 				return domain.Role{}, rerr
 			}
-			// Role audit payload carries id + name + actor — NOT the full
-			// permissions matrix (avoid payload blow-up; 5.2-17).
+			// Тело аудита роли несёт идентификатор, имя и актора — НЕ полную матрицу прав
+			// (раздувание тела; 5.2-17).
 			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
 				EventType:       auditEventRoleCreated,
 				TenantAccountID: string(inserted.AccountID),
@@ -260,17 +262,16 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			}); aerr != nil {
 				return domain.Role{}, aerr
 			}
-			// FGA role→account hierarchy parent-pointer intent co-committed in the
-			// SAME writer-tx (запрет #10). Under the FLAT rights model (Contract-A)
-			// this `account:<acc>#account@iam_role:<id>` pointer no longer grants
-			// access by itself — the `<rel> from account` ACCESS cascade on iam_role
-			// was removed. It is retained as the hierarchy/ownership lineage edge; the
-			// owner's (and creator's) ACTUAL admin/v_* access on this role is
-			// MATERIALIZED per-object by the reconciler (see the reconcile-event emit
-			// below), not derived from this pointer.
+			// Намерение кортежа иерархии «роль → аккаунт» (указатель на родителя)
+			// фиксируется в ТОЙ ЖЕ транзакции записи (запрет #10). В ПЛОСКОЙ модели прав
+			// (Contract-A) указатель `account:<acc>#account@iam_role:<id>` сам доступа
+			// больше не даёт — каскад доступа `<rel> from account` у `iam_role` снят. Он
+			// оставлен ребром иерархии и родословной владения; ФАКТИЧЕСКИЙ доступ
+			// владельца (и создателя) к этой роли МАТЕРИАЛИЗУЕТ пообъектно сверка (см.
+			// событие сверки ниже), а не этот указатель.
 			//
-			// kacho-iam#212: ONLY account-scoped roles get this pointer (the iam_role type has a
-			// single `account` hierarchy relation, no `project` ancestor).
+			// kacho-iam#212: указатель получают ТОЛЬКО роли уровня аккаунта (у типа
+			// `iam_role` одно отношение иерархии `account`, предка `project` нет).
 			if inserted.AccountID != "" {
 				if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{
 					{User: "account:" + string(inserted.AccountID), Relation: "account", Object: "iam_role:" + string(inserted.ID)},
@@ -278,42 +279,46 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 					return domain.Role{}, ferr
 				}
 			}
-			// rbac-contract-a-fix (forward-mat, C-01b): co-commit a reconcile event in
-			// the SAME writer-tx (ban #10) so the γ reconciler re-evaluates the owner
-			// `*.*` (and any other ARM_ANCHOR/ARM_NAMES) binding against this brand-new
-			// role and materializes the per-object admin/v_* tuple on iam_role:<id> —
-			// the access the flat model's removed `from account` cascade no longer
-			// derives. The event re-uses the mirror.upsert literal (the worker keys on
-			// object_type/object_id, not the event type). nil-safe by construction
-			// (EmitReconcileEvent is a plain outbox INSERT). Drained worker →
-			// ReconcileObject("iam.role", id) → IAMDirectSelectorBindingsMatchingObject
-			// finds the owner binding (arm='anchor') → full recompute materializes it.
+			// rbac-contract-a-fix (forward-mat, C-01b): событие сверки фиксируется в ТОЙ
+			// ЖЕ транзакции записи (запрет #10), чтобы сверка заново оценила привязку
+			// владельца `*.*` (и всякую другую по якорю либо именам) против новой роли и
+			// материализовала пообъектный кортеж администратора и `v_*` на
+			// `iam_role:<id>` — доступ, которого снятый каскад `from account` плоской
+			// модели больше не выводит. Событие берёт литерал `mirror.upsert`
+			// (исполнитель выбирает по типу и идентификатору объекта, а не по виду
+			// события). Безопасно и без провязки: `EmitReconcileEvent` — обычная
+			// вставка в очередь. Исполнитель выбирает событие →
+			// `ReconcileObject("iam.role", id)` → `IAMDirectSelectorBindingsMatchingObject`
+			// находит привязку владельца (`arm='anchor'`) → полный пересчёт её материализует.
 			if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.role", string(inserted.ID)); rerr != nil {
 				return domain.Role{}, rerr
 			}
-			return inserted, nil
+			// Признак превью — в ЭТОЙ транзакции и после записи проекций (kaname#76):
+			// эхо описывает роль, которую она записала, а писатель несёт читателя.
+			return shared.WithPreviewHolding(ctx, w, u.cat, inserted)
 		})
 	if err != nil {
 		return nil, err
 	}
 
-	// rbac-contract-a-fix (forward-mat, C-01b): SYNCHRONOUSLY materialize the
-	// per-object access on the just-committed role so the owner / account-admin
-	// per-object admin/v_* tuple is observable when the Operation reports done —
-	// closing the GET-after-create race the async event drain would otherwise lose
-	// under the flat model. Best-effort/non-fatal: the role is durably created and
-	// the co-committed reconcile event + periodic sweep are the at-least-once
-	// backstop. nil-safe.
+	// rbac-contract-a-fix (forward-mat, C-01b): пообъектный доступ к только что
+	// зафиксированной роли материализуется СИНХРОННО, чтобы пообъектный кортеж
+	// владельца и администратора аккаунта был виден, когда операция сообщает
+	// готовность, — это закрывает гонку «чтение после создания», которую
+	// асинхронная выборка событий в плоской модели иначе проигрывала бы. По
+	// наилучшему усилию и не роняя создания: роль уже записана, а событие сверки,
+	// зафиксированное вместе с ней, и периодический обход — страховка «хотя бы раз».
 	//
-	// IAM-FMB throughput fix: the sync post-commit materialization takes the ADDITIVE
-	// forward (ReconcileObjectForward, NO advisory lock at all, single-object — the role is
-	// brand-new so there is NOTHING stale to delete) instead of the FULL EXCLUSIVE
-	// ReconcileObject, whose per-binding advisory lock + O(scope) recompute serialized on
-	// the SINGLE owner/account binding every role of an account shares → the owner-tuple
-	// materialization lagged past the client read-your-writes retry budget under a parallel
-	// role-create burst. The forward delegates to the FULL path on a re-materialization
-	// with existing members (delete-stale guard); the FULL ReconcileObject REMAINS the
-	// async at-least-once backstop, driven by the co-committed reconcile event.
+	// IAM-FMB, пропускная способность: синхронная материализация после фиксации
+	// идёт ДОБАВЛЯЮЩИМ путём (`ReconcileObjectForward`, без консультативного замка
+	// вовсе, по одному объекту — роль новая, и снимать устаревшее НЕЧЕГО), а не
+	// ПОЛНЫМ исключительным `ReconcileObject`, чей замок на привязку и пересчёт
+	// области сериализовали всё на ОДНОЙ привязке владельца аккаунта, общей для
+	// всех ролей аккаунта, → материализация кортежа владельца отставала дольше,
+	// чем клиент готов ждать «чтения своей записи» при всплеске параллельных
+	// созданий. Добавляющий путь уходит на ПОЛНЫЙ при повторной материализации
+	// объекта с членами (сторож снятия устаревшего); ПОЛНЫЙ `ReconcileObject`
+	// ОСТАЁТСЯ асинхронной страховкой, которую гонит событие сверки.
 	u.reconcileObject(ctx, "iam.role", string(created.ID))
 
 	// Эхо мутации проецируется тем же набором, что и чтение: иначе `Create`
@@ -322,9 +327,9 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 	return marshalRole(created)
 }
 
-// reconcileObject runs the post-commit synchronous per-object materialization via the
-// ADDITIVE forward fast-path (nil-safe, non-fatal — logs and proceeds; the co-committed
-// reconcile event + periodic sweep are the at-least-once backstop).
+// reconcileObject гонит синхронную пообъектную материализацию после фиксации
+// добавляющим быстрым путём (может быть не провязан, создания не роняет — пишет в
+// журнал и идёт дальше; событие сверки и периодический обход — страховка).
 func (u *CreateRoleUseCase) reconcileObject(ctx context.Context, objectType, objectID string) {
 	if u.reconciler == nil {
 		return

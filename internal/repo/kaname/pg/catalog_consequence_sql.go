@@ -211,6 +211,11 @@ const catalogSelectorPruneCTE = `touched AS (
 
 // resettleRuleRefSQL — ПЕРВАЯ популяция: снятие объявлений правил арендаторских
 // ролей и переселение снятого в сироты ОДНИМ оператором.
+//
+// Отдаёт ДВЕ величины: сколько снято и КАКИЕ роли тронуты. Второе — вход события
+// роли (kaname#76), и берётся оно из ВЫХОДА снятия, а не из ведомости: вставка в
+// сироты на повторной паре гасится ключом, и роль, отзываемая второй раз, из
+// ведомости пропала бы.
 const resettleRuleRefSQL = `
 		WITH ` + catalogStaleInputCTE + `, dropped AS (
 		  DELETE FROM kaname.role_rule_ref rr
@@ -228,10 +233,13 @@ const resettleRuleRefSQL = `
 		    FROM dropped d
 		  ON CONFLICT (role_id, object_type, verb, source, cause) DO NOTHING
 		)
-		SELECT (SELECT count(*) FROM dropped)`
+		SELECT (SELECT count(*) FROM dropped),
+		       (SELECT coalesce(array_agg(DISTINCT role_id ORDER BY role_id), ARRAY[]::text[]) FROM dropped)`
 
 // resettleRoleVerbSQL — ВТОРАЯ популяция: снятие выдач глаголов и переселение
 // снятого в сироты ОДНИМ оператором.
+//
+// Отдаёт те же две величины и по тому же доводу, что сосед выше.
 const resettleRoleVerbSQL = `
 		WITH ` + catalogStaleInputCTE + `, dropped AS (
 		  DELETE FROM kaname.role_verb rv
@@ -244,7 +252,8 @@ const resettleRoleVerbSQL = `
 		  SELECT d.role_id, d.object_type, d.verb, 'role_verb', $6, $7 FROM dropped d
 		  ON CONFLICT (role_id, object_type, verb, source, cause) DO NOTHING
 		)
-		SELECT (SELECT count(*) FROM dropped)`
+		SELECT (SELECT count(*) FROM dropped),
+		       (SELECT coalesce(array_agg(DISTINCT role_id ORDER BY role_id), ARRAY[]::text[]) FROM dropped)`
 
 // staleRowArrays — вход отбора в форме, которую читает `catalogStaleInputCTE`.
 //

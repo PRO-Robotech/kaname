@@ -3,27 +3,26 @@
 
 package access_binding
 
-// role_fanout_offdonepath_test.go — a committed change to a role's rules is
-// reported as a SUCCESS, even when the membership pass that follows it fails.
+// role_fanout_offdonepath_test.go — зафиксированная смена правил роли сообщается
+// УСПЕХОМ, даже когда следующий за ней проход членства отказывает.
 //
-// The rules change commits first: the role row, the selector projection and the
-// audit row are all durable when the writer-tx returns. The membership pass that
-// re-materializes what the role grants runs AFTER that commit, over every active
-// binding, each in its own transaction. It used to run on the operation's own path,
-// so any failure in it turned the operation into an error — for a change that is
-// already committed and already in force.
+// Смена правил фиксируется первой: строка роли, проекция селекторов и запись
+// аудита записаны, когда транзакция записи возвращается. Проход членства, заново
+// материализующий то, что роль даёт, идёт ПОСЛЕ фиксации по каждой активной
+// привязке, каждая — в своей транзакции. Прежде он шёл на пути самой операции, и
+// любой его отказ превращал операцию в ошибку — о правке, уже зафиксированной и
+// уже действующей.
 //
-// What the caller then does is the damage: it reads an error, concludes the rules
-// were not applied, and repeats the request with the resource version it captured
-// before the first attempt. That version is stale (its own committed update moved
-// it), so the retry is refused as a concurrent modification — naming a competitor
-// that never existed. Meanwhile the privileges ARE changed, and an operator who
-// believes otherwise is reasoning about the wrong state.
+// Вред — в том, что вызывающий делает потом: читает ошибку, решает, что правила не
+// применились, и повторяет запрос с версией ресурса, снятой до первой попытки. Та
+// устарела (её сдвинула его же зафиксированная правка), и повтор отвергается как
+// параллельная правка — с соперником, которого не было. А права при этом ИЗМЕНЕНЫ,
+// и оператор, думающий иначе, рассуждает о неверном состоянии.
 //
-// Operation.done means the SUBJECT of the mutation is durable, never that an
-// eventually-consistent downstream effect is visible. The convergence backstops (the
-// co-committed reconcile event and the periodic sweep) are unchanged — this is about
-// what the caller is told.
+// `Operation.done` значит, что ПРЕДМЕТ мутации записан, а не что виден его
+// отложенный последующий эффект. Страховки схождения (событие сверки,
+// зафиксированное вместе с правкой, и периодический обход) не меняются — речь о том,
+// что сообщают вызывающему.
 
 import (
 	"context"
@@ -49,8 +48,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
-// failingFanout — a fan-out whose pass always fails, the way a lock wait that
-// outruns the statement timeout does under concurrent load.
+// failingFanout — проход, который отказывает всегда, — так, как отказывает ожидание
+// замка, переросшее предел оператора под параллельной нагрузкой.
 type failingFanout struct {
 	mu     sync.Mutex
 	count  int
@@ -75,13 +74,14 @@ func (f *failingFanout) called() int {
 	return f.calls
 }
 
-// A failing membership pass must not turn a committed rules change into a failed
-// operation.
+// Отказ прохода членства не вправе превратить зафиксированную смену правил в
+// отказавшую операцию.
 func TestRoleUpdate_FailingMembershipPass_StillReportsTheCommittedChangeAsDone(t *testing.T) {
 	const ownerID, accountID, resourceID = "usr_owner_offpath---", "acc_offpath---------", "prj_offpath---------"
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID178b, "viewer",
 		domain.Permissions{"compute.instance.*.get"})
 	repo.setRoleCustom(accountID)
+	repo.answerRoleSegments()
 	opsRepo := newFakeOpsRepo()
 	fan := &failingFanout{count: 3, failed: errors.New("canceling statement due to statement timeout")}
 
@@ -104,14 +104,14 @@ func TestRoleUpdate_FailingMembershipPass_StillReportsTheCommittedChangeAsDone(t
 			"post-commit materialization pass failed — the caller would retry with a "+
 			"resource version its own committed update has already moved")
 
-	// The pass still runs: moving it off the reported path must not delete it.
+	// Проход всё равно идёт: снять его с пути отчёта не значит его удалить.
 	assert.Eventually(t, func() bool { return fan.called() > 0 }, 2*time.Second, 10*time.Millisecond,
 		"the membership pass must still be attempted, just not on the reported path")
 }
 
-// ── the pass covers EVERY binding, not the ones before the first failure ─────
+// ── проход покрывает КАЖДУЮ привязку, а не стоящие до первого отказа ─────────
 
-// multiBindingRepo — a role carrying several active bindings.
+// multiBindingRepo — роль, которую несут несколько активных привязок.
 type multiBindingRepo struct{ bindings []domain.AccessBinding }
 
 func (r *multiBindingRepo) Reader(context.Context) (kanamerepo.Reader, error) {
@@ -151,7 +151,7 @@ func (r *multiBindingABReader) ListActiveByRole(context.Context, domain.RoleID) 
 	return r.parent.bindings, nil
 }
 
-// fanoutOrderReconciler — fails on the binding it is told to fail on, records the rest.
+// fanoutOrderReconciler — отказывает на названной привязке, прочие записывает.
 type fanoutOrderReconciler struct {
 	mu       sync.Mutex
 	failOn   domain.AccessBindingID
@@ -168,10 +168,10 @@ func (r *fanoutOrderReconciler) ReconcileBinding(_ context.Context, id domain.Ac
 	return nil
 }
 
-// One binding failing must not decide the fate of the others. Stopping at the first
-// failure made the outcome depend on the ORDER of the list: bindings before it were
-// re-materialized against the new rules, bindings after it kept the old ones, so
-// which subjects saw the change was settled by creation time.
+// Отказ одной привязки не вправе решать судьбу прочих. Остановка на первом отказе
+// делала исход зависимым от ПОРЯДКА перечня: привязки до него материализовались
+// по новым правилам, после него — сохраняли прежние, так что круг субъектов, увидевших
+// смену, решало время создания привязок.
 func TestReconcileActiveBindings_ContinuesPastAFailingBinding(t *testing.T) {
 	repo := &multiBindingRepo{bindings: []domain.AccessBinding{
 		{ID: "iab_first"}, {ID: "iab_second"}, {ID: "iab_third"},
