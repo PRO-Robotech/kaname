@@ -1068,7 +1068,7 @@ func (w *fakeABWtr) EmitRelationJournal(_ context.Context, writes, deletes []ab_
 	return nil
 }
 
-// EmitAuditEvent captures the audit_outbox compliance event for assertions.
+// EmitAuditEvent захватывает событие соответствия audit_outbox для утверждений.
 func (w *fakeABWtr) EmitAuditEvent(_ context.Context, ev ab_repo.AuditEvent) error {
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
