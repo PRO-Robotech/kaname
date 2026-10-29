@@ -10,6 +10,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/ids"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
@@ -54,12 +55,16 @@ func inForceRename(from, to string) string {
 		"UPDATE kaname.roles SET id = '" + from + "' WHERE id = '" + to + "';\n"
 }
 
-// TestSeededIDInForcePremise — предпосылка: синтетика вне перечня посеянного, а
-// оси различимы судьёй фундамента ровно так, как объявлено.
+// TestSeededIDInForcePremise — предпосылка: оси различимы ровно так, как
+// объявлено. Дефект длины отвергает уже путь запроса; дефект алфавита путь
+// запроса ПРИНИМАЕТ — его видит только судья фундамента, и без второй оси гейт
+// молчал бы на нём (закрытого перечня посеянного, который мог бы сделать
+// инъекцию вакуумной, после kaname#543 нет).
 func TestSeededIDInForcePremise(t *testing.T) {
-	for _, id := range []string{inForceBadLenID, inForceGoodID, inForceBadAlphabetID} {
-		require.Falsef(t, domain.IsSeededResourceID(id), "синтетика %q названа перечнем посеянного — инъекция вакуумна", id)
-	}
+	require.Error(t, shared.ValidateResourceID(inForceBadLenID, domain.PrefixRole, "role"),
+		"дефект длины принят путём запроса — ось длины вакуумна")
+	require.NoError(t, shared.ValidateResourceID(inForceBadAlphabetID, domain.PrefixRole, "role"),
+		"дефект алфавита отвергнут путём запроса — ось алфавита не отличает второго судьи")
 	require.True(t, ids.HasKnownPrefix(inForceGoodID), "годный id не годен судье фундамента")
 	require.False(t, ids.HasKnownPrefix(inForceBadLenID), "дефект длины годен судье фундамента")
 	require.False(t, ids.HasKnownPrefix(inForceBadAlphabetID), "дефект алфавита годен судье фундамента")

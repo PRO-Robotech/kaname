@@ -49,7 +49,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_CreateEmitsWriteRows(t *testing.T) {
 		ID:           domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(uid),
-		RoleID:       "rol000000000sysviewer",
+		RoleID:       domain.SystemViewerRoleID,
 		ResourceType: "account",
 		ResourceID:   string(acc.ID),
 	}
@@ -95,7 +95,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_DeleteEmitsDeleteRows(t *testing.T) {
 	binding := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(uid),
-		RoleID:       "rol000000000sysviewer",
+		RoleID:       domain.SystemViewerRoleID,
 		ResourceType: "account",
 		ResourceID:   string(acc.ID),
 	})
@@ -139,7 +139,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_RollbackDiscardsBothRowAndEmit(t *testing.T) {
 		ID:           candidateID,
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(uid),
-		RoleID:       "rol000000000sysviewer",
+		RoleID:       domain.SystemViewerRoleID,
 		ResourceType: "account",
 		ResourceID:   string(acc.ID),
 	}

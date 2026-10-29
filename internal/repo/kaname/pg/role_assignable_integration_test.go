@@ -91,7 +91,7 @@ func TestRole_RoleColsRegression_ScopeFieldsPopulated(t *testing.T) {
 	assert.Empty(t, gotPrj.AccountID)
 
 	// a system role (seed migration) carries cluster_id.
-	gotSys, err := rd.Roles().Get(ctx, domain.RoleID("rol000000000sysviewer"))
+	gotSys, err := rd.Roles().Get(ctx, domain.RoleID(domain.SystemViewerRoleID))
 	require.NoError(t, err)
 	assert.True(t, gotSys.IsSystem)
 	assert.Equal(t, domain.ClusterID(domain.ClusterSingletonID), gotSys.ClusterID,

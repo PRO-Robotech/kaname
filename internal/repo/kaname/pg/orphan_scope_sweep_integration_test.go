@@ -71,7 +71,7 @@ func setupOrphanScope(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suf
 	// Системная роль — её присваиваемость триггер `access_bindings_role_assignable_trg`
 	// пропускает без разбора области, поэтому фикстура не зависит от правил
 	// scoping'а ролей: они не предмет этой пробы.
-	const sysViewer = domain.RoleID("rol000000000sysviewer")
+	const sysViewer = domain.RoleID(domain.SystemViewerRoleID)
 
 	objLive := "iam_project:" + string(live.ID)
 	objDead := "iam_project:" + string(dead.ID)

@@ -36,7 +36,7 @@ func TestListByRole_E33_MalformedRoleID(t *testing.T) {
 
 func TestListByRole_E33_OwnerSeesBinding(t *testing.T) {
 	const (
-		roleID    = "rol000000000sysadmin"
+		roleID    = domain.SystemAdminRoleID
 		ownerID   = "usr_owner-----------"
 		accountID = "acc_lbr_account-----"
 	)

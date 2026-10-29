@@ -48,14 +48,13 @@ func ValidateResourceID(id, prefix, resourceName string) error {
 	if !strings.HasPrefix(id, prefix) {
 		return status.Errorf(codes.InvalidArgument, "invalid %s id '%s'", resourceName, id)
 	}
-	// Длина — чеканная форма ЛИБО закрытый перечень посеянного применённой
-	// миграцией (`domain.SeededResourceIDs`). Второе — не послабление длины: оно
-	// принимает ровно те строки, которые продукт посеял сам и которые неизменяемы
-	// by construction (ban #15, ban #5). Объявлять собственный посев негодным —
-	// значит отвечать `INVALID_ARGUMENT` на id, выданный этим же сервисом в
-	// ответе `List` (задача kacho#1808). Префикс при этом проверен ВЫШЕ, поэтому
-	// посеянный id роли не пройдёт там, где ждут аккаунт.
-	if len(id) != domain.ShortIDLen && !domain.IsSeededResourceID(id) {
+	// Длина — только чеканная форма. Исключений нет: единственный посеянный id
+	// вне длины (системная роль `system.viewer`) переведён на каноническую форму
+	// миграцией 20261029150000 (kaname#543), и закрытый перечень «посеянного
+	// вопреки длине» снят вместе с этой ветвью. Посев, не укладывающийся в форму,
+	// ловит гейт `TestSeededResourceIDsPassTheServiceOwnFormCheck` до того, как
+	// служба выдаст такой id в ответе `List`.
+	if len(id) != domain.ShortIDLen {
 		return status.Errorf(codes.InvalidArgument, "invalid %s id '%s'", resourceName, id)
 	}
 	return nil
