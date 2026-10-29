@@ -59,14 +59,30 @@ type Provenance struct {
 	Fingerprint Fingerprint
 	// treeRoot — корень, от которого считан отпечаток.
 	treeRoot string
+	// fingerprintErr — ПОЧЕМУ отпечаток не снят. Хранится, а не отбрасывается:
+	// шапка отказывает с этой причиной дословно (kaname#74). Отброшенная в
+	// момент провала, она терялась за часы замера до того, как её спросят, а
+	// отчёт без отпечатка гейт свежести объявлял несвежим, не сказав почему.
+	fingerprintErr error
 }
 
-// TakeProvenance — провенанс из окружения прогона.
+// TakeProvenance — провенанс прибора ЧТЕНИЯ: отпечаток — ComputeFingerprint.
+func TakeProvenance(runCommand string, grid [][]Point) Provenance {
+	return TakeProvenanceOf(runCommand, grid, ComputeFingerprint)
+}
+
+// TakeProvenanceOf — провенанс из окружения прогона с отпечатком НАЗВАННОГО
+// предмета.
+//
+// Вычислитель отпечатка — параметр, потому что приборов два и предметы у них
+// разные (у прибора записи — материализатор). Прежде второй прибор брал
+// провенанс первого, перезаписывал отпечаток своим и тоже глотал его провал:
+// две копии одного «получилось — положить, нет — промолчать».
 //
 // Git зовётся ТОЛЬКО через `pkg/gitenv`: прямой `exec.Command("git", …)` в
 // этом дереве — находка гейта, потому что унаследованные `GIT_DIR`/`GIT_INDEX_FILE`
 // увели бы команду в чужой репозиторий и ревизия относилась бы не к тому дереву.
-func TakeProvenance(runCommand string, grid [][]Point) Provenance {
+func TakeProvenanceOf(runCommand string, grid [][]Point, fingerprintOf func(root string) (Fingerprint, error)) Provenance {
 	p := Provenance{
 		When:       time.Now(),
 		CPUCores:   runtime.NumCPU(),
@@ -92,15 +108,48 @@ func TakeProvenance(runCommand string, grid [][]Point) Provenance {
 	}
 	// Отпечаток предмета берётся ТОЙ ЖЕ функцией, какой его пересчитает гейт:
 	// вторая реализация разошлась бы с первой молча — и разошлась бы там, где
-	// обе печатают «совпало».
-	if top, err := gitenv.Command("", "rev-parse", "--show-toplevel").Output(); err == nil {
-		root := strings.TrimSpace(string(top))
-		p.treeRoot = root
-		if fp, ferr := ComputeFingerprint(root); ferr == nil {
-			p.Fingerprint = fp
-		}
+	// обе печатают «совпало». Провал на любом из двух шагов — корень и сам
+	// отпечаток — ЗАПИСЫВАЕТСЯ с причиной: шапка откажет ею (Ready).
+	top, err := gitenv.Command("", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		p.fingerprintErr = fmt.Errorf("корень дерева не установлен (git rev-parse --show-toplevel): %w", err)
+		return p
 	}
+	root := strings.TrimSpace(string(top))
+	p.treeRoot = root
+	fp, err := fingerprintOf(root)
+	if err != nil {
+		p.fingerprintErr = err
+		return p
+	}
+	p.Fingerprint = fp
 	return p
+}
+
+// Ready — годен ли провенанс в шапку отчёта; ошибка называет, почему нет.
+//
+// Отдельным методом, а не только внутри Header: прибор зовёт его СРАЗУ после
+// снятия провенанса и падает до замера, а не через час, на записи отчёта.
+// Header зовёт его же — правило годности одно.
+//
+// Годен — когда есть дословная команда повторения и отпечаток предмета снят:
+// без первой число нечем проверить через месяц, без второго гейту свежести не с
+// чем сверять, и «сверять не с чем» он читает как «несвежий» без причины.
+func (p Provenance) Ready() error {
+	if strings.TrimSpace(p.RunCommand) == "" {
+		return fmt.Errorf("scalegrid: отчёт без дословной команды повторения невалиден — " +
+			"через месяц его число нечем проверить")
+	}
+	if p.fingerprintErr != nil {
+		return fmt.Errorf("scalegrid: отпечаток предмета замера не снят — гейту свежести не с чем "+
+			"сверять отчёт: %w", p.fingerprintErr)
+	}
+	if p.Fingerprint.Composition == "" || p.Fingerprint.Content == "" {
+		return fmt.Errorf("scalegrid: отпечаток предмета замера пуст (состав %q, содержимое %q) — "+
+			"провенанс собран не TakeProvenance и отпечатка не несёт; гейту свежести не с чем сверять отчёт",
+			p.Fingerprint.Composition, p.Fingerprint.Content)
+	}
+	return nil
 }
 
 // cpuModel — модель процессора; замер времени без неё — число без машины.
@@ -166,7 +215,7 @@ func AbsPathOf(rel string) (string, error) {
 	// было два — гейт свежести (через `treeposture`) и вот этот писатель (склейка
 	// с вершиной git). В монорепо они отвечали одинаково, поэтому расхождения не
 	// было видно; после выноса службы отдельным репозиторием читатель нашёл файл,
-	// а писатель — нет: приставка `services/iam/` в этом дереве ничему не
+	// а писатель — нет: приставка модуля в монорепо в этом дереве ничему не
 	// соответствует.
 	//
 	// Цена измерена: пересъёмка отчёта объёма отработала все четыре точки сетки
@@ -183,9 +232,8 @@ func AbsPathOf(rel string) (string, error) {
 // 10 отчётов) даёт 7 с командой и 3 без — и эти три невоспроизводимы ничем,
 // потому что их писатель строку повторения не печатает вовсе.
 func (p Provenance) Header(title string) (string, error) {
-	if strings.TrimSpace(p.RunCommand) == "" {
-		return "", fmt.Errorf("scalegrid: отчёт без дословной команды повторения невалиден — " +
-			"через месяц его число нечем проверить")
+	if err := p.Ready(); err != nil {
+		return "", err
 	}
 	var b strings.Builder
 	w := func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }

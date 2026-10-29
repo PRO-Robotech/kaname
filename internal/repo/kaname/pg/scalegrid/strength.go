@@ -252,7 +252,7 @@ func Strength() [][]StrengthPoint {
 }
 
 // StrengthReportPath — куда ложится отчёт сетки предела прочности.
-const StrengthReportPath = "services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt"
+const StrengthReportPath = "internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt"
 
 // StrengthDigest — отпечаток сетки по СОДЕРЖИМОМУ точек.
 func StrengthDigest(grid [][]StrengthPoint) string {
@@ -320,4 +320,4 @@ func joinModes(ms []AskMode) string {
 }
 
 // WriteDeleteReportPath — куда ложится отчёт записи и удаления.
-const WriteDeleteReportPath = "services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-2-write-delete.txt"
+const WriteDeleteReportPath = "internal/repo/kaname/pg/scalegrid/REPORT-R7-2-write-delete.txt"

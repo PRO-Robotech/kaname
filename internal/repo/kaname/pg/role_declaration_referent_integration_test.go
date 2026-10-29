@@ -7,7 +7,7 @@ package pg_test
 // каждая названная правилом пара `(модуль, ресурс)` обязана иметь ЖИВУЮ строку
 // каталога.
 //
-// Приёмка: services/iam/docs/engineering/acceptance/roles-pointing-at-moved-resources.md
+// Приёмка: docs/engineering/acceptance/roles-pointing-at-moved-resources.md
 // (APPROVED круга 2), сценарии IAM-RM-1-01, -05, -06, -07, -14, -15. Задача
 // продукта kacho#1825.
 //

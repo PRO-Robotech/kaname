@@ -7,7 +7,7 @@ package pg_test
 // проекции правила получила референт: каждый элемент
 // `role_rule_selectors.object_types` называет ЖИВУЮ строку каталога.
 //
-// Приёмка: services/iam/docs/engineering/acceptance/roles-pointing-at-moved-resources.md
+// Приёмка: docs/engineering/acceptance/roles-pointing-at-moved-resources.md
 // (APPROVED круга 2), сценарии IAM-RM-1-08, -09, -10, -16. Задача продукта kacho#1825.
 //
 // Предмет, довод в пользу триггера и выбор fail-closed разобраны в САМОЙ СХЕМЕ —

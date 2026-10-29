@@ -207,7 +207,7 @@ func Small() [][]Point { return [][]Point{smallN, smallB, smallR, smallF} }
 // Константа, а не аргумент: гейт свежести читает отчёт ПО ЭТОМУ пути, и путь,
 // задаваемый снаружи, позволил бы положить отчёт мимо гейта — то есть иметь
 // замер, о котором гейт ничего не знает и потому молчит.
-const ReportPath = "services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid.txt"
+const ReportPath = "internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid.txt"
 
 // Digest — отпечаток сетки: то, что попадает в шапку отчёта и сверяется при
 // чтении.

@@ -23,7 +23,7 @@ import (
 // координат выводился из состава КОРНЯ, а корень в монорепо и в самостоятельном
 // клоне модуля разный. Один и тот же код давал разные отпечатки.
 //
-// Цена измерена, а не предположена: `git archive HEAD:services/iam` в каталог
+// Цена измерена, а не предположена: `git archive` каталога модуля в монорепо в каталог
 // вне репозитория, тот же состав, различие только в посадке — отпечаток состава
 // совпадал, отпечаток СОДЕРЖИМОГО расходился (`b40f95a9…` против `06e3b406…`),
 // и виноваты были два файла из девятнадцати. Следствие: четыре гейта свежести у
@@ -44,7 +44,7 @@ import (
 //	    расходится: литералы называют каталог, лежащий только у корня фикстуры
 //	    платформы (`pkg/…`), каталог, лежащий только в поставке модуля
 //	    (`internal/…`), и координату модуля в дереве платформы
-//	    (`services/iam/…`). Верни распознавателю чтение состава корня — и
+//	    (`<приставка модуля>/…`). Верни распознавателю чтение состава корня — и
 //	    сравнение краснеет, называя файл (проверено: `вердикт/query.go`);
 //	(б) само сравнение обязано УМЕТЬ краснеть: одно-фактное расхождение деревьев
 //	    (один оператор запроса) даёт красное с координатой, а тот же оператор,
@@ -55,7 +55,7 @@ import (
 //
 // Снятие ОДНОЙ ветви — той, что принимает координату модуля в дереве платформы,
 // — этот гейт НЕ роняет: словарь поставки одинаков в обеих посадках, поэтому
-// литерал `services/iam/…` становится значащим сразу у обеих, и равенство
+// литерал `<приставка модуля>/…` становится значащим сразу у обеих, и равенство
 // сохраняется. Ось держит сосед `TestSignificantContent_ProvenByInjection`
 // (случай «каталог переехал в пути отчёта — НЕ сдвинулся»): при снятой ветви он
 // краснеет. Проверено инъекцией обеих ветвей порознь.
@@ -63,7 +63,7 @@ import (
 // postureModuleDirs — каталоги верхнего уровня ПОСТАВКИ модуля.
 //
 // Они одни в обеих посадках — в этом всё дело: в монорепо они лежат под
-// `services/iam/`, в клоне от корня.
+// приставкой модуля, в клоне от корня.
 var postureModuleDirs = []string{"cmd", "docs", "schema"}
 
 // posturePlatformOnlyDirs — каталоги, которые есть только у КОРНЯ монорепо.
@@ -78,19 +78,19 @@ var posturePlatformOnlyDirs = []string{"pkg", "proto", "gateway", "terraform"}
 // координатой не являющуюся:
 //
 //	путь импорта своего модуля      узнаётся по `module` из go.mod
-//	координата модуля в платформе   `services/iam/…` — каталога `services` в клоне НЕТ
+//	координата модуля в платформе   `<приставка модуля>/…` — каталога `services` в клоне НЕТ
 //	каталог верхнего уровня модуля  `internal/…` — каталога `internal` у корня монорепо ЕСТЬ,
 //	                                но решает теперь поставка, а не корень
 //	каталог, поставке НЕ принадлежащий `pkg/…` — значащ в ОБЕИХ посадках
 //	литерал с косой чертой          `kaname.roles/updated_at` — положительный контроль
-const postureVerdictSource = `// Copyright (c) PRO-Robotech
+var postureVerdictSource = strings.ReplaceAll(`// Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 package relverdict
 
 import "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 
-const reportPath = "services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt"
+const reportPath = "«M»/internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt"
 const askerPath = "internal/repo/kaname/pg/relverdict/asker.go"
 const foreignPath = "pkg/ids/ids.go"
 const sameSubject = "kaname.roles/updated_at"
@@ -100,7 +100,7 @@ func askVerdict() string {
 	_, _, _, _ = reportPath, askerPath, foreignPath, sameSubject
 	return "SELECT id FROM kaname.access_bindings WHERE scope_id = $1"
 }
-`
+`, "«M»", moduleCoord)
 
 // moduleCoord — координата модуля в дереве платформы.
 //
@@ -117,12 +117,12 @@ type posturePair struct {
 
 // buildPostureTree — дерево модуля в названной посадке.
 //
-// standalone=false: содержимое модуля лежит под `services/iam/`, а у корня есть
+// standalone=false: содержимое модуля лежит под приставкой модуля, а у корня есть
 // собственные каталоги платформы и СВОЙ go.mod другого модуля — ровно та форма,
 // в которой отчёты и снимались.
 //
 // standalone=true: то же содержимое лежит ОТ КОРНЯ, каталога `services` нет
-// вовсе — ровно то, что даёт `git archive HEAD:services/iam`.
+// вовсе — ровно то, что даёт `git archive` каталога модуля в монорепо.
 func buildPostureTree(t *testing.T, standalone bool, verdictSource string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -147,14 +147,11 @@ func buildPostureTree(t *testing.T, standalone bool, verdictSource string) strin
 		}
 	}
 
-	// Предмет отпечатка. Координаты прибора записаны от корня ПЛАТФОРМЫ; здесь
-	// они приводятся к посадке ровно так же, как их приводит сам прибор, —
-	// снятием приставки модуля в самостоятельном клоне.
+	// Предмет отпечатка. Координаты прибора записаны от корня МОДУЛЯ (kaname#141);
+	// здесь они приводятся к посадке ровно так же, как их приводит сам прибор, —
+	// приставкой модуля в дереве платформы и как есть в самостоятельном клоне.
 	inside := func(rel string) string {
-		if standalone {
-			rel = strings.TrimPrefix(strings.TrimPrefix(rel, moduleCoord), "/")
-		}
-		return filepath.Join(root, filepath.FromSlash(rel))
+		return filepath.Join(root, prefix, filepath.FromSlash(rel))
 	}
 
 	for _, dir := range []string{verdictDir, gridDir, migrateDir, reconcileDir} {
@@ -166,14 +163,14 @@ func buildPostureTree(t *testing.T, standalone bool, verdictSource string) strin
 	// Оснастка — ВЫВЕДЕННАЯ из объявления, а не выписанная: см. writeScaffolding.
 	writeScaffolding(t, inside)
 	writeFile(t, filepath.Join(inside(gridDir), "grid.go"),
-		"package scalegrid\n\nconst gridReport = \"services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid.txt\"\n\nfunc grid() string { return gridReport }\n")
+		"package scalegrid\n\nconst gridReport = \""+moduleCoord+"/internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid.txt\"\n\nfunc grid() string { return gridReport }\n")
 	writeFile(t, filepath.Join(inside(migrateDir), "0001_initial.sql"),
 		"-- +goose Up\nCREATE TABLE kaname.access_bindings (id text PRIMARY KEY);\n")
 
 	// Предмет ВТОРОГО прибора — материализатор. Он тоже несёт координату
 	// собственного дерева, и она тоже обязана узнаваться в обеих посадках.
 	writeFile(t, filepath.Join(inside(reconcileDir), "forward.go"),
-		"package reconcile\n\nconst home = \"services/iam/internal/apps/kaname/api/access_binding/reconcile\"\n\n"+
+		"package reconcile\n\nconst home = \""+moduleCoord+"/internal/apps/kaname/api/access_binding/reconcile\"\n\n"+
 			"func forward() string { return \"INSERT INTO kaname.access_bindings (id) VALUES ($1)\" + home }\n")
 
 	// go.mod МОДУЛЯ. В обеих посадках объявляет один и тот же путь — иначе

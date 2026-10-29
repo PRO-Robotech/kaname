@@ -6,7 +6,7 @@ package pg_test
 // role_withdrawal_cost_integration_test.go — ПОЛОСА ОТЗЫВА РОЛИ в приборе
 // стоимости.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
+// Приёмка `docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // §2.7, §10 шаг 7; сценарий IAM-RW-1-23. Задача продукта kacho#1913.
 //
 // # Зачем СВОЯ полоса, а не строка в соседней сетке

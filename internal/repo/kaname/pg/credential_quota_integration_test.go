@@ -3,7 +3,7 @@
 
 // credential_quota_integration_test.go — потолок числа удостоверений на
 // принципала (задача kacho#1191, приёмка
-// `services/iam/docs/engineering/acceptance/credential-ceiling-per-principal.md`).
+// `docs/engineering/acceptance/credential-ceiling-per-principal.md`).
 //
 // # Почему это свойство базы, а не use-case'а
 //

@@ -397,12 +397,15 @@ func TestR7_4_14_InjectionRelationOutsideThePlanIsNotUncovered(t *testing.T) {
 // миграции iam в одну первичную унёс и файл, и его откатный блок: определения
 // «до достройки» в дереве не существует НИ В ОДНОМ виде.
 //
-// Предикат, которым это перемеряется за секунду:
+// Предикат, которым это перемеряется за секунду (первая строка — на момент
+// свода; после него каталог снова растёт новыми миграциями, а файла с образцом
+// имени `785001_*` в нём нет по-прежнему — вторая строка):
 //
-//	ls services/iam/internal/migrations/*.sql | wc -l                  → 1
+//	ls internal/migrations/*.sql | wc -l                               → 1
+//	ls internal/migrations/ | grep -c 785001                           → 0
 //	python3 -c "import json; print(len(json.load(open(
-//	  'services/iam/internal/migrations/retired.json'))['retired']))"  → 170
-//	grep -c 'goose StatementBegin' services/iam/internal/migrations/0001_initial.sql → ≠ 0
+//	  'internal/migrations/retired.json'))['retired']))"               → 170
+//	grep -c 'goose StatementBegin' internal/migrations/0001_initial.sql → ≠ 0
 //
 // Последняя строка — отдельный, независимый довод: даже адресуйся проба не по
 // имени, а по содержимому, разбор блоков Up/Down этой формы не понимает и

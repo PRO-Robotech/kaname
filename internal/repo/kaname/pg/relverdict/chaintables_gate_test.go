@@ -289,11 +289,12 @@ func chainCatalogueCouplingFindings(mine, appliance []string) []string {
 // запускает бинарь из каталога пакета, а пакет и есть каталог чтения. Выписанный
 // путь пережил бы переезд пакета и сторожил бы пустоту.
 //
-// Ответ даётся В КООРДИНАТАХ ПРИБОРА, то есть от корня ПЛАТФОРМЫ: перечень
-// `Fingerprint.Files` записан так в обеих посадках. Путь, отсчитанный от корня
-// самостоятельного клона, приставки `services/iam` не несёт, и фильтр по нему не
-// нашёл бы НИ ОДНОГО файла — «ноль находок» стало бы «ноль прочитанного»
-// (наблюдалось при снятии пропуска по задаче продукта kacho#2273).
+// Ответ даётся В КООРДИНАТАХ ПРИБОРА, то есть от корня МОДУЛЯ: перечень
+// `Fingerprint.Files` записан так в обеих посадках (kaname#141; прежде — от
+// корня платформы). Путь, отсчитанный от корня дерева платформы, несёт
+// приставку модуля — она снимается: иначе фильтр не нашёл бы НИ ОДНОГО файла, и
+// «ноль находок» стало бы «ноль прочитанного» (наблюдалось при снятии пропуска
+// по задаче продукта kacho#2273, тогда — с обратным знаком).
 func chainCatalogueDir(t *testing.T, root string) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -311,11 +312,7 @@ func chainCatalogueDir(t *testing.T, root string) string {
 		t.Fatalf("каталог пакета %s не лежит под корнем дерева %s (rel=%q, err=%v): гейт "+
 			"сверял бы файлы чужого дерева", wd, root, rel, err)
 	}
-	slash := filepath.ToSlash(rel)
-	if md := treeposture.ModuleDirInPlatform(); slash != md && !strings.HasPrefix(slash, md+"/") {
-		slash = treeposture.Under(md, slash)
-	}
-	return slash
+	return strings.TrimPrefix(filepath.ToSlash(rel), treeposture.ModuleDirInPlatform()+"/")
 }
 
 // TestR7_4_16_ChainTableUnnamedByTheReadCatalogueIsAFinding — гейт.
@@ -547,9 +544,9 @@ func chainSyntheticRoot(t *testing.T, root, drop string) string {
 		suffix string
 		strip  bool
 	}{
-		{"services/iam/internal/repo/kaname/pg/relverdict", ".go", true},
-		{"services/iam/internal/repo/kaname/pg/scalegrid", ".go", false},
-		{"services/iam/internal/migrations", ".sql", false},
+		{"internal/repo/kaname/pg/relverdict", ".go", true},
+		{"internal/repo/kaname/pg/scalegrid", ".go", false},
+		{"internal/migrations", ".sql", false},
 	}
 	for _, d := range dirs {
 		src, perr := treeposture.PathUnder(root, d.rel)

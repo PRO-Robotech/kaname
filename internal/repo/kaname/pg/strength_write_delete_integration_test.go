@@ -17,7 +17,7 @@ package pg_test
 //
 // Что участвует — материализатор целиком и своим кодом: `reconcile.Reconciler`
 // поверх настоящего `pg.ReconcileAdapter` и настоящего Postgres (testcontainers).
-// Соседний прибор `services/iam/tools/authzformbench` — ДРУГОЙ прибор с другими единицами: он
+// Соседний прибор `tools/authzformbench` — ДРУГОЙ прибор с другими единицами: он
 // сравнивает формы одной выдачи между собой, а не меряет продуктовый материализатор.
 // Складывать его числа с этими нельзя. Что именно он берёт за образец сравнения,
 // здесь не воспроизводится намеренно: это его предмет, он меняется вместе с ним, и
@@ -441,22 +441,22 @@ func TestStrengthWriteDelete_Report(t *testing.T) {
 	}
 	if os.Getenv(strengthWDEnv) == "" {
 		t.Skipf("замер записи и удаления идёт РУЧНЫМ прогоном: %s=1 go test "+
-			"./services/iam/internal/repo/kaname/pg/ -run TestStrengthWriteDelete_Report "+
+			"./internal/repo/kaname/pg/ -run TestStrengthWriteDelete_Report "+
 			"-count=1 -v -timeout 120m", strengthWDEnv)
 	}
 	ctx := context.Background()
 
 	runCommand := fmt.Sprintf("%s=1 go test ./internal/repo/kaname/pg/ "+
 		"-run TestStrengthWriteDelete_Report -count=1 -v -timeout 120m", strengthWDEnv)
-	prov := scalegrid.TakeProvenance(runCommand, nil)
-	prov.GridText = wdGridText()
 	// Отпечаток берётся СВОЙ: предмет этого замера — материализатор, а не запрос
 	// вердикта. Отпечаток читающего прибора краснел бы здесь на чужой правке и
 	// молчал бы на своей.
-	if root, rerr := scalegrid.AbsPathOf(""); rerr == nil {
-		if fp, ferr := scalegrid.ComputeWriteDeleteFingerprint(strings.TrimSuffix(root, "/")); ferr == nil {
-			prov.Fingerprint = fp
-		}
+	prov := scalegrid.TakeProvenanceOf(runCommand, nil, scalegrid.ComputeWriteDeleteFingerprint)
+	prov.GridText = wdGridText()
+	// Годность провенанса — ДО замера: отпечаток, не снявшийся сейчас, не
+	// снимется и через час, а отчёт без него не пишется (kaname#74).
+	if err := prov.Ready(); err != nil {
+		t.Fatalf("провенанс замера негоден, замер не начат: %v", err)
 	}
 
 	started := time.Now()
@@ -787,7 +787,7 @@ func renderWDReport(results []wdResult, wall time.Duration, final bool) string {
 	w("            Прежних слагаемых «применение кортежа к движку» и «ожидание в\n")
 	w("            очереди до дренажа» нет у самого предмета: прямой факт складывает\n")
 	w("            триггер в момент коммита журнала.\n")
-	w("  Числа этого отчёта НЕЛЬЗЯ складывать с числами прибора services/iam/tools/authzformbench:\n")
+	w("  Числа этого отчёта НЕЛЬЗЯ складывать с числами прибора tools/authzformbench:\n")
 	w("  это другой прибор с другими единицами и другим предметом.\n")
 
 	w("\nИСХОД ПРОХОДА — ПЕРВОЙ КОЛОНКОЙ, ДО ВСЯКИХ МИЛЛИСЕКУНД\n")
