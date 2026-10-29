@@ -108,7 +108,7 @@ const probeRepeats = 21
 // утверждением без второй половины.
 const (
 	baselineRevision   = "3acddcfdf9216440aaa77db505a63a456d7aed98"
-	baselineReportPath = "services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid-before-S2.txt"
+	baselineReportPath = "internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid-before-S2.txt"
 )
 
 // probeChainDepth — глубина цепи фикстуры. Печатается РЯДОМ с S_набл: без неё
@@ -972,6 +972,11 @@ func TestScaleGrid_FullGridReport(t *testing.T) {
 	runCommand := fmt.Sprintf("%s=1 go test ./internal/repo/kaname/pg/relverdict/ "+
 		"-run TestScaleGrid_FullGridReport -count=1 -v -timeout 120m", fullGridEnv)
 	prov := scalegrid.TakeProvenance(runCommand, grid)
+	// Годность провенанса — ДО замера (kaname#74): иначе отказ шапки пришёл бы
+	// после всех осей сетки, и час прогона ушёл бы в отчёт, который не пишется.
+	if err := prov.Ready(); err != nil {
+		t.Fatalf("провенанс замера негоден, замер не начат: %v", err)
+	}
 
 	started := time.Now()
 	results := make([][]pointResult, 0, len(grid))

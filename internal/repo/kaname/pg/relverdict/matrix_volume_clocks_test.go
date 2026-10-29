@@ -66,7 +66,13 @@ func syntheticMatrix(rowsLo, rowsHi int64, p50Lo, p50Hi time.Duration, planLo, p
 // matrixBodyOf — текст отчёта целиком, тем же писателем, что у замера.
 func matrixBodyOf(t *testing.T, results []matrixResult) string {
 	t.Helper()
-	return renderMatrixReport(results, time.Minute, "16.4")
+	prov := matrixProvenance()
+	prov.Postgres = "16.4"
+	body, err := renderMatrixReport(prov, results, time.Minute)
+	if err != nil {
+		t.Fatalf("отчёт не собран: %v", err)
+	}
+	return body
 }
 
 const clocksDivergeTitle = "ЧАСЫ РАСХОДЯТСЯ С НЕСУЩЕЙ ВЕЛИЧИНОЙ"

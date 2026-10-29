@@ -5,8 +5,8 @@ package pg_test
 
 // migration_0064_fga_outbox_autoanalyze_integration_test.go
 //
-// Pins the per-table autovacuum settings migration 0064 put on
-// kaname.fga_outbox.
+// Закрепляет потабличные настройки autovacuum, которые миграция 0064 поставила
+// на kaname.fga_outbox.
 //
 // ЗДЕСЬ ЖИЛА ВТОРАЯ ПРОБА — «журнал несёт ОБА индекса клейма»
 // (TestMigration0063_FGAOutbox_CarriesBothClaimIndexes). Она снята вместе со
@@ -43,7 +43,7 @@ package pg_test
 // ЧТО ЭТО РЕШЕНИЕ НЕ УТВЕРЖДАЕТ — сказано, чтобы его не читали шире. Оно не
 // утверждает, что настройка сегодня что-то ускоряет: единственный читатель
 // журнала в прод-коде — де-дуп загрузочного добора
-// (`services/iam/internal/apps/kaname/seed/migrate_backfill.go`), одноразовый и на
+// (`internal/apps/kaname/seed/migrate_backfill.go`), одноразовый и на
 // пути запроса не стоящий. Появится читатель на пути запроса — довод 2 станет
 // измеримым; исчезнет журнал — настройка уйдёт вместе с таблицей. Ни одно из
 // двух не требует новой задачи: предикат назван здесь.
@@ -91,9 +91,9 @@ func TestMigration0064_FGAOutbox_KeepsStatisticsFresh(t *testing.T) {
 		  WHERE n.nspname = 'kaname' AND c.relname = 'fga_outbox'`,
 	).Scan(&reloptions))
 
-	// reloptions come back as "key=value" strings; compare NUMERICALLY so the
-	// assertion does not depend on how a given Postgres spells the stored float
-	// ("0" vs "0.0").
+	// reloptions приходят строками «ключ=значение»; сравнение — ЧИСЛОВОЕ, чтобы
+	// утверждение не зависело от того, как данный Postgres записывает хранимое
+	// число («0» против «0.0»).
 	opts := make(map[string]float64, len(reloptions))
 	for _, kv := range reloptions {
 		k, v, ok := strings.Cut(kv, "=")
@@ -107,11 +107,12 @@ func TestMigration0064_FGAOutbox_KeepsStatisticsFresh(t *testing.T) {
 		opts[k] = f
 	}
 
-	// scale_factor=0 decouples the trigger from table SIZE (an append-mostly outbox
-	// outgrows any percentage-based threshold); the fixed threshold ties it to
-	// absolute churn instead. The threshold is asserted as an upper bound, not an
-	// exact value — tuning it DOWN keeps the guarantee, raising it past a burst's
-	// worth of churn silently restores the stale-statistics plan.
+	// scale_factor=0 отвязывает срабатывание от РАЗМЕРА таблицы (журнал, в который
+	// в основном дописывают, перерастает любой процентный порог); постоянный
+	// порог привязывает его к абсолютному числу изменений. Порог утверждается
+	// верхней границей, а не точным значением: понижение гарантию сохраняет,
+	// подъём выше объёма одного всплеска молча возвращает план на устаревшей
+	// статистике.
 	for _, want := range []struct {
 		key    string
 		atMost float64

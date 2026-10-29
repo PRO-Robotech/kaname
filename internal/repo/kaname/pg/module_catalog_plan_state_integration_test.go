@@ -6,7 +6,7 @@ package pg_test
 // module_catalog_plan_state_integration_test.go — ПЛАН СЧИТАЕТ ТО, ЧТО СДЕЛАЕТ
 // ПРИМЕНЕНИЕ, И НЕ ПИШЕТ НИЧЕГО.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
+// Приёмка `docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 5), §2.5 (отпечаток), §2.6 (третья популяция), §2.11 (что
 // производит `Plan`). Задача продукта kacho#1034, объём О6 + О8.
 //

@@ -55,10 +55,16 @@ import (
 const fingerprintTableMark = "kaname."
 
 // verdictDir / gridDir — каталоги, чьё не-тестовое содержимое и есть предмет.
+//
+// Записаны от корня ЭТОГО дерева (kaname#141). Прежде — от корня монорепо
+// платформы, с приставкой, которой здесь нет: разрешитель её снимал, и файлы
+// находились, но та же координата уходила наружу как есть — в шапку отчёта,
+// в предикат и в сверку чистоты, где сравнивается с выводом git дословно и не
+// совпадала ни с одним путём.
 const (
-	verdictDir = "services/iam/internal/repo/kaname/pg/relverdict"
-	gridDir    = "services/iam/internal/repo/kaname/pg/scalegrid"
-	migrateDir = "services/iam/internal/migrations"
+	verdictDir = "internal/repo/kaname/pg/relverdict"
+	gridDir    = "internal/repo/kaname/pg/scalegrid"
+	migrateDir = "internal/migrations"
 )
 
 // significantClause — ЧТО именно берётся у файла под отпечаток.
@@ -318,7 +324,7 @@ func stampFiles(root string, files []string, fp *Fingerprint) error {
 // оператора:
 //
 //	путь импорта своего модуля   ".../kaname/internal/repo/<каталог>/pg/resource_mirror"
-//	путь отчёта                  "services/iam/.../REPORT-R7-2-strength.txt"
+//	путь отчёта                  "<координата модуля в платформе>/.../REPORT-R7-2-strength.txt"
 //	каталог предмета записи      "internal/apps/<каталог>/.../reconcile"
 //
 // # Почему это НЕ дыра
@@ -338,18 +344,20 @@ func stampFiles(root string, files []string, fp *Fingerprint) error {
 // самостоятельном клоне модуля — `cmd`, `internal`, `schema`. Словари разные,
 // значит нормализуется разное, и ОДИН И ТОТ ЖЕ код давал разные отпечатки.
 //
-// Замер, ради которого правило переписано (`git archive HEAD:services/iam` в
-// каталог вне репозитория, тот же состав, различие только в посадке): отпечаток
-// состава совпадал (тождества роль/имя от посадки не зависят), отпечаток
-// СОДЕРЖИМОГО расходился — `b40f95a9…` против `06e3b406…`, и виноваты были два
-// файла из девятнадцати, чьи литералы называют путь отчёта `services/iam/…`.
+// Замер, ради которого правило переписано (`git archive` каталога модуля в
+// монорепо в каталог вне репозитория, тот же состав, различие только в
+// посадке): отпечаток состава совпадал (тождества роль/имя от посадки не
+// зависят), отпечаток СОДЕРЖИМОГО расходился — `b40f95a9…` против `06e3b406…`,
+// и виноваты были два файла из девятнадцати, чьи литералы называли путь отчёта
+// от корня монорепо.
 // Цена: четыре гейта свежести у арендатора не исполнялись вовсе, хотя оба их
 // операнда — отчёт и код — с модулем едут.
 //
 // Словарь теперь выводится из каталогов верхнего уровня САМОГО МОДУЛЯ
 // (`treeposture.PathUnder(root, ModuleDirInPlatform())`), а координата модуля в
-// дереве платформы принимается ОТДЕЛЬНОЙ ветвью — она записана в литералах как
-// `services/iam/…` и обязана узнаваться там, где каталога `services` нет. Обе
+// дереве платформы (`treeposture.ModuleDirInPlatform`) принимается ОТДЕЛЬНОЙ
+// ветвью — историческая запись литералов, и она обязана узнаваться там, где
+// каталога `services` нет. Обе
 // величины суть свойства ПОСТАВКИ, а не посадки, поэтому отпечаток совпадает в
 // обеих by construction.
 //
@@ -388,16 +396,17 @@ type repoCoordinates struct {
 
 // under — координата дерева, ПРИВЕДЁННАЯ к посадке названного корня.
 //
-// Прибор читает свои каталоги по координатам вида `services/iam/...`. Склейка их
-// с корнем верна ровно для монорепо: в самостоятельном клоне корень репозитория
-// и есть корень модуля, и склеенный путь указывает в несуществующий подкаталог —
-// отпечаток не вычисляется, а отказ звучит «нет файла» там, где файл есть.
+// Прибор читает свои каталоги по координатам от корня МОДУЛЯ (kaname#141).
+// В самостоятельном клоне это корень репозитория, и координата верна как
+// записана. В дереве платформы, названном снаружи, модуль лежит под своей
+// приставкой — она и добавляется (`treeposture.PrefixUnder`): склейка без неё
+// указала бы в каталог платформы, которого нет, и отпечаток не вычислился бы.
 //
 // Отказ резолва здесь НЕ проглатывается: путь, лежащий вне поставки модуля,
 // означает «условие не создано», и прибор обязан сказать это, а не отдать
 // отпечаток, взятый не с того состава.
 func under(root, rel string) (string, error) {
-	p, err := treeposture.PathUnder(root, rel)
+	p, err := treeposture.PathUnder(root, treeposture.Under(treeposture.PrefixUnder(root), rel))
 	if err != nil {
 		return "", fmt.Errorf("scalegrid: координата %s не приведена к посадке корня %s: %w", rel, root, err)
 	}
@@ -414,7 +423,9 @@ func under(root, rel string) (string, error) {
 // бы байтовую чувствительность молча.
 func newRepoCoordinates(root string) (repoCoordinates, error) {
 	c := repoCoordinates{root: filepath.Clean(root), topLevel: map[string]bool{}, modules: map[string]string{}}
-	moduleDir, err := under(c.root, treeposture.ModuleDirInPlatform())
+	// Каталог модуля — исторической записью и резолвом напрямую: `under`
+	// добавляет приставку модуля сам, и запись с приставкой удвоила бы её.
+	moduleDir, err := treeposture.PathUnder(c.root, treeposture.ModuleDirInPlatform())
 	if err != nil {
 		return c, fmt.Errorf("scalegrid: каталог модуля под корнем %s не установлен: %w", root, err)
 	}
@@ -913,7 +924,7 @@ func tableNamesIn(src string) []string {
 // том, что он обязан ловить.
 
 // reconcileDir — каталог материализатора: он и есть предмет замера записи.
-const reconcileDir = "services/iam/internal/apps/kaname/api/access_binding/reconcile"
+const reconcileDir = "internal/apps/kaname/api/access_binding/reconcile"
 
 // ── ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА ЗАПИСИ И УДАЛЕНИЯ ──────────────────────────────
 //

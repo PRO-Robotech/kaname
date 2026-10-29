@@ -6,7 +6,7 @@ package pg_test
 // module_membership_from_rows_integration_test.go — ЧЛЕНСТВО МОДУЛЯ отвечает
 // СТРОКАМИ каталога, а не литералом Go.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/module-withdrawal-is-described.md`
+// Приёмка `docs/engineering/acceptance/module-withdrawal-is-described.md`
 // (APPROVED круга 2), сценарий **IAM-MW-1-10**; задача продукта kacho#1927 — остаток
 // kacho#1816. До неё сценарий был помечен «отрицательный к текущему дереву»: правило,
 // называющее СНЯТЫЙ модуль, принималось, потому что членство читал литерал

@@ -13,7 +13,7 @@ package pg_test
 // которого нет в иерархии `cluster → account → project`. У такого якоря нет ни
 // яруса, ни владельца: выдачей это не выражается, перечисление выдач о нём
 // молчит, и отзывать нечем. Решение записано в
-// `services/iam/docs/engineering/architecture/grant-surface-boundaries.md`:
+// `docs/engineering/architecture/grant-surface-boundaries.md`:
 // словарь якорей НЕ растёт, а способность переезжает на КЛАСТЕРНОЕ отношение и
 // выражается обычной системной выдачей.
 //

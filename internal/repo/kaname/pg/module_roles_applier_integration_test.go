@@ -5,7 +5,7 @@ package pg_test
 
 // module_roles_applier_integration_test.go — ПРИМЕНИТЕЛЬ ролей модуля целиком
 // доводится до настоящего Postgres (приёмка
-// `services/iam/docs/engineering/acceptance/roles-come-as-data-not-migrations.md`,
+// `docs/engineering/acceptance/roles-come-as-data-not-migrations.md`,
 // держатели Г1а, Г4, Г5 и сценарий MOD-RD-06; задача kacho#1870).
 //
 // # Чем эта проба отличается от соседней, и почему её мало было
@@ -270,8 +270,8 @@ func grantsOn(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id domain.R
 // фразой:
 //
 //	grep -c "'compute', '\(disk\|image\|snapshot\)'" \
-//	  services/iam/internal/migrations/20260901113757_rule_segments_have_a_referent.sql
-//	grep -c '"compute\.' services/iam/internal/domain/retired_types.go
+//	  internal/migrations/0001_initial.sql
+//	grep -c '"compute\.' internal/domain/retired_types.go
 func TestMODRD06ARetiredTypeIsRefusedByTheDomainBeforeAnyWrite(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -446,7 +446,7 @@ func TestMODRD07SystemRoleIDsInTheLiveBaseDeriveFromTheirNames(t *testing.T) {
 
 	// Рукописные идентификаторы применённых миграций — ВЕДОМОСТЬ, а не «прочее».
 	// Предикат её пополнения:
-	//   grep -ohE "\(\s*'rol[A-Za-z0-9]{5,}'" services/iam/internal/migrations/*.sql | sort -u
+	//   grep -ohE "\(\s*'rol[A-Za-z0-9]{5,}'" internal/migrations/*.sql | sort -u
 	// Имена — ОБЪЯВЛЕННЫЕ (kacho#2554): миграция перевода сменила имя, идентификатор
 	// остался рукописным литералом, и сверка пары обязана это пережить.
 	handRolled := map[string]string{

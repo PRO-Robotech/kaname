@@ -851,6 +851,11 @@ func TestStrengthGrid_Report(t *testing.T) {
 	runCommand := fmt.Sprintf("%s=1 go test ./internal/repo/kaname/pg/relverdict/ "+
 		"-run TestStrengthGrid_Report -count=1 -v -timeout 120m", strengthEnv)
 	prov := scalegrid.TakeProvenance(runCommand, nil)
+	// Годность провенанса — ДО замера (kaname#74): отпечаток, не снявшийся сейчас,
+	// не снимется и после оси, а отчёт без него не пишется.
+	if err := prov.Ready(); err != nil {
+		t.Fatalf("провенанс замера негоден, замер не начат: %v", err)
+	}
 	// Сетка у этого прибора СВОЯ, и провенанс обязан назвать именно её: шапка,
 	// напечатавшая соседнюю, описывала бы другой замер.
 	prov.GridDigest = scalegrid.StrengthDigest(grid)

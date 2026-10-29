@@ -6,7 +6,7 @@ package pg_test
 // module_catalog_confirmation_shape_integration_test.go — СОСТАВ ПОДТВЕРЖДЕНИЯ:
 // чему оно обязано быть слепо и к чему чувствительно.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
+// Приёмка `docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.5; сценарии `IAM-MA-1-16` и `-17` — их предикат.
 // Задача продукта kacho#1034.
 //

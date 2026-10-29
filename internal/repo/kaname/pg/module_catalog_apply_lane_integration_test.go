@@ -6,7 +6,7 @@ package pg_test
 // module_catalog_apply_lane_integration_test.go — ПОЛОС ПРИМЕНЕНИЯ ДВЕ, и
 // обязанности у них РАЗНЫЕ.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
+// Приёмка `docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.4; задача продукта kacho#1034.
 //
 // # Что здесь утверждается — и почему ОБЕ стороны, а не одна

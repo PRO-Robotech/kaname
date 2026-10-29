@@ -6,7 +6,7 @@ package pg_test
 // module_catalog_apply_audit_integration_test.go — ПРИМЕНЕНИЕ КАТАЛОГА
 // ОСТАВЛЯЕТ СЛЕД, и след этот называет того, кто применил.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
+// Приёмка `docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.7; сценарии `IAM-MA-1-29`, `-30`, `-31`.
 // Задача продукта kacho#1034.
 //

@@ -6,7 +6,7 @@ package pg_test
 // role_withdrawal_race_integration_test.go — СПОРНЫЕ ПУТИ отзыва роли под
 // конкуренцией.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
+// Приёмка `docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // (APPROVED круга 4); сценарии IAM-RW-1-26, IAM-RW-1-27, IAM-RW-1-28. Задача
 // продукта kacho#1913. Требование `data-integrity.md` §«Чек-лист нового ссылочного
 // поля», п. 5: спорный путь без пробы под конкуренцией не мёржится — гонку
