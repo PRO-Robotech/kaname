@@ -649,6 +649,10 @@ func TestSystemRoleIDs_SRCI10_MigrationIsReversible(t *testing.T) {
 	w.up("SRCI-10: первый накат")
 	full1, s1 := w.snapshot(tables), w.journalHead()
 	firstUp := w.journalAfter(s0)
+	// Ключи, временно несущие `ON UPDATE CASCADE`, обязаны вернуться дословно уже
+	// накатом, а не только откатом: иначе после наката навсегда осталась бы дорога
+	// тихим переименованиям (замысел К3).
+	assert.Equal(t, schema0, w.srciSchema(), "SRCI-10: схема после наката разошлась (ключи, триггеры, индексы)")
 
 	w.down("SRCI-10")
 	assert.Equal(t, full0, w.snapshot(tables), "SRCI-10: полный срез после отката разошёлся со срезом до наката")
@@ -662,6 +666,7 @@ func TestSystemRoleIDs_SRCI10_MigrationIsReversible(t *testing.T) {
 	}
 
 	w.up("SRCI-10: повторный накат")
+	assert.Equal(t, schema0, w.srciSchema(), "SRCI-10: схема после повторного наката разошлась")
 	assert.Equal(t, full1, w.snapshot(tables), "SRCI-10: срез повторного наката разошёлся с первым")
 	assert.Equal(t, srciPairs(firstUp), srciPairs(w.journalAfter(s2)), "SRCI-10: события повторного наката разошлись с первым")
 	assert.Equal(t, journal0, w.journalUpTo(s0), "SRCI-10: строки ленты до наката изменены")
