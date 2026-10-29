@@ -56,9 +56,14 @@
 -- =============================================================================
 -- ССЫЛКИ БЕЗ КЛЮЧА
 -- =============================================================================
--- Каскад не достаёт ссылок, которые ключа не несут. Их два места, и оба
+-- Каскад не достаёт ссылок, которые ключа не несут. Их три места, и все
 -- переписываются здесь: нагрузка очереди аудита (`audit_outbox.event_payload`,
--- поле `role_id` выдачи) и оси делегирования (`grant_delegations.role_ids`).
+-- поле `role_id` выдачи), оси делегирования (`grant_delegations.role_ids`) и
+-- текстовые колонки операций (`operations.description` — «Create access binding
+-- (… → <id роли> …)», `error_message`, `resource_id` операций над ролью). Снимки
+-- результатов операций (`response_data`, `metadata_data`) — protobuf в `bytea`:
+-- перекодировать их SQL нечем, и прежний `roleId` в ответе прошлой операции
+-- остаётся (приёмка, вопрос В1 замысла).
 -- Места, где id роли мог бы стоять ОБЪЕКТОМ (цель выдачи, факты и журнал
 -- отношений, кортежи выдачи), для системной роли недостижимы — роль уровня
 -- кластера объектом области не бывает; если строка с прежним id там всё же есть,
@@ -197,6 +202,22 @@ BEGIN
                'rol000000000sysadmin', 'rol58ksy03r9xd053my3'),
                'rol000000000sysviewer', 'rol6ht762gm6sj2cdvan')
      WHERE role_ids && ARRAY['rol000000000sysadmin', 'rol000000000sysviewer'];
+    UPDATE kaname.operations
+       SET description = replace(replace(description,
+               'rol000000000sysadmin', 'rol58ksy03r9xd053my3'),
+               'rol000000000sysviewer', 'rol6ht762gm6sj2cdvan'),
+           error_message = replace(replace(error_message,
+               'rol000000000sysadmin', 'rol58ksy03r9xd053my3'),
+               'rol000000000sysviewer', 'rol6ht762gm6sj2cdvan'),
+           resource_id = CASE resource_id
+               WHEN 'rol000000000sysadmin' THEN 'rol58ksy03r9xd053my3'
+               WHEN 'rol000000000sysviewer' THEN 'rol6ht762gm6sj2cdvan'
+               ELSE resource_id END
+     WHERE strpos(description, 'rol000000000sysadmin') > 0
+        OR strpos(description, 'rol000000000sysviewer') > 0
+        OR strpos(COALESCE(error_message, ''), 'rol000000000sysadmin') > 0
+        OR strpos(COALESCE(error_message, ''), 'rol000000000sysviewer') > 0
+        OR resource_id IN ('rol000000000sysadmin', 'rol000000000sysviewer');
 
     -- Объектом системная роль не бывает; строка, говорящая обратное, — отказ.
     IF EXISTS (SELECT 1 FROM kaname.access_bindings t
@@ -390,6 +411,22 @@ BEGIN
                'rol58ksy03r9xd053my3', 'rol000000000sysadmin'),
                'rol6ht762gm6sj2cdvan', 'rol000000000sysviewer')
      WHERE role_ids && ARRAY['rol58ksy03r9xd053my3', 'rol6ht762gm6sj2cdvan'];
+    UPDATE kaname.operations
+       SET description = replace(replace(description,
+               'rol58ksy03r9xd053my3', 'rol000000000sysadmin'),
+               'rol6ht762gm6sj2cdvan', 'rol000000000sysviewer'),
+           error_message = replace(replace(error_message,
+               'rol58ksy03r9xd053my3', 'rol000000000sysadmin'),
+               'rol6ht762gm6sj2cdvan', 'rol000000000sysviewer'),
+           resource_id = CASE resource_id
+               WHEN 'rol58ksy03r9xd053my3' THEN 'rol000000000sysadmin'
+               WHEN 'rol6ht762gm6sj2cdvan' THEN 'rol000000000sysviewer'
+               ELSE resource_id END
+     WHERE strpos(description, 'rol58ksy03r9xd053my3') > 0
+        OR strpos(description, 'rol6ht762gm6sj2cdvan') > 0
+        OR strpos(COALESCE(error_message, ''), 'rol58ksy03r9xd053my3') > 0
+        OR strpos(COALESCE(error_message, ''), 'rol6ht762gm6sj2cdvan') > 0
+        OR resource_id IN ('rol58ksy03r9xd053my3', 'rol6ht762gm6sj2cdvan');
 
     IF EXISTS (SELECT 1 FROM kaname.access_bindings t
                 WHERE strpos(t.target::text, 'rol58ksy03r9xd053my3') > 0
