@@ -77,7 +77,7 @@ func auditSynthetic(t *testing.T, base check.TreeCorpus, body string) []check.Ro
 	return out
 }
 
-func requireFinding(t *testing.T, got []check.RoleSubtableFinding, section, table, why string) {
+func requireRoleSubtableFinding(t *testing.T, got []check.RoleSubtableFinding, section, table, why string) {
 	t.Helper()
 	for _, f := range got {
 		if f.Section == section && (table == "" || f.Table == table) {
@@ -87,7 +87,7 @@ func requireFinding(t *testing.T, got []check.RoleSubtableFinding, section, tabl
 	t.Fatalf("%s: находки о разделе %s (таблица %q) нет; получено %+v", why, section, table, got)
 }
 
-func requireSilent(t *testing.T, got []check.RoleSubtableFinding, why string) {
+func requireRoleSubtableSilent(t *testing.T, got []check.RoleSubtableFinding, why string) {
 	t.Helper()
 	if len(got) > 0 {
 		t.Fatalf("%s: законный близнец дал находку %+v", why, got)
@@ -110,11 +110,11 @@ SELECT role_id, module || '.' || resource, COALESCE(verb, ''), 'rule_ref', 'сн
 -- +goose Down
 SELECT 1;
 `
-	requireFinding(t, auditSynthetic(t, base, writer), "Up", "role_rule_ref",
+	requireRoleSubtableFinding(t, auditSynthetic(t, base, writer), "Up", "role_rule_ref",
 		"миграция пишет подтаблицу роли без функции события")
 
 	twin := strings.Replace(writer, "-- +goose Down", injEmitCall+"-- +goose Down", 1)
-	requireSilent(t, auditSynthetic(t, base, twin), "вызов функции в том же разделе")
+	requireRoleSubtableSilent(t, auditSynthetic(t, base, twin), "вызов функции в том же разделе")
 }
 
 // TestRoleSubtableGate_IAMCCR24_SectionsAreJudgedApart — ось раздельности
@@ -126,11 +126,11 @@ func TestRoleSubtableGate_IAMCCR24_SectionsAreJudgedApart(t *testing.T) {
 -- +goose Down
 DELETE FROM kaname.role_verb WHERE object_type = 'probe.widgets';
 `
-	requireFinding(t, auditSynthetic(t, base, split), "Down", "role_verb",
+	requireRoleSubtableFinding(t, auditSynthetic(t, base, split), "Down", "role_verb",
 		"запись в Down при вызове только в Up — суждение по файлу дало бы молчание")
 
 	twin := split + injEmitCall
-	requireSilent(t, auditSynthetic(t, base, twin), "вызов в том же разделе, что запись")
+	requireRoleSubtableSilent(t, auditSynthetic(t, base, twin), "вызов в том же разделе, что запись")
 }
 
 // TestRoleSubtableGate_IAMCCR24_EveryWriteFormIsFound — формы записи, которые
@@ -152,9 +152,9 @@ func TestRoleSubtableGate_IAMCCR24_EveryWriteFormIsFound(t *testing.T) {
 	}
 	for _, f := range forms {
 		body := "-- +goose Up\n" + f.stmt + "\n-- +goose Down\nSELECT 1;\n"
-		requireFinding(t, auditSynthetic(t, base, body), "Up", f.table, "форма «"+f.name+"»")
+		requireRoleSubtableFinding(t, auditSynthetic(t, base, body), "Up", f.table, "форма «"+f.name+"»")
 		twin := "-- +goose Up\n" + f.stmt + "\n" + injEmitCall + "-- +goose Down\nSELECT 1;\n"
-		requireSilent(t, auditSynthetic(t, base, twin), "форма «"+f.name+"» с вызовом")
+		requireRoleSubtableSilent(t, auditSynthetic(t, base, twin), "форма «"+f.name+"» с вызовом")
 	}
 	t.Logf("перепись: форм записи доказано инъекцией %d, у каждой — близнец", len(forms))
 }
@@ -167,13 +167,13 @@ func TestRoleSubtableGate_IAMCCR24_DynamicSQLIsNotJudged(t *testing.T) {
 	base := treeMigrationCorpus(t)
 	dyn := "-- +goose Up\nDO $$ BEGIN EXECUTE format('DELETE FROM kaname.%I WHERE true', 'role_verb'); END $$;\n" +
 		injEmitCall + "-- +goose Down\nSELECT 1;\n"
-	requireFinding(t, auditSynthetic(t, base, dyn), "Up", "",
+	requireRoleSubtableFinding(t, auditSynthetic(t, base, dyn), "Up", "",
 		"динамический SQL с именем подтаблицы роли")
 
 	// Близнец: тот же динамический SQL над ЧУЖОЙ таблицей.
 	twin := "-- +goose Up\nDO $$ BEGIN EXECUTE format('DELETE FROM kaname.%I WHERE true', 'audit_outbox'); END $$;\n" +
 		"-- +goose Down\nSELECT 1;\n"
-	requireSilent(t, auditSynthetic(t, base, twin), "динамический SQL над чужой таблицей")
+	requireRoleSubtableSilent(t, auditSynthetic(t, base, twin), "динамический SQL над чужой таблицей")
 }
 
 // TestRoleSubtableGate_IAMCCR24_CommentIsNotAWrite — упоминание таблицы в
@@ -182,7 +182,7 @@ func TestRoleSubtableGate_IAMCCR24_CommentIsNotAWrite(t *testing.T) {
 	base := treeMigrationCorpus(t)
 	body := "-- +goose Up\n-- DELETE FROM kaname.role_verb когда-то стоял здесь\n" +
 		"/* UPDATE kaname.role_rule_selectors SET x = 1; */\nSELECT 1;\n-- +goose Down\nSELECT 1;\n"
-	requireSilent(t, auditSynthetic(t, base, body), "запись в комментарии")
+	requireRoleSubtableSilent(t, auditSynthetic(t, base, body), "запись в комментарии")
 }
 
 // TestRoleSubtableGate_IAMCCR24_NoTransactionWriterIsFound — раздел без
@@ -192,11 +192,11 @@ func TestRoleSubtableGate_IAMCCR24_NoTransactionWriterIsFound(t *testing.T) {
 	base := treeMigrationCorpus(t)
 	body := "-- +goose NO TRANSACTION\n-- +goose Up\nDELETE FROM kaname.role_verb WHERE verb = 'get';\n" +
 		injEmitCall + "-- +goose Down\nSELECT 1;\n"
-	requireFinding(t, auditSynthetic(t, base, body), "Up", "role_verb",
+	requireRoleSubtableFinding(t, auditSynthetic(t, base, body), "Up", "role_verb",
 		"раздел без транзакции пишет подтаблицу роли")
 
 	twin := strings.Replace(body, "-- +goose NO TRANSACTION\n", "", 1)
-	requireSilent(t, auditSynthetic(t, base, twin), "тот же раздел в транзакции")
+	requireRoleSubtableSilent(t, auditSynthetic(t, base, twin), "тот же раздел в транзакции")
 }
 
 // TestRoleSubtableGate_EmptyChainIsARefusal — цепочка без файлов — отказ, а не

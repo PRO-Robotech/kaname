@@ -24,11 +24,17 @@ import (
 )
 
 // roleSubtableWritersOutsidePopulation — писатели подтаблиц роли, стоящие НИЖЕ
-// границы популяции (§3.2а, «сегодня два»). Перечень закрыт: прибавиться ему
-// неоткуда, убыть тоже.
+// границы популяции. Перечень закрыт: прибавиться ему неоткуда (новое попадает
+// в популяцию), убыть тоже (применённые миграции не правятся).
+//
+// Приёмка §3.2а называет ДВА файла на ревизии своего измерения; третий —
+// `20261018030000` (правка `role_rule_selectors.verbs_by_type`) — лёг в цепочку
+// после той ревизии и стоит ниже границы: события о нём не требуется, а
+// перепись обязана его назвать.
 var roleSubtableWritersOutsidePopulation = []string{
 	check.MigrationsDirRel + "/0001_initial.sql",
 	check.MigrationsDirRel + "/20260914120000_role_read_relation_leaves_the_catalog.sql",
+	check.MigrationsDirRel + "/20261018030000_rule_selector_carries_its_verbs.sql",
 }
 
 func TestRoleSubtableGate_EveryMigrationWritingRoleSubtablesEmitsTheEvent(t *testing.T) {
