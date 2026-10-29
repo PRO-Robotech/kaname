@@ -54,7 +54,7 @@ func seedABForEmitted(t *testing.T, ctx context.Context, repo *kanamepg.Reposito
 	return insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(uid),
-		RoleID:       "rol000000000sysviewer",
+		RoleID:       domain.SystemViewerRoleID,
 		ResourceType: "account",
 		ResourceID:   string(accID),
 	})

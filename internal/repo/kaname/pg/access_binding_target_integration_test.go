@@ -44,7 +44,7 @@ func insertBindingWithTarget(t *testing.T, ctx context.Context, repo *kanamepg.R
 	require.NoError(t, err)
 	out, ierr := bindingset.Insert(ctx, w.AccessBindingsW(), domain.AccessBinding{
 		ID: id, SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
-		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: accID,
+		RoleID: domain.SystemViewerRoleID, ResourceType: "account", ResourceID: accID,
 		Target: tgt,
 	})
 	if ierr != nil {

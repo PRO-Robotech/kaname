@@ -279,9 +279,61 @@ MINTED_IDENTIFIERS = (
 MINTED_SURFACE = "служба (собственный REST-фронт)"
 
 
+# ФАКТЫ ДЕРЕВА, а не стенда: прежние идентификаторы двух системных ролей
+# (приёмка system-roles-carry-canonical-ids.md, kaname#543, SRCI-04). Литерала в
+# дереве вне миграций быть не должно (DoD п.6 приёмки), поэтому кейс читает их
+# переменной, а посев берёт РАЗБОРОМ вставки ролей `0001_initial.sql` по имени.
+# Имя — нынешнее (`domain.System*RoleName`); к строке вставки свода его ведёт
+# применённая миграция перевода имён тройкой «id, прежнее имя, объявленное имя»,
+# засчитанной лишь тогда, когда свод посеял этот id под этим прежним именем.
+# Прежнее написание имени здесь не выписывается: его остаток судит перепись
+# приёмки seed-identity-names-its-own-service.md. Применённые миграции не
+# правятся (ban #5), и разбор устойчив by construction.
+MINTED_TREE_FACTS = (
+    "systemAdminRolePrevId",
+    "systemViewerRolePrevId",
+)
+_SYSTEM_ROLE_NAMES = {
+    "systemAdminRolePrevId": "system.admin",
+    "systemViewerRolePrevId": "system.viewer",
+}
+_ROLE_INSERT = re.compile(
+    r"^INSERT INTO kaname\.roles \(id, [^)]*\) VALUES \('([^']*)', (?:NULL|'[^']*'), '([^']*)'")
+_ROLE_RENAME = re.compile(r"\('(rol[0-9a-z]*)',\s*'([^']*)',\s*'([^']*)'\)")
+
+
+def system_role_prev_ids(migrations: dict) -> dict:
+    """Прежние id системных ролей разбором текста миграций {имя файла: текст}.
+
+    ЧИСТАЯ — её судит самопроверка.
+    """
+    seeded = {}
+    for line in migrations.get("0001_initial.sql", "").splitlines():
+        m = _ROLE_INSERT.match(line)
+        if m:
+            seeded[m.group(1)] = m.group(2)
+    found = {}
+    for name in sorted(migrations):
+        for rid, previous, declared in _ROLE_RENAME.findall(migrations[name].split("-- +goose Down", 1)[0]):
+            if seeded.get(rid) == previous:
+                found.setdefault(declared, []).append(rid)
+    out = {}
+    for key, name in _SYSTEM_ROLE_NAMES.items():
+        ids = found.get(name, [])
+        if len(ids) != 1:
+            raise Unmet(f"вставка свода роли {name} по переводу имени разобрана {len(ids)} раз(а) — {key} не добыт")
+        out[key] = ids[0]
+    return out
+
+
+def tree_migrations() -> dict:
+    return {p.name: p.read_text(encoding="utf-8")
+            for p in sorted((ROOT / "internal" / "migrations").glob("*.sql"))}
+
+
 def minted_keys() -> tuple[str, ...]:
     return (MINTED_ADDRESSES + MINTED_CREDENTIALS + MINTED_DEFECTIVE
-            + MINTED_IDENTIFIERS)
+            + MINTED_IDENTIFIERS + MINTED_TREE_FACTS)
 
 
 # ─────────────────────────── исходы и учёт ───────────────────────────────────
@@ -1501,6 +1553,7 @@ def run(args: argparse.Namespace) -> int:
         "svaPureNoGrantId": sva_pure,
         "runId": run_id,
         **creds,
+        **system_role_prev_ids(tree_migrations()),
     }
     # ОБЪЯВЛЕННЫЕ ПАРЫ ПРОВЕРЯЮТСЯ ЗДЕСЬ — В ЕДИНСТВЕННОМ МЕСТЕ, ГДЕ ФИКСТУРЫ
     # СУЩЕСТВУЮТ. `principal_pairings` объявляет данными, чей идентификатор
@@ -1568,6 +1621,32 @@ def self_test() -> int:
            "env_patch промолчал — переменная уехала бы в окружение пустой")
     except KeyError:
         _c("ключ, объявленный и НЕ добытый, роняет запись", True)
+
+    # Ось 1а: прежние id системных ролей — разбором свода по имени роли, к которому
+    # ведёт тройка перевода имён; тройка о строке, которой свод под этим именем не
+    # сеял, не засчитывается; без вставки — «условие не создано», а не пустая
+    # переменная. Имена синтетики не совпадают с написаниями, которые судит
+    # перепись приёмки seed-identity-names-its-own-service.md.
+    cols = "(id, account_id, name, description)"
+    base = (f"INSERT INTO kaname.roles {cols} VALUES ('rolsynthadmin', NULL, 'brand-x.admin', 'x');\n"
+            f"INSERT INTO kaname.roles {cols} VALUES ('rolsynthviewer', NULL, 'brand-x.viewer', 'x');\n"
+            f"INSERT INTO kaname.roles {cols} VALUES ('rolsynthother', NULL, 'other', 'x');\n")
+    # Нижняя половина повторяет тройку (так пишет и настоящая миграция перевода):
+    # судится только верхняя, иначе один перевод читался бы дважды.
+    rename = ("-- +goose Up\n"
+              "VALUES ('rolsynthadmin', 'brand-x.admin', 'system.admin'),\n"
+              "       ('rolsynthviewer', 'brand-x.viewer', 'system.viewer'),\n"
+              "       ('rolsynthother', 'not-its-name', 'system.admin')\n"
+              "-- +goose Down\n"
+              "VALUES ('rolsynthadmin', 'brand-x.admin', 'system.admin')\n")
+    got = system_role_prev_ids({"0001_initial.sql": base, "2026_rename.sql": rename})
+    _c("прежние id системных ролей разобраны по имени через перевод",
+       got == {"systemAdminRolePrevId": "rolsynthadmin", "systemViewerRolePrevId": "rolsynthviewer"}, str(got))
+    try:
+        system_role_prev_ids({"0001_initial.sql": base.split("\n", 1)[1], "2026_rename.sql": rename})
+        _c("свод без вставки admin роняет посев", False, "разбор промолчал")
+    except Unmet:
+        _c("свод без вставки admin роняет посев", True)
 
     # Ось 1б: ПОСЕВ ОБЪЯВЛЯЕТ ПОВЕРХНОСТЬ, ДЛЯ КОТОРОЙ КУЁТ.
     #

@@ -8,6 +8,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/corelib/ids"
+
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
@@ -26,36 +29,42 @@ import (
 //     нечем, и молчание тут — не слепота, а граница предмета.
 
 const (
-	// synthGoodSeed — законный посев: слитная форма 20 символов.
+	// synthGoodSeed — законный посев: слитная форма 20 символов, тело в алфавите
+	// фундамента. Прежний литерал здесь (рукописный id системной роли admin) был
+	// годен лишь пути запроса: судья фундамента отвергает его букву тела, и
+	// «законным» после второй оси судьи (kaname#543) он быть перестал.
 	synthGoodSeed = "INSERT INTO kaname.roles (id, name, permissions) " +
-		"VALUES ('rol000000000sysadmin', 'kacho-system.admin', '[]');\n"
+		"VALUES ('rol0123456789abcdefg', 'kacho-system.admin', '[]');\n"
 	// synthUnderscoreSeed — ЗАКОННЫЙ близнец: форма через подчёркивание, 21 символ.
 	synthUnderscoreSeed = "INSERT INTO kaname.cluster_admin_grants (id, cluster_id) " +
 		"VALUES ('cag_5f4510f927a011885', 'cluster_root');\n"
 	// synthForeignFamilySeed — ЗАКОННЫЙ близнец: семейство таблицей не названо.
 	synthForeignFamilySeed = "INSERT INTO kaname.clusters (id, name) " +
 		"VALUES ('cluster_root', 'root');\n"
-	// synthBadSeedID — ДЕФЕКТ: слитная форма длиной 21, НИ ОДНОЙ миграцией не
-	// посеянная и потому перечнем `domain.SeededResourceIDs()` не названная.
+	// synthBadSeedID — ДЕФЕКТ: слитная форма длиной 21, тело в алфавите — дефект
+	// ровно одной оси (длины).
 	//
-	// Здесь стоял `rol000000000sysviewer` — и он перестал быть дефектом, когда
-	// исход kacho#1808 был выбран: посеянный литерал теперь ПРИНИМАЕТСЯ проверкой пути
-	// запроса. Инъекция на нём стала бы вакуумной, доказывая способность падать
-	// тем, что падать больше не обязано. Отсюда правило: инъектируемый литерал
-	// обязан быть ВНЕ перечня, и это утверждается ниже, а не подразумевается.
-	synthBadSeedID = "rol000000000sysvi3w3r"
+	// Инъектируемый литерал обязан быть отвергнут НАСТОЯЩЕЙ проверкой пути запроса:
+	// литерал, который она принимает, сделал бы инъекцию вакуумной. Это
+	// утверждается ниже, а не подразумевается.
+	synthBadSeedID = "rol0123456789abcdefgh"
 	// synthBadSeed — тот же дефект в форме посева.
 	synthBadSeed = "INSERT INTO kaname.roles (id, name, permissions) " +
 		"VALUES ('" + synthBadSeedID + "', 'kacho-system.viewer', '[]');\n"
 )
 
-// TestSeededIDInjectionInjectsSomethingStillUnlawful — предпосылка инъекций ниже.
-// Литерал, названный закрытым перечнем посеянного, проверкой ПРИНИМАЕТСЯ; подай
-// его инъекция — она зеленела бы и ничего не доказывала.
+// TestSeededIDInjectionInjectsSomethingStillUnlawful — предпосылка инъекций ниже:
+// инъектируемый литерал отвергается проверкой пути запроса, а законный —
+// принимается и ею, и судьёй фундамента. Иначе инъекция зеленела бы и ничего
+// не доказывала.
 func TestSeededIDInjectionInjectsSomethingStillUnlawful(t *testing.T) {
-	require.False(t, domain.IsSeededResourceID(synthBadSeedID),
-		"инъектируемый литерал назван перечнем посеянного — инъекция стала вакуумной")
+	require.Error(t, shared.ValidateResourceID(synthBadSeedID, domain.PrefixRole, "role"),
+		"инъектируемый литерал принят проверкой пути запроса — инъекция стала вакуумной")
 	require.Len(t, synthBadSeedID, 21, "дефект оси длины обязан остаться дефектом длины")
+	const good = "rol0123456789abcdefg"
+	require.NoError(t, shared.ValidateResourceID(good, domain.PrefixRole, "role"), "законный посев отвергнут путём запроса")
+	require.True(t, ids.HasKnownPrefix(good), "законный посев отвергнут судьёй фундамента")
+	require.Contains(t, synthGoodSeed, good, "законный близнец разошёлся с посевом положительного контроля")
 }
 
 func synthMigrationCorpus() map[string]string {

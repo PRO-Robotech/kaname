@@ -84,11 +84,11 @@ func TestABEmittedTuples_CrossBindingClaim_OnlyActiveBindingsKeepAFactAlive(t *t
 	// bindings whose emitted sets OVERLAP.
 	abA := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
-		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
+		RoleID: domain.SystemViewerRoleID, ResourceType: "account", ResourceID: string(acc.ID),
 	})
 	abB := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
-		RoleID: "rol000000000sysadmin", ResourceType: "account", ResourceID: string(acc.ID),
+		RoleID: domain.SystemAdminRoleID, ResourceType: "account", ResourceID: string(acc.ID),
 	})
 
 	shared := repoab.RelationTuple{User: "user:" + string(uid), Relation: "editor", Object: "account:" + string(acc.ID)}
