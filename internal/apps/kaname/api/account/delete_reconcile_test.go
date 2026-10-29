@@ -461,6 +461,10 @@ func (_ delABReader) PublicReadContainer(context.Context, string) (domain.Public
 	return domain.PublicReadContainer{}, nil
 }
 
+func (_ delABReader) ClassGrantsKeyedModules(context.Context) (domain.ClassGrantsKeyedModules, error) {
+	return domain.ClassGrantsKeyedModules{}, nil
+}
+
 // GrantDelegations — делегирований этот дублёр не несёт (kaname#986): пробы файла
 // делегированного пути права выдавать не касаются.
 func (delABReader) GrantDelegations() gdrepo.ReaderIface { return nil }

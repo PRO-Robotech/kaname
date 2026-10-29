@@ -73,6 +73,10 @@ func fwdCfg(forwarders ...string) config.Config {
 			// ни один предъявитель, и проба судила бы отказ домена вместо своего
 			// предмета — круга отправителей.
 			TrustDomainName: "kacho.cloud",
+			// Форма имени службы — вторая половина того же идентификатора
+			// (kaname#308): по необъявленной форме ни один отправитель не узнаётся
+			// модулем.
+			ServiceNameFormRaw: probeServiceNameFormRaw,
 		},
 	}
 }

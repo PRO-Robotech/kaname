@@ -14,6 +14,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // Config — root configuration struct for kaname.
@@ -445,6 +446,30 @@ type AuthNConfig struct {
 	// ENV `KANAME_AUTHN__TRUST_DOMAIN`, ключ YAML `authn.trust-domain`.
 	TrustDomainName string `mapstructure:"trust-domain"`
 
+	// ServiceNameFormRaw — ФОРМА ИМЕНИ СЛУЖБЫ в учётке SPIFFE-идентификатора
+	// модуля (kaname#308): как установка складывает имя учётки из короткого
+	// имени службы, с заполнителем `{service}` на месте имени
+	// (`acme-{service}`, `acme-{service}-sa`); приставка перед заполнителем
+	// обязательна — без неё модулем стала бы всякая учётка с именем службы.
+	//
+	// Домен выше отвечает, чьи предъявители наши; форма — как из учётки
+	// модуля читается имя его службы. Ею перечень личностей модулей ниже
+	// (ModuleIdentities) читает учётку каждой своей записи, и по прочитанному
+	// имени службы узнаются край на полосе входа, модули на обоих слушателях
+	// и домен пишущего модуля у посредника модели. Пока форма стояла литералом в
+	// страже прав, это была приставка имени другого продукта: установка,
+	// называвшая учётки иначе, поднималась зелёной, а полоса входа отказывала
+	// каждому запросу, не называя ни ручки, ни причины.
+	//
+	// Умолчания нет по той же причине, что у домена: непустое умолчание сделало
+	// бы контроль на вид включённым и увело бы установку, забывшую назвать
+	// форму, в чужую. Пустая и незаконная запись — отказ старта (Validate) на
+	// ЛЮБОМ старте. Каждая запись круга отправителей обязана разбираться этой
+	// формой (страж корня `requireForwardersRecognised`), иначе отказ старта называет запись.
+	//
+	// ENV `KANAME_AUTHN__SERVICE_NAME_FORM`, ключ YAML `authn.service-name-form`.
+	ServiceNameFormRaw string `mapstructure:"service-name-form"`
+
 	// ModuleIdentities — ЛИЧНОСТИ МОДУЛЕЙ установки (kaname#984): записи
 	// `<пространство>/<учётка>=<профиль>`.
 	//
@@ -503,7 +528,7 @@ func (a AuthNConfig) LoadModuleRoster() (moduleidentity.Roster, error) {
 	if err != nil {
 		return moduleidentity.Roster{}, err
 	}
-	return moduleidentity.ParseWithIssuers(a.ModuleIdentities, issuers)
+	return moduleidentity.ParseWithIssuers(a.ServiceNameForm(), a.ModuleIdentities, issuers)
 }
 
 // clientIssuer — запись доверенного центра: имя и путь к его PEM.
@@ -567,6 +592,22 @@ func loadClientIssuers(entries []clientIssuer) (moduleidentity.IssuerSet, error)
 	}
 	return out, nil
 }
+
+// ServiceNameForm — форма имени службы, которая РЕАЛЬНО уезжает в перечень
+// личностей модулей (`LoadModuleRoster`), к его стражу старта и к стражу круга
+// отправителей.
+//
+// Единственный источник этой величины на процесс: проводка, стража старта и
+// сверка круга читают ОДИН объект; учётку записи перечня читает ОДНО чтение
+// (`servicesan.Form.Service`), а идентификатор — ОДИН разбор
+// (`moduleidentity.ParseSAN`). Приведение написанного оператором живёт в
+// конструкторе типа и здесь не повторяется.
+func (a AuthNConfig) ServiceNameForm() servicesan.Form {
+	return servicesan.NewForm(a.ServiceNameFormRaw)
+}
+
+// ServiceNameFormKnob — имя ручки формы для текстов отказа: ключ и переменная.
+const ServiceNameFormKnob = "authn.service-name-form (env KANAME_AUTHN__SERVICE_NAME_FORM)"
 
 // TrustDomain — домен доверия, который РЕАЛЬНО уезжает в пару звеньев извлечения
 // личности на обоих слушателях.

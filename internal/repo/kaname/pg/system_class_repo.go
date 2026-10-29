@@ -108,6 +108,49 @@ SELECT c.public_read_to_children,
  WHERE c.dotted = $1 AND c.live
  GROUP BY c.public_read_to_children`
 
+// classGrantsKeyedModulesQ — живые модули с ключом S7 и их живые типы (kaname#950).
+//
+// LEFT JOIN намеренно: модуль с ключом без единого живого типа — законная строка
+// ответа, и его тип цели, которого каталог не знает, ворота обязаны отвергнуть,
+// а не пропустить за неимением строки. Порядок назначает домен
+// (`ClassGrantsKeyedModules.Sorted`), а не сравнение строк СУБД: порядок имён —
+// часть текста отказа.
+const classGrantsKeyedModulesQ = `
+SELECT m.module, r.resource, r.public_read_to_children
+  FROM kaname.catalog_module m
+  LEFT JOIN kaname.catalog_resource r
+         ON r.module = m.module AND r.live
+ WHERE m.live AND m.class_grants_only_on_containers`
+
+// ClassGrantsKeyedModules — см. access_binding.ReaderIface.
+func (r *abReader) ClassGrantsKeyedModules(ctx context.Context) (domain.ClassGrantsKeyedModules, error) {
+	rows, err := r.tx.Query(ctx, classGrantsKeyedModulesQ)
+	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	defer rows.Close()
+	out := domain.ClassGrantsKeyedModules{}
+	for rows.Next() {
+		var (
+			module    string
+			resource  *string
+			container *bool
+		)
+		if err := rows.Scan(&module, &resource, &container); err != nil {
+			return nil, mapErr(err, "", "")
+		}
+		types := out[module]
+		if resource != nil {
+			types = append(types, domain.ClassGrantsModuleType{Resource: *resource, Container: container != nil && *container})
+		}
+		out[module] = types
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	return out.Sorted(), nil
+}
+
 // PublicReadContainer — см. access_binding.ReaderIface.
 func (r *abReader) PublicReadContainer(ctx context.Context, dottedType string) (domain.PublicReadContainer, error) {
 	// Тип, о котором ответ, едет в ответе (kaname#874): по нему ворота находят

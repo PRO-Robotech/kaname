@@ -19,9 +19,9 @@
 // This is a COARSE "is this a legitimate internal reader" gate (defense-in-depth
 // against a compromised module holding a valid cert but not authorized to read
 // IAM) — NOT a per-resource viewer-check. Per-user authz is the api-gateway's
-// job, run BEFORE it forwards to :9091. The floor never ReBACs the forwarded
-// end-user principal (x-kacho-principal-*) — the subject of the Check is the
-// caller MODULE-SA, not the end user.
+// job, run BEFORE it forwards to :9091. Переданного принципала конечного
+// пользователя (`principalwire.MetaPrincipalPrefix`) пол моделью прав не судит
+// никогда: субъект проверки — учётка вызывающего МОДУЛЯ, а не пользователь.
 //
 // Default-OFF / production-mode-only: in dev/newman (no mTLS, FGA-on-internal
 // disabled) the floor is a NO-OP pass-through, byte-identical to today — the
@@ -207,7 +207,7 @@ func (f *SystemViewerFloor) allow(ctx context.Context, fullMethod string) error 
 		// Malformed / foreign-trust-domain / undeclared SAN → not a module identity.
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
-	sva := ServiceAccountIDForService(module.Service)
+	sva := ServiceAccountIDForAccount(module.Account)
 	if f.checker == nil {
 		// ReBAC backend not wired → fail-closed (never silently allow).
 		return status.Error(codes.PermissionDenied, "permission denied")

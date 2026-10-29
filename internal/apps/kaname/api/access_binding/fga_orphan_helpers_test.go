@@ -377,6 +377,10 @@ func (_ *fakeABRdr) PublicReadContainer(context.Context, string) (domain.PublicR
 	return domain.PublicReadContainer{}, nil
 }
 
+func (_ *fakeABRdr) ClassGrantsKeyedModules(context.Context) (domain.ClassGrantsKeyedModules, error) {
+	return domain.ClassGrantsKeyedModules{}, nil
+}
+
 // GuardSystemClassReads — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *fakeRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) error { return nil }
 

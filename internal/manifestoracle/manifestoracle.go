@@ -85,3 +85,32 @@ func (o fromPlans) TypeRelations(objectType string) []string {
 	names, _ := o.plans.RelationNames(objectType)
 	return names
 }
+
+// canonTypes — разобранный канон в роли родства типов для загрузчика (kaname#951).
+type canonTypes struct{ plans *authzmodel.Plans }
+
+// CanonTypes вносит родство типов КАНОНА ОБРАЗА судье вложенных правил роли
+// манифеста (`manifest.WithTypeCanon`).
+//
+// В отличие от [Canon] законен и на пути СТАРТА: загрузчик спрашивает его только
+// о типах, которых документ НЕ объявил, а тип нового модуля объявлен его же
+// манифестом и канона не касается. Тип, объявленный только каноном, в модели
+// процесса присутствует всегда — композиция кладёт канон дословно
+// (`modelcompose.Compose`), — поэтому ответ канона о нём и есть ответ модели,
+// которая из доставленного соберётся.
+//
+// Канон разбирается ЗДЕСЬ, а не берётся у общего разбора модели процесса, — тот
+// же довод, что у [Canon]: вопрос загрузчика не вправе отмечать модель процесса
+// прочитанной, иначе её установка после разбора доставки стала бы отказом.
+func CanonTypes() (manifest.TypeCanon, error) {
+	p, err := authzmodel.New(authzmodel.DSL)
+	if err != nil {
+		return nil, err
+	}
+	return canonTypes{plans: p}, nil
+}
+
+// ParentTypes — переадресуется владельцу модели без второго разбора.
+func (c canonTypes) ParentTypes(objectType string) ([]string, bool) {
+	return c.plans.ParentTypes(objectType)
+}

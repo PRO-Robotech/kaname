@@ -44,6 +44,7 @@ var noTrustDomain grpcsrv.TrustDomain
 func loadForwarderLane(t *testing.T, principal, forwarder string) (config.Config, error) {
 	t.Helper()
 	t.Setenv(anonServiceEnv, "registry.probe.local")
+	t.Setenv(registryIssuerEnv, probeIssuer)
 	t.Setenv(anonPrincipalEnv, principal)
 	t.Setenv(anonPaceEnv, "20")
 	t.Setenv(trustDomainEnv, probeTrustDomain)
@@ -111,7 +112,7 @@ func TestAnonymousForwarder_ValueOutsideTheDeclaredFormRefusesNamingTheKnob(t *t
 // никого, и пересыльщик не был бы опознан ни разу.
 func TestAnonymousForwarder_WithoutTheTrustDomainRefuses(t *testing.T) {
 	err := config.RegistryTokenConfig{
-		Endpoint: "tcp://0.0.0.0:9096", Service: "registry.probe.local",
+		Endpoint: "tcp://0.0.0.0:9096", Issuer: probeIssuer, Service: "registry.probe.local",
 		AnonymousClientID: "registry-anonymous", AnonymousPerSourcePerSec: 5,
 		AnonymousForwarderSAN: registryForwarderSAN,
 	}.Validate(config.ClientTokenConfig{}, noTrustDomain)

@@ -49,6 +49,8 @@ const (
 	// объявленный в нём доверенный пересыльщик точки (kaname#930).
 	anonLaneTrustDomain  = "kacho.cloud"
 	anonLaneForwarderSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-registry"
+	// anonLaneIssuer — издатель полосы пробы: умолчания у процесса нет (kaname#309).
+	anonLaneIssuer = "https://access.example.test/iam/token"
 )
 
 // anonymousLaneFromSettings собирает докерную полосу из НАСТРОЙКИ службы: env →
@@ -67,6 +69,7 @@ func anonymousLaneFromSettings(t *testing.T, principal, pace string, pool *pgxpo
 func anonymousLaneWithSourceRule(t *testing.T, principal, pace string, pool *pgxpool.Pool, rule *issuingsource.Rule) http.Handler {
 	t.Helper()
 	t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE", anonLaneService)
+	t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__ISSUER", anonLaneIssuer)
 	t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_CLIENT_ID", principal)
 	if pace != "" {
 		t.Setenv("KANAME_API_SERVER__REGISTRY_TOKEN__ANONYMOUS_PER_SOURCE_PER_SEC", pace)

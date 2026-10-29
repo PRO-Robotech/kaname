@@ -11,15 +11,20 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // domain — домен доверия проб.
 var domain = grpcsrv.NewTrustDomain("kaname.test")
 
+// probeForm — форма имени службы проб (kaname#308): учётки записей названы ею.
+var probeForm = servicesan.NewForm("kacho-{service}")
+
 // TestParse_DeclaredPairIsRecognizedWithItsProfile — объявленная пара
 // признаётся, и признание несёт профиль и имя службы, выведенное из учётки.
 func TestParse_DeclaredPairIsRecognizedWithItsProfile(t *testing.T) {
-	r, err := Parse([]string{" kacho/kacho-vpc=module-writer ", "", "edge-ns/kacho-api-gateway=edge"})
+	r, err := Parse(probeForm, []string{" kacho/kacho-vpc=module-writer ", "", "edge-ns/kacho-api-gateway=edge"})
 	require.NoError(t, err)
 	require.Len(t, r.Identities(), 2, "пустая запись записью не становится")
 
@@ -37,7 +42,7 @@ func TestParse_DeclaredPairIsRecognizedWithItsProfile(t *testing.T) {
 // другом пространстве, другая учётка в том же пространстве, чужой домен и
 // идентификатор не той формы — не модуль.
 func TestLookup_OnlyTheDeclaredPairIsAModule(t *testing.T) {
-	r, err := Parse([]string{"kacho/kacho-vpc=module-writer"})
+	r, err := Parse(probeForm, []string{"kacho/kacho-vpc=module-writer"})
 	require.NoError(t, err)
 
 	for name, san := range map[string]string{
@@ -59,7 +64,7 @@ func TestLookup_OnlyTheDeclaredPairIsAModule(t *testing.T) {
 // TestLookup_UndeclaredDomainRecognizesNobody — необъявленный домен не узнаёт
 // никого, и пустой перечень — тоже.
 func TestLookup_UndeclaredDomainRecognizesNobody(t *testing.T) {
-	r, err := Parse([]string{"kacho/kacho-vpc=module-writer"})
+	r, err := Parse(probeForm, []string{"kacho/kacho-vpc=module-writer"})
 	require.NoError(t, err)
 	_, ok := r.Lookup(grpcsrv.TrustDomain{}, "spiffe://kaname.test/ns/kacho/sa/kacho-vpc")
 	require.False(t, ok)
@@ -71,7 +76,7 @@ func TestLookup_UndeclaredDomainRecognizesNobody(t *testing.T) {
 // TestFromContext_OnlyAVerifiedLeafIsRecognized — признание вызывающего
 // gRPC-слушателя требует проверенного листа.
 func TestFromContext_OnlyAVerifiedLeafIsRecognized(t *testing.T) {
-	r, err := Parse([]string{"kacho/kacho-vpc=module-writer"})
+	r, err := Parse(probeForm, []string{"kacho/kacho-vpc=module-writer"})
 	require.NoError(t, err)
 	san := "spiffe://kaname.test/ns/kacho/sa/kacho-vpc"
 
@@ -97,7 +102,7 @@ func TestParse_RefusesEveryMalformedEntryNamingIt(t *testing.T) {
 		"пространство с сегментом": "kacho/x/kacho-vpc=module-writer",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := Parse([]string{"kacho/kacho-api-gateway=edge", entry})
+			_, err := Parse(probeForm, []string{"kacho/kacho-api-gateway=edge", entry})
 			require.Error(t, err)
 			require.Contains(t, err.Error(), entry)
 		})
@@ -106,7 +111,7 @@ func TestParse_RefusesEveryMalformedEntryNamingIt(t *testing.T) {
 
 // TestParse_DuplicatePairIsRefused — одна пара — одна личность.
 func TestParse_DuplicatePairIsRefused(t *testing.T) {
-	_, err := Parse([]string{"kacho/kacho-vpc=module-writer", "kacho/kacho-vpc=data-plane"})
+	_, err := Parse(probeForm, []string{"kacho/kacho-vpc=module-writer", "kacho/kacho-vpc=data-plane"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "declared twice")
 }
@@ -118,7 +123,7 @@ func TestRequire_EmptyRosterRefusesNamingTheKnob(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, strings.HasPrefix(err.Error(), "authn.module-identities is empty"), err.Error())
 
-	r, perr := Parse([]string{"kacho/kacho-vpc=module-writer"})
+	r, perr := Parse(probeForm, []string{"kacho/kacho-vpc=module-writer"})
 	require.NoError(t, perr)
 	require.NoError(t, r.Require(Gate{Knob: "authn.module-identities"}))
 }

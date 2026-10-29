@@ -1,0 +1,115 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/relation-fact-remembers-its-removal.md
+  sha256: f5b979630f087295e8b8038a0ac4dbe43936c9522a920cfe1d9b96a3600b9304
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: fb4a810a7
+  content_commit: 46a5d38b7c7a31e9328b073a07224d9f51180aa3
+  branch: '636'
+  task: PRO-Robotech/kaname#636
+  related_tasks: [PRO-Robotech/kaname#942]
+  lines: 447
+  round: 2
+  predecessor_record: >-
+    docs/specs/reviews/relation-fact-remembers-its-removal/c6bebc991a25398ace0303a35aa12a4ecaa30a2586bbef7dfc90ed35ef88649b.yaml
+    (круг 1, CHANGES_REQUESTED: FORMAT, DoD)
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/relation-fact-remembers-its-removal.md в копии
+    kacho-workspace/tmp/kn-636 @ 46a5d38b7 и `git show 46a5d38b7:<путь> | sha256sum` →
+    f5b97963…3600b9304 (оба совпали)
+  measurement_revisions: >-
+    Замеры дерева — чтение файлов и `git grep` копии kn-636 @ 46a5d38b7.
+    `git diff --stat 4a83063e0 46a5d38b7` → только документ приёмки и запись круга 1:
+    код и миграции с ревизии измерения документа (fb4a810a7) не менялись.
+  premise: >-
+    Посылка «отправка шла до 01:38:51Z» подтверждена исходом: журнал
+    tmp/kn636-runs/20261024T003851Z-3609676-f7ae4d99.log, .rc = 0, «pre-push: зелёное —
+    исполнено 6 из 6 групп, отказов 0», «fb4a810a7..46a5d38b7 HEAD -> 636».
+    `git ls-remote origin refs/heads/636` → 46a5d38b7c7a31e9328b073a07224d9f51180aa3.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-24'
+
+effective_approval:
+  issued: true
+  ban1_lifted: true
+  why: >-
+    Блокирующих 0. Оба блокирующих круга 1 исполнены, регрессий в остальном тексте нет.
+    Санкция — на эту редакцию по отпечатку; действует при опубликованном событии (блок event).
+    Условия DoD §6 п.6–7 (держатели 07/08, инъекции I5/I6) и п.9 (шапка миграции) — условия
+    готовности полосы, а не открытые вопросы контракта.
+
+prior_blocking_resolution:
+  - kind: FORMAT
+    status: resolved
+    measured: >-
+      §0.5 называет гейт `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance`.
+      Хук отправки на 46a5d38b7: группа «пробы» зелёная, отказов 0 (журнал выше).
+      Голые имена проб документа (8) — каждое `git grep -c "func <имя>(" HEAD -- '*.go'` → 1.
+  - kind: DoD
+    status: resolved
+    measured: >-
+      §6 п.6 добавляет I5 (снять `WHERE r.source_version < EXCLUDED.source_version`, :268) и
+      I6 (`v_user` вместо `v_stored` в ключе следа, :265) — координаты сверены `sed -n` по
+      миграции 20261023180000. Чтение свёртки (:195-269): I5 при снятиях t4→t2 понижает след
+      до t2, запись t3 ложится — 07 красна; у 01–06 снятия по возрастанию, у 05 одно — не
+      затронуты. I6 при `user:*` кладёт след на `user:*`, запись `system_class:anonymous` t1
+      его не видит — 08 красна; близнец t3 ложится при любом следе; у 01–07 субъект
+      `user:usr-O`, перевод — тождество. §6 п.7 называет фикстуру `journalGrant`
+      (relation_fact_late_grant_integration_test.go:65) с субъектом-параметром и
+      последовательности 07/08; красное без миграции по тексту утверждения.
+
+blocking: []
+
+important_nonblocking:
+  - "§6 п.6 I6 перечисляет зелёными 01–07; про 09–12 молчит. 09/10 след не трогает (v_owner IS NULL), 11/12 держит путь публикации до журнала (§0.1). Уточнение при постановке инъекции — в DoD-proof #636, не правкой приёмки."
+  - "Конструируемость 07/08 показана названной фикстурой и ограничениями базы (relation_fact_subject_class_reads_only 20261017020000:99-102; у fga_outbox ограничения субъекта нет); посев — с держателями §6 п.7. Ветвь записи субъект `system_class` не отсекает: перечень условий (:184-190) только подбирает условие для `user`, отбора строк нет."
+  - "Событие круга 1 (CHANGES_REQUESTED · c6bebc99…) в трекере не найдено: `gh issue view 636 -R PRO-Robotech/kaname --json comments` — комментариев acceptance-reviewer 0. Курьеру опубликовать оба тем же заходом."
+
+confirmed:
+  - "Дельта ред.1→ред.2 (`git diff 4a83063e0 46a5d38b7`): шапка (редакция 2, строка истории круга 1), §0.2 (:159 FOR EACH STATEMENT; :259 — раздел отката), §0.5 (координата с домом), KN-RFR-07/08 (держатель заказан, конструируемость 08), §5 строки 07/08, §6 п.6–7. Прочее не тронуто."
+  - "§0.2: 20261005040457 — CREATE TRIGGER на :159 (FOR EACH STATEMENT, до `-- +goose Down` на :165) и :259 (FOR EACH ROW, в откате)."
+  - "Производитель у «Тогда»: 13 из 13. Близнец у отрицаний: 6 из 6 (01, 04, 06, 07, 08, 11)."
+  - "Конструируемость: посевом рецензента 0 (прогоны на машине запрещены); названной фикстурой 13 из 13 (01–06 и 07 — journalGrant как есть, 08 — journalGrant с субъектом-параметром, 09–12 существующие пробы, 13 сравнение текстов); не выполнилось 0 по фикстуре, посев 07/08 — за держателями DoD п.7."
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#636
+  status: performed
+  published: true
+  database_id: 6379466575
+  node_id: IC_kwDOUO26pM8AAAABfD7vTw
+  url: https://github.com/PRO-Robotech/kaname/issues/636#issuecomment-6379466575
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6379466575
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/636
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-24T03:45:56Z'
+  body_sha256: 44cecec7424b8cadb87d8ca9f619e187882e98f4fb67fe719c7a906f58174e7b
+  subject_sha256: f5b979630f087295e8b8038a0ac4dbe43936c9522a920cfe1d9b96a3600b9304
+  subject_revision: 46a5d38b7c7a31e9328b073a07224d9f51180aa3
+  verdict: APPROVED
+  note: >-
+    Опубликовал курьер; блок приведён к факту по ответу API комментария; body_sha256 — sha256
+    тела комментария без перевода строки. effective_approval.issued: true — к факту события.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false

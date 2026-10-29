@@ -1,0 +1,228 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md
+  sha256: d44a9bbbdfef42e5f33d0ded13754ff103a4ae33f7ad6d7695be3865b65f9ae7
+  revision: 17
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписано туда при правке. Вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: 46d41317e
+  content_commit: 71cf3d8cf55155399c1ad0094398137a1a614165
+  content_commit_note: >-
+    Коммит `#950 приёмка, ред. 17: ворота S7 судят и цель «вся область»`, ветка 950. На
+    origin голова ветки — 71cf3d8cf (git ls-remote origin refs/heads/950 →
+    71cf3d8cf55155399c1ad0094398137a1a614165, 2026-10-23T23:18Z): отправка автора дошла.
+  branch: "950"
+  task: PRO-Robotech/kaname#950
+  related_tasks: [PRO-Robotech/kaname#951, PRO-Robotech/kaname#893]
+  lines: 2709
+  round: 2
+  round_scope: >-
+    Круг 2 дельты S7 — последний (fa-b8). Предмет по решению диспетчера: исполнение B1 записи
+    6a2769d1… (вариант (а), решение диспетчера 2026-10-24) и отсутствие регрессий. Дифф —
+    git diff 46d41317e 71cf3d8cf по документу (+303/−70): история и шапка, Обзор, «Что НЕ
+    входит» п. 9, Р5 (таблица и абзац о кластере), Р11 преамбула и пп. 2–6, критерии, П7 (R1,
+    роли И и И2, выдача ВО), SC-19 (строка о близнеце), SC-28 (заголовок и утверждение
+    сценария), SC-81, две строки производителей, инвариант 9, DoD S7, раздел «Редакция 17:
+    что закрыто». Плюс следствия дельты вне диффа: исходы SC-01…80 на своих посевах, история
+    решений (Д4). Решения диспетчера по вопросам автора приняты как данность: вложенное правило
+    при цели «вся область» — строгая форма (отказ); выдача классу ролью модуля с именами на
+    кластере с целью-объектами отдельным предметом не открывается.
+  predecessor_record: docs/specs/reviews/anonymous-and-authenticated-are-subject-classes/6a2769d1a23bdb4bfa4a36968b52e94487b36e1630da9edfc4cd279a143ebab4.yaml
+  fingerprint_predicate: >-
+    git show 71cf3d8cf:<док> | sha256sum (клон project/kaname после git fetch) и sha256sum
+    <док> в копии tmp/kn-950 → d44a9bbb…f9ae7, совпало с отпечатком задания.
+    git show 71cf3d8cf^:<док> | sha256sum → 6a2769d1…ebab4: база дельты — редакция 16.
+  measurement_revisions: >-
+    kaname a176c3768 (код ветки 950 не менялся: git diff --stat a176c3768 71cf3d8cf → только
+    документ и запись ревью) — git show / git grep; посев — внешний кластер, kaname@6b4b4c00c
+    (пробная ветка автора поверх 46d41317e, файл seedproof_sc81_integration_test.go, в ветку
+    задачи не идёт); трекер — gh issue view 950 -R PRO-Robotech/kaname → OPEN, 2026-10-23T23:18Z.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-23T23:18:26Z'
+
+delta_check:
+  - item: B1 [NEGATIVE] — путь «кластер + вся область + роль модуля с именами»
+    result: >-
+      Исполнено вариантом (а). Р11 п. 2 (б) судит цель «вся область» по правилам роли —
+      верхнего уровня и вложенным (модуль вложенного — у владельца; rule.go:45 «У вложенного
+      правила Module пуст»), любым селектором; у роли без правил — по скомпилированным правам.
+      Р11 п. 4 переписан перебором по виду цели и уровню области; каждая координата перебора
+      подтверждена чтением @a176c3768: system_class_gates.go:83-100 (:96 — условие кластера),
+      :145 (ворота контейнера выходят при пустом перечне), role_scope.go:97-101 (системная
+      роль назначаема везде), moduleroles/apply.go:453 (IsSystem: true), helpers.go:357-380
+      (HasAnchorRule), structural_gates.go:123 (Gate 3 — только по объектам цели),
+      role/update.go:142-147 («System role is read-only»), manifest/roles.go:158
+      (ErrRoleRuleForeignModule). Путь расширения роли модулем после выдачи назван явно, не
+      молчанием: роль модуля меняет только тот же модуль, что объявил ключ.
+  - item: SC-81 — главная строка, пять строк «И», близнец
+    result: >-
+      Порядок ворот, на который опирается строка «якорь и вложенное правило», есть в дереве:
+      create.go:258 requireGrantAuthority → :265 структурные → :271 validateSystemClassGates →
+      :284 validateGlobalAllSelector. Ворота вложенных правил (system_class_gates.go:69,
+      systemClassNestedRuleGate) стоят раньше и роль registry.reader на П6 пропускают — посев
+      дошёл до правила кластера. Каждая строка «И» отличается от «Когда» одним фактом (роль,
+      субъект, класс, отправитель); близнец — ключ. Тексты отказа ветви (б) — свои, с
+      ролью и типом; правило выбора называемого типа задано (Р11 п. 5).
+  - item: решения диспетчера по вопросам автора
+    result: >-
+      Строгая форма для вложенного правила при «вся область» — в Р11 п. 2 (б) и строке SC-81
+      «И (якорь и вложенное правило)». Выдача ролью с именами на кластере с целью-объектами
+      отдельным предметом не открыта; при ключе её судит ветвь (а).
+  - item: регрессии — исходы SC-01…80
+    result: >-
+      Не изменены. SC-28 строится на П1 ролью vpc.network.view (тип vpc, ключа у vpc нет) —
+      ветвь (б) его не задевает, отказ правила кластера прежний. SC-19, SC-24 — ворота вида
+      цели раньше S7. SC-60/65/73/78/79 — цель-объекты, ветвь (а) прежняя. SC-40 (Р8) — не
+      глагол создания. Сценариев 71: grep -c '^#### SC-' @71cf3d8cf → 71 (SC-01…45, 50…53,
+      60…81), совпало с разделом «Редакция 17».
+  - item: R1 [CONSTRUCTIBILITY] прошлого круга
+    result: >-
+      Закрыто: фраза П7 приведена к require.NotEmptyf (строка 165), положительный контроль по
+      каждому типу и по ролям И, И2 — пункт DoD S7.
+  - item: Р5, SC-19, SC-28, строка производителя SC-20, 28 — к дереву
+    result: >-
+      Утверждения о недостижимости выдачи классу на кластере переписаны: SC-28 утверждает
+      отсутствие положительного близнеца на посеве П1, а не в дереве; путь роли модуля назван
+      и показан посевом. DoD S7 обязывает привести к факту шапку ворот
+      (system_class_gates.go:18-22) и имя пробы
+      TestSystemClass_SC28_ClusterGrantToAClassIsUnreachableByCreate (system_class_s2_integration_test.go:365) тем же изменением.
+  - item: идентификаторы ролей
+    result: >-
+      printf %s <имя> | md5sum | cut -c1-17 → registry.repo_reader_named rol753025eda7953ac9c,
+      registry.reg_reader_named rola8923748827353a58, registry.reader rolb812261cfaa239694 —
+      совпало с документом и с выводом посева.
+  - item: критерии ban #18 (производительность ветви (б))
+    result: >-
+      Пределы подтверждены: domain.MaxRules = 64 (rule.go:55), maxRuleElems = 16 ресурсов на
+      правило (rule.go:51).
+
+constructibility_seed:
+  command: >-
+    KACHO_TASK=950 scripts/heavy-slot.sh --wait 240 integration -- go test -count=1 -v -run
+    '^TestSeedProofSC81' ./internal/apps/kaname/api/access_binding/ (из копии kaname@6b4b4c00c,
+    маршрут external, ns t950-heavy-integration-6fca)
+  result: 'исполнено 2, зелёных 2, код 0; ns снято раннером, census t950 после → 0'
+  observed:
+    - роль rol753025eda7953ac9c — is_system=true owner_module=registry arm_anchor=false reads_only=true
+    - класс authenticated, роль И, allInScope на кластере — Operation error=<nil>; выдач классу ролью И — 1
+    - класс authenticated, роль И2, allInScope — Operation error=<nil>; Check(usr-C, v_get, registry_registry:reg00000000000000001) false → true; registry_repository:reg00000000000000001/app → false
+    - класс authenticated, registry.reader, allInScope — InvalidArgument «GLOBAL scope requires names or labels selector for non-cluster-admin roles»
+    - человек usr-B, роль И, allInScope — Operation error=<nil>
+    - класс authenticated, роль И, цель не задана — InvalidArgument «target is required; use target.allInScope{} to grant all objects under the anchor»
+    - класс anonymous, роль И, allInScope — InvalidArgument, текст SC-24 дословно
+  note: >-
+    Посев независимо повторяет прогон автора (журнал автора hs-integration-20261024T012916, .rc 0)
+    — исходы совпали построчно. «Дано» с ключом (П7 с ролями И) сегодня не строится: ключа нет
+    в схеме (additionalProperties: false); его производитель заказан kaname#950, как у П7
+    редакции 16.
+
+blocking: []
+
+important:
+  - id: N1
+    kind: FORMAT
+    note: >-
+      Р11 п. 2 (б): «модуль правила … равен модулю типа либо `*`». У заведённого правила модуль
+      `*` невозможен — ruleModuleRe `^[a-z][a-z0-9-]*$` (rule.go:62); `*` живой лишь в
+      скомпилированных правах роли без правил, которые судятся тем же сравнением. Не неверно
+      (ворота строже), реализации учесть, что ветвь «модуль `*`» у правил недостижима.
+  - id: N2
+    kind: FORMAT
+    note: >-
+      SC-81 «И (право выдавать — раньше)»: «тем же текстом, что первая строка SC-28» — у первой
+      строки SC-28 дословного текста нет («текст не называет роль»). Проба сверяет текст с
+      захваченным ответом первой строки SC-28 (производитель один — requireGrantAuthority);
+      форма та же, что одобренная у SC-78 «И».
+  - id: N3
+    kind: FORMAT
+    note: >-
+      Строка Д4 в разделе «Редакция 5: что исправлено» (строка 2429) по-прежнему говорит
+      «недостижима через Create». Это запись истории о решении того круга; исправление названо
+      строкой истории редакции 17. Не блокирует.
+  - id: N4
+    kind: CONSTRUCTIBILITY
+    note: >-
+      В посеве исход Check(usr-C, registry X) = true снят после трёх выдач (а, б, г) разом;
+      к И2 он отнесён рассуждением (И покрывает только репозитории, г — другому человеку).
+      Проба S7 строит «И (правило над контейнером)» своим случаем с одной выдачей — DoD это уже
+      требует («каждая строка «И» — своим случаем»).
+
+summary:
+  scenarios_total: 71
+  scenarios_in_delta: 1 новый (SC-81); правлены формулировки SC-19, SC-28 (исходы прежние)
+  blocking: 0
+  blocking_kinds: []
+  producer_named: >-
+    SC-81 — строка «Сценарий → производитель» есть: ветвь (б) заказана kaname#950, порядок и
+    прочие строки — уже производит с координатами; сценариев без производителя 0
+  twins: >-
+    SC-81: главная строка — близнец «П7 без ключа» с ролями И (ключ); строка «якорь» — свой
+    близнец (ключ); «правило над контейнером», «человеку», «anonymous», «право выдавать» —
+    однофактные строки к «Когда». Отрицаний без близнеца 0
+  constructibility: >-
+    Посеяно 6 из 8 нетривиальных «Дано»/строк SC-81 (близнец, И2, якорь без ключа, человек,
+    anonymous, без цели) собственным прогоном во внешнем кластере; «не выполнилось» 2 —
+    «П7 с ролями И» (ключ S7 не в схеме, производитель заказан) и строка «право выдавать»
+    (usr-A — мир П1, производитель SC-28 первая строка, уже исполняется).
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  reason: >-
+    Вердикт APPROVED на отпечаток d44a9bbb…; действующим одобрение становится внешним событием
+    (комментарий в kaname#950), которое публикует курьер. Одобрение 8104e798… (редакция 15) и
+    возврат 6a2769d1… (редакция 16) к этой редакции не переносятся.
+
+event_body: "acceptance-reviewer · APPROVED · sha256 d44a9bbbdfef42e5f33d0ded13754ff103a4ae33f7ad6d7695be3865b65f9ae7 · ред. 17, круг 2 дельты S7 к 6a2769d1…: B1 (NEGATIVE) исполнен ветвью (б) ворот S7 и SC-81, регрессий исходов SC-01…80 нет, блокирующих 0; посев близнеца SC-81 во внешнем кластере 2/2"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#950
+  status: not_performed
+  published: false
+  note: публикует курьер; до публикации блок честно not_performed
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: null
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 2ce50ec0227c70a01acdb7043421e39d0f60948de1a7648e5962c470719ac239.yaml
+    - 113ca48a316f17a707b328ffd018dd60ce93fdc68fd8320534470ba1a8a408de.yaml
+    - fa4ff26f9b35dc6109f74a5e88996a66d3c21611c10ecbdcd8abe2f6bb21757e.yaml
+    - ae9ba373d26c8f4cc2a3c0036d04ff9e1a20b7cc0a8e43c1fca4690560427f51.yaml
+    - 36066b6a19f44f2a0f52b55b6d0d7314c0a9133dca930e13d0a4ed0ddf2f905d.yaml
+    - 14fba0c20aca16483e41774ae1715ab0a6c6a017cb6b07d452fac3c637c5056c.yaml
+    - 447e82645ec05aedf9e9d17cea61e480b7f6603583be9826372a5ff2245058cc.yaml
+    - 24e554b77a876bf8971cdc87d38c8b799de145e4b5fe8a8922dccaead99b2f2d.yaml
+    - 198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9.yaml
+    - c3fda64871e61d1306ad55cd210779cefbd28f7bc76eb96c3f78ddd33b971abc.yaml
+    - bd6325e384a1e03e2acceee8841ac2ee23b589ad5fbdff6a8df0674e79b67fd6.yaml
+    - 80edd84b01feb554f9da285da70a334911e50713226c597b6d9ef50abd07e345.yaml
+    - c89f7957db21357752795d5f8252c30b5bd19bd71eac76955649be7d971bff8f.yaml
+    - 8104e798a38ce1061910c7f8f78c244e37a25eee8fe25f86848c0930c4cc1be6.yaml
+    - 6a2769d1a23bdb4bfa4a36968b52e94487b36e1630da9edfc4cd279a143ebab4.yaml

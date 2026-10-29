@@ -48,14 +48,14 @@ const (
 	// исход — политика читает только сегмент учётной записи, — но списку
 	// отправителей (точное совпадение) такая описка стоила бы молчаливого отказа
 	// рабочему пути, поэтому привычка брать строку из чарта заводится сразу.
-	storageSAN = "spiffe://kacho.cloud/ns/kacho-storage/sa/kacho-storage"
+	storageSAN = "spiffe://kacho.cloud/ns/platform-storage/sa/mod-storage"
 
 	// operatorSAN — сертификат СНЯТОГО сетевого оператора. Чарта, который его
 	// выпускал бы, в дереве нет, каталога модуля нет, репозитория нет — строка
 	// живёт здесь ровно как вход отрицания
 	// (TestPublicCallerPolicy_RetiredOperatorFanoutIsNotCallable): предъявитель
 	// такого сертификата обязан быть отвергнут на всём публичном листенере.
-	operatorSAN = "spiffe://kacho.cloud/ns/kacho-vpc-operator/sa/kacho-vpc-operator"
+	operatorSAN = "spiffe://kacho.cloud/ns/platform-vpc-operator/sa/mod-vpc-operator"
 
 	// projectGetMethod — единственный публичный RPC, который зовут ВСЕ
 	// consumer-модули (vpc/compute/nlb/storage/registry): существование проекта
@@ -86,7 +86,7 @@ const (
 	// НЕ вправе спросить BatchCheck (фильтра страницы у него нет). Пара
 	// «допущен на своё ребро / отвергнут на чужое» на одном и том же
 	// сертификате — то, чем проверяется пообъектность допуска.
-	registrySAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-registry"
+	registrySAN = "spiffe://kacho.cloud/ns/kacho/sa/mod-registry"
 )
 
 func newStorageCtx() context.Context {
@@ -156,10 +156,10 @@ func TestPublicCallerPolicy_PeerReadEdgesKeepWorking(t *testing.T) {
 	p := testPublicPolicy(true)
 
 	for _, san := range []string{
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc",
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-compute",
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-nlb",
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-storage",
+		"spiffe://kacho.cloud/ns/kacho/sa/mod-vpc",
+		"spiffe://kacho.cloud/ns/kacho/sa/mod-compute",
+		"spiffe://kacho.cloud/ns/kacho/sa/mod-nlb",
+		"spiffe://kacho.cloud/ns/kacho/sa/mod-storage",
 		registrySAN,
 	} {
 		ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
@@ -170,9 +170,9 @@ func TestPublicCallerPolicy_PeerReadEdgesKeepWorking(t *testing.T) {
 	// Пер-страничный фильтр видимости: без него List у тенанта отвечает пустотой
 	// (фильтр падает закрыто), хотя ресурсы у него есть.
 	for _, san := range []string{
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc",
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-compute",
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-nlb",
+		"spiffe://kacho.cloud/ns/kacho/sa/mod-vpc",
+		"spiffe://kacho.cloud/ns/kacho/sa/mod-compute",
+		"spiffe://kacho.cloud/ns/kacho/sa/mod-nlb",
 		storageSAN,
 	} {
 		ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)

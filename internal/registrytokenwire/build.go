@@ -25,9 +25,9 @@ type BuildConfig struct {
 	// поля причина не уходила никуда, и разные по природе отказы выглядели
 	// одинаково. nil допустим — тогда журналирования нет.
 	Logger *slog.Logger
-	// Realm — the WWW-Authenticate realm URL advertised to docker clients
-	// (e.g. https://api.kacho.local/iam/token). Must match the data-plane's
-	// advertised Bearer realm.
+	// Realm — адрес области WWW-Authenticate, объявляемый клиентам docker
+	// (например, https://iam.example.invalid/iam/token). Обязан совпадать с
+	// областью Bearer, которую объявляет плоскость данных.
 	Realm string
 	// Service — the default registry service name (→ requested token audience +
 	// WWW-Authenticate service, e.g. registry.kacho.local).

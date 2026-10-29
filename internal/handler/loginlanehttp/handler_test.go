@@ -37,6 +37,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 const (
@@ -44,6 +45,8 @@ const (
 	gatewaySAN  = "spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"
 	vpcSAN      = "spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc"
 	strangerSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-stranger"
+	// laneServiceNameForm — форма учёток проб (kaname#308): край узнаётся по ней.
+	laneServiceNameForm = "kacho-{service}"
 )
 
 var base = time.Date(2026, 9, 16, 12, 0, 0, 123456000, time.UTC)
@@ -288,12 +291,18 @@ func newLane(t *testing.T, stub *stubLane, cookieDomain string) *lane {
 // вариантом использования (интеграционная проба входа со вторым фактором).
 func newLaneOver(t *testing.T, verbs loginlanehttp.Lane, cookieDomain string) *lane {
 	t.Helper()
+	return newLaneOfForm(t, verbs, cookieDomain, laneServiceNameForm)
+}
+
+// newLaneOfForm — тот же слушатель с объявленной формой имени службы form.
+func newLaneOfForm(t *testing.T, verbs loginlanehttp.Lane, cookieDomain, form string) *lane {
+	t.Helper()
 	ca := newCA(t)
 	h, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    24 * time.Hour,
 		CookieDomain:  cookieDomain,
 		TrustDomain:   grpcsrv.NewTrustDomain(trustDomain),
-		Modules:       laneRoster(t),
+		Modules:       laneRosterOfForm(t, form),
 		RefusalDomain: "iam.kaname.cloud",
 		Logger:        slog.New(slog.DiscardHandler),
 	}, verbs)
@@ -663,6 +672,40 @@ func TestLane_F3_29_51_OnlyTheGatewayIsAdmitted(t *testing.T) {
 	})
 }
 
+// TestLane_EdgeIsRecognisedByTheDeclaredForm — край узнаётся ОБЪЯВЛЕННОЙ формой
+// имени службы, а не приставкой, вписанной в код (kaname#308).
+//
+// Инъекция предмета: установка объявила форму, которой учётка края не имеет, —
+// тот же сертификат края получает 403, глагол не исполнен. Это ровно та
+// поломка, что была: взаимный TLS сходится, а ни один человек не входит.
+// Близнец — объявлена форма, которой учётка края названа на самом деле, —
+// исполнение; отличаются входы ровно объявлением.
+func TestLane_EdgeIsRecognisedByTheDeclaredForm(t *testing.T) {
+	foreign := newLaneOfForm(t, &stubLane{}, "", "other-{service}")
+	r := foreign.do(t, foreign.client(t, gatewaySAN), http.MethodGet, "/iam/v1/auth/csrf?form=login", nil, nil)
+	require.Equal(t, http.StatusForbidden, r.status, "край, названный не объявленной формой, допущен")
+	require.JSONEq(t, `{"code":7,"message":"permission denied","details":[]}`, r.body)
+
+	declared := newLaneOfForm(t, &stubLane{}, "", laneServiceNameForm)
+	r = declared.do(t, declared.client(t, gatewaySAN), http.MethodGet, "/iam/v1/auth/csrf?form=login", nil, nil)
+	require.Equal(t, http.StatusOK, r.status, "край объявленной формы не допущен — близнец отрицания")
+}
+
+// laneRosterOfForm — перечень личностей проб под объявленной формой имени
+// службы form (kaname#308): край и модуль vpc названы учётками этой формы.
+// Форма, которой учётка края сертификата проб не имеет, признаёт перечнем
+// другую учётку — и сертификат края проб краем не узнаётся.
+func laneRosterOfForm(t *testing.T, raw string) moduleidentity.Roster {
+	t.Helper()
+	form := servicesan.NewForm(raw)
+	r, err := moduleidentity.Parse(form, []string{
+		"kacho/" + form.Account("api-gateway") + "=edge",
+		"kacho/" + form.Account("vpc") + "=module-writer",
+	})
+	require.NoError(t, err)
+	return r
+}
+
 // TestLane_F3_23_CSRFIsIssuedWithoutASession — признак формы выдаётся и без
 // сессии (Р8: шаг смены обязан быть конструируем).
 func TestLane_F3_23_CSRFIsIssuedWithoutASession(t *testing.T) {
@@ -686,9 +729,7 @@ func TestLane_UnknownPathAndMethod(t *testing.T) {
 // объявлены парами своих SAN; краем слушатель признаёт только объявленную пару.
 func laneRoster(t *testing.T) moduleidentity.Roster {
 	t.Helper()
-	r, err := moduleidentity.Parse([]string{"kacho/kacho-api-gateway=edge", "kacho/kacho-vpc=module-writer"})
-	require.NoError(t, err)
-	return r
+	return laneRosterOfForm(t, laneServiceNameForm)
 }
 
 // TestLane_UndeclaredModuleRosterRefusesToBuild — слушатель без перечня

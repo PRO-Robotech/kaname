@@ -36,7 +36,7 @@ import (
 // laneWithoutSigner — вход сборки, исправный во всём, кроме подписанта.
 func laneWithoutSigner() registrytokenwire.BuildConfig {
 	return registrytokenwire.BuildConfig{
-		Realm:                  "https://api.kacho.local/iam/token",
+		Realm:                  "https://api.example.test/iam/token",
 		Service:                "registry.probe.local",
 		BasicCredentialTimeout: time.Second,
 		TokenTTL:               5 * time.Minute,

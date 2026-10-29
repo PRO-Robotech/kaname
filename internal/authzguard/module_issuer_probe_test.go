@@ -35,7 +35,7 @@ type issuerWorld struct {
 func newIssuerWorld(t *testing.T) issuerWorld {
 	t.Helper()
 	w := issuerWorld{edge: moduleroster.NewCA(t, "edge-ca"), internal: moduleroster.NewCA(t, "internal-ca")}
-	r, err := moduleidentity.ParseWithIssuers([]string{
+	r, err := moduleidentity.ParseWithIssuers(moduleroster.NameForm(), []string{
 		"kacho/kacho-api-gateway=edge@edge",
 		"kacho/kacho-vpc=module-writer@internal",
 	}, moduleidentity.IssuerSet{

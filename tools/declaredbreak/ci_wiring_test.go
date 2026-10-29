@@ -24,10 +24,11 @@ import (
 const workflowPath = "../../.github/workflows/ci.yml"
 
 type wfStep struct {
-	Name string `yaml:"name"`
-	Run  string `yaml:"run"`
-	If   string `yaml:"if"`
-	Uses string `yaml:"uses"`
+	Name string            `yaml:"name"`
+	Run  string            `yaml:"run"`
+	If   string            `yaml:"if"`
+	Uses string            `yaml:"uses"`
+	Env  map[string]string `yaml:"env"`
 }
 
 type wfJob struct {
@@ -132,6 +133,11 @@ func TestGateRunsWhereItsSubjectExpires(t *testing.T) {
 // Без разбора сетевой отказ (`buf` не достал базу сравнения) даёт пустой вывод, и
 // адъюдикатор честно печатает «находок 0» — то есть третья категория предъявлена
 // как вердикт «разрывов нет».
+//
+// Эта проба читает ТЕКСТ и держит лишь то, что разбор кода в сценарии записан.
+// Исполняется ли он, держит поведением пункт «buf против базы отказал — третий
+// исход 2» пробы TestStepJudgesTheRequestAgainstItsBase: мутант
+// «`*) return 2` → `*) return 0`» здесь зелен, там красен.
 func TestGateReadsBufReturnCode(t *testing.T) {
 	wf := readWorkflow(t)
 	steps := adjudicationSteps(wf)
@@ -140,15 +146,18 @@ func TestGateReadsBufReturnCode(t *testing.T) {
 	}
 	for job, ss := range steps {
 		for _, s := range ss {
-			if !strings.Contains(s.Run, "buf breaking") {
+			// Тело шага — `run:` и сценарий, который он зовёт (kaname#1055):
+			// разбор кода buf живёт в сценарии.
+			body := s.Run + stepScriptBody(t, s)
+			if !strings.Contains(body, "buf breaking") {
 				t.Errorf("задание %s: шаг зовёт адъюдикатор, но не зовёт buf breaking — "+
 					"на вход ему нечего подать", job)
 			}
-			if !strings.Contains(s.Run, "100") {
+			if !strings.Contains(body, "100") {
 				t.Errorf("задание %s: код 100 («есть находки») не разбирается — штатный "+
 					"вход адъюдикатора читался бы как отказ", job)
 			}
-			if !strings.Contains(s.Run, "exit 2") {
+			if !strings.Contains(body, "exit 2") {
 				t.Errorf("задание %s: у шага нет третьего исхода — любой иной код buf "+
 					"читался бы как «разрывов нет»", job)
 			}
@@ -181,4 +190,117 @@ func TestLedgerIsNamedByTheStepThatReadsIt(t *testing.T) {
 		t.Fatal("ни один шаг не называет перечня — адъюдикатор звался бы без предмета")
 	}
 	t.Logf("перечней названо шагами: %d", named)
+}
+
+// stepScriptBody — текст сценариев `tools/declaredbreak/*.sh`, которые зовёт шаг.
+func stepScriptBody(t *testing.T, s wfStep) string {
+	t.Helper()
+	var b strings.Builder
+	for _, tok := range strings.Fields(s.Run) {
+		if !strings.HasPrefix(tok, "tools/declaredbreak/") || !strings.HasSuffix(tok, ".sh") {
+			continue
+		}
+		body, err := os.ReadFile("../../" + tok)
+		if err != nil {
+			t.Fatalf("шаг зовёт сценарий %s, которого в дереве нет: %v", tok, err)
+		}
+		b.Write(body)
+	}
+	return b.String()
+}
+
+// TestStepNamesTheRequestHead — шаг передаёт сценарию голову ЗАПРОСА.
+//
+// На pull_request клон стоит на коммите слияния головы с базой; общий предок
+// этого коммита с базой — сама база, и отказ назвал бы «предмет есть» у любой
+// находки. Голова запроса приходит из события, а на push — коммит прогона
+// (kaname#1055, пункт 5).
+func TestStepNamesTheRequestHead(t *testing.T) {
+	wf := readWorkflow(t)
+	n := 0
+	for job, ss := range adjudicationSteps(wf) {
+		for _, s := range ss {
+			n++
+			v := s.Env["HEAD_SHA"]
+			if !strings.Contains(v, "github.event.pull_request.head.sha") || !strings.Contains(v, "github.sha") {
+				t.Errorf("задание %s: HEAD_SHA шага адъюдикации — %q, а не голова запроса "+
+					"с откатом на коммит прогона", job, v)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("шагов адъюдикации нет — ось беспредметна")
+	}
+}
+
+// TestManualRunNamesItsBase — ручной запуск называет базу сравнения.
+//
+// Ручной запуск — штатный путь для запроса в ветку эпика, на который триггер не
+// заводит прогона: без входа `base` он сравнивал бы с `main`, и отставание эпика
+// от ствола читалось бы удалением. Поэтому у `workflow_dispatch` есть вход `base`
+// с умолчанием `main`, а шаг адъюдикации отдаёт сценарию в BASE_REF базу запроса
+// и, когда её нет, — этот вход. Что сценарий BASE_REF ЧИТАЕТ, держит поведением
+// TestStepJudgesTheRequestAgainstItsBase («ручной запуск с base=эпик …»).
+func TestManualRunNamesItsBase(t *testing.T) {
+	wf := readWorkflow(t)
+	disp, ok := wf.On["workflow_dispatch"].(map[string]any)
+	if !ok {
+		t.Fatalf("у workflow_dispatch нет объявления входов (%T) — ручной запуск сравнивал бы только с main",
+			wf.On["workflow_dispatch"])
+	}
+	inputs, _ := disp["inputs"].(map[string]any)
+	base, _ := inputs["base"].(map[string]any)
+	if base == nil {
+		t.Fatal("у workflow_dispatch нет входа base — ручной запуск в ветку эпика сравнивался бы с main")
+	}
+	if d, _ := base["default"].(string); d != "main" {
+		t.Errorf("умолчание входа base — %q, а не main", d)
+	}
+	n := 0
+	for job, ss := range adjudicationSteps(wf) {
+		for _, s := range ss {
+			n++
+			v := s.Env["BASE_REF"]
+			if !strings.Contains(v, "github.base_ref") || !strings.Contains(v, "inputs.base") {
+				t.Errorf("задание %s: BASE_REF шага адъюдикации — %q, а не база запроса с откатом "+
+					"на вход base ручного запуска", job, v)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("шагов адъюдикации нет — ось беспредметна")
+	}
+}
+
+// TestRequestBaseProbeRunsWhereBufIs — проба TestStepJudgesTheRequestAgainstItsBase
+// ИСПОЛНЯЕТСЯ: под `-short` (задание unit) она пропускается, потому что сцене
+// нужен buf. Значит в задании, где стоит адъюдикация, после установки buf обязан
+// быть прогон пакета без `-short` — иначе её зелёное не наблюдал бы никто.
+func TestRequestBaseProbeRunsWhereBufIs(t *testing.T) {
+	wf := readWorkflow(t)
+	jobs := adjudicationSteps(wf)
+	if len(jobs) == 0 {
+		t.Fatal("шагов адъюдикации нет — ось беспредметна")
+	}
+	for job := range jobs {
+		bufAt, probeAt := -1, -1
+		for i, s := range wf.Jobs[job].Steps {
+			if strings.HasPrefix(s.Uses, "bufbuild/buf-setup-action@") && bufAt < 0 {
+				bufAt = i
+			}
+			if strings.Contains(s.Run, "go test") && strings.Contains(s.Run, "./tools/declaredbreak/") &&
+				!strings.Contains(s.Run, "-short") && strings.Contains(s.Run, "TestStepJudgesTheRequestAgainstItsBase") {
+				probeAt = i
+			}
+		}
+		switch {
+		case bufAt < 0:
+			t.Errorf("задание %s: buf не ставится — пробе базы запроса нечем сравнивать", job)
+		case probeAt < 0:
+			t.Errorf("задание %s: проба базы запроса не зовётся без -short — её пропуск под -short "+
+				"оставил бы шаг без единого исполненного опыта", job)
+		case probeAt < bufAt:
+			t.Errorf("задание %s: проба зовётся до установки buf", job)
+		}
+	}
 }

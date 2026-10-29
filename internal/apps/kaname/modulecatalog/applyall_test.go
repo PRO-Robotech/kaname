@@ -122,7 +122,7 @@ func (w *recordingWriter) ReadCatalog(context.Context) (modulecatalog.CatalogSta
 	return modulecatalog.NewCatalogState(seed.LiteralRows(), catalog.Rows{}), nil
 }
 
-func (w *recordingWriter) UpsertModule(_ context.Context, module string) (bool, error) {
+func (w *recordingWriter) UpsertModule(_ context.Context, module string, _ bool) (bool, error) {
 	w.calls = append(w.calls, "module:"+module)
 	if module == w.failOnModule {
 		return false, errWriterRefused

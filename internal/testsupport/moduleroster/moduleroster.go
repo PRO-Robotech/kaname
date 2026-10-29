@@ -17,10 +17,18 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // DomainName — домен доверия набора.
 const DomainName = "kacho.cloud"
+
+// NameFormRaw — форма имени службы набора (kaname#308): учётки его записей и
+// идентификаторов названы ею.
+const NameFormRaw = "kacho-{service}"
+
+// NameForm — форма имени службы набора величиной.
+func NameForm() servicesan.Form { return servicesan.NewForm(NameFormRaw) }
 
 // Domain — домен доверия набора величиной.
 func Domain() grpcsrv.TrustDomain { return grpcsrv.NewTrustDomain(DomainName) }
@@ -41,7 +49,7 @@ func Entries() []string {
 // Roster — перечень набора. Ошибка разбора — дефект набора, а не входа пробы.
 func Roster(t testing.TB) moduleidentity.Roster {
 	t.Helper()
-	r, err := moduleidentity.Parse(Entries())
+	r, err := moduleidentity.Parse(NameForm(), Entries())
 	if err != nil {
 		t.Fatalf("набор личностей проб не разобрался: %v", err)
 	}

@@ -41,6 +41,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -303,7 +304,12 @@ type RegisterResourceUseCase struct {
 	objRecon     objectReconciler      // sync post-commit — optional, nil-safe
 	residual     residualTupleReader   // names what the withdrawal must still take away — optional, nil-safe
 	metrics      materializationRecorder
-	logger       *slog.Logger
+	// modules — личности модулей установки: ими актор события аудита читает имя
+	// службы из учётки формой имени службы (kaname#308, kaname#1005). Нулевой
+	// перечень не называет модуля, и актором становится проверенная личность
+	// из контекста.
+	modules moduleidentity.Roster
+	logger  *slog.Logger
 }
 
 // NewRegisterResourceUseCase — constructor. `mirror` co-commits the
@@ -378,8 +384,8 @@ const (
 // Актор — машинная личность модуля по подтверждённому сертификату (та, чьё право
 // на запись проверили ворота обработчика), а не слово вызывающего; без неё —
 // проверенная личность из контекста (путь без mTLS вне боевой посадки).
-func auditEvent(ctx context.Context, eventType, outcome string, t tupleIntent, row service.ResourceMirrorRow, extra map[string]any) service.AuditEvent {
-	actor, module, ok := authzguard.ModuleActor(ctx)
+func (uc *RegisterResourceUseCase) auditEvent(ctx context.Context, eventType, outcome string, t tupleIntent, row service.ResourceMirrorRow, extra map[string]any) service.AuditEvent {
+	actor, module, ok := authzguard.ModuleActor(ctx, uc.modules)
 	if !ok {
 		actor = authzguard.PrincipalUserID(ctx)
 	}
@@ -398,6 +404,14 @@ func auditEvent(ctx context.Context, eventType, outcome string, t tupleIntent, r
 		payload[k] = v
 	}
 	return service.AuditEvent{EventType: eventType, TenantAccountID: row.ParentAccountID, Payload: payload}
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки — тот же,
+// которым ворота записи признают модуль: актор события аудита называет службу
+// той же формой имени службы.
+func (uc *RegisterResourceUseCase) WithModuleRoster(r moduleidentity.Roster) *RegisterResourceUseCase {
+	uc.modules = r
+	return uc
 }
 
 // WithReconcile wires the reconcile-event emitter: a mirror change
@@ -989,7 +1003,7 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// не было. Повтор той же регистрации, вторая доставка той же проекции и
 		// запоздалая старая версия события не пишут.
 		if projectionReplaced || (changed && !stood) {
-			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceRegistered,
+			if err = uc.audit.EmitTx(ctx, tx, uc.auditEvent(ctx, AuditEventResourceRegistered,
 				auditOutcomeRegistered, t, row, nil)); err != nil {
 				return "", false, false, fmt.Errorf("emit registration audit: %w", err)
 			}
@@ -1045,7 +1059,7 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			if derr != nil {
 				return "", false, false, derr
 			}
-			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceUnregistered,
+			if err = uc.audit.EmitTx(ctx, tx, uc.auditEvent(ctx, AuditEventResourceUnregistered,
 				auditOutcomeUnregistered, t, row, map[string]any{
 					"withdrawn_tuples": withdrawn, "descendants": descendants,
 				})); err != nil {
@@ -1055,7 +1069,7 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			// Надгробие старше хранимой регистрации: строка осталась, но кортежи
 			// регистрации не новее надгробия сняты (kaname#969) — модель прав
 			// изменилась, и это тоже событие.
-			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceUnregistered,
+			if err = uc.audit.EmitTx(ctx, tx, uc.auditEvent(ctx, AuditEventResourceUnregistered,
 				auditOutcomeSuperseded, t, row, map[string]any{"withdrawn_tuples": withdrawn})); err != nil {
 				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
 			}

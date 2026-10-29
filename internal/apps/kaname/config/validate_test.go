@@ -107,6 +107,7 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			Ceremony:                     ceremonyLifespanSettings(),
 			TrustedForwarderSANs:         []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"},
 			TrustDomainName:              "kacho.cloud",
+			ServiceNameFormRaw:           "kacho-{service}",
 			ModuleIdentities:             []string{"kacho/kacho-api-gateway=edge@internal"},
 			ClientIssuers:                []string{"internal=/etc/kaname/tls/server/ca.crt"},
 		},

@@ -31,7 +31,7 @@ import (
 const (
 	testIssuer   = "https://iam.kacho.local"
 	testKID      = "kaname-a"
-	testAudience = "api.kacho.local"
+	testAudience = "api.example.test"
 	testClientID = "svc-console"
 	testSubject  = "usr-0123456789abcdefg"
 	testFamily   = "tfm-0123456789abcdefg"

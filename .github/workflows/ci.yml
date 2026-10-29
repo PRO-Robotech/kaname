@@ -77,7 +77,17 @@ on:
       - main
       - '[0-9]+'
     types: [opened, synchronize, reopened, ready_for_review]
+  # Ручной запуск — штатный путь для запроса в ветку, на которую триггер
+  # прогона не заводит. Вход `base` — база такого запроса: с ней шаг адъюдикации
+  # сравнивает контракты (kaname#1055); без него отставание ветки эпика от `main`
+  # читалось бы удалением. Провязку держит `tools/declaredbreak`
+  # TestManualRunNamesItsBase.
   workflow_dispatch:
+    inputs:
+      base:
+        description: база сравнения контрактов — ветка, в которую идёт запрос
+        type: string
+        default: main
 
 permissions:
   contents: read
@@ -201,6 +211,21 @@ jobs:
       - name: стражи правила git — проба с воссозданными дефектами
         run: bash scripts/hooks/branch-rule-inject.sh
 
+      # ПЯТАЯ — СТРАЖ НОВЫХ BLOB'ОВ ОТПРАВКИ (kaname#894). Бинарь и файл больше 1 МБ
+      # среди blob'ов, которые отправка вносит в публичную историю, — отказ до
+      # обхода KANAME_SKIP_PREPUSH; песочница с голым удалённым, настоящий хук.
+      # Исход — кодом: 0 · 1 · 2 (предпосылки нет).
+      - name: страж новых blob'ов отправки — проба
+        run: bash scripts/hooks/prepush-added-files-inject.sh
+
+      # ШЕСТАЯ — ПЕРЕЧЕНЬ НЕПРОВЕРЕННОГО (kaname#273). Каждый шаг этого файла с
+      # `run:` — строка ведомости хука (`CI_LEDGER`), сверка в обе стороны; обход
+      # KANAME_SKIP_PREPUSH судится по ТЕКСТУ вывода настоящего хука, не по коду
+      # 0. Новый шаг здесь без строки ведомости роняет этот шаг. Исход — кодом:
+      # 0 · 1 · 2 (предпосылки нет).
+      - name: хук отправки — перечень непроверенного выведен из конвейера, обход громок — опыт
+        run: bash scripts/hooks/prepush-coverage-inject.sh --self-test
+
       - name: сборка
         run: go build ./...
 
@@ -264,15 +289,50 @@ jobs:
         run: python3 .github/scripts/review-event-silence.py
 
   # ── ЮНИТЫ ───────────────────────────────────────────────────────────────────
-  unit:
-    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit') }}
+  #
+  # ШАРДЫ → СВОДНЫЙ ВЕРДИКТ (kaname#873). Одним заданием юниты шли 1192…1852 с
+  # (ствол 422d1bc6f — 1484 с): пакеты внутри `go test ./...` идут параллельно,
+  # и стена прогона — время САМОГО ДОЛГОГО пакета (`internal/check` 1255 с).
+  # Распил по пакетам её не опускает; опускает распил ПАКЕТА по пробам.
+  # Шардов ПЯТЬ, а не по бюджету шарда: на первом круге двенадцать шардов ждали
+  # исполнителя до 23:30, и стена вышла длиннее прежней. Отдельного задания
+  # плана НЕТ: на втором круге оно исполнялось 17 с и ждало исполнителя 34:58 —
+  # лишнее звено цепочки ждёт заново. План строит каждый шард сам (чистая
+  # функция дерева), и цепочка равна прежней: «выбор затронутого → шарды → свод».
+  # Стена — от создания первого шарда до конца свода, критерий в шапке скрипта.
+  # Раздачу, её перепись и свод держит `.github/scripts/unit-shards.py`, довод и
+  # замеры — в его шапке; `-race` остаётся у всех пакетов, гейтов дерева тоже:
+  # конкурентность в них ИЗМЕРЕНА (параллельные пробы, горутины кода модуля).
+  #
+  # Имя сводного задания — ПРЕЖНЕЕ: «пробы -race -short (числовой вердикт)» —
+  # обязательный контекст защиты ствола (`.github/TRUNK-VERDICT.md`). Шарды несут
+  # производные от дерева имена и в защиту не идут.
+  unitshard:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unitshard') }}
     needs: [changes]
-    name: пробы -race -short (числовой вердикт)
+    name: юниты · шард ${{ matrix.shard }} из ${{ strategy.job-total }}
     runs-on: ubuntu-latest
-    # Предел задания — предел `go test` ниже (45m) плюс подготовка и прогонщик вердикта:
-    # иначе зависший пакет снял бы задание раньше паники `-timeout`, и вердикта не было бы.
+    # Предел задания — предел `go test` раздатчика (`-timeout 45m`, kaname#949; число и
+    # довод — у `RUN_FLAGS` в `.github/scripts/unit-shards.py`) плюс подготовка, план и
+    # прогонщик вердикта: иначе зависший пакет снял бы шард раньше паники `-timeout`,
+    # и вердикта о нём не было бы.
     timeout-minutes: 55
+    strategy:
+      # Красный шард не снимает соседей: вердикт нужен о КАЖДОМ пакете, а снятые
+      # пришли бы в свод третьей категорией по причине вне своего предмета.
+      fail-fast: false
+      # ЧИСЛО ШАРДОВ ОБЪЯВЛЕНО ТОЛЬКО ЗДЕСЬ: шард строит план на ширину матрицы
+      # (`strategy.job-total`) и берёт долю по номеру (`strategy.job-index`).
+      # Пять — замер первого круга (PR kaname#875, прогон 39039147809 @113dbddee):
+      # двенадцать шардов исполнялись 2:32…8:02, но ЖДАЛИ ИСПОЛНИТЕЛЯ 7:15…23:30,
+      # стена 33:44 против 28:05 одного задания, минуты исполнителей ≈52 против
+      # ≈25. Предел — число исполнителей, а не процессор шарда, поэтому шардов
+      # столько, сколько их можно получить разом рядом с остальными заданиями.
+      matrix:
+        shard: [1, 2, 3, 4, 5]
     steps:
+      # Полная история — предпосылка гейтов дерева (`internal/check` судит
+      # `origin/main...HEAD`), а не удобство; как и у прежнего задания.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           fetch-depth: 0
@@ -282,33 +342,68 @@ jobs:
           cache: true
       - run: go mod download
 
-      # ПРОГОНЩИК ВЫНОСИТ ЧАСТЬ ВЕРДИКТА, значит его способность УПАСТЬ обязана
-      # быть доказана ДО того, как его вердикту поверят: иначе он сам стал бы
-      # формой без содержания — тем самым классом, ради которого заведён.
-      # Инъекция идёт по каждой оси в ОБЕ стороны, включая законных близнецов.
+      # ПЕРЕПИСЬ ПОЛНОТЫ СТОИТ ДО ПРОГОНА: шард строит план из дерева, сверяет
+      # «роздано = дерево» и ширину матрицы и лишь затем исполняет свою долю.
+      # `-short` обязателен: контейнерные пробы гоняет задание `integration`.
+      # Раздатчик зовёт `go test -json` по пакетам шарда и частям распиленных,
+      # сверяет выборку частей с разрезом и выносит вердикт прогонщиком; код
+      # `go test` — данные, а не исход шага.
+      #
+      # ИМЯ ОПИСИ НЕСЁТ НОМЕР ПОПЫТКИ: перезапущенный шард заливает опись (и копию
+      # плана) рядом с прежней, и свод берёт самую свежую, а не легшую последней.
+      - name: план, перепись полноты и юниты шарда (-race -short)
+        env:
+          JOB_INDEX: ${{ strategy.job-index }}
+          JOB_TOTAL: ${{ strategy.job-total }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: python3 .github/scripts/unit-shards.py --run --job-index "$JOB_INDEX" --job-total "$JOB_TOTAL" --out-dir unit-out --attempt "$ATTEMPT"
+
+      # Опись уезжает и с КРАСНОГО шарда: иначе падение продукта приходило бы в
+      # свод как «шард не отчитался», и разбор начинался бы не с той находки.
+      - name: опись шарда — артефакт для сводного вердикта
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: unit-shard-${{ matrix.shard }}-a${{ github.run_attempt }}
+          path: unit-out/
+
+  # СВОДНЫЙ ВЕРДИКТ — единственное место, где про юниты говорят «зелено»: работа
+  # матрицы без упавших шагов выходит success и тогда, когда шардов исполнилось
+  # ноль. `!cancelled()` — несущая часть: пропущенное обязательное задание не
+  # краснеет, а молчит.
+  unit:
+    if: ${{ !cancelled() && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit')) }}
+    needs: [changes, unitshard]
+    name: пробы -race -short (числовой вердикт)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+
+      # САМОПРОБЫ — ДО ВЕРДИКТА: раздатчик и прогонщик сами выносят часть
+      # вердикта, и их способность упасть доказывается до того, как им поверят.
+      - name: раздача, разрез по пробам и свод способны упасть (самопроба инъекцией)
+        run: python3 .github/scripts/unit-shards.py --self-test
+
       - name: прогонщик вердикта способен упасть (самопроба инъекцией)
         run: python3 .github/scripts/go-test-verdict.py --self-test
 
-      # `-short` ОБЯЗАТЕЛЕН: без него сюда затягиваются контейнерные пробы,
-      # поднимающие Postgres на каждом пакете, и задание упирается в предел
-      # времени. Контейнерные гоняет отдельное задание ниже.
-      #
-      # Код `go test` берётся ДАННЫМИ: под `-e` ненулевой оборвал бы шаг до
-      # прогонщика, и вердикта — числа исполненного, отказов и пропущенного —
-      # не было бы вовсе. Роняет шаг ПРОГОНЩИК, а не `go test`.
-      #
-      # `-timeout 45m` — запас к самому долгому пакету (kaname#949): `internal/check`
-      # на d34eab3f7 под этой формой — 1723,754 с, код 0 (внешний кластер, 4 CPU);
-      # при 25m тот же пакет снят паникой на 1501 с. 45m — 2700 с: доля пакета 64 %,
-      # запас 57 %. Предел растёт вслед за пакетом, а не вместо его ускорения: доля
-      # выше 75 % — предмет задачи, а не новое число. Маршрут `ci.yml:unit` стенда
-      # воркспейса (`scripts/stand-report.sh`) берёт эту команду из этого шага.
-      - name: пробы (-race -short)
-        run: |
-          rc=0
-          go test ./... -race -short -count=1 -timeout 45m -json > test.json 2>&1 || rc=$?
-          echo "go test завершился с кодом $rc (вердикт выносит прогонщик ниже)"
-          python3 .github/scripts/go-test-verdict.py < test.json
+      # `continue-on-error` — не поблажка: отсутствие описей само есть предмет
+      # свода ниже, и отказ скачивания подменил бы его находку своим.
+      - name: скачать описи и копии плана шардов
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v6
+        with:
+          pattern: unit-shard-*
+          path: unit-in
+          merge-multiple: true
+
+      - name: СВОДНЫЙ ВЕРДИКТ
+        run: python3 .github/scripts/unit-shards.py --aggregate --dir unit-in --shard-result '${{ needs.unitshard.result }}'
 
   # ── ЛИНТ ────────────────────────────────────────────────────────────────────
   lint:
@@ -425,27 +520,31 @@ jobs:
       # Свойство «шаг не сужен событием» держит проба
       # `tools/declaredbreak` TestGateRunsWhereItsSubjectExpires, а не этот
       # комментарий.
-      - name: adjudicate breaking (vs main)
+      #
+      # БАЗА СРАВНЕНИЯ — БАЗА ЗАПРОСА, А НЕ `main` (kaname#1055). Запрос в ветку
+      # эпика, отставшую от `main`, сравнением с `main` получал «разрывы», которых
+      # голова не вносила: PR kaname#977 с нулевым диффом контрактов к своей базе был
+      # красен шестью чужими изменениями `main`. На запросе база — первый родитель
+      # коммита слияния, то есть та, с которой он собран, а не вершина ветки в
+      # момент шага; имя базы — BASE_REF: база запроса, на ручном запуске — вход
+      # `base`, на push — пусто, то есть `main`. Голову запроса сценарий берёт из
+      # HEAD_SHA; отказ называет по каждой находке, есть ли её предмет в общем
+      # предке. Сравнение с базой держит проба TestStepJudgesTheRequestAgainstItsBase
+      # шагом ниже — на настоящем buf.
+      - name: adjudicate breaking (vs база запроса)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_REF: ${{ github.base_ref || inputs.base }}
         run: |
           set -uo pipefail
           go build -o "$RUNNER_TEMP/adjudicate" ./tools/declaredbreak/cmd/adjudicate-declared-breaks
-          cd proto
-          set +e
-          buf breaking \
-            --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=proto" \
-            --error-format=json > "$RUNNER_TEMP/buf-breaking.jsonl" 2>"$RUNNER_TEMP/buf-breaking.err"
-          rc=$?
-          set -e
-          case "$rc" in
-            0|100) ;;
-            *)
-              echo "::error title=ГЕЙТ НЕ СДЕЛАЛ СВОЕЙ РАБОТЫ::buf breaking вышел кодом $rc — это НЕ «разрывов нет»"
-              cat "$RUNNER_TEMP/buf-breaking.err" >&2 || true
-              exit 2
-              ;;
-          esac
-          cd ..
-          "$RUNNER_TEMP/adjudicate" proto/declared-breaks.yaml < "$RUNNER_TEMP/buf-breaking.jsonl"
+          tools/declaredbreak/against-request-base.sh "$RUNNER_TEMP/adjudicate" proto/declared-breaks.yaml
+
+      # Проба шага выше пропускается под `-short` задания unit: её сцене нужен
+      # buf, а он стоит здесь. Без этого прогона её зелёного не наблюдал бы
+      # никто — провязку держит TestRequestBaseProbeRunsWhereBufIs.
+      - name: проба базы запроса (настоящий buf)
+        run: go test ./tools/declaredbreak/ -count=1 -run 'TestStepJudgesTheRequestAgainstItsBase' -v
 
       # Стабы закоммичены → они ОБЯЗАНЫ совпадать с .proto. Иначе кто-то правил
       # порождённое руками (что вдобавок бьёт rawDesc) либо забыл
@@ -765,24 +864,29 @@ jobs:
           cache: true
       - run: go mod download
 
-      # ИСХОДОВ ЧЕТЫРЕ, И ШАГ ИХ РАЗЛИЧАЕТ. Схлопни VOID в успех — пустое дерево
-      # отчитывалось бы зелёным так же уверенно, как проверенное, и первый
-      # манифест, положенный мимо ожидаемого имени, остался бы невидимым
-      # навсегда. Схлопни в отказ — красным стал бы ствол, а не продукт.
-      #
+      # ИСХОД ЧИТАЕТСЯ ПО ТЕКСТУ, А НЕ ПО КОДУ, и развилка вынесена СКРИПТОМ
+      # (kaname#825). `make` схлопывает код рецепта в свой: находка (1), «проверять
+      # нечего» (2) и «не исполнялась» (3) одинаково доезжают сюда ДВОЙКОЙ.
+      # Прежняя редакция разбирала код, двойка означала у неё «условие не
+      # создано, exit 0» — и НАСТОЯЩИЙ дефект формы манифеста доезжал до ствола
+      # зелёным. Развилку внутри шага нечем доказать инъекцией, поэтому она
+      # живёт в скрипте, а его самопроверка зовётся ДО вердикта. Политика
+      # исходов (что роняет шаг, что лишь называется) — в шапке скрипта.
+      - name: разбор исхода формы манифестов — доказательство инъекцией
+        run: .github/scripts/classify-manifest-outcome.sh --self-test
+
       # Код читается ДАННЫМИ, а не условием продолжения: блок `run:` исполняется
-      # под `bash -e`, и ненулевой код оборвал бы шаг молча — до присваивания,
-      # до развилки, до всякой аннотации.
+      # под `bash -e`, и ненулевой код оборвал бы шаг молча — до разбора вывода.
+      # Вызов стоит ПЕРВЫМ СЛОВОМ строки намеренно: провязку судит гейт дерева по
+      # разобранным телам `run:`, и он требует формы `make <цель>`. Код шага —
+      # код разборщика: последняя команда тела.
       - name: манифесты модулей — форму судит один загрузчик
         run: |
           rc=0
-          make module-manifest-check || rc=$?
-          case "$rc" in
-            0) echo "форма манифестов: годно" ;;
-            2) echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::манифестов не найдено ни одного — ПРОВЕРЯТЬ НЕЧЕГО. Это третий исход, а не «форма в порядке»"; exit 0 ;;
-            3) echo "::error title=НЕ ИСПОЛНЯЛАСЬ::разбор вызова не удался — вердикта о форме манифестов нет"; exit 1 ;;
-            *) echo "::error title=Форма манифеста негодна::названы файл, поле и строка (вывод выше)"; exit 1 ;;
-          esac
+          log="$RUNNER_TEMP/module-manifest.log"
+          make module-manifest-check > "$log" 2>&1 || rc=$?
+          cat "$log"
+          .github/scripts/classify-manifest-outcome.sh "$rc" "$log"
 
       # ВТОРОЙ ОПЕРАНД СОЗДАЁТСЯ ВЫБОРКОЙ — у условия ОДИН ДОМ, и это он
       # (`.github/actions/platform-tree`): то же действие создаёт его заданию
@@ -1021,6 +1125,7 @@ jobs:
     needs:
       - build
       - unit
+      - unitshard
       - lint
       - proto
       - standalone
@@ -1062,6 +1167,7 @@ jobs:
           .github/scripts/trunk-verdict-holder.sh \
             "${{ needs.build.result }}" \
             "${{ needs.unit.result }}" \
+            "${{ needs.unitshard.result }}" \
             "${{ needs.lint.result }}" \
             "${{ needs.proto.result }}" \
             "${{ needs.standalone.result }}" \
@@ -1088,7 +1194,7 @@ jobs:
   prverdict:
     name: сводный вердикт запроса (ci)
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    needs: [changes, authzartifacts, build, catalogparity, gosec, govulncheck, integration, integrationshard, lint, listfilter, proto, standalone, unit]
+    needs: [changes, authzartifacts, build, catalogparity, gosec, govulncheck, integration, integrationshard, lint, listfilter, proto, standalone, unit, unitshard]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

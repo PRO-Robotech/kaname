@@ -96,6 +96,8 @@ type loadOptions struct {
 	oracle RelationOracle
 	// modules — набор модулей, внесённый вызывающим; см. [WithModuleSet].
 	modules domain.ModuleSet
+	// canon — родство типов канона для судьи вложенных правил; см. [WithTypeCanon].
+	canon TypeCanon
 }
 
 // WithRelationOracle вносит модель, против которой судится связность выдачи

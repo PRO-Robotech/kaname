@@ -45,7 +45,7 @@
   ],
   "item": [
     {
-      "name": "IAM-AUTHCODE-OK-ISSUE-EXCHANGE-ACCEPT — 02→10→18: вход нашим входом, код перенаправлением, обмен на наш токен, фронт принимает его",
+      "name": "IAM-AUTHCODE-OK-ISSUE-EXCHANGE-ACCEPT — 02→10→18: вход нашим входом, код перенаправлением, обмен на наш токен, фронт принимает его (IC-SECRET-06)",
       "description": "class:CRUD | class:SEC | priority:P0",
       "item": [
         {
@@ -3851,7 +3851,7 @@
       ]
     },
     {
-      "name": "IAM-AUTHCODE-NEG-CLIENT-UNAUTHENTICATED — 12: без секрета, с неверным секретом, с неверным секретом и неизвестным кодом — 401 invalid_client",
+      "name": "IAM-AUTHCODE-NEG-CLIENT-UNAUTHENTICATED — 12: без секрета, с неверным секретом, с неверным секретом и неизвестным кодом — 401 invalid_client (IC-SECRET-06)",
       "description": "class:NEG | class:SEC | priority:P0",
       "item": [
         {

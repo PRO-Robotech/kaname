@@ -17,16 +17,16 @@ import (
 //
 // Личность выводится тем же разбором, которым ворота записи регистрации
 // (`RelationWriteGate.Authorize`) узнают модуль: единственный разбор SAN
-// (`moduleidentity.ParseSAN`, kaname#984) → учётка → служба
-// (`moduleidentity.ServiceFromAccount`, та же функция, которой перечень
-// личностей выводит `Identity.Service`) → учётка службы
-// (`ServiceAccountIDForService`). Поэтому для вызова, пропущенного воротами, актор
-// события аудита — ровно тот субъект, чьё право на запись проверено, а не слово
-// вызывающего. Признание по перечню и привязку к выпустившему центру (kaname#984,
-// kaname#988) судят ворота до use-case; здесь личность только называется.
-// ok=false — подтверждённой личности по сертификату нет (вызов не по mTLS либо
-// SAN не называет службу продукта).
-func ModuleActor(ctx context.Context) (subject, module string, ok bool) {
+// (`moduleidentity.ParseSAN`, kaname#984) → учётка → служба формой имени службы
+// установки (`moduleidentity.Roster.ServiceFromAccount`, та же функция, которой
+// перечень выводит `Identity.Service`, kaname#308) → учётка службы
+// (`ServiceAccountIDForAccount`). Поэтому для вызова, пропущенного воротами,
+// актор события аудита — ровно тот субъект, чьё право на запись проверено, а не
+// слово вызывающего. Признание по перечню и привязку к выпустившему центру
+// (kaname#984, kaname#988) судят ворота до use-case; здесь личность только
+// называется. ok=false — подтверждённой личности по сертификату нет (вызов не
+// по mTLS, SAN формы не имеет либо его учётка не несёт формы имени службы).
+func ModuleActor(ctx context.Context, modules moduleidentity.Roster) (subject, module string, ok bool) {
 	san, verified := grpcsrv.CertIdentityFromContext(ctx)
 	if !verified || san == "" {
 		return "", "", false
@@ -35,9 +35,9 @@ func ModuleActor(ctx context.Context) (subject, module string, ok bool) {
 	if !ok {
 		return "", "", false
 	}
-	svc, ok := moduleidentity.ServiceFromAccount(account)
+	svc, ok := modules.ServiceFromAccount(account)
 	if !ok {
 		return "", "", false
 	}
-	return "service_account:" + ServiceAccountIDForService(svc), svc, true
+	return "service_account:" + ServiceAccountIDForAccount(account), svc, true
 }

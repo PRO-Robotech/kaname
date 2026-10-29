@@ -158,6 +158,11 @@ done
 # прежний хук снял бы `-race` сам, и опыт зависел бы от машины, а не от хука.
 # `golangci-lint` отвечает версией пина фикстуры — чтобы прежний хук дошёл до
 # цели `lint`, если он её зовёт.
+#
+# Судья подписи хука (`go build ./tools/clagate/cmd/clagate`) собирается
+# переходником из НАСТОЯЩЕГО дерева: исходников судьи в фикстуре нет. Вызов идёт
+# в журнал как всякий другой и судится тем же правилом параллелизма и потолка;
+# ведомость фикстуры объявляет её корневую учётную запись своей (build_module).
 make_bin() {
     local b="$1" mode="$2"
     mkdir -p "$b" || return 1
@@ -165,6 +170,7 @@ make_bin() {
 #!/usr/bin/env bash
 printf 'sub=%s scoped=%s goflags=[%s] args=[%s]\n' "\${1:-}" "\${BUDGET_PROBE_SCOPED:-0}" "\${GOFLAGS:-}" "\$*" >> "$b/go.log"
 if [ "\${1:-}" = env ] && [ "\${2:-}" = CGO_ENABLED ] && [ "\$#" -eq 2 ]; then echo 1; exit 0; fi
+case " \$* " in *" ./tools/clagate/cmd/clagate "*) cd "$ROOT" || exit 97 ;; esac
 exec "$REAL_GO" "\$@"
 GO
     cat > "$b/golangci-lint" <<'LINT'
@@ -204,8 +210,12 @@ build_module() {
     # Хук первым зовёт страж правила ветки и коммита — без него он отказывает.
     cp "$RULE_LIB" "$d/scripts/hooks/branch-rule.sh" || return 1
     cp "$RULE_GUARD" "$d/scripts/hooks/prepush-rule.sh" || return 1
+    # Второй страж хука — новых blob'ов (kaname#894): без него хук отказывает.
+    cp "$ROOT/scripts/hooks/prepush-added-files.sh" "$d/scripts/hooks/prepush-added-files.sh" || return 1
     chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
     printf 'module probe.invalid/budget\n\ngo 1.21\n' > "$d/go.mod"
+    printf 'scope:\n  - .\nowners:\n  - email: probe@example.invalid\n    note: корневая учётная запись фикстуры — подпись опыта\nsignatories: []\nwaivers: []\n' \
+        > "$d/cla-ledger.yaml"
     cat > "$d/budget_test.go" <<GO
 package budget
 

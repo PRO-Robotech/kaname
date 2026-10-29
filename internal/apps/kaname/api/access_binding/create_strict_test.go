@@ -461,6 +461,10 @@ func (_ *strictDupABReader) PublicReadContainer(context.Context, string) (domain
 	return domain.PublicReadContainer{}, nil
 }
 
+func (_ *strictDupABReader) ClassGrantsKeyedModules(context.Context) (domain.ClassGrantsKeyedModules, error) {
+	return domain.ClassGrantsKeyedModules{}, nil
+}
+
 // BoundToSystemClass — системный класс субъекта (kaname#829) этим дублёром не судится.
 func (_ *strictDupRoleReader) BoundToSystemClass(context.Context, domain.RoleID) (bool, error) {
 	return false, nil

@@ -30,7 +30,8 @@ import (
 //
 // Колонки строки каталога — ВСЕ, которые пишет применитель (условие CE-18,
 // kaname#865): кроме живости и причины снятия — имя типа модели, указатели,
-// признак контейнера публичного чтения и применённая пара редакции. Отпечаток
+// признак контейнера публичного чтения, применённая пара редакции и ключ S7
+// модуля (kaname#950). Отпечаток
 // без них не видел бы младшей редакции, записавшей одну колонку: «отпечаток
 // равен» означал бы «равны колонки, которые отпечаток читает». Состав держит
 // проба `TestFingerprintSeesEveryColumnTheApplierWrites`
@@ -43,7 +44,8 @@ func Fingerprint(t testing.TB, ctx context.Context, pool *pgxpool.Pool) string {
 		  SELECT 'm:' || module || ':' || live::text ||
 		         ':' || coalesce(retired_reason, '') ||
 		         ':' || coalesce(applied_revision::text, '-') ||
-		         ':' || coalesce(applied_digest, '-') AS x
+		         ':' || coalesce(applied_digest, '-') ||
+		         ':' || class_grants_only_on_containers::text AS x
 		    FROM kaname.catalog_module
 		  UNION ALL
 		  SELECT 'r:' || dotted || ':' || live::text ||

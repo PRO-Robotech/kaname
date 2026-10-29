@@ -53,7 +53,7 @@ import (
 // testResourceAudience — адресат РЕСУРСНОЙ поверхности: то, что стоит в токене
 // доступа. Он намеренно не равен идентификатору нашего издателя
 // (`testIssuerID`), потому что именно их различие и есть второй признак.
-const testResourceAudience = "https://api.kacho.local"
+const testResourceAudience = "https://api.example.test"
 
 // platformKeyProvider — ключница платформы для пробы.
 //

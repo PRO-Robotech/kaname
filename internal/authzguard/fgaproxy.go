@@ -7,13 +7,14 @@
 // proto catalog (like every Internal IAM RPC), so least-privilege is NOT
 // expressed as a flat permission-string. It is enforced HERE as ReBAC:
 //
-//  1. The mTLS client-cert SAN (SPIRE format
-//     spiffe://<trust-domain>/ns/<ns>/sa/kacho-<svc>, extracted by SEC-B's
-//     grpcsrv.CertIdentityFromContext under the domain the installation
-//     declared) is recognized against the installation's module roster
-//     (moduleidentity.Roster, kaname#984 — only a DECLARED namespace/account
-//     pair is a module) and mapped to a deterministic
-//     ServiceAccount id (`'sva' || substr(md5('kacho-<svc>'),1,17)`).
+//  1. SAN клиентского сертификата (`spiffe://<домен>/ns/<пространство>/sa/<учётка>`,
+//     извлечённый grpcsrv.CertIdentityFromContext под доменом, который
+//     объявила установка) признаётся по перечню личностей модулей установки
+//     (moduleidentity.Roster, kaname#984 — модуль только ОБЪЯВЛЕННАЯ пара
+//     пространства и учётки; имя службы перечень читает формой имени службы,
+//     объявленной той же установкой, kaname#308), и учётка отображается в
+//     детерминированный идентификатор служебной учётки
+//     (`'sva' || substr(md5('<учётка>'),1,17)`).
 //  2. A ReBAC Check `service_account:<sva>#fga_writer@cluster:cluster_root`
 //     is issued. ALLOW → the RPC proceeds; DENY → PermissionDenied. Право
 //     выдаётся системной выдачей на кластере (kacho#914) — оно видно перечислением
@@ -55,10 +56,12 @@ const (
 	// всему кластеру — честнее стало ОБЪЯВЛЕНИЕ этого права.
 	relationWriteObject = clusterRootObject
 
-	// svcNamePrefix — приставка учётки модуля (`kacho-<svc>`). Объявлена у
-	// разбора личности (`moduleidentity.AccountPrefix`): выводом имени службы из
-	// учётки и формулой идентификатора служебной учётки правит одна величина.
-	svcNamePrefix = moduleidentity.AccountPrefix
+	// Приставки имени учётки здесь больше нет (kaname#308): форму имени службы
+	// объявляет установка (`authn.service-name-form`), и учётку записи перечня
+	// личностей читает она (`moduleidentity.Roster.ServiceFromAccount`). Пока
+	// приставка стояла здесь литералом, это было имя другого продукта, и
+	// установка, называвшая учётки иначе, не узнавала ни одного своего модуля.
+
 	// saPrefix — приставка идентификатора служебной учётки.
 	//
 	// Объявлена именем, а не вписана в формулу литералом: круговая сверка с
@@ -91,8 +94,10 @@ func (g *RelationWriteGate) WithModuleRoster(r moduleidentity.Roster) *RelationW
 	return g
 }
 
-// NewRelationWriteGate — constructor. Defaults to dev-mode (backward-compat); use
-// WithProductionMode to enable strict fail-closed enforcement.
+// NewRelationWriteGate — конструктор. Режим по умолчанию — разработки
+// (совместимость); строгий отказ включает WithProductionMode. Модулем ворота
+// признают только пару перечня (WithModuleRoster): нулевой перечень не признаёт
+// никого, и форму имени службы перечень несёт сам.
 func NewRelationWriteGate(checker RelationChecker) *RelationWriteGate {
 	return &RelationWriteGate{checker: checker}
 }
@@ -134,7 +139,7 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 		// ReBAC backend not wired → fail-closed (never silently allow).
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
-	allowed, err := g.checker.Check(ctx, "service_account:"+ServiceAccountIDForService(domain), RelationWriteRelation, relationWriteObject)
+	allowed, err := g.checker.Check(ctx, "service_account:"+ServiceAccountIDForAccount(module.Account), RelationWriteRelation, relationWriteObject)
 	if err != nil {
 		// Backend failure (FGA 5xx / network drop / ErrNotConfigured) is NOT an
 		// authorization decision — it is a transient outage. Surfacing it as
@@ -151,13 +156,19 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 	return domain, nil
 }
 
-// ServiceAccountIDForService derives the deterministic module SA id from a
-// service short-name (`'sva' || substr(md5('kacho-<svc>'),1,17)`). Single
-// source of truth shared by the gate and the seed migration helper.
+// ServiceAccountIDForAccount — идентификатор служебной учётки модуля по имени
+// его учётки (`'sva' || substr(md5('<учётка>'),1,17)`).
+//
+// Выводится из УЧЁТКИ целиком, а не из короткого имени службы: учётку модуля
+// заводит посев его владельца под тем же именем, которым её называет
+// сертификат (`internal/apps/kaname/moduleseed`, `module_seed_writer.go`), и
+// идентификатор там считается той же формулой от того же имени. Вывод из имени
+// службы с приставкой, вписанной здесь, был бы вторым объявлением формы — и
+// расходился бы с объявленной установкой молча: идентификатор оставался бы
+// синтаксически верным и переставал бы находить строку.
 //
 // Формула ОДНА на дерево и живёт в `domain.DerivedIDSuffix`: своя копия здесь
-// разошлась бы с постгресовой молча — полученный идентификатор остался бы
-// синтаксически верным и перестал бы находить строку.
-func ServiceAccountIDForService(svc string) string {
-	return saPrefix + domain.DerivedIDSuffix(svcNamePrefix+svc)
+// разошлась бы с постгресовой молча.
+func ServiceAccountIDForAccount(account string) string {
+	return saPrefix + domain.DerivedIDSuffix(account)
 }

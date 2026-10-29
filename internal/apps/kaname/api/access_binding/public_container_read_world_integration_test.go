@@ -61,6 +61,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -113,7 +114,10 @@ func newPCRWorld(t *testing.T) *pcrWorld {
 		// каталожным фактом, что у мира после последней доставки.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
 		kanamepg.NewRegistrationAudit(),
-	)
+	).
+		// Актор события аудита называет службу формой имени службы перечня — тем
+		// же, которым ворота записи признают модуль (kaname#308, kaname#1005).
+		WithModuleRoster(moduleroster.Roster(t))
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           w.door,
 		ClusterAdminChecker: w.door,

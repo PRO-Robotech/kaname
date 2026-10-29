@@ -37,6 +37,16 @@
 # в `.git/hooks` фикстур кладёт тот же производитель, что у клонов, —
 # `install.sh stub <имя>`, а не рукописная копия.
 #
+# СУДЬЯ ПОДПИСИ — НАСТОЯЩИЙ (kaname#459). За стражем правила и тоже до обхода хук
+# собирает судью подписи (`go build ./tools/clagate/cmd/clagate`) и судит им
+# отправку ведомостью `cla-ledger.yaml` отправляемой вершины; нет go либо судья
+# не собран — отказ. Go-модуля в фикстуре нет, поэтому переходник `go` собирает
+# судью из исходников ЭТОГО дерева, а ведомость фикстуры объявляет её корневую
+# учётную запись своей (push_fixture). Предмет пробы — страж правила, не подпись:
+# судья обязан пропустить законную отправку, и что он её судил и пропустил —
+# отдельное утверждение по его выводу, а не код 0. Отказы судьи держит проба
+# tools/clagate/prepush_hook_test.go.
+#
 # Исходы: 0 — все утверждения сошлись; 1 — провал; 2 — предпосылки нет.
 set -uo pipefail
 
@@ -49,16 +59,38 @@ unset KANAME_SKIP_PREPUSH GITHUB_REPOSITORY
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-for f in "$HERE/branch-rule.sh" "$HERE/commit-msg" "$HERE/prepush-rule.sh" "$HERE/pre-push" \
+for f in "$HERE/branch-rule.sh" "$HERE/commit-msg" "$HERE/prepush-rule.sh" "$HERE/prepush-added-files.sh" "$HERE/pre-push" \
     "$HERE/prepush-classify.sh" "$HERE/install.sh" "$ROOT/.github/scripts/pr-rule-check.sh"; do
     [ -f "$f" ] || { echo "branch-rule-inject: нет $f — предпосылки нет" >&2; exit 2; }
 done
 command -v git > /dev/null || { echo "branch-rule-inject: нет git" >&2; exit 2; }
+REAL_GO="$(command -v go)" || { echo "branch-rule-inject: нет go — судью подписи хука отправки (tools/clagate) собрать нечем, предпосылки нет" >&2; exit 2; }
+[ -d "$ROOT/tools/clagate/cmd/clagate" ] || { echo "branch-rule-inject: нет $ROOT/tools/clagate/cmd/clagate — судьи подписи нет, предпосылки нет" >&2; exit 2; }
+REAL_HOME="$HOME"
+REAL_XDG="${XDG_CONFIG_HOME-}"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/xdg" GIT_CONFIG_NOSYSTEM=1
 mkdir -p "$HOME"
+
+# Переходник `go` (kaname#459): хук собирает судью подписи из корня судимого
+# клона, а в фикстуре его исходников нет. Сборка судьи идёт в корне ЭТОГО дерева;
+# HOME и XDG_CONFIG_HOME у инструмента — настоящие, не песочницы: настройка go,
+# кэш модулей и сборки берутся оттуда, а не скачиваются заново. Отметка VCS судье
+# не нужна (-buildvcs=false): окружение отправки фикстуры о дереве ROOT не
+# свидетельствует, и спрашивать о нём git незачем.
+mkdir -p "$tmp/bin"
+if [ -n "$REAL_XDG" ]; then xdg_line="export XDG_CONFIG_HOME='$REAL_XDG'"; else xdg_line="unset XDG_CONFIG_HOME"; fi
+cat > "$tmp/bin/go" <<GO
+#!/usr/bin/env bash
+case " \$* " in *" ./tools/clagate/cmd/clagate "*) cd '$ROOT' || exit 97 ;; esac
+export HOME='$REAL_HOME' GOFLAGS="\${GOFLAGS:+\$GOFLAGS }-buildvcs=false"
+$xdg_line
+exec '$REAL_GO' "\$@"
+GO
+chmod +x "$tmp/bin/go"
+export PATH="$tmp/bin:$PATH"
 printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$HOME/.gitconfig"
 PRE=@1700000000 # 2023-11-14 — история до T0
 
@@ -122,7 +154,8 @@ REAL_TRAILER="Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.co
 # ── Набор оснастки под судом: настоящий либо с воссозданным дефектом ─────────
 kit_from_tree() { # $1 — каталог набора
     mkdir -p "$1/scripts/hooks" "$1/.github/scripts"
-    cp "$HERE/branch-rule.sh" "$HERE/commit-msg" "$HERE/prepush-rule.sh" "$HERE/pre-push" \
+    # prepush-added-files.sh — второй страж хука (kaname#894): без него хук отказывает.
+    cp "$HERE/branch-rule.sh" "$HERE/commit-msg" "$HERE/prepush-rule.sh" "$HERE/prepush-added-files.sh" "$HERE/pre-push" \
         "$HERE/prepush-classify.sh" "$HERE/install.sh" "$1/scripts/hooks/"
     cp "$ROOT/.github/scripts/pr-rule-check.sh" "$1/.github/scripts/"
     chmod +x "$1/scripts/hooks/"* "$1/.github/scripts/"*
@@ -290,6 +323,11 @@ push_fixture() { # $1 — набор
     local G=(git -C "$PP")
     "${G[@]}" remote add origin "$tmp/origin.git"
     "${G[@]}" commit -q --allow-empty --date="$PRE" --author='Old <old@example.invalid>' -m "история"
+    # Ведомость подписи (kaname#459) — в коммите правила: судья хука читает её из
+    # отправляемой вершины, а корневая учётная запись фикстуры в ней своя.
+    printf 'scope:\n  - .\nowners:\n  - email: probe@example.invalid\n    note: корневая учётная запись фикстуры — подпись опыта\nsignatories: []\nwaivers: []\n' \
+        > "$PP/cla-ledger.yaml"
+    "${G[@]}" add cla-ledger.yaml
     rule_commit "$PP" "$1"
     "${G[@]}" checkout -q -b 20; "${G[@]}" commit -q --allow-empty -m "#20 волна: начало"
     "${G[@]}" checkout -q -b wip/old main; "${G[@]}" commit -q --allow-empty --date="$PRE" -m "черновик до правила"
@@ -432,7 +470,9 @@ push_rule_cases() {
 
 # Настоящий `git push` в голый репозиторий через настоящий pre-push. Проверки
 # хука (сборка, пробы) фикстуре не по силам — Go-модуля в ней нет, — поэтому
-# законная отправка идёт с объявленным обходом ПРОВЕРОК; страж им не снимается.
+# законная отправка идёт с объявленным обходом ПРОВЕРОК; страж им не снимается,
+# судья подписи тоже — он настоящий (переходник `go` в шапке) и судит ведомость
+# фикстуры. Что он исполнился и пропустил, утверждается по его выводу.
 hook_cases() {
     local G=(git -C "$PP")
     ( cd "$PP" && bash scripts/hooks/install.sh stub pre-push ) > "$PP/.git/hooks/pre-push"
@@ -441,6 +481,9 @@ hook_cases() {
     "${G[@]}" checkout -q 31
     out="$(cd "$PP" && KANAME_SKIP_PREPUSH=1 git push origin 31 2>&1)"; rc=$?; [ "$rc" = 0 ] || rc=1
     expect "git push: ветка 31, проверки сняты обходом, страж пропускает" pass - "$rc" "$out"
+    expect_text "git push: ветка 31 — судья подписи исполнен и пропустил (kaname#459)" \
+        "clagate push-range: ЗЕЛЁНОЕ" "$out"
+    expect_text "git push: ветка 31 — судья осмотрел оба новых коммита" "публикуемых коммитов 2" "$out"
     "${G[@]}" checkout -q -b issue-7 main; "${G[@]}" commit -q --allow-empty -m "#7 правка"
     out="$(cd "$PP" && git push origin issue-7 2>&1)"; rc=$?; [ "$rc" = 0 ] || rc=1
     expect "git push: ветка issue-7" refuse "pre-push ОТКАЗ: правило ветки и коммита нарушено" "$rc" "$out"

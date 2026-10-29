@@ -44,9 +44,9 @@ func (c *recordingChecker) Check(_ context.Context, subject, relation, object st
 // ── SAN / FQN test fixtures ─────────────────────────────────────────────────
 
 const (
-	apiGatewayFloorSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"
-	vpcFloorSAN        = "spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc"
-	someOtherSAN       = "spiffe://kacho.cloud/ns/kacho/sa/kacho-someother"
+	apiGatewayFloorSAN = "spiffe://kacho.cloud/ns/kacho/sa/mod-api-gateway"
+	vpcFloorSAN        = "spiffe://kacho.cloud/ns/kacho/sa/mod-vpc"
+	someOtherSAN       = "spiffe://kacho.cloud/ns/kacho/sa/mod-someother"
 
 	// readFloorMethod — a representative READ-RPC under the floor.
 	readFloorMethod = "/kaname.cloud.iam.v1.InternalIAMService/LookupSubject"
@@ -83,7 +83,7 @@ func TestSystemViewerFloor_Prod_LegitimateReaderSA_Allowed(t *testing.T) {
 	if err := f.allow(ctxWithSAN(apiGatewayFloorSAN), readFloorMethod); err != nil {
 		t.Fatalf("prod legitimate reader-SA: unexpected error %v", err)
 	}
-	wantSubject := "service_account:" + ServiceAccountIDForService("api-gateway")
+	wantSubject := "service_account:" + ServiceAccountIDForAccount(testServiceNameForm.Account("api-gateway"))
 	if ck.subject != wantSubject {
 		t.Errorf("Check subject = %q, want %q (caller module-SA, NOT end-user)", ck.subject, wantSubject)
 	}

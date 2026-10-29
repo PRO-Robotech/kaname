@@ -13,17 +13,19 @@ import (
 //
 // Пары — те, что пробы предъявляют как ЗАКОННЫХ модулей; формы, которые пробы
 // предъявляют как чужие (необъявленное пространство, чужой домен, снятый
-// оператор), сюда не входят намеренно.
+// оператор), сюда не входят намеренно. Учётки названы формой имени службы проб
+// пакета (testServiceNameForm, kaname#308).
 func testModuleRoster() moduleidentity.Roster {
-	r, err := moduleidentity.Parse([]string{
-		"kacho/kacho-api-gateway=edge",
-		"kacho/kacho-vpc=module-writer",
-		"kacho/kacho-compute=module-writer",
-		"kacho/kacho-nlb=module-writer",
-		"kacho/kacho-registry=module-writer",
-		"kacho/kacho-storage=module-writer",
-		"kacho-storage/kacho-storage=module-writer",
-		"registry/kacho-registry-dp=data-plane",
+	f := testServiceNameForm
+	r, err := moduleidentity.Parse(f, []string{
+		"kacho/" + f.Account("api-gateway") + "=edge",
+		"kacho/" + f.Account("vpc") + "=module-writer",
+		"kacho/" + f.Account("compute") + "=module-writer",
+		"kacho/" + f.Account("nlb") + "=module-writer",
+		"kacho/" + f.Account("registry") + "=module-writer",
+		"kacho/" + f.Account("storage") + "=module-writer",
+		"platform-storage/" + f.Account("storage") + "=module-writer",
+		"registry/" + f.Account("registry-dp") + "=data-plane",
 	})
 	if err != nil {
 		panic("перечень личностей проб не разобрался: " + err.Error())

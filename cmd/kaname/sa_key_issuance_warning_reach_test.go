@@ -81,6 +81,7 @@ func devOwnWithoutOwnSAKeyIssuance() config.Config {
 	cfg.AuthN.Domain = "access.example.invalid"
 	cfg.AuthN.TrustedForwarderSANs = []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"}
 	cfg.AuthN.TrustDomainName = "kacho.cloud"
+	cfg.AuthN.ServiceNameFormRaw = probeServiceNameFormRaw
 	cfg.APIServer.Endpoint = "tcp://0.0.0.0:9090"
 	cfg.APIServer.InternalEndpoint = "tcp://0.0.0.0:9091"
 	cfg.Repository.Postgres.URL = "postgres://u:p@db:5432/kaname"
@@ -108,6 +109,7 @@ func devOwnWithoutOwnSAKeyIssuance() config.Config {
 	cfg.APIServer.RegistryToken = config.RegistryTokenConfig{
 		Endpoint: "tcp://0.0.0.0:9096",
 		Service:  "registry.kacho.local",
+		Issuer:   "https://access.example.test/iam/token",
 	}
 	cfg.AuthN.ClientToken = config.ClientTokenConfig{
 		Enabled:                  false,

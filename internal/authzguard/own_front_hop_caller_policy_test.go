@@ -212,7 +212,7 @@ func hopVersusModule(decide hopDecision, methods []string) (extra, missing []str
 // перечня проб: края, модуля-владельца и плоскости данных.
 func anyModuleAdmittedBy(decide hopDecision, methods []string) map[string]bool {
 	var out map[string]bool
-	for _, san := range []string{gatewaySAN, vpcSAN, "spiffe://kacho.cloud/ns/registry/sa/kacho-registry-dp"} {
+	for _, san := range []string{gatewaySAN, vpcSAN, "spiffe://kacho.cloud/ns/registry/sa/mod-registry-dp"} {
 		got := admittedBy(decide, grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true), methods)
 		if out == nil {
 			out = got

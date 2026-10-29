@@ -332,7 +332,7 @@ CASES.append(Case(
 # ───────────────────────────────────────────────────────────────────────────
 CASES.append(Case(
     id="IAM-RECOVERY-NEG-WRONG-CODE",
-    title="Неверный код восстановления: 401 одним текстом, носитель сессии не выдан",
+    title="Неверный код восстановления: 401 одним текстом, носитель сессии не выдан (Ф5-04 по форме отказа)",
     classes=["NEG", "SEC"],
     priority="P0",
     steps=[
@@ -732,7 +732,7 @@ def _login(p, tag, password_var, *, ok, store=None, user_var=None, keep=None, sa
 _P03 = "rcvA"
 CASES.append(Case(
     id="IAM-RECOVERY-OK-CODE-IN-TIME",
-    title="Код в срок: негодный пароль называет поле и код не тратит; годный — сессия выдана, прежняя отозвана",
+    title="Код в срок: негодный пароль называет поле и код не тратит; годный — сессия выдана, прежняя отозвана (Ф5-03)",
     classes=["CRUD", "SEC", "VAL"],
     priority="P0",
     steps=[
@@ -887,7 +887,7 @@ _LIMIT_N = "parseInt(pm.environment.get('rcvLimitN') || '0', 10)"
 
 CASES.append(Case(
     id="IAM-RECOVERY-NEG-RATE-LIMIT",
-    title="N неверных кодов — следующий (верный) получает отказ по частоте, равный отказу адреса, которого нет; N−1 — верный код принимается",
+    title="N неверных кодов — следующий (верный) получает отказ по частоте, равный отказу адреса, которого нет; N−1 — верный код принимается (Ф5-08)",
     classes=["NEG", "SEC", "BVA"],
     priority="P0",
     steps=[
@@ -922,7 +922,7 @@ CASES.append(Case(
 _P18 = "rcvD"
 CASES.append(Case(
     id="IAM-RECOVERY-OK-NEW-PASSWORD-SIGNS-IN",
-    title="После завершения восстановления человек входит новым паролем; прежним — единый отказ",
+    title="После завершения восстановления человек входит новым паролем; прежним — единый отказ (Ф5-18)",
     classes=["CRUD", "SEC"],
     priority="P0",
     steps=[
@@ -941,7 +941,7 @@ CASES.append(Case(
 _P19 = "rcvE"
 CASES.append(Case(
     id="IAM-RECOVERY-OK-ENDS-EVERY-SESSION",
-    title="Две живые сессии, восстановление запрошено из первой: после завершения обе негодны, выданная завершением годна",
+    title="Две живые сессии, восстановление запрошено из первой: после завершения обе негодны, выданная завершением годна (Ф5-19)",
     classes=["SEC", "STATE"],
     priority="P0",
     steps=[

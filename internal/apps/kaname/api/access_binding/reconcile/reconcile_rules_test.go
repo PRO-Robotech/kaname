@@ -120,6 +120,12 @@ type fakeStore struct {
 	// subjectType/subjectID.
 	subjects []domain.Subject
 
+	// liveCatalog — точечные типы с живой строкой каталога «в базе» (kaname#937);
+	// пусто — ни одного: тип, которого снимок не знает, считается снятым.
+	// liveCatalogReads — обращений LiveCatalogTypes.
+	liveCatalog      map[string]bool
+	liveCatalogReads int
+
 	// policy — политика роли выдачи (BindingScope.Policy, kaname#1006); nil —
 	// арендаторская: прежние пробы судят роль без владельца.
 	policy *domain.RulePolicy
@@ -424,6 +430,17 @@ func (f *fakeStore) LedgerTuplesForMember(ctx context.Context, id domain.AccessB
 
 // LedgerTuples — весь реестр выдачи: засеянное плюс записанное проходом минус
 // забытое им.
+func (f *fakeStore) LiveCatalogTypes(ctx context.Context, types []string) ([]string, error) {
+	f.liveCatalogReads++
+	var out []string
+	for _, t := range types {
+		if f.liveCatalog[t] {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) LedgerTuples(ctx context.Context, id domain.AccessBindingID) ([]LedgerRow, error) {
 	f.ledgerReads++
 	return f.ledgerNow(), nil

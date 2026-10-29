@@ -1,0 +1,133 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/relation-fact-remembers-its-removal.md
+  sha256: c6bebc991a25398ace0303a35aa12a4ecaa30a2586bbef7dfc90ed35ef88649b
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: fb4a810a7
+  content_commit: 4a83063e039a271a887979244f84628b7747fb44
+  branch: '636'
+  task: PRO-Robotech/kaname#636
+  related_tasks: [PRO-Robotech/kaname#942]
+  lines: 419
+  round: 1
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/relation-fact-remembers-its-removal.md
+    в копии kacho-workspace/tmp/kn-636 @ 4a83063e0 → c6bebc99…ef88649b (совпал с заданием)
+  measurement_revisions: >-
+    Замеры дерева — `git grep … fb4a810a7` и чтение файлов копии kn-636 @ 4a83063e0;
+    fb4a810a7..4a83063e0 добавляет только документ приёмки. На origin ветка `636` стоит
+    на fb4a810a7: коммит документа 4a83063e0 туда НЕ дошёл (см. premise).
+  premise: >-
+    Посылка задания «отправка шла до 23:58:02Z» опровергнута: отправка завершилась кодом 1
+    (журнал tmp/kn636-runs/20261023T222802Z-3240466-f7ae4d99.log, .rc = 1), хук отправки —
+    1 красная группа «пробы», отказ `TestAcceptanceProbeCoordinateResolves` на строке 103
+    этого документа. `git ls-remote origin refs/heads/636` → fb4a810a7.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-24'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующих два (FORMAT, DoD). Санкции на миграцию по этой редакции нет.
+
+blocking:
+  - kind: FORMAT
+    scenario: §0.5, строка 103
+    claim: >-
+      Документ называет пробу голым именем `TestNewMigrationCitesAnApprovedAcceptance`,
+      которой в дереве kaname нет. Гейт дерева `TestAcceptanceProbeCoordinateResolves`
+      считает это мёртвой координатой, хук отправки красен, документ в ствол не ложится:
+      приёмка, которой нет в ветке, санкцией R2-полосы быть не может. Держатель живёт в
+      `PRO-Robotech/kacho` (`internal/repohygiene/acceptanceledger_test.go`), и соседние
+      приёмки kaname называют его с домом.
+    measured: >-
+      tmp/kn636-runs/20261023T222802Z-3240466-f7ae4d99.log: «МЁРТВАЯ КООРДИНАТА
+      docs/engineering/acceptance/relation-fact-remembers-its-removal.md:103 — приёмка
+      называет пробу `TestNewMigrationCitesAnApprovedAcceptance`, а функции … в дереве НЕТ»,
+      «КРАСНЫЙ: отказов 1», rc=1.
+      `git -C project/kacho grep -l 'func TestNewMigrationCitesAnApprovedAcceptance' origin/main -- '*.go'`
+      → internal/repohygiene/acceptanceledger_test.go (@41d7edad9b).
+      `git grep -n 'PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance' -- docs/`
+      в kaname → 10 строк в 4 приёмках (форма с домом).
+    fix: >-
+      Назвать пробу с домом: `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance`
+      (смысл фразы «в Go-дереве kaname её нет» сохраняется). Готово — хук отправки на голове
+      с документом: отказов 0, и `git ls-remote origin refs/heads/636` = эта голова.
+  - kind: DoD
+    scenario: KN-RFR-07, KN-RFR-08 (§6 п.6–7)
+    claim: >-
+      Держатели 07 и 08 пишутся ПОСЛЕ кода: красного до правки у них не будет, а DoD не
+      требует показать, что они способны упасть. Инъекции п.6 (I1–I4) не трогают ни
+      `WHERE r.source_version < EXCLUDED.source_version` (`:268`), ни перевод `v_stored`
+      (`:221-224`) — подтест, ничего не утверждающий, пройдёт п.7 как «заведён».
+    measured: >-
+      Чтение §6 п.6–7 редакции c6bebc99; миграция
+      internal/migrations/20261023180000_relation_fact_remembers_its_removal.sql:221-224, :262-269
+      @ fb4a810a7; DoD-proof #636 @fb4a810a7 перечисляет инъекции I1–I4 и только их.
+    fix: >-
+      В §6 добавить по однофактной инъекции с названным исходом: I5 — снять условие
+      `WHERE r.source_version < EXCLUDED.source_version` в ветви снятия → краснеет 07, близнец
+      05 зелен; I6 — ключ следа `v_user` вместо `v_stored` → краснеет 08, близнец (запись t3)
+      зелен. В п.7 назвать фикстуру: `journalGrant` с субъектом параметром (08 пишет
+      `system_class:anonymous`, снимает `user:*`).
+
+important_nonblocking:
+  - "§0.2: «Операторный триггер … :259» — строка 259 файла 20261005040457 лежит в разделе `-- +goose Down` и создаёт построчный (FOR EACH ROW) триггер; операторный — `:159` (`grep -n 'CREATE TRIGGER'` → 159, 259). Поправить координату."
+  - "KN-RFR-08: конструируемость показана чтением ограничений, а не посевом — `relation_fact_subject_class_reads_only` допускает `system_class:anonymous` на `v_get` (20261017020000:99-102), на `fga_outbox` ограничений субъекта нет (`fga_outbox_event_type_check`, `fga_outbox_relation_present_check`). Посев придёт с держателем п.7."
+  - "Сужение предиката задачи («запись выдачи» → только строки с версией владельца) обосновано Р4 и §2 с контролями 09/10 и инъекцией I4. Принято."
+  - "Находки Н3 (гейт писателя следа) и Н4 (проба отката на базе) — вне объёма по решению диспетчера, записью в #636; KN-RFR-13 с держателем-сравнением текстов принят как объявлено."
+
+confirmed:
+  - "§0.1 перемерено @fb4a810a7: `'source_version'` в прод-Go → 1 (emitter.go:191); в миграциях 11 упоминаний, записей 0; EmitPublicationTx( → 1 вызов (publication.go:134); publications.ApplyTx( → 2 (register_resource.go:776, :885). Второй предикат — `INSERT INTO kaname.fga_outbox` в прод-коде: migrate_backfill.go:129 без source_version."
+  - "§0.3: FROM kaname.relation_fact в relverdict → 6 (те же координаты). §0.4: relation_fact_removal в прод-Go → 1 (check_value_lanes.go:342)."
+  - "§5 координаты миграции сверены: :200-204, :212-216, :221-224, :231-238, :262-269, :265-268, :278-431 — совпадают."
+  - "§6 п.4: diff sed 53,200p (20261019180000) и 282,429p (20261023180000) → пусто, rc 0; последний оператор отката — DROP TABLE kaname.relation_fact_removal."
+  - "Держатели существуют: TestRelationFact_NTF3_184_… (relation_fact_late_grant_integration_test.go:106, 6 подтестов 01–06 с текстами утверждений §5), TestEmitDeleteTx_GrantBegunBeforeTheRemovalOfAStandingFactSurvives (:115), …GrantFoldedAfterTheRevokeSurvives (:85), TestPublicRead_LateRedeliveryAfterWithdrawalDoesNotReopen (:198), …InOrderRepublicationOpens (:215), …ConcurrentDeliveriesConvergeToTheNewestIntent (:302), TestIntegration_CheckLedgerCoversTheLiveSchema, TestNewMigrationOutranksEveryAppliedOne."
+  - "Метка миграции 20261023180000 выше последней в базе 942 @d34eab3f7 (20261021081500)."
+  - "Производитель у «Тогда»: 13 из 13. Близнец у отрицаний: 6 из 6 (01, 04, 06, 07, 08, 11)."
+  - "Конструируемость: посевом рецензента — 0 (прогоны на машине запрещены, держателя 07/08 нет); названной фикстурой — 11 из 13 (01–06 journalGrant, 09–12 существующие пробы, 13 сравнение текстов; зелёность 01–06, 09–12 — со слов исполнителя, DoD-proof #636 @fb4a810a7); не выполнилось — 2 (07, 08)."
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#636
+  status: performed
+  published: true
+  database_id: 6379465888
+  node_id: IC_kwDOUO26pM8AAAABfD7soA
+  url: https://github.com/PRO-Robotech/kaname/issues/636#issuecomment-6379465888
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6379465888
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/636
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-10-24T03:45:51Z'
+  body_sha256: cf881725e7cf02d7a2830069be456fb6a7adf3a4ea53bc707994ce28bde3bc51
+  subject_sha256: c6bebc991a25398ace0303a35aa12a4ecaa30a2586bbef7dfc90ed35ef88649b
+  subject_revision: 4a83063e039a271a887979244f84628b7747fb44
+  verdict: CHANGES_REQUESTED
+  note: >-
+    Опубликовал курьер после круга 2 (до него события в трекере не было); блок приведён к
+    факту по ответу API комментария; body_sha256 — sha256 тела комментария без перевода строки.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false

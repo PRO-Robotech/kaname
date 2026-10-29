@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -79,7 +80,7 @@ func auditKRequest(w *urxWorld) *iamv1.RegisterResourceRequest {
 // assertAuditEvent — строка аудита несёт актора-модуля, объект и исход.
 func (w *urxWorld) assertAuditEvent(eventType, outcome, why string) {
 	w.t.Helper()
-	p := w.auditPayload(eventType, "actor", "service_account:"+authzguard.ServiceAccountIDForService("registry"))
+	p := w.auditPayload(eventType, "actor", "service_account:"+authzguard.ServiceAccountIDForAccount(moduleroster.NameForm().Account("registry")))
 	obj, _ := p["object"].(map[string]any)
 	assert.Equalf(w.t, pcrRegTgt, obj["type"], "%s: тип объекта в событии", why)
 	assert.Equalf(w.t, auditK, obj["id"], "%s: id объекта в событии", why)

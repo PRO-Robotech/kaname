@@ -3,12 +3,13 @@
 
 // fgaproxy_test.go — the FGA-proxy authz ReBAC gate + cert-SAN→SA mapping.
 //
-// Unit-level: the FGA-proxy gate resolves the verified mTLS client-cert SAN
-// (SPIRE format spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>) to a deterministic
-// ServiceAccount id, then ReBAC-checks `service_account:<sva>#fga_writer@
-// cluster:cluster_root` via the injected RelationChecker. No DB / no live TLS:
-//   - cert-identity injected via grpcsrv.WithCertIdentity;
-//   - ReBAC decision injected via a fake RelationChecker.
+// Уровень модуля: ворота посредника модели переводят SAN проверенного
+// клиентского сертификата (spiffe://kacho.cloud/ns/<ns>/sa/<учётка>, учётка —
+// формы, объявленной пробой: mod-<svc>) в детерминированный идентификатор
+// ServiceAccount и спрашивают `service_account:<sva>#fga_writer@cluster:cluster_root`
+// через подставленный RelationChecker. Без базы и без живого TLS:
+//   - личность сертификата подставляется через grpcsrv.WithCertIdentity;
+//   - решение модели прав — поддельным RelationChecker.
 //
 // Со снятия внешнего движка прав вопрос уходит не чужому хранилищу, а двери
 // решения над реляционной формой собственной базы (`authzcascade.Client` поверх
@@ -43,14 +44,21 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
+// probeServiceNameForm — форма учёток модулей, которой проба объявляет
+// установку. Приставка нарочно не та, что стражу прав когда-то вписывали
+// литералом: совпавшая проба осталась бы зелёной при вернувшемся литерале.
+var probeServiceNameForm = servicesan.NewForm("mod-{service}")
+
 // sva derives the deterministic ServiceAccount id for a module svc-name
-// (`'sva' || substr(md5('kacho-<svc>'), 1, 17)`), matching the seed migration.
+// (`'sva' || substr(md5('<учётка>'), 1, 17)`) — учётка в форме пробы, той же
+// формулой, что у посева владельца модуля.
 // md5 here is an id-derivation function chosen to agree with Postgres `md5()`,
 // not a security primitive — the digest guards nothing.
 func sva(svc string) string {
-	sum := md5.Sum([]byte("kacho-" + svc))
+	sum := md5.Sum([]byte(probeServiceNameForm.Account(svc)))
 	return "sva" + hex.EncodeToString(sum[:])[:17]
 }
 
@@ -83,7 +91,7 @@ func TestRelationWriteGate_C01_B07_ValidSANResolvedAndAllowed(t *testing.T) {
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc", true)
 
 	dom, err := gate.Authorize(ctx)
 	require.NoError(t, err, "vpc SA with fga_writer relation → allow")
@@ -103,7 +111,7 @@ func TestRelationWriteGate_B08_NoFGAWriterRelationDenied(t *testing.T) {
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-geo", true)
+		"spiffe://kacho.cloud/ns/kacho/sa/mod-geo", true)
 
 	_, err := gate.Authorize(ctx)
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "no fga_writer relation → PermissionDenied")
@@ -114,10 +122,10 @@ func TestRelationWriteGate_C03_MalformedOrForeignSANDenied(t *testing.T) {
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	for _, san := range []string{
-		"spiffe://other-trust-domain/x",      // foreign trust domain — never extracted
-		"spiffe://kacho.cloud/garbage",       // wrong path shape
-		"spiffe://kacho.cloud/ns//sa/kacho-", // empty segments
-		"",                                   // no identity
+		"spiffe://other-trust-domain/x",    // foreign trust domain — never extracted
+		"spiffe://kacho.cloud/garbage",     // wrong path shape
+		"spiffe://kacho.cloud/ns//sa/mod-", // empty segments
+		"",                                 // no identity
 	} {
 		ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
 		_, err := gate.Authorize(ctx)
@@ -131,7 +139,7 @@ func TestRelationWriteGate_C05_UnverifiedPeerDenied(t *testing.T) {
 
 	// Verified=false (TLS peer without verified client-cert) → never trusted.
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", false)
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc", false)
 	_, err := gate.Authorize(ctx)
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "unverified peer → fail-closed")
 }
@@ -143,7 +151,7 @@ func TestRelationWriteGate_C02_UnknownSADenied(t *testing.T) {
 	// Well-formed SPIRE SAN, but the resolved SA has no fga_writer relation
 	// (unknown / unregistered module) → fail-closed PermissionDenied.
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-unknown", true)
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-unknown", true)
 	_, err := gate.Authorize(ctx)
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 }
@@ -156,7 +164,7 @@ func TestRelationWriteGate_B09_NoACRConsulted(t *testing.T) {
 
 	// ctx carries NO acr claim of any kind — must still pass on relation alone.
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc", true)
 	_, err := gate.Authorize(ctx)
 	require.NoError(t, err, "SA exempt from ACR-floor")
 }
@@ -214,7 +222,7 @@ func TestRelationWriteGate_I1_BackendFailureIsUnavailable(t *testing.T) {
 			gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 			ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
-				"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
+				"spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc", true)
 
 			_, err := gate.Authorize(ctx)
 			require.Equal(t, codes.Unavailable, status.Code(err),
@@ -244,7 +252,7 @@ func TestRelationWriteGate_I1_ExplicitDenyIsPermissionDenied(t *testing.T) {
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc", true)
 
 	_, err := gate.Authorize(ctx)
 	require.Equal(t, codes.PermissionDenied, status.Code(err),
@@ -253,8 +261,15 @@ func TestRelationWriteGate_I1_ExplicitDenyIsPermissionDenied(t *testing.T) {
 
 // rosterOf — перечень личностей из тех ИДЕНТИФИКАТОРОВ, которые предъявляют
 // пробы: пара берётся разбором самого идентификатора, а не пишется второй раз
-// рядом — разойтись предъявленному и объявленному негде.
+// рядом — разойтись предъявленному и объявленному негде. Учётки читает форма
+// имени службы проб (probeServiceNameForm, kaname#308).
 func rosterOf(t *testing.T, profile moduleidentity.Profile, sans ...string) moduleidentity.Roster {
+	t.Helper()
+	return rosterOfForm(t, probeServiceNameForm, profile, sans...)
+}
+
+// rosterOfForm — тот же перечень под объявленной формой form.
+func rosterOfForm(t *testing.T, form servicesan.Form, profile moduleidentity.Profile, sans ...string) moduleidentity.Roster {
 	t.Helper()
 	d := grpcsrv.NewTrustDomain("kacho.cloud")
 	entries := make([]string, 0, len(sans))
@@ -263,34 +278,34 @@ func rosterOf(t *testing.T, profile moduleidentity.Profile, sans ...string) modu
 		require.True(t, ok, "идентификатор проб %q не разобрался", san)
 		entries = append(entries, ns+"/"+account+"="+string(profile))
 	}
-	r, err := moduleidentity.Parse(entries)
+	r, err := moduleidentity.Parse(form, entries)
 	require.NoError(t, err)
 	return r
 }
 
 // writerRoster — перечень личностей проб посредника (kaname#984): модулем
-// признаётся только объявленная пара. `kacho-geo` и `kacho-unknown` объявлены
+// признаётся только объявленная пара. `mod-geo` и `mod-unknown` объявлены
 // намеренно — их пробы утверждают отказ ОТНОШЕНИЯ, а не признания.
 func writerRoster(t *testing.T) moduleidentity.Roster {
 	t.Helper()
 	return rosterOf(t, moduleidentity.ProfileModuleWriter,
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc",
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-unknown",
-		"spiffe://kacho.cloud/ns/kacho/sa/kacho-geo",
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc",
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-unknown",
+		"spiffe://kacho.cloud/ns/kacho/sa/mod-geo",
 	)
 }
 
 // TestRosterIdentityDerivesTheDeterministicServiceAccountID — признанная
 // личность выводит идентификатор служебной учётки тем же производителем, что
-// посев: `'sva' || substr(md5('kacho-<svc>'),1,17)`. Своё пространство имён у
+// посев: `'sva' || substr(md5('<учётка>'),1,17)`. Своё пространство имён у
 // пира — законный случай: сегмент ns приходит из чарта самого пира.
 func TestRosterIdentityDerivesTheDeterministicServiceAccountID(t *testing.T) {
 	want := map[string]string{
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc":         "vpc",
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-compute":     "compute",
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-nlb":         "nlb",
-		"spiffe://kacho.cloud/ns/kacho-storage/sa/kacho-storage":    "storage",
-		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-api-gateway": "api-gateway",
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc":         "vpc",
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-compute":     "compute",
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-nlb":         "nlb",
+		"spiffe://kacho.cloud/ns/platform-storage/sa/mod-storage":    "storage",
+		"spiffe://kacho.cloud/ns/platform-system/sa/mod-api-gateway": "api-gateway",
 	}
 	sans := make([]string, 0, len(want))
 	for san := range want {
@@ -301,6 +316,35 @@ func TestRosterIdentityDerivesTheDeterministicServiceAccountID(t *testing.T) {
 	for san, svc := range want {
 		id, ok := r.Lookup(d, san)
 		require.True(t, ok, "san=%q не признан", san)
-		require.Equal(t, sva(svc), authzguard.ServiceAccountIDForService(id.Service), "san=%q → sva-id", san)
+		require.Equal(t, svc, id.Service, "san=%q → служба", san)
+		require.Equal(t, sva(svc), authzguard.ServiceAccountIDForAccount(id.Account), "san=%q → sva-id", san)
 	}
+}
+
+// TestRosterIdentityOfAnotherFormDerivesItsIDFromTheWholeAccount — форма имени
+// службы приезжает величиной (kaname#308): под ДРУГОЙ объявленной формой
+// учётка прежней формы перестаёт быть модулем, а учётка той формы — становится,
+// и идентификатор служебной учётки выводится из учётки ЦЕЛИКОМ, с окончанием
+// формы, а не из имени службы с приставкой, вписанной в код. Близнец — та же
+// учётка под формой, которой она названа.
+func TestRosterIdentityOfAnotherFormDerivesItsIDFromTheWholeAccount(t *testing.T) {
+	const (
+		ofOtherForm = "spiffe://kacho.cloud/ns/platform-system/sa/acme-vpc-sa"
+		ofProbeForm = "spiffe://kacho.cloud/ns/platform-system/sa/mod-vpc"
+	)
+	otherForm := servicesan.NewForm("acme-{service}-sa")
+	r := rosterOfForm(t, otherForm, moduleidentity.ProfileModuleWriter, ofOtherForm)
+	d := grpcsrv.NewTrustDomain("kacho.cloud")
+
+	id, ok := r.Lookup(d, ofOtherForm)
+	require.True(t, ok, "учётка ОБЪЯВЛЕННОЙ формы обязана признаваться")
+	require.Equal(t, "vpc", id.Service)
+	sum := md5.Sum([]byte("acme-vpc-sa"))
+	require.Equal(t, "sva"+hex.EncodeToString(sum[:])[:17], authzguard.ServiceAccountIDForAccount(id.Account),
+		"идентификатор выведен не из учётки целиком")
+
+	_, err := moduleidentity.Parse(otherForm, []string{"platform-system/mod-vpc=module-writer"})
+	require.Error(t, err, "учётка чужой формы принята записью перечня — перечень читает не объявленную форму")
+	_, ok = r.Lookup(d, ofProbeForm)
+	require.False(t, ok, "учётка чужой формы признана модулем")
 }

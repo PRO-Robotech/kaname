@@ -49,7 +49,7 @@ import (
 // Число объявлено ОТДЕЛЬНО от перечня намеренно: приписать строку, не тронув
 // число, нельзя, и наоборот. Два места об одном предмете заведены сознательно —
 // как храповик, а не как дубль.
-const platformNameAxesDeclared = 11
+const platformNameAxesDeclared = 12
 
 // platformNameAxes — перепись осей.
 //
@@ -136,6 +136,37 @@ var platformNameAxes = []PlatformNameAxis{
 		Judges: "ни один пакет, линкуемый в двоичные файлы, не объявляет SPIFFE-имени " +
 			"литералом: домен доверия и круг отправителей принадлежат настройке установки",
 		Subject: "internal/apps/kaname/config",
+	},
+	{
+		// ФОРМА ИМЕНИ СЛУЖБЫ В SPIFFE (kaname#308). Ось «SPIFFE» выше судит
+		// литералы `spiffe://` — а приставка учётной записи модуля стояла в страже
+		// прав голой строкой без схемы и мимо её держателя проходила. Установка,
+		// называвшая свои учётки иначе, поднималась зелёной, и полоса входа
+		// отказывала каждому запросу. Форма приходит настройкой
+		// (`authn.service-name-form`), и остаток читателей разбора — НОЛЬ, держится
+		// он точно: вхождение приставки в любом из них — рост, то есть находка.
+		//
+		// Обходятся РАЗБОРЩИК формы и ВСЕ пять читателей его исхода — пробы не
+		// судятся (свойство переписи остатка): они называют чужую форму как
+		// предмет своей проверки.
+		Axis:    "форма имени службы",
+		Subject: "internal/authzguard",
+		Census: &AxisCensus{
+			Paths: []string{
+				"internal/servicesan",
+				"internal/authzguard",
+				"internal/apps/kaname/api/authorize/caller_authority.go",
+				"internal/handler/loginlanehttp/handler.go",
+				"internal/issuingsource",
+			},
+			Token:       regexp.MustCompile(`(?i)kach(o|ō)-`),
+			Occurrences: 0,
+			Files:       0,
+			Composition: "остатка нет: имя службы в SAN разбирается формой, объявленной " +
+				"установкой (authn.service-name-form), и приставки другого продукта читатели " +
+				"разбора не называют ни кодом, ни прозой",
+			Owner: "PRO-Robotech/kaname#308",
+		},
 	},
 	{
 		Axis:    "посев",

@@ -71,7 +71,7 @@ func newStepUpStand(t *testing.T, floor string) stepUpStand {
 	t.Helper()
 	reader, mint := chainMint(t)
 	policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(),
-		floorCatalog{min: floor}, presentedcred.Presented)
+		floorCatalog{min: floor}, presentedcred.Presented).WithModuleRoster(testModuleRoster())
 	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(append(
 		publicIdentityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN), reader), policy.Unary())...))
 	iamv1.RegisterProjectServiceServer(srv, stepUpProjects{})

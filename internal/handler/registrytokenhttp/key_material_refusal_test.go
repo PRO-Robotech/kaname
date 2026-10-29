@@ -73,7 +73,7 @@ func realDockerLane(t *testing.T) (http.Handler, string, string) {
 	}
 	uc = uc.WithBasicCredentialResolver(liveCredential{secret: secret, sva: svaID})
 	return NewTokenHandler(Config{
-		Realm:          "https://api.kacho.local/iam/token",
+		Realm:          "https://api.example.test/iam/token",
 		DefaultService: "registry.kacho.local",
 	}, uc), credID, secret
 }

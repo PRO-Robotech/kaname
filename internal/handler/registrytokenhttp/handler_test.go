@@ -87,7 +87,7 @@ func assertNoBearerHandedOut(t *testing.T, body []byte) {
 
 func newTokenHandler(iss TokenIssuer) *TokenHandler {
 	return NewTokenHandler(Config{
-		Realm:          "https://api.kacho.local/iam/token",
+		Realm:          "https://api.example.test/iam/token",
 		DefaultService: "registry.kacho.local",
 	}, iss)
 }
@@ -104,7 +104,7 @@ func TestToken_NoAuthorization_401Challenge(t *testing.T) {
 	}
 	wa := rec.Header().Get("WWW-Authenticate")
 	if !strings.HasPrefix(wa, "Bearer ") ||
-		!strings.Contains(wa, `realm="https://api.kacho.local/iam/token"`) ||
+		!strings.Contains(wa, `realm="https://api.example.test/iam/token"`) ||
 		!strings.Contains(wa, `service="registry.kacho.local"`) {
 		t.Fatalf("WWW-Authenticate = %q", wa)
 	}

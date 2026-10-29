@@ -46,6 +46,8 @@ import (
 	"google.golang.org/grpc/peer"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // Profile — имя закрытого перечня методов внутреннего слушателя.
@@ -78,11 +80,6 @@ func (p Profile) known() bool {
 	return false
 }
 
-// AccountPrefix — приставка учётки модуля: `<приставка><служба>`. Из учётки,
-// а не из отдельной величины, выводится короткое имя службы — по нему решают
-// домен записи отношений и идентификатор служебной учётки модуля.
-const AccountPrefix = "kacho-"
-
 // saInfix — сегмент пути идентификатора, за которым стоит учётка.
 const saInfix = "/sa/"
 
@@ -92,7 +89,8 @@ type Identity struct {
 	Namespace string
 	// Account — служебная учётка целиком.
 	Account string
-	// Service — короткое имя службы, выведенное из учётки (`vpc`, `api-gateway`).
+	// Service — короткое имя службы, выведенное из учётки объявленной формой
+	// имени службы (`vpc`, `api-gateway`).
 	Service string
 	// Profile — профиль, объявленный установкой для этой пары.
 	Profile Profile
@@ -127,15 +125,20 @@ func ParseSAN(d grpcsrv.TrustDomain, san string) (namespace, account string, ok 
 	return ns, acc, true
 }
 
-// ServiceFromAccount — короткое имя службы, которое несёт учётка модуля. Ложь —
-// учётка приставки модулей не несёт либо имя службы в ней пусто.
-func ServiceFromAccount(account string) (string, bool) {
-	svc, ok := strings.CutPrefix(account, AccountPrefix)
-	if !ok || svc == "" {
-		return "", false
-	}
-	return svc, true
+// ServiceFromAccount — короткое имя службы, которое учётка модуля несёт в
+// форме имени службы, объявленной установкой (kaname#308). Ложь — учётка этой
+// формы не имеет, имя службы в ней пусто либо форма не объявлена.
+//
+// Форма — величина установки, а не литерал разбора: как учётка складывается из
+// имени службы, решает тот, кто ставит. Пока приставка стояла здесь литералом,
+// это было имя другого продукта, и установка, называвшая учётки иначе, не
+// признавала ни одного своего модуля.
+func (r Roster) ServiceFromAccount(account string) (string, bool) {
+	return r.form.Service(account)
 }
+
+// Form — форма имени службы, которой перечень читает учётки своих записей.
+func (r Roster) Form() servicesan.Form { return r.form }
 
 // Roster — перечень личностей модулей, объявленный установкой.
 //
@@ -146,6 +149,9 @@ type Roster struct {
 	// anchors — сырые якоря центров по имени: сравнение цепочки — побайтовое,
 	// по `Raw`, а не по имени субъекта, которое повторить может кто угодно.
 	anchors map[string][][]byte
+	// form — форма имени службы установки (kaname#308): ею из учётки каждой
+	// записи читается короткое имя службы.
+	form servicesan.Form
 }
 
 // pairKey — ключ пары. Косая черта в пространстве и учётке невозможна (их
@@ -157,8 +163,12 @@ const EntryShape = "<namespace>/<service-account>=<profile>[@<issuer>]"
 
 // Parse собирает перечень из записей установки без доверенных центров: запись,
 // называющая центр, отвергается как называющая необъявленный.
-func Parse(entries []string) (Roster, error) {
-	return ParseWithIssuers(entries, nil)
+//
+// Форма имени службы — первый и обязательный довод у каждой сборки перечня:
+// учётка записи читается ею, и сборка, забывшая её подставить, не соберётся
+// вовсе, тогда как умолчание признало бы модулями учётки чужой формы.
+func Parse(form servicesan.Form, entries []string) (Roster, error) {
+	return ParseWithIssuers(form, entries, nil)
 }
 
 // ParseDeclared — суд записей БЕЗ чтения центров: форма каждой записи, единство
@@ -168,12 +178,12 @@ func Parse(entries []string) (Roster, error) {
 // посадки на любой машине. Перечень, собранный им, якорей не несёт, и личность
 // с привязкой по нему не признаётся — признаёт перечень [ParseWithIssuers],
 // собранный из прочитанных центров.
-func ParseDeclared(entries []string, issuerNames []string) (Roster, error) {
+func ParseDeclared(form servicesan.Form, entries []string, issuerNames []string) (Roster, error) {
 	declared := make(map[string]bool, len(issuerNames))
 	for _, n := range issuerNames {
 		declared[n] = true
 	}
-	return parseRoster(entries, func(issuer string) bool { return declared[issuer] }, nil)
+	return parseRoster(form, entries, func(issuer string) bool { return declared[issuer] }, nil)
 }
 
 // ParseWithIssuers собирает перечень из записей установки и её прочитанных
@@ -185,7 +195,7 @@ func ParseDeclared(entries []string, issuerNames []string) (Roster, error) {
 // записью: страж старта отвергает установку, а не признаёт меньше, чем она
 // объявила. Центр, названный записью, обязан быть объявлен и нести хотя бы
 // один якорь.
-func ParseWithIssuers(entries []string, issuers IssuerSet) (Roster, error) {
+func ParseWithIssuers(form servicesan.Form, entries []string, issuers IssuerSet) (Roster, error) {
 	anchors := make(map[string][][]byte, len(issuers))
 	for name, certs := range issuers {
 		for _, c := range certs {
@@ -194,18 +204,27 @@ func ParseWithIssuers(entries []string, issuers IssuerSet) (Roster, error) {
 			}
 		}
 	}
-	return parseRoster(entries, func(issuer string) bool { return len(anchors[issuer]) > 0 }, anchors)
+	return parseRoster(form, entries, func(issuer string) bool { return len(anchors[issuer]) > 0 }, anchors)
 }
 
 // parseRoster — общий разбор записей: known отвечает, объявлен ли центр.
-func parseRoster(entries []string, known func(issuer string) bool, anchors map[string][][]byte) (Roster, error) {
+//
+// Запись при необъявленной либо незаконной форме имени службы — отказ: имя
+// службы из её учётки прочесть нечем, а перечень, собранный мимо формы,
+// признавал бы личность без домена записи. Отказ о самой форме выносит её
+// страж (`servicesan.Form.Require`); здесь он лишь не даёт собрать перечень.
+func parseRoster(form servicesan.Form, entries []string, known func(issuer string) bool, anchors map[string][][]byte) (Roster, error) {
 	byPair := make(map[string]Identity, len(entries))
 	for _, raw := range entries {
 		entry := strings.TrimSpace(raw)
 		if entry == "" {
 			continue
 		}
-		id, err := parseEntry(entry)
+		if !form.Valid() {
+			return Roster{}, fmt.Errorf("module identity %q cannot be read: the service name form %s is "+
+				"not declared or not valid, so no service name can be read from its account", entry, form.String())
+		}
+		id, err := parseEntry(form, entry)
 		if err != nil {
 			return Roster{}, err
 		}
@@ -225,11 +244,11 @@ func parseRoster(entries []string, known func(issuer string) bool, anchors map[s
 	if len(byPair) == 0 {
 		return Roster{}, nil
 	}
-	return Roster{byPair: byPair, anchors: anchors}, nil
+	return Roster{byPair: byPair, anchors: anchors, form: form}, nil
 }
 
-// parseEntry разбирает одну непустую запись.
-func parseEntry(entry string) (Identity, error) {
+// parseEntry разбирает одну непустую запись: учётку читает форма form.
+func parseEntry(form servicesan.Form, entry string) (Identity, error) {
 	pair, rest, found := strings.Cut(entry, "=")
 	if !found {
 		return Identity{}, fmt.Errorf("module identity %q carries no profile: write it as %s", entry, EntryShape)
@@ -246,10 +265,10 @@ func parseEntry(entry string) (Identity, error) {
 		return Identity{}, fmt.Errorf("module identity %q: service account %q is not a cluster account name "+
 			"(lower-case latin letters, digits, '-' and '.', starting and ending with a letter or a digit)", entry, account)
 	}
-	svc, ok := ServiceFromAccount(account)
+	svc, ok := form.Service(account)
 	if !ok {
-		return Identity{}, fmt.Errorf("module identity %q: service account %q does not carry the module "+
-			"prefix %q followed by the service name, so no service name can be read from it", entry, account, AccountPrefix)
+		return Identity{}, fmt.Errorf("module identity %q: service account %q is not of the declared "+
+			"service name form %q, so no service name can be read from it", entry, account, form.String())
 	}
 	profile, issuer, bound := strings.Cut(rest, "@")
 	p := Profile(profile)
@@ -310,6 +329,17 @@ func (r Roster) Lookup(d grpcsrv.TrustDomain, san string) (Identity, bool) {
 		return Identity{}, false
 	}
 	return id, true
+}
+
+// Declares — объявлена ли установкой пара идентификатора san домена d: суд
+// стража старта над записью конфигурации, а не признание вызывающего.
+//
+// Привязку к выпустившему центру здесь не судят: на старте листа нет, и
+// записанный в настройке идентификатор ничьей цепочки не несёт. Ложь —
+// идентификатор формы не имеет либо его пары нет в перечне.
+func (r Roster) Declares(d grpcsrv.TrustDomain, san string) bool {
+	_, ok := r.pair(d, san)
+	return ok
 }
 
 // FromContext — признание вызывающего gRPC-слушателя: идентификатор

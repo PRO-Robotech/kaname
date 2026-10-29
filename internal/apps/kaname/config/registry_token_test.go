@@ -34,9 +34,9 @@ func TestRegistryTokenListenAddress_Default(t *testing.T) {
 	}
 }
 
-// TestRegistryTokenPolicy_Defaults — the minted identity-JWT policy defaults
-// (issuer + TTL) match the data-plane's advertised realm. The addressee
-// (`service`) has NO default — see the note at the assertion below.
+// TestRegistryTokenPolicy_Defaults — умолчания политики выпускаемого токена.
+// Умолчание есть только у срока; ни у издателя, ни у адресата его нет — обе
+// величины у каждой установки свои (пояснения — у утверждений ниже).
 func TestRegistryTokenPolicy_Defaults(t *testing.T) {
 	t.Parallel()
 	cfg, err := config.Load("")
@@ -44,8 +44,13 @@ func TestRegistryTokenPolicy_Defaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	tok := cfg.APIServer.RegistryToken
-	if got := tok.TokenIssuer(); got != "https://api.kacho.local/iam/token" {
-		t.Errorf("TokenIssuer() = %q, want https://api.kacho.local/iam/token", got)
+	// ИЗДАТЕЛЬ УМОЛЧАНИЯ НЕ ИМЕЕТ (kaname#309): он и есть адрес нашей полосы, а
+	// адрес у каждой установки свой. Прежнее встроенное умолчание называло
+	// координату соседнего продукта: установка поднималась зелёной и чеканила
+	// удостоверения с чужим издателем. Незаданный издатель при поднятом
+	// слушателе отвергается стражем старта — registry_token_issuer_guard_test.go.
+	if got := tok.TokenIssuer(); got != "" {
+		t.Errorf("TokenIssuer() = %q, want empty (издателя объявляет посадка, а не код)", got)
 	}
 	// АДРЕСАТ УМОЛЧАНИЯ НЕ ИМЕЕТ (задача kacho#1184): имя службы реестра объявляет
 	// посадка ОДИН раз на обе стороны полосы. Встроенное умолчание здесь было
@@ -60,14 +65,14 @@ func TestRegistryTokenPolicy_Defaults(t *testing.T) {
 	}
 }
 
-// TestRegistryTokenConfig_AccessorFallbacks — the accessors fall back to the
-// built-in policy defaults on an unset struct (independent of viper), and
-// normalise the endpoint like every other listener.
+// TestRegistryTokenConfig_AccessorFallbacks — на незаданной структуре (мимо
+// випера) доступ к величинам подмены не делает: издатель и адресат пусты, срок
+// берёт встроенное умолчание, адрес слушателя приводится как у любого слушателя.
 func TestRegistryTokenConfig_AccessorFallbacks(t *testing.T) {
 	t.Parallel()
 	var empty config.RegistryTokenConfig
-	if got := empty.TokenIssuer(); got != "https://api.kacho.local/iam/token" {
-		t.Errorf("empty TokenIssuer() = %q, want default issuer", got)
+	if got := empty.TokenIssuer(); got != "" {
+		t.Errorf("empty TokenIssuer() = %q, want empty (у издателя умолчания нет)", got)
 	}
 	if got := empty.TokenService(); got != "" {
 		t.Errorf("empty TokenService() = %q, want empty (у адресата умолчания нет)", got)

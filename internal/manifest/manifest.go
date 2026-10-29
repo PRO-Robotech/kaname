@@ -171,6 +171,15 @@ type Manifest struct {
 	// строгом разборе. Значения не несёт: номер судится по узлу документа и
 	// читается [Manifest.Revision] — см. revision.go.
 	RevisionKey revisionKey `yaml:"revision"`
+	// ClassGrantsOnlyOnContainers — ключ оболочки стадии S7 (kaname#950): модуль
+	// принимает выдачу системному классу, достающую до его типов, только на
+	// объявленном контейнере публичного чтения — см. classgrants.go.
+	//
+	// Указатель по тому же доводу, что `Resource.PublicReadToChildren`: значение
+	// выражается ОДНИМ способом — ключ отсутствует либо равен true; `false`
+	// отличим от отсутствия только указателем, и загрузка его отвергает (SC-80
+	// (б)). Читатели спрашивают [Manifest.DeclaresClassGrantsOnlyOnContainers].
+	ClassGrantsOnlyOnContainers *bool `yaml:"classGrantsOnlyOnContainers"`
 	// Resources — что модуль объявляет платформе о своих правах. Раздел
 	// НЕОДНОРОДЕН: часть ключей порождается из аннотаций, часть пишет человек —
 	// см. resources.go.
@@ -468,9 +477,10 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 
 	// Разделы судятся В ПОРЯДКЕ ДОКУМЕНТА, и находки собираются ВСЕ: названная
 	// первая заставила бы автора чинить их по одной, по прогону на каждую.
-	faults := validateResources(&m, doc, referent)
+	faults := validateClassGrants(&m, doc)
+	faults = append(faults, validateResources(&m, doc, referent)...)
 	faults = append(faults, validateContainerVerbs(&m, doc, loadOpts.oracle)...)
-	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules))...)
+	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules), loadOpts.canon)...)
 	faults = append(faults, validateDeprecatedVerbs(&m, doc)...)
 	faults = append(faults, refuseObjectRefs(&m, doc)...) // ссылки на объекты, kaname#965
 

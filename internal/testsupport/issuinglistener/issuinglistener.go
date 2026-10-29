@@ -35,6 +35,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // Идентичности проб: домен доверия, SAN края и SAN соседней службы того же УЦ.
@@ -43,6 +44,10 @@ const (
 	EdgeSAN     = "spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"
 	NeighborSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc"
 )
+
+// ServiceNameForm — форма имени службы, которой названы учётки проб
+// (kaname#308): край узнаётся по объявленной форме, а не по литералу у стража.
+const ServiceNameForm = "kacho-{service}"
 
 // Stand — поднятый слушатель и его УЦ.
 type Stand struct {
@@ -160,7 +165,7 @@ func writePEM(t *testing.T, dir, name, kind string, der []byte) string {
 // объявлены парами своих SAN. Краем правило источника признаёт только
 // объявленную пару, поэтому проба края без перечня судила бы мир без края.
 func ModuleRoster() moduleidentity.Roster {
-	r, err := moduleidentity.Parse([]string{"kacho/kacho-api-gateway=edge", "kacho/kacho-vpc=module-writer"})
+	r, err := moduleidentity.Parse(servicesan.NewForm(ServiceNameForm), []string{"kacho/kacho-api-gateway=edge", "kacho/kacho-vpc=module-writer"})
 	if err != nil {
 		panic("перечень личностей проб не разобрался: " + err.Error())
 	}

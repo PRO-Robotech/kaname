@@ -104,3 +104,43 @@ func TestEmitDeleteTx_GrantFoldedAfterTheRevokeSurvives(t *testing.T) {
 	require.Equal(t, 1, factCount(t, pool, "prj_ver919b", "user:usr_ver919b"),
 		"близнец: выдача, записанная после коммита снятия, обязана остаться — иначе ноль в первой пробе ни о чём")
 }
+
+// TestEmitDeleteTx_GrantBegunBeforeTheRemovalOfAStandingFactSurvives — близнец
+// надгробия снятия по другую сторону его границы (kaname#636, миграция
+// 20261028210500, п. 3 шапки): факт стоит, вторая выдача того же кортежа начала
+// транзакцию раньше снятия и свёрнута ПОСЛЕ его коммита — факт остаётся. Строка
+// выдачи без версии владельца упорядочена меткой журнала (начало транзакции), и
+// её метка старше метки снятия; след снятия её не судит — иначе действующая
+// выдача осталась бы без факта.
+func TestEmitDeleteTx_GrantBegunBeforeTheRemovalOfAStandingFactSurvives(t *testing.T) {
+	pool := versionPool(t)
+	ctx := context.Background()
+	tuple := []clients.RelationTuple{{User: "user:usr_ver636", Relation: "admin", Object: "project:prj_ver636"}}
+
+	first, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = first.Rollback(context.Background()) })
+	require.NoError(t, fga_outbox.EmitWriteTx(ctx, first, tuple))
+	require.NoError(t, first.Commit(ctx))
+	require.Equal(t, 1, factCount(t, pool, "prj_ver636", "user:usr_ver636"),
+		"ПРЕДПОСЫЛКА: первая выдача легла фактом")
+
+	granter, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = granter.Rollback(context.Background()) })
+	_, err = granter.Exec(ctx, `SELECT now()`)
+	require.NoError(t, err, "ПРЕДПОСЫЛКА: транзакция второй выдачи начата")
+
+	revoker, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = revoker.Rollback(context.Background()) })
+	require.NoError(t, fga_outbox.EmitDeleteTx(ctx, revoker, tuple))
+	require.NoError(t, revoker.Commit(ctx))
+	require.Zero(t, factCount(t, pool, "prj_ver636", "user:usr_ver636"),
+		"ПРЕДПОСЫЛКА: снятие сняло стоящий факт")
+
+	require.NoError(t, fga_outbox.EmitWriteTx(ctx, granter, tuple))
+	require.NoError(t, granter.Commit(ctx))
+	require.Equal(t, 1, factCount(t, pool, "prj_ver636", "user:usr_ver636"),
+		"выдача, начавшая транзакцию раньше снятия стоящего факта и свёрнутая после его коммита, факта не дала — надгробие судит строку без версии владельца")
+}

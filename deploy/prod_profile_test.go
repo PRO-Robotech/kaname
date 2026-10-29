@@ -214,6 +214,7 @@ var configBridge = []bridged{
 	{configKey: "invite-mail.from", valuePath: []string{"inviteMail", "from"}, omitEmpty: true},
 	{configKey: "authn.trusted-forwarder-sans", valuePath: []string{"authn", "trustedForwarderSANs"}, omitEmpty: true},
 	{configKey: "authn.trust-domain", valuePath: []string{"authn", "trustDomain"}, omitEmpty: true},
+	{configKey: "authn.service-name-form", valuePath: []string{"authn", "serviceNameForm"}, omitEmpty: true},
 	{configKey: "authn.module-identities", valuePath: []string{"authn", "moduleIdentities"}, omitEmpty: true},
 	{configKey: "authn.client-issuers", valuePath: []string{"authn", "clientIssuers"}, omitEmpty: true},
 	// СОБСТВЕННЫЕ REST-ФРОНТЫ. Умолчания у адресов нет намеренно: адрес,
@@ -406,10 +407,6 @@ var restatedDeliberately = map[string]string{
 		"потому, что это АДРЕС, по которому всякий проверяющий наш токен читает набор " +
 		"ключей: оставленный умолчанием, он верен ровно до первого решения сменить путь — и " +
 		"тогда смена окажется невидимой в профиле",
-	"apiServer.registryToken.issuer": "встроенное умолчание процесса непусто (локальное имя), " +
-		"поэтому страж на снятии молчит. Величина объявлена потому, что это realm, который " +
-		"докерный клиент слышит от нас: оставленное умолчание отправило бы его на хост, " +
-		"которого у этой установки нет",
 	// Два HTTP-ребра, чей транспорт задавал ЗОНТИЧНЫЙ чарт монорепо: у отдельно
 	// поставленной службы его нет, а адреса обоих приходят умолчанием процесса и
 	// потому непусты всегда (третьим было ребро вебхуков поставщика, снятое

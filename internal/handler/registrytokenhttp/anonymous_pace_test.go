@@ -48,7 +48,7 @@ func pacedAnonHandler(t *testing.T, perSec int) (*TokenHandler, *anonMinter) {
 		t.Fatalf("полоса пробы: %v", err)
 	}
 	h := NewTokenHandler(Config{
-		Realm:          "https://api.kacho.local/iam/token",
+		Realm:          "https://api.example.test/iam/token",
 		DefaultService: "registry.kacho.local",
 		Source:         func(r *http.Request) string { return strings.Split(r.RemoteAddr, ":")[0] },
 	}, uc)

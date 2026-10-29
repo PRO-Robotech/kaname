@@ -44,6 +44,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // relationWriteRelation — отношение, которым гейт записи кортежей задаёт свой
@@ -61,10 +62,16 @@ var modulesThatWriteRelations = []string{"vpc", "compute", "nlb", "registry", "s
 // посева, которой право писать кортежи не выдано намеренно.
 const moduleWithoutRelationWrite = "api-gateway"
 
+// seededModuleForm — форма имени, которой посев платформы этой пробы называет
+// учётки модулей. Идентификатор учётки выводится из её имени целиком
+// (kaname#308), поэтому проба называет форму посева сама: литерала формы у
+// стража прав больше нет.
+var seededModuleForm = servicesan.NewForm("kacho-{service}")
+
 func askRelationWrite(t *testing.T, ctx context.Context, asker *relverdict.Asker, svc string) bool {
 	t.Helper()
 	allowed, err := asker.Allowed(ctx,
-		"service_account:"+authzguard.ServiceAccountIDForService(svc),
+		"service_account:"+authzguard.ServiceAccountIDForAccount(seededModuleForm.Account(svc)),
 		"cluster", domain.ClusterSingletonID, relationWriteRelation, nil)
 	require.NoError(t, err, "вопрос о праве писать кортежи обязан быть задаваем: %s", svc)
 	return allowed
@@ -209,7 +216,7 @@ func TestIntegration_R914_RevokingTheClusterGrantClosesTheWrite(t *testing.T) {
 	// пока дерево платформы не называло ни одно из них (#108). Отбор ПОЛОЖИТЕЛЬНЫЙ:
 	// тот же субъект, тот же якорь, любое отношение, кроме отозванного. Пустой
 	// отбор — отказ, а не молчание: контроль без основания ничего не контролирует.
-	subject := "service_account:" + authzguard.ServiceAccountIDForService("vpc")
+	subject := "service_account:" + authzguard.ServiceAccountIDForAccount(seededModuleForm.Account("vpc"))
 	var sibling string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT relation FROM kaname.relation_fact

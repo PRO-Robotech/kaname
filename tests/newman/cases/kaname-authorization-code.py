@@ -560,7 +560,7 @@ def _present(tag, name, *, token_var, accepted):
 _T = "Hp"
 CASES.append(Case(
     id="IAM-AUTHCODE-OK-ISSUE-EXCHANGE-ACCEPT",
-    title="02→10→18: вход нашим входом, код перенаправлением, обмен на наш токен, фронт принимает его",
+    title="02→10→18: вход нашим входом, код перенаправлением, обмен на наш токен, фронт принимает его (IC-SECRET-06)",
     classes=["CRUD", "SEC"],
     priority="P0",
     steps=[
@@ -749,7 +749,7 @@ _T = "Cu"
 _WRONG_SECRET = "'not-the-secret-' + pm.environment.get('runId')"
 CASES.append(Case(
     id="IAM-AUTHCODE-NEG-CLIENT-UNAUTHENTICATED",
-    title="12: без секрета, с неверным секретом, с неверным секретом и неизвестным кодом — 401 invalid_client",
+    title="12: без секрета, с неверным секретом, с неверным секретом и неизвестным кодом — 401 invalid_client (IC-SECRET-06)",
     classes=["NEG", "SEC"],
     priority="P0",
     steps=[

@@ -54,7 +54,7 @@ func dockerLogin(t *testing.T, h http.Handler, user, pass string) int {
 func buildLane(t *testing.T, until time.Time, obs *countingObserver) http.Handler {
 	t.Helper()
 	mux, err := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
-		Realm:                  "https://api.kacho.local/iam/token",
+		Realm:                  "https://api.example.test/iam/token",
 		Service:                "registry.probe.local",
 		BasicCredentialTimeout: time.Second,
 		KeyMaterialWindowUntil: until,

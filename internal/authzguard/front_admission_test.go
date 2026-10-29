@@ -23,7 +23,7 @@ import (
 func TestHopAdmits_RefusesWhomTheHopCannotNarrow(t *testing.T) {
 	ca := moduleroster.NewCA(t, "internal")
 	d := moduleroster.Domain()
-	roster := testModuleRoster()
+	roster := moduleroster.Roster(t)
 	for name, tc := range map[string]struct {
 		st    *tls.ConnectionState
 		admit bool

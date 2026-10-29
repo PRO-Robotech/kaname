@@ -11,7 +11,7 @@ import (
 // стражей вне `runServe` (kaname#984): край и модуль-владелец в пространстве
 // `kacho` домена `kacho.cloud` — те, кого эти пробы предъявляют законными.
 func testModuleRoster() moduleidentity.Roster {
-	r, err := moduleidentity.Parse([]string{
+	r, err := moduleidentity.Parse(probeServiceNameForm, []string{
 		"kacho/kacho-api-gateway=edge",
 		"kacho/kacho-vpc=module-writer",
 	})

@@ -355,6 +355,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"refresh_tokens": nil,
 	// Факт отношения выводит триггер схемы из очереди кортежей.
 	"relation_fact": nil,
+	// Надгробие факта отношения пишет та же свёртка журнала из очереди кортежей.
+	"relation_fact_removal": nil,
 	// Журнал ресурсов — событие пишет служба.
 	"resource_journal": nil,
 	// Зеркало чужого ресурса: тип и идентификатор прислала служба-владелец;

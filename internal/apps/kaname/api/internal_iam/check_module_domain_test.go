@@ -26,6 +26,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 )
 
@@ -36,7 +37,7 @@ const registryDataPlaneSAN = "spiffe://" + moduleroster.DomainName + "/ns/regist
 // domainRoster — плоскость данных registry и модуль-владелец vpc.
 func domainRoster(t *testing.T) moduleidentity.Roster {
 	t.Helper()
-	r, err := moduleidentity.Parse([]string{
+	r, err := moduleidentity.Parse(servicesan.NewForm("kacho-{service}"), []string{
 		"registry-data/kacho-registry=data-plane",
 		"kacho/kacho-vpc=module-writer",
 	})

@@ -313,13 +313,9 @@ func Inspect(repoRoot, ledgerRel, revRange string) (Report, error) {
 	if err != nil {
 		return rep, fmt.Errorf("ведомость %s не прочитана: %w", ledgerRel, err)
 	}
-	var ledger Ledger
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	// Неизвестный ключ — отказ, а не тишина: ключ, который ведомость объявляет,
-	// а гейт не читает, есть принятое-и-проигнорированное.
-	dec.KnownFields(true)
-	if err := dec.Decode(&ledger); err != nil {
-		return rep, fmt.Errorf("ведомость %s не разобрана: %w", ledgerRel, err)
+	ledger, err := decodeLedger(raw, ledgerRel)
+	if err != nil {
+		return rep, err
 	}
 	// Область сводится к корню судимого дерева ЗДЕСЬ: ведомость объявляет её
 	// относительно себя, а git спрашивают путями от корня.
@@ -436,6 +432,21 @@ func Inspect(repoRoot, ledgerRel, revRange string) (Report, error) {
 	return rep, nil
 }
 
+// decodeLedger разбирает ведомость. Разборщик один на оба суждения — гейт
+// дерева и судью отправки: второй разошёлся бы с первым молча.
+//
+// Неизвестный ключ — отказ, а не тишина: ключ, который ведомость объявляет, а
+// разборщик не читает, есть принятое-и-проигнорированное.
+func decodeLedger(raw []byte, name string) (Ledger, error) {
+	var ledger Ledger
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&ledger); err != nil {
+		return Ledger{}, fmt.Errorf("ведомость %s не разобрана: %w", name, err)
+	}
+	return ledger, nil
+}
+
 // index строит отбор по адресу и заодно судит саму ведомость: запись без
 // адреса либо без причины — дефект основания гейта, а не тишина.
 func index(entries []Entry, group string) (map[string]*Entry, []string) {
@@ -458,8 +469,10 @@ func index(entries []Entry, group string) (map[string]*Entry, []string) {
 	return out, fails
 }
 
+// commitRec — коммит: автор (name, email), коммиттер и сообщение.
 type commitRec struct {
-	sha, name, email, body string
+	sha, name, email, body        string
+	committerName, committerEmail string
 }
 
 type contributor struct {
@@ -581,18 +594,21 @@ func short(sha string) string {
 // вердикт о вкладе по истории ЧУЖОГО репозитория, оставаясь на вид исправным.
 // Дополнять окружение можно только ДОПИСЫВАНИЕМ к `gitenv.Env()`.
 func gitLog(repoRoot, revRange string, scope []string) ([]commitRec, error) {
-	args := []string{"log", "-z", "--format=%H%x1f%an%x1f%ae%x1f%B", revRange}
+	args := []string{revRange}
 	if len(scope) > 0 {
 		args = append(args, "--")
 		args = append(args, scope...)
 	}
-	cmd := gitenv.Command(repoRoot, args...)
-	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	return readCommits(repoRoot, args)
+}
+
+// readCommits — `git log` по доводам revs: автор, коммиттер и сообщение каждого
+// коммита. Тот же разбор у гейта дерева и у судьи отправки.
+func readCommits(repoRoot string, revs []string) ([]commitRec, error) {
+	args := append([]string{"log", "-z", "--format=%H%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%B"}, revs...)
+	out, err := gitOutput(repoRoot, args...)
 	if err != nil {
-		return nil, fmt.Errorf("git log %s: %w: %s", revRange, err, stderr.String())
+		return nil, err
 	}
 
 	var recs []commitRec
@@ -600,16 +616,32 @@ func gitLog(repoRoot, revRange string, scope []string) ([]commitRec, error) {
 		if strings.TrimSpace(chunk) == "" {
 			continue
 		}
-		parts := strings.SplitN(chunk, "\x1f", 4)
-		if len(parts) != 4 {
+		parts := strings.SplitN(chunk, "\x1f", 6)
+		if len(parts) != 6 {
 			return nil, fmt.Errorf("неразобранная запись git log: %q", short(chunk))
 		}
 		recs = append(recs, commitRec{
-			sha:   strings.TrimSpace(parts[0]),
-			name:  parts[1],
-			email: parts[2],
-			body:  parts[3],
+			sha:            strings.TrimSpace(parts[0]),
+			name:           parts[1],
+			email:          parts[2],
+			committerName:  parts[3],
+			committerEmail: parts[4],
+			body:           parts[5],
 		})
 	}
 	return recs, nil
+}
+
+// gitOutput — вывод git в судимом дереве ЧЕРЕЗ corelib/gitenv; отказ несёт
+// текст stderr.
+func gitOutput(repoRoot string, args ...string) ([]byte, error) {
+	cmd := gitenv.Command(repoRoot, args...)
+	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return out, nil
 }

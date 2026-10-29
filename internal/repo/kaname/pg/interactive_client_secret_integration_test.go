@@ -66,7 +66,7 @@ import (
 // icRedirect — адрес возврата R приёмки (тот же, что REDIRECT набора края
 // платформы `PRO-Robotech/kacho:gateway/tests/newman/cases/iam-interactive-client.py`,
 // куда набор переехал из этого дерева).
-const icRedirect = "https://api.kacho.local/auth/callback"
+const icRedirect = "https://api.example.test/auth/callback"
 
 // icPHC — форма проверочного значения колонки (ограничение
 // `interactive_clients_secret_verifier_form_ck`).
@@ -132,7 +132,7 @@ func (w *icSecretWorld) handlerOver(store icClientStore) *interactiveclient.Hand
 	return interactiveclient.NewHandler(
 		interactiveclient.NewGetUseCase(store),
 		interactiveclient.NewListUseCase(store),
-		interactiveclient.NewCreateUseCase(store, w.provider, w.ops, []string{"https://api.kacho.local"}, w.logger),
+		interactiveclient.NewCreateUseCase(store, w.provider, w.ops, []string{"https://api.example.test"}, w.logger),
 		interactiveclient.NewUpdateUseCase(store, w.ops, w.logger),
 		interactiveclient.NewDeleteUseCase(store, w.provider, w.ops, w.logger),
 	)
@@ -559,7 +559,7 @@ func TestIntegration_MalformedVerifierIsOurDefectNotTheCallers(t *testing.T) {
 	_, err = w.repo.Insert(w.ctx, domain.InteractiveClient{
 		ID: "ic-00000000000000009", Name: "ic-secret-bad-phc",
 		RedirectURIs: []string{icRedirect}, PostLogoutRedirectURIs: []string{},
-		ClientID: "oic-badphc0000000000000", Audiences: []string{"https://api.kacho.local"},
+		ClientID: "oic-badphc0000000000000", Audiences: []string{"https://api.example.test"},
 		GrantTypes:              []string{"authorization_code", "refresh_token"},
 		TokenEndpointAuthMethod: "client_secret_basic", Status: domain.InteractiveClientActive,
 	}, bad)

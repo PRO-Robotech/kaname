@@ -49,6 +49,7 @@ func TestKeyMaterialWindow_MalformedValueRefusesToStart(t *testing.T) {
 			c := config.RegistryTokenConfig{
 				Endpoint:                  "tcp://0.0.0.0:9096",
 				Service:                   "registry.kacho.local",
+				Issuer:                    probeIssuer,
 				KeyMaterialWindowUntilRaw: raw,
 			}
 			_, err := c.KeyMaterialWindowUntil()
@@ -73,6 +74,7 @@ func TestKeyMaterialWindow_DeclaredInstantIsParsedAndUnboundedIsUnexpressible(t 
 	c := config.RegistryTokenConfig{
 		Endpoint:                  "tcp://0.0.0.0:9096",
 		Service:                   "registry.kacho.local",
+		Issuer:                    probeIssuer,
 		KeyMaterialWindowUntilRaw: declared,
 	}
 

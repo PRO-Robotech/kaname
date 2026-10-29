@@ -71,7 +71,9 @@ const CatalogLockKey = "kaname.module_catalog"
 //
 // # Состав ВЫВЕДЕН из `WHERE` писателя, а не выбран
 //
-//	`catalog_module`    `live` — оживление модуля есть изменение
+//	`catalog_module`    `live` — оживление модуля есть изменение;
+//	                    `class_grants_only_on_containers` — условие изменения
+//	                    `UpsertModule` (ключ S7, kaname#950)
 //	`catalog_resource`  `resource`, `object_type`, `parent_types`,
 //	                    `public_read_to_children`, `live` — ровно то, что читает
 //	                    условие изменения `UpsertResource`, плюс ключ снятия
@@ -105,7 +107,7 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 	  FROM (
 	    SELECT 'module:' || $1::text AS x
 	    UNION ALL
-	    SELECT 'm:' || module || ':' || live::text
+	    SELECT 'm:' || module || ':' || live::text || ':' || class_grants_only_on_containers::text
 	      FROM kaname.catalog_module WHERE module = $1
 	    UNION ALL
 	    SELECT 'r:' || resource || ':' || object_type || ':' || array_to_string(parent_types, ',')
@@ -179,6 +181,8 @@ func (w catalogWriter) LockCatalog(ctx context.Context) error {
 // ещё нет, ключом не держит никто, а второго применителя не пускает
 // консультативный замок каталога.
 func (w catalogWriter) LockModuleRow(ctx context.Context, module string) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строка модуля FOR UPDATE — первым строчным
+	// замком, за которым применитель ждёт другого писателя (после 2р).
 	_, err := w.tx.Exec(ctx, `
 		SELECT 1 FROM kaname.catalog_module
 		 WHERE module = $1
@@ -229,6 +233,10 @@ func (w catalogWriter) LockModuleRow(ctx context.Context, module string) error {
 // то, что есть, а строки, которых ещё нет, конкурента иметь не могут — второго
 // применителя не пускает консультативный замок каталога.
 func (w catalogWriter) LockModuleResources(ctx context.Context, module string) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строки ресурсов модуля — FOR UPDATE, ORDER BY
+	// dotted, одним оператором, после строки модуля. Писатели проекций роли берут
+	// те же строки FOR KEY SHARE тем же порядком и ВПЕРЁД вставок
+	// (lockCatalogResourceRows). Перепись — docs/changes/kn-922/lock-order-census.md.
 	_, err := w.tx.Exec(ctx, `
 		SELECT 1 FROM kaname.catalog_resource
 		 WHERE module = $1
@@ -402,13 +410,20 @@ func (w catalogWriter) AdvanceRevision(
 // Оживление, а не вставка новой строки: снятая строка занимает первичный ключ, и
 // на этом стоит обратимость установки — повторная установка возвращает ТУ ЖЕ
 // строку, а не заводит вторую с той же парой.
-func (w catalogWriter) UpsertModule(ctx context.Context, module string) (bool, error) {
+//
+// Признак ключа S7 (`class_grants_only_on_containers`, kaname#950) входит в
+// условие изменения по тому же доводу, что признак контейнера у строки ресурса:
+// снятый с манифеста ключ, не доехавший до строки, оставил бы модуль закрытым
+// для выдач классу, которые он больше не запрещает, а объявленный — открытым.
+func (w catalogWriter) UpsertModule(ctx context.Context, module string, classGrantsOnly bool) (bool, error) {
 	return w.changed(ctx, `
-		INSERT INTO kaname.catalog_module (module) VALUES ($1)
+		INSERT INTO kaname.catalog_module (module, class_grants_only_on_containers) VALUES ($1, $2)
 		ON CONFLICT (module) DO UPDATE
-		   SET retired_at = NULL, live = true, retired_reason = NULL
+		   SET retired_at = NULL, live = true, retired_reason = NULL,
+		       class_grants_only_on_containers = EXCLUDED.class_grants_only_on_containers
 		 WHERE catalog_module.live IS DISTINCT FROM true
-		RETURNING 1`, module)
+		    OR catalog_module.class_grants_only_on_containers IS DISTINCT FROM EXCLUDED.class_grants_only_on_containers
+		RETURNING 1`, module, classGrantsOnly)
 }
 
 // UpsertResource заводит либо оживляет строку ресурса.

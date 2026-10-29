@@ -147,6 +147,13 @@ type ReaderIface interface {
 	// каталоге нет, — нулевое значение: не объявлен, детей нет.
 	PublicReadContainer(ctx context.Context, dottedType string) (domain.PublicReadContainer, error)
 
+	// ClassGrantsKeyedModules — модули, объявившие ключ S7
+	// (`catalog_module.class_grants_only_on_containers`, kaname#950), и их ЖИВЫЕ
+	// типы с признаком контейнера публичного чтения — тем же живым каталогом,
+	// что [ReaderIface.PublicReadContainer]. Одно чтение на выдачу классу;
+	// модулей с ключом нет — пустая карта.
+	ClassGrantsKeyedModules(ctx context.Context) (domain.ClassGrantsKeyedModules, error)
+
 	// ListMaterializedAtForBindings batch-loads, for MANY bindings in one query,
 	// the instant each one's per-object access last became live: MAX(updated_at)
 	// over its ACTIVE rows in access_binding_target_members (the reconciler's

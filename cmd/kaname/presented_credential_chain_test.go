@@ -267,7 +267,8 @@ func TestKAN_FWD_01_ForwardedIdentityStillPassesTheRealChain(t *testing.T) {
 // признаёт названного читателем» зеленело бы на политике, снятой целиком.
 func TestKAN_VER_01_CallerNamedByAPresentedCredentialIsALegitimatePublicCaller(t *testing.T) {
 	reader, raw := chainReader(t)
-	policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), noFloorCatalog{}, presentedcred.Presented)
+	policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), noFloorCatalog{}, presentedcred.Presented).
+		WithModuleRoster(testModuleRoster())
 	chain := chainUnaryServer(append(
 		publicIdentityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN), reader),
 		policy.Unary())...)
@@ -315,7 +316,8 @@ func TestKAN_VER_01_PresentedLaneDoesNotBypassTheAssuranceFloor(t *testing.T) {
 	reader, raw := chainReader(t)
 
 	chainWith := func(catalog authzguard.ACRRequirementLookup) grpc.UnaryServerInterceptor {
-		policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), catalog, presentedcred.Presented)
+		policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), catalog, presentedcred.Presented).
+			WithModuleRoster(testModuleRoster())
 		return chainUnaryServer(append(
 			publicIdentityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN), reader),
 			policy.Unary())...)

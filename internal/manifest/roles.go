@@ -399,7 +399,11 @@ func (r Rule) formRule() domain.Rule {
 // вызывающим (moduleset.go) и здесь не добывается: прежде набор брался у
 // перечня, порождённого сборкой, и правило модуля оператора отвергалось
 // «unknown module» при том, что его манифест доставку уже прошёл.
-func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet) []error {
+//
+// `canon` — родство типов канона для судьи вложенных правил (kaname#951); тоже
+// вносится вызывающим ([WithTypeCanon]), `nil` — судится только раздел
+// `resources` документа.
+func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet, canon TypeCanon) []error {
 	var faults []error
 	seen := map[string]int{}
 
@@ -429,7 +433,7 @@ func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet) []erro
 			// причину с координатой, а домен на той же форме ответил бы своим
 			// общим текстом (у `*` владельца — «подстановка только системная»),
 			// не сказав, что не так с вложенностью (kaname#874, ND-04).
-			if nestFaults := validateRuleChildren(m, rule, doc, i, j); len(nestFaults) > 0 {
+			if nestFaults := validateRuleChildren(m, rule, doc, i, j, canon); len(nestFaults) > 0 {
 				faults = append(faults, nestFaults...)
 				continue
 			}

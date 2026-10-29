@@ -110,8 +110,10 @@ func (h *Handler) WithModuleRoster(r moduleidentity.Roster) *Handler {
 	return h
 }
 
-// NewHandler — builder. Both svc and whoAmI are required (composition root
-// wires both unconditionally; nil at construction time means a wiring bug).
+// NewHandler — построитель. svc и whoAmI обязательны: композиционный корень
+// провязывает их безусловно, и nil при сборке означает ошибку провязки. Пира-модуля
+// обработчик признаёт только по перечню личностей (WithModuleRoster), и форму
+// имени службы установки перечень несёт сам (kaname#308).
 func NewHandler(svc Authorizer, whoAmI *WhoAmIUseCase) *Handler {
 	return &Handler{svc: svc, whoAmI: whoAmI}
 }

@@ -37,7 +37,7 @@ func f1bHandler(t *testing.T) (*TokenHandler, *fakeIssuer) {
 	f := &fakeIssuer{out: registrytokenuc.IssueOutput{
 		Token: "the.jwt.token", ExpiresIn: 300, IssuedAt: 1700000000,
 	}}
-	return NewTokenHandler(Config{Realm: "https://api.kacho.local/iam/token",
+	return NewTokenHandler(Config{Realm: "https://api.example.test/iam/token",
 		DefaultService: "registry.kacho.local"}, f), f
 }
 

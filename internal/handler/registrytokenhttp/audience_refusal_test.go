@@ -68,7 +68,7 @@ func TestAudienceRefusedLooksExactlyLikeAnyOtherAuthFailure(t *testing.T) {
 func TestAudienceRefusalReachesTheLog(t *testing.T) {
 	var buf bytes.Buffer
 	h := NewTokenHandler(Config{
-		Realm:          "https://api.kacho.local/iam/token",
+		Realm:          "https://api.example.test/iam/token",
 		DefaultService: "registry.kacho.local",
 	}, &fakeIssuer{err: registrytokenuc.ErrAudienceNotAllowed}).
 		WithLogger(slog.New(slog.NewJSONHandler(&buf, nil)))
@@ -89,7 +89,7 @@ func TestAudienceRefusalReachesTheLog(t *testing.T) {
 	// адресата НЕ называет — иначе строка выше зеленела бы на любом отказе.
 	buf.Reset()
 	h = NewTokenHandler(Config{
-		Realm:          "https://api.kacho.local/iam/token",
+		Realm:          "https://api.example.test/iam/token",
 		DefaultService: "registry.kacho.local",
 	}, &fakeIssuer{err: registrytokenuc.ErrUnauthenticated}).
 		WithLogger(slog.New(slog.NewJSONHandler(&buf, nil)))

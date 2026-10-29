@@ -17,6 +17,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // authorityStub — configurable authzguard.RelationChecker for the inner
@@ -35,12 +36,21 @@ func (a *authorityStub) Check(_ context.Context, subject, relation, object strin
 	return a.allow[relation+"|"+object], nil
 }
 
+// probeModuleForm — форма имени службы, которой названы учётки проб пакета
+// (`moduleCertCtx`): объявление установки, под которым собирается обработчик.
+var probeModuleForm = servicesan.NewForm("kacho-{service}")
+
 func newHandlerWithAuthority(svcCheck bool, auth *authorityStub) *Handler {
+	return newHandlerOfForm(svcCheck, auth, probeModuleForm)
+}
+
+// newHandlerOfForm — тот же обработчик, собранный с объявленной формой form.
+func newHandlerOfForm(svcCheck bool, auth *authorityStub, form servicesan.Form) *Handler {
 	stub := &stubVerdict{check: svcCheck}
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: stub,
 	})
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithModuleRoster(testModuleRoster()).WithCallerAuthority(auth)
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithModuleRoster(testModuleRosterOfForm(form)).WithCallerAuthority(auth)
 }
 
 // newHandlerWithAuthorityProd builds the handler in the DEFAULT posture, which
@@ -232,6 +242,22 @@ func TestCallerAuthority_Anonymous_ProdMode_VerifiedModuleCert_Allowed(t *testin
 	if auth.calls != 0 {
 		t.Errorf("module-peer path must not hit the authority checker; calls=%d", auth.calls)
 	}
+}
+
+// TestCallerAuthority_Anonymous_ProdMode_ModuleOfAForeignForm_Denied — пир
+// узнаётся модулем ОБЪЯВЛЕННОЙ формой имени службы (kaname#308). Тот же
+// проверенный сертификат, что у близнеца выше, при объявленной форме, которой
+// его учётка не имеет, — отказ: страж не узнаёт модуль по приставке, вписанной в
+// код. Отличие от близнеца — ровно объявление формы.
+func TestCallerAuthority_Anonymous_ProdMode_ModuleOfAForeignForm_Denied(t *testing.T) {
+	auth := &authorityStub{allow: map[string]bool{}}
+	h := newHandlerOfForm(true, auth, servicesan.NewForm("other-{service}")).WithInsecureAnonymousPeer(false)
+	_, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
+		Subject:  "user:usr_bob",
+		Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_any"},
+		Action:   "iam.accounts.get",
+	})
+	requireDenied(t, err)
 }
 
 // TestCallerAuthority_ListSubjects_NoAuthority_Denied — enumerating who can act

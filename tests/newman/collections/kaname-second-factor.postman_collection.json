@@ -13547,7 +13547,7 @@
       ]
     },
     {
-      "name": "IAM-2FA-OK-REMOVE-BY-CODE — Снятие фактора кодом по времени: строки сняты, сессия жива на «2», вход с кодом после — тот же 401, что на неверный пароль (Ф12-28)",
+      "name": "IAM-2FA-OK-REMOVE-BY-CODE — Снятие фактора кодом по времени: строки сняты, сессия жива на «2», вход с кодом после — тот же 401, что на неверный пароль (Ф12-28, Ф12-13 е)",
       "description": "class:CRUD | class:SEC | priority:P0",
       "item": [
         {
@@ -14740,7 +14740,7 @@
       ]
     },
     {
-      "name": "IAM-2FA-NEG-FORMS-AND-STATE — Чужой признак — 403; поле не прислано — 400 с именем; способ вне словаря — 400; confirm без заведения — ENROLLMENT_NOT_PENDING",
+      "name": "IAM-2FA-NEG-FORMS-AND-STATE — Чужой признак — 403; поле не прислано — 400 с именем; способ вне словаря — 400; confirm без заведения — ENROLLMENT_NOT_PENDING (Ф12-06, Ф12-41)",
       "description": "class:NEG | class:VAL | class:SEC | priority:P1",
       "item": [
         {

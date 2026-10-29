@@ -200,6 +200,22 @@ var AcceptanceProbeCoordinateExemptions = []DeadProbeCoordinate{
 		Issue: 133,
 		Note:  "проба снята вместе с ведомостью исключений: условные записи модели получили производителя (kaname#133)",
 	},
+	// Проба SC-28 называлась по утверждению «выдача классу на кластере глаголом
+	// создания недостижима», которое опровергнуто деревом (B1 круга 1 дельты S7:
+	// системная роль модуля с именами правило кластера проходит). DoD S7
+	// одобренной редакции 17 (отпечаток d44a9bbb…) велит привести имя пробы к
+	// факту тем же изменением и при этом сам называет прежнее имя; исходы строк
+	// SC-28 не менялись, проба живёт под именем
+	// `TestSystemClass_SC28_ClusterGrantToAClassByAnAnchorRoleIsRefusedByTheTrunkRule`.
+	// Правка текста сменила бы отпечаток одобренного документа.
+	// ПРЕДИКАТ СНЯТИЯ: следующая редакция приёмки anonymous-and-authenticated
+	// не называет прежнее имя — тогда запись истекает сама.
+	{
+		Name:  "TestSystemClass_SC28_ClusterGrantToAClassIsUnreachableByCreate",
+		Docs:  []string{"docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md"},
+		Issue: 950,
+		Note:  "проба SC-28 переименована по DoD S7: прежнее имя утверждало недостижимость, опровергнутую деревом (kaname#950)",
+	},
 }
 
 // ProbeCoordinatesIn разбирает документ и возвращает координаты — только их.

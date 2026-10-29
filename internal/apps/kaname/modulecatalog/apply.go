@@ -80,7 +80,7 @@
 // требует `FOR UPDATE`; с kaname#913 этот режим берётся заранее, на шаге 2а, и
 // ДО строк ресурсов — повышение на шаге 4 больше ничего не ждёт.
 //
-// Порядок трёх других писателей тех же строк:
+// Порядок других писателей тех же строк:
 //
 //   - применитель ролей модуля (`moduleroles.Applier`): строка `catalog_module`
 //     своего модуля `FOR KEY SHARE` первым оператором транзакции
@@ -92,7 +92,16 @@
 //     одним оператором, ДО строк селекторов (kacho#1996);
 //   - `LockLiveTargetTypes` выдачи с пообъектной целью (kaname#904): строки
 //     `catalog_resource` типов цели, `FOR KEY SHARE`, `ORDER BY dotted`, одним
-//     оператором, первым оператором транзакции выдачи.
+//     оператором, первым оператором транзакции выдачи;
+//   - писатели проекций роли (`ReplaceRoleVerbs`, `ReplaceRuleRefs`) — в том числе
+//     досев проекций системных ролей на старте: строки `catalog_resource` берутся
+//     `FOR KEY SHARE`, `ORDER BY dotted`, одним оператором ВПЕРЁД вставок
+//     (`lockCatalogResourceRows`, kaname#922). До этого ключ проекции брал их на
+//     каждой вставке — в порядке перечня, — и пара с применителем замыкалась на двух
+//     ресурсах модуля, названных в обратном порядке.
+//
+// Перепись всех писателей строк выдачи, модуля и ресурса с порядком и режимом
+// каждого и разбором пар — `docs/changes/kn-922/lock-order-census.md`.
 //
 // Почему цикла между ними нет. Писатель роли арендатора и выдача строку
 // `catalog_module` не берут вовсе (у роли арендатора `owner_module` пуст, ключ
@@ -235,9 +244,10 @@ type CatalogWriter interface {
 	// (документ без ключа) не пишет ничего и только читает применённую пару.
 	// Отдаёт пару, стоявшую ДО оператора, и что он сделал.
 	AdvanceRevision(ctx context.Context, module string, declared *Edition) (RevisionWrite, error)
-	// UpsertModule заводит либо ОЖИВЛЯЕТ строку модуля. `changed` ложно, когда
+	// UpsertModule заводит либо ОЖИВЛЯЕТ строку модуля и приводит в ней признак
+	// ключа S7 (`classGrantsOnly`, kaname#950). `changed` ложно, когда
 	// объявленное состояние уже стоит в строке.
-	UpsertModule(ctx context.Context, module string) (bool, error)
+	UpsertModule(ctx context.Context, module string, classGrantsOnly bool) (bool, error)
 	// UpsertResource заводит либо оживляет строку ресурса.
 	UpsertResource(ctx context.Context, r catalog.ResourceRow) (bool, error)
 	// UpsertVerb заводит либо оживляет строку действия, приводя и признак словаря.
@@ -333,7 +343,8 @@ type Report struct {
 	// UnchangedResources / UnchangedVerbs — объявленное уже стояло в строке.
 	UnchangedResources int
 	UnchangedVerbs     int
-	// ModuleWritten — строка модуля заведена либо оживлена.
+	// ModuleWritten — строка модуля заведена, оживлена либо сменила признак
+	// ключа S7 (kaname#950).
 	ModuleWritten bool
 	// RetiredResources / RetiredVerbs — строк помечено снятыми.
 	RetiredResources int
@@ -637,7 +648,7 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 			return fmt.Errorf("%w: чтение каталога модуля: %w", ErrWriteFailed, rerr)
 		}
 
-		if changed, uerr := w.UpsertModule(ctx, declared.Module); uerr != nil {
+		if changed, uerr := w.UpsertModule(ctx, declared.Module, declared.ClassGrantsOnlyOnContainers); uerr != nil {
 			return fmt.Errorf("%w: модуль %s: %w", ErrWriteFailed, declared.Module, uerr)
 		} else if changed {
 			rep.ModuleWritten = true

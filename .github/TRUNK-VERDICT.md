@@ -26,7 +26,7 @@
 | обязательный контекст | задание | процесс |
 |---|---|---|
 | `сборка · vet · gofmt` | `build` | ci |
-| `пробы -race -short (числовой вердикт)` | `unit` | ci |
+| `пробы -race -short (числовой вердикт)` | `unit` (сводный вердикт шардов `unitshard`) | ci |
 | `golangci-lint (пин v2.12.2)` | `lint` | ci |
 | `gosec (пин v2.28.0)` | `gosec` | ci |
 | `govulncheck` | `govulncheck` | ci |

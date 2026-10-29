@@ -622,6 +622,10 @@ func (_ *fakeABRdr) PublicReadContainer(context.Context, string) (domain.PublicR
 	return domain.PublicReadContainer{}, nil
 }
 
+func (_ *fakeABRdr) ClassGrantsKeyedModules(context.Context) (domain.ClassGrantsKeyedModules, error) {
+	return domain.ClassGrantsKeyedModules{}, nil
+}
+
 // GrantDelegations — делегирований этот дублёр не несёт (kaname#986): пробы файла
 // делегированного пути права выдавать не касаются.
 func (r *fakeABRdr) GrantDelegations() gdrepo.ReaderIface { return nil }

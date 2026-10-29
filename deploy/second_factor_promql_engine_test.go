@@ -69,6 +69,11 @@ func engineSeries() []cellTerm {
 	for _, v := range loginLaneOutcomeProducerValues() {
 		out = append(out, v.cell)
 	}
+	// Ряды ключей доступа (kaname#310): решётка «полоса × причина», события и
+	// ряд регрессий — сторона предъявителя тоже, правило не обязано звонить на её рост.
+	for _, v := range accessKeyProducerValues() {
+		out = append(out, v.cell)
+	}
 	// Исходы почтовой полосы по виду письма (kaname#733): вся решётка «вид ×
 	// исход», сданные тоже — правило не обязано звонить на их рост.
 	for _, kind := range clients.MailEventTypes {

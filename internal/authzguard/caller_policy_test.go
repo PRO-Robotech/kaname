@@ -14,12 +14,12 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
 
-// SAN constants for the caller-policy table. The gateway SA is the single
-// legitimate caller of the gateway-fronted privileged admin RPCs; any other
-// module SAN (e.g. kacho-vpc) is a non-gateway module.
+// SAN для таблицы политики вызывающего. Учётка края — единственный законный
+// вызывающий привилегированных админских RPC за краем; SAN любого другого
+// модуля (например, модуля vpc) — модуль не-край.
 const (
-	gatewaySAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"
-	vpcSAN     = "spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc"
+	gatewaySAN = "spiffe://kacho.cloud/ns/kacho/sa/mod-api-gateway"
+	vpcSAN     = "spiffe://kacho.cloud/ns/kacho/sa/mod-vpc"
 
 	// gatewayOnlyMethod — a representative gateway-fronted privileged admin RPC.
 	gatewayOnlyMethod = "/kaname.cloud.iam.v1.InternalClusterService/GrantAdmin"
@@ -27,7 +27,7 @@ const (
 	floorOnlyMethod = "/kaname.cloud.iam.v1.InternalIAMService/Check"
 
 	// authorizeBatchCheckMethod — RPC, которым пообъектный фильтр страницы
-	// (kacho-vpc / kacho-compute / kacho-nlb) судит идентификаторы СВОЕЙ страницы
+	// (модули vpc / compute / nlb) судит идентификаторы СВОЕЙ страницы
 	// service→service по ребру проверенного mTLS (:9091). НЕ gateway-fronted:
 	// звать вправе любая проверенная модульная SA — явный субъект в запросе есть
 	// авторизационный вид, а НЕ доступ вызывающего.
@@ -64,7 +64,7 @@ func newGatewayCtx() context.Context {
 	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), gatewaySAN, true)
 }
 
-// newVPCCtx returns a ctx carrying a verified kacho-vpc module cert SAN.
+// newVPCCtx — контекст с SAN проверенного сертификата модуля vpc.
 func newVPCCtx() context.Context {
 	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), vpcSAN, true)
 }
@@ -87,9 +87,9 @@ func TestCallerPolicy_GatewayOnly_GatewayCert(t *testing.T) {
 	}
 }
 
-// TestCallerPolicy_GatewayOnly_NonGatewayCert_Prod — a verified non-gateway
-// module (kacho-vpc) calling a gateway-only RPC in prod → PermissionDenied
-// (closes audit C1/C3: a compromised data-plane module cannot escalate).
+// TestCallerPolicy_GatewayOnly_NonGatewayCert_Prod — проверенный модуль не-край
+// (vpc) зовёт RPC «только край» в боевой посадке → PermissionDenied (закрывает
+// C1/C3 аудита: скомпрометированный модуль плоскости данных прав не поднимает).
 func TestCallerPolicy_GatewayOnly_NonGatewayCert_Prod(t *testing.T) {
 	p := testPolicy(true)
 	err := p.allow(newVPCCtx(), gatewayOnlyMethod)
@@ -127,8 +127,8 @@ func TestCallerPolicy_GatewayOnly_NoCert_Dev(t *testing.T) {
 
 // ── allow(): non-gateway RPC (floor only) ──────────────────────────────────
 
-// TestCallerPolicy_FloorOnly_AnyModuleCert — any verified module (kacho-vpc) may
-// call a non-gateway RPC, prod and dev.
+// TestCallerPolicy_FloorOnly_AnyModuleCert — любой проверенный модуль (vpc)
+// вправе звать RPC не за краем, в боевой посадке и в посадке разработки.
 func TestCallerPolicy_FloorOnly_AnyModuleCert(t *testing.T) {
 	for _, prod := range []bool{true, false} {
 		p := testPolicy(prod)
@@ -166,8 +166,9 @@ func TestCallerPolicy_UnverifiedCert_Prod(t *testing.T) {
 	}
 }
 
-// TestCallerPolicy_NonModuleSAN_Prod — a verified but non-module SAN (not
-// kacho-<svc>) is treated as "no module cert" → PermissionDenied in prod.
+// TestCallerPolicy_NonModuleSAN_Prod — проверенный, но не модульный SAN (учётка
+// не объявленной формы имени службы) считается «сертификата модуля нет» →
+// PermissionDenied в боевой посадке.
 func TestCallerPolicy_NonModuleSAN_Prod(t *testing.T) {
 	p := testPolicy(true)
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), "spiffe://kacho.cloud/ns/x/sa/not-a-module", true)
@@ -300,11 +301,12 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 // would accidentally gateway-front (or floor-gate) AuthorizeService and break
 // the consumer list-filter edge.
 
-// TestCallerPolicy_AuthorizeService_ModuleCert_Allowed — a verified module SA
-// (kacho-vpc) may call AuthorizeService.{BatchCheck,Check} on the internal
-// listener, prod AND dev (they are not gateway-fronted and are in the
-// module-writer profile). ListSubjects is NOT in that profile (kaname#984):
-// no module calls it, and in prod it is refused — see the sibling below.
+// TestCallerPolicy_AuthorizeService_ModuleCert_Allowed — проверенная учётка
+// модуля (vpc) вправе звать AuthorizeService.{BatchCheck,Check} на внутреннем
+// слушателе в боевой посадке И в посадке разработки: за краем они не стоят и
+// входят в профиль модуля-владельца. ListSubjects в этот профиль не входит
+// (kaname#984): его не зовёт ни один модуль, и в боевой посадке он отвергается —
+// см. соседнюю пробу ниже.
 func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
 	methods := []string{authorizeBatchCheckMethod, authorizeCheckMethod}
 	for _, prod := range []bool{true, false} {
