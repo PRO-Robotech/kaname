@@ -3,19 +3,18 @@
 
 package pg
 
-// backfill_adapter.go — pgx adapter for the
-// seed.BackfillStore + seed.VerifyStore ports (Clean Architecture: the backfill
-// runner + verify-gate use-cases depend only on those ports; this is the only place
-// that touches pgx for them).
+// backfill_adapter.go — pgx-адаптер портов seed.BackfillStore и seed.VerifyStore
+// (чистая архитектура: подмётка и страж сверки зависят только от этих портов, и
+// это единственное место, где они касаются pgx).
 //
-// The backfill sweep (seed.BackfillRunner) lists active bindings in chunks and
-// reconciles each through the EXISTING reconcile use-case (its own writer-tx +
-// per-binding advisory lock) — so this adapter holds NO reconcile SQL; it owns only
-// the singleton-lock + chunked listing + the verify-gate reads/forward-smoke seed.
+// Подмётка (seed.BackfillRunner) перечисляет активные выдачи порциями и сводит
+// каждую СУЩЕСТВУЮЩИМ use-case сведения (своя пишущая транзакция и
+// рекомендательная блокировка на выдачу), поэтому SQL сведения здесь нет. Адаптер
+// держит блокировку-одиночку, порционный перечень и ЧТЕНИЯ стража сверки; в
+// таблицы он ничего не пишет — дымовой посев зеркала снят (#148).
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -25,21 +24,20 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// backfillSingletonLockKey — the well-known advisory-lock key for the backfill
-// singleton. A fixed bigint distinct from any per-binding hashtext key. The
-// number is arbitrary-but-stable ("P8BF" mnemonic) and documented here so a future
-// advisory-lock user does not collide.
+// backfillSingletonLockKey — общеизвестный ключ рекомендательной блокировки
+// одиночки подмётки. Постоянный bigint, отличный от любого ключа hashtext на
+// выдачу. Число произвольное, но неизменное (мнемоника «P8BF»), и записано здесь,
+// чтобы будущий пользователь рекомендательных блокировок с ним не столкнулся.
 const backfillSingletonLockKey int64 = 0x50_38_42_46 // "P8BF"
 
-// BackfillAdapter — composition-root adapter for the backfill + verify-gate.
+// BackfillAdapter — адаптер композиционного корня для подмётки и стража сверки.
 type BackfillAdapter struct {
 	pool   *pgxpool.Pool
 	logger *slog.Logger
 }
 
-// NewBackfillAdapter constructs the adapter over a pool. The logger is nil-safe
-// (falls back to slog.Default) and is used to surface a singleton-lock release
-// failure rather than swallowing it.
+// NewBackfillAdapter строит адаптер над пулом. Журнал — slog.Default; через него
+// сбой снятия блокировки-одиночки выводится наружу, а не проглатывается.
 func NewBackfillAdapter(pool *pgxpool.Pool) *BackfillAdapter {
 	return &BackfillAdapter{pool: pool, logger: slog.Default()}
 }
@@ -51,11 +49,11 @@ var (
 
 // ── seed.BackfillStore ──────────────────────────────────────────────────────────
 
-// TryAcquireSingletonBackfillLock takes a SESSION-scoped pg_try_advisory_lock on
-// the well-known key (non-blocking). It dedicates ONE pool connection for the
-// whole sweep so the session lock outlives individual statements; the release
-// closure unlocks and returns the connection to the pool. ok=false ⇒ another
-// process holds the lock ⇒ the caller skips the sweep.
+// TryAcquireSingletonBackfillLock берёт pg_try_advisory_lock уровня СЕАНСА на
+// общеизвестном ключе (без ожидания). На всю подмётку выделяется ОДНО соединение
+// пула, чтобы блокировка сеанса пережила отдельные операторы; замыкание снятия
+// снимает блокировку и возвращает соединение в пул. ok=false ⇒ блокировку держит
+// другой процесс ⇒ вызывающий пропускает подмётку.
 func (a *BackfillAdapter) TryAcquireSingletonBackfillLock(ctx context.Context) (bool, func(context.Context), error) {
 	conn, err := a.pool.Acquire(ctx)
 	if err != nil {
@@ -71,13 +69,13 @@ func (a *BackfillAdapter) TryAcquireSingletonBackfillLock(ctx context.Context) (
 		return false, nil, nil
 	}
 	release := func(rctx context.Context) {
-		// Unlock on the SAME session that took the lock, then return the conn.
-		// Detach from the caller's (possibly-cancelled) ctx: a cancelled rctx would
-		// make conn.Exec a no-op and leak the session lock until the conn is recycled.
-		// WithoutCancel keeps any deadline/values but drops cancellation so the unlock
-		// always runs. A failed unlock is logged (defense-in-depth observability) —
-		// the session lock is still released when the conn is closed/recycled, but a
-		// silent failure would hide a real DB problem.
+		// Снять блокировку в ТОМ ЖЕ сеансе, что её взял, затем вернуть соединение.
+		// Отвязаться от ctx вызывающего (возможно, отменённого): с отменённым rctx
+		// conn.Exec ничего бы не сделал, и блокировка сеанса жила бы до пересоздания
+		// соединения. WithoutCancel сохраняет срок и значения, но снимает отмену, так
+		// что снятие исполняется всегда. Сбой снятия пишется в журнал (наблюдаемость
+		// эшелоном защиты): блокировка сеанса всё равно снимется при закрытии или
+		// пересоздании соединения, но молчаливый сбой скрыл бы настоящую беду базы.
 		uctx := context.WithoutCancel(rctx)
 		if _, err := conn.Exec(uctx, `SELECT pg_advisory_unlock($1)`, backfillSingletonLockKey); err != nil {
 			a.logger.WarnContext(uctx, "backfill: singleton advisory-unlock failed (released on conn recycle)",
@@ -88,9 +86,9 @@ func (a *BackfillAdapter) TryAcquireSingletonBackfillLock(ctx context.Context) (
 	return true, release, nil
 }
 
-// ListActiveBindingIDsChunk returns up to `limit` ACTIVE binding ids with id >
-// afterID (keyset pagination, ORDER BY id ASC). Pool-scoped read OUTSIDE the
-// per-binding reconcile tx (each binding reconciles in its own tx).
+// ListActiveBindingIDsChunk возвращает не больше `limit` id АКТИВНЫХ выдач с id >
+// afterID (пагинация по ключу, ORDER BY id ASC). Чтение уровня пула ВНЕ
+// транзакции сведения выдачи (каждая выдача сводится в своей транзакции).
 func (a *BackfillAdapter) ListActiveBindingIDsChunk(ctx context.Context, afterID string, limit int) ([]domain.AccessBindingID, error) {
 	rows, err := a.pool.Query(ctx,
 		`SELECT id
@@ -116,18 +114,18 @@ func (a *BackfillAdapter) ListActiveBindingIDsChunk(ctx context.Context, afterID
 
 // ── seed.VerifyStore ────────────────────────────────────────────────────────────
 
-// ListActiveBindingMaterialization returns, for every ACTIVE binding, whether it
-// EXPECTS explicit materialization and its current ledger-tuple count. The
-// expectation is the reconciler's OWN verdict — the count of ACTIVE
-// access_binding_target_members the last reconcile pass produced — NOT a heuristic
-// over the role rules. This is exact: a binding the reconciler decided to
-// materialize (a contained selector member, or the account/project scope-self
-// member) has ≥1 ACTIVE member; a binding the reconciler leaves empty (a
-// cluster-scoped `*.*.*` super-admin served by the short-circuit, a wildcard
-// content rule whose ObjectTypes are skipped, a selector matching nothing in the
-// mirror) has 0 ACTIVE members → it expects nothing and an empty ledger is correct.
-// The no-access-loss failure (Verify) is exactly "ACTIVE members exist but the
-// ledger is empty" — a member the reconciler activated without emitting its tuple.
+// ListActiveBindingMaterialization возвращает для каждой АКТИВНОЙ выдачи, ОЖИДАЕТ
+// ли она явной материализации, и текущее число её кортежей в ведомости. Ожидание —
+// СОБСТВЕННЫЙ вердикт сверщика (число АКТИВНЫХ access_binding_target_members,
+// оставленных последним проходом сведения), а НЕ эвристика по правилам роли. Это
+// точно: у выдачи, которую сверщик решил материализовать (вложенный член селектора
+// либо член «сама область» счёта или проекта), АКТИВНЫХ членов ≥1; у выдачи,
+// которую сверщик оставляет пустой (суперадминистратор `*.*.*` уровня кластера,
+// обслуживаемый коротким замыканием; правило содержимого с подстановочным знаком,
+// чьи ObjectTypes пропускаются; селектор, ничего не нашедший в зеркале), АКТИВНЫХ
+// членов 0 → она ничего не ожидает, и пустая ведомость верна. Отказ «потеря
+// доступа» (Verify) — ровно «АКТИВНЫЕ члены есть, а ведомость пуста»: член,
+// активированный сверщиком без выпуска своего кортежа.
 func (a *BackfillAdapter) ListActiveBindingMaterialization(ctx context.Context) ([]seed.BindingMaterialization, error) {
 	rows, err := a.pool.Query(ctx,
 		`SELECT b.id,
@@ -170,13 +168,14 @@ func (a *BackfillAdapter) ListActiveBindingMaterialization(ctx context.Context) 
 	return out, rows.Err()
 }
 
-// ListOwnerBindingsMissingMembers returns the ids of ACTIVE account-scoped OWNER
-// bindings (role_id = the owner system-role) that have ZERO ACTIVE target members.
-// An owner-binding ALWAYS materializes ≥1 member (its scope-self
-// member on account:<A>), so an owner-binding with 0 ACTIVE members is a wholesale
-// reconcile failure — flagged by the verify-gate. Restricted to owner bindings so the
-// check never false-flags a legitimately-empty binding (a cluster super-admin served by
-// the short-circuit, a thin permissions-only role, a selector matching nothing).
+// ListOwnerBindingsMissingMembers возвращает id АКТИВНЫХ выдач ВЛАДЕЛЬЦА уровня
+// счёта (role_id — системная роль владельца), у которых АКТИВНЫХ целевых членов
+// НОЛЬ. Выдача владельца ВСЕГДА материализует ≥1 члена (своего члена «сама область»
+// на account:<A>), поэтому выдача владельца с 0 АКТИВНЫХ членов — полный провал
+// сведения, который отмечает страж сверки. Сужено до выдач владельца, чтобы
+// проверка никогда ложно не отметила законно пустую выдачу (суперадминистратор
+// кластера, обслуживаемый коротким замыканием; тонкая роль из одних разрешений;
+// селектор, ничего не нашедший).
 func (a *BackfillAdapter) ListOwnerBindingsMissingMembers(ctx context.Context) ([]domain.AccessBindingID, error) {
 	rows, err := a.pool.Query(ctx,
 		`SELECT b.id
@@ -207,75 +206,16 @@ func (a *BackfillAdapter) ListOwnerBindingsMissingMembers(ctx context.Context) (
 	return out, rows.Err()
 }
 
-// SeedSmokeMirrorObject creates a synthetic resource_mirror row (project/account
-// parented + labels) for the forward-smoke (verify-gate). A now() source_version
-// wins any monotonic-version guard.
-func (a *BackfillAdapter) SeedSmokeMirrorObject(ctx context.Context, objectType, objectID, parentProject, parentAccount string, labels map[string]string) error {
-	labelsJSON, err := json.Marshal(labels)
-	if err != nil {
-		return fmt.Errorf("backfill: marshal smoke labels: %w", err)
-	}
-	if len(labels) == 0 {
-		labelsJSON = []byte("{}")
-	}
-	// Условие каталога — то же, каким его спрашивает эталонная полоса
-	// (`resource_mirror.UpsertTx`). Дымовая проба кладёт строку в БОЕВУЮ таблицу
-	// поднятого кластера, а не в свою: тип, снятый из каталога, производитель бы
-	// отверг, и обойти его здесь значило бы записать то, что продукт не
-	// принимает. Инвариант, выраженный в одном операторе из нескольких, — это
-	// инвариант, которого нет.
-	//
-	// Явные приведения обязательны: в списке `SELECT` тип параметра не выводится
-	// из колонки назначения, как он выводился в форме `VALUES`.
-	tag, err := a.pool.Exec(ctx,
-		`INSERT INTO kaname.resource_mirror
-		   (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		 SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, now(), now()
-		  WHERE EXISTS (
-		    SELECT 1 FROM kaname.catalog_resource WHERE dotted = $1 AND live
-		  )
-		 ON CONFLICT (object_type, object_id) DO UPDATE
-		    SET parent_project_id = EXCLUDED.parent_project_id,
-		        parent_account_id = EXCLUDED.parent_account_id,
-		        labels            = EXCLUDED.labels,
-		        source_version    = now(),
-		        updated_at        = now()`,
-		objectType, objectID, parentProject, parentAccount, string(labelsJSON))
-	if err != nil {
-		return fmt.Errorf("backfill: seed smoke mirror object %s:%s: %w", objectType, objectID, err)
-	}
-	// Ноль строк здесь означает РОВНО «тип не живой»: ветка `DO UPDATE` условия
-	// не несёт, поэтому на живом типе она применяется всегда. Отказ НАЗЫВАЕТ
-	// причину: без него дымовая проба сказала бы «объект не материализовался» —
-	// то есть обвинила бы прямой путь в том, чего он не делал.
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("backfill: seed smoke mirror object %s:%s: resource type %q "+
-			"is not a live entry of the platform resource catalog",
-			objectType, objectID, objectType)
-	}
-	return nil
-}
-
-// RemoveSmokeMirrorObject removes the synthetic forward-smoke mirror row.
-func (a *BackfillAdapter) RemoveSmokeMirrorObject(ctx context.Context, objectType, objectID string) error {
-	_, err := a.pool.Exec(ctx,
-		`DELETE FROM kaname.resource_mirror WHERE object_type = $1 AND object_id = $2`,
-		objectType, objectID)
-	if err != nil {
-		return fmt.Errorf("backfill: remove smoke mirror object %s:%s: %w", objectType, objectID, err)
-	}
-	return nil
-}
-
-// ListActiveBindingRelationChecks returns, for every ACTIVE binding, the per-object
-// v_* read-enforcement tuples (v_get / v_list) the relation-satisfies-action gate
-// must Check against real FGA. These are the cutover-critical relations: the
-// catalog gates `<domain>.<res>.get`→v_get and `…list`→v_list under Design-B, so the
-// gate proves each materialized read tuple actually RESOLVES the enforced relation —
-// not merely that the ledger is non-empty. Restricted to v_get/v_list (the read
-// surface the cutover flips) so the gate's FGA Check fan-out is bounded to the
-// relations whose mis-materialization caused the live owner-403 bug. Pool-scoped
-// read OUTSIDE any reconcile tx.
+// ListActiveBindingRelationChecks возвращает для каждой АКТИВНОЙ выдачи кортежи
+// исполнения чтения v_* по объектам (v_get / v_list), которые страж «отношение
+// удовлетворяет действию» обязан проверить настоящим Check. Это отношения,
+// решающие для переключения: при Design-B каталог судит `<domain>.<res>.get`→v_get
+// и `…list`→v_list, поэтому страж доказывает, что каждый материализованный кортеж
+// чтения действительно СВОДИТСЯ к исполняемому отношению, а не только что ведомость
+// непуста. Сужено до v_get/v_list (поверхность чтения, которую переворачивает
+// переключение), чтобы веер вызовов Check стража ограничивался отношениями, чья
+// ошибочная материализация дала живой дефект «403 владельцу». Чтение уровня пула
+// ВНЕ любой транзакции сведения.
 func (a *BackfillAdapter) ListActiveBindingRelationChecks(ctx context.Context) ([]seed.BindingRelationCheck, error) {
 	rows, err := a.pool.Query(ctx,
 		`SELECT DISTINCT t.binding_id, t.fga_user, t.relation, t.object
@@ -299,17 +239,4 @@ func (a *BackfillAdapter) ListActiveBindingRelationChecks(ctx context.Context) (
 		out = append(out, c)
 	}
 	return out, rows.Err()
-}
-
-// LedgerHasObject reports whether the binding's ledger records ANY tuple on the
-// given fga-object (forward-smoke success check).
-func (a *BackfillAdapter) LedgerHasObject(ctx context.Context, bindingID domain.AccessBindingID, fgaObject string) (bool, error) {
-	var n int
-	if err := a.pool.QueryRow(ctx,
-		`SELECT count(*) FROM kaname.access_binding_emitted_tuples
-		  WHERE binding_id = $1 AND object = $2`,
-		string(bindingID), fgaObject).Scan(&n); err != nil {
-		return false, fmt.Errorf("backfill: ledger has object %s for binding %s: %w", fgaObject, bindingID, err)
-	}
-	return n > 0, nil
 }
