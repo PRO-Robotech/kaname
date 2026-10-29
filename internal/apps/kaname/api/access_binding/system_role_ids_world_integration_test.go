@@ -5,7 +5,7 @@ package access_binding_test
 
 // system_role_ids_world_integration_test.go — посев и общие части проб приёмки
 // docs/engineering/acceptance/system-roles-carry-canonical-ids.md
-// (kaname#543, отпечаток 27295473fda44228a6fc8426db12bacbbcc6c9a436e151a59e738ecf50375877).
+// (kaname#543, редакция 3, отпечаток ab4986a47477a426badfa2dcb0f223218dea4b77d83ab481819dd1ce36ff2130).
 //
 // # ИСПЫТУЕМЫЙ НАХОДИТСЯ, А НЕ ВЫПИСЫВАЕТСЯ
 //
@@ -216,12 +216,12 @@ type srciWorld struct {
 	k  domain.UserID // кластерный администратор объявленным путём (SRCI-04)
 	u3 domain.UserID // получатель без выдач
 
-	// Посев SRCI-05.
-	a1     domain.AccountID
-	p1     domain.ProjectID
-	u1, u2 domain.UserID
-	g1     string
-	b1, b2 string
+	// Посев SRCI-05 (редакция 3): U0 — владелец A1, не субъект ни одной проверки.
+	a1             domain.AccountID
+	p1             domain.ProjectID
+	u0, u1, u2, u4 domain.UserID
+	g1             string
+	b1, b2, b6     string
 
 	// Получатели вставок SRCI-11: посеяны до гонки, разбираются по одному.
 	racersMu sync.Mutex
@@ -260,8 +260,13 @@ func newSRCIWorldAt(t *testing.T, version int64) *srciWorld {
 		WithSubjectChange(service.NewSubjectChangeService(kanamepg.NewSubjectChangeRepo(sc.pool, nil)))
 	sc.ab.WithListByRole(accessbindingapp.NewListByRoleUseCase(sc.repo).WithRelationStore(sc.door, nil))
 
-	// Старт службы пересчитывает проекции системных ролей (`cmd/kaname/serve.go`):
-	// без этого шага мир был бы базой, которую служба ни разу не поднимала.
+	// Старт службы пересчитывает проекции системных ролей (`cmd/kaname/serve.go`) тем
+	// же порядком: селекторы правил (:2141, тело `BackfillOwnerBindings`), глаголы
+	// (:2162), сегменты правил (:2201). Без этого шага мир был бы базой, которую служба
+	// ни разу не поднимала: селекторов у системных ролей нет, и правило-подстановка не
+	// адресует ни одного объекта.
+	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, sc.pool),
+		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): пересчёт селекторов правил системных ролей")
 	_, err = seed.ReseedSystemRoleVerbs(ctx, sc.repo, sc.pool, catalogfixture.Facts(), nil)
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): пересчёт проекции глаголов системных ролей")
 	_, err = seed.ReseedSystemRoleRuleRefs(ctx, sc.repo, sc.pool, nil)
@@ -278,15 +283,22 @@ func newSRCIWorldAt(t *testing.T, version int64) *srciWorld {
 	return w
 }
 
-// seedSRCI05 — посев SRCI-05: A1/P1, O1 в зеркале, U1–U2, G1 с членом U2, выдачи
-// B1 (U1 → system.admin, кластер, allInScope) и B2 (G1#member → system.viewer,
-// аккаунт A1, цель O1) на ПРЕЖНИЕ id.
+// seedSRCI05 — посев SRCI-05 редакции 3: U0–U4 (U3 — мира), A1 с владельцем U0,
+// P1, O1 в зеркале, G1 с членом U2; выдачи на ПРЕЖНИЕ id, каждая с целью «все
+// объекты области»:
+//   - B1: U1 → system.admin, аккаунт A1;
+//   - B2: G1#member → system.viewer, аккаунт A1;
+//   - B6: U4 → system.admin, кластер (исключение суперпользователя).
+//
+// Владелец A1 — U0, а не U1: иначе «разрешено» Ч1 могло бы прийти от владения.
 func (w *srciWorld) seedSRCI05() {
 	t := w.t
 	ctx := w.ctx
+	w.u0 = mustSeedUser(t, ctx, w.pool, "srciu0")
 	w.u1 = mustSeedUser(t, ctx, w.pool, "srciu1")
 	w.u2 = mustSeedUser(t, ctx, w.pool, "srciu2")
-	w.a1 = seedAccountByOwner(t, ctx, w.pool, "acc-srci-a1", w.u1)
+	w.u4 = mustSeedUser(t, ctx, w.pool, "srciu4")
+	w.a1 = seedAccountByOwner(t, ctx, w.pool, "acc-srci-a1", w.u0)
 	w.p1 = seedProjectInAccount(t, ctx, w.pool, w.a1, "prj-srci-p1")
 	w.g1 = seedGroup(t, ctx, w.pool, w.a1, "grp-srci-g1")
 	_, err := w.pool.Exec(ctx, `
@@ -296,18 +308,23 @@ func (w *srciWorld) seedSRCI05() {
 	verifyAddresses(t, ctx, w.pool)
 	seedMirrorObject(t, ctx, w.pool, scTargetType, srciObj, string(w.p1), string(w.a1))
 
+	admin := domain.RoleID(w.roleIDByName(domain.SystemAdminRoleName))
+	viewer := domain.RoleID(w.roleIDByName(domain.SystemViewerRoleName))
 	w.b1 = w.seedBinding(domain.AccessBinding{
-		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(w.u1),
-		RoleID:       domain.RoleID(w.roleIDByName(domain.SystemAdminRoleName)),
-		ResourceType: "cluster", ResourceID: domain.ClusterSingletonID, Scope: domain.ScopeCluster,
+		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(w.u1), RoleID: admin,
+		ResourceType: "account", ResourceID: string(w.a1), Scope: domain.ScopeAccount,
 		Target: domain.AccessTarget{AllInScope: true},
 	}, "B1")
 	w.b2 = w.seedBinding(domain.AccessBinding{
-		SubjectType: domain.SubjectTypeGroup, SubjectID: domain.SubjectID(w.g1),
-		RoleID:       domain.RoleID(w.roleIDByName(domain.SystemViewerRoleName)),
+		SubjectType: domain.SubjectTypeGroup, SubjectID: domain.SubjectID(w.g1), RoleID: viewer,
 		ResourceType: "account", ResourceID: string(w.a1), Scope: domain.ScopeAccount,
-		Target: domain.AccessTarget{Resources: []domain.ResourceRef{{Type: scTargetType, ID: srciObj}}},
+		Target: domain.AccessTarget{AllInScope: true},
 	}, "B2")
+	w.b6 = w.seedBinding(domain.AccessBinding{
+		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(w.u4), RoleID: admin,
+		ResourceType: "cluster", ResourceID: domain.ClusterSingletonID, Scope: domain.ScopeCluster,
+		Target: domain.AccessTarget{AllInScope: true},
+	}, "B6")
 }
 
 // roleIDByName — id системной роли по имени: роль адресуется чтением, а не литералом.

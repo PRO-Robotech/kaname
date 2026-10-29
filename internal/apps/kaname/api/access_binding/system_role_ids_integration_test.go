@@ -154,45 +154,60 @@ func TestSystemRoleIDs_SRCI04_OldIDsAddressNothing(t *testing.T) {
 	assert.Equal(t, before, w.opsCount(), "SRCI-04: отказ отчеканил Operation")
 }
 
-// srciCheckSnapshot — ответы Ч1–Ч4 с очищенным `checked_at` (условие ревью R1).
+// srciAsk — один вопрос среза: субъект и глагол на O1.
+type srciAsk struct{ subject, verb string }
+
+// srciAsks — Ч1–Ч5 редакции 3 по порядку; столбец «ожидание» — srciWant.
+func (w *srciWorld) srciAsks() []srciAsk {
+	u := func(id domain.UserID) string { return fmtSubject("user", string(id)) }
+	return []srciAsk{
+		{u(w.u1), "update"}, // Ч1 — B1
+		{u(w.u2), "get"},    // Ч2 — B2 через G1
+		{u(w.u2), "update"}, // Ч3 — близнец Ч2, отличие — глагол
+		{u(w.u3), "get"},    // Ч4 — близнец Ч2, отличие — субъект
+		{u(w.u3), "update"}, // Ч5 — близнец Ч1, отличие — субъект
+	}
+}
+
+// srciWant — столбец «ожидание» Ч1–Ч5.
+var srciWant = []bool{true, true, false, false, false}
+
+// srciAnswer — ответ Check с очищенным `checked_at` (условие ревью R1).
+func (w *srciWorld) srciAnswer(q srciAsk) *iamv1.AuthorizeCheckResponse {
+	w.t.Helper()
+	resp, err := w.check(q.subject, q.verb, srciObj)
+	require.NoErrorf(w.t, err, "Check(%s, %s)", q.subject, q.verb)
+	c := proto.Clone(resp).(*iamv1.AuthorizeCheckResponse)
+	c.CheckedAt = nil
+	return c
+}
+
+// srciCheckSnapshot — ответы Ч1–Ч5.
 func (w *srciWorld) srciCheckSnapshot() []*iamv1.AuthorizeCheckResponse {
 	w.t.Helper()
 	var out []*iamv1.AuthorizeCheckResponse
-	for _, q := range []struct {
-		subject string
-		verb    string
-	}{
-		{fmtSubject("user", string(w.u1)), "update"}, // Ч1
-		{fmtSubject("user", string(w.u2)), "get"},    // Ч2
-		{fmtSubject("user", string(w.u2)), "update"}, // Ч3
-		{fmtSubject("user", string(w.u3)), "get"},    // Ч4
-	} {
-		resp, err := w.check(q.subject, q.verb, srciObj)
-		require.NoErrorf(w.t, err, "Check(%s, %s)", q.subject, q.verb)
-		c := proto.Clone(resp).(*iamv1.AuthorizeCheckResponse)
-		c.CheckedAt = nil
-		out = append(out, c)
+	for _, q := range w.srciAsks() {
+		out = append(out, w.srciAnswer(q))
 	}
 	return out
 }
 
 // srciRequireCheckColumn — срез обязан дать ровно столбец «ожидание» (Ч1 и Ч2 —
-// разрешено, Ч3 и Ч4 — отказ): положительный контроль посева.
+// разрешено, Ч3–Ч5 — отказ): положительный контроль посева.
 func srciRequireCheckColumn(t *testing.T, snap []*iamv1.AuthorizeCheckResponse, why string) {
 	t.Helper()
-	want := []bool{true, true, false, false}
+	require.Len(t, snap, len(srciWant), "%s: число ответов среза", why)
 	for i, r := range snap {
-		require.Equalf(t, want[i], r.GetAllowed(), "%s: Ч%d (deny %v)", why, i+1, r.GetDenyReasons())
+		require.Equalf(t, srciWant[i], r.GetAllowed(), "%s: Ч%d (deny %v)", why, i+1, r.GetDenyReasons())
 	}
 }
 
-// seedSRCI05Materialized — посев SRCI-05 и ожидание окна материализации: срез Ч1–Ч4
+// seedSRCI05Materialized — посев SRCI-05 и ожидание окна материализации: срез Ч1–Ч5
 // обязан дать столбец «ожидание» (опрос раз в 200 мс до 30 с, окно SC-13). Не дал —
-// отказ называет все четыре ответа и то, из чего доступ выводится, чтобы несозданное
+// отказ называет все пять ответов и то, из чего доступ выводится, чтобы несозданное
 // условие читалось условием, а не предметом.
 func (w *srciWorld) seedSRCI05Materialized() {
 	w.seedSRCI05()
-	want := []bool{true, true, false, false}
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		snap := w.srciCheckSnapshot()
@@ -200,20 +215,20 @@ func (w *srciWorld) seedSRCI05Materialized() {
 		for i, r := range snap {
 			got[i] = r.GetAllowed()
 		}
-		if assert.ObjectsAreEqual(want, got) {
+		if assert.ObjectsAreEqual(srciWant, got) {
 			return
 		}
 		if time.Now().After(deadline) {
 			w.t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ(фикстура) SRCI-05: срез до за 30 с не дал столбец «ожидание» "+
-				"(Ч1 U1 update, Ч2 U2 get, Ч3 U2 update, Ч4 U3 get): ждали %v, получили %v; %s",
-				want, got, w.srciGrantBasis())
+				"(Ч1 U1 update, Ч2 U2 get, Ч3 U2 update, Ч4 U3 get, Ч5 U3 update): ждали %v, получили %v; %s",
+				srciWant, got, w.srciGrantBasis())
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 }
 
-// srciGrantBasis — из чего выводится доступ по B1 и B2: селекторы и глаголы ролей,
-// факты о субъектах на объекте и кластере, члены цели.
+// srciGrantBasis — из чего выводится доступ по B1, B2 и B6: селекторы и глаголы
+// ролей, факты о субъектах, члены цели.
 func (w *srciWorld) srciGrantBasis() string {
 	w.t.Helper()
 	q := func(sql string, args ...any) string {
@@ -233,11 +248,12 @@ func (w *srciWorld) srciGrantBasis() string {
 		return "[" + strings.Join(out, "; ") + "]"
 	}
 	roles := []string{w.roleIDByName(domain.SystemAdminRoleName), w.roleIDByName(domain.SystemViewerRoleName)}
-	subjects := []string{fmtSubject("user", string(w.u1)), fmtSubject("group", w.g1+"#member"), fmtSubject("user", string(w.u2))}
+	subjects := []string{fmtSubject("user", string(w.u1)), fmtSubject("group", w.g1+"#member"),
+		fmtSubject("user", string(w.u2)), fmtSubject("user", string(w.u4))}
 	return "селекторы ролей " + q(`SELECT role_id || ' ' || arm::text || ' ' || object_types::text FROM kaname.role_rule_selectors WHERE role_id = ANY($1)`, roles) +
 		"; глаголы на vpc_network " + q(`SELECT role_id || ' ' || verb FROM kaname.role_verb WHERE role_id = ANY($1) AND object_type = 'vpc_network'`, roles) +
 		"; факты " + q(`SELECT object_type || ':' || object_id || '#' || relation || '@' || subject FROM kaname.relation_fact WHERE subject = ANY($1)`, subjects) +
-		"; члены цели " + q(`SELECT binding_id || ' ' || t::text FROM kaname.access_binding_target_members t WHERE binding_id = ANY($1)`, []string{w.b1, w.b2})
+		"; члены цели " + q(`SELECT binding_id || ' ' || t::text FROM kaname.access_binding_target_members t WHERE binding_id = ANY($1)`, []string{w.b1, w.b2, w.b6})
 }
 
 // SRCI-05 — выдачи работающей базы переходят на новые id без потери.
@@ -248,9 +264,15 @@ func TestSystemRoleIDs_SRCI05_GrantsCrossOverWithoutLoss(t *testing.T) {
 
 	before := w.srciCheckSnapshot()
 	srciRequireCheckColumn(t, before, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) SRCI-05 срез до")
-	b1, b2 := w.getBinding(w.b1), w.getBinding(w.b2)
-	require.Equal(t, w.roleIDByName(domain.SystemAdminRoleName), b1.GetRoleId(), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): B1 на прежнем id admin")
-	require.Equal(t, w.roleIDByName(domain.SystemViewerRoleName), b2.GetRoleId(), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): B2 на прежнем id viewer")
+	// Ч6 — минор ревью редакции 3 (ab4986a4…, COVERAGE): U4 (субъект B6) update на O1.
+	// Значение НЕ закрепляется (Д6, kaname#1073): утверждается лишь «после равно до».
+	ch6 := srciAsk{fmtSubject("user", string(w.u4)), "update"}
+	ch6Before := w.srciAnswer(ch6)
+	t.Logf("SRCI-05: Ч6 до наката (не закрепляется, Д6) allowed=%v", ch6Before.GetAllowed())
+	b1, b2, b6 := w.getBinding(w.b1), w.getBinding(w.b2), w.getBinding(w.b6)
+	require.Equal(t, w.subj.oldAdmin, b1.GetRoleId(), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): B1 на прежнем id admin")
+	require.Equal(t, w.subj.oldViewer, b2.GetRoleId(), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): B2 на прежнем id viewer")
+	require.Equal(t, w.subj.oldAdmin, b6.GetRoleId(), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): B6 на прежнем id admin")
 	bindingsBefore := w.countRows("kaname.access_bindings")
 
 	w.subj.requireSubject(t, "SRCI-05")
@@ -259,7 +281,7 @@ func TestSystemRoleIDs_SRCI05_GrantsCrossOverWithoutLoss(t *testing.T) {
 	for _, c := range []struct {
 		before *iamv1.AccessBinding
 		role   string
-	}{{b1, domain.SystemAdminRoleID}, {b2, domain.SystemViewerRoleID}} {
+	}{{b1, domain.SystemAdminRoleID}, {b2, domain.SystemViewerRoleID}, {b6, domain.SystemAdminRoleID}} {
 		after := w.getBinding(c.before.GetId())
 		assert.Equal(t, c.before.GetId(), after.GetId(), "SRCI-05: id")
 		assert.Truef(t, proto.Equal(&iamv1.AccessBinding{Subjects: c.before.GetSubjects()}, &iamv1.AccessBinding{Subjects: after.GetSubjects()}),
@@ -274,6 +296,8 @@ func TestSystemRoleIDs_SRCI05_GrantsCrossOverWithoutLoss(t *testing.T) {
 	for i := range before {
 		assert.Truef(t, proto.Equal(before[i], afterChecks[i]), "SRCI-05: Ч%d разошёлся: %v → %v", i+1, before[i], afterChecks[i])
 	}
+	ch6After := w.srciAnswer(ch6)
+	assert.Truef(t, proto.Equal(ch6Before, ch6After), "SRCI-05: Ч6 (U4, B6) разошёлся: %v → %v", ch6Before, ch6After)
 	list, err := w.ab.ListByRole(asUser(w.ctx, w.k), &iamv1.ListAccessBindingsByRoleRequest{RoleId: domain.SystemAdminRoleID, PageSize: 1000})
 	require.NoError(t, err, "SRCI-05: listByRole")
 	var listed []string
@@ -281,6 +305,7 @@ func TestSystemRoleIDs_SRCI05_GrantsCrossOverWithoutLoss(t *testing.T) {
 		listed = append(listed, b.GetId())
 	}
 	assert.Contains(t, listed, w.b1, "SRCI-05: listByRole нового id admin отдаёт B1")
+	assert.Contains(t, listed, w.b6, "SRCI-05: listByRole нового id admin отдаёт B6")
 	assert.Equal(t, bindingsBefore, w.countRows("kaname.access_bindings"), "SRCI-05: число выдач")
 }
 
@@ -317,58 +342,74 @@ func (w *srciWorld) srciSettled(subject, verb string) bool {
 	}
 }
 
-// Контроль фикстуры SRCI-05 (не сценарий приёмки). Приёмка объявляет выдачи B1 и B2
-// состояниями, «которые глагол Create принимал на 092bee4fb», а посев (писатель §5)
-// строит их мимо глагола. Контроль спрашивает глагол о тех же формах — близнецы B1v
-// (U4) и B2v (G2#member, член U5) отличаются от посева одним фактом, писателем
-// выдачи, — и сверяет ответы Check близнецов с ответами посева (Ч1: U1↔U4 update;
-// Ч2, Ч3: U2↔U5 get, update). Мир — вся цепочка дерева, роль адресуется чтением по
-// имени: глагол принимает её id и до реализации, и после. Красное здесь — посев
-// строит не то, что глагол: состояние вымышлено либо отвечает иначе.
+// Контроль фикстуры SRCI-05 (не сценарий приёмки; §5 редакции 3). Посев (писатель
+// §5) строит B1, B2, B6 мимо глагола. Контроль спрашивает глагол `Create` о тех же
+// формах: близнецы B1v (U5), B2v (G2#member, член U6), B6v (U7). Отличие по предмету —
+// писатель; субъект и id роли — по построению (минор ревью ab4986a4…). Исход каждого
+// `Create` — без ошибки; ответы Check близнецов равны ответам посева: Ч1 (U1↔U5
+// update), Ч2–Ч3 (U2↔U6 get, update) и ответ по B6 (U4↔U7 update, значение не
+// закрепляется — Д6). Мир — вся цепочка дерева, роль адресуется чтением по имени:
+// глагол принимает её id и до реализации, и после. Красное здесь — посев строит не
+// то, что глагол: состояние вымышлено либо отвечает иначе.
+//
+// Глагол проходит все ворота в порядке вызова, включая ворота обработчика (форма
+// id роли, наличие цели) и право выдавать (`delegatedGrantAuthority`), которых
+// таблица ворот приёмки не перечисляет (минор ревью) — исход их и судит.
 func TestSystemRoleIDs_SRCI05Fixture_SeedIsWhatTheVerbMakes(t *testing.T) {
 	w := newSRCIWorldAt(t, 0)
 	w.seedSRCI05()
 
-	u4 := mustSeedUser(t, w.ctx, w.pool, "srciu4")
 	u5 := mustSeedUser(t, w.ctx, w.pool, "srciu5")
+	u6 := mustSeedUser(t, w.ctx, w.pool, "srciu6")
+	u7 := mustSeedUser(t, w.ctx, w.pool, "srciu7")
 	g2 := seedGroup(t, w.ctx, w.pool, w.a1, "grp-srci-g2")
 	_, err := w.pool.Exec(w.ctx, `
 		INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at)
-		VALUES ($1, 'user', $2, now())`, g2, string(u5))
+		VALUES ($1, 'user', $2, now())`, g2, string(u6))
 	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): член группы G2")
 	verifyAddresses(t, w.ctx, w.pool)
 
 	admin, viewer := w.roleIDByName(domain.SystemAdminRoleName), w.roleIDByName(domain.SystemViewerRoleName)
-	// B1v — форма B1: человек, system.admin, кластер, все объекты области.
+	// B1v — форма B1: человек, system.admin, аккаунт A1, все объекты.
 	_, b1err := w.srciCreateOutcome(&iamv1.CreateAccessBindingRequest{
-		Subjects: []*iamv1.Subject{userSubject(u4)}, RoleId: admin,
-		ScopeType: "iam.cluster", ScopeId: domain.ClusterSingletonID, Target: allInScopeTarget(),
+		Subjects: []*iamv1.Subject{userSubject(u5)}, RoleId: admin,
+		ScopeType: "iam.account", ScopeId: string(w.a1), Target: allInScopeTarget(),
 	})
-	// B2v — форма B2: группа, system.viewer, аккаунт A1, цель O1.
+	// B2v — форма B2: группа, system.viewer, аккаунт A1, все объекты.
 	_, b2err := w.srciCreateOutcome(&iamv1.CreateAccessBindingRequest{
 		Subjects: []*iamv1.Subject{groupSubject(g2)}, RoleId: viewer,
-		ScopeType: "iam.account", ScopeId: string(w.a1),
-		Target: resourcesTarget(&iamv1.ResourceRef{Type: scTargetType, Id: srciObj}),
+		ScopeType: "iam.account", ScopeId: string(w.a1), Target: allInScopeTarget(),
 	})
-	t.Logf("SRCI-05 контроль фикстуры: глагол о форме B1 (роль %s) — %v; о форме B2 (роль %s) — %v",
-		admin, b1err, viewer, b2err)
+	// B6v — форма B6: человек, system.admin, кластер, все объекты.
+	_, b6err := w.srciCreateOutcome(&iamv1.CreateAccessBindingRequest{
+		Subjects: []*iamv1.Subject{userSubject(u7)}, RoleId: admin,
+		ScopeType: "iam.cluster", ScopeId: domain.ClusterSingletonID, Target: allInScopeTarget(),
+	})
+	t.Logf("SRCI-05 контроль фикстуры: глагол о форме B1 (роль %s) — %v; B2 (роль %s) — %v; B6 (роль %s) — %v",
+		admin, b1err, viewer, b2err, admin, b6err)
 	assert.NoError(t, b1err, "посев B1: форму B1 глагол не принимает — состояние вымышлено")
 	assert.NoError(t, b2err, "посев B2: форму B2 глагол не принимает — состояние вымышлено")
+	assert.NoError(t, b6err, "посев B6: форму B6 глагол не принимает — состояние вымышлено")
 
-	u1s, u2s := fmtSubject("user", string(w.u1)), fmtSubject("user", string(w.u2))
-	u4s, u5s := fmtSubject("user", string(u4)), fmtSubject("user", string(u5))
-	seeded := []bool{w.srciSettled(u1s, "update"), w.srciSettled(u2s, "get"), w.srciSettled(u2s, "update")}
-	t.Logf("SRCI-05 контроль фикстуры: Ч1–Ч3 посева %v (столбец приёмки [true true false]); факты U1 %s",
-		seeded, w.srciFactsOf(u1s))
+	u := func(id domain.UserID) string { return fmtSubject("user", string(id)) }
+	seeded := []bool{w.srciSettled(u(w.u1), "update"), w.srciSettled(u(w.u2), "get"),
+		w.srciSettled(u(w.u2), "update"), w.srciSettled(u(w.u4), "update")}
+	t.Logf("SRCI-05 контроль фикстуры: посев Ч1–Ч3 и ответ по B6 %v (столбец приёмки Ч1–Ч3 [true true false]; B6 не закрепляется); факты U1 %s; факты U4 %s",
+		seeded, w.srciFactsOf(u(w.u1)), w.srciFactsOf(u(w.u4)))
 	if b1err == nil {
-		got := w.srciSettled(u4s, "update")
-		t.Logf("SRCI-05 контроль фикстуры: Ч1 близнеца B1v (U4 update) %v; факты U4 %s", got, w.srciFactsOf(u4s))
-		assert.Equal(t, got, seeded[0], "посев B1 отвечает на Ч1 иначе, чем та же выдача глаголом")
+		got := w.srciSettled(u(u5), "update")
+		t.Logf("SRCI-05 контроль фикстуры: Ч1 близнеца B1v (U5 update) %v; факты U5 %s", got, w.srciFactsOf(u(u5)))
+		assert.Equal(t, seeded[0], got, "посев B1 отвечает на Ч1 иначе, чем та же выдача глаголом")
 	}
 	if b2err == nil {
-		got := []bool{w.srciSettled(u5s, "get"), w.srciSettled(u5s, "update")}
-		t.Logf("SRCI-05 контроль фикстуры: Ч2–Ч3 близнеца B2v (U5 get, update) %v", got)
-		assert.Equal(t, got, seeded[1:], "посев B2 отвечает на Ч2–Ч3 иначе, чем та же выдача глаголом")
+		got := []bool{w.srciSettled(u(u6), "get"), w.srciSettled(u(u6), "update")}
+		t.Logf("SRCI-05 контроль фикстуры: Ч2–Ч3 близнеца B2v (U6 get, update) %v", got)
+		assert.Equal(t, seeded[1:3], got, "посев B2 отвечает на Ч2–Ч3 иначе, чем та же выдача глаголом")
+	}
+	if b6err == nil {
+		got := w.srciSettled(u(u7), "update")
+		t.Logf("SRCI-05 контроль фикстуры: ответ близнеца B6v (U7 update) %v; факты U7 %s", got, w.srciFactsOf(u(u7)))
+		assert.Equal(t, seeded[3], got, "посев B6 отвечает иначе, чем та же выдача глаголом")
 	}
 }
 
@@ -483,11 +524,10 @@ func TestSystemRoleIDs_SRCI07_MigrationNeitherGrantsNorRevokes(t *testing.T) {
 	assert.Equal(t, fga, w.countRows("kaname.fga_outbox"), "SRCI-07: fga_outbox вырос")
 	assert.Equal(t, sco, w.countRows("kaname.subject_change_outbox"), "SRCI-07: subject_change_outbox вырос")
 
-	// Близнец SRCI-07б: выдача B3 (форма B2, условие ревью R2 — цель формой провода).
+	// Близнец SRCI-07б: выдача B3 (форма B2 редакции 3 — аккаунт A1, все объекты).
 	w.createDone(asUser(w.ctx, w.k), &iamv1.CreateAccessBindingRequest{
 		Subjects: []*iamv1.Subject{userSubject(w.u3)}, RoleId: domain.SystemViewerRoleID,
-		ScopeType: "iam.account", ScopeId: string(w.a1),
-		Target: resourcesTarget(&iamv1.ResourceRef{Type: scTargetType, Id: srciObj}),
+		ScopeType: "iam.account", ScopeId: string(w.a1), Target: allInScopeTarget(),
 	}, "SRCI-07б: выдача B3")
 	var about []string
 	for _, c := range w.pollChanges(cursor, "SRCI-07б").GetChanges() {
@@ -791,7 +831,7 @@ func TestSystemRoleIDs_SRCI12_SubscriptionJournalTellsOfTheNewIDs(t *testing.T) 
 	b5 := w.seedBinding(domain.AccessBinding{
 		SubjectType: domain.SubjectTypeGroup, SubjectID: domain.SubjectID(w.g1),
 		RoleID: r0, ResourceType: "account", ResourceID: string(w.a1), Scope: domain.ScopeAccount,
-		Target: domain.AccessTarget{Resources: []domain.ResourceRef{{Type: scTargetType, ID: srciObj}}},
+		Target: domain.AccessTarget{AllInScope: true},
 	}, "B5")
 
 	s0 := w.journalHead()
@@ -800,6 +840,7 @@ func TestSystemRoleIDs_SRCI12_SubscriptionJournalTellsOfTheNewIDs(t *testing.T) 
 	require.NotEmpty(t, br, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): перечень BR пуст")
 	require.Contains(t, br, w.b1, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): B1 в BR")
 	require.Contains(t, br, w.b2, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): B2 в BR")
+	require.Contains(t, br, w.b6, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): B6 в BR")
 
 	w.subj.requireSubject(t, "SRCI-12")
 	w.up("SRCI-12")
