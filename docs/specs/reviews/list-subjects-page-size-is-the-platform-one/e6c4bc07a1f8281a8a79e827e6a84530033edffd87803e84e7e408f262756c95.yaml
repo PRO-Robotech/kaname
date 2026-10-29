@@ -195,8 +195,21 @@ event_body: "acceptance-reviewer · APPROVED · sha256 e6c4bc07a1f8281a8a79e827e
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#615
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6486026102
+  node_id: IC_kwDOUO26pM8AAAABgpjndg
+  url: https://github.com/PRO-Robotech/kaname/issues/615#issuecomment-6486026102
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6486026102
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: "2026-10-29T02:15:31Z"
+  body_sha256: 3b0e0eb97857d4c31f4ab37db265f48c5d71075d7ba56229756073b3bbc16343
+  subject_sha256: e6c4bc07a1f8281a8a79e827e6a84530033edffd87803e84e7e408f262756c95
+  subject_revision_commit: 77ae8736db5b03b6b95d8a5a88fbbe4b92370959
+  verdict: APPROVED
+  publication_note: Блок дописан отдельным коммитом поверх записи рецензента; вердикт, разбор и находки задним числом не правлены. Тело события — дословно event_body. Отпечаток предмета перемерен перед публикацией (`git show 77ae8736d:<док> | sha256sum`) и совпал с именем записи. Поля события — ответ `gh api` на создание комментария (created_at == updated_at); отпечаток тела — `jq -j .body | sha256sum`. Коммит 77ae8736d на origin ещё не отправлен (ветку отправляет исполнитель кода).
 
 attribution:
   reviewer_kind: claude_agent
