@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -117,7 +116,9 @@ type IDFormJudge interface {
 //     не уходит своему решателю (`questionGoesToItsOwnDecider` — тот же метод);
 //   - извлечение удалось и идентификатор не пуст. Пустое — не неверная форма, а
 //     отсутствие: его канон — другой текст, а у `RoleService/Create` и
-//     `AuthorizeService/BatchCheck` пустое законно.
+//     `AuthorizeService/BatchCheck` пустое законно. Строка из одних пробелов —
+//     не отсутствие, а неверная форма: идентификатором она не бывает ни при
+//     каком состоянии базы, и звено отвечает о ней, как о любой другой.
 //
 // Во всех прочих случаях звено пропускает запрос к двери без изменений. Сверх
 // судьи формы оно не проверяет ничего: алфавит внутри правильной длины и
@@ -193,7 +194,7 @@ func (d *OwnDoor) FormUnary(judge IDFormJudge) (grpc.UnaryServerInterceptor, err
 			return handler(ctx, req)
 		}
 		objectType, objectID, err := extract(req)
-		if err != nil || strings.TrimSpace(objectID) == "" {
+		if err != nil || objectID == "" {
 			// Извлечение отказало либо поля нет — судить нечего; вопрос
 			// остаётся двери и обработчику, как и до звена.
 			return handler(ctx, req)
