@@ -39,7 +39,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/corelib/ids"
@@ -1069,10 +1068,14 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 
 // revokeSAKeyResponse is the SINGLE producer of a successful revoke body: only
 // a revoke that removed the row gets it.
+//
+// Момент снятия — часы процесса после фиксации, усечённые до секунды общим
+// помощником (`shared.TimestampProto`): время на проводе — целые секунды, как
+// `createdAt` той же операции (kaname#1074).
 func revokeSAKeyResponse(keyID domain.SAOAuthClientID) (*anypb.Any, error) {
 	return anypb.New(&iamv1.RevokeSAKeyResponse{
 		KeyId:     string(keyID),
-		RevokedAt: timestamppb.Now(),
+		RevokedAt: shared.TimestampProto(time.Now()),
 	})
 }
 
