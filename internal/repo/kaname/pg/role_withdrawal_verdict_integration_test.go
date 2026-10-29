@@ -4,7 +4,7 @@
 package pg_test
 
 // role_withdrawal_verdict_integration_test.go — сценарий IAM-RW-1-10 приёмки
-// `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
+// `docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // на уровне ВЕРДИКТА: выдача на снятую роль доступа не даёт.
 //
 // Задача продукта kacho#2028.

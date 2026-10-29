@@ -41,17 +41,21 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/scalegrid"
 )
 
+// dirtyBase — провенанс с отпечатком, но без перечня файлов под ним: шапка без
+// отпечатка не собирается вовсе (kaname#74), а «файлов под отпечатком ноль» —
+// ровно тот случай, когда принадлежность грязных путей судить нечем.
 func dirtyBase() scalegrid.Provenance {
 	return scalegrid.Provenance{
 		TreeRev: "abc123", When: time.Now(), CPUCores: 1,
 		RunCommand: "make scale-grid-full", GridText: "  ось N: 100\n",
+		Fingerprint: scalegrid.Fingerprint{Composition: "C1", Content: "C2"},
 	}
 }
 
 func TestDirtinessIsJudgedAgainstTheSubjectOfTheMeasurement(t *testing.T) {
 	subject := []string{
-		"services/iam/internal/repo/kaname/pg/scalegrid/grid.go",
-		"services/iam/internal/repo/kaname/pg/scalegrid/census.go",
+		"internal/repo/kaname/pg/scalegrid/grid.go",
+		"internal/repo/kaname/pg/scalegrid/census.go",
 	}
 
 	t.Run("грязь ВНЕ предмета: замер воспроизводим, и шапка это говорит", func(t *testing.T) {
@@ -59,9 +63,9 @@ func TestDirtinessIsJudgedAgainstTheSubjectOfTheMeasurement(t *testing.T) {
 		p.Fingerprint = scalegrid.Fingerprint{Composition: "C1", Content: "C2", Files: subject, Identities: identitiesOf(subject)}
 		p.TreeDirty, p.DirtyPaths = true, 3
 		p.DirtyPathList = []string{
-			"services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt",
-			"services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-3-matrix-volume.txt",
-			"services/iam/internal/repo/kaname/pg/relverdict/REPORT-X.txt",
+			"internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt",
+			"internal/repo/kaname/pg/scalegrid/REPORT-R7-3-matrix-volume.txt",
+			"internal/repo/kaname/pg/relverdict/REPORT-X.txt",
 		}
 		text := headerOf(t, p)
 
@@ -85,8 +89,8 @@ func TestDirtinessIsJudgedAgainstTheSubjectOfTheMeasurement(t *testing.T) {
 		p.Fingerprint = scalegrid.Fingerprint{Composition: "C1", Content: "C2", Files: subject, Identities: identitiesOf(subject)}
 		p.TreeDirty, p.DirtyPaths = true, 2
 		p.DirtyPathList = []string{
-			"services/iam/internal/repo/kaname/pg/scalegrid/grid.go",
-			"services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt",
+			"internal/repo/kaname/pg/scalegrid/grid.go",
+			"internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt",
 		}
 		text := headerOf(t, p)
 
@@ -125,15 +129,15 @@ func TestDirtinessIsJudgedAgainstTheSubjectOfTheMeasurement(t *testing.T) {
 
 // TestDirtyPathsAreParsedFromPorcelain — разбор вывода git, а не догадка о нём.
 func TestDirtyPathsAreParsedFromPorcelain(t *testing.T) {
-	out := " M services/iam/internal/repo/kaname/pg/scalegrid/grid.go\n" +
-		"?? services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt\n" +
-		"R  old/path.go -> services/iam/new/path.go\n" +
+	out := " M internal/repo/kaname/pg/scalegrid/grid.go\n" +
+		"?? internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt\n" +
+		"R  old/path.go -> internal/new/path.go\n" +
 		"\n"
 	got := scalegrid.ParsePorcelainPaths([]byte(out))
 	want := []string{
-		"services/iam/internal/repo/kaname/pg/scalegrid/grid.go",
-		"services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt",
-		"services/iam/new/path.go",
+		"internal/repo/kaname/pg/scalegrid/grid.go",
+		"internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt",
+		"internal/new/path.go",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("путей разобрано %d, ожидалось %d: %v", len(got), len(want), got)

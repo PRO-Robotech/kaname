@@ -92,7 +92,7 @@ const matrixRunCommand = "KACHO_MATRIX_VOLUME=1 go test " +
 	"-count=1 -v -timeout 120m"
 
 // matrixReportPath — куда ложится отчёт, рядом с отчётами соседних приборов.
-const matrixReportPath = "services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-3-matrix-volume.txt"
+const matrixReportPath = "internal/repo/kaname/pg/scalegrid/REPORT-R7-3-matrix-volume.txt"
 
 // ── ПРЕДМЕТ ВОПРОСА ──────────────────────────────────────────────────────────
 
@@ -846,11 +846,21 @@ func TestMatrixVolume_Report(t *testing.T) {
 		t.Skipf("замер матрицы идёт РУЧНЫМ прогоном: %s", matrixRunCommand)
 	}
 	ctx := context.Background()
+	// Годность провенанса — ДО налива (kaname#74): отпечаток, не снявшийся сейчас,
+	// не снимется и через полчаса замера, а отчёт без него не пишется.
+	prov := matrixProvenance()
+	if err := prov.Ready(); err != nil {
+		t.Fatalf("провенанс замера негоден, замер не начат: %v", err)
+	}
 	started := time.Now()
 
 	results := runMatrix(t, ctx, matrixPoints)
 
-	body := renderMatrixReport(results, time.Since(started), postgresVersion(t, ctx))
+	prov.Postgres = postgresVersion(t, ctx)
+	body, err := renderMatrixReport(prov, results, time.Since(started))
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
 	path, err := matrixReportAbsPath()
 	if err != nil {
 		t.Fatalf("%v", err)

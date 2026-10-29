@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 902
+Всего кейсов: 909
 
 ## Перепись по модулям
 
@@ -35,7 +35,7 @@
 |---|---:|
 | `cases/authz-deny.py` | 293 |
 | `cases/authz-failclosed.py` | 3 |
-| `cases/basic-access-token.py` | 2 |
+| `cases/basic-access-token.py` | 3 |
 | `cases/docker-lane-credential-kind.py` | 2 |
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
@@ -77,7 +77,7 @@
 | `cases/kaname-access-keys.py` | 57 |
 | `cases/kaname-cluster-admins.py` | 17 |
 | `cases/kaname-second-factor.py` | 23 |
-| `cases/kaname-own-rest-front.py` | 14 |
+| `cases/kaname-own-rest-front.py` | 20 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/rbac-subject-channel-equivalence.py` | 8 |
 | `cases/rbac-visibility-set.py` | 7 |
@@ -390,11 +390,12 @@
 - `AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200`
 - `AUTHZ-FAILCLOSED-UNKNOWN-KEY-TWIN`
 
-## `cases/basic-access-token.py` — 2 кейсов
+## `cases/basic-access-token.py` — 3 кейсов
 
 > Case-set basic-access-token — БАЗОВЫЙ ТОКЕН ДОСТУПА (задача kacho#1142).
 
 - `IAM-BAT-SECRET-LIFECYCLE-OK`
+- `IAM-BAT-REVOKE-CONF-REVOKEDAT-SECONDS`
 - `IAM-BAT-SECRET-TTL-ABOVE-CEILING-NEG`
 
 ## `cases/docker-lane-credential-kind.py` — 2 кейсов
@@ -1335,7 +1336,7 @@
 - `CAP-20-ONE-WRITE-PATH`
 - `CAP-21-FRONT-SEPARATION`
 
-## `cases/kaname-own-rest-front.py` — 14 кейсов
+## `cases/kaname-own-rest-front.py` — 20 кейсов
 
 > Собственный REST-фронт службы (KAN-REST-1): два сокета, а не один с разбором
 > пути. Адресуется ОТДЕЛЬНЫМИ переменными окружения — край платформы и
@@ -1360,3 +1361,9 @@
 - `IAM-OWNREST-NEG-PAGE-SIZE`
 - `IAM-OWNREST-NEG-FOREIGN-OPERATION`
 - `IAM-OWNREST-NEG-FOREIGN-MUTATION`
+- `IAM-OWNREST-LSP-04-NEGATIVE-PAGE-SIZE`
+- `IAM-OWNREST-LSP-05-ZERO-PAGE-SIZE`
+- `IAM-OWNREST-LSP-06-OVER-MAX-PAGE-SIZE`
+- `IAM-OWNREST-LSP-07-MAX-PAGE-SIZE`
+- `IAM-OWNREST-LSP-08-FORMAT-BEFORE-AUTHORITY`
+- `IAM-OWNREST-LSP-09-FOREIGN-DENIED`

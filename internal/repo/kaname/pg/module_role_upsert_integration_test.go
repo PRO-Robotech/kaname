@@ -5,7 +5,7 @@ package pg_test
 
 // module_role_upsert_integration_test.go — ОПЕРАТОР применителя ролей модуля
 // доводится до настоящего Postgres (приёмка
-// `services/iam/docs/engineering/acceptance/roles-come-as-data-not-migrations.md`
+// `docs/engineering/acceptance/roles-come-as-data-not-migrations.md`
 // §3.1, §3.5; задача kacho#1824).
 //
 // # Дефект, ради которого проба написана

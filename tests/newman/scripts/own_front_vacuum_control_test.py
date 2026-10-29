@@ -190,6 +190,14 @@ ROUTER_LANE = {
 # идентификатора, то есть одинаков для чужого объекта и для отсутствующего.
 MUT_REFUSAL = (403, _j({"code": 7, "message": "permission denied", "details": []}))
 
+# Отказ ФОРМАТА страницы ListSubjects — производитель фундамента
+# (`corevalidate.PageSize`): код 3, текст `invalid argument`, одно нарушение поля.
+LSP_BAD_REQUEST = {"@type": "type.googleapis.com/google.rpc.BadRequest",
+                   "fieldViolations": [{"field": "page_size",
+                                        "description": "page_size must be in [0..1000] (0 means default)"}]}
+LSP_FIELD_REFUSAL = (400, _j({"code": 3, "message": "invalid argument", "details": [LSP_BAD_REQUEST]}))
+LSP_SERVED = (200, _j({"subjects": [f"service_account:{SVA_A}"], "nextPageToken": ""}))
+
 W_HIDING = {
     **ROUTER_LANE,
     "internal-path-on-internal-front": ONE_REFUSAL,
@@ -215,6 +223,14 @@ W_HIDING = {
     "patch-absent-account": MUT_REFUSAL,
     "foreign-account-unchanged": (200, _j({"id": ACCOUNT_B, "name": "acct-b",
                                            "createdAt": "2026-01-01T00:00:00Z"})),
+    # Размер страницы ListSubjects (kaname#615, LSP-04…09): законный мир после
+    # приведения глагола к правилу платформы.
+    "lsp04-list-subjects-page-size-negative": LSP_FIELD_REFUSAL,
+    "lsp05-list-subjects-page-size-zero": LSP_SERVED,
+    "lsp06-list-subjects-page-size-over-max": LSP_FIELD_REFUSAL,
+    "lsp07-list-subjects-page-size-max": LSP_SERVED,
+    "lsp08-list-subjects-page-size-negative-foreign": LSP_FIELD_REFUSAL,
+    "lsp09-list-subjects-foreign-legal-page-size": ONE_REFUSAL,
 }
 
 # Отказ, ЭХОМ выдающий существование объекта: отметка создания в теле отказа.
@@ -268,6 +284,15 @@ TARGETS = {
      "FOREIGN-MUT: «есть, но не твой» и «нет такого» неотличимы на маршруте ПРАВКИ — "
      "иначе отказ служил бы оракулом существования"):
         (404, _j({"code": 5, "message": f"Account {ACCOUNT_ABSENT} not found", "details": []})),
+
+    # Отказ формата, ЭХОМ несущий прежний собственный текст службы, — ровно один
+    # изменённый факт против законного отказа: лишняя деталь в `details`.
+    ("lsp06-list-subjects-page-size-over-max",
+     "LSP-06: прежний собственный текст службы не производится"):
+        (400, _j({"code": 3, "message": "invalid argument",
+                  "details": [LSP_BAD_REQUEST,
+                              {"@type": "type.googleapis.com/google.rpc.DebugInfo",
+                               "detail": "Illegal argument page_size 1001 > 1000"}]})),
 }
 
 # Утверждения, которым в W_today проходить ПОЛОЖЕНО, и причина по каждому. Всякое
@@ -317,6 +342,13 @@ HONEST_IN_W_TODAY = {
         "совпадает с W_today by construction; различительную работу несёт равенство двух "
         "отказов в шаге `patch-absent-account`, и оно в W_today падает",
     ("patch-foreign-account", "FOREIGN-MUT: grpc code 7"): "то же",
+    ("lsp09-list-subjects-foreign-legal-page-size", "status 403"):
+        "пара «статус + код» и текст ПИНЯТ контракт отказа в правах ListSubjects "
+        "(LSP-09), а не утверждают неотличимость; отказ в правах и есть ответ W_today, "
+        "поэтому совпадает с ним by construction. Различительную работу несёт близнец "
+        "LSP-08 (тот же вызывающий и объект, pageSize -1 → 400), и он в W_today падает",
+    ("lsp09-list-subjects-foreign-legal-page-size", "LSP-09: grpc code 7 (PERMISSION_DENIED)"): "то же",
+    ("lsp09-list-subjects-foreign-legal-page-size", "LSP-09: message — permission denied"): "то же",
 }
 
 # ── Движок ─────────────────────────────────────────────────────────────────

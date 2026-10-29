@@ -6,7 +6,7 @@ package pg_test
 // module_catalog_anchor_bound_apply_integration_test.go — ПРИМЕНЕНИЕ НЕ ВЫХОДИТ
 // ЗА ОПОРУ СТРАЖА ПАРИТЕТА, и опора эта АСИММЕТРИЧНА.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
+// Приёмка `docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.4; сценарии `IAM-MA-1-10`, `-11`, `-11а`, `-12`.
 // Задача продукта kacho#1034.
 //

@@ -359,3 +359,9 @@ func TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour(t *test
 	}))
 	require.True(t, txb.tx.committed)
 }
+
+// DeferJournalTx / FlushJournalTx — двойник откладывает нечего: строки журнала он
+// не кладёт в базу, и число операторов у него не предмет (kaname#617).
+func (journalEmitter) DeferJournalTx(tx service.Tx) service.Tx { return tx }
+
+func (journalEmitter) FlushJournalTx(context.Context, service.Tx) error { return nil }

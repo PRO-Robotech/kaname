@@ -7,7 +7,7 @@ package pg_test
 // кластерного якоря; инвариант держит СТРОКА, а не разбор.
 //
 // Задача продукта kacho#1032 (P0). Приёмка — APPROVED круга 2,
-// `services/iam/docs/engineering/acceptance/role-ownership-tier-apart-from-cluster-anchor.md`,
+// `docs/engineering/acceptance/role-ownership-tier-apart-from-cluster-anchor.md`,
 // сценарии IAM-OM-1-06 … -12. Миграция —
 // `20260902190500_role_ownership_tier_apart_from_cluster_anchor.sql`.
 //

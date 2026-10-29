@@ -3,12 +3,12 @@
 
 package access_binding
 
-// role_fanout_bound_test.go — bound-check for a Role.Update rules change. A
-// Role.Update whose rules change is rejected FAILED_PRECONDITION when the
-// role is carried by more than the contract limit (10000) of active bindings, BEFORE
-// any fan-out work (the Operation is not even created). Unit test over the fake repo
-// + a fake fanout; no Postgres (a service-layer Postgres dependency would be adapter
-// leakage).
+// role_fanout_bound_test.go — сторож предела для правки правил роли. Правка роли
+// со сменой правил отвергается FAILED_PRECONDITION, когда роль несут больше
+// активных привязок, чем предел контракта (10000), ДО всякой работы прохода
+// (операция даже не заводится). Проба над дублёром репозитория и дублёром
+// прохода; без Postgres (зависимость слоя службы от Postgres была бы утечкой
+// адаптера).
 
 import (
 	"context"
@@ -27,17 +27,18 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
-// fakeFanout — a role.RulesMembershipFanout returning a fixed active-binding count
-// and recording whether the post-commit reconcile was invoked.
+// fakeFanout — `role.RulesMembershipFanout`, отдающий заданный счёт активных
+// привязок и записывающий, звали ли сверку после фиксации.
 //
-// The pass runs on a goroutine DETACHED from the operation (shared.GoPostCommit), so
-// the fact it records is written by a goroutine other than the one that asserts on
-// it, and awaitOpDone is NOT a barrier for it: done means the row is durable, never
-// that the detached pass has been observed (ban #9). A plain bool field is therefore
-// two defects at once — a data race, and an assertion free to read `false` while the
-// pass is still in flight. The record is a channel the pass closes: the close
-// publishes everything before it, so the wait is race-free AND deterministic, ending
-// the instant the pass runs, with no polling and no sleep.
+// Проход идёт в горутине, ОТСОЕДИНЁННОЙ от операции (`shared.GoPostCommit`), так
+// что факт, который он записывает, пишет не та горутина, что его утверждает, и
+// `awaitOpDone` барьером для него НЕ служит: готовность значит, что строка
+// записана, а не что отсоединённый проход наблюдён (запрет #9). Голое поле `bool`
+// поэтому — два дефекта сразу: гонка данных и утверждение, вправе прочесть
+// `false`, пока проход ещё идёт. Запись — канал, который проход закрывает:
+// закрытие публикует всё, что было до него, поэтому ожидание без гонки И
+// детерминировано и кончается ровно тогда, когда проход исполнился, — без опроса и
+// без паузы.
 type fakeFanout struct {
 	count int
 	err   error
@@ -58,7 +59,7 @@ func (f *fakeFanout) ReconcileActiveBindings(context.Context, domain.RoleID) err
 	return nil
 }
 
-// reconciled reports whether the pass has run BY NOW, without blocking.
+// reconciled — исполнился ли проход К ЭТОМУ МОМЕНТУ, без ожидания.
 func (f *fakeFanout) reconciled() bool {
 	select {
 	case <-f.ran:
@@ -68,9 +69,9 @@ func (f *fakeFanout) reconciled() bool {
 	}
 }
 
-// awaitReconciled blocks until the detached pass has run, or until the budget
-// expires, and reports which happened. Expiry is a real failure of the property
-// under test, not a flake to be papered over.
+// awaitReconciled ждёт, пока отсоединённый проход исполнится либо истечёт срок,
+// и отвечает, что случилось. Истечение — настоящий отказ проверяемого свойства,
+// а не случайность, которую замазывают.
 func (f *fakeFanout) awaitReconciled(budget time.Duration) bool {
 	timer := time.NewTimer(budget)
 	defer timer.Stop()
@@ -101,8 +102,8 @@ func TestRoleUpdate_C21_FanoutBoundExceeded_FailedPrecondition(t *testing.T) {
 	require.Error(t, err, "a role over the fan-out limit must be rejected SYNC")
 	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 	assert.Contains(t, status.Convert(err).Message(), "too many bindings")
-	// Rejected synchronously, before the Operation exists, so nothing is in flight
-	// to be waited on: the pass either never started or the bound did not hold.
+	// Отвергнуто синхронно, до заведения операции, так что ждать нечего: проход либо
+	// не начинался, либо предел не удержан.
 	assert.False(t, fan.reconciled(), "the fan-out must NOT run when the bound is exceeded")
 }
 
@@ -111,6 +112,7 @@ func TestRoleUpdate_C21_FanoutWithinBound_Runs(t *testing.T) {
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID178b, "viewer",
 		domain.Permissions{"compute.instance.*.get"})
 	repo.setRoleCustom(accountID)
+	repo.answerRoleSegments()
 	opsRepo := newFakeOpsRepo()
 	fan := newFakeFanout(3)
 
@@ -124,8 +126,8 @@ func TestRoleUpdate_C21_FanoutWithinBound_Runs(t *testing.T) {
 	}))
 	require.NoError(t, err)
 	awaitOpDone(t, opsRepo, op.ID)
-	// op-done is the barrier for the COMMITTED change, not for the detached pass;
-	// the pass has its own.
+	// Готовность операции — барьер для ЗАФИКСИРОВАННОЙ правки, а не для
+	// отсоединённого прохода: у прохода свой барьер.
 	assert.True(t, fan.awaitReconciled(5*time.Second),
 		"within-bound rules change runs the membership fan-out")
 }

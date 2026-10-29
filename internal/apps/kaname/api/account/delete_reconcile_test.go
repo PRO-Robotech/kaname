@@ -111,6 +111,12 @@ type delFakeRepo struct {
 	fgaDel        []service.RelationTuple
 	acctDelCnt    int
 	bindingDelCnt int
+
+	// fgaDelStatements — сколько операторов журнала положила транзакция: пустой
+	// набор оператора не кладёт, как и настоящий выпускатель (kaname#617).
+	fgaDelStatements int
+	// members — участники аккаунта, которых возвращает замок снятия.
+	members []domain.UserID
 }
 
 // seedExtraBindings adds n further account-scoped bindings, each with one tuple in
@@ -316,6 +322,9 @@ func (w *delFakeWriter) EmitFGARelationWrite(context.Context, []service.Relation
 }
 func (w *delFakeWriter) EmitFGARelationDelete(_ context.Context, tuples []service.RelationTuple) error {
 	w.repo.fgaDel = append(w.repo.fgaDel, tuples...)
+	if len(tuples) > 0 {
+		w.repo.fgaDelStatements++
+	}
 	return nil
 }
 func (w *delFakeWriter) EmitReconcileEvent(context.Context, string, string, string) error {
@@ -335,8 +344,8 @@ func (w delAcctWriter) Delete(_ context.Context, _ domain.AccountID) error {
 	w.repo.acctDelCnt++
 	return nil
 }
-func (delAcctWriter) LockForRemoval(context.Context, domain.AccountID) ([]domain.UserID, error) {
-	return nil, nil
+func (w delAcctWriter) LockForRemoval(context.Context, domain.AccountID) ([]domain.UserID, error) {
+	return w.repo.members, nil
 }
 func (delAcctWriter) LockOwner(context.Context, domain.UserID) error { return nil }
 

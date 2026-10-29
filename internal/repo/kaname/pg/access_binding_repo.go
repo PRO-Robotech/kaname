@@ -1333,6 +1333,35 @@ func (w *abWriter) EmitRelationDelete(ctx context.Context, tuples []access_bindi
 	return w.emitFGAOutbox(ctx, "fga.tuple.delete", tuples)
 }
 
+// EmitRelationJournal — выдачи и снятия транзакции одним оператором журнала
+// (kaname#617). Отказ базы переводится тем же переводчиком, что у emitFGAOutbox:
+// 40P01 на этом операторе — признак конфликта, а не `internal error`.
+func (w *abWriter) EmitRelationJournal(ctx context.Context, writes, deletes []access_binding.RelationTuple) error {
+	ws, err := relationTuplesToClients(writes)
+	if err != nil {
+		return err
+	}
+	ds, err := relationTuplesToClients(deletes)
+	if err != nil {
+		return err
+	}
+	return mapErr(fga_outbox.EmitJournalTx(ctx, w.tx, ws, ds), "", "")
+}
+
+// relationTuplesToClients — кортежи реестра в форме выпускателя журнала;
+// неполный кортеж — отказ, как у emitFGAOutbox.
+func relationTuplesToClients(tuples []access_binding.RelationTuple) ([]clients.RelationTuple, error) {
+	out := make([]clients.RelationTuple, 0, len(tuples))
+	for _, t := range tuples {
+		if t.User == "" || t.Relation == "" || t.Object == "" {
+			return nil, fmt.Errorf("emit fga_outbox: incomplete tuple (user=%q relation=%q object=%q)",
+				t.User, t.Relation, t.Object)
+		}
+		out = append(out, clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object})
+	}
+	return out, nil
+}
+
 // LockLiveTargetTypes реализует access_binding.WriterIface (kaname#904, Р2).
 //
 // # Почему это не чтение-и-действие (запрет #10)

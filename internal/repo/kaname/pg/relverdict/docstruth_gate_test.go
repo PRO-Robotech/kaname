@@ -63,8 +63,8 @@ import (
 )
 
 const (
-	chainArchDoc = "services/iam/docs/engineering/architecture/scope-chain-reaches-the-root.md"
-	chainQueryGo = "services/iam/internal/repo/kaname/pg/relverdict/query.go"
+	chainArchDoc = "docs/engineering/architecture/scope-chain-reaches-the-root.md"
+	chainQueryGo = "internal/repo/kaname/pg/relverdict/query.go"
 	// chainMigDecl — по чему опознаётся миграция, ОБЪЯВЛЯЮЩАЯ представление цепи.
 	// Здесь стоял образец имени файла (`785001_*.sql`), и он ПЕРЕЖИЛ СВОЙ ПРЕДМЕТ
 	// в тот же день, когда цепь была объявлена заново другой миграцией: гейт

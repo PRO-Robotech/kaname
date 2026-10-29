@@ -73,6 +73,9 @@ func TestHeaderNamesTheStateOfTheTreeNotOnlyItsRevision(t *testing.T) {
 	base := scalegrid.Provenance{
 		TreeRev: "abc123", When: time.Now(), CPUCores: 1,
 		RunCommand: "make scale-grid-full", GridText: "  ось N: 100\n",
+		// Отпечаток — обязательная часть годной шапки (kaname#74); предмет этой
+		// пробы — строки состояния дерева, поэтому он минимален.
+		Fingerprint: scalegrid.Fingerprint{Composition: "C1", Content: "C2"},
 	}
 
 	// Чистое дерево: ревизия описывает исполнявшееся целиком.

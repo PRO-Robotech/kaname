@@ -28,10 +28,13 @@ type (
 // role UPDATE), so the role mutation + the per-binding FGA delta emit +
 // emitted-set ledger update commit-or-rollback together (ban #10). For each
 // active binding of roleID it diffs the stored emitted-set (old) against the
-// tuples derived from newRole (new) and emits EmitRelationDelete(removed) +
-// EmitRelationWrite(added) + ReplaceEmittedTuples. Bounded by the number of
-// active bindings of the single mutated role; idempotent (an unchanged tier
-// yields an empty delta).
+// tuples derived from newRole (new) and replaces the emitted-set. Bounded by the
+// number of active bindings of the single mutated role; idempotent (an unchanged
+// tier yields an empty delta).
+//
+// Снятия и выдачи всего веера ложатся в журнал ОДНИМ оператором после замены
+// реестров (EmitRelationJournal, kaname#617): оператор на выдачу брал замки строк
+// факта порядком выдач веера, и встречные смены ролей сходились в кольцо (40P01).
 type TupleReconciler interface {
 	ReconcileRoleTuples(ctx context.Context, w Writer, roleID domain.RoleID, newRole domain.Role) error
 }

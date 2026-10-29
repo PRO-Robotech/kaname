@@ -7,7 +7,7 @@ package pg_test
 // выбор ОБЪЯВЛЕН, а не совпал.
 //
 // Задача продукта kacho#1878; заказан приёмкой
-// `services/iam/docs/engineering/acceptance/module-withdrawal-is-described.md`
+// `docs/engineering/acceptance/module-withdrawal-is-described.md`
 // §9.2, решение — `docs/engineering/architecture/catalog-liveness-key-per-level.md`.
 //
 // # Предмет

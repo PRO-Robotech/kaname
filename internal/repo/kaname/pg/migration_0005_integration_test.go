@@ -9,8 +9,8 @@
 // Файл заводился под миграцию `0005_rbac_v2_grammar_and_scope.sql` и шагал по
 // ЛЕСТНИЦЕ версий: поднять базу до 4, посеять состояние «до», применить пятую,
 // сверить состояние «после». Свод 171 миграции iam в одну первичную снял
-// лестницу целиком — файлов в каталоге ровно один (предикат:
-// `ls services/iam/internal/migrations/*.sql | wc -l` → 1), и никакого «до
+// лестницу целиком — файлов в каталоге стал ровно один (предикат:
+// `ls internal/migrations/*.sql | wc -l` → 1 на момент свода), и никакого «до
 // пятой» больше не существует.
 //
 // Переименовать файл нельзя тем же заходом, что его правит, поэтому имя
@@ -349,7 +349,7 @@ func TestAccessBindingScope_OutOfRangeIsRejectedAndOmittedIsDerived(t *testing.T
 	require.Equal(t, 1, derived, "тип ресурса cluster даёт область 1")
 }
 
-// unwrapPgErr — peel pgconn.PgError out of wrap chain.
+// unwrapPgErr — достаёт pgconn.PgError из цепочки обёрток.
 func unwrapPgErr(err error) *pgconn.PgError {
 	for e := err; e != nil; {
 		pgErr, ok := e.(*pgconn.PgError)

@@ -1,0 +1,221 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/list-subjects-page-size-is-the-platform-one.md
+  sha256: e6c4bc07a1f8281a8a79e827e6a84530033edffd87803e84e7e408f262756c95
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: a3a53471ed593d231f5d0ceafecb27c4417bc4ac
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status --short` → `?? <путь>`); отпечаток снят с
+    файла рабочего дерева. Коммит документа обязан дать тот же отпечаток
+    (`git show HEAD:<путь> | sha256sum`), иначе эта запись — о другой редакции.
+  branch: '615'
+  task: PRO-Robotech/kaname#615
+  related_tasks: [PRO-Robotech/kaname#845]
+  lines: 269
+  round: 1
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/list-subjects-page-size-is-the-platform-one.md
+    в копии kacho-workspace/tmp/kn-615-page-size-acceptance @ a3a53471e →
+    e6c4bc07…262756c95 — совпал с заявленным в задании.
+  measurement_revisions: >-
+    Код — рабочее дерево копии на a3a53471e (правок кода в копии нет, `git status` — только
+    документ); corelib — модуль v1.15.0 (пин go.mod:8); kacho — project/kacho origin/main @41d7edad9b.
+  dispatcher_decisions_applied:
+    - порядок «формат → права» (LSP-08/09) оставлен по канону ID/формы-первым — не оспаривается
+    - курсор pageToken, принимающий мусор, — вне объёма, отдельная задача P3 — не оспаривается
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-29T02:13:07Z'
+
+scope:
+  source: >-
+    kaname#615 «ПРЕДИКАТ СНЯТИЯ» (у kaname нет docs/specs/04 roadmap — объём задаёт задача).
+  coverage:
+    - пункт «page_size=0 при 51+ субъекте — страница из 50 с непустым продолжением» → LSP-01
+    - пункт «page_size=-1 — INVALID_ARGUMENT с именем поля» → LSP-04 (+ LSP-06 верхняя граница)
+    - пункт «близнец page_size=60 — 60» → LSP-02
+    - пункт «комментарий поля в контракте согласован» → LSP-10
+  over_scope: none
+  out_of_scope_declared: pageToken-курсор, укорачивание после среза, внутренние читатели, прочие List, край kacho
+
+scenarios:
+  total: 10
+  positive: 5   # LSP-01, 02, 03, 05, 07
+  negative: 4   # LSP-04, 06, 08, 09
+  contract_text: 1  # LSP-10
+  producer_named: 10 of 10
+  twin_named: >-
+    4 of 4 по существу; у LSP-09 назван близнец LSP-08 (тоже отрицание), положительный близнец
+    LSP-05 (отличие ровно accountAId↔accountBId) существует, но не назван — см. minor M3.
+
+blocking: []
+
+minor:
+  - id: M1
+    kind: CONSTRUCTIBILITY
+    note: >-
+      Контроль «Дано» для LSP-01…03 отсекает только T < 61, а утверждение LSP-03 («ровно T − 50,
+      next_page_token пуст») истинно лишь при T ≤ 99: при T ≥ 100 вторая страница с умолчанием —
+      50 с непустым курсором (subjects.go:244 `if len(subjects) == limit`). Посевом T = 61 или 62
+      (61 человек + владелец), поэтому сегодня не краснеет, но граница не записана. Правка:
+      контрольный шаг — «61 ≤ T ≤ 99, иначе фикстура сломана, сценарий не исполнен».
+  - id: M2
+    kind: FORMAT
+    note: >-
+      Строка «вызывающий проходит внешний перехватчик глагола» называет устаревший механизм:
+      «каталог требует viewer на кластере, выданный классу authenticated (caller_authority.go:7-17)».
+      На a3a53471e каталог для ListSubjects несёт `required_relation: ""` и `scope_filtered: true`
+      (internal/apps/kaname/seed/embedded/permission_catalog.json:2723-2731; proto
+      authorize_service.proto:149-155 прямо говорит, что прежняя строка viewer-на-кластере
+      гейтом не была); внешняя дверь пропускает scope_filtered без вопроса об объекте
+      (internal/authzguard/own_door.go:352-354), порог required_acr_min=1 держит acr_floor.go,
+      машинная учётка от него освобождена (acr_floor.go:61). Исход сценариев тот же; текст
+      писателя исправить, чтобы документ не описывал несуществующий гейт.
+  - id: M3
+    kind: TWIN
+    note: >-
+      LSP-09 (403) — дописать «положительный близнец — LSP-05, отличается ровно accountBId
+      вместо accountAId». Сейчас назван только LSP-08 (отрицание).
+  - id: M4
+    kind: PRODUCER
+    note: >-
+      LSP-10: держатель названа машинно только для числа умолчания
+      (TestPageSizeContractNamesTheDefaultTheServiceApplies; `git grep 'default 500'`). Клаузы
+      «называет диапазон [0..1000] и отказ INVALID_ARGUMENT» у поля и «комментарий глагола
+      называет [0..1000]» предиката не имеют. Предложение для DoD: `git grep -c '\[0\.\.1000\]'
+      HEAD -- proto/kaname/cloud/iam/v1/authorize_service.proto` → ≥ 2 и `git grep -n 'Hard cap:
+      page size ≤ 1000' HEAD -- proto` → пусто.
+  - id: M5
+    kind: FORMAT
+    note: >-
+      Дрейф координат @a3a53471e: callerAuthorityRelations — caller_authority.go:55 (не :53);
+      newHandlerWithAuthorizer — handler_test.go:223 (не :229); `if limit <= 0` — subjects.go:202-204
+      (не :201-203). Смысл ссылок верен.
+  - id: M6
+    kind: DoD
+    note: >-
+      DoD LSP-04…09: «красная на a3a53471e (… LSP-06: текст без поля)» верно, только если дублёр
+      стоит ПОД настоящей службой (RelationQueries); если дублёр — сам service.Authorizer, то
+      сегодня LSP-06 даёт успех, а не текст без поля (проверка `> 1000` живёт в
+      authorize_service.go:1255-1257). Красная в обоих случаях; уточнить уровень дублёра в пробе.
+  - id: M7
+    kind: FORMAT
+    note: >-
+      Соседняя приёмка list-page-size-default-named-once.md приведена с отпечатком
+      (7d7314a4…cd5e34f — перемерено, совпал), но она DRAFT; на неё опирается лишь
+      подкрепляющее число «28 List-глаголов», канон решения — api-pagesize. Не блокирует.
+
+verified_claims:
+  - >-
+    corelib v1.15.0 validate.go:62 DefaultPageSize=50, :250-258 PageSize (текст «page_size must be in [0..1000] (0 means default)»), errors.go:80 «invalid argument», :47-49 BadRequest — прочитано в модуле
+  - >-
+    relverdict/list.go:87 `const DefaultPageSize = 500`; authorize_service.go:1256 `Illegal argument page_size %d > 1000`; proto:313 «default 500»; page_size_default_test.go:53 запись исключения — git grep @a3a53471e, по 1 строке
+  - >-
+    corevalidate.PageSize("page_size" — 6 (по файлам `git grep -c … | wc -l` → 6; по строкам `git grep -n 'corevalidate.PageSize(' … | wc -l` → 6)
+  - >-
+    handler.go:282-291 — обязательные поля, затем authorizeCaller до вызова службы; :303-305 проброс по префиксу «Illegal argument»
+  - >-
+    resolveActionToRelation: `iam.account.admin` → admin (сквозной список ssh/console/admin/editor/viewer), `iam.account.get` → viewer
+  - >-
+    own_gates.go:249-267 курсор проходит сквозь сужение допуска; admittedHolders снимает только недопущенных
+  - >-
+    fga_model.fga: account.admin = [user, service_account, group#member] or owner or super_admin
+  - >-
+    потребители: kaname — только handler.go (`git grep -ln 'ListSubjectsRequest{'`); kacho @41d7edad9b — маршрут шлюза и пробы; ui-future ServiceAccountKeysPage.tsx:18 `listSubjects` — одноимённое поле конфигурации, зовёт listServiceAccounts, не глагол
+  - >-
+    соседняя приёмка list-page-size-default-named-once.md — sha256 7d7314a4…cd5e34f (совпал)
+  - >-
+    seed_own_stand.py:1213-1218 admin на iam.account A у jwtAccountAdminA; :1425-1426 admin на B у иной учётки (sva_inv)
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → e6c4bc07a1f8281a8a79e827e6a84530033edffd87803e84e7e408f262756c95
+    - git -C <копия> rev-parse HEAD → a3a53471ed593d231f5d0ceafecb27c4417bc4ac; ветка 615
+    - git status --short → `?? docs/engineering/acceptance/list-subjects-page-size-is-the-platform-one.md`
+
+constructibility:
+  method: >-
+    Названными фикстурами, которые уже исполняют существующие пробы: ciWorld.seedAccountWithOwner /
+    seedUser / factThroughJournal (cascade_from_committed_rows_integration_test.go:134, :155, :202),
+    мир newAdmWorld (address_admission_integration_test.go:47) — те же писатели, что в EV-50/EV-55
+    над ListSubjects; край — tests/authz-fixtures/seed_own_stand.py. Схемных препятствий для 61
+    человека с фактом admin в одном аккаунте нет (EV-50 кладёт тот же факт). Допущение края
+    (роль admin на iam.account даёт отношение admin) документ называет сам и ставит контролем
+    положительного близнеца LSP-05. Посев на кластере не ставился: каждое «Дано» показано
+    названной фикстурой.
+  seeded: 0
+  of: 7
+  named_fixture: 7
+  not_executed: 0
+
+route_signs:
+  proto: true            # только комментарии ListSubjectsRequest.page_size и глагола
+  schema: false
+  public_rpc: true       # поведение AuthorizeService.ListSubjects на 0 / <0 / >1000
+  ui: false
+  new_domain: false
+  security_surface: true # порядок проверок в обработчике authz-RPC (LSP-08); поверхность не расширяется
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: true
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: >-
+    Действующее одобрение возникает после публикации внешнего события в subject.task этой
+    учёткой; до него запись — объявление вердикта рецензента.
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_on: publication of event_body to PRO-Robotech/kaname#615 by pointpu
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+
+event_body: "acceptance-reviewer · APPROVED · sha256 e6c4bc07a1f8281a8a79e827e6a84530033edffd87803e84e7e408f262756c95"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#615
+  status: performed
+  published: true
+  database_id: 6486026102
+  node_id: IC_kwDOUO26pM8AAAABgpjndg
+  url: https://github.com/PRO-Robotech/kaname/issues/615#issuecomment-6486026102
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6486026102
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: "2026-10-29T02:15:31Z"
+  body_sha256: 3b0e0eb97857d4c31f4ab37db265f48c5d71075d7ba56229756073b3bbc16343
+  subject_sha256: e6c4bc07a1f8281a8a79e827e6a84530033edffd87803e84e7e408f262756c95
+  subject_revision_commit: 77ae8736db5b03b6b95d8a5a88fbbe4b92370959
+  verdict: APPROVED
+  publication_note: Блок дописан отдельным коммитом поверх записи рецензента; вердикт, разбор и находки задним числом не правлены. Тело события — дословно event_body. Отпечаток предмета перемерен перед публикацией (`git show 77ae8736d:<док> | sha256sum`) и совпал с именем записи. Поля события — ответ `gh api` на создание комментария (created_at == updated_at); отпечаток тела — `jq -j .body | sha256sum`. Коммит 77ae8736d на origin ещё не отправлен (ветку отправляет исполнитель кода).
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: []

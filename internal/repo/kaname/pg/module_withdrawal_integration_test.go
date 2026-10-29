@@ -6,7 +6,7 @@ package pg_test
 // module_withdrawal_integration_test.go — ОТЗЫВ МОДУЛЯ: обратная половина
 // поставки данными.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/module-withdrawal-is-described.md`
+// Приёмка `docs/engineering/acceptance/module-withdrawal-is-described.md`
 // (APPROVED круга 2), сценарии IAM-MW-1-02(б), -06, -07(а,б), -08, -09, -14, -15,
 // -16, -17. Задачи продукта kacho#1823 (обратимость — ядро) и kacho#1859 (ключ живости).
 //

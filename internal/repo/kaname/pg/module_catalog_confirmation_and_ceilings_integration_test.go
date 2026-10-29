@@ -6,7 +6,7 @@ package pg_test
 // module_catalog_confirmation_and_ceilings_integration_test.go — ГЛАГОЛ ДЕЛАЕТ
 // ТО, ЧТО ПОКАЗАЛ ПЛАН, и не больше, чем оператор разрешил.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
+// Приёмка `docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.5 и §2.6; сценарии `IAM-MA-1-13`, `-14`, `-18`, `-19`,
 // `-20`. Задача продукта kacho#1034.
 //

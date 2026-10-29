@@ -170,11 +170,7 @@ func (r *Reconciler) convergeMemberTuples(ctx context.Context, s ReconcileStore,
 		}
 	}
 	if len(missing) > 0 {
-		if fresh := col.collectNew(missing); len(fresh) > 0 {
-			if err := s.EmitTupleWrite(ctx, fresh); err != nil {
-				return fmt.Errorf("emit missing tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
-			}
-		}
+		col.deferWrite(col.collectNew(missing))
 		if err := s.RecordEmittedTuples(ctx, bs.BindingID, coord, missing); err != nil {
 			return fmt.Errorf("record missing emitted tuple %s:%s: %w", d.ObjectType, d.ObjectID, err)
 		}

@@ -212,12 +212,12 @@ func TestRestampRefusesWhenTheSubjectItselfMoved(t *testing.T) {
 			"  файлов под отпечатком 1, таблиц выведено 1 (kaname.users)\n" +
 			"  предикат отпечатка    синтетика\n" +
 			scalegrid.MarkerFileList + "\n" +
-			scalegrid.MarkerFile + hash + "  " + identity + "  services/iam/internal/migrations/0001_initial.sql\n"
+			scalegrid.MarkerFile + hash + "  " + identity + "  internal/migrations/0001_initial.sql\n"
 	}
 	tail := "\nСЕТКА\n  ось N: 100\n"
 
 	fp := scalegrid.Fingerprint{
-		Files:      []string{"services/iam/internal/migrations/0001_initial.sql"},
+		Files:      []string{"internal/migrations/0001_initial.sql"},
 		Identities: []string{identity},
 		Tables:     []string{"kaname.users"},
 	}
@@ -445,7 +445,7 @@ func TestRestampNotePrintsThisReportsOwnDelta(t *testing.T) {
 	head := "ПРОВЕНАНС\n  снято               2026-09-17 10:58:04 MSK\n\nОТПЕЧАТОК\n"
 	tail := "\nСЕТКА\n  ось N: 100\n"
 	row := func(hash, id string) string {
-		return scalegrid.MarkerFile + hash + "  " + id + "  services/iam/internal/migrations/x.sql\n"
+		return scalegrid.MarkerFile + hash + "  " + id + "  internal/migrations/x.sql\n"
 	}
 	block := func(rows ...string) string {
 		return scalegrid.MarkerComposition + "aaaaaaaaaaaaaaaa\n" +

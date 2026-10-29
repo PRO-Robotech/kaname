@@ -38,8 +38,9 @@ type UpdateRoleInput struct {
 	// label-selectable наравне с account/project (iam-direct ARM_LABELS).
 	Labels     domain.Labels
 	UpdateMask []string
-	// ResourceVersion — xmin OCC token echoed from a prior Get/List; when set on a
-	// rules-changing Update it guards against a concurrent edit (A-08/OCC).
+	// ResourceVersion — токен оптимистической блокировки (`xmin`), полученный
+	// прежним `Get`/`List`; на правке правил сторожит от параллельной правки
+	// (A-08).
 	ResourceVersion string
 }
 
@@ -58,29 +59,29 @@ var roleImmutableFields = map[string]string{
 	"id":         "id is immutable after Role.Create",
 	"created_at": "createdAt is immutable after Role.Create",
 	"createdAt":  "createdAt is immutable after Role.Create",
-	// permissions is the compiled/derived projection — not directly mutable.
+	// `permissions` — скомпилированная производная проекция, прямой правке не подлежит.
 	"permissions": "permissions is immutable after Role.Create",
 }
 
 type UpdateRoleUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
-	// reconciler — FGA tuple reconcile fan-out for a permissions change
-	// (nil-safe: when unwired the role UPDATE still succeeds but active-binding
-	// tuples are not reconciled — only the case in standalone unit tests of the
-	// non-permission paths). Implemented by access_binding.RoleTupleReconciler,
-	// wired in the composition root.
+	// reconciler — сверка кортежей прав по привязкам при смене прав роли. Может
+	// быть не провязан: тогда правка роли проходит, а кортежи активных привязок не
+	// сверяются — так бывает только в отдельных пробах путей без смены прав.
+	// Реализует `access_binding.RoleTupleReconciler`, провязывает корень службы.
 	reconciler TupleReconciler
-	// membership — RBAC rules-model: re-materializes the role.rules
-	// ARM_LABELS membership of every ACTIVE binding after a rules change commits
-	// (the fan-out + the bounded-limit guard). nil-safe (unit tests of the
-	// non-rules paths leave it unwired; the periodic sweep also re-converges).
+	// membership — модель правил: после фиксации смены правил заново
+	// материализует членство по меткам каждой АКТИВНОЙ привязки роли (проход и
+	// сторож предела). Может быть не провязан: пробы путей без правил его не
+	// ставят, а периодический обход сводит состояние и сам.
 	membership RulesMembershipFanout
-	// objects — post-commit per-object materializer for the role AS AN OBJECT
-	// (iam.role). Distinct from `membership` above: that one re-materializes what the
-	// role's RULES grant over other objects, this one re-materializes who may reach
-	// THIS role after its OWN labels changed. nil-safe; the co-committed reconcile
-	// event + periodic sweep remain the backstop.
+	// objects — после фиксации материализует доступ к роли КАК К ОБЪЕКТУ
+	// (`iam.role`). Не то же, что `membership` выше: тот заново материализует, что
+	// ПРАВИЛА роли дают на других объектах, этот — кто может добраться до ЭТОЙ
+	// роли после смены её СОБСТВЕННЫХ меток. Может быть не провязан; событие
+	// сверки, зафиксированное вместе с правкой, и периодический обход остаются
+	// страховкой.
 	objects ObjectReconciler
 	logger  *slog.Logger
 	// cat — источник КАТАЛОЖНОГО ФАКТА (kacho#1816). Обязателен по той же
@@ -102,23 +103,23 @@ func NewUpdateRoleUseCase(r Repo, opsRepo operations.Repo, cat catalog.Source) *
 	return &UpdateRoleUseCase{repo: r, opsRepo: opsRepo, cat: cat}
 }
 
-// WithTupleReconciler wires the FGA tuple reconcile fan-out. nil-safe.
+// WithTupleReconciler провязывает сверку кортежей прав по привязкам. Может быть не провязан.
 func (u *UpdateRoleUseCase) WithTupleReconciler(r TupleReconciler) *UpdateRoleUseCase {
 	u.reconciler = r
 	return u
 }
 
-// WithMembershipFanout wires the role.rules membership fan-out (the
-// bound-check + post-commit per-binding reconcile). nil-safe.
+// WithMembershipFanout провязывает проход членства по правилам роли (сторож
+// предела и сверку каждой привязки после фиксации). Может быть не провязан.
 func (u *UpdateRoleUseCase) WithMembershipFanout(m RulesMembershipFanout) *UpdateRoleUseCase {
 	u.membership = m
 	return u
 }
 
-// WithObjectReconciler wires the post-commit per-object materializer used on an
-// own-resource LABEL change (parity with the cross-service RegisterResource re-register
-// path — see doUpdate). Optional; nil keeps the queue-only behaviour. The logger is
-// used only to report a failed pass (the durable event + sweep still re-converge).
+// WithObjectReconciler провязывает материализацию доступа к роли как к объекту
+// после фиксации правки СОБСТВЕННЫХ меток (паритет с повторной регистрацией
+// ресурса чужой службой — см. doUpdate). Необязателен: без него остаётся одна очередь.
+// Журнал нужен только для отчёта о сорванном проходе (событие и обход всё равно сведут).
 func (u *UpdateRoleUseCase) WithObjectReconciler(r ObjectReconciler, logger *slog.Logger) *UpdateRoleUseCase {
 	u.objects = r
 	u.logger = logger
@@ -137,12 +138,12 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	// Read the role WITH its xmin OCC token so the worker-tx UPDATE
-	// is guarded against a concurrent Role.Update (two updates each deriving the
-	// FGA fan-out from their own role projection → ledger↔FGA drift). The token is
-	// captured on the sync path and echoed into UpdateCAS inside the worker-tx; the
-	// loser fails FAILED_PRECONDITION and its whole writer-tx (UPDATE + reconcile
-	// fan-out) rolls back atomically (ban #10).
+	// Роль читается ВМЕСТЕ с токеном `xmin`, чтобы правка в транзакции исполнителя
+	// стояла под сторожем от параллельной правки той же роли (две правки, каждая
+	// со сверкой кортежей от своей проекции роли, — расхождение ведомости с моделью).
+	// Токен снимается на синхронном пути и уходит в `UpdateCAS` транзакции
+	// исполнителя; проигравшая получает FAILED_PRECONDITION, и вся её транзакция
+	// записи (правка и сверка кортежей) откатывается целиком (запрет #10).
 	current, version, err := rd.Roles().GetWithVersion(ctx, in.ID)
 	if err != nil {
 		_ = rd.Rollback(ctx)
@@ -150,19 +151,19 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	}
 	if current.IsSystem {
 		_ = rd.Rollback(ctx)
-		// redesign-2026 F6 (IAM-1-16): a system (seed/cluster-tier) role is immutable
-		// — FAILED_PRECONDITION, parity with RoleService.Delete and the proto contract
-		// (the resource's state, not the request, forbids the mutation).
+		// redesign-2026 F6 (IAM-1-16): системная роль (посев, кластерный ярус) не
+		// правится — FAILED_PRECONDITION, паритет с `RoleService.Delete` и контрактом
+		// (запрещает правку состояние ресурса, а не запрос).
 		return nil, status.Error(codes.FailedPrecondition, "System role is read-only and cannot be updated")
 	}
 	_ = rd.Rollback(ctx)
-	// Anti-anon floor only. WHO may update this custom role is decided by the
-	// MODEL: the api-gateway Checks `v_update@iam_role:<role_id>` before iam is
-	// dialed. The former in-service owner-equality check against the owning
-	// account's owner_user_id was narrower than that per-object relation and
-	// unsatisfiable by a machine principal — §«Авторизация живёт в
-	// МОДЕЛИ, а не в самодельных проверках». (The is-system refusal above is a
-	// resource-STATE check, not authz, and stays.)
+	// Здесь — только отказ анониму. КТО вправе править свою роль, решает МОДЕЛЬ:
+	// край спрашивает `v_update@iam_role:<role_id>` до обращения к службе. Прежняя
+	// проверка «вызывающий — владелец аккаунта роли» была у́же этого пообъектного
+	// отношения и невыполнима машинной личностью —
+	// §«Авторизация живёт в
+	// МОДЕЛИ, а не в самодельных проверках». (Отказ системной роли выше —
+	// проверка СОСТОЯНИЯ ресурса, а не авторизация, и она остаётся.)
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
@@ -177,23 +178,23 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		target.Description = *in.Description
 		changed = append(changed, "description")
 	}
-	// RBAC rules-model: rules are the authored, mutable field. When they
-	// change, recompile the INTERNAL permissions projection (anchor/names; matchLabels
-	// excluded; ≤1024 cap) and store both. permissions itself is immutable input
-	// (rejected in update_mask above).
+	// Модель правил: правила — авторское изменяемое поле. При их смене заново
+	// компилируется ВНУТРЕННЯЯ проекция прав (ветви якоря и имён; отбор по меткам
+	// исключён; потолок 1024), и хранятся обе. Сами `permissions` — неизменяемый
+	// вход (отвергнуты маской правки выше).
 	// Набор модулей — ЖИВЫЕ строки каталога (kacho#1927), тот же снимок, которым
 	// ниже строится проекция глаголов: обе стороны правила обязаны судиться
 	// согласованным множеством, а не двумя моментами времени.
 	facts := u.cat.Facts()
 	if in.Rules != nil && shared.MaskAllows(in.UpdateMask, "rules") {
-		// Validate the new rules first (specific cardinality/wildcard/feed errors),
-		// then compile (enforces the ≤1024 compiled-cap).
+		// Сперва судятся новые правила (точные отказы мощности, подстановки, ленты),
+		// затем компиляция (держит потолок скомпилированного 1024).
 		if verr := in.Rules.Validate(domain.PolicyOfRole(current.IsSystem, current.OwnerModule), facts); verr != nil {
 			return nil, shared.MapValidationErr(verr)
 		}
-		// Grantable-token gate — parity with Create (see rules_catalog.go). An
-		// Update that swaps a valid token for a typo'd one would otherwise silently
-		// DEMOTE a working grant to an empty one.
+		// Ворота выдаваемого токена — паритет с созданием (см. rules_catalog.go):
+		// правка, заменившая годный токен опечаткой, иначе молча ПОНИЗИЛА бы
+		// действующую выдачу до пустой.
 		// Источник — ТОТ ЖЕ снимок живых строк, что и у сегмента модуля выше
 		// (kacho#1993). Паритет с Create здесь несущий: приняв роль над заведённым
 		// типом и отвергнув её ПРАВКУ, платформа сделала бы роль неисправимой.
@@ -234,24 +235,23 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		}
 	}
 
-	// OCC: when the caller supplies a resource_version AND the rules are
-	// changing, it must match the version read on the sync path; a stale token →
-	// FAILED_PRECONDITION (the role was edited concurrently). When omitted, the
-	// xmin worker-tx CAS below is the sole guard (last-writer, back-compat).
+	// Оптимистическая блокировка: если вызывающий прислал `resource_version` И правила
+	// меняются, версия обязана совпасть с прочитанной на синхронном пути; устаревший
+	// токен — FAILED_PRECONDITION (роль правили параллельно). Без токена единственный
+	// сторож — CAS по `xmin` в транзакции исполнителя ниже (побеждает последний).
 	if in.ResourceVersion != "" && slices.Contains(changed, "rules") && in.ResourceVersion != version {
 		return nil, shared.MapRepoErr(
 			iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Role was modified concurrently, retry"))
 	}
 
-	// Bound-check: a rules change fans out a per-binding reconcile over
-	// the role's ACTIVE bindings. A role carried by more than the contract limit is
-	// rejected SYNC (before the Operation) — a single Role.Update must not trigger
-	// an unbounded fan-out. Checked only when the rules actually change + the fanout
-	// is wired (nil-safe). NOTE: this is a best-effort soft guard (a count read here,
-	// the fan-out later), NOT a hard cap — a concurrent grant can push the count past
-	// the limit between this check and the fan-out. That is acceptable: the bound only
-	// protects against grossly-oversized fan-out, and the per-binding reconcile is
-	// idempotent + bounded per binding, so a small overshoot is harmless.
+	// Сторож предела: смена правил запускает сверку по каждой АКТИВНОЙ привязке роли.
+	// Роль, которую несёт больше привязок, чем предел контракта, отвергается
+	// СИНХРОННО (до операции): одна правка роли не вправе запустить проход без границы.
+	// Сверяется только при реальной смене правил и провязанном проходе. Это мягкий
+	// сторож по наилучшему усилию (счёт читается здесь, проход — позже), а НЕ жёсткий
+	// потолок: параллельная выдача может перевалить предел между сверкой и проходом.
+	// Это приемлемо: предел защищает от грубо раздутого прохода, а сверка каждой
+	// привязки идемпотентна и ограничена привязкой, так что малый перебор безвреден.
 	if u.membership != nil && slices.Contains(changed, "rules") {
 		n, cerr := u.membership.CountActiveBindings(ctx, in.ID)
 		if cerr != nil {
@@ -285,130 +285,147 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 }
 
 func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []string, actor string, changed []string, expectedVersion string) (*anypb.Any, error) {
+	// Признак превью — в ТОЙ ЖЕ транзакции и после записи проекций (kaname#76): эхо
+	// описывает роль, которую эта транзакция записала, на обоих путях возврата.
 	updated, err := shared.DoWithWriteTx(ctx, u.repo,
 		func(ctx context.Context, w Writer) (domain.Role, error) {
-			// xmin-CAS: the worker-tx UPDATE is guarded by the version
-			// captured on the sync path. A concurrent Role.Update that committed first
-			// bumped xmin → this CAS matches 0 rows → ErrFailedPrecondition and the
-			// whole writer-tx (incl. the reconcile fan-out below) rolls back.
-			if slices.Contains(changed, "rules") {
-				if gerr := w.RolesW().GuardSystemClassReads(ctx, r.ID, r.GrantsReadsOnly()); gerr != nil {
-					return domain.Role{}, gerr
-				}
+			upd, werr := u.writeUpdate(ctx, w, r, mask, actor, changed, expectedVersion)
+			if werr != nil {
+				return domain.Role{}, werr
 			}
-			upd, uerr := w.RolesW().UpdateCAS(ctx, r, mask, expectedVersion)
-			if uerr != nil {
-				return domain.Role{}, uerr
-			}
-			if len(changed) == 0 {
-				return upd, nil
-			}
-			// When the rules (→ compiled permissions) changed, reconcile the
-			// FGA tuples of the role's ACTIVE bindings to the new permissions IN THIS
-			// writer-tx (atomic with the role UPDATE, ban #10). Without this an active
-			// binding keeps its old-tier FGA tuple after a downgrade (orphan = standing
-			// privilege). Bounded fan-out (active bindings of this single role),
-			// idempotent (unchanged tier → empty delta). nil-safe: in unit tests of
-			// the non-rules paths the reconciler may be unwired.
-			if u.reconciler != nil && slices.Contains(changed, "rules") {
-				if rerr := u.reconciler.ReconcileRoleTuples(ctx, w, upd.ID, upd); rerr != nil {
-					return domain.Role{}, rerr
-				}
-			}
-			// RBAC explicit-model: sync role_rule_selectors with the new
-			// UNIFIED materializing rules (anchor/names/labels) in the SAME writer-tx
-			// (ban #10) so the post-commit membership fan-out (and the reconciler
-			// fast-path / sweep) see the new selectors. A removed rule drops its
-			// selector here; the per-binding membership re-materialize (eager-revoke by
-			// rule_fp) runs post-commit.
-			if slices.Contains(changed, "rules") {
-				// Каталожный факт — один на обе стороны (довод — на создании).
-				facts := u.cat.Facts()
-				// Политика — та же, которой правила судились (kaname#1006).
-				policy := domain.PolicyOfRole(r.IsSystem, r.OwnerModule)
-				if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID,
-					facts.GrantSelectors(upd.Rules.MaterializingSelectors(), policy)); serr != nil {
-					return domain.Role{}, serr
-				}
-				// Та же пара, что на создании: снятый из правил глагол обязан
-				// исчезнуть из проекции, иначе отзыв права не применяется — молча,
-				// потому что добавление проходит успешно.
-				if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
-					facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors(), policy)); verr != nil {
-					return domain.Role{}, verr
-				}
-				// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и
-				// пишется она в той же транзакции по той же причине. Отличие от двух
-				// предыдущих в том, ЧТО кладётся: те несут только резолвящееся, эта —
-				// КАЖДЫЙ объявленный сегмент. На ней стоят ключи в каталог, и именно
-				// она отвергает правило, называющее ресурс или глагол, которых на
-				// платформе нет либо больше нет (kacho#1030, миграция 20260901113757).
-				//
-				// Своей проверки каталога здесь НЕТ намеренно: между «спросить» и
-				// «записать» помещается снятие ресурса, и правило пережило бы свой
-				// референт (запрет #10). Судит ОПЕРАТОР ВСТАВКИ.
-				if rerr := w.RolesW().ReplaceRuleRefs(ctx, upd.ID,
-					domain.RuleRefsOf(upd.Rules)); rerr != nil {
-					return domain.Role{}, rerr
-				}
-			}
-			// changed_fields records WHAT changed (e.g. ["permissions"]) — the
-			// full permissions set is intentionally NOT embedded.
-			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
-				EventType:       auditEventRoleUpdated,
-				TenantAccountID: string(upd.AccountID),
-				Payload: map[string]any{
-					"actor":          actor,
-					"resource_type":  "role",
-					"resource_id":    string(upd.ID),
-					"account_id":     string(upd.AccountID),
-					"changed_fields": changed,
-				},
-			}); aerr != nil {
-				return domain.Role{}, aerr
-			}
-			// Изменение own-resource labels может изменить membership iam-direct
-			// селектора (правило, матчащее iam.role по меткам). Co-commit reconcile-event
-			// в ЭТОЙ writer-tx (ban #10, паритет с user/SA Update) — reconciler ре-оценит
-			// затронутые iam.role selector-биндинги (≤2s): label add → грант появляется,
-			// label remove/change → eager fall-out. Только при изменении labels.
-			if slices.Contains(changed, "labels") {
-				if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.role", string(upd.ID)); rerr != nil {
-					return domain.Role{}, rerr
-				}
-			}
-			return upd, nil
+			return shared.WithPreviewHolding(ctx, w, u.cat, upd)
 		})
 	if err != nil {
 		return nil, err
 	}
+	return u.afterUpdate(ctx, updated, changed)
+}
 
-	// OWN-RESOURCE label change ⇒ who may reach THIS role may have flipped ⇒
-	// re-materialize this ONE object now instead of waiting out the FIFO reconcile
-	// queue. iam.role is label-selectable, so clearing a label an ARM_LABELS grant
-	// matches is a REVOCATION. The cross-service twin gets that for free: vpc/compute/
-	// nlb re-call InternalIAMService.RegisterResource on a label update, and
-	// RegisterResource runs ReconcileObjectForward in-process — the forward's
-	// delete-stale guard sees the object already has members, hands it to the FULL
-	// ReconcileObject, and the stale grant dies there. The iam-native path had no such
-	// pass: it enqueued a resource_reconcile_outbox event and returned, which made
-	// revoke latency the DEPTH OF THE GLOBAL RECONCILE QUEUE — strictly FIFO, one
-	// worker at ~5 events/s each doing a FULL O(scope) recompute, against an e2e suite
-	// producing 5-8 events/s, i.e. a multi-minute backlog. Measured on the stand for
-	// the sibling iam.project path: the label-clear event was enqueued at 19:59:18.97
-	// and drained at 20:06:49.82 (7m30s); the tuple survived until the 30s periodic
-	// sweep reached that binding at 20:00:23, 65s after the clear.
+// writeUpdate — записи правки в транзакции записи: строка роли под сторожем
+// версии, кортежи привязок, три проекции правил, аудит и событие сверки.
+func (u *UpdateRoleUseCase) writeUpdate(ctx context.Context, w Writer, r domain.Role, mask []string,
+	actor string, changed []string, expectedVersion string) (domain.Role, error) {
+	// CAS по `xmin`: правка в транзакции исполнителя стоит под версией, снятой на
+	// синхронном пути. Параллельная правка, зафиксированная первой, сдвинула `xmin`
+	// → CAS не находит строки → ErrFailedPrecondition, и вся транзакция записи
+	// (вместе со сверкой кортежей ниже) откатывается.
+	if slices.Contains(changed, "rules") {
+		if gerr := w.RolesW().GuardSystemClassReads(ctx, r.ID, r.GrantsReadsOnly()); gerr != nil {
+			return domain.Role{}, gerr
+		}
+	}
+	upd, uerr := w.RolesW().UpdateCAS(ctx, r, mask, expectedVersion)
+	if uerr != nil {
+		return domain.Role{}, uerr
+	}
+	if len(changed) == 0 {
+		return upd, nil
+	}
+	// Сменились правила (а с ними скомпилированные права) — кортежи АКТИВНЫХ
+	// привязок роли сверяются с новыми правами В ЭТОЙ транзакции записи, неделимо с
+	// правкой роли (запрет #10). Без этого активная привязка сохранила бы кортеж
+	// прежнего яруса после понижения (сирота — постоянная привилегия). Проход
+	// ограничен активными привязками одной роли и идемпотентен (ярус не сменился —
+	// пустая разница). Может быть не провязан в пробах путей без правил.
+	if u.reconciler != nil && slices.Contains(changed, "rules") {
+		if rerr := u.reconciler.ReconcileRoleTuples(ctx, w, upd.ID, upd); rerr != nil {
+			return domain.Role{}, rerr
+		}
+	}
+	// Явная модель: `role_rule_selectors` приводятся к новым ЕДИНЫМ материализующим
+	// правилам (якорь, имена, метки) в ТОЙ ЖЕ транзакции записи (запрет #10), чтобы
+	// проход членства после фиксации (и быстрый путь сверки, и обход) видел новые
+	// селекторы. Снятое правило снимает здесь свой селектор; заново материализует
+	// членство каждой привязки (с немедленным отзывом по `rule_fp`) проход после
+	// фиксации.
+	if slices.Contains(changed, "rules") {
+		// Каталожный факт — один на обе стороны (довод — на создании).
+		facts := u.cat.Facts()
+		// Политика — та же, которой правила судились (kaname#1006).
+		policy := domain.PolicyOfRole(r.IsSystem, r.OwnerModule)
+		if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID,
+			facts.GrantSelectors(upd.Rules.MaterializingSelectors(), policy)); serr != nil {
+			return domain.Role{}, serr
+		}
+		// Та же пара, что на создании: снятый из правил глагол обязан
+		// исчезнуть из проекции, иначе отзыв права не применяется — молча,
+		// потому что добавление проходит успешно.
+		if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
+			facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors(), policy)); verr != nil {
+			return domain.Role{}, verr
+		}
+		// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и
+		// пишется она в той же транзакции по той же причине. Отличие от двух
+		// предыдущих в том, ЧТО кладётся: те несут только резолвящееся, эта —
+		// КАЖДЫЙ объявленный сегмент. На ней стоят ключи в каталог, и именно
+		// она отвергает правило, называющее ресурс или глагол, которых на
+		// платформе нет либо больше нет (kacho#1030, миграция 20260901113757).
+		//
+		// Своей проверки каталога здесь НЕТ намеренно: между «спросить» и
+		// «записать» помещается снятие ресурса, и правило пережило бы свой
+		// референт (запрет #10). Судит ОПЕРАТОР ВСТАВКИ.
+		if rerr := w.RolesW().ReplaceRuleRefs(ctx, upd.ID,
+			domain.RuleRefsOf(upd.Rules)); rerr != nil {
+			return domain.Role{}, rerr
+		}
+	}
+	// `changed_fields` записывает, ЧТО изменилось (например `["permissions"]`); полный
+	// набор прав в запись намеренно НЕ кладётся.
+	if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
+		EventType:       auditEventRoleUpdated,
+		TenantAccountID: string(upd.AccountID),
+		Payload: map[string]any{
+			"actor":          actor,
+			"resource_type":  "role",
+			"resource_id":    string(upd.ID),
+			"account_id":     string(upd.AccountID),
+			"changed_fields": changed,
+		},
+	}); aerr != nil {
+		return domain.Role{}, aerr
+	}
+	// Изменение own-resource labels может изменить membership iam-direct
+	// селектора (правило, матчащее iam.role по меткам). Co-commit reconcile-event
+	// в ЭТОЙ writer-tx (ban #10, паритет с user/SA Update) — reconciler ре-оценит
+	// затронутые iam.role selector-биндинги (≤2s): label add → грант появляется,
+	// label remove/change → eager fall-out. Только при изменении labels.
+	if slices.Contains(changed, "labels") {
+		if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.role", string(upd.ID)); rerr != nil {
+			return domain.Role{}, rerr
+		}
+	}
+	return upd, nil
+}
+
+// afterUpdate — шаги после фиксации правки и эхо операции.
+func (u *UpdateRoleUseCase) afterUpdate(ctx context.Context, updated domain.Role, changed []string) (*anypb.Any, error) {
+	// Смена СОБСТВЕННЫХ меток ⇒ мог смениться круг тех, кто достаёт до ЭТОЙ роли ⇒
+	// этот ОДИН объект материализуется заново сейчас, а не после очереди сверки.
+	// `iam.role` отбирается метками, поэтому снятие метки, с которой совпадает выдача
+	// по меткам, есть ОТЗЫВ. Межслужебный близнец получает это даром: службы-владельцы
+	// ресурсов повторно зовут `InternalIAMService.RegisterResource` при правке меток, а
+	// тот гонит `ReconcileObjectForward` в процессе — сторож снятия устаревшего видит,
+	// что у объекта уже есть члены, отдаёт его ПОЛНОМУ `ReconcileObject`, и устаревшая
+	// выдача умирает там. У родного пути службы такого прохода не было: он ставил
+	// событие в `resource_reconcile_outbox` и возвращался, и задержка отзыва
+	// становилась ГЛУБИНОЙ ОБЩЕЙ ОЧЕРЕДИ СВЕРКИ — строго по порядку, один исполнитель
+	// на ~5 событий/с, каждое — ПОЛНЫЙ пересчёт области, против набора проб края,
+	// дающего 5–8 событий/с, то есть очередь на минуты. Замер на стенде по соседнему
+	// пути `iam.project`: событие снятия метки поставлено в 19:59:18.97 и выбрано в
+	// 20:06:49.82 (7 мин 30 с); кортеж жил, пока периодический обход (30 с) не дошёл
+	// до привязки в 20:00:23, через 65 с после снятия.
 	//
-	// Distinct from the rules fan-out below: that one re-materializes what this role
-	// GRANTS over other objects, this one re-materializes access TO the role object.
-	// It is scheduled BEFORE the rules fan-out on purpose — a mask carrying both
-	// "rules" and "labels" must not let a failing rules fan-out (which returns early)
-	// suppress the label revoke acceleration; the writer-tx is already committed here.
+	// Не то же, что проход по правилам ниже: тот заново материализует, что роль ДАЁТ
+	// на других объектах, этот — доступ К объекту-роли. Ставится РАНЬШЕ прохода по
+	// правилам намеренно: маска с «rules» и «labels» не вправе дать сорванному проходу
+	// по правилам (он выходит рано) погасить ускорение отзыва по меткам; транзакция
+	// записи здесь уже зафиксирована.
 	//
-	// OFF THE done-PATH (ban #9): scheduled detached, because Operation.done reports
-	// that the role row is durable, never that its tuples converged. The co-committed
-	// reconcile event and the periodic sweep stay the at-least-once backstop, so this
-	// changes WHEN the revoke is observed, not WHETHER it happens.
+	// ВНЕ пути готовности (запрет #9): ставится отсоединённо, потому что
+	// `Operation.done` сообщает, что строка роли записана, а не что её кортежи
+	// сошлись. Событие сверки, зафиксированное вместе с правкой, и периодический обход
+	// остаются страховкой «хотя бы раз», так что меняется КОГДА отзыв виден, а не
+	// СЛУЧИТСЯ ЛИ он.
 	if slices.Contains(changed, "labels") && u.objects != nil {
 		id := string(updated.ID)
 		shared.GoPostCommit(ctx, u.logger, "role label re-materialization", func(ctx context.Context) {
@@ -419,29 +436,30 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 		})
 	}
 
-	// Membership fan-out: after the rules change + selector-sync committed,
-	// re-materialize the role.rules ARM_LABELS membership of every ACTIVE binding of
-	// the role (each in its OWN writer-tx, idempotent). A removed rule's per-object
-	// members are eager-revoked by rule_fp (no residual); new/edited rules' matched
-	// objects are materialized. Bounded by the sync count-check above; nil-safe.
+	// Проход членства: после фиксации смены правил и приведения селекторов заново
+	// материализуется членство по меткам каждой АКТИВНОЙ привязки роли (каждая — в
+	// СВОЕЙ транзакции записи, идемпотентно). Пообъектные члены снятого правила
+	// отзываются немедленно по `rule_fp` (без остатка); объекты, совпавшие с новыми и
+	// правлеными правилами, материализуются. Ограничен синхронным сторожем счёта
+	// выше; может быть не провязан.
 	//
-	// OFF THE done-PATH (ban #9), like the label pass above and for the same reason.
-	// It used to run inline and a failure returned from the worker-fn, so the
-	// operation carried an ERROR for a change that had ALREADY COMMITTED — the role
-	// row, the selector projection and the audit row are durable before this line is
-	// reached. What the caller does with that error is the damage: it concludes the
-	// rules were not applied and retries with the resource version it captured before
-	// the first attempt, which its own committed update has already moved, so the
-	// retry is refused as a concurrent modification naming a competitor that never
-	// existed. Meanwhile the privileges ARE changed.
+	// ВНЕ пути готовности (запрет #9), как проход меток выше, и по той же причине.
+	// Прежде он шёл в теле исполнителя, и его отказ возвращался из него, так что
+	// операция несла ОШИБКУ о правке, УЖЕ зафиксированной: строка роли, проекция
+	// селекторов и запись аудита записаны до этой строки. Вред — в том, что
+	// вызывающий делает с такой ошибкой: решает, что правила не применились, и
+	// повторяет с версией ресурса, снятой до первой попытки, которую его же
+	// зафиксированная правка уже сдвинула, — повтор отвергается как параллельная
+	// правка, называющая соперника, которого не было. А права при этом ИЗМЕНЕНЫ.
 	//
-	// The trigger is not exotic: the pass takes an exclusive advisory lock per
-	// binding, the same key the sweep, the revoke and the expiry take, and no lock
-	// timeout is set — a wait long enough to hit the statement timeout is an error.
-	// Above a few hundred bindings the operation's own deadline is the ceiling.
+	// Повод не экзотический: проход берёт исключительный консультативный замок на
+	// привязку — тот же ключ, что обход, отзыв и истечение, — и предела ожидания
+	// замка нет: ожидание, дошедшее до предела оператора, — ошибка. Начиная с
+	// нескольких сотен привязок потолком становится срок самой операции.
 	//
-	// Detaching changes WHEN membership converges, never WHETHER: the co-committed
-	// reconcile event and the 30s periodic sweep remain the at-least-once backstop.
+	// Отсоединение меняет КОГДА сойдётся членство, а не СОЙДЁТСЯ ЛИ: событие сверки,
+	// зафиксированное вместе с правкой, и периодический обход (30 с) остаются
+	// страховкой «хотя бы раз».
 	if u.membership != nil && slices.Contains(changed, "rules") {
 		id := updated.ID
 		shared.GoPostCommit(ctx, u.logger, "role rules membership fan-out", func(ctx context.Context) {

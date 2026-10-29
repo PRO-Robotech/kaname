@@ -178,3 +178,9 @@ func TestRegisterResource_VBC15_ReconcileError_NonFatal(t *testing.T) {
 	require.True(t, txb.tx.committed)
 	require.Len(t, rec.snapshot(), 1)
 }
+
+// DeferJournalTx / FlushJournalTx — двойник откладывает нечего: строки журнала он
+// не кладёт в базу, и число операторов у него не предмет (kaname#617).
+func (smEmitter) DeferJournalTx(tx service.Tx) service.Tx { return tx }
+
+func (smEmitter) FlushJournalTx(context.Context, service.Tx) error { return nil }

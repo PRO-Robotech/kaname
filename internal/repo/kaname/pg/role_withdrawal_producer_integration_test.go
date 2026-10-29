@@ -6,7 +6,7 @@ package pg_test
 // role_withdrawal_producer_integration_test.go — ПРОИЗВОДИТЕЛЬ ОТЗЫВА роли
 // модуля целиком доводится до настоящего Postgres.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
+// Приёмка `docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // (APPROVED круга 4); сценарии IAM-RW-1-01, -04, -05, -06, -08, -09, -13, -14,
 // -24, -29, -30. Задача продукта kacho#1913.
 //

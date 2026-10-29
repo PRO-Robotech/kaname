@@ -380,3 +380,9 @@ func TestRegisterResource_UnversionedProducer_IsNeverGated(t *testing.T) {
 	assert.Len(t, rig.recon.snapshot(), 3,
 		"an unversioned register must always drive the forward reconcile (its sync fast path)")
 }
+
+// DeferJournalTx / FlushJournalTx — двойник откладывает нечего: строки журнала он
+// не кладёт в базу, и число операторов у него не предмет (kaname#617).
+func (e *countingEmitter) DeferJournalTx(tx service.Tx) service.Tx { return tx }
+
+func (e *countingEmitter) FlushJournalTx(context.Context, service.Tx) error { return nil }

@@ -508,15 +508,25 @@ type Role struct {
 	// AccessBinding anchor. `is_system` (tag 6) is DERIVED from the tier
 	// (tier_type == `iam.cluster`), not an independently stored provenance flag.
 	DefinitionTier *DefinitionTier `protobuf:"bytes,16,opt,name=definition_tier,json=definitionTier,proto3" json:"definition_tier,omitempty"`
-	// Authored verb set (redesign-2026 F6) — the DEDUPED, canonically-ordered union
-	// of the verbs the role's `rules[]` grant (output-only derived preview; `*`
-	// expands to full CRUD). Empty for a label-only role.
+	// Глаголы по букве правил (redesign-2026 F6) — объединение глаголов `rules[]`
+	// без повторов и в каноническом порядке, производное превью, output-only — по
+	// СЕГМЕНТАМ, которые роль сегодня держит (kaname#76). Явный глагол правила,
+	// адресующего ресурс, без держащегося сегмента не даёт ничего; `*`
+	// разворачивается наборами только тех ресурсов правила, чей якорь держится;
+	// правило без адресуемых ресурсов (`*` в модуле либо в ресурсе) даёт свои
+	// глаголы как прежде; глагол ЯРУСНОЙ пары судится живой строкой каталога этой
+	// пары. Сама буква правил — в `rules[]`. Пусто у роли, выданной одними метками.
 	AuthoredVerbs []string `protobuf:"bytes,17,rep,name=authored_verbs,json=authoredVerbs,proto3" json:"authored_verbs,omitempty"`
 	// Effective verb set (redesign-2026 F6) — the HONEST co-materialized preview of
 	// what the role actually grants. It equals `authored_verbs` PLUS, for an
 	// editor-tier role (grants `update` but not `delete`/`*`), the `delete*`
 	// qualifier: an editor may delete the in-scope leaf objects it edits (but NOT
 	// the account/project anchor). Output-only derived.
+	//
+	// Сужается вместе с `authored_verbs` (kaname#76): отношение
+	// `effective_verbs = authored_verbs ∪ {delete*}` сохраняется. Расходится с
+	// выдачей в двух местах: подстановка на живом типе после снятия действия
+	// следует снимку каталога, а снятое действие живого типа выдачу не отбирает.
 	EffectiveVerbs []string `protobuf:"bytes,18,rep,name=effective_verbs,json=effectiveVerbs,proto3" json:"effective_verbs,omitempty"`
 	// Per-verb notes (redesign-2026 F6) — clarifies the derived preview. Keyed by
 	// the verb; e.g. `verb_notes["delete*"]` explains the editor delete-qualifier.
@@ -549,15 +559,14 @@ type Role struct {
 	// `ROLE_HEALTH_UNSPECIFIED` там означает «этим ответом не вычислено» и
 	// НИКОГДА «роль здорова».
 	//
-	// ИСТОЧНИК У НЕГО ДРУГОЙ, ЧЕМ У `authored_verbs` / `effective_verbs`, и это
-	// решение, а не расхождение. Те считаются от СКОМПИЛИРОВАННОЙ таблицы типов,
-	// это — от строк, которые читает вердикт. Расходятся они в обе стороны:
-	//   - строка каталога снята → те не меняются, это меняется;
-	//   - тип объявлен, но модель его не знает → те показывают ВЕСЬ словарь
-	//     глаголов платформы (запасной словарь неизвестного типа), это — EMPTY.
-	//
-	// Складывать их в один предикат нельзя: они отвечают на разные вопросы —
-	// «что роль обещает» и «что вердикт по ней даёт».
+	// ПРИЗНАК У НЕГО ОБЩИЙ С `authored_verbs` / `effective_verbs` — ответ проекции
+	// выдач о сегментах роли (kaname#76), — а выводят они из него разное: это —
+	// сколько объявленных сегментов проекция не держит, те — какие глаголы она
+	// держит. Складывать их в один предикат нельзя: роль, назвавшая глагол ЯРУСНОЙ
+	// пары, читается здесь деградировавшей при неизменном превью, а правило без
+	// адресуемых ресурсов сегментов не объявляет — здесь оно здорово, а превью даёт
+	// его глаголы как прежде. Они отвечают на разные вопросы —
+	// «что роль обещает» и «сколько её объявленного не стоит за строками проекции».
 	Health RoleHealth `protobuf:"varint,22,opt,name=health,proto3,enum=kaname.cloud.iam.v1.RoleHealth" json:"health,omitempty"`
 	// Сколько АДРЕСУЕМЫХ сегментов объявляют правила роли (kacho#1035). Output-only.
 	//

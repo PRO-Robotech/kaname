@@ -651,7 +651,7 @@ func TestDoD1_RuntimeAppliedCatalogRowCarriesTheGrantToTheVerdict(t *testing.T) 
 // Сценарии `IAM-MB-1-06` (тип нового модуля доезжает до вердикта — дословный
 // предикат снятия kacho#1969) и `IAM-MB-1-08` (тип, которого не объявляет НИКТО, —
 // отказ с основанием) приёмки
-// `services/iam/docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md`.
+// `docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md`.
 // Её §9.3 предписывает эту переписку ТЕМ ЖЕ изменением и называет обе половины;
 // здесь они не пересказываются.
 func TestDoD1_TypeUnknownToTheBuildReachesTheVerdictThroughTheComposedModel(t *testing.T) {

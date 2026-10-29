@@ -107,6 +107,12 @@ func (a *Applier) retire(
 	found, census := Reconcile(m.Module, m.Roles, live)
 	reason := retirementReason(m.Module)
 
+	// Доступ членов выдач всех снятых ролей снимается ОДНИМ оператором журнала
+	// после цикла (kaname#617): оператор на роль брал замки строк факта порядком
+	// ролей и сходился в кольцо с полным проходом выдачи, который берёт те же
+	// факты в общем порядке, а замок роли полного прохода (`FOR KEY SHARE`) со
+	// снятием роли не конфликтует.
+	var revoked []domain.MembershipTuple
 	for _, d := range found {
 		if d.Kind != LiveNotDeclared {
 			// `DeclaredNotLive` — след того, что писатель до строки не дошёл. Он
@@ -138,6 +144,12 @@ func (a *Applier) retire(
 		}
 		rep.Retired++
 		rep.RetiredNames = append(rep.RetiredNames, string(d.Name))
+		revoked = append(revoked, out.RevokedMemberAccess...)
+	}
+	if len(revoked) > 0 {
+		if err := w.RevokeRetiredMemberAccess(ctx, revoked); err != nil {
+			return fmt.Errorf("%w: снятие доступа членов снятых ролей: %w", ErrWriteFailed, err)
+		}
 	}
 
 	// Перепись сверки печатается вызывающим вместе с переписью применения: числа

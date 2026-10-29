@@ -398,16 +398,19 @@ type ReconcileStore interface {
 	// снимающее весь учтённый набор.
 	LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]LedgerRow, error)
 
-	// EmitTupleWrite / EmitTupleDelete enqueue the per-object FGA tuples (+ the
-	// scope hierarchy parent-pointer is the binding-lifecycle concern handled at
-	// Create/Delete, NOT per member) into fga_outbox on the tx.
-	EmitTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error
-	EmitTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error
+	// EmitJournal кладёт выдачи и снятия прохода в журнал прав (fga_outbox) ОДНИМ
+	// оператором — и зовётся проходом ровно один раз, в его конце (flushJournal).
+	// Замки строк прямого факта свёртка берёт в общем порядке лишь в границах одного
+	// оператора; проход, писавший журнал несколькими, брал их в порядке своих
+	// вызовов и сходился с проходом соседней выдачи того же субъекта встречно
+	// (40P01, kaname#617). Иерархия области (указатель родителя) — забота
+	// жизненного цикла выдачи (Create/Delete), а не члена.
+	EmitJournal(ctx context.Context, writes, deletes []domain.MembershipTuple) error
 
 	// RecordEmittedTuples / ForgetEmittedTuples co-commit the per-member FGA tuples
 	// into the persisted emitted-tuple ledger (access_binding_emitted_tuples)
-	// in the SAME reconcile writer-tx as the matching EmitTupleWrite /
-	// EmitTupleDelete (ban #10). The ledger is the authoritative "what was emitted"
+	// in the SAME reconcile writer-tx as the matching journal rows (EmitJournal,
+	// ban #10). The ledger is the authoritative "what was emitted"
 	// set the symmetric revoke (delete.go) replays and the Role.Update reconcile
 	// fan-out diffs against — UNIFYING the selector arm's per-member tuples with the
 	// all_in_scope / resources[] arms' tuples already in the ledger. Without this the
@@ -572,25 +575,22 @@ func (r *Reconciler) observeSize(desired []DesiredMember) {
 	r.size.ObserveBindingMaterialization(len(objects), tuples)
 }
 
-// syncFGACollector accumulates, across a single reconcile pass, the per-object tuples a
-// reconcileBinding emitted to fga_outbox for ACTIVE members. NOTHING is applied anywhere
-// after the pass commits — see the note above SyncFGATuple: the direct fact is folded out
-// of the journal row by a trigger, inside the same transaction. What the collector is
-// still FOR is the subtraction at the end of the pass: flushDeletes must not strip a
-// tuple this very pass re-wrote. A nil collector de-duplicates nothing and the collect
-// calls degrade to cheap pass-throughs. Not concurrency-shared: one collector per WithTx
-// pass, and a pass runs single-goroutine under the per-binding advisory lock.
+// syncFGACollector — журнал прав ОДНОГО прохода: что проход выдаёт и что снимает. Строки
+// в fga_outbox уходят из него одним оператором в конце прохода (flushJournal), и после
+// коммита не применяется НИЧЕГО — прямой факт складывает из строки журнала триггер в той
+// же транзакции (см. заметку над SyncFGATuple). Каждый проход заводит свой коллектор
+// (`&syncFGACollector{}` в точке входа); nil-коллектора нет — проход без него потерял бы
+// свои строки журнала молча. Коллектор не разделяется между горутинами: один на проход
+// WithTx, а проход идёт в одной горутине под advisory-замком выдачи.
 type syncFGACollector struct {
-	// seen — что ЭТОТ проход уже записал. Единственный носитель, ради которого
-	// сбор и существует: вычитание в конце прохода.
-	//
-	// Рядом лежали два накопителя — записанное и снятое, — и оба уезжали
-	// пост-коммитным применителем в чужое хранилище. Применителя нет (стадия S6,
-	// эпик kacho#747), и накопители сняты вместе с ним: срез, который заполняют и
-	// никогда не читают, снаружи неотличим от работающего механизма.
+	// seen — что ЭТОТ проход уже записал: дедупликация записи по проходу и
+	// вычитание в конце прохода (снятие того, что проход записал заново, не нужно).
 	seen map[SyncFGATuple]struct{}
+	// writes — строки выдачи прохода, ОТЛОЖЕННЫЕ до его конца (flushJournal) в порядке
+	// сверки: в журнал они уходят одним оператором вместе со снятиями (kaname#617).
+	writes []domain.MembershipTuple
 	// pendingDeletes — строки снятия выдач прохода, ОТЛОЖЕННЫЕ до его конца
-	// (flushDeletes): вычитание записанного проходом идёт по ВСЕМУ проходу, от
+	// (flushJournal): вычитание записанного проходом идёт по ВСЕМУ проходу, от
 	// порядка сверки выдач не завися. Факт, который держит ведомость другой действующей выдачи,
 	// оставляет свёртка строки снятия под замком строки факта (kaname#919); снимок
 	// соседей здесь не читается.
@@ -606,10 +606,15 @@ type pendingDelete struct {
 
 // deferDelete records a binding's would-be tuple-deletes for the end-of-pass flush.
 func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []domain.MembershipTuple) {
-	if c == nil || len(tuples) == 0 {
+	if len(tuples) == 0 {
 		return
 	}
 	c.pendingDeletes = append(c.pendingDeletes, pendingDelete{binding: binding, tuples: tuples})
+}
+
+// deferWrite откладывает до конца прохода строки выдачи, которые вернул collectNew.
+func (c *syncFGACollector) deferWrite(tuples []domain.MembershipTuple) {
+	c.writes = append(c.writes, tuples...)
 }
 
 // collectNew records a member's ACTIVE-emit tuples DE-DUPLICATED across the whole pass
@@ -636,11 +641,9 @@ func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []
 // row — по нему свёртка строки снятия и узнаёт, что факт ещё держит другой держатель
 // (kaname#919, kaname#933).
 //
-// A nil collector (sync-FGA unwired) de-duplicates nothing and returns the input as-is.
+// Возвращённое вызывающий откладывает в тот же коллектор (deferWrite) либо в накопитель
+// аддитивного прохода — в журнал оно уходит одним оператором в конце прохода.
 func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.MembershipTuple {
-	if c == nil {
-		return tuples
-	}
 	if c.seen == nil {
 		c.seen = make(map[SyncFGATuple]struct{})
 	}
@@ -656,11 +659,22 @@ func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.
 	return fresh
 }
 
-// flushDeletes кладёт ОТЛОЖЕННЫЕ строки снятия прохода в его пишущую транзакцию —
-// ПОСЛЕ сверки всех выдач прохода, когда записанное им известно целиком. Из каждого
-// набора вычитаются кортежи, ЗАПИСАННЫЕ любым членом этого же прохода (соседняя
-// выдача выпустила тот же кортеж — col.seen): строка снятия того, что эта же
-// транзакция только что записала, ничего не даёт.
+// flushJournal кладёт ОТЛОЖЕННЫЕ строки журнала прохода — выдачи и снятия — в его
+// пишущую транзакцию ОДНИМ оператором (EmitJournal) ПОСЛЕ сверки всех выдач прохода,
+// когда записанное им известно целиком. Из каждого набора снятия вычитаются кортежи,
+// ЗАПИСАННЫЕ любым членом этого же прохода (соседняя выдача выпустила тот же кортеж —
+// col.seen): строка снятия того, что эта же транзакция только что записала, ничего
+// не даёт.
+//
+// ПОЧЕМУ ОДИН ОПЕРАТОР (kaname#617). Свёртка журнала в прямой факт берёт замки строк
+// факта в общем порядке (объект, субъект) лишь внутри одного оператора. Проход писал
+// выдачи по члену в цикле сверки, а снятия — здесь, и брал замки в порядке своих
+// вызовов: проход выдачи B, у которой объект «a» выпал из отбора, а «b» вошёл, брал
+// «b» раньше «a», а проход соседней выдачи A того же субъекта — «a» раньше «b»; база
+// снимала одну из транзакций отказом 40P01 (проба
+// `TestReconcilePassesOfOneSubjectCommitWhenOneRevokesWhatTheOtherWrites`). Строки
+// журнала — последние замки прохода: всё, что он берёт до них (advisory выдачи,
+// строки выдач, ролей, зеркала), взято раньше, и встречного ожидания с ними нет.
 //
 // Ведомости ДРУГИХ выдач здесь не читаются. Факт, который держит ведомость другой
 // действующей выдачи, оставляет свёртка строки снятия: вопрос о держателях она задаёт
@@ -670,25 +684,22 @@ func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.
 // оставляли факт без держателя. Своя строка ведомости к этому моменту уже забыта
 // (ForgetEmittedTuples в revokeMemberTuples) либо выдача снята — свой реестр факт не
 // держит.
-func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *syncFGACollector) error {
-	if c == nil || len(c.pendingDeletes) == 0 {
-		return nil
-	}
+func (r *Reconciler) flushJournal(ctx context.Context, s ReconcileStore, c *syncFGACollector) error {
+	var revoke []domain.MembershipTuple
 	for _, pd := range c.pendingDeletes {
 		// Кандидаты, не записанные этим проходом заново.
-		var revoke []domain.MembershipTuple
 		for _, t := range pd.tuples {
 			if _, written := c.seen[SyncFGATuple{User: t.User, Relation: t.Relation, Object: t.Object}]; written {
 				continue
 			}
 			revoke = append(revoke, t)
 		}
-		if len(revoke) == 0 {
-			continue
-		}
-		if err := s.EmitTupleDelete(ctx, revoke); err != nil {
-			return fmt.Errorf("flush deletes: emit tuple delete for %s: %w", pd.binding, err)
-		}
+	}
+	if len(c.writes) == 0 && len(revoke) == 0 {
+		return nil
+	}
+	if err := s.EmitJournal(ctx, c.writes, revoke); err != nil {
+		return fmt.Errorf("flush journal: %d writes, %d deletes: %w", len(c.writes), len(revoke), err)
 	}
 	return nil
 }
@@ -716,9 +727,10 @@ func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindin
 		if err := r.reconcileBinding(ctx, s, bindingID, converge, col); err != nil {
 			return err
 		}
-		// Отложенные строки снятия — в конце прохода; факт, который ещё держит
-		// другая действующая выдача, оставляет свёртка журнала (kaname#919).
-		return r.flushDeletes(ctx, s, col)
+		// Отложенные строки журнала — выдачи и снятия — одним оператором в конце
+		// прохода (kaname#617); факт, который ещё держит другая действующая выдача,
+		// оставляет свёртка журнала (kaname#919).
+		return r.flushJournal(ctx, s, col)
 	}); err != nil {
 		return err
 	}
@@ -874,9 +886,10 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 				return err
 			}
 		}
-		// Отложенные строки снятия — ПОСЛЕ сверки всех выдач прохода: вычитание
-		// записанного проходом видит его целиком, от порядка выдач не завися.
-		return r.flushDeletes(ctx, s, col)
+		// Отложенные строки журнала — ПОСЛЕ сверки всех выдач прохода, одним
+		// оператором (kaname#617): вычитание записанного проходом видит его целиком,
+		// от порядка выдач не завися.
+		return r.flushJournal(ctx, s, col)
 	}); err != nil {
 		return err
 	}
@@ -970,8 +983,9 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 				return fmt.Errorf("expire: delete member %s/%s:%s: %w", m.RuleFP, m.ObjectType, m.ObjectID, err)
 			}
 		}
-		// Отложенные строки снятия; факт другой действующей выдачи оставит свёртка.
-		return r.flushDeletes(ctx, s, col)
+		// Отложенные строки журнала одним оператором; факт другой действующей выдачи
+		// оставит свёртка.
+		return r.flushJournal(ctx, s, col)
 	}); err != nil {
 		return err
 	}
@@ -1582,15 +1596,12 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			if !tupleOK {
 				return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
 			}
-			// Enqueue ONLY the tuples this pass has not already enqueued, and record the
-			// same set in the pass collector — the set the deletion subtraction below
-			// reads, so a tuple re-written here is never stripped by a sibling's revoke
-			// in the same pass.
-			if fresh := col.collectNew(tuples); len(fresh) > 0 {
-				if err := s.EmitTupleWrite(ctx, fresh); err != nil {
-					return fmt.Errorf("emit tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
-				}
-			}
+			// Откладываются ТОЛЬКО кортежи, которых проход ещё не откладывал, и тот же
+			// набор запоминается в коллекторе прохода — его читает вычитание снятий, и
+			// кортеж, записанный здесь заново, соседнее снятие того же прохода не снимет.
+			// В журнал они уходят в конце прохода одним оператором со снятиями
+			// (flushJournal, kaname#617).
+			col.deferWrite(col.collectNew(tuples))
 			// Co-commit the emitted member-tuple into the ledger under the member's
 			// coordinate — the symmetric revoke + Role.Update reconcile both rest on it
 			// (ban #10).
@@ -1750,11 +1761,11 @@ func (r *Reconciler) memberTuples(d DesiredMember) ([]domain.MembershipTuple, bo
 //     кортеж, который выдача ещё выпускает другой координатой, не снимается.
 //
 // Строка снятия ОТЛОЖЕНА в коллектор (deferDelete) и уходит в конце прохода
-// (flushDeletes). Факт, который держит другая действующая выдача того же субъекта либо
+// (flushJournal). Факт, который держит другая действующая выдача того же субъекта либо
 // строка другой координаты, оставляет свёртка строки снятия под замком строки факта
 // (kaname#919) — для этого своя строка ведомости ОБЯЗАНА уйти до строки снятия, иначе
 // выдача держит факт сама: ForgetEmittedTuples стоит здесь, inline, раньше любого
-// flushDeletes.
+// flushJournal.
 func (r *Reconciler) revokeMemberTuples(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember, claims *memberClaims, col *syncFGACollector) error {
 	coord := coordOf(m)
 	tuples, err := r.revokeTuplesFor(ctx, s, bs, m)

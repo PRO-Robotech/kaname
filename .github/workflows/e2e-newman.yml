@@ -642,6 +642,7 @@ jobs:
             --service docker-lane-credential-kind \
             --service iam-membership-create \
             --service iam-token-facade-conformance \
+            --service basic-access-token \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
             --internal-front-client-cert ../../.stand/pki/edge.crt \

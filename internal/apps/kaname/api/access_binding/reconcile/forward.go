@@ -577,7 +577,7 @@ func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
 	if err := s.UpsertMembers(ctx, w.members); err != nil {
 		return fmt.Errorf("forward: upsert members (%d): %w", len(w.members), err)
 	}
-	if err := s.EmitTupleWrite(ctx, w.fresh); err != nil {
+	if err := s.EmitJournal(ctx, w.fresh, nil); err != nil {
 		return fmt.Errorf("forward: emit tuple write (%d): %w", len(w.fresh), err)
 	}
 	if err := s.RecordEmittedTuplesBatch(ctx, w.ledger); err != nil {

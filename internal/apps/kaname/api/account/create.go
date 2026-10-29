@@ -373,9 +373,12 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 		return nil, shared.MapRepoErr(perr)
 	}
 	// Same single projection as ProjectService.Create — see ownerTuples above.
-	if ferr := w.EmitFGARelationWrite(ctx, projectStructuralTuples(insertedProj)); ferr != nil {
-		return nil, shared.MapRepoErr(ferr)
-	}
+	//
+	// ЖУРНАЛ ПРАВ — ОДНИМ ОПЕРАТОРОМ НА ТРАНЗАКЦИЮ (kaname#617): кортежи проекта,
+	// владельца и указателя выдачи владельца копятся здесь и ложатся одним
+	// вызовом ниже, после вставки выдачи. Между операторами журнала замки строк
+	// факта берутся порядком вызовов, а не общим порядком свёртки.
+	journal := projectStructuralTuples(insertedProj)
 	if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.project", string(insertedProj.ID)); rerr != nil {
 		return nil, shared.MapRepoErr(rerr)
 	}
@@ -398,9 +401,7 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	//   user:<owner>#owner@account:<id>          — owner self-grant (D-4: NOT
 	//     reconstructible by the reconciler ⇒ in-tx emit is the ONLY guarantee).
 	//   cluster:cluster_root#cluster@account:<id> — SEC-L cluster pointer.
-	if ferr := w.EmitFGARelationWrite(ctx, ownerTuples(inserted)); ferr != nil {
-		return nil, shared.MapRepoErr(ferr)
-	}
+	journal = append(journal, ownerTuples(inserted)...)
 
 	// RBAC explicit-model 2026 P6 (D-8 / C-01 / ВЗ-3): co-commit the owner
 	// AccessBinding (subject=creator, role=owner, scope=ACCOUNT:<A>,
@@ -457,7 +458,8 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	// ReconcileBinding below (and the periodic sweep). The pointer is retained for
 	// lineage parity (and so a future cascade re-introduction would not need a
 	// migration), not for access.
-	if ferr := w.EmitFGARelationWrite(ctx, ownerBindingHierarchyTuples(inserted, createdBinding.ID)); ferr != nil {
+	journal = append(journal, ownerBindingHierarchyTuples(inserted, createdBinding.ID)...)
+	if ferr := w.EmitFGARelationWrite(ctx, journal); ferr != nil {
 		return nil, shared.MapRepoErr(ferr)
 	}
 	// Record the OWNER-BINDING-lifecycle tuples in the emitted-tuple ledger in the SAME

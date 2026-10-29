@@ -14,7 +14,13 @@
 
 Прогон против поднятого стенда это закрывает, но требует стенда. Здесь — то,
 что доказуемо без него: НАСТОЯЩИЙ newman по НАСТОЯЩЕЙ порождённой коллекции,
-ответы даёт подставной край.
+ответы даёт подставной собственный фронт службы.
+
+Модуль переутверждён по фактическому производителю (kaname#155): все его шаги
+адресуются собственному фронту службы (`ownRestBaseUrl`), а адреса края и
+внутреннего слушателя указывают на заведомо закрытый порт, поэтому шаг,
+оставшийся на крае, даёт запрос без ответа, и законный вход перестаёт быть
+чистым. Предъявление через край — предмет платформы (PRO-Robotech/kacho#3049).
 
 # Чем это отличается от «выписать ответ руками»
 
@@ -40,10 +46,16 @@
 | секрет без ключевого материала   | пустые поля ключа          | ответ дополнительно несёт закрытый ключ   |
 | срок назван всегда               | `expiresAt` непуст         | `expiresAt` пуст                          |
 | строка называет своё удостоверение | id из строки = token.id  | ответ называет другое удостоверение       |
-| живой секрет ПРОХОДИТ            | край принимает             | край отвергает живой секрет               |
-| испорченный ОТВЕРГАЕТСЯ          | край отвергает             | край принимает испорченную строку         |
+| живой секрет ПРОХОДИТ            | фронт принимает            | фронт отвергает живой секрет              |
+| испорченный ОТВЕРГАЕТСЯ          | фронт отвергает            | фронт принимает испорченную строку        |
+| отзыв доходит до предъявления    | после отзыва отказ         | после отзыва фронт продолжает принимать   |
 | секрет показан один раз          | операция без секрета       | операция перечитывается вместе с секретом |
-| отзыв доходит до предъявления    | после отзыва отказ         | после отзыва край продолжает принимать    |
+| перечень без секрета             | строки без секрета         | перечень несёт выданный секрет            |
+| выданное есть в перечне          | строка удостоверения есть  | перечень выданного не показывает          |
+| исход отзыва назван              | tokenId и revokedAt        | операция отзыва называет другое удостоверение |
+| повтор отзыва — отказ владельца  | синхронный NOT_FOUND       | повторный отзыв отвечает успехом          |
+| отозванного нет в перечне        | после отзыва строки нет    | перечень показывает отозванное            |
+| отсутствие — по всему перечню    | одна страница              | перечень с продолжением                   |
 
 # Чем это слабее прогона против стенда — названо прямо
 
@@ -127,6 +139,9 @@ MINT_PKG = "./tests/newman/scripts/credsecretmint"
 CASE_PREFIX = "IAM-BAT-SECRET-LIFECYCLE-OK"
 USER_ID = "usr0000000000000bat0"
 BOOT_BEARER = "bootstrap-bearer-for-selftest"
+# Адрес поверхности, которой у модуля быть не должно: порт 9 (discard) на
+# петле закрыт, соединение отвергается сразу, и newman пишет запрос без ответа.
+DEAD_SURFACE = "http://127.0.0.1:9"
 ISSUE_OP_ID = "iop0000000000000bat1"
 REVOKE_OP_ID = "iop0000000000000bat2"
 CRED_KIND = "CREDENTIAL_KIND_SECRET"
@@ -151,10 +166,12 @@ def mint(prefix: str = "uoc") -> tuple[str, str]:
 
 
 class Stand:
-    """Подставной край: выдача, предъявление, чтение операции, отзыв.
+    """Подставной собственный фронт: выдача, предъявление, перечень, чтение
+    операции, отзыв.
 
-    Ведёт состояние отзыва — иначе «после отзыва отказ» проверялось бы на крае,
-    который отвергает всегда, и утверждение зеленело бы, ничего не значив.
+    Ведёт состояние отзыва — иначе «после отзыва отказ» и «после отзыва в
+    перечне нет» проверялись бы на фронте, который отвергает всегда и чей
+    перечень пуст всегда, и утверждения зеленели бы, ничего не значив.
     """
 
     def __init__(self, *, credential_id: str, secret: str,
@@ -164,12 +181,17 @@ class Stand:
                  answered_credential_id: str | None = None,
                  reject_live: bool = False,
                  accept_tampered: bool = False,
-                 operation_carries_secret: bool = False,
                  revoke_reaches_presentation: bool = True,
+                 operation_carries_secret: bool = False,
+                 list_omits_issued: bool = False,
+                 list_carries_secret: bool = False,
+                 list_paginated: bool = False,
+                 revoke_reaches_list: bool = True,
+                 revoke_names_other: bool = False,
                  repeat_revoke_succeeds: bool = False):
         self.credential_id = credential_id
         self.secret = secret
-        # Что край КЛАДЁТ в ответ. По умолчанию — то же, что принимает; ось
+        # Что фронт КЛАДЁТ в ответ. По умолчанию — то же, что выдал; ось
         # формы разводит эти две величины.
         self.answered_secret = secret if answered_secret is None else answered_secret
         self.answered_credential_id = answered_credential_id or credential_id
@@ -177,9 +199,18 @@ class Stand:
         self.expires_at = expires_at
         self.reject_live = reject_live
         self.accept_tampered = accept_tampered
-        self.operation_carries_secret = operation_carries_secret
         self.revoke_reaches_presentation = revoke_reaches_presentation
-        # Повторный отзыв: законный край отвечает синхронным 404 с текстом
+        self.operation_carries_secret = operation_carries_secret
+        # Перечень: законный показывает выданное до отзыва и не показывает после,
+        # секрета не несёт и умещается в одну страницу. Каждая инъекция меняет
+        # ровно один из этих фактов.
+        self.list_omits_issued = list_omits_issued
+        self.list_carries_secret = list_carries_secret
+        self.list_paginated = list_paginated
+        self.revoke_reaches_list = revoke_reaches_list
+        # Исход отзыва: законный называет снятое удостоверение и момент снятия.
+        self.revoke_names_other = revoke_names_other
+        # Повторный отзыв: законный фронт отвечает синхронным 404 с текстом
         # владельца (CVR-03); инъекция — прежний исход, вторая операция с успехом.
         self.repeat_revoke_succeeds = repeat_revoke_succeeds
         self.revoked = False
@@ -234,7 +265,21 @@ class Stand:
                     return self._send(200, self._issue_response(
                         with_secret=outer.operation_carries_secret))
                 if path == f"/operations/{REVOKE_OP_ID}":
-                    return self._send(200, {"id": REVOKE_OP_ID, "done": True, "metadata": {}})
+                    named = ("uoc00000000000000000" if outer.revoke_names_other
+                             else outer.credential_id)
+                    return self._send(200, {"id": REVOKE_OP_ID, "done": True, "metadata": {},
+                                            "response": {"tokenId": named,
+                                                         "revokedAt": EXPIRES_AT}})
+                if path == f"/iam/v1/users/{USER_ID}/tokens":
+                    shown = not outer.list_omits_issued and (
+                        not outer.revoked or not outer.revoke_reaches_list)
+                    row = {"id": outer.credential_id, "credentialKind": CRED_KIND,
+                           "expiresAt": outer.expires_at}
+                    if outer.list_carries_secret:
+                        row["secret"] = outer.secret
+                    body = {"tokens": [row] if shown else [],
+                            "nextPageToken": "c2Vjb25kLXBhZ2U=" if outer.list_paginated else ""}
+                    return self._send(200, body)
                 if path == "/iam/v1/me":
                     got = (self.headers.get("Authorization") or "").replace("Bearer ", "", 1)
                     if got == outer.secret:
@@ -246,9 +291,6 @@ class Stand:
                                                 "email": "", "displayName": "",
                                                 "systemAdmin": False, "clusterViewer": True,
                                                 "accounts": [], "checkedAt": EXPIRES_AT})
-                    if got == BOOT_BEARER:
-                        return self._send(200, {"subject": "bootstrap", "userId": "",
-                                                "accounts": []})
                     if outer.accept_tampered:
                         # Полоса, не РАЗБИРАЮЩАЯ удостоверение: смотрит на вид и
                         # пропускает. Ровно то, что обязан ловить парный шаг.
@@ -334,16 +376,20 @@ class Outcome:
                 f"отказов скрипта {self.script_errors}")
 
 
-def run_folder(stand: Stand, folder: str) -> Outcome:
-    """Гоняет кейс против подставного края и возвращает ШЕСТЬ величин исхода."""
+def run_folder(stand: Stand, folder: str, *, surfaces_swapped: bool = False) -> Outcome:
+    """Гоняет кейс против подставного фронта и возвращает ШЕСТЬ величин исхода."""
     res = Outcome()
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "report.json"
         base = f"http://127.0.0.1:{stand.port}"
         cmd = [
             "newman", "run", str(COLLECTION), "--folder", folder,
-            "--env-var", f"baseUrl={base}",
-            "--env-var", f"internalBaseUrl={base}",
+            # Собственный фронт — подставной сервер; край и внутренний слушатель
+            # — заведомо закрытый порт: шаг, адресованный им, остаётся без ответа,
+            # и законный вход перестаёт быть чистым (шапка модуля).
+            "--env-var", f"ownRestBaseUrl={DEAD_SURFACE if surfaces_swapped else base}",
+            "--env-var", f"baseUrl={base if surfaces_swapped else DEAD_SURFACE}",
+            "--env-var", f"internalBaseUrl={base if surfaces_swapped else DEAD_SURFACE}",
             "--env-var", f"userAAAId={USER_ID}",
             "--env-var", "runId=selftest",
             "--env-var", f"jwtBootstrap={BOOT_BEARER}",
@@ -541,7 +587,7 @@ def main() -> int:
     else:
         print(f"законный вход: зелёных утверждений {legal.passed} из {legal.assertions} — "
               f"секрет отчеканен продуктом ({secret[:14]}…), форма совпала, "
-              f"предъявление прошло, отзыв дошёл")
+              f"предъявление прошло, отзыв дошёл до предъявления и до перечня")
 
     # ── ИНЪЕКЦИИ: каждая обязана УПАСТЬ ────────────────────────────────────
     injections = [
@@ -556,20 +602,36 @@ def main() -> int:
          dict(expires_at="")),
         ("строка называет ДРУГОЕ удостоверение, чем ответ",
          dict(answered_credential_id="uoc00000000000000000")),
-        ("край отвергает ЖИВОЙ секрет — полоса секрета не работает вовсе",
+        ("фронт отвергает ЖИВОЙ секрет — полоса секрета не работает вовсе",
          dict(reject_live=True)),
-        ("край ПРИНИМАЕТ испорченную строку — удостоверение не разбирается",
+        ("фронт ПРИНИМАЕТ испорченную строку — удостоверение не разбирается",
          dict(accept_tampered=True)),
-        ("операция выдачи перечитывается ВМЕСТЕ с секретом — показан не один раз",
-         dict(operation_carries_secret=True)),
         ("отзыв не доходит до предъявления — контроль действует только на выдаче",
          dict(revoke_reaches_presentation=False)),
+        ("операция выдачи перечитывается ВМЕСТЕ с секретом — показан не один раз",
+         dict(operation_carries_secret=True)),
+        ("перечень несёт выданный секрет — показан не один раз",
+         dict(list_carries_secret=True)),
+        ("перечень не показывает выданного — отсутствие после отзыва ничего не значит",
+         dict(list_omits_issued=True)),
+        ("исход отзыва называет ДРУГОЕ удостоверение",
+         dict(revoke_names_other=True)),
         ("повторный отзыв отвечает успехом — опечатка неотличима от отзыва",
          dict(repeat_revoke_succeeds=True)),
+        ("перечень показывает отозванное — отзыв не снял удостоверение",
+         dict(revoke_reaches_list=False)),
+        ("перечень с продолжением — отсутствие на странице не значит отсутствия",
+         dict(list_paginated=True)),
+        # Поверхность: собственный фронт молчит, отвечает край. Законный вход
+        # чист лишь тогда, когда каждый шаг адресован фронту; эта инъекция
+        # доказывает, что модуль край не спрашивает и молча на него не уходит.
+        ("модуль адресован краю, а не собственному фронту",
+         dict(surfaces_swapped=True)),
     ]
     for name, kw in injections:
+        swapped = bool(kw.pop("surfaces_swapped", False))
         with Stand(credential_id=cred_id, secret=secret, **kw) as st:
-            got = run_folder(st, folder)
+            got = run_folder(st, folder, surfaces_swapped=swapped)
         executed += 1
         outcomes.append(got)
         if got.silent:
