@@ -431,36 +431,6 @@ func (w *srciWorld) srciFactsOf(subject string) string {
 	return "[" + strings.Join(out, "; ") + "]"
 }
 
-// seedSRCIGrantOperation — выдача формы B1 (человек U8, system.admin, аккаунт A1,
-// все объекты) ГЛАГОЛОМ `Create` на прежний id admin; отдаёт id операции. Посев
-// SRCI-05 строит выдачи писателем мимо глагола и строк kaname.operations не
-// заводит, а на живой базе каждая выдача несёт строку операции, чьё описание
-// называет id роли (create.go, «Create access binding (… → <роль> on …)»). Без
-// этой строки перепись текста операций миграцией не держала бы ни одна проба.
-// Вызывается после seedSRCI05 на версии до миграции.
-func (w *srciWorld) seedSRCIGrantOperation() string {
-	t := w.t
-	admin := w.roleIDByName(domain.SystemAdminRoleName)
-	require.Equal(t, w.subj.oldAdmin, admin, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): мир не на версии до миграции — роль admin не на прежнем id")
-	u8 := mustSeedUser(t, w.ctx, w.pool, "srciu8")
-	verifyAddresses(t, w.ctx, w.pool)
-	op, err := w.ab.Create(asUser(w.ctx, w.k), &iamv1.CreateAccessBindingRequest{
-		Subjects: []*iamv1.Subject{userSubject(u8)}, RoleId: admin,
-		ScopeType: "iam.account", ScopeId: string(w.a1), Target: allInScopeTarget(),
-	})
-	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): глагол Create отказал выдаче формы B1 на прежний id admin")
-	done := awaitOp(t, w.ctx, w.ops, op.GetId())
-	require.Nilf(t, done.Error, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): операция выдачи %s завершилась ошибкой", op.GetId())
-	var desc string
-	require.NoError(t, w.pool.QueryRow(w.ctx,
-		`SELECT description FROM kaname.operations WHERE id = $1`, op.GetId()).Scan(&desc),
-		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): строка операции выдачи")
-	require.Containsf(t, desc, w.subj.oldAdmin,
-		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): описание операции выдачи не называет прежний id admin: %q", desc)
-	t.Logf("строка операции выдачи глаголом %s: %q", op.GetId(), desc)
-	return op.GetId()
-}
-
 // SRCI-06 — ни одна строка базы, кроме ленты подписки, не сохраняет прежний id;
 // лента дописывается, прежние её строки не меняются. Сверх посева SRCI-05 — строка
 // операции выдачи глаголом (seedSRCIGrantOperation): её описание переписывает лишь

@@ -49,6 +49,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pressly/goose/v3"
@@ -61,6 +62,7 @@ import (
 	internaliamapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
@@ -380,6 +382,66 @@ func (w *srciWorld) seedBinding(b domain.AccessBinding, what string) string {
 	require.NoError(t, wr.Commit(ctx))
 	require.NoErrorf(t, w.rec.ReconcileBindingForward(ctx, created.ID), "НЕ-ВЫПОЛНИЛОСЬ(фикстура) %s: материализация", what)
 	return string(created.ID)
+}
+
+// srciSettledReconciler — реконсайлер мира, сообщающий о конце прохода после
+// фиксации. `Create` материализует выдачу отсоединённо (shared.GoPostCommit):
+// сначала члены самой выдачи, затем доступ прочих выдач к новому объекту выдачи
+// (reconcileNewBindingObject — последний вызов прохода). Срез, снятый раньше конца
+// прохода, считал бы строки членов, которые ещё дописываются, и равенство «до» и
+// «после» судило бы гонку посева, а не миграцию.
+type srciSettledReconciler struct {
+	accessbindingapp.SelectorReconciler
+	once sync.Once
+	done chan struct{}
+}
+
+func (r *srciSettledReconciler) ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error {
+	defer r.once.Do(func() { close(r.done) })
+	return r.SelectorReconciler.ReconcileObjectForwardNoStale(ctx, objectType, objectID)
+}
+
+// seedSRCIGrantOperation — выдача формы B1 (человек U8, system.admin, аккаунт A1,
+// все объекты) ГЛАГОЛОМ `Create` на прежний id admin; отдаёт id операции. Посев
+// SRCI-05 строит выдачи писателем мимо глагола и строк kaname.operations не
+// заводит, а на живой базе каждая выдача несёт строку операции, чьё описание
+// называет id роли (create.go, «Create access binding (… → <роль> on …)»). Без
+// этой строки перепись текста операций миграцией не держала бы ни одна проба.
+// Глагол собран теми же конструкторами, что в wireSCWorld; отличие — реконсайлер,
+// сообщающий о конце отсоединённого прохода, которого посев дожидается.
+// Вызывается после seedSRCI05 на версии до миграции.
+func (w *srciWorld) seedSRCIGrantOperation() string {
+	t := w.t
+	admin := w.roleIDByName(domain.SystemAdminRoleName)
+	require.Equal(t, w.subj.oldAdmin, admin, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): мир не на версии до миграции — роль admin не на прежнем id")
+	u8 := mustSeedUser(t, w.ctx, w.pool, "srciu8")
+	verifyAddresses(t, w.ctx, w.pool)
+
+	rec := &srciSettledReconciler{SelectorReconciler: w.rec, done: make(chan struct{})}
+	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, w.ops, catalogfixture.Source()).
+		WithRelationStore(w.door, nil).
+		WithReconciler(rec)
+	verb := accessbindingapp.NewHandler(create, nil, nil, nil, nil, nil, nil)
+	op, err := verb.Create(asUser(w.ctx, w.k), &iamv1.CreateAccessBindingRequest{
+		Subjects: []*iamv1.Subject{userSubject(u8)}, RoleId: admin,
+		ScopeType: "iam.account", ScopeId: string(w.a1), Target: allInScopeTarget(),
+	})
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): глагол Create отказал выдаче формы B1 на прежний id admin")
+	done := awaitOp(t, w.ctx, w.ops, op.GetId())
+	require.Nilf(t, done.Error, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): операция выдачи %s завершилась ошибкой", op.GetId())
+	select {
+	case <-rec.done:
+	case <-time.After(shared.PostCommitTimeout):
+		t.Fatalf("НЕ-ВЫПОЛНИЛОСЬ(фикстура): проход материализации выдачи операции %s не закончился за %s", op.GetId(), shared.PostCommitTimeout)
+	}
+	var desc string
+	require.NoError(t, w.pool.QueryRow(w.ctx,
+		`SELECT description FROM kaname.operations WHERE id = $1`, op.GetId()).Scan(&desc),
+		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): строка операции выдачи")
+	require.Containsf(t, desc, w.subj.oldAdmin,
+		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): описание операции выдачи не называет прежний id admin: %q", desc)
+	t.Logf("строка операции выдачи глаголом %s: %q", op.GetId(), desc)
+	return op.GetId()
 }
 
 // srciKernelTables — таблицы схемы kaname по каталогу (не перечнем), кроме ленты
