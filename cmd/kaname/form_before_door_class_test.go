@@ -840,16 +840,19 @@ func (formProbeNoImports) Import(path string) (*types.Package, error) {
 //     того же среза (O04), взятие адреса, передача функции — нарушение: через
 //     него раскрывается уже не собранная цепочка. Одноимённый перечень другого
 //     объекта — параметр (O02) или именованный результат (O05) замыкания,
-//     затенение в блоке — не раскрытие собранного;
-//  3. раскрытие — прямой довод конструктора сервера `an.newServer`, и других
-//     звеньев (`grpc.UnaryInterceptor`, ещё одной `Chain…`) этот вызов не несёт;
-//  4. сервер присвоен имени, и имя после этого не переписано и адрес его не
-//     взят;
+//     затенение в блоке — не раскрытие собранного; имя, которое разбор типов
+//     не связал ни с каким объектом, считается употреблением (`formProbeWiring`);
+//  3. раскрытие — прямой довод конструктора сервера `an.newServer`;
+//  4. сервер присвоен имени этой функции, и имя после этого не переписано и
+//     адрес его не взят;
 //  5. на этом сервере корень монтирует публичные службы (`an.registerPublic` —
 //     та же функция, по которой проба выводит класс глаголов);
 //  6. этот сервер обслуживает (`Serve`) слушатель, рождённый `net.Listen` на
 //     адресе `<…>.<an.addrField>.<an.addrMethod>()`, и ни слушатель, ни адрес
-//     после рождения не переписаны.
+//     после рождения не переписаны;
+//  7. других звеньев (`grpc.UnaryInterceptor`, ещё одной `Chain…`) сервер не
+//     несёт — ни вызовом доводом, ни именем, рождённым таким вызовом; довод-имя,
+//     рождённое не в этой функции, — нарушение: что он несёт, не видно.
 //
 // Перестановка цепочек публичного и внутреннего серверов (O03), монтирования
 // служб либо слушателей ломает шаги 5–6. Присваиваний сборщика ноль — тоже
@@ -859,8 +862,13 @@ func (formProbeNoImports) Import(path string) (*types.Package, error) {
 // Граница — чего страж не видит, и чем это держится:
 //   - что делает со своим результатом сам сборщик после возврата (хранит ссылку
 //     на срез и пишет в неё позже) — страж судит употребления в корне, а не
-//     тело сборщика; это тело — чистая сборка из доводов, и её судит сама
-//     проба, исполняя цепочку, которую сборщик вернул;
+//     тело сборщика; тело `publicListenerChain` сегодня — сборка срезов из
+//     доводов и возврат, без горутин и сохранённых ссылок, и цепочку, которую
+//     оно вернуло, исполняет сама проба;
+//   - довод конструктора, рождённый в этой функции значением, которое лишь
+//     возвращает параметр (`opt := wrap(grpc.UnaryInterceptor(x))`), шаг 7 не
+//     раскрывает: судится вызов, рождающий имя, а не его доводы; в корне доводы
+//     конструктора — раскрытия сборки и учётные данные слушателя;
 //   - что `an.newServer` делает с переданными ему параметрами (фундамент
 //     `corelib/grpcsrv`, его пробы) и какие службы монтирует `an.registerPublic`
 //     (их судит проба: класс выводится из того же вызова);
@@ -924,39 +932,98 @@ func formProbeCallee(e ast.Expr) string {
 
 // formProbeWiring — одна функция корня: родитель каждого узла и объявление и
 // употребления каждого объекта внутри неё.
+//
+// unresolved — имена, которые разбор типов не связал ни с каким объектом. Это
+// не редкость, а следствие импортёра без зависимостей: при неверном типе
+// выражения перебора `go/types` не связывает переменные перебора
+// (`for _, links = range <вызов чужого пакета>`). Такое имя того же написания,
+// стоящее после рождения объекта, страж считает его употреблением — отказ по
+// умолчанию, а не слепота. Имена полей и методов (`x.links`), ключи составных
+// литералов и метки сюда не входят: переменной они не называют.
 type formProbeWiring struct {
-	fset   *token.FileSet
-	info   *types.Info
-	body   *ast.BlockStmt
-	parent map[ast.Node]ast.Node
-	def    map[types.Object]*ast.Ident
-	uses   map[types.Object][]*ast.Ident
+	fset       *token.FileSet
+	info       *types.Info
+	body       *ast.BlockStmt
+	parent     map[ast.Node]ast.Node
+	def        map[types.Object]*ast.Ident
+	uses       map[types.Object][]*ast.Ident
+	unresolved map[string][]*ast.Ident
 }
 
 func newFormProbeWiring(fset *token.FileSet, info *types.Info, body *ast.BlockStmt) *formProbeWiring {
 	w := &formProbeWiring{fset: fset, info: info, body: body, parent: map[ast.Node]ast.Node{},
-		def: map[types.Object]*ast.Ident{}, uses: map[types.Object][]*ast.Ident{}}
+		def: map[types.Object]*ast.Ident{}, uses: map[types.Object][]*ast.Ident{},
+		unresolved: map[string][]*ast.Ident{}}
 	var stack []ast.Node
 	ast.Inspect(body, func(n ast.Node) bool {
 		if n == nil {
 			stack = stack[:len(stack)-1]
 			return false
 		}
+		var parent ast.Node
 		if len(stack) > 0 {
-			w.parent[n] = stack[len(stack)-1]
+			parent = stack[len(stack)-1]
+			w.parent[n] = parent
 		}
 		stack = append(stack, n)
-		if id, ok := n.(*ast.Ident); ok {
-			if obj := info.Defs[id]; obj != nil {
-				w.def[obj] = id
-			}
-			if obj := info.Uses[id]; obj != nil {
-				w.uses[obj] = append(w.uses[obj], id)
-			}
+		id, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		obj, defined := info.Defs[id]
+		if obj != nil {
+			w.def[obj] = id
+		}
+		used, isUse := info.Uses[id]
+		if used != nil {
+			w.uses[used] = append(w.uses[used], id)
+		}
+		if !defined && !isUse && id.Name != "_" && !formProbeNamesNoVariable(parent, id) {
+			w.unresolved[id.Name] = append(w.unresolved[id.Name], id)
 		}
 		return true
 	})
 	return w
+}
+
+// formProbeNamesNoVariable — имя стоит там, где переменной не называет: поле
+// или метод селектора, ключ составного литерала, метка.
+func formProbeNamesNoVariable(parent ast.Node, id *ast.Ident) bool {
+	switch p := parent.(type) {
+	case *ast.SelectorExpr:
+		return p.Sel == id
+	case *ast.KeyValueExpr:
+		return p.Key == id
+	case *ast.LabeledStmt, *ast.BranchStmt:
+		return true
+	}
+	return false
+}
+
+// occurrences — употребления объекта в функции после позиции after: связанные
+// разбором типов и несвязанные того же написания, в порядке исходника.
+func (w *formProbeWiring) occurrences(obj types.Object, after token.Pos) []*ast.Ident {
+	var out []*ast.Ident
+	for _, id := range w.uses[obj] {
+		if id.Pos() > after {
+			out = append(out, id)
+		}
+	}
+	for _, id := range w.unresolved[obj.Name()] {
+		if id.Pos() > after {
+			out = append(out, id)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Pos() < out[j].Pos() })
+	return out
+}
+
+// born — позиция, с которой объект живёт в функции; не объявлен в ней — ноль.
+func (w *formProbeWiring) born(obj types.Object) token.Pos {
+	if id := w.def[obj]; id != nil {
+		return id.Pos()
+	}
+	return token.NoPos
 }
 
 func (w *formProbeWiring) line(n ast.Node) string {
@@ -1026,7 +1093,7 @@ func (w *formProbeWiring) touch(id *ast.Ident) string {
 // written — запись в объект после его рождения: присваивание (кроме except),
 // взятие адреса, ключ или значение перебора. Пусто — не записан.
 func (w *formProbeWiring) written(obj types.Object, except ast.Node) string {
-	for _, u := range w.uses[obj] {
+	for _, u := range w.occurrences(obj, w.born(obj)) {
 		switch p := w.parent[u].(type) {
 		case *ast.AssignStmt:
 			if ast.Node(p) == except {
@@ -1106,7 +1173,7 @@ func (w *formProbeWiring) linkProblem(as *ast.AssignStmt, i int, interceptor str
 		spread  *ast.CallExpr
 		touched []string
 	)
-	for _, u := range w.uses[links] {
+	for _, u := range w.occurrences(links, id.Pos()) {
 		if c := w.spreadOf(u, interceptor); c != nil && spread == nil {
 			spread = c
 			continue
@@ -1124,28 +1191,11 @@ func (w *formProbeWiring) linkProblem(as *ast.AssignStmt, i int, interceptor str
 		}
 		return why
 	}
-	// Шаг 3: прямой довод конструктора сервера, без лишних звеньев.
+	// Шаг 3: прямой довод конструктора сервера.
 	srvCall, ok := w.parent[spread].(*ast.CallExpr)
 	if !ok || formProbeCallee(srvCall) != an.newServer || !formProbeIsArg(srvCall, spread) {
 		return "(" + id.Name + ") раскрыт не прямым доводом " + an.newServer + " (" + w.line(spread) +
 			") — до какого слушателя он доходит, не доказать"
-	}
-	assembled := map[types.Object]bool{}
-	for _, l := range as.Lhs {
-		if obj := w.object(l); obj != nil {
-			assembled[obj] = true
-		}
-	}
-	for _, a := range srvCall.Args {
-		c, ok := a.(*ast.CallExpr)
-		if !ok || !formProbeInterceptorOptions[formProbeCallee(c)] {
-			continue
-		}
-		if len(c.Args) == 1 && assembled[w.object(c.Args[0])] {
-			continue
-		}
-		return "попадает в сервер (" + w.line(srvCall) + "), который несёт сверх неё звенья (" + w.line(c) + ": grpc." +
-			formProbeCallee(c) + ") — слушатель исполняет не ту цепочку, что судит проба"
 	}
 	// Шаг 4: сервер присвоен имени этой функции и не переписан.
 	var (
@@ -1180,6 +1230,35 @@ func (w *formProbeWiring) linkProblem(as *ast.AssignStmt, i int, interceptor str
 	// Шаг 6: он обслуживает слушатель публичного адреса.
 	if why := w.servesPublic(srv, an); why != "" {
 		return "попадает в сервер " + srv.Name() + ", который " + why
+	}
+	// Шаг 7: других звеньев сервер не несёт — ни вызовом параметра доводом, ни
+	// именем, рождённым таким вызовом в этой функции.
+	assembled := map[types.Object]bool{}
+	for _, l := range as.Lhs {
+		if obj := w.object(l); obj != nil {
+			assembled[obj] = true
+		}
+	}
+	for _, a := range srvCall.Args {
+		opt := a
+		if _, isName := a.(*ast.Ident); isName {
+			obj := w.object(a)
+			if obj == nil || w.definition(obj) == nil {
+				return "попадает в сервер " + srv.Name() + ", чей довод (" + w.line(a) + ") — имя, рождённое не в этой " +
+					"функции: несёт ли он звенья цепочки, не видно"
+			}
+			opt = w.definition(obj)
+		}
+		c, ok := opt.(*ast.CallExpr)
+		if !ok || !formProbeInterceptorOptions[formProbeCallee(c)] {
+			continue
+		}
+		// Своё раскрытие и раскрытие другой полосы той же сборки — не лишние.
+		if c == spread || (len(c.Args) == 1 && c.Ellipsis != token.NoPos && assembled[w.object(c.Args[0])]) {
+			continue
+		}
+		return "попадает в сервер " + srv.Name() + ", который несёт сверх неё звенья (" + w.line(c) + ": grpc." +
+			formProbeCallee(c) + ") — слушатель исполняет не ту цепочку, что судит проба"
 	}
 	return ""
 }
@@ -1235,7 +1314,7 @@ func (w *formProbeWiring) registersOn(srv types.Object, name string) bool {
 // и такой вызов есть; иначе — почему нет.
 func (w *formProbeWiring) servesPublic(srv types.Object, an formProbeAnchors) string {
 	served := 0
-	for _, u := range w.uses[srv] {
+	for _, u := range w.occurrences(srv, w.born(srv)) {
 		sel, ok := w.parent[u].(*ast.SelectorExpr)
 		if !ok || sel.X != u || sel.Sel.Name != "Serve" {
 			continue
@@ -1410,6 +1489,7 @@ func TestIAM_PNE_1_21_A_ClassCrossCheckNamesANarrowedVerb(t *testing.T) {
 // сервера перестановку цепочек слушателей (O03) таблица различить не могла бы.
 const formProbeLawfulRoot = `package main
 func serve() {
+	pubCreds, inCreds := creds()
 	u, s, err := chain()
 	_ = err
 	pub := grpcsrv.NewServer(pubCreds, grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...))
@@ -1487,6 +1567,14 @@ func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
 		"O03 публичный сервер не обслуживает ни одного слушателя": {
 			[]edit{{"run(func() error { return pub.Serve(lis) })\n", ""}},
 			2, []string{"ни одним вызовом Serve"}},
+		"O03 звено доводом-именем, рождённым grpc.UnaryInterceptor": {
+			[]edit{{"pub := grpcsrv.NewServer(", "bypass := grpc.UnaryInterceptor(x)\n\tpub := grpcsrv.NewServer("},
+				{pubArgs, "grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...), bypass)"}},
+			2, []string{"несёт сверх неё звенья"}},
+		"довод конструктора — имя, рождённое вне функции": {
+			[]edit{{"package main\n", "package main\nvar extra grpc.ServerOption\n"},
+				{pubArgs, "grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...), extra)"}},
+			2, []string{"имя, рождённое не в этой функции"}},
 		"O03 публичный сервер несёт сверх цепочки звено": {
 			[]edit{{pubArgs, "grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...), grpc.UnaryInterceptor(bypass))"}},
 			2, []string{"несёт сверх неё звенья"}},
@@ -1509,13 +1597,13 @@ func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
 		// O02, O05 — одноимённый перечень замыкания (тот же класс, что var в блоке).
 		"O02 параметр замыкания затеняет перечень": {
 			[]edit{{pubLine, pubVar + "func(u []X) {\n\t\t" + pubSet + "\n\t}(other)"}},
-			1, []string{"раскрыт одноимённый, но другой перечень"}},
+			2, []string{"раскрыт одноимённый, но другой перечень", "несёт сверх неё звенья"}},
 		"O05 именованный результат замыкания затеняет перечень": {
 			[]edit{{pubLine, pubVar + "func() (u []X) {\n\t\t" + pubSet + "\n\t\treturn\n\t}()"}},
-			1, []string{"параметром либо результатом замыкания"}},
+			2, []string{"параметром либо результатом замыкания", "несёт сверх неё звенья"}},
 		"затенение объявлением var во вложенном блоке": {
 			[]edit{{pubLine, pubVar + "if ok {\n\t\tvar u = other\n\t\t" + pubSet + "\n\t}"}},
-			1, []string{"раскрыт одноимённый, но другой перечень"}},
+			2, []string{"раскрыт одноимённый, но другой перечень", "несёт сверх неё звенья"}},
 		// O04 — второе имя того же среза и родственные формы утечки.
 		"O04 второе имя того же среза": {
 			[]edit{{after, after + "\tv := u\n\tv[0] = extra\n"}},
