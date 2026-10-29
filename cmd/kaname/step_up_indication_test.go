@@ -97,7 +97,7 @@ func newStepUpStand(t *testing.T, floor string) stepUpStand {
 
 func (s stepUpStand) rest(t *testing.T, raw string) (*httptest.ResponseRecorder, string) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/iam/v1/projects/prj-stepup", nil)
+	req := httptest.NewRequest(http.MethodGet, "/iam/v1/projects/prj00000000000stepup", nil)
 	if raw != "" {
 		req.Header.Set("Authorization", "Bearer "+raw)
 	}
@@ -109,7 +109,7 @@ func (s stepUpStand) rest(t *testing.T, raw string) (*httptest.ResponseRecorder,
 
 func (s stepUpStand) grpcGet(raw string) error {
 	ctx := metadata.AppendToOutgoingContext(context.Background(), presentedcred.MetadataKey, "Bearer "+raw)
-	_, err := iamv1.NewProjectServiceClient(s.conn).Get(ctx, &iamv1.GetProjectRequest{ProjectId: "prj-stepup"})
+	_, err := iamv1.NewProjectServiceClient(s.conn).Get(ctx, &iamv1.GetProjectRequest{ProjectId: "prj00000000000stepup"})
 	return err
 }
 

@@ -609,23 +609,38 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-ACC-GT-NEG-ID-MALFORMED — Get with syntactically invalid id → 400
+# IAM-ACC-GT-NEG-ID-MALFORMED — IAM-PNE-1-21 полоса Б (§11 приёмки
+# `non-empty-project-is-not-deleted.md`, kaname#168): Get с неверной формой id →
+# пара `400` / `3` и текст обработчика дословно.
+#
+# Здесь стоял допуск `oneOf([400, 404])`, и `404` в нём был СЛЕДОМ дефекта: у
+# шести `Get` с отношением `v_get` дверь собственного фронта отвечает на неверную
+# форму сокрытием существования — объявляет мусорную строку несуществующим
+# аккаунтом. Приёмка ставит ступень формы до двери; допуск снят
+# (testing.md, malformed-id-not-weakened).
+#
+# Положительный близнец — `IAM-ACC-GT-NEG-NOTFOUND` выше: тот же глагол, тот же
+# предъявитель, правильная форма `acc00000000000notfnd` → `404` / `5`. Отличие —
+# форма идентификатора.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-ACC-GT-NEG-ID-MALFORMED",
-    title="Get with malformed account_id (wrong prefix) → 400 InvalidArgument",
+    title="IAM-PNE-1-21 Б: Get с неверной формой account_id → 400 INVALID_ARGUMENT, текст дословно",
     classes=["NEG", "VAL"],
     priority="P2",
     steps=[
         Step(
             name="get-malformed",
             method="GET",
-            # account_id constraint: <=20 chars; "not-an-acc-id-xxx-xxxx-very-long" exceeds length
+            # Приставки вида нет и длина не 20: форма аккаунта не выполнена ни в чём.
             path="/iam/v1/accounts/not-an-account-id-at-all-toolong",
             auth="jwtAccountAdminA",
             test_script=[
-                "pm.test('400 or 404', () => pm.expect(pm.response.code).to.be.oneOf([400, 404]));",
+                *assert_status(400),
+                *assert_grpc_code(3, "INVALID_ARGUMENT"),
+                *assert_refusal_message("invalid account id 'not-an-account-id-at-all-toolong'",
+                                        probe="текст отказа формы — текст обработчика дословно"),
             ],
         ),
     ],

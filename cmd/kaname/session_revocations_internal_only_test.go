@@ -1,20 +1,20 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// session_revocations_internal_only_test.go — pins the gRPC-registration
-// contract for InternalSessionRevocationsService (ban #6: internal-only).
+// session_revocations_internal_only_test.go — закрепляет контракт регистрации
+// gRPC для InternalSessionRevocationsService (запрет #6: только внутренний).
 //
-// Before this fix the api-gateway logout handler called Revoke, but kaname
-// never registered the service → codes.Unimplemented at runtime → token
-// revocation was INERT (refresh-hook IsRevoked gate had nothing written to it).
-// This test guards both halves:
+// До этой починки обработчик выхода api-gateway звал Revoke, но kaname службу
+// не регистрировал вовсе → codes.Unimplemented во время работы → отзыв токена
+// был НЕДЕЙСТВУЮЩИМ (стражу IsRevoked крючка обновления никто ничего не писал).
+// Проба держит обе половины:
 //
-//	on the PUBLIC (external) server it is NOT registered → Unimplemented
-//	   (must never appear on the external surface, ban #6);
-//	on the INTERNAL (:9091) server it IS registered → the route exists
-//	   (anything other than Unimplemented proves reachability).
+//	на ПУБЛИЧНОМ (внешнем) сервере служба НЕ зарегистрирована → Unimplemented
+//	   (на внешней поверхности она не должна появиться никогда, запрет #6);
+//	на ВНУТРЕННЕМ (:9091) сервере служба зарегистрирована → маршрут есть
+//	   (любой код, кроме Unimplemented, доказывает достижимость).
 //
-// Pure registration/transport test (bufconn, no DB).
+// Чистая проба регистрации и транспорта (bufconn, без базы).
 package main
 
 import (
@@ -35,14 +35,14 @@ import (
 )
 
 func TestSessionRevocations_InternalOnly_NotOnExternalListener(t *testing.T) {
-	// A handler with no writer/reader wired is enough: the route either exists
-	// (reaches the handler → fail-closed Unavailable) or returns Unimplemented
-	// (not registered). A nil use-case + nil reader makes both RPCs fail closed
-	// without touching a DB.
+	// Обработчика без провязанных писателя и читателя достаточно: маршрут либо
+	// есть (доходит до обработчика → Unavailable с отказом по умолчанию), либо
+	// отвечает Unimplemented (не зарегистрирован). nil вместо use-case и
+	// читателя заставляет оба RPC отказать, не трогая базу.
 	handler := sessionrevapp.NewHandler(nil, nil)
 	svcs := &services{sessionRevocationsHandler: handler}
 
-	// PUBLIC server: NOT registered → Unimplemented.
+	// ПУБЛИЧНЫЙ сервер: НЕ зарегистрирована → Unimplemented.
 	pubConn := serveBufconn(t, func(s *grpc.Server) {
 		registerPublicServices(s, svcs, nil)
 	})
@@ -55,11 +55,11 @@ func TestSessionRevocations_InternalOnly_NotOnExternalListener(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, status.Code(err),
 		"IsRevoked must NOT exist on the external listener (ban #6)")
 
-	_, err = pubClient.Revoke(ctx, &iamv1.RevokeRequest{UserId: "usr_x", TokenJti: "jti-1", Reason: "x"})
+	_, err = pubClient.Revoke(ctx, &iamv1.RevokeRequest{UserId: "usr0000000000000000x", TokenJti: "jti-1", Reason: "x"})
 	require.Equal(t, codes.Unimplemented, status.Code(err),
 		"Revoke must NOT exist on the external listener (ban #6)")
 
-	// INTERNAL server: registered → reachable (NOT Unimplemented).
+	// ВНУТРЕННИЙ сервер: зарегистрирована → достижима (НЕ Unimplemented).
 	intConn := serveBufconn(t, func(s *grpc.Server) {
 		registerInternalServices(s, svcs, nil, config.Config{}, nil)
 	})
@@ -69,7 +69,7 @@ func TestSessionRevocations_InternalOnly_NotOnExternalListener(t *testing.T) {
 	require.NotEqual(t, codes.Unimplemented, status.Code(err),
 		"IsRevoked must be reachable on the internal listener")
 
-	_, err = intClient.Revoke(ctx, &iamv1.RevokeRequest{UserId: "usr_x", TokenJti: "jti-1", Reason: "x"})
+	_, err = intClient.Revoke(ctx, &iamv1.RevokeRequest{UserId: "usr0000000000000000x", TokenJti: "jti-1", Reason: "x"})
 	require.NotEqual(t, codes.Unimplemented, status.Code(err),
 		"Revoke must be reachable on the internal listener")
 }

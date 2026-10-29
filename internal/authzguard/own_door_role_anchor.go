@@ -73,6 +73,16 @@ import (
 // одним, потому что привязка к FQN и есть то, что делает якорь безопасным.
 const roleCreateMethod = "/kaname.cloud.iam.v1.RoleService/Create"
 
+// Виды области, которые называет якорь роли. Перечень ЗАКРЫТ и читается
+// звеном формы (`FormUnary`): судья формы обязан знать каждый вид, о котором
+// дверь спросит по якорю, а не только вид из аннотации глагола.
+const (
+	roleAnchorAccount = "account"
+	roleAnchorProject = "project"
+)
+
+var roleAnchorObjectTypes = []string{roleAnchorAccount, roleAnchorProject}
+
 // withCanonicalRoleAnchor учит карту двери читать канонический якорь роли,
 // оставляя легаси-полосу рабочей.
 //
@@ -126,17 +136,17 @@ func roleCreateScope(req any) (objectType, objectID string, ok bool) {
 			// Область отсюда не берётся, а форму входа судит обработчик своим
 			// `INVALID_ARGUMENT` — дверь его вопроса не подменяет.
 		case account != "":
-			return "account", account, true
+			return roleAnchorAccount, account, true
 		case project != "":
-			return "project", project, true
+			return roleAnchorProject, project, true
 		}
 	}
 	// 2-3. Легаси. Ровно те две армы, что контракт называет после канона.
 	switch {
 	case create.GetAccountId() != "":
-		return "account", create.GetAccountId(), true
+		return roleAnchorAccount, create.GetAccountId(), true
 	case create.GetProjectId() != "":
-		return "project", create.GetProjectId(), true
+		return roleAnchorProject, create.GetProjectId(), true
 	default:
 		return "", "", false
 	}

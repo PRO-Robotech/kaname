@@ -70,7 +70,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -174,9 +173,10 @@ func OwnDoorProtoPackages() []string {
 // значило всё — он несёт `required_relation: viewer` и
 // `scope_extractor{project, scope_id}`, поэтому названный вызывающий доходил до
 // вопроса об объекте. Объекта у ЭТОГО вопроса нет: `scope_id` контракт объявляет
-// НЕОБЯЗАТЕЛЬНЫМ дословно («Optional scope id for authz of the batch as a whole.
-// When set, the gateway gates the entire batch on this scope's
-// `iam.authorize.batchCheck` permission instead of per-item»), и не заполняет его
+// НЕОБЯЗАТЕЛЬНЫМ (комментарий поля, `proto/kaname/cloud/iam/v1/authorize_service.proto`:
+// необязательная область для авторизации пакета целиком; заданная, она заставляет
+// край судить весь пакет правом `iam.authorize.batchCheck` на этой области вместо
+// поэлементной проверки), и не заполняет его
 // ни один вызывающий в дереве — предикаты: `git grep -n 'ScopeId' -- pkg/listnarrow`
 // → пусто, `git grep -n 'ScopeId:' -- . | grep -v _test` → среди попаданий нет ни
 // одного `BatchAuthorizeCheckRequest`. Выведенный извлекатель читает поле как
@@ -308,7 +308,7 @@ func NewOwnDoor(opts OwnDoorOptions) (*OwnDoor, error) {
 		Logger:              logger,
 		CheckTimeout:        opts.CheckTimeout,
 		DenyRateLimitPerSec: opts.DenyRateLimitPerSec,
-	}), bypass: bypass}, nil
+	}), bypass: bypass, full: full}, nil
 }
 
 // OwnDoor — собственная дверь iam вместе с поправкой на вопросы о правах.
@@ -324,6 +324,11 @@ type OwnDoor struct {
 	// раз: сравнение по срезу на каждом запросе было бы линейным поиском на
 	// горячем пути.
 	bypass map[string]authz.ObjectExtractor
+	// full — карта, которую спрашивает звено (с якорем роли). Её же читает
+	// звено формы (`FormUnary`): вид и идентификатор, о которых судит форма,
+	// обязаны быть ровно теми, о которых дверь спросила бы модель секундой
+	// позже.
+	full authz.RPCMap
 }
 
 // callerNamed — назван ли вызывающий арендатором.
@@ -354,7 +359,8 @@ func callerNamed(ctx context.Context) bool {
 //     Отвечаем «область названа», чтобы полоса `Check` осталась ровно той же;
 //   - извлечение отказало — мы НЕ УСТАНОВИЛИ, что области нет. Дверь остаётся:
 //     неполученный ответ не есть «спрашивать не о чем»;
-//   - идентификатор пуст — области нет, и вопрос решает его решатель.
+//   - идентификатор отсутствует (`objectIDAbsent`) — области нет, и вопрос
+//     решает его решатель.
 func questionNamesNoScope(extract authz.ObjectExtractor, req any) bool {
 	if extract == nil {
 		return false
@@ -363,7 +369,24 @@ func questionNamesNoScope(extract authz.ObjectExtractor, req any) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(id) == ""
+	return objectIDAbsent(id)
+}
+
+// objectIDAbsent — извлечённый идентификатор объекта ОТСУТСТВУЕТ.
+//
+// Определение одно на пакет: им судят и дверь (`questionNamesNoScope` —
+// уходит ли вопрос своему решателю), и звено формы (`FormUnary` — есть ли что
+// судить). Два определения разошлись бы ровно на граничном входе: звено
+// отвергло бы строку как неверную форму, а дверь сочла бы ту же строку
+// отсутствием и отдала вопрос обработчику, — и шапка звена солгала бы о его
+// месте в цепочке. Паритет держит проба
+// `TestOwnDoor_FormLinkAndDoorShareOneDefinitionOfAbsence`.
+//
+// Отсутствие — только пустая строка: извлекатель отдаёт поле сырым, а строка
+// из одних пробелов — не отсутствие, а неверная форма: идентификатором она не
+// бывает ни при каком состоянии базы.
+func objectIDAbsent(id string) bool {
+	return id == ""
 }
 
 // questionGoesToItsOwnDecider — вопрос о правах решает `caller_authority.go`, а

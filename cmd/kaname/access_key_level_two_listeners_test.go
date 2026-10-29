@@ -74,12 +74,12 @@ func (s *accessKeyReached) BeginRegistration(context.Context, *iamv1.BeginAccess
 
 func (s *accessKeyReached) FinishRegistration(context.Context, *iamv1.FinishAccessKeyRegistrationRequest) (*operationpb.Operation, error) {
 	s.reached.Store(true)
-	return &operationpb.Operation{Id: "iop-kn747-probe", Done: true}, nil
+	return &operationpb.Operation{Id: "iop0000000kn747probe", Done: true}, nil
 }
 
 func (s *accessKeyReached) Revoke(context.Context, *iamv1.RevokeAccessKeyRequest) (*operationpb.Operation, error) {
 	s.reached.Store(true)
-	return &operationpb.Operation{Id: "iop-kn747-probe", Done: true}, nil
+	return &operationpb.Operation{Id: "iop0000000kn747probe", Done: true}, nil
 }
 
 // servePublicAccessKeys — публичный слушатель по mTLS с цепочкой боевого
@@ -114,15 +114,15 @@ func TestKN747_PublicListenerHoldsLevelTwoOnKeyVerbsCalledByTheEdge(t *testing.T
 		call func(ctx context.Context, opts ...grpc.CallOption) error
 	}{
 		{"kaname.cloud.iam.v1.AccessKeyService/BeginRegistration", func(ctx context.Context, opts ...grpc.CallOption) error {
-			_, err := client.BeginRegistration(ctx, &iamv1.BeginAccessKeyRegistrationRequest{UserId: "usr-kn747"}, opts...)
+			_, err := client.BeginRegistration(ctx, &iamv1.BeginAccessKeyRegistrationRequest{UserId: "usr000000000000kn747"}, opts...)
 			return err
 		}},
 		{"kaname.cloud.iam.v1.AccessKeyService/FinishRegistration", func(ctx context.Context, opts ...grpc.CallOption) error {
-			_, err := client.FinishRegistration(ctx, &iamv1.FinishAccessKeyRegistrationRequest{UserId: "usr-kn747"}, opts...)
+			_, err := client.FinishRegistration(ctx, &iamv1.FinishAccessKeyRegistrationRequest{UserId: "usr000000000000kn747"}, opts...)
 			return err
 		}},
 		{"kaname.cloud.iam.v1.AccessKeyService/Revoke", func(ctx context.Context, opts ...grpc.CallOption) error {
-			_, err := client.Revoke(ctx, &iamv1.RevokeAccessKeyRequest{UserId: "usr-kn747"}, opts...)
+			_, err := client.Revoke(ctx, &iamv1.RevokeAccessKeyRequest{UserId: "usr000000000000kn747"}, opts...)
 			return err
 		}},
 	}
@@ -134,7 +134,7 @@ func TestKN747_PublicListenerHoldsLevelTwoOnKeyVerbsCalledByTheEdge(t *testing.T
 				md := metadata.Pairs(
 					grpcsrv.MDKeyTokenACR, acr,
 					grpcsrv.MDKeyPrincipalType, "user",
-					grpcsrv.MDKeyPrincipalID, "usr-kn747",
+					grpcsrv.MDKeyPrincipalID, "usr000000000000kn747",
 				)
 				ctx, cancel := context.WithTimeout(metadata.NewOutgoingContext(context.Background(), md), 5*time.Second)
 				defer cancel()
@@ -167,7 +167,7 @@ func TestKN747_InternalListenerDoesNotServeKeyVerbs(t *testing.T) {
 	intConn := serveBufconn(t, func(s *grpc.Server) {
 		registerInternalServices(s, svcs, nil, config.Config{}, nil)
 	})
-	_, err := iamv1.NewAccessKeyServiceClient(intConn).BeginRegistration(ctx, &iamv1.BeginAccessKeyRegistrationRequest{UserId: "usr-kn747"})
+	_, err := iamv1.NewAccessKeyServiceClient(intConn).BeginRegistration(ctx, &iamv1.BeginAccessKeyRegistrationRequest{UserId: "usr000000000000kn747"})
 	require.Equal(t, codes.Unimplemented, status.Code(err),
 		"внутренний слушатель обслуживает глаголы ключа — путь входа, о котором пол не знает")
 
@@ -176,7 +176,7 @@ func TestKN747_InternalListenerDoesNotServeKeyVerbs(t *testing.T) {
 	pubConn := serveBufconn(t, func(s *grpc.Server) {
 		registerPublicServices(s, svcs, nil)
 	})
-	_, err = iamv1.NewAccessKeyServiceClient(pubConn).BeginRegistration(ctx, &iamv1.BeginAccessKeyRegistrationRequest{UserId: "usr-kn747"})
+	_, err = iamv1.NewAccessKeyServiceClient(pubConn).BeginRegistration(ctx, &iamv1.BeginAccessKeyRegistrationRequest{UserId: "usr000000000000kn747"})
 	require.NotEqual(t, codes.Unimplemented, status.Code(err), "публичный слушатель не обслуживает глаголы ключа: %v", err)
 	require.True(t, strings.TrimSpace(status.Convert(err).Message()) != "", "отказ обработчика назван")
 }
