@@ -210,16 +210,26 @@ event_body: "acceptance-reviewer · APPROVED · sha256 ab4986a47477a426badfa2dcb
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#543
-  status: not_performed
-  published: false
+  status: performed
+  published: true
+  database_id: 6486185875
+  node_id: IC_kwDOUO26pM8AAAABgptXkw
+  url: https://github.com/PRO-Robotech/kaname/issues/543#issuecomment-6486185875
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6486185875
+  actor: pointpu
   role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: "2026-10-29T02:26:21Z"
   verdict: APPROVED
   subject_sha256: ab4986a47477a426badfa2dcb0f223218dea4b77d83ab481819dd1ce36ff2130
+  subject_revision_commit: f742bef04fcfd732ec6c5d22e1bb10749facdb3a
+  subject_revision_on_origin: false
   body: acceptance-reviewer · APPROVED · sha256 ab4986a47477a426badfa2dcb0f223218dea4b77d83ab481819dd1ce36ff2130
-  publication_mode: 'git-operator: gh api POST repos/PRO-Robotech/kaname/issues/543/comments'
+  body_sha256: 394c3e26d237b43d270d78c095783f01069c1df7c715d682d5fea399101ed5de
+  publication_mode: 'git-operator: gh issue comment 543 -R PRO-Robotech/kaname'
   publication_note: >-
-    Курьер публикует событие и тем же заходом приводит этот блок к факту: status performed,
-    адрес, actor, created_at.
+    Ревизия документа закоммичена локально в ветку 543 и на origin ещё не отправлена; тело
+    события несёт отпечаток содержимого, сверяемый по файлу на любой ревизии.
 
 attribution:
   reviewer_kind: claude_agent
