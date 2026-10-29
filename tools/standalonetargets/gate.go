@@ -354,16 +354,34 @@ func RunTargets(dir string, targets []Target, run func(dir, target string) (int,
 			continue
 		}
 		if IsUnmetPremise(output) {
-			unmet = append(unmet, Unmet{Target: t, Code: code, Tail: Tail(output, 25)})
+			unmet = append(unmet, Unmet{Target: t, Code: code, Tail: Tail(output, targetTailLines)})
 			continue
 		}
+		probes := IsProbeFailure(output)
+		tail := targetTailLines
+		if probes {
+			tail = probeTailLines
+		}
 		out = append(out, Finding{
-			Target: t, Code: code, Tail: Tail(output, 25),
-			Probes: IsProbeFailure(output),
+			Target: t, Code: code, Tail: Tail(output, tail),
+			Probes: probes,
 		})
 	}
 	return out, unmet, nil
 }
+
+// targetTailLines — хвост вывода цели в находке: текст отказа рецепта стоит у
+// конца вывода, и двадцати пяти строк ему хватает.
+const targetTailLines = 25
+
+// probeTailLines — хвост вывода, когда цель ДОШЛА до конца и упали исполненные
+// ею пробы. Перечень печатает `scripts/test-standalone.sh` — имена упавших и под
+// каждой текст её отказа (задача #618: имени без текста недостаточно, диагноз
+// ставился гипотезой), — и предел перечня задаёт он сам: до 40 имён и текст у
+// первых пяти, до 12 строк каждый, то есть от заголовка перечня до конца вывода
+// (с меткой и строкой `make`) не больше 105 строк. Хвост длиннее предела рецепта,
+// чтобы не резать текст ПЕРВОЙ упавшей — он стоит дальше всех от конца.
+const probeTailLines = 150
 
 // Tail — последние n строк вывода, с отступом. Находка обязана нести ТЕКСТ
 // отказа цели, а не только её имя: имя посылает читателя искать причину, текст
