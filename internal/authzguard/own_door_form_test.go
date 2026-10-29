@@ -145,3 +145,55 @@ func TestFormUnary_RefusesToAssembleWithoutAJudgeForEveryKind(t *testing.T) {
 		t.Fatalf("близнец со всеми видами не собрался: %v", err)
 	}
 }
+
+// Пробельная область у вопроса о правах — неверная форма, как у любого другого
+// глагола класса: названный вызывающий получает отказ судьи, обработчик не
+// позван. Близнец — пустая `scope_id` той же цепочки — молчит (кейс «вопрос о
+// правах без области» выше): пустое поле есть отсутствие, и вопрос уходит
+// своему решателю.
+func TestFormUnary_BlankScopeOfABatchQuestionIsMalformedNotAbsent(t *testing.T) {
+	judge := &formJudge{known: allKinds()}
+	hit := false
+	_, err := formLink(t, judge)(tenantCtx("usr00000000000000001"), &iamv1.BatchAuthorizeCheckRequest{ScopeId: "  "},
+		&grpc.UnaryServerInfo{FullMethod: batchQuestion}, reached(&hit))
+	if status.Code(err) != codes.InvalidArgument || status.Convert(err).Message() != "invalid project id '  '" {
+		t.Fatalf("ответ %v на пробельную область вопроса о правах, ожидался InvalidArgument с текстом судьи "+
+			"(судья спрошен %v)", err, judge.judged)
+	}
+	if hit {
+		t.Fatal("обработчик позван после отказа формы на пробельной области")
+	}
+}
+
+// Звено формы и дверь одного пакета понимают «значение отсутствует» ОДИНАКОВО.
+//
+// Проба судит РАЗНИЦУ двух потребителей, а не каждого порознь: на одном и том
+// же входе звено считает идентификатор отсутствующим (пропускает, судью не
+// спросив) ровно тогда, когда дверь отдаёт вопрос его решателю (обработчик
+// достигнут при пустой модели прав). Законные близнецы — пустая строка (оба
+// «отсутствует») и годная форма (оба «назван»); входы с пробелами — предмет.
+func TestOwnDoor_FormLinkAndDoorShareOneDefinitionOfAbsence(t *testing.T) {
+	inputs := []string{"", "  ", "\t", " prj00000000000notfnd", "prj00000000000notfnd"}
+	for _, scope := range inputs {
+		req := &iamv1.BatchAuthorizeCheckRequest{ScopeId: scope}
+
+		judge := &formJudge{known: allKinds()}
+		formHit := false
+		_, _ = formLink(t, judge)(tenantCtx(ownerUser), req, &grpc.UnaryServerInfo{FullMethod: batchQuestion},
+			reached(&formHit))
+		formAbsent := formHit && len(judge.judged) == 0
+
+		store := &grantStore{allow: map[string]bool{}}
+		doorHit := false
+		_, _ = doorUnder(t, store)(tenantCtx(ownerUser), req, &grpc.UnaryServerInfo{FullMethod: batchQuestion},
+			reached(&doorHit))
+		doorAbsent := doorHit && len(store.asked) == 0
+
+		if formAbsent != doorAbsent {
+			t.Errorf("scope_id %q: звено формы считает область отсутствующей=%v, дверь=%v — "+
+				"два определения отсутствия в одном пакете (судья спрошен %v, модель спрошена %v)",
+				scope, formAbsent, doorAbsent, judge.judged, store.asked)
+		}
+	}
+	t.Logf("осмотрено входов: %d", len(inputs))
+}

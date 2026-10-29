@@ -914,7 +914,10 @@ func TestIAM_PNE_1_21_A_ClassCrossCheckNamesANarrowedVerb(t *testing.T) {
 // цепочка доходит до слушателя» на синтетическом корне: законная проводка
 // молчит, выброшенный и подменённый результат названы.
 func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
-	const head = "package main\nfunc serve() {\n"
+	const (
+		head         = "package main\nfunc serve() {\n"
+		lawfulSpread = "srv(grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...))\n"
+	)
 	for name, tc := range map[string]struct {
 		body string
 		want int
@@ -923,6 +926,17 @@ func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
 		"однократная выброшена": {"_, s, err := chain()\n_ = err\nsrv(grpc.ChainUnaryInterceptor(other...), grpc.ChainStreamInterceptor(s...))\n", 1},
 		"обе подменены":         {"u, s, err := chain()\n_, _, _ = u, s, err\nsrv(grpc.ChainUnaryInterceptor(other...), grpc.ChainStreamInterceptor(other...))\n", 2},
 		"результат не присвоен": {"chain()\n", 1},
+		// Переприсваивание перечня после сборки — один факт против законной
+		// проводки: раскрыт тот же идентификатор, но уже не собранный сборщиком.
+		"однократная переприсвоена": {"u, s, err := chain()\n_ = err\nu = other\n" + lawfulSpread, 1},
+		"потоковая дописана":        {"u, s, err := chain()\n_ = err\ns = append(s, extra)\n" + lawfulSpread, 1},
+		"элемент подменён":          {"u, s, err := chain()\n_ = err\nu[0] = extra\n" + lawfulSpread, 1},
+		"многозначное присваивание": {"u, s, err := chain()\n_ = err\nx, s := 1, other\n_ = x\n" + lawfulSpread, 1},
+		"перебором по перечню":      {"u, s, err := chain()\n_ = err\nfor _, u = range lists {\n}\n" + lawfulSpread, 1},
+		"затенена во вложенном блоке": {"u, s, err := chain()\n_ = err\nif ok {\nvar u = other\n" +
+			lawfulSpread + "}\n", 1},
+		"обе переприсвоены":           {"u, s, err := chain()\n_ = err\nu, s = other, other\n" + lawfulSpread, 2},
+		"соседняя переменная — молчит": {"u, s, err := chain()\nerr = nil\n_ = err\n" + lawfulSpread, 0},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, err := parser.ParseFile(token.NewFileSet(), "root.go", head+tc.body+"}\n", 0)
