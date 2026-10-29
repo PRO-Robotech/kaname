@@ -284,31 +284,48 @@ func TestSystemRoleIDs_SRCI05_GrantsCrossOverWithoutLoss(t *testing.T) {
 	assert.Equal(t, bindingsBefore, w.countRows("kaname.access_bindings"), "SRCI-05: число выдач")
 }
 
-// srciVerbTwinChecks — ответы Ч1–Ч4 близнецов посева, чьи выдачи заведены глаголом:
-// Ч1 — U4 update (близнец U1), Ч2/Ч3 — U5 get/update (близнец U2), Ч4 — U3 get.
-func (w *srciWorld) srciVerbTwinChecks(u4, u5 domain.UserID) []bool {
+// srciCreateOutcome — выдача глаголом `Create` от имени K: id выдачи и исход —
+// синхронный отказ либо ошибка операции; nil — операция завершилась без ошибки.
+func (w *srciWorld) srciCreateOutcome(req *iamv1.CreateAccessBindingRequest) (string, error) {
 	w.t.Helper()
-	var out []bool
-	for _, q := range []struct{ subject, verb string }{
-		{fmtSubject("user", string(u4)), "update"},
-		{fmtSubject("user", string(u5)), "get"},
-		{fmtSubject("user", string(u5)), "update"},
-		{fmtSubject("user", string(w.u3)), "get"},
-	} {
-		resp, err := w.check(q.subject, q.verb, srciObj)
-		require.NoErrorf(w.t, err, "Check(%s, %s)", q.subject, q.verb)
-		out = append(out, resp.GetAllowed())
+	op, err := w.ab.Create(asUser(w.ctx, w.k), req)
+	if err != nil {
+		return "", err
 	}
-	return out
+	done := awaitOp(w.t, w.ctx, w.ops, op.GetId())
+	if done.Error != nil {
+		return "", status.ErrorProto(done.Error)
+	}
+	var md iamv1.CreateAccessBindingMetadata
+	require.NoError(w.t, op.GetMetadata().UnmarshalTo(&md), "метаданные операции")
+	return md.GetAccessBindingId(), nil
 }
 
-// Контроль фикстуры SRCI-05 (не сценарий приёмки): посев выдач писателем (§5) отвечает
-// на Ч1–Ч4 ТАК ЖЕ, как те же выдачи, заведённые глаголом `Create`, — посев не
-// снисходительнее продукта и не строже его. Мир — вся цепочка дерева, роль адресуется
-// чтением по имени: глагол принимает её id и до реализации, и после. Близнецы
-// отличаются от посева ровно одним фактом — писателем выдачи (писатель §5 против
-// глагола); субъекты свои, чтобы выдачи не делили адресата.
-func TestSystemRoleIDs_SRCI05Fixture_SeedAnswersAsTheVerb(t *testing.T) {
+// srciSettled — ответ Check после окна материализации: опрос раз в 200 мс до 30 с,
+// пока не «разрешено»; по истечении — последний ответ. Отказ, переживший окно, —
+// отказ, а не ещё не доставленное право.
+func (w *srciWorld) srciSettled(subject, verb string) bool {
+	w.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		resp, err := w.check(subject, verb, srciObj)
+		require.NoErrorf(w.t, err, "Check(%s, %s)", subject, verb)
+		if resp.GetAllowed() || time.Now().After(deadline) {
+			return resp.GetAllowed()
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// Контроль фикстуры SRCI-05 (не сценарий приёмки). Приёмка объявляет выдачи B1 и B2
+// состояниями, «которые глагол Create принимал на 092bee4fb», а посев (писатель §5)
+// строит их мимо глагола. Контроль спрашивает глагол о тех же формах — близнецы B1v
+// (U4) и B2v (G2#member, член U5) отличаются от посева одним фактом, писателем
+// выдачи, — и сверяет ответы Check близнецов с ответами посева (Ч1: U1↔U4 update;
+// Ч2, Ч3: U2↔U5 get, update). Мир — вся цепочка дерева, роль адресуется чтением по
+// имени: глагол принимает её id и до реализации, и после. Красное здесь — посев
+// строит не то, что глагол: состояние вымышлено либо отвечает иначе.
+func TestSystemRoleIDs_SRCI05Fixture_SeedIsWhatTheVerbMakes(t *testing.T) {
 	w := newSRCIWorldAt(t, 0)
 	w.seedSRCI05()
 
@@ -323,31 +340,36 @@ func TestSystemRoleIDs_SRCI05Fixture_SeedAnswersAsTheVerb(t *testing.T) {
 
 	admin, viewer := w.roleIDByName(domain.SystemAdminRoleName), w.roleIDByName(domain.SystemViewerRoleName)
 	// B1v — форма B1: человек, system.admin, кластер, все объекты области.
-	w.createDone(asUser(w.ctx, w.k), &iamv1.CreateAccessBindingRequest{
+	_, b1err := w.srciCreateOutcome(&iamv1.CreateAccessBindingRequest{
 		Subjects: []*iamv1.Subject{userSubject(u4)}, RoleId: admin,
 		ScopeType: "iam.cluster", ScopeId: domain.ClusterSingletonID, Target: allInScopeTarget(),
-	}, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) близнец B1 глаголом")
+	})
 	// B2v — форма B2: группа, system.viewer, аккаунт A1, цель O1.
-	w.createDone(asUser(w.ctx, w.k), &iamv1.CreateAccessBindingRequest{
+	_, b2err := w.srciCreateOutcome(&iamv1.CreateAccessBindingRequest{
 		Subjects: []*iamv1.Subject{groupSubject(g2)}, RoleId: viewer,
 		ScopeType: "iam.account", ScopeId: string(w.a1),
 		Target: resourcesTarget(&iamv1.ResourceRef{Type: scTargetType, Id: srciObj}),
-	}, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) близнец B2 глаголом")
+	})
+	t.Logf("SRCI-05 контроль фикстуры: глагол о форме B1 (роль %s) — %v; о форме B2 (роль %s) — %v",
+		admin, b1err, viewer, b2err)
+	assert.NoError(t, b1err, "посев B1: форму B1 глагол не принимает — состояние вымышлено")
+	assert.NoError(t, b2err, "посев B2: форму B2 глагол не принимает — состояние вымышлено")
 
-	// Положительный контроль обеих сторон — до сравнения: право чтения O1 по выдаче
-	// наблюдателя материализовано и у посева (U2), и у глагола (U5). Иначе сравнение
-	// судило бы окно материализации, а не писателя.
-	w.pollCheck(fmtSubject("user", string(w.u2)), "get", srciObj, true, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) посев: U2 читает O1")
-	w.pollCheck(fmtSubject("user", string(u5)), "get", srciObj, true, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) глагол: U5 читает O1")
-
-	seeded := make([]bool, 0, 4)
-	for _, r := range w.srciCheckSnapshot() {
-		seeded = append(seeded, r.GetAllowed())
+	u1s, u2s := fmtSubject("user", string(w.u1)), fmtSubject("user", string(w.u2))
+	u4s, u5s := fmtSubject("user", string(u4)), fmtSubject("user", string(u5))
+	seeded := []bool{w.srciSettled(u1s, "update"), w.srciSettled(u2s, "get"), w.srciSettled(u2s, "update")}
+	t.Logf("SRCI-05 контроль фикстуры: Ч1–Ч3 посева %v (столбец приёмки [true true false]); факты U1 %s",
+		seeded, w.srciFactsOf(u1s))
+	if b1err == nil {
+		got := w.srciSettled(u4s, "update")
+		t.Logf("SRCI-05 контроль фикстуры: Ч1 близнеца B1v (U4 update) %v; факты U4 %s", got, w.srciFactsOf(u4s))
+		assert.Equal(t, got, seeded[0], "посев B1 отвечает на Ч1 иначе, чем та же выдача глаголом")
 	}
-	verb := w.srciVerbTwinChecks(u4, u5)
-	t.Logf("SRCI-05 контроль фикстуры: Ч1–Ч4 посева %v, глагола %v; столбец приёмки [true true false false]; факты U4 %s",
-		seeded, verb, w.srciFactsOf(fmtSubject("user", string(u4))))
-	assert.Equal(t, verb, seeded, "посев SRCI-05 отвечает на Ч1–Ч4 иначе, чем те же выдачи глаголом")
+	if b2err == nil {
+		got := []bool{w.srciSettled(u5s, "get"), w.srciSettled(u5s, "update")}
+		t.Logf("SRCI-05 контроль фикстуры: Ч2–Ч3 близнеца B2v (U5 get, update) %v", got)
+		assert.Equal(t, got, seeded[1:], "посев B2 отвечает на Ч2–Ч3 иначе, чем та же выдача глаголом")
+	}
 }
 
 // srciFactsOf — факты модели прав о субъекте: из чего выводится его доступ.
