@@ -88,6 +88,13 @@ Coverage:
                                      ИНАЧЕ — скрытие существования включено только на
                                      чтении, поэтому неотличимость приходится утверждать
                                      на константе, которую производит сама правка
+  IAM-OWNREST-LSP-04-NEGATIVE-PAGE-SIZE      — ListSubjects pageSize -1 → 400, нарушение поля page_size
+  IAM-OWNREST-LSP-05-ZERO-PAGE-SIZE          — pageSize 0 принят (близнец LSP-04)
+  IAM-OWNREST-LSP-06-OVER-MAX-PAGE-SIZE      — pageSize 1001 → 400, нарушение поля, прежнего текста нет
+  IAM-OWNREST-LSP-07-MAX-PAGE-SIZE           — pageSize 1000 принят (близнец LSP-06)
+  IAM-OWNREST-LSP-08-FORMAT-BEFORE-AUTHORITY — формат судится раньше полномочий: чужой аккаунт,
+                                               pageSize -1 → 400, а не 403
+  IAM-OWNREST-LSP-09-FOREIGN-DENIED          — чужой аккаунт, pageSize 0 → 403 (близнец LSP-08)
 
 Перечень выше СХОДИТСЯ с тем, что модуль объявляет, — но ДЕРЖИТСЯ ЭТО ВНИМАНИЕМ,
 и здесь сказано прямо, потому что прежняя редакция утверждала обратное. Гейт
@@ -1213,4 +1220,163 @@ CASES.append(Case(
             ],
         ),
     ],
+))
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# РАЗМЕР СТРАНИЦЫ ListSubjects — ПО ПРАВИЛУ ПЛАТФОРМЫ (kaname#615, сценарии
+# LSP-04…09 приёмки `docs/engineering/acceptance/list-subjects-page-size-is-the-platform-one.md`,
+# отпечаток e6c4bc07…262756c95).
+#
+# Глагол — `POST /iam/v1/authorize:listSubjects`, тело одно на все кейсы, кейсы
+# различаются аккаунтом и `pageSize`. У каждого отрицания назван положительный
+# близнец, отличающийся РОВНО одним фактом:
+#   LSP-04 (-1, A)  ↔ LSP-05 (0, A)      — pageSize
+#   LSP-06 (1001, A) ↔ LSP-07 (1000, A)  — pageSize
+#   LSP-08 (-1, B)  ↔ LSP-09 (0, B)      — pageSize; LSP-08 ↔ LSP-04 — аккаунт
+#   LSP-09 (0, B)   ↔ LSP-05 (0, A)      — аккаунт (условие ревью M3)
+#
+# Вызывающий `jwtAccountAdminA` администрирует `{{accountAId}}` (посев
+# `seed_own_stand.py`, встроенная роль admin на iam.account) и ролей на
+# `{{accountBId}}` не имеет. Внешний перехватчик глагол пропускает без вопроса
+# об объекте: каталог несёт для него `required_relation ""` и
+# `scope_filtered true` (условие ревью M2), решает сама служба —
+# администратор облака либо `admin` на названном ресурсе.
+#
+# Статус — таблица края по умолчанию: INVALID_ARGUMENT → 400,
+# PERMISSION_DENIED → 403.
+# ───────────────────────────────────────────────────────────────────────────
+_LSP_PATH = "/iam/v1/authorize:listSubjects"
+_LSP_VIOLATION = "page_size must be in [0..1000] (0 means default)"
+_LSP_OLD_REFUSAL = "Illegal argument page_size 1001 > 1000"
+
+
+def _lsp_body(account_var, page_size):
+    return {"resource": {"type": "account", "id": "{{" + account_var + "}}"},
+            "action": "iam.account.get", "pageSize": page_size}
+
+
+def _lsp_field_refusal(label):
+    """Отказ формата: пара «400 + code 3», текст `invalid argument` и ровно одно
+    нарушение поля `page_size` с текстом фундамента дословно."""
+    return [
+        *assert_status(400),
+        "const j = pm.response.json();",
+        f"pm.test({js_str(label + ': grpc code 3 (INVALID_ARGUMENT)')}, () => "
+        "pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
+        f"pm.test({js_str(label + ': message — invalid argument')}, () => "
+        "pm.expect(j.message, JSON.stringify(j)).to.eql('invalid argument'));",
+        f"pm.test({js_str(label + ': ровно одно нарушение поля page_size с текстом фундамента')}, () => {{",
+        "  const det = (j.details || []).filter(d => (d['@type'] || '').endsWith('google.rpc.BadRequest'));",
+        "  pm.expect(det.length, JSON.stringify(j)).to.eql(1);",
+        "  const fv = det[0].fieldViolations || [];",
+        "  pm.expect(fv.length, JSON.stringify(j)).to.eql(1);",
+        "  pm.expect(fv[0].field, JSON.stringify(j)).to.eql('page_size');",
+        f"  pm.expect(fv[0].description, JSON.stringify(j)).to.eql({js_str(_LSP_VIOLATION)});",
+        "});",
+    ]
+
+
+def _lsp_served(label):
+    """Обслужено: 200 и `subjects` — непустой массив (приёмка: держателей
+    `viewer` на аккаунте A не меньше одного)."""
+    return [
+        *assert_status(200),
+        "const j = pm.response.json();",
+        f"pm.test({js_str(label + ': subjects — непустой массив держателей')}, () => {{",
+        "  pm.expect(j.subjects, JSON.stringify(j)).to.be.an('array');",
+        "  pm.expect(j.subjects.length, JSON.stringify(j)).to.be.at.least(1);",
+        "});",
+    ]
+
+
+def _lsp_step(name, account_var, page_size, test_script):
+    return Step(
+        name=name,
+        method="POST",
+        path=_LSP_PATH,
+        body=_lsp_body(account_var, page_size),
+        pre_script=_own(_LSP_PATH),
+        # Туннель, а не сеть посадки: адрес фронта проброшен и достигается как
+        # 127.0.0.1, а серверный лист выписан внутренним УЦ на ИМЯ Service. На
+        # боевой посадке фронт под TLS (values.dev-prod: publicRest/internalRest
+        # true), и без этого КАЖДЫЙ запрос набора умирал бы на рукопожатии —
+        # то есть «без ответа», а не вердиктом о предмете. Предмет кейсов —
+        # КАКИЕ ПУТИ обслуживает фронт, а не цепочка доверия туннеля; посадку
+        # транспорта утверждает deploy/scripts/assert-production-posture.sh.
+        insecure_tls=True,
+        auth="jwtAccountAdminA",
+        test_script=test_script,
+    )
+
+
+CASES.append(Case(
+    id="IAM-OWNREST-LSP-04-NEGATIVE-PAGE-SIZE",
+    title="LSP-04: ListSubjects с pageSize -1 → 400, INVALID_ARGUMENT с именем поля page_size",
+    classes=["VAL", "BVA", "NEG", "PAGE"],
+    priority="P1",
+    steps=[_lsp_step("lsp04-list-subjects-page-size-negative", "accountAId", -1,
+                     _lsp_field_refusal("LSP-04"))],
+))
+
+CASES.append(Case(
+    id="IAM-OWNREST-LSP-05-ZERO-PAGE-SIZE",
+    title="LSP-05: ListSubjects с pageSize 0 принят (близнец LSP-04, отличие — pageSize)",
+    classes=["VAL", "BVA", "PAGE"],
+    priority="P1",
+    steps=[_lsp_step("lsp05-list-subjects-page-size-zero", "accountAId", 0,
+                     _lsp_served("LSP-05"))],
+))
+
+CASES.append(Case(
+    id="IAM-OWNREST-LSP-06-OVER-MAX-PAGE-SIZE",
+    title="LSP-06: ListSubjects с pageSize 1001 → 400, INVALID_ARGUMENT с именем поля; прежний собственный текст не производится",
+    classes=["VAL", "BVA", "NEG", "PAGE"],
+    priority="P1",
+    steps=[_lsp_step("lsp06-list-subjects-page-size-over-max", "accountAId", 1001, [
+        *_lsp_field_refusal("LSP-06"),
+        # Отрицание стоит в паре с наблюдением ВНУТРИ того же утверждения: на
+        # поверхности, где всякий ответ — один отказ в правах, «прежнего текста
+        # нет» истинно тривиально.
+        "pm.test('LSP-06: прежний собственный текст службы не производится', () => {",
+        _CONTROL_OPEN,
+        "  pm.expect(j.code, 'это не отказ формата — отсутствие текста ни о чём не свидетельствует')"
+        ".to.eql(3);",
+        _CONTROL_CLOSE,
+        f"  pm.expect(pm.response.text()).to.not.include({js_str(_LSP_OLD_REFUSAL)});",
+        "});",
+    ])],
+))
+
+CASES.append(Case(
+    id="IAM-OWNREST-LSP-07-MAX-PAGE-SIZE",
+    title="LSP-07: ListSubjects с pageSize 1000 принят (близнец LSP-06, отличие — pageSize)",
+    classes=["VAL", "BVA", "PAGE"],
+    priority="P1",
+    steps=[_lsp_step("lsp07-list-subjects-page-size-max", "accountAId", 1000,
+                     _lsp_served("LSP-07"))],
+))
+
+CASES.append(Case(
+    id="IAM-OWNREST-LSP-08-FORMAT-BEFORE-AUTHORITY",
+    title="LSP-08: формат страницы судится раньше полномочий — pageSize -1 на чужом аккаунте → 400 с именем поля, а не 403",
+    classes=["VAL", "NEG", "AUTHZ", "PAGE"],
+    priority="P1",
+    steps=[_lsp_step("lsp08-list-subjects-page-size-negative-foreign", "accountBId", -1,
+                     _lsp_field_refusal("LSP-08"))],
+))
+
+CASES.append(Case(
+    id="IAM-OWNREST-LSP-09-FOREIGN-DENIED",
+    title="LSP-09: тот же вызывающий с допустимым pageSize на чужом аккаунте → 403 (близнецы LSP-08 — pageSize, LSP-05 — аккаунт)",
+    classes=["NEG", "AUTHZ"],
+    priority="P1",
+    steps=[_lsp_step("lsp09-list-subjects-foreign-legal-page-size", "accountBId", 0, [
+        *assert_status(403),
+        "const j = pm.response.json();",
+        "pm.test('LSP-09: grpc code 7 (PERMISSION_DENIED)', () =>",
+        "  pm.expect(j.code, JSON.stringify(j)).to.eql(7));",
+        "pm.test('LSP-09: message — permission denied', () =>",
+        "  pm.expect(j.message, JSON.stringify(j)).to.eql('permission denied'));",
+    ])],
 ))
