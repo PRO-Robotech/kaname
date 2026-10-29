@@ -82,9 +82,27 @@ MARK = "УСЛОВИЕ НЕ СОЗДАНО"
 # строк хода (`=== RUN`, `--- FAIL`). Предел — текст у первых TEXT_TESTS упавших,
 # до TEXT_LINES последних строк у каждой: на их пределе стоит хвост находки гейта
 # (`tools/standalonetargets`, probeTailLines), и сдвигать один без другого нельзя.
+#
+# ПАНИКА — законная форма отказа, и у неё текст стоит В НАЧАЛЕ, а не в конце:
+# за сообщением `panic: …` идёт трасса горутин, и последние строки — это кадры
+# стека, а сообщение отрезано (задача #618). Поэтому у пробы, упавшей паникой,
+# текст берётся ОТ первой строки `panic:` — сообщение, многострочное тоже, и
+# начало трассы, — а не хвостом.
+#
+# Слова метки третьего исхода в тексте упавшей пробы законны и здесь не
+# вырезаются: красное от них красным быть не перестаёт, и решает это гейт —
+# упавшая проба для него вердикт раньше любой метки (`tools/standalonetargets`,
+# RunTargets).
 TEXT_TESTS = 5
 TEXT_LINES = 12
 SERVICE = ('=== ', '--- FAIL', '--- PASS', '--- SKIP')
+PANIC = 'panic:'
+
+def refusal(body):
+    for i, l in enumerate(body):
+        if l.startswith(PANIC):
+            return body[i:i+TEXT_LINES]
+    return body[-TEXT_LINES:]
 
 pkgs=collections.defaultdict(dict)
 out=collections.defaultdict(list)
@@ -129,7 +147,7 @@ if failed:
         print("    "+s)
         if s in text and shown < TEXT_TESTS:
             shown+=1
-            for l in text[s][-TEXT_LINES:]: print("      "+l)
+            for l in refusal(text[s]): print("      "+l)
     if len(failed)>40: print("    … и ещё %d" % (len(failed)-40))
     if len(text)>shown:
         print("    текст отказа показан у %d из %d упавших, несущих текст; полный — go test -json" %
