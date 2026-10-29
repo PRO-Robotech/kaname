@@ -1,0 +1,233 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/system-roles-carry-canonical-ids.md
+  sha256: ab4986a47477a426badfa2dcb0f223218dea4b77d83ab481819dd1ce36ff2130
+  revision: 3
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор, вердиктом оно не является. Вердикт выводится из этой записи
+    и внешнего события (`change-graph.md` §2). Шапку документа круг намеренно не правил.
+  base_commit: 092bee4fb3220215da255258dfa6fe0da9214f34
+  content_commit: none
+  content_note: >-
+    Файл изменён в рабочей копии и не закоммичен (`git status --short` → ` M`). Отпечаток снят с
+    файла рабочей копии на голове ветки 543 @ 3ca34095c.
+  branch: '543'
+  task: PRO-Robotech/kaname#543
+  related_tasks: [PRO-Robotech/kaname#1052, PRO-Robotech/kacho#2976]
+  lines: 798
+  round: 3
+  round_scope: >-
+    Правка ПОСЛЕ одобрения круга 2. Вердикт круга 2 (27295473…5877) на эту редакцию не переносится.
+    Предмет круга — только дельта к копии `<док>.27295473`: «Дано» и «Тогда» SRCI-05, формы B3
+    (SRCI-07б) и B5 (SRCI-12), перечень BR, строки §5 и §5а, Д6 в §8, шапка. Вне дельты ничего
+    не переоткрывалось (fa-b1). Это не третий круг спора по ⛔ (fa-b8): круг 2 закончился
+    одобрением, а сюда пришла новая редакция. Литерал прежних id в записи не выписан, потому что
+    запись лежит в дереве, по которому считается предикат DoD п.6.
+  predecessor_record: docs/specs/reviews/system-roles-carry-canonical-ids/27295473fda44228a6fc8426db12bacbbcc6c9a436e151a59e738ecf50375877.yaml
+  fingerprint_predicate: >-
+    sha256sum <док> → ab4986a4…2130; sha256sum <док>.27295473 → 27295473…5877 (совпал с
+    отпечатком одобренной редакции); diff -u копии и документа → 9 ханков (шапка, SRCI-05,
+    SRCI-07б, SRCI-12, §5, §5а, §8)
+  measurement_revisions: >-
+    Код читался `git show 092bee4fb:<путь>` в копии ветки 543. Голова ветки — 3ca34095c, код
+    продукта на ней равен 092bee4fb: `git diff --stat 092bee4fb HEAD -- . ':!*_test.go' ':!docs'`
+    → 4 файла, все в `tests/`.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-29T02:22:20Z'
+
+premise:
+  outcome: confirmed
+  note: >-
+    Посылки автора перемерены по коду @092bee4fb. Подтверждено: форма B2 редакции 2 недостижима;
+    Ч1 по кластерной выдаче недостижим; новые формы B1, B2, B6 проходят ворота Create.
+  commands:
+    - git show 092bee4fb:internal/apps/kaname/api/access_binding/create.go | sed -n 285,320p → порядок — delegatedGrantAuthority, :296 validateStructuralGates, :302 validateSystemClassGates, :315 validateGlobalAllSelector
+    - sed -n 60,150p structural_gates.go → :64-70 роль существует; :82 IsRoleAssignable; :108 ворота создателя; :126 ворота 3a и :138-146 ворота 3 судят только b.Target.Resources (при allInScope молчат)
+    - sed -n 97,103p internal/domain/role_scope.go → системная роль назначаема на любой области
+    - catalog/facts.go:648-655 ContainerGrants → при module=="*" или res=="*" правило пропускается, поэтому system.admin и system.viewer ролью создателя не являются (сноска ¹ верна; прямая координата — facts.go:651)
+    - sed -n 195,212p internal/domain/access_binding_target.go → CoversType сравнивает модуль точным равенством; правило `*` не покрывает vpc.network, поэтому форма B2 редакции 2 получает отказ structural_gates.go:141-143
+    - sed -n 361,385p helpers.go → ворота кластера молчат вне кластера; на кластере исключение даёт только IsClusterAdminRole (role_cluster_admin.go:51-54)
+    - sed -n 195,300p internal/domain/rule_fingerprint.go → MaterializingSelectorsInScope; scopeIsBounded — account/project; dottedTypes при module=="*" и bounded → AllMaterializableTypes, на кластере → nil
+    - feed_registry.go:50 → "vpc.network" в materializableTypes
+    - reconcile_adapter.go:405 → selectors := role.Rules.MaterializingSelectorsInScope(b.Scope)
+    - rule_verbs.go:63-89 ResolveVerbsAndTier → глагол `*` раскрывается в набор глаголов типа; delete → ярус admin; list/get → ярус viewer
+    - internal/authzmodel/fga_model.fga, type vpc_network → editor = … or admin; viewer = … or editor (Ч1 разрешён ярусом admin, Ч3 получает отказ при ярусе viewer)
+    - 0001_initial.sql:3785,3787 → правила system.admin `[{verbs:[*],module:*,resources:[*]}]`, system.viewer `[{verbs:[list,get],module:*,resources:[*]}]`
+    - tuples.go:87-93 → роль с правилами при Create даёт только указатель на родителя; mapClusterRelations (:221) — лишь на ветке роли «только с перечнем прав»
+    - reconcile/tuples.go:121 scopeSelfMember и :55-73 → на кластере член «сама область» не выводится (Д6 подтверждён чтением)
+    - seed/role_verb_reseed.go:147 listMaterializingSystemRoles, migrate_backfill.go:290-300 (`WHERE is_system = true`) → досев проекций перечисляет системные роли по признаку, а не по константе; на старой базе с новым кодом он адресует роли с прежними id
+    - serve.go:2141, :2162, :2201 и migrate_backfill.go:201, :246 → координаты шага пересчёта проекций верны
+    - grep -o '^\*\*ID:\*\* SRCI-[0-9]*' <док> | wc -l → 12; grep -c 'rol0\{9\}sys' <док> → 0; grep -n 'resources":\[' <док> → 0 (цели-перечня системной роли в документе не осталось)
+
+delta_disposition:
+  - item: SRCI-05 B2 (форма)
+    kind: CONSTRUCTIBILITY
+    outcome: fixed
+    note: >-
+      Форма `system.viewer` на iam.account/A1 с целью allInScope проходит все ворота по таблице.
+      Отказ на прежнюю цель-перечень подтверждён кодом (CoversType, точное равенство модуля).
+  - item: SRCI-05 Ч1
+    kind: CONSTRUCTIBILITY
+    outcome: fixed
+    note: >-
+      Ч1 опирается на B1 (admin на аккаунте). Путь: реконсайлер раскрывает правило `*` в
+      vpc.network на ограниченной области, ярус admin, editor ⊇ admin. U0 — владелец A1 и не
+      субъект проверок, поэтому разрешение Ч1 не может прийти от владения.
+  - item: SRCI-05 близнецы
+    kind: TWIN
+    outcome: fixed
+    note: Ч5 (U3, update) — близнец Ч1, отличие одно (субъект). Ч3 и Ч4 — близнецы Ч2 (глагол, субъект).
+  - item: SRCI-05 B6
+    kind: COVERAGE
+    outcome: accepted
+    note: >-
+      Строку кластерной выдачи миграция обязана перенести; это держат GET и listByRole в
+      «Тогда». О праве по B6 срез сознательно не утверждает ничего, довод — Д6.
+  - item: SRCI-07б B3, SRCI-12 B5, BR
+    kind: CONSTRUCTIBILITY
+    outcome: fixed
+    note: >-
+      B3 с целью allInScope глаголом достижима (в редакции 2 цель-перечень системной роли была
+      недостижима; круг 2 этого не увидел). B5 сохраняет единственное отличие от B2 — роль. В BR
+      добавлена B6.
+  - item: шапка, история ревью
+    kind: FORMAT
+    outcome: fixed
+    note: Правка после вердикта названа; одобрение круга 2 внесено в историю. Вердикт объявлен непереносимым.
+
+blocking: []
+
+minor:
+  - kind: FORMAT
+    scenarios: [SRCI-05]
+    note: >-
+      Таблица ворот начинается с «роль существует». Ворота обработчика и права выдавать
+      (handler.go: форма id роли и наличие цели; create.go:286 delegatedGrantAuthority) в неё
+      не внесены, хотя заголовок обещает «все ворота в порядке вызова». На конструируемость это
+      не влияет: формы id прежних ролей на 092bee4fb судил круг 2, полномочия K — тот же посев,
+      что у держателя ствола. Стоит дописать две строки.
+  - kind: FORMAT
+    scenarios: [SRCI-05, §5 контроль фикстуры]
+    note: >-
+      «Те же формы с другими субъектами, отличие от посева одно: писатель» противоречит само
+      себе: субъект тоже другой. На мире со всеми миграциями после реализации у близнецов другой
+      и id роли. Точнее так: «отличие по предмету — писатель; субъект и id роли — по
+      построению». Ложного зелёного здесь нет: «Тогда» SRCI-05 судит посев, а не близнецов.
+  - kind: COVERAGE
+    scenarios: [SRCI-05]
+    note: >-
+      Можно добавить Ч6 по U4 (субъект B6) без закреплённого значения, только с требованием
+      «ответ после миграции равен ответу до неё». Тогда перенос кластерной выдачи будет
+      охвачен и по праву, а дефект Д6 контрактом не станет. Не блокирует: перенос строки
+      уже держат GET и listByRole.
+  - kind: FORMAT
+    scenarios: [SRCI-05]
+    note: >-
+      Сноска ¹ выводит «system.admin не роль создателя» из исхода прогона. Прямое основание в
+      коде — catalog/facts.go:651: при подстановке в модуле или ресурсе ContainerGrants
+      пропускает правило.
+
+review_defaults:
+  - id: R1
+    scenario: SRCI-05
+    reading: >-
+      Остаётся в силе для Ч1–Ч5: «побайтно» значит равенство `allowed` и `deny_reasons` (порядок
+      `deny_reasons` сохраняется). Поле `checked_at` в сравнение не входит.
+  - id: R2
+    scenario: SRCI-07б
+    reading: "Снят — цель B3 теперь allInScope, ветви перечня на проводе нет."
+
+open_questions_disposition:
+  - id: Д6
+    outcome: accepted_out_of_scope
+    note: >-
+      Подтверждён чтением @092bee4fb: tuples.go:87-93, reconcile/tuples.go:55-73 и :121,
+      rule_fingerprint.go:216-224 — у роли с правилами на кластере нет ни одного пути, который
+      писал бы отношение администратора кластера. Документ архитектуры (explicit-rbac-model.md:187-189)
+      расходится с кодом. Ни один сценарий этой приёмки от исхода Д6 не зависит. Направление —
+      меньше доступа. Механики обхода защиты здесь нет: выдача принимается, но права не даёт.
+      Задачу заводит диспетчер.
+
+producers:
+  without_producer: 0
+  unreachable_named_producer: []
+  note: >-
+    Строка SRCI-05 в §5а переписана: материализация (create.go:572-576, reconcile_adapter.go:405,
+    rule_fingerprint.go), проекции старта (serve.go:2141, :2162), ворота (create.go:296, :302, :315).
+    Перенос остаётся заказан — это содержимое изменения.
+
+twins:
+  negatives_with_twin: all
+  note: Ч3 ↔ Ч2 (глагол), Ч4 ↔ Ч2 (субъект), Ч5 ↔ Ч1 (субъект); SRCI-07/07б, SRCI-12/12б — без изменений по смыслу.
+
+constructibility:
+  method: >-
+    По заданию — чтение кода @092bee4fb: каждая выдача проведена через ворота Create в порядке
+    вызова, материализация — через реконсайлер до яруса в модели. Посева не было: изоляция
+    (пространство стенда или слот) заданием не названа. Контроль фикстуры @3ca34095c — прогон
+    автора; он относится к формам редакции 2 (кластерный admin, цель-перечень viewer). Новые формы
+    B1 и B2 глаголом не прогонялись. Их держит «срез до» как положительный контроль: при неверном
+    чтении проба краснеет на фикстуре, а не даёт ложное зелёное.
+  seeded: 0
+  of: 5
+  by_code_reading: 5
+  items: [B1, B2, B6, B3 (SRCI-07б), B5 (SRCI-12)]
+  not_executed: 5
+  not_executed_reason: изоляция для посева заданием не названа
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+  change_stream: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: true
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: >-
+    Одобрение действует только вместе с внешним событием (`change-graph.md` §3). До публикации
+    ban #1 и гейт TestNewMigrationCitesAnApprovedAcceptance для редакции 3 не сняты.
+
+event_body: "acceptance-reviewer · APPROVED · sha256 ab4986a47477a426badfa2dcb0f223218dea4b77d83ab481819dd1ce36ff2130"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#543
+  status: not_performed
+  published: false
+  role: acceptance-reviewer
+  verdict: APPROVED
+  subject_sha256: ab4986a47477a426badfa2dcb0f223218dea4b77d83ab481819dd1ce36ff2130
+  body: acceptance-reviewer · APPROVED · sha256 ab4986a47477a426badfa2dcb0f223218dea4b77d83ab481819dd1ce36ff2130
+  publication_mode: 'git-operator: gh api POST repos/PRO-Robotech/kaname/issues/543/comments'
+  publication_note: >-
+    Курьер публикует событие и тем же заходом приводит этот блок к факту: status performed,
+    адрес, actor, created_at.
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/system-roles-carry-canonical-ids/09399b37d61a2384e469df2e6ff859d25973230cabf839cad5a10449f32f3dcf.yaml
+    - docs/specs/reviews/system-roles-carry-canonical-ids/27295473fda44228a6fc8426db12bacbbcc6c9a436e151a59e738ecf50375877.yaml

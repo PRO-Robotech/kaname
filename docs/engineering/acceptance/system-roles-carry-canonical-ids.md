@@ -5,9 +5,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Приёмка: системные роли адресуются идентификатором канонической формы
 
-- **Статус:** DRAFT, редакция 2. Вердикта на эту редакцию нет, санкции на код и миграцию нет
-  (ban #1; миграция — гейт `TestNewMigrationCitesAnApprovedAcceptance`). Вердикт выносит
-  `acceptance-reviewer`
+- **Статус:** DRAFT, редакция 3 — правка ПОСЛЕ вердикта круга 2 (APPROVED на редакцию 2,
+  `27295473…5877`). Вердикт на редакцию 3 не перенесён: санкции на код и миграцию по ней нет
+  (ban #1; миграция — гейт `TestNewMigrationCitesAnApprovedAcceptance`), пока
+  `acceptance-reviewer` не вынесет его на её отпечаток
 - **Статическая форма:** DRAFT. Слово вписано автором и вердиктом не является. Действующее
   одобрение выводится из записи ревью по отпечатку редакции и из внешнего события, на которое
   запись ссылается (`change-graph.md` §3). После ревью слово DRAFT не правится
@@ -16,14 +17,27 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `docs/specs/reviews/system-roles-carry-canonical-ids/<sha256>.yaml`
   - 2026-10-29 · круг 1 · CHANGES_REQUESTED · `09399b37d61a2384e469df2e6ff859d25973230cabf839cad5a10449f32f3dcf` ·
     `docs/specs/reviews/system-roles-carry-canonical-ids/09399b37d61a2384e469df2e6ff859d25973230cabf839cad5a10449f32f3dcf.yaml`
+  - 2026-10-29 · круг 2 · APPROVED · `27295473fda44228a6fc8426db12bacbbcc6c9a436e151a59e738ecf50375877` ·
+    `docs/specs/reviews/system-roles-carry-canonical-ids/27295473fda44228a6fc8426db12bacbbcc6c9a436e151a59e738ecf50375877.yaml`
+- **Правка ПОСЛЕ вердикта (2026-10-29, редакция 3).** Основание — возврат посадки: «Дано»
+  SRCI-05 редакции 2 объявляло выдачи, которых глагол в заданной форме не принимает (`B2` с
+  целью-перечнем), и ожидание, которого продукт не даёт (Ч1 по кластерной выдаче). Что
+  правлено: «Дано» SRCI-05 — формы выдач, которые глагол принимает на `092bee4fb`, с таблицей
+  ворот и основанием каждого ожидания по коду; `B3` (SRCI-07б) и `B5` (SRCI-12) — та же цель,
+  что у новой `B2`; §5, §5а — писатели; §8 — Д6 (находка вне предмета). Прочие сценарии, DoD,
+  §0–§3 и §7 не менялись
 - **Дата:** 2026-10-29
 - **Задача:** `PRO-Robotech/kaname#543`. Потребитель результата — край kacho: правило строгой
   формы id по домену-владельцу (`PRO-Robotech/kacho#2976`, закрыта) пока не может включиться
   для типа `iam_role`, потому что две роли kaname в форму не укладываются
 - **Ревизия измерения:** kaname `092bee4fb` (`origin/main`, база ветки `543`); kacho
   `41d7edad9b` (`origin/main`); соседняя ветка `origin/1052` — `1025bbabc`. Каждое число ниже
-  снято на этих ревизиях командой рядом. Посева
-  и прогона не было: «Дано» показано писателем с координатой (§5)
+  снято на этих ревизиях командой рядом. «Дано» показано писателем с координатой (§5).
+  Один прогон сюда входит: контроль фикстуры SRCI-05 (проба ветки `543`
+  `TestSystemRoleIDs_SRCI05Fixture_SeedIsWhatTheVerbMakes`) на голове `3ca34095c`, внешний
+  кластер. Код продукта на ней — `092bee4fb`: ветка правит только пробы
+  (`git diff --stat 092bee4fb 3ca34095c -- . ':!*_test.go' ':!docs'` → 4 файла, все в
+  `tests/`)
 - **Тип изменения:** новая миграция данных (идентификаторы двух строк `kaname.roles` и всех
   ссылок на них); значения двух констант домена; снятие закрытого перечня посеянных
   идентификаторов, принимаемых вопреки длине. Поля, RPC и тексты отказов не добавляются и не
@@ -332,43 +346,74 @@ found`; операция не чеканится (число строк `kaname.
 
 **ID:** SRCI-05
 
-**Given** база, к которой применены все миграции кроме новой
-**And** посеяны (писатели — §5): аккаунт `A1` с проектом `P1`; объект `O1` вида `vpc.network`
-(тип модели прав `vpc_network`, id канонической формы `enp…`) в `P1`/`A1` — строка зеркала
-объектов, как в мире П1 ствола; пользователи `U1`, `U2`, `U3` с подтверждёнными адресами;
-группа `G1` в `A1` с членом `U2`
-**And** посеяны выдачи на прежние id, каждая — в состоянии, которое глагол `Create` принимал на
-ревизии `092bee4fb` (то есть не вымышленном):
-  - `B1`: субъект `user:U1`, роль `system.admin` (прежний id admin), `scopeType=iam.cluster`,
-    `scopeId=cluster_root`, `target={"allInScope":{}}` — исключение суперпользователя: на
-    `092bee4fb` `IsClusterAdminRole` узнаёт прежний id (`role_cluster_admin.go:54`), и ворота
-    `helpers.go:380` выдачу пропускают;
+**Given** база, к которой применены все миграции кроме новой, и над ней — пересчёт проекций
+системных ролей в порядке старта службы: селекторы правил (`seed.BackfillOwnerBindings` →
+`syncAllSystemRoleSelectorsTx`, `cmd/kaname/serve.go:2141`), затем глаголы
+(`seed.ReseedSystemRoleVerbs`, `:2162`) и сегменты правил (`seed.ReseedSystemRoleRuleRefs`,
+`:2201`). Без этого шага база — та, которую служба ни разу не поднимала: строк селекторов у
+системных ролей нет, и правило-подстановка не адресует ни одного объекта
+**And** посеяны (писатели — §5): пользователи `U0`–`U4` с подтверждёнными адресами; аккаунт
+`A1` — его владелец `U0`, который не субъект ни одной проверки ниже (иначе «разрешено» Ч1 могло
+бы прийти от владения, а не от выдачи); проект `P1` в `A1`; объект `O1` вида `vpc.network` (тип
+модели прав `vpc_network`, id канонической формы `enp…`) в `P1`/`A1` — строка зеркала объектов,
+как в мире П1 ствола; группа `G1` в `A1` с членом `U2`
+**And** посеяны выдачи на прежние id. Форма каждой — та, которую глагол `Create` принимает на
+`092bee4fb`; прохождение ворот — таблица ниже, а контроль фикстуры (§5) сверяет посев с той же
+выдачей глаголом:
+  - `B1`: субъект `user:U1`, роль `system.admin` (прежний id admin), `scopeType=iam.account`,
+    `scopeId=A1`, `target={"allInScope":{}}`;
   - `B2`: субъект `group:G1#member`, роль `system.viewer` (прежний id viewer),
-    `scopeType=iam.account`, `scopeId=A1`, `target={"resources":[{"type":"vpc.network","id":"O1"}]}`
-    — область аккаунта; ворота «кластер + правило-якорь» судят только область кластера
-    (`helpers.go:361`). На кластере `B2` глаголом недостижима при ЛЮБОЙ цели: роль
-    наблюдателя несёт правило-якорь (`rule.go:88-96`), а ворота `helpers.go:380` цель не читают
-**And** снят «срез до»: для `B1`, `B2` — `id`, `subjects`, область, цель, `createdAt`; ответы
-четырёх проверок права — `AuthorizeService.Check` с внутреннего слушателя от имени проверенного
+    `scopeType=iam.account`, `scopeId=A1`, `target={"allInScope":{}}`;
+  - `B6`: субъект `user:U4`, роль `system.admin` (прежний id admin), `scopeType=iam.cluster`,
+    `scopeId=cluster_root`, `target={"allInScope":{}}` — исключение суперпользователя.
+
+| ворота `Create` (порядок вызова) | координата @`092bee4fb` | `B1` | `B2` | `B6` |
+|---|---|---|---|---|
+| роль существует | `structural_gates.go:64-70` | посеяна | посеяна | посеяна |
+| роль назначаема на область | `structural_gates.go:82` → `role_scope.go:99` (системная — на любой) | да | да | да |
+| роль создателя | `structural_gates.go:108` → `creator_gates.go:56-61` | не она | не она | не она¹ |
+| цель-перечень: роль без правил (3a), покрытие типа (3) | `structural_gates.go:126`, `:138-146` — судят только `target.resources` | перечня нет | перечня нет | перечня нет |
+| ворота системного класса | `create.go:302` → `system_class_gates.go:58-60` | субъект не класс | субъект не класс | субъект не класс |
+| кластер + правило-якорь | `create.go:315` → `helpers.go:361`, `:380` | не кластер | не кластер | исключение по закреплённому id (`role_cluster_admin.go:54`), на `092bee4fb` это прежний id admin |
+
+¹ Роль создателя на области не-аккаунта отвергается (`creator_gates.go:59-61`), а глагол
+выдачу формы `B6` принял (контроль фикстуры @`3ca34095c`: исход `Create` без ошибки). Значит,
+`system.admin` ролью создателя не является, и для `B1`, `B2` эти ворота тоже молчат.
+
+Форма `B2` редакции 2 — цель-перечень `{vpc.network, O1}` — глаголом **недостижима** ни на
+какой области. У правила системной роли модуль `*`, а покрытие типа сравнивает модуль точным
+равенством (`access_binding_target.go:205`). Отсюда отказ `FAILED_PRECONDITION` «role … does not
+grant verbs on vpc.network; …» (`structural_gates.go:141-143`); тот же отказ дал контроль
+фикстуры @`3ca34095c`.
+
+**And** снят «срез до»: для `B1`, `B2`, `B6` — `id`, `subjects`, область, цель, `createdAt`; ответы
+пяти проверок права — `AuthorizeService.Check` с внутреннего слушателя от имени проверенного
 модуля, тем же видом запроса, что у держателя мира П1
 (`system_class_world_integration_test.go:260-275`, `check` и ярус глагола `scTierOfVerb`):
 
-| # | `subject` | `resource` | `action` | `requiredRelation` | ожидание |
-|---|---|---|---|---|---|
-| Ч1 | `user:U1` | `{type:"vpc_network", id:"O1"}` | `vpc.networks.update` | `editor` | разрешено |
-| Ч2 | `user:U2` | `{type:"vpc_network", id:"O1"}` | `vpc.networks.get` | `viewer` | разрешено |
-| Ч3 | `user:U2` | `{type:"vpc_network", id:"O1"}` | `vpc.networks.update` | `editor` | отказ |
-| Ч4 | `user:U3` | `{type:"vpc_network", id:"O1"}` | `vpc.networks.get` | `viewer` | отказ |
+| # | `subject` | `resource` | `action` | `requiredRelation` | ожидание | основание по коду @`092bee4fb` |
+|---|---|---|---|---|---|---|
+| Ч1 | `user:U1` | `{type:"vpc_network", id:"O1"}` | `vpc.networks.update` | `editor` | разрешено | `B1`: роль с правилами материализуется реконсайлером (`create.go:572-576`); на области аккаунта правило-подстановка разворачивается во все материализуемые типы (`rule_fingerprint.go:216-224`, `:269-271`; вызов — `reconcile_adapter.go:405`); глаголы правила — `*` |
+| Ч2 | `user:U2` | `{type:"vpc_network", id:"O1"}` | `vpc.networks.get` | `viewer` | разрешено | `B2` через членство `U2` в `G1`; та же развёртка; глаголы правила — `list`, `get` |
+| Ч3 | `user:U2` | `{type:"vpc_network", id:"O1"}` | `vpc.networks.update` | `editor` | отказ | глагола `update` в правиле `system.viewer` нет — близнец Ч2, отличие — глагол |
+| Ч4 | `user:U3` | `{type:"vpc_network", id:"O1"}` | `vpc.networks.get` | `viewer` | отказ | у `U3` выдач нет — близнец Ч2, отличие — субъект |
+| Ч5 | `user:U3` | `{type:"vpc_network", id:"O1"}` | `vpc.networks.update` | `editor` | отказ | то же — близнец Ч1, отличие — субъект |
 
 Срез до обязан дать ровно столбец «ожидание» — это положительный контроль фикстуры: иначе
 сценарий судит несозданное условие (выдача не материализована), а не миграцию.
 
+О праве по `B6` срез **не утверждает ничего**. На `092bee4fb` кластерная выдача роли
+администратора облака принимается глаголом, но права не даёт (§8, Д6). «Разрешено» поэтому
+недостижимо, а «отказ» закрепил бы дефект как контракт. `B6` здесь — строка, которую миграция
+обязана перенести: её форму узнаёт по id исключение суперпользователя.
+
 **When** применена новая миграция
-**Then** `GET /iam/v1/accessBindings/{B1}` и `{B2}` → те же `id`, `subjects`, область, цель,
-`createdAt`; `roleId` — `domain.SystemAdminRoleID` и `domain.SystemViewerRoleID`
-**And** ответы Ч1–Ч4 совпадают со срезом до побайтно (Ч3 — близнец Ч2, отличие — глагол; Ч4 —
-близнец Ч2, отличие — субъект)
+**Then** `GET /iam/v1/accessBindings/{B1}`, `{B2}`, `{B6}` → те же `id`, `subjects`, область,
+цель, `createdAt`; `roleId` — `domain.SystemAdminRoleID` у `B1` и `B6`,
+`domain.SystemViewerRoleID` у `B2`
+**And** ответы Ч1–Ч5 совпадают со срезом до побайтно
 **And** `GET /iam/v1/accessBindings:listByRole?roleId={domain.SystemAdminRoleID}` возвращает `B1`
+и `B6`
 **And** число строк `kaname.access_bindings` после миграции равно числу до неё
 
 ### Сценарий 06: ни одна строка базы не сохраняет прежний id
@@ -408,8 +453,9 @@ id во всей схеме 0 (иначе равенство выполняло�
 
 **Близнец SRCI-07б.** На той же базе после миграции вызывающий `K` (SRCI-04) создаёт глаголом выдачу
 `B3`: `{"subjectType":"user", "subjectId":"<U3>", "roleId":"<domain.SystemViewerRoleID>",
-"scopeType":"iam.account", "scopeId":"<A1>", "target":{"resources":[{"type":"vpc.network","id":"<O1>"}]}}`
-(форма `B2` — на кластере роль наблюдателя глаголом не выдаётся, SRCI-08б)
+"scopeType":"iam.account", "scopeId":"<A1>", "target":{"allInScope":{}}}`
+(форма `B2` и её ворота — SRCI-05; на кластере роль наблюдателя глаголом не выдаётся, SRCI-08б;
+цель-перечень системной роли глагол отвергает, SRCI-05)
 → опрос с того же курсора отдаёт событие о `U3`. Отличие — один факт (была ли выдача).
 Без близнеца «ни одного события» неотличимо от немого опроса.
 
@@ -501,12 +547,12 @@ id во всей схеме 0 (иначе равенство выполняло�
 
 **Given** база SRCI-05 до новой миграции, и сверх неё: обычная роль `R0` аккаунта `A1` (не одна
 из двух; правило `vpc`/`network`/`get`) и выдача `B5`: субъект `group:G1#member`, роль
-`R0`, `scopeType=iam.account`, `scopeId=A1`, `target={"resources":[{"type":"vpc.network","id":"O1"}]}`
+`R0`, `scopeType=iam.account`, `scopeId=A1`, `target={"allInScope":{}}`
 (субъект, область и цель — те же, что у `B2`; отличие — только роль)
 **And** снята позиция ленты `S0` — наибольший `sequence_no` в `subscriptionjournal.Table`; снят
 перечень `BR` — id всех строк `kaname.access_bindings`, чей `role_id` — прежний id admin или
-прежний id viewer (в базе SRCI-05 — не меньше `B1` и `B2`; проба печатает его длину и падает
-на нуле)
+прежний id viewer (в базе SRCI-05 — не меньше `B1`, `B2` и `B6`; проба печатает его длину и
+падает на нуле)
 **When** применена новая миграция
 **Then** в ленте с позицией больше `S0` — строки, которые сервер потока читает и отдаёт событиями
 подписчику, возобновившему поток с этой позиции (`subscriptionjournal.Journal()`: вид,
@@ -541,10 +587,12 @@ sub-refetch-not-apply). Утверждается только то, что по�
 | пустая база, все миграции | `pgtest.NewEmptyDB` + `upAllIAMMigrations` | `internal/migrations/system_role_names_leave_the_brand_integration_test.go:59` |
 | база «все миграции кроме новой» | `goose.UpTo(db, ".", <предшественник>)` — тот же приём, что у соседней пробы миграции | `internal/migrations/access_binding_pair_in_set_integration_test.go:296-329` (`UpTo`, `DownTo`, повторный `UpTo`) |
 | вызывающий `K` (SRCI-04, -07б, -08, -10б) | `kaname.restore_cluster_admin('user', K)`, подтверждение адреса, живая сессия уровня «2» — тот же посев, что у держателя ствола | `system_class_s2_integration_test.go:372-377` (`verifyAddresses`, `restore_cluster_admin`, `seedLiveHumanSession` — `:228`) |
-| `A1`, `P1`, `U1`–`U3`, `G1` | `seedAccountByOwner`, `seedProjectInAccount`, `mustSeedUser`, `seedGroup` + член группы писателем членства | `testhelpers_assignable_test.go:80,113,125`; `system_class_world_integration_test.go` (`seedGroup`) |
+| проекции системных ролей (SRCI-05 и всё, что стоит на его базе) | старт службы, тем же порядком: `seed.SyncAllSystemRoleSelectors` (тело то же, что у `BackfillOwnerBindings`, — `syncAllSystemRoleSelectorsTx`), затем `seed.ReseedSystemRoleVerbs` и `seed.ReseedSystemRoleRuleRefs` | `cmd/kaname/serve.go:2141,2162,2201`; `internal/apps/kaname/seed/migrate_backfill.go:201,246`; мир, зовущий досев селекторов, — `service_account_creator_world_integration_test.go:722` |
+| `U0`–`U4`, `A1` (владелец `U0`), `P1`, `G1` | `mustSeedUser`, `seedAccountByOwner(…, U0)`, `seedProjectInAccount`, `seedGroup` + член группы писателем членства | `testhelpers_assignable_test.go:80,113,125`; `system_class_world_integration_test.go:173` (`seedGroup`) |
 | объект `O1` (`vpc.network` в `P1`) | `seedMirrorObject(…, "vpc.network", O1, P1, A1)` | `delete_fanout_deadlock_integration_test.go:135`; вызов — `system_class_world_integration_test.go:146` |
-| выдачи `B1`, `B2` на прежние id (цели — SRCI-05) | `bindingset.Insert` писателя выдач (с `Target`), затем материализация реконсайлером мира П1 (`reconcile.New` над `kanamepg.NewReconcileAdapter`); роль адресуется чтением `SELECT id FROM kaname.roles WHERE name=$1 AND is_system` — **не** литералом. Глагол `Create` для посева не годится: с новым кодом на старой базе `IsClusterAdminRole` ждёт новый id (`B1` → отказ `helpers.go:380`), а прежний id viewer отвергается проверкой формы (`B2` → `INVALID_ARGUMENT`). Состояние при этом то, что глагол принимал на `092bee4fb` (SRCI-05, обоснование по каждой выдаче) | `internal/testsupport/bindingset/bindingset.go:95`; `system_class_world_integration_test.go:103` |
-| проверки Ч1–Ч4 | `AuthorizeService.Check` через обработчик, вызывающий — проверенный модуль (`moduleCtx`) | `system_class_world_integration_test.go:245-275` |
+| выдачи `B1`, `B2`, `B6` на прежние id (формы — SRCI-05) | `bindingset.Insert` писателя выдач (с `Target`), затем материализация реконсайлером мира П1 (`reconcile.New` над `kanamepg.NewReconcileAdapter`); роль адресуется чтением `SELECT id FROM kaname.roles WHERE name=$1 AND is_system` — **не** литералом. Писатель один на все три выдачи, потому что глагол годится не для всех. С новым кодом на старой базе `B1` глагол принял бы (прежний id admin длины 20 проходит проверку формы, область — не кластер). `B2` он отвергнет проверкой формы (`INVALID_ARGUMENT`: прежний id viewer больше не прощается). `B6` — воротами `helpers.go:380`: `IsClusterAdminRole` ждёт новый id. Что состояние то же, какое глагол принимал на `092bee4fb`, держат таблица ворот SRCI-05 и контроль ниже | `internal/testsupport/bindingset/bindingset.go:95`; `system_class_world_integration_test.go:103` |
+| контроль фикстуры SRCI-05 (не сценарий) | на мире со всеми миграциями `K` выдаёт глаголом `Create` близнецов `B1v`, `B2v`, `B6v` — те же формы с другими субъектами, отличие от посева одно: писатель. Исход каждого `Create` — без ошибки; ответы Check близнецов (Ч1, Ч2–Ч3 и ответ по `B6v`) равны ответам посева. Красное — посев строит не то, что глагол | проба ветки `543` `TestSystemRoleIDs_SRCI05Fixture_SeedIsWhatTheVerbMakes` (`system_role_ids_integration_test.go:328`), формы приводятся к SRCI-05 этой редакции |
+| проверки Ч1–Ч5 | `AuthorizeService.Check` через обработчик, вызывающий — проверенный модуль (`moduleCtx`) | `system_class_world_integration_test.go:245-275` |
 | роль `R0`, выдача `B5` (SRCI-12) | `seedRulesRoleWithSelectors` и `bindingset.Insert` | `delete_fanout_deadlock_integration_test.go:95`; `bindingset.go:95` |
 | позиция `S0`, перечень `BR` (SRCI-12) | `SELECT max(sequence_no) FROM kaname.resource_journal`; `SELECT id FROM kaname.access_bindings WHERE role_id IN (SELECT id FROM kaname.roles WHERE name IN ('system.admin','system.viewer') AND is_system)` — до миграции | новая проба (держатель SRCI-12); образец чтения ленты — `internal/migrations/resource_journal_integration_test.go:58` |
 | курсор `PollSubjectChanges` | глагол `InternalIAMService.PollSubjectChanges` | `proto/kaname/cloud/iam/v1/internal_iam_service.proto:163` |
@@ -567,7 +615,7 @@ sub-refetch-not-apply). Утверждается только то, что по�
 | SRCI-04 admin | `internal/apps/kaname/api/role/get.go:119` — `"Role %s not found"`, `NOT_FOUND` | есть | `grep -n 'Role %s not found' internal/apps/kaname/api/role/get.go` |
 | SRCI-04 viewer | `internal/apps/kaname/shared/ids.go:59` — `"invalid %s id '%s'"`, ветвь срабатывает, когда перечень `seeded_ids.go` литерала больше не несёт | ветвь есть; снятие записи перечня **заказано** | чтение |
 | SRCI-04 выдача | `internal/apps/kaname/api/access_binding/structural_gates.go:70`, зовётся `create.go:296` до чеканки операции; тело с `target` проходит `handler.go:144` (`delta_input.go:27,40` отвергает лишь отсутствие цели) | есть | `sed -n 141,147p handler.go`; `sed -n 36,41p delta_input.go` |
-| SRCI-05 | внешние ключи на `kaname.roles(id)` (12, §0.3) и перенос ссылок новой миграцией; ответы Ч1–Ч4 — `AuthorizeService.Check` (`authorize_service.proto:73`) над материализацией выдач | перенос **заказан**; проверка есть | §0.3, команда; чтение |
+| SRCI-05 | внешние ключи на `kaname.roles(id)` (12, §0.3) и перенос ссылок новой миграцией; ответы Ч1–Ч5 — `AuthorizeService.Check` (`authorize_service.proto:73`) над материализацией выдач: реконсайлер разворачивает правило-подстановку на области аккаунта (`create.go:572-576`, `reconcile_adapter.go:405`, `rule_fingerprint.go:216-224,269-271`) по проекциям, которые пишет старт службы (`serve.go:2141,2162`); формы выдач — ворота `create.go:296,302,315` (таблица SRCI-05) | перенос **заказан**; проверка и материализация есть | §0.3, команда; чтение кода @`092bee4fb`; формы — контроль фикстуры @`3ca34095c` |
 | SRCI-06 | та же миграция над всеми таблицами схемы; неизменность прежних строк ленты — отсутствие в миграции правки `kaname.resource_journal` (Р4) | **заказан** | — |
 | SRCI-07 | отсутствие новых строк в очередях: миграция перезаписывает, а не эмитирует; событие близнеца — писатель выдачи (`create.go`) | **заказан** / есть | чтение |
 | SRCI-08 | `internal/domain/role_cluster_admin.go:54` (`IsClusterAdminRole` по закреплённому id) и отказ `helpers.go:380-382`, зовётся `create.go:315` до чеканки операции; тело с `target.allInScope` — как у держателя ствола `system_class_s2_integration_test.go:382`; держатель текста отказа на стволе — `system_class_s2_integration_test.go:400` (`trunkRule`) | есть; зависит от значения константы | чтение |
@@ -692,6 +740,26 @@ sub-refetch-not-apply). Утверждается только то, что по�
   через прежний экземпляр отвергается `INVALID_ARGUMENT` тем же текстом, что в SRCI-08б. Направление —
   меньше доступа, не больше; существующий доступ не затронут (SRCI-05). Принято без отдельного
   сценария: прод отсутствует, выкатка — один шаг.
+- **Д6 — кластерная выдача роли администратора облака принимается, но прав не даёт.** Это
+  находка вне предмета; задачу заводит диспетчер, здесь её не чинят. На `092bee4fb` глагол
+  принимает `system.admin` на кластере с целью «все объекты» (исключение `helpers.go:380`),
+  операция завершается без ошибки, а прав выдача не даёт:
+  - у роли есть правила, а для роли с правилами построитель кортежей выдачи выпускает лишь
+    указатель выдачи на родителя (`tuples.go:87-93`);
+  - на кластере реконсайлер правило-подстановку не разворачивает намеренно
+    (`rule_fingerprint.go:216-224`, `reconcile_adapter.go:405`);
+  - отношение администратора облака на кластере пишут другие пути: служба кластера
+    (`cluster/helpers.go:77`), посев первого администратора и восстановление объявленным путём.
+
+  Записанное намерение обратное: `docs/engineering/architecture/explicit-rbac-model.md:187-189`
+  («этот binding эмитирует то самое cluster-relation») и шапка `role_cluster_admin.go:49`.
+  Измерено контролем фикстуры @`3ca34095c`: выдача формы `B6` глаголом — без ошибки, фактов
+  отношения о субъекте 0, Check `update` на объекте — отказ.
+
+  Что из этого следует здесь. SRCI-05 о праве по `B6` не утверждает ничего, SRCI-08 утверждает
+  только приём выдачи и её `roleId`. Закрытие находки не покраснит ни один сценарий этой
+  приёмки, а её перенос id — не помеха закрытию: факт отношения ключуется субъектом, а не id
+  роли. Направление дефекта — меньше доступа, не больше.
 
 ## §8а. Условия к замыслу (не к приёмке)
 
