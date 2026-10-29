@@ -284,6 +284,90 @@ func TestSystemRoleIDs_SRCI05_GrantsCrossOverWithoutLoss(t *testing.T) {
 	assert.Equal(t, bindingsBefore, w.countRows("kaname.access_bindings"), "SRCI-05: число выдач")
 }
 
+// srciVerbTwinChecks — ответы Ч1–Ч4 близнецов посева, чьи выдачи заведены глаголом:
+// Ч1 — U4 update (близнец U1), Ч2/Ч3 — U5 get/update (близнец U2), Ч4 — U3 get.
+func (w *srciWorld) srciVerbTwinChecks(u4, u5 domain.UserID) []bool {
+	w.t.Helper()
+	var out []bool
+	for _, q := range []struct{ subject, verb string }{
+		{fmtSubject("user", string(u4)), "update"},
+		{fmtSubject("user", string(u5)), "get"},
+		{fmtSubject("user", string(u5)), "update"},
+		{fmtSubject("user", string(w.u3)), "get"},
+	} {
+		resp, err := w.check(q.subject, q.verb, srciObj)
+		require.NoErrorf(w.t, err, "Check(%s, %s)", q.subject, q.verb)
+		out = append(out, resp.GetAllowed())
+	}
+	return out
+}
+
+// Контроль фикстуры SRCI-05 (не сценарий приёмки): посев выдач писателем (§5) отвечает
+// на Ч1–Ч4 ТАК ЖЕ, как те же выдачи, заведённые глаголом `Create`, — посев не
+// снисходительнее продукта и не строже его. Мир — вся цепочка дерева, роль адресуется
+// чтением по имени: глагол принимает её id и до реализации, и после. Близнецы
+// отличаются от посева ровно одним фактом — писателем выдачи (писатель §5 против
+// глагола); субъекты свои, чтобы выдачи не делили адресата.
+func TestSystemRoleIDs_SRCI05Fixture_SeedAnswersAsTheVerb(t *testing.T) {
+	w := newSRCIWorldAt(t, 0)
+	w.seedSRCI05()
+
+	u4 := mustSeedUser(t, w.ctx, w.pool, "srciu4")
+	u5 := mustSeedUser(t, w.ctx, w.pool, "srciu5")
+	g2 := seedGroup(t, w.ctx, w.pool, w.a1, "grp-srci-g2")
+	_, err := w.pool.Exec(w.ctx, `
+		INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at)
+		VALUES ($1, 'user', $2, now())`, g2, string(u5))
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): член группы G2")
+	verifyAddresses(t, w.ctx, w.pool)
+
+	admin, viewer := w.roleIDByName(domain.SystemAdminRoleName), w.roleIDByName(domain.SystemViewerRoleName)
+	// B1v — форма B1: человек, system.admin, кластер, все объекты области.
+	w.createDone(asUser(w.ctx, w.k), &iamv1.CreateAccessBindingRequest{
+		Subjects: []*iamv1.Subject{userSubject(u4)}, RoleId: admin,
+		ScopeType: "iam.cluster", ScopeId: domain.ClusterSingletonID, Target: allInScopeTarget(),
+	}, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) близнец B1 глаголом")
+	// B2v — форма B2: группа, system.viewer, аккаунт A1, цель O1.
+	w.createDone(asUser(w.ctx, w.k), &iamv1.CreateAccessBindingRequest{
+		Subjects: []*iamv1.Subject{groupSubject(g2)}, RoleId: viewer,
+		ScopeType: "iam.account", ScopeId: string(w.a1),
+		Target: resourcesTarget(&iamv1.ResourceRef{Type: scTargetType, Id: srciObj}),
+	}, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) близнец B2 глаголом")
+
+	// Положительный контроль обеих сторон — до сравнения: право чтения O1 по выдаче
+	// наблюдателя материализовано и у посева (U2), и у глагола (U5). Иначе сравнение
+	// судило бы окно материализации, а не писателя.
+	w.pollCheck(fmtSubject("user", string(w.u2)), "get", srciObj, true, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) посев: U2 читает O1")
+	w.pollCheck(fmtSubject("user", string(u5)), "get", srciObj, true, "НЕ-ВЫПОЛНИЛОСЬ(фикстура) глагол: U5 читает O1")
+
+	seeded := make([]bool, 0, 4)
+	for _, r := range w.srciCheckSnapshot() {
+		seeded = append(seeded, r.GetAllowed())
+	}
+	verb := w.srciVerbTwinChecks(u4, u5)
+	t.Logf("SRCI-05 контроль фикстуры: Ч1–Ч4 посева %v, глагола %v; столбец приёмки [true true false false]; факты U4 %s",
+		seeded, verb, w.srciFactsOf(fmtSubject("user", string(u4))))
+	assert.Equal(t, verb, seeded, "посев SRCI-05 отвечает на Ч1–Ч4 иначе, чем те же выдачи глаголом")
+}
+
+// srciFactsOf — факты модели прав о субъекте: из чего выводится его доступ.
+func (w *srciWorld) srciFactsOf(subject string) string {
+	w.t.Helper()
+	rows, err := w.pool.Query(w.ctx, `
+		SELECT object_type || ':' || object_id || '#' || relation FROM kaname.relation_fact
+		 WHERE subject = $1 ORDER BY 1`, subject)
+	require.NoError(w.t, err)
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		require.NoError(w.t, rows.Scan(&s))
+		out = append(out, s)
+	}
+	require.NoError(w.t, rows.Err())
+	return "[" + strings.Join(out, "; ") + "]"
+}
+
 // SRCI-06 — ни одна строка базы, кроме ленты подписки, не сохраняет прежний id;
 // лента дописывается, прежние её строки не меняются.
 func TestSystemRoleIDs_SRCI06_NoRowKeepsTheOldID(t *testing.T) {
