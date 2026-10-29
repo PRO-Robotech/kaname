@@ -1014,7 +1014,7 @@ func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
 		"перебором по перечню":      {"u, s, err := chain()\n_ = err\nfor _, u = range lists {\n}\n" + lawfulSpread, 1},
 		"затенена во вложенном блоке": {"u, s, err := chain()\n_ = err\nif ok {\nvar u = other\n" +
 			lawfulSpread + "}\n", 1},
-		"обе переприсвоены":           {"u, s, err := chain()\n_ = err\nu, s = other, other\n" + lawfulSpread, 2},
+		"обе переприсвоены":            {"u, s, err := chain()\n_ = err\nu, s = other, other\n" + lawfulSpread, 2},
 		"соседняя переменная — молчит": {"u, s, err := chain()\nerr = nil\n_ = err\n" + lawfulSpread, 0},
 	} {
 		t.Run(name, func(t *testing.T) {
