@@ -22,6 +22,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
@@ -34,7 +35,9 @@ const (
 
 func newRule(t *testing.T) *issuingsource.Rule {
 	t.Helper()
-	return issuingsource.New(grpcsrv.NewTrustDomain(trustDomain), servicesan.NewForm("kacho-{service}"))
+	roster, err := moduleidentity.Parse(servicesan.NewForm("kacho-{service}"), []string{"kacho/kacho-api-gateway=edge", "kacho/kacho-vpc=module-writer"})
+	require.NoError(t, err)
+	return issuingsource.New(grpcsrv.NewTrustDomain(trustDomain), roster)
 }
 
 // request — запрос от пира с адреса peer; san пуст — сертификата нет.
@@ -117,6 +120,20 @@ func TestNeighborCertificateIsNotTheEdge(t *testing.T) {
 	requireCells(t, r, map[issuingsource.Cell]uint64{
 		{Point: issuingsource.PointToken, Reason: issuingsource.ReasonForwardedFromNonEdge}: 1,
 	})
+}
+
+// kaname#984 на правиле: лист с учёткой края из НЕОБЪЯВЛЕННОГО пространства —
+// не край. Ключ — адрес пира, заголовок не читается; близнец — тот же
+// заголовок от объявленной пары края — читается.
+func TestEdgeAccountFromAnUndeclaredNamespaceIsNotTheEdge(t *testing.T) {
+	r := newRule(t)
+	intruder := "spiffe://kacho.cloud/ns/intruder/sa/kacho-api-gateway"
+	require.Equal(t, peer, r.Of(request(t, intruder, xff("203.0.113.1")), issuingsource.PointToken))
+	requireCells(t, r, map[issuingsource.Cell]uint64{
+		{Point: issuingsource.PointToken, Reason: issuingsource.ReasonForwardedFromNonEdge}: 1,
+	})
+	require.Equal(t, "203.0.113.1", r.Of(request(t, edgeSAN, xff("203.0.113.1")), issuingsource.PointToken),
+		"близнец: объявленная пара края — край")
 }
 
 // KN-PACE-35 на правиле: край без годного адреса делит ключ своего пира.
@@ -279,9 +296,12 @@ func TestRegistryTokenPointCensusIsSeededWithZeros(t *testing.T) {
 	r := newRule(t)
 	require.Equal(t, []issuingsource.RegistryTokenReason{
 		issuingsource.RegistryTokenReasonForwardedFromUnrecognizedPeer,
+		registryEdgeWithoutAddress,
 	}, issuingsource.RegistryTokenReasons())
 	require.Equal(t, "forwarded-from-unrecognized-peer",
 		string(issuingsource.RegistryTokenReasonForwardedFromUnrecognizedPeer))
+	require.Equal(t, registryEdgeWithoutAddress, issuingsource.RegistryTokenReasonEdgeWithoutAddress,
+		"метка клетки — та же, что у клетки п. 4 точек приёмки")
 	requireRegistryTokenCensus(t, r, nil)
 	requireCells(t, r, nil)
 }
@@ -352,4 +372,52 @@ func TestRegistryTokenPointCensusIsSeparateFromTheAcceptancePoints(t *testing.T)
 	requireCells(t, r, map[issuingsource.Cell]uint64{
 		{Point: issuingsource.PointToken, Reason: issuingsource.ReasonForwardedFromNonEdge}: 1,
 	})
+}
+
+// registryEdgeWithoutAddress — клетка точки анонимной выдачи «край или
+// объявленный пересыльщик без годного адреса» (kaname#935). Записана строкой
+// метки витрины, а не константой правила: метка — то, что читает оператор, и
+// проба держит именно её.
+const registryEdgeWithoutAddress = issuingsource.RegistryTokenReason("edge-without-address")
+
+// Край или объявленный пересыльщик без годного адреса на точке анонимной
+// выдачи СЧИТАЕТСЯ (kaname#935): ключом темпа стал адрес пира, и все клиенты
+// за прокси реестра делят один предел. Без счёта такая посадка (прокси не
+// передаёт адрес клиента либо передаёт список) неотличима от залпа одного
+// клиента — оба видны только отказами по темпу. Каждая строка — один запрос и
+// ровно +1 в клетке edge-without-address; соседняя клетка точки и словарь п. 4
+// приёмки при этом не двигаются. Законный близнец — тот же пир с одним
+// адресом — в TestRegistryTokenPointLeavesTheCensusForRecognizedPeers: строки
+// отличаются от него ровно значением заголовка.
+func TestRegistryTokenPointCountsARecognizedPeerWithoutUsableAddress(t *testing.T) {
+	for name, tc := range map[string]struct {
+		san    string
+		header http.Header
+	}{
+		"пересыльщик: заголовка нет":  {registryForwarderSAN, nil},
+		"пересыльщик: два значения":   {registryForwarderSAN, xff("203.0.113.7", "198.51.100.2")},
+		"пересыльщик: список":         {registryForwarderSAN, xff("203.0.113.7, 198.51.100.2")},
+		"пересыльщик: не адрес":       {registryForwarderSAN, xff("not-an-address")},
+		"пересыльщик: адрес с портом": {registryForwarderSAN, xff("203.0.113.7:443")},
+		"пересыльщик: адрес с зоной":  {registryForwarderSAN, xff("fe80::1%eth0")},
+		"край: заголовка нет":         {edgeSAN, nil},
+		"край: список":                {edgeSAN, xff("203.0.113.7, 198.51.100.2")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRule(t)
+			source := r.RegistryTokenPoint(registryForwarderSAN)
+			require.Equal(t, peer, source(request(t, tc.san, tc.header)),
+				"пир без годного адреса делит ключ своего пира")
+			got := r.ReadRegistryTokenPoint()
+			require.Equalf(t, uint64(1), got[registryEdgeWithoutAddress],
+				"клетка %s точки анонимной выдачи после одного запроса без годного адреса; перепись %v",
+				registryEdgeWithoutAddress, got)
+			require.Contains(t, issuingsource.RegistryTokenReasons(), registryEdgeWithoutAddress,
+				"клетка объявлена в закрытом словаре точки — иначе витрина её не печатает")
+			requireRegistryTokenCensus(t, r, map[issuingsource.RegistryTokenReason]uint64{
+				registryEdgeWithoutAddress: 1,
+			})
+			requireCells(t, r, nil)
+		})
+	}
 }

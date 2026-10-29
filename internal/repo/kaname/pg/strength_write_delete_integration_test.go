@@ -737,6 +737,12 @@ func wdGridText() string {
 	return b.String()
 }
 
+// Метки, между которыми текст отчёта печатается в вывод прогона.
+const (
+	wdReportBeginMark = "===== ОТЧЁТ R7-2: НАЧАЛО ====="
+	wdReportEndMark   = "===== ОТЧЁТ R7-2: КОНЕЦ ====="
+)
+
 func writeWDReport(t *testing.T, prov scalegrid.Provenance, results []wdResult,
 	wall time.Duration, final bool) {
 	t.Helper()
@@ -752,11 +758,17 @@ func writeWDReport(t *testing.T, prov scalegrid.Provenance, results []wdResult,
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	if err := os.WriteFile(path, []byte(header+renderWDReport(results, wall, final)), 0o644); err != nil {
+	text := header + renderWDReport(results, wall, final)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 		t.Fatalf("запись отчёта: %v", err)
 	}
 	if final {
 		t.Logf("отчёт записан: %s", path)
+		// Текст отчёта целиком — и в вывод прогона, побайтово, между метками:
+		// прогон во внешнем кластере файлов обратно не возвращает, и отчёт
+		// переносится в дерево из журнала прогона (kaname#1006). Печать идёт мимо
+		// t.Logf намеренно: тот сдвигает строки продолжения отступом.
+		fmt.Fprintf(os.Stdout, "%s\n%s%s\n", wdReportBeginMark, text, wdReportEndMark)
 	}
 }
 

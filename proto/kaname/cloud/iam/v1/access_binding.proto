@@ -177,6 +177,12 @@ message AccessBinding {
   // under the anchor, including future) is reachable ONLY via explicit
   // `target.allInScope{}` opt-in; there is no default sentinel. NEW tag — the
   // earlier target/target_ref (tags 16/18) stay tombstoned.
+  //
+  // Клиентом цель не меняется, но снятие регистрации объекта её сужает: объект
+  // убирается из перечня, остальные сохраняют порядок. Перечень, из которого
+  // вынули последний объект, не хранится (пустой читался бы как вся область):
+  // выдача отзывается с причиной `REVOCATION_REASON_RESOURCE_UNREGISTERED`, и в
+  // цели отозванной выдачи остаётся последний снятый объект.
   AccessTarget target = 22;
 
   // OUTPUT-ONLY. When this binding's per-object access last became live —
@@ -242,6 +248,41 @@ message AccessBinding {
   // `subject_id = "*"` субъектом выдачи не является ни у какой выдачи: у обычной
   // она отвергается, у платформенной заменена системным классом.
   bool system = 25;
+
+  // Почему выдача отозвана. Закрытый набор, значение выразимо ровно одним
+  // способом (приёмка `unregistration-revokes-its-grants.md`, Д2).
+  enum RevocationReason {
+    // Выдача не отозвана; либо отозвана до заведения поля — тогда пустое значение
+    // значит «отозвана до заведения поля», а не «причину потеряли» (Д7).
+    REVOCATION_REASON_UNSPECIFIED           = 0;
+    // Отозвана глаголом `Revoke`; `revoked_by_user_id` — вызывающий.
+    REVOCATION_REASON_REVOKE                = 1;
+    // Истёк `expires_at`, выдачу отозвал проход срока; `revoked_by_user_id` пуст.
+    REVOCATION_REASON_EXPIRED               = 2;
+    // Снята регистрация объекта, который цель выдачи называла
+    // (`InternalIAMService.UnregisterResource`); `revoked_by_user_id` пуст —
+    // отозвал не человек.
+    REVOCATION_REASON_RESOURCE_UNREGISTERED = 3;
+    // Отозвано делегирование, по которому выдача сделана
+    // (`GrantDelegationService.Revoke`); `revoked_by_user_id` — отозвавший
+    // делегирование.
+    REVOCATION_REASON_DELEGATION_REVOKED    = 4;
+  }
+
+  // OUTPUT-ONLY. Причина отзыва. Задана ровно тогда, когда `status = REVOKED` и
+  // отзыв случился после заведения поля; у действующей выдачи и у выдачи,
+  // отозванной до заведения поля, не задана. Поле с присутствием (`optional`):
+  // незаданное не выходит ключом и в JSON, печатающем незаданные поля, — у
+  // действующей выдачи ключа `revocationReason` в теле нет (приёмка
+  // unregistration-revokes-its-grants.md, URG-E2).
+  optional RevocationReason revocation_reason = 26;
+
+  // OUTPUT-ONLY. Делегирование права выдавать (`GrantDelegation.id`), по которому
+  // выдача сделана делегатом; пусто у выдачи, сделанной держателем права выдавать.
+  // Ставит только делегированный путь права выдавать; на вход ни одного запроса
+  // поле не принимается. Делегат отзывает и удаляет только выдачи, несущие
+  // ссылку на его действующее делегирование.
+  string delegation_id = 27;
 }
 
 // AccessTarget selects which objects, under the binding's scope-anchor, the grant
@@ -261,7 +302,20 @@ message AccessTarget {
 // polymorphic ResourceRef{type,id} (graceful-dangling; `type` is the dotted name
 // of a type live in the platform resource catalog, e.g. `compute.instance`; the
 // grantable types are published by `GET /iam/v1/permissionCatalog`).
+//
+// Снятие регистрации объекта, выполненное после того, как выдача сделана, убирает
+// объект из перечня в той же транзакции; опустевший перечень — отзыв выдачи
+// (`AccessBinding.target`).
 message AccessTargetResources {
+  // The objects of the grant. Each `id` follows the object grammar, the same one
+  // object registration enforces: it is non-empty and contains none of space,
+  // tab, newline, `#` (the subject-set separator) or `:` (a second colon of the
+  // object `type:id`). `/` is legal and taken verbatim: the service neither
+  // splits nor normalizes the id. A forbidden character fails `Create`
+  // synchronously with INVALID_ARGUMENT before any `Operation` is issued, with
+  // the message `Illegal argument target.resources[N].id (not a valid object id:
+  // space, tab, newline, '#' and ':' are not allowed)`, where N is the element's
+  // index.
   repeated ResourceRef resources = 1;
 }
 

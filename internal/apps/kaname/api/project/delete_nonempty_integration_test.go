@@ -277,7 +277,7 @@ func unregisterMirrorRow(ctx context.Context, pool *pgxpool.Pool, objectType, ob
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := resource_mirror.DeleteTx(ctx, tx, objectType, objectID, time.Now().UTC()); err != nil {
+	if _, err := resource_mirror.DeleteTx(ctx, tx, objectType, objectID, time.Now().UTC()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

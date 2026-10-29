@@ -2195,14 +2195,13 @@ const file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc = "" +
 	"\n" +
 	"\x06SYSTEM\x10\x01\x12\v\n" +
 	"\aACCOUNT\x10\x02\x12\v\n" +
-	"\aPROJECT\x10\x032\xb9\x1b\n" +
+	"\aPROJECT\x10\x032\xcd\x1a\n" +
 	"\x14AccessBindingService\x12\xe0\x01\n" +
 	"\x03Get\x12,.kaname.cloud.iam.v1.GetAccessBindingRequest\x1a\".kaname.cloud.iam.v1.AccessBinding\"\x86\x01\x8a\xb5\x18\x17iam.access_bindings.get\x92\xb5\x18\x05v_get\x9a\xb5\x18'\n" +
 	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02,\x12*/iam/v1/accessBindings/{access_binding_id}\x12\xce\x01\n" +
 	"\x06Create\x12/.kaname.cloud.iam.v1.CreateAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"u\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x012\xba\xb5\x18\x0fHANDLER_DECIDES\xb2\xd2*,\n" +
-	"\x1bCreateAccessBindingMetadata\x12\rAccessBinding\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/iam/v1/accessBindings\x12\x9e\x02\n" +
-	"\x06Delete\x12/.kaname.cloud.iam.v1.DeleteAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"\xc4\x01\x8a\xb5\x18\x1aiam.access_bindings.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18'\n" +
-	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x012\xb2\xd2*4\n" +
+	"\x1bCreateAccessBindingMetadata\x12\rAccessBinding\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/iam/v1/accessBindings\x12\xe8\x01\n" +
+	"\x06Delete\x12/.kaname.cloud.iam.v1.DeleteAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"\x8e\x01\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x012\xba\xb5\x18\x0fHANDLER_DECIDES\xb2\xd2*4\n" +
 	"\x1bDeleteAccessBindingMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02,**/iam/v1/accessBindings/{access_binding_id}\x12\x99\x02\n" +
 	"\x06Update\x12/.kaname.cloud.iam.v1.UpdateAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"\xbf\x01\x8a\xb5\x18\x1aiam.access_bindings.update\x92\xb5\x18\bv_update\x9a\xb5\x18'\n" +
 	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x012\xb2\xd2*,\n" +
@@ -2221,9 +2220,8 @@ const file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc = "" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02.\x12,/iam/v1/accounts/{account_id}/accessBindings\x12\xaf\x02\n" +
 	"\x0eListOperations\x127.kaname.cloud.iam.v1.ListAccessBindingOperationsRequest\x1a8.kaname.cloud.iam.v1.ListAccessBindingOperationsResponse\"\xa9\x01\x8a\xb5\x18.iam.access_binding_operationses.listOperations\x92\xb5\x18\x06v_list\x9a\xb5\x18'\n" +
-	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x027\x125/iam/v1/accessBindings/{access_binding_id}/operations\x12\xa0\x02\n" +
-	"\x06Revoke\x12/.kaname.cloud.iam.v1.RevokeAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"\xc6\x01\x8a\xb5\x18\x1aiam.access_bindings.revoke\x92\xb5\x18\bv_delete\x9a\xb5\x18'\n" +
-	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x012\xb2\xd2*,\n" +
+	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x027\x125/iam/v1/accessBindings/{access_binding_id}/operations\x12\xea\x01\n" +
+	"\x06Revoke\x12/.kaname.cloud.iam.v1.RevokeAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"\x90\x01\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x012\xba\xb5\x18\x0fHANDLER_DECIDES\xb2\xd2*,\n" +
 	"\x1bRevokeAccessBindingMetadata\x12\rAccessBinding\x82\xd3\xe4\x93\x026:\x01*\"1/iam/v1/accessBindings/{access_binding_id}:revokeBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (

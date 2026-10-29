@@ -502,27 +502,28 @@ jobs:
       # Свойство «шаг не сужен событием» держит проба
       # `tools/declaredbreak` TestGateRunsWhereItsSubjectExpires, а не этот
       # комментарий.
-      - name: adjudicate breaking (vs main)
+      #
+      # БАЗА СРАВНЕНИЯ — БАЗА ЗАПРОСА, А НЕ `main` (kaname#1055). Запрос в ветку
+      # эпика, отставшую от `main`, сравнением с `main` получал «разрывы», которых
+      # голова не вносила: PR kaname#977 с нулевым диффом контрактов к своей базе был
+      # красен шестью чужими изменениями `main`. Базу берёт сценарий из
+      # GITHUB_BASE_REF (на push её нет — `main`), голову запроса — из HEAD_SHA;
+      # отказ называет по каждой находке, есть ли её предмет в общем предке.
+      # Сравнение с базой держит проба TestStepJudgesTheRequestAgainstItsBase
+      # шагом ниже — на настоящем buf.
+      - name: adjudicate breaking (vs база запроса)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -uo pipefail
           go build -o "$RUNNER_TEMP/adjudicate" ./tools/declaredbreak/cmd/adjudicate-declared-breaks
-          cd proto
-          set +e
-          buf breaking \
-            --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=proto" \
-            --error-format=json > "$RUNNER_TEMP/buf-breaking.jsonl" 2>"$RUNNER_TEMP/buf-breaking.err"
-          rc=$?
-          set -e
-          case "$rc" in
-            0|100) ;;
-            *)
-              echo "::error title=ГЕЙТ НЕ СДЕЛАЛ СВОЕЙ РАБОТЫ::buf breaking вышел кодом $rc — это НЕ «разрывов нет»"
-              cat "$RUNNER_TEMP/buf-breaking.err" >&2 || true
-              exit 2
-              ;;
-          esac
-          cd ..
-          "$RUNNER_TEMP/adjudicate" proto/declared-breaks.yaml < "$RUNNER_TEMP/buf-breaking.jsonl"
+          tools/declaredbreak/against-request-base.sh "$RUNNER_TEMP/adjudicate" proto/declared-breaks.yaml
+
+      # Проба шага выше пропускается под `-short` задания unit: её сцене нужен
+      # buf, а он стоит здесь. Без этого прогона её зелёного не наблюдал бы
+      # никто — провязку держит TestRequestBaseProbeRunsWhereBufIs.
+      - name: проба базы запроса (настоящий buf)
+        run: go test ./tools/declaredbreak/ -count=1 -run 'TestStepJudgesTheRequestAgainstItsBase' -v
 
       # Стабы закоммичены → они ОБЯЗАНЫ совпадать с .proto. Иначе кто-то правил
       # порождённое руками (что вдобавок бьёт rawDesc) либо забыл
@@ -842,24 +843,29 @@ jobs:
           cache: true
       - run: go mod download
 
-      # ИСХОДОВ ЧЕТЫРЕ, И ШАГ ИХ РАЗЛИЧАЕТ. Схлопни VOID в успех — пустое дерево
-      # отчитывалось бы зелёным так же уверенно, как проверенное, и первый
-      # манифест, положенный мимо ожидаемого имени, остался бы невидимым
-      # навсегда. Схлопни в отказ — красным стал бы ствол, а не продукт.
-      #
+      # ИСХОД ЧИТАЕТСЯ ПО ТЕКСТУ, А НЕ ПО КОДУ, и развилка вынесена СКРИПТОМ
+      # (kaname#825). `make` схлопывает код рецепта в свой: находка (1), «проверять
+      # нечего» (2) и «не исполнялась» (3) одинаково доезжают сюда ДВОЙКОЙ.
+      # Прежняя редакция разбирала код, двойка означала у неё «условие не
+      # создано, exit 0» — и НАСТОЯЩИЙ дефект формы манифеста доезжал до ствола
+      # зелёным. Развилку внутри шага нечем доказать инъекцией, поэтому она
+      # живёт в скрипте, а его самопроверка зовётся ДО вердикта. Политика
+      # исходов (что роняет шаг, что лишь называется) — в шапке скрипта.
+      - name: разбор исхода формы манифестов — доказательство инъекцией
+        run: .github/scripts/classify-manifest-outcome.sh --self-test
+
       # Код читается ДАННЫМИ, а не условием продолжения: блок `run:` исполняется
-      # под `bash -e`, и ненулевой код оборвал бы шаг молча — до присваивания,
-      # до развилки, до всякой аннотации.
+      # под `bash -e`, и ненулевой код оборвал бы шаг молча — до разбора вывода.
+      # Вызов стоит ПЕРВЫМ СЛОВОМ строки намеренно: провязку судит гейт дерева по
+      # разобранным телам `run:`, и он требует формы `make <цель>`. Код шага —
+      # код разборщика: последняя команда тела.
       - name: манифесты модулей — форму судит один загрузчик
         run: |
           rc=0
-          make module-manifest-check || rc=$?
-          case "$rc" in
-            0) echo "форма манифестов: годно" ;;
-            2) echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::манифестов не найдено ни одного — ПРОВЕРЯТЬ НЕЧЕГО. Это третий исход, а не «форма в порядке»"; exit 0 ;;
-            3) echo "::error title=НЕ ИСПОЛНЯЛАСЬ::разбор вызова не удался — вердикта о форме манифестов нет"; exit 1 ;;
-            *) echo "::error title=Форма манифеста негодна::названы файл, поле и строка (вывод выше)"; exit 1 ;;
-          esac
+          log="$RUNNER_TEMP/module-manifest.log"
+          make module-manifest-check > "$log" 2>&1 || rc=$?
+          cat "$log"
+          .github/scripts/classify-manifest-outcome.sh "$rc" "$log"
 
       # ВТОРОЙ ОПЕРАНД СОЗДАЁТСЯ ВЫБОРКОЙ — у условия ОДИН ДОМ, и это он
       # (`.github/actions/platform-tree`): то же действие создаёт его заданию

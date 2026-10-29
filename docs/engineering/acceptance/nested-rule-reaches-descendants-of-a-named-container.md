@@ -17,7 +17,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     записи круга 1; B1 — решением диспетчера (б). Вердикт `49242817…` относится к
     редакции 1 и на эту редакцию не переносится. Что закрыто — раздел «Редакция 2: что
     закрыто»
-- **Дата:** 2026-10-17 · **редакция:** 2
+  - 2026-10-17 · круг 2 · APPROVED · `f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6` ·
+    `docs/specs/reviews/nested-rule-reaches-descendants-of-a-named-container/f12395ae242f85e1120346123286318b3027d87e53f6973f4b8a21ac1bd6d9f6.yaml`
+  - 2026-10-24 · правка ПОСЛЕ вердикта `f12395ae…` · редакция 3: решение `kaname#965` —
+    манифест модуля не называет конкретных объектов, загрузчик отвергает `resourceNames`
+    у правила-владельца с `children` и во вложенном правиле, пустой перечень тоже. Тронуты
+    только места об этой форме: «Вне объёма» п. 2, таблица ролей П1, описание П3, ND-04
+    (новый пункт (з)), ND-05 (б), ND-08 «И», таблица производителей, DoD. Вердикт
+    `f12395ae…` относится к редакции 2 и на эту редакцию не переносится
+- **Дата:** 2026-10-17, правка 2026-10-24 · **редакция:** 3
 - **Задача:** `PRO-Robotech/kaname#874` (связь: `#857` — сужение по цели, `#856` — публичное
   чтение контейнера)
 - **Решения диспетчера 2026-10-17** (действует последнее): охват потомков объявляет
@@ -53,6 +61,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
    вложенного правила) — входом не строится на сегодняшних типах (замер Р2). Семантика
    пересечения — следующей фазой. Охват на `allInScope` и пустой цели и сужение
    правила-владельца в объём **входят** (решение диспетчера B1 = (б), Р3, ND-08, ND-11).
+   В манифесте модуля сужение **именами** (`resourceNames`) не допускается ни у
+   правила-владельца, ни у вложенного правила (`kaname#965`, ND-04 (з)): правило
+   манифеста сужается метками. Семантика Р3 для строки роли с именами у
+   правила-владельца утверждается на уровне решения (П3, ND-08 «И»).
 3. **Край, консоль, newman kacho**: пересборка края с пином kaname, показ `children` в
    консоли, сквозные кейсы — задача kacho (Р6). Манифест registry с ролями в форме
    `children` — задача `PRO-Robotech/kacho#3274`.
@@ -65,7 +77,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 |---|---|---|
 | `anonymous-and-authenticated-are-subject-classes.md` · `198db838d0a75b7f5b5bdbd5564bacec23a79cc00550a26e8830f3c6be61aac9` (ред. 10, APPROVED) | S5: `public_reader`, ворота SC-21, SC-24, SC-65; роль `registry.public.read`; SC-68 | **правится редакциями 11–12** (Р5): форма роли, абзац «Сужение по цели», держатели SC-68. Исходы SC-60…73 не меняются: SC-68 Б2 (`allInScope`) верен по Р3 (B1 = (б)) |
 | проба `#857` — `internal/repo/kaname/pg/relverdict/target_narrows_grant_integration_test.go` | цель `resources` сужает выдачу до пар «тип, id» во всех формах вопроса | правило верхнего уровня сохраняет это дословно (ND-01, ND-07) |
-| `module-manifest-roles-and-seed-grants.md` · `fc75beed6e2b2006774ae9156307f3c1f543111801e929aac10e8be1a48fffb5` | раздел `roles` манифеста, правило изоморфно `domain.Rule` | у правила роли манифеста появляется ключ `children` (Р1) |
+| `module-manifest-roles-and-seed-grants.md` · `89c6cf6c007d3751146d3bb4f88588b1820bda2ae90eb0e0fc3666719c73c51d` (правка `kaname#965` после вердикта круга 6) | раздел `roles` манифеста, правило изоморфно `domain.Rule` | у правила роли манифеста появляется ключ `children` (Р1) |
 
 ## Решения
 
@@ -252,7 +264,13 @@ o типа N, когда выполнены оба условия:
   | `registry.reader` · `rolb812261cfaa239694` | то же, что `registry.public.read` |
   | `registry.viewer` · `rol2375080206e7e5e32` | `registries [get, list]`, без `children` |
   | `registry.reader_get` · `rolc36eeca826b9a8603` | как `registry.reader`, у вложенного `classes: [get]` |
-  | `registry.reader_named` · `rolc8f851eb7a5da3d9f` | как `registry.reader`, у вложенного `resourceNames: [app]` |
+
+  Роли `registry.reader_named` · `rolc8f851eb7a5da3d9f` (как `registry.reader`, у
+  вложенного `resourceNames: [app]`) в фикстуре **нет**: манифест модуля конкретных
+  объектов не называет, и загрузчик такую роль отвергает (`kaname#965`, ND-04 (з)). Для
+  ND-05 (б) строку этой роли кладёт применитель манифеста **напрямую, минуя загрузчик**, —
+  как строку, доставленную до запрета; контроль — строка роли с этим id в
+  `kaname.roles` ровно одна.
 
   Id выведен формулой `'rol' || substr(md5(имя), 1, 17)` и сверен на известном
   `rolb1325b011aa17211d`. **Тело выдачи** «В(субъект, роль, цель)» —
@@ -272,8 +290,11 @@ o типа N, когда выполнены оба условия:
   фикстурой манифеста `internal/manifest/testdata/probemod.children-fixture.yaml` —
   **заказана**. В ней `boxes` (`probemod_box`, `parents: [project]`,
   `publicReadToChildren: true`), `items` (указатель `box`), `tags` (указатель `item`); роль
-  `probemod.reader`: `boxes [get, list]`, `children: [tags [get, list]]`; роль
-  `probemod.reader_b1`: то же, у правила над `boxes` ещё `resourceNames: [b1]`. Объекты: ящики
+  `probemod.reader`: `boxes [get, list]`, `children: [tags [get, list]]`. Роль-близнец
+  `probemod.reader_b1` (то же, у правила над `boxes` ещё `resourceNames: [b1]`) в фикстуре
+  манифеста **не объявляется** — манифест модуля конкретных объектов не называет
+  (`kaname#965`); её строку пишет проба продуктовым писателем роли из правил домена, как и
+  строку `probemod.reader` для ND-08. Объекты: ящики
   `b1`, `b2`; предмет `i1` в `b1`, `i3` в `b2`; ярлык `t1` в `i1` (цепь
   `["probemod_item:i1", "probemod_box:b1", "project:prj-A", "account:acc-A"]`), `t3` в `i3`.
   Выдача пишется строкой: вход API цель `probemod` не принимает, потому что
@@ -343,6 +364,15 @@ o типа N, когда выполнены оба условия:
   `BadRequest.field_violations[0].field` = `rules[0].children`; `Operation` не создана.
   **И** то же тело правил через `PATCH /iam/v1/roles/{roleId}` (`"updateMask":"rules"`) у
   роли арендатора — тот же код, текст и поле.
+- (з) **`kaname#965` — ссылка на конкретный объект.** У вложенного правила
+  `resourceNames: [app]` — загрузка отказывает находкой вида «манифест модуля называет
+  конкретный объект» (`manifest.ErrObjectRefInManifest`), текст
+  `roles[i].rules[0].children[0].resourceNames: сужение по идентификаторам объектов в роли манифеста модуля не допускается — правило называет типы (resources) и вправе сузиться метками (matchLabels); идентификатор объекта присваивает запись, и снимается он вместе с регистрацией объекта, а манифест применяется на каждом старте и вернул бы ссылку снова`.
+  **И** у правила-владельца с `children` — `resourceNames: [reg00000000000000001]` под
+  `resources: [registries]` — та же находка с координатой
+  `roles[i].rules[0].resourceNames`. **И** пустой перечень `resourceNames: []` в любом из
+  двух мест — тот же отказ: ключ судится по наличию, а не по длине. Прежняя редакция этого
+  документа строила на такой роли фикстуры П1 и П3; решение `kaname#965` их снимает.
 
 Ярус иерархии под правилом-владельцем (Р1 п. 2) — отдельная находка той же формы. Она
 строится на манифесте службы, где ярусы объявлены (`manifest.yaml` kaname): правило над
@@ -350,7 +380,8 @@ o типа N, когда выполнены оба условия:
 `roles[i].rules[0].resources: "project" — ярус иерархии; под ярусом выбирает область выдачи, children у него нет`.
 **Близнец:** немодифицированная фикстура — загрузка успешна, роль `registry.reader`
 применяется (ND-02). Для (ж) — то же тело без `children` (и `POST`, и `PATCH`) →
-`done=true`. Отличие в каждой
+`done=true`. Для (з) — немодифицированная фикстура: вложенное правило над типом, без
+`resourceNames`, — загрузка успешна. Отличие в каждой
 паре — один факт.
 
 #### ND-05 — классу не выдаётся вложенное правило, не выполняющее условий
@@ -359,8 +390,9 @@ o типа N, когда выполнены оба условия:
 - (а) роль `rolc36eeca826b9a8603` (вложенное `[get]`) → синхронно `FAILED_PRECONDITION`
   (HTTP 400), текст
   `Role rolc36eeca826b9a8603 nests a rule over registry.repositories that does not read it whole (get and list, without resourceNames or matchLabels); a system class reads children only whole`;
-- (б) роль `rolc8f851eb7a5da3d9f` (вложенное с `resourceNames`) → тот же текст с
-  `rolc8f851eb7a5da3d9f`;
+- (б) роль `rolc8f851eb7a5da3d9f` (вложенное с `resourceNames`; строка роли положена
+  применителем в обход загрузчика, как доставленная до запрета `kaname#965` — П1) → тот
+  же текст с `rolc8f851eb7a5da3d9f`;
 - (в) роль `rolb812261cfaa239694`, «Дано» — П1, **затем** `deliverPriorEdition`: прежняя
   редакция раздела `roles` не объявляет, поэтому роль остаётся живой
   (`internal/apps/kaname/moduleroles/retire.go:91`), а объявление контейнера снято. С одной
@@ -402,7 +434,8 @@ o типа N, когда выполнены оба условия:
 `items` нет). Материализатор (unit, фикстура каталога П3) даёт член `v_get` на `t1` и ни
 одного на `t3`, `i1`.
 **И** (B1 = (б)) выдача `usr-D` роли `probemod.reader` с целью `allInScope` → `t1` и `t3`
-→ `true`; роли `probemod.reader_b1` с целью `allInScope` → `t1` → `true`, `t3` → `false`:
+→ `true`; роли-близнеца `probemod.reader_b1` (строка роли из правил домена, П3; манифестом
+не объявляется — `kaname#965`) с целью `allInScope` → `t1` → `true`, `t3` → `false`:
 ветвь правила-владельца выбирает только `b1`.
 **Близнец:** цель `[probemod.boxes b2]` → `t1` → `false`, `t3` → `true`. Отличие — один факт:
 названный контейнер. Для «И» близнецы — пара ролей, отличие — `resourceNames` у
@@ -481,8 +514,9 @@ o типа N, когда выполнены оба условия:
 | ND-03, 07 (б), 10 | `public_reader` по вложенному правилу; исключение класса из оси вложенности | `publicReaderMember`, `withPublicReaders` (`internal/apps/kaname/api/access_binding/reconcile/public_reader.go`) — производят по правилу верхнего уровня; условие «вложенное правило» и исключение — **заказаны** | прочитано |
 | ND-04 (а)–(е) | судья формы манифеста | `internal/manifest/roles.go` (`Rule`, `DomainRule`), `schema/module-manifest.schema.json` — ключ **заказан**; родство — `parents` ресурсов (`internal/manifest/resources.go`) уже есть | прочитано |
 | ND-04 (ж) | отказ входа `RoleService` | `internal/apps/kaname/api/role/handler.go` (`InvalidArg`) — **заказан** | прочитано |
+| ND-04 (з) | отказ загрузчика по ссылке на конкретный объект (`kaname#965`) | `internal/manifest/object_refs.go` (`refuseObjectRefs`, `ErrObjectRefInManifest`); схема — `not: {required: [resourceNames]}` у элемента правила и у вложенного правила (`schema/module-manifest.schema.json`) — **уже производит** | прочитано @`abbcb5558`; пробы `TestObjectRefs_NestedRuleResourceNamesIsRefused`, `TestObjectRefs_OwnerRuleWithChildrenResourceNamesIsRefused`, близнец `TestObjectRefs_NestedRuleOverATypeLoads` (`internal/manifest/object_refs_test.go`); пустой перечень во вложенном правиле и у правила-владельца — подтесты `internal/manifest/object_refs_test.go` (**заказаны** решением диспетчера 2026-10-24); у правила верхнего уровня — `TestObjectRefs_RoleRuleResourceNamesIsRefused` |
 | ND-05, ND-10 | ворота класса и «только чтение» | `systemClassContainerGate` (`internal/apps/kaname/api/access_binding/system_class_gates.go`) и текст `domain.UndeclaredContainerText` — текст (в) уже производят. Условие — нет: `PublicReadContainer.CoveredChild` (`internal/domain/public_read.go:37-45`) и `Role.GrantsReadsOnly` (`internal/domain/system_class.go:182`) перебирают только правила верхнего уровня. Чтение вложенных правил в них и в стражах базы `kaname.role_grants_reads_only`, `kaname.access_binding_subject_class_reads_only`, тексты (а), (б), (г) — **заказаны** | прочитано |
-| ND-08 | глубина | фикстура `probemod.children-fixture.yaml` — **заказана** | прочитано |
+| ND-08 | глубина | фикстура `probemod.children-fixture.yaml` — **заказана**; роль-близнец «И» с `resourceNames: [b1]` — строкой роли из правил домена, не фикстурой манифеста (`kaname#965`) | прочитано |
 
 ## DoD
 
@@ -519,6 +553,9 @@ o типа N, когда выполнены оба условия:
     зелёные: ось вложенности — внутри единственного предиката;
 - фикстура `registry.public-read-fixture.yaml` — роли таблицы П1; соседу — редакция 11 (Р5)
   и её ревью дельты до вливания кода;
+- `kaname#965`: `go test ./internal/manifest/ -run '^TestObjectRefs_' -count=1` — находки
+  ND-04 (з) дословно, близнецы зелёные; ND-05 (б) зелёная на строке роли, положенной
+  применителем в обход загрузчика;
 - `make lint` и полный хук отправки зелёные; комментарий `DoD-proof @<sha>` в задаче `#874`.
 
 ## Решения диспетчера 2026-10-17 по вопросам В1–В5

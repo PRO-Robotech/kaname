@@ -202,6 +202,9 @@ resources:
       - name: member_remover
         definition: editor
         position: afterVerbs
+      - name: service_account_creator
+        definition: '[service_account] or editor'
+        position: afterVerbs
     verbs:
       - {name: get, from: [owner, super_admin]}
       - {name: list, from: [owner, super_admin]}
@@ -731,6 +734,8 @@ resources:
       - list
       - update
       - delete
+    containerVerbs:
+      - {name: create, parent: account, relation: service_account_creator}
 
   - name: group
     objectType: iam_group
@@ -1021,6 +1026,28 @@ roles:
       - module: iam
         resources: [serviceAccount]
         classes: ["*"]
+
+  # Роль СОЗДАТЕЛЯ (kaname#1003, приёмка service-account-creation-is-its-own-right.md,
+  # Р2): создавать служебные учётки в аккаунте выдачи и вести ТОЛЬКО созданные
+  # самим субъектом — без прав на проекты, группы, роли и без права выдавать.
+  # Правило 1 называет контейнерное действие `create` поимённо и пишет
+  # `account#service_account_creator` на области выдачи; правило 2 — глаголы на
+  # учётках, созданных субъектом (`createdBySubject`). Выдаётся только учётке,
+  # только на аккаунт, только на всю область; ведение действует, пока действует
+  # хотя бы одна выдача роли субъекту.
+  - id: iam.service_account.creator
+    description: "Create service accounts and manage the ones you created"
+    tier:
+      tierType: iam.cluster
+      tierId: cluster_root
+    rules:
+      - module: iam
+        resources: [serviceAccount]
+        verbs: [create]
+      - module: iam
+        resources: [serviceAccount]
+        verbs: [get, list, update, delete]
+        createdBySubject: true
 
   - id: iam.service_account.edit
     description: "Edit ServiceAccount"

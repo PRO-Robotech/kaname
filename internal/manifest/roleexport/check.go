@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -245,10 +246,11 @@ func judgeResource(facts VerbFacts, m *manifest.Manifest, roleID string, rule ma
 	}
 
 	fgaType, _ := authzmap.ObjectType(rule.Module, resource)
+	policy := rolePolicy(m.Module)
 	for _, verb := range rule.Classes {
 		class := classOf(m, verb)
 		judged++
-		if len(Covers(facts, own, fgaType, class)) > 0 {
+		if len(Covers(facts, policy, own, fgaType, class)) > 0 {
 			continue
 		}
 		faults = append(faults, Finding{
@@ -294,17 +296,18 @@ func judgeByModelVerbs(facts VerbFacts, m *manifest.Manifest, roleID string, rul
 
 	fgaType, _ := authzmap.ObjectType(rule.Module, resource)
 	typeVerbs := facts.VerbsOfType(fgaType)
+	policy := rolePolicy(m.Module)
 	var faults []error
 	judged := 0
 	for _, verb := range rule.Classes {
 		class := classOf(m, verb)
 		judged++
 		// Отдельной охраны «набор типа пуст» здесь нет намеренно: `GrantedVerbs`
-		// сверяет каждый глагол, включая удаление, которое влечёт правка, с
-		// набором типа, и на пустом наборе отдаёт пусто на любом пути. Охрана
+		// сверяет каждый глагол с набором типа, и на пустом наборе отдаёт пусто
+		// на любом пути. Охрана
 		// была бы эквивалентным мутантом, а исход «тип без глаголов — находка»
 		// держит проба (TestRuleOnResourceWithoutOwnServiceRefusesATypeWithoutModelVerbs).
-		if len(facts.GrantedVerbs(fgaType, []string{class}, typeVerbs)) > 0 {
+		if len(facts.GrantedVerbs(fgaType, []string{class}, typeVerbs, policy)) > 0 {
 			continue
 		}
 		faults = append(faults, Finding{
@@ -366,6 +369,7 @@ func classOf(m *manifest.Manifest, verb string) string {
 // искать её у себя.
 func emptyClassDetail(facts VerbFacts, roleID, module, resource, verb, class, fgaType string,
 	own []Action) string {
+	policy := rolePolicy(module)
 	var b strings.Builder
 	fmt.Fprintf(&b, "роль %q: класс %q на ресурсе %q модуля %q не покрывает ни одного "+
 		"пригодного действия", roleID, class, resource, module)
@@ -381,7 +385,7 @@ func emptyClassDetail(facts VerbFacts, roleID, module, resource, verb, class, fg
 			module, resource)
 	}
 
-	if skipped := SkippedByPlane(facts, own, fgaType, class); len(skipped) > 0 {
+	if skipped := SkippedByPlane(facts, policy, own, fgaType, class); len(skipped) > 0 {
 		fmt.Fprintf(&b, "Действий этого ресурса, которые класс покрыл бы, но которые живут на "+
 			"ПЛОСКОСТИ ИСПОЛНЕНИЯ, — %d: %s. Арендатору они недоступны by construction "+
 			"(внутренний слушатель), поэтому ролью арендатора не выдаются ни при каком классе; "+
@@ -401,7 +405,7 @@ func emptyClassDetail(facts VerbFacts, roleID, module, resource, verb, class, fg
 		b.WriteString(". ")
 	}
 
-	if suitable := suitableClasses(facts, own, fgaType); len(suitable) > 0 {
+	if suitable := suitableClasses(facts, policy, own, fgaType); len(suitable) > 0 {
 		fmt.Fprintf(&b, "Пригодные классы этого ресурса: %s. ", strings.Join(suitable, ", "))
 	} else {
 		b.WriteString("Пригодных классов у этого ресурса НЕТ НИ ОДНОГО — ролью модуля он " +
@@ -451,7 +455,7 @@ func gateSummary(own []Action) (exempt int, pairs []string) {
 // первый несёт глаголы, объявленные именно этим типом (`addTargets` и подобные),
 // второй — `create`, у которого пообъектного отношения нет вовсе и который
 // покрывает действие ярусом. Ни один из двух здесь не переобъявляется.
-func suitableClasses(facts VerbFacts, own []Action, fgaType string) []string {
+func suitableClasses(facts VerbFacts, policy domain.RulePolicy, own []Action, fgaType string) []string {
 	seen := map[string]bool{}
 	var candidates []string
 	for _, c := range append(facts.VerbsOfType(fgaType), manifest.CanonicalVerbs()...) {
@@ -462,7 +466,7 @@ func suitableClasses(facts VerbFacts, own []Action, fgaType string) []string {
 	}
 	var out []string
 	for _, c := range candidates {
-		if len(Covers(facts, own, fgaType, c)) > 0 {
+		if len(Covers(facts, policy, own, fgaType, c)) > 0 {
 			out = append(out, c)
 		}
 	}

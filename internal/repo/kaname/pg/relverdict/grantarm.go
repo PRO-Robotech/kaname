@@ -252,13 +252,36 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
                   ELSE false
              END, false) IS NOT NULL`
 	// Ветвь правила роли на самом объекте — у правила любого уровня.
+	//
+	// ЧЕТВЁРТАЯ ОСЬ — СЕЛЕКТОР СОЗДАТЕЛЯ (kaname#1003, приёмка
+	// `service-account-creation-is-its-own-right.md`, Р2а). Строка селектора с
+	// `created_by_subject` достаёт до объекта только для субъекта выдачи, который
+	// объект создал: факт создателя лежит в строке учётки (`service_accounts.
+	// created_by_*`), и только у неё — у объекта другого вида селектор не выбирает
+	// ничего (сторона отказа). Ось стоит здесь, в единственном доме предиката, и
+	// поэтому её получают все формы вопроса — прямой, страничный, перечень, «кто
+	// имеет право» и разбор оснований; материализатор ставит ту же стену своей
+	// формой (`reconcile.creatorGrantees`). Субъект выдачи — колонка `bs`
+	// (`access_binding_subjects`): у группы создателем учётка не бывает, и
+	// групповая выдача объекта не получает. Обёртка «NULLIF(…, false) IS NOT NULL»
+	// — тот же приём оценки, что у осей ниже: у строки без селектора «или»
+	// останавливается на первом слагаемом, а подзапрос по первичному ключу учётки
+	// исполняется только у строки с селектором.
+	creator := `
+     AND NULLIF(NOT rs.created_by_subject OR (bs.subject_type = 'service_account' AND EXISTS (
+             SELECT 1
+               FROM kaname.service_accounts csa
+              WHERE ` + objectModelTypeExpr + ` = 'iam_service_account'
+                AND csa.id = ` + objectIDExpr + `
+                AND csa.created_by_type = 'service_account'
+                AND csa.created_by_id = bs.subject_id)), false) IS NOT NULL`
 	arm := verb + `
      AND (
              rs.arm = 'anchor'
           OR (rs.arm = 'names'  AND ` + objectIDExpr + ` = ANY (rs.resource_names))
           OR (rs.arm = 'labels' AND ` + labelsExpr + ` IS NOT NULL
                                 AND ` + labelsExpr + ` @> rs.match_labels)
-         )`
+         )` + creator
 	// Без признака вложенности — вид ствола: только строка верхнего уровня, ось
 	// цели — на привязке. Вложенная строка не пускается вовсе (сторона отказа).
 	if !nesting {

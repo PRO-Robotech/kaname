@@ -1,0 +1,104 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/unregistration-revokes-its-grants.md
+  sha256: 17eaa8f261a021f98b15685612f67450921a2f53387900a7d1feae702cddc63b
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали. Вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  code_branch: '963'
+  code_commit: 5c0f8f13d
+  task: PRO-Robotech/kaname#963
+  related_tasks: [PRO-Robotech/kaname#965, PRO-Robotech/kaname#969]
+  review_form: delta_carry_over
+  predecessor_record: >-
+    docs/specs/reviews/unregistration-revokes-its-grants/0743cd4f3f4ac1b9519870bce93475a339c7729f202ee6cc1ad5386a87bd97b4.yaml
+    (APPROVED, перенос дельты)
+  fingerprint_predicate: >-
+    sha256sum <документ> → 17eaa8f2…dc63b; одобренная копия
+    kacho-workspace/tmp/963-acc/unregistration-revokes-its-grants.0743cd4f.md → 0743cd4f…bd97b4.
+    Оба совпали с заданием.
+  delta_predicate: >-
+    diff -u 963-acc/unregistration-revokes-its-grants.0743cd4f.md <документ> → 145 строк,
+    6 участков: §2 (новая строка про kaname#969); мир П3-У; URG-35, -36, -37; URG-30 (Тогда);
+    §5, строка 35/36; «Опора», строка соседа о вложенных правилах. Других участков нет.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-24'
+
+effective_approval:
+  issued: true
+  ban1_lifted: true
+  scope: >-
+    Только редакция 17eaa8f2…. Одобрение 0743cd4f перенесено проверкой дельты, а не новым
+    кругом.
+
+checks:
+  delta_limited: >-
+    Да. Все шесть участков относятся к двум узлам решения диспетчера: вынос
+    утверждения URG-30 в kaname#969 и мир F2 под фактическую пробу. Остальной текст побайтно
+    равен 0743cd4f (diff -u).
+  urg30_carve_out: >-
+    Из URG-30 убрано только `Check(usr-C, …, X) → allow`. Остались gRPC OK, `ACTIVE` у
+    выдачи usr-D и `Check(usr-D, …, X) → allow`. На них по-прежнему краснеет инъекция I4
+    (§6 п.6, строка 1062). Снятие выдач по-прежнему утверждают URG-01, -02, -06, -07,
+    -11, -15, -16 и инъекция I1, вынос их не трогает: утверждение про usr-C было о
+    кортежах владельца, а не о выдаче. Дефект #963 не спрятан.
+    kaname#969 существует: `gh issue view 969 -R PRO-Robotech/kaname` → OPEN, P1.
+  f2_matches_probe: >-
+    «Тогда» URG-35…37 совпадают с утверждениями пробы
+    internal/apps/kaname/api/access_binding/unregister_nested_names_world_integration_test.go
+    @5c0f8f13d:
+    - URG-35 — строки 143-154: одно правило; одно вложенное с [t3]; resources и verbs
+      владельца прежние; t1 deny, t3 allow; t1 deny после повторной регистрации.
+    - URG-36 — строки 169-175: вложенных нет; resources = [registries]; t3 и t4 deny;
+      X allow.
+    - URG-37 — строки 189-192: правила прежние; t3 allow; строк сужения 0.
+    Контроли фикстуры (136-137, 163-164, 184) — те, что названы в «Дано». Держатели §5
+    процитированы дословно.
+  red_without_subject: >-
+    До кода URG-35 краснеет на `ResourceNames == [t3]`: имена остаются [t1, t3]. URG-36
+    краснеет на `Empty(Children)`. I8 краснит URG-36 по t3 и t4. Близнец URG-37 зелен до кода.
+  world_honesty: >-
+    Строка «Опора» прямо говорит: id репозиториев без `/` реальный registry не создаёт,
+    и предмет держится на уровне контракта kaname, где id непрозрачен. Довод о типах
+    probemod (их нет в модели прав) записан как решение диспетчера. Р7 и его утверждения
+    не сузились.
+  disclosure: >-
+    Новая строка §2 называет условие (запоздалое снятие, кортежи владельца) и задачу.
+    Координаты кода нет, следствие — только в заголовке задачи, в форме требования.
+    Связки трёх элементов в документе нет. Остальные участки описывают мир пробы.
+
+important:
+  - kind: PRODUCER
+    scenario: URG-30
+    claim: >-
+      Проба пока не совпадает с «Тогда» документа. В
+      internal/apps/kaname/api/access_binding/unregister_revokes_grants_world_integration_test.go:681
+      @5c0f8f13d осталось утверждение `w.ask(usrC, …) → true`, вынесенное в kaname#969.
+      Пока оно стоит, URG-30 красный по чужому дефекту, и §6 п.5 («все зелёные») не
+      выполнится. Снять строку 681 из пробы #963; держатель переезжает в #969.
+
+event:
+  status: not_performed
+  body: "acceptance-reviewer · APPROVED · 17eaa8f261a021f98b15685612f67450921a2f53387900a7d1feae702cddc63b"
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: false
+  public_contract_field: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu

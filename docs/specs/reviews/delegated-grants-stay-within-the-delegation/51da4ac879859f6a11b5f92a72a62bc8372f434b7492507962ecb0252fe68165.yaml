@@ -1,0 +1,201 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/delegated-grants-stay-within-the-delegation.md
+  sha256: 51da4ac879859f6a11b5f92a72a62bc8372f434b7492507962ecb0252fe68165
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 5c6b7c07804d6972f2e8a3eb3e8f92b92c7f43d0
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status` → `?? docs/engineering/acceptance/…`); судится
+    содержимое по отпечатку, а не коммит.
+  branch: 986-acceptance
+  task: PRO-Robotech/kaname#986
+  related_tasks: [PRO-Robotech/kaname#1003, PRO-Robotech/kaname#982, PRO-Robotech/kaname#963]
+  lines: 1056
+  round: 1
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/delegated-grants-stay-within-the-delegation.md в копии
+    kacho-workspace/tmp/kn-986-acceptance @ 5c6b7c078 → 51da4ac8…52fe68165 (совпало с заданием)
+  measurement_revisions: >-
+    Все замеры — чтение дерева kaname в той же копии @ 5c6b7c078 и corelib v1.15.0 из кэша
+    модулей (версия закреплена `go.mod`).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-25T12:17:00Z'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Блокирующих четыре (PRODUCER ×3, COVERAGE ×1). Санкции на код по этой редакции нет.
+
+premise:
+  task_premise: >-
+    Подтверждена в части, проверенной рецензентом: три пути права выдавать
+    (helpers.go:155 requireGrantAuthority; Path 0 IsClusterAdminE, Path 1 :239, Path 2
+    fgaHoldsScopeAdminE → relations.Check «admin» :320); отзыв действует с коммита
+    (delete.go:23-31 «ОТЗЫВ ДЕЙСТВУЕТ С КОММИТА») — поэтому GD-20 детерминирован после `done`.
+    «Правило R4» рецензент не искал повторно — принято допущение А1 автора, вопрос В2 открыт.
+
+blocking:
+  - id: B1
+    kind: PRODUCER
+    scenario: GD-30 a, c (и e — в части «побайтово равна b»); GD-41 a; через §5.3 — SRI-65, SRI-67, SRI-71
+    claim: >-
+      Отзыв и удаление выдачи делегатом при названных производителях не производятся.
+      `AccessBindingService.Revoke` и `Delete` несут пообъектную аннотацию `v_delete` на
+      `iam_access_binding:<access_binding_id>` (access_binding_service.proto:67-68, :419-420;
+      permission_catalog.json:2539-2545), и её на арендаторском слушателе исполняет собственная
+      дверь kaname `authzguard.NewOwnDoor` (cmd/kaname/serve.go:885; own_door.go:39-49 «карта
+      ТОТАЛЬНА … незамапленный отвергается»). Делегат (sva-iss) отношений на объекте выдачи не
+      держит — это утверждает сам документ (Р3, GD-15: выдач с субъектом sva-iss 0). Значит
+      Revoke B10 от sva-iss отвергается дверью ДО use-case, и правка `revoke.go:105` /
+      `delete.go:125`, названная в §5.1 производителем GD-30, до вызова не доходит; GD-41 a
+      вместо текста deletion_protection получит отказ двери. Интеграционные пробы, вызывающие
+      use-case напрямую, позеленели бы при неработающем глаголе на настоящем слушателе.
+    measured: >-
+      Прочтено @5c6b7c078: access_binding_service.proto:61-68, :413-420;
+      permission_catalog.json:2539-2545; serve.go:870-893; own_door.go:20-60;
+      fga_model.fga `type iam_access_binding` (v_delete: [user, service_account, group#member]
+      or super_admin).
+    fix: >-
+      Назвать производителя прохода двери и включить его в §3 и критерий безопасности: либо
+      аннотация Revoke/Delete → решает обработчик (`<exempt>`/HANDLER_DECIDES, как у Create —
+      это расширение поверхности, назвать в «безопасность» и держать отрицаниями GD-30 b/d и
+      посторонним без права), либо иной путь, совместимый с Р3. Держатель GD-30/GD-41 a —
+      проба через слушатель (или newman-кейс S2), а не только вызов use-case.
+  - id: B2
+    kind: PRODUCER
+    scenario: GD-30 a («ключа `revokedByUserId` нет»)
+    claim: >-
+      Существующий писатель отзыва на вызывающем-учётке пишет не пусто: `actor =
+      PrincipalUserID` → пусто, затем подстановка `binding.GrantedByUserID` (у выдачи делегата
+      пуст, GD-10) → `"system:revoke"` (revoke.go:185-198). Контракт перечисления это
+      закрепляет: `REVOCATION_REASON_REVOKE — revoked_by_user_id — вызывающий`
+      (access_binding.proto:258). §5.1 правки этого поведения не заказывает, Р4 говорит только
+      об отзыве делегирования. «Тогда» GD-30 a названным производителем не производится.
+    measured: прочтено @5c6b7c078 revoke.go:185-198, access_binding.proto:252-266.
+    fix: >-
+      Либо утверждать фактическое значение (`revokedByUserId: "system:revoke"`), либо заказать
+      смену подстановки как изменение контракта (затрагивает ВСЕ отзывы учёткой, не только
+      делегатом) с производителем, близнецом и записью в Р6/Р4.
+  - id: B3
+    kind: PRODUCER
+    scenario: GD-61 c
+    claim: >-
+      Пара «производитель — текст» несогласована. Названный производитель
+      `shared.ValidatePagination` (pagination.go:60-62) отвечает сообщением
+      `Illegal argument page_size`; `corevalidate.PageSize` (corelib v1.15.0 validate.go:250-253)
+      — сообщением `invalid argument` с описанием нарушения поля
+      `page_size must be in [0..1000] (0 means default)`; сообщение `page_size must be in …`
+      даёт лишь репозиторий (internal/repo/kaname/pg/helpers.go:28). Документ отмечает это как
+      исправленное в редакции 1, но ссылка :60 указывает на другой текст.
+    measured: >-
+      Прочтено: pagination.go:60-91; corelib errors.go:80 (`invalid argument`), validate.go:249-259;
+      pg/helpers.go:28.
+    fix: >-
+      Назвать один производитель (для `List` по правилу — сырой формат до права,
+      `ValidateRawPagination`) и утверждать его форму: сообщение + `BadRequest.field_violations[0]`
+      (`field='page_size'`, описание дословно).
+  - id: B4
+    kind: COVERAGE
+    scenario: Р2 п.5, Д6 — нет ни одного сценария
+    claim: >-
+      Граница «группа — из аккаунта делегирования, человек — участник аккаунта» не держится ни
+      одним сценарием: в D1 `subjectTypes = {SERVICE_ACCOUNT, SYSTEM_CLASS}`, поэтому GD-11 d
+      (человек) и e (группа) отвергаются осью типа субъекта, а не Д6. Делегирование с
+      `subjectTypes` ⊇ {USER, GROUP} допустимо формой (1…4), и реализация, пропустившая Д6 для
+      группы или человека, прошла бы все пробы — делегат выдавал бы права чужой группе или
+      постороннему человеку. Кроме того, «участник аккаунта» не определён предикатом: у типа
+      `account` модели нет отношения членства (определения: cluster, super_admin, owner, admin,
+      editor, viewer, v_get, v_list, v_update, v_delete, member_remover), источник членства —
+      `MembershipService` (membership_service.proto:68) — документом не назван.
+    measured: >-
+      Прочтено @5c6b7c078: fga_model.fga `type account` (перечень define), membership_service.proto:68,
+      domain/group.go:17 (AccountID), domain/service_account.go:20 (AccountID).
+    fix: >-
+      Назвать источник «участника» (ресурс/таблица и предикат). Добавить делегирование с
+      `subjectTypes` ⊇ {USER, GROUP} и пары, отличные одним фактом: группа acc-A → создана /
+      группа acc-B → `permission denied`; участник acc-A → создана / не участник →
+      `permission denied`.
+
+important_nonblocking:
+  - "GD-45: `ServiceAccountService.Delete` асинхронен (service_account/delete.go:70 operations.Run) — отказ будет `Operation.error`, а не синхронным; назвать канал в GD-45 и строке Р6."
+  - "GD-10, GD-12, GD-13 «`Get` выдачи»: вызывающий не назван; делегат `v_get` на объекте выдачи не держит (та же дверь, что B1) — назвать usr-A."
+  - "Р1/DoD п.1: право `Get` «держатель права выдавать либо делегат» статической пообъектной аннотацией не выражается — назвать аннотацию каждого из четырёх методов (решает обработчик / сужение по данным) и где живёт проверка."
+  - "Старшинство путей: вызывающий-учётка, держащая и обычное право выдавать, и делегирование, — кладётся ли `delegationId` и отзывает ли такую выдачу отзыв делегирования? Дефолт рецензента: сперва три прежних пути, делегированный — только когда они отказали; `delegationId` ставится только им."
+  - "GD-06 c: «живой точечный тип проекта, как его публикует каталог прав» — подставить точную строку типа."
+  - "Имя поля в отказах формы: kaname преимущественно пишет snake_case в `field_violations` (`InvalidArg(\"account_id\"` ×5, `page_size` ×3; `ownerUserId` ×3 — исключение); выбрать одну форму и сверить с соседями, текст — контракт (`api-error-tone`)."
+  - "GD-70: «выполнены GD-01, GD-10 a, GD-30 a, GD-13, GD-40» — Given GD-40 требует B10 ACTIVE, GD-30 a его отзывает; написать «шаги When» и полный состав выдач, от которого считается `revoked_binding_count: 1`."
+  - "GD-20: названный близнец (вызов от sva-iss при D1) требует D1, которого в Given нет; естественный близнец — выдача V' до отзыва usr-E, уже стоящая в Given."
+  - "Р5: аудит отзыва делегированной выдачи ОБЫЧНЫМ держателем права (не делегатом) — несёт ли `delegation_id`, не сказано."
+  - "Опора svc-registry — DRAFT (fa-b7): при смене её отпечатка до круга 2 таблицу §5.3 сверить заново."
+
+confirmed:
+  - "Производитель назван у 35 из 35 сценариев (§5.1, `grep -c '^#### GD-'` = 35 по файлу); B1–B3 — о том, что названный производитель не производит утверждаемое."
+  - "Близнец у отрицаний назван во всех группах; GD-11 — двенадцать строк, каждая отличается от V одним полем."
+  - "Объём: предмет 2 #986 вынесен с предикатом снятия и `Refs`; «Что НЕ входит» — десять пунктов с носителями."
+  - "Отзыв выдачи действует с коммита (delete.go:23-31) — GD-20 и GD-42 детерминированы после `done`."
+  - "Текст deletion_protection в GD-41 a дословно совпадает с revoke.go:114-115; скрытие существования отзыва — revoke.go:94-98."
+  - "Отношения admin/editor/viewer/v_get объявлены у `account` и `project` (fga_model.fga) — восемь вопросов GD-26 задаваемы."
+  - "`granted_by_user_id` у выдачи учётки пуст (create.go:233-236) — утверждение GD-10 «ключа grantedByUserId нет» производится."
+  - "Раскрытия дефекта защиты нет: документ описывает новый механизм и его отказы, пути к существующему дефекту не собирает."
+
+constructibility:
+  seeded: 0
+  by_named_fixture: >-
+    Мир П6/SC (newSCWorld, newPCRWorld), registerRegistry/registerRepository, deliverNewEdition,
+    seedServiceAccount, seedProjectInAccount, createDone — существуют; заказаны: newGDWorld,
+    registry.delegation-fixture.yaml, вариант registerRegistry в чужом проекте.
+  not_constructible_as_written: [GD-30 a, GD-30 c, GD-41 a]
+  not_executed: >-
+    Посев не ставился: testcontainers — тяжёлый класс, только внешним кластером слотом; стенда и
+    разрешения на посев в задании нет. Вывод B1 — из аннотаций контракта и провязки двери,
+    прочитанных на 5c6b7c078.
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: false
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: вердикт не одобрение — события санкции нет; тело события возврата ниже публикует курьер, если диспетчер решит
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
+    acceptance-reviewer · CHANGES_REQUESTED · sha256 51da4ac879859f6a11b5f92a72a62bc8372f434b7492507962ecb0252fe68165
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    note: записей ревью этого документа до этой нет (каталог создан этой записью)

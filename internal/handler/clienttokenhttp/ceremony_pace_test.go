@@ -42,7 +42,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/failurewindow"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/issuinglistener"
 )
 
@@ -757,8 +756,7 @@ func TestKNPACE36_SourceRuleOnTheTokenEndpoint(t *testing.T) {
 	clock := &paceClock{now: paceT0}
 	window, err := failurewindow.New(paceFailedProofs, paceWindow, clock.Now)
 	require.NoError(t, err)
-	rule := issuingsource.New(grpcsrv.NewTrustDomain(issuinglistener.TrustDomain),
-		servicesan.NewForm(issuinglistener.ServiceNameForm))
+	rule := issuingsource.New(grpcsrv.NewTrustDomain(issuinglistener.TrustDomain), issuinglistener.ModuleRoster())
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
 		BodyCeiling:     testBodyCeiling,
 		InFlightCeiling: paceCeiling,

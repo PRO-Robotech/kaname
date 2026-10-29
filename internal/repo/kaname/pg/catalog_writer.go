@@ -77,8 +77,9 @@ const CatalogLockKey = "kaname.module_catalog"
 //	`catalog_resource`  `resource`, `object_type`, `parent_types`,
 //	                    `public_read_to_children`, `live` — ровно то, что читает
 //	                    условие изменения `UpsertResource`, плюс ключ снятия
-//	`catalog_verb`      `resource`, `verb`, `per_object`, `live` — ровно условие
-//	                    изменения `UpsertVerb`, плюс ключ снятия
+//	`catalog_verb`      `resource`, `verb`, `per_object`, `container_parent`,
+//	                    `container_relation`, `live` — ровно условие изменения
+//	                    `UpsertVerb`, плюс ключ снятия
 //
 // Причина снятия (`retired_reason` / `retired_at` / `superseded_by`) НЕ входит:
 // исхода применения она не меняет — ни один `WHERE` писателя её не читает, — а
@@ -114,6 +115,8 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 	      FROM kaname.catalog_resource WHERE module = $1
 	    UNION ALL
 	    SELECT 'v:' || resource || '.' || verb || ':' || live::text || ':' || per_object::text
+	           || CASE WHEN container_relation IS NULL THEN ''
+	                   ELSE ':' || container_parent || ':' || container_relation END
 	      FROM kaname.catalog_verb WHERE module = $1
 	  ) s)`
 
@@ -178,6 +181,8 @@ func (w catalogWriter) LockCatalog(ctx context.Context) error {
 // ещё нет, ключом не держит никто, а второго применителя не пускает
 // консультативный замок каталога.
 func (w catalogWriter) LockModuleRow(ctx context.Context, module string) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строка модуля FOR UPDATE — первым строчным
+	// замком, за которым применитель ждёт другого писателя (после 2р).
 	_, err := w.tx.Exec(ctx, `
 		SELECT 1 FROM kaname.catalog_module
 		 WHERE module = $1
@@ -228,6 +233,10 @@ func (w catalogWriter) LockModuleRow(ctx context.Context, module string) error {
 // то, что есть, а строки, которых ещё нет, конкурента иметь не могут — второго
 // применителя не пускает консультативный замок каталога.
 func (w catalogWriter) LockModuleResources(ctx context.Context, module string) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строки ресурсов модуля — FOR UPDATE, ORDER BY
+	// dotted, одним оператором, после строки модуля. Писатели проекций роли берут
+	// те же строки FOR KEY SHARE тем же порядком и ВПЕРЁД вставок
+	// (lockCatalogResourceRows). Перепись — docs/changes/kn-922/lock-order-census.md.
 	_, err := w.tx.Exec(ctx, `
 		SELECT 1 FROM kaname.catalog_resource
 		 WHERE module = $1
@@ -271,14 +280,14 @@ func (w catalogWriter) ReadModule(ctx context.Context, module string) (catalog.R
 	}
 
 	verbRows, err := w.tx.Query(ctx,
-		`SELECT module, resource, verb, per_object FROM kaname.catalog_verb
+		`SELECT module, resource, verb, per_object, COALESCE(container_parent, ''), COALESCE(container_relation, '') FROM kaname.catalog_verb
 		  WHERE module = $1 AND live ORDER BY resource, verb`, module)
 	if err != nil {
 		return out, fmt.Errorf("прочитать действия модуля %s: %w", module, err)
 	}
 	out.Verbs, err = pgx.CollectRows(verbRows, func(row pgx.CollectableRow) (catalog.VerbRow, error) {
 		var v catalog.VerbRow
-		return v, row.Scan(&v.Module, &v.Resource, &v.Verb, &v.PerObject)
+		return v, row.Scan(&v.Module, &v.Resource, &v.Verb, &v.PerObject, &v.ContainerParent, &v.ContainerRelation)
 	})
 	if err != nil {
 		return out, fmt.Errorf("прочитать действия модуля %s: %w", module, err)
@@ -463,14 +472,18 @@ func (w catalogWriter) UpsertResource(ctx context.Context, r catalog.ResourceRow
 // материализуется).
 func (w catalogWriter) UpsertVerb(ctx context.Context, v catalog.VerbRow) (bool, error) {
 	return w.changed(ctx, `
-		INSERT INTO kaname.catalog_verb (module, resource, verb, per_object)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO kaname.catalog_verb (module, resource, verb, per_object, container_parent, container_relation)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''))
 		ON CONFLICT (module, resource, verb) DO UPDATE
 		   SET retired_at = NULL, live = true, retired_reason = NULL,
-		       per_object = EXCLUDED.per_object
+		       per_object = EXCLUDED.per_object,
+		       container_parent = EXCLUDED.container_parent,
+		       container_relation = EXCLUDED.container_relation
 		 WHERE catalog_verb.live IS DISTINCT FROM true
 		    OR catalog_verb.per_object IS DISTINCT FROM EXCLUDED.per_object
-		RETURNING 1`, v.Module, v.Resource, v.Verb, v.PerObject)
+		    OR catalog_verb.container_parent IS DISTINCT FROM EXCLUDED.container_parent
+		    OR catalog_verb.container_relation IS DISTINCT FROM EXCLUDED.container_relation
+		RETURNING 1`, v.Module, v.Resource, v.Verb, v.PerObject, v.ContainerParent, v.ContainerRelation)
 }
 
 // RetireVerb помечает строку действия снятой. Повторное снятие — ноль строк.

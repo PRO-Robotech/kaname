@@ -609,7 +609,9 @@ jobs:
       #
       # Взаимный TLS собственных фронтов передаётся прогонщику флагами: без
       # клиентского листа КАЖДЫЙ запрос умер бы на рукопожатии, то есть «без
-      # ответа», а не вердиктом о предмете.
+      # ответа», а не вердиктом о предмете. Внутреннему фронту — лист края
+      # (`--internal-front-client-*`): фронт допускает лишь личности перечня
+      # (SEC-1017-1), лист службы получил бы 403 до слушателя.
       - name: коллекции собственного REST-фронта гоняются (числовой вердикт)
         timeout-minutes: 15
         run: |
@@ -638,6 +640,8 @@ jobs:
             --service iam-token-facade-conformance \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
+            --internal-front-client-cert ../../.stand/pki/edge.crt \
+            --internal-front-client-key ../../.stand/pki/edge.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt
 
       # ── ВОЛНА СВЁРТКИ БАЗЫ: отказ без вердикта, а не пустая страница ──────
@@ -994,11 +998,14 @@ jobs:
             --service rbac-visibility-set \
             --service iam-access-binding-account-scope \
             --service iam-access-binding-include-revoked \
+            --service iam-access-binding-revocation-reason \
             --service iam-authz-grant-check-propagation \
             --service iam-service-account \
             --service kaname-cluster-admins \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
+            --internal-front-client-cert ../../.stand/pki/edge.crt \
+            --internal-front-client-key ../../.stand/pki/edge.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt
 
       # Артефакт публичного репозитория — только после чистки: окружение прогона
@@ -1187,43 +1194,43 @@ jobs:
   # конфиденциальные клиенты церемонии заводятся глаголом `Create` (kaname#405).
   # Им гоняется набор `kaname-authorization-code` (LINE-A-1, kaname#423).
   #
-  # ДВЕ ПОЛОВИНЫ, У КАЖДОЙ СВОЙ СТЕНД (kaname#941). Восемь наборов одним вызовом
-  # шли 3802–3905 с при пределе шага 3900 с и дважды подряд были им сняты
-  # (прогоны 39683935347, 39706916751): около 2520 с из них — ожидание сроков по
-  # часам (окна профиля по 15 мин, срок испытания 5 мин, KN747-15), и на одном
-  # стенде эти ожидания шли одно за другим. Подъём kind и образ — 125–141 с, он
-  # повторяется в каждой половине. Половина «вход» — шесть наборов человека
-  # посева в прежнем порядке; половина «ключи» — наборы, которые людей заводят
-  # сами (ключи доступа, смена адреса). Посевы идут в обеих: условия у половин
-  # одни и те же. Ни одна половина не снимает другую (`fail-fast: false`): исход
-  # каждой читается целиком. Широкая форма (3–4 шарда, план шардов в
-  # прогонщике) — kaname#848.
+  # ЗАДАНИЕ — МАТРИЦА ШАРДОВ, У КАЖДОГО ШАРДА СВОЙ СТЕНД (kaname#848). Восемь
+  # наборов одним вызовом шли 3802–3905 с при пределе шага 3900 с и дважды
+  # подряд были им сняты (прогоны 39683935347, 39706916751); две половины
+  # kaname#941 сняли предел, но шаг остался 30,3–35,1 мин (восемь прогонов
+  # ниже): время шага — сумма наборов, а три из них длинные сами по себе (их
+  # окна — литералы профиля и контракта). Разрез — план
+  # `tests/newman/chart-own-shards.txt` (там же — замер по набору и порядок
+  # внутри шарда); у каждого шарда подъём, провенанс и ВСЕ посевы задания,
+  # поэтому условие каждого набора создаётся на его стенде так же, как прежде.
+  # Подъём kind и образ — 125–141 с, он повторяется в каждом шарде.
+  #
+  # Перечень шардов матрицы — второе место о плане, и он держится трижды: до
+  # стенда — пробой `tests/newman/scripts/shard_plan_test.py` (шарды матрицы
+  # этого задания и плана совпадают в обе стороны, задание `suite`); на стенде —
+  # шард матрицы без строки плана отвергает прогонщик (код 2); после — шард
+  # плана без задания матрицы краснит сводный вердикт `chart-own-verdict`
+  # отсутствующим отчётом. Набор слушателя формы вне плана прогонщик отвергает
+  # с именем. `fail-fast: false`: отказ одного шарда не снимает вердикт других.
   chart-own:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'chart-own') }}
     needs: [changes]
-    name: стенд посадки own (kind) — ${{ matrix.title }}
+    name: стенд посадки own (kind), шард ${{ matrix.shard }} — полоса входа паролем и своя церемония
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - half: entry
-            title: вход, восстановление, церемония, второй фактор, регистрация, подтверждение адреса
-            suite-minutes: 40
-            job-minutes: 55
-          - half: keys
-            title: ключи доступа, смена адреса
-            suite-minutes: 45
-            job-minutes: 60
-    # Предел задания — предел шага наборов плюс 15 мин: до наборов уходит около
-    # 4 мин (инструменты, самопробы, подъём, посевы), после — около 2 мин.
-    timeout-minutes: ${{ matrix.job-minutes }}
+        shard: [sf, ec, ak]
+    # Предел задания — предел шага наборов (30) плюс 15 мин: до наборов уходит
+    # около 4 мин (инструменты, самопробы, подъём, посевы), после — около 2 мин.
+    timeout-minutes: 45
     # Вид PrometheusRule на голом kind не заводится ничем, поэтому правила
     # тревоги выключены ручкой: их предмет — объект мониторинга, а не подъём.
     env:
       KANAME_STAND_ALERT_RULES: "off"
       KANAME_STAND_CLUSTER: kaname-chart-own-ci
       KANAME_STAND_IMAGE: kaname:stand-own-ci
+      CHART_OWN_SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
@@ -1385,79 +1392,40 @@ jobs:
       # запросы, упавшие утверждения, строка на коллекцию. Лист края и УЦ стенда
       # — те, что посев вынес из Secret стенда и по которым доказал способность.
       #
-      # КОЛЛЕКЦИИ ОДНОЙ ДВЕРИ — ОДНИМ ВЫЗОВОМ НА ПОЛОВИНУ. Восстановление доступа
-      # (`kaname-recovery-lane`, Ф5) и второй фактор (`kaname-second-factor`, Ф12)
-      # стоят на том же слушателе формы, читают те же `loginLaneBaseUrl`,
-      # `loginLaneEmail` (второй фактор — и `loginLanePassword`) и ждут того же
-      # условия стенда, что вход; церемония `authorization_code` (LINE-A-1,
-      # kaname#423) ждёт обоих посевов выше. Второй вызов прогонщика стёр бы
-      # `out/` первого до выкладывания. Порядок несущий: вход первым —
-      # восстановление способа входа не меняет, а его отказ читается раньше;
-      # церемония после входа — её отказ читается после отказа входа; второй
-      # фактор последним из наборов человека посева — он заводит фактор тому же
-      # человеку и снимает его своим
-      # последним кейсом, и набор, прогнанный после незавершённого снятия, мерил
-      # бы уже другого человека. Регистрация (`kaname-registration`, Ф4) и
-      # подтверждение адреса (`kaname-address-verification`, kaname#456) — после
-      # всех: людей они заводят сами, своих на прогон, и человека посева не
-      # трогают; подтверждение читает код письма у приёмника стенда
-      # (`standMailboxUrl`), как восстановление и кейсы второго фактора со своим
-      # человеком. Ключи доступа (`kaname-access-keys`, Ф7, kaname#268) — первыми
-      # в половине «ключи»: двух своих людей набор заводит регистрацией и
-      # подтверждает адрес кодом письма, токен человека выковывает церемонией с
-      # клиентом посева церемонии, личность `f13Person` прогонщик заводит заново
-      # перед набором, а ключи свои набор снимает последним кейсом. Смена адреса
-      # (`kaname-email-change`, kaname#635) — после ключей доступа: людей набор
-      # заводит сам и подтверждает их адрес кодом письма, коды смены и
-      # уведомление читает у того же приёмника.
-      # Выход второго фактора готов к публикации (kaname#417): срез ниже знает виды
-      # его удостоверений, а утверждения набора значений не печатают.
+      # КОЛЛЕКЦИИ ШАРДА — ОДНИМ ВЫЗОВОМ, ПЕРЕЧЕНЬ — ИЗ ПЛАНА (kaname#848), а не
+      # списком `--service` здесь: план один на прогонщик, перепись долга набора
+      # и сводный вердикт. Все наборы стоят на одном слушателе формы, читают
+      # `loginLaneBaseUrl` и ждут условий посевов выше; второй вызов прогонщика
+      # стёр бы `out/` первого до выкладывания. Порядок ВНУТРИ шарда несущий и
+      # назван в плане `tests/newman/chart-own-shards.txt` вместе с доводом.
+      # Личность `f13Person` набора ключей доступа прогонщик заводит заново перед
+      # набором (kaname#860) в любом шарде, где набор стоит. Выход второго
+      # фактора готов к публикации (kaname#417): срез ниже знает виды его
+      # удостоверений, а утверждения набора значений не печатают.
       #
-      # ПРЕДЕЛ ШАГА — ПО ЗАМЕРУ ПОЛОВИНЫ, А НЕ С ЗАПАСОМ НАУГАД (kaname#941).
-      # Время половин взято из журналов пяти прогонов шага одним вызовом
-      # (39294154731, 39314539710, 39339384072, 39347109767, 39706916751) — от
-      # вызова прогонщика до итога последней коллекции половины:
-      #   · «вход» — 1827–1858 с, из них ожидание окна профиля второго фактора
-      #     (kaname#480: `addressWindow`, `selfServiceFreshness` по 15 мин,
-      #     `deploy/values.prod.yaml`) — 905 с и окна TOTP — 120 с; предел 40 мин,
-      #     запас 29 % к наибольшему;
-      #   · «ключи» — 1943–2062 с, из них окно свежести EC-27 (15 мин) — 905 с,
-      #     срок испытания (`ChallengeTTL`, 5 мин, Ф7-34 и Ф7-54) — 301 с,
-      #     KN747-15 — 289 с, интервал писем EC-26 — 60 с; предел 45 мин, запас
-      #     31 % к наибольшему.
-      # Зависание снимается шагом, а не заданием. Окно, выросшее в профиле либо в
-      # контракте, съедает запас половины, где оно ждётся, — и пересчёт идёт
-      # здесь, по журналу шага, а не подъёмом предела вслепую.
-      - name: наборы посадки own гоняются — ${{ matrix.title }} (числовой вердикт)
-        timeout-minutes: ${{ matrix.suite-minutes }}
-        env:
-          OWN_HALF: ${{ matrix.half }}
-          OWN_TITLE: ${{ matrix.title }}
+      # ПРЕДЕЛ ШАГА — ПО ЗАМЕРУ, А НЕ С ЗАПАСОМ НАУГАД. Время коллекций — из
+      # журналов восьми прогонов двух половин kaname#941 (40075128618,
+      # 40076959645, 40074110518, 40066886429, 40062318602, 40046705031,
+      # 40046358005, 40013779496), от строки начала коллекции до строки следующей;
+      # по шардам плана — сумма наибольших: `sf` 23,1 мин, `ec` 22,9, `ak` 20,6.
+      # Самый долгий — второй фактор, и он один в шарде: кейс окна профиля
+      # (kaname#480) ждёт `addressWindow` и `selfServiceFreshness` по 15 мин
+      # (`deploy/values.prod.yaml`). Предел 30 — запас 30 % к наибольшему, как у
+      # половин kaname#941. Зависание снимается шагом, а не заданием; окно,
+      # выросшее в профиле либо в контракте, съедает запас шарда, где оно
+      # ждётся, — и пересчёт идёт здесь и в плане, по журналу шага.
+      - name: наборы посадки own гоняются — шард ${{ matrix.shard }} плана chart-own-shards.txt (числовой вердикт)
+        timeout-minutes: 30
         run: |
           cd tests/newman
           rc=0
-          if [ "$OWN_HALF" = entry ]; then
-            ./scripts/run.sh --service kaname-login-lane \
-              --service kaname-recovery-lane \
-              --service kaname-authorization-code \
-              --service kaname-second-factor \
-              --service kaname-registration \
-              --service kaname-address-verification \
-              --ssl-client-cert "$KANAME_STAND_WORKDIR/edge/edge.crt" \
-              --ssl-client-key "$KANAME_STAND_WORKDIR/edge/edge.key" \
-              --ssl-extra-ca-certs "$KANAME_STAND_WORKDIR/edge/ca.crt" || rc=$?
-          elif [ "$OWN_HALF" = keys ]; then
-            ./scripts/run.sh --service kaname-access-keys \
-              --service kaname-email-change \
-              --ssl-client-cert "$KANAME_STAND_WORKDIR/edge/edge.crt" \
-              --ssl-client-key "$KANAME_STAND_WORKDIR/edge/edge.key" \
-              --ssl-extra-ca-certs "$KANAME_STAND_WORKDIR/edge/ca.crt" || rc=$?
-          else
-            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::половина «$OWN_HALF» не объявлена — наборы не гонялись, вердикта о наборах нет"
-            exit 1
-          fi
+          ./scripts/run.sh --shard-plan chart-own-shards.txt \
+            --shard "$CHART_OWN_SHARD" \
+            --ssl-client-cert "$KANAME_STAND_WORKDIR/edge/edge.crt" \
+            --ssl-client-key "$KANAME_STAND_WORKDIR/edge/edge.key" \
+            --ssl-extra-ca-certs "$KANAME_STAND_WORKDIR/edge/ca.crt" || rc=$?
           case "$rc" in
-            0) echo "наборы посадки own зелены: половина $OWN_HALF — $OWN_TITLE" ;;
+            0) echo "наборы шарда $CHART_OWN_SHARD посадки own зелены" ;;
             75)
               echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::предполёт снял этот прогон до первого запроса — вердикта о наборе нет"
               exit 1 ;;
@@ -1492,7 +1460,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: own-landing-newman-report-${{ matrix.half }}
+          name: own-landing-newman-report-${{ matrix.shard }}
           path: tests/newman/out-public
           if-no-files-found: error
 
@@ -1505,6 +1473,48 @@ jobs:
       - name: снос стенда
         if: always()
         run: .github/scripts/stand-chart.sh down || true
+
+  # ── СВОДНЫЙ ВЕРДИКТ ШАРДОВ `chart-own` (kaname#848) ────────────────────────
+  #
+  # Исход матрицы не говорит, ЧТО прогнано: шард, выпавший из матрицы, не даёт
+  # красного ни одному её заданию, а шард без отчёта — тот же пропуск. Задание
+  # скачивает вычищенный отчёт КАЖДОГО шарда и судит КАЖДЫЙ набор КАЖДОГО шарда
+  # плана (`shard_plan.py --verdict`): нет каталога шарда, нет отчёта набора, ноль
+  # утверждений, упавшее утверждение, ненулевой код — красное; печатается
+  # «наборов с отчётом N из M». Покрытие вселенной судится здесь же, по дереву.
+  # Идёт и на красной матрице (`!cancelled()`): перепись нужна там больше всего.
+  chart-own-verdict:
+    if: ${{ !cancelled() && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'chart-own-verdict')) }}
+    needs: [changes, chart-own]
+    name: сводный вердикт шардов chart-own — отчёт каждого набора каждого шарда
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          sparse-checkout: |
+            tests/newman
+          sparse-checkout-cone-mode: false
+
+      - name: отчёты шардов
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          pattern: own-landing-newman-report-*
+          path: ${{ runner.temp }}/chart-own-reports
+
+      - name: каждый набор каждого шарда — с отчётом и зелен
+        run: |
+          rc=0
+          python3 tests/newman/scripts/shard_plan.py \
+            --plan tests/newman/chart-own-shards.txt \
+            --newman tests/newman \
+            --verdict "$RUNNER_TEMP/chart-own-reports" \
+            --prefix own-landing-newman-report- || rc=$?
+          case "$rc" in
+            0) echo "все шарды плана отчитались, все наборы зелены" ;;
+            1) echo "::error title=Шарды chart-own не зелены::отчёта нет либо он красен — строки FAIL выше называют шард и набор"; exit 1 ;;
+            *) echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::план не исполним либо отчётов не скачано — вердикта нет (код $rc)"; exit 1 ;;
+          esac
 
   # ── ВЕРДИКТ СТВОЛА ──────────────────────────────────────────────────────────
   #
@@ -1544,6 +1554,7 @@ jobs:
       - stand-ceremony
       - edgeselftests
       - chart-own
+      - chart-own-verdict
       - changes
       - prverdict
     runs-on: ubuntu-latest
@@ -1577,7 +1588,8 @@ jobs:
             "${{ needs.edgeselftests.result }}" \
             "${{ needs.changes.result }}" \
             "${{ needs.prverdict.result }}" \
-            "${{ needs.chart-own.result }}" || rc=$?
+            "${{ needs.chart-own.result }}" \
+            "${{ needs.chart-own-verdict.result }}" || rc=$?
           case "$rc" in
             0) echo "ствол зелен — держателя заводить не из чего" ;;
             1) echo "::error title=СТВОЛ КРАСЕН::держатель заведён либо дополнен в трекере. Пока он открыт, ствол считается красным; закрывать — с артефактом починки"; exit 1 ;;
@@ -1592,7 +1604,7 @@ jobs:
   prverdict:
     name: сводный вердикт запроса (e2e-newman)
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    needs: [changes, chart-own, edgeselftests, stand, stand-ceremony, suite]
+    needs: [changes, chart-own, chart-own-verdict, edgeselftests, stand, stand-ceremony, suite]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

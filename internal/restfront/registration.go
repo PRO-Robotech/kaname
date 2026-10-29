@@ -117,6 +117,7 @@ func registerPublicRESTServices(
 		{"MembershipService", iamv1.RegisterMembershipServiceHandlerFromEndpoint},
 		{"RoleService", iamv1.RegisterRoleServiceHandlerFromEndpoint},
 		{"AccessBindingService", iamv1.RegisterAccessBindingServiceHandlerFromEndpoint},
+		{"GrantDelegationService", iamv1.RegisterGrantDelegationServiceHandlerFromEndpoint},
 		{"AuthorizeService", iamv1.RegisterAuthorizeServiceHandlerFromEndpoint},
 		{"PermissionCatalogService", iamv1.RegisterPermissionCatalogServiceHandlerFromEndpoint},
 		{"SAKeyService", iamv1.RegisterSAKeyServiceHandlerFromEndpoint},

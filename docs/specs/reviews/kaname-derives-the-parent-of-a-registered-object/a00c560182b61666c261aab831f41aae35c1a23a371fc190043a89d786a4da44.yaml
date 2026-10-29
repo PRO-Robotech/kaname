@@ -1,0 +1,196 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/kaname-derives-the-parent-of-a-registered-object.md
+  sha256: a00c560182b61666c261aab831f41aae35c1a23a371fc190043a89d786a4da44
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор. Вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Рецензент шапку документа намеренно не правил.
+  publication_mode: courier_of_agent_verdict
+  base_commit: 6e4077e3a
+  content_commit: none
+  branch: 982
+  task: PRO-Robotech/kaname#982
+  related_tasks: [PRO-Robotech/kaname#983, PRO-Robotech/kaname#980, PRO-Robotech/kaname#979]
+  lines: 858
+  round: 1
+  predecessor_record: none
+  fingerprint_predicate: >-
+    `sha256sum` по документу в копии kacho-workspace/tmp/kn-982-acceptance даёт
+    a00c5601…4da44. Совпало с возвратом автора (журнал workflow, запись acc:982).
+  measurement_revisions: >-
+    Дерево читалось через `git grep` и чтение файлов на 6e4077e3a. Это HEAD копии, он же
+    origin/955. Документ не закоммичен: `git status` даёт `??`. Опоры сверены `sha256sum`:
+    #983 `object-keeps-its-project-after-unregistration.md` = 9bd07e38…122a (в дереве, с
+    записью APPROVED круга 5); svc-registry `registry-iam-and-tokens-acceptance.md` =
+    27170775…22dc7.
+  premise: >-
+    «Задача требует приёмку» подтверждена: предмет добавляет миграцию и новый ключ
+    манифеста и меняет поведение `RegisterResource`. Возврат автора: lane-tier.sh даёт
+    R2, acceptance: yes. `gh issue view 982 -R PRO-Robotech/kaname` даёт OPEN; в
+    комментарии к задаче — требование пары «проект в звене цепи».
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-26'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Один блокирующий (CONSTRUCTIBILITY). Документ сам себе противоречит в том, где стоит
+    политика записи. От этого зависит, строится ли «Дано» базового мира, на котором
+    стоят 9 из 13 сценариев.
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#982
+  status: performed
+  published: true
+  database_id: 6406080700
+  node_id: "IC_kwDOUO26pM8AAAABfdUIvA"
+  url: "https://github.com/PRO-Robotech/kaname/issues/982#issuecomment-6406080700"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6406080700"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-26T01:17:33Z"
+  body_sha256: "145b30491731534c6349e4e0d204159c772691936d4efee3f60365b61de7a707"
+  subject_sha256: "a00c560182b61666c261aab831f41aae35c1a23a371fc190043a89d786a4da44"
+  subject_revision_commit: "none"
+  verdict: "CHANGES_REQUESTED"
+  publication_mode: manual_issue_comment
+
+blocking:
+  - kind: CONSTRUCTIBILITY
+    scenario: §5.2 строка «X, Y, X/app, Y/app … кортежи owner usr-A»; §0.6; §3 «Производительность»; §6 п.7; DP-01 a, b, DP-03, DP-05, DP-15, DP-16
+    claim: >-
+      Документ по-разному отвечает на вопрос, где исполняется политика Р1: в обработчике
+      или в use-case `Register`.
+      (1) §5.2 строит «Дано» так: кортежи `owner` usr-A на X, Y, X/app, Y/app пишет
+      use-case мира напрямую, «запись ДО политики». Это `p.reg.Register` в
+      `registerRegistry` и `registerRepository`
+      (public_container_read_world_integration_test.go:178-205) на прежней редакции
+      registry, где ключа `writes` нет. Такое «Дано» строится, только если политика
+      стоит ВНЕ use-case.
+      (2) §3 «Производительность» говорит, что политика стоит «0 обращений сверх чтения
+      строки каталога, которое транзакция уже делает (`catalog_type.go:98`)». Это чтение
+      делает `catalogObjectType` внутри транзакции `emit` use-case
+      (register_resource.go:837-840).
+      (3) §0.6 и §6 п.7 говорят, что после задачи пробы, которые регистрируют через
+      `uc.Register` отношением-неуказателем (`parent` у `compute_instance`,
+      register_resource_mirror_integration_test.go:68-73), своё «Дано» не строят. Значит,
+      политика действует на уровне use-case.
+      По (2) и (3) запись `owner` из (1) получает отказ политики. Тогда `newPCRWorld`
+      падает на `require.NoErrorf` при построении. Падает базовый мир всех сценариев
+      DP-*, кроме DP-04, DP-20 и части DP-10/11, и весь набор П6, который §6 п.7
+      требует держать зелёным. По (1) неверны (2) и (3). Посевом это не решить: исход
+      зависит от того, где стоит политика, а документ называет это место двумя
+      способами.
+    remedy: >-
+      Назвать одно место и согласовать с ним остальной текст.
+      (а) Политика в обработчике, рядом с `validateProxyTuple`. Тогда исправить §3
+      «Производительность»: обработчику нужно своё чтение каталога, вне транзакции
+      записи. Назвать это обращение числом и сказать, что значит промах. Исправить §0.6
+      и §6 п.7: пробы, которые вызывают use-case напрямую, политику не проходят. §5.2
+      тогда верен.
+      (б) Политика в use-case, в транзакции `emit`. Тогда перестроить «Дано» мира с
+      `owner`: например, доставить W до `registerRegistry` и `registerRepository` либо
+      писать кортеж `owner` через существующий писатель факта. Назвать писателя
+      строкой §5.2. В §6 п.7 назвать мир П6 (`newPCRWorld`) среди переписываемых.
+      Решает автор. Рецензент записывает только то, что (б) честнее держит слова
+      «единственный вход» (§0.2) против будущих вызывающих use-case. Цена (а) — одно
+      чтение каталога вне транзакции.
+
+important:
+  - where: Р9 («вывод — до первого оператора записи») против Р10 и производителя PB-01 из #983
+    note: >-
+      По одобренной #983 сверка привязки стоит «на уровне записи зеркала и цепи
+      (оператор либо триггер `UpsertTx`), не в `emit`» (строка 781 её документа). Если
+      вывод стоит до первого оператора записи, отказ вывода возникает раньше отказа
+      привязки. Р10 требует обратного порядка для PB-24 a–d, в том числе для PB-24 c,
+      первой регистрации, где привязку заводит этот же запрос. Наблюдаемое поведение в
+      Р10 названо, держатель есть. Но место «до первого оператора» — условие к коду
+      (fa-b2), и с одобренным производителем #983 оно не сходится. Убрать место из Р9 в
+      замысел либо в §7 строке 4 назвать, как реализация выбирает отказ.
+  - where: Р12, §3 «Безопасность», В4
+    note: >-
+      Проверка «проект опоры есть в kaname» читает строку `projects` без блокировки. У
+      окна «регистрация обогнала удаление проекта» есть объявленный законный исход: это
+      `non-empty-project-is-not-deleted.md` §7.4 и IAM-PNE-1-13
+      (project_delete_nonempty_integration_test.go:170, проба зовёт `UpsertTx` напрямую,
+      эта задача её не трогает). Документ это окно не называет. «Закрывается регистрация
+      под проектом … с которым иерархия не согласна» верно только на момент чтения. Чтобы
+      исполнитель не написал мерцающую пробу сериализации, нужна строка: окно остаётся,
+      исход IAM-PNE-1-13 законен, ссылка на §7.4.
+  - where: Р4 (опора записи из `writes` — первое звено цепи)
+    note: >-
+      Объект зарегистрирован указателем `project:prj-A` с цепью `[account:acc-A]`
+      (DP-11 d принимает такую регистрацию) либо с пустой цепью и пустым полем
+      (DP-11 b, K из DP-14). Для такого объекта опора по Р4 не выводится, и запись
+      `owner` получает Р8 «parent scope does not match», хотя ничего не разошлось, а факт
+      указателя в `relation_fact` проект называет. Исход детерминирован и закрыт
+      отказом, поэтому замечание не блокирующее. Его стоит назвать сценарием либо брать
+      опору из факта указателя.
+  - where: DP-10 g ↔ DP-11 b
+    note: >-
+      Близнецы различаются двумя фактами: проектом опоры и объектом (Q против
+      `registry_registry:e12813c6a/b`). Каждый сценарий исполняется на своём мире,
+      поэтому объект можно взять один.
+  - where: DP-20 i
+    note: >-
+      Утверждается форма политики в строке каталога `{project: [project], owner: […]}`,
+      а форма колонки по §6 п.1 — «замысел». Утверждать через читателя политики (Р1),
+      а не через вид колонки.
+  - where: §0.1, §0.3
+    note: >-
+      Документ публичный и садится раньше фикса. Он перечисляет конкретные формы
+      записи, которые сегодня проходят, вместе с координатами. Воспользоваться ими
+      можно только с личностью модуля на внутреннем слушателе, поэтому замечание не
+      блокирующее. Рекомендация: оставить свойство («правило не спрашивает, указатель ли
+      отношение у типа»), примеры убрать (security-disclosure,
+      disc-no-consolidated-assembly).
+
+defaults_recorded:
+  - "В1 → (а), ключ `writes`; последствие для registry платформы названо в §7 строке 2"
+  - "В2 → (а), отказ привязки раньше; см. important п.1 о месте в Р9"
+  - "В3 → (а), пустая цепь и опущенное звено принимаются (сужение)"
+  - "В4 → (а), отказ Р8; окно гонки с удалением — important п.2"
+
+decisions_check: >-
+  Р-В1, Р-В3, Р-В7 не переоткрыты. Кортежей за модуль kaname не дописывает (Р7), вывод
+  только сверяет. Лимитов нет (§2 п.9).
+
+neighbours:
+  - "#983: 9bd07e38…122a, APPROVED круг 5, в дереве. Против документа сверены §2 п.3, PB-24 a–e, PB-25 d, PB-13 a; соответствие §5.4 верно"
+  - "svc-registry: 27170775…22dc7, DRAFT. Строки 194, 264, 283, 298, 573, 1515, 1738-1758, 1916 прочитаны; SRI-110 d → DP-01 a, e → DP-10 a, h → DP-11 a верны"
+
+tree_claims_checked:
+  - "§0.1: ValidateTuple вызывается 1 раз (handler.go:181); corelib v1.15.0 policy.go:80, :98 HierarchicalRelations(), :242 (только system_class), :413"
+  - "§0.4: 20 / 20 / 0 по миграции 20261017020000; rows.go:132 p.Type, p.Name — 0; repositories — {name: parent, type: registry_registry}"
+  - "§0.6: 21 / 27, объединение 29"
+  - "§4.1: newPCRWorld :99, registerRegistry :178, registerRepository :193, deliverPriorEdition :260, applyDelivered :272, seedProjectInAccount :125, fakeGate handler_test.go:196 — все на месте"
+
+constructibility:
+  seeded: 0
+  named_fixture_rows_verified: 9 of 9 (§5.2)
+  not_performed: 1
+  reason: >-
+    Посев не ставился. Строка мира с `owner` строится либо нет в зависимости от места
+    политики, а документ называет это место двумя способами (blocking п.1). Посев на
+    6e4077e3a прошёл бы при любом месте, потому что политики там ещё нет, и ничего не
+    доказал бы. Остальные строки §5.2 сверены с деревом по координатам.
+
+route_signs:
+  proto: да (только комментарии, Р13)
+  schema: да (миграция)
+  public_rpc: нет (внутренний слушатель)
+  ui: нет
+  new_domain: нет
+  security_surface: да (сужение)
+
+authority: >-
+  Роль в записи — координата, а не доказательство личности. Вердикт действует только
+  после внешнего события (`change-graph.md` §3).

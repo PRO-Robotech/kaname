@@ -203,7 +203,7 @@ func TestSystemClass_SC23_WriteVerbUnreachableForAClassOnAnyRolePath(t *testing.
 	role.Rules, role.Permissions = writeRules(), compiled
 	_, err = wr.RolesW().Update(w.ctx, role, []string{"rules"})
 	require.NoError(t, err, "SC-23 Дано: правила роли сменены мимо правки роли")
-	require.NoError(t, wr.RolesW().ReplaceRuleSelectors(w.ctx, w.rolRead, catalogfixture.Facts().GrantSelectors(writeRules().MaterializingSelectors())))
+	require.NoError(t, wr.RolesW().ReplaceRuleSelectors(w.ctx, w.rolRead, catalogfixture.Facts().GrantSelectors(writeRules().MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, wr.Commit(w.ctx))
 	require.NoError(t, w.rec.ReconcileBindingForward(w.ctx, domain.AccessBindingID(id)), "SC-23: повторная материализация")
 
@@ -447,6 +447,7 @@ func TestSystemClass_SC29_AuditNamesTheClassAndTheActor(t *testing.T) {
 		w.auditOf(userID, "iam.access_binding.granted"), "SC-29 близнец: форма записи")
 
 	id := w.createDone(asUser(w.ctx, w.usrA), w.sc01Request(), "SC-29 Дано: SC-01")
+	w.ownerMayRemove("SC-29 Дано", id)
 	op, err := w.ab.Delete(asUser(w.ctx, w.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 	require.NoError(t, err)
 	require.Nil(t, awaitOp(t, w.ctx, w.ops, op.GetId()).Error)

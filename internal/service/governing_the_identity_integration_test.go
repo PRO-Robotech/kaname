@@ -108,7 +108,9 @@ func TestGoverningTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 	unblockRel, unblockType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Unblock")
 	resetRel, resetType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/ResetSecondFactor")
 	readRel, readType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Get")
-	grantRel, grantType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.AccessBindingService/Delete")
+	// Снятие выдачи судит ОБРАБОТЧИК, а не дверь по каталогу (kaname#986, Р1а):
+	// источник вопроса — обработчик (`removalGateFromHandler`).
+	grantRel, grantType := removalGateFromHandler(t)
 	for _, c := range []struct{ what, got string }{
 		{"правка записи", editType}, {"запрет", blockType},
 		{"снятие запрета", unblockType}, {"сброс второго фактора", resetType},

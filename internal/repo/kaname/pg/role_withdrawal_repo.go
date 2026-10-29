@@ -52,8 +52,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 )
 
 // roleRetirementCause — причина переселения, которой помечает свои строки полоса
@@ -228,6 +230,17 @@ func (w *roleWriter) RetireRole(ctx context.Context, id domain.RoleID, ownerModu
 	}
 	out.RemovedSelectors = int(tag.RowsAffected())
 
+	// Доступ, который члены выдач этой роли ВЫПУСТИЛИ, снимается здесь же, до
+	// снятия самих членов (kaname#926). Удаление строки члена ничего не отзывает:
+	// прямой факт на объекте живёт в своём хранилище и снимается только строкой
+	// снятия журнала. Полный проход выдачи снимает кортежи лишь тех членов, что
+	// ещё существуют, а периодический обход выдачу без селекторов не видит вовсе.
+	// Без этого шага выдача на снятой роли держала бы ярус на объектах до своего отзыва,
+	// удаления или истечения — вопреки §2.4 приёмки снятия («не даёт ничего»).
+	if err := w.revokeMemberAccessOfRole(ctx, id); err != nil {
+		return out, err
+	}
+
 	tag, err = w.tx.Exec(ctx,
 		`DELETE FROM kaname.access_binding_target_members WHERE role_id = $1`, string(id))
 	if err != nil {
@@ -257,6 +270,58 @@ func (w *roleWriter) RetireRole(ctx context.Context, id domain.RoleID, ownerModu
 	}
 	out.Marked = true
 	return out, nil
+}
+
+// revokeMemberAccessOfRole снимает доступ, выпущенный членами выдач роли: строки
+// реестра выпущенного (`source='member'`) уходят, и на каждый их кортеж пишется
+// строка снятия журнала — в транзакции снятия роли (запрет #10).
+//
+// ПОРЯДОК НЕСУЩИЙ: строки реестра — РАНЬШЕ строк снятия. Свёртка строки снятия в
+// прямой факт оставляет факт, который держит действующая выдача (kaname#919), а
+// выдача на снятой роли остаётся ACTIVE (§2.4 приёмки) — со своими строками в
+// реестре она держала бы снимаемый факт сама. Общий кортеж, который держит ДРУГАЯ
+// выдача, свёртка оставит, поэтому вычитать его здесь не нужно.
+//
+// Строки уровня выдачи (`source='binding'`) не трогаются: у роли с правилами — а
+// роль модуля всегда с правилами — это лишь указатель иерархии на объект самой
+// выдачи, доступа субъекту он не даёт.
+//
+// Набор берётся из реестра, а не выводится из правил роли: снимается то, что было
+// выпущено, — тот же источник, что у снятия члена полным проходом
+// (revokeTuplesFor) и у снятия выдачи целиком (revokeWholeLedger).
+func (w *roleWriter) revokeMemberAccessOfRole(ctx context.Context, id domain.RoleID) error {
+	rows, err := w.tx.Query(ctx, `
+		DELETE FROM kaname.access_binding_emitted_tuples et
+		 USING kaname.access_bindings b
+		 WHERE b.role_id = $1
+		   AND et.binding_id = b.id
+		   AND et.source = 'member'
+		RETURNING et.fga_user, et.relation, et.object`, string(id))
+	if err != nil {
+		return mapErr(err, "", string(id))
+	}
+	seen := make(map[clients.RelationTuple]struct{})
+	var tuples []clients.RelationTuple
+	for rows.Next() {
+		var t clients.RelationTuple
+		if serr := rows.Scan(&t.User, &t.Relation, &t.Object); serr != nil {
+			rows.Close()
+			return mapErr(serr, "", string(id))
+		}
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		seen[t] = struct{}{}
+		tuples = append(tuples, t)
+	}
+	rows.Close()
+	if rerr := rows.Err(); rerr != nil {
+		return mapErr(rerr, "", string(id))
+	}
+	if err := fga_outbox.EmitDeleteTx(ctx, w.tx, tuples); err != nil {
+		return fmt.Errorf("снятие доступа членов роли %s: %w", id, err)
+	}
+	return nil
 }
 
 // ReviveRole оживляет снятую роль и снимает из ведомости строки СВОЕЙ причины —

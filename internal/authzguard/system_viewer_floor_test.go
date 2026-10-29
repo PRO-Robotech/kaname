@@ -66,7 +66,7 @@ func ctxWithSAN(san string) context.Context {
 // 01-unit — dev-mode (prod=false), READ-FQN → pass; checker NOT consulted.
 func TestSystemViewerFloor_DevMode_NoOp(t *testing.T) {
 	ck := &recordingChecker{allowed: false, err: errors.New("must not be called")}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(false)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(false)
 	if err := f.allow(ctxWithSAN(apiGatewayFloorSAN), readFloorMethod); err != nil {
 		t.Fatalf("dev-mode READ-FQN: unexpected error %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSystemViewerFloor_DevMode_NoOp(t *testing.T) {
 // the EXACT Check triple (subject = derived sva, relation, cluster object).
 func TestSystemViewerFloor_Prod_LegitimateReaderSA_Allowed(t *testing.T) {
 	ck := &recordingChecker{allowed: true}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	if err := f.allow(ctxWithSAN(apiGatewayFloorSAN), readFloorMethod); err != nil {
 		t.Fatalf("prod legitimate reader-SA: unexpected error %v", err)
 	}
@@ -98,7 +98,7 @@ func TestSystemViewerFloor_Prod_LegitimateReaderSA_Allowed(t *testing.T) {
 // 03-unit — prod-mode, verified SAN, checker→allowed=false → PermissionDenied.
 func TestSystemViewerFloor_Prod_NoSystemViewer_Denied(t *testing.T) {
 	ck := &recordingChecker{allowed: false}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	err := f.allow(ctxWithSAN(someOtherSAN), readFloorMethod)
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("prod module-SA without system_viewer: code = %v, want PermissionDenied", status.Code(err))
@@ -112,7 +112,7 @@ func TestSystemViewerFloor_Prod_NoSystemViewer_Denied(t *testing.T) {
 // (fail-closed; checker NOT consulted).
 func TestSystemViewerFloor_Prod_NoCert_Denied(t *testing.T) {
 	ck := &recordingChecker{allowed: true} // would pass if (wrongly) consulted
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	err := f.allow(context.Background(), readFloorMethod) // no cert identity
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("prod no-cert: code = %v, want PermissionDenied", status.Code(err))
@@ -125,7 +125,7 @@ func TestSystemViewerFloor_Prod_NoCert_Denied(t *testing.T) {
 // 03-unit unverified-cert sub-case — present-but-UNVERIFIED cert → PermissionDenied.
 func TestSystemViewerFloor_Prod_UnverifiedCert_Denied(t *testing.T) {
 	ck := &recordingChecker{allowed: true}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), apiGatewayFloorSAN, false)
 	if err := f.allow(ctx, readFloorMethod); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("prod unverified cert: code = %v, want PermissionDenied", status.Code(err))
@@ -138,7 +138,7 @@ func TestSystemViewerFloor_Prod_UnverifiedCert_Denied(t *testing.T) {
 // 03-unit foreign-SAN sub-case — verified but non-module SAN → PermissionDenied.
 func TestSystemViewerFloor_Prod_NonModuleSAN_Denied(t *testing.T) {
 	ck := &recordingChecker{allowed: true}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	ctx := ctxWithSAN("spiffe://other.domain/ns/x/sa/not-a-module")
 	if err := f.allow(ctx, readFloorMethod); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("prod foreign SAN: code = %v, want PermissionDenied", status.Code(err))
@@ -152,7 +152,7 @@ func TestSystemViewerFloor_Prod_NonModuleSAN_Denied(t *testing.T) {
 // message verbatim.
 func TestSystemViewerFloor_Prod_BackendError_Unavailable(t *testing.T) {
 	ck := &recordingChecker{err: errors.New("fga 503")}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	err := f.allow(ctxWithSAN(apiGatewayFloorSAN), readFloorMethod)
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("prod backend error: code = %v, want Unavailable", status.Code(err))
@@ -165,7 +165,7 @@ func TestSystemViewerFloor_Prod_BackendError_Unavailable(t *testing.T) {
 // 03b-unit nil-checker sub-case — prod-mode, checker not wired → PermissionDenied
 // (fail-closed, never silently allow).
 func TestSystemViewerFloor_Prod_NilChecker_Denied(t *testing.T) {
-	f := NewSystemViewerFloor(nil, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(nil, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	if err := f.allow(ctxWithSAN(apiGatewayFloorSAN), readFloorMethod); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("prod nil checker: code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -175,7 +175,7 @@ func TestSystemViewerFloor_Prod_NilChecker_Denied(t *testing.T) {
 // the checker, even in prod-mode (PDP-exempt regression guard, INV-FLOOR-5).
 func TestSystemViewerFloor_Prod_CheckExempt(t *testing.T) {
 	ck := &recordingChecker{allowed: false} // would DENY if (wrongly) consulted
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	if err := f.allow(ctxWithSAN(vpcFloorSAN), checkMethod); err != nil {
 		t.Fatalf("prod Check (PDP): unexpected error %v — must NOT be floor-gated", err)
 	}
@@ -189,7 +189,7 @@ func TestSystemViewerFloor_Prod_CheckExempt(t *testing.T) {
 func TestSystemViewerFloor_Prod_ExemptHotPath(t *testing.T) {
 	for _, m := range []string{isRevokedMethod} {
 		ck := &recordingChecker{allowed: false}
-		f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+		f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 		if err := f.allow(ctxWithSAN(apiGatewayFloorSAN), m); err != nil {
 			t.Errorf("prod exempt %s: unexpected error %v", m, err)
 		}
@@ -203,7 +203,7 @@ func TestSystemViewerFloor_Prod_ExemptHotPath(t *testing.T) {
 // system_viewer requirement on the write-RPC (write-gate is independent).
 func TestSystemViewerFloor_Prod_MutationExempt(t *testing.T) {
 	ck := &recordingChecker{allowed: false}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	if err := f.allow(ctxWithSAN(vpcFloorSAN), registerMethod); err != nil {
 		t.Fatalf("prod RegisterResource: floor must NOT impose system_viewer (err=%v)", err)
 	}
@@ -276,7 +276,7 @@ func floorOkStream(_ any, _ grpc.ServerStream) error { return nil }
 // Unary — denied READ-RPC short-circuits before the handler in prod.
 func TestSystemViewerFloor_Unary_Denied_Prod(t *testing.T) {
 	ck := &recordingChecker{allowed: false}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	info := &grpc.UnaryServerInfo{FullMethod: readFloorMethod}
 	out, err := f.Unary()(ctxWithSAN(someOtherSAN), nil, info, floorOkHandler)
 	if status.Code(err) != codes.PermissionDenied {
@@ -290,7 +290,7 @@ func TestSystemViewerFloor_Unary_Denied_Prod(t *testing.T) {
 // Unary — allowed READ-RPC reaches the handler in prod.
 func TestSystemViewerFloor_Unary_Allowed_Prod(t *testing.T) {
 	ck := &recordingChecker{allowed: true}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	info := &grpc.UnaryServerInfo{FullMethod: readFloorMethod}
 	out, err := f.Unary()(ctxWithSAN(apiGatewayFloorSAN), nil, info, floorOkHandler)
 	if err != nil {
@@ -304,7 +304,7 @@ func TestSystemViewerFloor_Unary_Allowed_Prod(t *testing.T) {
 // Stream — denied READ-RPC short-circuits in prod.
 func TestSystemViewerFloor_Stream_Denied_Prod(t *testing.T) {
 	ck := &recordingChecker{allowed: false}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(true)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(true)
 	info := &grpc.StreamServerInfo{FullMethod: readFloorMethod}
 	err := f.Stream()(nil, fakeFloorStream{ctx: ctxWithSAN(someOtherSAN)}, info, floorOkStream)
 	if status.Code(err) != codes.PermissionDenied {
@@ -315,7 +315,7 @@ func TestSystemViewerFloor_Stream_Denied_Prod(t *testing.T) {
 // Stream — dev-mode is a no-op pass even on a READ-RPC.
 func TestSystemViewerFloor_Stream_DevNoOp(t *testing.T) {
 	ck := &recordingChecker{allowed: false, err: errors.New("must not be called")}
-	f := NewSystemViewerFloor(ck, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(false)
+	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(false)
 	info := &grpc.StreamServerInfo{FullMethod: readFloorMethod}
 	if err := f.Stream()(nil, fakeFloorStream{ctx: context.Background()}, info, floorOkStream); err != nil {
 		t.Errorf("stream dev no-op: unexpected error %v", err)

@@ -96,7 +96,7 @@ func TestAuthoredCreateIsAcceptedAndProducesNoPerObjectRelation(t *testing.T) {
 		"`create` обязан остаться ВНЕ пообъектного набора типа: строка в наборе немедленно "+
 			"вернула бы материализацию `v_create`, снятую осознанно")
 
-	granted := facts.GrantedVerbs(fgaType, []string{"create", "list"}, typeVerbs)
+	granted := facts.GrantedVerbs(fgaType, []string{"create", "list"}, typeVerbs, domain.TenantPolicy())
 	require.NotContains(t, granted, "create",
 		"правило с `create` не даёт пообъектного кортежа — создание авторизуется ярусом "+
 			"записи на родителе")

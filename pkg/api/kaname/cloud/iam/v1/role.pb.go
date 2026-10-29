@@ -477,10 +477,13 @@ type Role struct {
 	// ID of the Project that owns this Role. Non-empty only for project-scoped
 	// custom roles.
 	ProjectId string `protobuf:"bytes,10,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	// Authored-политика роли: 1..64 правил. Источник истины И публичная
-	// API-поверхность (UI/клиенты рендерят роль из `rules`). Каждое Rule —
-	// однородный грант `{verbs}` над `{module} × resources` (ровно один модуль
-	// на правило), опц. суженный `resource_names` XOR `match_labels`.
+	// Authored-политика роли: на входе 1..64 правил; на чтении 0..64, ноль — роль
+	// только с перечнем прав (`permissions` непуст) либо роль, все правила которой
+	// потеряли адресатов снятием регистрации (`permissions` пуст: такая роль не
+	// даёт ничего). Источник истины И публичная API-поверхность (UI/клиенты
+	// рендерят роль из `rules`). Каждое Rule — однородный грант `{verbs}` над
+	// `{module} × resources` (ровно один модуль на правило), опц. суженный
+	// `resource_names` XOR `match_labels`.
 	// Роль, покрывающая несколько модулей = несколько правил (по одному на модуль).
 	Rules []*Rule `protobuf:"bytes,11,rep,name=rules,proto3" json:"rules,omitempty"`
 	// Optimistic-concurrency token (xmin-backed) для Role.Update под
@@ -1463,6 +1466,10 @@ type Rule struct {
 	Verbs []string `protobuf:"bytes,3,rep,name=verbs,proto3" json:"verbs,omitempty"`
 	// Pin-by-id селекция инстансов (K8s-native). ≤256; opaque-id; literal `"*"`
 	// запрещен как элемент. Взаимоисключающе с `match_labels`.
+	//
+	// Снятие регистрации объекта убирает его id из перечня. Правило, у которого
+	// имён не осталось, снимается целиком, а не хранится пустым перечнем: пустой
+	// перечень означал бы все объекты типа.
 	ResourceNames []string `protobuf:"bytes,4,rep,name=resource_names,json=resourceNames,proto3" json:"resource_names,omitempty"`
 	// Label-equality селекция инстансов (наше расширение; AND-equality). ≤16
 	// ключей; если задано — непусто. Взаимоисключающе с `resource_names`.
@@ -1495,9 +1502,27 @@ type Rule struct {
 	// которых среди предков есть контейнер, выбранный правилом-владельцем и целью
 	// выдачи, — включая созданные позже. Правило верхнего уровня сравнивает
 	// точно, как прежде.
-	Children      []*Rule `protobuf:"bytes,7,rep,name=children,proto3" json:"children,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	//
+	// Снятие регистрации объекта убирает его id из `resource_names` вложенного
+	// правила; вложенное правило, у которого имён не осталось, снимается целиком.
+	// Правило-владелец и остальные вложенные правила при этом не меняются.
+	Children []*Rule `protobuf:"bytes,7,rep,name=children,proto3" json:"children,omitempty"`
+	// Селектор СОЗДАТЕЛЯ (kaname#1003, приёмка
+	// `service-account-creation-is-its-own-right.md`, Р2а).
+	//
+	// ТОЛЬКО ВЫВОД. Правило с селектором даёт свои глаголы не на все объекты типа
+	// в области выдачи, а только на те, которые создал сам субъект выдачи.
+	// Объявляет его манифест модуля; на входе `Create` и `Update` значение `true`
+	// отвергается синхронно — INVALID_ARGUMENT с полем `rules[<i>].createdBySubject`.
+	// Чтение поле заполняет, потому что ответ без него показывал бы правило как
+	// «глаголы на всех объектах типа» — больше, чем роль даёт.
+	//
+	// Без селектора поле не выходит (ложь в JSON не печатается). С `resource_names`
+	// и `match_labels` взаимоисключающе. tag 8 — первый свободный (7 занят
+	// `children`).
+	CreatedBySubject bool `protobuf:"varint,8,opt,name=created_by_subject,json=createdBySubject,proto3" json:"created_by_subject,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Rule) Reset() {
@@ -1570,6 +1595,13 @@ func (x *Rule) GetChildren() []*Rule {
 		return x.Children
 	}
 	return nil
+}
+
+func (x *Rule) GetCreatedBySubject() bool {
+	if x != nil {
+		return x.CreatedBySubject
+	}
+	return false
 }
 
 type CreateRoleMetadata struct {
@@ -1790,14 +1822,15 @@ const file_kaname_cloud_iam_v1_role_proto_rawDesc = "" +
 	"\x05cause\x18\a \x01(\x0e2(.kaname.cloud.iam.v1.WithdrawnGrantCauseR\x05cause\"F\n" +
 	"\x0eDefinitionTier\x12\x1b\n" +
 	"\ttier_type\x18\x01 \x01(\tR\btierType\x12\x17\n" +
-	"\atier_id\x18\x02 \x01(\tR\x06tierId\"\xce\x02\n" +
+	"\atier_id\x18\x02 \x01(\tR\x06tierId\"\xfc\x02\n" +
 	"\x04Rule\x12\x1c\n" +
 	"\tresources\x18\x02 \x03(\tR\tresources\x12\x14\n" +
 	"\x05verbs\x18\x03 \x03(\tR\x05verbs\x12%\n" +
 	"\x0eresource_names\x18\x04 \x03(\tR\rresourceNames\x12M\n" +
 	"\fmatch_labels\x18\x05 \x03(\v2*.kaname.cloud.iam.v1.Rule.MatchLabelsEntryR\vmatchLabels\x12\x16\n" +
 	"\x06module\x18\x06 \x01(\tR\x06module\x125\n" +
-	"\bchildren\x18\a \x03(\v2\x19.kaname.cloud.iam.v1.RuleR\bchildren\x1a>\n" +
+	"\bchildren\x18\a \x03(\v2\x19.kaname.cloud.iam.v1.RuleR\bchildren\x12,\n" +
+	"\x12created_by_subject\x18\b \x01(\bR\x10createdBySubject\x1a>\n" +
 	"\x10MatchLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x01\x10\x02R\amodules\"-\n" +

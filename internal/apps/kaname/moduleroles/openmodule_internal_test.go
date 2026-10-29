@@ -55,7 +55,7 @@ func TestRoleOfAdmitsAModuleTheShippedTableDoesNotKnow(t *testing.T) {
 	}
 	produced := []domain.Rule{{Module: module, Resources: []string{"widget"}, Verbs: []string{"get"}}}
 
-	if _, err := roleOf(module, mr, produced); err != nil {
+	if _, err := roleOf(module, module, mr, produced); err != nil {
 		t.Fatalf("роль модуля оператора отвергнута применителем: %v", err)
 	}
 
@@ -64,14 +64,14 @@ func TestRoleOfAdmitsAModuleTheShippedTableDoesNotKnow(t *testing.T) {
 	own := authzmap.CatalogSeedModules()[0]
 	mrOwn := *mr
 	mrOwn.ID = own + ".widget.admin"
-	if _, err := roleOf(own, &mrOwn,
+	if _, err := roleOf(own, own, &mrOwn,
 		[]domain.Rule{{Module: own, Resources: []string{"widget"}, Verbs: []string{"get"}}}); err != nil {
 		t.Fatalf("парный положительный (модуль из таблицы) отвергнут: %v", err)
 	}
 
 	// Отрицательная сторона на месте: правило, называющее ЧУЖОЙ модуль,
 	// применитель по-прежнему отвергает.
-	if _, err := roleOf(module, mr,
+	if _, err := roleOf(module, module, mr,
 		[]domain.Rule{{Module: "someoneelse", Resources: []string{"widget"}, Verbs: []string{"get"}}}); err == nil {
 		t.Error("правило над чужим модулем принято применителем")
 	}

@@ -266,6 +266,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.NewRegistryTokenCredentialKindRecorder() },
 		Why:   "клетка окна перехода — ПРЕДИКАТ его закрытия: её отсутствие читается как «переведены все»",
 	},
+	Namespace + "_binding_converge_total": {
+		Cells: len(BindingConvergeOutcomes),
+		Build: func(r *Registry) { r.NewBindingConvergeRecorder() },
+		Why:   "проход без отказов обязан быть отличим от прохода, которого не было",
+	},
 	Namespace + "_role_rule_ref_reseeds_total": {
 		Cells: len(RuleRefReseedOutcomes),
 		Build: func(r *Registry) { r.NewRuleRefReseedRecorder() },

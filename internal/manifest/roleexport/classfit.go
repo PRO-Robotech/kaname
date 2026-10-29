@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -312,6 +313,7 @@ func unmatchedSequel(authored bool) string {
 // классе — оба пусты.
 func judgeVerb(facts VerbFacts, module, resource, fgaType string, authored bool,
 	v manifest.Verb, byKey map[string]Action, census *ClassCensus) (*Note, error) {
+	policy := rolePolicy(module)
 
 	class := declaredClass(v)
 	a, ok := byKey[module+"."+resource+"."+v.Name]
@@ -345,11 +347,11 @@ func judgeVerb(facts VerbFacts, module, resource, fgaType string, authored bool,
 				resource, module, v.Name, class),
 		}, nil
 	}
-	if Produces(facts, class, fgaType, a.Relation, a.Object) {
+	if Produces(facts, policy, class, fgaType, a.Relation, a.Object) {
 		census.ClassSatisfies++
 		return nil, nil
 	}
-	if fitting := classesSatisfying(facts, a, fgaType); len(fitting) > 0 {
+	if fitting := classesSatisfying(facts, policy, a, fgaType); len(fitting) > 0 {
 		census.Findings++
 		return nil, ClassFinding{
 			Kind: ErrDeclaredClassDoesNotSatisfyGate, Module: module, Resource: resource,
@@ -388,7 +390,7 @@ func declaredClass(v manifest.Verb) string {
 // первый несёт глаголы, объявленные именно этим типом, второй — `create`, у
 // которого пообъектного отношения нет вовсе и который покрывает действие
 // ярусом. Ни один из двух здесь не переобъявляется.
-func classesSatisfying(facts VerbFacts, a Action, fgaType string) []string {
+func classesSatisfying(facts VerbFacts, policy domain.RulePolicy, a Action, fgaType string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, c := range append(facts.VerbsOfType(fgaType), manifest.CanonicalVerbs()...) {
@@ -396,7 +398,7 @@ func classesSatisfying(facts VerbFacts, a Action, fgaType string) []string {
 			continue
 		}
 		seen[c] = true
-		if Produces(facts, c, fgaType, a.Relation, a.Object) {
+		if Produces(facts, policy, c, fgaType, a.Relation, a.Object) {
 			out = append(out, c)
 		}
 	}

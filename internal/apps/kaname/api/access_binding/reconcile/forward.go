@@ -94,7 +94,9 @@ package reconcile
 // не-ACTIVE выдачу, а прямой факт вердикт читает и без неё. Поэтому факты выдачи
 // форвард читает под `FOR KEY SHARE` (LoadBinding(s)ForForward), а каждое снятие берёт
 // строку `FOR UPDATE` до этого чтения (LockBindingForDeactivation у истечения,
-// GetForDeactivation у отзыва, удаления и сноса области, kaname#923): из режимов строки только эти
+// GetForDeactivation у отзыва, удаления и сноса области, kaname#923;
+// UnregisteredKeyStore.ActiveBindingsNamingKey у отзыва по снятию регистрации объекта,
+// kaname#963, F1): из режимов строки только эти
 // два конфликтуют между собой, и снятие видит все записи форварда, а форвард,
 // пришедший позже, читает выдачу снятой. С `FOR NO KEY UPDATE` полного прохода `FOR KEY SHARE`
 // совместим, поэтому всё сказанное выше про очередь остаётся верным; тот же режим
@@ -104,6 +106,15 @@ package reconcile
 // reconcile_forward_deactivation_race_integration_test.go (отзыв, удаление) — первый
 // порядок; снос области (удаление проекта и аккаунта) берёт те же замки
 // (shared.RevokeBindingsInScope).
+//
+// ЗАМОК СТРОКИ РОЛИ — `FOR SHARE`, и он о том же, но для ПРАВИЛ роли (kaname#926).
+// Ярус члена форвард выводит из правил, прочитанных тем же чтением фактов, а веер
+// правки роли (RoleMembershipFanout) с форвардом строкой выдачи не упорядочен —
+// режимы совместимы. Поэтому правила форвард читает под замком, конфликтующим с
+// правкой и снятием роли (адаптер, `roleLockShare`): правка, сузившая роль, либо
+// ждёт его коммита, и её веер видит члена форварда, либо коммитится раньше, и
+// форвард читает уже новые правила. Гонку держит
+// reconcile_forward_role_narrowing_race_integration_test.go.
 //
 // Замка строки мало: исход снятия решает и ВЕРСИЯ строки журнала — свёртка в
 // прямой факт снимает факт, лишь если его версия не новее версии строки снятия.
@@ -467,6 +478,18 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 		if err != nil {
 			return fmt.Errorf("forward: load bindings %s:%s: %w", objectType, objectID, err)
 		}
+		// Строка объекта — после выдач и ролей и до первой записи, тем же порядком
+		// родов, что у снятия регистрации (kaname#975). Строки, снятой после чтения
+		// выше, под замком нет: аддитивному проходу писать нечего.
+		if !iamDirect {
+			live, err := liveObjects(ctx, s, []MemberCoord{{ObjectType: objectType, ObjectID: objectID}})
+			if err != nil {
+				return fmt.Errorf("forward: object %s:%s: %w", objectType, objectID, err)
+			}
+			if !live(MemberCoord{ObjectType: objectType, ObjectID: objectID}) {
+				return nil
+			}
+		}
 		for _, bID := range ids {
 			bs, ok := scopes[bID]
 			if !ok || !bs.Active {
@@ -548,6 +571,9 @@ type forwardWriteSet struct {
 
 // flush записывает накопленное — три обращения к базе на ВЕСЬ веер вместо трёх на выдачу.
 func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
+	if err := w.keepLive(ctx, s); err != nil {
+		return err
+	}
 	if err := s.UpsertMembers(ctx, w.members); err != nil {
 		return fmt.Errorf("forward: upsert members (%d): %w", len(w.members), err)
 	}
@@ -557,6 +583,51 @@ func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
 	if err := s.RecordEmittedTuplesBatch(ctx, w.ledger); err != nil {
 		return fmt.Errorf("forward: record emitted tuples (%d): %w", len(w.ledger), err)
 	}
+	return nil
+}
+
+// keepLive запирает строки зеркала объектов накопленных членов до первой записи
+// прохода и выбрасывает членов, строки объекта которых под замком уже нет
+// (kaname#975): объект, чью регистрацию сняли после чтения отбора (область, метки,
+// предки), члена не получает. Вместе с членом уходят его записи реестра и его
+// кортежи журнала: кортеж несёт объект члена, поэтому кортеж, который остался бы
+// после фильтра, держит хотя бы одна оставшаяся запись реестра.
+func (w *forwardWriteSet) keepLive(ctx context.Context, s ReconcileStore) error {
+	if len(w.members) == 0 {
+		return nil
+	}
+	objs := make([]MemberCoord, 0, len(w.members))
+	for _, m := range w.members {
+		objs = append(objs, coordOf(m))
+	}
+	live, err := liveObjects(ctx, s, objs)
+	if err != nil {
+		return fmt.Errorf("forward: %w", err)
+	}
+	members := w.members[:0:0]
+	for _, m := range w.members {
+		if live(coordOf(m)) {
+			members = append(members, m)
+		}
+	}
+	if len(members) == len(w.members) {
+		return nil
+	}
+	ledger := w.ledger[:0:0]
+	kept := make(map[domain.MembershipTuple]struct{}, len(w.ledger))
+	for _, e := range w.ledger {
+		if live(e.Member) {
+			ledger = append(ledger, e)
+			kept[e.Tuple] = struct{}{}
+		}
+	}
+	fresh := w.fresh[:0:0]
+	for _, t := range w.fresh {
+		if _, ok := kept[t]; ok {
+			fresh = append(fresh, t)
+		}
+	}
+	w.members, w.ledger, w.fresh = members, ledger, fresh
 	return nil
 }
 

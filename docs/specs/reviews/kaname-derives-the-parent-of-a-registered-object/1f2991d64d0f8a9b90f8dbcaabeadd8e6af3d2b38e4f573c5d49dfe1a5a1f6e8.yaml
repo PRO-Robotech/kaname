@@ -1,0 +1,177 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/kaname-derives-the-parent-of-a-registered-object.md
+  sha256: 1f2991d64d0f8a9b90f8dbcaabeadd8e6af3d2b38e4f573c5d49dfe1a5a1f6e8
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор. Вердикт выводится из ЭТОЙ записи
+    (`change-graph.md` §2). Рецензент шапку документа намеренно не правил.
+  publication_mode: courier_of_agent_verdict
+  base_commit: 6e4077e3a
+  content_commit: none
+  branch: 982
+  task: PRO-Robotech/kaname#982
+  related_tasks: [PRO-Robotech/kaname#983, PRO-Robotech/kaname#980, PRO-Robotech/kaname#979]
+  lines: 1070
+  round: 2
+  predecessor_record: docs/specs/reviews/kaname-derives-the-parent-of-a-registered-object/a00c560182b61666c261aab831f41aae35c1a23a371fc190043a89d786a4da44.yaml
+  fingerprint_predicate: >-
+    `sha256sum` по документу в копии kacho-workspace/tmp/kn-982-acceptance даёт
+    1f2991d6…f6e8. Совпало с возвратом автора. Копия прежней редакции `.a00c5601`
+    даёт a00c5601…4da44, это отпечаток записи круга 1. Дифф двух редакций — 562 строки.
+  measurement_revisions: >-
+    Дерево читалось на 6e4077e3a (HEAD копии, origin/955). Документ не закоммичен
+    (`git status` даёт `??`). Опоры сверены `sha256sum`: #983 = 9bd07e38…122a;
+    `non-empty-project-is-not-deleted.md` = db46a803…cc6.
+  premise: >-
+    Посылка «редакция 2 исполняет решения диспетчера по кругу 1» подтверждена: каждое
+    решение сверено с текстом (decisions_check). Посылка «приёмка нужна» не
+    менялась с круга 1 (миграция, новый ключ манифеста, поведение RegisterResource).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-26'
+
+effective_approval:
+  issued: true
+  issued_at: "2026-10-26T01:31:10Z"
+  ban1_lifted: false
+  why: >-
+    Блокирующих 0. Одобрение начинает действовать, когда курьер опубликует событие
+    ниже и приведёт блок event к факту (`change-graph.md` §3).
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#982
+  status: performed
+  published: true
+  database_id: 6406233798
+  node_id: "IC_kwDOUO26pM8AAAABfddexg"
+  url: "https://github.com/PRO-Robotech/kaname/issues/982#issuecomment-6406233798"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6406233798"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-26T01:31:10Z"
+  body_sha256: "515ee5c7c1a19b9d669f38e8d8eb70941d38ec80a0c0645e48793ecf1066408f"
+  subject_sha256: "1f2991d64d0f8a9b90f8dbcaabeadd8e6af3d2b38e4f573c5d49dfe1a5a1f6e8"
+  subject_revision_commit: "0ab3062421e7443df150f661826039c2bd0f4f81"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+blocking: []
+
+round1_kind_repeated: >-
+  Нет. Блокирующее круга 1 (CONSTRUCTIBILITY: место политики названо двумя
+  способами) снято. Место одно — use-case `Register`, транзакция `emit`. Так сказано
+  в §0.2, §3 (Р1 «Место», «Производительность», «Безопасность»), §4.1, §5.2, DoD п.3 и
+  п.7, DP-06. Мир П6 назван среди переписываемых (§0.6, DoD п.7). Его кортежи `owner`
+  ложатся после доставки W через политику и вывод. Это сверено с кодом мира, см.
+  constructibility.
+
+decisions_check:
+  - "Р1 место — use-case: исполнено (§0.2, Р1, §3 «Производительность» — чтение каталога внутри `emit`, register_resource.go:832; §0.6, §4.1, §5.2, DoD п.3, п.7; DP-06 закрепляет вход мимо обработчика). Обработчик как место не назван нигде"
+  - "Важное п.1: исполнено. Р9 — вывод в той же транзакции; Р10 — почему порядок сам не получается; §7 строка 4 — условие к коду реализации #983"
+  - "Важное п.2: исполнено. Р12 ссылается на §7.4 и IAM-PNE-1-13 (TestProjectDelete_PNE_1_13, project_delete_nonempty_integration_test.go:170, координата на месте) и на отпечаток db46a803…cc6, совпадает. «Безопасность»: «на момент чтения в той же транзакции»"
+  - "Важное п.3: исполнено. Опора записи из `writes` — субъект факта указателя (Р4). Цепь [account:…] — DP-17 a/b, пустая цепь — DP-17 c/d, у каждой исход и близнец"
+  - "Важное п.4: исполнено. DP-10 g и DP-11 b — один объект `…/b`, один R1; различие — только проект субъекта"
+  - "Важное п.5: исполнено. DP-20 i, j утверждают множество троек читателя политики; колонку проба не читает"
+  - "Важное п.6: исполнено для §0.1 — там только свойство. См. important п.2 о DoD п.6"
+  - "В1–В4: вариант (а), §8"
+  - "Р-В1, Р-В3, Р-В7 не переоткрыты"
+
+important:
+  - where: §4.1 «передоставка P0», DP-01, DP-05, DP-06 a, DP-20 j
+    note: >-
+      «Дано» «`writes` не действует» строится повторной доставкой P0 поверх W. Сегодня
+      это работает, но документ не называет почему. Ни P0, ни новая редакция ключа
+      `revision` не несут (`grep -i revision` по обеим фикстурам пуст). Поэтому
+      `JudgeRevision` (modulecatalog/revision.go:134) каждый раз даёт
+      RevisionUndeclaredOverUnapplied, и строки применяются. Если документ объявит
+      редакцию, то при равном номере и другом отпечатке исход — RevisionConflict, а
+      при меньшем номере — RevisionStale. В обоих случаях `ApplyAll` ошибки не
+      возвращает, модуль уходит в census.NotApplied, а `applyDelivered` проходит
+      `require.NoError`. Ложного зелёного это не даёт: DP-20 j и DP-01 покраснеют. Но
+      исполнитель будет искать причину в политике. Рекомендация: строкой §4.1 назвать
+      это условие и в пробе проверять, что census.NotApplied пуст. Предикат снятия
+      этой ветки — S2 kaname#865 (revision.go:155-161). После неё P0 без редакции не
+      загрузится вовсе.
+  - where: DoD п.6, фраза «По существу, без мира, принимались бы DP-01 a–e, DP-04 b, …»
+    note: >-
+      Это новая сводная сборка «вот формы, которые сегодня проходят». Того же рода
+      был перечень, снятый из §0.1 решением п.6 (security-disclosure,
+      disc-no-consolidated-assembly). Воспользоваться можно только с личностью модуля
+      на внутреннем слушателе, поэтому замечание не блокирующее, как и в круге 1.
+      Рекомендация: убрать фразу из DoD. Строки «Красна @…» у сценариев сводки не
+      собирают, их достаточно.
+  - where: Р9 «до её первого оператора записи» против §7 строки 4
+    note: >-
+      По §7 строке 4 отказ вывода, найденный до первой записи, не возвращается, пока
+      в той же транзакции не установлено, что сверка привязки #983 этот запрос
+      пропускает. Сверка стоит на уровне записи зеркала (оператор либо триггер
+      `UpsertTx`). Значит, отказ Р8 может вернуться ПОСЛЕ оператора записи. Тот
+      откатывается, и «ничего не записано» остаётся верным. Противоречия нет, но
+      «до первого оператора записи» в Р9 читается строже, чем позволяет §7. Можно
+      уточнить: «вычисляется до первой записи; когда возвращается — §7 строка 4».
+  - where: Р4, «relation_fact_pkey (object_type, object_id, relation)»
+    note: >-
+      В скобках назван префикс, а не ключ. Ключ — PRIMARY KEY (object_type,
+      object_id, relation, subject) (0001_initial.sql:4257). Именно четвёртая колонка
+      позволяет двум фактам указателя у `X/app` в DP-17 e существовать одновременно.
+      Рекомендуется назвать ключ полностью и чтение по префиксу из трёх колонок.
+
+questions_relayed:
+  - >-
+    Правило Р4 «фактов указателя несколько — хватает согласия с одним» автор выбрал
+    сам и вынес вопросом (fa-b4). Мнение рецензента: на корректность и безопасность
+    (а) не влияет. Каждый факт указателя — уже выведенный kaname родитель. Прежний
+    факт и так даёт объекту доступ через каскад контейнера, пока он не снят, так что
+    согласие с ним область не расширяет. DP-17 e/f закрепляют любой выбор. Решает
+    диспетчер.
+
+constructibility:
+  seeded: 0
+  named_fixture_rows_verified: 11 of 11 (§5.2)
+  not_performed: 1
+  reason: >-
+    Посев не ставился. Задание не назвало изоляцию для посева, а testcontainers по
+    правилу машины идут только слотом внешнего кластера. Посев на 6e4077e3a ничего
+    не доказал бы: загрузчик отвергает W (manifest.go:450, KnownFields(true)), и мир
+    честно красный. Конструируемость показана писателями, каждый сверен с кодом:
+    (1) `registerRegistry` и `registerRepository` пишут указатель раньше `owner`
+    (public_container_read_world_integration_test.go:178-205), а prj-A посеян в acc-A
+    (system_class_world_integration_test.go:126). Поэтому у `owner` после W есть опора.
+    (2) Факт указателя пишет триггер `relation_fact_from_journal` на `fga_outbox` в
+    той же транзакции регистрации (0001_initial.sql:1389-1395). К следующей
+    регистрации он виден.
+    (3) Ключ relation_fact включает subject (:4257), поэтому два факта указателя
+    при переносе в DP-17 e допустимы.
+    (4) Повторная доставка P0 поверх W применяется, потому что ни у одной фикстуры
+    нет `revision` (important п.1).
+    (5) Фикстура P0 в дереве не правится: W строится правкой в пробе. Её читают
+    modelrender, modelcompose и sc70, и они не затронуты.
+
+tree_claims_checked:
+  - "register_resource.go: Register :374, emit :820, catalogObjectType :832, AccountForProjectTx :848, UpsertTx :859, isPureGrant :387, Unregister :553, validateRelationString :746; handler.go:211 MapRepoErr; catalog_type.go:98; resources.go:1225 validateResourcePublicRead; rows.go:132 p.Type — на месте"
+  - "§0.6: 21 / 27, объединение 29; newPCRWorld — 9 файлов; литерал owner — 11 файлов (git grep -l @6e4077e3a)"
+  - "§4.1: newPCRWorld :99, registerRegistry :178, registerRepository :193, deliverNewEdition :230, deliverPriorEdition :260, applyDelivered :272; seedProjectInAccount testhelpers_assignable_test.go:125; fakeGate handler_test.go:196; readParentChain parent_edge_integration_test.go:46 — на месте"
+  - "Сценариев 15 (DP-01…06, DP-10…17, DP-20); строк «сценарий → производитель» 15; без производителя 0"
+  - "Близнец у отрицаний: 15 из 15 сценариев, где есть отрицание; каждый отличается одним фактом (DP-01 a–e, DP-03 d, DP-04 b, DP-06 a, DP-10 a–h, DP-12 a–e, DP-14 a, DP-15 a–b, DP-16, DP-17 b/d/f, DP-20 a–h, j)"
+
+neighbours:
+  - "#983: 9bd07e38…122a, APPROVED круг 5. §5.4 соответствует PB-24 a–d, PB-25 d, PB-13 a"
+  - "non-empty-project-is-not-deleted.md: db46a803…cc6, в линии; IAM-PNE-1-13 на месте"
+  - "svc-registry: 27170775…22dc7, DRAFT. Отпечаток в документе тот же, что в круге 1; §5.3 не менялась"
+
+route_signs:
+  proto: да (только комментарии, Р13)
+  schema: да (миграция)
+  public_rpc: нет (внутренний слушатель)
+  ui: нет
+  new_domain: нет
+  security_surface: да (сужение)
+
+authority: >-
+  Роль в записи — координата, а не доказательство личности. Вердикт действует только
+  после внешнего события (`change-graph.md` §3).

@@ -28,6 +28,10 @@ type ruleJSON struct {
 	// Children — вложенные правила (kaname#874). Ключа нет у правила без
 	// вложенных: хранимая форма прежних ролей не меняется ни на байт.
 	Children []childRuleJSON `json:"children,omitempty"`
+	// CreatedBySubject — селектор создателя (kaname#1003, Р2а). Ключа нет у правила
+	// без селектора: хранимая форма прежних ролей не меняется ни на байт, а «нет»
+	// выражено одним способом — отсутствием ключа.
+	CreatedBySubject bool `json:"created_by_subject,omitempty"`
 }
 
 // childRuleJSON — хранимая форма ВЛОЖЕННОГО правила. Модуля и своих вложенных у
@@ -53,11 +57,12 @@ func DecodeRules(raw []byte) (Rules, error) {
 	out := make(Rules, 0, len(in))
 	for _, r := range in {
 		rule := Rule{
-			Module:        r.Module,
-			Resources:     r.Resources,
-			Verbs:         r.Verbs,
-			ResourceNames: r.ResourceNames,
-			MatchLabels:   r.MatchLabels,
+			Module:           r.Module,
+			Resources:        r.Resources,
+			Verbs:            r.Verbs,
+			ResourceNames:    r.ResourceNames,
+			MatchLabels:      r.MatchLabels,
+			CreatedBySubject: r.CreatedBySubject,
 		}
 		if len(r.Children) > 0 {
 			rule.Children = make([]Rule, 0, len(r.Children))
@@ -80,11 +85,12 @@ func EncodeRules(rs Rules) ([]byte, error) {
 	out := make([]ruleJSON, 0, len(rs))
 	for _, r := range rs {
 		rj := ruleJSON{
-			Module:        r.Module,
-			Resources:     r.Resources,
-			Verbs:         r.Verbs,
-			ResourceNames: r.ResourceNames,
-			MatchLabels:   r.MatchLabels,
+			Module:           r.Module,
+			Resources:        r.Resources,
+			Verbs:            r.Verbs,
+			ResourceNames:    r.ResourceNames,
+			MatchLabels:      r.MatchLabels,
+			CreatedBySubject: r.CreatedBySubject,
 		}
 		for _, c := range r.Children {
 			rj.Children = append(rj.Children, childRuleJSON{

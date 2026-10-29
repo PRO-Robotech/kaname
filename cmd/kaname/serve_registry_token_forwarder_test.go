@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 )
 
@@ -100,13 +101,13 @@ func TestAnonymousRegistryToken_ForwardingFromAnUntrustedPeerDoesNotChangeTheKey
 	}
 }
 
-// registryTokenFallbackRow — строка ряда переписи точки анонимной выдачи на
-// витрине реестра reg.
-func registryTokenFallbackRow(t *testing.T, reg *metrics.Registry) string {
+// registryTokenFallbackRow — строка ряда переписи точки анонимной выдачи по
+// причине reason на витрине реестра reg.
+func registryTokenFallbackRow(t *testing.T, reg *metrics.Registry, reason string) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	reg.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	prefix := metrics.RegistryTokenSourceFallbacksMetric + `{reason="forwarded-from-unrecognized-peer"} `
+	prefix := metrics.RegistryTokenSourceFallbacksMetric + `{reason="` + reason + `"} `
 	for _, line := range strings.Split(rec.Body.String(), "\n") {
 		if strings.HasPrefix(line, prefix) {
 			return line
@@ -134,11 +135,11 @@ func TestAnonymousRegistryToken_ForwardingFromAnUntrustedPeerIsCountedOnTheShowc
 		"близнец: доверенный пересыльщик": {anonLaneForwarderSAN, true, "0"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain), probeServiceNameForm)
+			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain), moduleidentity.Roster{})
 			reg := metrics.NewRegistry()
 			reg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(rule))
 			h := anonymousLaneWithSourceRule(t, anonLanePrincipal, "5", nil, rule)
-			if row := registryTokenFallbackRow(t, reg); !strings.HasSuffix(row, " 0") {
+			if row := registryTokenFallbackRow(t, reg, unrecognizedPeerReason); !strings.HasSuffix(row, " 0") {
 				t.Fatalf("до первого входа ряд не ноль: %q", row)
 			}
 			for _, client := range []string{"203.0.113.1", "203.0.113.2"} {
@@ -146,8 +147,56 @@ func TestAnonymousRegistryToken_ForwardingFromAnUntrustedPeerIsCountedOnTheShowc
 					t.Fatalf("вход клиента %s: статус %d", client, code)
 				}
 			}
-			if row := registryTokenFallbackRow(t, reg); !strings.HasSuffix(row, " "+tc.want) {
+			if row := registryTokenFallbackRow(t, reg, unrecognizedPeerReason); !strings.HasSuffix(row, " "+tc.want) {
 				t.Fatalf("ряд после двух входов: %q, ждали значение %s", row, tc.want)
+			}
+		})
+	}
+}
+
+// Метки рядов переписи точки анонимной выдачи — строками витрины: проба держит
+// то, что читает оператор, а не константу правила.
+const (
+	unrecognizedPeerReason   = "forwarded-from-unrecognized-peer"
+	edgeWithoutAddressReason = "edge-without-address"
+)
+
+// Объявленный пересыльщик без годного адреса ВИДЕН оператору (kaname#935): ряд
+// edge-without-address растёт на +1 за каждый такой вход. Прокси реестра, не
+// передающий адрес клиента или передающий список, сводит всех клиентов за
+// собой к одному ключу темпа — без ряда это неотличимо от залпа одного
+// клиента. Близнец — тот же пересыльщик с одним адресом: ряд остаётся нулём;
+// строки отличаются ровно значением заголовка. Соседний ряд точки не
+// двигается ни в одной строке. Полоса и витрина собраны переходниками корня,
+// теми же, что провязывает serve.go.
+func TestAnonymousRegistryToken_TrustedForwarderWithoutUsableAddressIsCountedOnTheShowcase(t *testing.T) {
+	for name, tc := range map[string]struct {
+		clients []string
+		want    string
+	}{
+		"список адресов":      {[]string{"203.0.113.1, 198.51.100.1", "203.0.113.2, 198.51.100.1"}, "2"},
+		"не адрес":            {[]string{"not-an-address"}, "1"},
+		"пустое значение":     {[]string{""}, "1"},
+		"близнец: один адрес": {[]string{"203.0.113.1", "203.0.113.2"}, "0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rule := issuingsource.New(grpcsrv.NewTrustDomain(anonLaneTrustDomain), moduleidentity.Roster{})
+			reg := metrics.NewRegistry()
+			reg.NewRegistryTokenSourceFallbackCollector(registryTokenSourceFallbackReasons(), registryTokenSourceFallbackReader(rule))
+			h := anonymousLaneWithSourceRule(t, anonLanePrincipal, "5", nil, rule)
+			if row := registryTokenFallbackRow(t, reg, edgeWithoutAddressReason); !strings.HasSuffix(row, " 0") {
+				t.Fatalf("до первого входа ряд не ноль: %q", row)
+			}
+			for _, client := range tc.clients {
+				if code := pullVia(t, h, anonLaneForwarderSAN, true, client); code != http.StatusOK {
+					t.Fatalf("вход с заголовком %q: статус %d", client, code)
+				}
+			}
+			if row := registryTokenFallbackRow(t, reg, edgeWithoutAddressReason); !strings.HasSuffix(row, " "+tc.want) {
+				t.Fatalf("ряд после %d входов: %q, ждали значение %s", len(tc.clients), row, tc.want)
+			}
+			if row := registryTokenFallbackRow(t, reg, unrecognizedPeerReason); !strings.HasSuffix(row, " 0") {
+				t.Fatalf("соседний ряд точки сдвинулся: %q", row)
 			}
 		})
 	}

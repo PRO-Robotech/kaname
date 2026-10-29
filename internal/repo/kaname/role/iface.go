@@ -220,8 +220,10 @@ type WriterIface interface {
 	RegrainSelectorVerbs(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error
 
 	// RulesForRegrain — правила роли под замком строки для пересчёта глаголов
-	// правил; live=false — роль снята либо её нет (kaname#878).
-	RulesForRegrain(ctx context.Context, roleID domain.RoleID) (rules domain.Rules, live bool, err error)
+	// правил; live=false — роль снята либо её нет (kaname#878). Политика роли
+	// ([domain.PolicyOfRole]) — из той же строки: от владельца зависит, влечёт ли
+	// правка удаление (kaname#1006).
+	RulesForRegrain(ctx context.Context, roleID domain.RoleID) (rules domain.Rules, policy domain.RulePolicy, live bool, err error)
 
 	// ReplaceRoleVerbs syncs kaname.role_verb — проекцию «роль → тип объекта ×
 	// глагол», которой отвечает форма E.

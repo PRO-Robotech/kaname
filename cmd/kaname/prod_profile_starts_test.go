@@ -57,6 +57,8 @@ import (
 
 	"github.com/PRO-Robotech/corelib/treecorpus"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
+	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // chartDir — каталог чарта этой службы относительно пакета композиционного корня.
@@ -208,7 +210,11 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	}
 	require.NotEmpty(t, forwardersCfg.AuthN.TrustedForwarderSANs,
 		"круг отправителей боевого профиля пуст — вердикт беспредметен")
-	require.NoError(t, requireForwardersRecognised(forwardersCfg.AuthN, ""),
+	// Перечень личностей — тоже у профиля (kaname#984): запись круга узнаётся,
+	// только если её пару объявляет перечень, а учётку записи перечня читает
+	// объявленная форма. Файлов центров проба не читает — центры судятся по имени.
+	forwardersRoster := profileRoster(t, values, forwardersCfg.AuthN.ServiceNameForm())
+	require.NoError(t, requireForwardersRecognised(forwardersCfg.AuthN, forwardersRoster, ""),
 		"боевой профиль объявляет отправителя, которого транспорт не узнает модулем: он прошёл бы "+
 			"взаимный TLS и получал отказ на каждом вызове")
 	t.Logf("круг отправителей: записей %d · форма %q · домен %q",
@@ -426,4 +432,35 @@ func profileString(t *testing.T, values map[string]any, path ...string) string {
 	raw, found := dig(values, path...)
 	require.Truef(t, found, "профиль не объявляет %s", strings.Join(path, "."))
 	return valueAsString(t, strings.Join(path, "."), raw)
+}
+
+// profileRoster — перечень личностей модулей профиля `authn.moduleIdentities`,
+// собранный формой form судом объявления (центры — по именам из
+// `authn.clientIssuers`, файлы не читаются). Пустой перечень — дефект профиля:
+// по нему модулем не признаётся никто, и вердикт о круге был бы вакуумен.
+func profileRoster(t *testing.T, values map[string]any, form servicesan.Form) moduleidentity.Roster {
+	t.Helper()
+	list := func(path ...string) []string {
+		raw, found := dig(values, path...)
+		if !found {
+			return nil
+		}
+		items, ok := raw.([]any)
+		require.True(t, ok, "%s объявлен не списком: %T", strings.Join(path, "."), raw)
+		out := make([]string, 0, len(items))
+		for i, e := range items {
+			out = append(out, valueAsString(t, fmt.Sprintf("%s[%d]", strings.Join(path, "."), i), e))
+		}
+		return out
+	}
+	entries := list("authn", "moduleIdentities")
+	require.NotEmpty(t, entries, "профиль не объявляет личностей модулей — модулем не признаётся никто")
+	var issuerNames []string
+	for _, e := range list("authn", "clientIssuers") {
+		name, _, _ := strings.Cut(e, "=")
+		issuerNames = append(issuerNames, strings.TrimSpace(name))
+	}
+	r, err := moduleidentity.ParseDeclared(form, entries, issuerNames)
+	require.NoError(t, err, "перечень личностей профиля не разобрался")
+	return r
 }

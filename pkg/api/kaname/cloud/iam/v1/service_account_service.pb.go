@@ -666,12 +666,12 @@ const file_kaname_cloud_iam_v1_service_account_service_proto_rawDesc = "" +
 	"\n" +
 	"operations\x18\x01 \x03(\v2\x1c.corelib.operation.OperationR\n" +
 	"operations\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x88\x11\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x99\x11\n" +
 	"\x15ServiceAccountService\x12\xe7\x01\n" +
 	"\x03Get\x12-.kaname.cloud.iam.v1.GetServiceAccountRequest\x1a#.kaname.cloud.iam.v1.ServiceAccount\"\x8b\x01\x8a\xb5\x18\x18iam.service_accounts.get\x92\xb5\x18\x05v_get\x9a\xb5\x18)\n" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02.\x12,/iam/v1/serviceAccounts/{service_account_id}\x12\xab\x01\n" +
-	"\x04List\x12/.kaname.cloud.iam.v1.ListServiceAccountsRequest\x1a0.kaname.cloud.iam.v1.ListServiceAccountsResponse\"@\x8a\xb5\x18\x19iam.service_accounts.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x19\x12\x17/iam/v1/serviceAccounts\x12\xf6\x01\n" +
-	"\x06Create\x120.kaname.cloud.iam.v1.CreateServiceAccountRequest\x1a\x1c.corelib.operation.Operation\"\x9b\x01\x8a\xb5\x18\x1biam.service_accounts.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
+	"\x04List\x12/.kaname.cloud.iam.v1.ListServiceAccountsRequest\x1a0.kaname.cloud.iam.v1.ListServiceAccountsResponse\"@\x8a\xb5\x18\x19iam.service_accounts.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x19\x12\x17/iam/v1/serviceAccounts\x12\x87\x02\n" +
+	"\x06Create\x120.kaname.cloud.iam.v1.CreateServiceAccountRequest\x1a\x1c.corelib.operation.Operation\"\xac\x01\x8a\xb5\x18\x1biam.service_accounts.create\x92\xb5\x18\x17service_account_creator\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x011\xb2\xd2*.\n" +
 	"\x1cCreateServiceAccountMetadata\x12\x0eServiceAccount\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/iam/v1/serviceAccounts\x12\xa1\x02\n" +

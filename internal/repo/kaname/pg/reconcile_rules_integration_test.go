@@ -32,6 +32,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/ids"
 
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
@@ -52,6 +53,16 @@ import (
 // FailNow before Commit, leaking the writer-tx connection; see the rollback note).
 func seedRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *kanamepg.Repository, prj domain.ProjectID, name string, rules domain.Rules) domain.RoleID {
 	t.Helper()
+	return seedRulesRoleWith(t, ctx, repo, prj, name, rules, catalogfixture.Facts())
+}
+
+// seedRulesRoleWith — seedRulesRole с явно названным каталожным фактом: охват
+// селекторов (`GrantSelectors`) выводится из него. Нужен пробам типа, заведённого
+// применением манифеста после старта (kaname#937): литеральный каталог фикстуры
+// такого типа не знает, и селектор вышел бы без охвата.
+func seedRulesRoleWith(t *testing.T, ctx context.Context, repo *kanamepg.Repository, prj domain.ProjectID, name string,
+	rules domain.Rules, facts *catalog.Facts) domain.RoleID {
+	t.Helper()
 	rid := domain.RoleID(ids.NewID(domain.PrefixRole))
 	compiled, err := domain.CompileRules(rules)
 	require.NoError(t, err)
@@ -69,7 +80,7 @@ func seedRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *
 	defer func() { _ = w.Rollback(ctx) }()
 	inserted, err := w.RolesW().Insert(ctx, role)
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors())))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, facts.GrantSelectors(inserted.Rules.MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, w.Commit(ctx))
 	return rid
 }
@@ -230,7 +241,7 @@ func TestC20C21_RuleRemoved_EagerRevokeByRuleFP_NoResidual(t *testing.T) {
 		Rules: domain.Rules{ruleKeep}, Permissions: mustCompile(t, domain.Rules{ruleKeep}), IsSystem: false}
 	_, err = w.RolesW().Update(ctx, updated, []string{"rules"})
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, roleID, catalogfixture.Facts().GrantSelectors(updated.Rules.MaterializingSelectors())))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, roleID, catalogfixture.Facts().GrantSelectors(updated.Rules.MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, w.Commit(ctx))
 
 	// Fan-out reconcile of the binding picks up the new role.rules.
@@ -404,7 +415,7 @@ func seedAccountRulesRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	defer func() { _ = w.Rollback(ctx) }()
 	inserted, err := w.RolesW().Insert(ctx, role)
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors())))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, w.Commit(ctx))
 	return rid
 }

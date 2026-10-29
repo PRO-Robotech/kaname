@@ -247,8 +247,8 @@ func TestIAMSV104_VerdictProjectionIsUnchanged(t *testing.T) {
 			require.NotEmptyf(t, typeVerbs, "контроль: тип %q обязан объявлять глаголы — "+
 				"на пустом наборе обе стороны дали бы nil и равенство прошло бы даром", c.fgaType)
 
-			was := authzmap.GrantedVerbs(c.fgaType, c.before, typeVerbs)
-			now := authzmap.GrantedVerbs(c.fgaType, c.after, typeVerbs)
+			was := authzmap.GrantedVerbs(c.fgaType, c.before, typeVerbs, domain.TenantPolicy())
+			now := authzmap.GrantedVerbs(c.fgaType, c.after, typeVerbs, domain.TenantPolicy())
 			require.NotEmptyf(t, was, "контроль: набор «до» пуст — сравнение вакуумно")
 			sort.Strings(was)
 			sort.Strings(now)

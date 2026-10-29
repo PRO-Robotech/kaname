@@ -82,7 +82,8 @@ type abReader struct {
 // выдачи различает пара (role_id, granted_relation), и ровно одна из них непуста.
 const abCols = "id, subject_type, subject_id, COALESCE(role_id, '') AS role_id, resource_type, resource_id, " +
 	"status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope, " +
-	"deletion_protection, labels, target, granted_relation, is_system"
+	"deletion_protection, labels, target, granted_relation, is_system, COALESCE(revocation_reason, '') AS revocation_reason, " +
+	"COALESCE(delegation_id, '') AS delegation_id"
 
 func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	row := r.tx.QueryRow(ctx,
@@ -136,26 +137,41 @@ func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.A
 // парным положительным контролем, что тот же форвард без держателя материализует
 // объект (иначе «не ждёт» зеленело бы на проходе, который ничего не делает).
 func (r *abReader) GetForNoKeyUpdate(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
-	row := r.tx.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 FOR NO KEY UPDATE`, abCols), string(id))
-	out, err := scanAB(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
-		}
-		return domain.AccessBinding{}, mapErr(err, "", string(id))
-	}
-	return out, nil
+	// ПОРЯДОК ЗАХВАТА (kaname#922): после advisory-замка этой выдачи (полный
+	// проход, проход по объекту — в порядке id веера, истечение). Перепись —
+	// docs/changes/kn-922/lock-order-census.md.
+	return r.getLocked(ctx, id, lockNoKeyUpdate)
 }
 
-// GetForKeyShare — Get с замком строки выдачи `FOR KEY SHARE`: чтение аддитивного
-// форварда (reconcile LoadBindingForForward, kaname#919). Режим совместим с
-// `FOR NO KEY UPDATE` полного прохода и конфликтует лишь с `FOR UPDATE` снятия
-// выдачи — поэтому форвард не ждёт фоновой работы, а решение «выдача жива» верно до
-// его коммита. Строки нет ⇒ ErrNotFound.
+// GetForKeyShare — строка выдачи под `FOR KEY SHARE` до конца транзакции: чтение
+// аддитивного форварда (reconcile LoadBindingForForward, kaname#919). Режим совместим
+// с `FOR NO KEY UPDATE` полного прохода и с `FOR KEY SHARE` дочерних вставок, а
+// конфликтует ТОЛЬКО с `FOR UPDATE` — замком снятия выдачи: истечения срока, отзыва и
+// удаления (getForUpdate, kaname#923) и отзыва по снятию регистрации
+// (`UnregisteredKeyStore.ActiveBindingsNamingKey`, kaname#963, F1). Форвард поэтому
+// не встаёт в очередь за фоновой работой, а решение «выдача жива» верно до его
+// коммита: либо снятие ждёт фиксации форварда и снимает записанное по реестру, либо
+// форвард ждёт фиксации снятия и читает строку уже отозванной. Строки нет ⇒
+// ErrNotFound.
 func (r *abReader) GetForKeyShare(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): форвард по выдаче берёт строку первой и без
+	// advisory; FOR KEY SHARE совместим с FOR NO KEY UPDATE полного прохода и ждёт
+	// лишь FOR UPDATE снятий.
+	return r.getLocked(ctx, id, lockKeyShare)
+}
+
+// rowLock — режим строчного замка чтения выдачи. Закрытый набор постоянных: текст
+// вставляется в оператор, поэтому значения извне сюда не попадают.
+type rowLock string
+
+const (
+	lockNoKeyUpdate rowLock = "FOR NO KEY UPDATE"
+	lockKeyShare    rowLock = "FOR KEY SHARE"
+)
+
+func (r *abReader) getLocked(ctx context.Context, id domain.AccessBindingID, lock rowLock) (domain.AccessBinding, error) {
 	row := r.tx.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 FOR KEY SHARE`, abCols), string(id))
+		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 %s`, abCols, lock), string(id))
 	out, err := scanAB(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -171,6 +187,9 @@ func (r *abReader) GetForKeyShare(ctx context.Context, id domain.AccessBindingID
 // (abWriter.GetForDeactivation), и истечение срока
 // (reconcileStore.LockBindingForDeactivation). Строки нет ⇒ ErrNotFound.
 func (r *abReader) getForUpdate(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): у всех снятий (отзыв, удаление, истечение, снос
+	// области) — после advisory-замка этой выдачи и до чтения ведомости. Перепись —
+	// docs/changes/kn-922/lock-order-census.md.
 	row := r.tx.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM access_bindings WHERE id = $1 FOR UPDATE`, abCols), string(id))
 	out, err := scanAB(row)
@@ -882,11 +901,18 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument target: %s", err.Error())
 	}
 	targetDigest := b.Target.Digest()
+	if err := holdRegisteredKeys(ctx, w.tx, b.HeldTargets, func(ref domain.ResourceRef) error {
+		return iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"target resource %s %s was unregistered before the access binding was written", ref.Type, ref.ID)
+	}); err != nil {
+		return domain.AccessBinding{}, err
+	}
 	q := fmt.Sprintf(`
 		INSERT INTO access_bindings (
 			id, subject_type, subject_id, role_id, resource_type, resource_id,
 			status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope,
-			deletion_protection, labels, target, target_digest, granted_relation, is_system
+			deletion_protection, labels, target, target_digest, granted_relation, is_system,
+			delegation_id
 		)
 		VALUES (
 			$1, $2, $3,
@@ -895,7 +921,10 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 			-- ключ и дала бы отказ ссылочной целостности на несуществующую роль.
 			NULLIF($4, ''), $5, $6,
 			COALESCE(NULLIF($7, ''), 'ACTIVE'),
-			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+			-- Ссылку на делегирование ставит только делегированный путь права
+			-- выдавать (kaname#986); у выдачи держателя права колонка NULL.
+			NULLIF($20, '')
 		)
 		RETURNING %s`, abCols)
 	var scopeArg any
@@ -920,6 +949,7 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		targetDigest,
 		b.GrantedRelation,
 		b.System,
+		string(b.DelegationID),
 	)
 	out, err := scanAB(row)
 	if err != nil {
@@ -938,6 +968,8 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 // что выдачу можно удалить (reconcile/expire), и пробы; публичный сценарий Delete
 // идёт через DeleteGuarded (P6, CAS по deletion_protection).
 func (w *abWriter) Delete(ctx context.Context, id domain.AccessBindingID) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): у сноса области строка уже взята FOR UPDATE
+	// (GetForDeactivation) после advisory-замка этой выдачи, выдачи — по возрастанию id.
 	tag, err := w.tx.Exec(ctx, `DELETE FROM access_bindings WHERE id = $1`, string(id))
 	if err != nil {
 		return mapErr(err, "AccessBinding.Delete", string(id))
@@ -955,6 +987,8 @@ func (w *abWriter) Delete(ctx context.Context, id domain.AccessBindingID) error 
 // FailedPrecondition). Никакого software TOCTOU (ban #10). 0 строк → повторное
 // чтение различает not-found / protected.
 func (w *abWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID) error {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строка уже взята FOR UPDATE (GetForDeactivation)
+	// после advisory-замка этой выдачи; оператор нового замка не добавляет.
 	tag, err := w.tx.Exec(ctx,
 		`DELETE FROM access_bindings WHERE id = $1 AND deletion_protection = false`, string(id))
 	if err != nil {
@@ -988,6 +1022,8 @@ func (w *abWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID)
 // FailedPrecondition. revoked_at проставляется, чтобы частичная UNIQUE
 // действующей выдачи (`WHERE revoked_at IS NULL`) освободила место повторной выдаче.
 func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID, revokedBy domain.UserID) (domain.AccessBinding, error) {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строка уже взята FOR UPDATE (GetForDeactivation)
+	// после advisory-замка этой выдачи; оператор нового замка не добавляет.
 	if revokedBy == "" {
 		// CHECK access_bindings_revoked_consistency_ck требует, чтобы revoked_at
 		// менялся вместе со status='REVOKED'; строка REVOKED без отозвавшего
@@ -1000,7 +1036,8 @@ func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID,
 		UPDATE access_bindings
 		   SET status             = 'REVOKED',
 		       revoked_at         = $2,
-		       revoked_by_user_id = $3
+		       revoked_by_user_id = $3,
+		       revocation_reason  = 'REVOKE'
 		 WHERE id = $1
 		   AND status = 'ACTIVE'
 		   AND deletion_protection = false
@@ -1030,6 +1067,8 @@ func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID,
 // Один оператор `UPDATE … WHERE id=$1 RETURNING …`; 0 строк → NotFound. Его зовёт
 // путь `Update(update_mask=["deletion_protection"])`, снимающий флаг.
 func (w *abWriter) SetDeletionProtection(ctx context.Context, id domain.AccessBindingID, protected bool) (domain.AccessBinding, error) {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строка выдачи FOR NO KEY UPDATE — первым и
+	// единственным строчным замком транзакции правки; advisory не берётся.
 	row := w.tx.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE access_bindings
 		   SET deletion_protection = $2
@@ -1051,6 +1090,9 @@ func (w *abWriter) SetDeletionProtection(ctx context.Context, id domain.AccessBi
 // writer ждет commit и видит обновленный row (last-writer-wins, не TOCTOU, ban #10).
 // 0 rows RETURNING → NotFound. Identity/scope/subject поля не затрагиваются.
 func (w *abWriter) UpdateLabels(ctx context.Context, id domain.AccessBindingID, labels domain.Labels) (domain.AccessBinding, error) {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строка выдачи FOR NO KEY UPDATE — первым и
+	// единственным строчным замком транзакции правки; advisory не берётся. Перепись —
+	// docs/changes/kn-922/lock-order-census.md.
 	labelsJSON, err := marshalLabels(labels)
 	if err != nil {
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
@@ -1165,7 +1207,7 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		labelsJSON   []byte
 		targetJSON   []byte
 	)
-	dest := make([]any, 0, 20)
+	dest := make([]any, 0, 21)
 	if len(versionOut) > 0 {
 		dest = append(dest, versionOut[0])
 	}
@@ -1188,6 +1230,8 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		&targetJSON,
 		&ab.GrantedRelation,
 		&ab.System,
+		(*string)(&ab.RevocationReason),
+		(*string)(&ab.DelegationID),
 	)
 	err := row.Scan(dest...)
 	if err != nil {
@@ -1314,6 +1358,9 @@ func (w *abWriter) EmitRelationDelete(ctx context.Context, tuples []access_bindi
 // (`catalogWriter.LockModuleResources`); здесь тот же порядок назначает та же
 // власть — база, — и взаимная блокировка на паре типов непредставима.
 func (w *abWriter) LockLiveTargetTypes(ctx context.Context, types []string) ([]string, error) {
+	// ПОРЯДОК ЗАХВАТА (kaname#922): строки catalog_resource типов цели — FOR KEY
+	// SHARE, ORDER BY dotted, первым оператором транзакции создания; новая строка
+	// выдачи и строка роли (FOR SHARE, триггер) — после. Перепись — docs/changes/kn-922/lock-order-census.md.
 	if len(types) == 0 {
 		return nil, nil
 	}

@@ -100,11 +100,17 @@ const deliveredWorkflow = ".github/workflows/ci.yml"
 // нужен каждому.
 const deliveredImageWorkflow = ".github/workflows/docker-build.yml"
 
+// deliveredChartWorkflow — объявление процесса, ПУБЛИКУЮЩЕГО ЧАРТ службы в
+// OCI-реестр на метке версии (kaname#964). Отдельное объявление по той же
+// причине, что у образа: триггер у него один — метка, — и ни запроса, ни ствола
+// ему не нужно.
+const deliveredChartWorkflow = ".github/workflows/chart.yml"
+
 // deliveredWorkflows — ВСЕ объявления процессов поставки. Разбираемость и форма
 // идентификатора судятся у КАЖДОГО: объявление, которого распознаватель не
 // знает, не даёт ни красного, ни зелёного — оно молчит, и его поломка
 // обнаруживается только у провайдера, нулём прогонов.
-var deliveredWorkflows = []string{deliveredWorkflow, deliveredImageWorkflow}
+var deliveredWorkflows = []string{deliveredWorkflow, deliveredImageWorkflow, deliveredChartWorkflow}
 
 // deliveredPipelineFiles — всё, что поставка обязана нести, чтобы конвейер
 // исполнился у постороннего. Перечень ВЫПИСАН, а не выведен обходом: обход
@@ -113,12 +119,20 @@ var deliveredWorkflows = []string{deliveredWorkflow, deliveredImageWorkflow}
 var deliveredPipelineFiles = []string{
 	deliveredWorkflow,
 	deliveredImageWorkflow,
+	deliveredChartWorkflow,
+	// Публикатор чарта: его зовёт процесс публикации чарта (kaname#964). Без него
+	// задание отказывает на отсутствующем файле, а не на реестре.
+	".github/scripts/chart-publish.sh",
 	// Составное действие, которым два задания создают дерево платформы: без
 	// него провайдер отказывает на разборе ссылки `uses: ./.github/actions/…`,
 	// и оба задания не исполняются вовсе.
 	".github/actions/platform-tree/action.yml",
 	".github/golangci.yml",
 	".github/scripts/classify-integration-outcome.sh",
+	// Разборщик исхода формы манифестов: вердикт шага «манифесты модулей» —
+	// его код (kaname#825). Без него шаг отказывает на отсутствующем файле, а
+	// не на манифесте.
+	".github/scripts/classify-manifest-outcome.sh",
 	".github/scripts/go-test-verdict.py",
 	".github/scripts/gosec-gate.sh",
 	// Сверка опубликованного образа: её зовёт производитель образа после

@@ -100,7 +100,9 @@ func TestRemovingTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// из proto и есть единственный источник per-RPC решения края.
 	removeRel, removeType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Delete")
 	readRel, readType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Get")
-	grantRel, grantType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.AccessBindingService/Delete")
+	// Снятие выдачи судит ОБРАБОТЧИК, а не дверь по каталогу (kaname#986, Р1а):
+	// источник вопроса — обработчик (`removalGateFromHandler`).
+	grantRel, grantType := removalGateFromHandler(t)
 	require.Equalf(t, "iam_user", removeType,
 		"снятие личности гейтится не на объекте личности (%s) — предмет пробы сменился", removeType)
 	require.Equalf(t, "iam_user", readType,

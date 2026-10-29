@@ -100,6 +100,7 @@ func TestMultiSubjectTeardown_DeleteNamesEverySubject(t *testing.T) {
 	id, subjects := w.twoSubjectsGrant()
 	require.Equal(t, subjects, w.grantedAuditSubjects(id), "близнец: аудит «выдано» называет каждого субъекта")
 
+	w.ownerMayRemove("удаление: Дано", id)
 	op, err := w.ab.Delete(asUser(w.ctx, w.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 	require.NoError(t, err, "удаление выдачи")
 	done := awaitOp(t, w.ctx, w.ops, op.GetId())
@@ -117,6 +118,7 @@ func TestMultiSubjectTeardown_RevokeNamesEverySubject(t *testing.T) {
 	w := newSCWorld(t)
 	id, subjects := w.twoSubjectsGrant()
 
+	w.ownerMayRemove("отзыв: Дано", id)
 	revoke := accessbindingapp.NewRevokeAccessBindingUseCase(w.repo, w.ops).WithRelationStore(w.door, nil)
 	op, err := revoke.Execute(asUser(w.ctx, w.usrA), domain.AccessBindingID(id))
 	require.NoError(t, err, "отзыв выдачи")

@@ -20,7 +20,8 @@
 //     дал, считается в закрытом словаре клеток ([Cells]), засеянном нулями.
 //     Точка анонимной выдачи считается в СВОЁМ закрытом словаре
 //     ([RegistryTokenReasons]): заголовок пересылки у пира, который ни край, ни
-//     объявленный пересыльщик (kaname#930).
+//     объявленный пересыльщик (kaname#930), и край или объявленный
+//     пересыльщик без годного адреса (kaname#935).
 //
 // Край узнаётся тем же признаком, что у полосы входа и яруса gateway-only:
 // короткое имя службы из SAN проверенного сертификата
@@ -44,7 +45,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // HeaderForwardedFor — единственный заголовок, который правило читает, и
@@ -94,7 +95,8 @@ func Cells() []Cell {
 }
 
 // RegistryTokenReason — почему на точке анонимной выдачи докерной полосы
-// источником стал адрес пира, хотя заголовок пересылки был (kaname#930).
+// источником стал адрес пира, хотя заголовок пересылки был или ждался
+// (kaname#930, kaname#935).
 type RegistryTokenReason string
 
 // Причины точки анонимной выдачи. Словарь ЗАКРЫТ и отделён от словаря п. 4
@@ -107,31 +109,42 @@ const (
 	// реестра, либо пересыльщик назван не тем идентификатором и все клиенты за
 	// прокси делят один ключ темпа.
 	RegistryTokenReasonForwardedFromUnrecognizedPeer RegistryTokenReason = "forwarded-from-unrecognized-peer"
+	// RegistryTokenReasonEdgeWithoutAddress — край или объявленный пересыльщик
+	// точки без годного адреса: заголовка нет, два значения, список через
+	// запятую или не адрес (kaname#935). Метка та же, что у клетки п. 4 точек
+	// приёмки, и значит то же: признанный пир адреса не дал. Рост клетки при
+	// пересыльщике значит, что прокси реестра не передаёт адрес клиента одним
+	// значением, и все клиенты за ним делят один ключ темпа.
+	RegistryTokenReasonEdgeWithoutAddress RegistryTokenReason = RegistryTokenReason(ReasonEdgeWithoutAddress)
 )
 
 // RegistryTokenReasons — закрытый словарь переписи точки анонимной выдачи,
 // КОПИЕЙ.
 func RegistryTokenReasons() []RegistryTokenReason {
-	return []RegistryTokenReason{RegistryTokenReasonForwardedFromUnrecognizedPeer}
+	return []RegistryTokenReason{
+		RegistryTokenReasonForwardedFromUnrecognizedPeer,
+		RegistryTokenReasonEdgeWithoutAddress,
+	}
 }
 
 // Rule — правило и его перепись.
 type Rule struct {
 	trust grpcsrv.TrustDomain
-	// form — форма имени службы, объявленная установкой: ею узнаётся край.
-	form servicesan.Form
+	// modules — личности модулей установки (kaname#984): краем признаётся
+	// только объявленная пара, чья служба — край.
+	modules moduleidentity.Roster
 
 	mu       sync.Mutex
 	counts   map[Cell]uint64
 	registry map[RegistryTokenReason]uint64
 }
 
-// New собирает правило над доменом доверия и формой имени службы процесса:
-// по ним узнаётся край. Перепись засеяна нулём по
+// New собирает правило над доменом доверия процесса и перечнем личностей его
+// модулей (kaname#984): краем признаётся объявленная пара. Перепись засеяна нулём по
 // каждой клетке: клетка, появляющаяся при первом попадании, не отличает «ноль
 // случаев» от «счёта нет».
-func New(trust grpcsrv.TrustDomain, form servicesan.Form) *Rule {
-	r := &Rule{trust: trust, form: form, counts: make(map[Cell]uint64, 4),
+func New(trust grpcsrv.TrustDomain, modules moduleidentity.Roster) *Rule {
+	r := &Rule{trust: trust, modules: modules, counts: make(map[Cell]uint64, 4),
 		registry: make(map[RegistryTokenReason]uint64, len(RegistryTokenReasons()))}
 	for _, c := range Cells() {
 		r.counts[c] = 0
@@ -175,7 +188,7 @@ func (r *Rule) resolve(req *http.Request, forwarderSAN string) (source string, r
 // пересыльщику точки. Сравнение точное: пересыльщик назван ручкой целиком,
 // а не узнан по форме имени.
 func (r *Rule) forwards(req *http.Request, forwarderSAN string) bool {
-	if authzguard.PeerIsGateway(r.trust, r.form, req.TLS) {
+	if authzguard.PeerIsGateway(r.modules, r.trust, req.TLS) {
 		return true
 	}
 	return forwarderSAN != "" && authzguard.VerifiedPeerIdentity(r.trust, req.TLS) == forwarderSAN
@@ -211,13 +224,21 @@ func (r *Rule) TokenPoint(req *http.Request) string { return r.Of(req, PointToke
 // пересылки от пира, который ни край, ни объявленный пересыльщик, считается в
 // своём словаре точки ([RegistryTokenReasons]): без счёта пересыльщик,
 // названный не тем идентификатором, неотличим от залпа одного клиента — оба
-// видны только отказами по темпу. Пересыльщик и край без годного адреса в
-// этом словаре не считаются.
+// видны только отказами по темпу. Там же считаются пересыльщик и край без
+// годного адреса (kaname#935): прокси реестра, не передающий адрес клиента
+// одним значением, сводит всех за собой к одному ключу темпа так же молча.
 func (r *Rule) RegistryTokenPoint(forwarderSAN string) func(*http.Request) string {
 	return func(req *http.Request) string {
 		source, reason, counted := r.resolve(req, forwarderSAN)
-		if counted && reason == ReasonForwardedFromNonEdge {
+		if !counted {
+			return source
+		}
+		// Обе причины, которые даёт resolve, — по своей клетке словаря точки.
+		switch reason {
+		case ReasonForwardedFromNonEdge:
 			r.countRegistryToken(RegistryTokenReasonForwardedFromUnrecognizedPeer)
+		case ReasonEdgeWithoutAddress:
+			r.countRegistryToken(RegistryTokenReasonEdgeWithoutAddress)
 		}
 		return source
 	}

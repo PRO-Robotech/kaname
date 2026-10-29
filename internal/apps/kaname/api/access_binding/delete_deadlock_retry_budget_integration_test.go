@@ -170,7 +170,7 @@ func deleteKeepsLosingDeadlock(t *testing.T, form deadlockHolderForm, stopAfter 
 	require.EqualValues(t, 1, tag.RowsAffected(), "контроль: держатель удерживает ровно строку спора")
 
 	delUC := accessbindingapp.NewDeleteAccessBindingUseCase(repo, opsRepo).
-		WithRelationStore(denyingRelations{}, nil)
+		WithRelationStore(ownerHoldsRemoval{owner: string(owner)}, nil)
 	op, err := delUC.Execute(asUser(ctx, owner), victim)
 	require.NoError(t, err, "снятие принято к исполнению")
 

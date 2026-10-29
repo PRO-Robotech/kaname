@@ -127,6 +127,18 @@ EXTRA=()
 SSL_CLIENT_CERT=""
 SSL_CLIENT_KEY=""
 SSL_EXTRA_CA=""
+# ШАРД ПЛАНА (kaname#848). `--shard-plan <файл> --shard <имя>` берёт перечень
+# коллекций из плана шардов (`chart-own-shards.txt`), а не из `--service`: план —
+# единственный источник разреза, и прогонщик судит его ДО стенда — набор
+# слушателя формы, не попавший ни в один шард, отказ с его именем (код 2), а не
+# зелёный шард. Путь плана — относительно каталога набора (прогонщик стоит в нём).
+# `--list` печатает выбранные коллекции и выходит, не требуя стенда: этим
+# провязку разреза и проверяют (`scripts/shard_plan_test.py`).
+SHARD_PLAN=""
+SHARD=""
+LIST_ONLY=""
+INT_FRONT_CERT=""
+INT_FRONT_KEY=""
 REMINT_BOOTSTRAP=0
 
 # `--help` ОТВЕЧАЕТ И НЕ ГОНЯЕТ. Прежде его не было вовсе, и неизвестный флаг
@@ -142,7 +154,7 @@ REMINT_BOOTSTRAP=0
 _usage() {
   awk 'NR < 6 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
   echo
-  echo "Флаги: --service <stem> (можно повторить) | --bail | --delay <мс> | --remint-bootstrap | --jobs <n> (принимается и игнорируется) | --help"
+  echo "Флаги: --service <stem> (можно повторить) | --shard-plan <файл> --shard <имя> | --list | --bail | --delay <мс> | --remint-bootstrap | --jobs <n> (принимается и игнорируется) | --ssl-client-cert/--ssl-client-key/--ssl-extra-ca-certs <файл> | --internal-front-client-cert/--internal-front-client-key <файл> (лист для адреса ownInternalRestBaseUrl) | --help"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -159,6 +171,9 @@ while [[ $# -gt 0 ]]; do
         fi
       done
       SERVICES+=("$2"); shift 2 ;;
+    --shard-plan) SHARD_PLAN="$2"; shift 2 ;;
+    --shard)      SHARD="$2"; shift 2 ;;
+    --list)       LIST_ONLY=1; shift ;;
     --bail)    BAIL="--bail"; shift ;;
     --delay)   DELAY="$2"; shift 2 ;;
     # СРОК БУТСТРАПА КОРОЧЕ ВОЛНЫ (kaname#868). Бутстрап живёт 15 минут (`MaxTTL`
@@ -183,9 +198,47 @@ while [[ $# -gt 0 ]]; do
     --ssl-client-cert)    SSL_CLIENT_CERT="$2"; EXTRA+=("$1" "$2"); shift 2 ;;
     --ssl-client-key)     SSL_CLIENT_KEY="$2";  EXTRA+=("$1" "$2"); shift 2 ;;
     --ssl-extra-ca-certs) SSL_EXTRA_CA="$2";    EXTRA+=("$1" "$2"); shift 2 ;;
+    # ЛИСТ КРАЯ — ТОЛЬКО ДЛЯ АДРЕСА ВНУТРЕННЕГО ФРОНТА (SEC-1017-1). Внутренний
+    # фронт допускает лишь объявленные личности (край, модуль-владелец), а лист
+    # службы (`srv.crt`) личностью перечня не является и получает 403 до
+    # слушателя. Лист из этих флагов уходит в newman списком по адресу
+    # (`--ssl-client-cert-list`), прочим адресам остаётся `--ssl-client-cert`.
+    --internal-front-client-cert) INT_FRONT_CERT="$2"; shift 2 ;;
+    --internal-front-client-key)  INT_FRONT_KEY="$2";  shift 2 ;;
     *)         EXTRA+=("$1"); shift ;;
   esac
 done
+
+# Разрез судится ДО окружения и стенда: его отказ — свойство дерева, а не прогона.
+if [[ -n "$SHARD_PLAN" || -n "$SHARD" ]]; then
+  if [[ -z "$SHARD_PLAN" || -z "$SHARD" ]]; then
+    echo "ОТКАЗ: --shard-plan и --shard называются вместе — половина разреза не выбирает ничего" >&2
+    exit 2
+  fi
+  if [[ ${#SERVICES[@]} -gt 0 ]]; then
+    echo "ОТКАЗ: --shard и --service вместе — у перечня было бы два источника" >&2
+    exit 2
+  fi
+  _shard_rc=0
+  _shard_out="$(python3 "$NEWMAN_DIR/scripts/shard_plan.py" --plan "$SHARD_PLAN" \
+                  --shard "$SHARD" --newman "$NEWMAN_DIR")" || _shard_rc=$?
+  if [[ "$_shard_rc" -ne 0 ]]; then
+    echo "ОТКАЗ: план шардов $SHARD_PLAN не исполним (код $_shard_rc) — ни одна коллекция не гонялась" >&2
+    exit 2
+  fi
+  while IFS= read -r _s; do
+    [[ -n "$_s" ]] && SERVICES+=("$_s")
+  done <<< "$_shard_out"
+  echo "[shard] $SHARD плана $SHARD_PLAN: ${SERVICES[*]}" >&2
+fi
+if [[ -n "$LIST_ONLY" ]]; then
+  if [[ ${#SERVICES[@]} -eq 0 ]]; then
+    echo "ОТКАЗ: --list без --service и без --shard — перечислять нечего, и пустой вывод читался бы «ноль коллекций»" >&2
+    exit 2
+  fi
+  printf '%s\n' ${SERVICES[@]+"${SERVICES[@]}"}
+  exit 0
+fi
 
 ENV="environments/local.postman_environment.json"
 # Env-файл gitignore-ится (fixture-seed пишет в него живые токены), но НИКТО его
@@ -199,6 +252,43 @@ if [[ ! -f "$ENV" && -f "${ENV%.json}.template.json" ]]; then
   echo "создан $ENV из ${ENV%.json}.template.json (креды допишет fixture-seed)" >&2
 fi
 [[ -f "$ENV" ]] || { echo "missing env: $ENV"; exit 1; }
+
+# ЛИСТ ВНУТРЕННЕГО ФРОНТА — СПИСКОМ ПО АДРЕСУ, АДРЕС — ИЗ ОКРУЖЕНИЯ ПОСЕВА.
+#
+# Адрес не выписывается: его пишет посев (`ownInternalRestBaseUrl`), и выписанный
+# здесь второй адрес разошёлся бы с ним молча — тогда лист не совпал бы ни с одним
+# запросом, и внутренний фронт снова получил бы лист службы. Флаги названы, а адреса
+# нет либо он не разбирается — ОТКАЗ кодом 75 до первой коллекции: без листа края
+# каждый шаг внутреннего фронта ответил бы 403 по причине стенда, а не дерева.
+if [[ -n "$INT_FRONT_CERT" || -n "$INT_FRONT_KEY" ]]; then
+  if [[ -z "$INT_FRONT_CERT" || -z "$INT_FRONT_KEY" ]]; then
+    echo "ОТКАЗ: --internal-front-client-cert и --internal-front-client-key идут парой" >&2
+    exit 2
+  fi
+  for _f in "$INT_FRONT_CERT" "$INT_FRONT_KEY"; do
+    if [[ ! -s "$_f" ]]; then
+      echo "ПРОГОН НЕ СОСТОЯЛСЯ: лист внутреннего фронта «$_f» не выписан — условие не создано, вердикта о дереве нет." >&2
+      exit 75
+    fi
+  done
+  _int_url="$(jq -r '[.values[] | select(.key == "ownInternalRestBaseUrl") | .value][0] // ""' "$ENV")"
+  if [[ ! "$_int_url" =~ ^(https://[^/:]+:[0-9]+)/?$ ]]; then
+    echo "ПРОГОН НЕ СОСТОЯЛСЯ: адрес внутреннего фронта в $ENV («${_int_url}») не вида https://<узел>:<порт> —" >&2
+    echo "лист края сопоставить не с чем; условие не создано, вердикта о дереве нет." >&2
+    exit 75
+  fi
+  _int_base="${BASH_REMATCH[1]}"
+  INT_FRONT_LIST="$(mktemp "${TMPDIR:-/tmp}/run-sh-cert-list.XXXXXX")"
+  trap 'rm -f "$INT_FRONT_LIST"' EXIT
+  jq -n --arg m "${_int_base}/*" \
+        --arg c "$(realpath "$INT_FRONT_CERT")" --arg k "$(realpath "$INT_FRONT_KEY")" \
+        '[{name: "внутренний фронт службы", matches: [$m], cert: {src: $c}, key: {src: $k}}]' \
+        > "$INT_FRONT_LIST"
+  EXTRA+=(--ssl-client-cert-list "$INT_FRONT_LIST")
+  _rest_leaf="без листа"
+  [[ -z "$SSL_CLIENT_CERT" ]] || _rest_leaf="$(basename "$SSL_CLIENT_CERT")"
+  echo "лист внутреннего фронта: ${_int_base}/* → $(basename "$INT_FRONT_CERT"); прочим адресам — ${_rest_leaf}"
+fi
 
 # RAN_STEMS — что этот прогон УЖЕ рассматривал. Не для вердикта (его набор
 # выводится из дерева ниже), а для остаточного прохода: он подбирает коллекции,
@@ -580,6 +670,16 @@ else
   # вердикта выводится из дерева, а не из перечня вызовов), но подхват — сигнал
   # автору, а не норма: место в порядке у коллекции есть, и оно здесь.
   run_one "iam-access-binding-include-revoked"
+  # iam-access-binding-revocation-reason — причина отзыва выдачи на крае
+  # (`revocationReason`, kaname#963, приёмка unregistration-revokes-its-grants.md,
+  # URG-E1/E2). Зависимости окружения — те же, что у соседней коллекции.
+  run_one "iam-access-binding-revocation-reason"
+  # iam-grant-delegation — делегирование права выдавать (kaname#986, приёмка
+  # delegated-grants-stay-within-the-delegation.md, GD-E1…E5). Посев набора —
+  # реестр, зарегистрированный модулем, роли модуля registry и учётка-делегат —
+  # краем не создаётся; без него кейсы отвечают «условие не создано» с именем
+  # переменной. Держатель посева и шага прогона — запись ведомости производителя.
+  run_one "iam-grant-delegation"
   # iam-permission-catalog — PermissionCatalogService.ListPermissionCatalog
   # (sub-phase G): backend-driven grantable role-rule catalog on the PUBLIC mux
   # (GET /iam/v1/permissionCatalog). Authenticated read + anonymous-deny. The CI

@@ -65,6 +65,16 @@ type DeleteAccessBindingUseCase struct {
 	// есть».
 	relations clients.RelationStore
 	logger    *slog.Logger
+	// delegated — делегированный путь права выдавать (kaname#986, Р2); nil —
+	// выключен.
+	delegated *DelegatedGrantPath
+}
+
+// WithDelegatedGrantPath — делегат удаляет выдачи своего делегирования
+// (kaname#986, Р2). Провязывает корень службы.
+func (u *DeleteAccessBindingUseCase) WithDelegatedGrantPath(p *DelegatedGrantPath) *DeleteAccessBindingUseCase {
+	u.delegated = p
+	return u
 }
 
 func NewDeleteAccessBindingUseCase(r Repo, opsRepo operations.Repo) *DeleteAccessBindingUseCase {
@@ -122,8 +132,12 @@ func (u *DeleteAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 	// With grant-authority: admin can grant AND revoke; subject self-revoke trivially
 	// passes the owner path when the binding is on their own account, or the FGA admin
 	// path when the binding is on a resource they admin.
-	if err := requireGrantAuthority(ctx, u.repo, u.relations,
-		string(binding.ResourceType), binding.ResourceID); err != nil {
+	//
+	// Право отозвать и удалить (kaname#986, Р1а, Р2): прежний вопрос двери
+	// слушателя (`v_delete` на объекте выдачи) переехал сюда дословно, вместе с
+	// правом выдавать на области; делегат проходит только по выдаче своего
+	// действующего делегирования (`removalAuthority`).
+	if err := removalAuthority(ctx, u.repo, u.relations, u.delegated, binding); err != nil {
 		return nil, err
 	}
 	// RBAC explicit-model 2026 P6 (D-10 / C-02): sync deletion_protection
@@ -321,7 +335,7 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 	if revokeActor == "" {
 		revokeActor = string(deletedBinding.GrantedByUserID)
 	}
-	if err := revokedAuditFor(ctx, w.AccessBindingsW().EmitAuditEvent, subjects, revokeActor, deletedBinding); err != nil {
+	if err := revokedAuditFor(ctx, w, subjects, revokeActor, deletedBinding); err != nil {
 		return err
 	}
 	if err := w.Commit(ctx); err != nil {
