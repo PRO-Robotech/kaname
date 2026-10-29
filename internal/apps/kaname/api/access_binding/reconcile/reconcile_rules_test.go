@@ -50,6 +50,7 @@ type fakeStore struct {
 	deletes       []string // memberKey of deleted members
 	writes        [][]domain.MembershipTuple
 	tdeletes      [][]domain.MembershipTuple
+	journalCalls  int // обращений EmitJournal: проход пишет журнал одним оператором
 	recorded      [][]LedgerRow
 	forgotten     [][]LedgerRow
 	audits        []string    // objectID audited
@@ -498,14 +499,18 @@ func ledgerTuples(batches ...[]LedgerRow) []domain.MembershipTuple {
 	return out
 }
 
-func (f *fakeStore) EmitTupleWrite(ctx context.Context, ts []domain.MembershipTuple) error {
-	f.note()
-	f.writes = append(f.writes, ts)
-	return nil
-}
-func (f *fakeStore) EmitTupleDelete(ctx context.Context, ts []domain.MembershipTuple) error {
-	f.note()
-	f.tdeletes = append(f.tdeletes, ts)
+// EmitJournal — один оператор журнала: выдачи и снятия прохода разом. Дублёр
+// считает вызовы (journalCalls) и раскладывает непустые наборы по прежним полям.
+func (f *fakeStore) EmitJournal(ctx context.Context, writes, deletes []domain.MembershipTuple) error {
+	f.journalCalls++
+	if len(writes) > 0 {
+		f.note()
+		f.writes = append(f.writes, writes)
+	}
+	if len(deletes) > 0 {
+		f.note()
+		f.tdeletes = append(f.tdeletes, deletes)
+	}
 	return nil
 }
 func (f *fakeStore) RecordEmittedTuples(ctx context.Context, id domain.AccessBindingID, member MemberCoord, ts []domain.MembershipTuple) error {
