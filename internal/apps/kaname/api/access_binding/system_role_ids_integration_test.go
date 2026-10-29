@@ -431,12 +431,45 @@ func (w *srciWorld) srciFactsOf(subject string) string {
 	return "[" + strings.Join(out, "; ") + "]"
 }
 
+// seedSRCIGrantOperation — выдача формы B1 (человек U8, system.admin, аккаунт A1,
+// все объекты) ГЛАГОЛОМ `Create` на прежний id admin; отдаёт id операции. Посев
+// SRCI-05 строит выдачи писателем мимо глагола и строк kaname.operations не
+// заводит, а на живой базе каждая выдача несёт строку операции, чьё описание
+// называет id роли (create.go, «Create access binding (… → <роль> on …)»). Без
+// этой строки перепись текста операций миграцией не держала бы ни одна проба.
+// Вызывается после seedSRCI05 на версии до миграции.
+func (w *srciWorld) seedSRCIGrantOperation() string {
+	t := w.t
+	admin := w.roleIDByName(domain.SystemAdminRoleName)
+	require.Equal(t, w.subj.oldAdmin, admin, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): мир не на версии до миграции — роль admin не на прежнем id")
+	u8 := mustSeedUser(t, w.ctx, w.pool, "srciu8")
+	verifyAddresses(t, w.ctx, w.pool)
+	op, err := w.ab.Create(asUser(w.ctx, w.k), &iamv1.CreateAccessBindingRequest{
+		Subjects: []*iamv1.Subject{userSubject(u8)}, RoleId: admin,
+		ScopeType: "iam.account", ScopeId: string(w.a1), Target: allInScopeTarget(),
+	})
+	require.NoError(t, err, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): глагол Create отказал выдаче формы B1 на прежний id admin")
+	done := awaitOp(t, w.ctx, w.ops, op.GetId())
+	require.Nilf(t, done.Error, "НЕ-ВЫПОЛНИЛОСЬ(фикстура): операция выдачи %s завершилась ошибкой", op.GetId())
+	var desc string
+	require.NoError(t, w.pool.QueryRow(w.ctx,
+		`SELECT description FROM kaname.operations WHERE id = $1`, op.GetId()).Scan(&desc),
+		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): строка операции выдачи")
+	require.Containsf(t, desc, w.subj.oldAdmin,
+		"НЕ-ВЫПОЛНИЛОСЬ(фикстура): описание операции выдачи не называет прежний id admin: %q", desc)
+	t.Logf("строка операции выдачи глаголом %s: %q", op.GetId(), desc)
+	return op.GetId()
+}
+
 // SRCI-06 — ни одна строка базы, кроме ленты подписки, не сохраняет прежний id;
-// лента дописывается, прежние её строки не меняются.
+// лента дописывается, прежние её строки не меняются. Сверх посева SRCI-05 — строка
+// операции выдачи глаголом (seedSRCIGrantOperation): её описание переписывает лишь
+// перепись текста операций, каскад ключей его не достаёт.
 func TestSystemRoleIDs_SRCI06_NoRowKeepsTheOldID(t *testing.T) {
 	subj := srciReadSubject(t)
 	w := newSRCIWorldAt(t, subj.preceding())
 	w.seedSRCI05()
+	opID := w.seedSRCIGrantOperation()
 
 	tables := w.tables(false)
 	oldBefore := map[string]map[string]int{
@@ -477,6 +510,12 @@ func TestSystemRoleIDs_SRCI06_NoRowKeepsTheOldID(t *testing.T) {
 		assert.Emptyf(t, w.countWith(tables, pair[0]), "SRCI-06: строки с прежним id %s после наката", role)
 		assert.Equalf(t, oldBefore[role], w.countWith(tables, pair[1]), "SRCI-06: строки с новым id %s — по таблицам", role)
 	}
+	var desc string
+	require.NoError(t, w.pool.QueryRow(w.ctx,
+		`SELECT description FROM kaname.operations WHERE id = $1`, opID).Scan(&desc), "SRCI-06: строка операции выдачи после наката")
+	t.Logf("SRCI-06: описание операции выдачи после наката %q", desc)
+	assert.NotContainsf(t, desc, subj.oldAdmin, "SRCI-06: описание операции выдачи %s хранит прежний id admin", opID)
+	assert.Containsf(t, desc, domain.SystemAdminRoleID, "SRCI-06: описание операции выдачи %s не называет новый id admin", opID)
 	assert.Equal(t, journalBefore, w.journalUpTo(s0), "SRCI-06: строки ленты до наката изменены")
 	appended := w.journalAfter(s0)
 	for role, pair := range map[string][2]string{
@@ -631,11 +670,21 @@ func (w *srciWorld) srciSchema() []string {
 }
 
 // SRCI-10 — обратимость: откат возвращает полный срез, повторный накат даёт срез
-// первого; лента только дописывается.
+// первого; лента только дописывается. Строка операции выдачи глаголом
+// (seedSRCIGrantOperation) — в срезе: обратную перепись текста операций держит
+// равенство срезов.
 func TestSystemRoleIDs_SRCI10_MigrationIsReversible(t *testing.T) {
 	subj := srciReadSubject(t)
 	w := newSRCIWorldAt(t, subj.preceding())
 	w.seedSRCI05()
+	opID := w.seedSRCIGrantOperation()
+	opDesc := func() string {
+		var d string
+		require.NoError(t, w.pool.QueryRow(w.ctx,
+			`SELECT description FROM kaname.operations WHERE id = $1`, opID).Scan(&d), "SRCI-10: строка операции выдачи")
+		return d
+	}
+	desc0 := opDesc()
 
 	tables := w.tables(false)
 	full0, schema0 := w.snapshot(tables), w.srciSchema()
@@ -653,8 +702,11 @@ func TestSystemRoleIDs_SRCI10_MigrationIsReversible(t *testing.T) {
 	// накатом, а не только откатом: иначе после наката навсегда осталась бы дорога
 	// тихим переименованиям (замысел К3).
 	assert.Equal(t, schema0, w.srciSchema(), "SRCI-10: схема после наката разошлась (ключи, триггеры, индексы)")
+	assert.Equal(t, strings.ReplaceAll(desc0, subj.oldAdmin, domain.SystemAdminRoleID), opDesc(),
+		"SRCI-10: описание операции выдачи после наката")
 
 	w.down("SRCI-10")
+	assert.Equal(t, desc0, opDesc(), "SRCI-10: описание операции выдачи после отката")
 	assert.Equal(t, full0, w.snapshot(tables), "SRCI-10: полный срез после отката разошёлся со срезом до наката")
 	assert.Equal(t, schema0, w.srciSchema(), "SRCI-10: схема после отката разошлась (ключи, триггеры, индексы)")
 	s2 := w.journalHead()
