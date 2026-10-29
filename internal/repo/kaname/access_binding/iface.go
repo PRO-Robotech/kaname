@@ -287,6 +287,14 @@ type WriterIface interface {
 	// EmitRelationDelete — symmetric revoke for EmitRelationWrite (event_type='fga.tuple.delete').
 	EmitRelationDelete(ctx context.Context, tuples []RelationTuple) error
 
+	// EmitRelationJournal кладёт выдачи И снятия транзакции ОДНИМ оператором журнала
+	// (fga_outbox.EmitJournalTx, kaname#617). Писатель, которому в одной транзакции
+	// нужно и то и другое либо несколько наборов, зовёт его ОДИН раз: между
+	// операторами порядок замков строк факта — порядок вызовов, и встречные
+	// транзакции сходятся в кольцо (40P01). Кортеж, названный и выдачей, и
+	// снятием, — отказ.
+	EmitRelationJournal(ctx context.Context, writes, deletes []RelationTuple) error
+
 	// InsertEmittedTuples persists the EXACT FGA tuples emitted for a binding into
 	// kaname.access_binding_emitted_tuples in THIS writer-tx — co-committed with
 	// the matching EmitRelationWrite (ban #10). The ledger row commits iff

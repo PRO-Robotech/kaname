@@ -179,7 +179,7 @@ func TestLedgerCoordinate_TwoCoordinatesOneTupleEachHoldsTheFact(t *testing.T) {
 			if err := s.ForgetEmittedTuples(ctx, p.bid, rows); err != nil {
 				return err
 			}
-			return s.EmitTupleDelete(ctx, own)
+			return s.EmitJournal(ctx, nil, own)
 		}))
 	}
 

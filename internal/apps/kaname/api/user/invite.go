@@ -567,6 +567,11 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 			}
 			out.user = ins
 			out.userIsNew = insertedNow
+			// Кортежи журнала прав транзакции копятся здесь и ложатся ОДНИМ
+			// оператором после обеих ветвей ниже (kaname#617): между операторами
+			// журнала замки строк факта берутся порядком вызовов, а не общим
+			// порядком свёртки.
+			var journal []service.RelationTuple
 
 			// Optional bind-to-Project. The insert is STRICT create, NOT idempotent:
 			// the `ON CONFLICT DO UPDATE SET id = access_bindings.id` this comment used
@@ -658,9 +663,7 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 					Relation: "project",
 					Object:   fmt.Sprintf("iam_access_binding:%s", ins.ID),
 				}}
-				if ferr := w.EmitFGARelationWrite(ctx, bindingTuples); ferr != nil {
-					return inviteTxResult{}, ferr
-				}
+				journal = append(journal, bindingTuples...)
 				if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, ins.ID, ledgerTuples(bindingTuples)); lerr != nil {
 					return inviteTxResult{}, lerr
 				}
@@ -686,11 +689,14 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 				// Со-коммит по той же причине, что и у привязки выше; форма
 				// кортежа байт-идентична пути активации приглашения
 				// (internal_upsert.go), который ушёл с post-commit-записи раньше.
-				if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{{
+				journal = append(journal, service.RelationTuple{
 					User:     fmt.Sprintf("account:%s", out.user.AccountID),
 					Relation: "account",
 					Object:   fmt.Sprintf("iam_user:%s", out.user.ID),
-				}}); ferr != nil {
+				})
+			}
+			if len(journal) > 0 {
+				if ferr := w.EmitFGARelationWrite(ctx, journal); ferr != nil {
 					return inviteTxResult{}, ferr
 				}
 			}

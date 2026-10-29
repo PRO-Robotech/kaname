@@ -97,13 +97,14 @@ func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID
 			if lerr != nil {
 				return lerr
 			}
-			// Symmetrically revoke the account's owner-tuples BEFORE deleting the
-			// account row — otherwise the FGA `define admin: … or owner` derivation
-			// leaves the ex-owner with standing admin on a deleted account.
-			// access_bindings carry NO FK to accounts (cross-resource soft
-			// ref), so the owner-binding row and its emitted-tuple ledger are NOT
-			// cascade-dropped by the account DELETE — they must be revoked explicitly.
-			if rerr := revokeAccountOwnerTuples(ctx, w, id); rerr != nil {
+			// Выдачи области аккаунта снимаются ЯВНО и ДО удаления его строки: у
+			// выдач нет внешнего ключа на аккаунт, и удаление строки не уносит ни
+			// выдачу владельца, ни её реестр выпущенного, — без отзыва бывший
+			// владелец сохранил бы `admin … or owner` на снятом аккаунте. Реестр
+			// читается до удаления выдач; строки снятия по нему ложатся журналом
+			// ниже, одним оператором транзакции.
+			fgaDeletes, rerr := revokeAccountOwnerTuples(ctx, w, id)
+			if rerr != nil {
 				return rerr
 			}
 			if derr := w.AccountsW().Delete(ctx, id); derr != nil {
@@ -112,7 +113,13 @@ func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID
 			// Колонка дома участников пустеет действием ключа `users_account_fk`
 			// (`ON DELETE SET NULL`, kaname#664, Р3) той же транзакцией; их
 			// указатели членства снимаются намерениями здесь же.
-			if perr := w.EmitFGARelationDelete(ctx, membershipPointersOf(id, members)); perr != nil {
+			//
+			// ЖУРНАЛ — ОДНИМ ОПЕРАТОРОМ (kaname#617): снятия выдач области,
+			// указатель кластера и указатели участников ложатся одним вызовом, после
+			// удаления выдач и строки аккаунта. Между операторами журнала замки строк
+			// факта берутся порядком вызовов, а не общим порядком свёртки.
+			fgaDeletes = append(fgaDeletes, membershipPointersOf(id, members)...)
+			if perr := w.EmitFGARelationDelete(ctx, fgaDeletes); perr != nil {
 				return shared.MapRepoErr(perr)
 			}
 			// Симметрия созданию (kacho#2055): создание со-коммитит событие реконсайла,
@@ -159,11 +166,11 @@ func membershipPointersOf(id domain.AccountID, members []domain.UserID) []servic
 //  1. For every account-scoped AccessBinding (resource_type='account',
 //     resource_id=<A>) — the owner-binding co-committed by Account.Create plus any
 //     other binding granted directly on the account — read its PERSISTED emitted-
-//     tuple ledger (SelectEmittedTuples) and EmitFGARelationDelete on EXACTLY that
-//     set, then DELETE the binding row (so the ledger rows cascade-drop). This is
+//     tuple ledger (SelectEmittedTuples) and collect EXACTLY that set for revoke,
+//     then DELETE the binding row (so the ledger rows cascade-drop). This is
 //     the SAME byte-symmetric revoke AccessBinding.Delete performs, applied to every
 //     binding the deleted account anchors.
-//  2. Emit the delete of the cluster pointer
+//  2. Collect the delete of the cluster pointer
 //     (cluster:cluster_root#cluster@account:<A>) — an ACCOUNT-lifecycle tuple
 //     deliberately excluded from the owner-binding ledger (it must survive an
 //     owner-binding revoke) but which MUST go when the account itself is deleted.
@@ -185,7 +192,10 @@ func membershipPointersOf(id domain.AccountID, members []domain.UserID) []servic
 // разъехались границами дренажа молча.
 const accountBindingRevokePageSize = shared.ScopeBindingRevokePageSize
 
-func revokeAccountOwnerTuples(ctx context.Context, w Writer, id domain.AccountID) error {
+// Строк снятия функция НЕ кладёт: набор возвращается вызывающему, который кладёт
+// журнал транзакции снятия одним оператором вместе с указателями участников
+// (kaname#617).
+func revokeAccountOwnerTuples(ctx context.Context, w Writer, id domain.AccountID) ([]service.RelationTuple, error) {
 	// Дренаж выдач области — ОБЩИЙ с проектом (`shared.RevokeBindingsInScope`):
 	// страницами до опустошения, симметрично по ведомости, с громким отказом
 	// вместо тихой частичной работы. Тело параметрично ровно по паре (вид
@@ -193,7 +203,7 @@ func revokeAccountOwnerTuples(ctx context.Context, w Writer, id domain.AccountID
 	fgaDeletes, _, err := shared.RevokeBindingsInScope(
 		ctx, w, domain.ResourceType("account"), string(id), "Account")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Указатель на кластер — кортеж жизненного цикла АККАУНТА: он намеренно не
 	// значится в ведомости ни одной выдачи (обязан пережить снятие
@@ -204,8 +214,5 @@ func revokeAccountOwnerTuples(ctx context.Context, w Writer, id domain.AccountID
 		Relation: "cluster",
 		Object:   "account:" + string(id),
 	})
-	if emitErr := w.EmitFGARelationDelete(ctx, fgaDeletes); emitErr != nil {
-		return shared.MapRepoErr(emitErr)
-	}
-	return nil
+	return fgaDeletes, nil
 }

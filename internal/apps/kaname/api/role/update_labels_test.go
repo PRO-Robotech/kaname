@@ -404,3 +404,7 @@ func (_ *rlRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) 
 func (w *rlRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, domain.RulePolicy, bool, error) {
 	return nil, domain.RulePolicy{}, false, nil
 }
+
+func (*rlRoleWtr) RevokeRetiredMemberAccess(context.Context, []domain.MembershipTuple) error {
+	return nil
+}

@@ -51,8 +51,9 @@ func NewRoleTupleReconciler() *RoleTupleReconciler { return &RoleTupleReconciler
 //  2. read oldTuples = SelectEmittedTuples(binding),
 //  3. diff: removed = old\new, added = new\old,
 //  4. ReplaceEmittedTuples(binding, newTuples) — реестр ДО строк журнала
-//     (kaname#919: иначе выдача держит снимаемый факт сама), затем
-//     EmitRelationDelete(removed) + EmitRelationWrite(added).
+//     (kaname#919: иначе выдача держит снимаемый факт сама);
+//  5. после веера — снятия и выдачи ВСЕХ выдач одним оператором журнала
+//     (EmitRelationJournal, kaname#617).
 //
 // Bounded: the fan-out iterates only the ACTIVE bindings of the SINGLE mutated
 // role (ListActiveByRole), not all bindings. Idempotent: an unchanged tier
@@ -75,6 +76,7 @@ func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamer
 	if err != nil {
 		return fmt.Errorf("list subjects of role %s bindings: %w", roleID, err)
 	}
+	var writes, deletes []abrepo.RelationTuple
 	for i := range bindings {
 		b := bindings[i]
 		bs := subjects[b.ID]
@@ -107,18 +109,47 @@ func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamer
 		if err := w.AccessBindingsW().ReplaceEmittedTuples(ctx, b.ID, newTuples); err != nil {
 			return fmt.Errorf("replace emitted-set of binding %s: %w", b.ID, err)
 		}
-		if len(removed) > 0 {
-			if err := w.AccessBindingsW().EmitRelationDelete(ctx, removed); err != nil {
-				return fmt.Errorf("emit relation delete for binding %s: %w", b.ID, err)
-			}
-		}
-		if len(added) > 0 {
-			if err := w.AccessBindingsW().EmitRelationWrite(ctx, added); err != nil {
-				return fmt.Errorf("emit relation write for binding %s: %w", b.ID, err)
-			}
-		}
+		writes = append(writes, added...)
+		deletes = append(deletes, removed...)
+	}
+	// ЖУРНАЛ — ОДНИМ ОПЕРАТОРОМ НА ВЕСЬ ВЕЕР (kaname#617). Строки снятия и выдачи
+	// по выдаче, оператором на каждую, брали замки строк факта порядком выдач веера:
+	// две встречные смены ролей, чьи выдачи стоят на одних объектах одного субъекта
+	// в разном порядке, сходились в кольцо (40P01, проба
+	// `TestRoleUpdatesOfOneSubjectCommitWhenTheirFanoutsMeetCrosswise`). Один оператор
+	// берёт их в общем порядке (объект, субъект, отношение).
+	//
+	// Реестры всех выдач заменены ДО оператора, поэтому свёртка каждой строки
+	// снятия видит конечный реестр веера: кортеж, который одна выдача снимает, а
+	// другая выдача того же веера выпускает, — не снятие (его держит её новый
+	// реестр), и в журнал он идёт лишь выдачей; иначе вызов отверг бы кортеж,
+	// названный дважды.
+	deletes = withoutTuples(deletes, writes)
+	if len(writes) == 0 && len(deletes) == 0 {
+		return nil
+	}
+	if err := w.AccessBindingsW().EmitRelationJournal(ctx, writes, deletes); err != nil {
+		return fmt.Errorf("emit relation journal for role %s: %w", roleID, err)
 	}
 	return nil
+}
+
+// withoutTuples — кортежи from, которых нет в drop, в прежнем порядке.
+func withoutTuples(from, drop []abrepo.RelationTuple) []abrepo.RelationTuple {
+	if len(from) == 0 || len(drop) == 0 {
+		return from
+	}
+	dropped := make(map[abrepo.RelationTuple]struct{}, len(drop))
+	for _, t := range drop {
+		dropped[t] = struct{}{}
+	}
+	out := from[:0:0]
+	for _, t := range from {
+		if _, ok := dropped[t]; !ok {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // diffTuples computes (removed = old\new, added = new\old) on set semantics over

@@ -1041,6 +1041,7 @@ func (w *fakeABWtr) EmitSubjectChangeEvent(_ context.Context, _ ab_repo.SubjectC
 
 // Захват эмитированных кортежей FGA для пробы симметрии выше.
 func (w *fakeABWtr) EmitRelationWrite(_ context.Context, tuples []ab_repo.RelationTuple) error {
+	w.repo.recordTxOp("emit_relation_write")
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
 	w.repo.fgaWritten = append(w.repo.fgaWritten, tuples...)
@@ -1069,6 +1070,17 @@ func (w *fakeABWtr) EmitAuditEvent(_ context.Context, ev ab_repo.AuditEvent) err
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
 	w.repo.auditEvents = append(w.repo.auditEvents, ev)
+	return nil
+}
+
+// EmitRelationJournal — выдачи и снятия одним оператором журнала: в следе
+// транзакции одна отметка, кортежи — в те же накопители, что у раздельных вызовов.
+func (w *fakeABWtr) EmitRelationJournal(_ context.Context, writes, deletes []ab_repo.RelationTuple) error {
+	w.repo.recordTxOp("emit_relation_journal")
+	w.repo.mu.Lock()
+	defer w.repo.mu.Unlock()
+	w.repo.fgaWritten = append(w.repo.fgaWritten, writes...)
+	w.repo.fgaDeleted = append(w.repo.fgaDeleted, deletes...)
 	return nil
 }
 

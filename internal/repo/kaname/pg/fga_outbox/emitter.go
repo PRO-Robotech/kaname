@@ -72,6 +72,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -190,16 +191,15 @@ func EmitPublicationTx(ctx context.Context, tx pgx.Tx, published bool, object st
 	if published {
 		eventType = EventTypeWrite
 	}
-	// Версия кладётся В ТОМ ЖЕ ОПЕРАТОРЕ приведением к jsonb, а не форматом на
-	// стороне Go: так значение в полезной нагрузке и значение в состоянии
-	// публикации — одна и та же величина до микросекунды, включая '-infinity'.
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
-		 VALUES ($1, jsonb_build_object('user', $2::text, 'relation', $3::text,
-		                                'object', $4::text, 'source_version', $5::timestamptz),
-		         now())`,
-		eventType, domain.PublicationSubject, domain.PublicationRelation, object, ownerVersion,
-	); err != nil {
+	// Версия кладётся приведением к jsonb в операторе раскладки (lay), а не
+	// форматом на стороне Go: так значение в полезной нагрузке и значение в
+	// состоянии публикации — одна и та же величина до микросекунды, включая
+	// '-infinity'.
+	if err := layIntents(ctx, tx, []intent{{
+		eventType: eventType,
+		tuple:     clients.RelationTuple{User: domain.PublicationSubject, Relation: domain.PublicationRelation, Object: object},
+		version:   ownerVersion,
+	}}); err != nil {
 		return fmt.Errorf("fga_outbox: insert publication %s: %w", eventType, err)
 	}
 	return nil
@@ -245,9 +245,7 @@ func EmitOwnerOrderedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples
 		// молча упорядочила бы строку меткой журнала — ровно то, от чего поле защищает.
 		return fmt.Errorf("fga_outbox: owner-ordered tuples without an owner version")
 	}
-	users := make([]string, 0, len(tuples))
-	relations := make([]string, 0, len(tuples))
-	objects := make([]string, 0, len(tuples))
+	intents := make([]intent, 0, len(tuples))
 	seen := make(map[clients.RelationTuple]struct{}, len(tuples))
 	for _, t := range tuples {
 		if _, dup := seen[t]; dup {
@@ -260,15 +258,9 @@ func EmitOwnerOrderedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples
 		if domain.IsStoredPublication(t.User, t.Relation) || strings.HasPrefix(t.Relation, "v_") {
 			return fmt.Errorf("fga_outbox: owner-ordered row of relation %q: verbs and publications are ordered by their own paths", t.Relation)
 		}
-		users, relations, objects = append(users, t.User), append(relations, t.Relation), append(objects, t.Object)
+		intents = append(intents, intent{eventType: eventType, tuple: t, version: ownerVersion})
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
-		 SELECT $1, jsonb_build_object('user', u, 'relation', r, 'object', o, 'source_version', $5::timestamptz), now()
-		   FROM unnest($2::text[], $3::text[], $4::text[]) AS t(u, r, o)
-		  ORDER BY o, u, r`,
-		eventType, users, relations, objects, ownerVersion,
-	); err != nil {
+	if err := layIntents(ctx, tx, intents); err != nil {
 		return fmt.Errorf("fga_outbox: insert owner-ordered %s: %w", eventType, err)
 	}
 	return nil
@@ -302,59 +294,324 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 	if len(tuples) == 0 {
 		return nil
 	}
-	groups := groupByGrant(tuples)
-	payloads := make([]string, 0, len(groups))
-	for _, g := range groups {
-		fields := map[string]any{"user": g.user, "object": g.object}
-		if len(g.relations) == 1 {
-			fields["relation"] = g.relations[0]
-		} else {
-			fields["relations"] = g.relations
-			if eventType == EventTypeWrite {
-				// COMPATIBILITY ECHO — GRANTS ONLY, and the asymmetry is the point.
-				//
-				// During a rolling upgrade a pod that predates the set form still claims
-				// these rows. Given an echo it applies ONE relation and marks the row
-				// delivered; given none it cannot decode the row and poisons it.
-				//
-				// For a GRANT the first outcome is better: the subject ends up with less
-				// access than it is owed (fail-closed), the row is consumed, and the next
-				// reconcile pass completes it.
-				//
-				// For a REVOKE it is strictly worse, and irrecoverably so: the row is
-				// marked delivered while most of the set SURVIVES ITS OWN REMOVAL — an
-				// over-grant that is invisible to the poison ledger, to the wedge warning
-				// and to the redrive, because as far as the queue is concerned the work
-				// is done. A poisoned revoke, by contrast, is visible in all three and is
-				// re-driven on the first model observation after a pod starts — which the
-				// end of the rollout guarantees. So revokes carry no echo: better stuck
-				// and loud than applied in part and silent.
-				fields["relation"] = g.relations[0]
-			}
-		}
-		payload, err := json.Marshal(fields)
-		if err != nil {
-			return fmt.Errorf("fga_outbox: marshal payload: %w", err)
-		}
-		payloads = append(payloads, string(payload))
+	// ОДИН оператор на все строки вызова (lay): свёртка журнала в прямой факт —
+	// операторная (kaname#568), и порядок захвата строк факта внутри оператора
+	// задаёт она сама. Между вызовами порядок захвата — порядок вызовов, поэтому
+	// транзакция, которой нужно больше одного набора, кладёт их одним вызовом
+	// EmitJournalTx либо копит на отложенной транзакции (Defer) и кладёт одним
+	// Flush (kaname#617).
+	intents := make([]intent, 0, len(tuples))
+	for _, t := range tuples {
+		intents = append(intents, intent{eventType: eventType, tuple: t})
 	}
-	// ОДИН стейтмент на все строки вместо одного на строку: свёртка журнала в
-	// прямой факт — операторная (kaname#568), и порядок захвата строк факта
-	// внутри оператора задаёт она сама — по (объект, субъект), строки одного ключа
-	// по id. Порядок МЕЖДУ вызовами сохраняется: выдача и отзыв одного ключа НЕ
-	// коммутативны, и id второго вызова всегда больше id первого.
-	stamp := writeStamp
-	if eventType == EventTypeDelete {
-		stamp = deleteStamp
-	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
-		 SELECT $1, p::jsonb, `+stamp+` FROM unnest($2::text[]) AS p`,
-		eventType, payloads,
-	); err != nil {
+	if err := layIntents(ctx, tx, intents); err != nil {
 		return fmt.Errorf("fga_outbox: insert %s: %w", eventType, err)
 	}
 	return nil
+}
+
+// groupPayload — полезная нагрузка строки одного набора: одиночное отношение либо
+// набор (у выдачи — с эхом первого отношения, см. ниже).
+func groupPayload(eventType string, g grantGroup) (string, error) {
+	fields := map[string]any{"user": g.user, "object": g.object}
+	if len(g.relations) == 1 {
+		fields["relation"] = g.relations[0]
+	} else {
+		fields["relations"] = g.relations
+		if eventType == EventTypeWrite {
+			// ЭХО СОВМЕСТИМОСТИ — ТОЛЬКО У ВЫДАЧИ, и асимметрия несущая.
+			//
+			// Введено ради выкатки, на которой под выпуска до формы набора ещё забирал
+			// эти строки дренажем. С эхом он применял ОДНО отношение и отмечал строку
+			// доставленной; без эха не мог её разобрать и отравлял.
+			//
+			// Для ВЫДАЧИ первый исход лучше: у субъекта меньше доступа, чем ему
+			// положено (отказ закрытый), строка поглощена, и следующий проход сверки
+			// её дополняет.
+			//
+			// Для СНЯТИЯ он строго хуже и необратим: строка отмечена доставленной, а
+			// большая часть набора ПЕРЕЖИВАЕТ СВОЁ СНЯТИЕ — лишний доступ, невидимый
+			// ни ведомости отравленных, ни предупреждению о заторе, ни повторной
+			// доставке, потому что для очереди работа сделана. Отравленное снятие,
+			// напротив, видно во всех трёх и доставляется заново при первом
+			// наблюдении модели после старта пода — а его гарантирует конец выкатки.
+			// Поэтому у снятия эха нет: лучше застрять громко, чем примениться
+			// частично и молча.
+			fields["relation"] = g.relations[0]
+		}
+	}
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return "", fmt.Errorf("fga_outbox: marshal payload: %w", err)
+	}
+	return string(payload), nil
+}
+
+// EmitJournalTx кладёт выдачи И снятия транзакции ОДНИМ оператором (kaname#617).
+//
+// # Зачем один оператор
+//
+// Свёртка журнала в прямой факт берёт замки строк факта в общем порядке
+// (объект, субъект) — но лишь в границах ОДНОГО оператора (kaname#568). Транзакция,
+// писавшая журнал несколькими операторами, брала замки в порядке своих вызовов:
+// проход реконсайлера писал выдачи по члену в цикле сверки, а снятия — в конце
+// прохода. Проход выдачи B, у которой объект «a» выпал из отбора, а «b» вошёл, брал
+// «b» раньше «a»; проход соседней выдачи A того же субъекта, в чей отбор входят
+// оба, — «a» раньше «b». Встречные замки, и база снимает одну из транзакций
+// отказом 40P01 (проба `TestReconcilePassesOfOneSubjectCommitWhenOneRevokesWhatTheOtherWrites`).
+// Один оператор на транзакцию — и порядок захвата общий для всех писателей журнала.
+//
+// # Ключ, у которого есть и выдача, и снятие
+//
+// Строки одного ключа (субъект, объект) свёртка берёт в порядке id, отношения
+// набора — побайтно. Набор выдачи и набор снятия одного ключа — две строки, и
+// порядок замков внутри ключа был бы порядком строк, а не отношений: выдача
+// `viewer` со снятием `editor` в одной транзакции и выдача `editor` со снятием
+// `viewer` в другой брали бы их встречно. Поэтому у такого ключа строка — на
+// ОТНОШЕНИЕ, и строки идут по отношению: id внутри ключа повторяет побайтный
+// порядок отношений, тот же, что у набора (раскладка — journalRows).
+//
+// Кортеж, названный и выдачей, и снятием одного вызова, — отказ: исход такой пары
+// зависел бы от порядка строк, а не от намерения вызывающего.
+//
+// Метки строк — прежние: выдача несёт начало транзакции, снятие — момент вставки
+// (writeStamp / deleteStamp).
+func EmitJournalTx(ctx context.Context, tx pgx.Tx, writes, deletes []clients.RelationTuple) error {
+	if tx == nil {
+		return fmt.Errorf("fga_outbox: tx must not be nil")
+	}
+	if len(writes) == 0 && len(deletes) == 0 {
+		return nil
+	}
+	written := make(map[clients.RelationTuple]struct{}, len(writes))
+	for _, t := range writes {
+		written[t] = struct{}{}
+	}
+	for _, t := range deletes {
+		if _, both := written[t]; both {
+			return fmt.Errorf("fga_outbox: tuple %s#%s@%s is both written and deleted in one call", t.Object, t.Relation, t.User)
+		}
+	}
+	intents := make([]intent, 0, len(writes)+len(deletes))
+	for _, t := range writes {
+		intents = append(intents, intent{eventType: EventTypeWrite, tuple: t})
+	}
+	for _, t := range deletes {
+		intents = append(intents, intent{eventType: EventTypeDelete, tuple: t})
+	}
+	if err := layIntents(ctx, tx, intents); err != nil {
+		return fmt.Errorf("fga_outbox: insert journal: %w", err)
+	}
+	return nil
+}
+
+// intent — строка журнала ДО раскладки: кортеж, вид строки и — у строки,
+// упорядоченной владельцем (публикация, иерархия посредника регистрации), —
+// версия владельца. Недействительная версия — строка без `source_version`.
+type intent struct {
+	eventType string
+	tuple     clients.RelationTuple
+	version   pgtype.Timestamptz
+}
+
+// layIntents — единственная точка, где намерения писателей становятся строками
+// журнала. На отложенной транзакции (Deferred) строки копятся до Flush; на
+// обычной ложатся сразу, одним оператором.
+func layIntents(ctx context.Context, tx pgx.Tx, intents []intent) error {
+	if d, ok := tx.(*Deferred); ok {
+		return d.add(intents)
+	}
+	return lay(ctx, tx, intents)
+}
+
+// lay кладёт намерения ОДНИМ оператором в порядке journalRows.
+//
+// Метка строки — та же, что у каждого писателя по отдельности: строка, упорядоченная
+// владельцем, несёт начало транзакции (её порядок задаёт версия, а не метка),
+// снятие без версии — момент вставки (deleteStamp), выдача — начало транзакции
+// (writeStamp). Версия владельца кладётся приведением в этом же операторе — до
+// микросекунды, включая '-infinity', как в состоянии публикации и в зеркале.
+func lay(ctx context.Context, tx pgx.Tx, intents []intent) error {
+	rows, err := journalRows(intents)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	eventTypes := make([]string, 0, len(rows))
+	payloads := make([]string, 0, len(rows))
+	versions := make([]pgtype.Timestamptz, 0, len(rows))
+	for _, r := range rows {
+		eventTypes = append(eventTypes, r.eventType)
+		payloads = append(payloads, r.payload)
+		versions = append(versions, r.version)
+	}
+	_, err = tx.Exec(ctx,
+		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
+		 SELECT e,
+		        CASE WHEN v IS NULL THEN p::jsonb
+		             ELSE p::jsonb || jsonb_build_object('source_version', v) END,
+		        CASE WHEN v IS NULL AND e = $4 THEN `+deleteStamp+` ELSE `+writeStamp+` END
+		   FROM unnest($1::text[], $2::text[], $3::timestamptz[]) WITH ORDINALITY AS t(e, p, v, n)
+		  ORDER BY n`,
+		eventTypes, payloads, versions, EventTypeDelete,
+	)
+	return err
+}
+
+// journalRow — строка журнала после раскладки, в порядке id.
+type journalRow struct {
+	object, user, relation string
+	eventType, payload     string
+	version                pgtype.Timestamptz
+}
+
+// journalRows раскладывает намерения в строки в ОБЩЕМ порядке захвата замков:
+// (объект, субъект, отношение) побайтно, как сравнивает свёртка (COLLATE "C").
+//
+// Ключ (субъект, объект), у которого все намерения — выдачи без версии либо все —
+// снятия без версии, ложится ОДНОЙ строкой-набором (groupByGrant, groupPayload):
+// набор — одна выдача, и двигаться ему одним куском. Ключ, у которого есть и
+// выдача, и снятие либо строка с версией владельца, ложится строкой на КАЖДОЕ
+// намерение: порядок замков внутри ключа — порядок отношений, а не порядок
+// писателей. Намерения одного кортежа внутри такого ключа идут в порядке их
+// записи (сортировка устойчива): «выдать, снять, выдать» одного кортежа в одной
+// транзакции — не то же, что «выдать, снять». Подряд идущий повтор того же
+// намерения того же кортежа схлопывается.
+func journalRows(intents []intent) ([]journalRow, error) {
+	type key struct{ user, object string }
+	const (
+		plainWrite = 1 << iota
+		plainDelete
+		ordered
+	)
+	kinds := make(map[key]int, len(intents))
+	for _, it := range intents {
+		k := key{it.tuple.User, it.tuple.Object}
+		switch {
+		case it.version.Valid:
+			kinds[k] |= ordered
+		case it.eventType == EventTypeDelete:
+			kinds[k] |= plainDelete
+		default:
+			kinds[k] |= plainWrite
+		}
+	}
+	single := func(k key) bool { s := kinds[k]; return s == plainWrite || s == plainDelete }
+
+	rows := make([]journalRow, 0, len(intents))
+	sets := map[string][]clients.RelationTuple{}
+	type last struct {
+		eventType string
+		version   pgtype.Timestamptz
+	}
+	previous := make(map[clients.RelationTuple]last)
+	for _, it := range intents {
+		if single(key{it.tuple.User, it.tuple.Object}) {
+			sets[it.eventType] = append(sets[it.eventType], it.tuple)
+			continue
+		}
+		if p, seen := previous[it.tuple]; seen && p.eventType == it.eventType && p.version == it.version {
+			continue
+		}
+		previous[it.tuple] = last{it.eventType, it.version}
+		payload, err := groupPayload(it.eventType, grantGroup{user: it.tuple.User, object: it.tuple.Object, relations: []string{it.tuple.Relation}})
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, journalRow{
+			object: it.tuple.Object, user: it.tuple.User, relation: it.tuple.Relation,
+			eventType: it.eventType, payload: payload, version: it.version,
+		})
+	}
+	for _, eventType := range []string{EventTypeWrite, EventTypeDelete} {
+		for _, g := range groupByGrant(sets[eventType]) {
+			payload, err := groupPayload(eventType, g)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, journalRow{
+				object: g.object, user: g.user, relation: g.relations[0],
+				eventType: eventType, payload: payload,
+			})
+		}
+	}
+	slices.SortStableFunc(rows, func(a, b journalRow) int {
+		return cmp.Or(cmp.Compare(a.object, b.object), cmp.Compare(a.user, b.user), cmp.Compare(a.relation, b.relation))
+	})
+	return rows, nil
+}
+
+// Deferred — транзакция, на которой строки журнала КОПЯТСЯ и ложатся одним
+// оператором (Flush), сколько бы писателей и вызовов их ни назвали (kaname#617).
+//
+// # Зачем
+//
+// Порядок захвата строк факта общий лишь внутри одного оператора журнала. Транзакция,
+// которая пишет журнал несколькими вызовами — снятие регистрации с потомками,
+// отзывом выдач и публикацией, применение манифеста модуля, — брала замки фактов
+// порядком своих вызовов и сходилась в кольцо с любым писателем, бравшим те же
+// факты в общем порядке (40P01). Отложенная транзакция сводит все вызовы к одному
+// оператору, и все замки фактов берутся после замков строк предметной области,
+// взятых по ходу транзакции, — тот же порядок родов, что у прохода материализации.
+//
+// # Чем она отличается от обычной
+//
+// Свёртка строки видит состояние транзакции на момент Flush, а не на момент
+// вызова писателя: реестр выпущенного и статус выдач — конечные. Читатель
+// прямого факта той же транзакции видит строки журнала лишь после Flush, поэтому
+// вопрос «стоит ли факт» после записи задаётся после Flush.
+//
+// Flush — один раз: строка журнала после него — отказ, а не второй оператор.
+// Фиксация с неуложенными строками — отказ, а не молчаливая потеря; точка
+// сохранения внутри — отказ: строки внутри неё легли бы мимо раскладки.
+type Deferred struct {
+	pgx.Tx
+	pending []intent
+	laid    bool
+}
+
+// Defer оборачивает транзакцию; уже отложенную возвращает как есть.
+func Defer(tx pgx.Tx) *Deferred {
+	if d, ok := tx.(*Deferred); ok {
+		return d
+	}
+	return &Deferred{Tx: tx}
+}
+
+func (d *Deferred) add(intents []intent) error {
+	if d.laid {
+		return errors.New("fga_outbox: the journal of this transaction is already laid — a second statement would take fact locks out of the common order")
+	}
+	d.pending = append(d.pending, intents...)
+	return nil
+}
+
+// Flush кладёт накопленное одним оператором. Второй вызов — отказ.
+func (d *Deferred) Flush(ctx context.Context) error {
+	if d.laid {
+		return errors.New("fga_outbox: the journal of this transaction is already laid")
+	}
+	d.laid = true
+	if err := lay(ctx, d.Tx, d.pending); err != nil {
+		return fmt.Errorf("fga_outbox: insert journal: %w", err)
+	}
+	d.pending = nil
+	return nil
+}
+
+// Commit фиксирует транзакцию; неуложенные строки журнала — отказ.
+func (d *Deferred) Commit(ctx context.Context) error {
+	if len(d.pending) > 0 {
+		return fmt.Errorf("fga_outbox: commit with %d journal intents not laid — Flush is missing", len(d.pending))
+	}
+	return d.Tx.Commit(ctx)
+}
+
+// Begin — точка сохранения внутри отложенной транзакции: отказ.
+func (d *Deferred) Begin(context.Context) (pgx.Tx, error) {
+	return nil, errors.New("fga_outbox: savepoint inside a transaction whose journal is deferred")
 }
 
 // writeStamp / deleteStamp — метка created_at строки журнала, она же ВЕРСИЯ строки
@@ -414,15 +671,20 @@ type grantGroup struct {
 // trigger (`kaname.relation_fact_from_journal`, migration 20261005040457) that walks
 // the rows of one statement by (object, user) byte-wise, same-key rows by id, and
 // the relations of a set byte-wise — whoever wrote them: this emitter, the boot
-// backfill's `INSERT … SELECT`, the module seed, raw migration SQL. Its reach is ONE
-// STATEMENT: across the statements of one transaction the order is the writer's.
-// The sort here is kept because it makes the journal itself canonical (one row per
-// set, relations in one order) — not because the locks depend on it.
+// backfill's `INSERT … SELECT`, the module seed, raw migration SQL.
 //
-// Reordering is safe because nothing inside one call depends on the caller's order:
-// the rows of one set are always different (user, object) keys, and rows of different
-// keys commute. The order that does matter — a grant and a revoke of the SAME key —
-// lies across calls, and the INSERT below keeps it (later call, larger id).
+// Досягаемость порядка — ОДИН оператор: между операторами одной транзакции замки
+// берутся порядком писателя, и база этого не держит — второй оператор журнала в
+// транзакции она не отвергает. Держат писатели: транзакция кладёт журнал одним
+// вызовом (EmitJournalTx либо одиночный писатель) либо копит его на отложенной
+// транзакции и кладёт одним Flush (Deferred). Перепись писателей по этому
+// свойству — kaname#617.
+//
+// Сортировка здесь оставлена ради канонического журнала (одна строка на набор,
+// отношения в одном порядке), а не ради замков. Переставлять безопасно: строки
+// наборов — разные ключи (субъект, объект), а строки разных ключей коммутируют.
+// Выдача и снятие ОДНОГО ключа не коммутируют — такой ключ ложится строкой на
+// намерение в порядке записи (journalRows), а не набором отсюда.
 //
 // De-duplication matters because the store rejected a request naming the same tuple
 // twice (cannot_allow_duplicate_tuples_in_one_request), and a caller that

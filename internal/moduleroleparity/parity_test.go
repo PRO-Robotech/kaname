@@ -361,3 +361,8 @@ func applyImageRoles(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	require.NoErrorf(t, err, "применение ролей своего манифеста службы отказало (%s)", rep)
 	t.Logf("роли своего манифеста службы применены: %s", rep)
 }
+
+func (r *recordingTx) RevokeRetiredMemberAccess(context.Context, []domain.MembershipTuple) error {
+	return fmt.Errorf("запоминающий писатель позван на снятие доступа членов снятых ролей: " +
+		"сверка манифестов снятия не делает")
+}

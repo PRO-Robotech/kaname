@@ -1571,18 +1571,15 @@ func (s *reconcileStore) LedgerTuples(ctx context.Context, bindingID domain.Acce
 	return out, rows.Err()
 }
 
-// EmitTupleWrite / EmitTupleDelete enqueue per-object FGA tuples on the tx.
-func (s *reconcileStore) EmitTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
-	return fga_outbox.EmitWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
-}
-
-func (s *reconcileStore) EmitTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error {
-	return fga_outbox.EmitDeleteTx(ctx, s.tx, membershipTuplesToClients(tuples))
+// EmitJournal кладёт выдачи и снятия прохода в журнал прав ОДНИМ оператором
+// (fga_outbox.EmitJournalTx, kaname#617).
+func (s *reconcileStore) EmitJournal(ctx context.Context, writes, deletes []domain.MembershipTuple) error {
+	return fga_outbox.EmitJournalTx(ctx, s.tx, membershipTuplesToClients(writes), membershipTuplesToClients(deletes))
 }
 
 // RecordEmittedTuples co-commits the per-member FGA tuples into the persisted
 // emitted-tuple ledger (kaname.access_binding_emitted_tuples — F3/#178) on the
-// reconcile writer-tx, alongside the matching EmitTupleWrite (ban #10), под координатой
+// reconcile writer-tx, alongside the matching journal rows (EmitJournal, ban #10), под координатой
 // члена, который их выпустил (kaname#933). The INSERT is `ON CONFLICT (<полный ключ>)
 // DO NOTHING`, so a repeated reconcile of the same ACTIVE member — or a forward +
 // async-full overlap — is an idempotent no-op. Строка уровня выдачи
