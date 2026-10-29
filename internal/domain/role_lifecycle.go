@@ -102,4 +102,10 @@ type RoleRetirement struct {
 	RemovedSelectors int
 	// RemovedTargetMembers — строк материализованного состава цели снято.
 	RemovedTargetMembers int
+	// RevokedMemberAccess — кортежи, выпущенные членами выдач роли, чьи строки
+	// реестра выпущенного сняты (kaname#926). Строк снятия журнала по ним снятие
+	// роли НЕ кладёт: их кладёт вызывающий, ОДНИМ оператором на транзакцию за все
+	// снятые роли (RevokeRetiredMemberAccess, kaname#617). Не положенные — доступ
+	// без строки реестра, который не снимет уже никто.
+	RevokedMemberAccess []MembershipTuple
 }

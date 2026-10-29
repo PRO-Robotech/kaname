@@ -138,6 +138,11 @@ type RoleWriter interface {
 	RetireRole(ctx context.Context, id domain.RoleID, ownerModule, reason, actor string) (
 		domain.RoleRetirement, error)
 
+	// RevokeRetiredMemberAccess — строки снятия доступа членов всех снятых ролей
+	// одним оператором журнала (kaname#617); зовётся после снятия ролей той же
+	// транзакцией.
+	RevokeRetiredMemberAccess(ctx context.Context, tuples []domain.MembershipTuple) error
+
 	// ReviveRole оживляет снятую роль и очищает ведомость её собственной
 	// причины. `false` означает «оживлять нечего», а не отказ.
 	ReviveRole(ctx context.Context, id domain.RoleID) (bool, error)

@@ -37,6 +37,11 @@ type fakeStore struct {
 	// взятию (kaname#913).
 	locked           []string
 	writesBeforeLock []int
+
+	// memberAccess — кортежи членов выдач роли, которые её снятие возвращает;
+	// revokeCalls — вызовы снятия доступа членов снятых ролей (kaname#617).
+	memberAccess map[domain.RoleID][]domain.MembershipTuple
+	revokeCalls  [][]domain.MembershipTuple
 }
 
 func newStore() *fakeStore {
@@ -312,7 +317,7 @@ func (s *fakeStore) RetireRole(_ context.Context, id domain.RoleID, ownerModule,
 		// либо роль уже снята.
 		return domain.RoleRetirement{}, nil
 	}
-	out := domain.RoleRetirement{Marked: true, ResettledRuleRefs: len(s.refs[id])}
+	out := domain.RoleRetirement{Marked: true, ResettledRuleRefs: len(s.refs[id]), RevokedMemberAccess: s.memberAccess[id]}
 	delete(s.refs, id)
 	r.Lifecycle = domain.RoleLifecycle{
 		State:         domain.RoleLifecycleWithdrawn,
@@ -357,4 +362,66 @@ func TestApplierLocksTheOwnerModuleRowBeforeAnyRoleWrite(t *testing.T) {
 	if store.calls == 0 {
 		t.Fatal("ПРЕДПОСЫЛКА: применитель не записал ни одной роли — порядок судить не о чем")
 	}
+}
+
+func (s *fakeStore) RevokeRetiredMemberAccess(_ context.Context, tuples []domain.MembershipTuple) error {
+	s.revokeCalls = append(s.revokeCalls, append([]domain.MembershipTuple(nil), tuples...))
+	return nil
+}
+
+// TestRetireRevokesMemberAccessOfAllRetiredRolesInOneCall — kaname#617: снятие
+// двух ролей одним применением отдаёт доступ членов ОБЕИХ одному вызову снятия
+// (один оператор журнала), а не вызову на роль; и вызов не пропущен — строки
+// реестра снятие роли уже убрало, и без него доступ остался бы без держателя.
+func TestRetireRevokesMemberAccessOfAllRetiredRolesInOneCall(t *testing.T) {
+	store := newStore()
+	ap := applierUnderTest(t, store)
+	doc := "apiVersion: iam/v1\nmodule: vpc\nroles:\n"
+	for _, id := range []string{"vpc.network.admin", "vpc.network.viewer"} {
+		doc += "  - id: " + id + "\n" +
+			"    description: Распоряжается сетями модуля.\n" +
+			"    tier: {tierType: iam.cluster, tierId: cluster_root}\n" +
+			"    rules:\n      - {module: vpc, resources: [network], classes: [get]}\n"
+	}
+	declared, err := manifest.Load([]byte(doc))
+	if err != nil {
+		t.Fatalf("фикстура манифеста отвергнута: %v", err)
+	}
+	if _, err := ap.Apply(context.Background(), declared, moduleroles.BootActorID); err != nil {
+		t.Fatalf("объявление ролей отвергнуто: %v", err)
+	}
+	admin := domain.MembershipTuple{User: "user:usr617a", Relation: "editor", Object: "vpc_network:n1"}
+	viewer := domain.MembershipTuple{User: "user:usr617v", Relation: "viewer", Object: "vpc_network:n2"}
+	store.memberAccess = map[domain.RoleID][]domain.MembershipTuple{
+		domain.SystemRoleID("vpc.network.admin"):  {admin},
+		domain.SystemRoleID("vpc.network.viewer"): {viewer},
+	}
+	none, err := manifest.Load([]byte("apiVersion: iam/v1\nmodule: vpc\nroles:\n  []\n"))
+	if err != nil {
+		t.Fatalf("фикстура пустого раздела ролей отвергнута: %v", err)
+	}
+	rep, err := ap.Apply(context.Background(), none, moduleroles.BootActorID)
+	if err != nil {
+		t.Fatalf("снятие ролей отвергнуто: %v", err)
+	}
+	if rep.Retired != 2 {
+		t.Fatalf("предпосылка: снято ролей %d, ожидались 2: %s", rep.Retired, rep)
+	}
+	if len(store.revokeCalls) != 1 {
+		t.Fatalf("снятие доступа членов снятых ролей позвано %d раз(а), ожидался один вызов на транзакцию: %v",
+			len(store.revokeCalls), store.revokeCalls)
+	}
+	got := store.revokeCalls[0]
+	if len(got) != 2 || !containsTuple(got, admin) || !containsTuple(got, viewer) {
+		t.Fatalf("единственный вызов не несёт доступ членов обеих ролей: %v", got)
+	}
+}
+
+func containsTuple(set []domain.MembershipTuple, want domain.MembershipTuple) bool {
+	for _, t := range set {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }

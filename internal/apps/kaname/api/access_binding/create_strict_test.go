@@ -299,6 +299,9 @@ func (w *strictDupABWriter) EmitSubjectChangeEvent(_ context.Context, _ repoab.S
 func (w *strictDupABWriter) EmitRelationWrite(_ context.Context, _ []repoab.RelationTuple) error {
 	return nil
 }
+func (w *strictDupABWriter) EmitRelationJournal(_ context.Context, _, _ []repoab.RelationTuple) error {
+	return nil
+}
 func (w *strictDupABWriter) EmitRelationDelete(_ context.Context, _ []repoab.RelationTuple) error {
 	return nil
 }

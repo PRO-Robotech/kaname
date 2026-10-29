@@ -14,6 +14,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -63,6 +64,24 @@ func (e *FGAOutboxEmitter) EmitOrderedDeleteTx(ctx context.Context, tx service.T
 	}
 	return fga_outbox.EmitOwnerOrderedTx(ctx, txAsPgx(tx), fga_outbox.EventTypeDelete,
 		serviceTuplesToClients(tuples), pgtype.Timestamptz{Time: tombstone, Valid: true})
+}
+
+// DeferJournalTx — транзакция, на которой строки журнала всех писателей копятся
+// до FlushJournalTx и ложатся одним оператором (fga_outbox.Deferred, kaname#617).
+// Писатели узнают её сами: каждый из них снимает pgx.Tx с того же дескриптора.
+func (e *FGAOutboxEmitter) DeferJournalTx(tx service.Tx) service.Tx {
+	return fga_outbox.Defer(txAsPgx(tx))
+}
+
+// FlushJournalTx кладёт накопленное отложенной транзакцией одним оператором.
+// Дескриптор, не прошедший DeferJournalTx, — отказ: «положено одним оператором»
+// о нём утверждать нечем.
+func (e *FGAOutboxEmitter) FlushJournalTx(ctx context.Context, tx service.Tx) error {
+	d, ok := txAsPgx(tx).(*fga_outbox.Deferred)
+	if !ok {
+		return errors.New("fga_outbox: flush on a transaction whose journal is not deferred")
+	}
+	return d.Flush(ctx)
 }
 
 // ownerVersionOrMinusInfinity — версия владельца; нулевая — '-infinity'.

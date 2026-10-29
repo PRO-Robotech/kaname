@@ -58,6 +58,15 @@ import (
 type relationOutboxEmitter interface {
 	EmitOrderedWriteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, version time.Time) error
 	EmitOrderedDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, tombstone time.Time) error
+	// DeferJournalTx и FlushJournalTx — ОДИН оператор журнала на транзакцию
+	// регистрации (kaname#617). Транзакция снятия пишет журнал многими путями —
+	// надгробие объекта, отзыв выдач, надгробия и выдачи потомков, публикации, —
+	// и оператором на путь брала замки строк факта порядком путей, сходясь в
+	// кольцо (40P01) с писателем, берущим те же факты в общем порядке. Отложенная
+	// транзакция копит строки всех путей, FlushJournalTx кладёт их одним
+	// оператором; строка после него — отказ, фиксация с неуложенными — отказ.
+	DeferJournalTx(tx service.Tx) service.Tx
+	FlushJournalTx(ctx context.Context, tx service.Tx) error
 }
 
 // resourceMirrorEmitter — narrow write port for the
@@ -929,6 +938,9 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// never surface the raw pgx driver text (host/port/user/db).
 		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
+	// Журнал транзакции — отложенно, одним оператором (FlushJournalTx ниже,
+	// kaname#617).
+	tx = uc.emitter.DeferJournalTx(tx)
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
 	// Имя типа КАТАЛОГА — у живой строки, в этом же снимке (kacho#1990).
@@ -1008,6 +1020,9 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 				return "", false, false, fmt.Errorf("emit registration audit: %w", err)
 			}
 		}
+		if err = uc.emitter.FlushJournalTx(ctx, tx); err != nil {
+			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
+		}
 	} else {
 		key := domain.ResourceRef{Type: row.ObjectType, ID: row.ObjectID}
 		// ПОРЯДОК РОДОВ СНЯТИЯ (kaname#974, kaname#975): выдачи и роли, называющие
@@ -1036,16 +1051,12 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		if err = uc.emitter.EmitOrderedDeleteTx(ctx, tx, tuples, row.SourceVersion); err != nil {
 			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 		}
-		after, serr := uc.standing(ctx, tx, before)
-		if serr != nil {
-			return "", false, false, serr
-		}
-		withdrawn := len(before) - len(after)
 		// СНЯТИЕ РЕГИСТРАЦИИ СНИМАЕТ ВЫДАЧИ ОБЪЕКТА (kaname#963, Д1). Только снятие,
 		// удалившее строку регистрации, есть снятие регистрации: устаревшее
 		// надгробие, повтор применённого снятия и снятие незарегистрированного
 		// ключа строки не удаляют и выдач не трогают. В той же транзакции —
 		// отзыв не фиксируется без снятия, и снятие без отзыва.
+		descendants := 0
 		if deleted {
 			if err = uc.withdrawal.WithdrawTx(ctx, tx, key, authzguard.PrincipalUserID(ctx)); err != nil {
 				return "", false, false, fmt.Errorf("withdraw grants of unregistered resource: %w", err)
@@ -1055,23 +1066,9 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			// Устаревшее надгробие (родитель зарегистрирован заново, новее) потомков
 			// нового родителя не трогает, а снятие незарегистрированного ключа не
 			// сносит ничего, что под ним числится.
-			descendants, derr := uc.dropDescendants(ctx, tx, t, row)
-			if derr != nil {
+			var derr error
+			if descendants, derr = uc.dropDescendants(ctx, tx, t, row); derr != nil {
 				return "", false, false, derr
-			}
-			if err = uc.audit.EmitTx(ctx, tx, uc.auditEvent(ctx, AuditEventResourceUnregistered,
-				auditOutcomeUnregistered, t, row, map[string]any{
-					"withdrawn_tuples": withdrawn, "descendants": descendants,
-				})); err != nil {
-				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
-			}
-		} else if withdrawn > 0 {
-			// Надгробие старше хранимой регистрации: строка осталась, но кортежи
-			// регистрации не новее надгробия сняты (kaname#969) — модель прав
-			// изменилась, и это тоже событие.
-			if err = uc.audit.EmitTx(ctx, tx, uc.auditEvent(ctx, AuditEventResourceUnregistered,
-				auditOutcomeSuperseded, t, row, map[string]any{"withdrawn_tuples": withdrawn})); err != nil {
-				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
 			}
 		}
 		// THE OBJECT'S PUBLICATION GOES WITH THE OBJECT, UNDER THE SAME VERSION.
@@ -1086,6 +1083,37 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		if modelType, modelID := t.splitObject(); admitsPublication(modelType) {
 			if _, err = uc.publications.ApplyTx(ctx, tx, modelType, modelID, false, row.SourceVersion); err != nil {
 				return "", false, false, fmt.Errorf("withdraw public-read publication: %w", err)
+			}
+		}
+		// ЖУРНАЛ СНЯТИЯ — ОДНИМ ОПЕРАТОРОМ (kaname#617): надгробие объекта, отзыв
+		// его выдач, надгробия, выдачи и публикации потомков, публикация объекта.
+		// Все замки строк предметной области (выдачи и роли — LockTx, строки
+		// зеркала объекта и потомков) взяты выше, замки фактов — здесь, в общем
+		// порядке свёртки.
+		if err = uc.emitter.FlushJournalTx(ctx, tx); err != nil {
+			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
+		}
+		// Сколько кортежей снято на самом деле — после оператора журнала: прямой
+		// факт отражает строки журнала лишь с момента их вставки.
+		after, serr := uc.standing(ctx, tx, before)
+		if serr != nil {
+			return "", false, false, serr
+		}
+		withdrawn := len(before) - len(after)
+		if deleted {
+			if err = uc.audit.EmitTx(ctx, tx, uc.auditEvent(ctx, AuditEventResourceUnregistered,
+				auditOutcomeUnregistered, t, row, map[string]any{
+					"withdrawn_tuples": withdrawn, "descendants": descendants,
+				})); err != nil {
+				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
+			}
+		} else if withdrawn > 0 {
+			// Надгробие старше хранимой регистрации: строка осталась, но кортежи
+			// регистрации не новее надгробия сняты (kaname#969) — модель прав
+			// изменилась, и это тоже событие.
+			if err = uc.audit.EmitTx(ctx, tx, uc.auditEvent(ctx, AuditEventResourceUnregistered,
+				auditOutcomeSuperseded, t, row, map[string]any{"withdrawn_tuples": withdrawn})); err != nil {
+				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
 			}
 		}
 	}

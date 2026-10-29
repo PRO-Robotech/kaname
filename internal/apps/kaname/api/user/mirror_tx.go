@@ -79,6 +79,15 @@ type BootstrapResult struct {
 // Кластерное право администратора этот путь не эмитит вовсе: его ставит отдельный
 // реконсайлер старта (`seed.RunBootstrapAdmin`) по адресу почты из настроек.
 func BootstrapPersonalResourcesTx(ctx context.Context, w Writer, in BootstrapInput) (BootstrapResult, error) {
+	return bootstrapPersonalResources(ctx, w, in, nil)
+}
+
+// bootstrapPersonalResources — тело BootstrapPersonalResourcesTx. carried — кортежи
+// журнала, которые вызывающий уже назвал в ЭТОЙ транзакции (указатель личности
+// активации): они ложатся тем же оператором журнала, что и кортежи личных
+// ресурсов, — один оператор на транзакцию (kaname#617). Заведение, которое
+// ничего не заводит (личные ресурсы уже есть), кладёт их одни.
+func bootstrapPersonalResources(ctx context.Context, w Writer, in BootstrapInput, carried []service.RelationTuple) (BootstrapResult, error) {
 	userID := domain.UserID(in.CandidateUserID)
 	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
 	prjID := domain.ProjectID(ids.NewID(domain.PrefixProject))
@@ -151,6 +160,11 @@ func BootstrapPersonalResourcesTx(ctx context.Context, w Writer, in BootstrapInp
 		existing, gerr := w.Users().Get(ctx, userID)
 		if gerr != nil {
 			return BootstrapResult{}, gerr
+		}
+		if len(carried) > 0 {
+			if ferr := w.EmitFGARelationWrite(ctx, carried); ferr != nil {
+				return BootstrapResult{}, ferr
+			}
 		}
 		return BootstrapResult{User: existing}, nil
 	}
@@ -340,7 +354,7 @@ func BootstrapPersonalResourcesTx(ctx context.Context, w Writer, in BootstrapInp
 	// доставляется live drainer'ом at-least-once + идемпотентно — owner-self-
 	// grant (D-4: невосстановим reconciler'ом) гарантирован.
 	if ferr := w.EmitFGARelationWrite(ctx,
-		bootstrapTuples(userID, accID, prjID, ownerBindingID, projectAB)); ferr != nil {
+		append(bootstrapTuples(userID, accID, prjID, ownerBindingID, projectAB), carried...)); ferr != nil {
 		return BootstrapResult{}, ferr
 	}
 
@@ -395,9 +409,25 @@ func personalAccountName(accID domain.AccountID, attempt int) domain.AccountName
 func ActivateInviteTx(ctx context.Context, w Writer, pending domain.User,
 	externalID domain.ExternalSubject, displayName domain.DisplayName, actor string,
 ) (domain.User, error) {
-	activated, err := w.UsersW().ActivateInvite(ctx, pending.ID, externalID, displayName)
+	activated, pointer, err := activateInvite(ctx, w, pending, externalID, displayName, actor)
 	if err != nil {
 		return domain.User{}, err
+	}
+	if ferr := w.EmitFGARelationWrite(ctx, pointer); ferr != nil {
+		return domain.User{}, ferr
+	}
+	return activated, nil
+}
+
+// activateInvite — тело ActivateInviteTx БЕЗ записи журнала: указатель личности
+// возвращается вызывающему, и тот кладёт его одним оператором журнала со всеми
+// кортежами своей транзакции (kaname#617).
+func activateInvite(ctx context.Context, w Writer, pending domain.User,
+	externalID domain.ExternalSubject, displayName domain.DisplayName, actor string,
+) (domain.User, []service.RelationTuple, error) {
+	activated, err := w.UsersW().ActivateInvite(ctx, pending.ID, externalID, displayName)
+	if err != nil {
+		return domain.User{}, nil, err
 	}
 	// Activate-invite is the User update branch (mirror-fields email/
 	// display_name applied) — emit iam.user.updated atomically with the
@@ -413,7 +443,7 @@ func ActivateInviteTx(ctx context.Context, w Writer, pending domain.User,
 			"changed_fields": []string{"external_id", "display_name", "invite_status"},
 		},
 	}); eerr != nil {
-		return domain.User{}, eerr
+		return domain.User{}, nil, eerr
 	}
 	// RC-2: co-commit the member hierarchy-tuple intent in the SAME writer-tx as
 	// the ActivateInvite UPDATE + the iam.user.updated audit-event (запрет #10 /
@@ -422,22 +452,20 @@ func ActivateInviteTx(ctx context.Context, w Writer, pending domain.User,
 	// byte-идентична bootstrapTuples hierarchy-блоку (account:<A>#account@iam_user:<id>).
 	// Idempotent: re-activation re-emits the same intent → at-least-once +
 	// idempotent drain → exactly one FGA edge.
-	if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{{
+	pointer := []service.RelationTuple{{
 		User:     fmt.Sprintf("account:%s", activated.AccountID),
 		Relation: "account",
 		Object:   fmt.Sprintf("iam_user:%s", activated.ID),
-	}}); ferr != nil {
-		return domain.User{}, ferr
-	}
+	}}
 	// rbac-contract-a-fix (forward-mat, C-01b): co-commit a reconcile event in
 	// the SAME activation writer-tx (ban #10) so the now-ACTIVE invitee user
 	// forward-materializes under the inviter-account's owner `*.*` binding —
 	// the flat rights model dropped the iam_user `from account` ACCESS cascade,
 	// so the parent-pointer above no longer grants the owner Get on the user.
 	if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.user", string(activated.ID)); rerr != nil {
-		return domain.User{}, rerr
+		return domain.User{}, nil, rerr
 	}
-	return activated, nil
+	return activated, pointer, nil
 }
 
 // MirrorInput — что приносит регистрация нашей полосой (Ф4).
@@ -528,14 +556,17 @@ func RegisterMirrorTx(ctx context.Context, w Writer, in MirrorInput) (MirrorResu
 // НЕ коммитит и НЕ откатывает: транзакция принадлежит вызывающему.
 func ActivateInviteOnVerificationTx(ctx context.Context, w Writer, pending domain.User, actor string) (BootstrapResult, error) {
 	externalID := domain.NewOwnLaneSubject()
-	activated, err := ActivateInviteTx(ctx, w, pending, externalID, "", actor)
+	// Указатель личности активации и кортежи личных ресурсов — ОДНИМ оператором
+	// журнала транзакции (kaname#617): активация его не кладёт, а передаёт
+	// заведению личных ресурсов.
+	activated, pointer, err := activateInvite(ctx, w, pending, externalID, "", actor)
 	if err != nil {
 		return BootstrapResult{}, err
 	}
-	return BootstrapPersonalResourcesTx(ctx, w, BootstrapInput{
+	return bootstrapPersonalResources(ctx, w, BootstrapInput{
 		CandidateUserID: string(activated.ID), ExternalID: externalID, Email: activated.Email,
 		DisplayName: activated.DisplayName, Actor: actor, NewIdentity: false,
-	})
+	}, pointer)
 }
 
 // ActivateInviteForLane — активация приглашения на полосе формы одним writer'ом

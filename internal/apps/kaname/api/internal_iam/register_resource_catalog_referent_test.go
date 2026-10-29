@@ -145,3 +145,9 @@ func TestRegisterResource_LiveResourceType_StillRegisters(t *testing.T) {
 	require.NoError(t, err, "живой тип каталога обязан регистрироваться по-прежнему")
 	require.Len(t, emitter.writes, 1, "принятое намерение обязано лечь в очередь")
 }
+
+// DeferJournalTx / FlushJournalTx — двойник откладывает нечего: строки журнала он
+// не кладёт в базу, и число операторов у него не предмет (kaname#617).
+func (e *recordingEmitter) DeferJournalTx(tx service.Tx) service.Tx { return tx }
+
+func (e *recordingEmitter) FlushJournalTx(context.Context, service.Tx) error { return nil }

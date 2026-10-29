@@ -68,7 +68,9 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
+	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 )
 
 // ErrSeedRoleNotResolved — выдача посева ролью называет идентификатор, под
@@ -92,7 +94,17 @@ func (r *ModuleSeedWriteRepo) RunInWriteTx(
 	ctx context.Context,
 	fn func(context.Context, moduleseed.Writer) error,
 ) error {
-	return r.tx.InTx(ctx, func(tx pgx.Tx) error { return fn(ctx, moduleSeedWriter{tx: tx}) })
+	return r.tx.InTx(ctx, func(tx pgx.Tx) error {
+		// Журнал посева — ОДНИМ оператором на транзакцию (kaname#617): строки
+		// выдач и вступлений копятся на отложенной транзакции и ложатся перед
+		// фиксацией. Оператор на кортеж брал замки строк факта порядком манифеста,
+		// а не общим порядком свёртки.
+		d := fga_outbox.Defer(tx)
+		if err := fn(ctx, moduleSeedWriter{tx: d}); err != nil {
+			return err
+		}
+		return d.Flush(ctx)
+	})
 }
 
 // moduleSeedWriter — `moduleseed.Writer` над одной транзакцией.
@@ -465,18 +477,13 @@ func (w moduleSeedWriter) clusterRoleID(ctx context.Context, name string) (strin
 	return id, nil
 }
 
-// journal кладёт строку журнала прав. Прямой факт отношения складывает из неё
+// journal называет строку журнала прав. Прямой факт отношения складывает из неё
 // триггер `relation_fact_follows_journal`.
 //
-// Приведения `::text` у параметров ОБЯЗАТЕЛЬНЫ и сняты быть не могут:
-// `jsonb_build_object` объявляет свои доводы как `"any"`, поэтому тип параметра
-// вывести неоткуда, и без приведения вставка отказывает `42P18` — а отказ
-// приходит из подготовки оператора, то есть раньше любого условия внутри.
+// Строку кладёт выпускатель журнала (fga_outbox), а не своя вставка: транзакция
+// посева отложена (RunInWriteTx), и все её строки ложатся одним оператором в
+// общем порядке захвата (kaname#617). Своя вставка была бы вторым написанием
+// формы строки и отдельным оператором мимо раскладки.
 func (w moduleSeedWriter) journal(ctx context.Context, user, object, relation string) error {
-	_, err := w.tx.Exec(ctx, `
-		INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
-		VALUES ('fga.tuple.write',
-		        jsonb_build_object('user', $1::text, 'object', $2::text, 'relation', $3::text),
-		        now())`, user, object, relation)
-	return err
+	return fga_outbox.EmitWriteTx(ctx, w.tx, []clients.RelationTuple{{User: user, Relation: relation, Object: object}})
 }

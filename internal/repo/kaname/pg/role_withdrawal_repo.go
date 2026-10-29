@@ -52,7 +52,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
@@ -237,9 +236,13 @@ func (w *roleWriter) RetireRole(ctx context.Context, id domain.RoleID, ownerModu
 	// ещё существуют, а периодический обход выдачу без селекторов не видит вовсе.
 	// Без этого шага выдача на снятой роли держала бы ярус на объектах до своего отзыва,
 	// удаления или истечения — вопреки §2.4 приёмки снятия («не даёт ничего»).
-	if err := w.revokeMemberAccessOfRole(ctx, id); err != nil {
+	// Строки реестра снимаются здесь, строки снятия журнала — вызывающим, одним
+	// оператором за все роли транзакции (RevokeRetiredMemberAccess, kaname#617).
+	revoked, err := w.revokeMemberAccessOfRole(ctx, id)
+	if err != nil {
 		return out, err
 	}
+	out.RevokedMemberAccess = revoked
 
 	tag, err = w.tx.Exec(ctx,
 		`DELETE FROM kaname.access_binding_target_members WHERE role_id = $1`, string(id))
@@ -273,8 +276,9 @@ func (w *roleWriter) RetireRole(ctx context.Context, id domain.RoleID, ownerModu
 }
 
 // revokeMemberAccessOfRole снимает доступ, выпущенный членами выдач роли: строки
-// реестра выпущенного (`source='member'`) уходят, и на каждый их кортеж пишется
-// строка снятия журнала — в транзакции снятия роли (запрет #10).
+// реестра выпущенного (`source='member'`) уходят, а их кортежи возвращаются —
+// строки снятия журнала по ним кладёт вызывающий в той же транзакции, одним
+// оператором за все снятые роли (RevokeRetiredMemberAccess, kaname#617; запрет #10).
 //
 // ПОРЯДОК НЕСУЩИЙ: строки реестра — РАНЬШЕ строк снятия. Свёртка строки снятия в
 // прямой факт оставляет факт, который держит действующая выдача (kaname#919), а
@@ -289,7 +293,7 @@ func (w *roleWriter) RetireRole(ctx context.Context, id domain.RoleID, ownerModu
 // Набор берётся из реестра, а не выводится из правил роли: снимается то, что было
 // выпущено, — тот же источник, что у снятия члена полным проходом
 // (revokeTuplesFor) и у снятия выдачи целиком (revokeWholeLedger).
-func (w *roleWriter) revokeMemberAccessOfRole(ctx context.Context, id domain.RoleID) error {
+func (w *roleWriter) revokeMemberAccessOfRole(ctx context.Context, id domain.RoleID) ([]domain.MembershipTuple, error) {
 	rows, err := w.tx.Query(ctx, `
 		DELETE FROM kaname.access_binding_emitted_tuples et
 		 USING kaname.access_bindings b
@@ -298,15 +302,15 @@ func (w *roleWriter) revokeMemberAccessOfRole(ctx context.Context, id domain.Rol
 		   AND et.source = 'member'
 		RETURNING et.fga_user, et.relation, et.object`, string(id))
 	if err != nil {
-		return mapErr(err, "", string(id))
+		return nil, mapErr(err, "", string(id))
 	}
-	seen := make(map[clients.RelationTuple]struct{})
-	var tuples []clients.RelationTuple
+	seen := make(map[domain.MembershipTuple]struct{})
+	var tuples []domain.MembershipTuple
 	for rows.Next() {
-		var t clients.RelationTuple
+		var t domain.MembershipTuple
 		if serr := rows.Scan(&t.User, &t.Relation, &t.Object); serr != nil {
 			rows.Close()
-			return mapErr(serr, "", string(id))
+			return nil, mapErr(serr, "", string(id))
 		}
 		if _, dup := seen[t]; dup {
 			continue
@@ -316,10 +320,18 @@ func (w *roleWriter) revokeMemberAccessOfRole(ctx context.Context, id domain.Rol
 	}
 	rows.Close()
 	if rerr := rows.Err(); rerr != nil {
-		return mapErr(rerr, "", string(id))
+		return nil, mapErr(rerr, "", string(id))
 	}
-	if err := fga_outbox.EmitDeleteTx(ctx, w.tx, tuples); err != nil {
-		return fmt.Errorf("снятие доступа членов роли %s: %w", id, err)
+	return tuples, nil
+}
+
+// RevokeRetiredMemberAccess кладёт строки снятия по кортежам, которые вернули
+// снятия ролей транзакции, — ОДНИМ оператором журнала (kaname#617). Строки
+// реестра к этому моменту сняты (revokeMemberAccessOfRole), поэтому свёртка
+// строки снятия оставит лишь факт, который держит ДРУГАЯ действующая выдача.
+func (w *roleWriter) RevokeRetiredMemberAccess(ctx context.Context, tuples []domain.MembershipTuple) error {
+	if err := fga_outbox.EmitDeleteTx(ctx, w.tx, membershipTuplesToClients(tuples)); err != nil {
+		return fmt.Errorf("снятие доступа членов снятых ролей: %w", err)
 	}
 	return nil
 }

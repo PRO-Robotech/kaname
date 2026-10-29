@@ -270,6 +270,15 @@ type WriterIface interface {
 	RetireRole(ctx context.Context, id domain.RoleID, ownerModule, reason, actor string) (
 		domain.RoleRetirement, error)
 
+	// RevokeRetiredMemberAccess кладёт строки снятия журнала прав по кортежам,
+	// которые RetireRole вернула в RevokedMemberAccess, — ОДНИМ оператором за все
+	// роли, снятые транзакцией (kaname#617). Снятие роли их не кладёт: оператор
+	// журнала на каждую роль брал замки строк факта порядком ролей, а не общим
+	// порядком свёртки, и сходился в кольцо с полным проходом выдачи (40P01).
+	// Вызывающий, снявший роль, ОБЯЗАН позвать его в той же транзакции: строки
+	// реестра уже сняты, и без строк снятия доступ остался бы без держателя.
+	RevokeRetiredMemberAccess(ctx context.Context, tuples []domain.MembershipTuple) error
+
 	// ReviveRole оживляет снятую роль и снимает из ведомости строки СВОЕЙ
 	// причины — одним оператором (kacho#1913).
 	//
