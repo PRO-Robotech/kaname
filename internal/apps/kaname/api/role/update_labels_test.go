@@ -57,14 +57,14 @@ const (
 
 var rlErrNotFound = stderrors.New("not found")
 
-// ownerCtx — authenticated owner principal (passes RequireOwnerMatchesPrincipal).
+// ownerCtx — проверенный владелец (проходит `RequireOwnerMatchesPrincipal`).
 func ownerCtx() context.Context {
 	return operations.WithPrincipal(context.Background(), operations.Principal{
 		Type: "user", ID: rlUpdOwnerID, DisplayName: "owner",
 	})
 }
 
-// ── sync mask-discipline reject paths (nil repo — pre-checks) ────────────────────
+// ── синхронные отказы дисциплины маски (репозитория нет — предпроверки) ──────────
 
 func TestUpdateRole_T33_LabelsMutable_ImmutableFieldRejected(t *testing.T) {
 	uc := &UpdateRoleUseCase{cat: catalogfixture.Source()} // nil deps: mask-discipline is a sync pre-check
@@ -90,10 +90,10 @@ func TestUpdateRole_T33_UnknownMaskField_Rejected(t *testing.T) {
 		"unknown field in update_mask → INVALID_ARGUMENT")
 }
 
-// labels is in the mutable set — a labels-only mask reaches the repo (NOT rejected
-// by the mask-discipline pre-check). Verified through the happy-path fake below.
+// `labels` входит в изменяемый набор — маска из одних меток доходит до репозитория
+// (предпроверка дисциплины маски её НЕ отвергает). Проверено дублёром ниже.
 
-// ── happy-path: labels-change co-commits reconcile-event "iam.role" ──────────────
+// ── успешный путь: правка меток со-коммитит событие сверки «iam.role» ─────────────
 
 func TestUpdateRole_T33UPD01_LabelsChangeEmitsReconcileEvent(t *testing.T) {
 	repo := newRlUpdRepo(domain.Labels{"team": "billing"})
@@ -136,7 +136,7 @@ func waitOps(t *testing.T) {
 	require.NoError(t, operations.Wait(waitCtx))
 }
 
-// ── compact fake repo ────────────────────────────────────────────────────────────
+// ── компактный дублёр репозитория ────────────────────────────────────────────────
 
 type rlUpdRepo struct {
 	role     domain.Role
@@ -296,7 +296,7 @@ func (w *rlRoleWtr) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.Rol
 	return nil
 }
 
-// ── fake ops repo (no-op; the worker runs via operations.Run + Wait) ─────────────
+// ── дублёр репозитория операций (ничего не делает; исполнитель — operations.Run + Wait)
 
 type rlFakeOps struct{}
 
@@ -348,12 +348,13 @@ func (w *rlUpdWriter) EmitInviteMail(_ context.Context, intent outboxtypes.Invit
 	return true, nil
 }
 
-// UnresolvedSegments — дублёр ОТКАЗЫВАЕТ, а не отвечает «неразрешённых нет»:
-// заглушка, возвращающая пустое, была бы снисходительнее продукта и молча
-// зеленила бы утверждения о деградации роли. Целость в этих пробах не предмет,
-// поэтому её путь здесь исполняться не должен — а если исполнится, проба упадёт.
+// UnresolvedSegments — дублёр отвечает «держится всё». Вопрос задаёт ЭХО
+// ПРАВКИ: оно несёт признак превью и спрашивает его в транзакции правки на
+// каждом пути (kaname#76), а эти пробы зовут правку всегда. Ответ «держится всё»
+// превью не сужает и утверждений о деградации роли не зеленит — их здесь нет:
+// предмет проб — метки, а целость и превью держат свои пробы.
 func (r *rlRoleRdr) UnresolvedSegments(context.Context, []domain.RoleSegment) (map[domain.RoleID][]domain.RoleSegment, error) {
-	return nil, stderrors.New("UnresolvedSegments не предмет этих проб")
+	return map[domain.RoleID][]domain.RoleSegment{}, nil
 }
 
 // WithdrawnGrants — дублёр ОТКАЗЫВАЕТ, а не отвечает «отобранного нет»:
