@@ -6,7 +6,7 @@ package pg_test
 // module_catalog_apply_consequence_populations_integration_test.go — СКОЛЬКО
 // ПОПУЛЯЦИЙ ПОСЛЕДСТВИЙ двигает ОДНО применение.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
+// Приёмка `docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.6; сценарии `IAM-MA-1-19`, `-20` — их предпосылка.
 // Задача продукта kacho#1034.
 //

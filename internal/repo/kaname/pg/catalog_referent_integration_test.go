@@ -5,7 +5,7 @@ package pg_test
 
 // catalog_referent_integration_test.go — у сегментов правила роли есть РЕФЕРЕНТ.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/rule-segments-have-a-referent.md`
+// Приёмка `docs/engineering/acceptance/rule-segments-have-a-referent.md`
 // (APPROVED круга 3), сценарии IAM-CT-1-02, -03, -05, -06, -07, -08, -09, -10,
 // -11, -12, -14. Задача продукта kacho#1030.
 //

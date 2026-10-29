@@ -8,7 +8,7 @@
 // (seed_rule_verb_resolvability_integration_test.go) и судит СВОЙСТВО дерева;
 // здесь утверждается то, что несёт посев.
 //
-// Приёмка: services/iam/docs/engineering/acceptance/system-role-segments-resolve.md
+// Приёмка: docs/engineering/acceptance/system-role-segments-resolve.md
 // Сценарии IAM-SV-1-01, -04, -07. Задача продукта kacho#1815.
 //
 // # Здесь стояли ещё три пробы — они сняты вместе со своим предметом

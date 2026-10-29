@@ -5,7 +5,7 @@ package pg_test
 
 // catalog_snapshot_integration_test.go — сценарии IAM-CT-2-01 · -06 · -07
 // (kacho#1816, приёмка
-// `services/iam/docs/engineering/acceptance/catalog-readers-move-to-the-table.md`)
+// `docs/engineering/acceptance/catalog-readers-move-to-the-table.md`)
 // на НАСТОЯЩЕЙ базе с применёнными миграциями.
 //
 // # `-01`: утверждается РАВЕНСТВО, а не константа

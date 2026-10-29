@@ -12,7 +12,7 @@ package pg_test
 // даёт пообъектного отношения `v_create` ни на одном объекте. Утверждать первую
 // половину без второй значило бы зеленеть на дереве, где `create` вернули в
 // пообъектный набор, — а это возврат 41 087 кортежей, снятых осознанно
-// (`services/iam/docs/engineering/architecture/verb-create-withdrawal.md`).
+// (`docs/engineering/architecture/verb-create-withdrawal.md`).
 //
 // # Почему словари РАЗНЫЕ — предмет задачи одной фразой
 //

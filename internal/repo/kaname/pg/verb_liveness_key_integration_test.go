@@ -7,7 +7,7 @@ package pg_test
 // держит КЛЮЧ, а не рассуждение о потребителях.
 //
 // Задача продукта kacho#1878, решение — kacho#1868, записано в
-// `services/iam/docs/engineering/architecture/catalog-liveness-key-per-level.md`.
+// `docs/engineering/architecture/catalog-liveness-key-per-level.md`.
 // Приёмка `module-withdrawal-is-described.md` §2.2 и §9.2.
 //
 // # Что здесь утверждается

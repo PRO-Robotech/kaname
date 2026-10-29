@@ -6,7 +6,7 @@ package pg_test
 // module_catalog_audit_third_population_integration_test.go — СЛЕД НЕСЁТ ТРЕТЬЮ
 // ПОПУЛЯЦИЮ ПОСЛЕДСТВИЙ, потому что больше её не несёт ничто.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
+// Приёмка `docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`
 // (APPROVED круга 4), §2.6 «Третья популяция потолком НЕ ограничивается» и §2.7
 // строка «что несёт». Задача продукта kacho#1034, предмет вырезания — kacho#1942.
 //

@@ -30,15 +30,18 @@ import (
 // Законный близнец у каждой отрицательной строки — положительная того же вида:
 // «комментарий сменился» против «оператор сменился» в одном и том же файле.
 func TestSignificantContent_ProvenByInjection(t *testing.T) {
-	const base = `// Copyright (c) PRO-Robotech
+	// Координата модуля в дереве платформы подставляется из её единственного дома
+	// (`moduleCoord`): литерал в пробе сделал бы её находкой гейта приставки
+	// (kaname#141), а предмет пробы — именно историческая запись координаты.
+	const baseTemplate = `// Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
 package relverdict
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/repo/prevhome/pg/resource_mirror"
+import "github.com/PRO-Robotech/kacho/«M»/internal/repo/prevhome/pg/resource_mirror"
 
 // reportPath — куда кладётся отчёт.
-const reportPath = "services/iam/internal/repo/prevhome/pg/scalegrid/REPORT-R7-2-strength.txt"
+const reportPath = "«M»/internal/repo/prevhome/pg/scalegrid/REPORT-R7-2-strength.txt"
 
 // sameSubject — литерал С КОСОЙ ЧЕРТОЙ, координатой НЕ являющийся.
 const sameSubject = "kaname.roles/updated_at"
@@ -51,6 +54,7 @@ func askVerdict() string {
 	return "SELECT id FROM kaname.access_bindings WHERE scope_id = $1"
 }
 `
+	base := strings.ReplaceAll(baseTemplate, "«M»", moduleCoord)
 
 	cases := []struct {
 		name  string
@@ -122,8 +126,8 @@ func askVerdict() string {
 			name: "каталог переехал в пути импорта своего модуля — НЕ сдвинулся",
 			rel:  "a.go",
 			other: strings.Replace(base,
-				"kacho/services/iam/internal/repo/prevhome/pg/resource_mirror",
-				"kacho/services/iam/internal/repo/kaname/pg/resource_mirror", 1),
+				"kacho/"+moduleCoord+"/internal/repo/prevhome/pg/resource_mirror",
+				"kacho/"+moduleCoord+"/internal/repo/kaname/pg/resource_mirror", 1),
 			moved: false,
 		},
 		{
@@ -133,8 +137,8 @@ func askVerdict() string {
 			name: "каталог переехал в пути отчёта — НЕ сдвинулся",
 			rel:  "a.go",
 			other: strings.Replace(base,
-				"services/iam/internal/repo/prevhome/pg/scalegrid/REPORT",
-				"services/iam/internal/repo/kaname/pg/scalegrid/REPORT", 1),
+				moduleCoord+"/internal/repo/prevhome/pg/scalegrid/REPORT",
+				moduleCoord+"/internal/repo/kaname/pg/scalegrid/REPORT", 1),
 			moved: false,
 		},
 		{
