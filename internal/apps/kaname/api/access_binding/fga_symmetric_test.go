@@ -1057,6 +1057,14 @@ func (w *fakeABWtr) EmitRelationDelete(_ context.Context, tuples []ab_repo.Relat
 	return nil
 }
 
+// EmitAuditEvent захватывает событие соответствия audit_outbox для утверждений.
+func (w *fakeABWtr) EmitAuditEvent(_ context.Context, ev ab_repo.AuditEvent) error {
+	w.repo.mu.Lock()
+	defer w.repo.mu.Unlock()
+	w.repo.auditEvents = append(w.repo.auditEvents, ev)
+	return nil
+}
+
 // EmitRelationJournal — выдачи и снятия одним оператором журнала: в следе
 // транзакции одна отметка, кортежи — в те же накопители, что у раздельных вызовов.
 func (w *fakeABWtr) EmitRelationJournal(_ context.Context, writes, deletes []ab_repo.RelationTuple) error {
@@ -1065,14 +1073,6 @@ func (w *fakeABWtr) EmitRelationJournal(_ context.Context, writes, deletes []ab_
 	defer w.repo.mu.Unlock()
 	w.repo.fgaWritten = append(w.repo.fgaWritten, writes...)
 	w.repo.fgaDeleted = append(w.repo.fgaDeleted, deletes...)
-	return nil
-}
-
-// EmitAuditEvent захватывает событие соответствия audit_outbox для утверждений.
-func (w *fakeABWtr) EmitAuditEvent(_ context.Context, ev ab_repo.AuditEvent) error {
-	w.repo.mu.Lock()
-	defer w.repo.mu.Unlock()
-	w.repo.auditEvents = append(w.repo.auditEvents, ev)
 	return nil
 }
 
