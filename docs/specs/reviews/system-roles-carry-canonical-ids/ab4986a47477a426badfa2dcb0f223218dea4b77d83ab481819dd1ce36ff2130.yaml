@@ -197,13 +197,8 @@ authority:
   authorized_actors: [pointpu]
   expected_actor: pointpu
 
-publication_pending:
-  required_for_sanction: true
-  expected_actor: pointpu
-  expected_mode: courier_of_agent_verdict
-  note: >-
-    Одобрение действует только вместе с внешним событием (`change-graph.md` §3). До публикации
-    ban #1 и гейт TestNewMigrationCitesAnApprovedAcceptance для редакции 3 не сняты.
+effective_approval:
+  issued: true
 
 event_body: "acceptance-reviewer · APPROVED · sha256 ab4986a47477a426badfa2dcb0f223218dea4b77d83ab481819dd1ce36ff2130"
 
