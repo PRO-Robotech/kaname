@@ -76,9 +76,37 @@ import json,sys,collections
 # величина, ради которой скрипт написан, тихо занизится.
 MARK = "УСЛОВИЕ НЕ СОЗДАНО"
 
+# ТЕКСТ ОТКАЗА упавшей пробы печатается под её именем (задача #618). Перечень из
+# одних имён посылал читателя искать причину гипотезой и отдельным прогоном, хотя
+# текст в машинном выводе ЕСТЬ: это строки вывода самой пробы без служебных
+# строк хода (`=== RUN`, `--- FAIL`). Предел — текст у первых TEXT_TESTS упавших,
+# до TEXT_LINES последних строк у каждой: на их пределе стоит хвост находки гейта
+# (`tools/standalonetargets`, probeTailLines), и сдвигать один без другого нельзя.
+#
+# ПАНИКА — законная форма отказа, и у неё текст стоит В НАЧАЛЕ, а не в конце:
+# за сообщением `panic: …` идёт трасса горутин, и последние строки — это кадры
+# стека, а сообщение отрезано (задача #618). Поэтому у пробы, упавшей паникой,
+# текст берётся ОТ первой строки `panic:` — сообщение, многострочное тоже, и
+# начало трассы, — а не хвостом.
+#
+# Слова метки третьего исхода в тексте упавшей пробы законны и здесь не
+# вырезаются: красное от них красным быть не перестаёт, и решает это гейт —
+# упавшая проба для него вердикт раньше любой метки (`tools/standalonetargets`,
+# RunTargets).
+TEXT_TESTS = 5
+TEXT_LINES = 12
+SERVICE = ('=== ', '--- FAIL', '--- PASS', '--- SKIP')
+PANIC = 'panic:'
+
+def refusal(body):
+    for i, l in enumerate(body):
+        if l.startswith(PANIC):
+            return body[i:i+TEXT_LINES]
+    return body[-TEXT_LINES:]
+
 pkgs=collections.defaultdict(dict)
 out=collections.defaultdict(list)
-unmet=[]; other=0; failed=[]
+unmet=[]; other=0; failed=[]; text={}
 for line in open(sys.argv[1],encoding='utf-8',errors='replace'):
     line=line.strip()
     if not line.startswith('{'): continue
@@ -93,7 +121,10 @@ for line in open(sys.argv[1],encoding='utf-8',errors='replace'):
             else: other+=1
             out.pop((p,test), None)
         elif a=='fail':
-            failed.append(p+' '+test); out.pop((p,test), None)
+            failed.append(p+' '+test)
+            body=[l.strip() for l in ''.join(out.pop((p,test), [])).splitlines()
+                  if l.strip() and not l.lstrip().startswith(SERVICE)]
+            if body: text[p+' '+test]=body
         elif a=='pass':
             out.pop((p,test), None)
     else:
@@ -111,7 +142,16 @@ if unmet:
     if len(unmet)>40: print("    … и ещё %d" % (len(unmet)-40))
 if failed:
     print("  УПАЛИ:")
-    for s in failed[:40]: print("    "+s)
+    shown=0
+    for s in failed[:40]:
+        print("    "+s)
+        if s in text and shown < TEXT_TESTS:
+            shown+=1
+            for l in refusal(text[s]): print("      "+l)
+    if len(failed)>40: print("    … и ещё %d" % (len(failed)-40))
+    if len(text)>shown:
+        print("    текст отказа показан у %d из %d упавших, несущих текст; полный — go test -json" %
+              (shown, len(text)))
 if bad and not failed:
     # ОТКАЗ ПАКЕТА БЕЗ ИМЕНИ УПАВШЕЙ ПРОБЫ — вердикт НЕДЕЙСТВИТЕЛЕН, а не красный.
     #

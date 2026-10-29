@@ -4,18 +4,22 @@
 package pg_test
 
 // access_binding_target_integration_test.go — redesign-2026 F8 (IAM-1-21/29):
-// the active-grant partial UNIQUE now includes `target_digest`, so:
+// частичный UNIQUE действующих выдач теперь включает `target_digest`, поэтому:
 //
-//   - two concurrent IDENTICAL Create (same subject, role, scope AND target) →
-//     exactly one winner, the rest ALREADY_EXISTS (the digest is a key column;
-//     WHERE revoked_at IS NULL is UNCHANGED — never weakened to status='ACTIVE');
-//   - after RevokeGuarded of the winner, an identical re-grant is a NEW ACTIVE row
-//     (revoked row frees the slot);
-//   - two DISTINCT targets (same subject/role/scope) COEXIST — the new F8
-//     dimension — because their digests differ.
+//   - два конкурентных ОДИНАКОВЫХ Create (тот же субъект, роль, область И цель) →
+//     ровно один победитель, остальные ALREADY_EXISTS (отпечаток — колонка ключа;
+//     WHERE revoked_at IS NULL НЕ МЕНЯЛСЯ и не ослаблен до status='ACTIVE');
+//   - после RevokeGuarded победителя такая же повторная выдача — НОВАЯ ACTIVE-строка
+//     (отозванная строка освобождает место);
+//   - две РАЗНЫЕ цели (тот же субъект, роль, область) СОСУЩЕСТВУЮТ — новое измерение
+//     F8 — потому что их отпечатки различны.
 //
-// Runs under -race. Запуск: TESTCONTAINERS_RYUK_DISABLED=true go test
-// ./internal/repo/kaname/pg/... -race -timeout 30m -p 1.
+// Идёт под -race. Запуск: `go test ./internal/repo/kaname/pg/... -race -timeout 30m -p 1`.
+// Уборщик контейнеров testcontainers (ryuk) НЕ выключается: `Terminate` исполняется
+// лишь при штатном завершении, а обрыв по `-timeout`, сигнал или падение процесса
+// оставили бы Postgres жить без владельца. Выключение уборщика законно только в
+// конвейере на эфемерном исполнителе (`.github/workflows/ci.yml`, шаг «контейнерные
+// пробы»), который исчезает целиком вместе с поднятым.
 
 import (
 	"context"
@@ -35,8 +39,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
-// insertBindingWithTarget Inserts+Commits one ACTIVE binding carrying the given
-// target on the (uid, account) 5-tuple.
+// insertBindingWithTarget вставляет и фиксирует одну ACTIVE-выдачу с данной целью
+// на пятёрке полей (uid, аккаунт).
 func insertBindingWithTarget(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	id domain.AccessBindingID, uid domain.UserID, accID string, tgt domain.AccessTarget) (domain.AccessBinding, error) {
 	t.Helper()
@@ -54,9 +58,10 @@ func insertBindingWithTarget(t *testing.T, ctx context.Context, repo *kanamepg.R
 	return out, w.Commit(ctx)
 }
 
-// TestAB_IAM_1_29_ReGrantWithTarget_Race — concurrent identical per-object target
-// grants collide on the extended active-grant UNIQUE (subject, role, scope,
-// target_digest); after revoke the identical re-grant is a NEW ACTIVE row.
+// TestAB_IAM_1_29_ReGrantWithTarget_Race — конкурентные одинаковые выдачи с
+// пообъектной целью сталкиваются на расширенном UNIQUE действующих выдач (субъект,
+// роль, область, target_digest); после отзыва такая же повторная выдача — НОВАЯ
+// ACTIVE-строка.
 func TestAB_IAM_1_29_ReGrantWithTarget_Race(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test (needs Docker)")
@@ -74,7 +79,7 @@ func TestAB_IAM_1_29_ReGrantWithTarget_Race(t *testing.T) {
 
 	tgt := domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "compute.instance", ID: "ins-race1"}}}
 
-	// ── Phase 1: concurrent identical Create (same target) → one winner ────
+	// ── Фаза 1: конкурентные одинаковые Create (та же цель) → один победитель ─
 	const goroutines = 8
 	type res struct {
 		id  domain.AccessBindingID
@@ -115,28 +120,28 @@ func TestAB_IAM_1_29_ReGrantWithTarget_Race(t *testing.T) {
 	assert.Equal(t, goroutines-1, already, "losers get ALREADY_EXISTS (partial UNIQUE incl. target_digest)")
 	assert.Equal(t, 0, other, "no unexpected errors / panics")
 
-	// ── Phase 2: revoke the winner ────────────────────────────────────────
+	// ── Фаза 2: отзыв победителя ──────────────────────────────────────────
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().RevokeGuarded(ctx, winner, uid)
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	// ── Phase 3: identical re-grant is a NEW ACTIVE row ───────────────────
+	// ── Фаза 3: такая же повторная выдача — НОВАЯ ACTIVE-строка ───────────
 	regrantID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	regranted, err := insertBindingWithTarget(t, ctx, repo, regrantID, uid, accID, tgt)
 	require.NoError(t, err, "re-grant after revoke must succeed — revoked row frees the slot")
 	assert.NotEqual(t, winner, regranted.ID, "re-grant is a distinct new ACTIVE binding id")
 	assert.Equal(t, domain.AccessBindingStatusActive, regranted.Status)
-	// target round-trips through the DB column.
+	// цель проходит туда и обратно через колонку базы.
 	require.Len(t, regranted.Target.Resources, 1)
 	assert.Equal(t, "compute.instance", regranted.Target.Resources[0].Type)
 	assert.Equal(t, "ins-race1", regranted.Target.Resources[0].ID)
 }
 
-// TestAB_IAM_1_29_DistinctTargets_Coexist — the NEW F8 dimension: same
-// subject/role/scope with DISTINCT targets do NOT collide (distinct digests), while
-// the whole-anchor allInScope grant is yet another distinct slot ("all").
+// TestAB_IAM_1_29_DistinctTargets_Coexist — НОВОЕ измерение F8: тот же субъект,
+// роль и область с РАЗНЫМИ целями НЕ сталкиваются (отпечатки различны), а выдача
+// allInScope на весь якорь — ещё одно отдельное место ("all").
 func TestAB_IAM_1_29_DistinctTargets_Coexist(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test (needs Docker)")
@@ -152,8 +157,8 @@ func TestAB_IAM_1_29_DistinctTargets_Coexist(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-iam1-29-tgt-coexist", uid)
 	accID := string(acc.ID)
 
-	// per-object ins-1, per-object ins-2, and whole-anchor allInScope — three
-	// distinct target_digests → three coexisting ACTIVE rows.
+	// пообъектная ins-1, пообъектная ins-2 и allInScope на весь якорь — три разных
+	// target_digest → три сосуществующие ACTIVE-строки.
 	_, e1 := insertBindingWithTarget(t, ctx, repo,
 		domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)), uid, accID,
 		domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "compute.instance", ID: "ins-1"}}})
@@ -169,7 +174,7 @@ func TestAB_IAM_1_29_DistinctTargets_Coexist(t *testing.T) {
 		domain.AccessTarget{AllInScope: true})
 	require.NoError(t, e3, "the whole-anchor allInScope grant is a distinct slot ('all')")
 
-	// but a DUPLICATE of ins-1 collides.
+	// а ДУБЛЬ ins-1 сталкивается.
 	_, e4 := insertBindingWithTarget(t, ctx, repo,
 		domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)), uid, accID,
 		domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "compute.instance", ID: "ins-1"}}})

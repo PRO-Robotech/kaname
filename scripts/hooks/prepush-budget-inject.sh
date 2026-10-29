@@ -134,6 +134,9 @@ trap 'rm -rf "$work"' EXIT
 # первая строка `#1 `, ветка `1`: предмет этого опыта не правило, и страж
 # обязан его пропустить.
 export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
+# Клон платформы того, кто гоняет опыт, в фикстуру не протекает: иначе хук завёл
+# бы группу «сверка с краем» о синтетическом модуле (kaname#822).
+unset KACHO_MONOREPO
 printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 
 # Временный каталог вне всякого репозитория — физическим путём (форма та же,
@@ -204,6 +207,11 @@ build_module() {
     # Хук первым зовёт страж правила ветки и коммита — без него он отказывает.
     cp "$RULE_LIB" "$d/scripts/hooks/branch-rule.sh" || return 1
     cp "$RULE_GUARD" "$d/scripts/hooks/prepush-rule.sh" || return 1
+    # Хук выбирает классы до отправки по тронутым путям (kaname#822): без
+    # помощника и карты выбора он отказывает кодом 2.
+    cp "$ROOT/scripts/hooks/prepush-classes.py" "$d/scripts/hooks/" || return 1
+    cp "$ROOT/.github/scripts/affected.py" "$d/.github/scripts/" || return 1
+    cp "$ROOT/.github/ci-paths.json" "$d/.github/" || return 1
     chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
     printf 'module probe.invalid/budget\n\ngo 1.21\n' > "$d/go.mod"
     cat > "$d/budget_test.go" <<GO

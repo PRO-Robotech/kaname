@@ -58,11 +58,27 @@
 # тело приходят переменными, а не подстановкой в текст шага: это ввод автора
 # запроса.
 #
+# `--commits-only` — для хука отправки (scripts/hooks/prepush-classes.py,
+# kaname#822), когда запроса ещё нет: заголовка и тела не существует, судятся
+# голова и коммиты диапазона, а «заголовок и тело — не судились» печатается
+# строкой. Конвейер флага не передаёт: заголовок и тело у него есть всегда.
+#
 # Исходы: 0 — нарушений нет; 1 — нарушения, названы поимённо; 2 — судить не
 # смог (нет входа, мелкий клон, коммитов нет в клоне).
 set -uo pipefail
 
-for v in PR_TITLE PR_BODY HEAD_REF BASE_SHA HEAD_SHA; do
+commits_only=0
+if [ "${1:-}" = --commits-only ]; then
+    commits_only=1
+    shift
+fi
+if [ "$#" -gt 0 ]; then
+    echo "pr-rule: неизвестный довод «$1»" >&2
+    exit 2
+fi
+inputs=(HEAD_REF BASE_SHA HEAD_SHA)
+[ "$commits_only" = 1 ] || inputs=(PR_TITLE PR_BODY "${inputs[@]}")
+for v in "${inputs[@]}"; do
     if [ -z "${!v+x}" ]; then
         echo "pr-rule: не задан $v — судить нечего" >&2
         exit 2
@@ -182,16 +198,18 @@ fi
 # shellcheck disable=SC2034  # читает branch_rule_judge_commits (branch-rule.sh)
 BR_EXEMPT="$exempt"
 
-if attr="$(branch_rule_attribution "$PR_TITLE")"; then
-    BR_FINDINGS+=("заголовок: атрибуция «$attr»")
-fi
-if ! n="$(branch_rule_subject_task "$PR_TITLE")"; then
-    BR_FINDINGS+=("заголовок не начинается с «#<N> »: «$PR_TITLE»")
-elif branch_rule_is_number "$head" && [ "$n" != "$head" ]; then
-    BR_FINDINGS+=("заголовок «#$n» у головы «$head»: заголовок несёт номер задачи ветки")
-fi
-if attr="$(branch_rule_attribution "$PR_BODY")"; then
-    BR_FINDINGS+=("тело: атрибуция «$attr»")
+if [ "$commits_only" = 0 ]; then
+    if attr="$(branch_rule_attribution "$PR_TITLE")"; then
+        BR_FINDINGS+=("заголовок: атрибуция «$attr»")
+    fi
+    if ! n="$(branch_rule_subject_task "$PR_TITLE")"; then
+        BR_FINDINGS+=("заголовок не начинается с «#<N> »: «$PR_TITLE»")
+    elif branch_rule_is_number "$head" && [ "$n" != "$head" ]; then
+        BR_FINDINGS+=("заголовок «#$n» у головы «$head»: заголовок несёт номер задачи ветки")
+    fi
+    if attr="$(branch_rule_attribution "$PR_BODY")"; then
+        BR_FINDINGS+=("тело: атрибуция «$attr»")
+    fi
 fi
 if [ "$head" != main ] && ! branch_rule_is_number "$head"; then
     branch_rule_has_pre_t0 "${range[@]}" ||
@@ -288,7 +306,11 @@ for i in "${!LV_SHAS[@]}"; do
 done
 
 echo "== правило запроса (T0 $(branch_rule_t0_text)): голова «$head», коммитов в диапазоне $BR_SEEN, из них после T0 $BR_AFTER_T0"
-echo "   судилось: заголовок, тело, имя головы, сообщения коммитов; подпись — нет (её держат хуки)"
+if [ "$commits_only" = 1 ]; then
+    echo "   судилось: имя головы, сообщения коммитов; заголовок и тело — НЕ судились (запроса нет, --commits-only); подпись — нет"
+else
+    echo "   судилось: заголовок, тело, имя головы, сообщения коммитов; подпись — нет (её держат хуки)"
+fi
 if [ "$LV_PRESENT" = 1 ]; then
     echo "   ведомость известных нарушений ($ledger_rel): записей $LV_ROWS, годных ${#LV_SHAS[@]}, в диапазоне $lv_in_range, прощено нарушений ${#BR_EXCUSED[@]}"
 else

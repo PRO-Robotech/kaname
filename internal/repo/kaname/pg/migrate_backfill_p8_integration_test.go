@@ -3,41 +3,44 @@
 
 package pg_test
 
-// migrate_backfill_p8_integration_test.go — integration tests over the
-// pg backfill/verify adapter + the seed.BackfillRunner / seed.VerifyGate
-// use-cases, driven by testcontainers Postgres 16.
+// migrate_backfill_p8_integration_test.go — интеграционные пробы pg-адаптера
+// подмётки и сверки вместе с use-case seed.BackfillRunner / seed.VerifyGate,
+// прогоняемые на testcontainers Postgres 16.
 //
-// The migrate step does NOT remove the FGA derivation cascade / scope_grant — that is the
-// SUBSEQUENT contract phase (Contract-A removed the cascade + scope_grant;
-// Contract-B removed the dead B2B org type). The migrate step only:
-//   1. owner-binding backfill for EXISTING accounts (migration 0036, SQL data
-//      migration — idempotent via the active-grant partial-UNIQUE; the per-object
-//      tuples are materialized FORWARD by the reconcile-sweep below).
-//   2. reconcile-backfill SWEEP over EVERY active binding (singleton single-shot
-//      under a process-wide pg_advisory_xact_lock; chunked tx-size bound).
-//      Each binding is reconciled by the SAME single materialization path
-//      (reconciler) → its per-object FGA tuples land in the ledger.
-//   3. verify-gate (continuous/forward-aware): every active binding's new
-//      explicit tuples are materialized (no-access-loss) + a forward-smoke on a
-//      freshly-created resource confirms the forward path is live (gate for the
-//      contract phase).
+// Шаг миграции НЕ снимает каскад вывода FGA и scope_grant — это ПОСЛЕДУЮЩАЯ фаза
+// контракта (Contract-A снял каскад и scope_grant, Contract-B — мёртвый тип
+// организации B2B). Шаг миграции делает лишь:
+//   1. дозаполнение выдач владельца для СУЩЕСТВУЮЩИХ счетов (миграция 0036,
+//      миграция данных на SQL — идемпотентна частичным UNIQUE живой выдачи;
+//      кортежи на объект материализует ПРЯМЫМ путём подмётка сведения ниже).
+//   2. ПОДМЁТКА сведения по КАЖДОЙ живой выдаче (одиночный однократный проход
+//      под pg_try_advisory_lock уровня сеанса; размер транзакции ограничен
+//      порциями). Каждая выдача сводится ТЕМ ЖЕ единственным путём
+//      материализации (сверщик) → её кортежи на объект попадают в ведомость.
+//   3. страж сверки (непрерывный): у каждой активной выдачи её явные кортежи
+//      материализованы (нет потери доступа). Живость прямого пути на свежем
+//      объекте утверждает проба P8-05 настоящим сведением, а не страж (#148).
 //
-// Coverage:
-//   - backfill does not lose operator access (post-backfill ledger present).
-//   - idempotent re-apply: repeat backfill → 0 new owner-bindings, 0 dup tuples.
-//   - commutative/idempotent backfill-sweep vs live forward-mat (partial-UNIQUE).
-//   - replica coordination: N concurrent RunOnce → exactly one executes the
-//     sweep (singleton advisory-lock), no duplicate ledger rows.
-//   - chunked tx-size bound (sweep does not reconcile all bindings in one tx).
-//   - forward-aware verify-gate: 100% no-access-loss + live forward-smoke.
+// Покрытие:
+//   - дозаполнение не теряет доступа оператора (ведомость после него есть).
+//   - идемпотентный повтор: повторное дозаполнение → 0 новых выдач владельца,
+//     0 дублей кортежей.
+//   - подмётка коммутативна и идемпотентна относительно живой прямой
+//     материализации (частичный UNIQUE).
+//   - согласование реплик: N одновременных RunOnce → подмётку исполняет ровно
+//     один (рекомендательная блокировка-одиночка), дублей в ведомости нет.
+//   - размер транзакции ограничен порциями (подмётка не сводит все выдачи одной
+//     транзакцией).
+//   - страж сверки: 100% отсутствия потери доступа; прямой путь на свежем объекте.
 //
-// Run: `make test` (testcontainers + Docker). Skipped under -short.
+// Запуск: `make test` (testcontainers и Docker). Под -short пропускается.
 
 import (
 	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -52,7 +55,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
-// activeOwnerBindingCount counts ACTIVE owner-role bindings for an account.
+// activeOwnerBindingCount считает АКТИВНЫЕ выдачи роли владельца на счёт.
 func activeOwnerBindingCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accID domain.AccountID) int {
 	t.Helper()
 	var n int
@@ -64,7 +67,7 @@ func activeOwnerBindingCount(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	return n
 }
 
-// ownerBindingID returns the (single) active owner-binding id for an account.
+// ownerBindingID возвращает id (единственной) живой выдачи владельца на счёт.
 func ownerBindingID(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accID domain.AccountID) domain.AccessBindingID {
 	t.Helper()
 	var id string
@@ -77,7 +80,7 @@ func ownerBindingID(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accID
 	return domain.AccessBindingID(id)
 }
 
-// ledgerTupleCount counts access_binding_emitted_tuples rows for a binding.
+// ledgerTupleCount считает строки access_binding_emitted_tuples выдачи.
 func ledgerTupleCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, bID domain.AccessBindingID) int {
 	t.Helper()
 	var n int
@@ -87,7 +90,7 @@ func ledgerTupleCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, bID
 	return n
 }
 
-// ledgerHasTuple asserts a specific (relation, object) tuple is recorded for a binding.
+// ledgerHasTuple сообщает, записан ли у выдачи кортеж (субъект, отношение, объект).
 func ledgerHasTuple(t *testing.T, ctx context.Context, pool *pgxpool.Pool, bID domain.AccessBindingID, fgaUser, relation, object string) bool {
 	t.Helper()
 	var n int
@@ -98,56 +101,56 @@ func ledgerHasTuple(t *testing.T, ctx context.Context, pool *pgxpool.Pool, bID d
 	return n > 0
 }
 
-// newBackfill wires the backfill runner + verify-gate over the pg adapter.
+// newBackfill собирает исполнителя подмётки и стража сверки над pg-адаптером.
 func newBackfill(pool *pgxpool.Pool) (*seed.BackfillRunner, *seed.VerifyGate) {
 	rec, _ := newReconciler(pool)
 	adapter := kanamepg.NewBackfillAdapter(pool)
 	runner := seed.NewBackfillRunner(rec, adapter, seed.BackfillConfig{ChunkSize: 2})
-	gate := seed.NewVerifyGate(rec, adapter, nil)
+	gate := seed.NewVerifyGate(adapter, nil)
 	return runner, gate
 }
 
-// ── owner-binding backfill for EXISTING accounts (migration 0036) ────────
+// ── дозаполнение выдач владельца для СУЩЕСТВУЮЩИХ счетов (миграция 0036) ────────
 //
-// An account created before owner-bindings were auto-created gets an owner-binding by
-// migration 0036. Idempotent: the active-grant partial-UNIQUE means a re-apply
-// (or an account that ALREADY has an owner-binding) inserts nothing.
+// Счёт, заведённый до того, как выдачи владельца стали создаваться сами, получает
+// выдачу владельца миграцией 0036. Идемпотентно: из-за частичного UNIQUE живой
+// выдачи повтор (или счёт, у которого выдача владельца УЖЕ есть) ничего не вставляет.
 
 func TestP8_01_OwnerBindingBackfill_ExistingAccounts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	dsn := setupTestDB(t) // goose.Up applies migration 0036 (owner-binding backfill)
+	dsn := setupTestDB(t) // goose.Up применяет миграцию 0036 (дозаполнение выдач владельца)
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	// An account seeded the "legacy" way (mustSeedUser INSERTs accounts directly,
-	// no owner AccessBinding) — but it was seeded AFTER goose.Up, so migration 0036
-	// already ran and did NOT see it. Re-run the backfill SQL idempotently here to
-	// emulate "existing account at migrate time".
+	// Счёт засеян «по-старому» (mustSeedUser вставляет счета напрямую, без
+	// AccessBinding владельца), но ПОСЛЕ goose.Up, так что миграция 0036 уже
+	// прошла и его НЕ видела. Здесь SQL дозаполнения повторяется идемпотентно,
+	// чтобы воспроизвести «счёт существовал в момент миграции».
 	owner := mustSeedUser(t, ctx, pool, "p8acc")
 	acc := seedAccount(t, ctx, repo, "p8-legacy-acc", owner)
 
-	// Before backfill: no owner-binding (seedAccount does not create one).
+	// До дозаполнения выдачи владельца нет (seedAccount её не создаёт).
 	require.Equal(t, 0, activeOwnerBindingCount(t, ctx, pool, acc.ID),
 		"seedAccount must not create an owner-binding")
 
-	// Run the idempotent backfill SQL (the body of migration 0036) — exposed so a
-	// post-goose.Up account is covered too.
+	// Идемпотентный SQL дозаполнения (тело миграции 0036) вынесен наружу, чтобы
+	// покрыть и счёт, заведённый после goose.Up.
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 
 	require.Equal(t, 1, activeOwnerBindingCount(t, ctx, pool, acc.ID),
 		"backfill must create exactly one owner-binding for the existing account")
 
-	// idempotent: re-run → still exactly one (active-grant partial-UNIQUE).
+	// идемпотентно: повтор → по-прежнему ровно одна (частичный UNIQUE живой выдачи).
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 	require.Equal(t, 1, activeOwnerBindingCount(t, ctx, pool, acc.ID),
 		"re-running owner-binding backfill must be a no-op (idempotent, H-02)")
 
-	// The owner-binding subject is the account's owner_user_id, role=owner.
+	// Субъект выдачи владельца — owner_user_id счёта, роль — владелец.
 	bID := ownerBindingID(t, ctx, pool, acc.ID)
 	var subjType, subjID, roleID string
 	var protected bool
@@ -160,20 +163,20 @@ func TestP8_01_OwnerBindingBackfill_ExistingAccounts(t *testing.T) {
 	assert.Equal(t, domain.OwnerRoleID, roleID)
 	assert.True(t, protected, "backfilled owner-binding must be deletion_protected (D-8a)")
 
-	// access_binding_subjects has the projected single subject row.
+	// В access_binding_subjects есть единственная спроецированная строка субъекта.
 	var subjRows int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.access_binding_subjects WHERE binding_id = $1`,
 		string(bID)).Scan(&subjRows))
 	assert.Equal(t, 1, subjRows, "owner-binding must have its projected subject row")
 
-	// No-access-loss: the backfill must ALSO queue the owner-binding OBJECT
-	// hierarchy parent-pointer fga_outbox intent
+	// Нет потери доступа: дозаполнение обязано ТАКЖЕ поставить в fga_outbox
+	// намерение родительского указателя иерархии для ОБЪЕКТА выдачи владельца
 	//   account:<A>#account@iam_access_binding:<bindingID>
-	// so the account owner resolves Get/Delete on the owner-binding OBJECT via the FGA
-	// `viewer/editor from account` cascade (the reconcile-sweep materializes per-object
-	// CONTENT, NOT this binding-lifecycle pointer). Without it Get/Delete authz-DENY
-	// (403) on the owner-binding object.
+	// чтобы владелец счёта получал Get/Delete на ОБЪЕКТ выдачи владельца через
+	// каскад FGA `viewer/editor from account` (подмётка сведения материализует
+	// СОДЕРЖИМОЕ на объект, а НЕ этот указатель жизненного цикла выдачи). Без него
+	// Get/Delete на объекте выдачи владельца получают отказ прав (403).
 	var hierTuples int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.fga_outbox
@@ -186,7 +189,7 @@ func TestP8_01_OwnerBindingBackfill_ExistingAccounts(t *testing.T) {
 		"backfill must queue exactly one owner-binding hierarchy parent-pointer "+
 			"account:<A>#account@iam_access_binding:<id> (no-access-loss, КФ-БАГ-2)")
 
-	// Idempotent: the hierarchy-tuple emit de-dupes on the payload NOT EXISTS guard.
+	// Идемпотентно: выпуск кортежа иерархии отсекает дубль условием NOT EXISTS по payload.
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.fga_outbox
@@ -199,12 +202,12 @@ func TestP8_01_OwnerBindingBackfill_ExistingAccounts(t *testing.T) {
 		"re-running backfill must NOT duplicate the hierarchy parent-pointer intent (H-02)")
 }
 
-// ── reconcile-backfill sweep materializes per-object tuples ────────
+// ── подмётка сведения материализует кортежи на объект ────────
 //
-// After owner-binding backfill, the per-object owner tuples on account:<A> are NOT
-// yet in the ledger (the migration creates only the binding row — content is
-// materialized FORWARD). The reconcile-sweep (singleton RunOnce) reconciles
-// EVERY active binding through the single materialization path → the ledger fills.
+// После дозаполнения выдач владельца кортежей владельца на объект account:<A> в
+// ведомости ЕЩЁ нет (миграция заводит лишь строку выдачи, содержимое
+// материализуется ПРЯМЫМ путём). Подмётка сведения (одиночный RunOnce) сводит
+// КАЖДУЮ живую выдачу единственным путём материализации → ведомость заполняется.
 
 func TestP8_02_ReconcileSweep_MaterializesPerObjectTuples(t *testing.T) {
 	if testing.Short() {
@@ -222,7 +225,7 @@ func TestP8_02_ReconcileSweep_MaterializesPerObjectTuples(t *testing.T) {
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 	bID := ownerBindingID(t, ctx, pool, acc.ID)
 
-	// Pre-sweep: owner-binding exists but its scope-self tuples are NOT materialized.
+	// До подмётки выдача владельца есть, но её кортежи «сама область» НЕ материализованы.
 	require.Equal(t, 0, ledgerTupleCount(t, ctx, pool, bID),
 		"owner-binding ledger empty before the reconcile sweep (forward materialization)")
 
@@ -232,8 +235,8 @@ func TestP8_02_ReconcileSweep_MaterializesPerObjectTuples(t *testing.T) {
 	assert.True(t, res.Executed, "the (only) RunOnce must execute the sweep")
 	assert.GreaterOrEqual(t, res.BindingsReconciled, 1, "at least the owner-binding reconciled")
 
-	// Post-sweep: the owner scope-self v_* tuples on account:<A> are in the ledger
-	// (the `*.*.*` owner rule yields verb-bearing self verbs on the scope object).
+	// После подмётки кортежи v_* «сама область» владельца на account:<A> в ведомости
+	// (правило владельца `*.*.*` даёт глаголы «сама область» на объекте области).
 	assert.Greater(t, ledgerTupleCount(t, ctx, pool, bID), 0,
 		"reconcile sweep must materialize the owner-binding scope-self tuples (H-01)")
 	obj := "account:" + string(acc.ID)
@@ -243,7 +246,7 @@ func TestP8_02_ReconcileSweep_MaterializesPerObjectTuples(t *testing.T) {
 	assert.True(t, ledgerHasTuple(t, ctx, pool, bID, user, "admin", obj),
 		"owner scope-self admin tier on account:<A> materialized (write-authz anchor)")
 
-	// idempotent: re-run the sweep → ledger count unchanged (partial-UNIQUE).
+	// идемпотентно: повтор подмётки → число в ведомости прежнее (частичный UNIQUE).
 	before := ledgerTupleCount(t, ctx, pool, bID)
 	_, err = runner.RunOnce(ctx)
 	require.NoError(t, err)
@@ -251,7 +254,7 @@ func TestP8_02_ReconcileSweep_MaterializesPerObjectTuples(t *testing.T) {
 		"re-running the sweep is idempotent — no new ledger rows (H-02/H-04)")
 }
 
-// ── singleton — N concurrent RunOnce → exactly one executes ─────
+// ── одиночка: из N одновременных RunOnce исполняет ровно один ─────
 
 func TestP8_03_Singleton_ConcurrentRunOnce_ExactlyOneExecutes(t *testing.T) {
 	if testing.Short() {
@@ -269,10 +272,10 @@ func TestP8_03_Singleton_ConcurrentRunOnce_ExactlyOneExecutes(t *testing.T) {
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 	bID := ownerBindingID(t, ctx, pool, acc.ID)
 
-	// N runners over the SAME pool race RunOnce. The process-wide singleton
-	// pg_advisory_xact_lock (NON-blocking try-lock) means exactly one acquires
-	// the lock and executes the sweep; the others skip (Executed=false). No
-	// duplicate ledger rows regardless.
+	// N исполнителей над ТЕМ ЖЕ пулом наперегонки зовут RunOnce. Блокировка-
+	// одиночка pg_try_advisory_lock уровня сеанса (попытка БЕЗ ожидания) даёт
+	// ровно одному взять её и исполнить подмётку; прочие пропускают
+	// (Executed=false). Дублей в ведомости нет в любом случае.
 	const n = 6
 	var executed int32
 	var wg sync.WaitGroup
@@ -300,7 +303,7 @@ func TestP8_03_Singleton_ConcurrentRunOnce_ExactlyOneExecutes(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&executed),
 		"exactly ONE concurrent RunOnce executes the singleton backfill (КФ-1/H-05)")
 
-	// The single execution materialized the ledger exactly once (no dup tuples).
+	// Единственное исполнение материализовало ведомость ровно один раз (дублей нет).
 	var dups int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) - count(DISTINCT (fga_user, relation, object))
@@ -309,7 +312,7 @@ func TestP8_03_Singleton_ConcurrentRunOnce_ExactlyOneExecutes(t *testing.T) {
 	assert.Equal(t, 0, dups, "no duplicate ledger tuples after concurrent backfill (partial-UNIQUE)")
 }
 
-// ── chunked tx-size — sweep splits work into bounded chunks ──────────
+// ── размер транзакции порциями: подмётка делит работу на ограниченные порции ──────────
 
 func TestP8_04_ChunkedTxSizeBound(t *testing.T) {
 	if testing.Short() {
@@ -322,7 +325,7 @@ func TestP8_04_ChunkedTxSizeBound(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	// Seed several owner-bindings (multiple accounts) → more bindings than ChunkSize.
+	// Засеять несколько выдач владельца (несколько счетов) → выдач больше, чем ChunkSize.
 	const accounts = 5
 	for i := 0; i < accounts; i++ {
 		o := mustSeedUser(t, ctx, pool, "p8chunk"+string(rune('a'+i)))
@@ -330,21 +333,35 @@ func TestP8_04_ChunkedTxSizeBound(t *testing.T) {
 	}
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 
-	runner, _ := newBackfill(pool) // ChunkSize=2 from newBackfill
+	runner, _ := newBackfill(pool) // ChunkSize=2 задаёт newBackfill
 	res, err := runner.RunOnce(ctx)
 	require.NoError(t, err)
 	assert.True(t, res.Executed)
 	assert.GreaterOrEqual(t, res.BindingsReconciled, accounts,
 		"every owner-binding reconciled across chunks")
-	// with ChunkSize=2 and ≥5 bindings, the sweep used ≥3 chunks (no single
-	// monster tx). Each binding still reconciles in its OWN reconcile writer-tx, so
-	// the per-binding tx is naturally bounded; Chunks reports the listing batches.
+	// при ChunkSize=2 и ≥5 выдачах подмётка прошла ≥3 порциями (без одной
+	// исполинской транзакции). Каждая выдача по-прежнему сводится в СВОЕЙ пишущей
+	// транзакции сведения, так что транзакция на выдачу ограничена сама собой;
+	// Chunks сообщает число порций перечня.
 	assert.GreaterOrEqual(t, res.Chunks, 3, "work split into bounded chunks (КФ-5)")
 }
 
-// ── forward-aware verify-gate — no-access-loss + forward-smoke ──
+// ── страж сверки: нет потери доступа + прямая материализация свежего объекта ──
 
-func TestP8_05_VerifyGate_NoAccessLoss_ForwardSmoke(t *testing.T) {
+// TestP8_05_VerifyGate_NoAccessLoss_ForwardMaterializes — после подмётки страж
+// сверки сообщает 100% отсутствия потери доступа, а объект, заведённый ПОСЛЕ
+// выдачи, получает кортеж обычной селекторной выдачи прямым путём сведения.
+//
+// Прежде вторую половину утверждала дымовая проба стража (`ForwardSmoke`): она
+// сама клала синтетику в боевое зеркало, сводила её и снимала. Механизм снят
+// (#148) — прод-потребителя у него не было с #119, а единственным потребителем
+// была эта проба. Свойство, которое он доказывал, утверждается здесь напрямую:
+// строка зеркала — тем же оператором, каким её кладёт регистрация в пробах
+// сведения, и настоящее `ReconcileObject` по ней, без посредника в прод-коде.
+//
+// Это селекторная полоса (ARM_ANCHOR обычной роли на проекте, `vpc.network`);
+// владельческая покрыта `Test224_OwnerWildcard_ForwardMaterializesContent`.
+func TestP8_05_VerifyGate_NoAccessLoss_ForwardMaterializes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -361,10 +378,7 @@ func TestP8_05_VerifyGate_NoAccessLoss_ForwardSmoke(t *testing.T) {
 	prj := seedProject(t, ctx, repo, acc.ID, "p8-verify-prj")
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 
-	// A REGULAR ARM_ANCHOR selector binding (vpc.network get, all) on the project —
-	// the implemented + bounded forward path the verify-gate smokes with a matching
-	// selector; the owner `*.*.*` content-forward is a separate contract-phase
-	// concern, NOT smoked here.
+	// Обычная селекторная выдача ARM_ANCHOR (vpc.network get, all) на проекте.
 	selRole := seedAccountRulesRole(t, ctx, pool, repo, acc.ID, "p8_net_viewer",
 		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get"}}})
 	selBinding := insertThinBindingScope(t, ctx, repo, member, selRole, "project", string(prj.ID), domain.ScopeProject)
@@ -373,9 +387,6 @@ func TestP8_05_VerifyGate_NoAccessLoss_ForwardSmoke(t *testing.T) {
 	_, err = runner.RunOnce(ctx)
 	require.NoError(t, err)
 
-	// Verify-gate: every active binding's explicit tuples are materialized
-	// (no-access-loss) AND a forward-smoke on a freshly-created resource confirms
-	// the forward path is live (gate for the contract phase).
 	report, err := gate.Verify(ctx)
 	require.NoError(t, err)
 	assert.True(t, report.NoAccessLoss,
@@ -383,47 +394,33 @@ func TestP8_05_VerifyGate_NoAccessLoss_ForwardSmoke(t *testing.T) {
 	assert.Empty(t, report.Failures, "no binding without materialized explicit tuples")
 	assert.GreaterOrEqual(t, report.BindingsChecked, 2, "owner-binding + selector binding checked")
 
-	// Forward-smoke: a vpc.network created in the project AFTER the grant must be
-	// picked up by the forward path (ReconcileObject on its mirror change) — the
-	// selector binding's ARM_ANCHOR rule materializes its tuple.
+	// Объект, которого при выдаче не было: до сведения кортежа на нём нет, после
+	// прямого пути — есть. Пара «до/после» отличает материализацию сведением от
+	// кортежа, оставшегося от подмётки.
 	fresh := ids.NewID("net")
-	smoke, err := gate.ForwardSmoke(ctx, seed.ForwardSmokeSpec{
-		ExpectBinding: selBinding,
-		ObjectType:    "vpc.network",
-		ObjectID:      fresh,
-		ParentProject: string(prj.ID),
-		ParentAccount: string(acc.ID),
-	})
-	require.NoError(t, err)
-	assert.True(t, smoke, "live forward-smoke on a fresh resource passes (КФ-4/H-06 gate)")
+	freshObject := "vpc_network:" + fresh
+	memberUser := "user:" + string(member)
+	seedMirrorRow(t, ctx, pool, "vpc.network", fresh, string(prj.ID), string(acc.ID), nil, time.Now())
+	require.False(t, ledgerHasTuple(t, ctx, pool, selBinding, memberUser, "v_get", freshObject),
+		"до сведения у свежего объекта кортежа нет — иначе утверждение ниже ничего не доказывает")
 
-	// ЗДЕСЬ УТВЕРЖДАЛСЯ ОСТАТОК — и теперь утверждается его ОТСУТСТВИЕ (kaname#119).
-	//
-	// Прежняя редакция требовала, чтобы строка ведомости по синтетическому объекту
-	// СОХРАНИЛАСЬ после пробы, и прямо это объясняла: «зеркало снято, а ведомость
-	// остаётся». Ровно этот остаток и печатался потом отказом о собственной
-	// синтетике: следующий страж читает ведомость и честно находит материализованное
-	// чтение на объекте, которого больше нет.
-	//
-	// Свойство, ради которого строка проверялась, никуда не делось и утверждается
-	// СТРОКОЙ ВЫШЕ: `smoke == true` означает, что прямой путь материализовал кортеж
-	// — проба увидела его в ведомости ДО уборки. Оставить оба утверждения нельзя:
-	// второе требует, чтобы уборки не было.
-	assert.False(t, ledgerHasTuple(t, ctx, pool, selBinding, "user:"+string(member), "v_get", "vpc_network:"+fresh),
-		"проба обязана убрать ВСЁ, что завела: строка ведомости по снятому синтетическому "+
-			"объекту читается следующим стражем как материализованное чтение на несуществующем")
+	rec, _ := newReconciler(pool)
+	require.NoError(t, rec.ReconcileObject(ctx, "vpc.network", fresh))
+	assert.True(t, ledgerHasTuple(t, ctx, pool, selBinding, memberUser, "v_get", freshObject),
+		"прямой путь обязан материализовать кортеж селекторной выдачи на объекте, "+
+			"заведённом после выдачи (КФ-4/H-06)")
 }
 
-// ── revoked owner-binding must NOT block re-grant on backfill ───
+// ── отозванная выдача владельца НЕ должна мешать повторной выдаче при дозаполнении ───
 //
-// backfillOwnerBindingsSQL used a DETERMINISTIC id 'acb'||substr(md5('owner-binding:'
-// ||a.id),1,17) with ON CONFLICT (id) DO NOTHING. If an account's owner-binding was
-// previously REVOKED (the row survives as a tombstone carrying that exact id with
-// revoked_at set), the NOT EXISTS(... revoked_at IS NULL) guard correctly finds NO
-// active owner-binding and yields the row to insert — but the INSERT then collides
-// with the tombstone PK and DO NOTHING silently drops it → the account is left with
-// NO active owner-binding (no-access-loss hole). The fix must re-create an ACTIVE
-// owner-binding whenever none exists, regardless of a revoked tombstone.
+// backfillOwnerBindingsSQL брал ДЕТЕРМИНИРОВАННЫЙ id 'acb'||substr(md5('owner-binding:'
+// ||a.id),1,17) с ON CONFLICT (id) DO NOTHING. Если выдачу владельца счёта прежде
+// ОТОЗВАЛИ (строка живёт надгробием с тем же id и заполненным revoked_at), условие
+// NOT EXISTS(... revoked_at IS NULL) верно не находит живой выдачи владельца и
+// отдаёт строку на вставку, но INSERT упирается в PK надгробия, и DO NOTHING молча
+// её роняет → у счёта НЕ остаётся живой выдачи владельца (дыра потери доступа).
+// Починка обязана заново заводить АКТИВНУЮ выдачу владельца всякий раз, когда её
+// нет, независимо от отозванного надгробия.
 func TestReview15_RevokedOwnerBinding_BackfillRecreatesActive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -438,44 +435,45 @@ func TestReview15_RevokedOwnerBinding_BackfillRecreatesActive(t *testing.T) {
 	owner := mustSeedUser(t, ctx, pool, "rv15own")
 	acc := seedAccount(t, ctx, repo, "acc-rv15", owner)
 
-	// First backfill creates the owner-binding (deterministic id).
+	// Первое дозаполнение заводит выдачу владельца (детерминированный id).
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 	require.Equal(t, 1, activeOwnerBindingCount(t, ctx, pool, acc.ID), "owner-binding created by first backfill")
 	revokedID := ownerBindingID(t, ctx, pool, acc.ID)
 
-	// Revoke it (tombstone: status=REVOKED, revoked_at set) — leaving the deterministic
-	// id occupied. This is exactly the state TransitionStatus/Delete produces.
+	// Отозвать её (надгробие: status=REVOKED, revoked_at заполнен), оставив
+	// детерминированный id занятым. Ровно такое состояние оставляют TransitionStatus
+	// и Delete.
 	_, err = pool.Exec(ctx,
 		`UPDATE kaname.access_bindings SET status='REVOKED', revoked_at=now() WHERE id=$1`,
 		string(revokedID))
 	require.NoError(t, err)
 	require.Equal(t, 0, activeOwnerBindingCount(t, ctx, pool, acc.ID), "no ACTIVE owner-binding after revoke")
 
-	// Re-run the backfill. It MUST re-create an ACTIVE owner-binding for the account
-	// (the revoked tombstone must not suppress the re-grant).
+	// Повторить дозаполнение. Оно ОБЯЗАНО заново завести АКТИВНУЮ выдачу владельца
+	// счёта (отозванное надгробие не должно подавлять повторную выдачу).
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 	assert.Equal(t, 1, activeOwnerBindingCount(t, ctx, pool, acc.ID),
 		"revoked owner-binding must be re-created as ACTIVE on backfill (no-access-loss, review #15)")
 
-	// The new active owner-binding is a DISTINCT row from the revoked tombstone.
+	// Новая живая выдача владельца — строка, ОТЛИЧНАЯ от отозванного надгробия.
 	newID := ownerBindingID(t, ctx, pool, acc.ID)
 	assert.NotEqual(t, revokedID, newID,
 		"re-grant uses a fresh id, not the revoked deterministic id (idempotency via active-grant partial-UNIQUE)")
 
-	// Idempotent: a second backfill with an active owner-binding present adds nothing.
+	// Идемпотентно: второе дозаполнение при живой выдаче владельца ничего не добавляет.
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 	assert.Equal(t, 1, activeOwnerBindingCount(t, ctx, pool, acc.ID),
 		"backfill remains idempotent once an ACTIVE owner-binding exists (H-02)")
 }
 
-// ── Verify must flag a binding that SHOULD materialize ≥1 member ──
+// ── Verify обязан отмечать выдачу, которая ДОЛЖНА материализовать ≥1 члена ──
 //
-//	but produced 0 (a wholesale reconcile failure the active_members-derived Verify
-//	was blind to). An ACTIVE account-scoped OWNER binding ALWAYS materializes ≥1 member
-//	(its scope-self member on account:<A> — the owner `*.*` role's ScopeSelfVerbs are
-//	non-empty and the account is always contained in its own scope), so an owner
-//	binding with 0 ACTIVE members is unambiguously a reconcile failure — computable
-//	without false positives. Verify now flags it.
+//	а дала 0 (полный провал сведения, к которому был слеп Verify, выведенный из
+//	active_members). АКТИВНАЯ выдача ВЛАДЕЛЬЦА уровня счёта ВСЕГДА материализует
+//	≥1 члена (своего члена «сама область» на account:<A>: ScopeSelfVerbs роли
+//	владельца `*.*` непусты, а счёт всегда содержится в собственной области),
+//	поэтому выдача владельца с 0 АКТИВНЫХ членов — однозначно провал сведения,
+//	вычислимый без ложных находок. Verify теперь её отмечает.
 func TestReview16_Verify_FlagsOwnerBindingWithZeroMembers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -490,9 +488,9 @@ func TestReview16_Verify_FlagsOwnerBindingWithZeroMembers(t *testing.T) {
 	owner := mustSeedUser(t, ctx, pool, "rv16own")
 	acc := seedAccount(t, ctx, repo, "acc-rv16", owner)
 
-	// Owner-binding created but NEVER reconciled → 0 ACTIVE target members. The old
-	// Verify (ExpectsTuples = active_members>0) read this as "expects nothing" and
-	// passed it silently — a wholesale-reconcile-failure blind spot.
+	// Выдача владельца заведена, но НИ РАЗУ не сведена → 0 АКТИВНЫХ целевых членов.
+	// Прежний Verify (ExpectsTuples = active_members>0) читал это как «ничего не
+	// ожидает» и молча пропускал — слепая зона полного провала сведения.
 	require.NoError(t, seed.BackfillOwnerBindings(ctx, pool))
 	ownerBID := ownerBindingID(t, ctx, pool, acc.ID)
 	require.Equal(t, 0, ledgerTupleCount(t, ctx, pool, ownerBID),
@@ -512,9 +510,9 @@ func TestReview16_Verify_FlagsOwnerBindingWithZeroMembers(t *testing.T) {
 	}
 	assert.True(t, flagged, "the un-reconciled owner-binding must be listed as a failure (review #16)")
 
-	// After the reconcile-sweep materializes every owner-binding's scope-self member
-	// (incl. the seeded kacho-system account's owner-binding), Verify is clean — no
-	// owner-binding is left with 0 members.
+	// После того как подмётка сведения материализует члена «сама область» каждой
+	// выдачи владельца (включая выдачу владельца засеянного счёта kacho-system),
+	// Verify чист: ни одной выдачи владельца с 0 членов не остаётся.
 	_, err = runner.RunOnce(ctx)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, ledgerTupleCount(t, ctx, pool, ownerBID), 1,
@@ -529,4 +527,4 @@ func TestReview16_Verify_FlagsOwnerBindingWithZeroMembers(t *testing.T) {
 	}
 }
 
-var _ = reconcile.New // keep the reconcile import referenced if a test path changes
+var _ = reconcile.New // держит импорт reconcile упомянутым, если путь проб сменится
