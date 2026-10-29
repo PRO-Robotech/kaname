@@ -1245,6 +1245,8 @@ CASES.append(Case(
 #
 # Статус — таблица края по умолчанию: INVALID_ARGUMENT → 400,
 # PERMISSION_DENIED → 403.
+#
+# verifies https://github.com/PRO-Robotech/kaname/issues/615
 # ───────────────────────────────────────────────────────────────────────────
 _LSP_PATH = "/iam/v1/authorize:listSubjects"
 _LSP_VIOLATION = "page_size must be in [0..1000] (0 means default)"
