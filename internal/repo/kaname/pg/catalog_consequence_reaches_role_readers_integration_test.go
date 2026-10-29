@@ -33,6 +33,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -720,9 +721,11 @@ func TestCCR22_StaleSnapshotPromisesNothingTaken(t *testing.T) {
 func TestCCR25_TierVerbStaysOnALiveCatalog(t *testing.T) {
 	w := buildCCRWorld(t, "t", "u", "e")
 	pt, pu, pe := w.read(t, w.snap, w.roles["t"]), w.read(t, w.snap, w.roles["u"]), w.read(t, w.snap, w.roles["e"])
-	require.Equal(t, []string{"list", "create"}, pt.GetAuthoredVerbs(), "IAM-CCR-25: T")
-	require.Equal(t, []string{"create"}, pu.GetAuthoredVerbs(), "IAM-CCR-25: U")
-	require.Equal(t, []string{"list"}, pe.GetAuthoredVerbs(), "IAM-CCR-25: E")
+	// Три утверждения превью — `assert`, а не `require`: форма, уносящая ярусный
+	// глагол, обязана покраснеть у T И у U, и первое не вправе скрыть второе.
+	assert.Equal(t, []string{"list", "create"}, pt.GetAuthoredVerbs(), "IAM-CCR-25: T")
+	assert.Equal(t, []string{"create"}, pu.GetAuthoredVerbs(), "IAM-CCR-25: U")
+	assert.Equal(t, []string{"list"}, pe.GetAuthoredVerbs(), "IAM-CCR-25: E")
 	require.Equal(t, []string{applierProbeModule + ".gadgets:list"}, w.grants(t, w.roles["t"]))
 	require.Empty(t, w.grants(t, w.roles["u"]))
 	require.Equal(t, []string{applierProbeModule + ".gadgets:list"}, w.grants(t, w.roles["e"]))
