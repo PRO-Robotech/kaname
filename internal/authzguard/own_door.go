@@ -174,9 +174,10 @@ func OwnDoorProtoPackages() []string {
 // значило всё — он несёт `required_relation: viewer` и
 // `scope_extractor{project, scope_id}`, поэтому названный вызывающий доходил до
 // вопроса об объекте. Объекта у ЭТОГО вопроса нет: `scope_id` контракт объявляет
-// НЕОБЯЗАТЕЛЬНЫМ дословно («Optional scope id for authz of the batch as a whole.
-// When set, the gateway gates the entire batch on this scope's
-// `iam.authorize.batchCheck` permission instead of per-item»), и не заполняет его
+// НЕОБЯЗАТЕЛЬНЫМ (комментарий поля, `proto/kaname/cloud/iam/v1/authorize_service.proto`:
+// необязательная область для авторизации пакета целиком; заданная, она заставляет
+// край судить весь пакет правом `iam.authorize.batchCheck` на этой области вместо
+// поэлементной проверки), и не заполняет его
 // ни один вызывающий в дереве — предикаты: `git grep -n 'ScopeId' -- pkg/listnarrow`
 // → пусто, `git grep -n 'ScopeId:' -- . | grep -v _test` → среди попаданий нет ни
 // одного `BatchAuthorizeCheckRequest`. Выведенный извлекатель читает поле как

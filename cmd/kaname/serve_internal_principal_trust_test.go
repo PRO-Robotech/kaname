@@ -3,24 +3,25 @@
 
 package main
 
-// serve_internal_principal_trust_test.go — anti-spoof guard for BOTH gRPC
-// listeners (cluster-internal :9091 and public :9090).
+// serve_internal_principal_trust_test.go — страж от подмены для ОБОИХ
+// gRPC-слушателей (внутрикластерного :9091 и публичного :9090).
 //
-// Subject: the TRANSPORT half of the trust invariant — a peer that did not pass
-// client-certificate verification must not be able to stamp
-// x-kacho-principal-*. Wiring a listener with the legacy unconditional
-// grpcsrv.UnaryPrincipalExtract / StreamPrincipalExtract would stamp the
-// forwarded principal blindly, and the identity recorded in
-// operations.principal_* / audit / granted_by would be whatever the caller typed.
+// Предмет: ТРАНСПОРТНАЯ половина инварианта доверия — собеседник, не прошедший
+// проверки клиентского сертификата, не должен суметь проставить
+// x-kacho-principal-*. Провязка слушателя прежним безусловным
+// grpcsrv.UnaryPrincipalExtract / StreamPrincipalExtract проставляла бы
+// переданный субъект вслепую, и личностью, записанной в
+// operations.principal_* / аудит / granted_by, стало бы то, что набрал
+// вызывающий.
 //
-// The OTHER half — WHICH verified peers may forward at all — is the
-// forwarder allow-list, and it lives in trusted_forwarders_test.go (behaviour)
-// plus trusted_forwarders_wiring_test.go (placement). The two halves are
-// complementary: verification says "you are who your certificate says", the
-// allow-list says "and you are one of the senders permitted to speak for a
-// user". Both chains here are built by the SAME production builder the listeners
-// use (identityUnary), so a change to the wiring cannot leave these locks green
-// while production diverges.
+// ДРУГАЯ половина — КАКИМ проверенным собеседникам вообще можно передавать —
+// это перечень передающих, и живёт она в trusted_forwarders_test.go (поведение)
+// и trusted_forwarders_wiring_test.go (размещение). Половины дополняют друг
+// друга: проверка говорит «ты тот, кем называет тебя сертификат», перечень —
+// «и ты из отправителей, которым позволено говорить за пользователя». Обе
+// цепочки здесь собирает ТОТ ЖЕ боевой сборщик, что у слушателей
+// (identityUnary), так что изменение провязки не оставит эти замки зелёными,
+// пока боевая сборка расходится.
 
 import (
 	"context"
@@ -37,10 +38,11 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 )
 
-// TestPublicChain_DropsForgedPrincipal_HonorsVerified — behavioral guard over the
-// exact interceptor chain the public listener wires (identityUnary): a forged
-// principal from an unverified TLS peer is dropped (carrier stays SystemPrincipal);
-// a listed, verified peer's principal is honored.
+// TestPublicChain_DropsForgedPrincipal_HonorsVerified — поведенческий страж над
+// той самой цепочкой перехватчиков, которую провязывает публичный слушатель
+// (identityUnary): поддельный субъект от непроверенного TLS-собеседника
+// отбрасывается (носитель остаётся SystemPrincipal); субъект перечисленного
+// проверенного собеседника принимается.
 func TestPublicChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 	chain := publicUnaryChainUnderTest()
 
@@ -56,13 +58,13 @@ func TestPublicChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 		var carrierID string
 		var trusted, present = true, true
 		final := func(c context.Context, _ any) (any, error) {
-			// present comes from PrincipalFromContextOK — the only accessor that
-			// tells "the carrier was scrubbed" apart from "the carrier holds the
-			// system identity". PrincipalFromContext cannot: by contract both
-			// states read back as SystemPrincipal, so asserting scrubbing with it
-			// stays green even when an untrusted sender is handed the system
-			// identity — the very identity the ownership predicate matches on
-			// every system-written operation.
+			// present берётся из PrincipalFromContextOK — единственного читателя,
+			// который отличает «носитель вычищен» от «носитель держит системную
+			// личность». PrincipalFromContext этого не может: по контракту оба
+			// состояния читаются как SystemPrincipal, и утверждение о вычистке
+			// через него остаётся зелёным, даже когда недоверенному отправителю
+			// вручили системную личность — ту самую, по которой предикат владения
+			// совпадает с каждой операцией, записанной системой.
 			p, ok := operations.PrincipalFromContextOK(c)
 			carrierID, present = p.ID, ok
 			_, trusted = grpcsrv.TrustedPrincipalFromContext(c)
@@ -106,15 +108,16 @@ func TestPublicChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 	})
 }
 
-// TestPublicChain_HonorsVerifiedConsumerForwarder — a NON-gateway module
-// (kacho-vpc) dials :9090 ProjectService.Get on the request path of its own
-// Create and forwards the END-USER principal so iam applies that tenant's
-// scope-filter. :9090 is therefore a MULTI-forwarder listener by design, and the
-// allow-list names those consumers alongside the gateway.
+// TestPublicChain_HonorsVerifiedConsumerForwarder — модуль НЕ край (kacho-vpc)
+// зовёт :9090 ProjectService.Get на пути своего Create и передаёт субъекта
+// КОНЕЧНОГО ПОЛЬЗОВАТЕЛЯ, чтобы iam применил фильтр области этого арендатора.
+// Поэтому :9090 по замыслу — слушатель СО МНОГИМИ передающими, и перечень
+// называет этих потребителей рядом с краем.
 //
-// Note what this does NOT say: being a permitted SENDER is not permission to call
-// anything. The per-RPC caller policy (authzguard.PublicCallerPolicy) admits vpc
-// on ProjectService/Get and nowhere else — see its own tests.
+// Заметьте, чего это НЕ утверждает: быть дозволенным ОТПРАВИТЕЛЕМ — не значит
+// иметь право звать что угодно. Поглагольная политика вызывающего
+// (authzguard.PublicCallerPolicy) пускает vpc на ProjectService/Get и больше
+// никуда — см. её собственные пробы.
 func TestPublicChain_HonorsVerifiedConsumerForwarder(t *testing.T) {
 	chain := publicUnaryChainUnderTest()
 	ctx := forwardedIdentity(verifiedCertPeer(t, fwdVPCSAN), "usr-alice")
@@ -133,21 +136,23 @@ func TestPublicChain_HonorsVerifiedConsumerForwarder(t *testing.T) {
 	}
 }
 
-// TestInternalChain_DropsForgedPrincipal_HonorsVerified — behavioral guard over
-// the exact interceptor chain the internal listener wires (identityUnary — the
-// SAME builder as the public one).
+// TestInternalChain_DropsForgedPrincipal_HonorsVerified — поведенческий страж над
+// той самой цепочкой перехватчиков, которую провязывает внутренний слушатель
+// (identityUnary — ТОТ ЖЕ сборщик, что у публичного).
 //
-//   - unverified TLS peer presenting forged x-kacho-principal-* → the principal
-//     carrier use-cases read (operations.PrincipalFromContext) MUST stay the
-//     SystemPrincipal fallback (forged id dropped).
-//   - a listed, mTLS-verified peer presenting the same metadata → principal IS
-//     honored (no behavior change for legitimate senders).
+//   - непроверенный TLS-собеседник, предъявивший поддельный x-kacho-principal-*
+//     → носитель субъекта, который читают use-case
+//     (operations.PrincipalFromContext), ОБЯЗАН остаться на запасном
+//     SystemPrincipal (поддельный id отброшен).
+//   - перечисленный, проверенный mTLS собеседник с теми же метаданными →
+//     субъект ПРИНИМАЕТСЯ (для законных отправителей поведение не меняется).
 func TestInternalChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 	chain := internalUnaryChainUnderTest()
 
 	t.Run("unverified_tls_peer_forged_principal_dropped", func(t *testing.T) {
-		// TLS present but NO verified client-cert (empty VerifiedChains) — exactly
-		// what an unverified/cert-less peer reaching the interceptor looks like.
+		// TLS есть, но проверенного клиентского сертификата НЕТ (пустой
+		// VerifiedChains) — ровно так выглядит дошедший до перехватчика
+		// непроверенный собеседник или собеседник без сертификата.
 		tlsPeer := &peer.Peer{AuthInfo: credentials.TLSInfo{State: tls.ConnectionState{}}}
 		ctx := peer.NewContext(context.Background(), tlsPeer)
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(
@@ -159,13 +164,13 @@ func TestInternalChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 		var carrierID string
 		var trusted, present = true, true
 		final := func(c context.Context, _ any) (any, error) {
-			// present comes from PrincipalFromContextOK — the only accessor that
-			// tells "the carrier was scrubbed" apart from "the carrier holds the
-			// system identity". PrincipalFromContext cannot: by contract both
-			// states read back as SystemPrincipal, so asserting scrubbing with it
-			// stays green even when an untrusted sender is handed the system
-			// identity — the very identity the ownership predicate matches on
-			// every system-written operation.
+			// present берётся из PrincipalFromContextOK — единственного читателя,
+			// который отличает «носитель вычищен» от «носитель держит системную
+			// личность». PrincipalFromContext этого не может: по контракту оба
+			// состояния читаются как SystemPrincipal, и утверждение о вычистке
+			// через него остаётся зелёным, даже когда недоверенному отправителю
+			// вручили системную личность — ту самую, по которой предикат владения
+			// совпадает с каждой операцией, записанной системой.
 			p, ok := operations.PrincipalFromContextOK(c)
 			carrierID, present = p.ID, ok
 			_, trusted = grpcsrv.TrustedPrincipalFromContext(c)
@@ -215,11 +220,11 @@ func TestInternalChain_DropsForgedPrincipal_HonorsVerified(t *testing.T) {
 	})
 }
 
-// internalUnaryChainUnderTest / publicUnaryChainUnderTest compose the identity
-// interceptors the two listeners really receive, by calling the PRODUCTION
-// builder rather than re-listing them here. Re-listing was how these guards
-// used to work, and it is precisely the drift that let an empty allow-list look
-// like a narrowing: the wiring could change and the locks would not notice.
+// internalUnaryChainUnderTest / publicUnaryChainUnderTest собирают перехватчики
+// личности, которые два слушателя получают на деле, вызовом БОЕВОГО сборщика, а
+// не повторным перечислением здесь. Перечислением эти стражи и работали прежде,
+// и именно этот дрейф позволил пустому перечню выглядеть сужением: провязка
+// могла измениться, а замки бы этого не заметили.
 func internalUnaryChainUnderTest() grpc.UnaryServerInterceptor {
 	return chainUnaryServer(identityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN))...)
 }
@@ -228,8 +233,8 @@ func publicUnaryChainUnderTest() grpc.UnaryServerInterceptor {
 	return chainUnaryServer(identityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN))...)
 }
 
-// chainUnaryServer composes unary server interceptors left-to-right around a
-// final handler, mirroring grpc.ChainUnaryInterceptor semantics.
+// chainUnaryServer складывает однократные серверные перехватчики слева направо
+// вокруг конечного обработчика, повторяя смысл grpc.ChainUnaryInterceptor.
 func chainUnaryServer(interceptors ...grpc.UnaryServerInterceptor) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		chained := handler
