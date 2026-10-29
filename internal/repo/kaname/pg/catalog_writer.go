@@ -48,6 +48,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -671,6 +672,23 @@ func (w catalogWriter) EmitApplied(ctx context.Context, ev modulecatalog.Applied
 		EventType: modulecatalog.AppliedEventType,
 		Payload:   ev.Payload(),
 	})
+}
+
+// EmitRoleComposition кладёт событие «состав роли изменился» ФУНКЦИЕЙ БАЗЫ
+// (kaname#76, миграция 20261029090000): оболочку она собирает функциями
+// журнала по заново прочитанной строке роли, повтор роли в пределах транзакции
+// гасит сама. Второй сборки оболочки в Go не заводится — её зовут и миграции, а
+// своя сборка у каждого вызывающего была бы вторым местом о форме события.
+//
+// Вызов — основной оператор, а не ветвь `WITH`: неиспользуемый `SELECT` в
+// `WITH` база не исполняет, и событие пропало бы молча.
+func (w catalogWriter) EmitRoleComposition(ctx context.Context, roles []domain.RoleID) error {
+	ids := make([]string, 0, len(roles))
+	for _, r := range roles {
+		ids = append(ids, string(r))
+	}
+	_, err := w.tx.Exec(ctx, `SELECT kaname.resource_journal_emit_role_composition($1::text[])`, ids)
+	return err
 }
 
 // changed исполняет оператор, меняющий не более одной строки, и отвечает,

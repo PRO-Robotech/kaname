@@ -192,6 +192,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -293,6 +294,11 @@ type CatalogWriter interface {
 	// нет, коммит ⇒ след есть. Второго пути записи в чужую транзакцию в дереве не
 	// заводится — он там один.
 	EmitApplied(ctx context.Context, ev AppliedEvent) error
+	// EmitRoleComposition кладёт в журнал подписки В ТОЙ ЖЕ транзакции ровно
+	// одно событие `iam_role UPDATED` на каждую названную роль, чья строка жива
+	// (kaname#76): состав роли сменился, а строка роли — нет. Повтор роли в
+	// пределах транзакции гасит функция базы, а не вызывающий.
+	EmitRoleComposition(ctx context.Context, roles []domain.RoleID) error
 }
 
 // Pruned — сколько вырезано из третьей проекции.
@@ -310,6 +316,10 @@ type Pruned struct {
 	Dropped int
 	// Elements — элементов массива вырезано суммарно, по обеим ветвям.
 	Elements int
+	// Roles — роли, у которых этот оператор укоротил либо снял строку отбора:
+	// ВЫХОД оператора, а не признак таблицы (kaname#76). Перепись применения и
+	// след его не несут — это вход события роли, а не величина последствий.
+	Roles []domain.RoleID
 }
 
 // TxRunner — исполнение под ОДНОЙ транзакцией записи. Все шаги ложатся вместе
@@ -327,6 +337,11 @@ type TxRunner interface {
 type Resettled struct {
 	RuleRefs  int
 	RoleVerbs int
+	// Roles — роли, у которых операторы переселения сняли хотя бы одну строку,
+	// по обеим популяциям вместе: ВЫХОД операторов, а не ведомость (kaname#76).
+	// Ведомость для этого негодна — вставка на повторной паре гасится её
+	// ключом, и роль, отзываемая второй раз, пропала бы.
+	Roles []domain.RoleID
 }
 
 // Report — перепись применения. Печатается числами, потому что «применено» без
