@@ -867,8 +867,8 @@ func (formProbeNoImports) Import(path string) (*types.Package, error) {
 //   - запись в переменную через отражение либо `unsafe` — в корне таких форм
 //     нет, и разбор исходника их не различает в принципе;
 //   - провязку вне функции, где стоит сборка: перечень, сервер, слушатель и
-//     адрес обязаны жить в одной функции, иначе — нарушение «не раскрыт» либо
-//     «не обслуживает», а не молчание.
+//     адрес обязаны жить в одной функции, иначе — нарушение «не раскрыт»,
+//     «объявленный вне этой функции» либо «не обслуживает», а не молчание.
 func formProbeChainReachesListener(fset *token.FileSet, files []*ast.File, an formProbeAnchors) []string {
 	info := &types.Info{Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}}
 	conf := types.Config{Importer: formProbeNoImports{}, Error: func(error) {}}
@@ -1147,14 +1147,26 @@ func (w *formProbeWiring) linkProblem(as *ast.AssignStmt, i int, interceptor str
 		return "попадает в сервер (" + w.line(srvCall) + "), который несёт сверх неё звенья (" + w.line(c) + ": grpc." +
 			formProbeCallee(c) + ") — слушатель исполняет не ту цепочку, что судит проба"
 	}
-	// Шаг 4: сервер присвоен имени и не переписан.
-	srvAssign, ok := w.parent[srvCall].(*ast.AssignStmt)
-	var srv types.Object
-	if ok && len(srvAssign.Lhs) == 1 && len(srvAssign.Rhs) == 1 {
-		srv = w.object(srvAssign.Lhs[0])
+	// Шаг 4: сервер присвоен имени этой функции и не переписан.
+	var (
+		srv       types.Object
+		srvAssign ast.Node
+	)
+	switch p := w.parent[srvCall].(type) {
+	case *ast.AssignStmt:
+		if len(p.Lhs) == 1 && len(p.Rhs) == 1 {
+			srv, srvAssign = w.object(p.Lhs[0]), p
+		}
+	case *ast.ValueSpec:
+		if len(p.Names) == 1 && len(p.Values) == 1 {
+			srv = w.info.Defs[p.Names[0]]
+		}
 	}
 	if srv == nil || srv.Name() == "_" {
 		return "попадает в сервер (" + w.line(srvCall) + "), не присвоенный имени, — до слушателя не проследить"
+	}
+	if w.def[srv] == nil {
+		return "попадает в сервер " + srv.Name() + ", объявленный вне этой функции, — записи в него вне её страж не видит"
 	}
 	if where := w.written(srv, srvAssign); where != "" {
 		return "попадает в сервер " + srv.Name() + ", переписанный после сборки (" + where +
@@ -1444,6 +1456,11 @@ func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
 		"законная проводка — молчит": {nil, 0, nil},
 		"законная: сервер объявлен var и присвоен = — молчит": {
 			[]edit{{pubLine, pubVar + pubSet}}, 0, nil},
+		"законная: сервер объявлен var со значением — молчит": {
+			[]edit{{"pub := grpcsrv.NewServer(", "var pub = grpcsrv.NewServer("}}, 0, nil},
+		"сервер объявлен вне функции": {
+			[]edit{{"package main\n", "package main\nvar pub *grpc.Server\n"}, {pubLine, pubSet}},
+			2, []string{"объявленный вне этой функции"}},
 		"законная: адрес прямым доводом Listen — молчит": {
 			[]edit{{`net.Listen("tcp", addr)`, `net.Listen("tcp", cfg.APIServer.ListenAddress())`}}, 0, nil},
 		"законная: соседняя переменная сборки записана — молчит": {
