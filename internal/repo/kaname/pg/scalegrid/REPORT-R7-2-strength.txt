@@ -3,59 +3,59 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 =========================================================================================================================================
 
 ПРОВЕНАНС
-  снято               2026-10-26 08:20:05 UTC
-  ревизия дерева      8701b4a39cfa77a3460a20f520d2733261c9fa93
+  снято               2026-10-29 03:19:59 UTC
+  ревизия дерева      2532e9d5b4a3349e2d17b7ee0360096ecd3ac176
   состояние дерева    чистое (несохранённых правок нет) — ревизия описывает
                       исполнявшееся дерево целиком
-  машина              AMD EPYC 7763 64-Core Processor, ядер 16
+  машина              AMD EPYC 7773X 64-Core Processor, ядер 16
   Postgres            16.15
 
 ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
   отпечаток состава     133f56216a875196
   отпечаток содержимого 1d776be4a2f108d8
   файлов под отпечатком 40, таблиц выведено 18 (kaname.access_binding_subjects, kaname.access_bindings, kaname.accounts, kaname.catalog_resource, kaname.clusters, kaname.group_members, kaname.groups, kaname.memberships, kaname.projects, kaname.relation_fact, kaname.resource_mirror, kaname.resource_parent_edge, kaname.resource_scope_edge, kaname.role_rule_selectors, kaname.role_verb, kaname.roles, kaname.service_accounts, kaname.users)
-  предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kaname/pg/relverdict и services/iam/internal/repo/kaname/pg/scalegrid; те .sql каталога services/iam/internal/migrations, у которых хотя бы один оператор определения имеет СУБЪЕКТОМ таблицу, которую читает запрос вердикта, — то есть таблица стоит на месте того, что оператор ИЗМЕНЯЕТ, а не того, на что он ссылается: оператор РАЗБИРАЕТСЯ (глагол, вид объекта, имена в грамматически определённых позициях), а не ищется подстрокой; границы операторов тоже разбираются — точка с запятой внутри литерала (обычного и с экранированием E'…\'…'), внутри имени в кавычках и внутри тела в долларовых кавычках оператора не кончает; комментарий не исполняется и субъектом не бывает; DDL над временным объектом, над функцией и над последовательностью субъектом ТАБЛИЦЫ не является by construction, а безвредность вида объекта НЕ ОБЪЯВЛЯЕТСЯ, а доказывается парой операторов с положительным контролем; СВЕРХ ОПРЕДЕЛЕНИЯ судятся формы, меняющие план не будучи им, — расширенная статистика, политика построчной безопасности, наследование, ANALYZE/REINDEX/CLUSTER/VACUUM; исполняемый SQL (EXECUTE) разбирается ТЕМ ЖЕ разбором, второго перечня глаголов нет — выписанный оператор судится ТОЧНО по своему субъекту, а подстановка format(%I) делает имя подстановочным и совпадает с любой измеряемой таблицей В ТОМ ПОЛЕ, где стоит; индекс и расширенная статистика, названные по имени, связываются с таблицей по словарю, ВЫВЕДЕННОМУ обходом того же каталога, а неизвестное имя и незнакомый вид объекта судятся ОСТОРОЖНО — «задевает», потому что молчание на них было бы слепотой; ОТБОР ЧИТАЕТ ФАЙЛ ЦЕЛИКОМ, включая раздел ОТКАТА, который в работе не исполняется: миграция попадает под отпечаток и за оператор, стоящий только там; имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kaname.", а не выписаны; БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем); у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; строковая лексема, называющая КООРДИНАТУ собственного дерева (путь импорта своего модуля, координата модуля в дереве платформы либо путь, начинающийся с каталога верхнего уровня ПОСТАВКИ МОДУЛЯ), заменяется постоянной меткой — адрес кода не есть его поведение, поэтому переезд каталога замер тоже НЕ обесценивает, а словарь координат выведен из поставки модуля и потому ОДИН В ОБЕИХ ПОСАДКАХ; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала; файл опознаётся ТОЖДЕСТВОМ «роль каталога/имя файла», а не путём, и в этом же порядке считается содержимое — поэтому оба плеча неподвижны при переименовании каталога by construction
+  предикат отпечатка    все не-тестовые .go каталогов internal/repo/kaname/pg/relverdict и internal/repo/kaname/pg/scalegrid; те .sql каталога internal/migrations, у которых хотя бы один оператор определения имеет СУБЪЕКТОМ таблицу, которую читает запрос вердикта, — то есть таблица стоит на месте того, что оператор ИЗМЕНЯЕТ, а не того, на что он ссылается: оператор РАЗБИРАЕТСЯ (глагол, вид объекта, имена в грамматически определённых позициях), а не ищется подстрокой; границы операторов тоже разбираются — точка с запятой внутри литерала (обычного и с экранированием E'…\'…'), внутри имени в кавычках и внутри тела в долларовых кавычках оператора не кончает; комментарий не исполняется и субъектом не бывает; DDL над временным объектом, над функцией и над последовательностью субъектом ТАБЛИЦЫ не является by construction, а безвредность вида объекта НЕ ОБЪЯВЛЯЕТСЯ, а доказывается парой операторов с положительным контролем; СВЕРХ ОПРЕДЕЛЕНИЯ судятся формы, меняющие план не будучи им, — расширенная статистика, политика построчной безопасности, наследование, ANALYZE/REINDEX/CLUSTER/VACUUM; исполняемый SQL (EXECUTE) разбирается ТЕМ ЖЕ разбором, второго перечня глаголов нет — выписанный оператор судится ТОЧНО по своему субъекту, а подстановка format(%I) делает имя подстановочным и совпадает с любой измеряемой таблицей В ТОМ ПОЛЕ, где стоит; индекс и расширенная статистика, названные по имени, связываются с таблицей по словарю, ВЫВЕДЕННОМУ обходом того же каталога, а неизвестное имя и незнакомый вид объекта судятся ОСТОРОЖНО — «задевает», потому что молчание на них было бы слепотой; ОТБОР ЧИТАЕТ ФАЙЛ ЦЕЛИКОМ, включая раздел ОТКАТА, который в работе не исполняется: миграция попадает под отпечаток и за оператор, стоящий только там; имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kaname.", а не выписаны; БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем); у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; строковая лексема, называющая КООРДИНАТУ собственного дерева (путь импорта своего модуля, координата модуля в дереве платформы либо путь, начинающийся с каталога верхнего уровня ПОСТАВКИ МОДУЛЯ), заменяется постоянной меткой — адрес кода не есть его поведение, поэтому переезд каталога замер тоже НЕ обесценивает, а словарь координат выведен из поставки модуля и потому ОДИН В ОБЕИХ ПОСАДКАХ; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала; файл опознаётся ТОЖДЕСТВОМ «роль каталога/имя файла», а не путём, и в этом же порядке считается содержимое — поэтому оба плеча неподвижны при переименовании каталога by construction
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (хэш · тождество · путь на момент замера)
-    28ccc0b674e6ac55  вердикт/asker.go  services/iam/internal/repo/kaname/pg/relverdict/asker.go
-    8a5df9cd8d0a346e  вердикт/asker_gate.go  services/iam/internal/repo/kaname/pg/relverdict/asker_gate.go
-    fc0a996b3aae0c42  вердикт/catalogtype.go  services/iam/internal/repo/kaname/pg/relverdict/catalogtype.go
-    26004fc4746102cd  вердикт/condition.go  services/iam/internal/repo/kaname/pg/relverdict/condition.go
-    54bda5dbeb33b13a  вердикт/expand.go  services/iam/internal/repo/kaname/pg/relverdict/expand.go
-    bf7a4bf2e0da329b  вердикт/grantarm.go  services/iam/internal/repo/kaname/pg/relverdict/grantarm.go
-    80e119935fa750c3  вердикт/labelaxis.go  services/iam/internal/repo/kaname/pg/relverdict/labelaxis.go
-    bd084bf53059395f  вердикт/list.go  services/iam/internal/repo/kaname/pg/relverdict/list.go
-    3b3ea697e22783c0  вердикт/membership.go  services/iam/internal/repo/kaname/pg/relverdict/membership.go
-    ca46fb5e458e9ffa  вердикт/query.go  services/iam/internal/repo/kaname/pg/relverdict/query.go
-    3a575e81e6c52470  вердикт/speaker_classes.go  services/iam/internal/repo/kaname/pg/relverdict/speaker_classes.go
-    d5955410c980a426  вердикт/subjects.go  services/iam/internal/repo/kaname/pg/relverdict/subjects.go
-    d290f46aeb1ee004  вердикт/target.go  services/iam/internal/repo/kaname/pg/relverdict/target.go
-    5ed0b860ed8e8607  миграции/0001_initial.sql  services/iam/internal/migrations/0001_initial.sql
-    ee18772d31c05f47  миграции/20260904135459_role_owner_module_needs_a_liveness_key.sql  services/iam/internal/migrations/20260904135459_role_owner_module_needs_a_liveness_key.sql
-    390bfdb71548b903  миграции/20260905020423_roles_carry_a_time_of_last_edit.sql  services/iam/internal/migrations/20260905020423_roles_carry_a_time_of_last_edit.sql
-    f0c353bfb01f8cfb  миграции/20260906214500_cluster_anchor_moves_to_its_declared_spelling.sql  services/iam/internal/migrations/20260906214500_cluster_anchor_moves_to_its_declared_spelling.sql
-    0dd4d7e1802562e0  миграции/20260915111233_login_methods_live_in_their_own_rows.sql  services/iam/internal/migrations/20260915111233_login_methods_live_in_their_own_rows.sql
-    a32d1070a453a38c  миграции/20260916012708_invite_row_carries_its_deadline.sql  services/iam/internal/migrations/20260916012708_invite_row_carries_its_deadline.sql
-    281ee4f03949ef56  миграции/20260917210000_memberships_carry_a_cursor_index_for_their_owner.sql  services/iam/internal/migrations/20260917210000_memberships_carry_a_cursor_index_for_their_owner.sql
-    8d7ad6143835da83  миграции/20261002120000_account_ids_are_issued_once.sql  services/iam/internal/migrations/20261002120000_account_ids_are_issued_once.sql
-    0110df80db8cac42  миграции/20261005030000_active_identity_has_a_way_in.sql  services/iam/internal/migrations/20261005030000_active_identity_has_a_way_in.sql
-    74852c609b9e2f20  миграции/20261006152443_admission_carrier_is_fixed_when_the_identity_is_minted.sql  services/iam/internal/migrations/20261006152443_admission_carrier_is_fixed_when_the_identity_is_minted.sql
-    4b245a0b43b2eee1  миграции/20261011061435_own_account_and_identity_are_removed_in_order.sql  services/iam/internal/migrations/20261011061435_own_account_and_identity_are_removed_in_order.sql
-    d7e131e7bdd27001  миграции/20261015120000_anonymous_and_authenticated_are_subject_classes.sql  services/iam/internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql
-    29ad815a089f3e24  миграции/20261015140000_subject_class_fact_is_a_read.sql  services/iam/internal/migrations/20261015140000_subject_class_fact_is_a_read.sql
-    e5fbf42fa1c57b5c  миграции/20261017020000_container_passes_public_read_to_its_children.sql  services/iam/internal/migrations/20261017020000_container_passes_public_read_to_its_children.sql
-    5a289679ac78efd3  миграции/20261017140000_nested_rule_reaches_descendants.sql  services/iam/internal/migrations/20261017140000_nested_rule_reaches_descendants.sql
-    89b3834b7c2a381a  миграции/20261018030000_rule_selector_carries_its_verbs.sql  services/iam/internal/migrations/20261018030000_rule_selector_carries_its_verbs.sql
-    a7e8387481d17f2e  миграции/20261018090644_access_binding_target_form_is_held_by_the_base.sql  services/iam/internal/migrations/20261018090644_access_binding_target_form_is_held_by_the_base.sql
-    b2461bccc3ef7b5d  миграции/20261018104759_access_binding_target_form_is_validated.sql  services/iam/internal/migrations/20261018104759_access_binding_target_form_is_validated.sql
-    e6333560dc9f20c8  миграции/20261024050000_unregistration_revokes_its_grants.sql  services/iam/internal/migrations/20261024050000_unregistration_revokes_its_grants.sql
-    beb3b2c5618c9c8d  миграции/20261025180000_grant_delegations.sql  services/iam/internal/migrations/20261025180000_grant_delegations.sql
-    7235cb0914d5bda3  миграции/20261026090000_service_account_creation_is_its_own_right.sql  services/iam/internal/migrations/20261026090000_service_account_creation_is_its_own_right.sql
-    cba312c09c5cc18f  сетка/census.go  services/iam/internal/repo/kaname/pg/scalegrid/census.go
-    58879bd6de1a3d96  сетка/dictionary.go  services/iam/internal/repo/kaname/pg/scalegrid/dictionary.go
-    b7bbcaf493e5b87e  сетка/grid.go  services/iam/internal/repo/kaname/pg/scalegrid/grid.go
-    7cfa5e434107a932  сетка/seed.go  services/iam/internal/repo/kaname/pg/scalegrid/seed.go
-    521cb8174a079a16  сетка/strength.go  services/iam/internal/repo/kaname/pg/scalegrid/strength.go
-    f6e9c85169896050  сетка/strength_census.go  services/iam/internal/repo/kaname/pg/scalegrid/strength_census.go
+    28ccc0b674e6ac55  вердикт/asker.go  internal/repo/kaname/pg/relverdict/asker.go
+    8a5df9cd8d0a346e  вердикт/asker_gate.go  internal/repo/kaname/pg/relverdict/asker_gate.go
+    fc0a996b3aae0c42  вердикт/catalogtype.go  internal/repo/kaname/pg/relverdict/catalogtype.go
+    26004fc4746102cd  вердикт/condition.go  internal/repo/kaname/pg/relverdict/condition.go
+    54bda5dbeb33b13a  вердикт/expand.go  internal/repo/kaname/pg/relverdict/expand.go
+    bf7a4bf2e0da329b  вердикт/grantarm.go  internal/repo/kaname/pg/relverdict/grantarm.go
+    80e119935fa750c3  вердикт/labelaxis.go  internal/repo/kaname/pg/relverdict/labelaxis.go
+    bd084bf53059395f  вердикт/list.go  internal/repo/kaname/pg/relverdict/list.go
+    3b3ea697e22783c0  вердикт/membership.go  internal/repo/kaname/pg/relverdict/membership.go
+    ca46fb5e458e9ffa  вердикт/query.go  internal/repo/kaname/pg/relverdict/query.go
+    3a575e81e6c52470  вердикт/speaker_classes.go  internal/repo/kaname/pg/relverdict/speaker_classes.go
+    d5955410c980a426  вердикт/subjects.go  internal/repo/kaname/pg/relverdict/subjects.go
+    d290f46aeb1ee004  вердикт/target.go  internal/repo/kaname/pg/relverdict/target.go
+    5ed0b860ed8e8607  миграции/0001_initial.sql  internal/migrations/0001_initial.sql
+    ee18772d31c05f47  миграции/20260904135459_role_owner_module_needs_a_liveness_key.sql  internal/migrations/20260904135459_role_owner_module_needs_a_liveness_key.sql
+    390bfdb71548b903  миграции/20260905020423_roles_carry_a_time_of_last_edit.sql  internal/migrations/20260905020423_roles_carry_a_time_of_last_edit.sql
+    f0c353bfb01f8cfb  миграции/20260906214500_cluster_anchor_moves_to_its_declared_spelling.sql  internal/migrations/20260906214500_cluster_anchor_moves_to_its_declared_spelling.sql
+    0dd4d7e1802562e0  миграции/20260915111233_login_methods_live_in_their_own_rows.sql  internal/migrations/20260915111233_login_methods_live_in_their_own_rows.sql
+    a32d1070a453a38c  миграции/20260916012708_invite_row_carries_its_deadline.sql  internal/migrations/20260916012708_invite_row_carries_its_deadline.sql
+    281ee4f03949ef56  миграции/20260917210000_memberships_carry_a_cursor_index_for_their_owner.sql  internal/migrations/20260917210000_memberships_carry_a_cursor_index_for_their_owner.sql
+    8d7ad6143835da83  миграции/20261002120000_account_ids_are_issued_once.sql  internal/migrations/20261002120000_account_ids_are_issued_once.sql
+    0110df80db8cac42  миграции/20261005030000_active_identity_has_a_way_in.sql  internal/migrations/20261005030000_active_identity_has_a_way_in.sql
+    74852c609b9e2f20  миграции/20261006152443_admission_carrier_is_fixed_when_the_identity_is_minted.sql  internal/migrations/20261006152443_admission_carrier_is_fixed_when_the_identity_is_minted.sql
+    4b245a0b43b2eee1  миграции/20261011061435_own_account_and_identity_are_removed_in_order.sql  internal/migrations/20261011061435_own_account_and_identity_are_removed_in_order.sql
+    d7e131e7bdd27001  миграции/20261015120000_anonymous_and_authenticated_are_subject_classes.sql  internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql
+    29ad815a089f3e24  миграции/20261015140000_subject_class_fact_is_a_read.sql  internal/migrations/20261015140000_subject_class_fact_is_a_read.sql
+    e5fbf42fa1c57b5c  миграции/20261017020000_container_passes_public_read_to_its_children.sql  internal/migrations/20261017020000_container_passes_public_read_to_its_children.sql
+    5a289679ac78efd3  миграции/20261017140000_nested_rule_reaches_descendants.sql  internal/migrations/20261017140000_nested_rule_reaches_descendants.sql
+    89b3834b7c2a381a  миграции/20261018030000_rule_selector_carries_its_verbs.sql  internal/migrations/20261018030000_rule_selector_carries_its_verbs.sql
+    a7e8387481d17f2e  миграции/20261018090644_access_binding_target_form_is_held_by_the_base.sql  internal/migrations/20261018090644_access_binding_target_form_is_held_by_the_base.sql
+    b2461bccc3ef7b5d  миграции/20261018104759_access_binding_target_form_is_validated.sql  internal/migrations/20261018104759_access_binding_target_form_is_validated.sql
+    e6333560dc9f20c8  миграции/20261024050000_unregistration_revokes_its_grants.sql  internal/migrations/20261024050000_unregistration_revokes_its_grants.sql
+    beb3b2c5618c9c8d  миграции/20261025180000_grant_delegations.sql  internal/migrations/20261025180000_grant_delegations.sql
+    7235cb0914d5bda3  миграции/20261026090000_service_account_creation_is_its_own_right.sql  internal/migrations/20261026090000_service_account_creation_is_its_own_right.sql
+    cba312c09c5cc18f  сетка/census.go  internal/repo/kaname/pg/scalegrid/census.go
+    58879bd6de1a3d96  сетка/dictionary.go  internal/repo/kaname/pg/scalegrid/dictionary.go
+    b7bbcaf493e5b87e  сетка/grid.go  internal/repo/kaname/pg/scalegrid/grid.go
+    7cfa5e434107a932  сетка/seed.go  internal/repo/kaname/pg/scalegrid/seed.go
+    521cb8174a079a16  сетка/strength.go  internal/repo/kaname/pg/scalegrid/strength.go
+    f6e9c85169896050  сетка/strength_census.go  internal/repo/kaname/pg/scalegrid/strength_census.go
 
 СЕТКА (константа в коде, ниоткуда не переопределяется)
   ось V: 100, 1000, 10000, 100000  — неподвижны: M=0 L=1 S=7 K=1
@@ -105,26 +105,26 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  100             25        55        80       46        111      3    8.715ms   20.192ms allow   
-  1000            25        53        78       46        101      3    3.143ms    6.427ms allow   
-  10000           25        53        78       46        101      3    2.712ms    5.028ms allow   
-  100000          25        53        78       46        101      3    2.834ms    3.186ms allow   
+  100             25        55        80       46        111      3    2.821ms    9.342ms allow   
+  1000            25        53        78       46        101      3    2.207ms    2.386ms allow   
+  10000           25        53        78       46        101      3    1.955ms    2.166ms allow   
+  100000          25        53        78       46        101      3    2.177ms    2.235ms allow   
     отношение верхней к нижней: тронуто 0.97× · сканов 1.00×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  100             31       127       158       56        173      3    3.301ms    6.798ms deny    
-  1000            31       124       155       56        170      3    3.284ms    5.915ms deny    
-  10000           31       124       155       56        170      3    2.887ms    3.578ms deny    
-  100000          31       124       155       56        170      3    2.703ms    2.904ms deny    
+  100             31       127       158       56        173      3     2.47ms    3.009ms deny    
+  1000            31       124       155       56        170      3     2.36ms    3.093ms deny    
+  10000           31       124       155       56        170      3    2.219ms    2.935ms deny    
+  100000          31       124       155       56        170      3    2.182ms    2.288ms deny    
     отношение верхней к нижней: тронуто 0.98× · сканов 1.00×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  100             29       137       166       56         68      3     2.83ms    4.902ms deny    
-  1000            29       137       166       56         68      3    3.092ms    7.884ms deny    
-  10000           29       137       166       56         68      3    3.787ms     6.44ms deny    
-  100000          29       137       166       56         68      3    2.635ms    2.851ms deny    
+  100             29       137       166       56         68      3    2.209ms    2.368ms deny    
+  1000            29       137       166       56         68      3    2.399ms    2.857ms deny    
+  10000           29       137       166       56         68      3    1.933ms    2.037ms deny    
+  100000          29       137       166       56         68      3    1.994ms    2.751ms deny    
     отношение верхней к нижней: тронуто 1.00× · сканов 1.00×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -167,32 +167,32 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  0               25        53        78       46        109      3    2.595ms   12.511ms allow   
-  1               26        56        82       46        102      3    2.475ms    6.792ms allow   
-  8               33        77       110       46        109      3    2.456ms    2.648ms allow   
-  64              89       576       665       46        953      3    2.935ms     3.94ms allow   
-  256*           281      8114      8395     1078       3449      3    4.686ms    6.573ms allow   
-  1024*         1049     31923     32972     4150      25765      3   14.605ms   16.421ms allow   
+  0               25        53        78       46        109      3    2.345ms   11.831ms allow   
+  1               26        56        82       46        102      3    2.015ms    2.037ms allow   
+  8               33        77       110       46        109      3    2.193ms    2.366ms allow   
+  64              89       576       665       46        953      3    2.617ms    3.126ms allow   
+  256*           281      8114      8395     1078       3449      3    4.104ms    5.159ms allow   
+  1024*         1049     31923     32972     4150      25765      3    8.691ms    8.955ms allow   
     отношение верхней к нижней: тронуто 422.72× · сканов 90.22×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  0               31       124       155       56        170      3    3.108ms    3.304ms deny    
-  1               32       157       189       61        201      3    2.661ms    3.994ms deny    
-  8               39       388       427       96        418      3    2.552ms    3.217ms deny    
-  64              95      2567      2662      376       2151      3    3.631ms    4.689ms deny    
-  256*           287      9671      9958     1336       8103      3    6.973ms     7.87ms deny    
-  1024*         1055     38088     39143     5176      31911      3   18.577ms   25.933ms deny    
+  0               31       124       155       56        170      3    2.423ms    3.297ms deny    
+  1               32       157       189       61        201      3    2.184ms    2.645ms deny    
+  8               39       388       427       96        418      3    2.347ms    2.737ms deny    
+  64              95      2567      2662      376       2151      3    4.054ms    4.207ms deny    
+  256*           287      9671      9958     1336       8103      3    5.207ms    5.801ms deny    
+  1024*         1055     38088     39143     5176      31911      3   18.599ms   22.201ms deny    
     отношение верхней к нижней: тронуто 252.54× · сканов 92.43×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  0               29       137       166       56         68      3    2.549ms    3.223ms deny    
-  1               30       174       204       61         69      3    2.916ms    5.697ms deny    
-  8               37       439       476       96         76      3    2.187ms    2.337ms deny    
-  64              85       546       631       42       2150      3    3.441ms    4.039ms deny    
-  256*           277      1891      2168       42        324      3    3.063ms    3.508ms deny    
-  1024*         1045      7268      8313       42       1092      3     5.28ms    5.512ms deny    
+  0               29       137       166       56         68      3    1.942ms    2.077ms deny    
+  1               30       174       204       61         69      3    2.093ms    3.326ms deny    
+  8               37       439       476       96         76      3    1.987ms    2.881ms deny    
+  64              85       546       631       42       2150      3     3.97ms    4.103ms deny    
+  256*           277      1891      2168       42        324      3    2.519ms    2.621ms deny    
+  1024*         1045      7268      8313       42       1092      3    4.258ms    4.389ms deny    
     отношение верхней к нижней: тронуто 50.08× · сканов 0.75×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -243,26 +243,26 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               25        53        78       46        109      3    2.865ms   10.598ms allow   
-  8               34       117       151       46        128      3    2.448ms     2.92ms allow   
-  64              29       562       591       46       1271      3    3.105ms    3.314ms allow   
-  512*            29        25        54       46         78      3    2.798ms    9.991ms allow   
+  1               25        53        78       46        109      3    2.362ms    8.464ms allow   
+  8               34       117       151       46        128      3    2.031ms    2.119ms allow   
+  64              29       562       591       46       1271      3    2.352ms    2.787ms allow   
+  512*            29        25        54       46         78      3    2.388ms    8.541ms allow   
     отношение верхней к нижней: тронуто 0.69× · сканов 1.00×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               31       124       155       56        170      3    2.265ms    2.603ms deny    
-  8               56       389       445       56        387      3    2.458ms    3.008ms deny    
-  64             153      2012      2165      120       2193      3    3.741ms    7.204ms deny    
-  512*          1051       538      1589      568       1095      3    5.076ms    5.799ms deny    
+  1               31       124       155       56        170      3    2.187ms    2.243ms deny    
+  8               56       389       445       56        387      3    2.027ms    2.065ms deny    
+  64             153      2012      2165      120       2193      3    3.432ms    3.473ms deny    
+  512*          1051       538      1589      568       1095      3    4.563ms    4.721ms deny    
     отношение верхней к нижней: тронуто 10.25× · сканов 10.14×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               29       137       166       56         68      3    2.324ms    3.153ms deny    
-  8               21        37        58       42         68      3    2.944ms    5.032ms deny    
-  64             146      1957      2103      120         73      3    2.603ms    2.795ms deny    
-  512*            21        35        56       42         66      3    2.753ms    6.224ms deny    
+  1               29       137       166       56         68      3    1.941ms    2.263ms deny    
+  8               21        37        58       42         68      3    1.823ms    2.713ms deny    
+  64             146      1957      2103      120         73      3    2.008ms    2.409ms deny    
+  512*            21        35        56       42         66      3    2.165ms    4.442ms deny    
     отношение верхней к нижней: тронуто 0.34× · сканов 0.75×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -305,26 +305,26 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               20        36        56       29         83      3    2.457ms   12.769ms allow   
-  7               29       134       163       44        188      3    2.008ms    2.316ms allow   
-  11              34       196       230       50        257      3    2.214ms    2.482ms allow   
-  341*           366     14595     14961     1133       4433      3    4.662ms    5.868ms allow   
+  1               20        36        56       29         83      3    2.185ms   10.387ms allow   
+  7               29       134       163       44        188      3    1.986ms    2.819ms allow   
+  11              34       196       230       50        257      3    2.103ms    2.221ms allow   
+  341*           366     14595     14961     1133       4433      3    4.177ms     4.42ms allow   
     отношение верхней к нижней: тронуто 267.16× · сканов 39.07×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               21        38        59       29         82      3    2.568ms    2.831ms deny    
-  7               30       136       166       44        187      3    2.362ms    3.181ms deny    
-  11              35       198       233       50        256      3    2.292ms    2.643ms deny    
-  341*           367     14597     14964     1133      14726      3    6.951ms     7.24ms deny    
+  1               21        38        59       29         82      3    1.971ms    2.219ms deny    
+  7               30       136       166       44        187      3    2.008ms    2.565ms deny    
+  11              35       198       233       50        256      3    2.074ms    3.336ms deny    
+  341*           367     14597     14964     1133      14726      3    6.116ms    6.508ms deny    
     отношение верхней к нижней: тронуто 253.63× · сканов 39.07×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1                4         1         5       27         40      3    2.047ms    2.496ms deny    
-  7               11         1        12       33         47      3    2.075ms    2.301ms deny    
-  11              14         1        15       36         54      3    1.803ms    2.056ms deny    
-  341*           344       256       600      111        380      3     3.49ms    4.588ms deny    
+  1                4         1         5       27         40      3    1.464ms    2.858ms deny    
+  7               11         1        12       33         47      3    1.828ms    3.092ms deny    
+  11              14         1        15       36         54      3    1.865ms    2.299ms deny    
+  341*           344       256       600      111        380      3    3.822ms    4.906ms deny    
     отношение верхней к нижней: тронуто 120.00× · сканов 4.11×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -367,26 +367,26 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               25        53        78       46        109      3    2.817ms   11.014ms allow   
-  8               25        53        78       46        115      3    2.724ms    4.959ms allow   
-  32              25        53        78       46        163      3    2.141ms    2.427ms allow   
-  64              25        53        78       46        227      3    2.337ms     2.59ms allow   
+  1               25        53        78       46        109      3    2.502ms    9.816ms allow   
+  8               25        53        78       46        115      3    2.194ms    2.424ms allow   
+  32              25        53        78       46        163      3    2.284ms    2.737ms allow   
+  64              25        53        78       46        227      3    2.008ms    2.043ms allow   
     отношение верхней к нижней: тронуто 1.00× · сканов 1.00×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               31       124       155       56        170      3    2.129ms    3.614ms deny    
-  8               38       131       169       56        184      3    2.161ms    2.426ms deny    
-  32              62       155       217       56        232      3    2.334ms    2.464ms deny    
-  64              94       187       281       56        296      3    2.547ms    2.829ms deny    
+  1               31       124       155       56        170      3    2.432ms    3.553ms deny    
+  8               38       131       169       56        184      3    2.933ms     3.16ms deny    
+  32              62       155       217       56        232      3    2.737ms    3.003ms deny    
+  64              94       187       281       56        296      3    2.097ms    2.242ms deny    
     отношение верхней к нижней: тронуто 1.81× · сканов 1.00×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               29       137       166       56         68      3    2.106ms    2.277ms deny    
-  8               36       137       173       56         75      3    2.136ms    2.485ms deny    
-  32              60       137       197       56         99      3    2.036ms    2.624ms deny    
-  64              23        67        90       46        131      3    2.384ms    2.698ms deny    
+  1               29       137       166       56         68      3    1.965ms    2.229ms deny    
+  8               36       137       173       56         75      3    2.173ms    2.825ms deny    
+  32              60       137       197       56         99      3    1.797ms    1.886ms deny    
+  64              23        67        90       46        131      3    1.915ms    1.996ms deny    
     отношение верхней к нижней: тронуто 0.54× · сканов 0.82×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -432,18 +432,18 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
   никогда, и ОДИН вызов просматривает ВЕСЬ тип. Колонка «заходов» — несущая.
 
   стр.    доступно   заходов   отдано осмотрено<=    строк*  тронуто*  сверочная время вызова
-  50      100%             1       50         50      1156     23177       3463        285ms
-  500     100%             1      500        500      9007   1940844      35380       2.376s
-  1000    100%             1     1000       1000     18007   7514062      68098       2.843s
-  5000*   100%             1     5000       5000     95006 187247873     347909      21.978s
-  50      50%              1       50         50      1156     23177       3463        167ms
-  500     50%              2      500       1000     10507   2257286      95969       5.062s
-  1000    50%              2     1000       2000     21007   8867088     193383       6.067s
-  5000*   50%              2     5000      10000    110006 219384187     972101      48.941s
-  50      0%            2001        1     100050      1356     33165   12735143    5m19.372s
-  500     0%             201        1     100500     11506   2571015   12303444    8m49.576s
-  1000    0%             101        1     101000     23006  10143015   12301880    5m36.831s
-  5000*   0%              21        1     105000    120006 250720015   12400600     9m8.575s
+  50      100%             1       50         50      1156     23177       3463        226ms
+  500     100%             1      500        500      9007   1940844      35380       2.099s
+  1000    100%             1     1000       1000     18007   7514062      68098       2.529s
+  5000*   100%             1     5000       5000     95006 187247873     347909      18.075s
+  50      50%              1       50         50      1156     23177       3463        135ms
+  500     50%              2      500       1000     10507   2257286     100451       4.471s
+  1000    50%              2     1000       2000     21007   8867088     201069       5.573s
+  5000*   50%              2     5000      10000    110006 219384187    1007085      41.665s
+  50      0%            2001        1     100050      1356     33165   12716252  1h8m14.445s
+  500     0%             201        1     100500     11506   2571015   12701844    7m55.989s
+  1000    0%             101        1     101000     23006  10143015   12701044     5m7.973s
+  5000*   0%              21        1     105000    120006 250720015   12700404    7m54.571s
 
   «строк*» и «тронуто*» сняты с ПЕРВОГО захода: суммировать планы разных заходов
   нельзя — это разные исполнения. Стоимость ВЫЗОВА читается по «заходов» × «строк*».
@@ -465,4 +465,4 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
 ОБЪЁМ ОСМОТРЕННОГО
   осей исполнено 6 из 6, точек 34, вопросов задано 78 (по 11 повторов на вопрос),
-  настенное время 35m4s
+  настенное время 1h34m35s

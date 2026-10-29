@@ -1,10 +1,10 @@
 R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ (перезамер ПОСЛЕ правок S2)
-БАЗОВЫЙ ЗАМЕР (ДО правок S2) — ревизия 3acddcfdf9216440aaa77db505a63a456d7aed98, файл services/iam/internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid-before-S2.txt
-========================================================================================================================================================================================================================================================
+БАЗОВЫЙ ЗАМЕР (ДО правок S2) — ревизия 3acddcfdf9216440aaa77db505a63a456d7aed98, файл internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid-before-S2.txt
+===========================================================================================================================================================================================================================================
 
 ПРОВЕНАНС
-  снято               2026-10-26 08:01:44 UTC
-  ревизия дерева      0a30b54c988168ed1c9017c44fad38f4b03bd901
+  снято               2026-10-29 03:23:00 UTC
+  ревизия дерева      2532e9d5b4a3349e2d17b7ee0360096ecd3ac176
   состояние дерева    чистое (несохранённых правок нет) — ревизия описывает
                       исполнявшееся дерево целиком
   машина              AMD EPYC 7763 64-Core Processor, ядер 16
@@ -14,48 +14,48 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
   отпечаток состава     133f56216a875196
   отпечаток содержимого 1d776be4a2f108d8
   файлов под отпечатком 40, таблиц выведено 18 (kaname.access_binding_subjects, kaname.access_bindings, kaname.accounts, kaname.catalog_resource, kaname.clusters, kaname.group_members, kaname.groups, kaname.memberships, kaname.projects, kaname.relation_fact, kaname.resource_mirror, kaname.resource_parent_edge, kaname.resource_scope_edge, kaname.role_rule_selectors, kaname.role_verb, kaname.roles, kaname.service_accounts, kaname.users)
-  предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kaname/pg/relverdict и services/iam/internal/repo/kaname/pg/scalegrid; те .sql каталога services/iam/internal/migrations, у которых хотя бы один оператор определения имеет СУБЪЕКТОМ таблицу, которую читает запрос вердикта, — то есть таблица стоит на месте того, что оператор ИЗМЕНЯЕТ, а не того, на что он ссылается: оператор РАЗБИРАЕТСЯ (глагол, вид объекта, имена в грамматически определённых позициях), а не ищется подстрокой; границы операторов тоже разбираются — точка с запятой внутри литерала (обычного и с экранированием E'…\'…'), внутри имени в кавычках и внутри тела в долларовых кавычках оператора не кончает; комментарий не исполняется и субъектом не бывает; DDL над временным объектом, над функцией и над последовательностью субъектом ТАБЛИЦЫ не является by construction, а безвредность вида объекта НЕ ОБЪЯВЛЯЕТСЯ, а доказывается парой операторов с положительным контролем; СВЕРХ ОПРЕДЕЛЕНИЯ судятся формы, меняющие план не будучи им, — расширенная статистика, политика построчной безопасности, наследование, ANALYZE/REINDEX/CLUSTER/VACUUM; исполняемый SQL (EXECUTE) разбирается ТЕМ ЖЕ разбором, второго перечня глаголов нет — выписанный оператор судится ТОЧНО по своему субъекту, а подстановка format(%I) делает имя подстановочным и совпадает с любой измеряемой таблицей В ТОМ ПОЛЕ, где стоит; индекс и расширенная статистика, названные по имени, связываются с таблицей по словарю, ВЫВЕДЕННОМУ обходом того же каталога, а неизвестное имя и незнакомый вид объекта судятся ОСТОРОЖНО — «задевает», потому что молчание на них было бы слепотой; ОТБОР ЧИТАЕТ ФАЙЛ ЦЕЛИКОМ, включая раздел ОТКАТА, который в работе не исполняется: миграция попадает под отпечаток и за оператор, стоящий только там; имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kaname.", а не выписаны; БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем); у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; строковая лексема, называющая КООРДИНАТУ собственного дерева (путь импорта своего модуля, координата модуля в дереве платформы либо путь, начинающийся с каталога верхнего уровня ПОСТАВКИ МОДУЛЯ), заменяется постоянной меткой — адрес кода не есть его поведение, поэтому переезд каталога замер тоже НЕ обесценивает, а словарь координат выведен из поставки модуля и потому ОДИН В ОБЕИХ ПОСАДКАХ; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала; файл опознаётся ТОЖДЕСТВОМ «роль каталога/имя файла», а не путём, и в этом же порядке считается содержимое — поэтому оба плеча неподвижны при переименовании каталога by construction
+  предикат отпечатка    все не-тестовые .go каталогов internal/repo/kaname/pg/relverdict и internal/repo/kaname/pg/scalegrid; те .sql каталога internal/migrations, у которых хотя бы один оператор определения имеет СУБЪЕКТОМ таблицу, которую читает запрос вердикта, — то есть таблица стоит на месте того, что оператор ИЗМЕНЯЕТ, а не того, на что он ссылается: оператор РАЗБИРАЕТСЯ (глагол, вид объекта, имена в грамматически определённых позициях), а не ищется подстрокой; границы операторов тоже разбираются — точка с запятой внутри литерала (обычного и с экранированием E'…\'…'), внутри имени в кавычках и внутри тела в долларовых кавычках оператора не кончает; комментарий не исполняется и субъектом не бывает; DDL над временным объектом, над функцией и над последовательностью субъектом ТАБЛИЦЫ не является by construction, а безвредность вида объекта НЕ ОБЪЯВЛЯЕТСЯ, а доказывается парой операторов с положительным контролем; СВЕРХ ОПРЕДЕЛЕНИЯ судятся формы, меняющие план не будучи им, — расширенная статистика, политика построчной безопасности, наследование, ANALYZE/REINDEX/CLUSTER/VACUUM; исполняемый SQL (EXECUTE) разбирается ТЕМ ЖЕ разбором, второго перечня глаголов нет — выписанный оператор судится ТОЧНО по своему субъекту, а подстановка format(%I) делает имя подстановочным и совпадает с любой измеряемой таблицей В ТОМ ПОЛЕ, где стоит; индекс и расширенная статистика, названные по имени, связываются с таблицей по словарю, ВЫВЕДЕННОМУ обходом того же каталога, а неизвестное имя и незнакомый вид объекта судятся ОСТОРОЖНО — «задевает», потому что молчание на них было бы слепотой; ОТБОР ЧИТАЕТ ФАЙЛ ЦЕЛИКОМ, включая раздел ОТКАТА, который в работе не исполняется: миграция попадает под отпечаток и за оператор, стоящий только там; имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kaname.", а не выписаны; БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем); у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; строковая лексема, называющая КООРДИНАТУ собственного дерева (путь импорта своего модуля, координата модуля в дереве платформы либо путь, начинающийся с каталога верхнего уровня ПОСТАВКИ МОДУЛЯ), заменяется постоянной меткой — адрес кода не есть его поведение, поэтому переезд каталога замер тоже НЕ обесценивает, а словарь координат выведен из поставки модуля и потому ОДИН В ОБЕИХ ПОСАДКАХ; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала; файл опознаётся ТОЖДЕСТВОМ «роль каталога/имя файла», а не путём, и в этом же порядке считается содержимое — поэтому оба плеча неподвижны при переименовании каталога by construction
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (хэш · тождество · путь на момент замера)
-    28ccc0b674e6ac55  вердикт/asker.go  services/iam/internal/repo/kaname/pg/relverdict/asker.go
-    8a5df9cd8d0a346e  вердикт/asker_gate.go  services/iam/internal/repo/kaname/pg/relverdict/asker_gate.go
-    fc0a996b3aae0c42  вердикт/catalogtype.go  services/iam/internal/repo/kaname/pg/relverdict/catalogtype.go
-    26004fc4746102cd  вердикт/condition.go  services/iam/internal/repo/kaname/pg/relverdict/condition.go
-    54bda5dbeb33b13a  вердикт/expand.go  services/iam/internal/repo/kaname/pg/relverdict/expand.go
-    bf7a4bf2e0da329b  вердикт/grantarm.go  services/iam/internal/repo/kaname/pg/relverdict/grantarm.go
-    80e119935fa750c3  вердикт/labelaxis.go  services/iam/internal/repo/kaname/pg/relverdict/labelaxis.go
-    bd084bf53059395f  вердикт/list.go  services/iam/internal/repo/kaname/pg/relverdict/list.go
-    3b3ea697e22783c0  вердикт/membership.go  services/iam/internal/repo/kaname/pg/relverdict/membership.go
-    ca46fb5e458e9ffa  вердикт/query.go  services/iam/internal/repo/kaname/pg/relverdict/query.go
-    3a575e81e6c52470  вердикт/speaker_classes.go  services/iam/internal/repo/kaname/pg/relverdict/speaker_classes.go
-    d5955410c980a426  вердикт/subjects.go  services/iam/internal/repo/kaname/pg/relverdict/subjects.go
-    d290f46aeb1ee004  вердикт/target.go  services/iam/internal/repo/kaname/pg/relverdict/target.go
-    5ed0b860ed8e8607  миграции/0001_initial.sql  services/iam/internal/migrations/0001_initial.sql
-    ee18772d31c05f47  миграции/20260904135459_role_owner_module_needs_a_liveness_key.sql  services/iam/internal/migrations/20260904135459_role_owner_module_needs_a_liveness_key.sql
-    390bfdb71548b903  миграции/20260905020423_roles_carry_a_time_of_last_edit.sql  services/iam/internal/migrations/20260905020423_roles_carry_a_time_of_last_edit.sql
-    f0c353bfb01f8cfb  миграции/20260906214500_cluster_anchor_moves_to_its_declared_spelling.sql  services/iam/internal/migrations/20260906214500_cluster_anchor_moves_to_its_declared_spelling.sql
-    0dd4d7e1802562e0  миграции/20260915111233_login_methods_live_in_their_own_rows.sql  services/iam/internal/migrations/20260915111233_login_methods_live_in_their_own_rows.sql
-    a32d1070a453a38c  миграции/20260916012708_invite_row_carries_its_deadline.sql  services/iam/internal/migrations/20260916012708_invite_row_carries_its_deadline.sql
-    281ee4f03949ef56  миграции/20260917210000_memberships_carry_a_cursor_index_for_their_owner.sql  services/iam/internal/migrations/20260917210000_memberships_carry_a_cursor_index_for_their_owner.sql
-    8d7ad6143835da83  миграции/20261002120000_account_ids_are_issued_once.sql  services/iam/internal/migrations/20261002120000_account_ids_are_issued_once.sql
-    0110df80db8cac42  миграции/20261005030000_active_identity_has_a_way_in.sql  services/iam/internal/migrations/20261005030000_active_identity_has_a_way_in.sql
-    74852c609b9e2f20  миграции/20261006152443_admission_carrier_is_fixed_when_the_identity_is_minted.sql  services/iam/internal/migrations/20261006152443_admission_carrier_is_fixed_when_the_identity_is_minted.sql
-    4b245a0b43b2eee1  миграции/20261011061435_own_account_and_identity_are_removed_in_order.sql  services/iam/internal/migrations/20261011061435_own_account_and_identity_are_removed_in_order.sql
-    d7e131e7bdd27001  миграции/20261015120000_anonymous_and_authenticated_are_subject_classes.sql  services/iam/internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql
-    29ad815a089f3e24  миграции/20261015140000_subject_class_fact_is_a_read.sql  services/iam/internal/migrations/20261015140000_subject_class_fact_is_a_read.sql
-    e5fbf42fa1c57b5c  миграции/20261017020000_container_passes_public_read_to_its_children.sql  services/iam/internal/migrations/20261017020000_container_passes_public_read_to_its_children.sql
-    5a289679ac78efd3  миграции/20261017140000_nested_rule_reaches_descendants.sql  services/iam/internal/migrations/20261017140000_nested_rule_reaches_descendants.sql
-    89b3834b7c2a381a  миграции/20261018030000_rule_selector_carries_its_verbs.sql  services/iam/internal/migrations/20261018030000_rule_selector_carries_its_verbs.sql
-    a7e8387481d17f2e  миграции/20261018090644_access_binding_target_form_is_held_by_the_base.sql  services/iam/internal/migrations/20261018090644_access_binding_target_form_is_held_by_the_base.sql
-    b2461bccc3ef7b5d  миграции/20261018104759_access_binding_target_form_is_validated.sql  services/iam/internal/migrations/20261018104759_access_binding_target_form_is_validated.sql
-    e6333560dc9f20c8  миграции/20261024050000_unregistration_revokes_its_grants.sql  services/iam/internal/migrations/20261024050000_unregistration_revokes_its_grants.sql
-    beb3b2c5618c9c8d  миграции/20261025180000_grant_delegations.sql  services/iam/internal/migrations/20261025180000_grant_delegations.sql
-    7235cb0914d5bda3  миграции/20261026090000_service_account_creation_is_its_own_right.sql  services/iam/internal/migrations/20261026090000_service_account_creation_is_its_own_right.sql
-    cba312c09c5cc18f  сетка/census.go  services/iam/internal/repo/kaname/pg/scalegrid/census.go
-    58879bd6de1a3d96  сетка/dictionary.go  services/iam/internal/repo/kaname/pg/scalegrid/dictionary.go
-    b7bbcaf493e5b87e  сетка/grid.go  services/iam/internal/repo/kaname/pg/scalegrid/grid.go
-    7cfa5e434107a932  сетка/seed.go  services/iam/internal/repo/kaname/pg/scalegrid/seed.go
-    521cb8174a079a16  сетка/strength.go  services/iam/internal/repo/kaname/pg/scalegrid/strength.go
-    f6e9c85169896050  сетка/strength_census.go  services/iam/internal/repo/kaname/pg/scalegrid/strength_census.go
+    28ccc0b674e6ac55  вердикт/asker.go  internal/repo/kaname/pg/relverdict/asker.go
+    8a5df9cd8d0a346e  вердикт/asker_gate.go  internal/repo/kaname/pg/relverdict/asker_gate.go
+    fc0a996b3aae0c42  вердикт/catalogtype.go  internal/repo/kaname/pg/relverdict/catalogtype.go
+    26004fc4746102cd  вердикт/condition.go  internal/repo/kaname/pg/relverdict/condition.go
+    54bda5dbeb33b13a  вердикт/expand.go  internal/repo/kaname/pg/relverdict/expand.go
+    bf7a4bf2e0da329b  вердикт/grantarm.go  internal/repo/kaname/pg/relverdict/grantarm.go
+    80e119935fa750c3  вердикт/labelaxis.go  internal/repo/kaname/pg/relverdict/labelaxis.go
+    bd084bf53059395f  вердикт/list.go  internal/repo/kaname/pg/relverdict/list.go
+    3b3ea697e22783c0  вердикт/membership.go  internal/repo/kaname/pg/relverdict/membership.go
+    ca46fb5e458e9ffa  вердикт/query.go  internal/repo/kaname/pg/relverdict/query.go
+    3a575e81e6c52470  вердикт/speaker_classes.go  internal/repo/kaname/pg/relverdict/speaker_classes.go
+    d5955410c980a426  вердикт/subjects.go  internal/repo/kaname/pg/relverdict/subjects.go
+    d290f46aeb1ee004  вердикт/target.go  internal/repo/kaname/pg/relverdict/target.go
+    5ed0b860ed8e8607  миграции/0001_initial.sql  internal/migrations/0001_initial.sql
+    ee18772d31c05f47  миграции/20260904135459_role_owner_module_needs_a_liveness_key.sql  internal/migrations/20260904135459_role_owner_module_needs_a_liveness_key.sql
+    390bfdb71548b903  миграции/20260905020423_roles_carry_a_time_of_last_edit.sql  internal/migrations/20260905020423_roles_carry_a_time_of_last_edit.sql
+    f0c353bfb01f8cfb  миграции/20260906214500_cluster_anchor_moves_to_its_declared_spelling.sql  internal/migrations/20260906214500_cluster_anchor_moves_to_its_declared_spelling.sql
+    0dd4d7e1802562e0  миграции/20260915111233_login_methods_live_in_their_own_rows.sql  internal/migrations/20260915111233_login_methods_live_in_their_own_rows.sql
+    a32d1070a453a38c  миграции/20260916012708_invite_row_carries_its_deadline.sql  internal/migrations/20260916012708_invite_row_carries_its_deadline.sql
+    281ee4f03949ef56  миграции/20260917210000_memberships_carry_a_cursor_index_for_their_owner.sql  internal/migrations/20260917210000_memberships_carry_a_cursor_index_for_their_owner.sql
+    8d7ad6143835da83  миграции/20261002120000_account_ids_are_issued_once.sql  internal/migrations/20261002120000_account_ids_are_issued_once.sql
+    0110df80db8cac42  миграции/20261005030000_active_identity_has_a_way_in.sql  internal/migrations/20261005030000_active_identity_has_a_way_in.sql
+    74852c609b9e2f20  миграции/20261006152443_admission_carrier_is_fixed_when_the_identity_is_minted.sql  internal/migrations/20261006152443_admission_carrier_is_fixed_when_the_identity_is_minted.sql
+    4b245a0b43b2eee1  миграции/20261011061435_own_account_and_identity_are_removed_in_order.sql  internal/migrations/20261011061435_own_account_and_identity_are_removed_in_order.sql
+    d7e131e7bdd27001  миграции/20261015120000_anonymous_and_authenticated_are_subject_classes.sql  internal/migrations/20261015120000_anonymous_and_authenticated_are_subject_classes.sql
+    29ad815a089f3e24  миграции/20261015140000_subject_class_fact_is_a_read.sql  internal/migrations/20261015140000_subject_class_fact_is_a_read.sql
+    e5fbf42fa1c57b5c  миграции/20261017020000_container_passes_public_read_to_its_children.sql  internal/migrations/20261017020000_container_passes_public_read_to_its_children.sql
+    5a289679ac78efd3  миграции/20261017140000_nested_rule_reaches_descendants.sql  internal/migrations/20261017140000_nested_rule_reaches_descendants.sql
+    89b3834b7c2a381a  миграции/20261018030000_rule_selector_carries_its_verbs.sql  internal/migrations/20261018030000_rule_selector_carries_its_verbs.sql
+    a7e8387481d17f2e  миграции/20261018090644_access_binding_target_form_is_held_by_the_base.sql  internal/migrations/20261018090644_access_binding_target_form_is_held_by_the_base.sql
+    b2461bccc3ef7b5d  миграции/20261018104759_access_binding_target_form_is_validated.sql  internal/migrations/20261018104759_access_binding_target_form_is_validated.sql
+    e6333560dc9f20c8  миграции/20261024050000_unregistration_revokes_its_grants.sql  internal/migrations/20261024050000_unregistration_revokes_its_grants.sql
+    beb3b2c5618c9c8d  миграции/20261025180000_grant_delegations.sql  internal/migrations/20261025180000_grant_delegations.sql
+    7235cb0914d5bda3  миграции/20261026090000_service_account_creation_is_its_own_right.sql  internal/migrations/20261026090000_service_account_creation_is_its_own_right.sql
+    cba312c09c5cc18f  сетка/census.go  internal/repo/kaname/pg/scalegrid/census.go
+    58879bd6de1a3d96  сетка/dictionary.go  internal/repo/kaname/pg/scalegrid/dictionary.go
+    b7bbcaf493e5b87e  сетка/grid.go  internal/repo/kaname/pg/scalegrid/grid.go
+    7cfa5e434107a932  сетка/seed.go  internal/repo/kaname/pg/scalegrid/seed.go
+    521cb8174a079a16  сетка/strength.go  internal/repo/kaname/pg/scalegrid/strength.go
+    f6e9c85169896050  сетка/strength_census.go  internal/repo/kaname/pg/scalegrid/strength_census.go
 
 СЕТКА (константа в коде, ниоткуда не переопределяется)
   ось N: 100, 1000, 10000, 100000, 1000000  — неподвижны: B=1000 R=9 F=1
@@ -87,11 +87,11 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ N
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-100        прямыми выдачами             48       105      153        121      3   2.655ms  10.504ms      7
-1000       прямыми выдачами             48       103      151        101      3   2.381ms   5.304ms      7
-10000      прямыми выдачами             48       103      151        101      3   2.687ms    7.93ms      7
-100000     прямыми выдачами             48       103      151        101      3   2.818ms   6.296ms      7
-1000000    прямыми выдачами             48       103      151        101      3   2.409ms   5.623ms      7
+100        прямыми выдачами             48       105      153        121      3   3.181ms  13.362ms      7
+1000       прямыми выдачами             48       103      151        101      3   2.916ms   3.994ms      7
+10000      прямыми выдачами             48       103      151        101      3   3.068ms   4.779ms      7
+100000     прямыми выдачами             48       103      151        101      3   2.729ms    3.54ms      7
+1000000    прямыми выдачами             48       103      151        101      3   3.142ms   6.126ms      7
 
   отношение к нижней точке (несущая): 100→1.00  1000→1.00  10000→1.00  100000→1.00  1000000→1.00  
   отношение сверочная/несущая по точкам: 100→2.52  1000→2.10  10000→2.10  100000→2.10  1000000→2.10  
@@ -118,9 +118,9 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ B
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-100        прямыми выдачами             25       581      606        650      3   3.373ms  12.337ms      7
-1000       прямыми выдачами             48       103      151        132      3   2.834ms    7.02ms      7
-1000000    прямыми выдачами             23        17       40         85      3   3.183ms   4.657ms      7
+100        прямыми выдачами             25       581      606        650      3   4.381ms  14.142ms      7
+1000       прямыми выдачами             48       103      151        132      3   3.133ms   7.846ms      7
+1000000    прямыми выдачами             23        17       40         85      3   3.187ms   4.304ms      7
 
   отношение к нижней точке (несущая): 100→1.00  1000→1.92  1000000→0.92  
   отношение сверочная/несущая по точкам: 100→26.00  1000→2.75  1000000→3.70  
@@ -145,14 +145,14 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ R
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-1          прямыми выдачами             32        39       71         91      3   2.807ms  17.248ms      7
-9          прямыми выдачами             48       103      151        101      3   2.531ms   4.788ms      7
-100        прямыми выдачами             23        17       40        281      3    2.77ms   7.228ms      7
-100        через группы                 23        17       40        281      3   3.489ms   3.765ms      7
-227        прямыми выдачами             23        17       40        303      3   2.878ms   3.723ms      7
-227        через группы                 23        17       40        303      3   3.144ms   4.349ms      7
-1000       прямыми выдачами             23        17       40         71      3   2.896ms   3.426ms      7
-1000       через группы                 23        17       40         71      3   3.357ms   3.801ms      7
+1          прямыми выдачами             32        39       71         91      3   3.333ms  11.847ms      7
+9          прямыми выдачами             48       103      151        101      3   2.619ms   3.041ms      7
+100        прямыми выдачами             23        17       40        281      3   3.451ms   4.106ms      7
+100        через группы                 23        17       40        281      3   2.868ms   3.582ms      7
+227        прямыми выдачами             23        17       40        303      3   2.852ms   3.684ms      7
+227        через группы                 23        17       40        303      3    3.22ms   3.678ms      7
+1000       прямыми выдачами             23        17       40         71      3   2.744ms   3.126ms      7
+1000       через группы                 23        17       40         71      3   3.275ms   3.547ms      7
 
   отношение к нижней точке (несущая): 1→1.00  9→1.50  100→0.72  100→0.72  227→0.72  227→0.72  1000→0.72  1000→0.72  
   отношение сверочная/несущая по точкам: 1→2.84  9→2.10  100→12.22  100→12.22  227→13.17  227→13.17  1000→3.09  1000→3.09  
@@ -182,14 +182,14 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 ОСЬ F
 ------------------------------------------------------------------------------
 значение   способ набора             строк   отброш.  тронуто  сверочная обращ.       p50       p99 S_набл
-0          фактом лично                 47        89      136        116      3   2.693ms  12.742ms      7
-1          фактом лично                 48       103      151        101      3   2.668ms   3.358ms      7
-10         фактом лично                 57       124      181        128      3   3.102ms   3.893ms      7
-10         фактом через группу          57       120      177        115      3   2.589ms   4.058ms      7
-10         фактом классом system_class:authenticated       57       123      180        115      3   2.548ms   3.945ms      7
-100        фактом лично                147      1296     1443        398      3   2.469ms   2.732ms      7
-100        фактом через группу         147       896     1043        398      3   2.605ms   3.824ms      7
-100        фактом классом system_class:authenticated      147       332      479        398      3   2.935ms   3.508ms      7
+0          фактом лично                 47        89      136        116      3   3.146ms  15.243ms      7
+1          фактом лично                 48       103      151        101      3   3.029ms    3.56ms      7
+10         фактом лично                 57       124      181        128      3   2.732ms   3.425ms      7
+10         фактом через группу          57       120      177        115      3   2.871ms   3.321ms      7
+10         фактом классом system_class:authenticated       57       123      180        115      3   2.288ms   3.262ms      7
+100        фактом лично                147      1296     1443        398      3   2.696ms   3.191ms      7
+100        фактом через группу         147       896     1043        398      3   2.828ms   5.382ms      7
+100        фактом классом system_class:authenticated      147       332      479        398      3   2.694ms   2.999ms      7
 
   отношение к нижней точке (несущая): 0→1.00  1→1.02  10→1.21  10→1.21  10→1.21  100→3.13  100→3.13  100→3.13  
   отношение сверочная/несущая по точкам: 0→2.47  1→2.10  10→2.25  10→2.02  10→2.02  100→2.71  100→2.71  100→2.71  
@@ -217,7 +217,7 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 
 
 ОБЪЁМ ОСМОТРЕННОГО
-  осей 4, точек сетки 24, вердиктов задано 528, настенное время прогона 43m13s
+  осей 4, точек сетки 24, вердиктов задано 528, настенное время прогона 46m21s
 
 ПЕРЕПИСЬ ПРИБОРА В ВЕРХНЕЙ ТОЧКЕ ОСИ N (доля неотнесённого печатается всегда)
 ПРАВИЛО ОТНЕСЕНИЯ (объявлено до прогона; перепись печатает его дословно из кода)
