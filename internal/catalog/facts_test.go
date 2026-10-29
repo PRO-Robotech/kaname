@@ -79,8 +79,8 @@ func TestIAMCT2_05_FactsFromRowsAnswerAsTheLiteral(t *testing.T) {
 	for _, fgaType := range types {
 		typeVerbs := authzmap.VerbsOfType(fgaType)
 		for _, authored := range [][]string{{"*"}, {"update"}, {"get", "list"}, {"nosuchverb"}} {
-			want := authzmap.GrantedVerbs(fgaType, authored, typeVerbs)
-			got := f.GrantedVerbs(fgaType, authored, typeVerbs)
+			want := authzmap.GrantedVerbs(fgaType, authored, typeVerbs, domain.TenantPolicy())
+			got := f.GrantedVerbs(fgaType, authored, typeVerbs, domain.TenantPolicy())
 			if strings.Join(want, ",") != strings.Join(got, ",") {
 				t.Errorf("GrantedVerbs(%q, %v): литерал %v, строки %v", fgaType, authored, want, got)
 			}
@@ -90,8 +90,8 @@ func TestIAMCT2_05_FactsFromRowsAnswerAsTheLiteral(t *testing.T) {
 	// RoleVerbsFromSelectors — по КАЖДОЙ грантуемой паре, подстановкой.
 	for _, r := range authzmap.CatalogSeedResources() {
 		sel := []domain.RuleSelector{{ObjectTypes: []string{r.Dotted}, Verbs: []string{"*"}}}
-		want := authzmap.RoleVerbsFromSelectors(sel)
-		got := f.RoleVerbsFromSelectors(sel)
+		want := authzmap.RoleVerbsFromSelectors(sel, domain.TenantPolicy())
+		got := f.RoleVerbsFromSelectors(sel, domain.TenantPolicy())
 		if pairsKey(want) != pairsKey(got) {
 			t.Errorf("RoleVerbsFromSelectors(%q): литерал %v, строки %v", r.Dotted, want, got)
 		}
@@ -128,7 +128,7 @@ func TestIAMCT2_06_RetiredResourceProducesNoPairs(t *testing.T) {
 	if len(live.VerbsOfType(fgaType)) == 0 {
 		t.Fatalf("до снятия у %q ноль глаголов — контроль не выполнен", fgaType)
 	}
-	if len(live.RoleVerbsFromSelectors(sel)) == 0 {
+	if len(live.RoleVerbsFromSelectors(sel, domain.TenantPolicy())) == 0 {
 		t.Fatalf("до снятия у %q ноль пар — контроль не выполнен", dotted)
 	}
 
@@ -139,7 +139,7 @@ func TestIAMCT2_06_RetiredResourceProducesNoPairs(t *testing.T) {
 	if got := retired.VerbsOfType(fgaType); len(got) != 0 {
 		t.Errorf("после снятия строки %q набор глаголов %v — снятый тип доехал до проекции", dotted, got)
 	}
-	if got := retired.RoleVerbsFromSelectors(sel); len(got) != 0 {
+	if got := retired.RoleVerbsFromSelectors(sel, domain.TenantPolicy()); len(got) != 0 {
 		t.Errorf("после снятия строки %q пары %v — снятый тип доехал до проекции", dotted, got)
 	}
 
@@ -252,7 +252,7 @@ func TestTierOnlyRowNeverEntersTheVerbSetOfItsType(t *testing.T) {
 
 	// И то, ради чего признак заведён: правило, назвавшее ярусный глагол, не даёт
 	// пообъектного кортежа, а названный рядом пообъектный — даёт.
-	granted := f.GrantedVerbs(fgaType, []string{"create", "get"}, got)
+	granted := f.GrantedVerbs(fgaType, []string{"create", "get"}, got, domain.TenantPolicy())
 	if containsVerb(granted, "create") {
 		t.Errorf("правило с ярусным глаголом дало пообъектную пару: %v", granted)
 	}

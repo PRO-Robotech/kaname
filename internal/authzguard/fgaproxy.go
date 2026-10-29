@@ -9,8 +9,10 @@
 //
 //  1. SAN клиентского сертификата (`spiffe://<домен>/ns/<пространство>/sa/<учётка>`,
 //     извлечённый grpcsrv.CertIdentityFromContext под доменом, который
-//     объявила установка) разбирается ФОРМОЙ ИМЕНИ СЛУЖБЫ, которую объявила
-//     та же установка (`servicesan.Form`), и учётка отображается в
+//     объявила установка) признаётся по перечню личностей модулей установки
+//     (moduleidentity.Roster, kaname#984 — модуль только ОБЪЯВЛЕННАЯ пара
+//     пространства и учётки; имя службы перечень читает формой имени службы,
+//     объявленной той же установкой, kaname#308), и учётка отображается в
 //     детерминированный идентификатор служебной учётки
 //     (`'sva' || substr(md5('<учётка>'),1,17)`).
 //  2. A ReBAC Check `service_account:<sva>#fga_writer@cluster:cluster_root`
@@ -33,7 +35,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 const (
@@ -55,10 +57,10 @@ const (
 	relationWriteObject = clusterRootObject
 
 	// Приставки имени учётки здесь больше нет (kaname#308): форму имени службы
-	// объявляет установка (`authn.service-name-form`), и разбирает её один
-	// разбор — `servicesan.Form.Parse`. Пока она стояла здесь литералом, это
-	// была приставка имени другого продукта, и установка, называвшая учётки
-	// иначе, не узнавала ни одного своего модуля.
+	// объявляет установка (`authn.service-name-form`), и учётку записи перечня
+	// личностей читает она (`moduleidentity.Roster.ServiceFromAccount`). Пока
+	// приставка стояла здесь литералом, это было имя другого продукта, и
+	// установка, называвшая учётки иначе, не узнавала ни одного своего модуля.
 
 	// saPrefix — приставка идентификатора служебной учётки.
 	//
@@ -79,19 +81,25 @@ type RelationWriteGate struct {
 	// with no verified client-cert is allowed (backward-compat);
 	// in production-mode (true) the gate is strictly fail-closed.
 	prodMode bool
-	// form — форма имени службы, объявленная установкой: ею учётка сертификата
-	// разбирается в модуль. Нулевая не узнаёт никого.
-	form servicesan.Form
+	// modules — личности модулей установки (kaname#984). Нулевое значение не
+	// признаёт никого.
+	modules moduleidentity.Roster
+}
+
+// WithModuleRoster подставляет перечень личностей модулей установки: писать
+// отношения вправе только объявленная пара, и домен записи — имя службы её
+// учётки.
+func (g *RelationWriteGate) WithModuleRoster(r moduleidentity.Roster) *RelationWriteGate {
+	g.modules = r
+	return g
 }
 
 // NewRelationWriteGate — конструктор. Режим по умолчанию — разработки
-// (совместимость); строгий отказ включает WithProductionMode.
-//
-// Форма имени службы — параметр ОБЯЗАТЕЛЬНЫЙ и позиционный: сборка, забывшая
-// её подставить, не соберётся вовсе, тогда как умолчание сделало бы стража
-// молча отвергающим каждый модуль.
-func NewRelationWriteGate(checker RelationChecker, form servicesan.Form) *RelationWriteGate {
-	return &RelationWriteGate{checker: checker, form: form}
+// (совместимость); строгий отказ включает WithProductionMode. Модулем ворота
+// признают только пару перечня (WithModuleRoster): нулевой перечень не признаёт
+// никого, и форму имени службы перечень несёт сам.
+func NewRelationWriteGate(checker RelationChecker) *RelationWriteGate {
+	return &RelationWriteGate{checker: checker}
 }
 
 // WithProductionMode toggles strict fail-closed enforcement (production AuthN).
@@ -119,17 +127,19 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 		// Production-mode: unverified peer or no module identity → never trusted.
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
-	id, ok := g.form.Parse(grpcsrv.CertIdentityDomainFromContext(ctx), san)
+	// Признание — объявленная пара перечня (kaname#984): лист нашего домена с
+	// учёткой модуля из необъявленного пространства модулем не является.
+	module, ok := g.modules.FromContext(ctx)
 	if !ok {
-		// Идентификатор не модульный: чужой домен, чужая форма учётки либо
-		// неразборчивая запись.
+		// Malformed / foreign-trust-domain / undeclared SAN → not a module identity.
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
+	domain := module.Service
 	if g.checker == nil {
 		// ReBAC backend not wired → fail-closed (never silently allow).
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
-	allowed, err := g.checker.Check(ctx, "service_account:"+ServiceAccountIDForAccount(id.Account), RelationWriteRelation, relationWriteObject)
+	allowed, err := g.checker.Check(ctx, "service_account:"+ServiceAccountIDForAccount(module.Account), RelationWriteRelation, relationWriteObject)
 	if err != nil {
 		// Backend failure (FGA 5xx / network drop / ErrNotConfigured) is NOT an
 		// authorization decision — it is a transient outage. Surfacing it as
@@ -143,35 +153,7 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 		// no fga_writer relation). Genuine authorization decision → fail-closed.
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
-	return id.Service, nil
-}
-
-// SANToServiceDomain — короткое имя службы модуля (`vpc`, `compute`,
-// `api-gateway`) из проверенного SAN: идентификатор домена d, чья учётка имеет
-// форму f. Иначе ("", false). По имени службы ValidateProxyTuple связывает тип
-// объекта с модулем (модуль vpc регистрирует только `vpc_*`).
-//
-// Разбор — `servicesan.Form.Parse`, один на всё дерево; здесь он не
-// повторяется. Почему и домен, и форма — АРГУМЕНТЫ, а не константы: обе
-// величины объявляет установка, и разбор обязан спрашивать те же, под которыми
-// она выпускает сертификаты. Пока они стояли литералами, разбор утверждал о них
-// независимо от установки — и утверждал бы это молча.
-//
-// Необъявленный домен и необъявленная форма не признают своим никого, поэтому
-// оба нуля здесь фейл-клоуз.
-func SANToServiceDomain(d grpcsrv.TrustDomain, f servicesan.Form, san string) (string, bool) {
-	id, ok := f.Parse(d, san)
-	return id.Service, ok
-}
-
-// SANToServiceAccountID — детерминированный идентификатор служебной учётки
-// модуля по проверенному SAN.
-func SANToServiceAccountID(d grpcsrv.TrustDomain, f servicesan.Form, san string) (string, bool) {
-	id, ok := f.Parse(d, san)
-	if !ok {
-		return "", false
-	}
-	return ServiceAccountIDForAccount(id.Account), true
+	return domain, nil
 }
 
 // ServiceAccountIDForAccount — идентификатор служебной учётки модуля по имени

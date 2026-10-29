@@ -65,8 +65,7 @@ const kn747ListVerb = "/kaname.cloud.iam.v1.AccessKeyService/List"
 
 func kn747PublicPolicy(t *testing.T, prod bool) *PublicCallerPolicy {
 	t.Helper()
-	return NewPublicCallerPolicy(prod, PublicPeerCallableRPCs(), loadRealACRCatalog(t), callerorigin.IsPresentedCredential,
-		testServiceNameForm)
+	return NewPublicCallerPolicy(prod, PublicPeerCallableRPCs(), loadRealACRCatalog(t), callerorigin.IsPresentedCredential).WithModuleRoster(testModuleRoster())
 }
 
 // presentedCredentialCtx — запрос, чью личность назвало удостоверение,

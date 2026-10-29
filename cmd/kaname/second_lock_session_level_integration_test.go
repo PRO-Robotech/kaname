@@ -255,7 +255,7 @@ func serveSecondLock(t *testing.T, reg *seed.PermissionRegistry, srv iamv1.Inter
 	serverTLS, clientTLS := secondLockTLS(t, acrTestGatewaySAN)
 	chain := append([]grpc.UnaryServerInterceptor{authzguard.DenyDetailUnary(reg)}, identityUnary(fwdCfg(acrTestGatewaySAN))...)
 	chain = append(chain,
-		authzguard.NewCallerPolicy(true, authzguard.GatewayFrontedInternalRPCs(), probeServiceNameForm).Unary(),
+		authzguard.NewCallerPolicy(true, authzguard.GatewayFrontedInternalRPCs()).WithModuleRoster(testModuleRoster()).Unary(),
 		authzguard.NewACRFloor(reg, authzguard.GatewayFrontedInternalRPCs()).WithProductionMode(true).Unary(),
 	)
 	gsrv := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(chain...))

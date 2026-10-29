@@ -12,9 +12,10 @@
 # Роли:
 #   - `probemod.reader` (`rol533113283eb982de5`) — `boxes [get, list]` с
 #     вложенным правилом над ВНУКОМ `tags [get, list]`;
-#   - `probemod.reader_b1` (`rol6c35afc8ab2c75066`) — то же, у правила над
-#     `boxes` ещё `resourceNames: [b1]` (близнец ND-08 «И»: отличие — имена у
-#     правила-владельца).
+#   - роли `probemod.reader_b1` (у правила над `boxes` ещё `resourceNames: [b1]`)
+#     здесь больше нет: манифест модуля не называет конкретных объектов
+#     (kaname#965). Близнец ND-08 «И» строит правила сам (`p3Rules`,
+#     `ndReaderRules`) и роли манифеста не читает.
 # Id — 'rol' || substr(md5(имя), 1, 17).
 #
 # Имя файла — НЕ `manifest.yaml`: проверка дерева читает файлы ровно с этим
@@ -56,19 +57,6 @@ roles:
       - module: probemod
         resources: [boxes]
         classes: [get, list]
-        children:
-          - resources: [tags]
-            classes: [get, list]
-
-  - id: probemod.reader_b1
-    description: >
-      Пробная роль: как probemod.reader, но правило над ящиками сужено именем b1.
-    tier: {tierType: iam.cluster, tierId: cluster_root}
-    rules:
-      - module: probemod
-        resources: [boxes]
-        classes: [get, list]
-        resourceNames: [b1]
         children:
           - resources: [tags]
             classes: [get, list]

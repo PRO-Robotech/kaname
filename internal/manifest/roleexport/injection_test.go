@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
@@ -180,7 +181,7 @@ func TestInjection_SameRelationNameOnTheResourceTypeIsSilent(t *testing.T) {
 		Relation: "editor",
 		Object:   "vpc_network_interface",
 	}
-	covered := roleexport.Covers(catalogfixture.Facts(),
+	covered := roleexport.Covers(catalogfixture.Facts(), domain.PolicyOfRole(true, "vpc"),
 		[]roleexport.Action{tenant}, "vpc_network_interface", "create")
 	if len(covered) != 1 {
 		t.Errorf("законный близнец по имени отношения не покрыт: ярус %q спрошен на объекте "+
@@ -192,7 +193,7 @@ func TestInjection_SameRelationNameOnTheResourceTypeIsSilent(t *testing.T) {
 	// половины близнец доказывал бы, что покрывается всё подряд.
 	scope := tenant
 	scope.Object = "project"
-	if got := roleexport.Covers(catalogfixture.Facts(),
+	if got := roleexport.Covers(catalogfixture.Facts(), domain.PolicyOfRole(true, "vpc"),
 		[]roleexport.Action{scope}, "vpc_network_interface", "create"); len(got) != 0 {
 		t.Errorf("ярус %q на объекте ОБЛАСТИ (%s) покрыт — правило роли модуля этого кортежа "+
 			"не пишет ни при каком написании", scope.Relation, scope.Object)

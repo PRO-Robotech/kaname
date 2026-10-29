@@ -31,16 +31,24 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/peer"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
-// listenerAdmission — пара ограничителей процесса.
+// listenerAdmission — ограничители процесса: публичный слушатель и два уровня
+// внутреннего.
 type listenerAdmission struct {
 	public   *grpcsrv.Admission
 	internal *grpcsrv.Admission
+	// internalInstance — уровень экземпляра внутреннего слушателя (kaname#992):
+	// ключ — личность и адрес экземпляра, величины — половина потолка модуля.
+	internalInstance *grpcsrv.Admission
 }
 
 // admissionLimits — величины ОБОИХ слушателей: ручки посадки там, где она их
@@ -73,12 +81,12 @@ func admissionLimits(cfg config.Config) (public, internal grpcsrv.AdmissionLimit
 // отсутствия строки — отсутствие читается как «версия старая» ничуть не реже,
 // чем как «потолка нет».
 func (l listenerAdmission) arm(logger *slog.Logger, cfg config.Config) {
-	for _, a := range []*grpcsrv.Admission{l.public, l.internal} {
+	for _, a := range []*grpcsrv.Admission{l.public, l.internal, l.internalInstance} {
 		if a == nil {
 			continue
 		}
 		fromPosture := !cfg.APIServer.RateLimit.Public.IsSilent()
-		if a.Listener() == "internal" {
+		if a.Listener() == "internal" || a.Listener() == "internal-instance" {
 			fromPosture = !cfg.APIServer.RateLimit.Internal.IsSilent()
 		}
 		logger.Info("request admission armed",
@@ -94,5 +102,81 @@ func (l listenerAdmission) arm(logger *slog.Logger, cfg config.Config) {
 // третьей копией. Метод остаётся, потому что его предмет — ПАРА слушателей
 // именно этого процесса.
 func (l listenerAdmission) report(ctx context.Context, logger *slog.Logger) {
-	grpcsrv.ReportAdmission(ctx, logger, "", l.public, l.internal)
+	grpcsrv.ReportAdmission(ctx, logger, "", l.public, l.internal, l.internalInstance)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ДВА УРОВНЯ ДОПУСКА ВНУТРЕННЕГО СЛУШАТЕЛЯ (kaname#992)
+//
+// Прежде ключом был SAN модуля: все экземпляры одного модуля (плоскость данных
+// на каждый реестр, реплики службы) делили ОДНО ведро, и шумный экземпляр
+// расходовал предел соседних. Теперь допуск двухуровневый:
+//
+//   - уровень экземпляра — ключ [instanceSubject]: личность сертификата и
+//     адрес пира. Где у экземпляра своя личность, её достаточно; где личность
+//     общая, экземпляры различает адрес;
+//   - уровень модуля — прежний ключ (SAN) и прежние величины
+//     (`api-server.rate-limit.internal`): потолок модуля в целом.
+//
+// Экземпляр проверяется ПЕРВЫМ: отказ на его уровне не тратит токенов модуля,
+// и шумный экземпляр выбирает из потолка модуля не больше своего ведра.
+
+// newInternalAdmissions — ограничители внутреннего слушателя обоих уровней.
+func newInternalAdmissions(module, instance grpcsrv.AdmissionLimits, opts ...grpcsrv.AdmissionOption) (listenerAdmission, error) {
+	internal, err := grpcsrv.NewAdmission("internal", module, grpcsrv.CertIdentitySubject, opts...)
+	if err != nil {
+		return listenerAdmission{}, fmt.Errorf("уровень модуля: %w", err)
+	}
+	perInstance, err := grpcsrv.NewAdmission("internal-instance", instance, instanceSubject, opts...)
+	if err != nil {
+		return listenerAdmission{}, fmt.Errorf("уровень экземпляра: %w", err)
+	}
+	return listenerAdmission{internal: internal, internalInstance: perInstance}, nil
+}
+
+// instanceAdmissionLimits — величины уровня экземпляра по умолчанию: ПОЛОВИНА
+// потолка модуля по каждой оси темпа и одновременности, кратность всплеска та
+// же.
+//
+// Половина — не подобранное число, а свойство: один экземпляр не выбирает
+// больше половины потолка модуля, и соседям при любом его шуме остаётся не
+// меньше половины. Одновременность не ниже одного — иначе ведро не пропускало
+// бы ни одного запроса.
+func instanceAdmissionLimits(module grpcsrv.AdmissionLimits) grpcsrv.AdmissionLimits {
+	inFlight := module.InFlight / 2
+	if inFlight < 1 {
+		inFlight = 1
+	}
+	return grpcsrv.AdmissionLimits{
+		ReadPerSec:     module.ReadPerSec / 2,
+		MutationPerSec: module.MutationPerSec / 2,
+		BurstFactor:    module.BurstFactor,
+		InFlight:       inFlight,
+	}
+}
+
+// instanceSubject — ключ экземпляра вызывающего: личность проверенного
+// сертификата и адрес пира без порта (один экземпляр открывает несколько
+// соединений). Без проверенной личности — пусто, то есть «не назван».
+func instanceSubject(ctx context.Context) string {
+	id := grpcsrv.CertIdentitySubject(ctx)
+	if id == "" {
+		return ""
+	}
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.Addr == nil {
+		return id
+	}
+	host, _, err := net.SplitHostPort(p.Addr.String())
+	if err != nil {
+		host = p.Addr.String()
+	}
+	return id + "@" + host
+}
+
+// internalRegistrar — обёртка регистратора внутреннего слушателя обоими
+// уровнями. Внутренняя обёртка регистратора исполняется ПЕРВОЙ на пути
+// запроса, поэтому уровень экземпляра стоит внутри.
+func (l listenerAdmission) internalRegistrar(next grpc.ServiceRegistrar) grpc.ServiceRegistrar {
+	return l.internal.Registrar(l.internalInstance.Registrar(next))
 }

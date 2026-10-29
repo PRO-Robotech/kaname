@@ -26,6 +26,14 @@ type ServiceAccount struct {
 	// наравне с account/project (ARM_LABELS-грант на iam.serviceAccount → v_list
 	// по `labels @> matchLabels`; List фильтрует viewer ∪ v_list).
 	Labels Labels
+	// CreatedBy — ФАКТ СОЗДАТЕЛЯ (kaname#1003, приёмка
+	// `service-account-creation-is-its-own-right.md`, Р4): принципал, вызвавший
+	// `ServiceAccountService.Create`. Пишется в транзакции создания и НЕ меняется
+	// (триггер `service_account_creator_is_immutable`); наружу не выдаётся (§2 п.3)
+	// и потому чтением строки не заполняется. Нулевое значение — создатель не
+	// записан: учётка заведена до изменения либо посевом мимо глагола; по роли
+	// создателя её не ведёт никто.
+	CreatedBy Subject
 }
 
 // MayAuthenticate reports whether this service account is allowed to obtain a

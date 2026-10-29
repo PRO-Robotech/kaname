@@ -224,6 +224,18 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		// NOT like Delete (which resolves to absence).
 		return resolveExistence(ctx, kindUpdate, m.GetAccessBindingId(), rd.AccessBindings().Get, marshalAccessBinding)
 
+	// Делегирования права выдавать (kaname#986). Заведение вставляет строку
+	// делегирования в той же транзакции, что аудит: строка есть ⇒ закоммичено.
+	// Отзыв строку СОХРАНЯЕТ, поэтому присутствие ничего не говорит — исход решает
+	// состояние строки: REVOKED ⇒ отзыв (вместе с выдачами по делегированию,
+	// одна транзакция) закоммичен; ACTIVE ⇒ не дошёл до коммита.
+	case *iamv1.CreateGrantDelegationMetadata:
+		return resolveExistence(ctx, kindCreate, m.GetGrantDelegationId(),
+			rd.AccessBindings().GrantDelegations().Get, marshalGrantDelegation)
+	case *iamv1.RevokeGrantDelegationMetadata:
+		return resolveGrantDelegationRevoke(ctx, domain.GrantDelegationID(m.GetGrantDelegationId()),
+			rd.AccessBindings().GrantDelegations().Get)
+
 	case *iamv1.RemoveUserFromAccountMetadata:
 		// Исключение человека из аккаунта (kacho#1127). Разрешается по ОТСУТСТВИЮ
 		// членства — той самой строки, которую операция и снимает.
@@ -467,4 +479,40 @@ func marshalAccessBinding(ab domain.AccessBinding) (*anypb.Any, error) {
 		return nil, err
 	}
 	return anypb.New(dst)
+}
+
+func marshalGrantDelegation(d domain.GrantDelegation) (*anypb.Any, error) {
+	var dst *iamv1.GrantDelegation
+	if err := dto.Transfer(dto.FromTo(d, &dst)); err != nil {
+		return nil, err
+	}
+	return anypb.New(dst)
+}
+
+// resolveGrantDelegationRevoke — исход осиротевшего отзыва делегирования по
+// СОСТОЯНИЮ строки (kaname#986): строка остаётся и после отзыва, поэтому
+// присутствие исхода не решает. REVOKED ⇒ отзыв закоммичен, ответ — отозванное
+// делегирование; ACTIVE ⇒ отзыв не дошёл до коммита; строки нет ⇒ отзывать было
+// нечего, работа не состоялась.
+func resolveGrantDelegationRevoke(
+	ctx context.Context,
+	id domain.GrantDelegationID,
+	get func(context.Context, domain.GrantDelegationID) (domain.GrantDelegation, error),
+) (operations.ResolverResult, error) {
+	d, err := get(ctx, id)
+	switch {
+	case err == nil:
+	case errors.Is(err, iamerr.ErrNotFound):
+		return interrupted(), nil
+	default:
+		return operations.ResolverResult{}, fmt.Errorf("operationresolver: grant delegation %q: %w", id, err)
+	}
+	if d.Status != domain.GrantDelegationRevoked {
+		return interrupted(), nil
+	}
+	resp, err := marshalGrantDelegation(d)
+	if err != nil {
+		return operations.ResolverResult{}, fmt.Errorf("operationresolver: marshal grant delegation %q: %w", id, err)
+	}
+	return done(resp), nil
 }

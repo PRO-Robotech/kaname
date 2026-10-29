@@ -41,7 +41,7 @@ const (
 
 // mintPolicy builds a CallerPolicy with the mint allow-list populated.
 func mintPolicy(prod bool, sans ...string) *CallerPolicy {
-	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs(), testServiceNameForm).
+	return NewCallerPolicy(prod, GatewayFrontedInternalRPCs()).WithModuleRoster(testModuleRoster()).
 		WithSANAllowlist(map[string][]string{bootstrapMintMethod: sans})
 }
 
@@ -103,7 +103,7 @@ func TestCallerPolicy_BootstrapMint_EmptyAllowlist_DeniesEveryone(t *testing.T) 
 			// перечень объявлен пустым
 			mintPolicy(prod),
 			// перечень не настраивался вовсе
-			NewCallerPolicy(prod, GatewayFrontedInternalRPCs(), testServiceNameForm),
+			NewCallerPolicy(prod, GatewayFrontedInternalRPCs()).WithModuleRoster(testModuleRoster()),
 			// перечень очищен явно
 			mintPolicy(prod).WithSANAllowlist(nil),
 		} {

@@ -550,6 +550,9 @@ type roleWriter struct {
 // the roles_definition_tier_xor CHECK and the roles_acc/prj_custom_unique partial indexes,
 // and by the account_id/project_id FK (an ” would dangle).
 func (w *roleWriter) Insert(ctx context.Context, r domain.Role) (domain.Role, error) {
+	if err := holdRoleNames(ctx, w.tx, r.HeldNames); err != nil {
+		return domain.Role{}, err
+	}
 	permsJSON, err := json.Marshal(stringSlice(r.Permissions))
 	if err != nil {
 		return domain.Role{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument permissions: %s", err.Error())
@@ -697,6 +700,9 @@ func (w *roleWriter) UpsertSystemRole(ctx context.Context, r domain.Role) (domai
 // Update — UPDATE на mutable полях. Custom-role: name (с UNIQUE check),
 // description, permissions. System-role caller отвергает на use-case-уровне.
 func (w *roleWriter) Update(ctx context.Context, r domain.Role, updateMask []string) (domain.Role, error) {
+	if err := holdRoleNames(ctx, w.tx, r.HeldNames); err != nil {
+		return domain.Role{}, err
+	}
 	args, changed, err := roleUpdateArgs(r, updateMask)
 	if err != nil {
 		return domain.Role{}, err
@@ -728,6 +734,9 @@ func (w *roleWriter) Update(ctx context.Context, r domain.Role, updateMask []str
 func (w *roleWriter) UpdateCAS(ctx context.Context, r domain.Role, updateMask []string, expectedVersion string) (domain.Role, error) {
 	if expectedVersion == "" {
 		return w.Update(ctx, r, updateMask)
+	}
+	if err := holdRoleNames(ctx, w.tx, r.HeldNames); err != nil {
+		return domain.Role{}, err
 	}
 	args, _, err := roleUpdateArgs(r, updateMask)
 	if err != nil {
@@ -1187,8 +1196,8 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 			`INSERT INTO kaname.role_rule_selectors
 			   (role_id, rule_fp, arm, object_types, resource_names, match_labels,
 			    container_type, container_arm, container_resource_names, container_match_labels,
-			    verbs_by_type, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11::jsonb, now(), now())
+			    verbs_by_type, created_by_subject, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11::jsonb, $12, now(), now())
 			 ON CONFLICT (role_id, rule_fp) DO UPDATE
 			    SET arm                      = EXCLUDED.arm,
 			        object_types             = EXCLUDED.object_types,
@@ -1199,9 +1208,11 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 			        container_resource_names = EXCLUDED.container_resource_names,
 			        container_match_labels   = EXCLUDED.container_match_labels,
 			        verbs_by_type            = EXCLUDED.verbs_by_type,
+			        created_by_subject       = EXCLUDED.created_by_subject,
 			        updated_at               = now()`,
 			string(roleID), sel.RuleFP, armText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
 			cont.typ, cont.arm, cont.names, cont.labels, grants,
+			sel.CreatedBySubject,
 		); err != nil {
 			// A CHECK violation (23514 — e.g. match_labels fails labels_valid)
 			// must surface as InvalidArgument, not INTERNAL; mapErr also keeps the pgx
@@ -1270,25 +1281,32 @@ func (w *roleWriter) RegrainSelectorVerbs(ctx context.Context, roleID domain.Rol
 // RulesForRegrain читает правила роли под замком строки (FOR SHARE) — в той
 // транзакции, где затем идёт RegrainSelectorVerbs (довод — у него). `live=false`
 // — роль снята либо её нет: строк селекторов у неё нет, пересчитывать нечего.
-func (w *roleWriter) RulesForRegrain(ctx context.Context, roleID domain.RoleID) (domain.Rules, bool, error) {
+//
+// Политика роли читается ТЕМ ЖЕ оператором и под тем же замком: от владельца
+// роли зависит, влечёт ли правка удаление (kaname#1006), и пересчёт по правилам
+// без владельца дал бы роли модуля удаление, которого её манифест не объявлял.
+func (w *roleWriter) RulesForRegrain(ctx context.Context, roleID domain.RoleID) (domain.Rules, domain.RulePolicy, bool, error) {
 	var (
-		raw  []byte
-		live bool
+		raw         []byte
+		isSystem    bool
+		ownerModule sql.NullString
+		live        bool
 	)
 	err := w.tx.QueryRow(ctx,
-		`SELECT CASE WHEN jsonb_typeof(rules) = 'array' THEN rules ELSE '[]'::jsonb END, live
-		   FROM kaname.roles WHERE id = $1 FOR SHARE`, string(roleID)).Scan(&raw, &live)
+		`SELECT CASE WHEN jsonb_typeof(rules) = 'array' THEN rules ELSE '[]'::jsonb END,
+		        is_system, owner_module, live
+		   FROM kaname.roles WHERE id = $1 FOR SHARE`, string(roleID)).Scan(&raw, &isSystem, &ownerModule, &live)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, false, nil
+		return nil, domain.RulePolicy{}, false, nil
 	}
 	if err != nil {
-		return nil, false, mapErr(err, "", string(roleID))
+		return nil, domain.RulePolicy{}, false, mapErr(err, "", string(roleID))
 	}
 	rules, derr := domain.DecodeRules(raw)
 	if derr != nil {
-		return nil, false, fmt.Errorf("правила роли %s не разбираются: %w", roleID, derr)
+		return nil, domain.RulePolicy{}, false, fmt.Errorf("правила роли %s не разбираются: %w", roleID, derr)
 	}
-	return rules, live, nil
+	return rules, domain.PolicyOfRole(isSystem, ownerModule.String), live, nil
 }
 
 // dequeueSelectorVerbs — роль снимается из очереди пересчёта глаголов правил.

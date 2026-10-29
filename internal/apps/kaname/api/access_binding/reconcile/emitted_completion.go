@@ -3,66 +3,93 @@
 
 package reconcile
 
-// emitted_completion.go — неизменный член выдачи нескольким субъектам доводится
-// до полного набора кортежей (kaname#880).
+// emitted_completion.go — неизменный действующий член выдачи сводится к своему
+// желаемому набору кортежей: недостающее дописывается (kaname#880), лишнее
+// снимается (kaname#1006).
 //
 // # Почему сверки по ключу члена здесь мало
 //
 // Сверка прохода судит члена по ключу (правило, объект) и статусу: совпали —
-// член «не изменился», и его кортежи не пишутся. Для выдачи ОДНОМУ субъекту это
-// точно: набор кортежей члена — функция ключа. Для выдачи нескольким субъектам —
-// нет: кортежи — объединение по субъектам, а субъектов в ключе нет.
+// член «не изменился», и его кортежи не пишутся. Это было бы точно, будь набор
+// кортежей члена функцией ключа. Он ею не является, и случаев два:
 //
-// Код до kaname#880 разворачивал выдачу одному первому субъекту. Член такой
-// выдачи записан с тем же ключом, что даёт ему нынешний вывод, но с кортежами
-// одного субъекта; сверка по ключу сочла бы его неизменным навсегда, и кортежи
-// субъектов со второго по N-й не были бы записаны ни одним проходом — ни обходом
-// по таймеру, ни проходом при старте. Свидетель полноты один — реестр
-// выпущенного: недостающее в нём дописывается тем же порядком, что запись
-// нового члена (журнал кортежей и реестр в одной транзакции).
+//   - выдача нескольким субъектам (kaname#880): кортежи — объединение по
+//     субъектам, а субъектов в ключе нет. Код до kaname#880 разворачивал выдачу
+//     одному первому субъекту; член такой выдачи записан с тем же ключом, что
+//     даёт ему нынешний вывод, но с кортежами одного субъекта, и сверка по ключу
+//     сочла бы его неизменным навсегда;
+//   - набор глаголов правила зависит не только от отпечатка правила, но и от
+//     каталога и политики роли (kaname#1006): роль модуля перестала получать
+//     удаление к правке, а ключ её члена остался прежним. Выдача,
+//     материализованная прежним вычислением, несла бы лишний `v_delete`
+//     навсегда — ни обход по таймеру, ни проход при старте его не сняли бы.
 //
-// # Цена
+// Свидетель выпущенного один — реестр: недостающее в нём дописывается тем же
+// порядком, что запись нового члена (журнал кортежей и реестр в одной
+// транзакции); лишнее снимается тем же порядком, что снятие выпавшего члена
+// (`revokeMemberTuples`): своя строка реестра — раньше строки снятия (kaname#919),
+// кортеж, на который претендует другой выживший член выдачи, в движке остаётся.
 //
-// Реестр читается лишь у выдачи с двумя и более субъектами, лениво — когда в
-// проходе нашёлся неизменный действующий член, и не более раза за проход:
-// полный проход — одно обращение по префиксу первичного ключа реестра
-// (binding_id), строк столько, сколько выдача выпустила; проход по объекту —
-// одно обращение по объекту. У сошедшейся выдачи недостающего нет, и проход
-// ничего не пишет (проба TestReconcileMultiSubject_ConvergedBindingIsNotRewritten).
+// # Где сводится и цена
 //
-// # Контракт: дописывание только добавляет
+// СВОДЯЩИЙ проход (`Reconciler.ConvergeBinding`) сводит каждого неизменного
+// действующего члена при любом числе субъектов. Его зовёт проход по всем
+// действующим выдачам (`seed.BackfillRunner`): при старте, после пересчёта
+// проекций ролей, — то есть сведение к новому вычислению приезжает с выкаткой,
+// тем же шагом, что и само вычисление, — и затем по такту (`RunEvery`, по
+// умолчанию раз в пять минут): лишнее, которое реплика прежней версии записала
+// во время перекрытия выкатки, и выдача, отказавшая в прошлом проходе,
+// сводятся без перезапуска (seed/binding_converge.go). Реестр выдачи читается
+// лениво — когда нашёлся неизменный действующий член — и не более раза за
+// проход, одним обращением по префиксу первичного ключа реестра (binding_id);
+// строк столько, сколько выдача выпустила. Цена платится раз за такт, а не на
+// каждом обходе по таймеру.
 //
-// Дописывание по ключу члена даёт НАДМНОЖЕСТВО выпущенного и само ничего не
-// снимает: кортеж субъекта, которого в наборе больше нет, оно оставило бы на
-// месте. Это верно, пока набор субъектов выдачи после создания неизменен —
-// `subjects` стоит в перечне неизменяемых полей обновления
-// (`abImmutableFields`, update.go), а снятие выдачи целиком идёт по реестру
-// выпущенного: отзыв (`RevokeAccessBindingUseCase.doRevoke`) и удаление
-// (`DeleteAccessBindingUseCase.deleteOnce`) читают его через
-// `SelectEmittedTuples`. Метод сужения набора (`DeleteSubject` репозитория
-// выдачи) в рабочем коде не вызывается; появится такой вызов — дописывание
-// обязано снимать кортежи вычтенных членов, и это отдельный предмет, а не
-// правка этого файла мимоходом.
+// Обход по таймеру, правка роли и проход ПО ОБЪЕКТУ (горячий путь регистрации)
+// реестр читают, как прежде, лишь у выдачи с двумя и более субъектами: обход
+// идёт по каждой выдаче каждые полминуты, и чтение реестра выдачи одному
+// субъекту на каждом обходе удвоило бы его чтения ради расхождения, которое
+// возникает только со сменой вычисления — а та приезжает выкаткой и сводится
+// тактом сводящего прохода. У сошедшейся
+// выдачи ни недостающего, ни лишнего нет, и проход ничего не пишет (пробы
+// TestReconcileMultiSubject_ConvergedBindingIsNotRewritten,
+// TestReconcile_ConvergedModuleRoleBindingIsNotRewritten).
+//
+// # Что лишним НЕ считается
+//
+// Лишняя — строка реестра ПОД КООРДИНАТОЙ сводимого члена, на которую не
+// претендует ни один желаемый действующий член этой координаты. Строки других
+// координат и строки уровня выдачи (нулевая координата) не трогаются: у них свой
+// владелец и свой путь снятия.
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // emittedView — реестр выпущенного выдачей в границах прохода, прочитанный
-// лениво и не более одного раза. nil — проход недостающего не ищет. Строка реестра
-// судится парой (координата члена, кортеж): кортеж, записанный ДРУГОЙ координатой,
-// за свой этому члену не засчитывается — уход той координаты снял бы его (kaname#933).
+// лениво и не более одного раза. nil — проход неизменных членов не сводит. Строка
+// реестра судится парой (координата члена, кортеж): кортеж, записанный ДРУГОЙ
+// координатой, за свой этому члену не засчитывается — уход той координаты снял бы
+// его (kaname#933).
 type emittedView struct {
 	load func(ctx context.Context) ([]LedgerRow, error)
-	set  map[LedgerRow]struct{}
+	// converge — сводящий проход: неизменный член сводится при любом числе
+	// субъектов.
+	converge bool
+	set      map[LedgerRow]struct{}
+	// byCoord — те же строки по координате члена: сведение одного члена не
+	// обходит реестр всей выдачи.
+	byCoord map[MemberCoord]map[domain.MembershipTuple]struct{}
 }
 
-// bindingEmitted — реестр всей выдачи (полный проход).
-func bindingEmitted(s ReconcileStore, bindingID domain.AccessBindingID) *emittedView {
-	return &emittedView{load: func(ctx context.Context) ([]LedgerRow, error) {
+// bindingEmitted — реестр всей выдачи (полный проход); converge — проход сводящий.
+func bindingEmitted(s ReconcileStore, bindingID domain.AccessBindingID, converge bool) *emittedView {
+	return &emittedView{converge: converge, load: func(ctx context.Context) ([]LedgerRow, error) {
 		return s.LedgerTuples(ctx, bindingID)
 	}}
 }
@@ -85,54 +112,108 @@ func objectEmitted(s ReconcileStore, bindingID domain.AccessBindingID, objectTyp
 	}}
 }
 
-func (v *emittedView) rows(ctx context.Context) (map[LedgerRow]struct{}, error) {
+// converges — сводит ли проход неизменного члена выдачи `bs`.
+func (v *emittedView) converges(bs BindingScope) bool {
+	return v != nil && (v.converge || len(bs.Subjects) >= 2)
+}
+
+func (v *emittedView) ensure(ctx context.Context) error {
 	if v.set != nil {
-		return v.set, nil
+		return nil
 	}
 	rows, err := v.load(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	v.set = make(map[LedgerRow]struct{}, len(rows))
+	v.byCoord = make(map[MemberCoord]map[domain.MembershipTuple]struct{})
 	for _, row := range rows {
-		v.set[row] = struct{}{}
+		v.add(row)
 	}
-	return v.set, nil
+	return nil
 }
 
-// completeMemberTuples дописывает неизменному действующему члену `d` кортежи,
-// которых нет в реестре выпущенного выдачей под ЕГО координатой: журнал кортежей и
-// реестр — в той же транзакции прохода, тем же порядком, что запись нового члена
-// (applyDiff). Выдача одному субъекту не читается вовсе — у неё ключ члена точен.
-func (r *Reconciler) completeMemberTuples(ctx context.Context, s ReconcileStore, bs BindingScope,
-	d DesiredMember, emitted *emittedView, col *syncFGACollector) error {
-	if emitted == nil || len(bs.Subjects) < 2 || len(d.Tuples) == 0 {
+func (v *emittedView) add(row LedgerRow) {
+	v.set[row] = struct{}{}
+	at := v.byCoord[row.Member]
+	if at == nil {
+		at = make(map[domain.MembershipTuple]struct{})
+		v.byCoord[row.Member] = at
+	}
+	at[row.Tuple] = struct{}{}
+}
+
+func (v *emittedView) forget(row LedgerRow) {
+	delete(v.set, row)
+	delete(v.byCoord[row.Member], row.Tuple)
+}
+
+// convergeMemberTuples сводит неизменного действующего члена `d` к его желаемому
+// набору: дописывает кортежи, которых нет в реестре под ЕГО координатой, и снимает
+// строки этой координаты, на которые не претендует ни один желаемый действующий
+// член (`claims`). Порядок записи — тот же, что у нового члена (applyDiff), порядок
+// снятия — тот же, что у выпавшего (revokeMemberTuples).
+func (r *Reconciler) convergeMemberTuples(ctx context.Context, s ReconcileStore, bs BindingScope,
+	d DesiredMember, emitted *emittedView, claims *memberClaims, col *syncFGACollector) error {
+	if !emitted.converges(bs) || len(d.Tuples) == 0 {
 		return nil
 	}
-	have, err := emitted.rows(ctx)
-	if err != nil {
+	if err := emitted.ensure(ctx); err != nil {
 		return fmt.Errorf("emitted ledger of %s: %w", bs.BindingID, err)
 	}
 	coord := desiredCoord(d)
+
 	var missing []domain.MembershipTuple
 	for _, t := range d.Tuples {
-		if _, ok := have[LedgerRow{Member: coord, Tuple: t}]; !ok {
+		if _, ok := emitted.set[LedgerRow{Member: coord, Tuple: t}]; !ok {
 			missing = append(missing, t)
 		}
 	}
-	if len(missing) == 0 {
-		return nil
-	}
-	if fresh := col.collectNew(missing); len(fresh) > 0 {
-		if err := s.EmitTupleWrite(ctx, fresh); err != nil {
-			return fmt.Errorf("emit missing tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
+	if len(missing) > 0 {
+		if fresh := col.collectNew(missing); len(fresh) > 0 {
+			if err := s.EmitTupleWrite(ctx, fresh); err != nil {
+				return fmt.Errorf("emit missing tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
+			}
+		}
+		if err := s.RecordEmittedTuples(ctx, bs.BindingID, coord, missing); err != nil {
+			return fmt.Errorf("record missing emitted tuple %s:%s: %w", d.ObjectType, d.ObjectID, err)
+		}
+		for _, t := range missing {
+			emitted.add(LedgerRow{Member: coord, Tuple: t})
 		}
 	}
-	if err := s.RecordEmittedTuples(ctx, bs.BindingID, coord, missing); err != nil {
-		return fmt.Errorf("record missing emitted tuple %s:%s: %w", d.ObjectType, d.ObjectID, err)
+
+	var forget []LedgerRow
+	var revoke []domain.MembershipTuple
+	for t := range emitted.byCoord[coord] {
+		if claims.claimedAt(coord, t) {
+			continue
+		}
+		forget = append(forget, LedgerRow{Member: coord, Tuple: t})
+		if !claims.claimed(t) {
+			revoke = append(revoke, t)
+		}
 	}
-	for _, t := range missing {
-		have[LedgerRow{Member: coord, Tuple: t}] = struct{}{}
+	if len(forget) == 0 {
+		return nil
 	}
+	// Порядок — детерминированный: строка снятия журнала и вызовы порта не должны
+	// зависеть от обхода карты.
+	slices.SortFunc(forget, func(a, b LedgerRow) int { return compareTuples(a.Tuple, b.Tuple) })
+	slices.SortFunc(revoke, compareTuples)
+	// Своя строка реестра — раньше строки снятия (kaname#919).
+	if err := s.ForgetEmittedTuples(ctx, bs.BindingID, forget); err != nil {
+		return fmt.Errorf("forget surplus emitted tuple %s:%s: %w", d.ObjectType, d.ObjectID, err)
+	}
+	for _, row := range forget {
+		emitted.forget(row)
+	}
+	// Строка снятия — в конец прохода (вычитание записанного тем же проходом).
+	col.deferDelete(bs.BindingID, revoke)
 	return nil
+}
+
+// compareTuples — порядок кортежей: субъект, отношение, объект.
+func compareTuples(a, b domain.MembershipTuple) int {
+	return cmp.Or(cmp.Compare(a.User, b.User), cmp.Compare(a.Relation, b.Relation), cmp.Compare(a.Object, b.Object))
 }

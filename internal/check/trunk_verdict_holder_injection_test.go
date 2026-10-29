@@ -264,3 +264,28 @@ func TestTrunkCorpusGateCanFail(t *testing.T) {
 		require.Contains(t, err.Error(), "не искали")
 	})
 }
+
+// TestPushesToTrunkReadsATagOnlyFilterAsTheProvider — `push` с фильтром одних
+// меток на ствол не идёт, а близнец, назвавший ещё и ветку `main`, идёт
+// (kaname#964). Каждый случай — один факт против соседнего.
+func TestPushesToTrunkReadsATagOnlyFilterAsTheProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		on   string
+		want bool
+	}{
+		{"только метки — ствола нет", "on:\n  push:\n    tags: [\"v[0-9]+.[0-9]+.[0-9]+\"]\n", false},
+		{"метки и ствол — ствол есть", "on:\n  push:\n    tags: [\"v[0-9]+.[0-9]+.[0-9]+\"]\n    branches: [main]\n", true},
+		{"только исключение меток — ствола нет", "on:\n  push:\n    tags-ignore: [\"x*\"]\n", false},
+		{"метки и исключение ветвей — ствол возможен", "on:\n  push:\n    tags: [\"v*\"]\n    branches-ignore: [\"wip-*\"]\n", true},
+		{"фильтр путей без ссылок — ствол есть", "on:\n  push:\n    paths: [\"deploy/**\"]\n", true},
+		{"push без тела — ствол есть", "on:\n  push:\n", true},
+		{"ветка не ствол — ствола нет", "on:\n  push:\n    branches: [\"[0-9]+\"]\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _, err := check.PushesToTrunk("name: probe\n" + tc.on + "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps: [{run: \"true\"}]\n")
+			require.NoError(t, err)
+			require.Equalf(t, tc.want, got, "триггер:\n%s", tc.on)
+		})
+	}
+}

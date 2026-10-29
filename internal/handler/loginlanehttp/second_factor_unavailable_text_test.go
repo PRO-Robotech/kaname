@@ -22,7 +22,6 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
 )
 
 // stepSecondFactorUnavailable — Ф12 Р2: материал не открывается; дословно.
@@ -102,11 +101,11 @@ func newLaneLogged(t *testing.T, stub *stubLane, logger *slog.Logger) *lane {
 	t.Helper()
 	ca := newCA(t)
 	h, err := loginlanehttp.New(loginlanehttp.Config{
-		SessionTTL:      24 * time.Hour,
-		TrustDomain:     grpcsrv.NewTrustDomain(trustDomain),
-		RefusalDomain:   "iam.kaname.cloud",
-		Logger:          logger,
-		ServiceNameForm: servicesan.NewForm(laneServiceNameForm),
+		SessionTTL:    24 * time.Hour,
+		TrustDomain:   grpcsrv.NewTrustDomain(trustDomain),
+		Modules:       laneRoster(t),
+		RefusalDomain: "iam.kaname.cloud",
+		Logger:        logger,
 	}, stub)
 	require.NoError(t, err)
 	srv := httptest.NewUnstartedServer(h)

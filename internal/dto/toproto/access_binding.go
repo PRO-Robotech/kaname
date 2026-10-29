@@ -74,7 +74,35 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		// «ничего не выдано» и «выдано в обход» снова становятся неотличимы.
 		GrantedRelation: b.GrantedRelation,
 		System:          b.System,
+		// Причина отзыва (kaname#963, Д2) — на каждом чтении, как статус.
+		RevocationReason: revocationReasonToProto(b.RevocationReason),
+		// Делегирование, по которому выдачу сделал делегат (kaname#986) — на
+		// каждом чтении: единая проекция Get и всех перечней (CE-15).
+		DelegationId: string(b.DelegationID),
 	}, nil
+}
+
+// revocationReasonToProto — слово хранения причины отзыва → значение контракта.
+// Поле контракта с присутствием: nil — «не отозвана либо отозвана до заведения
+// поля» (Д7), и в теле края такого ключа нет (URG-E2). Слово вне словаря
+// проецируется тем же nil, а не выдумывается: словарь колонки закрыт
+// ограничением `access_bindings_revocation_reason_ck`, и такое слово возникнуть
+// не может.
+func revocationReasonToProto(r domain.RevocationReason) *iamv1.AccessBinding_RevocationReason {
+	var v iamv1.AccessBinding_RevocationReason
+	switch r {
+	case domain.RevocationReasonRevoke:
+		v = iamv1.AccessBinding_REVOCATION_REASON_REVOKE
+	case domain.RevocationReasonExpired:
+		v = iamv1.AccessBinding_REVOCATION_REASON_EXPIRED
+	case domain.RevocationReasonResourceUnregistered:
+		v = iamv1.AccessBinding_REVOCATION_REASON_RESOURCE_UNREGISTERED
+	case domain.RevocationReasonDelegationRevoked:
+		v = iamv1.AccessBinding_REVOCATION_REASON_DELEGATION_REVOKED
+	default:
+		return nil
+	}
+	return &v
 }
 
 // materializedAtProto projects the materialization instant, truncated to seconds

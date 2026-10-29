@@ -90,7 +90,7 @@ func servePublicAccessKeys(t *testing.T, reg *seed.PermissionRegistry, srv iamv1
 	chain := append([]grpc.UnaryServerInterceptor{authzguard.DenyDetailUnary(reg)},
 		publicIdentityUnary(fwdCfg(acrTestGatewaySAN), nil)...)
 	chain = append(chain, authzguard.NewPublicCallerPolicy(
-		true, authzguard.PublicPeerCallableRPCs(), reg, presentedcred.Presented, probeServiceNameForm).Unary())
+		true, authzguard.PublicPeerCallableRPCs(), reg, presentedcred.Presented).WithModuleRoster(testModuleRoster()).Unary())
 	gsrv := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)), grpc.ChainUnaryInterceptor(chain...))
 	iamv1.RegisterAccessKeyServiceServer(gsrv, srv)
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

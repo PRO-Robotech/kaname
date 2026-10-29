@@ -13,9 +13,14 @@
 # Прочие роли раздела — ПРОБНЫЕ, их `kacho#3274` не вносит (П1 приёмки
 # `nested-rule-reaches-descendants-of-a-named-container.md`, kaname#874):
 # `registry.reader` (то же, что `registry.public.read`), `registry.viewer` (без
-# вложенного), `registry.reader_get` (у вложенного только `get`),
-# `registry.reader_named` (у вложенного `resourceNames: [app]`). Id каждой —
+# вложенного), `registry.reader_get` (у вложенного только `get`). Id каждой —
 # той же формулой от имени.
+#
+# Роли `registry.reader_named` (у вложенного `resourceNames: [app]`) здесь
+# больше нет: манифест модуля не называет конкретных объектов (kaname#965), и
+# загрузчик такую роль отвергает. Пробе ND-05 (б), которой она нужна, строку
+# этой роли кладёт применитель напрямую, минуя загрузчик, — как строку,
+# доставленную до запрета.
 #
 # Приёмка docs/engineering/acceptance/anonymous-and-authenticated-are-subject-classes.md,
 # П6, SC-60…73; равенство блоков канону судит SC-70 (б), роли его не трогают.
@@ -145,16 +150,3 @@ roles:
         children:
           - resources: [repositories]
             classes: [get]
-
-  - id: registry.reader_named
-    description: >
-      Пробная роль: как registry.reader, но вложенное правило сужено именами.
-    tier: {tierType: iam.cluster, tierId: cluster_root}
-    rules:
-      - module: registry
-        resources: [registries]
-        classes: [get, list]
-        children:
-          - resources: [repositories]
-            classes: [get, list]
-            resourceNames: [app]

@@ -182,3 +182,25 @@ func TestZeroPolicyIsTheStrictestBranch(t *testing.T) {
 		t.Fatal("нулевая политика приняла подстановку ресурса")
 	}
 }
+
+// TestUpdateImpliesDeleteFollowsTheOwner — правка влечёт удаление у ролей
+// платформы и арендатора и не влечёт у роли модуля (kaname#1006). Нулевая
+// политика — самая строгая ветвь: удаление не приписывается.
+func TestUpdateImpliesDeleteFollowsTheOwner(t *testing.T) {
+	cases := []struct {
+		name   string
+		policy domain.RulePolicy
+		want   bool
+	}{
+		{"арендаторская", domain.PolicyOfRole(false, ""), true},
+		{"платформенная", domain.PolicyOfRole(true, ""), true},
+		{"модульная", domain.PolicyOfRole(true, "registry"), false},
+		{"вырожденная «не системная с владельцем» — арендаторская", domain.PolicyOfRole(false, "registry"), true},
+		{"нулевая", domain.RulePolicy{}, false},
+	}
+	for _, c := range cases {
+		if got := c.policy.UpdateImpliesDelete(); got != c.want {
+			t.Errorf("%s: UpdateImpliesDelete=%v, ждали %v", c.name, got, c.want)
+		}
+	}
+}

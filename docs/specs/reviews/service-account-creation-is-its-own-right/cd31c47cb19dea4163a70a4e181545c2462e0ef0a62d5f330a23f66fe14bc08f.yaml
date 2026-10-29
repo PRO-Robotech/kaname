@@ -1,0 +1,184 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/service-account-creation-is-its-own-right.md
+  sha256: cd31c47cb19dea4163a70a4e181545c2462e0ef0a62d5f330a23f66fe14bc08f
+  revision: 3
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор. Вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: 5c6b7c07804d6972f2e8a3eb3e8f92b92c7f43d0
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status` → `?? docs/engineering/acceptance/…`). Судится
+    содержимое по отпечатку, а не коммит.
+  branch: 1003-acceptance
+  task: PRO-Robotech/kaname#1003
+  related_tasks: [PRO-Robotech/kaname#986, PRO-Robotech/kaname#980]
+  lines: 1191
+  round: 3
+  round_note: >-
+    Третьего полного круга нет (`flow-acceleration.md#fa-b8-acceptance-two-rounds`). Это проверка
+    ТОЛЬКО дельты f283293c→cd31c47c по решению диспетчера: закрыт ли B4 круга 2 и внесены ли три
+    важных замечания. Пункты вне дельты не переоткрывались (`fa-b1-reanalysis-delta-only`).
+  predecessor_record: docs/specs/reviews/service-account-creation-is-its-own-right/f283293c46bb1d7ce057f0c92331979a060b9c98b161b6c0295db4eb9b7594dc.yaml
+  fingerprint_predicate: >-
+    sha256sum в копии kacho-workspace/tmp/kn-1003-acceptance @ 5c6b7c078: документ →
+    cd31c47c…c08f (совпало с возвратом автора); служебная копия `.md.f283293c` → f283293c…94dc
+    (совпало с записью круга 2).
+  delta_predicate: >-
+    diff -u <копия>.f283293c <документ> — совпадает с диффом автора `kn1003-r3.diff` во всём, кроме
+    пути в строке заголовка; изменённых строк 43 (`grep -c '^[-+][^-+]'`). Ханков 7: шапка
+    (редакция, строка истории круга 2, ссылка на §11), Д-1003, Р3 «Выключение», SAC-40, §5.1 строка
+    SAC-40, DoD S1 п.6, новый §11. Других правок нет.
+  measurement_revisions: >-
+    Дерево kaname читалось в той же копии @ 5c6b7c078.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-25T16:13:56Z'
+
+effective_approval:
+  issued: true
+  issued_at: "2026-10-25T19:14:18Z"
+  ban1_lifted: false
+  why: >-
+    Вердикт роли — APPROVED, блокирующих 0. Санкция на код открывается внешним событием, которого
+    пока нет (раздел event). До публикации одобрения нет.
+
+premise:
+  task_premise: >-
+    Подтверждена. Посылка автора о коде верна: set_enabled.go:43-48 @5c6b7c078 — «Access tokens
+    already minted are not invalidated here; they run out on their own schedule. What stops at once
+    is every path that mints a NEW one — the token hook…, key issuance, and the docker-registry
+    token endpoint».
+
+closed_from_round_2:
+  - id: B4
+    kind: COVERAGE
+    status: closed
+    where: Р3, «Исход для самого создателя», пункт «Выключение» (строки 438-443)
+    note: >-
+      Текст теперь верен коду на пути, которым ходит потребитель (арендаторский слушатель kaname,
+      Р-В5). 1) Выпуск закрыт: обмен ключа на токен отказывает выключенной учётке
+      (service/token_enrichment_own_lane.go:110-111 — ErrServiceAccountDisabled), выпуск ключа —
+      sa_keys/usecases.go:385, токен реестра — registry_token/sakey_validator.go:112. 2) Выпущенный
+      токен принимается: читатель предъявленного удостоверения (internal/presentedcred, провязка
+      cmd/kaname/serve.go:945-959) проверяет подпись, издателя, аудиторию и реестр отзыва
+      выпущенных токенов; состояние учётки он не читает (git grep -i
+      'enabled|service_accounts|MayAuth' -- internal/presentedcred ':!*_test.go' → 0), и Disable в
+      реестр отзыва ничего не пишет (git grep -i revoc -- api/service_account ':!*_test.go' → о
+      предмете 0). 3) Дверь выключенность не судит: personmarks читает только kaname.users
+      (`SELECT id, (email_verified_at IS NOT NULL)`), а admission.ID возвращает `!person ||
+      verified` (admission.go:98-99) — учётка не человек и допущена. Значит, по выпущенному
+      токену учётка-создатель до его срока создаёт и ведёт учётки по роли C — как и написано.
+
+closed_important_from_round_2:
+  - kind: COVERAGE
+    where: SAC-40 e; §5.1 строка SAC-40
+    note: >-
+      Строка e — RoleService.Update rol-own, updateMask ["rules"], правило d. Отказ с полем
+      `rules[0].createdBySubject` согласован с таблицей отказов (строка 464 — `Create`, `Update`).
+      UpdateRoleRequest плоский (role_service.proto:235-249), путь поля без обёртки верен.
+      Близнец назван (c). Производитель у e — §5.1.
+  - kind: SCOPE
+    where: §3, Д-1003
+    note: Подтверждение диспетчера записано с цитатой.
+  - kind: DoD
+    where: DoD S1 п.6
+    note: >-
+      Правило общее («проба, чьё Дано требует роли C или её выдачи»), три примера даны после
+      «так —». Исход каждой пробы до и после изменения в DoD-proof называется одной из трёх
+      категорий. Пункт измерим.
+
+blocking: []
+
+defaults_fixed_at_review: []
+
+important_nonblocking:
+  - kind: COVERAGE
+    text: >-
+      Слово «немедленно» в «Выключении» точнее заменить на «в пределах окна вердикта двери, не
+      дожидаясь срока токена». Сами SAC-30 и SAC-33 ждут pollAsk false и окно вердикта двери
+      (PositiveTTL, строка 550). Прямой факт отзыв снимает в своей транзакции
+      (access_binding/revoke.go:160-215), но кэш вердикта двери остаётся. Формулировку предложила
+      запись круга 2, поэтому автору она в вину не ставится. Сценарии определяют поведение точно,
+      а слово только упрощает прозу и опасного прочтения не даёт: окно — секунды, срок токена
+      намного длиннее.
+  - kind: COVERAGE
+    text: >-
+      Утверждение «по ним учётка создаёт и ведёт учётки» верно для арендаторского слушателя kaname,
+      а этот путь и судит приёмка (Р-В5). Край kacho резолвит личность через
+      InternalIAMService.LookupSubject, и тот выключенной учётке отказывает
+      (internal_iam/lookup_subject.go:132-133, FAILED_PRECONDITION). Там остаточное право уже, то
+      есть безопаснее, чем написано. Уточнить слушатель можно при ближайшей правке; пока ошибка в
+      безопасную сторону.
+
+confirmed:
+  - "Отпечатки перемерены: cd31c47c…c08f (редакция 3) и f283293c…94dc (служебная копия) — оба совпали с заданием."
+  - "Сценариев 27 до и после: `grep -c '^#### SAC-'` = 27, `grep -c '^| SAC-'` = 27; множества ID совпадают (diff пуст)."
+  - "Изменённых строк 43, ханков 7, все в заявленных местах; вне дельты ничего не менялось."
+  - "Производитель у SAC-40 e — §5.1 (строка SAC-40 дополнена a, b, d, e). Близнец у отрицания e назван."
+  - "Раскрытия дефекта защиты нет: исход выключения назван классом поведения, пошагового пути к злоупотреблению нет."
+
+constructibility:
+  seeded: 0
+  by_named_fixture: >-
+    Новых «Дано» дельта не вводит. SAC-40 e строится в том же мире, что и b (rol-own, usr-A).
+  not_constructible_as_written: []
+  not_executed: >-
+    Посев не ставился: задание — проверка дельты, изоляции и разрешения на посев не называло;
+    testcontainers — тяжёлый класс, только слотом на внешнем кластере.
+
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: true
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: санкцию на код открывает только опубликованное событие этого вердикта
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1003
+  status: performed
+  published: true
+  database_id: 6401980777
+  node_id: "IC_kwDOUO26pM8AAAABfZZ5aQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/1003#issuecomment-6401980777"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6401980777"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-25T19:14:18Z"
+  body_sha256: "871f5a91dbf320a7f2f117da44b0ac2cd3307a7a421a4b1062ba30189844162f"
+  subject_sha256: "cd31c47cb19dea4163a70a4e181545c2462e0ef0a62d5f330a23f66fe14bc08f"
+  subject_revision_commit: "5dad8418cd4d7703315de01ee8ccd7acb52ad3ce"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/service-account-creation-is-its-own-right/4dcce34d1cf7a3d2b618bddfe50a47979914726898a250be27db198958ad43ab.yaml
+    - docs/specs/reviews/service-account-creation-is-its-own-right/f283293c46bb1d7ce057f0c92331979a060b9c98b161b6c0295db4eb9b7594dc.yaml

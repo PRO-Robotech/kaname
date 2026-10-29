@@ -737,6 +737,12 @@ func wdGridText() string {
 	return b.String()
 }
 
+// Метки, между которыми текст отчёта печатается в вывод прогона.
+const (
+	wdReportBeginMark = "===== ОТЧЁТ R7-2: НАЧАЛО ====="
+	wdReportEndMark   = "===== ОТЧЁТ R7-2: КОНЕЦ ====="
+)
+
 func writeWDReport(t *testing.T, prov scalegrid.Provenance, results []wdResult,
 	wall time.Duration, final bool) {
 	t.Helper()
@@ -758,19 +764,13 @@ func writeWDReport(t *testing.T, prov scalegrid.Provenance, results []wdResult,
 	}
 	if final {
 		t.Logf("отчёт записан: %s", path)
-		// Тот же текст — в поток прогона, дословно, между метками. Замер идёт
-		// заданием во внешнем кластере (решение владельца 2026-10-22: машина
-		// владельца для прогонов не используется), файл дерева остаётся в pod, а
-		// наружу доезжает лишь поток; отчёт в дерево кладётся из него без правки.
-		fmt.Fprintf(os.Stdout, "%s %s\n%s%s\n", wdReportStreamBegin, wdReportPath, text, wdReportStreamEnd)
+		// Текст отчёта целиком — и в вывод прогона, побайтово, между метками:
+		// прогон во внешнем кластере файлов обратно не возвращает, и отчёт
+		// переносится в дерево из журнала прогона (kaname#1006). Печать идёт мимо
+		// t.Logf намеренно: тот сдвигает строки продолжения отступом.
+		fmt.Fprintf(os.Stdout, "%s\n%s%s\n", wdReportBeginMark, text, wdReportEndMark)
 	}
 }
-
-// wdReportStreamBegin / wdReportStreamEnd — метки текста отчёта в потоке прогона.
-const (
-	wdReportStreamBegin = "=== R7-2 REPORT BEGIN"
-	wdReportStreamEnd   = "=== R7-2 REPORT END"
-)
 
 func renderWDReport(results []wdResult, wall time.Duration, final bool) string {
 	var b strings.Builder

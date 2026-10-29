@@ -82,15 +82,16 @@ func newHandlerWithStub(check bool) (*Handler, *stubVerdict) {
 	// whoAmI is required by the handler; tests that don't exercise WhoAmI pass
 	// a use-case with nil deps — its Execute() returns Unavailable via the
 	// documented defensive guards rather than panicking.
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil), probeModuleForm), stub
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithModuleRoster(testModuleRoster()), stub
 }
 
 func TestHandler_Check_AllowedHappyPath(t *testing.T) {
 	h := newHandler(true)
 	resp, err := h.Check(moduleCertCtx(), &iamv1.AuthorizeCheckRequest{
-		Subject:  "user:usr_alice",
-		Resource: &iamv1.ResourceRef{Type: "vpc_network", Id: "vpcn_x"},
-		Action:   "vpc.networks.list",
+		Subject:          "user:usr_alice",
+		Resource:         &iamv1.ResourceRef{Type: "vpc_network", Id: "vpcn_x"},
+		Action:           "vpc.networks.list",
+		RequiredRelation: "viewer",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -127,8 +128,8 @@ func TestHandler_BatchCheck_OrderPreserved(t *testing.T) {
 	h := newHandler(true)
 	resp, err := h.BatchCheck(moduleCertCtx(), &iamv1.BatchAuthorizeCheckRequest{
 		Checks: []*iamv1.AuthorizeCheckRequest{
-			{Subject: "user:a", Resource: &iamv1.ResourceRef{Type: "x", Id: "1"}, Action: "x.x.list"},
-			{Subject: "user:b", Resource: &iamv1.ResourceRef{Type: "x", Id: "2"}, Action: "x.x.list"},
+			{Subject: "user:a", Resource: &iamv1.ResourceRef{Type: "x", Id: "1"}, Action: "x.x.list", RequiredRelation: "viewer"},
+			{Subject: "user:b", Resource: &iamv1.ResourceRef{Type: "x", Id: "2"}, Action: "x.x.list", RequiredRelation: "viewer"},
 		},
 	})
 	if err != nil {
@@ -148,7 +149,7 @@ func TestHandler_BatchCheck_OrderPreserved(t *testing.T) {
 // system_admin) must NOT be silently dropped on the batch path. Here the verb
 // "list" would derive `viewer`, but the explicit override is "system_admin";
 // the verdict source MUST be asked about "system_admin", proving the override was
-// forwarded (and not the auto-derived viewer, which would slip admin gating).
+// forwarded (and not the relation derived from the action).
 func TestHandler_BatchCheck_ForwardsRequiredRelation(t *testing.T) {
 	h, stub := newHandlerWithStub(true)
 	_, err := h.BatchCheck(moduleCertCtx(), &iamv1.BatchAuthorizeCheckRequest{
@@ -156,7 +157,7 @@ func TestHandler_BatchCheck_ForwardsRequiredRelation(t *testing.T) {
 			{
 				Subject:          "user:a",
 				Resource:         &iamv1.ResourceRef{Type: "x", Id: "1"},
-				Action:           "x.x.list",     // would derive "viewer"
+				Action:           "x.x.list",     // без отношения — глагол типа из каталога модуля
 				RequiredRelation: "system_admin", // explicit override must win
 			},
 		},
@@ -223,7 +224,7 @@ func newHandlerWithAuthorizer(a service.Authorizer) *Handler {
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations: a,
 	})
-	return NewHandler(svc, NewWhoAmIUseCase(nil, nil), probeModuleForm)
+	return NewHandler(svc, NewWhoAmIUseCase(nil, nil)).WithModuleRoster(testModuleRoster())
 }
 
 // TestHandler_Authorize_RedactsBackendError — отказавший вызов к источнику
@@ -283,7 +284,7 @@ func TestHandler_BatchCheck_RedactsBackendUnavailable(t *testing.T) {
 	h := newHandlerWithAuthorizer(&errVerdict{})
 	resp, err := h.BatchCheck(moduleCertCtx(), &iamv1.BatchAuthorizeCheckRequest{
 		Checks: []*iamv1.AuthorizeCheckRequest{
-			{Subject: "user:x", Resource: &iamv1.ResourceRef{Type: "y", Id: "1"}, Action: "x.x.list"},
+			{Subject: "user:x", Resource: &iamv1.ResourceRef{Type: "y", Id: "1"}, Action: "x.x.list", RequiredRelation: "viewer"},
 		},
 	})
 	if err == nil {

@@ -126,7 +126,8 @@ type Transferrable interface {
 		*DTO[domain.Role, *iamv1.Role] |
 		*DTO[domain.AccessBinding, *iamv1.AccessBinding] |
 		*DTO[domain.Membership, *iamv1.Membership] |
-		*DTO[domain.AccessKey, *iamv1.AccessKey]
+		*DTO[domain.AccessKey, *iamv1.AccessKey] |
+		*DTO[domain.GrantDelegation, *iamv1.GrantDelegation]
 }
 
 // Transfer запускает Perform() на dto. Единственная публичная entry-point.

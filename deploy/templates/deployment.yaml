@@ -9,6 +9,79 @@
 и перечень выше: какой отрендерится первым, решает helm, а отказ обязан прийти в
 любом. */}}
 {{- include "kaname-svc.requireNoRetiredKnobs" . -}}
+{{- /* ДОСТАВКА МАНИФЕСТОВ МОДУЛЕЙ (kaname#964). Процесс читает каталог доставки
+на старте (`cmd/kaname/module_manifests.go`, ручки `manifests.dir` и
+`manifests.required`); чарт монтирует в него ПЕРЕЧИСЛЕННЫЕ в значениях ConfigMap
+своего namespace одним томом projected и отдаёт процессу пару ручек переменными
+окружения. Перечня ConfigMap кластера служба не читает и прав на него не
+получает: модуль кладёт свой ConfigMap в namespace службы, а оператор называет
+его здесь. Пустой перечень — ни тома, ни монтирования, ни ручек.
+
+Каждый вход, который том исполнил бы молча и неверно, — отказ рендера:
+  · один ключ в двух ConfigMap — kubelet собирает полезную нагрузку тома картой,
+    и второй файл лёг бы поверх первого без ошибки; поэтому ключи перечисляются
+    поимённо, и столкновение видно до установки;
+  · ключ с приставкой `..` — обход доставки такие записи пропускает как
+    служебные записи тома (`internal/manifest/check.go`, isDeliveredManifestName):
+    файл лёг бы в каталог и не был бы прочитан;
+  · относительный каталог либо каталог карты настроек `/etc/kaname` — второй
+    затенил бы `config.yaml`;
+  · ручка доставки, заданная ещё и в `env` либо `secrets`, — второй адрес одной
+    величины, и действующий выбирал бы порядок переменных, а не оператор. */}}
+{{- $mm := .Values.moduleManifests | default dict }}
+{{- $mmList := $mm.configMaps | default list }}
+{{- $mmDir := "" }}
+{{- if $mmList }}
+{{- if not (kindIs "slice" $mmList) }}
+{{- fail "moduleManifests.configMaps: ожидается перечень элементов {name, keys}" }}
+{{- end }}
+{{- $mmDir = required "moduleManifests.dir не задан при непустом moduleManifests.configMaps: каталог доставки обязан быть назван — им чарт монтирует том и его же отдаёт процессу" $mm.dir }}
+{{- if not (hasPrefix "/" $mmDir) }}
+{{- fail (printf "moduleManifests.dir=%q: каталог доставки обязан быть абсолютным путём" $mmDir) }}
+{{- end }}
+{{- if eq (clean $mmDir) "/etc/kaname" }}
+{{- fail (printf "moduleManifests.dir=%q: каталог доставки совпадает с каталогом карты настроек и затенил бы config.yaml — назовите подкаталог, например /etc/kaname/manifests" $mmDir) }}
+{{- end }}
+{{- $mmNames := dict }}
+{{- $mmKeys := dict }}
+{{- range $i, $e := $mmList }}
+{{- if not (kindIs "map" $e) }}
+{{- fail (printf "moduleManifests.configMaps[%d]: ожидается элемент {name, keys}" $i) }}
+{{- end }}
+{{- $n := required (printf "moduleManifests.configMaps[%d].name не задан: элемент перечня называет ConfigMap в namespace службы" $i) $e.name }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$" (toString $n)) }}
+{{- fail (printf "moduleManifests.configMaps[%d].name=%q: не имя объекта Kubernetes (строчные латинские буквы, цифры, '-', '.')" $i $n) }}
+{{- end }}
+{{- if hasKey $mmNames $n }}
+{{- fail (printf "moduleManifests.configMaps: ConfigMap %q назван дважды (элементы %v и %d) — ключи одного ConfigMap перечисляются в одном элементе" $n (get $mmNames $n) $i) }}
+{{- end }}
+{{- $_ := set $mmNames $n $i }}
+{{- $ks := $e.keys | default list }}
+{{- if or (not (kindIs "slice" $ks)) (eq (len $ks) 0) }}
+{{- fail (printf "moduleManifests.configMaps[%d].keys пуст: ключи ConfigMap %q перечисляются поимённо — иначе столкновение ключей двух ConfigMap том исполнил бы молча, положив один файл поверх другого" $i $n) }}
+{{- end }}
+{{- range $k := $ks }}
+{{- if not (kindIs "string" $k) }}
+{{- fail (printf "moduleManifests.configMaps[%d].keys: ключ %v — не строка" $i $k) }}
+{{- end }}
+{{- if hasPrefix ".." $k }}
+{{- fail (printf "moduleManifests.configMaps[%d].keys: ключ %q начинается с '..' — обход доставки пропускает такие записи как служебные записи тома, и файл не был бы прочитан" $i $k) }}
+{{- end }}
+{{- if not (regexMatch "^[-._a-zA-Z0-9]+$" $k) }}
+{{- fail (printf "moduleManifests.configMaps[%d].keys: %q — не ключ ConfigMap (латинские буквы, цифры, '-', '_', '.')" $i $k) }}
+{{- end }}
+{{- if hasKey $mmKeys $k }}
+{{- fail (printf "moduleManifests.configMaps: ключ %q назван у ConfigMap %q и у %q — в каталоге доставки это один файл, и том положил бы второй поверх первого молча" $k (get $mmKeys $k) $n) }}
+{{- end }}
+{{- $_ := set $mmKeys $k $n }}
+{{- end }}
+{{- end }}
+{{- range $knob := list "KANAME_MANIFESTS__DIR" "KANAME_MANIFESTS__REQUIRED" }}
+{{- if or (hasKey ($.Values.env | default dict) $knob) (hasKey ($.Values.secrets | default dict) $knob) }}
+{{- fail (printf "%s задан в env либо secrets при непустом moduleManifests.configMaps: величину доставки чарт выводит из блока moduleManifests, второй адрес снимите" $knob) }}
+{{- end }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -108,6 +181,11 @@ spec:
       # config/service_link_collision.go) — то есть отказ стал диагностируемым.
       # Здесь снимается ПРИЧИНА, там — молчание: одно другого не заменяет.
       enableServiceLinks: false
+      # ТОКЕН API КЛАСТЕРА НЕ МОНТИРУЕТСЯ (задача kaname#997): служба API
+      # кластера не вызывает, а умолчание платформы — монтировать токен
+      # ServiceAccount в каждый под. Величина — литерал, а не ручка значений:
+      # включать нечего, и ручка была бы лишней поверхностью без потребителя.
+      automountServiceAccountToken: false
       # Hardened pod security context (trivy AVD-KSV-0118): run as a
       # non-root user, drop the default ambient context.
       securityContext:
@@ -151,6 +229,26 @@ spec:
         - name: tls-client
           secret:
             secretName: {{ $tls.clientSecretName | quote }}
+        {{- end }}
+        {{- if $mmList }}
+        # МАНИФЕСТЫ МОДУЛЕЙ (kaname#964): один том из перечисленных ConfigMap,
+        # ключи — поимённо, файл в каталоге доставки назван ключом. `optional:
+        # false` записан явно: отсутствие ConfigMap либо ключа держит под в
+        # ожидании тома, потому что отсутствие манифеста снятием модуля не
+        # является (`internal/manifest/delivery.go`).
+        - name: module-manifests
+          projected:
+            sources:
+              {{- range $i, $e := $mmList }}
+              - configMap:
+                  name: {{ $e.name | quote }}
+                  optional: false
+                  items:
+                    {{- range $k := $e.keys }}
+                    - key: {{ $k | quote }}
+                      path: {{ $k | quote }}
+                    {{- end }}
+              {{- end }}
         {{- end }}
       initContainers:
         # Миграции БД исполняет отдельный binary `kaname-migrator`
@@ -267,6 +365,11 @@ spec:
               mountPath: {{ printf "%s/client" (required "tls.mountPath не задан при объявленном tls.clientSecretName: путь монтирования обязан быть назван явно — иначе удостоверение исходящего вызова называет файл, которого в поде нет" $tls.mountPath) | quote }}
               readOnly: true
             {{- end }}
+            {{- if $mmList }}
+            - name: module-manifests
+              mountPath: {{ $mmDir | quote }}
+              readOnly: true
+            {{- end }}
           env:
             - name: KANAME_CONFIG_PATH
               value: /etc/kaname/config.yaml
@@ -283,6 +386,17 @@ spec:
             # разошлось бы только в боевой посадке, где проверка включена.
             - name: KANAME_REST_UPSTREAM_MTLS_SERVERNAME
               value: {{ printf "%s.%s.svc.cluster.local" .Values.name .Release.Namespace | quote }}
+            {{- end }}
+            {{- if $mmList }}
+            # Пара ручек доставки (kaname#964) — ВЫЧИСЛЯЕТСЯ из блока
+            # moduleManifests тем же значением, которым смонтирован том: каталог,
+            # названный процессу, и каталог тома — одна величина. Опора
+            # объявляется вместе с каталогом: страж старта неполной пары не
+            # принимает (`config.ManifestsConfig.Validate`).
+            - name: KANAME_MANIFESTS__DIR
+              value: {{ $mmDir | quote }}
+            - name: KANAME_MANIFESTS__REQUIRED
+              value: "true"
             {{- end }}
             {{- range $k, $v := .Values.env }}
             - name: {{ $k }}

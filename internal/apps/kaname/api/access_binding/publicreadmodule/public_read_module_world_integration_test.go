@@ -36,6 +36,7 @@ package publicreadmodule_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,9 +60,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
-	"github.com/PRO-Robotech/kaname/internal/servicesan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -145,20 +146,29 @@ func newP2(t *testing.T) *p2 {
 		WithRelationStore(door, nil).
 		WithReconciler(w.rec)
 	get := accessbindingapp.NewGetAccessBindingUseCase(w.repo).WithRelationStore(door, nil)
-	del := accessbindingapp.NewDeleteAccessBindingUseCase(w.repo, w.ops).WithRelationStore(door, nil)
+	// Снятие выдачи судит обработчик вопросом `v_delete` на объекте выдачи
+	// (kaname#986, Р1а); в продукте владельцу его материализует авто-выдача роли
+	// `owner`, которой посев аккаунта мимо глагола не заводит. Предмет мира —
+	// публичное чтение модуля, а не материализация прав владельца, поэтому факт
+	// продукта дан портом поверх той же двери (`ownerRemovalOver`).
+	del := accessbindingapp.NewDeleteAccessBindingUseCase(w.repo, w.ops).
+		WithRelationStore(ownerRemovalOver{inner: door, owner: w.usrA}, nil)
 	w.ab = accessbindingapp.NewHandler(create, del, get, nil, nil, nil, nil)
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           door,
 		ClusterAdminChecker: door,
 	})
-	w.authz = authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil),
-		servicesan.NewForm("kacho-{service}"))
+	w.authz = authorizeapp.NewHandler(svc, authorizeapp.NewWhoAmIUseCase(nil, nil)).WithModuleRoster(moduleroster.Roster(t))
 	w.reg = internaliam.NewRegisterResourceUseCase(
 		kanamepg.NewFGAOutboxEmitter(),
 		kanamepg.NewResourceMirrorEmitter(),
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
+		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же
+		// каталожным источником, что у сверки мира.
+		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), src),
+		kanamepg.NewRegistrationAudit(),
 	).WithObjectReconciler(w.rec, nil)
 
 	w.box(pmB1)
@@ -247,11 +257,11 @@ func (w *p2) role(name string, rules domain.Rules) domain.RoleID {
 	}
 	// Глаголы каждого правила вычисляет каталог мира (kaname#878), как в
 	// продуктовом создании роли: селектор без них писатель отвергает.
-	sels := w.facts.GrantSelectors(r.Rules.MaterializingSelectors())
+	sels := w.facts.GrantSelectors(r.Rules.MaterializingSelectors(), domain.TenantPolicy())
 	if err := wr.RolesW().ReplaceRuleSelectors(w.ctx, r.ID, sels); err != nil {
 		w.t.Fatalf("селекторы %s: %v", name, err)
 	}
-	pairs := w.facts.RoleVerbsFromSelectors(sels)
+	pairs := w.facts.RoleVerbsFromSelectors(sels, domain.TenantPolicy())
 	if len(pairs) == 0 {
 		w.t.Fatalf("проекция глаголов роли %s пуста — каталог П1 не знает её типов", name)
 	}
@@ -422,4 +432,23 @@ func TestPM04_RoleWithoutChildRuleOpensNoChildren(t *testing.T) {
 	for _, q := range []pmQ{{"v_get", pmItemType, pmI1}, {"v_list", pmItemType, pmI1}} {
 		w.requireDenied(q, "PM-04: без вложенного правила ребёнок закрыт")
 	}
+}
+
+// ownerRemovalOver — дверь решения мира с одним фактом продукта сверху: владелец
+// аккаунта держит отношение удаления на объектах выдач (в продукте его
+// материализует авто-выдача роли `owner`, kaname#986 Р1а). Прочие вопросы —
+// настоящей двери.
+type ownerRemovalOver struct {
+	inner interface {
+		Check(ctx context.Context, subject, relation, object string) (bool, error)
+	}
+	owner string
+}
+
+func (o ownerRemovalOver) Check(ctx context.Context, subject, relation, object string) (bool, error) {
+	if subject == "user:"+o.owner && relation == accessbindingapp.RemovalRelation &&
+		strings.HasPrefix(object, accessbindingapp.RemovalObjectType+":") {
+		return true, nil
+	}
+	return o.inner.Check(ctx, subject, relation, object)
 }

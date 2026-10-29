@@ -41,12 +41,12 @@ import (
 // намерение не должно доехать до очереди вовсе.
 type recordingEmitter struct{ writes, deletes [][]service.RelationTuple }
 
-func (e *recordingEmitter) EmitWriteTx(_ context.Context, _ service.Tx, t []service.RelationTuple) error {
+func (e *recordingEmitter) EmitOrderedWriteTx(_ context.Context, _ service.Tx, t []service.RelationTuple, _ time.Time) error {
 	e.writes = append(e.writes, t)
 	return nil
 }
 
-func (e *recordingEmitter) EmitDeleteTx(_ context.Context, _ service.Tx, t []service.RelationTuple) error {
+func (e *recordingEmitter) EmitOrderedDeleteTx(_ context.Context, _ service.Tx, t []service.RelationTuple, _ time.Time) error {
 	e.deletes = append(e.deletes, t)
 	return nil
 }
@@ -55,7 +55,10 @@ func (e *recordingEmitter) EmitDeleteTx(_ context.Context, _ service.Tx, t []ser
 // оператор каталога. Дублёр НЕ снисходительнее настоящего: он возвращает тот же
 // признак и тот же текст, поэтому проба меряет отображение отказа, а не свою
 // выдумку.
-type refusingMirror struct{ objectType string }
+type refusingMirror struct {
+	noDescendants
+	objectType string
+}
 
 func (m refusingMirror) UpsertTx(_ context.Context, _ service.Tx, row service.ResourceMirrorRow) (bool, bool, error) {
 	if row.ObjectType == m.objectType {
@@ -65,8 +68,8 @@ func (m refusingMirror) UpsertTx(_ context.Context, _ service.Tx, row service.Re
 	return true, false, nil
 }
 
-func (refusingMirror) DeleteTx(context.Context, service.Tx, string, string, time.Time) error {
-	return nil
+func (refusingMirror) DeleteTx(context.Context, service.Tx, string, string, time.Time) (bool, error) {
+	return false, nil
 }
 
 // TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument — отказ
@@ -82,6 +85,8 @@ func TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument(t *te
 		&smTxBeginner{},
 		seededCatalogTypes{},
 		&recordingPublisher{},
+		&recordingWithdrawal{},
+		noAudit{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{
@@ -130,6 +135,8 @@ func TestRegisterResource_LiveResourceType_StillRegisters(t *testing.T) {
 		&smTxBeginner{},
 		seededCatalogTypes{},
 		&recordingPublisher{},
+		&recordingWithdrawal{},
+		noAudit{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{

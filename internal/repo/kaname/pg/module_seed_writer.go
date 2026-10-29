@@ -71,6 +71,11 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
+// ErrSeedRoleNotResolved — выдача посева ролью называет идентификатор, под
+// которым живой роли кластерного яруса нет (kaname#979). Отказ называет роль, а
+// не ограничение ключа: автор манифеста чинит имя роли, а не схему.
+var ErrSeedRoleNotResolved = errors.New("pg: seed role grant names no live cluster role")
+
 // ModuleSeedWriteRepo — исполнитель транзакций применителя посева над пулом.
 type ModuleSeedWriteRepo struct {
 	tx *coredb.Transactor
@@ -327,7 +332,11 @@ func (w moduleSeedWriter) grant(
 	var roleID *string
 	relation := form.relation
 	if form.roleID != "" {
-		roleID = &form.roleID
+		rowID, err := w.clusterRoleID(ctx, form.roleID)
+		if err != nil {
+			return false, err
+		}
+		roleID = &rowID
 	}
 
 	// Естественный ключ активной выдачи — по форме: отношение судится парой
@@ -422,6 +431,36 @@ func (w moduleSeedWriter) groupID(ctx context.Context, account, name string) (st
 		 WHERE a.name = ANY($1) AND g.name = $2`, account, name)
 	if err != nil {
 		return "", fmt.Errorf("группа %s/%s не резолвится: %w", account, name, err)
+	}
+	return id, nil
+}
+
+// clusterRoleID резолвит СТРОКУ роли, на которую ссылается выдача посева, по
+// идентификатору контракта `<модуль>.<имя>` (kaname#979).
+//
+// Манифест называет роль ИМЕНЕМ — тем же, каким её объявляет раздел `roles`
+// (контракт `roleId` опубликованной схемы); строка же выдачи ссылается на
+// идентификатор строки роли. Прежде применитель клал имя в ссылку как есть, и
+// исполнимой была только выдача по идентификатору строки — форма, которой
+// контракт не объявляет и по которой выдавалась роль любого модуля.
+//
+// Резолвится только ЖИВАЯ роль кластерного яруса: выдача посева стоит на якоре
+// кластера, и роль ниже него действовала бы на всю установку правом одного
+// объекта. Кластер — синглтон, и имя системной роли на нём уникально
+// (`roles_system_unique`), поэтому строк не больше одной by construction. Нет
+// строки — отказ с именем роли, а не нарушение ключа ссылки, называющее
+// ограничение вместо предмета. Снятие роли между чтением и вставкой держит страж
+// ссылки `access_bindings_role_is_live` под замком той же транзакции.
+func (w moduleSeedWriter) clusterRoleID(ctx context.Context, name string) (string, error) {
+	var id string
+	err := w.tx.QueryRow(ctx, `
+		SELECT id FROM kaname.roles
+		 WHERE name = $1 AND is_system AND live`, name).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("%w: %q", ErrSeedRoleNotResolved, name)
+	}
+	if err != nil {
+		return "", fmt.Errorf("роль %q не резолвится: %w", name, err)
 	}
 	return id, nil
 }

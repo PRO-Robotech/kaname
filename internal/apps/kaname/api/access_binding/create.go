@@ -119,7 +119,12 @@ type CreateAccessBindingUseCase struct {
 	// `system_admin` on the scope object) through this client. Do not drop it.
 	relations  clients.RelationStore
 	reconciler SelectorReconciler // γ — optional, nil-safe
-	logger     *slog.Logger
+	// keys — какие объекты цели зарегистрированы на приёме (kaname#963, Р8).
+	keys shared.RegisteredKeys
+	// delegated — делегированный путь права выдавать (kaname#986, Р2); nil —
+	// путь выключен (отказ, а не всеразрешение).
+	delegated *DelegatedGrantPath
+	logger    *slog.Logger
 }
 
 func NewCreateAccessBindingUseCase(r Repo, opsRepo operations.Repo, cat catalog.Source) *CreateAccessBindingUseCase {
@@ -159,6 +164,21 @@ func (u *CreateAccessBindingUseCase) refuseNonLiveTargetType(t domain.AccessTarg
 		return status.Error(codes.InvalidArgument, targetTypeNotLiveSyncMsg(typ))
 	}
 	return nil
+}
+
+// WithRegisteredKeys — чтение регистрации объектов цели на приёме (kaname#963,
+// Р8): выдача, принятая до снятия регистрации и записанная после, живой не
+// остаётся. Провязывает корень службы.
+func (u *CreateAccessBindingUseCase) WithRegisteredKeys(k shared.RegisteredKeys) *CreateAccessBindingUseCase {
+	u.keys = k
+	return u
+}
+
+// WithDelegatedGrantPath — делегированный путь права выдавать (kaname#986, Р2).
+// Провязывает корень службы; без него выдача делегатом отвергается.
+func (u *CreateAccessBindingUseCase) WithDelegatedGrantPath(p *DelegatedGrantPath) *CreateAccessBindingUseCase {
+	u.delegated = p
+	return u
 }
 
 // WithReconciler wires the γ selector reconciler (post-commit membership
@@ -256,7 +276,18 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// authored by a grant-authority holder on the scope. Enforced for EVERY Create,
 	// so the guard holds by construction.
 	if err := u.requireGrantAuthority(ctx, string(b.ResourceType), string(b.ResourceID)); err != nil {
-		return nil, err
+		// Делегированный путь (kaname#986, Р2) — только после ОТКАЗА прежних путей и
+		// на их месте: до структурных ворот, поэтому отказ ничего не говорит о роли
+		// и объекте. Неполадка двери к нему не ведёт (условие CE-04). Ссылку на
+		// делегирование ставит только он.
+		if !isPermissionDenied(err) {
+			return nil, err
+		}
+		gdl, derr := delegatedGrantAuthority(ctx, u.delegated, b, false)
+		if derr != nil {
+			return nil, derr
+		}
+		b.DelegationID = gdl
 	}
 	// F9 gates 2 & 3 (IAM-1-24/25): IsRoleAssignable + RoleCoversType — SYNC, before
 	// any Operation is minted (Operation.error reserved for truly-async FGA
@@ -283,6 +314,18 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// rejection observable on the request path, not buried in Operation.error).
 	if err := u.validateGlobalAllSelector(ctx, b); err != nil {
 		return nil, err
+	}
+
+	// ПРИЁМ ВЫДАЧИ ЧИТАЕТСЯ ОТ МОМЕНТА ПРИЁМА (kaname#963, Р8, Д6). Объекты цели,
+	// зарегистрированные сейчас, запись выдачи держит замком строки регистрации
+	// и отказывает (Т1), если снятие успело раньше записи; свободный ключ — ключ
+	// по ATC-03, выдача на него действует с ближайшей регистрации.
+	if u.keys != nil && len(b.Target.Resources) > 0 {
+		held, err := u.keys.RegisteredOf(ctx, b.Target.Resources)
+		if err != nil {
+			return nil, shared.MapRepoErr(err)
+		}
+		b.HeldTargets = held
 	}
 
 	// Strict create — generate a candidate id; on a duplicate active grant
@@ -375,6 +418,29 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 			return nil, status.Error(codes.FailedPrecondition, targetTypeNotLiveTxMsg(typ))
 		}
 	}
+	// Выдача делегатом (kaname#986): решение делегированного пути принято
+	// синхронно, а запись идёт здесь, в исполнителе операции. Строка делегирования
+	// берётся `FOR SHARE` по ЗАХВАЧЕННОМУ id с перепроверкой `ACTIVE` (условие CE-09):
+	// отзыв, взявший её `FOR UPDATE` раньше, дожидается здесь фиксации, и выдача по
+	// отозванному делегированию не пишется (Т-D1). Перевыбора по паре «аккаунт,
+	// делегат» нет: у пары после отзыва может быть новое делегирование с другими
+	// осями.
+	auditTenant := auditTenantAccountID(b)
+	var auditExtra map[string]any
+	if b.DelegationID != "" {
+		account, active, herr := w.AccessBindingsW().GrantDelegationsW().HoldActive(ctx, b.DelegationID)
+		if herr != nil {
+			return nil, shared.MapRepoErr(herr)
+		}
+		if !active {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"grant delegation %s was revoked before the access binding was written", b.DelegationID)
+		}
+		// Аудит выдачи делегатом несёт ссылку на делегирование, а аккаунт строки —
+		// аккаунт делегирования при любой области выдачи (Р5).
+		auditTenant = string(account)
+		auditExtra = map[string]any{"delegation_id": string(b.DelegationID)}
+	}
 	// Read the role inside the writer-tx (the writer also satisfies the Reader
 	// interface) BEFORE the binding INSERT for the permission-based FGA mapping
 	// below. The structural gates (role-scope IsRoleAssignable, RoleCoversType) are
@@ -452,7 +518,8 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 			ResourceID:      created.ResourceID,
 			RoleID:          string(created.RoleID),
 			BindingID:       string(created.ID),
-			TenantAccountID: auditTenantAccountID(created),
+			TenantAccountID: auditTenant,
+			ExtraPayload:    auditExtra,
 		}); err != nil {
 			return nil, shared.MapRepoErr(err)
 		}

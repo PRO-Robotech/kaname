@@ -107,7 +107,7 @@ func seedRulesRoleWithSelectors(t *testing.T, ctx context.Context, repo *kanamep
 		Rules:       rules, Permissions: compiled,
 	})
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors())))
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID, catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, w.Commit(ctx))
 	return rid
 }
@@ -213,7 +213,7 @@ func TestAB_DeleteAndObjectFanout_DoNotDeadlock(t *testing.T) {
 
 	// ── 1) СНЯТИЕ встаёт в очередь первым, не удерживая ничего ────────────────
 	delUC := accessbindingapp.NewDeleteAccessBindingUseCase(repo, opsRepo).
-		WithRelationStore(denyingRelations{}, nil)
+		WithRelationStore(ownerHoldsRemoval{owner: string(owner)}, nil)
 	op, err := delUC.Execute(asUser(ctx, owner), victim)
 	require.NoError(t, err, "снятие принято к исполнению")
 	waitAdvisoryWaiters(t, ctx, pool, 1, "снятие")

@@ -253,7 +253,7 @@ func seedSystemRulesRole(t *testing.T, ctx context.Context, repo *kanamepg.Repos
 	})
 	require.NoError(t, err, "системная роль правил %s", name)
 	require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID,
-		catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors())))
+		catalogfixture.Facts().GrantSelectors(inserted.Rules.MaterializingSelectors(), domain.TenantPolicy())))
 	require.NoError(t, w.Commit(ctx))
 	return inserted.ID
 }

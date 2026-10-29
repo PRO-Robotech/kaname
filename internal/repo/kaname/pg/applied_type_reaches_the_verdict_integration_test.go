@@ -285,7 +285,7 @@ func declareRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo kan
 	t.Helper()
 
 	rules := probeRules(module, resource)
-	pairs := cat.Facts().RoleVerbsFromSelectors(rules.MaterializingSelectors())
+	pairs := cat.Facts().RoleVerbsFromSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
 
 	ops := operations.NewRepo(pool, "kaname")
 	uc := roleapp.NewCreateRoleUseCase(repo, ops, cat)
@@ -331,7 +331,7 @@ func redeclareRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo k
 	t.Helper()
 
 	rules := probeRules(module, resource)
-	pairs := cat.Facts().RoleVerbsFromSelectors(rules.MaterializingSelectors())
+	pairs := cat.Facts().RoleVerbsFromSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
 
 	ops := operations.NewRepo(pool, "kaname")
 	uc := roleapp.NewUpdateRoleUseCase(repo, ops, cat)
@@ -358,7 +358,7 @@ func redeclareRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo k
 // то, что кладёт писатель, и теми же селекторами.
 func snapshotProjectionOf(facts *catalog.Facts, module, resource string) []domain.RoleVerb {
 	rules := domain.Rules{{Module: module, Resources: []string{resource}, Verbs: []string{"*"}}}
-	return facts.RoleVerbsFromSelectors(rules.MaterializingSelectors())
+	return facts.RoleVerbsFromSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
 }
 
 // grantOnProject выдаёт роль субъекту на проект и кладёт объект под этот проект.

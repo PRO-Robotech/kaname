@@ -90,10 +90,20 @@ func emitSubjectChangeFor(ctx context.Context, emit subjectChangeEmitter, subjec
 // строке «выдано», которую создание пишет на каждого (`create.go`). Строка на
 // одного первого оставляла бы в следе выдачу субъектам со второго по N-й
 // неснятой (kaname#880).
-func revokedAuditFor(ctx context.Context, emit func(context.Context, abrepo.AuditEvent) error,
+//
+// Ссылку на делегирование строка несёт по ВЫДАЧЕ, а не по тому, кто отзывает:
+// отзыв делегатом и отзыв обычным держателем права пишут её одинаково, и аккаунт
+// строки у такой выдачи — аккаунт делегирования при любой области (kaname#986,
+// Р5). Ссылка читается из строки выдачи под замком снятия (условие CE-16); у
+// выдачи без ссылки ключа нет.
+func revokedAuditFor(ctx context.Context, w Writer,
 	subjects []domain.Subject, actor string, binding domain.AccessBinding) error {
+	tenant, extra, err := delegationAuditScope(ctx, w, binding)
+	if err != nil {
+		return err
+	}
 	for _, s := range subjects {
-		if err := emit(ctx, abrepo.AuditEvent{
+		if err := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
 			EventType:       abrepo.AuditEventTypeRevoked,
 			Actor:           actor,
 			SubjectType:     string(s.Type),
@@ -102,10 +112,26 @@ func revokedAuditFor(ctx context.Context, emit func(context.Context, abrepo.Audi
 			ResourceID:      binding.ResourceID,
 			RoleID:          string(binding.RoleID),
 			BindingID:       string(binding.ID),
-			TenantAccountID: auditTenantAccountID(binding),
+			TenantAccountID: tenant,
+			ExtraPayload:    extra,
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// delegationAuditScope — аккаунт строки аудита и полезная нагрузка сверх
+// канонической у выдачи, несущей ссылку на делегирование (Р5): аккаунт
+// делегирования и `delegation_id`. У прочей выдачи — прежний писатель
+// (`auditTenantAccountID`) и пустая добавка.
+func delegationAuditScope(ctx context.Context, w Writer, binding domain.AccessBinding) (string, map[string]any, error) {
+	if binding.DelegationID == "" {
+		return auditTenantAccountID(binding), nil, nil
+	}
+	account, err := w.AccessBindingsW().GrantDelegationsW().AccountOf(ctx, binding.DelegationID)
+	if err != nil {
+		return "", nil, err
+	}
+	return string(account), map[string]any{"delegation_id": string(binding.DelegationID)}, nil
 }

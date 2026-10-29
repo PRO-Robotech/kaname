@@ -1,0 +1,184 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-target-object-id-follows-the-object-grammar.md
+  sha256: 19957fce558f4df770882c795a6b357836e981faa28a25fa3c3abaea2627b57f
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена: строку истории
+    круга 1 дописал автор, статическая форма DRAFT не тронута.
+  base_commit: ddd5681af
+  content_commit: none
+  content_note: >-
+    Редакция 2 — незакоммиченная правка рабочего дерева копии tmp/kn-1004-acc поверх временного
+    коммита 7f58444f1 (ветка 1004-acc). Отпечаток — содержимого файла, а не коммита.
+  branch: 1004-acc
+  task: PRO-Robotech/kaname#1004
+  related_tasks: [PRO-Robotech/kaname#980]
+  lines: 234
+  round: 2
+  round_scope: >-
+    Второй и последний круг (`flow-acceleration.md#fa-b8-acceptance-two-rounds`), только дельта
+    1d7635a3 → 19957fce (diff 71 строка): B1 TWIN, B2 FORMAT и три неблокирующих круга 1.
+    Решение диспетчера (INVALID_ARGUMENT; способ сверки состава цели и его хранимая форма не
+    меняются) не переоткрывается.
+  predecessor_record: docs/specs/reviews/access-target-object-id-follows-the-object-grammar/1d7635a30cc4a8efa1a73d61a99d02171d2f2183a7a0101401f1f145c1a9d01b.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/access-target-object-id-follows-the-object-grammar.md
+    в копии kacho-workspace/tmp/kn-1004-acc → 19957fce…7b57f (совпало с заданием); копия
+    прежней редакции `.md.1d7635a3` → 1d7635a3…a9d01b (совпало с отпечатком записи круга 1).
+  measurement_revisions: >-
+    Код — рабочее дерево копии на 7f58444f1 (= ddd5681af плюс документ); пробы ветки 1004 —
+    `git grep … origin/1004` (origin/1004 = 43750c544).
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-26T12:00:00Z'
+
+prior_blocking_disposition:
+  - id: B1
+    kind: TWIN
+    outcome: closed
+    evidence: >-
+      ATI-02b (стр. 122-132): то же «Дано», тот же usr-A, usr-D, роль и область; цель
+      [{<base>/one}] → Operation, done=true без error, выдач две. Отличие от ATI-02 ровно одно —
+      хвост идентификатора. Конструируемость исхода: UNIQUE access_bindings_active_grant_uniq =
+      (subject_id, subject_type, role_id, resource_type, resource_id, target_digest) WHERE
+      revoked_at IS NULL AND narrowed_at IS NULL
+      (20261024050000_unregistration_revokes_its_grants.sql:59-62); Digest — sha256 отсортированных
+      «type:id» (access_binding_target.go:140-151); {one} и {one, one/two} — разные digest; отказа
+      по подмножеству в create.go нет (grep -c 'Contains\|Subset' create.go → 0). Близнец в
+      таблице производителей (стр. 185) и в DoD п.1. Строка ATI-01 больше не объявляет себя
+      близнецом отрицаний (стр. 87-89).
+  - id: B2
+    kind: FORMAT
+    outcome: closed
+    evidence: >-
+      ATI-05 (стр. 167-177): синхронной ошибки нет, Operation; Operation.error code=6, текст
+      дословно «these permissions are already granted to <usr-D> on project:<проект мира>»; выдач
+      одна; вторая цель названа — {<base>/one} (= ATI-02b). Производитель сверен:
+      create.go:331-333 (комментарий UNIQUE), pgmaperr.go:470-478 (Sprintf «… to %s on %s»);
+      дословная форма с «project:%s» уже утверждается
+      unregister_revokes_grants_world_integration_test.go:429-430 (TestURG10_DuplicateOfUnnarrowedGrantRefused).
+      DoD п.1 требует код и текст и называет снимаемую форму `if err == nil` (она есть:
+      target_set_identity_world_integration_test.go:50 @origin/1004). Порядок шагов
+      ATI-02 → ATI-05 → ATI-02b согласован со счётами «одна»/«две».
+
+prior_minor_disposition:
+  - note: границы `/` в ATI-01 — «done=true без error» (стр. 99-100), уравнено с DoD п.2
+    outcome: closed
+  - note: склейка multierr — оговорка под ATI-02 (стр. 119-120)
+    outcome: closed
+  - note: порядок проверки формы до права выдавать — «Обзор» (стр. 23-25); create.go:254 = b.Validate, :278 = requireGrantAuthority — сверено
+    outcome: closed
+
+blocking: []
+
+minor:
+  - kind: PRODUCER
+    note: >-
+      Строка ATI-02b таблицы производителей: «на уровне хранилища то же свойство держит
+      TestAB_IAM_1_29_DistinctTargets_Coexist» — та проба вставляет непересекающиеся одиночные
+      цели (ins-1, ins-2, all; access_binding_target_integration_test.go:157-170), не подмножество.
+      Свойство «разный digest — разный слот» она держит, случай «{one} рядом с {one, one/two}» —
+      нет; единственный держатель именно ATI-02b — заказанный шаг DoD п.1. Не блокирует: заказ
+      назван, утверждение о слоте верно по определению индекса.
+  - kind: FORMAT
+    note: >-
+      Рядом с документом лежит неотслеживаемая копия прежней редакции `….md.1d7635a3` (для диффа
+      рецензенту). В PR документа её быть не должно — снять до коммита.
+
+open_questions:
+  - id: Д1
+    disposition: default_accepted
+    note: принят кругом 1, дельтой не затронут
+
+repeated_kind:
+  outcome: no
+  note: блокирующих в круге 2 нет; роды круга 1 (TWIN, FORMAT) закрыты, не повторились
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → 19957fce558f4df770882c795a6b357836e981faa28a25fa3c3abaea2627b57f; <док>.1d7635a3 → 1d7635a3…a9d01b
+    - diff <док>.1d7635a3 <док> → дельта только в шапке, «Обзоре», ATI-01, ATI-02, ATI-02b, ATI-05, таблице производителей и DoD п.1
+    - sed -n '254p;278p;331,333p' create.go → b.Validate; requireGrantAuthority; комментарий UNIQUE access_bindings_active_grant_uniq
+    - sed -n 462,482p internal/repo/kaname/pg/pgmaperr.go → «these permissions are already granted to %s on %s»
+    - git grep -n access_bindings_active_grant_uniq -- internal/migrations → действующее определение в 20261024050000…sql:60-62 с target_digest
+    - grep -c 'Contains\|Subset' create.go → 0
+    - git grep -n 'if err == nil' origin/1004 -- …/target_set_identity_world_integration_test.go → :50
+    - git grep -c 'func TestURG10_DuplicateOfUnnarrowedGrantRefused\|func TestAB_IAM_1_29_TargetDigestOrderIndependent' ddd5681af → по 1 в двух файлах
+
+constructibility:
+  method: >-
+    Новых «Дано» дельта не вводит: ATI-02b стоит на том же «Дано», что ATI-02/05 (роль w.seedRole,
+    выдача usr-D на {<base>/one, <base>/one/two} через w.createDone + w.grantRequest, объекты
+    registerSlashRepo). Это «Дано» посеяно прогоном рецензента круга 1 @43750c544 на внешнем
+    кластере (kacho-workspace/tmp/1004-rev-logs/hs-integration-20261026T085923-1416884.log).
+    Этим кругом посев не повторялся.
+  seeded: 4
+  of: 6
+  named_fixture: 2
+  not_executed: 0
+  seeded_this_round: 0
+
+route_signs:
+  proto: true
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+disclosure:
+  outcome: none
+  note: дельта нового пути к дефекту не называет; разбор круга 1 в силе
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: true
+  issued_at: "2026-10-26T11:02:34Z"
+  ban1_lifted: false
+  reason: >-
+    вердикт APPROVED записан; одобрение действует только после публикации внешнего события
+    курьером и приведения блока event к факту
+
+event_body: "acceptance-reviewer · APPROVED · sha256 19957fce558f4df770882c795a6b357836e981faa28a25fa3c3abaea2627b57f"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1004
+  status: performed
+  published: true
+  database_id: 6414421021
+  node_id: "IC_kwDOUO26pM8AAAABflRMHQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/1004#issuecomment-6414421021"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6414421021"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-10-26T11:02:34Z"
+  body_sha256: "9da9008932752ef319c0f9cc12c587323e4cd592660a1f5d2702365ade72f866"
+  subject_sha256: "19957fce558f4df770882c795a6b357836e981faa28a25fa3c3abaea2627b57f"
+  subject_revision_commit: "318af93fc05f57190fb09e99135fca58fbc7d0ba"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/access-target-object-id-follows-the-object-grammar/1d7635a30cc4a8efa1a73d61a99d02171d2f2183a7a0101401f1f145c1a9d01b.yaml

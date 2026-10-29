@@ -98,7 +98,7 @@ func internalChain(prod, hopDeclared bool) []chainGate {
 	if hopDeclared {
 		policy = policy.WithOwnFrontHop(ownFrontHopSAN)
 	}
-	viewer := NewSystemViewerFloor(grantsEveryRelation{}, ReadFloorRPCs(), testServiceNameForm).WithProductionMode(prod)
+	viewer := NewSystemViewerFloor(grantsEveryRelation{}, ReadFloorRPCs()).WithModuleRoster(testModuleRoster()).WithProductionMode(prod)
 	acr := NewACRFloor(declaresNoStepUp{}, GatewayFrontedInternalRPCs()).WithProductionMode(prod)
 	return []chainGate{
 		{"политика вызывающего", policy.allow},

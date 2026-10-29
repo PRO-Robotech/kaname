@@ -163,6 +163,7 @@ func TestPublicContainerRead_MultiSubject_RevokeClosesForEveryClass(t *testing.T
 	require.Equal(t, []string{"system_class:anonymous", "system_class:authenticated"}, p.publicReadersOn(pcrX),
 		"kaname#880 снятие, близнец: public_reader у обоих классов до снятия")
 
+	p.ownerMayRemove("kaname#880 снятие Дано", id)
 	op, err := p.ab.Delete(asUser(p.ctx, p.usrA), &iamv1.DeleteAccessBindingRequest{AccessBindingId: id})
 	require.NoError(t, err, "kaname#880 снятие: отзыв выдачи ПЧ")
 	done := awaitOp(t, p.ctx, p.ops, op.GetId())

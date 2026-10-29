@@ -304,11 +304,14 @@ func TestRole_A10_LabelOnlyRolePersists(t *testing.T) {
 	assert.Empty(t, got.Permissions, "label-only role carries no compiled permissions")
 }
 
-// A direct INSERT of a LEGACY permissions-only role (rules='[]') with an EMPTY
-// permissions array must STILL be rejected by the DB CHECK — the empty-permissions
-// relaxation is scoped to rules-roles only (rules non-empty). This pins that the
-// cap-raise migration does not weaken the legacy invariant.
-func TestRole_LegacyEmptyPermissionsRejectedByDB(t *testing.T) {
+// Роль без правил И без прав принимается схемой (kaname#963, приёмка
+// `unregistration-revokes-its-grants.md`, Р6): её строит снятие регистрации,
+// убравшее последнее правило, и она не даёт ничего. Прежнее утверждение «пара
+// rules='[]', permissions='[]' отвергается» эта приёмка снимает намеренно
+// (третья форма `roles_permissions_valid`, миграция 20261024050000). Близнец
+// ниже держит то, что от прежнего инварианта осталось: роль только с перечнем
+// прав по-прежнему судится грамматикой перечня.
+func TestRole_EmptyRulesAndEmptyPermissionsIsTheEmptyRoleInDB(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -327,7 +330,14 @@ func TestRole_LegacyEmptyPermissionsRejectedByDB(t *testing.T) {
 		VALUES ($1, $2, $3, '', '[]'::jsonb, '[]'::jsonb, now())`,
 		ids.NewID(domain.PrefixRole), string(acc.ID), "legacy_empty",
 	)
-	require.Error(t, err, "legacy permissions-only role with empty permissions AND empty rules must be rejected")
+	require.NoError(t, err, "роль rules='[]', permissions='[]' — законная форма «ничего» (Р6)")
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO roles (id, account_id, name, description, permissions, rules, created_at)
+		VALUES ($1, $2, $3, '', '["not-a-permission"]'::jsonb, '[]'::jsonb, now())`,
+		ids.NewID(domain.PrefixRole), string(acc.ID), "legacy_bad",
+	)
+	require.Error(t, err, "роль только с перечнем прав с негодным правом обязана отвергаться")
 	assert.Contains(t, err.Error(), "roles_permissions_valid")
 }
 

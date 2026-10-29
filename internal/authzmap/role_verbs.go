@@ -48,8 +48,14 @@ import "github.com/PRO-Robotech/kaname/internal/domain"
 // Тип, у которого набор глаголов не ОБЪЯВЛЕН вовсе, не получает ни одного
 // глагола, каким бы ни был `typeVerbs`: отношения `v_*` у него не существует,
 // и пара в проекции адресовала бы отношение, которого нет в модели.
-func GrantedVerbs(fgaType string, authored, typeVerbs []string) []string {
-	return GrantedVerbsWithDeclared(fgaType, len(VerbsOfType(fgaType)) > 0, authored, typeVerbs)
+//
+// policy — политика РОЛИ, которой принадлежит правило ([domain.PolicyOfRole]).
+// Она параметр без умолчания намеренно: ответ на «влечёт ли правка удаление»
+// зависит от владельца роли (kaname#1006), и вызывающий, не назвавший роль,
+// получал бы правило ролей платформы молча — ровно так роль модуля и получила
+// удаление, которого её манифест не объявлял.
+func GrantedVerbs(fgaType string, authored, typeVerbs []string, policy domain.RulePolicy) []string {
+	return GrantedVerbsWithDeclared(fgaType, len(VerbsOfType(fgaType)) > 0, authored, typeVerbs, policy)
 }
 
 // GrantedVerbsWithDeclared — ТОТ ЖЕ предикат, но единственный факт, который он
@@ -68,7 +74,8 @@ func GrantedVerbs(fgaType string, authored, typeVerbs []string) []string {
 // вправе предъявить набор ЗАПАСНОЙ (якорь без собственного набора разворачивает
 // подстановку общим словарём ради вывода яруса), и тогда `typeVerbs` непуст, а
 // тип не объявляет ничего.
-func GrantedVerbsWithDeclared(fgaType string, declaresVerbs bool, authored, typeVerbs []string) []string {
+func GrantedVerbsWithDeclared(fgaType string, declaresVerbs bool, authored, typeVerbs []string,
+	policy domain.RulePolicy) []string {
 	if !declaresVerbs {
 		return nil
 	}
@@ -108,7 +115,14 @@ func GrantedVerbsWithDeclared(fgaType string, declaresVerbs bool, authored, type
 	// СВЕРКА С НАБОРОМ ТИПА ОБЯЗАТЕЛЬНА И ЗДЕСЬ, не только в цикле: приписанное
 	// строкой отношение обошло бы и набор, и таблицу, и тип, у которого удаления не
 	// объявлено, получил бы висячее отношение, как только роль назовёт правку.
-	if hasUpdate && !IsHierarchyScopeType(fgaType) && domain.IsVerbOfType("delete", typeVerbs) && !seen["delete"] {
+	//
+	// РОЛЬ МОДУЛЯ ИСКЛЮЧЕНА (kaname#1006). Её классы объявляет манифест модуля, и
+	// объявляет точно: удаление модуль называет классом сам, а роль, назвавшая
+	// только правку, удалять не вправе. Решение — у политики роли
+	// (`RulePolicy.UpdateImpliesDelete`), а не здесь: вывод «чья это роль» в дереве
+	// один, и второй разошёлся бы с ним молча.
+	if hasUpdate && policy.UpdateImpliesDelete() && !IsHierarchyScopeType(fgaType) &&
+		domain.IsVerbOfType("delete", typeVerbs) && !seen["delete"] {
 		out = append(out, "delete")
 	}
 	return out
@@ -138,7 +152,7 @@ func IsHierarchyScopeType(fgaType string) bool {
 // Тип, которого каталог не знает, пар не даёт: материализатор на нём тоже не
 // эмитит ничего, и выдумать за него набор значило бы дать право, которого движок
 // не даёт.
-func RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain.RoleVerb {
+func RoleVerbsFromSelectors(selectors []domain.RuleSelector, policy domain.RulePolicy) []domain.RoleVerb {
 	seen := make(map[domain.RoleVerb]bool)
 	out := make([]domain.RoleVerb, 0, len(selectors))
 	for _, sel := range selectors {
@@ -150,7 +164,7 @@ func RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain.RoleVerb {
 			if !ok {
 				continue
 			}
-			for _, verb := range GrantedVerbs(fgaType, sel.Verbs, VerbsOfType(fgaType)) {
+			for _, verb := range GrantedVerbs(fgaType, sel.Verbs, VerbsOfType(fgaType), policy) {
 				pair := domain.RoleVerb{ObjectType: dotted, Verb: verb}
 				if seen[pair] {
 					continue

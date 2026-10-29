@@ -49,6 +49,11 @@ type BindingScope struct {
 	// проекцией первого субъекта, и выдача разворачивалась ему одному.
 	Subjects []domain.Subject
 	RoleID   string
+	// Policy — политика роли выдачи ([domain.PolicyOfRole] её строки). От неё
+	// зависит набор глаголов правила: правка влечёт удаление у ролей платформы и
+	// арендатора и не влечёт у роли модуля (kaname#1006). Нулевая — самая строгая
+	// ветвь: удаление не приписывается.
+	Policy domain.RulePolicy
 	// Selectors — the role's UNIFIED materializing selectors (flat explicit
 	// RBAC model): ARM_ANCHOR(all) + ARM_NAMES + ARM_LABELS. When non-empty the
 	// binding has dynamic per-rule membership: each selector (rule_fp) is matched
@@ -194,6 +199,23 @@ type ReconcileStore interface {
 	// возвращается немедленно.
 	AcquireBindingLocks(ctx context.Context, bindingIDs []domain.AccessBindingID) error
 
+	// LockBindingsAndRoles берёт строки выдач набора `FOR NO KEY UPDATE` (тот же
+	// режим, что LoadBinding), а затем строки их ролей `FOR KEY SHARE` (тот же
+	// режим, что чтение роли прохода), каждый род — одним оператором в порядке id и
+	// ДО первой записи прохода (kaname#974).
+	//
+	// ЗАЧЕМ. Снятие регистрации объекта запирает выдачи, чья цель называет ключ, и
+	// роли, чьи правила называют его, и только потом пишет (UnregisteredKeyWithdrawal).
+	// Проход по объекту прежде брал строку выдачи и её роль ПЕРЕД работой каждой
+	// выдачи веера — то есть приходил к роли следующей выдачи, уже записав прямой
+	// факт предыдущей, а к выдаче следующей — уже держа роль предыдущей. Общий факт
+	// двух выдач одного субъекта на одном объекте и роль с именем ключа замыкали
+	// кольцо со снятием: Postgres снимал одну сторону (40P01). Порядок родов у обеих
+	// сторон теперь один — выдачи, роли, затем записи, — и кольца нет by
+	// construction. Идемпотентен внутри транзакции: последующие чтения прохода берут
+	// уже удерживаемые замки.
+	LockBindingsAndRoles(ctx context.Context, bindingIDs []domain.AccessBindingID) error
+
 	// LoadBinding — минимальные факты выдачи: область, селекторы, роль. ok=false —
 	// выдачи больше нет (удалена: проходу делать нечего, каскад уже снял её членов).
 	//
@@ -211,7 +233,8 @@ type ReconcileStore interface {
 	// Держит замок другое: решение форварда «выдача жива» верно до его коммита. Снятие
 	// выдачи (LockBindingForDeactivation, `FOR UPDATE`) с ним конфликтует и не прочитает
 	// набор членов и реестр, пока форвард, увидевший выдачу ACTIVE, ещё пишет
-	// (kaname#919, kaname#923). ok=false — выдачи больше нет.
+	// (kaname#919, kaname#923). Тот же `FOR UPDATE` берёт отзыв по снятию регистрации
+	// объекта (kaname#963, F1). ok=false — выдачи больше нет.
 	LoadBindingForForward(ctx context.Context, bindingID domain.AccessBindingID) (BindingScope, bool, error)
 
 	// LoadBindingsForForward — то же чтение, что LoadBindingForForward, но для ЦЕЛОГО НАБОРА
@@ -259,6 +282,14 @@ type ReconcileStore interface {
 	MatchAllInScopeIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error)
 	MatchByIDsIAMDirect(ctx context.Context, types []string, ids []string) ([]domain.MirrorObject, error)
 
+	// MatchCreatedByIAMDirect — собственные объекты iam типов `types` в области
+	// `scope`, создатель которых — учётка из `creators` (kaname#1003, селектор
+	// создателя). Отбор — по индексу «аккаунт, создатель», а не перебором объектов
+	// области: число строк пропорционально числу учёток создателя. Тип, факт
+	// создателя которого не хранится, не даёт ни одного объекта. Сужение по
+	// области — то же доказанное надмножество IsContainedIn, что у ветви якоря.
+	MatchCreatedByIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor, creators []string) ([]domain.MirrorObject, error)
+
 	// MatchIAMDirect returns IAM's OWN objects matching a selector's
 	// types+matchLabels read SAME-DB from the native tables (FeedIAMDirect —
 	// iam.project/iam.account). The returned MirrorObject carries the iam-hierarchy
@@ -272,9 +303,26 @@ type ReconcileStore interface {
 	// a specific member on a mirror-change event / byName ref). ok=false ⇒ not in
 	// mirror ⇒ PENDING_VERIFICATION.
 	GetMirrorObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error)
+	// LockMirrorObjects запирает строки зеркала объектов `objs` под `FOR KEY SHARE`
+	// одним оператором в порядке (тип, id) и возвращает те, что есть (kaname#975).
+	// В `objs` — только объекты зеркала (не iam-direct).
+	//
+	// ЗАЧЕМ. Ветви отбора членов по зеркалу — область, метки, вложенное правило —
+	// выбирают объект по его строке зеркала, а не по выдаче или роли, которые
+	// запирает снятие регистрации. Снятие удаляет строку зеркала, а удаление
+	// конфликтует с `FOR KEY SHARE`: проход, запирающий строку объекта перед записью
+	// члена по нему, либо видит её и держит до коммита (снятие ждёт его, и
+	// пост-фиксационный проход снятия снимает записанное), либо, придя после снятия,
+	// её не находит и члена не пишет. Правка меток (`FOR NO KEY UPDATE`) с этим
+	// режимом не конфликтует. Строку, которую снятие удаляет прямо сейчас, замок не
+	// ждёт, а пропускает как отсутствующую (`SKIP LOCKED`): проход никогда не стоит
+	// на строке зеркала и потому не замыкает кольца со снятием (URG-24).
+	LockMirrorObjects(ctx context.Context, objs []MemberCoord) (map[MemberCoord]struct{}, error)
 	// AncestorObjects — предки объекта из его зарегистрированной цепи, которые
 	// есть в зеркале, с метками (kaname#874). По ним путь по объекту решает,
-	// охватывает ли объект вложенное правило.
+	// охватывает ли объект вложенное правило. Строки предков чтение запирает
+	// `FOR KEY SHARE` (kaname#975): охват потомка держится на строке контейнера, и
+	// снятие регистрации контейнера не проходит мимо прохода, который по ней решил.
 	AncestorObjects(ctx context.Context, objectType, objectID string) ([]domain.MirrorObject, error)
 	// MatchDescendants — объекты типов `types`, у которых среди предков есть
 	// контейнер типа `containerType` с идентификатором из `containerIDs`, на любой
@@ -648,9 +696,24 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 // ReconcileBinding recomputes the full desired membership of one binding from the
 // mirror and diffs it against the materialized set (trigger (a) + sweep (c)).
 func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error {
+	return r.fullPass(ctx, bindingID, false)
+}
+
+// ConvergeBinding — тот же полный проход, но СВОДЯЩИЙ: каждый неизменный
+// действующий член доводится до своего желаемого набора кортежей при любом числе
+// субъектов — недостающее дописывается, лишнее снимается (emitted_completion.go,
+// kaname#1006). Его зовёт проход по всем действующим выдачам — при старте и
+// затем по такту (seed/binding_converge.go): набор кортежей члена зависит не
+// только от ключа члена, но и от вычисления (политика роли, каталог), а
+// вычисление меняется выкаткой.
+func (r *Reconciler) ConvergeBinding(ctx context.Context, bindingID domain.AccessBindingID) error {
+	return r.fullPass(ctx, bindingID, true)
+}
+
+func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindingID, converge bool) error {
 	col := &syncFGACollector{}
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
-		if err := r.reconcileBinding(ctx, s, bindingID, col); err != nil {
+		if err := r.reconcileBinding(ctx, s, bindingID, converge, col); err != nil {
 			return err
 		}
 		// Отложенные строки снятия — в конце прохода; факт, который ещё держит
@@ -753,8 +816,8 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		// Предки объекта — не более ОДНОГО раза на веер и лишь по спросу выдачи с
 		// вложенным правилом (kaname#874): по ним каждая такая выдача решает свои
 		// вложенные правила. Чтение — текущей цепи, поэтому перенос объекта под
-		// другой контейнер (ND-09) переносит и члены.
-		ancestors := r.ancestorsOf(ctx, s, objectType, objectID, objPresent)
+		// другой контейнер (ND-09) переносит и члены. Память предков заводится ниже,
+		// после замка строки объекта: её чтение ленивое и идёт уже под замками выдач.
 
 		// Fan out over the de-duplicated union; the per-binding pass is an idempotent
 		// diff of THIS OBJECT's membership, so reconciling a binding once is enough
@@ -787,6 +850,25 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		if err := s.AcquireBindingLocks(ctx, union); err != nil {
 			return fmt.Errorf("acquire binding locks for object %s:%s: %w", objectType, objectID, err)
 		}
+		// Строки выдач и их ролей — тоже ВСЕ вперёд, тем же порядком родов, что у
+		// снятия регистрации объекта: выдачи, роли, затем записи (kaname#974, шапка
+		// LockBindingsAndRoles). Иначе проход брал роль очередной выдачи, уже
+		// записав общий прямой факт предыдущей, а снятие — наоборот.
+		if err := s.LockBindingsAndRoles(ctx, union); err != nil {
+			return fmt.Errorf("lock bindings and roles for object %s:%s: %w", objectType, objectID, err)
+		}
+		// Строка самого объекта — третьим родом, после выдач и ролей и до первой
+		// записи (kaname#975): тот же порядок, что у снятия регистрации (выдачи, роли,
+		// строка зеркала). Строки, снятой после чтения выше, под замком уже нет —
+		// желаемое пусто, и проход снимает члены объекта, а не пишет их.
+		if objPresent {
+			live, err := liveObjects(ctx, s, []MemberCoord{{ObjectType: objectType, ObjectID: objectID}})
+			if err != nil {
+				return fmt.Errorf("object %s:%s: %w", objectType, objectID, err)
+			}
+			objPresent = live(MemberCoord{ObjectType: objectType, ObjectID: objectID})
+		}
+		ancestors := r.ancestorsOf(ctx, s, objectType, objectID, objPresent)
 		for _, bID := range union {
 			if err := r.reconcileBindingForObject(ctx, s, bID, objectType, objectID, obj, objPresent, ancestors, col); err != nil {
 				return err
@@ -954,7 +1036,7 @@ func emitRevokedAuditOfExpiry(ctx context.Context, s ReconcileStore, bs BindingS
 
 // reconcileBinding is the core diff. It computes the desired member set for a
 // binding and reconciles it against the materialized set within the caller's tx.
-func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID, col *syncFGACollector) error {
+func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID, converge bool, col *syncFGACollector) error {
 	// Serialize concurrent reconcile passes of the same binding on the
 	// xact-scoped advisory lock BEFORE any read/write, so the exactly-once
 	// materialization invariant holds under N replicas.
@@ -985,7 +1067,7 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 		return fmt.Errorf("current members %s: %w", bindingID, err)
 	}
 
-	return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID), col)
+	return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID, converge), col)
 }
 
 // reconcileBindingForObject is the OBJECT-NARROWED twin of reconcileBinding: it diffs
@@ -1041,7 +1123,7 @@ func (r *Reconciler) reconcileBindingForObject(
 		if err != nil {
 			return fmt.Errorf("current members %s: %w", bindingID, err)
 		}
-		return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID), col)
+		return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID, false), col)
 	}
 
 	var desired []DesiredMember
@@ -1094,6 +1176,12 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 			out = append(out, sm)
 		}
 	}
+	// Контейнерные действия правил (kaname#1003, creator.go) — члены на объекте
+	// ОБЛАСТИ: путь по объекту обязан их выводить, иначе событие аккаунта сняло бы
+	// их как устаревшие.
+	if o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
+		out = append(out, containerMembers(cat, bs)...)
+	}
 	// Per-object target least-priv (F8, IAM-1-21): a rule may only grant an object the
 	// binding's target also lists. Uniform across all arms, exactly as
 	// matchSelectorObjects intersects the matched set. Вложенное правило (kaname#874)
@@ -1111,7 +1199,7 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 		} else if !inTarget || !selectorMatchesObject(sel, o) {
 			continue
 		}
-		dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope)
+		dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
 		if !ok {
 			// Правило не даёт типу ни одного кортежа → объект не член (fail-closed).
 			continue
@@ -1287,17 +1375,33 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 				return nil, err
 			}
 			for _, o := range matched {
-				if dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope); ok {
+				if dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope); ok {
 					out = append(out, dm)
 				}
 			}
 			continue
 		}
-		// Pass the binding's scope + target so the ANCHOR arm resolves the candidate set
-		// per the target (by-id when per-object; O(scope) push-down otherwise), and every
-		// arm's matches are intersected with the target. IsContainedIn below stays the
-		// authoritative containment re-verify.
-		matched, err := r.matchSelectorObjects(ctx, s, sel, bs.Scope, bs.Target)
+		// Правило, которое на своих типах называет одни контейнерные действия
+		// (kaname#1003), объектам не даёт ничего: его член — на объекте области
+		// (containerMembers). Кандидатов оно не ищет вовсе — перебора учёток
+		// аккаунта у выдачи роли создателя нет.
+		if !selectorWritesObjects(cat, sel) {
+			continue
+		}
+		var matched []domain.MirrorObject
+		var err error
+		if sel.CreatedBySubject {
+			// Селектор создателя: кандидаты — объекты области, созданные
+			// субъектами-учётками выдачи, отбором по индексу (аккаунт, создатель),
+			// а не перебором объектов области (§3 приёмки, «производительность»).
+			matched, err = r.matchCreatorObjects(ctx, s, sel, bs)
+		} else {
+			// Pass the binding's scope + target so the ANCHOR arm resolves the candidate set
+			// per the target (by-id when per-object; O(scope) push-down otherwise), and every
+			// arm's matches are intersected with the target. IsContainedIn below stays the
+			// authoritative containment re-verify.
+			matched, err = r.matchSelectorObjects(ctx, s, sel, bs.Scope, bs.Target)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1306,7 +1410,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// (desiredMemberForObject), so the full recompute and the forward path
 			// derive BYTE-IDENTICAL tuples (idempotency: forward + async full both
 			// emit the same set, and the read-delta FGA writer skips duplicates).
-			dm, ok := desiredMemberForObject(cat, gs, sel, o, bs.Scope)
+			dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
 			if !ok {
 				// Правило не даёт типу ни одного кортежа → объект не член (fail-closed).
 				continue
@@ -1314,6 +1418,9 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			out = append(out, dm)
 		}
 	}
+	// Контейнерные действия правил (kaname#1003, creator.go): члены на объекте
+	// области — тот же вывод, что у пути по объекту.
+	out = append(out, containerMembers(cat, bs)...)
 	// Публичное чтение детям (kaname#856): член `public_reader` на каждом
 	// объявленном контейнере, который выдача уже даёт действующим членом, — тот
 	// же вывод, что у прямого пути по объекту (desiredMembersForObject).
@@ -1337,7 +1444,14 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 //     решает строка каталога в базе (catalog_lag.go, kaname#937). Форвард его
 //     пропускает — он пишет только ACTIVE;
 //   - правило не даёт типу ни одного кортежа → ok=false (не член, fail-closed).
-func desiredMemberForObject(cat *catalog.Facts, gs []grantee, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
+func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []grantee, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
+	// Селектор создателя (kaname#1003, creator.go): объект входит в охват правила
+	// только для субъекта, который его создал. Никому — объект правилом не
+	// выбран вовсе (ни члена, ни отвергнутого члена: охвата нет, а не вне области).
+	gs = creatorGrantees(sel, gs, o)
+	if len(gs) == 0 {
+		return DesiredMember{}, false
+	}
 	if !o.IsContainedIn(scope) {
 		return DesiredMember{
 			RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
@@ -1359,9 +1473,19 @@ func desiredMemberForObject(cat *catalog.Facts, gs []grantee, sel domain.RuleSel
 	// не зависит: первый же отказ — отказ всего члена.
 	var tuples []domain.MembershipTuple
 	for _, g := range gs {
-		t, ok := ruleObjectTuples(cat, g.subject, g.verbs, o.ObjectType, o.ObjectID)
+		// Контейнерные действия кортежей на объекте не пишут (kaname#1003): их
+		// отношение лежит на родителе (containerMembers). Правило, у которого на
+		// типе объекта кроме них ничего нет, объекту не даёт ничего — даже яруса.
+		verbs := objectVerbsOf(cat, o.ObjectType, g.verbs)
+		if len(verbs) == 0 {
+			continue
+		}
+		t, ok := ruleObjectTuples(cat, policy, g.subject, verbs, o.ObjectType, o.ObjectID)
 		if !ok {
 			return DesiredMember{}, false
+		}
+		if sel.CreatedBySubject {
+			t = verbTuplesOnly(t)
 		}
 		tuples = append(tuples, t...)
 	}
@@ -1390,6 +1514,13 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 	// каталога в базе ДО диффа (kaname#937): тип жив — член удерживается как есть, тип
 	// снят — член выпадает и снимается ниже обычным путём.
 	desired, held, err := r.settleUnresolved(ctx, s, bs, desired, currentByKey)
+	if err != nil {
+		return err
+	}
+	// Объект, по которому проход ПИШЕТ член, — под замком строки зеркала до первой
+	// записи (kaname#975): объект, чью регистрацию сняли после чтения отбора, члена
+	// не получает, а снятие ждёт фиксации прохода, если замок взят раньше.
+	desired, err = keepLiveDesired(ctx, s, desired, currentByKey)
 	if err != nil {
 		return err
 	}
@@ -1423,11 +1554,12 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			prevStatus = prev.VerificationStatus
 		}
 		if existed && prevStatus == d.Status {
-			// Ключ и статус совпали. У выдачи нескольким субъектам ключ не несёт
-			// субъектов, и член мог быть записан прежде не всем им — недостающее
-			// дописывается по реестру выпущенного (emitted_completion.go, kaname#880).
+			// Ключ и статус совпали. Набор кортежей члена ключом не определён: ключ
+			// не несёт ни субъектов выдачи (kaname#880), ни политики роли и каталога
+			// (kaname#1006), — член сводится к желаемому набору по реестру
+			// выпущенного (emitted_completion.go).
 			if d.Status == domain.VerificationActive {
-				if err := r.completeMemberTuples(ctx, s, bs, d, emitted, col); err != nil {
+				if err := r.convergeMemberTuples(ctx, s, bs, d, emitted, survivingClaims, col); err != nil {
 					return err
 				}
 			}
@@ -1509,6 +1641,86 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 		}
 	}
 	return nil
+}
+
+// mirrorFed — объект питается зеркалом регистраций: его строку удаляет снятие
+// регистрации. Объекты собственных таблиц iam (`iam.*`) зеркала не имеют.
+func mirrorFed(objectType string) bool {
+	return domain.FeedSourceForType(objectType) == domain.FeedMirror
+}
+
+// liveObjects запирает строки зеркала объектов `objs` (LockMirrorObjects,
+// kaname#975) и отвечает, есть ли строка объекта. Объект собственной таблицы iam
+// замка зеркала не берёт и считается живым: его снятие — не снятие регистрации.
+func liveObjects(ctx context.Context, s ReconcileStore, objs []MemberCoord) (func(MemberCoord) bool, error) {
+	seen := make(map[MemberCoord]struct{}, len(objs))
+	mirror := make([]MemberCoord, 0, len(objs))
+	for _, o := range objs {
+		if !mirrorFed(o.ObjectType) {
+			continue
+		}
+		if _, dup := seen[o]; dup {
+			continue
+		}
+		seen[o] = struct{}{}
+		mirror = append(mirror, o)
+	}
+	if len(mirror) == 0 {
+		return func(MemberCoord) bool { return true }, nil
+	}
+	present, err := s.LockMirrorObjects(ctx, mirror)
+	if err != nil {
+		return nil, fmt.Errorf("lock mirror objects: %w", err)
+	}
+	return func(o MemberCoord) bool {
+		if !mirrorFed(o.ObjectType) {
+			return true
+		}
+		_, ok := present[o]
+		return ok
+	}, nil
+}
+
+// keepLiveDesired — желаемые члены без тех, чей объект проход собирается ЗАПИСАТЬ
+// (член новый либо меняет статус), а строки его зеркала под замком уже нет
+// (kaname#975). Такой объект выбыл из отбора между чтением и записью: член по нему
+// не пишется, а прежний член той же координаты выпадает из желаемого и снимается
+// тем же проходом. Члены без записи (статус прежний) замка не берут — их объект
+// проход не трогает, и периодическое сведение не платит замком за каждый объект
+// области. Ожидающий член (PENDING) объекта зеркала не имеет по определению и
+// фильтром не судится. Удержанный член типа, которого снимок каталога ещё не знает
+// (typeUnresolved, kaname#937), не пишется вовсе и замка тоже не берёт.
+func keepLiveDesired(ctx context.Context, s ReconcileStore, desired []DesiredMember, current map[string]domain.TargetMember) ([]DesiredMember, error) {
+	writes := make(map[MemberCoord]struct{})
+	for _, d := range desired {
+		if d.Status == domain.VerificationPending || d.typeUnresolved {
+			continue
+		}
+		if prev, ok := current[memberRuleKey(d.RuleFP, d.ObjectType, d.ObjectID)]; ok && prev.VerificationStatus == d.Status {
+			continue
+		}
+		writes[desiredCoord(d)] = struct{}{}
+	}
+	if len(writes) == 0 {
+		return desired, nil
+	}
+	objs := make([]MemberCoord, 0, len(writes))
+	for c := range writes {
+		objs = append(objs, c)
+	}
+	live, err := liveObjects(ctx, s, objs)
+	if err != nil {
+		return nil, err
+	}
+	out := desired[:0:0]
+	for _, d := range desired {
+		c := desiredCoord(d)
+		if _, written := writes[c]; written && d.Status != domain.VerificationPending && !d.typeUnresolved && !live(c) {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 // memberTuples returns the FGA tuple set for a DESIRED member. In the rules-based
