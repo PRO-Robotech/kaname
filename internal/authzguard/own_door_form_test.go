@@ -84,6 +84,22 @@ func TestFormUnary_NamedCallerMalformedIDIsRefusedBeforeTheHandler(t *testing.T)
 	}
 }
 
+// Пустая строка — отсутствие поля, строка из пробелов — неверная форма:
+// идентификатором она не бывает ни при каком состоянии базы. Близнец —
+// пустая строка той же цепочки — молчит (кейс «пустое поле» ниже).
+func TestFormUnary_BlankIDIsMalformedNotAbsent(t *testing.T) {
+	judge := &formJudge{known: allKinds()}
+	hit := false
+	_, err := formLink(t, judge)(tenantCtx("usr00000000000000001"), &iamv1.GetProjectRequest{ProjectId: "  "},
+		&grpc.UnaryServerInfo{FullMethod: projectGet}, reached(&hit))
+	if status.Code(err) != codes.InvalidArgument || status.Convert(err).Message() != "invalid project id '  '" {
+		t.Fatalf("ответ %v на пробельный идентификатор, ожидался InvalidArgument с текстом судьи", err)
+	}
+	if hit {
+		t.Fatal("обработчик позван после отказа формы на пробельном идентификаторе")
+	}
+}
+
 func TestFormUnary_SilentWhereTheDoorWouldNotAsk(t *testing.T) {
 	for name, tc := range map[string]struct {
 		ctx    context.Context
@@ -91,7 +107,7 @@ func TestFormUnary_SilentWhereTheDoorWouldNotAsk(t *testing.T) {
 		req    any
 	}{
 		"безымянный вызывающий": {context.Background(), projectGet, &iamv1.GetProjectRequest{ProjectId: "qqq-not-a-project"}},
-		"пустое поле":           {tenantCtx("usr00000000000000001"), projectGet, &iamv1.GetProjectRequest{ProjectId: "  "}},
+		"пустое поле":           {tenantCtx("usr00000000000000001"), projectGet, &iamv1.GetProjectRequest{ProjectId: ""}},
 		"глагол вне класса": {tenantCtx("usr00000000000000001"), "/kaname.cloud.iam.v1.ProjectService/List",
 			&iamv1.ListProjectsRequest{}},
 		"вопрос о правах без области": {tenantCtx("usr00000000000000001"), "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck",

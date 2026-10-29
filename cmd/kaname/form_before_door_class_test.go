@@ -39,6 +39,18 @@ package main
 // корень МОНТИРУЕТ на публичный сервер (`registerPublicServices`), а не с
 // приставкой имени службы.
 //
+// # Перечень выводится ДВАЖДЫ, и выводы сверяются
+//
+// Один вывод у пробы и у ступени слеп к сужению: глагол, выпавший из функции
+// класса, выпал бы из обоих разом, и проба зеленела бы на 57 глаголах так же,
+// как на 58. Поэтому второй вывод — встроенный каталог прав службы
+// (`internal/apps/kaname/seed/embedded/permission_catalog.json`, предикат «по
+// предмету» §11.2 приёмки), прочитанный своим разбором, без `catalogderive` и
+// без функции класса. Проба обходит ОБЪЕДИНЕНИЕ двух выводов: выпавший из
+// функции глагол всё равно гоняется и даёт находку там, где ступень молчит.
+// Сверх объединения утверждаются равенство выводов поглаголово (метод, поле,
+// вид) и точная перепись класса по видам — таблицей §11.2, а не потолком.
+//
 // # Одна цепочка на корень и пробу (условие ревью K6-N2)
 //
 // Цепочку, которую судит проба, строит `publicChainUnderProbe` — сборщик
@@ -57,6 +69,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -255,6 +268,142 @@ func formProbeClass(t *testing.T) (class, typedScope []formProbeVerb) {
 	return class, typedScope
 }
 
+// formProbeCatalogPath — встроенный каталог прав службы, источник второго
+// вывода класса. Путь — от каталога пакета корня, в котором исполняется проба.
+const formProbeCatalogPath = "../../internal/apps/kaname/seed/embedded/permission_catalog.json"
+
+// formProbeExempt — литерал изъятия в поле права строки каталога. Литералом, а
+// не константой `catalogderive`: второй вывод не делит кода с первым.
+const formProbeExempt = "<exempt>"
+
+// formProbeClassCensus — перепись класса по видам объекта, §11.2 приёмки:
+// 16 · 15 · 9 · 7 · 5 · 3 · 3, сумма 58. Число ТОЧНОЕ, а не потолок: новый
+// глагол класса меняет эту таблицу вместе с приёмкой, а выпавший краснит пробу.
+var formProbeClassCensus = map[string]int{
+	"account":             16,
+	"iam_user":            15,
+	"iam_service_account": 9,
+	"iam_group":           7,
+	"project":             5,
+	"iam_role":            3,
+	"iam_access_binding":  3,
+}
+
+// formProbeCatalogRow — строка каталога прав, разобранная своим типом.
+type formProbeCatalogRow struct {
+	FQN              string `json:"fqn"`
+	Permission       string `json:"permission"`
+	RequiredRelation string `json:"required_relation"`
+	ScopeFiltered    bool   `json:"scope_filtered"`
+	ScopeExtractor   struct {
+		ObjectType                 string `json:"object_type"`
+		FromRequestField           string `json:"from_request_field"`
+		ObjectTypeFromRequestField string `json:"object_type_from_request_field"`
+	} `json:"scope_extractor"`
+}
+
+// formProbeCatalogClass — второй вывод класса: строки каталога с конкретным
+// полем области (не пустым и не `*`), без поля вида области, не `scope_filtered`,
+// не изъятые и с отношением, — пересечённые с публичным сервером корня. Строк
+// каталога ноль — условие пробы не создано.
+func formProbeCatalogClass(t *testing.T) []formProbeVerb {
+	t.Helper()
+	raw, err := os.ReadFile(formProbeCatalogPath)
+	if err != nil {
+		t.Fatalf("каталог прав не прочитан — второго вывода класса нет: %v", err)
+	}
+	var rows []formProbeCatalogRow
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("каталог прав не разобран: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("в каталоге прав ноль строк — второй вывод класса беспредметен")
+	}
+	public := formProbePublicMethods(t)
+	var out []formProbeVerb
+	for _, r := range rows {
+		se := r.ScopeExtractor
+		method := "/" + r.FQN
+		if _, mounted := public[method]; !mounted ||
+			se.FromRequestField == "" || se.FromRequestField == "*" || se.ObjectTypeFromRequestField != "" ||
+			r.ScopeFiltered || r.Permission == formProbeExempt || r.RequiredRelation == "" {
+			continue
+		}
+		out = append(out, formProbeVerb{method: method, field: se.FromRequestField, kind: se.ObjectType})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].method < out[j].method })
+	return out
+}
+
+// formProbeDisagreement — расхождения двух выводов класса поглаголово: глагол
+// одного вывода без другого либо с другим полем или видом. Пусто — сошлись.
+func formProbeDisagreement(stage, catalog []formProbeVerb) []string {
+	byMethod := func(vs []formProbeVerb) map[string]formProbeVerb {
+		m := make(map[string]formProbeVerb, len(vs))
+		for _, v := range vs {
+			m[v.method] = v
+		}
+		return m
+	}
+	s, c := byMethod(stage), byMethod(catalog)
+	var out []string
+	for m, cv := range c {
+		sv, ok := s[m]
+		switch {
+		case !ok:
+			out = append(out, m+": в каталоге прав глагол класса, функция класса ступени его не выводит")
+		case sv.field != cv.field || sv.kind != cv.kind:
+			out = append(out, m+": ступень судит "+sv.kind+"@"+sv.field+", каталог объявляет "+cv.kind+"@"+cv.field)
+		}
+	}
+	for m := range s {
+		if _, ok := c[m]; !ok {
+			out = append(out, m+": функция класса выводит глагол, которого в классе каталога прав нет")
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// formProbeCensusMismatch — расхождения переписи класса по видам с таблицей
+// §11.2: по каждому виду таблицы и по каждому виду вне её.
+func formProbeCensusMismatch(class []formProbeVerb) []string {
+	got := map[string]int{}
+	for _, v := range class {
+		got[v.kind]++
+	}
+	var out []string
+	for kind, want := range formProbeClassCensus {
+		if got[kind] != want {
+			out = append(out, "вид "+kind+": глаголов "+strconv.Itoa(got[kind])+", перепись §11.2 — "+strconv.Itoa(want))
+		}
+	}
+	for kind, n := range got {
+		if _, ok := formProbeClassCensus[kind]; !ok {
+			out = append(out, "вид "+kind+": глаголов "+strconv.Itoa(n)+", в переписи §11.2 его нет")
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// formProbeUnion — объединение двух выводов по методу; поле и вид — каталога,
+// если глагол в нём есть (расхождение называет `formProbeDisagreement`).
+func formProbeUnion(stage, catalog []formProbeVerb) []formProbeVerb {
+	seen := map[string]bool{}
+	var out []formProbeVerb
+	for _, vs := range [][]formProbeVerb{catalog, stage} {
+		for _, v := range vs {
+			if !seen[v.method] {
+				seen[v.method] = true
+				out = append(out, v)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].method < out[j].method })
+	return out
+}
+
 // formProbeRequest строит запрос глагола: поле области — value, поле вида
 // области (если аннотация его называет) — объявленный аннотацией вид. false —
 // «не построен»: поля нет либо оно не строковое.
@@ -376,6 +525,23 @@ func TestIAM_PNE_1_21_A_FormIsAnsweredBeforeTheDoorOnEveryObjectScopedRPC(t *tes
 	if len(class) == 0 {
 		t.Fatal("в классе ноль глаголов — обход беспредметен, это не зелёное")
 	}
+	// Второй вывод — каталог прав: сужение функции класса видно сверкой, а
+	// выпавший глагол всё равно гоняется — обход идёт по объединению.
+	catalogClass := formProbeCatalogClass(t)
+	if len(catalogClass) == 0 {
+		t.Fatal("второй вывод класса (каталог прав) пуст — сверять не с чем, это не зелёное")
+	}
+	disagreement := formProbeDisagreement(class, catalogClass)
+	var census []string
+	for _, side := range []struct {
+		name string
+		vs   []formProbeVerb
+	}{{"функция класса ступени", class}, {"каталог прав", catalogClass}} {
+		for _, m := range formProbeCensusMismatch(side.vs) {
+			census = append(census, side.name+": "+m)
+		}
+	}
+	verbs := formProbeUnion(class, catalogClass)
 
 	var (
 		byKind       = map[string]int{}
@@ -384,7 +550,7 @@ func TestIAM_PNE_1_21_A_FormIsAnsweredBeforeTheDoorOnEveryObjectScopedRPC(t *tes
 		findings     []string
 		formAnswered int
 	)
-	for _, v := range class {
+	for _, v := range verbs {
 		byKind[v.kind]++
 		kind, known := formProbeKinds[v.kind]
 		entry, mapped := doorMap[v.method]
@@ -464,7 +630,7 @@ func TestIAM_PNE_1_21_A_FormIsAnsweredBeforeTheDoorOnEveryObjectScopedRPC(t *tes
 	// его пропускает, и ступень формы ему не отвечает.
 	anonCall := formProbeCaller(t, testPublicChainInputs{reader: reader, catalog: catalog, prodMode: false})
 	// (в) пустое поле (KE-9): отсутствие — не неверная форма.
-	for _, v := range class {
+	for _, v := range verbs {
 		kind, known := formProbeKinds[v.kind]
 		if !known {
 			continue
@@ -491,16 +657,25 @@ func TestIAM_PNE_1_21_A_FormIsAnsweredBeforeTheDoorOnEveryObjectScopedRPC(t *tes
 		kinds = append(kinds, k+" "+strconv.Itoa(n))
 	}
 	sort.Strings(kinds)
-	t.Logf("перепись IAM-PNE-1-21 А: глаголов класса %d (%s) · вне класса с полем вида области %d · "+
+	t.Logf("перепись IAM-PNE-1-21 А: глаголов обойдено %d (%s) · функция класса ступени %d · каталог прав %d · "+
+		"расхождений выводов %d · расхождений переписи по видам %d · вне класса с полем вида области %d · "+
 		"построено %d · не построено %d · входов неверной формы отвечено ступенью %d из %d · находок %d · "+
 		"контролей вне класса нарушено %d · проводка K6-N2 нарушений %d",
-		len(class), strings.Join(kinds, ", "), len(typedScope), built, len(unbuildable),
+		len(verbs), strings.Join(kinds, ", "), len(class), len(catalogClass), len(disagreement), len(census),
+		len(typedScope), built, len(unbuildable),
 		formAnswered, 3*built, len(findings), len(controls), len(structural))
 
+	if len(disagreement) > 0 {
+		t.Errorf("два вывода класса расходятся (%d) — ступень судит не тот перечень, что объявлен каталогом:\n  %s",
+			len(disagreement), strings.Join(disagreement, "\n  "))
+	}
+	if len(census) > 0 {
+		t.Errorf("перепись класса по видам расходится с §11.2 (%d):\n  %s", len(census), strings.Join(census, "\n  "))
+	}
 	sort.Strings(unbuildable)
 	if len(unbuildable) > 0 {
 		t.Errorf("вердикта НЕТ (запрос не построен) у %d глаголов из %d — это не отказ ступени:\n  %s",
-			len(unbuildable), len(class), strings.Join(unbuildable, "\n  "))
+			len(unbuildable), len(verbs), strings.Join(unbuildable, "\n  "))
 	}
 	if built == 0 {
 		t.Fatal("ни один глагол класса не построен — проба не утверждает ничего")
@@ -538,7 +713,10 @@ func formProbeOneWiring(t *testing.T) []string {
 		t.Fatalf("каталог корня не прочитан: %v", err)
 	}
 	fset := token.NewFileSet()
-	var read, calls int
+	var (
+		read, calls int
+		files       []*ast.File
+	)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
 			continue
@@ -548,6 +726,7 @@ func formProbeOneWiring(t *testing.T) []string {
 			t.Fatalf("исходник корня %s не разобран: %v", e.Name(), err)
 		}
 		read++
+		files = append(files, f)
 		ast.Inspect(f, func(n ast.Node) bool {
 			if c, ok := n.(*ast.CallExpr); ok {
 				if id, ok := c.Fun.(*ast.Ident); ok && id.Name == name {
@@ -563,8 +742,85 @@ func formProbeOneWiring(t *testing.T) []string {
 	if calls == 0 {
 		out = append(out, "корень (не-тестовых файлов "+strconv.Itoa(read)+") не зовёт "+name+
 			" — цепочка, которую судит проба, не та, что уезжает в публичный слушатель")
+		return out
+	}
+	return append(out, formProbeChainReachesListener(files, name)...)
+}
+
+// formProbeChainInterceptors — куда обязан уехать каждый результат сборщика
+// цепочки, по позиции: однократная полоса, затем потоковая.
+var formProbeChainInterceptors = []string{"ChainUnaryInterceptor", "ChainStreamInterceptor"}
+
+// formProbeChainReachesListener — собранная корнем цепочка доходит до
+// слушателя: каждое присваивание результата сборщика name в не-тестовом коде
+// раскрывается (`…`) в `grpc.ChainUnaryInterceptor` и `grpc.ChainStreamInterceptor`
+// той же функции. Звено, собранное и выброшенное (`_`) либо подменённое другим
+// перечнем, — нарушение: проба судила бы цепочку, которой слушатель не несёт.
+// Присваиваний ноль — тоже нарушение: зов без результата не провязка.
+func formProbeChainReachesListener(files []*ast.File, name string) []string {
+	var (
+		out      []string
+		assigned int
+	)
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				as, ok := n.(*ast.AssignStmt)
+				if !ok || len(as.Rhs) != 1 {
+					return true
+				}
+				c, ok := as.Rhs[0].(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if id, ok := c.Fun.(*ast.Ident); !ok || id.Name != name {
+					return true
+				}
+				assigned++
+				for i, interceptor := range formProbeChainInterceptors {
+					var links string
+					if i < len(as.Lhs) {
+						if id, ok := as.Lhs[i].(*ast.Ident); ok && id.Name != "_" {
+							links = id.Name
+						}
+					}
+					if links == "" || !formProbeSpreadInto(fn.Body, interceptor, links) {
+						out = append(out, fn.Name.Name+": результат "+strconv.Itoa(i+1)+" сборщика "+name+
+							" не раскрыт в grpc."+interceptor+" — цепочка собрана, но в слушатель не уезжает")
+					}
+				}
+				return true
+			})
+		}
+	}
+	if assigned == 0 {
+		out = append(out, "результат "+name+" не присвоен ни в одной функции корня — до слушателя ему не дойти")
 	}
 	return out
+}
+
+// formProbeSpreadInto — раскрывается ли перечень links в вызов interceptor
+// внутри body: `<пакет>.<interceptor>(links...)`.
+func formProbeSpreadInto(body *ast.BlockStmt, interceptor, links string) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		if !ok || c.Ellipsis == token.NoPos || len(c.Args) != 1 {
+			return true
+		}
+		if sel, ok := c.Fun.(*ast.SelectorExpr); !ok || sel.Sel.Name != interceptor {
+			return true
+		}
+		if id, ok := c.Args[0].(*ast.Ident); ok && id.Name == links {
+			found = true
+		}
+		return true
+	})
+	return found
 }
 
 // formProbeStreams — потоковый ли метод: по дескриптору контракта.
@@ -618,4 +874,64 @@ func TestIAM_PNE_1_21_A_FormStageHasNoStreamLane(t *testing.T) {
 			t.Fatalf("распознаватель не назвал подставленный потоковый глагол %s: %v", victim, got)
 		}
 	})
+}
+
+// TestIAM_PNE_1_21_A_ClassCrossCheckNamesANarrowedVerb — распознаватели сверки
+// двух выводов и переписи по видам на синтетике: выпавший из функции класса
+// глагол назван обоими, законный близнец (выводы равны, перепись по таблице)
+// молчит. Сам класс сюда не читается — только форма, которую сверка судит.
+func TestIAM_PNE_1_21_A_ClassCrossCheckNamesANarrowedVerb(t *testing.T) {
+	var full []formProbeVerb
+	for kind, n := range formProbeClassCensus {
+		for i := 0; i < n; i++ {
+			full = append(full, formProbeVerb{method: "/x." + kind + "/V" + strconv.Itoa(i), field: kind + "_id", kind: kind})
+		}
+	}
+	if got := formProbeDisagreement(full, full); len(got) != 0 {
+		t.Fatalf("близнец: равные выводы названы расходящимися: %v", got)
+	}
+	if got := formProbeCensusMismatch(full); len(got) != 0 {
+		t.Fatalf("близнец: перепись по таблице названа расходящейся: %v", got)
+	}
+	victim := full[0]
+	narrowed := full[1:]
+	if got := formProbeDisagreement(narrowed, full); len(got) != 1 || !strings.HasPrefix(got[0], victim.method+":") {
+		t.Fatalf("сверка не назвала глагол %s, выпавший из функции класса: %v", victim.method, got)
+	}
+	if got := formProbeCensusMismatch(narrowed); len(got) != 1 || !strings.Contains(got[0], "вид "+victim.kind+":") {
+		t.Fatalf("перепись не назвала вид %s выпавшего глагола: %v", victim.kind, got)
+	}
+	if got := formProbeUnion(narrowed, full); len(got) != len(full) {
+		t.Fatalf("объединение потеряло выпавший глагол: обойдено бы %d из %d", len(got), len(full))
+	}
+	moved := append([]formProbeVerb{{method: victim.method, field: "other_id", kind: victim.kind}}, narrowed...)
+	if got := formProbeDisagreement(moved, full); len(got) != 1 || !strings.Contains(got[0], "@other_id") {
+		t.Fatalf("сверка не назвала глагол с другим полем области: %v", got)
+	}
+}
+
+// TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection — страж «собранная
+// цепочка доходит до слушателя» на синтетическом корне: законная проводка
+// молчит, выброшенный и подменённый результат названы.
+func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
+	const head = "package main\nfunc serve() {\n"
+	for name, tc := range map[string]struct {
+		body string
+		want int
+	}{
+		"законная проводка":     {"u, s, err := chain()\n_ = err\nsrv(grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...))\n", 0},
+		"однократная выброшена": {"_, s, err := chain()\n_ = err\nsrv(grpc.ChainUnaryInterceptor(other...), grpc.ChainStreamInterceptor(s...))\n", 1},
+		"обе подменены":         {"u, s, err := chain()\n_, _, _ = u, s, err\nsrv(grpc.ChainUnaryInterceptor(other...), grpc.ChainStreamInterceptor(other...))\n", 2},
+		"результат не присвоен": {"chain()\n", 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := parser.ParseFile(token.NewFileSet(), "root.go", head+tc.body+"}\n", 0)
+			if err != nil {
+				t.Fatalf("синтетический корень не разобран: %v", err)
+			}
+			if got := formProbeChainReachesListener([]*ast.File{f}, "chain"); len(got) != tc.want {
+				t.Fatalf("нарушений %d, ожидалось %d: %v", len(got), tc.want, got)
+			}
+		})
+	}
 }
