@@ -341,24 +341,24 @@ func groupPayload(eventType string, g grantGroup) (string, error) {
 	} else {
 		fields["relations"] = g.relations
 		if eventType == EventTypeWrite {
-			// COMPATIBILITY ECHO — GRANTS ONLY, and the asymmetry is the point.
+			// ЭХО СОВМЕСТИМОСТИ — ТОЛЬКО У ВЫДАЧИ, и асимметрия несущая.
 			//
-			// During a rolling upgrade a pod that predates the set form still claims
-			// these rows. Given an echo it applies ONE relation and marks the row
-			// delivered; given none it cannot decode the row and poisons it.
+			// Введено ради выкатки, на которой под выпуска до формы набора ещё забирал
+			// эти строки дренажем. С эхом он применял ОДНО отношение и отмечал строку
+			// доставленной; без эха не мог её разобрать и отравлял.
 			//
-			// For a GRANT the first outcome is better: the subject ends up with less
-			// access than it is owed (fail-closed), the row is consumed, and the next
-			// reconcile pass completes it.
+			// Для ВЫДАЧИ первый исход лучше: у субъекта меньше доступа, чем ему
+			// положено (отказ закрытый), строка поглощена, и следующий проход сверки
+			// её дополняет.
 			//
-			// For a REVOKE it is strictly worse, and irrecoverably so: the row is
-			// marked delivered while most of the set SURVIVES ITS OWN REMOVAL — an
-			// over-grant that is invisible to the poison ledger, to the wedge warning
-			// and to the redrive, because as far as the queue is concerned the work
-			// is done. A poisoned revoke, by contrast, is visible in all three and is
-			// re-driven on the first model observation after a pod starts — which the
-			// end of the rollout guarantees. So revokes carry no echo: better stuck
-			// and loud than applied in part and silent.
+			// Для СНЯТИЯ он строго хуже и необратим: строка отмечена доставленной, а
+			// большая часть набора ПЕРЕЖИВАЕТ СВОЁ СНЯТИЕ — лишний доступ, невидимый
+			// ни ведомости отравленных, ни предупреждению о заторе, ни повторной
+			// доставке, потому что для очереди работа сделана. Отравленное снятие,
+			// напротив, видно во всех трёх и доставляется заново при первом
+			// наблюдении модели после старта пода — а его гарантирует конец выкатки.
+			// Поэтому у снятия эха нет: лучше застрять громко, чем примениться
+			// частично и молча.
 			fields["relation"] = g.relations[0]
 		}
 	}
