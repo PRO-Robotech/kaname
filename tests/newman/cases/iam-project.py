@@ -1234,20 +1234,115 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-PRJ-DL-NEG-MALFORMED-PREFIX (IAM-PNE-1-08) ЖИВЁТ В НАБОРЕ КРАЯ ПЛАТФОРМЫ:
-# `PRO-Robotech/kacho:gateway/tests/newman/cases/iam-project-edge-format.py`.
+# IAM-PRJ-DL-NEG-MALFORMED-PREFIX — IAM-PNE-1-08 (§11 приёмки
+# `non-empty-project-is-not-deleted.md`, решение диспетчера по kaname#168):
+# неверная форма идентификатора отвергается СИНХРОННО и ДО вопроса о праве — на
+# собственном фронте службы.
 #
-# Его пара `400` / `3` — производитель КРАЙ (короткое замыкание по приставке ДО
-# проверки прав, приёмка `non-empty-project-is-not-deleted.md` Н4/Н14). Этот
-# модуль целиком переадресован на собственный фронт службы, а там такого шага
-# нет: глагол доходит до проверки прав и на `qqq-not-a-project` отвечает `403` /
-# `7` (`AUTHZ_DENIED`, область `project`) — замер на сведённом дереве, прогон
-# автономного стенда 2026-09-16. Утверждение, чей производитель край, здесь
-# краснело бы не о предмете; ослаблять его до `oneOf` запрещено (testing.md
-# §e2e-инварианты), переутверждать как `403` — значит превратить кейс о ФОРМЕ
-# идентификатора в дубль `IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST` о ПРАВАХ.
-# Исход e2e-flow.md §7а — «оставить утверждение платформе, расщепив коллекцию».
+# ПРОИЗВОДИТЕЛЬ ПАРЫ — СЛУЖБА. Прежде кейс жил в наборе края платформы: край
+# судит приставку до проверки прав, а собственный фронт спрашивал модель раньше,
+# чем кто-либо смотрел на форму, и отвечал `403` / `7` (`AUTHZ_DENIED`, область
+# `project`; замер автономного стенда 2026-09-16). Приёмка возвращает пару службе:
+# ступень формы стоит после подлинности и до двери. Без этой ступени кейс КРАСНЫЙ
+# по предмету, а не по фикстуре: положительный близнец (последний шаг) на том же
+# глаголе и том же предъявителе получает отказ в праве, значит фронт отвечает.
+#
+# Форма — форма СЛУЖБЫ (приставка ожидаемого вида, длина 20 либо перечень
+# посеянного), а не края: поэтому `prj123` (приставка верна, длина нет) и
+# `acc00000000000notfnd` (форма чужого вида) — тоже неверная форма проекта.
+#
+# Строгость пары ослаблять ЗАПРЕЩЕНО (testing.md, malformed-id-not-weakened):
+# `oneOf` с `403` был бы допуском на исход, который это изменение и убирает.
 # ---------------------------------------------------------------------------
+
+def _project_form_refusal(value):
+    """Синхронный отказ формы: пара `400` / `3`, текст обработчика дословно, ни
+    конверта операции, ни причины рубежа прав."""
+    return [
+        *assert_status(400),
+        *assert_grpc_code(3, "INVALID_ARGUMENT"),
+        *assert_refusal_message(f"invalid project id '{value}'",
+                                probe="текст отказа формы — текст обработчика дословно"),
+        "pm.test('отказ формы синхронный: конверта операции нет (поля id нет)', () => {",
+        "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+        "  pm.expect(j.id, JSON.stringify(j)).to.equal(undefined);",
+        "});",
+        "pm.test('отказ формы не выдаёт себя за отказ в праве: ErrorInfo AUTHZ_DENIED нет', () => {",
+        "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+        "  const denied = (j.details || []).filter(d => (d['@type'] || '').endsWith('google.rpc.ErrorInfo') && d.reason === 'AUTHZ_DENIED');",
+        "  pm.expect(denied.length, JSON.stringify(j)).to.equal(0);",
+        "});",
+    ]
+
+
+CASES.append(Case(
+    id="IAM-PRJ-DL-NEG-MALFORMED-PREFIX",
+    title="IAM-PNE-1-08: DELETE project с неверной формой id → sync 400 INVALID_ARGUMENT "
+          "до вопроса о праве; ответ не зависит от выданного; аноним — 401",
+    classes=["NEG", "VAL", "AUTHZ"],
+    priority="P1",
+    steps=[
+        Step(
+            name="delete-malformed-no-prefix",
+            method="DELETE",
+            path="/iam/v1/projects/qqq-not-a-project",
+            auth="jwtAccountAdminA",
+            test_script=_project_form_refusal("qqq-not-a-project"),
+        ),
+        Step(
+            name="delete-malformed-short",
+            method="DELETE",
+            path="/iam/v1/projects/prj123",
+            auth="jwtAccountAdminA",
+            test_script=_project_form_refusal("prj123"),
+        ),
+        Step(
+            name="delete-malformed-foreign-kind",
+            method="DELETE",
+            path="/iam/v1/projects/acc00000000000notfnd",
+            auth="jwtAccountAdminA",
+            test_script=_project_form_refusal("acc00000000000notfnd"),
+        ),
+        # Администратор облака проходит дверь надзором — и всё равно получает ТОТ ЖЕ
+        # ответ: ответ на неверную форму от выданного не зависит.
+        Step(
+            name="delete-malformed-cluster-admin",
+            method="DELETE",
+            path="/iam/v1/projects/qqq-not-a-project",
+            auth="jwtBootstrap",
+            test_script=_project_form_refusal("qqq-not-a-project"),
+        ),
+        # Подлинность проверяется раньше формы: анониму форма не отвечает.
+        Step(
+            name="delete-malformed-anon",
+            method="DELETE",
+            path="/iam/v1/projects/qqq-not-a-project",
+            auth="anonymous",
+            test_script=[
+                *assert_status(401),
+                *assert_grpc_code(16, "UNAUTHENTICATED"),
+            ],
+        ),
+        # ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ — один факт, форма: правильная форма своего вида,
+        # проекта нет. Ступень формы его пропускает, отвечает вопрос о праве.
+        Step(
+            name="delete-wellformed-absent-twin",
+            method="DELETE",
+            path="/iam/v1/projects/prj00000000000notfnd",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(403),
+                *assert_grpc_code(7, "PERMISSION_DENIED"),
+                "pm.test('близнец: отвечает вопрос о праве (AUTHZ_DENIED), а не форма', () => {",
+                "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                "  const info = (j.details || []).find(d => (d['@type'] || '').endsWith('google.rpc.ErrorInfo')) || {};",
+                "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+                "  pm.expect(String(j.message || ''), JSON.stringify(j)).to.not.have.string('invalid project id');",
+                "});",
+            ],
+        ),
+    ],
+))
 
 # ---------------------------------------------------------------------------
 # IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST — IAM-PNE-1-09: отказ по непустоте НЕ

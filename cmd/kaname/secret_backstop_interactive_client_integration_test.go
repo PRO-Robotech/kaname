@@ -41,7 +41,7 @@ func TestIntegration_IC12_BackstopSweepsAClientSecretStrandedInAnOperationRow(t 
 	t.Cleanup(pool.Close)
 	ops := operations.NewRepo(pool, "kaname")
 
-	const opID = "iop_ic405_stranded"
+	const opID = "iop0000ic405stranded"
 	const secret = "stranded-client-secret-4b7f"
 	now := time.Now().UTC().Truncate(time.Second)
 	if err := ops.Create(ctx, operations.Operation{

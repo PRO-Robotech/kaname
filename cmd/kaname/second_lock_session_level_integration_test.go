@@ -56,7 +56,8 @@ package main
 //   - `resolve.go`, `sessionProto`: ответ краю называет «1» вместо уровня
 //     записи → красное «пересылаемое значение не равно уровню нашей сессии».
 //
-// Run: `go test ./cmd/kaname/ -run F11_20 -count=1` (Docker). Skipped under -short.
+// Запуск: `go test ./cmd/kaname/ -run F11_20 -count=1` (Docker). Под -short не
+// исполняется.
 
 import (
 	"context"
@@ -213,7 +214,7 @@ type secondLockReached struct {
 
 func (s *secondLockReached) GrantAdmin(context.Context, *iamv1.GrantClusterAdminRequest) (*operationpb.Operation, error) {
 	s.reached.Store(true)
-	return &operationpb.Operation{Id: "iop-second-lock-probe", Done: true}, nil
+	return &operationpb.Operation{Id: "iop00secondlockprobe", Done: true}, nil
 }
 
 // registerSecondLockPerson — личность регистрацией паролем (Ф4) тем же
