@@ -398,30 +398,16 @@ func personalAccountName(accID domain.AccountID, attempt int) domain.AccountName
 	return domain.AccountName(domain.PersonalAccountNamePrefix + strings.ToLower(tail))
 }
 
-// ActivateInviteTx — активация ОДНОЙ строки приглашения writer'ом вызывающего:
-// сама активация, событие аудита `iam.user.updated`, намерение кортежа членства
-// и событие реконсайла — одним исходом (RC-2, ban #10).
+// activateInvite — активация ОДНОЙ строки приглашения writer'ом вызывающего:
+// сама активация, событие аудита `iam.user.updated` и событие реконсайла — одним
+// исходом (RC-2, ban #10). Кортеж членства (указатель личности на аккаунт)
+// функция НЕ кладёт, а возвращает: вызывающий кладёт его одним оператором журнала
+// со всеми кортежами своей транзакции (kaname#617).
 //
 // Отказы адаптера возвращаются как есть — вызывающий различает их по сентинелу:
 // `ErrNotFound` — строку уже активировал конкурент (она больше не PENDING);
 // `ErrInviteExpired` — строка пережила свой срок (приёмка ID-MAIL-1, MAIL-23);
 // прочее — отказ.
-func ActivateInviteTx(ctx context.Context, w Writer, pending domain.User,
-	externalID domain.ExternalSubject, displayName domain.DisplayName, actor string,
-) (domain.User, error) {
-	activated, pointer, err := activateInvite(ctx, w, pending, externalID, displayName, actor)
-	if err != nil {
-		return domain.User{}, err
-	}
-	if ferr := w.EmitFGARelationWrite(ctx, pointer); ferr != nil {
-		return domain.User{}, ferr
-	}
-	return activated, nil
-}
-
-// activateInvite — тело ActivateInviteTx БЕЗ записи журнала: указатель личности
-// возвращается вызывающему, и тот кладёт его одним оператором журнала со всеми
-// кортежами своей транзакции (kaname#617).
 func activateInvite(ctx context.Context, w Writer, pending domain.User,
 	externalID domain.ExternalSubject, displayName domain.DisplayName, actor string,
 ) (domain.User, []service.RelationTuple, error) {
@@ -551,7 +537,7 @@ func RegisterMirrorTx(ctx context.Context, w Writer, in MirrorInput) (MirrorResu
 // в его условии, — затем личность, отчеканенная нашей полосой в момент
 // подтверждения (форма та же, что у регистрации, F4d-52), и личные ресурсы.
 //
-// Отказы — сентинелами адаптера, как у [ActivateInviteTx]: ErrInviteExpired —
+// Отказы — сентинелами адаптера, как у activateInvite: ErrInviteExpired —
 // приглашение истекло либо снято; ErrNotFound — строка уже не PENDING. Функция
 // НЕ коммитит и НЕ откатывает: транзакция принадлежит вызывающему.
 func ActivateInviteOnVerificationTx(ctx context.Context, w Writer, pending domain.User, actor string) (BootstrapResult, error) {

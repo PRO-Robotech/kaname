@@ -15,8 +15,8 @@ package user
 // двойник писателя: утверждается то, что положила база.
 //
 // Близнецы — пути той же транзакции с ОДНИМ набором кортежей (приглашение без
-// проекта, активация без личных ресурсов): один оператор на любой ревизии, и
-// счётчик, читающий «один», отличим от счётчика, читающего что угодно.
+// проекта, активация при уже заведённых личных ресурсах): один оператор на любой
+// ревизии, и счётчик, читающий «один», отличим от счётчика, читающего что угодно.
 
 import (
 	"context"
@@ -173,15 +173,22 @@ func TestActivateInviteOnVerification_LaysItsJournalInOneStatement(t *testing.T)
 	assert.Equal(t, 1, c.MaxPerTx, "активация кладёт указатель личности и личные ресурсы одним оператором журнала")
 }
 
-func TestActivateInvite_AloneLaysOneStatement(t *testing.T) {
+// TestActivateInviteOnVerification_WithPersonalResourcesInPlaceLaysOneStatement —
+// близнец: личные ресурсы у человека уже заведены (аккаунт, которым он владеет,
+// есть), заведение ничего не заводит, и журнал транзакции — один указатель
+// личности, один оператор на любой ревизии.
+func TestActivateInviteOnVerification_WithPersonalResourcesInPlaceLaysOneStatement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	w, exec := newJournalWorld(t)
-	p := w.pendingInvitee(t, exec, "one")
+	p := w.pendingInvitee(t, exec, "own")
+	acc := ids.NewID(domain.PrefixAccount)
+	exec(`INSERT INTO kaname.accounts (id, name, owner_user_id, labels) VALUES ($1, $2, $3, '{}'::jsonb)`,
+		acc, "own-"+strings.ToLower(acc[4:12]), string(p.ID))
 	c := w.activateCounted(t, func(wr Writer) error {
-		_, err := ActivateInviteTx(w.ctx, wr, p, domain.NewOwnLaneSubject(), "", string(p.ID))
+		_, err := ActivateInviteOnVerificationTx(w.ctx, wr, p, string(p.ID))
 		return err
 	})
-	assert.Equal(t, 1, c.MaxPerTx, "близнец: одна активация без личных ресурсов — один оператор на любой ревизии")
+	assert.Equal(t, 1, c.MaxPerTx, "близнец: активация без заведения личных ресурсов — один оператор на любой ревизии")
 }
