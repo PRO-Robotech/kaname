@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/PRO-Robotech/corelib/operations"
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
@@ -285,6 +286,17 @@ func (h *Handler) ListSubjects(ctx context.Context, req *iamv1.ListSubjectsReque
 	if req.GetAction() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument action: required")
 	}
+	// Размер страницы — правило платформы (`corevalidate.PageSize`): `0` → 50,
+	// допустимо [0..1000], вне диапазона — INVALID_ARGUMENT с нарушением поля
+	// `page_size`, а не подрезка и не своё умолчание. Судится ДО полномочий
+	// вызывающего: вопрос «правильно ли составлен запрос» имеет один ответ для
+	// всех вызывающих (формат → права → хранилище, `shared/pagination.go`).
+	// Вниз уходит уже применённый размер — источник держателей нуля не видит
+	// (kaname#615, LSP-04…08).
+	pageSize, err := corevalidate.PageSize("page_size", req.GetPageSize())
+	if err != nil {
+		return nil, err
+	}
 	// Inner defense-in-depth: ListSubjects enumerates WHO can act on a resource,
 	// so a tenant caller must administer that resource or be a cluster-admin
 	// (caller_authority.go) — otherwise it leaks the resource's authz graph.
@@ -295,7 +307,7 @@ func (h *Handler) ListSubjects(ctx context.Context, req *iamv1.ListSubjectsReque
 		ResourceType:      req.GetResource().GetType(),
 		ResourceID:        req.GetResource().GetId(),
 		Action:            req.GetAction(),
-		PageSize:          int(req.GetPageSize()),
+		PageSize:          int(pageSize),
 		PageToken:         req.GetPageToken(),
 		SubjectTypeFilter: req.GetSubjectTypeFilter(),
 	})

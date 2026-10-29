@@ -122,7 +122,9 @@ type AuthorizeServiceClient interface {
 	// ListSubjects — return all subjects holding `action` on a given resource.
 	// Used by the admin-UI "who can access this" widget.
 	//
-	// Hard cap: page size ≤ 1000 (InvalidArgument otherwise).
+	// Page size follows the platform rule: [0..1000], 0 selects the platform
+	// default (50); a value outside the range is rejected with INVALID_ARGUMENT
+	// naming the field `page_size`, before the caller's authority is checked.
 	ListSubjects(ctx context.Context, in *ListSubjectsRequest, opts ...grpc.CallOption) (*ListSubjectsResponse, error)
 	// ExpandRelations — return the subjects that resolve `relation` on `resource`,
 	// as recorded by the relational form that decides access. Used by audit
@@ -300,7 +302,9 @@ type AuthorizeServiceServer interface {
 	// ListSubjects — return all subjects holding `action` on a given resource.
 	// Used by the admin-UI "who can access this" widget.
 	//
-	// Hard cap: page size ≤ 1000 (InvalidArgument otherwise).
+	// Page size follows the platform rule: [0..1000], 0 selects the platform
+	// default (50); a value outside the range is rejected with INVALID_ARGUMENT
+	// naming the field `page_size`, before the caller's authority is checked.
 	ListSubjects(context.Context, *ListSubjectsRequest) (*ListSubjectsResponse, error)
 	// ExpandRelations — return the subjects that resolve `relation` on `resource`,
 	// as recorded by the relational form that decides access. Used by audit

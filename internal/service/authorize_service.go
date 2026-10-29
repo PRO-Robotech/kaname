@@ -1252,9 +1252,6 @@ func (s *AuthorizeService) ListSubjects(ctx context.Context, req ListSubjectsReq
 	if s.relations == nil {
 		return nil, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
-	if req.PageSize > 1000 {
-		return nil, fmt.Errorf("Illegal argument page_size %d > 1000", req.PageSize)
-	}
 	relation := resolveActionToRelation(req.Action)
 	if relation == "" {
 		return nil, fmt.Errorf("Illegal argument action %q", req.Action)
