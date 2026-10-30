@@ -1,0 +1,177 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/non-empty-project-is-not-deleted.md
+  sha256: 0c5a8bc822e1e43907feeb4d622c14c7712d8eb200f4906012d8e6a576613507
+  static_status: DRAFT
+  static_status_note: >-
+    Шапка документа намеренно не правлена (change-graph.md §2): слово DRAFT и
+    дописанный автором пункт «Круг 1 правки» — то, что туда вписали. Вердикт APPROVED
+    круга 5 вынесен редакции db46a803…, отказ круга 1 правки — редакции 0bb73b56…;
+    ни тот ни другой к этой редакции не переносится. Действующий вердикт об этой
+    редакции — эта запись.
+  base_commit: 092bee4fb3220215da255258dfa6fe0da9214f34
+  content_commit: none
+  content_commit_note: >-
+    Редакция не закоммичена (ветка `168` @092bee4fb, правка в рабочей копии автора).
+    Отпечаток снят рецензентом с файла рабочей копии и совпал с объявленным автором.
+  branch: '168'
+  task: https://github.com/PRO-Robotech/kaname/issues/168
+  lines: 3481
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/non-empty-project-is-not-deleted.md
+  compared_against:
+    sha256: 0bb73b568692cfd2059ed3264dece440af4695d467a09da0d672becab5693285
+    copy: docs/engineering/acceptance/non-empty-project-is-not-deleted.md.0bb73b56
+    record: docs/specs/reviews/non-empty-project-is-not-deleted/0bb73b568692cfd2059ed3264dece440af4695d467a09da0d672becab5693285.yaml
+  round: 2
+  round_note: >-
+    Круг 2 правки после вердикта (kaname#168) — последний по fa-b8 (≤ 2 кругов);
+    всего по документу — седьмой. Режим — проверка исполнения блокирующих круга 1 по
+    дельте; новое блокирует лишь угрозой корректности сценария.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-29'
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#168
+  status: performed
+  published: true
+  database_id: 6481608368
+  node_id: IC_kwDOUO26pM8AAAABglV-sA
+  url: https://github.com/PRO-Robotech/kaname/issues/168#issuecomment-6481608368
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6481608368
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: "2026-10-28T21:53:26Z"
+  body: acceptance-reviewer · APPROVED · sha256 0c5a8bc822e1e43907feeb4d622c14c7712d8eb200f4906012d8e6a576613507
+  body_sha256: f46b93c9103c58ab75898ab9819bbbf787564b3003fc09d8f2d96623e1be9fae
+  subject_sha256: 0c5a8bc822e1e43907feeb4d622c14c7712d8eb200f4906012d8e6a576613507
+  subject_revision_commit: a45e98eefbc6adc355ff1f0052f362876ff79981
+  subject_revision_on_origin: false
+  verdict: APPROVED
+  publication_mode: 'git-operator: gh api POST repos/PRO-Robotech/kaname/issues/168/comments'
+  publication_note: Ревизия документа закоммичена локально в ветку и на origin ещё не отправлена (по заданию ветку отправляет исполнитель кода); тело события несёт отпечаток содержимого, сверяемый по файлу на любой ревизии.
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - 7055ddb1b1e6a9553f342a4e3225802685cba3e1419d2aa9dcfe9512248977cf.yaml
+    - db46a803c1f4fbeeb7597bd51f72e220b7e0735ac103ef086c4cadbaafac1cc6.yaml
+    - 0bb73b568692cfd2059ed3264dece440af4695d467a09da0d672becab5693285.yaml
+
+scope:
+  reviewed: >-
+    Дельта 0bb73b56 → 0c5a8bc8 (diff -u, 186 строк): пункт шапки «Круг 1 правки»,
+    строка 1-21 А §0.2в, абзац сводки §5, «Дано» и близнецы IAM-PNE-1-21 полосы А,
+    врезка BatchCheck, строка 1-21 §6, строка дома З §6.1, строки §11.2/§11.4, три
+    строки §11.5, §11.7 «код»/полоса А/сквозной прогон, новый §11.10. Вне дельты
+    пункты не переоткрывались (fa-b1).
+  method: >-
+    Каждая новая координата дельты прочитана в дереве @092bee4fb и в
+    corelib@v1.15.0 (модульный кэш); числа перемерены собственными командами.
+    Посев не ставился: новое «Дано» — субъект пробы в процессе, его строит
+    названная фикстура, существующая в дереве.
+
+blocking_of_previous_round:
+  - id: K6-B1
+    kind: TWIN
+    status: resolved
+    evidence: >-
+      Близнец полосы А (строки 2462–2470) утверждает «первый вопрос — об объекте
+      `<вид>:<значение>` с отношением записи каталога, ответ не INVALID_ARGUMENT»,
+      число вопросов не утверждает. Производитель — checkAdapter.Check
+      (internal/authzguard/own_door.go:469–489): объект спрашивается первым, надзор
+      SubjectIsClusterAdminPlainE — только после отказа (:485). Подделка «не разрешает
+      ничего» — первый вопрос всегда об объекте, поэтому утверждение выполнимо на
+      верной реализации. Близнец на правильной форме зелен и сегодня (дверь есть),
+      отрицательный кейс сегодня красный; отличие ровно одним фактом — формой. «ровно один раз» в документе осталось только в
+      таблице §11.10 как цитата прежнего (`grep -n 'ровно один раз'` → 1 строка, 3473).
+      Строка §6 и §11.7 приведены к тому же.
+  - id: K6-B2
+    kind: CONSTRUCTIBILITY
+    status: resolved
+    evidence: >-
+      «Дано» называет служебную учётку, предъявленную удостоверением. Цепочка
+      публичного слушателя (cmd/kaname/serve.go:1018–1037): publicIdentityUnary →
+      publicCallerPolicy → addressGate → AntiAnonymousUnary → дверь. Политика на
+      ветви предъявленного (public_caller_policy.go:343–398) зовёт EvaluateStepUp,
+      который машинного субъекта освобождает первой ветвью (corelib@v1.15.0
+      grpcsrv/acr.go:181). Ворота адреса — admission.ID (internal/admission/admission.go:86–99):
+      `!person || verified` — при пустом ответе PersonMarks проход. Аноним-рубеж
+      названного не останавливает. Писатель — chainMint
+      (cmd/kaname/presented_credential_chain_test.go:86, extra переопределяет
+      ClaimPrincipalType/ClaimPrincipalID), PersonMarks → пустая карта (:70).
+      Образец прохода порога машинным принципалом в боевой цепочке есть:
+      TestF11_50 (cmd/kaname/step_up_indication_test.go:194–196, newStepUpStand :69–76 —
+      NewPublicCallerPolicy(true, …) над publicIdentityUnary).
+
+non_blocking_of_previous_round:
+  - {id: K6-N1, status: resolved, evidence: "git grep -h 'shared.ValidateResourceID(' 092bee4fb -- 'internal/apps/kaname/api/**.go' ':!*_test.go' | wc -l → 62; имён 8: account 19 · user 10 · service account 7 · group 7 · role 6 · project 6 · access binding 5 · grant delegation 1; вызов с переменной — list_subject_privileges.go:173 — сходится"}
+  - {id: K6-N2, status: resolved, evidence: "§11.7 «код»: одна цепочка на корень и пробу — условие к коду (fa-b2), передано полосе реализации"}
+  - {id: K6-N3, status: resolved, evidence: "врезка и строка §11.5; каталог: BatchCheck scope_extractor project/scope_id, required_acr_min 1 (permission_catalog.json:2691–2698); обход двери при безымянном/пустом scope — own_door.go:369–395"}
+  - {id: K6-N4, status: resolved, evidence: "§11.7 «сквозной прогон»: числа запросов и утверждений > 0 и оба кейса поимённо — пункт DoD измерим"}
+
+blocking: []
+
+non_blocking:
+  - id: K7-N1
+    kind: FORMAT
+    where: "IAM-PNE-1-21 полоса А, строка 2466"
+    claim: >-
+      Координата `own_door.go:485, checkAdapter` указывает строку вызова надзора, а
+      не тип checkAdapter (:469–470). §11.10 даёт верный диапазон 469–489. Смысл не
+      меняется.
+  - id: K7-N2
+    kind: CONSTRUCTIBILITY
+    where: "§11.5, строка писателя служебной учётки"
+    claim: >-
+      chainMint по умолчанию ставит `sub` = chainSubject и ClaimPrincipalDisplay
+      человека; проба обязана переопределить ClaimPrincipalID на `sva-` правильной
+      формы (документ это и требует). Полезно, чтобы проба утверждала вид и
+      идентификатор принципала, извлечённые цепочкой, — иначе подмена вида на
+      «user» дала бы отказ порога, неотличимый от построительной ошибки (§11.7 и
+      так требует «остановленных порогом — 0»).
+
+checked_and_holds:
+  - "sha256sum редакции → 0c5a8bc822e1e43907feeb4d622c14c7712d8eb200f4906012d8e6a576613507, 3481 строка; копия .0bb73b56 → 0bb73b56… — сходится с объявленным автором"
+  - "Порядок цепочки serve.go:1018–1037: политика до ворот адреса и анти-анонима, дверь последней — ступень формы встаёт между анти-анонимом и дверью, как §11.7"
+  - "Освобождение машинного субъекта в обеих ветвях политики (предъявленное :384, край :492) — одним правилом EvaluateStepUp"
+  - "Близнец ворот адреса для sva- — address_gate_integration_test.go:301–303 — сходится"
+  - "Сводка: сценариев 24, строк оси 32, RED 19 — правка не прибавляет и не снимает"
+
+constructibility:
+  seeded: 0
+  by_named_fixture_confirmed: 2
+  refuted: 0
+  not_performed: 0
+  note: >-
+    Нетривиальных новых «Дано» дельты — 2: служебная учётка без прав, проходящая
+    порог доверия (chainMint + TestF11_50 как образец прохода в боевой цепочке), и
+    проход ворот адреса (chainRevocations.PersonMarks + admission.ID). Оба
+    подтверждены прочтением фикстуры и производителя в дереве @092bee4fb. Прочие
+    «Дано» вне дельты подтверждены кругом 1.
+
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+effective_approval:
+  issued: true
+  rationale: >-
+    Отражает уже исполненное событие acceptance-reviewer по точному отпечатку
+    0c5a8bc822e1e43907feeb4d622c14c7712d8eb200f4906012d8e6a576613507:
+    https://github.com/PRO-Robotech/kaname/issues/168#issuecomment-6481608368.
+    Новое одобрение этой правкой не выдаётся.

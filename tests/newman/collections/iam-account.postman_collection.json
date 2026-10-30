@@ -1435,7 +1435,7 @@
       ]
     },
     {
-      "name": "IAM-ACC-GT-NEG-ID-MALFORMED — Get with malformed account_id (wrong prefix) → 400 InvalidArgument",
+      "name": "IAM-ACC-GT-NEG-ID-MALFORMED — IAM-PNE-1-21 Б: Get с неверной формой account_id → 400 INVALID_ARGUMENT, текст дословно",
       "description": "class:NEG | class:VAL | priority:P2",
       "item": [
         {
@@ -1515,7 +1515,15 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('400 or 404', () => pm.expect(pm.response.code).to.be.oneOf([400, 404]));"
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.test('текст отказа формы — текст обработчика дословно', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.message, JSON.stringify(j)).to.eql('invalid account id \\'not-an-account-id-at-all-toolong\\'');",
+                  "});"
                 ]
               }
             }

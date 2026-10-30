@@ -1,26 +1,27 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// acr_floor_grant_admin_integration_test.go — integration test.
+// acr_floor_grant_admin_integration_test.go — интеграционная проба.
 //
-// Exercises the cluster-internal interceptor CHAIN end-to-end over bufconn for
-// the gateway-fronted privileged RPC InternalClusterService/GrantAdmin (catalog
-// required_acr_min=2), proving the acr-floor + caller-policy
-// ordering on a real gRPC server:
+// Прогоняет ЦЕПОЧКУ перехватчиков внутрикластерного слушателя насквозь через
+// bufconn для привилегированного RPC за краем InternalClusterService/GrantAdmin
+// (в каталоге required_acr_min=2) и доказывает порядок пола acr и политики
+// вызывающего на настоящем gRPC-сервере:
 //
-//   - a verified api-gateway SAN forwarding acr=2 → passes BOTH gates → reaches
-//     the handler;
-//   - the same gateway SAN forwarding acr=1 → DENIED by the acr-floor BEFORE the
-//     handler (no side-effect);
-//   - a verified NON-gateway SAN (kacho-vpc) on this gateway-fronted RPC → DENIED
-//     by the caller-policy FIRST (the floor never sees it, so the module-
-//     SA acr-exemption cannot be abused).
+//   - проверенный SAN api-gateway, передающий acr=2 → проходит ОБА стража →
+//     доходит до обработчика;
+//   - тот же SAN края, передающий acr=1 → ОТКАЗ от пола acr РАНЬШЕ обработчика
+//     (без побочного эффекта);
+//   - проверенный SAN НЕ края (kacho-vpc) на этом RPC за краем → ОТКАЗ от
+//     политики вызывающего ПЕРВЫМ (пол его не видит вовсе, так что изъятием
+//     служебной учётки модуля от acr не злоупотребить).
 //
-// The chain mirrors serve.go's internal listener (prod-mode). The mTLS-verified
-// peer + forwarded acr are simulated by a tiny front interceptor that seeds the
-// ctx exactly as corelib UnaryCertIdentityExtract + UnaryTrustedPrincipalExtract
-// would on a verified gateway→iam edge — keeping the test to the chain logic
-// (no live TLS handshake; corelib's bufconn test covers the handshake half).
+// Цепочка повторяет внутренний слушатель serve.go (боевой режим). Проверенного
+// mTLS собеседника и переданный acr изображает крошечный передний перехватчик,
+// кладущий в ctx ровно то, что положили бы corelib UnaryCertIdentityExtract +
+// UnaryTrustedPrincipalExtract на проверенном ребре край→iam, — так проба
+// остаётся о логике цепочки (живого TLS-рукопожатия нет; половину о
+// рукопожатии покрывает bufconn-проба corelib).
 package main
 
 import (
@@ -50,8 +51,8 @@ const (
 	grantAdminFQN     = "/kaname.cloud.iam.v1.InternalClusterService/GrantAdmin"
 )
 
-// reachedClusterServer is a stub InternalClusterServiceServer recording whether
-// GrantAdmin's handler was reached (i.e. the chain let the call through).
+// reachedClusterServer — заглушка InternalClusterServiceServer, записывающая,
+// дошёл ли вызов до обработчика GrantAdmin (то есть пропустила ли его цепочка).
 type reachedClusterServer struct {
 	iamv1.UnimplementedInternalClusterServiceServer
 	grantReached bool
@@ -59,13 +60,13 @@ type reachedClusterServer struct {
 
 func (s *reachedClusterServer) GrantAdmin(context.Context, *iamv1.GrantClusterAdminRequest) (*operationpb.Operation, error) {
 	s.grantReached = true
-	return &operationpb.Operation{Id: "iop-acr-test", Done: true}, nil
+	return &operationpb.Operation{Id: "iop0000000000acrtest", Done: true}, nil
 }
 
-// seedVerifiedPeer simulates the corelib mTLS-verified extract: it seeds the
-// verified module SAN + the FD-4-trusted forwarded acr into ctx, exactly as
-// UnaryCertIdentityExtract + UnaryTrustedPrincipalExtract leave it on a verified
-// gateway→iam edge.
+// seedVerifiedPeer изображает извлечение проверенного mTLS из corelib: кладёт в
+// ctx проверенный SAN модуля и доверенный по FD-4 переданный acr ровно так, как
+// их оставляют UnaryCertIdentityExtract + UnaryTrustedPrincipalExtract на
+// проверенном ребре край→iam.
 func seedVerifiedPeer(san, acr string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		ctx = grpcsrv.WithCertIdentityIn(ctx, grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
@@ -74,8 +75,9 @@ func seedVerifiedPeer(san, acr string) grpc.UnaryServerInterceptor {
 	}
 }
 
-// serveACRChain starts a bufconn gRPC server whose chain is the prod-mode
-// internal chain (caller-policy → acr-floor) fronted by seedVerifiedPeer.
+// serveACRChain поднимает gRPC-сервер на bufconn, чья цепочка — внутренняя
+// цепочка боевого режима (политика вызывающего → пол acr) с seedVerifiedPeer
+// впереди.
 func serveACRChain(t *testing.T, srv iamv1.InternalClusterServiceServer, san, acr string) *grpc.ClientConn {
 	t.Helper()
 	reg, err := seed.LoadPermissionRegistry(context.Background(), nil)
@@ -86,7 +88,7 @@ func serveACRChain(t *testing.T, srv iamv1.InternalClusterServiceServer, san, ac
 
 	lis := bufconn.Listen(1024 * 1024)
 	gsrv := grpc.NewServer(grpc.ChainUnaryInterceptor(
-		seedVerifiedPeer(san, acr), // stand-in for the mTLS cert-identity + trusted-acr extract
+		seedVerifiedPeer(san, acr), // замена извлечению личности mTLS-сертификата и доверенного acr
 		callerPolicy.Unary(),
 		acrFloor.Unary(),
 	))
@@ -103,7 +105,7 @@ func serveACRChain(t *testing.T, srv iamv1.InternalClusterServiceServer, san, ac
 	return conn
 }
 
-// 5.4-01: gateway SAN + acr=2 → reaches the GrantAdmin handler.
+// 5.4-01: SAN края + acr=2 → доходит до обработчика GrantAdmin.
 func TestACRFloorIntegration_0401_GatewayAcr2_Reaches(t *testing.T) {
 	stub := &reachedClusterServer{}
 	conn := serveACRChain(t, stub, acrTestGatewaySAN, "2")
@@ -111,12 +113,12 @@ func TestACRFloorIntegration_0401_GatewayAcr2_Reaches(t *testing.T) {
 	defer cancel()
 
 	_, err := iamv1.NewInternalClusterServiceClient(conn).GrantAdmin(ctx,
-		&iamv1.GrantClusterAdminRequest{SubjectId: "usr-target"})
+		&iamv1.GrantClusterAdminRequest{SubjectId: "usr00000000000target"})
 	require.NoError(t, err, "acr=2 ≥ acr_min=2 must pass the floor to the handler")
 	require.True(t, stub.grantReached, "handler must be reached on a sufficient acr")
 }
 
-// 5.4-02: gateway SAN + acr=1 → DENIED by the acr-floor before the handler.
+// 5.4-02: SAN края + acr=1 → ОТКАЗ от пола acr раньше обработчика.
 func TestACRFloorIntegration_0402_GatewayAcr1_DeniedNoSideEffect(t *testing.T) {
 	stub := &reachedClusterServer{}
 	conn := serveACRChain(t, stub, acrTestGatewaySAN, "1")
@@ -124,24 +126,24 @@ func TestACRFloorIntegration_0402_GatewayAcr1_DeniedNoSideEffect(t *testing.T) {
 	defer cancel()
 
 	_, err := iamv1.NewInternalClusterServiceClient(conn).GrantAdmin(ctx,
-		&iamv1.GrantClusterAdminRequest{SubjectId: "usr-target"})
+		&iamv1.GrantClusterAdminRequest{SubjectId: "usr00000000000target"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err),
 		"acr=1 < acr_min=2 must be denied by the acr-floor")
 	require.False(t, stub.grantReached, "handler must NOT be reached on acr-deny (no side-effect, 5.4-02)")
 }
 
-// 5.4-06: a verified NON-gateway SAN (kacho-vpc) on a gateway-fronted RPC →
-// DENIED by the caller-policy FIRST (the acr-floor never runs; a module SA's
-// acr-exemption cannot be abused on a gateway-fronted RPC).
+// 5.4-06: проверенный SAN НЕ края (kacho-vpc) на RPC за краем → ОТКАЗ от
+// политики вызывающего ПЕРВЫМ (пол acr не исполняется вовсе; изъятием
+// служебной учётки модуля от acr на RPC за краем не злоупотребить).
 func TestACRFloorIntegration_0406_NonGatewaySAN_CallerPolicyDeniesFirst(t *testing.T) {
 	stub := &reachedClusterServer{}
-	// Even a spoofed-high acr=3 from a non-gateway peer must not help.
+	// Даже подделанный высокий acr=3 от собеседника не края помочь не должен.
 	conn := serveACRChain(t, stub, acrTestVPCSAN, "3")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	_, err := iamv1.NewInternalClusterServiceClient(conn).GrantAdmin(ctx,
-		&iamv1.GrantClusterAdminRequest{SubjectId: "usr-target"})
+		&iamv1.GrantClusterAdminRequest{SubjectId: "usr00000000000target"})
 	require.Equal(t, codes.PermissionDenied, status.Code(err),
 		"a non-gateway module on a gateway-fronted RPC must be denied (caller-policy first)")
 	require.False(t, stub.grantReached, "handler must NOT be reached")
