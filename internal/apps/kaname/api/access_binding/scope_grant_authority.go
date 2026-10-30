@@ -59,6 +59,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
 // grantScope — область выдачи: тип (`account` | `project` | `cluster`) и id.
@@ -111,6 +112,51 @@ func (a *ScopeGrantAuthority) activeScopesOfRole(ctx context.Context, id domain.
 		return nil, shared.MapRepoErr(err)
 	}
 	return distinctScopes(bindings), nil
+}
+
+// RequireForGroup — вызывающий вправе выдавать на каждой области действующих
+// выдач, называющих группу `id` субъектом (Р3): новый участник получает всё, что
+// выдано группе.
+func (a *ScopeGrantAuthority) RequireForGroup(ctx context.Context, id domain.GroupID) error {
+	scopes, err := a.activeScopesOfGroup(ctx, id)
+	if err != nil {
+		return err
+	}
+	return a.requireOnScopes(ctx, scopes)
+}
+
+// groupBindingsPage — страница чтения выдач группы: тот же предел, что у
+// перечней выдач.
+const groupBindingsPage = 1000
+
+// activeScopesOfGroup — различные области неотозванных выдач, где группа —
+// субъект (парой строки выдачи либо строкой набора субъектов). Перечень читается
+// постранично до конца: область, оставшаяся за границей страницы, осталась бы
+// непроверенной.
+func (a *ScopeGrantAuthority) activeScopesOfGroup(ctx context.Context, id domain.GroupID) ([]grantScope, error) {
+	rd, err := a.repo.Reader(ctx)
+	if err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+	var active []domain.AccessBinding
+	token := ""
+	for {
+		page, next, err := rd.AccessBindings().ListBySubject(ctx, domain.SubjectTypeGroup, domain.SubjectID(id),
+			abrepo.PageFilter{PageSize: groupBindingsPage, PageToken: token})
+		if err != nil {
+			return nil, shared.MapRepoErr(err)
+		}
+		for _, b := range page {
+			if b.Status != domain.AccessBindingStatusRevoked {
+				active = append(active, b)
+			}
+		}
+		if next == "" {
+			return distinctScopes(active), nil
+		}
+		token = next
+	}
 }
 
 // distinctScopes — различные области выдач в детерминированном порядке: отказ

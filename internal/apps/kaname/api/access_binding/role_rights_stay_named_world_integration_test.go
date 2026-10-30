@@ -200,9 +200,15 @@ func (w *escWorld) buildEscHandlers() {
 	w.groupsX = groupapp.NewHandler(
 		groupapp.NewCreateGroupUseCase(w.repo, w.ops).WithRelationStore(w.door, nil),
 		nil, nil, nil, nil,
-		groupapp.NewAddMemberUseCase(w.repo, w.ops),
+		w.escAddMemberOn(w.ops, w.door),
 		groupapp.NewRemoveMemberUseCase(w.repo, w.ops),
 		groupapp.NewListMembersUseCase(w.repo).WithRelationStore(w.door))
+}
+
+// escAddMemberOn — добавление участника группы с проверкой Р3 над названными
+// хранилищем операций и дверью решения.
+func (w *escWorld) escAddMemberOn(ops operations.Repo, relations accessbindingapp.GrantAuthorityRelations) *groupapp.AddMemberUseCase {
+	return escWireGroupAuthority(w, groupapp.NewAddMemberUseCase(w.repo, ops), relations)
 }
 
 // escRoleUpdate — правка роли теми же частями, что корень службы.

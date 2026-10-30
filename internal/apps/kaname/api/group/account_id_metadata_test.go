@@ -78,7 +78,7 @@ func TestCreateGroup_StampsAccountID(t *testing.T) {
 
 func TestAddGroupMember_StampsAccountID(t *testing.T) {
 	opsRepo := newFakeGrpOps()
-	uc := NewAddMemberUseCase(newFakeGrpRepo(), opsRepo)
+	uc := NewAddMemberUseCase(newFakeGrpRepo(), opsRepo).WithGrantAuthority(&groupGrantAuthorityAnswer{})
 	op, err := uc.Execute(ownerCtx(), AddMemberInput{
 		GroupID: metaGrp, MemberType: domain.SubjectTypeUser, MemberID: "usr0000000000000mmmm",
 	})
@@ -191,6 +191,9 @@ func (w *fakeGrpWtr) Update(_ context.Context, g domain.Group, _ []string) (doma
 }
 func (w *fakeGrpWtr) Delete(context.Context, domain.GroupID) error        { return nil }
 func (w *fakeGrpWtr) AddMember(context.Context, domain.GroupMember) error { return nil }
+func (w *fakeGrpWtr) RequireMemberOfGroupAccount(context.Context, domain.GroupMember) error {
+	return nil
+}
 func (w *fakeGrpWtr) RemoveMember(context.Context, domain.GroupID, domain.SubjectType, domain.SubjectID) error {
 	return nil
 }

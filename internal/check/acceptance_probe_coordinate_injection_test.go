@@ -211,6 +211,33 @@ func TestAcceptanceProbeCoordinateNamedHomeInjection(t *testing.T) {
 		}
 	}
 
+	// ── Ось 3а. Строка итога `go test` — координата СВОЕГО дома, а не приставка ─
+	// `--- PASS: TestX` цитирует вывод прогона: «--- PASS» домом не называется и
+	// координату с суждения не снимает — имя судится в дереве, как голое.
+	// Живое имя — молчание; мёртвое — находка «не резолвится» (не «дом не дом»).
+	for _, verb := range []string{"PASS", "FAIL", "SKIP"} {
+		c = judge("Прогон: `--- " + verb + ": TestIAMCT112_CatalogProbesDoNotDeferEverything`.\n")
+		if c.Coordinates != 1 || len(c.Findings) != 0 || c.Foreign != 0 {
+			t.Errorf("итог %s живой пробы: координат %d (1), чужих %d (0), находок %d (0): %v",
+				verb, c.Coordinates, c.Foreign, len(c.Findings), c.Findings)
+		}
+		c = judge("Прогон: `--- " + verb + ": TestNotHereAtAll`.\n")
+		if len(c.Findings) != 1 || strings.Contains(strings.Join(c.Findings, ""), "ДОМ НАЗВАН НЕ ДОМОМ") {
+			t.Errorf("итог %s мёртвой пробы обязан быть находкой о РЕЗОЛВЕ, ровно одной: %v",
+				verb, c.Findings)
+		}
+	}
+	c = judge("С длительностью: `--- PASS: TestIAMCT112_CatalogProbesDoNotDeferEverything (0.01s)`.\n")
+	if c.Coordinates != 1 || len(c.Findings) != 0 {
+		t.Errorf("итог с длительностью: координат %d (1), находок %d (0): %v",
+			c.Coordinates, len(c.Findings), c.Findings)
+	}
+	// Близнец: глагол не из итога `go test` остаётся приставкой — находкой.
+	if c = judge("Не итог: `--- OK: TestNotHereAtAll`.\n"); len(c.Findings) != 1 ||
+		!strings.Contains(strings.Join(c.Findings, ""), "ДОМ НАЗВАН НЕ ДОМОМ") {
+		t.Errorf("`--- OK:` — не строка итога, обязана остаться приставкой-находкой: %v", c.Findings)
+	}
+
 	// ── Ось 4. ЗАКОННЫЕ БЛИЗНЕЦЫ с двоеточием координатами НЕ являются ────────
 	// Пути с номером строки стоят в этом корпусе сотнями; принять их за
 	// координату значило бы краснеть на верных документах.

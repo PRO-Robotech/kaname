@@ -418,10 +418,57 @@ func (w *groupWriter) Delete(ctx context.Context, id domain.GroupID) error {
 	return iamerr.Wrapf(iamerr.ErrNotFound, "Group %s not found", id)
 }
 
+// RequireMemberOfGroupAccount — участник принадлежит аккаунту группы (Д-3
+// приёмки role-rights-stay-within-what-is-named.md, kaname#1037): учётка — своей
+// колонкой `account_id`, человек — строкой `memberships` пары «человек, аккаунт
+// группы» в состоянии ACTIVE (как Д6 делегирования). Выдача на аккаунт и владение
+// им членством не являются; приглашённый (PENDING) — не участник.
+//
+// Отказ — ровно та форма, что у несуществующего участника (`fkText`, общий текст
+// без вида и идентификатора): иначе ответ различал бы «такого нет» и «такой есть
+// в другом аккаунте» — оракул существования чужих субъектов.
+//
+// Строка, на которой держится ответ, берётся под FOR SHARE в транзакции
+// вставки: снятие членства (учётки) либо смена его состояния ждут её коммита, а
+// после ожидания условие перечитывается на новой версии строки. Поэтому участник,
+// чьё членство снято конкурентно, либо не проходит проверку, либо уже в группе к
+// моменту снятия — третьего порядка нет.
+func (w *groupWriter) RequireMemberOfGroupAccount(ctx context.Context, m domain.GroupMember) error {
+	var (
+		q    string
+		args = []any{string(m.GroupID), string(m.MemberID)}
+	)
+	switch m.MemberType {
+	case domain.SubjectTypeUser:
+		q = `SELECT 1 FROM memberships ms
+		       JOIN groups g ON g.account_id = ms.account_id
+		      WHERE g.id = $1 AND ms.user_id = $2 AND ms.state = $3
+		      FOR SHARE OF ms`
+		args = append(args, string(domain.MembershipStateActive))
+	case domain.SubjectTypeServiceAccount:
+		q = `SELECT 1 FROM service_accounts sa
+		       JOIN groups g ON g.account_id = sa.account_id
+		      WHERE g.id = $1 AND sa.id = $2
+		      FOR SHARE OF sa`
+	default:
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument member_type %s", m.MemberType)
+	}
+	var one int
+	err := w.tx.QueryRow(ctx, q, args...).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return iamerr.Wrapf(iamerr.ErrReferenceMissing, "%s", referenceMissingText)
+	}
+	if err != nil {
+		return mapErr(err, "", string(m.MemberID))
+	}
+	return nil
+}
+
 // AddMember — INSERT ON CONFLICT (group_id, member_type, member_id) DO NOTHING.
 // Идемпотентен: повторный AddMember — не ошибка.
 // Триггер group_members_member_exists_trg валидирует existence member_id в
-// users/service_accounts (23503 → FailedPrecondition).
+// users/service_accounts (23503 → FailedPrecondition). Принадлежность участника
+// аккаунту группы — RequireMemberOfGroupAccount, той же транзакцией до вставки.
 func (w *groupWriter) AddMember(ctx context.Context, m domain.GroupMember) error {
 	now := time.Now().UTC()
 	_, err := w.tx.Exec(ctx, `
