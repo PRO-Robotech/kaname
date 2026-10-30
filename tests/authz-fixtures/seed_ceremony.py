@@ -238,7 +238,7 @@ MINTED_WAVE = (
     # права не держит by construction. Предъявитель ему не нужен — доступ судит
     # проба модели прав, — нужны адрес и строка, которую приглашение обязано найти.
     "ceremonyInviteeEmail", "ceremonyInviteeUserId",
-) + tuple(k for s in ADMISSION_SLOTS + LEAVE_SLOTS + ADMIN_SLOTS + (CAP_PLAIN_SLOT,)
+) + tuple(k for s in ADMISSION_SLOTS + LEAVE_SLOTS + ADMIN_SLOTS + (CAP_PLAIN_SLOT, "Esc")
           for k in slot_keys(s)) + MINTED_CAP
 # Чего волна НЕ пишет, хотя имя похоже: `jwtAccountAdminAStepUp`. Это слот ТОГО
 # ЖЕ машинного распорядителя, что `jwtAccountAdminA` (кейсы выпускают под одним и
@@ -912,6 +912,12 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     values["jwtHumanCeremonyNoBindings"], _ = ceremony_bearer(stand, client, sn, nob, "1")
     values["ceremonyNoBindingsUserId"] = nob
     say("  ok   второй человек — без выдач на арендаторах посева")
+
+    _, esc_session, esc_user = person("esc")
+    values["jwtHumanEsc"], _ = ceremony_bearer(stand, client, esc_session, esc_user, "1")
+    values["jwtHumanEscStepUp"], _ = ceremony_bearer(
+        stand, client, level2_session(lane, esc_session), esc_user, "2")
+    values["humanEscUserId"] = esc_user
 
     values["ceremonyInviteeEmail"], _, values["ceremonyInviteeUserId"] = person("invitee")
     say("  ok   человек для приглашения — адрес подтверждён, выдач нет")
