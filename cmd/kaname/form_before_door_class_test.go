@@ -1517,6 +1517,7 @@ var formProbeSyntheticAnchors = formProbeAnchors{
 // падает сама). Законные близнецы молчат; формы O01–O05 возврата
 // check-verifier и прежние формы переприсваивания названы с причиной.
 func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
+	t.Run("настоящий корень", formProbeRootAnchorInjections)
 	const (
 		pubLine = "pub := grpcsrv.NewServer(pubCreds, grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...))"
 		inLine  = "in := grpcsrv.NewServer(inCreds, grpc.ChainUnaryInterceptor(iu...), grpc.ChainStreamInterceptor(is...))"
