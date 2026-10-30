@@ -21,8 +21,12 @@ package pg_test
 //   - TestAB_P6_ClearProtection_ThenDelete — SetDeletionProtection(false) →
 //     DeleteGuarded проходит.
 //
-// Запуск: `make test` или
-//   TESTCONTAINERS_RYUK_DISABLED=true go test ./internal/repo/kaname/pg/... -race
+// Запуск: `make test` или `go test ./internal/repo/kaname/pg/... -race`. Уборщик
+// контейнеров testcontainers (ryuk) НЕ выключается: `Terminate` исполняется лишь при
+// штатном завершении, а обрыв по `-timeout`, сигнал или падение процесса оставили бы
+// Postgres жить без владельца. Выключение уборщика законно только в конвейере на
+// эфемерном исполнителе (`.github/workflows/ci.yml`, шаг «контейнерные пробы»),
+// который исчезает целиком вместе с поднятым.
 
 import (
 	"context"
@@ -239,13 +243,14 @@ func TestAB_P6_DeleteGuarded_ConcurrentCAS(t *testing.T) {
 	assert.Equal(t, 0, other, "no unexpected errors / panics")
 }
 
-// TestAB_P6_DeleteVsRearm_ConcurrentCAS — concurrent interleave: one goroutine
-// re-arms protection via SetDeletionProtection(true) while another concurrently runs
-// DeleteGuarded on the same (currently unprotected) binding. The single-statement
-// `DELETE … WHERE deletion_protection=false` row-lock serializes them: either Delete
-// wins (binding gone, the rearm UPDATE then hits 0 rows → NotFound) OR the rearm wins
-// (binding survives protected, Delete sees deletion_protection=true → FailedPrecondition).
-// Never: binding deleted AND still protected; never a panic.
+// TestAB_P6_DeleteVsRearm_ConcurrentCAS — конкурентное чередование: одна горутина
+// снова ставит защиту через SetDeletionProtection(true), другая в то же время зовёт
+// DeleteGuarded на той же (пока незащищённой) выдаче. Блокировка строки одним
+// оператором `DELETE … WHERE deletion_protection=false` их сериализует: либо
+// побеждает удаление (выдачи нет, UPDATE защиты затем задевает 0 строк → NotFound),
+// либо побеждает защита (выдача жива и защищена, удаление видит
+// deletion_protection=true → FailedPrecondition). Не бывает: выдача удалена И
+// защищена; не бывает паники.
 func TestAB_P6_DeleteVsRearm_ConcurrentCAS(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test (needs Docker)")
@@ -276,7 +281,7 @@ func TestAB_P6_DeleteVsRearm_ConcurrentCAS(t *testing.T) {
 	delErrCh := make(chan error, 1)
 	rearmErrCh := make(chan error, 1)
 
-	go func() { // re-arm protection
+	go func() { // повторная постановка защиты
 		defer wg.Done()
 		<-startGate
 		gw, werr := repo.Writer(ctx)
@@ -292,7 +297,7 @@ func TestAB_P6_DeleteVsRearm_ConcurrentCAS(t *testing.T) {
 		}
 		rearmErrCh <- gw.Commit(ctx)
 	}()
-	go func() { // guarded delete
+	go func() { // удаление под защитой
 		defer wg.Done()
 		<-startGate
 		gw, werr := repo.Writer(ctx)
@@ -314,19 +319,19 @@ func TestAB_P6_DeleteVsRearm_ConcurrentCAS(t *testing.T) {
 	delErr := <-delErrCh
 	rearmErr := <-rearmErrCh
 
-	// Disambiguate the final state by reading the row.
+	// Итоговое состояние различается чтением строки.
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	final, gerr := rd.AccessBindings().Get(ctx, id)
 	_ = rd.Rollback(ctx)
 
 	if stderrors.Is(gerr, iamerr.ErrNotFound) {
-		// Delete won: it succeeded; the rearm UPDATE hit 0 rows → NotFound.
+		// Победило удаление: оно прошло, UPDATE защиты задел 0 строк → NotFound.
 		assert.NoError(t, delErr, "delete winner must succeed")
 		assert.True(t, stderrors.Is(rearmErr, iamerr.ErrNotFound),
 			"rearm on a deleted row → NotFound, got %v", rearmErr)
 	} else {
-		// Rearm won: the binding survives protected; Delete saw protection → FP.
+		// Победила защита: выдача жива и защищена, удаление увидело защиту → FP.
 		require.NoError(t, gerr)
 		assert.True(t, final.DeletionProtection, "surviving binding must be protected")
 		assert.NoError(t, rearmErr, "rearm winner must succeed")
@@ -335,8 +340,8 @@ func TestAB_P6_DeleteVsRearm_ConcurrentCAS(t *testing.T) {
 	}
 }
 
-// TestAB_P6_ClearProtection_ThenDelete — clear deletion_protection via the
-// repo SetDeletionProtection CAS, then DeleteGuarded succeeds.
+// TestAB_P6_ClearProtection_ThenDelete — снятие deletion_protection через CAS
+// репозитория SetDeletionProtection, после чего DeleteGuarded проходит.
 func TestAB_P6_ClearProtection_ThenDelete(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test (needs Docker)")
@@ -361,7 +366,7 @@ func TestAB_P6_ClearProtection_ThenDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	// Clear protection (C-03 Update path at the repo level).
+	// Снятие защиты (путь Update C-03 на уровне репозитория).
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	updated, err := w2.AccessBindingsW().SetDeletionProtection(ctx, id, false)
@@ -369,7 +374,7 @@ func TestAB_P6_ClearProtection_ThenDelete(t *testing.T) {
 	require.NoError(t, w2.Commit(ctx))
 	assert.False(t, updated.DeletionProtection)
 
-	// Now Delete passes.
+	// Теперь удаление проходит.
 	w3, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	require.NoError(t, w3.AccessBindingsW().DeleteGuarded(ctx, id))
