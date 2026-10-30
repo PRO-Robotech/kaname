@@ -1759,3 +1759,21 @@ Four base URLs beyond the gateway ones, injected by
 `iamRegistryTokenBaseUrl` (iam :9096), `registryDataPlaneBaseUrl` (registry :8080).
 A missing one turns the case RED naming the variable (`require_env_url`) — injection B
 above is the proof, not the promise.
+
+### Role rights stay named — S2 r4 (kaname#1034)
+
+`iam-role-rights-stay-named`: ESC-E1…ESC-E4, accepted fingerprint
+`3131d7ddfffa9b66857b94c70138b6ebfe7bdb77c7ca07f5333db88aefaae690`.
+Own public REST front; no deployed HTTP result is recorded here yet:
+collections executed **0 of 1**, cases executed **0 of 4**. Structural collection
+generation is a separate check and does not establish HTTP outcomes.
+
+The ceremony wave creates a separate Esc person with genuine level 1 and level 2
+authorization-code credentials. Registration's protected personal-account owner
+binding is cleared and revoked by that same owner through Update and Revoke,
+waiting for each Operation without error. The bootstrap caller then proves the
+complete ListBySubject empty, including the absence of a next page. Each case
+rechecks that condition. The fixture retains the account's independent owner
+record; no database writes or forged claims are involved. Real stand execution
+must confirm these setup operations as well as the four cases. Registry ids are
+owned by the existing delegation seed.
