@@ -28,7 +28,7 @@ def done():
 def mutation(name, path, body, auth=OWNER, capture=None, method="POST"):
     tests = [*assert_status(200), *save_from_response("j.id", "opId")]
     request = Step(name=name, method=method, path=path, body=body, auth=auth,
-                   test_script=tests)
+                   pre_script=["pm.environment.unset('opId');"], test_script=tests)
     if name in ("description-control", "empty-group-control", "wildcard-holder-grants"):
         request = retry_until_authorized(request)
     steps = [request, *done()]
@@ -41,7 +41,7 @@ def mutation(name, path, body, auth=OWNER, capture=None, method="POST"):
 
 def role(key, module, resource, verbs):
     return mutation("create-" + key, "/iam/v1/roles", {
-        "name": key.lower() + "-{{runId}}",
+        "name": key.lower() + "_{{runId}}",
         "definitionTier": {"tierType": "iam.account", "tierId": var("accountAId")},
         "rules": [{"module": module, "resources": [resource], "verbs": verbs}]}, capture=key)
 
