@@ -1166,6 +1166,7 @@ class _WaveWorld:
         self.codes: dict[str, tuple[str, str]] = {}
         self.admins: set[str] = set()
         self.ops: dict[str, dict] = {}
+        self.esc_bindings: dict[str, dict] = {}
         self.base = _FakeStand()
         self.issuance, self.own = self.base.issuance, self.base.own
 
@@ -1271,6 +1272,28 @@ class _WaveWorld:
 
     # фронт под бутстрапом (перечни для разрешения арендатора)
     def json_ask(self, url, **kw):
+        if "/iam/v1/accessBindings:listBySubject?" in url:
+            uid = url.split("subjectId=", 1)[1].split("&", 1)[0]
+            if uid not in self.esc_bindings:
+                self.esc_bindings[uid] = {"id": "acb" + uid[3:], "deletionProtection": True}
+            binding = self.esc_bindings[uid]
+            return 200, {"accessBindings": [binding] if binding else []}
+        if "/iam/v1/accessBindings/" in url:
+            if self.inj.get("esc_refused"):
+                return 403, {"code": 7}
+            uid = "usr" + url.split("/accessBindings/acb", 1)[1].split(":", 1)[0]
+            if kw.get("method") == "PATCH":
+                self.esc_bindings[uid]["deletionProtection"] = False
+            elif url.endswith(":revoke"):
+                if self.esc_bindings[uid].get("deletionProtection"):
+                    return 400, {"code": 9}
+                if not self.inj.get("esc_revoke_stale"):
+                    self.esc_bindings[uid] = {}
+            else:
+                return 404, {}
+            op_id = f"iop{len(self.ops)}"
+            self.ops[op_id] = {"id": "esc-fixture-operation"}
+            return 200, {"id": op_id}
         if kw.get("method") == "POST" and url.endswith("/iam/v1/users:invite"):
             body = kw["body"]
             uid = self._uid(len(self.people) + 1)
@@ -1411,6 +1434,11 @@ def self_test() -> int:
         w = _WaveWorld(**inj)
         return _outcome(lambda: seed_wave(w, w, w, _Mail(w), "t", "stand.invalid",
                                           sleep=w.sleep)), w
+
+    for injection in ("esc_refused", "esc_revoke_stale"):
+        esc_result, _ = wave(**{injection: True})
+        _c("Esc owner API setup failure is a finding: " + injection,
+           esc_result[0] == "finding", str(esc_result))
 
     # Предпосылка подставного мира: Р9 в нём ЕСТЬ и различает обе стороны
     # интервала. Без неё проверки ниже зеленели бы и на мире, где второго письма
