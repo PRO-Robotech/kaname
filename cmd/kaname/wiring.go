@@ -541,6 +541,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool)).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(kanameRepo, rsabReconciler)).
+		// Р2 (kaname#1036): правка правил роли с действующими выдачами — только с
+		// правом выдавать её на каждой области этих выдач; та же дверь решения, что у
+		// AccessBindingService.Create. Без провязки правка правил отказывает.
+		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(kanameRepo, relationStore)).
 		// Same revoke-latency fix as accountUpdate above, for the role AS AN OBJECT
 		// (iam.role is label-selectable, so clearing one of the ROLE's own labels is a
 		// REVOCATION of access TO the role — orthogonal to the rules fan-out wired

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -243,19 +244,38 @@ func TestGrantDelegation_CE16_DeleteAuditCarriesTheDelegationReference(t *testin
 }
 
 // ceFailFor — порт отношений, отказывающий ошибкой на любом вопросе об одном
-// субъекте; прочие вопросы — настоящей двери решения.
+// субъекте; прочие вопросы — настоящей двери решения. Обе формы вопроса —
+// одиночная и партийная: проверка права выдавать на областях спрашивает ярус
+// партией, и дублёр, отвечающий только на одиночный, инъекцию бы не донёс.
+// Партии одного вопроса идут параллельно, поэтому счёт — под замком.
 type ceFailFor struct {
-	inner   clients.RelationStore
+	inner   accessbindingapp.GrantAuthorityRelations
 	subject string
+	mu      sync.Mutex
 	hits    int
+}
+
+func (f *ceFailFor) hit() {
+	f.mu.Lock()
+	f.hits++
+	f.mu.Unlock()
 }
 
 func (f *ceFailFor) Check(ctx context.Context, subject, relation, object string) (bool, error) {
 	if subject == f.subject {
-		f.hits++
+		f.hit()
 		return false, errors.New("инъекция: хранилище отношений не ответило")
 	}
 	return f.inner.Check(ctx, subject, relation, object)
+}
+
+func (f *ceFailFor) BatchCheckWithContext(ctx context.Context, subject, relation string, objects []string,
+	condCtx map[string]any) ([]bool, error) {
+	if subject == f.subject {
+		f.hit()
+		return nil, errors.New("инъекция: хранилище отношений не ответило")
+	}
+	return f.inner.BatchCheckWithContext(ctx, subject, relation, objects, condCtx)
 }
 
 // CE-06 — у вопроса о праве делегирующего (Д3) три исхода: неполадка хранилища —

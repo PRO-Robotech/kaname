@@ -115,6 +115,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
@@ -334,7 +335,10 @@ func redeclareRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo k
 	pairs := cat.Facts().RoleVerbsFromSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
 
 	ops := operations.NewRepo(pool, "kaname")
-	uc := roleapp.NewUpdateRoleUseCase(repo, ops, cat)
+	// Право правящего выдавать роль на областях её выдач (Р2, kaname#1036) — тем
+	// же писателем, что у корня службы; правящий — владелец аккаунта роли.
+	uc := roleapp.NewUpdateRoleUseCase(repo, ops, cat).
+		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(repo, nil))
 	op, err := uc.Execute(declarerCtx(ctx, userID), roleapp.UpdateRoleInput{
 		ID:         domain.RoleID(roleID),
 		Rules:      rules,

@@ -115,7 +115,8 @@ func (p *pcrWorld) grantClassRole(name string, rules domain.Rules, why string) (
 func (p *pcrWorld) roleUpdate() *roleapp.UpdateRoleUseCase {
 	return roleapp.NewUpdateRoleUseCase(p.repo, p.ops, catalog.Fixed{F: p.facts}).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
-		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(p.repo, p.rec))
+		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(p.repo, p.rec)).
+		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(p.repo, p.door))
 }
 
 // updateRules — правка правил роли, операция доходит до done без error.
