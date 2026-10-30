@@ -57,7 +57,7 @@ func TestRelationReportSaysWhatTheCodeDoes(t *testing.T) {
 				Relation:  "v_get",
 				Object:    "iam_group:grp00000000000000wrd",
 			}}}
-			gate := NewVerifyGate(nil, store, logger).
+			gate := NewVerifyGate(store, logger).
 				WithRelationChecker(&fakeRelChecker{allow: map[string]bool{
 					"iam_group:grp00000000000000wrd": tc.allow,
 				}})

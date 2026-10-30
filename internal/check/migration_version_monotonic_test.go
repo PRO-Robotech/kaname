@@ -23,8 +23,20 @@
 // Дом — `internal/check`: это пакет гейтов ДЕРЕВА этой службы (аналог
 // `internal/repohygiene` монорепо), здесь уже живёт соседний гейт о
 // добавленных миграциях (`migration_not_a_writer_of_module_role_test.go`), и
-// отсюда берутся общие для них `trunkRef` и `addedMigrationFiles` — второй
+// отсюда берутся общие для них `trunkRefName` и `addedMigrationFiles` — второй
 // редакции «что считать добавленным» в дереве не заводится.
+//
+// # База сравнения — база ЗАПРОСА, и читается она по вершине
+//
+// Волна вливается в эпик, полоса — в волну, и только эпик — в ствол. Сравнение
+// с одним стволом не видело миграций, уже лежащих в базе запроса (kaname#618:
+// `20261005024608` ветки #344 ниже `…032942` и `…040457` ветки эпика, гейт
+// зелёный). Поэтому добавленное считается от базы запроса, которую называет
+// конвейер ([requestBaseEnv]), а применённым служат ВЕРШИНЫ базы и ствола —
+// не общий предок: легшее в базу после ответвления в дереве самой ветки не
+// лежит, а хук отправки и локальный прогон судят именно её.
+// Названная база, которой в клоне нет, — отказ предпосылки, а не откат на
+// ствол; не названная — ствол, и перепись говорит это словами.
 //
 // # Что гейт судит и чем ограничен его обход
 //
@@ -40,13 +52,14 @@
 //
 // Применённую миграцию не переименовывают (запрет #5): переименование меняет
 // схему у тех, кто уже мигрировал. Поэтому правило действует ВПЕРЁД — судится
-// только добавленное относительно ствола, а прошлое печатается числом.
+// только добавленное относительно базы сравнения, а прошлое печатается числом.
 //
 // Способность гейта упасть и способность смолчать доказаны инъекцией —
 // migration_version_monotonic_injection_test.go.
 package check_test
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -87,25 +100,26 @@ func TestNewMigrationOutranksEveryAppliedOne(t *testing.T) {
 			root, check.MigrationsDirRel)
 	}
 
-	// Состав ДОБАВЛЕННОГО. Ствол разрешается ПОСЛЕ переписи дерева: его
-	// недостижимость есть отказ предпосылки и обязана прийти отдельно от неё,
-	// а не вместо неё.
-	base, ok := trunkRef(root)
-	if !ok {
+	// Состав ДОБАВЛЕННОГО и базы сравнения. Они разрешаются ПОСЛЕ переписи
+	// дерева: их недостижимость есть отказ предпосылки и обязана прийти
+	// отдельно от неё, а не вместо неё.
+	run, notCreated, premise := runMonotonicGate(t, root, dirFiles, os.Getenv)
+	if premise != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", premise)
+	}
+	if notCreated != "" {
 		audit := check.AuditMigrationVersions(dirFiles, nil)
 		t.Logf("перепись дерева: %s", audit.Census)
-		t.Skipf("УСЛОВИЕ НЕ СОЗДАНО (не находка): ствол %s в этом клоне не разрешается — "+
-			"состав ДОБАВЛЕННОГО установить нечем. Перепись дерева выше снята и остаётся "+
-			"верной; о находках вердикта НЕТ ни зелёного, ни красного", trunkRefName)
+		t.Skipf("УСЛОВИЕ НЕ СОЗДАНО (не находка): %s — состав ДОБАВЛЕННОГО установить "+
+			"нечем. Перепись дерева выше снята и остаётся верной; о находках вердикта НЕТ "+
+			"ни зелёного, ни красного", notCreated)
 	}
-	added := sortedKeys(addedMigrationFiles(t, root, base))
-
-	audit := check.AuditMigrationVersions(dirFiles, added)
+	audit := run.audit
 
 	// Исход печатается ВСЕГДА и ОТДЕЛЬНО от числа находок: «находок ноль» само
 	// по себе не отличает гейт, которому нечего сказать, от гейта, который
 	// ничего не нашёл.
-	t.Logf("относительно %s: исход — %s; %s", base, audit.Outcome, audit.Census)
+	t.Logf("%s: исход — %s; %s", run.said, audit.Outcome, audit.Census)
 	// «Нет предмета» ЗЕЛЁНЫМ не бывает. У исхода [check.MigrationVersionNoCorpus]
 	// в ЖИВОМ дереве причина одна: дом миграций переехал, а гейт стережёт
 	// координату, которой больше нет. Находок при этом ноль — и ровно поэтому
@@ -139,6 +153,120 @@ func TestNewMigrationOutranksEveryAppliedOne(t *testing.T) {
 			"объявлены одним местом: docs/engineering/architecture/migration-version-namespace.md",
 			len(audit.Findings), strings.Join(audit.Findings, "\n  "))
 	}
+}
+
+// monotonicRun — вердикт гейта вместе с тем, С ЧЕМ сравнивали.
+type monotonicRun struct {
+	audit check.MigrationVersionAudit
+	// said — база сравнения словами; перепись печатает её всегда.
+	said string
+}
+
+// runMonotonicGate — ВЕСЬ путь гейта от окружения прогона до вердикта.
+//
+// Вынесен одной функцией намеренно: инъекция на синтетическом репозитории
+// зовёт ТОТ ЖЕ путь, что живой гейт, — выбор базы, состав добавленного и
+// вердикт, — а не свою копию любого из звеньев.
+//
+// Второй результат — «условие не создано» словами (база НЕ названа, а ствол в
+// клоне не разрешается), третий — отказ предпосылки (база НАЗВАНА, а в клоне её
+// нет). Откатываться с названной базы на ствол нельзя: вердикт о другой базе
+// выглядел бы ответом на этот запрос.
+func runMonotonicGate(t *testing.T, root string, dirFiles []string, getenv func(string) string) (monotonicRun, string, error) {
+	t.Helper()
+	choice := chooseMonotonicBase(getenv)
+	bases := make([]check.MigrationBase, 0, len(choice.peers))
+	for _, ref := range choice.peers {
+		files, err := migrationFilesAt(root, ref)
+		if err != nil {
+			if !choice.named {
+				return monotonicRun{}, "ствол " + ref + " в этом клоне не разрешается", nil
+			}
+			return monotonicRun{}, "", fmt.Errorf("база сравнения %s в этом клоне не "+
+				"разрешается (%s): %v — это отказ ПРЕДПОСЫЛКИ, а не повод сравнить со "+
+				"стволом: вердикт о другой базе выглядел бы ответом на этот запрос",
+				ref, choice.said, err)
+		}
+		bases = append(bases, check.MigrationBase{Ref: ref, Files: files})
+	}
+	added := sortedKeys(addedMigrationFiles(t, root, choice.added))
+	return monotonicRun{
+		audit: check.AuditMigrationVersionsAgainst(dirFiles, added, bases...),
+		said:  choice.said,
+	}, "", nil
+}
+
+// requestBaseEnv — переменная, которой конвейер называет базу запроса
+// слияния: ветку, в которую запрос вливается. Выставляет её сам провайдер на
+// событии запроса; на отправке в ствол и ручном запуске она пуста.
+const requestBaseEnv = "GITHUB_BASE_REF"
+
+// monotonicBaseChoice — с чем гейт сравнивает добавленное.
+type monotonicBaseChoice struct {
+	// added — ссылка, относительно которой считается ДОБАВЛЕННОЕ.
+	added string
+	// peers — ссылки, чьи ВЕРШИНЫ считаются применённым: база запроса и,
+	// если это не она, ствол — конец цепочки «волна → эпик → ствол».
+	peers []string
+	// named — база названа окружением, а не взята умолчанием.
+	named bool
+	// said — выбор словами, для переписи.
+	said string
+}
+
+// chooseMonotonicBase — база сравнения из окружения прогона.
+//
+// Названа база запроса — добавленное считается от неё, а применённым служат
+// вершины её и ствола: полоса вливается в волну, но её миграция уедет и в
+// ствол, и номер ниже легшего туда встанет раньше него так же. Не названа —
+// базой служит ствол, и перепись ГОВОРИТ, что база не названа: «сравнили со
+// стволом» и «сравнили с базой запроса, которая есть ствол» — разные исходы.
+func chooseMonotonicBase(getenv func(string) string) monotonicBaseChoice {
+	v := strings.TrimSpace(getenv(requestBaseEnv))
+	if v == "" {
+		return monotonicBaseChoice{
+			added: trunkRefName,
+			peers: []string{trunkRefName},
+			said: fmt.Sprintf("база запроса не названа (%s пуст: отправка в ствол, ручной "+
+				"запуск либо прогон вне запроса) — база сравнения ствол %s",
+				requestBaseEnv, trunkRefName),
+		}
+	}
+	ref := "origin/" + v
+	if ref == trunkRefName {
+		return monotonicBaseChoice{
+			added: ref, peers: []string{ref}, named: true,
+			said: fmt.Sprintf("база запроса %s (из %s) — она же ствол", ref, requestBaseEnv),
+		}
+	}
+	return monotonicBaseChoice{
+		added: ref, peers: []string{ref, trunkRefName}, named: true,
+		said: fmt.Sprintf("база запроса %s (из %s), сверх неё вершина ствола %s",
+			ref, requestBaseEnv, trunkRefName),
+	}
+}
+
+// migrationFilesAt — пути каталога миграций на ВЕРШИНЕ ссылки.
+//
+// Это чтение СОСТАВА по названной ссылке, а не вопрос о вхождении в историю:
+// ответ — содержимое дерева этой ревизии. Неразрешимая ссылка — ошибка, и
+// вызывающий решает, «условие не создано» это или отказ предпосылки.
+func migrationFilesAt(root, ref string) ([]string, error) {
+	cmd := gitenv.Command(root, "ls-tree", "-r", "--name-only", ref, "--",
+		check.MigrationsDirRel+"/")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-tree %s: %w: %s", ref, err, strings.TrimSpace(stderr.String()))
+	}
+	var files []string
+	for _, rel := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if rel = strings.TrimSpace(rel); rel != "" {
+			files = append(files, rel)
+		}
+	}
+	return files, nil
 }
 
 // historicalOutOfOrder — сколько раз в ИСТОРИИ СТВОЛА миграция вводилась с

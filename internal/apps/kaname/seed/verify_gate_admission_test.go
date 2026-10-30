@@ -81,7 +81,7 @@ func TestVerifyGateAdmissionRefusalIsNotAccessLoss(t *testing.T) {
 	}
 
 	logger, buf := captureLogger()
-	gate := NewVerifyGate(panicEngine{}, store, logger).WithRelationChecker(chk)
+	gate := NewVerifyGate(store, logger).WithRelationChecker(chk)
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 
@@ -124,7 +124,7 @@ func TestVerifyGateLostRelationOfAdmittedSubjectStillFound(t *testing.T) {
 	}
 
 	logger, buf := captureLogger()
-	gate := NewVerifyGate(panicEngine{}, store, logger).WithRelationChecker(chk)
+	gate := NewVerifyGate(store, logger).WithRelationChecker(chk)
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 
@@ -154,7 +154,7 @@ func TestVerifyGateAdmissionUnansweredIsAnError(t *testing.T) {
 	}}
 	chk := &doorLikeChecker{admitErr: errors.New("отметки не прочитаны")}
 
-	gate := NewVerifyGate(panicEngine{}, store, nil).WithRelationChecker(chk)
+	gate := NewVerifyGate(store, nil).WithRelationChecker(chk)
 	_, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "user:usr_a")

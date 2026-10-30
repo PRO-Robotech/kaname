@@ -121,8 +121,9 @@ const (
 	// «нарушений нет»: судить было нечего.
 	MigrationVersionNoCorpus MigrationVersionOutcome = "НЕТ ПРЕДМЕТА: обход не дал ни одного файла миграции"
 	// MigrationVersionNothingAdded — миграции есть, добавленных относительно
-	// ствола нет. Класс говорит о НОВОЙ миграции, и новой здесь не появилось.
-	MigrationVersionNothingAdded MigrationVersionOutcome = "НЕТ ПРЕДМЕТА: относительно ствола не добавлено ни одной миграции"
+	// базы сравнения нет. Класс говорит о НОВОЙ миграции, и новой здесь не
+	// появилось.
+	MigrationVersionNothingAdded MigrationVersionOutcome = "НЕТ ПРЕДМЕТА: относительно базы сравнения не добавлено ни одной миграции"
 	// MigrationVersionNoPeer — добавленное есть, а сравнивать его не с чем:
 	// применённых миграций в каталоге нет. Законное состояние нового домена — и
 	// ровно тот случай, ради которого одно число «добавлено N» не годится.
@@ -150,9 +151,16 @@ type MigrationVersionCensus struct {
 	// Unordered — миграции, номер которых не разобран. Не молчание и не
 	// находка сама по себе: их место в цепочке неизвестно.
 	Unordered []string
-	// Applied — миграции, уже лежащие в стволе (всё, кроме добавленного).
+	// Applied — миграции, уже лежащие в базе: всё в каталоге, кроме
+	// добавленного, и сверх того лежащее на ВЕРШИНЕ базы, но не в рабочем
+	// дереве (BaseOnly).
 	Applied int
-	// Added — миграции, добавленные относительно ствола.
+	// BaseOnly — из применённых те, что лежат на вершине базы и в рабочем
+	// дереве ОТСУТСТВУЮТ: база ушла вперёд после ответвления.
+	BaseOnly int
+	// Bases — базы сравнения словами: ссылка и число её миграций.
+	Bases []string
+	// Added — миграции, добавленные относительно базы сравнения.
 	Added int
 	// Compared — из добавленного то, что БЫЛО сопоставлено со старшей
 	// применённой. Отличается от Added ровно на случай «сравнивать не с чем».
@@ -185,11 +193,16 @@ func (c MigrationVersionCensus) String() string {
 	if c.HighestApplied != "" {
 		top = fmt.Sprintf("старшая применённая %s (%d)", c.HighestApplied, c.HighestValue)
 	}
+	bases := "базы сравнения нет — применённым считается рабочее дерево"
+	if len(c.Bases) > 0 {
+		bases = "базы сравнения: " + strings.Join(c.Bases, " · ")
+	}
 	return fmt.Sprintf(
 		"рассмотрено файлов каталога %d, из них миграций %d, из них упорядочиваемых %d "+
-			"(формы обходом: %s); применённых %d, добавлено %d, сравнено %d; %s",
+			"(формы обходом: %s); применённых %d (из них только на вершине базы %d), "+
+			"добавлено %d, сравнено %d; %s; %s",
 		c.DirFiles, c.SQL, c.Versioned, strings.Join(c.Forms(), " · "),
-		c.Applied, c.Added, c.Compared, top)
+		c.Applied, c.BaseOnly, c.Added, c.Compared, top, bases)
 }
 
 // MigrationVersionAudit — вердикт вместе с исходом и знаменателем.
@@ -202,19 +215,48 @@ type MigrationVersionAudit struct {
 	Findings []string
 }
 
-// AuditMigrationVersions — предмет гейта, взятый ЧИСТОЙ функцией.
+// MigrationBase — база сравнения: ссылка и состав каталога миграций на её
+// ВЕРШИНЕ.
 //
-// `dirFiles` — ВСЕ пути каталога миграций (знаменатель обхода), `added` — пути,
-// добавленные относительно ствола. Применённым считается всё, что в каталоге
-// есть и добавленным не является: сравнивать новое с самим собой нечего.
+// Вершина, а не общий предок с рабочей веткой, — несущее: база уходит вперёд
+// после ответвления, и старшая, легшая в неё позже, в рабочем дереве ветки не
+// лежит (слияние с базой собирает только конвейер запроса; хук отправки и
+// локальный прогон судят саму ветку). После вливания мигратор применит обе в порядке номера, поэтому
+// сравнивать добавленное надо с тем, что лежит в базе СЕЙЧАС (kaname#618).
+type MigrationBase struct {
+	// Ref — ссылка, по вершине которой прочитан состав. Печатается переписью и
+	// называется в находке: без неё старшая из базы — имя без координаты.
+	Ref string
+	// Files — пути на вершине базы; не-миграции отбрасываются тем же
+	// [IsMigrationFile], что и в рабочем дереве.
+	Files []string
+}
+
+// AuditMigrationVersions — предмет гейта без баз сравнения: применённым
+// считается рабочее дерево за вычетом добавленного.
+func AuditMigrationVersions(dirFiles, added []string) MigrationVersionAudit {
+	return AuditMigrationVersionsAgainst(dirFiles, added)
+}
+
+// AuditMigrationVersionsAgainst — предмет гейта, взятый ЧИСТОЙ функцией.
+//
+// `dirFiles` — ВСЕ пути каталога миграций рабочего дерева (знаменатель обхода),
+// `added` — пути, добавленные относительно базы сравнения, `bases` — составы
+// вершин баз. Применённым считается всё, что в каталоге есть и добавленным не
+// является, и сверх того всё, что лежит на вершине любой базы: сравнивать новое
+// с самим собой нечего, а с тем, что легло в базу после ответвления, — обязательно.
 //
 // Чистой она вынесена, чтобы инъекция судила ТОТ ЖЕ предикат на синтетическом
 // входе, не трогая живое дерево и не заводя своей копии правила.
-func AuditMigrationVersions(dirFiles, added []string) MigrationVersionAudit {
+func AuditMigrationVersionsAgainst(dirFiles, added []string, bases ...MigrationBase) MigrationVersionAudit {
 	census := MigrationVersionCensus{Widths: map[int]int{}}
 	isAdded := make(map[string]bool, len(added))
 	for _, rel := range added {
 		isAdded[rel] = true
+	}
+	inTree := make(map[string]bool, len(dirFiles))
+	for _, rel := range dirFiles {
+		inTree[rel] = true
 	}
 
 	sqlRels := make([]string, 0, len(dirFiles))
@@ -246,6 +288,40 @@ func AuditMigrationVersions(dirFiles, added []string) MigrationVersionAudit {
 		if !haveTop || mv.Value > census.HighestValue {
 			census.HighestValue, census.HighestApplied, haveTop = mv.Value, name, true
 		}
+	}
+
+	// Сверх рабочего дерева — вершины баз. Файл, который рабочее дерево уже
+	// несёт, учтён выше; добавленный применённым не становится, даже если
+	// лежит и в базе: сравнивать его с самим собой нечего.
+	counted := map[string]bool{}
+	for _, b := range bases {
+		var migs, only int
+		for _, rel := range b.Files {
+			if !IsMigrationFile(rel) {
+				continue
+			}
+			migs++
+			if inTree[rel] || isAdded[rel] || counted[rel] {
+				continue
+			}
+			counted[rel] = true
+			only++
+			name := path.Base(rel)
+			mv, ok := MigrationVersionOf(name)
+			if !ok {
+				census.Unordered = append(census.Unordered, b.Ref+":"+rel)
+				continue
+			}
+			census.Applied++
+			census.BaseOnly++
+			if !haveTop || mv.Value > census.HighestValue {
+				census.HighestValue, haveTop = mv.Value, true
+				census.HighestApplied = fmt.Sprintf("%s (вершина %s; в рабочем дереве его нет)",
+					name, b.Ref)
+			}
+		}
+		census.Bases = append(census.Bases, fmt.Sprintf(
+			"%s — миграций на вершине %d, из них вне рабочего дерева %d", b.Ref, migs, only))
 	}
 
 	accepted := AcceptedMigrationForm()
