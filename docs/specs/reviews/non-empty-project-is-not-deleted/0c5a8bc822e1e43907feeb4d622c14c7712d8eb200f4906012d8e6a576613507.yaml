@@ -167,3 +167,11 @@ route_signs:
   ui: false
   new_domain: false
   security_surface: true
+
+effective_approval:
+  issued: true
+  rationale: >-
+    Отражает уже исполненное событие acceptance-reviewer по точному отпечатку
+    0c5a8bc822e1e43907feeb4d622c14c7712d8eb200f4906012d8e6a576613507:
+    https://github.com/PRO-Robotech/kaname/issues/168#issuecomment-6481608368.
+    Новое одобрение этой правкой не выдаётся.
