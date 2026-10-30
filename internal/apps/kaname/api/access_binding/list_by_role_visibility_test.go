@@ -31,7 +31,7 @@ import (
 // the binding's scope, nor administers it, nor is its subject, gets an empty page.
 func TestListByRole_StrangerSeesNothing(t *testing.T) {
 	const (
-		roleID    = "rol000000000sysadmin"
+		roleID    = domain.SystemAdminRoleID
 		ownerID   = "usr_owner-----------"
 		accountID = "acc_lbr_account-----"
 	)
@@ -61,7 +61,7 @@ func TestListByRole_StrangerSeesNothing(t *testing.T) {
 // that the narrowing above is a scope filter and not a blanket denial.
 func TestListByRole_SubjectOfBindingSeesOwnRow(t *testing.T) {
 	const (
-		roleID    = "rol000000000sysadmin"
+		roleID    = domain.SystemAdminRoleID
 		ownerID   = "usr_owner-----------"
 		accountID = "acc_lbr_account-----"
 		memberID  = "usr_member----------"

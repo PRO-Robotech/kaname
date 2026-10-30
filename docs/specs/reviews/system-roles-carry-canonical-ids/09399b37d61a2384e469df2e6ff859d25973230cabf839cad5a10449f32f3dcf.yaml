@@ -1,0 +1,219 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/system-roles-carry-canonical-ids.md
+  sha256: 09399b37d61a2384e469df2e6ff859d25973230cabf839cad5a10449f32f3dcf
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписал автор; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: 092bee4fb3220215da255258dfa6fe0da9214f34
+  content_commit: none
+  content_note: >-
+    Файл не отслеживается (`git status --short` → `??`), коммита с ним нет; отпечаток снят с
+    файла рабочей копии.
+  branch: '543'
+  task: PRO-Robotech/kaname#543
+  related_tasks: [PRO-Robotech/kaname#1052, PRO-Robotech/kaname#1065, PRO-Robotech/kacho#2976]
+  lines: 522
+  round: 1
+  round_scope: >-
+    Первый круг, судится вся редакция. Литерал прежних id в этой записи не выписан: запись
+    лежит в дереве, по которому считается предикат DoD п.6 документа.
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/system-roles-carry-canonical-ids.md в копии
+    kacho-workspace/tmp/kn-543-sysrole-ids @ 092bee4fb → 09399b37…f3dcf (совпал с возвратом автора)
+  measurement_revisions: >-
+    Код — рабочая копия той же ветки @ 092bee4fb (чистая, кроме документа приёмки).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-29T00:00:00Z'
+
+premise:
+  outcome: confirmed
+  note: >-
+    Посылки автора перемерены и подтверждены; опровержение автором посылки «литерал в дереве — 0»
+    (Д1) подтверждено: литерал в трёх применённых миграциях, их правка — ban #5.
+  commands:
+    - sha256sum <док> → 09399b37d61a2384e469df2e6ff859d25973230cabf839cad5a10449f32f3dcf
+    - grep -n "INSERT INTO kaname.roles" internal/migrations/0001_initial.sql | wc -l → 48
+    - тот же конвейер §0.1 с grep -vcE формы → 2
+    - grep -ln "INSERT INTO kaname.roles" internal/migrations/2026*.sql | wc -l → 0
+    - git ls-files | xargs grep -l 'rol0\{9\}sys' | wc -l → 32
+    - grep -n 'REFERENCES kaname.roles' internal/migrations/*.sql | wc -l → 12; из них с ON UPDATE → 0
+    - ls internal/migrations/*.sql | tail -1 → 20261026090000_service_account_creation_is_its_own_right.sql
+    - grep -c 'rol0\{9\}sys' <док> → 0
+    - shared/ids.go ValidateResourceID судит префикс и длину, алфавит не судит → прежний id admin (длина 20) доходит до чтения и даёт NOT_FOUND, как в SRCI-04
+
+blocking:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    scenarios: [SRCI-04 (третье When, выдача), SRCI-08, SRCI-08б]
+    note: >-
+      Тела `POST /iam/v1/accessBindings` в трёх сценариях — «без `target`, то есть выборка
+      все объекты». Контракт так не читается: `target` ОБЯЗАТЕЛЕН
+      (`proto/kaname/cloud/iam/v1/access_binding_service.proto:521-526`), и обработчик первым
+      оператором отвечает на его отсутствие `INVALID_ARGUMENT "target is required; use
+      target.allInScope{} to grant all objects under the anchor"`
+      (`internal/apps/kaname/api/access_binding/handler.go:144` → `delta_input.go:27,40`) — ДО
+      `create.go:296` и `create.go:315`. Названные производители «Тогда» (`structural_gates.go:70`,
+      `helpers.go:380`) этими телами не достигаются: SRCI-04 вместо FAILED_PRECONDITION получит
+      INVALID_ARGUMENT иного текста, SRCI-08 вместо операции — отказ, SRCI-08б — отказ другим
+      текстом; близнец SRCI-08/08б различает тогда не роль, а ничего. Исправление: в тела добавить
+      `"target":{"allInScope":{}}` — ровно так строит запрос держатель, на который ссылается §5а
+      (`system_class_s2_integration_test.go:382`, `allInScopeTarget()`), и убрать из текста
+      «без target = все объекты». Предикат: `sed -n 141,147p handler.go` (вызов — :144); `sed -n 36,41p delta_input.go`.
+  - id: B2
+    kind: COVERAGE
+    scenarios: [SRCI-06, SRCI-07, SRCI-10, §9 «поток изменений»]
+    note: >-
+      Поведение ленты изменений ресурсов не названо. На `kaname.roles` и `kaname.access_bindings`
+      стоят триггеры ресурсного журнала подписки, срабатывающие by construction на любой
+      вставке, правке и снятии строки
+      (`internal/migrations/20260914090000_resource_journal_serves_the_subscription.sql:325-339`,
+      AFTER UPDATE … WHEN (OLD.* IS DISTINCT FROM NEW.*)). Миграция, меняющая id роли и
+      `role_id` выдач, их зажжёт, если её не заглушить. Документ этого не решает, но неявно
+      требует тишины: SRCI-06 («строк с новым id — столько же, сколько было с прежним», по
+      каждой таблице, включая `resource_journal`) и SRCI-10 (полный срез после повторного
+      наката равен срезу после первого — `sequence_no` из BIGSERIAL при эмиссии разошёлся бы)
+      проходят только при молчащем журнале. Тишина означает, что подписчик, держащий роль и
+      выдачу по событию (консоль перечитывает по событию — `subscription.md`
+      sub-refetch-not-apply), не узнает ни о смене `roleId` у `B1`/`B2`, ни о снятии роли с
+      прежним id и появлении роли с новым: его состояние ссылается на id, который больше ничего
+      не адресует (SRCI-04). SRCI-07 судит только `subject_change_outbox` и `fga_outbox`, а §9
+      называет «поток изменений — да» лишь по нему. Нужно: решение (эмиссия событий о
+      `iam_role` и `iam_access_binding` миграцией — либо тишина с названным следствием для
+      подписчика и чем оно снимается) и сценарий с близнецом на наблюдаемое в ленте; SRCI-06/-10
+      привести к этому решению явно (что именно в `resource_journal` растёт и на сколько), а не
+      держать его следствием равенства.
+  - id: B3
+    kind: CONSTRUCTIBILITY
+    scenarios: [SRCI-05 (Given B2 и тройки проверки права), SRCI-06/-07/-09/-10/-11 через базу SRCI-05]
+    note: >-
+      Given SRCI-05: «выдача B2 роли system.viewer на области кластера на G1» — цель не названа.
+      С `allInScope` это ровно то состояние, которое глагол отвергает (SRCI-08б документа,
+      `helpers.go:380`: роль наблюдателя несёт правило-якорь — `rule.go:88-96`, правила без
+      names/labels), то есть посев писателем репозитория в обход глагола заводит выдачу,
+      которой продукт создать не может, и «U2 чтение — разрешено» утверждается о вымышленном
+      состоянии. С пообъектной целью объект обязан быть назван. Тройки
+      `InternalIAMService.Check` («изменение объекта», «чтение того же объекта») не называют ни
+      тип, ни id объекта, поэтому ожидаемые «разрешено/отказ» из Given не выводятся. Нужно:
+      цель B2 — конкретная (`resources:[{type,id}]` посеянного объекта либо names/labels),
+      объект троек назван тем же значением, запрос `Check` выписан полями.
+
+minor:
+  - kind: COVERAGE
+    note: >-
+      SRCI-09 не способен покраснеть от этого изменения: посев выдач модуля резолвит роль по имени,
+      а выдач посева на `system.admin`/`system.viewer` в дереве kaname нет — выдачи посева в
+      `0001_initial.sql:3190-3196` относительные (`role_id` NULL, `granted_relation`), в
+      `manifest.yaml` роль этих имён в выдаче не названа (`grep -n 'system\.admin\|system\.viewer'
+      manifest.yaml` → одна строка комментария). Назвать выдачу посева на одну из двух ролей
+      (в том числе из манифестов модулей kacho) либо признать сценарий инвариантом без предмета и
+      снять.
+  - kind: DoD
+    note: >-
+      DoD п.5: `git grep -c 'SRCI[0-9]'` считает строки, а не покрытые ID — одиннадцать не
+      доказывает. Предикат по предмету: `git grep -ho 'SRCI-\?[0-9]\{2\}' -- '*_test.go' tests/newman
+      | tr -d - | sort -u | wc -l` → 11 (написание ID в функциях — `SRCI<NN>`, в кейсах — `SRCI-NN`).
+  - kind: FORMAT
+    note: >-
+      SRCI-04/-08: `Create` несёт `required_acr_min = "2"` (`access_binding_service.proto`), фикстура
+      вызывающего обязана его давать — назвать в Given, иначе отказ уровня входа замаскирует
+      предмет.
+  - kind: FORMAT
+    note: >-
+      SRCI-11: при внешних ключах без ON UPDATE миграция обязана держать замок строки прежней роли
+      до фиксации, иначе вставка (б), зафиксированная после снимка UPDATE выдач, роняет саму
+      миграцию нарушением ключа на снятии роли. Это условие к замыслу (`flow-acceleration.md`
+      fa-b2), а не к приёмке; «Тогда» верно при таком замке (`access_bindings_role_is_live` при
+      отсутствии строки отдаёт решение ключу, `0001_initial.sql:281-286` → 23503).
+
+open_questions_disposition:
+  - id: Д1
+    outcome: accepted
+    note: Предикат «0 вне internal/migrations/*.sql, 4 внутри» верен; другого честного нет (ban #5).
+  - id: Д2
+    outcome: accepted_conditionally
+    note: Принимается, но решение о `resource_journal` — часть B2, не Д2.
+  - id: Д3
+    outcome: deferred_to_design
+    note: Наблюдаемое одно (SRCI-04 viewer); выбор исхода — замысел.
+  - id: Д4
+    outcome: dispatcher
+    note: >-
+      Не блокирует: DoD п.6 написан условно и называет единственное возможное исключение.
+      Вопрос — диспетчеру.
+  - id: Д5
+    outcome: accepted
+    note: Направление окна — меньше доступа; прода нет.
+
+producers:
+  without_producer: 0
+  unreachable_named_producer: [SRCI-04 (выдача), SRCI-08, SRCI-08б]
+  note: Раздел §5а полон; три производителя названы верно, но недостижимы телами сценариев (B1).
+
+twins:
+  negatives_with_twin: all
+  note: >-
+    У SRCI-04 близнецы SRCI-03/SRCI-08, у SRCI-07 — 07б, у SRCI-08б — SRCI-08, у SRCI-01/-02 —
+    01б/02б, у SRCI-10 — 10б. Близнец SRCI-08/08б сегодня не различает роль (B1).
+
+constructibility:
+  method: >-
+    Посева не было: задание не назвало изоляцию (пространство стенда / слот) для посева. B1 и B3
+    установлены чтением производителя и контракта, не посевом.
+  seeded: 0
+  of: 7
+  named_fixture: 5
+  not_executed: 7
+  not_executed_reason: изоляция для посева заданием не названа
+
+route_signs:
+  proto: false
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: true
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: >-
+    Вердикт возврата санкции не даёт; событие публикуется для истории круга.
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  pending_on: новая редакция acceptance-author и круг 2
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 09399b37d61a2384e469df2e6ff859d25973230cabf839cad5a10449f32f3dcf"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#543
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: []

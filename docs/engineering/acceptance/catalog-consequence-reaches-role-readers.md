@@ -8,6 +8,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 - **Статус:** DRAFT — круг 1 на рецензию `acceptance-reviewer`. Кодирование запрещено до
   APPROVED (ban #1). Вердикт будет относиться к ОТПЕЧАТКУ содержимого (`change-graph.md`
   §2); записи ревью — каталог `docs/specs/reviews/catalog-consequence-reaches-role-readers/`
+- **⚠️ Правка ПОСЛЕ вердикта (2026-10-29, `PRO-Robotech/kaname#543`): литерал прежних id
+  двух системных ролей заменён именем константы** (`domain.SystemAdminRoleID`,
+  `domain.SystemViewerRoleID`). Значения констант сменила приёмка
+  `system-roles-carry-canonical-ids.md`: роли переведены на id канонической формы
+  миграцией `20261029150000`, и прежний литерал вне миграций в дереве не держится
+  (её DoD п.6). Замеры этого документа сняты на своей ревизии и относятся к
+  прежним значениям; предметы, вердикты и сценарии не тронуты.
 - **Ревизия измерения:** `6e9b94ab8e28` — вершина `origin/main` службы на день записи и база
   этой линии. Все числа §0, §2 и §5 сняты на ней. Разбор сортировщика снимался на `3ac222d2`;
   между ними в путях предмета изменился ОДИН файл — переименование импорта в обработчике роли
@@ -297,7 +304,7 @@ F: health HEALTHY · rule_states [ACTIVE] · withdrawn_grants 0 → 1 · пре�
   либо в ресурсе): адресуемых сегментов у неё ноль, признаку нечего сказать, `health` читает
   её ЗДОРОВОЙ. Это оговорка ВНУТРИ формулы (§2.3, пункт 1), а не абзац рядом с ней: без неё
   буквальное прочтение биконъюнкции опустошило бы превью трёх посеянных системных ролей
-  (`edit`, `view` и кластерной роли-наблюдателя `rol000000000sysviewer`) — измерено, §2.3
+  (`edit`, `view` и кластерной роли-наблюдателя `domain.SystemViewerRoleID`) — измерено, §2.3
   «Цена буквального прочтения»;
 - **ярусная ПАРА, чей ресурс СНЯТ, следует снимку каталога** — как подстановка на живом типе
   и по тому же производителю: строки `role_verb` у ярусной пары не бывает вовсе, поэтому
@@ -403,10 +410,10 @@ F: health HEALTHY · rule_states [ACTIVE] · withdrawn_grants 0 → 1 · пре�
 grep 'INSERT INTO kaname.roles' internal/migrations/0001_initial.sql \
   | grep '"resources": \["\*"\]' \
   | sed -E "s/.*VALUES \('([^']*)', [^,]*, '([^']*)'.*/\1 \2/"
-# → 6 ролей: rol21232f297a57a5a74 · rolde95b43bceeb4b998 · rol000000000sysadmin ·
-#   rol000000000sysviewer · rol1bda80f2be4d3658e · rol72122ce96bfec66e2
+# → 6 ролей: rol21232f297a57a5a74 · rolde95b43bceeb4b998 · domain.SystemAdminRoleID ·
+#   domain.SystemViewerRoleID · rol1bda80f2be4d3658e · rol72122ce96bfec66e2
 #   из них с ЯВНЫМИ глаголами — 3: edit [get,list,update], view [list,get] и
-#   кластерная роль-наблюдатель rol000000000sysviewer [list,get];
+#   кластерная роль-наблюдатель domain.SystemViewerRoleID [list,get];
 #   у остальных трёх (admin, owner и кластерная роль-администратор) глагол — подстановка
 ```
 
@@ -2067,7 +2074,7 @@ grep -rn PerObject --include=*.go internal/ | grep -v _test
 ```sh
 grep 'INSERT INTO kaname.roles' internal/migrations/0001_initial.sql | grep '"resources": \["\*"\]'
 # → 6 ролей; из них с ЯВНЫМИ глаголами 3: edit [get,list,update], view [list,get] и
-#   кластерная роль-наблюдатель rol000000000sysviewer [list,get]
+#   кластерная роль-наблюдатель domain.SystemViewerRoleID [list,get]
 ```
 
 Замер домена на тех же формах (временная проба в `internal/domain`): у `edit`, `view` и

@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 903
+Всего кейсов: 906
 
 ## Перепись по модулям
 
@@ -60,7 +60,7 @@
 | `cases/iam-rbac-subjects.py` | 14 |
 | `cases/iam-read-authz-vget.py` | 3 |
 | `cases/iam-role-redesign.py` | 10 |
-| `cases/iam-role.py` | 44 |
+| `cases/iam-role.py` | 47 |
 | `cases/iam-service-account.py` | 28 |
 | `cases/iam-subject-privileges-read.py` | 6 |
 | `cases/iam-system-class-subjects.py` | 21 |
@@ -765,7 +765,7 @@
 - `IAM-ROL-RD-DL-SYSTEM-NEG`
 - `IAM-ROL-RD-CR-UNKNOWN-RESOURCE-TOKEN-NEG`
 
-## `cases/iam-role.py` — 44 кейсов
+## `cases/iam-role.py` — 47 кейсов
 
 > Case-set для RoleService.
 
@@ -813,6 +813,9 @@
 - `IAM-ROL-CR-NEG-NO-SCOPE`
 - `IAM-ROL-UP-T33-LABELS-OK`
 - `IAM-ROL-CR-T33-NEG-BADLABELS`
+- `IAM-ROL-GET-SRCI03-NEW-ID-OK`
+- `IAM-ROL-GET-SRCI04-OLD-ID-REFUSED`
+- `IAM-ROL-AB-SRCI08-SUPERUSER-NEW-ID`
 
 ## `cases/iam-service-account.py` — 28 кейсов
 

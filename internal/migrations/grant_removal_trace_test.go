@@ -10,7 +10,8 @@
 // Держатель `TestNoMigrationMovesGrantsBetweenRoles` назван приёмкой
 // `docs/engineering/acceptance/seed-identity-names-its-own-service.md` §6 и до
 // этого файла не существовал ни в одном файле дерева — только в комментариях
-// (`internal/domain/constants_extended.go`, `internal/domain/seeded_ids.go`).
+// (`internal/domain/constants_extended.go` и перечень посеянного, снятый
+// задачей kaname#543).
 //
 // Доказательство способности упасть и смолчать — в
 // `grant_removal_trace_injection_test.go`.
@@ -113,5 +114,25 @@ func TestNoMigrationMovesGrantsBetweenRoles(t *testing.T) {
 			"которого выдававший НЕ НАЗЫВАЛ, а согласия у него никто не спрашивал. "+
 			"Законный путь — снять выдачу и оставить след",
 			strings.Join(moves, ", "))
+	}
+}
+
+// TestRoleIDRenamesAreExactlyTheRatchet — перевод id роли в корпусе совпадает с
+// храповиком `RoleIDRenameRatchet` в обе стороны (kaname#543): новый перевод —
+// находка, запись храповика без перевода — тоже.
+func TestRoleIDRenamesAreExactlyTheRatchet(t *testing.T) {
+	corpus := grantRemovalCorpus(t)
+
+	renames, statements := migrations.AuditRoleIDRenames(corpus)
+	t.Logf("перепись: файлов корпуса %d; операторов «UPDATE roles … SET» в накатной половине %d; "+
+		"из них меняющих id %d (%s); храповик %d",
+		len(corpus), statements, len(renames), strings.Join(renames, ", "), len(migrations.RoleIDRenameRatchet))
+
+	if statements == 0 {
+		t.Fatalf("ПРЕДПОСЫЛКА ЛОЖНА: во всём корпусе нет ни одного оператора правки строки роли — " +
+			"разбор разъехался с корпусом, и молчание сказано о нём, а не о дереве")
+	}
+	if f := migrations.RoleIDRenameFindings(renames, migrations.RoleIDRenameRatchet); len(f) > 0 {
+		t.Errorf("перевод id роли расходится с храповиком:\n%s", strings.Join(f, "\n"))
 	}
 }

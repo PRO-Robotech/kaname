@@ -58,7 +58,7 @@ INSERT INTO kaname.roles (id, account_id, name, rules) VALUES ('rol000000000000v
 
 // injOwnerlessInsert — законный близнец: имя без владельца в первом сегменте.
 const injOwnerlessInsert = `-- +goose Up
-INSERT INTO kaname.roles (id, account_id, name, rules) VALUES ('rol000000000sysadmin', NULL, 'sysadmin', '[]');
+INSERT INTO kaname.roles (id, account_id, name, rules) VALUES ('rol0000000000sysless', NULL, 'sysadmin', '[]');
 `
 
 // injForeignTableInsert — законный близнец: вставка в ЧУЖУЮ таблицу. Тот же

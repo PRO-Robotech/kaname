@@ -157,7 +157,7 @@ func TestGetAccessBinding_SelfCheckIgnoresTheSubjectsOfAnotherBinding(t *testing
 // которая называет его самого.
 func TestListByRole_SelfCheckSpansEverySubjectOfTheSet(t *testing.T) {
 	const (
-		roleID    = "rol000000000sysadmin"
+		roleID    = domain.SystemAdminRoleID
 		accountID = "acc00000000000ba01ab"
 	)
 	seen := 0
@@ -200,7 +200,7 @@ func TestListByRole_SelfCheckSpansEverySubjectOfTheSet(t *testing.T) {
 // посторонний по-прежнему получает пустую страницу, а не чужую выдачу.
 func TestListByRole_SelfCheckRejectsASubjectOutsideTheSet(t *testing.T) {
 	const (
-		roleID    = "rol000000000sysadmin"
+		roleID    = domain.SystemAdminRoleID
 		accountID = "acc00000000000ba01ab"
 	)
 	repo := newABFakeRepo("usr_owner-----------", accountID, accountID, roleID, "viewer", nil)
