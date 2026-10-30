@@ -119,9 +119,9 @@ const formProbeSA = "sva-formprobe0000001"
 // formProbeSubject — субъект модели, которым дверь обязана спросить о близнеце.
 const formProbeSubject = "service_account:" + formProbeSA
 
-// formProbeSeededRole — посеянный идентификатор роли (длина 21, закрытый
-// перечень посеянного): форма его не отвергает.
-const formProbeSeededRole = "rol000000000sysviewer"
+// formProbeSeededRole — действующий посеянный идентификатор системной роли:
+// положительный близнец берётся из домена и проходит общую проверку формы.
+const formProbeSeededRole = domain.SystemViewerRoleID
 
 // formProbeNoPrefix — вход (1): приставки нет ни у одного вида.
 const formProbeNoPrefix = "qqq-not-a-project"
