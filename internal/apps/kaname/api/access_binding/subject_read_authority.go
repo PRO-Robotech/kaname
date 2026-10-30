@@ -123,11 +123,11 @@ type subjectReadDecision struct {
 	resolved subjectResolution
 }
 
-// subjectResolution — outcome of the subject lookup, with the absence answer
-// held back. `miss` carries the owning repo's OWN NotFound (contract tone
-// "<Resource> <id> not found", never re-composed here — re-composing it is how
-// the hide-existence texts drift apart), and it is returned to the caller only
-// after authority has been established.
+// subjectResolution — исход поиска субъекта с придержанным ответом об отсутствии.
+// `miss` несёт СОБСТВЕННЫЙ NotFound хранилища-владельца (текст контракта
+// "<Resource> <id> not found", здесь не пересобирается: пересборка разводит
+// тексты сокрытия существования). Вызывающий получает его только после
+// подтверждения полномочий.
 type subjectResolution struct {
 	accountID domain.AccountID
 	found     bool
@@ -272,13 +272,13 @@ func callerIsSubject(
 	}
 }
 
-// resolveSubjectHome reads the subject (User / ServiceAccount / Group) to return
-// its home account_id for the authz check. All reads are within kaname,
-// same-schema — NOT a cross-domain edge.
+// resolveSubjectHome читает субъекта (User / ServiceAccount / Group) и возвращает
+// его домашний account_id для проверки прав. Все чтения — внутри kaname,
+// в одной схеме; междоменного ребра здесь НЕТ.
 //
-// Three outcomes, deliberately distinct: resolved (found, account id); absent
-// (found=false, miss holds the mapped NotFound — NOT returned as an error here);
-// store failure (err — never a statement about the subject).
+// Три намеренно разных исхода: найден (found, идентификатор аккаунта); отсутствует
+// (found=false, miss несёт отображённый NotFound — здесь НЕ возвращается ошибкой);
+// неполадка хранилища (err — никогда не утверждение о субъекте).
 func resolveSubjectHome(
 	ctx context.Context,
 	repo Repo,
@@ -294,7 +294,7 @@ func resolveSubjectHome(
 	resolved := func(accountID domain.AccountID) subjectResolution {
 		return subjectResolution{accountID: accountID, found: true}
 	}
-	// classify splits "no such row" (deferred answer) from a real store failure.
+	// classify отделяет отсутствие строки (придержанный ответ) от неполадки хранилища.
 	classify := func(gerr error) (subjectResolution, error) {
 		if errors.Is(gerr, iamerr.ErrNotFound) {
 			return subjectResolution{miss: shared.MapRepoErr(gerr)}, nil
@@ -316,15 +316,15 @@ func resolveSubjectHome(
 		}
 		return resolved(sa.AccountID), nil
 	case domain.SubjectTypeGroup:
-		// A Group is Account-scoped (groups.account_id FK), so its home account is
-		// the gate scope — same policy as User / SA.
+		// Группа принадлежит аккаунту (FK groups.account_id), поэтому домашний
+		// аккаунт — область проверки, по той же политике, что у User / SA.
 		grp, gerr := rd.Groups().Get(ctx, domain.GroupID(subjectID))
 		if gerr != nil {
 			return classify(gerr)
 		}
 		return resolved(grp.AccountID), nil
 	default:
-		// Unreachable — subject_type is whitelisted by the caller.
+		// Недостижимо: вызывающий проверяет subject_type по разрешённому перечню.
 		return subjectResolution{}, authzguard.PermissionDenied()
 	}
 }
@@ -358,19 +358,19 @@ func subjectHomeAccountAuthority(
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	// Path 1 — owner of the home Account.
+	// Путь 1 — владелец домашнего аккаунта.
 	acct, gerr := rd.Accounts().Get(ctx, accountID)
 	if gerr == nil && acct.OwnerUserID != "" && authzguard.IsSelf(ctx, string(acct.OwnerUserID)) {
 		return true, nil
 	}
-	// A missing account row is treated as "no owner-path" — fall through to the
-	// FGA delegated-admin path; ultimately unauthorized if neither holds.
+	// Нет строки аккаунта — нет пути владельца: переходим к пути делегированного
+	// распорядителя FGA. Если не держится ни один, полномочий нет.
 	if gerr != nil && !errors.Is(gerr, iamerr.ErrNotFound) {
 		return false, shared.MapRepoErr(gerr)
 	}
 
-	// Path 2 — delegated admin: principal holds `admin` on account:<id> in FGA
-	// (shared predicate — the single authority gate used by every site).
+	// Путь 2 — делегированный распорядитель: принципал держит `admin` на
+	// account:<id> в FGA (общий предикат — единая проверка полномочий для всех мест).
 	//
 	// E-форма обязательна: этот путь строит СТРАНИЦУ видимого. Проглотив
 	// неполадку хранилища прав, он вернул бы well-formed `200` с молча суженным
