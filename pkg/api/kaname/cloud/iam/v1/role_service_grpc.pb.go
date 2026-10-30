@@ -50,8 +50,16 @@ type RoleServiceClient interface {
 	// Creates a custom role in the specified account.
 	// Имя дублирующее system-role → AlreadyExists.
 	Create(ctx context.Context, in *CreateRoleRequest, opts ...grpc.CallOption) (*operation.Operation, error)
-	// Updates the specified custom role.
-	// System role → FailedPrecondition.
+	// Обновляет пользовательскую роль; системная роль → FAILED_PRECONDITION.
+	// Если update_mask называет rules, правящий должен быть вправе выдать роль
+	// на каждой области её действующих (ACTIVE) выдач. Проверяется то же право,
+	// что у AccessBindingService.Create: администратор облака, владелец аккаунта
+	// области либо admin на объекте области; делегированный путь не учитывается.
+	// Проверка следует за формой запроса, существованием роли, запретом системной
+	// роли и проверкой правил, до создания операции. Отказ — PERMISSION_DENIED,
+	// побайтово как отказ без права на метод, операция не создаётся.
+	// Правка только имени или описания этого права не требует; отозванные
+	// и истёкшие выдачи в проверке не участвуют.
 	Update(ctx context.Context, in *UpdateRoleRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Deletes the specified custom role.
 	// System role → FailedPrecondition.
@@ -148,8 +156,16 @@ type RoleServiceServer interface {
 	// Creates a custom role in the specified account.
 	// Имя дублирующее system-role → AlreadyExists.
 	Create(context.Context, *CreateRoleRequest) (*operation.Operation, error)
-	// Updates the specified custom role.
-	// System role → FailedPrecondition.
+	// Обновляет пользовательскую роль; системная роль → FAILED_PRECONDITION.
+	// Если update_mask называет rules, правящий должен быть вправе выдать роль
+	// на каждой области её действующих (ACTIVE) выдач. Проверяется то же право,
+	// что у AccessBindingService.Create: администратор облака, владелец аккаунта
+	// области либо admin на объекте области; делегированный путь не учитывается.
+	// Проверка следует за формой запроса, существованием роли, запретом системной
+	// роли и проверкой правил, до создания операции. Отказ — PERMISSION_DENIED,
+	// побайтово как отказ без права на метод, операция не создаётся.
+	// Правка только имени или описания этого права не требует; отозванные
+	// и истёкшие выдачи в проверке не участвуют.
 	Update(context.Context, *UpdateRoleRequest) (*operation.Operation, error)
 	// Deletes the specified custom role.
 	// System role → FailedPrecondition.
