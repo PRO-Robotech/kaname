@@ -128,6 +128,30 @@ BOOTSTRAP_CALLER_SAN="${KANAME_STAND_BOOTSTRAP_SAN:-spiffe://kaname.local/ns/kan
 # разбирает из него короткое имя службы (`kacho-` снимается) и сравнивает с
 # константой края — `api-gateway`. То же имя, что у стенда чарта.
 EDGE_SA="kacho-api-gateway"
+REGISTRY_WORLD="${KANAME_STAND_REGISTRY_WORLD:-0}"
+case "$REGISTRY_WORLD" in 0|1) ;; *) printf 'KANAME_STAND_REGISTRY_WORLD: expected 0 or 1\n' >&2; exit 64 ;; esac
+
+# Личность владельца ресурса, отдельно от края и бутстрапа (#1033).
+registry_world_prepare() {
+  [ "$REGISTRY_WORLD" = 1 ] || return 0
+  mkdir -p "$BIN/manifests" || return 75
+  cp "$ROOT/tests/authz-fixtures/registry-own-stand-fixture.yaml" "$BIN/manifests/registry.yaml" || return 75
+  if [ ! -f "$PKI/registry.crt" ] || [ ! -f "$PKI/registry.key" ]; then
+    printf '%s\n' 'basicConstraints=critical,CA:FALSE' 'keyUsage=critical,digitalSignature' \
+      'extendedKeyUsage=clientAuth' 'subjectAltName=URI:spiffe://kaname.local/ns/kaname/sa/kacho-registry' > "$PKI/registry.ext"
+    ( umask 077
+      openssl req -newkey rsa:2048 -nodes -subj '/CN=kacho-registry' \
+        -keyout "$PKI/registry.key" -out "$PKI/registry.csr" >/dev/null 2>&1 &&
+      openssl x509 -req -in "$PKI/registry.csr" -CA "$PKI/ca.crt" -CAkey "$PKI/ca.key" \
+        -days 2 -extfile "$PKI/registry.ext" -out "$PKI/registry.crt" >/dev/null 2>&1
+    ) || { unmet "лист владельца registry не выпущен"; return 75; }
+  fi
+  openssl verify -CAfile "$PKI/ca.crt" -purpose sslclient "$PKI/registry.crt" >/dev/null 2>&1 || return 75
+  openssl x509 -in "$PKI/registry.crt" -noout -ext subjectAltName | \
+    grep -qx '    URI:spiffe://kaname.local/ns/kaname/sa/kacho-registry' || return 75
+  cmp -s <(openssl x509 -in "$PKI/registry.crt" -pubkey -noout) \
+    <(openssl pkey -in "$PKI/registry.key" -pubout 2>/dev/null) || return 75
+}
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf 'НАХОДКА: %s\n' "$*" >&2; }
@@ -275,6 +299,12 @@ stand_env() {
   # нет и не заводится, поэтому внутреннему фронту прогонщик и утверждения стенда
   # предъявляют лист края (`run.sh --internal-front-client-*`, `stand-assert.py`).
   export KANAME_AUTHN__MODULE_IDENTITIES="kaname/$EDGE_SA=edge@internal"
+  if [ "$REGISTRY_WORLD" = 1 ]; then
+    export KANAME_AUTHN__MODULE_IDENTITIES="$KANAME_AUTHN__MODULE_IDENTITIES,kaname/kacho-registry=module-writer@internal"
+    export KANAME_MANIFESTS__DIR="$BIN/manifests" KANAME_MANIFESTS__REQUIRED=true
+  else
+    unset KANAME_MANIFESTS__DIR KANAME_MANIFESTS__REQUIRED
+  fi
   # Центр личности края — внутренний центр стенда (kaname#988): тот же файл,
   # что у пула клиентских центров слушателей ниже.
   export KANAME_AUTHN__CLIENT_ISSUERS="internal=$PKI/ca.crt"
@@ -396,6 +426,9 @@ stand_env() {
   # которого страж отказывает. Предикат: `grep -n 'timeout-minutes'
   # .github/workflows/e2e-newman.yml` у шагов посева и прогона обоих заданий.
   export KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL=25m
+  # Мир registry добавляет отдельный шаг посева (5 минут), всего 30 минут —
+  # действующий потолок tokenpolicy, без ослабления проверки срока.
+  if [ "$REGISTRY_WORLD" = 1 ]; then export KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL=30m; fi
   # Потолок тела — тот же, что у соседней поверхности, несущей ОДИН токен
   # (`internal/handler/tokenintrospecthttp`, `maxTokenBytes = 16 << 10`): тело
   # обмена — форма с одним подписанным утверждением. Замер по посеву
@@ -1177,7 +1210,7 @@ k8s_memory() {
 ext_put_config() {
   local d v rc=0
   d="$(mktemp -d)" || { unmet "временный каталог посадки не создан"; return 75; }
-  ( PKI="$EXT_PKI"; stand_env
+  ( PKI="$EXT_PKI"; BIN="$EXT_BIN"; stand_env
     for v in $(compgen -e); do
       case "$v" in KANAME_STAND_*) ;; KANAME_*) printf '%s' "${!v}" > "$d/$v" ;; esac
     done ) || rc=1
@@ -1308,6 +1341,15 @@ ext_upload() {
     [ -n "$want" ] && [ "$want" = "$got" ] || { unmet "отпечаток бинаря $f в поде не совпал с собранным"; return 75; }
   done
   say "бинари доехали в под, отпечатки совпали: kaname, kaname-migrator"
+  if [ "$REGISTRY_WORLD" = 1 ]; then
+    ks -n "$EXT_NS" exec -i "$EXT_POD" -c svc -- sh -c \
+      'mkdir -p "$1/manifests" && cat > "$1/manifests/registry.yaml"' sh "$EXT_BIN" \
+      < "$BIN/manifests/registry.yaml" || return 75
+    want="$(sha256sum "$BIN/manifests/registry.yaml" | cut -d' ' -f1)"
+    got="$(ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- sha256sum "$EXT_BIN/manifests/registry.yaml" | cut -d' ' -f1)"
+    [ -n "$want" ] && [ "$want" = "$got" ] || { unmet "манифест registry не совпал с доставленным"; return 75; }
+    say "манифест registry доставлен, отпечаток совпал: $want"
+  fi
 }
 
 ext_pg_isready() {
@@ -1541,14 +1583,16 @@ ext_up() {
 }
 
 up_local() {
-  make_pki; start_pg; start_mailbox; stand_env; build_binaries; migrate; start_service
+  make_pki; registry_world_prepare || return $?
+  start_pg; start_mailbox; stand_env; build_binaries; migrate; start_service
   say "===== стенд поднят: своя база + свой УЦ, без платформы и без поставщика ====="
   listeners_report
 }
 
 up_external() {
   need_tool kubectl
-  make_pki; build_binaries; ext_up
+  make_pki; registry_world_prepare || return $?
+  build_binaries; ext_up
   say "===== стенд поднят во внешнем кластере ($EXT_NS): своя база + свой УЦ, без платформы и без поставщика ====="
   ext_listeners_report
 }
@@ -2118,6 +2162,29 @@ runner_main() {
 # Отсюда запрет на слово-близнец: у исхода 75 в выводе не должно быть «НАХОДКА»,
 # у исхода 1 — «УСЛОВИЕ НЕ СОЗДАНО». Кода без текста мало: перепутать классы можно
 # и сохранив код.
+if [ "${1:-}" = "--registry-self-test" ]; then
+  registry_tmp="$(mktemp -d)" || exit 75
+  trap 'rm -rf "$registry_tmp"' EXIT
+  PKI="$registry_tmp/pki"; BIN="$registry_tmp/bin"; RUNDIR="$registry_tmp/run"
+  WRAPKEY_FILE="$RUNDIR/wrapping.key"; BOOTSTRAP_KEY_FILE="$RUNDIR/bootstrap-sa.key"
+  SECOND_FACTOR_KEY_FILE="$RUNDIR/second-factor.key"
+  REGISTRY_WORLD=1
+  make_pki
+  registry_world_prepare || exit 1
+  stand_env
+  [ "$KANAME_AUTHN__MODULE_IDENTITIES" = "kaname/$EDGE_SA=edge@internal,kaname/kacho-registry=module-writer@internal" ] || exit 1
+  [ "$KANAME_MANIFESTS__DIR" = "$BIN/manifests" ] && [ "$KANAME_MANIFESTS__REQUIRED" = true ] || exit 1
+  cmp "$ROOT/tests/authz-fixtures/registry-own-stand-fixture.yaml" "$BIN/manifests/registry.yaml" || exit 1
+  cp "$PKI/edge.crt" "$PKI/registry.crt"
+  if registry_world_prepare; then fail "чужой лист принят владельцем registry"; exit 1; fi
+  REGISTRY_WORLD=0
+  stand_env
+  [ "$KANAME_AUTHN__MODULE_IDENTITIES" = "kaname/$EDGE_SA=edge@internal" ] || exit 1
+  [ -z "${KANAME_MANIFESTS__DIR:-}${KANAME_MANIFESTS__REQUIRED:-}" ] || exit 1
+  say 'registry profile self-test: passed=5 failed=0'
+  exit 0
+fi
+
 if [ "${1:-}" = "--self-test" ]; then
     # Подставной слушатель — единственное, что самопроверке нужно извне. Требование
     # честное: тремя соседними самопроверками этого процесса python3 уже нужен, и
