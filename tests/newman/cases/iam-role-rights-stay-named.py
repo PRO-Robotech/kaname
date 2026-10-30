@@ -120,7 +120,7 @@ ve = {"subjects": [{"type": "SUBJECT_TYPE_SERVICE_ACCOUNT", "id": var("escSa")}]
 case(1, "delete cannot grant; wildcard twin can", [
     *empty(), *sa("escSa"), *role("escGrantRole", "registry", "registries", ["get"]),
     *role("escDelete", "iam", "project", ["delete"]), *grant("escHold", "escDelete"),
-    check("delete", True, "delete-binding-is-visible", "iam", "iam_project", "gdRegistryProjectId", "project"),
+    check("delete", True, "delete-binding-is-visible", "iam", "project", "gdRegistryProjectId", "project"),
     Step(name="delete-holder-cannot-grant", method="POST", path="/iam/v1/accessBindings",
          body=ve, auth=HUMAN, test_script=denied()),
     *remove("/iam/v1/accessBindings", "escHold"),
