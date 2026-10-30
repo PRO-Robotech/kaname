@@ -999,6 +999,7 @@ jobs:
             --service iam-access-binding-account-scope \
             --service iam-access-binding-include-revoked \
             --service iam-access-binding-revocation-reason \
+            --service iam-role-rights-stay-named \
             --service iam-authz-grant-check-propagation \
             --service iam-service-account \
             --service kaname-cluster-admins \
