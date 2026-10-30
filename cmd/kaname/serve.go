@@ -1542,7 +1542,11 @@ func runServe(cfg config.Config) error {
 	restAddr := restFront.addr
 	var restHandler http.Handler
 	if restFront.Enabled() {
-		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts)
+		// Потолки тела и одновременности (kaname#990): края у отдельно
+		// поставленной службы нет, и держит их фронт сам.
+		limits := restFrontLimits(cfg)
+		logRESTFrontLimits(logger, limits)
+		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts, limits)
 		if err != nil {
 			return fmt.Errorf("публичный REST-фронт: %w", err)
 		}
