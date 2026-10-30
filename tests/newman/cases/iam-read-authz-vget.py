@@ -272,14 +272,37 @@ CASES.append(Case(
 # account id returns the SAME 404/code-5 as an existing-but-denied id → an attacker
 # cannot tell "exists but forbidden" from "does not exist" (no enumeration leak).
 # ---------------------------------------------------------------------------
-# Well-formed account id (prefix `acc` + 17-char crockford-base32) that is not seeded.
-_NONEXISTENT_ACCOUNT_ID = "acc00000000bug2miss"
+# Форма из публичного Account.Create: `acc` + 17 знаков
+# `0123456789abcdefghjkmnpqrstvwxyz` (account_service.proto, CreateAccountRequest.id).
+# Отсутствие подтверждает system_admin перед запросом без прав: один read-deny
+# не отличает отсутствующий аккаунт от существующего, но недоступного.
+_NONEXISTENT_ACCOUNT_ID = "acc00000000000001085"
 CASES.append(Case(
     id="IAM-RDAUTHZ-ACC-GT-NONEXISTENT-EQ-DENIED",
     title="GET well-formed nonexistent account → same 404/code-5 as existing-denied",
     classes=["AUTHZ", "NEG"],
     priority="P1",
     steps=[
+        Step(
+            name="confirm-admin-can-read-account",
+            method="GET",
+            path="/iam/v1/accounts/{{accountAId}}",
+            auth="jwtBootstrap",
+            test_script=[
+                "pm.test('PRECONDITION: system_admin reads existing account', () => pm.expect(pm.response.code, pm.response.text()).to.eql(200));",
+                "pm.test('PRECONDITION: existing account id matches', () => pm.expect(pm.response.json().id).to.eql(pm.environment.get('accountAId')));",
+            ],
+        ),
+        Step(
+            name="confirm-account-absent-as-admin",
+            method="GET",
+            path="/iam/v1/accounts/" + _NONEXISTENT_ACCOUNT_ID,
+            auth="jwtBootstrap",
+            test_script=[
+                "pm.test('PRECONDITION: account absent for system_admin (404)', () => pm.expect(pm.response.code, pm.response.text()).to.eql(404));",
+                "pm.test('PRECONDITION: absent account code 5', () => pm.expect(pm.response.json().code).to.eql(5));",
+            ],
+        ),
         Step(
             name="get-account-nonexistent",
             method="GET",
