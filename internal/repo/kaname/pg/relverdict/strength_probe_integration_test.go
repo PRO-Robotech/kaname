@@ -92,8 +92,8 @@ const (
 	// strMaxDepth — предел обхода цепи; тот же, что у запроса вердикта.
 	strMaxDepth = 4
 
-	// strRepeats — повторов вопроса на точку; нулевой прогревочный и в выборку
-	// не входит.
+	// strRepeats — вызовов Ask в цикле: нулевой прогревочный и в выборку
+	// не входит. Начальный Ask вне цикла; List исполняется один раз без цикла.
 	strRepeats = 11
 )
 
@@ -115,7 +115,8 @@ var strWantRelations = []string{
 
 // ── РЕЗУЛЬТАТ ────────────────────────────────────────────────────────────────
 
-// askResult — один вопрос, снятый приборами.
+// askResult — один сценарий, снятый приборами. У List поля p50/p99 хранят
+// длительность единственного вызова, а не квантили выборки.
 type askResult struct {
 	mode    scalegrid.AskMode
 	verdict string
@@ -132,9 +133,16 @@ type askResult struct {
 	sweeps  int
 	listed  int
 	scanned int
+	runs    strRuns
 }
 
-// strPointResult — строка отчёта: точка и три её вопроса.
+// strRuns — фактически исполненные вызовы и наблюдения одного сценария.
+// SQL-обращения calls и повторы EXPLAIN считаются отдельно от методов продукта.
+type strRuns struct {
+	ask, list, initial, warm, sampled, explains int64
+}
+
+// strPointResult — точка и три сценария Ask либо один сценарий List у Pg.
 type strPointResult struct {
 	point  scalegrid.StrengthPoint
 	asks   []askResult
@@ -646,13 +654,15 @@ func measureAsk(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictCa
 	before := tuplesRead(t, ctx, tx)
 	capture.reset()
 	verdict, _, err := relverdict.Ask(ctx, tx, q)
+	res.calls = int64(capture.count())
 	after := tuplesRead(t, ctx, tx)
 	if err != nil {
 		t.Fatalf("вопрос %s в точке %s: %v", mode, p, err)
 	}
 	res.verdict = verdict.String()
 	res.tuples = after - before
-	res.calls = int64(capture.count())
+	res.runs.ask++
+	res.runs.initial++
 
 	axis, err := relverdict.LabelAxisForTest(strCatalogType, strModelType)
 	if err != nil {
@@ -671,6 +681,7 @@ func measureAsk(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictCa
 		"EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) "+stmt.sql, stmt.args...).Scan(&raw); err != nil {
 		t.Fatalf("снятие плана в точке %s (вопрос %s): %v", p, mode, err)
 	}
+	res.runs.explains++
 	m, err := planrows.Extract(raw, strWantRelations)
 	if err != nil {
 		t.Fatalf("прибор отказал в точке %s (вопрос %s): %v", p, mode, err)
@@ -687,7 +698,11 @@ func measureAsk(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictCa
 		}
 		if i > 0 {
 			durs = append(durs, time.Since(t0))
+			res.runs.sampled++
+		} else {
+			res.runs.warm++
 		}
+		res.runs.ask++
 	}
 	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
 	res.p50, res.p99 = quantile(durs, 0.50), quantile(durs, 0.99)
@@ -735,12 +750,14 @@ func measureList(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictC
 		Subject: strSubject, ObjectType: strModelType, Relation: strRelation, Limit: p.Pg,
 	})
 	elapsed := time.Since(t0)
+	res.calls = int64(capture.count())
 	after := tuplesRead(t, ctx, tx)
 	if err != nil {
 		t.Fatalf("перечисление в точке %s: %v", p, err)
 	}
 	res.tuples = after - before
-	res.calls = int64(capture.count())
+	res.runs.list++
+	res.runs.sampled++
 	res.listed = len(ids)
 	res.p50, res.p99 = elapsed, elapsed
 	res.verdict = fmt.Sprintf("отдано %d", len(ids))
@@ -758,6 +775,7 @@ func measureList(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictC
 		"EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) "+sweeps[0].sql, sweeps[0].args...).Scan(&raw); err != nil {
 		t.Fatalf("снятие плана перечисления в точке %s: %v", p, err)
 	}
+	res.runs.explains++
 	m, err := planrows.Extract(raw, strWantRelations)
 	if err != nil {
 		t.Fatalf("прибор отказал на перечислении в точке %s: %v", p, err)
@@ -769,7 +787,7 @@ func measureList(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictC
 	return res
 }
 
-// measureStrengthPoint — точка целиком: три вопроса на одном посеве плюс перепись.
+// measureStrengthPoint — три сценария Ask либо один List плюс перепись посева.
 func measureStrengthPoint(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictCapture,
 	f *strFixture, p scalegrid.StrengthPoint) strPointResult {
 	t.Helper()
@@ -793,7 +811,11 @@ func measureStrengthPoint(t *testing.T, ctx context.Context, tx pgx.Tx, capture 
 	if err != nil {
 		t.Fatalf("перепись в точке %s: %v", p, err)
 	}
-	census.VerdictsAsked = int64(len(res.asks) * strRepeats)
+	// Историческое общее имя поля сохраняется вместе с предметом отпечатка.
+	// Здесь считаются вызовы метода, а Ask/List подписываются renderer по оси.
+	for _, a := range res.asks {
+		census.VerdictsAsked += a.runs.ask + a.runs.list
+	}
 	res.census = census
 	if err := census.Verify(p); err != nil {
 		t.Fatalf("%v", err)
@@ -819,10 +841,14 @@ func runStrengthAxis(t *testing.T, ctx context.Context, axis []scalegrid.Strengt
 		r.seedIn = seedFor
 		var parts []string
 		for _, a := range r.asks {
+			timing := fmt.Sprintf("p50 %s", a.p50.Round(time.Microsecond))
+			if p.Axis == scalegrid.AxisPg {
+				timing = fmt.Sprintf("время вызова %s", a.p50.Round(time.Microsecond))
+			}
 			parts = append(parts, fmt.Sprintf("%s: строк %d, отброш. %d, тронуто %d, сканов %d, "+
-				"обращ. %d, вердикт %s, p50 %s",
+				"обращ. %d, вердикт %s, %s",
 				a.mode, a.rows, a.removed, a.touched, a.loops, a.calls, a.verdict,
-				a.p50.Round(time.Microsecond)))
+				timing))
 		}
 		t.Logf("точка %s: посев %s\n    %s", p, seedFor.Round(time.Millisecond),
 			strings.Join(parts, "\n    "))
@@ -877,7 +903,7 @@ func writeStrengthReport(t *testing.T, prov scalegrid.Provenance, grid [][]scale
 	results [][]strPointResult, wall time.Duration, final bool) {
 	t.Helper()
 	title := "R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляционный вердикт)\n" +
-		"Сетка пяти новых осей; КАЖДАЯ точка снята ТРЕМЯ вопросами на одном посеве."
+		"Сетка: шесть осей; Ask: три сценария на точку, Pg: один List на точку."
 	if !final {
 		title += "\nПРОМЕЖУТОЧНЫЙ СРЕЗ: прогон не окончен, оси ниже ещё не сняты."
 	}
@@ -929,8 +955,11 @@ func renderStrengthReport(grid [][]scalegrid.StrengthPoint, results [][]strPoint
 	w("               индексу, не нашедшее строки, даёт ноль и в «строк», и в «отброш.»,\n")
 	w("               и без этой колонки сделанная работа была бы невидима\n")
 	w("  сверочная  — pg_stat_xact_all_tables (seq_tup_read + idx_tup_fetch)\n")
-	w("  обращ.     — круговых обращений к БД на один вопрос, трассировщиком pgx\n")
-	w("  p50/p99    — часы; нулевой повтор прогревочный и в выборку не входит\n")
+	w("  обращ.     — SQL-обращения начального вызова продукта, трассировщиком pgx;\n")
+	w("               собственные запросы счётчика, EXPLAIN и повторы сюда не входят\n")
+	w("  Ask: p50/p99 по %d измерениям времени; один прогрев на сценарий в выборку не входит.\n", strRepeats-1)
+	w("       Начальный вызов для строк/обращений выполнен отдельно от этого цикла.\n")
+	w("  List: время одного вызова, без отдельного прогрева и без выборки квантилей.\n")
 
 	for ai, axis := range results {
 		if len(axis) == 0 {
@@ -946,20 +975,50 @@ func renderStrengthReport(grid [][]scalegrid.StrengthPoint, results [][]strPoint
 		}
 
 		w("\n  ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой величине порознь, счётом по факту):\n")
+		if axis[0].point.Axis == scalegrid.AxisPg {
+			w("  единица переписи: вызовы List (историческое поле «вопросов задано»).\n")
+		} else {
+			w("  единица переписи: вызовы Ask (историческое поле «вопросов задано»).\n")
+		}
 		w("%s", axis[len(axis)-1].census.String())
 		_ = ai
 	}
 
 	w("\n\nОБЪЁМ ОСМОТРЕННОГО\n")
-	points, asks := 0, 0
+	points, askScenarios, listScenarios := 0, 0, 0
+	var total strRuns
+	var askSamples, listSamples int64
 	for _, axis := range results {
 		points += len(axis)
 		for _, r := range axis {
-			asks += len(r.asks)
+			for _, a := range r.asks {
+				if r.point.Axis == scalegrid.AxisPg {
+					listScenarios++
+					listSamples += a.runs.sampled
+				} else {
+					askScenarios++
+					askSamples += a.runs.sampled
+				}
+				total.ask += a.runs.ask
+				total.list += a.runs.list
+				total.initial += a.runs.initial
+				total.warm += a.runs.warm
+				total.explains += a.runs.explains
+			}
 		}
 	}
-	w("  осей исполнено %d из %d, точек %d, вопросов задано %d (по %d повторов на вопрос),\n",
-		len(results), len(grid), points, asks, strRepeats)
+	w("  осей исполнено %d из %d, точек %d\n", len(results), len(grid), points)
+	w("  сценариев Ask %d\n", askScenarios)
+	w("  вызовов Ask %d\n", total.ask)
+	w("  начальных Ask %d\n", total.initial)
+	w("  прогревочных Ask %d\n", total.warm)
+	w("  измерений времени Ask %d\n", askSamples)
+	w("  сценариев List %d\n", listScenarios)
+	w("  вызовов List %d\n", total.list)
+	w("  измерений времени List %d\n", listSamples)
+	w("  EXPLAIN исполнено %d\n", total.explains)
+	w("  Вызовы методов и повторное исполнение в EXPLAIN — разные единицы;\n")
+	w("  количество вызовов не означает столько же проверенных исходов доступа.\n")
 	w("  настенное время %s\n", wall.Round(time.Second))
 	if !final {
 		w("\n  ПРОГОН НЕ ОКОНЧЕН: оси ниже исполненных не сняты. Это ТРЕТИЙ исход по ним,\n")
@@ -1018,12 +1077,19 @@ func renderVerdictAxis(b *strings.Builder, axis []strPointResult) {
 			r.point.Value(), al.touched, dn.touched, dn.touched-al.touched,
 			ratioText(dn.touched, al.touched))
 	}
-	w("\n  КОНТРОЛЬ ДЕШЁВОГО ОТКАЗА: ddeny(глагол) обязан быть ДЕШЕВЛЕ deny(правило).\n")
-	w("  Без него отчёт сказал бы «отказ дёшев» — и это была бы правда про фикстуру.\n")
+	w("\n  СРАВНЕНИЕ ОТКАЗОВ: измеренный touched, без предположения о дешевизне.\n")
 	w("  %-9s %14s %14s\n", "значение", "deny(глагол)", "deny(правило)")
 	for _, r := range axis {
+		verb, rule := r.ask(scalegrid.AskDenyVerb).touched, r.ask(scalegrid.AskDenyLabel).touched
 		w("  %-9d %14d %14d\n", r.point.Value(),
-			r.ask(scalegrid.AskDenyVerb).touched, r.ask(scalegrid.AskDenyLabel).touched)
+			verb, rule)
+		comparison := "равен"
+		if verb < rule {
+			comparison = "дешевле"
+		} else if verb > rule {
+			comparison = "дороже"
+		}
+		w("    deny(глагол) %s deny(правило) по touched.\n", comparison)
 	}
 	w("\n  план по точкам (отношение двух приборов читается ТОЛЬКО внутри одного плана):\n")
 	for _, r := range axis {
@@ -1037,6 +1103,8 @@ func renderListAxis(b *strings.Builder, axis []strPointResult) {
 	w("\n  ЗАХОД — НЕ ВЫЗОВ. `List` повторяет заход, пока страница не наполнится ЛИБО\n")
 	w("  кандидаты типа не кончатся. При доле доступных 0 %% страница не наполняется\n")
 	w("  никогда, и ОДИН вызов просматривает ВЕСЬ тип. Колонка «заходов» — несущая.\n\n")
+	w("  Доля доступных относится к bulk-объектам. Отдельный фиксированный allow\n")
+	w("  остаётся доступным и при bulk-доле ноль: это не полный отказ для типа.\n\n")
 	w("  %-7s %-9s %8s %8s %10s %9s %9s %10s %12s\n",
 		"стр.", "доступно", "заходов", "отдано", "осмотрено<=", "строк*", "тронуто*", "сверочная", "время вызова")
 	for _, r := range axis {
@@ -1054,7 +1122,10 @@ func renderListAxis(b *strings.Builder, axis []strPointResult) {
 			a.p50.Round(time.Millisecond))
 	}
 	w("\n  «строк*» и «тронуто*» сняты с ПЕРВОГО захода: суммировать планы разных заходов\n")
-	w("  нельзя — это разные исполнения. Стоимость ВЫЗОВА читается по «заходов» × «строк*».\n")
+	w("  без их снятия нельзя. При нескольких заходах суммарные rows/touched вызова не измерены.\n")
+	w("  Произведение числа заходов на первый план не устанавливает эту сумму.\n")
+	w("  Для всего вызова сняты число заходов, сверочная и время; при одном заходе\n")
+	w("  первый план представляет единственный захваченный запрос перечисления.\n")
 	w("  Колонка «осмотрено<=» — ВЕРХНЯЯ ОЦЕНКА (заходов × страница): последний заход\n")
 	w("  бывает неполон, а числа осмотренных кандидатов `List` наружу не отдаёт вовсе.\n")
 	w("  Точка 5000 помечена «*» и как СВЕРХ КОНТРАКТА: у `List` верхнего предела нет\n")
