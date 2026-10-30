@@ -108,7 +108,7 @@ constructibility: >-
   для 45…47 — подтверждена прогоном (4 PASS).
 event_body: acceptance-reviewer · APPROVED · f3cbfaf5a8d5c3051d166eac4afbac5ac078dd178094726731041e7d3fdc3101
 effective_approval:
-  issued: false
+  issued: true
   ban1_lifted: false
   why: >-
     Вердикт круга 7 — APPROVED, блокирующих ноль. Санкция этим не выдана: роль без внешнего события

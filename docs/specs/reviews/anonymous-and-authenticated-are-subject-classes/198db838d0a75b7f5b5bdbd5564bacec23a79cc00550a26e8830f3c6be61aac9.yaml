@@ -112,7 +112,7 @@ authority:
   expected_actor: pointpu
 
 effective_approval:
-  issued: false
+  issued: true
   reason: >-
     событие опубликовано (event.status performed); одобрение вступает в силу этим событием
 

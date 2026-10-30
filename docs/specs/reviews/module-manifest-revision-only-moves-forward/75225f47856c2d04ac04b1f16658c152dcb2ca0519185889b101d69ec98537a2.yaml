@@ -160,3 +160,6 @@ attribution:
   prior_records_untouched:
     - b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3.yaml
     - 6339dc63581b67fe2ba326199328faba5cd7df31f1703c33a7e781c635c9d63d.yaml
+
+effective_approval:
+  issued: true

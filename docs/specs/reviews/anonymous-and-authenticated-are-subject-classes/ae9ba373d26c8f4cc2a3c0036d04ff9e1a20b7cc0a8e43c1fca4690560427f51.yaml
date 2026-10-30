@@ -113,7 +113,7 @@ authority:
   expected_actor: pointpu
 
 effective_approval:
-  issued: false
+  issued: true
   ban1_lifted: false
   reason: одобрение вступает в силу внешним событием; до публикации — not_performed
 

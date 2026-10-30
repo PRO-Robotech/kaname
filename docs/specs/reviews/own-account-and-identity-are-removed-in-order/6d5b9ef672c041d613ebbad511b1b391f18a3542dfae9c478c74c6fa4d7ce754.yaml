@@ -122,6 +122,7 @@ consistency_with_approved:
   - subject-cutoff-writes-both-records-under-one-lock.md — оговорка окна теперь та же (KN-SCL-18); расхождения нет
 
 effective_approval:
+  issued: true
   publication_pending:
     required_for_sanction: true
     expected_actor: pointpu

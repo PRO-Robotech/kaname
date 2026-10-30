@@ -93,6 +93,7 @@ route_signs:
   security_surface: yes
 
 effective_approval:
+  issued: true
   publication_pending:
     required_for_sanction: true
     expected_actor: pointpu

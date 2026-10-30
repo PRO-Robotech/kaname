@@ -137,7 +137,7 @@ authority:
   expected_actor: pointpu
 
 effective_approval:
-  issued: false
+  issued: true
   reason: >-
     вердикт APPROVED записан; действующим одобрение становится внешним событием, которое
     публикует курьер (git-operator) и тем же заходом приводит блок event к факту

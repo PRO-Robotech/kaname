@@ -112,3 +112,6 @@ route_signs:
   ui: false
   new_domain: false
   security_surface: true
+
+effective_approval:
+  issued: true

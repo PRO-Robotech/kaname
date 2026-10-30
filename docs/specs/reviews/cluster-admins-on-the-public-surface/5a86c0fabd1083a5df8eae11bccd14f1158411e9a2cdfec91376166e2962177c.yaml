@@ -84,3 +84,6 @@ event:
   subject_revision_commit: "f8f53e63a7bbea068cc3b69649fd59b78457bd50"
   verdict: "APPROVED"
   publication_mode: scripts/rituals/approval-event.sh
+
+effective_approval:
+  issued: true

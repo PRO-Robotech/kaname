@@ -50,6 +50,7 @@ important:
     note: Замечание круга 2 о User-Agent у http.Client харнесса остаётся в силе (см. записи ee608e2e и 3c1eea51).
 
 effective_approval:
+  issued: true
   publication_pending:
     required_for_sanction: true
     expected_actor: pointpu

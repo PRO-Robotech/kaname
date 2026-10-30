@@ -27,7 +27,7 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-10-05'
 
 effective_approval:
-  issued: false
+  issued: true
   ban1_lifted: false
   publication_pending:
     required_for_sanction: true
