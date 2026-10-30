@@ -3,26 +3,28 @@
 
 package seed
 
-// verify_gate_relation_test.go — Design-B (flat-authz verb-bearing complete)
-// acceptance VBC-19/VBC-20 (verify-gate relation-satisfies-action, F-11/F-12).
+// verify_gate_relation_test.go — приёмка Design-B (плоская модель прав, полная по
+// глаголам) VBC-19/VBC-20, F-11/F-12: страж сверки «отношение удовлетворяет
+// действию».
 //
-// The pre-Design-B verify-gate only proved "materialization-happened" (the ledger
-// is non-empty) — the blind spot that let the Design-A class-of-bug through
-// (a tuple was materialized, but the relation it resolved did NOT satisfy the
-// enforcement-relation the catalog gates on). The extended gate runs, for every
-// active binding's required-relation check, a REAL Check(subject,
-// required_relation, object) and gates the cutover ONLY when 100% are ALLOW.
+// Страж сверки до Design-B доказывал лишь «материализация состоялась» (ведомость
+// непуста) — слепая зона, через которую прошёл класс дефекта Design-A: кортеж
+// материализован, но отношение, к которому он сводится, НЕ удовлетворяло
+// отношению исполнения, по которому судит каталог. Расширенный страж для каждой
+// проверки требуемого отношения живой привязки выполняет НАСТОЯЩИЙ
+// Check(subject, required_relation, object) и пропускает переключение ТОЛЬКО
+// когда разрешены все 100 %.
 //
-// This unit test drives the gate through a fake RelationChecker + store. The proof
-// against a real store is the relational form's own integration suite
-// (repo/kaname/pg/relverdict, run against Postgres): stage S6 removed the external
-// engine, so "a real store" means this service's own database, and naming the
-// engine here would send the next reader looking for a proof that no longer exists
-// under that name.
+// Эта unit-проба ведёт стража через поддельные RelationChecker и хранилище.
+// Доказательство на настоящем хранилище — собственный интеграционный набор
+// реляционной формы (repo/kaname/pg/relverdict, против Postgres): этап S6 снял
+// внешний движок, так что «настоящее хранилище» — собственная база этой службы, а
+// имя движка здесь отправило бы следующего читателя искать доказательство,
+// которого под этим именем больше нет.
 //
-// The trailing "RED until VerifyGate.VerifyRelationSatisfiesAction exists" is
-// dropped: it exists (seed/verify_gate.go), and a note announcing a red that is
-// green states nothing.
+// Прежний хвост «красное, пока нет VerifyGate.VerifyRelationSatisfiesAction»
+// снят: метод есть (seed/verify_gate.go), а пометка, объявляющая красным
+// зелёное, не утверждает ничего.
 
 import (
 	"context"
@@ -34,8 +36,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// relCheckStore — a VerifyStore double exposing ONLY the relation-check list; all
-// other VerifyStore methods panic (not exercised on this path).
+// relCheckStore — дублёр VerifyStore, отдающий ТОЛЬКО перечень проверок отношения;
+// прочие методы VerifyStore паникуют (на этом пути не исполняются).
 type relCheckStore struct {
 	stubVerifyStore
 	checks []BindingRelationCheck
@@ -46,10 +48,10 @@ func (s relCheckStore) ListActiveBindingRelationChecks(context.Context) ([]Bindi
 	return s.checks, s.err
 }
 
-// fakeRelChecker — records (subject, relation, object) and returns a programmed
-// verdict per object.
+// fakeRelChecker — считает вызовы Check и возвращает заданный вердикт по
+// объекту.
 type fakeRelChecker struct {
-	allow map[string]bool // object → allowed
+	allow map[string]bool // объект → разрешён
 	calls int
 }
 
@@ -72,7 +74,7 @@ func TestVerifyGate_VBC19_RelationSatisfiesAction_AllAllow(t *testing.T) {
 		"vpc_network:vpcn_y": true,
 	}}
 
-	gate := NewVerifyGate(panicEngine{}, store, nil).WithRelationChecker(chk)
+	gate := NewVerifyGate(store, nil).WithRelationChecker(chk)
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 	assert.True(t, report.NoAccessLoss,
@@ -83,18 +85,19 @@ func TestVerifyGate_VBC19_RelationSatisfiesAction_AllAllow(t *testing.T) {
 }
 
 func TestVerifyGate_VBC20_CutoverBlockedUntilVGetBackfilled(t *testing.T) {
-	// One active binding holds only a historical tier-tuple, so Check(v_get) DENIES
-	// — the gate must FAIL (cutover blocked) until the reconciler backfills v_get.
+	// Одна живая привязка держит лишь исторический кортеж яруса, поэтому
+	// Check(v_get) ОТКАЗЫВАЕТ — страж обязан ПАДАТЬ (переключение закрыто), пока
+	// сверщик не дозаполнит v_get.
 	store := relCheckStore{checks: []BindingRelationCheck{
 		{BindingID: "acb_ok", Subject: "user:usr_a", Relation: "v_get", Object: "iam_user:usr_x"},
 		{BindingID: "acb_bad", Subject: "user:usr_b", Relation: "v_get", Object: "iam_role:rol_y"},
 	}}
 	chk := &fakeRelChecker{allow: map[string]bool{
 		"iam_user:usr_x": true,
-		// iam_role:rol_y absent → DENY (tier-only historical ledger, no v_get).
+		// iam_role:rol_y нет → ОТКАЗ (историческая ведомость только ярусов, v_get нет).
 	}}
 
-	gate := NewVerifyGate(panicEngine{}, store, nil).WithRelationChecker(chk)
+	gate := NewVerifyGate(store, nil).WithRelationChecker(chk)
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 	assert.False(t, report.NoAccessLoss,
@@ -104,10 +107,11 @@ func TestVerifyGate_VBC20_CutoverBlockedUntilVGetBackfilled(t *testing.T) {
 }
 
 func TestVerifyGate_VBC19_NilChecker_SkipNonFatal(t *testing.T) {
-	// An unwired RelationChecker (nil) makes the relation-satisfies gate a non-fatal
-	// skip (ran=false) — the boot must not crash when the FGA checker is degraded.
+	// Неподключённый RelationChecker (nil) делает стража «отношение удовлетворяет»
+	// нефатальным пропуском (ran=false) — старт не обязан падать, когда
+	// проверяющий отношения недоступен.
 	store := relCheckStore{}
-	gate := NewVerifyGate(panicEngine{}, store, nil) // no WithRelationChecker
+	gate := NewVerifyGate(store, nil) // без WithRelationChecker
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 	assert.True(t, report.NoAccessLoss, "nil checker → non-fatal skip (no assertion made)")

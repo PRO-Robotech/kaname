@@ -4,14 +4,15 @@
 package pg_test
 
 // access_binding_revoke_integration_test.go — TDD integration-тесты для
-// redesign-2026 F10 (AccessBinding.:revoke = soft, Delete = hard; IAM-1-28/29).
+// redesign-2026 F10 (`AccessBinding.:revoke` — мягкий отзыв, `Delete` — жёсткое
+// удаление; IAM-1-28/29).
 //
 // Покрытие (testcontainers Postgres 16, реальные миграции + partial UNIQUE):
-//   - TestAB_IAM_1_28_RevokeGuarded_SoftRevoke — ACTIVE→REVOKED CAS; row RETAINED
-//     (Get всё ещё возвращает строку, НЕ NotFound), revoked_at/revoked_by set
-//     (audit-retention) — контраст с Delete=hard (Get→NotFound).
-//   - TestAB_IAM_1_28_RevokeGuarded_RefusesProtected — deletion_protection=true →
-//     FAILED_PRECONDITION (atomic CAS `WHERE …AND deletion_protection=false`,
+//   - TestAB_IAM_1_28_RevokeGuarded_SoftRevoke — CAS ACTIVE→REVOKED; строка ОСТАЁТСЯ
+//     (Get всё ещё возвращает строку, НЕ NotFound), revoked_at/revoked_by проставлены
+//     (хранение для аудита) — в отличие от жёсткого Delete (Get→NotFound).
+//   - TestAB_IAM_1_28_RevokeGuarded_RefusesProtected — при deletion_protection=true
+//     отказ FAILED_PRECONDITION (атомарный CAS `WHERE …AND deletion_protection=false`,
 //     owner-binding не отзывается случайно, паритет с Delete).
 //   - TestAB_IAM_1_28_RevokeGuarded_NotFound — отсутствующий binding → NotFound.
 //   - TestAB_IAM_1_28_RevokeGuarded_TerminalRevoked — повторный revoke уже-REVOKED
@@ -21,11 +22,16 @@ package pg_test
 //     scope) при ACTIVE → ровно 1 winner, остальные ALREADY_EXISTS; после :revoke
 //     winner'а → новый идентичный Create проходит как НОВАЯ ACTIVE-строка (revoked
 //     строка освобождает slot partial UNIQUE `WHERE revoked_at IS NULL`).
-//   - TestAB_IAM_1_28_RevokeGuarded_ConcurrentCAS — N goroutine RevokeGuarded
+//   - TestAB_IAM_1_28_RevokeGuarded_ConcurrentCAS — N горутин зовут RevokeGuarded
 //     ОДНОГО ACTIVE binding → ровно один success, остальные FAILED_PRECONDITION
 //     (row-lock сериализует; проигравшие видят строку уже REVOKED). Под -race.
 //
-// Запуск: TESTCONTAINERS_RYUK_DISABLED=true go test ./internal/repo/kaname/pg/... -race
+// Запуск: `go test ./internal/repo/kaname/pg/... -race`. Уборщик контейнеров
+// testcontainers (ryuk) НЕ выключается: `Terminate` исполняется лишь при штатном
+// завершении, а обрыв по `-timeout`, сигнал или падение процесса оставили бы Postgres
+// жить без владельца. Выключение уборщика законно только в конвейере на эфемерном
+// исполнителе (`.github/workflows/ci.yml`, шаг «контейнерные пробы»), который
+// исчезает целиком вместе с поднятым.
 
 import (
 	"context"
@@ -45,8 +51,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
-// insertActiveBinding is a small helper that Inserts+Commits one ACTIVE binding
-// with the given id and 5-tuple, mirroring the deletion_protection harness.
+// insertActiveBinding — помощник: вставляет и фиксирует одну ACTIVE-выдачу с данным
+// id и пятёркой полей, как обвязка проб deletion_protection.
 func insertActiveBinding(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	id domain.AccessBindingID, uid domain.UserID, accID string, protected bool) {
 	t.Helper()
@@ -77,7 +83,7 @@ func TestAB_IAM_1_28_RevokeGuarded_SoftRevoke(t *testing.T) {
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	insertActiveBinding(t, ctx, repo, id, uid, string(acc.ID), false)
 
-	// Soft-revoke.
+	// Мягкий отзыв.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	revoked, err := w.AccessBindingsW().RevokeGuarded(ctx, id, uid)
@@ -89,7 +95,7 @@ func TestAB_IAM_1_28_RevokeGuarded_SoftRevoke(t *testing.T) {
 	require.NotNil(t, revoked.RevokedByUserID, "revoked_by_user_id must be retained (audit)")
 	assert.Equal(t, uid, *revoked.RevokedByUserID)
 
-	// Row is RETAINED — Get still returns it (contrast with Delete=hard → NotFound).
+	// Строка ОСТАЁТСЯ — Get её возвращает (в отличие от жёсткого Delete → NotFound).
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	got, gerr := rd.AccessBindings().Get(ctx, id)
@@ -113,7 +119,7 @@ func TestAB_IAM_1_28_RevokeGuarded_RefusesProtected(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "iam1-28-prot")
 	acc := seedAccount(t, ctx, repo, "acc-iam1-28-prot", uid)
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	insertActiveBinding(t, ctx, repo, id, uid, string(acc.ID), true) // protected
+	insertActiveBinding(t, ctx, repo, id, uid, string(acc.ID), true) // защищена
 
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
@@ -123,7 +129,7 @@ func TestAB_IAM_1_28_RevokeGuarded_RefusesProtected(t *testing.T) {
 	assert.True(t, stderrors.Is(err, iamerr.ErrFailedPrecondition),
 		"RevokeGuarded on protected binding → FailedPrecondition, got %v", err)
 
-	// The row must survive the refused revoke (still ACTIVE).
+	// Строка обязана пережить отвергнутый отзыв (по-прежнему ACTIVE).
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	got, gerr := rd.AccessBindings().Get(ctx, id)
@@ -168,14 +174,14 @@ func TestAB_IAM_1_28_RevokeGuarded_TerminalRevoked(t *testing.T) {
 	id := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	insertActiveBinding(t, ctx, repo, id, uid, string(acc.ID), false)
 
-	// First revoke wins.
+	// Первый отзыв побеждает.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().RevokeGuarded(ctx, id, uid)
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	// Second revoke of the now-REVOKED (terminal) row → FailedPrecondition.
+	// Второй отзыв уже REVOKED (терминальной) строки → FailedPrecondition.
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	_, err = w2.AccessBindingsW().RevokeGuarded(ctx, id, uid)
@@ -185,11 +191,11 @@ func TestAB_IAM_1_28_RevokeGuarded_TerminalRevoked(t *testing.T) {
 		"re-revoke of REVOKED (terminal) → FailedPrecondition, got %v", err)
 }
 
-// TestAB_IAM_1_29_ReGrantAfterRevoke_Race — the emphasized concurrent-race on the
-// partial active-grant UNIQUE (data-integrity §5). N goroutines concurrently Insert
-// the SAME 5-tuple (distinct ids) → exactly ONE wins ACTIVE, the rest get
-// ALREADY_EXISTS. After :revoke of the winner, an identical re-grant Create is a NEW
-// ACTIVE row (the REVOKED row carries revoked_at, freeing the partial-UNIQUE slot).
+// TestAB_IAM_1_29_ReGrantAfterRevoke_Race — гонка на частичном UNIQUE действующих
+// выдач (data-integrity §5). N горутин разом вставляют ОДНУ И ТУ ЖЕ пятёрку (id
+// разные) → ровно ОДНА становится ACTIVE, остальные получают ALREADY_EXISTS. После
+// :revoke победителя такая же повторная выдача — НОВАЯ ACTIVE-строка (у REVOKED-строки
+// стоит revoked_at, и место частичного UNIQUE освобождается).
 func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test (needs Docker)")
@@ -205,7 +211,7 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-iam1-29-race", uid)
 	accID := string(acc.ID)
 
-	// ── Phase 1: concurrent identical Create → exactly one winner ──────────
+	// ── Фаза 1: конкурентные одинаковые Create → ровно один победитель ─────
 	const goroutines = 8
 	type res struct {
 		id  domain.AccessBindingID
@@ -259,14 +265,14 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 	assert.Equal(t, goroutines-1, already, "losers get ALREADY_EXISTS (partial UNIQUE)")
 	assert.Equal(t, 0, other, "no unexpected errors / panics")
 
-	// ── Phase 2: revoke the winner ────────────────────────────────────────
+	// ── Фаза 2: отзыв победителя ──────────────────────────────────────────
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	_, err = w.AccessBindingsW().RevokeGuarded(ctx, winner, uid)
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	// ── Phase 3: identical re-grant is now a NEW ACTIVE row ───────────────
+	// ── Фаза 3: такая же повторная выдача — теперь НОВАЯ ACTIVE-строка ────
 	regrantID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
@@ -280,10 +286,10 @@ func TestAB_IAM_1_29_ReGrantAfterRevoke_Race(t *testing.T) {
 	assert.Equal(t, domain.AccessBindingStatusActive, regranted.Status)
 }
 
-// TestAB_IAM_1_28_RevokeGuarded_ConcurrentCAS — N goroutines RevokeGuarded ONE
-// ACTIVE binding → exactly one success, the rest FailedPrecondition (the single
-// UPDATE … WHERE status='ACTIVE' row-lock serializes; losers see it already
-// REVOKED). Never two winners, never a panic. Runs under -race.
+// TestAB_IAM_1_28_RevokeGuarded_ConcurrentCAS — N горутин зовут RevokeGuarded на ОДНОЙ
+// ACTIVE-выдаче → ровно один успех, остальные FailedPrecondition (блокировка строки
+// одним оператором UPDATE … WHERE status='ACTIVE' сериализует; проигравшие видят её уже
+// REVOKED). Двух победителей не бывает, паники не бывает. Идёт под -race.
 func TestAB_IAM_1_28_RevokeGuarded_ConcurrentCAS(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test (needs Docker)")

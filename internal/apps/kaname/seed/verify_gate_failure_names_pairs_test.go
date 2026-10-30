@@ -60,7 +60,7 @@ func TestVerifyGateFailureNamesEveryPair(t *testing.T) {
 	chk := &fakeRelChecker{allow: map[string]bool{"iam_user:usr_x": true}}
 
 	logger, buf := captureLogger()
-	gate := NewVerifyGate(panicEngine{}, store, logger).WithRelationChecker(chk)
+	gate := NewVerifyGate(store, logger).WithRelationChecker(chk)
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 	require.False(t, report.NoAccessLoss)
@@ -104,7 +104,7 @@ func TestVerifyGateSuccessStaysQuiet(t *testing.T) {
 	chk := &fakeRelChecker{allow: map[string]bool{"iam_user:usr_x": true}}
 
 	logger, buf := captureLogger()
-	gate := NewVerifyGate(panicEngine{}, store, logger).WithRelationChecker(chk)
+	gate := NewVerifyGate(store, logger).WithRelationChecker(chk)
 	report, err := gate.VerifyRelationSatisfiesAction(context.Background())
 	require.NoError(t, err)
 	require.True(t, report.NoAccessLoss)
