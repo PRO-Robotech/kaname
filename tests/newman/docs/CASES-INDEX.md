@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 901
+Всего кейсов: 905
 
 ## Перепись по модулям
 
@@ -46,6 +46,7 @@
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
 | `cases/iam-flat-authz-vbc.py` | 2 |
 | `cases/iam-grant-delegation.py` | 5 |
+| `cases/iam-role-rights-stay-named.py` | 4 |
 | `cases/iam-group.py` | 33 |
 | `cases/iam-invite-grant-fga.py` | 4 |
 | `cases/iam-invite-resend.py` | 4 |
@@ -1359,3 +1360,12 @@
 - `IAM-OWNREST-NEG-PAGE-SIZE`
 - `IAM-OWNREST-NEG-FOREIGN-OPERATION`
 - `IAM-OWNREST-NEG-FOREIGN-MUTATION`
+
+## `cases/iam-role-rights-stay-named.py` — 4 кейса
+
+- `IAM-ESC-E1`
+- `IAM-ESC-E2`
+- `IAM-ESC-E3`
+- `IAM-ESC-E4`
+
+ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакция 4.

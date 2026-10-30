@@ -238,7 +238,7 @@ MINTED_WAVE = (
     # права не держит by construction. Предъявитель ему не нужен — доступ судит
     # проба модели прав, — нужны адрес и строка, которую приглашение обязано найти.
     "ceremonyInviteeEmail", "ceremonyInviteeUserId",
-) + tuple(k for s in ADMISSION_SLOTS + LEAVE_SLOTS + ADMIN_SLOTS + (CAP_PLAIN_SLOT,)
+) + tuple(k for s in ADMISSION_SLOTS + LEAVE_SLOTS + ADMIN_SLOTS + (CAP_PLAIN_SLOT, "Esc")
           for k in slot_keys(s)) + MINTED_CAP
 # Чего волна НЕ пишет, хотя имя похоже: `jwtAccountAdminAStepUp`. Это слот ТОГО
 # ЖЕ машинного распорядителя, что `jwtAccountAdminA` (кейсы выпускают под одним и
@@ -913,6 +913,41 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     values["ceremonyNoBindingsUserId"] = nob
     say("  ok   второй человек — без выдач на арендаторах посева")
 
+    _, esc_session, esc_user = person("esc")
+    values["jwtHumanEsc"], _ = ceremony_bearer(stand, client, esc_session, esc_user, "1")
+    values["jwtHumanEscStepUp"], _ = ceremony_bearer(
+        stand, client, level2_session(lane, esc_session), esc_user, "2")
+    values["humanEscUserId"] = esc_user
+    # Registration creates a protected owner binding in the personal account.
+    # S2 requires an absolutely empty ListBySubject, not an account-A filter.
+    # Clear protection and revoke through the public API as that same owner;
+    # Account.ownerUserId remains the product's independent ownership record.
+    code, bindings = http.json_ask(
+        f"{stand.own}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={esc_user}&pageSize=1000",
+        token=boot)
+    if code != 200 or bindings.get("nextPageToken"):
+        raise Finding("Esc initial bindings could not be completely enumerated")
+    for binding in bindings.get("accessBindings", []):
+        bid = binding.get("id") or ""
+        if not bid:
+            raise Finding("Esc initial binding has no id")
+        if binding.get("deletionProtection"):
+            code, op = http.json_ask(
+                f"{stand.own}/iam/v1/accessBindings/{bid}", method="PATCH",
+                token=values["jwtHumanEscStepUp"],
+                body={"updateMask": "deletionProtection", "deletionProtection": False})
+            if code != 200 or not op.get("id"):
+                raise Finding("Esc owner binding protection could not be cleared by its owner")
+            own_seed.await_operation(http, stand.own, values["jwtHumanEscStepUp"], op["id"])
+        own_seed.post_operation(http, stand.own, values["jwtHumanEscStepUp"],
+                                f"/iam/v1/accessBindings/{bid}:revoke", {},
+                                "Esc owner revokes its initial binding")
+    code, bindings = http.json_ask(
+        f"{stand.own}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={esc_user}&pageSize=1000",
+        token=boot)
+    if code != 200 or bindings.get("accessBindings") or bindings.get("nextPageToken"):
+        raise Finding("Esc ListBySubject is not empty after public revocation")
+
     values["ceremonyInviteeEmail"], _, values["ceremonyInviteeUserId"] = person("invitee")
     say("  ok   человек для приглашения — адрес подтверждён, выдач нет")
 
@@ -1131,6 +1166,7 @@ class _WaveWorld:
         self.codes: dict[str, tuple[str, str]] = {}
         self.admins: set[str] = set()
         self.ops: dict[str, dict] = {}
+        self.esc_bindings: dict[str, dict] = {}
         self.base = _FakeStand()
         self.issuance, self.own = self.base.issuance, self.base.own
 
@@ -1236,6 +1272,28 @@ class _WaveWorld:
 
     # фронт под бутстрапом (перечни для разрешения арендатора)
     def json_ask(self, url, **kw):
+        if "/iam/v1/accessBindings:listBySubject?" in url:
+            uid = url.split("subjectId=", 1)[1].split("&", 1)[0]
+            if uid not in self.esc_bindings:
+                self.esc_bindings[uid] = {"id": "acb" + uid[3:], "deletionProtection": True}
+            binding = self.esc_bindings[uid]
+            return 200, {"accessBindings": [binding] if binding else []}
+        if "/iam/v1/accessBindings/" in url:
+            if self.inj.get("esc_refused"):
+                return 403, {"code": 7}
+            uid = "usr" + url.split("/accessBindings/acb", 1)[1].split(":", 1)[0]
+            if kw.get("method") == "PATCH":
+                self.esc_bindings[uid]["deletionProtection"] = False
+            elif url.endswith(":revoke"):
+                if self.esc_bindings[uid].get("deletionProtection"):
+                    return 400, {"code": 9}
+                if not self.inj.get("esc_revoke_stale"):
+                    self.esc_bindings[uid] = {}
+            else:
+                return 404, {}
+            op_id = f"iop{len(self.ops)}"
+            self.ops[op_id] = {"id": "esc-fixture-operation"}
+            return 200, {"id": op_id}
         if kw.get("method") == "POST" and url.endswith("/iam/v1/users:invite"):
             body = kw["body"]
             uid = self._uid(len(self.people) + 1)
@@ -1376,6 +1434,11 @@ def self_test() -> int:
         w = _WaveWorld(**inj)
         return _outcome(lambda: seed_wave(w, w, w, _Mail(w), "t", "stand.invalid",
                                           sleep=w.sleep)), w
+
+    for injection in ("esc_refused", "esc_revoke_stale"):
+        esc_result, _ = wave(**{injection: True})
+        _c("Esc owner API setup failure is a finding: " + injection,
+           esc_result[0] == "finding", str(esc_result))
 
     # Предпосылка подставного мира: Р9 в нём ЕСТЬ и различает обе стороны
     # интервала. Без неё проверки ниже зеленели бы и на мире, где второго письма
