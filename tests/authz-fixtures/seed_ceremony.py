@@ -983,7 +983,7 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     # Registration creates a protected owner binding in the personal account.
     # S2 requires an absolutely empty ListBySubject, not an account-A filter.
     # Prove soft revocation, then hard-delete these temporary fixture rows.
-    # Account.ownerUserId remains independent; rights loss is tested on fresh SA.
+    # Account.ownerUserId is a persisted ownership field, not an effective grant.
     code, bindings = http.json_ask(
         f"{stand.own}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={esc_user}&pageSize=1000",
         token=boot)
@@ -994,31 +994,64 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     if len(accounts) != 1 or not all(binding.get("subjectId") == esc_user for binding in initial):
         raise Finding("Esc initial bindings do not identify its personal account")
     account = accounts.pop()
+    owner_bindings = [binding for binding in initial if binding.get("scopeType") == "iam.account"]
+    project_bindings = [binding for binding in initial if binding.get("scopeType") == "iam.project"]
+    if len(owner_bindings) != 1 or len(project_bindings) + 1 != len(initial):
+        raise Finding("Esc initial binding scopes do not identify one owner binding and its projects")
+    # Explicit lifecycle order: project rights first, account owner last. List order
+    # is not authoritative; after owner Revoke H has no removal authority.
+    ordered = sorted(project_bindings, key=lambda binding: binding.get("id", "")) + owner_bindings
+    owner_bid = owner_bindings[0].get("id")
+    human = values["jwtHumanEscStepUp"]
+
     def account_owner():
         code, current = http.json_ask(f"{stand.own}/iam/v1/accounts/{account}", token=boot)
         if code != 200 or current.get("ownerUserId") != esc_user:
-            raise Finding("Esc independent Account.ownerUserId was not preserved")
+            raise Finding("Esc persisted Account.ownerUserId was not preserved")
+
+    def owner_rights(expected):
+        for kind, resource_id, relations in (
+                ("account", account, ("owner", "admin", "v_get", "v_update", "v_delete")),
+                ("iam_access_binding", owner_bid, ("v_get", "v_delete"))):
+            for relation in relations:
+                code, result = http.json_ask(stand.own + "/iam/v1/authorize:check",
+                    method="POST", token=boot, body={"subject": "user:" + esc_user,
+                        "resource": {"type": kind, "id": resource_id},
+                        "action": "iam.accounts.get" if kind == "account" else "iam.accessBindings.get",
+                        "requiredRelation": relation})
+                if code != 200 or result.get("allowed") is not expected:
+                    raise Finding("Esc owner binding effective right disagrees: " + kind + ":" + relation)
+        say("  ok   Esc owner binding: seven effective rights " + ("present" if expected else "absent"))
+
     account_owner()
+    owner_rights(True)
     prove_soft_revoke_rights(http, stand.own, boot, account, suffix)
-    for binding in initial:
+    # Clear every protection while H still owns the account; no mutation after
+    # its self-revocation may assume that ownerUserId grants owner authority.
+    for binding in ordered:
         bid = binding.get("id") or ""
         if not bid:
             raise Finding("Esc initial binding has no id")
         if binding.get("deletionProtection"):
             code, op = http.json_ask(
-                f"{stand.own}/iam/v1/accessBindings/{bid}", method="PATCH",
-                token=values["jwtHumanEscStepUp"],
+                f"{stand.own}/iam/v1/accessBindings/{bid}", method="PATCH", token=human,
                 body={"updateMask": "deletionProtection", "deletionProtection": False})
             if code != 200 or not op.get("id"):
                 raise Finding("Esc owner binding protection could not be cleared by its owner")
-            own_seed.await_operation(http, stand.own, values["jwtHumanEscStepUp"], op["id"])
-        revoked_binding(http, stand.own, values["jwtHumanEscStepUp"], bid)
-        delete_revoked_binding(http, stand.own, values["jwtHumanEscStepUp"], bid)
+            own_seed.await_operation(http, stand.own, human, op["id"])
+    for binding in ordered:
+        revoked_binding(http, stand.own, human, binding["id"])
+    # All seven checks happen after completed owner Revoke, before any initial
+    # binding hard deletion. The persisted owner field must survive rights loss.
+    owner_rights(False)
+    account_owner()
+    for binding in ordered:
+        delete_revoked_binding(http, stand.own, boot, binding["id"])
     account_owner()
     code, bindings = http.json_ask(
         f"{stand.own}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={esc_user}&pageSize=1000",
-        token=boot)
-    if code != 200 or bindings.get("accessBindings") or bindings.get("nextPageToken"):
+        token=human)
+    if code != 200 or bindings.get("accessBindings") != [] or bindings.get("nextPageToken"):
         raise Finding("Esc ListBySubject is not empty after public hard deletion")
 
     values["ceremonyInviteeEmail"], _, values["ceremonyInviteeUserId"] = person("invitee")
@@ -1354,13 +1387,20 @@ class _WaveWorld:
                 self.esc_bindings[bid] = {"id": bid, "subjectId": uid, "subjectType": "user",
                     "scopeType": "iam.account", "scopeId": "acc" + uid[3:],
                     "status": "ACTIVE", "deletionProtection": True}
+                self.esc_bindings[bid + "project"] = {"id": bid + "project", "subjectId": uid,
+                    "subjectType": "user", "scopeType": "iam.project", "scopeId": "prj1",
+                    "status": "ACTIVE", "deletionProtection": True}
             return 200, {"accessBindings": [dict(b) for b in self.esc_bindings.values() if b["subjectId"] == uid]}
         if url.endswith("/iam/v1/roles?pageSize=1000"):
             return 200, {"roles": [{"id": "rolaccountview", "name": "iam.account.view"}]}
         if url.endswith("/iam/v1/authorize:check"):
             body = kw["body"]
             subject = body["subject"].split(":", 1)[1]
-            allowed = any(b["subjectId"] == subject and b["scopeId"] == body["resource"]["id"]
+            resource = body["resource"]
+            resource_id = resource["id"]
+            if resource["type"] == "iam_access_binding":
+                resource_id = self.esc_bindings.get(resource_id, {}).get("scopeId")
+            allowed = any(b["subjectId"] == subject and b["scopeId"] == resource_id
                           and (b["status"] == "ACTIVE" or self.inj.get("esc_revoke_right_stale"))
                           for b in self.esc_bindings.values())
             if self.inj.get("esc_lawful_twin_denied") and any(b["status"] == "REVOKED" for b in self.esc_bindings.values()):
@@ -1381,6 +1421,12 @@ class _WaveWorld:
             if not binding:
                 return 403, {"code": 7}
             method = kw.get("method", "GET")
+            sub = token_claims(kw.get("token", "")).get("sub")
+            if sub in self.esc_subjects and method != "GET":
+                owner_active = any(b["subjectId"] == sub and b["scopeType"] == "iam.account"
+                                   and b["status"] == "ACTIVE" for b in self.esc_bindings.values())
+                if not owner_active:
+                    return 403, {"code": 7}
             if method == "GET":
                 return 200, dict(binding)
             if method == "PATCH":
