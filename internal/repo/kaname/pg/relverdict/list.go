@@ -328,7 +328,7 @@ SELECT c.object_id,
 // listQuerySQL — ГОТОВЫЙ запрос перечисления для выбранной оси кандидатов
 // (довод — у expandQuerySQL).
 func listQuerySQL(labelTable string, nesting bool) (string, error) {
-	sql, err := replaceOnce(listSQL, armPredicateMark,
+	sql, err := replaceOnce(listSQL,
 		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", nesting))
 	if err != nil {
 		return "", err

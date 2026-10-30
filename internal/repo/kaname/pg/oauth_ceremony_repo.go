@@ -817,9 +817,8 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 //
 // Разведёнными они были не только многословны, но и НЕВЕРНЫ в переписи: два
 // одновременных снятия сессий одного человека выбирали бы одни и те же живые
-// семейства и оба возвращали бы их числом, хотя отозвал каждое ровно один.
-// `RETURNING` отдаёт строку ТОМУ, чей оператор её изменил, и число, которое
-// уходит вызывающему, считает сделанное этим вызовом, а не увиденное им.
+// семейства, хотя отозвал каждое ровно один. `RETURNING` отдаёт строку ТОМУ,
+// чей оператор её изменил; вызывающему достаточно успешного завершения отзыва.
 //
 // # ИДЕМПОТЕНТНОСТЬ — УСЛОВИЕМ, А НЕ ПРОВЕРКОЙ
 //
@@ -827,12 +826,12 @@ func (r *OAuthCeremonyRepo) RevokeFamily(ctx context.Context, familyID string, r
 // IS NULL` стоит в том же операторе и делает второй отзыв пустым, а не вторым.
 func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 	sessionIDs []string, reason domain.FamilyRevocationReason,
-) (int, error) {
+) error {
 	if len(sessionIDs) == 0 {
-		return 0, nil
+		return nil
 	}
 	if err := reason.Validate(); err != nil {
-		return 0, err
+		return err
 	}
 	// КУРСОР ЗАКРЫВАЕТСЯ РУКАМИ, А НЕ `defer`, И ЭТО НЕ НЕБРЕЖНОСТЬ: следом на
 	// ТОЙ ЖЕ транзакции исполняются ещё операторы, а pgx не допускает работы с
@@ -848,30 +847,25 @@ func revokeFamiliesOfSessionsTx(ctx context.Context, tx pgx.Tx,
 		 WHERE session_id = ANY($1) AND revoked_at IS NULL
 		RETURNING id`, sessionIDs, string(reason))
 	if err != nil {
-		return 0, wrapPgErr(err, "TokenFamily", "")
+		return wrapPgErr(err, "TokenFamily", "")
 	}
-	var families []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return 0, wrapPgErr(err, "TokenFamily", "")
+			return wrapPgErr(err, "TokenFamily", "")
 		}
-		families = append(families, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, wrapPgErr(err, "TokenFamily", "")
-	}
-	if len(families) == 0 {
-		return 0, nil
+		return wrapPgErr(err, "TokenFamily", "")
 	}
 
 	// Выданное снял КАСКАД: здесь, как и в `RevokeFamily`, дописывающих
 	// операторов больше нет — основание принадлежит семейству, а не копии на
 	// ребёнке. Записи выпуска токенов доступа — тоже ребёнок семейства, и место
 	// предъявления судит по ним (kaname#319).
-	return len(families), nil
+	return nil
 }
 
 // ── Проверочное значение секрета интерактивного клиента ─────────────────────

@@ -938,7 +938,7 @@ func peopleLine(f *lvFile, e ast.Expr, text string, at int) int {
 
 // peopleFuncLabel — имя функции для координаты: `тип.метод` либо `функция`.
 func peopleFuncLabel(fd *ast.FuncDecl) string {
-	if recv, _ := receiverTypeName(fd); recv != "" {
+	if recv := receiverTypeName(fd); recv != "" {
 		return recv + "." + fd.Name.Name
 	}
 	return fd.Name.Name

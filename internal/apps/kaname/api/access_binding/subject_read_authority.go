@@ -291,8 +291,8 @@ func resolveSubjectHome(
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	resolved := func(accountID domain.AccountID) (subjectResolution, error) {
-		return subjectResolution{accountID: accountID, found: true}, nil
+	resolved := func(accountID domain.AccountID) subjectResolution {
+		return subjectResolution{accountID: accountID, found: true}
 	}
 	// classify splits "no such row" (deferred answer) from a real store failure.
 	classify := func(gerr error) (subjectResolution, error) {
@@ -308,13 +308,13 @@ func resolveSubjectHome(
 		if gerr != nil {
 			return classify(gerr)
 		}
-		return resolved(usr.AccountID)
+		return resolved(usr.AccountID), nil
 	case domain.SubjectTypeServiceAccount:
 		sa, gerr := rd.ServiceAccounts().Get(ctx, domain.ServiceAccountID(subjectID))
 		if gerr != nil {
 			return classify(gerr)
 		}
-		return resolved(sa.AccountID)
+		return resolved(sa.AccountID), nil
 	case domain.SubjectTypeGroup:
 		// A Group is Account-scoped (groups.account_id FK), so its home account is
 		// the gate scope — same policy as User / SA.
@@ -322,7 +322,7 @@ func resolveSubjectHome(
 		if gerr != nil {
 			return classify(gerr)
 		}
-		return resolved(grp.AccountID)
+		return resolved(grp.AccountID), nil
 	default:
 		// Unreachable — subject_type is whitelisted by the caller.
 		return subjectResolution{}, authzguard.PermissionDenied()
