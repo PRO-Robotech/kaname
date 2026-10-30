@@ -126,8 +126,12 @@ func newP2(t *testing.T) *p2 {
 	if err != nil {
 		t.Fatalf("фикстура П1: %v", err)
 	}
-	if _, err := modulecatalog.NewApplier(kanamepg.NewCatalogWriteRepo(pool)).ApplyAll(ctx, []*manifest.Manifest{m}); err != nil {
+	census, err := modulecatalog.NewApplier(kanamepg.NewCatalogWriteRepo(pool)).ApplyAll(ctx, []*manifest.Manifest{m})
+	if err != nil {
 		t.Fatalf("применение каталога П1: %v", err)
+	}
+	if len(census.NotApplied) != 0 {
+		t.Fatalf("применение каталога П1: неприменённые модули: %+v", census.NotApplied)
 	}
 	live, err := kanamepg.NewCatalogRepo(pool).ReadLiveCatalog(ctx)
 	if err != nil {

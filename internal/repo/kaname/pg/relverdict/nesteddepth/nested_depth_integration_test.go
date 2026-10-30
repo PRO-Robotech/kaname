@@ -77,8 +77,12 @@ func newP3(t *testing.T) *p3 {
 	if err != nil {
 		t.Fatalf("фикстура П3: %v", err)
 	}
-	if _, err := modulecatalog.NewApplier(kanamepg.NewCatalogWriteRepo(pool)).ApplyAll(ctx, []*manifest.Manifest{m}); err != nil {
+	census, err := modulecatalog.NewApplier(kanamepg.NewCatalogWriteRepo(pool)).ApplyAll(ctx, []*manifest.Manifest{m})
+	if err != nil {
 		t.Fatalf("применение каталога П3: %v", err)
+	}
+	if len(census.NotApplied) != 0 {
+		t.Fatalf("применение каталога П3: неприменённые модули: %+v", census.NotApplied)
 	}
 
 	// Арендная обвязка — ОДНОЙ транзакцией: владелец аккаунта — отложенный
