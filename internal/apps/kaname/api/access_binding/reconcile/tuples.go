@@ -90,15 +90,17 @@ func ruleObjectTuplesWithTypeVerbs(cat *catalog.Facts, policy domain.RulePolicy,
 	for _, verb := range granted {
 		add("v_" + verb)
 	}
-	// Back-compat tier tuple — carries domain-verb access + keeps tier-based Check
-	// call-sites working.
+	// Ярусный кортеж — носитель доступа доменного глагола, у которого отношения
+	// `v_*` нет по построению, и ответ вопросам, спрашивающим ярус.
 	//
-	// Условие у него есть, и прежняя редакция комментария его умалчивала: ярусный
-	// кортеж эмитится, только если тип ВООБЩЕ резолвится (иначе вызывающий получил
-	// ok=false выше и ни одного кортежа). Внутри же этой ветки — да, безусловно: он
-	// не зависит от набора глаголов типа и остаётся носителем доступа для доменного
-	// глагола, у которого отношения `v_*` нет по построению.
-	add(tier)
+	// Условий у него два. Тип обязан резолвиться (иначе вызывающий получил ok=false
+	// выше и ни одного кортежа). И правило обязано давать ярус: правило, все
+	// глаголы которого — удаление, яруса не даёт (domain.ResolveVerbsAndTier,
+	// kaname#1035), и тогда на объекте остаётся только `v_delete`. От набора
+	// глаголов типа ярусный кортеж не зависит.
+	if tier != "" {
+		add(tier)
+	}
 	return out, true
 }
 
@@ -201,8 +203,12 @@ func scopeSelfTuplesWithTypeVerbs(cat *catalog.Facts, subject, scopeType, scopeI
 			add("v_" + domain.NormalizeVerb(v))
 		}
 	}
-	// Back-compat tier tuple — the write-authz / no-access-loss anchor (account/project).
-	add(tier)
+	// Ярусный кортеж на объекте области — якорь права писать и сохранности доступа.
+	// Правило одного удаления яруса не даёт (kaname#1035): удалить область не
+	// значит распоряжаться ею, и якоря у такой выдачи нет — только `v_delete`.
+	if tier != "" {
+		add(tier)
+	}
 	return out, true
 }
 

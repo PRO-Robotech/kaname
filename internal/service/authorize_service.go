@@ -1255,7 +1255,7 @@ func (s *AuthorizeService) ListSubjects(ctx context.Context, req ListSubjectsReq
 	if req.PageSize > 1000 {
 		return nil, fmt.Errorf("Illegal argument page_size %d > 1000", req.PageSize)
 	}
-	relation := resolveActionToRelation(req.Action)
+	relation := listSubjectsRelation(s.catalogFacts(), req.Action, req.ResourceType)
 	if relation == "" {
 		return nil, fmt.Errorf("Illegal argument action %q", req.Action)
 	}
@@ -1317,11 +1317,32 @@ func (s *AuthorizeService) ExpandRelations(ctx context.Context, req ExpandReques
 	}, nil
 }
 
-// resolveActionToRelation — `<domain>.<resource>.<verb>` → FGA relation.
-// Convention from pkg/authz: relation is `<resource>_<verb>` for
-// verbs in {get,list,update,delete,create} mapped to {viewer,viewer,editor,
-// admin,editor}. For domain-specific actions we fall back to the verb
-// directly (`compute.instances.ssh` → `ssh`).
+// listSubjectsRelation — отношение, которым `ListSubjects` отвечает на «кто может
+// <действие> над объектом».
+//
+// Удаление спрашивается глаголом типа из каталога модуля — тем же
+// `moduleVerbRelation`, которым `Check` разрешает действие без отношения: глагол
+// удаления больше не выводит яруса (kaname#1035, Р1), и ярусный ответ на «кто
+// может удалить X» терял бы держателя одного удаления, которого `Check(delete)`
+// пропускает, — два ответа на один вопрос разошлись бы (ESC-06 а). Тип, не
+// объявивший удаления, ответа не получает: пустая строка, вызывающий отвечает
+// «вход не назван», как на неизвестный глагол.
+//
+// Прочие глаголы — по-прежнему ярусом (`resolveActionToRelation`): из них ярус
+// выводится, и держатель глагола держит и ярус.
+func listSubjectsRelation(facts *catalog.Facts, action, objectType string) string {
+	if cut := strings.LastIndexByte(action, '.'); cut >= 0 && domain.NormalizeVerb(action[cut+1:]) == "delete" {
+		return moduleVerbRelation(facts, action, objectType)
+	}
+	return resolveActionToRelation(action)
+}
+
+// resolveActionToRelation — `<domain>.<resource>.<verb>` → ярус модели:
+// get/list → viewer, create/update → editor; доменные действия — по таблице ниже
+// либо самим глаголом (`compute.instances.ssh` → `ssh`).
+//
+// Удаления здесь нет: его ярус не выводится (kaname#1035), и `ListSubjects`
+// спрашивает удаление глаголом типа (`listSubjectsRelation`).
 //
 // Читатель у него один — `ListSubjects`. Вопрос `Check` без отношения ярусом
 // больше не разрешается: он берёт глагол типа из каталога модуля
@@ -1346,8 +1367,6 @@ func resolveActionToRelation(action string) string {
 		return "viewer"
 	case "create", "update":
 		return "editor"
-	case "delete":
-		return "admin"
 	// Action verbs that are semantically editor-level mutations but are not
 	// the canonical CRUD verbs. Mapping them to a real model relation avoids
 	// an FGA 400 (unknown relation) on the Check.
