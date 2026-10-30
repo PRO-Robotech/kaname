@@ -40,7 +40,7 @@ def intent(values):
     # Идентификатор выдаёт сам владелец фикстуры и сохраняет ДО отправки.
     # Повтор читает то же намерение, а не подставляет случайный объект при отказе.
     rid = "reg" + "".join(secrets.choice("0123456789abcdefghjkmnpqrstvwxyz") for _ in range(17))
-    return {"subjectId": "project:" + project, "relation": "parent",
+    return {"subjectId": "project:" + project, "relation": "project",
             "object": "registry_registry:" + rid, "parentProjectId": project,
             "parentAccountId": account,
             "parentChain": ["project:" + project, "account:" + account, "cluster:cluster_root"],
@@ -87,8 +87,8 @@ class Registrar:
         proc = self.request(method, body)
         if proc.returncode:
             error = proc.stderr.lower()
-            if any(word in error for word in ("connection refused", "no such host", "context deadline")):
-                raise own.Unmet("внутренний слушатель недостижим")
+            if any(word in error for word in ("connection refused", "no such host", "context deadline", "code: unavailable")):
+                raise own.Unmet("внутренний слушатель или источник вердикта недоступен")
             # Не печатаем сырой ответ, ключи или адреса.
             raise own.Finding(method + ": отказ владельцу registry, grpcurl rc=" + str(proc.returncode))
         try:
@@ -151,7 +151,7 @@ def prove(registrar, row):
         registrar.call("RegisterResource", row)
     for subject, allowed in ((row["subjectId"], True),
                              ("project:prj" + "0" * 17, False)):
-        response = registrar.call("Check", {"subjectId": subject, "relation": "parent",
+        response = registrar.call("Check", {"subjectId": subject, "relation": row["relation"],
                                             "object": row["object"], "consistency": "HIGHER_CONSISTENCY"})
         if response.get("allowed", False) is not allowed:
             raise own.Finding("реестр не доказал точное родительство")
@@ -222,8 +222,13 @@ def self_test():
     values = {"accountAId": "acc" + "1" * 17, "projectA1Id": "prj" + "2" * 17}
     row = intent(values)
     validate_intent(row, values)
-    count = 2
-    for key in ("parentChain", "parentProjectId", "parentAccountId", "object", "sourceVersion"):
+    # Сверяем структурное ребро с канонической моделью, а не с собственным fake.
+    model = (ROOT / "internal/authzmodel/fga_model.fga").read_text()
+    registry_model = model.split("\ntype registry_registry\n", 1)[1].split("\ntype ", 1)[0]
+    assert row["relation"] == "project"
+    assert "define " + row["relation"] + ": [project]" in registry_model
+    count = 4
+    for key in ("relation", "parentChain", "parentProjectId", "parentAccountId", "object", "sourceVersion"):
         bad = dict(row)
         bad[key] = ""
         try:
@@ -242,6 +247,7 @@ def self_test():
             if method == "RegisterResource" and self.failure == "registration":
                 raise own.Finding("denied")
             if method == "Check":
+                assert body["relation"] == row["relation"]
                 return {"allowed": self.failure == "wide" or (self.failure != "absent" and body["subjectId"] == row["subjectId"])}
             return {}
 
@@ -271,6 +277,17 @@ def self_test():
             accepted = False
         assert accepted is expected, "не тот класс отрицательного ответа"
         count += 1
+    for code, message, expected in (
+            (78, "Code: Unavailable", own.Unmet),
+            (71, "Code: PermissionDenied", own.Finding)):
+        probe = Registrar.__new__(Registrar)
+        probe.request = lambda *_: SimpleNamespace(returncode=code, stderr=message, stdout="")
+        try:
+            probe.call("Check", row)
+        except expected:
+            count += 1
+        else:
+            raise AssertionError("не тот класс отказа положительной проверки")
     print("registry seed self-test: passed=" + str(count) + " failed=0")
     return 0
 
