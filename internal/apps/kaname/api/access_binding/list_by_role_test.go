@@ -3,10 +3,10 @@
 
 package access_binding
 
-// list_by_role_test.go — RBAC rules-model 2026 unit tests for
-// the ListByRole audit read-RPC. The repo lister is exercised by the pg
-// integration test; here we assert the use-case authz floor + the read flow over
-// the fake repo.
+// list_by_role_test.go — модульные пробы читающего RPC аудита ListByRole
+// для модели правил RBAC 2026. Чтение списка из репозитория проверяет
+// интеграционная проба pg; здесь проверяются минимум прав сценария
+// и поток чтения через поддельный репозиторий.
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func TestListByRole_E33_OwnerSeesBinding(t *testing.T) {
 		accountID = "acc_lbr_account-----"
 	)
 	repo := newABFakeRepo(ownerID, accountID, accountID, roleID, "viewer", domain.Permissions{"iam.access_bindings.get"})
-	// Seed a binding carrying the role (the fake's single-binding store).
+	// Сеем выдачу с этой ролью (хранилище подделки вмещает одну выдачу).
 	repo.ab = &domain.AccessBinding{
 		ID:           "acb_lbr_1-----------",
 		SubjectType:  domain.SubjectTypeUser,
@@ -52,7 +52,7 @@ func TestListByRole_E33_OwnerSeesBinding(t *testing.T) {
 		Status:       domain.AccessBindingStatusActive,
 	}
 	uc := NewListByRoleUseCase(repo).WithRelationStore(newRecordingFGA(), nil)
-	ctx := newOwnerContext(ownerID) // account owner → grant authority
+	ctx := newOwnerContext(ownerID) // владелец аккаунта → право выдачи
 
 	got, _, err := uc.Execute(ctx, roleID, repoab.ListByRoleFilter{PageSize: 50})
 	require.NoError(t, err)
@@ -60,4 +60,4 @@ func TestListByRole_E33_OwnerSeesBinding(t *testing.T) {
 	require.Equal(t, domain.RoleID(roleID), got[0].RoleID)
 }
 
-var _ = authzguard.PermissionDenied // keep import referenced
+var _ = authzguard.PermissionDenied // сохраняем ссылку на импорт

@@ -148,7 +148,7 @@ func TestGetAccessBinding_SelfCheckIgnoresTheSubjectsOfAnotherBinding(t *testing
 // (`testing.md` §«Гейт на класс», п. 1); перепись прод-дерева, из которой взят
 // радиус:
 //
-//	git grep -n 'IsSelf(' -- 'services/iam/**/*.go' ':!*_test.go'
+//	`git grep -n 'IsSelf(' -- 'services/iam/**/*.go' ':!*_test.go'`
 //	→ 13 вхождений, из них по субъекту ВЫДАЧИ — 2 (get.go, list_by_role.go);
 //	  остальные судят владельца аккаунта либо идентификатор человека.
 

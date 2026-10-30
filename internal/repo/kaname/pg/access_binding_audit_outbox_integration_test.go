@@ -3,23 +3,23 @@
 
 package pg_test
 
-// access_binding_audit_outbox_integration_test.go — integration tests for the
-// audit_outbox compliance emit-in-tx contract on the access_bindings writer.
+// access_binding_audit_outbox_integration_test.go — интеграционные пробы контракта
+// записи аудита audit_outbox в транзакции писателя access_bindings.
 //
-// P0 compliance: an IAM control plane MUST durably record "who granted which
-// role to whom on which resource, and when" — the single most security-relevant
-// fact about an access-control system. Before this change the AccessBinding
-// grant/revoke writer-tx emitted only fga_outbox (ReBAC sync) +
-// subject_change_outbox (cache invalidation); neither is a durable compliance
-// trail. This file pins the new behaviour:
+// Требование аудита P0: управляющий контур IAM ДОЛЖЕН надёжно сохранять,
+// «кто, кому, какую роль, на какой ресурс и когда выдал» — наиболее значимый
+// для безопасности факт системы управления доступом. До этой правки транзакция
+// писателя выдачи/отзыва AccessBinding записывала только fga_outbox (синхронизация ReBAC) +
+// subject_change_outbox (инвалидация кэша); ни один из них не служит надёжным
+// журналом аудита. Этот файл закрепляет новое поведение:
 //
 //   - GRANT-EMIT: AccessBindingsW().Insert + EmitAuditEvent(granted) + Commit
-//     leaves exactly one audit_outbox row (event_type='iam.access_binding.granted')
-//     carrying actor / subject / resource / role_id / binding_id in the payload.
+//     оставляет ровно одну строку audit_outbox (event_type='iam.access_binding.granted')
+//     с полями actor / subject / resource / role_id / binding_id в полезной нагрузке.
 //   - REVOKE-EMIT: AccessBindingsW().Delete + EmitAuditEvent(revoked) + Commit
-//     leaves exactly one audit_outbox row (event_type='iam.access_binding.revoked').
-//   - ROLLBACK: rollback of the writer-tx discards the audit_outbox row too
-//     (запрет #10 — atomic emit-in-tx, no orphan compliance rows).
+//     оставляет ровно одну строку audit_outbox (event_type='iam.access_binding.revoked').
+//   - ROLLBACK: откат транзакции писателя удаляет и строку audit_outbox
+//     (запрет #10 — атомарная запись в транзакции, без осиротевших строк аудита).
 
 import (
 	"context"
@@ -38,9 +38,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
-// countAuditRows returns the number of audit_outbox rows whose payload binding_id
-// matches the supplied binding id (scopes assertions to the test row, ignoring
-// any seed/bootstrap audit rows).
+// countAuditRows возвращает число строк audit_outbox, у которых binding_id
+// в полезной нагрузке совпадает с переданным id выдачи (ограничивает проверки
+// строкой пробы, исключая любые строки аудита начального посева).
 func countAuditRows(ctx context.Context, t *testing.T, pool *pgxpool.Pool, bindingID string) int {
 	t.Helper()
 	var n int
@@ -93,7 +93,7 @@ func TestAB_AuditOutboxTx_GrantEmitsGrantedRow(t *testing.T) {
 	require.NoError(t, w.AccessBindingsW().EmitAuditEvent(ctx, ev))
 	require.NoError(t, w.Commit(ctx))
 
-	// Exactly one audit row for this binding.
+	// Ровно одна строка аудита для этой выдачи.
 	require.Equal(t, 1, countAuditRows(ctx, t, pool, string(bindingID)),
 		"grant must emit exactly one audit_outbox row")
 
@@ -175,9 +175,9 @@ func TestAB_AuditOutboxTx_RevokeEmitsRevokedRow(t *testing.T) {
 }
 
 // TestAB_AuditOutboxTx_RollbackDiscardsAuditRow — запрет #10:
-// rolling back the writer-tx MUST also discard the audit_outbox emit row.
-// Confirms the compliance event is atomic with the domain mutation (if the
-// grant rolls back, no audit row claims it happened).
+// откат транзакции писателя ДОЛЖЕН удалять и записанную строку audit_outbox.
+// Подтверждает атомарность события аудита с доменным изменением (при откате
+// выдачи ни одна строка аудита не утверждает, что выдача состоялась).
 func TestAB_AuditOutboxTx_RollbackDiscardsAuditRow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -219,9 +219,9 @@ func TestAB_AuditOutboxTx_RollbackDiscardsAuditRow(t *testing.T) {
 	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), binding)
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitAuditEvent(ctx, ev))
-	require.NoError(t, w.Rollback(ctx)) // explicit rollback
+	require.NoError(t, w.Rollback(ctx)) // явный откат
 
-	// Neither the binding row nor the audit_outbox row should be visible.
+	// Ни строка выдачи, ни строка audit_outbox не должны быть видимы.
 	var bindingCount int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.access_bindings WHERE id = $1`,

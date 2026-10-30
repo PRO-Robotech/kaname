@@ -3,24 +3,24 @@
 
 package pg_test
 
-// access_binding_subjects_integration_test.go — RBAC rules-model multi-subject
-// support. testcontainers Postgres 16 integration tests for
-// the multi-subject child table (kaname.access_binding_subjects, migration
-// 0028) + the ListByRole audit read.
+// access_binding_subjects_integration_test.go — поддержка нескольких субъектов
+// в модели правил RBAC. Интеграционные пробы с testcontainers Postgres 16
+// для дочерней таблицы нескольких субъектов (kaname.access_binding_subjects,
+// миграция 0028) и читающего аудита ListByRole.
 //
-//   - -ROUNDTRIP: InsertSubjects co-committed with the binding INSERT +
-//     ListSubjects reads back the exact ordered set.
-//   - -CASCADE: deleting the binding row CASCADE-drops its subject rows
-//     (FK ON DELETE CASCADE) — no orphan subject rows after revoke.
-//   - -UNIQUE: a duplicate (binding,subject) is an idempotent no-op (ON CONFLICT
-//     DO NOTHING); the set never inflates.
-//   - -PERSUBJECT: DeleteSubject removes ONE subject's row and leaves the
-//     others untouched (independent revoke).
-//   - -BATCH: ListSubjectsForBindings loads many bindings' subjects in one query.
-//   - -LISTBYROLE: ListByRole returns the bindings of a role, keyset-paged,
-//     hiding REVOKED unless IncludeRevoked.
-//   - -RACE (ban #10): concurrent InsertSubjects of the SAME (binding,subject)
-//     converge to exactly one row (PK row-lock idempotency, not software guard).
+//   - -ROUNDTRIP: InsertSubjects фиксируется вместе с INSERT выдачи,
+//     а ListSubjects читает в точности записанный упорядоченный набор.
+//   - -CASCADE: удаление строки выдачи каскадно удаляет строки её субъектов
+//     (FK ON DELETE CASCADE) — после отзыва нет осиротевших строк субъектов.
+//   - -UNIQUE: повтор (binding,subject) идемпотентно оставляет состояние прежним
+//     (ON CONFLICT DO NOTHING); набор никогда не разрастается.
+//   - -PERSUBJECT: DeleteSubject удаляет строку ОДНОГО субъекта, сохраняя
+//     остальных (независимый отзыв).
+//   - -BATCH: ListSubjectsForBindings загружает субъектов многих выдач одним запросом.
+//   - -LISTBYROLE: ListByRole возвращает выдачи роли постранично по ключу,
+//     скрывая REVOKED, если не задан IncludeRevoked.
+//   - -RACE (запрет #10): конкурентные InsertSubjects ОДНОЙ пары (binding,subject)
+//     сходятся ровно к одной строке (идемпотентность блокировкой строки PK, а не проверкой в коде).
 
 import (
 	"context"
@@ -71,8 +71,8 @@ func TestABSubjects_E34_RoundTripOrdered(t *testing.T) {
 
 	uid := mustSeedUser(t, ctx, pool, "absubrt")
 	acc := seedAccount(t, ctx, repo, "acc-absubrt", uid)
-	// subject_id is a within-service ref enforced by migration 0049 — seed real
-	// group/SA rows so the multi-subject set references live principals.
+	// subject_id — внутрисервисная ссылка, обеспеченная миграцией 0049: сеем настоящие
+	// строки группы/SA, чтобы набор субъектов ссылался на существующих участников.
 	gid := seedGroupID(t, ctx, pool, string(acc.ID), "absubrt")
 	said := seedSAID(t, ctx, pool, string(acc.ID), "absubrt")
 	ab := insertAB(t, ctx, repo, domain.AccessBinding{
@@ -93,7 +93,7 @@ func TestABSubjects_E34_RoundTripOrdered(t *testing.T) {
 	got, err := rd.AccessBindings().ListSubjects(ctx, ab.ID)
 	require.NoError(t, err)
 	require.Len(t, got, 3)
-	// Ordinal preserves insert order → subjects[0] is the user.
+	// Ordinal сохраняет порядок вставки → subjects[0] — пользователь.
 	assert.Equal(t, domain.SubjectTypeUser, got[0].Type)
 	assert.Equal(t, domain.SubjectID(uid), got[0].ID)
 	assert.Equal(t, domain.SubjectTypeGroup, got[1].Type)
@@ -124,7 +124,7 @@ func TestABSubjects_E30_CascadeOnBindingDelete(t *testing.T) {
 	})
 	require.Equal(t, 2, countABSubjects(t, ctx, repo, ab.ID))
 
-	// HARD delete the binding row → CASCADE drops subject rows.
+	// ФИЗИЧЕСКИ удаляем строку выдачи → CASCADE удаляет строки субъектов.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().Delete(ctx, ab.ID))
@@ -156,7 +156,7 @@ func TestABSubjects_PerSubjectDelete_Independent(t *testing.T) {
 		{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)},
 	})
 
-	// Remove ONLY the group subject; the user subject survives.
+	// Удаляем ТОЛЬКО субъекта-группу; субъект-пользователь сохраняется.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	deleted, err := w.AccessBindingsW().DeleteSubject(ctx, ab.ID, domain.Subject{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)})
@@ -175,7 +175,7 @@ func TestABSubjects_PerSubjectDelete_Independent(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, domain.SubjectTypeUser, got[0].Type)
 
-	// Idempotent: deleting an absent subject returns false.
+	// Идемпотентность: удаление отсутствующего субъекта возвращает false.
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	d2, err := w2.AccessBindingsW().DeleteSubject(ctx, ab.ID, domain.Subject{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(gid)})
@@ -236,7 +236,7 @@ func TestABSubjects_E33_ListByRole(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "ablbr")
 	acc := seedAccount(t, ctx, repo, "acc-ablbr", uid)
 	gid := seedGroupID(t, ctx, pool, string(acc.ID), "ablbr")
-	// Two ACTIVE bindings carrying the same role; one of a different role.
+	// Две выдачи ACTIVE с одной ролью; одна — с другой ролью.
 	insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
 		RoleID: domain.SystemViewerRoleID, ResourceType: "account", ResourceID: string(acc.ID),
@@ -300,7 +300,7 @@ func TestABSubjects_RACE_ConcurrentInsertSameSubject_OneRow(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Exactly one row for (binding, group) — PK + ON CONFLICT DO NOTHING (ban #10).
+	// Ровно одна строка для (binding, group) — PK + ON CONFLICT DO NOTHING (запрет #10).
 	got := func() []domain.Subject {
 		rd, err := repo.Reader(ctx)
 		require.NoError(t, err)

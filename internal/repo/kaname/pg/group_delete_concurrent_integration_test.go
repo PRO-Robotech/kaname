@@ -3,28 +3,28 @@
 
 package pg_test
 
-// group_delete_concurrent_integration_test.go — concurrent-goroutine race proof
-// for the production groupWriter.Delete contested CAS path (data-integrity.md
-// checklist #5: every contested CAS/guard path must carry a concurrent race test
-// proving exactly-one-winner). The sibling user delete-vs-create write-skew is
-// proven in access_binding_subject_exists_integration_test.go via an INLINE SQL
-// mirror of the users branch; the GROUP branch (distinct reverse-guard on
-// access_bindings + access_binding_subjects + the migration-0049 groups-row
-// FOR KEY SHARE probe + the migration-0050 groups BEFORE DELETE trigger) had no
-// concurrent test and is exercised here through the REAL groupWriter.Delete —
-// never an inline SQL copy.
+// group_delete_concurrent_integration_test.go — доказательство защиты от гонки
+// конкурентного CAS в продуктовом groupWriter.Delete (data-integrity.md,
+// пункт #5: каждый конкурентный путь CAS/защиты требует пробы гонки,
+// доказывающей ровно одного победителя). Соседний перекос записи удаления/создания
+// пользователя проверен в access_binding_subject_exists_integration_test.go через
+// ВСТРОЕННУЮ SQL-копию ветви users. Ветвь ГРУПП (отдельная обратная проверка по
+// access_bindings + access_binding_subjects + проверка строки groups через
+// FOR KEY SHARE миграции 0049 + триггер groups BEFORE DELETE миграции 0050) не имела
+// конкурентной пробы и проверяется здесь через НАСТОЯЩИЙ groupWriter.Delete —
+// без встроенной копии SQL.
 //
-// Both subtests are deterministic (no goroutine, no pg_stat_activity polling, no
-// possibility of a hang), mirroring TestABSubjectExists_ConcurrentDeleteVsCreate_
-// NoDangling: a real AccessBinding write for a GROUP subject is held open in one
-// tx (its 0049 subject_ref_exists trigger takes FOR KEY SHARE on the groups row),
-// then the production groupWriter.Delete runs on a SEPARATE connection whose
-// session lock_timeout is short so a blocked delete self-releases (SQLSTATE 55P03)
-// instead of blocking to statement_timeout. That the delete blocks at all PROVES
-// the two paths serialize on the groups row — the write-skew window the software
-// NOT-EXISTS guard alone could not close. After the writer commits, a fresh
-// guarded delete re-qualifies against the now-committed reference and rejects with
-// FailedPrecondition — never a dangling group-subject binding.
+// Обе подпробы детерминированы (без горутин, опроса pg_stat_activity и возможности
+// зависания), повторяя TestABSubjectExists_ConcurrentDeleteVsCreate_
+// NoDangling: настоящая запись AccessBinding для субъекта GROUP остаётся открытой
+// в транзакции (её триггер subject_ref_exists из 0049 берёт FOR KEY SHARE на строку groups),
+// затем продуктовый groupWriter.Delete выполняется в ОТДЕЛЬНОМ соединении с коротким
+// сессионным lock_timeout, поэтому заблокированное удаление само завершается (SQLSTATE 55P03),
+// не дожидаясь statement_timeout. Сама блокировка удаления ДОКАЗЫВАЕТ
+// сериализацию двух путей на строке groups: окно перекоса записи, которое одна
+// программная проверка NOT-EXISTS закрыть не могла. После коммита писателя новое
+// защищённое удаление повторяет проверку по зафиксированной ссылке и отказывает с
+// FailedPrecondition: выдача с висячей ссылкой на субъекта-группу не возникает.
 
 import (
 	"context"
@@ -44,10 +44,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
-// newLockTimeoutPool — a pgxpool whose every session sets `lock_timeout` so a
-// guarded write that blocks on a conflicting row-lock self-releases (55P03)
-// rather than waiting out statement_timeout. Used for the delete side so the
-// serialization proof is bounded and deterministic.
+// newLockTimeoutPool — pgxpool, каждая сессия которого задаёт `lock_timeout`, чтобы
+// защищённая запись, заблокированная конфликтующим замком строки, сама завершалась (55P03),
+// не дожидаясь statement_timeout. Используется на стороне удаления, чтобы
+// доказательство сериализации было ограниченным по времени и детерминированным.
 func newLockTimeoutPool(t *testing.T, ctx context.Context, dsn string, lockTimeoutMS int) *pgxpool.Pool {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(dsn)
@@ -69,18 +69,18 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 	ctx := context.Background()
 	dsn := setupTestDB(t)
 
-	// master pool — seeding + the held-open AccessBinding write tx.
+	// Основной пул — посев + открытая транзакция записи AccessBinding.
 	master, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	defer master.Close()
 	seedRepo := kanamepg.New(master, nil)
 
-	// delete-side repo on a lock_timeout=2s pool so the production
-	// groupWriter.Delete self-releases instead of blocking to statement_timeout.
+	// Репозиторий стороны удаления использует пул с lock_timeout=2s, чтобы продуктовый
+	// groupWriter.Delete завершался сам, не блокируясь до statement_timeout.
 	delRepo := kanamepg.New(newLockTimeoutPool(t, ctx, dsn, 2000), nil)
 
-	// realGroupDelete drives the PRODUCTION groupWriter.Delete on a fresh
-	// lock_timeout writer-tx (rolled back — this side never commits a delete).
+	// realGroupDelete вызывает ПРОДУКТОВЫЙ groupWriter.Delete в новой транзакции
+	// писателя с lock_timeout (откатывается — эта сторона никогда не фиксирует удаление).
 	realGroupDelete := func(id domain.GroupID) error {
 		w, werr := delRepo.Writer(ctx)
 		require.NoError(t, werr)
@@ -88,14 +88,14 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 		return w.GroupsW().Delete(ctx, id)
 	}
 
-	// ── subjects[0] projection: the access_bindings NOT-EXISTS guard ──────────
+	// ── Проекция subjects[0]: проверка NOT-EXISTS в access_bindings ──────────
 	t.Run("subjects0_access_bindings_guard", func(t *testing.T) {
 		uid := mustSeedUser(t, ctx, master, "gdc-a")
 		acc := seedAccount(t, ctx, seedRepo, "acc-gdc-a", uid)
 		g := seedGroup(t, ctx, seedRepo, acc.ID, "gdc-a")
 
-		// A real AccessBinding.Create for subject group:g, held open (uncommitted).
-		// Its 0049 subject_ref_exists trigger takes FOR KEY SHARE on the groups row.
+		// Настоящий AccessBinding.Create для субъекта group:g остаётся открытым (без коммита).
+		// Его триггер subject_ref_exists из 0049 берёт FOR KEY SHARE на строку groups.
 		wIns, err := seedRepo.Writer(ctx)
 		require.NoError(t, err)
 		committed := false
@@ -114,13 +114,13 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// Production groupWriter.Delete must block on the write's key-share lock
-		// and time out — proving the two paths serialize on the groups row.
+		// Продуктовый groupWriter.Delete должен заблокироваться замком записи KEY SHARE
+		// и истечь по сроку — это доказывает сериализацию двух путей на строке groups.
 		require.Error(t, realGroupDelete(g.ID),
 			"guarded Group.Delete must block on the AB.Create key-share lock, not delete the group (race window would be open)")
 
-		// Commit → releases the lock. A fresh guarded delete now observes the
-		// committed binding and rejects — never a dangling group-subject binding.
+		// Коммит → освобождение замка. Новое защищённое удаление видит зафиксированную
+		// выдачу и отказывает: выдачи с висячей ссылкой на субъекта-группу нет.
 		require.NoError(t, wIns.Commit(ctx))
 		committed = true
 
@@ -129,7 +129,7 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 		require.True(t, stderrors.Is(err, iamerr.ErrFailedPrecondition),
 			"post-commit Group.Delete must reject (group still bound), got %v", err)
 
-		// Invariant: the group survived and the binding references a live group.
+		// Инвариант: группа сохранилась, и выдача ссылается на существующую группу.
 		var groupCnt, bindCnt int
 		require.NoError(t, master.QueryRow(ctx,
 			`SELECT count(*) FROM kaname.groups WHERE id=$1`, string(g.ID)).Scan(&groupCnt))
@@ -140,16 +140,16 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 		require.Equal(t, 1, bindCnt, "the committed binding must reference the live group")
 	})
 
-	// ── subjects[1..N]: the access_binding_subjects guard + 0050 trigger ──────
+	// ── subjects[1..N]: защита access_binding_subjects + триггер 0050 ──────
 	t.Run("subjectsN_access_binding_subjects_guard", func(t *testing.T) {
 		uid := mustSeedUser(t, ctx, master, "gdc-b")
 		acc := seedAccount(t, ctx, seedRepo, "acc-gdc-b", uid)
 		g := seedGroup(t, ctx, seedRepo, acc.ID, "gdc-b")
 
-		// A COMMITTED binding whose subjects[0] is the user — group:g is NOT the
-		// access_bindings projection; it exists ONLY as an access_binding_subjects
-		// child row (the subjects[1..N] path guarded by migration 0050's BEFORE
-		// DELETE trigger + the Delete CTE's second NOT EXISTS).
+		// ЗАФИКСИРОВАННАЯ выдача, у которой subjects[0] — пользователь: group:g НЕ входит
+		// в проекцию access_bindings, а существует ТОЛЬКО как дочерняя строка
+		// access_binding_subjects (путь subjects[1..N], защищённый триггером BEFORE DELETE
+		// миграции 0050 + вторым NOT EXISTS в CTE Delete).
 		bindingID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 		wSeed, err := seedRepo.Writer(ctx)
 		require.NoError(t, err)
@@ -164,9 +164,9 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, wSeed.Commit(ctx))
 
-		// Add group:g as an extra subject, held open (uncommitted) — the 0049
-		// trigger fires on access_binding_subjects too, taking FOR KEY SHARE on
-		// the groups row.
+		// Добавляем group:g дополнительным субъектом, оставляя запись открытой (без коммита):
+		// триггер 0049 срабатывает и на access_binding_subjects, беря FOR KEY SHARE
+		// на строку groups.
 		wIns, err := seedRepo.Writer(ctx)
 		require.NoError(t, err)
 		committed := false
@@ -179,15 +179,15 @@ func TestGroup_DeleteVsAddSubject_ConcurrentCAS_NoDangling(t *testing.T) {
 			{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(g.ID)},
 		}))
 
-		// Production groupWriter.Delete must block/serialize on the groups row.
+		// Продуктовый groupWriter.Delete должен блокироваться/сериализоваться на строке groups.
 		require.Error(t, realGroupDelete(g.ID),
 			"guarded Group.Delete must block on the add-subject key-share lock (race window would be open)")
 
 		require.NoError(t, wIns.Commit(ctx))
 		committed = true
 
-		// Fresh guarded delete now sees the committed access_binding_subjects row
-		// → rejected (0050 trigger / second NOT EXISTS), no dangling subject ref.
+		// Новое защищённое удаление видит зафиксированную строку access_binding_subjects
+		// → отказ (триггер 0050 / второй NOT EXISTS), висячей ссылки на субъекта нет.
 		err = realGroupDelete(g.ID)
 		require.Error(t, err)
 		require.True(t, stderrors.Is(err, iamerr.ErrFailedPrecondition),

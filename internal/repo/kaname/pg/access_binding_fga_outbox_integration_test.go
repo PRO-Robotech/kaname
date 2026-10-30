@@ -3,17 +3,17 @@
 
 package pg_test
 
-// access_binding_fga_outbox_integration_test.go — integration tests for the
-// fga_outbox emit-in-tx contract on the access_bindings writer.
+// access_binding_fga_outbox_integration_test.go — интеграционные пробы контракта
+// записи fga_outbox в транзакции писателя access_bindings.
 //
-// Covers atomic emit + rollback:
+// Покрывает атомарную запись и откат:
 //
 // - CREATE-EMIT: AccessBindingsW().Insert + EmitRelationWrite + Commit
-// leaves N grant rows in kaname.fga_outbox (event_type=fga.tuple.write).
+// оставляет N строк выдачи в kaname.fga_outbox (event_type=fga.tuple.write).
 // - DELETE-EMIT: AccessBindingsW().Delete + EmitRelationDelete + Commit
-// leaves N revoke rows in kaname.fga_outbox (event_type=fga.tuple.delete).
-// - ROLLBACK: rollback of the writer-tx removes both the binding
-// row AND the fga_outbox rows (ban #10).
+// оставляет N строк отзыва в kaname.fga_outbox (event_type=fga.tuple.delete).
+// - ROLLBACK: откат транзакции писателя удаляет И строку выдачи,
+// И строки fga_outbox (запрет #10).
 
 import (
 	"context"
@@ -64,7 +64,7 @@ func TestAB_FGAOutboxTx_FGAOutbox_CreateEmitsWriteRows(t *testing.T) {
 	require.NoError(t, w.AccessBindingsW().EmitRelationWrite(ctx, tuples))
 	require.NoError(t, w.Commit(ctx))
 
-	// Verify fga_outbox row present.
+	// Проверяем наличие строки fga_outbox.
 	var et string
 	var payloadRaw string
 	require.NoError(t, pool.QueryRow(ctx,
@@ -117,9 +117,9 @@ func TestAB_FGAOutboxTx_FGAOutbox_DeleteEmitsDeleteRows(t *testing.T) {
 	require.Equal(t, "fga.tuple.delete", et)
 }
 
-// TestAB_FGAOutboxTx_FGAOutbox_RollbackDiscardsBothRowAndEmit verifies ban #10:
-// rolling back the writer-tx MUST also discard the fga_outbox emit row. Confirms
-// atomic emit-in-tx pattern (no orphan rows visible to drainer).
+// TestAB_FGAOutboxTx_FGAOutbox_RollbackDiscardsBothRowAndEmit проверяет запрет #10:
+// откат транзакции писателя ДОЛЖЕН удалять и записанную строку fga_outbox.
+// Подтверждает атомарность записи в транзакции (обработчик не видит осиротевших строк).
 func TestAB_FGAOutboxTx_FGAOutbox_RollbackDiscardsBothRowAndEmit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -152,9 +152,9 @@ func TestAB_FGAOutboxTx_FGAOutbox_RollbackDiscardsBothRowAndEmit(t *testing.T) {
 	_, err = bindingset.Insert(ctx, w.AccessBindingsW(), binding)
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitRelationWrite(ctx, tuples))
-	require.NoError(t, w.Rollback(ctx)) // explicit rollback
+	require.NoError(t, w.Rollback(ctx)) // явный откат
 
-	// Neither the binding row nor the fga_outbox row should be visible.
+	// Ни строка выдачи, ни строка fga_outbox не должны быть видимы.
 	var bindingCount int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.access_bindings WHERE id = $1`,
@@ -169,8 +169,8 @@ func TestAB_FGAOutboxTx_FGAOutbox_RollbackDiscardsBothRowAndEmit(t *testing.T) {
 	require.Equal(t, 0, fgaCount, "fga_outbox row must be rolled back atomically with binding row")
 }
 
-// TestAB_FGAOutboxTx_FGAOutbox_EmitWriteTx_EmptyTuplesNoop confirms 0 tuples is a
-// safe no-op (caller decides whether 0 emit is acceptable).
+// TestAB_FGAOutboxTx_FGAOutbox_EmitWriteTx_EmptyTuplesNoop подтверждает, что 0 кортежей
+// безопасно оставляет состояние прежним (допустимость пустой отправки решает вызывающий).
 func TestAB_FGAOutboxTx_FGAOutbox_EmitWriteTx_EmptyTuplesNoop(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -182,11 +182,11 @@ func TestAB_FGAOutboxTx_FGAOutbox_EmitWriteTx_EmptyTuplesNoop(t *testing.T) {
 	defer pool.Close()
 	repo := kanamepg.New(pool, nil)
 
-	// Snapshot the baseline outbox size: seed migrations enqueue relation-tuples
-	// (0009 fga_writer@iam_fgaproxy, 0010 operator system_viewer@cluster, 0014
-	// reader system_viewer@cluster). Assert this empty-emit adds ZERO rows
-	// (delta-based, robust to any current/future seed — a static "== 0" filter
-	// silently broke each time a new cluster-root seed landed).
+	// Снимаем начальный размер outbox: миграции посева ставят кортежи отношений в очередь
+	// (0009 fga_writer@iam_fgaproxy, 0010 — оператор system_viewer@cluster,
+	// 0014 — читатель system_viewer@cluster). Проверяем, что пустая отправка добавила НОЛЬ строк
+	// (по дельте, устойчивой к любому нынешнему и будущему посеву: статический фильтр «== 0»
+	// незаметно ломался при каждом добавлении нового посева корня кластера).
 	var before int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.fga_outbox`).Scan(&before))

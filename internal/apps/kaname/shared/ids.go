@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package shared — ids.go: resource-id format validator.
+// Package shared — ids.go: проверка формата идентификаторов ресурсов.
 //
 // Заменяет 11+ копий per-resource `validate<Resource>ID(id)` и
 // `validateAccountIDFor<Resource>(id)` функций (account/get.go,
