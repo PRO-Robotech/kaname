@@ -13,9 +13,9 @@ import (
 	"testing"
 )
 
-// formProbeRootAnchorInjections feeds the production root to the same wiring
-// guard used by the form probe. Each negative changes only the binding of one
-// call against its lawful twin; unused decoys must not count as a violation.
+// formProbeRootAnchorInjections подаёт производственный корень той же страже
+// провязки, что и проба формы. Каждый отрицательный случай меняет только привязку
+// одного вызова против законного близнеца; неиспользуемые приманки нарушением не считаются.
 func formProbeRootAnchorInjections(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -49,7 +49,7 @@ func formProbeRootAnchorInjections(t *testing.T) {
 	var signature string
 	for _, decl := range f.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == anchors.assembler && fn.Body != nil {
-			// Preserve the real signature, including every imported parameter type.
+			// Сохраняем настоящую сигнатуру, включая каждый импортированный тип параметра.
 			signature = "func" + root[fset.Position(fn.Type.Params.Pos()).Offset:fset.Position(fn.Body.Pos()).Offset]
 		}
 	}
