@@ -1158,6 +1158,7 @@ class _FakeStand:
     """Подставной стенд: законный мир, в котором каждая инъекция меняет ОДИН факт."""
 
     issuance, own = "https://127.0.0.1:1", "https://127.0.0.1:2"
+    BOOT_TOKEN, BOOT_PRINCIPAL = "boot", "svaboot"
 
     def __init__(self, **inject):
         self.inj = inject
@@ -1167,7 +1168,7 @@ class _FakeStand:
     def mint(self):
         if self.inj.get("mint_down"):
             raise Unmet("127.0.0.1:3 недостижим: connection refused")
-        return {"accessToken": "boot", "principalId": "svaboot"}
+        return {"accessToken": self.BOOT_TOKEN, "principalId": self.BOOT_PRINCIPAL}
 
     def create_client(self, principal, name, redirects):
         n = len(self.clients) + 1
@@ -1185,7 +1186,7 @@ class _FakeStand:
     def http(self, url, *, method="GET", headers=None, form=None):
         headers = headers or {}
         if url.startswith(self.own + "/iam/v1/accounts"):
-            ok = headers.get("Authorization") == "Bearer boot" and not self.inj.get("boot_refused")
+            ok = headers.get("Authorization") == "Bearer " + self.BOOT_TOKEN and not self.inj.get("boot_refused")
             return (200, {}, '{"accounts":[]}') if ok else (401, {}, '{"message":"unauth"}')
         if url.startswith(self.issuance + "/iam/v1/authorize"):
             q = urllib.parse.parse_qs(url.split("?", 1)[1])
@@ -1421,7 +1422,11 @@ class _WaveWorld:
             if not binding:
                 return 403, {"code": 7}
             method = kw.get("method", "GET")
-            sub = token_claims(kw.get("token", "")).get("sub")
+            # Only the exact token minted by this fake is its bootstrap actor.
+            # Every other token still uses the real parser; malformed JWT is not admin.
+            token = kw.get("token", "")
+            sub = (self.base.BOOT_PRINCIPAL if token == self.base.BOOT_TOKEN
+                   else token_claims(token).get("sub"))
             if sub in self.esc_subjects and method != "GET":
                 owner_active = any(b["subjectId"] == sub and b["scopeType"] == "iam.account"
                                    and b["status"] == "ACTIVE" for b in self.esc_bindings.values())
@@ -1595,11 +1600,17 @@ def self_test() -> int:
         return _outcome(lambda: seed_wave(w, w, w, _Mail(w), "t", "stand.invalid",
                                           sleep=w.sleep)), w
 
-    for injection in ("esc_refused", "esc_revoke_stale", "esc_revoke_removes_row",
-                      "esc_delete_stale", "esc_revoke_right_stale", "esc_lawful_twin_denied", "esc_owner_lost"):
+    for injection, reason in (
+            ("esc_refused", "Esc revoke target is not a visible ACTIVE binding"),
+            ("esc_revoke_stale", "Esc soft revoke did not retain the same REVOKED audit row"),
+            ("esc_revoke_removes_row", "Esc soft revoke did not retain the same REVOKED audit row"),
+            ("esc_delete_stale", "Esc binding still readable after completed hard deletion"),
+            ("esc_revoke_right_stale", "Esc soft revoke binding-derived right or lawful twin disagrees"),
+            ("esc_lawful_twin_denied", "Esc soft revoke binding-derived right or lawful twin disagrees"),
+            ("esc_owner_lost", "Esc persisted Account.ownerUserId was not preserved")):
         esc_result, _ = wave(**{injection: True})
         _c("Esc owner API setup failure is a finding: " + injection,
-           esc_result[0] == "finding", str(esc_result))
+           esc_result[0] == "finding" and reason in esc_result[1], str(esc_result))
 
     # Предпосылка подставного мира: Р9 в нём ЕСТЬ и различает обе стороны
     # интервала. Без неё проверки ниже зеленели бы и на мире, где второго письма
