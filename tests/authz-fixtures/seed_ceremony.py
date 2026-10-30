@@ -918,6 +918,35 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     values["jwtHumanEscStepUp"], _ = ceremony_bearer(
         stand, client, level2_session(lane, esc_session), esc_user, "2")
     values["humanEscUserId"] = esc_user
+    # Registration creates a protected owner binding in the personal account.
+    # S2 requires an absolutely empty ListBySubject, not an account-A filter.
+    # Clear protection and revoke through the public API as that same owner;
+    # Account.ownerUserId remains the product's independent ownership record.
+    code, bindings = http.json_ask(
+        f"{stand.own}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={esc_user}&pageSize=1000",
+        token=boot)
+    if code != 200 or bindings.get("nextPageToken"):
+        raise Finding("Esc initial bindings could not be completely enumerated")
+    for binding in bindings.get("accessBindings", []):
+        bid = binding.get("id") or ""
+        if not bid:
+            raise Finding("Esc initial binding has no id")
+        if binding.get("deletionProtection"):
+            code, op = http.json_ask(
+                f"{stand.own}/iam/v1/accessBindings/{bid}", method="PATCH",
+                token=values["jwtHumanEscStepUp"],
+                body={"updateMask": "deletionProtection", "deletionProtection": False})
+            if code != 200 or not op.get("id"):
+                raise Finding("Esc owner binding protection could not be cleared by its owner")
+            own_seed.await_operation(http, stand.own, values["jwtHumanEscStepUp"], op["id"])
+        own_seed.post_operation(http, stand.own, values["jwtHumanEscStepUp"],
+                                f"/iam/v1/accessBindings/{bid}:revoke", {},
+                                "Esc owner revokes its initial binding")
+    code, bindings = http.json_ask(
+        f"{stand.own}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={esc_user}&pageSize=1000",
+        token=boot)
+    if code != 200 or bindings.get("accessBindings") or bindings.get("nextPageToken"):
+        raise Finding("Esc ListBySubject is not empty after public revocation")
 
     values["ceremonyInviteeEmail"], _, values["ceremonyInviteeUserId"] = person("invitee")
     say("  ok   человек для приглашения — адрес подтверждён, выдач нет")
