@@ -8,6 +8,7 @@ import argparse
 import datetime
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 import pathlib
@@ -16,6 +17,7 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import urllib.parse
 
 import seed_own_stand as own
 
@@ -62,6 +64,15 @@ def validate_intent(row, values):
         raise own.Finding("сохранённое намерение не содержит sourceVersion") from None
 
 
+def issuer_rejected(proc):
+    # Только ответ сервера о клиентском издателе ПОСЛЕ проверки самого сервера.
+    # Таймаут grpcurl скрывает TLS alert и сам доказательством отказа не является.
+    return (proc.returncode != 0
+            and re.search(r"^Verification: OK$", proc.stderr, re.MULTILINE) is not None
+            and "alert unknown ca" in proc.stderr.lower()
+            and "SSL alert number 48" in proc.stderr)
+
+
 class Registrar:
     def __init__(self, pki, address):
         if not shutil.which("grpcurl"):
@@ -96,21 +107,61 @@ class Registrar:
         except json.JSONDecodeError:
             raise own.Finding(method + ": ответ не JSON") from None
 
+    def issuer_refusal(self):
+        hostname = urllib.parse.urlsplit("//" + self.address).hostname
+        if not hostname:
+            raise own.Unmet("TLS контроль не получил имя сервера")
+        try:
+            ipaddress.ip_address(hostname)
+            verify = "-verify_ip"
+        except ValueError:
+            verify = "-verify_hostname"
+        def argument(flag):
+            return self.args[self.args.index(flag) + 1]
+        command = ["openssl", "s_client", "-connect", self.address,
+                   "-CAfile", argument("-cacert"), "-cert", argument("-cert"),
+                   "-key", argument("-key"), "-verify_return_error", verify, hostname,
+                   "-servername", hostname, "-alpn", "h2", "-brief", "-ign_eof"]
+        try:
+            proc = subprocess.run(command, input="", capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            raise own.Unmet("TLS контроль не получил ответ сервера") from None
+        return issuer_rejected(proc)
+
     def refused(self, row, tls=False):
         proc = self.request("RegisterResource", row)
         message = proc.stderr.lower()
-        matches = ("tls" in message and "certificate" in message) if tls else any(
-            code in message for code in ("code: permissiondenied", "code: unauthenticated"))
+        if tls:
+            dial_failed = (proc.returncode == 1 and "failed to dial target host" in message
+                           and ("context deadline exceeded" in message
+                                or ("tls" in message and "certificate" in message)))
+            matches = dial_failed and self.issuer_refusal()
+        else:
+            matches = any(code in message for code in ("code: permissiondenied", "code: unauthenticated"))
         if proc.returncode == 0 or not matches:
             raise own.Finding("отрицательный контроль регистрации не получил свой отказ")
+        if tls:
+            print("registry TLS negative: server verified; remote client issuer alert unknown_ca (48)")
 
 
 def live_refusals(registrar, row, pki):
     """Та же цель и исправный близнец до и после каждой отрицательной подачи."""
+    failures = []
     def paired(other, body, tls=False):
-        prove(registrar, row)
-        other.refused(body, tls=tls)
-        prove(registrar, row)
+        label = "client-issuer" if tls else body["object"].split(":", 1)[0]
+        try:
+            prove(registrar, row)
+        except (own.Finding, own.Unmet) as error:
+            failures.append((type(error), label + ": lawful before: " + str(error)))
+            return
+        try:
+            other.refused(body, tls=tls)
+        except (own.Finding, own.Unmet) as error:
+            failures.append((type(error), label + ": negative: " + str(error)))
+        try:
+            prove(registrar, row)
+        except (own.Finding, own.Unmet) as error:
+            failures.append((type(error), label + ": lawful after: " + str(error)))
 
     # Доверенный лист службы не является объявленной личностью писателя registry.
     without_identity = Registrar(pki, registrar.address)
@@ -142,6 +193,9 @@ def live_refusals(registrar, row, pki):
             if result.returncode:
                 raise own.Unmet("не удалось выпустить отрицательный клиентский лист")
         paired(Registrar(other, registrar.address), row, tls=True)
+    if failures:
+        kind = own.Unmet if any(kind is own.Unmet for kind, _ in failures) else own.Finding
+        raise kind("; ".join(message for _, message in failures))
     print("registry live negatives: unrecognized identity, foreign module type, wrong issuer refused; paired positives passed")
 
 
@@ -264,12 +318,15 @@ def self_test():
             raise AssertionError("ложный proof: " + failure)
     for code, message, tls, expected in (
             (1, "Code: PermissionDenied", False, True),
-            (1, "remote error: tls: bad certificate", True, True),
+            (1, "Failed to dial target host: remote error: tls: bad certificate", True, True),
             (0, "", False, False),
             (1, "Code: Unavailable", False, False),
-            (1, "connection refused", True, False)):
+            (1, "connection refused", True, False),
+            (78, "Code: Unavailable", True, False),
+            (1, "Could not parse request data", True, False)):
         probe = Registrar.__new__(Registrar)
         probe.request = lambda *_: SimpleNamespace(returncode=code, stderr=message)
+        probe.issuer_refusal = lambda: True
         accepted = True
         try:
             probe.refused(row, tls=tls)
@@ -288,6 +345,18 @@ def self_test():
             count += 1
         else:
             raise AssertionError("не тот класс отказа положительной проверки")
+    good_tls = "Verification: OK\ntlsv1 alert unknown ca: SSL alert number 48\n"
+    for code, message, expected in (
+            (1, good_tls, True),
+            (0, good_tls, False),
+            (1, "tlsv1 alert unknown ca: SSL alert number 48", False),
+            (1, "Verification: OK\ncontext deadline exceeded", False),
+            (1, "Verification: OK\nCode: Unavailable", False),
+            (1, "Verification: OK\nconnection refused", False),
+            (1, "Verification error: self-signed certificate\nSSL alert number 48", False),
+            (1, "Could not open file or uri for loading client certificate", False)):
+        assert issuer_rejected(SimpleNamespace(returncode=code, stderr=message)) is expected
+        count += 1
     print("registry seed self-test: passed=" + str(count) + " failed=0")
     return 0
 
