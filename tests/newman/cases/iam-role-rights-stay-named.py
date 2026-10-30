@@ -87,11 +87,11 @@ def denied(saved=None, same=None):
     return lines
 
 
-def check(action, allowed, name):
+def check(action, allowed, name, module="registry", resource_type="registry_registry", resource_var="gdRegistryId", resource="registries"):
     step = Step(name=name, method="POST", path="/iam/v1/authorize:check",
         auth="jwtHumanEsc", body={"subject": "user:{{humanEscUserId}}",
-            "resource": {"type": "registry_registry", "id": var("gdRegistryId")},
-            "action": "registry.registries." + action},
+            "resource": {"type": resource_type, "id": var(resource_var)},
+            "action": module + "." + resource + "." + action},
         test_script=[*assert_status(200),
             "pm.test('exact authorization decision', () => pm.expect(pm.response.json().allowed).to.eql(" + str(allowed).lower() + "));"])
     if allowed:
@@ -120,6 +120,7 @@ ve = {"subjects": [{"type": "SUBJECT_TYPE_SERVICE_ACCOUNT", "id": var("escSa")}]
 case(1, "delete cannot grant; wildcard twin can", [
     *empty(), *sa("escSa"), *role("escGrantRole", "registry", "registries", ["get"]),
     *role("escDelete", "iam", "project", ["delete"]), *grant("escHold", "escDelete"),
+    check("delete", True, "delete-binding-is-visible", "iam", "iam_project", "gdRegistryProjectId", "project"),
     Step(name="delete-holder-cannot-grant", method="POST", path="/iam/v1/accessBindings",
          body=ve, auth=HUMAN, test_script=denied()),
     *remove("/iam/v1/accessBindings", "escHold"),
@@ -131,6 +132,7 @@ case(1, "delete cannot grant; wildcard twin can", [
 
 case(2, "delete-only and update/delete twin", [
     *empty(), *role("escDelete", "registry", "registries", ["delete"]), *grant("escHold", "escDelete"),
+    check("delete", True, "delete-binding-is-visible"),
     check("update", False, "delete-does-not-update"), check("delete", True, "delete-is-allowed"),
     *remove("/iam/v1/accessBindings", "escHold"),
     *role("escBoth", "registry", "registries", ["update", "delete"]), *grant("escTwinHold", "escBoth"),
