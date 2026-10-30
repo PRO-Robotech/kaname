@@ -128,6 +128,25 @@ type InternalIAMServiceClient interface {
 	// module. Called by the vpc/compute/nlb outbox-drainer over mTLS so
 	// those modules никогда не ходят в FGA напрямую — только через IAM.
 	//
+	// Для типа из живого каталога отношение и тип субъекта должны входить в
+	// политику записи манифеста (parents / writes). Иначе PERMISSION_DENIED,
+	// message = "permission denied", без деталей; политика судится до вывода.
+	// Kaname выводит родителя по субъекту указателя либо фактам указателей объекта
+	// и сверяет присланные поля области и цепь со своей иерархией, не дописывая их.
+	// Нет опоры либо сведения расходятся: FAILED_PRECONDITION,
+	// message = "<object> parent scope does not match", ErrorInfo.reason =
+	// "PARENT_SCOPE_MISMATCH". Ничего не записывается; после регистрации
+	// отсутствовавшего контейнера повтор может пройти.
+	//
+	// Для типа с permanentProject: true первая регистрация закрепляет проект
+	// объекта навсегда, в том числе после снятия регистрации. Другой проект в
+	// parent_project_id или любом звене project цепи: FAILED_PRECONDITION,
+	// message = "<object> is bound to another project", ErrorInfo.reason =
+	// "OBJECT_BOUND_TO_OTHER_PROJECT"; этот отказ предпочитается отказу вывода.
+	// Оба FAILED_PRECONDITION несут domain службы iam и metadata resource_type,
+	// resource_id; выведенная область и проект привязки в ответе не раскрываются.
+	// При отказе ни зеркало, ни цепь, ни факт отношения, ни событие не записываются.
+	//
 	// ИДЕМПОТЕНТНО (контракт): повтор того же (subject_id, relation, object) →
 	// gRPC OK, НЕ AlreadyExists. От этого зависит at-least-once outbox-retry —
 	// drainer может ретраить безопасно.
@@ -410,6 +429,25 @@ type InternalIAMServiceServer interface {
 	// (subject holds `relation` on `object`) on behalf of the resource-owning
 	// module. Called by the vpc/compute/nlb outbox-drainer over mTLS so
 	// those modules никогда не ходят в FGA напрямую — только через IAM.
+	//
+	// Для типа из живого каталога отношение и тип субъекта должны входить в
+	// политику записи манифеста (parents / writes). Иначе PERMISSION_DENIED,
+	// message = "permission denied", без деталей; политика судится до вывода.
+	// Kaname выводит родителя по субъекту указателя либо фактам указателей объекта
+	// и сверяет присланные поля области и цепь со своей иерархией, не дописывая их.
+	// Нет опоры либо сведения расходятся: FAILED_PRECONDITION,
+	// message = "<object> parent scope does not match", ErrorInfo.reason =
+	// "PARENT_SCOPE_MISMATCH". Ничего не записывается; после регистрации
+	// отсутствовавшего контейнера повтор может пройти.
+	//
+	// Для типа с permanentProject: true первая регистрация закрепляет проект
+	// объекта навсегда, в том числе после снятия регистрации. Другой проект в
+	// parent_project_id или любом звене project цепи: FAILED_PRECONDITION,
+	// message = "<object> is bound to another project", ErrorInfo.reason =
+	// "OBJECT_BOUND_TO_OTHER_PROJECT"; этот отказ предпочитается отказу вывода.
+	// Оба FAILED_PRECONDITION несут domain службы iam и metadata resource_type,
+	// resource_id; выведенная область и проект привязки в ответе не раскрываются.
+	// При отказе ни зеркало, ни цепь, ни факт отношения, ни событие не записываются.
 	//
 	// ИДЕМПОТЕНТНО (контракт): повтор того же (subject_id, relation, object) →
 	// gRPC OK, НЕ AlreadyExists. От этого зависит at-least-once outbox-retry —

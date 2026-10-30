@@ -465,10 +465,16 @@ type RegisterResourceRequest struct {
 	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Parent project id ресурса (`prj…`), если ресурс project-scoped.
 	// Кладется в mirror ради containment (объект «под scope») SAME-DB, без ребра
-	// iam→owner. Пусто для не-project-scoped объектов.
+	// iam→owner. Kaname сверяет с выведенной иерархией и не дописывает поле.
+	// Для permanentProject: true обязательно, иначе INVALID_ARGUMENT с
+	// field_violations.field = "parent_project_id"; также обязательно звено
+	// project:<id> в parent_chain, иначе INVALID_ARGUMENT по "parent_chain".
+	// При обоих нарушениях первым называется parent_project_id.
+	// Пусто для не-project-scoped объектов без объявления permanentProject.
 	ParentProjectId string `protobuf:"bytes,6,opt,name=parent_project_id,json=parentProjectId,proto3" json:"parent_project_id,omitempty"`
 	// Parent account id ресурса (`acc…`), если применимо. Mirror /
-	// containment на account-scope.
+	// containment на account-scope. Kaname сверяет с выведенной иерархией
+	// и не дописывает отсутствующее поле.
 	ParentAccountId string `protobuf:"bytes,7,opt,name=parent_account_id,json=parentAccountId,proto3" json:"parent_account_id,omitempty"`
 	// Монотонный per-object source-version. Маркер «версии
 	// состояния» ресурса у владельца (compute), проставляемый в момент эмита
@@ -493,23 +499,12 @@ type RegisterResourceRequest struct {
 	// области выдачи и из каскада: вопрос о нём задаётся, ответ «нет», и это
 	// неотличимо от честного отказа.
 	//
-	// АДДИТИВНО: старые вызывающие остаются валидными, номера не переиспользуются.
-	//
-	// ПУСТАЯ ЦЕПЬ — ЭТО УТВЕРЖДЕНИЕ «ПРЕДКОВ НЕТ», А НЕ УМОЛЧАНИЕ. Здесь стояло
-	// обратное — что iam при пустом поле выведет предков из двух прежних, «ровно
-	// как раньше». Он этого не делает и делать не должен: цепь есть СОСТОЯНИЕ, и
-	// применённая регистрация заменяет набор рёбер объекта целиком, иначе право
-	// пережило бы перенос объекта в другую область. Следствие, названное прямо:
-	// регистрация без цепи не «ничего не меняет», а СТИРАЕТ уже записанных
-	// предков. Вывод из двух полей области делает ВЛАДЕЛЕЦ на своей стороне
-	// (pkg/ownerregister.ParentChain) — тот, кто знает, глубже ли его иерархия;
-	// iam чужой формы не додумывает. Свойство «каждый потребитель называет цепь»
-	// держится гейтом по дереву (internal/repohygiene), а не этим абзацем.
-	//
-	// ПРИНЯТЬ И НЕ ЗАПИСАТЬ — ЗАПРЕЩЕНО (`api-conventions.md`). Поле обязано иметь
-	// читателя в прод-коде iam с той же фазы, в которой появилось: иначе продукт
-	// обещает возможность, которой нет, а форма E получает объект без предка —
-	// то есть ровно тот дефект, ради которого поле и заводится.
+	// Kaname сверяет каждое присланное звено с выведенной иерархией родителя,
+	// включая порядок; пропущенные звенья не дописывает. Пустая цепь —
+	// утверждение «предков нет»: принятая регистрация заменяет рёбра целиком.
+	// Для permanentProject: true требуется хотя бы одно звено project:<id>;
+	// каждое такое звено сверяется с неизменной привязкой объекта к проекту.
+	// Вызывающий явно передаёт цепь, в том числе при повторной регистрации.
 	ParentChain   []string `protobuf:"bytes,9,rep,name=parent_chain,json=parentChain,proto3" json:"parent_chain,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
