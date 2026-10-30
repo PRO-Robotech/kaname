@@ -1,0 +1,14 @@
+35a2dad00a52c18e2fe1cc44cc6b299a6d015022e78ad67e5f35898cb9a7a426  raw/REPORT-R7-1-S1-scale-grid.txt
+4de24b9858f2cf249ded5397a1e0c465370b44d7845149e2c215aaceb7695f35  raw/REPORT-R7-2-strength.txt
+326a1284d53816da644be5fdf9217b5ea00715f46d62931d2f6d8a3e7525457a  raw/REPORT-R7-2-write-delete.txt
+a62c44e7e5a5d7d67a764194f161ee7423d71f3365bfcf2eaaf534f72a54a87d  raw/REPORT-R7-3-matrix-volume.txt
+d8b9812ba58b05f14a92449fb50d7c0549bdafaa45c4a3bb58d6dc6d2ccd8378  manifests/r71.manifest.json
+28bcf2fef7caff8435d1533bfeec02f00c4189ea9347872c02088b4d10079e2b  manifests/r72.manifest.json
+06242639d2e67df5aa1d0dc314e35748b1eecc606137f6f89c01be707eab1dc7  manifests/r73.manifest.json
+1912448fe6fec797e067a2d82744eb5ba281fa715c16e8961d69353452813e68  manifests/writer.manifest.json
+42287628ca3ad7b60840c708aa36d43097bda1b6d4062f445d0f03dcc02ffaf9  plan-v3.json
+5edebb8d9cf34af1d1adb4f431e215070b33533c5e3145766f210ac0beab70fe  README.md
+a54ac3681b774c26132bf499a5cb2aad888f2defc75664cf37299150b1c050af  ../../../../internal/repo/kaname/pg/scalegrid/REPORT-R7-1-S1-scale-grid.txt
+41394a9bdd702e92497647a14954644811286472722c0f70e74b6738c0c65eb1  ../../../../internal/repo/kaname/pg/scalegrid/REPORT-R7-2-strength.txt
+dc1b270a2ca2e3e7817ebda98f3da303cc4b09e42fc8881cc6366d537397cd33  ../../../../internal/repo/kaname/pg/scalegrid/REPORT-R7-3-matrix-volume.txt
+6add2242f8d77f10a60cc71e325ec53255199b03db4fc49ea9da3a79a949e4c2  ../../../../internal/repo/kaname/pg/scalegrid/REPORT-R7-2-write-delete.txt
