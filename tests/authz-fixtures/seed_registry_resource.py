@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import fcntl
+import hashlib
 import json
 import os
 import pathlib
@@ -14,11 +15,12 @@ import re
 import secrets
 import shutil
 import subprocess
+import tempfile
 
 import seed_own_stand as own
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-KEYS = ("gdRegistryId", "gdRegistryProjectId")
+KEYS = ("gdRegistryId", "gdRegistryProjectId", "escRoleEdit", "escGroupEdit")
 PROTO = "kaname/cloud/iam/v1/internal_iam_service.proto"
 SERVICE = "kaname.cloud.iam.v1.InternalIAMService/"
 
@@ -73,12 +75,16 @@ class Registrar:
                      "-import-path", str(own.module_proto_root()), "-proto", PROTO]
         self.address = address
 
-    def call(self, method, body):
+    def request(self, method, body):
         try:
             proc = subprocess.run(self.args + ["-d", json.dumps(body), self.address, SERVICE + method],
                                   capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired):
             raise own.Unmet("внутренний слушатель не ответил") from None
+        return proc
+
+    def call(self, method, body):
+        proc = self.request(method, body)
         if proc.returncode:
             error = proc.stderr.lower()
             if any(word in error for word in ("connection refused", "no such host", "context deadline")):
@@ -89,6 +95,54 @@ class Registrar:
             return json.loads(proc.stdout)
         except json.JSONDecodeError:
             raise own.Finding(method + ": ответ не JSON") from None
+
+    def refused(self, row, tls=False):
+        proc = self.request("RegisterResource", row)
+        message = proc.stderr.lower()
+        matches = ("tls" in message and "certificate" in message) if tls else any(
+            code in message for code in ("code: permissiondenied", "code: unauthenticated"))
+        if proc.returncode == 0 or not matches:
+            raise own.Finding("отрицательный контроль регистрации не получил свой отказ")
+
+
+def live_refusals(registrar, row, pki):
+    """Та же цель и исправный близнец до и после каждой отрицательной подачи."""
+    def paired(other, body, tls=False):
+        prove(registrar, row)
+        other.refused(body, tls=tls)
+        prove(registrar, row)
+
+    # Доверенный лист службы не является объявленной личностью писателя registry.
+    without_identity = Registrar(pki, registrar.address)
+    without_identity.args = [str(pki / "srv.crt") if value == str(pki / "registry.crt")
+                             else str(pki / "srv.key") if value == str(pki / "registry.key")
+                             else value for value in without_identity.args]
+    paired(without_identity, row)
+    foreign = dict(row, object="vpc_network:net" + row["object"].split(":", 1)[1][3:])
+    paired(registrar, foreign)
+    # Другая CA действительно подписывает лист с тем же SAN; серверу доверяем
+    # по прежней CA. Отказ проверяет клиентского издателя, не серверный TLS.
+    with tempfile.TemporaryDirectory(prefix="registry-issuer-") as directory:
+        other = pathlib.Path(directory)
+        shutil.copyfile(pki / "ca.crt", other / "ca.crt")
+        ext = other / "leaf.ext"
+        ext.write_text("basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\n"
+                       "extendedKeyUsage=clientAuth\nsubjectAltName=URI:spiffe://kaname.local/ns/kaname/sa/kacho-registry\n")
+        commands = [
+            ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+             "-subj", "/CN=untrusted-fixture-issuer", "-keyout", str(other / "issuer.key"), "-out", str(other / "issuer.crt")],
+            ["openssl", "req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=kacho-registry",
+             "-keyout", str(other / "registry.key"), "-out", str(other / "leaf.csr")],
+            ["openssl", "x509", "-req", "-in", str(other / "leaf.csr"), "-CA", str(other / "issuer.crt"),
+             "-CAkey", str(other / "issuer.key"), "-CAcreateserial", "-days", "1", "-extfile", str(ext),
+             "-out", str(other / "registry.crt")],
+        ]
+        for command in commands:
+            result = subprocess.run(command, capture_output=True, timeout=30)
+            if result.returncode:
+                raise own.Unmet("не удалось выпустить отрицательный клиентский лист")
+        paired(Registrar(other, registrar.address), row, tls=True)
+    print("registry live negatives: unrecognized identity, foreign module type, wrong issuer refused; paired positives passed")
 
 
 def prove(registrar, row):
@@ -112,10 +166,18 @@ def run(args):
               if item.get("enabled", True)}
     token, public = required(values, "jwtAccountAdminA"), required(values, "ownRestBaseUrl")
     project = required(values, "projectA1Id")
-    code, body = own.Http(pki).json_ask(public + "/iam/v1/projects/" + project, token=token)
+    http = own.Http(pki)
+    code, body = http.json_ask(public + "/iam/v1/projects/" + project, token=token)
     if code != 200 or body.get("accountId") != required(values, "accountAId"):
         raise own.Finding("проект не подтвердил свой аккаунт")
     registrar = Registrar(pki, args.grpc_addr)
+    roles = {}
+    for key, name in (("escRoleEdit", "iam.role.edit"), ("escGroupEdit", "iam.group.edit")):
+        role_id = own.builtin_role_id(http, public, token, name)
+        # Коллекция также вычисляет эти идентификаторы; сверяем с живым каталогом.
+        if role_id != "rol" + hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()[:17]:
+            raise own.Finding("идентификатор роли коллекции расходится с живым каталогом")
+        roles[key] = role_id
     ledger.parent.mkdir(parents=True, exist_ok=True)
     lock_fd = os.open(str(ledger) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
     with os.fdopen(lock_fd, "w") as lock:
@@ -126,7 +188,7 @@ def run(args):
         if ledger.exists():
             row = json.loads(ledger.read_text())
         else:
-            if any(values.get(key) for key in KEYS):
+            if any(values.get(key) for key in KEYS[:2]):
                 raise own.Finding("окружение называет registry без намерения владельца")
             row = intent(values)
             fd = os.open(ledger, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -135,17 +197,20 @@ def run(args):
                 out.flush()
                 os.fsync(out.fileno())
         validate_intent(row, values)
+        live_refusals(registrar, row, pki)
         patch = prove(registrar, row)
+        patch.update(roles)
         for key in KEYS:
             if values.get(key) and values[key] != patch[key]:
                 raise own.Finding("окружение расходится с ресурсом владельца: " + key)
         own.write_env(patch, env_file, env_file)
-    print("registry seed: регистрация и повтор приняты; точное родительство доказано; ключей записано 2")
+    print("registry seed: регистрация и повтор приняты; точное родительство доказано; ключей записано 4")
     return 0
 
 
 def self_test():
     import yaml
+    from types import SimpleNamespace
 
     fixture = yaml.safe_load((ROOT / "tests/authz-fixtures/registry-own-stand-fixture.yaml").read_text())
     assert fixture["module"] == "registry" and fixture["revision"] > 0
@@ -191,6 +256,21 @@ def self_test():
             count += 1
         else:
             raise AssertionError("ложный proof: " + failure)
+    for code, message, tls, expected in (
+            (1, "Code: PermissionDenied", False, True),
+            (1, "remote error: tls: bad certificate", True, True),
+            (0, "", False, False),
+            (1, "Code: Unavailable", False, False),
+            (1, "connection refused", True, False)):
+        probe = Registrar.__new__(Registrar)
+        probe.request = lambda *_: SimpleNamespace(returncode=code, stderr=message)
+        accepted = True
+        try:
+            probe.refused(row, tls=tls)
+        except own.Finding:
+            accepted = False
+        assert accepted is expected, "не тот класс отрицательного ответа"
+        count += 1
     print("registry seed self-test: passed=" + str(count) + " failed=0")
     return 0
 
