@@ -805,8 +805,8 @@ var formProbeInterceptorOptions = map[string]bool{
 	"ChainUnaryInterceptor": true, "ChainStreamInterceptor": true,
 }
 
-// formProbeAnchors — имена, по которым страж узнаёт в корне сборщик цепочки,
-// конструктор сервера, монтирование публичных служб и публичный адрес. У
+// formProbeAnchors — имена для разрешения сборщика в области пакета корня и
+// конструктора в пакете formProbeServerPackage; прочие якоря узнаются по имени. У
 // настоящего корня они ВЫВОДЯТСЯ (`formProbeRootAnchors`), у синтетического —
 // литералами таблицы инъекций.
 type formProbeAnchors struct {
@@ -817,20 +817,31 @@ type formProbeAnchors struct {
 	addrMethod     string // метод раздела, отдающий публичный адрес
 }
 
-// formProbeNoImports — импортёр разбора типов, не читающий ни одного пакета:
-// стражу нужна только тождественность объектов внутри корня (какой перечень
-// раскрыт, какой сервер обслуживает слушатель), а не типы зависимостей.
-type formProbeNoImports struct{}
+const formProbeServerPackage = "github.com/PRO-Robotech/corelib/grpcsrv"
 
-func (formProbeNoImports) Import(path string) (*types.Package, error) {
+// formProbeAnchorImports не читает зависимости. Пустой пакет конструктора
+// сохраняет объект PkgName и путь импорта, включая алиасы; объектов его членов
+// и их типов он не предоставляет. Остальные импорты остаются неразрешёнными.
+type formProbeAnchorImports struct{}
+
+func (formProbeAnchorImports) Import(path string) (*types.Package, error) {
+	if path == formProbeServerPackage {
+		pkg := types.NewPackage(path, "grpcsrv")
+		pkg.MarkComplete()
+		return pkg, nil
+	}
 	return nil, errors.New("страж провязки зависимостей не читает: " + path)
 }
 
 // formProbeChainReachesListener — собранная корнем цепочка доходит до
 // ПУБЛИЧНОГО слушателя (K6-N2), а не просто раскрыта где-то в той же функции.
 // По каждому результату сборщика `an.assembler` в не-тестовом коде страж
-// проходит путь от сборки до слушателя по ТОЖДЕСТВУ объектов (разбор типов
-// пакета корня, `go/types`), а не по совпадению имён:
+// связывает сборщик с объектом *types.Func области пакета корня, а перечни,
+// сервер и слушатель — по тождеству локальных объектов (`go/types`). Конструктор
+// узнаётся по объекту *types.PkgName квалификатора с путём formProbeServerPackage
+// и имени члена: это происхождение импорта, не полная типизация внешнего API.
+// Селекторы перехватчиков, Serve, Listen и публичного адреса, а также вызов
+// регистрации служб по-прежнему узнаются по имени. Шаги проверки:
 //
 //  1. результат присвоен имени, и имя РОЖДЕНО этой сборкой (`:=`): перечень,
 //     объявленный раньше, мог быть раскрыт или записан до неё (O01);
@@ -879,10 +890,17 @@ func (formProbeNoImports) Import(path string) (*types.Package, error) {
 //     «объявленный вне этой функции» либо «не обслуживает», а не молчание.
 func formProbeChainReachesListener(fset *token.FileSet, files []*ast.File, an formProbeAnchors) []string {
 	info := &types.Info{Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}}
-	conf := types.Config{Importer: formProbeNoImports{}, Error: func(error) {}}
+	conf := types.Config{Importer: formProbeAnchorImports{}, Error: func(error) {}}
 	// Ошибки типов ожидаемы (зависимостей разбор не читает) и вердиктом не
 	// являются: тождество объектов корня от них не зависит.
-	_, _ = conf.Check("main", fset, files, info)
+	pkg, _ := conf.Check("main", fset, files, info)
+	if pkg == nil {
+		return []string{"пакет корня не разобран — якорь сборщика не разрешён"}
+	}
+	assembler, ok := pkg.Scope().Lookup(an.assembler).(*types.Func)
+	if !ok || assembler.Parent() != pkg.Scope() {
+		return []string{"сборщик " + an.assembler + " не объявлен функцией пакета корня"}
+	}
 	var (
 		out      []string
 		assigned int
@@ -896,7 +914,15 @@ func formProbeChainReachesListener(fset *token.FileSet, files []*ast.File, an fo
 			w := newFormProbeWiring(fset, info, fn.Body)
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				as, ok := n.(*ast.AssignStmt)
-				if !ok || len(as.Rhs) != 1 || formProbeCallee(as.Rhs[0]) != an.assembler {
+				if !ok || len(as.Rhs) != 1 {
+					return true
+				}
+				call, ok := as.Rhs[0].(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				callee, ok := call.Fun.(*ast.Ident)
+				if !ok || info.Uses[callee] != assembler {
 					return true
 				}
 				assigned++
@@ -915,7 +941,8 @@ func formProbeChainReachesListener(fset *token.FileSet, files []*ast.File, an fo
 	return out
 }
 
-// formProbeCallee — имя вызываемого: `f(…)` и `<пакет>.f(…)`; не вызов — пусто.
+// formProbeCallee — написание имени вызываемого для диагностики и проверок
+// формы остальных селекторов. Идентичность сборщика и конструктора им не судится.
 func formProbeCallee(e ast.Expr) string {
 	c, ok := e.(*ast.CallExpr)
 	if !ok {
@@ -1039,6 +1066,22 @@ func (w *formProbeWiring) object(e ast.Expr) types.Object {
 		return obj
 	}
 	return w.info.Uses[id]
+}
+
+// serverConstructor связывает квалификатор с импортом, а не с одноимённой
+// местной переменной. Сам член пакета проверяется по имени: импортёр его API
+// не загружает и объект *types.Func для этого члена не строит.
+func (w *formProbeWiring) serverConstructor(c *ast.CallExpr, name string) bool {
+	sel, ok := c.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != name {
+		return false
+	}
+	qualifier, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	pkg, ok := w.info.Uses[qualifier].(*types.PkgName)
+	return ok && pkg.Imported().Path() == formProbeServerPackage
 }
 
 // spreadOf — раскрытие `<пакет>.<interceptor>(id...)` с ровно этим доводом.
@@ -1193,7 +1236,7 @@ func (w *formProbeWiring) linkProblem(as *ast.AssignStmt, i int, interceptor str
 	}
 	// Шаг 3: прямой довод конструктора сервера.
 	srvCall, ok := w.parent[spread].(*ast.CallExpr)
-	if !ok || formProbeCallee(srvCall) != an.newServer || !formProbeIsArg(srvCall, spread) {
+	if !ok || !w.serverConstructor(srvCall, an.newServer) || !formProbeIsArg(srvCall, spread) {
 		return "(" + id.Name + ") раскрыт не прямым доводом " + an.newServer + " (" + w.line(spread) +
 			") — до какого слушателя он доходит, не доказать"
 	}
@@ -1488,6 +1531,8 @@ func TestIAM_PNE_1_21_A_ClassCrossCheckNamesANarrowedVerb(t *testing.T) {
 // внутренний (свой перечень `iu`/`is`, внутренние службы и адрес). Без второго
 // сервера перестановку цепочек слушателей (O03) таблица различить не могла бы.
 const formProbeLawfulRoot = `package main
+import "github.com/PRO-Robotech/corelib/grpcsrv"
+func chain() ([]X, []X, error) { return nil, nil, nil }
 func serve() {
 	pubCreds, inCreds := creds()
 	u, s, err := chain()
@@ -1540,7 +1585,7 @@ func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
 		"законная: сервер объявлен var со значением — молчит": {
 			[]edit{{"pub := grpcsrv.NewServer(", "var pub = grpcsrv.NewServer("}}, 0, nil},
 		"сервер объявлен вне функции": {
-			[]edit{{"package main\n", "package main\nvar pub *grpc.Server\n"}, {pubLine, pubSet}},
+			[]edit{{"func serve() {", "var pub *grpc.Server\nfunc serve() {"}, {pubLine, pubSet}},
 			2, []string{"объявленный вне этой функции"}},
 		"законная: адрес прямым доводом Listen — молчит": {
 			[]edit{{`net.Listen("tcp", addr)`, `net.Listen("tcp", cfg.APIServer.ListenAddress())`}}, 0, nil},
@@ -1573,7 +1618,7 @@ func TestIAM_PNE_1_21_A_ChainReachesTheListenerInjection(t *testing.T) {
 				{pubArgs, "grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...), bypass)"}},
 			2, []string{"несёт сверх неё звенья"}},
 		"довод конструктора — имя, рождённое вне функции": {
-			[]edit{{"package main\n", "package main\nvar extra grpc.ServerOption\n"},
+			[]edit{{"func serve() {", "var extra grpc.ServerOption\nfunc serve() {"},
 				{pubArgs, "grpc.ChainUnaryInterceptor(u...), grpc.ChainStreamInterceptor(s...), extra)"}},
 			2, []string{"имя, рождённое не в этой функции"}},
 		"O03 публичный сервер несёт сверх цепочки звено": {
