@@ -49,7 +49,7 @@ func TestReplaceOnce_RefusesAnAbsentOrRepeatedMark(t *testing.T) {
 		"метки нет":    {"WHERE true", "0 раз"},
 		"метка дважды": {"(" + armPredicateMark + ") AND (" + armPredicateMark + ")", "2 раз"},
 	} {
-		got, err := replaceOnce(c.tmpl, armPredicateMark, "x")
+		got, err := replaceOnce(c.tmpl, "x")
 		if !errors.Is(err, errTemplateMark) {
 			t.Errorf("%s: ошибка %v, ждали errTemplateMark", name, err)
 			continue
@@ -61,7 +61,7 @@ func TestReplaceOnce_RefusesAnAbsentOrRepeatedMark(t *testing.T) {
 			t.Errorf("%s: ошибка не называет метку и число вхождений: %q", name, msg)
 		}
 	}
-	got, err := replaceOnce("WHERE ("+armPredicateMark+")", armPredicateMark, "p")
+	got, err := replaceOnce("WHERE ("+armPredicateMark+")", "p")
 	if err != nil || got != "WHERE (p)" {
 		t.Errorf("метка ровно один раз: %q, %v", got, err)
 	}

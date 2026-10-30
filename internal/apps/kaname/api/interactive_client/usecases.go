@@ -25,8 +25,8 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
-// resourceKind — the noun used in the malformed-id message. One constant, so the
-// sync format check and the not-found tone cannot drift apart.
+// resourceKind — имя вида в сообщении о неверной форме идентификатора. Одна
+// константа не даёт разойтись синхронной проверке формы и тексту отсутствия.
 const resourceKind = "interactive client"
 
 // Способы аутентификации клиента на токен-эндпоинте — словарь схемы
@@ -37,20 +37,19 @@ const resourceKind = "interactive client"
 // здесь: колонку пишет реестр этой службы, а читает церемония фундамента
 // (`oauth_ceremony_vaults.go`), и два словаря одной колонки разошлись бы молча.
 
-// grantTypesInteractive — the ONLY shape this resource registers. A constant and
-// not a request field: the resource exists precisely to produce this shape, and
-// offering a choice would offer something no caller can evaluate and no code
-// downstream reads.
+// grantTypesInteractive — ЕДИНСТВЕННАЯ форма, которую регистрирует этот ресурс.
+// Это константа, а не поле запроса: ресурс существует именно ради этой формы.
+// Предложенный выбор вызывающий не смог бы оценить, и код ниже его не читает.
 var grantTypesInteractive = []string{"authorization_code", "refresh_token"}
 
-// validateID — malformed own-id → sync INVALID_ARGUMENT, always the first
-// statement of an RPC that takes one. Without it a malformed id reaches the
-// store and returns NOT_FOUND, which asserts the absence of a resource the
-// caller never named.
+// validateID — неверная форма своего идентификатора даёт синхронный
+// INVALID_ARGUMENT; это всегда первая проверка принимающего его RPC. Без неё
+// неверный идентификатор доходит до хранилища и возвращает NOT_FOUND,
+// утверждая отсутствие ресурса, которого вызывающий не называл.
 //
-// corevalidate.ResourceID lets the EMPTY string through by contract, so the
-// required-check is made here rather than assumed: an empty id would otherwise
-// travel on and come back as `InteractiveClient  not found`.
+// corevalidate.ResourceID по контракту пропускает ПУСТУЮ строку, поэтому
+// обязательность проверяется здесь явно: иначе пустой идентификатор прошёл бы
+// дальше и вернулся как `InteractiveClient  not found`.
 func validateID(id string) error {
 	if id == "" {
 		return shared.InvalidArg("interactive_client_id", "interactive_client_id: required")
@@ -58,9 +57,9 @@ func validateID(id string) error {
 	return corevalidate.ResourceID(resourceKind, ids.PrefixInteractiveClientHyphen, id)
 }
 
-// parseNameFilter — the whitelist is one field (`name=`), matching the platform
-// filter phase. Anything else is refused BY NAME rather than ignored: a filter
-// silently dropped returns a page the caller did not ask for.
+// parseNameFilter — разрешено одно поле (`name=`), в соответствии с фазой
+// фильтрации платформы. Всё прочее отвергается ПО ИМЕНИ, а не игнорируется:
+// молча снятый фильтр вернул бы страницу, которой вызывающий не просил.
 func parseNameFilter(filter string) (string, error) {
 	if strings.TrimSpace(filter) == "" {
 		return "", nil
@@ -79,13 +78,13 @@ func parseNameFilter(filter string) (string, error) {
 
 // ── Get ──────────────────────────────────────────────────────────────────────
 
-// GetUseCase — sync read of one client.
+// GetUseCase — синхронное чтение одного клиента.
 type GetUseCase struct{ repo clientRepo }
 
-// NewGetUseCase — constructor.
+// NewGetUseCase — конструктор.
 func NewGetUseCase(r clientRepo) *GetUseCase { return &GetUseCase{repo: r} }
 
-// Execute — direct-read lane: a well-formed id with no row is NOT_FOUND.
+// Execute — прямое чтение: правильная форма идентификатора без строки даёт NOT_FOUND.
 func (uc *GetUseCase) Execute(ctx context.Context, id string) (domain.InteractiveClient, error) {
 	if err := validateID(id); err != nil {
 		return domain.InteractiveClient{}, err
@@ -99,23 +98,23 @@ func (uc *GetUseCase) Execute(ctx context.Context, id string) (domain.Interactiv
 
 // ── List ─────────────────────────────────────────────────────────────────────
 
-// ListUseCase — sync cursor-paginated read.
+// ListUseCase — синхронное чтение страниц с курсором.
 type ListUseCase struct{ repo clientRepo }
 
-// NewListUseCase — constructor.
+// NewListUseCase — конструктор.
 func NewListUseCase(r clientRepo) *ListUseCase { return &ListUseCase{repo: r} }
 
-// ListResult — one page plus the cursor for the next.
+// ListResult — страница и курсор следующей.
 type ListResult struct {
 	Clients       []domain.InteractiveClient
 	NextPageToken string
 }
 
-// Execute — pagination format is validated FIRST, so a garbage token or an
-// out-of-range page size is INVALID_ARGUMENT independently of what the caller
-// holds and of what the store contains. `page_size` out of range is REJECTED,
-// never clamped: silent clamping returns a different page than the one asked
-// for and the caller never learns of it.
+// Execute — форма пагинации проверяется ПЕРВОЙ, поэтому негодный токен или
+// размер страницы вне диапазона даёт INVALID_ARGUMENT независимо от прав
+// вызывающего и содержимого хранилища. `page_size` вне диапазона ОТВЕРГАЕТСЯ,
+// а не подрезается: молчаливая подрезка вернула бы другую страницу, и вызывающий
+// об этом не узнал бы.
 func (uc *ListUseCase) Execute(ctx context.Context, pageSize int64, pageToken, filter string) (ListResult, error) {
 	if pageSize < 0 || pageSize > int64(shared.MaxListPageSize) {
 		return ListResult{}, shared.InvalidArg("page_size", "Illegal argument page_size")
@@ -141,9 +140,9 @@ func (uc *ListUseCase) Execute(ctx context.Context, pageSize int64, pageToken, f
 
 // ── Create ───────────────────────────────────────────────────────────────────
 
-// CreateUseCase — registers the client at the service's own registry, then
-// records it. The client is confidential and its secret is shown once, in the
-// answer of this call (kaname#405).
+// CreateUseCase — регистрирует клиента в собственном реестре службы, затем
+// записывает его. Клиент конфиденциальный; секрет показывается один раз,
+// в ответе этого вызова (kaname#405).
 type CreateUseCase struct {
 	repo      clientRepo
 	provider  ProviderClients
@@ -152,19 +151,18 @@ type CreateUseCase struct {
 	logger    *slog.Logger
 }
 
-// providerReleaseTimeout — upper bound on the release call. Detached from the
-// caller's cancellation: the release must run even when the request is already
-// gone.
+// providerReleaseTimeout — верхний предел вызова отзыва регистрации. Отвязан
+// от отмены вызывающего: отзыв должен состояться и тогда, когда запроса
+// уже нет.
 const providerReleaseTimeout = 5 * time.Second
 
-// releaseProviderClient removes a registration made before the row was
-// committed, by a direct idempotent deregistration.
+// releaseProviderClient снимает регистрацию, сделанную до коммита строки,
+// прямым идемпотентным отзывом.
 //
-// A DURABLE intent used to be the primary path here, for the registration made
-// at an external identity provider: the intent survived a dead process and a
-// failing release call. The external provider is gone (kaname#363) — the
-// registry is our own, the release is a call to it — and the intent writer went
-// with the provider.
+// Прежде основным путём было СОХРАНЁННОЕ намерение отзыва регистрации у внешнего
+// поставщика личности: оно переживало гибель процесса и отказ вызова отзыва.
+// Внешний поставщик снят (kaname#363); реестр теперь собственный, отзыв — вызов
+// к нему. Писатель намерения снят вместе с поставщиком.
 func (uc *CreateUseCase) releaseProviderClient(ctx context.Context, clientID, reason string) {
 	if clientID == "" {
 		return
@@ -173,34 +171,34 @@ func (uc *CreateUseCase) releaseProviderClient(ctx context.Context, clientID, re
 	defer cancel()
 
 	if err := uc.provider.Deregister(relCtx, clientID); err != nil && uc.logger != nil {
-		// Neither an intent nor a release: the registration stays at the
-		// provider, and this line is the only handle left to remove it by hand.
+		// Нет ни намерения, ни отзыва: регистрация остаётся у поставщика,
+		// и эта строка — единственная зацепка для ручного снятия.
 		uc.logger.ErrorContext(relCtx,
 			"interactive client: provider registration left behind after a failed insert",
 			"provider_client_id", clientID, "reason", reason, "err", err.Error())
 	}
 }
 
-// NewCreateUseCase — constructor. `audiences` comes from iam's own configuration
-// (Р2): the caller never supplies it and it is echoed output-only.
+// NewCreateUseCase — конструктор. `audiences` берётся из собственной конфигурации
+// iam (Р2): вызывающий его не задаёт, значение возвращается только в ответе.
 func NewCreateUseCase(r clientRepo, p ProviderClients, ops operations.Repo, audiences []string, logger *slog.Logger) *CreateUseCase {
 	return &CreateUseCase{repo: r, provider: p, opsRepo: ops, audiences: audiences, logger: logger}
 }
 
-// Execute — validate → persist Operation → register at the registry → check
-// the secret triple → insert the row with the verification value → split the
-// response bodies (stored without the secret, shown with it).
+// Execute — проверка → сохранение Operation → регистрация в реестре → сверка
+// тройки секрета → вставка строки с проверочным значением → разделение тел
+// ответа (хранится без секрета, показывается с ним).
 //
-// WHY THE PROVIDER IS CONTACTED BEFORE THE ROW IS WRITTEN, AND WHAT PAYS FOR IT.
-// The row must carry the provider's client id, so registration comes first. If
-// the insert then fails — most often because the name is taken — the client that
-// was just registered is deregistered again. Without that compensation an orphan
-// would remain at the provider that the platform has no record of and no way to
-// name: nothing would ever remove it, and it would keep accepting ceremonies.
+// ПОЧЕМУ ВЫЗОВ ПОСТАВЩИКА ПРЕДШЕСТВУЕТ ЗАПИСИ СТРОКИ И ЧЕМ ЭТО ОПЛАЧЕНО.
+// Строка обязана нести идентификатор клиента поставщика, поэтому регистрация
+// идёт первой. Если вставка затем отказывает, обычно из-за занятого имени,
+// только что зарегистрированный клиент отзывается. Без компенсации у поставщика
+// остался бы сирота, которого платформа не записала и не может назвать:
+// никто не снял бы его, и он продолжал бы принимать церемонии.
 //
-// The Operation row is persisted BEFORE either side effect, so the id the caller
-// receives is always pollable; a failure is recorded on it as a terminal error
-// rather than leaving the caller polling a row that does not exist.
+// Строка Operation сохраняется ДО обоих побочных действий, поэтому полученный
+// вызывающим идентификатор всегда доступен для опроса. Отказ записывается
+// терминальной ошибкой, а не оставляет вызывающего опрашивать отсутствующую строку.
 func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteractiveClientRequest) (*operationpb.Operation, error) {
 	id := ids.NewHyphenID(ids.PrefixInteractiveClientHyphen)
 	c := domain.InteractiveClient{
@@ -218,8 +216,8 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		PostLogoutRedirectURIs: req.GetPostLogoutRedirectUris(),
 		Status:                 domain.InteractiveClientActive,
 	}
-	// Validation runs against the same entity that will be stored, so the rule
-	// the caller is judged by and the rule the row satisfies are one rule.
+	// Проверяется та же сущность, которая будет сохранена: правило для вызывающего
+	// и правило, которому удовлетворяет строка, — одно правило.
 	if err := c.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
@@ -236,10 +234,10 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		return nil, fmt.Errorf("persist operation: %w", err)
 	}
 
-	fail := func(err error) (*operationpb.Operation, error) {
+	fail := func(err error) error {
 		gerr := shared.MapRepoErr(err)
 		_ = uc.opsRepo.MarkError(ctx, op.ID, status.Convert(gerr).Proto())
-		return nil, gerr
+		return gerr
 	}
 	// failTraced — отказ пути, чья причина — НАШ текст: ответ реестра (в том
 	// числе срыв чеканки секрета), несогласие тройки, сборка тела ответа. Наружу
@@ -248,7 +246,7 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 	// следа нигде. Отказ ВСТАВКИ сюда не идёт намеренно: его причина — текст
 	// хранилища, и IC-SECRET-13 (б) требует, чтобы отказ вне словаря не эхал
 	// его и в журнал (`TestIntegration_IC13b_InternalInsertRefusalEchoesNothing`).
-	failTraced := func(err error) (*operationpb.Operation, error) {
+	failTraced := func(err error) error {
 		_ = shared.LogMappedErr(ctx, uc.logger, "InteractiveClient.Create", err, shared.MapRepoErr(err))
 		return fail(err)
 	}
@@ -261,14 +259,14 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		GrantTypes:             grantTypesInteractive,
 	})
 	if err != nil {
-		return failTraced(err)
+		return nil, failTraced(err)
 	}
 	// Согласие тройки «способ ⟺ материал ⟺ секрет» — ДО вставки (задача #405).
 	// Схема держит только одно направление; без этой проверки возможен клиент
 	// со способом секретом, которому нечего предъявить никогда.
 	if err := secretMaterialAgrees(pc); err != nil {
 		uc.releaseProviderClient(ctx, pc.ClientID, "registry answered a secret material that disagrees with the method")
-		return failTraced(err)
+		return nil, failTraced(err)
 	}
 	c.ClientID = pc.ClientID
 	c.GrantTypes = pc.GrantTypes
@@ -279,13 +277,10 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 	// писателя материала нет.
 	created, err := uc.repo.Insert(ctx, c, pc.SecretVerifier)
 	if err != nil {
-		// Compensate the half-done registration. The compensating intent cannot
-		// ride the insert's transaction — that transaction is precisely the one
-		// that failed — so it is committed on its own and delivered
-		// at-least-once, which is what makes it survive both a dead process and
-		// a provider that is itself the thing failing.
+		// При отказе вставки отзываем регистрацию прямым вызовом. Отмена запроса
+		// этот вызов не отменяет; его срок ограничен providerReleaseTimeout.
 		uc.releaseProviderClient(ctx, pc.ClientID, "client row was not inserted")
-		return fail(err)
+		return nil, fail(err)
 	}
 
 	// Тело для строки операции — без секрета, тело вызывающему — с ним (Р3).
@@ -300,7 +295,7 @@ func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteracti
 		uc.abandonCreated(ctx, created)
 		// Причина — только ТЕКСТОМ (%v), в цепочку она не входит нарочно:
 		// чужой признак в цепочке переклассифицировал бы отказ в MapRepoErr.
-		return failTraced(iamerr.Wrapf(iamerr.ErrInternal, "interactive client Create: %v", err))
+		return nil, failTraced(iamerr.Wrapf(iamerr.ErrInternal, "interactive client Create: %v", err))
 	}
 	if err := uc.opsRepo.MarkDone(ctx, op.ID, stored); err != nil && uc.logger != nil {
 		uc.logger.ErrorContext(ctx, "interactive client Create: operation complete failed",
@@ -350,28 +345,28 @@ func (uc *CreateUseCase) abandonCreated(ctx context.Context, created domain.Inte
 
 // ── Update ───────────────────────────────────────────────────────────────────
 
-// UpdateUseCase — applies the mutable fields.
+// UpdateUseCase — применяет изменяемые поля.
 type UpdateUseCase struct {
 	repo    clientRepo
 	opsRepo operations.Repo
 	logger  *slog.Logger
 }
 
-// NewUpdateUseCase — constructor.
+// NewUpdateUseCase — конструктор.
 func NewUpdateUseCase(r clientRepo, ops operations.Repo, logger *slog.Logger) *UpdateUseCase {
 	return &UpdateUseCase{repo: r, opsRepo: ops, logger: logger}
 }
 
-// mutableFields — the known-set the update mask is checked against.
+// mutableFields — известный набор полей для сверки маски обновления.
 var mutableFields = []string{"name", "description", "labels", "redirect_uris", "post_logout_redirect_uris"}
 
-// immutableFields — named separately so a mask naming one of them is refused BY
-// NAME. They must be checked BEFORE the known-set check: the known-set does not
-// contain them, so the generic "unknown field" answer would fire first and the
-// caller would never learn that the field exists and simply cannot be changed.
+// immutableFields — названы отдельно, чтобы маска с таким полем отвергалась
+// ПО ИМЕНИ. Проверяются ДО известного набора: их в нём нет, поэтому общий отказ
+// "unknown field" сработал бы первым и вызывающий не узнал бы, что поле существует,
+// но изменению не подлежит.
 var immutableFields = []string{"id", "created_at", "client_id", "audiences", "grant_types", "token_endpoint_auth_method", "status"}
 
-// Execute — mask discipline, then the write.
+// Execute — проверка маски, затем запись.
 func (uc *UpdateUseCase) Execute(ctx context.Context, req *iamv1.UpdateInteractiveClientRequest) (*operationpb.Operation, error) {
 	id := req.GetInteractiveClientId()
 	if err := validateID(id); err != nil {
@@ -379,7 +374,7 @@ func (uc *UpdateUseCase) Execute(ctx context.Context, req *iamv1.UpdateInteracti
 	}
 
 	paths := req.GetUpdateMask().GetPaths()
-	// Immutable first — see the comment on immutableFields.
+	// Сначала неизменяемые — см. комментарий у immutableFields.
 	for _, p := range paths {
 		for _, im := range immutableFields {
 			if normalizeFieldPath(p) == im {
@@ -405,9 +400,9 @@ func (uc *UpdateUseCase) Execute(ctx context.Context, req *iamv1.UpdateInteracti
 		return nil, shared.MapRepoErr(err)
 	}
 
-	// Empty mask → full-object PATCH over the mutable fields (api-conventions).
-	// The request message carries no immutable field at all, so there is nothing
-	// in the body to apply or to ignore beyond this set (kaname#562).
+	// Пустая маска — PATCH целого объекта по изменяемым полям (api-conventions).
+	// Сообщение запроса вовсе не несёт неизменяемых полей, поэтому вне этого набора
+	// в теле нечего применять или игнорировать (kaname#562).
 	set := make(map[string]bool, len(paths))
 	for _, p := range paths {
 		set[normalizeFieldPath(p)] = true
@@ -428,8 +423,8 @@ func (uc *UpdateUseCase) Execute(ctx context.Context, req *iamv1.UpdateInteracti
 	if all || set["post_logout_redirect_uris"] {
 		cur.PostLogoutRedirectURIs = req.GetPostLogoutRedirectUris()
 	}
-	// The updated entity is validated by the SAME rules as on Create — a mutable
-	// field must not be reachable through Update in a shape Create would refuse.
+	// Обновлённая сущность проверяется ТЕМИ ЖЕ правилами, что при Create:
+	// Update не должен пропускать изменяемое поле в форме, которую Create отвергнет.
 	if err := cur.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
@@ -467,7 +462,7 @@ func (uc *UpdateUseCase) Execute(ctx context.Context, req *iamv1.UpdateInteracti
 
 // ── Delete ───────────────────────────────────────────────────────────────────
 
-// DeleteUseCase — removes the client at the provider and its row.
+// DeleteUseCase — снимает клиента у поставщика и его строку.
 type DeleteUseCase struct {
 	repo     clientRepo
 	provider ProviderClients
@@ -475,18 +470,17 @@ type DeleteUseCase struct {
 	logger   *slog.Logger
 }
 
-// NewDeleteUseCase — constructor.
+// NewDeleteUseCase — конструктор.
 func NewDeleteUseCase(r clientRepo, p ProviderClients, ops operations.Repo, logger *slog.Logger) *DeleteUseCase {
 	return &DeleteUseCase{repo: r, provider: p, opsRepo: ops, logger: logger}
 }
 
-// Execute — idempotent by construction.
+// Execute — идемпотентен по построению.
 //
-// Deleting an already-absent client succeeds and reports the same code as the
-// first delete: the caller asked for the client to be gone, and it is. The row
-// is removed first and the provider-side deregistration follows only when a row
-// was actually taken — otherwise a repeated Delete would keep asking the
-// provider to remove something already removed.
+// Снятие уже отсутствующего клиента успешно и отвечает тем же кодом, что первое:
+// вызывающий просил отсутствия клиента, и тот отсутствует. Первой снимается строка;
+// отзыв у поставщика следует только тогда, когда строка действительно снята.
+// Иначе повторный Delete снова просил бы поставщика снять уже снятое.
 func (uc *DeleteUseCase) Execute(ctx context.Context, id string) (*operationpb.Operation, error) {
 	if err := validateID(id); err != nil {
 		return nil, err
@@ -512,9 +506,9 @@ func (uc *DeleteUseCase) Execute(ctx context.Context, id string) (*operationpb.O
 	}
 	if existed && removed.ClientID != "" {
 		if derr := uc.provider.Deregister(ctx, removed.ClientID); derr != nil {
-			// The row is already gone, so the platform can no longer name this
-			// provider client. Loud, never swallowed — this is the one line that
-			// makes a leftover registration findable.
+			// Строки уже нет, поэтому платформа больше не может назвать этого клиента
+			// поставщика. Отказ не проглатывается: эта строка позволяет найти
+			// оставшуюся регистрацию.
 			if uc.logger != nil {
 				uc.logger.ErrorContext(ctx,
 					"interactive client: row removed but provider deregistration failed",
@@ -525,9 +519,9 @@ func (uc *DeleteUseCase) Execute(ctx context.Context, id string) (*operationpb.O
 			return nil, gerr
 		}
 	}
-	// The response echoes the removed resource when there was one; on the
-	// idempotent repeat it echoes the id alone, because there is nothing left to
-	// describe and inventing a body would be describing a row that does not exist.
+	// Ответ возвращает снятый ресурс, если он был; при идемпотентном повторе —
+	// только идентификатор: описывать больше нечего, а выдуманное тело описало бы
+	// строку, которой нет.
 	removed.ID = domain.InteractiveClientID(id)
 	resp, merr := operationResponse(removed)
 	if merr != nil {
@@ -541,9 +535,9 @@ func (uc *DeleteUseCase) Execute(ctx context.Context, id string) (*operationpb.O
 	return shared.OperationToProto(&op), nil
 }
 
-// normalizeFieldPath — masks arrive in either snake_case (proto) or camelCase
-// (REST через grpc-gateway). Both name the same field, so both are accepted;
-// refusing one of them would make the answer depend on which door was used.
+// normalizeFieldPath — маски приходят в snake_case (proto) либо camelCase
+// (REST через grpc-gateway). Оба написания называют одно поле и принимаются;
+// отказ одному из них поставил бы ответ в зависимость от выбранного входа.
 func normalizeFieldPath(p string) string {
 	var b strings.Builder
 	for i := 0; i < len(p); i++ {

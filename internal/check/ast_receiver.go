@@ -12,9 +12,9 @@ package check
 import "go/ast"
 
 // receiverTypeName — имя типа получателя без указателя; пусто, если метода нет.
-func receiverTypeName(fn *ast.FuncDecl) (typeName, recvName string) {
+func receiverTypeName(fn *ast.FuncDecl) (typeName string) {
 	if fn.Recv == nil || len(fn.Recv.List) == 0 {
-		return "", ""
+		return ""
 	}
 	field := fn.Recv.List[0]
 	switch t := field.Type.(type) {
@@ -25,8 +25,5 @@ func receiverTypeName(fn *ast.FuncDecl) (typeName, recvName string) {
 	case *ast.Ident:
 		typeName = t.Name
 	}
-	if len(field.Names) > 0 {
-		recvName = field.Names[0].Name
-	}
-	return typeName, recvName
+	return typeName
 }

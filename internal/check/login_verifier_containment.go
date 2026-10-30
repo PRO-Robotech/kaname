@@ -621,7 +621,7 @@ func (ix *lvIndex) indexFile(f *lvFile) {
 				ix.funcs[f.dir][d.Name.Name] = fn
 				continue
 			}
-			recvType, _ := receiverTypeName(d)
+			recvType := receiverTypeName(d)
 			if ix.methods[f.dir][recvType] == nil {
 				ix.methods[f.dir][recvType] = map[string]lvFunc{}
 			}
@@ -760,7 +760,7 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 				c.AccessorDecls++
 				// Разбор получателя — общий для гейтов пакета (`ast_receiver.go`):
 				// вторая копия одного разбора разошлась бы с первой молча.
-				recvType, _ := receiverTypeName(fn)
+				recvType := receiverTypeName(fn)
 				declWhere = append(declWhere, fmt.Sprintf("%s (получатель %s)", f.rel, recvType))
 			}
 		}

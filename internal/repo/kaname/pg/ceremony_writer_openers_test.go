@@ -328,7 +328,7 @@ func (r *HumanSessionRepo) Writer(ctx context.Context) (*humanSessionWriter, err
 }
 
 func (w *humanSessionWriter) EndSession(ctx context.Context) error {
-	_, err := revokeFamiliesOfSessionsTx(ctx, w.tx, nil, "x")
+	err := revokeFamiliesOfSessionsTx(ctx, w.tx, nil, "x")
 	return err
 }
 
@@ -338,7 +338,7 @@ func (w *humanSessionWriter) EndOtherSessions(ctx context.Context) error {
 }
 
 func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx) (int, error) {
-	return revokeFamiliesOfSessionsTx(ctx, tx, nil, "x")
+	return 0, revokeFamiliesOfSessionsTx(ctx, tx, nil, "x")
 }
 `
 
@@ -438,7 +438,7 @@ func (s *RegistrationStore) Writer(ctx context.Context) (*humanSessionWriter, er
 				return s + `
 func (r *HumanSessionRepo) Sweep(ctx context.Context) {
 	tx, _ := r.pool.Begin(ctx)
-	_, _ = revokeFamiliesOfSessionsTx(ctx, tx, nil, "x")
+	_ = revokeFamiliesOfSessionsTx(ctx, tx, nil, "x")
 }
 `
 			},

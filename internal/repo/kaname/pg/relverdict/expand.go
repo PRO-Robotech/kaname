@@ -200,7 +200,7 @@ SELECT 'group'::text,
 // сам, судил бы СВОЮ сборку: подстановка не того параметра прошла бы мимо него
 // ровно потому, что он подставляет свой.
 func expandQuerySQL(labelTable string, nesting bool) (string, error) {
-	sql, err := replaceOnce(expandSQL, armPredicateMark,
+	sql, err := replaceOnce(expandSQL,
 		grantArmPredicate("$7::text", "$1::text", "$2::text", "m.labels", nesting))
 	if err != nil {
 		return "", err

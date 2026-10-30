@@ -846,7 +846,7 @@ func (w *humanSessionWriter) EndSession(ctx context.Context, id domain.HumanSess
 	if !ended {
 		return false, nil
 	}
-	if _, rerr := revokeFamiliesOfSessionsTx(ctx, w.tx, []string{string(id)},
+	if rerr := revokeFamiliesOfSessionsTx(ctx, w.tx, []string{string(id)},
 		domain.FamilyRevokedBySessionEnd); rerr != nil {
 		return false, rerr
 	}
@@ -1077,7 +1077,7 @@ func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, set sessio
 	if rerr := rows.Err(); rerr != nil {
 		return nil, mapErr(rerr, "HumanSession.End", userID)
 	}
-	if _, rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
+	if rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
 		domain.FamilyRevokedBySessionEnd); rerr != nil {
 		return nil, rerr
 	}

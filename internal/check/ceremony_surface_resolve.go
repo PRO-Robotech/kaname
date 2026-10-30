@@ -489,7 +489,7 @@ func (r *strResolver) strNow(sp *surfaceSrcPkg, fk fkey, e ast.Expr) *strRes {
 	switch x := ast.Unparen(e).(type) {
 	case *ast.Ident:
 		if v, ok := sp.info.ObjectOf(x).(*types.Var); ok {
-			return r.variable(v, fk)
+			return r.variable(v)
 		}
 	case *ast.SelectorExpr:
 		if sel, ok := sp.info.Selections[x]; ok {
@@ -500,7 +500,7 @@ func (r *strResolver) strNow(sp *surfaceSrcPkg, fk fkey, e ast.Expr) *strRes {
 			break
 		}
 		if v, ok := sp.info.Uses[x.Sel].(*types.Var); ok {
-			return r.variable(v, fk)
+			return r.variable(v)
 		}
 	case *ast.BinaryExpr:
 		if x.Op == token.ADD {
@@ -536,10 +536,10 @@ func concat(a, b *strRes) *strRes {
 	return out
 }
 
-func (r *strResolver) variable(v *types.Var, fk fkey) *strRes {
+func (r *strResolver) variable(v *types.Var) *strRes {
 	ix := r.a.idx
 	if p, ok := ix.params[v]; ok {
-		return r.param(v, p)
+		return r.param(p)
 	}
 	res := newStrRes()
 	writes := ix.varWrites[v]
@@ -591,7 +591,7 @@ func (r *strResolver) field(f *types.Var) *strRes {
 	return res
 }
 
-func (r *strResolver) param(v *types.Var, p paramOf) *strRes {
+func (r *strResolver) param(p paramOf) *strRes {
 	if p.fk.lit != nil {
 		return leaf("параметр %s литерала функции %s", p.name, position(r.a.prog.fset, p.fk.lit.Pos()))
 	}

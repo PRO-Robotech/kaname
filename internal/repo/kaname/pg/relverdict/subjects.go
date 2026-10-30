@@ -182,7 +182,7 @@ SELECT g.subject
 // subjectsQuerySQL — ГОТОВЫЙ запрос перечисления субъектов для выбранной оси
 // меток (довод — у expandQuerySQL).
 func subjectsQuerySQL(labelTable string, nesting bool) (string, error) {
-	sql, err := replaceOnce(subjectsSQL, armPredicateMark,
+	sql, err := replaceOnce(subjectsSQL,
 		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels", nesting))
 	if err != nil {
 		return "", err
