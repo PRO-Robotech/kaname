@@ -97,7 +97,7 @@ func (uc *FinishAssertionUseCase) Execute(ctx context.Context, in FinishAssertio
 	now := uc.deps.Now().UTC()
 	cd, err := webauthnverify.ParseClientData(in.ClientDataJSON)
 	if err != nil {
-		return uc.refuse(RefusalMalformed)
+		return FinishAssertionOutput{}, uc.refuse(RefusalMalformed)
 	}
 	ch, found, err := uc.deps.Store.Challenge(ctx, cd.Challenge, in.UserID, domain.ChallengeForAssertion)
 	if err != nil {
@@ -132,21 +132,21 @@ func (uc *FinishAssertionUseCase) Execute(ctx context.Context, in FinishAssertio
 	})
 	switch {
 	case challengeReason != "":
-		return uc.refuse(challengeReason)
+		return FinishAssertionOutput{}, uc.refuse(challengeReason)
 	case !known:
-		return uc.refuse(RefusalUnknownCredential)
+		return FinishAssertionOutput{}, uc.refuse(RefusalUnknownCredential)
 	case key.UserID != in.UserID:
-		return uc.refuse(RefusalForeignKey)
+		return FinishAssertionOutput{}, uc.refuse(RefusalForeignKey)
 	case len(in.UserHandle) > 0 && !bytes.Equal(in.UserHandle, key.UserHandle):
-		return uc.refuse(RefusalUserHandle)
+		return FinishAssertionOutput{}, uc.refuse(RefusalUserHandle)
 	case verr != nil:
-		return uc.refuse(verifyRefusalOf(verr))
+		return FinishAssertionOutput{}, uc.refuse(verifyRefusalOf(verr))
 	}
 	// Счётчик: чтение классифицирует, инвариант держит оператор (Р6).
 	switch webauthnverify.JudgeCounter(key.SignCount, res.SignCount) {
 	case webauthnverify.CounterRegressed:
 		uc.deps.Observer.SignCountRegressionObserved()
-		return uc.refuse(RefusalCounter)
+		return FinishAssertionOutput{}, uc.refuse(RefusalCounter)
 	}
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
@@ -158,7 +158,7 @@ func (uc *FinishAssertionUseCase) Execute(ctx context.Context, in FinishAssertio
 		return FinishAssertionOutput{}, mapStoreErr(uc.deps, "access_keys.FinishAssertion.consume", err)
 	}
 	if !consumed {
-		return uc.refuse(RefusalChallengeConsumed)
+		return FinishAssertionOutput{}, uc.refuse(RefusalChallengeConsumed)
 	}
 	advanced, err := w.AdvanceSignCount(ctx, key.ID, key.SignCount, res.SignCount, now)
 	if err != nil {
@@ -167,7 +167,7 @@ func (uc *FinishAssertionUseCase) Execute(ctx context.Context, in FinishAssertio
 	if !advanced {
 		// Проигравший конкуренции (Ф7-20, ветвь б): сдвиг перехвачен другим
 		// утверждением того же ключа — отказ БЕЗ сигнала клонирования (Р6).
-		return uc.refuse(RefusalCounterRace)
+		return FinishAssertionOutput{}, uc.refuse(RefusalCounterRace)
 	}
 	if err := w.Commit(ctx); err != nil {
 		return FinishAssertionOutput{}, mapStoreErr(uc.deps, "access_keys.FinishAssertion.commit", err)
@@ -179,9 +179,9 @@ func (uc *FinishAssertionUseCase) Execute(ctx context.Context, in FinishAssertio
 	}, nil
 }
 
-func (uc *FinishAssertionUseCase) refuse(reason Refusal) (FinishAssertionOutput, error) {
+func (uc *FinishAssertionUseCase) refuse(reason Refusal) error {
 	uc.deps.Observer.AccessKeyRefusalObserved(LaneAssertion, reason)
-	return FinishAssertionOutput{}, assertionRefusal()
+	return assertionRefusal()
 }
 
 func verifyRefusalOf(err error) Refusal {

@@ -1008,67 +1008,19 @@ func runServe(cfg config.Config) error {
 		})
 	}
 
-	// Anti-anonymous guard перед мутирующими RPC: минимальная защита от
-	// анонимного создания Account/Project/AccessBinding/Group/SA/Role
-	// в дополнение к вопросу о доступе через AuthorizeService.
-	//
-	// Порядок: измеритель задержки (оборачивает всё) → recovery → личность вызывающего
-	// (publicIdentityUnary: сертификат, переданная личность от разрешённого
-	// отправителя, затем предъявленное удостоверение) → пер-RPC политика
-	// вызывающего → анти-аноним.
-	publicUnary := append([]grpc.UnaryServerInterceptor{
-		// Измеритель задержки первым — он оборачивает цепочку целиком, поэтому
-		// длительность и код накрывают ВЕСЬ вызов, включая вопрос о доступе.
-		// Стоя внутри решения о доступе, он оставил бы неизмеренным каждый отказ
-		// по правам — то есть исход, ради которого метрику и смотрят.
-		latency.UnaryServerInterceptor(grpcsrv.ListenerPublic),
-		// Восстановление после паники — сразу внутри метрик: паника в любом
-		// нижележащем перехватчике или обработчике становится записанным в журнал
-		// codes.Internal для ОДНОГО этого запроса, а не роняет весь процесс точки
-		// решения (метрики всё равно пишут код Internal, потому что восстановление
-		// стоит внутри них).
-		grpcsrv.UnaryPanicRecovery(logger),
-		// Самый внешний из перехватчиков авторизации, чтобы видеть отказ ЛЮБОГО из
-		// них и обработчика: прикладывает машиночитаемую причину, по которой судит
-		// клиент. Важнее всего это там, где iam сам решает авторизацию над данными
-		// (строки, отобранные по области): там край не делает проверки по RPC,
-		// ничто другое на пути не называет действия, и отказ по области был
-		// побайтно равен промаху каталога. См. deny_details.go.
-		authzguard.DenyDetailUnary(permRegistry),
-	}, publicIdentityUnary(cfg, presentedReader)...)
-	publicUnary = append(publicUnary,
-		publicCallerPolicy.Unary(),
-		addressGate.Unary(),
-		authzguard.AntiAnonymousUnary(logger),
-		// Дверь — ПОСЛЕДНЕЙ: субъект к этому месту уже назван и уже отсечён,
-		// если он аноним, поэтому вопрос к модели задаётся только о том, кого
-		// есть о чём спрашивать. Обратный порядок тратил бы обращение к модели
-		// на запрос, который всё равно отвергнут.
-		publicObjectDoor.Unary(),
-	)
-	publicStream := append([]grpc.StreamServerInterceptor{
-		// Срок жизни подписки — своя серия и своя сетка корзин: это другая
-		// величина, и общая с задержкой вызова не разрешала бы ни ту, ни другую.
-		latency.StreamServerInterceptor(grpcsrv.ListenerPublic),
-		grpcsrv.StreamPanicRecovery(logger),
-	}, publicIdentityStream(cfg, presentedReader)...)
-	publicStream = append(publicStream,
-		publicCallerPolicy.Stream(),
-		addressGate.Stream(),
-		authzguard.AntiAnonymousStream(logger),
-		// Та же дверь на второй полосе. Стримовых RPC у iam сегодня НОЛЬ
-		// (замер `git grep -c 'returns (stream' -- proto/kaname/cloud/iam/v1` → 0),
-		// поэтому провязка ничего не решает СЕЙЧАС и стоит здесь ради того,
-		// чтобы решать, когда предмет появится: полоса без двери при полосе с
-		// дверью — это различие, которого никто не принимал, и обнаружилось бы
-		// оно первым же стримовым RPC. Соседняя политика провязана на обе полосы
-		// по той же причине.
-		publicObjectDoor.Stream(),
-	)
+	// Публичная цепочка собирается ОДНИМ сборщиком, и его же зовут пробы
+	// цепочки (IAM-PNE-1-21 А, самопроверка анонима): они судят ту цепочку,
+	// что уезжает в слушатель, а не собранную рядом копию. Порядок звеньев и
+	// доводы — в шапке `publicListenerChain`.
+	publicUnaryLinks, publicStreamLinks, err := publicListenerChain(cfg, logger, latency, permRegistry,
+		presentedReader, publicCallerPolicy, addressGate, publicObjectDoor)
+	if err != nil {
+		return fmt.Errorf("цепочка публичного слушателя: %w", err)
+	}
 	grpcSrv := grpcsrv.NewServer(
 		publicServerCreds,
-		grpc.ChainUnaryInterceptor(publicUnary...),
-		grpc.ChainStreamInterceptor(publicStream...),
+		grpc.ChainUnaryInterceptor(publicUnaryLinks...),
+		grpc.ChainStreamInterceptor(publicStreamLinks...),
 	)
 	// Внутренний слушатель (порт 9091) отделён сетью, но НЕ доверен: authN+authZ
 	// исполняются на КАЖДОМ внутреннем RPC (§«authN+authZ везде»; закрывает
@@ -2554,4 +2506,108 @@ func registryTokenBuildConfig(rt config.RegistryTokenConfig, run registryTokenRu
 		CredentialKindObserver:   run.credentialKindObserver,
 		BasicCredentialTimeout:   run.basicCredentialTimeout,
 	}, nil
+}
+
+// publicListenerChain — сборщик цепочки публичного слушателя (:9090), обеих
+// полос: однократного вызова и потока.
+//
+// # Почему сборщик, а не сборка по месту
+//
+// Цепочку судят пробы — что ступень формы идентификатора стоит до двери у
+// каждого глагола класса (IAM-PNE-1-21 А), что безымянный вызывающий не
+// доходит до решателя. Собери проба цепочку сама — и она судила бы вторую
+// проводку, которой в проде нет: звено, добавленное в корень, пробе осталось
+// бы невидимым, и наоборот. Поэтому корень и пробы зовут ЭТУ функцию, а
+// звенья, несущие собственные зависимости (политика вызывающего, ворота
+// адреса, дверь), приходят параметрами: их строит корень из настройки, проба —
+// из своего мира.
+//
+// Имена `publicUnary`, `publicStream`, `publicCallerPolicy`, `addressGate`, `cfg`
+// несущие: по ним стражи текста корня (address_gate_wiring_test.go,
+// trusted_forwarders_wiring_test.go) находят цепочку и её звенья.
+func publicListenerChain(
+	cfg config.Config,
+	logger *slog.Logger,
+	latency *grpcsrv.ServerLatency,
+	permRegistry authzguard.DenyActionLookup,
+	presentedReader *presentedcred.Reader,
+	publicCallerPolicy *authzguard.PublicCallerPolicy,
+	addressGate *authzguard.AddressGate,
+	publicObjectDoor *authzguard.OwnDoor,
+) (publicUnaryLinks []grpc.UnaryServerInterceptor, publicStreamLinks []grpc.StreamServerInterceptor, err error) {
+	// Звено формы идентификатора строится из ТОЙ ЖЕ двери, которая стоит за
+	// ним: оно читает её карту, и отказ сборки (нет судьи, судья не знает вида
+	// глагола класса) — отказ старта, а не цепочка без звена.
+	publicIDFormLink, err := publicObjectDoor.FormUnary(publicIDForm{})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Anti-anonymous guard перед мутирующими RPC: минимальная защита от
+	// анонимного создания Account/Project/AccessBinding/Group/SA/Role
+	// в дополнение к вопросу о доступе через AuthorizeService.
+	//
+	// Порядок: измеритель задержки (оборачивает всё) → recovery → обогатитель
+	// отказа → личность вызывающего (publicIdentityUnary: сертификат, переданная
+	// личность от разрешённого отправителя, затем предъявленное удостоверение) →
+	// пер-RPC политика вызывающего → ворота адреса → анти-аноним → форма
+	// идентификатора → дверь.
+	publicUnary := append([]grpc.UnaryServerInterceptor{
+		// Измеритель задержки первым — он оборачивает цепочку целиком, поэтому
+		// длительность и код накрывают ВЕСЬ вызов, включая вопрос о доступе.
+		// Стоя внутри решения о доступе, он оставил бы неизмеренным каждый отказ
+		// по правам — то есть исход, ради которого метрику и смотрят.
+		latency.UnaryServerInterceptor(grpcsrv.ListenerPublic),
+		// Перехват паники — сразу внутри измерителя: паника в любом нижележащем
+		// звене или обработчике становится записанным в журнал codes.Internal
+		// для ОДНОГО этого запроса, а не роняет весь процесс PDP (измеритель
+		// всё равно учитывает код Internal, потому что перехват стоит внутри него).
+		grpcsrv.UnaryPanicRecovery(logger),
+		// Внешнее из звеньев авторизации — чтобы видеть отказ, порождённый ЛЮБЫМ
+		// из них и обработчиком: прикрепляет машиночитаемую причину, по которой
+		// различает клиент. Важнее всего это там, где iam сам решает об
+		// авторизации по данным (строки, отфильтрованные по области): там край не
+		// задаёт поглагольной проверки, и больше ничто на пути не называет
+		// действие, а отказ по области был побайтово неотличим от промаха
+		// каталога. См. deny_details.go.
+		authzguard.DenyDetailUnary(permRegistry),
+	}, publicIdentityUnary(cfg, presentedReader)...)
+	publicUnary = append(publicUnary,
+		publicCallerPolicy.Unary(),
+		addressGate.Unary(),
+		authzguard.AntiAnonymousUnary(logger),
+		// Форма идентификатора — после подлинности (анониму она не отвечает) и
+		// ДО вопроса о праве: ответ на неверную форму не зависит ни от
+		// выданного, ни от того, администратор ли вызывающий (kaname#168).
+		publicIDFormLink,
+		// Дверь — ПОСЛЕДНЕЙ: субъект к этому месту уже назван и уже отсечён,
+		// если он аноним, поэтому вопрос к модели задаётся только о том, кого
+		// есть о чём спрашивать. Обратный порядок тратил бы обращение к модели
+		// на запрос, который всё равно отвергнут.
+		publicObjectDoor.Unary(),
+	)
+	publicStream := append([]grpc.StreamServerInterceptor{
+		// Срок жизни подписки — своя серия и своя сетка корзин: это другая
+		// величина, и общая с задержкой вызова не разрешала бы ни ту, ни другую.
+		latency.StreamServerInterceptor(grpcsrv.ListenerPublic),
+		grpcsrv.StreamPanicRecovery(logger),
+	}, publicIdentityStream(cfg, presentedReader)...)
+	publicStream = append(publicStream,
+		publicCallerPolicy.Stream(),
+		addressGate.Stream(),
+		authzguard.AntiAnonymousStream(logger),
+		// Та же дверь на второй полосе. Стримовых RPC у iam сегодня НОЛЬ
+		// (`git grep -c 'returns (stream' -- proto/kaname/cloud/iam/v1` → 0),
+		// поэтому провязка ничего не решает СЕЙЧАС и стоит здесь ради того,
+		// чтобы решать, когда предмет появится: полоса без двери при полосе с
+		// дверью — это различие, которого никто не принимал, и обнаружилось бы
+		// оно первым же стримовым RPC. Соседняя политика провязана на обе полосы
+		// по той же причине.
+		//
+		// Звена формы на этой полосе НЕТ, и это решение, а не пропуск: в классе
+		// формы потоковых глаголов ноль, и проба
+		// `TestIAM_PNE_1_21_A_FormStageHasNoStreamLane` краснеет на первом.
+		publicObjectDoor.Stream(),
+	)
+	return publicUnary, publicStream, nil
 }

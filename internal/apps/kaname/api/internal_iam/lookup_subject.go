@@ -84,7 +84,7 @@ func (uc *LookupSubjectUseCase) byExternalID(ctx context.Context, ext string) (*
 	// заведена первой.
 	for _, u := range rows {
 		if u.InviteStatus.MayAuthenticate() {
-			return responseUser(u)
+			return responseUser(u), nil
 		}
 	}
 	if len(rows) > 0 {
@@ -120,7 +120,7 @@ func (uc *LookupSubjectUseCase) byID(ctx context.Context, id string) (*iamv1.Loo
 		if !u.InviteStatus.MayAuthenticate() {
 			return nil, status.Errorf(codes.FailedPrecondition, "User %s %s", id, userStateReason(u.InviteStatus))
 		}
-		return responseUser(u)
+		return responseUser(u), nil
 	case strings.HasPrefix(id, domain.PrefixServiceAccount):
 		sa, err := rd.ServiceAccounts().Get(ctx, domain.ServiceAccountID(id))
 		if err != nil {
@@ -132,7 +132,7 @@ func (uc *LookupSubjectUseCase) byID(ctx context.Context, id string) (*iamv1.Loo
 		if !sa.MayAuthenticate() {
 			return nil, status.Errorf(codes.FailedPrecondition, "ServiceAccount %s is disabled", id)
 		}
-		return responseServiceAccount(sa)
+		return responseServiceAccount(sa), nil
 	}
 	return nil, status.Errorf(codes.InvalidArgument, "unknown id prefix: %s", id)
 }
@@ -154,7 +154,7 @@ func (uc *LookupSubjectUseCase) byEmail(ctx context.Context, email string) (*iam
 		return nil, status.Error(codes.Internal, "user lookup by email")
 	}
 	if len(actives) > 0 {
-		return responseUser(actives[0])
+		return responseUser(actives[0]), nil
 	}
 	// Действующих нет. Это либо «адрес никому не принадлежит», либо «строка
 	// есть, но аутентификация ей запрещена» — два разных ответа.
@@ -187,7 +187,7 @@ func userStateReason(st domain.InviteStatus) string {
 	return "is not active"
 }
 
-func responseUser(u domain.User) (*iamv1.LookupSubjectResponse, error) {
+func responseUser(u domain.User) *iamv1.LookupSubjectResponse {
 	pb := &iamv1.User{
 		Id:          string(u.ID),
 		ExternalId:  string(u.ExternalID),
@@ -196,10 +196,10 @@ func responseUser(u domain.User) (*iamv1.LookupSubjectResponse, error) {
 	}
 	return &iamv1.LookupSubjectResponse{
 		Subject: &iamv1.LookupSubjectResponse_User{User: pb},
-	}, nil
+	}
 }
 
-func responseServiceAccount(sa domain.ServiceAccount) (*iamv1.LookupSubjectResponse, error) {
+func responseServiceAccount(sa domain.ServiceAccount) *iamv1.LookupSubjectResponse {
 	pb := &iamv1.ServiceAccount{
 		Id:          string(sa.ID),
 		AccountId:   string(sa.AccountID),
@@ -208,5 +208,5 @@ func responseServiceAccount(sa domain.ServiceAccount) (*iamv1.LookupSubjectRespo
 	}
 	return &iamv1.LookupSubjectResponse{
 		Subject: &iamv1.LookupSubjectResponse_ServiceAccount{ServiceAccount: pb},
-	}, nil
+	}
 }

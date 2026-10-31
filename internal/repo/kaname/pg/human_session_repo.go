@@ -480,8 +480,8 @@ type humanSessionWriter struct {
 //
 // Писатель нескольких строк сессии — оператор, пишущий строки `human_sessions`
 // не по одному идентификатору, либо каскад, их удаляющий. Предикат переписи:
-// `git grep -nE '(UPDATE|DELETE FROM) +(kaname\.)?human_sessions' -- '*.go'
-// ':!*_test.go'` (из найденных — операторы с условием не по `id`), вызывающие
+// `git grep -nE '(UPDATE|DELETE FROM) +(kaname\.)?human_sessions' -- '*.go' ':!*_test.go'`
+// (из найденных — операторы с условием не по `id`), вызывающие
 // двери — `git grep -n 'EndOtherSessions(' -- '*.go' ':!*_test.go'` (из
 // найденных — вызовы; объявления портов, сама дверь и эта строка — не они),
 // каскады — `REFERENCES kaname.users` у таблицы `human_sessions` в миграциях.
@@ -622,8 +622,8 @@ func (w *humanSessionWriter) holdPersonForSessionSet(ctx context.Context, userID
 // берёт строку личности РАНЬШЕ них. Перепись (kaname#770) — по строкам,
 // которые пишут глаголы двери:
 //
-//	git grep -nE '(INSERT INTO|UPDATE|DELETE FROM) +(kaname\.)?(email_change_codes|recovery_codes|human_sessions)\b' -- '*.go' ':!*_test.go'
-//	git grep -nE '\.(UpsertPendingTOTP|ActivateTOTP|ReplaceLookupSet|ConsumeLookupElement|RemoveSecondFactor)\(ctx' -- '*.go' ':!*_test.go'
+//	`git grep -nE '(INSERT INTO|UPDATE|DELETE FROM) +(kaname\.)?(email_change_codes|recovery_codes|human_sessions)\b' -- '*.go' ':!*_test.go'`
+//	`git grep -nE '\.(UpsertPendingTOTP|ActivateTOTP|ReplaceLookupSet|ConsumeLookupElement|RemoveSecondFactor)\(ctx' -- '*.go' ':!*_test.go'`
 //
 //	строки смены адреса        — только глаголы смены (эта дверь)
 //	коды восстановления        — запрос кода: `SessionSetWriter` (kaname#770
@@ -846,7 +846,7 @@ func (w *humanSessionWriter) EndSession(ctx context.Context, id domain.HumanSess
 	if !ended {
 		return false, nil
 	}
-	if _, rerr := revokeFamiliesOfSessionsTx(ctx, w.tx, []string{string(id)},
+	if rerr := revokeFamiliesOfSessionsTx(ctx, w.tx, []string{string(id)},
 		domain.FamilyRevokedBySessionEnd); rerr != nil {
 		return false, rerr
 	}
@@ -1077,7 +1077,7 @@ func endSessionsAndRevokeWhatTheyHold(ctx context.Context, tx pgx.Tx, set sessio
 	if rerr := rows.Err(); rerr != nil {
 		return nil, mapErr(rerr, "HumanSession.End", userID)
 	}
-	if _, rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
+	if rerr := revokeFamiliesOfSessionsTx(ctx, tx, ended,
 		domain.FamilyRevokedBySessionEnd); rerr != nil {
 		return nil, rerr
 	}

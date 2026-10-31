@@ -113,3 +113,6 @@ attribution:
   publication_mode: courier_of_agent_verdict
   history_is_appended_not_rewritten: true
   prior_records_untouched: true
+
+effective_approval:
+  issued: true

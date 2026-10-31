@@ -10,7 +10,7 @@ package loginlanehttp
 // (перепись — в пробе), и путь, объявленный отказом, судится ступенью
 // положения в своём обработчике. Разбор — синтаксическим
 // деревом `handler.go`: путь — первый довод `h.mux.HandleFunc`, обработчик —
-// метод, переданный через `h.method`, ступень — вызов `h.admitted(w, r, <путь>, …)`.
+// метод, переданный через `h.method`, ступень — вызов `h.admitted(w, r, <путь>)`.
 
 import (
 	"go/ast"
@@ -188,7 +188,7 @@ func TestR2ListInjection(t *testing.T) {
 		t.Fatalf("путь без объявления не найден: %v", f)
 	}
 
-	ungated := strings.Replace(src, "\tif !h.admitted(w, r, PathPassword, humansession.TextRequestNotPerformed) {\n\t\treturn\n\t}\n", "", 1)
+	ungated := strings.Replace(src, "\tif !h.admitted(w, r, PathPassword) {\n\t\treturn\n\t}\n", "", 1)
 	if ungated == src {
 		t.Fatal("НЕ-ВЫПОЛНИЛОСЬ: инъекция снятия ступени не легла")
 	}

@@ -344,10 +344,10 @@ var errTemplateMark = errors.New("метка шаблона запроса ст�
 // константы пакета, поэтому это ошибка сборки дерева, а не данных: её ловит
 // проба TestEveryAssembledQueryCarriesTheGrantPredicateOnce, собирающая каждую
 // форму вопроса.
-func replaceOnce(tmpl, mark, val string) (string, error) {
-	if n := strings.Count(tmpl, mark); n != 1 {
+func replaceOnce(tmpl, val string) (string, error) {
+	if n := strings.Count(tmpl, armPredicateMark); n != 1 {
 		return "", fmt.Errorf("relverdict: метка %q стоит в шаблоне %d раз, ждали ровно один: %w",
-			mark, n, errTemplateMark)
+			armPredicateMark, n, errTemplateMark)
 	}
-	return strings.Replace(tmpl, mark, val, 1), nil
+	return strings.Replace(tmpl, armPredicateMark, val, 1), nil
 }

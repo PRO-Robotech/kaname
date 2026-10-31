@@ -229,23 +229,23 @@ const (
 
 // judgeClientData — общие для обеих процедур сверки клиентских данных
 // (норма §7.1 шаги 7–9, §7.2 шаги 11–13): тип, испытание, происхождение.
-func judgeClientData(raw []byte, wantType string, challenge []byte, b Binding) (ClientData, error) {
+func judgeClientData(raw []byte, wantType string, challenge []byte, b Binding) error {
 	cd, err := ParseClientData(raw)
 	if err != nil {
-		return ClientData{}, err
+		return err
 	}
 	if cd.Type != wantType {
-		return ClientData{}, refuse(ReasonClientDataType, fmt.Sprintf("want %s, got %s", wantType, cd.Type))
+		return refuse(ReasonClientDataType, fmt.Sprintf("want %s, got %s", wantType, cd.Type))
 	}
 	if !bytes.Equal(cd.Challenge, challenge) {
-		return ClientData{}, refuse(ReasonChallengeMismatch, "")
+		return refuse(ReasonChallengeMismatch, "")
 	}
 	// Происхождение сверяется с ОБЪЯВЛЕННЫМ перечнем и никогда не берётся из
 	// запроса; пустой перечень означает «никого» (Ф7-13, Ф7-44).
 	if !b.allowsOrigin(cd.Origin) {
-		return ClientData{}, refuse(ReasonOriginNotAllowed, cd.Origin)
+		return refuse(ReasonOriginNotAllowed, cd.Origin)
 	}
-	return cd, nil
+	return nil
 }
 
 // authenticatorData — разобранная форма данных аутентификатора (норма §6.1).
@@ -340,7 +340,7 @@ type RegistrationResult struct {
 // VerifyRegistration — норма §7.1 без шагов аттестации: клиентские данные,
 // хэш имени доверяющей стороны, бит присутствия, алгоритм ключа из перечня.
 func VerifyRegistration(in RegistrationInput) (RegistrationResult, error) {
-	if _, err := judgeClientData(in.ClientDataJSON, ClientDataTypeCreate, in.Challenge, in.Binding); err != nil {
+	if err := judgeClientData(in.ClientDataJSON, ClientDataTypeCreate, in.Challenge, in.Binding); err != nil {
 		return RegistrationResult{}, err
 	}
 	var att struct {
@@ -407,7 +407,7 @@ type AssertionResult struct {
 // VerifyAssertion — норма §7.2: клиентские данные, хэш имени, бит присутствия,
 // подпись над `authData || SHA-256(clientDataJSON)` открытым ключом строки.
 func VerifyAssertion(in AssertionInput) (AssertionResult, error) {
-	if _, err := judgeClientData(in.ClientDataJSON, ClientDataTypeGet, in.Challenge, in.Binding); err != nil {
+	if err := judgeClientData(in.ClientDataJSON, ClientDataTypeGet, in.Challenge, in.Binding); err != nil {
 		return AssertionResult{}, err
 	}
 	ad, err := parseAuthenticatorData(in.AuthenticatorData, false)

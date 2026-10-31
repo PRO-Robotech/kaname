@@ -192,3 +192,6 @@ attribution:
   history_is_appended_not_rewritten: true
   prior_records_untouched:
     - b5e3324ddaea4f8f11952931853f0fbd0f5be17c7ae4ce86e8ff101c3ed7f4f3.yaml
+
+effective_approval:
+  issued: true

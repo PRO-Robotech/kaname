@@ -773,7 +773,7 @@ func (fl *lvFlow) resolveCall(fun ast.Expr, ctx lvCtx) (lvFunc, bool) {
 			return lvFunc{}, false
 		}
 		if fld, ok := x.Obj.Decl.(*ast.Field); ok && fld == ctx.decl.Recv.List[0] {
-			recvType, _ := receiverTypeName(ctx.decl)
+			recvType := receiverTypeName(ctx.decl)
 			fn, ok := fl.ix.methods[fl.f.dir][recvType][t.Sel.Name]
 			return fn, ok
 		}
@@ -1219,7 +1219,7 @@ func lvFuncLabel(decl *ast.FuncDecl) string {
 		return "уровень пакета"
 	}
 	if decl.Recv != nil {
-		t, _ := receiverTypeName(decl)
+		t := receiverTypeName(decl)
 		return t + "." + decl.Name.Name
 	}
 	return decl.Name.Name

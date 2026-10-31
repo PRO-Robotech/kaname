@@ -26,9 +26,10 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
-// Construct every authorization-bearing public unary layer in production order.
-// Only DB-backed marks/relations are substituted; Check's own-door contract is
-// derived from the actual descriptors, and the ACR floor from the actual seed.
+// Собрать каждый несущий авторизацию публичный однократный слой в боевом
+// порядке. Подменены только метки и отношения из базы; контракт собственной
+// двери Check выводится из настоящих дескрипторов, а пол ACR — из настоящего
+// посева.
 type anonymousDoor struct{}
 
 func (anonymousDoor) Check(context.Context, string, string, string) (bool, error) {
@@ -40,17 +41,14 @@ func anonymousPublicChain(t *testing.T, reader *presentedcred.Reader) grpc.Unary
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := authzguard.NewPublicCallerPolicy(true, authzguard.PublicPeerCallableRPCs(), catalog, presentedcred.Presented).WithModuleRoster(testModuleRoster())
-	door, err := authzguard.NewOwnDoor(authzguard.OwnDoorOptions{SelfCheck: anonymousDoor{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return chainUnaryServer(append(publicIdentityUnary(fwdCfg(fwdGatewaySAN, fwdVPCSAN), reader),
-		policy.Unary(), authzguard.NewAddressGate(chainRevocations{}).Unary(), authzguard.AntiAnonymousUnary(slog.Default()), door.Unary())...)
+	// Цепочку собирает сборщик корня, а не перечисление звеньев здесь: ручная
+	// копия молча осталась бы без звена, добавленного в корень.
+	return testPublicChain(t, testPublicChainInputs{reader: reader, catalog: catalog, decider: anonymousDoor{}, prodMode: true})
 }
 
-// The transport and public identity chain are real. Only the decision port is
-// replaced: these tests assert who reaches it, not a second policy evaluator.
+// Транспорт и публичная цепочка личности — настоящие. Подменён только порт
+// решения: эти пробы утверждают, кто до него доходит, а не второй вычислитель
+// политики.
 type anonymousDecision struct {
 	authorize.Authorizer
 	allowed bool
@@ -185,7 +183,8 @@ func TestAnonymousSelfCheck_PublicChainNeverDowngradesCredentials(t *testing.T) 
 			}
 		})
 	}
-	// A lawful authenticated self-query must still reach the same decision port.
+	// Законный подлинный вопрос о себе обязан по-прежнему доходить до того же
+	// порта решения.
 	d := &anonymousDecision{allowed: true}
 	req := anonymousRequest()
 	req.Subject = "user:" + chainSubject

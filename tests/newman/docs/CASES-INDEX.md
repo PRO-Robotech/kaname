@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 902
+Всего кейсов: 906
 
 ## Перепись по модулям
 
@@ -54,13 +54,13 @@
 | `cases/iam-membership-mine.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
 | `cases/iam-permission-catalog.py` | 3 |
-| `cases/iam-project.py` | 35 |
+| `cases/iam-project.py` | 36 |
 | `cases/iam-rbac-rules-labels.py` | 2 |
 | `cases/iam-rbac-scope-grant.py` | 2 |
 | `cases/iam-rbac-subjects.py` | 14 |
 | `cases/iam-read-authz-vget.py` | 3 |
 | `cases/iam-role-redesign.py` | 10 |
-| `cases/iam-role.py` | 44 |
+| `cases/iam-role.py` | 47 |
 | `cases/iam-service-account.py` | 28 |
 | `cases/iam-subject-privileges-read.py` | 6 |
 | `cases/iam-system-class-subjects.py` | 21 |
@@ -668,7 +668,7 @@
 - `CONF-G-03-catalog-retired-successor`
 - `NEG-G-02-catalog-anonymous-unauthenticated`
 
-## `cases/iam-project.py` — 35 кейсов
+## `cases/iam-project.py` — 36 кейсов
 
 > Case-set для ProjectService.
 
@@ -703,6 +703,7 @@
 - `IAM-PRJ-DL-NEG-NOTFOUND`
 - `IAM-PRJ-DL-NEG-HAS-CHILDREN`
 - `IAM-PRJ-DL-AUTHZ-ANON-DENY`
+- `IAM-PRJ-DL-NEG-MALFORMED-PREFIX`
 - `IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST`
 - `IAM-PRJ-DL-STATE-REFUSAL-KEEPS-GRANTS`
 - `IAM-PRJ-LSOP-CRUD-OK`
@@ -764,7 +765,7 @@
 - `IAM-ROL-RD-DL-SYSTEM-NEG`
 - `IAM-ROL-RD-CR-UNKNOWN-RESOURCE-TOKEN-NEG`
 
-## `cases/iam-role.py` — 44 кейсов
+## `cases/iam-role.py` — 47 кейсов
 
 > Case-set для RoleService.
 
@@ -812,6 +813,9 @@
 - `IAM-ROL-CR-NEG-NO-SCOPE`
 - `IAM-ROL-UP-T33-LABELS-OK`
 - `IAM-ROL-CR-T33-NEG-BADLABELS`
+- `IAM-ROL-GET-SRCI03-NEW-ID-OK`
+- `IAM-ROL-GET-SRCI04-OLD-ID-REFUSED`
+- `IAM-ROL-AB-SRCI08-SUPERUSER-NEW-ID`
 
 ## `cases/iam-service-account.py` — 28 кейсов
 

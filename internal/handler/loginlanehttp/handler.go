@@ -583,15 +583,15 @@ func (h *Handler) judgeForm(w http.ResponseWriter, r *http.Request, kind domain.
 // Set-Cookie не пишет, сессию и контекст формы не трогает. Путь, объявленный
 // доступным, этой ступени не проходит — её зов с таким путём есть дефект
 // провязки, и он отвечает отказом, а не проходом.
-func (h *Handler) admitted(w http.ResponseWriter, r *http.Request, path string, unavailableText string) bool {
+func (h *Handler) admitted(w http.ResponseWriter, r *http.Request, path string) bool {
 	if pathPositions[path] != PathRefusedInVerification {
 		h.cfg.Logger.Error("login lane: position step on a path not declared refused", "path", path)
-		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, unavailableText, nil)
+		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextRequestNotPerformed, nil)
 		return false
 	}
 	pos, err := h.lane.AddressPosition(r.Context(), h.bearer(r))
 	if err != nil {
-		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, unavailableText, nil)
+		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextRequestNotPerformed, nil)
 		return false
 	}
 	if pos == humansession.PositionVerification {
@@ -743,7 +743,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormPassword, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathPassword, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathPassword) {
 		return
 	}
 	if err := requireFields(map[string]string{"currentPassword": form.CurrentPassword, "newPassword": form.NewPassword}); err != nil {
@@ -780,7 +780,7 @@ func (h *Handler) enrollPassword(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormPasswordEnroll, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathPasswordEnroll, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathPasswordEnroll) {
 		return
 	}
 	if err := requireFields(map[string]string{"newPassword": form.NewPassword}); err != nil {
@@ -895,7 +895,7 @@ func (h *Handler) enrollSecondFactor(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathSecondFactorEnroll, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathSecondFactorEnroll) {
 		return
 	}
 	out, err := h.lane.EnrollSecondFactor(r.Context(), humansession.EnrollInput{Bearer: h.bearer(r)})
@@ -920,7 +920,7 @@ func (h *Handler) confirmSecondFactor(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathSecondFactorConfirm, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathSecondFactorConfirm) {
 		return
 	}
 	if err := requireFields(map[string]string{"code": form.Code}); err != nil {
@@ -959,7 +959,7 @@ func backupCodeSetJSON(v humansession.BackupCodeSetView) map[string]any {
 // `pending` и `active`; ключ `backupCodeSet` — только у заведённого фактора с
 // прочитанным набором (kaname#297 Р4: «сводки нет» — отсутствие ключа).
 func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
-	if !h.admitted(w, r, PathSecondFactor, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathSecondFactor) {
 		return
 	}
 	out, err := h.lane.SecondFactorStatus(r.Context(), humansession.StatusInput{Bearer: h.bearer(r)})
@@ -1004,7 +1004,7 @@ func (h *Handler) removeSecondFactor(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathSecondFactorRemove, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathSecondFactorRemove) {
 		return
 	}
 	factor, err := parseSecondFactorField("", secondFactorField{Method: form.Method, Code: form.Code})
@@ -1034,7 +1034,7 @@ func (h *Handler) regenerateBackupCodes(w http.ResponseWriter, r *http.Request) 
 	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathSecondFactorBackupCodes, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathSecondFactorBackupCodes) {
 		return
 	}
 	factor, err := parseSecondFactorField("", secondFactorField{Method: form.Method, Code: form.Code})
@@ -1069,7 +1069,7 @@ func (h *Handler) stepUp(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormStepUp, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathStepUp, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathStepUp) {
 		return
 	}
 	method, err := humansession.ParseStepUpMethod("method", form.Method)
@@ -1115,7 +1115,7 @@ func (h *Handler) stepUpAccessKeyBegin(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormStepUpAccessKeyBegin, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathStepUpAccessKeyBegin, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathStepUpAccessKeyBegin) {
 		return
 	}
 	out, err := h.lane.BeginStepUpAccessKey(r.Context(), humansession.StepUpAccessKeyBeginInput{Bearer: h.bearer(r)})
@@ -1198,7 +1198,7 @@ func (h *Handler) requestEmailChange(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormEmailChange, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathEmailChange, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathEmailChange) {
 		return
 	}
 	out, err := h.lane.RequestEmailChange(r.Context(), humansession.RequestEmailChangeInput{
@@ -1224,7 +1224,7 @@ func (h *Handler) confirmEmailChange(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormEmailChangeConfirm, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathEmailChangeConfirm, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathEmailChangeConfirm) {
 		return
 	}
 	out, err := h.lane.ConfirmEmailChange(r.Context(), humansession.ConfirmEmailChangeInput{
@@ -1287,7 +1287,7 @@ func (h *Handler) ownSessions(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
 		return
 	}
-	if !h.admitted(w, r, PathSessions, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathSessions) {
 		return
 	}
 	out, err := h.lane.ListOwnSessions(r.Context(), humansession.ListOwnSessionsInput{Bearer: h.bearer(r), Page: page})
@@ -1324,7 +1324,7 @@ func (h *Handler) endOwnSession(w http.ResponseWriter, r *http.Request) {
 			humansession.TextRequestNotPerformed)
 		return
 	}
-	if !h.admitted(w, r, PathSessionsEnd, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathSessionsEnd) {
 		return
 	}
 	if _, err := h.lane.EndOwnSession(r.Context(), humansession.EndOwnSessionInput{Bearer: h.bearer(r), SessionID: id}); err != nil {
@@ -1345,7 +1345,7 @@ func (h *Handler) endOtherOwnSessions(w http.ResponseWriter, r *http.Request) {
 	if !h.judgeForm(w, r, domain.FormSessionEnd, form.CSRFToken) {
 		return
 	}
-	if !h.admitted(w, r, PathSessionsEndOthers, humansession.TextRequestNotPerformed) {
+	if !h.admitted(w, r, PathSessionsEndOthers) {
 		return
 	}
 	out, err := h.lane.EndOtherOwnSessions(r.Context(), humansession.EndOtherOwnSessionsInput{Bearer: h.bearer(r)})

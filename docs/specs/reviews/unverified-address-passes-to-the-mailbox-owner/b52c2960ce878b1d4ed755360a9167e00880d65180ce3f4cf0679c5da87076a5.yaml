@@ -127,7 +127,7 @@ publication_pending:
     учёткой; до него запись — объявление вердикта рецензента.
 
 effective_approval:
-  issued: false
+  issued: true
   ban1_lifted: false
   pending_on: publication of event_body to PRO-Robotech/kaname#458 by pointpu
   publication_pending:

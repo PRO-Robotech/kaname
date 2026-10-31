@@ -609,7 +609,7 @@ const (
 // отвечает «да» о каждом объекте страницы, до которого достаёт выдача на любой
 // один из них.
 func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string, nesting bool) (grant, fact string, err error) {
-	grant, err = replaceOnce(grantArmSQL, armPredicateMark,
+	grant, err = replaceOnce(grantArmSQL,
 		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels", nesting))
 	if err != nil {
 		return "", "", err

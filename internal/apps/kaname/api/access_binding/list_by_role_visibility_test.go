@@ -3,20 +3,20 @@
 
 package access_binding
 
-// list_by_role_visibility_test.go — what a STRANGER receives from the "who holds
-// role R" audit read.
+// list_by_role_visibility_test.go — что ПОСТОРОННИЙ получает при чтении
+// аудита «кто держит роль R».
 //
-// The catalog entry for this RPC asks `viewer` on the cluster singleton, and the
-// cluster bootstrap grants that relation to the system class `authenticated` so the global reference
-// catalog stays readable — so every authenticated subject passes the front door
-// and the per-row scope filter in this use-case is the only narrowing there is.
-// The suite pinned the positive arm (an account owner sees the binding) but never
-// the negative one, and a filter with no red test for the case it exists to
-// prevent is a filter that can be dropped in silence.
+// Запись каталога для этого RPC требует `viewer` на единственном кластере,
+// а начальный посев кластера даёт это отношение системному классу `authenticated`,
+// чтобы глобальный справочник оставался читаемым. Любой аутентифицированный субъект
+// проходит входную проверку; построчный фильтр области в сценарии — единственное сужение.
+// Набор закреплял положительную ветвь (владелец аккаунта видит выдачу), но не
+// отрицательную. Фильтр без красной пробы на случай, который он должен
+// предотвращать, можно снять незаметно.
 //
-// Asserted at the level of the observable: the rows handed back, not the status
-// code — a stranger must learn neither that the binding exists, nor who its
-// subject is, nor which scope it sits on.
+// Проверяется наблюдаемый результат — возвращённые строки, а не код
+// статуса: посторонний не должен узнать ни о существовании выдачи, ни о её
+// субъекте, ни об области, к которой она относится.
 
 import (
 	"testing"
@@ -27,11 +27,11 @@ import (
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
-// TestListByRole_StrangerSeesNothing — an authenticated caller who neither owns
-// the binding's scope, nor administers it, nor is its subject, gets an empty page.
+// TestListByRole_StrangerSeesNothing — аутентифицированный вызывающий, который
+// не владеет областью выдачи, не администрирует её и не является её субъектом, получает пустую страницу.
 func TestListByRole_StrangerSeesNothing(t *testing.T) {
 	const (
-		roleID    = "rol000000000sysadmin"
+		roleID    = domain.SystemAdminRoleID
 		ownerID   = "usr_owner-----------"
 		accountID = "acc_lbr_account-----"
 	)
@@ -46,7 +46,7 @@ func TestListByRole_StrangerSeesNothing(t *testing.T) {
 		ResourceID:   accountID,
 		Status:       domain.AccessBindingStatusActive,
 	}
-	// denyingFGA: no delegated admin anywhere, and the caller is not the owner.
+	// denyingFGA: делегированного администратора нигде нет, вызывающий — не владелец.
 	uc := NewListByRoleUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
 
 	got, _, err := uc.Execute(foreignCtx(), roleID, repoab.ListByRoleFilter{PageSize: 50})
@@ -56,12 +56,12 @@ func TestListByRole_StrangerSeesNothing(t *testing.T) {
 		"a stranger must learn neither that the binding exists nor who holds the role")
 }
 
-// TestListByRole_SubjectOfBindingSeesOwnRow — the deliberate exception: the
-// person the grant is ABOUT sees their own row even without scope authority. Pins
-// that the narrowing above is a scope filter and not a blanket denial.
+// TestListByRole_SubjectOfBindingSeesOwnRow — намеренное исключение: получатель
+// выдачи видит свою строку даже без полномочий на область. Это закрепляет,
+// что сужение выше фильтрует область, а не запрещает чтение всем.
 func TestListByRole_SubjectOfBindingSeesOwnRow(t *testing.T) {
 	const (
-		roleID    = "rol000000000sysadmin"
+		roleID    = domain.SystemAdminRoleID
 		ownerID   = "usr_owner-----------"
 		accountID = "acc_lbr_account-----"
 		memberID  = "usr_member----------"

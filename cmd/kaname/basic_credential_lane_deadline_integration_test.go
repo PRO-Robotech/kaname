@@ -101,8 +101,8 @@ func TestBasicCredentialLaneQueriesTheBaseUnderTheDeclaredLimit(t *testing.T) {
 		WithBasicCredentialResolver(authority)
 
 	const (
-		userID = "uoc_dlim0000000000001"
-		saID   = "soc_dlim0000000000002"
+		userID = "uocdlim0000000000001"
+		saID   = "socdlim0000000000002"
 	)
 	userSecret, _, err := credsecret.Mint(userID)
 	require.NoError(t, err)

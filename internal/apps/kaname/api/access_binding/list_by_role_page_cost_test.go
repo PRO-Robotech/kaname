@@ -67,7 +67,7 @@ func (f *countingFGA) questions() int {
 
 var _ clients.RelationStore = (*countingFGA)(nil)
 
-const pageCostRoleID = "rol000000000sysadmin"
+const pageCostRoleID = domain.SystemAdminRoleID
 
 // bindingsOnScopes — строки страницы, разложенные по названным областям
 // по кругу. Тип области — ЛИСТОВОЙ (не account/project): у такого нет

@@ -3,23 +3,23 @@
 
 package pg_test
 
-// access_binding_emitted_tuples_integration_test.go — emitted-tuple ledger tests.
+// access_binding_emitted_tuples_integration_test.go — пробы ведомости отправленных кортежей.
 //
-// testcontainers Postgres 16 integration tests for the persisted emitted-tuple
-// ledger (kaname.access_binding_emitted_tuples, migration 0024) that makes
-// AccessBinding revoke + Role.Update reconcile byte-symmetric to the grant:
+// Интеграционные пробы с testcontainers Postgres 16 для сохраняемой ведомости
+// отправленных кортежей (kaname.access_binding_emitted_tuples, миграция 0024),
+// которая делает отзыв AccessBinding и согласование Role.Update побайтово симметричными выдаче:
 //
-//   - -COMMIT: InsertEmittedTuples co-committed with EmitRelationWrite +
-//     SelectEmittedTuples reads back the EXACT set (round-trip).
-//   - -CASCADE: deleting the binding row CASCADE-drops its emitted-tuple rows
-//     (FK ON DELETE CASCADE) — no orphan ledger rows after revoke.
-//   - -REPLACE: ReplaceEmittedTuples wholesale-replaces the set (reconcile path).
-//   - -ROLLBACK: a rolled-back writer-tx leaves NO ledger row (atomic emit-in-tx,
-//     ban #10).
-//   - -RACE: concurrent Role.Update-style ReplaceEmittedTuples ∥ revoke Delete on
-//     the SAME binding serialize to a consistent terminal state — either the
-//     binding is gone (CASCADE cleared the ledger, zero orphan rows) or it
-//     survived with exactly the replaced set; never a half-state.
+//   - -COMMIT: InsertEmittedTuples фиксируется вместе с EmitRelationWrite,
+//     а SelectEmittedTuples читает в точности записанный набор.
+//   - -CASCADE: удаление строки выдачи каскадно удаляет строки отправленных кортежей
+//     (FK ON DELETE CASCADE) — после отзыва нет осиротевших строк ведомости.
+//   - -REPLACE: ReplaceEmittedTuples целиком заменяет набор (путь согласования).
+//   - -ROLLBACK: откат транзакции писателя НЕ оставляет строк ведомости (атомарная
+//     запись в транзакции, запрет #10).
+//   - -RACE: конкурентные ReplaceEmittedTuples в стиле Role.Update ∥ отзыв Delete
+//     ОДНОЙ выдачи сериализуются в согласованное конечное состояние: либо выдача
+//     удалена (CASCADE очистил ведомость, осиротевших строк нет), либо она
+//     сохранилась с точно заменённым набором; промежуточного состояния нет.
 
 import (
 	"context"
@@ -47,28 +47,28 @@ func emittedTuplesCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, b
 	return n
 }
 
-// seedABForEmitted creates a real access_bindings row (account-scoped) so the
-// emitted-tuple FK has a parent to reference.
+// seedABForEmitted создаёт настоящую строку access_bindings в области аккаунта,
+// чтобы у внешнего ключа отправленного кортежа была родительская строка.
 func seedABForEmitted(t *testing.T, ctx context.Context, repo *kanamepg.Repository, uid domain.UserID, accID domain.AccountID) domain.AccessBinding {
 	t.Helper()
 	return insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(uid),
-		RoleID:       "rol000000000sysviewer",
+		RoleID:       domain.SystemViewerRoleID,
 		ResourceType: "account",
 		ResourceID:   string(accID),
 	})
 }
 
-// TestABEmittedTuples_B14_ConcurrentScopeGrantLedger_OneTupleSet — RBAC
-// rules-model 2026 concurrency mandate for the scope_grant emitted-set.
+// TestABEmittedTuples_B14_ConcurrentScopeGrantLedger_OneTupleSet — требование
+// конкурентности модели правил RBAC 2026 для отправленного набора scope_grant.
 //
-// The scope_grant emitted-set (rulesBindingTuples output for an ARM_NAMES /
-// ARM_ANCHOR rule) is persisted via InsertEmittedTuples with PK (binding_id,
-// fga_user, relation, object) + ON CONFLICT DO NOTHING. N goroutines that
-// concurrently persist the IDENTICAL scope_grant tuple-set for the same binding
-// must converge to EXACTLY that one set — no duplicate rows, no second-writer
-// inflation (ban #10, DB-level idempotency, not software check-then-act).
+// Отправленный набор scope_grant (выход rulesBindingTuples для правила ARM_NAMES /
+// ARM_ANCHOR) сохраняется через InsertEmittedTuples с PK (binding_id,
+// fga_user, relation, object) + ON CONFLICT DO NOTHING. N горутин, конкурентно
+// сохраняющих ОДИНАКОВЫЙ набор кортежей scope_grant для одной выдачи,
+// должны сойтись РОВНО к этому набору: без повторных строк и разрастания
+// от второго писателя (запрет #10, идемпотентность в базе, а не проверка перед записью).
 func TestABEmittedTuples_B14_ConcurrentScopeGrantLedger_OneTupleSet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -84,9 +84,9 @@ func TestABEmittedTuples_B14_ConcurrentScopeGrantLedger_OneTupleSet(t *testing.T
 	acc := seedAccount(t, ctx, repo, "acc-b14", uid)
 	ab := seedABForEmitted(t, ctx, repo, uid, acc.ID)
 
-	// The scope_grant tuple-set an ARM_NAMES {vpc.address,[get,update],addr5k} rule
-	// emits: per-object per-verb tuples + the back-compat tier tuple. Identical
-	// across all goroutines (the realistic concurrent re-grant shape).
+	// Набор кортежей scope_grant правила ARM_NAMES {vpc.address,[get,update],addr5k}:
+	// кортежи на каждый объект и глагол + кортеж уровня для обратной совместимости.
+	// Одинаков во всех горутинах (реальная форма конкурентной повторной выдачи).
 	scopeGrantSet := []repoab.RelationTuple{
 		{User: "user:" + string(uid), Relation: "v_get", Object: "vpc_address:addr5k"},
 		{User: "user:" + string(uid), Relation: "v_update", Object: "vpc_address:addr5k"},
@@ -119,7 +119,7 @@ func TestABEmittedTuples_B14_ConcurrentScopeGrantLedger_OneTupleSet(t *testing.T
 		require.NoError(t, e, "concurrent idempotent InsertEmittedTuples must not error (ON CONFLICT DO NOTHING)")
 	}
 
-	// Exactly the 3 tuples persist — no duplicate, no inflation under concurrency.
+	// Сохранены ровно 3 кортежа — без повторов и разрастания при конкуренции.
 	require.Equal(t, len(scopeGrantSet), emittedTuplesCount(t, ctx, pool, ab.ID),
 		"concurrent identical scope_grant ledger writes must converge to ONE tuple-set")
 	rd, err := repo.Reader(ctx)
@@ -150,14 +150,14 @@ func TestABEmittedTuples_178_InsertSelect_RoundTrip(t *testing.T) {
 		{User: "account:" + string(acc.ID), Relation: "account", Object: "iam_access_binding:" + string(ab.ID)},
 	}
 
-	// Co-commit the emit + the ledger in one writer-tx.
+	// Фиксируем отправку и ведомость одной транзакцией писателя.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	require.NoError(t, w.AccessBindingsW().EmitRelationWrite(ctx, tuples))
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, tuples))
 	require.NoError(t, w.Commit(ctx))
 
-	// Read back the exact set.
+	// Читаем в точности записанный набор.
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	got, err := rd.AccessBindings().SelectEmittedTuples(ctx, ab.ID)
@@ -165,7 +165,7 @@ func TestABEmittedTuples_178_InsertSelect_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.ElementsMatch(t, tuples, got, "SelectEmittedTuples must return the exact persisted set")
 
-	// Idempotent re-insert (ON CONFLICT DO NOTHING) does not duplicate.
+	// Идемпотентная повторная вставка (ON CONFLICT DO NOTHING) не даёт повторов.
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	require.NoError(t, w2.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, tuples))
@@ -197,7 +197,7 @@ func TestABEmittedTuples_178_DeleteBinding_CascadesLedger(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 	require.Equal(t, 1, emittedTuplesCount(t, ctx, pool, ab.ID))
 
-	// Revoke (delete the binding row) → FK ON DELETE CASCADE clears the ledger.
+	// Отзыв (удаление строки выдачи) → FK ON DELETE CASCADE очищает ведомость.
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	require.NoError(t, w2.AccessBindingsW().Delete(ctx, ab.ID))
@@ -232,7 +232,7 @@ func TestABEmittedTuples_178_Replace_WholesaleSwap(t *testing.T) {
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, oldSet))
 	require.NoError(t, w.Commit(ctx))
 
-	// Reconcile: wholesale-replace admin → viewer.
+	// Согласование: целиком заменяем admin → viewer.
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	require.NoError(t, w2.AccessBindingsW().ReplaceEmittedTuples(ctx, ab.ID, newSet))
@@ -246,19 +246,19 @@ func TestABEmittedTuples_178_Replace_WholesaleSwap(t *testing.T) {
 	require.ElementsMatch(t, newSet, got, "ReplaceEmittedTuples must wholesale-swap the ledger to the new set")
 }
 
-// TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples — RBAC
-// rules-model 2026, CRITICAL ledger-source fix.
+// TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples — модель правил
+// RBAC 2026, КРИТИЧНАЯ правка разделения источников ведомости.
 //
-// The emitted-tuple ledger holds BOTH binding-level tuples (InsertEmittedTuples /
-// the Role.Update RoleTupleReconciler via ReplaceEmittedTuples) AND ARM_LABELS
-// per-member tuples (the per-member reconciler RecordEmittedTuples). A binding-level
-// Role.Update reconcile (ReplaceEmittedTuples) MUST NOT revoke or wipe the
-// per-member tuples — those are owned by RoleMembershipFanout, not the
-// binding-level reconcile. Before the `source` split, ReplaceEmittedTuples did a
-// `DELETE … WHERE binding_id` wholesale wipe, dropping the member rows on every
-// rules-changing Role.Update of a custom role mixing a binding-level arm with an
-// ARM_LABELS arm — transient (or, on a post-commit fan-out failure,
-// durable-until-sweep) loss of label-selected access.
+// Ведомость отправленных кортежей хранит И кортежи уровня выдачи (InsertEmittedTuples /
+// RoleTupleReconciler при Role.Update через ReplaceEmittedTuples), И кортежи ARM_LABELS
+// на каждого участника (RecordEmittedTuples согласователя участников). Согласование
+// Role.Update уровня выдачи (ReplaceEmittedTuples) НЕ ДОЛЖНО отзывать или стирать
+// кортежи участников: ими владеет RoleMembershipFanout, а не согласователь
+// уровня выдачи. До разделения по `source` ReplaceEmittedTuples выполнял полное
+// удаление `DELETE … WHERE binding_id`, стирая строки участников при каждом
+// изменяющем правила Role.Update пользовательской роли, сочетающей ветвь уровня выдачи
+// с ARM_LABELS. Это временно лишало доступа по меткам (а при отказе распространения
+// после коммита — до следующего полного обхода).
 func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -274,7 +274,7 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 	acc := seedAccount(t, ctx, repo, "acc-emsrc", uid)
 	ab := seedABForEmitted(t, ctx, repo, uid, acc.ID)
 
-	// (1) Binding-level emitted-set the RoleTupleReconciler owns (anchor/hierarchy).
+	// (1) Отправленный набор уровня выдачи, которым владеет RoleTupleReconciler (якорь/иерархия).
 	bindingLevel := []repoab.RelationTuple{
 		{User: "user:" + string(uid), Relation: "admin", Object: "account:" + string(acc.ID)},
 		{User: "account:" + string(acc.ID), Relation: "account", Object: "iam_access_binding:" + string(ab.ID)},
@@ -284,8 +284,8 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 	require.NoError(t, w.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, bindingLevel))
 	require.NoError(t, w.Commit(ctx))
 
-	// (2) ARM_LABELS per-member tuples the per-member reconciler owns — written via the
-	// PRODUCTION member-writer (RecordEmittedTuples), object-space <fga_type>:<id>.
+	// (2) Кортежи ARM_LABELS участников, которыми владеет согласователь участников, записаны
+	// ПРОДУКТОВЫМ писателем участников (RecordEmittedTuples), пространство объектов <fga_type>:<id>.
 	memberTuples := []domain.MembershipTuple{
 		{User: "user:" + string(uid), Relation: "v_get", Object: "vpc_subnet:sub-emsrc"},
 		{User: "user:" + string(uid), Relation: "viewer", Object: "vpc_subnet:sub-emsrc"},
@@ -297,9 +297,9 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 	require.Equal(t, len(bindingLevel)+len(memberTuples), emittedTuplesCount(t, ctx, pool, ab.ID),
 		"precondition: ledger holds both binding-level and member tuples")
 
-	// (3) Role.Update reconcile: a binding-level tier change (admin → viewer) via
-	// ReplaceEmittedTuples — exactly what RoleTupleReconciler does for a rules
-	// change. It must replace ONLY the binding-level subset.
+	// (3) Согласование Role.Update: смена уровня выдачи (admin → viewer) через
+	// ReplaceEmittedTuples — ровно то, что делает RoleTupleReconciler при изменении
+	// правил. Заменяться должно ТОЛЬКО подмножество уровня выдачи.
 	newBindingLevel := []repoab.RelationTuple{
 		{User: "user:" + string(uid), Relation: "viewer", Object: "account:" + string(acc.ID)},
 		{User: "account:" + string(acc.ID), Relation: "account", Object: "iam_access_binding:" + string(ab.ID)},
@@ -309,7 +309,7 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 	require.NoError(t, w2.AccessBindingsW().ReplaceEmittedTuples(ctx, ab.ID, newBindingLevel))
 	require.NoError(t, w2.Commit(ctx))
 
-	// (4) The ARM_LABELS per-member tuples MUST survive the binding-level reconcile.
+	// (4) Кортежи ARM_LABELS участников ДОЛЖНЫ пережить согласование уровня выдачи.
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	got, err := rd.AccessBindings().SelectEmittedTuples(ctx, ab.ID)
@@ -324,7 +324,7 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 		require.Contains(t, got, m,
 			"ARM_LABELS member tuple %v must NOT be wiped by a binding-level Role.Update reconcile", m)
 	}
-	// And the binding-level subset was replaced (admin gone, viewer present).
+	// А подмножество уровня выдачи заменено (admin удалён, viewer присутствует).
 	require.Contains(t, got, repoab.RelationTuple{User: "user:" + string(uid), Relation: "viewer", Object: "account:" + string(acc.ID)})
 	require.NotContains(t, got, repoab.RelationTuple{User: "user:" + string(uid), Relation: "admin", Object: "account:" + string(acc.ID)},
 		"binding-level reconcile must still replace its own (admin → viewer) subset")
@@ -355,12 +355,12 @@ func TestABEmittedTuples_178_RollbackDiscardsLedger(t *testing.T) {
 		"rolled-back writer-tx must leave NO ledger row (atomic emit-in-tx, ban #10)")
 }
 
-// TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent — concurrent
-// Role.Update-style ReplaceEmittedTuples ∥ revoke Delete on the SAME binding
-// serialize on the binding row-lock / FK to a consistent terminal state: either
-// the Delete won (binding gone, CASCADE cleared the ledger → 0 rows) or the
-// Replace won and the Delete then dropped both (also 0 rows). The invariant: NO
-// orphan ledger rows remain referencing a deleted binding, and no half-state.
+// TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent — конкурентные
+// ReplaceEmittedTuples в стиле Role.Update ∥ отзыв Delete ОДНОЙ выдачи
+// сериализуются блокировкой строки выдачи / FK в согласованное конечное состояние:
+// либо победил Delete (выдачи нет, CASCADE очистил ведомость → 0 строк), либо
+// победил Replace, а затем Delete удалил обе сущности (тоже 0 строк). Инвариант:
+// НЕТ осиротевших строк ведомости со ссылкой на удалённую выдачу и промежуточного состояния.
 func TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -376,7 +376,7 @@ func TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent(t *testing.T) 
 	acc := seedAccount(t, ctx, repo, "acc-em05", uid)
 	ab := seedABForEmitted(t, ctx, repo, uid, acc.ID)
 
-	// Seed an initial emitted-set.
+	// Сеем начальный отправленный набор.
 	wSeed, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	require.NoError(t, wSeed.AccessBindingsW().InsertEmittedTuples(ctx, ab.ID, []repoab.RelationTuple{
@@ -386,7 +386,7 @@ func TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent(t *testing.T) 
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	// Goroutine A — reconcile (Role.Update fan-out): replace admin → viewer.
+	// Горутина A — согласование (распространение Role.Update): заменяем admin → viewer.
 	go func() {
 		defer wg.Done()
 		w, e := repo.Writer(ctx)
@@ -401,7 +401,7 @@ func TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent(t *testing.T) 
 		}
 		_ = w.Commit(ctx)
 	}()
-	// Goroutine B — revoke: delete the binding (CASCADE drops the ledger).
+	// Горутина B — отзыв: удаляем выдачу (CASCADE удаляет ведомость).
 	go func() {
 		defer wg.Done()
 		w, e := repo.Writer(ctx)
@@ -416,10 +416,10 @@ func TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent(t *testing.T) 
 	}()
 	wg.Wait()
 
-	// Terminal invariant: if the binding row is gone, the ledger MUST be empty
-	// (CASCADE). If it survived (replace committed, delete lost its row was still
-	// present — but delete on an existing row never "loses"), the ledger holds the
-	// replaced set. Either way: zero ROWS referencing a NON-existent binding.
+	// Конечный инвариант: если строки выдачи нет, ведомость ДОЛЖНА быть пустой
+	// (CASCADE). Если выдача сохранилась (замена зафиксирована, удаление проиграло,
+	// строка оставалась — хотя удаление существующей строки никогда не «проигрывает»),
+	// ведомость содержит заменённый набор. В любом случае: ноль СТРОК со ссылкой на НЕСУЩЕСТВУЮЩУЮ выдачу.
 	var bindingExists bool
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM kaname.access_bindings WHERE id = $1)`, string(ab.ID)).Scan(&bindingExists))
@@ -430,8 +430,8 @@ func TestABEmittedTuples_178_ConcurrentReplaceVsRevoke_Consistent(t *testing.T) 
 	} else {
 		require.LessOrEqual(t, ledger, 1, "surviving binding holds at most the replaced single-tuple set")
 	}
-	// Orphan-row safety net: there must be ZERO ledger rows whose binding_id has
-	// no matching access_bindings row.
+	// Страховка от осиротевших строк: НОЛЬ строк ведомости с binding_id,
+	// для которого нет соответствующей строки access_bindings.
 	var orphans int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*) FROM kaname.access_binding_emitted_tuples e

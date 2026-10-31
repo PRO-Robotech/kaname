@@ -6,7 +6,7 @@ package pg_test
 // access_binding_cross_binding_claim_integration_test.go — кто ДЕРЖИТ прямой
 // факт, когда строка снятия его касается (kaname#919).
 //
-// WHY IT EXISTS. The emitted-tuple ledger is keyed PER BINDING (binding_id,
+// ЗАЧЕМ ЭТА ПРОБА. Ключ ведомости отправленных кортежей задан НА ВЫДАЧУ (binding_id,
 // fga_user, relation, object), а сам ФАКТ отношения не счётный: его ключ —
 // (объект, отношение, субъект), без выдачи. Две выдачи ОДНОМУ субъекту на ОДНУ
 // область держат ДВЕ строки ведомости на ОДИН живой факт. Снос, снимающий факт по
@@ -78,17 +78,17 @@ func TestABEmittedTuples_CrossBindingClaim_OnlyActiveBindingsKeepAFactAlive(t *t
 	uid := mustSeedUser(t, ctx, pool, "xclaim")
 	acc := seedAccount(t, ctx, repo, "acc-xclaim", uid)
 
-	// TWO bindings of the SAME subject on the SAME scope. Different roles, because
-	// the partial UNIQUE access_bindings_active_grant_uniq forbids a duplicate ACTIVE
-	// 5-tuple — which is exactly why the shared-tuple class exists at all: distinct
-	// bindings whose emitted sets OVERLAP.
+	// ДВЕ выдачи ОДНОМУ субъекту на ОДНУ область. Роли различаются, поскольку
+	// частичный UNIQUE access_bindings_active_grant_uniq запрещает повтор активного
+	// кортежа из пяти полей. Именно поэтому существует класс общих кортежей:
+	// разные выдачи с ПЕРЕСЕКАЮЩИМИСЯ наборами отправленных кортежей.
 	abA := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
-		RoleID: "rol000000000sysviewer", ResourceType: "account", ResourceID: string(acc.ID),
+		RoleID: domain.SystemViewerRoleID, ResourceType: "account", ResourceID: string(acc.ID),
 	})
 	abB := insertAB(t, ctx, repo, domain.AccessBinding{
 		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid),
-		RoleID: "rol000000000sysadmin", ResourceType: "account", ResourceID: string(acc.ID),
+		RoleID: domain.SystemAdminRoleID, ResourceType: "account", ResourceID: string(acc.ID),
 	})
 
 	shared := repoab.RelationTuple{User: "user:" + string(uid), Relation: "editor", Object: "account:" + string(acc.ID)}

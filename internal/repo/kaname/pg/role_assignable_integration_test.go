@@ -3,15 +3,15 @@
 
 package pg_test
 
-// role_assignable_integration_test.go — integration tests (testcontainers PG16)
-// for the assignable-roles read side:
+// role_assignable_integration_test.go — интеграционные пробы (testcontainers PG16)
+// читающей стороны назначаемых ролей:
 //
-//   - roleCols regression: Get/List now also project cluster_id + project_id
-//     so the domain.Role carries the scope fields the predicate needs
-//     (was: only account_id) — existing reads still work.
-//   - Reader.ListAssignable filters roles by the scope-matrix predicate
-//     (system everywhere; account-role only own account; project-role only own
-//     project; cluster ⇒ system only) with keyset (created_at,id) ASC pagination.
+//   - Регрессия roleCols: Get/List теперь проецируют также cluster_id + project_id,
+//     чтобы domain.Role содержал поля области, нужные предикату
+//     (был только account_id); существующие чтения продолжают работать.
+//   - Reader.ListAssignable фильтрует роли предикатом матрицы областей
+//     (системные везде; роль аккаунта — только свой аккаунт; роль проекта — только
+//     свой проект; кластер ⇒ только системные), страницы по ключу (created_at,id) ASC.
 
 import (
 	"context"
@@ -29,9 +29,9 @@ import (
 	reporole "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
 )
 
-// seedProjectRole — INSERT a project-scoped custom role directly (no public
-// Create path mints project-scoped roles yet). The role is
-// is_system=false, cluster_id NULL, account_id NULL, project_id set.
+// seedProjectRole — прямая вставка INSERT пользовательской роли области проекта
+// для проверки чтения репозитория без вызова публичного Create. У роли заданы
+// is_system=false, cluster_id NULL, account_id NULL и значение project_id.
 func seedProjectRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, prj domain.ProjectID, name string) domain.RoleID {
 	t.Helper()
 	rid := domain.RoleID(ids.NewID(domain.PrefixRole))
@@ -43,7 +43,7 @@ func seedProjectRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, prj 
 	return rid
 }
 
-// roleIDs collects ids from a role slice for set assertions.
+// roleIDs собирает id из среза ролей для проверок множеств.
 func roleIDs(rs []domain.Role) map[domain.RoleID]domain.Role {
 	m := map[domain.RoleID]domain.Role{}
 	for _, r := range rs {
@@ -52,9 +52,9 @@ func roleIDs(rs []domain.Role) map[domain.RoleID]domain.Role {
 	return m
 }
 
-// TestRole_RoleColsRegression_ScopeFieldsPopulated — Get/List must now populate
-// ClusterID (system) and ProjectID (project-scoped), in addition to AccountID.
-// Pre-1.5 roleCols omitted cluster_id/project_id → both stayed empty.
+// TestRole_RoleColsRegression_ScopeFieldsPopulated — Get/List должны заполнять
+// ClusterID (системные) и ProjectID (область проекта) наряду с AccountID.
+// До 1.5 roleCols пропускал cluster_id/project_id → оба оставались пустыми.
 func TestRole_RoleColsRegression_ScopeFieldsPopulated(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -77,29 +77,29 @@ func TestRole_RoleColsRegression_ScopeFieldsPopulated(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	// account-scoped role still reads its account_id (regression) + project_id empty.
+	// Роль аккаунта по-прежнему читает свой account_id (регрессия), project_id пуст.
 	gotAcc, err := rd.Roles().Get(ctx, accRole.ID)
 	require.NoError(t, err)
 	assert.Equal(t, acc.ID, gotAcc.AccountID, "account_id still populated (regression)")
 	assert.Empty(t, gotAcc.ProjectID)
 	assert.Empty(t, gotAcc.ClusterID)
 
-	// project-scoped role: project_id now populated (the NEW projection).
+	// Роль проекта: project_id теперь заполнен (НОВАЯ проекция).
 	gotPrj, err := rd.Roles().Get(ctx, prjRoleID)
 	require.NoError(t, err)
 	assert.Equal(t, proj.ID, gotPrj.ProjectID, "project_id populated by expanded roleCols")
 	assert.Empty(t, gotPrj.AccountID)
 
-	// a system role (seed migration) carries cluster_id.
-	gotSys, err := rd.Roles().Get(ctx, domain.RoleID("rol000000000sysviewer"))
+	// Системная роль (миграция посева) содержит cluster_id.
+	gotSys, err := rd.Roles().Get(ctx, domain.RoleID(domain.SystemViewerRoleID))
 	require.NoError(t, err)
 	assert.True(t, gotSys.IsSystem)
 	assert.Equal(t, domain.ClusterID(domain.ClusterSingletonID), gotSys.ClusterID,
 		"system role cluster_id populated by expanded roleCols")
 }
 
-// TestRole_ListAssignable_AccountResource — 1.5-01: account resource returns
-// SYSTEM + own ACCOUNT-roles, NOT a foreign account's custom role.
+// TestRole_ListAssignable_AccountResource — 1.5-01: ресурс аккаунта возвращает
+// СИСТЕМНЫЕ + собственные роли АККАУНТА, но НЕ пользовательскую роль чужого аккаунта.
 func TestRole_ListAssignable_AccountResource(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -123,7 +123,7 @@ func TestRole_ListAssignable_AccountResource(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	// page_size big enough for a single page (all system roles + accustom).
+	// page_size достаточен для одной страницы (все системные роли + accustom).
 	out, _, err := rd.Roles().ListAssignable(ctx, "account", string(accA.ID),
 		reporole.ListFilter{PageSize: 1000})
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestRole_ListAssignable_AccountResource(t *testing.T) {
 	assert.Contains(t, byID, accustom.ID, "own account-role assignable")
 	assert.NotContains(t, byID, bcustom.ID, "foreign account-role NOT assignable (1.5-01 isolation)")
 
-	// at least one system role present and is_system=true with cluster scope.
+	// Присутствует хотя бы одна системная роль с is_system=true и областью кластера.
 	sawSystem := false
 	for _, r := range out {
 		if r.IsSystem {
@@ -144,8 +144,8 @@ func TestRole_ListAssignable_AccountResource(t *testing.T) {
 }
 
 // TestRole_ListAssignable_ProjectResource_StrictAccountExcluded — 1.5-02 / 1.5-02b:
-// project resource returns SYSTEM + own PROJECT-role; STRICTLY excludes the
-// account-scoped role of the owning account.
+// ресурс проекта возвращает СИСТЕМНЫЕ + собственную роль ПРОЕКТА; СТРОГО исключает
+// роль области аккаунта, которому принадлежит проект.
 func TestRole_ListAssignable_ProjectResource_StrictAccountExcluded(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -177,8 +177,8 @@ func TestRole_ListAssignable_ProjectResource_StrictAccountExcluded(t *testing.T)
 	assert.NotContains(t, byID, accustom.ID, "account-role NOT assignable on project (1.5-02b STRICT)")
 }
 
-// TestRole_ListAssignable_ClusterResource_SystemOnly — 1.5-03: cluster resource
-// returns ONLY system roles.
+// TestRole_ListAssignable_ClusterResource_SystemOnly — 1.5-03: ресурс кластера
+// возвращает ТОЛЬКО системные роли.
 func TestRole_ListAssignable_ClusterResource_SystemOnly(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -210,8 +210,8 @@ func TestRole_ListAssignable_ClusterResource_SystemOnly(t *testing.T) {
 	assert.NotEmpty(t, out, "system roles seeded → cluster returns them")
 }
 
-// TestRole_ListAssignable_Pagination — 1.5-04: keyset pagination over the
-// filtered set (page_size=1 yields a page + cursor, second page the remainder).
+// TestRole_ListAssignable_Pagination — 1.5-04: страницы по ключу в отфильтрованном
+// наборе (page_size=1 даёт страницу + курсор, вторая страница — остаток).
 func TestRole_ListAssignable_Pagination(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -231,13 +231,13 @@ func TestRole_ListAssignable_Pagination(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	// First gather the full set to know the count.
+	// Сначала собираем полный набор, чтобы узнать число элементов.
 	full, _, err := rd.Roles().ListAssignable(ctx, "account", string(acc.ID),
 		reporole.ListFilter{PageSize: 1000})
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(full), 2, "system roles + accustom ≥ 2")
 
-	// Walk the set one element per page; collect ids; assert no dup, full coverage.
+	// Обходим набор по элементу на страницу; собираем id; проверяем отсутствие повторов и полноту.
 	seen := map[domain.RoleID]bool{}
 	token := ""
 	pages := 0

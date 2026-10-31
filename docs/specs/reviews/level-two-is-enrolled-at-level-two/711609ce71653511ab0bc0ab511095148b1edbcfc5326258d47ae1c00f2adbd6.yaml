@@ -87,3 +87,6 @@ constructibility:
 verified_coordinates:
   - "access_key_service.proto:78/104/141 = \"1\" (118 — List, без правки) — git grep @400493cf0"
   - "KN747-сценариев 18 — grep -c '^\\*\\*ID: KN747'"
+
+effective_approval:
+  issued: true

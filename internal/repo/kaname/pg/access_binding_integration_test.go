@@ -3,22 +3,21 @@
 
 package pg_test
 
-// access_binding_integration_test.go — integration tests AccessBindingRepo
-// (migration 0003 strict-create).
+// access_binding_integration_test.go — интеграционные пробы AccessBindingRepo
+// (строгое создание из миграции 0003).
 //
 // Покрытие:
-// - 31a: Insert NEW → новая row + new id.
-// - 31b (migration 0003): Insert duplicate active 5-tuple → ErrAlreadyExists
-//   с verbatim text «these permissions are already granted to <subject_id>
-//   on <res_type>:<res_id>».
-// - 31c (migration 0003): Insert после revoke того же 5-tuple → новая ACTIVE row
-//   (partial UNIQUE WHERE revoked_at IS NULL не блокирует revoked rows).
+// - 31a: Insert новой выдачи → новая строка + новый id.
+// - 31b (миграция 0003): Insert повтора активного кортежа из пяти полей → ErrAlreadyExists
+//   с дословным текстом `these permissions are already granted to <subject_id> on <res_type>:<res_id>`.
+// - 31c (миграция 0003): Insert того же кортежа из пяти полей после отзыва → новая строка ACTIVE
+//   (частичный UNIQUE WHERE revoked_at IS NULL не блокирует отозванные строки).
 // - 32: Insert с несущ. role_id → FailedPrecondition (FK access_bindings_role_fk).
-// - 33: Insert с invalid subject_type → CHECK violation → InvalidArgument.
-// - 34a: Delete happy.
+// - 33: Insert с недопустимым subject_type → нарушение CHECK → InvalidArgument.
+// - 34a: Успешный Delete.
 // - 34b: Delete несущ. → NotFound.
-// - 35a: ListByScope — несколько binding'ов одного resource.
-// - 35b: ListBySubject — несколько binding'ов одного subject.
+// - 35a: ListByScope — несколько выдач одного ресурса.
+// - 35b: ListBySubject — несколько выдач одного субъекта.
 
 import (
 	"context"
@@ -39,14 +38,14 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 )
 
-// insertAB — helper для seed-вставки AccessBinding.
+// insertAB — вспомогательная функция посева AccessBinding.
 //
-// Использует `assert.NoError + explicit Rollback + t.FailNow` (не голый
-// `require.NoError`), чтобы освободить открытый Writer на любом code-path. Иначе
-// при FK-violation (например, role_id ссылается на несуществующую роль)
-// `require.FailNow` → `runtime.Goexit` ДО `w.Commit/Rollback` → connection
-// остается acquired → `pool.Close` блокируется на pgxpool puddle WaitGroup →
-// тест висит до timeout. Параллель `mustBeginTx` из
+// Использует assert.NoError + явный Rollback + t.FailNow (не голый
+// `require.NoError`), чтобы освободить открытый Writer на любом пути исполнения. Иначе
+// при нарушении FK (например, role_id ссылается на несуществующую роль)
+// `require.FailNow` → `runtime.Goexit` ДО `w.Commit/Rollback` → соединение
+// остаётся занятым → `pool.Close` блокируется на WaitGroup в puddle из pgxpool →
+// тест висит до истечения срока. Параллель `mustBeginTx` из
 // kac127_repos_integration_test.go.
 func insertAB(t *testing.T, ctx context.Context, repo *kanamepg.Repository, b domain.AccessBinding) domain.AccessBinding {
 	t.Helper()
@@ -59,7 +58,7 @@ func insertAB(t *testing.T, ctx context.Context, repo *kanamepg.Repository, b do
 	}
 	out, err := bindingset.Insert(ctx, w.AccessBindingsW(), b)
 	if err != nil {
-		_ = w.Rollback(ctx) // освобождаем connection до FailNow
+		_ = w.Rollback(ctx) // освобождаем соединение до FailNow
 		assert.NoError(t, err)
 		t.FailNow()
 	}
@@ -88,7 +87,7 @@ func TestAB_31a_Insert_New(t *testing.T) {
 	b := domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(uid),
-		RoleID:       "rol000000000sysviewer", // seed system role (migration 0011)
+		RoleID:       domain.SystemViewerRoleID, // системная роль посева (миграция 0011)
 		ResourceType: "account",
 		ResourceID:   string(acc.ID),
 	}
@@ -97,13 +96,13 @@ func TestAB_31a_Insert_New(t *testing.T) {
 	assert.Equal(t, b.SubjectID, out.SubjectID)
 }
 
-// TestAB_31b_Insert_DuplicateActiveIsAlreadyExists — migration 0003.
+// TestAB_31b_Insert_DuplicateActiveIsAlreadyExists — миграция 0003.
 //
-// Inserting the SAME 5-tuple twice (both rows would be ACTIVE) must surface
-// SQLSTATE 23505 from access_bindings_active_grant_uniq, which mapErr
-// translates to ErrAlreadyExists with the canonical Kachō error text
-// «these permissions are already granted to <subject_id> on
-// <res_type>:<res_id>». Replaces the historical idempotent-upsert behaviour.
+// Двойная вставка ОДНОГО кортежа из пяти полей (обе строки были бы ACTIVE) должна давать
+// SQLSTATE 23505 от access_bindings_active_grant_uniq, который mapErr
+// преобразует в ErrAlreadyExists с каноническим текстом ошибки Kachō:
+// `these permissions are already granted to <subject_id> on <res_type>:<res_id>`.
+// Это заменяет прежнее поведение идемпотентного обновления при вставке.
 func TestAB_31b_Insert_DuplicateActiveIsAlreadyExists(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -121,34 +120,34 @@ func TestAB_31b_Insert_DuplicateActiveIsAlreadyExists(t *testing.T) {
 	b := domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(uid),
-		RoleID:       "rol000000000sysviewer", // seed system role (migration 0011)
+		RoleID:       domain.SystemViewerRoleID, // системная роль посева (миграция 0011)
 		ResourceType: "account",
 		ResourceID:   string(acc.ID),
 	}
 	_ = insertAB(t, ctx, repo, b)
 
-	// Second insert with a fresh candidate id but identical 5-tuple — must fail.
+	// Вторая вставка с новым кандидатом id, но тем же кортежем из пяти полей должна отказать.
 	b2 := b
 	b2.ID = domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	_, insErr := bindingset.Insert(ctx, w.AccessBindingsW(), b2)
-	_ = w.Rollback(ctx) // release connection even on error path
+	_ = w.Rollback(ctx) // освобождаем соединение и на пути ошибки
 
 	require.Error(t, insErr, "duplicate active grant must surface")
 	assert.True(t, stderrors.Is(insErr, iamerr.ErrAlreadyExists),
 		"expected ErrAlreadyExists sentinel, got %v", insErr)
-	// The canonical Kachō error text.
+	// Канонический текст ошибки Kachō.
 	wantMsg := "these permissions are already granted to " + string(uid) + " on account:" + string(acc.ID)
 	assert.Contains(t, insErr.Error(), wantMsg,
 		"error message must include the canonical Kachō error text")
 }
 
-// TestAB_31c_Insert_AfterRevokeIsAllowed — migration 0003.
+// TestAB_31c_Insert_AfterRevokeIsAllowed — миграция 0003.
 //
-// The partial UNIQUE access_bindings_active_grant_uniq scopes uniqueness to
-// WHERE revoked_at IS NULL. A re-grant of the SAME 5-tuple AFTER the prior
-// row is revoked must succeed (operators legitimately re-grant).
+// Частичный UNIQUE access_bindings_active_grant_uniq ограничивает уникальность
+// условием WHERE revoked_at IS NULL. Повторная выдача ТОГО ЖЕ кортежа из пяти полей
+// ПОСЛЕ отзыва прежней строки должна пройти (повторная выдача операторами законна).
 func TestAB_31c_Insert_AfterRevokeIsAllowed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -166,13 +165,13 @@ func TestAB_31c_Insert_AfterRevokeIsAllowed(t *testing.T) {
 	b := domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(uid),
-		RoleID:       "rol000000000sysviewer",
+		RoleID:       domain.SystemViewerRoleID,
 		ResourceType: "account",
 		ResourceID:   string(acc.ID),
 	}
 	first := insertAB(t, ctx, repo, b)
 
-	// Revoke the first binding.
+	// Отзываем первую выдачу.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	revoker := domain.UserID(uid)
@@ -182,7 +181,7 @@ func TestAB_31c_Insert_AfterRevokeIsAllowed(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
-	// Re-grant the same 5-tuple — must succeed (new ACTIVE row).
+	// Повторно выдаём тот же кортеж из пяти полей — успешно (новая строка ACTIVE).
 	b2 := b
 	b2.ID = domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	second := insertAB(t, ctx, repo, b2)
@@ -337,33 +336,33 @@ func TestAB_35_ListByScopeAndBySubject(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	// ListByScope (account = acc.ID) → 3 bindings.
+	// ListByScope (account = acc.ID) → 3 выдачи.
 	byRes, _, err := rd.AccessBindings().ListByScope(ctx, "account", string(acc.ID), repoab.PageFilter{PageSize: 100})
 	require.NoError(t, err)
 	assert.Equal(t, 3, len(byRes))
 
-	// ListBySubject (uid) → 2 bindings (admin + viewer).
+	// ListBySubject (uid) → 2 выдачи (admin + viewer).
 	bySub, _, err := rd.AccessBindings().ListBySubject(ctx, domain.SubjectTypeUser, domain.SubjectID(uid), repoab.PageFilter{PageSize: 100})
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(bySub))
 }
 
-// TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner — migration 0003,
-// the "concurrent goroutines" race mandate for contended DB invariants.
+// TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner — миграция 0003,
+// требование пробы гонки конкурентных горутин для оспариваемых инвариантов базы.
 //
-// AccessBinding.Create is the highest-traffic contended write in IAM. The
-// strict-create contract (partial UNIQUE access_bindings_active_grant_uniq
-// WHERE revoked_at IS NULL) must be RACE-safe at the DB level — N goroutines
-// inserting the IDENTICAL active 5-tuple must produce EXACTLY ONE row, with the
-// rest fail-closed via ErrAlreadyExists. No second-writer-wins, no panic, no
-// leaked pgx error (ban #10 — invariant enforced by Postgres, not software
-// check-then-act). The sequential dup test (TestAB_31b) cannot catch a TOCTOU
-// race; this test does.
+// AccessBinding.Create — самая нагруженная конкурентная запись IAM. Контракт
+// строгого создания (частичный UNIQUE access_bindings_active_grant_uniq
+// WHERE revoked_at IS NULL) должен защищать от ГОНОК в базе: N горутин,
+// вставляющих ОДИНАКОВЫЙ активный кортеж из пяти полей, создают РОВНО ОДНУ строку,
+// остальные безопасно отказывают с ErrAlreadyExists. Без победы второго писателя,
+// паники и утечки ошибки pgx (запрет #10 — инвариант обеспечивает Postgres,
+// а не проверка перед действием в коде). Последовательная проба повтора (TestAB_31b)
+// не ловит гонку TOCTOU; эта проба ловит.
 //
-// Each goroutine drives its own Writer-tx (pool.Begin → Insert → Commit) — the
-// shared insertAB helper is NOT goroutine-safe (it uses t.FailNow), so the
-// transaction lifecycle is inlined here, mirroring the
-// cluster_admin_grant_integration_test.go race pattern.
+// Каждая горутина ведёт собственную транзакцию Writer (pool.Begin → Insert → Commit):
+// общая функция insertAB НЕ безопасна для горутин (использует t.FailNow), поэтому
+// жизненный цикл транзакции встроен здесь по образцу гонки из
+// файла cluster_admin_grant_integration_test.go.
 func TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -378,8 +377,8 @@ func TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner(t *testing.T) {
 	uid := mustSeedUser(t, ctx, pool, "abconc")
 	acc := seedAccount(t, ctx, repo, "acc-abconc", uid)
 
-	// The contended 5-tuple — identical across all goroutines (only the
-	// candidate id differs, which is the realistic concurrent-Create shape).
+	// Оспариваемый кортеж из пяти полей одинаков во всех горутинах (различается
+	// только кандидат id — реальная форма конкурентного Create).
 	tuple := domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(uid),
@@ -408,7 +407,7 @@ func TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner(t *testing.T) {
 			}
 			out, ierr := bindingset.Insert(ctx, w.AccessBindingsW(), b)
 			if ierr != nil {
-				_ = w.Rollback(ctx) // release connection on the loser path
+				_ = w.Rollback(ctx) // освобождаем соединение на проигравшем пути
 				if stderrors.Is(ierr, iamerr.ErrAlreadyExists) {
 					dupErrs <- ierr
 				} else {
@@ -417,8 +416,8 @@ func TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner(t *testing.T) {
 				return
 			}
 			if ierr := w.Commit(ctx); ierr != nil {
-				// A serialization/commit race that surfaces the active-grant
-				// conflict at COMMIT time is still a duplicate-grant outcome.
+				// Гонка сериализации/коммита, выявляющая конфликт активной выдачи
+				// при COMMIT, по-прежнему означает повторную выдачу.
 				if stderrors.Is(ierr, iamerr.ErrAlreadyExists) {
 					dupErrs <- ierr
 				} else {
@@ -434,7 +433,7 @@ func TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner(t *testing.T) {
 	close(dupErrs)
 	close(otherErrs)
 
-	// No unexpected (non-sentinel) errors.
+	// Нет неожиданных ошибок (кроме предусмотренных сигнальных).
 	for e := range otherErrs {
 		require.NoError(t, e, "only ErrAlreadyExists is an acceptable loser outcome")
 	}
@@ -451,7 +450,7 @@ func TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner(t *testing.T) {
 	require.Len(t, winnerIDs, 1, "exactly one concurrent Insert of the same active 5-tuple must win")
 	require.Equal(t, N-1, dupCount, "the remaining goroutines must fail with ErrAlreadyExists")
 
-	// Exactly one ACTIVE row persisted in the DB (no second-writer-wins).
+	// В базе сохранена ровно одна строка ACTIVE (без победы второго писателя).
 	var active int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.access_bindings
@@ -463,13 +462,13 @@ func TestAccessBinding_ConcurrentActiveGrant_ExactlyOneWinner(t *testing.T) {
 	require.Equal(t, 1, active, "exactly one active grant row must persist after the race")
 }
 
-// TestAccessBinding_RegrantAfterRevoke_Succeeds — migration 0003.
+// TestAccessBinding_RegrantAfterRevoke_Succeeds — миграция 0003.
 //
-// The partial UNIQUE access_bindings_active_grant_uniq is scoped to
-// WHERE revoked_at IS NULL, so a REVOKED grant must NOT block a fresh active
-// grant of the same 5-tuple. Operators legitimately re-grant after revoke.
-// Distinct from the existing TestAB_31c by asserting the surviving-active-row
-// count via the revoke path (TransitionStatus → REVOKED sets revoked_at).
+// Частичный UNIQUE access_bindings_active_grant_uniq ограничен условием
+// WHERE revoked_at IS NULL, поэтому выдача REVOKED НЕ должна блокировать новую
+// активную выдачу того же кортежа из пяти полей. Повторная выдача после отзыва законна.
+// В отличие от существующей TestAB_31c, проверяет число сохранившихся активных
+// строк через путь отзыва (TransitionStatus → REVOKED задаёт revoked_at).
 func TestAccessBinding_RegrantAfterRevoke_Succeeds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -494,8 +493,8 @@ func TestAccessBinding_RegrantAfterRevoke_Succeeds(t *testing.T) {
 	first := insertAB(t, ctx, repo, tuple)
 	require.Equal(t, domain.AccessBindingStatusActive, first.Status)
 
-	// Revoke the first grant via the real repo path (CAS UPDATE sets
-	// revoked_at + status='REVOKED').
+	// Отзываем первую выдачу настоящим путём репозитория (CAS UPDATE задаёт
+	// поля revoked_at + status='REVOKED').
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	revoker := domain.UserID(uid)
@@ -506,15 +505,15 @@ func TestAccessBinding_RegrantAfterRevoke_Succeeds(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 	require.Equal(t, domain.AccessBindingStatusRevoked, revoked.Status)
 
-	// Re-grant the SAME 5-tuple — must SUCCEED (revoked row is out of the
-	// partial-UNIQUE scope), yielding a fresh ACTIVE row.
+	// Повторно выдаём ТОТ ЖЕ кортеж из пяти полей — УСПЕШНО (отозванная строка вне
+	// области частичного UNIQUE), получая новую строку ACTIVE.
 	regrant := tuple
 	regrant.ID = domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	second := insertAB(t, ctx, repo, regrant)
 	assert.NotEqual(t, first.ID, second.ID, "re-grant after revoke must produce a fresh row id")
 	assert.Equal(t, domain.AccessBindingStatusActive, second.Status)
 
-	// Exactly one ACTIVE row + one REVOKED history row for the 5-tuple.
+	// Ровно одна строка ACTIVE + одна историческая строка REVOKED для кортежа из пяти полей.
 	var active, revokedCnt int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT

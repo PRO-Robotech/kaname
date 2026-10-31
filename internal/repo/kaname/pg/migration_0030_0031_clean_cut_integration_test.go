@@ -3,19 +3,19 @@
 
 package pg_test
 
-// migration_0030_0031_clean_cut_integration_test.go — RBAC rules-model clean-cut.
-// Testcontainers Postgres 16; all migrations applied by setupTestDB. Proves:
+// migration_0030_0031_clean_cut_integration_test.go — полный переход на модель правил RBAC.
+// Testcontainers Postgres 16; все миграции применяет setupTestDB. Доказывает:
 //
-//   - the legacy child tables access_binding_targets / access_binding_selector
-//     are DROPPED, while access_binding_target_members SURVIVES (rules
-//     reconciler depends on it).
-//   - the system roles are RE-SEEDED in-place (UPSERT) with non-empty
-//     rules[] — access NOT severed: the FK-child cohort (cluster-admin
-//     mig 0004 + module-SA mig 0009) is preserved, no role row deleted, the
-//     deterministic ids of view / kacho-system.viewer / admin are stable, and
-//     a re-apply of 0031 is an idempotent no-op (ON CONFLICT DO UPDATE).
-//   - a re-seeded system role read back via the repo carries non-empty rules
-//     AND (through the public DTO) empty permissions.
+//   - прежние дочерние таблицы access_binding_targets / access_binding_selector
+//     УДАЛЕНЫ, а access_binding_target_members СОХРАНЕНА (от неё зависит
+//     согласователь правил).
+//   - системные роли ПОВТОРНО ПОСЕЯНЫ на месте (UPSERT) с непустыми
+//     rules[]; доступ НЕ оборван: дочерние строки FK (администратор кластера
+//     из миграции 0004 + module-SA из миграции 0009) сохранены, строки ролей не удалены,
+//     детерминированные id view / kacho-system.viewer / admin стабильны,
+//     повторное применение 0031 идемпотентно (ON CONFLICT DO UPDATE).
+//   - повторно посеянная системная роль, прочитанная через репозиторий, содержит
+//     непустые rules И пустые permissions (через публичный DTO).
 
 import (
 	"context"
@@ -27,15 +27,15 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/dto"
-	_ "github.com/PRO-Robotech/kaname/internal/dto/toproto" // register Role transfer
+	_ "github.com/PRO-Robotech/kaname/internal/dto/toproto" // регистрируем преобразование Role
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
-// TestMigration_F51_LegacyTablesDropped — the two legacy child tables are gone,
-// the rules-reconciler member table survives.
+// TestMigration_F51_LegacyTablesDropped — две прежние дочерние таблицы удалены,
+// таблица участников согласователя правил сохранена.
 func TestMigration_F51_LegacyTablesDropped(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testcontainers integration in -short mode")
@@ -62,28 +62,28 @@ func TestMigration_F51_LegacyTablesDropped(t *testing.T) {
 		"F-51: access_binding_target_members must SURVIVE (rules reconciler uses it)")
 }
 
-// wantSystemRoles — how many system roles the migration chain leaves seeded.
+// wantSystemRoles — сколько системных ролей остаётся в посеве после цепочки миграций.
 //
-// Derivation: 66 seeded (58 catalog + 5 SEC-C module-SA mig 0009 + owner mig 0035
-// + registry mig 0044 + storage mig 0057), MINUS the 9 compute block-storage roles
-// migration 0074 withdrew (compute.{disk,image,snapshot}.{admin,edit,view} —
-// kacho-storage owns those resources), MINUS ALL SEVEN module-SA backing roles:
-// 0076 retired the network operator's and 0077 the remaining six
-// (module.{api_gateway,compute,nlb,registry,storage,vpc}_sa). Each of the seven
-// authored rules naming resources the closed object-type table does not carry — an
-// EMPTY resolvable set per role — so none materialized a single tuple. What those
-// service accounts work by is untouched: their fga_writer tuples, the
-// system_viewer@cluster tuples of 0014, and the requesting tenant's own identity,
-// propagated on every peer call.
+// Расчёт: 66 посеянных (58 каталожных + 5 SEC-C module-SA из миграции 0009 + owner из 0035
+// + registry из 0044 + storage из 0057), МИНУС 9 ролей блочного хранения compute,
+// снятых миграцией 0074 (compute.{disk,image,snapshot}.{admin,edit,view} —
+// этими ресурсами владеет kacho-storage), МИНУС ВСЕ СЕМЬ опорных ролей module-SA:
+// 0076 сняла роль сетевого оператора, а 0077 — остальные шесть
+// (module.{api_gateway,compute,nlb,registry,storage,vpc}_sa). Каждая из семи
+// задавала правила с ресурсами, отсутствующими в закрытой таблице типов объектов:
+// разрешаемый набор каждой роли ПУСТ, ни одна не материализовала ни одного кортежа.
+// Средства работы этих сервисных аккаунтов сохранены: их кортежи fga_writer,
+// кортежи system_viewer@cluster из 0014 и собственная личность арендатора,
+// от имени которого выполняется запрос, передаваемая при каждом межсервисном вызове.
 //
-// MINUS `iam.user.edit`, выведенной 20260824002317: её единственный глагол
+// МИНУС `iam.user.edit`, выведенной 20260824002317: её единственный глагол
 // `update` снят с типа `iam_user` (kacho#1128, читателя у него не было с kacho#1102),
 // поэтому набор глаголов правила разрешался в ПУСТОЙ — роль не материализовала
 // ни одного кортежа, а её имя обещало правку. Смысла, который обещает имя, у неё
 // быть не может: правку записи личности выражает `record_writer`, отношение
 // ВЫЧИСЛЯЕМОЕ, и выдать его нельзя ни кортежем, ни привязкой.
 //
-// MINUS `iam.user.admin`, выведенной вместе со снятием `v_delete` с того же типа
+// МИНУС `iam.user.admin`, выведенной вместе со снятием `v_delete` с того же типа
 // (kacho#1189). Её правило — подстановка `*`, разворачиваемая в набор ТИПА; после снятия
 // последнего распоряжающегося глагола набор стал `[get list]`, и роль
 // материализовала ярус НАБЛЮДАТЕЛЯ и те же два глагола, что соседняя
@@ -95,15 +95,15 @@ func TestMigration_F51_LegacyTablesDropped(t *testing.T) {
 //
 // 66 − 9 − 7 − 1 − 1 = 48.
 //
-// The number is asserted EXACTLY, not as a floor, so a re-seed that quietly brings
-// a retired role back fails here — that is the guard, and it is worth the upkeep.
-// It lives in ONE place because it was previously written out twice and a
-// deliberate retire then had to find both; the second copy is a precondition in
-// TestMigration_F53_AccessNotSevered.
+// Проверяется ТОЧНОЕ число, а не нижняя граница, поэтому повторный посев,
+// незаметно вернувший снятую роль, здесь падает: это защита, стоящая поддержки.
+// Число задано в ОДНОМ месте: прежде оно было записано дважды и при намеренном
+// снятии приходилось искать обе записи; второе использование — предусловие в
+// пробе TestMigration_F53_AccessNotSevered.
 const wantSystemRoles = 48
 
-// TestMigration_F53_SystemRolesReseededWithRules — every system role has
-// non-empty rules after re-seed; the count is exact.
+// TestMigration_F53_SystemRolesReseededWithRules — у каждой системной роли
+// непустые rules после повторного посева; число ролей точное.
 func TestMigration_F53_SystemRolesReseededWithRules(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testcontainers integration in -short mode")
@@ -128,8 +128,8 @@ func TestMigration_F53_SystemRolesReseededWithRules(t *testing.T) {
 		"F-53: every system role must have non-empty rules[] after re-seed (0031)")
 }
 
-// TestMigration_F53_IdStability — the deterministic ids that downstream tuple
-// migrations (0004/0009/0010/0014) depend on are unchanged by the re-seed.
+// TestMigration_F53_IdStability — детерминированные id, от которых зависят
+// последующие миграции кортежей (0004/0009/0010/0014), не меняются при повторном посеве.
 func TestMigration_F53_IdStability(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testcontainers integration in -short mode")
@@ -155,16 +155,17 @@ func TestMigration_F53_IdStability(t *testing.T) {
 	assert.Equal(t, mdID("view"), idOf("view"), "F-53: view id must stay 'rol'||md5('view')[1..17]")
 	assert.Equal(t, mdID("admin"), idOf("admin"), "F-53: admin id must stay 'rol'||md5('admin')[1..17]")
 	// Роли ищутся ОБЪЯВЛЕННЫМ именем: перевод имени (kacho#2554) идентификатор не
-	// двигает, и ровно это здесь утверждается — имя ушло, литерал остался.
+	// двигает. Двигает его ровно одна миграция — перевод на каноническую форму
+	// (kaname#543), и после всей цепочки id роли по имени равен константе домена.
 	assert.Equal(t, domain.SystemViewerRoleID, idOf(domain.SystemViewerRoleName),
-		"F-53: system.viewer id must stay the literal rol000000000sysviewer")
+		"F-53: system.viewer id must equal domain.SystemViewerRoleID (kaname#543 moved it once, by migration)")
 	assert.Equal(t, domain.SystemAdminRoleID, idOf(domain.SystemAdminRoleName),
-		"F-53: system.admin id must stay the literal rol000000000sysadmin")
+		"F-53: system.admin id must equal domain.SystemAdminRoleID (kaname#543 moved it once, by migration)")
 }
 
-// TestMigration_F53_AccessNotSevered — the FK-child cohort and the role rows are
-// preserved across an idempotent re-apply of 0031 (the access bindings that mig
-// 0004/0009 attach to system roles must not be touched, no role row deleted).
+// TestMigration_F53_AccessNotSevered — дочерние строки FK и строки ролей
+// сохраняются при идемпотентном повторном применении 0031 (выдачи, которые миграции
+// 0004/0009 привязывают к системным ролям, не затрагиваются, строки ролей не удаляются).
 func TestMigration_F53_AccessNotSevered(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testcontainers integration in -short mode")
@@ -194,9 +195,9 @@ func TestMigration_F53_AccessNotSevered(t *testing.T) {
 	require.Greater(t, bindingsBefore, 0,
 		"F-53: at least the cluster-admin (0004) + module-SA (0009) bindings on system roles must exist")
 
-	// Re-apply the re-seed body idempotently: an UPSERT (ON CONFLICT DO UPDATE
-	// SET rules) must NOT delete any role or any FK-child binding (the clean-cut
-	// re-seed never DELETEs).
+	// Идемпотентно повторяем тело посева: UPSERT (ON CONFLICT DO UPDATE
+	// SET rules) НЕ должен удалять ни роль, ни дочернюю выдачу FK (полный переход
+	// с повторным посевом никогда не выполняет DELETE).
 	reapplySystemRoleReseed(t, ctx, pool)
 
 	assert.Equal(t, rolesBefore, countSystemRoles(),
@@ -205,11 +206,11 @@ func TestMigration_F53_AccessNotSevered(t *testing.T) {
 		"F-53: re-apply must not sever any system-role access binding")
 }
 
-// reapplySystemRoleReseed re-runs the deterministic UPSERT that migration 0031
-// performs, proving idempotency (ON CONFLICT DO UPDATE SET rules). It touches
-// every system role with its own canonical rules — re-deriving them is the
-// migration's contract; here we just re-bump the SAME rules already stored, so
-// the row content is unchanged and no FK-child is affected.
+// reapplySystemRoleReseed повторяет детерминированный UPSERT миграции 0031,
+// доказывая идемпотентность (ON CONFLICT DO UPDATE SET rules). Он затрагивает
+// каждую системную роль с её каноническими правилами: повторный вывод правил —
+// контракт миграции; здесь повторно записываются ТЕ ЖЕ сохранённые rules,
+// поэтому содержимое строк не меняется и дочерние строки FK не затрагиваются.
 func reapplySystemRoleReseed(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(ctx,
@@ -217,9 +218,9 @@ func reapplySystemRoleReseed(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	require.NoError(t, err, "idempotent re-apply of system-role rules must succeed")
 }
 
-// TestMigration_F52_SystemRolePublicDTOEmptyPermissions — a re-seeded system role
-// read back via the repo + public DTO carries non-empty rules and EMPTY
-// permissions (public-surface contract).
+// TestMigration_F52_SystemRolePublicDTOEmptyPermissions — повторно посеянная системная роль,
+// прочитанная через репозиторий + публичный DTO, содержит непустые rules и ПУСТЫЕ
+// permissions (контракт публичной поверхности).
 func TestMigration_F52_SystemRolePublicDTOEmptyPermissions(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping testcontainers integration in -short mode")
@@ -235,8 +236,8 @@ func TestMigration_F52_SystemRolePublicDTOEmptyPermissions(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
 
-	// 'view' is a wildcard read role: *.*.{read,list,get} → rules non-empty, perms
-	// still stored (FGA emission), but the public DTO must omit permissions.
+	// 'view' — роль чтения по шаблону: *.*.{read,list,get} → rules непусты,
+	// права по-прежнему сохранены (отправка FGA), но публичный DTO обязан опустить permissions.
 	var viewID string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT id FROM kaname.roles WHERE name = 'view' AND is_system`).Scan(&viewID))
