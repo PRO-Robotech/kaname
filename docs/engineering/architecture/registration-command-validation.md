@@ -26,40 +26,39 @@ declaration backfill never rewrites or validates historical chains (R8).
 
 ## Raw edge concurrency
 
-An object advisory transaction fence closes the missing-row case. Commands with
-an existing locked mirror take its fence and lock the existing edge rows before
-comparing the chain in a separate SQL statement. Commands whose initial mirror
-lookup was empty first perform the effective mirror CAS, then take the fence and
-edge locks. This preserves mirror-before-fence order even if a concurrent raw
-UPSERT inserted the mirror between those statements. A raw mirror writer takes
-the fence only in its AFTER effective-row guard; a raw UPSERT waiting on a mirror
-cannot already own the fence or binding. First raw binding creation also checks
-the existing chain; a failure rolls the whole statement back.
+Every command and physical mirror/edge/catalog write takes the same exclusive
+advisory transaction fence in a BEFORE STATEMENT trigger, before row locks.
+INSERT, UPDATE, DELETE and TRUNCATE participate. Nested writes reacquire the same
+transaction lock safely. Catalog writes enter before declaration row locks; the catalog applier takes
+the same fence in LockCatalog before its explicit module/resource prelocks;
+unregistration enters in LockBindingsNamingKeys before its complete grant/role
+lock plan. The bindings -> roles -> mirror -> facts order remains (#975/#1019);
+taking the fence only at DELETE would invert with catalog retirement FK checks
+on roles. Commands still read the chain in a separate VOLATILE SQL
+statement after waiting (#874). The one/zero binding-read contract is unchanged.
 
-A raw project-edge INSERT takes the destination object's fence before its row
-exists. A raw UPDATE that changes the object key does the same: its old locked
-row belongs to another object's chain. A raw UPDATE of the SAME object key must
-not take that fence after its row lock. Its committed old row is visible to the
-command's edge-lock statement, which waits before reading the fresh chain. If
-the command got the edge lock first, the raw UPDATE waits and its row guard then
-sees the committed binding. This distinction avoids the edge-to-fence inversion.
-Raw edge statement triggers take compatible catalog SHARE locks before any edge
-row locks, so a pending catalog declaration cannot introduce a catalog/edge lock
-cycle. Nested command DML already holds the relevant catalog lock and omits this
-statement guard under the same closed-graph proof.
+This serializes registration write transactions, including raw DML. A raw edge
+insert cannot remain invisible to a command that creates the first binding: the
+command waits until raw commit, then replaces the committed chain. A raw mirror
+first registration also checks its existing chain. A mismatch fails atomically
+with object_project_binding_holds. Historical catalog backfill retains R8 chains.
+There are no deferred constraints, client flags, permits or shared-to-exclusive
+lock upgrades. SET CONSTRAINTS IMMEDIATE does not alter this protocol. Commands
+and raw statements can be mixed in either order in one transaction.
 
-The additional ordinary-command cost for a held type is one advisory lock and
-one ordered lock scan over its at-most-four existing edge rows, with no extra
-binding lookup. Commands on independent object keys remain concurrent; raw
-statements briefly share-lock the catalog, and do not serialize each other.
-Hash collisions can introduce additional waiting, never an integrity exemption.
-There are no deferred constraints, lock-mode upgrades, new stored permits or
-client-controlled switches. SET CONSTRAINTS IMMEDIATE does not alter the
-protocol. As with ordinary multi-object SQL transactions, callers must keep a
-consistent object order; no promise of deadlock-free arbitrary SQL ordering is
-made. The scoped tests retain the original manual-mirror-lock/raw-UPSERT twin,
-the original raw INSERT probe, and same-key/key-moving UPDATE twins. Latency and
-buffer measurements remain a separate acceptance gate.
+The raw-UPSERT barrier test now holds the writer transaction with a genuine stale
+command rather than a manual SELECT FOR NO KEY UPDATE before command entry. Its
+semantic assertions remain: both lawful writers commit, no deadlock, correct
+permanent binding. Arbitrary row locks taken outside the writer protocol can
+still create ordinary SQL lock-order cycles; no absence-of-deadlock guarantee for
+such prelocks is inferred from R9. The original manual-prelock schedule is not
+claimed fixed. The actual UpsertTx has one command statement and no such prelock.
+
+The cost is one transaction-wide exclusive fence, not merely the binding SELECT
+count. The acceptance latency/EXPLAIN measurement and concurrent-writer controls
+must assess this serialization before approval. Independent objects no longer
+write in parallel; this is an explicit implementation tradeoff, not an accepted
+performance result. No performance threshold or accepted criterion is changed.
 
 ## Closed trigger graph is the authority
 

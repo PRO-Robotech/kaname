@@ -5,14 +5,14 @@ syntax = "proto3";
 
 package kaname.cloud.iam.v1;
 
+import "corelib/api/v1/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+import "corelib/operation/operation.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
-import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/secret_options.proto";
 import "kaname/cloud/iam/v1/service_account.proto";
 import "kaname/cloud/iam/v1/user.proto";
-import "kaname/cloud/iam/v1/secret_options.proto";
-import "corelib/operation/operation.proto";
-import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
 
@@ -29,13 +29,13 @@ service InternalIAMService {
   // REST exposed ONLY on the cluster-internal listener;
   // api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
   // and authz-public-allowlist permits the <exempt> catalog entry.
-  rpc LookupSubject (LookupSubjectRequest) returns (LookupSubjectResponse) {
+  rpc LookupSubject(LookupSubjectRequest) returns (LookupSubjectResponse) {
     option (google.api.http) = {
       post: "/iam/v1/internal/iam:lookupSubject"
       body: "*"
     };
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // TOMBSTONE. The false-assurance stub
@@ -59,13 +59,13 @@ service InternalIAMService {
   // задаётся той же базе, что и остальные чтения службы.
   //
   // REST exposed ONLY on the cluster-internal listener.
-  rpc Check (CheckRequest) returns (CheckResponse) {
+  rpc Check(CheckRequest) returns (CheckResponse) {
     option (google.api.http) = {
       post: "/iam/v1/internal/iam:check"
       body: "*"
     };
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // TOMBSTONE. `WriteCreatorTuple` — synchronous own-creator tuple write — is
@@ -114,7 +114,7 @@ service InternalIAMService {
   // docs/engineering/architecture/known-divergences.md. An integrator has
   // neither our history nor a way to re-measure, so the promise is withdrawn
   // here rather than left standing.
-  rpc ForceLogout (ForceLogoutRequest) returns (corelib.operation.Operation) {
+  rpc ForceLogout(ForceLogoutRequest) returns (corelib.operation.Operation) {
     option (corelib.api.v1.operation) = {
       metadata: "ForceLogoutMetadata"
       response: "ForceLogoutResult"
@@ -122,7 +122,7 @@ service InternalIAMService {
     // Cluster-internal listener-protected; admin authz gate enforced at
     // the api-gateway internal mux layer (system_admin role required).
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // PollSubjectChanges drains subject_change_outbox by ascending id cursor,
@@ -160,9 +160,9 @@ service InternalIAMService {
   // indistinguishable from "rows were swept" — an unapplied revocation nobody
   // observes. Until this refusal existed, sweeping the journal was impossible
   // by construction, not by preference.
-  rpc PollSubjectChanges (PollSubjectChangesRequest) returns (PollSubjectChangesResponse) {
+  rpc PollSubjectChanges(PollSubjectChangesRequest) returns (PollSubjectChangesResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // RegisterResource — Internal FGA-proxy: apply an owner-hierarchy tuple
@@ -203,9 +203,9 @@ service InternalIAMService {
   // ServiceAccount → relation `fga_writer` на системном объекте
   // `cluster:cluster_root`. Нет relation → PermissionDenied. cluster-internal
   // listener :9091 only — нет google.api.http.
-  rpc RegisterResource (RegisterResourceRequest) returns (RegisterResourceResponse) {
+  rpc RegisterResource(RegisterResourceRequest) returns (RegisterResourceResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
@@ -225,9 +225,9 @@ service InternalIAMService {
   // Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
   // `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
   // нет google.api.http.
-  rpc UnregisterResource (UnregisterResourceRequest) returns (UnregisterResourceResponse) {
+  rpc UnregisterResource(UnregisterResourceRequest) returns (UnregisterResourceResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // GetRoleCompiled — Internal two-projection read (redesign-2026 F5): returns a
@@ -257,18 +257,18 @@ service InternalIAMService {
   // «есть, но не ваш». Различимость живёт ВНУТРЬ — в счётчиках по причинам.
   //
   // REST exposed ONLY on the cluster-internal listener.
-  rpc ResolveBasicCredential (ResolveBasicCredentialRequest) returns (ResolveBasicCredentialResponse) {
+  rpc ResolveBasicCredential(ResolveBasicCredentialRequest) returns (ResolveBasicCredentialResponse) {
     option (google.api.http) = {
       post: "/iam/v1/internal/iam:resolveBasicCredential"
       body: "*"
     };
-    option (corelib.authz.v1.permission)    = "<exempt>";
+    option (corelib.authz.v1.permission) = "<exempt>";
     option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
-  rpc GetRoleCompiled (GetRoleCompiledRequest) returns (GetRoleCompiledResponse) {
+  rpc GetRoleCompiled(GetRoleCompiledRequest) returns (GetRoleCompiledResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // CheckBasicCredentialLive — ЖИВО ЛИ УДОСТОВЕРЕНИЕ, СПРОШЕННОЕ ПО ЕГО
@@ -299,8 +299,8 @@ service InternalIAMService {
   // БЕЗ `google.api.http` НАМЕРЕННО — как у `GetRoleCompiled`. Вызывающий ходит
   // gRPC; дружелюбного пути под этот вопрос не заводится, чтобы его нельзя было
   // выставить наружу опечаткой в таблице маршрутов края.
-  rpc CheckBasicCredentialLive (CheckBasicCredentialLiveRequest) returns (CheckBasicCredentialLiveResponse) {
-    option (corelib.authz.v1.permission)    = "<exempt>";
+  rpc CheckBasicCredentialLive(CheckBasicCredentialLiveRequest) returns (CheckBasicCredentialLiveResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
     option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 }
@@ -321,7 +321,7 @@ message LookupSubjectRequest {
 message LookupSubjectResponse {
   // Возвращенный subject — User или ServiceAccount.
   oneof subject {
-    User           user            = 1;
+    User user = 1;
     ServiceAccount service_account = 2;
   }
 }
@@ -563,9 +563,9 @@ message PollSubjectChangesRequest {
 
 // SubjectChange — one row from subject_change_outbox.
 message SubjectChange {
-  int64  id         = 1;
+  int64 id = 1;
   string subject_id = 2;
-  string op         = 3; // binding_upsert | binding_delete | group_member_change
+  string op = 3; // binding_upsert | binding_delete | group_member_change
 
   // subject_type — тип субъекта в словаре модели прав: `user` |
   // `service_account` | `group` | `system_class` (у выдачи системному классу

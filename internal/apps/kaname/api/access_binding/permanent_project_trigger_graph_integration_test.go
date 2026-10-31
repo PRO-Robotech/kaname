@@ -63,7 +63,7 @@ func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T){
     require.Zero(t,bad,"RLS callbacks require a new graph proof")
     require.NoError(t,w.pool.QueryRow(w.ctx,`SELECT count(*) FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
         WHERE t.tgrelid IN ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)
-        AND NOT t.tgisinternal AND p.proname NOT IN ('resource_mirror_keeps_the_bound_project','resource_parent_edge_keeps_the_bound_project','resource_parent_edge_locks_catalog')`).Scan(&bad))
+        AND NOT t.tgisinternal AND p.proname NOT IN ('resource_mirror_keeps_the_bound_project','resource_parent_edge_keeps_the_bound_project','resource_registration_locks_writers')`).Scan(&bad))
     require.Zero(t,bad,"no observable callback may precede complete command validation")
     require.NoError(t,w.pool.QueryRow(w.ctx,`SELECT count(*) FROM pg_constraint WHERE conrelid IN
         ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)

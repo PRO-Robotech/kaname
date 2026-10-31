@@ -132,7 +132,9 @@ type InternalIAMServiceClient interface {
 	// политику записи манифеста (parents / writes). Иначе PERMISSION_DENIED,
 	// message = "permission denied", без деталей; политика судится до вывода.
 	// Kaname выводит родителя по субъекту указателя либо фактам указателей объекта
-	// и сверяет присланные поля области и цепь со своей иерархией, не дописывая их.
+	// и сверяет присланные поля области и цепь со своей иерархией. Сам вывод
+	// пропущенные сведения не дописывает; прежнее заполнение parent_account_id
+	// по parent_project_id из данных IAM сохраняется (если аккаунт не прислан).
 	// Нет опоры либо сведения расходятся: FAILED_PRECONDITION,
 	// message = "<object> parent scope does not match", ErrorInfo.reason =
 	// "PARENT_SCOPE_MISMATCH". Ничего не записывается; после регистрации
@@ -434,7 +436,9 @@ type InternalIAMServiceServer interface {
 	// политику записи манифеста (parents / writes). Иначе PERMISSION_DENIED,
 	// message = "permission denied", без деталей; политика судится до вывода.
 	// Kaname выводит родителя по субъекту указателя либо фактам указателей объекта
-	// и сверяет присланные поля области и цепь со своей иерархией, не дописывая их.
+	// и сверяет присланные поля области и цепь со своей иерархией. Сам вывод
+	// пропущенные сведения не дописывает; прежнее заполнение parent_account_id
+	// по parent_project_id из данных IAM сохраняется (если аккаунт не прислан).
 	// Нет опоры либо сведения расходятся: FAILED_PRECONDITION,
 	// message = "<object> parent scope does not match", ErrorInfo.reason =
 	// "PARENT_SCOPE_MISMATCH". Ничего не записывается; после регистрации

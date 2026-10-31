@@ -35,7 +35,7 @@ func TestPermanentProjectCost_BindingReadPlan(t *testing.T) {
 		require.NoError(t, err)
 		_, err = conn.Exec(w.ctx, "SET enable_seqscan = "+seqscan)
 		require.NoError(t, err)
-		rows, err := conn.Query(w.ctx, `EXPLAIN (COSTS OFF)
+		rows, err := conn.Query(w.ctx, `EXPLAIN (ANALYZE, BUFFERS, COSTS OFF)
 			SELECT b.project_id FROM kaname.object_project_binding b
 			 WHERE b.object_type = $1 AND b.object_id = $2`, pcrRegType, dpQ)
 		require.NoError(t, err)
