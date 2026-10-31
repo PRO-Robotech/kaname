@@ -191,7 +191,7 @@ first takes the same advisory fence. Direct witness TRUNCATE is refused.
 
 Reuse compares full `pg_current_xact_id()` with the stored xid8; heap xmin,
 32-bit casts, transaction status, session caches and epochs are not authority.
-It rechecks the current role's original UPDATE privilege on
+It rechecks the current role's original SELECT and UPDATE privileges on
 `catalog_resource.project_bindings_held` each time. Missing privilege takes the
 ordinary mint/write/error path, including after SET ROLE. Catalog fields are read
 afresh after mint; no logical field is stored in the witness. Raw edge protects

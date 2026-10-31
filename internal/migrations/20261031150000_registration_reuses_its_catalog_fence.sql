@@ -48,6 +48,7 @@ LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog, kaname 
 BEGIN
     -- Recheck authority after SET ROLE/revocation. A marker is not a grant.
     IF has_column_privilege(current_user, 'kaname.catalog_resource', 'project_bindings_held', 'UPDATE')
+       AND has_column_privilege(current_user, 'kaname.catalog_resource', 'project_bindings_held', 'SELECT')
        AND EXISTS (SELECT 1 FROM kaname.registration_catalog_fence w
                     WHERE w.catalog_module = p_module AND w.catalog_resource = p_resource
                       AND w.fence_xid = pg_current_xact_id()) THEN
@@ -155,7 +156,8 @@ BEGIN
     -- serialize/retry, not validate an invisible binding or edge as absent.
     -- The non-key assignment preserves every logical catalog column. The held
     -- flag callback preserves its value; UPDATE OF permanent_project backfill
-    -- does not run. No additional binding lookup or stored witness is needed.
+    -- does not run. No additional binding lookup is needed. The full-xid
+    -- witness records only a surviving physical catalog conflict fence.
     FOR v_catalog IN SELECT cr.module, cr.resource FROM kaname.catalog_resource cr
         WHERE cr.dotted = NEW.dotted_type AND cr.live ORDER BY cr.module, cr.resource
     LOOP

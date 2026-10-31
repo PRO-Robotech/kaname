@@ -58,7 +58,8 @@ func TestRegistrationCatalogWitness_MetadataCannotGrantAuthority(t *testing.T) {
 	ctx, admin, writer, _ := registrationRRDB(t)
 	allowed := fmt.Sprintf("fence_allowed_%d", writer.PgConn().PID())
 	denied := fmt.Sprintf("fence_denied_%d", writer.PgConn().PID())
-	for _, role := range []string{allowed, denied} {
+	noSelect := fmt.Sprintf("fence_no_select_%d", writer.PgConn().PID())
+	for _, role := range []string{allowed, denied, noSelect} {
 		_, err := admin.Exec(ctx, "CREATE ROLE "+role+" NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT")
 		require.NoError(t, err)
 		t.Cleanup(func() {
@@ -68,13 +69,16 @@ func TestRegistrationCatalogWitness_MetadataCannotGrantAuthority(t *testing.T) {
 		})
 		// Only existing command/table DML, plus the new metadata DML. No CREATE,
 		// TRIGGER, schema ownership, role membership or SECURITY DEFINER grant.
-		_, err = admin.Exec(ctx, "GRANT USAGE ON SCHEMA kaname TO "+role+"; "+
-			"GRANT SELECT ON kaname.catalog_resource TO "+role+"; "+
+		catalogSelect := "GRANT SELECT ON kaname.catalog_resource TO " + role + "; "
+		if role == noSelect {
+			catalogSelect = "GRANT SELECT(module,resource,object_type,dotted,live,permanent_project) ON kaname.catalog_resource TO " + role + "; "
+		}
+		_, err = admin.Exec(ctx, "GRANT USAGE ON SCHEMA kaname TO "+role+"; "+catalogSelect+
 			"GRANT SELECT,INSERT,UPDATE,DELETE ON kaname.resource_mirror,kaname.resource_parent_edge,kaname.object_project_binding,kaname.registration_catalog_fence TO "+role+"; "+
 			"GRANT INSERT ON kaname.resource_registration_command TO "+role)
 		require.NoError(t, err)
 	}
-	_, err := admin.Exec(ctx, "GRANT UPDATE(project_bindings_held) ON kaname.catalog_resource TO "+allowed)
+	_, err := admin.Exec(ctx, "GRANT UPDATE(project_bindings_held) ON kaname.catalog_resource TO "+allowed+","+noSelect)
 	require.NoError(t, err)
 	t.Run("ordinary_writer", func(t *testing.T) {
 		tx, err := writer.Begin(ctx)
@@ -93,19 +97,25 @@ func TestRegistrationCatalogWitness_MetadataCannotGrantAuthority(t *testing.T) {
 		_, err = tx.Exec(ctx, registrationRRCommand, "ordinary-writer-second")
 		require.NoError(t, err)
 	})
-	for _, mode := range []string{"direct_mint", "role_after_mint"} {
+	for _, mode := range []string{"direct_mint", "role_after_mint", "raw_edge_without_held_select"} {
 		t.Run(mode, func(t *testing.T) {
 			tx, err := writer.Begin(ctx)
 			require.NoError(t, err)
 			defer tx.Rollback(context.Background())
-			if mode == "role_after_mint" {
+			if mode != "direct_mint" {
 				_, err = tx.Exec(ctx, registrationRRCommand, "owner-before-role")
 				require.NoError(t, err)
 			}
-			_, err = tx.Exec(ctx, "SET LOCAL ROLE "+denied)
+			role := denied
+			if mode == "raw_edge_without_held_select" {
+				role = noSelect
+			}
+			_, err = tx.Exec(ctx, "SET LOCAL ROLE "+role)
 			require.NoError(t, err)
 			if mode == "direct_mint" {
 				_, err = tx.Exec(ctx, `INSERT INTO kaname.registration_catalog_fence VALUES ('registry','registries',pg_current_xact_id())`)
+			} else if mode == "raw_edge_without_held_select" {
+				_, err = tx.Exec(ctx, registrationRREdge, "denied-edge-after-role", "registrationRR-P")
 			} else {
 				_, err = tx.Exec(ctx, registrationRRCommand, "denied-after-role")
 			}
