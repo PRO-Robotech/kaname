@@ -35,7 +35,8 @@ import (
 // интеграционная проба на живой базе; здесь — что путь её ВООБЩЕ зовёт.
 func Test_Invite_CoCommitsTheMailIntent(t *testing.T) {
 	repo := &invPrincRepo{}
-	uc := NewInviteUserUseCase(repo, newFakeUsrOps(), invPrincAllowAll{}).
+	ops := newFakeUsrOps()
+	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).
 		WithInviteMailRateLimit(outboxtypes.InviteMailRateLimit{MaxPerWindow: 3, Window: time.Hour}, nil)
 
 	ctx := operations.WithPrincipal(context.Background(),
@@ -47,14 +48,14 @@ func Test_Invite_CoCommitsTheMailIntent(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, op)
 
-	require.Eventually(t, func() bool {
-		repo.mu.Lock()
-		defer repo.mu.Unlock()
-		return repo.inserted
-	}, 5*time.Second, 10*time.Millisecond, "приглашение обязано дойти до писателя")
+	// InsertPending ещё не завершает транзакцию: письмо ставится после него.
+	// Судим результат после успешного завершения всей асинхронной операции.
+	done := awaitUsrOp(t, ops, op.ID)
+	require.Nil(t, done.Error, "приглашение обязано завершиться успешно")
 
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
+	require.True(t, repo.inserted, "приглашение обязано дойти до писателя")
 
 	require.Len(t, repo.mailIntents, 1,
 		"состоявшееся приглашение обязано оставить РОВНО ОДНО намерение отправить письмо: "+
