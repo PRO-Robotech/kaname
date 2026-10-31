@@ -37,7 +37,7 @@ func TestRegistrationCommand_DownUpRetainsBindingAndGuards(t *testing.T) {
 		if up {
 			require.NoError(t, goose.Up(db, "."))
 		} else {
-			require.NoError(t, goose.Down(db, "."))
+			require.NoError(t, goose.DownTo(db, ".", 20261026120000))
 		}
 		var present bool
 		require.NoError(t, db.QueryRow(`SELECT to_regclass('kaname.resource_registration_command') IS NOT NULL`).Scan(&present))

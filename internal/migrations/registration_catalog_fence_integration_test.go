@@ -6,8 +6,10 @@ package migrations_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
@@ -168,4 +170,38 @@ func TestRegistrationCatalogFence_DifferentTypesAndInvalidSecondCall(t *testing.
 	var project string
 	require.NoError(t, tx.QueryRow(ctx, `SELECT project_id FROM kaname.object_project_binding WHERE object_id='first-type'`).Scan(&project))
 	require.Equal(t, "registrationRR-P", project)
+}
+
+func TestRegistrationCatalogFence_DownUpAndXidEpoch(t *testing.T) {
+	ctx, _, writer, _ := registrationRRDB(t)
+	var low string
+	require.NoError(t, writer.QueryRow(ctx, `SELECT '4294967301'::xid8::xid::text`).Scan(&low))
+	require.Equal(t, "5", low, "PostgreSQL conversion discards the epoch, not decimal digits")
+	body, err := migrations.FS.ReadFile("20261031150000_registration_reuses_its_catalog_fence.sql")
+	require.NoError(t, err)
+	parts := strings.Split(string(body), "-- +goose Down")
+	require.Len(t, parts, 2)
+	for _, up := range []bool{false, true} {
+		sql := parts[1]
+		if up {
+			sql = parts[0]
+		}
+		_, err = writer.Exec(ctx, sql)
+		require.NoError(t, err)
+		tx, err := writer.Begin(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback(context.Background())
+		_, err = tx.Exec(ctx, registrationRRCommand, "roundtrip-first")
+		require.NoError(t, err)
+		n := registrationCatalogWrites(t, ctx, tx)
+		_, err = tx.Exec(ctx, registrationRRCommand, "roundtrip-second")
+		require.NoError(t, err)
+		delta := registrationCatalogWrites(t, ctx, tx) - n
+		if up {
+			require.Zero(t, delta, "Up reuses the surviving catalog tuple")
+		} else {
+			require.Positive(t, delta, "Down restores the original physical write")
+		}
+		require.NoError(t, tx.Rollback(ctx))
+	}
 }
