@@ -193,8 +193,8 @@ func TestGrantDelegation_CE10_DelegationRevokeRemovesEmittedFacts(t *testing.T) 
 	d1 := w.d1()
 	requireGranted(t, w.tryGrant(asSA(w.ctx, w.svaIss), w.v()), "CE-10 Дано: B10")
 	subject := fmtSubject("service_account", w.svaA)
-	w.pollAsk(subject, "v_get", pcrRegType, pcrX, true, "CE-10 Дано: B10 материализована")
-	before := w.directFacts(subject, pcrRegType, pcrX)
+	w.pollAsk(subject, "v_get", pcrRegType, pcrX, true, "CE-10 Дано: право B10 доступно")
+	before := w.waitCE10DirectFacts(subject)
 	t.Logf("CE-10: прямых фактов sva-A на X до отзыва — %d", before)
 	require.Positive(t, before, "CE-10 контроль: выдача registry выпускает прямые факты — без них утверждение ниже вакуумно")
 
@@ -204,6 +204,90 @@ func TestGrantDelegation_CE10_DelegationRevokeRemovesEmittedFacts(t *testing.T) 
 		time.Sleep(200 * time.Millisecond)
 	}
 	assert.Zero(t, w.directFacts(subject, pcrRegType, pcrX), "CE-10: прямые факты sva-A на X пережили отзыв делегирования")
+}
+
+// Check выводит право из действующей выдачи; это не барьер отдельной проекции.
+// До проверки снятия ждём именно положительный предмет CE-10, сохраняя отказ,
+// если настоящий материализатор не выпустил ни одного факта за своё окно.
+func (w *gdWorld) waitCE10DirectFacts(subject string) int {
+	w.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	before := w.directFacts(subject, pcrRegType, pcrX)
+	for before == 0 && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+		before = w.directFacts(subject, pcrRegType, pcrX)
+	}
+	return before
+}
+
+// Задвижка удерживает только настоящий forward-проход новой выдачи. Остальные
+// методы порта и выпущенные факты остаются настоящими, без подстановки вердикта.
+type ce10DelayedReconciler struct {
+	accessbindingapp.SelectorReconciler
+	entered  chan domain.AccessBindingID
+	release  <-chan struct{}
+	finished chan error
+}
+
+func (r *ce10DelayedReconciler) ReconcileBindingForward(ctx context.Context, id domain.AccessBindingID) error {
+	select {
+	case r.entered <- id:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	err := r.SelectorReconciler.ReconcileBindingForward(ctx, id)
+	r.finished <- err
+	return err
+}
+
+func TestGrantDelegation_CE10_DelayedProjectionKeepsThePositiveControl(t *testing.T) {
+	w := newGDWorld(t)
+	w.requireSubject("CE-10 задержанная проекция")
+	d1 := w.d1()
+	release := make(chan struct{})
+	var once sync.Once
+	resume := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(resume)
+	delayed := &ce10DelayedReconciler{
+		SelectorReconciler: w.rec,
+		entered:            make(chan domain.AccessBindingID, 1),
+		release:            release,
+		finished:           make(chan error, 1),
+	}
+	// Отдельная сборка не меняет порт уже запущенных фоновых проходов посева.
+	create, _, del := w.newGrantVerbs(w.ops)
+	create.WithReconciler(delayed)
+	w.abx = accessbindingapp.NewHandler(create, del, nil, nil, nil, nil, nil)
+	b10 := requireGranted(t, w.tryGrant(asSA(w.ctx, w.svaIss), w.v()), "CE-10 задержанная проекция: B10")
+	select {
+	case id := <-delayed.entered:
+		require.Equal(t, domain.AccessBindingID(b10), id, "задержан проход именно B10")
+	case <-time.After(30 * time.Second):
+		t.Fatal("CE-10: настоящий forward-проход не дошёл до задвижки")
+	}
+	subject := fmtSubject("service_account", w.svaA)
+	w.pollAsk(subject, "v_get", pcrRegType, pcrX, true, "CE-10: право уже доступно при задержанной проекции")
+	require.Zero(t, w.directFacts(subject, pcrRegType, pcrX), "CE-10: Check=true не означает готовность прямых фактов")
+	resume()
+	before := w.waitCE10DirectFacts(subject)
+	require.Positive(t, before, "CE-10: после снятия задвижки настоящий материализатор обязан выпустить факты")
+	select {
+	case err := <-delayed.finished:
+		require.NoError(t, err, "CE-10: настоящий forward-проход завершился")
+	case <-time.After(30 * time.Second):
+		t.Fatal("CE-10: forward-проход не завершился после снятия задвижки")
+	}
+	w.revokeDelegation(asUser(w.ctx, w.usrA), d1, "CE-10 задержанная проекция")
+	deadline := time.Now().Add(30 * time.Second)
+	for w.directFacts(subject, pcrRegType, pcrX) > 0 && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+	}
+	assert.Zero(t, w.directFacts(subject, pcrRegType, pcrX), "CE-10: реальные факты пережили реальный отзыв делегирования")
 }
 
 // CE-15 — `delegationId` читает единая проекция: он есть и в перечне, а не только в Get.
