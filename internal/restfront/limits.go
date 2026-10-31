@@ -95,7 +95,13 @@ func WithLimits(next http.Handler, l Limits) http.Handler {
 			}
 			// Читается не больше потолка плюс один байт: лишний байт и есть
 			// признак превышения, а остаток тела в память не попадает вовсе.
-			body, err := io.ReadAll(io.LimitReader(r.Body, l.MaxBodyBytes+1))
+			// Наибольший положительный потолок тоже допустим: дополнительный
+			// байт насыщается, чтобы переполнение не превратило тело в пустое.
+			readLimit := l.MaxBodyBytes
+			if readLimit < 1<<63-1 {
+				readLimit++
+			}
+			body, err := io.ReadAll(io.LimitReader(r.Body, readLimit))
 			_ = r.Body.Close()
 			if int64(len(body)) > l.MaxBodyBytes {
 				writeRefusal(w, http.StatusRequestEntityTooLarge, TextBodyTooLarge)
