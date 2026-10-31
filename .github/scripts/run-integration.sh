@@ -89,7 +89,7 @@ cd "$ROOT" || exit 2
 # ШАРД: `INTEGRATION_SHARD=<k>/<N>`, k от 0 — ровно `strategy.job-index` и
 # `strategy.job-total` задания, то есть число шардов берётся у самой матрицы и
 # разойтись с ней не может. `--plan` печатает раскладку всех N шардов и выходит,
-# не исполняя проб (`INTEGRATION_SHARD=0/3 run-integration.sh --plan`).
+# не исполняя проб (`INTEGRATION_SHARD=0/4 run-integration.sh --plan`).
 # DEFAULT_WEIGHT — вес пакета, которого ведомость весов не знает (секунды).
 DEFAULT_WEIGHT=10
 plan_only=0
