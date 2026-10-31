@@ -1702,7 +1702,7 @@ exit 4
 POD
 
 # Текст pod. Ждёт исходники (/work/.go), ставит инструменты, исполняет команду в /src,
-# пишет код в /work/.rc и ждёт, пока машина заберёт отчёты (/work/.fetched).
+# пишет атомарный итог «стадия код» в /work/.rc и ждёт забора отчётов (/work/.fetched).
 read -r -d '' RUNNER_POD_SH <<'POD'
 set -uo pipefail
 unset KUBECONFIG
@@ -1720,8 +1720,10 @@ fetched() {
     sleep 2
   done
 }
-finish() { echo "$1" > /work/.rc.tmp && mv /work/.rc.tmp /work/.rc; fetched; exit "$1"; }
-unmet() { say "УСЛОВИЕ НЕ СОЗДАНО: $* — команда НЕ исполнялась (125)"; finish 125; }
+# Одна атомарная запись связывает код со стадией: «setup 125» не выдаёт себя за
+# исполненную команду с кодом 125, даже если pod станет недоступен при заборе отчётов.
+finish() { printf '%s %s\n' "$1" "$2" > /work/.rc.tmp && mv /work/.rc.tmp /work/.rc; fetched; exit "$2"; }
+unmet() { say "УСЛОВИЕ НЕ СОЗДАНО: $* — команда НЕ исполнялась (125)"; finish setup 125; }
 mkdir -p "$HOME" /work/out /work/ship /work/bin
 for _ in $(seq 1 300); do [ -e /work/.go ] && break; sleep 2; done
 [ -e /work/.go ] || { say "исходники не доставлены за 600 с"; exit 125; }
@@ -1762,7 +1764,7 @@ cd /src || unmet "каталог исходников /src"
 say "команда: $RUNNER_CMD"
 bash -c "$RUNNER_CMD"; rc=$?
 say "команда завершилась кодом $rc"
-finish "$rc"
+finish command "$rc"
 POD
 
 # Текст pod: перечень отчётов «размер сумма путь» — то, что машина обязана получить.
@@ -2023,7 +2025,7 @@ runner_on_signal() {
 # команды; 125 — не исполнялась; 76 — исполнилась, отчёты доставлены неполно; 64 — вызов
 # неверен; 1 — пространство уже есть.
 runner_main() {
-  local sha url repo gov kver image objs mark mrc rc="" phase miss=0 fetch=0 t f base want got
+  local sha url repo gov kver image objs mark mrc rc="" stage="" outcome phase miss=0 fetch=0 t f base want got
   local -A seen=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2101,9 +2103,11 @@ runner_main() {
   ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- touch /work/.go || { unmet "pod не принял сигнал старта"; exit "$RUNNER_UNMET"; }
   ks -n "$EXT_NS" logs -f "pod/$RUNNER_POD" -c run & RUNNER_LOGS=$!
   while :; do
-    rc="$(ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- cat /work/.rc 2>/dev/null)"
-    [[ "$rc" =~ ^[0-9]+$ ]] && break
-    rc=""
+    outcome="$(ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- cat /work/.rc 2>/dev/null)"
+    if [[ "$outcome" =~ ^(setup|command)\ (0|[1-9][0-9]{0,2})$ ]] && [ "${BASH_REMATCH[2]}" -le 255 ]; then
+      stage="${BASH_REMATCH[1]}"; rc="${BASH_REMATCH[2]}"; break
+    fi
+    rc=""; stage=""
     phase="$(kc -n "$EXT_NS" get pod "$RUNNER_POD" -o 'jsonpath={.status.phase}' 2>/dev/null)"
     case "$phase" in
       Running|Pending) miss=0 ;;
@@ -2117,6 +2121,9 @@ runner_main() {
   for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$RUNNER_LOGS" 2>/dev/null || break; sleep 1; done
   kill "$RUNNER_LOGS" 2>/dev/null; wait "$RUNNER_LOGS" 2>/dev/null; RUNNER_LOGS=""
   [ -n "$rc" ] || { runner_explain; unmet "кода команды из pod нет — команда не исполнилась до конца"; exit "$RUNNER_UNMET"; }
+  # Стадия прочитана вместе с кодом ДО забора: численный код 125 сам по себе ничего
+  # не говорит об исполнении. Setup остаётся 125 при любом исходе доставки.
+  [ "$stage" = command ] || { unmet "подготовка pod завершилась кодом $rc до команды"; exit "$RUNNER_UNMET"; }
   # Команда исполнилась, отчёты неполны: исход команды назван, но вердикт по отчётам не
   # читается — «не выполнилось» своим кодом, а не 125 «команда не исполнялась».
   [ "$fetch" -eq 0 ] || {
@@ -2624,6 +2631,7 @@ case "$line" in
   *"get pod kaname-own"*"--ignore-not-found"*) [ -f "$S/pod" ] && echo pod/kaname-own; exit 0 ;;
   *"delete pod kaname-own"*) rm -f "$S/pod" ;;
   *"get pod kaname-runner"*) cat "$S/phase" 2>/dev/null || echo Running ;;
+  # Тот же атомарный итог «стадия код», что публикует finish() настоящего pod.
   *"exec "*"cat /work/.rc"*) [ -f "$S/rc" ] || exit 1; cat "$S/rc" ;;
   *"logs "*) echo "журнал службы из пода" ;;
   *"exec "*"/proc/net/tcp"*) cat "$S/proc-net-tcp" ;;
@@ -2815,7 +2823,7 @@ EOF
           ROOT="$R"; RUNDIR="$TMP/run-runner"; rm -rf "$RUNDIR"
           export XDG_CONFIG_HOME="$TMP/xdg-empty"; unset KACHO_REMOTE_KUBECONFIG KANAME_STAND_CONTEXT KANAME_STAND_PROFILE KANAME_STAND_EXT_NS
           IN_POD=""; export KANAME_STAND_KUBECONFIG="$TMP/kc-u--prof.yaml" KANAME_STAND_TASK=841
-          echo 0 > "$SELFTEST_KC/rc"
+          printf 'command 0\n' > "$SELFTEST_KC/rc"
           "${1:-:}"
           rc=0
           # shellcheck disable=SC2086  # доводы мира — словами
@@ -2823,7 +2831,9 @@ EOF
           grep -qE 'create -f|apply -f' "$SELFTEST_KC/calls" && echo "ЗАПИСЬ В КЛАСТЕР БЫЛА"
           exit "$rc" )
     }
-    rw_rc3()       { echo 3 > "$SELFTEST_KC/rc"; }
+    rw_rc3()       { printf 'command 3\n' > "$SELFTEST_KC/rc"; }
+    rw_setup125()  { printf 'setup 125\n' > "$SELFTEST_KC/rc"; }
+    rw_cmd125()    { printf 'command 125\n' > "$SELFTEST_KC/rc"; }
     rw_pod_gone()  { rm -f "$SELFTEST_KC/rc"; echo Failed > "$SELFTEST_KC/phase"; }
     rw_dirty()     { echo '// правка' >> "$R/go.mod"; }
     rw_unnamed()   { KANAME_STAND_KUBECONFIG=""; }
@@ -2850,11 +2860,16 @@ EOF
     }
     rw_reports_part() {
         local i
-        rw_reports; echo 3 > "$SELFTEST_KC/rc"
+        rw_reports; printf 'command 3\n' > "$SELFTEST_KC/rc"
         for i in 1 2 3; do head -c 4096 < <(base64 -w 0 < /dev/urandom) > "$RUNNER_WORK/out/part-$i.json"; done
         runner_exec() { shift; if [ "$4" = fetch ]; then "$@" | head -c 6000; return 0; fi; "$@"; }
     }
     rw_reports_cut_pod_gone() { rw_reports_cut; rw_pod_gone; }
+    # Один изменённый факт у близнецов: стадия атомарного итога при том же коде 125.
+    rw_reports_setup125()     { rw_reports; rw_setup125; }
+    rw_reports_cmd125()       { rw_reports; rw_cmd125; }
+    rw_reports_cut_setup125() { rw_reports_cut; rw_setup125; }
+    rw_reports_cut_cmd125()   { rw_reports_cut; rw_cmd125; }
     rw_ns_exists() { echo own > "$SELFTEST_KC/ns/t841-kaname-own"; }
     world_runner_ok()        { runner_world; }
     world_runner_rc3()       { runner_world rw_rc3; }
@@ -2869,6 +2884,10 @@ EOF
     world_runner_reports_cut() { runner_world rw_reports_cut; }
     world_runner_reports_part() { runner_world rw_reports_part; }
     world_runner_reports_cut_pod_gone() { runner_world rw_reports_cut_pod_gone; }
+    world_runner_reports_setup125()     { runner_world rw_reports_setup125; }
+    world_runner_reports_cmd125()       { runner_world rw_reports_cmd125; }
+    world_runner_reports_cut_setup125() { runner_world rw_reports_cut_setup125; }
+    world_runner_reports_cut_cmd125()   { runner_world rw_reports_cut_cmd125; }
 
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
@@ -3070,6 +3089,10 @@ EOF
     assert 76 "(+) поток забора рвётся в каждой попытке до отчёта — 76, не 125" world_runner_reports_cut "доставлено 0 из 1 при коде команды 0" "отказ забора: «tar:" "раннер: команда в pod завершилась кодом 0"
     assert 76 "(+) тот же обрыв — пространство снято, код 76"                  world_runner_reports_cut "задачи 841 во внешнем кластере: 0" "раннер: код 76" "раннер: код 125"
     assert 125 "(+) pod вышел без кода, забор оборван — 125, не 76"           world_runner_reports_cut_pod_gone "кода команды из pod нет" "-" "НЕ ВЫПОЛНИЛОСЬ: отчёты"
+    assert 125 "(+) setup 125, отчёт забран — команда не исполнялась"          world_runner_reports_setup125 "подготовка pod завершилась кодом 125 до команды" "доставлено 1 из 1" "раннер: команда в pod завершилась"
+    assert 125 "(+) setup 125 и тот же обрыв — не подменяется на 76"             world_runner_reports_cut_setup125 "подготовка pod завершилась кодом 125 до команды" "задачи 841 во внешнем кластере: 0" "раннер: код 76"
+    assert 125 "(−) настоящая команда 125 и полный отчёт — код команды 125"     world_runner_reports_cmd125 "раннер: команда в pod завершилась кодом 125" "доставлено 1 из 1" "подготовка pod завершилась"
+    assert 76 "(+) настоящая команда 125 и тот же обрыв — неполные отчёты 76"   world_runner_reports_cut_cmd125 "доставлено 0 из 1 при коде команды 125" "задачи 841 во внешнем кластере: 0" "подготовка pod завершилась"
 
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"
