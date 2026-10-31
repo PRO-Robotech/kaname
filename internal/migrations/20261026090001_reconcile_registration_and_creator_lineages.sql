@@ -1,5 +1,7 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
+-- САНКЦИЯ: docs/engineering/acceptance/kaname-derives-the-parent-of-a-registered-object.md
+-- САНКЦИЯ: docs/engineering/acceptance/service-account-creation-is-its-own-right.md
 -- kaname#1020: explicit reconciliation of the two historical 20261026090000
 -- lineages (#982 and #1003). Main 90000 remains byte-identical. The other SQL
 -- is archived verbatim under historical/ (sha256 bd9449a671136b68ae82ce38edabbe2801a056fd4f7919fde769406be7bced29).
@@ -8,6 +10,88 @@
 -- Recognize COMPLETE definitions, never infer deployment from a missing record.
 -- All recognition precedes persistent mutation; unexpected partial state fails.
 -- +goose Up
+
+-- The same guard protects our inverse and the original archived 90000 body.
+-- It runs inside that Goose transaction, after excluding concurrent writers.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.registration_lineage_assert_unused(side text) RETURNS void
+LANGUAGE plpgsql SET search_path = pg_catalog, kaname AS $unused$
+BEGIN
+    LOCK TABLE kaname.catalog_resource, kaname.catalog_verb,
+               kaname.service_accounts, kaname.role_rule_selectors,
+               kaname.roles, kaname.relation_fact IN ACCESS EXCLUSIVE MODE;
+    IF side='writer' THEN
+        -- Exact harmless values installed by this migration. New declarations
+        -- are meaningful policy and cannot be discarded by schema rollback.
+        IF EXISTS (SELECT 1 FROM kaname.catalog_resource c
+                    WHERE c.writes <> '{}'::text[] OR c.parent_names IS DISTINCT FROM
+                      CASE WHEN c.module='registry' AND c.resource='repositories'
+                           THEN ARRAY['parent']::text[] ELSE c.parent_types END) THEN
+            RAISE EXCEPTION '90000 lineage rollback would discard writer policy'
+                USING ERRCODE='23514', CONSTRAINT='registration_lineage_lossless_down';
+        END IF;
+    ELSIF side='creator' THEN
+        IF EXISTS (SELECT 1 FROM kaname.service_accounts WHERE created_by_type IS NOT NULL OR created_by_id IS NOT NULL)
+           OR EXISTS (SELECT 1 FROM kaname.role_rule_selectors WHERE created_by_subject)
+           OR EXISTS (SELECT 1 FROM kaname.roles WHERE jsonb_path_exists(rules,'$.**.created_by_subject'))
+           OR EXISTS (SELECT 1 FROM kaname.relation_fact WHERE relation='service_account_creator')
+           OR EXISTS (SELECT 1 FROM kaname.catalog_verb
+                       WHERE (module='iam' AND resource='serviceAccount' AND verb='create' AND live
+                              AND ROW(container_parent,container_relation) IS DISTINCT FROM ROW('account'::text,'service_account_creator'::text))
+                          OR (NOT (module='iam' AND resource='serviceAccount' AND verb='create' AND live)
+                              AND (container_parent IS NOT NULL OR container_relation IS NOT NULL))) THEN
+            RAISE EXCEPTION '90000 lineage rollback would discard creator facts or rights'
+                USING ERRCODE='23514', CONSTRAINT='registration_lineage_lossless_down';
+        END IF;
+    ELSE
+        RAISE EXCEPTION 'unknown registration lineage side';
+    END IF;
+END
+$unused$;
+-- +goose StatementEnd
+
+-- A bounded schema identity: only objects belonging to the two 90000 sides.
+-- Later independent migrations are not provenance for these definitions.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.registration_lineage_shape() RETURNS jsonb
+LANGUAGE sql STABLE SET search_path = pg_catalog, kaname AS $shape$
+WITH columns_of_interest(table_name, column_name) AS (VALUES
+ ('catalog_resource','parent_names'), ('catalog_resource','writes'),
+ ('catalog_verb','container_parent'), ('catalog_verb','container_relation'),
+ ('service_accounts','created_by_type'), ('service_accounts','created_by_id'),
+ ('role_rule_selectors','created_by_subject')),
+parts AS (
+ SELECT 'column/'||i.table_name||'/'||i.column_name AS key,
+        jsonb_build_array(a.atttypid,a.atttypmod,a.attnotnull,a.attcollation,
+          a.attidentity,a.attgenerated,pg_get_expr(d.adbin,d.adrelid)) AS value
+ FROM columns_of_interest i
+ JOIN pg_attribute a ON a.attrelid=('kaname.'||i.table_name)::regclass
+  AND a.attname=i.column_name AND NOT a.attisdropped
+ LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+ UNION ALL
+ SELECT 'constraint/'||c.conrelid::regclass::text||'/'||c.conname,
+        jsonb_build_array(c.contype,c.convalidated,c.condeferrable,c.condeferred,pg_get_constraintdef(c.oid))
+ FROM pg_constraint c WHERE c.connamespace='kaname'::regnamespace AND c.conname IN
+ ('catalog_resource_parent_names_form','catalog_resource_writes_form',
+  'catalog_verb_container_pair_ck','catalog_verb_container_is_tier_ck','catalog_verb_container_relation_form_ck',
+  'service_accounts_creator_pair_ck','service_accounts_creator_type_ck','service_accounts_creator_id_nonempty_ck',
+  'role_rule_selectors_creator_is_top_anchor_ck')
+ UNION ALL
+ SELECT 'function/'||p.proname, to_jsonb(pg_get_functiondef(p.oid))
+ FROM pg_proc p WHERE p.pronamespace='kaname'::regnamespace
+  AND p.proname IN ('iam_rules_valid','service_account_creator_is_immutable')
+ UNION ALL
+ SELECT 'index/service_accounts_creator_idx',
+        jsonb_build_array(pg_get_indexdef(i.indexrelid),i.indisvalid,i.indisready,i.indislive)
+ FROM pg_index i WHERE i.indexrelid=to_regclass('kaname.service_accounts_creator_idx')
+ UNION ALL
+ SELECT 'trigger/service_account_creator_is_immutable',
+        jsonb_build_array(pg_get_triggerdef(t.oid),t.tgenabled)
+ FROM pg_trigger t WHERE t.tgrelid='kaname.service_accounts'::regclass
+  AND t.tgname='service_account_creator_is_immutable')
+SELECT jsonb_object_agg(key,value) FROM parts;
+$shape$;
+-- +goose StatementEnd
 -- +goose StatementBegin
 DO $reconcile$
 DECLARE
@@ -21,6 +105,9 @@ DECLARE
     v_function oid;
     v_rules_source text;
 BEGIN
+    LOCK TABLE kaname.catalog_resource, kaname.catalog_verb,
+               kaname.service_accounts, kaname.role_rule_selectors,
+               kaname.roles, kaname.relation_fact IN ACCESS EXCLUSIVE MODE;
     -- Expected definitions are parsed by this server, avoiding version-sensitive
     -- hand-written pg_get_constraintdef/default pretty-print comparisons.
     CREATE TEMP TABLE registration_expected_resource (
@@ -381,6 +468,35 @@ $old_rules$;
         RAISE EXCEPTION '90000 lineage reconciliation: rule validator differs; no changes applied';
     END IF;
 
+    IF NOT v_main AND NOT v_feature THEN
+        RAISE EXCEPTION '90000 lineage reconciliation: neither original lineage exists';
+    END IF;
+    IF to_regclass('kaname.registration_lineage_origin') IS NOT NULL THEN
+        -- Only our completed inverse can be upgraded again. A preexisting
+        -- unmarked/converged installation is never assigned invented history.
+        IF (SELECT count(*) FROM kaname.registration_lineage_origin) <> 1 OR NOT EXISTS (
+            SELECT 1 FROM kaname.registration_lineage_origin
+             WHERE singleton AND format_version=1 AND state='down'
+               AND had_creator=v_main AND had_writer=v_feature
+               AND restored_shape=kaname.registration_lineage_shape()) THEN
+            RAISE EXCEPTION '90000 lineage reconciliation: invalid retained provenance';
+        END IF;
+    ELSE
+        CREATE TABLE kaname.registration_lineage_origin (
+            singleton boolean PRIMARY KEY CHECK (singleton),
+            format_version integer NOT NULL CHECK (format_version=1),
+            had_creator boolean NOT NULL,
+            had_writer boolean NOT NULL,
+            state text NOT NULL CHECK (state IN ('up','down')),
+            complete_shape jsonb NOT NULL,
+            restored_shape jsonb NOT NULL,
+            CHECK (had_creator OR had_writer)
+        );
+        REVOKE ALL ON kaname.registration_lineage_origin FROM PUBLIC;
+        INSERT INTO kaname.registration_lineage_origin
+            VALUES (true,1,v_main,v_feature,'up','{}',kaname.registration_lineage_shape());
+    END IF;
+
     -- Existing data, including post-deployment catalog changes, is never replayed.
     -- Only a completely absent lineage runs its exact original Up body.
     IF NOT v_main THEN
@@ -609,13 +725,174 @@ COMMENT ON COLUMN kaname.catalog_resource.writes IS 'Отношения свер
 
 $feature_ddl$;
     END IF;
+    UPDATE kaname.registration_lineage_origin
+       SET state='up', complete_shape=kaname.registration_lineage_shape();
 END
 $reconcile$;
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
-DO $$ BEGIN
-    RAISE EXCEPTION '90000 lineages were reconciled without rewriting history; automatic down cannot determine which original lineage to remove';
-END $$;
+DO $inverse$
+DECLARE
+    v_creator boolean;
+    v_writer boolean;
+BEGIN
+    LOCK TABLE kaname.catalog_resource, kaname.catalog_verb,
+               kaname.service_accounts, kaname.role_rule_selectors,
+               kaname.roles, kaname.relation_fact IN ACCESS EXCLUSIVE MODE;
+    IF to_regclass('kaname.registration_lineage_origin') IS NULL THEN
+        RAISE EXCEPTION '90000 lineage rollback: provenance is missing';
+    END IF;
+    LOCK TABLE kaname.registration_lineage_origin IN ACCESS EXCLUSIVE MODE;
+    IF (SELECT count(*) FROM kaname.registration_lineage_origin) <> 1 OR NOT EXISTS (
+        SELECT 1 FROM kaname.registration_lineage_origin
+         WHERE singleton AND format_version=1 AND state='up'
+           AND (had_creator OR had_writer)
+           AND complete_shape=kaname.registration_lineage_shape()) THEN
+        RAISE EXCEPTION '90000 lineage rollback: provenance or schema differs';
+    END IF;
+    SELECT had_creator,had_writer INTO STRICT v_creator,v_writer
+      FROM kaname.registration_lineage_origin WHERE singleton;
+    IF NOT v_writer THEN
+        PERFORM kaname.registration_lineage_assert_unused('writer');
+        ALTER TABLE kaname.catalog_resource
+            DROP CONSTRAINT catalog_resource_parent_names_form,
+            DROP CONSTRAINT catalog_resource_writes_form,
+            DROP COLUMN parent_names, DROP COLUMN writes;
+    END IF;
+    IF NOT v_creator THEN
+        PERFORM kaname.registration_lineage_assert_unused('creator');
+        -- The previous validator was validated byte-for-byte before Up.
+        -- Its inverse is static SQL, never executable text read from a marker.
+        EXECUTE $restore_validator$
+CREATE OR REPLACE FUNCTION kaname.iam_rules_valid(rules jsonb) RETURNS boolean
+LANGUAGE plpgsql IMMUTABLE AS $validator$
+DECLARE
+    rule       jsonb;
+    child      jsonb;
+    arr        jsonb;
+    has_names  boolean;
+    has_labels boolean;
+BEGIN
+    IF rules IS NULL THEN RETURN false; END IF;
+    IF jsonb_typeof(rules) <> 'array' THEN RETURN false; END IF;
+    -- Empty array is valid (legacy permissions-only role; back-compat).
+    IF jsonb_array_length(rules) = 0 THEN RETURN true; END IF;
+    IF jsonb_array_length(rules) > 64 THEN RETURN false; END IF;
+
+    FOR rule IN SELECT value FROM jsonb_array_elements(rules) LOOP
+        IF jsonb_typeof(rule) <> 'object' THEN RETURN false; END IF;
+
+        -- module: required, non-empty string scalar. The array `modules` key is
+        -- NO LONGER valid.
+        IF NOT (rule ? 'module') THEN RETURN false; END IF;
+        IF jsonb_typeof(rule -> 'module') <> 'string' THEN RETURN false; END IF;
+        IF length(rule ->> 'module') < 1 THEN RETURN false; END IF;
+
+        -- resources / verbs: required non-empty string arrays, 1..16.
+        FOR arr IN SELECT rule -> k FROM (VALUES ('resources'), ('verbs')) AS t(k) LOOP
+            IF arr IS NULL OR jsonb_typeof(arr) <> 'array' THEN RETURN false; END IF;
+            IF jsonb_array_length(arr) < 1 OR jsonb_array_length(arr) > 16 THEN RETURN false; END IF;
+            IF EXISTS (SELECT 1 FROM jsonb_array_elements(arr) e WHERE jsonb_typeof(e) <> 'string') THEN
+                RETURN false;
+            END IF;
+        END LOOP;
+
+        has_names  := (rule ? 'resource_names') AND jsonb_typeof(rule -> 'resource_names') <> 'null';
+        has_labels := (rule ? 'match_labels')   AND jsonb_typeof(rule -> 'match_labels')   <> 'null';
+
+        -- resource_names XOR match_labels (both → reject).
+        IF has_names AND has_labels THEN RETURN false; END IF;
+
+        IF has_names THEN
+            IF jsonb_typeof(rule -> 'resource_names') <> 'array' THEN RETURN false; END IF;
+            IF jsonb_array_length(rule -> 'resource_names') > 256 THEN RETURN false; END IF;
+            IF EXISTS (SELECT 1 FROM jsonb_array_elements(rule -> 'resource_names') e
+                       WHERE jsonb_typeof(e) <> 'string') THEN
+                RETURN false;
+            END IF;
+        END IF;
+
+        IF has_labels THEN
+            IF jsonb_typeof(rule -> 'match_labels') <> 'object' THEN RETURN false; END IF;
+            IF (SELECT count(*) FROM jsonb_object_keys(rule -> 'match_labels')) NOT BETWEEN 1 AND 16 THEN
+                RETURN false;
+            END IF;
+        END IF;
+
+        -- Вложенные правила (kaname#874). Ключа нет — правило без вложенных.
+        IF rule ? 'children' THEN
+            IF jsonb_typeof(rule -> 'children') <> 'array' THEN RETURN false; END IF;
+            IF jsonb_array_length(rule -> 'children') NOT BETWEEN 1 AND 16 THEN RETURN false; END IF;
+            -- Владелец — ровно один ресурс, не подстановка, модуль не подстановка.
+            IF rule ->> 'module' = '*' THEN RETURN false; END IF;
+            IF jsonb_array_length(rule -> 'resources') <> 1 THEN RETURN false; END IF;
+            IF rule -> 'resources' ->> 0 = '*' THEN RETURN false; END IF;
+
+            FOR child IN SELECT value FROM jsonb_array_elements(rule -> 'children') LOOP
+                IF jsonb_typeof(child) <> 'object' THEN RETURN false; END IF;
+                -- Модуль — владельца; глубину выражает тип, а не структура роли.
+                IF child ? 'module' OR child ? 'children' THEN RETURN false; END IF;
+                FOR arr IN SELECT child -> k FROM (VALUES ('resources'), ('verbs')) AS t(k) LOOP
+                    IF arr IS NULL OR jsonb_typeof(arr) <> 'array' THEN RETURN false; END IF;
+                    IF jsonb_array_length(arr) < 1 OR jsonb_array_length(arr) > 16 THEN RETURN false; END IF;
+                    IF EXISTS (SELECT 1 FROM jsonb_array_elements(arr) e WHERE jsonb_typeof(e) <> 'string') THEN
+                        RETURN false;
+                    END IF;
+                END LOOP;
+                -- Вложенное называет тип: не подстановку и не тип владельца.
+                IF EXISTS (SELECT 1 FROM jsonb_array_elements_text(child -> 'resources') e
+                            WHERE e = '*' OR e = rule -> 'resources' ->> 0) THEN
+                    RETURN false;
+                END IF;
+
+                has_names  := (child ? 'resource_names') AND jsonb_typeof(child -> 'resource_names') <> 'null';
+                has_labels := (child ? 'match_labels')   AND jsonb_typeof(child -> 'match_labels')   <> 'null';
+                IF has_names AND has_labels THEN RETURN false; END IF;
+                IF has_names THEN
+                    IF jsonb_typeof(child -> 'resource_names') <> 'array' THEN RETURN false; END IF;
+                    IF jsonb_array_length(child -> 'resource_names') > 256 THEN RETURN false; END IF;
+                    IF EXISTS (SELECT 1 FROM jsonb_array_elements(child -> 'resource_names') e
+                               WHERE jsonb_typeof(e) <> 'string') THEN
+                        RETURN false;
+                    END IF;
+                END IF;
+                IF has_labels THEN
+                    IF jsonb_typeof(child -> 'match_labels') <> 'object' THEN RETURN false; END IF;
+                    IF (SELECT count(*) FROM jsonb_object_keys(child -> 'match_labels')) NOT BETWEEN 1 AND 16 THEN
+                        RETURN false;
+                    END IF;
+                END IF;
+            END LOOP;
+        END IF;
+    END LOOP;
+
+    RETURN true;
+END;
+$validator$;
+$restore_validator$;
+        ALTER TABLE kaname.role_rule_selectors
+            DROP CONSTRAINT role_rule_selectors_creator_is_top_anchor_ck,
+            DROP COLUMN created_by_subject;
+        DROP TRIGGER service_account_creator_is_immutable ON kaname.service_accounts;
+        DROP FUNCTION kaname.service_account_creator_is_immutable();
+        DROP INDEX kaname.service_accounts_creator_idx;
+        ALTER TABLE kaname.service_accounts
+            DROP CONSTRAINT service_accounts_creator_id_nonempty_ck,
+            DROP CONSTRAINT service_accounts_creator_type_ck,
+            DROP CONSTRAINT service_accounts_creator_pair_ck,
+            DROP COLUMN created_by_id, DROP COLUMN created_by_type;
+        ALTER TABLE kaname.catalog_verb
+            DROP CONSTRAINT catalog_verb_container_relation_form_ck,
+            DROP CONSTRAINT catalog_verb_container_is_tier_ck,
+            DROP CONSTRAINT catalog_verb_container_pair_ck,
+            DROP COLUMN container_relation, DROP COLUMN container_parent;
+    END IF;
+    UPDATE kaname.registration_lineage_origin
+       SET state='down', restored_shape=kaname.registration_lineage_shape();
+    -- Retain origin across the colliding 90000 boundary. The product runner
+    -- selects the exact archived writer for feature origin and refuses both.
+END
+$inverse$;
 -- +goose StatementEnd

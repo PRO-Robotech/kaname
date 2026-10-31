@@ -214,7 +214,7 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 	}
 	w.judgeDescendantRing(fx, fmt.Sprintf("1019 late, raw40P01=%t", sawDeadlock))
 	// Откат первой попытки не оставляет аудит: один родительский event
-	// принятого вызова называет ровно одного снятого потомка (#1020).
+	// принятого вызова называет ровно одного снятого потомка (kaname#1020).
 	// Отдельное снятие ребёнка не вызывалось и события о нём быть не должно.
 	var parentEvents, childEvents, descendants int
 	require.NoError(t, w.pool.QueryRow(ctx, `SELECT

@@ -49,12 +49,14 @@ package check_test
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/corelib/gitenv"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
@@ -99,6 +101,20 @@ func TestNewMigrationOutranksEveryAppliedOne(t *testing.T) {
 			"верной; о находках вердикта НЕТ ни зелёного, ни красного", trunkRefName)
 	}
 	added := sortedKeys(addedMigrationFiles(t, root, base))
+	archive := check.HistoricalRegistrationMigration
+	if body, err := os.ReadFile(filepath.Join(root, archive)); err == nil {
+		if err := check.AuditHistoricalRegistrationMigration(body, migrations.FS); err != nil {
+			t.Fatal(err)
+		}
+		withoutArchive := func(paths []string) []string {
+			out := make([]string,0,len(paths))
+			for _, name := range paths { if name != archive { out=append(out,name) } }
+			return out
+		}
+		dirFiles=withoutArchive(dirFiles)
+		added=withoutArchive(added)
+		t.Log("точный исторический SQL проверен и отсутствует в исполняемой FS")
+	} else if !os.IsNotExist(err) { t.Fatal(err) }
 
 	audit := check.AuditMigrationVersions(dirFiles, added)
 

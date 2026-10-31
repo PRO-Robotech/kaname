@@ -921,7 +921,7 @@ func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, p
 // проход материализации адресует ТОТ ЖЕ объект, что легло в зеркало, и второй
 // перевод у него разошёлся бы с первым молча.
 // A new descendant may commit between the first census and the mirror deletion.
-// Its grant locks belong BEFORE every mirror/fact lock (#975). Restart the whole
+// Its grant locks belong BEFORE every mirror/fact lock (kaname#975). Restart the whole
 // transaction with a larger lock plan; hints never authorize deleting an object.
 const unregisterClosureAttempts = 8
 

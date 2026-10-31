@@ -542,7 +542,6 @@ func TestPermanentProject_PB17_ConcurrentFirstRegistrationsOneWins(t *testing.T)
 				prj domain.ProjectID
 				acc domain.AccountID
 			}{{w.prjA, w.accA}, {second, secondAcc}} {
-				n, side, sp := n, side, sp
 				req := w.regReq(fmt.Sprintf("race%d/k", n), sp.prj, sp.acc)
 				wg.Add(1)
 				go func() {

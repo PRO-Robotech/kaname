@@ -6,14 +6,15 @@ package migrations_test
 import (
 	"context"
 	"fmt"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/corelib/migratorrun"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 // Reviewer-only external probe: no injected trigger/DDL/callback. The normal

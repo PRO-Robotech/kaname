@@ -53,6 +53,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -124,6 +125,13 @@ func MirrorCandidateCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
 }
 
 func MirrorWritesIn(filename, src string) ([]MirrorWrite, int, error) {
+	return MirrorWritesThroughCommands(filename, src, nil)
+}
+
+// MirrorWritesThroughCommands прослеживает INSERT в представление команды до
+// его INSTEAD OF INSERT триггера. Каталог берётся из тела действующей функции,
+// а не из имени команды или обещания в комментарии вызывающего кода.
+func MirrorWritesThroughCommands(filename, src string, commands map[string]string) ([]MirrorWrite, int, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, src, 0)
 	if err != nil {
@@ -156,11 +164,17 @@ func MirrorWritesIn(filename, src string) ([]MirrorWrite, int, error) {
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}
-		if !strings.Contains(lit.Value, ResourceMirrorTable) {
+		value:=lit.Value
+		for command,body:=range commands {
+			if strings.Contains(strings.ToUpper(normalizeSpace(value)),"INSERT INTO "+strings.ToUpper(command)) {
+				value += "\n"+body
+			}
+		}
+		if !strings.Contains(value, ResourceMirrorTable) {
 			return true
 		}
 		mentions++
-		upper := strings.ToUpper(lit.Value)
+		upper := strings.ToUpper(normalizeSpace(value))
 		owner := ""
 		for _, s := range spans {
 			if lit.Pos() >= s.from && lit.End() <= s.to {
@@ -168,7 +182,7 @@ func MirrorWritesIn(filename, src string) ([]MirrorWrite, int, error) {
 				break
 			}
 		}
-		catalog := mirrorUniqueSorted(catalogTablePattern.FindAllString(strings.ToLower(lit.Value), -1))
+		catalog := mirrorUniqueSorted(catalogTablePattern.FindAllString(strings.ToLower(value), -1))
 		for _, v := range MirrorWriteVerbs {
 			if strings.Contains(upper, strings.ToUpper(v.Verb)) {
 				writes = append(writes, MirrorWrite{
@@ -182,6 +196,34 @@ func MirrorWritesIn(filename, src string) ([]MirrorWrite, int, error) {
 		return true
 	})
 	return writes, mentions, nil
+}
+
+var mirrorFunctionHeader = regexp.MustCompile(`(?is)CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(kaname\.[a-z_][a-z0-9_]*)\s*\([^;]*?\)\s+RETURNS\s+trigger\b[^;]*?\bAS\s+(\$[a-zA-Z_0-9]*\$)`)
+var mirrorInsteadTrigger = regexp.MustCompile(`(?is)CREATE\s+TRIGGER\s+[a-z_][a-z0-9_]*\s+INSTEAD\s+OF\s+INSERT\s+ON\s+(kaname\.[a-z_][a-z0-9_]*)\s+FOR\s+EACH\s+ROW\s+EXECUTE\s+FUNCTION\s+(kaname\.[a-z_][a-z0-9_]*)\s*\(\s*\)`)
+
+// MirrorCommandBodies сводит функции в порядке миграций: последняя редакция
+// определяет исполняемое тело. Непрочитанная функция — отказ предпосылки.
+func MirrorCommandBodies(upSections []string) (map[string]string,error) {
+	functions:=map[string]string{}
+	bindings:=map[string]string{}
+	for _,section:=range upSections {
+		sql:=stripSQLComments(section)
+		for _,match:=range mirrorFunctionHeader.FindAllStringSubmatchIndex(sql,-1) {
+			name:=strings.ToLower(sql[match[2]:match[3]])
+			tag:=sql[match[4]:match[5]]
+			end:=strings.Index(sql[match[1]:],tag)
+			if end<0 { return nil,fmt.Errorf("unterminated mirror command function %s",name) }
+			functions[name]=sql[match[1]:match[1]+end]
+		}
+		for _,match:=range mirrorInsteadTrigger.FindAllStringSubmatch(sql,-1) { bindings[strings.ToLower(match[1])]=strings.ToLower(match[2]) }
+	}
+	commands:=map[string]string{}
+	for relation,function:=range bindings {
+		body,ok:=functions[function]
+		if !ok { return nil,fmt.Errorf("mirror command %s has unread function %s",relation,function) }
+		commands[relation]=body
+	}
+	return commands,nil
 }
 
 // MirrorConditionOutcome — вердикт сверки полос вместе с переписью.

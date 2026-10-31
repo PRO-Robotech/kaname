@@ -678,11 +678,15 @@ func catalogCorpus(corpus []catalogSeedMigration) (seedBody string, retired map[
 		// оператора не заканчивает. Но запись в каталог, спрятанная внутри,
 		// обязана быть НАЗВАНА — иначе маска стала бы слепой зоной.
 		for _, blk := range reDollarQuoted.FindAllString(exec, -1) {
-			if loc := reCatalogDML.FindString(blk); loc != "" {
+			for _, loc := range reCatalogDML.FindAllStringIndex(blk, -1) {
+				statement := splitSQLStatements(blk[loc[0]:])[0]
+				if catalogSelfAssignmentUpdate(normalizeSpace(statement)) {
+					continue
+				}
 				findings = append(findings, fmt.Sprintf(
 					"%s: запись в каталог внутри долларового блока (%s) — разбор такой формы "+
 						"не читает, и свод цепочки был бы неполон молча",
-					m.Name, normalizeSpace(loc)))
+					m.Name, normalizeSpace(blk[loc[0]:loc[1]])))
 			}
 		}
 		exec = reDollarQuoted.ReplaceAllStringFunc(exec, func(b string) string {
@@ -719,6 +723,17 @@ func catalogCorpus(corpus []catalogSeedMigration) (seedBody string, retired map[
 		}
 	}
 	return body.String(), retired, findings
+}
+
+// catalogSelfAssignmentUpdate узнаёт запись конфликта RR: SET присваивает
+// атрибуту его же значение из той же строки. Чужой псевдоним, дополнительное
+// присваивание и выражение не являются этой формой. Остальные DML в блоке
+// проверяются отдельно, поэтому законный оператор не скрывает соседнюю запись.
+var reCatalogSelfAssignment = regexp.MustCompile(`(?is)^UPDATE\s+kaname\.catalog_resource\s+([a-z_][a-z0-9_]*)\s+SET\s+([a-z_][a-z0-9_]*)\s*=\s*([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\s+WHERE\b`)
+
+func catalogSelfAssignmentUpdate(statement string) bool {
+	m:=reCatalogSelfAssignment.FindStringSubmatch(statement)
+	return m!=nil && strings.EqualFold(m[1],m[3]) && strings.EqualFold(m[2],m[4]) && strings.EqualFold(m[2],"project_bindings_held")
 }
 
 // reResourceAttrUpdate — оператор правки строк каталога ресурса: таблица (с

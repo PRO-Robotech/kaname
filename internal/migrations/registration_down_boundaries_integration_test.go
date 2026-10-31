@@ -16,6 +16,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestRegistrationCommand_DownUpRetainsBindingAndGuards(t *testing.T) {
@@ -63,6 +64,8 @@ func TestRegistrationReconciliation_DownRefusesAtomically(t *testing.T) {
 	require.NoError(t, goose.SetDialect("postgres"))
 	require.NoError(t, goose.Up(db, "."))
 	var before int
+	_,err=db.Exec(`UPDATE kaname.catalog_resource SET writes=ARRAY['owner:user'] WHERE dotted='registry.registries'`)
+	require.NoError(t,err)
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version`).Scan(&before))
 	raw, err := migrations.FS.ReadFile("20261026090001_reconcile_registration_and_creator_lineages.sql")
 	require.NoError(t, err)
@@ -70,7 +73,10 @@ func TestRegistrationReconciliation_DownRefusesAtomically(t *testing.T) {
 	tx, err := db.BeginTx(context.Background(), nil)
 	require.NoError(t, err)
 	_, err = tx.Exec(down)
-	require.ErrorContains(t, err, "90000")
+	var violation *pgconn.PgError
+	require.ErrorAs(t,err,&violation)
+	require.Equal(t,"23514",violation.Code)
+	require.Equal(t,"registration_lineage_lossless_down",violation.ConstraintName)
 	require.NoError(t, tx.Rollback())
 	var after int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version`).Scan(&after))

@@ -60,7 +60,8 @@ func slashInputs() []struct{ name, id string } {
 }
 
 // registerSlashRepo — регистрация объекта службой-владельцем с цепью
-// `[project, account]`, как в задаче; владелец объекта — usr-A.
+// `[registry, project, account]` из каталога; владелец объекта — usr-A.
+// Реестр указан отдельно: префикс непрозрачного id не определяет предка.
 func registerSlashRepo(w *pcrWorld, id string, ver time.Time) {
 	w.t.Helper()
 	req := &iamv1.RegisterResourceRequest{
@@ -69,10 +70,10 @@ func registerSlashRepo(w *pcrWorld, id string, ver time.Time) {
 		Object:          pcrRepoType + ":" + id,
 		ParentProjectId: string(w.prjA),
 		ParentAccountId: string(w.accA),
-		ParentChain:     []string{"project:" + string(w.prjA), "account:" + string(w.accA)},
+		ParentChain:     []string{pcrRegType + ":" + pcrX, "project:" + string(w.prjA), "account:" + string(w.accA)},
 		SourceVersion:   timestamppb.New(ver),
 	}
-	require.NoErrorf(w.t, w.reg.Register(w.ctx, req), "регистрация %q с цепью [project, account]", id)
+	require.NoErrorf(w.t, w.reg.Register(w.ctx, req), "регистрация %q с цепью [registry, project, account]", id)
 }
 
 // parentEdges — цепь объекта, как её хранит решение: (тип, id, глубина).
@@ -125,8 +126,8 @@ func TestSlashObjectID_RegistrationGrantAndCheckAreVerbatim(t *testing.T) {
 		  WHERE object_type = 'registry.repositories' AND object_id = ANY($1)`, all).Scan(&distinct))
 	assert.Equal(t, len(in), distinct, "два разных входа дали один объект зеркала")
 
-	// Цепь читается та, что передана: [project, account] с глубинами 1, 2.
-	wantChain := [][3]string{{"project", string(w.prjA), "1"}, {"account", string(w.accA), "2"}}
+	// Цепь читается дословно; предок не извлекается из идентификатора объекта.
+	wantChain := [][3]string{{pcrRegType, pcrX, "1"}, {"project", string(w.prjA), "2"}, {"account", string(w.accA), "3"}}
 	for _, c := range in {
 		assert.Equalf(t, wantChain, parentEdges(w, c.id), "%s: цепь %q не та, что передана", c.name, c.id)
 	}

@@ -255,16 +255,3 @@ func versionOr(t time.Time) any {
 	}
 	return t.UTC()
 }
-
-// splitObjectRef — разбор `"<type>:<id>"` по ПЕРВОМУ двоеточию.
-func splitObjectRef(ref string) (typ, id string, ok bool) {
-	for i := 0; i < len(ref); i++ {
-		if ref[i] == ':' {
-			if i == 0 || i == len(ref)-1 {
-				return "", "", false
-			}
-			return ref[:i], ref[i+1:], true
-		}
-	}
-	return "", "", false
-}

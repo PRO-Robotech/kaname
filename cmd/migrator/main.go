@@ -195,7 +195,11 @@ func newUpCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 		Args:  cobraargs.NoExtraArguments,
 		Short: "Apply migrations up to latest (or --target version)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := buildRunner(opts, migrationsFS)
+			source, err := registrationMigrationSource(cmd.Context(), opts, migrationsFS, target, false)
+			if err != nil {
+				return err
+			}
+			r, err := buildRunner(opts, source)
 			if err != nil {
 				return err
 			}
@@ -226,7 +230,11 @@ func newDownCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 			); err != nil {
 				return err
 			}
-			r, err := buildRunner(opts, migrationsFS)
+			source, err := registrationMigrationSource(cmd.Context(), opts, migrationsFS, target, true)
+			if err != nil {
+				return err
+			}
+			r, err := buildRunner(opts, source)
 			if err != nil {
 				return err
 			}
@@ -316,6 +324,21 @@ func resolveDSN(flagDSN string) (string, error) {
 // Адрес базы выбирает resolveDSN — одно место на оба читателя; там же правило
 // «объявленный источник ровно один».
 func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, error) {
+	dsn, err := validatedMigrationDSN(opts)
+	if err != nil { return nil, err }
+
+	return migratorrun.New(migratorrun.Config{
+		Service:         serviceName,
+		Dialect:         opts.dialect,
+		DSN:             dsn,
+		FS:              migrationsFS,
+		MigrationsDir:   defaultMigrationsDir,
+		DSNExtraSources: dsnExtraSources,
+	})
+}
+
+// validatedMigrationDSN разделяет предусловия адреса между runner и проверкой происхождения.
+func validatedMigrationDSN(opts *rootOptions) (string,error) {
 	// ДИАЛЕКТ СВЕРЯЕТСЯ ПЕРВЫМ, и это порядок, а не стиль. Общий накат сверяет
 	// его тоже — но уже приняв DSN, а до DSN лежит загрузка конфигурации службы.
 	// Оператор, назвавший несуществующий диалект, получал бы тогда отказ
@@ -325,7 +348,7 @@ func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, er
 	// проверки не делает, поэтому здесь она стоит явно. Функция та же — двух
 	// редакций одного текста не заводится.
 	if _, err := migratorcli.ResolveDialectSpec(opts.dialect); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	// Запасная конфигурация iam — тот же DB_HOST/PORT/USER/PASSWORD/NAME/SSLMODE,
@@ -343,7 +366,7 @@ func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, er
 	// ниже по тексту.
 	dsn, err := resolveDSN(opts.dsn)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	// АДРЕС БАЗЫ ОБЯЗАН НАЗЫВАТЬ ХОСТ — иначе ожидание её не сойдётся НИКОГДА.
@@ -368,16 +391,9 @@ func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, er
 	// должен — накат их не употребляет. Позвав его, мы уронили бы ШТАТНУЮ
 	// установку.
 	if !config.DSNNamesAHost(dsn) {
-		return nil, fmt.Errorf("database address %q names no host: it is not set, and waiting for "+
+		return "", fmt.Errorf("database address %q names no host: it is not set, and waiting for "+
 			"the database would never converge; set --dsn, ENV %s, or the chart's db.host", config.RedactDSN(dsn), envDSN)
 	}
 
-	return migratorrun.New(migratorrun.Config{
-		Service:         serviceName,
-		Dialect:         opts.dialect,
-		DSN:             dsn,
-		FS:              migrationsFS,
-		MigrationsDir:   defaultMigrationsDir,
-		DSNExtraSources: dsnExtraSources,
-	})
+	return dsn,nil
 }

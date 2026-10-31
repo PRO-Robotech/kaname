@@ -1,5 +1,6 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
+-- САНКЦИЯ: docs/engineering/acceptance/object-keeps-its-project-after-unregistration.md
 -- kaname#983: one complete DB-owned registration validator. No stored permit,
 -- additional role, SECURITY DEFINER, client flag or callable partial writer.
 -- See docs/engineering/architecture/registration-command-validation.md.

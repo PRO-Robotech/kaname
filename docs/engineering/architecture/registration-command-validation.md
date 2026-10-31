@@ -33,10 +33,10 @@ INSERT, UPDATE, DELETE and TRUNCATE participate. Nested writes reacquire the sam
 transaction lock safely. Catalog writes enter before declaration row locks; the catalog applier takes
 the same fence in LockCatalog before its explicit module/resource prelocks;
 unregistration enters in LockBindingsNamingKeys before its complete grant/role
-lock plan. The bindings -> roles -> mirror -> facts order remains (#975/#1019);
+lock plan. The bindings -> roles -> mirror -> facts order remains (kaname#975/kaname#1019);
 taking the fence only at DELETE would invert with catalog retirement FK checks
 on roles. Commands still read the chain in a separate VOLATILE SQL
-statement after waiting (#874). The one/zero binding-read contract is unchanged.
+statement after waiting (kaname#874). The one/zero binding-read contract is unchanged.
 
 This serializes registration write transactions, including raw DML. Under READ COMMITTED a raw edge
 insert cannot remain invisible to a command that creates the first binding: the
@@ -104,8 +104,24 @@ converge; unexpected partial or changed definitions fail closed. Product
 `migratorrun.Runner.Up` already uses `goose.WithAllowMissing`, so a feature database
 already at 120000 receives missing 90001. The upgrade matrix uses this actual
 runner, with complete original lineages, repeat upgrade and data preservation.
-Automatic Down of reconciliation refuses: the ambiguous historical ledger does
-not reveal which side can safely be removed.
+The unpublished reconciliation records the validated pre-Up origin in the same
+transaction. Down locks the affected tables, checks the exact reconciled shape,
+and removes only the side installed by reconciliation. Writer declarations must
+still equal their seeded/default values; creator facts, selectors, role rules and
+container rights prevent their removal with SQLSTATE 23514. The inverse restores
+the validated original rule validator with static SQL. Historical files stay
+byte-identical.
+
+The product migrator retains this provenance across the colliding 90000 boundary.
+For feature origin it selects the exact archived writer SQL; for main origin it
+selects the original creator SQL. The shared losslessness guard precedes either
+original Down body in its Goose transaction. Both-origin and missing/malformed
+provenance refuse an ambiguous crossing before any Down executes. A missing
+marker on an old installation is not reconstructed from its version number.
+This preflight is not a promise that every multi-migration Down is atomic: a
+concurrent newly committed policy can make the later transaction refuse after
+independent later migrations have been rolled back. The policy/data remain.
+Retained provenance supports Up again after a supported deep rollback.
 
 ## Evidence boundary
 
