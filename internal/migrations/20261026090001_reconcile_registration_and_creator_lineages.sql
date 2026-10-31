@@ -445,7 +445,7 @@ BEGIN
     v_main := v_main_count=5;
     IF (SELECT count(*) FROM pg_proc WHERE pronamespace='kaname'::regnamespace
          AND proname IN ('iam_rules_valid','service_account_creator_is_immutable'))
-       <> CASE WHEN v_main THEN 2 ELSE 1 END THEN
+       <> (CASE WHEN v_main THEN 2 ELSE 1 END) THEN
         RAISE EXCEPTION '90000 lineage reconciliation: unexpected function overload';
     END IF;
 

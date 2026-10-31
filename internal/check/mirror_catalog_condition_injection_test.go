@@ -311,4 +311,35 @@ INSERT INTO kaname.resource_mirror(object_type,object_id) VALUES ($1,$2)` + "`"
 			t.Fatalf("постороннее изменение: %v", err)
 		}
 	}
+	// Mixed trigger events enter the unsupported-shape branch before the normal
+	// INSERT binding path. search_path may still resolve an unqualified target.
+	for _, target := range []struct {
+		relation string
+		refused  bool
+	}{
+		{"kaname.command", true},
+		{"command", true},
+		{"another.command", false},
+	} {
+		t.Run("unsupported replacement on "+target.relation, func(t *testing.T) {
+			mutation := `SET search_path=kaname,pg_catalog;
+CREATE FUNCTION kaname.other() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ INSERT INTO kaname.resource_mirror(object_type,object_id) VALUES (NEW.kind,NEW.id);
+ RETURN NEW;
+END $$;
+CREATE OR REPLACE TRIGGER command_apply INSTEAD OF DELETE OR INSERT ON ` + target.relation + `
+ FOR EACH ROW EXECUTE FUNCTION kaname.other();`
+			bodies, err := check.MirrorCommandBodies([]string{initial, mutation})
+			if target.refused {
+				if err == nil {
+					t.Fatal("unsupported replacement retained stale catalog evidence")
+				}
+				return
+			}
+			if err != nil || bodies["kaname.command"] != commands["kaname.command"] {
+				t.Fatalf("explicit other schema changed the tracked command: %v", err)
+			}
+		})
+	}
 }

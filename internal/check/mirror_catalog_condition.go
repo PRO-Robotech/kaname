@@ -343,8 +343,10 @@ func mirrorFoldStatement(s []sqlTok, functions map[string]string, bindings map[s
 		if instead < 0 || word(instead+1) != "of" || word(instead+2) != "insert" || on < 0 || execute < 0 {
 			if on >= 0 {
 				relation, _ := mirrorRelation(s, on+1)
-				if _, tracked := bindings[relation+"/"+word(i+1)]; tracked {
-					return fmt.Errorf("unsupported mirror command trigger definition %s", relation)
+				for _, binding := range bindings {
+					if binding.trigger == word(i+1) && mirrorDependencyMatches(relation, binding.relation) {
+						return fmt.Errorf("unsupported mirror command trigger definition %s", relation)
+					}
 				}
 			}
 			return nil
