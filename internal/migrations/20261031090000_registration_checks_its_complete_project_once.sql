@@ -46,12 +46,17 @@ BEGIN
      WHERE m.object_type = NEW.dotted_type AND m.object_id = NEW.object_id
        FOR NO KEY UPDATE;
     v_locked := FOUND;
-    SELECT cr.object_type, cr.permanent_project,
-           cr.permanent_project OR cr.project_bindings_held
-      INTO NEW.model_type, v_declared, v_held
-      FROM kaname.catalog_resource cr
+    -- A real tuple write is the RR conflict gate: a stale transaction must
+    -- serialize/retry, not validate an invisible binding or edge as absent.
+    -- The non-key assignment preserves every logical catalog column. The held
+    -- flag callback preserves its value; UPDATE OF permanent_project backfill
+    -- does not run. No additional binding lookup or stored witness is needed.
+    UPDATE kaname.catalog_resource cr
+       SET project_bindings_held = cr.project_bindings_held
      WHERE cr.dotted = NEW.dotted_type AND cr.live
-       FOR SHARE;
+     RETURNING cr.object_type, cr.permanent_project,
+               cr.permanent_project OR cr.project_bindings_held
+          INTO NEW.model_type, v_declared, v_held;
     IF NOT FOUND THEN
         RETURN NEW;
     END IF;
@@ -168,13 +173,22 @@ BEGIN
     IF pg_trigger_depth() = 2 THEN
         RETURN NEW;
     END IF;
-    -- Замок строки каталога — FOR SHARE: он упорядочивает регистрацию с
-    -- объявлением признака (PB-18), а регистрации между собой не держит.
-    SELECT cr.object_type, cr.permanent_project AND cr.live, cr.permanent_project OR cr.project_bindings_held
-      INTO v_model_type, v_declared, v_held
-      FROM kaname.catalog_resource cr
-     WHERE cr.dotted = NEW.object_type
-       FOR SHARE;
+    IF TG_WHEN = 'BEFORE' THEN
+        -- Same RR conflict gate as the complete command, before raw mutation.
+        -- SQLSTATE 40001 propagates unchanged; it is not an integrity verdict.
+        UPDATE kaname.catalog_resource cr
+           SET project_bindings_held = cr.project_bindings_held
+         WHERE cr.dotted = NEW.object_type
+         RETURNING cr.object_type, cr.permanent_project AND cr.live,
+                   cr.permanent_project OR cr.project_bindings_held
+              INTO v_model_type, v_declared, v_held;
+    ELSE
+        -- AFTER uses the catalog tuple already written by this raw statement.
+        SELECT cr.object_type, cr.permanent_project AND cr.live, cr.permanent_project OR cr.project_bindings_held
+          INTO v_model_type, v_declared, v_held
+          FROM kaname.catalog_resource cr
+         WHERE cr.dotted = NEW.object_type;
+    END IF;
     IF NOT FOUND OR NOT v_held THEN
         RETURN NEW;
     END IF;
@@ -213,10 +227,12 @@ BEGIN
     IF pg_trigger_depth() = 2 THEN
         RETURN NEW;
     END IF;
-    -- Serialize raw edge writes with declaration; declaration retains historical
-    -- chains (R8), while a write after declaration must see the held binding.
-    PERFORM 1 FROM kaname.catalog_resource cr
-     WHERE cr.object_type = NEW.object_type FOR SHARE;
+    -- Raw project edges participate in the same real write-conflict gate.
+    -- This also protects the reverse RR schedule: an edge committed after the
+    -- first-binding writer's snapshot makes that writer serialize/retry.
+    UPDATE kaname.catalog_resource cr
+       SET project_bindings_held = cr.project_bindings_held
+     WHERE cr.object_type = NEW.object_type;
     IF kaname.object_project_binding_refuses(NEW.object_type, NEW.object_id, NULL,
                                              ARRAY[NEW.parent_type || ':' || NEW.parent_id]) THEN
         RAISE EXCEPTION 'object %:% is bound to another project', NEW.object_type, NEW.object_id

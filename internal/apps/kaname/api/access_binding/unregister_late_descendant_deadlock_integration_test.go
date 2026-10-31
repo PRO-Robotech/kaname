@@ -213,13 +213,20 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 		require.NoError(t, w.withdrawErr(ctx, fx.parent), "cleanup/convergence after documented deadlock victim")
 	}
 	w.judgeDescendantRing(fx, fmt.Sprintf("1019 late, raw40P01=%t", sawDeadlock))
-	// Первая попытка уже удаляла зеркало, но её откат не оставляет аудит.
-	// После успешного повтора у каждого реально снятого объекта одно событие.
-	for _, id := range []string{fx.parent, fx.child} {
-		var events int
-		require.NoError(t, w.pool.QueryRow(ctx, `SELECT count(*) FROM kaname.audit_outbox
-			WHERE event_type='iam.resource_registration.unregistered'
-			AND event_payload #>> '{object,id}'=$1`, id).Scan(&events))
-		require.Equal(t, 1, events, "отброшенная попытка не удваивает аудит: "+id)
-	}
+	// Откат первой попытки не оставляет аудит: один родительский event
+	// принятого вызова называет ровно одного снятого потомка (#1020).
+	// Отдельное снятие ребёнка не вызывалось и события о нём быть не должно.
+	var parentEvents, childEvents, descendants int
+	require.NoError(t, w.pool.QueryRow(ctx, `SELECT
+		count(*) FILTER (WHERE event_payload #>> '{object,id}'=$1),
+		count(*) FILTER (WHERE event_payload #>> '{object,id}'=$2),
+		coalesce(sum((event_payload->>'descendants')::integer)
+			FILTER (WHERE event_payload #>> '{object,id}'=$1),0)
+		FROM kaname.audit_outbox
+		WHERE event_type='iam.resource_registration.unregistered'
+		AND event_payload #>> '{object,id}' IN ($1,$2)`, fx.parent, fx.child).
+		Scan(&parentEvents, &childEvents, &descendants))
+	require.Equal(t, 1, parentEvents, "отброшенная попытка не оставляет второе событие")
+	require.Equal(t, 1, descendants, "принятая попытка сняла ровно одного потомка")
+	require.Zero(t, childEvents, "потомок отражён в событии родителя, отдельного вызова снятия не было")
 }

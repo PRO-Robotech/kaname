@@ -114,3 +114,39 @@ version/chain movement, four mirror writers, scalegrid parity and error preceden
 remain required. The kaname#1019 whole-transaction closure retry is independent;
 it must pass its real PostgreSQL deadlock reproducer and kaname#975 regressions.
 A code commit or an isolated EXPLAIN is not evidence of these runtime properties.
+
+## Repeatable Read conflict gate
+
+The advisory fence orders writers but cannot refresh a Repeatable Read snapshot.
+Command catalog admission now uses a real `UPDATE ... RETURNING`, assigning
+`project_bindings_held` its existing value. Raw mirror BEFORE and raw project-edge
+triggers perform the same write. A competing committed catalog tuple version
+therefore raises PostgreSQL `40001` before a stale transaction can treat an
+invisible binding or project edge as absent. The original error propagates;
+it is not relabelled as an integrity violation and RR is not disabled. A retry
+in a new transaction can succeed for a lawful project or receive class `23` for
+a visible binding violation. Default-RC PB17/PB19 behavior remains required.
+
+The gate changes no logical catalog column, revision, manifest, or timestamp.
+The existing held-flag BEFORE callback preserves its value; the declaration
+backfill is `UPDATE OF permanent_project` and does not run for this assignment.
+The catalog statement callback only reacquires the already-held advisory fence,
+so there is no recursive catalog write. A runtime control compares the entire
+catalog JSON plus audit/reconcile counts and pins the installed callback census.
+There are no new rows, witness tables, roles, connections, or client flags.
+Command validation still reads the binding once (zero for never-declared types),
+and inserts at most its single binding row; raw AFTER uses its own catalog tuple.
+
+This is not free: the catalog UPDATE creates a physical tuple version and WAL,
+including on never-declared command types, and serializes writers of that type
+in addition to the existing global fence. Its cost must be measured, including
+isolated sequential baseline/final latency in one Job; no acceptance or zero-cost
+claim follows from the lookup counter. A stale user-owned RR transaction may
+abort even for a lawful project, independently of the default-isolation API
+same-project concurrency promise. R8 declaration/backfill remains unchanged.
+
+TRUNCATE obtains its relation lock before its statement trigger. The confirmed
+TRUNCATE-versus-writer `40P01` schedule remains a liveness limitation; the losing
+transaction rolls back and binding permanence is preserved. This protocol does
+not promise universal deadlock freedom for raw TRUNCATE or arbitrary manual row
+prelocks outside its writer entry points.
