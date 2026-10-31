@@ -149,22 +149,29 @@ func TestRegistrationCatalogFence_RawEdgeAllCatalogRows(t *testing.T) {
 }
 
 func TestRegistrationCatalogFence_DifferentTypesAndInvalidSecondCall(t *testing.T) {
-	ctx, _, writer, _ := registrationRRDB(t)
+	ctx, observer, writer, _ := registrationRRDB(t)
+	// A dedicated, committed fixture type declares exactly the two parents used
+	// below; no arbitrary production catalog type or empty-parent assumption.
+	_, err := observer.Exec(ctx, `INSERT INTO kaname.catalog_resource
+ (module,resource,dotted,object_type,parent_types,parent_names,permanent_project)
+ VALUES ('registry','fence_probe','registry.fence_probe','catalog_fence_probe',
+ ARRAY['project','account'],ARRAY['project_id','account_id'],true)`)
+	require.NoError(t, err)
 	tx, err := writer.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback(context.Background())
 	_, err = tx.Exec(ctx, registrationRRCommand, "first-type")
 	require.NoError(t, err)
-	var other string
-	require.NoError(t, tx.QueryRow(ctx, `SELECT dotted FROM kaname.catalog_resource WHERE live AND dotted<>'registry.registries' ORDER BY dotted LIMIT 1`).Scan(&other))
 	n := registrationCatalogWrites(t, ctx, tx)
-	_, err = tx.Exec(ctx, `INSERT INTO kaname.resource_registration_command(dotted_type,object_id,parent_project_id,parent_account_id,source_version) VALUES ($1,'other-type','','',now())`, other)
+	_, err = tx.Exec(ctx, `INSERT INTO kaname.resource_registration_command(dotted_type,object_id,parent_project_id,parent_account_id,labels,source_version,parent_chain)
+ VALUES ('registry.fence_probe','other-type','registrationRR-P','registrationRR-A','{}',now(),ARRAY['project:registrationRR-P','account:registrationRR-A'])`)
 	require.NoError(t, err)
 	require.Positive(t, registrationCatalogWrites(t, ctx, tx)-n, "another type has its own first physical fence")
 	_, err = tx.Exec(ctx, `SAVEPOINT invalid_second`)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.resource_registration_command(dotted_type,object_id,parent_project_id,parent_account_id,source_version,parent_chain) VALUES ('registry.registries','first-type','registrationRR-Q','registrationRR-A',now(),ARRAY['project:registrationRR-Q'])`)
-	require.Equal(t, "23", registrationRRState(err)[:2], "ownership does not authorize conflicting second payload")
+	require.Error(t, err, "ownership does not authorize conflicting second payload")
+	require.True(t, strings.HasPrefix(registrationRRState(err), "23"), "expected integrity SQLSTATE class, got %s", registrationRRState(err))
 	_, err = tx.Exec(ctx, `ROLLBACK TO SAVEPOINT invalid_second`)
 	require.NoError(t, err)
 	var project string
