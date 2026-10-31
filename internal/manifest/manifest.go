@@ -469,6 +469,7 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	// Разделы судятся В ПОРЯДКЕ ДОКУМЕНТА, и находки собираются ВСЕ: названная
 	// первая заставила бы автора чинить их по одной, по прогону на каждую.
 	faults := validateResources(&m, doc, referent)
+	faults = append(faults, validateContainerVerbs(&m, doc, loadOpts.oracle)...)
 	faults = append(faults, validateRoles(&m, doc, moduleSetFor(&m, loadOpts.modules))...)
 	faults = append(faults, validateDeprecatedVerbs(&m, doc)...)
 	faults = append(faults, refuseObjectRefs(&m, doc)...) // ссылки на объекты, kaname#965

@@ -799,8 +799,17 @@ func (*AccessTarget_AllInScope) isAccessTarget_Target() {}
 // объект из перечня в той же транзакции; опустевший перечень — отзыв выдачи
 // (`AccessBinding.target`).
 type AccessTargetResources struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Resources     []*ResourceRef         `protobuf:"bytes,1,rep,name=resources,proto3" json:"resources,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The objects of the grant. Each `id` follows the object grammar, the same one
+	// object registration enforces: it is non-empty and contains none of space,
+	// tab, newline, `#` (the subject-set separator) or `:` (a second colon of the
+	// object `type:id`). `/` is legal and taken verbatim: the service neither
+	// splits nor normalizes the id. A forbidden character fails `Create`
+	// synchronously with INVALID_ARGUMENT before any `Operation` is issued, with
+	// the message `Illegal argument target.resources[N].id (not a valid object id:
+	// space, tab, newline, '#' and ':' are not allowed)`, where N is the element's
+	// index.
+	Resources     []*ResourceRef `protobuf:"bytes,1,rep,name=resources,proto3" json:"resources,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

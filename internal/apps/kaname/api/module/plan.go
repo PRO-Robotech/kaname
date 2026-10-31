@@ -326,7 +326,7 @@ func writtenCounts(live catalog.Rows, declared modulecatalog.Declared) (int32, i
 	}
 	for _, v := range declared.Verbs {
 		cur, ok := liveVerb[dottedVerb(v)]
-		if !ok || cur.PerObject != v.PerObject {
+		if !ok || !cur.SameForm(v) {
 			verbs++
 		}
 	}

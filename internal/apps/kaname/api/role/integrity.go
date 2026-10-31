@@ -52,13 +52,26 @@ func attachIntegrity(ctx context.Context, rd kanamerepo.Reader, cat catalog.Sour
 	if cat == nil {
 		return status.Error(codes.Internal, "internal error")
 	}
-	lookup := cat.Facts().RolePreviewLookup()
+	facts := cat.Facts()
+	lookup := facts.RolePreviewLookup()
 	declared := make(map[domain.RoleID]int, len(roles))
 	segments := make([]domain.RoleSegment, 0, len(roles))
 	for _, r := range roles {
 		segs := domain.SegmentsOf(r.ID, r.Rules)
 		declared[r.ID] = len(segs)
-		segments = append(segments, segs...)
+		for _, s := range segs {
+			// Контейнерное действие (kaname#1003, Р2а) проекции «роль → тип ×
+			// глагол» не даёт by construction: его право — отношение на родителе,
+			// и производит его каталог (`catalog_verb.container_relation`), а не
+			// строка `role_verb`. Сегмент, чьё действие каталог объявляет
+			// контейнерным, разрешён самим объявлением; спроси его у `role_verb` —
+			// и роль создателя читалась бы ДЕГРАДИРОВАННОЙ, давая ровно то, что
+			// объявляет (SAC-41).
+			if _, ok := facts.ContainerVerb(s.ObjectType, s.Verb); ok {
+				continue
+			}
+			segments = append(segments, s)
+		}
 	}
 
 	// Срез, а не счётчик: величину роли даёт его длина, а состав нужен правилу

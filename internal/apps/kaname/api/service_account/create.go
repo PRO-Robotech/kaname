@@ -115,6 +115,11 @@ func (u *CreateServiceAccountUseCase) Execute(ctx context.Context, sa domain.Ser
 	}
 	actor := authzguard.PrincipalUserID(ctx)
 	sa.ID = domain.ServiceAccountID(saID)
+	// Факт создателя (kaname#1003, Р4) — принципал вызова, а не поле запроса
+	// (анти-подмена): каким бы путём ни пришло право создавать, создатель тот,
+	// кто вызвал. Ведение по роли создателя получает только учётка, но факт
+	// пишется на каждом создании.
+	sa.CreatedBy = creatorOf(operations.PrincipalFromContext(ctx))
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
 		return u.doCreate(ctx, sa, actor)
 	})
@@ -199,4 +204,18 @@ func (u *CreateServiceAccountUseCase) reconcileObject(ctx context.Context, objec
 		u.logger.Error("service_account create: object forward reconcile failed (event/sweep will retry)",
 			"object_type", objectType, "object_id", objectID, "err", rerr)
 	}
+}
+
+// creatorOf — субъект-создатель из принципала вызова (kaname#1003, Р4). Вид
+// вне закрытого набора «человек | учётка» создателя не даёт: нулевое значение
+// значит «создатель не записан», и по роли создателя такую учётку не ведёт
+// никто — ошибка уходит в сторону отказа, а не выдачи.
+func creatorOf(p operations.Principal) domain.Subject {
+	switch domain.SubjectType(p.Type) {
+	case domain.SubjectTypeUser, domain.SubjectTypeServiceAccount:
+		if p.ID != "" {
+			return domain.Subject{Type: domain.SubjectType(p.Type), ID: domain.SubjectID(p.ID)}
+		}
+	}
+	return domain.Subject{}
 }

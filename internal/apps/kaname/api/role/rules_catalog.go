@@ -68,6 +68,7 @@ import (
 
 	"go.uber.org/multierr"
 
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
@@ -82,6 +83,10 @@ type typeCatalog interface {
 	// FGAObjectType — имя типа МОДЕЛИ для точечного имени КАТАЛОГА; ok=false у
 	// ресурса, чья строка снята либо которого в каталоге нет вовсе.
 	FGAObjectType(dotted string) (string, bool)
+	// ContainerVerb — контейнерное действие `verb` ресурса `dotted` (kaname#1003,
+	// Р2а); ok=false — действие не контейнерное. Арендаторской роли такие действия
+	// недоступны (Р2 п.4), и гейт спрашивает ровно этот факт.
+	ContainerVerb(dotted, verb string) (catalog.ContainerGrant, bool)
 }
 
 // catalogEndpoint — where an author reads the grantable taxonomy.
@@ -156,6 +161,14 @@ func validateRuleCatalog(rules domain.Rules, systemCtx bool, types typeCatalog) 
 			// Ключ КАТАЛОГА — точечное имя; ищется точным совпадением, без
 			// разбора по первой точке: сегменты уже разделены запросом.
 			key := r.Module + "." + res
+			// Контейнерное действие (kaname#1003, Р2 п.4) — только у системной роли:
+			// роль аккаунта, назвавшая его, отвергается синхронно, до операции.
+			for _, v := range r.Verbs {
+				if _, ok := types.ContainerVerb(key, v); ok {
+					errs = multierr.Append(errs, fmt.Errorf(
+						"Illegal argument verbs (%s on %s is system-only)", v, res))
+				}
+			}
 			if _, ok := types.FGAObjectType(key); ok {
 				continue
 			}

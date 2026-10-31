@@ -295,6 +295,24 @@ func (f *fakeStore) MatchAllInScopeIAMDirect(ctx context.Context, types []string
 	return out, nil
 }
 
+// MatchCreatedByIAMDirect — объекты типов, созданные одной из учёток `creators`
+// (kaname#1003); область не сужается — как у MatchAllInScopeIAMDirect выше.
+func (f *fakeStore) MatchCreatedByIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor, creators []string) ([]domain.MirrorObject, error) {
+	want := make(map[string]bool, len(creators))
+	for _, c := range creators {
+		want["service_account:"+c] = true
+	}
+	var out []domain.MirrorObject
+	for _, t := range types {
+		for _, o := range f.iamDirect[t] {
+			if want[o.CreatedBy] {
+				out = append(out, o)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) MatchByIDsIAMDirect(ctx context.Context, types, ids []string) ([]domain.MirrorObject, error) {
 	want := make(map[string]struct{}, len(ids))
 	for _, id := range ids {

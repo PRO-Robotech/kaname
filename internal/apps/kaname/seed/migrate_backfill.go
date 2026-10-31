@@ -424,9 +424,9 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 		   INSERT INTO kaname.role_rule_selectors
 		     (role_id, rule_fp, arm, object_types, resource_names, match_labels,
 		      container_type, container_arm, container_resource_names, container_match_labels,
-		      verbs_by_type, created_at, updated_at)
+		      verbs_by_type, created_by_subject, created_at, updated_at)
 		   VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb,
-		           kaname.role_selector_verbs_upper_bound($4), now(), now())
+		           kaname.role_selector_verbs_upper_bound($4), $11, now(), now())
 		   ON CONFLICT (role_id, rule_fp) DO UPDATE
 		      SET arm                      = EXCLUDED.arm,
 		          object_types             = EXCLUDED.object_types,
@@ -436,6 +436,7 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 		          container_arm            = EXCLUDED.container_arm,
 		          container_resource_names = EXCLUDED.container_resource_names,
 		          container_match_labels   = EXCLUDED.container_match_labels,
+		          created_by_subject       = EXCLUDED.created_by_subject,
 		          verbs_by_type            = CASE
 		              WHEN kaname.role_rule_selectors.object_types IS DISTINCT FROM EXCLUDED.object_types
 		              THEN EXCLUDED.verbs_by_type
@@ -450,6 +451,7 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 		 ON CONFLICT (role_id) DO NOTHING`,
 		roleID, sel.RuleFP, selectorArmText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
 		containerType, containerArm, containerNames, containerLabels,
+		sel.CreatedBySubject,
 	); err != nil {
 		return fmt.Errorf("sync system role selectors: upsert selector %s/%s: %w", roleID, sel.RuleFP, err)
 	}

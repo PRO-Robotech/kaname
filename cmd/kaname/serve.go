@@ -455,6 +455,17 @@ func runServe(cfg config.Config) error {
 	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
 		return raErr
 	}
+	// Роли СВОЕГО манифеста службы (kaname#1003) — тем же применителем, после
+	// доставленных: новая роль модуля iam заводится объявлением манифеста образа,
+	// а не миграцией. Довод — шапка `applyImageModuleRoles`. Свой манифест читается
+	// здесь и тот же связанный идентификатор уходит ниже применителю посева.
+	ownManifest, omErr := loadOwnManifest(logger)
+	if omErr != nil {
+		return omErr
+	}
+	if riErr := applyImageModuleRoles(ctx, logger, rolesApplier, ownManifest); riErr != nil {
+		return riErr
+	}
 
 	// ПРИМЕНЕНИЕ ПОСЕВА — ПОСЛЕ применения ролей (задачи kacho#2452, kaname#106).
 	//
@@ -480,10 +491,6 @@ func runServe(cfg config.Config) error {
 	// он встроен в образ, доставкой не связан, и порядок редакций доставки о нём
 	// не говорит ничего — модуль `iam` доставки и встроенный документ суть два
 	// разных входа.
-	ownManifest, omErr := loadOwnManifest(logger)
-	if omErr != nil {
-		return omErr
-	}
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
 	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
 		return seErr

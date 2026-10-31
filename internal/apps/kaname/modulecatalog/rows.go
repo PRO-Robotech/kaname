@@ -180,6 +180,25 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 			})
 		}
 
+		// Контейнерные действия (kaname#1003, Р2а) — ярусные строки с парой
+		// «родитель, отношение»: в набор глаголов типа они не входят, а одноимённая
+		// ярусная строка класса им уступает (первичный ключ у тройки один).
+		container := make(map[string]bool, len(r.ContainerVerbs))
+		for _, cv := range r.ContainerVerbs {
+			token := canonicalVerb(cv.Name)
+			if token == "" {
+				return Declared{}, fmt.Errorf("%w: %s.%s (контейнерное действие)", ErrVerbNameEmpty, m.Module, r.Name)
+			}
+			if prev, dup := declaredBy[token]; dup || container[token] {
+				return Declared{}, fmt.Errorf("%w: %s.%s: контейнерное действие %q и %q дают %q",
+					ErrVerbTokenCollision, m.Module, r.Name, prev, cv.Name, token)
+			}
+			container[token] = true
+			out.Verbs = append(out.Verbs, catalog.VerbRow{
+				Module: m.Module, Resource: r.Name, Verb: token,
+				ContainerParent: r.ParentTypeOf(cv), ContainerRelation: cv.Relation,
+			})
+		}
 		// Ресурс, не объявивший ни одного действия, ярусных строк НЕ получает:
 		// у него нет ни одного отношения `v_*`, правило на него не резолвится
 		// ничем, и ярусная строка обещала бы автору выдачу, которой не будет.
@@ -190,6 +209,9 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 			// Тип, объявивший этот класс ПООБЪЕКТНО, второй строки не получает:
 			// первичный ключ у тройки один, и вторая строка отвергалась бы схемой.
 			if _, declared := declaredBy[class]; declared {
+				continue
+			}
+			if container[class] {
 				continue
 			}
 			out.Verbs = append(out.Verbs, catalog.VerbRow{

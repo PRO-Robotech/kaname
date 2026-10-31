@@ -56,6 +56,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/moduleroleparity"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/servicemanifest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/modulemanifests"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/rightsfixture"
 )
@@ -146,6 +148,14 @@ func moduleStates(ctx context.Context, t *testing.T, set modulemanifests.Set) (
 	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
+
+	// Живая база — та, что СТАРТ оставляет после себя, а не голые миграции: роли
+	// своего манифеста службы применитель пишет на старте (`ApplyImage`,
+	// kaname#1003), и новая роль модуля iam заводится только так — миграция роль
+	// модуля с манифестом не вставляет (TestMODRD23). Применение здесь — тот же
+	// производитель, что у старта; сверка после него судит, что объявление образа
+	// применимо и что база не несёт ролей модуля сверх объявленных.
+	applyImageRoles(ctx, t, pool)
 
 	liveByOwner, ownerless, live := readLiveSystemRoles(ctx, t, pool)
 
@@ -338,4 +348,16 @@ func manifestSet(t *testing.T) modulemanifests.Set {
 	set, err := modulemanifests.Available(wd)
 	require.NoError(t, err, "перечень манифестов не снят — проверка НЕ ИСПОЛНЯЛАСЬ")
 	return set
+}
+
+// applyImageRoles — роли манифеста образа службы применителем пути старта
+// (`moduleroles.Applier.ApplyImage`) над живой базой пробы.
+func applyImageRoles(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	own, err := servicemanifest.Load()
+	require.NoError(t, err, "встроенный манифест службы")
+	rep, err := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanamepg.New(pool, nil)), rightsfixture.Export()).
+		ApplyImage(ctx, own, moduleroles.BootActorID)
+	require.NoErrorf(t, err, "применение ролей своего манифеста службы отказало (%s)", rep)
+	t.Logf("роли своего манифеста службы применены: %s", rep)
 }

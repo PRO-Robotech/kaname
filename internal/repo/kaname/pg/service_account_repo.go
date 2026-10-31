@@ -158,11 +158,16 @@ func (w *saWriter) Insert(ctx context.Context, sa domain.ServiceAccount) (domain
 		return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
 	q := fmt.Sprintf(`
-		INSERT INTO service_accounts (id, account_id, name, description, labels, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO service_accounts (id, account_id, name, description, labels, created_at,
+		                              created_by_type, created_by_id)
+		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''))
 		RETURNING %s`, saCols)
+	// Факт создателя (kaname#1003, Р4) — тем же оператором, что строка учётки:
+	// учётки без создателя при созданной глаголом не бывает. Пустая пара — NULL
+	// обеими колонками (проверка пары в схеме).
 	row := w.tx.QueryRow(ctx, q,
 		string(sa.ID), string(sa.AccountID), string(sa.Name), string(sa.Description), labelsJSON, now,
+		string(sa.CreatedBy.Type), string(sa.CreatedBy.ID),
 	)
 	out, err := scanSA(row)
 	if err != nil {

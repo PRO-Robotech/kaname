@@ -173,6 +173,11 @@ func CheckNamedVerbs(facts VerbFacts, m *manifest.Manifest, actions []Action) ([
 						// а не участник роли. Правом оно не выдаётся вовсе —
 						// значит и непроизводимым быть не может.
 						continue
+					case containerProduces(m, rule.Module, resource, verb, a):
+						// Контейнерное действие (kaname#1003, Р2а): гейт спрашивает
+						// объявленное отношение на объявленном родителе, и правило
+						// пишет ровно этот кортеж на объекте области выдачи.
+						continue
 					case Produces(facts, policy, declaredClassOfVerb(m, resource, verb), fgaType, a.Relation, a.Object):
 						continue
 					}
@@ -264,7 +269,11 @@ func ExportRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) (
 				continue
 			}
 			census.Named++
-			classes, missing := reduceNamed(facts, m, rule, named, byResource)
+			// Контейнерные действия (kaname#1003, Р2а) к классу НЕ сводятся:
+			// класса у них нет, и MOD-RL-18 к ним не применяется — правило
+			// экспортируется поимённо. Сводятся только действия типа.
+			objectVerbs, containerNamed := splitContainerVerbs(m, rule, named)
+			classes, missing := reduceNamed(facts, m, rule, objectVerbs, byResource)
 			if len(missing) > 0 {
 				roleFaults++
 				census.Findings++
@@ -281,7 +290,17 @@ func ExportRoleRules(facts VerbFacts, m *manifest.Manifest, actions []Action) (
 			}
 			census.Reduced++
 			reduced := rule.DomainRule()
-			reduced.Verbs = classes
+			reduced.Verbs = append(classes, containerNamed...)
+			// Правило с селектором создателя (kaname#1003, Р2 п.3) уезжает ОБЪЯВЛЕННЫМИ
+			// глаголами, без сведения к классам: сведение считается покрытием действий
+			// каталога и опускает глагол без действия ЭТОГО ресурса (`v_list` на учётке
+			// спрашивают список её ключей и фильтр списка учёток), тогда как селектор пишет на
+			// объекте только кортежи глаголов и ярусом опущенное не возвращает:
+			// создатель терял бы список своих учёток и их ключей (SAC-12, SAC-15).
+			// Полнота перечня уже проверена строкой выше.
+			if rule.CreatedBySubject {
+				reduced.Verbs = append(append([]string(nil), objectVerbs...), containerNamed...)
+			}
 			reduced.Children = children
 			rules = append(rules, reduced)
 		}

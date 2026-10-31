@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 905
+Всего кейсов: 906
 
 ## Перепись по модулям
 
@@ -40,7 +40,7 @@
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
 | `cases/iam-access-binding-revocation-reason.py` | 2 |
-| `cases/iam-access-binding-redesign.py` | 19 |
+| `cases/iam-access-binding-redesign.py` | 20 |
 | `cases/iam-account-redesign.py` | 9 |
 | `cases/iam-account.py` | 58 |
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
@@ -433,7 +433,7 @@
 - `IAM-AB-URG-E1-REVOCATION-REASON-VISIBLE-OK`
 - `IAM-AB-URG-E2-ACTIVE-HAS-NO-REASON-OK`
 
-## `cases/iam-access-binding-redesign.py` — 19 кейсов
+## `cases/iam-access-binding-redesign.py` — 20 кейсов
 
 > Case-set для AccessBindingService — IAM-1 REDESIGN (authz-core: scope+target+revoke).
 
@@ -441,6 +441,7 @@
 - `IAM-ACB-RD-CR-TARGET-RESOURCES-OK`
 - `IAM-ACB-RD-CR-NO-TARGET-NEG`
 - `IAM-ACB-RD-CR-TARGET-UNKNOWN-TYPE-NEG`
+- `IAM-ACB-RD-CR-TARGET-OBJECT-ID-GRAMMAR-NEG`
 - `IAM-ACB-RD-CR-TARGET-LIVE-CATALOG-OK`
 - `IAM-ACB-RD-CR-TARGET-MISSPELLED-TYPE-NEG`
 - `IAM-ACB-RD-CR-SCOPETYPE-REQUIRED-NEG`
