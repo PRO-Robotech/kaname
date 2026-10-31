@@ -26,7 +26,7 @@ const writer90000="20261026090000_module_writes_only_what_its_manifest_declares.
 func TestRegistrationLineages_ProductMigratorReconcilesBothHistories(t *testing.T){
     if testing.Short(){t.Skip("integration: PostgreSQL")}
     // Do not run in parallel: the product runner and goose own process globals.
-    for _,lineage:=range []string{"fresh","main","feature","both","partial"}{
+    for _,lineage:=range []string{"fresh","main","feature","both","partial","changed"}{
         t.Run(lineage,func(t *testing.T){
             dsn:=pgtest.NewEmptyDB(t)
             db,err:=sql.Open("pgx",dsn);require.NoError(t,err);defer db.Close()
@@ -37,11 +37,11 @@ func TestRegistrationLineages_ProductMigratorReconcilesBothHistories(t *testing.
                 // registration b8 ends at binding120000. No invented prefix.
                 if name>="20261031000000"||strings.HasPrefix(name,"20261026090001_"){continue}
                 if lineage=="main"&&name>creator90000{continue}
-                if (lineage=="feature"||lineage=="both"||lineage=="partial")&&name==creator90000{continue}
+                if (lineage=="feature"||lineage=="both"||lineage=="partial"||lineage=="changed")&&name==creator90000{continue}
                 data,e:=migrations.FS.ReadFile(name);require.NoError(t,e)
                 source[name]=&fstest.MapFile{Data:data}
             }
-            if lineage=="feature"||lineage=="both"||lineage=="partial"{
+            if lineage=="feature"||lineage=="both"||lineage=="partial"||lineage=="changed"{
                 old,e:=migrations.Historical.ReadFile("historical/"+writer90000);require.NoError(t,e)
                 source[writer90000]=&fstest.MapFile{Data:old}
             }
@@ -53,9 +53,13 @@ func TestRegistrationLineages_ProductMigratorReconcilesBothHistories(t *testing.
                     body:=strings.Split(strings.Split(string(raw),"-- +goose Up")[1],"-- +goose Down")[0]
                     _,e=db.Exec(body);require.NoError(t,e,"fixture: both exact schemas, one ambiguous version record")
                 }
-                if lineage=="partial"{
+                if lineage=="partial"||lineage=="changed"{
                     _,err=db.Exec(`ALTER TABLE kaname.catalog_resource DROP CONSTRAINT catalog_resource_writes_form`)
                     require.NoError(t,err)
+                    if lineage=="changed" {
+                        _,err=db.Exec(`ALTER TABLE kaname.catalog_resource ADD CONSTRAINT catalog_resource_writes_form CHECK (true)`)
+                        require.NoError(t,err)
+                    }
                 }
                 // A lawful later catalog update must survive: do not replay seeds.
                 if lineage=="feature"||lineage=="both"{
@@ -68,7 +72,7 @@ func TestRegistrationLineages_ProductMigratorReconcilesBothHistories(t *testing.
             runner,err:=migratorrun.New(migratorrun.Config{Service:"kaname",Dialect:"postgres",DSN:dsn,FS:migrations.FS,MigrationsDir:"."})
             require.NoError(t,err)
             err=runner.Up(context.Background(),"")
-            if lineage=="partial"{
+            if lineage=="partial"||lineage=="changed"{
                 require.ErrorContains(t,err,"90000 lineage reconciliation")
                 var absent bool
                 require.NoError(t,db.QueryRow(`SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='kaname' AND table_name='catalog_verb' AND column_name='container_parent')`).Scan(&absent))

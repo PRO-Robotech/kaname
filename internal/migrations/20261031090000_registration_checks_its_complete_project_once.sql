@@ -76,6 +76,16 @@ BEGIN
         v_chain := array_append(v_chain, v_type || ':' || v_id);
     END LOOP;
 
+    -- Existing mirror rows are already locked. Lock the object fence before
+    -- edge rows. A raw UPDATE of this same key needs no fence: its old row is
+    -- visible here, so we wait for it BEFORE judging the fresh chain snapshot.
+    IF v_locked AND v_held THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended('kaname.registration:' || NEW.model_type || ':' || NEW.object_id, 0));
+        PERFORM 1 FROM kaname.resource_parent_edge pe
+         WHERE pe.object_type = NEW.model_type AND pe.object_id = NEW.object_id
+         ORDER BY pe.depth FOR UPDATE;
+    END IF;
+
     -- Mirror first, binding second for EVERY writer, including raw UPSERT.
     -- These writes are provisional: the complete validation below is mandatory
     -- even for stale/no-op, and any refusal rolls back this entire statement.
@@ -107,6 +117,14 @@ BEGIN
     END IF;
 
     IF v_held THEN
+        -- On an absent-row race the effective mirror write must precede the
+        -- fence: a raw UPSERT can already own the newly inserted mirror row.
+        IF NOT v_locked THEN
+            PERFORM pg_advisory_xact_lock(hashtextextended('kaname.registration:' || NEW.model_type || ':' || NEW.object_id, 0));
+            PERFORM 1 FROM kaname.resource_parent_edge pe
+             WHERE pe.object_type = NEW.model_type AND pe.object_id = NEW.object_id
+             ORDER BY pe.depth FOR UPDATE;
+        END IF;
         -- A stale request must never establish the first binding. A concurrent
         -- insert won the mirror lock first; this effective write now serializes
         -- on that same row before touching the binding unique index.
@@ -159,6 +177,8 @@ DECLARE
     v_model_type text;
     v_declared   boolean;
     v_held       boolean;
+    v_new_binding boolean := false;
+    v_raw_chain text[] := ARRAY[]::text[];
 BEGIN
     -- Only the direct complete-command trigger writes these tables at depth 2.
     -- This relies on the closed installed trigger/callback graph, not depth
@@ -176,12 +196,24 @@ BEGIN
     IF NOT FOUND OR NOT v_held THEN
         RETURN NEW;
     END IF;
+    IF TG_WHEN = 'AFTER' THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended('kaname.registration:' || v_model_type || ':' || NEW.object_id, 0));
+        PERFORM 1 FROM kaname.resource_parent_edge pe
+         WHERE pe.object_type = v_model_type AND pe.object_id = NEW.object_id
+         ORDER BY pe.depth FOR UPDATE;
+    END IF;
     IF TG_WHEN = 'AFTER' AND v_declared AND NEW.parent_project_id <> '' THEN
         INSERT INTO kaname.object_project_binding (object_type, object_id, project_id)
         VALUES (v_model_type, NEW.object_id, NEW.parent_project_id)
         ON CONFLICT (object_type, object_id) DO NOTHING;
+        v_new_binding := FOUND;
     END IF;
-    IF kaname.object_project_binding_refuses(v_model_type, NEW.object_id, NEW.parent_project_id, ARRAY[]::text[]) THEN
+    IF v_new_binding THEN
+        SELECT coalesce(array_agg(pe.parent_type || ':' || pe.parent_id), ARRAY[]::text[])
+          INTO v_raw_chain FROM kaname.resource_parent_edge pe
+         WHERE pe.object_type = v_model_type AND pe.object_id = NEW.object_id;
+    END IF;
+    IF kaname.object_project_binding_refuses(v_model_type, NEW.object_id, NEW.parent_project_id, v_raw_chain) THEN
         RAISE EXCEPTION 'object %:% is bound to another project', v_model_type, NEW.object_id
             USING ERRCODE = 'integrity_constraint_violation',
                   CONSTRAINT = 'object_project_binding_holds',
@@ -205,10 +237,14 @@ BEGIN
     IF pg_trigger_depth() = 2 THEN
         RETURN NEW;
     END IF;
-    -- Serialize raw edge writes with declaration; declaration retains historical
-    -- chains (R8), while a write after declaration must see the held binding.
-    PERFORM 1 FROM kaname.catalog_resource cr
-     WHERE cr.object_type = NEW.object_type FOR SHARE;
+    -- INSERT has no old row for a command to lock. A key-moving UPDATE has
+    -- an old row in a DIFFERENT object's chain. Fence their destination before
+    -- writing it. A same-key UPDATE must NOT acquire this fence after its row
+    -- lock: commands use fence -> edge. Its visible old row is the barrier.
+    IF TG_OP = 'INSERT' OR OLD.object_type IS DISTINCT FROM NEW.object_type
+                         OR OLD.object_id IS DISTINCT FROM NEW.object_id THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended('kaname.registration:' || NEW.object_type || ':' || NEW.object_id, 0));
+    END IF;
     IF kaname.object_project_binding_refuses(NEW.object_type, NEW.object_id, NULL,
                                              ARRAY[NEW.parent_type || ':' || NEW.parent_id]) THEN
         RAISE EXCEPTION 'object %:% is bound to another project', NEW.object_type, NEW.object_id
@@ -222,7 +258,27 @@ END
 $$;
 -- +goose StatementEnd
 
+-- +goose StatementBegin
+CREATE FUNCTION kaname.resource_parent_edge_locks_catalog() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, kaname AS $$
+BEGIN
+    IF pg_trigger_depth() = 1 THEN
+        -- Statement triggers cannot know affected object keys. Catalog SHARE
+        -- locks are compatible across all writers and acquired BEFORE edge row
+        -- locks, so a pending declaration cannot form edge -> catalog -> edge.
+        PERFORM 1 FROM kaname.catalog_resource cr ORDER BY cr.dotted FOR SHARE;
+    END IF;
+    RETURN NULL;
+END
+$$;
+-- +goose StatementEnd
+CREATE TRIGGER resource_parent_edge_locks_catalog
+    BEFORE INSERT OR UPDATE ON kaname.resource_parent_edge
+    FOR EACH STATEMENT EXECUTE FUNCTION kaname.resource_parent_edge_locks_catalog();
+
 -- +goose Down
+DROP TRIGGER resource_parent_edge_locks_catalog ON kaname.resource_parent_edge;
+DROP FUNCTION kaname.resource_parent_edge_locks_catalog();
 DROP VIEW kaname.resource_registration_command;
 DROP FUNCTION kaname.resource_registration_command_apply();
 DROP TRIGGER resource_mirror_binds_effective_registration ON kaname.resource_mirror;

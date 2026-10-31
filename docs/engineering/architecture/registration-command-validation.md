@@ -24,6 +24,43 @@ the mirror row held by the command: all effective writers use mirror → binding
 Catalog declarations remain serialized by SHARE versus UPDATE catalog locks;
 declaration backfill never rewrites or validates historical chains (R8).
 
+## Raw edge concurrency
+
+An object advisory transaction fence closes the missing-row case. Commands with
+an existing locked mirror take its fence and lock the existing edge rows before
+comparing the chain in a separate SQL statement. Commands whose initial mirror
+lookup was empty first perform the effective mirror CAS, then take the fence and
+edge locks. This preserves mirror-before-fence order even if a concurrent raw
+UPSERT inserted the mirror between those statements. A raw mirror writer takes
+the fence only in its AFTER effective-row guard; a raw UPSERT waiting on a mirror
+cannot already own the fence or binding. First raw binding creation also checks
+the existing chain; a failure rolls the whole statement back.
+
+A raw project-edge INSERT takes the destination object's fence before its row
+exists. A raw UPDATE that changes the object key does the same: its old locked
+row belongs to another object's chain. A raw UPDATE of the SAME object key must
+not take that fence after its row lock. Its committed old row is visible to the
+command's edge-lock statement, which waits before reading the fresh chain. If
+the command got the edge lock first, the raw UPDATE waits and its row guard then
+sees the committed binding. This distinction avoids the edge-to-fence inversion.
+Raw edge statement triggers take compatible catalog SHARE locks before any edge
+row locks, so a pending catalog declaration cannot introduce a catalog/edge lock
+cycle. Nested command DML already holds the relevant catalog lock and omits this
+statement guard under the same closed-graph proof.
+
+The additional ordinary-command cost for a held type is one advisory lock and
+one ordered lock scan over its at-most-four existing edge rows, with no extra
+binding lookup. Commands on independent object keys remain concurrent; raw
+statements briefly share-lock the catalog, and do not serialize each other.
+Hash collisions can introduce additional waiting, never an integrity exemption.
+There are no deferred constraints, lock-mode upgrades, new stored permits or
+client-controlled switches. SET CONSTRAINTS IMMEDIATE does not alter the
+protocol. As with ordinary multi-object SQL transactions, callers must keep a
+consistent object order; no promise of deadlock-free arbitrary SQL ordering is
+made. The scoped tests retain the original manual-mirror-lock/raw-UPSERT twin,
+the original raw INSERT probe, and same-key/key-moving UPDATE twins. Latency and
+buffer measurements remain a separate acceptance gate.
+
 ## Closed trigger graph is the authority
 
 Only direct depth-one command entry is accepted. Physical mirror/edge guards omit

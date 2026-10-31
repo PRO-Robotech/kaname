@@ -198,8 +198,8 @@ func TestUnregister_LateDescendantIsTakenToo(t *testing.T) {
 	assert.Equal(t, []string{"registry.repositories/reg1/app", "registry.repositories/reg1/late"}, m.dropped,
 		"kaname#1019: поздний потомок не снят")
 	require.Len(t, w.locked, 2, "kaname#1019: ключ позднего потомка не заперт отдельным замком")
-	assert.Equal(t, []domain.ResourceRef{{Type: "registry.repositories", ID: "reg1/late"}}, w.locked[1],
-		"kaname#1019: второй замок не на позднего потомка")
+	assert.Equal(t, []domain.ResourceRef{{Type: "registry.registries", ID: "reg1"}, {Type: "registry.repositories", ID: "reg1/app"}, {Type: "registry.repositories", ID: "reg1/late"}}, w.locked[1],
+		"kaname#1019: повтор не удерживает весь увеличенный план")
 	assert.Contains(t, withdrawnKeys(w), "registry.repositories/reg1/late", "kaname#1019: выдачи позднего потомка не отозваны")
 }
 

@@ -100,7 +100,7 @@ func TestPermanentProjectCommand_RefusalRollsBackProvisionalMirrorAndBinding(t *
         (dotted_type,object_id,parent_project_id,parent_account_id,labels,source_version,parent_chain,
          type_live,model_type,applied,projection_unchanged)
         VALUES ($1,$2,$3,$4,'{}',now(),$5,true,'spoofed',true,true)`,
-        ppRegCat,id,string(w.prjA),string(w.accA),[]string{"project:"+string(w.prjA),"project:"+string(w.prjB)})
+        ppRegCat,id,string(w.prjA),string(w.accA),[]string{"project:"+string(w.prjA),"project:"+string(w.prjC)})
     var pgerr *pgconn.PgError
     require.ErrorAs(t,err,&pgerr)
     require.Equal(t,"23000",pgerr.Code)
