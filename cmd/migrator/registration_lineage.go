@@ -97,6 +97,15 @@ func registrationMigrationSource(ctx context.Context, opts *rootOptions, source 
 		return nil, err
 	}
 	defer func() { _ = db.Close() }()
+	// Проверка соединения не заменяет тот же отказ внутри Goose-транзакции.
+	// Старый snapshot RR нельзя освежить ожиданием табличного замка.
+	var isolation string
+	if err := db.QueryRowContext(ctx, `SHOW default_transaction_isolation`).Scan(&isolation); err != nil {
+		return nil, err
+	}
+	if isolation != "read committed" {
+		return nil, fmt.Errorf("registration migration refused before any Down: requires READ COMMITTED, got %s", isolation)
+	}
 	var hasLedger, hasOrigin bool
 	if err := db.QueryRowContext(ctx, `SELECT to_regclass('goose_db_version') IS NOT NULL,
         to_regclass('kaname.registration_lineage_origin') IS NOT NULL`).Scan(&hasLedger, &hasOrigin); err != nil {
@@ -159,8 +168,17 @@ func registrationMigrationSource(ctx context.Context, opts *rootOptions, source 
         FROM kaname.registration_lineage_origin WHERE singleton`).Scan(&version, &creator, &writer, &state); err != nil {
 		return nil, err
 	}
-	if version != 1 || (!creator && !writer) || (state != "up" && state != "down") || (applied[registrationReconciliation] != (state == "up")) {
-		return nil, fmt.Errorf("registration migration provenance does not match the applied ledger")
+	if version != 2 || (!creator && !writer) || (state != "up" && state != "down") || (applied[registrationReconciliation] != (state == "up")) {
+		return nil, fmt.Errorf("registration migration refused before any Down: provenance does not match the applied ledger")
+	}
+	var originMatches bool
+	if err := db.QueryRowContext(ctx, `SELECT kaname.registration_lineage_origin_matches(
+        original_shape,complete_shape,had_creator,had_writer)
+        FROM kaname.registration_lineage_origin WHERE singleton`).Scan(&originMatches); err != nil {
+		return nil, err
+	}
+	if !originMatches {
+		return nil, fmt.Errorf("registration migration refused before any Down: origin flags or definitions differ")
 	}
 	if down && creator && writer && applied[registrationCollision] && floor < registrationCollision {
 		return nil, fmt.Errorf("registration rollback refused before any Down: both historical 90000 lineages have an ambiguous ledger owner")

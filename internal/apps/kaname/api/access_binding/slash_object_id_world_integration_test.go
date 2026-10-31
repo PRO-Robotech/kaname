@@ -64,6 +64,18 @@ func slashInputs() []struct{ name, id string } {
 // Реестр указан отдельно: префикс непрозрачного id не определяет предка.
 func registerSlashRepo(w *pcrWorld, id string, ver time.Time) {
 	w.t.Helper()
+	// Факт указателя приходит раньше владельца. Цепь сама по себе его не создаёт;
+	// микросекунда сохраняет строгое сравнение после timestamptz PostgreSQL.
+	pointer := &iamv1.RegisterResourceRequest{
+		SubjectId: pcrRegType + ":" + pcrX,
+		Relation: "parent",
+		Object: pcrRepoType + ":" + id,
+		ParentProjectId: string(w.prjA),
+		ParentAccountId: string(w.accA),
+		ParentChain: []string{pcrRegType + ":" + pcrX, "project:" + string(w.prjA), "account:" + string(w.accA)},
+		SourceVersion: timestamppb.New(ver.Add(-time.Microsecond)),
+	}
+	require.NoError(w.t, w.reg.Register(w.ctx, pointer))
 	req := &iamv1.RegisterResourceRequest{
 		SubjectId:       "user:" + string(w.usrA),
 		Relation:        "owner",
@@ -162,4 +174,34 @@ func TestSlashObjectID_RegistrationGrantAndCheckAreVerbatim(t *testing.T) {
 	w.pollAsk(usrD, "v_get", pcrRepoType, deeper, true, "выдача на объект с лишним сегментом материализуется")
 	assert.False(t, w.ask(usrD, "v_get", pcrRepoType, legit),
 		"выдача на объект с лишним сегментом открыла объект короче по написанию")
+}
+
+func TestSlashObjectID_OwnerNeedsAnEarlierActualPointer(t *testing.T) {
+	w := newPCRWorld(t)
+	id := "/opaque%2Fowner/child"
+	ver := time.Now().UTC().Truncate(time.Microsecond)
+	err := w.reg.Register(w.ctx, &iamv1.RegisterResourceRequest{
+		SubjectId: "user:" + string(w.usrA), Relation: "owner", Object: pcrRepoType + ":" + id,
+		ParentProjectId: string(w.prjA), ParentAccountId: string(w.accA),
+		ParentChain: []string{pcrRegType + ":" + pcrX, "project:" + string(w.prjA), "account:" + string(w.accA)},
+		SourceVersion: timestamppb.New(ver),
+	})
+	require.Error(t, err, "присланная цепь без факта указателя не даёт опоры")
+	var mirrors, facts, edges int
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT
+        (SELECT count(*) FROM kaname.resource_mirror WHERE object_type='registry.repositories' AND object_id=$1),
+        (SELECT count(*) FROM kaname.relation_fact WHERE object_type=$2 AND object_id=$1),
+        (SELECT count(*) FROM kaname.resource_parent_edge WHERE object_type=$2 AND object_id=$1)`, id,pcrRepoType).Scan(&mirrors,&facts,&edges))
+	require.Zero(t, mirrors)
+	require.Zero(t, facts)
+	require.Zero(t, edges)
+	registerSlashRepo(w, id, ver)
+	var pointer, owner int
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT
+        (SELECT count(*) FROM kaname.relation_fact WHERE object_type=$1 AND object_id=$2 AND relation='parent' AND subject=$3),
+        (SELECT count(*) FROM kaname.relation_fact WHERE object_type=$1 AND object_id=$2 AND relation='owner' AND subject=$4)`,
+		pcrRepoType,id,pcrRegType+":"+pcrX,"user:"+string(w.usrA)).Scan(&pointer,&owner))
+	require.Equal(t, 1, pointer)
+	require.Equal(t, 1, owner, "строго новая версия владельца не стала replay no-op")
+	require.Equal(t, [][3]string{{pcrRegType,pcrX,"1"},{"project",string(w.prjA),"2"},{"account",string(w.accA),"3"}},parentEdges(w,id))
 }

@@ -248,3 +248,55 @@ func TestMirrorConditionGate_Injection(t *testing.T) {
 		}
 	}
 }
+
+func TestMirrorCommandRelationIdentityAndDependencyChanges(t *testing.T) {
+	const initial = `CREATE FUNCTION kaname.command_apply() RETURNS trigger LANGUAGE plpgsql AS $body$
+BEGIN
+ PERFORM 1 FROM kaname.catalog_resource WHERE live;
+ INSERT INTO kaname.resource_mirror(object_type,object_id) VALUES (NEW.kind,NEW.id);
+ -- DROP VIEW kaname.command; is a comment inside an unexecuted function body.
+ RETURN NEW;
+END $body$;
+CREATE TRIGGER command_apply INSTEAD OF INSERT ON kaname.command
+ FOR EACH ROW EXECUTE FUNCTION kaname.command_apply();`
+	commands, err := check.MirrorCommandBodies([]string{initial})
+	if err != nil { t.Fatal(err) }
+	for _, target := range []string{"kaname.command_other", `"kaname"."command_other"`, `"kaname.command"`} {
+		caller := "package p\nconst q = `INSERT INTO " + target + `(kind,id) VALUES ($1,$2);
+INSERT INTO kaname.resource_mirror(object_type,object_id) VALUES ($1,$2)` + "`"
+		writes, _, err := check.MirrorWritesThroughCommands("other.go", caller, commands)
+		if err != nil { t.Fatal(err) }
+		if len(writes) != 1 || len(writes[0].Catalog) != 0 { t.Fatalf("чужой relation получил условие команды: %+v", writes) }
+	}
+	for _, target := range []string{"kaname.command", `"kaname" . "command"`} {
+		caller := "package p\nconst q = `INSERT INTO " + target + "(kind,id) VALUES ($1,$2)`"
+		writes, _, err := check.MirrorWritesThroughCommands("command.go", caller, commands)
+		if err != nil || len(writes) != 1 || len(writes[0].Catalog) != 1 { t.Fatalf("точная команда потеряна: %+v %v", writes, err) }
+	}
+	for _, mutation := range []string{
+		`DROP TRIGGER command_apply ON kaname.command;`,
+		`DROP FUNCTION kaname.command_apply();`,
+		`DROP FUNCTION command_apply();`,
+		`DROP TRIGGER command_apply ON command;`,
+		`DROP VIEW kaname.command;`,
+		`ALTER TABLE kaname.command DISABLE TRIGGER command_apply;`,
+		`ALTER TABLE kaname.command ENABLE TRIGGER command_apply;`,
+		`ALTER FUNCTION kaname.command_apply() SECURITY DEFINER;`,
+		`CREATE OR REPLACE TRIGGER command_apply INSTEAD OF INSERT ON kaname.command FOR EACH ROW EXECUTE FUNCTION kaname.other();`,
+		`CREATE OR REPLACE VIEW kaname.command AS SELECT 1;`,
+		`DROP TRIGGER command_apply ON kaname.command; CREATE OR REPLACE FUNCTION kaname.command_apply() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;`,
+	} {
+		t.Run(mutation, func(t *testing.T) {
+			if _, err := check.MirrorCommandBodies([]string{initial,mutation}); err == nil { t.Fatal("старая связь пережила неподдержанное изменение") }
+		})
+	}
+	for _, unrelated := range []string{
+		`DROP VIEW kaname.command_other; DROP FUNCTION kaname.other();`,
+		`DROP VIEW another.command; DROP FUNCTION another.command_apply();`,
+		`DROP TRIGGER other ON kaname.command;`,
+		`ALTER TABLE kaname.command DISABLE TRIGGER other;`,
+		`CREATE FUNCTION kaname.other() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'DROP VIEW kaname.command'; RETURN NEW; END $$;`,
+	} {
+		if _, err := check.MirrorCommandBodies([]string{initial,unrelated}); err != nil { t.Fatalf("постороннее изменение: %v",err) }
+	}
+}

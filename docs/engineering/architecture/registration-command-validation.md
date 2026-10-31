@@ -123,6 +123,31 @@ concurrent newly committed policy can make the later transaction refuse after
 independent later migrations have been rolled back. The policy/data remain.
 Retained provenance supports Up again after a supported deep rollback.
 
+The candidate marker uses format 2. Its immutable `original_shape` is bound to
+the origin flags through the full column, constraint, function, index and trigger
+identity, including the original rule validator. CLI preflight, SQL inverse and
+retained-marker Up all check this correspondence. Down checks the resulting
+schema against that original identity and changes only the state; it does not
+overwrite the evidence with its result. Unknown marker formats fail closed.
+Any role named exactly `iam.service_account.creator` prevents creator rollback,
+including a plain role without a creator selector: the historical Down removes
+that entire named population.
+
+These migration transactions require READ COMMITTED. Their SQL guards reject
+other isolation levels with SQLSTATE 25001 before taking locks or changing
+schema. The CLI also rejects an incompatible default isolation before any Down.
+A table lock cannot refresh an existing Repeatable Read snapshot; the runtime
+registration protocol still supports Repeatable Read and preserves its 40001
+conflict gate below.
+
+After Down to version 1, the original inverses restore nine limit rows. A full
+Up correctly refuses the pending destructive drop while they exist. Run the
+actual CLI Up with `--target 20260910120000` first: the original early migrations
+consume six retired defaults and transfer three owned ceilings. Once `limits`
+is empty, full Up can pass its ordinary drop preflight. An extra unconsumed row
+still refuses the drop; no approval bypass or manual deletion is part of this
+round trip.
+
 ## Evidence boundary
 
 Required external controls include full Upsert and Register nested-query counts
