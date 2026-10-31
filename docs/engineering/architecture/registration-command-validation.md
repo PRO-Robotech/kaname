@@ -6,10 +6,11 @@ physical write. `type_live`, `model_type`, `applied`, `projection_unchanged` are
 always overwritten with DB outcomes. There is no callable partial writer, new
 role, SECURITY DEFINER, DSN, permit row, client flag or GUC.
 
-The effective protocol is mirror lock → fresh catalog/chain snapshot → provisional
+The effective protocol is writer fence → mirror lock → catalog write-conflict gate → provisional
 mirror CAS → binding INSERT if applied → one binding PK SELECT → full field/chain
 validation → edge projection. Separate VOLATILE SPI statements preserve the
-kaname#874 fresh snapshot after lock waiting. When the initial lock found no row,
+kaname#874 fresh snapshot after lock waiting under READ COMMITTED; stale RR instead
+receives the serialization failure described below. When the initial lock found no row,
 the version-only optimization is disabled: an insertion race gets the conservative
 projection-changed outcome. Strict `<` and unknown/retired type refusal remain.
 
@@ -21,7 +22,7 @@ one binding read; it cannot create a first binding. Raw BEFORE mirror guards jud
 existing binding, while raw AFTER effective-row guards create and recheck binding.
 Thus a raw INSERT ON CONFLICT cannot hold a binding insert lock while waiting for
 the mirror row held by the command: all effective writers use mirror → binding.
-Catalog declarations remain serialized by SHARE versus UPDATE catalog locks;
+Catalog declarations remain serialized by the common fence and catalog tuple writes;
 declaration backfill never rewrites or validates historical chains (R8).
 
 ## Raw edge concurrency
@@ -37,9 +38,10 @@ taking the fence only at DELETE would invert with catalog retirement FK checks
 on roles. Commands still read the chain in a separate VOLATILE SQL
 statement after waiting (#874). The one/zero binding-read contract is unchanged.
 
-This serializes registration write transactions, including raw DML. A raw edge
+This serializes registration write transactions, including raw DML. Under READ COMMITTED a raw edge
 insert cannot remain invisible to a command that creates the first binding: the
-command waits until raw commit, then replaces the committed chain. A raw mirror
+command waits until raw commit, then replaces the committed chain. Stale RR
+transactions instead abort through the catalog write-conflict gate. A raw mirror
 first registration also checks its existing chain. A mismatch fails atomically
 with object_project_binding_holds. Historical catalog backfill retains R8 chains.
 There are no deferred constraints, client flags, permits or shared-to-exclusive
@@ -69,7 +71,8 @@ alone is not authority: introducing another writer invalidates the proof.
 
 The command contains static DML and built-in operations over text/jsonb/timestamp
 inputs. It cannot call client-selected functions or SQL. The mirror/edge guards
-write only binding; binding UPDATE/DELETE/TRUNCATE permanence is never bypassed.
+write the existing catalog gate tuple and, for a first effective mirror, its
+binding; binding UPDATE/DELETE/TRUNCATE permanence is never bypassed.
 Catalog declaration triggers write binding, not mirror/edges. Journal, quota,
 subject and reconcile triggers do not reach a physical mirror/edge writer.
 `rename_cluster_anchor(text,text)` is an existing dynamic writer: ordinary SELECT
