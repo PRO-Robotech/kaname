@@ -703,7 +703,7 @@ func ceremonyInjections() []ceremonyInjection {
 
 		{"I2_second_external_surface_rest_front", func(f *ceremonyFixture) {
 			f.addImport("internal/restfront", "front.go", anchorCeremonyImp)
-			f.insertAfter("internal/restfront", "front.go", "NewPublic", "mux := newMux()",
+			f.insertAfter("internal/restfront", "front.go", "NewPublic", "mux := newPublicMux()",
 				"_ = mux.HandlePath(http.MethodGet, authorizehttp.AuthorizePath, "+
 					"func(w http.ResponseWriter, _ *http.Request, _ map[string]string) { w.WriteHeader(http.StatusOK) })")
 		}, []string{"эндпоинт авторизации", "2 поверхностях", "собственный публичный REST-фронт"}},
@@ -1155,7 +1155,7 @@ func ceremonyInjections() []ceremonyInjection {
 		// вызов.
 		{"Z12_gateway_handle_path_method_value", func(f *ceremonyFixture) {
 			f.addImport("internal/restfront", "front.go", anchorCeremonyImp)
-			f.insertAfter("internal/restfront", "front.go", "NewPublic", "mux := newMux()",
+			f.insertAfter("internal/restfront", "front.go", "NewPublic", "mux := newPublicMux()",
 				"ceremonyHandlePath := mux.HandlePath\n_ = ceremonyHandlePath(http.MethodGet, authorizehttp.AuthorizePath, "+
 					"func(w http.ResponseWriter, _ *http.Request, _ map[string]string) { w.WriteHeader(http.StatusOK) })")
 		}, []string{"эндпоинт авторизации", "2 поверхностях", "собственный публичный REST-фронт"}},
