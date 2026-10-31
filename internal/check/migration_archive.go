@@ -22,12 +22,18 @@ func AuditHistoricalRegistrationMigration(body []byte, executable fs.FS) error {
 		return fmt.Errorf("historical registration migration differs from the original immutable SQL")
 	}
 	return fs.WalkDir(executable, ".", func(name string, entry fs.DirEntry, err error) error {
-		if err != nil { return err }
-		if entry.IsDir() || !strings.HasSuffix(name,".sql") { return nil }
-		data, err := fs.ReadFile(executable,name)
-		if err != nil { return err }
-		if fmt.Sprintf("%x",sha256.Sum256(data)) == identity || strings.HasPrefix(name,"historical/") {
-			return fmt.Errorf("historical migration is executable through migrations.FS: %s",name)
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(name, ".sql") {
+			return nil
+		}
+		data, err := fs.ReadFile(executable, name)
+		if err != nil {
+			return err
+		}
+		if fmt.Sprintf("%x", sha256.Sum256(data)) == identity || strings.HasPrefix(name, "historical/") {
+			return fmt.Errorf("historical migration is executable through migrations.FS: %s", name)
 		}
 		return nil
 	})

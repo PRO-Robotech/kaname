@@ -110,15 +110,15 @@ func TestRegisterResource_ForwardSurvivesCallerCancellation(t *testing.T) {
 }
 
 func TestRegisterResource_PreCanceledRequestDoesNotCommitOrForward(t *testing.T) {
-	rec:=&dfRecon{}
-	txb:=&smTxBeginner{}
-	uc:=NewRegisterResourceUseCase(smEmitter{},mirrorAdapter{},txb,seededCatalogTypes{},&recordingPublisher{},&recordingWithdrawal{},noAudit{},unitScopes()).WithObjectReconciler(rec,nil)
-	ctx,cancel:=context.WithCancel(context.Background())
+	rec := &dfRecon{}
+	txb := &smTxBeginner{}
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithObjectReconciler(rec, nil)
+	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err:=uc.Register(ctx,&regReq{subject:"project:"+unitProject,relation:"project",object:"vpc_network:vpcn_canceled"})
-	require.ErrorIs(t,err,context.Canceled)
-	require.Nil(t,txb.tx,"до отменённой транзакции не дошли")
-	require.Zero(t,rec.calls)
+	err := uc.Register(ctx, &regReq{subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_canceled"})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, txb.tx, "до отменённой транзакции не дошли")
+	require.Zero(t, rec.calls)
 }
 
 // TestRegisterResource_DetachedForwardKeepsItsOwnBudget — отвязка снимает ОТМЕНУ,

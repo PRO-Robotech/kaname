@@ -14,8 +14,8 @@
 package check_test
 
 import (
-	"os"
 	"io/fs"
+	"os"
 	"testing"
 
 	"github.com/PRO-Robotech/corelib/treecorpus"
@@ -70,17 +70,23 @@ func TestMirrorRowCatalogConditionReachesEveryWriter(t *testing.T) {
 		mentions  int
 		writes    []check.MirrorWrite
 	)
-	names,err:=fs.Glob(migrations.FS,"*.sql")
-	if err!=nil { t.Fatal(err) }
-	var sections []string
-	for _,name:=range names {
-		data,err:=migrations.FS.ReadFile(name)
-		if err!=nil { t.Fatal(err) }
-		sections=append(sections,migrations.MigrationUpSection(string(data)))
+	names, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		t.Fatal(err)
 	}
-	commands,err:=check.MirrorCommandBodies(sections)
-	if err!=nil { t.Fatal(err) }
-	t.Logf("прослежено миграций %d; представлений команд %d",len(names),len(commands))
+	var sections []string
+	for _, name := range names {
+		data, err := migrations.FS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sections = append(sections, migrations.MigrationUpSection(string(data)))
+	}
+	commands, err := check.MirrorCommandBodies(sections)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("прослежено миграций %d; представлений команд %d", len(names), len(commands))
 	for _, rel := range corpus.Rels() {
 		body := corpus[rel]
 		w, m, perr := check.MirrorWritesThroughCommands(rel, body, commands)

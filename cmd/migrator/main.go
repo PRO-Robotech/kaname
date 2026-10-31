@@ -325,7 +325,9 @@ func resolveDSN(flagDSN string) (string, error) {
 // «объявленный источник ровно один».
 func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, error) {
 	dsn, err := validatedMigrationDSN(opts)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 
 	return migratorrun.New(migratorrun.Config{
 		Service:         serviceName,
@@ -338,7 +340,7 @@ func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, er
 }
 
 // validatedMigrationDSN разделяет предусловия адреса между runner и проверкой происхождения.
-func validatedMigrationDSN(opts *rootOptions) (string,error) {
+func validatedMigrationDSN(opts *rootOptions) (string, error) {
 	// ДИАЛЕКТ СВЕРЯЕТСЯ ПЕРВЫМ, и это порядок, а не стиль. Общий накат сверяет
 	// его тоже — но уже приняв DSN, а до DSN лежит загрузка конфигурации службы.
 	// Оператор, назвавший несуществующий диалект, получал бы тогда отказ
@@ -395,5 +397,5 @@ func validatedMigrationDSN(opts *rootOptions) (string,error) {
 			"the database would never converge; set --dsn, ENV %s, or the chart's db.host", config.RedactDSN(dsn), envDSN)
 	}
 
-	return dsn,nil
+	return dsn, nil
 }

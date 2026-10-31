@@ -732,8 +732,8 @@ func catalogCorpus(corpus []catalogSeedMigration) (seedBody string, retired map[
 var reCatalogSelfAssignment = regexp.MustCompile(`(?is)^UPDATE\s+kaname\.catalog_resource\s+([a-z_][a-z0-9_]*)\s+SET\s+([a-z_][a-z0-9_]*)\s*=\s*([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\s+WHERE\b`)
 
 func catalogSelfAssignmentUpdate(statement string) bool {
-	m:=reCatalogSelfAssignment.FindStringSubmatch(statement)
-	return m!=nil && strings.EqualFold(m[1],m[3]) && strings.EqualFold(m[2],m[4]) && strings.EqualFold(m[2],"project_bindings_held")
+	m := reCatalogSelfAssignment.FindStringSubmatch(statement)
+	return m != nil && strings.EqualFold(m[1], m[3]) && strings.EqualFold(m[2], m[4]) && strings.EqualFold(m[2], "project_bindings_held")
 }
 
 // reResourceAttrUpdate — оператор правки строк каталога ресурса: таблица (с

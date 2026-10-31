@@ -22,7 +22,7 @@ import (
 )
 
 func TestMirrorCommandWriterIsFollowedIntoItsCurrentTrigger(t *testing.T) {
-	const sql=`CREATE FUNCTION kaname.command_apply() RETURNS trigger LANGUAGE plpgsql AS $body$
+	const sql = `CREATE FUNCTION kaname.command_apply() RETURNS trigger LANGUAGE plpgsql AS $body$
 BEGIN
  PERFORM 1 FROM kaname.catalog_resource WHERE live;
  INSERT INTO kaname.resource_mirror(object_type,object_id) VALUES (NEW.kind,NEW.id);
@@ -30,23 +30,35 @@ BEGIN
 END $body$;
 CREATE TRIGGER command_apply INSTEAD OF INSERT ON kaname.command
  FOR EACH ROW EXECUTE FUNCTION kaname.command_apply();`
-	const caller="package resource_mirror\nconst statement = `INSERT INTO kaname.command(kind,id) VALUES ($1,$2)`"
-	commands,err:=check.MirrorCommandBodies([]string{sql})
-	if err!=nil { t.Fatal(err) }
-	writes,mentions,err:=check.MirrorWritesThroughCommands("reference.go",caller,commands)
-	if err!=nil { t.Fatal(err) }
-	if mentions!=1 || len(writes)!=1 || !writes[0].Introduces || len(writes[0].Catalog)!=1 {
-		t.Fatalf("не прослежен вводящий писатель: %+v; литералов %d",writes,mentions)
+	const caller = "package resource_mirror\nconst statement = `INSERT INTO kaname.command(kind,id) VALUES ($1,$2)`"
+	commands, err := check.MirrorCommandBodies([]string{sql})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writes, mentions, err := check.MirrorWritesThroughCommands("reference.go", caller, commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mentions != 1 || len(writes) != 1 || !writes[0].Introduces || len(writes[0].Catalog) != 1 {
+		t.Fatalf("не прослежен вводящий писатель: %+v; литералов %d", writes, mentions)
 	}
 	// Последующая редакция без каталога должна снять условие и из переписи.
-	changed:=strings.Replace(sql,"PERFORM 1 FROM kaname.catalog_resource WHERE live;","PERFORM 1;",1)
-	commands,err=check.MirrorCommandBodies([]string{sql,changed})
-	if err!=nil { t.Fatal(err) }
-	writes,_,err=check.MirrorWritesThroughCommands("reference.go",caller,commands)
-	if err!=nil { t.Fatal(err) }
-	if len(writes)!=1 || len(writes[0].Catalog)!=0 { t.Fatalf("прочитана прежняя редакция: %+v",writes) }
-	_,err=check.MirrorCommandBodies([]string{`CREATE TRIGGER command_apply INSTEAD OF INSERT ON kaname.command FOR EACH ROW EXECUTE FUNCTION kaname.missing();`})
-	if err==nil { t.Fatal("непрочитанная функция не может считаться проверенным писателем") }
+	changed := strings.Replace(sql, "PERFORM 1 FROM kaname.catalog_resource WHERE live;", "PERFORM 1;", 1)
+	commands, err = check.MirrorCommandBodies([]string{sql, changed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writes, _, err = check.MirrorWritesThroughCommands("reference.go", caller, commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(writes) != 1 || len(writes[0].Catalog) != 0 {
+		t.Fatalf("прочитана прежняя редакция: %+v", writes)
+	}
+	_, err = check.MirrorCommandBodies([]string{`CREATE TRIGGER command_apply INSTEAD OF INSERT ON kaname.command FOR EACH ROW EXECUTE FUNCTION kaname.missing();`})
+	if err == nil {
+		t.Fatal("непрочитанная функция не может считаться проверенным писателем")
+	}
 }
 
 // injMirrorReference — эталонная полоса: вводит строку и спрашивает каталог.

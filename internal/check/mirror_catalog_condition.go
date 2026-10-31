@@ -50,10 +50,10 @@
 package check
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -164,10 +164,10 @@ func MirrorWritesThroughCommands(filename, src string, commands map[string]strin
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}
-		value:=lit.Value
-		for command,body:=range commands {
-			if strings.Contains(strings.ToUpper(normalizeSpace(value)),"INSERT INTO "+strings.ToUpper(command)) {
-				value += "\n"+body
+		value := lit.Value
+		for command, body := range commands {
+			if strings.Contains(strings.ToUpper(normalizeSpace(value)), "INSERT INTO "+strings.ToUpper(command)) {
+				value += "\n" + body
 			}
 		}
 		if !strings.Contains(value, ResourceMirrorTable) {
@@ -203,27 +203,33 @@ var mirrorInsteadTrigger = regexp.MustCompile(`(?is)CREATE\s+TRIGGER\s+[a-z_][a-
 
 // MirrorCommandBodies сводит функции в порядке миграций: последняя редакция
 // определяет исполняемое тело. Непрочитанная функция — отказ предпосылки.
-func MirrorCommandBodies(upSections []string) (map[string]string,error) {
-	functions:=map[string]string{}
-	bindings:=map[string]string{}
-	for _,section:=range upSections {
-		sql:=stripSQLComments(section)
-		for _,match:=range mirrorFunctionHeader.FindAllStringSubmatchIndex(sql,-1) {
-			name:=strings.ToLower(sql[match[2]:match[3]])
-			tag:=sql[match[4]:match[5]]
-			end:=strings.Index(sql[match[1]:],tag)
-			if end<0 { return nil,fmt.Errorf("unterminated mirror command function %s",name) }
-			functions[name]=sql[match[1]:match[1]+end]
+func MirrorCommandBodies(upSections []string) (map[string]string, error) {
+	functions := map[string]string{}
+	bindings := map[string]string{}
+	for _, section := range upSections {
+		sql := stripSQLComments(section)
+		for _, match := range mirrorFunctionHeader.FindAllStringSubmatchIndex(sql, -1) {
+			name := strings.ToLower(sql[match[2]:match[3]])
+			tag := sql[match[4]:match[5]]
+			end := strings.Index(sql[match[1]:], tag)
+			if end < 0 {
+				return nil, fmt.Errorf("unterminated mirror command function %s", name)
+			}
+			functions[name] = sql[match[1] : match[1]+end]
 		}
-		for _,match:=range mirrorInsteadTrigger.FindAllStringSubmatch(sql,-1) { bindings[strings.ToLower(match[1])]=strings.ToLower(match[2]) }
+		for _, match := range mirrorInsteadTrigger.FindAllStringSubmatch(sql, -1) {
+			bindings[strings.ToLower(match[1])] = strings.ToLower(match[2])
+		}
 	}
-	commands:=map[string]string{}
-	for relation,function:=range bindings {
-		body,ok:=functions[function]
-		if !ok { return nil,fmt.Errorf("mirror command %s has unread function %s",relation,function) }
-		commands[relation]=body
+	commands := map[string]string{}
+	for relation, function := range bindings {
+		body, ok := functions[function]
+		if !ok {
+			return nil, fmt.Errorf("mirror command %s has unread function %s", relation, function)
+		}
+		commands[relation] = body
 	}
-	return commands,nil
+	return commands, nil
 }
 
 // MirrorConditionOutcome — вердикт сверки полос вместе с переписью.

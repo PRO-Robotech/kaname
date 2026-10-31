@@ -107,14 +107,20 @@ func TestNewMigrationOutranksEveryAppliedOne(t *testing.T) {
 			t.Fatal(err)
 		}
 		withoutArchive := func(paths []string) []string {
-			out := make([]string,0,len(paths))
-			for _, name := range paths { if name != archive { out=append(out,name) } }
+			out := make([]string, 0, len(paths))
+			for _, name := range paths {
+				if name != archive {
+					out = append(out, name)
+				}
+			}
 			return out
 		}
-		dirFiles=withoutArchive(dirFiles)
-		added=withoutArchive(added)
+		dirFiles = withoutArchive(dirFiles)
+		added = withoutArchive(added)
 		t.Log("точный исторический SQL проверен и отсутствует в исполняемой FS")
-	} else if !os.IsNotExist(err) { t.Fatal(err) }
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
 
 	audit := check.AuditMigrationVersions(dirFiles, added)
 
