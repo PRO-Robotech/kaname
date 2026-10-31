@@ -475,6 +475,10 @@ type Resource struct {
 	Relations []Relation `yaml:"relations"`
 	// Verbs — действия ресурса. Обе формы записи принимаются (см. Verb).
 	Verbs []Verb `yaml:"verbs"`
+	// ContainerVerbs — КОНТЕЙНЕРНЫЕ действия ресурса (kaname#1003, containerverbs.go):
+	// действия, которые авторизуются отношением на РОДИТЕЛЕ. В набор глаголов типа
+	// не входят, классом и подстановкой не достигаются, модели не порождают.
+	ContainerVerbs []ContainerVerb `yaml:"containerVerbs"`
 	// BaseRoles — ресурс порождает БАЗОВЫЕ ЯРУСНЫЕ РОЛИ.
 	//
 	// Признак ЯВНЫЙ, и это решение, а не умолчание: наивный вывод трёх ярусов

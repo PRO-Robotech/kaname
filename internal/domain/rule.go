@@ -44,6 +44,14 @@ type Rule struct {
 	// пустой непустой срез формой не является (второй способ сказать «нет»).
 	// У вложенного правила Module пуст (берётся у владельца) и своих Children нет.
 	Children []Rule
+	// CreatedBySubject — селектор СОЗДАТЕЛЯ (kaname#1003, приёмка
+	// `service-account-creation-is-its-own-right.md`, Р2а): правило даёт свои
+	// глаголы не на все объекты типа в области выдачи, а только на те, чей
+	// создатель — сам субъект выдачи. Объявляет его только манифест модуля:
+	// на входе `RoleService` он отвергается (Р2 п.4), а вид объекта, у которого
+	// факт создателя хранится, судит загрузчик манифеста. С `ResourceNames` и
+	// `MatchLabels` взаимоисключающ — селектор у правила один.
+	CreatedBySubject bool
 }
 
 const (
@@ -105,6 +113,17 @@ func (r Rule) Validate(policy RulePolicy, modules ModuleSet) error {
 	if len(r.ResourceNames) > 0 && len(r.MatchLabels) > 0 {
 		errs = multierr.Append(errs, fmt.Errorf(
 			"Illegal argument: resourceNames and matchLabels are mutually exclusive"))
+	}
+	if r.CreatedBySubject && (len(r.ResourceNames) > 0 || len(r.MatchLabels) > 0) {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"Illegal argument: createdBySubject cannot combine with resourceNames or matchLabels"))
+	}
+	// Селектор создателя называет вид объекта поимённо: факт создателя хранится
+	// у определённого вида, и подстановка модуля или ресурса обещала бы ведение
+	// созданного там, где факта нет вовсе.
+	if r.CreatedBySubject && (r.Module == wildcard || containsWildcard(r.Resources)) {
+		errs = multierr.Append(errs, fmt.Errorf(
+			"Illegal argument: createdBySubject cannot combine with a wildcard module or resource"))
 	}
 
 	// module — scalar: required + grammar + closed-set membership +
@@ -415,6 +434,13 @@ func CompileRules(rules []Rule) (Permissions, error) {
 		return nil
 	}
 	for _, r := range rules {
+		// Правило с селектором создателя в свёртку НЕ едет (kaname#1003): свёрнутое
+		// якорем, оно читалось бы как «глаголы на всех объектах типа» — ровно то,
+		// чего селектор не даёт. Его охват — функция субъекта выдачи, и выразить её
+		// строкой разрешения нечем.
+		if r.CreatedBySubject {
+			continue
+		}
 		switch r.Arm() {
 		case ArmLabels:
 			continue // not compiled

@@ -155,6 +155,30 @@ type VerbRow struct {
 	// материализуются кортежи. Пропустить сюда ярусную строку значило бы вернуть
 	// снятое отношение целиком.
 	PerObject bool
+	// ContainerParent / ContainerRelation — строка есть КОНТЕЙНЕРНОЕ действие
+	// (kaname#1003, приёмка `service-account-creation-is-its-own-right.md`, Р2а):
+	// действие над ресурсом, которое авторизуется отношением ContainerRelation на
+	// родителе типа модели ContainerParent («создать учётку в аккаунте»).
+	// Колонки `catalog_verb.container_parent` и `container_relation`; пишет их
+	// применитель каталога из `containerVerbs` манифеста.
+	//
+	// Пусты обе — действие не контейнерное. Строка контейнерного действия —
+	// всегда ярусная (`PerObject` ложь): в набор глаголов типа она не входит,
+	// подстановка `*` её не достигает, и пообъектного отношения у неё нет.
+	// Согласие пары держит схема (`catalog_verb_container_pair_ck`).
+	ContainerParent   string
+	ContainerRelation string
+}
+
+// IsContainer — строка объявляет контейнерное действие.
+func (v VerbRow) IsContainer() bool { return v.ContainerRelation != "" }
+
+// SameForm — строки глагола описывают действие одинаково по ВСЕМ величинам,
+// которые применение пишет: пообъектность и контейнерная пара. Одно место на
+// всех, кто спрашивает «изменилась ли строка» (см. [ResourceRow.SameForm]).
+func (v VerbRow) SameForm(o VerbRow) bool {
+	return v.PerObject == o.PerObject && v.ContainerParent == o.ContainerParent &&
+		v.ContainerRelation == o.ContainerRelation
 }
 
 // Rows — ЖИВОЕ множество каталога, прочитанное одним обращением.

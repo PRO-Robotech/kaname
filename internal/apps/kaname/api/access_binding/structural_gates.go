@@ -103,6 +103,11 @@ func (u *CreateAccessBindingUseCase) validateStructuralGates(ctx context.Context
 			"role %s (definitionTier %s) is not assignable on %s:%s; assign at %s or %s tier of this account",
 			b.RoleID, tier, scope, b.ResourceID, scope, tier)
 	}
+	// Роль создателя (kaname#1003, creator_gates.go): область, цель и субъекты —
+	// после права выдавать и видимости роли, до суждения о цели по правилам.
+	if err := u.validateCreatorRoleGates(role, b); err != nil {
+		return err
+	}
 
 	// Gate 3a — per-object target requires a RULES role (least-priv; sibling of the
 	// Finding-1 reconciler fix). A per-object target materializes per-object v_* tuples

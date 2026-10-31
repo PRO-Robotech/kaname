@@ -33,6 +33,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -919,7 +920,38 @@ func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, p
 // обращения к зеркалу. Переведённое имя возвращается вызывающему: пост-коммитный
 // проход материализации адресует ТОТ ЖЕ объект, что легло в зеркало, и второй
 // перевод у него разошёлся бы с первым молча.
-func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, extra ...service.RelationTuple) (objectType string, changed bool, projectionUnchanged bool, err error) {
+// A new descendant may commit between the first census and the mirror deletion.
+// Its grant locks belong BEFORE every mirror/fact lock (#975). Restart the whole
+// transaction with a larger lock plan; hints never authorize deleting an object.
+const unregisterClosureAttempts = 8
+
+type descendantClosureExpanded struct {
+	keys []domain.ResourceRef
+}
+
+func (*descendantClosureExpanded) Error() string { return "unregistration descendant closure expanded" }
+
+func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, extra ...service.RelationTuple) (string, bool, bool, error) {
+	hints := make(map[domain.ResourceRef]struct{})
+	for attempt := 0; attempt < unregisterClosureAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", false, false, err
+		}
+		objectType, changed, unchanged, err := uc.emitAttempt(ctx, t, row, write, hints, extra...)
+		var expanded *descendantClosureExpanded
+		if !stderrors.As(err, &expanded) {
+			// Includes commit failures: their outcome may be ambiguous. They must
+			// never enter this private, pre-commit retry protocol.
+			return objectType, changed, unchanged, err
+		}
+		for _, key := range expanded.keys {
+			hints[key] = struct{}{}
+		}
+	}
+	return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+}
+
+func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, hints map[domain.ResourceRef]struct{}, extra ...service.RelationTuple) (objectType string, changed bool, projectionUnchanged bool, err error) {
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
 		// Backend-down at connection acquisition → retriable Unavailable (the
@@ -928,7 +960,18 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// never surface the raw pgx driver text (host/port/user/db).
 		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
-	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
+	defer func() {
+		// Release the abandoned attempt even when its request was cancelled.
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		rollbackErr := tx.Rollback(rollbackCtx)
+		var expanded *descendantClosureExpanded
+		if rollbackErr != nil && stderrors.As(err, &expanded) {
+			// No next transaction until rollback is confirmed. Do not expose the
+			// driver error (credentials/addresses), or retain the retry marker.
+			err = iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+		}
+	}()
 
 	// Имя типа КАТАЛОГА — у живой строки, в этом же снимке (kacho#1990). На пути
 	// регистрации та же строка несёт политику записи модуля, и регистрацию судят
@@ -1042,7 +1085,26 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		if derr != nil {
 			return "", false, false, derr
 		}
-		if err = uc.withdrawal.LockTx(ctx, tx, append([]domain.ResourceRef{key}, descendantKeys(descendants)...)); err != nil {
+		locked := make(map[domain.ResourceRef]struct{}, len(hints)+len(descendants)+1)
+		for hint := range hints {
+			locked[hint] = struct{}{}
+		}
+		locked[key] = struct{}{}
+		for _, descendant := range descendantKeys(descendants) {
+			locked[descendant] = struct{}{}
+		}
+		keys := make([]domain.ResourceRef, 0, len(locked))
+		for resource := range locked {
+			keys = append(keys, resource)
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			if keys[i].Type != keys[j].Type {
+				return keys[i].Type < keys[j].Type
+			}
+			return keys[i].ID < keys[j].ID
+		})
+		// One binding-id ordered lock set, then one role-id ordered lock set.
+		if err = uc.withdrawal.LockTx(ctx, tx, keys); err != nil {
 			return "", false, false, fmt.Errorf("lock grants of unregistered resource: %w", err)
 		}
 		deleted, derr := uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion)
@@ -1057,7 +1119,7 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// вторым родом, до фактов; их факты и выдачи — ниже, с фактами родителя.
 		var gone []droppedDescendant
 		if deleted {
-			if gone, err = uc.dropDescendantRegistrations(ctx, tx, t, row, descendants); err != nil {
+			if gone, err = uc.dropDescendantRegistrations(ctx, tx, t, row, descendants, locked); err != nil {
 				return "", false, false, err
 			}
 		}
@@ -1144,8 +1206,8 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 	}
 	if err := tx.Commit(ctx); err != nil {
 		// Backend-down at commit → retriable Unavailable (same opaque, no-leak
-		// contract as Begin). The row/tuple did not durably land; the caller's
-		// drainer re-delivers.
+		// contract as Begin). The outcome may be ambiguous; there is no internal
+		// retry. The caller's idempotent drainer may re-deliver.
 		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	return objectType, changed, projectionUnchanged, nil
@@ -1251,14 +1313,12 @@ func descendantKeys(ds []unregisteredDescendant) []domain.ResourceRef {
 // этого чтения (регистрация потомка строку родителя не запирает), в нём
 // отсутствует. Оставленный, он остался бы зарегистрированным объектом без живого
 // родителя. Поэтому после снятия известных потомков перечень читается ещё раз: у
-// снятых цепи уже нет, и второе чтение называет только поздних. Их выдачи и роли
-// запираются здесь — позже записи строки родителя, то есть вне порядка kaname#975;
-// встречный проход по такому потомку может закончиться отказом 40P01, и
-// потребитель доставит то же снятие повторно — тогда потомок уже в первом
-// перечне. Окно, в котором потомок пропускался бы, не шире прежнего: второе чтение
-// стоит после записи строки родителя, где перечень читался и раньше.
+// снятых цепи уже нет, и второе чтение называет только поздних. Если их ключей
+// не было в начальном плане замков, попытка целиком откатывается ДО нового
+// замка: следующая транзакция заново читает потомков и расширяет план. Подсказки
+// служат только замкам; удаляются лишь потомки, прочитанные в новой транзакции.
 func (uc *RegisterResourceUseCase) dropDescendantRegistrations(ctx context.Context, tx service.Tx,
-	t tupleIntent, parent service.ResourceMirrorRow, known []unregisteredDescendant,
+	t tupleIntent, parent service.ResourceMirrorRow, known []unregisteredDescendant, locked map[domain.ResourceRef]struct{},
 ) ([]droppedDescendant, error) {
 	gone, err := uc.dropRegistrations(ctx, tx, known)
 	if err != nil {
@@ -1271,8 +1331,19 @@ func (uc *RegisterResourceUseCase) dropDescendantRegistrations(ctx context.Conte
 	if len(late) == 0 {
 		return gone, nil
 	}
-	if err := uc.withdrawal.LockTx(ctx, tx, descendantKeys(late)); err != nil {
-		return nil, fmt.Errorf("lock grants of late descendants: %w", err)
+	var added []domain.ResourceRef
+	for _, key := range descendantKeys(late) {
+		if _, ok := locked[key]; !ok {
+			added = append(added, key)
+		}
+	}
+	if len(added) != 0 {
+		// Preserve the entire previous lock plan, including the first census:
+		// successive attempts only enlarge hints, even if a descendant moves.
+		for key := range locked {
+			added = append(added, key)
+		}
+		return nil, &descendantClosureExpanded{keys: added}
 	}
 	lateGone, err := uc.dropRegistrations(ctx, tx, late)
 	if err != nil {

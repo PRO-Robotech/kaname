@@ -703,6 +703,9 @@ func catalogCorpus(corpus []catalogSeedMigration) (seedBody string, retired map[
 			if resourceAttributeOnlyUpdate(st) {
 				continue // членства и живости не трогает — свод цепочки от него не зависит
 			}
+			if verbAttributeOnlyUpdate(st) {
+				continue // пара контейнерного действия (kaname#1003): членства и живости не трогает
+			}
 			key, ok := retiredVerbOf(st)
 			if !ok {
 				findings = append(findings, fmt.Sprintf(
@@ -805,4 +808,40 @@ func firstRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// reVerbAttrAssignment — ОДНО присваивание раздела SET признанной формы правки
+// строки глагола: `<колонка> = '<литерал>'`. Выражение, вызов, ссылка на колонку
+// и подзапрос этой формой не являются.
+var reVerbAttrAssignment = regexp.MustCompile(`(?i)^\s*([a-z_][a-z0-9_]*)\s*=\s*'[^']*'\s*$`)
+
+// verbAttributeColumns — колонки строки глагола, которые свод цепочки НЕ судит:
+// пара контейнерного действия (kaname#1003, `catalog_verb.container_parent`,
+// `container_relation`) не меняет ни членства действия в каталоге, ни его
+// живости, ни признака словаря. Перечень закрыт; правка иной колонки остаётся
+// неизвестной формой.
+var verbAttributeColumns = map[string]bool{
+	"container_parent":   true,
+	"container_relation": true,
+}
+
+// verbAttributeOnlyUpdate — оператор правит у ОДНОЙ живой строки глагола
+// (отбор по полному первичному ключу, как у снятия) ТОЛЬКО колонки из
+// [verbAttributeColumns] литералами. Такой оператор посева не меняет; всё прочее —
+// неизвестная форма, и вызывающий даёт по ней находку.
+func verbAttributeOnlyUpdate(st string) bool {
+	m := reRetireVerb.FindStringSubmatch(st)
+	if m == nil {
+		return false
+	}
+	if reRetireWhere.FindStringSubmatch(normalizeSpace(m[2])) == nil {
+		return false
+	}
+	for _, item := range strings.Split(m[1], ",") {
+		a := reVerbAttrAssignment.FindStringSubmatch(item)
+		if a == nil || !verbAttributeColumns[strings.ToLower(a[1])] {
+			return false
+		}
+	}
+	return true
 }
