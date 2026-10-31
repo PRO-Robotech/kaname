@@ -204,7 +204,7 @@ func TestRegistrationRepeatableRead_CatalogGateHasNoSemanticEffects(t *testing.T
 		t.Logf("catalog callback %s", definition)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"catalog_resource_binds_registered_objects_on_declare", "catalog_resource_binds_registered_objects_on_insert", "catalog_resource_holds_project_bindings", "resource_registration_locks_writers"}, names, "new callbacks require gate re-review")
+	require.Equal(t, []string{"catalog_resource_binds_registered_objects_on_declare", "catalog_resource_binds_registered_objects_on_insert", "catalog_resource_holds_project_bindings", "registration_catalog_fence_forget_all", "registration_catalog_fence_forget_identity", "registration_catalog_fence_forget_row", "resource_registration_locks_writers"}, names, "new callbacks require gate re-review")
 }
 
 func TestRegistrationRepeatableRead_MovedRawEdgeUpdate(t *testing.T) {

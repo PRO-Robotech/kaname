@@ -1,12 +1,121 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- САНКЦИЯ: docs/engineering/acceptance/object-keeps-its-project-after-unregistration.md
--- kaname#983: retain the first physical RR conflict fence per catalog row.
--- A surviving visible top-level xmin proves the same transaction already wrote
--- that row; no session flag, in-progress shortcut or child-XID inference is used.
--- https://www.postgresql.org/docs/16/functions-info.html#FUNCTIONS-TXID-SNAPSHOT
--- All payload/binding checks and writer advisory/row lock order stay unchanged.
+-- kaname#983: full xid8 witness, never a historical heap xmin or a client permit.
+-- Every mint physically fences its exact catalog PK under the original invoker.
 -- +goose Up
+
+CREATE TABLE kaname.registration_catalog_fence (
+    catalog_module text NOT NULL,
+    catalog_resource text NOT NULL,
+    fence_xid xid8 NOT NULL,
+    PRIMARY KEY (catalog_module, catalog_resource)
+);
+REVOKE ALL ON kaname.registration_catalog_fence FROM PUBLIC;
+
+-- +goose StatementBegin
+CREATE FUNCTION kaname.registration_catalog_fence_mint() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog, kaname AS $$
+DECLARE
+    v_count bigint;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF NEW.catalog_module IS DISTINCT FROM OLD.catalog_module OR
+           NEW.catalog_resource IS DISTINCT FROM OLD.catalog_resource THEN
+            RAISE EXCEPTION 'catalog fence identity cannot be moved'
+                USING ERRCODE = 'check_violation', CONSTRAINT = 'registration_catalog_fence_identity';
+        END IF;
+    END IF;
+    -- Unconditional even for direct DML/COPY, a supplied current xid, or a nested
+    -- trigger. Ordinary invoker UPDATE privileges and RR conflicts apply here.
+    UPDATE kaname.catalog_resource cr
+       SET project_bindings_held = cr.project_bindings_held
+     WHERE cr.module = NEW.catalog_module AND cr.resource = NEW.catalog_resource;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    IF v_count <> 1 THEN
+        RAISE EXCEPTION 'catalog fence identity does not exist'
+            USING ERRCODE = 'foreign_key_violation', CONSTRAINT = 'registration_catalog_fence_catalog_identity';
+    END IF;
+    NEW.fence_xid := pg_current_xact_id();
+    RETURN NEW;
+END
+$$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE FUNCTION kaname.registration_catalog_fence_ensure(p_module text, p_resource text) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog, kaname AS $$
+BEGIN
+    -- Recheck authority after SET ROLE/revocation. A marker is not a grant.
+    IF has_column_privilege(current_user, 'kaname.catalog_resource', 'project_bindings_held', 'UPDATE')
+       AND EXISTS (SELECT 1 FROM kaname.registration_catalog_fence w
+                    WHERE w.catalog_module = p_module AND w.catalog_resource = p_resource
+                      AND w.fence_xid = pg_current_xact_id()) THEN
+        RETURN;
+    END IF;
+    -- The unchanged global statement fence serializes miss paths. Avoid UPSERT's
+    -- double BEFORE firing: one UPDATE miss followed by one INSERT mints once.
+    UPDATE kaname.registration_catalog_fence w SET fence_xid = pg_current_xact_id()
+     WHERE w.catalog_module = p_module AND w.catalog_resource = p_resource;
+    IF NOT FOUND THEN
+        INSERT INTO kaname.registration_catalog_fence(catalog_module, catalog_resource, fence_xid)
+        VALUES (p_module, p_resource, pg_current_xact_id());
+    END IF;
+END
+$$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE FUNCTION kaname.registration_catalog_fence_forget() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog, kaname AS $$
+BEGIN
+    IF TG_OP = 'TRUNCATE' THEN
+        DELETE FROM kaname.registration_catalog_fence;
+    ELSIF TG_OP = 'INSERT' THEN
+        DELETE FROM kaname.registration_catalog_fence
+         WHERE catalog_module = NEW.module AND catalog_resource = NEW.resource;
+    ELSIF TG_OP = 'DELETE' THEN
+        DELETE FROM kaname.registration_catalog_fence
+         WHERE catalog_module = OLD.module AND catalog_resource = OLD.resource;
+    ELSE
+        DELETE FROM kaname.registration_catalog_fence
+         WHERE (catalog_module = OLD.module AND catalog_resource = OLD.resource)
+            OR (catalog_module = NEW.module AND catalog_resource = NEW.resource);
+    END IF;
+    RETURN NULL;
+END
+$$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE FUNCTION kaname.registration_catalog_fence_refuses_truncate() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path = pg_catalog, kaname AS $$
+BEGIN
+    RAISE EXCEPTION 'catalog fence metadata cannot be truncated directly'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'registration_catalog_fence_no_truncate';
+END
+$$;
+-- +goose StatementEnd
+
+CREATE TRIGGER resource_registration_locks_writers
+    BEFORE INSERT OR UPDATE OR DELETE ON kaname.registration_catalog_fence
+    FOR EACH STATEMENT EXECUTE FUNCTION kaname.resource_registration_locks_writers();
+CREATE TRIGGER registration_catalog_fence_mint
+    BEFORE INSERT OR UPDATE ON kaname.registration_catalog_fence
+    FOR EACH ROW EXECUTE FUNCTION kaname.registration_catalog_fence_mint();
+CREATE TRIGGER registration_catalog_fence_no_truncate
+    BEFORE TRUNCATE ON kaname.registration_catalog_fence
+    FOR EACH STATEMENT EXECUTE FUNCTION kaname.registration_catalog_fence_refuses_truncate();
+CREATE TRIGGER registration_catalog_fence_forget_row
+    AFTER INSERT OR DELETE ON kaname.catalog_resource
+    FOR EACH ROW EXECUTE FUNCTION kaname.registration_catalog_fence_forget();
+CREATE TRIGGER registration_catalog_fence_forget_identity
+    AFTER UPDATE ON kaname.catalog_resource
+    FOR EACH ROW WHEN (OLD.module IS DISTINCT FROM NEW.module OR OLD.resource IS DISTINCT FROM NEW.resource)
+    EXECUTE FUNCTION kaname.registration_catalog_fence_forget();
+CREATE TRIGGER registration_catalog_fence_forget_all
+    AFTER TRUNCATE ON kaname.catalog_resource
+    FOR EACH STATEMENT EXECUTE FUNCTION kaname.registration_catalog_fence_forget();
 
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname.resource_registration_command_apply() RETURNS trigger
@@ -21,6 +130,7 @@ DECLARE
     v_id text;
     v_count bigint;
     v_locked boolean;
+    v_catalog record;
 BEGIN
     IF pg_trigger_depth() <> 1 THEN
         RAISE EXCEPTION 'registration command requires a direct entry'
@@ -46,23 +156,16 @@ BEGIN
     -- The non-key assignment preserves every logical catalog column. The held
     -- flag callback preserves its value; UPDATE OF permanent_project backfill
     -- does not run. No additional binding lookup or stored witness is needed.
-    -- Only a currently visible top-level tuple is a surviving write witness.
-    -- xid8 -> xid is PostgreSQL's exact low-32-bit conversion, including epochs.
-    -- Child xmin, a foreign xmin or no row falls back to the original RR write.
+    FOR v_catalog IN SELECT cr.module, cr.resource FROM kaname.catalog_resource cr
+        WHERE cr.dotted = NEW.dotted_type AND cr.live ORDER BY cr.module, cr.resource
+    LOOP
+        PERFORM kaname.registration_catalog_fence_ensure(v_catalog.module, v_catalog.resource);
+    END LOOP;
     SELECT cr.object_type, cr.permanent_project,
            cr.permanent_project OR cr.project_bindings_held
       INTO NEW.model_type, v_declared, v_held
       FROM kaname.catalog_resource cr
-     WHERE cr.dotted = NEW.dotted_type AND cr.live
-       AND cr.xmin = pg_current_xact_id()::xid;
-    IF NOT FOUND THEN
-        UPDATE kaname.catalog_resource cr
-           SET project_bindings_held = cr.project_bindings_held
-         WHERE cr.dotted = NEW.dotted_type AND cr.live
-         RETURNING cr.object_type, cr.permanent_project,
-                   cr.permanent_project OR cr.project_bindings_held
-              INTO NEW.model_type, v_declared, v_held;
-    END IF;
+     WHERE cr.dotted = NEW.dotted_type AND cr.live;
     IF NOT FOUND THEN
         RETURN NEW;
     END IF;
@@ -168,6 +271,7 @@ DECLARE
     v_held       boolean;
     v_new_binding boolean := false;
     v_raw_chain text[] := ARRAY[]::text[];
+    v_catalog record;
 BEGIN
     -- Only the direct complete-command trigger writes these tables at depth 2.
     -- This relies on the closed installed trigger/callback graph, not depth
@@ -178,20 +282,15 @@ BEGIN
     IF TG_WHEN = 'BEFORE' THEN
         -- Same RR conflict gate as the complete command, before raw mutation.
         -- SQLSTATE 40001 propagates unchanged; it is not an integrity verdict.
+        FOR v_catalog IN SELECT cr.module, cr.resource FROM kaname.catalog_resource cr
+            WHERE cr.dotted = NEW.object_type ORDER BY cr.module, cr.resource
+        LOOP
+            PERFORM kaname.registration_catalog_fence_ensure(v_catalog.module, v_catalog.resource);
+        END LOOP;
         SELECT cr.object_type, cr.permanent_project AND cr.live,
                cr.permanent_project OR cr.project_bindings_held
           INTO v_model_type, v_declared, v_held
-          FROM kaname.catalog_resource cr
-         WHERE cr.dotted = NEW.object_type
-           AND cr.xmin = pg_current_xact_id()::xid;
-        IF NOT FOUND THEN
-            UPDATE kaname.catalog_resource cr
-               SET project_bindings_held = cr.project_bindings_held
-             WHERE cr.dotted = NEW.object_type
-             RETURNING cr.object_type, cr.permanent_project AND cr.live,
-                       cr.permanent_project OR cr.project_bindings_held
-                  INTO v_model_type, v_declared, v_held;
-        END IF;
+          FROM kaname.catalog_resource cr WHERE cr.dotted = NEW.object_type;
     ELSE
         -- AFTER uses the catalog tuple already written by this raw statement.
         SELECT cr.object_type, cr.permanent_project AND cr.live, cr.permanent_project OR cr.project_bindings_held
@@ -229,6 +328,8 @@ $$;
 CREATE OR REPLACE FUNCTION kaname.resource_parent_edge_keeps_the_bound_project() RETURNS trigger
     LANGUAGE plpgsql SET search_path = pg_catalog, kaname
     AS $$
+DECLARE
+    v_catalog record;
 BEGIN
     IF pg_trigger_depth() = 2 THEN
         RETURN NEW;
@@ -236,12 +337,11 @@ BEGIN
     -- Raw project edges participate in the same real write-conflict gate.
     -- This also protects the reverse RR schedule: an edge committed after the
     -- first-binding writer's snapshot makes that writer serialize/retry.
-    UPDATE kaname.catalog_resource cr
-       SET project_bindings_held = cr.project_bindings_held
-     WHERE cr.object_type = NEW.object_type
-       -- Keep ALL original live/retired matches; each row needs its own witness.
-       -- A child-owned or otherwise unknown xmin still takes the real UPDATE.
-       AND cr.xmin IS DISTINCT FROM pg_current_xact_id()::xid;
+    FOR v_catalog IN SELECT cr.module, cr.resource FROM kaname.catalog_resource cr
+        WHERE cr.object_type = NEW.object_type ORDER BY cr.module, cr.resource
+    LOOP
+        PERFORM kaname.registration_catalog_fence_ensure(v_catalog.module, v_catalog.resource);
+    END LOOP;
     IF kaname.object_project_binding_refuses(NEW.object_type, NEW.object_id, NULL,
                                              ARRAY[NEW.parent_type || ':' || NEW.parent_id]) THEN
         RAISE EXCEPTION 'object %:% is bound to another project', NEW.object_type, NEW.object_id
@@ -257,7 +357,7 @@ $$;
 
 -- +goose Down
 
--- Restore the exact prior physical-fence behavior; no data is removed.
+-- Restore safe physical fences before removing optimization metadata.
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname.resource_registration_command_apply() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, kaname AS $$
@@ -482,3 +582,12 @@ BEGIN
 END
 $$;
 -- +goose StatementEnd
+
+DROP TRIGGER registration_catalog_fence_forget_row ON kaname.catalog_resource;
+DROP TRIGGER registration_catalog_fence_forget_identity ON kaname.catalog_resource;
+DROP TRIGGER registration_catalog_fence_forget_all ON kaname.catalog_resource;
+DROP FUNCTION kaname.registration_catalog_fence_ensure(text, text);
+DROP TABLE kaname.registration_catalog_fence;
+DROP FUNCTION kaname.registration_catalog_fence_mint();
+DROP FUNCTION kaname.registration_catalog_fence_refuses_truncate();
+DROP FUNCTION kaname.registration_catalog_fence_forget();

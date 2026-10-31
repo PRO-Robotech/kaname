@@ -22,11 +22,11 @@ func registrationCatalogWrites(t *testing.T, ctx context.Context, tx pgx.Tx) int
 	return n
 }
 
-func registrationCatalogXmin(t *testing.T, ctx context.Context, tx pgx.Tx) string {
+func registrationCatalogWitness(t *testing.T, ctx context.Context, tx pgx.Tx) string {
 	t.Helper()
-	var xmin string
-	require.NoError(t, tx.QueryRow(ctx, `SELECT xmin::text FROM kaname.catalog_resource WHERE dotted='registry.registries' AND live`).Scan(&xmin))
-	return xmin
+	var witness string
+	require.NoError(t, tx.QueryRow(ctx, `SELECT coalesce((SELECT fence_xid::text FROM kaname.registration_catalog_fence WHERE catalog_module='registry' AND catalog_resource='registries'),'')`).Scan(&witness))
+	return witness
 }
 
 // Physical writes, not elapsed time or implementation text: one top-level
@@ -82,23 +82,21 @@ func TestRegistrationCatalogFence_SavepointsAndReuse(t *testing.T) {
 				_, err = tx.Exec(ctx, registrationRRCommand, "outer-fence")
 				require.NoError(t, err)
 			}
-			before := registrationCatalogXmin(t, ctx, tx)
+			before := registrationCatalogWitness(t, ctx, tx)
 			_, err = tx.Exec(ctx, `SAVEPOINT fence_child`)
 			require.NoError(t, err)
 			_, err = tx.Exec(ctx, registrationRRCommand, "child-fence")
 			require.NoError(t, err)
-			child := registrationCatalogXmin(t, ctx, tx)
+			child := registrationCatalogWitness(t, ctx, tx)
 			var top string
-			require.NoError(t, tx.QueryRow(ctx, `SELECT pg_current_xact_id()::xid::text`).Scan(&top))
-			if mode != "outer_survives_rollback" {
-				require.NotEqual(t, top, child, "subtransaction tuple is not top-level ownership")
-			}
+			require.NoError(t, tx.QueryRow(ctx, `SELECT pg_current_xact_id()::text`).Scan(&top))
+			require.Equal(t, top, child, "mint stores full top-level xid; child marker and real write roll back together")
 			if mode == "child_release" {
 				_, err = tx.Exec(ctx, `RELEASE SAVEPOINT fence_child`)
 			} else if mode != "active_child" {
 				_, err = tx.Exec(ctx, `ROLLBACK TO SAVEPOINT fence_child`)
 				require.NoError(t, err)
-				require.Equal(t, before, registrationCatalogXmin(t, ctx, tx), "rolled-back tuple cannot remain a witness")
+				require.Equal(t, before, registrationCatalogWitness(t, ctx, tx), "rolled-back tuple cannot remain a witness")
 				_, err = tx.Exec(ctx, `RELEASE SAVEPOINT fence_child`)
 			}
 			require.NoError(t, err)
@@ -106,10 +104,10 @@ func TestRegistrationCatalogFence_SavepointsAndReuse(t *testing.T) {
 			_, err = tx.Exec(ctx, registrationRRCommand, "after-child")
 			require.NoError(t, err)
 			delta := registrationCatalogWrites(t, ctx, tx) - n
-			if mode == "outer_survives_rollback" {
-				require.Zero(t, delta, "surviving top-level tuple remains protected")
+			if mode != "child_rollback" {
+				require.Zero(t, delta, "surviving transactional witness remains protected")
 			} else {
-				require.Positive(t, delta, "missing/top-unproven witness requires real fallback write")
+				require.Positive(t, delta, "rolled-back witness requires a new physical fence")
 			}
 		})
 	}
@@ -139,7 +137,7 @@ func TestRegistrationCatalogFence_RawEdgeAllCatalogRows(t *testing.T) {
 	_, err = tx.Exec(ctx, registrationRREdge, "raw-all-rows", "registrationRR-P")
 	require.NoError(t, err)
 	var total, owned int
-	require.NoError(t, tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE xmin=pg_current_xact_id()::xid) FROM kaname.catalog_resource WHERE object_type='registry_registry'`).Scan(&total, &owned))
+	require.NoError(t, tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE EXISTS(SELECT 1 FROM kaname.registration_catalog_fence w WHERE w.catalog_module=cr.module AND w.catalog_resource=cr.resource AND w.fence_xid=pg_current_xact_id())) FROM kaname.catalog_resource cr WHERE object_type='registry_registry'`).Scan(&total, &owned))
 	require.Equal(t, 2, total)
 	require.Equal(t, total, owned, "both live and retired matching rows are fenced")
 	n := registrationCatalogWrites(t, ctx, tx)
@@ -179,11 +177,11 @@ func TestRegistrationCatalogFence_DifferentTypesAndInvalidSecondCall(t *testing.
 	require.Equal(t, "registrationRR-P", project)
 }
 
-func TestRegistrationCatalogFence_DownUpAndXidEpoch(t *testing.T) {
+func TestRegistrationCatalogFence_DownUpAndFullXid(t *testing.T) {
 	ctx, _, writer, _ := registrationRRDB(t)
-	var low string
-	require.NoError(t, writer.QueryRow(ctx, `SELECT '4294967301'::xid8::xid::text`).Scan(&low))
-	require.Equal(t, "5", low, "PostgreSQL conversion discards the epoch, not decimal digits")
+	var distinct bool
+	require.NoError(t, writer.QueryRow(ctx, `SELECT '5'::xid8 <> '4294967301'::xid8`).Scan(&distinct))
+	require.True(t, distinct, "full-xid equality keeps epochs distinct; mint controls exercise the actual authority path")
 	body, err := migrations.FS.ReadFile("20261031150000_registration_reuses_its_catalog_fence.sql")
 	require.NoError(t, err)
 	parts := strings.Split(string(body), "-- +goose Down")

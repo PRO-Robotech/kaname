@@ -4,7 +4,8 @@ The stateless `kaname.resource_registration_command` view accepts the complete
 mirror payload and ordered chain. Its sole INSTEAD OF INSERT trigger owns every
 physical write. `type_live`, `model_type`, `applied`, `projection_unchanged` are
 always overwritten with DB outcomes. There is no callable partial writer, new
-role, SECURITY DEFINER, DSN, permit row, client flag or GUC.
+role, SECURITY DEFINER, DSN, object-authorization permit, client flag or GUC.
+A bounded transactional catalog-conflict witness below carries no object authority.
 
 The effective protocol is writer fence → mirror lock → catalog write-conflict gate → provisional
 mirror CAS → binding INSERT if applied → one binding PK SELECT → full field/chain
@@ -174,15 +175,51 @@ a visible binding violation. Default-RC PB17/PB19 behavior remains required.
 The gate changes no logical catalog column, revision, manifest, or timestamp.
 The existing held-flag BEFORE callback preserves its value; the declaration
 backfill is `UPDATE OF permanent_project` and does not run for this assignment.
-The catalog statement callback only reacquires the already-held advisory fence,
-so there is no recursive catalog write. A runtime control compares the entire
+The catalog statement callback reacquires the already-held advisory fence.
+The witness mint is the only new catalog writer: its invoker BEFORE INSERT/UPDATE
+always performs that same real catalog UPDATE before stamping a full xid8.
+Catalog lifecycle callbacks only DELETE witnesses; unchanged-PK catalog updates
+never invoke invalidation. There is no catalog-to-mint recursion. A runtime control compares the entire
 catalog JSON plus audit/reconcile counts and pins the installed callback census.
-There are no new rows, witness tables, roles, connections, or client flags.
+There are no new roles, connections or client flags. The internal
+`registration_catalog_fence` table stores only the exact catalog PK and full xid8,
+with one lazily created row per current catalog identity, never per object/call.
+Every mint, including direct DML, COPY, UPSERT and nested-trigger entry, performs
+the real catalog UPDATE under SECURITY INVOKER before replacing the supplied xid.
+No caller-provided marker can bypass that physical fence. Every witness statement
+first takes the same advisory fence. Direct witness TRUNCATE is refused.
+
+Reuse compares full `pg_current_xact_id()` with the stored xid8; heap xmin,
+32-bit casts, transaction status, session caches and epochs are not authority.
+It rechecks the current role's original UPDATE privilege on
+`catalog_resource.project_bindings_held` each time. Missing privilege takes the
+ordinary mint/write/error path, including after SET ROLE. Catalog fields are read
+afresh after mint; no logical field is stored in the witness. Raw edge protects
+all matching live/retired catalog identities in stable PK order.
+
+Catalog INSERT/DELETE and PK changes invalidate affected identities; catalog
+TRUNCATE deletes all witnesses. Savepoint rollback restores witness and physical
+catalog version together; RELEASE retains both. Child-minted full-xid evidence is
+reusable while that transactional row survives. Connection reuse/new transactions
+need another real fence. Down restores the original three physical-fence function
+bodies and removes only this optimization metadata and its callbacks.
+
+The shipped chart's migrate/serve containers share config and DB credential;
+`MigrateDSN` and runtime DSN use the same base DSN, so that principal owns the new
+migration-created table. No provisioner, membership or PUBLIC metadata grant is
+introduced. An installation deliberately using separate migrator/writer object
+ACLs must explicitly provision SELECT/INSERT/UPDATE/DELETE on this internal table
+for its existing authorized writer; that external setup is not inferred here.
+The low-privilege control grants only existing command DML plus metadata DML,
+without CREATE/TRIGGER, superuser or role-management rights. RLS/rules/custom
+expression or new callback authority on catalog/witness requires renewed graph
+review, not an ACL-only bypass.
 Command validation still reads the binding once (zero for never-declared types),
 and inserts at most its single binding row; raw AFTER uses its own catalog tuple.
 
-This is not free: the catalog UPDATE creates a physical tuple version and WAL,
-including on never-declared command types, and serializes writers of that type
+This is not free: the first catalog fence per identity and transaction still
+creates a physical tuple version and WAL, including on never-declared types;
+metadata mint adds one bounded witness write. It serializes writers of that type
 in addition to the existing global fence. Its cost must be measured, including
 isolated sequential baseline/final latency in one Job; no acceptance or zero-cost
 claim follows from the lookup counter. A stale user-owned RR transaction may

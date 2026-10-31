@@ -73,13 +73,13 @@ func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T) {
 	}
 	var bad int
 	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_constraint WHERE contype='f'
-        AND conrelid IN ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)`).Scan(&bad))
+        AND conrelid IN ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass,'kaname.registration_catalog_fence'::regclass)`).Scan(&bad))
 	require.Zero(t, bad, "incoming FK actions require a new graph proof")
 	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_rewrite WHERE ev_class IN
-        ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)`).Scan(&bad))
+        ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass,'kaname.catalog_resource'::regclass,'kaname.registration_catalog_fence'::regclass)`).Scan(&bad))
 	require.Zero(t, bad, "physical rewrite callbacks are not part of the approved graph")
 	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_class WHERE oid IN
-        ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass,'kaname.resource_registration_command'::regclass)
+        ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass,'kaname.resource_registration_command'::regclass,'kaname.catalog_resource'::regclass,'kaname.registration_catalog_fence'::regclass)
         AND (relrowsecurity OR relforcerowsecurity)`).Scan(&bad))
 	require.Zero(t, bad, "RLS callbacks require a new graph proof")
 	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
@@ -90,4 +90,16 @@ func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T) {
         ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)
         AND pg_get_constraintdef(oid) LIKE '%kaname.%'`).Scan(&bad))
 	require.Zero(t, bad, "physical checks must remain built-in expressions, without custom callbacks")
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_proc WHERE pronamespace='kaname'::regnamespace
+        AND proname IN ('registration_catalog_fence_mint','registration_catalog_fence_ensure','registration_catalog_fence_forget','registration_catalog_fence_refuses_truncate')
+        AND (prosecdef OR provolatile<>'v')`).Scan(&bad))
+	require.Zero(t, bad, "witness cannot introduce a definer privilege or cached snapshot")
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
+        WHERE t.tgrelid='kaname.registration_catalog_fence'::regclass AND NOT t.tgisinternal
+        AND p.proname NOT IN ('registration_catalog_fence_mint','registration_catalog_fence_refuses_truncate','resource_registration_locks_writers')`).Scan(&bad))
+	require.Zero(t, bad, "witness mint graph has no unreviewed callbacks")
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_constraint WHERE contype='c'
+        AND conrelid IN ('kaname.catalog_resource'::regclass,'kaname.registration_catalog_fence'::regclass)
+        AND pg_get_constraintdef(oid) LIKE '%kaname.%'`).Scan(&bad))
+	require.Zero(t, bad, "catalog/witness checks cannot hide custom callbacks")
 }
