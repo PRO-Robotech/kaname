@@ -273,7 +273,9 @@ func registrationRestoreEarlyLimits(t *testing.T, dsn string, db *sql.DB) {
 }
 
 func TestRegistrationMigrator_PhasedUpStillRefusesUnconsumedLimit(t *testing.T) {
-	if testing.Short() { t.Skip("integration: PostgreSQL") }
+	if testing.Short() {
+		t.Skip("integration: PostgreSQL")
+	}
 	dsn, db := registrationOriginDB(t, "fresh")
 	_, _, err := runCommandFS(t, migrations.FS, []string{"down", "--target", "1", "--dsn", dsn}, nil)
 	require.NoError(t, err)
@@ -289,7 +291,9 @@ func TestRegistrationMigrator_PhasedUpStillRefusesUnconsumedLimit(t *testing.T) 
 }
 
 func TestRegistrationMigrator_OriginFlagsAreBoundToOriginalDefinitions(t *testing.T) {
-	if testing.Short() { t.Skip("integration: PostgreSQL") }
+	if testing.Short() {
+		t.Skip("integration: PostgreSQL")
+	}
 	for _, scenario := range []struct{ name, origin, mutation string }{
 		{"main-to-feature", "main", `SET had_creator=false,had_writer=true`},
 		{"feature-to-main", "feature", `SET had_creator=true,had_writer=false`},
@@ -313,12 +317,12 @@ func TestRegistrationMigrator_OriginFlagsAreBoundToOriginalDefinitions(t *testin
 			_, _, err = runCommandFS(t, migrations.FS, []string{"down", "--target", "1", "--dsn", dsn}, nil)
 			require.ErrorContains(t, err, "before any Down")
 			// SQL inverse is independently guarded, even without the CLI preflight.
-			raw, err := fs.ReadFile(migrations.FS,"20261026090001_reconcile_registration_and_creator_lineages.sql")
+			raw, err := fs.ReadFile(migrations.FS, "20261026090001_reconcile_registration_and_creator_lineages.sql")
 			require.NoError(t, err)
-			_, down, ok := strings.Cut(string(raw),migrations.SectionDownMarker)
+			_, down, ok := strings.Cut(string(raw), migrations.SectionDownMarker)
 			require.True(t, ok)
 			_, err = db.Exec(down)
-			require.ErrorContains(t, err,"provenance or schema differs")
+			require.ErrorContains(t, err, "provenance or schema differs")
 			require.Equal(t, before, registrationScalar(t, db, `SELECT jsonb_build_array(
                 kaname.registration_lineage_shape(),
                 (SELECT jsonb_agg(to_jsonb(v) ORDER BY id) FROM goose_db_version v),
@@ -328,13 +332,15 @@ func TestRegistrationMigrator_OriginFlagsAreBoundToOriginalDefinitions(t *testin
 }
 
 func TestRegistrationMigrator_RepeatableReadRefusesBeforeHistoricalDown(t *testing.T) {
-	if testing.Short() { t.Skip("integration: PostgreSQL") }
-	for _, commit := range []bool{false,true} {
-		t.Run(map[bool]string{true:"writer-commit",false:"writer-rollback"}[commit], func(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: PostgreSQL")
+	}
+	for _, commit := range []bool{false, true} {
+		t.Run(map[bool]string{true: "writer-commit", false: "writer-rollback"}[commit], func(t *testing.T) {
 			dsn, db := registrationOriginDB(t, "feature")
 			_, _, err := runCommandFS(t, migrations.FS, []string{"down", "--target", "20261026090000", "--dsn", dsn}, nil)
 			require.NoError(t, err)
-			tx, err := db.BeginTx(context.Background(), &sql.TxOptions{Isolation:sql.LevelRepeatableRead})
+			tx, err := db.BeginTx(context.Background(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 			require.NoError(t, err)
 			defer tx.Rollback()
 			var snapshot string
@@ -344,9 +350,13 @@ func TestRegistrationMigrator_RepeatableReadRefusesBeforeHistoricalDown(t *testi
 			defer writer.Rollback()
 			_, err = writer.Exec(`UPDATE kaname.catalog_resource SET writes=ARRAY['owner:user'] WHERE dotted='registry.registries'`)
 			require.NoError(t, err)
-			if commit { require.NoError(t, writer.Commit()) } else { require.NoError(t, writer.Rollback()) }
+			if commit {
+				require.NoError(t, writer.Commit())
+			} else {
+				require.NoError(t, writer.Rollback())
+			}
 			before := registrationScalar(t, db, `SELECT kaname.registration_lineage_shape()::text`)
-			source := registrationHistoryFS{FS:migrations.FS,writer:true}
+			source := registrationHistoryFS{FS: migrations.FS, writer: true}
 			raw, err := fs.ReadFile(source, creatorMigration)
 			require.NoError(t, err)
 			_, down, ok := strings.Cut(string(raw), migrations.SectionDownMarker)
@@ -357,14 +367,19 @@ func TestRegistrationMigrator_RepeatableReadRefusesBeforeHistoricalDown(t *testi
 			require.Equal(t, "25001", violation.Code)
 			require.NoError(t, tx.Rollback())
 			require.Equal(t, before, registrationScalar(t, db, `SELECT kaname.registration_lineage_shape()::text`))
-			want := "{}"; if commit { want = "{owner:user}" }
+			want := "{}"
+			if commit {
+				want = "{owner:user}"
+			}
 			require.Equal(t, want, registrationScalar(t, db, `SELECT writes::text FROM kaname.catalog_resource WHERE dotted='registry.registries'`))
 		})
 	}
 }
 
 func TestRegistrationMigrator_DefaultRepeatableReadRefusesBeforeAnyDown(t *testing.T) {
-	if testing.Short() { t.Skip("integration: PostgreSQL") }
+	if testing.Short() {
+		t.Skip("integration: PostgreSQL")
+	}
 	dsn, db := registrationOriginDB(t, "main")
 	before := registrationScalar(t, db, `SELECT jsonb_agg(to_jsonb(v) ORDER BY id)::text FROM goose_db_version v`)
 	name := registrationScalar(t, db, `SELECT current_database()`)
@@ -377,7 +392,9 @@ func TestRegistrationMigrator_DefaultRepeatableReadRefusesBeforeAnyDown(t *testi
 }
 
 func TestRegistrationMigrator_UnrelatedPlainRoleSurvivesCreatorDown(t *testing.T) {
-	if testing.Short() { t.Skip("integration: PostgreSQL") }
+	if testing.Short() {
+		t.Skip("integration: PostgreSQL")
+	}
 	dsn, db := registrationOriginDB(t, "feature")
 	_, err := db.Exec(`INSERT INTO kaname.roles(id,name,permissions,rules,cluster_id)
         VALUES ('rol-lineage-unrelated','iam.service_account.observer','[]',
@@ -390,7 +407,9 @@ func TestRegistrationMigrator_UnrelatedPlainRoleSurvivesCreatorDown(t *testing.T
 }
 
 func TestRegistrationMigrator_ChangedValidatorStillRefusesReconciliation(t *testing.T) {
-	if testing.Short() { t.Skip("integration: PostgreSQL") }
+	if testing.Short() {
+		t.Skip("integration: PostgreSQL")
+	}
 	for _, origin := range []string{"main", "feature"} {
 		t.Run(origin, func(t *testing.T) {
 			dsn, db := registrationOriginDB(t, origin)

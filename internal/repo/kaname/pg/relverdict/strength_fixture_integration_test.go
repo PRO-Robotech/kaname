@@ -13,7 +13,9 @@ import (
 )
 
 func TestStrengthFixture_ZeroShareControlsAllCandidates(t *testing.T) {
-	if testing.Short() { t.Skip("integration: PostgreSQL") }
+	if testing.Short() {
+		t.Skip("integration: PostgreSQL")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	tx, _ := openProbeTx(t, ctx)
@@ -22,12 +24,18 @@ func TestStrengthFixture_ZeroShareControlsAllCandidates(t *testing.T) {
 		f.growN(t, ctx, 100, share)
 		f.analyze(t, ctx)
 		ids, _, err := relverdict.List(ctx, tx, relverdict.ListQuery{
-			Subject:strSubject, ObjectType:strModelType, Relation:strRelation, Limit:200,
+			Subject: strSubject, ObjectType: strModelType, Relation: strRelation, Limit: 200,
 		})
 		require.NoError(t, err)
 		want := share
-		if share > 0 { want++ }
-		require.Len(t, ids, want, "доля %d учитывает и специальный объект",share)
-		if share > 0 { require.Contains(t, ids, strAllowObj) } else { require.Empty(t, ids) }
+		if share > 0 {
+			want++
+		}
+		require.Len(t, ids, want, "доля %d учитывает и специальный объект", share)
+		if share > 0 {
+			require.Contains(t, ids, strAllowObj)
+		} else {
+			require.Empty(t, ids)
+		}
 	}
 }

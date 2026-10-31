@@ -260,18 +260,26 @@ END $body$;
 CREATE TRIGGER command_apply INSTEAD OF INSERT ON kaname.command
  FOR EACH ROW EXECUTE FUNCTION kaname.command_apply();`
 	commands, err := check.MirrorCommandBodies([]string{initial})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, target := range []string{"kaname.command_other", `"kaname"."command_other"`, `"kaname.command"`} {
 		caller := "package p\nconst q = `INSERT INTO " + target + `(kind,id) VALUES ($1,$2);
 INSERT INTO kaname.resource_mirror(object_type,object_id) VALUES ($1,$2)` + "`"
 		writes, _, err := check.MirrorWritesThroughCommands("other.go", caller, commands)
-		if err != nil { t.Fatal(err) }
-		if len(writes) != 1 || len(writes[0].Catalog) != 0 { t.Fatalf("чужой relation получил условие команды: %+v", writes) }
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(writes) != 1 || len(writes[0].Catalog) != 0 {
+			t.Fatalf("чужой relation получил условие команды: %+v", writes)
+		}
 	}
 	for _, target := range []string{"kaname.command", `"kaname" . "command"`} {
 		caller := "package p\nconst q = `INSERT INTO " + target + "(kind,id) VALUES ($1,$2)`"
 		writes, _, err := check.MirrorWritesThroughCommands("command.go", caller, commands)
-		if err != nil || len(writes) != 1 || len(writes[0].Catalog) != 1 { t.Fatalf("точная команда потеряна: %+v %v", writes, err) }
+		if err != nil || len(writes) != 1 || len(writes[0].Catalog) != 1 {
+			t.Fatalf("точная команда потеряна: %+v %v", writes, err)
+		}
 	}
 	for _, mutation := range []string{
 		`DROP TRIGGER command_apply ON kaname.command;`,
@@ -287,7 +295,9 @@ INSERT INTO kaname.resource_mirror(object_type,object_id) VALUES ($1,$2)` + "`"
 		`DROP TRIGGER command_apply ON kaname.command; CREATE OR REPLACE FUNCTION kaname.command_apply() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;`,
 	} {
 		t.Run(mutation, func(t *testing.T) {
-			if _, err := check.MirrorCommandBodies([]string{initial,mutation}); err == nil { t.Fatal("старая связь пережила неподдержанное изменение") }
+			if _, err := check.MirrorCommandBodies([]string{initial, mutation}); err == nil {
+				t.Fatal("старая связь пережила неподдержанное изменение")
+			}
 		})
 	}
 	for _, unrelated := range []string{
@@ -297,6 +307,8 @@ INSERT INTO kaname.resource_mirror(object_type,object_id) VALUES ($1,$2)` + "`"
 		`ALTER TABLE kaname.command DISABLE TRIGGER other;`,
 		`CREATE FUNCTION kaname.other() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'DROP VIEW kaname.command'; RETURN NEW; END $$;`,
 	} {
-		if _, err := check.MirrorCommandBodies([]string{initial,unrelated}); err != nil { t.Fatalf("постороннее изменение: %v",err) }
+		if _, err := check.MirrorCommandBodies([]string{initial, unrelated}); err != nil {
+			t.Fatalf("постороннее изменение: %v", err)
+		}
 	}
 }
