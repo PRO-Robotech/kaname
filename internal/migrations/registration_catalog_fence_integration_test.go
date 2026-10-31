@@ -134,8 +134,12 @@ func TestRegistrationCatalogFence_RawEdgeAllCatalogRows(t *testing.T) {
 	tx, err := writer.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback(context.Background())
+	_, err = tx.Exec(ctx, `SELECT kaname.registration_catalog_fence_ensure('registry','registries')`)
+	require.NoError(t, err)
+	beforePartial := registrationCatalogWrites(t, ctx, tx)
 	_, err = tx.Exec(ctx, registrationRREdge, "raw-all-rows", "registrationRR-P")
 	require.NoError(t, err)
+	require.EqualValues(t, 1, registrationCatalogWrites(t, ctx, tx)-beforePartial, "only the unprotected retired alias needs a first fence")
 	var total, owned int
 	require.NoError(t, tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE EXISTS(SELECT 1 FROM kaname.registration_catalog_fence w WHERE w.catalog_module=cr.module AND w.catalog_resource=cr.resource AND w.fence_xid=pg_current_xact_id())) FROM kaname.catalog_resource cr WHERE object_type='registry_registry'`).Scan(&total, &owned))
 	require.Equal(t, 2, total)

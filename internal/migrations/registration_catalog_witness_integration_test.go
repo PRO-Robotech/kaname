@@ -126,7 +126,7 @@ func TestRegistrationCatalogWitness_MetadataCannotGrantAuthority(t *testing.T) {
 }
 
 func TestRegistrationCatalogWitness_IdentityAndCardinality(t *testing.T) {
-	for _, mode := range []string{"delete_recreate", "move", "logical_update", "truncate"} {
+	for _, mode := range []string{"delete_recreate", "move", "logical_update", "truncate", "reuse"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, _, writer, _ := registrationRRDB(t)
 			tx, err := writer.Begin(ctx)
@@ -167,6 +167,17 @@ func TestRegistrationCatalogWitness_IdentityAndCardinality(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM kaname.registration_catalog_fence`).Scan(&n))
 				require.Zero(t, n)
+			case "reuse":
+				before := registrationCatalogWrites(t, ctx, tx)
+				var metadataBefore, metadataAfter int64
+				require.NoError(t, tx.QueryRow(ctx, `SELECT n_tup_ins+n_tup_upd FROM pg_stat_xact_user_tables WHERE relid='kaname.registration_catalog_fence'::regclass`).Scan(&metadataBefore))
+				for i := 0; i < 8; i++ {
+					_, err = tx.Exec(ctx, `SELECT kaname.registration_catalog_fence_ensure('registry','witness_probe')`)
+					require.NoError(t, err)
+				}
+				require.NoError(t, tx.QueryRow(ctx, `SELECT n_tup_ins+n_tup_upd FROM pg_stat_xact_user_tables WHERE relid='kaname.registration_catalog_fence'::regclass`).Scan(&metadataAfter))
+				require.Equal(t, before, registrationCatalogWrites(t, ctx, tx))
+				require.Equal(t, metadataBefore, metadataAfter, "reuse does not move version amplification to the witness")
 			}
 			require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM kaname.registration_catalog_fence w LEFT JOIN kaname.catalog_resource c ON (c.module,c.resource)=(w.catalog_module,w.catalog_resource) WHERE c.module IS NULL`).Scan(&n))
 			require.Zero(t, n, "no orphan identities")
