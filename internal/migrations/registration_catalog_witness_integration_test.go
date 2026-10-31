@@ -14,9 +14,13 @@ import (
 
 // verifies https://github.com/PRO-Robotech/kaname/issues/983
 func TestRegistrationCatalogWitness_EveryMintPhysicallyFences(t *testing.T) {
-	for _, mode := range []string{"insert", "update", "upsert", "copy", "nested_trigger"} {
+	for _, mode := range []string{"insert", "update", "upsert", "copy", "nested_trigger", "frozen_catalog"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, _, writer, _ := registrationRRDB(t)
+			if mode == "frozen_catalog" {
+				_, err := writer.Exec(ctx, `VACUUM (FREEZE, DISABLE_PAGE_SKIPPING) kaname.catalog_resource`)
+				require.NoError(t, err)
+			}
 			tx, err := writer.Begin(ctx)
 			require.NoError(t, err)
 			defer tx.Rollback(context.Background())
@@ -26,7 +30,7 @@ func TestRegistrationCatalogWitness_EveryMintPhysicallyFences(t *testing.T) {
 			}
 			n := registrationCatalogWrites(t, ctx, tx)
 			switch mode {
-			case "insert":
+			case "insert", "frozen_catalog":
 				_, err = tx.Exec(ctx, `INSERT INTO kaname.registration_catalog_fence VALUES ('registry','registries','4294967301'::xid8)`)
 			case "update":
 				_, err = tx.Exec(ctx, `UPDATE kaname.registration_catalog_fence SET fence_xid='5'::xid8 WHERE catalog_module='registry' AND catalog_resource='registries'`)
@@ -78,6 +82,12 @@ func TestRegistrationCatalogWitness_MetadataCannotGrantAuthority(t *testing.T) {
 		defer tx.Rollback(context.Background())
 		_, err = tx.Exec(ctx, "SET LOCAL ROLE "+allowed)
 		require.NoError(t, err)
+		var elevated bool
+		require.NoError(t, tx.QueryRow(ctx, `SELECT rolsuper OR rolcreaterole
+ OR has_schema_privilege(current_user,'kaname','CREATE')
+ OR has_table_privilege(current_user,'kaname.registration_catalog_fence','TRIGGER')
+ FROM pg_roles WHERE rolname=current_user`).Scan(&elevated))
+		require.False(t, elevated, "actual ordinary writer has no superuser, role, schema or trigger authority")
 		_, err = tx.Exec(ctx, registrationRRCommand, "ordinary-writer")
 		require.NoError(t, err, "legitimate writer needs no new privilege authority")
 		_, err = tx.Exec(ctx, registrationRRCommand, "ordinary-writer-second")
