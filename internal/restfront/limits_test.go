@@ -301,3 +301,33 @@ func TestLimits_BrokenBodyIsRefusedNotHalfParsed(t *testing.T) {
 		t.Fatalf("отказ %+v (%v), ожидался {code:3, message:%q}", got, err, TextBodyUnreadable)
 	}
 }
+
+// Наибольший положительный потолок остаётся допустимой настройкой и не
+// превращает непустое тело в пустое ни с длиной, ни без объявленной длины.
+func TestLimits_MaxInt64CeilingPreservesTheBody(t *testing.T) {
+	const ceiling int64 = 1<<63 - 1
+	const payload = `{"subject":"bounded-body"}`
+	for _, declared := range []bool{true, false} {
+		var seen []byte
+		var seenLength int64
+		h := WithLimits(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var err error
+			seen, err = io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("чтение тела обработчиком: %v", err)
+			}
+			seenLength = r.ContentLength
+			w.WriteHeader(http.StatusOK)
+		}), Limits{MaxBodyBytes: ceiling, MaxInFlight: 1})
+		req := httptest.NewRequest(http.MethodPost, "/iam/v1/authorize:check", strings.NewReader(payload))
+		if !declared {
+			req.ContentLength = -1
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || string(seen) != payload || seenLength != int64(len(payload)) {
+			t.Fatalf("declared=%v: статус %d, тело %q, длина %d; ожидались 200, %q, %d",
+				declared, rec.Code, seen, seenLength, payload, len(payload))
+		}
+	}
+}
