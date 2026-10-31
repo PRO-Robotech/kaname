@@ -21,11 +21,14 @@ import (
 // через него идёт каждый запрос фронта: все звенья, решающие о вызывающем и о
 // доступе к объекту, суть перехватчики слушателя, и внутрипроцессная
 // регистрация обошла бы их все.
-func NewPublic(ctx context.Context, grpcAddr string, opts []grpc.DialOption) (http.Handler, error) {
+//
+// limits — потолки тела и одновременности (limits.go). Аргумент, а не опция:
+// фронт, опубликованный наружу, без них не собирается — забыть их негде.
+func NewPublic(ctx context.Context, grpcAddr string, opts []grpc.DialOption, limits Limits) (http.Handler, error) {
 	if grpcAddr == "" {
 		return nil, fmt.Errorf("публичный REST-фронт: адрес собственного gRPC-слушателя пуст")
 	}
-	mux := newMux()
+	mux := newPublicMux()
 	if err := registerPublicRESTServices(ctx, mux, grpcAddr, opts); err != nil {
 		return nil, err
 	}
@@ -33,7 +36,10 @@ func NewPublic(ctx context.Context, grpcAddr string, opts []grpc.DialOption) (ht
 	// challenge.go: внутренний фронт обслуживает модули, называющиеся
 	// сертификатом, и совет «предъяви Bearer» указал бы им действие, которого у
 	// них нет.
-	return withAuthenticationChallenge(mux), nil
+	//
+	// Потолки — ВНУТРИ подсказки: их отказы — не 401, и подсказка их не
+	// трогает, а слот одновременности берётся до чтения тела мультиплексором.
+	return withAuthenticationChallenge(WithLimits(mux, limits)), nil
 }
 
 // Admission — допуск предъявителя внутреннего фронта по состоянию его
