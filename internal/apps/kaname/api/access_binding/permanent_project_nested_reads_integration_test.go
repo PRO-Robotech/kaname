@@ -82,6 +82,7 @@ func TestPermanentProjectNestedReads_FullUpsertBudget(t *testing.T) {
 		{"conflict_update", func(){ row.SourceVersion = row.SourceVersion.Add(time.Second); row.Labels=map[string]string{"revision":"changed"} }, 1},
 		{"version_only", func(){ row.SourceVersion = row.SourceVersion.Add(time.Second) }, 1},
 		{"two_project_links", func(){ row.SourceVersion = row.SourceVersion.Add(time.Second); row.ParentChain=[]string{"project:"+string(w.prjA),"project:"+string(w.prjA),"account:"+string(w.accA)} }, 1},
+		{"stale", func(){ row.SourceVersion = row.SourceVersion.Add(-time.Second) }, 1},
 		{"never_declared_control", func(){ row.ObjectType="vpc.network"; row.ObjectID="983-never-declared"; row.SourceVersion=row.SourceVersion.Add(time.Second) }, 0},
 	}
 	for _, tc := range cases {
@@ -92,7 +93,7 @@ func TestPermanentProjectNestedReads_FullUpsertBudget(t *testing.T) {
 			notices=nil
 			out, err := resource_mirror.UpsertTx(w.ctx, tx, row)
 			require.NoError(t, err, "fixture: lawful complete registration must succeed")
-			require.True(t, out.Applied, "fixture: observed operation must write")
+			require.Equal(t, tc.name != "stale", out.Applied, "fixture: source-version outcome")
 			reads:=countBinding()
 			for _, q := range queries() { t.Logf("nested production SQL: %s", q) }
 			t.Logf("983 complete UpsertTx: binding SELECTs=%d expected=%d; latency not measured", reads, tc.wantReads)
