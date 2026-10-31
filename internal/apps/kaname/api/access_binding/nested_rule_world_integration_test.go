@@ -94,7 +94,11 @@ func (w *ndWorld) deliverDoc(sc string, doc []byte) {
 // ПРЕЖНЕЙ формой: одно правило над `[registries, repositories]` (П2, ND-07).
 func ndFlatPublicRead(t *testing.T) []byte {
 	t.Helper()
-	doc, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
+	edition, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
+	require.NoError(t, err)
+	// Запись `writes: owner` — как у мира П6 (kaname#982): доставка заменяет политику
+	// записи модуля, и регистрации `owner` мира без неё были бы отказом.
+	doc, err := publicreadfixture.WithWrites(edition)
 	require.NoError(t, err)
 	s := string(doc)
 	start := strings.Index(s, "  - id: registry.public.read\n")
@@ -140,6 +144,22 @@ func (w *ndWorld) registerRepoAt(id, registry string, ver time.Time) {
 		r.SourceVersion = timestamppb.New(ver)
 		require.NoErrorf(w.t, w.reg.Register(w.ctx, r), "регистрация %s в %s (%s)", id, registry, r.GetRelation())
 	}
+}
+
+// moveRepoAt — перенос репозитория под реестр `registry`: указатель `parent` с
+// версией источника `ver`. Кортеж `owner` переносом не переписывается: владелец
+// объекта остаётся прежним, а его запись сверяется с ВЫВЕДЕННЫМ родителем объекта
+// (kaname#982) — перенос, не принятый как не новее, родителя не меняет, и запись
+// `owner` с цепью через новый реестр была бы отказом вывода.
+func (w *ndWorld) moveRepoAt(id, registry string, ver time.Time) {
+	w.t.Helper()
+	r := &iamv1.RegisterResourceRequest{
+		SubjectId: pcrRegType + ":" + registry, Relation: "parent", Object: pcrRepoType + ":" + id,
+		ParentProjectId: string(w.prjA), ParentAccountId: string(w.accA),
+		ParentChain:   []string{pcrRegType + ":" + registry, "project:" + string(w.prjA), "account:" + string(w.accA)},
+		SourceVersion: timestamppb.New(ver),
+	}
+	require.NoErrorf(w.t, w.reg.Register(w.ctx, r), "перенос %s в %s", id, registry)
 }
 
 // batch — `AuthorizeService.BatchCheck` по v_get.
@@ -372,8 +392,12 @@ func TestNestedWorld_ND04_g_RoleServiceRefusesChildrenOnInput(t *testing.T) {
 // снова прошёл бы через загрузчик.
 func (w *ndWorld) seedNamedReader() {
 	w.t.Helper()
-	doc, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
+	edition, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
 	require.NoError(w.t, err, "ND-05 (б): фикстура П1")
+	// Та же запись `writes: owner`, что у мира П6 (kaname#982): доставка заменяет
+	// политику записи, и без неё регистрации `owner` мира стали бы отказом.
+	doc, err := publicreadfixture.WithWrites(edition)
+	require.NoError(w.t, err, "ND-05 (б): фикстура П1 с writes")
 	m, err := manifest.Load(doc)
 	require.NoError(w.t, err, "ND-05 (б): фикстура П1 обязана загружаться")
 	m.Roles = append(m.Roles, manifest.Role{
@@ -511,7 +535,7 @@ func TestNestedWorld_ND09_MoveFollowsAStrictlyNewerSourceVersion(t *testing.T) {
 			if c.newer {
 				ver = t1.Add(time.Second)
 			}
-			w.registerRepoAt(ndXMoved, ndYTgt, ver)
+			w.moveRepoAt(ndXMoved, ndYTgt, ver)
 			if c.newer {
 				w.pollAsk(d, "v_get", pcrRepoType, ndXMoved, false, "ND-09: D после переноса")
 				w.pollAsk(e, "v_get", pcrRepoType, ndXMoved, true, "ND-09: E после переноса")

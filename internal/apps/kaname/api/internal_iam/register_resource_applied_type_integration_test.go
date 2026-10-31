@@ -50,6 +50,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
 )
 
 // Тип, заведённый ПРИМЕНЕНИЕМ: словарь сборки о нём не знает by construction —
@@ -82,12 +83,15 @@ func newRegisterUCApplied(t *testing.T) (*internaliam.RegisterResourceUseCase, *
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 	return uc, pool
 }
 
 // seedAppliedType кладёт УСЛОВИЕ сценария: живую строку каталога, какую положил
-// бы применитель манифеста в работающем процессе.
+// бы применитель манифеста в работающем процессе: с указателем `project` —
+// применитель переносит указатели манифеста в строку, и из них политика записи
+// модуля судит регистрацию (kaname#982).
 func seedAppliedType(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(ctx,
@@ -95,8 +99,8 @@ func seedAppliedType(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 		appliedModule)
 	require.NoError(t, err, "условие сценария не создано: строка модуля")
 	_, err = pool.Exec(ctx,
-		`INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type)
-		 VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+		`INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type, parent_types, parent_names)
+		 VALUES ($1, $2, $3, $4, ARRAY['project'], ARRAY['project']) ON CONFLICT DO NOTHING`,
 		appliedModule, appliedRes, appliedDotted, appliedType)
 	require.NoError(t, err, "условие сценария не создано: строка ресурса")
 }
@@ -120,6 +124,7 @@ func TestRegisterResource_AppliedTypeReachesTheMirror(t *testing.T) {
 	}
 	ctx := context.Background()
 	uc, pool := newRegisterUCApplied(t)
+	scene := registrationscene.Seed(t, ctx, pool)
 
 	// КОНТРОЛЬ ПРЕДПОСЫЛКИ. Знай словарь сборки этот тип — перевод сборкой дал бы
 	// верный ответ по совпадению, и проба перестала бы что-либо утверждать.
@@ -132,10 +137,10 @@ func TestRegisterResource_AppliedTypeReachesTheMirror(t *testing.T) {
 	// «путь регистрации не работает вовсе».
 	const liveObj = "compute_instance:inst-live-1990"
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-1990",
-		Relation:        "parent",
+		SubjectId:       "project:" + scene.Project,
+		Relation:        "project",
 		Object:          liveObj,
-		ParentProjectId: "prj-1990",
+		ParentProjectId: scene.Project,
 	}), "живой сосед не зарегистрировался — путь регистрации сломан, о предмете пробы вердикта нет")
 	require.Equal(t, 1, mirrorRowCount(t, ctx, pool, "compute.instance", "inst-live-1990"),
 		"живой сосед не лёг в зеркало точечным именем")
@@ -144,10 +149,10 @@ func TestRegisterResource_AppliedTypeReachesTheMirror(t *testing.T) {
 	seedAppliedType(t, ctx, pool)
 	const appliedObj = appliedType + ":obj-1990"
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-1990",
-		Relation:        "parent",
+		SubjectId:       "project:" + scene.Project,
+		Relation:        "project",
 		Object:          appliedObj,
-		ParentProjectId: "prj-1990",
+		ParentProjectId: scene.Project,
 	})
 	require.NoError(t, err,
 		"регистрация объекта типа, заведённого ПРИМЕНЕНИЕМ, отвергнута: строки зеркала нет, "+
@@ -173,14 +178,15 @@ func TestUnregisterResource_AppliedTypeLeavesNoMirrorRow(t *testing.T) {
 	}
 	ctx := context.Background()
 	uc, pool := newRegisterUCApplied(t)
+	scene := registrationscene.Seed(t, ctx, pool)
 	seedAppliedType(t, ctx, pool)
 
 	const objID = "obj-1990-teardown"
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-1990",
-		Relation:        "parent",
+		SubjectId:       "project:" + scene.Project,
+		Relation:        "project",
 		Object:          appliedType + ":" + objID,
-		ParentProjectId: "prj-1990",
+		ParentProjectId: scene.Project,
 	}
 	require.NoError(t, uc.Register(ctx, req))
 	require.Equal(t, 1, mirrorRowCount(t, ctx, pool, appliedDotted, objID),

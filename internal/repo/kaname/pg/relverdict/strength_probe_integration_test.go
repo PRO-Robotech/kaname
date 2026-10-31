@@ -332,6 +332,14 @@ func strSeedBinding(t *testing.T, ctx context.Context, tx pgx.Tx,
 func (f *strFixture) growN(t *testing.T, ctx context.Context, target, allowedShare int) {
 	t.Helper()
 	if allowedShare != f.shareSeeded {
+		// Нулевая доля относится ко ВСЕМ кандидатам List, включая объект Ask.
+		// При возврате к положительной доле восстанавливаются все метки оси K.
+		labels := strLabelKeys()
+		if allowedShare == 0 {
+			labels = map[string]string{"env": "dev"}
+		}
+		exec(t, ctx, f.tx, `UPDATE kaname.resource_mirror SET labels=$1::jsonb
+            WHERE object_type=$2 AND object_id=$3`, strJSON(t, labels), strCatalogType, f.allowObj)
 		// Смена раскраски переписывает метки УЖЕ посаженных: досыпать поверх
 		// значило бы получить смесь двух долей и назвать её одной.
 		if f.seedN > 0 {

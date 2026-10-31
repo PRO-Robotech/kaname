@@ -93,29 +93,50 @@ type ResourceRow struct {
 	// контейнер» каталогу неизвестна, и публичное чтение через неё не
 	// открывается — отсутствие связи закрывает, а не открывает.
 	ParentTypes []string
+	// ParentNames — ИМЕНА указателей ресурса, позиционно парные [ParentTypes]:
+	// у `registry.repositories` — `parent` при типе `registry_registry`, у
+	// прочих имя равно типу. Колонка `catalog_resource.parent_names` (kaname#982):
+	// политика записи модуля адресует указатель именем отношения, а не типом.
+	ParentNames []string
+	// Writes — отношения сверх указателя, которые модуль пишет сам (`writes`
+	// манифеста, kaname#982): пары «отношение · тип субъекта» в форме хранения
+	// [domain.WriteGrant.Token], в порядке манифеста. Колонка
+	// `catalog_resource.writes`; пусто — модуль пишет только указатель.
+	Writes []string
 	// PublicReadToChildren — тип объявлен контейнером публичного чтения
 	// (`publicReadToChildren: true` манифеста, kaname#856). Колонка
 	// `catalog_resource.public_read_to_children`.
 	PublicReadToChildren bool
+	// PermanentProject — тип объявил неизменность проекта своих объектов
+	// (`permanentProject: true` манифеста, kaname#983). Колонка
+	// `catalog_resource.permanent_project`.
+	PermanentProject bool
+}
+
+// sameStrings — два перечня равны поэлементно и по порядку.
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // SameForm — строки описывают ресурс одинаково по ВСЕМ величинам, которые
-// применение пишет: имя типа модели, указатели и признак контейнера.
+// применение пишет: имя типа модели, указатели (типы и имена), записи сверх
+// указателя, признак контейнера и признак неизменного проекта.
 //
 // Одно место на всех, кто спрашивает «изменилась ли строка» (план применения и
 // перепись записанного): разойдясь, они дали бы оператору план «без изменений»
 // при применении, которое строку перепишет.
 func (r ResourceRow) SameForm(o ResourceRow) bool {
-	if r.ObjectType != o.ObjectType || r.PublicReadToChildren != o.PublicReadToChildren ||
-		len(r.ParentTypes) != len(o.ParentTypes) {
-		return false
-	}
-	for i := range r.ParentTypes {
-		if r.ParentTypes[i] != o.ParentTypes[i] {
-			return false
-		}
-	}
-	return true
+	return r.ObjectType == o.ObjectType && r.PublicReadToChildren == o.PublicReadToChildren &&
+		sameStrings(r.ParentTypes, o.ParentTypes) && sameStrings(r.ParentNames, o.ParentNames) &&
+		sameStrings(r.Writes, o.Writes) && r.PermanentProject == o.PermanentProject
 }
 
 // VerbRow — одна ЖИВАЯ строка `kaname.catalog_verb`.

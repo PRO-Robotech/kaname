@@ -185,6 +185,35 @@ var (
 	// блок с такой записью побайтово равен блоку из одного ключа (kaname#866, Р2) —
 	// два объявления одного следствия, которые допуск различить не может.
 	ErrPublicReadClassInReadVerb = errors.New("manifest: a read verb of a public read container names a subject class the key already brings")
+	// ErrWritesEmpty — `writes: []`: второй способ сказать «модуль пишет только
+	// указатель» рядом с отсутствием ключа (kaname#982, Р2).
+	ErrWritesEmpty = errors.New("manifest: writes is either absent or non-empty")
+	// ErrWriteIsPointer — запись `writes` называет указатель ресурса: регистрацию
+	// указателем уже объявил `parents`, и второе объявление того же — ложь одного
+	// из двух мест.
+	ErrWriteIsPointer = errors.New("manifest: a write names a parent pointer of the resource")
+	// ErrWriteRelationUndeclared — запись `writes` называет отношение, которого
+	// нет среди авторских отношений ресурса (`relations`).
+	ErrWriteRelationUndeclared = errors.New("manifest: a write names a relation the resource does not declare")
+	// ErrWriteRelationNotWritable — отношение объявлено, но модулю его писать не
+	// дано правилом проксируемой записи: ключ обещал бы запись, которую правило
+	// отвергнет на каждой доставке.
+	ErrWriteRelationNotWritable = errors.New("manifest: a write names a relation the module may not write")
+	// ErrWriteSubjectsInvalid — перечень субъектов записи пуст, называет тип вне
+	// закрытого перечня либо называет тип дважды.
+	ErrWriteSubjectsInvalid = errors.New("manifest: write subjects are empty, repeated or outside the closed set")
+	// ErrWriteDuplicate — одно отношение в двух записях `writes` ресурса.
+	ErrWriteDuplicate = errors.New("manifest: two writes of the resource name one relation")
+	// ErrPermanentProjectFalse — `permanentProject: false`: второй способ сказать
+	// «не объявлено» рядом с отсутствием ключа (kaname#983, Р7).
+	ErrPermanentProjectFalse = errors.New("manifest: permanentProject is either absent or true")
+	// ErrPermanentProjectWithoutProject — ключ на типе, у которого нет пути к
+	// проекту: среди указателей нет ни якоря `project`, ни указателя на тип того
+	// же документа.
+	ErrPermanentProjectWithoutProject = errors.New("manifest: permanentProject is declared on a type with no path to a project")
+	// ErrPermanentProjectParentUnbound — указатель типа с ключом называет тип того
+	// же документа без ключа: родитель мог бы сменить проект, а ребёнок — нет.
+	ErrPermanentProjectParentUnbound = errors.New("manifest: permanentProject is declared on a type whose parent of the same module does not declare it")
 )
 
 // canonicalVerbClasses — ЕДИНСТВЕННОЕ в дереве объявление правила «класс из
@@ -472,6 +501,26 @@ type Resource struct {
 	// сказать «нет», и отличить его от отсутствия можно только по указателю;
 	// загрузка его отвергает (SC-71 (в)). Читатели спрашивают [Resource.PassesPublicRead].
 	PublicReadToChildren *bool `yaml:"publicReadToChildren"`
+	// Writes — отношения СВЕРХ указателя, которые модуль пишет на объект этого
+	// типа сам (kaname#982, приёмка kaname-derives-the-parent-of-a-registered-object.md,
+	// Р2): вместе с указателями из `parents` это закрытая политика записи модуля,
+	// и регистрация вне неё отвергается.
+	//
+	// Значение выражается ОДНИМ способом: ключ отсутствует (модуль пишет только
+	// указатель) либо перечень непуст. `writes: []` — второй способ сказать «только
+	// указатель», и загрузка его отвергает ([ErrWritesEmpty]). Указатели здесь
+	// вторично не объявляются: их объявил `parents`.
+	Writes []Write `yaml:"writes"`
+	// PermanentProject — объект типа привязан к проекту своей первой регистрации,
+	// и привязка переживает снятие регистрации: регистрация того же id под другим
+	// проектом отвергается (kaname#983, приёмка
+	// object-keeps-its-project-after-unregistration.md, Р1, Р7).
+	//
+	// Указатель, а не значение, — по той же причине, что у
+	// [Resource.PublicReadToChildren]: значение выражается ОДНИМ способом, ключ
+	// отсутствует либо равен true, а `false` загрузка отвергает
+	// ([ErrPermanentProjectFalse]). Читатели спрашивают [Resource.HoldsPermanentProject].
+	PermanentProject *bool `yaml:"permanentProject"`
 
 	// publicReadVia — имена указателей ЭТОГО ресурса на контейнеры ТОГО ЖЕ
 	// документа, объявившие публичное чтение детям, в порядке указателей.
@@ -482,6 +531,23 @@ type Resource struct {
 	// именно ребёнку. Неэкспортировано, чтобы его нельзя было объявить рукой
 	// в обход ключа контейнера.
 	publicReadVia []string
+}
+
+// Write — одна запись `writes`: отношение, которое модуль пишет сам, и типы
+// субъекта, которыми он вправе его писать (kaname#982, Р2).
+type Write struct {
+	// Relation — имя АВТОРСКОГО отношения ресурса (`relations`), которое модулю
+	// дано писать правилом проксируемой записи.
+	Relation string `yaml:"relation"`
+	// Subjects — типы субъекта записи; перечень закрыт
+	// ([domain.WriteSubjectTypes]), непуст и без повторов.
+	Subjects []string `yaml:"subjects"`
+}
+
+// HoldsPermanentProject — тип объявил неизменность проекта своих объектов
+// (`permanentProject: true`).
+func (r Resource) HoldsPermanentProject() bool {
+	return r.PermanentProject != nil && *r.PermanentProject
 }
 
 // PassesPublicRead — тип объявлен контейнером публичного чтения
@@ -868,6 +934,8 @@ func validateResources(m *Manifest, doc *yaml.Node, referent TypeReferent) []err
 		faults = append(faults, validateResourceTiers(r, doc, i)...)
 		faults = append(faults, validateResourceBaseRoles(r, doc, i)...)
 		faults = append(faults, validateResourcePublicRead(m, r, doc, i)...)
+		faults = append(faults, validateResourceWrites(r, doc, i)...)
+		faults = append(faults, validateResourcePermanentProject(m, r, doc, i, ownTypes)...)
 		faults = append(faults, validateResourceVerbs(r, doc, i)...)
 		faults = append(faults, validateResourceRelations(r, doc, i)...)
 		faults = append(faults, validateResourceNotes(r, doc, i)...)

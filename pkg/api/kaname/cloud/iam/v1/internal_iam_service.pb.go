@@ -465,10 +465,17 @@ type RegisterResourceRequest struct {
 	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Parent project id ресурса (`prj…`), если ресурс project-scoped.
 	// Кладется в mirror ради containment (объект «под scope») SAME-DB, без ребра
-	// iam→owner. Пусто для не-project-scoped объектов.
+	// iam→owner. Kaname сверяет с выведенной иерархией и не дописывает поле.
+	// Для permanentProject: true обязательно, иначе INVALID_ARGUMENT с
+	// field_violations.field = "parent_project_id"; также обязательно звено
+	// project:<id> в parent_chain, иначе INVALID_ARGUMENT по "parent_chain".
+	// При обоих нарушениях первым называется parent_project_id.
+	// Пусто для не-project-scoped объектов без объявления permanentProject.
 	ParentProjectId string `protobuf:"bytes,6,opt,name=parent_project_id,json=parentProjectId,proto3" json:"parent_project_id,omitempty"`
 	// Parent account id ресурса (`acc…`), если применимо. Mirror /
-	// containment на account-scope.
+	// containment на account-scope. Kaname сверяет с выведенной иерархией
+	// при приёме присланного поля. Если поле пропущено, Kaname сохраняет прежнее
+	// заполнение аккаунта по parent_project_id из собственных данных о проекте.
 	ParentAccountId string `protobuf:"bytes,7,opt,name=parent_account_id,json=parentAccountId,proto3" json:"parent_account_id,omitempty"`
 	// Монотонный per-object source-version. Маркер «версии
 	// состояния» ресурса у владельца (compute), проставляемый в момент эмита
@@ -485,31 +492,15 @@ type RegisterResourceRequest struct {
 	//
 	//	["registry_registry:reg…", "project:prj…", "account:acc…"]
 	//
-	// ЗАЧЕМ ОТДЕЛЬНОЕ ПОЛЕ ПРИ ДВУХ УЖЕ СУЩЕСТВУЮЩИХ. `parent_project_id` и
-	// `parent_account_id` несут ровно двух предков и ровно этих. Модель прав
-	// требует цепи ПРОИЗВОЛЬНОЙ формы: репозиторий → реестр → проект → аккаунт →
-	// кластер — глубина четыре. Объект, чей предок не проект и не аккаунт, сегодня
-	// регистрируется без предка вовсе, а объект без предка МОЛЧА выпадает из
-	// области выдачи и из каскада: вопрос о нём задаётся, ответ «нет», и это
-	// неотличимо от честного отказа.
-	//
-	// АДДИТИВНО: старые вызывающие остаются валидными, номера не переиспользуются.
-	//
-	// ПУСТАЯ ЦЕПЬ — ЭТО УТВЕРЖДЕНИЕ «ПРЕДКОВ НЕТ», А НЕ УМОЛЧАНИЕ. Здесь стояло
-	// обратное — что iam при пустом поле выведет предков из двух прежних, «ровно
-	// как раньше». Он этого не делает и делать не должен: цепь есть СОСТОЯНИЕ, и
-	// применённая регистрация заменяет набор рёбер объекта целиком, иначе право
-	// пережило бы перенос объекта в другую область. Следствие, названное прямо:
-	// регистрация без цепи не «ничего не меняет», а СТИРАЕТ уже записанных
-	// предков. Вывод из двух полей области делает ВЛАДЕЛЕЦ на своей стороне
-	// (pkg/ownerregister.ParentChain) — тот, кто знает, глубже ли его иерархия;
-	// iam чужой формы не додумывает. Свойство «каждый потребитель называет цепь»
-	// держится гейтом по дереву (internal/repohygiene), а не этим абзацем.
-	//
-	// ПРИНЯТЬ И НЕ ЗАПИСАТЬ — ЗАПРЕЩЕНО (`api-conventions.md`). Поле обязано иметь
-	// читателя в прод-коде iam с той же фазы, в которой появилось: иначе продукт
-	// обещает возможность, которой нет, а форма E получает объект без предка —
-	// то есть ровно тот дефект, ради которого поле и заводится.
+	// Поля области называют проект и аккаунт; цепь также может назвать контейнер.
+	// Kaname выводит иерархию H по родителю: [project, account] либо
+	// [container, project, account] (короче, если дальние предки отсутствуют).
+	// Присланная цепь должна быть подпоследовательностью H с тем же порядком.
+	// Пропущенные звенья не дописываются. Пустая цепь заменяет рёбра пустым
+	// набором и допустима, если объявление типа не требует звена проекта.
+	// Для permanentProject: true требуется хотя бы одно звено project:<id>;
+	// каждое такое звено сверяется с неизменной привязкой объекта к проекту.
+	// Вызывающий явно передаёт цепь, в том числе при повторной регистрации.
 	ParentChain   []string `protobuf:"bytes,9,rep,name=parent_chain,json=parentChain,proto3" json:"parent_chain,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1533,7 +1524,7 @@ var File_kaname_cloud_iam_v1_internal_iam_service_proto protoreflect.FileDescrip
 
 const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\n" +
-	".kaname/cloud/iam/v1/internal_iam_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a)kaname/cloud/iam/v1/service_account.proto\x1a\x1ekaname/cloud/iam/v1/user.proto\x1a(kaname/cloud/iam/v1/secret_options.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"j\n" +
+	".kaname/cloud/iam/v1/internal_iam_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1ecorelib/api/v1/operation.proto\x1a$corelib/authz/v1/authz_options.proto\x1a!corelib/operation/operation.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a(kaname/cloud/iam/v1/secret_options.proto\x1a)kaname/cloud/iam/v1/service_account.proto\x1a\x1ekaname/cloud/iam/v1/user.proto\"j\n" +
 	"\x14LookupSubjectRequest\x12!\n" +
 	"\vexternal_id\x18\x01 \x01(\tH\x00R\n" +
 	"externalId\x12\x10\n" +
@@ -1719,9 +1710,9 @@ func file_kaname_cloud_iam_v1_internal_iam_service_proto_init() {
 	if File_kaname_cloud_iam_v1_internal_iam_service_proto != nil {
 		return
 	}
+	file_kaname_cloud_iam_v1_secret_options_proto_init()
 	file_kaname_cloud_iam_v1_service_account_proto_init()
 	file_kaname_cloud_iam_v1_user_proto_init()
-	file_kaname_cloud_iam_v1_secret_options_proto_init()
 	file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[0].OneofWrappers = []any{
 		(*LookupSubjectRequest_ExternalId)(nil),
 		(*LookupSubjectRequest_Id)(nil),

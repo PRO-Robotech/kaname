@@ -32,6 +32,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -112,12 +113,23 @@ func (r *grantReq) GetParentChain() []string     { return nil }
 
 const publicGrantObject = "registry_repository:reg53eeeg3578y4ah0q9/team/app"
 
+// publicGrantContainer — реестр репозитория: указатель `parent` репозитория
+// называет его, и регистрация репозитория — регистрация этим указателем
+// (политика записи посева, kaname#982).
+const publicGrantContainer = "registry_registry:reg53eeeg3578y4ah0q9"
+
+// publicGrantProject / publicGrantAccount — область реестра проб публикации.
+const (
+	publicGrantProject = "prj0000000000000proj"
+	publicGrantAccount = "acc0000000000000acc1"
+)
+
 func publicGrantRig() (*RegisterResourceUseCase, *mirrorSpy, *countingEmitter, *countingReconcileEvents, *recordingPublisher) {
 	m := newMirrorSpy()
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	pub := &recordingPublisher{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub, &recordingWithdrawal{}, noAudit{}).WithReconcile(ev)
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub, &recordingWithdrawal{}, noAudit{}, publicGrantScene()).WithReconcile(ev)
 	return uc, m, e, ev, pub
 }
 
@@ -152,7 +164,7 @@ func TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone(t *testin
 	base := time.Now()
 	// (1) The repository registers itself: parent scope + labels.
 	require.NoError(t, uc.Register(ctx, &grantReq{
-		subject: "project:prj0000000000000proj", relation: "project", object: publicGrantObject,
+		subject: publicGrantContainer, relation: "parent", object: publicGrantObject,
 		parentProject: "prj0000000000000proj", labels: map[string]string{"tier": "gold"},
 		version: base,
 	}))
@@ -198,7 +210,7 @@ func TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection(t *te
 
 	base := time.Now()
 	require.NoError(t, uc.Register(ctx, &grantReq{
-		subject: "project:prj0000000000000proj", relation: "project", object: publicGrantObject,
+		subject: publicGrantContainer, relation: "parent", object: publicGrantObject,
 		parentProject: "prj0000000000000proj", version: base,
 	}))
 	require.NotEqual(t, 0, emitter.writes)
@@ -231,11 +243,11 @@ func TestUnregisterResource_Repository_StillDeletesTheProjection(t *testing.T) {
 
 	base := time.Now()
 	require.NoError(t, uc.Register(ctx, &grantReq{
-		subject: "project:prj0000000000000proj", relation: "project", object: publicGrantObject,
+		subject: publicGrantContainer, relation: "parent", object: publicGrantObject,
 		parentProject: "prj0000000000000proj", version: base,
 	}))
 	require.NoError(t, uc.Unregister(ctx, &grantReq{
-		subject: "project:prj0000000000000proj", relation: "project", object: publicGrantObject,
+		subject: publicGrantContainer, relation: "parent", object: publicGrantObject,
 		version: base.Add(5 * time.Millisecond),
 	}))
 
@@ -300,4 +312,15 @@ func TestRegisterResource_PublicGrant_StoreFailureIsARefusal(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assertAnError)
+}
+
+// publicGrantScene — сцена проб публикации: реестр репозитория зарегистрирован в
+// проекте prj0000000000000proj, и проект известен kaname (вывод родителя
+// репозитория, kaname#982).
+func publicGrantScene() sceneScopes {
+	s := unitScopes()
+	s.containers = map[string]domain.ContainerScope{
+		publicGrantContainer: {Registered: true, ProjectID: publicGrantProject, AccountID: publicGrantAccount},
+	}
+	return s
 }

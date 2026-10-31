@@ -5,14 +5,14 @@ syntax = "proto3";
 
 package kaname.cloud.iam.v1;
 
+import "corelib/api/v1/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+import "corelib/operation/operation.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
-import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/secret_options.proto";
 import "kaname/cloud/iam/v1/service_account.proto";
 import "kaname/cloud/iam/v1/user.proto";
-import "kaname/cloud/iam/v1/secret_options.proto";
-import "corelib/operation/operation.proto";
-import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
 
@@ -29,13 +29,13 @@ service InternalIAMService {
   // REST exposed ONLY on the cluster-internal listener;
   // api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
   // and authz-public-allowlist permits the <exempt> catalog entry.
-  rpc LookupSubject (LookupSubjectRequest) returns (LookupSubjectResponse) {
+  rpc LookupSubject(LookupSubjectRequest) returns (LookupSubjectResponse) {
     option (google.api.http) = {
       post: "/iam/v1/internal/iam:lookupSubject"
       body: "*"
     };
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // TOMBSTONE. The false-assurance stub
@@ -59,13 +59,13 @@ service InternalIAMService {
   // задаётся той же базе, что и остальные чтения службы.
   //
   // REST exposed ONLY on the cluster-internal listener.
-  rpc Check (CheckRequest) returns (CheckResponse) {
+  rpc Check(CheckRequest) returns (CheckResponse) {
     option (google.api.http) = {
       post: "/iam/v1/internal/iam:check"
       body: "*"
     };
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // TOMBSTONE. `WriteCreatorTuple` — synchronous own-creator tuple write — is
@@ -114,7 +114,7 @@ service InternalIAMService {
   // docs/engineering/architecture/known-divergences.md. An integrator has
   // neither our history nor a way to re-measure, so the promise is withdrawn
   // here rather than left standing.
-  rpc ForceLogout (ForceLogoutRequest) returns (corelib.operation.Operation) {
+  rpc ForceLogout(ForceLogoutRequest) returns (corelib.operation.Operation) {
     option (corelib.api.v1.operation) = {
       metadata: "ForceLogoutMetadata"
       response: "ForceLogoutResult"
@@ -122,7 +122,7 @@ service InternalIAMService {
     // Cluster-internal listener-protected; admin authz gate enforced at
     // the api-gateway internal mux layer (system_admin role required).
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // PollSubjectChanges drains subject_change_outbox by ascending id cursor,
@@ -160,15 +160,36 @@ service InternalIAMService {
   // indistinguishable from "rows were swept" — an unapplied revocation nobody
   // observes. Until this refusal existed, sweeping the journal was impossible
   // by construction, not by preference.
-  rpc PollSubjectChanges (PollSubjectChangesRequest) returns (PollSubjectChangesResponse) {
+  rpc PollSubjectChanges(PollSubjectChangesRequest) returns (PollSubjectChangesResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // RegisterResource — Internal FGA-proxy: apply an owner-hierarchy tuple
   // (subject holds `relation` on `object`) on behalf of the resource-owning
   // module. Called by the vpc/compute/nlb outbox-drainer over mTLS so
   // those modules никогда не ходят в FGA напрямую — только через IAM.
+  //
+  // Для типа из живого каталога отношение и тип субъекта должны входить в
+  // политику записи манифеста (parents / writes). Иначе PERMISSION_DENIED,
+  // message = "permission denied", без деталей; политика судится до вывода.
+  // Kaname выводит родителя по субъекту указателя либо фактам указателей объекта
+  // и сверяет присланные поля области и цепь со своей иерархией. Сам вывод
+  // пропущенные сведения не дописывает; прежнее заполнение parent_account_id
+  // по parent_project_id из данных IAM сохраняется (если аккаунт не прислан).
+  // Нет опоры либо сведения расходятся: FAILED_PRECONDITION,
+  // message = "<object> parent scope does not match", ErrorInfo.reason =
+  // "PARENT_SCOPE_MISMATCH". Ничего не записывается; после регистрации
+  // отсутствовавшего контейнера повтор может пройти.
+  //
+  // Для типа с permanentProject: true первая регистрация закрепляет проект
+  // объекта навсегда, в том числе после снятия регистрации. Другой проект в
+  // parent_project_id или любом звене project цепи: FAILED_PRECONDITION,
+  // message = "<object> is bound to another project", ErrorInfo.reason =
+  // "OBJECT_BOUND_TO_OTHER_PROJECT"; этот отказ предпочитается отказу вывода.
+  // Оба FAILED_PRECONDITION несут domain службы iam и metadata resource_type,
+  // resource_id; выведенная область и проект привязки в ответе не раскрываются.
+  // При отказе ни зеркало, ни цепь, ни факт отношения, ни событие не записываются.
   //
   // ИДЕМПОТЕНТНО (контракт): повтор того же (subject_id, relation, object) →
   // gRPC OK, НЕ AlreadyExists. От этого зависит at-least-once outbox-retry —
@@ -182,9 +203,9 @@ service InternalIAMService {
   // ServiceAccount → relation `fga_writer` на системном объекте
   // `cluster:cluster_root`. Нет relation → PermissionDenied. cluster-internal
   // listener :9091 only — нет google.api.http.
-  rpc RegisterResource (RegisterResourceRequest) returns (RegisterResourceResponse) {
+  rpc RegisterResource(RegisterResourceRequest) returns (RegisterResourceResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
@@ -204,9 +225,9 @@ service InternalIAMService {
   // Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
   // `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
   // нет google.api.http.
-  rpc UnregisterResource (UnregisterResourceRequest) returns (UnregisterResourceResponse) {
+  rpc UnregisterResource(UnregisterResourceRequest) returns (UnregisterResourceResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // GetRoleCompiled — Internal two-projection read (redesign-2026 F5): returns a
@@ -236,18 +257,18 @@ service InternalIAMService {
   // «есть, но не ваш». Различимость живёт ВНУТРЬ — в счётчиках по причинам.
   //
   // REST exposed ONLY on the cluster-internal listener.
-  rpc ResolveBasicCredential (ResolveBasicCredentialRequest) returns (ResolveBasicCredentialResponse) {
+  rpc ResolveBasicCredential(ResolveBasicCredentialRequest) returns (ResolveBasicCredentialResponse) {
     option (google.api.http) = {
       post: "/iam/v1/internal/iam:resolveBasicCredential"
       body: "*"
     };
-    option (corelib.authz.v1.permission)    = "<exempt>";
+    option (corelib.authz.v1.permission) = "<exempt>";
     option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
-  rpc GetRoleCompiled (GetRoleCompiledRequest) returns (GetRoleCompiledResponse) {
+  rpc GetRoleCompiled(GetRoleCompiledRequest) returns (GetRoleCompiledResponse) {
     option (corelib.authz.v1.permission) = "<exempt>";
-    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
   // CheckBasicCredentialLive — ЖИВО ЛИ УДОСТОВЕРЕНИЕ, СПРОШЕННОЕ ПО ЕГО
@@ -278,8 +299,8 @@ service InternalIAMService {
   // БЕЗ `google.api.http` НАМЕРЕННО — как у `GetRoleCompiled`. Вызывающий ходит
   // gRPC; дружелюбного пути под этот вопрос не заводится, чтобы его нельзя было
   // выставить наружу опечаткой в таблице маршрутов края.
-  rpc CheckBasicCredentialLive (CheckBasicCredentialLiveRequest) returns (CheckBasicCredentialLiveResponse) {
-    option (corelib.authz.v1.permission)    = "<exempt>";
+  rpc CheckBasicCredentialLive(CheckBasicCredentialLiveRequest) returns (CheckBasicCredentialLiveResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
     option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 }
@@ -300,7 +321,7 @@ message LookupSubjectRequest {
 message LookupSubjectResponse {
   // Возвращенный subject — User или ServiceAccount.
   oneof subject {
-    User           user            = 1;
+    User user = 1;
     ServiceAccount service_account = 2;
   }
 }
@@ -403,11 +424,18 @@ message RegisterResourceRequest {
 
   // Parent project id ресурса (`prj…`), если ресурс project-scoped.
   // Кладется в mirror ради containment (объект «под scope») SAME-DB, без ребра
-  // iam→owner. Пусто для не-project-scoped объектов.
+  // iam→owner. Kaname сверяет с выведенной иерархией и не дописывает поле.
+  // Для permanentProject: true обязательно, иначе INVALID_ARGUMENT с
+  // field_violations.field = "parent_project_id"; также обязательно звено
+  // project:<id> в parent_chain, иначе INVALID_ARGUMENT по "parent_chain".
+  // При обоих нарушениях первым называется parent_project_id.
+  // Пусто для не-project-scoped объектов без объявления permanentProject.
   string parent_project_id = 6;
 
   // Parent account id ресурса (`acc…`), если применимо. Mirror /
-  // containment на account-scope.
+  // containment на account-scope. Kaname сверяет с выведенной иерархией
+  // при приёме присланного поля. Если поле пропущено, Kaname сохраняет прежнее
+  // заполнение аккаунта по parent_project_id из собственных данных о проекте.
   string parent_account_id = 7;
 
   // Монотонный per-object source-version. Маркер «версии
@@ -425,31 +453,15 @@ message RegisterResourceRequest {
   // Каждый элемент — объект в форме `"<type>:<id>"`, той же, что `object` выше:
   //   ["registry_registry:reg…", "project:prj…", "account:acc…"]
   //
-  // ЗАЧЕМ ОТДЕЛЬНОЕ ПОЛЕ ПРИ ДВУХ УЖЕ СУЩЕСТВУЮЩИХ. `parent_project_id` и
-  // `parent_account_id` несут ровно двух предков и ровно этих. Модель прав
-  // требует цепи ПРОИЗВОЛЬНОЙ формы: репозиторий → реестр → проект → аккаунт →
-  // кластер — глубина четыре. Объект, чей предок не проект и не аккаунт, сегодня
-  // регистрируется без предка вовсе, а объект без предка МОЛЧА выпадает из
-  // области выдачи и из каскада: вопрос о нём задаётся, ответ «нет», и это
-  // неотличимо от честного отказа.
-  //
-  // АДДИТИВНО: старые вызывающие остаются валидными, номера не переиспользуются.
-  //
-  // ПУСТАЯ ЦЕПЬ — ЭТО УТВЕРЖДЕНИЕ «ПРЕДКОВ НЕТ», А НЕ УМОЛЧАНИЕ. Здесь стояло
-  // обратное — что iam при пустом поле выведет предков из двух прежних, «ровно
-  // как раньше». Он этого не делает и делать не должен: цепь есть СОСТОЯНИЕ, и
-  // применённая регистрация заменяет набор рёбер объекта целиком, иначе право
-  // пережило бы перенос объекта в другую область. Следствие, названное прямо:
-  // регистрация без цепи не «ничего не меняет», а СТИРАЕТ уже записанных
-  // предков. Вывод из двух полей области делает ВЛАДЕЛЕЦ на своей стороне
-  // (pkg/ownerregister.ParentChain) — тот, кто знает, глубже ли его иерархия;
-  // iam чужой формы не додумывает. Свойство «каждый потребитель называет цепь»
-  // держится гейтом по дереву (internal/repohygiene), а не этим абзацем.
-  //
-  // ПРИНЯТЬ И НЕ ЗАПИСАТЬ — ЗАПРЕЩЕНО (`api-conventions.md`). Поле обязано иметь
-  // читателя в прод-коде iam с той же фазы, в которой появилось: иначе продукт
-  // обещает возможность, которой нет, а форма E получает объект без предка —
-  // то есть ровно тот дефект, ради которого поле и заводится.
+  // Поля области называют проект и аккаунт; цепь также может назвать контейнер.
+  // Kaname выводит иерархию H по родителю: [project, account] либо
+  // [container, project, account] (короче, если дальние предки отсутствуют).
+  // Присланная цепь должна быть подпоследовательностью H с тем же порядком.
+  // Пропущенные звенья не дописываются. Пустая цепь заменяет рёбра пустым
+  // набором и допустима, если объявление типа не требует звена проекта.
+  // Для permanentProject: true требуется хотя бы одно звено project:<id>;
+  // каждое такое звено сверяется с неизменной привязкой объекта к проекту.
+  // Вызывающий явно передаёт цепь, в том числе при повторной регистрации.
   repeated string parent_chain = 9;
 }
 
@@ -551,9 +563,9 @@ message PollSubjectChangesRequest {
 
 // SubjectChange — one row from subject_change_outbox.
 message SubjectChange {
-  int64  id         = 1;
+  int64 id = 1;
   string subject_id = 2;
-  string op         = 3; // binding_upsert | binding_delete | group_member_change
+  string op = 3; // binding_upsert | binding_delete | group_member_change
 
   // subject_type — тип субъекта в словаре модели прав: `user` |
   // `service_account` | `group` | `system_class` (у выдачи системному классу

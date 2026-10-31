@@ -63,6 +63,7 @@ func newRegisterUCWired(pool *pgxpool.Pool) *internal_iam.RegisterResourceUseCas
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver())
@@ -143,7 +144,7 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 	v0 := time.Now().Add(-time.Minute)
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId:       "project:" + string(fx.prj),
-		Relation:        "parent",
+		Relation:        "project",
 		Object:          "vpc_network:net-treska",
 		Labels:          map[string]string{"network": "treska"},
 		ParentProjectId: string(fx.prj),
@@ -164,7 +165,7 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 	// the callee — it must revoke regardless of which consumer emitted).
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId:       "project:" + string(fx.prj),
-		Relation:        "parent",
+		Relation:        "project",
 		Object:          "vpc_network:net-treska",
 		Labels:          map[string]string{}, // label removed (upsert {}, not Unregister)
 		ParentProjectId: string(fx.prj),

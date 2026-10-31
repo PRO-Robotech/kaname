@@ -57,14 +57,19 @@ func TestPublicReader_RelationFactAdmitsOnlyAClassSubject(t *testing.T) {
 
 // prInsertResource — строка каталога ресурса с перечнем указателей, в своей
 // транзакции с откатом.
+//
+// Имена указателей (kaname#982) позиционно парны типам, и проверка их формы
+// судит парность: строка пробы несёт столько же ЗАКОННЫХ имён, сколько типов, —
+// так отказ приходит только от проверки формы типов, которую проба и судит.
 func prInsertResource(db *sql.DB, resource, objectType, parents string) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.Exec(`INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type, parent_types)
-	                  VALUES ('vpc', $1, 'vpc.' || $1, $2, $3::text[])`, resource, objectType, parents)
+	_, err = tx.Exec(`INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type, parent_types, parent_names)
+	                  VALUES ('vpc', $1, 'vpc.' || $1, $2, $3::text[],
+	                          array_fill('pointer'::text, ARRAY[cardinality($3::text[])]))`, resource, objectType, parents)
 	return err
 }
 

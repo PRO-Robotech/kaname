@@ -119,6 +119,7 @@ func newATCWorld(t *testing.T) *atcWorld {
 		// каталожным фактом, что у мира после последней доставки.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 	doc, err := atcProbemodDoc()
 	require.NoError(t, err, "М2: фикстура probemod без ключа публичного чтения")
@@ -217,13 +218,16 @@ func (a *atcWorld) itemsLiveInDB() bool {
 	return live
 }
 
-// registerBox — регистрация `probemod_box:<id>` в prj-A службой-владельцем.
+// registerBox — регистрация `probemod_box:<id>` в prj-A службой-владельцем:
+// указатель области. Кортежа `owner` нет: у типа `probemod_box` фикстуры нет
+// отношения `owner`, его запись `writes` объявить нечем, и закрытая политика
+// записи модуля (kaname#982) такой кортеж отвергает — предмет мира в нём не
+// нуждается (выдачи судят цель, а не владельца).
 func (a *atcWorld) registerBox(id string) {
 	a.t.Helper()
 	obj := atcBoxType + ":" + id
 	for _, r := range []*iamv1.RegisterResourceRequest{
 		{SubjectId: "project:" + string(a.prjA), Relation: "project", Object: obj},
-		{SubjectId: "user:" + string(a.usrA), Relation: "owner", Object: obj},
 	} {
 		r.ParentProjectId, r.ParentAccountId = string(a.prjA), string(a.accA)
 		r.ParentChain = []string{"project:" + string(a.prjA), "account:" + string(a.accA)}
