@@ -369,3 +369,119 @@ def test_address_own_front_refuses_a_readdress_without_a_reason():
         assert "причина" in str(e)
     else:
         raise AssertionError("пустая причина принята — отказ «адреса нет» не назвал бы, что потеряно")
+
+
+# ESC: пропущенная мутация не должна подтверждать чужую завершённую операцию.
+def _esc_fixture():
+    return gen.load_cases_module(
+        gen.CASES_DIR / "iam-role-rights-stay-named.py", gen._INJECTED,
+        before=gen._reset_step_name_counters)
+
+
+def test_esc_fixture_seven_role_names_obey_the_custom_role_contract():
+    import re
+
+    fixture = _esc_fixture()
+    names = [step.body["name"] for case in fixture.CASES for step in case.steps
+             if step.method == "POST" and step.path == "/iam/v1/roles"]
+    assert len(names) == 7
+    for name in names:
+        assert re.fullmatch(r"[a-z][a-z0-9_]{0,40}",
+                            name.replace("{{runId}}", "r0123456789")), name
+
+
+def _esc_fixture_flow(steps, missing):
+    import subprocess
+
+    case = gen.Case(id="T-ESC-FIXTURE", title="t", classes=["SEC"],
+                    priority="P0", steps=steps)
+    payload = {"items": list(_items(case).values()), "missing": missing}
+    driver = r"""
+const assert = require('assert');
+const vm = require('vm');
+const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const env = new Map([['opId', 'previous-owner-op'],
+  ['jwtAccountAdminAStepUp', 'owner-token'], ['jwtHumanEscStepUp', 'human-token'],
+  ['ownRestBaseUrl', 'https://own.invalid'], ['baseUrl', 'https://own.invalid']]);
+if (!input.missing) env.set('escRole', 'current-role');
+const requests = [], failures = [], passed = [];
+const replace = text => text.replace(/\{\{(\w+)\}\}/g,
+  (whole, key) => env.has(key) ? env.get(key) : whole);
+for (const item of input.items) {
+  let skipped = false;
+  const pm = {
+    environment: {get: k => env.get(k), set: (k,v) => env.set(k,v),
+      unset: k => env.delete(k)},
+    variables: {get: k => env.get(k), has: k => env.has(k), replaceIn: replace},
+    request: {url: item.request.url.raw,
+      body: item.request.body, headers: {upsert() {}, remove() {}}},
+    info: {requestName: item.name},
+    execution: {skipRequest() {skipped = true;}, setNextRequest() {
+      throw Error('unexpected retry');}},
+    response: {code: 200, json: () => item.request.method === 'GET'
+      ? {id: 'current-op', done: true, response: {id: 'current-resource'}}
+      : {id: 'current-op'}, text: () => '{}'},
+    test(name, fn) {try {fn(); passed.push(name);} catch (e) {
+      failures.push(name);}},
+    expect(value) {return {to: {eql: expected =>
+      assert.deepStrictEqual(value, expected)}};}
+  };
+  pm.expect.fail = message => {throw Error(message);};
+  const run = listen => {
+    for (const event of item.event || []) if (event.listen === listen)
+      vm.runInNewContext('(function(){\n' + event.script.exec.join('\n') + '\n})()',
+        {pm, setTimeout() {}}, {timeout: 1000});
+  };
+  run('prerequest');
+  if (!skipped) {requests.push(replace(pm.request.url.toString())); run('test');}
+}
+process.stdout.write(JSON.stringify({requests, failures, passed,
+  opId: env.get('opId') || null, captured: env.get('escCaptured') || null}));
+"""
+    proc = subprocess.run(["node", "-e", driver], input=json.dumps(payload),
+                          capture_output=True, text=True, timeout=15)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def _esc_missing_resource_failure_reasons():
+    # Мутация отмечает отсутствующий ресурс; оба читателя отмечают пустую операцию.
+    missing_resource = "предусловие: {{escRole}} не было захвачено — запрос не отправлен"
+    missing_operation = [
+        "operation id opId was captured (the mutation returned an Operation)",
+        "предусловие: {{opId}} не было захвачено — запрос не отправлен",
+    ]
+    return [missing_resource, *missing_operation, *missing_operation]
+
+
+def test_esc_fixture_skipped_human_mutation_does_not_poll_the_owner_operation():
+    fixture = _esc_fixture()
+    result = _esc_fixture_flow(fixture.mutation(
+        "control", "/iam/v1/roles/{{escRole}}", {"updateMask": "description"},
+        fixture.HUMAN, capture="escCaptured", method="PATCH"), missing=True)
+    assert result["requests"] == []
+    assert result["opId"] is None and result["captured"] is None
+    assert result["failures"] == _esc_missing_resource_failure_reasons(), result
+    assert result["passed"] == []
+
+
+def test_esc_fixture_skipped_owner_cleanup_cannot_confirm_a_previous_success():
+    fixture = _esc_fixture()
+    result = _esc_fixture_flow(fixture.remove(
+        "/iam/v1/roles", "escRole"), missing=True)
+    assert result["requests"] == []
+    assert result["opId"] is None
+    assert result["failures"] == _esc_missing_resource_failure_reasons(), result
+    assert result["passed"] == []
+
+
+def test_esc_fixture_success_captures_only_its_own_operation_and_resource():
+    fixture = _esc_fixture()
+    result = _esc_fixture_flow(fixture.mutation(
+        "control", "/iam/v1/roles/{{escRole}}", {"updateMask": "description"},
+        fixture.HUMAN, capture="escCaptured", method="PATCH"), missing=False)
+    assert len(result["requests"]) == 3
+    assert all("current-op" in url for url in result["requests"][1:])
+    assert result["opId"] == "current-op"
+    assert result["captured"] == "current-resource"
+    assert result["failures"] == []

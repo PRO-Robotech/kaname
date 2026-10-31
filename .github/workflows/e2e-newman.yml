@@ -873,6 +873,8 @@ jobs:
     name: автономный стенд — волна церемонии и распорядители аккаунта (второй шард)
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      KANAME_STAND_REGISTRY_WORLD: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
@@ -931,6 +933,12 @@ jobs:
         timeout-minutes: 5
         run: python3 tests/authz-fixtures/seed_ceremony.py --self-test
 
+      - name: профиль и посев registry способны упасть
+        timeout-minutes: 5
+        run: |
+          .github/scripts/stand-own.sh --registry-self-test
+          python3 tests/authz-fixtures/seed_registry_resource.py --self-test
+
       - name: чистка отчёта способна упасть (самопроба по каждой форме)
         timeout-minutes: 5
         run: python3 .github/scripts/redact-newman-report.py --self-test
@@ -953,6 +961,17 @@ jobs:
               echo "::error title=Посев отвергнут продуктом::посев предъявил всё, чего требует контракт, и получил отказ — это вердикт о дереве"
               exit "$rc" ;;
           esac
+
+      - name: условие registry создано владельцем модуля
+        timeout-minutes: 5
+        run: |
+          rc=0
+          python3 tests/authz-fixtures/seed_registry_resource.py || rc=$?
+          if [ "$rc" -eq 75 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::registry producer недоступен; вердикта о продукте нет"
+            exit 1
+          fi
+          exit "$rc"
 
       # УСЛОВИЕ ВОЛНЫ — ОТДЕЛЬНЫМ ШАГОМ: отказ церемонии не должен читаться отказом
       # машинного посева и не должен читаться вердиктом о наборе.

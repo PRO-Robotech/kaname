@@ -871,6 +871,68 @@ def slot_slug(slot: str) -> str:
     return "".join(out)
 
 
+def revoked_binding(http, public, token, bid):
+    """Public soft revoke: completed operation AND the same retained audit row."""
+    code, before = http.json_ask(f"{public}/iam/v1/accessBindings/{bid}", token=token)
+    if code != 200 or before.get("id") != bid or before.get("status") != "ACTIVE":
+        raise Finding("Esc revoke target is not a visible ACTIVE binding")
+    response = own_seed.post_operation(http, public, token,
+                                       f"/iam/v1/accessBindings/{bid}:revoke", {}, "Esc public soft revoke")
+    code, retained = http.json_ask(f"{public}/iam/v1/accessBindings/{bid}", token=token)
+    if (response.get("id") != bid or response.get("status") != "REVOKED"
+            or code != 200 or retained.get("id") != bid
+            or retained.get("status") != "REVOKED" or not retained.get("revokedAt")):
+        raise Finding("Esc soft revoke did not retain the same REVOKED audit row")
+    say("  ok   Esc public soft revoke: operation done; same binding retained REVOKED")
+
+
+def delete_revoked_binding(http, public, token, bid):
+    # The same actor sees the row first: a pre-existing 403 is not deletion proof.
+    code, before = http.json_ask(f"{public}/iam/v1/accessBindings/{bid}", token=token)
+    if code != 200 or before.get("id") != bid or before.get("status") != "REVOKED":
+        raise Finding("Esc delete target is not the visible REVOKED binding")
+    code, operation = http.json_ask(f"{public}/iam/v1/accessBindings/{bid}",
+                                    method="DELETE", token=token)
+    if code != 200 or not operation.get("id"):
+        raise Finding("Esc public hard deletion was refused")
+    own_seed.await_operation(http, public, token, operation["id"])
+    code, after = http.json_ask(f"{public}/iam/v1/accessBindings/{bid}", token=token)
+    # Public Get deliberately hides absence (get.go): existing hard-delete case
+    # IAM-ACB-RD-DL-HARD-OK has the same 403/404 contract.
+    if (code, after.get("code")) not in ((403, 7), (404, 5)):
+        raise Finding("Esc binding still readable after completed hard deletion")
+    say("  ok   Esc public hard delete: visible before; operation done; Get gone")
+
+
+def prove_soft_revoke_rights(http, public, boot, account, suffix):
+    """Independent non-owner subjects: only one of two identical grants is revoked."""
+    role = own_seed.builtin_role_id(http, public, boot, "iam.account.view")
+    subjects = [own_seed.make_service_account(http, public, boot, account,
+                "ceremony-revoke-" + label, suffix, "Esc revoke control " + label)
+                for label in ("subject", "twin")]
+    if subjects[0] == subjects[1]:
+        raise Finding("Esc revoke controls share a subject")
+
+    def checks(expected):
+        for subject, allowed in zip(subjects, expected):
+            code, result = http.json_ask(public + "/iam/v1/authorize:check", method="POST", token=boot,
+                body={"subject": "service_account:" + subject, "resource": {"type": "account", "id": account},
+                      "action": "iam.accounts.get", "requiredRelation": "v_get"})
+            if code != 200 or result.get("allowed", False) is not allowed:
+                raise Finding("Esc soft revoke binding-derived right or lawful twin disagrees")
+
+    checks((False, False))
+    bindings = [own_seed.grant_role(http, public, boot, subject, role, "iam.account", account)
+                for subject in subjects]
+    checks((True, True))
+    revoked_binding(http, public, boot, bindings[0])
+    checks((False, True))
+    say("  ok   Esc soft revoke rights: two fresh SA denied then allowed; revoked SA denied; lawful twin allowed")
+    delete_revoked_binding(http, public, boot, bindings[0])
+    revoked_binding(http, public, boot, bindings[1])
+    delete_revoked_binding(http, public, boot, bindings[1])
+
+
 def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
               sleep=time.sleep) -> dict:
     """Волна церемонии: клиенты, люди и их предъявители обоих уровней. `sleep` —
@@ -920,33 +982,77 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     values["humanEscUserId"] = esc_user
     # Registration creates a protected owner binding in the personal account.
     # S2 requires an absolutely empty ListBySubject, not an account-A filter.
-    # Clear protection and revoke through the public API as that same owner;
-    # Account.ownerUserId remains the product's independent ownership record.
+    # Prove soft revocation, then hard-delete these temporary fixture rows.
+    # Account.ownerUserId is a persisted ownership field, not an effective grant.
     code, bindings = http.json_ask(
         f"{stand.own}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={esc_user}&pageSize=1000",
         token=boot)
     if code != 200 or bindings.get("nextPageToken"):
         raise Finding("Esc initial bindings could not be completely enumerated")
-    for binding in bindings.get("accessBindings", []):
+    initial = bindings.get("accessBindings", [])
+    accounts = {binding.get("scopeId") for binding in initial if binding.get("scopeType") == "iam.account"}
+    if len(accounts) != 1 or not all(binding.get("subjectId") == esc_user for binding in initial):
+        raise Finding("Esc initial bindings do not identify its personal account")
+    account = accounts.pop()
+    owner_bindings = [binding for binding in initial if binding.get("scopeType") == "iam.account"]
+    project_bindings = [binding for binding in initial if binding.get("scopeType") == "iam.project"]
+    if len(owner_bindings) != 1 or len(project_bindings) + 1 != len(initial):
+        raise Finding("Esc initial binding scopes do not identify one owner binding and its projects")
+    # Explicit lifecycle order: project rights first, account owner last. List order
+    # is not authoritative; after owner Revoke H has no removal authority.
+    ordered = sorted(project_bindings, key=lambda binding: binding.get("id", "")) + owner_bindings
+    owner_bid = owner_bindings[0].get("id")
+    human = values["jwtHumanEscStepUp"]
+
+    def account_owner():
+        code, current = http.json_ask(f"{stand.own}/iam/v1/accounts/{account}", token=boot)
+        if code != 200 or current.get("ownerUserId") != esc_user:
+            raise Finding("Esc persisted Account.ownerUserId was not preserved")
+
+    def owner_rights(expected):
+        for kind, resource_id, relations in (
+                ("account", account, ("owner", "admin", "v_get", "v_update", "v_delete")),
+                ("iam_access_binding", owner_bid, ("v_get", "v_delete"))):
+            for relation in relations:
+                code, result = http.json_ask(stand.own + "/iam/v1/authorize:check",
+                    method="POST", token=boot, body={"subject": "user:" + esc_user,
+                        "resource": {"type": kind, "id": resource_id},
+                        "action": "iam.accounts.get" if kind == "account" else "iam.accessBindings.get",
+                        "requiredRelation": relation})
+                if code != 200 or result.get("allowed") is not expected:
+                    raise Finding("Esc owner binding effective right disagrees: " + kind + ":" + relation)
+        say("  ok   Esc owner binding: seven effective rights " + ("present" if expected else "absent"))
+
+    account_owner()
+    owner_rights(True)
+    prove_soft_revoke_rights(http, stand.own, boot, account, suffix)
+    # Clear every protection while H still owns the account; no mutation after
+    # its self-revocation may assume that ownerUserId grants owner authority.
+    for binding in ordered:
         bid = binding.get("id") or ""
         if not bid:
             raise Finding("Esc initial binding has no id")
         if binding.get("deletionProtection"):
             code, op = http.json_ask(
-                f"{stand.own}/iam/v1/accessBindings/{bid}", method="PATCH",
-                token=values["jwtHumanEscStepUp"],
+                f"{stand.own}/iam/v1/accessBindings/{bid}", method="PATCH", token=human,
                 body={"updateMask": "deletionProtection", "deletionProtection": False})
             if code != 200 or not op.get("id"):
                 raise Finding("Esc owner binding protection could not be cleared by its owner")
-            own_seed.await_operation(http, stand.own, values["jwtHumanEscStepUp"], op["id"])
-        own_seed.post_operation(http, stand.own, values["jwtHumanEscStepUp"],
-                                f"/iam/v1/accessBindings/{bid}:revoke", {},
-                                "Esc owner revokes its initial binding")
+            own_seed.await_operation(http, stand.own, human, op["id"])
+    for binding in ordered:
+        revoked_binding(http, stand.own, human, binding["id"])
+    # All seven checks happen after completed owner Revoke, before any initial
+    # binding hard deletion. The persisted owner field must survive rights loss.
+    owner_rights(False)
+    account_owner()
+    for binding in ordered:
+        delete_revoked_binding(http, stand.own, boot, binding["id"])
+    account_owner()
     code, bindings = http.json_ask(
         f"{stand.own}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={esc_user}&pageSize=1000",
-        token=boot)
-    if code != 200 or bindings.get("accessBindings") or bindings.get("nextPageToken"):
-        raise Finding("Esc ListBySubject is not empty after public revocation")
+        token=human)
+    if code != 200 or bindings.get("accessBindings") != [] or bindings.get("nextPageToken"):
+        raise Finding("Esc ListBySubject is not empty after public hard deletion")
 
     values["ceremonyInviteeEmail"], _, values["ceremonyInviteeUserId"] = person("invitee")
     say("  ok   человек для приглашения — адрес подтверждён, выдач нет")
@@ -1052,6 +1158,7 @@ class _FakeStand:
     """Подставной стенд: законный мир, в котором каждая инъекция меняет ОДИН факт."""
 
     issuance, own = "https://127.0.0.1:1", "https://127.0.0.1:2"
+    BOOT_TOKEN, BOOT_PRINCIPAL = "boot", "svaboot"
 
     def __init__(self, **inject):
         self.inj = inject
@@ -1061,7 +1168,7 @@ class _FakeStand:
     def mint(self):
         if self.inj.get("mint_down"):
             raise Unmet("127.0.0.1:3 недостижим: connection refused")
-        return {"accessToken": "boot", "principalId": "svaboot"}
+        return {"accessToken": self.BOOT_TOKEN, "principalId": self.BOOT_PRINCIPAL}
 
     def create_client(self, principal, name, redirects):
         n = len(self.clients) + 1
@@ -1079,7 +1186,7 @@ class _FakeStand:
     def http(self, url, *, method="GET", headers=None, form=None):
         headers = headers or {}
         if url.startswith(self.own + "/iam/v1/accounts"):
-            ok = headers.get("Authorization") == "Bearer boot" and not self.inj.get("boot_refused")
+            ok = headers.get("Authorization") == "Bearer " + self.BOOT_TOKEN and not self.inj.get("boot_refused")
             return (200, {}, '{"accounts":[]}') if ok else (401, {}, '{"message":"unauth"}')
         if url.startswith(self.issuance + "/iam/v1/authorize"):
             q = urllib.parse.parse_qs(url.split("?", 1)[1])
@@ -1167,6 +1274,7 @@ class _WaveWorld:
         self.admins: set[str] = set()
         self.ops: dict[str, dict] = {}
         self.esc_bindings: dict[str, dict] = {}
+        self.esc_subjects: set[str] = set()
         self.base = _FakeStand()
         self.issuance, self.own = self.base.issuance, self.base.own
 
@@ -1274,25 +1382,78 @@ class _WaveWorld:
     def json_ask(self, url, **kw):
         if "/iam/v1/accessBindings:listBySubject?" in url:
             uid = url.split("subjectId=", 1)[1].split("&", 1)[0]
-            if uid not in self.esc_bindings:
-                self.esc_bindings[uid] = {"id": "acb" + uid[3:], "deletionProtection": True}
-            binding = self.esc_bindings[uid]
-            return 200, {"accessBindings": [binding] if binding else []}
+            if uid not in self.esc_subjects:
+                self.esc_subjects.add(uid)
+                bid = "acb" + uid[3:]
+                self.esc_bindings[bid] = {"id": bid, "subjectId": uid, "subjectType": "user",
+                    "scopeType": "iam.account", "scopeId": "acc" + uid[3:],
+                    "status": "ACTIVE", "deletionProtection": True}
+                self.esc_bindings[bid + "project"] = {"id": bid + "project", "subjectId": uid,
+                    "subjectType": "user", "scopeType": "iam.project", "scopeId": "prj1",
+                    "status": "ACTIVE", "deletionProtection": True}
+            return 200, {"accessBindings": [dict(b) for b in self.esc_bindings.values() if b["subjectId"] == uid]}
+        if url.endswith("/iam/v1/roles?pageSize=1000"):
+            return 200, {"roles": [{"id": "rolaccountview", "name": "iam.account.view"}]}
+        if url.endswith("/iam/v1/authorize:check"):
+            body = kw["body"]
+            subject = body["subject"].split(":", 1)[1]
+            resource = body["resource"]
+            resource_id = resource["id"]
+            if resource["type"] == "iam_access_binding":
+                resource_id = self.esc_bindings.get(resource_id, {}).get("scopeId")
+            allowed = any(b["subjectId"] == subject and b["scopeId"] == resource_id
+                          and (b["status"] == "ACTIVE" or self.inj.get("esc_revoke_right_stale"))
+                          for b in self.esc_bindings.values())
+            if self.inj.get("esc_lawful_twin_denied") and any(b["status"] == "REVOKED" for b in self.esc_bindings.values()):
+                allowed = False
+            return 200, {"allowed": allowed}
+        if url.endswith("/iam/v1/accessBindings") and kw.get("method") == "POST":
+            bid = "acbcontrol" + str(len(self.ops))
+            row = dict(kw["body"], id=bid, status="ACTIVE", deletionProtection=False)
+            self.esc_bindings[bid] = row
+            op_id = f"iop{len(self.ops)}"
+            self.ops[op_id] = dict(row)
+            return 200, {"id": op_id}
         if "/iam/v1/accessBindings/" in url:
             if self.inj.get("esc_refused"):
                 return 403, {"code": 7}
-            uid = "usr" + url.split("/accessBindings/acb", 1)[1].split(":", 1)[0]
-            if kw.get("method") == "PATCH":
-                self.esc_bindings[uid]["deletionProtection"] = False
+            bid = url.split("/accessBindings/", 1)[1].split(":", 1)[0]
+            binding = self.esc_bindings.get(bid)
+            if not binding:
+                return 403, {"code": 7}
+            method = kw.get("method", "GET")
+            # Only the exact token minted by this fake is its bootstrap actor.
+            # Every other token still uses the real parser; malformed JWT is not admin.
+            token = kw.get("token", "")
+            sub = (self.base.BOOT_PRINCIPAL if token == self.base.BOOT_TOKEN
+                   else token_claims(token).get("sub"))
+            if sub in self.esc_subjects and method != "GET":
+                owner_active = any(b["subjectId"] == sub and b["scopeType"] == "iam.account"
+                                   and b["status"] == "ACTIVE" for b in self.esc_bindings.values())
+                if not owner_active:
+                    return 403, {"code": 7}
+            if method == "GET":
+                return 200, dict(binding)
+            if method == "PATCH":
+                binding["deletionProtection"] = False
             elif url.endswith(":revoke"):
-                if self.esc_bindings[uid].get("deletionProtection"):
+                if binding.get("deletionProtection"):
                     return 400, {"code": 9}
                 if not self.inj.get("esc_revoke_stale"):
-                    self.esc_bindings[uid] = {}
+                    binding.update(status="REVOKED", revokedAt="2026-10-30T00:00:00Z")
+                if self.inj.get("esc_revoke_removes_row"):
+                    self.esc_bindings.pop(bid)
+            elif method == "DELETE":
+                if binding.get("deletionProtection"):
+                    return 400, {"code": 9}
+                if not self.inj.get("esc_delete_stale"):
+                    self.esc_bindings.pop(bid)
+                if self.inj.get("esc_owner_lost"):
+                    self.inj["esc_owner_removed"] = True
             else:
                 return 404, {}
             op_id = f"iop{len(self.ops)}"
-            self.ops[op_id] = {"id": "esc-fixture-operation"}
+            self.ops[op_id] = dict(binding)
             return 200, {"id": op_id}
         if kw.get("method") == "POST" and url.endswith("/iam/v1/users:invite"):
             body = kw["body"]
@@ -1332,6 +1493,10 @@ class _WaveWorld:
             if sub in self.admins or self.inj.get("plain_is_admin"):
                 return 200, {"id": SEEDED_SYSTEM_ACCOUNT}
             return 404, {"code": 5, "message": f"Account {SEEDED_SYSTEM_ACCOUNT} not found"}
+        if "/iam/v1/accounts/" in url:
+            account = url.rsplit("/", 1)[1]
+            owner = "usr" + account[3:]
+            return 200, {"id": account, "ownerUserId": "" if self.inj.get("esc_owner_removed") else owner}
         return 404, {}
 
 
@@ -1435,10 +1600,17 @@ def self_test() -> int:
         return _outcome(lambda: seed_wave(w, w, w, _Mail(w), "t", "stand.invalid",
                                           sleep=w.sleep)), w
 
-    for injection in ("esc_refused", "esc_revoke_stale"):
+    for injection, reason in (
+            ("esc_refused", "Esc revoke target is not a visible ACTIVE binding"),
+            ("esc_revoke_stale", "Esc soft revoke did not retain the same REVOKED audit row"),
+            ("esc_revoke_removes_row", "Esc soft revoke did not retain the same REVOKED audit row"),
+            ("esc_delete_stale", "Esc binding still readable after completed hard deletion"),
+            ("esc_revoke_right_stale", "Esc soft revoke binding-derived right or lawful twin disagrees"),
+            ("esc_lawful_twin_denied", "Esc soft revoke binding-derived right or lawful twin disagrees"),
+            ("esc_owner_lost", "Esc persisted Account.ownerUserId was not preserved")):
         esc_result, _ = wave(**{injection: True})
         _c("Esc owner API setup failure is a finding: " + injection,
-           esc_result[0] == "finding", str(esc_result))
+           esc_result[0] == "finding" and reason in esc_result[1], str(esc_result))
 
     # Предпосылка подставного мира: Р9 в нём ЕСТЬ и различает обе стороны
     # интервала. Без неё проверки ниже зеленели бы и на мире, где второго письма
