@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""#1033: ресурс registry через владельца модуля; делегирование не создаётся."""
+"""kaname#1033: ресурс registry через владельца модуля; делегирование не создаётся."""
 from __future__ import annotations
 
 import argparse

@@ -131,7 +131,7 @@ EDGE_SA="kacho-api-gateway"
 REGISTRY_WORLD="${KANAME_STAND_REGISTRY_WORLD:-0}"
 case "$REGISTRY_WORLD" in 0|1) ;; *) printf 'KANAME_STAND_REGISTRY_WORLD: expected 0 or 1\n' >&2; exit 64 ;; esac
 
-# Личность владельца ресурса, отдельно от края и бутстрапа (#1033).
+# Личность владельца ресурса, отдельно от края и бутстрапа (kaname#1033).
 registry_world_prepare() {
   [ "$REGISTRY_WORLD" = 1 ] || return 0
   mkdir -p "$BIN/manifests" || return 75

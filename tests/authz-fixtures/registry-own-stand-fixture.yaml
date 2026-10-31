@@ -194,8 +194,8 @@ roles:
         resources: [repositories]
         classes: [get, list, update, delete]
 
-# #1033: настоящий писатель модуля применяется штатным module_seed_apply.
-# Делегирование выдач здесь не заводится: это предмет установщика #1038.
+# kaname#1033: настоящий писатель модуля применяется штатным module_seed_apply.
+# Делегирование выдач здесь не заводится: это предмет установщика kaname#1038.
 revision: 1
 seed:
   serviceAccounts:
