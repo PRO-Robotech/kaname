@@ -940,9 +940,15 @@ createdBySubject: true}`
 |---|---|---|---|
 | a | `POST /iam/v1/projects` `{"accountId":"{{accountAId}}","name":"p-{{runId}}"}` | 403, `code: 7` | 200 |
 | b | `POST /iam/v1/groups` `{"accountId":"{{accountAId}}","name":"g-{{runId}}"}` | 403, `code: 7` | 200 |
-| c | `POST /iam/v1/roles` `{"accountId":"{{accountAId}}","name":"r-{{runId}}","rules":[{"module":"iam","resources":["project"],"verbs":["get"]}]}` | 403, `code: 7` | 200 |
+| c | `POST /iam/v1/roles` `{"accountId":"{{accountAId}}","name":"r{{runId}}","rules":[{"module":"iam","resources":["project"],"verbs":["get"]}]}` | 403, `code: 7` | 200 |
 **When** вызов
 **Then** как в таблице; у отказа `message: "permission denied"`.
+
+Правка после вердикта, 2026-11-01: в строке c исправлена конструируемость положительного
+контроля — имя `r{{runId}}` одинаково у creator и admin; семантика прав и утверждения
+не меняются. Отдельный круг приёмки этой буквальной правки снят диспетчером по явному
+разрешению пользователя на процессное сокращение. Прежние отпечатки ревью не являются
+одобрением изменённой редакции.
 
 #### SAC-E4 · близнец E2: ключ чужой учётке — нет
 

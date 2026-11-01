@@ -99,7 +99,8 @@ func TestSystemClass_SC21_WriteRoleIsRejectedForAClass(t *testing.T) {
 func (w *scWorld) roleUpdate() *roleapp.UpdateRoleUseCase {
 	return roleapp.NewUpdateRoleUseCase(w.repo, w.ops, catalogfixture.Source()).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
-		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(w.repo, w.rec))
+		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(w.repo, w.rec)).
+		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door))
 }
 
 func writeRules() domain.Rules {

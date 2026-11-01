@@ -1759,3 +1759,130 @@ Four base URLs beyond the gateway ones, injected by
 `iamRegistryTokenBaseUrl` (iam :9096), `registryDataPlaneBaseUrl` (registry :8080).
 A missing one turns the case RED naming the variable (`require_env_url`) — injection B
 above is the proof, not the promise.
+
+## kaname#1003 S2 — SAC-E1…E5
+
+Набор содержит пять сценариев, 30 шагов: выдача creator-роли, собственный SA/key
+lifecycle, три отрицательные пары project/group/role с admin-контролями,
+отказы по чужой учётке и аккаунту. Посев получает `saCreatorId`/`jwtSaCreator`
+через client_credentials в отдельном домашнем аккаунте; SAC-E1 выдаёт роль сам.
+
+Предыдущий внешний прогон на `bef10ab27ce38203e36ec025dc7de6d67cdf7272`:
+1/1 коллекций с отчётом, 27 запросов, 0 без ответа, 77 утверждений, 5 упавших.
+Один первичный отказ — admin-контроль Role.Create с именем `r-{{runId}}`
+получил INVALID_ARGUMENT вместо Operation; ещё четыре утверждения относятся
+к отсутствующим Operation/resource-id после этого отказа. E1/E2/E4/E5 и пары
+project/group прошли; роль creator не получала лишних прав. Три зависимых
+запроса роли не были отправлены защитами незахваченных переменных. Посев и
+провенанс прошли, пространство снято, остаток 0.
+
+Новый кандидат переносит только S2 QA на main
+`f5a1d80a45ac88f3a5a38581d2862d95196eba2d`. В SAC-E3 c имя исправлено на
+`r{{runId}}` одинаково для creator/admin и в примере приёмки: это исправление
+конструируемости положительного контроля. Все статусы, коды, тексты и проверки
+Operation сохранены; старый красный прогон не переименован в новый.
+
+Независимый ci-watcher подтвердил полный внешний S2-прогон на источнике
+`2375217df9500508c962f63d917de46bf0eb44fc`: **1/1 коллекций, 5/5 сценариев,
+30/30 объявленных шагов, 30 HTTP-запросов, 83 утверждения**. Упавших утверждений,
+запросов без ответа, пропусков, ошибок скриптов, pending и неисполненных ветвей — 0.
+SAC-E3 c исполнил admin Role.Create с HTTP 200, завершением Operation без ошибки
+и захватом resource-id; уборка роли также дала 200 и успешное завершение Operation.
+Обе стороны project/group-пар и все остальные SAC-E1…E5 исполнились.
+
+Все 13 фаз завершились кодом 0: каталог main 907/907, генератор — 5 кейсов,
+побайтовая сверка коллекции — 0, обе самопроверки совместимости посева — 0;
+далее подъём, провенанс, посев, полная коллекция, очистка отчётов,
+диагностический экспорт, teardown и census — 0. Суммы бинаря раннера, службы
+и работающего процесса совпали; 13 параметров процесса без расхождений.
+mTLS-контроль: с клиентским листом HTTP 401, без листа HTTP 000/curl 56,
+положительный запрос после отрицательного контроля снова HTTP 401.
+В текущей базе среди TCP client-backend сессий пользователя kaname — 16/16 TLS.
+Отпечаток источника до/после прогона совпал; доставлено 27/27 артефактов,
+namespace снят тем же native runner, остаток — 0.
+
+Эта запись результата не является новым API-прогоном: runtime-источник остаётся
+`2375217df9500508c962f63d917de46bf0eb44fc`, сгенерированные байты и утверждения
+после него не менялись.
+
+### Role rights stay named — S2 r4 (kaname#1034)
+
+`iam-role-rights-stay-named`: ESC-E1…ESC-E4, accepted fingerprint
+`3131d7ddfffa9b66857b94c70138b6ebfe7bdb77c7ca07f5333db88aefaae690`.
+Own public REST front; no deployed HTTP result is recorded here yet:
+collections executed **0 of 1**, cases executed **0 of 4**. Structural collection
+generation is a separate check and does not establish HTTP outcomes.
+
+The ceremony wave creates a separate Esc person with genuine level 1 and level 2
+authorization-code credentials. Registration's protected personal-account owner
+binding is cleared and revoked by that same owner through Update and Revoke,
+waiting for each Operation without error. The bootstrap caller then proves the
+complete ListBySubject empty, including the absence of a next page. Each case
+rechecks that condition. The fixture retains the account's independent owner
+record; no database writes or forged claims are involved. Real stand execution
+must confirm these setup operations as well as the four cases. Registry ids are
+owned by the existing delegation seed.
+
+## kaname#1037 — условия групповых сценариев после ESC-23
+
+Успешное добавление человека в группу требует ACTIVE-членства в аккаунте группы.
+Групповые фикстуры отделены от общих NOB/INV/AAB и основного человека церемонии:
+они получают только членство аккаунта, без прямой выдачи проверяемой роли.
+Сохранены проверки отзыва и удаления участника; добавлены отказы до групповой
+выдачи, чтобы само членство не делало положительный контроль тривиальным.
+Целевой повтор: `iam-system-class-subjects`, `iam-group`, `iam-rbac-subjects`,
+`rbac-subject-channel-equivalence` на одном автономном production-стенде.
+Независимый перемер целевого внешнего прогона на
+`6a36283b3d0e9c9dd768bc5933e3e494bdfdfca0` подтвердил:
+
+| коллекция | кейсов исполнено | HTTP-запросов | утверждений |
+|---|---:|---:|---:|
+| iam-system-class-subjects | 21/21 | 111 | 236 |
+| iam-group | 33/33 | 62 | 133 |
+| iam-rbac-subjects | 14/14 | 69 | 144 |
+| rbac-subject-channel-equivalence | 8/8 | 80 | 148 |
+| всего | 76/76 | 322 | 661 |
+
+Упавших утверждений, запросов без ответа, пропущенных утверждений, отказов
+скриптов и несозданных условий — 0. Все 22 прежние записи отказов (18 разных
+шагов в 10 кейсах) перепроверены: 22/22 прошли; новые before/after-deny и
+положительный близнец SC08 исполнились.
+
+Из 330 порождённых шагов восемь условных delete/await preclean не отправлялись:
+четыре реально исполненных preclean-list вернули 200 и подтвердили отсутствие
+старой выдачи. Последующие grant, positive, revoke и deny исполнились. Число
+реальных HTTP-запросов — 322, а не 330.
+
+Отпечатки источника до/после прогона совпали, суммы бинаря раннера, службы и
+процесса совпали. Проверено 13 параметров процесса; mTLS дал 401 с листом и
+HTTP 000/curl 56 без листа, затем положительное восстановление 401. Выборка
+TCP-сессий пользователя kaname показала 16/16 TLS. Доставлено 35/35 артефактов.
+Посев и данные набора сняты вместе с собственным namespace, остаток — 0.
+Сгенерированные коллекции в этом изменении побайтово равны проверенным
+выходам этого прогона; перенос артефактов не является новым API-прогоном.
+
+## kaname#1003 — совместный целевой прогон S2 и групповых прав
+
+Независимый перемер внешнего production-прогона на исходе
+`a1872debc1e7c63edc61c4597cb95f804f39229d` подтвердил **5/5 коллекций,
+81/81 кейс, 352 HTTP-запроса и 744 утверждения**: `iam-service-account-creator`,
+`iam-system-class-subjects`, `iam-group`, `iam-rbac-subjects` и
+`rbac-subject-channel-equivalence`. Упавших утверждений, запросов без ответа,
+пропущенных утверждений и отказов скриптов — 0.
+
+Из 360 объявленных шагов реально исполнены 352. Восемь условных delete/await
+preclean не выбирались: четыре исполненных preclean-list подтвердили отсутствие
+прежних выдач. Эти восемь шагов не считаются прошедшими; последующие проверки
+выдачи, положительного доступа, отзыва и отказа исполнились.
+
+Все 24/24 фазы завершились кодом 0. Оба прежде красных Go-теста
+`TestBareIssueRefsNameTheirRepository` и `TestAcceptanceEditedAfterItsVerdictSaysSo`
+реально исполнились с PASS, без SKIP. Каталог проверен: 911/911 кейсов;
+fixture/pairing-проверки — 14/14. Генерация пяти коллекций и сравнение их байтов
+с исходом, self-test обоих посевов и реальный own/ceremony seed завершились успешно.
+
+Провенанс фактического бинаря подтвердил VCS-ревизию `a1872debc1e7c63edc61c4597cb95f804f39229d`
+и `vcs.modified=false`. Доставлено 55/55 артефактов; namespace снят, остаток — 0.
+Область результата — перечисленные пять коллекций и подготовительные проверки;
+полный хук и CI этим прогоном не подтверждаются. Прежние записи выше сохраняют
+свои исходные runtime pins; этот результат относится к `a1872debc`.

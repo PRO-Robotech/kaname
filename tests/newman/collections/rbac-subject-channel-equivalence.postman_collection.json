@@ -1028,9 +1028,94 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-EQUIV-OK — group-member: ROLE_VIEW@ACCOUNT bound to group:G (ceremonyUserId∈G) → member jwtHumanCeremony reads account-A + sees project, identical to user-direct; revoke → gone",
+      "name": "IAM-CH-GRP-EQUIV-OK — group-member: ROLE_VIEW@ACCOUNT bound to group:G (ceremonyGroupUserId∈G) → member jwtHumanGroupCeremony reads account-A + sees project, identical to user-direct; revoke → gone",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:GROUP | class:HAPPY | priority:P0",
       "item": [
+        {
+          "name": "IAM-CH-GRP-EQUIV-OK :: membership-alone-denied",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanGroupCeremony'",
+                  "const __t = pm.environment.get('jwtHumanGroupCeremony') || pm.variables.get('jwtHumanGroupCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanGroupCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanGroupCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{accountAId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ACTIVE account membership grants no group rights: GET account-A → 404 (no inherited/leaked grant, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('ACTIVE account membership grants no group rights: grpc code 5 (NOT_FOUND)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "IAM-CH-GRP-EQUIV-OK :: create-group",
           "request": {
@@ -1257,7 +1342,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyGroupUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1699,13 +1784,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanGroupCeremony'",
+                  "const __t = pm.environment.get('jwtHumanGroupCeremony') || pm.variables.get('jwtHumanGroupCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanGroupCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanGroupCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -1789,13 +1874,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanGroupCeremony'",
+                  "const __t = pm.environment.get('jwtHumanGroupCeremony') || pm.variables.get('jwtHumanGroupCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanGroupCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanGroupCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -2066,7 +2151,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyGroupUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2150,9 +2235,94 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-MEMBERSHIP-FLIP-OK — group membership flip: addMember(ceremonyUserId)→jwtHumanCeremony gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
+      "name": "IAM-CH-GRP-MEMBERSHIP-FLIP-OK — group membership flip: addMember(ceremonyGroupUserId)→jwtHumanGroupCeremony gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:INV7 | class:GROUP | class:STATE | priority:P0",
       "item": [
+        {
+          "name": "IAM-CH-GRP-MEMBERSHIP-FLIP-OK :: membership-alone-denied",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanGroupCeremony'",
+                  "const __t = pm.environment.get('jwtHumanGroupCeremony') || pm.variables.get('jwtHumanGroupCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanGroupCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanGroupCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{accountAId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ACTIVE account membership grants no group rights: GET account-A → 404 (no inherited/leaked grant, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('ACTIVE account membership grants no group rights: grpc code 5 (NOT_FOUND)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "IAM-CH-GRP-MEMBERSHIP-FLIP-OK :: create-group",
           "request": {
@@ -2619,7 +2789,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyGroupUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2821,13 +2991,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanGroupCeremony'",
+                  "const __t = pm.environment.get('jwtHumanGroupCeremony') || pm.variables.get('jwtHumanGroupCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanGroupCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanGroupCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -2907,7 +3077,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyGroupUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3104,7 +3274,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyGroupUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3393,9 +3563,94 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-NONMEMBER-DENY — group grant scoped to members: member jwtHumanCeremony reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
+      "name": "IAM-CH-GRP-NONMEMBER-DENY — group grant scoped to members: member jwtHumanGroupCeremony reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV9 | class:INV3 | class:GROUP | class:NEG | priority:P0",
       "item": [
+        {
+          "name": "IAM-CH-GRP-NONMEMBER-DENY :: membership-alone-denied",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanGroupCeremony'",
+                  "const __t = pm.environment.get('jwtHumanGroupCeremony') || pm.variables.get('jwtHumanGroupCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanGroupCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanGroupCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{accountAId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ACTIVE account membership grants no group rights: GET account-A → 404 (no inherited/leaked grant, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('ACTIVE account membership grants no group rights: grpc code 5 (NOT_FOUND)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "IAM-CH-GRP-NONMEMBER-DENY :: create-group",
           "request": {
@@ -3622,7 +3877,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyGroupUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4064,13 +4319,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanGroupCeremony'",
+                  "const __t = pm.environment.get('jwtHumanGroupCeremony') || pm.variables.get('jwtHumanGroupCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanGroupCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanGroupCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -4426,7 +4681,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyGroupUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4510,9 +4765,94 @@
       ]
     },
     {
-      "name": "IAM-CH-GRP-REVOKE-BINDING-OK — revoke group binding: member jwtHumanCeremony has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
+      "name": "IAM-CH-GRP-REVOKE-BINDING-OK — revoke group binding: member jwtHumanGroupCeremony has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
       "description": "class:RBAC | class:AUTHZ | class:CHANNEL | class:INV7 | class:GROUP | class:STATE | priority:P0",
       "item": [
+        {
+          "name": "IAM-CH-GRP-REVOKE-BINDING-OK :: membership-alone-denied",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{accountAId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{accountAId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanGroupCeremony'",
+                  "const __t = pm.environment.get('jwtHumanGroupCeremony') || pm.variables.get('jwtHumanGroupCeremony') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanGroupCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanGroupCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accounts/{{accountAId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — собственный публичный REST-фронт службы; без него у волны церемонии нет поверхности, которую она судит', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ACTIVE account membership grants no group rights: GET account-A → 404 (no inherited/leaked grant, hide-existence)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(404));",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.test('ACTIVE account membership grants no group rights: grpc code 5 (NOT_FOUND)', () => pm.expect(j && j.code, JSON.stringify(j)).to.eql(5));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "IAM-CH-GRP-REVOKE-BINDING-OK :: create-group",
           "request": {
@@ -4739,7 +5079,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyUserId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{ceremonyGroupUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5181,13 +5521,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanGroupCeremony'",
+                  "const __t = pm.environment.get('jwtHumanGroupCeremony') || pm.variables.get('jwtHumanGroupCeremony') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtHumanGroupCeremony is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanGroupCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -5458,7 +5798,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"subjectId\": \"user:{{ceremonyUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
+              "raw": "{\"subjectId\": \"user:{{ceremonyGroupUserId}}\", \"relation\": \"v_get\", \"object\": \"account:{{accountAId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"

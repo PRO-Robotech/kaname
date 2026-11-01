@@ -107,6 +107,10 @@ isolation — grant for X does not leak to Y).
 # выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
 HOME = "kaname"
 
+# kaname#1037: групповые четыре сценария используют отдельную человеческую пару
+# ceremonyGroupUserId ↔ jwtHumanGroupCeremony; ACTIVE-членство A проверяет посев.
+# Прямой пользовательский канал сохраняет ceremonyUserId ↔ jwtHumanCeremony.
+
 CASES = []
 
 # Bounded cap for the grant→appears and revoke→gone probes, to poll past the fga_outbox drain
@@ -654,23 +658,24 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# CHANNEL 2 — group-member. subjects=[group:G], ceremonyUserId ∈ G; read as jwtHumanCeremony.
+# CHANNEL 2 — group-member. subjects=[group:G], ceremonyGroupUserId ∈ G; read as jwtHumanGroupCeremony.
 # The member's access-set must be IDENTICAL to the user-direct baseline.
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-GRP-EQUIV-OK",
-    title="group-member: ROLE_VIEW@ACCOUNT bound to group:G (ceremonyUserId∈G) → member jwtHumanCeremony reads account-A + sees project, identical to user-direct; revoke → gone",
+    title="group-member: ROLE_VIEW@ACCOUNT bound to group:G (ceremonyGroupUserId∈G) → member jwtHumanGroupCeremony reads account-A + sees project, identical to user-direct; revoke → gone",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV9", "GROUP", "HAPPY"],
     priority="P0",
     steps=[
+        deny_account_singleshot("membership-alone-denied", "jwtHumanGroupCeremony", "ACTIVE account membership grants no group rights"),
         # verifies (group-member channel ≡ user-direct via group#member userset)
         *create_group("create-group", "chgrp-equiv-{{runId}}", "chgEquivGrp", "chgEquivGrpOp"),
-        *member_op("add-member", "addMember", "chgEquivGrp", "{{ceremonyUserId}}", "chgEquivAddOp"),
+        *member_op("add-member", "addMember", "chgEquivGrp", "{{ceremonyGroupUserId}}", "chgEquivAddOp"),
         grant_view("grant-group", [{"type": "SUBJECT_TYPE_GROUP", "id": "{{chgEquivGrp}}"}], "chgEquivAcb", "chgEquivBindOp"),
         poll_op("chgEquivBindOp"),
-        read_account_appears("read-acct-grp", "jwtHumanCeremony", "group-member"),
-        read_projects_visible("read-prj-grp", "jwtHumanCeremony", "group-member"),
-        *revoke_then_gone("teardown-grp", "chgEquivAcb", "user:{{ceremonyUserId}}", "group-member", "chgEquivRevOp"),
+        read_account_appears("read-acct-grp", "jwtHumanGroupCeremony", "group-member"),
+        read_projects_visible("read-prj-grp", "jwtHumanGroupCeremony", "group-member"),
+        *revoke_then_gone("teardown-grp", "chgEquivAcb", "user:{{ceremonyGroupUserId}}", "group-member", "chgEquivRevOp"),
     ],
 ))
 
@@ -678,14 +683,15 @@ CASES.append(Case(
 # ===========================================================================
 # CHANNEL 2 delta — membership FLIP: addMember grants access, removeMember removes it.
 # Self-contained: bind the group first, add the member (access appears), then remove the
-# member (access gone). Reads as jwtHumanCeremony.
+# member (access gone). Reads as jwtHumanGroupCeremony.
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-GRP-MEMBERSHIP-FLIP-OK",
-    title="group membership flip: addMember(ceremonyUserId)→jwtHumanCeremony gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
+    title="group membership flip: addMember(ceremonyGroupUserId)→jwtHumanGroupCeremony gains account access; removeMember→access removed (member-tuple co-commit drives visibility)",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV9", "INV7", "GROUP", "STATE"],
     priority="P0",
     steps=[
+        deny_account_singleshot("membership-alone-denied", "jwtHumanGroupCeremony", "ACTIVE account membership grants no group rights"),
         # verifies (group membership add/remove flips materialized access)
         # Most drain-sensitive case of the suite (two async transitions on a grant-on-empty-group):
         # the add→appears / remove→gone probes can flake on the fga_outbox drain tail under
@@ -694,12 +700,12 @@ CASES.append(Case(
         *create_group("create-group", "chgrp-flip-{{runId}}", "chgFlipGrp", "chgFlipGrpOp"),
         grant_view("grant-group", [{"type": "SUBJECT_TYPE_GROUP", "id": "{{chgFlipGrp}}"}], "chgFlipAcb", "chgFlipBindOp"),
         poll_op("chgFlipBindOp"),
-        *member_op("add-member", "addMember", "chgFlipGrp", "{{ceremonyUserId}}", "chgFlipAddOp"),
-        read_account_appears("read-after-add", "jwtHumanCeremony", "group add-member"),
-        *member_op("remove-member", "removeMember", "chgFlipGrp", "{{ceremonyUserId}}", "chgFlipRmOp"),
+        *member_op("add-member", "addMember", "chgFlipGrp", "{{ceremonyGroupUserId}}", "chgFlipAddOp"),
+        read_account_appears("read-after-add", "jwtHumanGroupCeremony", "group add-member"),
+        *member_op("remove-member", "removeMember", "chgFlipGrp", "{{ceremonyGroupUserId}}", "chgFlipRmOp"),
         # removeMember co-commits the member-tuple removal in its writer-tx (awaited above), so
         # the member's `v_get` resolution via group:G#member is gone — probe the FGA decision.
-        check_until_deny("flip-gone", "user:{{ceremonyUserId}}", "v_get", "account:{{accountAId}}",
+        check_until_deny("flip-gone", "user:{{ceremonyGroupUserId}}", "v_get", "account:{{accountAId}}",
                          "group remove-member: access removed"),
         *teardown("teardown-flip", "chgFlipAcb"),
     ],
@@ -707,25 +713,26 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# CHANNEL 2 delta — group grant does NOT leak to a NON-member. A member (jwtHumanCeremony) gains
+# CHANNEL 2 delta — group grant does NOT leak to a NON-member. A member (jwtHumanGroupCeremony) gains
 # access (proves the grant is live); a never-member (jwtNoBindings) is denied (single-shot).
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-GRP-NONMEMBER-DENY",
-    title="group grant scoped to members: member jwtHumanCeremony reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
+    title="group grant scoped to members: member jwtHumanGroupCeremony reads account-A (200) but non-member jwtNoBindings is denied (404) — the group grant does not flow to non-members",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV9", "INV3", "GROUP", "NEG"],
     priority="P0",
     steps=[
+        deny_account_singleshot("membership-alone-denied", "jwtHumanGroupCeremony", "ACTIVE account membership grants no group rights"),
         # verifies (group userset confers access only on members)
         *create_group("create-group", "chgrp-nonmem-{{runId}}", "chgNmGrp", "chgNmGrpOp"),
-        *member_op("add-member", "addMember", "chgNmGrp", "{{ceremonyUserId}}", "chgNmAddOp"),
+        *member_op("add-member", "addMember", "chgNmGrp", "{{ceremonyGroupUserId}}", "chgNmAddOp"),
         grant_view("grant-group", [{"type": "SUBJECT_TYPE_GROUP", "id": "{{chgNmGrp}}"}], "chgNmAcb", "chgNmBindOp"),
         poll_op("chgNmBindOp"),
         # member gains access (poll — proves the group grant materialized).
-        read_account_appears("member-reads", "jwtHumanCeremony", "group member"),
+        read_account_appears("member-reads", "jwtHumanGroupCeremony", "group member"),
         # non-member is denied — single-shot (steady-state, never granted; polling would mask a leak).
         deny_account_singleshot("nonmember-denied", "jwtPureNoBindings", "group non-member"),
-        *revoke_then_gone("teardown-nonmem", "chgNmAcb", "user:{{ceremonyUserId}}", "group-nonmember-case", "chgNmRevOp"),
+        *revoke_then_gone("teardown-nonmem", "chgNmAcb", "user:{{ceremonyGroupUserId}}", "group-nonmember-case", "chgNmRevOp"),
     ],
 ))
 
@@ -736,17 +743,18 @@ CASES.append(Case(
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-GRP-REVOKE-BINDING-OK",
-    title="revoke group binding: member jwtHumanCeremony has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
+    title="revoke group binding: member jwtHumanGroupCeremony has access, then revoking the group binding removes the member's access (binding-tuple userset gone)",
     classes=["RBAC", "AUTHZ", "CHANNEL", "INV7", "GROUP", "STATE"],
     priority="P0",
     steps=[
+        deny_account_singleshot("membership-alone-denied", "jwtHumanGroupCeremony", "ACTIVE account membership grants no group rights"),
         # verifies (revoke binding removes materialized tuples for all members)
         *create_group("create-group", "chgrp-revoke-{{runId}}", "chgRvGrp", "chgRvGrpOp"),
-        *member_op("add-member", "addMember", "chgRvGrp", "{{ceremonyUserId}}", "chgRvAddOp"),
+        *member_op("add-member", "addMember", "chgRvGrp", "{{ceremonyGroupUserId}}", "chgRvAddOp"),
         grant_view("grant-group", [{"type": "SUBJECT_TYPE_GROUP", "id": "{{chgRvGrp}}"}], "chgRvAcb", "chgRvBindOp"),
         poll_op("chgRvBindOp"),
-        read_account_appears("member-reads", "jwtHumanCeremony", "group member (pre-revoke)"),
-        *revoke_then_gone("revoke-binding", "chgRvAcb", "user:{{ceremonyUserId}}", "group binding revoked", "chgRvRevOp"),
+        read_account_appears("member-reads", "jwtHumanGroupCeremony", "group member (pre-revoke)"),
+        *revoke_then_gone("revoke-binding", "chgRvAcb", "user:{{ceremonyGroupUserId}}", "group binding revoked", "chgRvRevOp"),
     ],
 ))
 

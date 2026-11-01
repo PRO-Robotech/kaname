@@ -1,0 +1,176 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/access-target-object-id-follows-the-object-grammar.md
+  sha256: 1d7635a30cc4a8efa1a73d61a99d02171d2f2183a7a0101401f1f145c1a9d01b
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке — то, что туда вписали; вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2). Шапка документа кругом намеренно не правлена.
+  base_commit: ddd5681af
+  content_commit: 7f58444f1
+  branch: 1004-acc
+  task: PRO-Robotech/kaname#1004
+  related_tasks: [PRO-Robotech/kaname#980]
+  lines: 193
+  round: 1
+  round_scope: >-
+    Первый круг, вся редакция. Решение диспетчера (INVALID_ARGUMENT; способ сверки состава цели и
+    его хранимая форма не меняются) не переоткрывается.
+  predecessor_record: none
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/access-target-object-id-follows-the-object-grammar.md
+    в копии kacho-workspace/tmp/kn-1004-acc @ 7f58444f1 → 1d7635a3…d9c01b (совпало с заданием)
+  measurement_revisions: >-
+    Код — рабочее дерево копии на 7f58444f1 (= ddd5681af плюс один документ); пробы ветки 1004 —
+    `git grep <образец> origin/1004` (origin/1004 = 43750c544).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-26T09:20:00Z'
+
+blocking:
+  - id: B1
+    kind: TWIN
+    scenarios: [ATI-02]
+    note: >-
+      Заголовок ATI-02 говорит «отличается от ATI-01 ровно идентификатором», но ATI-01 выдаёт
+      usr-B без «Дано», а ATI-02 — usr-D при действующей выдаче на {<base>/one, <base>/one/two}:
+      различий три (субъект, предусловие, идентификатор). Текст о близнеце вводит в заблуждение, а
+      утверждения ATI-02, зависящие от usr-D («число выдач не изменилось», «ALREADY_EXISTS не
+      производится»), близнеца при том же субъекте и том же «Дано» не имеют. Положительная проба
+      ветки 1004 этого близнеца тоже не несёт: там есть лишь контроль «повтор той же цели
+      отвергнут» (target_set_identity_world_integration_test.go:49-53 @origin/1004).
+      Исправление: близнец ATI-02 при том же «Дано» и том же usr-D — цель
+      [{registry.repositories, <base>/one}] (законный идентификатор без склеенного хвоста) →
+      Operation, done=true без error, выдач usr-D по роли и области становится две; одной строкой
+      в ATI-02 и в DoD п.1.
+  - id: B2
+    kind: FORMAT
+    scenarios: [ATI-05]
+    note: >-
+      «Тогда» ATI-05 — «отказ — повтор действующей выдачи (как до этой правки)» и «две цели с
+      разным составом … сосуществуют»: нет ни кода, ни пути (синхронно или в Operation.error), ни
+      текста, ни названных двух целей. Сегодня этот отказ — асинхронный: Create отвечает
+      Operation, UNIQUE access_bindings_active_grant_uniq даёт в воркере Operation.error code=6
+      ALREADY_EXISTS с текстом «these permissions are already granted to <usr-D> on
+      project:<проект>» (create.go:331-333, pgmaperr.go:470-478; дословная форма уже утверждается
+      в unregister_revokes_grants_world_integration_test.go:428-431 @ddd5681af). Названный
+      держатель на уровне Create — `if err == nil { require.NotNil(t, done.Error, …) }`
+      (target_set_identity_world_integration_test.go:49-53 @origin/1004) — принимает ЛЮБОЙ
+      синхронный отказ и любой код в Operation.error, поэтому охрана «кодировку не менять» на
+      уровне Create ничего не различает. Исправление: Then ATI-05 — Create без синхронной ошибки,
+      Operation.error code=6, текст дословно; «сосуществуют» — назвать вторую цель (например
+      [{<base>/one}] для usr-D — совпадает с близнецом B1); DoD п.1 — контроль утверждает код и
+      текст, а не NotNil.
+
+minor:
+  - kind: FORMAT
+    note: >-
+      ATI-01, шесть границ `/`: в «Тогда» — «синхронного отказа нет», в DoD п.2 — «done=true без
+      error». Уравнять в пользу DoD (исход операции, а не только отсутствие синхронного отказа).
+  - kind: FORMAT
+    note: >-
+      Validate копит отказы через multierr: при двух негодных идентификаторах текст будет склейкой
+      через «; ». Приёмка утверждает один отказ — это верно, но стоит одной фразой сказать, что
+      текст дословен для одного негодного элемента.
+  - kind: COVERAGE
+    note: >-
+      Порядок: проверка формы (create.go:254) идёт раньше права выдавать (create.go:278), как и
+      нынешний отказ «(empty)». Отказ синтаксический и ничего не сообщает о чужих объектах —
+      допустимо; можно назвать это в документе одной строкой, чтобы реализация не перенесла
+      проверку ниже ворот права.
+
+open_questions:
+  - id: Д1
+    disposition: default_accepted
+    note: >-
+      «Грамматика объекта» = правило регистрации (validateRelationString,
+      register_resource.go:835-852: без пробела, табуляции, перевода строки, `#`, ровно одно `:` в
+      `<тип>:<id>`, значит в id `:` нет). Возврат каретки и прочие пробельные Юникода — вне объёма.
+      Дефолт принят.
+
+premise:
+  outcome: confirmed
+  commands:
+    - sha256sum <док> → 1d7635a30cc4a8efa1a73d61a99d02171d2f2183a7a0101401f1f145c1a9d01b
+    - sed -n 72,91p internal/domain/access_binding_target.go → отвергается только пустой id, multierr
+    - sed -n 140,151p internal/domain/access_binding_target.go → Digest = sha256(join(sort(type:id), "\n")); склейка «a\ntype:b» совпадает с {a, b}
+    - internal/apps/kaname/shared/errors.go:200-205 → MapValidationErr = InvalidArgument с err.Error() как есть
+    - create.go:208 refuseNonLiveTargetType → :254 b.Validate → :278 requireGrantAuthority; :324-329 RegisteredOf — незарегистрированный объект не отвергается (границы `/` конструируемы без регистрации)
+    - git grep -n 'targetFromProto(' -- internal ':!*_test.go' → определение и один вызов handler.go:144
+    - git grep -n 'AccessTarget{Resources:' -- internal ':!*_test.go' → 3 строки (delta_input.go:65, unregistered_key.go:169, relverdict/target.go:127)
+    - git grep -n -F <имена проб и строк держателей> origin/1004 → все 9 образцов найдены
+    - gh issue view 1004 -R PRO-Robotech/kaname --json comments → DoD-proof @43750c544 (issuecomment-6404146828)
+
+constructibility:
+  method: >-
+    Посев выводом: пробы ветки 1004 (registerSlashRepo, w.seedRole, w.createDone + w.grantRequest
+    в мире newPCRWorld) прогнаны рецензентом на внешнем кластере в собственной копии
+    tmp/kn-1004-rev @43750c544 (heavy-slot integration). Полоса B — названной фикстурой:
+    _seed_role и условие стенда кейса IAM-ACB-RD-CR-TARGET-RESOURCES-OK
+    (tests/newman/cases/iam-access-binding-redesign.py:177-209).
+  seeded: 4
+  of: 6
+  named_fixture: 2
+  not_executed: 0
+  run_log: kacho-workspace/tmp/1004-rev-logs/hs-integration-20261026T085923-1416884.log (rc 1)
+  observed: >-
+    TestSlashObjectID_RegistrationGrantAndCheckAreVerbatim — PASS (6.06 s): объекты <base>/one,
+    <base>/one/two и пять границ зарегистрированы, выдача usr-B на <base>/one материализована.
+    TestAccessTarget_DistinctObjectSetsAreDistinctTargets — FAIL (1.23 s) на :63, то есть ПОСЛЕ
+    посева роли, выдачи usr-D на {<base>/one, <base>/one/two} и контроля: Operation.error
+    Code:6, Message "these permissions are already granted to usr… on project:prj…" — «Дано»
+    ATI-02/05 построено, посылка (ложный ALREADY_EXISTS) воспроизведена, путь и текст отказа
+    ATI-05 — асинхронный Operation.error (основание B2). Строки «Дано»: 1 (<base>/one и
+    <base>/one/two посеяны; <base>/o-ne этим прогоном не сеялся — тот же хелпер
+    registerSlashRepo, а регистрация для Create не обязательна, create.go:324-329), 2, 3, 4 —
+    посеяны; 5, 6 — названной фикстурой полосы B.
+
+route_signs:
+  proto: true
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+disclosure:
+  outcome: none
+  note: >-
+    Документ называет вход, на котором две цели неразличимы, и следствие — ложный отказ «уже
+    выдано». Расширения доступа следствие не даёт (AccessTarget.Contains сравнивает дословно, а
+    объект со склейкой зарегистрирован быть не может); тот же разбор уже публичен в задаче и в
+    пробе ветки 1004. Рода DISCLOSURE нет.
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  reason: verdict is CHANGES_REQUESTED
+
+event_body: "acceptance-reviewer · CHANGES_REQUESTED · sha256 1d7635a30cc4a8efa1a73d61a99d02171d2f2183a7a0101401f1f145c1a9d01b"
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1004
+  status: not_performed
+  published: false
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: []

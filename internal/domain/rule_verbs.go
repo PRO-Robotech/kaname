@@ -49,43 +49,74 @@ func NormalizeVerb(v string) string {
 	return strings.ToLower(strings.TrimSpace(v))
 }
 
-// ResolveVerbsAndTier expands a rule's authored verbs (verb `*` → набор ТИПА) and
-// derives the per-RULE back-compat tier (strongest verb-class among the rule's
-// verbs), mapped the SAME way the consumer authz-gate resolves an action:
-// get/list → viewer ; create/update (+ domain mutations) → editor ; delete → admin.
-// Per-RULE, never whole-role (B-11). The tier tuple keeps tier-based Check
-// call-sites working; the v_* tuples carry the precise per-verb enforcement.
+// ResolveVerbsAndTier разворачивает авторские глаголы правила (`*` → набор ТИПА) и
+// выводит ярус ПРАВИЛА — не роли целиком (B-11): сильнейший класс среди его
+// глаголов, чтение → `viewer`, правка и прочие изменяющие → `editor`. Ярусный
+// кортеж держит вопросы, которые спрашивают ярус; точное право по глаголу несут
+// отношения `v_*`.
+//
+// # Удаление яруса не даёт
+//
+// Прежде `delete` давал `admin`, а `admin` на области — это право выдавать доступ и
+// всё, что модель выводит из администратора: роль «только удалять» открывала
+// держателю выдачу любых прав (kaname#1035, kaname#1039; приёмка
+// role-rights-stay-within-what-is-named.md, Р1 и В1). Право удалять несёт
+// отношение `v_delete`. Правило, все глаголы которого — `delete`, яруса не даёт
+// вовсе: ответ — пустая строка, и ярусный кортеж не пишется. Удаление не даёт и
+// `viewer` — глагол удаления не даёт чтения.
+//
+// # Подстановка `*` — единственный путь к `admin`
+//
+// Правило, назвавшее все глаголы типа подстановкой, выводит ярус по развёрнутому
+// набору так же, как прежде: удаление в нём означает администратора. Роли с `*` и
+// владелец аккаунта поэтому не меняются (Р1).
+//
 // typeVerbs — набор глаголов, объявленный ТИПОМ, на который правило адресовано. Он
 // приходит ПАРАМЕТРОМ от вызывающего, который тип уже знает: владельцем таблицы
 // остаётся authzmap, а домен — без внешних зависимостей (см. объявление файла).
 // Вызывающий, у которого типа нет (правило не резолвится ни в один известный),
 // передаёт словарь, общий для всех ресурсов, — это его решение, не домена.
 func ResolveVerbsAndTier(authored, typeVerbs []string) (verbs []string, tier string) {
-	expanded := authored
 	for _, v := range authored {
 		if v == "*" {
-			expanded = typeVerbs
-			break
+			return typeVerbs, wildcardTier(typeVerbs)
 		}
 	}
-	hasEditor, hasAdmin := false, false
-	for _, v := range expanded {
-		switch verbBackCompatTier(v) {
-		case "admin":
-			hasAdmin = true
+	hasViewer, hasEditor := false, false
+	for _, v := range authored {
+		switch verbTier(v) {
 		case "editor":
 			hasEditor = true
+		case "viewer":
+			hasViewer = true
 		}
 	}
 	switch {
-	case hasAdmin:
-		tier = "admin"
 	case hasEditor:
 		tier = "editor"
-	default:
+	case hasViewer:
 		tier = "viewer"
 	}
-	return expanded, tier
+	return authored, tier
+}
+
+// wildcardTier — ярус подстановки `*` по развёрнутому набору типа: удаление в нём
+// означает администратора, иначе — сильнейший класс прочих глаголов; набор без
+// глаголов — наблюдатель. Вывод тот же, что до kaname#1035: роль с `*` не меняется.
+func wildcardTier(expanded []string) string {
+	hasEditor := false
+	for _, v := range expanded {
+		if NormalizeVerb(v) == verbDelete {
+			return "admin"
+		}
+		if verbTier(v) == "editor" {
+			hasEditor = true
+		}
+	}
+	if hasEditor {
+		return "editor"
+	}
+	return "viewer"
 }
 
 // ScopeSelfVerbs returns the UNION of authored verbs the role's rules grant on the
@@ -107,6 +138,17 @@ func ResolveVerbsAndTier(authored, typeVerbs []string) (verbs []string, tier str
 // Returns nil when no rule applies to the scope self (a content-only role —
 // e.g. `compute.instance` rules — grants nothing ON the account/project object,
 // only on its content; the scope-self member is then absent, fail-closed).
+//
+// # Подстановка сохраняется знаком `*` рядом с развёрнутым набором
+//
+// Подстановка `*` разворачивается в набор ТИПА якоря — из него пишутся отношения
+// `v_*`. Сам знак `*` при этом остаётся в ответе: ярус выводится из него
+// ([ResolveVerbsAndTier]), и только подстановка даёт ярус `admin` — правило,
+// перечислившее те же глаголы поимённо, его не даёт (удаление яруса не даёт,
+// kaname#1035). Без знака сборщик кортежей якоря видел бы развёрнутый набор, и
+// владелец аккаунта (`*.*`) молча понизился бы до редактора. Знак отношением не
+// становится: глаголом типа он не является ([IsVerbOfType]), и классу он не
+// достаётся (класс получает только чтение, [IsClassReadVerb]).
 func (rs Rules) ScopeSelfVerbs(scopeResource string, typeVerbs []string) []string {
 	var collected []string
 	matched := false
@@ -139,29 +181,34 @@ func (rs Rules) ScopeSelfVerbs(scopeResource string, typeVerbs []string) []strin
 		return nil
 	}
 	verbs, _ := ResolveVerbsAndTier(collected, typeVerbs)
+	for _, v := range collected {
+		if v == wildcard {
+			return append(append([]string(nil), verbs...), wildcard)
+		}
+	}
 	return verbs
 }
 
-// verbBackCompatTier maps a rule verb to the tier the consumer authz-gate resolves
-// it to (resolveActionToRelation parity): get/list → viewer, delete → admin, else
-// editor (create/update/domain mutations). ONLY for the back-compat tier tuple;
-// the v_* tuples carry the precise per-verb enforcement. delete→admin (NOT editor)
-// keeps Check(delete)→admin allowed for a rule granting delete.
+// verbDelete — глагол удаления в канонической форме.
+const verbDelete = "delete"
+
+// verbTier — ярус одного глагола правила вне подстановки: чтение → `viewer`,
+// удаление → пустая строка (яруса не даёт, Р1 kaname#1035), прочее (создание,
+// правка, доменные изменения) → `editor`. Только для ярусного кортежа: точное право
+// по глаголу несут отношения `v_*`.
 //
-// The read-style domain verbs getTargetStates / listOperations resolve to VIEWER —
-// in lockstep with authzmap.verbClass and the consumer resolveActionToRelation map
-// (authorize_service.go), which both classify them as read-tier. Keeping all three
-// aligned is the tier-parity invariant (F-53): a rules-role must emit the SAME tier
-// the legacy permissions did, never a stronger one (no escalation). Without this,
-// the nlb loadbalancer.operator / target_manager roles would emit editor on
-// listeners/targetGroups where legacy emitted viewer.
-func verbBackCompatTier(verb string) string {
+// Доменные чтения getTargetStates и listOperations — наблюдательские, в лад с
+// `authzmap.verbClass` и картой `resolveActionToRelation` (authorize_service.go):
+// согласие трёх классификаторов — инвариант паритета ярусов (F-53), роль правил не
+// получает яруса сильнее прежнего. Без этого роли nlb loadbalancer.operator и
+// target_manager давали бы `editor` на слушателях и группах целей.
+func verbTier(verb string) string {
 	switch NormalizeVerb(verb) {
 	case "get", "list", "view", "watch", "describe", "read",
 		"gettargetstates", "listoperations":
 		return "viewer"
-	case "delete":
-		return "admin"
+	case verbDelete:
+		return ""
 	default:
 		return "editor"
 	}

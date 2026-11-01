@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 901
+Всего кейсов: 911
 
 ## Перепись по модулям
 
@@ -40,12 +40,13 @@
 | `cases/iam-access-binding-account-scope.py` | 9 |
 | `cases/iam-access-binding-include-revoked.py` | 2 |
 | `cases/iam-access-binding-revocation-reason.py` | 2 |
-| `cases/iam-access-binding-redesign.py` | 19 |
+| `cases/iam-access-binding-redesign.py` | 20 |
 | `cases/iam-account-redesign.py` | 9 |
 | `cases/iam-account.py` | 58 |
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
 | `cases/iam-flat-authz-vbc.py` | 2 |
 | `cases/iam-grant-delegation.py` | 5 |
+| `cases/iam-role-rights-stay-named.py` | 4 |
 | `cases/iam-group.py` | 33 |
 | `cases/iam-invite-grant-fga.py` | 4 |
 | `cases/iam-invite-resend.py` | 4 |
@@ -62,6 +63,7 @@
 | `cases/iam-role-redesign.py` | 10 |
 | `cases/iam-role.py` | 44 |
 | `cases/iam-service-account.py` | 28 |
+| `cases/iam-service-account-creator.py` | 5 |
 | `cases/iam-subject-privileges-read.py` | 6 |
 | `cases/iam-system-class-subjects.py` | 21 |
 | `cases/iam-system-grant-visibility.py` | 1 |
@@ -432,7 +434,7 @@
 - `IAM-AB-URG-E1-REVOCATION-REASON-VISIBLE-OK`
 - `IAM-AB-URG-E2-ACTIVE-HAS-NO-REASON-OK`
 
-## `cases/iam-access-binding-redesign.py` — 19 кейсов
+## `cases/iam-access-binding-redesign.py` — 20 кейсов
 
 > Case-set для AccessBindingService — IAM-1 REDESIGN (authz-core: scope+target+revoke).
 
@@ -440,6 +442,7 @@
 - `IAM-ACB-RD-CR-TARGET-RESOURCES-OK`
 - `IAM-ACB-RD-CR-NO-TARGET-NEG`
 - `IAM-ACB-RD-CR-TARGET-UNKNOWN-TYPE-NEG`
+- `IAM-ACB-RD-CR-TARGET-OBJECT-ID-GRAMMAR-NEG`
 - `IAM-ACB-RD-CR-TARGET-LIVE-CATALOG-OK`
 - `IAM-ACB-RD-CR-TARGET-MISSPELLED-TYPE-NEG`
 - `IAM-ACB-RD-CR-SCOPETYPE-REQUIRED-NEG`
@@ -1359,3 +1362,20 @@
 - `IAM-OWNREST-NEG-PAGE-SIZE`
 - `IAM-OWNREST-NEG-FOREIGN-OPERATION`
 - `IAM-OWNREST-NEG-FOREIGN-MUTATION`
+
+## `cases/iam-service-account-creator.py` — 5 кейсов
+
+- `IAM-SAC-GR-AUTHZ-E1`
+- `IAM-SAC-CR-CRUD-E2`
+- `IAM-SAC-CR-AUTHZ-E3`
+- `IAM-SAC-KEY-AUTHZ-E4`
+- `IAM-SAC-CR-AUTHZ-E5`
+
+## `cases/iam-role-rights-stay-named.py` — 4 кейса
+
+- `IAM-ESC-E1`
+- `IAM-ESC-E2`
+- `IAM-ESC-E3`
+- `IAM-ESC-E4`
+
+ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакция 4.

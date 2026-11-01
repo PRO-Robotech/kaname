@@ -101,10 +101,12 @@ func TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock(t *test
 // forward: ReconcileObjectForward delegated every iam-direct type straight to the FULL
 // ReconcileObject → EXCLUSIVE lock (f.locks>0).
 func TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLock(t *testing.T) {
-	// Owner-shape selector: full CRUD over iam.accessBinding (delete ⇒ admin tier).
+	// Селектор формы владельца: подстановка `*` над iam.accessBinding — весь набор
+	// типа и ярус `admin`. Поимённый набор тех же глаголов `admin` не даёт:
+	// удаление яруса не выводит (kaname#1035), а владелец (`*.*`) несёт `*`.
 	fp := domain.Rule{
 		Module: "iam", Resources: []string{"accessBinding"},
-		Verbs: []string{"get", "list", "create", "update", "delete"},
+		Verbs: []string{"*"},
 	}.Fingerprint()
 	f := &fakeStore{
 		scope:       domain.ScopeAnchor{Type: "account", ID: "acc-1"},
@@ -112,7 +114,7 @@ func TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLo
 		selectors: []domain.RuleSelector{{
 			Arm: domain.ArmAnchor, RuleFP: fp,
 			ObjectTypes: []string{"iam.accessBinding"},
-			Verbs:       []string{"get", "list", "create", "update", "delete"},
+			Verbs:       []string{"*"},
 		}},
 		// The freshly-created binding-OBJECT lives in the iam-direct feed (own table),
 		// contained in account acc-1 (parentAccount).

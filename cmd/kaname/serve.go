@@ -1159,11 +1159,14 @@ func runServe(cfg config.Config) error {
 	}
 	// Ключи у слушателей РАЗНЫЕ, и это не деталь: публичный ключуется личностью
 	// конечного пользователя (за краем сидит арендатор, и предел объявлен на
-	// него), внутренний — личностью СЕРТИФИКАТА вызывающего модуля, потому что
-	// запрос модуля несёт личности разных арендаторов и ключ по арендатору
-	// дробил бы бюджет соседа на тысячу вёдер. У внутреннего этот ключ — уровень
-	// модуля; под ним стоит уровень экземпляра того же модуля (ниже).
-	publicAdmission, err := grpcsrv.NewAdmission("public", publicAdmissionLimits, grpcsrv.PrincipalSubject)
+	// него; аноним — адресом источника, а не общим ведром, и Check платит
+	// бюджетом чтений, kaname#991), внутренний — личностью СЕРТИФИКАТА
+	// вызывающего модуля, потому что запрос модуля несёт личности разных
+	// арендаторов и ключ по арендатору дробил бы бюджет соседа на тысячу вёдер.
+	// У внутреннего этот ключ — уровень модуля; под ним стоит уровень
+	// экземпляра того же модуля (ниже).
+	publicAdmission, err := grpcsrv.NewAdmission("public", publicAdmissionLimits,
+		publicAdmissionSubject(ownFrontSAN), publicAdmissionOptions()...)
 	if err != nil {
 		return fmt.Errorf("ограничитель допуска публичного слушателя: %w", err)
 	}
@@ -1542,7 +1545,11 @@ func runServe(cfg config.Config) error {
 	restAddr := restFront.addr
 	var restHandler http.Handler
 	if restFront.Enabled() {
-		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts)
+		// Потолки тела и одновременности (kaname#990): края у отдельно
+		// поставленной службы нет, и держит их фронт сам.
+		limits := restFrontLimits(cfg)
+		logRESTFrontLimits(logger, limits)
+		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts, limits)
 		if err != nil {
 			return fmt.Errorf("публичный REST-фронт: %w", err)
 		}

@@ -35,8 +35,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/group"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -90,6 +93,10 @@ func (w *fakeMemberWriter) Rollback(context.Context) error { return nil }
 
 // fakeGroupWriter records the group_members DML; satisfies group.WriterIface.
 type fakeGroupWriter struct {
+	// notMember — участник не из аккаунта группы (Д-3).
+	notMember   bool
+	belongAsked []domain.GroupMember
+
 	added   []domain.GroupMember
 	removed []struct {
 		gid domain.GroupID
@@ -109,6 +116,16 @@ func (g *fakeGroupWriter) Delete(context.Context, domain.GroupID) error {
 }
 func (g *fakeGroupWriter) AddMember(_ context.Context, m domain.GroupMember) error {
 	g.added = append(g.added, m)
+	return nil
+}
+
+// RequireMemberOfGroupAccount — Д-3: `notMember` отвечает отказом той формы, что
+// у хранилища («ссылки нет»); вызовы записываются для пробы порядка.
+func (g *fakeGroupWriter) RequireMemberOfGroupAccount(_ context.Context, m domain.GroupMember) error {
+	g.belongAsked = append(g.belongAsked, m)
+	if g.notMember {
+		return iamerr.Wrapf(iamerr.ErrReferenceMissing, "referenced resource does not exist; create it or correct the reference before retrying")
+	}
 	return nil
 }
 func (g *fakeGroupWriter) RemoveMember(_ context.Context, gid domain.GroupID, mt domain.SubjectType, mid domain.SubjectID) error {
@@ -177,6 +194,39 @@ func TestAddMember_CoCommitsFGAMemberTuple_ServiceAccount(t *testing.T) {
 		Object:   "group:grp0000000000000abcd",
 	}, w.writeEmitted[0][0], "service_account member uses the service_account FGA prefix")
 	assert.Empty(t, w.delEmitted, "AddMember must not emit a delete")
+}
+
+// Д-3 (kaname#1037): участник не из аккаунта группы — операция завершается
+// отказом хранилища как есть, и ни строки состава, ни факта модели, ни события
+// снятия кэша не остаётся. Близнец — тот же вызов с участником из аккаунта:
+// принадлежность спрошена ровно один раз, и вставка идёт после неё.
+func TestAddMember_MemberOutsideTheGroupAccountLeavesNothing(t *testing.T) {
+	in := AddMemberInput{
+		GroupID:    domain.GroupID("grp0000000000000abcd"),
+		MemberType: domain.SubjectTypeServiceAccount,
+		MemberID:   domain.SubjectID("sva0000000000000bbbb"),
+	}
+
+	repo, w := newFakeMemberRepo()
+	w.gw.notMember = true
+	_, err := NewAddMemberUseCase(repo, nil).doAdd(context.Background(), in)
+	require.Error(t, err, "Д-3: участник не из аккаунта группы принят")
+	// Отказ хранилища проходит отображение транзакции записи (shared.MapRepoErrAt):
+	// наружу — `FailedPrecondition` с общим текстом «ссылки нет», тем же, что у
+	// несуществующего участника (ESC-23 f).
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err), "Д-3: код отказа (%v)", err)
+	assert.Equal(t, "referenced resource does not exist; create it or correct the reference before retrying",
+		status.Convert(err).Message(), "Д-3: текст отказа — «ссылки нет»")
+	assert.Empty(t, w.gw.added, "Д-3: строка состава вставлена")
+	assert.Empty(t, w.writeEmitted, "Д-3: факт модели записан")
+	assert.False(t, w.committed, "Д-3: транзакция записи закоммичена")
+
+	twin, tw := newFakeMemberRepo()
+	_, err = NewAddMemberUseCase(twin, nil).doAdd(context.Background(), in)
+	require.NoError(t, err, "Д-3 близнец: участник из аккаунта группы")
+	assert.Equal(t, []domain.GroupMember{{GroupID: in.GroupID, MemberType: in.MemberType, MemberID: in.MemberID}},
+		tw.gw.belongAsked, "Д-3 близнец: принадлежность спрошена один раз о добавляемом")
+	require.Len(t, tw.gw.added, 1, "Д-3 близнец: строка состава")
 }
 
 func TestRemoveMember_CoCommitsFGAMemberTupleDelete(t *testing.T) {

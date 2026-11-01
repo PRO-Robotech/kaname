@@ -65,6 +65,8 @@ BINDING_TARGET_ONLY_IDS = frozenset({
     "userAABId",
     "userNOBId",
     "userINVId",
+    "groupMemberAUserId",
+    "groupNonMemberAUserId",
     "userPA1Id",
     "userPureNoBindingsId",
 })
@@ -115,11 +117,15 @@ def header_principal_claims(doc: str) -> list[tuple[int, str, str]]:
 
 PRINCIPAL_PAIRINGS = {
     "svaAId": "jwtSAA",
+    "saCreatorId": "jwtSaCreator",
     "svaInviteeId": "jwtInvitee",
     "svaNoGrantId": "jwtSANoGrant",
     "svaPureNoGrantId": "jwtPureNoBindings",
     "svaStorageCreateListOnlyId": "jwtStorageCreateListOnlyA",
 }
+
+# Человеческий токен проверяется по sub своей церемонии, машинный — по enrichment.
+HUMAN_PRINCIPAL_PAIRINGS = {"ceremonyGroupUserId": "jwtHumanGroupCeremony"}
 
 
 def token_principal_id(token: str) -> str:

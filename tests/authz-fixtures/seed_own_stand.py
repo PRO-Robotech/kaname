@@ -208,6 +208,7 @@ MINTED_CREDENTIALS = (
     "jwtNoBindings",
     "jwtPureNoBindings",
     "jwtSAA",
+    "jwtSaCreator",
     "jwtSANoGrant",
 )
 # Удостоверение в ЗАКОННО-ДЕФЕКТНОМ состоянии. Названо отдельной группой, потому
@@ -246,6 +247,8 @@ MINTED_IDENTIFIERS = (
     "userAABId",
     "userNOBId",
     "userINVId",
+    "groupMemberAUserId",
+    "groupNonMemberAUserId",
     # Цели привязки матрицы отказов (`cases/authz-deny.py`): строки людей, на
     # которые субъекты матрицы пробуют выдать себе права и чью запись читают.
     # Предъявителя у них нет (`principal_pairings.BINDING_TARGET_ONLY_IDS`), и
@@ -254,6 +257,7 @@ MINTED_IDENTIFIERS = (
     "userPA1Id",
     "userPureNoBindingsId",
     "svaAId",
+    "saCreatorId",
     "svaInviteeId",
     "svaNoGrantId",
     "svaPureNoGrantId",
@@ -760,6 +764,21 @@ def post_operation(http: Http, public: str, token: str, path: str,
     return await_operation(http, public, token, op_id)
 
 
+def active_group_account_member(http: Http, public: str, token: str,
+                                account_id: str, email: str, user_id: str) -> None:
+    """Групповой субъект: ACTIVE-членство аккаунта без назначения ролей."""
+    row = post_operation(http, public, token, "/iam/v1/memberships",
+                         {"accountId": account_id, "email": email},
+                         "условие принадлежности участника аккаунту группы")
+    expected = {"accountId": account_id, "userId": user_id, "state": "ACTIVE"}
+    if not row.get("id") or any(row.get(k) != v for k, v in expected.items()):
+        raise Finding("групповой субъект не получил ACTIVE-членство нужного аккаунта")
+    code, read = http.json_ask(
+        f"{public}/iam/v1/accounts/{account_id}/memberships/{row['id']}", token=token)
+    if code != 200 or any(read.get(k) != v for k, v in expected.items()):
+        raise Finding("чтение членства группового субъекта не подтвердило ACTIVE/аккаунт/человека")
+
+
 def exchange(http: Http, token_url: str, client_id: str, key_pem: str,
              key_id: str, what: str) -> str:
     """Подписанное утверждение → токен НАШЕЙ чеканки."""
@@ -1240,6 +1259,22 @@ def run(args: argparse.Namespace) -> int:
                   "jwtSAA (называет себя на /iam/v1/me)")
     step("jwtSAA получен обменом и ПРИНЯТ фронтом на /iam/v1/me")
 
+    # SAC-E1…E5: отдельный домашний аккаунт, без выдачи роли до E1.
+    creator_email = f"seed-{run_id}-creator@kaname.local"
+    creator_person = register_person(lane_http, creator_email, person_password())
+    confirm_person(lane_http, mailbox, creator_email, creator_person)
+    creator_tenant = resolve_tenant(http, public, boot, creator_email)
+    if creator_tenant["accountId"] in {t["accountId"] for t in tenants.values()}:
+        raise Finding("домашний аккаунт создателя совпал с целью SAC-E2/E5")
+    sva_creator = make_service_account(http, public, boot, creator_tenant["accountId"],
+                                       f"seed-{run_id}-creator", run_id,
+                                       "создание принципала SAC-E1…E5")
+    assert_no_bindings(http, public, boot, sva_creator)
+    creds["jwtSaCreator"] = sa_token(http, public, token_url, boot, sva_creator,
+                                     run_id, "создатель служебных учёток")
+    assert_serves(http, public, creds["jwtSaCreator"], "/iam/v1/me", "jwtSaCreator")
+    step("создатель в отдельном аккаунте: токен обменян и принят; выдач ещё нет")
+
     say("── субъект БЕЗ выдач: тот, кому не выдано ничего ─────────────────────")
     sva_pure = make_service_account(http, public, boot, tenants["a"]["accountId"],
                                     f"seed-{run_id}-pure", run_id,
@@ -1319,6 +1354,21 @@ def run(args: argparse.Namespace) -> int:
             "цель привязки членства совпала с уже заведённым человеком — слоты "
             "набора перестали быть независимы")
     step(f"и стала строкой человека: {user_inv}")
+
+    # kaname#1037: общие NOB/INV/AAB сохраняют прежние аккаунты; группа получает своих людей.
+    group_people = {}
+    for tag, variable in (("member", "groupMemberAUserId"),
+                          ("nonmember", "groupNonMemberAUserId")):
+        email = f"seed-{run_id}-group-{tag}@kaname.local"
+        session = register_person(lane_http, email, person_password())
+        confirm_person(lane_http, mailbox, email, session)
+        person = resolve_tenant(http, public, boot, email)
+        active_group_account_member(http, public, boot, tenants["a"]["accountId"],
+                                    email, person["userId"])
+        group_people[variable] = person["userId"]
+    if len(set(group_people.values())) != 2:
+        raise Finding("групповые участник и неучастник совпали")
+    step("два отдельных групповых субъекта имеют ACTIVE-членство A без назначения ролей")
 
     say("── ЦЕЛИ ПРИВЯЗКИ МАТРИЦЫ ОТКАЗОВ: строки людей без предъявителя ───────")
     #
@@ -1492,10 +1542,12 @@ def run(args: argparse.Namespace) -> int:
         "userNOBId": user_nob,
         # Цель привязки членства группы — человек, и только цель.
         "userINVId": user_inv,
+        **group_people,
         # Цели привязки матрицы отказов — люди, и только цели.
         "userPA1Id": targets["pa1"],
         "userPureNoBindingsId": targets["pure"],
         "svaAId": sva_a,
+        "saCreatorId": sva_creator,
         "svaInviteeId": sva_inv,
         "svaNoGrantId": sva_nogrant,
         "svaPureNoGrantId": sva_pure,
