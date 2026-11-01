@@ -22,9 +22,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # ЧТО ГОНЯЕТСЯ ЗДЕСЬ — И ЧТО НЕ ГОНЯЕТСЯ
 #
-# Группы ниже — те задания конвейера (`.github/workflows/ci.yml`), которые
-# исполнимы на машине разработчика БЫСТРО: сборка · vet · vet под тегом
-# integration · gofmt · пробы `-short` без детектора гонок · audit-list-filter.
+# Группы ниже — задания конвейера (`.github/workflows/ci.yml`), исполняемые
+# до отправки во внешнем кластере: сборка · vet · vet под тегом
+# integration · gofmt · пробы `-short` без детектора гонок · audit-list-filter ·
+# pinned golangci-lint по затронутым пакетам.
 # Форма у них ТА ЖЕ, что в конвейере, и там, где рецепт уже объявляет цель,
 # зовётся цель, а не инструмент напрямую.
 #
@@ -36,14 +37,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # БЮДЖЕТ ПАМЯТИ — ДЕРЖИТСЯ МЕХАНИЗМОМ, А НЕ ОЦЕНКОЙ
 #
-# Хук исполняется на каждой отправке, на машине, где параллельно идут другие
-# полосы. Решение владельца 2026-09-24: память машины не переваливает за 45 ГБ,
-# тяжёлое локально не гоняется — его гоняет конвейер на АГРЕГАТЕ волны. Прежняя
-# редакция звала `go test ./... -race` с параллелизмом по числу ядер и
-# `make lint` без всякого потолка. Отсюда три свойства:
+# Хук отправки исполняется Job-ом внешнего кластера. Линтер ограничен пакетами
+# диапазона отправки, при недоступной базе или смене конфигурации — весь модуль.
+# Прежнее решение 2026-09-24 исключало линтер ради памяти машины; перенос
+# отправки во внешний кластер снял эту предпосылку (kaname#1050).
 #
-#   · детектор гонок и golangci-lint здесь НЕ гоняются — они в перечне
-#     непроверенного, их вердикт выносит конвейер;
+#   · детектор гонок здесь НЕ гоняется — его вердикт выносит конвейер;
 #   · параллелизм Go — 4 (`GOFLAGS` дополняется `-p=4` последним, поэтому
 #     перекрывает любое прежнее `-p`);
 #   · весь прогон идёт под потолком памяти 10 ГБ без подкачки — хук
@@ -96,15 +95,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # ЧТО ЭТОТ ХУК СУДИТ — И ЧЕГО ОН ПОКА НЕ СУДИТ
 #
-# Он судит РАБОЧУЮ КОПИЮ, а уезжает КОММИТ. Совпадают они у всякого, кто
-# отправляет то, что только что написал, и расходятся у того, кто отправляет
-# старую ветку из грязного дерева: тогда проверено не то, что поедет.
-#
-# Названо здесь, а не умолчано, потому что тихая неполнота — это ровно тот
-# класс, ради которого файл написан. Закрывается отдельным производителем
-# диапазона (git подаёт хуку `<local_ref> <local_sha> <remote_ref>
-# <remote_sha>`); так сделано в соседнем репозитории —
-# `kacho:scripts/hooks/prepush-range.sh`. Здесь этого ещё нет.
+# Шесть прежних групп судят рабочую копию. Их область этим изменением не
+# меняется. Группа golangci-lint судит каждый distinct отправляемый COMMIT:
+# диапазон берётся из stdin git, содержимое — из изолированного checkout SHA.
+# Ни HEAD другой ветки, ни dirty-файлы не подменяют bytes отправляемого tip.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # КАК ОБОЙТИ — ПЕРЕЧЕНЬ ПОЛНЫЙ, И ЭТО ЕГО СВОЙСТВО
@@ -141,7 +135,7 @@ not_run_notice() {
         echo
         echo "pre-push: исполнено групп проверок: $executed"
         echo "ЗДЕСЬ НЕ ГОНЯЛОСЬ (и потому «хук зелен» не значит «конвейер зелен»):"
-        echo "  детектор гонок (-race) · golangci-lint (make lint) — тяжёлое, на агрегате конвейером ·"
+        echo "  детектор гонок (-race) — на агрегате конвейером ·"
         echo "  интеграция на контейнерах · самостоятельный клон · buf breaking против ствола ·"
         echo "  каталог прав и канон модели (нужен чекаут дерева платформы) · govulncheck · gosec ·"
         echo "  вердикт ствола"
@@ -220,6 +214,9 @@ cd "$ROOT" || finish 2 "pre-push: ОТКАЗ — в корень рабочей 
 
 # Вход git читается ОДИН раз: его судят и страж правила, и перепись ссылок ниже.
 push_input="$(cat)"
+# Снимок main один на весь запуск. Lint не fetch-ит и не перечитывает движущуюся
+# ссылку: новая ветка сравнивается с merge-base именно этого снимка.
+lint_main_sha="$(git rev-parse --verify "refs/remotes/${1:-origin}/main^{commit}" 2>/dev/null)" || lint_main_sha=""
 
 # ── СТРАЖ ПРАВИЛА ВЕТКИ И КОММИТА — ПЕРВЫМ, ДО ОБХОДА ПРОВЕРОК ──────────────
 #
@@ -406,6 +403,139 @@ group_probes() {
 
 group_listfilter() { need make || return "$UNMET_RC"; make audit-list-filter; }
 
+# Один distinct tip проверяется в своей копии ЗАКОММИЧЕННОГО дерева. Shared
+# clone заимствует только immutable объекты; checkout, config и cache отдельны.
+# Копия не регистрирует worktree в пользовательском репозитории.
+lint_committed_tip() (
+    local tip="$1" snapshot="$scratch/lint-tree.$1"
+    local local_ref local_sha remote_ref remote_sha base paths full="" path dir file found want have
+    local -a packages=()
+    local -A seen=()
+    need make || return "$UNMET_RC"
+    paths="$scratch/lint.paths.$tip"
+    : > "$paths"
+    [ "$refs_total" -gt 0 ] || full="нет входа git push"
+    while read -r local_ref local_sha remote_ref remote_sha; do
+        [ -n "${local_ref:-}" ] && [ "${local_sha:-$zero}" != "$zero" ] || continue
+        base="${remote_sha:-$zero}"
+        if [ "$base" = "$zero" ]; then
+            echo "lint: main snapshot=${lint_main_sha:-недоступен}, tip=$local_sha"
+            if [ -n "$lint_main_sha" ]; then
+                base="$(git merge-base "$lint_main_sha" "$local_sha" 2>/dev/null)" || base=""
+            else
+                base=""
+            fi
+        fi
+        if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            full="база отправки недоступна"
+            continue
+        fi
+        echo "lint: диапазон $base..$local_sha ($remote_ref)"
+        # Без распознавания rename получаются обе стороны перемещения: D и A.
+        if ! git diff --no-renames --name-only -z "$base" "$local_sha" -- >> "$paths"; then
+            declare_unmet "диапазон lint не прочитан: $base..$local_sha"
+            return "$UNMET_RC"
+        fi
+    done <<< "$push_input"
+    echo "lint: committed tip=$tip"
+    trap 'rm -rf "$snapshot"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM HUP
+    if ! git clone --shared --no-checkout --quiet "$ROOT" "$snapshot" ||
+       ! git -C "$snapshot" checkout --quiet --detach "$tip"; then
+        declare_unmet "закоммиченное дерево lint не получено: $tip"
+        return "$UNMET_RC"
+    fi
+    cd "$snapshot" || { declare_unmet "не перейти в дерево lint $tip"; return "$UNMET_RC"; }
+    while IFS= read -r -d '' path; do
+        case "$path" in
+            .github/golangci.yml|Makefile|go.mod|go.sum|go.work|go.work.sum) full="изменена конфигурация: $path" ;;
+            *.go)
+                dir="${path%/*}"; [ "$dir" != "$path" ] || dir="."
+                # Удалённый пакет в линтер не передаётся; оставшийся пакет судится.
+                found=0
+                for file in "$dir"/*.go; do [ ! -f "$file" ] || found=1; done
+                [ "$found" = 1 ] || continue
+                case "$dir" in *[[:space:]]*) full="путь пакета содержит пробел"; continue ;; esac
+                if [ -z "${seen[$dir]+present}" ]; then
+                    seen[$dir]=1
+                    if [ "$dir" = . ]; then packages+=(.); else packages+=("./$dir"); fi
+                fi
+                ;;
+        esac
+    done < "$paths"
+    if [ -n "$full" ]; then
+        packages=(./...)
+        echo "lint: полный модуль — $full"
+    elif [ "${#packages[@]}" -eq 0 ]; then
+        echo "lint: затронутых существующих пакетов Go 0 — линтеру нечего передать"
+        return 0
+    fi
+    echo "lint: областей ${#packages[@]} — ${packages[*]}"
+    need golangci-lint || return "$UNMET_RC"
+    # GNU make читает объявленный пин; второй литерал версии здесь не заводится.
+    want="$(make --no-print-directory -s --eval='prepush-lint-pin: ; @printf "%s\n" "$(GOLANGCI_LINT_VERSION)"' prepush-lint-pin)" || {
+        declare_unmet "пин golangci-lint из Makefile не прочитан"; return "$UNMET_RC";
+    }
+    have="$(golangci-lint version 2>/dev/null)" || have=""
+    if [ -z "$want" ] || [[ "$have" != *"version ${want#v} "* ]]; then
+        declare_unmet "golangci-lint не отвечает пину $want: $have"
+        return "$UNMET_RC"
+    fi
+    GOLANGCI_LINT_CACHE="$snapshot/.cache/golangci-lint" golangci-lint run --timeout=10m --config=.github/golangci.yml "${packages[@]}"
+)
+
+# Диапазоны одинакового tip объединяются; разные tips никогда не подменяют
+# содержимое друг друга. Отказ одного не останавливает перепись остальных.
+group_lint() {
+    local local_ref local_sha remote_ref remote_sha tip original_unmet="$UNMET_FILE" output rc verdict crc
+    local red_tips=0 unmet_tips=0 undecided_tips=0
+    local -a tips=()
+    local -A inputs=()
+    while read -r local_ref local_sha remote_ref remote_sha; do
+        [ -n "${local_ref:-}" ] && [ "${local_sha:-$zero}" != "$zero" ] || continue
+        tip="$(git rev-parse --verify "$local_sha^{commit}" 2>/dev/null)" || {
+            declare_unmet "tip lint не разрешается в commit: $local_sha"; return "$UNMET_RC";
+        }
+        if [ -z "${inputs[$tip]+present}" ]; then tips+=("$tip"); inputs[$tip]=""; fi
+        inputs[$tip]+="$local_ref $local_sha $remote_ref $remote_sha"$'\n'
+    done <<< "$push_input"
+    if [ "${#tips[@]}" -eq 0 ]; then
+        tip="$(git rev-parse HEAD)" || { declare_unmet "HEAD lint не прочитан"; return "$UNMET_RC"; }
+        tips=("$tip"); inputs[$tip]=""
+    fi
+    for tip in "${tips[@]}"; do
+        UNMET_FILE="$scratch/lint-unmet.$tip"
+        : > "$UNMET_FILE"
+        output="$(push_input="${inputs[$tip]}" lint_committed_tip "$tip" 2>&1)"
+        rc=$?
+        printf '%s\n' "$output"
+        verdict="$("$CLASSIFY" --rc "$rc" --unmet "$UNMET_FILE")"
+        crc=$?
+        if [ "$crc" -ne 0 ]; then undecided_tips=$((undecided_tips + 1))
+        else
+            case "$verdict" in
+                red) red_tips=$((red_tips + 1)) ;;
+                unmet) unmet_tips=$((unmet_tips + 1)) ;;
+            esac
+        fi
+    done
+    UNMET_FILE="$original_unmet"
+    echo "lint: distinct tips ${#tips[@]}, красных $red_tips, без условия $unmet_tips, без категории $undecided_tips"
+    if [ "$red_tips" -gt 0 ]; then
+        if [ "$unmet_tips" -gt 0 ] || [ "$undecided_tips" -gt 0 ]; then
+            declare_axis "не все tips получили вердикт: без условия $unmet_tips, без категории $undecided_tips"
+        fi
+        return 1
+    fi
+    [ "$undecided_tips" -eq 0 ] || return "$UNMET_RC"
+    if [ "$unmet_tips" -gt 0 ]; then
+        declare_unmet "lint tips без условия: $unmet_tips"
+        return "$UNMET_RC"
+    fi
+    return 0
+}
+
 # Ведомость групп — ЕДИНСТВЕННЫЙ источник и перечня, и числа.
 groups=(
     "сборка|go build ./...|group_build"
@@ -414,6 +544,7 @@ groups=(
     "gofmt|gofmt по индексу git|group_gofmt"
     "пробы|go test ./... -short (вердикт прогонщиком)|group_probes"
     "listfilter|make audit-list-filter|group_listfilter"
+    "golangci-lint|пин Makefile, пакеты диапазона отправки|group_lint"
 )
 
 declared=0
@@ -428,6 +559,8 @@ axes_names=()
 
 scratch="$(mktemp -d)" || finish 2 "pre-push: ОТКАЗ — временный каталог не создан, судить не в чем"
 trap 'rm -rf "$scratch"' EXIT
+trap 'finish 130 "pre-push: прерван сигналом INT"' INT
+trap 'finish 143 "pre-push: прерван сигналом TERM/HUP"' TERM HUP
 
 # ВРЕМЕННЫЙ КАТАЛОГ ВНУТРИ СУДИМОГО ДЕРЕВА — ТРЕТЬЯ КАТЕГОРИЯ, А НЕ КРАСНОЕ.
 #
