@@ -72,6 +72,29 @@ concurrency:
   group: e2e-newman-${{ github.ref }}
   cancel-in-progress: true
 
+# Used tool providers; these declarations also feed the native runner bootstrap.
+env:
+  KANAME_RUNNER_IMAGE: ubuntu:24.04
+  KANAME_RUNNER_OS: ubuntu/24.04
+  KANAME_RUNNER_SNAPSHOT: https://snapshot.ubuntu.com/ubuntu/20261025T000000Z/
+  KANAME_RUNNER_APT: >-
+    git=1:2.43.0-1ubuntu7.4 git-man=1:2.43.0-1ubuntu7.4
+    openssl=3.0.13-0ubuntu3.16 libssl3t64=3.0.13-0ubuntu3.16
+    jq=1.7.1-3ubuntu0.24.04.2 libjq1=1.7.1-3ubuntu0.24.04.2
+    python3=3.12.3-0ubuntu2.1 python3-minimal=3.12.3-0ubuntu2.1
+    libpython3-stdlib=3.12.3-0ubuntu2.1
+    python3.12=3.12.3-1ubuntu0.17 python3.12-minimal=3.12.3-1ubuntu0.17
+    libpython3.12-minimal=3.12.3-1ubuntu0.17 libpython3.12-stdlib=3.12.3-1ubuntu0.17
+    libpython3.12t64=3.12.3-1ubuntu0.17
+  KANAME_RUNNER_NODE: '20.20.2'
+  KANAME_RUNNER_NPM: '10.8.2'
+  KANAME_RUNNER_HELM: v3.22.1
+  KANAME_RUNNER_KUBECTL: v1.35.7
+  KANAME_RUNNER_DOCKER: '28.0.4'
+  KANAME_RUNNER_DOCKER_SHA256: 6b130fa5fb13516620d5ece0b63f63a495cede428bb2f9e24449022e9d72e0cb
+  KANAME_RUNNER_PIP: '26.2.2'
+  KANAME_RUNNER_PYYAML: '6.0.3'
+
 defaults:
   run:
     shell: bash
@@ -83,7 +106,7 @@ jobs:
   # а сводный вердикт `prverdict` на черновике красный по построению.
   changes:
     name: выбор затронутого (e2e-newman)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       full: ${{ steps.pick.outputs.full }}
@@ -115,7 +138,7 @@ jobs:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'suite') }}
     needs: [changes]
     name: набор — оснастка, пробы, покрытие, долг
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -448,7 +471,7 @@ jobs:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'stand') }}
     needs: [changes]
     name: автономный стенд — служба без платформы
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -871,7 +894,7 @@ jobs:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'stand-ceremony') }}
     needs: [changes]
     name: автономный стенд — волна церемонии и распорядители аккаунта (второй шард)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
       KANAME_STAND_REGISTRY_WORLD: '1'
@@ -1123,7 +1146,7 @@ jobs:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'edgeselftests') }}
     needs: [changes]
     name: самопроверки против подставного края (стенда не нужно)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -1230,7 +1253,7 @@ jobs:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'chart-own') }}
     needs: [changes]
     name: стенд посадки own (kind) — ${{ matrix.title }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -1574,7 +1597,7 @@ jobs:
       - chart-own
       - changes
       - prverdict
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Право на запись задач — ТОЛЬКО у этого задания, и оно наименьшее из
     # достаточных.
@@ -1621,7 +1644,7 @@ jobs:
     name: сводный вердикт запроса (e2e-newman)
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     needs: [changes, chart-own, edgeselftests, stand, stand-ceremony, suite]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
