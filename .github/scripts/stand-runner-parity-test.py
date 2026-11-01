@@ -100,7 +100,7 @@ class World:
         (self.work / ".fetched").touch()
         (self.src / "root-sentinel").write_text("root\n")
         source_root = Path(__file__).resolve().parents[2]
-        for relative in ("go.mod", ".github/workflows/e2e-newman.yml", ".github/scripts/stand-runner-tools.py"):
+        for relative in ("go.mod", ".github/workflows/e2e-newman.yml", ".github/scripts/stand-runner-tools.py", ".github/scripts/stand-runner-bootstrap.sh"):
             destination = self.src / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source_root / relative, destination)
@@ -108,12 +108,17 @@ class World:
             for file in ships.iterdir():
                 if file.is_file():
                     shutil.copyfile(file, self.work / "ship" / file.name)
+        self.provider = {k: str(v) for k, v in yaml.safe_load((source_root / ".github/workflows/e2e-newman.yml").read_text())["env"].items()}
         self.env = dict(os.environ)
+        self.env.update(self.provider)
+        self.env["KANAME_RUNNER_GO"] = declarations(source_root)[0]["go"][0]
+        self.env["FIXTURE_NPM"] = self.provider["KANAME_RUNNER_NPM"]
+        self.env["FIXTURE_REAL_GOROOT"] = os.environ["GOROOT"]
         self.env.update(env or {})
         self.env.update(HOME=str(base / "home"), PATH=f"{self.bin}:{self.prefix}/bin:/usr/bin:/bin",
                         RUNNER_SHA="fixture-source", RUNNER_REPO="PRO-Robotech/kaname",
-                        RUNNER_NODE="20", RUNNER_KUBECTL="v1.31.2", RUNNER_GO=self.env.get("RUNNER_GO", "1.26.10"),
-                        RUNNER_GH_SH="#!/bin/sh\nexit 4\n", GITHUB_PATH=str(self.work / "github-path"),
+                        RUNNER_NODE=self.provider["KANAME_RUNNER_NODE"], RUNNER_KUBECTL=self.provider["KANAME_RUNNER_KUBECTL"], RUNNER_GO=self.env["KANAME_RUNNER_GO"],
+                        RUNNER_GH_SH="#!/bin/sh\nexit 4\n", GITHUB_PATH=str(self.work / "github-path"), GITHUB_ENV=str(self.work / "github-env"),
                         FIXTURE_WORLD=str(base), FIXTURE_PY=sys.executable,
                         KANAME_STAND_IN_POD="inherited-after-world-cleanup", KEEP_SENTINEL="retained",
                         GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
@@ -131,7 +136,7 @@ class World:
             digest = hashlib.sha256(original.read_bytes()).hexdigest()
             target = self.bin / name
             if name == "jq":
-                shutil.copyfile(original, target)
+                target.symlink_to(original)
                 target.chmod(0o755)
                 assert hashlib.sha256(target.read_bytes()).hexdigest() == digest, "jq bytes не совпали"
             else:
@@ -165,7 +170,7 @@ if name == "go":
         target=pathlib.Path(args[2])
         real=os.environ.get("FIXTURE_REAL_GO")
         if real and target.read_bytes().startswith(b"\\x7fELF"):
-            sys.exit(subprocess.run([real,*args]).returncode)
+            sys.exit(subprocess.run([real,*args],env=dict(os.environ, GOROOT=os.environ["FIXTURE_REAL_GOROOT"])).returncode)
         specs=json.loads((root/"go-install-specs.json").read_text())
         module, version=specs[str(target)].rsplit("@",1)
         print(str(target)+": go"+os.environ["RUNNER_GO"])
@@ -179,12 +184,12 @@ if name == "go":
     specs[str(target)]=args[1]; records.write_text(json.dumps(specs))
     if os.environ.get("FIXTURE_REAL_GO") and tool == "grpcurl":
         target.parent.mkdir(parents=True,exist_ok=True)
-        environment=dict(os.environ, GOBIN=str(target.parent))
+        environment=dict(os.environ, GOBIN=str(target.parent), GOROOT=os.environ["FIXTURE_REAL_GOROOT"])
         sys.exit(subprocess.run([os.environ["FIXTURE_REAL_GO"],*args],env=environment).returncode)
 elif name == "npm":
-    if args == ["--version"]: print("10.0.0"); sys.exit(0)
+    if args == ["--version"]: print(os.environ["FIXTURE_NPM"]); sys.exit(0)
     if args[:2] != ["install", "-g"]: sys.exit(72)
-    tool, version=args[2].rsplit("@",1); target=root/"usr/local/bin"/tool
+    tool, version=args[2].rsplit("@",1); target=root/"work/provider/node/bin"/tool
 else: sys.exit(73)
 with (root/"install-argv").open("a") as out: out.write(json.dumps([name,*args])+"\\n")
 target.parent.mkdir(parents=True,exist_ok=True)
@@ -194,6 +199,14 @@ target.chmod(0o755)
         executable(self.bin / "go", installer)
         # Python остаётся настоящим; только сетевой install peer заменён контролируемым.
         executable(self.bin / "python3", '''#!/bin/sh
+if [ "$1 $2" = '-m venv' ]; then
+  for last; do :; done
+  "$FIXTURE_PY" "$@" || exit $?
+  for site in "$last"/lib/python*/site-packages; do
+    printf '%s\n' "$FIXTURE_SITE_PATHS" > "$site/fixture-parent.pth"
+  done
+  exit 0
+fi
 if [ "$1 $2 $3" = '-m pip install' ]; then
   printf '%s\\n' "$*" >> "$FIXTURE_WORLD/python-install-argv"
   exit 0
@@ -217,28 +230,70 @@ sys.stdout.buffer.write(lzma.decompress(sys.stdin.buffer.read()))
         assert lawful.returncode == 0 and lawful.stdout == sample, "base-fixture xz не декодировал exact bytes"
         assert broken.returncode != 0, "base-fixture xz принял испорченный архив"
         print("PARITY-READY xz source=base-fixture/stdlib-lzma lawful=exact-bytes bad-archive=refused", flush=True)
-        archive = self.work / "node-fixture.tar.xz"
-        arch = {"x86_64": "x64", "aarch64": "arm64"}[platform.machine()]
-        self.env["FIXTURE_NODE_ARCH"] = arch
-        with tarfile.open(archive, "w:xz") as tar:
-            for name, body in {"node": '#!/bin/sh\necho v20.0.0\n', "npm": installer}.items():
-                data = body.encode()
-                info = tarfile.TarInfo(f"node-v20.0.0-linux-{arch}/bin/{name}")
-                info.size = len(data)
-                info.mode = 0o755
-                tar.addfile(info, io.BytesIO(data))
-        self.env["FIXTURE_NODE_ARCHIVE"] = str(archive)
-        executable(self.bin / "curl", '''#!/usr/bin/env python3
+        peers = self.base / "python-peers"
+        (peers / "pip").mkdir(parents=True)
+        (peers / "pip/__init__.py").write_text("")
+        (peers / "pip/__main__.py").write_text("import os,sys,pathlib\nassert sys.argv[1] == 'install'\nwith (pathlib.Path(os.environ['FIXTURE_WORLD'])/'python-install-argv').open('a') as out: out.write(repr(sys.argv[1:])+'\\n')\n")
+        self.env["PYTHONPATH"] = str(peers) + os.pathsep + os.environ.get("PYTHONPATH", "")
+        self.env["FIXTURE_SITE_PATHS"] = "\n".join(p for p in sys.path if "site-packages" in p or "dist-packages" in p)
+        # Controlled peers provide synthetic Go/Node/Helm archives. The production
+        # bootstrap still verifies their bytes; the Docker workflow digest requires
+        # the real parent provider archive. The outer native run proves real CLIs.
+        outer_work = Path(os.environ["KANAME_RUNNER_WORK"])
+        self.env["FIXTURE_DOCKER_ARCHIVE"] = str(outer_work / "docker.tgz")
+        node = self.provider["KANAME_RUNNER_NODE"]
+        helm = self.provider["KANAME_RUNNER_HELM"]
+        kubectl = self.provider["KANAME_RUNNER_KUBECTL"]
+        files = {
+            "node": {f"node-v{node}-linux-x64/bin/node": f"#!/bin/sh\necho v{node}\n", f"node-v{node}-linux-x64/bin/npm": installer},
+            "go": {"go/bin/go": installer},
+            "helm": {"linux-amd64/helm": f"#!/bin/sh\necho {helm}\n"},
+        }
+        for name, contents in files.items():
+            archive = self.work / (name + "-fixture.tar" + (".xz" if name == "node" else ".gz"))
+            with tarfile.open(archive, "w:xz" if name == "node" else "w:gz") as tar:
+                for filename, body in contents.items():
+                    raw = body.encode(); info = tarfile.TarInfo(filename); info.size = len(raw); info.mode = 0o755
+                    tar.addfile(info, io.BytesIO(raw))
+        (self.work / "kubectl-fixture").write_text("#!/bin/sh\necho " + shlex.quote(json.dumps({"clientVersion": {"gitVersion": kubectl}})) + "\n")
+        # These peers must remain available after bootstrap deliberately clears PATH.
+        provider_bin = self.work / "provider/bin"
+        provider_bin.mkdir(parents=True)
+        for name in ("python3",):
+            (provider_bin / name).symlink_to(self.bin / name)
+        executable(provider_bin / "curl", r'''#!/usr/bin/env python3
 import hashlib, os, pathlib, shutil, sys
-a=sys.argv[1:]; archive=pathlib.Path(os.environ["FIXTURE_NODE_ARCHIVE"])
-if a[-1].endswith("/SHASUMS256.txt"):
- print(hashlib.sha256(archive.read_bytes()).hexdigest()+"  node-v20.0.0-linux-"+os.environ["FIXTURE_NODE_ARCH"]+".tar.xz")
+a=sys.argv[1:]; url=next(x for x in a if x.startswith("https://")); work=pathlib.Path(os.environ["FIXTURE_WORLD"])/"work"
+if "go.dev/dl/?mode=json" in url:
+ import json
+ pin=os.environ["KANAME_RUNNER_GO"]
+ content=[{"version":"go"+pin,"files":[{"filename":"go"+pin+".linux-amd64.tar.gz","sha256":hashlib.sha256((work/"go-fixture.tar.gz").read_bytes()).hexdigest()}]}]
+ pathlib.Path(a[a.index("-o")+1]).write_text(json.dumps(content));sys.exit(0)
+if "nodejs.org" in url:
+ file=work/"node-fixture.tar.xz"
+elif "go.dev" in url:
+ file=work/"go-fixture.tar.gz"
+elif "get.helm.sh" in url:
+ file=work/"helm-fixture.tar.gz"
+elif "dl.k8s.io" in url:
+ file=work/"kubectl-fixture"
+elif "download.docker.com" in url:
+ file=pathlib.Path(os.environ["FIXTURE_DOCKER_ARCHIVE"])
+else:
+ print("unknown download peer",file=sys.stderr);sys.exit(74)
+if os.environ.get("FIXTURE_FETCH_FAIL"):
+ print("controlled provider fetch failure",file=sys.stderr);sys.exit(75)
+if url.endswith("/SHASUMS256.txt"):
+ print(hashlib.sha256(file.read_bytes()).hexdigest()+"  node-v"+os.environ["KANAME_RUNNER_NODE"]+"-linux-x64.tar.xz")
+elif url.endswith((".sha256", ".sha256sum")):
+ print(hashlib.sha256(file.read_bytes()).hexdigest())
 elif "-o" in a:
- shutil.copyfile(archive,a[a.index("-o")+1])
+ shutil.copyfile(file,a[a.index("-o")+1])
 else: sys.exit(74)
 ''')
+        # The first download occurs after the controlled PATH is installed.
 
-    def run(self, command, extra_install="", payload=None):
+    def run(self, command, extra_install="", payload=None, expected_stage="command"):
         text = self.payload if payload is None else payload
         if extra_install:
             anchor = 'say "команда: $RUNNER_CMD"\n'
@@ -254,10 +309,10 @@ else: sys.exit(74)
         env["RUNNER_CMD"] = remap_roots(command, roots)
         print("PARITY-PRODUCER world=" + self.base.name + " sha256=" + hashlib.sha256(self.payload.encode()).hexdigest(), flush=True)
         result = subprocess.run(["bash", "-c", text], env=env, cwd=self.src, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=240 if self.env.get("FIXTURE_REAL_GO") else 45)
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300 if self.env.get("FIXTURE_REAL_GO") else 90)
         stage = (self.work / ".rc").read_text().strip() if (self.work / ".rc").exists() else "missing"
         print(f"PARITY-PAYLOAD rc={result.returncode} stage={stage}", flush=True)
-        if not stage.startswith("command "):
+        if not stage.startswith(expected_stage + " "):
             print(result.stdout, flush=True)
             raise RuntimeError("payload fixture не дошла до команды: " + stage)
         return result
@@ -283,7 +338,11 @@ def payload_checks(root, payload, axis="all"):
 data=json.loads(pathlib.Path(sys.argv[1]).read_text()); failures=[]
 for name, version in data.items():
  if name.startswith('python:'):
-  importlib.import_module(name.split(':',1)[1].replace('pyyaml','yaml')); continue
+  package=name.split(':',1)[1]
+  importlib.import_module(package.replace('pyyaml','yaml'))
+  from importlib.metadata import version as package_version
+  if package_version(package) != version: failures.append(name+': package version mismatch')
+  continue
  actual=shutil.which(name)
  if not actual: failures.append(name+': отсутствует'); continue
  if version:
@@ -325,6 +384,38 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
             else:
                 assert result.returncode != 0, "tools self-test не увидел однофактный wrong-pin mutant"
                 print("PARITY-MUTANT tools rejected=wrong-pin command-stage", flush=True)
+        if axis in ("all", "tools"):
+            # Existing wrong portable tools are replaced, rather than accepted by
+            # command -v. The lawful pair uses the same full production bootstrap.
+            existing = World(base / "wrong-existing", payload)
+            executable(existing.work / "provider/node/bin/node", "#!/bin/sh\necho v0.0.1042\n")
+            repaired = existing.run("node --version")
+            assert repaired.returncode == 0 and ("v" + existing.provider["KANAME_RUNNER_NODE"]) in repaired.stdout
+            print("PARITY-MUTANT existing-version repaired=exact-workflow-pin", flush=True)
+            controls = ("fetch-failure", "PATH-shadowing", "python-package-version", "missing-stdlib", "missing-git-helper")
+            for label in controls:
+                world = World(base / label, payload)
+                if label == "fetch-failure":
+                    world.env["FIXTURE_FETCH_FAIL"] = "1"
+                elif label == "PATH-shadowing":
+                    executable(world.work / "provider/node/bin/git", "#!/bin/sh\necho git version 0.0.1042\n")
+                elif label == "python-package-version":
+                    pins = declarations(Path(__file__).resolve().parents[2])[0]
+                    package = next(name.split(":", 1)[1] for name in pins if name.startswith("python:") and name.split(":", 1)[1] != "pyyaml")
+                    fake = world.work / "python-tools" / (package + "-0.0.1042.dist-info")
+                    fake.mkdir(parents=True)
+                    (fake / "METADATA").write_text("Metadata-Version: 2.1\nName: " + package + "\nVersion: 0.0.1042\n")
+                elif label == "missing-stdlib":
+                    (world.base / "python-peers/lzma.py").write_text("raise ImportError('controlled missing stdlib')\n")
+                elif label == "missing-git-helper":
+                    world.env["GIT_EXEC_PATH"] = str(world.base / "absent-git-helpers")
+                rejected = world.run("touch /work/out/should-not-run", expected_stage="setup")
+                assert rejected.returncode == 125 and not (world.work / "out/should-not-run").exists(), label
+                reasons = {"fetch-failure": "controlled provider fetch failure", "PATH-shadowing": "PATH shadowing: git",
+                           "python-package-version": "Python package version disagrees:", "missing-stdlib": "controlled missing stdlib",
+                           "missing-git-helper": "Git helper closure missing or shadowed"}
+                assert reasons[label] in rejected.stdout, (label, rejected.stdout)
+                print("PARITY-MUTANT provider rejected=" + label + " stage=setup code=125 payload=not-run", flush=True)
         command = "python3 -c " + shlex.quote("import os,json; print(json.dumps({'present': 'KANAME_STAND_IN_POD' in os.environ, 'keep':os.environ.get('KEEP_SENTINEL')}))")
         env_worlds = (("actual", payload), ("unset-mutant", payload.replace("unset KUBECONFIG KANAME_STAND_IN_POD\n", "unset KUBECONFIG\n", 1))) if axis in ("all", "prologue") else ()
         for label, code in env_worlds:

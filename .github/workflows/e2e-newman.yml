@@ -116,7 +116,18 @@ jobs:
         with:
           sparse-checkout: |
             .github
+            go.mod
           sparse-checkout-cone-mode: false
+      - name: единый provider инструментов (native/hosted)
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          rc=0
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
+            exit 1
+          fi
       - name: выбор затронутого по карте путей
         id: pick
         env:
@@ -158,6 +169,16 @@ jobs:
       # перенесла их дом в это дерево (`proto/kaname/` — 41 контракт), и гейт
       # покрытия читает их оттуда. Прежде они приезжали модулем платформы, и
       # обоснование этого шага было именно таким.
+      - name: единый provider инструментов (native/hosted)
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          rc=0
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
+            exit 1
+          fi
       - run: go mod download
 
       # ИНСТРУМЕНТЫ ПРОВЕРЯЮТСЯ ЗАРАНЕЕ, И ИХ ОТСУТСТВИЕ — ТРЕТИЙ ИСХОД.
@@ -185,9 +206,9 @@ jobs:
           # без сверки и доложат об этом честно, но перепись долга объявление процесса
           # не прочитает вовсе. Поэтому спрашивается здесь, заголовком «УСЛОВИЕ НЕ
           # СОЗДАНО», и доводу выше не противоречит — у них разные предметы.
-          python3 -m pip install --quiet pytest pyyaml
+          python3 -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
           missing=""
-          for tool in node jq git; do
+          for tool in go node jq git; do
             command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
           done
           if [ -n "$missing" ]; then
@@ -479,6 +500,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: единый provider инструментов (native/hosted)
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          rc=0
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
+            exit 1
+          fi
       - run: go mod download
 
       # Утверждения о стенде выносят вердикт, значит их способность упасть
@@ -550,7 +581,7 @@ jobs:
           go install github.com/fullstorydev/grpcurl/cmd/grpcurl@v1.9.3 || rc=$?
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           export PATH="$PATH:$(go env GOPATH)/bin"
-          python3 -m pip install --quiet pyyaml || rc=$?
+          python3 -m pip install --quiet pyyaml==6.0.3 || rc=$?
           missing=""
           for tool in newman grpcurl jq; do
             command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
@@ -904,6 +935,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: единый provider инструментов (native/hosted)
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          rc=0
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
+            exit 1
+          fi
       - run: go mod download
 
       - name: различение исходов подъёма способно упасть (самопроба инъекцией)
@@ -933,7 +974,7 @@ jobs:
           go install github.com/fullstorydev/grpcurl/cmd/grpcurl@v1.9.3 || rc=$?
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           export PATH="$PATH:$(go env GOPATH)/bin"
-          python3 -m pip install --quiet pyyaml || rc=$?
+          python3 -m pip install --quiet pyyaml==6.0.3 || rc=$?
           missing=""
           for tool in newman grpcurl jq; do
             command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
@@ -1158,6 +1199,16 @@ jobs:
       # Чеканка удостоверения идёт КОДОМ ПРОДУКТА (`go run …/credsecretmint`), и
       # его зависимости — модули: без этого шага самопроверка формы выходит
       # «предпосылкой не выполненной», а не вердиктом.
+      - name: единый provider инструментов (native/hosted)
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          rc=0
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
+            exit 1
+          fi
       - run: go mod download
 
       # ИНСТРУМЕНТ ПРОВЕРЯЕТСЯ ЗАРАНЕЕ, И ЕГО ОТСУТСТВИЕ — ТРЕТИЙ ИСХОД.
@@ -1284,6 +1335,16 @@ jobs:
 
       # Координаты стенда — ВНЕ рабочего дерева и одни на все шаги: каталог
       # стенда несёт ключи листов, и в дереве им не место.
+      - name: единый provider инструментов (native/hosted)
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          rc=0
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
+            exit 1
+          fi
       - name: координаты стенда
         run: |
           echo "KANAME_STAND_WORKDIR=$RUNNER_TEMP/kaname-stand-own" >> "$GITHUB_ENV"
@@ -1609,6 +1670,16 @@ jobs:
 
       # Самопроверка идёт ДО вердикта: держатель, потерявший способность
       # производить событие, молчит ровно так же, как исправный на зелёном стволе.
+      - name: единый provider инструментов (native/hosted)
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          rc=0
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
+            exit 1
+          fi
       - name: держатель — доказательство инъекцией в обе стороны
         run: .github/scripts/trunk-verdict-holder.sh --self-test
 
@@ -1651,7 +1722,18 @@ jobs:
         with:
           sparse-checkout: |
             .github
+            go.mod
           sparse-checkout-cone-mode: false
+      - name: единый provider инструментов (native/hosted)
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          rc=0
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
+            exit 1
+          fi
       - name: целевой или полный — и исход
         env:
           EVENT: ${{ github.event_name }}

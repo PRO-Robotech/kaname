@@ -1676,12 +1676,10 @@ ext_unfold() {
 #                 снять, прочитать), exec и проброс, журнал, секреты и карты конфигурации
 #                 стенда, события. Форму судит runner_judge ДО записи в кластер; пространство
 #                 несёт посадку pod `baseline` — привилегированного пода учётка не заведёт;
-#   образ         golang версии `toolchain` из go.mod ревизии (ту же ставит конвейеру
-#                 setup-go; тот же образ — у Job тяжёлых прогонов); поверх — apt (python3, pyyaml, cryptography, venv, pip, jq,
-#                 openssl), node мажорной версии KANAME_STAND_RUNNER_NODE (умолчание 20 —
-#                 её несёт ранер конвейера, дерево версии node не объявляет) выпуском с
-#                 суммой из SHASUMS256 того же выпуска, kubectl — клиент машины потоком
-#                 либо версия сервера кластера с суммой; не поставлено — 125 с именем;
+#   образ         Ubuntu и snapshot из env e2e-newman.yml; общий bootstrap ставит
+#                 точные версии используемых CLI и Python-пакетов из workflow,
+#                 Go — из go.mod. PATH не заимствует kubectl или кэш CLI машины.
+#                 Неполная установка/несовпадение runtime — setup 125;
 #   исходники     `git archive` головы рабочей копии потоком в /src, дерево — репозиторием
 #                 git (наборы читают состав индексом); правка вне коммита — отказ 64 до
 #                 первой записи; --ship — файлы машины в /work/ship (исполнитель шагов
@@ -1712,7 +1710,8 @@ ext_unfold() {
 STAND_RUNNER_KINDS="own"
 RUNNER_POD=kaname-runner
 RUNNER_DEADLINE="${KANAME_STAND_RUNNER_DEADLINE:-10800}"
-RUNNER_NODE="${KANAME_STAND_RUNNER_NODE:-20}"
+RUNNER_NODE=""
+RUNNER_PROVIDER_JSON='[]'
 RUNNER_UNMET=125
 RUNNER_FETCH_SHORT=76
 RUNNER_FETCH_N=0 RUNNER_FETCH_M="?" RUNNER_FETCH_WHY=""
@@ -1777,43 +1776,10 @@ unmet() { say "УСЛОВИЕ НЕ СОЗДАНО: $* — команда НЕ и
 mkdir -p "$HOME" /work/out /work/ship /work/bin
 for _ in $(seq 1 300); do [ -e /work/.go ] && break; sleep 2; done
 [ -e /work/.go ] || { say "исходники не доставлены за 600 с"; exit 125; }
-case "$(uname -m)" in x86_64) ka=amd64 na=x64 ;; aarch64) ka=arm64 na=arm64 ;; *) unmet "архитектура $(uname -m)" ;; esac
-export DEBIAN_FRONTEND=noninteractive
-say "инструменты: apt"
-{ apt-get update -q && apt-get install -y -q --no-install-recommends ca-certificates curl git jq openssl tar gzip xz-utils procps \
-    python3 python3-yaml python3-venv python3-pip python3-cryptography; } > /work/apt.log 2>&1 || { tail -n 5 /work/apt.log; unmet "apt-get"; }
-python3 /src/.github/scripts/stand-runner-tools.py --root /src --work /work || unmet "workflow tool declarations не прочитаны"
-declared_node="$(jq -r '.setup.node // empty' /work/workflow-tools.json)"
-[ -z "$declared_node" ] || RUNNER_NODE="$declared_node"
-if [ -x /work/bin/kubectl ] && /work/bin/kubectl version --client > /dev/null 2>&1; then
-  install -m 0755 /work/bin/kubectl /usr/local/bin/kubectl || unmet "kubectl машины не поставлен"
-  say "инструменты: kubectl — клиент машины ($(kubectl version --client 2>/dev/null | head -n 1))"
-else
-  say "инструменты: kubectl $RUNNER_KUBECTL — загрузкой"
-  ku="https://dl.k8s.io/release/$RUNNER_KUBECTL/bin/linux/$ka/kubectl"
-  { curl -fsSL --retry 3 --speed-limit 200000 --speed-time 60 -o /usr/local/bin/kubectl "$ku" &&
-    echo "$(curl -fsSL --retry 3 --max-time 60 "$ku.sha256")  /usr/local/bin/kubectl" | sha256sum -c --quiet - &&
-    chmod +x /usr/local/bin/kubectl; } || unmet "kubectl $RUNNER_KUBECTL не получен либо сумма не сошлась"
-fi
-if [[ "$RUNNER_NODE" =~ ^[0-9]+$ ]]; then nb="https://nodejs.org/dist/latest-v$RUNNER_NODE.x"
-elif [[ "$RUNNER_NODE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then nb="https://nodejs.org/dist/v$RUNNER_NODE"
-else unmet "Node pin вне поддержанной формы: $RUNNER_NODE"; fi
-sums="$(curl -fsSL --retry 3 --max-time 60 "$nb/SHASUMS256.txt")" || unmet "node $RUNNER_NODE: перечень сумм выпуска не получен"
-line="$(grep -E "^[0-9a-f]{64}  node-v[0-9]+\.[0-9]+\.[0-9]+-linux-$na\.tar\.xz\$" <<< "$sums")"
-[ "$(grep -c . <<< "$line")" -eq 1 ] || unmet "node $RUNNER_NODE: в перечне сумм не ровно один выпуск linux-$na"
-nf="${line##* }"
-{ curl -fsSL --retry 3 --speed-limit 50000 --speed-time 60 -o "/work/$nf" "$nb/$nf" &&
-  ( cd /work && sha256sum -c --quiet --strict - <<< "$line" ) &&
-  tar -xJ -C /usr/local --strip-components=1 -f "/work/$nf" && rm -f "/work/$nf"; } ||
-  unmet "node $RUNNER_NODE: выпуск $nf не получен, сумма не сошлась либо он не распакован"
-say "инструменты: node $(node --version), npm $(npm --version)"
-[ "$(go env GOVERSION)" = "go$RUNNER_GO" ] || unmet "go образа $(go env GOVERSION), а дерево требует go$RUNNER_GO"
-say "инструменты: $(go version)"
-{ printf '%s\n' "$RUNNER_GH_SH" > /usr/local/bin/gh && chmod 0755 /usr/local/bin/gh; } || unmet "gh раннера не поставлен"
+. /src/.github/scripts/stand-runner-bootstrap.sh || unmet "общий provider отсутствует"
+runner_bootstrap /src /work || unmet "общий provider не установлен либо exact runtime proof не сошёлся"
+{ printf '%s\n' "$RUNNER_GH_SH" > /work/provider/bin/gh && chmod 0755 /work/provider/bin/gh; } || unmet "gh раннера не поставлен"
 say "инструменты: gh — чтение публичного REST без удостоверения"
-# Один источник install/setup declarations; inherited image providers проверяются отдельно.
-. /work/workflow-tools.sh || unmet "workflow tools не установлены либо отсутствует base-image provider"
-python3 /src/.github/scripts/stand-runner-tools.py --root /src --work /work --observe || unmet "workflow tools runtime proof не сошёлся"
 say "исходники $RUNNER_SHA — репозиторием git (наборы читают состав индексом)"
 ( cd /src && git init -q && git remote add origin "https://github.com/$RUNNER_REPO.git" && git add -A &&
   git -c user.name=kaname-runner -c user.email=kaname-runner@kaname.invalid commit -q -m "kaname-runner: исходники $RUNNER_SHA" ) > /work/git.log 2>&1 ||
@@ -1886,8 +1852,8 @@ runner_go() {
   printf '%s\n' "$v"
 }
 
-# Тот же образ, что у Job тяжёлых прогонов внешнего кластера (golang версии toolchain).
-runner_image() { printf 'docker.io/library/golang:%s' "$1"; }
+# Образ общего provider из workflow; версия Go больше не задаётся образом.
+runner_image() { jq -r '.[] | select(.name == "KANAME_RUNNER_IMAGE") | .value' <<< "$RUNNER_PROVIDER_JSON"; }
 
 # runner_exec ПРОСТРАНСТВО АРГУМЕНТЫ… — исполнить в pod раннера. Самопроверка подменяет её.
 runner_exec() { local ns="$1"; shift; ks -n "$ns" exec "$RUNNER_POD" -c run -- "$@"; }
@@ -1955,7 +1921,7 @@ runner_fetch() {
 runner_objects() {
   jq -n --arg ns "$1" --arg image "$2" --arg sha "$3" --arg task "$4" --arg kver "$5" --arg go "$6" \
     --arg cmd "$7" --arg repo "$8" --argjson steps "${9:-[]}" --arg node "$RUNNER_NODE" --arg sh "$RUNNER_POD_SH" --arg gh "$RUNNER_GH_SH" \
-    --arg name "$RUNNER_POD" --argjson deadline "$RUNNER_DEADLINE" '
+    --argjson provider "$RUNNER_PROVIDER_JSON" --arg name "$RUNNER_POD" --argjson deadline "$RUNNER_DEADLINE" '
     def meta: {name: $name, namespace: $ns, labels: {"kaname.io/stand": "runner", "app.kubernetes.io/name": $name}};
     def env($n; $v): {name: $n, value: $v};
     {apiVersion: "v1", kind: "List", items: [
@@ -1976,7 +1942,7 @@ runner_objects() {
           env: [env("RUNNER_SHA"; $sha), env("RUNNER_CMD"; $cmd), env("RUNNER_STEPS_JSON"; ($steps | tojson)), env("RUNNER_KUBECTL"; $kver),
                 env("RUNNER_GO"; $go), env("RUNNER_NODE"; $node), env("RUNNER_REPO"; $repo), env("RUNNER_GH_SH"; $gh),
                 env("KANAME_STAND_IN_POD"; "1"), env("KANAME_STAND_EXT_NS"; $ns), env("KANAME_STAND_TASK"; $task),
-                env("HOME"; "/work/home"), env("GOTOOLCHAIN"; "local")],
+                env("HOME"; "/work/home"), env("GOTOOLCHAIN"; "local")] + $provider,
           resources: {requests: {cpu: "1", memory: "2Gi"}, limits: {memory: "6Gi"}},
           securityContext: {allowPrivilegeEscalation: false},
           volumeMounts: [{name: "src", mountPath: "/src"}, {name: "work", mountPath: "/work"}]}],
@@ -2148,6 +2114,9 @@ runner_main() {
     *) return "$RUNNER_UNMET" ;;
   esac
   gov="$(runner_go "$sha")" || return "$RUNNER_UNMET"
+  RUNNER_PROVIDER_JSON="$(python3 "$ROOT/.github/scripts/stand-runner-tools.py" --root "$ROOT" --work "$RUNDIR/runner-provider" --provider-json)" || {
+    unmet "workflow provider не прочитан — pod не создан"; return "$RUNNER_UNMET"; }
+  RUNNER_NODE="$(jq -r '.[] | select(.name == "KANAME_RUNNER_NODE") | .value' <<< "$RUNNER_PROVIDER_JSON")"
   kver="$(kq version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion // empty' 2>/dev/null)"
   [[ "$kver" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { unmet "версия сервера кластера не прочитана — kubectl pod не выбрать"; return "$RUNNER_UNMET"; }
   image="$(runner_image "$gov")"
@@ -2181,11 +2150,6 @@ runner_main() {
     [ "$want" = "$got" ] || { unmet "отпечаток файла $base в pod не совпал с машинным"; exit "$RUNNER_UNMET"; }
     say "раннер: /work/ship/$base доставлен, отпечаток сошёлся"
   done
-  # kubectl машины — тем же потоком, лишь при той же архитектуре узла.
-  if [ "$(ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- uname -m 2>/dev/null)" = "$(uname -m)" ]; then
-    gzip -1 < "$(type -P kubectl)" | ks -n "$EXT_NS" exec -i "$RUNNER_POD" -c run -- sh -c 'mkdir -p /work/bin && gzip -dc > /work/bin/kubectl && chmod 0755 /work/bin/kubectl' ||
-      runner_warn "kubectl машины в pod не доставлен — pod загрузит версию сервера"
-  fi
   ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- touch /work/.go || { unmet "pod не принял сигнал старта"; exit "$RUNNER_UNMET"; }
   ks -n "$EXT_NS" logs -f "pod/$RUNNER_POD" -c run & RUNNER_LOGS=$!
   while :; do
@@ -2952,6 +2916,10 @@ EOF
           { git -C "$R" init -q && printf 'module x\n\ngo 1.26.0\n\ntoolchain go1.26.10\n' > "$R/go.mod" && git -C "$R" add go.mod &&
             git -C "$R" -c user.name=t -c user.email=t@t.invalid commit -q -m t &&
             git -C "$R" remote add origin https://github.com/PRO-Robotech/kaname.git; } || exit 9
+          mkdir -p "$R/.github/scripts" "$R/.github/workflows"
+          cp "$SELFTEST_SOURCE_ROOT/.github/workflows/e2e-newman.yml" "$R/.github/workflows/"
+          cp "$SELFTEST_SOURCE_ROOT/.github/scripts/stand-runner-tools.py" "$R/.github/scripts/"
+          git -C "$R" add .github && git -C "$R" -c user.name=t -c user.email=t@t.invalid commit -q -m fixture-provider || exit 9
           ROOT="$R"; RUNDIR="$TMP/run-runner"; rm -rf "$RUNDIR"
           export XDG_CONFIG_HOME="$TMP/xdg-empty"; unset KACHO_REMOTE_KUBECONFIG KANAME_STAND_CONTEXT KANAME_STAND_PROFILE KANAME_STAND_EXT_NS
           IN_POD=""; export KANAME_STAND_KUBECONFIG="$TMP/kc-u--prof.yaml" KANAME_STAND_TASK=841

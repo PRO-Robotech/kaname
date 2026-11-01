@@ -4,6 +4,9 @@ import argparse
 import hashlib
 import json
 import platform
+import os
+import importlib.metadata
+import ssl
 from pathlib import Path
 import re
 import shlex
@@ -18,6 +21,29 @@ import yaml
 def manifest(root):
     path = root / ".github/workflows/e2e-newman.yml"
     document = yaml.safe_load(path.read_text())
+    provider = {k: str(v) for k, v in document.get("env", {}).items() if k.startswith("KANAME_RUNNER_")}
+    required = ("IMAGE", "OS", "SNAPSHOT", "APT", "NODE", "NPM", "HELM", "KUBECTL", "DOCKER", "DOCKER_SHA256", "PIP", "PYYAML")
+    if set(provider) != {"KANAME_RUNNER_" + name for name in required}:
+        raise ValueError("workflow provider: missing/unknown declaration")
+    if provider["KANAME_RUNNER_OS"] != "ubuntu/24.04" or provider["KANAME_RUNNER_IMAGE"] != "ubuntu:24.04":
+        raise ValueError("workflow provider: unsupported OS/image")
+    if not re.fullmatch(r"https://snapshot\.ubuntu\.com/ubuntu/[0-9]{8}T[0-9]{6}Z/", provider["KANAME_RUNNER_SNAPSHOT"]):
+        raise ValueError("workflow provider: immutable snapshot required")
+    for name in ("NODE", "NPM", "HELM", "KUBECTL", "DOCKER", "PIP", "PYYAML"):
+        if not re.fullmatch(r"v?\d+\.\d+\.\d+", provider["KANAME_RUNNER_" + name]):
+            raise ValueError("workflow provider: exact version required: " + name)
+    if not re.fullmatch(r"[a-f0-9]{64}", provider["KANAME_RUNNER_DOCKER_SHA256"]):
+        raise ValueError("workflow provider: Docker release digest required")
+    packages = {}
+    for spec in provider["KANAME_RUNNER_APT"].split():
+        if not re.fullmatch(r"[a-z0-9.+-]+=[A-Za-z0-9:~.+-]+", spec):
+            raise ValueError("workflow provider: exact apt spec required")
+        name, version = spec.split("=", 1)
+        if name in packages:
+            raise ValueError("workflow provider: duplicate apt spec " + name)
+        packages[name] = version
+    if not packages:
+        raise ValueError("workflow provider: empty apt closure")
     entries, checks, images, setups = {}, {}, {}, {}
     inspected = 0
 
@@ -88,6 +114,8 @@ def manifest(root):
                                 continue
                             if not re.fullmatch(r"[A-Za-z0-9._-]+(?:==[A-Za-z0-9.+-]+)?", word):
                                 raise ValueError(f"{source}: неподдержанная форма pip install {word!r}")
+                            if "==" not in word:
+                                raise ValueError(f"{source}: unpinned Python package {word}")
                             add("pip", word.split("==", 1)[0], word, source)
                 check = re.match(r"\s*for tool in (.+?); do", line)
                 if check:
@@ -97,7 +125,14 @@ def manifest(root):
                         checks.setdefault(name, []).append(source)
     if not inspected or not entries or not checks:
         raise ValueError("workflow tools: пустое входное замыкание")
-    return {"source": str(path), "jobs": len(images), "steps": inspected, "images": images,
+    yaml_pin = next((entry["spec"].split("==", 1)[1] for entry in entries.values() if entry["kind"] == "pip" and entry["name"].lower() == "pyyaml"), None)
+    if yaml_pin != provider["KANAME_RUNNER_PYYAML"]:
+        raise ValueError("workflow bootstrap/install PyYAML pins disagree")
+    provider["KANAME_RUNNER_GO"] = setups["go"]
+    for name, pin in setups.items():
+        if name != "go" and pin.lstrip("v") != provider["KANAME_RUNNER_" + name.upper()].lstrip("v"):
+            raise ValueError("workflow setup/provider disagreement: " + name)
+    return {"provider": provider, "apt": packages, "source": str(path), "jobs": len(images), "steps": inspected, "images": images,
             "setup": setups, "install": list(entries.values()), "checks": checks}
 
 
@@ -150,52 +185,106 @@ def provide_ship(data, work, name):
 
 
 def observe(data, work):
-    # Форматы version argv — протокол CLI, состав целей берётся только из workflow.
-    result = {"inherited_ci_version_parity": "unresolved", "images": data["images"], "tools": {}}
-    for name in data["checks"]:
+    """Measure used CLIs and their runtime closure, rejecting inherited PATH tools."""
+    provider = data["provider"]
+    def pin(name):
+        return provider["KANAME_RUNNER_" + name.upper()].lstrip("v")
+    def run(argv):
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        if result.returncode:
+            raise ValueError(f"provider probe failed rc={result.returncode}: {argv}")
+        return result.stdout.strip() or result.stderr.strip()
+    result = {"declared_provider_versions": "verified", "hosted_runtime_comparison": "not-observed", "provider": provider, "images": data["images"], "tools": {}, "packages": {}}
+    for name, expected in data["apt"].items():
+        actual = run(["dpkg-query", "-W", "-f=${Version}", name])
+        if actual != expected:
+            raise ValueError(f"apt package version disagrees: {name}: {actual} != {expected}")
+        result["packages"][name] = actual
+    def apt_version(name):
+        raw = data["apt"][name].split(":", 1)[-1]
+        return raw.split("-", 1)[0]
+    versions = {"go": pin("go"), "node": pin("node"), "helm": pin("helm"),
+                "kubectl": pin("kubectl"), "docker": pin("docker"),
+                "python3": apt_version("python3"), "git": apt_version("git"),
+                "openssl": apt_version("openssl"), "jq": apt_version("jq")}
+    for entry in data["install"]:
+        if entry["kind"] in ("npm", "go"):
+            versions[entry["name"]] = entry["spec"].rsplit("@", 1)[1].lstrip("v")
+    targets = dict(data["checks"])
+    targets.setdefault("npm", [data["source"] + "/env/KANAME_RUNNER_NPM"])
+    gopath = Path(run(["go", "env", "GOPATH"])) / "bin"
+    for name, sources in targets.items():
         binary = shutil.which(name)
         if not binary:
-            raise ValueError(f"missing-provider: {name}, source={data['checks'][name]}")
+            raise ValueError(f"missing-provider: {name}, source={sources}")
         file = Path(binary).resolve()
-        run = subprocess.run([str(file), *version_arguments(name)], capture_output=True, text=True, timeout=30)
+        if name in ("git", "openssl", "jq", "python3"):
+            permitted = file.parent == Path("/usr/bin")
+        elif name in ("kind", "grpcurl"):
+            permitted = file.parent == gopath.resolve()
+        else:
+            permitted = file.is_relative_to((work / "provider").resolve())
+        if not permitted:
+            raise ValueError(f"PATH shadowing: {name}: {file}")
+        output = run([str(file), *version_arguments(name)])
+        if name == "kubectl":
+            actual = json.loads(output)["clientVersion"]["gitVersion"].lstrip("v")
+        elif name == "go":
+            actual = run(["go", "env", "GOVERSION"]).removeprefix("go")
+        elif name == "helm":
+            match = re.search(r'Version:"v([^"+]+)', output)
+            actual = match[1] if match else output.lstrip("v").split("+", 1)[0]
+        else:
+            match = re.search(r"(?<![0-9.])v?(\d+\.\d+(?:\.\d+)?)", output)
+            actual = match[1] if match else output.lstrip("v")
+        expected = pin("npm") if name == "npm" else versions.get(name)
+        # go install commonly embeds '(devel)' in version output. Build metadata
+        # below is the canonical version authority for these module commands.
+        go_entry = next((e for e in data["install"] if e["kind"] == "go" and e["name"] == name), None)
+        if go_entry:
+            module, expected_mod = go_entry["spec"].rsplit("@", 1)
+            metadata = run(["go", "version", "-m", str(file)])
+            rows = [line.strip().split() for line in metadata.splitlines()]
+            if not any(row == ["path", module] for row in rows) or not any(len(row) >= 3 and row[0] == "mod" and row[2] == expected_mod and (module == row[1] or module.startswith(row[1] + "/")) for row in rows):
+                raise ValueError(f"pinned tool build metadata disagrees: {name}: {metadata}")
+            actual = expected_mod.lstrip("v")
+        if expected is None or actual != expected:
+            raise ValueError(f"CLI version disagrees: {name}: {actual!r} != {expected!r}")
         result["tools"][name] = {"path": str(file), "sha256": hashlib.sha256(file.read_bytes()).hexdigest(),
-                                 "version_rc": run.returncode, "version_output": (run.stdout + run.stderr).strip(),
-                                 "source_steps": data["checks"][name], "ci_version_equality": "not-asserted"}
+            "version": actual, "expected": expected, "version_output": output,
+            "source_steps": sources, "declared_version_equality": "verified"}
+        if go_entry:
+            result["tools"][name]["go_build_metadata"] = metadata
+    # Functional stdlib/ABI probes include modules omitted by single-ELF shipping.
+    import lzma, sqlite3, venv, hashlib as hash_probe
+    if ".".join(map(str, sys.version_info[:3])) != apt_version("python3"):
+        raise ValueError("Python runtime disagrees with apt provider")
+    if ssl.OPENSSL_VERSION.split()[1] != apt_version("openssl"):
+        raise ValueError("Python OpenSSL ABI disagrees with provider")
+    if lzma.decompress(lzma.compress(b"runner")) != b"runner" or sqlite3.connect(":memory:").execute("select 42").fetchone() != (42,):
+        raise ValueError("Python stdlib functional probe failed")
+    result["python_runtime"] = {"executable": sys.executable, "version": sys.version, "openssl": ssl.OPENSSL_VERSION}
+    expected_packages = {"pip": pin("pip")}
     for entry in data["install"]:
-        if entry["kind"] != "go":
-            continue
-        binary = shutil.which(entry["name"])
-        if not binary:
-            raise ValueError(f"missing-provider: pinned {entry['name']}")
-        module, pin = entry["spec"].rsplit("@", 1)
-        run = subprocess.run(["go", "version", "-m", binary], capture_output=True, text=True, timeout=30)
-        rows = [line.strip().split() for line in run.stdout.splitlines()]
-        path_ok = any(row == ["path", module] for row in rows)
-        mod_ok = any(len(row) >= 3 and row[0] == "mod" and row[2] == pin and (module == row[1] or module.startswith(row[1] + "/")) for row in rows)
-        if run.returncode or not path_ok or not mod_ok:
-            raise ValueError(f"pinned tool build metadata disagrees: {entry['name']} expected={entry['spec']} actual={run.stdout!r}")
-        result["tools"][entry["name"]]["go_build_metadata"] = run.stdout
-        result["tools"][entry["name"]]["declared_pin"] = entry["spec"]
-    for entry in data["install"]:
-        if entry["kind"] != "npm":
-            continue
-        expected = entry["spec"].rsplit("@", 1)[1]
-        actual = result["tools"].get(entry["name"], {})
-        if actual.get("version_rc") != 0 or actual.get("version_output", "").strip().lstrip("v") != expected:
-            raise ValueError(f"npm tool runtime version disagrees: {entry['name']} expected={expected}")
-        actual["declared_pin"] = entry["spec"]
-    if data["setup"].get("go"):
-        run = subprocess.run(["go", "env", "GOVERSION"], capture_output=True, text=True, timeout=30)
-        if run.returncode or run.stdout.strip() != "go" + data["setup"]["go"]:
-            raise ValueError("setup-go provider не совпал с объявленной версией")
-    for name in ("node", "helm"):
-        if name in data["setup"]:
-            actual = result["tools"].get(name, {}).get("version_output", "").lstrip("v")
-            wanted = data["setup"][name].lstrip("v")
-            if not re.match(re.escape(wanted) + r"(?:[.\s+]|$)", actual):
-                raise ValueError(f"setup-{name} runtime provider не совпал с declared pin {wanted}")
+        if entry["kind"] == "pip":
+            name, expected = entry["spec"].split("==", 1)
+            expected_packages[name] = expected
+    for name, expected in expected_packages.items():
+        actual = importlib.metadata.version(name)
+        if actual != expected:
+            raise ValueError(f"Python package version disagrees: {name}: {actual} != {expected}")
+        result["packages"]["python:" + name] = actual
+    helpers = Path(run(["git", "--exec-path"]))
+    if helpers != Path("/usr/lib/git-core") or not (helpers / "git-remote-https").is_file():
+        raise ValueError("Git helper closure missing or shadowed")
+    run([str(helpers / "git-sh-i18n--envsubst"), "--variables", "$RUNNER"])
+    helper = subprocess.run([str(helpers / "git-remote-https")], capture_output=True, text=True, timeout=30)
+    if helper.returncode != 1 or "remote-curl: usage: git remote-curl" not in helper.stderr:
+        raise ValueError("Git HTTPS helper cannot load its runtime/ABI closure")
+    result["git_https_helper"] = {"path": str((helpers / "git-remote-https").resolve()), "startup_rc": helper.returncode}
+    result["git_exec_path"] = str(helpers)
     (work / "runtime-tools.json").write_text(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    print("workflow tools: declared pins verified; inherited CI version parity unresolved")
+    print("workflow tools: exact CLI/package pins and runtime closure verified")
 
 
 def main():
@@ -204,11 +293,14 @@ def main():
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--observe", action="store_true")
     parser.add_argument("--provide-ship")
+    parser.add_argument("--provider-json", action="store_true")
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
     try:
         data = manifest(args.root)
-        if args.provide_ship:
+        if args.provider_json:
+            print(json.dumps([{"name": k, "value": v} for k, v in data["provider"].items()]))
+        elif args.provide_ship:
             provide_ship(data, args.work, args.provide_ship)
         elif args.observe:
             observe(data, args.work)
