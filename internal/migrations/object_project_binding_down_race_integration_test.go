@@ -8,11 +8,13 @@ package migrations_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -90,6 +92,35 @@ func TestObjectProjectBindingDown_ConcurrentWriter(t *testing.T) {
 				assert.False(t, exists)
 				assert.Zero(t, mirrors)
 			}
+		})
+	}
+}
+
+func TestObjectProjectBindingDown_RefusesStaleSnapshot(t *testing.T) {
+	for _, isolation := range []string{"repeatable read", "serializable"} {
+		t.Run(isolation, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			db, err := sql.Open("pgx", pgtest.NewEmptyDB(t))
+			require.NoError(t, err)
+			defer db.Close()
+			db.SetMaxOpenConns(1)
+			goose.SetBaseFS(migrations.FS)
+			require.NoError(t, goose.SetDialect("postgres"))
+			require.NoError(t, goose.UpToContext(ctx, db, ".", 20261026120000))
+			_, err = db.ExecContext(ctx, `SELECT set_config('default_transaction_isolation', $1, false)`, isolation)
+			require.NoError(t, err)
+			err = goose.DownToContext(ctx, db, ".", 20261026090001)
+			require.ErrorContains(t, err, "object project binding rollback requires READ COMMITTED")
+			var pgErr *pgconn.PgError
+			require.True(t, errors.As(err, &pgErr))
+			assert.Equal(t, "25001", pgErr.Code)
+			var exists bool
+			require.NoError(t, db.QueryRowContext(ctx, `SELECT to_regclass('kaname.object_project_binding') IS NOT NULL`).Scan(&exists))
+			assert.True(t, exists, "отказ предшествует снятию схемы")
+			version, err := goose.GetDBVersionContext(ctx, db)
+			require.NoError(t, err)
+			assert.Equal(t, int64(20261026120000), version, "отказ сохраняет ledger")
 		})
 	}
 }
