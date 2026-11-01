@@ -7,16 +7,25 @@ runner_bootstrap() {
   . /etc/os-release
   [ "$ID/$VERSION_ID" = "$KANAME_RUNNER_OS" ] || { echo 'runner provider: OS declaration mismatch' >&2; return 125; }
   mkdir -p "$work" || return 125
+  export KANAME_RUNNER_WORK="$work"
+  if [ "$(id -u)" != 0 ]; then
+    sudo --preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT \
+      bash -c '. "$1"; runner_bootstrap "$2" "$3" apt-only' bootstrap "$root/.github/scripts/stand-runner-bootstrap.sh" "$root" "$work" || return 125
+    [ "$mode" != apt-only ] || return 0
+    mode=portable
+  fi
+  if [ "$mode" != portable ]; then
   aptdir="$work/apt-provider"
   mkdir -p "$aptdir/lists/partial" "$aptdir/archives/partial" || return 125
   printf 'deb [check-valid-until=no] %s noble main universe\ndeb [check-valid-until=no] %s noble-updates main universe\ndeb [check-valid-until=no] %s noble-security main universe\n' \
     "$KANAME_RUNNER_SNAPSHOT" "$KANAME_RUNNER_SNAPSHOT" "$KANAME_RUNNER_SNAPSHOT" > "$aptdir/sources.list"
-  # apt's transport bootstrap is distinct from measured tools. The clean image has
-  # no CA bundle; use the same signed archive over HTTP until ca-certificates exists.
+  # The stock image has the Ubuntu archive keyring, but no TLS CA bundle.
+  # Bootstrap only transport trust via its signed distribution archive first.
   if [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
-    sed -i 's|https://|http://|g' "$aptdir/sources.list" || return 125
+    apt-get -o APT::Update::Error-Mode=any update -q &&
+      apt-get install -y -q --no-install-recommends --no-remove ca-certificates || return 125
   fi
-  local -a apt=(apt-get -o "Dir::Etc::sourcelist=$aptdir/sources.list" -o Dir::Etc::sourceparts=-
+  local -a apt=(apt-get -o APT::Update::Error-Mode=any -o "Dir::Etc::sourcelist=$aptdir/sources.list" -o Dir::Etc::sourceparts=-
     -o "Dir::State::lists=$aptdir/lists" -o "Dir::Cache::archives=$aptdir/archives" -o APT::Get::List-Cleanup=0)
   export DEBIAN_FRONTEND=noninteractive
   "${apt[@]}" update -q || return 125
@@ -34,6 +43,7 @@ runner_bootstrap() {
   done
   printf 'RUNNER-PROVIDER apt exact closure verified snapshot=%s packages=%s\n' "$KANAME_RUNNER_SNAPSHOT" "${#packages[@]}"
   [ "$mode" != apt-only ] || return 0
+  fi
   mkdir -p "$work/provider/bin" || return 125
   export PATH="$work/provider/bin:/usr/bin:/bin"
   arch=amd64; nodearch=x64
