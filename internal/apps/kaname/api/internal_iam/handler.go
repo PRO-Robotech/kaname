@@ -77,6 +77,7 @@ type relationWriteGate interface {
 type resourceRegistrar interface {
 	Register(ctx context.Context, in registerInput) error
 	Unregister(ctx context.Context, in unregisterInput) error
+	RecordRefusal(ctx context.Context, in unregisterInput, unregister bool, outcome string) error
 }
 
 // roleCompiledReader — narrow read port returning a Role's compiled permission
@@ -218,7 +219,8 @@ func proxyWriteRefusal() error {
 //
 // authz: exempt in proto-catalog; least-priv enforced HERE via ReBAC
 // (cert-cert→SA → `fga_writer@cluster:cluster_root`). cluster-internal :9091.
-func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResourceRequest) (*iamv1.RegisterResourceResponse, error) {
+func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResourceRequest) (response *iamv1.RegisterResourceResponse, err error) {
+	defer func() { err = h.registrationRefusal(ctx, req, false, err) }()
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {
 		return nil, err
@@ -243,7 +245,8 @@ func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResou
 // UnregisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple
 // delete. Idempotent: absent tuple → OK, never NotFound (drainer
 // cannot_delete→success). Same authz gate as RegisterResource.
-func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterResourceRequest) (*iamv1.UnregisterResourceResponse, error) {
+func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterResourceRequest) (response *iamv1.UnregisterResourceResponse, err error) {
+	defer func() { err = h.registrationRefusal(ctx, req, true, err) }()
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {
 		return nil, err
@@ -260,6 +263,30 @@ func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterR
 		return nil, shared.MapRepoErr(err)
 	}
 	return &iamv1.UnregisterResourceResponse{}, nil
+}
+
+// Отказ пишет только обработчик: сюда сходятся ворота, политика и use-case.
+// Без подтверждённой личности модуля событие регистрации не приписывается SAN.
+func (h *Handler) registrationRefusal(ctx context.Context, in unregisterInput, unregister bool, refusal error) error {
+	var outcome string
+	switch status.Code(refusal) {
+	case codes.PermissionDenied:
+		outcome = "permission_denied"
+	case codes.FailedPrecondition:
+		outcome = "failed_precondition"
+	default:
+		return refusal
+	}
+	if _, _, verified := authzguard.ModuleActor(ctx); !verified {
+		return refusal
+	}
+	if h.registrar == nil {
+		return shared.MapRepoErr(stderrors.New("registration audit not configured"))
+	}
+	if err := h.registrar.RecordRefusal(ctx, in, unregister, outcome); err != nil {
+		return shared.MapRepoErr(err)
+	}
+	return refusal
 }
 
 // authorizeRegistration runs the ReBAC gate and returns the caller's module

@@ -986,6 +986,12 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 		return "", false, false, fmt.Errorf("resolve catalog object type: %w", err)
 	}
 	objectType = row.ObjectType
+	// Снимок родителя берётся до снятия его фактов и в транзакции изменения.
+	hierarchy, herr := uc.registrationHierarchy(ctx, tx, t, write)
+	if herr != nil {
+		return "", false, false, fmt.Errorf("read registration audit hierarchy: %w", herr)
+	}
+	auditFields := hierarchyAuditFields(hierarchy)
 
 	// The tuple named by the request, plus whatever the caller established must go with
 	// it (see residualTuples): one atomic enqueue, so a withdrawal cannot commit half of
@@ -1061,7 +1067,7 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 		// запоздалая старая версия события не пишут.
 		if projectionReplaced || (changed && !stood) {
 			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceRegistered,
-				auditOutcomeRegistered, t, row, nil)); err != nil {
+				auditOutcomeRegistered, t, row, auditFields)); err != nil {
 				return "", false, false, fmt.Errorf("emit registration audit: %w", err)
 			}
 		}
@@ -1152,18 +1158,19 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 			if derr != nil {
 				return "", false, false, derr
 			}
+			auditFields["withdrawn_tuples"] = withdrawn
+			auditFields["descendants"] = removedDescendants
 			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceUnregistered,
-				auditOutcomeUnregistered, t, row, map[string]any{
-					"withdrawn_tuples": withdrawn, "descendants": removedDescendants,
-				})); err != nil {
+				auditOutcomeUnregistered, t, row, auditFields)); err != nil {
 				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
 			}
 		} else if withdrawn > 0 {
 			// Надгробие старше хранимой регистрации: строка осталась, но кортежи
 			// регистрации не новее надгробия сняты (kaname#969) — модель прав
 			// изменилась, и это тоже событие.
+			auditFields["withdrawn_tuples"] = withdrawn
 			if err = uc.audit.EmitTx(ctx, tx, auditEvent(ctx, AuditEventResourceUnregistered,
-				auditOutcomeSuperseded, t, row, map[string]any{"withdrawn_tuples": withdrawn})); err != nil {
+				auditOutcomeSuperseded, t, row, auditFields)); err != nil {
 				return "", false, false, fmt.Errorf("emit unregistration audit: %w", err)
 			}
 		}
