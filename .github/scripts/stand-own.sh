@@ -2987,8 +2987,11 @@ EOF
     world_runner_steps() { runner_world rw_steps; }
     world_runner_payload_parity() {
         printf '%s\n' "$RUNNER_POD_SH" > "$TMP/parity-payload.sh"
-        "$PY" "$SELFTEST_SOURCE_ROOT/.github/scripts/stand-runner-parity-test.py" "$SELFTEST_SOURCE_ROOT" "$TMP/parity-payload.sh"
+        "$PY" "$SELFTEST_SOURCE_ROOT/.github/scripts/stand-runner-parity-test.py" --axis "$1" "$SELFTEST_SOURCE_ROOT" "$TMP/parity-payload.sh"
     }
+    world_runner_tools() { world_runner_payload_parity tools; }
+    world_runner_prologue() { world_runner_payload_parity prologue; }
+    world_runner_opaque() { world_runner_payload_parity opaque; }
 
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
@@ -3196,7 +3199,9 @@ EOF
     assert 76 "(+) настоящая команда 125 и тот же обрыв — неполные отчёты 76"   world_runner_reports_cut_cmd125 "доставлено 0 из 1 при коде команды 125" "задачи 841 во внешнем кластере: 0" "подготовка pod завершилась"
 
     echo '--- ось 16: workflow toolset, explicit steps, actual prologue и доставленная сводка (kaname#1042)'
-    assert 0 '(−) real payload соответствует tools/prologue workflow' world_runner_payload_parity 'PARITY-AXIS tools' 'PARITY-AXIS prologue' 'PARITY-INVALID'
+    assert 0 '(−) real payload соответствует tools workflow' world_runner_tools 'PARITY-AXIS tools' '-' 'PARITY-INVALID'
+    assert 0 '(−) actual prologue снимает sentinel после world cleanup' world_runner_prologue 'PARITY-AXIS prologue actual' 'PARITY-AXIS prologue unset-lawful absent=True' 'PARITY-INVALID'
+    assert 0 '(−) opaque command сохраняет собственный cd' world_runner_opaque 'PARITY-OPAQUE cwd сохраняется' '-' 'PARITY-INVALID'
     assert 0 '(−) явные шаги runner приняты настоящим parser' world_runner_steps 'раннер: код 0' '-' 'неизвестный довод'
     assert 0 '(−) сводка приехала независимо от урезанного manifest N/N' world_fetch_summary 'PARITY-AXIS summary: exact bytes доставлены' '-' 'заранее созданная summary.txt не доставлена'
     assert 0 '(−) lawful export twin покрывает ту же summary.txt' world_fetch_summary_lawful 'PARITY-AXIS summary: exact bytes доставлены' '-' '-'

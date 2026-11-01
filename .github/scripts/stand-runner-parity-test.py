@@ -141,6 +141,23 @@ if [ "$1 $2 $3" = '-m pip install' ]; then
 fi
 exec "$FIXTURE_PY" "$@"
 ''')
+        # Операционная возможность base-fixture, не доказательство настоящего apt install:
+        # tar получает реальный декодер байтов stdlib lzma. Apt peer остаётся явно
+        # подставным; неизвестный argv и испорченный архив не дают успешного status.
+        executable(self.bin / "xz", '''#!/usr/bin/env python3
+import lzma, sys
+if not sys.argv[1:] or any(arg not in ("-d", "--decompress", "-c", "--stdout") for arg in sys.argv[1:]):
+ print("fixture xz: unsupported argv", file=sys.stderr); sys.exit(75)
+sys.stdout.buffer.write(lzma.decompress(sys.stdin.buffer.read()))
+''')
+        import lzma
+        sample = b"fixture-xz-byte-control\x00\n"
+        decoder = [str(self.bin / "xz"), "-d"]
+        lawful = subprocess.run(decoder, env=self.env, input=lzma.compress(sample), capture_output=True, timeout=5)
+        broken = subprocess.run(decoder, env=self.env, input=b"invalid-xz-archive", capture_output=True, timeout=5)
+        assert lawful.returncode == 0 and lawful.stdout == sample, "base-fixture xz не декодировал exact bytes"
+        assert broken.returncode != 0, "base-fixture xz принял испорченный архив"
+        print("PARITY-READY xz source=base-fixture/stdlib-lzma lawful=exact-bytes bad-archive=refused", flush=True)
         archive = self.work / "node-fixture.tar.xz"
         arch = {"x86_64": "x64", "aarch64": "arm64"}[platform.machine()]
         self.env["FIXTURE_NODE_ARCH"] = arch
@@ -176,7 +193,7 @@ else: sys.exit(74)
             if key.startswith("RUNNER_"):
                 env[key] = value.replace("/work/", str(self.work) + "/").replace("/src/", str(self.src) + "/")
         env["RUNNER_CMD"] = command.replace("/work/", str(self.work) + "/").replace("/src/", str(self.src) + "/")
-        print("PARITY-PRODUCER sha256=" + hashlib.sha256(self.payload.encode()).hexdigest(), flush=True)
+        print("PARITY-PRODUCER world=" + self.base.name + " sha256=" + hashlib.sha256(self.payload.encode()).hexdigest(), flush=True)
         result = subprocess.run(["bash", "-c", text], env=env, cwd=self.src, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45)
         stage = (self.work / ".rc").read_text().strip() if (self.work / ".rc").exists() else "missing"
@@ -187,7 +204,7 @@ else: sys.exit(74)
         return result
 
 
-def payload_checks(root, payload):
+def payload_checks(root, payload, axis="all"):
     installs, checks, blocks = declarations(root)
     failures = 0
     with tempfile.TemporaryDirectory(prefix="stand-parity-") as temp:
@@ -206,7 +223,8 @@ for name, version in data.items():
   if version not in r.stdout+r.stderr: failures.append(name+': ожидалось '+version+', получено '+r.stdout+r.stderr)
 print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(failures))
 '''
-        for label, install in (("actual", ""), ("workflow-lawful", "\n".join(blocks))):
+        tool_worlds = (("actual", ""), ("workflow-lawful", "\n".join(blocks))) if axis in ("all", "tools") else ()
+        for label, install in tool_worlds:
             world = World(base / label, payload)
             (world.work / "ship/tools.py").write_text(probe)
             expected = {name: spec[0] for name, spec in installs.items()}
@@ -222,7 +240,8 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
             else:
                 assert result.returncode == 0, "workflow lawful install twin не исполнился"
         command = "python3 -c " + shlex.quote("import os,json; print(json.dumps({'present': 'KANAME_STAND_IN_POD' in os.environ, 'keep':os.environ.get('KEEP_SENTINEL')}))")
-        for label, code in (("actual", payload), ("unset-lawful", payload.replace("unset KUBECONFIG\n", "unset KUBECONFIG KANAME_STAND_IN_POD\n", 1))):
+        env_worlds = (("actual", payload), ("unset-lawful", payload.replace("unset KUBECONFIG\n", "unset KUBECONFIG KANAME_STAND_IN_POD\n", 1))) if axis in ("all", "prologue") else ()
+        for label, code in env_worlds:
             world = World(base / (label + "-env"), payload)
             result = world.run(command, payload=code)
             rows = [json.loads(line) for line in result.stdout.splitlines() if line.startswith('{"present":')]
@@ -231,10 +250,11 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
             print(f"PARITY-AXIS prologue {label} absent={good}", flush=True)
             if label == "actual": failures += not good
             else: assert good, "lawful unset twin не подавил унаследованную переменную"
-        world = World(base / "opaque-cwd", payload)
-        result = world.run("cd sub; test \"$PWD\" = \"$(dirname \"$PWD\")/sub\"")
-        assert result.returncode == 0, "законный cd внутри opaque payload потерян"
-        print("PARITY-OPAQUE cwd сохраняется внутри одной команды: PASS", flush=True)
+        if axis in ("all", "opaque"):
+            world = World(base / "opaque-cwd", payload)
+            result = world.run("cd sub; test \"$PWD\" = \"$(dirname \"$PWD\")/sub\"")
+            assert result.returncode == 0, "законный cd внутри opaque payload потерян"
+            print("PARITY-OPAQUE cwd сохраняется внутри одной команды: PASS", flush=True)
     return int(bool(failures))
 
 
@@ -259,6 +279,9 @@ if __name__ == "__main__":
     try:
         if sys.argv[1] == "--steps":
             sys.exit(step_checks(Path(sys.argv[2]), Path(sys.argv[3])))
+        if sys.argv[1] == "--axis":
+            assert sys.argv[2] in ("tools", "prologue", "opaque"), "неизвестная ось fixture"
+            sys.exit(payload_checks(Path(sys.argv[3]), Path(sys.argv[4]).read_text(), sys.argv[2]))
         sys.exit(payload_checks(Path(sys.argv[1]), Path(sys.argv[2]).read_text()))
     except Exception as error:
         print(f"PARITY-INVALID: {type(error).__name__}: {error}", flush=True)
