@@ -6,6 +6,8 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+mkdir -p "$work/hook-temp"
+export TMPDIR="$work/hook-temp"
 for tool in bash git go gofmt make python3 golangci-lint grep sed cp mkdir rm chmod dirname wc tail head cat mv date; do
     command -v "$tool" >/dev/null || { echo "НЕ ВЫПОЛНИЛОСЬ: нет $tool"; exit 2; }
 done
@@ -155,6 +157,44 @@ hook_check() {
     printf '%s\n' "$input" | bash scripts/hooks/pre-push origin > "$work/$name.log" 2>&1 || hook_rc=$?
     check_result "$name" "$expected" "$pattern" "$hook_rc" "$work/$name.log"
 }
+ref_push_check() {
+    local name="$1" expected="$2" pattern="$3" sent="$4" rc=0
+    git push origin "$sent:refs/heads/main" > "$work/$name.log" 2>&1 || rc=$?
+    check_result "$name" "$expected" "$pattern" "$rc" "$work/$name.log"
+}
+
+# Прямой RED независимого опыта: хороший checkout не подменяет плохой ref.
+# Это настоящие branch pushes; main допускает корректные commits задачи #1.
+git checkout -q --detach "$base"
+git update-ref refs/remotes/origin/main "$base"
+ref_push_check nonhead-twin green 'зелёное — исполнено 7 из 7' "$base"
+ref_push_check nonhead-mutant refuse 'probe.go:.*errcheck' "$mutant"
+git checkout -q --detach "$mutant"
+git checkout "$base" -- probe.go
+before_status="$(git status --porcelain)"
+before_head="$(git rev-parse HEAD)"
+before_blob="$(git hash-object probe.go)"
+ref_push_check dirty-hides-mutant refuse 'probe.go:.*errcheck' "$mutant"
+printf '%s\n' "$(git rev-parse HEAD) $(git hash-object probe.go)" > "$work/dirty-state.log"
+state_rc=0
+if [ "$before_status" != "$(git status --porcelain)" ]; then state_rc=1; fi
+check_result dirty-state green "^$before_head $before_blob$" "$state_rc" "$work/dirty-state.log"
+git restore --source=HEAD --staged --worktree -- probe.go
+git checkout -q --detach "$base"
+printf '\n// Закоммиченный законный близнец.\n' >> probe.go
+git add probe.go
+git commit -qm '#1 законный tip для dirty checkout'
+lawful_tip="$(git rev-parse HEAD)"
+sed -i 's/_ = result()/result()/' probe.go
+before_status="$(git status --porcelain)"
+before_head="$(git rev-parse HEAD)"
+before_blob="$(git hash-object probe.go)"
+ref_push_check dirty-cannot-red-lawful green 'зелёное — исполнено 7 из 7' "$lawful_tip"
+printf '%s\n' "$(git rev-parse HEAD) $(git hash-object probe.go)" > "$work/lawful-dirty-state.log"
+state_rc=0
+if [ "$before_status" != "$(git status --porcelain)" ]; then state_rc=1; fi
+check_result lawful-dirty-state green "^$before_head $before_blob$" "$state_rc" "$work/lawful-dirty-state.log"
+git restore --source=HEAD --staged --worktree -- probe.go
 
 # На main есть старый lint-дефект в другом пакете. Новый чистый push должен
 # судить только изменённый пакет: full-module и пустой обход здесь различимы.
@@ -199,13 +239,13 @@ tip="$(git rev-parse HEAD)"
 rc=0
 printf 'HEAD %s refs/heads/2 %s\nHEAD %s refs/heads/2 %s\n' "$tip" "$tip" "$tip" "$main_snapshot" | bash scripts/hooks/pre-push origin > "$work/multi-ref.log" 2>&1 || rc=$?
 check_result multi-ref green 'lint: областей 1 — .' "$rc" "$work/multi-ref.log"
+check_result multi-ref-dedup green 'lint: distinct tips 1, красных 0' "$rc" "$work/multi-ref.log"
 rc=0
 printf 'refs/heads/2 0000000000000000000000000000000000000000 refs/heads/2 %s\n' "$tip" | bash scripts/hooks/pre-push origin > "$work/delete-ref.log" 2>&1 || rc=$?
 check_result delete-ref green 'содержимого не уезжает — проверять нечего' "$rc" "$work/delete-ref.log"
 
-# Два РАЗНЫХ tips меняют разные пакеты, оба существуют в checkout. Дефект A
-# обязан сохраниться в union при любом порядке live refs. Предмет здесь —
-# отбор пакетов checkout, содержимое остальных tips hook отдельно не checkout-ит.
+# Два РАЗНЫХ tips меняют разные пакеты. Каждый проверяется по своим bytes;
+# дефект A обязан сохраниться при любом порядке live refs.
 mkdir uniona unionb
 cat > uniona/a.go <<'GO'
 package uniona
@@ -233,16 +273,18 @@ git commit -qm '#2 объединённый checkout разных tips'
 input_a="HEAD $tip_a refs/heads/2 $union_base"
 input_b="HEAD $tip_b refs/heads/main $union_base"
 hook_check different-tips-ab refuse 'uniona/a.go:.*errcheck' "$input_a"$'\n'"$input_b"
-check_result different-tips-ab-argv refuse '^lint: областей 2 — ./uniona ./unionb$' "$hook_rc" "$work/different-tips-ab.log"
+check_result different-tips-ab-argv-a refuse '^lint: областей 1 — ./uniona$' "$hook_rc" "$work/different-tips-ab.log"
+check_result different-tips-ab-argv-b refuse '^lint: областей 1 — ./unionb$' "$hook_rc" "$work/different-tips-ab.log"
 hook_check different-tips-ba refuse 'uniona/a.go:.*errcheck' "$input_b"$'\n'"$input_a"
-check_result different-tips-ba-argv refuse '^lint: областей 2 — ./unionb ./uniona$' "$hook_rc" "$work/different-tips-ba.log"
+check_result different-tips-ba-argv-a refuse '^lint: областей 1 — ./uniona$' "$hook_rc" "$work/different-tips-ba.log"
+check_result different-tips-ba-argv-b refuse '^lint: областей 1 — ./unionb$' "$hook_rc" "$work/different-tips-ba.log"
 git checkout -q --detach "$union_base"
 printf '\n// Законный близнец первого пакета.\n' >> uniona/a.go
 commit_case uniona/a.go
 tip_a_clean="$(git rev-parse HEAD)"
 git checkout "$tip_b" -- unionb/b.go
 git commit -qm '#2 законный checkout разных tips'
-hook_check different-tips-twin green '^lint: областей 2 — ./uniona ./unionb$' "HEAD $tip_a_clean refs/heads/2 $union_base"$'\n'"$input_b"
+hook_check different-tips-twin green 'lint: distinct tips 2, красных 0' "HEAD $tip_a_clean refs/heads/2 $union_base"$'\n'"$input_b"
 
 # После перемещения исходный пакет выживает и несёт старый дефект. Проверка
 # только destination пропустила бы его; изменяются обе стороны rename.
@@ -293,5 +335,9 @@ sed -i 's/^GOLANGCI_LINT_VERSION := .*/GOLANGCI_LINT_VERSION :=/' Makefile
 commit_case Makefile
 push_check missing-pin refuse 'golangci-lint не отвечает пину'
 
+shopt -s nullglob dotglob
+residue=("$TMPDIR"/*)
+printf 'temporary entries %s\n' "${#residue[@]}" > "$work/cleanup.log"
+check_result temporary-cleanup green '^temporary entries 0$' 0 "$work/cleanup.log"
 echo "prepush-lint-inject: рассмотрено $checks утверждений о hook, исполнено $checks, отказов $failed"
 [ "$failed" -eq 0 ]

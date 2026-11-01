@@ -95,15 +95,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # ЧТО ЭТОТ ХУК СУДИТ — И ЧЕГО ОН ПОКА НЕ СУДИТ
 #
-# Он судит РАБОЧУЮ КОПИЮ, а уезжает КОММИТ. Совпадают они у всякого, кто
-# отправляет то, что только что написал, и расходятся у того, кто отправляет
-# старую ветку из грязного дерева: тогда проверено не то, что поедет.
-#
-# Названо здесь, а не умолчано, потому что тихая неполнота — это ровно тот
-# класс, ради которого файл написан. Закрывается отдельным производителем
-# диапазона (git подаёт хуку `<local_ref> <local_sha> <remote_ref>
-# <remote_sha>`); так сделано в соседнем репозитории —
-# `kacho:scripts/hooks/prepush-range.sh`. Здесь этого ещё нет.
+# Шесть прежних групп судят рабочую копию. Их область этим изменением не
+# меняется. Группа golangci-lint судит каждый distinct отправляемый COMMIT:
+# диапазон берётся из stdin git, содержимое — из изолированного checkout SHA.
+# Ни HEAD другой ветки, ни dirty-файлы не подменяют bytes отправляемого tip.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # КАК ОБОЙТИ — ПЕРЕЧЕНЬ ПОЛНЫЙ, И ЭТО ЕГО СВОЙСТВО
@@ -408,14 +403,16 @@ group_probes() {
 
 group_listfilter() { need make || return "$UNMET_RC"; make audit-list-filter; }
 
-# Полный lint сохраняется в make lint. Здесь тот же пин из Makefile, конфиг и
-# кэш; область — объединение пакетов всех живых ссылок исходного push-входа.
-group_lint() {
+# Один distinct tip проверяется в своей копии ЗАКОММИЧЕННОГО дерева. Shared
+# clone заимствует только immutable объекты; checkout, config и cache отдельны.
+# Копия не регистрирует worktree в пользовательском репозитории.
+lint_committed_tip() (
+    local tip="$1" snapshot="$scratch/lint-tree.$1"
     local local_ref local_sha remote_ref remote_sha base paths full="" path dir file found want have
     local -a packages=()
     local -A seen=()
     need make || return "$UNMET_RC"
-    paths="$scratch/lint.paths"
+    paths="$scratch/lint.paths.$tip"
     : > "$paths"
     [ "$refs_total" -gt 0 ] || full="нет входа git push"
     while read -r local_ref local_sha remote_ref remote_sha; do
@@ -440,6 +437,16 @@ group_lint() {
             return "$UNMET_RC"
         fi
     done <<< "$push_input"
+    echo "lint: committed tip=$tip"
+    trap 'rm -rf "$snapshot"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM HUP
+    if ! git clone --shared --no-checkout --quiet "$ROOT" "$snapshot" ||
+       ! git -C "$snapshot" checkout --quiet --detach "$tip"; then
+        declare_unmet "закоммиченное дерево lint не получено: $tip"
+        return "$UNMET_RC"
+    fi
+    cd "$snapshot" || { declare_unmet "не перейти в дерево lint $tip"; return "$UNMET_RC"; }
     while IFS= read -r -d '' path; do
         case "$path" in
             .github/golangci.yml|Makefile|go.mod|go.sum|go.work|go.work.sum) full="изменена конфигурация: $path" ;;
@@ -475,7 +482,58 @@ group_lint() {
         declare_unmet "golangci-lint не отвечает пину $want: $have"
         return "$UNMET_RC"
     fi
-    GOLANGCI_LINT_CACHE="$ROOT/.cache/golangci-lint" golangci-lint run --timeout=10m --config=.github/golangci.yml "${packages[@]}"
+    GOLANGCI_LINT_CACHE="$snapshot/.cache/golangci-lint" golangci-lint run --timeout=10m --config=.github/golangci.yml "${packages[@]}"
+)
+
+# Диапазоны одинакового tip объединяются; разные tips никогда не подменяют
+# содержимое друг друга. Отказ одного не останавливает перепись остальных.
+group_lint() {
+    local local_ref local_sha remote_ref remote_sha tip original_unmet="$UNMET_FILE" output rc verdict crc
+    local red_tips=0 unmet_tips=0 undecided_tips=0
+    local -a tips=()
+    local -A inputs=()
+    while read -r local_ref local_sha remote_ref remote_sha; do
+        [ -n "${local_ref:-}" ] && [ "${local_sha:-$zero}" != "$zero" ] || continue
+        tip="$(git rev-parse --verify "$local_sha^{commit}" 2>/dev/null)" || {
+            declare_unmet "tip lint не разрешается в commit: $local_sha"; return "$UNMET_RC";
+        }
+        if [ -z "${inputs[$tip]+present}" ]; then tips+=("$tip"); inputs[$tip]=""; fi
+        inputs[$tip]+="$local_ref $local_sha $remote_ref $remote_sha"$'\n'
+    done <<< "$push_input"
+    if [ "${#tips[@]}" -eq 0 ]; then
+        tip="$(git rev-parse HEAD)" || { declare_unmet "HEAD lint не прочитан"; return "$UNMET_RC"; }
+        tips=("$tip"); inputs[$tip]=""
+    fi
+    for tip in "${tips[@]}"; do
+        UNMET_FILE="$scratch/lint-unmet.$tip"
+        : > "$UNMET_FILE"
+        output="$(push_input="${inputs[$tip]}" lint_committed_tip "$tip" 2>&1)"
+        rc=$?
+        printf '%s\n' "$output"
+        verdict="$("$CLASSIFY" --rc "$rc" --unmet "$UNMET_FILE")"
+        crc=$?
+        if [ "$crc" -ne 0 ]; then undecided_tips=$((undecided_tips + 1))
+        else
+            case "$verdict" in
+                red) red_tips=$((red_tips + 1)) ;;
+                unmet) unmet_tips=$((unmet_tips + 1)) ;;
+            esac
+        fi
+    done
+    UNMET_FILE="$original_unmet"
+    echo "lint: distinct tips ${#tips[@]}, красных $red_tips, без условия $unmet_tips, без категории $undecided_tips"
+    if [ "$red_tips" -gt 0 ]; then
+        if [ "$unmet_tips" -gt 0 ] || [ "$undecided_tips" -gt 0 ]; then
+            declare_axis "не все tips получили вердикт: без условия $unmet_tips, без категории $undecided_tips"
+        fi
+        return 1
+    fi
+    [ "$undecided_tips" -eq 0 ] || return "$UNMET_RC"
+    if [ "$unmet_tips" -gt 0 ]; then
+        declare_unmet "lint tips без условия: $unmet_tips"
+        return "$UNMET_RC"
+    fi
+    return 0
 }
 
 # Ведомость групп — ЕДИНСТВЕННЫЙ источник и перечня, и числа.
@@ -501,6 +559,8 @@ axes_names=()
 
 scratch="$(mktemp -d)" || finish 2 "pre-push: ОТКАЗ — временный каталог не создан, судить не в чем"
 trap 'rm -rf "$scratch"' EXIT
+trap 'finish 130 "pre-push: прерван сигналом INT"' INT
+trap 'finish 143 "pre-push: прерван сигналом TERM/HUP"' TERM HUP
 
 # ВРЕМЕННЫЙ КАТАЛОГ ВНУТРИ СУДИМОГО ДЕРЕВА — ТРЕТЬЯ КАТЕГОРИЯ, А НЕ КРАСНОЕ.
 #
