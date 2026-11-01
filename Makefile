@@ -291,10 +291,17 @@ test-prepush-lint:
 .PHONY: test-prepush-hooks
 test-prepush-hooks:
 	@rc=0; for script in prepush-lint-inject.sh prepush-budget-inject.sh prepush-classify-inject.sh; do \
-	  bash scripts/hooks/$$script || rc=1; \
+	  echo "== targeted $$script"; part_rc=0; \
+	  bash scripts/hooks/$$script || part_rc=$$?; \
+	  echo "targeted-part $$script rc=$$part_rc"; \
+	  if [ $$part_rc -ne 0 ]; then rc=1; fi; \
 	done; \
-	bash -n scripts/hooks/pre-push scripts/hooks/prepush-lint-inject.sh scripts/hooks/prepush-budget-inject.sh scripts/hooks/prepush-classify-inject.sh || rc=1; \
-	go test ./internal/supplyhygiene -count=1 -v || rc=1; \
+	part_rc=0; parsed=0; for source in pre-push prepush-lint-inject.sh prepush-budget-inject.sh prepush-classify-inject.sh; do \
+	  bash -n scripts/hooks/$$source || part_rc=$$?; parsed=$$((parsed + 1)); \
+	done; echo "syntax: рассмотрено $$parsed файлов"; \
+	echo "targeted-part syntax rc=$$part_rc"; if [ $$part_rc -ne 0 ]; then rc=1; fi; \
+	part_rc=0; go test ./internal/supplyhygiene -count=1 -v || part_rc=$$?; \
+	echo "targeted-part supplyhygiene rc=$$part_rc"; if [ $$part_rc -ne 0 ]; then rc=1; fi; \
 	exit $$rc
 
 # audit-list-filter — CI gate for kaname's listing surface: every method that

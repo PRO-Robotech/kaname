@@ -115,10 +115,27 @@ grep -q 'красные.*golangci-lint' "$work/defect.log"
 echo "PASS: errcheck назван, push отказал; база диапазона $base"
 checks=2
 failed=0
+matches_status() {
+    case "$1:$2" in
+        green:0) return 0 ;;
+        green:*|refuse:0) return 1 ;;
+        refuse:*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+# Таблица судьи проверяется отдельно: && и || в shell имеют равный приоритет.
+for row in 'green 0 yes' 'green 1 no' 'refuse 0 no' 'refuse 1 yes' 'refuse 2 yes'; do
+    read -r expected code want <<< "$row"
+    actual=no
+    if matches_status "$expected" "$code"; then actual=yes; fi
+    checks=$((checks + 1))
+    if [ "$actual" = "$want" ]; then echo "PASS: judge $row"
+    else failed=$((failed + 1)); echo "FAIL: judge $row → $actual"; fi
+done
 check_result() {
     local name="$1" expected="$2" pattern="$3" rc="$4" log="$5"
     checks=$((checks + 1))
-    if { [ "$expected" = green ] && [ "$rc" -eq 0 ] || [ "$expected" = refuse ] && [ "$rc" -ne 0 ]; } && grep -q -- "$pattern" "$log"; then
+    if matches_status "$expected" "$rc" && grep -q -- "$pattern" "$log"; then
         echo "PASS: $name"
     else
         failed=$((failed + 1))
@@ -132,6 +149,12 @@ push_check() {
     check_result "$name" "$expected" "$pattern" "$rc" "$work/$name.log"
 }
 commit_case() { git add "$@"; git commit -qm '#2 граница области lint'; }
+hook_check() {
+    local name="$1" expected="$2" pattern="$3" input="$4"
+    hook_rc=0
+    printf '%s\n' "$input" | bash scripts/hooks/pre-push origin > "$work/$name.log" 2>&1 || hook_rc=$?
+    check_result "$name" "$expected" "$pattern" "$hook_rc" "$work/$name.log"
+}
 
 # На main есть старый lint-дефект в другом пакете. Новый чистый push должен
 # судить только изменённый пакет: full-module и пустой обход здесь различимы.
@@ -179,6 +202,75 @@ check_result multi-ref green 'lint: областей 1 — .' "$rc" "$work/multi
 rc=0
 printf 'refs/heads/2 0000000000000000000000000000000000000000 refs/heads/2 %s\n' "$tip" | bash scripts/hooks/pre-push origin > "$work/delete-ref.log" 2>&1 || rc=$?
 check_result delete-ref green 'содержимого не уезжает — проверять нечего' "$rc" "$work/delete-ref.log"
+
+# Два РАЗНЫХ tips меняют разные пакеты, оба существуют в checkout. Дефект A
+# обязан сохраниться в union при любом порядке live refs. Предмет здесь —
+# отбор пакетов checkout, содержимое остальных tips hook отдельно не checkout-ит.
+mkdir uniona unionb
+cat > uniona/a.go <<'GO'
+package uniona
+
+import "errors"
+
+func result() error { return errors.New("union") }
+
+func Probe() { _ = result() }
+GO
+printf 'package unionb\n\nfunc Value() int { return 0 }\n' > unionb/b.go
+commit_case uniona/a.go unionb/b.go
+union_base="$(git rev-parse HEAD)"
+sed -i 's/_ = result()/result()/' uniona/a.go
+commit_case uniona/a.go
+tip_a="$(git rev-parse HEAD)"
+git checkout -q --detach "$union_base"
+printf '\n// Изменение второго пакета.\n' >> unionb/b.go
+commit_case unionb/b.go
+tip_b="$(git rev-parse HEAD)"
+[ "$tip_a" != "$tip_b" ]
+git checkout -q --detach "$tip_a"
+git checkout "$tip_b" -- unionb/b.go
+git commit -qm '#2 объединённый checkout разных tips'
+input_a="HEAD $tip_a refs/heads/2 $union_base"
+input_b="HEAD $tip_b refs/heads/main $union_base"
+hook_check different-tips-ab refuse 'uniona/a.go:.*errcheck' "$input_a"$'\n'"$input_b"
+check_result different-tips-ab-argv refuse '^lint: областей 2 — ./uniona ./unionb$' "$hook_rc" "$work/different-tips-ab.log"
+hook_check different-tips-ba refuse 'uniona/a.go:.*errcheck' "$input_b"$'\n'"$input_a"
+check_result different-tips-ba-argv refuse '^lint: областей 2 — ./unionb ./uniona$' "$hook_rc" "$work/different-tips-ba.log"
+git checkout -q --detach "$union_base"
+printf '\n// Законный близнец первого пакета.\n' >> uniona/a.go
+commit_case uniona/a.go
+tip_a_clean="$(git rev-parse HEAD)"
+git checkout "$tip_b" -- unionb/b.go
+git commit -qm '#2 законный checkout разных tips'
+hook_check different-tips-twin green '^lint: областей 2 — ./uniona ./unionb$' "HEAD $tip_a_clean refs/heads/2 $union_base"$'\n'"$input_b"
+
+# После перемещения исходный пакет выживает и несёт старый дефект. Проверка
+# только destination пропустила бы его; изменяются обе стороны rename.
+mkdir renameold renamenew
+cat > renameold/keep.go <<'GO'
+package renameold
+
+import "errors"
+
+func result() error { return errors.New("source") }
+
+func Probe() { result() }
+GO
+printf 'package renameold\n\nfunc Moved() {}\n' > renameold/move.go
+printf 'package renamenew\n\nfunc Kept() {}\n' > renamenew/keep.go
+commit_case renameold/keep.go renameold/move.go renamenew/keep.go
+rename_base="$(git rev-parse HEAD)"
+git mv renameold/move.go renamenew/move.go
+sed -i 's/package renameold/package renamenew/' renamenew/move.go
+git add renamenew/move.go
+git commit -qm '#2 перенос файла из выживающего пакета'
+tip="$(git rev-parse HEAD)"
+hook_check surviving-source refuse 'renameold/keep.go:.*errcheck' "HEAD $tip refs/heads/2 $rename_base"
+check_result surviving-source-argv refuse '^lint: областей 2 — ./renamenew ./renameold$' "$hook_rc" "$work/surviving-source.log"
+sed -i 's/result() }/_ = result() }/' renameold/keep.go
+commit_case renameold/keep.go
+tip="$(git rev-parse HEAD)"
+hook_check surviving-source-twin green '^lint: областей 2 — ./renamenew ./renameold$' "HEAD $tip refs/heads/2 $rename_base"
 
 printf '\n# Граница конфигурации.\n' >> .github/golangci.yml
 commit_case .github/golangci.yml
