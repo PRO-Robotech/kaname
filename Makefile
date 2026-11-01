@@ -284,6 +284,10 @@ lint:
 	echo "  пакета, не деревом, и возвращает разбор ЧУЖИХ файлов с чужими путями"
 	golangci-lint run --timeout=10m --config=.github/golangci.yml ./...
 
+.PHONY: test-prepush-lint
+test-prepush-lint:
+	bash scripts/hooks/prepush-lint-inject.sh
+
 # audit-list-filter — CI gate for kaname's listing surface: every method that
 # hands a page to a caller must narrow it, and must declare HOW. What is checked
 # lives in pkg/listfiltergate; how this service is laid out lives in
