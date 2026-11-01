@@ -6,18 +6,35 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-for tool in git go gofmt make python3 golangci-lint grep sed; do
+for tool in bash git go gofmt make python3 golangci-lint grep sed cp mkdir rm chmod dirname wc tail head cat mv date; do
     command -v "$tool" >/dev/null || { echo "НЕ ВЫПОЛНИЛОСЬ: нет $tool"; exit 2; }
 done
+# Полный вход копии: Makefile включает provenance.mk; его внешний include мягкий.
+# lint не имеет зависимых целей, vet зовёт go; listfilter заменён пустым предметом.
+# Python-прогонщик использует только стандартную библиотеку и git.
+inputs=(Makefile provenance.mk .github/golangci.yml .github/scripts/go-test-verdict.py
+    scripts/hooks/pre-push scripts/hooks/prepush-rule.sh scripts/hooks/branch-rule.sh
+    scripts/hooks/prepush-classify.sh scripts/hooks/install.sh)
+for input in "${inputs[@]}"; do
+    [ -f "$ROOT/$input" ] || { echo "НЕ ВЫПОЛНИЛОСЬ: нет входа $input"; exit 2; }
+done
+printf 'fixture-input: %s\n' "${inputs[@]}"
+echo "fixture-input: рассмотрено ${#inputs[@]} исходных файлов"
+# Тот же изолированный способ identity, что у существующих budget/classify проб.
+# Пользовательский global и HOME не меняются; branch guard читает этот файл.
+export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
+printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 mkdir -p "$work/repo/scripts/hooks" "$work/repo/.github/scripts" "$work/repo/.github"
 cp "$ROOT"/scripts/hooks/{pre-push,prepush-rule.sh,branch-rule.sh,prepush-classify.sh,install.sh} "$work/repo/scripts/hooks/"
 cp "$ROOT/.github/scripts/go-test-verdict.py" "$work/repo/.github/scripts/"
 cp "$ROOT/.github/golangci.yml" "$work/repo/.github/"
 cp "$ROOT/Makefile" "$work/repo/Makefile"
+cp "$ROOT/provenance.mk" "$work/repo/provenance.mk"
+[ -x "$work/repo/scripts/hooks/prepush-classify.sh" ] || {
+    echo 'НЕ ВЫПОЛНИЛОСЬ: определитель категорий не исполним'; exit 2;
+}
 # Прочие цели выполняют реальные build/vet/test; listfilter предмета здесь не имеет.
 cat >> "$work/repo/Makefile" <<'MK'
-vet:
-	go vet ./...
 audit-list-filter:
 	@echo "фикстура без списков"
 MK
@@ -41,10 +58,8 @@ import "testing"
 
 func TestProbe(t *testing.T) { Probe() }
 GO
-git init -q
-git config --local user.name 'Prepush Lint Fixture'
-git config --local user.email 'prepush-lint@fixture.invalid'
-git add scripts/hooks .github Makefile go.mod probe.go probe_test.go
+git init -q -b 1
+git add scripts/hooks .github Makefile provenance.mk go.mod probe.go probe_test.go
 git commit -qm '#1 законный близнец'
 base="$(git rev-parse HEAD)"
 # Цель lint сама сверяет пин. Ненулевой oracle — негодная фикстура, а не RED хука.
@@ -75,16 +90,16 @@ git checkout -q --detach "$base"
 git init -q --bare "$work/remote.git"
 git remote add origin "$work/remote.git"
 bash scripts/hooks/install.sh install >/dev/null
-# Теги несут Go-код и судятся всеми группами хука. Правило имён веток здесь
-# предмета не имеет; глобальная identity владельца для изолированной пробы не нужна.
+# Настоящий branch push проходит неизменённый страж с изолированной identity.
 # Обе фикстурные ревизии созданы до установки хуков, которые не отключаются.
-if git push origin HEAD:refs/tags/lint-probe > "$work/twin.log" 2>&1; then
+bash scripts/hooks/install.sh check
+if git push origin HEAD:refs/heads/1 > "$work/twin.log" 2>&1; then
     echo 'PASS: законный близнец — настоящий push прошёл'
 else
     cat "$work/twin.log"; exit 1
 fi
 git checkout -q --detach "$mutant"
-if git push --force origin HEAD:refs/tags/lint-probe > "$work/defect.log" 2>&1; then
+if git push origin HEAD:refs/heads/1 > "$work/defect.log" 2>&1; then
     cat "$work/defect.log"
     echo 'FAIL: настоящий push пропустил errcheck в затронутом пакете'
     exit 1
