@@ -568,13 +568,25 @@
    "path": "tests/authz-fixtures/principal_pairings.py",
    "upstream_blob": "80183e8cc34fd0af8a54b863c8e61e3cc42aeab7",
    "upstream_sha256": "d1989123c4ed341a2265b5cfc53af8f04827379aa8583d81f57c06577527189e",
-   "local_sha256": "8f3fb09c838fb385b145862964d996d2992749d6da39d72e551482ffe77961de",
+   "local_sha256": "8dbe17ad73db215ac964e14d6376e830ceef17e7a6b2a0858a787902a8f9eded",
    "rewrites": [
     {
      "line": 45,
      "local": "# BINDING_TARGET_ONLY_IDS — та же врезка выше, но ДАННЫМИ (задача kacho#1441, п.5).",
      "upstream": "# BINDING_TARGET_ONLY_IDS — та же врезка выше, но ДАННЫМИ (задача #1441, п.5).",
      "why": "ссылка на задачу другого репозитория несёт его имя: в этом репозитории голая `#<N>` разрешается в трекер службы и ведёт в 404 либо в чужую задачу (kaname#387)"
+    },
+    {
+     "line": 68,
+     "local": "    \"userINVId\",\n    \"groupMemberAUserId\",\n    \"groupNonMemberAUserId\",\n    \"userPA1Id\",",
+     "upstream": "    \"userINVId\",\n    \"userPA1Id\",",
+     "why": "kaname#1037: отдельные групповые субъекты остаются целями binding; ACTIVE membership не подменяет их токенами общих NOB/INV/AAB"
+    },
+    {
+     "line": 124,
+     "local": "# Человеческий токен проверяется по sub своей церемонии, машинный — по enrichment.\nHUMAN_PRINCIPAL_PAIRINGS = {\"ceremonyGroupUserId\": \"jwtHumanGroupCeremony\"}\n\n\ndef token_principal_id",
+     "upstream": "\ndef token_principal_id",
+     "why": "kaname#1037: отдельная человеческая пара групповой церемонии объявлена отдельно от машинных enrichment-пар"
     }
    ]
   }
