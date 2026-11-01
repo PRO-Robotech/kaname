@@ -139,7 +139,7 @@ case(2, "delete-only and update/delete twin", [
     check("update", True, "twin-can-update"),
     *remove("/iam/v1/accessBindings", "escTwinHold"),
     *remove("/iam/v1/roles", "escBoth"), *remove("/iam/v1/roles", "escDelete"),
-    # #1039: decisions above are accompanied by real mutations on the own API.
+    # kaname#1039: decisions above are accompanied by real mutations on the own API.
     # Same human, scope, object type and target; the twin changes only role verbs.
     *sa("escMutationTarget"),
     Step(name="snapshot-before-delete-only-update", method="GET",

@@ -73,7 +73,7 @@ func assertRegistrationCaller(t *testing.T, p map[string]any, outcome string) {
 	assert.Equal(t, outcome, p["outcome"])
 }
 
-// Родитель не прислан: полная цепь события выводится из данных kaname (#982).
+// Родитель не прислан: полная цепь события выводится из данных kaname (kaname#982).
 func TestRegistrationAudit1044_DerivedParentAndVersion(t *testing.T) {
 	w := newURXWorld(t)
 	id := pcrX + "/audit1044"

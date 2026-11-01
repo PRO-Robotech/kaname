@@ -51,6 +51,8 @@ func (seededCatalogTypes) DottedTypeTx(_ context.Context, _ service.Tx, modelTyp
 var seededPolicies = map[string]domain.WritePolicy{
 	"vpc_network": {ObjectType: "vpc_network",
 		Pointers: []domain.ParentPointer{{Name: "project", Type: "project"}}},
+	"storage_volume": {ObjectType: "storage_volume",
+		Pointers: []domain.ParentPointer{{Name: "project", Type: "project"}}},
 	"registry_registry": {ObjectType: "registry_registry",
 		Pointers: []domain.ParentPointer{{Name: "project", Type: "project"}}},
 	"registry_repository": {ObjectType: "registry_repository",
