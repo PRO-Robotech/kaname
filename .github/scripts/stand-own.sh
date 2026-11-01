@@ -2223,6 +2223,7 @@ if [ "${1:-}" = "--registry-self-test" ]; then
 fi
 
 if [ "${1:-}" = "--self-test" ]; then
+    SELFTEST_SOURCE_ROOT="$ROOT"
     # Подставной слушатель — единственное, что самопроверке нужно извне. Требование
     # честное: тремя соседними самопроверками этого процесса python3 уже нужен, и
     # его отсутствие здесь — НЕ зелёное, а отсутствие доказательства.
@@ -2698,6 +2699,7 @@ case "$line" in
   *"get pod kaname-own"*"--ignore-not-found"*) [ -f "$S/pod" ] && echo pod/kaname-own; exit 0 ;;
   *"delete pod kaname-own"*) rm -f "$S/pod" ;;
   *"get pod kaname-runner"*) cat "$S/phase" 2>/dev/null || echo Running ;;
+  *"apply -f -"*) cat > "$S/objects.json" ;;
   # Тот же атомарный итог «стадия код», что публикует finish() настоящего pod.
   *"exec "*"cat /work/.rc"*) [ -f "$S/rc" ] || exit 1; cat "$S/rc" ;;
   *"logs "*) echo "журнал службы из пода" ;;
@@ -2838,6 +2840,22 @@ EOF
     world_fetch_whole() { fetch_world; }
     world_fetch_cut()   { fetch_world cut; }
     world_fetch_absent() { fetch_world absent; }
+    # Сводка создаётся ДО glob-census; ожидаемые путь/байты от него не выводятся.
+    world_fetch_summary() {
+        ( POD="$TMP/summary-pod"; rm -rf "$POD"; mkdir -p "$POD/work/out"
+          printf 'summary nonce=%s\n' "$$-1042" > "$POD/work/out/summary.txt"
+          printf '{"control":true}\n' > "$POD/work/out/result.json"
+          RUNNER_ROOT="$POD"; RUNNER_WORK="$POD/work"
+          runner_exec() { shift; "$@"; }
+          out="$TMP/summary-out"; rm -rf "$out"; mkdir -p "$out"
+          runner_fetch t841-kaname-own "$out" || exit $?
+          if ! cmp -s "$POD/work/out/summary.txt" "$out/work/out/summary.txt"; then
+              echo 'PARITY-AXIS summary: заранее созданная summary.txt не доставлена exact bytes' >&2
+              exit 1
+          fi
+          echo 'PARITY-AXIS summary: exact bytes доставлены' )
+    }
+    world_fetch_summary_lawful() { ( RUNNER_GLOBS="$RUNNER_GLOBS work/out/summary.txt"; world_fetch_summary ); }
 
     # inpod_world [настройка] — подъём изнутри pod раннера до выбора пути; путь подменён
     # заведением пространства (оно в pod лишь чистит остаток) и строкой.
@@ -2895,6 +2913,9 @@ EOF
           rc=0
           # shellcheck disable=SC2086  # доводы мира — словами
           ( runner_main ${SELFTEST_RUNNER_ARGS--- true} ) || rc=$?
+          if [ "$rc" -eq 0 ] && [ "${SELFTEST_VERIFY_STEPS:-}" = 1 ]; then
+              "$PY" "$SELFTEST_SOURCE_ROOT/.github/scripts/stand-runner-parity-test.py" --steps "$SELFTEST_KC/objects.json" "$TMP/runner-steps" || rc=$?
+          fi
           grep -qE 'create -f|apply -f' "$SELFTEST_KC/calls" && echo "ЗАПИСЬ В КЛАСТЕР БЫЛА"
           exit "$rc" )
     }
@@ -2955,6 +2976,19 @@ EOF
     world_runner_reports_cmd125()       { runner_world rw_reports_cmd125; }
     world_runner_reports_cut_setup125() { runner_world rw_reports_cut_setup125; }
     world_runner_reports_cut_cmd125()   { runner_world rw_reports_cut_cmd125; }
+    # В baseline неизвестный --step — отсутствие предмета, остальные оси независимы.
+    rw_steps() {
+        mkdir -p "$TMP/runner-steps"
+        printf 'cd sub\nexport STEP_ONLY_SENTINEL=first\nprintf first > ../step-file\n' > "$TMP/runner-steps/first.sh"
+        printf 'test -f root-sentinel && test -f step-file && test -z "${STEP_ONLY_SENTINEL+x}"\n' > "$TMP/runner-steps/second.sh"
+        SELFTEST_RUNNER_ARGS="--ship $TMP/runner-steps/first.sh --ship $TMP/runner-steps/second.sh --step first.sh --step second.sh"
+        SELFTEST_VERIFY_STEPS=1
+    }
+    world_runner_steps() { runner_world rw_steps; }
+    world_runner_payload_parity() {
+        printf '%s\n' "$RUNNER_POD_SH" > "$TMP/parity-payload.sh"
+        "$PY" "$SELFTEST_SOURCE_ROOT/.github/scripts/stand-runner-parity-test.py" "$SELFTEST_SOURCE_ROOT" "$TMP/parity-payload.sh"
+    }
 
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
@@ -3161,6 +3195,11 @@ EOF
     assert 125 "(−) настоящая команда 125 и полный отчёт — код команды 125"     world_runner_reports_cmd125 "раннер: команда в pod завершилась кодом 125" "доставлено 1 из 1" "подготовка pod завершилась"
     assert 76 "(+) настоящая команда 125 и тот же обрыв — неполные отчёты 76"   world_runner_reports_cut_cmd125 "доставлено 0 из 1 при коде команды 125" "задачи 841 во внешнем кластере: 0" "подготовка pod завершилась"
 
+    echo '--- ось 16: workflow toolset, explicit steps, actual prologue и доставленная сводка (kaname#1042)'
+    assert 0 '(−) real payload соответствует tools/prologue workflow' world_runner_payload_parity 'PARITY-AXIS tools' 'PARITY-AXIS prologue' 'PARITY-INVALID'
+    assert 0 '(−) явные шаги runner приняты настоящим parser' world_runner_steps 'раннер: код 0' '-' 'неизвестный довод'
+    assert 0 '(−) сводка приехала независимо от урезанного manifest N/N' world_fetch_summary 'PARITY-AXIS summary: exact bytes доставлены' '-' 'заранее созданная summary.txt не доставлена'
+    assert 0 '(−) lawful export twin покрывает ту же summary.txt' world_fetch_summary_lawful 'PARITY-AXIS summary: exact bytes доставлены' '-' '-'
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"
     [ "$probes" -eq 0 ] && { echo "ПРОВАЛ: ни одной пробы не исполнено" >&2; exit 2; }
