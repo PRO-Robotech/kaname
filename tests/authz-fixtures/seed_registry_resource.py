@@ -45,7 +45,7 @@ def intent(values):
     return {"subjectId": "project:" + project, "relation": "project",
             "object": "registry_registry:" + rid, "parentProjectId": project,
             "parentAccountId": account,
-            "parentChain": ["project:" + project, "account:" + account, "cluster:cluster_root"],
+            "parentChain": ["project:" + project, "account:" + account],
             "sourceVersion": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")}
 
 
