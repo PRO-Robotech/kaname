@@ -88,6 +88,71 @@ func (s *UnregisteredKeyStore) ActiveBindingsNamingKey(ctx context.Context, tx s
 	return out, nil
 }
 
+// BindingsNamingKeysSQL — замок выдач, цель которых называет ЛЮБОЙ из ключей
+// ($1 — типы, $2 — id, попарно), одним оператором в порядке id (kaname#1019).
+// Режим тот же, что у BindingsNamingKeySQL, — `FOR UPDATE` (kaname#963, F1).
+// Поиск по каждому ключу — тем же условием и тем же частичным индексом
+// `access_bindings_target_resources_live_idx`, что у одиночного оператора
+// (боковое подзапросное соединение, по ключу — свой проход индекса); замок берёт
+// внешний выбор, поэтому порядок замков — порядок id по всему набору, а не по
+// ключам. Экспортирован ради пробы плана, как BindingsNamingKeySQL.
+const BindingsNamingKeysSQL = `SELECT b.id FROM kaname.access_bindings b
+		  WHERE b.` + liveBinding + `
+		    AND b.id IN (
+		        SELECT n.id
+		          FROM unnest($1::text[], $2::text[]) AS k(type, id)
+		          CROSS JOIN LATERAL (
+		                SELECT x.id FROM kaname.access_bindings x
+		                 WHERE x.` + liveBinding + `
+		                   AND x.target -> 'resources' @> jsonb_build_array(jsonb_build_object('type', k.type, 'id', k.id))) n)
+		  ORDER BY b.id
+		    FOR UPDATE OF b`
+
+// RolesNamingKeysSQL — замок ролей, правило которых называет ЛЮБОЙ из ключей в
+// `resourceNames`, одним оператором в порядке id (kaname#1019); режим и индекс —
+// те же, что у RolesNamingKeySQL.
+const RolesNamingKeysSQL = `SELECT r.id FROM kaname.roles r
+		  WHERE r.id IN (
+		        SELECT s.role_id
+		          FROM unnest($1::text[], $2::text[]) AS k(type, id)
+		          JOIN kaname.role_rule_selectors s
+		            ON s.resource_names @> ARRAY[k.id] AND k.type = ANY (s.object_types))
+		  ORDER BY r.id
+		    FOR UPDATE OF r`
+
+// keyColumns — типы и id ключей двумя параллельными массивами (параметры
+// BindingsNamingKeysSQL и RolesNamingKeysSQL).
+func keyColumns(keys []domain.ResourceRef) (types, ids []string) {
+	types, ids = make([]string, len(keys)), make([]string, len(keys))
+	for i, k := range keys {
+		types[i], ids[i] = k.Type, k.ID
+	}
+	return types, ids
+}
+
+// LockBindingsNamingKeys — замок выдач, называющих любой из ключей (kaname#1019).
+func (s *UnregisteredKeyStore) LockBindingsNamingKeys(ctx context.Context, tx service.Tx, keys []domain.ResourceRef) error {
+	// Каталог и регистрация входят в тот же fence до строк каталога/зеркала.
+	// Он нужен до выдач и ролей: применение каталога затем проверяет FK ролей.
+	if _, err := txAsPgx(tx).Exec(ctx, registrationWriterLockSQL); err != nil {
+		return mapErr(err, "", "")
+	}
+	types, ids := keyColumns(keys)
+	if _, err := txAsPgx(tx).Exec(ctx, BindingsNamingKeysSQL, types, ids); err != nil {
+		return mapErr(err, "", "")
+	}
+	return nil
+}
+
+// LockRolesNamingKeys — замок ролей, называющих любой из ключей (kaname#1019).
+func (s *UnregisteredKeyStore) LockRolesNamingKeys(ctx context.Context, tx service.Tx, keys []domain.ResourceRef) error {
+	types, ids := keyColumns(keys)
+	if _, err := txAsPgx(tx).Exec(ctx, RolesNamingKeysSQL, types, ids); err != nil {
+		return mapErr(err, "", "")
+	}
+	return nil
+}
+
 // RevokeForUnregistered — отзыв по снятию регистрации: `REVOKED`, `revoked_at`,
 // причина `RESOURCE_UNREGISTERED`, `revoked_by_user_id` пуст (отозвал не
 // человек). Защита от удаления не условие (Р1 (в)): она — от удаления и отзыва

@@ -201,7 +201,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"catalog_module_live_matches_retired",
 		},
 	},
-	// Каталог ресурса: модуль, ресурс, тип модели и типы указателей — из
+	// Каталог ресурса: модуль, ресурс, тип модели, типы и имена указателей и
+	// записи сверх указателя (kaname#982) — из
 	// манифеста; точечное имя склеивает служба, живость, снятие и преемника
 	// ставит служба.
 	"catalog_resource": {
@@ -209,8 +210,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"catalog_resource_module_undotted",
 			"catalog_resource_nonempty",
 			"catalog_resource_object_type_form",
+			"catalog_resource_parent_names_form",
 			"catalog_resource_parent_types_form",
 			"catalog_resource_resource_undotted",
+			"catalog_resource_writes_form",
 		},
 		service: []string{
 			"catalog_resource_dotted_form",
@@ -324,6 +327,16 @@ var checkValueLanes = map[string]*checkTableLanes{
 		caller:  []string{"minted_token_revocations_reason_ck", "minted_token_revocations_subject_ck"},
 		service: []string{"minted_token_revocations_decider_ck"},
 	},
+	// Привязка объекта к проекту (kaname#983): id объекта и проект пришли
+	// регистрацией вызывающего (строкой зеркала), модельное имя типа выводит
+	// служба из строки каталога.
+	"object_project_binding": {
+		caller: []string{"object_project_binding_object_id_nonempty", "object_project_binding_project_id_nonempty"},
+		service: []string{
+			"object_project_binding_object_type_model_dictionary",
+			"object_project_binding_object_type_nonempty",
+		},
+	},
 	// Операция — вид принципала ставит служба.
 	"operations": nil,
 	// Проекция посадки, записанная при старте; её величины судит страж старта.
@@ -353,6 +366,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 	},
 	// Токен обновления — дайджесты, сроки, поколение и ротацию ведёт служба.
 	"refresh_tokens": nil,
+	// Происхождение наката записывает только миграция: версия формата, флаги
+	// исходных линий и состояние не поступают от вызывающего (kaname#1096).
+	"registration_lineage_origin": nil,
 	// Факт отношения выводит триггер схемы из очереди кортежей.
 	"relation_fact": nil,
 	// Журнал ресурсов — событие пишет служба.

@@ -35,6 +35,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // dfRecon — реконсайлер, который ДОКЛАДЫВАЕТ о состоянии полученного контекста:
@@ -46,6 +48,22 @@ type dfRecon struct {
 	deadlineIn  time.Duration
 	calls       int
 }
+
+// dfCommitCancel отменяет запрос только после успешного коммита писателя.
+type dfCommitCancel struct {
+	smTx
+	cancel context.CancelFunc
+}
+
+func (tx *dfCommitCancel) Commit(ctx context.Context) error {
+	if err := tx.smTx.Commit(ctx); err != nil {
+		return err
+	}
+	tx.cancel()
+	return nil
+}
+
+func (tx *dfCommitCancel) Begin(context.Context) (service.Tx, error) { return tx, nil }
 
 func (r *dfRecon) ReconcileObjectForward(ctx context.Context, _, _ string) error {
 	r.calls++
@@ -69,18 +87,18 @@ func (r *dfRecon) ReconcileObjectForwardNoStale(ctx context.Context, t, id strin
 // до асинхронного дренажа.
 func TestRegisterResource_ForwardSurvivesCallerCancellation(t *testing.T) {
 	rec := &dfRecon{}
-	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}).WithObjectReconciler(rec, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	txb := &dfCommitCancel{cancel: cancel}
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithObjectReconciler(rec, nil)
 
 	// Ровно та ситуация, что на стенде: дедлайн вызывающего истёк к моменту, когда
 	// writer-tx уже закоммичен и очередь дошла до пост-коммитного прохода.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := uc.Register(ctx, &regReq{subject: "user:usr_creator", relation: "v_get", object: "vpc_network:vpcn_detached"})
+	err := uc.Register(ctx, &regReq{subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_detached"})
 
 	require.NoError(t, err, "отказ форварда не фатален — этого VBC-15 и требует")
-	require.True(t, txb.tx.committed, "writer-tx коммитится независимо от отмены")
+	require.True(t, txb.committed, "writer-tx закоммичен до отмены")
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
 
 	require.Equal(t, 1, rec.calls, "пост-коммитный проход обязан состояться ровно один раз")
 	assert.False(t, rec.sawCanceled,
@@ -91,20 +109,32 @@ func TestRegisterResource_ForwardSurvivesCallerCancellation(t *testing.T) {
 			"на блокировке проход держал бы горутину всю жизнь процесса")
 }
 
+func TestRegisterResource_PreCanceledRequestDoesNotCommitOrForward(t *testing.T) {
+	rec := &dfRecon{}
+	txb := &smTxBeginner{}
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithObjectReconciler(rec, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := uc.Register(ctx, &regReq{subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_canceled"})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, txb.tx, "до отменённой транзакции не дошли")
+	require.Zero(t, rec.calls)
+}
+
 // TestRegisterResource_DetachedForwardKeepsItsOwnBudget — отвязка снимает ОТМЕНУ,
 // а не время. Положительный контроль к предыдущей пробе: если бюджет когда-нибудь
 // уберут «чтобы наверняка досчиталось», эта проба покраснеет.
 func TestRegisterResource_DetachedForwardKeepsItsOwnBudget(t *testing.T) {
 	rec := &dfRecon{}
 	txb2 := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb2, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}).WithObjectReconciler(rec, nil)
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb2, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithObjectReconciler(rec, nil)
 
 	// Вызывающий жив и щедр — проба смотрит не на его отмену, а на то, что бюджет
 	// прохода СОБСТВЕННЫЙ, а не унаследованный.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
 
-	err := uc.Register(ctx, &regReq{subject: "user:usr_creator", relation: "v_get", object: "vpc_network:vpcn_budget"})
+	err := uc.Register(ctx, &regReq{subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_budget"})
 	require.NoError(t, err)
 
 	require.Equal(t, 1, rec.calls)

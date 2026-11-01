@@ -14,13 +14,14 @@
 package check_test
 
 import (
+	"io/fs"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/corelib/treecorpus"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
@@ -69,12 +70,26 @@ func TestMirrorRowCatalogConditionReachesEveryWriter(t *testing.T) {
 		mentions  int
 		writes    []check.MirrorWrite
 	)
+	names, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sections []string
+	for _, name := range names {
+		data, err := migrations.FS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sections = append(sections, migrations.MigrationUpSection(string(data)))
+	}
+	commands, err := check.MirrorCommandBodies(sections)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("прослежено миграций %d; представлений команд %d", len(names), len(commands))
 	for _, rel := range corpus.Rels() {
 		body := corpus[rel]
-		if !strings.Contains(body, check.ResourceMirrorTable) {
-			continue
-		}
-		w, m, perr := check.MirrorWritesIn(rel, body)
+		w, m, perr := check.MirrorWritesThroughCommands(rel, body, commands)
 		if perr != nil {
 			t.Fatalf("разбор %s: %v — файл индекса не разобран, и его молчание ничего не значит",
 				rel, perr)

@@ -1,0 +1,146 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+  sha256: c29b7647a612904902b729e94b0d505e212d82a4d43daf5ce05c2d40e702f3e6
+  static_status: APPROVED
+  static_status_note: >-
+    Слово APPROVED в шапке — вердикт круга 11 о прежней редакции (origin/955, SHA-256
+    6df11c2125f631856834638a4f757def316eb7b36f7c3d2289e45af438128f7a). Шапка намеренно не правлена
+    (change-graph.md §2). Docs-gate по этой редакции отвечает APPROVED: он судит объявление, а не
+    одобрение, и это его объявленный предел. Действующий вердикт о редакции c29b7647… — эта запись.
+  base_commit: ddd5681afbd48393f6af372b5359d2aacdb095c8
+  content_commit: null
+  branch: 953-acc
+  task: https://github.com/PRO-Robotech/kaname/issues/953
+  lines: 4121
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+  fingerprint_note: >-
+    Файл не закоммичен: лежит в рабочем дереве копии tmp/kn-953-acc поверх origin/955 @ddd5681a.
+    Отпечаток снят по файлу и совпал с отпечатком из задания. Одобренная редакция — `git show
+    origin/955:<путь> | sha256sum` → 6df11c21…; однострочная редакция ветки 953 — `git show
+    origin/953:<путь> | sha256sum` → 848b3b9e…. Вердикт этой записи относится только к c29b7647….
+  measurement_revisions: >-
+    kaname: origin/955 = ddd5681afbd48393f6af372b5359d2aacdb095c8, origin/953 =
+    f8c2172ab64f485a227c07297bf55ce5a4578f8a, merge-base b5142cd6a. Сведение — `git merge-tree
+    --write-tree origin/955 origin/953` → дерево c9c074c25f59927dd6bf4ac4d8207b08e4f00ed5 без
+    конфликтов. В сведении canon.go, fga_model.fga и note_prose.go побайтово такие же, как на 953.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-26T06:03:54Z'
+round: 1
+round_note: >-
+  Это первый круг по правке после вердикта (kaname#953). Круг 11 судил прежнее содержимое.
+  Предел в два круга (flow-acceleration.md#fa-b8) считается по этой правке.
+
+scope_of_round: >-
+  Судится дельта к одобренной редакции (+28 −3, один файл; `git diff origin/955 -- <путь>`):
+  (1) величина «байт» в клаузе «Тогда» сценария IAM-MB-1-01: 113 221 → 113 222;
+  (2) атрибуция `kacho#1922` в продолжении той же клаузы: «на нынешнюю» → «на 110 759» и ссылка на
+  шапку canon.go как единственное место истории сдвигов;
+  (3) новая запись шапки «Правка ПОСЛЕ вердикта (2026-10-26, kaname#953)».
+  Сценарии, их ID, «Дано», «Когда», производитель, DoD — не тронуты (дифф).
+
+checks:
+  value_bytes:
+    claim: на сведении 955+953 канон весит 113 222 байт (единица B, весь файл)
+    predicate_1: >-
+      `git cat-file -p c9c074c2:internal/authzmodel/fga_model.fga | wc -c` → 113222, `wc -m` →
+      87169; то же для proto/kaname/cloud/iam/v1/fga_model.fga; на origin/955 → 113221
+    predicate_2: >-
+      шапка canon.go @origin/953, строка 31: «33 блока · 113 222 Б · 87 169 симв (весь файл)»;
+      со слов автора на временном сведении bfbfdd0e2 `TestAcceptanceScenarioCanonValuesAreTodays`
+      напечатал «байт 89239 либо 113222»
+    result: подтверждено, оба предиката сошлись
+  types_and_relations_unchanged:
+    predicate: >-
+      `grep -c '^type '` по fga_model.fga сведения → 33; строк диффа 955→сведение без
+      комментариев (`grep -v '^[-+]\s*#'`) → 0
+    result: подтверждено — отношения модели не тронуты, изменилась только проза
+  attribution_1922:
+    predicate: >-
+      `git show 85be25ba3` (feat(iam): отношение чтения роли снято…) — канон 110 830 → 110 759,
+      клауза «байт 110 759»
+    result: >-
+      подтверждено: 110 759 — действительно значение после kacho#1922. Прежняя фраза «на нынешнюю» была
+      ложной: после kacho#1922 величину сдвигали kacho#1281, kaname#829, kaname#856, kaname#855 и kaname#953 (шапка canon.go)
+  translation_holds_old_prose:
+    predicate: >-
+      note_prose.go @origin/953 — три пары kaname#953 в priorNoteProse с условием снятия;
+      `grep -c 'the first-push blob-reveal guard'` по registry.{public-read,prior-edition,delegation}-fixture.yaml
+      @ddd5681a → 1 · 1 · 1
+    result: >-
+      подтверждено текстом. Совпадение строки с ключом после разбора YAML (у фикстур отступ блока
+      10 пробелов, у ключа — 4) этим кругом не исполнялось; держит его зелёный
+      TestRegistryCreateNote_* (3) на bfbfdd0e2 — со слов автора, журнал
+      tmp/kn-953-acc-probe.1355413.log
+  gate_scope:
+    predicate: >-
+      acceptancecanonvalues_test.go @origin/953, строки 15–21 и 58: судятся только клаузы
+      Дано/Когда/Тогда и их продолжение
+    result: >-
+      «113 221» в записи шапки гейт не судит по построению. В продолжении клаузы пар
+      «число+единица» с прежним значением нет
+  registry_operator_v_update:
+    claim: модуль PRO-Robotech/registry-operator спрашивает v_update
+    source: тело задачи kaname#953 (ссылка на registry-operator#4)
+    predicate: >-
+      `gh search code --repo PRO-Robotech/registry-operator v_update` → [] (индекс пуст либо
+      отсутствует)
+    result: >-
+      не выполнилось — довод взят со слов задачи. Не блокирует: это обоснование в шапке, а не
+      утверждение сценария. Сторона kacho подтверждена — `git -C project/kacho grep v_create
+      origin/main -- services/registry` → handler.go:289, rename_repository.go:29
+
+blocking: []
+non_blocking:
+  - genus: FORMAT
+    where: шапка, запись kaname#953
+    note: >-
+      Утверждение о registry-operator опирается на задачу, а не на предикат по его дереву. Если
+      добавлять, то при переносе в ветку 953: координата файла и строки в registry-operator.
+      Вердикт от этого не зависит.
+
+coverage:
+  scenarios_added: 0
+  scenarios_removed: 0
+  producer_for_then: >-
+    без изменений — у IAM-MB-1-01 производитель modelrender, величину держит
+    TestAcceptanceScenarioCanonValuesAreTodays
+  twin_for_negatives: не применимо — правка не трогает отрицательных сценариев
+  constructibility: не применимо — «Дано» не менялось, посев не требуется
+  dod: не тронут
+
+owner_question_resolution:
+  question: убирать ли правку атрибуции kacho#1922
+  decision: >-
+    оставить (вариант «а»). Без неё клауза одобренного документа утверждает ложное о том, кто дал
+    нынешнее значение. Дельта видна и проверена (85be25ba3)
+
+effective_approval:
+  issued_by_this_record: false
+  why: >-
+    Запись — вердикт роли. Санкцию выпускает внешнее событие, которое публикует курьер. После
+    публикации курьер тем же заходом приводит блок event к факту.
+
+event:
+  type: acceptance_approval
+  status: not_performed
+  published: false
+  body: acceptance-reviewer · APPROVED · sha256 c29b7647a612904902b729e94b0d505e212d82a4d43daf5ce05c2d40e702f3e6
+  publication_expected_from_orchestrator: true
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    note: >-
+      Записей ревью этого документа в docs/specs/reviews/ нет ни на одной ветке origin: проверено
+      обходом `git ls-tree` по refs/remotes/origin/*. Вердикт круга 11 существует только строкой
+      шапки. Эта запись его не переписывает и не отзывает.

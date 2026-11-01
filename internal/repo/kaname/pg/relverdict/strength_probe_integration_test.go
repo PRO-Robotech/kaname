@@ -127,6 +127,10 @@ type askResult struct {
 	calls   int64 // обращений к БД на один вопрос
 	p50     time.Duration
 	p99     time.Duration
+	// invocations — вызовы API, включая начальный контроль Ask; EXPLAIN отдельно.
+	invocations int64
+	// elapsed — единственное наблюдение List, без приписывания ему квантилей.
+	elapsed time.Duration
 	plan    string
 	// sweeps / listed / scanned — только у оси перечисления.
 	sweeps  int
@@ -332,6 +336,14 @@ func strSeedBinding(t *testing.T, ctx context.Context, tx pgx.Tx,
 func (f *strFixture) growN(t *testing.T, ctx context.Context, target, allowedShare int) {
 	t.Helper()
 	if allowedShare != f.shareSeeded {
+		// Нулевая доля относится ко ВСЕМ кандидатам List, включая объект Ask.
+		// При возврате к положительной доле восстанавливаются все метки оси K.
+		labels := strLabelKeys()
+		if allowedShare == 0 {
+			labels = map[string]string{"env": "dev"}
+		}
+		exec(t, ctx, f.tx, `UPDATE kaname.resource_mirror SET labels=$1::jsonb
+            WHERE object_type=$2 AND object_id=$3`, strJSON(t, labels), strCatalogType, f.allowObj)
 		// Смена раскраски переписывает метки УЖЕ посаженных: досыпать поверх
 		// значило бы получить смесь двух долей и назвать её одной.
 		if f.seedN > 0 {
@@ -641,7 +653,7 @@ func (f *strFixture) askFor(mode scalegrid.AskMode) relverdict.Query {
 func measureAsk(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictCapture,
 	p scalegrid.StrengthPoint, q relverdict.Query, mode scalegrid.AskMode) askResult {
 	t.Helper()
-	res := askResult{mode: mode}
+	res := askResult{mode: mode, invocations: strRepeats + 1}
 
 	before := tuplesRead(t, ctx, tx)
 	capture.reset()
@@ -717,7 +729,7 @@ func sumLoops(m planrows.Measurement) int64 {
 func measureList(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictCapture,
 	p scalegrid.StrengthPoint) askResult {
 	t.Helper()
-	res := askResult{mode: scalegrid.AskAllow}
+	res := askResult{mode: scalegrid.AskAllow, invocations: 1}
 	if p.AllowedShare == 0 {
 		res.mode = scalegrid.AskDenyLabel
 	}
@@ -742,7 +754,7 @@ func measureList(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictC
 	res.tuples = after - before
 	res.calls = int64(capture.count())
 	res.listed = len(ids)
-	res.p50, res.p99 = elapsed, elapsed
+	res.elapsed = elapsed
 	res.verdict = fmt.Sprintf("отдано %d", len(ids))
 
 	sweeps := capture.matching(listSQL)
@@ -769,7 +781,7 @@ func measureList(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictC
 	return res
 }
 
-// measureStrengthPoint — точка целиком: три вопроса на одном посеве плюс перепись.
+// measureStrengthPoint — три Ask либо один List на одном посеве плюс перепись.
 func measureStrengthPoint(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictCapture,
 	f *strFixture, p scalegrid.StrengthPoint) strPointResult {
 	t.Helper()
@@ -793,7 +805,9 @@ func measureStrengthPoint(t *testing.T, ctx context.Context, tx pgx.Tx, capture 
 	if err != nil {
 		t.Fatalf("перепись в точке %s: %v", p, err)
 	}
-	census.VerdictsAsked = int64(len(res.asks) * strRepeats)
+	for _, a := range res.asks {
+		census.VerdictsAsked += a.invocations
+	}
 	res.census = census
 	if err := census.Verify(p); err != nil {
 		t.Fatalf("%v", err)
@@ -819,10 +833,14 @@ func runStrengthAxis(t *testing.T, ctx context.Context, axis []scalegrid.Strengt
 		r.seedIn = seedFor
 		var parts []string
 		for _, a := range r.asks {
+			clock := fmt.Sprintf("p50 %s", a.p50.Round(time.Microsecond))
+			if p.Axis == scalegrid.AxisPg {
+				clock = fmt.Sprintf("один List %s", a.elapsed.Round(time.Microsecond))
+			}
 			parts = append(parts, fmt.Sprintf("%s: строк %d, отброш. %d, тронуто %d, сканов %d, "+
-				"обращ. %d, вердикт %s, p50 %s",
+				"обращ. %d, вердикт %s, %s",
 				a.mode, a.rows, a.removed, a.touched, a.loops, a.calls, a.verdict,
-				a.p50.Round(time.Microsecond)))
+				clock))
 		}
 		t.Logf("точка %s: посев %s\n    %s", p, seedFor.Round(time.Millisecond),
 			strings.Join(parts, "\n    "))
@@ -877,7 +895,7 @@ func writeStrengthReport(t *testing.T, prov scalegrid.Provenance, grid [][]scale
 	results [][]strPointResult, wall time.Duration, final bool) {
 	t.Helper()
 	title := "R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляционный вердикт)\n" +
-		"Сетка пяти новых осей; КАЖДАЯ точка снята ТРЕМЯ вопросами на одном посеве."
+		"Сетка шести осей: V/M/L/S/K — по три Ask на точку; Pg — один List."
 	if !final {
 		title += "\nПРОМЕЖУТОЧНЫЙ СРЕЗ: прогон не окончен, оси ниже ещё не сняты."
 	}
@@ -930,7 +948,8 @@ func renderStrengthReport(grid [][]scalegrid.StrengthPoint, results [][]strPoint
 	w("               и без этой колонки сделанная работа была бы невидима\n")
 	w("  сверочная  — pg_stat_xact_all_tables (seq_tup_read + idx_tup_fetch)\n")
 	w("  обращ.     — круговых обращений к БД на один вопрос, трассировщиком pgx\n")
-	w("  p50/p99    — часы; нулевой повтор прогревочный и в выборку не входит\n")
+	w("  p50/p99    — часы повторных Ask; нулевой повтор прогревочный и в выборку не входит\n")
+	w("  время List — один вызов, без повторов и без квантилей\n")
 
 	for ai, axis := range results {
 		if len(axis) == 0 {
@@ -951,15 +970,38 @@ func renderStrengthReport(grid [][]scalegrid.StrengthPoint, results [][]strPoint
 	}
 
 	w("\n\nОБЪЁМ ОСМОТРЕННОГО\n")
-	points, asks := 0, 0
+	points, asks, lists := 0, 0, 0
+	var invocations int64
 	for _, axis := range results {
 		points += len(axis)
 		for _, r := range axis {
 			asks += len(r.asks)
+			if r.point.Axis == scalegrid.AxisPg {
+				lists += len(r.asks)
+			}
+			invocations += r.census.VerdictsAsked
 		}
 	}
-	w("  осей исполнено %d из %d, точек %d, вопросов задано %d (по %d повторов на вопрос),\n",
-		len(results), len(grid), points, asks, strRepeats)
+	w("  осей исполнено %d из %d, точек %d, сценариев %d: Ask %d, List %d\n",
+		len(results), len(grid), points, asks, asks-lists, lists)
+	w("  Ask: начальный контроль + %d повторов (нулевой прогревочный); List: один вызов\n", strRepeats)
+	w("  вызовов API %d; EXPLAIN ANALYZE и перепись в это число не входят\n", invocations)
+	plannedPoints, plannedAsks, plannedLists := 0, 0, 0
+	for _, axis := range grid {
+		for _, p := range axis {
+			plannedPoints++
+			if p.Axis == scalegrid.AxisPg {
+				plannedLists++
+			} else {
+				plannedAsks += len(scalegrid.AskModes())
+			}
+		}
+	}
+	w("  STRENGTH_PLAN axes=%d plannedAxes=%d points=%d scenarios=%d askScenarios=%d listScenarios=%d apiInvocations=%d askRepeats=%d listRepeats=1\n",
+		len(grid), len(grid), plannedPoints, plannedAsks+plannedLists, plannedAsks, plannedLists,
+		plannedAsks*(strRepeats+1)+plannedLists, strRepeats)
+	w("  STRENGTH_CENSUS axes=%d plannedAxes=%d points=%d scenarios=%d askScenarios=%d listScenarios=%d apiInvocations=%d askRepeats=%d listRepeats=1\n",
+		len(results), len(grid), points, asks, asks-lists, lists, invocations, strRepeats)
 	w("  настенное время %s\n", wall.Round(time.Second))
 	if !final {
 		w("\n  ПРОГОН НЕ ОКОНЧЕН: оси ниже исполненных не сняты. Это ТРЕТИЙ исход по ним,\n")
@@ -1051,7 +1093,7 @@ func renderListAxis(b *strings.Builder, axis []strPointResult) {
 		w("  %-7s %-9s %8d %8d %10d %9d %9d %10d %12s\n",
 			fmt.Sprintf("%d%s", r.point.Pg, mark), fmt.Sprintf("%d%%", r.point.AllowedShare),
 			a.sweeps, a.listed, a.scanned, a.rows, a.touched, a.tuples,
-			a.p50.Round(time.Millisecond))
+			a.elapsed.Round(time.Millisecond))
 	}
 	w("\n  «строк*» и «тронуто*» сняты с ПЕРВОГО захода: суммировать планы разных заходов\n")
 	w("  нельзя — это разные исполнения. Стоимость ВЫЗОВА читается по «заходов» × «строк*».\n")

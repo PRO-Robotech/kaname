@@ -77,6 +77,7 @@ type relationWriteGate interface {
 type resourceRegistrar interface {
 	Register(ctx context.Context, in registerInput) error
 	Unregister(ctx context.Context, in unregisterInput) error
+	RecordRefusal(ctx context.Context, in unregisterInput, unregister bool, outcome string) error
 }
 
 // roleCompiledReader — narrow read port returning a Role's compiled permission
@@ -198,9 +199,18 @@ func validateProxyTuple(callerDomain, subject, relation, object string) error {
 	// именовании, и тип, чьё имя приставке не подчиняется, был бы невыразим (kacho#1885).
 	if err := proxytuple.ValidateTuple(callerDomain, subject, relation, object,
 		proxytuple.WithTypeOwner(catalogTypeOwner{})); err != nil {
-		return status.Error(codes.PermissionDenied, "permission denied")
+		return proxyWriteRefusal()
 	}
 	return nil
+}
+
+// proxyWriteRefusal — ЕДИНСТВЕННЫЙ производитель отказа проксируемой записи по
+// правам: его отдают и правило приёма здесь, и политика записи модуля в use-case
+// (kaname#982, Р3). Ответ побайтово один — `PERMISSION_DENIED`, `permission
+// denied`, деталей нет, — и какая оговорка отвергла, не наблюдаемо; второй
+// производитель того же текста разошёлся бы с первым молча.
+func proxyWriteRefusal() error {
+	return status.Error(codes.PermissionDenied, "permission denied")
 }
 
 // RegisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple write
@@ -209,7 +219,8 @@ func validateProxyTuple(callerDomain, subject, relation, object string) error {
 //
 // authz: exempt in proto-catalog; least-priv enforced HERE via ReBAC
 // (cert-cert→SA → `fga_writer@cluster:cluster_root`). cluster-internal :9091.
-func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResourceRequest) (*iamv1.RegisterResourceResponse, error) {
+func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResourceRequest) (response *iamv1.RegisterResourceResponse, err error) {
+	defer func() { err = h.registrationRefusal(ctx, req, false, err) }()
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {
 		return nil, err
@@ -234,7 +245,8 @@ func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResou
 // UnregisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple
 // delete. Idempotent: absent tuple → OK, never NotFound (drainer
 // cannot_delete→success). Same authz gate as RegisterResource.
-func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterResourceRequest) (*iamv1.UnregisterResourceResponse, error) {
+func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterResourceRequest) (response *iamv1.UnregisterResourceResponse, err error) {
+	defer func() { err = h.registrationRefusal(ctx, req, true, err) }()
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {
 		return nil, err
@@ -251,6 +263,30 @@ func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterR
 		return nil, shared.MapRepoErr(err)
 	}
 	return &iamv1.UnregisterResourceResponse{}, nil
+}
+
+// Отказ пишет только обработчик: сюда сходятся ворота, политика и use-case.
+// Без подтверждённой личности модуля событие регистрации не приписывается SAN.
+func (h *Handler) registrationRefusal(ctx context.Context, in unregisterInput, unregister bool, refusal error) error {
+	var outcome string
+	switch status.Code(refusal) {
+	case codes.PermissionDenied:
+		outcome = "permission_denied"
+	case codes.FailedPrecondition:
+		outcome = "failed_precondition"
+	default:
+		return refusal
+	}
+	if _, _, verified := authzguard.ModuleActor(ctx); !verified {
+		return refusal
+	}
+	if h.registrar == nil {
+		return shared.MapRepoErr(stderrors.New("registration audit not configured"))
+	}
+	if err := h.registrar.RecordRefusal(ctx, in, unregister, outcome); err != nil {
+		return shared.MapRepoErr(err)
+	}
+	return refusal
 }
 
 // authorizeRegistration runs the ReBAC gate and returns the caller's module

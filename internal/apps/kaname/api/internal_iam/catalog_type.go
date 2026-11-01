@@ -74,6 +74,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -86,8 +87,14 @@ import (
 // `ok=false` означает «строки нет вовсе» — ни живой, ни снятой. Пара
 // `(значение, известен ли)` не сворачивается здесь в «как есть»: что означает
 // промах, решает вызывающий, и у регистрации со снятием ответы разные.
+//
+// WritePolicyTx — та же живая строка, прочитанная для регистрации (kaname#982,
+// Р1): точечное имя И политика записи модуля на тип, одним чтением. `live=false` —
+// живой строки нет, и политику с выводом регистрация не судит (Р3): тип отвергает
+// строка зеркала, как и прежде.
 type catalogTypeReader interface {
 	DottedTypeTx(ctx context.Context, tx service.Tx, modelType string) (dotted string, ok bool, err error)
+	WritePolicyTx(ctx context.Context, tx service.Tx, typeName string) (dotted string, policy domain.WritePolicy, live bool, err error)
 }
 
 // catalogObjectType переводит имя типа, приехавшее в кортеже, в имя словаря

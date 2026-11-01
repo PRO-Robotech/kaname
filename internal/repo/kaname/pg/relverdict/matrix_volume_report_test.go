@@ -10,6 +10,7 @@ package relverdict_test
 // прятать второй за первым.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -160,6 +161,10 @@ func renderMatrixReport(results []matrixResult, wall time.Duration, pgVersion st
 	w("\nЧЕМ СНЯТА КАЖДАЯ КОЛОНКА (единицы не складываются между собой)\n")
 	w("  строк(несущая)  — Actual Rows × Actual Loops листовых узлов плана\n")
 	w("                    (EXPLAIN ANALYZE BUFFERS VERBOSE FORMAT JSON, pg/planrows)\n")
+	w("                    У записи суммируются ОБА верхних плана: выдача и субъекты.\n")
+	w("                    Это не полная физическая стоимость транзакции: SQL триггеров\n")
+	w("                    сохранён отдельно с контекстом функций и backendPID ниже.\n")
+	w("                    Буферы и время родителя включают потомков и повторно не суммируются.\n")
 	w("  отброшено       — Rows Removed by Filter/Index Recheck/Join Filter, тем же прибором\n")
 	w("  тронуто         — несущая + отброшено; вердикт о стоимости выносится по НЕЙ\n")
 	w("  сверочная       — pg_stat_xact_all_tables (seq_tup_read + idx_tup_fetch),\n")
@@ -172,7 +177,7 @@ func renderMatrixReport(results []matrixResult, wall time.Duration, pgVersion st
 	w("                    транзакции пулом в него не входит, как и собственные\n")
 	w("                    запросы прибора. Отсюда 3 у записи (вставка выдачи ·\n")
 	w("                    вставка её субъектов · фиксация) и 2 у отзыва\n")
-	w("                    (обновление · фиксация) — числа полные, а не усечённые.\n")
+	w("                    (обновление · фиксация). Это вызовы клиента, не число SQL триггеров.\n")
 	w("  p50/p95         — часы; нулевой цикл прогревочный и в выборку не входит.\n")
 	w("                    НАБЛЮДЕНИЕ, не вердикт: миллисекунда на этой машине\n")
 	w("                    устаревает раньше, чем свойство запроса.\n")
@@ -185,6 +190,12 @@ func renderMatrixReport(results []matrixResult, wall time.Duration, pgVersion st
 	w("  затем откачена. Настоящие операции закоммичены; их часы и обращения сняты\n")
 	w("  отдельно, на них самих. Планы чтений сняты на настоящем состоянии —\n")
 	w("  вопрос идемпотентен, и повторять его безопасно.\n")
+	w("  После всех операторов записи выполняется SET CONSTRAINTS ALL IMMEDIATE:\n")
+	w("  так отложенные ограничения исполняются до отката. COMMIT/WAL/fsync этим\n")
+	w("  не измеряются; часы настоящего COMMIT входят только в выборку операции.\n")
+	w("  auto_explain собирает вложенный SQL с sample_rate=1 только на плановых\n")
+	w("  двойниках, вне замера часов. Верхние JSON EXPLAIN и вложенные JSON\n")
+	w("  сохранены целиком. Полный физический итог строк здесь не объявляется.\n")
 
 	// ── таблица объёма
 	w("\n\nОБЪЁМ БАЗЫ ПО ТОЧКАМ (перепись по каждой таблице порознь, счётом ПО ФАКТУ)\n")
@@ -251,6 +262,19 @@ func renderMatrixReport(results []matrixResult, wall time.Duration, pgVersion st
 			}
 			w("    %-12s [%s]\n", r.point.Name, o.plan)
 		}
+		w("  Полные SQL-свидетельства (верхние планы и вложенный SQL раздельно):\n")
+		for _, r := range results {
+			o := r.ops[k]
+			body, err := json.MarshalIndent(struct {
+				Roots              []matrixRootPlan  `json:"roots"`
+				PhysicalSQL        []matrixSQLNotice `json:"physicalSQL"`
+				ConstraintsChecked bool              `json:"constraintsChecked"`
+			}{o.roots, o.physicalSQL, o.constraintsChecked}, "", "  ")
+			if err != nil {
+				return fmt.Sprintf("отчёт не собран: SQL-свидетельство %s/%s: %v", r.point.Name, k, err)
+			}
+			w("    %s\n%s\n", r.point.Name, body)
+		}
 	}
 
 	// ── главный вопрос
@@ -286,14 +310,10 @@ func renderMatrixReport(results []matrixResult, wall time.Duration, pgVersion st
 		lo, hi := results[0].ops[opCheck], results[len(results)-1].ops[opCheck]
 		w("  На отрицательном чтении несущая величина выросла в %.2f раза, а p50 —\n",
 			ratioOf(hi.rows, lo.rows))
-		w("  в %.2f раза. План при этом НЕ МЕНЯЛСЯ ни в одной точке (отпечатки выше\n",
-			ratioOf(int64(hi.p50), int64(lo.p50)))
-		w("  совпадают дословно), то есть запрос делает ту же работу тем же способом.\n")
-		w("  Значит разница часов — НЕ про алгоритм: это цена того, что рабочее\n")
-		w("  множество перестало помещаться в память, отведённую под кэш страниц.\n")
-		w("  Различать эти две вещи обязательно: первая чинится запросом и индексом,\n")
-		w("  вторая — памятью и профилем развёртывания, и лечить одну средствами\n")
-		w("  другой значит не вылечить ни одной.\n")
+		w("  в %.2f раза. Различных показанных форм отрицательного плана: %d.\n",
+			ratioOf(int64(hi.p50), int64(lo.p50)), matrixDistinctPlans(results, opCheck))
+		w("  Причина изменения часов этим опытом не установлена: контролируемого\n")
+		w("  сравнения кэша и памяти здесь нет. Формы планов показаны по каждой точке.\n")
 		w("  Величина, на которой это видно: место под таблицами замера выросло с %s\n",
 			humanBytes(results[0].dbBytes))
 		w("  до %s.\n", humanBytes(results[len(results)-1].dbBytes))
@@ -327,9 +347,21 @@ func renderMatrixReport(results []matrixResult, wall time.Duration, pgVersion st
 	w("\n\nОБЪЁМ ОСМОТРЕННОГО\n")
 	w("  точек исполнено %d, операций на точку 4, полных циклов на точку %d\n",
 		len(results), matrixRepeats)
-	w("  всего операций исполнено %d, настенное время %s\n",
+	w("  основных операций цикла исполнено %d, настенное время %s\n",
 		len(results)*4*matrixRepeats, wall.Round(time.Second))
+	w("  Посев, подготовка allow, Ask при снятии планов, EXPLAIN ANALYZE,\n")
+	w("  проверка ограничений, очистка и SQL триггеров в это число не входят.\n")
 	return b.String()
+}
+
+func matrixDistinctPlans(results []matrixResult, k opKind) int {
+	shapes := map[string]bool{}
+	for _, r := range results {
+		if o := r.ops[k]; o.planTaken {
+			shapes[o.plan] = true
+		}
+	}
+	return len(shapes)
 }
 
 // TestMatrixReportPathResolvesWhereTheFreshnessGateReadsIt — писатель отчёта

@@ -811,8 +811,8 @@ type failingWithdrawal struct {
 	inner *accessbindingapp.UnregisteredKeyWithdrawal
 }
 
-func (f failingWithdrawal) LockTx(ctx context.Context, tx service.Tx, key domain.ResourceRef) error {
-	return f.inner.LockTx(ctx, tx, key)
+func (f failingWithdrawal) LockTx(ctx context.Context, tx service.Tx, keys []domain.ResourceRef) error {
+	return f.inner.LockTx(ctx, tx, keys)
 }
 
 func (f failingWithdrawal) WithdrawTx(ctx context.Context, tx service.Tx, key domain.ResourceRef, actor string) error {
@@ -834,6 +834,7 @@ func TestURG01_RevokeCommitsOnlyWithUnregistration(t *testing.T) {
 		kanamepg.NewPublicReadPublisher(),
 		failingWithdrawal{inner: accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld})},
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 	err := uc.Unregister(w.ctx, &iamv1.UnregisterResourceRequest{
 		SubjectId: "project:" + string(w.prjA), Relation: "project", Object: pcrRegType + ":" + pcrX,
@@ -912,4 +913,9 @@ func TestUnregistrationLookupUsesIndexes(t *testing.T) {
 	require.NoError(t, err, "п.10: статистика выдач")
 	explain("выдачи по ключу", "access_bindings_target_resources_live_idx", kanamepg.BindingsNamingKeySQL, pcrRegTgt, pcrX)
 	explain("правила по ключу", "role_rule_selectors_resource_names_idx", kanamepg.RolesNamingKeySQL, pcrRegTgt, pcrX)
+	// Замок снятия родителя с потомками (kaname#1019) — по набору ключей одним
+	// оператором; поиск по каждому ключу обязан остаться на тех же индексах.
+	keyTypes, keyIDs := []string{pcrRegTgt, "registry.repositories"}, []string{pcrX, pcrXApp}
+	explain("выдачи по набору ключей", "access_bindings_target_resources_live_idx", kanamepg.BindingsNamingKeysSQL, keyTypes, keyIDs)
+	explain("правила по набору ключей", "role_rule_selectors_resource_names_idx", kanamepg.RolesNamingKeysSQL, keyTypes, keyIDs)
 }

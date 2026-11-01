@@ -54,6 +54,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
 )
 
 // publicReadRig собирает use-case ТАК ЖЕ, как композиционный корень, — без
@@ -76,6 +77,7 @@ func publicReadRig(t *testing.T) (*internal_iam.RegisterResourceUseCase, *pgxpoo
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
@@ -264,6 +266,15 @@ func TestPublicRead_ResourceWithdrawalTakesThePublicationWithIt(t *testing.T) {
 		id  = reg + "/team/app"
 	)
 	v1, v2 := versions()
+	// Реестр зарегистрирован в проекте, известном kaname: родителя репозитория
+	// kaname выводит из регистрации контейнера (kaname#982), и ребёнок под
+	// незарегистрированным реестром отвергается.
+	scene := registrationscene.Seed(t, context.Background(), pool)
+	require.NoError(t, uc.Register(context.Background(), &iamv1.RegisterResourceRequest{
+		SubjectId: "project:" + scene.Project, Relation: "project", Object: "registry_registry:" + reg,
+		ParentProjectId: scene.Project, ParentAccountId: scene.Account, ParentChain: scene.ProjectChain(),
+		SourceVersion: timestamppb.New(v1.Add(-time.Second)),
+	}), "«Дано»: реестр зарегистрирован")
 	parent := &iamv1.RegisterResourceRequest{
 		SubjectId: "registry_registry:" + reg, Relation: "parent", Object: publicReadObject(id),
 		ParentChain: []string{"registry_registry:" + reg}, SourceVersion: timestamppb.New(v1),

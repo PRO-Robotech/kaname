@@ -207,15 +207,22 @@ func TestCompose_SC70_d_ThirdFormPassingTheLoadIsRefusedAtCompose(t *testing.T) 
 		t.Fatalf("SC-70 (г) близнец (б): новая редакция обязана собираться, отказ: %v", err)
 	}
 	ms := sc70DeliverSubject(t, "SC-70 (г)", third)
-	var blk []byte
+	// Два вида одного блока: прежнюю редакцию судят по рендеру как есть (её
+	// закрепление снято с прежней прозы), а длину в тексте отказа называет та
+	// форма, которую сборщик сверяет с каноном, — после перевода прозы
+	// примечаний (`RenderForCanon`; в блоке реестра его строки есть с kaname#953).
+	var raw, blk []byte
 	for _, res := range ms[0].Resources {
 		if res.ObjectType == "registry_registry" {
-			if blk, err = modelrender.Render(res); err != nil {
+			if raw, err = modelrender.Render(res); err != nil {
 				t.Fatalf("SC-70 (г): рендер registry_registry: %v", err)
+			}
+			if blk, err = modelrender.RenderForCanon(res); err != nil {
+				t.Fatalf("SC-70 (г): рендер registry_registry для сверки с каноном: %v", err)
 			}
 		}
 	}
-	if sc70SHA(blk) == sc70PriorSHA["registry_registry"] {
+	if sc70SHA(raw) == sc70PriorSHA["registry_registry"] {
 		t.Fatalf("фикстура: третья форма (г) рендерит прежнюю редакцию — она не третья")
 	}
 	_, _, err = modelcompose.Compose(authzmodel.DSL, ms)

@@ -132,6 +132,13 @@ var passThroughSentinels = map[string]bool{
 	// отдаёт текст `ErrAlreadyExists` как есть, и новый вызывающий тела, не
 	// перехвативший признак, вынес бы его на провод.
 	"ErrPersonalAccountNameUnavailable": true,
+	// Отказ вывода родителя регистрируемого объекта (kaname#982, Р8): статус
+	// собирается из `StripSentinel(err)` (`shared.objectRefusal`), текст —
+	// `<объект> parent scope does not match`.
+	"ErrParentScopeMismatch": true,
+	// Отказ привязки объекта к проекту (kaname#983, Р4): тот же переводчик,
+	// текст — `<объект> is bound to another project`.
+	"ErrObjectBoundToOtherProject": true,
 }
 
 // fixedTextSentinels — признаки, чей текст на провод НЕ доезжает: их полоса

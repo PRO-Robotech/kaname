@@ -720,7 +720,7 @@ service_account_creator, account, acc-A, true)`
 | e | `GroupService.Update` grp-A, `updateMask: ["description"]`, `description: "d"` | `PERMISSION_DENIED` | `done` |
 | f | `GroupService.AddMember` grp-A, участник `{SUBJECT_TYPE_SERVICE_ACCOUNT, sva-A}` | `PERMISSION_DENIED` | `done` |
 | g | `GroupService.Delete` grp-A | `PERMISSION_DENIED` | `done` |
-| h | `RoleService.Create` `{"accountId":"<acc-A>","name":"r-20h","rules":[{"module":"iam","resources":["project"],"verbs":["get"]}]}` | `PERMISSION_DENIED` | `done` |
+| h | `RoleService.Create` `{"accountId":"<acc-A>","name":"r_20h","rules":[{"module":"iam","resources":["project"],"verbs":["get"]}]}` | `PERMISSION_DENIED` | `done` |
 | i | `RoleService.Update` rol-own, `updateMask: ["description"]`, `description: "d"` | `PERMISSION_DENIED` | `done` |
 | j | `RoleService.Delete` rol-own | `PERMISSION_DENIED` | `done` |
 **When** вызов через дверь мира
@@ -863,8 +863,9 @@ iam_service_account, <учётка>, true)` в окне
 
 #### SAC-40 · роль аккаунта не называет `create` на учётках и не несёт селектора создателя
 
-**Given** мир С
-**When** usr-A вызывает a) `RoleService.Create` `{"accountId":"<acc-A>","name":"r-40a","rules":
+**Given** для каждого варианта a–e — свежий мир С с теми же исходными объектами и связями;
+создание роли в c не меняет мир остальных вариантов
+**When** usr-A вызывает a) `RoleService.Create` `{"accountId":"<acc-A>","name":"r_40a","rules":
 [{"module":"iam","resources":["serviceAccount"],"verbs":["create"]}]}`; b) `RoleService.Update`
 rol-own, `updateMask: ["rules"]`, то же правило; c) `RoleService.Create` с телом a, но
 `"verbs":["get"]`; d) `RoleService.Create` с телом c и `"createdBySubject":true` в правиле;
@@ -876,6 +877,13 @@ createdBySubject (creator-scoped rules are declared by a module manifest)`, си
 нет; у e правила rol-own прежние
 **And** c — близнец a (отличается глаголом) и d (отличается селектором); b и e — те же отказы, что
 a и d, на методе `Update` (Р2 п.4 отвергает в `Create` и в `Update`).
+
+Техническая правка, 2026-11-01, после независимого BLOCKED на отпечаток
+`bda4d4fcc1bb29203a4677f4855a8116294518cc540aa2243b0d1f26c985da4c`: в SAC-20 h и
+SAC-40 a (и наследующих тело вариантах c, d) исправлены только имена пользовательских ролей;
+для SAC-40 явно указана изоляция вариантов. Проверяемые права, исходы и состав сценариев
+сохранены. Эта редакция требует независимого ревью по новому отпечатку; одобрение ей здесь
+не присваивается. Прежние записи ревью и пометка правки SAC-E3 сохранены как история.
 
 #### SAC-41 · роль создателя видна в каталоге ролей целиком
 

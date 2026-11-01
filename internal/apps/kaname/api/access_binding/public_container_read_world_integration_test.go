@@ -113,6 +113,7 @@ func newPCRWorld(t *testing.T) *pcrWorld {
 		// каталожным фактом, что у мира после последней доставки.
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 	svc := service.NewAuthorizeService(service.AuthorizeServiceConfig{
 		Relations:           w.door,
@@ -231,8 +232,12 @@ func (p *pcrWorld) pchRequest() *iamv1.CreateAccessBindingRequest {
 func (p *pcrWorld) deliverNewEdition(sc string) {
 	p.t.Helper()
 	require.False(p.t, p.delivered, "доставка новой редакции П6 зовётся один раз")
-	doc, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
+	edition, err := publicreadfixture.Read(publicreadfixture.NewEditionFile)
 	require.NoError(p.t, err, "фикстура П6")
+	// Новая редакция несёт ту же запись `writes`, что W (kaname#982, мир ДР
+	// §4.1): поздние регистрации `owner` проб SC-* проходят политику записи.
+	doc, err := publicreadfixture.WithWrites(edition)
+	require.NoError(p.t, err, "фикстура П6: новая редакция с writes")
 	keyless, err := publicreadfixture.WithoutKey(doc)
 	require.NoError(p.t, err, "фикстура П6: близнец без ключа")
 	_, err = manifest.Load(keyless)
@@ -253,18 +258,34 @@ func (p *pcrWorld) deliverNewEdition(sc string) {
 	p.delivered = true
 }
 
-// deliverPriorEdition — то, что служба видит СЕГОДНЯ: манифест registry прежней
-// редакции (kacho @a95248464), доставленный и применённый путём старта (Р10,
-// шаг 1). Без него у каталога нет пообъектных действий registry, и выдача
-// `rol-reg-get` материализуется лишь ярусом `viewer`, которого `v_get` реестра
-// не читает: положительный контроль П6 был бы красным по фикстуре.
+// deliverPriorEdition — манифест registry прежней редакции (kacho @a95248464)
+// с записью `writes: owner` на обоих ресурсах — документ W мира ДР (kaname#982,
+// приёмка `kaname-derives-the-parent-of-a-registered-object.md` §4.1), —
+// доставленный и применённый путём старта (Р10, шаг 1). Без доставки у каталога
+// нет пообъектных действий registry, и выдача `rol-reg-get` материализуется лишь
+// ярусом `viewer`, которого `v_get` реестра не читает: положительный контроль П6
+// был бы красным по фикстуре. Без `writes` кортеж `owner` мира — отказ политики
+// записи, и мир не строится.
+//
+// Перед доставкой — контроль: P0, тот же документ без ключа `writes`,
+// загружается. Сломанная фикстура краснеет на нём и за отсутствующий ключ себя не
+// выдаёт.
 func (p *pcrWorld) deliverPriorEdition() {
 	p.t.Helper()
-	doc, err := publicreadfixture.Read(publicreadfixture.PriorEditionFile)
+	prior, err := publicreadfixture.Read(publicreadfixture.PriorEditionFile)
 	require.NoError(p.t, err, "фикстура П6: прежняя редакция")
+	_, err = manifest.Load(prior)
+	require.NoError(p.t, err, "контроль фикстуры П6: P0 (прежняя редакция без writes) обязана загружаться")
+	doc, err := publicreadfixture.WithWrites(prior)
+	require.NoError(p.t, err, "фикстура П6: документ W")
+
+	// ── Предмет kaname#982 начинается здесь ───────────────────────────────────
 	m, err := manifest.Load(doc)
-	require.NoError(p.t, err, "фикстура П6: прежняя редакция обязана загружаться")
-	p.applyDelivered("фикстура П6: доставка прежней редакции", m)
+	if err != nil {
+		p.t.Fatalf("доставка П6: загрузчик отверг документ W (ключ %s; предмета kaname#982 нет): %v",
+			publicreadfixture.WritesKey, err)
+	}
+	p.applyDelivered("фикстура П6: доставка W", m)
 }
 
 // applyDelivered — применение доставленного манифеста глаголами пути старта

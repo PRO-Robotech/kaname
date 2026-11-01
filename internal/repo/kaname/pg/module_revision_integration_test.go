@@ -273,12 +273,14 @@ func Test865_31_RaceOfTwoContentsUnderOneRevision(t *testing.T) {
 // TestFingerprintSeesEveryColumnTheApplierWrites — отпечаток шести таблиц
 // видит КАЖДУЮ колонку, которую пишет применитель и которую называет условие
 // CE-18: применённую пару (`applied_revision`, `applied_digest`) строки модуля
-// и имя типа, указатели и признак контейнера (`object_type`, `parent_types`,
+// и имя типа, указатели, их имена, записи сверх указателя, признаки контейнера и
+// неизменного проекта
+// (`object_type`, `parent_types`, `parent_names`, `writes`, `permanent_project`,
 // `public_read_to_children`) строки ресурса. Каждая колонка меняется ОДНА, от
 // состояния после предыдущей: равенство отпечатков, которым пробы утверждают
 // «ничего не изменилось», обязано краснеть на любой из них.
 //
-// Проба держит СОСТАВ отпечатка: снятие любой из пяти колонок из
+// Проба держит СОСТАВ отпечатка: снятие любой из восьми колонок из
 // `catalogstate.Fingerprint` краснит её строку, называя колонку (CV-865-2:
 // проба, менявшая только `applied_digest`, оставалась зелёной при снятом
 // `applied_revision`).
@@ -304,11 +306,23 @@ func TestFingerprintSeesEveryColumnTheApplierWrites(t *testing.T) {
 		{"catalog_resource.object_type",
 			`UPDATE kaname.catalog_resource SET object_type = object_type || '_probe' ` + resourceRow,
 			[]any{rev865Module, rev865Resource}},
+		// Указатель ЗАМЕНЯЕТСЯ, а не дописывается: имена указателей позиционно
+		// парны типам (`catalog_resource_parent_names_form`, kaname#982), и
+		// дописанный тип без имени отвергла бы проверка колонки.
 		{"catalog_resource.parent_types",
-			`UPDATE kaname.catalog_resource SET parent_types = parent_types || 'probe_parent'::text ` + resourceRow,
+			`UPDATE kaname.catalog_resource SET parent_types = array_replace(parent_types, parent_types[1], 'probe_parent') ` + resourceRow,
+			[]any{rev865Module, rev865Resource}},
+		{"catalog_resource.parent_names",
+			`UPDATE kaname.catalog_resource SET parent_names = array_replace(parent_names, parent_names[1], 'probe_pointer') ` + resourceRow,
+			[]any{rev865Module, rev865Resource}},
+		{"catalog_resource.writes",
+			`UPDATE kaname.catalog_resource SET writes = writes || 'probe_owner:user'::text ` + resourceRow,
 			[]any{rev865Module, rev865Resource}},
 		{"catalog_resource.public_read_to_children",
 			`UPDATE kaname.catalog_resource SET public_read_to_children = NOT public_read_to_children ` + resourceRow,
+			[]any{rev865Module, rev865Resource}},
+		{"catalog_resource.permanent_project",
+			`UPDATE kaname.catalog_resource SET permanent_project = NOT permanent_project ` + resourceRow,
 			[]any{rev865Module, rev865Resource}},
 	}
 	for _, c := range cases {
