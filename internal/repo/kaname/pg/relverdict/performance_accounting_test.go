@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,7 +77,7 @@ func TestPerformanceAccountingCollectorUsesCompiledScenarioPlan(t *testing.T) {
 			report, raw := filepath.Join(dir, "report"), filepath.Join(dir, "raw")
 			require.NoError(t, os.WriteFile(report, []byte(tc.body), 0o600))
 			require.NoError(t, os.WriteFile(raw, []byte(tc.raw), 0o600))
-			out, err := exec.Command("bash", "../scalegrid/collect-strength.sh", report, raw, tc.rc).CombinedOutput()
+			out, err := osexec.Command("bash", "../scalegrid/collect-strength.sh", report, raw, tc.rc).CombinedOutput()
 			if tc.valid {
 				require.NoError(t, err, "%s", out)
 			} else {
