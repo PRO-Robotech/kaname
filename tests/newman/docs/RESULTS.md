@@ -1777,3 +1777,16 @@ rechecks that condition. The fixture retains the account's independent owner
 record; no database writes or forged claims are involved. Real stand execution
 must confirm these setup operations as well as the four cases. Registry ids are
 owned by the existing delegation seed.
+
+## #1037 — условия групповых сценариев после ESC-23
+
+Успешное добавление человека в группу требует ACTIVE-членства в аккаунте группы.
+Групповые фикстуры отделены от общих NOB/INV/AAB и основного человека церемонии:
+они получают только членство аккаунта, без прямой выдачи проверяемой роли.
+Сохранены проверки отзыва и удаления участника; добавлены отказы до групповой
+выдачи, чтобы само членство не делало положительный контроль тривиальным.
+Целевой повтор: `iam-system-class-subjects`, `iam-group`, `iam-rbac-subjects`,
+`rbac-subject-channel-equivalence` на одном автономном production-стенде.
+Исход повторного прогона в этой редакции ещё не получен; это описание условия,
+а не зелёный результат. Посев и созданные набором данные убираются вместе с
+собственным пространством прогона и итоговой переписью остатков.
