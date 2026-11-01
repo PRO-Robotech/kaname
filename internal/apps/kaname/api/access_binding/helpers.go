@@ -245,7 +245,17 @@ func scopeOwnerUserID(ctx context.Context, repo Repo, resourceType, resourceID s
 		return "", shared.MapRepoErr(err)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
+	return scopeOwnerUserIDIn(ctx, rd, resourceType, resourceID)
+}
 
+// scopeOwnerUserIDIn — владелец аккаунта области в УЖЕ открытой читающей
+// транзакции `rd`; у областей, кроме `account` и `project`, — пустая строка без
+// чтения. Вызывающий отвечает за то, чтобы транзакция не была открыта во время
+// вопроса к хранилищу отношений (довод — у scopeOwnerUserID).
+func scopeOwnerUserIDIn(ctx context.Context, rd Reader, resourceType, resourceID string) (string, error) {
+	if resourceType != "account" && resourceType != "project" {
+		return "", nil
+	}
 	accountID := domain.AccountID(resourceID)
 	if resourceType == "project" {
 		proj, err := rd.Projects().Get(ctx, domain.ProjectID(resourceID))

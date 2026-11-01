@@ -1760,7 +1760,7 @@ Four base URLs beyond the gateway ones, injected by
 A missing one turns the case RED naming the variable (`require_env_url`) — injection B
 above is the proof, not the promise.
 
-## #1003 S2 — SAC-E1…E5
+## kaname#1003 S2 — SAC-E1…E5
 
 Набор содержит пять сценариев, 30 шагов: выдача creator-роли, собственный SA/key
 lifecycle, три отрицательные пары project/group/role с admin-контролями,
@@ -1804,3 +1804,59 @@ namespace снят тем же native runner, остаток — 0.
 Эта запись результата не является новым API-прогоном: runtime-источник остаётся
 `2375217df9500508c962f63d917de46bf0eb44fc`, сгенерированные байты и утверждения
 после него не менялись.
+
+### Role rights stay named — S2 r4 (kaname#1034)
+
+`iam-role-rights-stay-named`: ESC-E1…ESC-E4, accepted fingerprint
+`3131d7ddfffa9b66857b94c70138b6ebfe7bdb77c7ca07f5333db88aefaae690`.
+Own public REST front; no deployed HTTP result is recorded here yet:
+collections executed **0 of 1**, cases executed **0 of 4**. Structural collection
+generation is a separate check and does not establish HTTP outcomes.
+
+The ceremony wave creates a separate Esc person with genuine level 1 and level 2
+authorization-code credentials. Registration's protected personal-account owner
+binding is cleared and revoked by that same owner through Update and Revoke,
+waiting for each Operation without error. The bootstrap caller then proves the
+complete ListBySubject empty, including the absence of a next page. Each case
+rechecks that condition. The fixture retains the account's independent owner
+record; no database writes or forged claims are involved. Real stand execution
+must confirm these setup operations as well as the four cases. Registry ids are
+owned by the existing delegation seed.
+
+## kaname#1037 — условия групповых сценариев после ESC-23
+
+Успешное добавление человека в группу требует ACTIVE-членства в аккаунте группы.
+Групповые фикстуры отделены от общих NOB/INV/AAB и основного человека церемонии:
+они получают только членство аккаунта, без прямой выдачи проверяемой роли.
+Сохранены проверки отзыва и удаления участника; добавлены отказы до групповой
+выдачи, чтобы само членство не делало положительный контроль тривиальным.
+Целевой повтор: `iam-system-class-subjects`, `iam-group`, `iam-rbac-subjects`,
+`rbac-subject-channel-equivalence` на одном автономном production-стенде.
+Независимый перемер целевого внешнего прогона на
+`6a36283b3d0e9c9dd768bc5933e3e494bdfdfca0` подтвердил:
+
+| коллекция | кейсов исполнено | HTTP-запросов | утверждений |
+|---|---:|---:|---:|
+| iam-system-class-subjects | 21/21 | 111 | 236 |
+| iam-group | 33/33 | 62 | 133 |
+| iam-rbac-subjects | 14/14 | 69 | 144 |
+| rbac-subject-channel-equivalence | 8/8 | 80 | 148 |
+| всего | 76/76 | 322 | 661 |
+
+Упавших утверждений, запросов без ответа, пропущенных утверждений, отказов
+скриптов и несозданных условий — 0. Все 22 прежние записи отказов (18 разных
+шагов в 10 кейсах) перепроверены: 22/22 прошли; новые before/after-deny и
+положительный близнец SC08 исполнились.
+
+Из 330 порождённых шагов восемь условных delete/await preclean не отправлялись:
+четыре реально исполненных preclean-list вернули 200 и подтвердили отсутствие
+старой выдачи. Последующие grant, positive, revoke и deny исполнились. Число
+реальных HTTP-запросов — 322, а не 330.
+
+Отпечатки источника до/после прогона совпали, суммы бинаря раннера, службы и
+процесса совпали. Проверено 13 параметров процесса; mTLS дал 401 с листом и
+HTTP 000/curl 56 без листа, затем положительное восстановление 401. Выборка
+TCP-сессий пользователя kaname показала 16/16 TLS. Доставлено 35/35 артефактов.
+Посев и данные набора сняты вместе с собственным namespace, остаток — 0.
+Сгенерированные коллекции в этом изменении побайтово равны проверенным
+выходам этого прогона; перенос артефактов не является новым API-прогоном.

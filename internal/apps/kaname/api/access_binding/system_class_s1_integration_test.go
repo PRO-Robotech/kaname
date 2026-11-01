@@ -20,6 +20,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -320,8 +321,13 @@ func TestSystemClass_SC18_SignedInOfAnotherTenantReadsTheNamedObject(t *testing.
 // `member_type`, как на любом виде вне `user|service_account`; близнец — человек.
 func TestSystemClass_SC08_ClassIsNotAGroupMember(t *testing.T) {
 	w := newSCWorld(t)
-	add := groupapp.NewAddMemberUseCase(w.repo, w.ops)
+	add := groupapp.NewAddMemberUseCase(w.repo, w.ops).
+		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door))
 
+	// Близнец — человек, состоящий в аккаунте группы: участник группы обязан
+	// принадлежать её аккаунту (Д-3 приёмки role-rights-stay-within-what-is-named.md),
+	// и без членства близнец мерил бы не вид участника, а принадлежность.
+	gdSeedMembership(t, w.ctx, w.pool, w.usrB, w.accA, "ACTIVE")
 	op, err := add.Execute(asUser(w.ctx, w.usrA), groupapp.AddMemberInput{
 		GroupID: domain.GroupID(w.grpA), MemberType: domain.SubjectTypeUser, MemberID: domain.SubjectID(w.usrB),
 	})

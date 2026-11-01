@@ -16,8 +16,8 @@ CRUD fixture dependency:
     accountAId        — pre-seeded account for group scope
     accountBId        — cross-account (for isolation probes)
     userAAAId         — ЦЕЛЬ ПРИВЯЗКИ: строка пользователя, владеющая accountAId
-    userNOBId         — ЦЕЛЬ ПРИВЯЗКИ: пользователь без выдач
-    userINVId         — ЦЕЛЬ ПРИВЯЗКИ: приглашаемый пользователь
+    groupMemberAUserId    — ЦЕЛЬ: отдельный человек, ACTIVE в accountAId, без выдач
+    groupNonMemberAUserId — ЦЕЛЬ: другой ACTIVE-член accountAId, не член группы
 
   ПОЧЕМУ `user*Id` НЕ ПРЕДЪЯВИТЕЛИ. Это ЦЕЛИ ПРИВЯЗКИ — строки пользователей,
   заведённые, чтобы разрешился триггер существования субъекта. Ни один выдаваемый
@@ -28,7 +28,7 @@ CRUD fixture dependency:
   ДАННЫМИ (`tests/authz-fixtures/principal_pairings.py`, `BINDING_TARGET_ONLY_IDS`)
   и сверяется гейтом `scripts/case_header_principal_claim_test.py`.
 
-  No additional env vars needed. The suite creates a FRESH group per runId
+  The own-stand seed supplies these two isolated group subjects. The suite creates a FRESH group per runId
   ("grp-{{runId}}") in accountAId via jwtAccountAdminA. This avoids cross-test
   pollution while reusing seeded users for AddMember/RemoveMember.
 
@@ -42,7 +42,7 @@ Operation envelope:
 край и здесь не читается. Поэтому шаги идут на собственный публичный фронт
 (`ownRestBaseUrl`, `address_own_front` в конце модуля), и гоняет модуль задание
 `stand` процесса `e2e-newman.yml`. Все ключи окружения, включая цель привязки
-`userINVId`, пишет посев автономного стенда
+`groupNonMemberAUserId`, пишет посев автономного стенда
 (`tests/authz-fixtures/seed_own_stand.py --minted-keys`).
 
 Gotchas:
@@ -460,7 +460,7 @@ CASES.append(Case(
             method="GET",
             path="/iam/v1/groups/{{crudGroupId}}",
             # jwtNoBindings is NOT a no-grant subject any more: the iam suites
-            # themselves grant userNOBId `view` on account-A (iam-flat-authz-vbc
+            # themselves grant groupMemberAUserId `view` on account-A (iam-flat-authz-vbc
             # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
             # and those bindings stay ACTIVE in the DB across runs. A probe that
             # asserts "this subject sees nothing" was therefore asserting it
@@ -555,7 +555,7 @@ CASES.append(Case(
             method="GET",
             path="/iam/v1/groups?accountId={{accountAId}}",
             # jwtNoBindings is NOT a no-grant subject any more: the iam suites
-            # themselves grant userNOBId `view` on account-A (iam-flat-authz-vbc
+            # themselves grant groupMemberAUserId `view` on account-A (iam-flat-authz-vbc
             # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
             # and those bindings stay ACTIVE in the DB across runs. A probe that
             # asserts "this subject sees nothing" was therefore asserting it
@@ -877,12 +877,12 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-GRP-AM-CRUD-OK — AddMember userNOBId to crudGroupId → Operation done
+# IAM-GRP-AM-CRUD-OK — AddMember groupMemberAUserId to crudGroupId → Operation done
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-GRP-AM-CRUD-OK",
-    title="AddMember (user/userNOBId) to crudGroupId → Operation done",
+    title="AddMember (user/groupMemberAUserId) to crudGroupId → Operation done",
     classes=["CRUD"],
     priority="P0",
     steps=[
@@ -890,7 +890,7 @@ CASES.append(Case(
             name="add-member",
             method="POST",
             path="/iam/v1/groups/{{crudGroupId}}:addMember",
-            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            body={"memberType": "user", "memberId": "{{groupMemberAUserId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -916,12 +916,12 @@ CASES.append(Case(
 # asserted: the Operation succeeds AND the member is present exactly once. An
 # error-code assertion could never have caught a duplicate row.
 #
-# Depends on IAM-GRP-AM-CRUD-OK having added userNOBId.
+# Depends on IAM-GRP-AM-CRUD-OK having added groupMemberAUserId.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-GRP-AM-IDEMPOTENT-DUP",
-    title="AddMember of an existing member (userNOBId) → Operation done, no error, member still present exactly once",
+    title="AddMember of an existing member (groupMemberAUserId) → Operation done, no error, member still present exactly once",
     classes=["CRUD"],
     priority="P1",
     steps=[
@@ -929,7 +929,7 @@ CASES.append(Case(
             name="add-dup",
             method="POST",
             path="/iam/v1/groups/{{crudGroupId}}:addMember",
-            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            body={"memberType": "user", "memberId": "{{groupMemberAUserId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -955,7 +955,7 @@ CASES.append(Case(
                 *assert_status(200),
                 "pm.test('member present exactly once after the duplicate Add', () => {",
                 "  const ms = pm.response.json().members || [];",
-                "  const mine = ms.filter(m => m.memberId === pm.environment.get('userNOBId'));",
+                "  const mine = ms.filter(m => m.memberId === pm.environment.get('groupMemberAUserId'));",
                 "  pm.expect(mine.length, JSON.stringify(ms)).to.eql(1);",
                 "});",
             ],
@@ -1030,7 +1030,7 @@ CASES.append(Case(
             name="add-nonadmin",
             method="POST",
             path="/iam/v1/groups/{{crudGroupId}}:addMember",
-            body={"memberType": "user", "memberId": "{{userINVId}}"},
+            body={"memberType": "user", "memberId": "{{groupNonMemberAUserId}}"},
             auth="jwtNoBindings",
             test_script=[
                 "pm.test('NONADMIN: 403 or 404', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));",
@@ -1043,13 +1043,13 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-GRP-RM-CRUD-OK — RemoveMember (userNOBId) → Operation done
-# Depends on IAM-GRP-AM-CRUD-OK having added userNOBId.
+# IAM-GRP-RM-CRUD-OK — RemoveMember (groupMemberAUserId) → Operation done
+# Depends on IAM-GRP-AM-CRUD-OK having added groupMemberAUserId.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-GRP-RM-CRUD-OK",
-    title="RemoveMember (user/userNOBId) from crudGroupId → Operation done",
+    title="RemoveMember (user/groupMemberAUserId) from crudGroupId → Operation done",
     classes=["CRUD"],
     priority="P0",
     steps=[
@@ -1057,7 +1057,7 @@ CASES.append(Case(
             name="remove-member",
             method="POST",
             path="/iam/v1/groups/{{crudGroupId}}:removeMember",
-            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            body={"memberType": "user", "memberId": "{{groupMemberAUserId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -1081,13 +1081,13 @@ CASES.append(Case(
 #
 # The real risk of a no-op remove is COLLATERAL: that it removes something else,
 # or that a genuine membership silently disappears. That is what is asserted —
-# the Operation succeeds, userINVId is (still) absent, and the group's other
+# the Operation succeeds, groupNonMemberAUserId is (still) absent, and the group's other
 # membership is untouched.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-GRP-RM-IDEMPOTENT-NOT-MEMBER",
-    title="RemoveMember of a non-member (userINVId) → Operation done, no error, membership set unchanged",
+    title="RemoveMember of a non-member (groupNonMemberAUserId) → Operation done, no error, membership set unchanged",
     classes=["CRUD"],
     priority="P1",
     steps=[
@@ -1097,7 +1097,7 @@ CASES.append(Case(
             name="seed-member-before-noop-remove",
             method="POST",
             path="/iam/v1/groups/{{crudGroupId}}:addMember",
-            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            body={"memberType": "user", "memberId": "{{groupMemberAUserId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -1109,7 +1109,7 @@ CASES.append(Case(
             name="remove-not-member",
             method="POST",
             path="/iam/v1/groups/{{crudGroupId}}:removeMember",
-            body={"memberType": "user", "memberId": "{{userINVId}}"},
+            body={"memberType": "user", "memberId": "{{groupNonMemberAUserId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -1135,12 +1135,12 @@ CASES.append(Case(
                 *assert_status(200),
                 "pm.test('the non-member is still absent', () => {",
                 "  const ms = pm.response.json().members || [];",
-                "  const inv = ms.filter(m => m.memberId === pm.environment.get('userINVId'));",
+                "  const inv = ms.filter(m => m.memberId === pm.environment.get('groupNonMemberAUserId'));",
                 "  pm.expect(inv.length, JSON.stringify(ms)).to.eql(0);",
                 "});",
                 "pm.test('the genuine member was NOT collaterally removed', () => {",
                 "  const ms = pm.response.json().members || [];",
-                "  const nob = ms.filter(m => m.memberId === pm.environment.get('userNOBId'));",
+                "  const nob = ms.filter(m => m.memberId === pm.environment.get('groupMemberAUserId'));",
                 "  pm.expect(nob.length, JSON.stringify(ms)).to.eql(1);",
                 "});",
             ],
@@ -1151,7 +1151,7 @@ CASES.append(Case(
             name="restore-empty-group",
             method="POST",
             path="/iam/v1/groups/{{crudGroupId}}:removeMember",
-            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            body={"memberType": "user", "memberId": "{{groupMemberAUserId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -1177,7 +1177,7 @@ CASES.append(Case(
             name="remove-nonadmin",
             method="POST",
             path="/iam/v1/groups/{{crudGroupId}}:removeMember",
-            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            body={"memberType": "user", "memberId": "{{groupMemberAUserId}}"},
             auth="jwtNoBindings",
             test_script=[
                 "pm.test('NONADMIN: 403 or 404', () => pm.expect(pm.response.code).to.be.oneOf([403, 404]));",
@@ -1212,7 +1212,7 @@ CASES.append(Case(
             name="seed-member-for-list",
             method="POST",
             path="/iam/v1/groups/{{crudGroupId}}:addMember",
-            body={"memberType": "user", "memberId": "{{userNOBId}}"},
+            body={"memberType": "user", "memberId": "{{groupMemberAUserId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -1234,7 +1234,7 @@ CASES.append(Case(
                 "});",
                 "pm.test('the seeded member is present exactly once, typed', () => {",
                 "  const ms = pm.response.json().members || [];",
-                "  const mine = ms.filter(m => m.memberId === pm.environment.get('userNOBId'));",
+                "  const mine = ms.filter(m => m.memberId === pm.environment.get('groupMemberAUserId'));",
                 "  pm.expect(mine.length, JSON.stringify(ms)).to.eql(1);",
                 "  pm.expect(mine[0].memberType, JSON.stringify(mine[0])).to.eql('user');",
                 "});",
@@ -1299,7 +1299,7 @@ CASES.append(Case(
             method="GET",
             path="/iam/v1/groups/{{crudGroupId}}:listMembers",
             # jwtNoBindings is NOT a no-grant subject any more: the iam suites
-            # themselves grant userNOBId `view` on account-A (iam-flat-authz-vbc
+            # themselves grant groupMemberAUserId `view` on account-A (iam-flat-authz-vbc
             # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
             # and those bindings stay ACTIVE in the DB across runs. A probe that
             # asserts "this subject sees nothing" was therefore asserting it

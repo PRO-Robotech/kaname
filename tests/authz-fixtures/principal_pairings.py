@@ -65,6 +65,8 @@ BINDING_TARGET_ONLY_IDS = frozenset({
     "userAABId",
     "userNOBId",
     "userINVId",
+    "groupMemberAUserId",
+    "groupNonMemberAUserId",
     "userPA1Id",
     "userPureNoBindingsId",
 })
@@ -121,6 +123,9 @@ PRINCIPAL_PAIRINGS = {
     "svaPureNoGrantId": "jwtPureNoBindings",
     "svaStorageCreateListOnlyId": "jwtStorageCreateListOnlyA",
 }
+
+# Человеческий токен проверяется по sub своей церемонии, машинный — по enrichment.
+HUMAN_PRINCIPAL_PAIRINGS = {"ceremonyGroupUserId": "jwtHumanGroupCeremony"}
 
 
 def token_principal_id(token: str) -> str:

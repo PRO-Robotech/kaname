@@ -135,7 +135,7 @@ func TestIAMSUC04_CreateRoleRefusesRetiredTypeBeforeAnyWrite(t *testing.T) {
 // правилом. Порядок гейтов у правки свой, поэтому утверждается отдельно.
 func TestIAMSUC04_UpdateRoleRefusesRetiredTypeBeforeAnyWrite(t *testing.T) {
 	live := &writeCountingRepo{rlUpdRepo: newRlUpdRepo(domain.Labels{})}
-	_, err := NewUpdateRoleUseCase(live, newRlFakeOps(), catalog.Fixed{F: liveSeedFacts(t)}).
+	_, err := NewUpdateRoleUseCase(live, newRlFakeOps(), catalog.Fixed{F: liveSeedFacts(t)}).WithGrantAuthority(&grantAuthorityAnswer{}).
 		Execute(ownerCtx(), UpdateRoleInput{
 			ID: rlUpdRoleID,
 			Rules: domain.Rules{
@@ -153,7 +153,7 @@ func TestIAMSUC04_UpdateRoleRefusesRetiredTypeBeforeAnyWrite(t *testing.T) {
 	}
 
 	retired := &writeCountingRepo{rlUpdRepo: newRlUpdRepo(domain.Labels{})}
-	op, err := NewUpdateRoleUseCase(retired, newRlFakeOps(), catalog.Fixed{F: liveSeedFacts(t)}).
+	op, err := NewUpdateRoleUseCase(retired, newRlFakeOps(), catalog.Fixed{F: liveSeedFacts(t)}).WithGrantAuthority(&grantAuthorityAnswer{}).
 		Execute(ownerCtx(), UpdateRoleInput{
 			ID: rlUpdRoleID,
 			Rules: domain.Rules{

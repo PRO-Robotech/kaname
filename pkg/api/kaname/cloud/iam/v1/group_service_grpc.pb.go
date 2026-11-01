@@ -62,7 +62,11 @@ type GroupServiceClient interface {
 	Delete(ctx context.Context, in *DeleteGroupRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Adds a member (User или ServiceAccount) to the group.
 	// Идемпотентно: повторное добавление того же member'а — no-op.
-	// Несуществующий member → FailedPrecondition.
+	// Если у группы есть действующие выдачи, вызывающий обязан иметь право
+	// выдавать на каждой их области; иначе — PermissionDenied синхронно, операции нет.
+	// Участник обязан принадлежать аккаунту группы (учётка — своим аккаунтом,
+	// человек — активным членством); иначе, как и для несуществующего member'а,
+	// операция завершается FailedPrecondition одной и той же формой отказа.
 	AddMember(ctx context.Context, in *AddGroupMemberRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Removes a member from the group.
 	// Идемпотентно: удаление несуществующего членства — no-op.
@@ -199,7 +203,11 @@ type GroupServiceServer interface {
 	Delete(context.Context, *DeleteGroupRequest) (*operation.Operation, error)
 	// Adds a member (User или ServiceAccount) to the group.
 	// Идемпотентно: повторное добавление того же member'а — no-op.
-	// Несуществующий member → FailedPrecondition.
+	// Если у группы есть действующие выдачи, вызывающий обязан иметь право
+	// выдавать на каждой их области; иначе — PermissionDenied синхронно, операции нет.
+	// Участник обязан принадлежать аккаунту группы (учётка — своим аккаунтом,
+	// человек — активным членством); иначе, как и для несуществующего member'а,
+	// операция завершается FailedPrecondition одной и той же формой отказа.
 	AddMember(context.Context, *AddGroupMemberRequest) (*operation.Operation, error)
 	// Removes a member from the group.
 	// Идемпотентно: удаление несуществующего членства — no-op.

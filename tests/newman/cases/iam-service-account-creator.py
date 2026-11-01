@@ -1,7 +1,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""SAC-E1…E5 (#1003), own public REST, S2 approved acceptance.
+"""SAC-E1…E5 (kaname#1003), own public REST, S2 approved acceptance.
 
 Source: docs/engineering/acceptance/service-account-creation-is-its-own-right.md.
 Techniques: decision table, positive controls, one-fact scope/target twins.

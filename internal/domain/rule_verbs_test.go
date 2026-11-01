@@ -31,6 +31,15 @@ func fullAnchorVerbs() []string {
 	return out
 }
 
+// wildcardAnchorVerbs — ожидаемое правила с подстановкой: развёрнутый набор типа
+// якоря и сам знак `*`, из которого выводится ярус `admin` (kaname#1035: поимённый
+// набор тех же глаголов `admin` не даёт). Отсортированно: `*` — первым.
+func wildcardAnchorVerbs() []string {
+	out := append(fullAnchorVerbs(), wildcard)
+	sort.Strings(out)
+	return out
+}
+
 func TestRules_ScopeSelfVerbs(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -45,13 +54,13 @@ func TestRules_ScopeSelfVerbs(t *testing.T) {
 			name:          "full-wildcard *.* on account → full closed verb-set",
 			rules:         Rules{{Module: wildcard, Resources: []string{wildcard}, Verbs: []string{wildcard}}},
 			scopeResource: "account",
-			want:          fullAnchorVerbs(),
+			want:          wildcardAnchorVerbs(),
 		},
 		{
 			name:          "full-wildcard *.* on project → full closed verb-set",
 			rules:         Rules{{Module: wildcard, Resources: []string{wildcard}, Verbs: []string{wildcard}}},
 			scopeResource: "project",
-			want:          fullAnchorVerbs(),
+			want:          wildcardAnchorVerbs(),
 		},
 		{
 			// (b) direct iam.account rule on an account-scoped binding → its authored
@@ -106,7 +115,7 @@ func TestRules_ScopeSelfVerbs(t *testing.T) {
 				{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}},
 			},
 			scopeResource: "account",
-			want:          fullAnchorVerbs(),
+			want:          wildcardAnchorVerbs(),
 		},
 		{
 			// (g) empty scopeResource (cluster — no per-resource iam rule) with a

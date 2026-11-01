@@ -1,57 +1,61 @@
-# Веса 39 контейнерных пакетов для штатной раскладки (kaname#990).
+# Веса 39 контейнерных пакетов для штатной раскладки (kaname#1034).
 #
-# Источник: внешние прогоны 2026-10-30UTC на Kaname
-# 1f3b6d40d4db5cd28fa506e3199a1ce568b6b825:23 завершённых пакета полного
-# native-прогона плюс 16 пакетов диагностического остатка, без повторов.
-# Исходные времена: 5195.535 с; здесь каждая строка округлена ВВЕРХ до целой секунды.
-# Измерение времени не означает зелёный вердикт: CE-10 в access_binding тогда
-# упал; его синхронизация исправлена отдельно в 7a10a55f23784b39f8dcbe8ea68b0ad8280b3b04.
-# Машинный census поставки: rest-limits/full-native/recovery-1/
-# recovery-terminal-census/workflow-feasibility.json (полный набор 39/39).
+# Источник: внешние прогоны 2026-10-31 UTC на Kaname
+# acfe58702a884c12dbecafcaab46783906e647d1: 37 завершённых пакетов четырёх
+# integration-частей плюс 2 пакета диагностического остатка, без повторов.
+# Исходные времена: 5637.866 с; каждая строка округлена ВВЕРХ до целой секунды.
+# Samples из разных pod: их сумма не является временем единого прогона.
+# Часть 3 завершилась по job30m (step124); оставшиеся 2 пакета прошли отдельно
+# за 9.224 и 8.290 с, 54 теста без пропусков. Полная часть этим не принята.
+# Диагностическая команда заняла 228 с, до первого пакета — 206.359 с;
+# сумма package elapsed не учитывает всю сборку и подготовку команды.
+# Provenance: root-four-part-census.json и missing-two-diagnostic/
+# root-terminal-review.json поставки rights/final-native-acfe5870-preparation.
 #
 # Строка: <секунды> <путь импорта>. Веса задают только порядок, НЕ состав:
 # run-integration.sh выводит контейнерный отбор реальным go list. Каждый пакет
 # обязан быть ровно в одном шарде; неописанный пакет получает штатный вес 10 с,
 # строка без выбранного пакета и дубликат веса отвергаются.
-# Матрица содержит 4 legs при прежнем 30m бюджете и прежних ресурсах. Три идеальных
-# яруса оставляли лишь ~68 с на подготовку/сборку при измеренном overhead 179–250 с;
-# четыре оставляют ~500 с до overhead. Это план по замеру, не гарантия длительности.
-934 github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp
-811 github.com/PRO-Robotech/kaname/internal/migrations
-739 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding
-715 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg
-555 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession
-422 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict
-353 github.com/PRO-Robotech/kaname/cmd/kaname
+# Матрица расширена с 4 до 5 частей, Go25m и job30m сохранены. При четырёх
+# частях новые веса дают 1414/1415/1415/1414 с без накладных расходов; при пяти —
+# 1131/1131/1131/1133/1132 с. Это планирование, не гарантия времени или PASS.
+# Полнота и срок требуют фактического прогона всех пяти частей новой головы.
+856 github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp
+934 github.com/PRO-Robotech/kaname/internal/migrations
+1023 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding
+729 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg
+572 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession
+474 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict
+357 github.com/PRO-Robotech/kaname/cmd/kaname
 138 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam
-41 github.com/PRO-Robotech/kaname/internal/apps/kaname/seed
-39 github.com/PRO-Robotech/kaname/internal/scopesourcecensus
-37 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/listvisibility
-34 github.com/PRO-Robotech/kaname/internal/authzmap
+44 github.com/PRO-Robotech/kaname/internal/apps/kaname/seed
+43 github.com/PRO-Robotech/kaname/internal/scopesourcecensus
+36 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/listvisibility
+33 github.com/PRO-Robotech/kaname/internal/authzmap
 33 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration
-26 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations
-24 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster
-21 github.com/PRO-Robotech/kaname/cmd/migrator
-21 github.com/PRO-Robotech/kaname/internal/service
-20 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/audit
-20 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/sa_keys
-20 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user_tokens
-20 github.com/PRO-Robotech/kaname/internal/authzguard
+27 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations
+26 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster
+24 github.com/PRO-Robotech/kaname/cmd/migrator
+22 github.com/PRO-Robotech/kaname/internal/service
+21 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/audit
+23 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/sa_keys
+21 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user_tokens
+21 github.com/PRO-Robotech/kaname/internal/authzguard
 18 github.com/PRO-Robotech/kaname/internal/testsupport/accesssnapshot
 17 github.com/PRO-Robotech/kaname/internal/subscriptionjournal
 15 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror
 13 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user
-12 github.com/PRO-Robotech/kaname/internal/observability/metrics
-11 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/module
-11 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/project
-11 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/readauthz
-11 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox
+14 github.com/PRO-Robotech/kaname/internal/observability/metrics
+12 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/module
+12 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/project
+10 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/readauthz
+12 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox
 10 github.com/PRO-Robotech/kaname/internal/moduleseedparity
-10 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/parentedge
-10 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict/nesteddepth
-9 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/publicreadmodule
-9 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token
+11 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/parentedge
+9 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict/nesteddepth
+10 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/publicreadmodule
+10 github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token
 9 github.com/PRO-Robotech/kaname/internal/clients
-8 github.com/PRO-Robotech/kaname/internal/moduleroleparity
-7 github.com/PRO-Robotech/kaname/internal/repo/cursorplan
+9 github.com/PRO-Robotech/kaname/internal/moduleroleparity
+8 github.com/PRO-Robotech/kaname/internal/repo/cursorplan
 2 github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/schemasnapshot
