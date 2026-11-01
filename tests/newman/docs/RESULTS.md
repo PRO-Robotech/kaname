@@ -1759,3 +1759,28 @@ Four base URLs beyond the gateway ones, injected by
 `iamRegistryTokenBaseUrl` (iam :9096), `registryDataPlaneBaseUrl` (registry :8080).
 A missing one turns the case RED naming the variable (`require_env_url`) — injection B
 above is the proof, not the promise.
+
+## #1003 S2 — SAC-E1…E5
+
+Набор содержит пять сценариев, 30 шагов: выдача creator-роли, собственный SA/key
+lifecycle, три отрицательные пары project/group/role с admin-контролями,
+отказы по чужой учётке и аккаунту. Посев получает `saCreatorId`/`jwtSaCreator`
+через client_credentials в отдельном домашнем аккаунте; SAC-E1 выдаёт роль сам.
+
+Предыдущий внешний прогон на `bef10ab27ce38203e36ec025dc7de6d67cdf7272`:
+1/1 коллекций с отчётом, 27 запросов, 0 без ответа, 77 утверждений, 5 упавших.
+Один первичный отказ — admin-контроль Role.Create с именем `r-{{runId}}`
+получил INVALID_ARGUMENT вместо Operation; ещё четыре утверждения относятся
+к отсутствующим Operation/resource-id после этого отказа. E1/E2/E4/E5 и пары
+project/group прошли; роль creator не получала лишних прав. Три зависимых
+запроса роли не были отправлены защитами незахваченных переменных. Посев и
+провенанс прошли, пространство снято, остаток 0.
+
+Новый кандидат переносит только S2 QA на main
+`f5a1d80a45ac88f3a5a38581d2862d95196eba2d`. В SAC-E3 c имя исправлено на
+`r{{runId}}` одинаково для creator/admin и в примере приёмки: это исправление
+конструируемости положительного контроля. Все статусы, коды, тексты и проверки
+Operation сохранены. API-результата нового источника ещё нет; старый красный
+прогон не переименован в новый. Перед полным E1…E5 внешним прогоном проверяются
+каталог/генерация на новой базе и совместимость посева. Снятие namespace и
+перепись остатков выполняются тем же native runner.

@@ -115,6 +115,7 @@ def header_principal_claims(doc: str) -> list[tuple[int, str, str]]:
 
 PRINCIPAL_PAIRINGS = {
     "svaAId": "jwtSAA",
+    "saCreatorId": "jwtSaCreator",
     "svaInviteeId": "jwtInvitee",
     "svaNoGrantId": "jwtSANoGrant",
     "svaPureNoGrantId": "jwtPureNoBindings",

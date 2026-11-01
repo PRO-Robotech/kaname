@@ -208,6 +208,7 @@ MINTED_CREDENTIALS = (
     "jwtNoBindings",
     "jwtPureNoBindings",
     "jwtSAA",
+    "jwtSaCreator",
     "jwtSANoGrant",
 )
 # Удостоверение в ЗАКОННО-ДЕФЕКТНОМ состоянии. Названо отдельной группой, потому
@@ -254,6 +255,7 @@ MINTED_IDENTIFIERS = (
     "userPA1Id",
     "userPureNoBindingsId",
     "svaAId",
+    "saCreatorId",
     "svaInviteeId",
     "svaNoGrantId",
     "svaPureNoGrantId",
@@ -1240,6 +1242,22 @@ def run(args: argparse.Namespace) -> int:
                   "jwtSAA (называет себя на /iam/v1/me)")
     step("jwtSAA получен обменом и ПРИНЯТ фронтом на /iam/v1/me")
 
+    # SAC-E1…E5: отдельный домашний аккаунт, без выдачи роли до E1.
+    creator_email = f"seed-{run_id}-creator@kaname.local"
+    creator_person = register_person(lane_http, creator_email, person_password())
+    confirm_person(lane_http, mailbox, creator_email, creator_person)
+    creator_tenant = resolve_tenant(http, public, boot, creator_email)
+    if creator_tenant["accountId"] in {t["accountId"] for t in tenants.values()}:
+        raise Finding("домашний аккаунт создателя совпал с целью SAC-E2/E5")
+    sva_creator = make_service_account(http, public, boot, creator_tenant["accountId"],
+                                       f"seed-{run_id}-creator", run_id,
+                                       "создание принципала SAC-E1…E5")
+    assert_no_bindings(http, public, boot, sva_creator)
+    creds["jwtSaCreator"] = sa_token(http, public, token_url, boot, sva_creator,
+                                     run_id, "создатель служебных учёток")
+    assert_serves(http, public, creds["jwtSaCreator"], "/iam/v1/me", "jwtSaCreator")
+    step("создатель в отдельном аккаунте: токен обменян и принят; выдач ещё нет")
+
     say("── субъект БЕЗ выдач: тот, кому не выдано ничего ─────────────────────")
     sva_pure = make_service_account(http, public, boot, tenants["a"]["accountId"],
                                     f"seed-{run_id}-pure", run_id,
@@ -1496,6 +1514,7 @@ def run(args: argparse.Namespace) -> int:
         "userPA1Id": targets["pa1"],
         "userPureNoBindingsId": targets["pure"],
         "svaAId": sva_a,
+        "saCreatorId": sva_creator,
         "svaInviteeId": sva_inv,
         "svaNoGrantId": sva_nogrant,
         "svaPureNoGrantId": sva_pure,

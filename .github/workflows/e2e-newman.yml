@@ -1001,6 +1001,7 @@ jobs:
             --service iam-access-binding-revocation-reason \
             --service iam-authz-grant-check-propagation \
             --service iam-service-account \
+            --service iam-service-account-creator \
             --service kaname-cluster-admins \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
