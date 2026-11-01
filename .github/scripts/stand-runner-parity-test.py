@@ -79,6 +79,11 @@ def executable(path, text):
     path.chmod(0o755)
 
 
+def remap_roots(text, roots):
+    """Один проход по исходным root tokens; вставленные байты не разбираются заново."""
+    return re.sub(r"/(?:usr/local|work|src)(?=/|[\s\"'`;)]|$)", lambda match: str(roots[match[0]]), text)
+
+
 class World:
     """Изолированные пути и install peers; исполняется сам RUNNER_POD_SH."""
     def __init__(self, base, payload, env=None, ships=None):
@@ -106,6 +111,36 @@ class World:
                         FIXTURE_WORLD=str(base), FIXTURE_PY=sys.executable,
                         KANAME_STAND_IN_POD="inherited-after-world-cleanup", KEEP_SENTINEL="retained",
                         GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
+        # Операционный envelope payload/export, отдельно от expected workflow toolset.
+        # Это настоящие capabilities base-fixture, не успешные ответы apt peer.
+        operational = ("bash", "cat", "chmod", "cut", "date", "find", "git", "grep", "gzip", "head",
+                       "install", "jq", "mkdir", "mv", "openssl", "rm", "seq", "sha256sum", "sh",
+                       "sleep", "sort", "stat", "tar", "tail", "uname")
+        manifest = {}
+        for name in operational:
+            source = shutil.which(name, path=os.environ["PATH"])
+            assert source, f"base-fixture operational dependency отсутствует: {name}"
+            original = Path(source).resolve()
+            assert original.is_file() and os.access(original, os.X_OK), (name, original)
+            digest = hashlib.sha256(original.read_bytes()).hexdigest()
+            target = self.bin / name
+            if name == "jq":
+                shutil.copyfile(original, target)
+                target.chmod(0o755)
+                assert hashlib.sha256(target.read_bytes()).hexdigest() == digest, "jq bytes не совпали"
+            else:
+                target.symlink_to(original)
+            manifest[name] = {"source": str(original), "sha256": digest, "provider": "base-fixture/native"}
+        lawful_jq = subprocess.run([str(self.bin / "jq"), "-nc", "{proof:(6*7)}"], env=self.env,
+                                  capture_output=True, text=True, timeout=5)
+        bad_jq = subprocess.run([str(self.bin / "jq"), "-n", "{"], env=self.env,
+                               capture_output=True, text=True, timeout=5)
+        assert lawful_jq.returncode == 0 and json.loads(lawful_jq.stdout) == {"proof": 42}, "jq не вычислил lawful input"
+        assert bad_jq.returncode != 0, "jq проглотил ошибочный фильтр"
+        (base / "operational-closure.json").write_text(json.dumps(manifest, sort_keys=True))
+        if base.name == "control":
+            print("PARITY-OPERATIONAL " + json.dumps(manifest, sort_keys=True), flush=True)
+        print("PARITY-READY operational=" + ",".join(operational) + " jq=real-bytes/evaluation-and-refusal", flush=True)
         executable(self.bin / "apt-get", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FIXTURE_WORLD/apt-argv"\n')
         executable(self.work / "bin/kubectl", '#!/bin/sh\necho "Client Version: v1.31.2"\n')
         # Необъявленные пины образа не сочиняются: эти base-image tools лишь присутствуют.
@@ -186,13 +221,13 @@ else: sys.exit(74)
             assert text.count(anchor) == 1, "граница producer payload не найдена"
             text = text.replace(anchor, extra_install + "\n" + anchor)
         # Перенос адресов, не переписывание решения. Другие байты producer сохраняются.
-        for old, new in (("/usr/local", self.prefix), ("/work", self.work), ("/src", self.src)):
-            text = text.replace(old, str(new))
+        roots = {"/usr/local": self.prefix, "/work": self.work, "/src": self.src}
+        text = remap_roots(text, roots)
         env = dict(self.env)
         for key, value in env.items():
             if key.startswith("RUNNER_"):
-                env[key] = value.replace("/work/", str(self.work) + "/").replace("/src/", str(self.src) + "/")
-        env["RUNNER_CMD"] = command.replace("/work/", str(self.work) + "/").replace("/src/", str(self.src) + "/")
+                env[key] = remap_roots(value, roots)
+        env["RUNNER_CMD"] = remap_roots(command, roots)
         print("PARITY-PRODUCER world=" + self.base.name + " sha256=" + hashlib.sha256(self.payload.encode()).hexdigest(), flush=True)
         result = subprocess.run(["bash", "-c", text], env=env, cwd=self.src, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45)
@@ -209,6 +244,15 @@ def payload_checks(root, payload, axis="all"):
     failures = 0
     with tempfile.TemporaryDirectory(prefix="stand-parity-") as temp:
         base = Path(temp)
+        roots = {"/usr/local": base / "workflow-lawful/usr/local", "/work": base / "workflow-lawful/work", "/src": base / "workflow-lawful/src"}
+        sample = "'/usr/local/bin/kubectl' /work/out /src/root /workflow-lawful/bin"
+        expected = f"'{roots['/usr/local']}/bin/kubectl' {roots['/work']}/out {roots['/src']}/root /workflow-lawful/bin"
+        assert remap_roots(sample, roots) == expected, "remap lawful boundary не сохранена"
+        mutant = sample
+        for old, new in roots.items():
+            mutant = mutant.replace(old, str(new))
+        assert mutant != expected, "remap control не отличает прежнюю повторную замену"
+        print("PARITY-READY remap=single-pass/original-boundaries workflow-lawful=preserved old-mutant=rejected", flush=True)
         control = World(base / "control", payload)
         assert control.run("true").returncode == 0, "законный opaque control не исполнился"
         probe = '''import importlib, json, pathlib, shutil, subprocess, sys
@@ -225,7 +269,11 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
 '''
         tool_worlds = (("actual", ""), ("workflow-lawful", "\n".join(blocks))) if axis in ("all", "tools") else ()
         for label, install in tool_worlds:
-            world = World(base / label, payload)
+            # Один и тот же root/layout: меняется только факт workflow install.
+            pair_root = base / "workflow-lawful"
+            shutil.rmtree(pair_root, ignore_errors=True)
+            world = World(pair_root, payload)
+            print("PARITY-CASE tools " + label, flush=True)
             (world.work / "ship/tools.py").write_text(probe)
             expected = {name: spec[0] for name, spec in installs.items()}
             expected.update({name: expected.get(name, "") for name in checks})
@@ -242,7 +290,9 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
         command = "python3 -c " + shlex.quote("import os,json; print(json.dumps({'present': 'KANAME_STAND_IN_POD' in os.environ, 'keep':os.environ.get('KEEP_SENTINEL')}))")
         env_worlds = (("actual", payload), ("unset-lawful", payload.replace("unset KUBECONFIG\n", "unset KUBECONFIG KANAME_STAND_IN_POD\n", 1))) if axis in ("all", "prologue") else ()
         for label, code in env_worlds:
-            world = World(base / (label + "-env"), payload)
+            pair_root = base / "prologue-world"
+            shutil.rmtree(pair_root, ignore_errors=True)
+            world = World(pair_root, payload)
             result = world.run(command, payload=code)
             rows = [json.loads(line) for line in result.stdout.splitlines() if line.startswith('{"present":')]
             assert len(rows) == 1 and rows[0]["keep"] == "retained", "env fixture не исполнилась"
