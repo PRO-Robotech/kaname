@@ -64,6 +64,7 @@ import (
 	operationpb "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	"github.com/PRO-Robotech/corelib/operations"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	projectapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/project"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
@@ -251,10 +252,12 @@ func (w *sacWorld) buildSACHandlers() {
 		groupapp.NewCreateGroupUseCase(repo, ops).WithRelationStore(door, nil),
 		groupapp.NewUpdateGroupUseCase(repo, ops),
 		groupapp.NewDeleteGroupUseCase(repo, ops), nil, nil,
-		groupapp.NewAddMemberUseCase(repo, ops), nil, nil)
+		groupapp.NewAddMemberUseCase(repo, ops).
+			WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(repo, door)), nil, nil)
 	w.rolex = roleapp.NewHandler(
 		roleapp.NewCreateRoleUseCase(repo, ops, src).WithRelationStore(door, nil),
-		roleapp.NewUpdateRoleUseCase(repo, ops, src),
+		roleapp.NewUpdateRoleUseCase(repo, ops, src).
+			WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(repo, door)),
 		roleapp.NewDeleteRoleUseCase(repo, ops),
 		roleapp.NewGetRoleUseCase(repo, src),
 		roleapp.NewListRolesUseCase(repo, src).WithRelationStore(door))

@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -257,9 +256,10 @@ func TestGrantDelegation_GD16_PersonAndGroupOnlyFromTheDelegationAccount(t *test
 
 // Д4 по §1 приёмки («делегирование не даёт делегату доступа к данным»):
 // субъект-группа, в составе которой делегат, — тот же делегат: право роли через
-// состав группы дошло бы до него самого. Держатель права выдавать включает
-// учётку-делегата в группу acc-A прежним глаголом `GroupService.AddMember`, затем
-// делегат выдаёт этой группе роль модуля на X. Близнец — та же группа без
+// состав группы дошло бы до него самого. Учётка-делегат (acc-S) стоит в группе
+// acc-A — состояние, которое прежний глагол `GroupService.AddMember` принимал, а
+// нынешний не заводит (Д-3); оно сеется строкой. Затем делегат выдаёт этой
+// группе роль модуля на X. Близнец — та же группа без
 // делегата (GD-16 a): отличается ровно составом группы. Каждая строка — на
 // свежем мире.
 func TestGrantDelegation_D4_GroupHoldingTheDelegateIsRefused(t *testing.T) {
@@ -275,13 +275,17 @@ func TestGrantDelegation_D4_GroupHoldingTheDelegateIsRefused(t *testing.T) {
 			w.requireSubject("Д4 " + r.name)
 			dU := w.dU()
 			if r.delegateMember {
-				add := groupapp.NewAddMemberUseCase(w.repo, w.ops)
-				op, err := add.Execute(asUser(w.ctx, w.usrA), groupapp.AddMemberInput{
-					GroupID: domain.GroupID(w.grpA), MemberType: domain.SubjectTypeServiceAccount,
-					MemberID: domain.SubjectID(w.svaIss2),
-				})
-				require.NoError(t, err, "Д4 Дано: usr-A включает sva-iss2 в grp-A")
-				require.Nil(t, awaitOp(t, w.ctx, w.ops, op.ID).Error, "Д4 Дано: включение done без error")
+				// Прежнее состояние — строкой посева, а не глаголом: учётка sva-iss2
+				// живёт в acc-S, и `GroupService.AddMember` больше не включает в группу
+				// участника не из её аккаунта (Д-3 приёмки
+				// role-rights-stay-within-what-is-named.md, решение В-4.2). Посев — то,
+				// что оставлял прежний глагол: строка состава и факт `member` модели
+				// (форма `memberFGATuple`) — тем же коммитом журнала, что у глагола.
+				_, err := w.pool.Exec(w.ctx, `
+					INSERT INTO kaname.group_members (group_id, member_type, member_id)
+					VALUES ($1, 'service_account', $2)`, w.grpA, w.svaIss2)
+				require.NoError(t, err, "Д4 Дано: строка состава sva-iss2 → grp-A")
+				gdSeedTuple(t, w.ctx, w.pool, "service_account:"+w.svaIss2, "member", "group:"+w.grpA)
 			}
 			var members int
 			require.NoError(t, w.pool.QueryRow(w.ctx, `

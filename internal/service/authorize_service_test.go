@@ -133,7 +133,7 @@ func TestAuthorize_Check_DeniesNoPath(t *testing.T) {
 	// and the "no direct relations granted" tail.
 	for _, want := range []string{
 		"user:usr_bob",
-		"admin", // vpc.networks.delete -> admin
+		"admin", // отношение, названное явно (RequiredRelation)
 		"vpc_network:vpcn_y",
 		"vpc.networks.delete",
 		"no direct relations granted",
@@ -372,9 +372,12 @@ func TestAuthorize_RelationStoreUnavailable_ReturnsUnavailable(t *testing.T) {
 
 func TestResolveActionToRelation(t *testing.T) {
 	cases := map[string]string{
-		"vpc.networks.list":     "viewer",
-		"vpc.networks.create":   "editor",
-		"vpc.networks.delete":   "admin",
+		"vpc.networks.list":   "viewer",
+		"vpc.networks.create": "editor",
+		// Удаление ярусом не разрешается (kaname#1035): «кто может удалить»
+		// спрашивается глаголом типа (listSubjectsRelation,
+		// list_subjects_delete_relation_test.go).
+		"vpc.networks.delete":   "",
 		"compute.instances.ssh": "ssh",
 		"":                      "",
 		"just-one-part":         "",

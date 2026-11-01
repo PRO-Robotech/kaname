@@ -55,6 +55,20 @@ type RulesMembershipFanout interface {
 	ReconcileActiveBindings(ctx context.Context, roleID domain.RoleID) error
 }
 
+// RulesGrantAuthority — порт Р2 (kaname#1036, приёмка
+// role-rights-stay-within-what-is-named.md): правка правил роли с действующими
+// выдачами допускается, только если правящий сам вправе выдать эту роль на каждой
+// области её выдач — иначе правка выдала бы держателям роли больше, чем правящий
+// вправе выдать. Реализует access_binding.ScopeGrantAuthority (там же, где право
+// выдавать у `AccessBindingService.Create`), провязывает корень службы.
+//
+// Ответ: nil — разрешено (в том числе выдач нет); `authzguard.PermissionDenied()`
+// — отказ, побайтово как отказ без права; `authzguard.AuthzBackendUnavailable()` —
+// хранилище отношений не ответило.
+type RulesGrantAuthority interface {
+	RequireForRole(ctx context.Context, id domain.RoleID) error
+}
+
 // MaxRoleFanoutBindings — the contract bound: a Role.Update whose
 // rules change is rejected FAILED_PRECONDITION when the role is carried by more
 // than this many active bindings ("split role"). One constant for use-case + test.

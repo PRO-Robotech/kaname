@@ -624,7 +624,9 @@ jobs:
       # первом упавшем.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # kaname#1034: замер 39 пакетов на acfe — 5637.866 с без сборки.
+        # Пятая часть оставляет запас внутри прежнего job30m; отбор и Go25m те же.
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:

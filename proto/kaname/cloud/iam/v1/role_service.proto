@@ -103,8 +103,16 @@ service RoleService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
-  // Updates the specified custom role.
-  // System role → FailedPrecondition.
+  // Обновляет пользовательскую роль; системная роль → FAILED_PRECONDITION.
+  // Если update_mask называет rules, правящий должен быть вправе выдать роль
+  // на каждой области её действующих (ACTIVE) выдач. Проверяется то же право,
+  // что у AccessBindingService.Create: администратор облака, владелец аккаунта
+  // области либо admin на объекте области; делегированный путь не учитывается.
+  // Проверка следует за формой запроса, существованием роли, запретом системной
+  // роли и проверкой правил, до создания операции. Отказ — PERMISSION_DENIED,
+  // побайтово как отказ без права на метод, операция не создаётся.
+  // Правка только имени или описания этого права не требует; отозванные
+  // и истёкшие выдачи в проверке не участвуют.
   rpc Update (UpdateRoleRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { patch: "/iam/v1/roles/{role_id}" body: "*" };
     option (corelib.api.v1.operation) = {

@@ -4,14 +4,26 @@
 package group
 
 // add_member.go — AddMemberUseCase.
-// INSERT INTO group_members ON CONFLICT DO NOTHING. DB-триггер
-// group_members_member_exists_trg делает EXISTS-check → SQLSTATE 23503 при
-// отсутствии member → FailedPrecondition с verbatim "<member_type> <member_id> not found".
+//
+// Синхронно, до операции: форма → существование группы → вид участника → право
+// выдавать на каждой области действующих выдач группы (Р3). В операции, одной
+// транзакцией записи: принадлежность участника аккаунту группы (Д-3) → INSERT
+// INTO group_members ON CONFLICT DO NOTHING (DB-триггер
+// group_members_member_exists_trg проверяет существование участника).
+//
+// Участник не из аккаунта группы и несуществующий участник завершают операцию
+// ОДНОЙ формой: FAILED_PRECONDITION с общим текстом «ссылки нет» (`pgmaperr.go`,
+// неразобранная связь 23503) — без вида и идентификатора участника. Различие
+// «нет такого» и «есть в другом аккаунте» было бы оракулом существования чужих
+// субъектов.
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -35,10 +47,31 @@ type AddMemberInput struct {
 type AddMemberUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
+	// authority — право добавляющего выдавать на областях действующих выдач
+	// группы (Р3, kaname#1037). Без провязки добавление отказывает (fail-closed):
+	// контроль, которому нечем исполниться, не должен молча пропускать.
+	authority MembersGrantAuthority
 }
 
 func NewAddMemberUseCase(r Repo, opsRepo operations.Repo) *AddMemberUseCase {
 	return &AddMemberUseCase{repo: r, opsRepo: opsRepo}
+}
+
+// WithGrantAuthority — проверка Р3 перед добавлением участника. Провязывает
+// корень службы (`access_binding.NewScopeGrantAuthority`).
+func (u *AddMemberUseCase) WithGrantAuthority(a MembersGrantAuthority) *AddMemberUseCase {
+	u.authority = a
+	return u
+}
+
+// requireMembersGrantAuthority — проверка Р3. Непровязанный порт — отказ, а не
+// пропуск; текст наружу фиксированный (§Hardening #1), причина — в журнал.
+func (u *AddMemberUseCase) requireMembersGrantAuthority(ctx context.Context, id domain.GroupID) error {
+	if u.authority == nil {
+		slog.ErrorContext(ctx, "group add member: members grant authority is not wired — refusing the add", "group_id", string(id))
+		return status.Error(codes.Internal, "internal error")
+	}
+	return u.authority.RequireForGroup(ctx, id)
 }
 
 func (u *AddMemberUseCase) Execute(ctx context.Context, in AddMemberInput) (*operations.Operation, error) {
@@ -77,6 +110,13 @@ func (u *AddMemberUseCase) Execute(ctx context.Context, in AddMemberInput) (*ope
 		return nil, shared.InvalidArg("member_type",
 			"member_type must be 'user' or 'service_account'")
 	}
+	// Р3 (kaname#1037): участник в группу с действующими выдачами — только с
+	// правом выдавать на каждой их области. Порядок несущий (Д-4): форма,
+	// существование группы и вид участника уже проверены, об участнике отказ не
+	// говорит ничего. Отказ синхронный, операции нет.
+	if err := u.requireMembersGrantAuthority(ctx, in.GroupID); err != nil {
+		return nil, err
+	}
 
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
@@ -105,6 +145,12 @@ func (u *AddMemberUseCase) doAdd(ctx context.Context, in AddMemberInput) (*anypb
 	}
 	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
 		func(ctx context.Context, w Writer) error {
+			// Д-3 (kaname#1037): участник — только из аккаунта группы. Той же
+			// транзакцией, что вставка, и под FOR SHARE строки, на которой
+			// держится ответ: снятое конкурентно членство не проходит в группу.
+			if err := w.GroupsW().RequireMemberOfGroupAccount(ctx, m); err != nil {
+				return err
+			}
 			if err := w.GroupsW().AddMember(ctx, m); err != nil {
 				return err
 			}

@@ -482,7 +482,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	groupGet := groupapp.NewGetGroupUseCase(kanameRepo).WithRelationStore(relationStore)
 	groupList := groupapp.NewListGroupsUseCase(kanameRepo).WithRelationStore(relationStore).
 		WithListScanRecorder(listScanRec)
-	groupAdd := groupapp.NewAddMemberUseCase(kanameRepo, opsRepo)
+	// Р3 (kaname#1037): участник в группу с действующими выдачами — только с правом
+	// выдавать на каждой их области; та же дверь решения, что у
+	// AccessBindingService.Create. Без провязки добавление отказывает.
+	groupAdd := groupapp.NewAddMemberUseCase(kanameRepo, opsRepo).
+		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(kanameRepo, relationStore))
 	groupRemove := groupapp.NewRemoveMemberUseCase(kanameRepo, opsRepo)
 	// ListMembers names the group in the request, so it re-asks the model about
 	// that group on `v_list` — the same relation the front door requires, and the
@@ -541,6 +545,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool)).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(kanameRepo, rsabReconciler)).
+		// Р2 (kaname#1036): правка правил роли с действующими выдачами — только с
+		// правом выдавать её на каждой области этих выдач; та же дверь решения, что у
+		// AccessBindingService.Create. Без провязки правка правил отказывает.
+		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(kanameRepo, relationStore)).
 		// Same revoke-latency fix as accountUpdate above, for the role AS AN OBJECT
 		// (iam.role is label-selectable, so clearing one of the ROLE's own labels is a
 		// REVOCATION of access TO the role — orthogonal to the rules fan-out wired

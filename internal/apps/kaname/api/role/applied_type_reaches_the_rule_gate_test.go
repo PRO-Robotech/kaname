@@ -281,7 +281,7 @@ func TestIAM1993_CreateRole_OverWithdrawnType_Rejected(t *testing.T) {
 // исправить.
 func TestIAM1993_UpdateRole_OverAppliedType_Accepted(t *testing.T) {
 	repo := newRlUpdRepo(domain.Labels{})
-	uc := NewUpdateRoleUseCase(repo, newRlFakeOps(), catalog.Fixed{F: factsWithAppliedType(t)})
+	uc := NewUpdateRoleUseCase(repo, newRlFakeOps(), catalog.Fixed{F: factsWithAppliedType(t)}).WithGrantAuthority(&grantAuthorityAnswer{})
 
 	_, err := uc.Execute(ownerCtx(), UpdateRoleInput{
 		ID: rlUpdRoleID,

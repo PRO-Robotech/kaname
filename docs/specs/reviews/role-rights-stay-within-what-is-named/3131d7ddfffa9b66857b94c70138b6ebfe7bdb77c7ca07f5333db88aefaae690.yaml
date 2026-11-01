@@ -1,0 +1,178 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+  sha256: 3131d7ddfffa9b66857b94c70138b6ebfe7bdb77c7ca07f5333db88aefaae690
+  revision: 4
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT и строку «редакция 4» в шапке вписал автор. Вердикт выводится из ЭТОЙ записи и
+    внешнего события (`change-graph.md` §2). Шапку документа рецензент не правил.
+  base_commit: ddd5681afbd48393f6af372b5359d2aacdb095c8
+  content_commit: 484e0cb610ae8a11416a5b782f2869f9f5f50e27
+  content_commit_note: >-
+    Копия kacho-workspace/tmp/kn-esc-acc, ветка 1034, HEAD = 484e0cb61. Рабочее дерево по файлу
+    приёмки чистое. Промежуточная редакция 4 в 299af08b4 (b7b8c09d…) заменена коммитом 484e0cb61.
+    К ней эта запись не относится.
+  branch: '1034'
+  task: PRO-Robotech/kaname#1034
+  related_tasks: [PRO-Robotech/kaname#1035, PRO-Robotech/kaname#1036, PRO-Robotech/kaname#1037, PRO-Robotech/kaname#1039]
+  lines: 1018
+  round: delta_check_after_dispatcher_decisions
+  round_note: >-
+    Сверка дельты ред.3 (8f141cbd…, APPROVED) → ред.4 только по решениям диспетчера В1–В3
+    (в документе — В-4.1…В-4.3). Принятое ранее не переоткрывалось.
+  predecessor_record: docs/specs/reviews/role-rights-stay-within-what-is-named/8f141cbd7fed24693847bc1344bcd77a7f7490431bba7c2edc71378bd2ed7b26.yaml
+  author_return_note: >-
+    Возврат автора в задании ВОЗВРАТа не содержит («Still running. Waiting for the monitor
+    event.»). Предмет установлен замером, а не со слов автора: ред.3 = `git show
+    26e71e3aa:<путь> | sha256sum` → 8f141cbd… (= `9e161aa77` в ветке 1035, совпало с заданием);
+    ред.4 = рабочий файл и `484e0cb61` → 3131d7dd….
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+    @ kn-esc-acc 484e0cb61 → 3131d7dd…aefaae690
+  measurement_revisions: >-
+    Чтение дерева kaname в той же копии: база ddd5681af; фикстуры GD — ef558bd04 (голова #1037);
+    журнал прогона на базе — tmp/kn-esc-acc-logs/base-1793017186-3439127.log (.rc = 1),
+    копия прогона tmp/kn-esc-base-probe @ 4f9167e38.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-26T12:30:17Z'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт агента APPROVED. Санкцию даёт только внешнее событие полномочия, его публикует курьер
+    (`change-graph.md` §3). Одобрение ред.3 к этому отпечатку не относится.
+
+delta_check:
+  predicate: >-
+    git diff 26e71e3aa 484e0cb61 -- <приёмка> → 119+/32−, 17 блоков. Каждый блок приписан
+    одному из В1–В3 либо служебен (шапка, история, дата, §8, §11). Правок вне решений нет.
+  B1_text_of_missing_member:
+    status: executed
+    checked: >-
+      Текст T-нет совпадает с измеренным. Базовый pgmaperr.go:678 возвращает
+      "referenced resource does not exist; create it or correct the reference before retrying".
+      В журнале прогона на базе, строка 134, стоит actual того же текста для ESC-23 f.
+      ESC-23 b, d, e, f и ESC-E4 переписаны на T-нет. Равенство b/f и d/f теперь по коду, тексту
+      и деталям: идентификатора в тексте нет, неразличимость Д-3 только усилилась. Код 9 и
+      контракт наружу не тронуты. Кейс края IAM-GRP-AM-NEG-MEMBER-MISSING
+      (iam-group.py:1012-1014) утверждает код 9 и REFERENCE_MISSING. Остатков прежнего шаблона
+      `<member_type> <member_id> not found` в утверждениях 0: grep 'not found' даёт две строки,
+      обе цитаты (§0.2 :72 — текст триггера, §11 :1010 — прежнее утверждение пробы).
+  B2_gd_fixtures_under_D3:
+    status: executed
+    checked: >-
+      Перепись @ef558bd04 повторена: 7 строк в 3 файлах из 14 grant_delegation_*. Координаты
+      верны: cd_bounds :179-184 (GD-25 e, usr-B → grp-A), b_grant :278-286 (Д4, AddMember
+      sva-iss2 → grp-A), world :376. usr-M посеян членом acc-A ACTIVE (world :161, :165;
+      gdSeedMembership :266). Свойство GD-25 e сохранено: близнец-владелец (usr-A) → done
+      (cd_bounds :240-247), делегат → PERMISSION_DENIED и перепись acc-A не меняется (:250-256).
+      Свойство Д4 сохранено посевом строки: отказ читает состав напрямую,
+      `rd.Groups().IsMember` (delegated_grant.go @ddd5681af, блок Д4). Посеянная строка
+      group_members даёт тот же исход, что добавление через API. Контроль count=1 в пробе Д4
+      остаётся. Предикат §6 п.7 «нет диффа в grant_delegation_*» заменён на «пробы GD не
+      ослаблены: каждое прежнее утверждение сохранено либо переутверждено на том же свойстве».
+      Формулировка дословно по В2. Перечень до/после — в DoD-proof. Оговорка «пока Д-3 держится
+      в операции (Д-4)» согласована с Д-4 (:305-310): принадлежность проверяется в операции.
+  B3_race_is_guard:
+    status: executed
+    checked: >-
+      Обе пробы гонки §6 п.5 записаны как охрана и внесены в перечень охраны п.7, из «сперва
+      красные» исключены. На базе обе зелёные: журнал, строки 128 и 209. Механизм для ролей
+      записан явно и измерен. 0001_initial.sql:279 — `FOR SHARE` в
+      access_bindings_role_is_live_trg на INSERT. role_repo.go:792 — `UPDATE roles` без правки
+      ключевых значений, то есть FOR NO KEY UPDATE; при правке ключа замок был бы сильнее
+      (FOR UPDATE). Оба режима с FOR SHARE несовместимы, утверждение верно.
+  run_on_base_section_11:
+    checked: >-
+      Копия прогона 4f9167e38: `git diff --name-only ddd5681af HEAD | grep -v -E
+      '_test\.go$|^docs/'` → пусто (код grep 1). Цитаты §11 сверены с журналом: ESC-23 f :134,
+      b/d/e :148/:153/:158, гонки :127-128 и :208-209, ESC-32 :314. Утверждение «продукт группы
+      в 8619c19dc тот же, что на базе» проверено: `git diff --name-only ddd5681af 8619c19dc`
+      не содержит api/group/*, pgmaperr.go и миграций.
+  counts: >-
+    `grep -c '^#### ESC-'` = 24, `grep -c '^| ESC-'` = 24 (как в ред.3).
+
+blocking: []
+
+important_nonblocking:
+  - >-
+    Шапка internal/apps/kaname/api/group/add_member.go:7-9 называет наружу «verbatim
+    <member_type> <member_id> not found». С измеренным это расходится, и на ef558bd04 шапка та
+    же. §0.2 расхождение фиксирует. Рекомендация полосе #1037: править шапку тем же заходом, что
+    и комментарии п.6 (doc-truthfulness, «два места об одном предмете»). Приёмку не держит.
+  - >-
+    §5.2, абзац после таблицы: Д4 добавлен в исключения, но основание («предмет — переход»)
+    сформулировано только для ESC-30/ESC-32. Основание Д4 стоит в §0.4. Косметика.
+  - >-
+    В3 требовал механизм сериализации только для ролей. Для гонки добавления участника механизм
+    в приёмке не назван, проба зелёная на базе как охрана. Если полоса #1037 меняет путь
+    AddMember, то, что держит порядок, стоит назвать в замысле.
+
+defaults_fixed: []
+
+constructibility:
+  seeded: 0
+  by_named_fixture: >-
+    GD-25 e — существующим посевом usr-M (world :165). Д4 — вставкой строки group_members,
+    писатель заказан (§5.2). Исполнимость на схеме базы видна по ESC-32: вставка постороннего
+    участника принимается триггером, который проверяет только существование.
+  not_executed: >-
+    Посев новых фикстур GD не ставился: правки фикстур — предмет полосы #1037, а не приёмки.
+
+route_signs:
+  proto: true
+  proto_note: "только комментарии контракта (DoD п.6); дельта ред.4 не меняет"
+  schema: false
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: true
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: >-
+    Санкция появится только после публикации события. Курьер тем же заходом приводит блок event
+    к факту.
+
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1034
+  status: performed
+  published: true
+  url: https://github.com/PRO-Robotech/kaname/issues/1034#issuecomment-6416087321
+  published_at: '2026-10-26T12:33:03Z'
+  published_by: pointpu
+  body_fields:
+    role: acceptance-reviewer
+    verdict: APPROVED
+    subject_revision: 484e0cb61
+    subject_sha256: 3131d7ddfffa9b66857b94c70138b6ebfe7bdb77c7ca07f5333db88aefaae690
+  note: опубликовал курьер (git-operator); блок приведён к факту по ответу API комментария
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: pointpu (курьер git-operator)
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/role-rights-stay-within-what-is-named/20039abfd0d6e89d3e6aa10f5a48d0f9a9fb5886639e090738ef83c2388883ab.yaml
+    - docs/specs/reviews/role-rights-stay-within-what-is-named/c6f3981e1ec6b6a9e60b7de030eb31619421bd63bd82375345b1ed31e9aff5fb.yaml
+    - docs/specs/reviews/role-rights-stay-within-what-is-named/8f141cbd7fed24693847bc1344bcd77a7f7490431bba7c2edc71378bd2ed7b26.yaml
