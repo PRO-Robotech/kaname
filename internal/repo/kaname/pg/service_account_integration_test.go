@@ -102,7 +102,7 @@ func TestSA_18_DuplicateName(t *testing.T) {
 	_ = w.Rollback(ctx)
 	require.Error(t, err)
 	assert.True(t, stderrors.Is(err, iamerr.ErrAlreadyExists))
-	assert.Contains(t, err.Error(), "ServiceAccount with name dup-sa already exists")
+	assert.Equal(t, "ServiceAccount with name dup-sa already exists", iamerr.StripSentinel(err))
 }
 
 func TestSA_18b_FKMissingAccount(t *testing.T) {
@@ -127,6 +127,9 @@ func TestSA_18b_FKMissingAccount(t *testing.T) {
 	_ = w.Rollback(ctx)
 	require.Error(t, err)
 	assert.True(t, stderrors.Is(err, iamerr.ErrFailedPrecondition))
+	assert.ErrorIs(t, err, iamerr.ErrReferenceMissing)
+	assert.Equal(t, "Account "+string(sa.AccountID)+" not found", iamerr.StripSentinel(err))
+	assert.NotContains(t, err.Error(), string(sa.Name))
 }
 
 func TestSA_19_DeleteWithAccessBinding(t *testing.T) {
