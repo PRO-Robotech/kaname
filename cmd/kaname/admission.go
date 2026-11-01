@@ -12,7 +12,10 @@ package main
 // потолок им ставит он — по объявленной оси дескриптора. iam собирает серверы
 // сам (две точки сборки в serve.go), поэтому обёртку регистратора ставит здесь.
 // Это отличие раскладки, а не решения: величины берутся из ТОГО ЖЕ пола
-// платформы, ключи у слушателей те же, и счётчик печатается так же.
+// платформы, и счётчик печатается так же. Ключ и классификатор публичного
+// слушателя у iam СВОИ, и это уже решение (kaname#991): служба публикуется
+// клиентам сама, анонимный вызов ключуется адресом источника, а Check
+// относится к чтениям (publicAdmissionSubject, publicCallClass ниже).
 //
 // # Почему iam ограничивать важнее прочих
 //
@@ -32,13 +35,18 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
+	"strings"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/restfront"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // listenerAdmission — ограничители процесса: публичный слушатель и два уровня
@@ -179,4 +187,117 @@ func instanceSubject(ctx context.Context) string {
 // запроса, поэтому уровень экземпляра стоит внутри.
 func (l listenerAdmission) internalRegistrar(next grpc.ServiceRegistrar) grpc.ServiceRegistrar {
 	return l.internal.Registrar(l.internalInstance.Registrar(next))
+}
+
+// anonymousSubjectPrefix — приставка ключа анонимного вызывающего.
+//
+// Знак `<` в типе личности не встречается, поэтому ключ анонимного адреса не
+// совпадёт ни с одним ключом вошедшего (`<тип>:<id>`) — бюджет вошедшего и
+// бюджет адреса не смешиваются ни при каком входе. Форма — та же, что у ключа
+// безымянного запроса фундамента ([grpcsrv.UnattributedSubject]).
+const anonymousSubjectPrefix = "<anonymous>@"
+
+// publicAdmissionSubject — ключ ПУБЛИЧНОГО ограничителя (kaname#991).
+//
+// # Вошедший — личностью, как прежде
+//
+// Вызывающий с личностью ключуется ею ([grpcsrv.PrincipalSubject]): предел
+// объявлен на арендатора, и соединений у него сколько угодно.
+//
+// # Аноним — адресом, а не общим ведром
+//
+// У анонима личности нет, и фундамент сводит всех безымянных в ОДНО ведро:
+// поток одного источника расходовал бы предел всех анонимных клиентов разом
+// (в том числе самопроверки, которые публичный слушатель анониму разрешает).
+// Поэтому аноним ключуется адресом источника — без порта: каждое
+// переподключение иначе покупало бы свежее ведро.
+//
+// Адрес источника — адрес пира соединения, кроме одного случая: пир —
+// СОБСТВЕННЫЙ REST-фронт, узнанный по проверенному листу (`frontHop`, тот же,
+// что у политики вызывающего, ownfronthop.go). Тогда все HTTP-клиенты пришли бы
+// с одного адреса — самого фронта, — и источником служит адрес его клиента,
+// который фронт пишет своим ключом метаданных ([restfront.MetadataClientAddr]).
+// От любого другого пира этот ключ не читается: прислать его может кто угодно.
+// Фронт без годного адреса нового ключа не получает — он делит ключ своего пира.
+//
+// Адрес за балансировщиком сюда приходит тем же путём — адресом соединения,
+// который слушатель берёт из заголовка объявленного балансировщика (kaname#989);
+// своего разбора заголовков здесь нет.
+//
+// # Чего ключ не делает
+//
+// Вне боевой посадки у фронта нет листа (`frontHop` пуст), и все его анонимные
+// клиенты делят ключ его адреса — тот же исход, что был для всех до правки.
+// Без адреса пира (в процессе такого вызова нет) ключ пуст, и фундамент
+// относит вызов к общему безымянному ведру.
+func publicAdmissionSubject(frontHop string) grpcsrv.SubjectFunc {
+	return func(ctx context.Context) string {
+		if s := grpcsrv.PrincipalSubject(ctx); s != "" {
+			return s
+		}
+		if addr := anonymousSourceAddr(ctx, frontHop); addr != "" {
+			return anonymousSubjectPrefix + addr
+		}
+		return ""
+	}
+}
+
+// anonymousSourceAddr — адрес источника анонимного вызова, приведённый к одной
+// записи; пусто — источника не установить.
+func anonymousSourceAddr(ctx context.Context, frontHop string) string {
+	if frontHop != "" {
+		if id, verified := grpcsrv.CertIdentityFromContext(ctx); verified && id == frontHop {
+			if md, ok := metadata.FromIncomingContext(ctx); ok {
+				if addr, ok := oneClientAddr(md.Get(restfront.MetadataClientAddr)); ok {
+					return addr
+				}
+			}
+		}
+	}
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.Addr == nil {
+		return ""
+	}
+	host := p.Addr.String()
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return addr.Unmap().String()
+	}
+	return host
+}
+
+// oneClientAddr — ровно одно значение, и оно — адрес IPv4 или IPv6 без зоны.
+// Две записи одного адреса дают один ключ.
+func oneClientAddr(values []string) (string, bool) {
+	if len(values) != 1 {
+		return "", false
+	}
+	addr, err := netip.ParseAddr(strings.TrimSpace(values[0]))
+	if err != nil || addr.Zone() != "" {
+		return "", false
+	}
+	return addr.Unmap().String(), true
+}
+
+// publicCallClass — класс вызова на публичном слушателе (kaname#991).
+//
+// Конвенция продукта распознаёт чтение по имени (`Get`/`List`), и Check под неё
+// не подпадает: вопрос о доступе — чтение, мутаций у него нет, а по конвенции он
+// платил впятеро более узким бюджетом мутаций. Сужение — ровно один метод,
+// названный константой порождённого кода, а не правилом по имени: правило
+// «всё, что начинается на Check» купило бы бюджет чтения следующему методу
+// молча. BatchCheck остаётся в бюджете мутаций намеренно: один его вызов —
+// до ста вопросов к хранилищу отношений подряд.
+func publicCallClass(fullMethod string) grpcsrv.CallClass {
+	if fullMethod == iamv1.AuthorizeService_Check_FullMethodName {
+		return grpcsrv.ClassRead
+	}
+	return grpcsrv.ClassifyByKachoConvention(fullMethod)
+}
+
+// publicAdmissionOptions — опции публичного ограничителя: классификатор вызова.
+func publicAdmissionOptions() []grpcsrv.AdmissionOption {
+	return []grpcsrv.AdmissionOption{grpcsrv.WithCallClassifier(publicCallClass)}
 }
