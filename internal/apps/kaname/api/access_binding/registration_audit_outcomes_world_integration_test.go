@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -73,7 +73,7 @@ func TestRegistrationAudit1044_DerivedParentAndVersion(t *testing.T) {
 	h := auditOutcomeHandler(w, codes.OK)
 	_, err := h.RegisterResource(registryModuleCtx(), r)
 	require.NoError(t, err, "законный близнец: регистрация без подсказок родителя")
-	check := func(eventType, outcome, version string) {
+	check := func(t *testing.T, eventType, outcome, version string) {
 		p := registrationOutcomePayload(t, w, eventType, id)
 		assertRegistrationCaller(t, p, outcome)
 		assert.Equal(t, map[string]any{"type": "registry.repositories", "id": id}, p["object"])
@@ -81,20 +81,26 @@ func TestRegistrationAudit1044_DerivedParentAndVersion(t *testing.T) {
 		assert.Equal(t, []any{pcrRegType + ":" + pcrX, "project:" + string(w.prjA), "account:" + string(w.accA)}, p["parent_chain"])
 		assert.Equal(t, version, p["source_version"])
 	}
-	t.Run("register", func(t *testing.T) { check(auditRegistered, "registered", r.SourceVersion.AsTime().UTC().Format(time.RFC3339Nano)) })
+	t.Run("register", func(t *testing.T) {
+		check(t, auditRegistered, "registered", r.SourceVersion.AsTime().UTC().Format(time.RFC3339Nano))
+	})
 	_, err = h.RegisterResource(registryModuleCtx(), r)
 	require.NoError(t, err)
 	registrationOutcomePayload(t, w, auditRegistered, id)
 	u := &iamv1.UnregisterResourceRequest{SubjectId: r.SubjectId, Relation: r.Relation, Object: r.Object, SourceVersion: w.nextVersion()}
 	_, err = h.UnregisterResource(registryModuleCtx(), u)
 	require.NoError(t, err)
-	t.Run("unregister", func(t *testing.T) { check(auditUnregistered, "unregistered", u.SourceVersion.AsTime().UTC().Format(time.RFC3339Nano)) })
+	t.Run("unregister", func(t *testing.T) {
+		check(t, auditUnregistered, "unregistered", u.SourceVersion.AsTime().UTC().Format(time.RFC3339Nano))
+	})
 }
 
 func TestRegistrationAudit1044_PermissionDenied(t *testing.T) {
 	for _, unregister := range []bool{false, true} {
 		name := "register"
-		if unregister { name = "unregister" }
+		if unregister {
+			name = "unregister"
+		}
 		t.Run(name, func(t *testing.T) {
 			w := newURXWorld(t)
 			r := auditKRequest(w)
@@ -108,8 +114,10 @@ func TestRegistrationAudit1044_PermissionDenied(t *testing.T) {
 			if unregister {
 				eventType = auditUnregistered
 				_, err = h.UnregisterResource(registryModuleCtx(), &iamv1.UnregisterResourceRequest{
-					SubjectId:r.SubjectId, Relation:r.Relation, Object:r.Object, SourceVersion:r.SourceVersion})
-			} else { _, err = h.RegisterResource(registryModuleCtx(), r) }
+					SubjectId: r.SubjectId, Relation: r.Relation, Object: r.Object, SourceVersion: r.SourceVersion})
+			} else {
+				_, err = h.RegisterResource(registryModuleCtx(), r)
+			}
 			require.Equal(t, codes.PermissionDenied, status.Code(err))
 			p := registrationOutcomePayload(t, w, eventType, auditK)
 			assertRegistrationCaller(t, p, "permission_denied")
@@ -139,11 +147,62 @@ func TestRegistrationAudit1044_FailedPrecondition(t *testing.T) {
 func TestRegistrationAudit1044_UnverifiedCertificateIsNotCaller(t *testing.T) {
 	w := newURXWorld(t)
 	r := auditKRequest(w)
+	_, err := auditOutcomeHandler(w, codes.OK).RegisterResource(registryModuleCtx(), r)
+	require.NoError(t, err, "подтверждённый близнец: личность модуля в событии")
+	assertRegistrationCaller(t, registrationOutcomePayload(t, w, auditRegistered, auditK), "registered")
+	_, err = w.pool.Exec(w.ctx, `DELETE FROM kaname.audit_outbox WHERE event_payload #>> '{object,id}'=$1`, auditK)
+	require.NoError(t, err)
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 		"spiffe://kacho.cloud/ns/kacho/sa/kacho-registry", false)
-	_, err := auditOutcomeHandler(w, codes.PermissionDenied).RegisterResource(ctx, r)
+	_, err = auditOutcomeHandler(w, codes.PermissionDenied).RegisterResource(ctx, r)
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	p := registrationOutcomePayload(t, w, auditRegistered, auditK)
-	assert.NotEqual(t, "service_account:"+authzguard.ServiceAccountIDForService("registry"), p["actor"])
-	assert.Empty(t, p["module"])
+	assert.Zero(t, w.auditRows(auditRegistered), "неподтверждённый SAN не порождает событие модуля")
+	var version time.Time
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT source_version FROM kaname.resource_mirror WHERE object_type=$1 AND object_id=$2`, pcrRegTgt, auditK).Scan(&version))
+	assert.True(t, r.SourceVersion.AsTime().Equal(version), "отказ не изменил регистрацию")
+}
+
+// Настоящая auditTX не фиксируется: исход становится opaque Internal, состояние
+// объекта остаётся прежним и событие не объявляется сохранённым.
+func TestRegistrationAudit1044_RefusalAuditFailureIsOpaque(t *testing.T) {
+	w := newURXWorld(t)
+	r := auditKRequest(w)
+	h := auditOutcomeHandler(w, codes.OK)
+	_, err := h.RegisterResource(registryModuleCtx(), r)
+	require.NoError(t, err)
+	_, err = w.pool.Exec(w.ctx, `DELETE FROM kaname.audit_outbox WHERE event_payload #>> '{object,id}'=$1`, auditK)
+	require.NoError(t, err)
+	_, err = w.pool.Exec(w.ctx, `CREATE FUNCTION kaname.audit1044_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+	BEGIN IF NEW.event_payload #>> '{object,id}' = 'reg00000000000000008' THEN
+	RAISE EXCEPTION 'host=secret-audit-db user=private-auditor'; END IF; RETURN NEW; END $$;
+	CREATE TRIGGER audit1044_fault BEFORE INSERT ON kaname.audit_outbox FOR EACH ROW EXECUTE FUNCTION kaname.audit1044_fault()`)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, cleanupErr := w.pool.Exec(context.Background(), `DROP TRIGGER audit1044_fault ON kaname.audit_outbox; DROP FUNCTION kaname.audit1044_fault()`)
+		assert.NoError(t, cleanupErr)
+	})
+	for _, operation := range []string{"register_denied", "unregister_denied", "register_precondition"} {
+		t.Run(operation, func(t *testing.T) {
+			denied := auditOutcomeHandler(w, codes.PermissionDenied)
+			var refusal error
+			switch operation {
+			case "register_denied":
+				_, refusal = denied.RegisterResource(registryModuleCtx(), r)
+			case "unregister_denied":
+				_, refusal = denied.UnregisterResource(registryModuleCtx(), &iamv1.UnregisterResourceRequest{
+					SubjectId: r.SubjectId, Relation: r.Relation, Object: r.Object, SourceVersion: r.SourceVersion})
+			case "register_precondition":
+				mismatch := auditKRequest(w)
+				mismatch.ParentAccountId = string(w.accB)
+				_, refusal = h.RegisterResource(registryModuleCtx(), mismatch)
+			}
+			assert.Equal(t, codes.Internal, status.Code(refusal))
+			assert.Equal(t, "internal error", status.Convert(refusal).Message())
+			assert.Zero(t, w.auditRows(auditRegistered))
+			assert.Zero(t, w.auditRows(auditUnregistered))
+			var version time.Time
+			require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT source_version FROM kaname.resource_mirror WHERE object_type=$1 AND object_id=$2`, pcrRegTgt, auditK).Scan(&version))
+			assert.True(t, r.SourceVersion.AsTime().Equal(version), "неудача аудита не изменила объект")
+		})
+	}
 }

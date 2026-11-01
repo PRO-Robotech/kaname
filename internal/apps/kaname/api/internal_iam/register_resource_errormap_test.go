@@ -72,6 +72,11 @@ func TestRegisterResourceUseCase_BeginFailure_MapsUnavailable(t *testing.T) {
 type fakeRegistrar struct {
 	registerErr   error
 	unregisterErr error
+	refusalErr    error
+}
+
+func (f *fakeRegistrar) RecordRefusal(context.Context, unregisterInput, bool, string) error {
+	return f.refusalErr
 }
 
 func (f *fakeRegistrar) Register(_ context.Context, _ registerInput) error {
