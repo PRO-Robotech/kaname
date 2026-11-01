@@ -33,6 +33,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -330,7 +331,9 @@ func TestNestedWorld_ND03_AnonymousReadsDescendantsThroughPublicReader(t *testin
 func TestNestedWorld_ND04_g_RoleServiceRefusesChildrenOnInput(t *testing.T) {
 	w := newNDWorld(t, "ND-04 (ж)", nil)
 	cat := catalog.Fixed{F: w.facts}
-	h := roleapp.NewHandler(roleapp.NewCreateRoleUseCase(w.repo, w.ops, cat), roleapp.NewUpdateRoleUseCase(w.repo, w.ops, cat),
+	h := roleapp.NewHandler(roleapp.NewCreateRoleUseCase(w.repo, w.ops, cat),
+		roleapp.NewUpdateRoleUseCase(w.repo, w.ops, cat).
+			WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door)),
 		nil, roleapp.NewGetRoleUseCase(w.repo, cat), nil)
 	rules := func(withChildren bool) []*iamv1.Rule {
 		r := &iamv1.Rule{Module: "registry", Resources: []string{"registries"}, Verbs: []string{"get", "list"}}

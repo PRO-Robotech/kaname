@@ -1,0 +1,207 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+  sha256: c6f3981e1ec6b6a9e60b7de030eb31619421bd63bd82375345b1ed31e9aff5fb
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Слово DRAFT в шапке вписал автор. Вердикт выводится из ЭТОЙ записи и внешнего события
+    (`change-graph.md` §2). Шапку документа рецензент намеренно не правил.
+  base_commit: ddd5681afbd48393f6af372b5359d2aacdb095c8
+  content_commit: none
+  content_commit_note: >-
+    Документ в копии не закоммичен (`git status --short` → `?? docs/engineering/acceptance/…`).
+    Судится содержимое по отпечатку, а не коммит.
+  branch: esc-acc
+  task: PRO-Robotech/kaname#1034
+  related_tasks: [PRO-Robotech/kaname#1035, PRO-Robotech/kaname#1036, PRO-Robotech/kaname#1037, PRO-Robotech/kaname#1039, PRO-Robotech/kaname#986]
+  lines: 930
+  round: 2
+  predecessor_record: docs/specs/reviews/role-rights-stay-within-what-is-named/20039abfd0d6e89d3e6aa10f5a48d0f9a9fb5886639e090738ef83c2388883ab.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/role-rights-stay-within-what-is-named.md в копии
+    kacho-workspace/tmp/kn-esc-acc @ ddd5681af → c6f3981e…9aff5fb (совпало с возвратом автора);
+    копия редакции 1 `.20039abf` → 20039abf…88883ab (совпало с записью круга 1)
+  measurement_revisions: >-
+    Все замеры — чтение дерева kaname в той же копии @ ddd5681af (git rev-parse HEAD).
+    Вход круга — дифф редакции 1 к редакции 2 (fa-b1: судится дельта и исполнение замечаний).
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-10-26T10:19:18Z'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Из четырёх блокирующих круга 1 три исполнены полностью (B1, B3, B4). B2 исполнен по форме,
+    но в перечень «сперва красные» попала ячейка, которая на базе зелёная. Это остаток того же
+    рода DoD. Круг 2 последний: третьего нет (fa-b8). Спор решает диспетчер. Правка механическая,
+    одна ячейка, см. resolution_for_dispatcher.
+
+round1_execution:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    status: executed
+    checked: >-
+      (1) ESC-30 теперь сеет строку реестра вместе с фактом. Писатель называется: одна
+      транзакция формы rewindToPreFix (public_container_read_multi_subject_converge_integration_test.go:70);
+      строка журнала — форма gdSeedTuple (grant_delegation_world_integration_test.go:278, «триггер
+      складывает строку в факт тем же коммитом»). У gdWorld есть `rec`: он встраивает *pcrWorld
+      (grant_delegation_world_integration_test.go:110, :147), а `p.rec` = reconcile.New
+      (public_container_read_world_integration_test.go:306). ConvergeBinding (reconcile.go:688)
+      снимает «строку реестра под координатой сводимого члена, на которую не претендует ни один
+      желаемый член» (emitted_completion.go, шапка). Ярусный кортеж прежнего вывода пишется той
+      же сборкой, что v_* (tuples.go:65-105, `add(tier)`). У члена-области координата `iam.<scope>`
+      (tuples.go:121-143), поэтому посеянная строка admin лежит под координатой члена и
+      снимаема. PK реестра — (выдача, координата, субъект, отношение, объект) (миграция
+      20261021081500). Значит, `ON CONFLICT DO NOTHING` у выдачи usr-W честно не добавит строк.
+      На базе посев usr-D тоже ничего не добавит: прежний вывод уже дал admin. Контроли зелёные,
+      утверждения о usr-D после прохода красные. Конструируемо на обеих ревизиях.
+      (2) Строка sva-B вынесена в ESC-32 и сеется до наката. serOpenAt делает goose.UpTo с
+      проверкой версии (human_session_forced_exit_reason_integration_test.go:136-147).
+      20261025180000 — последняя миграция (`ls internal/migrations/*.sql | tail -1`). Триггер
+      group_members_member_exists проверяет только существование (0001_initial.sql:335-361), и
+      позднее он не переопределялся (`git grep 'group_members_member' -- 'internal/migrations/*.sql'`
+      находит только 0001). Посылка «триггер не проверяет аккаунт» из §5.2 снята.
+  - id: B2
+    kind: DoD
+    status: partially_executed
+    checked: >-
+      §6 S1 п.7 разделён на два перечня. Каждую строку обоих перечней я сверил по модели и коду
+      @ddd5681af. Ошибка одна, ESC-04 a у usr-D (см. blocking.R2-1). Остальные ячейки разнесены
+      верно: ESC-06 а на базе зелёная (delete → admin, :1349; у usr-D есть admin на X), б1 на
+      базе красная (authorizeCaller пропускает admin на X, handler.go:346); ESC-23 f на базе
+      зелёная, b/d/e красные; ESC-32 на базе вакуумно-зелёная (новой миграции нет).
+  - id: B3
+    kind: COVERAGE
+    status: executed
+    checked: >-
+      Предикаты §0.7 перегнаны и дали числа документа: право выдавать — 12 строк (2 обёртки,
+      helpers.go:178 и :338; 10 путей); вопросы об `admin` — 12 строк, из них 4 вопроса к модели;
+      callerAuthorityRelations = {"admin"} (caller_authority.go:55, :122); resolveActionToRelation —
+      authorize_service.go:1258. Двери каталога (jq): kaname 13 (account 9, project 3, cluster 1),
+      модули 56 (project 40, cluster 8, листовые 8). ESC-06 а держит ListSubjects(delete) против
+      Check(delete), ESC-06 б1/б2 держит право спрашивать о чужом. Судьба делегирования — в §0.7
+      «Делегирование» и §2 п.5. «Тип изменения» обновлён.
+  - id: B4
+    kind: TWIN
+    status: executed
+    checked: >-
+      §4.1: rol-e1 → usr-R на prj-A; rol-e2 → usr-R на prj-A и sva-A3 на acc-A. ESC-13 a и
+      ESC-10 b: тот же вызывающий usr-RP, то же тело U-R. Отличие — ровно вторая выдача. Правила
+      rol-e1 и rol-e2 — `get` на registries, поэтому вторая выдача usr-R не меняет утверждений
+      ESC-10 a/b о v_delete. Мир свежий на каждый сценарий (§4.1).
+
+kind_repeated:
+  DoD: >-
+    да — остаток B2, одна ячейка. Задание автору менять не нужно: моя формулировка круга 1
+    («по строкам с новым свойством») была верна, ошибся автор в одной строке.
+  CONSTRUCTIBILITY: нет
+  COVERAGE: нет
+  TWIN: нет
+
+blocking:
+  - id: R2-1
+    kind: DoD
+    scenario: §6 S1 п.7, перечень «сперва красные на ddd5681af» — «ESC-04 a–d у usr-D»
+    claim: >-
+      На базе ячейка ESC-04 a у usr-D (`action: registry.registries.update`, `registry_registry:X`,
+      ожидание `false`) уже `false`, то есть зелёная. Красной сперва она быть не может, и пункт DoD,
+      как написан, неисполним (тот же дефект, что B2). Цепочка такая. Check с действием берёт
+      глагол у типа объекта (moduleVerbRelation, internal/service/module_verb_relation.go:67-93)
+      → `v_update`. Это совпадает и со строкой каталога (permission_catalog.json:1017-1019,
+      `RegistryService/Update` → `v_update`). Модель: `registry_registry.v_update: [user,
+      service_account, group#member] or owner or super_admin` (fga_model.fga), а super_admin
+      = super_admin from project = admin from account or any_admin from cluster. Ярусный кортеж
+      usr-D (`admin` на X и на prj-A) в v_update не входит. Из `delete` прямой `v_update` не
+      выводится: GrantedVerbsWithDeclared добавляет удаление к правке, а не правку к удалению
+      (internal/authzmap/role_verbs.go:77-100). Ячейки b, c, d у usr-D на базе красные
+      (editor/admin/viewer ← прямой admin на X), с ними всё верно.
+    measured: >-
+      Прочтено @ddd5681af: internal/service/module_verb_relation.go:67-93;
+      internal/apps/kaname/seed/embedded/permission_catalog.json:1017-1019;
+      internal/authzmodel/fga_model.fga (type registry_registry: v_update, super_admin; type
+      project: super_admin); internal/authzmap/role_verbs.go:77-100;
+      internal/apps/kaname/api/access_binding/reconcile/tuples.go:65-105.
+    fix: >-
+      В §6 S1 п.7 заменить «ESC-04 a–d у usr-D» на «ESC-04 b–d у usr-D». Ячейку ESC-04 a у
+      usr-D перенести в «охрану: зелёные до и после» (её закрывает строка каталога `v_update`,
+      Р1 её не меняет). Больше ничего не трогать.
+    resolution_for_dispatcher: >-
+      Третьего круга нет (fa-b8). Правка — одна ячейка, без нового механизма и без новых
+      сценариев. Предлагаю диспетчеру принять редакцию 3 по проверке дельты: дифф к c6f3981e
+      ограничен п.7 (одна ячейка перенесена) и строками истории. Для проверки хватит
+      `diff c6f3981e… <ред.3>`. Другие правки дельты — повод для нового рассмотрения.
+
+important_nonblocking:
+  - "ESC-30: «на каждую такую строку — строка журнала» не говорит, о вставленных строках идёт речь или о всех строках `v_delete`. Предлагаю писать журнал по `INSERT … RETURNING`. Утверждения от этого не зависят: запись факта идемпотентна, у usr-W факт уже есть."
+  - "ESC-32: на базе и при реализации без новой миграции `goose.Up` от 20261025180000 — пустой проход, и проба вакуумно-зелёная. Документ это допускает (перечень охраны). Держателем Р4 для состава ESC-32 становится только при появлении миграции, это стоит назвать одной фразой в строке производителя."
+
+defaults_fixed: []
+
+confirmed:
+  - "Сценариев 24: `grep -c '^#### ESC-'` = 24, `grep -c '^| ESC-'` = 24. Производитель назван у 24 из 24."
+  - "Опора §9: в копии `sha256sum delegated-grants-stay-within-the-delegation.md` = 7512fd96…bb690fe6. Запись 7512fd96… — `revision: 3`, `verdict: APPROVED`; запись 43622b18… — редакция 2."
+  - "Помощники на месте: rewindToPreFix :70 (метод pcrWorld, gdWorld его встраивает); gdSeedTuple :278; anonSelfCheckHandler anonymous_self_check_module_verb_integration_test.go:46; moduleCtx system_class_world_integration_test.go:245; asUser list_assignable_roles_integration_test.go:30; pollRelation — метод gdWorld (:439 и далее); TestReconcile_ConvergedModuleRoleBindingIsNotRewritten module_role_implied_delete_test.go:173; BackfillRunner.convergeOne → ConvergeBinding seed/binding_converge.go:84."
+  - "Право спрашивать о чужом стоит на ListSubjects: handler.go:346 `authorizeCaller(ctx, \"\", req.GetResource())`; модульный вызывающий пропускается (caller_authority.go, шапка)."
+  - "Решения диспетчера Р1–Р4, В1 (а), В2 (а) записаны в §3 дословно по смыслу и не переоткрывались. §8: открытых вопросов нет. §7 строка 1 — ворота перезакрепления, а не DoD S1. Строку о порядке требует §6 S1 п.10."
+  - "Важные замечания круга 1, пп. 1–4, исполнены: ESC-10/ESC-20 сравниваются с authzguard.PermissionDenied(), неотличимость на слушателе — ESC-E3/E4; jwtHumanEscStepUp в ESC-E1/E4 и в посеве S2; две формы вопроса модели; Д-3 судит только строку memberships ACTIVE."
+
+constructibility:
+  seeded: 0
+  by_named_fixture: >-
+    ESC-30 и ESC-32 — по чтению писателей @ddd5681af (см. round1_execution B1); остальные «Дано»
+    без изменений с круга 1. Заказаны помощники: newEscWorld (Update, AddMember, RemoveMember,
+    AuthorizeService), посев группы, учётки и состава в пакете миграций, посев H для S2.
+  not_constructible_as_written: []
+  not_executed: >-
+    Посев сценариев не ставился: в задании нет изоляции и разрешения на посев, а testcontainers —
+    тяжёлый класс, только через слот. Прогон автора (`go test ./internal/check/ -run
+    '^TestAcceptance'`, 10 из 10) судит форму документа, а не посев сценариев, и в посев не
+    зачитывается.
+
+route_signs:
+  proto: true
+  proto_note: "только комментарии контракта (DoD п.6 — поле action, ListSubjects)"
+  schema: false
+  schema_note: накат, если появится, держит ESC-32
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  expected_actor: pointpu
+
+publication_pending:
+  required_for_sanction: false
+  expected_actor: pointpu
+  expected_mode: courier_of_agent_verdict
+  note: >-
+    Вердикт — не одобрение, события санкции нет. Тело события возврата ниже публикует курьер,
+    если так решит диспетчер.
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    «Не выполнилось» — третий исход. Событие публикует курьер. Тело:
+    acceptance-reviewer · CHANGES_REQUESTED · sha256 c6f3981e1ec6b6a9e60b7de030eb31619421bd63bd82375345b1ed31e9aff5fb
+
+attribution:
+  reviewer_kind: claude_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched:
+    - docs/specs/reviews/role-rights-stay-within-what-is-named/20039abfd0d6e89d3e6aa10f5a48d0f9a9fb5886639e090738ef83c2388883ab.yaml

@@ -128,6 +128,30 @@ BOOTSTRAP_CALLER_SAN="${KANAME_STAND_BOOTSTRAP_SAN:-spiffe://kaname.local/ns/kan
 # разбирает из него короткое имя службы (`kacho-` снимается) и сравнивает с
 # константой края — `api-gateway`. То же имя, что у стенда чарта.
 EDGE_SA="kacho-api-gateway"
+REGISTRY_WORLD="${KANAME_STAND_REGISTRY_WORLD:-0}"
+case "$REGISTRY_WORLD" in 0|1) ;; *) printf 'KANAME_STAND_REGISTRY_WORLD: expected 0 or 1\n' >&2; exit 64 ;; esac
+
+# Личность владельца ресурса, отдельно от края и бутстрапа (kaname#1033).
+registry_world_prepare() {
+  [ "$REGISTRY_WORLD" = 1 ] || return 0
+  mkdir -p "$BIN/manifests" || return 75
+  cp "$ROOT/tests/authz-fixtures/registry-own-stand-fixture.yaml" "$BIN/manifests/registry.yaml" || return 75
+  if [ ! -f "$PKI/registry.crt" ] || [ ! -f "$PKI/registry.key" ]; then
+    printf '%s\n' 'basicConstraints=critical,CA:FALSE' 'keyUsage=critical,digitalSignature' \
+      'extendedKeyUsage=clientAuth' 'subjectAltName=URI:spiffe://kaname.local/ns/kaname/sa/kacho-registry' > "$PKI/registry.ext"
+    ( umask 077
+      openssl req -newkey rsa:2048 -nodes -subj '/CN=kacho-registry' \
+        -keyout "$PKI/registry.key" -out "$PKI/registry.csr" >/dev/null 2>&1 &&
+      openssl x509 -req -in "$PKI/registry.csr" -CA "$PKI/ca.crt" -CAkey "$PKI/ca.key" \
+        -days 2 -extfile "$PKI/registry.ext" -out "$PKI/registry.crt" >/dev/null 2>&1
+    ) || { unmet "лист владельца registry не выпущен"; return 75; }
+  fi
+  openssl verify -CAfile "$PKI/ca.crt" -purpose sslclient "$PKI/registry.crt" >/dev/null 2>&1 || return 75
+  openssl x509 -in "$PKI/registry.crt" -noout -ext subjectAltName | \
+    grep -qx '    URI:spiffe://kaname.local/ns/kaname/sa/kacho-registry' || return 75
+  cmp -s <(openssl x509 -in "$PKI/registry.crt" -pubkey -noout) \
+    <(openssl pkey -in "$PKI/registry.key" -pubout 2>/dev/null) || return 75
+}
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf 'НАХОДКА: %s\n' "$*" >&2; }
@@ -275,6 +299,12 @@ stand_env() {
   # нет и не заводится, поэтому внутреннему фронту прогонщик и утверждения стенда
   # предъявляют лист края (`run.sh --internal-front-client-*`, `stand-assert.py`).
   export KANAME_AUTHN__MODULE_IDENTITIES="kaname/$EDGE_SA=edge@internal"
+  if [ "$REGISTRY_WORLD" = 1 ]; then
+    export KANAME_AUTHN__MODULE_IDENTITIES="$KANAME_AUTHN__MODULE_IDENTITIES,kaname/kacho-registry=module-writer@internal"
+    export KANAME_MANIFESTS__DIR="$BIN/manifests" KANAME_MANIFESTS__REQUIRED=true
+  else
+    unset KANAME_MANIFESTS__DIR KANAME_MANIFESTS__REQUIRED
+  fi
   # Центр личности края — внутренний центр стенда (kaname#988): тот же файл,
   # что у пула клиентских центров слушателей ниже.
   export KANAME_AUTHN__CLIENT_ISSUERS="internal=$PKI/ca.crt"
@@ -396,6 +426,9 @@ stand_env() {
   # которого страж отказывает. Предикат: `grep -n 'timeout-minutes'
   # .github/workflows/e2e-newman.yml` у шагов посева и прогона обоих заданий.
   export KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL=25m
+  # Мир registry добавляет отдельный шаг посева (5 минут), всего 30 минут —
+  # действующий потолок tokenpolicy, без ослабления проверки срока.
+  if [ "$REGISTRY_WORLD" = 1 ]; then export KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL=30m; fi
   # Потолок тела — тот же, что у соседней поверхности, несущей ОДИН токен
   # (`internal/handler/tokenintrospecthttp`, `maxTokenBytes = 16 << 10`): тело
   # обмена — форма с одним подписанным утверждением. Замер по посеву
@@ -1177,7 +1210,7 @@ k8s_memory() {
 ext_put_config() {
   local d v rc=0
   d="$(mktemp -d)" || { unmet "временный каталог посадки не создан"; return 75; }
-  ( PKI="$EXT_PKI"; stand_env
+  ( PKI="$EXT_PKI"; BIN="$EXT_BIN"; stand_env
     for v in $(compgen -e); do
       case "$v" in KANAME_STAND_*) ;; KANAME_*) printf '%s' "${!v}" > "$d/$v" ;; esac
     done ) || rc=1
@@ -1308,6 +1341,15 @@ ext_upload() {
     [ -n "$want" ] && [ "$want" = "$got" ] || { unmet "отпечаток бинаря $f в поде не совпал с собранным"; return 75; }
   done
   say "бинари доехали в под, отпечатки совпали: kaname, kaname-migrator"
+  if [ "$REGISTRY_WORLD" = 1 ]; then
+    ks -n "$EXT_NS" exec -i "$EXT_POD" -c svc -- sh -c \
+      'mkdir -p "$1/manifests" && cat > "$1/manifests/registry.yaml"' sh "$EXT_BIN" \
+      < "$BIN/manifests/registry.yaml" || return 75
+    want="$(sha256sum "$BIN/manifests/registry.yaml" | cut -d' ' -f1)"
+    got="$(ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- sha256sum "$EXT_BIN/manifests/registry.yaml" | cut -d' ' -f1)"
+    [ -n "$want" ] && [ "$want" = "$got" ] || { unmet "манифест registry не совпал с доставленным"; return 75; }
+    say "манифест registry доставлен, отпечаток совпал: $want"
+  fi
 }
 
 ext_pg_isready() {
@@ -1541,14 +1583,16 @@ ext_up() {
 }
 
 up_local() {
-  make_pki; start_pg; start_mailbox; stand_env; build_binaries; migrate; start_service
+  make_pki; registry_world_prepare || return $?
+  start_pg; start_mailbox; stand_env; build_binaries; migrate; start_service
   say "===== стенд поднят: своя база + свой УЦ, без платформы и без поставщика ====="
   listeners_report
 }
 
 up_external() {
   need_tool kubectl
-  make_pki; build_binaries; ext_up
+  make_pki; registry_world_prepare || return $?
+  build_binaries; ext_up
   say "===== стенд поднят во внешнем кластере ($EXT_NS): своя база + свой УЦ, без платформы и без поставщика ====="
   ext_listeners_report
 }
@@ -1644,10 +1688,14 @@ ext_unfold() {
 #   отчёты        команда пишет их в /work/out; машина забирает RUNNER_GLOBS (без venv,
 #                 без ключей стенда, без невычищенных отчётов newman) в --out со сверкой:
 #                 перечень «размер сумма путь» собран в pod до передачи, каждый путь
-#                 сверен на машине; неполная доставка — повтор, затем 125 с перечнем;
+#                 сверен на машине; неполная доставка — повтор ЛИШЬ недоставленного, пока
+#                 попытка прибавляет файлы (поток exec рвётся на одном и том же месте:
+#                 95 из 121 трижды подряд, kaname#1026); KANAME_STAND_RUNNER_FETCH_TRIES
+#                 попыток подряд без прибавки — конец, перечень недоставленного;
 #   код           код КОМАНДЫ; 125 — команда не исполнялась (кластер недоступен, образ не
-#                 встал, инструменты не поставились, pod исчез) либо отчёты не доставлены
-#                 целиком — «не выполнилось», а не красное;
+#                 встал, инструменты не поставились, pod исчез); 76 — команда исполнилась,
+#                 а её отчёты не доставлены целиком (в выводе — доставлено из скольких, код
+#                 команды, последняя строка отказа забора); оба — «не выполнилось», а не красное;
 #   снятие        пространство снимается ВСЕГДА (успех, падение, сигнал; SIGKILL — сроком
 #                 kacho.io/expires), затем перепись пространств задачи; ненулевой остаток
 #                 при коде 0 команды — код 1.
@@ -1661,6 +1709,8 @@ RUNNER_POD=kaname-runner
 RUNNER_DEADLINE="${KANAME_STAND_RUNNER_DEADLINE:-10800}"
 RUNNER_NODE="${KANAME_STAND_RUNNER_NODE:-20}"
 RUNNER_UNMET=125
+RUNNER_FETCH_SHORT=76
+RUNNER_FETCH_N=0 RUNNER_FETCH_M="?" RUNNER_FETCH_WHY=""
 # Корень и рабочий каталог pod — переменными ради самопроверки забора: она исполняет те
 # же тексты на каталогах-фикстурах.
 RUNNER_ROOT=/
@@ -1696,7 +1746,7 @@ exit 4
 POD
 
 # Текст pod. Ждёт исходники (/work/.go), ставит инструменты, исполняет команду в /src,
-# пишет код в /work/.rc и ждёт, пока машина заберёт отчёты (/work/.fetched).
+# пишет атомарный итог «стадия код» в /work/.rc и ждёт забора отчётов (/work/.fetched).
 read -r -d '' RUNNER_POD_SH <<'POD'
 set -uo pipefail
 unset KUBECONFIG
@@ -1714,8 +1764,10 @@ fetched() {
     sleep 2
   done
 }
-finish() { echo "$1" > /work/.rc.tmp && mv /work/.rc.tmp /work/.rc; fetched; exit "$1"; }
-unmet() { say "УСЛОВИЕ НЕ СОЗДАНО: $* — команда НЕ исполнялась (125)"; finish 125; }
+# Одна атомарная запись связывает код со стадией: «setup 125» не выдаёт себя за
+# исполненную команду с кодом 125, даже если pod станет недоступен при заборе отчётов.
+finish() { printf '%s %s\n' "$1" "$2" > /work/.rc.tmp && mv /work/.rc.tmp /work/.rc; fetched; exit "$2"; }
+unmet() { say "УСЛОВИЕ НЕ СОЗДАНО: $* — команда НЕ исполнялась (125)"; finish setup 125; }
 mkdir -p "$HOME" /work/out /work/ship /work/bin
 for _ in $(seq 1 300); do [ -e /work/.go ] && break; sleep 2; done
 [ -e /work/.go ] || { say "исходники не доставлены за 600 с"; exit 125; }
@@ -1756,7 +1808,7 @@ cd /src || unmet "каталог исходников /src"
 say "команда: $RUNNER_CMD"
 bash -c "$RUNNER_CMD"; rc=$?
 say "команда завершилась кодом $rc"
-finish "$rc"
+finish command "$rc"
 POD
 
 # Текст pod: перечень отчётов «размер сумма путь» — то, что машина обязана получить.
@@ -1781,11 +1833,19 @@ done < "$work/.fetch.files0"
 cat "$work/.manifest"
 POD
 
-# Текст pod: поток tar ровно состава перечня. Номер процесса — признак «забор идёт».
+# Текст pod: поток tar состава перечня. Третий аргумент — номера его путей (с 1, через
+# запятую), которые машине ещё не доставлены; пусто — все. Номера, а не пути: доводы exec
+# идут адресом запроса к API, и путь в них — лишняя длина и лишний разбор. Номер
+# процесса — признак «забор идёт».
 read -r -d '' RUNNER_TAR_SH <<'POD'
 cd "$1" || exit 1
 echo $$ > "$2/.fetching.pid"
-exec tar -c --null --verbatim-files-from -T "$2/.fetch.files0"
+[ -n "${3:-}" ] || exec tar -c --null --verbatim-files-from -T "$2/.fetch.files0"
+declare -A want=(); IFS=, read -r -a ix <<< "$3"
+for k in "${ix[@]}"; do [[ "$k" =~ ^[1-9][0-9]*$ ]] || exit 1; want[$k]=1; done
+i=0
+while IFS= read -r -d '' p; do i=$((i + 1)); [ -z "${want[$i]:-}" ] || printf '%s\0' "$p"; done < "$2/.fetch.files0" > "$2/.fetch.again0" || exit 1
+exec tar -c --null --verbatim-files-from -T "$2/.fetch.again0"
 POD
 
 runner_warn() { printf 'раннер: %s\n' "$*" >&2; }
@@ -1808,47 +1868,58 @@ runner_exec() { local ns="$1"; shift; ks -n "$ns" exec "$RUNNER_POD" -c run -- "
 
 # runner_fetch ПРОСТРАНСТВО КАТАЛОГ — отчёты из pod со сверкой полноты. Перечень собран в
 # pod до передачи; после каждой попытки каждый его путь сверяется по размеру и сумме.
-# Неполная доставка — повтор (KANAME_STAND_RUNNER_FETCH_TRIES, умолчание 3); не сошлось и
-# после — код 1 и перечень недоставленного. Исход печатается всегда: «доставлено N из M».
+# Неполная доставка — повтор ЛИШЬ недоставленного: поток exec рвётся на одном и том же месте,
+# и повтор всего состава упирался в тот же обрыв (95 из 121 трижды, kaname#1026). Попытки идут,
+# пока прибавляют файлы; KANAME_STAND_RUNNER_FETCH_TRIES (умолчание 3) подряд без прибавки —
+# код 1 и перечень недоставленного. Исход печатается всегда: «доставлено N из M»; для
+# вызывающего — RUNNER_FETCH_N, RUNNER_FETCH_M и RUNNER_FETCH_WHY (последняя строка отказа).
 runner_fetch() {
-  local ns="$1" out="$2" tries="${KANAME_STAND_RUNNER_FETCH_TRIES:-3}" man line path f size sum try n=0 m=0 prc xrc
-  local -a globs lost=() st
-  [[ "$tries" =~ ^[1-9][0-9]?$ ]] || { runner_warn "KANAME_STAND_RUNNER_FETCH_TRIES=«$tries» — не число 1..99"; return 1; }
+  local ns="$1" out="$2" tries="${KANAME_STAND_RUNNER_FETCH_TRIES:-3}" man line path f size sum try=0 idle=0 prev k n=0 m=0 prc xrc
+  local -a globs lost=() again=() st
+  RUNNER_FETCH_N=0 RUNNER_FETCH_M="?" RUNNER_FETCH_WHY=""
+  [[ "$tries" =~ ^[1-9][0-9]?$ ]] || { RUNNER_FETCH_WHY="KANAME_STAND_RUNNER_FETCH_TRIES=«$tries» — не число 1..99"; runner_warn "$RUNNER_FETCH_WHY"; return 1; }
   man="$out/.manifest"
   read -r -a globs <<< "$RUNNER_GLOBS"
   runner_exec "$ns" bash -c "$RUNNER_MANIFEST_SH" manifest "$RUNNER_ROOT" "$RUNNER_WORK" "${globs[@]}" > "$man" ||
-    { runner_warn "перечень отчётов в pod не собран — доставку сверить не с чем"; return 1; }
+    { RUNNER_FETCH_WHY="перечень отчётов в pod не собран — доставку сверить не с чем"; runner_warn "$RUNNER_FETCH_WHY"; return 1; }
   while IFS= read -r line; do
-    [[ "$line" =~ ^[0-9]+\ [0-9a-f]{64}\ .+$ ]] || { runner_warn "перечень pod не в форме «размер сумма путь»: «$line»"; return 1; }
+    [[ "$line" =~ ^[0-9]+\ [0-9a-f]{64}\ .+$ ]] || { RUNNER_FETCH_WHY="перечень pod не в форме «размер сумма путь»: «$line»"; runner_warn "$RUNNER_FETCH_WHY"; return 1; }
     path="${line#* * }"
-    case "/$path/" in //*|*/../*) runner_warn "путь перечня pod вне каталога отчётов: «$path»"; return 1 ;; esac
+    case "/$path/" in //*|*/../*) RUNNER_FETCH_WHY="путь перечня pod вне каталога отчётов: «$path»"; runner_warn "$RUNNER_FETCH_WHY"; return 1 ;; esac
     m=$((m + 1))
   done < "$man"
+  RUNNER_FETCH_M="$m"
   : > "$out/.fetched.list"
   if [ "$m" -eq 0 ]; then
     say "отчёты раннера: в pod файлов по шаблонам $RUNNER_GLOBS — 0, доставлено 0 из 0"
     return 0
   fi
-  for try in $(seq 1 "$tries"); do
-    while IFS= read -r line; do rm -f -- "$out/${line#* * }"; done < "$man"
-    runner_exec "$ns" bash -c "$RUNNER_TAR_SH" fetch "$RUNNER_ROOT" "$RUNNER_WORK" | tar -x -C "$out" 2> "$out/.fetch.err"
+  while :; do
+    try=$((try + 1)); prev="$n"
+    # Недоставленное прежней попытки (в первой — ничего) снимается: обрыв оставляет обрезок.
+    for path in "${lost[@]}"; do rm -f -- "$out/$path"; done
+    runner_exec "$ns" bash -c "$RUNNER_TAR_SH" fetch "$RUNNER_ROOT" "$RUNNER_WORK" "$(IFS=,; printf '%s' "${again[*]}")" | tar -x -C "$out" 2> "$out/.fetch.err"
     st=("${PIPESTATUS[@]}"); prc="${st[0]}"; xrc="${st[1]}"
-    n=0; lost=(); : > "$out/.fetched.list"
+    n=0; k=0; lost=(); again=(); : > "$out/.fetched.list"
     while IFS= read -r line; do
-      read -r size sum _ <<< "$line"; path="${line#* * }"; f="$out/$path"
+      k=$((k + 1)); read -r size sum _ <<< "$line"; path="${line#* * }"; f="$out/$path"
       if [ -f "$f" ] && [ ! -L "$f" ] && [ "$(stat -c %s -- "$f")" = "$size" ] && [ "$(sha256sum < "$f" | cut -d' ' -f1)" = "$sum" ]; then
         n=$((n + 1)); printf '%s\n' "$path" >> "$out/.fetched.list"
       else
-        lost+=("$path")
+        lost+=("$path"); again+=("$k")
       fi
     done < "$man"
+    RUNNER_FETCH_N="$n"
     if [ "$n" -eq "$m" ]; then
-      say "отчёты раннера: доставлено $n из $m (размер и сумма каждого сверены с перечнем pod; попытка $try из $tries) в $out"
+      say "отчёты раннера: доставлено $n из $m (размер и сумма каждого сверены с перечнем pod; попыток $try) в $out"
       return 0
     fi
-    runner_warn "отчёты: попытка $try из $tries — доставлено $n из $m (код tar в pod $prc, на машине $xrc: $(tail -n 1 "$out/.fetch.err"))$([ "$try" -lt "$tries" ] && printf ' — повтор')"
+    if [ "$n" -gt "$prev" ]; then idle=0; else idle=$((idle + 1)); fi
+    RUNNER_FETCH_WHY="$(tail -n 1 "$out/.fetch.err")"
+    runner_warn "отчёты: попытка $try — доставлено $n из $m (код tar в pod $prc, на машине $xrc: ${RUNNER_FETCH_WHY:-—})$([ "$idle" -lt "$tries" ] && printf ' — повтор недоставленного (%s)' "${#lost[@]}")"
+    [ "$idle" -lt "$tries" ] || break
   done
-  runner_warn "ОТЧЁТЫ ДОСТАВЛЕНЫ НЕПОЛНО: $n из $m после $tries попыток; недоставлено либо расходится с перечнем pod (${#lost[@]}):"
+  runner_warn "ОТЧЁТЫ ДОСТАВЛЕНЫ НЕПОЛНО: $n из $m после $try попыток, из них $tries подряд без прибавки; недоставлено либо расходится с перечнем pod (${#lost[@]}):"
   printf '  %s\n' "${lost[@]}" >&2
   return 1
 }
@@ -1995,9 +2066,10 @@ runner_on_signal() {
 }
 
 # runner_main [--out КАТАЛОГ] [--ship ФАЙЛ]… -- КОМАНДА… — раздел выше. Код — код
-# команды; 125 — не исполнялась; 64 — вызов неверен; 1 — пространство уже есть.
+# команды; 125 — не исполнялась; 76 — исполнилась, отчёты доставлены неполно; 64 — вызов
+# неверен; 1 — пространство уже есть.
 runner_main() {
-  local sha url repo gov kver image objs mark mrc rc="" phase miss=0 fetch=0 t f base want got
+  local sha url repo gov kver image objs mark mrc rc="" stage="" outcome phase miss=0 fetch=0 t f base want got
   local -A seen=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2075,9 +2147,11 @@ runner_main() {
   ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- touch /work/.go || { unmet "pod не принял сигнал старта"; exit "$RUNNER_UNMET"; }
   ks -n "$EXT_NS" logs -f "pod/$RUNNER_POD" -c run & RUNNER_LOGS=$!
   while :; do
-    rc="$(ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- cat /work/.rc 2>/dev/null)"
-    [[ "$rc" =~ ^[0-9]+$ ]] && break
-    rc=""
+    outcome="$(ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- cat /work/.rc 2>/dev/null)"
+    if [[ "$outcome" =~ ^(setup|command)\ (0|[1-9][0-9]{0,2})$ ]] && [ "${BASH_REMATCH[2]}" -le 255 ]; then
+      stage="${BASH_REMATCH[1]}"; rc="${BASH_REMATCH[2]}"; break
+    fi
+    rc=""; stage=""
     phase="$(kc -n "$EXT_NS" get pod "$RUNNER_POD" -o 'jsonpath={.status.phase}' 2>/dev/null)"
     case "$phase" in
       Running|Pending) miss=0 ;;
@@ -2091,7 +2165,14 @@ runner_main() {
   for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$RUNNER_LOGS" 2>/dev/null || break; sleep 1; done
   kill "$RUNNER_LOGS" 2>/dev/null; wait "$RUNNER_LOGS" 2>/dev/null; RUNNER_LOGS=""
   [ -n "$rc" ] || { runner_explain; unmet "кода команды из pod нет — команда не исполнилась до конца"; exit "$RUNNER_UNMET"; }
-  [ "$fetch" -eq 0 ] || { unmet "команда в pod завершилась кодом $rc, но её отчёты доставлены неполно (выше) — вердикт по ним не читается"; exit "$RUNNER_UNMET"; }
+  # Стадия прочитана вместе с кодом ДО забора: численный код 125 сам по себе ничего
+  # не говорит об исполнении. Setup остаётся 125 при любом исходе доставки.
+  [ "$stage" = command ] || { unmet "подготовка pod завершилась кодом $rc до команды"; exit "$RUNNER_UNMET"; }
+  # Команда исполнилась, отчёты неполны: исход команды назван, но вердикт по отчётам не
+  # читается — «не выполнилось» своим кодом, а не 125 «команда не исполнялась».
+  [ "$fetch" -eq 0 ] || {
+    runner_warn "НЕ ВЫПОЛНИЛОСЬ: отчёты доставлены неполно — доставлено $RUNNER_FETCH_N из $RUNNER_FETCH_M при коде команды $rc; отказ забора: «${RUNNER_FETCH_WHY:-—}»; вердикт по отчётам не читается — код $RUNNER_FETCH_SHORT"
+    exit "$RUNNER_FETCH_SHORT"; }
   say "раннер: команда в pod завершилась кодом $rc, отчёты — $RUNNER_OUT"
   exit "$rc"
 }
@@ -2118,6 +2199,29 @@ runner_main() {
 # Отсюда запрет на слово-близнец: у исхода 75 в выводе не должно быть «НАХОДКА»,
 # у исхода 1 — «УСЛОВИЕ НЕ СОЗДАНО». Кода без текста мало: перепутать классы можно
 # и сохранив код.
+if [ "${1:-}" = "--registry-self-test" ]; then
+  registry_tmp="$(mktemp -d)" || exit 75
+  trap 'rm -rf "$registry_tmp"' EXIT
+  PKI="$registry_tmp/pki"; BIN="$registry_tmp/bin"; RUNDIR="$registry_tmp/run"
+  WRAPKEY_FILE="$RUNDIR/wrapping.key"; BOOTSTRAP_KEY_FILE="$RUNDIR/bootstrap-sa.key"
+  SECOND_FACTOR_KEY_FILE="$RUNDIR/second-factor.key"
+  REGISTRY_WORLD=1
+  make_pki
+  registry_world_prepare || exit 1
+  stand_env
+  [ "$KANAME_AUTHN__MODULE_IDENTITIES" = "kaname/$EDGE_SA=edge@internal,kaname/kacho-registry=module-writer@internal" ] || exit 1
+  [ "$KANAME_MANIFESTS__DIR" = "$BIN/manifests" ] && [ "$KANAME_MANIFESTS__REQUIRED" = true ] || exit 1
+  cmp "$ROOT/tests/authz-fixtures/registry-own-stand-fixture.yaml" "$BIN/manifests/registry.yaml" || exit 1
+  cp "$PKI/edge.crt" "$PKI/registry.crt"
+  if registry_world_prepare; then fail "чужой лист принят владельцем registry"; exit 1; fi
+  REGISTRY_WORLD=0
+  stand_env
+  [ "$KANAME_AUTHN__MODULE_IDENTITIES" = "kaname/$EDGE_SA=edge@internal" ] || exit 1
+  [ -z "${KANAME_MANIFESTS__DIR:-}${KANAME_MANIFESTS__REQUIRED:-}" ] || exit 1
+  say 'registry profile self-test: passed=5 failed=0'
+  exit 0
+fi
+
 if [ "${1:-}" = "--self-test" ]; then
     # Подставной слушатель — единственное, что самопроверке нужно извне. Требование
     # честное: тремя соседними самопроверками этого процесса python3 уже нужен, и
@@ -2594,9 +2698,17 @@ case "$line" in
   *"get pod kaname-own"*"--ignore-not-found"*) [ -f "$S/pod" ] && echo pod/kaname-own; exit 0 ;;
   *"delete pod kaname-own"*) rm -f "$S/pod" ;;
   *"get pod kaname-runner"*) cat "$S/phase" 2>/dev/null || echo Running ;;
+  # Тот же атомарный итог «стадия код», что публикует finish() настоящего pod.
   *"exec "*"cat /work/.rc"*) [ -f "$S/rc" ] || exit 1; cat "$S/rc" ;;
   *"logs "*) echo "журнал службы из пода" ;;
   *"exec "*"/proc/net/tcp"*) cat "$S/proc-net-tcp" ;;
+  # `exec -i` настоящего клиента передаёт приёмнику pod поток до конца. Подставной, вышедший
+  # недочитав, ронял пишущую сторону конвейера сигналом SIGPIPE, и pipefail доставки
+  # принимал это за отказ — исход зависел от того, кто первым успел (kaname#1025).
+  *"exec -i "*)
+    cat > /dev/null
+    [ -e "$S/exec-in-fail" ] || exit 0
+    echo "gzip: stdin: not in gzip format" >&2; echo "command terminated with exit code 2" >&2; exit 2 ;;
   *) exit 0 ;;
 esac
 EOF
@@ -2778,7 +2890,7 @@ EOF
           ROOT="$R"; RUNDIR="$TMP/run-runner"; rm -rf "$RUNDIR"
           export XDG_CONFIG_HOME="$TMP/xdg-empty"; unset KACHO_REMOTE_KUBECONFIG KANAME_STAND_CONTEXT KANAME_STAND_PROFILE KANAME_STAND_EXT_NS
           IN_POD=""; export KANAME_STAND_KUBECONFIG="$TMP/kc-u--prof.yaml" KANAME_STAND_TASK=841
-          echo 0 > "$SELFTEST_KC/rc"
+          printf 'command 0\n' > "$SELFTEST_KC/rc"
           "${1:-:}"
           rc=0
           # shellcheck disable=SC2086  # доводы мира — словами
@@ -2786,13 +2898,23 @@ EOF
           grep -qE 'create -f|apply -f' "$SELFTEST_KC/calls" && echo "ЗАПИСЬ В КЛАСТЕР БЫЛА"
           exit "$rc" )
     }
-    rw_rc3()       { echo 3 > "$SELFTEST_KC/rc"; }
+    rw_rc3()       { printf 'command 3\n' > "$SELFTEST_KC/rc"; }
+    rw_setup125()  { printf 'setup 125\n' > "$SELFTEST_KC/rc"; }
+    rw_cmd125()    { printf 'command 125\n' > "$SELFTEST_KC/rc"; }
     rw_pod_gone()  { rm -f "$SELFTEST_KC/rc"; echo Failed > "$SELFTEST_KC/phase"; }
     rw_dirty()     { echo '// правка' >> "$R/go.mod"; }
     rw_unnamed()   { KANAME_STAND_KUBECONFIG=""; }
+    # Исходники больше буфера канала: пишущая сторона доставки ещё пишет, когда приёмник
+    # уже мог выйти, — подставной, не дочитавший поток, роняет доставку на каждом прогоне.
+    rw_big_src()   { head -c 262144 /dev/urandom > "$R/blob" && git -C "$R" add blob &&
+                     git -C "$R" -c user.name=t -c user.email=t@t.invalid commit -q -m blob; }
+    rw_src_refused() { : > "$SELFTEST_KC/exec-in-fail"; }
     # Забор настоящим текстом перечня и потока над «pod»-каталогом: один отчёт, каталогов
-    # шаблонов без подстановочных знаков нет — код команды доходит (kaname#940); cut
-    # обрывает поток в каждой попытке — неполная доставка, 125.
+    # шаблонов без подстановочных знаков нет — код команды доходит (kaname#940). Поток
+    # обрывается на одном и том же байте каждой попытки, как у настоящего забора
+    # (kaname#1026: 95 из 121 трижды подряд): cut — до первого отчёта, ни одна попытка не
+    # добавляет файла — 76; part — за первым отчётом из четырёх, каждая попытка добавляет по одному —
+    # все четыре доставлены, код команды доходит.
     rw_reports() {
         local pod="$TMP/runner-pod-root"; rm -rf "$pod"; mkdir -p "$pod/work/out"
         printf '{"job": "stand"}\n' > "$pod/work/out/result.json"
@@ -2803,16 +2925,36 @@ EOF
         rw_reports
         runner_exec() { shift; if [ "$4" = fetch ]; then "$@" | head -c 100; return 0; fi; "$@"; }
     }
+    rw_reports_part() {
+        local i
+        rw_reports; printf 'command 3\n' > "$SELFTEST_KC/rc"
+        for i in 1 2 3; do head -c 4096 < <(base64 -w 0 < /dev/urandom) > "$RUNNER_WORK/out/part-$i.json"; done
+        runner_exec() { shift; if [ "$4" = fetch ]; then "$@" | head -c 6000; return 0; fi; "$@"; }
+    }
+    rw_reports_cut_pod_gone() { rw_reports_cut; rw_pod_gone; }
+    # Один изменённый факт у близнецов: стадия атомарного итога при том же коде 125.
+    rw_reports_setup125()     { rw_reports; rw_setup125; }
+    rw_reports_cmd125()       { rw_reports; rw_cmd125; }
+    rw_reports_cut_setup125() { rw_reports_cut; rw_setup125; }
+    rw_reports_cut_cmd125()   { rw_reports_cut; rw_cmd125; }
     rw_ns_exists() { echo own > "$SELFTEST_KC/ns/t841-kaname-own"; }
     world_runner_ok()        { runner_world; }
     world_runner_rc3()       { runner_world rw_rc3; }
     world_runner_pod_gone()  { runner_world rw_pod_gone; }
     world_runner_dirty()     { runner_world rw_dirty; }
     world_runner_unnamed()   { runner_world rw_unnamed; }
+    world_runner_big_src()   { runner_world rw_big_src; }
+    world_runner_src_refused() { runner_world rw_src_refused; }
     world_runner_ns_exists() { runner_world rw_ns_exists; }
     world_runner_no_cmd()    { ( SELFTEST_RUNNER_ARGS=""; runner_world ); }
     world_runner_reports()     { runner_world rw_reports; }
     world_runner_reports_cut() { runner_world rw_reports_cut; }
+    world_runner_reports_part() { runner_world rw_reports_part; }
+    world_runner_reports_cut_pod_gone() { runner_world rw_reports_cut_pod_gone; }
+    world_runner_reports_setup125()     { runner_world rw_reports_setup125; }
+    world_runner_reports_cmd125()       { runner_world rw_reports_cmd125; }
+    world_runner_reports_cut_setup125() { runner_world rw_reports_cut_setup125; }
+    world_runner_reports_cut_cmd125()   { runner_world rw_reports_cut_cmd125; }
 
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
@@ -2989,7 +3131,7 @@ EOF
 
     echo "--- ось 13: раннер — отчёты сверены с перечнем pod, лишнее машине не уходит"
     assert 0  "(−) целый поток — доставлено 3 из 3, ни ключа, ни venv, ни сырого отчёта" world_fetch_whole "доставлено 3 из 3" "размер и сумма каждого сверены" "ЗАБРАНО ЛИШНЕЕ"
-    assert 1  "(+) поток оборван в каждой попытке — неполно, с перечнем"     world_fetch_cut "ОТЧЁТЫ ДОСТАВЛЕНЫ НЕПОЛНО" "попытка 1 из 2" "доставлено 3 из 3"
+    assert 1  "(+) поток оборван в каждой попытке — неполно, с перечнем"     world_fetch_cut "ОТЧЁТЫ ДОСТАВЛЕНЫ НЕПОЛНО" "попытка 2 — доставлено" "доставлено 3 из 3"
     assert 0  "(−) каталогов шаблонов нет — не отчёт, доставлено 1 из 1"     world_fetch_absent "доставлено 1 из 1" "размер и сумма каждого сверены" "перечень отчётов в pod не собран"
 
     echo "--- ось 14: стенд изнутри pod раннера — лишь своё пространство, пространств не заводит"
@@ -3003,12 +3145,21 @@ EOF
     assert 0  "(−) команда pod 0 — код 0, пространство снято, перепись 0"    world_runner_ok "раннер: код 0" "задачи 841 во внешнем кластере: 0" "УСЛОВИЕ НЕ СОЗДАНО"
     assert 3  "(+) команда pod 3 — код 3, пространство снято всё равно"      world_runner_rc3 "раннер: код 3" "задачи 841 во внешнем кластере: 0" "УСЛОВИЕ НЕ СОЗДАНО"
     assert 125 "(+) pod вышел без кода — 125, не красное"                    world_runner_pod_gone "кода команды из pod нет" "задачи 841 во внешнем кластере: 0" "раннер: код 0"
+    assert 0  "(−) исходники больше буфера канала — доставлены, код 0"      world_runner_big_src "раннер: код 0" "-" "в pod не доставлены"
+    assert 125 "(+) приёмник исходников в pod отказал — 125, не красное"     world_runner_src_refused "в pod не доставлены" "задачи 841 во внешнем кластере: 0" "раннер: код 0"
     assert 64 "(+) правка вне коммита — 64 до записи"                        world_runner_dirty "правки вне коммита" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
     assert 125 "(+) кубконфиг не назван — 125, локального подъёма нет"      world_runner_unnamed "pod раннеру ставить негде" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
     assert 1  "(+) пространство уже есть — 1 до записи"                      world_runner_ns_exists "уже есть" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
     assert 64 "(+) команда не названа — 64 до записи"                        world_runner_no_cmd "команда не названа" "-" "ЗАПИСЬ В КЛАСТЕР БЫЛА"
     assert 0  "(−) команда 0, отчёт забран перечнем pod — код 0"            world_runner_reports "доставлено 1 из 1" "раннер: команда в pod завершилась кодом 0" "УСЛОВИЕ НЕ СОЗДАНО"
-    assert 125 "(+) команда 0, забор неполон — 125, не зелёное"             world_runner_reports_cut "доставлены неполно" "задачи 841 во внешнем кластере: 0" "раннер: команда в pod завершилась кодом 0"
+    assert 3  "(−) поток забора рвётся за первым отчётом — повтор недоставленного, 4 из 4, код команды" world_runner_reports_part "доставлено 4 из 4" "раннер: команда в pod завершилась кодом 3" "НЕПОЛНО"
+    assert 76 "(+) поток забора рвётся в каждой попытке до отчёта — 76, не 125" world_runner_reports_cut "доставлено 0 из 1 при коде команды 0" "отказ забора: «tar:" "раннер: команда в pod завершилась кодом 0"
+    assert 76 "(+) тот же обрыв — пространство снято, код 76"                  world_runner_reports_cut "задачи 841 во внешнем кластере: 0" "раннер: код 76" "раннер: код 125"
+    assert 125 "(+) pod вышел без кода, забор оборван — 125, не 76"           world_runner_reports_cut_pod_gone "кода команды из pod нет" "-" "НЕ ВЫПОЛНИЛОСЬ: отчёты"
+    assert 125 "(+) setup 125, отчёт забран — команда не исполнялась"          world_runner_reports_setup125 "подготовка pod завершилась кодом 125 до команды" "доставлено 1 из 1" "раннер: команда в pod завершилась"
+    assert 125 "(+) setup 125 и тот же обрыв — не подменяется на 76"             world_runner_reports_cut_setup125 "подготовка pod завершилась кодом 125 до команды" "задачи 841 во внешнем кластере: 0" "раннер: код 76"
+    assert 125 "(−) настоящая команда 125 и полный отчёт — код команды 125"     world_runner_reports_cmd125 "раннер: команда в pod завершилась кодом 125" "доставлено 1 из 1" "подготовка pod завершилась"
+    assert 76 "(+) настоящая команда 125 и тот же обрыв — неполные отчёты 76"   world_runner_reports_cut_cmd125 "доставлено 0 из 1 при коде команды 125" "задачи 841 во внешнем кластере: 0" "подготовка pod завершилась"
 
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"

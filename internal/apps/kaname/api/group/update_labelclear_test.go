@@ -165,6 +165,9 @@ func (w *lcgGrpWtr) Update(_ context.Context, g domain.Group, mask []string) (do
 }
 func (w *lcgGrpWtr) Delete(context.Context, domain.GroupID) error        { return nil }
 func (w *lcgGrpWtr) AddMember(context.Context, domain.GroupMember) error { return nil }
+func (w *lcgGrpWtr) RequireMemberOfGroupAccount(context.Context, domain.GroupMember) error {
+	return nil
+}
 func (w *lcgGrpWtr) RemoveMember(context.Context, domain.GroupID, domain.SubjectType, domain.SubjectID) error {
 	return nil
 }

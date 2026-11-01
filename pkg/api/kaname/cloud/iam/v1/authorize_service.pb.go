@@ -101,10 +101,11 @@ type AuthorizeCheckRequest struct {
 	Subject string `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
 	// Resource the action is being checked against.
 	Resource *ResourceRef `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
-	// Permission string in `<domain>.<resource>.<verb>` form
-	// ("vpc.networks.create"). Resolved to an FGA relation server-side
-	// when `required_relation` is empty (verb → relation: get/list → viewer,
-	// create/update → editor, delete → admin). 1-128 chars.
+	// Право в форме `<domain>.<resource>.<verb>` ("vpc.networks.create"),
+	// 1–128 символов. При пустом required_relation сервер выводит отношение:
+	// get/list → viewer, create/update → editor, delete → v_delete.
+	// Одно delete даёт только удаление, без яруса admin/editor/viewer
+	// и без права выдавать доступ.
 	Action string `protobuf:"bytes,3,opt,name=action,proto3" json:"action,omitempty"`
 	// Optional opaque condition-evaluation context.
 	// Reserved keys:

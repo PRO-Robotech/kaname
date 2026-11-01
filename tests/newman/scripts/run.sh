@@ -636,6 +636,7 @@ else
   # краем не создаётся; без него кейсы отвечают «условие не создано» с именем
   # переменной. Держатель посева и шага прогона — запись ведомости производителя.
   run_one "iam-grant-delegation"
+  run_one "iam-role-rights-stay-named"
   # iam-permission-catalog — PermissionCatalogService.ListPermissionCatalog
   # (sub-phase G): backend-driven grantable role-rule catalog on the PUBLIC mux
   # (GET /iam/v1/permissionCatalog). Authenticated read + anonymous-deny. The CI
