@@ -230,6 +230,7 @@ MINTED_WAVE = (
     # Тот же человек церемонии — повышенным уровнем, и аккаунт, которым он владеет
     # (личный аккаунт регистрации: известный id, не зависящий от порядка коллекций).
     "jwtHumanCeremonyStepUp", "ceremonyAccountId",
+    "jwtHumanGroupCeremony", "ceremonyGroupUserId", "ceremonyGroupEmail",
     # ВТОРОЙ человек, которому на арендаторах посева не выдано ничего.
     "jwtHumanCeremonyNoBindings", "ceremonyNoBindingsUserId",
     # Человек, которого кейс ПРИГЛАШАЕТ (`iam-user.py`,
@@ -970,6 +971,14 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
                    "ceremonyAccountId": tenant["accountId"]})
     say("  ok   человек церемонии: предъявители уровней «1» и «2», личный аккаунт")
 
+    group_email, group_session, group_user = person("group")
+    group_token, _ = ceremony_bearer(stand, client, group_session, group_user, "1")
+    values.update({"jwtHumanGroupCeremony": group_token, "ceremonyGroupUserId": group_user,
+                   "ceremonyGroupEmail": group_email})
+    for identifier, credential in own_seed.require_pairings().HUMAN_PRINCIPAL_PAIRINGS.items():
+        if token_claims(values[credential]).get("sub") != values[identifier]:
+            raise Finding("групповой предъявитель церемонии не соответствует своему человеку")
+
     _, sn, nob = person("nobind")
     values["jwtHumanCeremonyNoBindings"], _ = ceremony_bearer(stand, client, sn, nob, "1")
     values["ceremonyNoBindingsUserId"] = nob
@@ -1131,6 +1140,16 @@ def run(args: argparse.Namespace) -> int:
         values = seed_wave(stand, lane, own_seed.Http(pki), own_seed.Mailbox(args.mailbox_url),
                            secrets.token_hex(4), args.email_domain)
         keys = WAVE_KEYS
+        # Аккаунт A — результат машинного посева, а не личный аккаунт человека церемонии.
+        env_values = {item["key"]: item.get("value", "")
+                      for item in json.loads(env_file.read_text())["values"]}
+        account_a = env_values.get("accountAId", "")
+        if not account_a:
+            raise Unmet("машинный посев не передал accountAId для групповой фикстуры")
+        group_boot, _ = bootstrap(stand)
+        own_seed.active_group_account_member(own_seed.Http(pki), stand.own, group_boot,
+                                            account_a, values["ceremonyGroupEmail"],
+                                            values["ceremonyGroupUserId"])
     else:
         email, password = credentials()
         values = seed(stand, lane, email, password, secrets.token_hex(4),

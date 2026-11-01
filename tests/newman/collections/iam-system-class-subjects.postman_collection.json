@@ -4643,7 +4643,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4968,7 +4968,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"

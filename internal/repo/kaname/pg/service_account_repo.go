@@ -21,6 +21,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/PRO-Robotech/corelib/db/pgfault"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/service_account"
@@ -171,7 +173,12 @@ func (w *saWriter) Insert(ctx context.Context, sa domain.ServiceAccount) (domain
 	)
 	out, err := scanSA(row)
 	if err != nil {
-		return domain.ServiceAccount{}, mapErr(err, "", string(sa.Name))
+		// Отсутствующая ссылка называет аккаунт, конфликт имени — учётку.
+		hint := string(sa.Name)
+		if fault := pgfault.Classify(err); fault.Class == pgfault.ForeignKey && fault.Constraint == "service_accounts_account_fk" {
+			hint = string(sa.AccountID)
+		}
+		return domain.ServiceAccount{}, mapErr(err, "", hint)
 	}
 	return out, nil
 }

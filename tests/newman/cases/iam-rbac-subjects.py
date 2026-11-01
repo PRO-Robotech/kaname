@@ -47,7 +47,7 @@ Test-design techniques applied:
     accessBindings[]); error text "Illegal argument subjects (must be 1..32)".
 
 Fixture dependency (tests/authz-fixtures/seed_own_stand.py — посев автономного стенда): jwtAccountAdminA,
-jwtNoBindings, accountAId, userAAAId, userAABId, userNOBId. AccessBinding subjects
+jwtNoBindings, accountAId, userAAAId, groupMemberAUserId, userNOBId. AccessBinding subjects
 must reference an EXISTING user/service_account/group in the iam DB — migration 0049
 (subject_ref_exists BEFORE INSERT/UPDATE trigger) closes the (subject_type,
 subject_id) within-service reference at the DB level (phantom-grant / delete-race,
@@ -285,7 +285,7 @@ def teardown_group(group_var, member_vars=(), auth="jwtAccountAdminA"):
     THE LEAK THIS CLOSES (proven on the live stand, not deduced): subject userAAB holds no
     AccessBinding on account A at all, yet InternalIAMService.Check answers allowed — the
     sole carrier is the group `rbac-e31-grp-*` that THIS suite creates in the SHARED
-    {{accountAId}}, adds {{userAABId}} to, and binds ROLE_VIEW on. The group and its
+    {{accountAId}}, adds {{groupMemberAUserId}} to, and binds ROLE_VIEW on. The group and its
     membership were never removed, so every run left one more standing viewer path for a
     shared fixture subject; the vpc AUTHZ-*-LS-OWN-AAB leak-guards (which model AAB as
     account-B-only) then fail deterministically on the NEXT run — five of them did, while
@@ -860,7 +860,7 @@ CASES.append(Case(
 # ---------------------------------------------------------------------------
 # RBACSUBJ-EXPAND-GROUP-OK: ExpandAccess resolves a group-subject userset
 # into CONCRETE principals (the group's members). Self-contained: create a REAL
-# group, add REAL user members (userAAAId, userAABId — the group_members trigger
+# group, add REAL user members (userAAAId, groupMemberAUserId — the group_members trigger
 # requires existing users), bind a role that grants account#viewer to that group on
 # the account, then ExpandAccess (objectType=account, objectId=accountAId,
 # relation=viewer) must list the concrete member principals — NOT just the group.
@@ -881,7 +881,7 @@ CASES.append(Case(
 # `account#viewer`. So a group member NEVER resolved `account:accountAId#viewer`
 # from it (correctly — the role doesn't grant the account tier). The account owner
 # (userAAAId) still appeared via the ownership/admin path, masking the mismatch and
-# making it look like only userAABId "failed"; in fact the case-setup asked the
+# making it look like only groupMemberAUserId "failed"; in fact the case-setup asked the
 # wrong object/relation for the role under test. The product is correct: a
 # compute-scoped grant must not grant account-viewer. Fixed by binding ROLE_VIEW,
 # the role that actually grants the queried `account#viewer` relation. This is a
@@ -939,7 +939,7 @@ CASES.append(Case(
             name="add-member-aab",
             method="POST",
             path="/iam/v1/groups/{{e31GroupId}}:addMember",
-            body={"memberType": "user", "memberId": "{{userAABId}}"},
+            body={"memberType": "user", "memberId": "{{groupMemberAUserId}}"},
             auth="jwtAccountAdminA",
             test_script=[
                 *assert_status(200),
@@ -996,7 +996,7 @@ CASES.append(Case(
                 "const ec = parseInt(pm.environment.get('_expCount') || '0', 10);",
                 "const ids = (j.principals || []).map(p => p.id);",
                 "const wantA = pm.environment.get('userAAAId');",
-                "const wantB = pm.environment.get('userAABId');",
+                "const wantB = pm.environment.get('groupMemberAUserId');",
                 "const ready = (pm.response.code === 200 && ids.indexOf(wantA) !== -1 && ids.indexOf(wantB) !== -1);",
                 f"if (!ready && ec < {FGA_POLL_CAP}) {{",
                 "  pm.environment.set('_expCount', String(ec + 1));",
@@ -1012,9 +1012,9 @@ CASES.append(Case(
                 "  const ids = (j.principals || []).map(p => p.id);",
                 "  pm.expect(ids, JSON.stringify(j.principals)).to.include(pm.environment.get('userAAAId'));",
                 "});",
-                "pm.test('concrete member userAABId resolved', () => {",
+                "pm.test('concrete member groupMemberAUserId resolved', () => {",
                 "  const ids = (j.principals || []).map(p => p.id);",
-                "  pm.expect(ids, JSON.stringify(j.principals)).to.include(pm.environment.get('userAABId'));",
+                "  pm.expect(ids, JSON.stringify(j.principals)).to.include(pm.environment.get('groupMemberAUserId'));",
                 "});",
                 "pm.test('principals are concrete (no GROUP type in the result)', () => {",
                 "  const types = (j.principals || []).map(p => p.type);",
@@ -1029,7 +1029,7 @@ CASES.append(Case(
         # subsequent run. Binding first (it references the group), then membership, then the
         # group itself.
         *teardown_delete("e31AcbId"),
-        *teardown_group("e31GroupId", ("userAAAId", "userAABId")),
+        *teardown_group("e31GroupId", ("userAAAId", "groupMemberAUserId")),
     ],
 ))
 
@@ -1047,8 +1047,8 @@ CASES.append(Case(
 # member-tuple flow into OpenFGA so the Check below converges allowed=true.
 #
 # MEMBER + ROLE CHOICE — the probe must be DECISIVE, not satisfiable by another
-# path. It checks `Check(user:userAABId, viewer, account:accountAId)`:
-#   - userAABId is the owner/admin of account B, with NO independent grant on
+# path. It checks `Check(user:groupMemberAUserId, viewer, account:accountAId)`:
+#   - groupMemberAUserId has ACTIVE account-A membership, with NO independent grant on
 #     account A — so it can resolve `account:accountAId#viewer` ONLY through the
 #     group→member→binding userset. (A prior revision used userAAAId, the account-A
 #     OWNER; that Check is true via ownership regardless of the group binding — a
@@ -1089,7 +1089,7 @@ CASES.append(Case(
             ],
         ),
         poll_op_done("gmGrantGrpOpId", out_id_var="gmGrantGroupId"),
-        # Add a REAL user member (trigger enforces existence). userAABId has NO
+        # Add a REAL user member (trigger enforces existence). groupMemberAUserId has NO
         # independent grant on account A, so the Check below can only pass through
         # the group→member→binding userset — a decisive probe, not ownership.
         # The admin's `v_update` on the freshly-created group OBJECT (action
@@ -1100,7 +1100,7 @@ CASES.append(Case(
             name="add-member",
             method="POST",
             path="/iam/v1/groups/{{gmGrantGroupId}}:addMember",
-            body={"memberType": "user", "memberId": "{{userAABId}}"},
+            body={"memberType": "user", "memberId": "{{groupMemberAUserId}}"},
             auth="jwtAccountAdminA",
             expect_code=200,
             retry_on=(403,),
@@ -1143,7 +1143,7 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             pre_script=[
                 "if (pm.environment.get('_gmChkStarted') !== pm.info.requestName) { pm.environment.set('_gmChkCount', '0'); pm.environment.set('_gmChkStarted', pm.info.requestName); }",
-                "pm.environment.set('_gmChkSubj', 'user:' + pm.environment.get('userAABId'));",
+                "pm.environment.set('_gmChkSubj', 'user:' + pm.environment.get('groupMemberAUserId'));",
                 "pm.environment.set('_gmChkObj', 'account:' + pm.environment.get('accountAId'));",
                 "// InternalIAMService.Check (/iam/v1/internal/iam:check) is an Internal* RPC —",
                 "// it lives ONLY on the cluster-internal REST listener, never on the public",
@@ -1188,7 +1188,7 @@ CASES.append(Case(
         # The probe above PROVES the access is live; leaving it live after the case is what
         # made "AAB has no binding yet Check says allowed" true for every later suite.
         *teardown_delete("gmGrantAcbId"),
-        *teardown_group("gmGrantGroupId", ("userAABId",)),
+        *teardown_group("gmGrantGroupId", ("groupMemberAUserId",)),
     ],
 ))
 
@@ -1336,6 +1336,23 @@ CASES.append(Case(
         ),
     ],
 ))
+
+def _group_fixture_denied(name):
+    """ACTIVE-членство само по себе не должно давать проверяемый viewer."""
+    return Step(name=name, method="POST", path="/iam/v1/internal/iam:check",
+                auth="jwtAccountAdminA",
+                pre_script=require_env_url("ownInternalRestBaseUrl", "/iam/v1/internal/iam:check",
+                                           "isolated group subject has no independent viewer grant"),
+                body={"subjectId": "user:{{groupMemberAUserId}}", "relation": "viewer",
+                      "object": "account:{{accountAId}}"},
+                test_script=[*assert_status(200),
+                             "pm.test('membership alone grants no viewer', () => pm.expect(pm.response.json().allowed).to.eql(false));"])
+
+
+for _case in CASES:
+    if _case.id in {"RBACSUBJ-EXPAND-GROUP-OK", "RBACSUBJ-GROUP-GRANTS-MEMBER-OK"}:
+        _case.steps.insert(0, _group_fixture_denied("group-fixture-denied-before"))
+        _case.steps.append(_group_fixture_denied("group-fixture-denied-after-cleanup"))
 
 # Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
 CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "

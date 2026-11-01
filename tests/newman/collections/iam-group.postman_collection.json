@@ -3263,7 +3263,7 @@
       ]
     },
     {
-      "name": "IAM-GRP-AM-CRUD-OK — AddMember (user/userNOBId) to crudGroupId → Operation done",
+      "name": "IAM-GRP-AM-CRUD-OK — AddMember (user/groupMemberAUserId) to crudGroupId → Operation done",
       "description": "class:CRUD | priority:P0",
       "item": [
         {
@@ -3290,7 +3290,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3490,7 +3490,7 @@
       ]
     },
     {
-      "name": "IAM-GRP-AM-IDEMPOTENT-DUP — AddMember of an existing member (userNOBId) → Operation done, no error, member still present exactly once",
+      "name": "IAM-GRP-AM-IDEMPOTENT-DUP — AddMember of an existing member (groupMemberAUserId) → Operation done, no error, member still present exactly once",
       "description": "class:CRUD | priority:P1",
       "item": [
         {
@@ -3517,7 +3517,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3774,7 +3774,7 @@
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "pm.test('member present exactly once after the duplicate Add', () => {",
                   "  const ms = pm.response.json().members || [];",
-                  "  const mine = ms.filter(m => m.memberId === pm.environment.get('userNOBId'));",
+                  "  const mine = ms.filter(m => m.memberId === pm.environment.get('groupMemberAUserId'));",
                   "  pm.expect(mine.length, JSON.stringify(ms)).to.eql(1);",
                   "});"
                 ]
@@ -4017,7 +4017,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userINVId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupNonMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4090,7 +4090,7 @@
       ]
     },
     {
-      "name": "IAM-GRP-RM-CRUD-OK — RemoveMember (user/userNOBId) from crudGroupId → Operation done",
+      "name": "IAM-GRP-RM-CRUD-OK — RemoveMember (user/groupMemberAUserId) from crudGroupId → Operation done",
       "description": "class:CRUD | priority:P0",
       "item": [
         {
@@ -4117,7 +4117,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4317,7 +4317,7 @@
       ]
     },
     {
-      "name": "IAM-GRP-RM-IDEMPOTENT-NOT-MEMBER — RemoveMember of a non-member (userINVId) → Operation done, no error, membership set unchanged",
+      "name": "IAM-GRP-RM-IDEMPOTENT-NOT-MEMBER — RemoveMember of a non-member (groupNonMemberAUserId) → Operation done, no error, membership set unchanged",
       "description": "class:CRUD | priority:P1",
       "item": [
         {
@@ -4344,7 +4344,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4560,7 +4560,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userINVId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupNonMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4817,12 +4817,12 @@
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "pm.test('the non-member is still absent', () => {",
                   "  const ms = pm.response.json().members || [];",
-                  "  const inv = ms.filter(m => m.memberId === pm.environment.get('userINVId'));",
+                  "  const inv = ms.filter(m => m.memberId === pm.environment.get('groupNonMemberAUserId'));",
                   "  pm.expect(inv.length, JSON.stringify(ms)).to.eql(0);",
                   "});",
                   "pm.test('the genuine member was NOT collaterally removed', () => {",
                   "  const ms = pm.response.json().members || [];",
-                  "  const nob = ms.filter(m => m.memberId === pm.environment.get('userNOBId'));",
+                  "  const nob = ms.filter(m => m.memberId === pm.environment.get('groupMemberAUserId'));",
                   "  pm.expect(nob.length, JSON.stringify(ms)).to.eql(1);",
                   "});"
                 ]
@@ -4854,7 +4854,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5076,7 +5076,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5176,7 +5176,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userNOBId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5457,7 +5457,7 @@
                   "});",
                   "pm.test('the seeded member is present exactly once, typed', () => {",
                   "  const ms = pm.response.json().members || [];",
-                  "  const mine = ms.filter(m => m.memberId === pm.environment.get('userNOBId'));",
+                  "  const mine = ms.filter(m => m.memberId === pm.environment.get('groupMemberAUserId'));",
                   "  pm.expect(mine.length, JSON.stringify(ms)).to.eql(1);",
                   "  pm.expect(mine[0].memberType, JSON.stringify(mine[0])).to.eql('user');",
                   "});"
