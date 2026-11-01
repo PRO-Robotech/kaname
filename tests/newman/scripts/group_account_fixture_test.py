@@ -1,6 +1,6 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""#1037: групповая фикстура доказывает ACTIVE-членство без выдачи ролей."""
+"""kaname#1037: групповая фикстура доказывает ACTIVE-членство без выдачи ролей."""
 import sys
 from pathlib import Path
 

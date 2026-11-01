@@ -107,7 +107,7 @@ isolation — grant for X does not leak to Y).
 # выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
 HOME = "kaname"
 
-# #1037: групповые четыре сценария используют отдельную человеческую пару
+# kaname#1037: групповые четыре сценария используют отдельную человеческую пару
 # ceremonyGroupUserId ↔ jwtHumanGroupCeremony; ACTIVE-членство A проверяет посев.
 # Прямой пользовательский канал сохраняет ceremonyUserId ↔ jwtHumanCeremony.
 

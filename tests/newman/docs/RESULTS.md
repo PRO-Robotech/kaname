@@ -1778,7 +1778,7 @@ record; no database writes or forged claims are involved. Real stand execution
 must confirm these setup operations as well as the four cases. Registry ids are
 owned by the existing delegation seed.
 
-## #1037 — условия групповых сценариев после ESC-23
+## kaname#1037 — условия групповых сценариев после ESC-23
 
 Успешное добавление человека в группу требует ACTIVE-членства в аккаунте группы.
 Групповые фикстуры отделены от общих NOB/INV/AAB и основного человека церемонии:

@@ -1337,7 +1337,7 @@ def run(args: argparse.Namespace) -> int:
             "набора перестали быть независимы")
     step(f"и стала строкой человека: {user_inv}")
 
-    # #1037: общие NOB/INV/AAB сохраняют прежние аккаунты; группа получает своих людей.
+    # kaname#1037: общие NOB/INV/AAB сохраняют прежние аккаунты; группа получает своих людей.
     group_people = {}
     for tag, variable in (("member", "groupMemberAUserId"),
                           ("nonmember", "groupNonMemberAUserId")):
