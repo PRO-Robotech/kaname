@@ -178,7 +178,7 @@ var (
 	liveCatalogHalf = catalogHalf{
 		what:    "каталог",
 		modules: `SELECT module FROM kaname.catalog_module WHERE live`,
-		resources: `SELECT module, resource, object_type, parent_types, public_read_to_children
+		resources: `SELECT module, resource, object_type, parent_types, parent_names, writes, public_read_to_children, permanent_project
 		              FROM kaname.catalog_resource WHERE live`,
 		verbs: `SELECT module, resource, verb, per_object, COALESCE(container_parent, ''), COALESCE(container_relation, '') FROM kaname.catalog_verb WHERE live`,
 		// Преемника живая половина НЕ выбирает: у живой строки он невыразим в
@@ -187,7 +187,8 @@ var (
 		// выдачи классу решает о `public_reader` (kaname#856).
 		scanResource: func(row pgx.CollectableRow) (catalog.ResourceRow, error) {
 			var r catalog.ResourceRow
-			return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.ParentTypes, &r.PublicReadToChildren)
+			return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.ParentTypes, &r.ParentNames, &r.Writes,
+				&r.PublicReadToChildren, &r.PermanentProject)
 		},
 	}
 	// retiredCatalogHalf — СНЯТОЕ множество: `retired_at` проставлен, `live`

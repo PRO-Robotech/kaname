@@ -35,6 +35,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
 )
 
 // newRegisterUCWithMirror builds the RegisterResource use-case backed by a real
@@ -53,8 +54,9 @@ func newRegisterUCWithMirror(t *testing.T) (*internaliam.RegisterResourceUseCase
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
-	return uc, &mirrorProbe{pool: pool}
+	return uc, &mirrorProbe{pool: pool, scene: registrationscene.Seed(t, ctx, pool)}
 }
 
 // happy path — Create compute-instance with labels → mirror row appears,
@@ -69,18 +71,18 @@ func TestRegisterResource_B01_MirrorRowAndTupleCoCommit(t *testing.T) {
 	const obj = "compute_instance:inst-abc"
 
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-P",
-		Relation:        "parent",
+		SubjectId:       "project:" + p.scene.Project,
+		Relation:        "project",
 		Object:          obj,
 		Labels:          map[string]string{"env": "dev", "team": "core"},
-		ParentProjectId: "prj-P",
-		ParentAccountId: "acc-A",
+		ParentProjectId: p.scene.Project,
+		ParentAccountId: p.scene.Account,
 	})
 	require.NoError(t, err)
 
 	prj, acc, labels := p.readMirror(t, ctx, "compute.instance", "inst-abc")
-	require.Equal(t, "prj-P", prj)
-	require.Equal(t, "acc-A", acc)
+	require.Equal(t, p.scene.Project, prj)
+	require.Equal(t, p.scene.Account, acc)
 	require.Equal(t, map[string]string{"env": "dev", "team": "core"}, labels)
 
 	// Owner-tuple co-committed in the SAME writer-tx.
@@ -96,16 +98,16 @@ func TestRegisterResource_B02_EmptyLabelsGraceful(t *testing.T) {
 	uc, p := newRegisterUCWithMirror(t)
 
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId:       "project:prj-P",
-		Relation:        "parent",
+		SubjectId:       "project:" + p.scene.Project,
+		Relation:        "project",
 		Object:          "compute_instance:inst-nolabels",
 		Labels:          map[string]string{},
-		ParentProjectId: "prj-P",
+		ParentProjectId: p.scene.Project,
 	})
 	require.NoError(t, err)
 
 	prj, _, labels := p.readMirror(t, ctx, "compute.instance", "inst-nolabels")
-	require.Equal(t, "prj-P", prj)
+	require.Equal(t, p.scene.Project, prj)
 	require.Equal(t, map[string]string{}, labels)
 }
 
@@ -123,12 +125,12 @@ func TestRegisterResource_B03_AtomicCoCommit(t *testing.T) {
 	const obj = "compute_instance:inst-atomic"
 
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
-		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P", ParentAccountId: "acc-A",
+		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: obj,
+		Labels: map[string]string{"env": "dev"}, ParentProjectId: p.scene.Project, ParentAccountId: p.scene.Account,
 	}))
 
 	prj, _, _ := p.readMirror(t, ctx, "compute.instance", "inst-atomic")
-	require.Equal(t, "prj-P", prj, "mirror present")
+	require.Equal(t, p.scene.Project, prj, "mirror present")
 	require.Equal(t, 1, p.outboxCount(t, ctx, obj), "tuple present — both committed together")
 }
 
@@ -141,8 +143,8 @@ func TestRegisterResource_B06_IdempotentMirrorUpsert(t *testing.T) {
 	uc, p := newRegisterUCWithMirror(t)
 
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-idem",
-		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P",
+		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: "compute_instance:inst-idem",
+		Labels: map[string]string{"env": "dev"}, ParentProjectId: p.scene.Project,
 	}
 	require.NoError(t, uc.Register(ctx, req))
 	require.NoError(t, uc.Register(ctx, req), "repeat must be OK (idempotent)")
@@ -174,8 +176,8 @@ func TestRegisterResource_B05_ConcurrentUpsertOneRow(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			errs[i] = uc.Register(ctx, &iamv1.RegisterResourceRequest{
-				SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-race",
-				Labels: labelSets[i%len(labelSets)], ParentProjectId: "prj-P",
+				SubjectId: "project:" + p.scene.Project, Relation: "project", Object: "compute_instance:inst-race",
+				Labels: labelSets[i%len(labelSets)], ParentProjectId: p.scene.Project,
 			})
 		}(i)
 	}
@@ -202,13 +204,13 @@ func TestRegisterResource_B07_UnregisterDeletesMirrorAndRevokesTuple(t *testing.
 	const obj = "compute_instance:inst-gone"
 
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
-		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P",
+		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: obj,
+		Labels: map[string]string{"env": "dev"}, ParentProjectId: p.scene.Project,
 	}))
 	require.Equal(t, 1, p.mirrorCount(t, ctx, "compute.instance", "inst-gone"))
 
 	require.NoError(t, uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
+		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: obj,
 	}))
 	require.Equal(t, 0, p.mirrorCount(t, ctx, "compute.instance", "inst-gone"),
 		"Unregister removes the mirror row (β-07)")
@@ -222,10 +224,10 @@ func TestRegisterResource_B07b_UnregisterAbsentIsOK(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	uc, _ := newRegisterUCWithMirror(t)
+	uc, p := newRegisterUCWithMirror(t)
 
 	require.NoError(t, uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-never",
+		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: "compute_instance:inst-never",
 	}), "unregister of absent object must be OK (β-07/D-β5)")
 }
 
@@ -241,7 +243,7 @@ func TestRegisterResource_B09_LegacyCallerEmptyMirror(t *testing.T) {
 	const obj = "compute_instance:inst-legacy"
 
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
+		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: obj,
 		// no labels / parent_* — old compute
 	}))
 
@@ -267,8 +269,8 @@ func TestRegisterResource_B15_InvalidLabelsRejected(t *testing.T) {
 	before := p.totalRows(t, ctx)
 
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: obj,
-		Labels: map[string]string{"ENV": "x"}, ParentProjectId: "prj-P",
+		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: obj,
+		Labels: map[string]string{"ENV": "x"}, ParentProjectId: p.scene.Project,
 	})
 	require.Error(t, err)
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "invalid label key → InvalidArgument (β-15)")
@@ -287,8 +289,8 @@ func TestRegisterResource_B16_MirrorShapeAndDanglingSurvives(t *testing.T) {
 	uc, p := newRegisterUCWithMirror(t)
 
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-P", Relation: "parent", Object: "compute_instance:inst-orphan",
-		Labels: map[string]string{"env": "dev"}, ParentProjectId: "prj-P", ParentAccountId: "acc-A",
+		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: "compute_instance:inst-orphan",
+		Labels: map[string]string{"env": "dev"}, ParentProjectId: p.scene.Project, ParentAccountId: p.scene.Account,
 	}))
 
 	// Column set is exactly the tenant-facing projection (no infra columns).
@@ -299,12 +301,18 @@ func TestRegisterResource_B16_MirrorShapeAndDanglingSurvives(t *testing.T) {
 
 	// Stale row survives without an Unregister: re-reading is fine.
 	prj, _, _ := p.readMirror(t, ctx, "compute.instance", "inst-orphan")
-	require.Equal(t, "prj-P", prj)
+	require.Equal(t, p.scene.Project, prj)
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-type mirrorProbe struct{ pool *pgxpool.Pool }
+// mirrorProbe — чтения проб и проект сцены: родителя регистрации kaname выводит
+// из своих данных (kaname#982), и регистрация под проектом, которого в kaname
+// нет, отвергается.
+type mirrorProbe struct {
+	pool  *pgxpool.Pool
+	scene registrationscene.Scene
+}
 
 func (p *mirrorProbe) readMirror(t *testing.T, ctx context.Context, objType, objID string) (prj, acc string, labels map[string]string) {
 	t.Helper()

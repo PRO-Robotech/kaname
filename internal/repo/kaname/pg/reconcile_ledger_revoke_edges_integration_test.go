@@ -66,7 +66,7 @@ func insertThinBindingSubjects(t *testing.T, ctx context.Context, repo *kanamepg
 func registerUnderProject(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fx gammaFixture, fgaObject string) {
 	t.Helper()
 	require.NoError(t, newRegisterUCWired(pool).Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:" + string(fx.prj), Relation: "parent", Object: fgaObject,
+		SubjectId: "project:" + string(fx.prj), Relation: "project", Object: fgaObject,
 		ParentProjectId: string(fx.prj), ParentAccountId: string(fx.accID),
 		SourceVersion: timestamppb.New(time.Now().Add(time.Minute)),
 	}))

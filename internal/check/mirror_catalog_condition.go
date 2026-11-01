@@ -50,11 +50,13 @@
 package check
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/PRO-Robotech/corelib/treecorpus"
@@ -124,6 +126,13 @@ func MirrorCandidateCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
 }
 
 func MirrorWritesIn(filename, src string) ([]MirrorWrite, int, error) {
+	return MirrorWritesThroughCommands(filename, src, nil)
+}
+
+// MirrorWritesThroughCommands прослеживает INSERT в представление команды до
+// его INSTEAD OF INSERT триггера. Каталог берётся из тела действующей функции,
+// а не из имени команды или обещания в комментарии вызывающего кода.
+func MirrorWritesThroughCommands(filename, src string, commands map[string]string) ([]MirrorWrite, int, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, src, 0)
 	if err != nil {
@@ -156,11 +165,20 @@ func MirrorWritesIn(filename, src string) ([]MirrorWrite, int, error) {
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}
-		if !strings.Contains(lit.Value, ResourceMirrorTable) {
+		value, unquoteErr := strconv.Unquote(lit.Value)
+		if unquoteErr != nil {
+			return true
+		}
+		for command, body := range commands {
+			if mirrorInsertsRelation(value, command) {
+				value += "\n" + body
+			}
+		}
+		if !strings.Contains(value, ResourceMirrorTable) {
 			return true
 		}
 		mentions++
-		upper := strings.ToUpper(lit.Value)
+		upper := strings.ToUpper(normalizeSpace(value))
 		owner := ""
 		for _, s := range spans {
 			if lit.Pos() >= s.from && lit.End() <= s.to {
@@ -168,7 +186,7 @@ func MirrorWritesIn(filename, src string) ([]MirrorWrite, int, error) {
 				break
 			}
 		}
-		catalog := mirrorUniqueSorted(catalogTablePattern.FindAllString(strings.ToLower(lit.Value), -1))
+		catalog := mirrorUniqueSorted(catalogTablePattern.FindAllString(strings.ToLower(value), -1))
 		for _, v := range MirrorWriteVerbs {
 			if strings.Contains(upper, strings.ToUpper(v.Verb)) {
 				writes = append(writes, MirrorWrite{
@@ -182,6 +200,239 @@ func MirrorWritesIn(filename, src string) ([]MirrorWrite, int, error) {
 		return true
 	})
 	return writes, mentions, nil
+}
+
+// Используется общая SQL-лексика: quoted names точны, комментарии и dollar
+// bodies не становятся исполняемыми DDL. Это fold известного протокола команд,
+// а не разбор произвольного SQL.
+func mirrorRelation(tokens []sqlTok, at int) (string, int) {
+	if at >= len(tokens) || tokens[at].kind != sqlTokName {
+		return "", at
+	}
+	component := func(name string) string {
+		if strings.Contains(name, ".") {
+			return strconv.Quote(name)
+		}
+		return name
+	}
+	name := component(tokens[at].name)
+	at++
+	if at+1 < len(tokens) && tokens[at].op == '.' && tokens[at+1].kind == sqlTokName {
+		name += "." + component(tokens[at+1].name)
+		at += 2
+	}
+	return name, at
+}
+
+// An unqualified mutation may resolve to the tracked schema through search_path.
+// Refuse that ambiguity; another explicitly qualified schema is unrelated.
+func mirrorDependencyMatches(name, tracked string) bool {
+	if name == tracked {
+		return true
+	}
+	return name != "" && !strings.Contains(name, ".") && strings.HasSuffix(tracked, "."+name)
+}
+
+func mirrorInsertsRelation(sql, relation string) bool {
+	tokens := sqlTokens(sql)
+	for i := 0; i+2 < len(tokens); i++ {
+		if tokens[i].name == "insert" && tokens[i+1].name == "into" {
+			name, _ := mirrorRelation(tokens, i+2)
+			if name == relation {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type mirrorCommandBinding struct {
+	relation string
+	trigger  string
+	function string
+}
+
+// MirrorCommandBodies сводит исполняемые операторы в порядке миграций.
+// Непрочитанная функция или неподдержанная смена зависимости — отказ.
+func MirrorCommandBodies(upSections []string) (map[string]string, error) {
+	functions := map[string]string{}
+	bindings := map[string]mirrorCommandBinding{}
+	for _, section := range upSections {
+		tokens := sqlTokens(section)
+		for len(tokens) > 0 {
+			end := 0
+			for end < len(tokens) && tokens[end].op != ';' {
+				end++
+			}
+			statement := tokens[:end]
+			if end < len(tokens) {
+				end++
+			}
+			tokens = tokens[end:]
+			if len(statement) == 0 {
+				continue
+			}
+			if err := mirrorFoldStatement(statement, functions, bindings); err != nil {
+				return nil, err
+			}
+		}
+	}
+	commands := map[string]string{}
+	for _, key := range mirrorSortedBindingKeys(bindings) {
+		binding := bindings[key]
+		body, ok := functions[binding.function]
+		if !ok {
+			return nil, fmt.Errorf("mirror command %s has unread function %s", binding.relation, binding.function)
+		}
+		commands[binding.relation] += "\n" + body
+	}
+	return commands, nil
+}
+
+func mirrorSortedBindingKeys(bindings map[string]mirrorCommandBinding) []string {
+	keys := make([]string, 0, len(bindings))
+	for key := range bindings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func mirrorFoldStatement(s []sqlTok, functions map[string]string, bindings map[string]mirrorCommandBinding) error {
+	word := func(i int) string {
+		if i < len(s) && s[i].kind == sqlTokName {
+			return s[i].name
+		}
+		return ""
+	}
+	find := func(name string) int {
+		for i := range s {
+			if word(i) == name {
+				return i
+			}
+		}
+		return -1
+	}
+	i := 1
+	replace := word(1) == "or" && word(2) == "replace"
+	if replace {
+		i = 3
+	}
+	if word(0) == "create" && word(i) == "function" {
+		name, _ := mirrorRelation(s, i+1)
+		for _, b := range bindings {
+			if name != b.function && mirrorDependencyMatches(name, b.function) {
+				return fmt.Errorf("ambiguous mirror command function definition %s", name)
+			}
+		}
+		returns, as := find("returns"), find("as")
+		if returns >= 0 && word(returns+1) == "trigger" && as >= 0 && as+1 < len(s) && s[as+1].kind == sqlTokString && len(s[as+1].readings) == 1 {
+			functions[name] = s[as+1].readings[0]
+			return nil
+		}
+		for _, b := range bindings {
+			if b.function == name {
+				return fmt.Errorf("unsupported mirror command function definition %s", name)
+			}
+		}
+		delete(functions, name)
+		return nil
+	}
+	if word(0) == "create" && word(i) == "trigger" {
+		instead, on, execute := find("instead"), find("on"), find("execute")
+		if instead < 0 || word(instead+1) != "of" || word(instead+2) != "insert" || on < 0 || execute < 0 {
+			if on >= 0 {
+				relation, _ := mirrorRelation(s, on+1)
+				for _, binding := range bindings {
+					if binding.trigger == word(i+1) && mirrorDependencyMatches(relation, binding.relation) {
+						return fmt.Errorf("unsupported mirror command trigger definition %s", relation)
+					}
+				}
+			}
+			return nil
+		}
+		relation, _ := mirrorRelation(s, on+1)
+		function, _ := mirrorRelation(s, execute+2)
+		trigger := word(i + 1)
+		if relation == "" || function == "" || trigger == "" || word(execute+1) != "function" {
+			return fmt.Errorf("unread mirror command trigger")
+		}
+		for _, b := range bindings {
+			if relation != b.relation && trigger == b.trigger && mirrorDependencyMatches(relation, b.relation) {
+				return fmt.Errorf("ambiguous mirror command trigger definition %s", relation)
+			}
+		}
+		key := relation + "/" + trigger
+		binding := mirrorCommandBinding{relation: relation, trigger: trigger, function: function}
+		if prior, ok := bindings[key]; replace || (ok && prior != binding) {
+			return fmt.Errorf("unsupported mirror command trigger replacement %s", key)
+		}
+		bindings[key] = binding
+		return nil
+	}
+	if word(0) == "create" && replace && word(i) == "view" {
+		name, _ := mirrorRelation(s, i+1)
+		for _, b := range bindings {
+			if mirrorDependencyMatches(name, b.relation) {
+				return fmt.Errorf("unsupported mirror command view replacement %s", name)
+			}
+		}
+	}
+	if word(0) != "drop" && word(0) != "alter" {
+		return nil
+	}
+	kind := word(1)
+	at := 2
+	if word(at) == "if" && word(at+1) == "exists" {
+		at += 2
+	}
+	name, _ := mirrorRelation(s, at)
+	for _, b := range bindings {
+		touched := false
+		switch kind {
+		case "function", "routine":
+			for j := at; j < len(s); {
+				n, next := mirrorRelation(s, j)
+				touched = touched || mirrorDependencyMatches(n, b.function)
+				if next > j {
+					j = next
+				} else {
+					j++
+				}
+			}
+		case "view", "table":
+			for j := at; j < len(s); {
+				n, next := mirrorRelation(s, j)
+				touched = touched || mirrorDependencyMatches(n, b.relation)
+				if next > j {
+					j = next
+				} else {
+					j++
+				}
+			}
+			// A different named trigger on this relation is unrelated.
+			if tr := find("trigger"); word(0) == "alter" && tr >= 0 && word(tr+1) != "all" && word(tr+1) != "user" && word(tr+1) != b.trigger {
+				touched = false
+			}
+		case "trigger":
+			on := find("on")
+			relation := ""
+			if on >= 0 {
+				relation, _ = mirrorRelation(s, on+1)
+			}
+			touched = name == b.trigger && mirrorDependencyMatches(relation, b.relation)
+		}
+		if touched {
+			return fmt.Errorf("unsupported %s %s of mirror command dependency %s", word(0), kind, name)
+		}
+	}
+	if kind == "function" || kind == "routine" {
+		for j := at; j < len(s); j++ {
+			n, _ := mirrorRelation(s, j)
+			delete(functions, n)
+		}
+	}
+	return nil
 }
 
 // MirrorConditionOutcome — вердикт сверки полос вместе с переписью.

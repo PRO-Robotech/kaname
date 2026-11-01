@@ -40,7 +40,7 @@ import (
 // queue reached the co-committed event.
 func TestUnregisterResource_DrivesTheRevokeInTheSameRequest(t *testing.T) {
 	rec := &smObjectReconciler{}
-	uc, txb := newRegUC(t, rec)
+	uc, txb := newStorageRevokeUC(t, rec)
 
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject:  "project:prj_owner",
@@ -61,7 +61,7 @@ func TestUnregisterResource_DrivesTheRevokeInTheSameRequest(t *testing.T) {
 // TestUnregisterResource_NilReconciler_NonFatal — an unwired reconciler leaves the
 // withdrawal on the queue-only path (the pre-existing behaviour), never an error.
 func TestUnregisterResource_NilReconciler_NonFatal(t *testing.T) {
-	uc, txb := newRegUC(t, nil)
+	uc, txb := newStorageRevokeUC(t, nil)
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_owner", relation: "project", object: "storage_volume:vol_gone",
 	}), "nil reconciler must be a non-fatal no-op")
@@ -73,12 +73,24 @@ func TestUnregisterResource_NilReconciler_NonFatal(t *testing.T) {
 // failed pass must not turn a completed withdrawal into an error the caller retries.
 func TestUnregisterResource_ReconcileError_NonFatal(t *testing.T) {
 	rec := &smObjectReconciler{err: errors.New("reconcile transient")}
-	uc, txb := newRegUC(t, rec)
+	uc, txb := newStorageRevokeUC(t, rec)
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_owner", relation: "project", object: "storage_volume:vol_gone",
 	}), "a post-commit reconcile error must not fail a committed withdrawal (queue is the backstop)")
 	require.True(t, txb.tx.committed)
 	require.Len(t, rec.snapshot(), 1)
+}
+
+// newStorageRevokeUC задаёт прежнюю иерархию только сцены снятия тома:
+// аудит читает стоящий указатель до удаления фактов объекта.
+func newStorageRevokeUC(t *testing.T, rec *smObjectReconciler) (*RegisterResourceUseCase, *smTxBeginner) {
+	t.Helper()
+	uc, txb := newRegUC(t, rec)
+	scopes := unitScopes()
+	scopes.projects["prj_owner"] = "acc_owner"
+	scopes.pointers = map[string][]string{"storage_volume:vol_gone": {"project:prj_owner"}}
+	uc.scopes = scopes
+	return uc, txb
 }
 
 // TestUnregisterResource_PureGrantWithdrawal_LeavesTheObjectAlone — withdrawing the

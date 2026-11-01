@@ -50,7 +50,10 @@ func Fingerprint(t testing.TB, ctx context.Context, pool *pgxpool.Pool) string {
 		         ':' || coalesce(retired_reason, '') ||
 		         ':' || object_type ||
 		         ':' || array_to_string(parent_types, ',') ||
-		         ':' || public_read_to_children::text
+		         ':' || array_to_string(parent_names, ',') ||
+		         ':' || array_to_string(writes, ',') ||
+		         ':' || public_read_to_children::text ||
+		         ':' || permanent_project::text
 		    FROM kaname.catalog_resource
 		  UNION ALL
 		  SELECT 'v:' || module || '.' || resource || '.' || verb || ':' || live::text ||

@@ -48,6 +48,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
 )
 
 // newRegisterUC builds the RegisterResource use-case backed by a real pool's
@@ -67,8 +68,9 @@ func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxP
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
-	return uc, &outboxProbe{pool: pool}
+	return uc, &outboxProbe{pool: pool, scene: registrationscene.Seed(t, ctx, pool)}
 }
 
 func TestRegisterResource_A01_EnqueuesWriteTupleInTx(t *testing.T) {
@@ -82,8 +84,10 @@ func TestRegisterResource_A01_EnqueuesWriteTupleInTx(t *testing.T) {
 	const obj = "vpc_network:enp00000000000000001"
 
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-1",
-		Relation:  "parent",
+		// Указатель области — единственное, что модуль vpc пишет на сеть по
+		// политике записи посева, и под проектом, известным kaname (kaname#982).
+		SubjectId: "project:" + h.scene.Project,
+		Relation:  "project",
 		Object:    obj,
 	})
 	require.NoError(t, err)
@@ -91,8 +95,8 @@ func TestRegisterResource_A01_EnqueuesWriteTupleInTx(t *testing.T) {
 	n, et, payload := h.lastOutbox(t, ctx, obj)
 	require.Equal(t, 1, n, "exactly one outbox row enqueued")
 	require.Equal(t, "fga.tuple.write", et)
-	require.Equal(t, "project:prj-1", payload["user"])
-	require.Equal(t, "parent", payload["relation"])
+	require.Equal(t, "project:"+h.scene.Project, payload["user"])
+	require.Equal(t, "project", payload["relation"])
 	require.Equal(t, obj, payload["object"])
 
 	// Здесь стояло ещё одно утверждение — «строка ПОКА НЕ ДОСТАВЛЕНА»
@@ -111,7 +115,7 @@ func TestRegisterResource_A02_IdempotentRegister(t *testing.T) {
 
 	const obj = "vpc_network:enp00000000000000001"
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: obj,
+		SubjectId: "project:" + h.scene.Project, Relation: "project", Object: obj,
 	}
 	err := uc.Register(ctx, req)
 	require.NoError(t, err)
@@ -199,7 +203,13 @@ func TestRegisterResource_A05_InvalidArgsNoOutbox(t *testing.T) {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 // outboxProbe reads back kaname.fga_outbox rows for assertions.
-type outboxProbe struct{ pool *pgxpool.Pool }
+//
+// scene — проект пробы в kaname: родителя регистрации kaname выводит из своих
+// данных (kaname#982), и регистрация под проектом, которого нет, отвергается.
+type outboxProbe struct {
+	pool  *pgxpool.Pool
+	scene registrationscene.Scene
+}
 
 // scopedToOwnObjects — область отбора ПО СВОИМ объектам, а не «всё, кроме
 // известного посева». Пустая область запрещена: она не отбирает ничего и не

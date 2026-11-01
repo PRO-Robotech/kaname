@@ -56,8 +56,7 @@ import (
 //
 //  1. подаются ТЕ ЖЕ стейтменты, что выпускает производитель, — не их редакция
 //     и не её копия: текст объявлен ОДИН раз у него
-//     (`resource_mirror.StmtLockMirrorRow`, `.StmtVersionOnlyBump`,
-//     `.StmtInsertOrSupersede`), и
+//     (`resource_mirror.StmtRegistrationCommand`), и
 //     посевщик подаёт в пачку ЭТИ константы;
 //  2. ПОСТРОЧНАЯ СВЕРКА с производителем на малой точке: N посажено обоими
 //     путями, содержимое обеих таблиц сверено по всем колонкам. Без неё быстрый
@@ -194,57 +193,11 @@ func (s *Seeder) Queue(ctx context.Context, row MirrorRow) error {
 	}
 	version := versionOr(row.SourceVersion)
 
-	// (1) СДВИГ ВЕРСИИ и (2) ВСТАВКА ПОД УСЛОВИЕМ ПРИЁМА — операторы
-	// ПРОИЗВОДИТЕЛЯ, взятые у него, а не их редакция.
-	//
-	// Здесь стояли КОПИИ обоих, и шапка утверждала их дословность прозой.
-	// Копии разошлись молча по двум осям сразу: у полосы сдвига версии не было
-	// условия приёма (сетка сдвигала версию на типе, снятом с платформы), у
-	// полосы вставки не было имени типа словаря модели, приехавшего к
-	// производителю позже. Сверка, сажающая один набор двумя путями, этого не
-	// видит: она сравнивает СТРОКИ РЕЗУЛЬТАТА, а на живом типе они одинаковы.
-	//
-	// Тождество теперь построением: объявление одно (kacho#1890). Ответы обоих
-	// операторов посевщик по-прежнему отбрасывает — вердикт о том, легли ли
-	// строки, выносит перепись (3), и это её предмет, а не его.
-	// Цепь в словаре модели — тем же образом, каким её ниже кладут рёбра; полоса
-	// сдвига версии сверяет с ней хранимые рёбра (kaname#874).
-	edgeChain := make([]string, 0, len(row.ParentChain))
-	for _, ancestor := range row.ParentChain {
-		typ, id, ok := splitObjectRef(ancestor)
-		if !ok {
-			return fmt.Errorf("scalegrid: непонятая форма предка %q (ожидается \"<type>:<id>\")", ancestor)
-		}
-		edgeChain = append(edgeChain, edgeParentType(typ)+":"+id)
-	}
-	// Замок строки до сверки — тот же оператор, что у производителя (kaname#874):
-	// без него пачка подавала бы на один оператор меньше, чем продукт выпускает.
-	s.batch.Queue(resource_mirror.StmtLockMirrorRow, row.ObjectType, row.ObjectID)
-	s.batch.Queue(resource_mirror.StmtVersionOnlyBump,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version, edgeChain)
-	s.batch.Queue(resource_mirror.StmtInsertOrSupersede,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
-
-	edgeType := edgeObjectType(row.ObjectType)
-
-	// (3) Полная замена цепи: сначала снять.
-	s.batch.Queue(
-		`DELETE FROM kaname.resource_parent_edge
-		  WHERE object_type = $1 AND object_id = $2`,
-		edgeType, row.ObjectID)
-
-	// (4) …затем положить, по ребру на предка.
-	for i, ancestor := range row.ParentChain {
-		typ, id, ok := splitObjectRef(ancestor)
-		if !ok {
-			return fmt.Errorf("scalegrid: непонятая форма предка %q (ожидается \"<type>:<id>\")", ancestor)
-		}
-		s.batch.Queue(
-			`INSERT INTO kaname.resource_parent_edge
-			   (object_type, object_id, parent_type, parent_id, depth, source_version, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, now())`,
-			edgeType, row.ObjectID, edgeParentType(typ), id, i+1, version)
-	}
+	// The same complete DB writer as UpsertTx, including source-version gating
+	// of edge replacement. There is no independent seeder edge-writing path.
+	s.batch.Queue(resource_mirror.StmtRegistrationCommand,
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID,
+		payload, version, row.ParentChain)
 
 	s.objects++
 	s.pendingObjects++
@@ -301,17 +254,4 @@ func versionOr(t time.Time) any {
 		return "-infinity"
 	}
 	return t.UTC()
-}
-
-// splitObjectRef — разбор `"<type>:<id>"` по ПЕРВОМУ двоеточию.
-func splitObjectRef(ref string) (typ, id string, ok bool) {
-	for i := 0; i < len(ref); i++ {
-		if ref[i] == ':' {
-			if i == 0 || i == len(ref)-1 {
-				return "", "", false
-			}
-			return ref[:i], ref[i+1:], true
-		}
-	}
-	return "", "", false
 }

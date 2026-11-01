@@ -691,6 +691,27 @@ $$;
 	}
 }
 
+func TestCatalogDollarBlockSelfAssignmentHasNoSeedEffect(t *testing.T) {
+	const lawful = `DO $$ BEGIN UPDATE kaname.catalog_resource cr SET project_bindings_held=cr.project_bindings_held WHERE cr.live RETURNING cr.object_type INTO v_type; END $$;`
+	for _, tc := range []struct {
+		name, body string
+		rejected   bool
+	}{
+		{"тот же атрибут той же строки", lawful, false},
+		{"другой источник", strings.Replace(lawful, "=cr.", "=other.", 1), true},
+		{"выражение", strings.Replace(lawful, "=cr.project_bindings_held", "=NOT cr.project_bindings_held", 1), true},
+		{"дополнительное присваивание", strings.Replace(lawful, " WHERE", " , live=false WHERE", 1), true},
+		{"соседняя запись", strings.Replace(lawful, " END", " UPDATE kaname.catalog_resource SET live=false WHERE live; END", 1), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, findings := catalogCorpus([]catalogSeedMigration{{Name: "probe.sql", Body: tc.body}})
+			if (len(findings) > 0) != tc.rejected {
+				t.Fatalf("находки %v, отказ ожидается %v", findings, tc.rejected)
+			}
+		})
+	}
+}
+
 // TestIAMCT114_Injection_Chain_AttributeOnlyUpdateIsKnown — правка у строк
 // ресурса только колонок, которые посев не судит (указатели и признак
 // контейнера, kaname#856), — признанная форма: находки нет. Близнец той же

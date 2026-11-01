@@ -80,8 +80,8 @@ func sac20Rows() []sac20Row {
 				return w.grpx.Delete(ctx, req)
 			})
 		}},
-		// Имя роли — `r_20h`, а не `r-20h` тела приёмки: дефис в имени роли аккаунта
-		// отвергает `roles_custom_name_check`, и близнец справа не дошёл бы до `done`.
+		// Имя `r_20h` совпадает с приёмкой после правки 2026-11-01: прежнее
+		// `r-20h` отвергалось бы `roles_custom_name_check` до успешного исхода близнеца.
 		{"h — RoleService.Create", false, func(w *sacWorld, ctx context.Context) sacOp {
 			req := &iamv1.CreateRoleRequest{AccountId: string(w.accA), Name: "r_20h",
 				Rules: []*iamv1.Rule{{Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"}}}}

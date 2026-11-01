@@ -29,6 +29,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
 )
 
 func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
@@ -48,10 +49,14 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 
+	// Проект, известный kaname: родителя регистрации kaname выводит сам
+	// (kaname#982), и под выдуманным проектом регистрация отвергается.
+	scene := registrationscene.Seed(t, ctx, pool)
 	req := &iamv1.RegisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp00000000000000002",
+		SubjectId: "project:" + scene.Project, Relation: "project", Object: "vpc_network:enp00000000000000002",
 	}
 
 	const n = 8

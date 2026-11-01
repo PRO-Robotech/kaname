@@ -6,7 +6,7 @@ package pg
 // check_value_lane_integration_test.go — полоса отказа проверки по вопросу
 // «чьё это значение» на ЖИВОЙ схеме (kaname#395).
 //
-// Две пробы:
+// Проверки:
 //
 //   - перепись: каждая живая проверка схемы (`pg_constraint`, contype 'c')
 //     подаётся переводчику, и его ответ сверяется со спецификацией
@@ -16,6 +16,8 @@ package pg
 //     (`human_sessions.ended_reason`) и ввод вызывающего
 //     (`accounts.description`). Что сервер кладёт в `TableName`,
 //     `ConstraintName` и `Detail`, здесь ЗАХВАЧЕНО, а не предположено.
+//   - происхождение наката: все четыре проверки служебной строки отвечают
+//     фиксированным отказом службы, а исправное обновление строки проходит.
 
 import (
 	"context"
@@ -163,6 +165,41 @@ func TestIntegration_CheckValueLaneOnRealServerRefusals(t *testing.T) {
 	require.True(t, stderrors.Is(mapped, iamerr.ErrInvalidArg), "значение вызывающего — полоса ввода: %v", mapped)
 	require.Equal(t, "Illegal argument description: length must be <=256", iamerr.StripSentinel(mapped))
 	require.NotContains(t, logBuf.String(), "check backstop fired", "близнец записи о рубеже не пишет")
+}
+
+// Происхождение наката формирует миграция; вызывающий не может исправить
+// отказ её четырёх проверок изменением запроса (kaname#1096).
+func TestIntegration_LineageOriginChecksAreServiceDefects(t *testing.T) {
+	pool := cvPool(t)
+	ctx := context.Background()
+	for _, test := range []struct {
+		name string
+		set  string
+	}{
+		{"registration_lineage_origin_check", "had_creator=false, had_writer=false"},
+		{"registration_lineage_origin_format_version_check", "format_version=3"},
+		{"registration_lineage_origin_singleton_check", "singleton=false"},
+		{"registration_lineage_origin_state_check", "state='invalid'"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tx, err := pool.Begin(ctx)
+			require.NoError(t, err)
+			defer func() { _ = tx.Rollback(ctx) }()
+			// Законный близнец доказывает наличие строки и исполнимость записи.
+			tag, err := tx.Exec(ctx, `UPDATE kaname.registration_lineage_origin SET state=state`)
+			require.NoError(t, err)
+			require.EqualValues(t, 1, tag.RowsAffected())
+			_, err = tx.Exec(ctx, `UPDATE kaname.registration_lineage_origin SET `+test.set)
+			var refusal *pgconn.PgError
+			require.ErrorAs(t, err, &refusal)
+			require.Equal(t, "23514", refusal.Code)
+			require.Equal(t, "registration_lineage_origin", refusal.TableName)
+			require.Equal(t, test.name, refusal.ConstraintName)
+			mapped := wrapPgErr(refusal, "RegistrationLineageOrigin", "singleton")
+			require.ErrorIs(t, mapped, iamerr.ErrInternal)
+			require.Equal(t, iamerr.ErrInternal.Error(), mapped.Error())
+		})
+	}
 }
 
 // cvRaisedByName — имена ограничений, которые живые функции схемы поднимают

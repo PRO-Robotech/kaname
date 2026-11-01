@@ -45,6 +45,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
 )
 
 // readMirrorRowT31 reads the full tenant-facing projection of a mirror row.
@@ -80,16 +81,20 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
+		kanamepg.NewRegistrationScopeReader(),
 	)
 
 	const objType, objID = "vpc.network", "net-g3"
-	const prj, acc = "prj-g3", "acc-g3"
+	// Проект, известный kaname: родителя регистрации kaname выводит сам
+	// (kaname#982), и под выдуманным проектом регистрация отвергается.
+	scene := registrationscene.Seed(t, ctx, pool)
+	prj, acc := scene.Project, scene.Account
 
 	// Given: a network registered with a label (Create-time emit) at v0.
 	v0 := time.Now().Add(-time.Minute)
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId:       "project:" + prj,
-		Relation:        "parent",
+		Relation:        "project",
 		Object:          "vpc_network:" + objID,
 		Labels:          map[string]string{"network": "treska"},
 		ParentProjectId: prj,
@@ -108,7 +113,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 	// (G-3: upsert {}, NOT UnregisterResource).
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId:       "project:" + prj,
-		Relation:        "parent",
+		Relation:        "project",
 		Object:          "vpc_network:" + objID,
 		Labels:          map[string]string{}, // empty — full removal
 		ParentProjectId: prj,

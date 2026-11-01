@@ -1,0 +1,108 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/service-account-creation-is-its-own-right.md
+  sha256: c5c7bfc3403d9b847db7f48722f2d5e858d1818e462e53f452dcfd226bf3f8f7
+  revision: current-after-constructibility-correction
+  static_status: DRAFT
+  static_status_note: >-
+    Шапка DRAFT намеренно не правлена. Вердикт относится только к указанному SHA-256. Прежние APPROVED и BLOCKED остаются вердиктами о своих редакциях.
+  base_commit: 5cfc8c3ae776a9f34d49d26e2be1e714e6b7bb11
+  base_tree: 584938dba226f2137fb33bede6e8b59816543191
+  content_commit: none
+  content_commit_note: >-
+    Рассмотрена изменённая рабочая копия документа на названной базе; она ещё не закоммичена. Отпечаток вычислен непосредственно по файлу.
+  branch: '1096'
+  task: PRO-Robotech/kaname#1096
+  related_tasks: [PRO-Robotech/kaname#1003]
+  round: 5
+  round_note: >-
+    Новый вердикт на исправленную редакцию по явному поручению диспетчера. Разрешённое пользователем сокращение порядка касается after-code review; качество контракта и привязка к отпечатку не отменены. Одобрение до кода не заявляется, дата фактическая. Проверены точный документ, его дельта после полного рассмотрения bda4d4fc и закрытие обоих блокирующих.
+  predecessor_record: docs/specs/reviews/service-account-creation-is-its-own-right/bda4d4fcc1bb29203a4677f4855a8116294518cc540aa2243b0d1f26c985da4c.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/service-account-creation-is-its-own-right.md = c5c7bfc3403d9b847db7f48722f2d5e858d1818e462e53f452dcfd226bf3f8f7. Сохранённая автором предыдущая редакция независимо проверена sha256sum: bda4d4fcc1bb29203a4677f4855a8116294518cc540aa2243b0d1f26c985da4c.
+  delta_predicate: >-
+    git diff -- docs/engineering/acceptance/service-account-creation-is-its-own-right.md независимо прочитан и побайтово совпал с диффом автора (cmp, exit 0). Дельта содержит только два исправления имён, отдельный мир каждому варианту SAC-40 и историческую пометку о правке. Then, DoD и права не менялись.
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-11-01T06:33:58Z'
+scope: >-
+  Контракт отдельного права создания служебных учёток и ведения созданного в пределах действующей выдачи, форма роли/манифеста, селектор и факт создателя, конец/восстановление выдачи, конкурентные сценарии и наборы S1/S2. Это одобрение текста контракта, не ревью SQL/Go, не зелёный результат испытаний, не подтверждение исполнения нового Given существующей пробой и не разрешение на посадку миграции без остальных проверок.
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт роли APPROVED, блокирующих 0. Внешнее событие не публиковалось; эта запись не утверждает его существования или персонального одобрения.
+premise:
+  status: confirmed
+  note: >-
+    HEAD и новый SHA-256 совпадают с заданием. Предыдущая запись bda4d4fc остаётся BLOCKED. Старые записи не редактировались, их git diff пуст.
+closed_from_previous_review:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    status: closed
+    where: docs/engineering/acceptance/service-account-creation-is-its-own-right.md:723
+    note: >-
+      SAC-20 h использует r_20h. Имя соответствует CustomRoleNameForm ^[a-z][a-z0-9_]{0,40}$ (internal/domain/types.go:100) и тому же roles_custom_name_check (internal/migrations/0001_initial.sql:2503). В таблице один payload для обеих сторон, отличается только вызывающий.
+  - id: B2
+    kind: CONSTRUCTIBILITY
+    status: closed
+    where: docs/engineering/acceptance/service-account-creation-is-its-own-right.md:866
+    note: >-
+      SAC-40 a использует r_40a; c наследует его и меняет только verbs, d наследует c и меняет только createdBySubject. Имя соответствует доменному и DB-ограничению. Каждый вариант получает свежий мир С с теми же исходными объектами и связями. Создание в c не оставляет занятого имени для d, пары a/c и c/d различаются одним проверяемым фактом.
+blocking: []
+defaults_fixed_at_review: []
+coverage:
+  scenarios: 27
+  producer_rows: 27
+  ids_equal: true
+  scenarios_without_producer: []
+  predicate: >-
+    rg -c '^#### SAC-' <subject> = 27; rg -c '^\| SAC-' <subject> = 27; rg '^#### SAC-|^\| SAC-' <subject> | cut -d ' ' -f 2 | sort | uniq -c: каждый ID встречается дважды. cmp выборок заголовков и строк производителей предыдущего и нового документов вернул 0: обе выборки сохранены побайтово.
+  ids: [SAC-01, SAC-02, SAC-03, SAC-10, SAC-11, SAC-12, SAC-13, SAC-14, SAC-15, SAC-16, SAC-20, SAC-21, SAC-22, SAC-30, SAC-31, SAC-32, SAC-33, SAC-34, SAC-35, SAC-40, SAC-41, SAC-42, SAC-E1, SAC-E2, SAC-E3, SAC-E4, SAC-E5]
+  changed_given_producer: >-
+    Производитель изолированного Given — уже названный newSACWorld, создаваемый для каждого варианта. Он определён в service_account_creator_world_integration_test.go:153, вызывает newGDWorld и строит rol-own штатным Create (строки 189–195). Основа newSCWorld вызывает setupTestDB (system_class_world_integration_test.go:99). Пример отдельного мира на вариант уже есть в SAC-20: c_narrow_integration_test.go:159–162. Новый производственный писатель или механизм ради этой клаузы не требуется.
+  scope_dod_and_questions: >-
+    Scope §1, исключения §2, производители §5, DoD S1/S2 и открытые вопросы не изменены. В1/В7 относятся к потребителю и вынесены за этот предмет; В2–В6 фиксируют решения. Новых вопросов реализации дельта не вводит.
+constructibility:
+  seeded: 0
+  executed_scenarios: 0
+  total_scenarios: 27
+  by_named_fixture:
+    - internal/apps/kaname/api/access_binding/service_account_creator_world_integration_test.go:153
+    - internal/apps/kaname/api/access_binding/grant_delegation_world_integration_test.go:144
+    - internal/apps/kaname/api/access_binding/system_class_world_integration_test.go:93
+    - tests/authz-fixtures/seed_own_stand.py:1273
+    - tests/authz-fixtures/seed_own_stand.py:1550
+  not_constructible_as_written: []
+  not_executed: >-
+    Live-посев и 27 сценариев в этом рассмотрении не запускались: задание разрешает чтение и запись отзыва, без новых tests/Jobs. Конструируемость подтверждена названными существующими фикстурами и сверкой исправленных значений с ограничениями. Чтение не объявляется выполненным прогоном.
+important_nonblocking:
+  - kind: CONVENTION
+    where: internal/apps/kaname/api/access_binding/service_account_creator_c_narrow_integration_test.go:83
+    text: >-
+      Комментарий о r-20h в теле приёмки теперь устарел: документ уже содержит r_20h. Предмет следующей правки Go-комментария; этот отзыв код не меняет.
+  - kind: CONVENTION
+    where: internal/apps/kaname/api/access_binding/service_account_creator_e_form_integration_test.go:38
+    text: >-
+      Комментарий о r-40a в теле приёмки теперь устарел. Кроме того, нынешняя проба SAC-40 создаёт один мир в строке 43 и использует разные имена r_40a/r_40c/r_40d в строках 73–79. Она ещё не исполняет новый буквальный Given с отдельным миром каждому варианту. Одобрение контракта не подтверждает соответствие этой пробы: исполнителю нужно согласовать её изоляцию и имена с документом, сохранив точные утверждения.
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+publication_pending:
+  required_for_sanction: true
+  expected_mode: courier_of_agent_verdict
+  note: Внешнее событие нового вердикта не опубликовано.
+event: {type: issue_comment, target: PRO-Robotech/kaname#1096, "status": "performed", "published": true, role: acceptance-reviewer, subject_sha256: c5c7bfc3403d9b847db7f48722f2d5e858d1818e462e53f452dcfd226bf3f8f7, verdict: APPROVED, publication_mode: courier_of_agent_verdict, "database_id": 6554590952, "node_id": "IC_kwDOUO26pM8AAAABhq8e6A", "url": "https://github.com/PRO-Robotech/kaname/issues/1096#issuecomment-6554590952", "api_url": "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6554590952", "actor": "pointpu", "author_association": "MEMBER", "created_at": "2026-11-01T06:46:17Z", body_sha256: a5cc30d5f475f5b23f9ac67f799e6b88c7e367a849f06d49e3d2b89919cfa174}
+attribution:
+  reviewer_kind: codex_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true

@@ -1,0 +1,120 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/service-account-creation-is-its-own-right.md
+  sha256: bda4d4fcc1bb29203a4677f4855a8116294518cc540aa2243b0d1f26c985da4c
+  revision: current-after-revision-3
+  static_status: DRAFT
+  static_status_note: >-
+    Шапка документа намеренно не правлена. Историческое одобрение cd31c47c не является одобрением текущего отпечатка. Эта запись одобрения не даёт.
+  content_commit: 5cfc8c3ae776a9f34d49d26e2be1e714e6b7bb11
+  content_tree: 584938dba226f2137fb33bede6e8b59816543191
+  branch: '1096'
+  task: PRO-Robotech/kaname#1096
+  related_tasks: [PRO-Robotech/kaname#1003]
+  round: 4
+  round_note: >-
+    Новое независимое рассмотрение полного текущего текста по явному заданию диспетчера с разрешённым пользователем сокращением порядка процесса. Не утверждается одобрение до уже существовавшего кода. Старые три записи на иных отпечатках остаются неизменными; новый вердикт дан actual-now.
+  predecessor_record: docs/specs/reviews/service-account-creation-is-its-own-right/cd31c47cb19dea4163a70a4e181545c2462e0ef0a62d5f330a23f66fe14bc08f.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/service-account-creation-is-its-own-right.md = bda4d4fcc1bb29203a4677f4855a8116294518cc540aa2243b0d1f26c985da4c; git show 5dad8418cd4d7703315de01ee8ccd7acb52ad3ce:docs/engineering/acceptance/service-account-creation-is-its-own-right.md | sha256sum = cd31c47cb19dea4163a70a4e181545c2462e0ef0a62d5f330a23f66fe14bc08f.
+  delta_predicate: >-
+    git diff 5dad8418cd4d7703315de01ee8ccd7acb52ad3ce HEAD -- docs/engineering/acceptance/service-account-creation-is-its-own-right.md: один участок SAC-E3 c, r-{{runId}} заменено на r{{runId}}, добавлена честная пометка о правке после вердикта. Изменений ссылок относительно этой одобренной редакции нет. Смысл прав не изменён.
+verdict: BLOCKED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-11-01T06:23:03Z'
+scope: >-
+  Полный текущий документ: право создания служебных учёток, ведение созданного в пределах действующей выдачи, форма роли и манифеста, селектор и факт создателя, конец и восстановление выдачи, конкурентные сценарии, S1 и S2. Это не ревью SQL/Go, не вердикт прогонов и не санкция на посадку.
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: Точная текущая редакция содержит два неконструируемых положительных контроля.
+premise:
+  status: confirmed
+  note: >-
+    HEAD и SHA-256 совпали с заданием. До этого рассмотрения в каталоге приёмки были три записи на иных отпечатках, APPROVED только у cd31c47c. Посылка о возможности автоматически перенести прежнее одобрение отвергнута.
+blocking:
+  - id: B1
+    kind: CONSTRUCTIBILITY
+    scenario: SAC-20 h
+    where: docs/engineering/acceptance/service-account-creation-is-its-own-right.md:723
+    observation: >-
+      Положительный близнец от usr-A требует успешного RoleService.Create пользовательской роли с name=r-20h. Дефис запрещён действующим CustomRoleNameForm и DB CHECK roles_custom_name_check.
+    evidence:
+      - internal/domain/types.go:100
+      - internal/domain/types.go:159
+      - internal/domain/role.go:186
+      - internal/migrations/0001_initial.sql:2503
+      - internal/apps/kaname/api/access_binding/service_account_creator_c_narrow_integration_test.go:83
+    predicate: >-
+      rg -n 'r-20h|r_20h' docs/engineering/acceptance/service-account-creation-is-its-own-right.md internal/apps/kaname/api/access_binding/service_account_creator_c_narrow_integration_test.go; rg -n 'CustomRoleNameForm|roles_custom_name_check' internal/domain/types.go internal/migrations/0001_initial.sql @5cfc8c3ae776a9f34d49d26e2be1e714e6b7bb11.
+    requested_change: >-
+      Указать законное имя роли в обеих сторонах пары, сохранив отличие только вызывающим. Не расширять производственный валидатор ради литерала.
+  - id: B2
+    kind: CONSTRUCTIBILITY
+    scenario: SAC-40 c
+    where: docs/engineering/acceptance/service-account-creation-is-its-own-right.md:867
+    observation: >-
+      c наследует тело a с name=r-40a, изменяя только verbs на get, и требует успеха. Такое имя пользовательской роли запрещено тем же ограничением. Действующая проба использует r_40c и прямо объясняет замену дефисных имён; она не доказывает буквальный вход приёмки.
+    evidence:
+      - internal/domain/types.go:100
+      - internal/domain/types.go:159
+      - internal/domain/role.go:186
+      - internal/migrations/0001_initial.sql:2503
+      - internal/apps/kaname/api/access_binding/service_account_creator_e_form_integration_test.go:38
+      - internal/apps/kaname/api/access_binding/service_account_creator_e_form_integration_test.go:77
+    predicate: >-
+      sed -n '863,881p' docs/engineering/acceptance/service-account-creation-is-its-own-right.md; rg -n 'r-40|r_40' internal/apps/kaname/api/access_binding/service_account_creator_e_form_integration_test.go @5cfc8c3ae776a9f34d49d26e2be1e714e6b7bb11.
+    requested_change: >-
+      Согласовать законное имя во всех вариантах SAC-40, сохранив ровно одно отличие каждой пары. Явно определить изоляцию либо уборку положительного создания, если варианты выполняются последовательно с тем же именем.
+coverage:
+  scenarios: 27
+  producer_rows: 27
+  ids_equal: true
+  scenarios_without_producer: []
+  predicate: >-
+    rg -c '^#### SAC-' <subject> = 27; rg -c '^\| SAC-' <subject> = 27; rg '^#### SAC-|^\| SAC-' <subject> | cut -d ' ' -f 2 | sort | uniq -c: каждый из 27 ID встречается ровно дважды, один заголовок и одна строка производителя.
+  ids: [SAC-01, SAC-02, SAC-03, SAC-10, SAC-11, SAC-12, SAC-13, SAC-14, SAC-15, SAC-16, SAC-20, SAC-21, SAC-22, SAC-30, SAC-31, SAC-32, SAC-33, SAC-34, SAC-35, SAC-40, SAC-41, SAC-42, SAC-E1, SAC-E2, SAC-E3, SAC-E4, SAC-E5]
+  positive_twins: >-
+    Пары объявлены в группах A–E и S2. Две положительные стороны B1/B2 неконструируемы; полного подтверждения работоспособности пар нет.
+  scope_and_dod: >-
+    Предмет и исключения названы в §1–§2, производители в §5, DoD S1/S2 требует перечисленные сценарии, внешний кластер и уборку. Наличие этих требований не объявляет их исполненными.
+  open_questions: >-
+    В1 и В7 относятся к потребителю и вынесены за предмет §2/§7/§8. В2–В6 фиксируют решения. Этот отзыв новых решений не принимает.
+constructibility:
+  seeded: 0
+  executed_scenarios: 0
+  total_scenarios: 27
+  by_named_fixture:
+    - internal/apps/kaname/api/access_binding/service_account_creator_world_integration_test.go:153
+    - tests/authz-fixtures/seed_own_stand.py:1273
+    - tests/authz-fixtures/seed_own_stand.py:1550
+  not_constructible_as_written: [SAC-20 h, SAC-40 c]
+  not_executed: >-
+    Новые тесты/Jobs и live-посев не входили в задание; 0 из 27 сценариев запущены этим рецензентом. Чтение фикстур не является запуском. Дефекты B1/B2 подтверждены чтением домена и ограничения БД, не пробой.
+important_nonblocking:
+  - kind: FORMAT
+    text: >-
+      SAC-E3 c теперь имеет допустимое имя: gen.py:365–369 порождает runId из [a-z0-9] длиной до 11 с буквой в начале. Служебные имена учёток с дефисом принадлежат другому типу и к B1/B2 не относятся.
+route_signs:
+  proto: true
+  schema: true
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+publication_pending:
+  required_for_sanction: false
+  note: Вердикт BLOCKED; одобрения нет и публикация его не создаст.
+event: {type: issue_comment, target: PRO-Robotech/kaname#1096, "status": "performed", "published": true, role: acceptance-reviewer, subject_sha256: bda4d4fcc1bb29203a4677f4855a8116294518cc540aa2243b0d1f26c985da4c, verdict: BLOCKED, publication_mode: courier_of_agent_verdict, "database_id": 6554590544, "node_id": "IC_kwDOUO26pM8AAAABhq8dUA", "url": "https://github.com/PRO-Robotech/kaname/issues/1096#issuecomment-6554590544", "api_url": "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6554590544", "actor": "pointpu", "author_association": "MEMBER", "created_at": "2026-11-01T06:46:14Z", body_sha256: a5d195597a75a4cbd3dbe78b454f3f29a561c542e4dac5d82cb10a8b827accae}
+attribution:
+  reviewer_kind: codex_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+next:
+  agent: acceptance-author
+  task: Исправить два положительных контроля одним изменением и передать новый SHA-256 без изменения прав/API.

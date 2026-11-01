@@ -16,13 +16,24 @@ import (
 // транзакцией хранилище отзыва не касается — его держат пробы мира У на
 // настоящей базе (`access_binding/unregister_revokes_grants_world_integration_test.go`).
 type recordingWithdrawal struct {
-	mu   sync.Mutex
-	keys []domain.ResourceRef
+	mu     sync.Mutex
+	keys   []domain.ResourceRef
+	locked [][]domain.ResourceRef
+	// onLock — снимок состояния соседних дублёров в момент замка (kaname#1019):
+	// проба порядка родов спрашивает, что успело случиться ДО него.
+	onLock func(keys []domain.ResourceRef)
 }
 
-// LockTx — замок выдач и ролей ключа (kaname#975): поддельной транзакции запирать
-// нечего.
-func (r *recordingWithdrawal) LockTx(context.Context, service.Tx, domain.ResourceRef) error {
+// LockTx — замок выдач и ролей ключей (kaname#975, kaname#1019): поддельной
+// транзакции запирать нечего, набор ключей запоминается.
+func (r *recordingWithdrawal) LockTx(_ context.Context, _ service.Tx, keys []domain.ResourceRef) error {
+	r.mu.Lock()
+	r.locked = append(r.locked, append([]domain.ResourceRef(nil), keys...))
+	hook := r.onLock
+	r.mu.Unlock()
+	if hook != nil {
+		hook(keys)
+	}
 	return nil
 }
 

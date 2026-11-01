@@ -378,13 +378,14 @@ def _esc_fixture():
         before=gen._reset_step_name_counters)
 
 
-def test_esc_fixture_seven_role_names_obey_the_custom_role_contract():
+def test_esc_fixture_nine_role_names_obey_the_custom_role_contract():
     import re
 
     fixture = _esc_fixture()
     names = [step.body["name"] for case in fixture.CASES for step in case.steps
              if step.method == "POST" and step.path == "/iam/v1/roles"]
-    assert len(names) == 7
+    # E1 создаёт три роли, E2 — четыре, E3 и E4 — по одной.
+    assert len(names) == 9
     for name in names:
         assert re.fullmatch(r"[a-z][a-z0-9_]{0,40}",
                             name.replace("{{runId}}", "r0123456789")), name

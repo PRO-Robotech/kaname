@@ -35,50 +35,69 @@ const (
 
 // SAC-40 — роль аккаунта не называет `create` на учётках и не несёт селектора создателя.
 //
-// Имена ролей — с подчёркиванием (`r_40a`), а не с дефисом, как в теле приёмки
-// (`r-40a`): имя роли аккаунта судит `roles_custom_name_check`
-// (`^[a-z][a-z0-9_]{0,40}$`), и дефис отвергся бы ДО предмета — отказом имени, а не
-// отказом права. Остальное тело — дословно.
+// После правки приёмки 2026-11-01 варианты a, c, d используют одно имя `r_40a`
+// в отдельных мирах. Прежнее `r-40a` отвергалось бы `roles_custom_name_check`
+// до проверки права; разные имена в одном мире больше не подменяют изоляцию Given.
 func TestServiceAccountCreator_SAC40_TenantRoleNamesNoCreateAndNoCreatorSelector(t *testing.T) {
-	w := newSACWorld(t)
-	owner := asUser(w.ctx, w.usrA)
-	ownRules := w.roleRules(w.rolOwn)
 	ruleA := `{"module":"iam","resources":["serviceAccount"],"verbs":["create"]}`
+	ruleC := `{"module":"iam","resources":["serviceAccount"],"verbs":["get"]}`
 	ruleD := `{"module":"iam","resources":["serviceAccount"],"verbs":["get"],"createdBySubject":true}`
 
-	create := func(name, rule string) sacOp {
-		var req iamv1.CreateRoleRequest
-		roleFromJSON(t, fmt.Sprintf(`{"accountId":%q,"name":%q,"rules":[%s]}`, string(w.accA), name, rule), &req)
-		return w.mutate(owner, sacMethodRolCreate, &req, func(ctx context.Context) (*operationpb.Operation, error) {
-			return w.rolex.Create(ctx, &req)
-		})
-	}
-	update := func(rule string) sacOp {
-		var req iamv1.UpdateRoleRequest
-		roleFromJSON(t, fmt.Sprintf(`{"roleId":%q,"updateMask":"rules","rules":[%s]}`, string(w.rolOwn), rule), &req)
-		return w.mutate(owner, sacMethodRolUpdate, &req, func(ctx context.Context) (*operationpb.Operation, error) {
-			return w.rolex.Update(ctx, &req)
-		})
-	}
-	requireRefused := func(o sacOp, text, field, why string) {
-		t.Helper()
-		require.Emptyf(t, o.opID, "%s: синхронного отказа нет, заведена операция (ошибка %v)", why, o.opErr)
-		st := requireRefusal(t, o.syncErr, codes.InvalidArgument, text, why)
-		if field != "" {
-			require.Containsf(t, fieldViolations(st), field, "%s: поле отказа", why)
-		}
-	}
+	for _, row := range []struct {
+		name   string
+		rule   string
+		update bool
+		text   string
+		field  string
+	}{
+		{"a: Create с create на serviceAccount", ruleA, false, sac40VerbsText, ""},
+		{"b: Update rol-own тем же правилом", ruleA, true, sac40VerbsText, ""},
+		{"c (близнец): Create с get", ruleC, false, "", ""},
+		{"d: Create с createdBySubject", ruleD, false, sac40SelectorText, "rules[0].createdBySubject"},
+		{"e: Update rol-own правилом d", ruleD, true, sac40SelectorText, "rules[0].createdBySubject"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			w := newSACWorld(t)
+			owner := asUser(w.ctx, w.usrA)
+			ownRules := w.roleRules(w.rolOwn)
+			why := "SAC-40 " + row.name
 
-	requireRefused(create("r_40a", ruleA), sac40VerbsText, "", "SAC-40 a: Create с create на serviceAccount")
-	requireRefused(update(ruleA), sac40VerbsText, "", "SAC-40 b: Update rol-own тем же правилом")
-	require.Equal(t, ownRules, w.roleRules(w.rolOwn), "SAC-40 b: правила rol-own прежние")
-	requireSACDone(t, create("r_40c", `{"module":"iam","resources":["serviceAccount"],"verbs":["get"]}`),
-		"SAC-40 c (близнец): Create с get")
-	requireRefused(create("r_40d", ruleD), sac40SelectorText, "rules[0].createdBySubject",
-		"SAC-40 d: Create с createdBySubject")
-	requireRefused(update(ruleD), sac40SelectorText, "rules[0].createdBySubject",
-		"SAC-40 e: Update rol-own правилом d")
-	require.Equal(t, ownRules, w.roleRules(w.rolOwn), "SAC-40 e: правила rol-own прежние")
+			// Проверяем исходное отсутствие роли до вызова: успех c не занимает имя для d.
+			var namedRoles int
+			require.NoError(t, w.pool.QueryRow(w.ctx,
+				`SELECT count(*) FROM kaname.roles WHERE account_id = $1 AND name = $2`,
+				string(w.accA), "r_40a").Scan(&namedRoles), why+": Дано, перепись имени роли")
+			require.Zero(t, namedRoles, why+": Дано, роли r_40a в свежем мире нет")
+
+			var o sacOp
+			if row.update {
+				var req iamv1.UpdateRoleRequest
+				roleFromJSON(t, fmt.Sprintf(`{"roleId":%q,"updateMask":"rules","rules":[%s]}`, string(w.rolOwn), row.rule), &req)
+				o = w.mutate(owner, sacMethodRolUpdate, &req, func(ctx context.Context) (*operationpb.Operation, error) {
+					return w.rolex.Update(ctx, &req)
+				})
+			} else {
+				var req iamv1.CreateRoleRequest
+				roleFromJSON(t, fmt.Sprintf(`{"accountId":%q,"name":"r_40a","rules":[%s]}`, string(w.accA), row.rule), &req)
+				o = w.mutate(owner, sacMethodRolCreate, &req, func(ctx context.Context) (*operationpb.Operation, error) {
+					return w.rolex.Create(ctx, &req)
+				})
+			}
+
+			if row.text == "" {
+				requireSACDone(t, o, why)
+				return
+			}
+			require.Emptyf(t, o.opID, "%s: синхронного отказа нет, заведена операция (ошибка %v)", why, o.opErr)
+			st := requireRefusal(t, o.syncErr, codes.InvalidArgument, row.text, why)
+			if row.field != "" {
+				require.Containsf(t, fieldViolations(st), row.field, "%s: поле отказа", why)
+			}
+			if row.update {
+				require.Equal(t, ownRules, w.roleRules(w.rolOwn), why+": правила rol-own прежние")
+			}
+		})
+	}
 }
 
 // SAC-41 — роль создателя видна в каталоге ролей целиком.

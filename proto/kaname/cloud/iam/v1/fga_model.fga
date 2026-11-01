@@ -1336,9 +1336,9 @@ type registry_registry
     # `v_create` LIVES HERE AND NOWHERE ELSE — do not "restore parity" by adding it
     # back to the other types. A registry is a CONTAINER: "create a repository in
     # this namespace" is a real operation on the registry object, and it is really
-    # asked — by the control plane (CreateRepository / RenameRepository) and by the
-    # data plane (docker push to a new repo, cross-repo mount into a new dst, and
-    # the first-push blob-reveal guard). Every other type answered a question no
+    # asked — by modules that gate repository creation on the container (create and
+    # rename, push to a new repo, cross-repo mount, first-push blob guard); a module
+    # may ask `v_update` here instead. Every other type answered a question no
     # request ever asks: "create" is not an operation on an already-existing object,
     # and creating a resource inside a scope is authorized by the write tier on that
     # scope. Locked by authzmap/verb_relation_has_reader_test.go, which reds with the

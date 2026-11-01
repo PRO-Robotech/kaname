@@ -40,6 +40,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -185,7 +186,7 @@ func (journalEmitter) EmitOrderedDeleteTx(_ context.Context, tx service.Tx, tupl
 func newRegUCWithStore(t *testing.T, s *factStore) (*RegisterResourceUseCase, *factTxBeginner) {
 	t.Helper()
 	txb := &factTxBeginner{store: s}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, s, &recordingWithdrawal{}, noAudit{}).
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, deliveredRegistryTypes{}, s, &recordingWithdrawal{}, noAudit{}, residualScene()).
 		WithResidualTupleReader(s)
 	return uc, txb
 }
@@ -353,9 +354,26 @@ func TestUnregisterResource_ResidualReadFailure_FailsClosed(t *testing.T) {
 func TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour(t *testing.T) {
 	store := &factStore{}
 	txb := &factTxBeginner{store: store}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store, &recordingWithdrawal{}, noAudit{}) // без WithResidualTupleReader
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store, &recordingWithdrawal{}, noAudit{}, unitScopes()) // без WithResidualTupleReader
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
 	}))
 	require.True(t, txb.tx.committed)
+}
+
+// residualScene — сцена проб остатка для вывода родителя (kaname#982): реестр
+// reg_doomed зарегистрирован указателем на prj_home, реестр reg_x — контейнер в
+// prj_home, репозиторий reg_x/app — под reg_x. Запись `owner` сверяется с
+// иерархией субъекта факта указателя объекта, поэтому факты указателя названы
+// здесь явно: дублёр отвечает тем, что в него вписано.
+func residualScene() sceneScopes {
+	s := unitScopes()
+	s.containers = map[string]domain.ContainerScope{
+		"registry_registry:reg_x": {Registered: true, ProjectID: "prj_home", AccountID: "acc_home"},
+	}
+	s.pointers = map[string][]string{
+		"registry_registry:reg_doomed":  {"project:prj_home"},
+		"registry_repository:reg_x/app": {"registry_registry:reg_x"},
+	}
+	return s
 }

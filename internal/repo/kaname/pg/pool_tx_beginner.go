@@ -14,6 +14,7 @@ package pg
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -23,7 +24,8 @@ import (
 // The pgx.Tx it produces satisfies service.Tx (opaque interface implemented
 // by any concrete pgx.Tx via txAsPgx).
 type PoolTxBeginner struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	options pgx.TxOptions
 }
 
 // NewPoolTxBeginner — constructor.
@@ -31,9 +33,16 @@ func NewPoolTxBeginner(pool *pgxpool.Pool) *PoolTxBeginner {
 	return &PoolTxBeginner{pool: pool}
 }
 
+// NewRegistrationTxBeginner задаёт снимок каждого оператора: повторный обход
+// потомков после замка должен видеть регистрации, завершённые после первого.
+// Умолчание пула не меняется; каждый повтор открывает самостоятельную транзакцию.
+func NewRegistrationTxBeginner(pool *pgxpool.Pool) *PoolTxBeginner {
+	return &PoolTxBeginner{pool: pool, options: pgx.TxOptions{IsoLevel: pgx.ReadCommitted}}
+}
+
 // Begin — opens a read-write transaction from the pool.
 func (b *PoolTxBeginner) Begin(ctx context.Context) (service.Tx, error) {
-	return b.pool.Begin(ctx)
+	return b.pool.BeginTx(ctx, b.options)
 }
 
 // Compile-time assertion.

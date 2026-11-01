@@ -255,15 +255,24 @@ $body
 GO
     gofmt -w "$d/mask_test.go" || return 1
     # Цели рецепта — ровно те, что зовёт хук, настоящие по форме и пустые по
-    # содержанию: предмет опыта не они. Линтер хук не зовёт (бюджет памяти —
-    # опыт `prepush-budget-inject.sh`), поэтому цели `lint` у фикстуры нет.
+    # содержанию: предмет опыта не они. Lint здесь — явный дублёр; настоящий
+    # pinned линтер и отбор пакетов доказывает prepush-lint-inject.sh.
     cat > "$d/Makefile" <<'MK'
 .PHONY: vet audit-list-filter
+GOLANGCI_LINT_VERSION := v9.9.9
 vet:
 	@go vet ./...
 audit-list-filter:
 	@echo "ok"
 MK
+    mkdir -p "$d/bin"
+    cat > "$d/bin/golangci-lint" <<'LINT'
+#!/usr/bin/env bash
+case "${1:-}" in version) echo 'golangci-lint has version 9.9.9 built with go' ;; run) exit 0 ;; *) exit 2 ;; esac
+LINT
+    chmod +x "$d/bin/golangci-lint"
+    # Область дублёра ограничена этим самостоятельным процессом пробы.
+    export PATH="$d/bin:$PATH"
     git -C "$d" init -q .
     git -C "$d" add -A
     git -C "$d" commit -q -m "#1 фикстура опыта"
@@ -345,7 +354,7 @@ else
         else
             bad "перепись не называет группу без условия: $(printf '%s' "$out" | tail -8)"
         fi
-        if printf '%s' "$out" | grep -q 'pre-push: НЕ ВЫПОЛНИЛОСЬ — групп без условия 1 из 6'; then
+        if printf '%s' "$out" | grep -q 'pre-push: НЕ ВЫПОЛНИЛОСЬ — групп без условия 1 из 7'; then
             ok "исход назван третьей категорией с числом — не «зелёное» и не «красное»"
         else
             bad "исход не назван недобором с числом: $(printf '%s' "$out" | tail -3)"

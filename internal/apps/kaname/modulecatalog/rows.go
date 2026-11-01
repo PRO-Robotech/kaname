@@ -47,6 +47,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -127,13 +128,26 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 		// ним разворачивание выдачи классу решает, писать ли `public_reader`, и
 		// ворота выдачи — объявлен ли тип цели (kaname#856). Источник «тип
 		// объявлен» — живой каталог из доставленных манифестов, а не литерал.
+		//
+		// Имена указателей и записи сверх указателя (kaname#982) — тоже дословно:
+		// из них политика записи модуля судит регистрацию, и источник политики —
+		// живая строка каталога, а не литерал.
 		parentTypes := make([]string, 0, len(r.Parents))
+		parentNames := make([]string, 0, len(r.Parents))
 		for _, p := range r.Parents {
 			parentTypes = append(parentTypes, p.Type)
+			parentNames = append(parentNames, p.Name)
+		}
+		var writes []string
+		for _, w := range r.Writes {
+			for _, s := range w.Subjects {
+				writes = append(writes, domain.WriteGrant{Relation: w.Relation, SubjectType: s}.Token())
+			}
 		}
 		out.Resources = append(out.Resources, catalog.ResourceRow{
 			Module: m.Module, Resource: r.Name, ObjectType: r.ObjectType,
-			ParentTypes: parentTypes, PublicReadToChildren: r.PassesPublicRead(),
+			ParentTypes: parentTypes, ParentNames: parentNames, Writes: writes,
+			PublicReadToChildren: r.PassesPublicRead(), PermanentProject: r.HoldsPermanentProject(),
 		})
 
 		// declaredBy — токен → имя, каким его написал манифест. Нужен ИМЕННО для

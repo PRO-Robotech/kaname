@@ -48,7 +48,7 @@ type Row struct {
 	// `iam.account`): им названа колонка зеркала, и им же зовёт регистрация.
 	//
 	// Цепь предков этой же строки ложится словарём МОДЕЛИ ПРАВ — перевод делает
-	// писатель (см. upsertParentEdges). Разница не косметическая: по цепи ходит
+	// DB command. Разница не косметическая: по цепи ходит
 	// вопрос о доступе, а он приходит словарём модели.
 	ObjectType      string
 	ObjectID        string
@@ -80,137 +80,14 @@ type Row struct {
 	ParentChain []string
 }
 
-// negInfinity — the sentinel a zero/legacy SourceVersion maps to ('-infinity'),
-// so an older producer's empty version still applies (back-compat with a
-// producer that emits no version).
-// StmtLockMirrorRow, StmtVersionOnlyBump и StmtInsertOrSupersede — ТРИ оператора
-// зеркала, объявленные ОДИН раз.
-//
-// # Почему экспортируются
-//
-// Их подаёт не только эмитент: посевщик сетки порядков (`../scalegrid`) шлёт те
-// же операторы пачкой, потому что мерит СТОИМОСТЬ того, что выпускает продукт.
-// Пока текст жил у него копией, копия расходилась молча — проверка, сажающая
-// один набор двумя путями, сравнивает СТРОКИ РЕЗУЛЬТАТА и на живом типе даёт
-// одно и то же. Разошлись копии дважды: условие приёма не доехало до полосы
-// сдвига версии, имя типа словаря модели — до полосы вставки (kacho#1890).
-//
-// Объявление одно ⇒ расхождение невыразимо, и сверять нечего. Пачку это не
-// трогает: посевщик по-прежнему шлёт операторы пачкой, меняется лишь то, откуда
-// берётся текст.
-//
-// # Порядок параметров — часть объявления
-//
-// Операторы принимают параметры в одном и том же порядке: тип объекта,
-// идентификатор, проект-родитель, аккаунт-родитель, метки (jsonb), версия
-// источника; замок — первые два из них, сдвиг версии — ещё цепь седьмым.
-// Вызывающий передаёт их так же — иначе оператор один, а смысл разный.
-const (
-	// StmtLockMirrorRow — ЗАМОК строки зеркала ДО сверки полосы сдвига версии
-	// (kaname#874, находка ревью круга 1).
-	//
-	// Полоса сдвига версии сверяет цепь предков подзапросом по ЧУЖОЙ таблице
-	// (`resource_parent_edge`). В READ COMMITTED после ожидания замка строки
-	// Postgres перепроверяет условие только по колонкам самой обновляемой строки,
-	// а подзапрос остаётся на снимке, взятом до ожидания. Старшая доставка с цепью
-	// B держит строку, новейшая с цепью A ждёт её, сверяет A с рёбрами СТАРОГО
-	// снимка (A), видит совпадение и сдвигает одну версию: версия новейшая, рёбра
-	// старшей доставки, объект под чужим контейнером.
-	//
-	// Отдельный оператор — потому что снимок берётся на ОПЕРАТОР: дождавшись
-	// замка здесь, следующий оператор (сверка) берёт новый снимок, в котором
-	// зафиксированная старшая доставка уже видна целиком — и строка, и её рёбра.
-	// Сила замка — та же, что берёт сам сдвиг версии (`FOR NO KEY UPDATE`):
-	// новой конкуренции он не вводит, он лишь переносит ожидание ДО сверки.
-	// Строки нет — замка нет, и это законно: вставку сериализует первичный ключ
-	// в полосе (2), а рёбра пишутся ПОСЛЕ неё отдельными операторами.
-	//
-	// Цена — одно обращение к базе на регистрацию; держать цепь второй колонкой
-	// строки зеркала значило бы завести второе место одного факта (рёбра уже его
-	// держат) и миграцию ради копии.
-	StmtLockMirrorRow = `SELECT 1 FROM kaname.resource_mirror
-		  WHERE object_type = $1 AND object_id = $2
-		    FOR NO KEY UPDATE`
-
-	// StmtVersionOnlyBump — полоса СДВИГА ВЕРСИИ: строка уже лежит, входящая
-	// версия строго новее, и ничего из читаемого отбором не изменилось.
-	//
-	// УСЛОВИЕ ПРИЁМА СТОИТ И ЗДЕСЬ: полоса срабатывает на существующей строке и
-	// вставки не делает, поэтому без своего EXISTS она давала бы обход — тип снят
-	// с платформы, а регистрация им проходит только потому, что строка уже лежит.
-	//
-	// ЦЕПЬ ПРЕДКОВ — ТОЖЕ ЧАСТЬ ПРОЕКЦИИ (kaname#874). Её читает вложенное правило
-	// роли: объект охвачен, если среди предков есть выбранный контейнер. Перенос
-	// под другой контейнер ТОГО ЖЕ проекта не меняет ни проекта, ни аккаунта, ни
-	// меток — и без сверки цепи эта полоса сдвигала одну версию, рёбра оставались
-	// прежними, а путь регистрации шёл аддитивно и не снимал права, оставшегося у
-	// прежнего контейнера. $7 — присланная цепь КАК ЕСТЬ (`"<тип>:<id>"`, тип —
-	// в словаре каталога либо модели), в порядке глубины. Перевод в словарь
-	// модели — тем же правилом, каким цепь пишут рёбра (`modelTypeName`: имя с
-	// точкой — строка каталога, без точки — уже модель), но ВНУТРИ оператора:
-	// отдельное обращение за каждым предком стояло бы на каждой регистрации.
-	// Предок, которого каталог не знает, или непонятая форма не совпадают ни с
-	// чем — полоса не срабатывает, и отказ называет полоса вставки, как прежде.
-	// Совпадение — массивом целиком.
-	//
-	// Сверка цепи верна ТОЛЬКО под замком `StmtLockMirrorRow`, взятым ПРЕДЫДУЩИМ
-	// оператором: подзапрос по рёбрам при ожидании замка внутри этого оператора
-	// не перечитывается (шапка `StmtLockMirrorRow`).
-	StmtVersionOnlyBump = `UPDATE kaname.resource_mirror
-		    SET source_version = $6, updated_at = now()
-		  WHERE object_type       = $1
-		    AND object_id         = $2
-		    AND parent_project_id = $3
-		    AND parent_account_id = $4
-		    AND labels            = $5::jsonb
-		    AND source_version    < $6
-		    AND EXISTS (SELECT 1 FROM kaname.catalog_resource cr
-		                 WHERE cr.dotted = $1 AND cr.live)
-		    AND ARRAY(
-		            SELECT coalesce(pc.object_type, split_part(u.ref, ':', 1))
-		                   || ':' || substr(u.ref, strpos(u.ref, ':') + 1)
-		              FROM unnest($7::text[]) WITH ORDINALITY AS u(ref, n)
-		              LEFT JOIN kaname.catalog_resource pc
-		                ON strpos(split_part(u.ref, ':', 1), '.') > 0
-		               AND pc.dotted = split_part(u.ref, ':', 1)
-		             ORDER BY u.n)
-		      = ARRAY(
-		            SELECT pe.parent_type || ':' || pe.parent_id
-		              FROM kaname.catalog_resource co
-		              JOIN kaname.resource_parent_edge pe
-		                ON pe.object_type = co.object_type AND pe.object_id = $2
-		             WHERE co.dotted = $1 AND co.live
-		             ORDER BY pe.depth)`
-
-	// StmtInsertOrSupersede — полоса ВСТАВКИ ПОД УСЛОВИЕМ ПРИЁМА, отвечающая
-	// ТРЕМЯ значениями: принят ли тип, его имя в словаре модели, число
-	// применённых строк.
-	//
-	// Имя типа берётся ТЕМ ЖЕ оператором, а не вторым запросом: строка, дающая
-	// право на запись, и строка, дающая имя, — одна, и читать их надо в одном
-	// снимке.
-	StmtInsertOrSupersede = `WITH live_type AS (
-		     SELECT object_type
-		       FROM kaname.catalog_resource
-		      WHERE dotted = $1 AND live
-		 ), applied AS (
-		     INSERT INTO kaname.resource_mirror
-		       (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		     SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, $6::timestamptz, now()
-		      WHERE EXISTS (SELECT 1 FROM live_type)
-		     ON CONFLICT (object_type, object_id) DO UPDATE
-		        SET parent_project_id = EXCLUDED.parent_project_id,
-		            parent_account_id = EXCLUDED.parent_account_id,
-		            labels            = EXCLUDED.labels,
-		            source_version    = EXCLUDED.source_version,
-		            updated_at        = now()
-		      WHERE resource_mirror.source_version < EXCLUDED.source_version
-		     RETURNING 1
-		 )
-		 SELECT EXISTS (SELECT 1 FROM live_type),
-		        (SELECT object_type FROM live_type),
-		        (SELECT count(*) FROM applied)`
-)
+// StmtRegistrationCommand is shared with scalegrid so measurement exercises the
+// complete production writer, including nested validation and edge projection.
+// The VOLATILE command trigger takes the mirror lock in a separate SPI statement
+// before comparing the chain (kaname#874); one local binding judges the whole payload.
+const StmtRegistrationCommand = `INSERT INTO kaname.resource_registration_command
+    (dotted_type, object_id, parent_project_id, parent_account_id, labels, source_version, parent_chain)
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6::timestamptz, $7::text[])
+    RETURNING type_live, model_type, applied, projection_unchanged`
 
 func versionOr(t time.Time) any {
 	if t.IsZero() {
@@ -247,33 +124,9 @@ type Outcome struct {
 // SAME source_version is likewise a no-op (`<` is strict). Equal/newer in-order
 // register applies and advances source_version.
 //
-// ТРИ ОПЕРАТОРА В ОДНОЙ ТРАНЗАКЦИИ: ЗАМОК, СДВИГ ВЕРСИИ, ВСТАВКА.
-//
-// Сдвиг версии сверяет с хранимым всё, что читает отбор: проект, аккаунт и метки —
-// колонками самой строки, цепь предков — подзапросом по `resource_parent_edge`.
-// Перепроверка условия после ожидания замка (READ COMMITTED) читает ЗАНОВО только
-// колонки самой строки; подзапрос по рёбрам остаётся на снимке, взятом до ожидания.
-// Здесь прежде стояло обратное — что сравнение идёт с тем, что действительно
-// зафиксировано, — и это было неверно для цепи: старшая доставка с цепью B держала
-// строку, новейшая с цепью A сверялась со старыми рёбрами A и сдвигала одну версию
-// (версия новейшая, рёбра — старшей доставки; проба
-// TestParentEdges_ND09_ReorderedDeliveriesLeaveTheNewestChain).
-//
-// Поэтому замок строки берётся ОТДЕЛЬНЫМ оператором ДО сверки (`StmtLockMirrorRow`):
-// снимок берётся на оператор, и сверка, идущая после замка, видит зафиксированную
-// конкурирующую доставку целиком — строку и её рёбра. Сверка и запись остаются
-// одним оператором под замком, то есть чтения-и-действия нет (ban #10). Только
-// когда сдвиг версии не совпал ни с чем, идёт обычная вставка-или-замена.
-//
-// The two cannot be folded into one statement: two data-modifying CTEs over the same
-// table would either see a pre-UPDATE snapshot or touch the same row twice.
-//
-// A concurrent delivery that inserts the row between the two statements makes the second
-// take its UPSERT branch and report ProjectionUnchanged = false — a CONSERVATIVE answer
-// (the caller then keeps its delete-stale-capable path), never a permissive one.
-//
-// MUST run in the same pgx.Tx as the owner-tuple fga_outbox emit; tx rollback ⇒
-// the row is not visible (atomic co-commit, ban #10).
+// The DB command owns the full payload and both physical projections. Its
+// refusal rolls back the complete statement; the caller still owns commit of
+// mirror, tuple, audit and reconcile effects in the same transaction.
 func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	if tx == nil {
 		return Outcome{}, fmt.Errorf("resource_mirror: tx must not be nil")
@@ -286,177 +139,20 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, fmt.Errorf("resource_mirror: marshal labels: %w", err)
 	}
-	version := versionOr(row.SourceVersion)
-	// (0) ЗАМОК СТРОКИ — до сверки, отдельным оператором (шапка StmtLockMirrorRow).
-	if _, err := tx.Exec(ctx, StmtLockMirrorRow, row.ObjectType, row.ObjectID); err != nil {
-		return Outcome{}, fmt.Errorf("resource_mirror: lock mirror row: %w", err)
-	}
-	// (1) VERSION-ONLY BUMP. Matches exactly when a row already exists, the incoming
-	// version is strictly newer, AND nothing a selector reads has changed. `labels =
-	// $5::jsonb` is jsonb equality — key order and whitespace do not make a projection
-	// "different". An unversioned producer ('-infinity') never satisfies `< $6` and so
-	// never reaches this branch: it supplies no proof and gets no exemption.
-	//
-	// УСЛОВИЕ ПРИЁМА СТОИТ И ЗДЕСЬ. Полоса срабатывает на СУЩЕСТВУЮЩЕЙ строке и
-	// вставки не делает, поэтому без своего `EXISTS` она давала бы обход: тип
-	// снят с платформы, а регистрация им проходит — только потому, что строка
-	// уже лежит. Ноль затронутых строк здесь ничего не скрывает: вердикт о
-	// каталоге выносит оператор (2), и он различает «не принято» и «не новее».
-	tag, err := tx.Exec(ctx, StmtVersionOnlyBump,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version, row.ParentChain,
-	)
-	if err != nil {
-		return Outcome{}, fmt.Errorf("resource_mirror: bump source version: %w", err)
-	}
-	if tag.RowsAffected() > 0 {
-		return Outcome{Applied: true, ProjectionUnchanged: true}, nil
-	}
-	// (2) INSERT-OR-SUPERSEDE ПОД УСЛОВИЕМ ПРИЁМА. Either the row is new, or the
-	// incoming projection differs from the stored one, or the version is not newer
-	// (0 rows — a redelivery the monotonic guard already recognised).
-	//
-	// # ДВА ВЕРДИКТА ОДНИМ ОПЕРАТОРОМ, И ВТОРОЙ НУЖЕН ИМЕННО ЗДЕСЬ
-	//
-	// «Тип не принят» и «редоставка не новее» дают ОДИНАКОВЫЙ ноль затронутых
-	// строк. Вызывающий читает этот ноль как «делать нечего» и возвращает УСПЕХ —
-	// то есть голое `WHERE EXISTS` превратило бы отказ в тихое согласие, ровно на
-	// том входе, ради которого условие и заводится. Поэтому оператор возвращает
-	// ОБА факта: принадлежность типа живому каталогу и число применённых строк.
-	//
-	// # ПОЧЕМУ ЭТО НЕ ЧТЕНИЕ-И-ДЕЙСТВИЕ (запрет #10)
-	//
-	// Сверка и запись — ОДИН оператор в одном снимке: между «спросил» и «вставил»
-	// нет окна, в которое поместилось бы снятие типа. Читающая ветвь общая для
-	// обоих вердиктов, поэтому разойтись они не могут by construction.
-	//
-	// # ПОЧЕМУ НЕ ВНЕШНИЙ КЛЮЧ
-	//
-	// Ключ на `(dotted, live)` выражал бы ту же сверку постоянным инвариантом — и
-	// тем самым запретил бы СНЯТИЕ типа, пока у арендатора есть хоть один ресурс
-	// этого типа (`ON UPDATE NO ACTION` отверг бы перевод строки каталога в
-	// неживую), а каскад унёс бы чужие данные. Условие приёма и постоянный
-	// инвариант здесь — разные утверждения: регистрировать новым типом нельзя,
-	// а уже зарегистрированное обязано пережить снятие (зеркало терпит висячую
-	// ссылку by design). Проба:
-	// TestResourceMirror_RetiredTypeKeepsItsAlreadyRegisteredRows.
-	//
-	// Явные приведения у параметров обязательны: в списке `SELECT` тип параметра
-	// не выводится из колонки назначения, как он выводился в форме `VALUES`.
-	// ИМЯ ТИПА МОДЕЛИ ПРИЕЗЖАЕТ ИЗ ТОЙ ЖЕ СТРОКИ, ЧЬЮ ЛИВНОСТЬ ЗДЕСЬ СПРАШИВАЮТ.
-	//
-	// Цепь предков этой регистрации названа словарём МОДЕЛИ, и раньше перевод
-	// брался у словаря, ПОРОЖДЁННОГО СБОРКОЙ: тип, заведённый применением
-	// манифеста в работающем процессе, тот словарь возвращал точечным именем, и
-	// вставка ребра отвергалась проверкой схемы — то есть регистрация не
-	// проходила ВОВСЕ (kacho#1982). Читать имя вторым запросом не надо: строка,
-	// дающая право на запись, и строка, дающая имя, — ОДНА, и берутся они одним
-	// оператором в одном снимке.
 	var typeLive bool
 	var modelType *string
-	var appliedRows int64
-	if err = tx.QueryRow(ctx, StmtInsertOrSupersede,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version,
-	).Scan(&typeLive, &modelType, &appliedRows); err != nil {
-		return Outcome{}, fmt.Errorf("resource_mirror: upsert: %w", err)
+	var outcome Outcome
+	if err = tx.QueryRow(ctx, StmtRegistrationCommand,
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID,
+		payload, versionOr(row.SourceVersion), row.ParentChain,
+	).Scan(&typeLive, &modelType, &outcome.Applied, &outcome.ProjectionUnchanged); err != nil {
+		return Outcome{}, fmt.Errorf("resource_mirror: registration command: %w", err)
 	}
 	if !typeLive {
-		// Отказ НАЗЫВАЕТ поле и правило: без имени типа вызывающий не знает, что
-		// чинить, а «invalid object» одинаково звучало бы и на грамматике.
-		// Наименование каталога здесь не является оракулом: перечень грантуемых
-		// типов платформа отдаёт арендатору сама (PermissionCatalogService), то
-		// есть отказ не сообщает ничего, чего вызывающий не мог бы прочесть. Чей
-		// это тип — вопрос ДРУГОЙ полосы (правило приёма), и она по-прежнему
-		// отвечает отказом без причины.
 		return Outcome{}, iamerr.Wrapf(iamerr.ErrUnknownResourceType,
-			"resource type %q is not a live entry of the platform resource catalog",
-			row.ObjectType)
+			"resource type %q is not a live entry of the platform resource catalog", row.ObjectType)
 	}
-	applied := appliedRows > 0
-	if applied {
-		// `modelType` непуст by construction: сюда доходит только живая строка
-		// (ветвь `!typeLive` выше), а колонка объявлена `NOT NULL` под проверкой
-		// грамматики. Ветви «имени нет» здесь не заводится — она объявляла бы
-		// состояние, которого не бывает, и первый же читатель принял бы её за
-		// свидетельство, что бывает.
-		if err := upsertParentEdges(ctx, tx, row, *modelType, version); err != nil {
-			return Outcome{}, err
-		}
-	}
-	return Outcome{Applied: applied}, nil
-}
-
-// upsertParentEdges записывает цепь предков объекта рёбрами, в ТОЙ ЖЕ транзакции.
-//
-// Полная замена, а не досыпка: цепь — это состояние, а не приращение. Владелец
-// прислал ту цепь, которая верна сейчас; ребро, которого в ней нет, обязано
-// исчезнуть, иначе объект останется под областью, из которой его вынесли, — то
-// есть право переживёт перенос.
-//
-// Зовётся ТОЛЬКО когда зеркало реально применилось: устаревшая доставка не
-// проходит монотонную защиту строки и не должна переписывать цепь свежей.
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// ЦЕПЬ ПИШЕТСЯ В СЛОВАРЕ МОДЕЛИ ПРАВ — И ЭТО НЕ ТО ЖЕ, ЧЕМ НАЗВАНА СТРОКА ЗЕРКАЛА
-//
-// Зеркало — проекция КАТАЛОГА ресурсов, и его `object_type` назван словарём
-// каталога (`vpc.network`). Цепь читается вопросом о доступе, а он приходит
-// словарём МОДЕЛИ (`vpc_network`) — им же названы три из четырёх колонок, с
-// которыми цепь соединяется: прямой факт, область выдачи и собственная
-// родительская сторона рёбер. Цепь в словаре каталога не совпала бы с ними
-// НИКОГДА и молча: исход выглядел бы как «права нет», а не как ошибка.
-//
-// Обратное направление невозможно by construction, а не по вкусу: вершина
-// иерархии `cluster` в каталоге ресурсов отсутствует — кластер не ресурс, — и
-// цепь, названная словарём каталога, не смогла бы дойти до строки администратора
-// облака вовсе.
-//
-// Перевод берётся ЕДИНСТВЕННЫЙ (`modelTypeName`, model_dictionary.go) и читает
-// ЖИВУЮ строку каталога, а не словарь, порождённый сборкой: иначе тип,
-// заведённый применением манифеста в работающем процессе, приезжал бы сюда
-// точечным именем и вся регистрация отвергалась бы проверкой схемы (kacho#1982).
-// Родительская сторона приезжает от владельца ресурса уже модельными именами
-// (`project`, `account`, `registry_registry`) — их перевод не трогает, потому что
-// сужение идёт по СВОЙСТВУ имени, а не по перечню имён.
-//
-// Имя САМОГО объекта переводить здесь нечем и не надо: оно приезжает уже
-// разрешённым из строки, чью ливность спросил вызывающий тем же оператором. Свой
-// запрос тут завёл бы второе место об одном предмете — и второй снимок.
-//
-// Держится это не здесь, а проверками схемы `*_type NOT LIKE '%.%'`: регрессия
-// писателя отвергается строкой, а не перестаёт совпадать тихо.
-func upsertParentEdges(ctx context.Context, tx pgx.Tx, row Row, objectType string, version any) error {
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM kaname.resource_parent_edge
-		  WHERE object_type = $1 AND object_id = $2`,
-		objectType, row.ObjectID,
-	); err != nil {
-		return fmt.Errorf("resource_parent_edge: clear: %w", err)
-	}
-	for i, ancestor := range row.ParentChain {
-		typ, id, ok := splitObjectRef(ancestor)
-		if !ok {
-			// Непонятая форма — ОТКАЗ, а не пропуск: пропущенное звено делает цепь
-			// короче настоящей, и объект оказывается под тем предком, под которым
-			// он не находится. Молчаливое проглатывание здесь дало бы область
-			// выдачи, «совпавшую» с ожиданием ровно потому, что про звено не
-			// спросили.
-			return fmt.Errorf("resource_parent_edge: непонятая форма предка %q "+
-				"(ожидается \"<type>:<id>\")", ancestor)
-		}
-		parentType, err := modelTypeName(ctx, tx, typ)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO kaname.resource_parent_edge
-			   (object_type, object_id, parent_type, parent_id, depth, source_version, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, now())`,
-			objectType, row.ObjectID, parentType, id, i+1, version,
-		); err != nil {
-			return fmt.Errorf("resource_parent_edge: insert depth %d: %w", i+1, err)
-		}
-	}
-	return nil
+	return outcome, nil
 }
 
 // splitObjectRef разбирает `"<type>:<id>"`. Разделитель — ПЕРВОЕ двоеточие:
@@ -477,7 +173,7 @@ func splitObjectRef(ref string) (typ, id string, ok bool) {
 // ПОЧЕМУ ЦЕПЬ СНИМАЕТСЯ ЗДЕСЬ, А НЕ ОСТАВЛЯЕТСЯ БАЗЕ
 //
 // Регистрация пишет обе половины одной транзакцией (`UpsertTx` →
-// `upsertParentEdges`), а снятие убирало только первую. Досняться цепи неоткуда:
+// registration command), а снятие убирало только первую. Досняться цепи неоткуда:
 // внешнего ключа с зеркала на ребро НЕТ и быть не может — стороны названы
 // РАЗНЫМИ словарями (зеркало — словарём каталога, `vpc.securityGroup`; ребро —
 // словарём модели прав, `vpc_security_group`), поэтому каскад тут невыразим by
@@ -539,7 +235,7 @@ func DeleteTx(ctx context.Context, tx pgx.Tx, objectType, objectID string, tombs
 	deleted := tag.RowsAffected() > 0
 	// Цепь предков — вторая половина той же регистрации. Перевод словаря берётся
 	// ЕДИНСТВЕННЫЙ и тот же, которым цепь писалась (`modelTypeName` в
-	// `upsertParentEdges`): назови её здесь словарём каталога — снятие не совпало
+	// registration command): назови её здесь словарём каталога — снятие не совпало
 	// бы ни с одним ребром и промолчало бы, то есть выглядело бы исполненным.
 	//
 	// Перевод ливность НЕ спрашивает (см. model_dictionary.go): условие приёма
