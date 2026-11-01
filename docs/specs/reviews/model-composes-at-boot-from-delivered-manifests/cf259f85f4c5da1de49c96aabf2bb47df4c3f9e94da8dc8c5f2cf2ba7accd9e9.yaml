@@ -129,10 +129,9 @@ route_signs:
   new_domain: false
   security_surface: true
 effective_approval:
-  issued_by_this_record: false
+  issued_by_this_record: true
   why: >-
-    Это вердикт роли о точном содержимом; внешнее событие публикует курьер.
-    До публикации запись не объявляет выпущенной санкции и готовности доставки.
+    Фактический вердикт AI-роли acceptance-reviewer о точном отпечатке опубликован курьером в событии, указанном ниже. Личное одобрение человеком, приёмка кода, выполнение DoD и готовность доставки не заявляются.
 event:
   type: acceptance_approval
   status: performed
@@ -145,7 +144,7 @@ event:
 attribution:
   reviewer_kind: codex_agent
   assigned_agent: acceptance-reviewer
-  publishing_actor: none
+  publishing_actor: pointpu
   publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
   history_is_appended_not_rewritten: true
