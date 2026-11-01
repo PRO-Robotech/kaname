@@ -22,9 +22,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # ЧТО ГОНЯЕТСЯ ЗДЕСЬ — И ЧТО НЕ ГОНЯЕТСЯ
 #
-# Группы ниже — те задания конвейера (`.github/workflows/ci.yml`), которые
-# исполнимы на машине разработчика БЫСТРО: сборка · vet · vet под тегом
-# integration · gofmt · пробы `-short` без детектора гонок · audit-list-filter.
+# Группы ниже — задания конвейера (`.github/workflows/ci.yml`), исполняемые
+# до отправки во внешнем кластере: сборка · vet · vet под тегом
+# integration · gofmt · пробы `-short` без детектора гонок · audit-list-filter ·
+# pinned golangci-lint по затронутым пакетам.
 # Форма у них ТА ЖЕ, что в конвейере, и там, где рецепт уже объявляет цель,
 # зовётся цель, а не инструмент напрямую.
 #
@@ -36,14 +37,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # БЮДЖЕТ ПАМЯТИ — ДЕРЖИТСЯ МЕХАНИЗМОМ, А НЕ ОЦЕНКОЙ
 #
-# Хук исполняется на каждой отправке, на машине, где параллельно идут другие
-# полосы. Решение владельца 2026-09-24: память машины не переваливает за 45 ГБ,
-# тяжёлое локально не гоняется — его гоняет конвейер на АГРЕГАТЕ волны. Прежняя
-# редакция звала `go test ./... -race` с параллелизмом по числу ядер и
-# `make lint` без всякого потолка. Отсюда три свойства:
+# Хук отправки исполняется Job-ом внешнего кластера. Линтер ограничен пакетами
+# диапазона отправки, при недоступной базе или смене конфигурации — весь модуль.
+# Прежнее решение 2026-09-24 исключало линтер ради памяти машины; перенос
+# отправки во внешний кластер снял эту предпосылку (kaname#1050).
 #
-#   · детектор гонок и golangci-lint здесь НЕ гоняются — они в перечне
-#     непроверенного, их вердикт выносит конвейер;
+#   · детектор гонок здесь НЕ гоняется — его вердикт выносит конвейер;
 #   · параллелизм Go — 4 (`GOFLAGS` дополняется `-p=4` последним, поэтому
 #     перекрывает любое прежнее `-p`);
 #   · весь прогон идёт под потолком памяти 10 ГБ без подкачки — хук
@@ -141,7 +140,7 @@ not_run_notice() {
         echo
         echo "pre-push: исполнено групп проверок: $executed"
         echo "ЗДЕСЬ НЕ ГОНЯЛОСЬ (и потому «хук зелен» не значит «конвейер зелен»):"
-        echo "  детектор гонок (-race) · golangci-lint (make lint) — тяжёлое, на агрегате конвейером ·"
+        echo "  детектор гонок (-race) — на агрегате конвейером ·"
         echo "  интеграция на контейнерах · самостоятельный клон · buf breaking против ствола ·"
         echo "  каталог прав и канон модели (нужен чекаут дерева платформы) · govulncheck · gosec ·"
         echo "  вердикт ствола"
@@ -220,6 +219,9 @@ cd "$ROOT" || finish 2 "pre-push: ОТКАЗ — в корень рабочей 
 
 # Вход git читается ОДИН раз: его судят и страж правила, и перепись ссылок ниже.
 push_input="$(cat)"
+# Снимок main один на весь запуск. Lint не fetch-ит и не перечитывает движущуюся
+# ссылку: новая ветка сравнивается с merge-base именно этого снимка.
+lint_main_sha="$(git rev-parse --verify "refs/remotes/${1:-origin}/main^{commit}" 2>/dev/null)" || lint_main_sha=""
 
 # ── СТРАЖ ПРАВИЛА ВЕТКИ И КОММИТА — ПЕРВЫМ, ДО ОБХОДА ПРОВЕРОК ──────────────
 #
@@ -406,6 +408,76 @@ group_probes() {
 
 group_listfilter() { need make || return "$UNMET_RC"; make audit-list-filter; }
 
+# Полный lint сохраняется в make lint. Здесь тот же пин из Makefile, конфиг и
+# кэш; область — объединение пакетов всех живых ссылок исходного push-входа.
+group_lint() {
+    local local_ref local_sha remote_ref remote_sha base paths full="" path dir file found want have
+    local -a packages=()
+    local -A seen=()
+    need make || return "$UNMET_RC"
+    paths="$scratch/lint.paths"
+    : > "$paths"
+    [ "$refs_total" -gt 0 ] || full="нет входа git push"
+    while read -r local_ref local_sha remote_ref remote_sha; do
+        [ -n "${local_ref:-}" ] && [ "${local_sha:-$zero}" != "$zero" ] || continue
+        base="${remote_sha:-$zero}"
+        if [ "$base" = "$zero" ]; then
+            echo "lint: main snapshot=${lint_main_sha:-недоступен}, tip=$local_sha"
+            if [ -n "$lint_main_sha" ]; then
+                base="$(git merge-base "$lint_main_sha" "$local_sha" 2>/dev/null)" || base=""
+            else
+                base=""
+            fi
+        fi
+        if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            full="база отправки недоступна"
+            continue
+        fi
+        echo "lint: диапазон $base..$local_sha ($remote_ref)"
+        # Без распознавания rename получаются обе стороны перемещения: D и A.
+        if ! git diff --no-renames --name-only -z "$base" "$local_sha" -- >> "$paths"; then
+            declare_unmet "диапазон lint не прочитан: $base..$local_sha"
+            return "$UNMET_RC"
+        fi
+    done <<< "$push_input"
+    while IFS= read -r -d '' path; do
+        case "$path" in
+            .github/golangci.yml|Makefile|go.mod|go.sum|go.work|go.work.sum) full="изменена конфигурация: $path" ;;
+            *.go)
+                dir="${path%/*}"; [ "$dir" != "$path" ] || dir="."
+                # Удалённый пакет в линтер не передаётся; оставшийся пакет судится.
+                found=0
+                for file in "$dir"/*.go; do [ ! -f "$file" ] || found=1; done
+                [ "$found" = 1 ] || continue
+                case "$dir" in *[[:space:]]*) full="путь пакета содержит пробел"; continue ;; esac
+                if [ -z "${seen[$dir]+present}" ]; then
+                    seen[$dir]=1
+                    if [ "$dir" = . ]; then packages+=(.); else packages+=("./$dir"); fi
+                fi
+                ;;
+        esac
+    done < "$paths"
+    if [ -n "$full" ]; then
+        packages=(./...)
+        echo "lint: полный модуль — $full"
+    elif [ "${#packages[@]}" -eq 0 ]; then
+        echo "lint: затронутых существующих пакетов Go 0 — линтеру нечего передать"
+        return 0
+    fi
+    echo "lint: областей ${#packages[@]} — ${packages[*]}"
+    need golangci-lint || return "$UNMET_RC"
+    # GNU make читает объявленный пин; второй литерал версии здесь не заводится.
+    want="$(make --no-print-directory -s --eval='prepush-lint-pin: ; @printf "%s\n" "$(GOLANGCI_LINT_VERSION)"' prepush-lint-pin)" || {
+        declare_unmet "пин golangci-lint из Makefile не прочитан"; return "$UNMET_RC";
+    }
+    have="$(golangci-lint version 2>/dev/null)" || have=""
+    if [ -z "$want" ] || [[ "$have" != *"version ${want#v} "* ]]; then
+        declare_unmet "golangci-lint не отвечает пину $want: $have"
+        return "$UNMET_RC"
+    fi
+    GOLANGCI_LINT_CACHE="$ROOT/.cache/golangci-lint" golangci-lint run --timeout=10m --config=.github/golangci.yml "${packages[@]}"
+}
+
 # Ведомость групп — ЕДИНСТВЕННЫЙ источник и перечня, и числа.
 groups=(
     "сборка|go build ./...|group_build"
@@ -414,6 +486,7 @@ groups=(
     "gofmt|gofmt по индексу git|group_gofmt"
     "пробы|go test ./... -short (вердикт прогонщиком)|group_probes"
     "listfilter|make audit-list-filter|group_listfilter"
+    "golangci-lint|пин Makefile, пакеты диапазона отправки|group_lint"
 )
 
 declared=0

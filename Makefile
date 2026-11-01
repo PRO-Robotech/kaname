@@ -288,6 +288,15 @@ lint:
 test-prepush-lint:
 	bash scripts/hooks/prepush-lint-inject.sh
 
+.PHONY: test-prepush-hooks
+test-prepush-hooks:
+	@rc=0; for script in prepush-lint-inject.sh prepush-budget-inject.sh prepush-classify-inject.sh; do \
+	  bash scripts/hooks/$$script || rc=1; \
+	done; \
+	bash -n scripts/hooks/pre-push scripts/hooks/prepush-lint-inject.sh scripts/hooks/prepush-budget-inject.sh scripts/hooks/prepush-classify-inject.sh || rc=1; \
+	go test ./internal/supplyhygiene -count=1 -v || rc=1; \
+	exit $$rc
+
 # audit-list-filter — CI gate for kaname's listing surface: every method that
 # hands a page to a caller must narrow it, and must declare HOW. What is checked
 # lives in pkg/listfiltergate; how this service is laid out lives in

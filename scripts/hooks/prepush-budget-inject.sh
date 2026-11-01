@@ -3,18 +3,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # prepush-budget-inject.sh — доказательство опытом, что хук отправки держит
-# СВОЙ БЮДЖЕТ ПАМЯТИ: тяжёлого он не гоняет, параллелизм Go ограничен, а весь
+# СВОЙ БЮДЖЕТ ПАМЯТИ: детектора гонок нет, параллелизм Go ограничен, а весь
 # прогон идёт под потолком памяти, когда машина умеет его выставить.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # ПРЕДМЕТ
 #
-# Хук исполняется на КАЖДОЙ отправке и на машине, где параллельно идут другие
-# полосы. Решение владельца 2026-09-24: память машины не переваливает за 45 ГБ,
-# тяжёлое (детектор гонок, линтер, контейнеры) локально не гоняется — его
-# гоняет конвейер на АГРЕГАТЕ волны. Прежняя редакция хука звала
-# `go test ./... -race` с параллелизмом по числу ядер и `make lint` — без
-# всякого потолка, на каждой отправке.
+# Хук исполняется на каждой отправке. После переноса во внешний кластер
+# bounded lint включён (kaname#1050), а бюджет и отсутствие -race сохранены.
+# Линтер здесь — записывающий дублёр: он доказывает только место вызова.
+# Настоящий pinned binary/config и отбор пакетов судит prepush-lint-inject.sh.
 #
 # Свойство держится не текстом шапки хука, а тем, ЧТО хук зовёт. Поэтому опыт
 # гоняет НАСТОЯЩИЙ хук на синтетическом модуле, а в PATH кладёт записывающие
@@ -27,10 +25,9 @@
 #
 #  1. КОНТРОЛЬ С ПОТОЛКОМ. Отправка зелёного модуля проходит; каждый вызов
 #     `go build|vet|test` идёт с параллелизмом 4 и ВНУТРИ потолка; `-race` нет
-#     ни в одном `go test`; цель `lint` не зовётся ни разу (а сама она
-#     достижима — это проверено прямым вызовом, иначе молчание журнала ничего
-#     бы не доказывало); перечень непроверенного называет детектор гонок и
-#     линтер; ровно ОДИН вызов `systemd-run` перезапускает хук, и опции области
+#     ни в одном `go test`; bounded lint зовётся внутри потолка; перечень
+#     непроверенного называет детектор гонок, lint в нём отсутствует;
+#     ровно ОДИН вызов `systemd-run` перезапускает хук, и опции области
 #     именно у НЕГО несут `--user --scope`, `MemoryMax=10G` и `MemorySwapMax=0`
 #     (пробный вызов `-- true` в зачёт не идёт — разбор у судьи потолка).
 #  2. ЗАКОННЫЙ БЛИЗНЕЦ: ПОТОЛОК НЕДОСТУПЕН. `systemd-run` отказывает. Отправка
@@ -156,8 +153,7 @@ done
 # «внутри потолка» (его выставляет только переходник `systemd-run`). На
 # `go env CGO_ENABLED` он отвечает «1»: иначе на машине без компилятора C
 # прежний хук снял бы `-race` сам, и опыт зависел бы от машины, а не от хука.
-# `golangci-lint` отвечает версией пина фикстуры — чтобы прежний хук дошёл до
-# цели `lint`, если он её зовёт.
+# `golangci-lint` отвечает пином фикстуры и записывает место вызова.
 make_bin() {
     local b="$1" mode="$2"
     mkdir -p "$b" || return 1
@@ -167,9 +163,13 @@ printf 'sub=%s scoped=%s goflags=[%s] args=[%s]\n' "\${1:-}" "\${BUDGET_PROBE_SC
 if [ "\${1:-}" = env ] && [ "\${2:-}" = CGO_ENABLED ] && [ "\$#" -eq 2 ]; then echo 1; exit 0; fi
 exec "$REAL_GO" "\$@"
 GO
-    cat > "$b/golangci-lint" <<'LINT'
+    cat > "$b/golangci-lint" <<LINT
 #!/usr/bin/env bash
-case "${1:-}" in version) echo "golangci-lint has version 9.9.9 built with go" ;; *) exit 0 ;; esac
+case "\${1:-}" in
+version) echo "golangci-lint has version 9.9.9 built with go" ;;
+run) printf 'scoped=%s args=%s\n' "\${BUDGET_PROBE_SCOPED:-0}" "\$*" >> "$b/lint.log" ;;
+*) exit 2 ;;
+esac
 LINT
     if [ "$mode" = ok ]; then
         cat > "$b/systemd-run" <<SR
@@ -192,6 +192,7 @@ SR
     fi
     chmod +x "$b/go" "$b/golangci-lint" "$b/systemd-run"
     : > "$b/go.log"; : > "$b/systemd-run.log"; : > "$b/outer-goflags.log"
+    : > "$b/lint.log"
 }
 
 # build_module <каталог> <тело пробы> — синтетический модуль с НАСТОЯЩИМ хуком.
@@ -216,19 +217,14 @@ $body
 }
 GO
     gofmt -w "$d/budget_test.go" || return 1
-    # Цель `lint` пишет в журнал — по нему видно, звал ли её хук.
     cat > "$d/Makefile" <<MK
-.PHONY: vet lint audit-list-filter print-golangci-pin
+.PHONY: vet audit-list-filter
+GOLANGCI_LINT_VERSION := v9.9.9
 vet:
 	@go vet ./...
-lint:
-	@echo lint >> "$d.lint.log"
 audit-list-filter:
 	@echo "ok"
-print-golangci-pin:
-	@printf '%s\n' 'v9.9.9'
 MK
-    : > "$d.lint.log"
     git -C "$d" init -q .
     git -C "$d" add -A
     git -C "$d" commit -q -m "#1 фикстура опыта"
@@ -394,19 +390,20 @@ else
     if [ "$n_test" -gt 0 ] && [ "$n_race" -eq 0 ]; then ok "go test звался $n_test раз, с -race — ни разу"
     else bad "go test: вызовов $n_test, из них с -race $n_race — детектор гонок гоняется локально"; fi
 
-    if [ -s "$d.lint.log" ]; then bad "хук позвал цель lint — линтер гоняется локально"
-    else ok "цель lint хуком не звалась"; fi
-    # Положительный контроль журнала: цель достижима и пишет, иначе молчание
-    # журнала выше ничего бы не доказывало.
-    ( cd "$d" && make -s lint ) >/dev/null 2>&1
-    if [ -s "$d.lint.log" ]; then ok "положительный контроль: прямой вызов цели lint пишет журнал"
-    else bad "прямой вызов цели lint журнал не пишет — утверждение о молчании слепо"; fi
+    if grep -q '^scoped=1 args=run ' "$b/lint.log"; then ok "bounded lint вызван внутри потолка"
+    else bad "bounded lint внутри потолка не вызван"; fi
+    # Положительный контроль: прямой вызов добавляет запись того же производителя.
+    before_lint="$(wc -l < "$b/lint.log")"
+    PATH="$b:$PATH" golangci-lint run >/dev/null 2>&1
+    after_lint="$(wc -l < "$b/lint.log")"
+    if [ "$after_lint" -gt "$before_lint" ]; then ok "положительный контроль: прямой lint добавил запись"
+    else bad "прямой lint не добавил запись — журнал непригоден"; fi
 
     block="$(not_run_block "$out")"
-    if printf '%s' "$block" | grep -q -- '-race' && printf '%s' "$block" | grep -q 'golangci-lint'; then
-        ok "перечень непроверенного называет детектор гонок и линтер"
+    if printf '%s' "$block" | grep -q -- '-race' && ! printf '%s' "$block" | grep -q 'golangci-lint'; then
+        ok "перечень непроверенного называет детектор гонок, lint снят"
     else
-        bad "перечень непроверенного не называет -race и golangci-lint: $block"
+        bad "перечень непроверенного неверен: $block"
     fi
 
     verdict="$(restart_verdict "$b/systemd-run.log")"
@@ -434,8 +431,8 @@ else
     done <<< "$heavy"
     if [ "$n_heavy" -gt 0 ] && [ "$wide" -eq 0 ]; then ok "без потолка параллелизм всё равно 4 ($n_heavy вызовов)"
     else bad "без потолка вызовов с параллелизмом не 4: $wide из $n_heavy"; fi
-    if [ -s "$d.lint.log" ]; then bad "без потолка хук позвал цель lint"
-    else ok "без потолка цель lint не звалась"; fi
+    if grep -q '^scoped=0 args=run ' "$b/lint.log"; then ok "без потолка bounded lint всё равно вызван"
+    else bad "без потолка bounded lint не вызван"; fi
     axis_done 2
 fi
 

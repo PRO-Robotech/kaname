@@ -56,7 +56,10 @@ package probe
 
 import "testing"
 
-func TestProbe(t *testing.T) { Probe() }
+func TestProbe(t *testing.T) {
+	Probe()
+	result()
+}
 GO
 git init -q -b 1
 git add scripts/hooks .github Makefile provenance.mk go.mod probe.go probe_test.go
@@ -78,6 +81,7 @@ mutant="$(git rev-parse HEAD)"
 go build ./...
 go vet ./...
 [ -z "$(gofmt -l probe.go)" ]
+echo 'PRECONDITION PASS: mutant build/vet/gofmt чисты'
 if make lint > "$work/mutant-lint.log" 2>&1; then
     cat "$work/mutant-lint.log"; echo 'НЕ ВЫПОЛНИЛОСЬ: mutant oracle не увидел дефект'; exit 2
 fi
@@ -94,6 +98,7 @@ bash scripts/hooks/install.sh install >/dev/null
 # Обе фикстурные ревизии созданы до установки хуков, которые не отключаются.
 bash scripts/hooks/install.sh check
 if git push origin HEAD:refs/heads/1 > "$work/twin.log" 2>&1; then
+    cat "$work/twin.log"
     echo 'PASS: законный близнец — настоящий push прошёл'
 else
     cat "$work/twin.log"; exit 1
@@ -108,4 +113,93 @@ cat "$work/defect.log"
 grep -q 'probe.go:.*errcheck' "$work/defect.log"
 grep -q 'красные.*golangci-lint' "$work/defect.log"
 echo "PASS: errcheck назван, push отказал; база диапазона $base"
-echo 'prepush-lint-inject: рассмотрено 2 сценария, исполнено 2, отказов 0'
+checks=2
+failed=0
+check_result() {
+    local name="$1" expected="$2" pattern="$3" rc="$4" log="$5"
+    checks=$((checks + 1))
+    if { [ "$expected" = green ] && [ "$rc" -eq 0 ] || [ "$expected" = refuse ] && [ "$rc" -ne 0 ]; } && grep -q -- "$pattern" "$log"; then
+        echo "PASS: $name"
+    else
+        failed=$((failed + 1))
+        echo "FAIL: $name, код $rc, ожидается $expected / $pattern"
+        cat "$log"
+    fi
+}
+push_check() {
+    local name="$1" expected="$2" pattern="$3" rc=0
+    git push origin HEAD:refs/heads/2 > "$work/$name.log" 2>&1 || rc=$?
+    check_result "$name" "$expected" "$pattern" "$rc" "$work/$name.log"
+}
+commit_case() { git add "$@"; git commit -qm '#2 граница области lint'; }
+
+# На main есть старый lint-дефект в другом пакете. Новый чистый push должен
+# судить только изменённый пакет: full-module и пустой обход здесь различимы.
+git checkout -q --detach "$base"
+mkdir untouched
+cat > untouched/bad.go <<'GO'
+package untouched
+
+import "errors"
+
+func result() error { return errors.New("untouched") }
+
+func Probe() { result() }
+GO
+commit_case untouched/bad.go
+main_snapshot="$(git rev-parse HEAD)"
+git -C "$work/remote.git" fetch -q "$PWD" "$main_snapshot"
+git -C "$work/remote.git" update-ref refs/heads/main "$main_snapshot"
+git update-ref refs/remotes/origin/main "$main_snapshot"
+printf '\n// Изменён только корневой пакет.\n' >> probe.go
+commit_case probe.go
+tip="$(git rev-parse HEAD)"
+push_check new-branch green "lint: диапазон $main_snapshot..$tip"
+check_result captured-main green "lint: main snapshot=$main_snapshot" 0 "$work/new-branch.log"
+printf 'описание\n' > notes.txt
+commit_case notes.txt
+push_check no-go green 'затронутых существующих пакетов Go 0'
+git mv probe.go renamed.go
+git commit -qm '#2 перенос файла Go'
+push_check renamed-file green 'lint: областей 1 — .'
+mkdir moved
+printf 'package moved\n\nfunc Valid() {}\n' > moved/valid.go
+commit_case moved/valid.go
+push_check new-package green 'lint: областей 1 — ./moved'
+git mv moved renamed
+git commit -qm '#2 перенос пакета Go'
+push_check moved-package green 'lint: областей 1 — ./renamed'
+git rm -q renamed/valid.go
+git commit -qm '#2 удаление пакета Go'
+push_check deleted-package green 'затронутых существующих пакетов Go 0'
+tip="$(git rev-parse HEAD)"
+rc=0
+printf 'HEAD %s refs/heads/2 %s\nHEAD %s refs/heads/2 %s\n' "$tip" "$tip" "$tip" "$main_snapshot" | bash scripts/hooks/pre-push origin > "$work/multi-ref.log" 2>&1 || rc=$?
+check_result multi-ref green 'lint: областей 1 — .' "$rc" "$work/multi-ref.log"
+rc=0
+printf 'refs/heads/2 0000000000000000000000000000000000000000 refs/heads/2 %s\n' "$tip" | bash scripts/hooks/pre-push origin > "$work/delete-ref.log" 2>&1 || rc=$?
+check_result delete-ref green 'содержимого не уезжает — проверять нечего' "$rc" "$work/delete-ref.log"
+
+printf '\n# Граница конфигурации.\n' >> .github/golangci.yml
+commit_case .github/golangci.yml
+push_check config-full refuse 'untouched/bad.go:.*errcheck'
+check_result config-reason refuse 'полный модуль — изменена конфигурация' 1 "$work/config-full.log"
+tip="$(git rev-parse HEAD)"
+rc=0
+printf 'HEAD %s refs/heads/2 ffffffffffffffffffffffffffffffffffffffff\n' "$tip" | bash scripts/hooks/pre-push origin > "$work/unknown-base.log" 2>&1 || rc=$?
+check_result unknown-base refuse 'полный модуль — база отправки недоступна' "$rc" "$work/unknown-base.log"
+rc=0
+bash scripts/hooks/pre-push origin </dev/null > "$work/no-input.log" 2>&1 || rc=$?
+check_result no-input refuse 'полный модуль — нет входа git push' "$rc" "$work/no-input.log"
+
+# Расхождение версии и отсутствующее объявление — третья категория и отказ,
+# без запасного hardcode пина. Пользовательский binary и config не меняются.
+sed -i 's/^GOLANGCI_LINT_VERSION := .*/GOLANGCI_LINT_VERSION := v0.0.0/' Makefile
+commit_case Makefile
+push_check wrong-pin refuse 'golangci-lint не отвечает пину v0.0.0'
+sed -i 's/^GOLANGCI_LINT_VERSION := .*/GOLANGCI_LINT_VERSION :=/' Makefile
+commit_case Makefile
+push_check missing-pin refuse 'golangci-lint не отвечает пину'
+
+echo "prepush-lint-inject: рассмотрено $checks утверждений о hook, исполнено $checks, отказов $failed"
+[ "$failed" -eq 0 ]
