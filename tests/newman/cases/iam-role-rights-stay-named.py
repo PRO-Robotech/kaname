@@ -145,7 +145,7 @@ case(2, "delete-only and update/delete twin", [
     Step(name="snapshot-before-delete-only-update", method="GET",
          path="/iam/v1/serviceAccounts/{{escMutationTarget}}", auth=OWNER,
          test_script=[*assert_status(200),
-             "pm.environment.set('escBeforeDeniedUpdate', JSON.stringify(pm.response.json()));"]),
+             "pm.environment.set('escBeforeDeniedUpdate', pm.response.text());"]),
     *role("escSaDelete", "iam", "serviceAccount", ["delete"]),
     *grant("escSaHold", "escSaDelete", account=True),
     check("delete", True, "sa-delete-policy-visible", "iam", "iam_service_account", "escMutationTarget", "service_accounts"),

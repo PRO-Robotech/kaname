@@ -8797,7 +8797,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('escBeforeDeniedUpdate', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('escBeforeDeniedUpdate', pm.response.text());"
                 ]
               }
             }
