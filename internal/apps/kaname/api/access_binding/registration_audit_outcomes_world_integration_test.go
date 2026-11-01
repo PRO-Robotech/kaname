@@ -55,6 +55,17 @@ func registrationOutcomePayload(t *testing.T, w *urxWorld, eventType, objectID s
 	return payloads[0]
 }
 
+// Сравнивается сохранённая строка целиком, включая версию и updated_at.
+// Версия запроса имеет наносекунды, а PostgreSQL хранит микросекунды: сравнение
+// запроса с БД не доказывает, что отказ изменил состояние.
+func registrationMirrorSnapshot(t *testing.T, w *urxWorld) string {
+	t.Helper()
+	var snapshot string
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT to_jsonb(m)::text FROM kaname.resource_mirror m
+		WHERE object_type=$1 AND object_id=$2`, pcrRegTgt, auditK).Scan(&snapshot))
+	return snapshot
+}
+
 func assertRegistrationCaller(t *testing.T, p map[string]any, outcome string) {
 	t.Helper()
 	assert.Equal(t, "service_account:"+authzguard.ServiceAccountIDForService("registry"), p["actor"])
@@ -150,6 +161,9 @@ func TestRegistrationAudit1044_UnverifiedCertificateIsNotCaller(t *testing.T) {
 	_, err := auditOutcomeHandler(w, codes.OK).RegisterResource(registryModuleCtx(), r)
 	require.NoError(t, err, "подтверждённый близнец: личность модуля в событии")
 	assertRegistrationCaller(t, registrationOutcomePayload(t, w, auditRegistered, auditK), "registered")
+	before := registrationMirrorSnapshot(t, w)
+	t.Logf("Точность фикстуры: request source_version=%s; persisted mirror=%s", r.SourceVersion.AsTime().UTC().Format(time.RFC3339Nano), before)
+	r.SourceVersion = w.nextVersion()
 	_, err = w.pool.Exec(w.ctx, `DELETE FROM kaname.audit_outbox WHERE event_payload #>> '{object,id}'=$1`, auditK)
 	require.NoError(t, err)
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
@@ -157,9 +171,7 @@ func TestRegistrationAudit1044_UnverifiedCertificateIsNotCaller(t *testing.T) {
 	_, err = auditOutcomeHandler(w, codes.PermissionDenied).RegisterResource(ctx, r)
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	assert.Zero(t, w.auditRows(auditRegistered), "неподтверждённый SAN не порождает событие модуля")
-	var version time.Time
-	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT source_version FROM kaname.resource_mirror WHERE object_type=$1 AND object_id=$2`, pcrRegTgt, auditK).Scan(&version))
-	assert.True(t, r.SourceVersion.AsTime().Equal(version), "отказ не изменил регистрацию")
+	assert.Equal(t, before, registrationMirrorSnapshot(t, w), "отказ не изменил регистрацию")
 }
 
 // Настоящая auditTX не фиксируется: исход становится opaque Internal, состояние
@@ -181,8 +193,11 @@ func TestRegistrationAudit1044_RefusalAuditFailureIsOpaque(t *testing.T) {
 		_, cleanupErr := w.pool.Exec(context.Background(), `DROP TRIGGER audit1044_fault ON kaname.audit_outbox; DROP FUNCTION kaname.audit1044_fault()`)
 		assert.NoError(t, cleanupErr)
 	})
+	before := registrationMirrorSnapshot(t, w)
+	t.Logf("Точность фикстуры: request source_version=%s; persisted mirror=%s", r.SourceVersion.AsTime().UTC().Format(time.RFC3339Nano), before)
 	for _, operation := range []string{"register_denied", "unregister_denied", "register_precondition"} {
 		t.Run(operation, func(t *testing.T) {
+			r.SourceVersion = w.nextVersion()
 			denied := auditOutcomeHandler(w, codes.PermissionDenied)
 			var refusal error
 			switch operation {
@@ -200,9 +215,7 @@ func TestRegistrationAudit1044_RefusalAuditFailureIsOpaque(t *testing.T) {
 			assert.Equal(t, "internal error", status.Convert(refusal).Message())
 			assert.Zero(t, w.auditRows(auditRegistered))
 			assert.Zero(t, w.auditRows(auditUnregistered))
-			var version time.Time
-			require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT source_version FROM kaname.resource_mirror WHERE object_type=$1 AND object_id=$2`, pcrRegTgt, auditK).Scan(&version))
-			assert.True(t, r.SourceVersion.AsTime().Equal(version), "неудача аудита не изменила объект")
+			assert.Equal(t, before, registrationMirrorSnapshot(t, w), "неудача аудита не изменила объект")
 		})
 	}
 }
