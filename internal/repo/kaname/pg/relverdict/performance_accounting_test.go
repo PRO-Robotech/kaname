@@ -41,3 +41,11 @@ func TestPerformanceAccountingMatrixReportsObservedPlans(t *testing.T) {
 	require.Contains(t, text, "основных операций цикла")
 	require.Contains(t, text, "триггер")
 }
+
+func TestPerformanceAccountingMatrixIncludesSubjects(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	results := runMatrix(t, ctx, matrixPoints[:1])
+	require.Contains(t, results[0].ops[opWrite].plan, "access_bindings", "положительный близнец: первая вставка снята")
+	require.Contains(t, results[0].ops[opWrite].plan, "access_binding_subjects", "план записи включает обе продуктовые вставки")
+}
