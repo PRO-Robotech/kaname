@@ -1661,6 +1661,11 @@ ext_unfold() {
 # раннера платформы (PRO-Robotech/kacho#3346); на машине — kubectl, git, tar и gzip:
 #
 #   stand-own.sh runner [--out КАТАЛОГ] [--ship ФАЙЛ]… -- КОМАНДА…
+#   stand-own.sh runner [--out КАТАЛОГ] --ship ФАЙЛ… --step ИМЯ…
+#   --step ссылается на точное имя уже доставленного --ship файла; порядок и повторы
+#   сохраняются. Каждый bash-файл — отдельная оболочка из /src; первый ненулевой код
+#   останавливает следующие шаги, отчёты забираются и при ошибке. Формы не смешиваются.
+#   Старый -- КОМАНДА… — один непрозрачный payload, cd внутри него сохраняется.
 #
 #   пространство  t<задача>-kaname-own (KANAME_STAND_EXT_NS, KANAME_STAND_TASK — как у
 #                 внешнего пути) заводит машина тем же ext_claim_ns ПОСЛЕ доказательства
@@ -1715,9 +1720,10 @@ RUNNER_FETCH_N=0 RUNNER_FETCH_M="?" RUNNER_FETCH_WHY=""
 # же тексты на каталогах-фикстурах.
 RUNNER_ROOT=/
 RUNNER_WORK=/work
-RUNNER_GLOBS='work/out/*.json work/out/*.md work/out/step-*.log work/out/artifacts src/tests/newman/out-public src/.stand/log-public'
+RUNNER_GLOBS='work/out/*.json work/out/*.md work/out/summary.txt work/out/step-*.log work/out/artifacts src/tests/newman/out-public src/.stand/log-public'
 RUNNER_OUT="" RUNNER_LOGS="" RUNNER_UP=0
 RUNNER_SHIP=()
+RUNNER_STEPS=()
 
 # Текст pod: `gh` без удостоверения — чтение публичного REST. Тихий успех на иной
 # форме спрятал бы, что трекер не спрошен: прочее — код 4 с объяснением.
@@ -1749,7 +1755,7 @@ POD
 # пишет атомарный итог «стадия код» в /work/.rc и ждёт забора отчётов (/work/.fetched).
 read -r -d '' RUNNER_POD_SH <<'POD'
 set -uo pipefail
-unset KUBECONFIG
+unset KUBECONFIG KANAME_STAND_IN_POD
 say() { printf '=== kaname-runner: %s\n' "$*"; }
 # Срок ожидания забора — 600 с от последнего признака забора, а не от кода: пока жив tar
 # текущей попытки (/work/.fetching.pid), pod не выходит и поток не рвётся посередине.
@@ -1776,6 +1782,9 @@ export DEBIAN_FRONTEND=noninteractive
 say "инструменты: apt"
 { apt-get update -q && apt-get install -y -q --no-install-recommends ca-certificates curl git jq openssl tar gzip xz-utils procps \
     python3 python3-yaml python3-venv python3-pip python3-cryptography; } > /work/apt.log 2>&1 || { tail -n 5 /work/apt.log; unmet "apt-get"; }
+python3 /src/.github/scripts/stand-runner-tools.py --root /src --work /work || unmet "workflow tool declarations не прочитаны"
+declared_node="$(jq -r '.setup.node // empty' /work/workflow-tools.json)"
+[ -z "$declared_node" ] || RUNNER_NODE="$declared_node"
 if [ -x /work/bin/kubectl ] && /work/bin/kubectl version --client > /dev/null 2>&1; then
   install -m 0755 /work/bin/kubectl /usr/local/bin/kubectl || unmet "kubectl машины не поставлен"
   say "инструменты: kubectl — клиент машины ($(kubectl version --client 2>/dev/null | head -n 1))"
@@ -1786,7 +1795,9 @@ else
     echo "$(curl -fsSL --retry 3 --max-time 60 "$ku.sha256")  /usr/local/bin/kubectl" | sha256sum -c --quiet - &&
     chmod +x /usr/local/bin/kubectl; } || unmet "kubectl $RUNNER_KUBECTL не получен либо сумма не сошлась"
 fi
-nb="https://nodejs.org/dist/latest-v$RUNNER_NODE.x"
+if [[ "$RUNNER_NODE" =~ ^[0-9]+$ ]]; then nb="https://nodejs.org/dist/latest-v$RUNNER_NODE.x"
+elif [[ "$RUNNER_NODE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then nb="https://nodejs.org/dist/v$RUNNER_NODE"
+else unmet "Node pin вне поддержанной формы: $RUNNER_NODE"; fi
 sums="$(curl -fsSL --retry 3 --max-time 60 "$nb/SHASUMS256.txt")" || unmet "node $RUNNER_NODE: перечень сумм выпуска не получен"
 line="$(grep -E "^[0-9a-f]{64}  node-v[0-9]+\.[0-9]+\.[0-9]+-linux-$na\.tar\.xz\$" <<< "$sums")"
 [ "$(grep -c . <<< "$line")" -eq 1 ] || unmet "node $RUNNER_NODE: в перечне сумм не ровно один выпуск linux-$na"
@@ -1800,13 +1811,28 @@ say "инструменты: node $(node --version), npm $(npm --version)"
 say "инструменты: $(go version)"
 { printf '%s\n' "$RUNNER_GH_SH" > /usr/local/bin/gh && chmod 0755 /usr/local/bin/gh; } || unmet "gh раннера не поставлен"
 say "инструменты: gh — чтение публичного REST без удостоверения"
+# Один источник install/setup declarations; inherited image providers проверяются отдельно.
+. /work/workflow-tools.sh || unmet "workflow tools не установлены либо отсутствует base-image provider"
+python3 /src/.github/scripts/stand-runner-tools.py --root /src --work /work --observe || unmet "workflow tools runtime proof не сошёлся"
 say "исходники $RUNNER_SHA — репозиторием git (наборы читают состав индексом)"
 ( cd /src && git init -q && git remote add origin "https://github.com/$RUNNER_REPO.git" && git add -A &&
   git -c user.name=kaname-runner -c user.email=kaname-runner@kaname.invalid commit -q -m "kaname-runner: исходники $RUNNER_SHA" ) > /work/git.log 2>&1 ||
   { tail -n 5 /work/git.log; unmet "дерево исходников не стало репозиторием git"; }
 cd /src || unmet "каталог исходников /src"
 say "команда: $RUNNER_CMD"
-bash -c "$RUNNER_CMD"; rc=$?
+rc=0
+if [ "${RUNNER_STEPS_JSON:-[]}" != '[]' ]; then
+  python3 -c 'import json,sys; a=json.loads(sys.argv[1]); assert isinstance(a,list) and a and all(isinstance(x,str) and x and "/" not in x and "\0" not in x for x in a); sys.stdout.buffer.write(b"".join(x.encode()+b"\0" for x in a))' "$RUNNER_STEPS_JSON" > /work/.steps0 || unmet "список --step повреждён"
+  mapfile -d '' -t steps < /work/.steps0
+  for step in "${steps[@]}"; do
+    [ -f "/work/ship/$step" ] && [ ! -L "/work/ship/$step" ] || unmet "--step не доставлен обычным файлом: $step"
+    say "шаг: $step; cwd=/src"
+    ( cd /src && bash -- "/work/ship/$step" ); rc=$?
+    [ "$rc" -eq 0 ] || break
+  done
+else
+  bash -c "$RUNNER_CMD"; rc=$?
+fi
 say "команда завершилась кодом $rc"
 finish command "$rc"
 POD
@@ -1928,7 +1954,7 @@ runner_fetch() {
 # роль, привязка и pod раннера (список JSON для kubectl apply). Всё — в ПРОСТРАНСТВЕ.
 runner_objects() {
   jq -n --arg ns "$1" --arg image "$2" --arg sha "$3" --arg task "$4" --arg kver "$5" --arg go "$6" \
-    --arg cmd "$7" --arg repo "$8" --arg node "$RUNNER_NODE" --arg sh "$RUNNER_POD_SH" --arg gh "$RUNNER_GH_SH" \
+    --arg cmd "$7" --arg repo "$8" --argjson steps "${9:-[]}" --arg node "$RUNNER_NODE" --arg sh "$RUNNER_POD_SH" --arg gh "$RUNNER_GH_SH" \
     --arg name "$RUNNER_POD" --argjson deadline "$RUNNER_DEADLINE" '
     def meta: {name: $name, namespace: $ns, labels: {"kaname.io/stand": "runner", "app.kubernetes.io/name": $name}};
     def env($n; $v): {name: $n, value: $v};
@@ -1947,7 +1973,7 @@ runner_objects() {
         serviceAccountName: $name, restartPolicy: "Never", activeDeadlineSeconds: $deadline,
         enableServiceLinks: false, terminationGracePeriodSeconds: 10,
         containers: [{name: "run", image: $image, command: ["bash", "-c", $sh], workingDir: "/src",
-          env: [env("RUNNER_SHA"; $sha), env("RUNNER_CMD"; $cmd), env("RUNNER_KUBECTL"; $kver),
+          env: [env("RUNNER_SHA"; $sha), env("RUNNER_CMD"; $cmd), env("RUNNER_STEPS_JSON"; ($steps | tojson)), env("RUNNER_KUBECTL"; $kver),
                 env("RUNNER_GO"; $go), env("RUNNER_NODE"; $node), env("RUNNER_REPO"; $repo), env("RUNNER_GH_SH"; $gh),
                 env("KANAME_STAND_IN_POD"; "1"), env("KANAME_STAND_EXT_NS"; $ns), env("KANAME_STAND_TASK"; $task),
                 env("HOME"; "/work/home"), env("GOTOOLCHAIN"; "local")],
@@ -2070,6 +2096,7 @@ runner_on_signal() {
 # неверен; 1 — пространство уже есть.
 runner_main() {
   local sha url repo gov kver image objs mark mrc rc="" stage="" outcome phase miss=0 fetch=0 t f base want got
+  local command_form="" step matched steps_json='[]' command_text=""
   local -A seen=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2079,14 +2106,29 @@ runner_main() {
               base="$(basename -- "$2")"
               [ -z "${seen[$base]:-}" ] || { refuse "runner: --ship — два файла с именем «$base»"; return 64; }
               seen[$base]=1; RUNNER_SHIP+=("$2"); shift 2 ;;
-      --) shift; break ;;
+      --step) [ "$#" -ge 2 ] && [ -n "$2" ] || { refuse "runner: --step без имени доставленного файла"; return 64; }
+              RUNNER_STEPS+=("$2"); shift 2 ;;
+      --) command_form=1; shift; break ;;
       *) refuse "runner: неизвестный довод «$1» (команда — после --)"; return 64 ;;
     esac
   done
-  [ $# -gt 0 ] || { refuse "runner: команда не названа — stand-own.sh runner [--out КАТАЛОГ] [--ship ФАЙЛ]… -- КОМАНДА…"; return 64; }
+  if [ "${#RUNNER_STEPS[@]}" -gt 0 ]; then
+    [ -z "$command_form" ] && [ "$#" -eq 0 ] || { refuse "runner: --step и -- КОМАНДА… не смешиваются"; return 64; }
+    for step in "${RUNNER_STEPS[@]}"; do
+      matched=""
+      for f in "${RUNNER_SHIP[@]}"; do [ "$(basename -- "$f")" != "$step" ] || matched=1; done
+      [ -n "$matched" ] || { refuse "runner: --step «$step» не соответствует --ship файлу"; return 64; }
+    done
+  else
+    [ $# -gt 0 ] || { refuse "runner: команда не названа — stand-own.sh runner [--out КАТАЛОГ] [--ship ФАЙЛ]… -- КОМАНДА…"; return 64; }
+    command_text="$(printf '%q ' "$@")"
+  fi
   for t in kubectl jq python3 git gzip tar; do
     command -v "$t" >/dev/null 2>&1 || { unmet "инструмента нет: $t — раннер не запускался"; return "$RUNNER_UNMET"; }
   done
+  if [ "${#RUNNER_STEPS[@]}" -gt 0 ]; then
+    steps_json="$(printf '%s\0' "${RUNNER_STEPS[@]}" | python3 -c 'import json,sys; data=sys.stdin.buffer.read(); print(json.dumps([x.decode() for x in data.split(b"\0")[:-1]]))')" || { refuse "runner: --step не удалось представить JSON-массивом"; return 64; }
+  fi
   [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ] ||
     { refuse "runner: в рабочей копии правки вне коммита — pod исполняет коммит (git archive HEAD): закоммить их"; return 64; }
   sha="$(git -C "$ROOT" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" || { refuse "runner: голова рабочей копии не разрешается"; return 64; }
@@ -2109,7 +2151,7 @@ runner_main() {
   kver="$(kq version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion // empty' 2>/dev/null)"
   [[ "$kver" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { unmet "версия сервера кластера не прочитана — kubectl pod не выбрать"; return "$RUNNER_UNMET"; }
   image="$(runner_image "$gov")"
-  objs="$(runner_objects "$EXT_NS" "$image" "$sha" "$EXT_TASK" "$kver" "$gov" "$(printf '%q ' "$@")" "$repo")" ||
+  objs="$(runner_objects "$EXT_NS" "$image" "$sha" "$EXT_TASK" "$kver" "$gov" "$command_text" "$repo" "$steps_json")" ||
     { unmet "объекты раннера не построены"; return "$RUNNER_UNMET"; }
   runner_judge "$EXT_NS" <<< "$objs" >&2 || { unmet "форма объектов раннера не прошла суд (выше)"; return "$RUNNER_UNMET"; }
   RUNNER_OUT="${RUNNER_OUT:-$ROOT/.stand/runner-out/$EXT_NS}"
@@ -2702,11 +2744,15 @@ case "$line" in
   *"apply -f -"*) cat > "$S/objects.json" ;;
   # Тот же атомарный итог «стадия код», что публикует finish() настоящего pod.
   *"exec "*"cat /work/.rc"*) [ -f "$S/rc" ] || exit 1; cat "$S/rc" ;;
+  *"exec "*"sha256sum /work/ship/"*)
+    file="${args[${#args[@]}-1]}"; sha256sum "$S/ship/${file##*/}" ;;
   *"logs "*) echo "журнал службы из пода" ;;
   *"exec "*"/proc/net/tcp"*) cat "$S/proc-net-tcp" ;;
   # `exec -i` настоящего клиента передаёт приёмнику pod поток до конца. Подставной, вышедший
   # недочитав, ронял пишущую сторону конвейера сигналом SIGPIPE, и pipefail доставки
   # принимал это за отказ — исход зависел от того, кто первым успел (kaname#1025).
+  *"exec -i "*"/work/ship/"*)
+    file="${args[${#args[@]}-1]}"; mkdir -p "$S/ship"; cat > "$S/ship/$file" ;;
   *"exec -i "*)
     cat > /dev/null
     [ -e "$S/exec-in-fail" ] || exit 0
@@ -2856,6 +2902,7 @@ EOF
           echo 'PARITY-AXIS summary: exact bytes доставлены' )
     }
     world_fetch_summary_lawful() { ( RUNNER_GLOBS="$RUNNER_GLOBS work/out/summary.txt"; world_fetch_summary ); }
+    world_fetch_summary_mutant() { ( RUNNER_GLOBS="${RUNNER_GLOBS//work\/out\/summary.txt/}"; world_fetch_summary ); }
 
     # inpod_world [настройка] — подъём изнутри pod раннера до выбора пути; путь подменён
     # заведением пространства (оно в pod лишь чистит остаток) и строкой.
@@ -2914,6 +2961,8 @@ EOF
           # shellcheck disable=SC2086  # доводы мира — словами
           ( runner_main ${SELFTEST_RUNNER_ARGS--- true} ) || rc=$?
           if [ "$rc" -eq 0 ] && [ "${SELFTEST_VERIFY_STEPS:-}" = 1 ]; then
+              export PARITY_EXPORT_FUNCTIONS="$(declare -f runner_fetch runner_warn say)"
+              export PARITY_EXPORT_MANIFEST="$RUNNER_MANIFEST_SH" PARITY_EXPORT_TAR="$RUNNER_TAR_SH" PARITY_EXPORT_GLOBS="$RUNNER_GLOBS"
               "$PY" "$SELFTEST_SOURCE_ROOT/.github/scripts/stand-runner-parity-test.py" --steps "$SELFTEST_KC/objects.json" "$TMP/runner-steps" || rc=$?
           fi
           grep -qE 'create -f|apply -f' "$SELFTEST_KC/calls" && echo "ЗАПИСЬ В КЛАСТЕР БЫЛА"
@@ -2992,6 +3041,12 @@ EOF
     world_runner_tools() { world_runner_payload_parity tools; }
     world_runner_prologue() { world_runner_payload_parity prologue; }
     world_runner_opaque() { world_runner_payload_parity opaque; }
+    world_runner_real_tool() { world_runner_payload_parity real-tool; }
+    rw_steps_repeat() { rw_steps; SELFTEST_RUNNER_ARGS="$SELFTEST_RUNNER_ARGS --step first.sh"; }
+    world_runner_steps_repeat() { runner_world rw_steps_repeat; }
+    world_runner_steps_unknown() { ( SELFTEST_RUNNER_ARGS='--step missing.sh'; runner_world ); }
+    world_runner_steps_empty() { ( SELFTEST_RUNNER_ARGS='--step'; runner_world ); }
+    world_runner_steps_mixed() { ( SELFTEST_RUNNER_ARGS='--step first.sh -- true'; runner_world ); }
 
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
@@ -3200,11 +3255,19 @@ EOF
 
     echo '--- ось 16: workflow toolset, explicit steps, actual prologue и доставленная сводка (kaname#1042)'
     assert 0 '(−) real payload соответствует tools workflow' world_runner_tools 'PARITY-AXIS tools' '-' 'PARITY-INVALID'
-    assert 0 '(−) actual prologue снимает sentinel после world cleanup' world_runner_prologue 'PARITY-AXIS prologue actual' 'PARITY-AXIS prologue unset-lawful absent=True' 'PARITY-INVALID'
+    assert 0 '(−) actual prologue снимает sentinel после world cleanup' world_runner_prologue 'PARITY-AXIS prologue actual absent=True' 'PARITY-MUTANT prologue rejected' 'PARITY-INVALID'
     assert 0 '(−) opaque command сохраняет собственный cd' world_runner_opaque 'PARITY-OPAQUE cwd сохраняется' '-' 'PARITY-INVALID'
     assert 0 '(−) явные шаги runner приняты настоящим parser' world_runner_steps 'раннер: код 0' '-' 'неизвестный довод'
+    assert 0 '(−) повторы шага разрешены' world_runner_steps_repeat 'раннер: код 0' '-' 'неизвестный довод'
+    assert 64 '(+) недоставленный step отвергнут до payload' world_runner_steps_unknown 'не соответствует --ship' '-' 'ЗАПИСЬ В КЛАСТЕР БЫЛА'
+    assert 64 '(+) пустой step-mode отвергнут' world_runner_steps_empty '--step без имени' '-' 'ЗАПИСЬ В КЛАСТЕР БЫЛА'
+    assert 64 '(+) смешение steps и opaque отвергнуто' world_runner_steps_mixed 'не смешиваются' '-' 'ЗАПИСЬ В КЛАСТЕР БЫЛА'
     assert 0 '(−) сводка приехала независимо от урезанного manifest N/N' world_fetch_summary 'PARITY-AXIS summary: exact bytes доставлены' '-' 'заранее созданная summary.txt не доставлена'
     assert 0 '(−) lawful export twin покрывает ту же summary.txt' world_fetch_summary_lawful 'PARITY-AXIS summary: exact bytes доставлены' '-' '-'
+    assert 1 '(+) summary coverage mutant обнаружен за N/N' world_fetch_summary_mutant 'заранее созданная summary.txt не доставлена' '-' '-'
+    if [ "${KANAME_RUNNER_REAL_TOOL_PROOF:-}" = 1 ]; then
+        assert 0 '(−) реальный grpcurl совпал с workflow Go module pin' world_runner_real_tool 'PARITY-REAL grpcurl workflow-pin=' '-' 'PARITY-INVALID'
+    fi
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"
     [ "$probes" -eq 0 ] && { echo "ПРОВАЛ: ни одной пробы не исполнено" >&2; exit 2; }

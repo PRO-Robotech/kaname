@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Самопроба реального текста payload: установки, пролог и граница shell-step."""
 import hashlib
+import ast
 import io
 import json
 import os
@@ -98,6 +99,11 @@ class World:
         (self.work / ".go").touch()
         (self.work / ".fetched").touch()
         (self.src / "root-sentinel").write_text("root\n")
+        source_root = Path(__file__).resolve().parents[2]
+        for relative in ("go.mod", ".github/workflows/e2e-newman.yml", ".github/scripts/stand-runner-tools.py"):
+            destination = self.src / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_root / relative, destination)
         if ships:
             for file in ships.iterdir():
                 if file.is_file():
@@ -147,7 +153,7 @@ class World:
         for tool in ("helm", "docker"):
             executable(self.bin / tool, '#!/bin/sh\necho "fixture-base-image-tool"\n')
         installer = '''#!/usr/bin/env python3
-import json, os, pathlib, sys
+import json, os, pathlib, subprocess, sys
 root=pathlib.Path(os.environ["FIXTURE_WORLD"])
 name=pathlib.Path(sys.argv[0]).name
 args=sys.argv[1:]
@@ -155,8 +161,26 @@ if name == "go":
     if args == ["env", "GOVERSION"]: print("go"+os.environ["RUNNER_GO"]); sys.exit(0)
     if args == ["env", "GOPATH"]: print(root/"go"); sys.exit(0)
     if args == ["version"]: print("go version go"+os.environ["RUNNER_GO"]+" linux/amd64"); sys.exit(0)
+    if args[:2] == ["version", "-m"]:
+        target=pathlib.Path(args[2])
+        real=os.environ.get("FIXTURE_REAL_GO")
+        if real and target.read_bytes().startswith(b"\\x7fELF"):
+            sys.exit(subprocess.run([real,*args]).returncode)
+        specs=json.loads((root/"go-install-specs.json").read_text())
+        module, version=specs[str(target)].rsplit("@",1)
+        print(str(target)+": go"+os.environ["RUNNER_GO"])
+        print("\\tpath\\t"+module)
+        print("\\tmod\\t"+module.split("/cmd/",1)[0]+"\\t"+version+"\\th1:controlled-fixture")
+        sys.exit(0)
     if args[:1] != ["install"]: sys.exit(71)
     module, version=args[1].rsplit("@",1); tool=module.rsplit("/",1)[-1]; target=root/"go/bin"/tool
+    records=root/"go-install-specs.json"
+    specs=json.loads(records.read_text()) if records.exists() else {}
+    specs[str(target)]=args[1]; records.write_text(json.dumps(specs))
+    if os.environ.get("FIXTURE_REAL_GO") and tool == "grpcurl":
+        target.parent.mkdir(parents=True,exist_ok=True)
+        environment=dict(os.environ, GOBIN=str(target.parent))
+        sys.exit(subprocess.run([os.environ["FIXTURE_REAL_GO"],*args],env=environment).returncode)
 elif name == "npm":
     if args == ["--version"]: print("10.0.0"); sys.exit(0)
     if args[:2] != ["install", "-g"]: sys.exit(72)
@@ -230,7 +254,7 @@ else: sys.exit(74)
         env["RUNNER_CMD"] = remap_roots(command, roots)
         print("PARITY-PRODUCER world=" + self.base.name + " sha256=" + hashlib.sha256(self.payload.encode()).hexdigest(), flush=True)
         result = subprocess.run(["bash", "-c", text], env=env, cwd=self.src, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45)
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=240 if self.env.get("FIXTURE_REAL_GO") else 45)
         stage = (self.work / ".rc").read_text().strip() if (self.work / ".rc").exists() else "missing"
         print(f"PARITY-PAYLOAD rc={result.returncode} stage={stage}", flush=True)
         if not stage.startswith("command "):
@@ -267,12 +291,23 @@ for name, version in data.items():
   if version not in r.stdout+r.stderr: failures.append(name+': ожидалось '+version+', получено '+r.stdout+r.stderr)
 print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(failures))
 '''
-        tool_worlds = (("actual", ""), ("workflow-lawful", "\n".join(blocks))) if axis in ("all", "tools") else ()
+        tool_worlds = (("actual", ""), ("workflow-lawful", "\n".join(blocks)), ("pin-mutant", "")) if axis in ("all", "tools") else ()
         for label, install in tool_worlds:
             # Один и тот же root/layout: меняется только факт workflow install.
             pair_root = base / "workflow-lawful"
             shutil.rmtree(pair_root, ignore_errors=True)
             world = World(pair_root, payload)
+            if label == "pin-mutant":
+                helper = world.src / ".github/scripts/stand-runner-tools.py"
+                text = helper.read_text()
+                statements = [node for node in ast.walk(ast.parse(text)) if isinstance(node, ast.Assign) and ast.get_source_segment(text, node) == "spec = words[2]"]
+                assert len(statements) == 1, "нет единственного producer Go spec"
+                node = statements[0]
+                lines = text.splitlines(keepends=True)
+                start = sum(map(len, lines[:node.lineno-1])) + node.col_offset
+                end = sum(map(len, lines[:node.end_lineno-1])) + node.end_col_offset
+                replacement = "spec = words[2].replace(" + repr("@" + installs["grpcurl"][0]) + ", '@v0.0.1042')"
+                helper.write_text(text[:start] + replacement + text[end:])
             print("PARITY-CASE tools " + label, flush=True)
             (world.work / "ship/tools.py").write_text(probe)
             expected = {name: spec[0] for name, spec in installs.items()}
@@ -285,10 +320,13 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
             if label == "actual":
                 print(f"PARITY-AXIS tools rc={result.returncode}", flush=True)
                 failures += result.returncode != 0
-            else:
+            elif label == "workflow-lawful":
                 assert result.returncode == 0, "workflow lawful install twin не исполнился"
+            else:
+                assert result.returncode != 0, "tools self-test не увидел однофактный wrong-pin mutant"
+                print("PARITY-MUTANT tools rejected=wrong-pin command-stage", flush=True)
         command = "python3 -c " + shlex.quote("import os,json; print(json.dumps({'present': 'KANAME_STAND_IN_POD' in os.environ, 'keep':os.environ.get('KEEP_SENTINEL')}))")
-        env_worlds = (("actual", payload), ("unset-lawful", payload.replace("unset KUBECONFIG\n", "unset KUBECONFIG KANAME_STAND_IN_POD\n", 1))) if axis in ("all", "prologue") else ()
+        env_worlds = (("actual", payload), ("unset-mutant", payload.replace("unset KUBECONFIG KANAME_STAND_IN_POD\n", "unset KUBECONFIG\n", 1))) if axis in ("all", "prologue") else ()
         for label, code in env_worlds:
             pair_root = base / "prologue-world"
             shutil.rmtree(pair_root, ignore_errors=True)
@@ -299,12 +337,29 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
             good = rows[0]["present"] is False
             print(f"PARITY-AXIS prologue {label} absent={good}", flush=True)
             if label == "actual": failures += not good
-            else: assert good, "lawful unset twin не подавил унаследованную переменную"
+            else:
+                assert not good, "prologue self-test не увидел mutant без unset"
+                print("PARITY-MUTANT prologue rejected=missing-unset", flush=True)
         if axis in ("all", "opaque"):
             world = World(base / "opaque-cwd", payload)
             result = world.run("cd sub; test \"$PWD\" = \"$(dirname \"$PWD\")/sub\"")
             assert result.returncode == 0, "законный cd внутри opaque payload потерян"
             print("PARITY-OPAQUE cwd сохраняется внутри одной команды: PASS", flush=True)
+        if axis == "real-tool":
+            world = World(base / "real-grpcurl", payload)
+            real_go = shutil.which("go", path=os.environ["PATH"])
+            assert real_go, "реальный Go отсутствует"
+            world.env["FIXTURE_REAL_GO"] = str(Path(real_go).resolve())
+            result = world.run("grpcurl --version")
+            assert result.returncode == 0, result.stdout
+            record = json.loads((world.work / "runtime-tools.json").read_text())["tools"]["grpcurl"]
+            binary = Path(record["path"])
+            assert binary.read_bytes().startswith(b"\x7fELF"), "grpcurl не реальный ELF binary"
+            metadata = subprocess.run([real_go, "version", "-m", str(binary)], capture_output=True, text=True, check=True)
+            rows = [line.strip().split() for line in metadata.stdout.splitlines()]
+            assert any(len(row) >= 3 and row[0] == "mod" and row[2] == installs["grpcurl"][0] for row in rows), metadata.stdout
+            print("PARITY-REAL grpcurl workflow-pin=" + installs["grpcurl"][0] + " path=" + str(binary) + " sha256=" + hashlib.sha256(binary.read_bytes()).hexdigest(), flush=True)
+            print(metadata.stdout + result.stdout, flush=True)
     return int(bool(failures))
 
 
@@ -322,6 +377,30 @@ def step_checks(objects, ships):
             print("PARITY-AXIS steps: отдельные оболочки/root cwd/files не подтверждены", flush=True)
             return 1
         print("PARITY-AXIS steps: actual producer payload исполнен, root cwd и files сохранены", flush=True)
+        anchor = '( cd /src && bash -- "/work/ship/$step" )'
+        assert payload.count(anchor) == 1, "граница step cwd не единственна"
+        mutant = World(Path(temp) / "cwd-mutant", payload, env=env, ships=ships)
+        bad = mutant.run(env.get("RUNNER_CMD", ""), payload=payload.replace(anchor, '( cd /src/sub && bash -- "/work/ship/$step" )', 1))
+        assert bad.returncode != 0, "steps self-test не увидел wrong-cwd mutant"
+        print("PARITY-MUTANT steps rejected=wrong-cwd", flush=True)
+        failure_ships = Path(temp) / "failure-ships"
+        failure_ships.mkdir()
+        (failure_ships / "first.sh").write_text('printf "failure nonce=1042\\n" > "$PARITY_OUT/summary.txt"\nexit 23\n')
+        (failure_ships / "second.sh").write_text('touch "$PARITY_OUT/not-run"\n')
+        failed = World(Path(temp) / "first-failure", payload, env=env, ships=failure_ships)
+        failed.env["PARITY_OUT"] = str(failed.work / "out")
+        outcome = failed.run(env.get("RUNNER_CMD", ""))
+        assert outcome.returncode == 23 and not (failed.work / "out/not-run").exists(), "первый код/остановка steps не сохранены"
+        receiver = failed.base / "receiver"
+        receiver.mkdir()
+        exported = dict(failed.env, RUNNER_ROOT=str(failed.base), RUNNER_WORK=str(failed.work),
+                        RUNNER_GLOBS=os.environ["PARITY_EXPORT_GLOBS"], RUNNER_MANIFEST_SH=os.environ["PARITY_EXPORT_MANIFEST"],
+                        RUNNER_TAR_SH=os.environ["PARITY_EXPORT_TAR"])
+        code = "set -uo pipefail\n" + os.environ["PARITY_EXPORT_FUNCTIONS"] + '\nrunner_exec() { shift; "$@"; }\nrunner_fetch fixture "$1"\n'
+        fetch = subprocess.run(["bash", "-c", code, "fetch", str(receiver)], env=exported, capture_output=True, text=True, timeout=30)
+        print(fetch.stdout + fetch.stderr, flush=True)
+        assert fetch.returncode == 0 and (receiver / "work/out/summary.txt").read_bytes() == b"failure nonce=1042\n", "summary после реальной ошибки шага не экспортирован"
+        print("PARITY-STEP-FAILURE code=23 following=not-run summary=exported-exact-bytes", flush=True)
     return 0
 
 
@@ -330,7 +409,7 @@ if __name__ == "__main__":
         if sys.argv[1] == "--steps":
             sys.exit(step_checks(Path(sys.argv[2]), Path(sys.argv[3])))
         if sys.argv[1] == "--axis":
-            assert sys.argv[2] in ("tools", "prologue", "opaque"), "неизвестная ось fixture"
+            assert sys.argv[2] in ("tools", "prologue", "opaque", "real-tool"), "неизвестная ось fixture"
             sys.exit(payload_checks(Path(sys.argv[3]), Path(sys.argv[4]).read_text(), sys.argv[2]))
         sys.exit(payload_checks(Path(sys.argv[1]), Path(sys.argv[2]).read_text()))
     except Exception as error:
