@@ -895,7 +895,7 @@ func writeStrengthReport(t *testing.T, prov scalegrid.Provenance, grid [][]scale
 	results [][]strPointResult, wall time.Duration, final bool) {
 	t.Helper()
 	title := "R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляционный вердикт)\n" +
-		"Сетка пяти новых осей; КАЖДАЯ точка снята ТРЕМЯ вопросами на одном посеве."
+		"Сетка шести осей: V/M/L/S/K — по три Ask на точку; Pg — один List."
 	if !final {
 		title += "\nПРОМЕЖУТОЧНЫЙ СРЕЗ: прогон не окончен, оси ниже ещё не сняты."
 	}
