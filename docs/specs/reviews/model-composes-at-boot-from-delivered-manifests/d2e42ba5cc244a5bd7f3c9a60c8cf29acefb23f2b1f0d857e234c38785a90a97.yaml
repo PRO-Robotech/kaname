@@ -1,0 +1,210 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+  sha256: d2e42ba5cc244a5bd7f3c9a60c8cf29acefb23f2b1f0d857e234c38785a90a97
+  static_status: APPROVED
+  static_status_note: >-
+    Шапка намеренно не правлена. Ее APPROVED относится к прежней редакции;
+    запись c29b7647a612904902b729e94b0d505e212d82a4d43daf5ce05c2d40e702f3e6
+    также судила другой отпечаток и не имеет опубликованного события.
+    Ни одно из этих объявлений не переносится на рассматриваемую редакцию.
+  base_commit: d0c08a3c74ea39cae48228e2d3ca0fc9132e33d6
+  content_commit: 15521042a60a28ee4db4bc1a9546361f9bede41b
+  content_tree: 912082c4a3cebbe2877f22fa43212a72e02bbb2e
+  branch: '953'
+  task: https://github.com/PRO-Robotech/kaname/issues/953
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+verdict: BLOCKED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-11-01T07:21:37Z'
+round: 2
+round_note: >-
+  Вторая append-only запись по правке kaname#953 после c29b7647...;
+  исторические круги исходной под-фазы не возобновляются. Третьего круга
+  по тому же спору не назначать автоматически: решение принимает диспетчер.
+scope_of_round: >-
+  Фактический текущий exact review по заданию диспетчера. Дельта к base_commit:
+  +28/-3 строки приёмки, баннер #953, величина байт IAM-MB-1-01 и историческая
+  атрибуция. Дельта сама согласована с каноном. Однако запрошенное одобрение
+  текущего отпечатка нельзя выдать при противоречащих друг другу действующих
+  ожидаемых результатах того же контракта тождества канону. Замечание не
+  требует нового механизма продукта и не является ревью реализации.
+chronology: >-
+  Реализация уже унаследована из существующей ветки до этого рассмотрения.
+  Эта запись не утверждает одобрение до кода и не удостоверяет TDD, тестовые
+  результаты, готовность доставки либо завершение задачи #953.
+checks:
+  fingerprint_and_revision:
+    predicate: git rev-parse HEAD HEAD^{tree}; sha256sum docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+    result: совпадают с subject; исходная рабочая копия чистая
+  changed_value:
+    predicate_1: wc -c internal/authzmodel/fga_model.fga proto/kaname/cloud/iam/v1/fga_model.fga
+    observation: оба файла по 114114 байт
+    predicate_2: internal/modelrender/canon.go, строки 30-31, единица B
+    second_observation: 33 блока; 114114 байт всего файла
+    result: величина IAM-MB-1-01 подтверждена чтением и измерением файлов
+  canonical_cardinality:
+    predicate_1: rg -c '^type ' internal/authzmodel/fga_model.fga
+    observation: '33'
+    predicate_2: internal/modelrender/canon.go:30-31; internal/modelcompose/compose.go:94-96
+    second_observation: >-
+      Шапка производителя называет 33 блока; Compose получает число из
+      SplitCanon. Это сверка исходников, не запуск парсера.
+  scope_and_relations:
+    predicate: git diff origin/main -- internal/authzmodel/fga_model.fga
+    observation: заменены три строки комментария; объявления отношений не изменены
+  producer_then:
+    sources:
+      - docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md:897
+      - docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md:973
+      - internal/modelcompose/compose_test.go:166
+      - internal/modelrender/acceptancecanonvalues_test.go:171
+    observation: >-
+      Для изменённого IAM-MB-1-01 названы П-17 и Н-01; существующая проба
+      TestIAMMB101_OnTodaysTreeCompositionIsIdentity сравнивает результат с
+      authzmodel.DSL и требует непустой подтверждённый набор. Величину клауз
+      проверяет TestAcceptanceScenarioCanonValuesAreTodays.
+  one_fact_twins:
+    source: internal/modelcompose/registry_create_note_test.go
+    observation: >-
+      registryDocWithNote строит варианты из одной public-read фикстуры.
+      NewProseIsTheCanon и PriorProseStillComposes требуют подтверждения двух
+      ресурсов без добавленных/прежних типов. ThirdProseIsRefused меняет одну
+      строку новой прозы и требует отказа композиции. Это чтение существующих
+      сценариев и их производителей, не заявление о зелёном прогоне.
+  constructibility:
+    named_fixtures:
+      - internal/modelcompose/registry_create_note_test.go:registryDocWithNote
+      - internal/testsupport/publicreadfixture/publicreadfixture.go:NewEditionFile
+      - internal/modelcompose/compose_test.go:deliveredManifests
+    observation: >-
+      Локальная Registry-фикстура существует; три версии примечания строятся
+      существующим helper. Полный Given IAM-MB-1-01 имеет существующую фабрику
+      deliveredManifests с внешним деревом через RequireNamedPlatformTree.
+      Фабрика и ее предусловие прочитаны; доставку и посев этот review не запускал.
+    seeded: 0
+    runtime_verification: not_performed
+    reason: задание прямо запрещает новые тесты, Jobs, CI и локальные прогоны
+  dod:
+    observation: >-
+      Приёмка сохраняет исходные границы §9 и исходные сценарии; #953 их не
+      расширяет. Literal DoD #953 включает реальный перепин resources у
+      потребителя. Он не удостоверяется этой записью и по входу диспетчера
+      еще не выполнен. Требование consumer commit остается самостоятельным.
+blocking:
+  - id: B1
+    genus: FORMAT
+    where: >-
+      §2 пункт 1 (строки 703-704); IAM-MB-1-01 (956-957), IAM-MB-1-02
+      (981-983); положительный контроль IAM-MB-1-10 (1115-1116);
+      IAM-MB-1-11 (1130-1135).
+    finding: >-
+      Действующие ожидаемые результаты противоречат друг другу: -01 требует
+      тождественную канону модель с 33 типами, а -02 одновременно требует
+      тождества тому же канону и len(Types)=32. Норма §2 продолжает называть
+      базой 32 типа; связанные контроли -10/-11 также сохраняют прежние
+      кардинальности. Это клаузы сценариев/норма, а не записи исторического
+      замера. Точная текущая редакция не может быть принята целиком с такими
+      взаимоисключающими исходами.
+    predicate: >-
+      sed -n '701,705p;950,983p;1115,1135p' docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md;
+      rg -c '^type ' internal/authzmodel/fga_model.fga;
+      sed -n '30,31p' internal/modelrender/canon.go
+    revision: 15521042a60a28ee4db4bc1a9546361f9bede41b
+    remedy: >-
+      Согласовать нормативные клаузы и положительные контроли с текущей
+      кардинальностью канона либо явно задать отдельную фиксированную
+      историческую фикстуру там, где действительно проверяется она.
+      Исторические записи замеров и старые отзывы не переписывать.
+    scope_reason: >-
+      Расхождение существовало до #953; оно не приписывается этой правке.
+      Оно блокирует именно запрошенное полное exact approval текущего
+      контракта как вводящий в заблуждение ожидаемый результат
+      (ban19-block-criterion), а не узкую корректность новой величины байт.
+  - id: B2
+    genus: FORMAT
+    where: §2 пункт 6, строки 741-746; IAM-MB-1-17, строки 1196-1202
+    finding: >-
+      Норма требует композицию ДО разбора доставки безусловно. Сценарий -17
+      задает обратный порядок: доставка, затем композиция, и явно называет
+      действием разбор доставки. Одно выполнение старта не может соблюдать
+      оба порядка. Различение разбора формы и проверки ссылок в последующем
+      тексте не устраняет буквального противоречия двух нормативных требований.
+    predicate: >-
+      sed -n '738,746p;1194,1202p' docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+    revision: 15521042a60a28ee4db4bc1a9546361f9bede41b
+    remedy: >-
+      Уточнить нормативную фразу §2 пункт 6 в соответствии с единым порядком
+      сценария -17: разбор формы доставки, композиция, дальнейшие стадии.
+      Если подразумевалось первое чтение модели, назвать именно его.
+      Исторические отзывы не переписывать, нового механизма не добавлять.
+    scope_reason: >-
+      Существовавшая до #953 неоднозначность контракта; включена в пакет
+      замечаний по дополнительному заданию диспетчера о полном exact census.
+non_blocking: []
+coverage:
+  scenarios_added: 0
+  scenarios_removed: 0
+  scenario_inventory: §3.3 содержит IAM-MB-1-01..22 с именованными производителями
+  scenarios_without_producer_in_delta: []
+  all_historical_scenarios_executed: false
+  full_spec_coverage_claimed: false
+execution:
+  tests_run: 0
+  green: 0
+  red: 0
+  not_performed: текущий запуск сценариев и посев не заказывались и не выполнялись
+  note: BLOCKED означает дефект текста контракта, а не красный тестовый прогон
+route_signs:
+  scope: дельта #953 относительно base_commit
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+effective_approval:
+  issued_by_this_record: false
+  why: BLOCKED; публикация события также еще не выполнена
+event:
+  type: acceptance_review
+  status: performed
+  published: true
+  body: acceptance-reviewer · BLOCKED · sha256 d2e42ba5cc244a5bd7f3c9a60c8cf29acefb23f2b1f0d857e234c38785a90a97
+  publication_expected_from_orchestrator: false
+  url: https://github.com/PRO-Robotech/kaname/issues/953#issuecomment-6555186195
+  published_at: "2026-11-01T07:52:52Z"
+  publishing_actor: pointpu
+attribution:
+  reviewer_kind: codex_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: true
+completion:
+  scope: >-
+    По дополнительному заданию диспетчера прочитаны нормативные разделы
+    §1-§10, все сценарии §4, таблица производителей §3.3 и пояснение порядка
+    §21. Исторические журналы §0 и §11-§22 не превращены в текущие требования.
+    Полный повтор старых экспериментов и проверка каждого исторического
+    утверждения о дереве не проводились.
+  scenario_inventory_predicate_1: rg -n '^\*\*`IAM-MB' docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md | wc -l
+  scenario_inventory_result_1: 22
+  scenario_inventory_predicate_2: sed -n '893,922p' docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md | rg -c '^\| `IAM'
+  scenario_inventory_result_2: 22
+  producer_mapping: 22 непустые строки таблицы; это учет названных производителей, не 22 исполненные проверки
+  blocking_count: 2
+  blocking_genera: [FORMAT]
+  historical_measurements: >-
+    Числа таблиц §0, §5 и §8, а также стенограмм кругов сохраняют свою ревизию.
+    В B1 исправление требуется в действующих нормативных клаузах; исторические
+    числа нельзя механически заменять по всему файлу. При применении §10
+    как сегодняшней инструкции также требуется явно назвать ревизию входа.
+  decision_boundary: >-
+    Два подтвержденных противоречия текста передаются автору одним пакетом.
+    Никакие дополнительные дефекты продукта, готовность потребителя, полный
+    scope спеки или результаты исторических прогонов этим обзором не объявлены.

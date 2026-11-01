@@ -1,0 +1,152 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+  sha256: cf259f85f4c5da1de49c96aabf2bb47df4c3f9e94da8dc8c5f2cf2ba7accd9e9
+  static_status: NOT_APPROVED
+  static_status_note: >-
+    Шапка содержит историческое APPROVED и явное предупреждение, что новая
+    редакция еще не одобрена. Шапка намеренно не правлена; текущий вердикт
+    привязан к SHA-256 этой записью, внешнее событие пока не опубликовано.
+  base_commit: 15521042a60a28ee4db4bc1a9546361f9bede41b
+  content_commit: null
+  branch: '953'
+  task: https://github.com/PRO-Robotech/kaname/issues/953
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+  fingerprint_note: >-
+    Рассмотрено незакоммиченное содержимое рабочего файла поверх base_commit.
+    Коммит 15521042 содержит прежнюю редакцию d2e42ba5..., а не cf259f85....
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-11-01T07:49:48Z'
+round: 3
+round_note: >-
+  Номер продолжает историю записей #953 (c29b7647, d2e42ba5, cf259f85).
+  Этот заход назначен явно диспетчером после принятия обоих замечаний и
+  исправления автором. Автоматический третий спор по неизменному предмету
+  не проводился; в текущей серии на сведении 15521042 это второе рассмотрение.
+previous_review:
+  subject_sha256: d2e42ba5cc244a5bd7f3c9a60c8cf29acefb23f2b1f0d857e234c38785a90a97
+  record_sha256: 1a6353f228a0c5657394962febcf31a8f539a0a579624ec581af2902b8b16683
+  verdict: BLOCKED
+  retained_unchanged: true
+scope_of_round: >-
+  Повторное рассмотрение дельты к d2e42ba5: +19/-8 строк одного документа.
+  Проверены исправления B1/B2 FORMAT, новый отпечаток, сохранность сценариев,
+  производителей, исторических замеров и границ. Остальной нормативный
+  предмет рассмотрен предыдущим заходом; полный исторический аудит повторно
+  не заявляется. Новых блокирующих противоречий в дельте не обнаружено.
+chronology: >-
+  Код существовал до настоящего review. Запись не удостоверяет одобрение
+  до первой строки реализации, TDD, готовность к посадке, CI либо доставку.
+checks:
+  exact_subject:
+    predicate: git rev-parse HEAD; git status --short; sha256sum docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+    result: HEAD совпал с base_commit, файл изменен, отпечаток совпал с subject.sha256
+  B1:
+    genus: FORMAT
+    result: resolved
+    predicate: git diff -- docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+    observation: >-
+      §2 пункт 1 и сценарии -02/-10 называют текущие 33 типа. В -11
+      повтор дает 34 против 33, множество уникальных имен остается 33=33,
+      положительный контроль без повтора имеет 33. Исторический замер
+      §0.9 сохранен и явно отделен от текущего положительного контроля.
+    owner_predicate_1: wc -c internal/authzmodel/fga_model.fga; rg -c '^type ' internal/authzmodel/fga_model.fga
+    owner_observation_1: 114114 байт; 33 объявления type
+    owner_predicate_2: sed -n '30,31p' internal/modelrender/canon.go
+    owner_observation_2: производитель называет 33 блока и 114114 байт всего файла
+  B2:
+    genus: FORMAT
+    result: resolved
+    predicate: git diff -- docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+    observation: >-
+      §2 пункт 6 теперь требует композицию до первого чтения модели и
+      явно задает разбор формы доставки без чтения модели, композицию,
+      применение и страж. Противоречие сценарию IAM-MB-1-17 устранено.
+    owner_sources:
+      - cmd/kaname/serve.go:284
+      - cmd/kaname/serve.go:332
+      - cmd/kaname/serve.go:378
+    owner_observation: >-
+      Чтение существующего корня подтверждает порядок загрузки доставки,
+      installComposedModel и последующего стража каталога. Прогона старта нет.
+  scope_and_history:
+    predicate: git diff --numstat -- docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md; git diff -- docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md
+    observation: >-
+      +19/-8; изменены баннер, нормативные кардинальности и порядок.
+      Исторические отчеты, ID, таблица производителей и границы §9 не изменены.
+  inventory:
+    predicate_1: rg -n '^\*\*`IAM-MB' docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md | wc -l
+    observed_1: 22
+    predicate_2: sed -n '902,931p' docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md | rg -c '^\| `IAM'
+    observed_2: 22
+    interpretation: сценариев 22, соответствий именованным производителям 22; не число исполненных проб
+  twins_and_constructibility:
+    sources:
+      - internal/modelcompose/registry_create_note_test.go:51
+      - internal/modelcompose/registry_create_note_test.go:96
+      - internal/modelcompose/registry_create_note_test.go:108
+      - internal/modelcompose/registry_create_note_test.go:114
+      - internal/modelcompose/compose_test.go:deliveredManifests
+      - internal/testsupport/publicreadfixture/publicreadfixture.go:NewEditionFile
+    observation: >-
+      Существующие именованные фабрики и фикстуры сохранены. Registry-пара
+      допускает новую и прежнюю прозу; отрицательный вариант меняет одну
+      строку новой прозы и требует отказа. Коррекция чисел -10/-11 сохраняет
+      отличие отрицания от положительного близнеца. Given не расширены.
+    seeded: 0
+    runtime_verification: not_performed
+    reason: задание запрещает новые тесты, Jobs, CI и локальные прогоны
+  dod:
+    observation: >-
+      Требование реального consumer repin из literal DoD #953 остается
+      самостоятельным и не засчитывается этим review. По входу диспетчера
+      оно не выполнено. Одобрение контракта не закрывает #953 и не принимает код.
+blocking: []
+non_blocking: []
+coverage:
+  scenarios: 22
+  named_producer_rows: 22
+  scenarios_without_named_producer: []
+  scenarios_added: 0
+  scenarios_removed: 0
+  entire_historical_runtime_coverage_claimed: false
+execution:
+  tests_run: 0
+  seeded: 0
+  green: 0
+  red: 0
+  runtime_status: not_performed
+  note: одобрение текста по чтению и именованным фикстурам; зеленый прогон не объявляется
+route_signs:
+  scope: дельта #953
+  proto: false
+  schema: false
+  public_rpc: false
+  ui: false
+  new_domain: false
+  security_surface: true
+effective_approval:
+  issued_by_this_record: false
+  why: >-
+    Это вердикт роли о точном содержимом; внешнее событие публикует курьер.
+    До публикации запись не объявляет выпущенной санкции и готовности доставки.
+event:
+  type: acceptance_approval
+  status: performed
+  published: true
+  body: acceptance-reviewer · APPROVED · sha256 cf259f85f4c5da1de49c96aabf2bb47df4c3f9e94da8dc8c5f2cf2ba7accd9e9
+  publication_expected_from_orchestrator: false
+  url: https://github.com/PRO-Robotech/kaname/issues/953#issuecomment-6555186824
+  published_at: "2026-11-01T07:52:54Z"
+  publishing_actor: pointpu
+attribution:
+  reviewer_kind: codex_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: true
