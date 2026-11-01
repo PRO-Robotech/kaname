@@ -61,14 +61,17 @@ package relverdict_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
@@ -228,6 +231,10 @@ type opResult struct {
 	// не снимали», а это разные вещи.
 	planTaken bool
 	plan      string
+	// roots — полные верхние планы; physicalSQL — отдельные вложенные SQL.
+	roots              []matrixRootPlan
+	physicalSQL        []matrixSQLNotice
+	constraintsChecked bool
 
 	// tuples — сверочная величина (`pg_stat_xact_all_tables`); заполняется
 	// ТОЛЬКО на чтениях, см. шапку файла. tuplesTaken отличает «не спрашивали»
@@ -244,6 +251,45 @@ type opResult struct {
 
 	// verdict — исход вердикта для чтений; пусто для записи и отзыва.
 	verdict string
+}
+
+type matrixRootPlan struct {
+	SQL     string          `json:"sql"`
+	Args    []any           `json:"args"`
+	Explain json.RawMessage `json:"explain"`
+}
+
+// matrixSQLNotice сохраняет происхождение SQL, включая контекст функции и backend.
+// Время и буферы родителя включают потомков; складывать эти величины нельзя.
+type matrixSQLNotice struct {
+	BackendPID uint32          `json:"backendPID"`
+	Context    string          `json:"context"`
+	Plan       json.RawMessage `json:"plan"`
+}
+
+type matrixNoticeCapture struct {
+	mu    sync.Mutex
+	byPID map[uint32][]matrixSQLNotice
+}
+
+func (c *matrixNoticeCapture) onNotice(conn *pgconn.PgConn, n *pgconn.Notice) {
+	_, body, ok := strings.Cut(n.Message, "plan:\n")
+	if !ok {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.byPID[conn.PID()] = append(c.byPID[conn.PID()], matrixSQLNotice{
+		BackendPID: conn.PID(), Context: n.Where, Plan: json.RawMessage(body),
+	})
+}
+
+func (c *matrixNoticeCapture) take(pid uint32) []matrixSQLNotice {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := c.byPID[pid]
+	delete(c.byPID, pid)
+	return out
 }
 
 // tableCount — строка переписи объёма: таблица, строк, байт.
@@ -298,21 +344,29 @@ func matrixDSN(t *testing.T) string {
 // соединение видело бы пустую базу. Здесь посев КОММИТИТСЯ — иначе продуктовый
 // путь записи (он открывает свою транзакцию из пула) не увидел бы ни объекта,
 // ни роли, — и ограничение снимается вместе со своей причиной.
-func openMatrixPool(t *testing.T, ctx context.Context) (*pgxpool.Pool, *verdictCapture) {
+func openMatrixPool(t *testing.T, ctx context.Context) (*pgxpool.Pool, *verdictCapture, *matrixNoticeCapture) {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(matrixDSN(t))
 	if err != nil {
 		t.Fatalf("разбор строки подключения: %v", err)
 	}
 	capture := &verdictCapture{}
+	notices := &matrixNoticeCapture{byPID: map[uint32][]matrixSQLNotice{}}
 	cfg.ConnConfig.Tracer = capture
+	cfg.ConnConfig.OnNotice = notices.onNotice
+	// Модуль загружается одинаково до замеров на всех соединениях; сбор включён
+	// только на плановых двойниках, вне выборки часов продуктовой операции.
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, `LOAD 'auto_explain'`)
+		return err
+	}
 	cfg.MaxConns = 4
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatalf("пул: %v", err)
 	}
 	pgtest.ClosePoolAtEnd(t, pool)
-	return pool, capture
+	return pool, capture, notices
 }
 
 // seedMatrixSubject — субъект вопроса и его роль. Один раз на всю базу.
@@ -438,10 +492,10 @@ func askOnMatrix(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 // вовсе, и «запись», ограниченная первой вставкой, создала бы выдачу, которой
 // вердикт не видит, — то есть шаг 2 упал бы на исправном продукте.
 //
-// Возвращает захваченный оператор вставки: план снимается с ТОГО ЖЕ текста,
+// Возвращает оба захваченных оператора: план снимается с ТОГО ЖЕ текста,
 // который исполнил продукт, а не с редакции прибора.
 func writeOnMatrix(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
-	capture *verdictCapture, id string) (int64, time.Duration, capturedVerdictStmt) {
+	capture *verdictCapture, id string) (int64, time.Duration, []capturedVerdictStmt) {
 	t.Helper()
 	w, err := repo.Writer(ctx)
 	if err != nil {
@@ -466,7 +520,10 @@ func writeOnMatrix(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 	}
 	took := time.Since(t0)
 	calls := int64(capture.count())
-	return calls, took, findCaptured(t, capture, "вставки выдачи", "INSERT INTO access_bindings")
+	return calls, took, []capturedVerdictStmt{
+		findCaptured(t, capture, "вставки выдачи", "INSERT INTO access_bindings"),
+		findCaptured(t, capture, "вставки субъектов", "INSERT INTO access_binding_subjects"),
+	}
 }
 
 // revokeOnMatrix — продуктовый отзыв выдачи.
@@ -545,9 +602,37 @@ func matrixPlanShape(raw []byte, want []string) string {
 	return strings.Join(types, " ")
 }
 
-// explainCaptured — план ЗАХВАЧЕННОГО оператора.
+type matrixPlanMeasurement struct {
+	measurement planrows.Measurement
+	shape       string
+	root        matrixRootPlan
+	physicalSQL []matrixSQLNotice
+}
+
+// matrixPlanSession включает полный сбор вложенного SQL на плановом двойнике.
+func matrixPlanSession(t *testing.T, ctx context.Context, tx pgx.Tx) {
+	t.Helper()
+	for _, sql := range []string{
+		`SET LOCAL auto_explain.log_min_duration = -1`,
+		`SET LOCAL auto_explain.log_analyze = on`,
+		`SET LOCAL auto_explain.log_buffers = on`,
+		`SET LOCAL auto_explain.log_timing = on`,
+		`SET LOCAL auto_explain.log_triggers = on`,
+		`SET LOCAL auto_explain.log_verbose = on`,
+		`SET LOCAL auto_explain.log_nested_statements = on`,
+		`SET LOCAL auto_explain.log_format = 'json'`,
+		`SET LOCAL auto_explain.log_level = 'notice'`,
+		`SET LOCAL client_min_messages = 'notice'`,
+		`SET LOCAL auto_explain.sample_rate = 1`,
+		`SET LOCAL auto_explain.log_min_duration = 0`,
+	} {
+		exec(t, ctx, tx, sql)
+	}
+}
+
+// explainCaptured — полный верхний план ЗАХВАЧЕННОГО оператора.
 func explainCaptured(t *testing.T, ctx context.Context, tx pgx.Tx,
-	stmt capturedVerdictStmt, want []string) (planrows.Measurement, string) {
+	stmt capturedVerdictStmt, want []string) matrixPlanMeasurement {
 	t.Helper()
 	var raw []byte
 	if err := tx.QueryRow(ctx,
@@ -558,7 +643,8 @@ func explainCaptured(t *testing.T, ctx context.Context, tx pgx.Tx,
 	if err != nil {
 		t.Fatalf("прибор строк плана отказал: %v", err)
 	}
-	return m, matrixPlanShape(raw, want)
+	return matrixPlanMeasurement{measurement: m, shape: matrixPlanShape(raw, want),
+		root: matrixRootPlan{SQL: stmt.sql, Args: stmt.args, Explain: json.RawMessage(raw)}}
 }
 
 // withArg0 — тот же оператор с ДРУГИМ первым параметром.
@@ -577,15 +663,23 @@ func withArg0(stmt capturedVerdictStmt, v any) capturedVerdictStmt {
 	return capturedVerdictStmt{sql: stmt.sql, args: args}
 }
 
-func withPlan(r opResult, m planrows.Measurement, shape string) opResult {
-	r.rows, r.removed, r.touched = m.Rows, m.Removed, m.Touched
-	r.plan, r.planTaken = shape, true
+func withPlan(r opResult, p matrixPlanMeasurement) opResult {
+	r.rows += p.measurement.Rows
+	r.removed += p.measurement.Removed
+	r.touched += p.measurement.Touched
+	if r.planTaken {
+		r.plan += " | "
+	}
+	r.plan += p.shape
+	r.planTaken = true
+	r.roots = append(r.roots, p.root)
+	r.physicalSQL = append(r.physicalSQL, p.physicalSQL...)
 	return r
 }
 
 // askAndExplain — вердикт и план ОДНОГО и того же вопроса.
 func matrixAskAndExplain(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
-	capture *verdictCapture, want relverdict.Verdict) (planrows.Measurement, string) {
+	capture *verdictCapture, notices *matrixNoticeCapture, want relverdict.Verdict) matrixPlanMeasurement {
 	t.Helper()
 	axis, err := relverdict.LabelAxisForTest(probeCatalogType, probeModelType)
 	if err != nil {
@@ -611,21 +705,25 @@ func matrixAskAndExplain(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 			"ноль означает, что продукт исполняет другой текст, больше одного — что прибор "+
 			"мерит два вопроса", len(stmts))
 	}
-	return explainCaptured(t, ctx, tx, stmts[0], matrixWantRead)
+	matrixPlanSession(t, ctx, tx)
+	p := explainCaptured(t, ctx, tx, stmts[0], matrixWantRead)
+	p.physicalSQL = notices.take(tx.Conn().PgConn().PID())
+	return p
 }
 
 // ── ЗАМЕР ТОЧКИ ──────────────────────────────────────────────────────────────
 
 // measureMatrixPoint — четыре операции на одной точке объёма.
 func measureMatrixPoint(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
-	repo *kanamepg.Repository, capture *verdictCapture, p matrixPoint, seq *int) matrixResult {
+	repo *kanamepg.Repository, capture *verdictCapture, notices *matrixNoticeCapture, p matrixPoint, seq *int) matrixResult {
 	t.Helper()
 	res := matrixResult{point: p, ops: map[opKind]opResult{}, cycles: matrixRepeats}
 
 	durs := map[opKind][]time.Duration{}
 	calls := map[opKind]int64{}
 	tuples := map[opKind]int64{}
-	var insertStmt, revokeStmt capturedVerdictStmt
+	var insertStmts []capturedVerdictStmt
+	var revokeStmt capturedVerdictStmt
 
 	for i := 0; i < matrixRepeats; i++ {
 		*seq++
@@ -647,7 +745,7 @@ func measureMatrixPoint(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 				"отзыв не подействовал", p, i, cv)
 		}
 
-		insertStmt, revokeStmt = wStmt, dStmt
+		insertStmts, revokeStmt = wStmt, dStmt
 
 		// Нулевой цикл прогревочный: исполняется, но в выборку не входит.
 		if i == 0 {
@@ -688,8 +786,7 @@ func measureMatrixPoint(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	// Состояние на входе: все выдачи цикла отозваны, значит вердикт deny.
 
 	// 1) отрицательное чтение — на нынешнем состоянии, без подготовки.
-	m, shape := matrixAskAndExplain(t, ctx, pool, capture, relverdict.Deny)
-	res.ops[opCheck] = withPlan(res.ops[opCheck], m, shape)
+	res.ops[opCheck] = withPlan(res.ops[opCheck], matrixAskAndExplain(t, ctx, pool, capture, notices, relverdict.Deny))
 
 	// 2) вставка — двойником, ПОКА действующей выдачи нет.
 	*seq++
@@ -699,9 +796,22 @@ func measureMatrixPoint(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 			t.Fatalf("транзакция снятия плана вставки: %v", err)
 		}
 		defer func() { _ = tx.Rollback(context.Background()) }()
-		m, shape := explainCaptured(t, ctx, tx,
-			withArg0(insertStmt, fmt.Sprintf("acb-mx%014d", *seq)), matrixWantWrite)
-		res.ops[opWrite] = withPlan(res.ops[opWrite], m, shape)
+		matrixPlanSession(t, ctx, tx)
+		id := fmt.Sprintf("acb-mx%014d", *seq)
+		for i, stmt := range insertStmts {
+			want := matrixWantWrite
+			if i == 1 {
+				want = []string{"access_binding_subjects"}
+			}
+			res.ops[opWrite] = withPlan(res.ops[opWrite], explainCaptured(t, ctx, tx, withArg0(stmt, id), want))
+		}
+		// Откат сам не исполняет отложенные ограничения. Выполняем их после
+		// ОБЕИХ вставок, как при фиксации; запись двойника затем откатывается.
+		exec(t, ctx, tx, `SET CONSTRAINTS ALL IMMEDIATE`)
+		r := res.ops[opWrite]
+		r.constraintsChecked = true
+		r.physicalSQL = notices.take(tx.Conn().PgConn().PID())
+		res.ops[opWrite] = r
 	}()
 
 	// 3) положительное чтение — воспроизводится настоящей выдачей: allow без
@@ -711,8 +821,7 @@ func measureMatrixPoint(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	if _, _, _, err := repoWrite(t, ctx, repo, planID); err != nil {
 		t.Fatalf("подготовка плана положительного пути: %v", err)
 	}
-	m, shape = matrixAskAndExplain(t, ctx, pool, capture, relverdict.Allow)
-	res.ops[opRead] = withPlan(res.ops[opRead], m, shape)
+	res.ops[opRead] = withPlan(res.ops[opRead], matrixAskAndExplain(t, ctx, pool, capture, notices, relverdict.Allow))
 
 	// 4) отзыв — двойником на ДЕЙСТВУЮЩЕЙ выдаче: отозванная дала бы ноль
 	// изменённых строк и план, описывающий несделанную работу.
@@ -722,14 +831,44 @@ func measureMatrixPoint(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 			t.Fatalf("транзакция снятия плана отзыва: %v", err)
 		}
 		defer func() { _ = tx.Rollback(context.Background()) }()
-		m, shape := explainCaptured(t, ctx, tx, withArg0(revokeStmt, planID), matrixWantWrite)
-		res.ops[opRevoke] = withPlan(res.ops[opRevoke], m, shape)
+		matrixPlanSession(t, ctx, tx)
+		res.ops[opRevoke] = withPlan(res.ops[opRevoke], explainCaptured(t, ctx, tx, withArg0(revokeStmt, planID), matrixWantWrite))
+		exec(t, ctx, tx, `SET CONSTRAINTS ALL IMMEDIATE`)
+		r := res.ops[opRevoke]
+		r.constraintsChecked = true
+		r.physicalSQL = notices.take(tx.Conn().PgConn().PID())
+		res.ops[opRevoke] = r
 	}()
 
 	// Выдача, созданная ради плана, снимается по-настоящему: оставленная
 	// действующей, она дала бы allow там, где следующая точка ждёт deny.
 	if _, _, _, err := repoRevoke(t, ctx, repo, planID); err != nil {
 		t.Fatalf("снятие выдачи, созданной ради плана: %v", err)
+	}
+	for k, r := range res.ops {
+		want := 1
+		if k == opWrite {
+			want = 2
+		}
+		if len(r.roots) != want {
+			t.Fatalf("SQL-свидетельство %s: верхних планов %d, ожидалось %d", k, len(r.roots), want)
+		}
+		hasNested, hasDeferred := false, false
+		for _, n := range r.physicalSQL {
+			if !json.Valid(n.Plan) {
+				t.Fatalf("SQL-свидетельство %s: повреждён JSON auto_explain", k)
+			}
+			hasNested = hasNested || n.Context != ""
+			hasDeferred = hasDeferred || strings.Contains(n.Context, "access_binding_carries_a_subject")
+		}
+		if k == opWrite || k == opRevoke {
+			if !hasNested || !r.constraintsChecked {
+				t.Fatalf("SQL-свидетельство %s: вложенный SQL или проверка ограничений не сняты", k)
+			}
+		}
+		if k == opWrite && !hasDeferred {
+			t.Fatalf("SQL-свидетельство записи: нет исполнения отложенной проверки состава субъектов")
+		}
 	}
 	return res
 }
@@ -778,7 +917,7 @@ func repoRevoke(t *testing.T, ctx context.Context, repo *kanamepg.Repository,
 // разошлись бы молча, и малая сетка перестала бы охранять то, что мерит полная.
 func runMatrix(t *testing.T, ctx context.Context, points []matrixPoint) []matrixResult {
 	t.Helper()
-	pool, capture := openMatrixPool(t, ctx)
+	pool, capture, notices := openMatrixPool(t, ctx)
 	repo := kanamepg.New(pool, nil)
 
 	results := make([]matrixResult, 0, len(points))
@@ -826,7 +965,7 @@ func runMatrix(t *testing.T, ctx context.Context, points []matrixPoint) []matrix
 		tables, dbRows, dbBytes := takeMatrixTables(t, ctx, ctx1)
 		_ = ctx1.Rollback(ctx)
 
-		res := measureMatrixPoint(t, ctx, pool, repo, capture, p, &seq)
+		res := measureMatrixPoint(t, ctx, pool, repo, capture, notices, p, &seq)
 		res.census, res.tables = census, tables
 		res.dbRows, res.dbBytes, res.seedIn = dbRows, dbBytes, seedIn
 		results = append(results, res)
