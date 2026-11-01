@@ -3811,6 +3811,99 @@
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:EXPAND | class:AUDIT | class:HAPPY | priority:P0",
       "item": [
         {
+          "name": "RBACSUBJ-EXPAND-GROUP-OK :: group-fixture-denied-before",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/iam:check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "iam:check"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subjectId\": \"user:{{groupMemberAUserId}}\", \"relation\": \"viewer\", \"object\": \"account:{{accountAId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownInternalRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownInternalRestBaseUrl') || pm.variables.get('ownInternalRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/iam:check');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownInternalRestBaseUrl is set — isolated group subject has no independent viewer grant', () => {",
+                  "    pm.expect.fail('ownInternalRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('membership alone grants no viewer', () => pm.expect(pm.response.json().allowed).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "RBACSUBJ-EXPAND-GROUP-OK :: create-group",
           "request": {
             "method": "POST",
@@ -4247,7 +4340,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userAABId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4774,7 +4867,7 @@
                   "const ec = parseInt(pm.environment.get('_expCount') || '0', 10);",
                   "const ids = (j.principals || []).map(p => p.id);",
                   "const wantA = pm.environment.get('userAAAId');",
-                  "const wantB = pm.environment.get('userAABId');",
+                  "const wantB = pm.environment.get('groupMemberAUserId');",
                   "const ready = (pm.response.code === 200 && ids.indexOf(wantA) !== -1 && ids.indexOf(wantB) !== -1);",
                   "if (!ready && ec < 180) {",
                   "  pm.environment.set('_expCount', String(ec + 1));",
@@ -4790,9 +4883,9 @@
                   "  const ids = (j.principals || []).map(p => p.id);",
                   "  pm.expect(ids, JSON.stringify(j.principals)).to.include(pm.environment.get('userAAAId'));",
                   "});",
-                  "pm.test('concrete member userAABId resolved', () => {",
+                  "pm.test('concrete member groupMemberAUserId resolved', () => {",
                   "  const ids = (j.principals || []).map(p => p.id);",
-                  "  pm.expect(ids, JSON.stringify(j.principals)).to.include(pm.environment.get('userAABId'));",
+                  "  pm.expect(ids, JSON.stringify(j.principals)).to.include(pm.environment.get('groupMemberAUserId'));",
                   "});",
                   "pm.test('principals are concrete (no GROUP type in the result)', () => {",
                   "  const types = (j.principals || []).map(p => p.type);",
@@ -5143,7 +5236,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userAABId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5224,7 +5317,7 @@
                   "pm.environment.unset('_poll200_teardown_unmember_e31GroupId_1');",
                   "pm.environment.unset('_poll200_started_teardown_unmember_e31GroupId_1');",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.test('teardown: userAABId removed from the group (idempotent)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
+                  "pm.test('teardown: groupMemberAUserId removed from the group (idempotent)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
                 ]
               }
             }
@@ -5331,6 +5424,99 @@
               }
             }
           ]
+        },
+        {
+          "name": "RBACSUBJ-EXPAND-GROUP-OK :: group-fixture-denied-after-cleanup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/iam:check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "iam:check"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subjectId\": \"user:{{groupMemberAUserId}}\", \"relation\": \"viewer\", \"object\": \"account:{{accountAId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownInternalRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownInternalRestBaseUrl') || pm.variables.get('ownInternalRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/iam:check');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownInternalRestBaseUrl is set — isolated group subject has no independent viewer grant', () => {",
+                  "    pm.expect.fail('ownInternalRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('membership alone grants no viewer', () => pm.expect(pm.response.json().allowed).to.eql(false));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -5338,6 +5524,99 @@
       "name": "RBACSUBJ-GROUP-GRANTS-MEMBER-OK — Group membership FGA mirror: a group member gains access via a group-subject binding (Check member → allowed)",
       "description": "class:RBAC | class:RULES | class:SUBJECTS | class:AUTHZ | class:HAPPY | priority:P0",
       "item": [
+        {
+          "name": "RBACSUBJ-GROUP-GRANTS-MEMBER-OK :: group-fixture-denied-before",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/iam:check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "iam:check"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subjectId\": \"user:{{groupMemberAUserId}}\", \"relation\": \"viewer\", \"object\": \"account:{{accountAId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownInternalRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownInternalRestBaseUrl') || pm.variables.get('ownInternalRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/iam:check');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownInternalRestBaseUrl is set — isolated group subject has no independent viewer grant', () => {",
+                  "    pm.expect.fail('ownInternalRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('membership alone grants no viewer', () => pm.expect(pm.response.json().allowed).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "RBACSUBJ-GROUP-GRANTS-MEMBER-OK :: create-group",
           "request": {
@@ -5564,7 +5843,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userAABId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6038,7 +6317,7 @@
                   "  pm.execution.skipRequest();",
                   "}",
                   "if (pm.environment.get('_gmChkStarted') !== pm.info.requestName) { pm.environment.set('_gmChkCount', '0'); pm.environment.set('_gmChkStarted', pm.info.requestName); }",
-                  "pm.environment.set('_gmChkSubj', 'user:' + pm.environment.get('userAABId'));",
+                  "pm.environment.set('_gmChkSubj', 'user:' + pm.environment.get('groupMemberAUserId'));",
                   "pm.environment.set('_gmChkObj', 'account:' + pm.environment.get('accountAId'));",
                   "// InternalIAMService.Check (/iam/v1/internal/iam:check) is an Internal* RPC —",
                   "// it lives ONLY on the cluster-internal REST listener, never on the public",
@@ -6336,7 +6615,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{userAABId}}\"}",
+              "raw": "{\"memberType\": \"user\", \"memberId\": \"{{groupMemberAUserId}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6417,7 +6696,7 @@
                   "pm.environment.unset('_poll200_teardown_unmember_gmGrantGroupId_0');",
                   "pm.environment.unset('_poll200_started_teardown_unmember_gmGrantGroupId_0');",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.test('teardown: userAABId removed from the group (idempotent)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
+                  "pm.test('teardown: groupMemberAUserId removed from the group (idempotent)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
                 ]
               }
             }
@@ -6520,6 +6799,99 @@
                   "pm.environment.unset('_poll200_started_teardown_group_gmGrantGroupId');",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "pm.test('teardown: group deleted (200) or already gone (404) — a surviving group in the SHARED account is a cross-suite grant carrier', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RBACSUBJ-GROUP-GRANTS-MEMBER-OK :: group-fixture-denied-after-cleanup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/internal/iam:check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "internal",
+                "iam:check"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"subjectId\": \"user:{{groupMemberAUserId}}\", \"relation\": \"viewer\", \"object\": \"account:{{accountAId}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtAccountAdminA'",
+                  "const __t = pm.environment.get('jwtAccountAdminA') || pm.variables.get('jwtAccountAdminA') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownInternalRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownInternalRestBaseUrl') || pm.variables.get('ownInternalRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/internal/iam:check');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownInternalRestBaseUrl is set — isolated group subject has no independent viewer grant', () => {",
+                  "    pm.expect.fail('ownInternalRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('membership alone grants no viewer', () => pm.expect(pm.response.json().allowed).to.eql(false));"
                 ]
               }
             }
