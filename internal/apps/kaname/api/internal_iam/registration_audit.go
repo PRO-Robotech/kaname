@@ -18,7 +18,10 @@ import (
 // нового указателя допустим только после admitRegistration; при снятии и отказе
 // читаются стоящие указатели, а присланные поля области не используются.
 func (uc *RegisterResourceUseCase) registrationHierarchy(ctx context.Context, tx service.Tx, t tupleIntent, admittedWrite bool) (domain.ParentHierarchy, error) {
-	typ, id := t.splitObject()
+	typ, id, valid := strings.Cut(t.object, ":")
+	if !valid || typ == "" || id == "" {
+		return domain.ParentHierarchy{}, nil
+	}
 	_, policy, live, err := uc.catalogTypes.WritePolicyTx(ctx, tx, typ)
 	if err != nil || !live {
 		return domain.ParentHierarchy{}, err
@@ -62,7 +65,7 @@ func (uc *RegisterResourceUseCase) RecordRefusal(ctx context.Context, in unregis
 		return nil
 	}
 	t := tupleIntent{subject: in.GetSubjectId(), relation: in.GetRelation(), object: in.GetObject()}
-	typ, id := t.splitObject()
+	typ, id, _ := strings.Cut(t.object, ":")
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin registration refusal audit: %w", err)
