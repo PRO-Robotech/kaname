@@ -720,7 +720,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	registerResourceUC := internaliamapp.NewRegisterResourceUseCase(
 		kanamepg.NewFGAOutboxEmitter(),
 		kanamepg.NewResourceMirrorEmitter(),
-		kanamepg.NewPoolTxBeginner(pool),
+		kanamepg.NewRegistrationTxBeginner(pool),
 		// Имя типа КАТАЛОГА читается у ЖИВОЙ строки, в транзакции записи зеркала
 		// (kacho#1990). Параметр, а не опция: запасной путь «переводим словарём
 		// сборки» молчалив — верный ответ на посеянных типах и неверный на

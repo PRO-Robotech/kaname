@@ -282,6 +282,15 @@ DO $$
 DECLARE
     v_bound bigint;
 BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'object project binding rollback requires READ COMMITTED'
+            USING ERRCODE = '25001';
+    END IF;
+    -- Сначала исключаем всех производителей привязки, затем читаем свежий
+    -- снимок: ожидаемый writer мог закоммитить первую привязку под замком.
+    LOCK TABLE kaname.catalog_resource, kaname.resource_mirror,
+               kaname.resource_parent_edge, kaname.object_project_binding
+        IN ACCESS EXCLUSIVE MODE;
     SELECT count(*) INTO v_bound FROM kaname.object_project_binding;
     IF v_bound > 0 THEN
         RAISE EXCEPTION
