@@ -949,7 +949,7 @@ ks() { kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" "$@"; }
 # которое машина завела и снимет сама. Подъём в нём — тот же внешний путь, но
 # кластер уже доказан машиной (контекст -client, узлы профиля) ДО заведения
 # пространства, а учётка pod пространств не заводит и не читает: роль у неё
-# лишь в своём. Поэтому изнутри pod (KANAME_STAND_IN_POD=1):
+# лишь в своём. Маршрут определяется canonical SA/DownwardAPI mount, не env sentinel:
 #   маршрут     внешний, пространство — СВОЁ пространство учётки pod, и оно же
 #               обязано быть названо KANAME_STAND_EXT_NS (иначе отказ 64: стенд
 #               ставится лишь туда, где pod сам и живёт);
@@ -957,23 +957,36 @@ ks() { kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" "$@"; }
 #               сам токен в файл не переписывается), контекст `in-pod`;
 #   пространство не заводится и не снимается: подъём убирает остаток прежнего
 #               стенда в нём, снос — объекты стенда, перепись — под стенда в нём.
-IN_POD="${KANAME_STAND_IN_POD:-}"
-SA_DIR="${KANAME_STAND_SA_DIR:-/var/run/secrets/kubernetes.io/serviceaccount}"
+IN_POD=""
+# Canonical mounted data is the child-process route signal; host env cannot move it.
+SA_DIR=/var/run/secrets/kubernetes.io/serviceaccount
+POD_ID_DIR=/var/run/kaname-runner/pod
+in_pod_detect() {
+  IN_POD=""
+  if [ -e "$POD_ID_DIR" ] || [ -L "$POD_ID_DIR" ] || [ -e "$SA_DIR" ] || [ -L "$SA_DIR" ]; then IN_POD=1; fi
+}
+in_pod_detect
 
 # in_pod_route — маршрут изнутри pod раннера; код 64 — pod не раннера либо не в
 # названном пространстве.
 in_pod_route() {
-  local own host
-  if [ -z "${KUBERNETES_SERVICE_HOST:-}" ] || [ ! -r "$SA_DIR/namespace" ] || [ ! -r "$SA_DIR/token" ] || [ ! -r "$SA_DIR/ca.crt" ]; then
-    refuse "KANAME_STAND_IN_POD — лишь изнутри pod раннера: учётки pod нет; с машины — stand-own.sh runner"
+  local own host marker_ns marker_uid
+  if [ ! -r "$SA_DIR/namespace" ] || [ ! -r "$SA_DIR/token" ] || [ ! -r "$SA_DIR/ca.crt" ] || [ ! -s "$SA_DIR/namespace" ] || [ ! -s "$SA_DIR/token" ] || [ ! -s "$SA_DIR/ca.crt" ]; then
+    refuse "маршрут pod — лишь изнутри pod раннера: учётки pod нет; с машины — stand-own.sh runner"
     return 64
   fi
   own="$(cat "$SA_DIR/namespace")"
+  if [ -e "$POD_ID_DIR" ]; then
+    [ -r "$POD_ID_DIR/namespace" ] && [ -r "$POD_ID_DIR/uid" ] || { refuse "неполные pod identity files"; return 64; }
+    marker_ns="$(cat "$POD_ID_DIR/namespace")"; marker_uid="$(cat "$POD_ID_DIR/uid")"
+    [[ "$marker_uid" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ ]] && [ "$marker_ns" = "$own" ] || { refuse "pod identity и учётка не совпали"; return 64; }
+  fi
+  [[ "$own" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] && [ "${#own}" -le 63 ] || { refuse "namespace учётки pod вне допустимой формы"; return 64; }
   if [ -z "${KANAME_STAND_EXT_NS:-}" ] || [ "$own" != "$KANAME_STAND_EXT_NS" ]; then
     refuse "pod раннера в пространстве «$own», а стенд назван «${KANAME_STAND_EXT_NS:-}» — стенд ставится лишь в своё пространство"
     return 64
   fi
-  host="$KUBERNETES_SERVICE_HOST"
+  host=kubernetes.default.svc
   case "$host" in *:*) host="[$host]" ;; esac
   mkdir -p "$RUNDIR"
   EXT_KCFG="$RUNDIR/in-pod.kubeconfig"; EXT_CTX=in-pod
@@ -982,7 +995,7 @@ apiVersion: v1
 kind: Config
 clusters:
   - name: in-pod
-    cluster: {server: "https://$host:${KUBERNETES_SERVICE_PORT:-443}", certificate-authority: "$SA_DIR/ca.crt"}
+    cluster: {server: "https://$host:443", certificate-authority: "$SA_DIR/ca.crt"}
 users:
   - name: in-pod
     user: {tokenFile: "$SA_DIR/token"}
@@ -1079,6 +1092,7 @@ ext_nodes_guard() {
 route_decide() {
   local out rc
   ROUTE=local; WHY=""; PROOF=""
+  in_pod_detect
   if [ -n "$IN_POD" ]; then in_pod_route; return $?; fi
   ext_kubeconfig || return 0
   command -v kubectl >/dev/null 2>&1 || { WHY="kubectl на машине нет — внешний кластер не спросить"; return 0; }
@@ -1661,6 +1675,11 @@ ext_unfold() {
 # раннера платформы (PRO-Robotech/kacho#3346); на машине — kubectl, git, tar и gzip:
 #
 #   stand-own.sh runner [--out КАТАЛОГ] [--ship ФАЙЛ]… -- КОМАНДА…
+#   stand-own.sh runner [--out КАТАЛОГ] --ship ФАЙЛ… --step ИМЯ…
+#   --step ссылается на точное имя уже доставленного --ship файла; порядок и повторы
+#   сохраняются. Каждый bash-файл — отдельная оболочка из /src; первый ненулевой код
+#   останавливает следующие шаги, отчёты забираются и при ошибке. Формы не смешиваются.
+#   Старый -- КОМАНДА… — один непрозрачный payload, cd внутри него сохраняется.
 #
 #   пространство  t<задача>-kaname-own (KANAME_STAND_EXT_NS, KANAME_STAND_TASK — как у
 #                 внешнего пути) заводит машина тем же ext_claim_ns ПОСЛЕ доказательства
@@ -1671,18 +1690,16 @@ ext_unfold() {
 #                 снять, прочитать), exec и проброс, журнал, секреты и карты конфигурации
 #                 стенда, события. Форму судит runner_judge ДО записи в кластер; пространство
 #                 несёт посадку pod `baseline` — привилегированного пода учётка не заведёт;
-#   образ         golang версии `toolchain` из go.mod ревизии (ту же ставит конвейеру
-#                 setup-go; тот же образ — у Job тяжёлых прогонов); поверх — apt (python3, pyyaml, cryptography, venv, pip, jq,
-#                 openssl), node мажорной версии KANAME_STAND_RUNNER_NODE (умолчание 20 —
-#                 её несёт ранер конвейера, дерево версии node не объявляет) выпуском с
-#                 суммой из SHASUMS256 того же выпуска, kubectl — клиент машины потоком
-#                 либо версия сервера кластера с суммой; не поставлено — 125 с именем;
+#   образ         Ubuntu и snapshot из env e2e-newman.yml; общий bootstrap ставит
+#                 точные версии используемых CLI и Python-пакетов из workflow,
+#                 Go — из go.mod. PATH не заимствует kubectl или кэш CLI машины.
+#                 Неполная установка/несовпадение runtime — setup 125;
 #   исходники     `git archive` головы рабочей копии потоком в /src, дерево — репозиторием
 #                 git (наборы читают состав индексом); правка вне коммита — отказ 64 до
 #                 первой записи; --ship — файлы машины в /work/ship (исполнитель шагов
 #                 задания конвейера и т. п.), отпечаток каждого сверяется;
 #   стенд         команда поднимает его сама тем же stand-own.sh: pod несёт
-#                 KANAME_STAND_IN_POD=1 (раздел «СТЕНД ИЗНУТРИ POD РАННЕРА» выше);
+#                 canonical SA/DownwardAPI identity; env sentinel до payload сбрасывается;
 #   трекер        удостоверений площадки в pod НЕТ: `gh` pod — лишь чтение публичного
 #                 REST (`gh api repos/… [--jq …]`), прочее — отказ с объяснением;
 #   отчёты        команда пишет их в /work/out; машина забирает RUNNER_GLOBS (без venv,
@@ -1707,7 +1724,8 @@ ext_unfold() {
 STAND_RUNNER_KINDS="own"
 RUNNER_POD=kaname-runner
 RUNNER_DEADLINE="${KANAME_STAND_RUNNER_DEADLINE:-10800}"
-RUNNER_NODE="${KANAME_STAND_RUNNER_NODE:-20}"
+RUNNER_NODE=""
+RUNNER_PROVIDER_JSON='[]'
 RUNNER_UNMET=125
 RUNNER_FETCH_SHORT=76
 RUNNER_FETCH_N=0 RUNNER_FETCH_M="?" RUNNER_FETCH_WHY=""
@@ -1715,9 +1733,10 @@ RUNNER_FETCH_N=0 RUNNER_FETCH_M="?" RUNNER_FETCH_WHY=""
 # же тексты на каталогах-фикстурах.
 RUNNER_ROOT=/
 RUNNER_WORK=/work
-RUNNER_GLOBS='work/out/*.json work/out/*.md work/out/step-*.log work/out/artifacts src/tests/newman/out-public src/.stand/log-public'
+RUNNER_GLOBS='work/out/*.json work/out/*.md work/out/summary.txt work/out/step-*.log work/out/artifacts src/tests/newman/out-public src/.stand/log-public'
 RUNNER_OUT="" RUNNER_LOGS="" RUNNER_UP=0
 RUNNER_SHIP=()
+RUNNER_STEPS=()
 
 # Текст pod: `gh` без удостоверения — чтение публичного REST. Тихий успех на иной
 # форме спрятал бы, что трекер не спрошен: прочее — код 4 с объяснением.
@@ -1749,7 +1768,7 @@ POD
 # пишет атомарный итог «стадия код» в /work/.rc и ждёт забора отчётов (/work/.fetched).
 read -r -d '' RUNNER_POD_SH <<'POD'
 set -uo pipefail
-unset KUBECONFIG
+unset KUBECONFIG KANAME_STAND_IN_POD
 say() { printf '=== kaname-runner: %s\n' "$*"; }
 # Срок ожидания забора — 600 с от последнего признака забора, а не от кода: пока жив tar
 # текущей попытки (/work/.fetching.pid), pod не выходит и поток не рвётся посередине.
@@ -1771,34 +1790,9 @@ unmet() { say "УСЛОВИЕ НЕ СОЗДАНО: $* — команда НЕ и
 mkdir -p "$HOME" /work/out /work/ship /work/bin
 for _ in $(seq 1 300); do [ -e /work/.go ] && break; sleep 2; done
 [ -e /work/.go ] || { say "исходники не доставлены за 600 с"; exit 125; }
-case "$(uname -m)" in x86_64) ka=amd64 na=x64 ;; aarch64) ka=arm64 na=arm64 ;; *) unmet "архитектура $(uname -m)" ;; esac
-export DEBIAN_FRONTEND=noninteractive
-say "инструменты: apt"
-{ apt-get update -q && apt-get install -y -q --no-install-recommends ca-certificates curl git jq openssl tar gzip xz-utils procps \
-    python3 python3-yaml python3-venv python3-pip python3-cryptography; } > /work/apt.log 2>&1 || { tail -n 5 /work/apt.log; unmet "apt-get"; }
-if [ -x /work/bin/kubectl ] && /work/bin/kubectl version --client > /dev/null 2>&1; then
-  install -m 0755 /work/bin/kubectl /usr/local/bin/kubectl || unmet "kubectl машины не поставлен"
-  say "инструменты: kubectl — клиент машины ($(kubectl version --client 2>/dev/null | head -n 1))"
-else
-  say "инструменты: kubectl $RUNNER_KUBECTL — загрузкой"
-  ku="https://dl.k8s.io/release/$RUNNER_KUBECTL/bin/linux/$ka/kubectl"
-  { curl -fsSL --retry 3 --speed-limit 200000 --speed-time 60 -o /usr/local/bin/kubectl "$ku" &&
-    echo "$(curl -fsSL --retry 3 --max-time 60 "$ku.sha256")  /usr/local/bin/kubectl" | sha256sum -c --quiet - &&
-    chmod +x /usr/local/bin/kubectl; } || unmet "kubectl $RUNNER_KUBECTL не получен либо сумма не сошлась"
-fi
-nb="https://nodejs.org/dist/latest-v$RUNNER_NODE.x"
-sums="$(curl -fsSL --retry 3 --max-time 60 "$nb/SHASUMS256.txt")" || unmet "node $RUNNER_NODE: перечень сумм выпуска не получен"
-line="$(grep -E "^[0-9a-f]{64}  node-v[0-9]+\.[0-9]+\.[0-9]+-linux-$na\.tar\.xz\$" <<< "$sums")"
-[ "$(grep -c . <<< "$line")" -eq 1 ] || unmet "node $RUNNER_NODE: в перечне сумм не ровно один выпуск linux-$na"
-nf="${line##* }"
-{ curl -fsSL --retry 3 --speed-limit 50000 --speed-time 60 -o "/work/$nf" "$nb/$nf" &&
-  ( cd /work && sha256sum -c --quiet --strict - <<< "$line" ) &&
-  tar -xJ -C /usr/local --strip-components=1 -f "/work/$nf" && rm -f "/work/$nf"; } ||
-  unmet "node $RUNNER_NODE: выпуск $nf не получен, сумма не сошлась либо он не распакован"
-say "инструменты: node $(node --version), npm $(npm --version)"
-[ "$(go env GOVERSION)" = "go$RUNNER_GO" ] || unmet "go образа $(go env GOVERSION), а дерево требует go$RUNNER_GO"
-say "инструменты: $(go version)"
-{ printf '%s\n' "$RUNNER_GH_SH" > /usr/local/bin/gh && chmod 0755 /usr/local/bin/gh; } || unmet "gh раннера не поставлен"
+. /src/.github/scripts/stand-runner-bootstrap.sh || unmet "общий provider отсутствует"
+runner_bootstrap /src /work || unmet "общий provider не установлен либо exact runtime proof не сошёлся"
+{ printf '%s\n' "$RUNNER_GH_SH" > /work/provider/bin/gh && chmod 0755 /work/provider/bin/gh; } || unmet "gh раннера не поставлен"
 say "инструменты: gh — чтение публичного REST без удостоверения"
 say "исходники $RUNNER_SHA — репозиторием git (наборы читают состав индексом)"
 ( cd /src && git init -q && git remote add origin "https://github.com/$RUNNER_REPO.git" && git add -A &&
@@ -1806,7 +1800,19 @@ say "исходники $RUNNER_SHA — репозиторием git (набор
   { tail -n 5 /work/git.log; unmet "дерево исходников не стало репозиторием git"; }
 cd /src || unmet "каталог исходников /src"
 say "команда: $RUNNER_CMD"
-bash -c "$RUNNER_CMD"; rc=$?
+rc=0
+if [ "${RUNNER_STEPS_JSON:-[]}" != '[]' ]; then
+  python3 -c 'import json,sys; a=json.loads(sys.argv[1]); assert isinstance(a,list) and a and all(isinstance(x,str) and x and "/" not in x and "\0" not in x for x in a); sys.stdout.buffer.write(b"".join(x.encode()+b"\0" for x in a))' "$RUNNER_STEPS_JSON" > /work/.steps0 || unmet "список --step повреждён"
+  mapfile -d '' -t steps < /work/.steps0
+  for step in "${steps[@]}"; do
+    [ -f "/work/ship/$step" ] && [ ! -L "/work/ship/$step" ] || unmet "--step не доставлен обычным файлом: $step"
+    say "шаг: $step; cwd=/src"
+    ( cd /src && bash -- "/work/ship/$step" ); rc=$?
+    [ "$rc" -eq 0 ] || break
+  done
+else
+  bash -c "$RUNNER_CMD"; rc=$?
+fi
 say "команда завершилась кодом $rc"
 finish command "$rc"
 POD
@@ -1860,8 +1866,8 @@ runner_go() {
   printf '%s\n' "$v"
 }
 
-# Тот же образ, что у Job тяжёлых прогонов внешнего кластера (golang версии toolchain).
-runner_image() { printf 'docker.io/library/golang:%s' "$1"; }
+# Образ общего provider из workflow; версия Go больше не задаётся образом.
+runner_image() { jq -r '.[] | select(.name == "KANAME_RUNNER_IMAGE") | .value' <<< "$RUNNER_PROVIDER_JSON"; }
 
 # runner_exec ПРОСТРАНСТВО АРГУМЕНТЫ… — исполнить в pod раннера. Самопроверка подменяет её.
 runner_exec() { local ns="$1"; shift; ks -n "$ns" exec "$RUNNER_POD" -c run -- "$@"; }
@@ -1928,8 +1934,8 @@ runner_fetch() {
 # роль, привязка и pod раннера (список JSON для kubectl apply). Всё — в ПРОСТРАНСТВЕ.
 runner_objects() {
   jq -n --arg ns "$1" --arg image "$2" --arg sha "$3" --arg task "$4" --arg kver "$5" --arg go "$6" \
-    --arg cmd "$7" --arg repo "$8" --arg node "$RUNNER_NODE" --arg sh "$RUNNER_POD_SH" --arg gh "$RUNNER_GH_SH" \
-    --arg name "$RUNNER_POD" --argjson deadline "$RUNNER_DEADLINE" '
+    --arg cmd "$7" --arg repo "$8" --argjson steps "${9:-[]}" --arg node "$RUNNER_NODE" --arg sh "$RUNNER_POD_SH" --arg gh "$RUNNER_GH_SH" \
+    --argjson provider "$RUNNER_PROVIDER_JSON" --arg name "$RUNNER_POD" --argjson deadline "$RUNNER_DEADLINE" '
     def meta: {name: $name, namespace: $ns, labels: {"kaname.io/stand": "runner", "app.kubernetes.io/name": $name}};
     def env($n; $v): {name: $n, value: $v};
     {apiVersion: "v1", kind: "List", items: [
@@ -1947,14 +1953,18 @@ runner_objects() {
         serviceAccountName: $name, restartPolicy: "Never", activeDeadlineSeconds: $deadline,
         enableServiceLinks: false, terminationGracePeriodSeconds: 10,
         containers: [{name: "run", image: $image, command: ["bash", "-c", $sh], workingDir: "/src",
-          env: [env("RUNNER_SHA"; $sha), env("RUNNER_CMD"; $cmd), env("RUNNER_KUBECTL"; $kver),
+          env: ([env("RUNNER_SHA"; $sha), env("RUNNER_CMD"; $cmd), env("RUNNER_STEPS_JSON"; ($steps | tojson)), env("RUNNER_KUBECTL"; $kver),
                 env("RUNNER_GO"; $go), env("RUNNER_NODE"; $node), env("RUNNER_REPO"; $repo), env("RUNNER_GH_SH"; $gh),
                 env("KANAME_STAND_IN_POD"; "1"), env("KANAME_STAND_EXT_NS"; $ns), env("KANAME_STAND_TASK"; $task),
-                env("HOME"; "/work/home"), env("GOTOOLCHAIN"; "local")],
+                env("HOME"; "/work/home"), env("GOTOOLCHAIN"; "local")] + $provider),
           resources: {requests: {cpu: "1", memory: "2Gi"}, limits: {memory: "6Gi"}},
           securityContext: {allowPrivilegeEscalation: false},
-          volumeMounts: [{name: "src", mountPath: "/src"}, {name: "work", mountPath: "/work"}]}],
-        volumes: [{name: "src", emptyDir: {}}, {name: "work", emptyDir: {}}]}}]}'
+          volumeMounts: [{name: "src", mountPath: "/src"}, {name: "work", mountPath: "/work"},
+            {name: "pod-identity", mountPath: "/var/run/kaname-runner/pod", readOnly: true}]}],
+        volumes: [{name: "src", emptyDir: {}}, {name: "work", emptyDir: {}},
+          {name: "pod-identity", downwardAPI: {items: [
+            {path: "namespace", fieldRef: {fieldPath: "metadata.namespace"}},
+            {path: "uid", fieldRef: {fieldPath: "metadata.uid"}}]}}]}}]}'
 }
 
 # runner_judge ПРОСТРАНСТВО — суд формы объектов раннера (stdin — их список): то, что
@@ -2020,10 +2030,18 @@ for i in items:
         for h in ("hostNetwork", "hostPID", "hostIPC"):
             if sp.get(h):
                 bad.append("pod: %s" % h)
+        identity = [v for v in sp.get("volumes", []) if v.get("name") == "pod-identity"]
+        wanted = [{"path": "namespace", "fieldRef": {"fieldPath": "metadata.namespace"}}, {"path": "uid", "fieldRef": {"fieldPath": "metadata.uid"}}]
+        if len(identity) != 1 or identity[0].get("downwardAPI", {}).get("items") != wanted:
+            bad.append("pod identity: отсутствует namespace/UID DownwardAPI")
         for v in sp.get("volumes", []):
             if "hostPath" in v:
                 bad.append("pod: том hostPath %s" % v.get("name"))
         for c in sp.get("containers", []) + sp.get("initContainers", []):
+            if c.get("name") == "run":
+                mounts = [m for m in c.get("volumeMounts", []) if m.get("name") == "pod-identity"]
+                if mounts != [{"name": "pod-identity", "mountPath": "/var/run/kaname-runner/pod", "readOnly": True}]:
+                    bad.append("pod identity: canonical readOnly mount отсутствует")
             sc = c.get("securityContext") or {}
             if sc.get("privileged") or (sc.get("capabilities") or {}).get("add"):
                 bad.append("контейнер %s: privileged либо добавленные возможности" % c.get("name"))
@@ -2070,6 +2088,7 @@ runner_on_signal() {
 # неверен; 1 — пространство уже есть.
 runner_main() {
   local sha url repo gov kver image objs mark mrc rc="" stage="" outcome phase miss=0 fetch=0 t f base want got
+  local command_form="" step matched steps_json='[]' command_text=""
   local -A seen=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2079,14 +2098,29 @@ runner_main() {
               base="$(basename -- "$2")"
               [ -z "${seen[$base]:-}" ] || { refuse "runner: --ship — два файла с именем «$base»"; return 64; }
               seen[$base]=1; RUNNER_SHIP+=("$2"); shift 2 ;;
-      --) shift; break ;;
+      --step) [ "$#" -ge 2 ] && [ -n "$2" ] || { refuse "runner: --step без имени доставленного файла"; return 64; }
+              RUNNER_STEPS+=("$2"); shift 2 ;;
+      --) command_form=1; shift; break ;;
       *) refuse "runner: неизвестный довод «$1» (команда — после --)"; return 64 ;;
     esac
   done
-  [ $# -gt 0 ] || { refuse "runner: команда не названа — stand-own.sh runner [--out КАТАЛОГ] [--ship ФАЙЛ]… -- КОМАНДА…"; return 64; }
+  if [ "${#RUNNER_STEPS[@]}" -gt 0 ]; then
+    [ -z "$command_form" ] && [ "$#" -eq 0 ] || { refuse "runner: --step и -- КОМАНДА… не смешиваются"; return 64; }
+    for step in "${RUNNER_STEPS[@]}"; do
+      matched=""
+      for f in "${RUNNER_SHIP[@]}"; do [ "$(basename -- "$f")" != "$step" ] || matched=1; done
+      [ -n "$matched" ] || { refuse "runner: --step «$step» не соответствует --ship файлу"; return 64; }
+    done
+  else
+    [ $# -gt 0 ] || { refuse "runner: команда не названа — stand-own.sh runner [--out КАТАЛОГ] [--ship ФАЙЛ]… -- КОМАНДА…"; return 64; }
+    command_text="$(printf '%q ' "$@")"
+  fi
   for t in kubectl jq python3 git gzip tar; do
     command -v "$t" >/dev/null 2>&1 || { unmet "инструмента нет: $t — раннер не запускался"; return "$RUNNER_UNMET"; }
   done
+  if [ "${#RUNNER_STEPS[@]}" -gt 0 ]; then
+    steps_json="$(printf '%s\0' "${RUNNER_STEPS[@]}" | python3 -c 'import json,sys; data=sys.stdin.buffer.read(); print(json.dumps([x.decode() for x in data.split(b"\0")[:-1]]))')" || { refuse "runner: --step не удалось представить JSON-массивом"; return 64; }
+  fi
   [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ] ||
     { refuse "runner: в рабочей копии правки вне коммита — pod исполняет коммит (git archive HEAD): закоммить их"; return 64; }
   sha="$(git -C "$ROOT" rev-parse --verify 'HEAD^{commit}' 2>/dev/null)" || { refuse "runner: голова рабочей копии не разрешается"; return 64; }
@@ -2106,10 +2140,13 @@ runner_main() {
     *) return "$RUNNER_UNMET" ;;
   esac
   gov="$(runner_go "$sha")" || return "$RUNNER_UNMET"
+  RUNNER_PROVIDER_JSON="$(python3 "$ROOT/.github/scripts/stand-runner-tools.py" --root "$ROOT" --work "$RUNDIR/runner-provider" --provider-json)" || {
+    unmet "workflow provider не прочитан — pod не создан"; return "$RUNNER_UNMET"; }
+  RUNNER_NODE="$(jq -r '.[] | select(.name == "KANAME_RUNNER_NODE") | .value' <<< "$RUNNER_PROVIDER_JSON")"
   kver="$(kq version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion // empty' 2>/dev/null)"
   [[ "$kver" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { unmet "версия сервера кластера не прочитана — kubectl pod не выбрать"; return "$RUNNER_UNMET"; }
   image="$(runner_image "$gov")"
-  objs="$(runner_objects "$EXT_NS" "$image" "$sha" "$EXT_TASK" "$kver" "$gov" "$(printf '%q ' "$@")" "$repo")" ||
+  objs="$(runner_objects "$EXT_NS" "$image" "$sha" "$EXT_TASK" "$kver" "$gov" "$command_text" "$repo" "$steps_json")" ||
     { unmet "объекты раннера не построены"; return "$RUNNER_UNMET"; }
   runner_judge "$EXT_NS" <<< "$objs" >&2 || { unmet "форма объектов раннера не прошла суд (выше)"; return "$RUNNER_UNMET"; }
   RUNNER_OUT="${RUNNER_OUT:-$ROOT/.stand/runner-out/$EXT_NS}"
@@ -2139,11 +2176,6 @@ runner_main() {
     [ "$want" = "$got" ] || { unmet "отпечаток файла $base в pod не совпал с машинным"; exit "$RUNNER_UNMET"; }
     say "раннер: /work/ship/$base доставлен, отпечаток сошёлся"
   done
-  # kubectl машины — тем же потоком, лишь при той же архитектуре узла.
-  if [ "$(ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- uname -m 2>/dev/null)" = "$(uname -m)" ]; then
-    gzip -1 < "$(type -P kubectl)" | ks -n "$EXT_NS" exec -i "$RUNNER_POD" -c run -- sh -c 'mkdir -p /work/bin && gzip -dc > /work/bin/kubectl && chmod 0755 /work/bin/kubectl' ||
-      runner_warn "kubectl машины в pod не доставлен — pod загрузит версию сервера"
-  fi
   ks -n "$EXT_NS" exec "$RUNNER_POD" -c run -- touch /work/.go || { unmet "pod не принял сигнал старта"; exit "$RUNNER_UNMET"; }
   ks -n "$EXT_NS" logs -f "pod/$RUNNER_POD" -c run & RUNNER_LOGS=$!
   while :; do
@@ -2223,6 +2255,7 @@ if [ "${1:-}" = "--registry-self-test" ]; then
 fi
 
 if [ "${1:-}" = "--self-test" ]; then
+    SELFTEST_SOURCE_ROOT="$ROOT"
     # Подставной слушатель — единственное, что самопроверке нужно извне. Требование
     # честное: тремя соседними самопроверками этого процесса python3 уже нужен, и
     # его отсутствие здесь — НЕ зелёное, а отсутствие доказательства.
@@ -2238,7 +2271,7 @@ if [ "${1:-}" = "--self-test" ]; then
     # KANAME_STAND_IN_POD, KANAME_STAND_EXT_NS, KANAME_STAND_TASK и адрес API кластера, и
     # миры маршрута судили бы pod, а не свою настройку (11 провалов, kaname#940). Мир,
     # которому они нужны, ставит их сам.
-    IN_POD=""; SA_DIR="$TMP/sa-none"
+    IN_POD=""; SA_DIR="$TMP/sa-none"; POD_ID_DIR="$TMP/pod-id-none"
     unset KANAME_STAND_IN_POD KANAME_STAND_EXT_NS KANAME_STAND_TASK KANAME_STAND_SA_DIR KUBERNETES_SERVICE_HOST KUBERNETES_SERVICE_PORT
     # Маршрут идущего стенда машины самопроверку не уводит: файла маршрута у неё нет.
     ROUTE_FILE="$TMP/route-none"
@@ -2698,13 +2731,18 @@ case "$line" in
   *"get pod kaname-own"*"--ignore-not-found"*) [ -f "$S/pod" ] && echo pod/kaname-own; exit 0 ;;
   *"delete pod kaname-own"*) rm -f "$S/pod" ;;
   *"get pod kaname-runner"*) cat "$S/phase" 2>/dev/null || echo Running ;;
+  *"apply -f -"*) cat > "$S/objects.json" ;;
   # Тот же атомарный итог «стадия код», что публикует finish() настоящего pod.
   *"exec "*"cat /work/.rc"*) [ -f "$S/rc" ] || exit 1; cat "$S/rc" ;;
+  *"exec "*"sha256sum /work/ship/"*)
+    file="${args[${#args[@]}-1]}"; sha256sum "$S/ship/${file##*/}" ;;
   *"logs "*) echo "журнал службы из пода" ;;
   *"exec "*"/proc/net/tcp"*) cat "$S/proc-net-tcp" ;;
   # `exec -i` настоящего клиента передаёт приёмнику pod поток до конца. Подставной, вышедший
   # недочитав, ронял пишущую сторону конвейера сигналом SIGPIPE, и pipefail доставки
   # принимал это за отказ — исход зависел от того, кто первым успел (kaname#1025).
+  *"exec -i "*"/work/ship/"*)
+    file="${args[${#args[@]}-1]}"; mkdir -p "$S/ship"; cat > "$S/ship/$file" ;;
   *"exec -i "*)
     cat > /dev/null
     [ -e "$S/exec-in-fail" ] || exit 0
@@ -2792,6 +2830,8 @@ EOF
     }
     RF_ROLE='(.items[] | select(.kind == "Role"))'
     RF_POD='(.items[] | select(.kind == "Pod"))'
+    world_rf_identity_missing() { runner_form_world '(.items[] | select(.kind == "Pod")).spec.volumes |= map(select(.name != "pod-identity"))'; }
+    world_rf_identity_writable() { runner_form_world '(.items[] | select(.kind == "Pod")).spec.containers[0].volumeMounts |= map(if .name == "pod-identity" then .readOnly=false else . end)'; }
     world_rf_ok()          { runner_form_world; }
     world_rf_clusterrole() { runner_form_world "$RF_ROLE.kind = \"ClusterRole\""; }
     world_rf_verb()        { runner_form_world "$RF_ROLE.rules[0].verbs += [\"update\"]"; }
@@ -2838,13 +2878,30 @@ EOF
     world_fetch_whole() { fetch_world; }
     world_fetch_cut()   { fetch_world cut; }
     world_fetch_absent() { fetch_world absent; }
+    # Сводка создаётся ДО glob-census; ожидаемые путь/байты от него не выводятся.
+    world_fetch_summary() {
+        ( POD="$TMP/summary-pod"; rm -rf "$POD"; mkdir -p "$POD/work/out"
+          printf 'summary nonce=%s\n' "$$-1042" > "$POD/work/out/summary.txt"
+          printf '{"control":true}\n' > "$POD/work/out/result.json"
+          RUNNER_ROOT="$POD"; RUNNER_WORK="$POD/work"
+          runner_exec() { shift; "$@"; }
+          out="$TMP/summary-out"; rm -rf "$out"; mkdir -p "$out"
+          runner_fetch t841-kaname-own "$out" || exit $?
+          if ! cmp -s "$POD/work/out/summary.txt" "$out/work/out/summary.txt"; then
+              echo 'PARITY-AXIS summary: заранее созданная summary.txt не доставлена exact bytes' >&2
+              exit 1
+          fi
+          echo 'PARITY-AXIS summary: exact bytes доставлены' )
+    }
+    world_fetch_summary_lawful() { ( RUNNER_GLOBS="$RUNNER_GLOBS work/out/summary.txt"; world_fetch_summary ); }
+    world_fetch_summary_mutant() { ( RUNNER_GLOBS="${RUNNER_GLOBS//work\/out\/summary.txt/}"; world_fetch_summary ); }
 
     # inpod_world [настройка] — подъём изнутри pod раннера до выбора пути; путь подменён
     # заведением пространства (оно в pod лишь чистит остаток) и строкой.
     inpod_world() {
         ( PATH="$TMP/kc:$PATH"; kc_reset
           SA="$TMP/sa"; rm -rf "$SA"; mkdir -p "$SA"
-          echo t841-kaname-own > "$SA/namespace"; : > "$SA/token"; : > "$SA/ca.crt"
+          echo t841-kaname-own > "$SA/namespace"; echo fixture-token > "$SA/token"; echo fixture-ca > "$SA/ca.crt"
           export KUBERNETES_SERVICE_HOST=10.9.8.7 KUBERNETES_SERVICE_PORT=443 KANAME_STAND_EXT_NS=t841-kaname-own KANAME_STAND_TASK=841
           export XDG_CONFIG_HOME="$TMP/xdg-empty"; unset KANAME_STAND_KUBECONFIG KACHO_REMOTE_KUBECONFIG
           IN_POD=1; SA_DIR="$SA"
@@ -2887,6 +2944,10 @@ EOF
           { git -C "$R" init -q && printf 'module x\n\ngo 1.26.0\n\ntoolchain go1.26.10\n' > "$R/go.mod" && git -C "$R" add go.mod &&
             git -C "$R" -c user.name=t -c user.email=t@t.invalid commit -q -m t &&
             git -C "$R" remote add origin https://github.com/PRO-Robotech/kaname.git; } || exit 9
+          mkdir -p "$R/.github/scripts" "$R/.github/workflows"
+          cp "$SELFTEST_SOURCE_ROOT/.github/workflows/e2e-newman.yml" "$R/.github/workflows/"
+          cp "$SELFTEST_SOURCE_ROOT/.github/scripts/stand-runner-tools.py" "$R/.github/scripts/"
+          git -C "$R" add .github && git -C "$R" -c user.name=t -c user.email=t@t.invalid commit -q -m fixture-provider || exit 9
           ROOT="$R"; RUNDIR="$TMP/run-runner"; rm -rf "$RUNDIR"
           export XDG_CONFIG_HOME="$TMP/xdg-empty"; unset KACHO_REMOTE_KUBECONFIG KANAME_STAND_CONTEXT KANAME_STAND_PROFILE KANAME_STAND_EXT_NS
           IN_POD=""; export KANAME_STAND_KUBECONFIG="$TMP/kc-u--prof.yaml" KANAME_STAND_TASK=841
@@ -2895,6 +2956,11 @@ EOF
           rc=0
           # shellcheck disable=SC2086  # доводы мира — словами
           ( runner_main ${SELFTEST_RUNNER_ARGS--- true} ) || rc=$?
+          if [ "$rc" -eq 0 ] && [ "${SELFTEST_VERIFY_STEPS:-}" = 1 ]; then
+              export PARITY_EXPORT_FUNCTIONS="$(declare -f runner_fetch runner_warn say)"
+              export PARITY_EXPORT_MANIFEST="$RUNNER_MANIFEST_SH" PARITY_EXPORT_TAR="$RUNNER_TAR_SH" PARITY_EXPORT_GLOBS="$RUNNER_GLOBS"
+              "$PY" "$SELFTEST_SOURCE_ROOT/.github/scripts/stand-runner-parity-test.py" --steps "$SELFTEST_KC/objects.json" "$TMP/runner-steps" || rc=$?
+          fi
           grep -qE 'create -f|apply -f' "$SELFTEST_KC/calls" && echo "ЗАПИСЬ В КЛАСТЕР БЫЛА"
           exit "$rc" )
     }
@@ -2955,6 +3021,28 @@ EOF
     world_runner_reports_cmd125()       { runner_world rw_reports_cmd125; }
     world_runner_reports_cut_setup125() { runner_world rw_reports_cut_setup125; }
     world_runner_reports_cut_cmd125()   { runner_world rw_reports_cut_cmd125; }
+    # В baseline неизвестный --step — отсутствие предмета, остальные оси независимы.
+    rw_steps() {
+        mkdir -p "$TMP/runner-steps"
+        printf 'cd sub\nexport STEP_ONLY_SENTINEL=first\nprintf first > ../step-file\n' > "$TMP/runner-steps/first.sh"
+        printf 'test -f root-sentinel && test -f step-file && test -z "${STEP_ONLY_SENTINEL+x}"\n' > "$TMP/runner-steps/second.sh"
+        SELFTEST_RUNNER_ARGS="--ship $TMP/runner-steps/first.sh --ship $TMP/runner-steps/second.sh --step first.sh --step second.sh"
+        SELFTEST_VERIFY_STEPS=1
+    }
+    world_runner_steps() { runner_world rw_steps; }
+    world_runner_payload_parity() {
+        printf '%s\n' "$RUNNER_POD_SH" > "$TMP/parity-payload.sh"
+        "$PY" "$SELFTEST_SOURCE_ROOT/.github/scripts/stand-runner-parity-test.py" --axis "$1" "$SELFTEST_SOURCE_ROOT" "$TMP/parity-payload.sh"
+    }
+    world_runner_tools() { world_runner_payload_parity tools; }
+    world_runner_prologue() { world_runner_payload_parity prologue; }
+    world_runner_opaque() { world_runner_payload_parity opaque; }
+    world_runner_real_tool() { world_runner_payload_parity real-tool; }
+    rw_steps_repeat() { rw_steps; SELFTEST_RUNNER_ARGS="$SELFTEST_RUNNER_ARGS --step first.sh"; }
+    world_runner_steps_repeat() { runner_world rw_steps_repeat; }
+    world_runner_steps_unknown() { ( SELFTEST_RUNNER_ARGS='--step missing.sh'; runner_world ); }
+    world_runner_steps_empty() { ( SELFTEST_RUNNER_ARGS='--step'; runner_world ); }
+    world_runner_steps_mixed() { ( SELFTEST_RUNNER_ARGS='--step first.sh -- true'; runner_world ); }
 
     probes=0; failed=0; checks=0
     OUT="$TMP/out"
@@ -3114,6 +3202,8 @@ EOF
 
     echo "--- ось 12: раннер — форма объектов судится до записи, роль лишь в своём пространстве (kaname#940)"
     RF_BAD="$(printf 'RUNNER-FORM\t')"
+    assert 1 "(+) pod identity отсутствует" world_rf_identity_missing "pod identity:" "-" "RUNNER-FORM-OK"
+    assert 1 "(+) pod identity доступен на запись" world_rf_identity_writable "canonical readOnly mount" "-" "RUNNER-FORM-OK"
     assert 0  "(−) настоящий вывод runner_objects — форма сошлась"           world_rf_ok "RUNNER-FORM-OK" "правил роли 5" "$RF_BAD"
     assert 1  "(+) ClusterRole вместо роли пространства"                     world_rf_clusterrole "виды объектов" "-" "RUNNER-FORM-OK"
     assert 1  "(+) глагол сверх нужного на подах"                            world_rf_verb "['update'] на pods сверх нужного" "-" "RUNNER-FORM-OK"
@@ -3161,12 +3251,37 @@ EOF
     assert 125 "(−) настоящая команда 125 и полный отчёт — код команды 125"     world_runner_reports_cmd125 "раннер: команда в pod завершилась кодом 125" "доставлено 1 из 1" "подготовка pod завершилась"
     assert 76 "(+) настоящая команда 125 и тот же обрыв — неполные отчёты 76"   world_runner_reports_cut_cmd125 "доставлено 0 из 1 при коде команды 125" "задачи 841 во внешнем кластере: 0" "подготовка pod завершилась"
 
+    echo '--- ось 16: workflow toolset, explicit steps, actual prologue и доставленная сводка (kaname#1042)'
+    assert 0 '(−) real payload соответствует tools workflow' world_runner_tools 'PARITY-AXIS tools' '-' 'PARITY-INVALID'
+    assert 0 '(−) actual prologue снимает sentinel после world cleanup' world_runner_prologue 'PARITY-AXIS prologue actual absent=True' 'PARITY-MUTANT prologue rejected' 'PARITY-INVALID'
+    assert 0 '(−) opaque command сохраняет собственный cd' world_runner_opaque 'PARITY-OPAQUE cwd сохраняется' '-' 'PARITY-INVALID'
+    assert 0 '(−) явные шаги runner приняты настоящим parser' world_runner_steps 'раннер: код 0' '-' 'неизвестный довод'
+    assert 0 '(−) повторы шага разрешены' world_runner_steps_repeat 'раннер: код 0' '-' 'неизвестный довод'
+    assert 64 '(+) недоставленный step отвергнут до payload' world_runner_steps_unknown 'не соответствует --ship' '-' 'ЗАПИСЬ В КЛАСТЕР БЫЛА'
+    assert 64 '(+) пустой step-mode отвергнут' world_runner_steps_empty '--step без имени' '-' 'ЗАПИСЬ В КЛАСТЕР БЫЛА'
+    assert 64 '(+) смешение steps и opaque отвергнуто' world_runner_steps_mixed 'не смешиваются' '-' 'ЗАПИСЬ В КЛАСТЕР БЫЛА'
+    assert 0 '(−) сводка приехала независимо от урезанного manifest N/N' world_fetch_summary 'PARITY-AXIS summary: exact bytes доставлены' '-' 'заранее созданная summary.txt не доставлена'
+    assert 0 '(−) lawful export twin покрывает ту же summary.txt' world_fetch_summary_lawful 'PARITY-AXIS summary: exact bytes доставлены' '-' '-'
+    assert 1 '(+) summary coverage mutant обнаружен за N/N' world_fetch_summary_mutant 'заранее созданная summary.txt не доставлена' '-' '-'
+    if [ "${KANAME_RUNNER_REAL_TOOL_PROOF:-}" = 1 ]; then
+        assert 0 '(−) реальный grpcurl совпал с workflow Go module pin' world_runner_real_tool 'PARITY-REAL grpcurl workflow-pin=' '-' 'PARITY-INVALID'
+    fi
     echo
     echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"
     [ "$probes" -eq 0 ] && { echo "ПРОВАЛ: ни одной пробы не исполнено" >&2; exit 2; }
     [ "$failed" -gt 0 ] && exit 1
     exit 0
 fi
+
+# Mounted identity also guards down/census/db commands that may load a saved route.
+case "${1:-}" in
+  up|down|census|db-fold|db-unfold)
+    if [ -n "$IN_POD" ]; then
+      route_decide || exit $?
+      ext_name_ns || exit $?
+      record_route || exit $?
+    fi ;;
+esac
 
 case "${1:-}" in
   up) stand_up; exit $? ;;
