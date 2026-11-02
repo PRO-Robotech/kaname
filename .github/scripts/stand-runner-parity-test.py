@@ -520,8 +520,10 @@ def payload_checks(root, payload, axis="all"):
             original = (root / ".github/scripts/stand-own.sh").read_text()
             prefix = original.split('if [ "${1:-}" = "--registry-self-test" ]; then', 1)[0]
             dispatch = original[original.index('# Mounted identity also guards'):]
-            for label in ("lawful", "wrong-namespace", "missing-account", "partial-marker", "wrong-marker", "invalid-uid"):
-                world = World(base / ("child-route-" + label), payload)
+            cases = [(label, "chain") for label in ("lawful", "wrong-namespace", "missing-account", "partial-marker", "wrong-marker", "invalid-uid")]
+            cases += [(label, operation) for label in ("missing-account", "wrong-namespace") for operation in ("down", "census")]
+            for label, operation in cases:
+                world = World(base / ("child-route-" + label + "-" + operation), payload)
                 sa = world.work / "sa"; marker = world.work / "pod-identity"
                 sa.mkdir(); marker.mkdir()
                 for name, value in {"namespace": "t841-kaname-own", "token": "fixture-token", "ca.crt": "fixture-ca"}.items(): (sa/name).write_text(value)
@@ -547,7 +549,12 @@ ext_save_log() { :; }
                 child = world.work / "ship/child-own.sh"
                 child.write_text('test -z "${KANAME_STAND_IN_POD+x}" || exit 89\n' + prefix + setup + peers + dispatch)
                 world.env.update(PARITY_CHILD_CALLS=str(world.work/"child-api-calls"), PARITY_CHILD_LOCAL=str(world.work/"local-docker-called"))
-                result = world.run("bash /work/ship/child-own.sh up && bash /work/ship/child-own.sh census && bash /work/ship/child-own.sh down")
+                if operation != "chain":
+                    existing = world.work / "child-run"
+                    existing.mkdir()
+                    (existing / "route").write_text("external\tt841-kaname-own\t841\tin-pod\tfixture-existing-kubeconfig\n")
+                command = "bash /work/ship/child-own.sh " + operation if operation != "chain" else "bash /work/ship/child-own.sh up && bash /work/ship/child-own.sh census && bash /work/ship/child-own.sh down"
+                result = world.run(command)
                 assert result.returncode == (0 if label == "lawful" else 64), (label,result.stdout)
                 assert not (world.work/"local-docker-called").exists(), label
                 if label == "lawful":
@@ -556,7 +563,7 @@ ext_save_log() { :; }
                     config=(world.work/"child-run/in-pod.kubeconfig").read_text()
                     assert "kubernetes.default.svc:443" in config and str(sa/"token") in config
                 else: assert not (world.work/"child-api-calls").exists(), (label,result.stdout)
-                print("PARITY-COMPOSE sentinel=absent child-own=" + label + " rc=" + str(result.returncode) + " localDocker=not-called",flush=True)
+                print("PARITY-COMPOSE sentinel=absent child-own=" + label + " operation=" + operation + " existing-route=" + str(operation != "chain") + " rc=" + str(result.returncode) + " localDocker=not-called",flush=True)
         command = "python3 -c " + shlex.quote("import os,json; print(json.dumps({'present': 'KANAME_STAND_IN_POD' in os.environ, 'keep':os.environ.get('KEEP_SENTINEL')}))")
         env_worlds = (("actual", payload), ("unset-mutant", payload.replace("unset KUBECONFIG KANAME_STAND_IN_POD\n", "unset KUBECONFIG\n", 1))) if axis in ("all", "prologue") else ()
         for label, code in env_worlds:
