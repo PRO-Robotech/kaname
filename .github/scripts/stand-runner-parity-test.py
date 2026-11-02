@@ -201,7 +201,6 @@ class World:
             target = self.bin / name
             if name == "jq":
                 target.symlink_to(original)
-                target.chmod(0o755)
                 assert hashlib.sha256(target.read_bytes()).hexdigest() == digest, "jq bytes не совпали"
             else:
                 target.symlink_to(original)

@@ -77,7 +77,7 @@ env:
   KANAME_RUNNER_IMAGE: ubuntu:24.04
   KANAME_RUNNER_OS: ubuntu/24.04
   KANAME_RUNNER_SNAPSHOT: https://snapshot.ubuntu.com/ubuntu/20261025T000000Z/
-  KANAME_RUNNER_APT: >-
+  KANAME_RUNNER_APT: |-
     git=1:2.43.0-1ubuntu7.4 git-man=1:2.43.0-1ubuntu7.4
     openssl=3.0.13-0ubuntu3.16 libssl3t64=3.0.13-0ubuntu3.16
     jq=1.7.1-3ubuntu0.24.04.2 libjq1=1.7.1-3ubuntu0.24.04.2
