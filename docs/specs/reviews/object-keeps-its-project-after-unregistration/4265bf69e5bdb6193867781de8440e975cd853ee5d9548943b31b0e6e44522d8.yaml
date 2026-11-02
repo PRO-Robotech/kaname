@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -20,14 +21,14 @@ subject:
     Это ревью правки одобренного документа, только по дельте 1d308bbd → 4265bf69.
   predecessor_record: docs/specs/reviews/object-keeps-its-project-after-unregistration/1d308bbd5d5bb6cee79994a67f7cf3664e475f504c65f323b983948139b26a72.yaml
   fingerprint_predicate: >-
-    `sha256sum` в копии kacho-workspace/tmp/kn-983-acceptance: `.md` → 4265bf69…22d8,
+    `sha256sum` в копии review-worktree-30: `.md` → 4265bf69…22d8,
     совпало с возвратом автора; служебная копия `.md.1d308bbd` → 1d308bbd…6a72,
     совпало с одобренной записью; `git show HEAD:<путь> | sha256sum` → 1d308bbd…6a72
     (в ветке лежит одобренная редакция, правка не закоммичена).
   measurement_revisions: >-
     Дифф — `diff .md.1d308bbd .md`: изменены строки 848 и 886, добавлены 951–961 (§11).
     Других ханков нет. kacho — origin/main @41d7edad9b; svc-registry — копия
-    tmp/svc-registry-target, SHA-256 2717077568…22dc7 (прежний, совпал с записью круга 2).
+    review-worktree-36, SHA-256 2717077568…22dc7 (прежний, совпал с записью круга 2).
   premise: >-
     «Правка касается только двух координат проб и §11; сценарии и стадии не менялись» —
     подтверждена диффом (три ханка, сценарии, производители и близнецы не тронуты).
@@ -63,7 +64,7 @@ blocking:
       Фильтр — `/internal/migrations/` и `.sql` (строки 158-159). Новый файл
       `internal/migrations/*.sql` дерева kaname в этот дифф не попадает никогда, поэтому
       added=0 и находок 0. Своего гейта цитирования приёмки в kaname нет:
-      `git grep -n -i acceptance -- '*_test.go' | grep -i migrat` в tmp/kn-983-acceptance
+      `git grep -n -i acceptance -- '*_test.go' | grep -i migrat` в review-worktree-30
       находит только комментарии-ссылки. Цитирование в шапках миграций kaname — соглашение
       без держателя (`git grep -l docs/engineering/acceptance -- 'internal/migrations/*.sql'`
       → 3 файла).

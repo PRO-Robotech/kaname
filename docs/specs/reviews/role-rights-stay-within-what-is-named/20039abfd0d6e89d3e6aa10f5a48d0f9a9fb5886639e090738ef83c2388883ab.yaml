@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -22,7 +23,7 @@ subject:
   predecessor_record: none
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/role-rights-stay-within-what-is-named.md в копии
-    kacho-workspace/tmp/kn-esc-acc @ ddd5681af → 20039abf…88883ab (совпало с заданием)
+    review-worktree-33 @ ddd5681af → 20039abf…88883ab (совпало с заданием)
   measurement_revisions: >-
     Все замеры — чтение дерева kaname в той же копии @ ddd5681af (HEAD = origin/955) и corelib
     v1.15.0 из кэша модулей (go.mod:8).

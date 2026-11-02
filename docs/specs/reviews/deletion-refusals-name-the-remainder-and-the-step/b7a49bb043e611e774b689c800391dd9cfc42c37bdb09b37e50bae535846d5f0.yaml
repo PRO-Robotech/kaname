@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -17,7 +18,7 @@ subject:
   round: 2
   predecessor_record: docs/specs/reviews/deletion-refusals-name-the-remainder-and-the-step/3217711702358047275c3f7c588011e80d55704e9b1d589487733d42ae160faf.yaml
   fingerprint_predicate: >-
-    sha256sum <док> в копии kacho-workspace/tmp/w9/kn-acc-proto-b → b7a49bb0…846d5f0;
+    sha256sum <док> в копии review-worktree-45 → b7a49bb0…846d5f0;
     совпало с заданием; wc -l → 491.
   measurement_revisions: >-
     Код — та же копия @f8021ad84; git diff --stat ede94db30 HEAD -- internal proto tests пуст.

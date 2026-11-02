@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -21,7 +22,7 @@ subject:
     второе ревью правки одобренного документа, только по дельте 4265bf69 → 69280aba.
   predecessor_record: docs/specs/reviews/object-keeps-its-project-after-unregistration/4265bf69e5bdb6193867781de8440e975cd853ee5d9548943b31b0e6e44522d8.yaml
   fingerprint_predicate: >-
-    `sha256sum` в копии kacho-workspace/tmp/kn-983-acceptance: `.md` → 69280aba…bbd0,
+    `sha256sum` в копии review-worktree-30: `.md` → 69280aba…bbd0,
     совпало с возвратом автора. Служебная копия `.md.4265bf69` → 4265bf69…22d8, совпала с
     записью круга 3. `git show HEAD:<путь> | sha256sum` → 1d308bbd…6a72: в ветке лежит
     одобренная редакция, правка не закоммичена.

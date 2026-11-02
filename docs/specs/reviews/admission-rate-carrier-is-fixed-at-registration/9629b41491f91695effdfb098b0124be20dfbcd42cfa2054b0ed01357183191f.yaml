@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -18,7 +19,7 @@ subject:
   predecessor_record: null
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md
-    в копии kacho-workspace/tmp/kaname-197-198-acc @ 3827cbfcc → 9629b414…7183191f (совпал с заданием)
+    в копии review-worktree-18 @ 3827cbfcc → 9629b414…7183191f (совпал с заданием)
   measurement_revisions: >-
     Все замеры — в копии kaname-197-198-acc @ 3827cbfcc.
 

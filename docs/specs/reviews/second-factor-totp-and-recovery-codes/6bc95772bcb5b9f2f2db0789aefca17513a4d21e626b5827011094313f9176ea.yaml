@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -558,7 +559,7 @@ neighbours:
 
 gates_run:
   - name: >-
-      go test -count=1 -short ./internal/check/ (рабочая копия круга, TMPDIR=/var/tmp/w16-257-review)
+      go test -count=1 -short ./internal/check/ (рабочая копия круга, TMPDIR=review-tempdir-08)
       — ДО записи, на 74a0f1a1
     result: >-
       ok (16.39 s), rc 0. TestAcceptancePathCoordinateResolves — приёмок 45 · отслеживаемых путей

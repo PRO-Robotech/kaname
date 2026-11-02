@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -26,9 +27,9 @@ subject:
     не тронута.
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/expired-invitation-keeps-the-address-until-the-inviter-acts.md
-    в копии kacho-workspace/tmp/kaname-198-acc (ветка 198, HEAD 8b0379e2a, файл изменён) → 34f7a09e…a4284 (перемерено)
+    в копии review-worktree-19 (ветка 198, HEAD 8b0379e2a, файл изменён) → 34f7a09e…a4284 (перемерено)
   measurement_revisions: >-
-    Все замеры и посев — в отдельной копии рецензента kacho-workspace/tmp/kaname-198-rev @ 8b0379e2a
+    Все замеры и посев — в отдельной копии рецензента review-worktree-20 @ 8b0379e2a
     (detached), разовая проба в дерево не внесена.
 
 verdict: APPROVED

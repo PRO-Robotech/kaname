@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -21,7 +22,7 @@ subject:
     (круг 2, APPROVED, редакция 2 до правки неблокирующих)
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/unregistration-revokes-its-grants.md в копии
-    kacho-workspace/tmp/963-kaname-unreg-grants → 0743cd4f…87bd97b4. Совпал с заданием.
+    review-worktree-13 → 0743cd4f…87bd97b4. Совпал с заданием.
   measurement_revisions: >-
     Чтение файла копии на голове ветки 318f793bb. Документ не закоммичен (`??`), поэтому
     прежней редакции 4351c531 нет ни в git, ни копией на диске. Дельта восстановлена

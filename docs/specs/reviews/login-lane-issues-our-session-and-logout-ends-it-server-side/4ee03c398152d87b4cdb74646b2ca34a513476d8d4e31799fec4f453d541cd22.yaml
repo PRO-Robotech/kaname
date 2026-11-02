@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -268,7 +269,7 @@ predicates_run:
     command: "awk '/^## §6 /,/^## §7 /' <док> | grep -oE '^\\*\\*Ф3-[0-9]+' | sort -u | wc -l; … grep -vc 'СНЯТ'; awk '/^## §7 /,/^### §7.1 /' <док> | grep -cE '^\\| \\*\\*Ф3-'; … grep -c 'PRO-Robotech/kacho'"
     expected: 53 · 52 · 53 · 12 (круг 4)
     got: 53 · 52 · 53 · 12 — сценариев не прибавилось и не убыло; Ф3-53 остался живым (снята одна буква)
-  - where: PRO-Robotech/kaname@230a7414 (TMPDIR=/var/tmp/w15-rev3, вне репозитория)
+  - where: PRO-Robotech/kaname@230a7414 (TMPDIR=review-tempdir-07, вне репозитория)
     command: "go test -count=1 ./internal/check/ -run TestAcceptance -v"
     expected: PASS
     got: "ok 6.7 s — приёмок 44; координат-путей 565, резолвится 485, в чужом доме 80, находок 0; координат проб 646, резолвится 522, в чужом доме 124, находок 0; правлено после объявления состояния 38, с записью 38, находок 0; инъекции PASS"
@@ -349,7 +350,7 @@ verification:
 reviewer_errors_named_first:
   - >-
     Первый `git worktree add` я дал относительным путём от `project/kaname` — копии легли
-    ВНУТРЬ общей копии продукта (`project/kaname/tmp/…`); снято `worktree remove --force` и
+    ВНУТРЬ общей копии продукта (`project/kaname/review-worktree-03`); снято `worktree remove --force` и
     заведено заново под `tmp/` воркспейса до чтения; `git status` общей копии — чист.
   - >-
     Первый `git fetch` общей копии не уложился в предел инструмента и ушёл в фон; вывод прочитан

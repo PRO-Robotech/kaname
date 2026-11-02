@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -17,7 +18,7 @@ subject:
   round: 1
   predecessor_record: null
   fingerprint_predicate: >-
-    sha256sum <док> в копии kacho-workspace/tmp/w9/kn-acc-proto-b и
+    sha256sum <док> в копии review-worktree-45 и
     git show HEAD:<док> | sha256sum → 32177117…ae160faf; совпало с заданием; wc -l → 401.
   measurement_revisions: >-
     Код — та же копия; ede94db30..HEAD меняет только три документа приёмки (git diff --stat).

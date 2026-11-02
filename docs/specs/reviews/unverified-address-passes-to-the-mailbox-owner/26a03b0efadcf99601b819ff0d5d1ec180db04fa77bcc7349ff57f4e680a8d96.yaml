@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -19,7 +20,7 @@ subject:
   predecessor_record: none
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/unverified-address-passes-to-the-mailbox-owner.md
-    в копии kacho-workspace/tmp/kaname-458-acc @ 7c8081251 → 26a03b0e…4f680a8d96;
+    в копии review-worktree-22 @ 7c8081251 → 26a03b0e…4f680a8d96;
     `git show HEAD:<путь> | sha256sum` — то же
   measurement_revisions: >-
     Все замеры — `git grep <образец> d33a3b866abc` в той же копии. d33a3b866..7c8081251 меняет

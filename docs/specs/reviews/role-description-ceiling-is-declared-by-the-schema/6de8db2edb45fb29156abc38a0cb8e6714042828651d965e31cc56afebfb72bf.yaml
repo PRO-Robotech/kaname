@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -21,7 +22,7 @@ subject:
   round: 1
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/role-description-ceiling-is-declared-by-the-schema.md
-    в копии kacho-workspace/tmp/kn-866-acc @ 892853c45 → 6de8db2e…afebfb72bf
+    в копии review-worktree-28 @ 892853c45 → 6de8db2e…afebfb72bf
   measurement_revisions: >-
     Код — рабочая копия на 892853c45 (HEAD = origin/746 = 892853c45); #867 (3206bf295, влит
     97853ea94) — предок HEAD; kaname#867 CLOSED.
