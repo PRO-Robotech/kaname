@@ -141,7 +141,9 @@ def manifest(root):
 
 def installer(data, work, root):
     quote = shlex.quote
-    lines = ["set -uo pipefail", f'export PATH="$(go env GOPATH)/bin:{quote(str(work / "bin"))}:$PATH"',
+    # Shipped fallbacks must not shadow the exact provider just bootstrapped.
+    # Keep them discoverable only after the provider/system paths.
+    lines = ["set -uo pipefail", f'export PATH="$(go env GOPATH)/bin:$PATH:{quote(str(work / "bin"))}"',
              f"mkdir -p {quote(str(work / 'python-tools'))} || return 1",
              f"export PYTHONPATH={quote(str(work / 'python-tools'))}${{PYTHONPATH:+:$PYTHONPATH}}"]
     for entry in data["install"]:

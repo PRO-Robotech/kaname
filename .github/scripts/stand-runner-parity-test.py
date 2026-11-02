@@ -231,6 +231,8 @@ with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'apt-peer.jsonl').open('a') as o
 if os.environ.get('FIXTURE_APT_FAIL'):
  print('controlled apt peer failure',file=sys.stderr);sys.exit(23)
 ''')
+        # A stale fallback remains present: lawful bootstrap must select its
+        # exact provider without deleting or accepting this older executable.
         executable(self.work / "bin/kubectl", '#!/bin/sh\necho "Client Version: v1.31.2"\n')
         # Необъявленные пины образа не сочиняются: эти base-image tools лишь присутствуют.
         for tool in ("helm", "docker"):
@@ -411,7 +413,12 @@ def payload_checks(root, payload, axis="all"):
         assert mutant != expected, "remap control не отличает прежнюю повторную замену"
         print("PARITY-READY remap=single-pass/original-boundaries workflow-lawful=preserved old-mutant=rejected", flush=True)
         control = World(base / "control", payload)
+        stale_kubectl = (control.work / "bin/kubectl").read_bytes()
         assert control.run("true").returncode == 0, "законный opaque control не исполнился"
+        selected_kubectl = json.loads((control.work / "runtime-tools.json").read_text())["tools"]["kubectl"]
+        assert Path(selected_kubectl["path"]) == control.work / "provider/bin/kubectl", "stale fallback затенил exact kubectl provider"
+        assert (control.work / "bin/kubectl").read_bytes() == stale_kubectl, "stale fallback control был удалён или переписан"
+        print("PARITY-READY stale-kubectl=retained selected=exact-provider", flush=True)
         probe = "import importlib, importlib.metadata, json, pathlib, re, shutil, subprocess, sys\n" + inspect.getsource(verify_tools) + "\nsys.exit(verify_tools(json.loads(pathlib.Path(sys.argv[1]).read_text())))\n"
         tool_worlds = (("actual", ""), ("workflow-lawful", "\n".join(blocks)), ("pin-mutant", "")) if axis in ("all", "tools") else ()
         for label, install in tool_worlds:
