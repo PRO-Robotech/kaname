@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -25,7 +26,7 @@ subject:
   predecessor_record: docs/specs/reviews/registration-and-its-three-consequences/819d03794fad39658eb7fe3f5e267b1854f1a65b78e9be29951c154d1b9e3d70.yaml
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/registration-and-its-three-consequences.md в рабочей
-    копии kacho-workspace/tmp/w-256-f4 на 57d4e213
+    копии review-worktree-38 на 57d4e213
   fingerprint_note: >-
     Отпечаток и число строк (1866) сняты своим замером первым действием и совпали с заданием.
     Дельта к записи круга 1 (99cbbd56..57d4e213) — один файл, сам документ; запись круга 1 не

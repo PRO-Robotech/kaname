@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -13,7 +14,7 @@ subject:
   content_commit: none
   content_commit_note: >-
     Документ в копии не закоммичен (`git status --short` → ` M docs/engineering/acceptance/…`);
-    отпечаток снят с рабочего файла. Копия kacho-workspace/tmp/kn-865-acc4 — отсоединённая
+    отпечаток снят с рабочего файла. Копия review-worktree-27 — отсоединённая
     голова 63d8938a2 (голова ветки `865`).
   branch: '865'
   task: PRO-Robotech/kaname#865

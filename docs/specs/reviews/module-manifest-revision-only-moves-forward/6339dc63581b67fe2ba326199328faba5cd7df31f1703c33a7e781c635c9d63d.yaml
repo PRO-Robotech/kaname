@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -30,7 +31,7 @@ subject:
     (круг 1, CHANGES_REQUESTED; не тронута)
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/module-manifest-revision-only-moves-forward.md
-    в копии kacho-workspace/tmp/kn-865-acc @ 892853c45 → 6339dc63…c9d63d (совпадает с
+    в копии review-worktree-26 @ 892853c45 → 6339dc63…c9d63d (совпадает с
     названным автором)
   measurement_revisions: >-
     Код — рабочее дерево копии на 892853c45 (изменены только файлы приёмки и записей ревью).

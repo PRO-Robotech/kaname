@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -11,7 +12,7 @@ subject:
     события (`change-graph.md` §2). Шапка документа намеренно не правлена.
   base_commit: 892853c45
   content_commit: null
-  content_commit_note: документ не закоммичен (неотслеживаемый файл копии tmp/kn-866-acc, ветка 866)
+  content_commit_note: документ не закоммичен (неотслеживаемый файл копии review-worktree-28, ветка 866)
   branch: "866"
   task: PRO-Robotech/kaname#866
   related_tasks: [PRO-Robotech/kaname#856, PRO-Robotech/kaname#858]
@@ -23,7 +24,7 @@ subject:
     объявлениях на загрузке отвергнут (ломает registry_repository). Р4 не переоткрывается.
   predecessor_record: null
   fingerprint_predicate: >-
-    sha256sum <док> в копии tmp/kn-866-acc @ 892853c45 → 25a2af39…ad155 (совпало с префиксом
+    sha256sum <док> в копии review-worktree-28 @ 892853c45 → 25a2af39…ad155 (совпало с префиксом
     задания).
   measurement_revisions: >-
     kaname — 892853c45 (HEAD копии); трекер — gh issue view 866 на 2026-10-18.

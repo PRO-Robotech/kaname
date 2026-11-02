@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -13,7 +14,7 @@ subject:
   base_commit: ddd5681af
   content_commit: none
   content_note: >-
-    Редакция 2 — незакоммиченная правка рабочего дерева копии tmp/kn-1004-acc поверх временного
+    Редакция 2 — незакоммиченная правка рабочего дерева копии review-worktree-25 поверх временного
     коммита 7f58444f1 (ветка 1004-acc). Отпечаток — содержимого файла, а не коммита.
   branch: 1004-acc
   task: PRO-Robotech/kaname#1004
@@ -28,7 +29,7 @@ subject:
   predecessor_record: docs/specs/reviews/access-target-object-id-follows-the-object-grammar/1d7635a30cc4a8efa1a73d61a99d02171d2f2183a7a0101401f1f145c1a9d01b.yaml
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/access-target-object-id-follows-the-object-grammar.md
-    в копии kacho-workspace/tmp/kn-1004-acc → 19957fce…7b57f (совпало с заданием); копия
+    в копии review-worktree-25 → 19957fce…7b57f (совпало с заданием); копия
     прежней редакции `.md.1d7635a3` → 1d7635a3…a9d01b (совпало с отпечатком записи круга 1).
   measurement_revisions: >-
     Код — рабочее дерево копии на 7f58444f1 (= ddd5681af плюс документ); пробы ветки 1004 —
@@ -117,7 +118,7 @@ constructibility:
     Новых «Дано» дельта не вводит: ATI-02b стоит на том же «Дано», что ATI-02/05 (роль w.seedRole,
     выдача usr-D на {<base>/one, <base>/one/two} через w.createDone + w.grantRequest, объекты
     registerSlashRepo). Это «Дано» посеяно прогоном рецензента круга 1 @43750c544 на внешнем
-    кластере (kacho-workspace/tmp/1004-rev-logs/hs-integration-20261026T085923-1416884.log).
+    кластере (review-worktree-11/hs-integration-20261026T085923-1416884.log).
     Этим кругом посев не повторялся.
   seeded: 4
   of: 6

@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -18,7 +19,7 @@ subject:
   round: 2
   predecessor_record: docs/specs/reviews/kaname-derives-the-parent-of-a-registered-object/a00c560182b61666c261aab831f41aae35c1a23a371fc190043a89d786a4da44.yaml
   fingerprint_predicate: >-
-    `sha256sum` по документу в копии kacho-workspace/tmp/kn-982-acceptance даёт
+    `sha256sum` по документу в копии review-worktree-29 даёт
     1f2991d6…f6e8. Совпало с возвратом автора. Копия прежней редакции `.a00c5601`
     даёт a00c5601…4da44, это отпечаток записи круга 1. Дифф двух редакций — 562 строки.
   measurement_revisions: >-

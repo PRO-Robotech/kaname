@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -248,7 +249,7 @@ predicates_run:
     expected: "2 (:161, :1718) · 69 · оба MERGED в release/iam-lines"
     got: "2 (:161, :1718) · 69 · MERGED 8ed128b9 base=release/iam-lines · MERGED 68e66887 base=release/iam-lines"
   - where: PRO-Robotech/kaname@7c5ee22c
-    command: "TMPDIR=/var/tmp/… go test ./internal/check/ -run 'TestAcceptance|TestHistory' -count=1 -v"
+    command: "TMPDIR=review-tempdir-10 go test ./internal/check/ -run 'TestAcceptance|TestHistory' -count=1 -v"
     expected: PASS, находок 0
     got: "PASS — приёмок 45; координат-путей 583, находок 0; координат проб 653, находок 0; правлено после объявления состояния 38, с записью 38; вопросов об истории 59, находок 0"
   - where: PRO-Robotech/kacho#1268

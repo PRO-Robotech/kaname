@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -18,7 +19,7 @@ subject:
     (APPROVED, перенос дельты)
   fingerprint_predicate: >-
     sha256sum <документ> → 17eaa8f2…dc63b; одобренная копия
-    kacho-workspace/tmp/963-acc/unregistration-revokes-its-grants.0743cd4f.md → 0743cd4f…bd97b4.
+    review-worktree-12/unregistration-revokes-its-grants.0743cd4f.md → 0743cd4f…bd97b4.
     Оба совпали с заданием.
   delta_predicate: >-
     diff -u 963-acc/unregistration-revokes-its-grants.0743cd4f.md <документ> → 145 строк,

@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -22,7 +23,7 @@ subject:
   predecessor_record: none
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/access-target-object-id-follows-the-object-grammar.md
-    в копии kacho-workspace/tmp/kn-1004-acc @ 7f58444f1 → 1d7635a3…d9c01b (совпало с заданием)
+    в копии review-worktree-25 @ 7f58444f1 → 1d7635a3…d9c01b (совпало с заданием)
   measurement_revisions: >-
     Код — рабочее дерево копии на 7f58444f1 (= ddd5681af плюс один документ); пробы ветки 1004 —
     `git grep <образец> origin/1004` (origin/1004 = 43750c544).
@@ -116,7 +117,7 @@ constructibility:
   of: 6
   named_fixture: 2
   not_executed: 0
-  run_log: kacho-workspace/tmp/1004-rev-logs/hs-integration-20261026T085923-1416884.log (rc 1)
+  run_log: review-worktree-11/hs-integration-20261026T085923-1416884.log (rc 1)
   observed: >-
     TestSlashObjectID_RegistrationGrantAndCheckAreVerbatim — PASS (6.06 s): объекты <base>/one,
     <base>/one/two и пять границ зарегистрированы, выдача usr-B на <base>/one материализована.

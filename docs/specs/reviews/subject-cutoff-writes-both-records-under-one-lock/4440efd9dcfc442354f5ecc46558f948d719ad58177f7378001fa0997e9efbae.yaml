@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -18,7 +19,7 @@ subject:
   predecessor_record: none
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/subject-cutoff-writes-both-records-under-one-lock.md
-    в копии kacho-workspace/tmp/kaname-336-acc @ 53a220b87 → 4440efd9…9efbae (совпал с заданием)
+    в копии review-worktree-21 @ 53a220b87 → 4440efd9…9efbae (совпал с заданием)
   measurement_revisions: >-
     Все замеры — в копии kaname-336-acc @ 53a220b87. Документ объявляет ревизию 8a84dcff6e;
     9bac42bdc..53a220b87 добавляет только документ приёмки.

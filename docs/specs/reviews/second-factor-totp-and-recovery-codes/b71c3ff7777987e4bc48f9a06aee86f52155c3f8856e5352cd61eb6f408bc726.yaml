@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -480,7 +481,7 @@ neighbours:
   Ф1, Ф5, Ф4, F4d, IAM-INT-1: без изменений против круга 1; редакция 5 их строк не трогала.
 
 gates_run:
-  - name: go test ./internal/check/ -run Acceptance -count=1 (рабочая копия круга, TMPDIR=/var/tmp/w13-f12r2)
+  - name: go test ./internal/check/ -run Acceptance -count=1 (рабочая копия круга, TMPDIR=review-tempdir-05)
     result: >-
       ok (6.56 s). TestAcceptancePathCoordinateResolves — приёмок 43 · координат-путей 529 ·
       резолвится 449 · в чужом доме 80 · находок 0; TestAcceptanceProbeCoordinateResolves —

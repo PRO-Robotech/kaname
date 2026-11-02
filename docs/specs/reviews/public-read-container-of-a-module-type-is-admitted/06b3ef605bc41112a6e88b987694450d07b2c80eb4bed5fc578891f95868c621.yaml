@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -12,7 +13,7 @@ subject:
   base_commit: ba1f0f681
   content_commit: null
   content_commit_note: >-
-    документ не закоммичен: правка рабочей копии tmp/kn-866-acc3 (detached @ ba1f0f681),
+    документ не закоммичен: правка рабочей копии review-worktree-283 (detached @ ba1f0f681),
     `git status --short` → ` M <док>`.
   branch: "866"
   task: PRO-Robotech/kaname#866
@@ -25,7 +26,7 @@ subject:
     переоткрывается.
   predecessor_record: docs/specs/reviews/public-read-container-of-a-module-type-is-admitted/a129f53c4c46525b390d5f71bda31866e43e0776c6c556326806ce313836babf.yaml
   fingerprint_predicate: >-
-    sha256sum <док> в копии tmp/kn-866-acc3 → 06b3ef60…c621 (совпало с возвратом автора);
+    sha256sum <док> в копии review-worktree-283 → 06b3ef60…c621 (совпало с возвратом автора);
     `git show 7642fc25e:<док> | sha256sum` → a129f53c…babf (ред. 2, совпало с предыдущей записью).
   delta_predicate: >-
     `git diff 7642fc25e -- <док>` → 136+/50−, 10 хунков. Тронуты: шапка (история круга 2,
@@ -118,7 +119,7 @@ summary:
         локально с причиной в журнале слота: Job внешнего кластера стоит на pull
         postgres:16-alpine (t866-heavy-integration-6ac1 с 20:12:23Z, тот же отказ полосы 888)
       result: ok, код 0, PASS ×3 (TestProbe_APIRefusesModuleTarget, TestProbe_PM03, TestProbe_PM04)
-      log: /tmp/claude-1000/-home-dk-workspace-github-PRO-Robotech-cloud-demo-kacho-workspace/3f44acf5-eb2b-55dd-ba20-9ef6786c26b4/scratchpad/rev866r3/reseed-1464348.log
+      log: review-artifact-02/reseed-1464348.log
 
 route_signs:
   proto: false

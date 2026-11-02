@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -17,7 +18,7 @@ subject:
   task: PRO-Robotech/kaname#965
   review_form: delta_after_approval
   fingerprint_predicate: >-
-    sha256sum kacho-workspace/tmp/965-acc/module-manifest-resources-roles-deprecated.md → 363399f0…e094;
+    sha256sum review-worktree-14/module-manifest-resources-roles-deprecated.md → 363399f0…e094;
     одобренная копия …0c2e48ca.md → 0c2e48ca…f32e. Совпали с заданием.
   delta_predicate: >-
     diff -u …0c2e48ca.md …deprecated.md → 94 строки, 5 участков: шапка; врезка MOD-MR-10;

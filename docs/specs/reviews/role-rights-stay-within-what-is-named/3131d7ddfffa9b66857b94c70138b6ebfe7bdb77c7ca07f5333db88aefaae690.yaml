@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -12,7 +13,7 @@ subject:
   base_commit: ddd5681afbd48393f6af372b5359d2aacdb095c8
   content_commit: 484e0cb610ae8a11416a5b782f2869f9f5f50e27
   content_commit_note: >-
-    Копия kacho-workspace/tmp/kn-esc-acc, ветка 1034, HEAD = 484e0cb61. Рабочее дерево по файлу
+    Копия review-worktree-33, ветка 1034, HEAD = 484e0cb61. Рабочее дерево по файлу
     приёмки чистое. Промежуточная редакция 4 в 299af08b4 (b7b8c09d…) заменена коммитом 484e0cb61.
     К ней эта запись не относится.
   branch: '1034'
@@ -34,7 +35,7 @@ subject:
     @ kn-esc-acc 484e0cb61 → 3131d7dd…aefaae690
   measurement_revisions: >-
     Чтение дерева kaname в той же копии: база ddd5681af; фикстуры GD — ef558bd04 (голова #1037);
-    журнал прогона на базе — tmp/kn-esc-acc-logs/base-1793017186-3439127.log (.rc = 1),
+    журнал прогона на базе — review-worktree-33-logs/base-1793017186-3439127.log (.rc = 1),
     копия прогона tmp/kn-esc-base-probe @ 4f9167e38.
 
 verdict: APPROVED

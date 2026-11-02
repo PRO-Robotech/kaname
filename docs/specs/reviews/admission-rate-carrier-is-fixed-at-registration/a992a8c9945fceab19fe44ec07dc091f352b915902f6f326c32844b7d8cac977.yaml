@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -18,7 +19,7 @@ subject:
   predecessor_record: docs/specs/reviews/admission-rate-carrier-is-fixed-at-registration/9629b41491f91695effdfb098b0124be20dfbcd42cfa2054b0ed01357183191f.yaml
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/admission-rate-carrier-is-fixed-at-registration.md
-    в копии kacho-workspace/tmp/kaname-197-198-acc @ ab4edde6f → a992a8c9…d8cac977 (совпал с заданием)
+    в копии review-worktree-18 @ ab4edde6f → a992a8c9…d8cac977 (совпал с заданием)
   measurement_revisions: >-
     Все замеры по дереву — в копии kaname-197-198-acc @ ab4edde6f; посев — одноразовая
     база postgres:16-alpine (тот же образ, что у corelib pgtest v1.10.0) через слот.
