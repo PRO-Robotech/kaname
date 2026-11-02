@@ -107,6 +107,51 @@ runner_bootstrap() {
   python3 -m venv --clear "$work/provider/python" || return 125
   export PATH="$work/provider/python/bin:$PATH"
   python3 -m pip install --quiet "pip==$KANAME_RUNNER_PIP" "PyYAML==$KANAME_RUNNER_PYYAML" || return 125
+  # Expose only the signing distribution supplied by the signed apt snapshot,
+  # not all system site-packages. Keep pip/PyYAML and the venv isolation intact.
+  python3 - <<'PY' || return 125
+import importlib.metadata
+from pathlib import Path
+import subprocess
+import sysconfig
+
+source = Path('/usr/lib/python3/dist-packages')
+target = Path(sysconfig.get_path('purelib'))
+files = subprocess.check_output(['dpkg-query', '-L', 'python3-cryptography', 'python3-cffi-backend'], text=True).splitlines()
+names = {Path(path).relative_to(source).parts[0] for path in files
+         if Path(path).is_relative_to(source) and Path(path) != source}
+metadata = {name for name in names if name.startswith('cryptography') and name.endswith(('.dist-info', '.egg-info'))}
+backend = {name for name in names if name.startswith('_cffi_backend.') and name.endswith('.so')}
+if 'cryptography' not in names or len(metadata) != 1 or len(backend) != 1:
+    raise RuntimeError('signing apt distribution closure missing or ambiguous')
+for name in {'cryptography'} | metadata | backend:
+    origin = source / name
+    if not origin.exists():
+        raise RuntimeError('signing apt distribution file missing: ' + str(origin))
+    (target / name).symlink_to(origin, target_is_directory=origin.is_dir())
+
+import cryptography, _cffi_backend
+if Path(cryptography.__file__).resolve() != (source / 'cryptography/__init__.py').resolve() or Path(_cffi_backend.__file__).resolve() != (source / next(iter(backend))).resolve():
+    raise RuntimeError('signing apt distribution shadowed')
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, utils
+key = ec.generate_private_key(ec.SECP256R1())
+pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+key = serialization.load_pem_private_key(pem, password=None)
+message = b'runner-signing-closure'
+signature = key.sign(message, ec.ECDSA(hashes.SHA256()))
+r, s = utils.decode_dss_signature(signature)
+signature = utils.encode_dss_signature(r, s)
+key.public_key().verify(signature, message, ec.ECDSA(hashes.SHA256()))
+try:
+    key.public_key().verify(signature, message + b'-changed', ec.ECDSA(hashes.SHA256()))
+except InvalidSignature:
+    pass
+else:
+    raise RuntimeError('signing closure accepted a changed message')
+print('RUNNER-PROVIDER signing ES256 verified cryptography=' + importlib.metadata.version('cryptography'))
+PY
   python3 "$root/.github/scripts/stand-runner-tools.py" --root "$root" --work "$work" || return 125
   . "$work/workflow-tools.sh" || return 125
   python3 "$root/.github/scripts/stand-runner-tools.py" --root "$root" --work "$work" --observe || return 125
