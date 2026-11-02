@@ -130,6 +130,18 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - name: измеренный UID и публичный receipt provider
+        run: |
+          python3 - <<'PY_RECEIPT'
+          import json, os, pathlib, subprocess
+          work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
+          raw = json.loads((work / "runtime-tools.json").read_text())
+          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
+          text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
+          (work / "runtime-tools-public.json").write_text(text + "\n")
+          print("RUNNER_PROVIDER_RECEIPT " + text)
+          PY_RECEIPT
       - name: выбор затронутого по карте путей
         id: pick
         env:
@@ -181,6 +193,18 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - name: измеренный UID и публичный receipt provider
+        run: |
+          python3 - <<'PY_RECEIPT'
+          import json, os, pathlib, subprocess
+          work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
+          raw = json.loads((work / "runtime-tools.json").read_text())
+          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
+          text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
+          (work / "runtime-tools-public.json").write_text(text + "\n")
+          print("RUNNER_PROVIDER_RECEIPT " + text)
+          PY_RECEIPT
       - run: go mod download
 
       # ИНСТРУМЕНТЫ ПРОВЕРЯЮТСЯ ЗАРАНЕЕ, И ИХ ОТСУТСТВИЕ — ТРЕТИЙ ИСХОД.
@@ -512,6 +536,18 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - name: измеренный UID и публичный receipt provider
+        run: |
+          python3 - <<'PY_RECEIPT'
+          import json, os, pathlib, subprocess
+          work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
+          raw = json.loads((work / "runtime-tools.json").read_text())
+          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
+          text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
+          (work / "runtime-tools-public.json").write_text(text + "\n")
+          print("RUNNER_PROVIDER_RECEIPT " + text)
+          PY_RECEIPT
       - run: go mod download
 
       # Утверждения о стенде выносят вердикт, значит их способность упасть
@@ -817,6 +853,10 @@ jobs:
               >> tests/newman/out-public/redaction-failed.txt
             exit 1
           fi
+          # Attach only after successful redaction and only to an existing report.
+          if [ -f "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" ] && [ -n "$(find tests/newman/out-public -type f -print -quit)" ]; then
+            cp "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" tests/newman/out-public/runner-provider.json
+          fi
 
       - name: отчёт прогона коллекции (вычищенный)
         if: always()
@@ -947,6 +987,18 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - name: измеренный UID и публичный receipt provider
+        run: |
+          python3 - <<'PY_RECEIPT'
+          import json, os, pathlib, subprocess
+          work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
+          raw = json.loads((work / "runtime-tools.json").read_text())
+          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
+          text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
+          (work / "runtime-tools-public.json").write_text(text + "\n")
+          print("RUNNER_PROVIDER_RECEIPT " + text)
+          PY_RECEIPT
       - run: go mod download
 
       - name: различение исходов подъёма способно упасть (самопроба инъекцией)
@@ -1118,6 +1170,10 @@ jobs:
               > tests/newman/out-public/redaction-failed.txt
             exit 1
           fi
+          # Attach only after successful redaction and only to an existing report.
+          if [ -f "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" ] && [ -n "$(find tests/newman/out-public -type f -print -quit)" ]; then
+            cp "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" tests/newman/out-public/runner-provider.json
+          fi
 
       - name: отчёт прогона волны церемонии (вычищенный)
         if: always()
@@ -1211,6 +1267,18 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - name: измеренный UID и публичный receipt provider
+        run: |
+          python3 - <<'PY_RECEIPT'
+          import json, os, pathlib, subprocess
+          work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
+          raw = json.loads((work / "runtime-tools.json").read_text())
+          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
+          text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
+          (work / "runtime-tools-public.json").write_text(text + "\n")
+          print("RUNNER_PROVIDER_RECEIPT " + text)
+          PY_RECEIPT
       - run: go mod download
 
       # ИНСТРУМЕНТ ПРОВЕРЯЕТСЯ ЗАРАНЕЕ, И ЕГО ОТСУТСТВИЕ — ТРЕТИЙ ИСХОД.
@@ -1347,6 +1415,18 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - name: измеренный UID и публичный receipt provider
+        run: |
+          python3 - <<'PY_RECEIPT'
+          import json, os, pathlib, subprocess
+          work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
+          raw = json.loads((work / "runtime-tools.json").read_text())
+          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
+          text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
+          (work / "runtime-tools-public.json").write_text(text + "\n")
+          print("RUNNER_PROVIDER_RECEIPT " + text)
+          PY_RECEIPT
       - name: координаты стенда
         run: |
           echo "KANAME_STAND_WORKDIR=$RUNNER_TEMP/kaname-stand-own" >> "$GITHUB_ENV"
@@ -1601,6 +1681,10 @@ jobs:
               > tests/newman/out-public/redaction-failed.txt
             exit 1
           fi
+          # Attach only after successful redaction and only to an existing report.
+          if [ -f "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" ] && [ -n "$(find tests/newman/out-public -type f -print -quit)" ]; then
+            cp "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" tests/newman/out-public/runner-provider.json
+          fi
 
       - name: отчёт прогона полосы формы (вычищенный)
         if: always()
@@ -1682,6 +1766,18 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - name: измеренный UID и публичный receipt provider
+        run: |
+          python3 - <<'PY_RECEIPT'
+          import json, os, pathlib, subprocess
+          work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
+          raw = json.loads((work / "runtime-tools.json").read_text())
+          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
+          text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
+          (work / "runtime-tools-public.json").write_text(text + "\n")
+          print("RUNNER_PROVIDER_RECEIPT " + text)
+          PY_RECEIPT
       - name: держатель — доказательство инъекцией в обе стороны
         run: .github/scripts/trunk-verdict-holder.sh --self-test
 
@@ -1736,6 +1832,18 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - name: измеренный UID и публичный receipt provider
+        run: |
+          python3 - <<'PY_RECEIPT'
+          import json, os, pathlib, subprocess
+          work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
+          raw = json.loads((work / "runtime-tools.json").read_text())
+          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
+          text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
+          (work / "runtime-tools-public.json").write_text(text + "\n")
+          print("RUNNER_PROVIDER_RECEIPT " + text)
+          PY_RECEIPT
       - name: целевой или полный — и исход
         env:
           EVENT: ${{ github.event_name }}
