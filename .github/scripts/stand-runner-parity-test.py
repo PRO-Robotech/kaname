@@ -470,7 +470,9 @@ def payload_checks(root, payload, axis="all"):
                 if label != "missing-expected":
                     stub = world.work / "oracle-shadow/git"
                     executable(stub, "#!/bin/sh\necho " + shlex.quote("git version " + installs["git"][0] + ("1" if label == "version-prefix" else "")) + "\nexit " + ("0" if label == "version-prefix" else "23") + "\n")
-                    extra = "export PATH=" + shlex.quote(str(stub.parent)) + ':$PATH'
+                    # World.run remaps canonical roots once; an expanded native
+                    # /work/... path would be remapped a second time here.
+                    extra = 'export PATH=/work/oracle-shadow:$PATH'
                 result = world.run("python3 /work/ship/tools.py /work/ship/tools.json", extra)
                 assert result.returncode == 1, (label,result.stdout)
                 reason = {"version-prefix": "exact version mismatch", "version-command-status": "version command rc=23", "missing-expected": "missing expected version"}[label]
