@@ -350,7 +350,7 @@ verification:
 reviewer_errors_named_first:
   - >-
     Первый `git worktree add` я дал относительным путём от `project/kaname` — копии легли
-    ВНУТРЬ общей копии продукта (`project/kanamereview-worktree-03`); снято `worktree remove --force` и
+    ВНУТРЬ общей копии продукта (`project/kaname/review-worktree-03`); снято `worktree remove --force` и
     заведено заново под `tmp/` воркспейса до чтения; `git status` общей копии — чист.
   - >-
     Первый `git fetch` общей копии не уложился в предел инструмента и ушёл в фон; вывод прочитан
