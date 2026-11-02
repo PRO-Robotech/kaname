@@ -111,6 +111,7 @@ runner_bootstrap() {
   # not all system site-packages. Keep pip/PyYAML and the venv isolation intact.
   python3 - <<'PY' || return 125
 import importlib.metadata
+from email.parser import Parser
 from pathlib import Path
 import subprocess
 import sysconfig
@@ -122,9 +123,24 @@ names = {Path(path).relative_to(source).parts[0] for path in files
          if Path(path).is_relative_to(source) and Path(path) != source}
 metadata = {name for name in names if name.startswith('cryptography') and name.endswith(('.dist-info', '.egg-info'))}
 backend = {name for name in names if name.startswith('_cffi_backend.') and name.endswith('.so')}
-if 'cryptography' not in names or len(metadata) != 1 or len(backend) != 1:
+formats = {suffix: sorted(name for name in metadata if name.endswith(suffix))
+           for suffix in ('.dist-info', '.egg-info')}
+if 'cryptography' not in names or not metadata or any(len(items) > 1 for items in formats.values()) or len(backend) != 1:
     raise RuntimeError('signing apt distribution closure missing or ambiguous')
-for name in {'cryptography'} | metadata | backend:
+versions = set()
+for name in metadata:
+    record = source / name / ('METADATA' if name.endswith('.dist-info') else 'PKG-INFO')
+    if str(record) not in files:
+        raise RuntimeError('signing metadata record not owned by apt')
+    headers = Parser().parsestr(record.read_text())
+    if headers.get_all('Name') != ['cryptography'] or len(headers.get_all('Version', [])) != 1 or not headers['Version']:
+        raise RuntimeError('signing metadata identity invalid')
+    versions.add(headers['Version'])
+if len(versions) != 1:
+    raise RuntimeError('signing metadata versions disagree')
+expected_version = next(iter(versions))
+canonical_metadata = (formats['.dist-info'] or formats['.egg-info'])[0]
+for name in {'cryptography', canonical_metadata} | backend:
     origin = source / name
     if not origin.exists():
         raise RuntimeError('signing apt distribution file missing: ' + str(origin))
@@ -133,6 +149,8 @@ for name in {'cryptography'} | metadata | backend:
 import cryptography, _cffi_backend
 if Path(cryptography.__file__).resolve() != (source / 'cryptography/__init__.py').resolve() or Path(_cffi_backend.__file__).resolve() != (source / next(iter(backend))).resolve():
     raise RuntimeError('signing apt distribution shadowed')
+if cryptography.__version__ != expected_version or importlib.metadata.version('cryptography') != expected_version:
+    raise RuntimeError('signing module/metadata version disagrees with apt')
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
