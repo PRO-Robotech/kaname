@@ -281,10 +281,15 @@ target.chmod(0o755)
         executable(self.bin / "python3", '''#!/bin/sh
 if [ "$1 $2" = '-m venv' ]; then
   for last; do :; done
-  "$FIXTURE_PY" "$@" || exit $?
+  # Reuse the real parent distributions: ensurepip's bundled pip would shadow
+  # their pinned metadata, while the controlled install peer only records argv.
+  "$FIXTURE_PY" "$@" --without-pip || exit $?
   for site in "$last"/lib/python*/site-packages; do
     printf '%s\n' "$FIXTURE_SITE_PATHS" > "$site/fixture-parent.pth"
   done
+  # Keep the CLI discoverable and bind it to this same fixture interpreter.
+  printf '%s\\n' '#!/bin/sh' 'exec "${0%/*}/python3" -m pip "$@"' > "$last/bin/pip"
+  chmod 0755 "$last/bin/pip"
   exit 0
 fi
 if [ "$1 $2 $3" = '-m pip install' ]; then
