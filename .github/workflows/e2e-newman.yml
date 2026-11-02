@@ -86,6 +86,8 @@ env:
     python3.12=3.12.3-1ubuntu0.17 python3.12-minimal=3.12.3-1ubuntu0.17
     libpython3.12-minimal=3.12.3-1ubuntu0.17 libpython3.12-stdlib=3.12.3-1ubuntu0.17
     libpython3.12t64=3.12.3-1ubuntu0.17
+  # Package releases and their self-reported CLI versions are distinct contracts.
+  KANAME_RUNNER_SYSTEM_CLI: '{"git":"2.43.0","openssl":"3.0.13","jq":"1.7","python3":"3.12.3"}'
   KANAME_RUNNER_NODE: '20.20.2'
   KANAME_RUNNER_NPM: '10.8.2'
   KANAME_RUNNER_HELM: v3.22.1

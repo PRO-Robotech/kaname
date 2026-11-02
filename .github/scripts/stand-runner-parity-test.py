@@ -22,7 +22,8 @@ def declarations(root):
     """Состав и пины берутся из исполняемых install/check steps всех jobs workflow."""
     path = root / ".github/workflows/e2e-newman.yml"
     workflow = yaml.safe_load(path.read_text())
-    installs, checks, blocks, inspected = {}, set(), [], 0
+    installs = {name: (version, "env/KANAME_RUNNER_SYSTEM_CLI") for name, version in json.loads(workflow["env"]["KANAME_RUNNER_SYSTEM_CLI"]).items()}
+    checks, blocks, inspected = set(), [], 0
     for job, body in workflow["jobs"].items():
         for index, step in enumerate(body.get("steps", [])):
             inspected += 1
@@ -392,7 +393,7 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
             repaired = existing.run("node --version")
             assert repaired.returncode == 0 and ("v" + existing.provider["KANAME_RUNNER_NODE"]) in repaired.stdout
             print("PARITY-MUTANT existing-version repaired=exact-workflow-pin", flush=True)
-            controls = ("fetch-failure", "PATH-shadowing", "python-package-version", "missing-stdlib", "missing-git-helper")
+            controls = ("fetch-failure", "PATH-shadowing", "python-package-version", "missing-stdlib", "missing-git-helper", "system-cli-version")
             for label in controls:
                 world = World(base / label, payload)
                 if label == "fetch-failure":
@@ -409,11 +410,18 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
                     (world.base / "python-peers/lzma.py").write_text("raise ImportError('controlled missing stdlib')\n")
                 elif label == "missing-git-helper":
                     world.env["GIT_EXEC_PATH"] = str(world.base / "absent-git-helpers")
+                elif label == "system-cli-version":
+                    declaration = world.src / ".github/workflows/e2e-newman.yml"
+                    document = yaml.safe_load(declaration.read_text())
+                    pins = json.loads(document["env"]["KANAME_RUNNER_SYSTEM_CLI"])
+                    pins["jq"] = "0.0.1042"
+                    document["env"]["KANAME_RUNNER_SYSTEM_CLI"] = json.dumps(pins)
+                    declaration.write_text(yaml.safe_dump(document))
                 rejected = world.run("touch /work/out/should-not-run", expected_stage="setup")
                 assert rejected.returncode == 125 and not (world.work / "out/should-not-run").exists(), label
                 reasons = {"fetch-failure": "controlled provider fetch failure", "PATH-shadowing": "PATH shadowing: git",
                            "python-package-version": "Python package version disagrees:", "missing-stdlib": "controlled missing stdlib",
-                           "missing-git-helper": "Git helper closure missing or shadowed"}
+                           "missing-git-helper": "Git helper closure missing or shadowed", "system-cli-version": "CLI version disagrees: jq"}
                 assert reasons[label] in rejected.stdout, (label, rejected.stdout)
                 print("PARITY-MUTANT provider rejected=" + label + " stage=setup code=125 payload=not-run", flush=True)
         command = "python3 -c " + shlex.quote("import os,json; print(json.dumps({'present': 'KANAME_STAND_IN_POD' in os.environ, 'keep':os.environ.get('KEEP_SENTINEL')}))")

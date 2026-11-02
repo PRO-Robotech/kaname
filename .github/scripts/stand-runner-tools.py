@@ -22,7 +22,7 @@ def manifest(root):
     path = root / ".github/workflows/e2e-newman.yml"
     document = yaml.safe_load(path.read_text())
     provider = {k: str(v) for k, v in document.get("env", {}).items() if k.startswith("KANAME_RUNNER_")}
-    required = ("IMAGE", "OS", "SNAPSHOT", "APT", "NODE", "NPM", "HELM", "KUBECTL", "DOCKER", "DOCKER_SHA256", "PIP", "PYYAML")
+    required = ("IMAGE", "OS", "SNAPSHOT", "APT", "SYSTEM_CLI", "NODE", "NPM", "HELM", "KUBECTL", "DOCKER", "DOCKER_SHA256", "PIP", "PYYAML")
     if set(provider) != {"KANAME_RUNNER_" + name for name in required}:
         raise ValueError("workflow provider: missing/unknown declaration")
     if provider["KANAME_RUNNER_OS"] != "ubuntu/24.04" or provider["KANAME_RUNNER_IMAGE"] != "ubuntu:24.04":
@@ -44,6 +44,9 @@ def manifest(root):
         packages[name] = version
     if not packages:
         raise ValueError("workflow provider: empty apt closure")
+    system_cli = json.loads(provider["KANAME_RUNNER_SYSTEM_CLI"])
+    if set(system_cli) != {"git", "openssl", "jq", "python3"} or any(not isinstance(v, str) or not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", v) for v in system_cli.values()):
+        raise ValueError("workflow provider: exact system CLI declarations required")
     entries, checks, images, setups = {}, {}, {}, {}
     inspected = 0
 
@@ -132,7 +135,7 @@ def manifest(root):
     for name, pin in setups.items():
         if name != "go" and pin.lstrip("v") != provider["KANAME_RUNNER_" + name.upper()].lstrip("v"):
             raise ValueError("workflow setup/provider disagreement: " + name)
-    return {"provider": provider, "apt": packages, "source": str(path), "jobs": len(images), "steps": inspected, "images": images,
+    return {"provider": provider, "system_cli": system_cli, "apt": packages, "source": str(path), "jobs": len(images), "steps": inspected, "images": images,
             "setup": setups, "install": list(entries.values()), "checks": checks}
 
 
@@ -200,13 +203,10 @@ def observe(data, work):
         if actual != expected:
             raise ValueError(f"apt package version disagrees: {name}: {actual} != {expected}")
         result["packages"][name] = actual
-    def apt_version(name):
-        raw = data["apt"][name].split(":", 1)[-1]
-        return raw.split("-", 1)[0]
+    # A distribution package pin is not the executable's version protocol:
+    # jq's pinned Ubuntu 1.7.1 package intentionally reports jq-1.7.
     versions = {"go": pin("go"), "node": pin("node"), "helm": pin("helm"),
-                "kubectl": pin("kubectl"), "docker": pin("docker"),
-                "python3": apt_version("python3"), "git": apt_version("git"),
-                "openssl": apt_version("openssl"), "jq": apt_version("jq")}
+                "kubectl": pin("kubectl"), "docker": pin("docker"), **data["system_cli"]}
     for entry in data["install"]:
         if entry["kind"] in ("npm", "go"):
             versions[entry["name"]] = entry["spec"].rsplit("@", 1)[1].lstrip("v")
@@ -257,9 +257,9 @@ def observe(data, work):
             result["tools"][name]["go_build_metadata"] = metadata
     # Functional stdlib/ABI probes include modules omitted by single-ELF shipping.
     import lzma, sqlite3, venv, hashlib as hash_probe
-    if ".".join(map(str, sys.version_info[:3])) != apt_version("python3"):
+    if ".".join(map(str, sys.version_info[:3])) != data["system_cli"]["python3"]:
         raise ValueError("Python runtime disagrees with apt provider")
-    if ssl.OPENSSL_VERSION.split()[1] != apt_version("openssl"):
+    if ssl.OPENSSL_VERSION.split()[1] != data["system_cli"]["openssl"]:
         raise ValueError("Python OpenSSL ABI disagrees with provider")
     if lzma.decompress(lzma.compress(b"runner")) != b"runner" or sqlite3.connect(":memory:").execute("select 42").fetchone() != (42,):
         raise ValueError("Python stdlib functional probe failed")
