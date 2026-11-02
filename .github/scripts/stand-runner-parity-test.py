@@ -347,7 +347,7 @@ for name, version in data.items():
  actual=shutil.which(name)
  if not actual: failures.append(name+': отсутствует'); continue
  if version:
-  r=subprocess.run([actual,'version' if name=='go' else '--version'],capture_output=True,text=True)
+  r=subprocess.run([actual,'version' if name in ('go','openssl') else '--version'],capture_output=True,text=True)
   if version not in r.stdout+r.stderr: failures.append(name+': ожидалось '+version+', получено '+r.stdout+r.stderr)
 print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(failures))
 '''

@@ -204,7 +204,7 @@ def observe(data, work):
             raise ValueError(f"apt package version disagrees: {name}: {actual} != {expected}")
         result["packages"][name] = actual
     # A distribution package pin is not the executable's version protocol:
-    # jq's pinned Ubuntu 1.7.1 package intentionally reports jq-1.7.
+    # jq's pinned Ubuntu 1.7.1 package reports jq-1.7 in the retained native failure.
     versions = {"go": pin("go"), "node": pin("node"), "helm": pin("helm"),
                 "kubectl": pin("kubectl"), "docker": pin("docker"), **data["system_cli"]}
     for entry in data["install"]:
