@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -17,7 +18,7 @@ subject:
   predecessor_record: none
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/unregistration-revokes-its-grants.md в копии
-    kacho-workspace/tmp/963-kaname-unreg-grants → 12c38a0c…abaa97a5. Совпал с заданием.
+    review-worktree-13 → 12c38a0c…abaa97a5. Совпал с заданием.
   measurement_revisions: >-
     Замеры дерева — `git grep` и чтение файлов на голове 318f793bb (ветка 963, основание
     origin/955 @1e09286f1). Документ в ветке не закоммичен (`git status` → `??`). Соседи

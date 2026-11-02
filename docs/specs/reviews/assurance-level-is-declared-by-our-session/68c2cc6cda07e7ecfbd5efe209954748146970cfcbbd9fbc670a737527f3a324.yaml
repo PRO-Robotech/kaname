@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -395,7 +396,7 @@ verification:
     сверка ведомости с контролем, способным дать находку
   subject_digest_matches_current_document: true
   remote_head_checked_twice: '85c2a9cb — до ревью и непосредственно перед записью, не сдвинулась'
-  worktree: kacho-workspace/tmp/w7-f11rev (отсоединённая голова 85c2a9cb), после инъекций чиста
+  worktree: review-worktree-40 (отсоединённая голова 85c2a9cb), после инъекций чиста
 
 reviewer_errors_named_first:
   - >-

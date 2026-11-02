@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -178,7 +179,7 @@ predicates_run:
     command: "for f in <шесть файлов проб Р17>; do git show \"$L:$f\" | grep -cE '^func Test'; done"
     expected: "3 · 1 · 8 · 3 · 2 · 1 (Р17)"
     got: "3 · 1 · 8 · 3 · 2 · 1 — совпало; имена всех 15 держателей, названных в Ф3-31/Ф3-53, существуют"
-  - where: PRO-Robotech/kaname@faf4f67e (tmp/w14-review2-lane, TMPDIR=/var/tmp/w14-review2)
+  - where: PRO-Robotech/kaname@faf4f67e (tmp/w14-review2-lane, TMPDIR=review-tempdir-06)
     command: "go test ./internal/passwordverify/ ./cmd/kaname/ ./internal/apps/kaname/api/humansession/ -run 'Envelope|_188_|F3_31|CostClass' -count=1 -v"
     expected: держатели зелёные; измерительная — по ручке
     got: "15 PASS · 1 SKIP (TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses без KACHO_LOGIN_TIMING=1) · rc=0 — третья категория у измерительной названа, не зачтена"

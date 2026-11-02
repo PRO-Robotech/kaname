@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -427,7 +428,7 @@ verification:
     повтор опыта круга 1 по каждому блокирующему; исполнение предикатов документа в названных
     домах; инъекции в держатель §6 по четырём формам; обход приёмок обоих домов по свойству
   subject_digest_matches_current_document: true
-  worktree: kacho-workspace/tmp/f11-review2 (отсоединённая голова 99f53f9d), после инъекций чиста
+  worktree: review-worktree-17 (отсоединённая голова 99f53f9d), после инъекций чиста
 
 limits:
   not_executed:

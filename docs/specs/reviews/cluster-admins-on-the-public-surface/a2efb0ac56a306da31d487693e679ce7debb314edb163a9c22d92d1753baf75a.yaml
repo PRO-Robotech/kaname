@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -21,7 +22,7 @@ subject:
   predecessor_record: docs/specs/reviews/cluster-admins-on-the-public-surface/f957e4511b261df71338db98105dd7b5ad553e9c3bba54eaa41b75cf17367ac0.yaml
   fingerprint_predicate: >-
     sha256sum docs/engineering/acceptance/cluster-admins-on-the-public-surface.md
-    в копии kacho-workspace/tmp/kaname-661-accept @ a697a6856 → a2efb0ac…1753baf75a (совпал с заданием)
+    в копии review-worktree-23 @ a697a6856 → a2efb0ac…1753baf75a (совпал с заданием)
   measurement_revisions: >-
     Служба — копия kaname-661-accept @ a697a6856 (дерево кода = 76ca2c8aa + запись круга 1).
     Платформа — `git show/grep ffbe930dbe` в project/kacho (только чтение объектов).

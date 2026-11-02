@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -25,7 +26,7 @@ subject:
     важных замечания. Пункты вне дельты не переоткрывались (`fa-b1-reanalysis-delta-only`).
   predecessor_record: docs/specs/reviews/service-account-creation-is-its-own-right/f283293c46bb1d7ce057f0c92331979a060b9c98b161b6c0295db4eb9b7594dc.yaml
   fingerprint_predicate: >-
-    sha256sum в копии kacho-workspace/tmp/kn-1003-acceptance @ 5c6b7c078: документ →
+    sha256sum в копии review-worktree-24 @ 5c6b7c078: документ →
     cd31c47c…c08f (совпало с возвратом автора); служебная копия `.md.f283293c` → f283293c…94dc
     (совпало с записью круга 2).
   delta_predicate: >-

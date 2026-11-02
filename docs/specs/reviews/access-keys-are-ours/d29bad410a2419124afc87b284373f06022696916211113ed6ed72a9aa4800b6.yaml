@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -40,7 +41,7 @@ subject:
     kaname — ствол `origin/main` = `cbbac984`; голова полосы `fff9ea1f`, впереди ствола на пять
     коммитов. Предмет ревью — незакоммиченная правка поверх `fff9ea1f`.
     Инъекции проведены в ИЗОЛЯЦИИ — две отсоединённые рабочие копии
-    (`git worktree add … 4d0e09e2` и `… fff9ea1f`) в `kacho-workspace/tmp/rev8-inject/`,
+    (`git worktree add … 4d0e09e2` и `… fff9ea1f`) в `review-worktree-35`,
     снятые по окончании (`git worktree remove --force`, `git worktree prune`). Рабочее дерево
     полосы не правилось ни разу; в нём в момент круга писал ПАРАЛЛЕЛЬНЫЙ агент
     (`?? internal/migrations/zz_acceptance_review_seed_test.go`, «ВРЕМЕННЫЙ посев ревьюера

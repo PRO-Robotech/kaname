@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -18,7 +19,7 @@ subject:
   round: 1
   predecessor_record: none
   fingerprint_predicate: >-
-    `sha256sum` по документу в копии kacho-workspace/tmp/kn-982-acceptance даёт
+    `sha256sum` по документу в копии review-worktree-29 даёт
     a00c5601…4da44. Совпало с возвратом автора (журнал workflow, запись acc:982).
   measurement_revisions: >-
     Дерево читалось через `git grep` и чтение файлов на 6e4077e3a. Это HEAD копии, он же

@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -36,7 +37,7 @@ subject:
     a69c79d6`). Ошибка этого же круга названа в reviewer_error_named_first: первая запись
     поля несла заполнитель вместо хеша и была исправлена до коммита.
   measurement_revisions: >-
-    Все замеры сняты в СОБСТВЕННОЙ отсоединённой копии `kacho-workspace/tmp/w9-acc106` @
+    Все замеры сняты в СОБСТВЕННОЙ отсоединённой копии `review-worktree-41` @
     b756b532 (kaname). Ветка добавляет к своему основанию a69c79d6 ровно три файла, все —
     документация (`git diff --stat a69c79d6..HEAD` → приёмка и две записи ревью); сосед
     `seed-identity-names-its-own-service.md` побайтово равен стволовому (`git diff origin/main

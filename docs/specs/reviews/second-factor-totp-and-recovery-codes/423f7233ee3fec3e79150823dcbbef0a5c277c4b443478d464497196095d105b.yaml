@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -215,8 +216,8 @@ closure_of_round_6:
 
 constructibility:
   isolation: >-
-    tmp/w-254-f12 (задание), TMPDIR=/var/tmp/f12-r6; пробы края — отдельный рабочий каталог
-    kacho-workspace/tmp/r7-kacho-edge на b5fa093341f, снят после прогона (`git worktree list` →
+    tmp/w-254-f12 (задание), TMPDIR=review-tempdir-04; пробы края — отдельный рабочий каталог
+    review-worktree-34 на b5fa093341f, снят после прогона (`git worktree list` →
     0 вхождений). Одноразовые пробы удалены, `git status --porcelain` перед записью → пусто.
   seeded:
     - given: близнец Ф12-45 (б) — W с system_admin на своей записи; W без него

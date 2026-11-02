@@ -1,3 +1,4 @@
+# #1051: координаты окружения обезличены; исходный вердикт и результаты сохранены.
 schema_version: 1
 kind: acceptance_review
 subject:
@@ -16,7 +17,7 @@ subject:
   related_tasks: [PRO-Robotech/kaname#874]
   review_form: delta_after_approval
   fingerprint_predicate: >-
-    sha256sum kacho-workspace/tmp/965-acc/nested-rule-reaches-descendants-of-a-named-container.md
+    sha256sum review-worktree-16/nested-rule-reaches-descendants-of-a-named-container.md
     → 1393ba89…2c1; одобренная копия …f12395ae.md → f12395ae…d9f6. Совпали с заданием.
   delta_predicate: >-
     diff -u …f12395ae.md …container.md → 137 строк, 11 участков: шапка; «Вне объёма» п.2;
