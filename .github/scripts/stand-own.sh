@@ -949,7 +949,7 @@ ks() { kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" "$@"; }
 # которое машина завела и снимет сама. Подъём в нём — тот же внешний путь, но
 # кластер уже доказан машиной (контекст -client, узлы профиля) ДО заведения
 # пространства, а учётка pod пространств не заводит и не читает: роль у неё
-# лишь в своём. Поэтому изнутри pod (KANAME_STAND_IN_POD=1):
+# лишь в своём. Маршрут определяется canonical SA/DownwardAPI mount, не env sentinel:
 #   маршрут     внешний, пространство — СВОЁ пространство учётки pod, и оно же
 #               обязано быть названо KANAME_STAND_EXT_NS (иначе отказ 64: стенд
 #               ставится лишь туда, где pod сам и живёт);
@@ -957,23 +957,36 @@ ks() { kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" "$@"; }
 #               сам токен в файл не переписывается), контекст `in-pod`;
 #   пространство не заводится и не снимается: подъём убирает остаток прежнего
 #               стенда в нём, снос — объекты стенда, перепись — под стенда в нём.
-IN_POD="${KANAME_STAND_IN_POD:-}"
-SA_DIR="${KANAME_STAND_SA_DIR:-/var/run/secrets/kubernetes.io/serviceaccount}"
+IN_POD=""
+# Canonical mounted data is the child-process route signal; host env cannot move it.
+SA_DIR=/var/run/secrets/kubernetes.io/serviceaccount
+POD_ID_DIR=/var/run/kaname-runner/pod
+in_pod_detect() {
+  IN_POD=""
+  if [ -e "$POD_ID_DIR" ] || [ -L "$POD_ID_DIR" ] || [ -e "$SA_DIR" ] || [ -L "$SA_DIR" ]; then IN_POD=1; fi
+}
+in_pod_detect
 
 # in_pod_route — маршрут изнутри pod раннера; код 64 — pod не раннера либо не в
 # названном пространстве.
 in_pod_route() {
-  local own host
-  if [ -z "${KUBERNETES_SERVICE_HOST:-}" ] || [ ! -r "$SA_DIR/namespace" ] || [ ! -r "$SA_DIR/token" ] || [ ! -r "$SA_DIR/ca.crt" ]; then
-    refuse "KANAME_STAND_IN_POD — лишь изнутри pod раннера: учётки pod нет; с машины — stand-own.sh runner"
+  local own host marker_ns marker_uid
+  if [ ! -r "$SA_DIR/namespace" ] || [ ! -r "$SA_DIR/token" ] || [ ! -r "$SA_DIR/ca.crt" ] || [ ! -s "$SA_DIR/namespace" ] || [ ! -s "$SA_DIR/token" ] || [ ! -s "$SA_DIR/ca.crt" ]; then
+    refuse "маршрут pod — лишь изнутри pod раннера: учётки pod нет; с машины — stand-own.sh runner"
     return 64
   fi
   own="$(cat "$SA_DIR/namespace")"
+  if [ -e "$POD_ID_DIR" ]; then
+    [ -r "$POD_ID_DIR/namespace" ] && [ -r "$POD_ID_DIR/uid" ] || { refuse "неполные pod identity files"; return 64; }
+    marker_ns="$(cat "$POD_ID_DIR/namespace")"; marker_uid="$(cat "$POD_ID_DIR/uid")"
+    [[ "$marker_uid" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ ]] && [ "$marker_ns" = "$own" ] || { refuse "pod identity и учётка не совпали"; return 64; }
+  fi
+  [[ "$own" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] && [ "${#own}" -le 63 ] || { refuse "namespace учётки pod вне допустимой формы"; return 64; }
   if [ -z "${KANAME_STAND_EXT_NS:-}" ] || [ "$own" != "$KANAME_STAND_EXT_NS" ]; then
     refuse "pod раннера в пространстве «$own», а стенд назван «${KANAME_STAND_EXT_NS:-}» — стенд ставится лишь в своё пространство"
     return 64
   fi
-  host="$KUBERNETES_SERVICE_HOST"
+  host=kubernetes.default.svc
   case "$host" in *:*) host="[$host]" ;; esac
   mkdir -p "$RUNDIR"
   EXT_KCFG="$RUNDIR/in-pod.kubeconfig"; EXT_CTX=in-pod
@@ -982,7 +995,7 @@ apiVersion: v1
 kind: Config
 clusters:
   - name: in-pod
-    cluster: {server: "https://$host:${KUBERNETES_SERVICE_PORT:-443}", certificate-authority: "$SA_DIR/ca.crt"}
+    cluster: {server: "https://$host:443", certificate-authority: "$SA_DIR/ca.crt"}
 users:
   - name: in-pod
     user: {tokenFile: "$SA_DIR/token"}
@@ -1079,6 +1092,7 @@ ext_nodes_guard() {
 route_decide() {
   local out rc
   ROUTE=local; WHY=""; PROOF=""
+  in_pod_detect
   if [ -n "$IN_POD" ]; then in_pod_route; return $?; fi
   ext_kubeconfig || return 0
   command -v kubectl >/dev/null 2>&1 || { WHY="kubectl на машине нет — внешний кластер не спросить"; return 0; }
@@ -1685,7 +1699,7 @@ ext_unfold() {
 #                 первой записи; --ship — файлы машины в /work/ship (исполнитель шагов
 #                 задания конвейера и т. п.), отпечаток каждого сверяется;
 #   стенд         команда поднимает его сама тем же stand-own.sh: pod несёт
-#                 KANAME_STAND_IN_POD=1 (раздел «СТЕНД ИЗНУТРИ POD РАННЕРА» выше);
+#                 canonical SA/DownwardAPI identity; env sentinel до payload сбрасывается;
 #   трекер        удостоверений площадки в pod НЕТ: `gh` pod — лишь чтение публичного
 #                 REST (`gh api repos/… [--jq …]`), прочее — отказ с объяснением;
 #   отчёты        команда пишет их в /work/out; машина забирает RUNNER_GLOBS (без venv,
@@ -1945,8 +1959,12 @@ runner_objects() {
                 env("HOME"; "/work/home"), env("GOTOOLCHAIN"; "local")] + $provider,
           resources: {requests: {cpu: "1", memory: "2Gi"}, limits: {memory: "6Gi"}},
           securityContext: {allowPrivilegeEscalation: false},
-          volumeMounts: [{name: "src", mountPath: "/src"}, {name: "work", mountPath: "/work"}]}],
-        volumes: [{name: "src", emptyDir: {}}, {name: "work", emptyDir: {}}]}}]}'
+          volumeMounts: [{name: "src", mountPath: "/src"}, {name: "work", mountPath: "/work"},
+            {name: "pod-identity", mountPath: "/var/run/kaname-runner/pod", readOnly: true}]}],
+        volumes: [{name: "src", emptyDir: {}}, {name: "work", emptyDir: {}},
+          {name: "pod-identity", downwardAPI: {items: [
+            {path: "namespace", fieldRef: {fieldPath: "metadata.namespace"}},
+            {path: "uid", fieldRef: {fieldPath: "metadata.uid"}}]}}]}}]}'
 }
 
 # runner_judge ПРОСТРАНСТВО — суд формы объектов раннера (stdin — их список): то, что
@@ -2012,10 +2030,18 @@ for i in items:
         for h in ("hostNetwork", "hostPID", "hostIPC"):
             if sp.get(h):
                 bad.append("pod: %s" % h)
+        identity = [v for v in sp.get("volumes", []) if v.get("name") == "pod-identity"]
+        wanted = [{"path": "namespace", "fieldRef": {"fieldPath": "metadata.namespace"}}, {"path": "uid", "fieldRef": {"fieldPath": "metadata.uid"}}]
+        if len(identity) != 1 or identity[0].get("downwardAPI", {}).get("items") != wanted:
+            bad.append("pod identity: отсутствует namespace/UID DownwardAPI")
         for v in sp.get("volumes", []):
             if "hostPath" in v:
                 bad.append("pod: том hostPath %s" % v.get("name"))
         for c in sp.get("containers", []) + sp.get("initContainers", []):
+            if c.get("name") == "run":
+                mounts = [m for m in c.get("volumeMounts", []) if m.get("name") == "pod-identity"]
+                if mounts != [{"name": "pod-identity", "mountPath": "/var/run/kaname-runner/pod", "readOnly": True}]:
+                    bad.append("pod identity: canonical readOnly mount отсутствует")
             sc = c.get("securityContext") or {}
             if sc.get("privileged") or (sc.get("capabilities") or {}).get("add"):
                 bad.append("контейнер %s: privileged либо добавленные возможности" % c.get("name"))
@@ -2245,7 +2271,7 @@ if [ "${1:-}" = "--self-test" ]; then
     # KANAME_STAND_IN_POD, KANAME_STAND_EXT_NS, KANAME_STAND_TASK и адрес API кластера, и
     # миры маршрута судили бы pod, а не свою настройку (11 провалов, kaname#940). Мир,
     # которому они нужны, ставит их сам.
-    IN_POD=""; SA_DIR="$TMP/sa-none"
+    IN_POD=""; SA_DIR="$TMP/sa-none"; POD_ID_DIR="$TMP/pod-id-none"
     unset KANAME_STAND_IN_POD KANAME_STAND_EXT_NS KANAME_STAND_TASK KANAME_STAND_SA_DIR KUBERNETES_SERVICE_HOST KUBERNETES_SERVICE_PORT
     # Маршрут идущего стенда машины самопроверку не уводит: файла маршрута у неё нет.
     ROUTE_FILE="$TMP/route-none"
@@ -2804,6 +2830,8 @@ EOF
     }
     RF_ROLE='(.items[] | select(.kind == "Role"))'
     RF_POD='(.items[] | select(.kind == "Pod"))'
+    world_rf_identity_missing() { runner_form_world '(.items[] | select(.kind == "Pod")).spec.volumes |= map(select(.name != "pod-identity"))'; }
+    world_rf_identity_writable() { runner_form_world '(.items[] | select(.kind == "Pod")).spec.containers[0].volumeMounts |= map(if .name == "pod-identity" then .readOnly=false else . end)'; }
     world_rf_ok()          { runner_form_world; }
     world_rf_clusterrole() { runner_form_world "$RF_ROLE.kind = \"ClusterRole\""; }
     world_rf_verb()        { runner_form_world "$RF_ROLE.rules[0].verbs += [\"update\"]"; }
@@ -2873,7 +2901,7 @@ EOF
     inpod_world() {
         ( PATH="$TMP/kc:$PATH"; kc_reset
           SA="$TMP/sa"; rm -rf "$SA"; mkdir -p "$SA"
-          echo t841-kaname-own > "$SA/namespace"; : > "$SA/token"; : > "$SA/ca.crt"
+          echo t841-kaname-own > "$SA/namespace"; echo fixture-token > "$SA/token"; echo fixture-ca > "$SA/ca.crt"
           export KUBERNETES_SERVICE_HOST=10.9.8.7 KUBERNETES_SERVICE_PORT=443 KANAME_STAND_EXT_NS=t841-kaname-own KANAME_STAND_TASK=841
           export XDG_CONFIG_HOME="$TMP/xdg-empty"; unset KANAME_STAND_KUBECONFIG KACHO_REMOTE_KUBECONFIG
           IN_POD=1; SA_DIR="$SA"
@@ -3174,6 +3202,8 @@ EOF
 
     echo "--- ось 12: раннер — форма объектов судится до записи, роль лишь в своём пространстве (kaname#940)"
     RF_BAD="$(printf 'RUNNER-FORM\t')"
+    assert 1 "(+) pod identity отсутствует" world_rf_identity_missing "pod identity:" "-" "RUNNER-FORM-OK"
+    assert 1 "(+) pod identity доступен на запись" world_rf_identity_writable "canonical readOnly mount" "-" "RUNNER-FORM-OK"
     assert 0  "(−) настоящий вывод runner_objects — форма сошлась"           world_rf_ok "RUNNER-FORM-OK" "правил роли 5" "$RF_BAD"
     assert 1  "(+) ClusterRole вместо роли пространства"                     world_rf_clusterrole "виды объектов" "-" "RUNNER-FORM-OK"
     assert 1  "(+) глагол сверх нужного на подах"                            world_rf_verb "['update'] на pods сверх нужного" "-" "RUNNER-FORM-OK"
@@ -3242,6 +3272,16 @@ EOF
     [ "$failed" -gt 0 ] && exit 1
     exit 0
 fi
+
+# Mounted identity also guards down/census/db commands that may load a saved route.
+case "${1:-}" in
+  up|down|census|db-fold|db-unfold)
+    if [ -n "$IN_POD" ]; then
+      route_decide || exit $?
+      ext_name_ns || exit $?
+      record_route || exit $?
+    fi ;;
+esac
 
 case "${1:-}" in
   up) stand_up; exit $? ;;

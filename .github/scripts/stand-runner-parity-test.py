@@ -3,6 +3,9 @@
 import hashlib
 import ast
 import io
+import inspect
+import importlib
+import importlib.metadata
 import json
 import os
 import platform
@@ -23,6 +26,10 @@ def declarations(root):
     path = root / ".github/workflows/e2e-newman.yml"
     workflow = yaml.safe_load(path.read_text())
     installs = {name: (version, "env/KANAME_RUNNER_SYSTEM_CLI") for name, version in json.loads(workflow["env"]["KANAME_RUNNER_SYSTEM_CLI"]).items()}
+    for name in ("node", "helm", "kubectl", "docker", "npm", "pip"):
+        installs[name] = (str(workflow["env"]["KANAME_RUNNER_" + name.upper()]).removeprefix("v"), "env/KANAME_RUNNER_" + name.upper())
+    installs["python:pip"] = installs["pip"]
+    modules = {}
     checks, blocks, inspected = set(), [], 0
     for job, body in workflow["jobs"].items():
         for index, step in enumerate(body.get("steps", [])):
@@ -45,6 +52,7 @@ def declarations(root):
                     previous = installs.get(name)
                     assert previous is None or previous[0] == version, (name, previous, version)
                     installs[name] = (version, f"{job}/steps/{index}")
+                    modules[name] = module
                     found = True
                 elif words[:3] == ["npm", "install", "-g"]:
                     spec = words[3]
@@ -72,7 +80,9 @@ def declarations(root):
     print(f"PARITY-CENSUS workflow jobs={len(workflow['jobs'])} steps={inspected} installs={len(installs)} checks={len(checks)}", flush=True)
     for name, (version, coordinate) in sorted(installs.items()):
         print(f"PARITY-DECL {coordinate} {name} version={version or 'workflow-unpinned'}", flush=True)
-    return installs, checks, blocks
+    assert not checks.difference(installs), ("missing expected versions", sorted(checks.difference(installs)))
+    assert all(version for version, _ in installs.values()), "missing exact expected version"
+    return installs, checks, blocks, modules
 
 
 def executable(path, text):
@@ -84,6 +94,59 @@ def executable(path, text):
 def remap_roots(text, roots):
     """Один проход по исходным root tokens; вставленные байты не разбираются заново."""
     return re.sub(r"/(?:usr/local|work|src)(?=/|[\s\"'`;)]|$)", lambda match: str(roots[match[0]]), text)
+
+
+def verify_tools(data):
+    """Independent workflow oracle: exact protocols, command status, module metadata."""
+    failures = []
+    for name, version in data["versions"].items():
+        expected = version.removeprefix("v")
+        if not expected:
+            failures.append(name + ": missing expected version"); continue
+        if name.startswith("python:"):
+            package = name.split(":", 1)[1]
+            try:
+                importlib.import_module(package.replace("pyyaml", "yaml"))
+                actual = importlib.metadata.version(package)
+            except ImportError as error:
+                failures.append(name + ": " + str(error)); continue
+        else:
+            binary = shutil.which(name)
+            if not binary:
+                failures.append(name + ": missing executable"); continue
+            args = {"go": ["version"], "openssl": ["version"], "helm": ["version", "--short"],
+                    "kubectl": ["version", "--client", "-o", "json"]}.get(name, ["--version"])
+            argv = [sys.executable, "-m", "pip", "--version"] if name == "pip" else [binary, *args]
+            run = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+            if run.returncode:
+                failures.append(name + ": version command rc=" + str(run.returncode)); continue
+            output = (run.stdout + run.stderr).strip()
+            if name in data["modules"]:
+                metadata = subprocess.run(["go", "version", "-m", binary], capture_output=True, text=True, timeout=30)
+                rows = [line.strip().split() for line in metadata.stdout.splitlines()]
+                module = data["modules"][name]
+                if metadata.returncode or not any(row == ["path", module] for row in rows) or not any(len(row) >= 3 and row[0] == "mod" and row[2].removeprefix("v") == expected and (row[1] == module or module.startswith(row[1] + "/")) for row in rows):
+                    failures.append(name + ": exact module metadata mismatch")
+                continue
+            if name == "kubectl":
+                actual = json.loads(output)["clientVersion"]["gitVersion"].removeprefix("v")
+            elif name == "go":
+                match = re.fullmatch(r"go version go(\d+\.\d+\.\d+) \S+", output)
+                actual = match[1] if match else "invalid Go version protocol"
+            elif name == "helm":
+                match = re.fullmatch(r"v(\d+\.\d+\.\d+)(?:\+[^\s]+)?", output)
+                actual = match[1] if match else "invalid Helm version protocol"
+            else:
+                patterns = {"git": r"git version (\d+\.\d+\.\d+)", "jq": r"jq-(\d+\.\d+(?:\.\d+)?)",
+                            "openssl": r"OpenSSL (\d+\.\d+\.\d+) .+", "python3": r"Python (\d+\.\d+\.\d+)",
+                            "node": r"v(\d+\.\d+\.\d+)", "npm": r"(\d+\.\d+\.\d+)",
+                            "newman": r"(\d+\.\d+\.\d+)", "pip": r"pip (\d+\.\d+\.\d+)(?: .+)?",
+                            "docker": r"Docker version (\d+\.\d+\.\d+), build .+"}
+                match = re.fullmatch(patterns.get(name, r"(?!)"), output)
+                actual = match[1] if match else "invalid version protocol"
+        if actual != expected:
+            failures.append(name + ": exact version mismatch " + actual + " != " + expected)
+    print("TOOL-RESULT " + json.dumps(failures, ensure_ascii=False)); return int(bool(failures))
 
 
 class World:
@@ -101,7 +164,7 @@ class World:
         (self.work / ".fetched").touch()
         (self.src / "root-sentinel").write_text("root\n")
         source_root = Path(__file__).resolve().parents[2]
-        for relative in ("go.mod", ".github/workflows/e2e-newman.yml", ".github/scripts/stand-runner-tools.py", ".github/scripts/stand-runner-bootstrap.sh"):
+        for relative in ("go.mod", ".github/workflows/e2e-newman.yml", ".github/scripts/stand-runner-tools.py", ".github/scripts/stand-runner-bootstrap.sh", ".github/scripts/stand-own.sh"):
             destination = self.src / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source_root / relative, destination)
@@ -153,7 +216,22 @@ class World:
         if base.name == "control":
             print("PARITY-OPERATIONAL " + json.dumps(manifest, sort_keys=True), flush=True)
         print("PARITY-READY operational=" + ",".join(operational) + " jq=real-bytes/evaluation-and-refusal", flush=True)
-        executable(self.bin / "apt-get", '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FIXTURE_WORLD/apt-argv"\n')
+        self.env["FIXTURE_UID"] = "0"
+        executable(self.bin / "id", '#!/bin/sh\n[ "$1" = -u ] || exit 93\nprintf "%s\\n" "$FIXTURE_UID"\n')
+        executable(self.bin / "sudo", '''#!/usr/bin/env python3
+import json,os,pathlib,sys
+args=sys.argv[1:]
+assert args[0] == '--preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT'
+assert args[1:3] == ['bash','-c']
+with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'sudo-peer.jsonl').open('a') as out: out.write(json.dumps(args)+'\\n')
+os.execvpe('bash',args[1:],dict(os.environ,FIXTURE_UID='0'))
+''')
+        executable(self.bin / "apt-get", '''#!/usr/bin/env python3
+import json,os,pathlib,sys
+with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'apt-peer.jsonl').open('a') as out: out.write(json.dumps({'peer':str(pathlib.Path(__file__).resolve()),'uid':os.environ['FIXTURE_UID'],'argv':sys.argv[1:]})+'\\n')
+if os.environ.get('FIXTURE_APT_FAIL'):
+ print('controlled apt peer failure',file=sys.stderr);sys.exit(23)
+''')
         executable(self.work / "bin/kubectl", '#!/bin/sh\necho "Client Version: v1.31.2"\n')
         # Необъявленные пины образа не сочиняются: эти base-image tools лишь присутствуют.
         for tool in ("helm", "docker"):
@@ -234,7 +312,7 @@ sys.stdout.buffer.write(lzma.decompress(sys.stdin.buffer.read()))
         peers = self.base / "python-peers"
         (peers / "pip").mkdir(parents=True)
         (peers / "pip/__init__.py").write_text("")
-        (peers / "pip/__main__.py").write_text("import os,sys,pathlib\nassert sys.argv[1] == 'install'\nwith (pathlib.Path(os.environ['FIXTURE_WORLD'])/'python-install-argv').open('a') as out: out.write(repr(sys.argv[1:])+'\\n')\n")
+        (peers / "pip/__main__.py").write_text("import os,sys,pathlib\nif sys.argv[1:] == ['--version']: print('pip '+os.environ['KANAME_RUNNER_PIP']); sys.exit(0)\nassert sys.argv[1] == 'install'\nwith (pathlib.Path(os.environ['FIXTURE_WORLD'])/'python-install-argv').open('a') as out: out.write(repr(sys.argv[1:])+'\\n')\n")
         self.env["PYTHONPATH"] = str(peers) + os.pathsep + os.environ.get("PYTHONPATH", "")
         self.env["FIXTURE_SITE_PATHS"] = "\n".join(p for p in sys.path if "site-packages" in p or "dist-packages" in p)
         # Controlled peers provide synthetic Go/Node/Helm archives. The production
@@ -320,7 +398,7 @@ else: sys.exit(74)
 
 
 def payload_checks(root, payload, axis="all"):
-    installs, checks, blocks = declarations(root)
+    installs, checks, blocks, modules = declarations(root)
     failures = 0
     with tempfile.TemporaryDirectory(prefix="stand-parity-") as temp:
         base = Path(temp)
@@ -335,22 +413,7 @@ def payload_checks(root, payload, axis="all"):
         print("PARITY-READY remap=single-pass/original-boundaries workflow-lawful=preserved old-mutant=rejected", flush=True)
         control = World(base / "control", payload)
         assert control.run("true").returncode == 0, "законный opaque control не исполнился"
-        probe = '''import importlib, json, pathlib, shutil, subprocess, sys
-data=json.loads(pathlib.Path(sys.argv[1]).read_text()); failures=[]
-for name, version in data.items():
- if name.startswith('python:'):
-  package=name.split(':',1)[1]
-  importlib.import_module(package.replace('pyyaml','yaml'))
-  from importlib.metadata import version as package_version
-  if package_version(package) != version: failures.append(name+': package version mismatch')
-  continue
- actual=shutil.which(name)
- if not actual: failures.append(name+': отсутствует'); continue
- if version:
-  r=subprocess.run([actual,'version' if name in ('go','openssl') else '--version'],capture_output=True,text=True)
-  if version not in r.stdout+r.stderr: failures.append(name+': ожидалось '+version+', получено '+r.stdout+r.stderr)
-print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(failures))
-'''
+        probe = "import importlib, importlib.metadata, json, pathlib, re, shutil, subprocess, sys\n" + inspect.getsource(verify_tools) + "\nsys.exit(verify_tools(json.loads(pathlib.Path(sys.argv[1]).read_text())))\n"
         tool_worlds = (("actual", ""), ("workflow-lawful", "\n".join(blocks)), ("pin-mutant", "")) if axis in ("all", "tools") else ()
         for label, install in tool_worlds:
             # Один и тот же root/layout: меняется только факт workflow install.
@@ -371,8 +434,8 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
             print("PARITY-CASE tools " + label, flush=True)
             (world.work / "ship/tools.py").write_text(probe)
             expected = {name: spec[0] for name, spec in installs.items()}
-            expected.update({name: expected.get(name, "") for name in checks})
-            (world.work / "ship/tools.json").write_text(json.dumps(expected))
+            assert not checks.difference(expected), "missing workflow pin"
+            (world.work / "ship/tools.json").write_text(json.dumps({"versions": expected, "modules": modules}))
             result = world.run("python3 /work/ship/tools.py /work/ship/tools.json", install)
             print(result.stdout, flush=True)
             trace = world.base / "install-argv"
@@ -386,6 +449,35 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
                 assert result.returncode != 0, "tools self-test не увидел однофактный wrong-pin mutant"
                 print("PARITY-MUTANT tools rejected=wrong-pin command-stage", flush=True)
         if axis in ("all", "tools"):
+            for label in ("version-prefix", "version-command-status", "missing-expected"):
+                world = World(base / ("oracle-" + label), payload)
+                expected = {name: spec[0] for name, spec in installs.items()}
+                if label == "missing-expected": expected["git"] = ""
+                (world.work / "ship/tools.py").write_text(probe)
+                (world.work / "ship/tools.json").write_text(json.dumps({"versions": expected, "modules": modules}))
+                extra = ""
+                if label != "missing-expected":
+                    stub = world.work / "oracle-shadow/git"
+                    executable(stub, "#!/bin/sh\necho " + shlex.quote("git version " + installs["git"][0] + ("1" if label == "version-prefix" else "")) + "\nexit " + ("0" if label == "version-prefix" else "23") + "\n")
+                    extra = "export PATH=" + shlex.quote(str(stub.parent)) + ':$PATH'
+                result = world.run("python3 /work/ship/tools.py /work/ship/tools.json", extra)
+                assert result.returncode == 1, (label,result.stdout)
+                reason = {"version-prefix": "exact version mismatch", "version-command-status": "version command rc=23", "missing-expected": "missing expected version"}[label]
+                assert reason in result.stdout, (label,result.stdout)
+                print("PARITY-ORACLE rejected=" + label + " command-stage rc=1",flush=True)
+            for uid in ("0", "1001"):
+                for fail in (False, True):
+                    world = World(base / ("privilege-" + uid + ("-refused" if fail else "-lawful")), payload)
+                    world.env["FIXTURE_UID"] = uid
+                    if fail: world.env["FIXTURE_APT_FAIL"] = "1"
+                    result = world.run("touch /work/out/privilege-payload", expected_stage="setup" if fail else "command")
+                    rows = [json.loads(line) for line in (world.base / "apt-peer.jsonl").read_text().splitlines()]
+                    assert rows and all(row["peer"] == str(world.bin / "apt-get") and row["uid"] == "0" for row in rows)
+                    assert (world.base / "sudo-peer.jsonl").exists() == (uid != "0")
+                    assert result.returncode == (125 if fail else 0)
+                    assert (world.work / "out/privilege-payload").exists() == (not fail)
+                    if fail: assert "controlled apt peer failure" in result.stdout
+                    print("PARITY-PRIVILEGE uid=" + uid + " apt=named-peer refused=" + str(fail) + " rc=" + str(result.returncode), flush=True)
             # Existing wrong portable tools are replaced, rather than accepted by
             # command -v. The lawful pair uses the same full production bootstrap.
             existing = World(base / "wrong-existing", payload)
@@ -424,6 +516,47 @@ print('TOOL-RESULT '+json.dumps(failures,ensure_ascii=False)); sys.exit(bool(fai
                            "missing-git-helper": "Git helper closure missing or shadowed", "system-cli-version": "CLI version disagrees: jq"}
                 assert reasons[label] in rejected.stdout, (label, rejected.stdout)
                 print("PARITY-MUTANT provider rejected=" + label + " stage=setup code=125 payload=not-run", flush=True)
+        if axis in ("all", "prologue"):
+            original = (root / ".github/scripts/stand-own.sh").read_text()
+            prefix = original.split('if [ "${1:-}" = "--registry-self-test" ]; then', 1)[0]
+            dispatch = original[original.index('# Mounted identity also guards'):]
+            for label in ("lawful", "wrong-namespace", "missing-account", "partial-marker", "wrong-marker", "invalid-uid"):
+                world = World(base / ("child-route-" + label), payload)
+                sa = world.work / "sa"; marker = world.work / "pod-identity"
+                sa.mkdir(); marker.mkdir()
+                for name, value in {"namespace": "t841-kaname-own", "token": "fixture-token", "ca.crt": "fixture-ca"}.items(): (sa/name).write_text(value)
+                (marker/"namespace").write_text("t841-kaname-own")
+                (marker/"uid").write_text("01234567-89ab-cdef-0123-456789abcdef")
+                if label == "missing-account": shutil.rmtree(sa)
+                if label == "partial-marker": (marker/"uid").unlink()
+                if label == "wrong-marker": (marker/"namespace").write_text("t999-other")
+                if label == "invalid-uid": (marker/"uid").write_text("not-a-pod-uid")
+                world.env.update(KANAME_STAND_EXT_NS="t999-other" if label == "wrong-namespace" else "t841-kaname-own", KANAME_STAND_TASK="841")
+                setup = "\nSA_DIR=" + shlex.quote(str(sa)) + "\nPOD_ID_DIR=" + shlex.quote(str(marker)) + "\nin_pod_detect\nROOT=" + shlex.quote(str(world.src)) + "\nRUNDIR=" + shlex.quote(str(world.work/"child-run")) + "\nROUTE_FILE=\"$RUNDIR/route\"\nROUTE_LOG=\"$RUNDIR/route.log\"\n"
+                # Only service/API peers are replaced; route decisions, ownership,
+                # persisted-route handling and the actual CLI dispatch are unchanged.
+                peers = r'''
+test -z "${KANAME_STAND_IN_POD+x}" || exit 89
+kc() { printf '%s\n' "$*" >> "$PARITY_CHILD_CALLS"; case "$*" in *namespaces*|*'delete namespace'*) return 88;; esac; return 0; }
+up_external() { ext_claim_ns; }
+up_local() { touch "$PARITY_CHILD_LOCAL"; return 87; }
+down() { touch "$PARITY_CHILD_LOCAL"; return 87; }
+ext_unforward() { :; }
+ext_save_log() { :; }
+'''
+                child = world.work / "ship/child-own.sh"
+                child.write_text('test -z "${KANAME_STAND_IN_POD+x}" || exit 89\n' + prefix + setup + peers + dispatch)
+                world.env.update(PARITY_CHILD_CALLS=str(world.work/"child-api-calls"), PARITY_CHILD_LOCAL=str(world.work/"local-docker-called"))
+                result = world.run("bash /work/ship/child-own.sh up && bash /work/ship/child-own.sh census && bash /work/ship/child-own.sh down")
+                assert result.returncode == (0 if label == "lawful" else 64), (label,result.stdout)
+                assert not (world.work/"local-docker-called").exists(), label
+                if label == "lawful":
+                    calls=(world.work/"child-api-calls").read_text()
+                    assert "-n t841-kaname-own" in calls and "namespaces" not in calls and "delete namespace" not in calls
+                    config=(world.work/"child-run/in-pod.kubeconfig").read_text()
+                    assert "kubernetes.default.svc:443" in config and str(sa/"token") in config
+                else: assert not (world.work/"child-api-calls").exists(), (label,result.stdout)
+                print("PARITY-COMPOSE sentinel=absent child-own=" + label + " rc=" + str(result.returncode) + " localDocker=not-called",flush=True)
         command = "python3 -c " + shlex.quote("import os,json; print(json.dumps({'present': 'KANAME_STAND_IN_POD' in os.environ, 'keep':os.environ.get('KEEP_SENTINEL')}))")
         env_worlds = (("actual", payload), ("unset-mutant", payload.replace("unset KUBECONFIG KANAME_STAND_IN_POD\n", "unset KUBECONFIG\n", 1))) if axis in ("all", "prologue") else ()
         for label, code in env_worlds:
