@@ -14,6 +14,7 @@ import (
 	"time"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
@@ -48,6 +49,21 @@ func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 // policy remains unchanged. Empty accessTTL retains the stand profile.
 func newInstallationNativeWorldLifetimes(t *testing.T, keyTTL int64, accessTTL string) *installationNativeWorld {
 	t.Helper()
+	// Declare a coherent short-lived production profile before creating the PG
+	// fixture. The revocation reader stays enabled; its ordinary cache window
+	// must be positive and strictly shorter than the issued-token lifetime.
+	overrides := map[string]string{}
+	if accessTTL != "" {
+		ttl, err := time.ParseDuration(accessTTL)
+		require.NoError(t, err)
+		const revocationWindow = 5 * time.Second
+		require.Greater(t, ttl, revocationWindow)
+		require.LessOrEqual(t, ttl, tokenpolicy.MaxTokenTTL)
+		require.Greater(t, time.Duration(keyTTL)*time.Second, ttl,
+			"standing key must permit the declared full token lifetime")
+		overrides["KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL"] = accessTTL
+		overrides["KANAME_AUTHN__PRESENTED_CREDENTIAL__REVOCATION_CACHE_TTL"] = revocationWindow.String()
+	}
 	requireNativeManifestPremise(t)
 	deadline, ok := t.Deadline()
 	require.True(t, ok, "bounded Go test deadline required for native lifecycle")
@@ -99,12 +115,9 @@ func newInstallationNativeWorldLifetimes(t *testing.T, keyTTL int64, accessTTL s
 	require.NoError(t, err)
 	require.Equal(t, baseline.SystemID, string(system))
 	require.Equal(t, []domain.AccountID{domain.AccountID(tenantID)}, tenants, "actual initial snapshot contains only O's tenant")
-	// The only changed startup fact is O's email. Audience, issuer, authority,
-	// lifetime and gateway policy remain the ordinary stand profile.
-	overrides := map[string]string{"KANAME_BOOTSTRAP_ROOT_EMAIL": w.email}
-	if accessTTL != "" {
-		overrides["KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL"] = accessTTL
-	}
+	// O's email and any explicit lifetime profile are ordinary startup inputs.
+	// Audience, issuer, authority and gateway policy retain the stand profile.
+	overrides["KANAME_BOOTSTRAP_ROOT_EMAIL"] = w.email
 	environment, err = stand.Environment(overrides)
 	require.NoError(t, err)
 	stand.StartMailbox(t, ctx, environment)

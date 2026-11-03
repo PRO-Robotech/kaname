@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type nativePublicReceipt struct {
@@ -62,8 +63,7 @@ func (f *installationNativeWorld) requirePublicDeliveredPairs(t *testing.T, modu
 			require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT account_id,name,created_at FROM kaname.service_accounts WHERE id=$1`, got.Id).Scan(&account, &name, &created))
 			require.Equal(t, account, got.AccountId)
 			require.Equal(t, name, got.Name)
-			require.NotNil(t, got.CreatedAt)
-			require.True(t, created.Equal(got.CreatedAt.AsTime()))
+			requireNativePublicCreatedAt(t, created, got.CreatedAt)
 			encoded, err := json.Marshal([]any{got.Id, got.AccountId, got.Name, got.CreatedAt.AsTime()})
 			require.NoError(t, err)
 			receipt.ServiceAccounts[got.Id] = string(encoded)
@@ -132,8 +132,7 @@ func (f *installationNativeWorld) requirePublicDeliveredPairs(t *testing.T, modu
 			require.Equal(t, targets, got.TargetTypes)
 			require.Equal(t, []string{"service_account"}, subjects)
 			require.Len(t, got.RoleIds, 1)
-			require.NotNil(t, got.CreatedAt)
-			require.True(t, created.Equal(got.CreatedAt.AsTime()))
+			requireNativePublicCreatedAt(t, created, got.CreatedAt)
 			encoded, err := protojson.Marshal(&got)
 			require.NoError(t, err)
 			var canonical any
@@ -159,4 +158,19 @@ func (f *installationNativeWorld) requirePublicDeliveredPairs(t *testing.T, modu
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(f.session.Root, fmt.Sprintf("public-delivery-census-%03d.json", f.publicReadSequence)), encoded, 0600))
 	return receipt
+}
+
+// Public created_at has whole-second precision; persistence retains its own
+// precision. This is exact canonical equality, not an elapsed-time tolerance.
+// Keep the SQL renewal snapshot untruncated so subsecond persistence changes
+// remain detectable independently of the public Get/List receipt.
+func requireNativePublicCreatedAt(t *testing.T, stored time.Time, public *timestamppb.Timestamp) {
+	t.Helper()
+	require.NotNil(t, public)
+	require.NoError(t, public.CheckValid())
+	canonical := stored.UTC().Truncate(time.Second)
+	require.Zero(t, public.Nanos, "public created_at must have whole-second precision")
+	require.True(t, canonical.Equal(public.AsTime()),
+		"created_at: persistence=%s canonical=%s public=%s",
+		stored.UTC().Format(time.RFC3339Nano), canonical.Format(time.RFC3339Nano), public.AsTime().Format(time.RFC3339Nano))
 }
