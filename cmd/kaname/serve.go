@@ -43,7 +43,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/edgecredential"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
@@ -347,13 +346,10 @@ func runServe(cfg config.Config) error {
 		return err
 	}
 	if hasInstallationDelegations(deliveredManifests) {
-		if cfg.Installation.AccountPageSize < 1 || cfg.Installation.AccountPageSize > 1000 {
-			return failInstallation(logger, "input", "accountPageSize", "", "", 0, shared.InvalidArg("accountPageSize", "page size must be 1..1000"))
-		}
-		if err := validateInstallationScope(cfg.Installation); err != nil {
+		if err := validateInstallationInput(cfg.ModuleSeedInstaller); err != nil {
 			return failInstallation(logger, "input", "tenantAccountId", "", "", 0, err)
 		}
-		if _, _, err := loadInstallationCredential(cfg.Installation.CredentialFile); err != nil {
+		if _, _, err := loadInstallationCredential(cfg.ModuleSeedInstaller.CredentialFile); err != nil {
 			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
 		}
 	}
@@ -380,11 +376,8 @@ func runServe(cfg config.Config) error {
 		if err := authzguard.RequireClusterAdmin(verified, installationRelations); err != nil {
 			return failInstallation(logger, "preflight-authority", "moduleSeedInstaller.credentialFile", "", "", 0, err)
 		}
-		if cfg.Installation.TargetAccountID != "" {
-			if err := shared.ValidateResourceID(cfg.Installation.TargetAccountID, domain.PrefixAccount, "account"); err != nil {
-				return err
-			}
-			if _, _, err := installationReader.InstallationAccounts(ctx, cfg.Installation.TargetAccountID, cfg.Installation.AccountPageSize); err != nil {
+		if installationTarget(cfg.ModuleSeedInstaller) != "" {
+			if _, _, err := installationReader.InstallationAccounts(ctx, installationTarget(cfg.ModuleSeedInstaller), 256); err != nil {
 				return failInstallation(logger, "input", "tenantAccountId", "", "", 0, shared.MapRepoErrAt(ctx, err))
 			}
 		}
@@ -569,7 +562,7 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("configure LRO default-registry: %w", err)
 	}
 	operations.Start()
-	if err := applyInstallationDelegations(ctx, logger, installationAuthn, kanameRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, cfg.Installation.TargetAccountID, cfg.Installation.AccountPageSize, appliedManifests); err != nil {
+	if err := applyInstallationDelegations(ctx, logger, installationAuthn, kanamepg.New(pool, nil), installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), 256, appliedManifests); err != nil {
 		return err
 	}
 

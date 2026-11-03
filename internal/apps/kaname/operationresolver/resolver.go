@@ -116,7 +116,18 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 			domain.UserID(m.GetUserId()), domain.AccessKeyID(m.GetAccessKeyId()), r.keys)
 	}
 
-	rd, err := r.repo.Reader(ctx)
+	openReader := r.repo.Reader
+	switch msg.(type) {
+	case *iamv1.CreateGrantDelegationMetadata, *iamv1.RevokeGrantDelegationMetadata:
+		primary, ok := r.repo.(interface {
+			ReaderFromPrimary(context.Context) (kanamerepo.Reader, error)
+		})
+		if !ok {
+			return operations.ResolverResult{}, fmt.Errorf("operationresolver: grant delegation primary reader is not wired")
+		}
+		openReader = primary.ReaderFromPrimary
+	}
+	rd, err := openReader(ctx)
 	if err != nil {
 		return operations.ResolverResult{}, fmt.Errorf("operationresolver: open reader: %w", err)
 	}

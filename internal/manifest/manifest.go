@@ -421,6 +421,9 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 	if faults := checkStringKeys(doc); len(faults) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrNonStringKey, joinFaults(faults))
 	}
+	if err := refuseUnknownDelegationFields(doc); err != nil {
+		return nil, err
+	}
 	if err := refuseNullDelegations(doc); err != nil {
 		return nil, err
 	}

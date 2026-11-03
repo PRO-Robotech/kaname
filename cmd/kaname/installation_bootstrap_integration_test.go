@@ -21,7 +21,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // installationBootstrapWorld is an INITIAL isolated installation Given. Only O's
@@ -37,9 +39,9 @@ type installationBootstrapWorld struct {
 	relations *authzcascade.Client
 }
 
-func newInstallationBootstrapWorld(t *testing.T) *installationBootstrapWorld {
+func newInstallationBootstrapWorld(t *testing.T, opts ...worldOption) *installationBootstrapWorld {
 	t.Helper()
-	w := newCeremonyWorld(t, "INSTALLATION-F0", "2")
+	w := newCeremonyWorld(t, "INSTALLATION-F0", "2", opts...)
 	w.markPerson()
 	token := w.redeem(w.issueCode(w.ic1, lineA1R))
 	reader, err := presentedcred.New(presentedcred.Config{
@@ -62,6 +64,12 @@ func newInstallationBootstrapWorld(t *testing.T) *installationBootstrapWorld {
 	allowed, err := authzguard.IsClusterAdminE(principal, relations)
 	require.NoError(t, err)
 	require.False(t, allowed, "ordinary registered O has no admin authority before bootstrap")
+	writer, err := kanamepg.New(w.pool, nil).Writer(principal)
+	require.NoError(t, err)
+	capability, ok := writer.(installationTransactionControl)
+	require.True(t, ok)
+	require.Equal(t, codes.PermissionDenied, status.Code(capability.RequireInstallationAuthority(principal, prepared.plans)), "unprivileged authenticated O must be denied, not an unanswered backend question")
+	require.NoError(t, writer.Rollback(principal))
 	result, err := seed.RunBootstrapAdmin(w.ctx, w.pool, quietLogger(), seed.BootstrapAdminInput{Email: w.email})
 	require.NoError(t, err)
 	require.False(t, result.Skipped)
