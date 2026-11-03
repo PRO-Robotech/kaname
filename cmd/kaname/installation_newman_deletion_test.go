@@ -152,6 +152,7 @@ type rid05PublicContext struct {
 	initialGD                              map[string]map[string]any
 }
 type rid05Expectation struct {
+	DeleteContract *rid05DeleteWireContract `json:"deleteContract,omitempty"`
 	rid03NewmanExpectation
 	OldCreatorID         string     `json:"oldCreatorId"`
 	ReplacementCreatorID string     `json:"replacementCreatorId"`

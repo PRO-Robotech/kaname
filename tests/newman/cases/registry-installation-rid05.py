@@ -67,9 +67,15 @@ pm.test('same actual O-owned Delete Operation and deadline',()=>{pm.expect(op.id
 pm.environment.set('rid05Polls',String(Number(pm.environment.get('rid05Polls'))+1));
 if(!op.done)pm.execution.setNextRequest(pm.info.requestName);else{
  pm.test('exact normal asynchronous Delete outcome',()=>{
-  pm.expect(op.metadata.serviceAccountId).to.eql(e.oldCreatorId);pm.expect(op.metadata.accountId).to.eql(e.systemId);
-  if(e.denied){pm.expect(op.error.code).to.eql(9);pm.expect(op.error.message).to.eql('service account '+e.oldCreatorId+' holds an active grant delegation '+e.blockingDelegationId+'; revoke it first');pm.expect(op.response||null).to.eql(null);}
-  else{pm.expect(op.error||null).to.eql(null);pm.expect(op.response).to.eql({'@type':'type.googleapis.com/google.protobuf.Empty'});}
+  const c=e.deleteContract,creator=e.snapshot.projection.serviceAccounts.find(sa=>sa.id===e.oldCreatorId);
+  pm.expect(!!c&&c.caseId===e.caseId&&c.resourceId===e.oldCreatorId&&creator&&c.accountId===creator.accountId&&c.operatorId===e.operatorId).to.eql(true);
+  pm.expect(op.done).to.eql(true);
+  // The full canonical typed skeleton is derived BEFORE this mutation. Only
+  // allocated Operation ID and its two clocks are dynamic, and each is checked.
+  pm.expect(Object.keys(op).sort()).to.eql(Object.keys(c.operation).sort());
+  Object.keys(c.operation).filter(k=>!['id','createdAt','modifiedAt'].includes(k)).forEach(k=>pm.expect(op[k]).to.eql(c.operation[k]));
+  const created=Date.parse(op.createdAt),modified=Date.parse(op.modifiedAt),lower=Date.parse(c.notBefore),upper=Date.parse(c.notAfter);
+  pm.expect(Number.isFinite(created)&&Number.isFinite(modified)&&Number.isFinite(lower)&&Number.isFinite(upper)&&created>=lower&&created<=modified&&modified<=upper).to.eql(true);
  });
 }""".strip()
 _PHASES=[
@@ -122,7 +128,7 @@ for case_id,mode,suffix,scenario,phase,delete,token,recovery,c2,present in _PHAS
   outcome=[*assert_status(403),"pm.test('synchronous oldcreator/no-revival grant refusal',()=>{const j=pm.response.json();pm.expect(j.code).to.eql(7);pm.expect(j.message).to.eql('permission denied');pm.expect(j.id).to.eql(undefined);});"] if denied and not delete else [*assert_status(200),*_POST.splitlines()]
   path='/iam/v1/serviceAccounts/{{rid05DeleteCreator}}' if delete else '/iam/v1/accessBindings'
   pre=["const e=JSON.parse(pm.environment.get('rid05Expected'));pm.environment.set('rid05DeleteCreator',e.oldCreatorId);pm.environment.set('rid05ActionDeadline',String(Date.now()+30000));pm.environment.set('rid05Polls','0');"]
-  if not delete:pre.append("pm.request.body.update(JSON.stringify(JSON.parse(pm.environment.get('rid05Expected')).request)));")
+  if not delete:pre.append("pm.request.body.update(JSON.stringify(JSON.parse(pm.environment.get('rid05Expected')).request));")
   if delete:steps.append(Step(name='actual-delete',method='DELETE',path=path,auth='jwtRIDOperator',pre_script=pre,test_script=outcome))
   else:steps.append(Step(name='actual-action',method='POST',path=path,auth='jwtRIDIssuer',body={},pre_script=pre,test_script=outcome))
   if delete or not denied:steps.append(Step(name='actual-owner-Operation-Get',method='GET',path='/operations/{{rid05ActionOperationId}}',auth='jwtRIDOperator' if delete else 'jwtRIDIssuer',test_script=[*assert_status(200),*(_DELETE_POLL if delete else _POLL).splitlines()]))
