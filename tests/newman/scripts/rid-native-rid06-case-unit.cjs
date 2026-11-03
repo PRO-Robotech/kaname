@@ -42,7 +42,7 @@ function folder(id){const xs=(collection.item||[]).filter(x=>x.name===id||x.name
 function leaf(id,name){const xs=leaves(folder(id)).filter(x=>x.name===id+' :: '+name);assert.equal(xs.length,1);return xs[0];}
 function source(item,listen){return(item.event||[]).filter(e=>e.listen===listen).flatMap(e=>e.script.exec||[]).join('\n');}
 for(const id of Object.keys(literalActors))test('RID06-rendered-scripts/'+id,()=>{const f=folder(id);assert.ok(leaves(f).length>=2);for(const item of[f,...leaves(f)])for(const event of item.event||[])new vm.Script('(function(){\n'+event.script.exec.join('\n')+'\n})');});
-function expectation(value){const chain={};for(const k of['to','be','and'])Object.defineProperty(chain,k,{get:()=>chain});chain.eql=want=>assert.deepEqual(value,want);chain.below=want=>assert.ok(value<want);chain.above=want=>assert.ok(value>want);chain.a=kind=>{assert.equal(typeof value,kind);return chain;};Object.defineProperty(chain,'not',{get:()=>({get empty(){assert.ok(value!==''&&value!==null&&value!==undefined);return chain;}})});return chain;}
+function expectation(value){const chain={};for(const k of['to','be','and'])Object.defineProperty(chain,k,{get:()=>chain});chain.eql=want=>assert.deepEqual(structuredClone(value),structuredClone(want));chain.below=want=>assert.ok(value<want);chain.above=want=>assert.ok(value>want);chain.a=kind=>{assert.equal(typeof value,kind);return chain;};Object.defineProperty(chain,'not',{get:()=>({get empty(){assert.ok(value!==''&&value!==null&&value!==undefined);return chain;}})});return chain;}
 expectation.fail=()=>assert.fail('actual rendered script reported a fixture precondition failure');
 function evaluate(code,variables,response={}){
  const env=new Map(Object.entries(variables)),headers=new Map(),failures=[],next=[];let skipped=false;
@@ -72,4 +72,23 @@ for(const name of['wrong-handle','wrong-metadata','wrong-account','wrong-resourc
  const id='registry-installation-rid06-S1-REVOKE-ACT',e=fixture(id),op={id:'OP',done:true,metadata:{grantDelegationId:'GD',accountId:'A'},response:{id:'GD',accountId:'A',status:'REVOKED'}};
  switch(name){case'wrong-handle':op.id='OTHER';break;case'wrong-metadata':op.metadata.grantDelegationId='OTHER';break;case'wrong-account':op.metadata.accountId='OTHER';break;case'wrong-resource':op.response.id='OTHER';break;case'not-revoked':op.response.status='ACTIVE';break;case'failed-operation':op.error={code:9};break;}
  const out=evaluate(source(leaf(id,'actual-owner-Operation-Get'),'test'),{rid06Expected:JSON.stringify(e),rid06ActionOperationId:'OP',rid06ActionDeadline:String(Date.now()+(name==='expired-deadline'?-1000:10000)),rid06Polls:'0'},op);assert.ok(out.failures.length>0);
+});
+
+// Chai data equality must not reject an otherwise identical JSON record solely
+// because a literal belongs to the rendered script's VM realm. structuredClone
+// keeps data types and own-property presence; no JSON stringify normalization.
+test('RID06-sandbox-eql/cross-realm-record',()=>{
+ const actual={type:'service_account',id:'C'},expected=new vm.Script("({type:'service_account',id:'C'})").runInNewContext();
+ assert.throws(()=>assert.deepEqual(actual,expected),'before-fix strict prototype comparator must reproduce the realm mismatch');
+ expectation(actual).eql(expected);assert.deepEqual(actual,{type:'service_account',id:'C'});
+});
+for(const name of ['wrong-type','extra-field','missing-field','nested-mismatch','undefined-presence'])test('RID06-sandbox-eql-reject/'+name,()=>{
+ const actual={type:'service_account',id:'C',nested:{value:7}},expressions={
+  'wrong-type':"({type:'service_account',id:'C',nested:{value:'7'}})",
+  'extra-field':"({type:'service_account',id:'C',nested:{value:7},extra:true})",
+  'missing-field':"({type:'service_account',nested:{value:7}})",
+  'nested-mismatch':"({type:'service_account',id:'C',nested:{value:8}})",
+  'undefined-presence':"({type:'service_account',id:'C',nested:{value:7},extra:undefined})"
+ };
+ const expected=new vm.Script(expressions[name]).runInNewContext();assert.throws(()=>expectation(actual).eql(expected));
 });
