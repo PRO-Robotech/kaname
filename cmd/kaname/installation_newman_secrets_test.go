@@ -11,8 +11,8 @@ import (
 	"syscall"
 )
 
-// Closed phase-bound actor/opaque-secret inventory. Assertion bytes are secrets,
-// not bearer tokens; both use the unchanged anonymous two-string FD5 protocol.
+// Замкнутая привязанная к фазе ведомость участников/непрозрачных секретов. Байты утверждений — секреты,
+// а не токены предъявителя; оба используют неизменный анонимный двухстрочный протокол FD5.
 func ridNewmanClientSecrets(stem, caseID string, variables map[string]any) ([]string, error) {
 	if !strings.HasPrefix(caseID, stem+"-") || len(caseID) == len(stem)+1 {
 		return nil, errors.New("invalid Newman case identity")
@@ -117,8 +117,8 @@ func ridNewmanClientSecrets(stem, caseID string, variables map[string]any) ([]st
 	return secrets, nil
 }
 
-// Every admitted bearer/assertion gets its existing two-string FD5 record. Capture all secrets
-// before reading the TLS key or doing any other fallible admission work.
+// Каждый допущенный токен/утверждение получает существующую двухстрочную запись FD5. Захватываем все секреты
+// до чтения ключа TLS или любой другой способной отказать работы допуска.
 func ridNewmanRecordBearers(inventory io.Writer, bearers []string) error {
 	for _, bearer := range bearers {
 		if err := json.NewEncoder(inventory).Encode([]string{"", bearer}); err != nil {
@@ -128,9 +128,9 @@ func ridNewmanRecordBearers(inventory io.Writer, bearers []string) error {
 	return nil
 }
 
-// Read only the anonymous FD5 itself, never the world-secret union used for
-// stream scanning. A token known to the fixture is not proof of FD5 capture.
-// ReadAt through SectionReader preserves the shared file description offset.
+// Читаем лишь сам анонимный FD5, а не объединение секретов мира, используемое
+// для проверки потоков. Известный фикстуре токен не доказывает захват FD5.
+// ReadAt через SectionReader сохраняет смещение общего открытого файлового описания.
 func ridNewmanAuditAnonymousInventory(inventory *os.File, required []string) error {
 	info, err := inventory.Stat()
 	if err != nil {

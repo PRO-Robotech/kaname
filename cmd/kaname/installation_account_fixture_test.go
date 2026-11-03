@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// renewOperator performs another actual ceremony/code exchange for the SAME O.
-// A one-hour RID08 wait must not substitute a different actor or reuse an expired
-// bearer. The initial session and interactive client are the approved F0 Given.
+// renewOperator выполняет ещё один настоящий обмен церемонии/кода для ТОГО ЖЕ O.
+// Часовое ожидание RID08 не должно подменять участника или повторно использовать просроченный
+// токен предъявителя. Начальная сессия и интерактивный клиент — утверждённый Given F0.
 func (f *installationBootstrapWorld) renewOperator(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
 	fresh := f.world.redeem(f.world.issueCode(f.world.ic1, lineA1R))
@@ -45,8 +45,8 @@ func (f *installationStandingWorld) createTenant(t *testing.T, ctx context.Conte
 	return domain.AccountID(account.Id)
 }
 
-// threeTenants consumes precisely the legitimate 1(initial A)+2(B,T) budget.
-// The tenant named system-tenant is not the canonical system account.
+// threeTenants расходует ровно разрешённый бюджет 1(initial A)+2(B,T).
+// Тенант с именем system-tenant не является канонической системной учётной записью.
 func (f *installationStandingWorld) threeTenants(t *testing.T, ctx context.Context) []domain.AccountID {
 	t.Helper()
 	reader := kanamepg.NewInstallationReader(f.world.pool)
@@ -65,8 +65,8 @@ func (f *installationStandingWorld) threeTenants(t *testing.T, ctx context.Conte
 	return got
 }
 
-// Read-only observation of the REAL trigger/window, never a clock override or
-// admission mutation. remaining is measured by the database's own clock.
+// Наблюдаем НАСТОЯЩИЙ триггер/окно только чтением, без подмены часов или
+// изменения допуска. remaining измеряется собственными часами базы данных.
 func (f *installationStandingWorld) admissionWindow(t *testing.T, ctx context.Context) (admitted, limit, seconds int, remaining time.Duration) {
 	t.Helper()
 	var nanos float64
@@ -80,10 +80,10 @@ func (f *installationStandingWorld) admissionWindow(t *testing.T, ctx context.Co
 	return admitted, limit, seconds, time.Duration(nanos * float64(time.Second))
 }
 
-// awaitAdmissionWindow is called BEFORE the RID08 snapshot/first-pair barrier,
-// so a writer transaction or normal Operation never sits blocked for an hour.
-// Other already-frozen cases may run while the controller waits. After return,
-// freeze N3, prove the barrier arrival, then same O creates D normally.
+// awaitAdmissionWindow вызывается ДО снимка RID08/барьера первой пары,
+// поэтому транзакция записи или обычная Operation не блокируется на час.
+// Пока контроллер ждёт, могут выполняться другие уже зафиксированные случаи. После возврата
+// фиксируем N3, доказываем достижение барьера, затем тот же O штатно создаёт D.
 func (f *installationStandingWorld) awaitAdmissionWindow(t *testing.T, ctx context.Context) {
 	t.Helper()
 	for {

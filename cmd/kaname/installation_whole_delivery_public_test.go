@@ -17,8 +17,8 @@ type rid09PublicView struct {
 	Groups, Members, Roles, Bindings map[string]string
 }
 
-// Complete ordinary O pages are retained independently of the primary hashes.
-// Across all accounts, with unscoped roles/ABs and the complete public catalog.
+// Полные штатные страницы O сохраняются независимо от первичных хешей.
+// По всем учётным записям, с ролями/AB без области и полным публичным каталогом.
 func rid09ReadPublic(t *testing.T, f *installationNativeWorld) rid09PublicView {
 	t.Helper()
 	f.renewOperator(t, f.given.ctx)
@@ -103,8 +103,8 @@ func rid09ReadPublic(t *testing.T, f *installationNativeWorld) rid09PublicView {
 			require.NotContains(t, out.Bindings, item.Id)
 			var got iamv1.AccessBinding
 			f.publicRead(t, "/iam/v1/accessBindings/"+url.PathEscape(item.Id), &got)
-			// The independently observed PRIMARY entire rows remain the authoritative
-			// no-delta oracle. Public read enrichment is preserved, never zeroed.
+			// Независимо наблюдаемые полные строки PRIMARY остаются авторитетным
+			// оракулом нулевой разницы. Обогащение публичного чтения сохраняется, не обнуляется.
 			require.Equal(t, item.Id, got.Id)
 			require.Equal(t, item.RoleId, got.RoleId)
 			require.Equal(t, item.Status, got.Status)
@@ -115,8 +115,8 @@ func rid09ReadPublic(t *testing.T, f *installationNativeWorld) rid09PublicView {
 			break
 		}
 	}
-	// These are real clean worlds; O's cluster-admin authority must see the full
-	// public entity inventory, not just a module-specific subset.
+	// Это настоящие чистые миры; кластерные полномочия администратора O должны видеть полную
+	// публичную ведомость сущностей, а не только подмножество конкретного модуля.
 	for table, got := range map[string]int{"groups": len(out.Groups), "group_members": len(out.Members), "roles": len(out.Roles), "access_bindings": len(out.Bindings)} {
 		var count int
 		require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*) FROM kaname.`+table).Scan(&count))

@@ -19,9 +19,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This receipt contains stable identities and dates only. It neither dumps nor
-// alters credential material; replay/audit rows are intentionally not counted as
-// provisioning. Whole GD rows include exact axes, creator, ID and createdAt.
+// Эта квитанция содержит только стабильные идентичности и даты. Она не выгружает и не
+// меняет удостоверяющий материал; строки повторов/аудита намеренно не считаются
+// выдачей. Полные строки GD включают точные оси, создателя, ID и createdAt.
 type nativeStableReceipt struct {
 	Delegations     string
 	Accounts        string
@@ -100,7 +100,7 @@ func ridNativeExactIdentityAxes(t *testing.T) {
 }
 
 func ridNativeTokenRenewal(t *testing.T) {
-	// Explicit ordinary fixture profile; production defaults remain untouched.
+	// Явный штатный профиль фикстуры; производственные значения по умолчанию не затронуты.
 	f := newInstallationNativeWorldLifetimes(t, 300, "30s")
 	in := nativeSingleDelivery(f)
 	public := rid01NewmanContext(t, f, "renewal")
@@ -113,7 +113,7 @@ func ridNativeTokenRenewal(t *testing.T) {
 	f.secrets = append(f.secrets, first.Bearer, first.Assertion)
 	require.LessOrEqual(t, first.ExpiresAt.Sub(first.IssuedAt), 30*time.Second)
 	rid01NewmanPhase(t, public, "RENEWAL-BEFORE", nil)
-	// Actual accepted token expires; include the PRESENTATION skew allowance.
+	// Настоящий принятый токен истекает; включаем допуск рассогласования ПРЕДЪЯВЛЕНИЯ.
 	waitNativeWallClock(t, f.given.ctx, first.ExpiresAt.Add(tokenpolicy.ClockSkew+time.Second))
 	require.True(t, time.Now().Before(f.creator.ExpiresAt), "renewal key must still be live")
 	code, err := f.wire.JSON(f.given.ctx, http.MethodGet, "/iam/v1/me", first.Bearer, nil, nil)
@@ -140,7 +140,7 @@ func ridNativeExpiredKeyTimeTwin(t *testing.T) {
 	f := newInstallationNativeWorldLifetimes(t, 300, "30s")
 	in := nativeSingleDelivery(f)
 	public := rid01NewmanContext(t, f, "key")
-	// Positive twin FIRST, against the identical key, grant, delivery and world.
+	// СНАЧАЛА положительный близнец с теми же ключом, выдачей, поставкой и миром.
 	requireNativeOK(t, f.apply(t, in), 1)
 	f.requireDeliveredPairs(t, "ridfirst")
 	before := f.stableReceipt(t)
@@ -152,8 +152,8 @@ func ridNativeExpiredKeyTimeTwin(t *testing.T) {
 	stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	require.NoError(t, f.session.Stop(stop))
 	cancel()
-	// The real clock is the only changed authorization input. No key reissue,
-	// new admin grant, SQL aging, fake clock or mutation of the credential file.
+	// Настоящие часы — единственный изменённый вход авторизации. Без перевыдачи ключа,
+	// новой административной выдачи, старения SQL, поддельных часов или изменения файла удостоверяющего материала.
 	waitNativeWallClock(t, f.given.ctx, f.creator.ExpiresAt.Add(tokenpolicy.ClockSkew+time.Second))
 	require.Equal(t, before, f.stableReceipt(t))
 	observer := f.wire.StartReadinessWatch(f.given.ctx)
@@ -187,9 +187,9 @@ func ridNativeExpiredKeyTimeTwin(t *testing.T) {
 	require.Equal(t, before, f.stableReceipt(t), "refused startup must retain previous IDs dates axes and counts")
 	f.requireSameCredential(t)
 	require.NoError(t, failed.CheckSecretAbsence(f.secrets...))
-	// Session.Stop reports the already-observed expected exit as an error. Its
-	// call still clears ownership; assert this precise observed exit, never hide
-	// an unexpected cleanup error or alter Process.Stop's production semantics.
+	// Session.Stop сообщает уже наблюдённый ожидаемый выход как ошибку. Его
+	// вызов всё равно снимает владение; проверяем ровно этот наблюдённый выход, не скрывая
+	// неожиданную ошибку очистки и не меняя производственную семантику Process.Stop.
 	cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	cleanupErr := f.session.Stop(cleanup)
 	cancel()

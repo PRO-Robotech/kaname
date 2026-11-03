@@ -15,8 +15,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Reverse each NONTRIVIAL axis, not merely the order of manifest files. A
-// singleton reversal cannot establish set-order idempotence.
+// Разворачиваем каждую НЕТРИВИАЛЬНУЮ ось, а не только порядок файлов манифеста.
+// Разворот единственного элемента не может установить идемпотентность порядка множества.
 func reverseNativeDelegationAxes(t *testing.T, raw []byte) []byte {
 	t.Helper()
 	var doc map[string]any
@@ -41,8 +41,8 @@ func reverseNativeDelegationAxes(t *testing.T, raw []byte) []byte {
 	return changed
 }
 
-// Both S1 and S2 execute actual full serve, normal account provisioning,
-// full public census and a second actual startup with all three axes reordered.
+// И S1, и S2 выполняют настоящий полный serve, штатную подготовку учётных записей,
+// полную публичную перепись и второй настоящий запуск с переставленными всеми тремя осями.
 func ridNativeSequentialAxisRepeat(t *testing.T) {
 	for _, mode := range []string{"S1", "S2"} {
 		t.Run(mode, func(t *testing.T) { ridNativeSequentialAxisRepeatMode(t, mode) })

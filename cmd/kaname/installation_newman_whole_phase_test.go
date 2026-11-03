@@ -46,8 +46,8 @@ func rid09NewmanCaseID(t *testing.T, in rid09Input, phase string) string {
 	return "registry-installation-rid09-" + strings.ToUpper(in.Axis) + "-" + order + "-" + kind + "-" + suffix
 }
 
-// Each call owns ONE closure in ONE existing native world. The caller leaves
-// explicit consumers intact. Off-mode has no callable/accepted public proof.
+// Каждый вызов владеет ОДНИМ замыканием в ОДНОМ существующем нативном мире. Вызывающий сохраняет
+// явных потребителей. Выключенный режим не имеет вызываемого/принятого публичного доказательства.
 func rid09DefaultNewmanConsumer(t *testing.T, f *installationNativeWorld, in rid09Input) rid09LivePublicConsumer {
 	t.Helper()
 	if os.Getenv("KANAME_RID_NEWMAN") != "1" {
@@ -82,8 +82,8 @@ func rid09DefaultNewmanConsumer(t *testing.T, f *installationNativeWorld, in rid
 				require.Equal(t, *before, e.Projection, "negative startup preserves the ENTIRE independent public projection")
 			}
 		}
-		// The bridge may Fatal/Goexit before returning on a failed public
-		// phase. A defer is necessary to bracket that attempt as well.
+		// Мост может вызвать Fatal/Goexit до возврата при неудачной публичной
+		// фазе. defer необходим для охвата и этой попытки.
 		func() {
 			defer func() {
 				after := rid09ReadNewmanProjection(t, f)

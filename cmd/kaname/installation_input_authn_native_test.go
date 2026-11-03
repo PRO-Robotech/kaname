@@ -122,8 +122,8 @@ type rid11Proof struct {
 	IssuerBefore, IssuerAfter                                     *rid11Identity
 }
 
-// Optional future live public observer; nil is recorded as NOT_EXECUTED. It is
-// never evidence that Newman ran. No secrets are copied to this receipt.
+// Необязательный будущий живой публичный наблюдатель; nil записывается как NOT_EXECUTED. Это
+// никогда не доказывает запуск Newman. Секреты в эту квитанцию не копируются.
 type rid11LivePublicConsumer func(*testing.T, *installationNativeWorld, rid11Case, string)
 
 func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
@@ -162,8 +162,8 @@ func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
 	return w, named
 }
 
-// Credential mutations live exclusively in the existing private fixture store.
-// The original creator credential remains readable for the full post-reap audit.
+// Изменения удостоверяющего материала живут исключительно в существующем закрытом хранилище фикстуры.
+// Исходный удостоверяющий материал создателя остаётся читаемым для полного аудита после ожидания завершения.
 func rid11Mutate(t *testing.T, w *ridLifecycleWorld, c rid11Case, p *rid11Proof) string {
 	return rid11MutateObserved(t, w, c, p, nil)
 }
@@ -291,8 +291,8 @@ func rid11Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
 	require.NoError(t, installruntime.CheckOwnedListeners(c.cmd.Process.Pid, c.dir, installruntime.DefaultNativePorts().All()...))
 }
 
-// Public OAuth twin uses the SAME supplied credential fields and normal ES256
-// assertion contract, including the wrong signature material when requested.
+// Публичный близнец OAuth использует ТЕ ЖЕ переданные поля удостоверяющего материала и штатный контракт утверждения ES256,
+// включая неправильный материал подписи, когда это запрошено.
 func rid11FreshInputAssertion(t *testing.T, f *installationNativeWorld, credential string) (string, time.Time) {
 	raw, err := os.ReadFile(credential)
 	require.NoError(t, err)
@@ -339,9 +339,9 @@ func rid11PublicRefusal(t *testing.T, f *installationNativeWorld, credential str
 	require.Equal(t, "invalid_client", out.Error)
 }
 
-// Full identity evidence is restricted to the SA resource/table, never key rows.
-// Primary includes every identity column, including future fields; public is the
-// complete typed API message, not an id-only existence check.
+// Полное доказательство идентичности ограничено ресурсом/таблицей SA, без строк ключей.
+// Первичное чтение включает каждый столбец идентичности, в том числе будущие поля; публичное —
+// полное типизированное сообщение API, а не проверку существования только по id.
 type rid11Identity struct {
 	Public  *iamv1.ServiceAccount
 	Primary string
@@ -405,8 +405,8 @@ func rid11RequireCreatorAbsent(t *testing.T, f *installationNativeWorld) *rid11A
 func rid11RequireKeysAbsent(t *testing.T, f *installationNativeWorld, liveCreator bool) *rid11KeyAbsence {
 	t.Helper()
 	out := &rid11KeyAbsence{PublicListExecuted: liveCreator}
-	// After Delete the parent resource itself is absent. Its public NOT_FOUND is
-	// observed separately; the primary proves that no orphan key survived.
+	// После Delete родительский ресурс отсутствует. Его публичный NOT_FOUND
+	// наблюдается отдельно; первичное чтение доказывает отсутствие осиротевших ключей.
 	if liveCreator {
 		out.PublicRows = len(f.ridList(t, "/iam/v1/serviceAccounts/"+f.creator.ID+"/keys", "keys", nil))
 		require.Zero(t, out.PublicRows)
@@ -417,8 +417,8 @@ func rid11RequireKeysAbsent(t *testing.T, f *installationNativeWorld, liveCreato
 	return out
 }
 
-// Resolve declared I independently from GD. Neither a delegation's delegate ID
-// nor an already accepted winner is allowed to choose this oracle's identity.
+// Разрешаем заявленный I независимо от GD. Ни идентификатор делегата делегирования,
+// ни уже принятый победитель не могут выбирать идентичность этого оракула.
 func rid11DeclaredIssuer(t *testing.T, w *ridLifecycleWorld) rid11Identity {
 	t.Helper()
 	f := w.f
@@ -474,7 +474,7 @@ func rid11CheckPairs(t *testing.T, w *ridLifecycleWorld) rid11Identity {
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT id FROM kaname.roles WHERE name='registry.puller'`).Scan(&pull))
 	require.NotEmpty(t, pull)
 	for _, account := range w.accounts {
-		list := w.delegations(t, account) // full pages, independent Gets, primary count and createdAt
+		list := w.delegations(t, account) // полные страницы, независимые Get, первичные число и createdAt
 		require.Len(t, list, 1)
 		gd := list[0]
 		require.Equal(t, iamv1.GrantDelegation_ACTIVE, gd.Status)
@@ -578,7 +578,7 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 	require.Equal(t, int32(c.returnCode()), p.Returned.Code)
 	require.Equal(t, !c.Twin, p.Returned.ErrorPresent)
 	require.True(t, p.Returned.CaptureOK && p.Returned.MessageMatches)
-	p.RawStreamsAudited = true // wait/gracefulStop call mandatory single-Wait afterReap.
+	p.RawStreamsAudited = true // wait/gracefulStop вызывают обязательный afterReap после единственного Wait.
 	p.After = ridReadWholeDelivery(t, f)
 	p.PairRowsAfter = rid08PrimaryGD(t, f)
 	if c.Active {
@@ -626,8 +626,8 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 			require.True(t, p.Returned.ActualCreator && p.Returned.ActualQuestion && p.Returned.ContextLive)
 			require.False(t, p.Returned.ForwardAllowed || p.Returned.Injected)
 		}
-		// Read-only public consequences after the stopped-process primary proof.
-		// Ordinary no-delivery startup cannot repair deleted C or restore authority.
+		// Публичные последствия наблюдаются только чтением после первичного доказательства остановленного процесса.
+		// Штатный запуск без поставки не может починить удалённый C или восстановить полномочия.
 		public.beforeRestore(t, w, p.Returned)
 		base, err := f.session.StartBase(f.given.ctx)
 		require.NoError(t, err)

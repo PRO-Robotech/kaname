@@ -134,14 +134,14 @@ func ridNewmanAbsenceObservation(ctx context.Context, start string, stat func() 
 	actual, err := readStart()
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
-	} // transient disappearance, require a fresh absence observation
+	} // временное исчезновение, требуем свежего наблюдения отсутствия
 	if err != nil {
 		return false, errors.New("Node start identity unavailable")
 	}
 	if actual != start {
 		return false, errors.New("Node PID identity recycled before proven absence")
 	}
-	return false, nil // a live process OR zombie still exists
+	return false, nil // живой процесс ИЛИ зомби ещё существует
 }
 func ridNewmanAwaitNodeAbsent(t *testing.T, ctx context.Context, c *rid02OwnedChild) {
 	t.Helper()
@@ -181,7 +181,7 @@ func ridNewmanAssertNodeTerminal(t *testing.T, c *rid02OwnedChild, killed bool) 
 	}
 }
 
-// Permit frames are constants, never supplied from an environment/collection.
+// Кадры разрешения — константы, они не подставляются из окружения/коллекции.
 func ridNewmanPermitMessage(probe string) string {
 	switch probe {
 	case "reject-missing-permit":

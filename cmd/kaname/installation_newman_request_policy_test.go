@@ -37,8 +37,8 @@ func ridNewmanOrigin(raw string) (string, string, string, error) {
 		return "", "", "", errors.New("invalid owned HTTPS origin")
 	}
 	portNumber, portErr := strconv.Atoi(u.Port())
-	// Match WHATWG URL canonicalization: explicit nonempty decimal port,
-	// no leading zeros/range overflow, and no implicit HTTPS default443.
+	// Повторяем канонизацию URL WHATWG: явный непустой десятичный порт,
+	// без ведущих нулей/выхода за диапазон и неявного HTTPS default443.
 	if portErr != nil || portNumber < 0 || portNumber > 65535 || portNumber == 443 || strconv.Itoa(portNumber) != u.Port() {
 		return "", "", "", errors.New("invalid owned HTTPS origin")
 	}
@@ -52,7 +52,7 @@ func ridNewmanDecodeRequestPolicy(raw json.RawMessage) (*ridNewmanRequestPolicy,
 	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil, nil
 	}
-	// Decode through a map first to reject duplicate, missing and extra keys.
+	// Сначала декодируем через карту, чтобы отклонить повторные, отсутствующие и лишние ключи.
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	token, err := dec.Token()
 	if err != nil || token != json.Delim('{') {
@@ -94,7 +94,7 @@ func ridNewmanDecodeRequestPolicy(raw json.RawMessage) (*ridNewmanRequestPolicy,
 	return &ridNewmanRequestPolicy{fields["caseId"], fields["requestName"], fields["method"], fields["path"], fields["origin"]}, nil
 }
 
-// Exact closed origin contract; no input variable selects a policy or actor.
+// Точный замкнутый контракт адреса; входная переменная не выбирает политику или участника.
 func ridNewmanIssuanceCase(caseID string) (string, string, bool) {
 	if caseID == rid01ExpiredKeyCase {
 		return "rid01IssuanceOrigin", "expired-standing-key-token-refusal", true

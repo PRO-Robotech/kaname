@@ -28,12 +28,12 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// installationStandingWorld extends the approved initial-O Given. C is created
-// by normal Operations under O, never inserted by fixture SQL. Admin mutations
-// use the existing real-mTLS second-lock fixture with the REAL cluster handler.
-// The forwarded identity and ACR below are obtained only by re-verifying O's
-// actual ceremony credential. This helper is internal evidence, not a claim
-// that the final full serve/listener acceptance has run.
+// installationStandingWorld расширяет утверждённый Given начального O. C создаётся
+// штатными Operation под O, без вставки SQL фикстуры. Административные изменения
+// используют существующую настоящую фикстуру второй блокировки mTLS с НАСТОЯЩИМ кластерным обработчиком.
+// Передаваемые ниже идентичность и ACR получаются только повторной проверкой
+// настоящего удостоверяющего материала церемонии O. Этот помощник — внутреннее доказательство, а не утверждение
+// о выполнении финальной полной приёмки serve/слушателей.
 type installationStandingWorld struct {
 	*installationBootstrapWorld
 	cfg            config.Config
@@ -58,8 +58,8 @@ func (f *installationBootstrapWorld) verifyOperator(t *testing.T, parent context
 	return verified
 }
 
-// gatewayOperator forwards only values from the verified O token. No caller
-// chooses a principal/ACR from configuration, and no context identity is seeded.
+// gatewayOperator передаёт только значения из проверенного токена O. Вызывающий
+// не выбирает субъекта/ACR из конфигурации, и идентичность контекста не засеивается.
 func (f *installationStandingWorld) gatewayOperator(t *testing.T, parent context.Context) context.Context {
 	t.Helper()
 	verified := f.verifyOperator(t, parent)
@@ -85,8 +85,8 @@ func newInstallationStandingWorld(t *testing.T, pace int, accessTTL time.Duratio
 	cfg.AuthN.ClientToken.DefaultAudience = "https://api.kacho.local"
 	cfg.AuthN.ClientToken.ExchangesPerClientPerSec = pace
 	cfg.AuthN.ClientToken.TokenTTL = accessTTL
-	// Explicit existing native stand profile; configuration defaults are zero
-	// because production requires these issuance limits to be declared.
+	// Явный существующий профиль нативного стенда; умолчания конфигурации нулевые,
+	// поскольку производственный код требует объявления этих пределов выдачи.
 	cfg.AuthN.ClientToken.BodyCeiling = 16384
 	cfg.AuthN.ClientToken.InFlightCeiling = 32
 	cfg.AuthN.ClientToken.FailedProofsPerSource = 50
@@ -107,8 +107,8 @@ func newInstallationStandingWorld(t *testing.T, pace int, accessTTL time.Duratio
 	handler := clusterapp.NewHandler(clusterapp.NewGetClusterUseCase(kanamepg.NewClusterReader(pool)), grant, revoke, clusterapp.NewListAdminsUseCase(grantReads))
 	registry, err := seed.LoadPermissionRegistry(base.world.ctx, nil)
 	require.NoError(t, err)
-	// Existing helper uses actual TLS CA/leaf verification and production
-	// identity extraction -> gateway caller policy -> catalog ACR floor.
+	// Существующий помощник использует настоящую проверку CA/конечного сертификата TLS и производственную
+	// цепочку извлечения идентичности -> политики вызывающего шлюза -> нижней границы ACR каталога.
 	f.cluster = iamv1.NewInternalClusterServiceClient(serveSecondLock(t, registry, handler))
 	operator := f.verifyOperator(t, base.world.ctx)
 	require.NoError(t, authzguard.RequireClusterAdmin(operator, f.relations))
@@ -129,8 +129,8 @@ func newInstallationStandingWorld(t *testing.T, pace int, accessTTL time.Duratio
 		SubjectType: iamv1.ClusterGrantSubjectType_SERVICE_ACCOUNT, SubjectId: string(f.creator)})
 	require.NoError(t, err)
 	require.NoError(t, waitInstallationOperation(operator, f.ops, granted.GetId()))
-	// Use the actual composition-root key handler, preserving audit, lifetime,
-	// one-time response redaction, and ordinary credential registration.
+	// Используем настоящий обработчик ключей корня композиции, сохраняя аудит, срок,
+	// скрытие одноразового ответа и штатную регистрацию удостоверяющего материала.
 	keys := buildSAKeysHandler(pool, f.ops, cfg, quietLogger())
 	issued, err := keys.Issue(operator, &iamv1.IssueSAKeyRequest{ServiceAccountId: string(f.creator), Description: "RID standing creator", TtlSeconds: 7200})
 	require.NoError(t, err)

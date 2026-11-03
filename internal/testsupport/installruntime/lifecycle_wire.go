@@ -22,8 +22,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Existing module-writer stand leaf; no forwarded identity or user metadata.
-// The server's real module roster and RegisterResource policy decide authority.
+// Существующий конечный сертификат стенда записи модуля; без передаваемых идентичности или метаданных пользователя.
+// Настоящий состав модулей сервера и политика RegisterResource определяют полномочия.
 func (w *Wire) ModuleWriter(pki string) (*grpc.ClientConn, error) {
 	leaf, err := tls.LoadX509KeyPair(filepath.Join(pki, "registry.crt"), filepath.Join(pki, "registry.key"))
 	if err != nil {
@@ -34,7 +34,7 @@ func (w *Wire) ModuleWriter(pki string) (*grpc.ClientConn, error) {
 	return grpc.NewClient(w.InternalGatewayAddress(), grpc.WithTransportCredentials(credentials.NewTLS(cfg)))
 }
 
-// Issue an ordinary key for an already-created SA. No GrantAdmin is implicit.
+// Выдаём штатный ключ для уже созданной SA. Неявного GrantAdmin нет.
 func (w *Wire) IssueStandingKey(ctx context.Context, o *VerifiedOperator, id, account, path string, observe func(string)) (*StandingCreator, error) {
 	if observe == nil {
 		return nil, errors.New("private secret observer required")
@@ -55,8 +55,8 @@ func (w *Wire) IssueStandingKey(ctx context.Context, o *VerifiedOperator, id, ac
 		return nil, errors.New("ordinary Issue returned incomplete key")
 	}
 	c := &StandingCreator{ID: id, AccountID: account, ClientID: issued.ClientID, KeyID: issued.KeyID, privateKey: issued.PrivateKeyPEM, CredentialFile: path, KeyOperation: op}
-	// Page through the normal key API; the requested standing lifetime is never
-	// used as an invented expiration date.
+	// Обходим страницы штатного API ключей; запрошенный постоянный срок никогда
+	// не используется вымышленной датой истечения.
 	seen := map[string]bool{}
 	token := ""
 	for {
@@ -111,8 +111,8 @@ func (w *Wire) IssueStandingKey(ctx context.Context, o *VerifiedOperator, id, ac
 	return c, nil
 }
 
-// Exercise the normal token endpoint with the OLD exact standing key after
-// normal revoke/delete. Return safe OAuth classification; never response text.
+// Проверяем штатную конечную точку токенов со СТАРЫМ точным постоянным ключом после
+// штатного отзыва/удаления. Возвращаем безопасную классификацию OAuth, не текст ответа.
 func (w *Wire) StandingKeyRefusal(ctx context.Context, c *StandingCreator, issuer, audience string) (int, string, string, error) {
 	key, err := jwt.ParseECPrivateKeyFromPEM([]byte(c.privateKey))
 	if err != nil {
@@ -144,9 +144,9 @@ func (w *Wire) StandingKeyRefusal(ctx context.Context, c *StandingCreator, issue
 	return code, out.Error, proof, nil
 }
 
-// StartCatalogOnly exposes the existing no-declaration startup path so O can
-// perform recovery through live normal APIs while the old C remains retired.
-// It rejects any delegation declaration rather than bypassing its authn gate.
+// StartCatalogOnly открывает существующий путь запуска без объявлений, чтобы O мог
+// восстановить состояние через живые штатные API, пока старый C остаётся выведенным из обращения.
+// Он отклоняет любое объявление делегирования, не обходя его проверку аутентификации.
 func (s *Session) StartCatalogOnly(ctx context.Context, in RIDDeliveryFixture) (*Process, error) {
 	if err := s.checkEnvironment(); err != nil {
 		return nil, err
@@ -184,8 +184,8 @@ func (s *Session) StartCatalogOnly(ctx context.Context, in RIDDeliveryFixture) (
 	return p, p.AwaitReady(ready, s.Probe)
 }
 
-// Normal pacing is read from actual HTTP Retry-After, with a fresh signed JTI
-// for every retry. No rate setting, clock or verifier behavior is overridden.
+// Штатное ограничение частоты читается из настоящего HTTP Retry-After, со свежим подписанным JTI
+// для каждого повтора. Настройки частоты, часы и поведение проверяющего не подменяются.
 func (w *Wire) ExchangeLifecycleKey(ctx context.Context, c *StandingCreator, issuer, audience string, observe func(string)) (StandingToken, error) {
 	if observe == nil {
 		return StandingToken{}, errors.New("private secret observer required")

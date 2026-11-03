@@ -13,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Raw authn rows stay protected in memory. Only complete hashes, row counts,
-// column names and primary clocks may survive teardown. No credential body,
-// token, replay nonce or arbitrary audit payload is serialized.
+// Необработанные строки аутентификации остаются защищёнными в памяти. После очистки могут оставаться только полные хеши, количества строк,
+// имена столбцов и первичные часы. Ни тело удостоверения,
+// ни токен, ни одноразовое значение повтора, ни произвольная нагрузка аудита не сериализуются.
 type rid11AuthnSnapshot struct {
 	Started  time.Time                    `json:"primaryStartedAt"`
 	Finished time.Time                    `json:"primaryFinishedAt"`
@@ -150,10 +150,10 @@ func rid11AuthnUnchanged(a, b rid11AuthnSnapshot) bool {
 	return rid11AuthnShape(a) && rid11AuthnShape(b) && !b.Started.Before(a.Finished) && reflect.DeepEqual(a.Columns, b.Columns) && reflect.DeepEqual(a.Raw["client_assertion_replay"], b.Raw["client_assertion_replay"]) && reflect.DeepEqual(a.Raw["access_tokens"], b.Raw["access_tokens"]) && rid11AuditHistoryValid(a, b)
 }
 
-// Source contract: corelib v1.15.0 audit/shipper.go shipBatch, backoff,
-// buildShipperSQL. The fixture buildAuditShipper supplies only Table, hence
-// production defaults BackoffMin=1s/BackoffMax=5m. This is transport progress,
-// never a new authn/business action or a physical-SQL-zero claim.
+// Контракт исходника: corelib v1.15.0 audit/shipper.go shipBatch, backoff,
+// buildShipperSQL. Фикстура buildAuditShipper задаёт только Table, поэтому
+// производственные значения по умолчанию — BackoffMin=1s/BackoffMax=5m. Это прогресс транспорта,
+// а не новое действие аутентификации/бизнеса и не утверждение физического нуля SQL.
 func rid11AuditImmutable(row rid09PrimaryRow) rid09PrimaryRow {
 	out := rid09PrimaryRow{}
 	for _, key := range []string{"id", "event_type", "tenant_account_id", "event_payload", "created_at"} {
@@ -233,23 +233,23 @@ func rid11AuditTransition(a, b rid09PrimaryRow, beforeUpper, afterUpper time.Tim
 	oldNext, _ := rid03Cell[time.Time](a, "next_attempt_at")
 	next, _ := rid03Cell[time.Time](b, "next_attempt_at")
 	created, _ := rid03Cell[time.Time](b, "created_at")
-	// Claim SQL requires next_attempt_at <= transaction now(), and any
-	// committed claim transaction starts no later than the independent after
-	// primary upper bound. Do not require it to start after the BEFORE read.
+	// SQL захвата требует next_attempt_at <= транзакционного now(), и любая
+	// зафиксированная транзакция захвата начинается не позже независимой верхней границы
+	// первичного снимка после. Не требуем её начала после чтения BEFORE.
 	if oldNext.After(afterUpper) || next.Before(oldNext) {
 		return false
 	}
 	if rid03S(b, "status") == "sent" {
 		sent, _ := rid03Cell[*time.Time](b, "sent_at")
-		// claim and sent use the same tx's now(); a pre-baseline transaction can
-		// commit later, so no unjustified sent_at >= before snapshot constraint.
+		// Захват и отправка используют now() той же транзакции; транзакция до базы может
+		// зафиксироваться позже, поэтому необоснованное ограничение sent_at >= снимку до не вводится.
 		if sent.Before(oldNext) || next.After(*sent) {
 			return false
 		}
 		return attempts-oldAttempts != 1 || next.Equal(oldNext)
 	}
-	// Failed defer SQL rolls back its savepoint but commits claim's increment:
-	// all four other transport fields remain exact on this documented stuck path.
+	// Неудачный SQL отсрочки откатывает точку сохранения, но фиксирует увеличение захвата:
+	// все четыре других транспортных поля остаются точными на этом документированном застрявшем пути.
 	onlyClaim := true
 	for _, key := range []string{"status", "sent_at", "last_error", "next_attempt_at"} {
 		if !reflect.DeepEqual(a[key], b[key]) {

@@ -24,9 +24,9 @@ type pendingInstallationOperation struct {
 	metadataData                                                    []byte
 }
 
-// LockPendingInstallationOperation is the FIRST write transaction lock. The
-// normal Operation was created earlier; cancelled, recovered or foreign rows
-// cannot acquire permission to mutate a delegation by arriving late.
+// LockPendingInstallationOperation — ПЕРВАЯ блокировка транзакции записи. Штатная
+// Operation создана ранее; отменённые, восстановленные или чужие строки
+// не могут получить разрешение менять делегирование поздним прибытием.
 func (w *writeTx) LockPendingInstallationOperation(ctx context.Context, id, account, proposed string) error {
 	var state pendingInstallationOperation
 	var done bool
@@ -56,15 +56,15 @@ func installationOperationConflict() error {
 	return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "installation operation is not pending with its expected identity")
 }
 
-// RequireInstallationAuthority uses the SAME admitted production verdict and
-// person marks on THIS writer transaction, after the pair lock, without pool IO.
+// RequireInstallationAuthority использует ТОТ ЖЕ допущенный производственный вердикт и
+// метки человека в ЭТОЙ транзакции записи после блокировки пары, без ввода-вывода пула.
 func (w *writeTx) RequireInstallationAuthority(ctx context.Context, plans *authzmodel.Plans) error {
 	checker := authzcascade.WrapAdmitted(relverdict.NewTransactionAsker(w.tx, plans), personmarks.NewTransaction(w.tx))
 	return authzguard.RequireClusterAdmin(ctx, checker)
 }
 
-// BindInstallationOperation commits the actual resource identity with the GD.
-// It does not terminalize: operations.Run retains the normal terminal write.
+// BindInstallationOperation фиксирует настоящую идентичность ресурса вместе с GD.
+// Он не записывает конечное состояние: operations.Run сохраняет штатную конечную запись.
 func (w *writeTx) BindInstallationOperation(ctx context.Context, id string, metadata *anypb.Any, winningID string) error {
 	state := w.installationOperation
 	if state == nil || state.id != id || metadata == nil || metadata.TypeUrl != state.metadataType {

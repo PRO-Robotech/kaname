@@ -23,9 +23,9 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// Depends on frozen RID09 primary projection helpers (63ab0c...4059). The full
-// public projection and the extra raw/Operation snapshot own separate primary
-// RO/RR txs and are composed only after an exact before-admission bracket.
+// Зависит от зафиксированных первичных помощников проекции RID09 (63ab0c...4059). Полная
+// публичная проекция и дополнительный необработанный снимок/снимок Operation владеют отдельными первичными
+// транзакциями RO/RR и объединяются только после точных скобок перед допуском.
 type rid10NewmanSnapshot struct {
 	PullRole      string                     `json:"-"`
 	Projection    rid09NewmanProjection      `json:"projection"`
@@ -163,9 +163,9 @@ func rid10ReadNewmanSnapshot(t *testing.T, ctx context.Context, f *installationN
 	return s
 }
 
-// Capture only an independent primary baseline, never an extra public phase.
-// Wait for the real per-object old G to materialize and then observe a stable
-// full ledger twice before the native fault/retirement. No state is repaired.
+// Захватываем лишь независимую первичную базу, без дополнительной публичной фазы.
+// Ждём материализации настоящего старого G каждого объекта, затем дважды наблюдаем стабильный
+// полный журнал до нативного сбоя/вывода из обращения. Состояние не чинится.
 func rid10NewmanBaseline(t *testing.T, x *rid10World, p *rid10Proof) *rid10NewmanContext {
 	t.Helper()
 	if os.Getenv("KANAME_RID_NEWMAN") != "1" {
@@ -230,12 +230,12 @@ func rid10NewmanPhase(t *testing.T, x *rid10World, p *rid10Proof, history *rid10
 		require.NotNil(t, history.Partial)
 		require.True(t, history.Calls["partial"])
 	}
-	// Root's separately reviewed extra-C-token FD5 delta must audit THIS
-	// actual bearer before any subsequent fallible child/admission step. The
-	// existing ridToken helper calls ExchangeLifecycleKey and captures
-	// assertion/bearer in f.secrets. The adapter adds no separate parent /me;
-	// the explicit Newman C /me is this phase's principal ownership proof.
-	// Node never receives the issuance origin or a private C key.
+	// Отдельно проверенное основным агентом дополнение FD5 токеном C должно аудировать ЭТОТ
+	// настоящий токен предъявителя до любого следующего способного отказать дочернего шага/допуска.
+	// Существующий помощник ridToken вызывает ExchangeLifecycleKey и захватывает
+	// утверждение/токен в f.secrets. Адаптер не добавляет отдельный родительский /me;
+	// явный C /me Newman доказывает владение субъектом этой фазы.
+	// Node никогда не получает адрес выдачи или закрытый ключ C.
 	creatorToken := f.ridToken(t, f.creator)
 	snapshot := func() rid10NewmanSnapshot {
 		snapshotCtx, snapshotCancel := context.WithTimeout(f.given.ctx, 30*time.Second)
@@ -292,8 +292,8 @@ func rid10RequireNewmanPremise(t *testing.T, x *rid10World, p *rid10Proof, h *ri
 	require.NotEmpty(t, e.NamedSystem)
 	require.Contains(t, normal, e.NamedSystem)
 	e.FirstAccount = normal[0]
-	// Stock2+C+the TWO named lifecycle declarations are SYS; the independently
-	// created grantee is in the first normal account, not a sixth SYS identity.
+	// Stock2+C+ДВА именованных объявления жизненного цикла относятся к SYS; независимо
+	// созданный получатель находится в первой штатной учётной записи, а не является шестой идентичностью SYS.
 	require.Len(t, f.baseline.ServiceAccounts, 2)
 	require.NotContains(t, f.baseline.ServiceAccounts, e.Creator)
 	require.Len(t, projection.ServiceAccounts, 6)

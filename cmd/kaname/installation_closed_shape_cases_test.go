@@ -14,9 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// These are inputs for the complete native RID12 obligation. A parser premise
-// proves only that the twins and coordinates are usable; it does not prove
-// startup exit/readiness, zero delivery writes, successful seed or idempotence.
+// Это входы полного нативного обязательства RID12. Предпосылка парсера
+// доказывает лишь пригодность близнецов и координат; она не доказывает
+// код выхода/готовность запуска, отсутствие записей поставки, успешный посев или идемпотентность.
 type rid12InputCase struct {
 	Name        string
 	Field       string
@@ -41,8 +41,8 @@ func rid12Encode(t *testing.T, doc map[string]any) []byte {
 	return raw
 }
 
-// The two serializations have the same ordering/formatting. Only the selected
-// node differs: removing that node yields byte-identical canonical documents.
+// Обе сериализации имеют одинаковые порядок/форматирование. Отличается только выбранный
+// узел: удаление этого узла даёт побайтно одинаковые канонические документы.
 func rid12ChangedDocument(t *testing.T, raw []byte, path []any, value any, remove bool) []byte {
 	t.Helper()
 	doc := rid12Document(t, raw)
@@ -105,8 +105,8 @@ func rid12InputCases(t *testing.T) []rid12InputCase {
 	}
 	add("roles17", "seed.grantDelegations[0].roleIds", boundary, axis("roleIds"), roles)
 	add("types17", "seed.grantDelegations[0].targetTypes", boundary, axis("targetTypes"), types)
-	// There are four allowed values. The fifth deliberately repeats USER;
-	// cardinality is the first declared refusal, never a fictional legal enum.
+	// Разрешены четыре значения. Пятое намеренно повторяет USER;
+	// мощность множества — первый заявленный отказ, без вымышленного допустимого перечисления.
 	add("subjects5", "seed.grantDelegations[0].subjectTypes", boundary, axis("subjectTypes"), []string{
 		"SUBJECT_TYPE_USER", "SUBJECT_TYPE_SERVICE_ACCOUNT", "SUBJECT_TYPE_GROUP", "SUBJECT_TYPE_SYSTEM_CLASS", "SUBJECT_TYPE_USER",
 	})
@@ -114,9 +114,9 @@ func rid12InputCases(t *testing.T) []rid12InputCase {
 	add("subject-unknown", "seed.grantDelegations[0].subjectTypes", ordinary, axis("subjectTypes"), []string{"SUBJECT_TYPE_RID12_UNKNOWN"})
 	add("iam-role", "seed.grantDelegations[0].roleIds", ordinary, axis("roleIds"), []string{"iam.admin"})
 	add("iam-type", "seed.grantDelegations[0].targetTypes", ordinary, axis("targetTypes"), []string{"iam.accounts"})
-	// Module-only changes exactly module, retaining every other canonical byte.
-	// The normal parser first rejects the retained own role prefix at roles[0].id;
-	// this is separate from the GD iam role/type refusal coordinates.
+	// Изменение только модуля меняет ровно module, сохраняя каждый другой канонический байт.
+	// Штатный парсер сначала отклоняет сохранённый префикс собственной роли в roles[0].id;
+	// это отдельно от координат отказа роли/типа iam в GD.
 	add("iam-module", "roles[0].id", ordinary, []any{"module"}, "iam")
 	cases[len(cases)-1].FieldCensus = false
 	return cases
@@ -127,9 +127,9 @@ func rid12WithoutField(t *testing.T, raw []byte, path []any) []byte {
 	return rid12ChangedDocument(t, raw, path, nil, true)
 }
 
-// TestRID12InputFixturePremise is deliberately separate from the RID12 holder.
-// It may run before any PostgreSQL lease. Passing it cannot connect a native
-// callback or satisfy a delivery/runtime predicate.
+// TestRID12InputFixturePremise намеренно отделён от держателя RID12.
+// Он может выполняться до любой аренды PostgreSQL. Его успех не подключает нативный
+// обратный вызов и не удовлетворяет предикат поставки/исполнения.
 func TestRID12InputFixturePremise(t *testing.T) {
 	cases := rid12InputCases(t)
 	require.Len(t, cases, 15, "accepted RID12 negative input inventory")
@@ -150,8 +150,8 @@ func TestRID12InputFixturePremise(t *testing.T) {
 			var field interface{ FieldPath() string }
 			require.True(t, errors.As(err, &field), "normal parser must retain a structured field coordinate")
 			if tc.FieldCensus {
-				// A census observation is not an approved expected field. Root must
-				// resolve this case before native RID12 can be considered ready.
+				// Наблюдение переписи не является утверждённым ожидаемым полем. Основной агент должен
+				// разрешить этот случай до признания нативного RID12 готовым.
 				t.Logf("SOURCE_CENSUS: module-only first coordinate=%s", field.FieldPath())
 			} else {
 				require.Equal(t, tc.Field, field.FieldPath())

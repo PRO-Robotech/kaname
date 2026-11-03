@@ -84,8 +84,8 @@ func TestInstallationUnknownFieldCoordinates(t *testing.T) {
 	}
 }
 
-// Every mutation changes one node in the second declaration; the valid twin
-// proves the rejection is about its shape, not linkage or the fixture.
+// Каждое изменение меняет один узел второго объявления; допустимый близнец
+// доказывает, что отказ относится к форме, а не связям или фикстуре.
 func TestInstallationDelegationNodeShapeCoordinates(t *testing.T) {
 	base, err := os.ReadFile("testdata/registry.delegation-fixture.yaml")
 	if err != nil {
@@ -97,7 +97,7 @@ func TestInstallationDelegationNodeShapeCoordinates(t *testing.T) {
       subjectTypes: [SUBJECT_TYPE_USER]
 `
 	good := string(base) + "\nseed:\n  serviceAccounts:\n    - {name: svc-registry, account: system, description: Registry delegated issuer}\n  grantDelegations:\n" + entry + entry
-	// Alias resolution must preserve YAML forms already accepted by the decoder.
+	// Разрешение псевдонимов должно сохранять формы YAML, уже принятые декодером.
 	for _, tc := range []struct{ name, old, anchor, alias string }{
 		{"entry", entry, strings.Replace(entry, "- delegate:", "- &entry\n      delegate:", 1), "    - *entry\n"},
 		{"delegate", "{account: system, name: svc-registry}", "&delegate {account: system, name: svc-registry}", "*delegate"},
@@ -143,7 +143,7 @@ func TestInstallationDelegationNodeShapeCoordinates(t *testing.T) {
 			if err != nil || m == nil {
 				t.Fatalf("valid twin: %v", err)
 			}
-			// Replace only the second declaration so a constant [0] cannot pass.
+			// Заменяем лишь второе объявление, чтобы константа [0] не могла пройти.
 			first := strings.LastIndex(good, entry)
 			bad := good[:first] + strings.Replace(good[first:], tc.old, tc.replacement, 1)
 			m, err = manifest.Load([]byte(bad))

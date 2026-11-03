@@ -235,8 +235,8 @@ func rid03BuildDeltaPolicy(t *testing.T, e *rid03NewmanExpectation, a, b rid03Ne
 			}
 		}
 	}
-	// The class public_reader member is a separate exact coordinate derived from
-	// the delivered nested read rules, not a free privilege on matching endpoints.
+	// Член класса public_reader — отдельная точная координата, выведенная из
+	// поставленных вложенных правил чтения, а не свободная привилегия на совпавших конечных точках.
 	if p.SubjectType == "system_class" {
 		fps := []string{}
 		children := a.Facts.PublicReadChildren(targetType)
@@ -267,8 +267,8 @@ func rid03BuildDeltaPolicy(t *testing.T, e *rid03NewmanExpectation, a, b rid03Ne
 	return p
 }
 
-// Technical intent partition and multiplicity are not business invariants.
-// Each row is closed; the independently expected complete emitted union is required.
+// Разбиение и множественность технических намерений не являются бизнес-инвариантами.
+// Каждая строка замкнута; требуется независимо ожидаемое полное выданное объединение.
 func rid03ProducerKey(subject, typ, id string, relations []string) string {
 	raw, _ := json.Marshal([]any{subject, typ, id, relations})
 	return string(raw)
@@ -314,8 +314,8 @@ func (p rid03DeltaPolicy) producer(row rid09PrimaryRow) (string, []rid03Tuple, b
 	return key, tuples, true
 }
 
-// Bind versions only to independently validated new producer rows. No fact cell
-// participates in this proof. Ordinary fold filters verbs and uses producer time.
+// Привязываем версии только к независимо проверенным новым строкам производителя. Ячейки фактов
+// в этом доказательстве не участвуют. Штатная свёртка фильтрует действия и использует время производителя.
 func (p *rid03DeltaPolicy) bindProducers(rows []rid09PrimaryRow) (accepted bool) {
 	defer func() {
 		if !accepted {
@@ -344,9 +344,9 @@ func (p *rid03DeltaPolicy) bindProducers(rows []rid09PrimaryRow) (accepted bool)
 			if !exists || at.After(last) {
 				p.FactVersions[tuple] = at
 			}
-			// A concurrent transaction with a later start can insert first.
-			// Retain ALL independently validated matching producer clocks; never
-			// infer first insertion from minimum transaction-start time.
+			// Конкурентная транзакция с более поздним началом может вставить первой.
+			// Сохраняем ВСЕ независимо проверенные совпадающие часы производителей; никогда
+			// не выводим первую вставку из минимального времени начала транзакции.
 			p.FactCreated[tuple] = append(p.FactCreated[tuple], at)
 		}
 	}
@@ -398,9 +398,9 @@ func (p rid03DeltaPolicy) allows(table string, r rid09PrimaryRow) bool {
 	return false
 }
 
-// Technical fga_outbox multiplicity is intentionally absent. Existing business
-// row counts remain exact; this does not relax the separate G/GD/Operation/audit
-// primary or native predicates.
+// Техническая множественность fga_outbox намеренно отсутствует. Существующие количества бизнес-строк
+// остаются точными; это не ослабляет отдельные первичные или нативные
+// предикаты G/GD/Operation/аудита.
 func rid03BusinessCountsValid(counts map[string]int) bool {
 	for table, want := range map[string]int{"access_bindings": 1, "access_binding_subjects": 1, "subject_change_outbox": 1, "resource_reconcile_outbox": 1, "resource_journal": 2, "journal-CREATED": 1, "journal-UPDATED": 1} {
 		if counts[table] != want {
@@ -411,7 +411,7 @@ func rid03BusinessCountsValid(counts map[string]int) bool {
 }
 func rid03RequireClosedDelta(t *testing.T, a, b rid03NewmanSnapshot, p rid03DeltaPolicy) {
 	t.Helper()
-	// Establish producer provenance before any physical fact is admitted.
+	// Устанавливаем происхождение производителя до допуска любого физического факта.
 	if p.Path == "/iam/v1/accessBindings" {
 		old := map[string]int{}
 		for _, row := range a.Raw["fga_outbox"] {
@@ -482,8 +482,8 @@ func rid03RequireClosedDelta(t *testing.T, a, b rid03NewmanSnapshot, p rid03Delt
 	require.True(t, rid03BusinessCountsValid(counts), "exact business row multiplicities required")
 	require.Equal(t, p.Members, memberSeen)
 	require.Equal(t, p.Ledger, ledgerSeen)
-	// A tuple already present before ACT is a retained shared claim. Every other
-	// independently derived tuple must appear exactly once as a new direct fact.
+	// Кортеж, уже существовавший до ACT, — сохранённое совместное притязание. Каждый другой
+	// независимо выведенный кортеж должен появиться ровно один раз новым прямым фактом.
 	for _, r := range a.Raw["relation_fact"] {
 		delete(p.DirectTuples, rid03Tuple{rid03S(r, "subject"), rid03S(r, "relation"), rid03S(r, "object_type"), rid03S(r, "object_id")})
 	}
@@ -493,7 +493,7 @@ func rid03RequireClosedDelta(t *testing.T, a, b rid03NewmanSnapshot, p rid03Delt
 	}
 	require.Equal(t, 1, counts["journal-CREATED"])
 	require.Equal(t, 1, counts["journal-UPDATED"])
-	// All technical rows and their actual multiplicity remain in full snapshots.
-	// No producer-call count or partition is asserted.
+	// Все технические строки и их настоящая множественность остаются в полных снимках.
+	// Количество вызовов производителя или разбиение не проверяются.
 	t.Logf("RID03 technical FGA intents: actual new rows=%d; full raw rows/clocks retained separately from exact business counts", counts["fga_outbox"])
 }

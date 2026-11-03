@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The history retains the entire primary GD row, including sub-second dates and
-// physical axis order. Only the separate public projection canonicalizes sets.
+// История сохраняет всю первичную строку GD, включая доли секунды дат и
+// физический порядок осей. Только отдельная публичная проекция канонизирует множества.
 type rid02NewmanHistory struct {
 	Delegations []map[string]any           `json:"delegations"`
 	Rows        map[string]json.RawMessage `json:"rows"`
@@ -54,8 +54,8 @@ func rid02NewmanPhase(t *testing.T, f *installationNativeWorld, mode, phase stri
 	return history
 }
 
-// Independent primary-only snapshot: no REST observation supplies expected IDs,
-// membership, role linkage, issuer identity, timestamps or expected pair count.
+// Независимый снимок только первичного состояния: наблюдения REST не подставляют ожидаемые ID,
+// состав, связь ролей, идентичность издателя, метки времени или ожидаемое число пар.
 func rid02ReadNewmanPrimary(t *testing.T, f *installationNativeWorld, mode, phase string, wanted []string, previous *rid02NewmanHistory) (rid02NewmanExpectation, *rid02NewmanHistory) {
 	t.Helper()
 	n := 1

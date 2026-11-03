@@ -14,9 +14,9 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// ridArrival identifies an observed production boundary. A controller must
-// receive every expected arrival before releasing concurrent attempts; elapsed
-// time never substitutes for evidence that both real workers arrived.
+// ridArrival обозначает наблюдаемую границу производственного кода. Контроллер должен
+// получить все ожидаемые сигналы достижения до освобождения конкурентных попыток; истёкшее
+// время не заменяет доказательства прибытия обоих настоящих исполнителей.
 type ridArrival struct {
 	Boundary    string
 	Writer      int64
@@ -61,12 +61,12 @@ func (b *ridBarrier) await(ctx context.Context, count int) ([]ridArrival, error)
 }
 func (b *ridBarrier) open() { b.once.Do(func() { close(b.release) }) }
 
-// ridBoundaryRepo decorates the ACTUAL repository. Reader, SQL, transaction
-// begin/commit, locks and all domain writers remain the real implementation.
-// beforeWriter is after the normal Create Operation (the use-case owns ordering).
-// Its controller must independently observe that Operation before returning an
-// injected unknown BeginTx error. beforeCommit/afterCommit permit process-stop
-// or cancellation/reconciler overlap at precisely those boundaries.
+// ridBoundaryRepo оборачивает НАСТОЯЩИЙ репозиторий. Чтение, SQL, начало/завершение
+// транзакций, блокировки и все доменные записи сохраняют настоящую реализацию.
+// beforeWriter идёт после штатной Create Operation (порядком владеет сценарий использования).
+// Его контроллер должен независимо наблюдать эту Operation до возврата
+// внедрённой неизвестной ошибки BeginTx. beforeCommit/afterCommit допускают остановку процесса
+// или пересечение отмены/сведения ровно на этих границах.
 type ridBoundaryRepo struct {
 	kanamerepo.Repository
 	writers      atomic.Int64

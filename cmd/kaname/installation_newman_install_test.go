@@ -88,9 +88,9 @@ func rid01CaptureSnapshot(t *testing.T, ctx context.Context, f *installationNati
 		operationRawRows[id] = row
 		columns[id] = map[string]rid01OperationColumnProof{}
 		for name, value := range row {
-			// A primary cell is json.RawMessage: SQL NULL is the literal
-			// bytes "null", not a nil Go wrapper. Decode only its JSON kind;
-			// the digest always covers the untouched original RawMessage.
+			// Первичная ячейка — json.RawMessage: SQL NULL представлен литеральными
+			// байтами "null", а не обёрткой Go nil. Декодируем только вид JSON;
+			// дайджест всегда покрывает нетронутый исходный RawMessage.
 			var cell any
 			decoder := json.NewDecoder(bytes.NewReader(value))
 			decoder.UseNumber()
@@ -123,8 +123,8 @@ func rid01StableSnapshots(a, b rid01NewmanSnapshot) bool {
 	return reflect.DeepEqual(a.Projection, b.Projection) && reflect.DeepEqual(a.Whole.Delivery, b.Whole.Delivery) && reflect.DeepEqual(a.Whole.OwnCeilings, b.Whole.OwnCeilings) && reflect.DeepEqual(a.Operations, b.Operations) && reflect.DeepEqual(a.Whole.Bookkeeping["operations"], b.Whole.Bookkeeping["operations"])
 }
 
-// Only the readiness baseline is observed until stable. A single caller context
-// bounds all SQL/raw/projection reads, waits and the successful return.
+// До стабилизации наблюдается только база готовности. Единственный контекст вызывающего
+// ограничивает все чтения SQL/необработанных данных/проекций, ожидания и успешный возврат.
 func rid01Baseline(t *testing.T, f *installationNativeWorld) rid01NewmanSnapshot {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(f.given.ctx, 30*time.Second)
@@ -190,16 +190,16 @@ func rid01NewmanPhase(t *testing.T, h *rid01PublicContext, phase string, variabl
 		e.Previous = &previous.Projection
 	}
 	installedNow := phase == "CLEAN-INSTALLED" || phase == "S1-EXACT-IDENTITIES" || phase == "RENEWAL-BEFORE" || phase == "VALID-KEY-TWIN"
-	// Closed census of all eight boundary types. Full raw zero-delta belongs
-	// to read-only/no-startup boundaries and the refusal BEFORE restoration.
-	// Normal startup may restate seed/catalog storage while preserving the full
-	// public state and exact historical GD/G rows; never call it a zero-write.
+	// Замкнутая перепись всех восьми типов границ. Полная необработанная нулевая разница относится
+	// к границам только чтения/без запуска и отказу ДО восстановления.
+	// Штатный запуск может повторно изложить хранилище посева/каталога, сохраняя полное
+	// публичное состояние и точные исторические строки GD/G; это не называется отсутствием записей.
 	switch phase {
 	case "CLEAN-BEFORE", "EXPIRED-ACCESS-TOKEN":
 		require.True(t, rid01StableSnapshots(previous, snapshot), "read-only boundary preserves all primary/raw/Operation state")
 	case "CLEAN-INSTALLED", "S1-EXACT-IDENTITIES", "RENEWAL-BEFORE", "VALID-KEY-TWIN":
-		// New delivered resources are checked independently by literal module
-		// counts and all declared identities/seeds in rid01RequirePremise.
+		// Новые поставленные ресурсы независимо проверяются литеральными количествами
+		// модулей и всеми заявленными идентичностями/посевами в rid01RequirePremise.
 		ridRequireOwnCeilingsPreserved(t, previous.Whole, snapshot.Whole)
 	case "RENEWAL-AFTER":
 		rid01RequireReentryPreserved(t, previous, snapshot)
@@ -207,8 +207,8 @@ func rid01NewmanPhase(t *testing.T, h *rid01PublicContext, phase string, variabl
 	case "EXPIRED-KEY-REFUSAL":
 		require.NotNil(t, h.RefusalBeforeRestore, "successful strict refusal capture BEFORE any restore is mandatory; no post-restore fallback")
 		rid01RequireReentryPreserved(t, previous, snapshot)
-		// Bound the actual normal restoring startup by the independently
-		// captured post-refusal primary clocks, not by a new repaired baseline.
+		// Ограничиваем настоящий штатный восстанавливающий запуск независимо
+		// захваченными первичными часами после отказа, а не новой исправленной базой.
 		ridRequireOwnCeilingsPreserved(t, h.RefusalBeforeRestore.Whole, snapshot.Whole)
 	default:
 		t.Fatal("unclassified RID01 phase boundary")
@@ -256,10 +256,10 @@ func rid01NewmanPhase(t *testing.T, h *rid01PublicContext, phase string, variabl
 	h.Previous = &current
 }
 
-// Successful re-entry preserves all public fields and full raw historical
-// GD/G/target/materialization identities. The complete raw snapshot remains
-// captured and is strict within each actual public phase; unrelated catalog/seed
-// restatement hashes are not asserted zero across an authorized startup.
+// Успешный повторный вход сохраняет все публичные поля и полные необработанные исторические
+// идентичности GD/G/целей/материализации. Полный необработанный снимок по-прежнему
+// захватывается и строго проверяется внутри каждой настоящей публичной фазы; ноль хешей постороннего повторного изложения
+// каталога/посева между разрешёнными запусками не проверяется.
 func rid01RequireReentryPreserved(t *testing.T, before, after rid01NewmanSnapshot) {
 	t.Helper()
 	require.Equal(t, before.Projection, after.Projection, "full public identities/createdAt/axes/materializedAt/catalog/seed unchanged across normal re-entry")
@@ -274,9 +274,9 @@ func rid01RequireReentryPreserved(t *testing.T, before, after rid01NewmanSnapsho
 
 func rid01DiagnoseOperationHistory(t *testing.T, f *installationNativeWorld, before, after rid01NewmanSnapshot, delta int) {
 	t.Helper()
-	// Diagnose every changed historical row BEFORE any existing assertion can
-	// stop this phase. Values and credential response bodies never leave memory;
-	// only per-column SHA256 and identities from the real fixture are retained.
+	// Диагностируем каждую изменённую историческую строку ДО того, как существующее утверждение сможет
+	// остановить фазу. Значения и тела ответов с удостоверениями не покидают память;
+	// сохраняются только SHA256 каждого столбца и идентичности настоящей фикстуры.
 	changed := map[string]any{}
 	for id, digest := range before.Operations {
 		if after.Operations[id] == digest {
@@ -477,9 +477,9 @@ func rid01RequirePremise(t *testing.T, h *rid01PublicContext, e *rid01PublicExpe
 	}
 }
 
-// Normal ES256 client assertion contract, same credential/signing recipe as
-// rid11PublicRefusal/StandingKeyRefusal. Sign only; actual token POST is Newman.
-// Assertion lifetime stays live even though the stored standing key is expired.
+// Штатный контракт клиентского утверждения ES256, тот же материал/способ подписи, что в
+// rid11PublicRefusal/StandingKeyRefusal. Только подпись; настоящий POST токена выполняет Newman.
+// Срок утверждения остаётся действующим, хотя сохранённый постоянный ключ истёк.
 func rid01FreshAssertion(t *testing.T, f *installationNativeWorld) (string, time.Time) {
 	t.Helper()
 	raw, err := os.ReadFile(f.creator.CredentialFile)
@@ -502,9 +502,9 @@ func rid01FreshAssertion(t *testing.T, f *installationNativeWorld) (string, time
 	return proof, end
 }
 
-// Observe the refused process's complete primary result AFTER terminal/reap and
-// BEFORE normal serve can upsert any catalog or seed. Never replace the retained
-// VALID-KEY-TWIN oracle with this observation or a post-restore baseline.
+// Наблюдаем полный первичный результат отказавшего процесса ПОСЛЕ завершения/ожидания и
+// ДО того, как штатный serve сможет обновить каталог или посев. Сохранённый
+// оракул VALID-KEY-TWIN не заменяется этим наблюдением или базой после восстановления.
 func rid01RequireRefusalBeforeRestore(t *testing.T, h *rid01PublicContext) {
 	t.Helper()
 	require.NotNil(t, h)
@@ -534,9 +534,9 @@ func rid01RequireRefusalBeforeRestore(t *testing.T, h *rid01PublicContext) {
 	h.RefusalBeforeRestore = &proof
 }
 
-// All native expired-key outcome/cleanup assertions have completed. Restore the
-// same delivered catalog/seed on the same DB using normal serve with NO GD stage.
-// The VALID-KEY-TWIN primary snapshot remains the oracle for the refusal phase.
+// Все нативные утверждения исхода/очистки просроченного ключа завершены. Восстанавливаем
+// тот же поставленный каталог/посев в той же БД штатным serve БЕЗ стадии GD.
+// Первичный снимок VALID-KEY-TWIN остаётся оракулом фазы отказа.
 func rid01RestorePublicListeners(t *testing.T, f *installationNativeWorld, in installruntime.DeliveryInput, public *rid01PublicContext) {
 	t.Helper()
 	var doc map[string]any

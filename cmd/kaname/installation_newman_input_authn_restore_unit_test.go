@@ -33,7 +33,7 @@ func rid11RestoreFixture(t *testing.T) (rid03NewmanSnapshot, rid03NewmanSnapshot
 	a.Raw["roles"] = []rid09PrimaryRow{role}
 	p, err := rid11BuildRestorePlan(a.Raw, facts)
 	require.True(t, err == nil)
-	// A prior stored selector exists, but its materializing projection is empty.
+	// Предыдущий сохранённый селектор существует, но его материализующая проекция пуста.
 	for _, r := range p.Selectors {
 		r = rid11RestoreClone(r)
 		r["created_at"], _ = json.Marshal(at.Add(-time.Hour))
@@ -494,8 +494,8 @@ func TestRID11Restore_TwoPoliciesHaveIndependentGrantSets(t *testing.T) {
 	}
 }
 
-// An empty verb list is not the documented wildcard anchor. This is the
-// malformed premise behind the first failed positive, retained as a negative.
+// Пустой список действий не является документированным универсальным якорем. Это
+// неверная предпосылка первого неудачного положительного случая, сохранённая отрицательным случаем.
 func TestRID11Restore_EmptyVerbsCannotProveAnchor(t *testing.T) {
 	a, _, p := rid11RestoreFixture(t)
 	authored := domain.Rules{{Module: "test", Resources: []string{"objects"}}}

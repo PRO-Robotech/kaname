@@ -45,10 +45,10 @@ type rid02ChildEvent struct {
 	PID       int    `json:"pid"`
 }
 
-// This entrypoint never creates a fixture or supplies a principal. The parent
-// supplies only the owned DB/profile and the same actual public-issued C key.
-// Production signing -> assertion verification -> issuance -> presented reader
-// establish C before the actual ExecuteInstallation call.
+// Эта точка входа не создаёт фикстуру и не подставляет субъекта. Родитель
+// передаёт только принадлежащие фикстуре БД/профиль и тот же настоящий публично выданный ключ C.
+// Производственная подпись -> проверка утверждения -> выдача -> считыватель предъявленных токенов
+// устанавливают C до настоящего вызова ExecuteInstallation.
 func TestRID02OwnedInstallationChild(t *testing.T) {
 	path := os.Getenv(rid02ChildInputEnv)
 	if path == "" {
@@ -90,8 +90,8 @@ func TestRID02OwnedInstallationChild(t *testing.T) {
 	require.NoError(t, err)
 	auth, err := prepareInstallationAuthentication(pool, cfg, signer, reader, logger)
 	require.NoError(t, err)
-	// FD5 was privately allocated and unlinked by the parent BEFORE Start.
-	// Append records rather than replacing earlier tokens during renewal.
+	// FD5 закрыто выделен родителем и удалён из каталога ДО Start.
+	// Дописываем записи, сохраняя предыдущие токены при обновлении.
 	saveSecrets := func() {
 		saveErr := json.NewEncoder(secretInventory).Encode([]string{auth.credential.PrivateKeyPEM, auth.accessToken})
 		if saveErr != nil {
@@ -119,8 +119,8 @@ func TestRID02OwnedInstallationChild(t *testing.T) {
 	enc := json.NewEncoder(events)
 	dec := json.NewDecoder(control)
 	if input.Action == "lock-pending" || input.Action == "terminal-refusal" {
-		// Separate real repository protocol proof; never presented as a resumed
-		// successful worker beyond its normal four-minute execution deadline.
+		// Отдельное доказательство настоящего протокола репозитория; оно не представляется возобновлённым
+		// успешным исполнителем за пределами его штатного четырёхминутного срока выполнения.
 		writer, err := kanamepg.New(pool, nil).Writer(verified)
 		require.NoError(t, err)
 		defer writer.Rollback(context.Background())
@@ -151,8 +151,8 @@ func TestRID02OwnedInstallationChild(t *testing.T) {
 		if err := enc.Encode(rid02ChildEvent{Stage: stage, Operation: id, PID: os.Getpid()}); err != nil {
 			return err
 		}
-		// The parent owns this IPC pause and exact OS process. Waiting does not fake
-		// a DB result or reset any clock. The normal worker context remains intact.
+		// Родитель владеет этой паузой IPC и точным процессом ОС. Ожидание не подделывает
+		// результат БД и не сбрасывает часы. Штатный контекст исполнителя сохраняется.
 		var action string
 		if err := dec.Decode(&action); err != nil {
 			return err
@@ -186,8 +186,8 @@ func TestRID02OwnedInstallationChild(t *testing.T) {
 	create := gdapp.NewCreateGrantDelegationUseCase(repo, ops, snapshot).WithRelationStore(relations, logger).WithInstallationModel(model.plans)
 	op, err := create.ExecuteInstallation(verified, input.Input)
 	require.NoError(t, err)
-	// Wait for the real dispatched worker, not merely the visible done bit (Cancel
-	// can set that bit while the old writer is still paused).
+	// Ждём настоящего отправленного исполнителя, а не только видимый бит done (Cancel
+	// может выставить его, пока старая запись ещё приостановлена).
 	require.NoError(t, operations.Wait(ctx))
 	attempts, err := json.Marshal(observed.terminalAttempts())
 	require.NoError(t, err)

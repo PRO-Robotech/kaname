@@ -13,9 +13,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// InstallationReadFactory opens real primary database read transactions. Keeping
-// the transaction boundary explicit permits callers to add deadline/telemetry/fault
-// decorators without changing canonical snapshot or membership semantics.
+// InstallationReadFactory открывает настоящие транзакции чтения первичной базы. Явная
+// граница транзакции позволяет вызывающим добавлять обёртки срока/телеметрии/сбоя
+// без изменения семантики канонического снимка или состава.
 type InstallationReadFactory interface {
 	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
@@ -24,8 +24,8 @@ type InstallationPageFactory interface {
 	BeginTx(context.Context, pgx.Tx, pgx.TxOptions) (pgx.Tx, error)
 }
 
-// NestedInstallationPages opens real savepoint scopes on the existing read-only,
-// repeatable-read transaction; incompatible options are refused, never ignored.
+// NestedInstallationPages открывает настоящие области точек сохранения в существующей транзакции только чтения
+// с повторяемым чтением; несовместимые параметры отклоняются, а не игнорируются.
 type NestedInstallationPages struct{}
 
 func (NestedInstallationPages) BeginTx(ctx context.Context, tx pgx.Tx, options pgx.TxOptions) (pgx.Tx, error) {
@@ -44,14 +44,14 @@ func NewInstallationReader(factory InstallationReadFactory) *InstallationReader 
 	return &InstallationReader{factory: factory, pages: NestedInstallationPages{}}
 }
 
-// WithPageFactory decorates real nested transaction creation without replacing
-// canonical page SQL or membership. It does not create another connection.
+// WithPageFactory оборачивает создание настоящих вложенных транзакций без замены
+// канонического SQL страниц или состава. Другого соединения не создаётся.
 func (r *InstallationReader) WithPageFactory(pages InstallationPageFactory) *InstallationReader {
 	return &InstallationReader{factory: r.factory, pages: pages}
 }
 
-// InstallationAccounts captures complete canonical membership on the primary in
-// one repeatable-read snapshot. Pages are ordered by ID and never caller-filtered.
+// InstallationAccounts захватывает полный канонический состав в первичной базе в
+// одном снимке повторяемого чтения. Страницы упорядочены по ID, без фильтра вызывающего.
 func (r *InstallationReader) InstallationAccounts(ctx context.Context, target string, pageSize int) ([]domain.AccountID, domain.AccountID, error) {
 	if pageSize < 1 {
 		return nil, "", fmt.Errorf("installation account page size must be positive")
@@ -75,7 +75,7 @@ func (r *InstallationReader) InstallationAccounts(ctx context.Context, target st
 		}
 		return []domain.AccountID{account.ID}, domain.AccountID(sys), nil
 	}
-	// All page scopes share this real repeatable-read membership snapshot.
+	// Все области страниц делят этот настоящий снимок состава повторяемого чтения.
 	var ids []domain.AccountID
 	after := ""
 	for {
@@ -100,8 +100,8 @@ func (r *InstallationReader) InstallationAccounts(ctx context.Context, target st
 	return ids, domain.AccountID(sys), nil
 }
 
-// InstallationReferences resolves the SAME seed identity spelling window and
-// cluster role names used by the ordinary seed writer. It never creates identities.
+// InstallationReferences разрешает ТО ЖЕ окно написания идентичности посева и
+// имена кластерных ролей штатной записи посева. Идентичности никогда не создаются.
 func (r *InstallationReader) InstallationReferences(ctx context.Context, account, name string, roles []string) (domain.ServiceAccountID, []string, error) {
 	tx, err := r.factory.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {

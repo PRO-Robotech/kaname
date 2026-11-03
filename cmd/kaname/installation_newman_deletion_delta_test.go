@@ -98,8 +98,8 @@ func rid05DeleteAuditDelta(before, after []rid09PrimaryRow, creator, account, ac
 	return rid03S(row, "id"), ok && !at.Before(start) && !at.After(end) && rid03Columns(row, "id event_type tenant_account_id event_payload created_at") && rid03AuditIDPattern.MatchString(rid03S(row, "id")) && rid03S(row, "event_type") == "iam.service_account.deleted" && rid03S(row, "tenant_account_id") == account && rid03SameCell(row, "event_payload", map[string]any{"actor": actor, "resource_type": "service_account", "resource_id": creator, "account_id": account})
 }
 
-// Only exact BEFORE coordinates of the object being deleted authorize cleanup.
-// No recursive ID search and no unknown table/column exemptions.
+// Только точные координаты BEFORE удаляемого объекта разрешают очистку.
+// Без рекурсивного поиска ID и исключений неизвестных таблиц/столбцов.
 func rid05DeleteRawDelta(a, b rid03NewmanSnapshot, creator, account string, failed bool) (rid05DeleteProof, bool) {
 	proof := rid05DeleteProof{OldCreatorID: creator, Failed: failed, PrimaryLower: a.Whole.PrimaryFinishedAt, PrimaryUpper: b.Whole.PrimaryStartedAt, RemovedRows: map[string]int{}, AddedRows: map[string]int{}, DeleteIntents: []rid03ProducerEvidence{}, DeletedFactClocks: []rid03FactEvidence{}, BeforeSHA: rid03EvidenceHash(a.Raw), AfterSHA: rid03EvidenceHash(b.Raw)}
 	expected := map[rid03Tuple]bool{}
@@ -164,7 +164,7 @@ func rid05DeleteRawDelta(a, b rid03NewmanSnapshot, creator, account string, fail
 		if !ok {
 			return proof, false
 		}
-		// Every expected removed full old row MUST actually be absent.
+		// Каждая ожидаемая удалённая полная старая строка ДОЛЖНА действительно отсутствовать.
 		for _, row := range current {
 			if expectedRemoval(table, row) {
 				return proof, false
@@ -254,9 +254,9 @@ func rid05DeleteProjectionValid(a, b rid03NewmanSnapshot, creator string, failed
 	return valid && reflect.DeepEqual(expected, b.Projection)
 }
 
-// Compute the entire expected projection solely from BEFORE primary state.
-// The internal materialization fence is part of that projection, not an
-// unchanged public field: exact authorized member removal changes its digest.
+// Вычисляем всю ожидаемую проекцию только из первичного состояния BEFORE.
+// Внутренний барьер материализации — часть этой проекции, а не
+// неизменное публичное поле: точное разрешённое удаление члена меняет его дайджест.
 func rid05DeleteProjectionExpected(a rid03NewmanSnapshot, creator string) (rid09NewmanProjection, bool) {
 	expected := a.Projection
 	members, present := a.Raw["access_binding_target_members"]
@@ -278,9 +278,9 @@ func rid05DeleteProjectionExpected(a rid03NewmanSnapshot, creator string) (rid09
 		}
 		remaining = append(remaining, member)
 	}
-	// rid09PrimaryRows orders by to_jsonb(row)::text. Removing a subset retains
-	// exactly that canonical relative ordering, all columns and subsecond clocks.
-	// rid03EvidenceHash and ridWholeDigest both SHA256 json.Marshal for row slices.
+	// rid09PrimaryRows упорядочивает по to_jsonb(row)::text. Удаление подмножества сохраняет
+	// ровно этот канонический относительный порядок, все столбцы и доли секунды часов.
+	// rid03EvidenceHash и ridWholeDigest используют SHA256 json.Marshal для срезов строк.
 	expected.Materialization = rid03EvidenceHash(remaining)
 	expected.ServiceAccounts = []map[string]any{}
 	removed := 0
@@ -435,7 +435,7 @@ func rid05RequireDeleteOperation(t *testing.T, w *ridLifecycleWorld, a, b rid05S
 	return op
 }
 
-// No typed secret-bearing Any is ever formatted in assertion failures.
+// Типизированный Any с секретом никогда не форматируется при отказах утверждений.
 func rid05TypedDeleteValid(op *operations.Operation, creator, account, actor string, failed bool, blocking string) bool {
 	if op == nil || !op.Done || op.Principal != (operations.Principal{Type: "user", ID: actor, DisplayName: actor}) || op.Metadata == nil {
 		return false
@@ -462,9 +462,9 @@ func rid05TypedDeleteValid(op *operations.Operation, creator, account, actor str
 	return op.Response.UnmarshalTo(&got) == nil && proto.Equal(&got, &emptypb.Empty{})
 }
 
-// Native DELETE remains an ordinary API request in the three deletion setup
-// worlds. This independent checkpoint preserves full evidence across that real
-// mutation, without incrementing the public phase counter or substituting RPC.
+// Нативный DELETE остаётся штатным запросом API в трёх мирах подготовки удаления.
+// Эта независимая контрольная точка сохраняет полное доказательство через настоящее
+// изменение без увеличения счётчика публичных фаз или подмены RPC.
 func (p *rid05PublicContext) beforeNativeDelete(t *testing.T, w *ridLifecycleWorld) {
 	if p == nil {
 		return
@@ -492,8 +492,8 @@ func (p *rid05PublicContext) nativeDeleted(t *testing.T, w *ridLifecycleWorld) {
 	rid08Write(t, w.f.session.Root, "rid05-"+p.owner+"-"+rid03Mode(t, w)+"-native-delete-proof", map[string]any{"integrationOnly": true, "actualNewmanExecuted": false, "proof": proof, "wholeDoDAccepted": false})
 }
 
-// Canonical data-only domain→DTO→protojson projection, exactly as RID09's SQL
-// oracle. No REST/usecase/AFTER value participates; zero emits JSON null.
+// Каноническая проекция только данных домен→DTO→protojson, ровно как у SQL-оракула RID09.
+// Значения REST/сценария/AFTER не участвуют; ноль выдаёт JSON null.
 func rid05CanonicalMaterializedAt(at time.Time) (any, bool) {
 	var pb *iamv1.AccessBinding
 	if dto.Transfer(dto.FromTo(domain.AccessBinding{MaterializedAt: at}, &pb)) != nil {
@@ -511,8 +511,8 @@ func rid05CanonicalMaterializedAt(at time.Time) (any, bool) {
 	return value, present
 }
 
-// Failure evidence is a closed nonsecret field/hash census. In particular no
-// raw Operation, credential, arbitrary bookkeeping payload or response is logged.
+// Доказательство отказа — замкнутая несекретная перепись полей/хешей. В частности, никакие
+// необработанные Operation, удостоверения, произвольные учётные нагрузки или ответы не журналируются.
 func rid05RequireDeleteProjection(t *testing.T, w *ridLifecycleWorld, a, b rid03NewmanSnapshot, failed bool, label string) {
 	expected, valid := a.Projection, true
 	if !failed {

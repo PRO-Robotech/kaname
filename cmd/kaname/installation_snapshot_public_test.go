@@ -105,8 +105,8 @@ func rid08NewOperations(t *testing.T, f *installationNativeWorld, before []strin
 	require.Len(t, after, len(before)+want)
 }
 
-// O discovers every public page first. Primary queries then independently check
-// full membership, exact IDs, axes, creators and public canonical timestamps.
+// O сначала обнаруживает каждую публичную страницу. Первичные запросы затем независимо проверяют
+// полный состав, точные ID, оси, создателей и публичные канонические временные метки.
 func rid08PublicCensus(t *testing.T, f *installationNativeWorld, wantedAccounts []string) rid08PublicProof {
 	t.Helper()
 	f.renewOperator(t, f.given.ctx)

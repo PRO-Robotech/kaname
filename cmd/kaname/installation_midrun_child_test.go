@@ -57,7 +57,7 @@ func TestRID10OwnedMidrunStartupChild(t *testing.T) {
 	info, err := inventory.Stat()
 	require.NoError(t, err)
 	require.True(t, info.Mode().IsRegular() && info.Mode().Perm() == 0600)
-	// No authentication claim is attached to this ownership handshake.
+	// К этому рукопожатию владения не приписывается утверждение об аутентификации.
 	require.NoError(t, events.SetWriteDeadline(time.Now().Add(15*time.Second)))
 	require.NoError(t, control.SetReadDeadline(time.Now().Add(15*time.Second)))
 	require.NoError(t, json.NewEncoder(events).Encode(rid02ChildEvent{Stage: "midrun-preauth-armed", PID: os.Getpid()}))
@@ -167,7 +167,7 @@ func TestRID10OwnedMidrunStartupChild(t *testing.T) {
 			if e := write("fresh-writer-fault", map[string]any{"ordinal": ordinal, "contextLive": true, "creator": principal.ID, "freshUnknown": true, "sentinel": false}); e != nil {
 				return recordControl(e)
 			}
-			// A fresh opaque error, never a cancellation/deadline/unavailable sentinel.
+			// Свежая непрозрачная ошибка, без сигнального значения отмены/срока/недоступности.
 			return errors.New("RID10 owned fresh second writer begin fault")
 		}
 		return r

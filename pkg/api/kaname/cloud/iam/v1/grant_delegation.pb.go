@@ -25,7 +25,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Lifecycle status. ACTIVE — делегирование действует; REVOKED — отозвано,
+// Состояние жизненного цикла. ACTIVE — делегирование действует; REVOKED — отозвано,
 // конечное состояние.
 type GrantDelegation_Status int32
 
@@ -76,7 +76,7 @@ func (GrantDelegation_Status) EnumDescriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_grant_delegation_proto_rawDescGZIP(), []int{0, 0}
 }
 
-// A GrantDelegation resource — делегирование права выдавать.
+// Ресурс GrantDelegation — делегирование права выдавать.
 //
 // Держатель права выдавать на аккаунте допускает служебную учётку (`delegate`)
 // выдавать и отзывать права на объекты ОДНОГО модуля от своего имени. Выдача
@@ -91,10 +91,10 @@ func (GrantDelegation_Status) EnumDescriptor() ([]byte, []int) {
 // действующую выдачу, сделанную по делегированию, с причиной
 // `REVOCATION_REASON_DELEGATION_REVOKED`. Отозванная запись остаётся для аудита.
 //
-// Resource id prefix: `gdl` (concatenated form, `ids.NewID`).
+// Префикс id ресурса: `gdl` (слитная форма, `ids.NewID`).
 type GrantDelegation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the grant delegation.
+	// ID делегирования выдачи.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// Аккаунт — единственная область, в которой делегат вправе выдавать.
 	// Неизменяемо.

@@ -44,16 +44,16 @@ type rid08PageObservation struct {
 	Fault                  bool
 }
 
-// This safe receipt contains no arbitrary returned-error message. It records
-// the status of the ACTUAL runServe return, never a separately mapped surrogate.
+// Эта безопасная квитанция не содержит произвольного сообщения возвращённой ошибки. Она записывает
+// статус НАСТОЯЩЕГО возврата runServe, а не отдельно преобразованной подмены.
 type rid08ReturnedStatus struct {
 	ErrorPresent   bool  `json:"errorPresent"`
 	Code           int32 `json:"code"`
 	MessageMatches bool  `json:"messageMatches"`
 }
 
-// Only the owned test executable selects these dependencies. The entrypoint
-// executes the SAME complete runServe with real authn, full manifests and writers.
+// Только принадлежащий фикстуре тестовый файл выбирает эти зависимости. Точка входа
+// выполняет ТОТ ЖЕ полный runServe с настоящей аутентификацией, полными манифестами и записью.
 func TestRID08OwnedSnapshotStartupChild(t *testing.T) {
 	path := os.Getenv(rid08ChildInputEnv)
 	if path == "" {
@@ -122,9 +122,9 @@ func TestRID08OwnedSnapshotStartupChild(t *testing.T) {
 	err = runServe(cfg, installationServeDependencies{decorateInstallationReader: decorate, installationPageSize: 2, observeCredential: observer})
 	returned := status.Convert(err)
 	observed := rid08ReturnedStatus{ErrorPresent: err != nil, Code: int32(returned.Code()), MessageMatches: returned.Message() == "internal error"}
-	// Do not log or persist an unexpected arbitrary message, including in a
-	// failed assertion. The production structured result remains independently
-	// required by the parent; this receipt verifies its formerly hidden cause.
+	// Не журналируем и не сохраняем неожиданное произвольное сообщение, в том числе в
+	// неудачном утверждении. Производственный структурный результат остаётся независимо
+	// обязательным для родителя; эта квитанция проверяет его ранее скрытую причину.
 	safeStatus, receiptErr := json.Marshal(observed)
 	require.NoError(t, receiptErr)
 	require.NoError(t, os.WriteFile(filepath.Join(input.EvidenceDir, "actual-returned-status.json"), safeStatus, 0600))
@@ -160,8 +160,8 @@ func (p *rid08ObservedPages) BeginTx(ctx context.Context, tx pgx.Tx, options pgx
 		if err = p.emit(ctx, "second-page-fault"); err != nil {
 			return nil, err
 		}
-		// Fresh unknown non-sentinel error at the REAL second nested BeginTx boundary.
-		// The previous page and coordinator were real; the reader owns their cleanup.
+		// Свежая неизвестная несигнальная ошибка на НАСТОЯЩЕЙ второй вложенной границе BeginTx.
+		// Предыдущие страница и координатор были настоящими; их очисткой владеет считыватель.
 		return nil, fmt.Errorf("owned RID08 fresh second-page BeginTx failure")
 	}
 	return (kanamepg.NestedInstallationPages{}).BeginTx(ctx, tx, options)
@@ -180,8 +180,8 @@ func (r *rid08ObservedReader) InstallationAccounts(ctx context.Context, target s
 	if err != nil {
 		return accounts, system, err
 	}
-	// The real canonical reader has committed/released its RR transaction BEFORE
-	// this observer. The returned membership is retained exactly, never replaced.
+	// Настоящий канонический считыватель зафиксировал/освободил свою транзакцию RR ДО
+	// этого наблюдателя. Возвращённый состав сохраняется точно, без замены.
 	observed := rid08SnapshotObservation{Accounts: append([]domain.AccountID(nil), accounts...), System: system, PageSize: size, Pages: r.pages.calls, CompletedAt: time.Now().UTC(), ContextLive: ctx.Err() == nil}
 	raw, err := json.Marshal(observed)
 	if err != nil {

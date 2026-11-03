@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A separately leased protocol probe uses the real installed issuer credential
-// and the same lawful RID03 ACT input. The parent kills only after Node has
-// acknowledged the complete private input, before HTTP permission is released.
-// This proves secret cleanup on abrupt termination, not public RID acceptance.
+// Отдельно арендованная проба протокола использует настоящий установленный удостоверяющий материал издателя
+// и тот же допустимый вход ACT RID03. Родитель завершает процесс только после подтверждения Node
+// полного закрытого входа, до выдачи разрешения HTTP.
+// Это доказывает очистку секретов при внезапном завершении, а не публичную приёмку RID.
 func TestRIDNewmanProtocolIssuer(t *testing.T) {
 	ridNewmanProtocolEnabled(t)
 	for _, tc := range []struct{ name, mode string }{
@@ -21,7 +21,7 @@ func TestRIDNewmanProtocolIssuer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newRIDLifecycleWorld(t, "S1", false)
 			f := w.f
-			// Preserve the native GRANT setup used by the ordinary public case.
+			// Сохраняем нативную подготовку GRANT штатного публичного случая.
 			nativeSubject := f.ridSA(t, f.tenantID, "rid-grantee")
 			g := w.grant(t, w.bindingInput("service_account", nativeSubject, w.pull, "registry.registries", w.object))
 			require.Equal(t, w.gd.Id, g.DelegationId)

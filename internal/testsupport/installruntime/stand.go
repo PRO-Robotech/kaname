@@ -23,14 +23,14 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-// NativeStand reuses the already exercised stand preparation and exact-owned
-// PostgreSQL TLS lifecycle. Creating one requires the caller's explicit runtime
-// lease; this helper is never invoked by package initialization or pure tests.
+// NativeStand повторно использует уже исполненную подготовку стенда и жизненный цикл TLS
+// PostgreSQL с точной проверкой владения. Создание требует явной аренды исполнения
+// вызывающего; помощник не вызывается инициализацией пакета или чистыми тестами.
 type NativeStand struct{ Root, Evidence, PGPort string }
 
-// Environment retains the normal stand policy while relocating every native
-// listener to loopback. Overrides are explicit fixture inputs; callers must not
-// use them to change admission, identity, gateway policy, or resource limits.
+// Environment сохраняет штатную политику стенда, перемещая каждый нативный
+// слушатель на петлевой адрес. Переопределения — явные входы фикстуры; вызывающие не должны
+// использовать их для изменения допуска, идентичности, политики шлюза или лимитов ресурсов.
 func (s *NativeStand) Environment(overrides map[string]string) ([]string, error) {
 	raw, err := os.ReadFile(filepath.Join(s.Evidence, "run", "native-environment.json"))
 	if err != nil {
@@ -65,8 +65,8 @@ func (s *NativeStand) Environment(overrides map[string]string) ([]string, error)
 	return result, nil
 }
 
-// RunMigrator invokes the normal native migration command before the initial
-// Given. Its complete output is private; no migration/data operation is replaced.
+// RunMigrator вызывает штатную нативную команду миграции до начального
+// Given. Её полный вывод закрыт; миграция/операция данных не подменяются.
 func (s *NativeStand) RunMigrator(ctx context.Context, binary string, environment []string) error {
 	if !filepath.IsAbs(binary) {
 		return fmt.Errorf("absolute migrator artifact required")
@@ -138,7 +138,7 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	require.NoError(t, os.Mkdir(evidence, 0700), "each run needs a fresh evidence directory")
 	// Генерируем ровно существующие PKI/конфигурацию стенда до любого контейнера.
 	prepare := exec.CommandContext(ctx, "bash", filepath.Join(root, ".github/scripts/stand-own.sh"), "prepare-native")
-	// Any incidental relative output belongs to this private run, never the source tree.
+	// Любой случайный относительный вывод относится к этому закрытому запуску, а не дереву исходников.
 	prepare.Dir = evidence
 	var cleanEnvironment []string
 	for _, entry := range os.Environ() {

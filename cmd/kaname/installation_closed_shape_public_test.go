@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// Generalized RID08 public/primary census: accepted axes come from exact parsed
-// delivery, never from persisted GD. I resolves independently even for noGD.
+// Обобщённая публичная/первичная перепись RID08: принятые оси берутся из точно разобранной
+// поставки, а не из сохранённого GD. I разрешается независимо даже для noGD.
 func rid12PublicCensus(t *testing.T, f *installationNativeWorld, wantedAccounts []string, declarations map[string]*manifest.Manifest, noGD bool) rid08PublicProof {
 	t.Helper()
 	f.renewOperator(t, f.given.ctx)

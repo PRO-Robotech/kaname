@@ -53,8 +53,8 @@ func rid01RedactionUnit(t *testing.T) *rid01RedactionUnitFixture {
 	clock := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	modified := clock.Add(-profile.Settled - time.Minute)
 	original := &iamv1.IssueSAKeyResponse{Key: &iamv1.ServiceAccountOAuthClient{Id: "unit-client", SvaId: "unit-service-account", Description: "stable nested key", ExpiresAt: timestamppb.New(clock.Add(time.Hour)), CreatedAt: timestamppb.New(modified), CreatedByUserId: "unit-creator", Name: "stable name", Labels: map[string]string{"label": "stable"}}, ClientId: "unit-client", KeyId: "unit-client", Algorithm: "ES256", PublicKeyPem: "unit-public-key", Audiences: []string{"https://kaname.local"}, PrivateKeyPem: "unit-private-secret", ClientSecret: "unit-client-secret", Secret: "unit-base-secret"}
-	// Unknown fields are deliberately present in the accepted twin too: the
-	// comparator must preserve both top-level and nested unknown bytes.
+	// Неизвестные поля намеренно есть и в принятом близнеце:
+	// компаратор должен сохранять неизвестные байты верхнего уровня и вложений.
 	original.ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x01})
 	original.Key.ProtoReflect().SetUnknown([]byte{0xa8, 0x06, 0x02})
 	current := proto.Clone(original).(*iamv1.IssueSAKeyResponse)

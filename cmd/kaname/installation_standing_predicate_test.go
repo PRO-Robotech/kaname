@@ -45,9 +45,9 @@ func ridWaitUntil(t *testing.T, ctx context.Context, at time.Time) {
 	}
 }
 
-// ridStandingAuthentication covers the internal live issuance/cache mechanism.
-// It does NOT replace the separate clean full-serve/renewal predicate of RID01.
-// All elapsed time is real; both pacing limits are the requested lawful profiles.
+// ridStandingAuthentication покрывает внутренний живой механизм выдачи/кеша.
+// Он НЕ заменяет отдельный предикат чистого полного serve/обновления RID01.
+// Всё истёкшее время настоящее; оба ограничения частоты — запрошенные допустимые профили.
 func ridStandingAuthentication(t *testing.T) {
 	for _, pace := range []int{1, 5} {
 		name := "pace1"
@@ -66,8 +66,8 @@ func ridStandingAuthentication(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, authzguard.RequireClusterAdmin(verified, f.relations))
 			require.True(t, first == f.authentication.accessToken, "immediate repeat reuses actual issued access credential")
-			// Decode only the expiry of the token already accepted above by the NORMAL
-			// reader. This observation never supplies identity or bypasses verification.
+			// Декодируем только истечение токена, уже принятого выше ШТАТНЫМ
+			// считывателем. Это наблюдение не подставляет идентичность и не обходит проверку.
 			claims := jwt.MapClaims{}
 			_, _, err = new(jwt.Parser).ParseUnverified(first, claims)
 			require.NoError(t, err)
@@ -104,9 +104,9 @@ func ridStandingAuthentication(t *testing.T) {
 			for err := range errors {
 				require.NoError(t, err)
 			}
-			// Exhaust the REAL verifier's per-client pace using genuine fresh proofs.
-			// Observe an actual RetryAfter with enough remaining time for cancellation;
-			// no synthetic limiter or private gate is used.
+			// Исчерпываем НАСТОЯЩЕЕ ограничение частоты проверяющего для клиента настоящими свежими доказательствами.
+			// Наблюдаем настоящий RetryAfter с достаточным остатком времени для отмены;
+			// синтетический ограничитель или закрытый шлюз не используются.
 			client, outcome, err := clientassertion.ResolveRegisteredClient(ctx, f.authentication.resolver, f.authentication.credential.ClientID)
 			require.NoError(t, err, "registered standing client must resolve: %s", outcome)
 			throttled := false
@@ -130,7 +130,7 @@ func ridStandingAuthentication(t *testing.T) {
 			_, _, err = f.authentication.exchange(cancelled)
 			stop()
 			require.Equal(t, codes.DeadlineExceeded, status.Code(err), "actual RetryAfter wait must honor cancellation")
-			// A subsequent real exchange must recover with a fresh assertion/JTI.
+			// Последующий настоящий обмен должен восстановиться со свежим утверждением/JTI.
 			token, owner, err := f.authentication.exchange(ctx)
 			require.NoError(t, err)
 			require.NotEmpty(t, token.AccessToken)

@@ -29,8 +29,8 @@ func rid08Stage(t *testing.T, f *installationNativeWorld) {
 	f.requireSameCredential(t)
 	requireNativeAuthority(t, f.given, "user", string(f.given.user), 1)
 	requireNativeAuthority(t, f.given, "service_account", f.creator.ID, 1)
-	// Normal setup delivers exact M1/M2 catalog/I but omits ONLY GD declarations.
-	// The tested subsequent full payload always contains both GD declarations.
+	// Штатная подготовка поставляет точные каталог/I M1/M2, опуская ТОЛЬКО объявления GD.
+	// Проверяемая последующая полная нагрузка всегда содержит оба объявления GD.
 	p := f.apply(t, installruntime.DeliveryInput{Manifests: nativeWithoutDelegations(t, installruntime.NewRIDDeliveryFixture()), CredentialFile: f.creator.CredentialFile})
 	results, err := p.Results()
 	require.NoError(t, err)
@@ -195,7 +195,7 @@ func rid08FaultExit(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild
 	require.True(t, os.IsNotExist(err), "no later page after injected unknown failure")
 	_, err = os.Stat(filepath.Join(c.dir, "canonical-snapshot.json"))
 	require.True(t, os.IsNotExist(err), "incomplete census must never be observed as empty success")
-	// Real child has reaped; no coordinator or writer transaction survives it.
+	// Ожидание завершения настоящего потомка окончено; координатор или транзакция записи его не переживают.
 	closed, cancel := context.WithTimeout(f.given.ctx, 5*time.Second)
 	defer cancel()
 	tick := time.NewTicker(25 * time.Millisecond)

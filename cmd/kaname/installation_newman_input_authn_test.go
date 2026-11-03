@@ -199,8 +199,8 @@ func (p *rid11PublicContext) afterPositive(t *testing.T, w *ridLifecycleWorld) {
 		auditPairs = map[string]string{}
 	}
 	require.True(t, rid11InstallerAuditValid(p.beforeRun.BusinessAudit, s.BusinessAudit, w.f.creator.ID, issuer["id"].(string), pull, auditPairs, p.beforeRun.Whole.PrimaryFinishedAt, s.Whole.PrimaryStartedAt), "exact normal installer GD business audit delta; no extra AB/GD event")
-	// Prior installation delegation/grant/history remains byte-exact. A new
-	// absent-pair normal startup is evidenced separately by native assertions.
+	// Предыдущие делегирование/выдача/история установки сохраняются побайтно. Новый
+	// штатный запуск отсутствующей пары подтверждается отдельно нативными утверждениями.
 	if p.input.Active {
 		rid04RequireGDGUnchanged(t, *p.beforeRun, s)
 	}
@@ -223,8 +223,8 @@ func (p *rid11PublicContext) beforeRestore(t *testing.T, w *ridLifecycleWorld, r
 		require.True(t, reflect.DeepEqual(p.beforeRun.Raw, s.Raw), "failed prewrite startup full delivery/history/Operation zero")
 		require.True(t, reflect.DeepEqual(p.beforeRun.Projection, s.Projection), "failed prewrite startup projection zero")
 	} else {
-		// Census fails AFTER normal seed/catalog delivery and independent I creation.
-		// Original native page/RR/fault and exact GD/Operation guards are retained.
+		// Перепись отказывает ПОСЛЕ штатного посева/поставки каталога и независимого создания I.
+		// Сохраняются исходные нативные защиты страниц/RR/сбоев и точные защиты GD/Operation.
 		if p.input.Active {
 			rid04RequireGDGUnchanged(t, *p.beforeRun, s)
 		}
@@ -325,9 +325,9 @@ func (p *rid11PublicContext) read(t *testing.T, w *ridLifecycleWorld, stage stri
 	}()
 }
 
-// Native installation is not a Newman mutation. Its independent primary
-// Operation metadata supplies resource IDs; declared manifest axes supply this
-// closed audit payload. All old history and the entire AB/GD family census remain.
+// Нативная установка не является изменением Newman. Её независимые первичные
+// метаданные Operation дают ID ресурсов; заявленные оси манифеста дают эту
+// замкнутую нагрузку аудита. Вся старая история и перепись всего семейства AB/GD сохраняются.
 func rid11InstallerAuditValid(before, after []rid09PrimaryRow, creator, issuer, role string, pairs map[string]string, start, end time.Time) bool {
 	if creator == "" || issuer == "" || role == "" || start.IsZero() || end.Before(start) {
 		return false

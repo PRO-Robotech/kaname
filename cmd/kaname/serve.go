@@ -91,8 +91,8 @@ func stopGRPCBounded(srv grpcStopper, timeout time.Duration) {
 	}
 }
 
-// installationRepositoryDecorator is an internal composition seam. The published
-// entrypoint always supplies nil; it is not selectable by configuration or RPC.
+// installationRepositoryDecorator — внутренний шов композиции. Опубликованная
+// точка входа всегда передаёт nil; конфигурация или RPC не могут его выбрать.
 type installationRepositoryDecorator func(kanamerepo.Repository) kanamerepo.Repository
 
 type installationServeDependencies struct {
@@ -355,7 +355,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		return cErr
 	}
 
-	// Whole-delivery preflight precedes model installation and all delivery writers.
+	// Предварительная проверка всей поставки идёт до установки модели и всех записей поставки.
 	ownManifest, omErr := loadOwnManifest(logger)
 	if omErr != nil {
 		return omErr
@@ -398,8 +398,8 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		if err != nil {
 			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
 		}
-		// Immutable copies only: observation cannot replace credentials, a
-		// principal, issuer, verifier or any authority decision.
+		// Только неизменяемые копии: наблюдение не может заменить удостоверения,
+		// субъекта, издателя, проверяющего или любое решение о полномочиях.
 		installationAuthn.observeCredential = installationDependencies.observeCredential
 		installationAuthn.observeMaterial("")
 		verified, err := installationAuthn.Authenticate(ctx)

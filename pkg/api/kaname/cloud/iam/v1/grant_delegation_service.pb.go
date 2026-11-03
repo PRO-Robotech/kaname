@@ -30,7 +30,7 @@ const (
 
 type GetGrantDelegationRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the GrantDelegation resource to return.
+	// ID возвращаемого ресурса GrantDelegation.
 	GrantDelegationId string `protobuf:"bytes,1,opt,name=grant_delegation_id,json=grantDelegationId,proto3" json:"grant_delegation_id,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -75,13 +75,13 @@ func (x *GetGrantDelegationRequest) GetGrantDelegationId() string {
 
 type ListGrantDelegationsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the Account whose grant delegations are listed. Required.
+	// ID Account, чьи делегирования выдачи перечисляются. Обязателен.
 	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// The maximum number of results per page to return. 0 selects the platform
-	// default (50); a value outside [0..1000] is rejected with INVALID_ARGUMENT
-	// rather than clamped.
+	// Максимальное число результатов страницы. 0 выбирает значение платформы
+	// по умолчанию (50); значение вне [0..1000] отклоняется с INVALID_ARGUMENT,
+	// а не ограничивается границей.
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	// Page token.
+	// Токен страницы.
 	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -140,9 +140,9 @@ func (x *ListGrantDelegationsRequest) GetPageToken() string {
 
 type ListGrantDelegationsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// List of GrantDelegation resources, ordered by (created_at, id).
+	// Список ресурсов GrantDelegation в порядке (created_at, id).
 	GrantDelegations []*GrantDelegation `protobuf:"bytes,1,rep,name=grant_delegations,json=grantDelegations,proto3" json:"grant_delegations,omitempty"`
-	// Token for the next page; empty on the last page.
+	// Токен следующей страницы; на последней странице пуст.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -194,17 +194,17 @@ func (x *ListGrantDelegationsResponse) GetNextPageToken() string {
 
 type CreateGrantDelegationRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the Account the delegation is scoped to. Required.
+	// ID Account, которым ограничено делегирование. Обязателен.
 	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// The delegate: a service account (`SUBJECT_TYPE_SERVICE_ACCOUNT` only).
+	// Делегат: системная учётка (только `SUBJECT_TYPE_SERVICE_ACCOUNT`).
 	Delegate *Subject `protobuf:"bytes,2,opt,name=delegate,proto3" json:"delegate,omitempty"`
-	// Role ids the delegate may grant: 1..16, no repeats; roles declared by ONE
-	// module manifest (not `iam`).
+	// ID ролей, которые делегат вправе выдавать: 1..16, без повторов; роли объявлены ОДНИМ
+	// манифестом модуля (не `iam`).
 	RoleIds []string `protobuf:"bytes,3,rep,name=role_ids,json=roleIds,proto3" json:"role_ids,omitempty"`
-	// Catalog types (dotted, e.g. `registry.registries`) of the same module whose
-	// objects the delegate may grant on: 1..16, no repeats.
+	// Типы каталога (с точками, например `registry.registries`) того же модуля,
+	// на объекты которых делегат вправе выдавать: 1..16, без повторов.
 	TargetTypes []string `protobuf:"bytes,4,rep,name=target_types,json=targetTypes,proto3" json:"target_types,omitempty"`
-	// Subject types the delegate may grant to: 1..4, no repeats, never
+	// Типы субъектов, которым делегат вправе выдавать: 1..4, без повторов, никогда
 	// `SUBJECT_TYPE_UNSPECIFIED`.
 	SubjectTypes  []SubjectType `protobuf:"varint,5,rep,packed,name=subject_types,json=subjectTypes,proto3,enum=kaname.cloud.iam.v1.SubjectType" json:"subject_types,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -278,9 +278,9 @@ func (x *CreateGrantDelegationRequest) GetSubjectTypes() []SubjectType {
 
 type CreateGrantDelegationMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the GrantDelegation being created.
+	// ID создаваемого GrantDelegation.
 	GrantDelegationId string `protobuf:"bytes,1,opt,name=grant_delegation_id,json=grantDelegationId,proto3" json:"grant_delegation_id,omitempty"`
-	// ID of the Account the delegation is scoped to.
+	// ID Account, которым ограничено делегирование.
 	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -332,7 +332,7 @@ func (x *CreateGrantDelegationMetadata) GetAccountId() string {
 
 type RevokeGrantDelegationRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the GrantDelegation resource to revoke.
+	// ID отзываемого ресурса GrantDelegation.
 	GrantDelegationId string `protobuf:"bytes,1,opt,name=grant_delegation_id,json=grantDelegationId,proto3" json:"grant_delegation_id,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -377,9 +377,9 @@ func (x *RevokeGrantDelegationRequest) GetGrantDelegationId() string {
 
 type RevokeGrantDelegationMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// ID of the GrantDelegation being revoked.
+	// ID отзываемого GrantDelegation.
 	GrantDelegationId string `protobuf:"bytes,1,opt,name=grant_delegation_id,json=grantDelegationId,proto3" json:"grant_delegation_id,omitempty"`
-	// ID of the Account the delegation is scoped to.
+	// ID Account, которым ограничено делегирование.
 	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

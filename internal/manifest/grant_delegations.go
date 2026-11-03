@@ -12,8 +12,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// GrantDelegation is the closed installation declaration. Identity, creator,
-// status and account IDs are resolved by the authenticated installation stage.
+// GrantDelegation — замкнутое объявление установки. Идентичность, создатель,
+// статус и ID учётных записей разрешаются аутентифицированной стадией установки.
 type GrantDelegation struct {
 	Delegate     SubjectRef `yaml:"delegate"`
 	RoleIDs      []string   `yaml:"roleIds"`
@@ -91,7 +91,7 @@ func validateGrantDelegations(m *Manifest, doc *yaml.Node) []error {
 	return faults
 }
 
-// A declared null list is not the closed array input (omission and [] are legal).
+// Заявленный список null не является замкнутым входным массивом (отсутствие и [] допустимы).
 func refuseNullDelegations(doc *yaml.Node) error {
 	for i := 0; i+1 < len(doc.Content); i += 2 {
 		if doc.Content[i].Value != "seed" {
@@ -107,8 +107,8 @@ func refuseNullDelegations(doc *yaml.Node) error {
 	return nil
 }
 
-// Refuse unknown fields and wrong node kinds so callers receive structural coordinates,
-// independently of yaml.Decoder's human-readable error formatting.
+// Отклоняем неизвестные поля и неверные виды узлов, давая вызывающим структурные координаты
+// независимо от читаемого человеком форматирования ошибок yaml.Decoder.
 func refuseUnknownDelegationFields(doc *yaml.Node) error {
 	entries := mapValue(mapValue(doc, "seed"), "grantDelegations")
 	if entries == nil || entries.Kind != yaml.SequenceNode {
@@ -154,9 +154,9 @@ func refuseUnknownDelegationFields(doc *yaml.Node) error {
 	return nil
 }
 
-// Check the resolved kind without embedding input values in a shape failure.
-// Scalar tags and allowed values remain the strict decoder's and semantic
-// validator's responsibility; valid YAML aliases keep their normal meaning.
+// Проверяем разрешённый вид без включения входных значений в отказ формы.
+// Скалярные теги и допустимые значения остаются ответственностью строгого декодера и семантического
+// валидатора; допустимые псевдонимы YAML сохраняют штатный смысл.
 func delegationNodeKind(doc, node *yaml.Node, want yaml.Kind, steps ...any) (*yaml.Node, error) {
 	resolved, err := resolveAlias(node)
 	if err != nil || resolved.Kind != want {

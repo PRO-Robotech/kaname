@@ -14,10 +14,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RIDDeliveryFixture carries complete independent test modules. It does not
-// require an installed consumer service. Both declarations include ordinary
-// catalog, roles, SA, group, grant and join inputs, so a preflight snapshot can
-// detect writes outside the delegation table as well.
+// RIDDeliveryFixture содержит полные независимые тестовые модули. Он не
+// требует установленной службы-потребителя. Оба объявления включают штатные
+// входы каталога, ролей, SA, группы, выдачи и присоединения, поэтому предварительный снимок может
+// обнаружить записи и вне таблицы делегирования.
 type RIDDeliveryFixture struct {
 	First  []byte
 	Second []byte
@@ -69,14 +69,14 @@ seed:
 `, module))
 }
 
-// Write creates a new complete delivery; order is encoded in filenames, matching
-// the production directory reader. Returned hashes identify the exact inputs.
+// Write создаёт новую полную поставку; порядок закодирован именами файлов в соответствии
+// с производственным чтением каталога. Возвращённые хеши обозначают точные входы.
 func (d RIDDeliveryFixture) Write(dir string, reversed bool) ([]string, error) {
 	if err := os.Mkdir(dir, 0700); err != nil {
 		return nil, err
 	}
 	inputs := [][]byte{d.First}
-	// S1 can deliver one complete module. M1/M2 callers still supply both.
+	// S1 может поставить один полный модуль. Вызывающие M1/M2 по-прежнему передают оба.
 	if len(d.Second) > 0 {
 		inputs = append(inputs, d.Second)
 	}
@@ -94,8 +94,8 @@ func (d RIDDeliveryFixture) Write(dir string, reversed bool) ([]string, error) {
 	return hashes, nil
 }
 
-// BoundaryDelivery always declares ALL 17 lawful own roles and types. Varying
-// the delegation axes therefore isolates the 16/17 bound from foreign linkage.
+// BoundaryDelivery всегда объявляет ВСЕ 17 допустимых собственных ролей и типов. Изменение
+// осей делегирования поэтому изолирует границу 16/17 от внешних связей.
 func BoundaryDelivery(roles, types int) ([]byte, error) {
 	if roles < 0 || roles > 17 || types < 0 || types > 17 {
 		return nil, fmt.Errorf("boundary fixture accepts axis counts 0..17")
@@ -113,9 +113,9 @@ func BoundaryDelivery(roles, types int) ([]byte, error) {
 	b.WriteString("roles:\n")
 	for _, id := range ids {
 		fmt.Fprintf(&b, "  - id: %s\n    description: Independent boundary reader fixture\n    tier: {tierType: iam.cluster, tierId: cluster_root}\n    rules:\n", id)
-		// The independent domain bound is 16 resources per role rule. Keep
-		// all 17 catalog types covered, in two lawful rules, so only the GD
-		// axis cardinality differs between the accepted and rejected twins.
+		// Независимая доменная граница — 16 ресурсов на правило роли. Сохраняем
+		// покрытие всех 17 типов каталога двумя допустимыми правилами, чтобы только мощность
+		// оси GD различалась у принятого и отклонённого близнецов.
 		for _, resources := range [][]string{names[:16], names[16:]} {
 			fmt.Fprintf(&b, "      - module: ridbounds\n        resources: [%s]\n        classes: [get, list]\n", strings.Join(resources, ", "))
 		}
@@ -132,8 +132,8 @@ func BoundaryDelivery(roles, types int) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-// ChangeAxis changes one declaration field, retaining all other parsed input.
-// Unknown/empty/duplicate forms use the same complete delivery as their twin.
+// ChangeAxis меняет одно поле объявления, сохраняя весь другой разобранный вход.
+// Неизвестные/пустые/повторные формы используют ту же полную поставку, что и их близнец.
 func ChangeAxis(input []byte, field string, value any) ([]byte, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(input, &doc); err != nil {

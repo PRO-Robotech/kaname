@@ -341,9 +341,9 @@ func TestRID06PauseDeadlineNeverExtends(t *testing.T) {
 	}
 }
 
-// These controls run the SAME optional critical-stage controller used by every
-// observer owner. They inject cancellation at real progression boundaries, not
-// just the arithmetic which computes a timestamp. No PG/HTTP/child is started.
+// Эти контроли выполняют ТОТ ЖЕ необязательный контроллер критических стадий, что использует каждый
+// владелец наблюдателя. Они внедряют отмену на настоящих границах продвижения, а не
+// только в арифметику вычисления временной метки. PG/HTTP/дочерний процесс не запускаются.
 type rid06UnitBudgetWriter struct {
 	deadline              time.Time
 	deadlines, writes     int

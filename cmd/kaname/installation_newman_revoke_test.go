@@ -253,9 +253,9 @@ func (p *rid06PublicContext) afterRecoveryApply(t *testing.T, w *ridLifecycleWor
 	p.read(t, w, "RECOVERY-REAPPLY", "REVOKED")
 }
 
-// Across actual native startup, catalog bookkeeping may be reprojected. Every
-// old Operation remains byte-exact; all new installer Operations retain their
-// original full typed native oracle. This is distinct from public ACT brackets.
+// При настоящем нативном запуске учёт каталога может проецироваться заново. Каждая
+// старая Operation сохраняется побайтно; все новые Operation установщика сохраняют свой
+// исходный полный типизированный нативный оракул. Это отделено от скобок публичного ACT.
 func rid06RequireNativeBoundary(t *testing.T, w *ridLifecycleWorld, a, b rid03NewmanSnapshot, success bool, revokeOp map[string]any) {
 	old := rid03RowsByID(t, a.Raw["operations"])
 	now := rid03RowsByID(t, b.Raw["operations"])
@@ -340,8 +340,8 @@ func (p *rid06PublicContext) actionPair(t *testing.T, w *ridLifecycleWorld, scen
 	return act
 }
 
-// Revoke alone runs inside the conservative earlier bound spawned+20s. All
-// admission, both full SQL snapshots and actual POST/owner polling share it.
+// Только Revoke работает внутри консервативной ранней границы spawned+20s. Весь
+// допуск, оба полных снимка SQL и настоящий POST/опрос владельца делят её.
 func (p *rid06PublicContext) revoke(t *testing.T, w *ridLifecycleWorld, id string, deadline time.Time) installruntime.Operation {
 	ctx, cancel := context.WithDeadline(w.f.given.ctx, deadline)
 	defer cancel()
@@ -424,9 +424,9 @@ func (p *rid06PublicContext) afterRevoke(t *testing.T, w *ridLifecycleWorld, id 
 	require.NoError(t, ctx.Err())
 }
 
-// Only native installer Operations may be added during the refused startup.
-// Their exact typed cardinality/outcome is checked separately by the native
-// Operation oracle; every other known or future raw delivery table is exact.
+// Во время отказавшего запуска могут добавляться только нативные Operation установщика.
+// Их точные типизированные количество/исход отдельно проверяет нативный
+// оракул Operation; каждая другая известная или будущая необработанная таблица поставки сохраняется точно.
 func rid06FailedDeliveryEqual(a, b rid03NewmanSnapshot) bool {
 	if len(a.Raw) != len(b.Raw) || !reflect.DeepEqual(a.Projection, b.Projection) || !reflect.DeepEqual(a.BusinessAudit, b.BusinessAudit) {
 		return false
@@ -450,10 +450,10 @@ func rid06PauseDeadline(ctx context.Context, spawned time.Time) time.Time {
 	return deadline
 }
 
-// The stopped-base freshness oracle remains mandatory in NativeBoundary above.
-// This separate history edge can start AFTER the same startup's own-seed refresh
-// (postRevoke). An unchanged diagnostic clock is therefore valid. A changed
-// clock must be backed by the actual enclosing PRIMARY observation interval.
+// Оракул свежести остановленной базы остаётся обязательным в NativeBoundary выше.
+// Эта отдельная грань истории может начаться ПОСЛЕ обновления собственного посева этого запуска
+// (postRevoke). Поэтому неизменные диагностические часы допустимы. Изменённые
+// часы должны подтверждаться настоящим охватывающим интервалом наблюдения PRIMARY.
 func rid06HistoryOwnCeilingsValid(before, after ridWholeDeliverySnapshot) bool {
 	a, b := before.OwnCeilings, after.OwnCeilings
 	if before.PrimaryStartedAt.IsZero() || before.PrimaryFinishedAt.IsZero() || after.PrimaryStartedAt.IsZero() || after.PrimaryFinishedAt.IsZero() || before.PrimaryFinishedAt.Before(before.PrimaryStartedAt) || after.PrimaryFinishedAt.Before(after.PrimaryStartedAt) || after.PrimaryStartedAt.Before(before.PrimaryFinishedAt) {
@@ -488,7 +488,7 @@ func rid06HistoryOwnCeilingsValid(before, after ridWholeDeliverySnapshot) bool {
 			}
 		}
 	}
-	// Raw hashes are retained, not rewritten from AFTER values. When there was no
-	// diagnostic clock movement, the COMPLETE raw row census must also be exact.
+	// Необработанные хеши сохраняются, а не переписываются из значений AFTER. Когда
+	// диагностические часы не сдвинулись, ПОЛНАЯ перепись необработанных строк также должна совпадать точно.
 	return !unchanged || reflect.DeepEqual(a.Raw.Rows, b.Raw.Rows)
 }

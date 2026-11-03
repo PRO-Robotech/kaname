@@ -45,7 +45,7 @@ type rid11BindingRestoreProof struct {
 type rid11BindingObject struct{ Type, ID, Account string }
 
 // Представление четырёх закрытых таблиц должно совпасть с самостоятельным
-// whole-SQL census. jsonb сортирует ключи по длине, затем по байтам; пробелы значимы.
+// перепись всего SQL. jsonb сортирует ключи по длине, затем по байтам; пробелы значимы.
 func rid11BindingJSONB(value any) (string, bool) {
 	switch v := value.(type) {
 	case nil:
@@ -209,8 +209,8 @@ func rid11BindingInventory(raw map[string][]rid09PrimaryRow) ([]rid11BindingObje
 					return nil, false
 				}
 			case "roles":
-				// Жизненный цикл целевого IAM role не фильтрует native inventory.
-				// Live роли, выдающей права, отдельно проверяется при построении плана.
+				// Жизненный цикл целевой роли IAM не фильтрует нативную ведомость.
+				// Признак live роли, выдающей права, отдельно проверяется при построении плана.
 				_, valid := rid03Cell[bool](r, "live")
 				if !valid {
 					return nil, false
@@ -612,7 +612,7 @@ func rid11ValidateBindingRestore(a, b rid03NewmanSnapshot, p rid11BindingRestore
 	if !p.Policy.bindProducers(fresh["fga_outbox"]) {
 		return proof, false
 	}
-	// Одинаковый primary key с иными полями не может спрятаться за новым producer.
+	// Одинаковый первичный ключ с иными полями не может спрятаться за новым производителем.
 	for _, r := range fresh["fga_outbox"] {
 		_, tuples, ok := p.Policy.producer(r)
 		if !ok {

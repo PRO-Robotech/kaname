@@ -18,9 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The stock database, transaction, domain writer and commit all remain real.
-// The decorator only stops at an observed transaction boundary so cancellation
-// is reproducible without relying on a fast machine or a scheduling sleep.
+// Штатные база, транзакция, доменная запись и фиксация остаются настоящими.
+// Обёртка лишь останавливается на наблюдаемой границе транзакции, чтобы отмена
+// воспроизводилась без опоры на быструю машину или ожидание планировщика.
 type reseedShutdownRepo struct {
 	kanamerepo.Repository
 	calls   atomic.Int64
@@ -85,9 +85,9 @@ func reseedProjectionSnapshot(t *testing.T, ctx context.Context, pool *pgxpool.P
 	return snapshot
 }
 
-// This is a regression for the actual native SIGTERM failure found by kaname#1038:
-// shutdown with zero completed roles became Structural/exit1, while shutdown
-// after some commits became exit0. Neither interrupted traversal is complete.
+// Это регрессия настоящего нативного отказа SIGTERM из kaname#1038:
+// завершение с нулём готовых ролей становилось Structural/exit1, тогда как завершение
+// после нескольких фиксаций становилось exit0. Ни один прерванный обход не полон.
 func TestReseedShutdownCancellationPreservesProgress(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires the leased PostgreSQL integration job")
@@ -101,8 +101,8 @@ func TestReseedShutdownCancellationPreservesProgress(t *testing.T) {
 					lifetime, stop := context.WithTimeout(t.Context(), 20*time.Second)
 					defer stop()
 					real := kanamepg.New(pool, nil)
-					// Positive same-database control: no broken catalog/fixture may turn the
-					// cancellation case green by preventing any role from being materialized.
+					// Положительный контроль той же базы: неисправный каталог/фикстура не должны делать
+					// случай отмены успешным за счёт запрета материализации любой роли.
 					positive := lane.run(lifetime, real, pool)
 					require.NoError(t, positive.err)
 					require.Greater(t, positive.examined, 1)
@@ -124,8 +124,8 @@ func TestReseedShutdownCancellationPreservesProgress(t *testing.T) {
 							t.Fatal("real transaction boundary was not reached")
 						}
 					}
-					// Snapshot is taken while the selected real transaction is open but has
-					// not touched its role. Prior commits already exist in PostgreSQL.
+					// Снимок делается при открытой выбранной настоящей транзакции, пока она
+					// не коснулась своей роли. Предыдущие фиксации уже существуют в PostgreSQL.
 					before := reseedProjectionSnapshot(t, lifetime, pool, lane.table)
 					cancel()
 					var result reseedShutdownResult
@@ -148,8 +148,8 @@ func TestReseedShutdownCancellationPreservesProgress(t *testing.T) {
 	}
 }
 
-// A live-context all-role failure is the necessary negative control: treating
-// every zero-progress result as benign shutdown would silently lose this gate.
+// Отказ всех ролей в живом контексте — необходимый отрицательный контроль: трактовка
+// любого нулевого прогресса как безвредного завершения незаметно потеряла бы эту защиту.
 func TestReseedShutdownDoesNotHideLiveStructuralFailure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires the leased PostgreSQL integration job")
@@ -164,8 +164,8 @@ func TestReseedShutdownDoesNotHideLiveStructuralFailure(t *testing.T) {
 			require.NoError(t, positive.err)
 			require.Greater(t, positive.examined, 1)
 			before := reseedProjectionSnapshot(t, ctx, pool, lane.table)
-			// A private DB fault, not seeded C/I/GD or rewritten authority. A statement
-			// trigger rejects even empty DELETE, so every attempted role really fails.
+			// Закрытый сбой БД, без посева C/I/GD или переписывания полномочий. Триггер оператора
+			// отклоняет даже пустой DELETE, поэтому каждая попытка роли действительно отказывает.
 			_, err := pool.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION kaname.probe_reseed_shutdown_refusal() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN RAISE EXCEPTION 'independent reseed shutdown negative control'; END $$;
     CREATE TRIGGER probe_reseed_shutdown_refusal BEFORE DELETE ON kaname.%s

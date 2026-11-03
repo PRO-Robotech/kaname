@@ -76,7 +76,7 @@ func (u *CreateGrantDelegationUseCase) WithRelationStore(relations clients.Relat
 	return u
 }
 
-// WithInstallationModel supplies the admitted instance plans for transaction-bound authority.
+// WithInstallationModel передаёт допущенные планы экземпляра для полномочий в границах транзакции.
 func (u *CreateGrantDelegationUseCase) WithInstallationModel(plans *authzmodel.Plans) *CreateGrantDelegationUseCase {
 	u.installationModel = plans
 	return u
@@ -93,8 +93,8 @@ func (u *CreateGrantDelegationUseCase) Execute(ctx context.Context, in CreateInp
 	return u.execute(ctx, in, false)
 }
 
-// ExecuteInstallation retains the ordinary validation, authority, operation and audit path,
-// adding the immutable installation pair/history policy within its writer transaction.
+// ExecuteInstallation сохраняет штатный путь проверки, полномочий, операции и аудита,
+// добавляя неизменяемую политику пары/истории установки внутри своей транзакции записи.
 func (u *CreateGrantDelegationUseCase) ExecuteInstallation(ctx context.Context, in CreateInput) (*operations.Operation, error) {
 	return u.execute(ctx, in, true)
 }

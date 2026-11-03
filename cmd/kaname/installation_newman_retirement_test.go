@@ -144,8 +144,8 @@ func (p *rid04PublicContext) refusalBeforeRestore(t *testing.T, w *ridLifecycleW
 	}
 	t.Helper()
 	require.NotNil(t, p.beforeFailure)
-	// No listener is assumed alive. This is bounded primary SQL integration
-	// evidence, never a Newman phase or public receipt.
+	// Жизнь слушателя не предполагается. Это ограниченное первичное интеграционное доказательство SQL,
+	// а не фаза Newman или публичная квитанция.
 	after := rid03PhaseSnapshot(t, w)
 	ridRequireWholeDeliveryUnchanged(t, p.beforeFailure.Whole, after.Whole)
 	require.Equal(t, p.beforeFailure.Projection, after.Projection)
@@ -295,8 +295,8 @@ func rid04RequireOldActive(t *testing.T, w *ridLifecycleWorld, s rid03NewmanSnap
 }
 func rid04RequireNormalBoundary(t *testing.T, w *ridLifecycleWorld, a, b rid03NewmanSnapshot, delta int) {
 	t.Helper()
-	// A normal native startup may reproject catalog bookkeeping. This is distinct
-	// from the full raw failed-start checkpoint and strict each-public-phase bracket.
+	// Штатный нативный запуск может заново проецировать учёт каталога. Это отделено
+	// от полной необработанной контрольной точки отказавшего запуска и строгих скобок каждой публичной фазы.
 	require.Equal(t, a.Projection, b.Projection)
 	rid04RequireGDGUnchanged(t, a, b)
 	require.Equal(t, a.BusinessAudit, b.BusinessAudit, "idempotent apply/catalog restore emits no new AB/GD business event")
@@ -346,8 +346,8 @@ func (p *rid04PublicContext) read(t *testing.T, w *ridLifecycleWorld, suffix str
 }
 func (p *rid04PublicContext) actionPair(t *testing.T, w *ridLifecycleWorld, scenario string, denied, authority bool) {
 	t.Helper()
-	// Actual normal I credential is captured by unchanged FD5 admission. No C
-	// credential is supplied, and no bearer is carried into O-only VERIFY.
+	// Настоящий штатный удостоверяющий материал I захватывается неизменным допуском FD5. Материал C
+	// не подставляется, и токен предъявителя не переносится в VERIFY только для O.
 	require.NotEmpty(t, p.bodySHA256)
 	require.Equal(t, p.bodySHA256, rid03EvidenceHash(p.body), "denied and lawful twin use the exact retained request")
 	token := w.issuerToken

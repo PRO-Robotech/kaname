@@ -77,7 +77,7 @@ type Reader struct {
 // вопрос: «не провязан» не становится «подтверждён».
 func New(pool *pgxpool.Pool) *Reader { return &Reader{pool: pool} }
 
-// NewTransaction keeps ordinary person admission on the caller's transaction.
+// NewTransaction сохраняет штатный допуск человека в транзакции вызывающего.
 func NewTransaction(tx pgx.Tx) *Reader { return &Reader{transaction: tx} }
 
 // PersonMarks — см. `admission.Marks`.

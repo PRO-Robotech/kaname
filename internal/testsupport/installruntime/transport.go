@@ -29,10 +29,10 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// Wire speaks to the real production listeners using the existing stand CA and
-// two distinct leaf identities. There is no insecure TLS mode or synthetic
-// context principal. Response bodies (which can contain credentials) are never
-// included in errors. Only the private fixture caller receives their bytes.
+// Wire обращается к настоящим производственным слушателям с существующим CA стенда и
+// двумя разными конечными идентичностями. Небезопасного режима TLS или синтетического
+// субъекта контекста нет. Тела ответов (которые могут содержать удостоверения) никогда
+// не включаются в ошибки. Их байты получает только закрытый вызывающий фикстуры.
 type Wire struct {
 	ports                           NativePorts
 	PublicURL, IssuanceURL, JWKSURL string
@@ -98,7 +98,7 @@ func (w *Wire) request(ctx context.Context, method, endpoint string, headers htt
 	req.Header = headers.Clone()
 	res, err := w.http.Do(req)
 	if err != nil {
-		// net/url errors include the full authorize URL and its sensitive query.
+		// Ошибки net/url включают полный URL авторизации и его чувствительный запрос.
 		return 0, nil, nil, fmt.Errorf("native HTTP transport failed: %T", err)
 	}
 	defer res.Body.Close()
@@ -123,15 +123,15 @@ func (w *Wire) JWKSReady(ctx context.Context) error {
 	return nil
 }
 
-// OperatorGiven is the accepted initial user/session/interactive-client Given.
-// It carries no administrative grant. Only ordinary startup bootstrap gives O
-// that authority; a normal /me request must accept the resulting ceremony token.
+// OperatorGiven — принятый начальный Given пользователя/сессии/интерактивного клиента.
+// Он не несёт административной выдачи. Только штатная начальная настройка запуска даёт O
+// эти полномочия; штатный запрос /me должен принять полученный токен церемонии.
 type OperatorGiven struct {
 	UserID, SessionBearer, ClientID, ClientSecret, RedirectURI string
 }
 
-// VerifiedOperator cannot be constructed outside this package. Its gateway
-// identity/ACR are derived from the same token accepted by the real /me reader.
+// VerifiedOperator не может создаваться вне этого пакета. Его шлюзовые
+// идентичность/ACR выводятся из того же токена, принятого настоящим считывателем /me.
 type VerifiedOperator struct{ token, userID, acr string }
 
 func (o *VerifiedOperator) Bearer() string { return o.token }
@@ -149,9 +149,9 @@ func randomURLToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
 }
 
-// ExchangeOperator performs actual authorization-code + PKCE exchange across
-// the TLS listener, then authenticates that exact token at the public /me API.
-// Reading its ACR afterwards does not authenticate it: /me already did so.
+// ExchangeOperator выполняет настоящий обмен кода авторизации + PKCE через
+// слушатель TLS, затем аутентифицирует ровно этот токен в публичном API /me.
+// Чтение ACR после этого не аутентифицирует токен: это уже сделал /me.
 func (w *Wire) ExchangeOperator(ctx context.Context, given OperatorGiven) (*VerifiedOperator, error) {
 	verifier, err := randomURLToken()
 	if err != nil {
@@ -207,8 +207,8 @@ func (w *Wire) ExchangeOperator(ctx context.Context, given OperatorGiven) (*Veri
 	return &VerifiedOperator{token: token.AccessToken, userID: given.UserID, acr: "2"}, nil
 }
 
-// JSON uses the ordinary presented bearer. Negative cases receive the actual
-// HTTP status and can inspect the safe structured code without printing bodies.
+// JSON использует штатный предъявленный токен. Отрицательные случаи получают настоящий
+// статус HTTP и могут проверять безопасный структурный код без печати тел.
 func (w *Wire) JSON(ctx context.Context, method, path, bearer string, in, out any) (int, error) {
 	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
 		return 0, errors.New("public fixture path must be relative to the selected listener")
@@ -241,9 +241,9 @@ func (w *Wire) Gateway(address string) (*grpc.ClientConn, error) {
 	return grpc.NewClient(address, grpc.WithTransportCredentials(credentials.NewTLS(w.gatewayTLS.Clone())))
 }
 
-// Operation polls the same production public visibility surface used by the
-// independent Newman suite. It preserves API failures as failures and requires
-// an actual completed response, not merely admission of a request.
+// Operation опрашивает тот же производственный публичный интерфейс видимости, что использует
+// независимый набор Newman. Он сохраняет отказы API отказами и требует
+// настоящий завершённый ответ, а не только допуск запроса.
 type Operation struct {
 	ID    string `json:"id"`
 	Done  bool   `json:"done"`
@@ -287,10 +287,10 @@ func (w *Wire) AwaitOperation(ctx context.Context, bearer string, op Operation) 
 	}
 }
 
-// AwaitOperatorAdmin observes the ordinary current-authority API. Startup's
-// bootstrap task is asynchronous; TLS/JWKS readiness cannot replace this barrier.
-// Only the expected pre-bootstrap permission refusal is retried. Authentication,
-// backend and response-shape failures remain failures of the native fixture.
+// AwaitOperatorAdmin наблюдает штатный API текущих полномочий. Начальная настройка запуска
+// асинхронна; готовность TLS/JWKS не заменяет этот барьер.
+// Повторяется только ожидаемый отказ разрешения до начальной настройки. Отказы аутентификации,
+// серверной части и формы ответа остаются отказами нативного запуска.
 func (w *Wire) AwaitOperatorAdmin(ctx context.Context, operator *VerifiedOperator) error {
 	if operator == nil || operator.userID == "" {
 		return errors.New("verified operator required")

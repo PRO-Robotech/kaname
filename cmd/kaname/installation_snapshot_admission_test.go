@@ -102,8 +102,8 @@ func rid08WaitRealWindow(t *testing.T, f *installationNativeWorld, full rid08Adm
 		require.Equal(t, full.CarrierDigest, now.CarrierDigest)
 		observations = append(observations, now)
 		if !now.DBNow.Before(deadline) {
-			// Normal retention may already remove an elapsed row. Never rewrite it or
-			// require it to survive its own normal cleanup policy.
+			// Штатное хранение уже могло удалить истёкшую строку. Не переписываем её и
+			// не требуем пережить собственную штатную политику очистки.
 			if now.Present {
 				require.Equal(t, full.Started, now.Started)
 				require.EqualValues(t, 3, now.Admitted)

@@ -30,15 +30,15 @@ func hasInstallationDelegations(manifests []*manifest.Manifest) bool {
 	return false
 }
 
-// installationReadSource is the canonical primary reader. Its real BeginTx
-// dependency can be decorated independently of the mutation repository.
+// installationReadSource — канонический первичный считыватель. Его настоящая зависимость BeginTx
+// может оборачиваться независимо от репозитория изменений.
 type installationReadSource interface {
 	InstallationAccounts(context.Context, string, int) ([]domain.AccountID, domain.AccountID, error)
 	InstallationReferences(context.Context, string, string, []string) (domain.ServiceAccountID, []string, error)
 }
 
-// Immutable value emitted only after the real successful Operation has completed.
-// The ordinary startup supplies no observer; no transaction is held here.
+// Неизменяемое значение выдаётся только после завершения настоящей успешной Operation.
+// Штатный запуск не передаёт наблюдателя; транзакция здесь не удерживается.
 type installationCompletedPair struct {
 	CompletedPairs                     int
 	AccountID, DelegateID, OperationID string
@@ -85,8 +85,8 @@ func applyInstallationDelegations(ctx context.Context, logger *slog.Logger, auth
 				pairs++
 				if len(afterCompleted) > 0 && afterCompleted[0] != nil {
 					if err := afterCompleted[0](ctx, installationCompletedPair{CompletedPairs: pairs, AccountID: string(account), DelegateID: string(delegate), OperationID: op.ID}); err != nil {
-						// Internal observer/control errors are not installation Writer or
-						// authority results: never manufacture an installation result.
+						// Внутренние ошибки наблюдателя/управления не являются результатами Writer установки или
+						// проверки полномочий: результат установки никогда не выдумывается.
 						return err
 					}
 				}

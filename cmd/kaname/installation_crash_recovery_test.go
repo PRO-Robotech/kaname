@@ -24,8 +24,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Reader deliberately refuses the replica route; primary reads always delegate
-// to actual production repository. No resource value is supplied by this seam.
+// Чтение намеренно отвергает маршрут реплики; первичное чтение всегда передаётся
+// настоящему производственному репозиторию. Этот шов не подставляет значение ресурса.
 type rid02PrimaryObserver struct {
 	kanamerepo.Repository
 	primary atomic.Int64
@@ -48,7 +48,7 @@ func rid02Recovery(t *testing.T, f *installationNativeWorld) (*operations.Reconc
 	t.Helper()
 	repo := &rid02PrimaryObserver{Repository: kanamepg.New(f.given.pool, nil)}
 	resolver := operationresolver.New(repo, nil, kanamepg.NewAccessKeyRepo(f.given.pool))
-	// Omit OrphanGrace: use the actual production five-minute default.
+	// Не задаём OrphanGrace: используем настоящий производственный пятиминутный период по умолчанию.
 	return operations.NewReconciler(f.given.pool, resolver, operations.ReconcilerConfig{Schema: "kaname"}), resolver, repo
 }
 func rid02StageCrashWorld(t *testing.T) (*installationNativeWorld, []rid02ChildInput) {
@@ -71,7 +71,7 @@ func rid02StageCrashWorld(t *testing.T) (*installationNativeWorld, []rid02ChildI
 			inputs = append(inputs, rid02ChildInput{CredentialFile: f.creator.CredentialFile, ManifestDir: dir, Creator: f.creator.ID, Input: gdapp.CreateInput{AccountID: account, DelegateType: "SUBJECT_TYPE_SERVICE_ACCOUNT", DelegateID: string(delegate), RoleIDs: roles, TargetTypes: []string{module + ".objects"}, SubjectTypes: []string{"SUBJECT_TYPE_SERVICE_ACCOUNT"}}})
 		}
 	}
-	// No background serve reconciler may consume the deliberately orphaned rows.
+	// Фоновый механизм сведения serve не должен обработать намеренно осиротевшие строки.
 	stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	require.NoError(t, f.session.Stop(stop))
@@ -161,7 +161,7 @@ func ridNativeCrashPrimaryRecovery(t *testing.T) {
 		records = append(records, rid02Pending(t, f, input, event.Operation, i == 2))
 		require.NoError(t, child.kill())
 		child.wait(t, true)
-		// Independent primary visibility after actual OS death/connection rollback.
+		// Независимая первичная видимость после настоящей смерти процесса ОС/отката соединения.
 		rid02Pending(t, f, input, event.Operation, i == 2)
 	}
 	reconciler, resolver, observer := rid02Recovery(t, f)

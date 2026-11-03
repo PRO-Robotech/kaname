@@ -103,7 +103,7 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 		require.NoError(t, events.SetWriteDeadline(time.Now().Add(10*time.Second)))
 		require.NoError(t, json.NewEncoder(events).Encode(rid02ChildEvent{Stage: stage, PID: os.Getpid()}))
 	}
-	// Parent captures exact Go-child argv/start/cgroup before supplying secrets.
+	// Родитель захватывает точные argv/запуск/cgroup дочернего Go до передачи секретов.
 	emit("newman-input")
 	require.NoError(t, control.SetReadDeadline(time.Now().Add(20*time.Second)))
 	var payload string
@@ -128,8 +128,8 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 	require.Len(t, stem, 4)
 	bearers, err := ridNewmanClientSecrets(strings.Join(stem[:3], "-"), in.CaseID, data.Variables)
 	require.NoError(t, err)
-	// Actual O, phase-bound C and opaque assertion secrets are captured before
-	// the TLS key read and before any Node process can receive their bytes.
+	// Настоящий O, привязанный к фазе C и непрозрачные секреты утверждения захватываются до
+	// чтения ключа TLS и до передачи их байтов любому процессу Node.
 	require.NoError(t, ridNewmanRecordBearers(inventory, bearers))
 	privateKey, err := os.ReadFile(in.Key)
 	require.NoError(t, err)
@@ -163,7 +163,7 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 	require.NoError(t, pipeErr)
 	closeProtocol := func() { _ = ackRead.Close(); _ = ackWrite.Close(); _ = permitRead.Close(); _ = permitWrite.Close() }
 	t.Cleanup(closeProtocol)
-	// The Go child's control/event/secret descriptors must not reach Node.
+	// Дескрипторы управления/событий/секретов дочернего Go не должны попадать в Node.
 	for _, fd := range []int{3, 4, 5} {
 		syscall.CloseOnExec(fd)
 	}
@@ -173,7 +173,7 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 	done := make(chan struct{})
 	var waitErr error
 	go func() { waitErr = cmd.Wait(); _ = out.Close(); _ = stderr.Close(); close(done) }()
-	// Installed immediately after Start, before ownership reads or assertions.
+	// Устанавливается сразу после Start, до чтений владения или утверждений.
 	t.Cleanup(func() {
 		select {
 		case <-done:
@@ -231,8 +231,8 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 	require.True(t, bytes.Equal(parentCG, nodeCG))
 	ownership, _ := json.Marshal(map[string]any{"pid": cmd.Process.Pid, "starttime": start, "argv": expected, "group": group, "cgroup": string(nodeCG), "nodeSHA256": in.NodeSHA, "scriptSHA256": in.ScriptSHA})
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "process.json"), ownership, 0600))
-	// Node runner is still waiting for stdin. Parent independently captures
-	// the actual Node identity/group before any secret/HTTP admission.
+	// Исполнитель Node ещё ждёт stdin. Родитель независимо захватывает
+	// настоящую идентичность/группу Node до любого допуска секретов/HTTP.
 	emit("newman-node-armed")
 	require.NoError(t, control.SetReadDeadline(time.Now().Add(20*time.Second)))
 	var nodeRelease string
@@ -350,8 +350,8 @@ func ridRunNewmanPhaseModeBudget(t *testing.T, f *installationNativeWorld, stem,
 	return ridRunNewmanPhaseModeObserved(t, f, stem, caseID, label, variables, probe, budget, nil)
 }
 
-// Only the closed RID11 authn-refusal phases may observe SQL after ordinary O
-// exchange and completed FD5 capture. Existing callers retain nil observer.
+// Только закрытые фазы отказа аутентификации RID11 могут наблюдать SQL после штатного обмена O
+// и завершённого захвата FD5. Существующие вызывающие сохраняют наблюдателя nil.
 func ridRunNewmanInputObserved(t *testing.T, f *installationNativeWorld, caseID, label string, variables map[string]any, observer func() error) ridNewmanReceipt {
 	require.True(t, rid11TokenCase(caseID) && observer != nil, "closed RID11 admission observer required")
 	return ridRunNewmanPhaseModeObserved(t, f, "registry-installation-rid11", caseID, label, variables, "", nil, observer)
@@ -414,8 +414,8 @@ func ridRunNewmanPhaseModeObserved(t *testing.T, f *installationNativeWorld, ste
 		require.NoError(t, ridNewmanBudgetCheck(budget))
 	}
 	c := startRIDInstallationChild(t, f, "newman-"+label, in, f.session.Environment, ridNewmanInputEnv, "TestRIDNewmanOwnedPublicChild", "3m")
-	// Parent creates both mandatory streams and installs the fallback auditor
-	// BEFORE control-payload admission can create any Node process.
+	// Родитель создаёт оба обязательных потока и устанавливает резервный аудит
+	// ДО того, как допуск управляющей нагрузки сможет создать любой процесс Node.
 	dir := filepath.Join(c.dir, "newman")
 	require.NoError(t, os.Mkdir(dir, 0700))
 	for _, name := range []string{"stdout", "stderr"} {
@@ -457,8 +457,8 @@ func ridRunNewmanPhaseModeObserved(t *testing.T, f *installationNativeWorld, ste
 	} else {
 		require.NoError(t, ridNewmanBudgetCheck(budget))
 	}
-	// Capture each actual secret before any subsequent fallible step or Node
-	// admission. FD5 is already anonymous/unlinked; no inventory pathname exists.
+	// Захватываем каждый настоящий секрет до любого следующего способного отказать шага или допуска
+	// Node. FD5 уже анонимен/удалён из каталога; пути ведомости нет.
 
 	if budget != nil {
 		require.NoError(t, ridNewmanBudgetCheck(budget))

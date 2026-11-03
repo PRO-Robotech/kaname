@@ -14,8 +14,8 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// Observe persistence independently of the DTO: Get does not populate the
-// denormalized resource index. Keep the actual raw Any columns in the check.
+// Наблюдаем хранилище независимо от DTO: Get не заполняет
+// денормализованный индекс ресурса. Сохраняем настоящие необработанные столбцы Any в проверке.
 func requireNativeInstallationOperation(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id, account, creator, winning string) nativeInstallationOperationObservation {
 	t.Helper()
 	op, err := operations.NewRepo(pool, "kaname").Get(ctx, id)
@@ -53,9 +53,9 @@ func requireNativeInstallationOperation(t *testing.T, ctx context.Context, pool 
 
 }
 
-// Immutable actual persistence observations survive the child subtest's PG
-// cleanup. The separate named metadata predicate validates these raw receipts;
-// selected alone, its owner first performs the actual concurrent scenarios.
+// Неизменяемые настоящие наблюдения хранилища переживают очистку PG дочернего
+// подтеста. Отдельный именованный предикат метаданных проверяет эти необработанные квитанции;
+// при отдельном выборе его владелец сначала выполняет настоящие конкурентные сценарии.
 type nativeInstallationOperationObservation struct {
 	ID, Account, Creator, Winner                            string
 	CreatedAt                                               time.Time

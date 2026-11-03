@@ -16,10 +16,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Session owns successive REAL serve processes against one existing database.
-// The caller supplies ordinary provisioned standing credentials, real PKI/DB
-// environment and a TLS/application readiness probe. This type cannot fabricate
-// an identity, seed a database or silently replace the executable after restart.
+// Session владеет последовательными НАСТОЯЩИМИ процессами serve на одной существующей базе.
+// Вызывающий передаёт штатно подготовленный постоянный удостоверяющий материал, настоящее окружение PKI/DB
+// и пробу готовности TLS/приложения. Этот тип не может выдумать
+// идентичность, засеять базу или незаметно заменить исполняемый файл после перезапуска.
 type Session struct {
 	Binary       string
 	BinarySHA256 string
@@ -35,10 +35,10 @@ type DeliveryInput struct {
 	Manifests      RIDDeliveryFixture
 	Reverse        bool
 	CredentialFile string
-	// nil is S2; non-nil is the EXACT S1 value, including deliberate empty input.
+	// nil означает S2; ненулевой указатель — ТОЧНОЕ значение S1, включая намеренно пустой вход.
 	TenantAccountID *string
-	// ExtraConfig is the complete fixture profile (PKI/DB normally stay in env).
-	// Reserved delivery/installer keys cannot be shadowed by this map or env.
+	// ExtraConfig — полный профиль фикстуры (PKI/DB обычно остаются в окружении).
+	// Зарезервированные ключи поставки/установщика не могут затеняться этой картой или окружением.
 	ExtraConfig map[string]any
 }
 
@@ -73,8 +73,8 @@ func (s *Session) start(ctx context.Context, config []byte) (*Process, error) {
 	return p, nil
 }
 
-// StartBase explicitly excludes delivered modules and installer input. The same
-// database subsequently receives the full delivery through StartDelivery.
+// StartBase явно исключает поставленные модули и вход установщика. Та же
+// база впоследствии получает полную поставку через StartDelivery.
 func (s *Session) StartBase(ctx context.Context) (*Process, error) {
 	if err := s.checkEnvironment(); err != nil {
 		return nil, err
@@ -88,9 +88,9 @@ func (s *Session) StartBase(ctx context.Context) (*Process, error) {
 	return p, p.AwaitReady(ready, s.Probe)
 }
 
-// StartDelivery invokes ordinary full serve, preserving invalid input for
-// failure cases. The caller decides whether to await readiness or process exit;
-// a process surviving startup is not itself proof of acceptance.
+// StartDelivery вызывает штатный полный serve, сохраняя неверный вход для
+// случаев отказа. Вызывающий решает, ждать готовности или выхода процесса;
+// переживший запуск процесс сам по себе не доказывает приём.
 func (s *Session) StartDelivery(ctx context.Context, in DeliveryInput) (*Process, error) {
 	if err := s.checkEnvironment(); err != nil {
 		return nil, err
@@ -142,9 +142,9 @@ func (s *Session) Stop(ctx context.Context) error {
 	return err
 }
 
-// CheckSecretAbsence inspects BOTH complete raw streams. JSON-escaped forms are
-// checked as well, since a multiline PEM is commonly escaped by JSON logging.
-// Error messages never reproduce the secret or the offending log line.
+// CheckSecretAbsence проверяет ОБА полных необработанных потока. Экранированные JSON формы
+// тоже проверяются, поскольку многострочный PEM обычно экранируется журналированием JSON.
+// Сообщения ошибок не воспроизводят секрет или нарушающую строку журнала.
 func (p *Process) CheckSecretAbsence(secrets ...string) error {
 	for _, path := range []string{p.StdoutPath, p.StderrPath} {
 		raw, err := os.ReadFile(path)

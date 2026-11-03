@@ -23,9 +23,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Only declared URL replaces split address knobs; this is ordinary documented
-// config. application_name gives independent DB attribution to each serve PID.
-// ReplicaBudget=2 declares the actual deployment, not a pool/admission override.
+// Только заявленный URL заменяет отдельные настройки адреса; это штатная документированная
+// конфигурация. application_name даёт независимую атрибуцию БД каждому PID serve.
+// ReplicaBudget=2 объявляет настоящее развёртывание, не подменяя пул/допуск.
 func nativeConcurrentEnvironment(t *testing.T, f *installationNativeWorld, ports installruntime.NativePorts, label string) []string {
 	t.Helper()
 	values := map[string]string{}
@@ -70,8 +70,8 @@ func nativeWithoutDelegations(t *testing.T, in installruntime.RIDDeliveryFixture
 	return installruntime.RIDDeliveryFixture{First: strip(in.First), Second: strip(in.Second)}
 }
 
-// Initial ceremony consumes one admission. Exactly two ordinary public creates
-// complete S2; no other owner, fake identity, SQL writer or window adjustment.
+// Начальная церемония расходует один допуск. Ровно два штатных публичных создания
+// завершают S2; без другого владельца, поддельной идентичности, записи SQL или изменения окна.
 func (f *installationNativeWorld) createRID02Accounts(t *testing.T) []string {
 	t.Helper()
 	f.renewOperator(t, f.given.ctx)
@@ -124,8 +124,8 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 		accounts = f.createRID02Accounts(t)
 	}
 	full := installruntime.NewRIDDeliveryFixture()
-	// Normal full module seed establishes I via production. No pair/history is
-	// supplied by setup, and this staging run is not counted as F6 acceptance.
+	// Штатный полный посев модуля устанавливает I через производственный код. Пара/история
+	// не подставляются подготовкой, и этот подготовительный запуск не считается приёмкой F6.
 	staging := f.apply(t, installruntime.DeliveryInput{Manifests: nativeWithoutDelegations(t, full), CredentialFile: f.creator.CredentialFile})
 	results, err := staging.Results()
 	require.NoError(t, err)
@@ -164,11 +164,11 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 				t.Errorf("owned concurrent serve shutdown: %v", err)
 			}
 
-			// Cleanup runs on success AND any fatal assertion; Stop has reaped the
-			// process before inspecting both complete raw streams from every start.
+			// Очистка выполняется при успехе И любом фатальном утверждении; Stop дожидается
+			// процесса до проверки обоих полных необработанных потоков каждого запуска.
 			for _, process := range p.session.History {
-				// Stop can return immediately after its forced Kill. Wait separately so
-				// no failure-path scan races a remaining writer or an unreaped child.
+				// Stop может вернуться сразу после принудительного Kill. Отдельный Wait исключает
+				// гонку проверки отказа с оставшейся записью или дочерним процессом без ожидания завершения.
 				reapCtx, reapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 				_ = process.Wait(reapCtx)
 				if reapCtx.Err() != nil {
@@ -177,9 +177,9 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 				reapCancel()
 
 			}
-			// A Start failure after OS launch may reap internally before Session can
-			// append History. Enumerate this participant's owned process directories
-			// as well, so those failure streams cannot escape the same audit.
+			// При отказе Start после запуска ОС внутреннее ожидание может завершиться до добавления
+			// History в Session. Также перечисляем принадлежащие этому участнику каталоги процессов,
+			// чтобы потоки таких отказов не избежали того же аудита.
 			dirs, globErr := filepath.Glob(filepath.Join(p.session.Root, "serve-*", "process"))
 			if globErr != nil {
 				t.Error("concurrent stream census unavailable")
@@ -195,8 +195,8 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 		p.process, err = p.session.StartDelivery(f.given.ctx, in)
 		require.NoError(t, err)
 	}
-	// Production pair statement timeout is 30s; fail before it rather than hide
-	// a missed overlap behind retries. Both processes are already running.
+	// Производственный таймаут оператора пары — 30s; завершаем раньше, не скрывая
+	// пропущенное пересечение повторными попытками. Оба процесса уже работают.
 	overlap, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)
 	pids, err := barrier.AwaitTwo(overlap)
 	cancel()
@@ -269,8 +269,8 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 			require.Equal(t, 1, audits)
 		}
 	}
-	// Independent O publicly lists/gets each tenant through one of the actual
-	// live participants. New O exchange and /me remain the normal public path.
+	// Независимый O публично перечисляет/читает каждого тенанта через одного из настоящих
+	// живых участников. Новый обмен O и /me остаются штатным публичным путём.
 	original := f.tenantID
 	for _, account := range accounts {
 		f.tenantID = account
@@ -278,8 +278,8 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 	}
 	f.tenantID = original
 	f.requireSameCredential(t)
-	// Stop both explicitly to make exit0 part of the test body. Cleanup retries
-	// still own the processes if an earlier assertion aborts.
+	// Явно останавливаем оба процесса, делая exit0 частью тела теста. Повторы очистки
+	// по-прежнему владеют процессами, если раннее утверждение прервёт выполнение.
 	for i := range participants {
 		p := &participants[i]
 		stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)

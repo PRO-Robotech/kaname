@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 )
 
-// EvidenceDirectory never interpolates a raw Go subtest identity into a shell
-// path. Hashing the COMPLETE identity also keeps a/b distinct from a-b, unlike
-// replacing separators or dropping punctuation. The caller records the original
-// identity separately as JSON data, not as executable shell syntax.
+// EvidenceDirectory не подставляет необработанную идентичность подтеста Go в путь
+// оболочки. Хеширование ПОЛНОЙ идентичности также различает a/b и a-b в отличие
+// от замены разделителей или удаления пунктуации. Вызывающий записывает исходную
+// идентичность отдельно данными JSON, а не исполняемым синтаксисом оболочки.
 func EvidenceDirectory(root, identity string) (string, error) {
 	if err := validateStandPath(root); err != nil {
 		return "", err
@@ -24,10 +24,10 @@ func EvidenceDirectory(root, identity string) (string, error) {
 	return filepath.Join(root, fmt.Sprintf("case-%x", digest)), nil
 }
 
-// The existing stand environment builder evaluates its fixed variable names.
-// Its supplied PKI/run/delivery paths must therefore use this restricted ASCII
-// alphabet before ANY preparation subprocess or filesystem mutation. This is a
-// test orchestration constraint, not an alteration of production configuration.
+// Существующий построитель окружения стенда вычисляет фиксированные имена переменных.
+// Поэтому переданные пути PKI/запуска/поставки должны использовать этот ограниченный алфавит ASCII
+// до ЛЮБОГО подготовительного подпроцесса или изменения файловой системы. Это
+// ограничение тестовой оркестрации, без изменения производственной конфигурации.
 func validateStandPath(path string) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return fmt.Errorf("native stand path must be absolute and canonical")

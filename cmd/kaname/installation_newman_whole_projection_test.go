@@ -22,8 +22,8 @@ import (
 
 type rid09PrimaryRow map[string]json.RawMessage
 
-// A closed source-level census, never inferred from whichever public responses
-// happened to be visible. Every table is read unfiltered in one primary RR tx.
+// Замкнутая перепись уровня исходников не выводится из случайно видимых публичных
+// ответов. Каждая таблица читается без фильтров в одной первичной транзакции RR.
 type rid09NewmanProjection struct {
 	Accounts        []map[string]any            `json:"accounts"`
 	ServiceAccounts []map[string]any            `json:"serviceAccounts"`
@@ -61,8 +61,8 @@ func rid09PrimaryRows(t *testing.T, ctx context.Context, tx pgx.Tx, table string
 }
 func rid09PrimaryJSON(t *testing.T, m proto.Message) map[string]any {
 	t.Helper()
-	// grpc-gateway's default JSONPb emits unpopulated non-optional fields. This is
-	// serialization of independently read primary domain values, never a handler.
+	// Штатный JSONPb grpc-gateway выдаёт незаполненные поля без признака optional. Это
+	// сериализация независимо прочитанных первичных доменных значений, без обработчика.
 	raw, err := (protojson.MarshalOptions{EmitUnpopulated: true}).Marshal(m)
 	require.NoError(t, err)
 	var out map[string]any
@@ -76,9 +76,9 @@ func rid09ReadNewmanProjection(t *testing.T, f *installationNativeWorld) rid09Ne
 	return rid09ReadNewmanProjectionContext(t, ctx, f)
 }
 
-// Context-taking entry point for a caller-owned, aggregate observation budget.
-// Existing RID09 callers retain their original 30s wrapper. All SQL/mapping is
-// shared here; no inner context resets or extends the caller's deadline.
+// Точка входа с контекстом для принадлежащего вызывающему общего бюджета наблюдения.
+// Существующие вызывающие RID09 сохраняют исходную обёртку 30s. Весь SQL/преобразование
+// общие; внутренний контекст не сбрасывает и не продлевает срок вызывающего.
 func rid09ReadNewmanProjectionContext(t *testing.T, ctx context.Context, f *installationNativeWorld) rid09NewmanProjection {
 	t.Helper()
 	require.NoError(t, ctx.Err(), "primary projection caller context expired")
@@ -131,8 +131,8 @@ func rid09ReadNewmanProjectionContext(t *testing.T, ctx context.Context, f *inst
 		require.NoError(t, dto.Transfer(dto.FromTo(d, &pb)))
 		e.Delegations = append(e.Delegations, rid09PrimaryJSON(t, pb))
 	}
-	// Retain the complete safe ledger, including unmaterialized members. Moving
-	// enrichment cannot be hidden by replacing MaterializedAt with a zero value.
+	// Сохраняем полный безопасный журнал, включая нематериализованных членов. Движущееся
+	// обогащение нельзя скрыть заменой MaterializedAt нулевым значением.
 	e.Materialization = ridWholeDigest(t, rid09PrimaryRows(t, ctx, tx, "access_binding_target_members"))
 	require.NoError(t, tx.Commit(ctx))
 	require.NoError(t, ctx.Err(), "primary projection caller context expired before return")

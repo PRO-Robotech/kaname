@@ -46,7 +46,7 @@ func rid04Retire(t *testing.T, w *ridLifecycleWorld) (*iamv1.AccessBinding, map[
 func rid04RetireObserved(t *testing.T, w *ridLifecycleWorld, public *rid04PublicContext) (*iamv1.AccessBinding, map[string]any) {
 	t.Helper()
 	f := w.f
-	// C is a SYS service account; O owns A. No direct tenant role was given to C.
+	// C — служебная учётная запись SYS; O владеет A. Прямая роль тенанта C не выдавалась.
 	require.NotEqual(t, f.creator.AccountID, f.tenantID)
 	var owner string
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT owner_user_id FROM kaname.accounts WHERE id=$1`, f.tenantID).Scan(&owner))
@@ -64,8 +64,8 @@ func rid04RetireObserved(t *testing.T, w *ridLifecycleWorld, public *rid04Public
 	f.ridAdmin(t, f.creator.ID, false)
 	f.ridAuthorityMaterialized(t, f.creator.ID, false)
 	require.Equal(t, before, w.snapshot(t), "retirement does not revoke historical grants or GD")
-	// Renew the genuine I credential after retirement, so a stale token is not
-	// the explanation for the current-creator authority refusal.
+	// Обновляем настоящий удостоверяющий материал I после вывода из обращения, чтобы устаревший токен
+	// не объяснял отказ текущих полномочий создателя.
 	w.issuerToken = f.ridToken(t, w.issuer)
 	w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
 	public.retired(t, w)

@@ -28,10 +28,10 @@ type rid06ChildInput struct {
 	PairOrdinal int64  `json:"pairOrdinal"`
 }
 
-// Instrumented TEST executable running the actual complete startup root. This
-// is not the published executable, a new product command, or a direct Execute
-// surrogate. Config, authentication, delivery, guards, listeners and shutdown
-// are the same full root used by ordinary runServe(cfg).
+// Инструментированный ТЕСТОВЫЙ исполняемый файл выполняет настоящий полный корень запуска. Это
+// не опубликованный исполняемый файл, новая команда продукта или прямая подмена Execute.
+// Конфигурация, аутентификация, поставка, защиты, слушатели и завершение
+// используют тот же полный корень, что и штатный runServe(cfg).
 func TestRID06OwnedFullStartupChild(t *testing.T) {
 	path := os.Getenv(rid06ChildInputEnv)
 	if path == "" {
@@ -45,9 +45,9 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 		require.NotNil(t, f)
 		return f
 	}
-	// Inherited ExtraFiles are not automatically pollable os.Pipe handles.
-	// Mark only these owned IPC ends nonblocking BEFORE NewFile so deadlines
-	// register with the Go poller. Cleanup is installed before asserting errors.
+	// Унаследованные ExtraFiles автоматически не становятся опрашиваемыми дескрипторами os.Pipe.
+	// Помечаем неблокирующими только эти принадлежащие фикстуре концы IPC ДО NewFile, чтобы сроки
+	// регистрировались в опросчике Go. Очистка устанавливается до проверок ошибок.
 	eventModeErr := syscall.SetNonblock(3, true)
 	events := own(3, "rid06-events")
 	require.NoError(t, eventModeErr)
@@ -69,8 +69,8 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 	require.NoError(t, refusaldomain.Declare(refusaldomain.ProductSuffix))
 	var mu sync.Mutex
 	var captureErr error
-	// Capture occurs synchronously at actual production issuance, BEFORE any
-	// subsequent failure. Only anonymous FD5 receives secrets, never receipts/logs.
+	// Захват синхронен настоящей производственной выдаче, ДО любого
+	// последующего отказа. Секреты получает только анонимный FD5, никогда квитанции/журналы.
 	observe := func(pem, token string) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -99,8 +99,8 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 			if !ok || principal.Type != "service_account" || principal.ID != input.Creator {
 				return fmt.Errorf("full startup boundary lacks actual creator identity")
 			}
-			// No pair lock is held here. Only this attempt's pending Operation row is
-			// locked by the real writer, so independent O can commit ordinary Revoke.
+			// Здесь не удерживается блокировка пары. Настоящая запись блокирует лишь строку ожидающей Operation
+			// этой попытки, поэтому независимый O может зафиксировать штатный Revoke.
 			deadline := time.Now().Add(20 * time.Second)
 			if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 				deadline = d
@@ -135,8 +135,8 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 	}
 }
 
-// Repository embedding alone loses this optional primary port. Forward it to
-// the actual repository; never substitute a reader or a primary result.
+// Одно встраивание репозитория теряет этот необязательный первичный порт. Передаём его
+// настоящему репозиторию; чтение и первичный результат не подменяются.
 type rid06FullStartupRepo struct{ *ridBoundaryRepo }
 
 func (r *rid06FullStartupRepo) ReaderFromPrimary(ctx context.Context) (kanamerepo.Reader, error) {

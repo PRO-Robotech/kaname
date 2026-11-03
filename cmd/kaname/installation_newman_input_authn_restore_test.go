@@ -53,8 +53,8 @@ func rid11RestoreRoles(t *testing.T, raw map[string][]rid09PrimaryRow, facts *ca
 		withdrawn[id] = append(withdrawn[id], g)
 	}
 	pruned := map[domain.RoleID][]domain.PrunedSelectorType{}
-	// Storage may differ by rule digest while public semantics are DISTINCT on the
-	// following six fields (same exact projection as the documented read contract).
+	// Хранилище может различаться дайджестом правила, тогда как публичная семантика использует DISTINCT по
+	// следующим шести полям (ровно та же проекция, что в документированном контракте чтения).
 	seenPrune := map[string]bool{}
 	pruneRows := append([]rid09PrimaryRow(nil), raw["role_selector_prune"]...)
 	sort.SliceStable(pruneRows, func(i, j int) bool {
@@ -90,8 +90,8 @@ func rid11RestoreRoles(t *testing.T, raw map[string][]rid09PrimaryRow, facts *ca
 		d := domain.Role{ID: rid09PrimaryValue[domain.RoleID](t, r, "id"), ClusterID: rid09PrimaryValue[domain.ClusterID](t, r, "cluster_id"), AccountID: rid09PrimaryValue[domain.AccountID](t, r, "account_id"), ProjectID: rid09PrimaryValue[domain.ProjectID](t, r, "project_id"), Name: rid09PrimaryValue[domain.RoleName](t, r, "name"), Description: rid09PrimaryValue[domain.Description](t, r, "description"), IsSystem: rid09PrimaryValue[bool](t, r, "is_system"), OwnerModule: rid09PrimaryValue[string](t, r, "owner_module"), CreatedAt: rid09PrimaryValue[time.Time](t, r, "created_at"), UpdatedAt: rid09PrimaryValue[time.Time](t, r, "updated_at"), Labels: rid09PrimaryValue[domain.Labels](t, r, "labels")}
 		d.Rules, err = domain.DecodeRules(r["rules"])
 		require.NoError(t, err)
-		// CreatedByUserID is deliberately not a roles column read by roleCols. Its
-		// zero value matches the actual stored-to-domain reader, not an invented actor.
+		// CreatedByUserID намеренно не является столбцом roles, читаемым roleCols. Его
+		// нулевое значение соответствует настоящему чтению из хранилища в домен, а не выдуманному участнику.
 		declared := domain.SegmentsOf(d.ID, d.Rules)
 		unresolved := []domain.RoleSegment{}
 		for _, seg := range declared {
@@ -129,10 +129,10 @@ func rid11RestoreRoles(t *testing.T, raw map[string][]rid09PrimaryRow, facts *ca
 	return out
 }
 
-// This oracle applies ONLY across failed census -> ordinary StartBase. Each
-// public READ still uses the unchanged strict comparator. It never reads AFTER
-// to choose eligible roles, privileges, selector coordinates or public fields.
-// Sources: seed/role_verb_reseed.go; seed/role_rule_ref_reseed.go;
+// Этот оракул применяется ТОЛЬКО между неудачной переписью -> штатным StartBase. Каждое
+// публичное READ по-прежнему использует неизменный строгий компаратор. Он не читает AFTER
+// для выбора допустимых ролей, привилегий, координат селектора или публичных полей.
+// Источники: seed/role_verb_reseed.go; seed/role_rule_ref_reseed.go;
 // seed/migrate_backfill.go BackfillOwnerBindings/syncAllSystemRoleSelectorsTx.
 type rid11RestorePlan struct {
 	Raw               map[string][]rid09PrimaryRow
@@ -228,8 +228,8 @@ func rid11RestoreLabels(m map[string]string) map[string]string {
 	return m
 }
 
-// Facts are reconstructed from retained BEFORE physical rows, not the saved
-// pointer or public catalog. Raw catalog rows remain strict in the comparator.
+// Факты восстанавливаются из сохранённых физических строк BEFORE, а не сохранённого
+// указателя или публичного каталога. Необработанные строки каталога остаются строгими в компараторе.
 func rid11RestoreFacts(t *testing.T, raw map[string][]rid09PrimaryRow) *catalog.Facts {
 	t.Helper()
 	halves := catalog.Halves{}
@@ -331,8 +331,8 @@ func rid11BuildRestorePlan(raw map[string][]rid09PrimaryRow, facts *catalog.Fact
 			}
 			p.Raw["role_rule_ref"] = append(p.Raw["role_rule_ref"], rid11RestoreRow(map[string]any{"role_id": id, "module": ref.Module, "resource": ref.Resource, "verb": verb, "live": true}))
 		}
-		// BackfillOwnerBindings first reprojects complete selectors from unfiltered
-		// MaterializingSelectors. The following reseed fills exact per-rule grants.
+		// BackfillOwnerBindings сначала заново проецирует полные селекторы из нефильтрованных
+		// MaterializingSelectors. Следующий повторный посев заполняет точные выдачи каждого правила.
 		for _, sel := range sels {
 			if len(sel.ObjectTypes) == 0 {
 				continue
@@ -355,8 +355,8 @@ func rid11BuildRestorePlan(raw map[string][]rid09PrimaryRow, facts *catalog.Fact
 				cn = rid11RestoreStrings(c.ResourceNames)
 				cl = rid11RestoreLabels(c.MatchLabels)
 			}
-			// Only object_types actually stored by the sync can be regrained; no
-			// privilege or unrelated catalog key is imported from another rule.
+			// Только object_types, действительно сохранённые синхронизацией, могут перегруппировываться;
+			// привилегия или посторонний ключ каталога не импортируются из другого правила.
 			grants := map[string][]string{}
 			for _, typ := range sel.ObjectTypes {
 				if v, ok := sel.Grants[typ]; ok {
@@ -366,7 +366,7 @@ func rid11BuildRestorePlan(raw map[string][]rid09PrimaryRow, facts *catalog.Fact
 			p.Selectors[key] = rid11RestoreRow(map[string]any{"role_id": id, "rule_fp": sel.RuleFP, "object_types": sel.ObjectTypes, "match_labels": rid11RestoreLabels(sel.MatchLabels), "arm": rid11RestoreArm(sel.Arm), "resource_names": rid11RestoreStrings(sel.ResourceNames), "live": true, "container_type": ct, "container_object_type": co, "container_arm": ca, "container_resource_names": cn, "container_match_labels": cl, "verbs_by_type": grants, "created_by_subject": sel.CreatedBySubject})
 		}
 	}
-	// Replace, never union, eligible projections. Keep full unrelated rows.
+	// Заменяем допустимые проекции, не объединяем. Полные посторонние строки сохраняем.
 	for _, table := range []string{"role_verb", "role_rule_ref"} {
 		derived := p.Raw[table][len(raw[table]):]
 		p.Raw[table] = []rid09PrimaryRow{}
@@ -395,8 +395,8 @@ func rid11BuildRestorePlan(raw map[string][]rid09PrimaryRow, facts *catalog.Fact
 	return p, nil
 }
 
-// The ONLY clock allowance is the independently identified common-transaction
-// syncAllSystemRoleSelectorsTx UPSERT. Regrain itself grants no timestamp edits.
+// ЕДИНСТВЕННЫЙ допуск часов — независимо выявленный UPSERT общей транзакции
+// syncAllSystemRoleSelectorsTx. Сама перегруппировка не разрешает править временные метки.
 func rid11RestoreSelectorsValid(p rid11RestorePlan, actual []rid09PrimaryRow, lower, upper time.Time) bool {
 	if lower.IsZero() || upper.Before(lower) {
 		return false
@@ -506,8 +506,8 @@ func rid11RestoreRawValid(p rid11RestorePlan, a rid03NewmanSnapshot, b rid03Newm
 	return reflect.DeepEqual(a.BusinessAudit, b.BusinessAudit)
 }
 
-// No raw operation/auth table cells escape. Diagnostics are unconditional and
-// precede any oracle assertion, including schema/DTO decoding failures.
+// Необработанные ячейки операций/аутентификации не выходят наружу. Диагностика безусловна и
+// предшествует любому утверждению оракула, в том числе отказам декодирования схемы/DTO.
 func rid11RequireCensusRestoration(t *testing.T, w *ridLifecycleWorld, a, b rid03NewmanSnapshot) {
 	t.Helper()
 	rid08Write(t, w.f.session.Root, "rid11-census-restoration-coordinate-diagnostic", rid11CoordinateDiagnostic(a, b))
@@ -562,7 +562,7 @@ func rid11RequireCensusRestoration(t *testing.T, w *ridLifecycleWorld, a, b rid0
 	p, err := rid11BuildRestorePlan(a.Raw, facts)
 	require.True(t, err == nil, "closed BEFORE restoration premise")
 	// Допуск касается только обычной материализации существующей выдачи после
-	// сохранённой границы отказа. Первичный failed-start checkpoint не меняется.
+	// сохранённой границы отказа. Первичная контрольная точка неудачного запуска не меняется.
 	bindingChanged := false
 	for table := range rid11BindingSchemas {
 		bindingChanged = bindingChanged || !rid11RestoreRowsEqual(a.Raw[table], b.Raw[table])

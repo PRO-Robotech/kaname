@@ -155,7 +155,7 @@ func TestRID03VerbOnlyProducerDoesNotBecomeFact(t *testing.T) {
 	require.False(t, p.allows("relation_fact", fact))
 }
 
-// Different transaction starts do not establish insertion/commit order.
+// Разные начала транзакций не устанавливают порядок вставки/фиксации.
 func TestRID03TechnicalIntentConvergence(t *testing.T) {
 	for _, tc := range []struct {
 		name                         string
@@ -190,8 +190,8 @@ func TestRID03TechnicalIntentConvergence(t *testing.T) {
 				second := rid03UnitProducer(t, p)
 				second["id"] = json.RawMessage(`2`)
 				second["created_at"], _ = json.Marshal(p.Start.Add(1500 * time.Millisecond))
-				// Later-started transaction may insert first, even if snapshot row order
-				// happens to enumerate the earlier-started producer first.
+				// Позднее начавшаяся транзакция может вставить первой, даже если порядок строк снимка
+				// случайно перечисляет раньше производителя, начавшегося ранее.
 				rows = append(rows, second)
 			}
 			fact["created_at"], _ = json.Marshal(p.Start.Add(tc.createdOffset))

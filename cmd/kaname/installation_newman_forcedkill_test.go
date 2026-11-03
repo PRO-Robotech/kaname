@@ -22,9 +22,9 @@ func ridNewmanProtocolEnabled(t *testing.T) {
 	require.Empty(t, os.Getenv("KANAME_RID_EXPECTED_IDENTITIES_DIR"), "no fabricated twelve-collection identity DIR for protocol probes")
 }
 
-// Each subtest owns a real normal fixture and externally frozen RID01 collection.
-// The accepted case runs only NormalPermit. Kill probes stop after real Node ACK,
-// before permit/HTTP, and cannot enter the public RID acceptance denominator.
+// Каждый подтест владеет настоящей штатной фикстурой и внешне зафиксированной коллекцией RID01.
+// Принятый случай выполняет только NormalPermit. Пробы завершения останавливаются после настоящего ACK Node,
+// до разрешения/HTTP, и не могут попасть в знаменатель публичной приёмки RID.
 func ridNewmanProtocolFixture(t *testing.T, mode string, assertion bool) {
 	t.Helper()
 	ridNewmanProtocolEnabled(t)
@@ -33,8 +33,8 @@ func ridNewmanProtocolFixture(t *testing.T, mode string, assertion bool) {
 	requireNativeOK(t, f.apply(t, nativeSingleDelivery(f)), 1)
 	f.requireDeliveredPairs(t, "ridfirst")
 	if !assertion {
-		// Genuine exact re-entry precedes the creator case; protocol probes do
-		// not claim the separate wall-clock token-renewal RID obligation.
+		// Настоящий точный повторный вход предшествует случаю создателя; пробы протокола
+		// не претендуют на отдельное обязательство RID обновления токена по настоящим часам.
 		requireNativeOK(t, f.apply(t, nativeSingleDelivery(f)), 1)
 		f.requireDeliveredPairs(t, "ridfirst")
 	}

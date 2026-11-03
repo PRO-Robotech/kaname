@@ -27,8 +27,8 @@ type ridWholeReturn struct {
 	CapturedRecords, IssuedTokens int
 }
 
-// Actual full startup; the ONLY optional dependency observes immutable real
-// credentials. No reader/repository/fault/model/authority replacement exists.
+// Настоящий полный запуск; ЕДИНСТВЕННАЯ необязательная зависимость наблюдает неизменяемый настоящий
+// удостоверяющий материал. Замены чтения/репозитория/сбоя/модели/полномочий нет.
 func TestRIDWholeDeliveryOwnedStartupChild(t *testing.T) {
 	path := os.Getenv(ridWholeChildEnv)
 	if path == "" {
@@ -52,9 +52,9 @@ func TestRIDWholeDeliveryOwnedStartupChild(t *testing.T) {
 	info, err := inventory.Stat()
 	require.NoError(t, err)
 	require.True(t, info.Mode().IsRegular() && info.Mode().Perm() == 0600)
-	// Pre-authentication barrier is BEFORE config parsing and actual runServe.
-	// Parent can establish owned PID/start/argv/PGID and cgroup before a fast
-	// expected refusal exits. This event claims no authentication/token issuance.
+	// Барьер предварительной аутентификации идёт ДО разбора конфигурации и настоящего runServe.
+	// Родитель может установить принадлежащие PID/начало/argv/PGID и cgroup до быстрого
+	// ожидаемого отказа. Это событие не утверждает аутентификацию/выдачу токена.
 	deadline := time.Now().Add(15 * time.Second)
 	if end, ok := t.Deadline(); ok && end.Before(deadline) {
 		deadline = end

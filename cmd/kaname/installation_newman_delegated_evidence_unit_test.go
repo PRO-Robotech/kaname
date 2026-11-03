@@ -203,7 +203,7 @@ func TestRID03ClosedTechnicalEvidenceReceipt(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, a, b, p := rid03UnitEvidenceInputs(t)
-			// An unrelated credential-bearing SQL column is NEVER a receipt source.
+			// Посторонний столбец SQL с удостоверяющим материалом НИКОГДА не является источником квитанции.
 			b.Raw["operations"] = []rid09PrimaryRow{rid03UnitRow(t, map[string]any{"response_data": "credential-canary-must-not-serialize"})}
 			if tc.change != nil {
 				tc.change(t, e, &a, &b, &p)

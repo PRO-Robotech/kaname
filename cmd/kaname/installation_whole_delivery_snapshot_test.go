@@ -15,17 +15,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Every physical kaname table is discovered from the primary, not a selected
-// account or live-only subset. Complete canonical rows are hashed in memory:
-// receipts must not persist private key/token/session material from auth tables.
-// The precise permitted bookkeeping separation is recorded, never silently lost.
+// Каждая физическая таблица kaname обнаруживается в первичной БД, а не выбранной
+// учётной записи или подмножестве только живых строк. Полные канонические строки хешируются в памяти:
+// квитанции не должны сохранять материал закрытых ключей/токенов/сессий из таблиц аутентификации.
+// Точное разрешённое отделение учёта записывается и не теряется молча.
 type ridWholeTable struct {
 	Columns []string `json:"columns"`
 	Rows    []string `json:"rowSHA256"`
 }
 
-// Raw includes stated_at, all original columns and complete row fingerprints.
-// Semantic removes ONLY stated_at; unknown future fields remain in its digest.
+// Необработанное представление включает stated_at, все исходные столбцы и полные отпечатки строк.
+// Семантическое представление удаляет ТОЛЬКО stated_at; неизвестные будущие поля остаются в дайджесте.
 type ridWholeOwnCeilings struct {
 	Raw      ridWholeTable        `json:"raw"`
 	Semantic map[string]string    `json:"semanticRowSHA256ByKind"`
@@ -91,8 +91,8 @@ func ridReadWholeDelivery(t *testing.T, f *installationNativeWorld) ridWholeDeli
 		require.NoError(t, col.Err())
 		col.Close()
 		require.NotEmpty(t, entry.Columns)
-		// Identifier quoting is driven by actual catalog names; no predicate filters
-		// account, status, live/retired rows, seed origin, creator, or module.
+		// Кавычки идентификаторов определяются настоящими именами каталога; предикат не фильтрует
+		// учётную запись, статус, живые/выведенные строки, происхождение посева, создателя или модуль.
 		rows, err := tx.Query(ctx, `SELECT to_jsonb(r)::text FROM `+pgx.Identifier{"kaname", table}.Sanitize()+` r ORDER BY to_jsonb(r)::text`)
 		require.NoError(t, err)
 		for rows.Next() {
@@ -117,7 +117,7 @@ func ridReadWholeDelivery(t *testing.T, f *installationNativeWorld) ridWholeDeli
 				require.False(t, stated.IsZero())
 				require.NotContains(t, out.OwnCeilings.Semantic, *kind)
 				out.OwnCeilings.StatedAt[*kind] = *stated
-				delete(fields, "stated_at") // sole approved diagnostic-only boot timestamp
+				delete(fields, "stated_at") // единственная утверждённая диагностическая временная метка загрузки
 				semantic, err := json.Marshal(fields)
 				require.NoError(t, err)
 				digest := sha256.Sum256(semantic)
@@ -136,9 +136,9 @@ func ridReadWholeDelivery(t *testing.T, f *installationNativeWorld) ridWholeDeli
 			out.Delivery[table] = entry
 		}
 	}
-	// Producer inventory: catalog_writer, role_repo/withdrawal, module_seed_writer,
-	// ordinary SA/group/AB/GD/admin/account writers and their projection ledgers.
-	// New tables are INCLUDED by default; removal of a required table fails.
+	// Ведомость производителей: catalog_writer, role_repo/withdrawal, module_seed_writer,
+	// штатные записи SA/групп/AB/GD/администратора/учётных записей и их журналы проекций.
+	// Новые таблицы ВКЛЮЧЕНЫ по умолчанию; удаление обязательной таблицы даёт отказ.
 	for _, table := range []string{"catalog_module", "catalog_resource", "catalog_verb", "roles", "role_rule_ref", "role_rule_selectors", "role_selector_verbs_pending", "role_verb", "role_grant_orphan", "role_selector_prune", "service_accounts", "service_account_oauth_clients", "groups", "group_members", "access_bindings", "access_binding_subjects", "access_binding_target_members", "access_binding_emitted_tuples", "grant_delegations", "cluster_admin_grants", "account_admission_rate_limits", "accounts", "users", "memberships", "relation_fact", "resource_mirror", "resource_parent_edge", "resource_journal", "public_read_publication", "fga_outbox", "resource_reconcile_outbox", "subject_change_outbox"} {
 		require.Contains(t, out.Delivery, table)
 	}
@@ -161,9 +161,9 @@ func ridRequireWholeDeliveryUnchanged(t *testing.T, before, after ridWholeDelive
 	require.Equal(t, before.Delivery, after.Delivery, "all primary delivery tables/columns/rows, including retired/history rows and every account, must remain exact")
 }
 
-// Apply projects the same posture at every boot, including a rejected manifest
-// delivery. It changes stated_at only. Both bounds are actual PRIMARY DB clocks,
-// surrounding the tested startup; no host clock/tolerance or dropped policy row.
+// Apply проецирует то же состояние при каждой загрузке, включая отклонённую поставку
+// манифеста. Меняется только stated_at. Обе границы — настоящие часы БД PRIMARY,
+// охватывающие проверяемый запуск; без часов/допуска хоста или отброшенной строки политики.
 func ridRequireOwnCeilingsPreserved(t *testing.T, before, after ridWholeDeliverySnapshot) {
 	t.Helper()
 	require.Equal(t, before.OwnCeilings.Raw.Columns, after.OwnCeilings.Raw.Columns, "complete boot policy schema remains exact")
@@ -184,7 +184,7 @@ func ridWholeDigest(t *testing.T, v any) string {
 	require.NoError(t, err)
 	if text, ok := v.(string); ok {
 		raw = []byte(text)
-	} // manifest SHA covers exact bytes, not JSON quoting
+	} // SHA манифеста покрывает точные байты, а не цитирование JSON
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }

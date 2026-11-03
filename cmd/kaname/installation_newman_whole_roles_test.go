@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Independently reconstruct read enrichment from stored rows in the SAME RR
-// transaction. No public role usecase/handler, server snapshot or REST DTO is read.
+// Независимо восстанавливаем обогащение чтения из сохранённых строк в ТОЙ ЖЕ транзакции
+// RR. Публичный сценарий/обработчик роли, снимок сервера или DTO REST не читаются.
 func rid09PrimaryRoles(t *testing.T, ctx context.Context, tx pgx.Tx, facts *catalog.Facts) []map[string]any {
 	t.Helper()
 	out := []map[string]any{}
@@ -54,8 +54,8 @@ func rid09PrimaryRoles(t *testing.T, ctx context.Context, tx pgx.Tx, facts *cata
 		withdrawn[id] = append(withdrawn[id], g)
 	}
 	pruned := map[domain.RoleID][]domain.PrunedSelectorType{}
-	// Storage may differ by rule digest while public semantics are DISTINCT on the
-	// following six fields (same exact projection as the documented read contract).
+	// Хранилище может различаться дайджестом правила, тогда как публичная семантика использует DISTINCT по
+	// следующим шести полям (ровно та же проекция, что в документированном контракте чтения).
 	rows, err := tx.Query(ctx, `SELECT DISTINCT role_id,object_type,outcome,COALESCE(retired_reason,''),pruned_at,applied_by FROM kaname.role_selector_prune ORDER BY role_id,object_type,outcome`)
 	require.NoError(t, err)
 	for rows.Next() {
@@ -79,8 +79,8 @@ func rid09PrimaryRoles(t *testing.T, ctx context.Context, tx pgx.Tx, facts *cata
 		d := domain.Role{ID: rid09PrimaryValue[domain.RoleID](t, r, "id"), ClusterID: rid09PrimaryValue[domain.ClusterID](t, r, "cluster_id"), AccountID: rid09PrimaryValue[domain.AccountID](t, r, "account_id"), ProjectID: rid09PrimaryValue[domain.ProjectID](t, r, "project_id"), Name: rid09PrimaryValue[domain.RoleName](t, r, "name"), Description: rid09PrimaryValue[domain.Description](t, r, "description"), IsSystem: rid09PrimaryValue[bool](t, r, "is_system"), OwnerModule: rid09PrimaryValue[string](t, r, "owner_module"), CreatedAt: rid09PrimaryValue[time.Time](t, r, "created_at"), UpdatedAt: rid09PrimaryValue[time.Time](t, r, "updated_at"), Labels: rid09PrimaryValue[domain.Labels](t, r, "labels")}
 		d.Rules, err = domain.DecodeRules(r["rules"])
 		require.NoError(t, err)
-		// CreatedByUserID is deliberately not a roles column read by roleCols. Its
-		// zero value matches the actual stored-to-domain reader, not an invented actor.
+		// CreatedByUserID намеренно не является столбцом roles, читаемым roleCols. Его
+		// нулевое значение соответствует настоящему чтению из хранилища в домен, а не выдуманному участнику.
 		declared := domain.SegmentsOf(d.ID, d.Rules)
 		unresolved := []domain.RoleSegment{}
 		for _, seg := range declared {

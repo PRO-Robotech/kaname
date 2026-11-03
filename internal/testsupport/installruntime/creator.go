@@ -17,9 +17,9 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// StandingCreator records the three normal successful Operations which create
-// C, grant its authority, and issue its durable key. No database writer enters
-// this helper. The fullserve fixture separately checks all persisted identities.
+// StandingCreator записывает три штатные успешные Operation, создающие
+// C, выдающие ему полномочия и постоянный ключ. Помощник не получает
+// механизма записи БД. Фикстура fullserve отдельно проверяет все сохранённые идентичности.
 type StandingCreator struct {
 	ID, AccountID, ClientID, KeyID, CredentialFile string
 	CreateOperation, GrantOperation, KeyOperation  Operation
@@ -41,15 +41,15 @@ func (w *Wire) createOperation(ctx context.Context, operator *VerifiedOperator, 
 	return w.AwaitOperation(ctx, operator.Bearer(), op)
 }
 
-// ProvisionStandingCreator requires O's real ceremony bearer. GrantAdmin goes
-// through the real mTLS gateway-fronted listener with only verified O metadata;
-// that listener must independently enforce current authority and ACR.
+// ProvisionStandingCreator требует настоящего токена церемонии O. GrantAdmin идёт
+// через настоящий слушатель за шлюзом mTLS только с проверенными метаданными O;
+// этот слушатель должен независимо обеспечивать текущие полномочия и ACR.
 func (w *Wire) ProvisionStandingCreator(ctx context.Context, operator *VerifiedOperator, systemAccountID, credentialFile string) (*StandingCreator, error) {
 	return w.ProvisionStandingCreatorWithKeyTTL(ctx, operator, systemAccountID, credentialFile, 7200)
 }
 
-// ProvisionStandingCreatorWithKeyTTL selects a declared ordinary Issue lifetime.
-// Validation and expiry remain the production key API and real wall clock.
+// ProvisionStandingCreatorWithKeyTTL выбирает заявленный штатный срок Issue.
+// Проверка и истечение остаются за производственным API ключей и настоящими часами.
 func (w *Wire) ProvisionStandingCreatorWithKeyTTL(ctx context.Context, operator *VerifiedOperator, systemAccountID, credentialFile string, ttlSeconds int64, observers ...func(string)) (*StandingCreator, error) {
 	if ttlSeconds <= 0 {
 		return nil, errors.New("positive declared standing-key lifetime required")
