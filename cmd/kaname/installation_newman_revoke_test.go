@@ -384,7 +384,7 @@ func rid06RequireNativeHistory(t *testing.T, a, b rid03NewmanSnapshot) {
 	require.True(t, rid04GDGHistoryEqual(a, b), "full primary GD/G raw history changed across startup")
 	require.True(t, reflect.DeepEqual(a.Projection, b.Projection), "full primary projection changed across startup")
 	require.True(t, reflect.DeepEqual(a.BusinessAudit, b.BusinessAudit), "startup changed business audit")
-	ridRequireOwnCeilingsPreserved(t, a.Whole, b.Whole)
+	require.True(t, rid06HistoryOwnCeilingsValid(a.Whole, b.Whole), "midrun own-ceilings must preserve full semantics and unchanged or bounded diagnostic clocks")
 }
 func (p *rid06PublicContext) beforeRevoke(t *testing.T, w *ridLifecycleWorld, deadline time.Time) {
 	if p == nil {
@@ -448,4 +448,47 @@ func rid06PauseDeadline(ctx context.Context, spawned time.Time) time.Time {
 		return parent
 	}
 	return deadline
+}
+
+// The stopped-base freshness oracle remains mandatory in NativeBoundary above.
+// This separate history edge can start AFTER the same startup's own-seed refresh
+// (postRevoke). An unchanged diagnostic clock is therefore valid. A changed
+// clock must be backed by the actual enclosing PRIMARY observation interval.
+func rid06HistoryOwnCeilingsValid(before, after ridWholeDeliverySnapshot) bool {
+	a, b := before.OwnCeilings, after.OwnCeilings
+	if before.PrimaryStartedAt.IsZero() || before.PrimaryFinishedAt.IsZero() || after.PrimaryStartedAt.IsZero() || after.PrimaryFinishedAt.IsZero() || before.PrimaryFinishedAt.Before(before.PrimaryStartedAt) || after.PrimaryFinishedAt.Before(after.PrimaryStartedAt) || after.PrimaryStartedAt.Before(before.PrimaryFinishedAt) {
+		return false
+	}
+	if !reflect.DeepEqual(a.Raw.Columns, b.Raw.Columns) || !reflect.DeepEqual(a.Semantic, b.Semantic) || len(a.Semantic) == 0 || len(a.Raw.Rows) != len(a.Semantic) || len(b.Raw.Rows) != len(a.Semantic) || len(a.StatedAt) != len(a.Semantic) || len(b.StatedAt) != len(a.Semantic) {
+		return false
+	}
+	columns := map[string]bool{}
+	for _, column := range a.Raw.Columns {
+		if column == "" || columns[column] {
+			return false
+		}
+		columns[column] = true
+	}
+	for _, required := range []string{"kind", "limit_value", "stated_at"} {
+		if !columns[required] {
+			return false
+		}
+	}
+	unchanged := true
+	for kind, digest := range a.Semantic {
+		old, oldOK := a.StatedAt[kind]
+		now, nowOK := b.StatedAt[kind]
+		if kind == "" || digest == "" || !oldOK || !nowOK || old.IsZero() || now.IsZero() || old.After(before.PrimaryFinishedAt) || now.After(after.PrimaryStartedAt) {
+			return false
+		}
+		if !now.Equal(old) {
+			unchanged = false
+			if now.Before(before.PrimaryFinishedAt) || now.After(after.PrimaryStartedAt) {
+				return false
+			}
+		}
+	}
+	// Raw hashes are retained, not rewritten from AFTER values. When there was no
+	// diagnostic clock movement, the COMPLETE raw row census must also be exact.
+	return !unchanged || reflect.DeepEqual(a.Raw.Rows, b.Raw.Rows)
 }
