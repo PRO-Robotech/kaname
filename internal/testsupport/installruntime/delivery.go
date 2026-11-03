@@ -108,7 +108,13 @@ func BoundaryDelivery(roles, types int) ([]byte, error) {
 	}
 	b.WriteString("roles:\n")
 	for _, id := range ids {
-		fmt.Fprintf(&b, "  - id: %s\n    description: Independent boundary reader fixture\n    tier: {tierType: iam.cluster, tierId: cluster_root}\n    rules:\n      - module: ridbounds\n        resources: [%s]\n        classes: [get, list]\n", id, strings.Join(names, ", "))
+		fmt.Fprintf(&b, "  - id: %s\n    description: Independent boundary reader fixture\n    tier: {tierType: iam.cluster, tierId: cluster_root}\n    rules:\n", id)
+		// The independent domain bound is 16 resources per role rule. Keep
+		// all 17 catalog types covered, in two lawful rules, so only the GD
+		// axis cardinality differs between the accepted and rejected twins.
+		for _, resources := range [][]string{names[:16], names[16:]} {
+			fmt.Fprintf(&b, "      - module: ridbounds\n        resources: [%s]\n        classes: [get, list]\n", strings.Join(resources, ", "))
+		}
 	}
 	fmt.Fprintf(&b, `seed:
   serviceAccounts:
