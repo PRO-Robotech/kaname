@@ -30,7 +30,7 @@ func TestRIDNewmanBearerAdmission(t *testing.T) {
 		{"operator-oversized", "registry-installation-rid08", map[string]any{"jwtRIDOperator": strings.Repeat("s", (16<<10)+1)}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ridNewmanClientBearers(tc.stem, tc.variables)
+			got, err := ridNewmanClientSecrets(tc.stem, tc.stem+"-UNIT", tc.variables)
 			if tc.want == nil {
 				require.Error(t, err)
 				require.Nil(t, got)
@@ -89,4 +89,30 @@ func TestRIDNewmanAnonymousInventoryAdmission(t *testing.T) {
 			require.Equal(t, []string{"", token}, record)
 		}
 	})
+}
+
+func TestRIDNewmanAssertionAnonymousInventory(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		want      bool
+	}{
+		{"complete-assertion-record", "[\"\",\"operator\"]\n[\"\",\"assertion\"]\n[\"key\",\"operator\"]\n", true},
+		{"world-known-assertion-not-FD5", "[\"\",\"operator\"]\n[\"key\",\"operator\"]\n", false},
+		{"assertion-truncated", "[\"\",\"operator\"]\n[\"key\",\"operator\"]\n[", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := os.OpenFile(filepath.Join(t.TempDir(), "inventory"), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = f.Close() })
+			require.NoError(t, os.Remove(f.Name()))
+			_, err = io.WriteString(f, tc.raw)
+			require.NoError(t, err)
+			err = ridNewmanAuditAnonymousInventory(f, []string{"operator", "assertion", "key"})
+			if tc.want {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
 }

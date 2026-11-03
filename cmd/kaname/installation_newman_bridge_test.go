@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,6 +25,8 @@ import (
 const ridNewmanInputEnv = "KANAME_RID_NEWMAN_CHILD_INPUT"
 
 type ridNewmanToolInput struct {
+	PublicOrigin                                                                     string
+	RequestPolicy                                                                    *ridNewmanRequestPolicy
 	Node, Module, Collection, Script, CA, Cert, Key, CaseID, Evidence                string
 	NodeSHA, ScriptSHA, CollectionSHA, PackageSHA, TreeSHA, TestExecutableSHA, RunID string
 }
@@ -104,18 +107,25 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 	require.NoError(t, json.NewDecoder(control).Decode(&payload))
 	require.LessOrEqual(t, len(payload), 1<<20)
 	var data struct {
-		Variables         map[string]any `json:"variables"`
-		RunID             string         `json:"runId"`
-		TestExecutableSHA string         `json:"testExecutableSHA256"`
+		Variables         map[string]any  `json:"variables"`
+		PublicOrigin      string          `json:"ownRestBaseUrl"`
+		RequestPolicy     json.RawMessage `json:"requestPolicy"`
+		RunID             string          `json:"runId"`
+		TestExecutableSHA string          `json:"testExecutableSHA256"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(payload), &data))
 	require.Equal(t, in.RunID, data.RunID)
 	require.Equal(t, in.TestExecutableSHA, data.TestExecutableSHA)
+	policy, err := ridNewmanDecodeRequestPolicy(data.RequestPolicy)
+	require.NoError(t, err)
+	require.True(t, in.PublicOrigin == data.PublicOrigin, "payload public origin differs from parent-bound input")
+	require.True(t, reflect.DeepEqual(in.RequestPolicy, policy), "payload request policy differs from parent-bound input")
+	require.NoError(t, ridNewmanValidateRequestPolicy(in.CaseID, data.PublicOrigin, policy, data.Variables))
 	stem := strings.SplitN(in.CaseID, "-", 4)
 	require.Len(t, stem, 4)
-	bearers, err := ridNewmanClientBearers(strings.Join(stem[:3], "-"), data.Variables)
+	bearers, err := ridNewmanClientSecrets(strings.Join(stem[:3], "-"), in.CaseID, data.Variables)
 	require.NoError(t, err)
-	// Actual parent-issued O and optional lawful C tokens are captured before
+	// Actual O, phase-bound C and opaque assertion secrets are captured before
 	// the TLS key read and before any Node process can receive their bytes.
 	require.NoError(t, ridNewmanRecordBearers(inventory, bearers))
 	privateKey, err := os.ReadFile(in.Key)
@@ -282,13 +292,16 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	require.True(t, filepath.IsAbs(node) && filepath.IsAbs(module), "explicit immutable Newman tool inputs required")
 	f.renewOperator(t, f.given.ctx)
 	variables["jwtRIDOperator"] = f.operator.Bearer()
-	bearers, err := ridNewmanClientBearers(stem, variables)
+	bearers, err := ridNewmanClientSecrets(stem, caseID, variables)
 	require.NoError(t, err)
 	f.secrets = append(f.secrets, bearers...)
+	policy, err := ridNewmanParentRequestPolicy(caseID, f.wire.PublicURL, f.wire.IssuanceURL, variables)
+	require.NoError(t, err)
 	runID := os.Getenv("KANAME_RID_RUN_ID")
 	require.Regexp(t, "^[A-Za-z0-9-]{16,80}$", runID, "explicit fresh owned run ID required")
 	executableSHA := ridNewmanHash(t, os.Args[0])
 	in := ridNewmanToolInput{Node: node, Module: module, Collection: filepath.Join(root, "tests/newman/collections", stem+".postman_collection.json"), Script: filepath.Join(root, "tests/newman/scripts/run-rid-native.cjs"), CA: filepath.Join(f.session.Root, "pki", "ca.crt"), Cert: filepath.Join(f.session.Root, "pki", "srv.crt"), Key: filepath.Join(f.session.Root, "pki", "srv.key"), CaseID: caseID, Evidence: filepath.Join(f.session.Root, "newman-"+label)}
+	in.PublicOrigin, in.RequestPolicy = f.wire.PublicURL, policy
 	in.NodeSHA = ridNewmanHash(t, in.Node)
 	in.ScriptSHA = ridNewmanHash(t, in.Script)
 	in.CollectionSHA = ridNewmanHash(t, in.Collection)
@@ -306,7 +319,7 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	require.Equal(t, expected.Tree, in.TreeSHA)
 	require.Equal(t, expected.Collection, in.CollectionSHA)
 	require.Equal(t, expected.Test, in.TestExecutableSHA)
-	payload, err := json.Marshal(map[string]any{"ownRestBaseUrl": f.wire.PublicURL, "variables": variables, "runId": runID, "testExecutableSHA256": executableSHA, "expectedIdentities": expected})
+	payload, err := json.Marshal(map[string]any{"ownRestBaseUrl": f.wire.PublicURL, "variables": variables, "runId": runID, "testExecutableSHA256": executableSHA, "expectedIdentities": expected, "requestPolicy": policy})
 	require.NoError(t, err)
 	require.LessOrEqual(t, len(payload), 1<<20)
 	c := startRIDInstallationChild(t, f, "newman-"+label, in, f.session.Environment, ridNewmanInputEnv, "TestRIDNewmanOwnedPublicChild", "3m")

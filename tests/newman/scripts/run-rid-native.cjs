@@ -64,6 +64,71 @@ function assertCache(tree) {
     if (actual !== runner && !tree.regular.has(actual)) throw new Error('unattested-require-cache');
   }
 }
+const expiredKeyCase = 'registry-installation-rid01-EXPIRED-KEY-REFUSAL';
+const rid01Cases = new Set(['CLEAN-BEFORE','CLEAN-INSTALLED','S1-EXACT-IDENTITIES','RENEWAL-BEFORE',
+  'EXPIRED-ACCESS-TOKEN','RENEWAL-AFTER','EXPIRED-KEY-REFUSAL','VALID-KEY-TWIN']
+  .map(x => 'registry-installation-rid01-' + x));
+function clientSecretNames(stem, caseId, variables) {
+  if (!caseId.startsWith(stem + '-') || caseId.length === stem.length + 1 ||
+      !variables || typeof variables !== 'object' || Array.isArray(variables)) throw new Error('invalid-secret-policy');
+  const names = ['jwtRIDOperator'];
+  if (stem === 'registry-installation-rid10') names.push('jwtRIDCreator');
+  if (stem === 'registry-installation-rid01') {
+    if (!rid01Cases.has(caseId)) throw new Error('invalid-secret-policy');
+    if (caseId === 'registry-installation-rid01-EXPIRED-ACCESS-TOKEN') names.push('jwtRIDExpiredCreator');
+    if (caseId === 'registry-installation-rid01-RENEWAL-AFTER') names.push('jwtRIDCreator');
+    if (caseId === expiredKeyCase) names.push('rid01ClientAssertion');
+  }
+  if (Object.keys(variables).some(k => ((k.startsWith('jwtRID') || k === 'rid01ClientAssertion') && !names.includes(k)) ||
+      (k === 'rid01IssuanceOrigin' && caseId !== expiredKeyCase)) ||
+      names.some(k => typeof variables[k] !== 'string' || !variables[k] || Buffer.byteLength(variables[k],'utf8') > 16384)) {
+    throw new Error('invalid-secret-policy');
+  }
+  return names;
+}
+function ownedOrigin(raw) {
+  if (typeof raw !== 'string') throw new Error('invalid-origin');
+  const u = new URL(raw);
+  if (u.protocol !== 'https:' || !['localhost','127.0.0.1'].includes(u.hostname) ||
+      u.username || u.password || u.pathname !== '/' || u.search || u.hash || !u.port ||
+      (raw !== u.origin && raw !== u.origin + '/')) throw new Error('invalid-origin');
+  return u;
+}
+function requestPolicy(caseId, publicRaw, policy, variables) {
+  const publicURL = ownedOrigin(publicRaw);
+  if (caseId !== expiredKeyCase) {
+    if (policy != null || Object.hasOwn(variables,'rid01IssuanceOrigin')) throw new Error('unexpected-policy');
+    return {publicOrigin:publicURL.origin, token:null};
+  }
+  if (!['9098','9198'].includes(publicURL.port)) throw new Error('invalid-public-policy');
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy) ||
+      Object.keys(policy).sort().join(',') !== 'caseId,method,origin,path,requestName' ||
+      policy.caseId !== caseId || policy.requestName !== caseId + ' :: expired-standing-key-token-refusal' ||
+      policy.method !== 'POST' || policy.path !== '/iam/v1/token') throw new Error('invalid-token-policy');
+  const tokenURL = ownedOrigin(policy.origin);
+  if (policy.origin !== tokenURL.origin || tokenURL.hostname !== publicURL.hostname ||
+      tokenURL.port !== (publicURL.port === '9098' ? '9096' : '9196') ||
+      variables.rid01IssuanceOrigin !== tokenURL.origin) throw new Error('invalid-token-origin');
+  return {publicOrigin:publicURL.origin, token:{...policy}};
+}
+// Shared by BEFORE-network admission and actual-execution receipt validation.
+function allowedRequest(policy, names, name, method, rawURL) {
+  try {
+    if (!names.includes(name)) return false;
+    const u = new URL(rawURL);
+    if (u.username || u.password || u.hash) return false;
+    if (policy.token && name === policy.token.requestName) {
+      return method === policy.token.method && rawURL === policy.token.origin + policy.token.path;
+    }
+    return u.origin === policy.publicOrigin;
+  } catch (_) { return false; }
+}
+// beforeRequest fires synchronously before runtime creates its HTTP requester.
+// A mere exitCode or async stdout write would leave the outgoing request alive.
+function stopBeforeNetwork() {
+  try { fs.writeSync(1, '{"schemaVersion":1,"ok":false,"kind":"request-policy-denied-before-network"}\n'); }
+  finally { process.exit(1); }
+}
 async function main() {
   // Await parent admission before ANY early validation/exit or HTTP request.
   let chunks = [], length = 0;
@@ -124,27 +189,13 @@ async function main() {
       new Set(allNames).size !== allNames.length) {
     fail('empty-or-ambiguous-declared-request-census'); return;
   }
-  const origin = new URL(input.ownRestBaseUrl);
-  if (origin.protocol !== 'https:' ||
-      !['localhost', '127.0.0.1'].includes(origin.hostname) ||
-      origin.username || origin.password || origin.pathname !== '/' ||
-      origin.search || origin.hash || !origin.port) {
-    fail('not-an-explicit-native-https-front'); return;
-  }
-  if (!input.variables || typeof input.variables !== 'object' ||
-      typeof input.variables.jwtRIDOperator !== 'string' ||
-      !input.variables.jwtRIDOperator) {
-    fail('live-operator-not-produced'); return;
-  }
-  // Same closed actor set as the Go parent/child FD5 admission. Only RID10
-  // needs the lawful creator bearer for creator-owned Operation.Get reads.
-  const bearerNames = stem === 'registry-installation-rid10'
-    ? ['jwtRIDOperator', 'jwtRIDCreator'] : ['jwtRIDOperator'];
-  if (Object.keys(input.variables).some((key) => key.startsWith('jwtRID') && !bearerNames.includes(key)) ||
-      bearerNames.some((key) => typeof input.variables[key] !== 'string' ||
-        !input.variables[key] || Buffer.byteLength(input.variables[key], 'utf8') > 16384)) {
-    fail('invalid-declared-client-bearers'); return;
-  }
+  let origin, policy;
+  try {
+    clientSecretNames(stem, caseId, input.variables);
+    origin = ownedOrigin(input.ownRestBaseUrl);
+    policy = requestPolicy(caseId, input.ownRestBaseUrl, input.requestPolicy, input.variables);
+    if (policy.token && !names.includes(policy.token.requestName)) throw new Error('missing-token-leaf');
+  } catch (_) { fail('invalid-owned-request-or-secret-policy'); return; }
   const reserved = new Set(['ownRestBaseUrl', 'baseUrl', '__proto__', 'prototype', 'constructor']);
   if (Array.isArray(input.variables) ||
       Object.keys(input.variables).some((key) => reserved.has(key)) ||
@@ -184,8 +235,7 @@ async function main() {
         if (!ex.response || ex.requestError) unanswered++;
         let sameOrigin = false;
         if (ex.request && ex.request.url) {
-          try { sameOrigin = new URL(ex.request.url.toString()).origin === origin.origin; }
-          catch (_) { /* No raw URL or exception is emitted. */ }
+          sameOrigin = allowedRequest(policy, names, name, ex.request.method, ex.request.url.toString());
         }
         if (!sameOrigin) wrongOrigin++;
         const results = (ex.assertions || []).map((a, index) => {
@@ -249,6 +299,14 @@ async function main() {
       process.stdout.write(JSON.stringify(receipt) + '\n');
       process.exitCode = ok ? 0 : 1;
     } catch (_) { fail('sanitized-result-processing-failed'); }
+  }).on('beforeRequest', (error, args) => {
+    let allowed = false;
+    try {
+      allowed = !error && args && args.item && args.request && args.request.url &&
+        allowedRequest(policy, names, args.item.name, args.request.method, args.request.url.toString());
+    } catch (_) { /* Never emit an SDK URL/error/header/body. */ }
+    if (!allowed) stopBeforeNetwork();
   });
 }
-main().catch(() => fail('client-precondition-or-execution-failed'));
+module.exports = {clientSecretNames, ownedOrigin, requestPolicy, allowedRequest};
+if (require.main === module) main().catch(() => fail('client-precondition-or-execution-failed'));
