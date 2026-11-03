@@ -223,6 +223,11 @@ func (f *installationNativeWorld) ridAdmin(t *testing.T, id string, grant bool) 
 	}
 }
 func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifecycleWorld {
+	return newRIDLifecycleWorldAccounts(t, mode, systemClass, nil)
+}
+
+// Optional fixture setup uses the same full native installation and public F7-F10.
+func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, setup func(*testing.T, *installationNativeWorld) []string) *ridLifecycleWorld {
 	t.Helper()
 	manifests := ridLifecycleDelivery(t, systemClass)
 	f := newInstallationNativeWorldProfile(t, 7200, "", true)
@@ -232,7 +237,11 @@ func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifec
 
 	accounts := []string{f.tenantID}
 	if mode == "S2" {
-		accounts = f.createRID02Accounts(t)
+		if setup != nil {
+			accounts = setup(t, f)
+		} else {
+			accounts = f.createRID02Accounts(t)
+		}
 	}
 	in := installruntime.DeliveryInput{Manifests: manifests, CredentialFile: f.creator.CredentialFile}
 	if mode == "S1" {

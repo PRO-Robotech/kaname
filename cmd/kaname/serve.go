@@ -96,6 +96,7 @@ func stopGRPCBounded(srv grpcStopper, timeout time.Duration) {
 type installationRepositoryDecorator func(kanamerepo.Repository) kanamerepo.Repository
 
 type installationServeDependencies struct {
+	decorateInstallationRelations  func(authzguard.RelationChecker) authzguard.RelationChecker
 	decorateInstallationRepository installationRepositoryDecorator
 	observeCredential              func(string, string)
 	decorateInstallationReader     func(*kanamepg.InstallationReader) installationReadSource
@@ -378,7 +379,10 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if err != nil {
 		return err
 	}
-	installationRelations := authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(pool, preparedModel.plans), personmarks.New(pool))
+	var installationRelations authzguard.RelationChecker = authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(pool, preparedModel.plans), personmarks.New(pool))
+	if installationDependencies.decorateInstallationRelations != nil {
+		installationRelations = installationDependencies.decorateInstallationRelations(installationRelations)
+	}
 	realInstallationReader := kanamepg.NewInstallationReader(pool)
 	var installationReader installationReadSource = realInstallationReader
 	if installationDependencies.decorateInstallationReader != nil {
