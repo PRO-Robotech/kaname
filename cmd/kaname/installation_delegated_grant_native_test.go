@@ -20,6 +20,7 @@ func ridNativeDelegatedGrant(t *testing.T) {
 		g := w.grant(t, w.bindingInput("service_account", u, w.pull, "registry.registries", w.object))
 		require.Equal(t, w.gd.Id, g.DelegationId)
 		require.NotEqual(t, w.issuer.ID, w.f.creator.ID)
+		rid03PublicDelegatedGrant(t, w)
 	})
 }
 func ridNativeDelegatedAxes(t *testing.T) {
@@ -44,6 +45,7 @@ func ridNativeDelegatedAxes(t *testing.T) {
 		body["subjectType"] = "service_account"
 		body["subjectId"] = u
 		w.grant(t, body)
+		rid03PublicDelegatedAxes(t, w)
 	})
 }
 func ridNativeIssuerCannotDelegate(t *testing.T) {
@@ -73,6 +75,7 @@ func ridNativeIssuerCannotDelegate(t *testing.T) {
 			}
 		}
 		require.True(t, found)
+		rid03PublicIssuerCannotDelegate(t, w, other)
 	})
 }
 func ridNativeAnonymousClass(t *testing.T) {
@@ -83,5 +86,6 @@ func ridNativeAnonymousClass(t *testing.T) {
 		w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
 		body["subjectId"] = "anonymous"
 		w.grant(t, body)
+		rid03PublicAnonymousClass(t, w)
 	})
 }

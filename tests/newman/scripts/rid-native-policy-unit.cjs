@@ -71,3 +71,71 @@ for (const [name,publicURL,token,want] of [
  if(want){const p=run();assert.equal(allowedRequest(p,[normal],normal,'GET',publicURL+'/iam/v1/me'),true);assert.equal(allowedRequest(p,[normal],normal,'GET','https://localhost:43218/iam/v1/me'),false);}
  else assert.throws(run);
 });
+
+// RID03 source census and closed actor policy; prior policy controls unchanged.
+const rid03LiteralCases=[
+  "registry-installation-rid03-S1-GRANT-ACT",
+  "registry-installation-rid03-S1-GRANT-VERIFY",
+  "registry-installation-rid03-S1-ROLE-DENIED-ACT",
+  "registry-installation-rid03-S1-ROLE-DENIED-VERIFY",
+  "registry-installation-rid03-S1-ROLE-TWIN-ACT",
+  "registry-installation-rid03-S1-ROLE-TWIN-VERIFY",
+  "registry-installation-rid03-S1-TARGET-DENIED-ACT",
+  "registry-installation-rid03-S1-TARGET-DENIED-VERIFY",
+  "registry-installation-rid03-S1-TARGET-TWIN-ACT",
+  "registry-installation-rid03-S1-TARGET-TWIN-VERIFY",
+  "registry-installation-rid03-S1-SUBJECT-DENIED-ACT",
+  "registry-installation-rid03-S1-SUBJECT-DENIED-VERIFY",
+  "registry-installation-rid03-S1-SUBJECT-TWIN-ACT",
+  "registry-installation-rid03-S1-SUBJECT-TWIN-VERIFY",
+  "registry-installation-rid03-S1-ISSUER-GD-DENIED-ACT",
+  "registry-installation-rid03-S1-ISSUER-GD-DENIED-VERIFY",
+  "registry-installation-rid03-S1-CREATOR-GD-TWIN-ACT",
+  "registry-installation-rid03-S1-CREATOR-GD-TWIN-VERIFY",
+  "registry-installation-rid03-S1-AUTHENTICATED-DENIED-ACT",
+  "registry-installation-rid03-S1-AUTHENTICATED-DENIED-VERIFY",
+  "registry-installation-rid03-S1-ANONYMOUS-TWIN-ACT",
+  "registry-installation-rid03-S1-ANONYMOUS-TWIN-VERIFY",
+  "registry-installation-rid03-S2-GRANT-ACT",
+  "registry-installation-rid03-S2-GRANT-VERIFY",
+  "registry-installation-rid03-S2-ROLE-DENIED-ACT",
+  "registry-installation-rid03-S2-ROLE-DENIED-VERIFY",
+  "registry-installation-rid03-S2-ROLE-TWIN-ACT",
+  "registry-installation-rid03-S2-ROLE-TWIN-VERIFY",
+  "registry-installation-rid03-S2-TARGET-DENIED-ACT",
+  "registry-installation-rid03-S2-TARGET-DENIED-VERIFY",
+  "registry-installation-rid03-S2-TARGET-TWIN-ACT",
+  "registry-installation-rid03-S2-TARGET-TWIN-VERIFY",
+  "registry-installation-rid03-S2-SUBJECT-DENIED-ACT",
+  "registry-installation-rid03-S2-SUBJECT-DENIED-VERIFY",
+  "registry-installation-rid03-S2-SUBJECT-TWIN-ACT",
+  "registry-installation-rid03-S2-SUBJECT-TWIN-VERIFY",
+  "registry-installation-rid03-S2-ISSUER-GD-DENIED-ACT",
+  "registry-installation-rid03-S2-ISSUER-GD-DENIED-VERIFY",
+  "registry-installation-rid03-S2-CREATOR-GD-TWIN-ACT",
+  "registry-installation-rid03-S2-CREATOR-GD-TWIN-VERIFY",
+  "registry-installation-rid03-S2-AUTHENTICATED-DENIED-ACT",
+  "registry-installation-rid03-S2-AUTHENTICATED-DENIED-VERIFY",
+  "registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT",
+  "registry-installation-rid03-S2-ANONYMOUS-TWIN-VERIFY"
+];
+for (const caseId of rid03LiteralCases) test('secret/RID03-literal/'+caseId,()=>{
+ const vars={jwtRIDOperator:'O'};
+ const want=['jwtRIDOperator'];
+ if(caseId.endsWith('-ACT')){const actor=caseId.includes('-CREATOR-GD-TWIN-')?'jwtRIDCreator':'jwtRIDIssuer';vars[actor]='actual-dummy';want.push(actor);}
+ assert.deepEqual(clientSecretNames('registry-installation-rid03',caseId,vars),want);
+});
+for(const [name,caseId,vars] of [
+ ['I-missing','registry-installation-rid03-S1-GRANT-ACT',{jwtRIDOperator:'O'}],
+ ['I-empty','registry-installation-rid03-S1-GRANT-ACT',{jwtRIDOperator:'O',jwtRIDIssuer:''}],
+ ['I-type','registry-installation-rid03-S1-GRANT-ACT',{jwtRIDOperator:'O',jwtRIDIssuer:1}],
+ ['I-oversize','registry-installation-rid03-S1-GRANT-ACT',{jwtRIDOperator:'O',jwtRIDIssuer:'x'.repeat(16385)}],
+ ['C-on-I-ACT','registry-installation-rid03-S1-GRANT-ACT',{jwtRIDOperator:'O',jwtRIDIssuer:'I',jwtRIDCreator:'C'}],
+ ['I-on-C-ACT','registry-installation-rid03-S1-CREATOR-GD-TWIN-ACT',{jwtRIDOperator:'O',jwtRIDIssuer:'I'}],
+ ['I-on-VERIFY','registry-installation-rid03-S1-GRANT-VERIFY',{jwtRIDOperator:'O',jwtRIDIssuer:'I'}],
+ ['C-on-VERIFY','registry-installation-rid03-S1-CREATOR-GD-TWIN-VERIFY',{jwtRIDOperator:'O',jwtRIDCreator:'C'}],
+ ['I-outside-RID03','registry-installation-rid08-EMPTY-N0',{jwtRIDOperator:'O',jwtRIDIssuer:'I'}],
+ ['unknown-phase','registry-installation-rid03-S1-GRANT-AFTER',{jwtRIDOperator:'O',jwtRIDIssuer:'I'}],
+ ['unknown-mode','registry-installation-rid03-S3-GRANT-ACT',{jwtRIDOperator:'O',jwtRIDIssuer:'I'}],
+ ['assertion-on-I-ACT','registry-installation-rid03-S1-GRANT-ACT',{jwtRIDOperator:'O',jwtRIDIssuer:'I',rid01ClientAssertion:'assertion'}],
+])test('secret/RID03-negative/'+name,()=>assert.throws(()=>clientSecretNames(caseId.match(/^registry-installation-rid\d\d/)[0],caseId,vars)));

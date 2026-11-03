@@ -116,3 +116,111 @@ func TestRIDNewmanAssertionAnonymousInventory(t *testing.T) {
 		})
 	}
 }
+
+// Security-only source controls; values are dummy strings, never fixture tokens.
+func TestRID03NewmanSecretAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name, caseID string
+		variables    map[string]any
+		want         []string
+	}{
+		{"I-positive-S1", "registry-installation-rid03-S1-GRANT-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": "I"}, []string{"O", "I"}},
+		{"I-negative-S2", "registry-installation-rid03-S2-ROLE-DENIED-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": "I"}, []string{"O", "I"}},
+		{"C-exact-twin", "registry-installation-rid03-S2-CREATOR-GD-TWIN-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDCreator": "C"}, []string{"O", "C"}},
+		{"O-only-VERIFY", "registry-installation-rid03-S1-GRANT-VERIFY", map[string]any{"jwtRIDOperator": "O"}, []string{"O"}},
+		{"I-missing", "registry-installation-rid03-S1-GRANT-ACT", map[string]any{"jwtRIDOperator": "O"}, nil},
+		{"I-empty", "registry-installation-rid03-S1-GRANT-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": ""}, nil},
+		{"I-type", "registry-installation-rid03-S1-GRANT-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": 1}, nil},
+		{"I-oversize", "registry-installation-rid03-S1-GRANT-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": strings.Repeat("x", 16385)}, nil},
+		{"C-on-I-ACT", "registry-installation-rid03-S1-GRANT-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": "I", "jwtRIDCreator": "C"}, nil},
+		{"I-on-C-ACT", "registry-installation-rid03-S1-CREATOR-GD-TWIN-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": "I"}, nil},
+		{"I-on-VERIFY", "registry-installation-rid03-S1-GRANT-VERIFY", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": "I"}, nil},
+		{"C-on-VERIFY", "registry-installation-rid03-S1-CREATOR-GD-TWIN-VERIFY", map[string]any{"jwtRIDOperator": "O", "jwtRIDCreator": "C"}, nil},
+		{"I-outside-RID03", "registry-installation-rid08-EMPTY-N0", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": "I"}, nil},
+		{"unknown-phase", "registry-installation-rid03-S1-GRANT-AFTER", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": "I"}, nil},
+		{"unknown-mode", "registry-installation-rid03-S3-GRANT-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": "I"}, nil},
+		{"assertion-on-I-ACT", "registry-installation-rid03-S1-GRANT-ACT", map[string]any{"jwtRIDOperator": "O", "jwtRIDIssuer": "I", "rid01ClientAssertion": "assertion"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stem := strings.Join(strings.Split(tc.caseID, "-")[:3], "-")
+			got, err := ridNewmanClientSecrets(stem, tc.caseID, tc.variables)
+			if tc.want == nil {
+				require.Error(t, err)
+				require.Nil(t, got)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.want, got)
+			}
+		})
+	}
+}
+func TestRID03NewmanLiteralAdmissionCensus(t *testing.T) {
+	require.Len(t, rid03NewmanActors, 44)
+	for _, id := range rid03ExpectedLiteralCases {
+		t.Run(id, func(t *testing.T) {
+			actor, ok := rid03NewmanActor(id)
+			require.True(t, ok)
+			variables := map[string]any{"jwtRIDOperator": "O"}
+			want := []string{"O"}
+			if actor == "I" {
+				variables["jwtRIDIssuer"] = "I"
+				want = append(want, "I")
+			}
+			if actor == "C" {
+				variables["jwtRIDCreator"] = "C"
+				want = append(want, "C")
+			}
+			got, err := ridNewmanClientSecrets("registry-installation-rid03", id, variables)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+// Independent literal test order; never derived from admitted map entries.
+var rid03ExpectedLiteralCases = []string{
+	"registry-installation-rid03-S1-GRANT-ACT",
+	"registry-installation-rid03-S1-GRANT-VERIFY",
+	"registry-installation-rid03-S1-ROLE-DENIED-ACT",
+	"registry-installation-rid03-S1-ROLE-DENIED-VERIFY",
+	"registry-installation-rid03-S1-ROLE-TWIN-ACT",
+	"registry-installation-rid03-S1-ROLE-TWIN-VERIFY",
+	"registry-installation-rid03-S1-TARGET-DENIED-ACT",
+	"registry-installation-rid03-S1-TARGET-DENIED-VERIFY",
+	"registry-installation-rid03-S1-TARGET-TWIN-ACT",
+	"registry-installation-rid03-S1-TARGET-TWIN-VERIFY",
+	"registry-installation-rid03-S1-SUBJECT-DENIED-ACT",
+	"registry-installation-rid03-S1-SUBJECT-DENIED-VERIFY",
+	"registry-installation-rid03-S1-SUBJECT-TWIN-ACT",
+	"registry-installation-rid03-S1-SUBJECT-TWIN-VERIFY",
+	"registry-installation-rid03-S1-ISSUER-GD-DENIED-ACT",
+	"registry-installation-rid03-S1-ISSUER-GD-DENIED-VERIFY",
+	"registry-installation-rid03-S1-CREATOR-GD-TWIN-ACT",
+	"registry-installation-rid03-S1-CREATOR-GD-TWIN-VERIFY",
+	"registry-installation-rid03-S1-AUTHENTICATED-DENIED-ACT",
+	"registry-installation-rid03-S1-AUTHENTICATED-DENIED-VERIFY",
+	"registry-installation-rid03-S1-ANONYMOUS-TWIN-ACT",
+	"registry-installation-rid03-S1-ANONYMOUS-TWIN-VERIFY",
+	"registry-installation-rid03-S2-GRANT-ACT",
+	"registry-installation-rid03-S2-GRANT-VERIFY",
+	"registry-installation-rid03-S2-ROLE-DENIED-ACT",
+	"registry-installation-rid03-S2-ROLE-DENIED-VERIFY",
+	"registry-installation-rid03-S2-ROLE-TWIN-ACT",
+	"registry-installation-rid03-S2-ROLE-TWIN-VERIFY",
+	"registry-installation-rid03-S2-TARGET-DENIED-ACT",
+	"registry-installation-rid03-S2-TARGET-DENIED-VERIFY",
+	"registry-installation-rid03-S2-TARGET-TWIN-ACT",
+	"registry-installation-rid03-S2-TARGET-TWIN-VERIFY",
+	"registry-installation-rid03-S2-SUBJECT-DENIED-ACT",
+	"registry-installation-rid03-S2-SUBJECT-DENIED-VERIFY",
+	"registry-installation-rid03-S2-SUBJECT-TWIN-ACT",
+	"registry-installation-rid03-S2-SUBJECT-TWIN-VERIFY",
+	"registry-installation-rid03-S2-ISSUER-GD-DENIED-ACT",
+	"registry-installation-rid03-S2-ISSUER-GD-DENIED-VERIFY",
+	"registry-installation-rid03-S2-CREATOR-GD-TWIN-ACT",
+	"registry-installation-rid03-S2-CREATOR-GD-TWIN-VERIFY",
+	"registry-installation-rid03-S2-AUTHENTICATED-DENIED-ACT",
+	"registry-installation-rid03-S2-AUTHENTICATED-DENIED-VERIFY",
+	"registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT",
+	"registry-installation-rid03-S2-ANONYMOUS-TWIN-VERIFY",
+}

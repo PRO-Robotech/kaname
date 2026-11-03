@@ -68,6 +68,52 @@ const expiredKeyCase = 'registry-installation-rid01-EXPIRED-KEY-REFUSAL';
 const rid01Cases = new Set(['CLEAN-BEFORE','CLEAN-INSTALLED','S1-EXACT-IDENTITIES','RENEWAL-BEFORE',
   'EXPIRED-ACCESS-TOKEN','RENEWAL-AFTER','EXPIRED-KEY-REFUSAL','VALID-KEY-TWIN']
   .map(x => 'registry-installation-rid01-' + x));
+const rid03Actors = Object.freeze({
+  "registry-installation-rid03-S1-GRANT-ACT": "I",
+  "registry-installation-rid03-S1-GRANT-VERIFY": "O",
+  "registry-installation-rid03-S1-ROLE-DENIED-ACT": "I",
+  "registry-installation-rid03-S1-ROLE-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S1-ROLE-TWIN-ACT": "I",
+  "registry-installation-rid03-S1-ROLE-TWIN-VERIFY": "O",
+  "registry-installation-rid03-S1-TARGET-DENIED-ACT": "I",
+  "registry-installation-rid03-S1-TARGET-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S1-TARGET-TWIN-ACT": "I",
+  "registry-installation-rid03-S1-TARGET-TWIN-VERIFY": "O",
+  "registry-installation-rid03-S1-SUBJECT-DENIED-ACT": "I",
+  "registry-installation-rid03-S1-SUBJECT-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S1-SUBJECT-TWIN-ACT": "I",
+  "registry-installation-rid03-S1-SUBJECT-TWIN-VERIFY": "O",
+  "registry-installation-rid03-S1-ISSUER-GD-DENIED-ACT": "I",
+  "registry-installation-rid03-S1-ISSUER-GD-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S1-CREATOR-GD-TWIN-ACT": "C",
+  "registry-installation-rid03-S1-CREATOR-GD-TWIN-VERIFY": "O",
+  "registry-installation-rid03-S1-AUTHENTICATED-DENIED-ACT": "I",
+  "registry-installation-rid03-S1-AUTHENTICATED-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S1-ANONYMOUS-TWIN-ACT": "I",
+  "registry-installation-rid03-S1-ANONYMOUS-TWIN-VERIFY": "O",
+  "registry-installation-rid03-S2-GRANT-ACT": "I",
+  "registry-installation-rid03-S2-GRANT-VERIFY": "O",
+  "registry-installation-rid03-S2-ROLE-DENIED-ACT": "I",
+  "registry-installation-rid03-S2-ROLE-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S2-ROLE-TWIN-ACT": "I",
+  "registry-installation-rid03-S2-ROLE-TWIN-VERIFY": "O",
+  "registry-installation-rid03-S2-TARGET-DENIED-ACT": "I",
+  "registry-installation-rid03-S2-TARGET-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S2-TARGET-TWIN-ACT": "I",
+  "registry-installation-rid03-S2-TARGET-TWIN-VERIFY": "O",
+  "registry-installation-rid03-S2-SUBJECT-DENIED-ACT": "I",
+  "registry-installation-rid03-S2-SUBJECT-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S2-SUBJECT-TWIN-ACT": "I",
+  "registry-installation-rid03-S2-SUBJECT-TWIN-VERIFY": "O",
+  "registry-installation-rid03-S2-ISSUER-GD-DENIED-ACT": "I",
+  "registry-installation-rid03-S2-ISSUER-GD-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S2-CREATOR-GD-TWIN-ACT": "C",
+  "registry-installation-rid03-S2-CREATOR-GD-TWIN-VERIFY": "O",
+  "registry-installation-rid03-S2-AUTHENTICATED-DENIED-ACT": "I",
+  "registry-installation-rid03-S2-AUTHENTICATED-DENIED-VERIFY": "O",
+  "registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT": "I",
+  "registry-installation-rid03-S2-ANONYMOUS-TWIN-VERIFY": "O"
+});
 function clientSecretNames(stem, caseId, variables) {
   if (!caseId.startsWith(stem + '-') || caseId.length === stem.length + 1 ||
       !variables || typeof variables !== 'object' || Array.isArray(variables)) throw new Error('invalid-secret-policy');
@@ -78,6 +124,11 @@ function clientSecretNames(stem, caseId, variables) {
     if (caseId === 'registry-installation-rid01-EXPIRED-ACCESS-TOKEN') names.push('jwtRIDExpiredCreator');
     if (caseId === 'registry-installation-rid01-RENEWAL-AFTER') names.push('jwtRIDCreator');
     if (caseId === expiredKeyCase) names.push('rid01ClientAssertion');
+  }
+  if (stem === 'registry-installation-rid03') {
+    if (!Object.hasOwn(rid03Actors, caseId)) throw new Error('invalid-secret-policy');
+    if (rid03Actors[caseId] === 'I') names.push('jwtRIDIssuer');
+    if (rid03Actors[caseId] === 'C') names.push('jwtRIDCreator');
   }
   if (Object.keys(variables).some(k => ((k.startsWith('jwtRID') || k === 'rid01ClientAssertion') && !names.includes(k)) ||
       (k === 'rid01IssuanceOrigin' && caseId !== expiredKeyCase)) ||
@@ -148,6 +199,36 @@ async function validatedInputACK(caseId, runId) {
     stream.on('error',()=>{clearTimeout(timer);reject(new Error('node-permit-unavailable'));});
   });
 }
+const rid03ObservedCases = new Set([
+ 'registry-installation-rid03-S1-GRANT-ACT','registry-installation-rid03-S1-ROLE-TWIN-ACT','registry-installation-rid03-S1-TARGET-TWIN-ACT','registry-installation-rid03-S1-SUBJECT-TWIN-ACT','registry-installation-rid03-S1-ANONYMOUS-TWIN-ACT',
+ 'registry-installation-rid03-S2-GRANT-ACT','registry-installation-rid03-S2-ROLE-TWIN-ACT','registry-installation-rid03-S2-TARGET-TWIN-ACT','registry-installation-rid03-S2-SUBJECT-TWIN-ACT','registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT',
+]);
+function rid03GetObservation(caseId, executions, starts, ends) {
+ if (!rid03ObservedCases.has(caseId)) {
+  if (starts.length || ends.length) throw new Error('invalid-act-get-observation');
+  return null;
+ }
+ const name=caseId+' :: actual-action-resource-Get';
+ const rows=executions.filter(x=>x.item && x.item.name===name);
+ if(rows.length!==1 || starts.length!==1 || ends.length!==1) throw new Error('invalid-act-get-observation');
+ const ex=rows[0];
+ if(!ex.request || ex.request.method!=='GET' || !ex.response || ex.response.code!==200 || ex.requestError ||
+    !(ex.assertions||[]).length || ex.assertions.some(x=>x.error||x.skipped)) throw new Error('invalid-act-get-observation');
+ const j=ex.response.json(), target=j.target && j.target.resources && j.target.resources.resources;
+ const id=/^[A-Za-z0-9_-]{1,128}$/;
+ if(!Array.isArray(target)||target.length!==1 || ![j.id,j.delegationId,j.subjectId,j.roleId,j.scopeId,target[0].id].every(x=>typeof x==='string'&&id.test(x)) ||
+    !['service_account','system_class'].includes(j.subjectType) || j.scopeType!=='iam.account' || target[0].type!=='registry.registries') throw new Error('invalid-act-get-observation');
+ const url=new URL(ex.request.url.toString());
+ const mat=Date.parse(j.materializedAt),created=Date.parse(j.createdAt),start=starts[0],end=ends[0];
+ if(url.pathname!=='/iam/v1/accessBindings/'+j.id || url.search || url.hash ||
+    typeof j.materializedAt!=='string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.materializedAt) ||
+    typeof j.createdAt!=='string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.createdAt) ||
+    ![mat,created,start,end].every(Number.isFinite) || mat<created || mat>end || end<start || end-start>5000) throw new Error('invalid-act-get-observation');
+ return {version:1,caseId,requestName:name,method:'GET',path:url.pathname,resourceId:j.id,materializedAt:j.materializedAt,createdAt:j.createdAt,
+         delegationId:j.delegationId,subjectType:j.subjectType,subjectId:j.subjectId,roleId:j.roleId,scopeType:j.scopeType,scopeId:j.scopeId,
+         targetType:target[0].type,targetId:target[0].id,startedAt:new Date(start).toISOString(),completedAt:new Date(end).toISOString()};
+}
+
 async function main() {
   // Await parent admission before ANY early validation/exit or HTTP request.
   let chunks = [], length = 0;
@@ -241,6 +322,7 @@ async function main() {
     ignoreRedirects: true, timeout: 90000, timeoutRequest: 5000,
     timeoutScript: 3000, iterationCount: 1, bail: false,
   };
+  const rid03Starts=[],rid03Ends=[];
   newman.run(options, (error, summary) => {
     try {
       if (!summary || !summary.run) { fail('newman-no-actual-summary'); return; }
@@ -298,7 +380,9 @@ async function main() {
       assertCache(afterTree);
       if (afterTree.sha256 !== beforeTree.sha256 || digest(fs.readFileSync(process.execPath)) !== nodeSHA256 ||
           digest(fs.readFileSync(__filename)) !== runnerSHA256) { fail('toolchain-changed-during-run'); return; }
+      const actGet=rid03GetObservation(caseId,summary.run.executions||[],rid03Starts,rid03Ends);
       const receipt = {
+        ...(actGet ? {rid03ActGet:actGet} : {}),
         schemaVersion: 1, ok, caseId, selectedFolder: folder.name,
         producer: {runId: input.runId, testExecutableSHA256: input.testExecutableSHA256},
         collectionSHA256: digest(collectionBytes), newmanVersion: pkg.version,
@@ -326,7 +410,10 @@ async function main() {
         allowedRequest(policy, names, args.item.name, args.request.method, args.request.url.toString());
     } catch (_) { /* Never emit an SDK URL/error/header/body. */ }
     if (!allowed) stopBeforeNetwork();
+    if(rid03ObservedCases.has(caseId) && args.item.name===caseId+' :: actual-action-resource-Get')rid03Starts.push(Date.now());
+  }).on('request', (error,args)=>{
+    if(rid03ObservedCases.has(caseId) && args && args.item && args.item.name===caseId+' :: actual-action-resource-Get')rid03Ends.push(Date.now());
   });
 }
-module.exports = {clientSecretNames, ownedOrigin, requestPolicy, allowedRequest, validatePermitFrame};
+module.exports = {clientSecretNames, ownedOrigin, requestPolicy, allowedRequest, validatePermitFrame, rid03GetObservation};
 if (require.main === module) main().catch(() => fail('client-precondition-or-execution-failed'));
