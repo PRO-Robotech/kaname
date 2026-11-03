@@ -568,8 +568,8 @@ func stepUpTrailer(err error) (metadata.MD, bool) {
 // подсказку — ответ беднее, но не ложен и не шире.
 func (p *PublicCallerPolicy) Unary() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		// The anonymous exception is unary and request-shaped. It must never
-		// open the method-only policy used by streams or other RPCs.
+		// Анонимное исключение зависит от формы unary-запроса. Оно никогда не должно
+		// открывать политику только по методу, используемую потоками и другими RPC.
 		if info.FullMethod == iamv1.AuthorizeService_Check_FullMethodName {
 			check, ok := req.(*iamv1.AuthorizeCheckRequest)
 			if ok && IsAnonymousSelfCheck(ctx, check, p.modules) {

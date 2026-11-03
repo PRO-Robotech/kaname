@@ -36,7 +36,7 @@ import (
 // create-forward materializes the binding's desired ACTIVE members + per-object tuples and
 // takes NO EXCLUSIVE advisory lock (f.locks stays 0), only the SHARE lock
 // (f.locks==0) — и НИКАКОЙ другой: с 2026-08-05 форвард не берёт advisory вовсе, поэтому
-// проверяется отсутствие блокировки плюс факт прохода (f.keyShareLoads>=1). This is
+// проверяется отсутствие блокировки плюс факт прохода (f.keyShareLoads>=1). Это
 // the throughput-critical property: SHARE ∥ SHARE do not conflict, so a burst of
 // concurrent binding-creates never serializes on the full path's EXCLUSIVE lock.
 //

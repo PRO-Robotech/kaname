@@ -26,9 +26,9 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
-// Construct every authorization-bearing public unary layer in production order.
-// Only DB-backed marks/relations are substituted; Check's own-door contract is
-// derived from the actual descriptors, and the ACR floor from the actual seed.
+// Строим все публичные unary-слои авторизации в производственном порядке.
+// Подменены только отметки/отношения БД; контракт собственной двери Check
+// выведен из настоящих дескрипторов, а основание ACR — из настоящего посева.
 type anonymousDoor struct{}
 
 func (anonymousDoor) Check(context.Context, string, string, string) (bool, error) {
@@ -49,8 +49,8 @@ func anonymousPublicChain(t *testing.T, reader *presentedcred.Reader) grpc.Unary
 		policy.Unary(), authzguard.NewAddressGate(chainRevocations{}).Unary(), authzguard.AntiAnonymousUnary(slog.Default()), door.Unary())...)
 }
 
-// The transport and public identity chain are real. Only the decision port is
-// replaced: these tests assert who reaches it, not a second policy evaluator.
+// Транспорт и публичная цепочка личности настоящие. Подменён только порт
+// решения: пробы проверяют, кто до него доходит, без второго вычислителя политики.
 type anonymousDecision struct {
 	authorize.Authorizer
 	allowed bool
@@ -185,7 +185,7 @@ func TestAnonymousSelfCheck_PublicChainNeverDowngradesCredentials(t *testing.T) 
 			}
 		})
 	}
-	// A lawful authenticated self-query must still reach the same decision port.
+	// Допустимый аутентифицированный запрос о себе должен по-прежнему доходить до того же порта решения.
 	d := &anonymousDecision{allowed: true}
 	req := anonymousRequest()
 	req.Subject = "user:" + chainSubject

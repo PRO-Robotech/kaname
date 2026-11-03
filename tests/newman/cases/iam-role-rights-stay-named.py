@@ -33,7 +33,7 @@ def mutation(name, path, body, auth=OWNER, capture=None, method="POST"):
         request = retry_until_authorized(request)
     steps = [request, *done()]
     if capture:
-        # Capture only after successful completion, from the completed operation.
+        # Фиксируем только после успешного завершения, из завершённой операции.
         steps[-1].test_script.extend(save_from_response(
             "j.response && j.response.id", capture))
     return steps
@@ -113,7 +113,7 @@ def case(number, title, steps):
                      classes=["SEC", "NEG"], priority="P0", steps=steps))
 
 
-# E1: one changed fact: delete -> wildcard on the same project and same human.
+# E1: один изменённый факт: delete -> wildcard на том же проекте и для того же человека.
 ve = {"subjects": [{"type": "SUBJECT_TYPE_SERVICE_ACCOUNT", "id": var("escSa")}],
       "roleId": var("escGrantRole"), "scopeType": "iam.project",
       "scopeId": var("gdRegistryProjectId"), "target": {"allInScope": {}}}
@@ -139,8 +139,8 @@ case(2, "delete-only and update/delete twin", [
     check("update", True, "twin-can-update"),
     *remove("/iam/v1/accessBindings", "escTwinHold"),
     *remove("/iam/v1/roles", "escBoth"), *remove("/iam/v1/roles", "escDelete"),
-    # kaname#1039: decisions above are accompanied by real mutations on the own API.
-    # Same human, scope, object type and target; the twin changes only role verbs.
+    # kaname#1039: решения выше сопровождаются настоящими изменениями через собственный API.
+    # Те же человек, область, тип объекта и цель; двойник меняет только глаголы роли.
     *sa("escMutationTarget"),
     Step(name="snapshot-before-delete-only-update", method="GET",
          path="/iam/v1/serviceAccounts/{{escMutationTarget}}", auth=OWNER,

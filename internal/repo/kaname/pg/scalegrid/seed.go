@@ -193,8 +193,8 @@ func (s *Seeder) Queue(ctx context.Context, row MirrorRow) error {
 	}
 	version := versionOr(row.SourceVersion)
 
-	// The same complete DB writer as UpsertTx, including source-version gating
-	// of edge replacement. There is no independent seeder edge-writing path.
+	// Тот же полный путь записи БД, что и UpsertTx, включая проверку версии источника
+	// при замене рёбер. Отдельного пути записи рёбер для посева нет.
 	s.batch.Queue(resource_mirror.StmtRegistrationCommand,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID,
 		payload, version, row.ParentChain)

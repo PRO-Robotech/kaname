@@ -1506,10 +1506,10 @@ func (s *reconcileStore) EmitTupleDelete(ctx context.Context, tuples []domain.Me
 
 // RecordEmittedTuples co-commits the per-member FGA tuples into the persisted
 // emitted-tuple ledger (kaname.access_binding_emitted_tuples — F3/#178) on the
-// reconcile writer-tx, alongside the matching EmitTupleWrite (ban #10), под координатой
-// члена, который их выпустил (kaname#933). The INSERT is `ON CONFLICT (<полный ключ>)
-// DO NOTHING`, so a repeated reconcile of the same ACTIVE member — or a forward +
-// async-full overlap — is an idempotent no-op. Строка уровня выдачи
+// транзакции записи сведения вместе с соответствующим EmitTupleWrite (ban #10), под координатой
+// члена, который их выпустил (kaname#933). INSERT использует `ON CONFLICT (<полный ключ>)
+// DO NOTHING`, поэтому повторное сведение того же участника ACTIVE — либо прямой проход и
+// наложение полного асинхронного прохода — идемпотентное пустое действие. Строка уровня выдачи
 // (`source='binding'`) с тем же кортежем несёт пустую координату и остаётся отдельной
 // строкой: у неё свой владелец (Create, RoleTupleReconciler). len==0 is a no-op.
 func (s *reconcileStore) RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, member reconcile.MemberCoord, tuples []domain.MembershipTuple) error {
@@ -1525,10 +1525,10 @@ func (s *reconcileStore) RecordEmittedTuples(ctx context.Context, bindingID doma
 
 // ForgetEmittedTuples снимает ровно названные строки реестра — по ПОЛНОМУ ключу
 // (выдача, координата члена, кортеж) — на пишущей транзакции (eager-revoke /
-// fell-out / expiry), keeping the ledger lock-step with the live FGA tuple set so a
-// later symmetric revoke does not replay a tuple that was already revoked. Строка
+// выпадение / истечение), сохраняя журнал в соответствии с живым набором кортежей FGA, чтобы
+// последующий симметричный отзыв не выдавал заново уже отозванный кортеж. Строка
 // другой координаты с тем же кортежем остаётся: она отвечает за своего члена
-// (kaname#933). A deleted BINDING's rows are dropped by the FK ON DELETE CASCADE
+// (kaname#933). Строки удалённой ПРИВЯЗКИ снимает FK ON DELETE CASCADE
 // (delete.go). len==0 is a no-op.
 func (s *reconcileStore) ForgetEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, rows []reconcile.LedgerRow) error {
 	if len(rows) == 0 {

@@ -67,8 +67,8 @@ func TestRegistrationCatalogWitness_MetadataCannotGrantAuthority(t *testing.T) {
 			_, _ = admin.Exec(context.Background(), "DROP OWNED BY "+role)
 			_, _ = admin.Exec(context.Background(), "DROP ROLE "+role)
 		})
-		// Only existing command/table DML, plus the new metadata DML. No CREATE,
-		// TRIGGER, schema ownership, role membership or SECURITY DEFINER grant.
+		// Только существующий DML команды/таблиц и DML новых метаданных. Без выдачи CREATE,
+		// TRIGGER, владения схемой, членства в роли или SECURITY DEFINER.
 		catalogSelect := "GRANT SELECT ON kaname.catalog_resource TO " + role + "; "
 		if role == noSelect {
 			catalogSelect = "GRANT SELECT(module,resource,object_type,dotted,live,permanent_project) ON kaname.catalog_resource TO " + role + "; "

@@ -7,8 +7,8 @@ package pg_test
 // guard (ban #10: a within-service invariant must be DB-level/atomic, not a
 // software check-then-act).
 //
-// BUG (5th audit, DATA-medium): the personal-resource bootstrap was gated with a
-// cross-transaction TOCTOU — countOwnedAccounts()
+// ДЕФЕКТ (пятый аудит, DATA-medium): bootstrap личных ресурсов защищался
+// межтранзакционным TOCTOU — countOwnedAccounts()
 // opened its OWN reader-tx (SELECT count(*) FROM accounts WHERE owner_user_id=$1),
 // rolled it back, and THEN inserted a personal Account/Project/owner-binding in a
 // SEPARATE writer-tx when the count was 0. For the newIdentity=false path (an
@@ -28,7 +28,7 @@ package pg_test
 // creating a duplicate.
 //
 // RED before the fix (N concurrent bootstraps → N owned accounts), GREEN after
-// (exactly ONE owned account; every bootstrap still succeeds).
+// (ровно ОДИН собственный аккаунт; каждый bootstrap при этом успешен).
 //
 // Тело заведения — `userapp.BootstrapPersonalResourcesTx`, тот же оператор, что
 // служит активации в исходе подтверждения адреса и регистрации. Прежде проба
@@ -53,8 +53,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
-// TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount — N concurrent bootstraps
-// for one already-ACTIVE, zero-account user must create EXACTLY ONE personal
+// TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount — N конкурентных bootstrap
+// для одного уже ACTIVE пользователя без аккаунтов должны создать РОВНО ОДИН личный
 // account (not N).
 func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	if testing.Short() {
@@ -86,8 +86,8 @@ func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	require.Equal(t, 0, ownedAccountCount(t, ctx, pool, string(inviteeID)),
 		"pre-state: activated invitee owns zero accounts")
 
-	// Fire N concurrent bootstraps, released together by a start barrier; each
-	// in its OWN writer-tx, committed on success.
+	// Запускаем N конкурентных bootstrap вместе через стартовый барьер; каждый
+	// в СВОЕЙ транзакции записи, коммит при успехе.
 	const n = 6
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -123,8 +123,8 @@ func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	// Every bootstrap must succeed (the loser returns the already-bootstrapped
-	// user, it does not error).
+	// Каждый bootstrap должен пройти (проигравший возвращает уже подготовленного
+	// пользователя, без ошибки).
 	for i := range errs {
 		require.NoError(t, errs[i], "concurrent bootstrap #%d must succeed", i)
 		require.Equal(t, inviteeID, got[i], "concurrent bootstrap #%d returns the same user", i)

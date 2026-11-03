@@ -658,7 +658,7 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# CHANNEL 2 — group-member. subjects=[group:G], ceremonyGroupUserId ∈ G; read as jwtHumanGroupCeremony.
+# КАНАЛ 2 — участник группы. subjects=[group:G], ceremonyGroupUserId ∈ G; чтение как jwtHumanGroupCeremony.
 # The member's access-set must be IDENTICAL to the user-direct baseline.
 # ===========================================================================
 CASES.append(Case(
@@ -683,7 +683,7 @@ CASES.append(Case(
 # ===========================================================================
 # CHANNEL 2 delta — membership FLIP: addMember grants access, removeMember removes it.
 # Self-contained: bind the group first, add the member (access appears), then remove the
-# member (access gone). Reads as jwtHumanGroupCeremony.
+# участника (доступ исчез). Чтение как jwtHumanGroupCeremony.
 # ===========================================================================
 CASES.append(Case(
     id="IAM-CH-GRP-MEMBERSHIP-FLIP-OK",
@@ -713,7 +713,7 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# CHANNEL 2 delta — group grant does NOT leak to a NON-member. A member (jwtHumanGroupCeremony) gains
+# Дельта КАНАЛА 2 — выдача группе НЕ переходит НЕучастнику. Участник (jwtHumanGroupCeremony) получает
 # access (proves the grant is live); a never-member (jwtNoBindings) is denied (single-shot).
 # ===========================================================================
 CASES.append(Case(

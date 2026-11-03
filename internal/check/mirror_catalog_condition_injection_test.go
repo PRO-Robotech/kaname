@@ -311,8 +311,8 @@ INSERT INTO kaname.resource_mirror(object_type,object_id) VALUES ($1,$2)` + "`"
 			t.Fatalf("постороннее изменение: %v", err)
 		}
 	}
-	// Mixed trigger events enter the unsupported-shape branch before the normal
-	// INSERT binding path. search_path may still resolve an unqualified target.
+	// Смешанные события триггера идут в ветвь неподдерживаемой формы до обычного
+	// пути INSERT привязки. search_path всё ещё может разрешить цель без схемы.
 	for _, target := range []struct {
 		relation string
 		refused  bool
