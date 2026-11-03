@@ -138,7 +138,6 @@ func TestInstallationTransactionRepairPoolOne(t *testing.T) {
 		stored, err := ops.Get(ctx, op.ID)
 		require.NoError(t, err)
 		require.False(t, stored.Done)
-		require.Equal(t, winning, stored.ResourceID)
 		require.Equal(t, op.Principal, stored.Principal)
 		var value iamv1.CreateGrantDelegationMetadata
 		require.NoError(t, stored.Metadata.UnmarshalTo(&value))

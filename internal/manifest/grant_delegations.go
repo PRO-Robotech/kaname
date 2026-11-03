@@ -107,7 +107,7 @@ func refuseNullDelegations(doc *yaml.Node) error {
 	return nil
 }
 
-// Refuse unknown fields from nodes so callers receive structural coordinates,
+// Refuse unknown fields and wrong node kinds so callers receive structural coordinates,
 // independently of yaml.Decoder's human-readable error formatting.
 func refuseUnknownDelegationFields(doc *yaml.Node) error {
 	entries := mapValue(mapValue(doc, "seed"), "grantDelegations")
@@ -115,21 +115,35 @@ func refuseUnknownDelegationFields(doc *yaml.Node) error {
 		return nil
 	}
 	for i, entry := range entries.Content {
-		if entry.Kind != yaml.MappingNode {
-			continue // the normal shape decoder owns non-mapping entries
+		entry, err := delegationNodeKind(doc, entry, yaml.MappingNode, "seed", "grantDelegations", i)
+		if err != nil {
+			return err
 		}
 		for j := 0; j+1 < len(entry.Content); j += 2 {
 			key, value := entry.Content[j].Value, entry.Content[j+1]
 			switch key {
 			case "roleIds", "targetTypes", "subjectTypes":
+				axis, err := delegationNodeKind(doc, value, yaml.SequenceNode, "seed", "grantDelegations", i, key)
+				if err != nil {
+					return err
+				}
+				for k, item := range axis.Content {
+					if _, err := delegationNodeKind(doc, item, yaml.ScalarNode, "seed", "grantDelegations", i, key, k); err != nil {
+						return err
+					}
+				}
 			case "delegate":
-				if value.Kind != yaml.MappingNode {
-					continue
+				value, err = delegationNodeKind(doc, value, yaml.MappingNode, "seed", "grantDelegations", i, "delegate")
+				if err != nil {
+					return err
 				}
 				for k := 0; k+1 < len(value.Content); k += 2 {
 					field := value.Content[k].Value
 					if field != "account" && field != "name" {
 						return linkFault{kind: ErrShape, coord: locate(doc, "seed", "grantDelegations", i, "delegate", field), detail: "unknown field"}
+					}
+					if _, err := delegationNodeKind(doc, value.Content[k+1], yaml.ScalarNode, "seed", "grantDelegations", i, "delegate", field); err != nil {
+						return err
 					}
 				}
 			default:
@@ -138,4 +152,15 @@ func refuseUnknownDelegationFields(doc *yaml.Node) error {
 		}
 	}
 	return nil
+}
+
+// Check the resolved kind without embedding input values in a shape failure.
+// Scalar tags and allowed values remain the strict decoder's and semantic
+// validator's responsibility; valid YAML aliases keep their normal meaning.
+func delegationNodeKind(doc, node *yaml.Node, want yaml.Kind, steps ...any) (*yaml.Node, error) {
+	resolved, err := resolveAlias(node)
+	if err != nil || resolved.Kind != want {
+		return nil, linkFault{kind: ErrShape, coord: locate(doc, steps...), detail: "expected " + nodeKindName(want)}
+	}
+	return resolved, nil
 }
