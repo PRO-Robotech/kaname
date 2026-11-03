@@ -3,10 +3,7 @@
 
 package main
 
-import (
-	"context"
-	"errors"
-)
+import "context"
 
 // superviseStartupTask связывает фатальный отказ стартового досева с общей
 // ручкой гашения. Обычный errgroup.Group сам не отменяет долгоживущие задачи:
@@ -19,9 +16,37 @@ func superviseStartupTask(ctx context.Context, triggerShutdown func(), run func(
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, context.Canceled) && errors.Is(ctx.Err(), context.Canceled) {
+	if ctx.Err() == context.Canceled && onlyStartupCancellation(err) {
 		return nil
 	}
 	triggerShutdown()
 	return err
+}
+
+// onlyStartupCancellation принимает только дерево, у которого каждый лист —
+// context.Canceled. errors.Is отвечает лишь о наличии одной причины и потому
+// не отличает штатную отмену от её объединения с настоящим отказом.
+func onlyStartupCancellation(err error) bool {
+	if err == context.Canceled {
+		return true
+	}
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := wrapped.Unwrap()
+		seen := false
+		for _, cause := range causes {
+			if cause == nil {
+				continue
+			}
+			if !onlyStartupCancellation(cause) {
+				return false
+			}
+			seen = true
+		}
+		return seen
+	case interface{ Unwrap() error }:
+		return onlyStartupCancellation(wrapped.Unwrap())
+	default:
+		return false
+	}
 }

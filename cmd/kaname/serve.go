@@ -2201,7 +2201,7 @@ func runServe(cfg config.Config) error {
 		}
 		verbs, verr := seed.ReseedSystemRoleVerbs(startupCtx, kanameRepo, pool,
 			catalogSnapshot.Facts(), roleVerbReseed)
-		if verr != nil && !errors.Is(verr, context.Canceled) && !errors.Is(verr, context.DeadlineExceeded) {
+		if verr != nil && (verbs.Completed || startupCtx.Err() == nil) {
 			logger.Error("пересчёт проекции глаголов роли отказал",
 				slog.Any("err", verr),
 				slog.Int("roles_examined", verbs.Examined),
@@ -2216,14 +2216,16 @@ func runServe(cfg config.Config) error {
 			slog.Int("roles_failed", verbs.Failed),
 			slog.Int("pairs", verbs.Pairs),
 			slog.Bool("completed", verbs.Completed))
-		if errors.Is(verr, context.Canceled) || errors.Is(verr, context.DeadlineExceeded) {
-			return verr
-		}
 		if verbs.Structural() {
 			return fmt.Errorf("пересчёт проекции глаголов роли: осмотрено %d системных ролей, "+
 				"пересеяно 0 — повтор даст то же самое, и цепь вердикта собирает ответ "+
 				"«разрешено ли действие» из строк, которых нет: %w",
 				verbs.Examined, verr)
+		}
+		if !verbs.Completed {
+			if err := startupCtx.Err(); err != nil {
+				return err
+			}
 		}
 		// Пересчёт проекции ОБЪЯВЛЕННЫХ СЕГМЕНТОВ правила — третья сторона того
 		// же правила и СВОЯ полоса отказа (kacho#1821).
@@ -2246,7 +2248,7 @@ func runServe(cfg config.Config) error {
 			return err
 		}
 		refs, rerr := seed.ReseedSystemRoleRuleRefs(startupCtx, kanameRepo, pool, ruleRefReseed)
-		if rerr != nil && !errors.Is(rerr, context.Canceled) && !errors.Is(rerr, context.DeadlineExceeded) {
+		if rerr != nil && (refs.Completed || startupCtx.Err() == nil) {
 			logger.Error("пересчёт проекции сегментов правила отказал",
 				slog.Any("err", rerr),
 				slog.Bool("structural", refs.Structural()),
@@ -2262,8 +2264,10 @@ func runServe(cfg config.Config) error {
 			slog.Int("roles_failed", refs.Failed),
 			slog.Int("refs", refs.Refs),
 			slog.Bool("completed", refs.Completed))
-		if errors.Is(rerr, context.Canceled) || errors.Is(rerr, context.DeadlineExceeded) {
-			return rerr
+		if !refs.Completed {
+			if err := startupCtx.Err(); err != nil {
+				return err
+			}
 		}
 		// Перепись встроенного доступа. Системные выдачи можно ОТОЗВАТЬ — это и есть
 		// предмет kacho#893/#895, — поэтому их отсутствие обязано быть видно оператору, а
