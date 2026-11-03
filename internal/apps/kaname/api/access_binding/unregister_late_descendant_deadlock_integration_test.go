@@ -4,8 +4,8 @@
 package access_binding_test
 
 // verifies https://github.com/PRO-Robotech/kaname/issues/1019
-// Real PostgreSQL, lawful grants, and one-shot port barriers. The child is
-// registered AFTER the first census, while the parent is still committed.
+// Настоящий PostgreSQL, допустимые выдачи и одноразовые барьеры портов. Потомок
+// регистрируется ПОСЛЕ первой переписи, пока родитель ещё закоммичен.
 
 import (
 	"context"
@@ -70,7 +70,7 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 	w := newDescendantRingWorld(t)
 	ctx, cancel := context.WithTimeout(w.ctx, 90*time.Second)
 	defer cancel()
-	// These are legitimate grants to a future child, not fabricated SQL rows.
+	// Это допустимые выдачи будущему потомку, не выдуманные строки SQL.
 	var fx descendantRing
 	for i := 0; i < 20; i++ {
 		parent := raceKey(24000, i)
@@ -163,7 +163,7 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 		}
 		return false
 	}, 15*time.Second, 10*time.Millisecond, "fixture: R must block on U's BX after sorted binding lock begins")
-	// A third transaction proves B1 is already locked before U is released.
+	// Третья транзакция доказывает, что B1 уже заперт до освобождения U.
 	probe, err := w.pool.Begin(ctx)
 	require.NoError(t, err)
 	_, err = probe.Exec(ctx, `SELECT id FROM kaname.access_bindings WHERE id=$1 FOR UPDATE NOWAIT`, fx.b1)

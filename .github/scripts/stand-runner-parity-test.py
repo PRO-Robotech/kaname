@@ -186,8 +186,8 @@ class World:
                         FIXTURE_WORLD=str(base), FIXTURE_PY=sys.executable,
                         KANAME_STAND_IN_POD="inherited-after-world-cleanup", KEEP_SENTINEL="retained",
                         GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
-        # Операционный envelope payload/export, отдельно от expected workflow toolset.
-        # Это настоящие capabilities base-fixture, не успешные ответы apt peer.
+        # Операционная оболочка полезной нагрузки/экспорта, отдельно от ожидаемого набора инструментов процесса.
+        # Это настоящие возможности базовой фикстуры, не успешные ответы соседа apt.
         operational = ("bash", "cat", "chmod", "cut", "date", "find", "git", "grep", "gzip", "head",
                        "install", "jq", "mkdir", "mv", "openssl", "rm", "seq", "sha256sum", "sh",
                        "sleep", "sort", "stat", "tar", "tail", "uname")
@@ -231,10 +231,10 @@ with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'apt-peer.jsonl').open('a') as o
 if os.environ.get('FIXTURE_APT_FAIL'):
  print('controlled apt peer failure',file=sys.stderr);sys.exit(23)
 ''')
-        # A stale fallback remains present: lawful bootstrap must select its
-        # exact provider without deleting or accepting this older executable.
+        # Устаревший запасной файл остаётся: допустимый bootstrap должен выбрать своего
+        # точного поставщика, не удаляя и не принимая этот старый исполняемый файл.
         executable(self.work / "bin/kubectl", '#!/bin/sh\necho "Client Version: v1.31.2"\n')
-        # Необъявленные пины образа не сочиняются: эти base-image tools лишь присутствуют.
+        # Необъявленные пины образа не сочиняются: эти инструменты базового образа лишь присутствуют.
         for tool in ("helm", "docker"):
             executable(self.bin / tool, '#!/bin/sh\necho "fixture-base-image-tool"\n')
         installer = '''#!/usr/bin/env python3
@@ -277,7 +277,7 @@ target.write_text("#!/bin/sh\\nprintf '%s\\n' "+repr(version)+"\\n")
 target.chmod(0o755)
 '''
         executable(self.bin / "go", installer)
-        # Python остаётся настоящим; только сетевой install peer заменён контролируемым.
+        # Python остаётся настоящим; только сетевой сосед установки заменён контролируемым.
         executable(self.bin / "python3", '''#!/bin/sh
 if [ "$1 $2" = '-m venv' ]; then
   for last; do :; done
@@ -298,8 +298,8 @@ if [ "$1 $2 $3" = '-m pip install' ]; then
 fi
 exec "$FIXTURE_PY" "$@"
 ''')
-        # Операционная возможность base-fixture, не доказательство настоящего apt install:
-        # tar получает реальный декодер байтов stdlib lzma. Apt peer остаётся явно
+        # Операционная возможность базовой фикстуры, не доказательство настоящего apt install:
+        # tar получает реальный декодер байтов stdlib lzma. Сосед apt остаётся явно
         # подставным; неизвестный argv и испорченный архив не дают успешного status.
         executable(self.bin / "xz", '''#!/usr/bin/env python3
 import lzma, sys
@@ -321,9 +321,9 @@ sys.stdout.buffer.write(lzma.decompress(sys.stdin.buffer.read()))
         (peers / "pip/__main__.py").write_text("import os,sys,pathlib\nif sys.argv[1:] == ['--version']: print('pip '+os.environ['KANAME_RUNNER_PIP']); sys.exit(0)\nassert sys.argv[1] == 'install'\nwith (pathlib.Path(os.environ['FIXTURE_WORLD'])/'python-install-argv').open('a') as out: out.write(repr(sys.argv[1:])+'\\n')\n")
         self.env["PYTHONPATH"] = str(peers) + os.pathsep + os.environ.get("PYTHONPATH", "")
         self.env["FIXTURE_SITE_PATHS"] = "\n".join(p for p in sys.path if "site-packages" in p or "dist-packages" in p)
-        # Controlled peers provide synthetic Go/Node/Helm archives. The production
-        # bootstrap still verifies their bytes; the Docker workflow digest requires
-        # the real parent provider archive. The outer native run proves real CLIs.
+        # Контролируемые соседи дают синтетические архивы Go/Node/Helm. Производственный
+        # bootstrap по-прежнему проверяет их байты; digest процесса Docker требует
+        # настоящий архив родительского поставщика. Внешний нативный прогон доказывает настоящие CLI.
         outer_work = Path(os.environ["KANAME_RUNNER_WORK"])
         self.env["FIXTURE_DOCKER_ARCHIVE"] = str(outer_work / "docker.tgz")
         node = self.provider["KANAME_RUNNER_NODE"]
@@ -341,7 +341,7 @@ sys.stdout.buffer.write(lzma.decompress(sys.stdin.buffer.read()))
                     raw = body.encode(); info = tarfile.TarInfo(filename); info.size = len(raw); info.mode = 0o755
                     tar.addfile(info, io.BytesIO(raw))
         (self.work / "kubectl-fixture").write_text("#!/bin/sh\necho " + shlex.quote(json.dumps({"clientVersion": {"gitVersion": kubectl}})) + "\n")
-        # These peers must remain available after bootstrap deliberately clears PATH.
+        # Эти соседи должны остаться доступны после намеренного сброса PATH в bootstrap.
         provider_bin = self.work / "provider/bin"
         provider_bin.mkdir(parents=True)
         for name in ("python3",):
@@ -376,7 +376,7 @@ elif "-o" in a:
  shutil.copyfile(file,a[a.index("-o")+1])
 else: sys.exit(74)
 ''')
-        # The first download occurs after the controlled PATH is installed.
+        # Первая загрузка идёт после установки контролируемого PATH.
 
     def run(self, command, extra_install="", payload=None, expected_stage="command"):
         text = self.payload if payload is None else payload
@@ -427,7 +427,7 @@ def payload_checks(root, payload, axis="all"):
         probe = "import importlib, importlib.metadata, json, pathlib, re, shutil, subprocess, sys\n" + inspect.getsource(verify_tools) + "\nsys.exit(verify_tools(json.loads(pathlib.Path(sys.argv[1]).read_text())))\n"
         tool_worlds = (("actual", ""), ("workflow-lawful", "\n".join(blocks)), ("pin-mutant", "")) if axis in ("all", "tools") else ()
         for label, install in tool_worlds:
-            # Один и тот же root/layout: меняется только факт workflow install.
+            # Один и тот же корень/структура каталогов: меняется только факт установки процессом.
             pair_root = base / "workflow-lawful"
             shutil.rmtree(pair_root, ignore_errors=True)
             world = World(pair_root, payload)
@@ -470,8 +470,8 @@ def payload_checks(root, payload, axis="all"):
                 if label != "missing-expected":
                     stub = world.work / "oracle-shadow/git"
                     executable(stub, "#!/bin/sh\necho " + shlex.quote("git version " + installs["git"][0] + ("1" if label == "version-prefix" else "")) + "\nexit " + ("0" if label == "version-prefix" else "23") + "\n")
-                    # World.run remaps canonical roots once; an expanded native
-                    # /work/... path would be remapped a second time here.
+                    # World.run один раз переназначает канонические корни; раскрытый нативный
+                    # путь /work/... здесь переназначился бы второй раз.
                     extra = 'export PATH=/work/oracle-shadow:$PATH'
                 result = world.run("python3 /work/ship/tools.py /work/ship/tools.json", extra)
                 assert result.returncode == 1, (label,result.stdout)
@@ -491,8 +491,8 @@ def payload_checks(root, payload, axis="all"):
                     assert (world.work / "out/privilege-payload").exists() == (not fail)
                     if fail: assert "controlled apt peer failure" in result.stdout
                     print("PARITY-PRIVILEGE uid=" + uid + " apt=named-peer refused=" + str(fail) + " rc=" + str(result.returncode), flush=True)
-            # Existing wrong portable tools are replaced, rather than accepted by
-            # command -v. The lawful pair uses the same full production bootstrap.
+            # Существующие неверные переносимые инструменты заменяются, а не принимаются через
+            # command -v. Допустимая пара использует тот же полный производственный bootstrap.
             existing = World(base / "wrong-existing", payload)
             executable(existing.work / "provider/node/bin/node", "#!/bin/sh\necho v0.0.1042\n")
             repaired = existing.run("node --version")
@@ -548,8 +548,8 @@ def payload_checks(root, payload, axis="all"):
                 if label == "invalid-uid": (marker/"uid").write_text("not-a-pod-uid")
                 world.env.update(KANAME_STAND_EXT_NS="t999-other" if label == "wrong-namespace" else "t841-kaname-own", KANAME_STAND_TASK="841")
                 setup = "\nSA_DIR=" + shlex.quote(str(sa)) + "\nPOD_ID_DIR=" + shlex.quote(str(marker)) + "\nin_pod_detect\nROOT=" + shlex.quote(str(world.src)) + "\nRUNDIR=" + shlex.quote(str(world.work/"child-run")) + "\nROUTE_FILE=\"$RUNDIR/route\"\nROUTE_LOG=\"$RUNDIR/route.log\"\n"
-                # Only service/API peers are replaced; route decisions, ownership,
-                # persisted-route handling and the actual CLI dispatch are unchanged.
+                # Подменены только соседи сервисов/API; решения маршрута, владение,
+                # обработка сохранённого маршрута и фактическая диспетчеризация CLI не меняются.
                 peers = r'''
 test -z "${KANAME_STAND_IN_POD+x}" || exit 89
 kc() { printf '%s\n' "$*" >> "$PARITY_CHILD_CALLS"; case "$*" in *namespaces*|*'delete namespace'*) return 88;; esac; return 0; }

@@ -920,9 +920,9 @@ func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, p
 // обращения к зеркалу. Переведённое имя возвращается вызывающему: пост-коммитный
 // проход материализации адресует ТОТ ЖЕ объект, что легло в зеркало, и второй
 // перевод у него разошёлся бы с первым молча.
-// A new descendant may commit between the first census and the mirror deletion.
-// Its grant locks belong BEFORE every mirror/fact lock (kaname#975). Restart the whole
-// transaction with a larger lock plan; hints never authorize deleting an object.
+// Новый потомок может закоммититься между первой переписью и удалением зеркала.
+// Его замки выдач идут ДО всех замков зеркала/фактов (kaname#975). Всю
+// транзакцию начинаем заново с расширенным планом замков; подсказки не разрешают удалять объект.
 const unregisterClosureAttempts = 8
 
 type descendantClosureExpanded struct {
@@ -940,8 +940,8 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		objectType, changed, unchanged, err := uc.emitAttempt(ctx, t, row, write, hints, extra...)
 		var expanded *descendantClosureExpanded
 		if !stderrors.As(err, &expanded) {
-			// Includes commit failures: their outcome may be ambiguous. They must
-			// never enter this private, pre-commit retry protocol.
+			// Включая отказы коммита: их исход может быть неоднозначным. Они
+			// никогда не входят в этот внутренний протокол повторов до коммита.
 			return objectType, changed, unchanged, err
 		}
 		for _, key := range expanded.keys {
@@ -961,14 +961,14 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	defer func() {
-		// Release the abandoned attempt even when its request was cancelled.
+		// Освобождаем брошенную попытку, даже если её запрос отменён.
 		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		rollbackErr := tx.Rollback(rollbackCtx)
 		var expanded *descendantClosureExpanded
 		if rollbackErr != nil && stderrors.As(err, &expanded) {
-			// No next transaction until rollback is confirmed. Do not expose the
-			// driver error (credentials/addresses), or retain the retry marker.
+			// Следующая транзакция не начинается до подтверждения отката. Не раскрываем
+			// ошибку драйвера (учётные данные/адреса) и не сохраняем маркер повтора.
 			err = iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 		}
 	}()
@@ -1109,7 +1109,7 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 			}
 			return keys[i].ID < keys[j].ID
 		})
-		// One binding-id ordered lock set, then one role-id ordered lock set.
+		// Один набор замков по binding-id, затем один набор по role-id.
 		if err = uc.withdrawal.LockTx(ctx, tx, keys); err != nil {
 			return "", false, false, fmt.Errorf("lock grants of unregistered resource: %w", err)
 		}
@@ -1213,8 +1213,8 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 	}
 	if err := tx.Commit(ctx); err != nil {
 		// Backend-down at commit → retriable Unavailable (same opaque, no-leak
-		// contract as Begin). The outcome may be ambiguous; there is no internal
-		// retry. The caller's idempotent drainer may re-deliver.
+		// контракт, как у Begin). Исход может быть неоднозначным; внутреннего
+		// повтора нет. Идемпотентный исполнитель вызывающего может доставить повторно.
 		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	return objectType, changed, projectionUnchanged, nil
@@ -1345,8 +1345,8 @@ func (uc *RegisterResourceUseCase) dropDescendantRegistrations(ctx context.Conte
 		}
 	}
 	if len(added) != 0 {
-		// Preserve the entire previous lock plan, including the first census:
-		// successive attempts only enlarge hints, even if a descendant moves.
+		// Сохраняем весь прежний план замков, включая первую перепись:
+		// следующие попытки только расширяют подсказки, даже если потомок перемещается.
 		for key := range locked {
 			added = append(added, key)
 		}

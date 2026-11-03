@@ -48,7 +48,7 @@ type Row struct {
 	// `iam.account`): им названа колонка зеркала, и им же зовёт регистрация.
 	//
 	// Цепь предков этой же строки ложится словарём МОДЕЛИ ПРАВ — перевод делает
-	// DB command. Разница не косметическая: по цепи ходит
+	// команду БД. Разница не косметическая: по цепи ходит
 	// вопрос о доступе, а он приходит словарём модели.
 	ObjectType      string
 	ObjectID        string
@@ -80,10 +80,10 @@ type Row struct {
 	ParentChain []string
 }
 
-// StmtRegistrationCommand is shared with scalegrid so measurement exercises the
-// complete production writer, including nested validation and edge projection.
-// The VOLATILE command trigger takes the mirror lock in a separate SPI statement
-// before comparing the chain (kaname#874); one local binding judges the whole payload.
+// StmtRegistrationCommand общий со scalegrid, поэтому замер исполняет
+// полный производственный путь записи, включая вложенную валидацию и проекцию рёбер.
+// Триггер команды VOLATILE берёт замок зеркала отдельным оператором SPI
+// до сравнения цепочки (kaname#874); одна локальная привязка судит всю полезную нагрузку.
 const StmtRegistrationCommand = `INSERT INTO kaname.resource_registration_command
     (dotted_type, object_id, parent_project_id, parent_account_id, labels, source_version, parent_chain)
     VALUES ($1, $2, $3, $4, $5::jsonb, $6::timestamptz, $7::text[])
@@ -124,9 +124,9 @@ type Outcome struct {
 // SAME source_version is likewise a no-op (`<` is strict). Equal/newer in-order
 // register applies and advances source_version.
 //
-// The DB command owns the full payload and both physical projections. Its
-// refusal rolls back the complete statement; the caller still owns commit of
-// mirror, tuple, audit and reconcile effects in the same transaction.
+// Команда БД владеет всей полезной нагрузкой и обеими физическими проекциями. Её
+// отказ откатывает весь оператор; вызывающий по-прежнему владеет коммитом
+// эффектов зеркала, кортежей, аудита и сведения в той же транзакции.
 func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	if tx == nil {
 		return Outcome{}, fmt.Errorf("resource_mirror: tx must not be nil")
@@ -173,7 +173,7 @@ func splitObjectRef(ref string) (typ, id string, ok bool) {
 // ПОЧЕМУ ЦЕПЬ СНИМАЕТСЯ ЗДЕСЬ, А НЕ ОСТАВЛЯЕТСЯ БАЗЕ
 //
 // Регистрация пишет обе половины одной транзакцией (`UpsertTx` →
-// registration command), а снятие убирало только первую. Досняться цепи неоткуда:
+// команду регистрации), а снятие убирало только первую. Досняться цепи неоткуда:
 // внешнего ключа с зеркала на ребро НЕТ и быть не может — стороны названы
 // РАЗНЫМИ словарями (зеркало — словарём каталога, `vpc.securityGroup`; ребро —
 // словарём модели прав, `vpc_security_group`), поэтому каскад тут невыразим by
@@ -235,7 +235,7 @@ func DeleteTx(ctx context.Context, tx pgx.Tx, objectType, objectID string, tombs
 	deleted := tag.RowsAffected() > 0
 	// Цепь предков — вторая половина той же регистрации. Перевод словаря берётся
 	// ЕДИНСТВЕННЫЙ и тот же, которым цепь писалась (`modelTypeName` в
-	// registration command): назови её здесь словарём каталога — снятие не совпало
+	// команда регистрации): назови её здесь словарём каталога — снятие не совпало
 	// бы ни с одним ребром и промолчало бы, то есть выглядело бы исполненным.
 	//
 	// Перевод ливность НЕ спрашивает (см. model_dictionary.go): условие приёма

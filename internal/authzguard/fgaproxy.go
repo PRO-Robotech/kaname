@@ -126,7 +126,7 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 	// учёткой модуля из необъявленного пространства модулем не является.
 	module, ok := g.modules.FromContext(ctx)
 	if !ok {
-		// Malformed / foreign-trust-domain / undeclared SAN → not a module identity.
+		// Некорректный SAN / чужой домен доверия / необъявленный SAN → не личность модуля.
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
 	domain := module.Service

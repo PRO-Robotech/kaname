@@ -30,7 +30,7 @@ func TestUserAudit_5_2_14_InviteActivationEmitsUpdated(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
 
-	// Seed a PENDING invite row with the verification mark of our lane:
+	// Сеем строку приглашения PENDING с отметкой проверки нашей полосы:
 	// активация идёт только в исходе подтверждения адреса (kaname#456, Р11).
 	owner, accID := seedUserAccount(t, ctx, env.pool, "usr14upd")
 	_ = owner
