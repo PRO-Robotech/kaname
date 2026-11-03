@@ -100,6 +100,7 @@ type installationServeDependencies struct {
 	observeCredential              func(string, string)
 	decorateInstallationReader     func(*kanamepg.InstallationReader) installationReadSource
 	installationPageSize           int
+	afterCompletedInstallationPair func(context.Context, installationCompletedPair) error
 }
 
 func runServe(cfg config.Config, optional ...installationServeDependencies) error {
@@ -594,7 +595,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if installationDependencies.decorateInstallationRepository != nil {
 		installationRepo = installationDependencies.decorateInstallationRepository(installationRepo)
 	}
-	if err := applyInstallationDelegations(ctx, logger, installationAuthn, installationRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), installationPageSize, appliedManifests); err != nil {
+	if err := applyInstallationDelegations(ctx, logger, installationAuthn, installationRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), installationPageSize, appliedManifests, installationDependencies.afterCompletedInstallationPair); err != nil {
 		return err
 	}
 

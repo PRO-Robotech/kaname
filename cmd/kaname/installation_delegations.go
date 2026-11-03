@@ -37,7 +37,14 @@ type installationReadSource interface {
 	InstallationReferences(context.Context, string, string, []string) (domain.ServiceAccountID, []string, error)
 }
 
-func applyInstallationDelegations(ctx context.Context, logger *slog.Logger, authn *installationAuthentication, repo gdapp.Repo, reads installationReadSource, ops operations.Repo, cat catalog.Source, relations clients.RelationStore, plans *authzmodel.Plans, target string, pageSize int, manifests []*manifest.Manifest) error {
+// Immutable value emitted only after the real successful Operation has completed.
+// The ordinary startup supplies no observer; no transaction is held here.
+type installationCompletedPair struct {
+	CompletedPairs                     int
+	AccountID, DelegateID, OperationID string
+}
+
+func applyInstallationDelegations(ctx context.Context, logger *slog.Logger, authn *installationAuthentication, repo gdapp.Repo, reads installationReadSource, ops operations.Repo, cat catalog.Source, relations clients.RelationStore, plans *authzmodel.Plans, target string, pageSize int, manifests []*manifest.Manifest, afterCompleted ...func(context.Context, installationCompletedPair) error) error {
 	if !hasInstallationDelegations(manifests) {
 		return nil
 	}
@@ -63,7 +70,7 @@ func applyInstallationDelegations(ctx context.Context, logger *slog.Logger, auth
 					return failInstallation(logger, "delegation", "", string(account), string(delegate), pairs, err)
 				}
 				if err := authzguard.RequireClusterAdmin(verified, relations); err != nil {
-					return failInstallation(logger, "delegation", "", string(account), string(delegate), pairs, err)
+					return failInstallation(logger, "authority", "", string(account), string(delegate), pairs, err)
 				}
 				op, err := create.ExecuteInstallation(verified, gdapp.CreateInput{
 					AccountID: string(account), DelegateType: "SUBJECT_TYPE_SERVICE_ACCOUNT", DelegateID: string(delegate),
@@ -76,6 +83,13 @@ func applyInstallationDelegations(ctx context.Context, logger *slog.Logger, auth
 					return failInstallation(logger, "delegation", "", string(account), string(delegate), pairs, err)
 				}
 				pairs++
+				if len(afterCompleted) > 0 && afterCompleted[0] != nil {
+					if err := afterCompleted[0](ctx, installationCompletedPair{CompletedPairs: pairs, AccountID: string(account), DelegateID: string(delegate), OperationID: op.ID}); err != nil {
+						// Internal observer/control errors are not installation Writer or
+						// authority results: never manufacture an installation result.
+						return err
+					}
+				}
 			}
 		}
 	}

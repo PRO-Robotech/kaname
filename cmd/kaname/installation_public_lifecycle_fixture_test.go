@@ -441,7 +441,7 @@ func (w *ridLifecycleWorld) grant(t *testing.T, body any) *iamv1.AccessBinding {
 	require.True(t, metadata.MessageIs(&creation))
 	require.NoError(t, metadata.UnmarshalTo(&creation))
 	require.Equal(t, binding.Id, creation.AccessBindingId)
-	require.Equal(t, w.f.tenantID, creation.AccountId)
+	require.Equal(t, request.ScopeId, creation.AccountId) // actual requested account, including canonical-first S2 account
 	require.NotEmpty(t, binding.Id)
 	require.NotContains(t, beforeBindings, binding.Id)
 	w.requireGrantRequest(t, &request, &binding)

@@ -191,17 +191,95 @@ func TestRID_08_SnapshotPagesAndFutureAccount(t *testing.T) {
 		}})
 }
 func TestRID_09_WholeDeliveryPreflight(t *testing.T) {
+	var observed []rid09Observation
+	attempted := false
+	negative := func(t *testing.T) { attempted = true; observed = rid09Matrix(t, false, nil) }
+	preserved := func(t *testing.T) {
+		if !attempted {
+			negative(t)
+		}
+		rid09RequireMatrixPreserved(t, observed)
+	}
+	twins := func(t *testing.T) {
+		result := rid09Matrix(t, true, nil)
+		require.Len(t, result, 8)
+		for _, p := range result {
+			require.True(t, p.Twin)
+			require.NotNil(t, p.GDPublic)
+			require.Len(t, p.GDPublic.Delegations, 6)
+			require.False(t, p.Return.ErrorPresent)
+		}
+	}
 	runInstallationRID(t,
-		ridPredicate{name: "complete M1 M2 fresh worlds both orders for foreign role target subject delegate"},
-		ridPredicate{name: "every invalid axis preserves catalog roles own seed SA groups joins grants GD snapshots"},
-		ridPredicate{name: "single-field legal twin writes both full manifests and every N pair"})
+		ridPredicate{name: "complete M1 M2 fresh worlds both orders for foreign role target subject delegate", run: negative},
+		ridPredicate{name: "every invalid axis preserves catalog roles own seed SA groups joins grants GD snapshots", run: preserved},
+		ridPredicate{name: "single-field legal twin writes both full manifests and every N pair", run: twins})
 }
 func TestRID_10_MidRunFaultAndRetirement(t *testing.T) {
+	proofs := map[string]*rid10Proof{}
+	attempted := map[string]bool{}
+	ensure := func(t *testing.T, mode string, twin bool) *rid10Proof {
+		t.Helper()
+		key := mode
+		if twin {
+			key += "-lawful-twin"
+		}
+		if !attempted[key] {
+			attempted[key] = true
+			require.True(t, t.Run(key, func(t *testing.T) { proofs[key] = rid10Run(t, mode, twin) }))
+		}
+		require.NotNil(t, proofs[key], "selected predicate requires its actual successful scenario, never an empty receipt")
+		return proofs[key]
+	}
 	runInstallationRID(t,
-		ridPredicate{name: "first pair committed observed; unknown Writer BeginTx only after normal second Operation Create"},
-		ridPredicate{name: "second Operation done INTERNAL internal error; first kept; no later pairs"},
-		ridPredicate{name: "independent O RevokeAdmin at same boundary; denial before next Operation"},
-		ridPredicate{name: "remove only fault or restore only admin; retry N stable first ID; no-fault twins"})
+		ridPredicate{name: "first pair committed observed; unknown Writer BeginTx only after normal second Operation Create", run: func(t *testing.T) {
+			p := ensure(t, "fault", false)
+			require.Len(t, p.Accounts, 3)
+			require.NotEqual(t, p.System, p.NamedSystem)
+			require.Equal(t, []string{p.First.ID}, p.AtBoundary)
+			require.NotNil(t, p.Failure)
+			require.NotEqual(t, p.First.ID, p.Failure.ID)
+			require.NotEqual(t, p.First.Winner, p.Failure.Proposed)
+			require.True(t, p.Returned.FaultInjected && p.Returned.FaultContextLive && p.Returned.ControlOK)
+		}},
+		ridPredicate{name: "second Operation done INTERNAL internal error; first kept; no later pairs", run: func(t *testing.T) {
+			p := ensure(t, "fault", false)
+			require.NotNil(t, p.Failure)
+			require.True(t, p.Failure.Done && p.Failure.MessageMatches)
+			require.EqualValues(t, 13, p.Failure.Code)
+			require.Len(t, p.AfterFailure, 2)
+			require.Contains(t, p.AfterFailure, p.First.ID)
+			require.Equal(t, p.First.Winner, p.PairIDs[p.First.Account])
+			require.Equal(t, p.First.CreatedAt, p.Created[p.First.Account])
+			require.NotEmpty(t, p.FirstG)
+		}},
+		ridPredicate{name: "independent O RevokeAdmin at same boundary; denial before next Operation", run: func(t *testing.T) {
+			p := ensure(t, "retirement", false)
+			require.Equal(t, p.AtBoundary, p.AfterFailure)
+			require.Nil(t, p.Failure)
+			require.EqualValues(t, 7, p.Returned.Code)
+			require.True(t, p.Returned.MessageMatches && p.Returned.ControlOK)
+			require.EqualValues(t, 1, p.Returned.WriterArrivals)
+		}},
+		ridPredicate{name: "remove only fault or restore only admin; retry N stable first ID; no-fault twins", run: func(t *testing.T) {
+			// Run both independent twins before dependent receipt comparisons;
+			// one failed negative must not suppress the fresh-world census.
+			for _, mode := range []string{"fault", "retirement"} {
+				t.Run(mode+"-independent-twin", func(t *testing.T) { ensure(t, mode, true) })
+			}
+			for _, mode := range []string{"fault", "retirement"} {
+				p := ensure(t, mode, false)
+				twin := ensure(t, mode, true)
+				require.Len(t, p.Recovery, 3)
+				require.Len(t, p.PairIDs, 3)
+				require.Len(t, twin.PairIDs, 3)
+				require.Equal(t, p.First.Winner, p.PairIDs[p.First.Account])
+				require.Equal(t, p.First.CreatedAt, p.Created[p.First.Account])
+				require.EqualValues(t, 0, twin.Returned.Code)
+				require.Equal(t, 3, twin.Returned.Completed)
+				require.True(t, twin.Returned.ControlOK && twin.Returned.MessageMatches)
+			}
+		}})
 }
 func TestRID_11_InputAuthnAuthorityBackend(t *testing.T) {
 	runInstallationRID(t,
