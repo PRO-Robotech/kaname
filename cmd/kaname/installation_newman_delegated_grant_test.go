@@ -59,6 +59,9 @@ func rid03NewmanActor(caseID string) (string, bool) {
 // Read-only full RR raw snapshot, with the reviewed RID09 projection on either
 // side. The caller owns ONE aggregate budget for SQL, readiness and return.
 func rid03CaptureNewmanSnapshot(t *testing.T, ctx context.Context, f *installationNativeWorld) (rid03NewmanSnapshot, bool) {
+	return rid03CaptureNewmanSnapshotWithCensus(t, ctx, f, nil)
+}
+func rid03CaptureNewmanSnapshotWithCensus(t *testing.T, ctx context.Context, f *installationNativeWorld, census func(context.Context, pgx.Tx)) (rid03NewmanSnapshot, bool) {
 	t.Helper()
 	require.NoError(t, ctx.Err())
 	s := rid03NewmanSnapshot{Projection: rid09ReadNewmanProjectionContext(t, ctx, f), Raw: map[string][]rid09PrimaryRow{}}
@@ -83,6 +86,9 @@ func rid03CaptureNewmanSnapshot(t *testing.T, ctx context.Context, f *installati
 	}
 	s.Raw["operations"] = rid09PrimaryRows(t, ctx, tx, "operations")
 	s.BusinessAudit = rid03ReadBusinessAudit(t, ctx, tx)
+	if census != nil {
+		census(ctx, tx)
+	}
 	require.NoError(t, tx.Commit(ctx))
 	after := rid09ReadNewmanProjectionContext(t, ctx, f)
 	require.NoError(t, ctx.Err(), "RID03 aggregate capture deadline before return")

@@ -84,9 +84,14 @@ func (w *ridLifecycleWorld) creatorReferenceCensus(t *testing.T, allowedActiveDe
 	requireNativeAuthority(t, f.given, "service_account", f.creator.ID, 0)
 }
 func (w *ridLifecycleWorld) deleteCreator(t *testing.T) {
+	w.deleteCreatorObserved(t, nil)
+}
+func (w *ridLifecycleWorld) deleteCreatorObserved(t *testing.T, public *rid05PublicContext) {
 	t.Helper()
 	w.revokeCreatorKeys(t)
 	w.creatorReferenceCensus(t, "")
+	public.keysClean(t, w)
+	public.beforeNativeDelete(t, w)
 	before := w.snapshot(t)
 	w.f.ridOperation(t, "DELETE", "/iam/v1/serviceAccounts/"+w.f.creator.ID, w.f.operator.Bearer(), nil, 0)
 	code, raw := w.f.ridRequest(t, "GET", "/iam/v1/serviceAccounts/"+w.f.creator.ID, w.f.operator.Bearer(), nil)
@@ -98,20 +103,31 @@ func (w *ridLifecycleWorld) deleteCreator(t *testing.T) {
 	var n int
 	require.NoError(t, w.f.given.pool.QueryRow(w.f.given.ctx, `SELECT count(*) FROM kaname.service_accounts WHERE id=$1`, w.f.creator.ID).Scan(&n))
 	require.Zero(t, n)
+	public.nativeDeleted(t, w)
+	public.deleted(t, w)
 }
 func (w *ridLifecycleWorld) oldCredentialRefused(t *testing.T) {
+	w.oldCredentialRefusedObserved(t, nil)
+}
+func (w *ridLifecycleWorld) oldCredentialRefusedObserved(t *testing.T, public *rid05PublicContext) {
 	t.Helper()
 	code, oauth, assertion, err := w.f.wire.StandingKeyRefusal(w.f.given.ctx, w.f.creator, "https://kaname.local", "https://kaname.local")
 	w.f.secrets = append(w.f.secrets, assertion)
 	require.NoError(t, err)
 	require.Equal(t, 401, code)
 	require.Equal(t, "invalid_client", oauth)
-	w.refusedApply(t, installationResult{Stage: "authentication", Code: "UNAUTHENTICATED"})
+	public.beforeRefusedApply(t, w)
+	w.refusedApplyObserved(t, installationResult{Stage: "authentication", Code: "UNAUTHENTICATED"}, func() { public.refusalBeforeRestore(t, w) })
+	public.afterRefusedApply(t, w)
 }
 func rid05DeletedWorld(t *testing.T, w *ridLifecycleWorld) (*iamv1.AccessBinding, map[string]any) {
+	return rid05DeletedWorldObserved(t, w, nil)
+}
+func rid05DeletedWorldObserved(t *testing.T, w *ridLifecycleWorld, public *rid05PublicContext) (*iamv1.AccessBinding, map[string]any) {
 	t.Helper()
 	g, body := rid04Retire(t, w)
-	w.deleteCreator(t)
+	public.prepare(t, w, g, body)
+	w.deleteCreatorObserved(t, public)
 	w.issuerToken = w.f.ridToken(t, w.issuer)
 	w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
 	w.unchangedActive(t, g)
@@ -130,25 +146,34 @@ func rid05NewSameName(t *testing.T, w *ridLifecycleWorld) string {
 	return id
 }
 func ridNativeCreatorDelete(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) { rid05DeletedWorld(t, w); w.oldCredentialRefused(t) })
+	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+		public := rid05PublicConsumer(t, w, "deleted")
+		rid05DeletedWorldObserved(t, w, public)
+		w.oldCredentialRefusedObserved(t, public)
+		public.deletedGrant(t, w)
+	})
 }
 func ridNativeSameNameDoesNotRestore(t *testing.T) {
 	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
-		g, body := rid05DeletedWorld(t, w)
-		w.oldCredentialRefused(t)
+		public := rid05PublicConsumer(t, w, "same-name")
+		g, body := rid05DeletedWorldObserved(t, w, public)
+		w.oldCredentialRefusedObserved(t, public)
 		before := w.snapshot(t)
-		rid05NewSameName(t, w)
+		c2 := rid05NewSameName(t, w)
+		public.sameName(t, w, c2)
 		require.Equal(t, before, w.snapshot(t))
 		w.issuerToken = w.f.ridToken(t, w.issuer)
 		w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
 		w.unchangedActive(t, g)
-		w.oldCredentialRefused(t)
+		w.oldCredentialRefusedObserved(t, public)
 		w.unchangedActive(t, g)
 	})
 }
 func ridNativeActiveDelegateDeleteGuard(t *testing.T) {
 	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+		public := rid05PublicConsumer(t, w, "delete-guard")
 		g, _ := rid04Retire(t, w)
+		public.prepare(t, w, g, nil)
 		w.revokeCreatorKeys(t)
 		// O explicitly creates one independent lawful delegation TO C. C remains
 		// retired and has no keys; only this active delegate reference blocks Delete.
@@ -159,9 +184,14 @@ func ridNativeActiveDelegateDeleteGuard(t *testing.T) {
 		failed := w.f.ridOperation(t, "DELETE", "/iam/v1/serviceAccounts/"+w.f.creator.ID, w.f.operator.Bearer(), nil, 9)
 		require.Equal(t, fmt.Sprintf("service account %s holds an active grant delegation %s; revoke it first", w.f.creator.ID, blocking), failed.Error.Message)
 		require.Equal(t, before, w.snapshot(t))
+		public.guardedDelete(t, w, blocking)
 		w.f.ridOperation(t, "POST", "/iam/v1/grantDelegations/"+blocking+":revoke", w.f.operator.Bearer(), map[string]any{}, 0)
 		w.creatorReferenceCensus(t, "")
-		w.f.ridOperation(t, "DELETE", "/iam/v1/serviceAccounts/"+w.f.creator.ID, w.f.operator.Bearer(), nil, 0)
+		if public == nil {
+			w.f.ridOperation(t, "DELETE", "/iam/v1/serviceAccounts/"+w.f.creator.ID, w.f.operator.Bearer(), nil, 0)
+		} else {
+			public.deleteTwin(t, w, blocking)
+		}
 		code, _ := w.f.ridRequest(t, "GET", "/iam/v1/serviceAccounts/"+w.f.creator.ID, w.f.operator.Bearer(), nil)
 		require.Equal(t, 404, code)
 		w.unchangedActive(t, g)
@@ -169,9 +199,11 @@ func ridNativeActiveDelegateDeleteGuard(t *testing.T) {
 }
 func ridNativeCreatorExplicitReplacement(t *testing.T) {
 	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
-		g, body := rid05DeletedWorld(t, w)
-		w.oldCredentialRefused(t)
+		public := rid05PublicConsumer(t, w, "recovery")
+		g, body := rid05DeletedWorldObserved(t, w, public)
+		w.oldCredentialRefusedObserved(t, public)
 		c2 := rid05NewSameName(t, w)
+		public.sameName(t, w, c2)
 		w.f.ridAdmin(t, c2, true)
 		w.f.ridAuthorityMaterialized(t, c2, true)
 		key := w.f.ridKey(t, c2, w.f.creator.AccountID, "replacement-creator")
@@ -179,6 +211,7 @@ func ridNativeCreatorExplicitReplacement(t *testing.T) {
 		// Name and even explicit C2 authority cannot revive a GD authored by old C.
 		w.issuerToken = w.f.ridToken(t, w.issuer)
 		w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
+		public.noRevival(t, w, c2)
 		old := map[string]*iamv1.GrantDelegation{}
 		for _, account := range w.accounts {
 			for _, gd := range w.delegations(t, account) {
@@ -201,6 +234,7 @@ func ridNativeCreatorExplicitReplacement(t *testing.T) {
 		require.Equal(t, iamv1.AccessBinding_REVOKED, revokedGrant.Status)
 		require.Equal(t, "REVOCATION_REASON_DELEGATION_REVOKED", revokedGrant.GetRevocationReason().String())
 		history := w.snapshot(t)
+		public.beforeReapply(t, w, c2)
 		w.delivery.CredentialFile = key.CredentialFile
 		requireNativeOK(t, w.f.apply(t, w.delivery), len(w.accounts))
 		w.f.renewOperator(t, w.f.given.ctx)
@@ -224,7 +258,9 @@ func ridNativeCreatorExplicitReplacement(t *testing.T) {
 				}
 			}
 		}
+		public.recoveryReady(t, w, c2)
 		w.issuerToken = w.f.ridToken(t, w.issuer)
+		public.recoveredGrant(t, w, c2)
 		w.grant(t, body)
 	})
 }

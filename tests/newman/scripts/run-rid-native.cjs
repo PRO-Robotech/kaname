@@ -130,6 +130,43 @@ const rid04Actors=Object.freeze({
   "registry-installation-rid04-S2-RESTORED-GRANT-VERIFY": "O",
   "registry-installation-rid04-S2-RESTORED-REAPPLY": "O"
 });
+const rid05Actors=Object.freeze({
+  "registry-installation-rid05-S1-KEYS-AND-REFERENCES-CLEAN": "O",
+  "registry-installation-rid05-S1-DELETED-C-SNAPSHOT": "O",
+  "registry-installation-rid05-S1-OLD-C-TOKEN-REFUSED": "A",
+  "registry-installation-rid05-S1-DELETED-C-GRANT-ACT": "I",
+  "registry-installation-rid05-S1-DELETED-C-GRANT-VERIFY": "O",
+  "registry-installation-rid05-S1-SAME-NAME-C2-SNAPSHOT": "O",
+  "registry-installation-rid05-S1-C2-NO-REVIVAL-ACT": "I",
+  "registry-installation-rid05-S1-C2-NO-REVIVAL-VERIFY": "O",
+  "registry-installation-rid05-S1-ACTIVE-DELEGATE-DELETE-ACT": "O",
+  "registry-installation-rid05-S1-ACTIVE-DELEGATE-DELETE-VERIFY": "O",
+  "registry-installation-rid05-S1-REVOKE-ONLY-DELETE-TWIN-ACT": "O",
+  "registry-installation-rid05-S1-REVOKE-ONLY-DELETE-TWIN-VERIFY": "O",
+  "registry-installation-rid05-S1-EXPLICIT-C2-RECOVERY-ACT": "I",
+  "registry-installation-rid05-S1-EXPLICIT-C2-RECOVERY-VERIFY": "O",
+  "registry-installation-rid05-S1-RECOVERY-REAPPLY": "O",
+  "registry-installation-rid05-S2-KEYS-AND-REFERENCES-CLEAN": "O",
+  "registry-installation-rid05-S2-DELETED-C-SNAPSHOT": "O",
+  "registry-installation-rid05-S2-OLD-C-TOKEN-REFUSED": "A",
+  "registry-installation-rid05-S2-DELETED-C-GRANT-ACT": "I",
+  "registry-installation-rid05-S2-DELETED-C-GRANT-VERIFY": "O",
+  "registry-installation-rid05-S2-SAME-NAME-C2-SNAPSHOT": "O",
+  "registry-installation-rid05-S2-C2-NO-REVIVAL-ACT": "I",
+  "registry-installation-rid05-S2-C2-NO-REVIVAL-VERIFY": "O",
+  "registry-installation-rid05-S2-ACTIVE-DELEGATE-DELETE-ACT": "O",
+  "registry-installation-rid05-S2-ACTIVE-DELEGATE-DELETE-VERIFY": "O",
+  "registry-installation-rid05-S2-REVOKE-ONLY-DELETE-TWIN-ACT": "O",
+  "registry-installation-rid05-S2-REVOKE-ONLY-DELETE-TWIN-VERIFY": "O",
+  "registry-installation-rid05-S2-EXPLICIT-C2-RECOVERY-ACT": "I",
+  "registry-installation-rid05-S2-EXPLICIT-C2-RECOVERY-VERIFY": "O",
+  "registry-installation-rid05-S2-RECOVERY-REAPPLY": "O"
+});
+function issuanceCase(caseId){
+ if(caseId===expiredKeyCase)return {variable:'rid01IssuanceOrigin',leaf:'expired-standing-key-token-refusal'};
+ if(caseId==='registry-installation-rid05-S1-OLD-C-TOKEN-REFUSED'||caseId==='registry-installation-rid05-S2-OLD-C-TOKEN-REFUSED')return {variable:'rid05IssuanceOrigin',leaf:'old-standing-key-token-refusal'};
+ return null;
+}
 function clientSecretNames(stem, caseId, variables) {
   if (!caseId.startsWith(stem + '-') || caseId.length === stem.length + 1 ||
       !variables || typeof variables !== 'object' || Array.isArray(variables)) throw new Error('invalid-secret-policy');
@@ -150,8 +187,13 @@ function clientSecretNames(stem, caseId, variables) {
     if (!Object.hasOwn(rid04Actors,caseId)) throw new Error('invalid-secret-policy');
     if (rid04Actors[caseId] === 'I') names.push('jwtRIDIssuer');
   }
-  if (Object.keys(variables).some(k => ((k.startsWith('jwtRID') || k === 'rid01ClientAssertion') && !names.includes(k)) ||
-      (k === 'rid01IssuanceOrigin' && caseId !== expiredKeyCase)) ||
+  if(stem==='registry-installation-rid05'){
+    if(!Object.hasOwn(rid05Actors,caseId))throw new Error('invalid-secret-policy');
+    if(rid05Actors[caseId]==='I')names.push('jwtRIDIssuer');
+    if(rid05Actors[caseId]==='A')names.push('rid05ClientAssertion');
+  }
+  if (Object.keys(variables).some(k => ((k.startsWith('jwtRID') || k === 'rid01ClientAssertion' || k==='rid05ClientAssertion') && !names.includes(k)) ||
+      (k === 'rid01IssuanceOrigin' && caseId !== expiredKeyCase) || (k==='rid05IssuanceOrigin' && !(issuanceCase(caseId)&&issuanceCase(caseId).variable===k))) ||
       names.some(k => typeof variables[k] !== 'string' || !variables[k] || Buffer.byteLength(variables[k],'utf8') > 16384)) {
     throw new Error('invalid-secret-policy');
   }
@@ -167,19 +209,21 @@ function ownedOrigin(raw) {
 }
 function requestPolicy(caseId, publicRaw, policy, variables) {
   const publicURL = ownedOrigin(publicRaw);
-  if (caseId !== expiredKeyCase) {
-    if (policy != null || Object.hasOwn(variables,'rid01IssuanceOrigin')) throw new Error('unexpected-policy');
+  const spec=issuanceCase(caseId);
+  if((Object.hasOwn(variables,'rid01IssuanceOrigin')&&(!spec||spec.variable!=='rid01IssuanceOrigin')) || (Object.hasOwn(variables,'rid05IssuanceOrigin')&&(!spec||spec.variable!=='rid05IssuanceOrigin')))throw new Error('unexpected-policy');
+  if (!spec) {
+    if (policy != null || Object.hasOwn(variables,'rid01IssuanceOrigin') || Object.hasOwn(variables,'rid05IssuanceOrigin')) throw new Error('unexpected-policy');
     return {publicOrigin:publicURL.origin, token:null};
   }
   if (!['9098','9198'].includes(publicURL.port)) throw new Error('invalid-public-policy');
   if (!policy || typeof policy !== 'object' || Array.isArray(policy) ||
       Object.keys(policy).sort().join(',') !== 'caseId,method,origin,path,requestName' ||
-      policy.caseId !== caseId || policy.requestName !== caseId + ' :: expired-standing-key-token-refusal' ||
+      policy.caseId !== caseId || policy.requestName !== caseId + ' :: '+spec.leaf ||
       policy.method !== 'POST' || policy.path !== '/iam/v1/token') throw new Error('invalid-token-policy');
   const tokenURL = ownedOrigin(policy.origin);
   if (policy.origin !== tokenURL.origin || tokenURL.hostname !== publicURL.hostname ||
       tokenURL.port !== (publicURL.port === '9098' ? '9096' : '9196') ||
-      variables.rid01IssuanceOrigin !== tokenURL.origin) throw new Error('invalid-token-origin');
+      variables[spec.variable] !== tokenURL.origin) throw new Error('invalid-token-origin');
   return {publicOrigin:publicURL.origin, token:{...policy}};
 }
 // Shared by BEFORE-network admission and actual-execution receipt validation.
