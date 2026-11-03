@@ -167,6 +167,38 @@ function issuanceCase(caseId){
  if(caseId==='registry-installation-rid05-S1-OLD-C-TOKEN-REFUSED'||caseId==='registry-installation-rid05-S2-OLD-C-TOKEN-REFUSED')return {variable:'rid05IssuanceOrigin',leaf:'old-standing-key-token-refusal'};
  return null;
 }
+const rid06Actors=Object.freeze({
+  "registry-installation-rid06-S1-BEFORE-REVOKE": "O",
+  "registry-installation-rid06-S1-REVOKE-ACT": "O",
+  "registry-installation-rid06-S1-AFTER-REVOKE": "O",
+  "registry-installation-rid06-S1-SEQUENTIAL-BEFORE-REVOKE": "O",
+  "registry-installation-rid06-S1-SEQUENTIAL-AFTER-OVERLAP": "O",
+  "registry-installation-rid06-S1-AFTER-SEQUENTIAL-REFUSAL": "O",
+  "registry-installation-rid06-S1-NO-REVOKE-BEFORE": "O",
+  "registry-installation-rid06-S1-NO-REVOKE-TWIN": "O",
+  "registry-installation-rid06-S1-RECOVERY-BEFORE-REVOKE": "O",
+  "registry-installation-rid06-S1-RECOVERY-AFTER-REVOKE": "O",
+  "registry-installation-rid06-S1-EXPLICIT-CREATE-ACT": "C",
+  "registry-installation-rid06-S1-EXPLICIT-CREATE-VERIFY": "O",
+  "registry-installation-rid06-S1-RECOVERY-REAPPLY": "O",
+  "registry-installation-rid06-S1-EXPLICIT-RECOVERY-ACT": "I",
+  "registry-installation-rid06-S1-EXPLICIT-RECOVERY-VERIFY": "O",
+  "registry-installation-rid06-S2-BEFORE-REVOKE": "O",
+  "registry-installation-rid06-S2-REVOKE-ACT": "O",
+  "registry-installation-rid06-S2-AFTER-REVOKE": "O",
+  "registry-installation-rid06-S2-SEQUENTIAL-BEFORE-REVOKE": "O",
+  "registry-installation-rid06-S2-SEQUENTIAL-AFTER-OVERLAP": "O",
+  "registry-installation-rid06-S2-AFTER-SEQUENTIAL-REFUSAL": "O",
+  "registry-installation-rid06-S2-NO-REVOKE-BEFORE": "O",
+  "registry-installation-rid06-S2-NO-REVOKE-TWIN": "O",
+  "registry-installation-rid06-S2-RECOVERY-BEFORE-REVOKE": "O",
+  "registry-installation-rid06-S2-RECOVERY-AFTER-REVOKE": "O",
+  "registry-installation-rid06-S2-EXPLICIT-CREATE-ACT": "C",
+  "registry-installation-rid06-S2-EXPLICIT-CREATE-VERIFY": "O",
+  "registry-installation-rid06-S2-RECOVERY-REAPPLY": "O",
+  "registry-installation-rid06-S2-EXPLICIT-RECOVERY-ACT": "I",
+  "registry-installation-rid06-S2-EXPLICIT-RECOVERY-VERIFY": "O"
+});
 function clientSecretNames(stem, caseId, variables) {
   if (!caseId.startsWith(stem + '-') || caseId.length === stem.length + 1 ||
       !variables || typeof variables !== 'object' || Array.isArray(variables)) throw new Error('invalid-secret-policy');
@@ -191,6 +223,11 @@ function clientSecretNames(stem, caseId, variables) {
     if(!Object.hasOwn(rid05Actors,caseId))throw new Error('invalid-secret-policy');
     if(rid05Actors[caseId]==='I')names.push('jwtRIDIssuer');
     if(rid05Actors[caseId]==='A')names.push('rid05ClientAssertion');
+  }
+  if(stem==='registry-installation-rid06'){
+    if(!Object.hasOwn(rid06Actors,caseId))throw new Error('invalid-secret-policy');
+    if(rid06Actors[caseId]==='I')names.push('jwtRIDIssuer');
+    if(rid06Actors[caseId]==='C')names.push('jwtRIDCreator');
   }
   if (Object.keys(variables).some(k => ((k.startsWith('jwtRID') || k === 'rid01ClientAssertion' || k==='rid05ClientAssertion') && !names.includes(k)) ||
       (k === 'rid01IssuanceOrigin' && caseId !== expiredKeyCase) || (k==='rid05IssuanceOrigin' && !(issuanceCase(caseId)&&issuanceCase(caseId).variable===k))) ||

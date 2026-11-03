@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 1154
+Всего кейсов: 1184
 
 ## Перепись по модулям
 
@@ -88,6 +88,7 @@
 | `cases/registry-installation-rid03.py` | 44 |
 | `cases/registry-installation-rid04.py` | 14 |
 | `cases/registry-installation-rid05.py` | 30 |
+| `cases/registry-installation-rid06.py` | 30 |
 | `cases/registry-installation-rid07.py` | 32 |
 | `cases/registry-installation-rid08.py` | 6 |
 | `cases/registry-installation-rid09.py` | 32 |
@@ -1696,3 +1697,36 @@ ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакци
 - `registry-installation-rid05-S2-EXPLICIT-C2-RECOVERY-ACT`
 - `registry-installation-rid05-S2-EXPLICIT-C2-RECOVERY-VERIFY`
 - `registry-installation-rid05-S2-RECOVERY-REAPPLY`
+
+## `cases/registry-installation-rid06.py` — 30 кейсов
+
+- `registry-installation-rid06-S1-BEFORE-REVOKE`
+- `registry-installation-rid06-S1-REVOKE-ACT`
+- `registry-installation-rid06-S1-AFTER-REVOKE`
+- `registry-installation-rid06-S1-SEQUENTIAL-BEFORE-REVOKE`
+- `registry-installation-rid06-S1-SEQUENTIAL-AFTER-OVERLAP`
+- `registry-installation-rid06-S1-AFTER-SEQUENTIAL-REFUSAL`
+- `registry-installation-rid06-S1-NO-REVOKE-BEFORE`
+- `registry-installation-rid06-S1-NO-REVOKE-TWIN`
+- `registry-installation-rid06-S1-RECOVERY-BEFORE-REVOKE`
+- `registry-installation-rid06-S1-RECOVERY-AFTER-REVOKE`
+- `registry-installation-rid06-S1-EXPLICIT-CREATE-ACT`
+- `registry-installation-rid06-S1-EXPLICIT-CREATE-VERIFY`
+- `registry-installation-rid06-S1-RECOVERY-REAPPLY`
+- `registry-installation-rid06-S1-EXPLICIT-RECOVERY-ACT`
+- `registry-installation-rid06-S1-EXPLICIT-RECOVERY-VERIFY`
+- `registry-installation-rid06-S2-BEFORE-REVOKE`
+- `registry-installation-rid06-S2-REVOKE-ACT`
+- `registry-installation-rid06-S2-AFTER-REVOKE`
+- `registry-installation-rid06-S2-SEQUENTIAL-BEFORE-REVOKE`
+- `registry-installation-rid06-S2-SEQUENTIAL-AFTER-OVERLAP`
+- `registry-installation-rid06-S2-AFTER-SEQUENTIAL-REFUSAL`
+- `registry-installation-rid06-S2-NO-REVOKE-BEFORE`
+- `registry-installation-rid06-S2-NO-REVOKE-TWIN`
+- `registry-installation-rid06-S2-RECOVERY-BEFORE-REVOKE`
+- `registry-installation-rid06-S2-RECOVERY-AFTER-REVOKE`
+- `registry-installation-rid06-S2-EXPLICIT-CREATE-ACT`
+- `registry-installation-rid06-S2-EXPLICIT-CREATE-VERIFY`
+- `registry-installation-rid06-S2-RECOVERY-REAPPLY`
+- `registry-installation-rid06-S2-EXPLICIT-RECOVERY-ACT`
+- `registry-installation-rid06-S2-EXPLICIT-RECOVERY-VERIFY`

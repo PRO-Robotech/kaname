@@ -30,17 +30,32 @@ import (
 )
 
 func rid06Revoke(t *testing.T, w *ridLifecycleWorld, id string) string {
+	return rid06RevokeObserved(t, w, id, nil, time.Time{})
+}
+func rid06RevokeObserved(t *testing.T, w *ridLifecycleWorld, id string, public *rid06PublicContext, deadline time.Time) string {
 	t.Helper()
 	// This normal public mutation must finish inside the child's20s pause. It is
 	// not a fake commit, SQL state change or same pair-advisory-lock deadlock.
 	ctx, cancel := context.WithTimeout(w.f.given.ctx, 15*time.Second)
+	if public != nil {
+		var clipped context.CancelFunc
+		ctx, clipped = context.WithDeadline(ctx, deadline)
+		defer clipped()
+	}
 	defer cancel()
 	var op installruntime.Operation
-	code, err := w.f.wire.JSON(ctx, http.MethodPost, "/iam/v1/grantDelegations/"+id+":revoke", w.f.operator.Bearer(), map[string]any{}, &op)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, code)
-	op, err = w.f.wire.AwaitOperation(ctx, w.f.operator.Bearer(), op)
-	require.NoError(t, err)
+	var code int
+	var err error
+	if public != nil {
+		ownedDeadline, _ := ctx.Deadline()
+		op = public.revoke(t, w, id, ownedDeadline)
+	} else {
+		code, err = w.f.wire.JSON(ctx, http.MethodPost, "/iam/v1/grantDelegations/"+id+":revoke", w.f.operator.Bearer(), map[string]any{}, &op)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, code)
+		op, err = w.f.wire.AwaitOperation(ctx, w.f.operator.Bearer(), op)
+		require.NoError(t, err)
+	}
 	require.True(t, op.Done)
 	require.Nil(t, op.Error)
 	var response anypb.Any
@@ -261,9 +276,13 @@ func rid06ReadResult(t *testing.T, c *rid02OwnedChild, want installationResult) 
 // The sole varied action between these overlap worlds is ordinary O Revoke.
 // Arrival is actual full startup, not a helper ExecuteInstallation invocation.
 func rid06Overlap(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBinding, revoke bool) {
+	rid06OverlapObserved(t, w, g, revoke, nil)
+}
+func rid06OverlapObserved(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBinding, revoke bool, public *rid06PublicContext) {
 	t.Helper()
 	f := w.f
 	f.ridAuthorityMaterialized(t, f.creator.ID, true)
+	public.beforeOverlap(t, w, g)
 	before := w.snapshot(t)
 	_, opsBefore := w.grantIdentityCensus(t)
 	wire, err := installruntime.NewWireAtPorts(filepath.Join(f.session.Root, "pki"), installruntime.SecondNativePorts())
@@ -271,30 +290,112 @@ func rid06Overlap(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBinding, re
 	defer wire.Close()
 	watch := wire.StartReadinessWatch(f.given.ctx)
 	defer watch.Stop()
-	spawned := time.Now().UTC()
+	publicSpawned := time.Now()
+	spawned := publicSpawned.UTC()
+	// Preserve the original wall-clock evidence, but keep a monotonic bound
+	// captured BEFORE spawn for every optional public action and primary read.
+	publicPauseDeadline := rid06PauseDeadline(f.given.ctx, publicSpawned)
 	c := rid06Start(t, w, "rid06-overlap")
-	ctx, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)
-	event := c.await(t, ctx, "before-pair")
-	cancel()
-	arrived := time.Now().UTC()
-	rid06CheckPending(t, w, c, event, opsBefore)
-	require.Equal(t, before, rid06BoundarySnapshot(t, w), "no pair mutation before observed boundary")
+	releasedControl := false
+	defer func() {
+		if !releasedControl {
+			_ = c.control.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
+			_ = json.NewEncoder(c.control).Encode("continue")
+		}
+	}()
+
+	var event rid02ChildEvent
+	var arrived, committed, released time.Time
 	revokeOp := ""
-	if revoke {
-		revokeOp = rid06Revoke(t, w, w.gd.Id)
+	if public == nil {
+		// Original native-only path: no optional observer budget or bridge behavior.
+		ctx, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)
+		event = c.await(t, ctx, "before-pair")
+		cancel()
+		arrived = time.Now().UTC()
+		rid06CheckPending(t, w, c, event, opsBefore)
+		require.Equal(t, before, rid06BoundarySnapshot(t, w), "no pair mutation before observed boundary")
+		if revoke {
+			revokeOp = rid06Revoke(t, w, w.gd.Id)
+		}
+		committed = time.Now().UTC()
+		afterAction := rid06BoundarySnapshot(t, w)
+		if !revoke {
+			require.Equal(t, before, afterAction)
+		}
+		if revoke {
+			opsBefore = append(opsBefore, revokeOp)
+		}
+		released = time.Now().UTC()
+		c.release(t, "continue")
+		releasedControl = true
+	} else {
+		// This clone alone carries the absolute observation budget. The real owning
+		// fixture/context is untouched, including cleanup and post-release startup.
+		ctx, cancel := context.WithDeadline(f.given.ctx, publicPauseDeadline)
+		defer cancel()
+		scopedWorld, scopedFixture, scopedGiven := *w, *f, *f.given
+		scopedGiven.ctx = ctx
+		scopedFixture.given = &scopedGiven
+		scopedWorld.f = &scopedFixture
+		// Preserve all actual refreshed O secrets for the original independent audit.
+		syncSecrets := func() { f.secrets = scopedFixture.secrets; f.operator = scopedFixture.operator }
+		secretsSynced := false
+		defer func() {
+			if !secretsSynced {
+				syncSecrets()
+			}
+		}()
+		written, criticalErr := rid06RunCritical(ctx, rid06CriticalActions{
+			Await: func(ctx context.Context) error {
+				event = c.await(t, ctx, "before-pair")
+				arrived = time.Now().UTC()
+				return nil
+			},
+			Pending: func(context.Context) error {
+				rid06CheckPending(t, &scopedWorld, c, event, opsBefore)
+				public.pending(t, &scopedWorld, event.Operation)
+				require.Equal(t, before, rid06BoundarySnapshot(t, &scopedWorld), "no pair mutation before observed boundary")
+				return nil
+			},
+			Revoke: func(context.Context) error {
+				if revoke {
+					if public.owner == "revoke" {
+						revokeOp = rid06RevokeObserved(t, &scopedWorld, w.gd.Id, public, publicPauseDeadline)
+					} else {
+						public.beforeRevoke(t, &scopedWorld, publicPauseDeadline)
+						revokeOp = rid06Revoke(t, &scopedWorld, w.gd.Id)
+						public.afterRevoke(t, &scopedWorld, revokeOp)
+					}
+				}
+				committed = time.Now().UTC()
+				return nil
+			},
+			Boundary: func(context.Context) error {
+				afterAction := rid06BoundarySnapshot(t, &scopedWorld)
+				if !revoke {
+					require.Equal(t, before, afterAction)
+				}
+				if revoke {
+					opsBefore = append(opsBefore, revokeOp)
+				}
+				return nil
+			},
+			Release: func(ctx context.Context) (bool, error) {
+				written, err := ridNewmanBudgetWrite(ctx, c.control, "continue", 20*time.Second)
+				if written {
+					released = time.Now().UTC()
+				}
+				return written, err
+			},
+		})
+		releasedControl = written
+		syncSecrets()
+		secretsSynced = true
+		require.NoError(t, criticalErr, "FIXTURE_NOT_ACCEPTED: original pause observation budget exhausted")
+		require.True(t, releasedControl)
+		require.NoError(t, ridNewmanBudgetCheck(ctx), "FIXTURE_NOT_ACCEPTED: observation expired before successful release proof")
 	}
-	committed := time.Now().UTC()
-	afterAction := rid06BoundarySnapshot(t, w)
-	if !revoke {
-		require.Equal(t, before, afterAction)
-	}
-	// The authorized Revoke is an independent ordinary Operation, excluded from
-	// installer-operation delta; every installer Operation remains checked.
-	if revoke {
-		opsBefore = append(opsBefore, revokeOp)
-	}
-	released := time.Now().UTC()
-	c.release(t, "continue")
 	proof, err := json.Marshal(map[string]any{"spawned": spawned, "arrivalObserved": arrived, "revoke": revoke, "revokeOperation": revokeOp, "actionCommittedObserved": committed, "release": released, "pendingOperation": event.Operation})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(c.dir, "temporal-order.json"), proof, 0600))
@@ -350,31 +451,44 @@ func rid06Overlap(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBinding, re
 		f.publicRead(t, "/iam/v1/grantDelegations/"+w.gd.Id, &same)
 		require.True(t, proto.Equal(w.gd, &same))
 	}
+	public.afterOverlap(t, w, g, revoke)
 }
 
 func ridNativeRevokeBeforePair(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) { g := rid06Grant(t, w); rid06Overlap(t, w, g, true) })
+	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+		public := rid06PublicConsumer(t, w, "revoke")
+		g := rid06Grant(t, w)
+		rid06OverlapObserved(t, w, g, true, public)
+	})
 }
 func ridNativeRevokeOverlapAndSequential(t *testing.T) {
 	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+		public := rid06PublicConsumer(t, w, "sequential")
 		g := rid06Grant(t, w)
-		rid06Overlap(t, w, g, true)
+		rid06OverlapObserved(t, w, g, true, public)
 		before := w.snapshot(t)
 		_, ops := w.grantIdentityCensus(t)
-		w.refusedApply(t, rid06Result(w))
+		public.beforeSequential(t, w)
+		w.refusedApplyObserved(t, rid06Result(w), func() { public.sequentialBeforeRestore(t, w) })
+		public.afterSequential(t, w)
 		require.Equal(t, before, w.snapshot(t))
 		rid07CheckApplyOperations(t, w, ops, false)
 		rid06RequireRevoked(t, w, w.gd, g)
 	})
 }
 func ridNativeNoRevokeOverlapTwin(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) { g := rid06Grant(t, w); rid06Overlap(t, w, g, false) })
+	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+		public := rid06PublicConsumer(t, w, "twin")
+		g := rid06Grant(t, w)
+		rid06OverlapObserved(t, w, g, false, public)
+	})
 }
 func ridNativeRevokeExplicitRecovery(t *testing.T) {
 	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+		public := rid06PublicConsumer(t, w, "recovery")
 		g := rid06Grant(t, w)
 		old := proto.Clone(w.gd).(*iamv1.GrantDelegation)
-		rid06Overlap(t, w, g, true)
+		rid06OverlapObserved(t, w, g, true, public)
 		var revokedGD iamv1.GrantDelegation
 		w.f.publicRead(t, "/iam/v1/grantDelegations/"+old.Id, &revokedGD)
 		var revokedG iamv1.AccessBinding
@@ -382,7 +496,12 @@ func ridNativeRevokeExplicitRecovery(t *testing.T) {
 		token := w.f.ridToken(t, w.f.creator)
 		priorPairs := w.delegations(t, w.f.tenantID)
 		_, priorOperations := w.grantIdentityCensus(t)
-		op := w.f.ridOperation(t, "POST", "/iam/v1/grantDelegations", token, w.gdCreateBody(w.f.tenantID, w.issuer.ID), 0)
+		var op ridLifecycleOperation
+		if public == nil {
+			op = w.f.ridOperation(t, "POST", "/iam/v1/grantDelegations", token, w.gdCreateBody(w.f.tenantID, w.issuer.ID), 0)
+		} else {
+			op = public.create(t, w, token)
+		}
 		id := ridResponseID(t, op)
 		require.NotContains(t, priorOperations, op.ID)
 		for _, previous := range priorPairs {
@@ -407,6 +526,7 @@ func ridNativeRevokeExplicitRecovery(t *testing.T) {
 		w.gd = &next
 		history := w.snapshot(t)
 		_, ops := w.grantIdentityCensus(t)
+		public.beforeRecoveryApply(t, w)
 		requireNativeOK(t, w.f.apply(t, w.delivery), len(w.accounts))
 		w.f.renewOperator(t, w.f.given.ctx)
 		require.Equal(t, history, w.snapshot(t))
@@ -415,8 +535,10 @@ func ridNativeRevokeExplicitRecovery(t *testing.T) {
 		w.f.publicRead(t, "/iam/v1/grantDelegations/"+old.Id, &got)
 		require.True(t, proto.Equal(&revokedGD, &got))
 		rid07BindingUnchanged(t, w, &revokedG)
+		public.afterRecoveryApply(t, w)
 		subject := w.f.ridSA(t, w.f.tenantID, "rid06-recovered-grantee")
 		w.issuerToken = w.f.ridToken(t, w.issuer)
+		public.recoveredGrant(t, w)
 		newGrant := w.grant(t, w.bindingInput("service_account", subject, w.pull, "registry.registries", w.object))
 		require.Equal(t, id, newGrant.DelegationId)
 		w.f.publicRead(t, "/iam/v1/grantDelegations/"+old.Id, &got)
