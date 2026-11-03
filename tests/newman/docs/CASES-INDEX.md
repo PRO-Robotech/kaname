@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 1066
+Всего кейсов: 1110
 
 ## Перепись по модулям
 
@@ -85,6 +85,7 @@
 | `cases/rbac-visibility-set.py` | 7 |
 | `cases/registry-installation-rid01.py` | 8 |
 | `cases/registry-installation-rid02.py` | 4 |
+| `cases/registry-installation-rid03.py` | 44 |
 | `cases/registry-installation-rid07.py` | 32 |
 | `cases/registry-installation-rid08.py` | 6 |
 | `cases/registry-installation-rid09.py` | 32 |
@@ -1582,3 +1583,54 @@ ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакци
 - `registry-installation-rid01-RENEWAL-AFTER`
 - `registry-installation-rid01-EXPIRED-KEY-REFUSAL`
 - `registry-installation-rid01-VALID-KEY-TWIN`
+
+---
+
+## `cases/registry-installation-rid03.py` — 44 кейса
+
+> Выдача через установленную доверенность: реальные ACT и независимые VERIFY в S1/S2, отказы вне осей и разрешённые близнецы.
+
+- `registry-installation-rid03-S1-GRANT-ACT`
+- `registry-installation-rid03-S1-GRANT-VERIFY`
+- `registry-installation-rid03-S1-ROLE-DENIED-ACT`
+- `registry-installation-rid03-S1-ROLE-DENIED-VERIFY`
+- `registry-installation-rid03-S1-ROLE-TWIN-ACT`
+- `registry-installation-rid03-S1-ROLE-TWIN-VERIFY`
+- `registry-installation-rid03-S1-TARGET-DENIED-ACT`
+- `registry-installation-rid03-S1-TARGET-DENIED-VERIFY`
+- `registry-installation-rid03-S1-TARGET-TWIN-ACT`
+- `registry-installation-rid03-S1-TARGET-TWIN-VERIFY`
+- `registry-installation-rid03-S1-SUBJECT-DENIED-ACT`
+- `registry-installation-rid03-S1-SUBJECT-DENIED-VERIFY`
+- `registry-installation-rid03-S1-SUBJECT-TWIN-ACT`
+- `registry-installation-rid03-S1-SUBJECT-TWIN-VERIFY`
+- `registry-installation-rid03-S1-ISSUER-GD-DENIED-ACT`
+- `registry-installation-rid03-S1-ISSUER-GD-DENIED-VERIFY`
+- `registry-installation-rid03-S1-CREATOR-GD-TWIN-ACT`
+- `registry-installation-rid03-S1-CREATOR-GD-TWIN-VERIFY`
+- `registry-installation-rid03-S1-AUTHENTICATED-DENIED-ACT`
+- `registry-installation-rid03-S1-AUTHENTICATED-DENIED-VERIFY`
+- `registry-installation-rid03-S1-ANONYMOUS-TWIN-ACT`
+- `registry-installation-rid03-S1-ANONYMOUS-TWIN-VERIFY`
+- `registry-installation-rid03-S2-GRANT-ACT`
+- `registry-installation-rid03-S2-GRANT-VERIFY`
+- `registry-installation-rid03-S2-ROLE-DENIED-ACT`
+- `registry-installation-rid03-S2-ROLE-DENIED-VERIFY`
+- `registry-installation-rid03-S2-ROLE-TWIN-ACT`
+- `registry-installation-rid03-S2-ROLE-TWIN-VERIFY`
+- `registry-installation-rid03-S2-TARGET-DENIED-ACT`
+- `registry-installation-rid03-S2-TARGET-DENIED-VERIFY`
+- `registry-installation-rid03-S2-TARGET-TWIN-ACT`
+- `registry-installation-rid03-S2-TARGET-TWIN-VERIFY`
+- `registry-installation-rid03-S2-SUBJECT-DENIED-ACT`
+- `registry-installation-rid03-S2-SUBJECT-DENIED-VERIFY`
+- `registry-installation-rid03-S2-SUBJECT-TWIN-ACT`
+- `registry-installation-rid03-S2-SUBJECT-TWIN-VERIFY`
+- `registry-installation-rid03-S2-ISSUER-GD-DENIED-ACT`
+- `registry-installation-rid03-S2-ISSUER-GD-DENIED-VERIFY`
+- `registry-installation-rid03-S2-CREATOR-GD-TWIN-ACT`
+- `registry-installation-rid03-S2-CREATOR-GD-TWIN-VERIFY`
+- `registry-installation-rid03-S2-AUTHENTICATED-DENIED-ACT`
+- `registry-installation-rid03-S2-AUTHENTICATED-DENIED-VERIFY`
+- `registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT`
+- `registry-installation-rid03-S2-ANONYMOUS-TWIN-VERIFY`
