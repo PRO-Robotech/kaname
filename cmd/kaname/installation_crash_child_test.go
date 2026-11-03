@@ -103,7 +103,7 @@ func TestRID02OwnedInstallationChild(t *testing.T) {
 	require.NoError(t, err)
 	principal, ok := operations.PrincipalFromContextOK(verified)
 	require.True(t, ok)
-	require.Equal(t, operations.Principal{Type: "service_account", ID: input.Creator}, principal)
+	require.Equal(t, operations.Principal{Type: "service_account", ID: input.Creator, DisplayName: input.Creator}, principal)
 	require.NoError(t, authzguard.RequireClusterAdmin(verified, relations))
 	rows := kanamepg.NewCatalogRepo(pool)
 	halves, err := rows.ReadCatalogHalves(ctx)

@@ -96,7 +96,7 @@ func rid02Pending(t *testing.T, f *installationNativeWorld, input rid02ChildInpu
 	require.False(t, op.Done)
 	require.Nil(t, op.Error)
 	require.Nil(t, op.Response)
-	require.Equal(t, operations.Principal{Type: "service_account", ID: f.creator.ID}, op.Principal)
+	require.Equal(t, operations.Principal{Type: "service_account", ID: f.creator.ID, DisplayName: f.creator.ID}, op.Principal)
 	var m iamv1.CreateGrantDelegationMetadata
 	require.NoError(t, op.Metadata.UnmarshalTo(&m))
 	require.Equal(t, input.Input.AccountID, m.AccountId)

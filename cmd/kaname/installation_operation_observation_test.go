@@ -22,7 +22,7 @@ func requireNativeInstallationOperation(t *testing.T, ctx context.Context, pool 
 	require.NoError(t, err)
 	require.True(t, op.Done)
 	require.Nil(t, op.Error)
-	require.Equal(t, operations.Principal{Type: "service_account", ID: creator}, op.Principal)
+	require.Equal(t, operations.Principal{Type: "service_account", ID: creator, DisplayName: creator}, op.Principal)
 	require.NotNil(t, op.Metadata)
 	require.NotNil(t, op.Response)
 	var metadata iamv1.CreateGrantDelegationMetadata
