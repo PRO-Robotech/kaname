@@ -56,6 +56,8 @@ type installationAuthentication struct {
 	reader            *presentedcred.Reader
 	audience          string
 	assertionAudience string
+	// Optional immutable observation wired only by the internal full-root seam.
+	observeCredential func(string, string)
 }
 
 func preparePresentedReader(pool *pgxpool.Pool, cfg config.Config, keys *signingkeys.Keystore, logger *slog.Logger) (*presentedcred.Reader, error) {
@@ -162,6 +164,12 @@ func (a *installationAuthentication) Authenticate(parent context.Context) (conte
 	return authenticated, nil
 }
 
+func (a *installationAuthentication) observeMaterial(token string) {
+	if a.observeCredential != nil {
+		a.observeCredential(a.credential.PrivateKeyPEM, token)
+	}
+}
+
 func (a *installationAuthentication) exchange(ctx context.Context) (client_token.Output, string, error) {
 	for {
 		client, outcome, err := clientassertion.ResolveRegisteredClient(ctx, a.resolver, a.credential.ClientID)
@@ -172,6 +180,7 @@ func (a *installationAuthentication) exchange(ctx context.Context) (client_token
 			return client_token.Output{}, "", installationProofFailure(clientassertion.OutcomeClientUnknown)
 		}
 		raw, err := a.freshAssertion(client)
+		a.observeMaterial(raw)
 		if err != nil {
 			return client_token.Output{}, "", err
 		}
@@ -186,6 +195,7 @@ func (a *installationAuthentication) exchange(ctx context.Context) (client_token
 			return client_token.Output{}, "", installationProofFailure(verified.Outcome)
 		}
 		token, outcome, err := a.issuer.Issue(ctx, client_token.Input{Client: verified.Client, RequestedAudience: []string{a.audience}})
+		a.observeMaterial(token.AccessToken)
 		if err != nil {
 			return client_token.Output{}, "", installationProofFailure(outcome)
 		}

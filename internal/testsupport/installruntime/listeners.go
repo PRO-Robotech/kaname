@@ -15,7 +15,13 @@ import (
 // OwnsListeners checks actual Linux socket ownership, not just port readiness.
 // Every listening socket of this PID must be IPv4 loopback and in the census.
 func (p *Process) OwnsListeners(expected ...int) error {
-	root := fmt.Sprintf("/proc/%d", p.cmd.Process.Pid)
+	return CheckOwnedListeners(p.cmd.Process.Pid, filepath.Dir(p.StdoutPath), expected...)
+}
+
+// CheckOwnedListeners reuses the exact native socket census for an independently
+// ownership-verified test executable running the actual complete startup root.
+func CheckOwnedListeners(pid int, evidenceDir string, expected ...int) error {
+	root := fmt.Sprintf("/proc/%d", pid)
 	entries, err := os.ReadDir(filepath.Join(root, "fd"))
 	if err != nil {
 		return err
@@ -63,6 +69,6 @@ func (p *Process) OwnsListeners(expected ...int) error {
 			return fmt.Errorf("listener %d is not owned by this serve PID", port)
 		}
 	}
-	raw, _ := json.Marshal(map[string]any{"pid": p.cmd.Process.Pid, "loopbackPorts": expected, "owned": true})
-	return os.WriteFile(filepath.Join(filepath.Dir(p.StdoutPath), "listener-ownership.json"), raw, 0600)
+	raw, _ := json.Marshal(map[string]any{"pid": pid, "loopbackPorts": expected, "owned": true})
+	return os.WriteFile(filepath.Join(evidenceDir, "listener-ownership.json"), raw, 0600)
 }
