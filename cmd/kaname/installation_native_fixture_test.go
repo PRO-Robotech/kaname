@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,18 +25,22 @@ import (
 // model/seed/bootstrap helper executes in the test process: all those steps run
 // inside the frozen native production executable using its real listener chain.
 type installationNativeWorld struct {
-	given    *ceremonyWorld
-	stand    *installruntime.NativeStand
-	session  *installruntime.Session
-	wire     *installruntime.Wire
-	operator *installruntime.VerifiedOperator
-	creator  *installruntime.StandingCreator
-	base     *installruntime.Process
-	secrets  []string
+	given            *ceremonyWorld
+	stand            *installruntime.NativeStand
+	session          *installruntime.Session
+	wire             *installruntime.Wire
+	operator         *installruntime.VerifiedOperator
+	creator          *installruntime.StandingCreator
+	base             *installruntime.Process
+	secrets          []string
+	baseline         nativeBaseline
+	tenantID         string
+	credentialDigest [32]byte
 }
 
 func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 	t.Helper()
+	requireNativeManifestPremise(t)
 	deadline, ok := t.Deadline()
 	require.True(t, ok, "bounded Go test deadline required for native lifecycle")
 	ctx, cancelLifetime := context.WithDeadline(context.Background(), deadline)
@@ -61,18 +66,31 @@ func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 	// in-process token surface, signer, permission model or bootstrap admin.
 	w := &ceremonyWorld{t: t, id: "RID-NATIVE-F0", ctx: ctx, pool: pool, logs: &lockedBuffer{}, clientAudiences: []string{"https://kaname.local"}}
 	w.requireStorePremise()
+	baseline := readNativeBaseline(t, w)
+	require.Len(t, baseline.ServiceAccounts, 2, "stock bootstrap and gateway identities remain")
+	require.Len(t, baseline.AdminGrants, 1, "stock bootstrap admin is part of F0")
+	require.Contains(t, baseline.ServiceAccounts, "svab91854890de887e6d")
+	require.Contains(t, baseline.ServiceAccounts, "sva3e9556e76be67f816")
+	requireNativeAuthority(t, w, "service_account", "svab91854890de887e6d", 1)
+	requireNativeNoDelivery(t, w)
+	var tenantsBefore int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.accounts WHERE id<>$1`, baseline.SystemID).Scan(&tenantsBefore))
+	require.Zero(t, tenantsBefore)
+	writeNativeBaseline(t, evidence, baseline)
 	w.seedPerson()
 	w.markPerson()
 	w.session = w.seedSession("2")
 	w.ic1 = w.seedClient("rid-native-operator", domain.InteractiveClientActive, []string{lineA1R})
-	var admins, delegations, issuers int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT
- (SELECT count(*) FROM kaname.cluster_admin_grants),
- (SELECT count(*) FROM kaname.grant_delegations),
- (SELECT count(*) FROM kaname.service_accounts WHERE name IN ('svc-ridfirst','svc-ridsecond'))`).Scan(&admins, &delegations, &issuers))
-	require.Zero(t, admins, "O must have no admin grant before actual startup bootstrap")
-	require.Zero(t, delegations)
-	require.Zero(t, issuers)
+	baseline.requirePreserved(t, w, 0, 0)
+	require.NotEqual(t, baseline.SystemOwner, string(w.user))
+	requireNativeAuthority(t, w, "user", string(w.user), 0)
+	requireNativeNoDelivery(t, w)
+	var tenantID string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id FROM kaname.accounts WHERE owner_user_id=$1`, string(w.user)).Scan(&tenantID))
+	tenants, system, err := kanamepg.NewInstallationReader(pool).InstallationAccounts(ctx, "", 2)
+	require.NoError(t, err)
+	require.Equal(t, baseline.SystemID, string(system))
+	require.Equal(t, []domain.AccountID{domain.AccountID(tenantID)}, tenants, "actual initial snapshot contains only O's tenant")
 	// The only changed startup fact is O's email. Audience, issuer, authority,
 	// lifetime and gateway policy remain the ordinary stand profile.
 	environment, err = stand.Environment(map[string]string{"KANAME_BOOTSTRAP_ROOT_EMAIL": w.email})
@@ -83,7 +101,7 @@ func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 	t.Cleanup(wire.Close)
 	session := &installruntime.Session{Binary: os.Getenv("KANAME_RID_BINARY"), BinarySHA256: os.Getenv("KANAME_RID_BINARY_SHA256"),
 		Environment: environment, Root: evidence, Probe: wire.ListenersReady}
-	f := &installationNativeWorld{given: w, stand: stand, session: session, wire: wire, secrets: []string{w.ic1.secret, w.session.bearer.CookieValue()}}
+	f := &installationNativeWorld{given: w, stand: stand, session: session, wire: wire, secrets: []string{w.ic1.secret, w.session.bearer.CookieValue()}, baseline: baseline, tenantID: tenantID}
 	t.Cleanup(func() {
 		stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -99,12 +117,37 @@ func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 	require.NoError(t, base.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
 	f.base = base
 	f.renewOperator(t, ctx)
-	_, system, err := kanamepg.NewInstallationReader(pool).InstallationAccounts(ctx, "", 2)
-	require.NoError(t, err)
+	authority, cancelAuthority := context.WithTimeout(ctx, 60*time.Second)
+	err = wire.AwaitOperatorAdmin(authority, f.operator)
+	cancelAuthority()
+	require.NoError(t, err, "actual asynchronous bootstrap must grant O before provisioning C")
+	requireNativeAuthority(t, w, "user", string(w.user), 1)
+	baseline.requirePreserved(t, w, 0, 1)
+	requireNativeNoDelivery(t, w)
 	f.creator, err = wire.ProvisionStandingCreator(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"))
 	require.NoError(t, err)
 	f.secrets = append(f.secrets, f.creator.SecretMaterial()...)
+	credential, err := os.ReadFile(f.creator.CredentialFile)
+	require.NoError(t, err)
+	f.credentialDigest = sha256.Sum256(credential)
+	info, err := os.Stat(f.creator.CredentialFile)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0600), info.Mode().Perm())
 	require.NotEqual(t, string(w.user), f.creator.ID)
+	require.NotContains(t, baseline.ServiceAccounts, f.creator.ID)
+	require.Equal(t, baseline.SystemID, f.creator.AccountID)
+	requireNativeAuthority(t, w, "service_account", f.creator.ID, 1)
+	baseline.requirePreserved(t, w, 1, 2)
+	requireNativeNoDelivery(t, w)
+	operations := []installruntime.Operation{f.creator.CreateOperation, f.creator.GrantOperation, f.creator.KeyOperation}
+	seen := map[string]bool{}
+	for _, op := range operations {
+		require.NotEmpty(t, op.ID)
+		require.False(t, seen[op.ID])
+		seen[op.ID] = true
+		require.True(t, op.Done)
+		require.Nil(t, op.Error)
+	}
 	return f
 }
 
@@ -147,9 +190,10 @@ func ridNativeFirstInstall(t *testing.T) {
 	require.Equal(t, "delegation", result.Stage)
 	require.Equal(t, "OK", result.Code)
 	require.Equal(t, 2, result.CompletedPairs)
-	var count int
-	require.NoError(t, f.given.pool.QueryRow(t.Context(), `SELECT count(*) FROM kaname.grant_delegations WHERE status='ACTIVE' AND module IN ('ridfirst','ridsecond')`).Scan(&count))
-	require.Equal(t, 2, count, "one initial tenant and two delivered issuer pairs")
+	f.requireDeliveredPairs(t)
+	credential, err := os.ReadFile(f.creator.CredentialFile)
+	require.NoError(t, err)
+	require.True(t, f.credentialDigest == sha256.Sum256(credential), "full serve retains the same standing credential")
 	// Keep real process/state available to the identity assertions while proving
 	// that O's ceremony still works after the full delivery restart.
 	f.renewOperator(t, t.Context())

@@ -285,3 +285,48 @@ func (w *Wire) AwaitOperation(ctx context.Context, bearer string, op Operation) 
 		op = next
 	}
 }
+
+// AwaitOperatorAdmin observes the ordinary current-authority API. Startup's
+// bootstrap task is asynchronous; TLS/JWKS readiness cannot replace this barrier.
+// Only the expected pre-bootstrap permission refusal is retried. Authentication,
+// backend and response-shape failures remain failures of the native fixture.
+func (w *Wire) AwaitOperatorAdmin(ctx context.Context, operator *VerifiedOperator) error {
+	if operator == nil || operator.userID == "" {
+		return errors.New("verified operator required")
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var out struct {
+			Admins []struct {
+				GrantID     string `json:"clusterAdminGrantId"`
+				SubjectType string `json:"subjectType"`
+				SubjectID   string `json:"subjectId"`
+			} `json:"admins"`
+		}
+		code, err := w.JSON(ctx, http.MethodGet, "/iam/v1/cluster/admins", operator.Bearer(), nil, &out)
+		if err != nil {
+			return err
+		}
+		if code == http.StatusOK {
+			matches := 0
+			for _, admin := range out.Admins {
+				if admin.SubjectType == "USER" && admin.SubjectID == operator.userID && admin.GrantID != "" {
+					matches++
+				}
+			}
+			if matches != 1 {
+				return errors.New("current-authority API did not return exactly one active O grant")
+			}
+			return nil
+		}
+		if code != http.StatusForbidden {
+			return fmt.Errorf("bootstrap authority observation returned HTTP %d", code)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
