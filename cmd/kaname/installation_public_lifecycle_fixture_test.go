@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -59,14 +60,18 @@ func ridLifecycleDelivery(t *testing.T, systemClass bool) installruntime.RIDDeli
 		subjects = append(subjects, "SUBJECT_TYPE_SYSTEM_CLASS")
 	}
 	doc["seed"] = map[string]any{
-		"serviceAccounts":  []any{map[string]any{"account": "system", "name": "rid-public-issuer"}, map[string]any{"account": "system", "name": "kacho-registry"}},
-		"groups":           []any{map[string]any{"account": "system", "name": "rid-public-readers"}},
+		"serviceAccounts":  []any{map[string]any{"account": "system", "name": "rid-public-issuer", "description": "Generic RID issuer exercises only its explicitly installed grant delegation"}, map[string]any{"account": "system", "name": "kacho-registry", "description": "Existing module writer identity registers lawful resource targets for generic RID tests"}},
+		"groups":           []any{map[string]any{"account": "system", "name": "rid-public-readers", "description": "Fixture reader group receives the delivered read role without granting issuer admin authority"}},
 		"accessBindings":   []any{map[string]any{"subjects": []any{map[string]any{"type": "group", "name": "rid-public-readers"}}, "roleId": "registry.puller", "scopeType": "iam.cluster", "scopeId": "cluster_root", "target": "allInScope"}},
 		"joins":            []any{map[string]any{"serviceAccount": map[string]any{"account": "system", "name": "kacho-registry"}, "group": map[string]any{"account": "system", "name": "module-relation-writers"}, "why": "Generic RID fixture uses the existing module writer mechanism"}},
 		"grantDelegations": []any{map[string]any{"delegate": map[string]any{"account": "system", "name": "rid-public-issuer"}, "roleIds": []string{"registry.puller"}, "targetTypes": []string{"registry.registries"}, "subjectTypes": subjects}},
 	}
 	raw, err = yaml.Marshal(doc)
 	require.NoError(t, err)
+	// Judge the exact generated input with the ordinary production parser before
+	// any database/native process is created. This does not apply model or seed.
+	_, err = manifest.Load(raw)
+	require.NoError(t, err, "generated lifecycle delivery must pass ordinary manifest validation")
 	return installruntime.RIDDeliveryFixture{First: raw}
 }
 func (f *installationNativeWorld) ridRequest(t *testing.T, method, path, bearer string, body any) (int, json.RawMessage) {
@@ -218,6 +223,7 @@ func (f *installationNativeWorld) ridAdmin(t *testing.T, id string, grant bool) 
 }
 func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifecycleWorld {
 	t.Helper()
+	manifests := ridLifecycleDelivery(t, systemClass)
 	f := newInstallationNativeWorldProfile(t, 7200, "", true)
 
 	// Constructor already compared the full stock catalog before/after base,
@@ -227,7 +233,7 @@ func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifec
 	if mode == "S2" {
 		accounts = f.createRID02Accounts(t)
 	}
-	in := installruntime.DeliveryInput{Manifests: ridLifecycleDelivery(t, systemClass), CredentialFile: f.creator.CredentialFile}
+	in := installruntime.DeliveryInput{Manifests: manifests, CredentialFile: f.creator.CredentialFile}
 	if mode == "S1" {
 		in.TenantAccountID = &f.tenantID
 	}
