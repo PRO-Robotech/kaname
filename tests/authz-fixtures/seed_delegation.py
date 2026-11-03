@@ -84,10 +84,26 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pki", required=True)
-    parser.add_argument("--ledger", required=True)
+    parser.add_argument("--pki", default=str(ROOT / ".stand/pki"))
+    parser.add_argument("--ledger", default=str(ROOT / ".stand/run/delegation-subjects.json"))
     parser.add_argument("--env-file", default=str(ROOT / "tests/newman/environments/local.postman_environment.json"))
-    return run(parser.parse_args())
+    parser.add_argument("--minted-keys", action="store_true")
+    parser.add_argument("--minted-surface", action="store_true")
+    args = parser.parse_args()
+    if args.minted_keys:
+        print("\n".join(KEYS))
+        return 0
+    if args.minted_surface:
+        print(own.MINTED_SURFACE)
+        return 0
+    try:
+        return run(args)
+    except own.Unmet as error:
+        print("УСЛОВИЕ НЕ СОЗДАНО: " + str(error))
+        return 75
+    except (own.Finding, OSError, ValueError) as error:
+        print("НАХОДКА: " + str(error))
+        return 1
 
 
 if __name__ == "__main__":

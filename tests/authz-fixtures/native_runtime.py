@@ -40,7 +40,6 @@ def main() -> int:
     if mode not in {"base", "public-matrix"}:
         raise ValueError("unknown native acceptance mode")
     env = {key: os.environ[key] for key in ("HOME", "PATH", "GOMAXPROCS", "GOMEMLIMIT") if key in os.environ}
-    env["PATH"] = "/home/dk/.local/opt/node/bin:/home/dk/bin:" + env["PATH"]
     env.update(json.loads((evidence / "run/native-environment.json").read_text()))
     env["KANAME_DB_PORT"] = str(args.pg_port)
     for key, port in {
