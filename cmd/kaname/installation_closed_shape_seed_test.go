@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// The unchanged ordinary seed proof is scoped to declared ordinary modules.
+// Неизменённое доказательство штатного посева ограничено заявленными штатными модулями.
 func rid12RequireOrdinarySeed(t *testing.T, f *installationNativeWorld, view rid09PublicView, modules ...string) {
 	t.Helper()
 	var catalog iamv1.ListPermissionCatalogResponse

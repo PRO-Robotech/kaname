@@ -242,9 +242,9 @@ func load(path string) (Config, *viper.Viper, error) {
 		return Config{}, nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	// Presence belongs to operator input, not to decoded zero values/defaults.
-	// In particular YAML null and an explicitly empty environment override select
-	// S1 and must reach the startup validator as an empty (invalid) target.
+	// Наличие принадлежит входу оператора, а не декодированным нулевым значениям/умолчаниям.
+	// В частности, YAML null и явно пустое переопределение окружения выбирают
+	// S1 и должны дойти до проверки запуска пустой (недопустимой) целью.
 	if env, present := os.LookupEnv("KANAME_MODULESEEDINSTALLER__TENANTACCOUNTID"); present {
 		cfg.ModuleSeedInstaller.TenantAccountID = &env
 	} else if tenantTargetDeclared && cfg.ModuleSeedInstaller.TenantAccountID == nil {

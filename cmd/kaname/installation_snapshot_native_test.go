@@ -102,7 +102,7 @@ func rid08FutureWorld(t *testing.T) *rid08FutureProof {
 	ids, namedSystem, initial, full := rid08SetupN3(t, f)
 	proof := &rid08FutureProof{Initial: initial, Full: full, AccountsN3: ids, TenantNamedSystem: namedSystem, System: f.baseline.SystemID, Operator: string(f.given.user)}
 	rid08RequireAccountCapacity(t, f, 3)
-	// No child, census transaction or writer exists during this normal-clock wait.
+	// Во время этого ожидания по штатным часам нет потомка, транзакции переписи или записи.
 	proof.Expired = rid08WaitRealWindow(t, f, full)
 	rid08Stage(t, f)
 	require.Equal(t, ids, rid08NonSystemIDs(t, rid08PrimaryAccounts(t, f), f.baseline.SystemID))
@@ -118,8 +118,8 @@ func rid08FutureWorld(t *testing.T) *rid08FutureProof {
 	require.False(t, proof.Snapshot.CompletedAt.Before(proof.Expired.DBNow))
 	require.JSONEq(t, "[]", rid08PrimaryGD(t, f))
 	require.Equal(t, before, rid08GDOperations(t, f))
-	// Account membership is now frozen by the ACTUAL returned canonical snapshot.
-	// D is created through the SAME freshly verified O, before first GD release.
+	// Состав учётных записей теперь зафиксирован НАСТОЯЩИМ возвращённым каноническим снимком.
+	// D создаётся через ТОГО ЖЕ заново проверенного O до первого освобождения GD.
 	proof.D = rid08CreateAccount(t, f, "rid-d")
 	proof.DCommitted = time.Now().UTC()
 	rid08RequireAccountCapacity(t, f, 4)
@@ -171,8 +171,8 @@ func rid08EmptyWorld(t *testing.T) *rid08EmptyProof {
 	before := rid08PrimaryAccounts(t, f)
 	require.Equal(t, []string{f.tenantID}, rid08NonSystemIDs(t, before, f.baseline.SystemID))
 	requireNativeNoDelivery(t, f.given)
-	// Account.Delete is a normal owner operation. It removes no person and must
-	// leave the independent O alive, homeless and still a current cluster admin.
+	// Account.Delete — штатная операция владельца. Она не удаляет человека и должна
+	// оставить независимого O живым, без домашней записи и всё ещё текущим кластерным администратором.
 	var projects, sas, groups, roles int
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT
  (SELECT count(*) FROM kaname.projects WHERE account_id=$1),
@@ -242,9 +242,9 @@ func rid08EmptyWorld(t *testing.T) *rid08EmptyProof {
 	return proof
 }
 
-// Both boundaries re-verify the SAME ordinary O and independently read the
-// complete primary account set. An account recreated during startup/renewal or
-// shutdown cannot hide behind an empty GD list or the earlier snapshot.
+// Обе границы заново проверяют ТОГО ЖЕ штатного O и независимо читают
+// полное первичное множество учётных записей. Запись, пересозданная при запуске/обновлении или
+// завершении, не может скрыться за пустым списком GD или прежним снимком.
 func rid08RequireEmptyBoundary(t *testing.T, f *installationNativeWorld, saved []rid08AccountRow) []rid08AccountRow {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(f.given.ctx, 15*time.Second)
@@ -290,8 +290,8 @@ func rid08FaultWorld(t *testing.T) *rid08FaultProof {
 	require.Equal(t, history, rid08PrimaryGD(t, f))
 	proof := &rid08FaultProof{Accounts: ids, FailedOpsBefore: before, FailedOpsAfter: after, FaultGDHistory: history}
 	rid08NewmanPhase(t, f, "late-fault-n0", nil, nil, namedSystem, "", "")
-	// Same world, manifests, C/O, account set, page size and real startup. Only the
-	// second-page fault flag is removed; no state repair or permission write.
+	// Тот же мир, манифесты, C/O, множество учётных записей, размер страницы и настоящий запуск. Убран только
+	// флаг сбоя второй страницы; без починки состояния или записи разрешений.
 	twin := rid08Start(t, f, "rid08-late-page-twin", false, false)
 	rid08AwaitEvent(t, f, twin, "snapshot-complete")
 	proof.TwinSnapshot = rid08ReadSnapshot(t, twin)
@@ -322,9 +322,9 @@ func rid08FaultWorld(t *testing.T) *rid08FaultProof {
 	return proof
 }
 
-// The capacity and admission receipts name independent existing production
-// policies. The fourth account is permitted by the declared count ceiling only;
-// its normal Create still has to wait for the unchanged three-per-hour window.
+// Квитанции вместимости и допуска называют независимые существующие производственные
+// политики. Четвёртая учётная запись разрешена только заявленным пределом количества;
+// её штатный Create всё равно ждёт неизменного окна трёх допусков в час.
 func rid08RequireAccountCapacity(t *testing.T, f *installationNativeWorld, owned int64) {
 	t.Helper()
 	var ceiling, count int64

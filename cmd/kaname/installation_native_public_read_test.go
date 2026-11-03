@@ -33,12 +33,12 @@ func (f *installationNativeWorld) publicRead(t *testing.T, path string, out prot
 	require.NoError(t, protojson.Unmarshal(raw, out))
 }
 
-// F6/P6: discover every page through O's public credential, Get each discovered
-// resource, then compare exact identities/axes/dates to read-only persistence.
-// SQL never supplies the public List result and cannot substitute for it.
+// F6/P6: обнаруживаем каждую страницу публичным удостоверяющим материалом O, получаем каждый обнаруженный
+// ресурс, затем сравниваем точные идентичности/оси/даты с сохранённым состоянием только чтением.
+// SQL не подставляет публичный результат List и не может его заменить.
 func (f *installationNativeWorld) requirePublicDeliveredPairs(t *testing.T, modules ...string) nativePublicReceipt {
 	t.Helper()
-	f.renewOperator(t, f.given.ctx) // fresh real code exchange + normal /me verification
+	f.renewOperator(t, f.given.ctx) // свежий настоящий обмен кода + штатная проверка /me
 	receipt := nativePublicReceipt{ServiceAccounts: map[string]string{}, Delegations: map[string]string{}}
 	accounts := map[string]*iamv1.ServiceAccount{}
 	tokens := map[string]bool{}
@@ -160,10 +160,10 @@ func (f *installationNativeWorld) requirePublicDeliveredPairs(t *testing.T, modu
 	return receipt
 }
 
-// Public created_at has whole-second precision; persistence retains its own
-// precision. This is exact canonical equality, not an elapsed-time tolerance.
-// Keep the SQL renewal snapshot untruncated so subsecond persistence changes
-// remain detectable independently of the public Get/List receipt.
+// Публичный created_at имеет секундную точность; хранилище сохраняет собственную
+// точность. Это точное каноническое равенство, а не допуск истёкшего времени.
+// Сохраняем снимок обновления SQL без усечения, чтобы изменения долей секунды в хранилище
+// обнаруживались независимо от публичной квитанции Get/List.
 func requireNativePublicCreatedAt(t *testing.T, stored time.Time, public *timestamppb.Timestamp) {
 	t.Helper()
 	require.NotNil(t, public)

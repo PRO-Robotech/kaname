@@ -214,11 +214,11 @@ type ceremonyWorld struct {
 	surfaceAuth servicecontract.Axis[servicecontract.SurfaceAuthMech]
 	priv        *ecdsa.PrivateKey
 	kid         string
-	signer      *tokensigner.Signer // same real signer exposed to installation acceptance
+	signer      *tokensigner.Signer // тот же настоящий подписант, доступный приёмке установки
 	logs        *lockedBuffer
 	// lifespans — сроки церемонии, которые настройка мира называет сборке.
 	lifespans       config.CeremonyConfig
-	clientAudiences []string // native Given uses the actual stand audience; nil preserves this fixture
+	clientAudiences []string // нативный Given использует настоящую аудиторию стенда; nil сохраняет эту фикстуру
 
 	user    domain.UserID
 	email   string

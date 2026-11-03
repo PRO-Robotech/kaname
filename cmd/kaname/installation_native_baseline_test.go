@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These are observations of stock migration data, never fixture seed writers.
-// Keep the bootstrap identity and its authority while proving that the new O
-// receives neither from the initial user/session Given.
+// Это наблюдения штатных миграционных данных, без записывающих посев помощников фикстуры.
+// Сохраняем начальную идентичность и её полномочия, доказывая, что новый O
+// не получает их из начального Given пользователя/сессии.
 type nativeBaseline struct {
 	ServiceAccounts map[string]json.RawMessage `json:"serviceAccounts"`
 	AdminGrants     map[string]json.RawMessage `json:"adminGrants"`

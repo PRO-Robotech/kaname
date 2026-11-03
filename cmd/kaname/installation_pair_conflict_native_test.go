@@ -24,9 +24,9 @@ type rid07Observation struct {
 	OldPair, NewPair, OldGrant, NewGrant string
 }
 
-// Each negative/twin starts from an independent full F0→O→C→delivery world.
-// Revoke/Create below is explicit Given construction, never convergence repair.
-// Its revoked history is included in the frozen snapshot before tested apply.
+// Каждый отрицательный случай/близнец начинается с независимого полного мира F0→O→C→поставка.
+// Revoke/Create ниже — явное построение Given, без починки сходимости.
+// Его отозванная история включена в зафиксированный снимок до проверяемого применения.
 func rid07Matrix(t *testing.T, exact bool) []rid07Observation {
 	return rid07MatrixWithPublic(t, exact, nil)
 }
@@ -60,8 +60,8 @@ func rid07MatrixWithPublic(t *testing.T, exact bool, consumer rid07LivePublicCon
 				creator := f.creator.ID
 				credential := f.creator
 				if axis == "creator" {
-					// BOTH worlds provision C-other identically. Only the caller used for
-					// ordinary Create changes; installer always presents original C.
+					// ОБА мира одинаково подготавливают C-other. Меняется лишь вызывающий для
+					// штатного Create; установщик всегда предъявляет исходный C.
 					other := f.ridSA(t, f.creator.AccountID, "rid07-other-creator")
 					f.ridAdmin(t, other, true)
 					f.ridAuthorityMaterialized(t, other, true)
@@ -127,8 +127,8 @@ func rid07MatrixWithPublic(t *testing.T, exact bool, consumer rid07LivePublicCon
 				}
 				newGrant := w.grant(t, grantBody)
 				require.NotEqual(t, oldGrant.Id, newGrant.Id)
-				// Lawfulness is demonstrated by ordinary Create and a successful actual I
-				// grant under this GD before freezing the Given; shape alone is insufficient.
+				// Допустимость доказывают штатный Create и успешная настоящая выдача I
+				// под этим GD до фиксации Given; одной формы недостаточно.
 				history := w.snapshot(t)
 				publicPairs := map[string]*iamv1.GrantDelegation{}
 				for _, account := range w.accounts {

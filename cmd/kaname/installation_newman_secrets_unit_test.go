@@ -117,7 +117,7 @@ func TestRIDNewmanAssertionAnonymousInventory(t *testing.T) {
 	}
 }
 
-// Security-only source controls; values are dummy strings, never fixture tokens.
+// Исходные контроли только безопасности; значения — фиктивные строки, а не токены фикстуры.
 func TestRID03NewmanSecretAdmission(t *testing.T) {
 	for _, tc := range []struct {
 		name, caseID string
@@ -177,7 +177,7 @@ func TestRID03NewmanLiteralAdmissionCensus(t *testing.T) {
 	}
 }
 
-// Independent literal test order; never derived from admitted map entries.
+// Независимый литеральный порядок теста; не выводится из допущенных элементов карты.
 var rid03ExpectedLiteralCases = []string{
 	"registry-installation-rid03-S1-GRANT-ACT",
 	"registry-installation-rid03-S1-GRANT-VERIFY",

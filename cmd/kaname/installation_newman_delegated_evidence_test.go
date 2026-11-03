@@ -19,9 +19,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Business families are read across the entire primary DB, without target,
-// actor, tenant or newly derived ID filters. Wrong-target/extra-family events
-// cannot disappear from the delta. Transport progress is not business history.
+// Бизнес-семейства читаются по всей первичной БД без фильтров цели,
+// участника, тенанта или нового выведенного ID. События неверной цели/лишнего семейства
+// не могут исчезнуть из разницы. Прогресс транспорта не является бизнес-историей.
 func rid03ReadBusinessAudit(t *testing.T, ctx context.Context, tx pgx.Tx) []rid09PrimaryRow {
 	t.Helper()
 	rows, err := tx.Query(ctx, `SELECT to_jsonb(r) FROM kaname.audit_outbox r
@@ -51,8 +51,8 @@ func rid03ImmutableBusinessAudit(row rid09PrimaryRow) (rid09PrimaryRow, bool) {
 		return nil, false
 	}
 	out := rid09PrimaryRow{}
-	// Exactly these five columns describe business identity/history. Other five
-	// columns are explicitly transport-only and are not erased from any raw SQL.
+	// Ровно эти пять столбцов описывают бизнес-идентичность/историю. Другие пять
+	// столбцов явно относятся только к транспорту и не стираются из необработанного SQL.
 	for _, key := range []string{"id", "event_type", "tenant_account_id", "event_payload", "created_at"} {
 		out[key] = append(json.RawMessage(nil), row[key]...)
 	}
@@ -111,8 +111,8 @@ func rid03AuditStringSet(value any) ([]string, bool) {
 	return xs, true
 }
 
-// This fixture's module roles have explicit owner_module in BEFORE primary.
-// No handler/usecase or post-ACT GD payload supplies the expected audit module.
+// У ролей модуля этой фикстуры есть явный owner_module в первичном BEFORE.
+// Ни обработчик/сценарий, ни нагрузка GD после ACT не подставляют ожидаемый модуль аудита.
 func rid03DeclaredGDAuditAxes(e *rid03NewmanExpectation) (string, []string, []string, []string, bool) {
 	roles, ok := rid03AuditStringSet(e.Request["roleIds"])
 	if !ok {
@@ -161,8 +161,8 @@ func rid03DeclaredGDAuditAxes(e *rid03NewmanExpectation) (string, []string, []st
 	return module, roles, targets, normalized, true
 }
 
-// This pure oracle uses only original declared request/actor and the independent
-// new primary resource ID. New business payloads have a closed exact shape.
+// Этот чистый оракул использует лишь исходно заявленные запрос/участника и независимый
+// ID нового первичного ресурса. Новые бизнес-нагрузки имеют замкнутую точную форму.
 func rid03BusinessAuditDelta(e *rid03NewmanExpectation, newID string, before, after []rid09PrimaryRow, start, end time.Time) ([]rid09PrimaryRow, bool) {
 	seen := map[string]bool{}
 	for _, row := range after {
@@ -255,7 +255,7 @@ type rid03BusinessEventEvidence struct {
 	Actor        string    `json:"actor"`
 	BindingID    string    `json:"bindingId,omitempty"`
 	DelegationID string    `json:"delegationId"`
-	// Payload is deliberately a digest, never arbitrary raw audit/credential data.
+	// Нагрузка намеренно является дайджестом, без произвольных необработанных данных аудита/удостоверений.
 	PayloadSHA256 string `json:"payloadSHA256"`
 }
 type rid03TechnicalReceipt struct {
@@ -286,9 +286,9 @@ type rid03TechnicalReceipt struct {
 	WholeDoDAccepted            bool                         `json:"wholeDoDAccepted"`
 }
 
-// Called only after strict full primary/action checks. It validates its own
-// selected fields again before returning a closed nonsecret receipt. Callers
-// write only after ACT observation validation (or strict VERIFY/denial bracket).
+// Вызывается только после строгих полных первичных проверок/проверок действия. Он вновь проверяет собственные
+// выбранные поля до возврата замкнутой несекретной квитанции. Вызывающие
+// пишут только после проверки наблюдения ACT (либо строгих скобок VERIFY/отказа).
 func rid03BuildTechnicalReceipt(e *rid03NewmanExpectation, a, b rid03NewmanSnapshot, p *rid03DeltaPolicy) (rid03TechnicalReceipt, bool) {
 	if _, ok := rid03NewmanActor(e.CaseID); !ok || !strings.HasSuffix(e.CaseID, "-"+e.Phase) || (e.Phase != "ACT" && e.Phase != "VERIFY") {
 		return ridNewmanInitialTechnicalReceipt(e, a, b), false
@@ -300,7 +300,7 @@ func ridNewmanInitialTechnicalReceipt(e *rid03NewmanExpectation, a, b rid03Newma
 	return rid03TechnicalReceipt{Version: 1, CaseID: e.CaseID, Phase: e.Phase, Denied: e.Denied, PrimaryLowerBound: a.Whole.PrimaryFinishedAt, PrimaryUpperBound: b.Whole.PrimaryStartedAt, Producers: []rid03ProducerEvidence{}, DirectFacts: []rid03FactEvidence{}, BusinessEvents: []rid03BusinessEventEvidence{}, ExpectedEmittedUnion: []rid03EvidenceTuple{}, ActualEmittedUnion: []rid03EvidenceTuple{}, ExpectedDirectUnion: []rid03EvidenceTuple{}, ActualDirectUnion: []rid03EvidenceTuple{}}
 }
 
-// Pure body: each caller must first validate its own closed literal case/phase map.
+// Чистое тело: каждый вызывающий сначала проверяет собственное замкнутое литеральное соответствие случая/фазы.
 func ridNewmanBuildClosedTechnicalReceipt(e *rid03NewmanExpectation, a, b rid03NewmanSnapshot, p *rid03DeltaPolicy) (rid03TechnicalReceipt, bool) {
 	out := ridNewmanInitialTechnicalReceipt(e, a, b)
 	if (e.Phase != "ACT" && e.Phase != "VERIFY" && e.Phase != "READ") || out.PrimaryUpperBound.Before(out.PrimaryLowerBound) {

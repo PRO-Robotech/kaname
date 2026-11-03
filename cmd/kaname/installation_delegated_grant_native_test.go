@@ -25,20 +25,20 @@ func ridNativeDelegatedGrant(t *testing.T) {
 }
 func ridNativeDelegatedAxes(t *testing.T) {
 	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
-		// Both roles are lawfully delivered and cover both target types. The only
-		// role change between negative/positive requests is the out-of-axis role.
+		// Обе роли законно поставлены и покрывают оба целевых типа. Единственное
+		// изменение роли между отрицательным/положительным запросами — роль вне оси.
 		u := w.f.ridSA(t, w.f.tenantID, "rid-role-twin")
 		body := w.bindingInput("service_account", u, w.push, "registry.registries", w.object)
 		w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
 		body["roleId"] = w.pull
 		w.grant(t, body)
-		// Registered legal repository with a covering role; only target axis differs.
+		// Зарегистрированный допустимый репозиторий с покрывающей ролью; отличается только целевая ось.
 		u = w.f.ridSA(t, w.f.tenantID, "rid-target-twin")
 		body = w.bindingInput("service_account", u, w.pull, "registry.repositories", w.repository)
 		w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
 		body["target"] = w.bindingInput("service_account", u, w.pull, "registry.registries", w.object)["target"]
 		w.grant(t, body)
-		// A real existing user is a legal subject kind but outside this delegation.
+		// Настоящий существующий пользователь — допустимый вид субъекта, но вне этого делегирования.
 		u = w.f.ridSA(t, w.f.tenantID, "rid-subject-twin")
 		body = w.bindingInput("user", w.f.operator.UserID(), w.pull, "registry.registries", w.object)
 		w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
@@ -58,8 +58,8 @@ func ridNativeIssuerCannotDelegate(t *testing.T) {
 			other = ridResponseID(t, f.ridOperation(t, "POST", "/iam/v1/accounts", f.operator.Bearer(), map[string]any{"name": "rid-other-account"}, 0))
 		}
 		require.NotEqual(t, f.tenantID, other)
-		// A fresh normal SA makes this an absent pair even in S2, which already
-		// installed I's own pair in every snapshot account. Payload is byte-identical.
+		// Свежая штатная SA делает пару отсутствующей даже в S2, где уже
+		// установлена собственная пара I во всех учётных записях снимка. Полезная нагрузка побайтно одинакова.
 		delegate := f.ridSA(t, other, "rid-explicit-delegate")
 		body := w.gdCreateBody(other, delegate)
 		w.denied(t, "/iam/v1/grantDelegations", w.issuerToken, body)
@@ -80,8 +80,8 @@ func ridNativeIssuerCannotDelegate(t *testing.T) {
 }
 func ridNativeAnonymousClass(t *testing.T) {
 	rid03BothModes(t, true, func(t *testing.T, w *ridLifecycleWorld) {
-		// Same legal SYSTEM_CLASS axis, target, role, scope and caller. Only the
-		// existing class name changes. The issuer is authenticated in both requests.
+		// Та же допустимая ось SYSTEM_CLASS, цель, роль, область и вызывающий. Меняется только
+		// имя существующего класса. Издатель аутентифицирован в обоих запросах.
 		body := w.bindingInput("system_class", "authenticated", w.pull, "registry.registries", w.object)
 		w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
 		body["subjectId"] = "anonymous"

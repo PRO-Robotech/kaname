@@ -69,8 +69,8 @@ func ridLifecycleDelivery(t *testing.T, systemClass bool) installruntime.RIDDeli
 	}
 	raw, err = yaml.Marshal(doc)
 	require.NoError(t, err)
-	// Judge the exact generated input with the ordinary production parser before
-	// any database/native process is created. This does not apply model or seed.
+	// Проверяем точный порождённый вход штатным производственным парсером до
+	// создания любой базы/нативного процесса. Это не применяет модель или посев.
 	_, err = manifest.Load(raw)
 	require.NoError(t, err, "generated lifecycle delivery must pass ordinary manifest validation")
 	return installruntime.RIDDeliveryFixture{First: raw}
@@ -159,7 +159,7 @@ func (f *installationNativeWorld) ridList(t *testing.T, path, field string, quer
 func (f *installationNativeWorld) ridToken(t *testing.T, key *installruntime.StandingCreator) string {
 	t.Helper()
 	token, err := f.wire.ExchangeLifecycleKey(f.given.ctx, key, "https://kaname.local", "https://kaname.local", func(secret string) { f.secrets = append(f.secrets, secret) })
-	// Never print token/PEM through assertion values.
+	// Не печатаем токен/PEM через значения утверждений.
 	f.secrets = append(f.secrets, token.Bearer, token.Assertion)
 	require.NoError(t, err)
 	require.NotEmpty(t, token.Bearer)
@@ -226,14 +226,14 @@ func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifec
 	return newRIDLifecycleWorldAccounts(t, mode, systemClass, nil)
 }
 
-// Optional fixture setup uses the same full native installation and public F7-F10.
+// Необязательная подготовка фикстуры использует ту же полную нативную установку и публичные F7-F10.
 func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, setup func(*testing.T, *installationNativeWorld) []string) *ridLifecycleWorld {
 	t.Helper()
 	manifests := ridLifecycleDelivery(t, systemClass)
 	f := newInstallationNativeWorldProfile(t, 7200, "", true)
 
-	// Constructor already compared the full stock catalog before/after base,
-	// recorded real no-delivery receipts, and checked zero delivered I/W/GD.
+	// Конструктор уже сравнил полный штатный каталог до/после базы,
+	// записал настоящие квитанции отсутствия поставки и проверил нулевую поставку I/W/GD.
 
 	accounts := []string{f.tenantID}
 	if mode == "S2" {
@@ -357,8 +357,8 @@ func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, s
 		{"registry_repository", "registry.repositories", w.repository, "parent", "registry_registry", w.object, []string{"registry_registry:" + w.object, "project:" + w.project, "account:" + f.tenantID}},
 	} {
 		object := entry.modelType + ":" + entry.id
-		// Observe the actually applied policy before writing: model name, dotted
-		// catalog type, structural pointer and explicitly permitted owner writes.
+		// До записи наблюдаем фактически применённую политику: имя модели, точечный
+		// тип каталога, структурный указатель и явно разрешённые записи владельца.
 		var dotted string
 		var names, types, writes []string
 		require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT dotted,parent_names,parent_types,writes FROM kaname.catalog_resource WHERE object_type=$1 AND live`, entry.modelType).Scan(&dotted, &names, &types, &writes))
@@ -366,10 +366,10 @@ func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, s
 		require.Equal(t, []string{entry.pointer}, names)
 		require.Equal(t, []string{entry.parentType}, types)
 		require.Contains(t, writes, "owner:user")
-		// The existing RegisterResource protocol derives parenthood from a
-		// pointer fact. An owner write cannot create that fact implicitly.
-		// Registry follows the existing seed_registry_resource producer; repository
-		// follows the same protocol with its already registered container as parent.
+		// Существующий протокол RegisterResource выводит родительство из
+		// факта указателя. Запись владельца не может неявно создать этот факт.
+		// Реестр следует существующему производителю seed_registry_resource; репозиторий
+		// следует тому же протоколу с уже зарегистрированным контейнером в качестве родителя.
 		for _, tuple := range []struct{ subject, relation string }{
 			{entry.parentType + ":" + entry.parentID, entry.pointer},
 			{"user:" + f.operator.UserID(), "owner"},
@@ -380,8 +380,8 @@ func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, s
 			require.NoError(t, e)
 			require.True(t, check.Allowed, "actual registered pointer/owner")
 		}
-		// Observe the result under catalog vocabulary and the complete ordered
-		// chain under model vocabulary; no observer writes domain state.
+		// Наблюдаем результат в словаре каталога и полную упорядоченную
+		// цепочку в словаре модели; наблюдатели не пишут доменное состояние.
 		var parentProject, parentAccount string
 		var chain []string
 		require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT m.parent_project_id,m.parent_account_id,
@@ -396,8 +396,8 @@ func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, s
 		for _, subject := range []string{issuerID, f.creator.ID} {
 			judged, e := module.Check(f.given.ctx, &iamv1.CheckRequest{SubjectId: "service_account:" + subject, Relation: "admin", Object: "account:" + account, Consistency: iamv1.CheckRequest_HIGHER_CONSISTENCY})
 			require.NoError(t, e)
-			// C's cluster admin may imply account admin in the relation model. The
-			// issuer must have neither; C's direct tenant grants are checked at retirement.
+			// Кластерный администратор C может подразумевать администратора учётной записи в модели отношений.
+			// Издатель не должен иметь ни того, ни другого; прямые выдачи C в тенанте проверяются при выводе из обращения.
 			if subject == issuerID {
 				require.False(t, judged.Allowed, "I must not acquire account administrator authority")
 			}
@@ -450,7 +450,7 @@ func (w *ridLifecycleWorld) grant(t *testing.T, body any) *iamv1.AccessBinding {
 	require.True(t, metadata.MessageIs(&creation))
 	require.NoError(t, metadata.UnmarshalTo(&creation))
 	require.Equal(t, binding.Id, creation.AccessBindingId)
-	require.Equal(t, request.ScopeId, creation.AccountId) // actual requested account, including canonical-first S2 account
+	require.Equal(t, request.ScopeId, creation.AccountId) // настоящая запрошенная учётная запись, включая каноническую первую запись S2
 	require.NotEmpty(t, binding.Id)
 	require.NotContains(t, beforeBindings, binding.Id)
 	w.requireGrantRequest(t, &request, &binding)
@@ -467,9 +467,9 @@ func (w *ridLifecycleWorld) grant(t *testing.T, body any) *iamv1.AccessBinding {
 		require.NoError(t, protojson.Unmarshal(raw, &got))
 		materialized = w.primaryBindingMaterializedAt(t, observationCtx, binding.Id)
 		w.recordGrantProjection(t, &binding, &got)
-		// Bracket the public read with independent PRIMARY observations. Retry
-		// only a moving ledger, never a mismatch in the checked API response.
-		// Null is legitimate; this is not a barrier requiring materialization.
+		// Обрамляем публичное чтение независимыми наблюдениями PRIMARY. Повторяем
+		// только движущийся журнал, а не несовпадение проверяемого ответа API.
+		// Null допустим; это не барьер, требующий материализации.
 		require.NoError(t, observationCtx.Err(), "materialization observation deadline exceeded")
 		if proto.Equal(before, materialized) {
 			break
@@ -483,8 +483,8 @@ func (w *ridLifecycleWorld) grant(t *testing.T, body any) *iamv1.AccessBinding {
 		}
 	}
 	if at := binding.MaterializedAt; at != nil {
-		// Operation.done does not promise this observable, but if supplied its
-		// historical instant must obey the same precision and lifetime bounds.
+		// Operation.done не обещает это наблюдаемое значение, но, если оно передано, его
+		// исторический момент должен соблюдать те же границы точности и срока.
 		require.NoError(t, at.CheckValid())
 		require.Zero(t, at.Nanos)
 		require.NotNil(t, binding.CreatedAt)
@@ -577,8 +577,8 @@ func (w *ridLifecycleWorld) refusedApplyObserved(t *testing.T, want installation
 	if checkpoint != nil {
 		checkpoint()
 	}
-	// Restore only normal listeners/catalog, with NO delegation declarations.
-	// Retired/deleted C remains unchanged and supplies no authority to this path.
+	// Восстанавливаем только штатные слушатели/каталог, БЕЗ объявлений делегирования.
+	// Выведенный/удалённый C остаётся неизменным и не даёт полномочий этому пути.
 	w.catalogOnly(t)
 	require.Equal(t, before, w.snapshot(t))
 }
@@ -603,8 +603,8 @@ func (w *ridLifecycleWorld) catalogOnly(t *testing.T) {
 	w.f.renewOperator(t, w.f.given.ctx)
 }
 
-// Registered by the opt-in constructor before first Start and provisioning.
-// The existing default/RID01 cleanup is left unchanged.
+// Регистрируется конструктором явного включения до первого Start и подготовки.
+// Существующая очистка по умолчанию/RID01 сохраняется.
 func (f *installationNativeWorld) ridLifecycleCleanup(t *testing.T) {
 	t.Helper()
 	if f == nil || f.session == nil {
@@ -674,9 +674,9 @@ func (w *ridLifecycleWorld) requireGrantRequest(t *testing.T, request *iamv1.Cre
 	require.True(t, maps.Equal(request.Labels, got.Labels), "exact protobuf labels map entries")
 }
 
-// recordGrantProjection records data-only binding projections before the strict
-// equality assertion. It does not normalize any field or include HTTP headers,
-// credentials, keys, or tokens. Only field names may reach test diagnostics.
+// recordGrantProjection записывает проекции привязок только данными до строгого
+// утверждения равенства. Он не нормализует поля и не включает заголовки HTTP,
+// удостоверения, ключи или токены. Только имена полей могут попасть в диагностику теста.
 func (w *ridLifecycleWorld) recordGrantProjection(t *testing.T, response, got *iamv1.AccessBinding) {
 	t.Helper()
 	fields := response.ProtoReflect().Descriptor().Fields()
@@ -716,10 +716,10 @@ func (w *ridLifecycleWorld) recordGrantProjection(t *testing.T, response, got *i
 	t.Logf("AccessBinding Operation/Get differing proto fields: %v", changed)
 }
 
-// primaryBindingMaterializedAt independently implements the public observable's
-// documented MAX(updated_at) over ACTIVE members, truncated to whole seconds.
-// This is read-only observation of the real fixture PRIMARY, not an API-derived
-// expected value. PENDING_VERIFICATION rows cannot establish materialization.
+// primaryBindingMaterializedAt независимо реализует документированное публичное наблюдаемое значение
+// MAX(updated_at) по членам ACTIVE с усечением до целых секунд.
+// Это наблюдение только чтением настоящего PRIMARY фикстуры, а не выведенное из API
+// ожидание. Строки PENDING_VERIFICATION не могут устанавливать материализацию.
 func (w *ridLifecycleWorld) primaryBindingMaterializedAt(t *testing.T, ctx context.Context, id string) *timestamppb.Timestamp {
 	t.Helper()
 	var recovery bool

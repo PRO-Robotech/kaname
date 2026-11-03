@@ -1,9 +1,9 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package installruntime runs the ordinary Kaname executable for installation
-// acceptance. It supplies no identity, configuration defaults, database, or TLS
-// bypass. The fixture must provision those through the existing stand mechanisms.
+// Пакет installruntime запускает штатный исполняемый файл Kaname для приёмки
+// установки. Он не подставляет идентичность, умолчания конфигурации, базу данных или обход
+// TLS. Фикстура должна подготовить их существующими механизмами стенда.
 package installruntime
 
 import (
@@ -41,10 +41,10 @@ type Process struct {
 	StderrPath   string
 }
 
-// Start invokes the existing serve command. Environment is explicit so a
-// previously running fixture cannot silently supply another credential or DSN.
-// ctx is the real process deadline; cancellation kills the process, it is not
-// merely metadata in an evidence file.
+// Start вызывает существующую команду serve. Окружение явно, чтобы ранее
+// работавшая фикстура не могла незаметно подставить другое удостоверение или DSN.
+// ctx — настоящий срок процесса; отмена завершает процесс, а не служит
+// лишь метаданными в файле доказательства.
 func Start(ctx context.Context, in Input) (*Process, error) {
 	if !filepath.IsAbs(in.Binary) || !filepath.IsAbs(in.ConfigFile) || !filepath.IsAbs(in.EvidenceDir) {
 		return nil, errors.New("runtime fixture requires absolute binary, config and evidence paths")
@@ -108,8 +108,8 @@ func Start(ctx context.Context, in Input) (*Process, error) {
 	return p, nil
 }
 
-// AwaitReady requires an actual listener/application probe supplied by the
-// fixture; merely seeing a startup log or a live PID cannot establish readiness.
+// AwaitReady требует настоящую пробу слушателя/приложения, переданную
+// фикстурой; одного журнала запуска или живого PID недостаточно для установления готовности.
 func (p *Process) AwaitReady(ctx context.Context, probe func(context.Context) error) error {
 	if probe == nil {
 		return errors.New("readiness probe is required")
@@ -156,8 +156,8 @@ func (p *Process) Wait(ctx context.Context) error {
 	}
 }
 
-// Stop preserves the production graceful-shutdown result; forced cleanup is a
-// failure, never a successful installation exit.
+// Stop сохраняет результат производственного плавного завершения; принудительная очистка —
+// отказ, а не успешный выход установки.
 func (p *Process) Stop(ctx context.Context) error {
 	select {
 	case <-p.done:
@@ -174,10 +174,10 @@ func (p *Process) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Results reads only the structured installation object, while raw logs remain
-// private evidence. Driver messages and credential values are never printed by
-// this helper. Callers still assert absence of their exact secret bytes in BOTH
-// raw streams before publishing evidence.
+// Results читает только структурный объект установки, а необработанные журналы остаются
+// закрытым доказательством. Сообщения драйвера и значения удостоверений не печатаются
+// этим помощником. Вызывающие всё равно проверяют отсутствие точных байтов секретов в ОБОИХ
+// необработанных потоках до публикации доказательства.
 func (p *Process) Results() ([]json.RawMessage, error) {
 	var results []json.RawMessage
 	for _, path := range []string{p.StdoutPath, p.StderrPath} {

@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// Independently constructed public/ledger expectations: do not use the repaired
-// expected-projection builder to construct its own positive oracle.
+// Независимо построенные ожидания публичного состояния/журнала: исправленный построитель
+// ожидаемой проекции не используется для построения собственного положительного оракула.
 func rid05ProjectionControl(t *testing.T, kind string) (rid03NewmanSnapshot, rid03NewmanSnapshot) {
 	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	member := func(binding, typ, id string, at time.Time, status string) rid09PrimaryRow {
@@ -46,8 +46,8 @@ func rid05ProjectionControl(t *testing.T, kind string) (rid03NewmanSnapshot, rid
 	}
 	a := rid03NewmanSnapshot{Projection: projection, Raw: map[string][]rid09PrimaryRow{"access_binding_target_members": before}}
 	b := rid03NewmanSnapshot{Raw: map[string][]rid09PrimaryRow{"access_binding_target_members": after}}
-	// JSON roundtrip creates independent safe maps; restore the deliberately
-	// nonserialized internal fence separately using the independent full ledger.
+	// Оборот JSON создаёт независимые безопасные карты; намеренно несериализуемый
+	// внутренний барьер восстанавливается отдельно из независимого полного журнала.
 	raw, err := json.Marshal(projection)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &b.Projection))

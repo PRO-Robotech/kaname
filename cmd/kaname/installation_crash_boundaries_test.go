@@ -16,10 +16,10 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// PRIVATE child-driver foundation. A boundary only announces and waits on an
-// owned IPC control; it cannot return a fabricated DB result or impersonate C.
-// The owned child entrypoint supplies actual production authentication; its
-// parent observes persistence and kills the exact process at the selected point.
+// ЗАКРЫТАЯ основа дочернего драйвера. Граница лишь сообщает о достижении и ждёт через
+// принадлежащий ей канал IPC; она не может вернуть вымышленный результат БД или выдать себя за C.
+// Принадлежащая фикстуре дочерняя точка входа обеспечивает настоящую производственную аутентификацию;
+// родитель наблюдает сохранение и завершает точный процесс в выбранной точке.
 type rid02Boundary func(context.Context, string, string) error
 
 type rid02ObservedOperation struct {
@@ -31,7 +31,7 @@ type rid02ObservedOperation struct {
 func (s *rid02ObservedOperation) set(id string) { s.mu.Lock(); defer s.mu.Unlock(); s.id = id }
 func (s *rid02ObservedOperation) get() string   { s.mu.Lock(); defer s.mu.Unlock(); return s.id }
 
-// These are observations around the REAL repository CAS, not substitute writes.
+// Это наблюдения вокруг НАСТОЯЩЕГО CAS репозитория, а не подменные записи.
 type rid02TerminalAttempt struct {
 	Started, Finished                   time.Time
 	ContextLiveBefore, ContextLiveAfter bool
@@ -77,8 +77,8 @@ func (r *rid02CrashRepo) Writer(ctx context.Context) (kanamerepo.Writer, error) 
 	return &rid02CrashWriter{Writer: w, installation: cap, operation: id, boundary: r.boundary}, nil
 }
 
-// Forward the primary port as well. Repository embedding alone would silently
-// lose it and turn a test seam into a different recovery implementation.
+// Также передаём первичный порт. Одно встраивание репозитория незаметно
+// потеряло бы его и превратило тестовый шов в другую реализацию восстановления.
 func (r *rid02CrashRepo) ReaderFromPrimary(ctx context.Context) (kanamerepo.Reader, error) {
 	primary, ok := r.Repository.(interface {
 		ReaderFromPrimary(context.Context) (kanamerepo.Reader, error)
@@ -112,9 +112,9 @@ func (w *rid02CrashWriter) Commit(ctx context.Context) error {
 	if err := w.Writer.Commit(ctx); err != nil {
 		return err
 	}
-	// No SQL transaction remains open here. The owned IPC pause precedes return
-	// from the operation function, so operations.Run has NOT yet created its
-	// fresh terminal attempt context. The original worker deadline is unchanged.
+	// Здесь нет открытой SQL-транзакции. Принадлежащая фикстуре пауза IPC предшествует возврату
+	// из функции операции, поэтому operations.Run ЕЩЁ НЕ создал
+	// свежий контекст конечной попытки. Исходный срок исполнителя не изменяется.
 	return w.boundary(ctx, "after-commit-before-terminal", w.operation)
 }
 
@@ -131,8 +131,8 @@ func (r *rid02CrashOperations) Create(ctx context.Context, op operations.Operati
 	return nil
 }
 
-// This method intentionally remains present: dropping the optional worker
-// executionClaimer would remove the normal terminal-state guard from the test.
+// Этот метод намеренно сохранён: удаление необязательного для исполнителя
+// executionClaimer убрало бы из теста штатную защиту конечного состояния.
 func (r *rid02CrashOperations) ClaimForExecution(ctx context.Context, id string) (bool, error) {
 	actual, ok := r.Repo.(interface {
 		ClaimForExecution(context.Context, string) (bool, error)
@@ -152,7 +152,7 @@ func (r *rid02CrashOperations) MarkDone(ctx context.Context, id string, response
 	}
 	a.Started = time.Now()
 	a.ContextLiveBefore = ctx.Err() == nil
-	// Never replace, renew or detach this context: it must come from real Run.
+	// Не заменяем, не обновляем и не отделяем этот контекст: он должен прийти из настоящего Run.
 	err = r.Repo.MarkDone(ctx, id, response)
 	a.Finished = time.Now()
 	a.ContextLiveAfter = ctx.Err() == nil

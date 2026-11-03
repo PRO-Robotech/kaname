@@ -44,9 +44,9 @@ func rid08NewmanPhase(t *testing.T, f *installationNativeWorld, phase string, wa
 	return expected.Delegations
 }
 
-// Primary projections are acquired independently of ANY public response.
-// SQL reads cannot fabricate a public outcome: the generated Newman collection
-// performs its own pages/Get/identity requests and compares every declared field.
+// Первичные проекции получаются независимо от ЛЮБОГО публичного ответа.
+// Чтения SQL не могут выдумать публичный исход: порождённая коллекция Newman
+// сама выполняет запросы страниц/Get/идентичности и сравнивает каждое заявленное поле.
 func rid08ReadNewmanPrimary(t *testing.T, f *installationNativeWorld, phase string, wanted []string, previous []map[string]any, tenantNamedSystem, future string) rid08NewmanExpectation {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)

@@ -37,13 +37,13 @@ type rid12Proof struct {
 	Return, RepeatReturn                      ridWholeReturn
 }
 
-// Optional external public consumer has the actual ordinary world and phase.
-// nil is NOT_EXECUTED for Newman; native API evidence is independently required.
+// Необязательный внешний публичный потребитель имеет настоящий штатный мир и фазу.
+// nil означает NOT_EXECUTED для Newman; нативное доказательство API требуется независимо.
 type rid12LivePublicConsumer func(*testing.T, *installationNativeWorld, rid12NativeInput, string)
 
 func rid12NativeInputs(t *testing.T, kind string) []rid12NativeInput {
 	t.Helper()
-	first := installruntime.NewRIDDeliveryFixture().Second // independent valid M1
+	first := installruntime.NewRIDDeliveryFixture().Second // независимый допустимый M1
 	cases := rid12InputCases(t)
 	require.Len(t, cases, 15)
 	result := []rid12NativeInput{}
@@ -117,7 +117,7 @@ func rid12Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild, no
 	}
 	require.NoError(t, installruntime.CheckOwnedListeners(c.cmd.Process.Pid, c.dir, installruntime.DefaultNativePorts().All()...))
 	if !noGD {
-		c.seenEvent = true // only real GD authentication requires positive FD5 token audit
+		c.seenEvent = true // только настоящая аутентификация GD требует положительного аудита токена FD5
 		rid06ReadResult(t, c, installationResult{Stage: "delegation", Code: "OK", CompletedPairs: 6})
 	}
 }
@@ -205,7 +205,7 @@ func rid12World(t *testing.T, in rid12NativeInput, consumer rid12LivePublicConsu
 		}
 		rid08Write(t, child.dir, "readiness-observations", observations)
 		rid06ReadResult(t, child, installationResult{Stage: "preflight", Code: "INVALID_ARGUMENT", Field: in.Input.Field, CompletedPairs: 0})
-		out.Return = rid09ReturnReceipt(t, child, codes.Unknown) // actual wrapped loader code=2, distinct from structured INVALID_ARGUMENT
+		out.Return = rid09ReturnReceipt(t, child, codes.Unknown) // настоящий обёрнутый код загрузчика code=2, отличный от структурированного INVALID_ARGUMENT
 		out.After = ridReadWholeDelivery(t, f)
 		ridRequireWholeDeliveryUnchanged(t, before, out.After)
 		require.Equal(t, ops, rid08GDOperations(t, f))
@@ -252,7 +252,7 @@ func rid12World(t *testing.T, in rid12NativeInput, consumer rid12LivePublicConsu
 		}
 		if in.Repeat {
 			repeated := in.Input
-			// Reorder every GD axis, preserving all declared catalog/role/seed nodes.
+			// Переставляем каждую ось GD, сохраняя все заявленные узлы каталога/ролей/посева.
 			doc := rid12Document(t, repeated.Delivery.Second)
 			gd := doc["seed"].(map[string]any)["grantDelegations"].([]any)[0].(map[string]any)
 			for _, axis := range []string{"roleIds", "targetTypes", "subjectTypes"} {
@@ -294,12 +294,12 @@ func rid12World(t *testing.T, in rid12NativeInput, consumer rid12LivePublicConsu
 }
 func rid12Matrix(t *testing.T, kind string, consumer rid12LivePublicConsumer) []*rid12Proof {
 	t.Helper()
-	inputs := rid12NativeInputs(t, kind) // validate every exact input before first PG
+	inputs := rid12NativeInputs(t, kind) // проверяем каждый точный вход до первого PG
 	out := []*rid12Proof{}
 	for _, in := range inputs {
 		t.Run(in.Name+"/"+kind, func(t *testing.T) { out = append(out, rid12World(t, in, consumer)) })
 	}
-	// Fail after attempting every independent fresh world, never first-red abort.
+	// Завершаем с ошибкой после попыток всех независимых свежих миров, без остановки на первом отказе.
 	require.Len(t, out, len(inputs), "matrix incomplete; attempted guard prevents automatic blind rerun")
 	return out
 }

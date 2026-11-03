@@ -141,7 +141,7 @@ func (v Verdict) String() string {
 
 // Query — вопрос к форме E.
 type Query struct {
-	// PreparedPlans permits authenticated startup preflight before process model installation.
+	// PreparedPlans разрешает предварительную проверку запуска с аутентификацией до установки модели процесса.
 	PreparedPlans *authzmodel.Plans
 	// Subject — целиком, в форме `"user:usr-1"`: подстановочный и групповой
 	// субъекты на пару не раскладываются.

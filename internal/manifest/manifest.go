@@ -288,7 +288,7 @@ func (m *Manifest) RolesDeclared() bool { return m.rolesDeclared }
 // объявлением; после kacho#2452 он зовёт применитель сам, поэтому судит уже не
 // согласие двух копий, а то, доезжает ли объявленное до строк.
 type Seed struct {
-	// GrantDelegations declares installation delegation; absence and [] do not request writes.
+	// GrantDelegations объявляет делегирование установки; отсутствие и [] не запрашивают записей.
 	GrantDelegations []GrantDelegation `yaml:"grantDelegations"`
 	// ServiceAccounts — личности самого модуля: под ними он ходит к соседям.
 	ServiceAccounts []ServiceAccount `yaml:"serviceAccounts"`

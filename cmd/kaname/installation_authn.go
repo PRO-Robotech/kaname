@@ -56,7 +56,7 @@ type installationAuthentication struct {
 	reader            *presentedcred.Reader
 	audience          string
 	assertionAudience string
-	// Optional immutable observation wired only by the internal full-root seam.
+	// Необязательное неизменяемое наблюдение, подключаемое только внутренним швом полного корня запуска.
 	observeCredential func(string, string)
 }
 
@@ -125,8 +125,8 @@ func prepareInstallationAuthentication(pool *pgxpool.Pool, cfg config.Config, si
 	return &installationAuthentication{credential: c, key: key, resolver: resolver, verifier: verifier, issuer: issuer, reader: reader, audience: cfg.AuthN.PresentedCredential.Audience, assertionAudience: signer.Issuer()}, nil
 }
 
-// Authenticate reuses an actual issued access token, checking it through the
-// normal presented reader every time. Authority is independently checked per pair.
+// Authenticate повторно использует настоящий выданный токен доступа, каждый раз проверяя его
+// штатным считывателем предъявленных токенов. Полномочия независимо проверяются для каждой пары.
 func (a *installationAuthentication) Authenticate(parent context.Context) (context.Context, error) {
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
@@ -144,8 +144,8 @@ func (a *installationAuthentication) Authenticate(parent context.Context) (conte
 		}
 		a.accessToken = token.AccessToken
 		a.accessOwner = owner
-		// Renew conservatively before the numeric-date rounding boundary; acceptance
-		// and revocation of each presentation still belong to the ordinary reader.
+		// Обновляем заблаговременно до границы округления числовой даты; приём
+		// и отзыв каждого предъявления по-прежнему проверяет штатный считыватель.
 		a.accessExpires = time.Now().Add(time.Duration(max(0, token.ExpiresIn-1)) * time.Second)
 	}
 	var authenticated context.Context
@@ -190,7 +190,7 @@ func (a *installationAuthentication) exchange(ctx context.Context) (client_token
 				if err := waitInstallationExchange(ctx, verified.RetryAfter); err != nil {
 					return client_token.Output{}, "", err
 				}
-				continue // Fresh lookup, assertion and jti; never retry a consumed proof.
+				continue // Новый поиск, утверждение и jti; использованное доказательство не повторяем.
 			}
 			return client_token.Output{}, "", installationProofFailure(verified.Outcome)
 		}

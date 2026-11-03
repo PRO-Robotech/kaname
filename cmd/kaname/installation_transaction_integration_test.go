@@ -43,8 +43,8 @@ func (p *installationFailPage) BeginTx(ctx context.Context, tx pgx.Tx, options p
 	return (kanamepg.NestedInstallationPages{}).BeginTx(ctx, tx, options)
 }
 
-// This is a real SQL/transaction control using the initial verified O Given.
-// It deliberately does not claim standing C or public edge acceptance coverage.
+// Это настоящий контроль SQL/транзакции с начальным проверенным Given O.
+// Он намеренно не заявляет покрытие действующего C или публичной краевой приёмки.
 func TestInstallationTransactionRepairPoolOne(t *testing.T) {
 	f := newInstallationBootstrapWorld(t, withPoolWidth(1))
 	ctx, cancel := context.WithTimeout(f.principal, 30*time.Second)
@@ -67,8 +67,8 @@ func TestInstallationTransactionRepairPoolOne(t *testing.T) {
 	require.Equal(t, 3600, windowSeconds)
 	t.Logf("fixture census: initial tenants=%d canonical system=1 admission=%d/%d window=%ds remaining=%d", len(initial), admitted, maximum, windowSeconds, maximum-admitted)
 	var tenants []domain.AccountID
-	// The initial ceremony account already charged one of the three admission
-	// events. Two ordinary creates respect that unchanged production policy.
+	// Начальная учётная запись церемонии уже израсходовала одно из трёх событий
+	// допуска. Два штатных создания соблюдают эту неизменную производственную политику.
 	for i := 0; i < 2; i++ {
 		name := fmt.Sprintf("repair-tenant-%d", i)
 		op, err := create.Execute(ctx, domain.Account{Name: domain.AccountName(name)})
@@ -123,14 +123,14 @@ func TestInstallationTransactionRepairPoolOne(t *testing.T) {
 		metadata, _ := anypb.New(&iamv1.CreateGrantDelegationMetadata{AccountId: string(tenants[0]), GrantDelegationId: proposed})
 		op, err := operations.NewFromContext(ctx, domain.PrefixOperationIAM, "installation SQL boundary control", &iamv1.CreateGrantDelegationMetadata{AccountId: string(tenants[0]), GrantDelegationId: proposed})
 		require.NoError(t, err)
-		require.NoError(t, ops.Create(ctx, op)) // ordinary producer before writer boundary
+		require.NoError(t, ops.Create(ctx, op)) // штатный производитель до границы записи
 		writer, err := repo.Writer(ctx)
 		require.NoError(t, err)
 		cap, ok := writer.(installationTransactionControl)
 		require.True(t, ok)
 		require.NoError(t, cap.LockPendingInstallationOperation(ctx, op.ID, string(tenants[0]), proposed))
 		require.NoError(t, cap.RequireInstallationAuthority(ctx, f.model.plans), "pool1 must progress with actual admitted O guard")
-		metadata.Value = nil // mismatched/corrupt metadata must never bind
+		metadata.Value = nil // несовпадающие/повреждённые метаданные никогда не должны привязываться
 		require.Error(t, cap.BindInstallationOperation(ctx, op.ID, metadata, winning))
 		actual, _ := anypb.New(&iamv1.CreateGrantDelegationMetadata{AccountId: string(tenants[0]), GrantDelegationId: winning})
 		require.NoError(t, cap.BindInstallationOperation(ctx, op.ID, actual, winning))
@@ -152,8 +152,8 @@ func TestInstallationTransactionRepairPoolOne(t *testing.T) {
 		var decoded iamv1.CreateGrantDelegationMetadata
 		require.NoError(t, proto.Unmarshal(rawValue, &decoded))
 		require.Equal(t, winning, decoded.GrantDelegationId)
-		// A restart reading the normal Operation now sees the actual resource identity;
-		// terminalization is still the normal operations writer's responsibility.
+		// Перезапуск, читающий штатную Operation, теперь видит настоящую идентичность ресурса;
+		// За запись конечного состояния по-прежнему отвечает штатный механизм записи операций.
 		require.NoError(t, ops.MarkDone(ctx, op.ID, nil))
 		writer, err = repo.Writer(ctx)
 		require.NoError(t, err)

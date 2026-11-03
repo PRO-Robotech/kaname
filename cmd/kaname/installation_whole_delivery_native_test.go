@@ -42,9 +42,9 @@ type rid09Observation struct {
 	NewmanExecuted               bool
 }
 
-// A future Newman bridge receives the actual live ordinary wire/O and sameworld
-// phase. nil is explicitly NOT_EXECUTED, never counted as public Newman proof.
-// No environment/CLI/product hook or synthetic exported credential is added.
+// Будущий мост Newman получает настоящий живой штатный транспорт/O и фазу того же мира.
+// nil явно означает NOT_EXECUTED и не считается публичным доказательством Newman.
+// Не добавляются окружение/CLI/хук продукта или синтетическое экспортированное удостоверение.
 type rid09LivePublicConsumer func(*testing.T, *installationNativeWorld, rid09Input, string)
 
 func rid09Inputs(t *testing.T, reverse, twin bool) []rid09Input {
@@ -89,8 +89,8 @@ func rid09StopBase(t *testing.T, f *installationNativeWorld) {
 	defer cancel()
 	require.NoError(t, f.session.Stop(ctx))
 	require.NoError(t, ctx.Err())
-	// Stop/Wait completion precedes the independent primary baseline. Its own
-	// background projection, token and retention workers cannot race the oracle.
+	// Завершение Stop/Wait предшествует независимой первичной базе. Его собственные
+	// фоновые исполнители проекций, токенов и хранения не могут гоняться с оракулом.
 	rid02CheckStreams(t, []string{f.base.StdoutPath, f.base.StderrPath}, rid02WorldSecretMaterial(t, f))
 }
 func rid09Start(t *testing.T, f *installationNativeWorld, in rid09Input) *rid02OwnedChild {
@@ -123,9 +123,9 @@ func rid09Start(t *testing.T, f *installationNativeWorld, in rid09Input) *rid02O
 	return child
 }
 
-// Deliberately do NOT call c.await: its seenEvent means real authentication.
-// The pre-start ownership event cannot require minted tokens on a lawful
-// preflight refusal. Global afterReap semantics remain byte-for-byte unchanged.
+// Намеренно НЕ вызываем c.await: его seenEvent означает настоящую аутентификацию.
+// Событие владения до запуска не может требовать выпущенных токенов при допустимом
+// предварительном отказе. Глобальная семантика afterReap сохраняется побайтно.
 func rid09ArmAndRelease(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(f.given.ctx, 10*time.Second)
@@ -189,7 +189,7 @@ func rid09Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
 		case <-ticker.C:
 		}
 	}
-	c.seenEvent = true // successful actual authn requires nonempty real token FD5 audit.
+	c.seenEvent = true // успешная настоящая аутентификация требует непустого аудита настоящего токена FD5.
 	require.NoError(t, installruntime.CheckOwnedListeners(c.cmd.Process.Pid, c.dir, installruntime.DefaultNativePorts().All()...))
 	rid06ReadResult(t, c, installationResult{Stage: "delegation", Code: "OK", CompletedPairs: 6})
 }
@@ -236,8 +236,8 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 	before := ridReadWholeDelivery(t, f)
 	ops := rid08GDOperations(t, f)
 	require.Empty(t, ops)
-	// The input receipt is exact nonsecret generated manifest bytes. All external
-	// IDs remain those returned by normal ceremony/accounts/provisioning.
+	// Квитанция входа — точные несекретные порождённые байты манифеста. Все внешние
+	// ID остаются возвращёнными штатной церемонией/учётными записями/подготовкой.
 	rid08Write(t, f.session.Root, "whole-before", before)
 	rid08Write(t, f.session.Root, "whole-input", in)
 	out := rid09Observation{Axis: in.Axis, Field: in.Field, Reverse: in.Reverse, Twin: in.Twin, Accounts: accounts, NamedSystem: namedSystem, CanonicalSystem: f.baseline.SystemID, Before: before, PublicBefore: beforePublic, Input: in, NewmanExecuted: consumer != nil && os.Getenv("KANAME_RID_NEWMAN") == "1"}
@@ -256,16 +256,16 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 		}
 		rid08Write(t, child.dir, "readiness-observations", observations)
 		rid06ReadResult(t, child, installationResult{Stage: "preflight", Code: "INVALID_ARGUMENT", Field: in.Field, CompletedPairs: 0})
-		// The loader publishes INVALID_ARGUMENT above but returns its wrapped
-		// manifest error (module_manifests.go). Observe that actual Unknown code
-		// separately; never relabel it or confuse startup-result with RPC status.
+		// Загрузчик публикует INVALID_ARGUMENT выше, но возвращает свою обёрнутую
+		// ошибку манифеста (module_manifests.go). Наблюдаем настоящий код Unknown
+		// отдельно; не переименовываем его и не смешиваем результат запуска со статусом RPC.
 		out.Return = rid09ReturnReceipt(t, child, codes.Unknown)
 		out.After = ridReadWholeDelivery(t, f)
 		rid08Write(t, f.session.Root, "whole-after", out.After)
 		ridRequireWholeDeliveryUnchanged(t, before, out.After)
 		require.Equal(t, ops, rid08GDOperations(t, f))
-		// Read public consequences only after the authoritative stopped-process
-		// before/after proof. Restart is normal no-delivery startup, never a repair.
+		// Читаем публичные последствия только после авторитетного доказательства до/после
+		// остановленного процесса. Перезапуск — штатный запуск без поставки, а не починка.
 		p, err := f.session.StartBase(f.given.ctx)
 		require.NoError(t, err)
 		require.NoError(t, p.OwnsListeners(installruntime.DefaultNativePorts().All()...))
@@ -302,7 +302,7 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 }
 func rid09Matrix(t *testing.T, twin bool, consumer rid09LivePublicConsumer) []rid09Observation {
 	t.Helper()
-	// Judge all exact generated bytes for BOTH filename orders before first PG.
+	// Проверяем все точные порождённые байты для ОБОИХ порядков файлов до первого PG.
 	var inputs []rid09Input
 	for _, reverse := range []bool{false, true} {
 		inputs = append(inputs, rid09Inputs(t, reverse, twin)...)
@@ -318,7 +318,7 @@ func rid09Matrix(t *testing.T, twin bool, consumer rid09LivePublicConsumer) []ri
 		if twin {
 			kind = "lawful-twin"
 		}
-		// Each failed world is cleaned before the next; collect the whole census.
+		// Каждый неудачный мир очищается до следующего; собираем всю перепись.
 		t.Run(in.Axis+"/"+order+"/"+kind, func(t *testing.T) { out = append(out, rid09World(t, in, consumer)) })
 	}
 	require.Len(t, out, 8)

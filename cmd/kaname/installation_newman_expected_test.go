@@ -14,11 +14,11 @@ import (
 	"syscall"
 )
 
-// The full producer freezes one flat, externally supplied identity file for
-// every literal collection. Node and collector still receive the same exact
-// five-field contract used by the independently exercised single-RID bridge.
-// All twelve files are checked together before selecting a collection: a
-// different test binary/toolchain cannot be hidden in a later RID's file.
+// Полный производитель фиксирует один плоский внешний файл идентичности для
+// каждой литеральной коллекции. Node и сборщик по-прежнему получают тот же точный
+// пятиполевой контракт независимо исполненного моста одного RID.
+// Все двенадцать файлов проверяются вместе до выбора коллекции:
+// другой тестовый файл/набор инструментов не может скрыться в файле последующего RID.
 func ridNewmanExpectedForCollection(file, directory, stem string) (ridNewmanExpected, error) {
 	var zero ridNewmanExpected
 	if (file == "") == (directory == "") {
@@ -86,8 +86,8 @@ func ridNewmanExpectedForCollection(file, directory, stem string) (ridNewmanExpe
 	return selected, nil
 }
 
-// fd is owned by this function. O_NONBLOCK plus the regular-file check also
-// makes malformed FIFO/device entries a bounded refusal rather than a wait.
+// Эта функция владеет fd. O_NONBLOCK и проверка обычного файла также
+// превращают неверные FIFO/устройства в ограниченный по времени отказ вместо ожидания.
 func ridNewmanReadExpectedFD(fd int) (ridNewmanExpected, error) {
 	var out ridNewmanExpected
 	f := os.NewFile(uintptr(fd), "rid-external-identity")

@@ -16,8 +16,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// StandingToken is observed only after the exact issued credential succeeds at
-// the ordinary presented-credential /me endpoint. Claims are not an authenticator.
+// StandingToken наблюдается только после успеха точного выданного удостоверения на
+// штатной конечной точке /me предъявляемых удостоверений. Утверждения не являются аутентификатором.
 type StandingToken struct {
 	Bearer              string
 	Assertion           string

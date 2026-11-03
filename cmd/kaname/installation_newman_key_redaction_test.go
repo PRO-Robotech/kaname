@@ -39,10 +39,10 @@ func rid01RedactionHash(v any) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// This intentionally supports ONLY the known nativeSingleDelivery profile. It
-// never invokes config.Load/AutomaticEnv or consults/mutates ambient os.Environ.
-// Production Session.StartDelivery owns the actual YAML from this ExtraConfig,
-// and Process.Start uses exactly Session.Environment plus its own config path.
+// Это намеренно поддерживает ТОЛЬКО известный профиль nativeSingleDelivery.
+// Никогда не вызывает config.Load/AutomaticEnv, не читает и не меняет окружающий os.Environ.
+// Производственный Session.StartDelivery владеет настоящим YAML из этого ExtraConfig,
+// а Process.Start использует ровно Session.Environment и собственный путь конфигурации.
 func rid01ResolveRedactionProfile(environment []string, extra map[string]any) (rid01KeyRedactionProfile, error) {
 	fail := errors.New("fixture NOT_ACCEPTED: unsupported RID01 redaction profile")
 	if len(extra) != 0 {
@@ -53,8 +53,8 @@ func rid01ResolveRedactionProfile(environment []string, extra map[string]any) (r
 		if !ok {
 			return rid01KeyRedactionProfile{}, fail
 		}
-		// Includes both actual loader namespaces and legacy flat aliases. Unknown
-		// redaction names are rejected too, even an empty/default-valued override.
+		// Включает оба настоящих пространства имён загрузчика и прежние плоские псевдонимы. Неизвестные
+		// имена скрытия тоже отклоняются, даже переопределение пустым/умолчальным значением.
 		name = strings.ToUpper(name)
 		if strings.HasPrefix(name, "KANAME_") && strings.Contains(name, "REDACT") {
 			return rid01KeyRedactionProfile{}, fail
@@ -133,16 +133,16 @@ func rid01RawString(row rid09PrimaryRow, name string) (string, bool) {
 	return value, true
 }
 
-// The only normalization is a clone of BEFORE. AFTER remains untouched and must
-// equal that complete typed clone, including nested fields and unknown proto
-// bytes. SQL cells/columns outside response_data remain byte-exact, not selected.
+// Единственная нормализация — клон BEFORE. AFTER остаётся нетронутым и должен
+// равняться этому полному типизированному клону, включая вложенные поля и неизвестные байты
+// proto. Ячейки/столбцы SQL вне response_data сохраняются побайтно, без отбора.
 func rid01ProveKeyRedaction(caseID, keyID string, before, after, preRestore rid01NewmanSnapshot, profile rid01KeyRedactionProfile) (*rid01KeyRedactionProof, error) {
 	fail := errors.New("RID01 typed key redaction NOT_ACCEPTED")
 	if caseID != rid01KeyRedactionCase || keyID == "" || len(before.Operations) != len(after.Operations) || len(before.OperationRawRows) != len(before.Operations) || len(after.OperationRawRows) != len(after.Operations) {
 		return nil, fail
 	}
-	// Re-derive defaults, without reading ambient process environment. The actual
-	// profile was separately validated/sealed before restoring StartDelivery.
+	// Заново выводим значения по умолчанию без чтения окружающего окружения процесса. Настоящий
+	// профиль отдельно проверен/опечатан до восстановления StartDelivery.
 	expected, err := rid01ResolveRedactionProfile(nil, nil)
 	if err != nil || profile.SAKeyGrace != expected.SAKeyGrace || profile.UserTokenGrace != expected.UserTokenGrace || profile.Settled != expected.Settled || profile.Window != expected.Window || profile.EnvironmentSHA256 == "" || profile.ExtraConfigSHA256 == "" {
 		return nil, fail
@@ -210,8 +210,8 @@ func rid01ProveKeyRedaction(caseID, keyID string, before, after, preRestore rid0
 	if start.IsZero() || end.Before(start) || !modified.Before(start.Add(-profile.Settled)) || !modified.After(end.Add(-profile.Window)) {
 		return nil, fail
 	}
-	// Keep the original strict zero-delta checkpoint as an independent mandatory
-	// premise. This comparator cannot itself authorize a failed pre-restore proof.
+	// Сохраняем исходную строгую контрольную точку нулевой разницы независимой обязательной
+	// предпосылкой. Этот компаратор сам не может разрешить неудачное доказательство до восстановления.
 	if !reflect.DeepEqual(before.Operations, preRestore.Operations) || !reflect.DeepEqual(before.OperationRawRows, preRestore.OperationRawRows) {
 		return nil, fail
 	}
@@ -240,8 +240,8 @@ func rid01ProveKeyRedaction(caseID, keyID string, before, after, preRestore rid0
 	if !proto.Equal(cleared, current) {
 		return nil, fail
 	}
-	// Deterministic known-field encoding also retains the exact raw unknown
-	// bytes at every nested message. No unknown-field normalization is allowed.
+	// Детерминированная кодировка известных полей также сохраняет точные необработанные неизвестные
+	// байты каждого вложенного сообщения. Нормализация неизвестных полей запрещена.
 	expectedBytes, err := (proto.MarshalOptions{Deterministic: true}).Marshal(cleared)
 	if err != nil {
 		return nil, fail
@@ -271,7 +271,7 @@ func rid01AcceptedKeyRedaction(t *testing.T, h *rid01PublicContext, before, afte
 	return proof
 }
 
-// Bind the public context to the exact actual input passed to StartDelivery.
+// Привязываем публичный контекст к точному настоящему входу StartDelivery.
 func rid01SealRestoreProfile(t *testing.T, f *installationNativeWorld, in installruntime.DeliveryInput, h *rid01PublicContext) {
 	t.Helper()
 	require.NotNil(t, h)
@@ -282,8 +282,8 @@ func rid01SealRestoreProfile(t *testing.T, f *installationNativeWorld, in instal
 	profile, err := rid01ResolveRedactionProfile(f.session.Environment, in.ExtraConfig)
 	require.True(t, err == nil, "fixture NOT_ACCEPTED: unsupported actual RID01 restoring profile")
 	h.RestoreRedactionProfile = &profile
-	// Only nil/empty ExtraConfig is accepted, but retain its exact nil/empty shape
-	// so the digest is bound to the same actual file input, not a reconstruction.
+	// Принимается только nil/пустой ExtraConfig, но его точная форма nil/пустого значения сохраняется,
+	// чтобы дайджест был привязан к тому же настоящему входу файла, а не реконструкции.
 	if in.ExtraConfig != nil {
 		h.RestoreExtraConfig = map[string]any{}
 	}

@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Stock catalog rows are image/migration state, not evidence of module delivery.
-// Capture every column and every live/retired row; no live-only/count shortcut.
+// Штатные строки каталога — состояние образа/миграции, не доказательство поставки модуля.
+// Захватываем каждый столбец и каждую живую/выведенную строку; без сокращения до живых строк/числа.
 type ridStockPremise struct {
 	Catalog         json.RawMessage `json:"catalog"`
 	Issuers         int             `json:"deliveredIssuers"`
@@ -50,7 +50,7 @@ func writeRIDStockPremise(t *testing.T, root, phase string, p ridStockPremise, s
 }
 func requireRIDNoDeliveredIdentities(t *testing.T, p ridStockPremise, creators int) {
 	t.Helper()
-	// The entire coordinate receipt was written BEFORE any of these assertions.
+	// Вся квитанция координат записана ДО любого из этих утверждений.
 	require.Zero(t, p.Issuers, "no delivered I before full serve")
 	require.Zero(t, p.Writers, "W is introduced by first full delivery, not F0")
 	require.Zero(t, p.Delegations, "no GD before full serve")
@@ -58,8 +58,8 @@ func requireRIDNoDeliveredIdentities(t *testing.T, p ridStockPremise, creators i
 	require.Equal(t, 2+creators, p.ServiceAccounts, "only stock SAs and explicitly provisioned C")
 }
 
-// Only these startup producer messages/fields are retained; no arbitrary log
-// record or secret-bearing response is copied to a premise receipt.
+// Сохраняются только эти сообщения/поля производителя запуска; никакая произвольная запись журнала
+// или ответ с секретом не копируются в квитанцию предпосылки.
 var ridBaseReceiptFields = map[string][]string{
 	"доставка манифестов модулей не объявлена посадкой": {"required"},
 	"перепись композиции модели прав":                   {"manifests_seen", "resources_seen", "canon_types", "composed", "reaffirmed", "prior_edition", "public_read_key_terms"},
@@ -73,8 +73,8 @@ func readRIDBaseReceipts(t *testing.T, path string) map[string][]map[string]json
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
 	out := map[string][]map[string]json.RawMessage{}
-	// Ignore only an unfinished trailing line from an unrelated concurrent log
-	// write; every required startup receipt must exist as a complete record.
+	// Пропускаем только незавершённую последнюю строку посторонней конкурентной записи
+	// журнала; каждая необходимая квитанция запуска должна существовать полной записью.
 	lines := strings.Split(string(raw), "\n")
 	for _, line := range lines[:len(lines)-1] {
 		if strings.TrimSpace(line) == "" {
@@ -106,8 +106,8 @@ func (f *installationNativeWorld) requireRIDBasePremise(t *testing.T, phase stri
 	require.NotEmpty(t, f.stockCatalog, "post-migration stock snapshot required")
 	require.JSONEq(t, string(f.stockCatalog), string(p.Catalog), "full live+retired stock catalog preserved without delivery")
 	requireRIDNoDeliveredIdentities(t, p, creators)
-	// Existing stock identity/admin row preservation assertions are retained in
-	// the constructor. Here record the phase explicitly: stock + O [+ C].
+	// Существующие проверки сохранения штатных строк идентичности/администратора остаются
+	// в конструкторе. Здесь явно записываем фазу: штатное состояние + O [+ C].
 	require.Equal(t, 2+creators, p.AdminGrants)
 	for msg, fields := range ridBaseReceiptFields {
 		rows := receipts[msg]
@@ -145,8 +145,8 @@ func (f *installationNativeWorld) requireRIDBasePremise(t *testing.T, phase stri
 	declared := len(own.Seed.ServiceAccounts) + len(own.Seed.Groups) + len(own.Seed.Joins) + len(own.Seed.AccessBindings)
 	require.Positive(t, declared, "independent own manifest seed is nonempty")
 	require.Equal(t, declared, ridRequiredReceiptScalar[int](t, seedReceipt, "declared_rows"))
-	// Count the actual full post-migration snapshot, independently of the
-	// startup census being judged. Exact full snapshot equality was checked above.
+	// Считаем настоящий полный снимок после миграции независимо от
+	// проверяемой переписи запуска. Точное равенство полного снимка проверено выше.
 	var stock map[string][]map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(f.stockCatalog, &stock))
 	catalogReceipt := receipts["перепись каталога модуля"][0]
@@ -164,15 +164,15 @@ func (f *installationNativeWorld) requireRIDBasePremise(t *testing.T, phase stri
 		require.Positive(t, live, "stock live %s must exist", kind)
 		require.Equal(t, live, ridRequiredReceiptScalar[int](t, catalogReceipt, "row_"+kind))
 		require.Equal(t, retired, ridRequiredReceiptScalar[int](t, catalogReceipt, "retired_"+kind))
-		// Empty delivery must report the same stock live image anchor, without
-		// adding or dropping rows; retired rows are counted separately above.
+		// Пустая поставка должна сообщать тот же якорь живого штатного образа без
+		// добавления или удаления строк; выведенные строки отдельно подсчитаны выше.
 		require.Equal(t, live, ridRequiredReceiptScalar[int](t, catalogReceipt, "anchor_"+kind))
 	}
 }
 
-// Pointer decoding distinguishes a legitimate zero/false from JSON null.
-// Missing fields, wrong scalar types and null all fail before dereference.
-// Slice fields deliberately keep their normal JSON-null representation.
+// Декодирование указателя отличает допустимые ноль/false от JSON null.
+// Отсутствующие поля, неверные скалярные типы и null дают отказ до разыменования.
+// Поля срезов намеренно сохраняют штатное представление JSON-null.
 func ridRequiredReceiptScalar[T int | bool](t *testing.T, record map[string]json.RawMessage, key string) T {
 	t.Helper()
 	raw, exists := record[key]

@@ -11,10 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// A real PostgreSQL transaction owns the EXACT production pair lock. No GD,
-// credential, authority, timestamp or admission row is written by this barrier.
-// Two waiting PIDs alone are insufficient: AwaitTwo checks the same lock key,
-// distinct real backends, and still-absent complete pair history before release.
+// Настоящая транзакция PostgreSQL владеет ТОЧНОЙ производственной блокировкой пары. Этот барьер не пишет строки GD,
+// удостоверений, полномочий, временных меток или допуска.
+// Двух ожидающих PID недостаточно: AwaitTwo проверяет тот же ключ блокировки,
+// разные настоящие серверные процессы и всё ещё отсутствующую полную историю пары до освобождения.
 type nativePairBarrier struct {
 	pool              *pgxpool.Pool
 	tx                pgx.Tx

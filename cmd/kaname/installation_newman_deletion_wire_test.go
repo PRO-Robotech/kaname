@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// This nonsecret contract is built before ACT, without a returned ID/body or an
-// AFTER snapshot. Full primary typed validation and exact VERIFY stay separate.
+// Этот несекретный контракт строится до ACT, без возвращённого ID/тела или снимка
+// AFTER. Полная первичная типизированная проверка и точный VERIFY остаются отдельными.
 type rid05DeleteWireContract struct {
 	CaseID     string         `json:"caseId"`
 	ResourceID string         `json:"resourceId"`
@@ -54,9 +54,9 @@ func rid05DeleteWireContractBefore(caseID, creator, account, actor string, lower
 			return nil, false
 		}
 	}
-	// In protobufv1.36.11 Empty is custom JSON: Any has @type AND value:{}.
-	// Derive the sole canonical shape from the pinned implementation, not a
-	// permissive pair of alternative hand-written encodings.
+	// В protobufv1.36.11 Empty имеет особый JSON: Any содержит @type И value:{}.
+	// Выводим единственную каноническую форму из закреплённой реализации, а не
+	// из допускающей варианты пары вручную написанных кодировок.
 	raw, err := (protojson.MarshalOptions{EmitUnpopulated: true}).Marshal(operationspb.ToProto(op))
 	if err != nil {
 		return nil, false

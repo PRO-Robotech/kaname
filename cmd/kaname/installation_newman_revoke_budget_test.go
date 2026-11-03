@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// nil preserves the existing bridge's caller/default behavior. A budgeted
-// observer checks the actual deadline as well as cancellation, including timer lag.
+// nil сохраняет прежнее поведение вызывающего/умолчаний моста. Ограниченный бюджетом
+// наблюдатель проверяет настоящий срок вместе с отменой, включая задержку таймера.
 func ridNewmanBudgetCheck(ctx context.Context) error {
 	if ctx == nil {
 		return nil
@@ -29,8 +29,8 @@ type ridNewmanBudgetWriter interface {
 	SetWriteDeadline(time.Time) error
 }
 
-// written is true ONLY after the real Encode succeeds, even if the subsequent
-// deadline check rejects acceptance. Cleanup must not send a second permit then.
+// written равен true ТОЛЬКО после успеха настоящего Encode, даже если следующая
+// проверка срока отклоняет приём. Очистка тогда не должна посылать второе разрешение.
 func ridNewmanBudgetWrite(ctx context.Context, out ridNewmanBudgetWriter, action string, cap time.Duration) (written bool, err error) {
 	if err = ridNewmanBudgetCheck(ctx); err != nil {
 		return false, err
@@ -58,8 +58,8 @@ type rid06CriticalActions struct {
 	Release                          func(context.Context) (bool, error)
 }
 
-// This is the actual optional-observer controller, shared by all four worlds.
-// A failed check never advances to the next stage; cleanup/reap is owned outside.
+// Это настоящий контроллер необязательного наблюдателя, общий для всех четырёх миров.
+// Неудачная проверка не продвигает к следующей стадии; очисткой/ожиданием владеет внешний код.
 func rid06RunCritical(ctx context.Context, actions rid06CriticalActions) (bool, error) {
 	for _, stage := range []func(context.Context) error{actions.Await, actions.Pending, actions.Revoke, actions.Boundary} {
 		if err := ridNewmanBudgetCheck(ctx); err != nil {

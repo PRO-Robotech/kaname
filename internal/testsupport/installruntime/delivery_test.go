@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This checks the future runtime Given, not installer success. In particular a
-// malformed baseline must not make every negative runtime twin falsely green.
+// Это проверяет будущий Given исполнения, а не успех установщика. В частности,
+// неверная база не должна давать ложный успех всем отрицательным близнецам исполнения.
 func TestRuntimeDeliveryInputsAreLawful(t *testing.T) {
 	delivery := NewRIDDeliveryFixture()
 	for _, input := range [][]byte{delivery.First, delivery.Second} {

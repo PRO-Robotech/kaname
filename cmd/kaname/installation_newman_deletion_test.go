@@ -115,7 +115,7 @@ func rid05SnapshotRead(t *testing.T, w *ridLifecycleWorld, stable bool) rid05Sna
 		require.True(t, ok, "primary moved within phase capture")
 		return s
 	}
-	// One caller budget covers full native materialization readiness and ALL SQL.
+	// Один бюджет вызывающего покрывает полную нативную готовность материализации и ВЕСЬ SQL.
 	view, fixture, given := *w, *w.f, *w.f.given
 	given.ctx = ctx
 	fixture.given = &given
@@ -471,8 +471,8 @@ func (p *rid05PublicContext) actionPair(t *testing.T, w *ridLifecycleWorld, scen
 	}()
 }
 
-// Keep the typed operation adapter local and nonsecret. The independently read
-// operation, never a Node report ID/body, is the source for native assertions.
+// Сохраняем типизированный адаптер операции локальным и несекретным. Независимо прочитанная
+// операция, а не ID/тело отчёта Node, служит источником нативных утверждений.
 func rid05LifecycleOperation(t *testing.T, op *operations.Operation) ridLifecycleOperation {
 	raw, err := json.Marshal(rid09PrimaryJSON(t, operationspb.ToProto(op)))
 	require.NoError(t, err)
@@ -481,10 +481,10 @@ func rid05LifecycleOperation(t *testing.T, op *operations.Operation) ridLifecycl
 	return out
 }
 
-// Match the production Delete WHERE NOT EXISTS predicate: only revoked_at
-// removes a subject reference. Narrowing and expiry do not authorize deletion.
-// Validate every coordinate first so omitted/malformed raw fields cannot turn
-// the independent census into a vacuous zero. No raw rows enter error output.
+// Повторяем производственный предикат Delete WHERE NOT EXISTS: только revoked_at
+// удаляет ссылку субъекта. Сужение и истечение срока не разрешают удаление.
+// Сначала проверяем каждую координату, чтобы пропущенные/неверные необработанные поля не превратили
+// независимую перепись в пустой ноль. Необработанные строки не попадают в вывод ошибок.
 func rid05CreatorSubjectReferences(raw map[string][]rid09PrimaryRow, creator string) (legacy, secondary int, valid bool) {
 	bindings, haveBindings := raw["access_bindings"]
 	subjects, haveSubjects := raw["access_binding_subjects"]
@@ -496,7 +496,7 @@ func rid05CreatorSubjectReferences(raw map[string][]rid09PrimaryRow, creator str
 		id, idOK := rid03Cell[string](row, "id")
 		kind, kindOK := rid03Cell[string](row, "subject_type")
 		subject, subjectOK := rid03Cell[string](row, "subject_id")
-		// json null unmarshals into string's zero value, so enforce string tokens.
+		// json null разбирается в нулевое значение строки, поэтому требуем строковые токены.
 		if !idOK || id == "" || !kindOK || kind == "" || !subjectOK || subject == "" || strings.TrimSpace(string(row["subject_id"])) == "null" {
 			return 0, 0, false
 		}

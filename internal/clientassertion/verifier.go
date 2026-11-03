@@ -905,9 +905,9 @@ func parsePublicKey(pemText string) (crypto.PublicKey, error) {
 	return key, nil
 }
 
-// ResolveRegisteredClient is the shared registry failure classification used by
-// verification and the bounded expiry lookup needed to prepare a client proof.
-// Unknown identity and an unanswered registry question are deliberately distinct.
+// ResolveRegisteredClient — общая классификация отказов реестра для
+// проверки и ограниченного поиска истечения, нужного для подготовки доказательства клиента.
+// Неизвестная идентичность и вопрос реестру без ответа намеренно различаются.
 func ResolveRegisteredClient(ctx context.Context, resolver ClientResolver, id string) (domain.AssertionClient, Outcome, error) {
 	client, err := resolver.ResolveAssertionClient(ctx, id)
 	if domain.IsAssertionClientUnknown(err) {

@@ -63,9 +63,9 @@ func rid07NewmanCaseID(t *testing.T, in rid07NewmanInput, phase string) string {
 	return "registry-installation-rid07-" + rid07NewmanAxis(t, in.Axis) + "-" + in.Mode + "-" + kind + "-" + strings.ToUpper(phase)
 }
 
-// The caller owns the aggregate budget, including all projection/raw reads,
-// waits and the final success return. This read-only context view preserves the
-// frozen whole-table SQL body and pool; it changes no live fixture state.
+// Вызывающий владеет общим бюджетом, включая все чтения проекций/необработанных данных,
+// ожидания и финальный успешный возврат. Это представление контекста только чтения сохраняет
+// зафиксированные тело SQL всей таблицы и пул; живое состояние фикстуры не меняется.
 func rid07CaptureNewmanSnapshotContext(t *testing.T, ctx context.Context, f *installationNativeWorld) (rid07NewmanSnapshot, bool) {
 	t.Helper()
 	require.NoError(t, ctx.Err(), "aggregate RID07 snapshot budget expired before read")
@@ -88,10 +88,10 @@ func rid07ReadNewmanSnapshot(t *testing.T, f *installationNativeWorld) rid07Newm
 	return snapshot
 }
 
-// This is a readiness observation before the first accepted public baseline,
-// never a retry of an actual Newman phase. w.grant may return a stable nil
-// materializedAt, so require the real active G enrichment and the complete
-// projection/raw-history/Operation ledger to be stable across two full reads.
+// Это наблюдение готовности до первой принятой публичной базы,
+// без повтора настоящей фазы Newman. w.grant может возвращать стабильный nil
+// materializedAt, поэтому требуем настоящего обогащения активного G и стабильности полного
+// журнала проекций/необработанной истории/Operation между двумя полными чтениями.
 func rid07NewmanBaseline(t *testing.T, w *ridLifecycleWorld, in rid07NewmanInput) rid07NewmanSnapshot {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.f.given.ctx, 30*time.Second)
@@ -173,10 +173,10 @@ func rid07DefaultNewmanConsumer(t *testing.T, w *ridLifecycleWorld, in rid07Newm
 					require.Equal(t, rows, e.Snapshot.Whole.Delivery[table], "all raw GD/G history, targets, materialization rows and identities unchanged")
 				}
 			}
-			// Existing native rid07CheckApplyOperations already checks every newly
-			// created normal GD Operation's owner, metadata, response/error and count.
-			// Independently bound the whole ledger here: all old rows survive byte-exact,
-			// and precisely that native boundary may add rows, no blanket ledger ignore.
+			// Существующий нативный rid07CheckApplyOperations уже проверяет владельца, метаданные,
+			// ответ/ошибку и количество каждой новой штатной GD Operation.
+			// Здесь независимо ограничиваем весь журнал: все старые строки сохраняются побайтно,
+			// а добавлять строки может ровно эта нативная граница, без общего игнорирования журнала.
 			delta := len(w.accounts)
 			if !in.Exact {
 				for i, account := range w.accounts {

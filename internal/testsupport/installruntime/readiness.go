@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// ReadinessStatus probes the real diagnostics readiness route using the same
-// verified fixture CA/client TLS. A TLS handshake or JWKS alone is not ready.
+// ReadinessStatus проверяет настоящий диагностический маршрут готовности с теми же
+// проверенными CA/клиентским TLS фикстуры. Рукопожатие TLS или один JWKS не означают готовность.
 func (w *Wire) ReadinessStatus(ctx context.Context) (int, error) {
 	code, _, _, err := w.request(ctx, http.MethodGet, fmt.Sprintf("https://localhost:%d/readyz", w.ports.Metrics), nil, nil)
 	return code, err
@@ -43,13 +43,13 @@ type ReadinessWatch struct {
 	stop    chan struct{}
 	done    chan struct{}
 	once    sync.Once
-	samples []ReadinessSample // published only after done closes
+	samples []ReadinessSample // публикуются только после закрытия done
 }
 
-// StartReadinessWatch arms an active observer before the caller spawns serve.
-// It returns only after the FIRST actual request completes. Every subsequent
-// request starts immediately after a 1ms scheduling interval and has a bounded
-// 250ms deadline. The caller must keep it alive until process termination.
+// StartReadinessWatch активирует наблюдателя до запуска serve вызывающим.
+// Возвращается только после завершения ПЕРВОГО настоящего запроса. Каждый следующий
+// запрос начинается сразу после интервала планирования 1ms и имеет ограниченный
+// срок 250ms. Вызывающий должен сохранять наблюдателя до завершения процесса.
 func (w *Wire) StartReadinessWatch(ctx context.Context) *ReadinessWatch {
 	watch := &ReadinessWatch{stop: make(chan struct{}), done: make(chan struct{})}
 	armed := make(chan struct{})
@@ -69,8 +69,8 @@ func (w *Wire) StartReadinessWatch(ctx context.Context) *ReadinessWatch {
 				close(armed)
 				first = false
 			}
-			// Stop does not cancel the in-flight request: a 200 racing with process
-			// exit still belongs in the evidence instead of disappearing on cancel.
+			// Stop не отменяет текущий запрос: 200, совпавший с выходом процесса,
+			// всё равно относится к доказательству и не должен исчезать при отмене.
 			timer := time.NewTimer(time.Millisecond)
 			select {
 			case <-ctx.Done():

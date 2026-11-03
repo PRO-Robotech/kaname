@@ -98,9 +98,9 @@ func rid12DefaultNewmanConsumer(t *testing.T, f *installationNativeWorld, in rid
 		require.Same(t, f, got)
 		require.Equal(t, in, current)
 		if phase == "refusal-before-restore" {
-			// This is an offline primary checkpoint, not an extra public phase.
-			// The failed startup is terminal and reaped; ordinary base restoration
-			// has not run and therefore cannot repair or mask any rejected write.
+			// Это отключённая первичная контрольная точка, а не дополнительная публичная фаза.
+			// Неудачный запуск завершён, ожидание выполнено; штатное восстановление базы
+			// ещё не запускалось и потому не может починить или скрыть отклонённую запись.
 			require.True(t, in.Invalid)
 			require.Equal(t, 1, calls)
 			require.False(t, refusalBeforeRestore)
@@ -128,17 +128,17 @@ func rid12DefaultNewmanConsumer(t *testing.T, f *installationNativeWorld, in rid
 			if in.Invalid {
 				require.True(t, refusalBeforeRestore, "complete rejected-startup primary state must be checked before normal base restoration")
 				require.Equal(t, before.Projection, e.Snapshot.Projection)
-				// Full raw no-write equality was checked at the actual failure
-				// boundary above. A later ordinary base startup reprojects its own
-				// catalog timestamps; it must not redefine that refusal boundary.
+				// Полное необработанное равенство без записей проверено на настоящей границе отказа
+				// выше. Последующий штатный базовый запуск заново проецирует свои
+				// временные метки каталога; он не должен переопределять эту границу отказа.
 			}
 			if phase == "after-reorder" {
 				require.NotNil(t, previous)
 				require.Equal(t, previous.Projection, e.Snapshot.Projection)
-				// Reorder is an ordinary successful apply, not a read-only
-				// interval. Preserve the full public projection plus every raw
-				// GD/G history row; the native holder separately retains its full
-				// catalog/roles/SA/group/idempotence and exact Operation checks.
+				// Перестановка — штатное успешное применение, а не интервал только чтения.
+				// Сохраняем полную публичную проекцию и каждую необработанную строку
+				// истории GD/G; нативный держатель отдельно сохраняет все свои
+				// проверки каталога/ролей/SA/групп/идемпотентности и точной Operation.
 				for table, rows := range previous.Whole.Delivery {
 					if table == "grant_delegations" || strings.HasPrefix(table, "access_binding") {
 						require.Contains(t, e.Snapshot.Whole.Delivery, table)
@@ -169,8 +169,8 @@ func rid12RequireNewmanPremise(t *testing.T, f *installationNativeWorld, in rid1
 	p := e.Snapshot.Projection
 	delivered := e.Phase != "before" && !in.Invalid
 	require.Len(t, p.Accounts, 4)
-	// Every RID12 world is already base-ready. The embedded own manifest
-	// unconditionally seeds this SYS group before any delivered manifest.
+	// Каждый мир RID12 уже имеет готовую базу. Встроенный собственный манифест
+	// безусловно засеивает эту группу SYS до любого поставленного манифеста.
 	require.NotEmpty(t, p.Groups)
 	stockWriterGroups := 0
 	for _, group := range p.Groups {

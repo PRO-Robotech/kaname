@@ -766,9 +766,9 @@ func dsnHas(dsn, frag string) bool {
 	return false
 }
 
-// ModuleSeedInstallerConfig is the accepted protected installation input.
-// A present tenantAccountId selects S1 (empty is invalid); omission selects S2.
-// No default value is registered for this pointer: presence belongs to user input.
+// ModuleSeedInstallerConfig — принятый защищённый вход установки.
+// Присутствующий tenantAccountId выбирает S1 (пустое значение недопустимо); отсутствие выбирает S2.
+// Для этого указателя не регистрируется умолчание: наличие принадлежит пользовательскому входу.
 type ModuleSeedInstallerConfig struct {
 	CredentialFile  string  `mapstructure:"credentialFile"`
 	TenantAccountID *string `mapstructure:"tenantAccountId"`

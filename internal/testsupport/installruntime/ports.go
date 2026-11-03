@@ -7,8 +7,8 @@ import (
 	"net"
 )
 
-// NativePorts relocates only listeners. Issuer, audiences, CA, trusted gateway
-// SAN and all identity/admission policies remain identical between processes.
+// NativePorts перемещает только слушатели. Издатель, аудитории, CA, SAN доверенного шлюза
+// и все политики идентичности/допуска остаются одинаковыми между процессами.
 type NativePorts struct {
 	PublicGRPC, InternalGRPC, Metrics, Token, JWKS, PublicREST, InternalREST, Login int
 }

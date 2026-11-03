@@ -523,7 +523,7 @@ func TestRID11BindingRestore_InventoryRetainsRetiredRoleTarget(t *testing.T) {
 func TestRID11BindingRestore_RejectTwoSidedOmittedRetiredRoleTarget(t *testing.T) {
 	a, b, _ := rid11BindingFixture(t)
 	// Политика выбирает role на обеих сторонах; добавочный объект не является
-	// authority role. Его неизменная строка не может скрыть пропущенное покрытие.
+	// роли полномочий. Её неизменная строка не может скрыть пропущенное покрытие.
 	rows := catalog.Rows{Modules: []string{"iam"}}
 	for _, resource := range []struct{ name, model string }{{"account", "account"}, {"serviceAccount", "iam_service_account"}, {"group", "iam_group"}, {"role", "iam_role"}} {
 		rows.Resources = append(rows.Resources, catalog.ResourceRow{Module: "iam", Resource: resource.name, ObjectType: resource.model})

@@ -136,8 +136,8 @@ func New(
 	return h, nil
 }
 
-// Prepare builds the shared proof verifier and issuer without opening a listener.
-// Replay, revocation, pacing and per-call deadlines are identical to New.
+// Prepare строит общий проверяющий доказательства и издатель без открытия слушателя.
+// Повторы, отзыв, ограничение частоты и сроки каждого вызова совпадают с New.
 func Prepare(cfg BuildConfig, clients clientassertion.ClientResolver,
 	issuers clientassertion.TrustedIssuerResolver, replay clientassertion.ReplayGuard,
 	signer client_token.Signer, claims client_token.ClaimSource,

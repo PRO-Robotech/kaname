@@ -17,7 +17,7 @@ import (
 func (w *ridLifecycleWorld) revokeCreatorKeys(t *testing.T) {
 	t.Helper()
 	f := w.f
-	// More than one real key prevents a one-key shortcut from proving "all".
+	// Несколько настоящих ключей не дают сокращению до одного ключа доказать «все».
 	f.ridKey(t, f.creator.ID, f.creator.AccountID, "creator-spare")
 	keys := f.ridList(t, "/iam/v1/serviceAccounts/"+f.creator.ID+"/keys", "keys", nil)
 	require.GreaterOrEqual(t, len(keys), 2)
@@ -39,7 +39,7 @@ func (w *ridLifecycleWorld) revokeCreatorKeys(t *testing.T) {
 func (w *ridLifecycleWorld) creatorReferenceCensus(t *testing.T, allowedActiveDelegate string) {
 	t.Helper()
 	f := w.f
-	// Full public GD history in every fixture account, independently Get each.
+	// Полная публичная история GD в каждой учётной записи фикстуры, независимый Get каждой записи.
 	active := []string{}
 	for _, account := range w.accounts {
 		for _, gd := range w.delegations(t, account) {
@@ -71,8 +71,8 @@ func (w *ridLifecycleWorld) creatorReferenceCensus(t *testing.T, allowedActiveDe
 			}
 		}
 	}
-	// Read-only observer catches an omitted public reference; it cannot create,
-	// remove or authorize the references being audited.
+	// Наблюдатель только чтением ловит пропущенную публичную ссылку; он не может создавать,
+	// удалять или разрешать проверяемые ссылки.
 	var members, grants, delegates int
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT
  (SELECT count(*) FROM kaname.group_members WHERE member_type='service_account' AND member_id=$1),
@@ -175,8 +175,8 @@ func ridNativeActiveDelegateDeleteGuard(t *testing.T) {
 		g, _ := rid04Retire(t, w)
 		public.prepare(t, w, g, nil)
 		w.revokeCreatorKeys(t)
-		// O explicitly creates one independent lawful delegation TO C. C remains
-		// retired and has no keys; only this active delegate reference blocks Delete.
+		// O явно создаёт одно независимое законное делегирование В ПОЛЬЗУ C. C остаётся
+		// выведенным из обращения без ключей; только эта активная ссылка делегата блокирует Delete.
 		op := w.f.ridOperation(t, "POST", "/iam/v1/grantDelegations", w.f.operator.Bearer(), w.gdCreateBody(w.f.tenantID, w.f.creator.ID), 0)
 		blocking := ridResponseID(t, op)
 		w.creatorReferenceCensus(t, blocking)
@@ -208,7 +208,7 @@ func ridNativeCreatorExplicitReplacement(t *testing.T) {
 		w.f.ridAuthorityMaterialized(t, c2, true)
 		key := w.f.ridKey(t, c2, w.f.creator.AccountID, "replacement-creator")
 		token := w.f.ridToken(t, key)
-		// Name and even explicit C2 authority cannot revive a GD authored by old C.
+		// Имя и даже явные полномочия C2 не могут оживить GD, созданное старым C.
 		w.issuerToken = w.f.ridToken(t, w.issuer)
 		w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
 		public.noRevival(t, w, c2)

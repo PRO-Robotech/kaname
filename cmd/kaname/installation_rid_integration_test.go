@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The complete accepted RID inventory stays explicit while the executable
-// scenarios are being connected. Missing execution is a FIXTURE_INCOMPLETE
-// failure under the opt-in gate, never a vacuous PASS or a product defect.
-// Ordinary package runs skip the entire leased runtime obligation. No holder
-// may be marked complete by substituting the already-green narrow pool1 test.
+// Полная принятая ведомость RID остаётся явной при подключении исполняемых
+// сценариев. Отсутствующее выполнение — отказ FIXTURE_INCOMPLETE
+// при явном включении, а не пустой PASS или дефект продукта.
+// Штатные запуски пакета пропускают всё арендованное обязательство исполнения. Держатель
+// не может считаться полным за счёт подстановки уже успешного узкого теста pool1.
 type ridPredicate struct {
 	name string
 	run  func(*testing.T)
@@ -103,8 +103,8 @@ func TestRID_07_ExistingPairConflict(t *testing.T) {
 		ridPredicate{name: "one-axis-only twin for each conflict is idempotent exact match", run: twins})
 }
 func TestRID_08_SnapshotPagesAndFutureAccount(t *testing.T) {
-	// One complete real-hour world supplies immutable evidence to the first four
-	// named predicates. Selecting any one alone still executes the entire world.
+	// Один полный мир настоящего часа даёт неизменяемое доказательство первым четырём
+	// именованным предикатам. Выбор любого одного всё равно выполняет весь мир.
 	var future *rid08FutureProof
 	futureAttempted := false
 	var empty *rid08EmptyProof
@@ -264,8 +264,8 @@ func TestRID_10_MidRunFaultAndRetirement(t *testing.T) {
 			require.EqualValues(t, 1, p.Returned.WriterArrivals)
 		}},
 		ridPredicate{name: "remove only fault or restore only admin; retry N stable first ID; no-fault twins", run: func(t *testing.T) {
-			// Run both independent twins before dependent receipt comparisons;
-			// one failed negative must not suppress the fresh-world census.
+			// Запускаем оба независимых близнеца до зависимых сравнений квитанций;
+			// один неудачный отрицательный случай не должен подавлять перепись свежего мира.
 			for _, mode := range []string{"fault", "retirement"} {
 				t.Run(mode+"-independent-twin", func(t *testing.T) { ensure(t, mode, true) })
 			}
@@ -331,8 +331,8 @@ func TestRID_11_InputAuthnAuthorityBackend(t *testing.T) {
 			}
 		}},
 		ridPredicate{name: "each fact-only legal twin succeeds and converges; missing S1 A before writes", run: func(t *testing.T) {
-			// Every state-based lawful twin omits only its named intervention.
-			// Retirement negatives separately prove Revoke-keeps-C then Delete-removes-C.
+			// Каждый допустимый близнец состояния опускает только своё именованное вмешательство.
+			// Отрицательные случаи вывода из обращения отдельно доказывают: Revoke сохраняет C, затем Delete удаляет C.
 			lawful := ensure(t, true)
 			byCase := map[string]rid11Proof{}
 			for _, p := range lawful {
@@ -432,7 +432,7 @@ func TestRID_12_ClosedShapeAndBounds(t *testing.T) {
 			t.Fatal("unknown RID12 matrix kind")
 		}
 		if !attempted[kind] {
-			attempted[kind] = true // before any t.Fatal; no blind reruns by later predicates
+			attempted[kind] = true // до любого t.Fatal; без слепых повторов последующими предикатами
 			*target = rid12Matrix(t, kind, nil)
 		}
 		want := 15

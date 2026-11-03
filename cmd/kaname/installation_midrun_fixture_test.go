@@ -28,8 +28,8 @@ type rid10World struct {
 func rid10Prepare(t *testing.T) *rid10World {
 	t.Helper()
 	full := ridLifecycleDelivery(t, false)
-	// Judge exact full/staging bytes before any PG. Only GD declarations are
-	// removed for ordinary catalog/I/W setup; no GD or binding is SQL-seeded.
+	// Проверяем точные полные/подготовительные байты до любого PG. Только объявления GD
+	// удаляются для штатной подготовки каталога/I/W; GD и привязки не засеиваются через SQL.
 	var doc map[string]any
 	require.NoError(t, yaml.Unmarshal(full.First, &doc))
 	seed, ok := doc["seed"].(map[string]any)
@@ -142,8 +142,8 @@ func rid10Prepare(t *testing.T) *rid10World {
 		{"registry_repository", "registry.repositories", w.repository, "parent", "registry_registry", w.object, []string{"registry_registry:" + w.object, "project:" + w.project, "account:" + accounts[0]}},
 	} {
 		object := entry.modelType + ":" + entry.id
-		// Observe the actually applied policy before writing: model name, dotted
-		// catalog type, structural pointer and explicitly permitted owner writes.
+		// До записи наблюдаем фактически применённую политику: имя модели, точечный
+		// тип каталога, структурный указатель и явно разрешённые записи владельца.
 		var dotted string
 		var names, types, writes []string
 		require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT dotted,parent_names,parent_types,writes FROM kaname.catalog_resource WHERE object_type=$1 AND live`, entry.modelType).Scan(&dotted, &names, &types, &writes))
@@ -151,10 +151,10 @@ func rid10Prepare(t *testing.T) *rid10World {
 		require.Equal(t, []string{entry.pointer}, names)
 		require.Equal(t, []string{entry.parentType}, types)
 		require.Contains(t, writes, "owner:user")
-		// The existing RegisterResource protocol derives parenthood from a
-		// pointer fact. An owner write cannot create that fact implicitly.
-		// Registry follows the existing seed_registry_resource producer; repository
-		// follows the same protocol with its already registered container as parent.
+		// Существующий протокол RegisterResource выводит родительство из
+		// факта указателя. Запись владельца не может неявно создать этот факт.
+		// Реестр следует существующему производителю seed_registry_resource; репозиторий
+		// следует тому же протоколу с уже зарегистрированным контейнером в качестве родителя.
 		for _, tuple := range []struct{ subject, relation string }{
 			{entry.parentType + ":" + entry.parentID, entry.pointer},
 			{"user:" + f.operator.UserID(), "owner"},
@@ -165,8 +165,8 @@ func rid10Prepare(t *testing.T) *rid10World {
 			require.NoError(t, e)
 			require.True(t, check.Allowed, "actual registered pointer/owner")
 		}
-		// Observe the result under catalog vocabulary and the complete ordered
-		// chain under model vocabulary; no observer writes domain state.
+		// Наблюдаем результат в словаре каталога и полную упорядоченную
+		// цепочку в словаре модели; наблюдатели не пишут доменное состояние.
 		var parentProject, parentAccount string
 		var chain []string
 		require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT m.parent_project_id,m.parent_account_id,
@@ -193,8 +193,8 @@ func (x *rid10World) grantFirst(t *testing.T) *iamv1.AccessBinding {
 	return w.grant(t, map[string]any{"subjectType": "service_account", "subjectId": x.subject, "roleId": w.pull, "scopeType": "iam.account", "scopeId": w.accounts[0], "target": map[string]any{"resources": map[string]any{"resources": []any{map[string]any{"type": "registry.registries", "id": w.object}}}}})
 }
 
-// Stable primary rows for pre-existing grants; includes retired history. Authn,
-// admin transition and normal Operation bookkeeping are observed separately.
+// Стабильные первичные строки ранее существовавших выдач; включена выведенная история. Аутентификация,
+// переход администратора и штатный учёт Operation наблюдаются отдельно.
 func rid10BindingRows(t *testing.T, w *ridLifecycleWorld) string {
 	t.Helper()
 	var out string

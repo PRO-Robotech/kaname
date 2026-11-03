@@ -150,8 +150,8 @@ func TestInstallationPaceWaitHonoursCancellation(t *testing.T) {
 	}
 }
 
-// A narrow error-boundary control: no database is replaced or simulated here.
-// Nil mutation dependencies make entering a GD operation after failed census fatal.
+// Узкий контроль границы ошибки: база данных здесь не заменяется и не имитируется.
+// Зависимости изменения nil делают вход в операцию GD после неудачной переписи фатальным.
 type installationCensusError struct {
 	installationReadSource
 	cause error

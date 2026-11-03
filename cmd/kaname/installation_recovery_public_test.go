@@ -17,9 +17,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Reopen actual production listeners with the already-staged manifest (no GD
-// apply). Public O independently discovers exactly the recovered durable rows;
-// this startup cannot manufacture missing delegations to make recovery green.
+// Снова открываем настоящие производственные слушатели с уже подготовленным манифестом (без применения
+// GD). Публичный O независимо обнаруживает ровно восстановленные устойчивые строки;
+// этот запуск не может выдумать отсутствующие делегирования ради успеха восстановления.
 func rid02PublicRecoveredCensus(t *testing.T, f *installationNativeWorld, records []rid02CrashRecord) {
 	t.Helper()
 	before := f.stableReceipt(t)

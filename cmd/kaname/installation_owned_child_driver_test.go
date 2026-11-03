@@ -34,7 +34,7 @@ type rid02OwnedChild struct {
 	waitErr         error
 	dir             string
 	world           *installationNativeWorld
-	afterReapAudit  func(*testing.T, []string) // optional parent-owned nested-client audit; normal nil
+	afterReapAudit  func(*testing.T, []string) // необязательный родительский аудит вложенного клиента; штатно nil
 	auditOnce       sync.Once
 	seenEvent       bool
 }
@@ -58,8 +58,8 @@ func startRID02Child(t *testing.T, f *installationNativeWorld, label string, inp
 	return startRIDInstallationChild(t, f, label, input, f.session.Environment, rid02ChildInputEnv, "TestRID02OwnedInstallationChild", "12m")
 }
 
-// The same ownership/FD/reap protocol serves the full-startup instrumented child.
-// Entry selection exists only in test source, never in production config or CLI.
+// Тот же протокол владения/FD/ожидания обслуживает инструментированного потомка полного запуска.
+// Выбор входа существует только в тестовом исходнике, без производственной конфигурации или CLI.
 func startRIDInstallationChild(t *testing.T, f *installationNativeWorld, label string, input any, environment []string, inputEnv, entry, timeout string) *rid02OwnedChild {
 	t.Helper()
 	dir := filepath.Join(f.session.Root, label)
@@ -69,14 +69,14 @@ func startRIDInstallationChild(t *testing.T, f *installationNativeWorld, label s
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, raw, 0600))
 
-	// Each acquired FD has cleanup registered before any fatal assertion.
+	// Для каждого полученного FD очистка регистрируется до любого фатального утверждения.
 	ownFD := func(f *os.File) {
 		if f != nil {
 			t.Cleanup(func() { _ = f.Close() })
 		}
 	}
-	// This file is outside evidence and has no pathname before any child can
-	// receive secrets. Parent/child death closes the only remaining references.
+	// Этот файл находится вне доказательств и не имеет пути до того, как любой дочерний процесс
+	// может получить секреты. Смерть родителя/потомка закрывает единственные оставшиеся ссылки.
 	secretInventory, err := os.CreateTemp("/tmp", "kaname-rid02-secret-*")
 	ownFD(secretInventory)
 	if err != nil {
@@ -108,21 +108,21 @@ func startRIDInstallationChild(t *testing.T, f *installationNativeWorld, label s
 	require.NoError(t, err)
 	cmd := exec.Command(os.Args[0], "-test.run=^"+entry+"$", "-test.timeout="+timeout, "-test.v")
 	cmd.Env = append(append([]string{}, environment...), inputEnv+"="+path)
-	cmd.ExtraFiles = []*os.File{ew, cr, secretInventory} // FD3 events, FD4 control, FD5 anonymous secret inventory.
+	cmd.ExtraFiles = []*os.File{ew, cr, secretInventory} // FD3 — события, FD4 — управление, FD5 — анонимная ведомость секретов.
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c := &rid02OwnedChild{cmd: cmd, control: cw, secretInventory: secretInventory, events: make(chan rid02ChildEvent, 4), decodeError: make(chan error, 1), exited: make(chan struct{}), dir: dir, world: f}
 	err = cmd.Start()
 	if err == nil {
-		// No assertion or ownership read may precede Wait/cleanup installation.
+		// Ни утверждение, ни чтение владения не могут предшествовать установке Wait/очистки.
 		go func() { c.waitErr = cmd.Wait(); close(c.exited) }()
 		t.Cleanup(func() {
 			select {
 			case <-c.exited:
 			default:
-				// Before identity capture completes, os.Process is the Start-owned handle;
-				// Kill uses that handle and never an unverified numeric process group.
+				// До завершения захвата идентичности os.Process — дескриптор, принадлежащий Start;
+				// Kill использует его, а не непроверенную числовую группу процессов.
 				var killErr error
 				if c.start == "" || len(c.argv) == 0 {
 					killErr = cmd.Process.Kill()
@@ -162,7 +162,7 @@ func startRIDInstallationChild(t *testing.T, f *installationNativeWorld, label s
 				c.decodeError <- err
 				return
 			}
-			c.events <- event // At most boundary + worker-finished; buffer holds four.
+			c.events <- event // Не более границы + завершения исполнителя; буфер вмещает четыре.
 		}
 	}()
 	ownership, err := json.Marshal(map[string]any{"pid": cmd.Process.Pid, "starttime": c.start, "argv": strings.Split(strings.TrimRight(string(c.argv), "\x00"), "\x00"), "group": pgid})
@@ -171,10 +171,10 @@ func startRIDInstallationChild(t *testing.T, f *installationNativeWorld, label s
 	return c
 }
 
-// Establish the exact launched argv before retaining a successful identity.
-// A successful early proc read can transiently contain no bytes. Only that
-// empty snapshot is retryable; unexpected identity, exit or timeout is FAIL.
-// Until this succeeds, cleanup retains the Start-owned os.Process handle.
+// Устанавливаем точные запущенные argv до сохранения успешной идентичности.
+// Успешное раннее чтение proc может временно не содержать байтов. Повторяется только такой
+// пустой снимок; неожиданная идентичность, выход или таймаут означают FAIL.
+// До успеха очистка сохраняет принадлежащий Start дескриптор os.Process.
 func (c *rid02OwnedChild) establishArgv(limit time.Duration) ([]byte, error) {
 	pid := c.cmd.Process.Pid
 	expected := []byte(strings.Join(c.cmd.Args, "\x00") + "\x00")
@@ -266,7 +266,7 @@ func (c *rid02OwnedChild) await(t *testing.T, ctx context.Context, stage string)
 		require.NotEmpty(t, e.Operation)
 		return e
 	case err := <-c.decodeError:
-		// The decoder may observe EOF immediately after the final buffered event.
+		// Декодер может увидеть EOF сразу после последнего буферизованного события.
 		select {
 		case e := <-c.events:
 			c.seenEvent = true
@@ -334,7 +334,7 @@ func (c *rid02OwnedChild) terminalAttempts(t *testing.T) []rid02TerminalAttempt 
 func (c *rid02OwnedChild) afterReap(t *testing.T) {
 	t.Helper()
 	c.auditOnce.Do(func() {
-		// These absence assertions run after the single Wait on every exit path.
+		// Эти утверждения отсутствия выполняются после единственного Wait на каждом пути выхода.
 		if _, err := os.Stat(fmt.Sprintf("/proc/%d", c.cmd.Process.Pid)); !errors.Is(err, os.ErrNotExist) {
 			t.Error("owned child PID not proven absent after reap")
 		}
@@ -342,9 +342,9 @@ func (c *rid02OwnedChild) afterReap(t *testing.T) {
 			t.Error("owned child process group not proven absent after reap")
 		}
 		secrets := rid02WorldSecretMaterial(t, c.world)
-		// Reap precedes Seek: child and parent share this open file description.
-		// Retain each successfully decoded append-only record even if a killed
-		// child left a final incomplete write; malformed inventory still fails.
+		// Ожидание завершения предшествует Seek: потомок и родитель делят это открытое файловое описание.
+		// Сохраняем каждую успешно декодированную добавленную запись, даже если завершённый
+		// потомок оставил последнюю запись неполной; неверная ведомость всё равно даёт отказ.
 		records, issuedTokens := 0, 0
 		if _, err := c.secretInventory.Seek(0, io.SeekStart); err != nil {
 			t.Error("anonymous child secret inventory seek failed")
@@ -373,8 +373,8 @@ func (c *rid02OwnedChild) afterReap(t *testing.T) {
 		if c.seenEvent && (records == 0 || issuedTokens == 0) {
 			t.Error("authenticated child has no actual issued-token inventory")
 		}
-		// An early startup failure can precede issuance. Neither that failure nor
-		// malformed inventory skips both complete streams and structural checks.
+		// Ранний отказ запуска может предшествовать выдаче. Ни этот отказ, ни
+		// неверная ведомость не отменяют проверок обоих полных потоков и структуры.
 		rid02CheckStreams(t, []string{filepath.Join(c.dir, "stdout"), filepath.Join(c.dir, "stderr")}, secrets)
 		if c.afterReapAudit != nil {
 			c.afterReapAudit(t, secrets)
@@ -396,9 +396,9 @@ func rid02WorldSecretMaterial(t *testing.T, f *installationNativeWorld) []string
 	return secrets
 }
 
-// Real issued child tokens are captured privately. Native serve's internal
-// issuance is deliberately opaque: in addition to all known real secret bytes,
-// reject any compact signed JWT and any PEM private-key envelope in its output.
+// Настоящие выданные токены потомка захватываются закрыто. Внутренняя выдача нативного serve
+// намеренно непрозрачна: в дополнение ко всем известным настоящим секретным байтам
+// отклоняем любой компактный подписанный JWT и любую оболочку закрытого ключа PEM в его выводе.
 var rid02JWTInStream = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
 var rid02PEMInStream = regexp.MustCompile(`-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----`)
 

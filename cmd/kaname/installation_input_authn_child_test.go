@@ -36,9 +36,9 @@ type rid11Return struct {
 	ActualCreator, ActualQuestion, ContextLive, ForwardAllowed, Injected bool
 }
 
-// The only authority fault replaces a failed Check transport result. The real
-// judge is first called with the exact real verified principal and question.
-// Neither the outcome mapper nor the principal/context is replaced.
+// Единственный сбой полномочий заменяет неудачный транспортный результат Check. Настоящий
+// арбитр сначала вызывается с точными настоящими проверенными субъектом и вопросом.
+// Ни преобразователь исходов, ни субъект/контекст не заменяются.
 type rid11Authority struct {
 	authzguard.RelationChecker
 	input   rid11ChildInput
@@ -86,7 +86,7 @@ func TestRID11OwnedInputAuthnStartupChild(t *testing.T) {
 	require.True(t, info.Mode().IsRegular() && info.Mode().Perm() == 0600)
 	require.NoError(t, events.SetWriteDeadline(time.Now().Add(15*time.Second)))
 	require.NoError(t, control.SetReadDeadline(time.Now().Add(15*time.Second)))
-	// Reuse the ownership-only protocol, which does not assert authentication.
+	// Повторно используем протокол только владения, который не утверждает аутентификацию.
 	require.NoError(t, json.NewEncoder(events).Encode(rid02ChildEvent{Stage: "whole-preauth-armed", PID: os.Getpid()}))
 	var action string
 	require.NoError(t, json.NewDecoder(control).Decode(&action))

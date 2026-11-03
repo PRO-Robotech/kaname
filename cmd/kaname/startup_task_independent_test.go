@@ -15,9 +15,9 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Exercise the actual wrapper registered by serve, not a reproduction of its
-// error predicate. A mixed error is not evidence that all failed work was only
-// interrupted, even if the shutdown context has since ended.
+// Проверяем настоящую обёртку, зарегистрированную serve, а не воспроизведение её
+// предиката ошибки. Смешанная ошибка не доказывает, что вся неудачная работа была лишь
+// прервана, даже если контекст завершения с тех пор закончился.
 func TestSuperviseStartupTaskPreservesFailureSemantics(t *testing.T) {
 	fatal := errors.New("independent completed startup failure")
 	wrappedCancel := fmt.Errorf("interrupted startup: %w", context.Canceled)
@@ -54,8 +54,8 @@ func TestSuperviseStartupTaskPreservesFailureSemantics(t *testing.T) {
 			got := superviseStartupTask(ctx, func() { triggers++ }, func(actual context.Context) error {
 				calls++
 				require.Equal(t, ctx, actual, "actual work receives its original task context")
-				// Cancellation happens after the body has obtained its result. This is
-				// the race that a blanket ctx.Err check would misclassify.
+				// Отмена происходит после получения результата телом. Это
+				// гонка, которую общая проверка ctx.Err классифицировала бы неверно.
 				result := tc.result
 				if tc.contextState == "cancelled" {
 					cancel()
@@ -74,9 +74,9 @@ func TestSuperviseStartupTaskPreservesFailureSemantics(t *testing.T) {
 	}
 }
 
-// The same production rootShutdown and plain errgroup used by serve must drain
-// after a fatal startup result WITHOUT an external signal. A copied callback
-// calling Trigger by itself would not test the supervision wiring at all.
+// Те же производственные rootShutdown и простой errgroup, что использует serve, должны завершиться
+// после фатального результата запуска БЕЗ внешнего сигнала. Скопированный обратный вызов,
+// самостоятельно вызывающий Trigger, вовсе не проверил бы связи надзора.
 func TestSuperviseStartupTaskDrainsActualRootWithoutSignal(t *testing.T) {
 	for _, tc := range []struct {
 		name               string

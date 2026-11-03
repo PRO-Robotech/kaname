@@ -11,8 +11,8 @@ import (
 	"strings"
 )
 
-// installationResult is deliberately value-free: no credentials, token, SQL,
-// driver errors or manifest payloads can enter the structural startup result.
+// installationResult намеренно не содержит значений: удостоверения, токен, SQL,
+// ошибки драйвера или нагрузки манифеста не могут попасть в структурный результат запуска.
 type installationResult struct {
 	Stage          string `json:"stage"`
 	Code           string `json:"code"`

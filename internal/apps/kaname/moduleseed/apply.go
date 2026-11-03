@@ -405,7 +405,7 @@ func subjectOf(s manifest.Subject, seed *manifest.Seed) (Subject, error) {
 	}
 }
 
-// Preflight validates every seed target before the first writer is opened.
+// Предварительная проверка проверяет каждую цель посева до открытия первой записи.
 func Preflight(own *manifest.Manifest, delivered []*manifest.Manifest) error {
 	all := append([]*manifest.Manifest{own}, delivered...)
 	for _, m := range all {

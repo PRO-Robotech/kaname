@@ -189,8 +189,8 @@ func NewAsker(pool *pgxpool.Pool) *Asker {
 	return &Asker{pool: pool}
 }
 
-// NewPreparedAsker uses the admitted model for startup without reading or replacing
-// the global process model. All relation queries and database admission stay shared.
+// NewPreparedAsker использует допущенную модель для запуска без чтения или замены
+// глобальной модели процесса. Все запросы отношений и допуск базы остаются общими.
 func NewPreparedAsker(pool *pgxpool.Pool, plans *authzmodel.Plans) *Asker {
 	if pool == nil || plans == nil {
 		return nil
@@ -198,8 +198,8 @@ func NewPreparedAsker(pool *pgxpool.Pool, plans *authzmodel.Plans) *Asker {
 	return &Asker{pool: pool, preparedPlans: plans}
 }
 
-// NewTransactionAsker runs the ordinary production verdict on the caller's held
-// transaction. It neither acquires another connection nor ends that transaction.
+// NewTransactionAsker выполняет штатный производственный вердикт в удерживаемой транзакции
+// вызывающего. Он не берёт другое соединение и не завершает эту транзакцию.
 func NewTransactionAsker(tx pgx.Tx, plans *authzmodel.Plans) *Asker {
 	if tx == nil || plans == nil {
 		return nil

@@ -22,10 +22,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// installationNativeWorld is the actual F0→O→C→full-delivery path. Its only
-// inserted Given is the previously approved initial user/session/client. No
-// model/seed/bootstrap helper executes in the test process: all those steps run
-// inside the frozen native production executable using its real listener chain.
+// installationNativeWorld — настоящий путь F0→O→C→полная поставка. Его единственный
+// вставленный Given — ранее утверждённые начальные пользователь/сессия/клиент. Помощники
+// модели/посева/начальной настройки в тестовом процессе не выполняются: все эти шаги идут
+// внутри зафиксированного нативного производственного файла с настоящей цепочкой слушателей.
 type installationNativeWorld struct {
 	given              *ceremonyWorld
 	stand              *installruntime.NativeStand
@@ -47,38 +47,38 @@ func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 	return newInstallationNativeWorldLifetimes(t, 7200, "")
 }
 
-// Only ordinary declared credential lifetimes vary; all admission and authority
-// policy remains unchanged. Empty accessTTL retains the stand profile.
+// Различаются только штатные заявленные сроки удостоверяющего материала; все политики допуска и полномочий
+// сохраняются. Пустой accessTTL сохраняет профиль стенда.
 func newInstallationNativeWorldLifetimes(t *testing.T, keyTTL int64, accessTTL string) *installationNativeWorld {
 	return newInstallationNativeWorldProfile(t, keyTTL, accessTTL, false)
 }
 
-// The writer profile only prepares the existing module PKI/roster. Manifest
-// environment is removed below: F0 and its stock/no-delivery assertions remain
-// unchanged, and the actual later full serve performs the first installation.
+// Профиль записи готовит только существующие PKI/состав модуля. Окружение манифеста
+// удаляется ниже: F0 и его проверки штатного состояния/отсутствия поставки сохраняются,
+// а настоящий последующий полный serve выполняет первую установку.
 func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL string, moduleWriter bool) *installationNativeWorld {
 	t.Helper()
 	return newInstallationNativeWorldLifecycle(t, keyTTL, accessTTL, moduleWriter, moduleWriter)
 }
 
-// Early lifecycle auditing is independent of the optional module-writer PKI.
-// Existing callers keep their previous profile; RID08 opts into early cleanup
-// and actual initial-key observation without enabling W or altering F0/model.
+// Ранний аудит жизненного цикла не зависит от необязательной PKI записи модуля.
+// Существующие вызывающие сохраняют прежний профиль; RID08 включает раннюю очистку
+// и настоящее наблюдение начального ключа без включения W или изменения F0/модели.
 func newInstallationNativeWorldLifecycle(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool) *installationNativeWorld {
 	t.Helper()
 	return newInstallationNativeWorldAccountCapacity(t, keyTTL, accessTTL, moduleWriter, earlyLifecycle, 0)
 }
 
-// A snapshot crossing N3 -> N4 requires capacity for four simultaneously owned
-// accounts. This ordinary declared count ceiling is separate from the unchanged
-// three admissions per real hour. Zero preserves every historical stand profile;
-// no DB policy row or identity/carrier is rewritten by the fixture.
+// Снимок перехода N3 -> N4 требует вместимости для четырёх одновременно принадлежащих
+// учётных записей. Этот штатный заявленный предел количества отделён от неизменных
+// трёх допусков за настоящий час. Ноль сохраняет каждый прежний профиль стенда;
+// фикстура не переписывает строку политики БД или идентичность/носитель.
 func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool, accountCapacity int64) *installationNativeWorld {
 	t.Helper()
 	require.True(t, accountCapacity == 0 || accountCapacity == 4, "only the explicit RID08 N4 count profile is permitted")
-	// Declare a coherent short-lived production profile before creating the PG
-	// fixture. The revocation reader stays enabled; its ordinary cache window
-	// must be positive and strictly shorter than the issued-token lifetime.
+	// Объявляем согласованный краткоживущий производственный профиль до создания фикстуры PG.
+	// Считыватель отзывов остаётся включённым; его штатное окно кеша
+	// должно быть положительным и строго короче срока выданного токена.
 	overrides := map[string]string{}
 	if accountCapacity != 0 {
 		overrides["KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY"] = fmt.Sprint(accountCapacity)
@@ -109,8 +109,8 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	stand := installruntime.PrepareNativeStand(t, ctx, root, evidence, moduleWriter)
 	f := &installationNativeWorld{stand: stand}
 	if earlyLifecycle {
-		// Register before any native Start, bootstrap or key provisioning. The
-		// closure tolerates every partially initialized world and never Fatal's.
+		// Регистрируем до любого нативного Start, начальной настройки или выдачи ключа.
+		// Замыкание допускает любой частично инициализированный мир и никогда не вызывает Fatal.
 		t.Cleanup(func() { f.ridLifecycleCleanup(t) })
 	}
 	if moduleWriter {
@@ -127,8 +127,8 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	pool, err := coredb.NewPool(ctx, fmt.Sprintf("postgres://kaname:stand@127.0.0.1:%s/kaname?sslmode=require&options=-c%%20search_path%%3Dkaname%%2Cpublic&pool_max_conns=2", stand.PGPort))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	// Reuse exactly the established ceremony Given writers, without building its
-	// in-process token surface, signer, permission model or bootstrap admin.
+	// Повторно используем ровно установленные помощники записи Given церемонии, не создавая её
+	// внутрипроцессный интерфейс токенов, подписант, модель разрешений или начального администратора.
 	w := &ceremonyWorld{t: t, id: "RID-NATIVE-F0", ctx: ctx, pool: pool, logs: &lockedBuffer{}, clientAudiences: []string{"https://kaname.local"}}
 	w.requireStorePremise()
 	if moduleWriter {
@@ -162,8 +162,8 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	require.NoError(t, err)
 	require.Equal(t, baseline.SystemID, string(system))
 	require.Equal(t, []domain.AccountID{domain.AccountID(tenantID)}, tenants, "actual initial snapshot contains only O's tenant")
-	// O's email and any explicit lifetime profile are ordinary startup inputs.
-	// Audience, issuer, authority and gateway policy retain the stand profile.
+	// Адрес почты O и любой явный профиль сроков — штатные входы запуска.
+	// Аудитория, издатель, полномочия и политика шлюза сохраняют профиль стенда.
 	overrides["KANAME_BOOTSTRAP_ROOT_EMAIL"] = w.email
 	environment, err = stand.Environment(overrides)
 	require.NoError(t, err)
@@ -281,8 +281,8 @@ func (f *installationNativeWorld) apply(t *testing.T, input installruntime.Deliv
 	return process
 }
 
-// This predicate asserts only the full native installation path. Subsequent
-// RID01 predicates separately assert complete axes, expiry and failure twins.
+// Этот предикат проверяет только полный нативный путь установки. Последующие
+// предикаты RID01 отдельно проверяют полные оси, истечение срока и близнецы отказов.
 func ridNativeFirstInstall(t *testing.T) {
 	f := newInstallationNativeWorld(t)
 	public := rid01NewmanContext(t, f, "clean")
@@ -301,7 +301,7 @@ func ridNativeFirstInstall(t *testing.T) {
 	credential, err := os.ReadFile(f.creator.CredentialFile)
 	require.NoError(t, err)
 	require.True(t, f.credentialDigest == sha256.Sum256(credential), "full serve retains the same standing credential")
-	// Keep real process/state available to the identity assertions while proving
-	// that O's ceremony still works after the full delivery restart.
+	// Сохраняем настоящий процесс/состояние для проверок идентичности, доказывая,
+	// что церемония O всё ещё работает после перезапуска с полной поставкой.
 	f.renewOperator(t, t.Context())
 }

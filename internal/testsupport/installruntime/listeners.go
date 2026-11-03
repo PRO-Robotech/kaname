@@ -12,14 +12,14 @@ import (
 	"strings"
 )
 
-// OwnsListeners checks actual Linux socket ownership, not just port readiness.
-// Every listening socket of this PID must be IPv4 loopback and in the census.
+// OwnsListeners проверяет настоящее владение сокетами Linux, а не только готовность портов.
+// Каждый слушающий сокет этого PID должен быть петлевым IPv4 и присутствовать в переписи.
 func (p *Process) OwnsListeners(expected ...int) error {
 	return CheckOwnedListeners(p.cmd.Process.Pid, filepath.Dir(p.StdoutPath), expected...)
 }
 
-// CheckOwnedListeners reuses the exact native socket census for an independently
-// ownership-verified test executable running the actual complete startup root.
+// CheckOwnedListeners повторно использует точную нативную перепись сокетов для независимо
+// проверенного на владение тестового файла, выполняющего настоящий полный корень запуска.
 func CheckOwnedListeners(pid int, evidenceDir string, expected ...int) error {
 	root := fmt.Sprintf("/proc/%d", pid)
 	entries, err := os.ReadDir(filepath.Join(root, "fd"))

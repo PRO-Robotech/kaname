@@ -38,8 +38,8 @@ func rid02RequireTerminalRefusal(t *testing.T, f *installationNativeWorld, label
 func ridNativeCancellationReconcilerOverlap(t *testing.T) {
 	f, inputs := rid02StageCrashWorld(t)
 	normal := operations.NewRepo(f.given.pool, "kaname")
-	// Normal ownership-scoped Operation.Cancel under freshly verified standing C;
-	// old worker is resumed well before its four-minute deadline.
+	// Штатная Operation.Cancel в области владения при заново проверенном действующем C;
+	// старый исполнитель возобновляется задолго до своего четырёхминутного срока.
 	cancelInput := inputs[0]
 	cancelInput.Boundary = "before-writer"
 	cancelChild := startRID02Child(t, f, "authorized-cancel", cancelInput)
@@ -61,9 +61,9 @@ func ridNativeCancellationReconcilerOverlap(t *testing.T) {
 	require.Zero(t, count)
 	rid02RequireTerminalRefusal(t, f, "cancelled-terminal-refusal", cancelledRecord)
 
-	// Stagger three distinct real Operations, then share ONE actual five-minute
-	// grace. Native serve was stopped before staging orphans; only this Sweep is
-	// allowed to consume them. Neither worker timeout nor DB idle timeout changes.
+	// Разносим во времени три разные настоящие Operation, затем используем ОДИН настоящий пятиминутный
+	// льготный период. Нативный serve остановлен до подготовки осиротевших записей; только этот Sweep
+	// может их обработать. Таймаут исполнителя и таймаут простоя БД не меняются.
 	var records []rid02CrashRecord
 	var live []*rid02OwnedChild
 	for i, stage := range []string{"before-writer", "after-commit-before-terminal", "before-writer"} {
@@ -84,10 +84,10 @@ func ridNativeCancellationReconcilerOverlap(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n)
 	rid02WaitOrphanGrace(t, f, records)
-	// Inverse ordering is explicitly a REAL repository protocol proof, not a
-	// claim that the old four-minute worker can successfully execute at five.
-	// LockPendingInstallationOperation holds the orphan row for <25s, preserving
-	// the production sixty-second idle transaction guard.
+	// Обратный порядок явно доказывает НАСТОЯЩИЙ протокол репозитория, а не
+	// успешное выполнение старого четырёхминутного исполнителя на пятой минуте.
+	// LockPendingInstallationOperation держит осиротевшую строку <25s, сохраняя
+	// производственную защиту от шестидесятисекундного простоя транзакции.
 	locked := records[2]
 	lockInput := locked.Input
 	lockInput.Action = "lock-pending"
@@ -145,8 +145,8 @@ func ridNativeCancellationReconcilerOverlap(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, terminal, after, "late original worker terminal attempt cannot resurrect or overwrite recovered result")
 		}
-		// Expired old worker context is NOT evidence of this independent fresh
-		// context check: actual verified C + real writer rejects terminal state.
+		// Истёкший контекст старого исполнителя НЕ доказывает эту независимую проверку свежего
+		// контекста: настоящий проверенный C + настоящая запись отклоняют конечное состояние.
 		rid02RequireTerminalRefusal(t, f, "recovered-terminal-refusal-"+string(rune('a'+i)), r)
 	}
 	n, err = reconciler.Sweep(f.given.ctx)

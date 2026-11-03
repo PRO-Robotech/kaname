@@ -34,8 +34,8 @@ func rid06Revoke(t *testing.T, w *ridLifecycleWorld, id string) string {
 }
 func rid06RevokeObserved(t *testing.T, w *ridLifecycleWorld, id string, public *rid06PublicContext, deadline time.Time) string {
 	t.Helper()
-	// This normal public mutation must finish inside the child's20s pause. It is
-	// not a fake commit, SQL state change or same pair-advisory-lock deadlock.
+	// Это штатное публичное изменение должно завершиться внутри паузы потомка 20s. Это
+	// не поддельная фиксация, изменение состояния SQL или взаимоблокировка на той же рекомендательной блокировке пары.
 	ctx, cancel := context.WithTimeout(w.f.given.ctx, 15*time.Second)
 	if public != nil {
 		var clipped context.CancelFunc
@@ -145,9 +145,9 @@ func rid06HashExecutable(t *testing.T) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Reuse the complete native config/manifest inputs, changing only ordinary
-// listener addresses and declared two-replica DB allocation. No test flag enters
-// Config. The instrumentation is in the owned test executable only.
+// Повторно используем полные нативные входы конфигурации/манифеста, меняя только штатные
+// адреса слушателей и заявленное выделение БД двум репликам. Тестовый флаг не попадает в
+// Config. Инструментация есть только в принадлежащем фикстуре тестовом файле.
 func rid06Start(t *testing.T, w *ridLifecycleWorld, label string) *rid02OwnedChild {
 	t.Helper()
 	f := w.f
@@ -188,7 +188,7 @@ func rid06Start(t *testing.T, w *ridLifecycleWorld, label string) *rid02OwnedChi
 	return c
 }
 
-// Read-only identical full history oracle, bounded while the owned writer is paused.
+// Тот же полный оракул истории только чтения, ограниченный по времени паузы принадлежащей записи.
 func rid06BoundarySnapshot(t *testing.T, w *ridLifecycleWorld) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.f.given.ctx, 2*time.Second)
@@ -273,8 +273,8 @@ func rid06ReadResult(t *testing.T, c *rid02OwnedChild, want installationResult) 
 	require.Equal(t, want, got)
 }
 
-// The sole varied action between these overlap worlds is ordinary O Revoke.
-// Arrival is actual full startup, not a helper ExecuteInstallation invocation.
+// Единственное различающееся действие между этими мирами пересечения — штатный Revoke O.
+// Достижение границы — настоящий полный запуск, а не вспомогательный вызов ExecuteInstallation.
 func rid06Overlap(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBinding, revoke bool) {
 	rid06OverlapObserved(t, w, g, revoke, nil)
 }
@@ -292,8 +292,8 @@ func rid06OverlapObserved(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBin
 	defer watch.Stop()
 	publicSpawned := time.Now()
 	spawned := publicSpawned.UTC()
-	// Preserve the original wall-clock evidence, but keep a monotonic bound
-	// captured BEFORE spawn for every optional public action and primary read.
+	// Сохраняем исходное доказательство реальных часов, но для каждого необязательного публичного действия
+	// и первичного чтения сохраняем монотонную границу, захваченную ДО запуска.
 	publicPauseDeadline := rid06PauseDeadline(f.given.ctx, publicSpawned)
 	c := rid06Start(t, w, "rid06-overlap")
 	releasedControl := false
@@ -309,7 +309,7 @@ func rid06OverlapObserved(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBin
 	var afterAction string
 	revokeOp := ""
 	if public == nil {
-		// Original native-only path: no optional observer budget or bridge behavior.
+		// Исходный только нативный путь: без бюджета необязательного наблюдателя или поведения моста.
 		ctx, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)
 		event = c.await(t, ctx, "before-pair")
 		cancel()
@@ -331,15 +331,15 @@ func rid06OverlapObserved(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBin
 		c.release(t, "continue")
 		releasedControl = true
 	} else {
-		// This clone alone carries the absolute observation budget. The real owning
-		// fixture/context is untouched, including cleanup and post-release startup.
+		// Только этот клон несёт абсолютный бюджет наблюдения. Настоящая владеющая
+		// фикстура/контекст не затронуты, включая очистку и запуск после освобождения.
 		ctx, cancel := context.WithDeadline(f.given.ctx, publicPauseDeadline)
 		defer cancel()
 		scopedWorld, scopedFixture, scopedGiven := *w, *f, *f.given
 		scopedGiven.ctx = ctx
 		scopedFixture.given = &scopedGiven
 		scopedWorld.f = &scopedFixture
-		// Preserve all actual refreshed O secrets for the original independent audit.
+		// Сохраняем все настоящие обновлённые секреты O для исходного независимого аудита.
 		syncSecrets := func() { f.secrets = scopedFixture.secrets; f.operator = scopedFixture.operator }
 		secretsSynced := false
 		defer func() {

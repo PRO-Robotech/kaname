@@ -20,9 +20,9 @@ import (
 	"testing"
 )
 
-// Same v1 canonical record algorithm as run-rid-native.cjs and the isolated
-// synthetic premise. No symlink is followed while walking; its resolved target
-// MUST stay inside root, and require.cache checks demand actual attested files.
+// Тот же канонический алгоритм записи v1, что в run-rid-native.cjs и изолированной
+// синтетической предпосылке. Обход не следует символьным ссылкам; разрешённая цель
+// ДОЛЖНА оставаться внутри root, а проверки require.cache требуют настоящих аттестованных файлов.
 type ridNewmanTree struct {
 	SHA     string   `json:"sha256"`
 	Entries []string `json:"entries"`
@@ -168,8 +168,8 @@ func ridNewmanTreeManifest(root string) (ridNewmanTree, error) {
 	return out, nil
 }
 
-// Registered in the parent before it releases ANY Node input. Unlike Go-child
-// Cleanup this still executes after a forced kill of that entire owned group.
+// Регистрируется в родителе до освобождения ЛЮБОГО входа Node. В отличие от Cleanup
+// дочернего Go это выполняется и после принудительного завершения всей принадлежащей группы.
 type ridNewmanAuditError struct{ Code, Message string }
 type ridNewmanAuditResult struct {
 	Checks  map[string]bool
@@ -328,7 +328,7 @@ func ridNewmanVerifiedToolRead(path, want string) bool {
 	return err == nil && n <= 256<<20 && hex.EncodeToString(h.Sum(nil)) == want
 }
 
-// Independent parent-side proof while Node is live but has received no stdin.
+// Независимое доказательство со стороны родителя, пока Node жив, но ещё не получил stdin.
 func ridNewmanParentObserveNode(t *testing.T, c *rid02OwnedChild, in ridNewmanToolInput) {
 	ridNewmanParentObserveNodeStage(t, c, in, false)
 }

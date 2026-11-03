@@ -51,13 +51,13 @@ type rid03NewmanExpectation struct {
 	Resource          map[string]any         `json:"resource"`
 }
 
-// No floating case suffix or variables can add a bearer to this closed census.
+// Произвольный суффикс случая или переменные не могут добавить токен предъявителя в эту замкнутую перепись.
 func rid03NewmanActor(caseID string) (string, bool) {
 	return rid03NewmanActors[caseID], rid03NewmanActors[caseID] != ""
 }
 
-// Read-only full RR raw snapshot, with the reviewed RID09 projection on either
-// side. The caller owns ONE aggregate budget for SQL, readiness and return.
+// Полный необработанный снимок RR только чтения с проверенной проекцией RID09 с обеих
+// сторон. Вызывающий владеет ОДНИМ общим бюджетом SQL, готовности и возврата.
 func rid03CaptureNewmanSnapshot(t *testing.T, ctx context.Context, f *installationNativeWorld) (rid03NewmanSnapshot, bool) {
 	return rid03CaptureNewmanSnapshotWithCensus(t, ctx, f, nil)
 }
@@ -111,8 +111,8 @@ func rid03StableNewmanSnapshot(t *testing.T, w *ridLifecycleWorld) rid03NewmanSn
 				materialized = false
 			}
 		}
-		// Finish ordinary setup/forward reconciliation before accepting a
-		// baseline; no writes and no rerun of the actual Newman action.
+		// Завершаем штатную подготовку/прямое сведение до принятия
+		// базы; без записей и повторного запуска настоящего действия Newman.
 		for _, r := range s.Raw["resource_reconcile_outbox"] {
 			if string(r["sent_at"]) == "null" {
 				materialized = false
@@ -224,8 +224,8 @@ func rid03PublicAnonymousClass(t *testing.T, w *ridLifecycleWorld) {
 	if !rid03PublicEnabled(t, w, "AUTHENTICATED-DENIED", "ANONYMOUS-TWIN") {
 		return
 	}
-	// A normal separate target avoids colliding with the preserved native anonymous G.
-	// Both public requests use this SAME actor/target/account/project/role/scope.
+	// Штатная отдельная цель избегает столкновения с сохранённым нативным анонимным G.
+	// Оба публичных запроса используют ЭТИХ ЖЕ участника/цель/учётную запись/проект/роль/область.
 	target := "rid03-newman-registry"
 	conn, err := w.f.wire.ModuleWriter(filepath.Join(w.f.session.Root, "pki"))
 	require.NoError(t, err)
@@ -244,14 +244,14 @@ func rid03PublicAnonymousClass(t *testing.T, w *ridLifecycleWorld) {
 	rid03PublicActionPair(t, w, "ANONYMOUS-TWIN", body, false)
 }
 
-// ACT and VERIFY are real Newman phases in the same owning world. IDs returned
-// in sanitized Node reports are NEVER used as the primary oracle.
+// ACT и VERIFY — настоящие фазы Newman в том же владеющем мире. ID, возвращённые
+// в очищенных отчётах Node, НИКОГДА не используются первичным оракулом.
 func rid03PublicActionPair(t *testing.T, w *ridLifecycleWorld, scenario string, body map[string]any, denied bool) {
 	t.Helper()
 	f := w.f
 	mode := rid03Mode(t, w)
 	prefix := "registry-installation-rid03-" + mode + "-" + scenario
-	// Token issuance and ordinary subject setup precede the independent baseline.
+	// Выдача токена и штатная подготовка субъекта предшествуют независимой базе.
 	token := f.ridToken(t, w.issuer)
 	secretName := "jwtRIDIssuer"
 	actor := w.issuer.ID
@@ -264,7 +264,7 @@ func rid03PublicActionPair(t *testing.T, w *ridLifecycleWorld, scenario string, 
 		secretName = "jwtRIDCreator"
 		actor = f.creator.ID
 	}
-	// Keep a private deep copy: native callers change the single lawful fact next.
+	// Сохраняем закрытую глубокую копию: далее нативные вызывающие меняют единственный допустимый факт.
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)
 	request := map[string]any{}
@@ -275,7 +275,7 @@ func rid03PublicActionPair(t *testing.T, w *ridLifecycleWorld, scenario string, 
 	e := rid03NewmanExpectation{CaseID: prefix + "-ACT", Mode: mode, Scenario: scenario, Phase: "ACT", Actor: actor, Operator: string(f.given.user), Issuer: w.issuer.ID, Creator: f.creator.ID, System: f.baseline.SystemID, Tenant: f.tenantID, InstallationGD: w.gd.Id, Request: request, Path: path, Denied: denied, Snapshot: before}
 	var after rid03NewmanSnapshot
 	var actionReceipt ridNewmanReceipt
-	// A fatal/Goexit still captures the post-ACT full primary evidence exactly once.
+	// Даже фатальный исход/Goexit захватывает полное первичное доказательство после ACT ровно один раз.
 	func() {
 		defer func() {
 			after = rid03StableNewmanSnapshot(t, w)
@@ -425,10 +425,10 @@ func rid03RowsByID(t *testing.T, rows []rid09PrimaryRow) map[string]rid09Primary
 }
 func rid03RawDigest(t *testing.T, r rid09PrimaryRow) string { t.Helper(); return ridWholeDigest(t, r) }
 
-// ACT has one declared mutation; all tables/columns/history remain captured.
-// Unchanged physical rows must survive byte-exact. Additive forward materializer
-// rows are bound to the new G-as-object or the requested subject/target; unknown
-// tables, removals, unrelated updates or a second Operation are rejected.
+// У ACT одно заявленное изменение; все таблицы/столбцы/история остаются захваченными.
+// Неизменённые физические строки должны сохраниться побайтно. Аддитивные строки прямой материализации
+// привязаны к новому G как объекту либо запрошенным субъекту/цели; неизвестные
+// таблицы, удаления, посторонние обновления и вторая Operation отклоняются.
 func rid03RequireActionDelta(t *testing.T, w *ridLifecycleWorld, e *rid03NewmanExpectation, a, b rid03NewmanSnapshot) {
 	t.Helper()
 	rid03RequireActionDeltaWithReceipt(t, w, e, a, b, rid03BuildTechnicalReceipt)
@@ -517,9 +517,9 @@ func rid03RequireActionDeltaWithReceipt(t *testing.T, w *ridLifecycleWorld, e *r
 				}
 			}
 			if !reflect.DeepEqual(row["materializedAt"], actual["materializedAt"]) {
-				// Forward reconcile may enrich an existing owner G for this new G-as-object.
-				// Its raw main row/history remains exact; require an actual new ACTIVE member
-				// for exactly this newly allocated resource, never arbitrary enrichment.
+				// Прямое сведение может обогатить существующий G владельца для этого нового G как объекта.
+				// Его необработанные основная строка/история остаются точными; требуем настоящего нового члена ACTIVE
+				// ровно для этого нового выделенного ресурса, без произвольного обогащения.
 				member := false
 				for _, r := range b.Raw["access_binding_target_members"] {
 					if rid03ExactOwnerMember(t, e, a, r, id, resourceID) {
@@ -560,8 +560,8 @@ func rid03RequireActionDeltaWithReceipt(t *testing.T, w *ridLifecycleWorld, e *r
 		require.Equal(t, f.tenantID, meta.AccountId)
 		require.Equal(t, meta.AccountId, rid03RawID(t, row, "account_id"))
 		w.requireGrantRequest(t, rid03BindingRequest(t, e.Request), &response)
-		// Operation stores the original response; retain its actual enrichment. The
-		// later Get uses the separately captured primary ledger materializedAt.
+		// Operation хранит исходный ответ; сохраняем его настоящее обогащение. Последующий
+		// Get использует отдельно захваченный materializedAt первичного журнала.
 		full := proto.Clone(&response).(*iamv1.AccessBinding)
 		encoded, err := json.Marshal(e.Resource)
 		require.NoError(t, err)

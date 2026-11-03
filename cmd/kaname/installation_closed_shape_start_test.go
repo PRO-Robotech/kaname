@@ -13,8 +13,8 @@ import (
 	"testing"
 )
 
-// RID09 ownership/FD5/preauth path with phase-exclusive input/evidence directories.
-// Only directory names differ; no shared helper or production seam is modified.
+// Путь RID09 владения/FD5/предварительной аутентификации с отдельными каталогами входов/доказательств для фаз.
+// Отличаются только имена каталогов; общие помощники и производственные швы не меняются.
 func rid12Start(t *testing.T, f *installationNativeWorld, in rid09Input, phase string) *rid02OwnedChild {
 	t.Helper()
 	root := filepath.Join(f.session.Root, "rid12-input-"+phase)

@@ -295,7 +295,7 @@ func (f linkFault) Error() string {
 // прозу сообщения.
 func (f linkFault) Unwrap() error { return f.kind }
 
-// FieldPath identifies the invalid document field without exposing its value.
+// FieldPath обозначает неверное поле документа без раскрытия значения.
 func (f linkFault) FieldPath() string { return f.coord.path }
 
 // locate — путь и номер строки места, адресованного шагами: строка — ключ

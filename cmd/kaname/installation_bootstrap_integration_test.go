@@ -26,15 +26,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// installationBootstrapWorld is an INITIAL isolated installation Given. Only O's
-// pre-existing registered user/session/client come from ceremonyWorld's setup.
-// Its actual ceremony token is verified by the production presented reader; the
-// existing startup bootstrap producer grants O authority. C/I/GD are never seeded.
-// Public/gateway assertions belong to the independent edge fixture.
+// installationBootstrapWorld — НАЧАЛЬНЫЙ изолированный Given установки. Только ранее
+// зарегистрированные пользователь/сессия/клиент O берутся из подготовки ceremonyWorld.
+// Настоящий токен церемонии проверяется производственным считывателем предъявленных токенов;
+// существующий производитель начальной настройки даёт O полномочия. C/I/GD не засеиваются.
+// Проверки публичного интерфейса/шлюза принадлежат независимой краевой фикстуре.
 type installationBootstrapWorld struct {
 	world         *ceremonyWorld
 	principal     context.Context
-	operatorToken string // private actual ceremony access token; never logged
+	operatorToken string // закрытый настоящий токен доступа церемонии; не журналируется
 	reader        *presentedcred.Reader
 	model         preparedModel
 	relations     *authzcascade.Client
@@ -81,9 +81,9 @@ func newInstallationBootstrapWorld(t *testing.T, opts ...worldOption) *installat
 	return &installationBootstrapWorld{world: w, principal: principal, operatorToken: token.AccessToken, reader: reader, model: prepared, relations: relations}
 }
 
-// The helper process is essential: an already installed model in another test
-// cannot prove that authenticated current-authority preflight leaves FIRST Install
-// possible. No model reset or global mutation is used.
+// Вспомогательный процесс необходим: уже установленная в другом тесте модель
+// не доказывает, что предварительная проверка текущих полномочий с аутентификацией сохраняет возможность ПЕРВОЙ Install.
+// Сброс модели и глобальные изменения не используются.
 func TestInstallationPreparedAuthorityBeforeFirstInstall(t *testing.T) {
 	const marker = "KANAME_TEST_INSTALLATION_PREPARED_AUTHORITY_CHILD"
 	if os.Getenv(marker) != "1" {

@@ -15,10 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The real observer callback is a deterministic arrival boundary AFTER the
-// failed role transaction. Cancel exactly after the final actual failure, not
-// while database work is in flight. This is the completed-failure twin of the
-// independent interrupted-traversal tests, not synthetic authz or storage.
+// Настоящий обратный вызов наблюдателя — детерминированная граница достижения ПОСЛЕ
+// неудачной транзакции роли. Отменяем ровно после последнего настоящего отказа, а не
+// во время работы базы. Это близнец завершённого отказа для
+// независимых тестов прерванного обхода, без синтетической авторизации или хранилища.
 type cancelAfterLastReseedFailure struct {
 	expected, observed int
 	cancel             context.CancelFunc

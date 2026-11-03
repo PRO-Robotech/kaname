@@ -73,7 +73,7 @@ func rid10Start(t *testing.T, x *rid10World, mode string) *rid02OwnedChild {
 	require.Equal(t, "0", strings.TrimSpace(string(swap)))
 	rid08Write(t, child.dir, "provenance", map[string]any{"instrumentedCompleteStartup": true, "testBinarySHA256": digest, "productionAppSHA256": f.session.BinarySHA256, "pid": child.cmd.Process.Pid, "starttime": child.start, "cgroup": string(childCG), "memoryMax": string(memory), "swapMax": string(swap)})
 	t.Cleanup(func() { require.Equal(t, digest, rid06HashExecutable(t)) })
-	// Private ownership handshake MUST NOT claim authentication or issued tokens.
+	// Закрытое рукопожатие владения НЕ ДОЛЖНО утверждать аутентификацию или выдачу токенов.
 	ctx, cancel := context.WithTimeout(f.given.ctx, 10*time.Second)
 	defer cancel()
 	var event rid02ChildEvent
@@ -140,7 +140,7 @@ func rid10FirstBoundary(t *testing.T, x *rid10World, c *rid02OwnedChild, p *rid1
 	require.Equal(t, w.issuer.ID, receipt.DelegateID)
 	p.AtBoundary = rid08GDOperations(t, f)
 	require.Equal(t, []string{receipt.OperationID}, p.AtBoundary)
-	// Canonical order has one publicly visible ACTIVE pair, no hidden later pair.
+	// В каноническом порядке одна публично видимая пара ACTIVE, без скрытой поздней пары.
 	for _, account := range append(append([]string{}, w.accounts...), f.baseline.SystemID) {
 		got := w.delegations(t, account)
 		if account == w.accounts[0] {
@@ -164,8 +164,8 @@ func rid10FirstBoundary(t *testing.T, x *rid10World, c *rid02OwnedChild, p *rid1
 	var held int
 	require.NoError(t, f.given.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE application_name='rid10-full-root' AND xact_start IS NOT NULL AND state='idle in transaction'`).Scan(&held))
 	require.Zero(t, held, "between-pair callback must hold no writer/snapshot transaction")
-	// A real pre-existing G is created through I while first GD is visible and
-	// before fault/revoke. Its exact row/history must survive every later phase.
+	// Настоящий ранее существовавший G создаётся через I при видимом первом GD и
+	// до сбоя/отзыва. Его точная строка/история должна пережить каждую последующую фазу.
 	g := x.grantFirst(t)
 	require.Equal(t, w.gd.Id, g.DelegationId)
 	require.Equal(t, iamv1.AccessBinding_ACTIVE, g.Status)
@@ -327,8 +327,8 @@ func rid10Run(t *testing.T, mode string, twin bool) *rid10Proof {
 	wire := rid08Wire(t, f)
 	watch := wire.StartReadinessWatch(f.given.ctx)
 	t.Cleanup(func() { watch.Stop() })
-	// Complete a failed transport probe before starting the owned second listener.
-	// StartReadinessWatch's first observation is synchronous (existing RID08).
+	// Завершаем неудачную транспортную пробу до запуска принадлежащего фикстуре второго слушателя.
+	// Первое наблюдение StartReadinessWatch синхронно (существующий RID08).
 	spawned := time.Now()
 	child := rid10Start(t, x, childMode)
 	p := &rid10Proof{Mode: mode, Twin: twin, Accounts: append([]string{}, w.accounts...), System: f.baseline.SystemID, NamedSystem: x.namedSystem}
@@ -412,8 +412,8 @@ func rid10Run(t *testing.T, mode string, twin bool) *rid10Proof {
 		rid10OnlyFirst(t, x, p)
 		rid10CheckOldG(t, x, p, oldG)
 		rid10NewmanPhase(t, x, p, newmanHistory, "partial")
-		// The actual failed startup has exited. Recovery uses the ordinary released
-		// executable of the NEW integrated source, with identical delivery/key.
+		// Настоящий неудачный запуск завершился. Восстановление использует штатный выпущенный
+		// исполняемый файл НОВОГО интегрированного исходника с той же поставкой/ключом.
 		if mode == "retirement" {
 			f.ridAdmin(t, f.creator.ID, true)
 		}

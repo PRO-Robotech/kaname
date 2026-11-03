@@ -41,8 +41,8 @@ var rid03ObservedCases = map[string]bool{
 	"registry-installation-rid03-S2-GRANT-ACT": true, "registry-installation-rid03-S2-ROLE-TWIN-ACT": true, "registry-installation-rid03-S2-TARGET-TWIN-ACT": true, "registry-installation-rid03-S2-SUBJECT-TWIN-ACT": true, "registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT": true,
 }
 
-// Strict closed optional metadata object: no duplicate keys, unknown fields,
-// trailing values, secret/body/header slots, arrays or unbounded strings.
+// Строгий замкнутый необязательный объект метаданных: без повторных ключей, неизвестных полей,
+// последующих значений, слотов секретов/тела/заголовков, массивов или неограниченных строк.
 func (o *rid03ActGetObservation) UnmarshalJSON(raw []byte) error {
 	fail := errors.New("invalid RID03 actual Get observation")
 	if len(raw) > 4096 {
@@ -124,8 +124,8 @@ func rid03ValidateReceiptObservation(caseID string, o *rid03ActGetObservation) e
 	return nil
 }
 
-// Returned response identity remains an OBSERVATION until this independent
-// primary delta has supplied the actual new ID and exact materialization ledger.
+// Идентичность возвращённого ответа остаётся НАБЛЮДЕНИЕМ, пока эта независимая
+// первичная разница не предоставит настоящий новый ID и точный журнал материализации.
 func rid03MatchActObservation(e *rid03NewmanExpectation, o *rid03ActGetObservation, before, after rid03NewmanSnapshot) error {
 	fail := errors.New("FIXTURE_NOT_ACCEPTED: actual Get and independent primary observation differ")
 	if rid03ValidateReceiptObservation(e.CaseID, o) != nil {
@@ -170,8 +170,8 @@ func rid03DecodeReceiptObservation(caseID string, raw json.RawMessage) (*rid03Ac
 	return &o, nil
 }
 
-// Preserve the prior report schema, but reject duplicate/new unknown RID03
-// observation slots before the ordinary receipt decoder can discard them.
+// Сохраняем прежнюю схему отчёта, но отклоняем повторные/новые неизвестные слоты наблюдения RID03
+// до того, как штатный декодер квитанции сможет их отбросить.
 func rid03CheckReceiptObservationField(raw []byte) error {
 	fail := errors.New("invalid RID03 actual Get observation")
 	d := json.NewDecoder(bytes.NewReader(raw))

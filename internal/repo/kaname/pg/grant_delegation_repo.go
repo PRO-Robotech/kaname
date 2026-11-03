@@ -255,7 +255,7 @@ func (w *gdWriter) Insert(ctx context.Context, d domain.GrantDelegation) (domain
 
 // LockForRevoke — строка делегирования под `FOR UPDATE`.
 func (w *gdWriter) LockForRevoke(ctx context.Context, id domain.GrantDelegationID) (domain.GrantDelegation, error) {
-	// Acquire the same pair lock before the row lock used by grants and revocation.
+	// Берём ту же блокировку пары до блокировки строки, используемой выдачами и отзывом.
 	pair, err := w.Get(ctx, id)
 	if err != nil {
 		return domain.GrantDelegation{}, err
@@ -367,15 +367,15 @@ func (w *gdWriter) AccountOf(ctx context.Context, id domain.GrantDelegationID) (
 	return domain.AccountID(acc), nil
 }
 
-// lockPair serializes create, installation history checks and committed revocation.
-// Advisory collisions can only serialize unrelated pairs; they cannot admit duplicates.
+// lockPair сериализует создание, проверки истории установки и зафиксированный отзыв.
+// Коллизии рекомендательных блокировок могут лишь сериализовать посторонние пары, не допуская дублей.
 func (w *gdWriter) lockPair(ctx context.Context, account domain.AccountID, delegate domain.ServiceAccountID) error {
 	_, err := w.tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1038))`, string(account)+"/"+string(delegate))
 	return err
 }
 
-// InstallationPair checks ALL history under the production pair lock. An explicit
-// ordinary Create may replace revoked history; installation never does so.
+// InstallationPair проверяет ВСЮ историю под производственной блокировкой пары. Явный
+// штатный Create может заменить отозванную историю; установка никогда этого не делает.
 func (w *gdWriter) InstallationPair(ctx context.Context, wanted domain.GrantDelegation) (domain.GrantDelegation, bool, error) {
 	if err := w.lockPair(ctx, wanted.AccountID, wanted.DelegateID); err != nil {
 		return domain.GrantDelegation{}, false, err
