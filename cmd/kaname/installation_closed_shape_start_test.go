@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 	"os"
