@@ -39,23 +39,23 @@ resources:
     notes:
       - before: v_get
         text: |
-          # #64 Defect A: v_* derive from `owner` so a registry's CREATOR/OWNER (the
-          # RegisterResource `owner` tuple) holds the full CRUD verb-set on their own
-          # registry — esp. v_create (create repositories). Without this the owner got
-          # only editor-tier v_get/v_list/v_update/v_delete (the `edit` role authors no
-          # `create` verb) and CreateRepository denied → 404 for the owner. Per-OBJECT
-          # computed relation (like `editor: this or admin`), NOT a hierarchy cascade.
+          # #64 Дефект A: v_* выводятся из `owner`, поэтому СОЗДАТЕЛЬ/ВЛАДЕЛЕЦ реестра (кортеж
+          # `owner` от RegisterResource) имеет полный набор глаголов CRUD на своём
+          # реестре — особенно v_create (создание репозиториев). Без этого владелец получал
+          # только ярус редактора v_get/v_list/v_update/v_delete (роль `edit` не задаёт
+          # глагол `create`), а CreateRepository отказывал → 404 для владельца. Вычисляемое
+          # отношение на ОБЪЕКТЕ (как `editor: this or admin`), НЕ каскад иерархии.
           #
-          # `v_create` LIVES HERE AND NOWHERE ELSE — do not "restore parity" by adding it
-          # back to the other types. A registry is a CONTAINER: "create a repository in
-          # this namespace" is a real operation on the registry object, and it is really
-          # asked — by the control plane (CreateRepository / RenameRepository) and by the
-          # data plane (docker push to a new repo, cross-repo mount into a new dst, and
-          # the first-push blob-reveal guard). Every other type answered a question no
-          # request ever asks: "create" is not an operation on an already-existing object,
-          # and creating a resource inside a scope is authorized by the write tier on that
-          # scope. Locked by authzmap/verb_relation_has_reader_test.go, which reds with the
-          # type name if a reader-less carrier reappears.
+          # `v_create` ЖИВЁТ ТОЛЬКО ЗДЕСЬ — не «восстанавливайте равенство», добавляя его
+          # другим типам. Реестр — КОНТЕЙНЕР: «создать репозиторий в
+          # этом пространстве имён» — настоящее действие над объектом реестра, которое действительно
+          # запрашивается плоскостью управления (CreateRepository / RenameRepository) и
+          # плоскостью данных (docker push в новый репозиторий, cross-repo mount в новый dst и
+          # защитой раскрытия blob при первом push). Все другие типы отвечали на вопрос,
+          # которого ни один запрос не задаёт: «создать» не является действием над уже существующим объектом,
+          # а создание ресурса внутри области разрешается ярусом записи на этой
+          # области. Закреплено authzmap/verb_relation_has_reader_test.go: он краснеет с
+          # именем типа при возвращении носителя без читателя.
     relations:
       - name: owner
         definition: '[user, service_account]'
@@ -77,18 +77,18 @@ resources:
     notes:
       - before: super_admin
         text: |
-          # A repository has no project pointer of its own — it is a child of its
-          # registry, and the registry is the one anchored to a project.
+          # У репозитория нет собственного указателя на проект — это потомок
+          # реестра, и именно реестр привязан к проекту.
       - before: v_get
         text: |
-          # RG-1 D-7: `user:*` public-read wildcard — anonymous pull of a PUBLIC repo.
-          # The wildcard grants v_get ONLY on repos that ALSO carry an explicit
-          # `user:* v_get` tuple emitted by the registry overlay (visibility=PUBLIC);
-          # absent that tuple `user:*` has no access → uniform 404. ONLY v_get gains
-          # the wildcard — no write relation does (anon is a read-only floor, B14).
-          # #64 Defect A: v_* derive from `owner` (repo creator/pusher owner-tuple) so
-          # the repo owner fully manages their own repository; `user:*` wildcard stays
-          # on v_get ONLY (anonymous public-read floor, B14).
+          # RG-1 D-7: wildcard публичного чтения `user:*` — анонимный pull репозитория PUBLIC.
+          # Wildcard даёт v_get ТОЛЬКО репозиториям, которые ТАКЖЕ несут явный
+          # кортеж `user:* v_get`, выданный overlay реестра (visibility=PUBLIC);
+          # без этого кортежа `user:*` не имеет доступа → одинаковый 404. Wildcard получает
+          # ТОЛЬКО v_get, ни одно отношение записи (анонимный доступ — основание только для чтения, B14).
+          # #64 Дефект A: v_* выводятся из `owner` (кортеж владельца создателя/отправителя репозитория), поэтому
+          # владелец полностью управляет своим репозиторием; wildcard `user:*` остаётся
+          # ТОЛЬКО на v_get (основание анонимного публичного чтения, B14).
     relations:
       - name: owner
         definition: '[user, service_account]'

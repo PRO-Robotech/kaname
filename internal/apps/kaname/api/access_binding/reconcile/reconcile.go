@@ -411,7 +411,7 @@ type ReconcileStore interface {
 	// RecordEmittedTuples пишет строки ОДНОГО члена — с его координатой, INSERT … ON
 	// CONFLICT DO NOTHING по полному ключу (повтор идемпотентен); ForgetEmittedTuples
 	// снимает ровно названные строки по полному ключу (eager-revoke / fell-out /
-	// expiry). A deleted binding's rows are dropped by the FK ON DELETE CASCADE.
+	// истечение). Строки удалённой привязки снимает FK ON DELETE CASCADE.
 	RecordEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, member MemberCoord, tuples []domain.MembershipTuple) error
 
 	// UpsertMembers / RecordEmittedTuplesBatch — те же записи, что UpsertMember и
@@ -618,8 +618,8 @@ func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []
 // its own collector, and the revoke in between clears the member row and the ledger.
 //
 // The per-binding LEDGER write is deliberately NOT de-duplicated by this set: the ledger
-// PK is (binding_id, member coordinate, fga_user, relation, object), so two bindings (и
-// две координаты одной выдачи) claiming the identical tuple must each keep their OWN
+// PK — (binding_id, member coordinate, fga_user, relation, object), поэтому две привязки (и
+// две координаты одной выдачи), претендующие на один кортеж, должны каждая сохранять СВОЮ
 // row — по нему свёртка строки снятия и узнаёт, что факт ещё держит другой держатель
 // (kaname#919, kaname#933).
 //
@@ -741,11 +741,11 @@ func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindin
 //     change to object X cannot add, remove or re-status a member on object Y. The
 //     desired verdict for X is derived by desiredMemberForObject — the SAME per-object
 //     decision point the full recompute uses — so the two paths stay byte-identical.
-//   - The within-binding survivingClaims subtraction (applyDiff) that decides which
-//     ledger rows are FORGOTTEN only ever involves members that SHARE a ledger row, and
-//     the ledger PK is (binding_id, member coordinate, fga_user, relation, object): a
-//     shared row implies the SAME coordinate, то есть тот же объект. Restricting the
-//     desired set to one object therefore forgets exactly what the full set would have.
+//   - Вычитание survivingClaims внутри привязки (applyDiff), определяющее,
+//     какие строки журнала ЗАБЫВАЮТСЯ, затрагивает только участников с ОБЩЕЙ строкой журнала,
+//     а PK журнала — (binding_id, member coordinate, fga_user, relation, object):
+//     общая строка означает ТУ ЖЕ координату, то есть тот же объект. Сужение
+//     желаемого набора до одного объекта забывает ровно то же, что забыл бы полный набор.
 //     Строку снятия кортежа, который выдача ещё выпускает ДРУГОЙ координатой на том же
 //     объекте движка (тип переименован с сохранением типа модели), сужение не вычитает
 //     — её оставляет свёртка: строка той координаты держит факт (kaname#919).
@@ -1065,7 +1065,7 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 //
 // It keeps everything the full path does per object: the ACTIVE/REJECTED verdict, the
 // containment audit, the eager-revoke of a member that fell out, and the deferred
-// delete flush. Взаимное исключение с параллельным проходом той же
+// сброс удаления. Взаимное исключение с параллельным проходом той же
 // выдачи тоже сохраняется — тем же EXCLUSIVE advisory-замком, — но берёт его
 // ВЫЗЫВАЮЩИЙ, сразу на весь веер и до первой записи прохода (см. тело функции). Only the SIZE of
 // the diffed set changes: O(1) in the scope instead of O(scope). Because the critical
@@ -1384,10 +1384,10 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// а не перебором объектов области (§3 приёмки, «производительность»).
 			matched, err = r.matchCreatorObjects(ctx, s, sel, bs)
 		} else {
-			// Pass the binding's scope + target so the ANCHOR arm resolves the candidate set
-			// per the target (by-id when per-object; O(scope) push-down otherwise), and every
-			// arm's matches are intersected with the target. IsContainedIn below stays the
-			// authoritative containment re-verify.
+			// Передаём область и цель привязки, чтобы ветвь ANCHOR разрешила набор кандидатов
+			// по цели (по id для пообъектной; иначе O(scope) с проталкиванием фильтра), а совпадения
+			// каждой ветви пересекаются с целью. IsContainedIn ниже остаётся
+			// окончательной повторной проверкой включения.
 			matched, err = r.matchSelectorObjects(ctx, s, sel, bs.Scope, bs.Target)
 		}
 		if err != nil {
@@ -1552,8 +1552,8 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 					return fmt.Errorf("emit tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
 				}
 			}
-			// Co-commit the emitted member-tuple into the ledger under the member's
-			// coordinate — the symmetric revoke + Role.Update reconcile both rest on it
+			// Коммитим выданный кортеж участника в журнале вместе с остальным по координате
+			// участника — на этом держатся симметричный отзыв и сведение Role.Update
 			// (ban #10).
 			if err := s.RecordEmittedTuples(ctx, bs.BindingID, desiredCoord(d), tuples); err != nil {
 				return fmt.Errorf("record emitted tuple %s:%s: %w", d.ObjectType, d.ObjectID, err)
@@ -1695,8 +1695,8 @@ func (r *Reconciler) memberTuples(d DesiredMember) ([]domain.MembershipTuple, bo
 // revokeMemberTuples eager-revokes the live FGA tuples of a previously-ACTIVE
 // member (ACTIVE→REJECTED/PENDING transition OR a fell-out member) and forgets them
 // from the ledger, in lock-step (ban #10). The revoke set is the member's SAVED
-// tuple-set — строки реестра ЕГО координаты (revokeTuplesFor), NOT re-derived from a
-// possibly-mutated role (a removed rule's verbs are gone, so the only authority is the
+// набор кортежей — строки реестра ЕГО координаты (revokeTuplesFor), НЕ выведенные заново из
+// возможно изменённой роли (глаголы снятого правила исчезли, поэтому единственный источник истины —
 // ledger).
 //
 // Множеств два (claims — набор выживших ACTIVE-членов этой выдачи после прохода):
@@ -1768,10 +1768,10 @@ func (c *memberClaims) claimedAt(coord MemberCoord, t domain.MembershipTuple) bo
 	return ok
 }
 
-// desiredActiveClaims collects every FGA tuple that a desired ACTIVE member will
-// (re)emit this pass — the "still-claimed" sets the eager-revoke subtracts. Only ACTIVE
-// desired members carry precomputed Tuples (REJECTED/PENDING members carry none), so
-// they are the exact set of live claims after the pass.
+// desiredActiveClaims собирает все кортежи FGA, которые желаемый участник ACTIVE
+// выдаст заново в этом проходе — наборы действующих притязаний для вычитания при немедленном отзыве. Только желаемые
+// участники ACTIVE несут вычисленные Tuples (у REJECTED/PENDING их нет), поэтому
+// это точный набор живых притязаний после прохода.
 func desiredActiveClaims(desired []DesiredMember) *memberClaims {
 	c := &memberClaims{
 		all:     make(map[domain.MembershipTuple]struct{}),
@@ -1795,13 +1795,13 @@ func desiredActiveClaims(desired []DesiredMember) *memberClaims {
 	return c
 }
 
-// revokeTuplesFor returns the FGA tuples to revoke for a member: the SAVED ledger rows
-// of the member's coordinate (access_binding_emitted_tuples) — "revoke what was
+// revokeTuplesFor возвращает кортежи FGA для отзыва участника: СОХРАНЁННЫЕ строки журнала
+// его координаты (access_binding_emitted_tuples) — «отозвать то, что было
 // actually emitted, do NOT re-derive from the role", because the role may have been
-// mutated out from under the member. Координата — та же, что у строки члена, и снимку
+// изменённого независимо от участника. Координата — та же, что у строки члена, и снимку
 // каталога процесса здесь нечего решать: член по типу, выпавшему из снимка реплики,
 // снимается тем же чтением, а строки члена ДРУГОГО типа с тем же идентификатором
-// остаются нетронутыми (kaname#933). Empty ledger ⇒ nothing to revoke.
+// остаются нетронутыми (kaname#933). Пустой журнал ⇒ отзывать нечего.
 func (r *Reconciler) revokeTuplesFor(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember) ([]domain.MembershipTuple, error) {
 	tuples, err := s.LedgerTuplesForMember(ctx, bs.BindingID, coordOf(m))
 	if err != nil {

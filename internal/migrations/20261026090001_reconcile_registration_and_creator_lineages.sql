@@ -2,13 +2,13 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- САНКЦИЯ: docs/engineering/acceptance/kaname-derives-the-parent-of-a-registered-object.md
 -- САНКЦИЯ: docs/engineering/acceptance/service-account-creation-is-its-own-right.md
--- kaname#1020: explicit reconciliation of the two historical 20261026090000
--- lineages (#982 and #1003). Main 90000 remains byte-identical. The other SQL
--- is archived verbatim under historical/ (sha256 bd9449a671136b68ae82ce38edabbe2801a056fd4f7919fde769406be7bced29).
--- No goose history is rewritten. Product migrator uses WithAllowMissing(), so
--- feature installations already at 120000 execute this missing 90001 too.
--- Recognize COMPLETE definitions, never infer deployment from a missing record.
--- All recognition precedes persistent mutation; unexpected partial state fails.
+-- kaname#1020: явное согласование двух исторических линий 20261026090000
+-- (#982 и #1003). Main 90000 остаётся побайтно идентичным. Другой SQL
+-- дословно архивирован в historical/ (sha256 bd9449a671136b68ae82ce38edabbe2801a056fd4f7919fde769406be7bced29).
+-- История goose не переписывается. Производственный мигратор использует WithAllowMissing(), поэтому
+-- установки фичи, уже достигшие 120000, также исполняют пропущенную 90001.
+-- Распознаём ПОЛНЫЕ определения, не выводим факт установки из отсутствия записи.
+-- Всё распознавание предшествует постоянным изменениям; неожиданное частичное состояние даёт отказ.
 -- +goose Up
 
 -- Отказ до первого DDL, в том числе создания вспомогательных функций.
@@ -23,8 +23,8 @@ END
 $isolation$;
 -- +goose StatementEnd
 
--- The same guard protects our inverse and the original archived 90000 body.
--- It runs inside that Goose transaction, after excluding concurrent writers.
+-- Та же защита охраняет наш обратный ход и исходное архивное тело 90000.
+-- Она работает внутри той транзакции Goose после исключения конкурентных писателей.
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname.registration_lineage_assert_unused(side text) RETURNS void
 LANGUAGE plpgsql SET search_path = pg_catalog, kaname AS $unused$
@@ -37,8 +37,8 @@ BEGIN
                kaname.service_accounts, kaname.role_rule_selectors,
                kaname.roles, kaname.relation_fact IN ACCESS EXCLUSIVE MODE;
     IF side='writer' THEN
-        -- Exact harmless values installed by this migration. New declarations
-        -- are meaningful policy and cannot be discarded by schema rollback.
+        -- Точные безопасные значения, установленные этой миграцией. Новые объявления
+        -- задают значимую политику и не могут отбрасываться откатом схемы.
         IF EXISTS (SELECT 1 FROM kaname.catalog_resource c
                     WHERE c.writes <> '{}'::text[] OR c.parent_names IS DISTINCT FROM
                       CASE WHEN c.module='registry' AND c.resource='repositories'
@@ -67,8 +67,8 @@ END
 $unused$;
 -- +goose StatementEnd
 
--- A bounded schema identity: only objects belonging to the two 90000 sides.
--- Later independent migrations are not provenance for these definitions.
+-- Ограниченная идентичность схемы: только объекты двух сторон 90000.
+-- Более поздние независимые миграции не доказывают происхождение этих определений.
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname.registration_lineage_shape() RETURNS jsonb
 LANGUAGE sql STABLE SET search_path = pg_catalog, kaname AS $shape$
@@ -398,8 +398,8 @@ BEGIN
     LOCK TABLE kaname.catalog_resource, kaname.catalog_verb,
                kaname.service_accounts, kaname.role_rule_selectors,
                kaname.roles, kaname.relation_fact IN ACCESS EXCLUSIVE MODE;
-    -- Expected definitions are parsed by this server, avoiding version-sensitive
-    -- hand-written pg_get_constraintdef/default pretty-print comparisons.
+    -- Ожидаемые определения разбирает этот сервер, избегая зависящих от версии
+    -- ручных сравнений красивого вывода pg_get_constraintdef/default.
     CREATE TEMP TABLE registration_expected_resource (
         parent_types text[],
         parent_names text[] NOT NULL DEFAULT '{}'::text[],
@@ -545,8 +545,8 @@ $creator_source$
         RAISE EXCEPTION '90000 lineage reconciliation: neither original lineage exists';
     END IF;
     IF to_regclass('kaname.registration_lineage_origin') IS NOT NULL THEN
-        -- Only our completed inverse can be upgraded again. A preexisting
-        -- unmarked/converged installation is never assigned invented history.
+        -- Только наш завершённый обратный ход может обновляться заново. Уже существующей
+        -- неотмеченной/сведённой установке никогда не присваивается выдуманная история.
         IF (SELECT count(*) FROM kaname.registration_lineage_origin) <> 1 OR NOT EXISTS (
             SELECT 1 FROM kaname.registration_lineage_origin
              WHERE singleton AND format_version=2 AND state='down'
@@ -571,8 +571,8 @@ $creator_source$
             VALUES (true,2,v_main,v_feature,'up','{}',kaname.registration_lineage_shape());
     END IF;
 
-    -- Existing data, including post-deployment catalog changes, is never replayed.
-    -- Only a completely absent lineage runs its exact original Up body.
+    -- Существующие данные, включая изменения каталога после выкатки, не проигрываются заново.
+    -- Только полностью отсутствующая линия исполняет своё точное исходное тело Up.
     IF NOT v_main THEN
         EXECUTE $main_ddl$
 
@@ -846,8 +846,8 @@ BEGIN
     END IF;
     IF NOT v_creator THEN
         PERFORM kaname.registration_lineage_assert_unused('creator');
-        -- The previous validator was validated byte-for-byte before Up.
-        -- Its inverse is static SQL, never executable text read from a marker.
+        -- Предыдущий валидатор побайтно проверен до Up.
+        -- Его обратный ход — статический SQL, а не исполняемый текст из маркера.
         EXECUTE $restore_validator$
 CREATE OR REPLACE FUNCTION kaname.iam_rules_valid(rules jsonb) RETURNS boolean
 LANGUAGE plpgsql IMMUTABLE AS $validator$
@@ -977,8 +977,8 @@ $restore_validator$;
         RAISE EXCEPTION '90000 lineage rollback: inverse differs from original schema';
     END IF;
     UPDATE kaname.registration_lineage_origin SET state='down';
-    -- Retain origin across the colliding 90000 boundary. The product runner
-    -- selects the exact archived writer for feature origin and refuses both.
+    -- Сохраняем происхождение через границу конфликтующих 90000. Производственный исполнитель
+    -- выбирает точный архивный путь записи для происхождения feature и отклоняет наличие обоих.
 END
 $inverse$;
 -- +goose StatementEnd

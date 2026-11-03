@@ -460,7 +460,7 @@ CASES.append(Case(
             method="GET",
             path="/iam/v1/groups/{{crudGroupId}}",
             # jwtNoBindings is NOT a no-grant subject any more: the iam suites
-            # themselves grant groupMemberAUserId `view` on account-A (iam-flat-authz-vbc
+            # сами дают groupMemberAUserId `view` на аккаунте A (iam-flat-authz-vbc
             # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
             # and those bindings stay ACTIVE in the DB across runs. A probe that
             # asserts "this subject sees nothing" was therefore asserting it
@@ -555,7 +555,7 @@ CASES.append(Case(
             method="GET",
             path="/iam/v1/groups?accountId={{accountAId}}",
             # jwtNoBindings is NOT a no-grant subject any more: the iam suites
-            # themselves grant groupMemberAUserId `view` on account-A (iam-flat-authz-vbc
+            # сами дают groupMemberAUserId `view` на аккаунте A (iam-flat-authz-vbc
             # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
             # and those bindings stay ACTIVE in the DB across runs. A probe that
             # asserts "this subject sees nothing" was therefore asserting it
@@ -916,7 +916,7 @@ CASES.append(Case(
 # asserted: the Operation succeeds AND the member is present exactly once. An
 # error-code assertion could never have caught a duplicate row.
 #
-# Depends on IAM-GRP-AM-CRUD-OK having added groupMemberAUserId.
+# Зависит от добавления groupMemberAUserId в IAM-GRP-AM-CRUD-OK.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
@@ -1044,7 +1044,7 @@ CASES.append(Case(
 
 # ---------------------------------------------------------------------------
 # IAM-GRP-RM-CRUD-OK — RemoveMember (groupMemberAUserId) → Operation done
-# Depends on IAM-GRP-AM-CRUD-OK having added groupMemberAUserId.
+# Зависит от добавления groupMemberAUserId в IAM-GRP-AM-CRUD-OK.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
@@ -1081,7 +1081,7 @@ CASES.append(Case(
 #
 # The real risk of a no-op remove is COLLATERAL: that it removes something else,
 # or that a genuine membership silently disappears. That is what is asserted —
-# the Operation succeeds, groupNonMemberAUserId is (still) absent, and the group's other
+# Operation успешна, groupNonMemberAUserId по-прежнему отсутствует, а прочие участники группы
 # membership is untouched.
 # ---------------------------------------------------------------------------
 
@@ -1299,7 +1299,7 @@ CASES.append(Case(
             method="GET",
             path="/iam/v1/groups/{{crudGroupId}}:listMembers",
             # jwtNoBindings is NOT a no-grant subject any more: the iam suites
-            # themselves grant groupMemberAUserId `view` on account-A (iam-flat-authz-vbc
+            # сами дают groupMemberAUserId `view` на аккаунте A (iam-flat-authz-vbc
             # create-derive) and on account-B (the authz-deny AB-CR ALLOW rows),
             # and those bindings stay ACTIVE in the DB across runs. A probe that
             # asserts "this subject sees nothing" was therefore asserting it

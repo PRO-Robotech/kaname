@@ -8,13 +8,13 @@ package access_binding
 // Permission-based mapping collapses the previous name-based mappers
 // (`roleNameToRelation`, `resolveBindingRelation`, `resolveRelationFromRepo`)
 // into a single permission-based mapper `authzmap.PermissionsToRelations` and
-// a single tuple-builder `tuplesForBinding(b, subject, []Relation)`.
+// единый построитель кортежей `tuplesForBinding(b, subject, []Relation)`.
 //
 // Emit path:
 //
 //  1. Read role (via Writer-tx reader-side or pre-loaded role).
 //  2. relations := authzmap.PermissionsToRelations(role.Permissions)
-//  3. tuples := tuplesForBinding(binding, subject, relations) — per subject of the set
+//  3. tuples := tuplesForBinding(binding, subject, relations) — для каждого субъекта набора
 //  4. w.AccessBindingsW().EmitRelationWrite(ctx, tuples)         // grant
 //     -- OR --
 //     w.AccessBindingsW().EmitRelationDelete(ctx, tuples)        // revoke (symmetric)

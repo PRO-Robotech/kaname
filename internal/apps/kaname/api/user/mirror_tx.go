@@ -556,27 +556,27 @@ func ActivateInviteForLane(ctx context.Context, w Writer, pending domain.User) (
 	return humansession.InviteActivation{User: res.User, OwnerBindingID: res.OwnerBindingID}, nil
 }
 
-// bootstrapTuples строит ВСЕ FGA-tuples bootstrap-графа identity для co-commit
+// bootstrapTuples строит ВСЕ кортежи FGA графа bootstrap личности для совместного коммита
 // intent'ами в kaname.fga_outbox (SEC-D). Раньше эти
-// tuples писались best-effort post-commit (`WriteTuples` + снятый с тех пор писатель
+// кортежи писались с необязательным успехом после коммита (`WriteTuples` + снятый с тех пор писатель
 // «Non-fatal») — теперь это чистый builder, а emit делает writer-tx:
 //
-//	user:<usr>#owner            @account:<acc> — owner grant (зеркалит CreateAccount;
+//	user:<usr>#owner            @account:<acc> — выдача владельца (зеркалит CreateAccount;
 //	                                             D-4: невосстановим reconciler'ом)
-//	user:<usr>#admin            @account:<acc> — account-admin self-grant (AB row)
-//	user:<usr>#admin            @project:<prj> — project-admin self-grant (AB row)
-//	iam_user:<usr>#account      @account:<acc> — user→account hierarchy
-//	project:<prj>#account       @account:<acc> — project→account hierarchy
-//	account:<acc>#cluster       @cluster:root  — SEC-L cluster pointer (account)
-//	project:<prj>#cluster       @cluster:root  — SEC-L cluster pointer (project)
-//	iam_access_binding:<ab>#project@project:<prj> — project-scoped AB hierarchy
+//	user:<usr>#admin            @account:<acc> — выдача себе account-admin (строка AB)
+//	user:<usr>#admin            @project:<prj> — выдача себе project-admin (строка AB)
+//	iam_user:<usr>#account      @account:<acc> — иерархия пользователь→аккаунт
+//	project:<prj>#account       @account:<acc> — иерархия проект→аккаунт
+//	account:<acc>#cluster       @cluster:root  — указатель SEC-L на кластер (аккаунт)
+//	project:<prj>#cluster       @cluster:root  — указатель SEC-L на кластер (проект)
+//	iam_access_binding:<ab>#project@project:<prj> — иерархия AB в области проекта
 //
 // Две строки проектной самовыдачи (admin@project и указатель её объекта) берутся
 // из projectBindingTuples — того же источника, что ведомость этой выдачи.
 //
-// Account-scoped AccessBinding (accountAB) НЕ получает iam_access_binding
+// AccessBinding в области аккаунта (accountAB) НЕ получает iam_access_binding
 // hierarchy-tuple: FGA-тип `iam_access_binding` имеет только `project`-parent —
-// account-scoped binding'и per-resource Get авторизуются через grant-tuples выше.
+// для привязок в области аккаунта пообъектный Get авторизуется через кортежи выдачи выше.
 // ЗДЕСЬ СТОЯЛО «без `iam_user`-hierarchy-tuple per-resource UserService.Get/
 // Update/Delete никогда не авторизуется» — И ЭТО НЕВЕРНО СО ДНЯ СНЯТИЯ ВНЕШНЕГО
 // ДВИЖКА. Предка личности называет не этот кортеж, а цепь областей
@@ -587,23 +587,23 @@ func ActivateInviteForLane(ctx context.Context, w Writer, pending domain.User) (
 // заведён отдельно (kacho#946), здесь он назван, а не снят: уборка и отрыв — разные
 // изменения.
 //
-// rbac-contract-a-flat-fallout: the `admin@account` self-grant tuple is DROPPED —
-// the account-scoped binding is now the OWNER binding (OwnerRoleID), whose tier
-// (admin via `*.*`) + per-object content access is materialized by the post-commit
-// ReconcileBinding (the single materialization path, D-4). The `owner@account`
-// grant tuple is retained (D-4 class — not reconstructible by the reconciler, the
-// owner standing). TWO new tuples are added under the flat model:
-//   - iam_user:<usr>#subject @ user:<usr> — the self-tuple so the user can GET
+// rbac-contract-a-flat-fallout: кортеж выдачи себе `admin@account` СНЯТ —
+// привязка на аккаунте теперь является привязкой ВЛАДЕЛЬЦА (OwnerRoleID); её ярус
+// (admin через `*.*`) и пообъектный доступ к содержимому материализует после коммита
+// ReconcileBinding (единственный путь материализации, D-4). Кортеж выдачи `owner@account`
+// сохранён (класс D-4 — реконсайлер не может его восстановить,
+// положение владельца). Плоская модель добавляет ДВА новых кортежа:
+//   - iam_user:<usr>#subject @ user:<usr> — кортеж на себя, чтобы пользователь мог GET
 //     themselves (model `iam_user.v_get = … or subject or super_admin`; D-4 class —
-//     emitted explicitly at user creation, NOT reconstructible by the reconciler).
+//     выдаётся явно при создании пользователя, НЕ восстанавливается реконсайлером).
 //     ЧИТАЮЩИЙ ГЛАГОЛ НАЗВАН ТОЧНО, и это не педантизм: здесь стояло `viewer`,
 //     а гейт чтения — `v_get`, и `subject` в нём отсутствовал. Кортеж писался,
 //     проверкой не читался, самочтение не работало ни у кого. Восстановлено
 //     в модели (kacho#715-follow-up); комментарий обязан называть то отношение, от
 //     которого зависит исход, иначе следующий читатель снова сверит не с тем.
-//   - account:<acc>#account @ iam_access_binding:<ownerBindingID> — the owner-
-//     binding OBJECT hierarchy parent-pointer (parity with account/create.go
-//     ownerBindingHierarchyTuples; lineage edge, access is per-object via reconcile).
+//   - account:<acc>#account @ iam_access_binding:<ownerBindingID> — указатель родителя
+//     в иерархии ОБЪЕКТА привязки владельца (как в account/create.go,
+//     ownerBindingHierarchyTuples; ребро происхождения, пообъектный доступ — через сведение).
 //
 // Tuple-формат (User/Relation/Object) совпадает с путём приглашения
 // и CreateAccount/CreateProject/CreateAccessBinding — единый owner-tuple контракт.
@@ -612,18 +612,18 @@ func bootstrapTuples(
 	ownerBindingID domain.AccessBindingID, projectAB domain.AccessBinding,
 ) []service.RelationTuple {
 	out := []service.RelationTuple{
-		// Grant-tuples. owner@account is the D-4 owner standing (зеркалит CreateAccount
-		// ownerTuples); admin@account is DROPPED (owner-binding reconcile materializes
-		// the tier). project admin@project kept as the explicit project-admin self-grant.
+		// Кортежи выдачи. owner@account — положение владельца D-4 (зеркалит CreateAccount
+		// ownerTuples); admin@account СНЯТ (сведение привязки владельца материализует
+		// ярус). admin@project проекта сохранён как явная выдача себе project-admin.
 		{User: fmt.Sprintf("user:%s", userID), Relation: "owner", Object: fmt.Sprintf("account:%s", accID)},
-		// Self-tuple (flat-model get-self, D-4): iam_user.v_get включает `subject`.
+		// Кортеж на себя (получение себя в плоской модели, D-4): iam_user.v_get включает `subject`.
 		{User: fmt.Sprintf("user:%s", userID), Relation: "subject", Object: fmt.Sprintf("iam_user:%s", userID)},
-		// Hierarchy parent-pointer tuples (та же форма, что на пути приглашения).
+		// Кортежи указателей родителя иерархии (та же форма, что на пути приглашения).
 		{User: fmt.Sprintf("account:%s", accID), Relation: "account", Object: fmt.Sprintf("iam_user:%s", userID)},
 		{User: fmt.Sprintf("account:%s", accID), Relation: "account", Object: fmt.Sprintf("project:%s", prjID)},
-		// Owner-binding OBJECT hierarchy parent-pointer (parity with account/create.go).
+		// Указатель родителя иерархии ОБЪЕКТА привязки владельца (как в account/create.go).
 		{User: fmt.Sprintf("account:%s", accID), Relation: "account", Object: fmt.Sprintf("iam_access_binding:%s", ownerBindingID)},
-		// SEC-L cluster parent-pointer tuples (зеркалит account.Create / project.Create).
+		// Кортежи указателей родителя кластера SEC-L (зеркалит account.Create / project.Create).
 		{User: "cluster:" + domain.ClusterSingletonID, Relation: "cluster", Object: fmt.Sprintf("account:%s", accID)},
 		{User: "cluster:" + domain.ClusterSingletonID, Relation: "cluster", Object: fmt.Sprintf("project:%s", prjID)},
 	}

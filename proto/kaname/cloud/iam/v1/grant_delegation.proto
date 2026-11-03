@@ -10,7 +10,7 @@ import "kaname/cloud/iam/v1/access_binding.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
 
-// A GrantDelegation resource — делегирование права выдавать.
+// Ресурс GrantDelegation — делегирование права выдавать.
 //
 // Держатель права выдавать на аккаунте допускает служебную учётку (`delegate`)
 // выдавать и отзывать права на объекты ОДНОГО модуля от своего имени. Выдача
@@ -25,9 +25,9 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 // действующую выдачу, сделанную по делегированию, с причиной
 // `REVOCATION_REASON_DELEGATION_REVOKED`. Отозванная запись остаётся для аудита.
 //
-// Resource id prefix: `gdl` (concatenated form, `ids.NewID`).
+// Префикс id ресурса: `gdl` (слитная форма, `ids.NewID`).
 message GrantDelegation {
-  // Lifecycle status. ACTIVE — делегирование действует; REVOKED — отозвано,
+  // Состояние жизненного цикла. ACTIVE — делегирование действует; REVOKED — отозвано,
   // конечное состояние.
   enum Status {
     STATUS_UNSPECIFIED = 0;
@@ -44,7 +44,7 @@ message GrantDelegation {
     string id = 2;
   }
 
-  // ID of the grant delegation.
+  // ID делегирования выдачи.
   string id = 1;
 
   // Аккаунт — единственная область, в которой делегат вправе выдавать.

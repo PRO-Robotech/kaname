@@ -4,25 +4,25 @@
 package pg_test
 
 // upsert_invite_grant_fga_integration_test.go — RC-2 + RC-5 integration
-// (testcontainers Postgres) on the live invite-activation lane: activation IN
-// THE OUTCOME OF ADDRESS VERIFICATION (`userapp.ActivateInviteOnVerificationTx`,
-// kaname#456) against a real DB, probing the transactional outbox rows + DB
+// (testcontainers Postgres) на настоящей полосе активации приглашения: активация КАК
+// РЕЗУЛЬТАТ ПРОВЕРКИ АДРЕСА (`userapp.ActivateInviteOnVerificationTx`,
+// kaname#456) на настоящей БД с проверкой строк транзакционного outbox и БД
 // state. Прежде пробы шли через глагол заведения личности по внешнему
 // удостоверению; он снят (kaname#929, AWI-09), а предмет проб — тело активации и
 // заведения личных ресурсов — живёт на полосе подтверждения адреса.
 //
 // Scenarios:
 //   T-I3 — invite-activation co-commits the member hierarchy tuple
-//          (account:<A>#account@iam_user:<id>) IN THE SAME writer-tx as the
+//          (account:<A>#account@iam_user:<id>) В ТОЙ ЖЕ транзакции записи, что и
 //          iam.user.updated audit-event + the ActivateInvite UPDATE (ban #10 atomic
 //          co-commit through w.EmitFGARelationWrite, НЕ записью после коммита — она снята).
 //   T-I5 — an invitee that owns ZERO accounts gets a personal default Account +
 //          "default" Project bootstrapped (RC-5 gate), WITHOUT a 2nd InsertActive
 //          (the invitee user-row already exists → a re-INSERT would 23505 on
 //          UNIQUE(external_id)); the RC-2 inviter member-tuple co-exists.
-//   T-E4(int) — repeated bootstrap is idempotent: still exactly ONE owned
-//          personal account; a second activation of the already-ACTIVE row is
-//          refused (the row is no longer PENDING) and changes nothing.
+//   T-E4(int) — повторный bootstrap идемпотентен: по-прежнему ровно ОДИН собственный
+//          личный аккаунт; вторая активация уже ACTIVE строки
+//          отклоняется (строка больше не PENDING) и ничего не меняет.
 
 import (
 	"context"
@@ -143,7 +143,7 @@ func externalIDOf(t *testing.T, ctx context.Context, pool *pgxpool.Pool, userID 
 	return ext
 }
 
-// ── T-I3 — RC-2 member-tuple co-committed with audit in the activation writer-tx ──────
+// ── T-I3 — RC-2: кортеж участника коммитится вместе с аудитом в транзакции записи активации ──────
 func TestUpsertInviteGrant_TI3_RC2_MemberTupleCoCommitWithAudit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -164,7 +164,7 @@ func TestUpsertInviteGrant_TI3_RC2_MemberTupleCoCommitWithAudit(t *testing.T) {
 	require.NoError(t, err, "активация в исходе подтверждения адреса")
 	require.Equal(t, inviteeID, res.User.ID, "активирована та же строка (id сохранён)")
 
-	// PENDING → ACTIVE, id preserved, identity minted by our lane.
+	// PENDING → ACTIVE, id сохранён, личность выпущена нашей полосой.
 	var status, gotExt string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT invite_status, external_id FROM kaname.users WHERE id = $1`, string(inviteeID)).
@@ -184,7 +184,7 @@ func TestUpsertInviteGrant_TI3_RC2_MemberTupleCoCommitWithAudit(t *testing.T) {
 		"exactly one RC-2 member hierarchy-tuple intent must be co-committed with activation")
 }
 
-// T-I3 atomicity — a rolled-back activation tx leaves NEITHER the audit row NOR the
+// Атомарность T-I3 — откат транзакции активации не оставляет НИ строки аудита, НИ
 // fga member-tuple intent. We assert the co-commit invariant directly on the
 // writer-tx (the only way both rows can appear/disappear atomically is via the
 // SAME w.EmitFGARelationWrite + w.EmitAuditEvent on one pgx.Tx).
@@ -202,7 +202,7 @@ func TestUpsertInviteGrant_TI3_RC2_RollbackDiscardsBoth(t *testing.T) {
 	const email = "invitee-ti3rb@example.com"
 	_, accID, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "ti3rb", email)
 
-	// Replicate the activation writer-tx shape, then ROLLBACK: activate + audit + fga
+	// Повторяем форму транзакции записи активации и ОТКАТЫВАЕМ: активация + аудит + fga
 	// member-tuple, all on one tx, abandoned.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
@@ -298,7 +298,7 @@ func TestUpsertInviteGrant_TI5_RC5_BootstrapFiresOwnsZero_NoSecondInsertActive(t
 		"account:"+string(accA), "account", "iam_user:"+string(inviteeID)),
 		"RC-2: inviter member-tuple co-exists with RC-5 personal bootstrap")
 
-	// The bootstrap reused the activated row, not a new identity.
+	// Bootstrap повторно использовал активированную строку вместо новой личности.
 	assert.Equal(t, inviteeID, res.User.ID, "заведение личных ресурсов — на активированной строке")
 	assert.Equal(t, domain.AccountID(personalAcc), res.AccountID, "личный аккаунт исхода — тот, что заведён")
 }

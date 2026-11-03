@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestNativeDelegationPublicMatrix is opt-in: all native processes inherit the
-// caller's bounded cgroup; the Docker endpoint must be the separately leased,
-// one-container PostgreSQL relay. It never starts a consumer or changes policy.
-// Binary/source provenance is supplied independently from this fixture revision.
+// TestNativeDelegationPublicMatrix запускается явно: все нативные процессы наследуют
+// ограниченную cgroup вызывающего; endpoint Docker должен быть отдельно арендованным
+// ретранслятором PostgreSQL на один контейнер. Потребитель не запускается, политика не меняется.
+// Происхождение бинарных файлов/исходников задаётся независимо от этой ревизии фикстуры.
 func TestNativeDelegationPublicMatrix(t *testing.T) {
 	if os.Getenv("KANAME_NATIVE_ACCEPTANCE") != "1" {
 		t.Skip("requires an explicitly leased native acceptance job")
@@ -33,7 +33,7 @@ func TestNativeDelegationPublicMatrix(t *testing.T) {
 		"--evidence", evidence, "--pg-port", stand.PGPort, "--binary", os.Getenv("KANAME_NATIVE_BINARY"),
 		"--migrator", os.Getenv("KANAME_NATIVE_MIGRATOR"))
 	payload.Dir = root
-	// Let the payload reap its exact native process groups before Go escalates.
+	// Даём полезной нагрузке собрать свои точные нативные группы процессов до эскалации Go.
 	payload.Cancel = func() error { return payload.Process.Signal(syscall.SIGTERM) }
 	payload.WaitDelay = 40 * time.Second
 	log, err := os.OpenFile(filepath.Join(evidence, "payload.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)

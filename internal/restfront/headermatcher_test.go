@@ -231,8 +231,8 @@ func TestNarrowingMatcherDropsBothFormsAndKeepsTheCredential(t *testing.T) {
 	}
 }
 
-// An explicitly empty or unsupported credential is still PRESENT. The
-// anonymous self-check must not infer anonymity after the HTTP front loses it.
+// Явно пустые или неподдерживаемые учётные данные всё равно ПРИСУТСТВУЮТ.
+// Анонимная проверка самого себя не должна выводить анонимность после их потери HTTP-входом.
 func TestAnonymousSelfCheck_HeaderPresenceSurvivesRESTFront(t *testing.T) {
 	for _, value := range []string{"", "Bearer ", "Other credential"} {
 		md := metadataThroughMux(t, newMux(), map[string]string{"Authorization": value})

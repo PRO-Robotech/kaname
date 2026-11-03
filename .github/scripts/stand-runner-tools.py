@@ -141,8 +141,8 @@ def manifest(root):
 
 def installer(data, work, root):
     quote = shlex.quote
-    # Shipped fallbacks must not shadow the exact provider just bootstrapped.
-    # Keep them discoverable only after the provider/system paths.
+    # Поставленные запасные файлы не должны затенять только что подготовленного точного поставщика.
+    # Оставляем их обнаруживаемыми только после путей поставщика/системы.
     lines = ["set -uo pipefail", f'export PATH="$(go env GOPATH)/bin:$PATH:{quote(str(work / "bin"))}"',
              f"mkdir -p {quote(str(work / 'python-tools'))} || return 1",
              f"export PYTHONPATH={quote(str(work / 'python-tools'))}${{PYTHONPATH:+:$PYTHONPATH}}"]
@@ -205,8 +205,8 @@ def observe(data, work):
         if actual != expected:
             raise ValueError(f"apt package version disagrees: {name}: {actual} != {expected}")
         result["packages"][name] = actual
-    # A distribution package pin is not the executable's version protocol:
-    # jq's pinned Ubuntu 1.7.1 package reports jq-1.7 in the retained native failure.
+    # Пин пакета дистрибутива не равен протоколу версии исполняемого файла:
+    # закреплённый пакет Ubuntu jq 1.7.1 сообщает jq-1.7 в сохранённом нативном отказе.
     versions = {"go": pin("go"), "node": pin("node"), "helm": pin("helm"),
                 "kubectl": pin("kubectl"), "docker": pin("docker"), **data["system_cli"]}
     for entry in data["install"]:
@@ -240,8 +240,8 @@ def observe(data, work):
             match = re.search(r"(?<![0-9.])v?(\d+\.\d+(?:\.\d+)?)", output)
             actual = match[1] if match else output.lstrip("v")
         expected = pin("npm") if name == "npm" else versions.get(name)
-        # go install commonly embeds '(devel)' in version output. Build metadata
-        # below is the canonical version authority for these module commands.
+        # go install часто встраивает '(devel)' в вывод версии. Метаданные сборки
+        # ниже — канонический источник версии этих модульных команд.
         go_entry = next((e for e in data["install"] if e["kind"] == "go" and e["name"] == name), None)
         if go_entry:
             module, expected_mod = go_entry["spec"].rsplit("@", 1)
@@ -257,7 +257,7 @@ def observe(data, work):
             "source_steps": sources, "declared_version_equality": "verified"}
         if go_entry:
             result["tools"][name]["go_build_metadata"] = metadata
-    # Functional stdlib/ABI probes include modules omitted by single-ELF shipping.
+    # Функциональные пробы stdlib/ABI включают модули, пропущенные при поставке одного ELF.
     import lzma, sqlite3, venv, hashlib as hash_probe
     if ".".join(map(str, sys.version_info[:3])) != data["system_cli"]["python3"]:
         raise ValueError("Python runtime disagrees with apt provider")
