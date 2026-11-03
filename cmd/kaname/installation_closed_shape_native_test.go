@@ -209,6 +209,9 @@ func rid12World(t *testing.T, in rid12NativeInput, consumer rid12LivePublicConsu
 		out.After = ridReadWholeDelivery(t, f)
 		ridRequireWholeDeliveryUnchanged(t, before, out.After)
 		require.Equal(t, ops, rid08GDOperations(t, f))
+		if consumer != nil {
+			consumer(t, f, in, "refusal-before-restore")
+		}
 		p, err := f.session.StartBase(f.given.ctx)
 		require.NoError(t, err)
 		require.NoError(t, p.OwnsListeners(installruntime.DefaultNativePorts().All()...))
