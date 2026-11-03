@@ -340,6 +340,13 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	return ridRunNewmanPhaseMode(t, f, stem, caseID, label, variables, "")
 }
 func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseID, label string, variables map[string]any, probe string) ridNewmanReceipt {
+	return ridRunNewmanPhaseModeBudget(t, f, stem, caseID, label, variables, probe, nil)
+}
+func ridRunNewmanPhaseBudget(t *testing.T, f *installationNativeWorld, stem, caseID, label string, variables map[string]any, budget context.Context) ridNewmanReceipt {
+	require.True(t, stem == "registry-installation-rid06" && (caseID == "registry-installation-rid06-S1-REVOKE-ACT" || caseID == "registry-installation-rid06-S2-REVOKE-ACT"), "budgeted Newman admission requires exact RID06 Revoke case")
+	return ridRunNewmanPhaseModeBudget(t, f, stem, caseID, label, variables, "", budget)
+}
+func ridRunNewmanPhaseModeBudget(t *testing.T, f *installationNativeWorld, stem, caseID, label string, variables map[string]any, probe string, budget context.Context) ridNewmanReceipt {
 	require.Contains(t, []string{"", "normal-permit", "reject-missing-permit", "node-kill", "group-kill"}, probe)
 
 	t.Helper()
@@ -352,7 +359,14 @@ func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseI
 	node := os.Getenv("KANAME_RID_NODE_BINARY")
 	module := os.Getenv("KANAME_RID_NEWMAN_MODULE")
 	require.True(t, filepath.IsAbs(node) && filepath.IsAbs(module), "explicit immutable Newman tool inputs required")
+
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	f.renewOperator(t, f.given.ctx)
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	variables["jwtRIDOperator"] = f.operator.Bearer()
 	bearers, err := ridNewmanClientSecrets(stem, caseID, variables)
 	require.NoError(t, err)
@@ -385,6 +399,10 @@ func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseI
 	payload, err := json.Marshal(map[string]any{"ownRestBaseUrl": f.wire.PublicURL, "variables": variables, "runId": runID, "testExecutableSHA256": executableSHA, "expectedIdentities": expected, "requestPolicy": policy})
 	require.NoError(t, err)
 	require.LessOrEqual(t, len(payload), 1<<20)
+
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	c := startRIDInstallationChild(t, f, "newman-"+label, in, f.session.Environment, ridNewmanInputEnv, "TestRIDNewmanOwnedPublicChild", "3m")
 	// Parent creates both mandatory streams and installs the fallback auditor
 	// BEFORE control-payload admission can create any Node process.
@@ -421,22 +439,57 @@ func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseI
 	ctx, cancel := context.WithTimeout(f.given.ctx, 120*time.Second)
 	defer cancel()
 	ridNewmanAwait(t, c, ctx, "newman-input")
-	require.NoError(t, c.control.SetWriteDeadline(time.Now().Add(15*time.Second)))
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
+	if budget == nil {
+		require.NoError(t, c.control.SetWriteDeadline(time.Now().Add(15*time.Second)))
+	} else {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	// Capture each actual secret before any subsequent fallible step or Node
 	// admission. FD5 is already anonymous/unlinked; no inventory pathname exists.
+
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	require.NoError(t, ridNewmanRecordBearers(c.secretInventory, bearers))
 	keyBytes, err := os.ReadFile(in.Key)
 	require.NoError(t, err)
 	actualKey = string(keyBytes)
 	require.NoError(t, json.NewEncoder(c.secretInventory).Encode([]string{actualKey, bearers[0]}))
+
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	admitted = true
 	rid08Write(t, dir, "parent-admission", map[string]any{"ownedGroup": c.cmd.Process.Pid, "goStarttime": c.start, "nodeSHA256": in.NodeSHA, "runnerSHA256": in.ScriptSHA, "toolTreeSHA256": in.TreeSHA})
-	c.release(t, string(payload))
+	if budget == nil {
+		c.release(t, string(payload))
+	} else {
+		_, writeErr := ridNewmanBudgetWrite(budget, c.control, string(payload), 15*time.Second)
+		require.NoError(t, writeErr)
+	}
 	ridNewmanAwait(t, c, ctx, "newman-node-armed")
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	ridNewmanParentObserveNode(t, c, in)
-	require.NoError(t, c.control.SetWriteDeadline(time.Now().Add(10*time.Second)))
-	c.release(t, "admit-owned-node")
+	if budget == nil {
+		require.NoError(t, c.control.SetWriteDeadline(time.Now().Add(10*time.Second)))
+	} else {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
+	if budget == nil {
+		c.release(t, "admit-owned-node")
+	} else {
+		_, writeErr := ridNewmanBudgetWrite(budget, c.control, "admit-owned-node", 10*time.Second)
+		require.NoError(t, writeErr)
+	}
 	ridNewmanAwait(t, c, ctx, "newman-node-input-validated")
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	ridNewmanParentObserveNodeStage(t, c, in, true)
 	if probe == "group-kill" {
 		require.NoError(t, c.kill())
@@ -457,8 +510,17 @@ func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseI
 	if probe == "node-kill" {
 		ridNewmanKillExactNode(t, c, in)
 	}
-	require.NoError(t, c.control.SetWriteDeadline(time.Now().Add(10*time.Second)))
-	c.release(t, ridNewmanPermitMessage(probe))
+	if budget == nil {
+		require.NoError(t, c.control.SetWriteDeadline(time.Now().Add(10*time.Second)))
+	} else {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
+	if budget == nil {
+		c.release(t, ridNewmanPermitMessage(probe))
+	} else {
+		_, writeErr := ridNewmanBudgetWrite(budget, c.control, ridNewmanPermitMessage(probe), 10*time.Second)
+		require.NoError(t, writeErr)
+	}
 	if probe == "node-kill" {
 		select {
 		case <-c.exited:
@@ -474,6 +536,9 @@ func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseI
 	}
 	if probe == "reject-missing-permit" {
 		ridNewmanAwait(t, c, ctx, "newman-probe-finished")
+		if budget != nil {
+			require.NoError(t, ridNewmanBudgetCheck(budget))
+		}
 		c.wait(t, false)
 		ridNewmanAssertNodeTerminal(t, c, false)
 		require.NotNil(t, auditResult)
@@ -482,7 +547,18 @@ func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseI
 		return ridNewmanReceipt{}
 	}
 	ridNewmanAwait(t, c, ctx, "newman-finished")
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	c.seenEvent = true
+	if budget != nil {
+		select {
+		case <-c.exited:
+		case <-budget.Done():
+			t.Fatal("Newman observation budget expired before child reap")
+		}
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	c.wait(t, false)
 	raw, err := os.ReadFile(filepath.Join(c.dir, "newman", "stdout"))
 	require.NoError(t, err)
@@ -493,10 +569,18 @@ func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseI
 	require.NoError(t, observationErr)
 	receipt.RID03ActGetObservation = observation
 	require.True(t, receipt.OK)
+
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
+	}
 	if probe == "" {
 		rid08Write(t, f.session.Root, "newman-"+label+"-accepted", receipt)
 	} else {
 		rid08Write(t, f.session.Root, label+"-protocol-result", map[string]any{"detector": "NORMAL_PERMIT_ACTUAL_HTTP", "receipt": receipt, "publicAcceptance": false})
+	}
+
+	if budget != nil {
+		require.NoError(t, ridNewmanBudgetCheck(budget))
 	}
 	return receipt
 }
