@@ -111,7 +111,7 @@ func chainExemptFromTheReadFloor() []chainGate {
 // С пределом хопа методов под полом читающих хоп не достигает вовсе: их нет
 // в пересечении перечней профилей. Поэтому способность утверждения об
 // отношениях упасть доказывается миром, где предел снят, — иначе освобождение
-// от пола было бы невидимо ему by construction, а не потому, что оно держит.
+// от пола было бы невидимо ему по построению, а не потому, что оно держит.
 func chainWithoutTheHopLimitAndExemptFromTheReadFloor() []chainGate {
 	gates := chainExemptFromTheReadFloor()
 	inner := gates[0].decide

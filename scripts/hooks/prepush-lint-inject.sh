@@ -23,7 +23,7 @@ done
 printf 'fixture-input: %s\n' "${inputs[@]}"
 echo "fixture-input: рассмотрено ${#inputs[@]} исходных файлов"
 # Тот же изолированный способ identity, что у существующих budget/classify проб.
-# Пользовательский global и HOME не меняются; branch guard читает этот файл.
+# Пользовательские global и HOME не меняются; страж веток читает этот файл.
 export GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = probe\n\temail = probe@example.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
 mkdir -p "$work/repo/scripts/hooks" "$work/repo/.github/scripts" "$work/repo/.github"
@@ -96,7 +96,7 @@ git checkout -q --detach "$base"
 git init -q --bare "$work/remote.git"
 git remote add origin "$work/remote.git"
 bash scripts/hooks/install.sh install >/dev/null
-# Настоящий branch push проходит неизменённый страж с изолированной identity.
+# Настоящая отправка ветки проходит неизменённый страж с изолированной личностью.
 # Обе фикстурные ревизии созданы до установки хуков, которые не отключаются.
 bash scripts/hooks/install.sh check
 if git push origin HEAD:refs/heads/1 > "$work/twin.log" 2>&1; then
@@ -164,7 +164,7 @@ ref_push_check() {
 }
 
 # Прямой RED независимого опыта: хороший checkout не подменяет плохой ref.
-# Это настоящие branch pushes; main допускает корректные commits задачи #1.
+# Это настоящие отправки веток; main допускает корректные коммиты задачи #1.
 git checkout -q --detach "$base"
 git update-ref refs/remotes/origin/main "$base"
 ref_push_check nonhead-twin green 'зелёное — исполнено 7 из 7' "$base"
@@ -245,7 +245,7 @@ printf 'refs/heads/2 0000000000000000000000000000000000000000 refs/heads/2 %s\n'
 check_result delete-ref green 'содержимого не уезжает — проверять нечего' "$rc" "$work/delete-ref.log"
 
 # Два РАЗНЫХ tips меняют разные пакеты. Каждый проверяется по своим bytes;
-# дефект A обязан сохраниться при любом порядке live refs.
+# дефект A обязан сохраниться при любом порядке живых ссылок.
 mkdir uniona unionb
 cat > uniona/a.go <<'GO'
 package uniona

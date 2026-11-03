@@ -860,7 +860,7 @@ CASES.append(Case(
 # ---------------------------------------------------------------------------
 # RBACSUBJ-EXPAND-GROUP-OK: ExpandAccess resolves a group-subject userset
 # into CONCRETE principals (the group's members). Self-contained: create a REAL
-# group, add REAL user members (userAAAId, groupMemberAUserId — the group_members trigger
+# группу, добавляем НАСТОЯЩИХ пользователей (userAAAId, groupMemberAUserId — триггер group_members
 # requires existing users), bind a role that grants account#viewer to that group on
 # the account, then ExpandAccess (objectType=account, objectId=accountAId,
 # relation=viewer) must list the concrete member principals — NOT just the group.
@@ -881,7 +881,7 @@ CASES.append(Case(
 # `account#viewer`. So a group member NEVER resolved `account:accountAId#viewer`
 # from it (correctly — the role doesn't grant the account tier). The account owner
 # (userAAAId) still appeared via the ownership/admin path, masking the mismatch and
-# making it look like only groupMemberAUserId "failed"; in fact the case-setup asked the
+# создавая видимость «отказа» только у groupMemberAUserId; на деле подготовка кейса запросила
 # wrong object/relation for the role under test. The product is correct: a
 # compute-scoped grant must not grant account-viewer. Fixed by binding ROLE_VIEW,
 # the role that actually grants the queried `account#viewer` relation. This is a
@@ -1047,8 +1047,8 @@ CASES.append(Case(
 # member-tuple flow into OpenFGA so the Check below converges allowed=true.
 #
 # MEMBER + ROLE CHOICE — the probe must be DECISIVE, not satisfiable by another
-# path. It checks `Check(user:groupMemberAUserId, viewer, account:accountAId)`:
-#   - groupMemberAUserId has ACTIVE account-A membership, with NO independent grant on
+# путь. Он проверяет `Check(user:groupMemberAUserId, viewer, account:accountAId)`:
+#   - у groupMemberAUserId есть членство ACTIVE в аккаунте A, БЕЗ независимой выдачи на
 #     account A — so it can resolve `account:accountAId#viewer` ONLY through the
 #     group→member→binding userset. (A prior revision used userAAAId, the account-A
 #     OWNER; that Check is true via ownership regardless of the group binding — a
@@ -1089,7 +1089,7 @@ CASES.append(Case(
             ],
         ),
         poll_op_done("gmGrantGrpOpId", out_id_var="gmGrantGroupId"),
-        # Add a REAL user member (trigger enforces existence). groupMemberAUserId has NO
+        # Добавляем НАСТОЯЩЕГО пользователя (триггер проверяет существование). У groupMemberAUserId НЕТ
         # independent grant on account A, so the Check below can only pass through
         # the group→member→binding userset — a decisive probe, not ownership.
         # The admin's `v_update` on the freshly-created group OBJECT (action

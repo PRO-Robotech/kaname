@@ -367,7 +367,7 @@ func TestIAMDirectForward_06_DeleteStaleGuard_ProjectLabelFlip(t *testing.T) {
 // COALESCE-through-project join) — so routing the create-path to forward cannot over-/
 // under-grant vs the full recompute.
 //
-// The account-owner (`*.*`, ярус admin — от подстановки `*`, kaname#1035) materializes on the project-scoped role
+// Владелец аккаунта (`*.*`, ярус admin — от подстановки `*`, kaname#1035) материализуется на роли в области проекта
 // too: the COALESCE join resolves the project's account, IsContainedIn(account) accepts it.
 func TestIAMDirectForward_07_Role_ForwardEqualsFull_AccountAndProjectScoped(t *testing.T) {
 	if testing.Short() {

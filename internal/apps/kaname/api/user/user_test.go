@@ -86,8 +86,8 @@ func TestDeleteUser_Sync_InvalidID(t *testing.T) {
 // ниже и по-прежнему падает.
 
 // TestBootstrapPersonalResources_SECL_EmitsClusterParentTuplesInTx — 1.4-10b
-// (S2-iam): the bootstrap body (`BootstrapPersonalResourcesTx`, the one that
-// serves registration and invite activation) that provisions a NEW account +
+// (S2-iam): тело bootstrap (`BootstrapPersonalResourcesTx`, которое
+// обслуживает регистрацию и активацию приглашения) и создаёт НОВЫЙ аккаунт и
 // default project must co-commit the WHOLE bootstrap-graph (owner self-grant +
 // admin self-grants + hierarchy + SEC-L cluster parent-pointer tuples) as
 // fga_outbox INTENTS in the SAME bootstrap-tx — NOT best-effort post-commit

@@ -356,10 +356,10 @@ CASES.append(Case(
 ))
 
 
-# kaname#1011: a separate normal delegation admits GROUP. The original D1 axes and
-# GD-E1..E5 stay unchanged. Both twins use the same role/target/scope and caller;
-# only the group's membership differs. The delegate belongs to A because the
-# public AddMember contract requires the member and group to share an account.
+# kaname#1011: отдельное обычное делегирование допускает GROUP. Исходные оси D1 и
+# GD-E1..E5 не меняются. Оба двойника используют одинаковые роль/цель/область и вызывающего;
+# различается только состав группы. Делегат принадлежит A, поскольку
+# публичный контракт AddMember требует одного аккаунта у участника и группы.
 def _group_self_grant_twin(contains_delegate):
     prefix = "gdgroupdeny" if contains_delegate else "gdgroupallow"
     delegation_var, group_var, binding_var = prefix + "Delegation", prefix + "Group", prefix + "Binding"

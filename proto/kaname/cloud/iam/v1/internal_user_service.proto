@@ -11,11 +11,11 @@ import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
 
-// InternalUserService — cluster-internal user API (port 9091).
+// InternalUserService — внутренний пользовательский API кластера (порт 9091).
 //
 // НЕ публикуется на external TLS listener.
 //
-// Transport: `Get` — регистрируется в api-gateway internal mux (нужен
+// Транспорт: `Get` — регистрируется во внутреннем мультиплексоре api-gateway (нужен
 // interceptor'у).
 service InternalUserService {
   // Глагола заведения личности по удостоверению внешнего поставщика здесь

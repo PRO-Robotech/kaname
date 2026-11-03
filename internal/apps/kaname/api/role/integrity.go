@@ -61,7 +61,7 @@ func attachIntegrity(ctx context.Context, rd kanamerepo.Reader, cat catalog.Sour
 		declared[r.ID] = len(segs)
 		for _, s := range segs {
 			// Контейнерное действие (kaname#1003, Р2а) проекции «роль → тип ×
-			// глагол» не даёт by construction: его право — отношение на родителе,
+			// глагол» не даёт по построению: его право — отношение на родителе,
 			// и производит его каталог (`catalog_verb.container_relation`), а не
 			// строка `role_verb`. Сегмент, чьё действие каталог объявляет
 			// контейнерным, разрешён самим объявлением; спроси его у `role_verb` —

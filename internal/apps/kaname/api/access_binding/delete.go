@@ -284,7 +284,7 @@ func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.A
 	// (Role.Update) between grant and revoke; re-deriving would emit
 	// EmitRelationDelete on the NEW tuple set and orphan the originally-granted
 	// ones (standing privilege). access_binding_emitted_tuples records exactly
-	// what THIS binding emitted at grant / last reconcile. Реестр читается В ЭТОЙ
+	// то, что ЭТА привязка выдала при создании / последнем сведении. Реестр читается В ЭТОЙ
 	// пишущей транзакции ДО удаления выдачи: каскад внешнего ключа снимает его
 	// строки вместе с ней.
 	stored, err := w.AccessBindings().SelectEmittedTuples(ctx, id)
