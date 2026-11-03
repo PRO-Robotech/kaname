@@ -196,7 +196,7 @@ func ridNativeExpiredKeyTimeTwin(t *testing.T) {
 	require.ErrorIs(t, cleanupErr, failed.ExitError())
 	if public != nil {
 		rid01RequireRefusalBeforeRestore(t, public)
-		rid01RestorePublicListeners(t, f, in)
+		rid01RestorePublicListeners(t, f, in, public)
 		rid01NewmanPhase(t, public, "EXPIRED-KEY-REFUSAL", nil)
 	}
 }

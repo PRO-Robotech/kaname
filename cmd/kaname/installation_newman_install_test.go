@@ -29,19 +29,22 @@ type rid01OperationColumnProof struct {
 }
 
 type rid01NewmanSnapshot struct {
+	OperationRawRows      map[string]rid09PrimaryRow                      `json:"-"`
 	Projection            rid09NewmanProjection                           `json:"projection"`
 	Whole                 ridWholeDeliverySnapshot                        `json:"-"`
 	Operations            map[string]string                               `json:"-"`
 	OperationColumnHashes map[string]map[string]rid01OperationColumnProof `json:"-"`
 }
 type rid01PublicContext struct {
-	f                    *installationNativeWorld
-	Kind                 string
-	Phases               []string
-	Calls                int
-	Initial              rid01NewmanSnapshot
-	Previous             *rid01NewmanSnapshot
-	RefusalBeforeRestore *rid01NewmanSnapshot
+	RestoreRedactionProfile *rid01KeyRedactionProfile
+	RestoreExtraConfig      map[string]any
+	f                       *installationNativeWorld
+	Kind                    string
+	Phases                  []string
+	Calls                   int
+	Initial                 rid01NewmanSnapshot
+	Previous                *rid01NewmanSnapshot
+	RefusalBeforeRestore    *rid01NewmanSnapshot
 }
 type rid01PublicExpectation struct {
 	CaseID             string                 `json:"caseId"`
@@ -76,11 +79,13 @@ func rid01CaptureSnapshot(t *testing.T, ctx context.Context, f *installationNati
 	require.NoError(t, tx.QueryRow(ctx, "SELECT pg_is_in_recovery()").Scan(&recovery))
 	require.False(t, recovery)
 	ops := map[string]string{}
+	operationRawRows := map[string]rid09PrimaryRow{}
 	columns := map[string]map[string]rid01OperationColumnProof{}
 	for _, row := range rid09PrimaryRows(t, ctx, tx, "operations") {
 		id := rid09PrimaryValue[string](t, row, "id")
 		require.NotContains(t, ops, id)
 		ops[id] = ridWholeDigest(t, row)
+		operationRawRows[id] = row
 		columns[id] = map[string]rid01OperationColumnProof{}
 		for name, value := range row {
 			// A primary cell is json.RawMessage: SQL NULL is the literal
@@ -112,7 +117,7 @@ func rid01CaptureSnapshot(t *testing.T, ctx context.Context, f *installationNati
 	require.NoError(t, tx.Commit(ctx))
 	after := rid09ReadNewmanProjectionContext(t, ctx, f)
 	require.NoError(t, ctx.Err(), "aggregate RID01 snapshot budget expired before return")
-	return rid01NewmanSnapshot{Projection: p, Whole: whole, Operations: ops, OperationColumnHashes: columns}, reflect.DeepEqual(p, after)
+	return rid01NewmanSnapshot{Projection: p, Whole: whole, Operations: ops, OperationColumnHashes: columns, OperationRawRows: operationRawRows}, reflect.DeepEqual(p, after)
 }
 func rid01StableSnapshots(a, b rid01NewmanSnapshot) bool {
 	return reflect.DeepEqual(a.Projection, b.Projection) && reflect.DeepEqual(a.Whole.Delivery, b.Whole.Delivery) && reflect.DeepEqual(a.Whole.OwnCeilings, b.Whole.OwnCeilings) && reflect.DeepEqual(a.Operations, b.Operations) && reflect.DeepEqual(a.Whole.Bookkeeping["operations"], b.Whole.Bookkeeping["operations"])
@@ -215,7 +220,15 @@ func rid01NewmanPhase(t *testing.T, h *rid01PublicContext, phase string, variabl
 	if phase == "RENEWAL-AFTER" {
 		delta = 1
 	}
-	rid01RequireOperations(t, f, previous, snapshot, delta)
+	rid01DiagnoseOperationHistory(t, f, previous, snapshot, delta)
+	var redaction *rid01KeyRedactionProof
+	if phase == "EXPIRED-KEY-REFUSAL" {
+		redaction = rid01AcceptedKeyRedaction(t, h, previous, snapshot)
+	}
+	rid01RequireOperations(t, f, previous, snapshot, delta, redaction)
+	if redaction != nil {
+		rid08Write(t, f.session.Root, "rid01-accepted-typed-key-redaction", redaction)
+	}
 	if variables == nil {
 		variables = map[string]any{}
 	}
@@ -259,7 +272,7 @@ func rid01RequireReentryPreserved(t *testing.T, before, after rid01NewmanSnapsho
 	}
 }
 
-func rid01RequireOperations(t *testing.T, f *installationNativeWorld, before, after rid01NewmanSnapshot, delta int) {
+func rid01DiagnoseOperationHistory(t *testing.T, f *installationNativeWorld, before, after rid01NewmanSnapshot, delta int) {
 	t.Helper()
 	// Diagnose every changed historical row BEFORE any existing assertion can
 	// stop this phase. Values and credential response bodies never leave memory;
@@ -295,9 +308,17 @@ func rid01RequireOperations(t *testing.T, f *installationNativeWorld, before, af
 	if len(changed) != 0 {
 		rid08Write(t, f.session.Root, "rid01-operation-history-diagnostic", map[string]any{"state": "CHANGED_HISTORICAL_OPERATIONS_NOT_ACCEPTED", "changed": changed, "beforeCount": len(before.Operations), "afterCount": len(after.Operations), "expectedNewCount": delta, "wholeDoDAccepted": false})
 	}
+}
+
+func rid01RequireOperations(t *testing.T, f *installationNativeWorld, before, after rid01NewmanSnapshot, delta int, redaction *rid01KeyRedactionProof) {
+	t.Helper()
 	require.Len(t, after.Operations, len(before.Operations)+delta)
 	for id, row := range before.Operations {
-		require.Equal(t, row, after.Operations[id], "all existing full normal Operation rows exact")
+		if row == after.Operations[id] {
+			continue
+		}
+		accepted := redaction != nil && delta == 0 && redaction.CaseID == rid01KeyRedactionCase && redaction.OperationID == f.creator.KeyOperation.ID && id == redaction.OperationID && row == redaction.BeforeRowSHA256 && after.Operations[id] == redaction.AfterRowSHA256
+		require.True(t, accepted, "all historical Operation rows exact except independently proven phase-scoped known-key typed redaction")
 	}
 	ctx, cancel := context.WithTimeout(f.given.ctx, 30*time.Second)
 	defer cancel()
@@ -516,7 +537,7 @@ func rid01RequireRefusalBeforeRestore(t *testing.T, h *rid01PublicContext) {
 // All native expired-key outcome/cleanup assertions have completed. Restore the
 // same delivered catalog/seed on the same DB using normal serve with NO GD stage.
 // The VALID-KEY-TWIN primary snapshot remains the oracle for the refusal phase.
-func rid01RestorePublicListeners(t *testing.T, f *installationNativeWorld, in installruntime.DeliveryInput) {
+func rid01RestorePublicListeners(t *testing.T, f *installationNativeWorld, in installruntime.DeliveryInput, public *rid01PublicContext) {
 	t.Helper()
 	var doc map[string]any
 	require.NoError(t, yaml.Unmarshal(in.Manifests.First, &doc))
@@ -526,6 +547,7 @@ func rid01RestorePublicListeners(t *testing.T, f *installationNativeWorld, in in
 	raw, err := yaml.Marshal(doc)
 	require.NoError(t, err)
 	in.Manifests.First = raw
+	rid01SealRestoreProfile(t, f, in, public)
 	process, err := f.session.StartDelivery(f.given.ctx, in)
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(f.given.ctx, 60*time.Second)
