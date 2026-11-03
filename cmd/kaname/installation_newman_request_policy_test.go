@@ -102,6 +102,9 @@ func ridNewmanIssuanceCase(caseID string) (string, string, bool) {
 	if rid05TokenCase(caseID) {
 		return "rid05IssuanceOrigin", "old-standing-key-token-refusal", true
 	}
+	if rid11TokenCase(caseID) {
+		return "rid11IssuanceOrigin", "input-standing-key-token-refusal", true
+	}
 	return "", "", false
 }
 func ridNewmanValidateRequestPolicy(caseID, public string, p *ridNewmanRequestPolicy, variables map[string]any) error {
@@ -113,11 +116,12 @@ func ridNewmanValidateRequestPolicy(caseID, public string, p *ridNewmanRequestPo
 	raw, has := variables[variable]
 	_, oldOrigin := variables["rid01IssuanceOrigin"]
 	_, deletedOrigin := variables["rid05IssuanceOrigin"]
-	if (oldOrigin && variable != "rid01IssuanceOrigin") || (deletedOrigin && variable != "rid05IssuanceOrigin") {
+	_, inputOrigin := variables["rid11IssuanceOrigin"]
+	if (oldOrigin && variable != "rid01IssuanceOrigin") || (deletedOrigin && variable != "rid05IssuanceOrigin") || (inputOrigin && variable != "rid11IssuanceOrigin") {
 		return errors.New("unexpected issuance policy")
 	}
 	if !tokenCase {
-		if p != nil || has || oldOrigin || deletedOrigin {
+		if p != nil || has || oldOrigin || deletedOrigin || inputOrigin {
 			return errors.New("unexpected issuance policy")
 		}
 		return nil
