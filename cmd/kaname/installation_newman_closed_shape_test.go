@@ -56,9 +56,14 @@ func rid12ReadNewmanSnapshot(t *testing.T, f *installationNativeWorld) rid12Newm
 	t.Helper()
 	ctx, cancel := context.WithTimeout(f.given.ctx, 30*time.Second)
 	defer cancel()
+	require.NoError(t, ctx.Err(), "aggregate RID12 snapshot deadline before read")
 	p := rid09ReadNewmanProjectionContext(t, ctx, f)
-	whole := ridReadWholeDelivery(t, f)
+	readWorld, readGiven := *f, *f.given
+	readGiven.ctx = ctx
+	readWorld.given = &readGiven
+	whole := ridReadWholeDelivery(t, &readWorld)
 	require.Equal(t, p, rid09ReadNewmanProjectionContext(t, ctx, f), "fixture NOT_ACCEPTED: full primary projection moved while composing whole raw history")
+	require.NoError(t, ctx.Err(), "aggregate RID12 snapshot deadline before success return")
 	return rid12NewmanSnapshot{Projection: p, Whole: whole}
 }
 func rid12RequireNewmanStable(t *testing.T, a, b rid12NewmanSnapshot) {
@@ -85,12 +90,33 @@ func rid12DefaultNewmanConsumer(t *testing.T, f *installationNativeWorld, in rid
 		return nil
 	}
 	calls := 0
+	refusalBeforeRestore := false
 	var before, previous *rid12NewmanSnapshot
 	t.Cleanup(func() { require.Equal(t, len(phases), calls, "all exact same-world RID12 phases mandatory") })
 	return func(t *testing.T, got *installationNativeWorld, current rid12NativeInput, phase string) {
 		t.Helper()
 		require.Same(t, f, got)
 		require.Equal(t, in, current)
+		if phase == "refusal-before-restore" {
+			// This is an offline primary checkpoint, not an extra public phase.
+			// The failed startup is terminal and reaped; ordinary base restoration
+			// has not run and therefore cannot repair or mask any rejected write.
+			require.True(t, in.Invalid)
+			require.Equal(t, 1, calls)
+			require.False(t, refusalBeforeRestore)
+			require.NotNil(t, before)
+			after := rid12ReadNewmanSnapshot(t, f)
+			require.Equal(t, before.Projection, after.Projection)
+			ridRequireWholeDeliveryUnchanged(t, before.Whole, after.Whole)
+			require.Equal(t, before.Whole.Bookkeeping["operations"], after.Whole.Bookkeeping["operations"], "rejected startup cannot add or rewrite Operations")
+			rid08Write(t, f.session.Root, "rid12-public-refusal-before-restore", map[string]any{
+				"beforeProjection": before.Projection, "afterProjection": after.Projection,
+				"beforeWhole": before.Whole, "afterWhole": after.Whole,
+				"failedStartupTerminalBeforeRestore": true, "wholeDoDAccepted": false,
+			})
+			refusalBeforeRestore = true
+			return
+		}
 		require.Less(t, calls, len(phases))
 		require.Equal(t, phases[calls], phase)
 		calls++
@@ -100,13 +126,25 @@ func rid12DefaultNewmanConsumer(t *testing.T, f *installationNativeWorld, in rid
 		if phase != "before" {
 			require.NotNil(t, before)
 			if in.Invalid {
+				require.True(t, refusalBeforeRestore, "complete rejected-startup primary state must be checked before normal base restoration")
 				require.Equal(t, before.Projection, e.Snapshot.Projection)
-				ridRequireWholeDeliveryUnchanged(t, before.Whole, e.Snapshot.Whole)
+				// Full raw no-write equality was checked at the actual failure
+				// boundary above. A later ordinary base startup reprojects its own
+				// catalog timestamps; it must not redefine that refusal boundary.
 			}
 			if phase == "after-reorder" {
 				require.NotNil(t, previous)
 				require.Equal(t, previous.Projection, e.Snapshot.Projection)
-				require.Equal(t, previous.Whole.Delivery, e.Snapshot.Whole.Delivery, "reorder preserves all raw IDs/createdAt/history")
+				// Reorder is an ordinary successful apply, not a read-only
+				// interval. Preserve the full public projection plus every raw
+				// GD/G history row; the native holder separately retains its full
+				// catalog/roles/SA/group/idempotence and exact Operation checks.
+				for table, rows := range previous.Whole.Delivery {
+					if table == "grant_delegations" || strings.HasPrefix(table, "access_binding") {
+						require.Contains(t, e.Snapshot.Whole.Delivery, table)
+						require.Equal(t, rows, e.Snapshot.Whole.Delivery[table], "reorder preserves complete raw GD/G identities, timestamps and history")
+					}
+				}
 			}
 		}
 		func() {
