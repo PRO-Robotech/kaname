@@ -2106,9 +2106,12 @@ func runServe(cfg config.Config) error {
 	// поднимала бы тревогу одинаково там, где арендатор получает отказ, и там,
 	// где перестаёт работать наша собственная проверка (kacho#1821).
 	ruleRefReseed := metricsReg.NewRuleRefReseedRecorder()
-	tasks = append(tasks, func() error {
+	startupSeedTask := func(startupCtx context.Context) error {
 		defer close(startupSeedDone)
-		if ores, oerr := orphanScopeSweeper.RunOnce(taskCtx); oerr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if ores, oerr := orphanScopeSweeper.RunOnce(startupCtx); oerr != nil {
 			logger.Warn("orphan-scope sweep failed (next boot will retry)",
 				slog.Any("err", oerr),
 				slog.Int("scopes_revoked", ores.ScopesRevoked),
@@ -2117,7 +2120,10 @@ func runServe(cfg config.Config) error {
 		// Перепись прохода по зеркалу печатается НА ЛЮБОМ исходе, включая чистый:
 		// «сирот ноль» обязано быть отличимо от «проход не состоялся», а строки
 		// журнала у этих двух случаев иначе одинаковы — их нет.
-		if mres, merr := orphanMirrorSweeper.RunOnce(taskCtx); merr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if mres, merr := orphanMirrorSweeper.RunOnce(startupCtx); merr != nil {
 			logger.Warn("orphan-mirror sweep failed (next boot will retry)",
 				slog.Any("err", merr), slog.String("census", mres.Census()))
 		} else if mres.Executed {
@@ -2128,7 +2134,10 @@ func runServe(cfg config.Config) error {
 		// включая чистый, и на чистом дереве проход ПРОХОДИТ, а не падает:
 		// проверка, падающая на достижении своей цели, толкает держать сироту
 		// ради зелёного.
-		if dres, derr := danglingProjectMirrorSweeper.RunOnce(taskCtx); derr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if dres, derr := danglingProjectMirrorSweeper.RunOnce(startupCtx); derr != nil {
 			logger.Warn("dangling-project-mirror sweep failed (next boot will retry)",
 				slog.Any("err", derr), slog.String("census", dres.Census()))
 		} else if dres.Executed {
@@ -2150,7 +2159,10 @@ func runServe(cfg config.Config) error {
 		// числа. Уровень выбирается по НЕРАЗРЕШИМОЙ части: снятое с преемником —
 		// объявленное свойство дерева, и жалоба на нём краснела бы после всякого
 		// законного снятия типа.
-		if drows, dscanned, derr := resource_mirror.Divergence(taskCtx, pool); derr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if drows, dscanned, derr := resource_mirror.Divergence(startupCtx, pool); derr != nil {
 			logger.Warn("resource-mirror divergence unread (next boot will retry)",
 				slog.Any("err", derr))
 		} else if census := resource_mirror.DivergenceCensus(drows, dscanned); len(
@@ -2160,7 +2172,10 @@ func runServe(cfg config.Config) error {
 		} else {
 			logger.Info("resource-mirror divergence: " + census)
 		}
-		if oerr := seed.BackfillOwnerBindings(taskCtx, pool); oerr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if oerr := seed.BackfillOwnerBindings(startupCtx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
 		}
 		// Страж расхождения литерала и строк каталога отработал РАНЬШЕ — в
@@ -2181,9 +2196,12 @@ func runServe(cfg config.Config) error {
 		// самолечащая, менять ограниченное отставание на полный отказ службы
 		// нельзя); структурная — системные роли есть, пересеяна ни одна —
 		// РОНЯЕТ старт, потому что «повтори позже» на ней есть ложь.
-		verbs, verr := seed.ReseedSystemRoleVerbs(taskCtx, kanameRepo, pool,
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		verbs, verr := seed.ReseedSystemRoleVerbs(startupCtx, kanameRepo, pool,
 			catalogSnapshot.Facts(), roleVerbReseed)
-		if verr != nil {
+		if verr != nil && !errors.Is(verr, context.Canceled) && !errors.Is(verr, context.DeadlineExceeded) {
 			logger.Error("пересчёт проекции глаголов роли отказал",
 				slog.Any("err", verr),
 				slog.Int("roles_examined", verbs.Examined),
@@ -2196,7 +2214,11 @@ func runServe(cfg config.Config) error {
 			slog.Int("roles_examined", verbs.Examined),
 			slog.Int("roles_reseeded", verbs.Reseeded),
 			slog.Int("roles_failed", verbs.Failed),
-			slog.Int("pairs", verbs.Pairs))
+			slog.Int("pairs", verbs.Pairs),
+			slog.Bool("completed", verbs.Completed))
+		if errors.Is(verr, context.Canceled) || errors.Is(verr, context.DeadlineExceeded) {
+			return verr
+		}
 		if verbs.Structural() {
 			return fmt.Errorf("пересчёт проекции глаголов роли: осмотрено %d системных ролей, "+
 				"пересеяно 0 — повтор даст то же самое, и цепь вердикта собирает ответ "+
@@ -2220,8 +2242,11 @@ func runServe(cfg config.Config) error {
 		// ненаписанного стража значило бы менять ограниченную потерю проверки на
 		// полный отказ. Поэтому здесь `Error` плюс счётчик плюс перепись — и
 		// структурная полоса НАЗВАНА в тексте, а не проглочена.
-		refs, rerr := seed.ReseedSystemRoleRuleRefs(taskCtx, kanameRepo, pool, ruleRefReseed)
-		if rerr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		refs, rerr := seed.ReseedSystemRoleRuleRefs(startupCtx, kanameRepo, pool, ruleRefReseed)
+		if rerr != nil && !errors.Is(rerr, context.Canceled) && !errors.Is(rerr, context.DeadlineExceeded) {
 			logger.Error("пересчёт проекции сегментов правила отказал",
 				slog.Any("err", rerr),
 				slog.Bool("structural", refs.Structural()),
@@ -2235,15 +2260,25 @@ func runServe(cfg config.Config) error {
 			slog.Int("roles_examined", refs.Examined),
 			slog.Int("roles_reseeded", refs.Reseeded),
 			slog.Int("roles_failed", refs.Failed),
-			slog.Int("refs", refs.Refs))
+			slog.Int("refs", refs.Refs),
+			slog.Bool("completed", refs.Completed))
+		if errors.Is(rerr, context.Canceled) || errors.Is(rerr, context.DeadlineExceeded) {
+			return rerr
+		}
 		// Перепись встроенного доступа. Системные выдачи можно ОТОЗВАТЬ — это и есть
 		// предмет kacho#893/#895, — поэтому их отсутствие обязано быть видно оператору, а
 		// не выглядеть поломкой продукта.
-		seed.LogSystemGrantCensus(taskCtx, pool, logger.With(slog.String("component", "system_grants")))
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		seed.LogSystemGrantCensus(startupCtx, pool, logger.With(slog.String("component", "system_grants")))
 		// Перепись прохода печатает сам проход, на любом исходе. Отказ старт не
 		// роняет: отказавшие выдачи повторяет такт `RunEvery` (задача выше), без
 		// перезапуска процесса.
-		res, berr := backfillRunner.RunOnce(taskCtx)
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		res, berr := backfillRunner.RunOnce(startupCtx)
 		if berr != nil {
 			logger.Error("сводящий проход по выдачам на старте свёл не все — повторит такт",
 				slog.Duration("interval", convergeWindows.Interval),
@@ -2252,7 +2287,10 @@ func runServe(cfg config.Config) error {
 				slog.Any("err", berr))
 		}
 		if res.Executed {
-			report, verr := verifyGate.Verify(taskCtx)
+			if err := startupCtx.Err(); err != nil {
+				return err
+			}
+			report, verr := verifyGate.Verify(startupCtx)
 			if verr != nil {
 				logger.Warn("p8 verify-gate: verify failed", slog.Any("err", verr))
 			} else {
@@ -2287,7 +2325,10 @@ func runServe(cfg config.Config) error {
 			// Отчёт о том, РАЗРЕШАЮТСЯ ли материализованные чтения (F-12 / VBC-19):
 			// настоящий Check по каждой тройке v_* активной выдачи. Именно отчёт:
 			// вызывающий журналирует вердикт и ничего не переключает (#119).
-			relReport, rerr := verifyGate.VerifyRelationSatisfiesAction(taskCtx)
+			if err := startupCtx.Err(); err != nil {
+				return err
+			}
+			relReport, rerr := verifyGate.VerifyRelationSatisfiesAction(startupCtx)
 			if rerr != nil {
 				logger.Warn("p8 verify-gate: relation-satisfies-action check failed", slog.Any("err", rerr))
 			} else {
@@ -2299,6 +2340,9 @@ func runServe(cfg config.Config) error {
 			}
 		}
 		return nil
+	}
+	tasks = append(tasks, func() error {
+		return superviseStartupTask(taskCtx, triggerShutdown, startupSeedTask)
 	})
 
 	// Пересчёт ОЧЕРЕДИ глаголов правил (kaname#878) — своя задача, а не шаг

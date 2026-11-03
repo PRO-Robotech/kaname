@@ -99,6 +99,8 @@ type RoleVerbReseedObserver interface {
 // после отката печаталось бы число, которого в базе нет, — ровно тот класс, ради
 // которого перепись и заводится.
 type RoleVerbReseedCensus struct {
+	// Completed — обход завершён; отменённая или непрочитанная перепись неполна.
+	Completed bool
 	// Examined — системных ролей с непустыми правилами прочитано.
 	Examined int
 	// Reseeded — ролей, чья транзакция закоммичена.
@@ -112,8 +114,9 @@ type RoleVerbReseedCensus struct {
 // Structural — полоса, на которой повтор даст то же самое: роли есть, пересеяна
 // ни одна. Пустое множество ролей структурной полосой НЕ является — это свежая
 // база, и роняя на ней старт, проверка краснела бы на достижении цели.
+// Незавершённый обход не доказывает структурный отказ даже при нуле успехов.
 func (c RoleVerbReseedCensus) Structural() bool {
-	return c.Examined > 0 && c.Reseeded == 0
+	return c.Completed && c.Examined > 0 && c.Reseeded == 0 && c.Failed == c.Examined
 }
 
 // ReseedSystemRoleVerbs пересчитывает проекцию глаголов КАЖДОЙ живой системной
@@ -143,21 +146,32 @@ func ReseedSystemRoleVerbs(
 	obs RoleVerbReseedObserver,
 ) (RoleVerbReseedCensus, error) {
 	var census RoleVerbReseedCensus
+	if err := ctx.Err(); err != nil {
+		return census, err
+	}
 
 	roles, err := listMaterializingSystemRoles(ctx, pool)
 	if err != nil {
-		return census, err
+		return census, errors.Join(err, ctx.Err())
 	}
 	census.Examined = len(roles)
 
 	var failures []error
 	for _, rr := range roles {
+		if err := ctx.Err(); err != nil {
+			return census, errors.Join(append(failures, err)...)
+		}
 		pairs, rerr := replaceRoleVerbsInOwnTx(ctx, repo, cat, rr.id)
 		if rerr != nil {
 			census.Failed++
 			failures = append(failures, rerr)
 			if obs != nil {
 				obs.IncRoleVerbReseed(RoleVerbReseedOutcomeFailed)
+			}
+			// Ошибка транзакционного helper уже отображена для RPC. Отмену
+			// сохраняет сама перепись, пока обход ещё не завершён.
+			if err := ctx.Err(); err != nil {
+				return census, errors.Join(append(failures, err)...)
 			}
 			continue
 		}
@@ -167,6 +181,7 @@ func ReseedSystemRoleVerbs(
 			obs.IncRoleVerbReseed(RoleVerbReseedOutcomeReseeded)
 		}
 	}
+	census.Completed = true
 	if len(failures) == 0 {
 		return census, nil
 	}
