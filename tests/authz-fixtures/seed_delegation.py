@@ -21,7 +21,8 @@ import seed_own_stand as own
 
 ROOT = Path(__file__).resolve().parents[2]
 KEYS = ("gdDelegateSaId", "jwtGDDelegate", "gdGroupDelegateSaId",
-        "jwtGDGroupDelegate", "gdRegistryRolesDelivered")
+        "jwtGDGroupDelegate", "gdRegistryRolesDelivered",
+        "gdRolePullerId", "gdRolePusherId", "gdRoleAdminId")
 
 
 def run(args):
@@ -60,7 +61,8 @@ def run(args):
             raise own.Finding("live delivered role does not match the public delegation fixture: " + name)
         roles.append(role_id)
     run_id = secrets.token_hex(5)
-    patch = {"gdRegistryRolesDelivered": "true"}
+    patch = {"gdRegistryRolesDelivered": "true",
+             "gdRolePullerId": roles[0], "gdRolePusherId": roles[1], "gdRoleAdminId": roles[2]}
     ledger = {"runId": run_id, "roles": roles, "subjects": []}
     for account, admin, prefix, id_key, token_key in (
         (account_b, admin_b, "gd-edge-delegate", "gdDelegateSaId", "jwtGDDelegate"),
