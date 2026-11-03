@@ -10,6 +10,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -86,8 +87,8 @@ func rid11RestoreUnitAccepted(t *testing.T, a, b rid03NewmanSnapshot, p rid11Res
 }
 func TestRID11Restore_EmptyToHealthyExactTwin(t *testing.T) {
 	a, b, p := rid11RestoreFixture(t)
-	require.Equal(t, "EMPTY", a.Projection.Roles[0]["health"])
-	require.Equal(t, "HEALTHY", b.Projection.Roles[0]["health"])
+	require.Equal(t, iamv1.RoleHealth_ROLE_HEALTH_EMPTY.String(), a.Projection.Roles[0]["health"])
+	require.Equal(t, iamv1.RoleHealth_ROLE_HEALTH_HEALTHY.String(), b.Projection.Roles[0]["health"])
 	require.True(t, rid11RestoreUnitAccepted(t, a, b, p))
 }
 func TestRID11Restore_ResolvedPublicIdentity(t *testing.T) {
@@ -100,13 +101,18 @@ func TestRID11Restore_ResolvedPublicIdentity(t *testing.T) {
 }
 func TestRID11Restore_AnchorRuleRefUsesNull(t *testing.T) {
 	a, _, p := rid11RestoreFixture(t)
-	rules, e := domain.EncodeRules(domain.Rules{{Module: "test", Resources: []string{"objects"}}})
+	authored := domain.Rules{{Module: "test", Resources: []string{"objects"}, Verbs: []string{"*"}}}
+	require.True(t, authored.Validate(domain.PolicyOfRole(true, "test"), domain.ModuleSetOf("test")) == nil, "positive anchor must be a valid normal authored rule")
+	rules, e := domain.EncodeRules(authored)
 	require.True(t, e == nil)
 	a.Raw["roles"][0]["rules"] = rules
 	p, e = rid11BuildRestorePlan(a.Raw, p.Facts)
 	require.True(t, e == nil)
 	require.Len(t, p.Raw["role_rule_ref"], 1)
 	require.True(t, string(p.Raw["role_rule_ref"][0]["verb"]) == "null")
+	require.Equal(t, "role-one", rid03S(p.Raw["role_rule_ref"][0], "role_id"))
+	require.Equal(t, "test", rid03S(p.Raw["role_rule_ref"][0], "module"))
+	require.Equal(t, "objects", rid03S(p.Raw["role_rule_ref"][0], "resource"))
 }
 func rid11RestoreReject(t *testing.T, mutate func(*rid03NewmanSnapshot, *rid03NewmanSnapshot, *rid11RestorePlan)) {
 	t.Helper()
@@ -272,7 +278,9 @@ func TestRID11Restore_RejectCatalogFingerprint(t *testing.T) {
 }
 
 func TestRID11Restore_RejectPublicDerivedHealth(t *testing.T) {
-	rid11RestoreReject(t, func(a, b *rid03NewmanSnapshot, p *rid11RestorePlan) { b.Projection.Roles[0]["health"] = "EMPTY" })
+	rid11RestoreReject(t, func(a, b *rid03NewmanSnapshot, p *rid11RestorePlan) {
+		b.Projection.Roles[0]["health"] = iamv1.RoleHealth_ROLE_HEALTH_EMPTY.String()
+	})
 }
 
 func TestRID11Restore_RejectPublicUnresolved(t *testing.T) {
@@ -484,4 +492,19 @@ func TestRID11Restore_TwoPoliciesHaveIndependentGrantSets(t *testing.T) {
 	for _, v := range q.Raw["role_verb"] {
 		require.Equal(t, "get", rid03S(v, "verb"))
 	}
+}
+
+// An empty verb list is not the documented wildcard anchor. This is the
+// malformed premise behind the first failed positive, retained as a negative.
+func TestRID11Restore_EmptyVerbsCannotProveAnchor(t *testing.T) {
+	a, _, p := rid11RestoreFixture(t)
+	authored := domain.Rules{{Module: "test", Resources: []string{"objects"}}}
+	require.True(t, authored.Validate(domain.PolicyOfRole(true, "test"), domain.ModuleSetOf("test")) != nil, "empty verb list is not a valid anchor premise")
+	rules, e := domain.EncodeRules(authored)
+	require.True(t, e == nil)
+	a.Raw["roles"][0]["rules"] = rules
+	p, e = rid11BuildRestorePlan(a.Raw, p.Facts)
+	require.True(t, e == nil)
+	require.Zero(t, len(p.Raw["role_rule_ref"]))
+	require.Zero(t, len(p.Raw["role_verb"]))
 }
