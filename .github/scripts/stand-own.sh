@@ -3285,6 +3285,24 @@ esac
 
 case "${1:-}" in
   up) stand_up; exit $? ;;
+  prepare-native)
+    # Test orchestration only: reuse the stand's real CA, leaf identities and
+    # production posture without starting Docker, a server, or a build. The
+    # bounded acceptance runner supplies its own already-proven binaries/PG.
+    make_pki || exit $?
+    registry_world_prepare || exit $?
+    stand_env || exit $?
+    mkdir -p "$RUNDIR"
+    KANAME_STAND_NATIVE_ENV="$RUNDIR/native-environment.json" python3 - <<'PY_NATIVE_ENV'
+import json, os
+path = os.environ["KANAME_STAND_NATIVE_ENV"]
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w") as output:
+    json.dump({name: value for name, value in os.environ.items()
+               if name.startswith("KANAME_") and not name.startswith(("KANAME_STAND_", "KANAME_NATIVE_"))}, output)
+    output.write("\n")
+PY_NATIVE_ENV
+    exit $? ;;
   env)
     # Печать посадки для соседнего шага: он читает её `eval`-ом, а не повторяет.
     stand_env
@@ -3306,7 +3324,7 @@ case "${1:-}" in
   failclosed-prepare) failclosed_prepare "${2:-}"; exit 0 ;;
   failclosed-judge) failclosed_judge "${2:-}"; exit $? ;;
   *)
-    printf 'использование: %s {up|env|down|runner|census|db-fold|db-unfold|failclosed-prepare|failclosed-judge|--self-test}\n' "$0" >&2
+    printf 'использование: %s {up|env|prepare-native|down|runner|census|db-fold|db-unfold|failclosed-prepare|failclosed-judge|--self-test}\n' "$0" >&2
     exit 2
     ;;
 esac
