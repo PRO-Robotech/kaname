@@ -506,6 +506,7 @@ func rid11RestoreRawValid(p rid11RestorePlan, a rid03NewmanSnapshot, b rid03Newm
 // precede any oracle assertion, including schema/DTO decoding failures.
 func rid11RequireCensusRestoration(t *testing.T, w *ridLifecycleWorld, a, b rid03NewmanSnapshot) {
 	t.Helper()
+	rid08Write(t, w.f.session.Root, "rid11-census-restoration-coordinate-diagnostic", rid11CoordinateDiagnostic(a, b))
 	type delta struct {
 		BeforeColumns, AfterColumns []string
 		BeforeCount, AfterCount     int
