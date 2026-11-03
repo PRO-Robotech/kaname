@@ -32,11 +32,12 @@ import (
 // existing startup bootstrap producer grants O authority. C/I/GD are never seeded.
 // Public/gateway assertions belong to the independent edge fixture.
 type installationBootstrapWorld struct {
-	world     *ceremonyWorld
-	principal context.Context
-	reader    *presentedcred.Reader
-	model     preparedModel
-	relations *authzcascade.Client
+	world         *ceremonyWorld
+	principal     context.Context
+	operatorToken string // private actual ceremony access token; never logged
+	reader        *presentedcred.Reader
+	model         preparedModel
+	relations     *authzcascade.Client
 }
 
 func newInstallationBootstrapWorld(t *testing.T, opts ...worldOption) *installationBootstrapWorld {
@@ -77,7 +78,7 @@ func newInstallationBootstrapWorld(t *testing.T, opts ...worldOption) *installat
 	allowed, err = authzguard.IsClusterAdminE(principal, relations)
 	require.NoError(t, err)
 	require.True(t, allowed, "actual bootstrap journal must materialize O system_admin")
-	return &installationBootstrapWorld{world: w, principal: principal, reader: reader, model: prepared, relations: relations}
+	return &installationBootstrapWorld{world: w, principal: principal, operatorToken: token.AccessToken, reader: reader, model: prepared, relations: relations}
 }
 
 // The helper process is essential: an already installed model in another test

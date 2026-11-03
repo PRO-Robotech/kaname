@@ -214,6 +214,7 @@ type ceremonyWorld struct {
 	surfaceAuth servicecontract.Axis[servicecontract.SurfaceAuthMech]
 	priv        *ecdsa.PrivateKey
 	kid         string
+	signer      *tokensigner.Signer // same real signer exposed to installation acceptance
 	logs        *lockedBuffer
 	// lifespans — сроки церемонии, которые настройка мира называет сборке.
 	lifespans config.CeremonyConfig
@@ -587,6 +588,7 @@ func (w *ceremonyWorld) buildSurface() {
 		w.fixture("подписант: %v", err)
 	}
 
+	w.signer = signer
 	logger := slog.New(slog.NewJSONHandler(w.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	mux, err := registrytokenwire.Build(w.pool, registrytokenwire.BuildConfig{
 		Realm:    "https://api.kacho.local/iam/token",
