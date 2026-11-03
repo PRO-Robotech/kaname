@@ -143,12 +143,16 @@ func ReseedSystemRoleRuleRefs(
 	census.Examined = len(roles)
 
 	var failures []error
-	for _, rr := range roles {
+	for i, rr := range roles {
 		if err := ctx.Err(); err != nil {
 			return census, errors.Join(append(failures, err)...)
 		}
 		refs := domain.RuleRefsOf(rr.rules)
 		if rerr := replaceRuleRefsInOwnTx(ctx, repo, rr.id, refs); rerr != nil {
+			// Фиксируем исход работы до вызова наблюдателя: отмена после
+			// последней законченной роли уже не прерывает обход.
+			interrupted := ctx.Err()
+			census.Completed = i == len(roles)-1 && interrupted == nil
 			census.Failed++
 			failures = append(failures, rerr)
 			if obs != nil {
@@ -156,11 +160,12 @@ func ReseedSystemRoleRuleRefs(
 			}
 			// Ошибка транзакционного helper уже отображена для RPC. Отмену
 			// сохраняет сама перепись, пока обход ещё не завершён.
-			if err := ctx.Err(); err != nil {
-				return census, errors.Join(append(failures, err)...)
+			if interrupted != nil {
+				return census, errors.Join(append(failures, interrupted)...)
 			}
 			continue
 		}
+		census.Completed = i == len(roles)-1
 		census.Reseeded++
 		census.Refs += len(refs)
 		if obs != nil {

@@ -157,12 +157,16 @@ func ReseedSystemRoleVerbs(
 	census.Examined = len(roles)
 
 	var failures []error
-	for _, rr := range roles {
+	for i, rr := range roles {
 		if err := ctx.Err(); err != nil {
 			return census, errors.Join(append(failures, err)...)
 		}
 		pairs, rerr := replaceRoleVerbsInOwnTx(ctx, repo, cat, rr.id)
 		if rerr != nil {
+			// Фиксируем исход работы до вызова наблюдателя: отмена после
+			// последней законченной роли уже не прерывает обход.
+			interrupted := ctx.Err()
+			census.Completed = i == len(roles)-1 && interrupted == nil
 			census.Failed++
 			failures = append(failures, rerr)
 			if obs != nil {
@@ -170,11 +174,12 @@ func ReseedSystemRoleVerbs(
 			}
 			// Ошибка транзакционного helper уже отображена для RPC. Отмену
 			// сохраняет сама перепись, пока обход ещё не завершён.
-			if err := ctx.Err(); err != nil {
-				return census, errors.Join(append(failures, err)...)
+			if interrupted != nil {
+				return census, errors.Join(append(failures, interrupted)...)
 			}
 			continue
 		}
+		census.Completed = i == len(roles)-1
 		census.Reseeded++
 		census.Pairs += pairs
 		if obs != nil {
