@@ -24,15 +24,12 @@ func runInstallationRID(t *testing.T, predicates ...ridPredicate) {
 		t.Skip("NOT_EXECUTED: full RID requires a frozen, explicitly leased acceptance job")
 	}
 	for _, predicate := range predicates {
-		if predicate.run == nil {
-			t.Errorf("FIXTURE_INCOMPLETE (not a product verdict): %s", predicate.name)
-		}
-	}
-	if t.Failed() {
-		t.FailNow()
-	}
-	for _, predicate := range predicates {
-		t.Run(predicate.name, predicate.run)
+		t.Run(predicate.name, func(t *testing.T) {
+			if predicate.run == nil {
+				t.Fatalf("FIXTURE_INCOMPLETE (not a product verdict): %s", predicate.name)
+			}
+			predicate.run(t)
+		})
 	}
 }
 
