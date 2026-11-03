@@ -7,8 +7,12 @@ import (
 	"encoding/json"
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/operations/operationspb"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/dto"
+	_ "github.com/PRO-Robotech/kaname/internal/dto/toproto"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -246,7 +250,38 @@ func rid05DeleteProjectionValid(a, b rid03NewmanSnapshot, creator string, failed
 	if failed {
 		return reflect.DeepEqual(a.Projection, b.Projection)
 	}
+	expected, valid := rid05DeleteProjectionExpected(a, creator)
+	return valid && reflect.DeepEqual(expected, b.Projection)
+}
+
+// Compute the entire expected projection solely from BEFORE primary state.
+// The internal materialization fence is part of that projection, not an
+// unchanged public field: exact authorized member removal changes its digest.
+func rid05DeleteProjectionExpected(a rid03NewmanSnapshot, creator string) (rid09NewmanProjection, bool) {
 	expected := a.Projection
+	members, present := a.Raw["access_binding_target_members"]
+	if !present || a.Projection.Materialization != rid03EvidenceHash(members) {
+		return expected, false
+	}
+	remaining := []rid09PrimaryRow{}
+	for _, member := range members {
+		binding, bindingOK := rid03Cell[string](member, "binding_id")
+		typ, typeOK := rid03Cell[string](member, "object_type")
+		id, idOK := rid03Cell[string](member, "object_id")
+		status, statusOK := rid03Cell[string](member, "verification_status")
+		_, timeOK := rid03Cell[time.Time](member, "updated_at")
+		if !bindingOK || binding == "" || !typeOK || typ == "" || !idOK || id == "" || !statusOK || status == "" || !timeOK || strings.TrimSpace(string(member["updated_at"])) == "null" {
+			return expected, false
+		}
+		if typ == "iam.serviceAccount" && id == creator {
+			continue
+		}
+		remaining = append(remaining, member)
+	}
+	// rid09PrimaryRows orders by to_jsonb(row)::text. Removing a subset retains
+	// exactly that canonical relative ordering, all columns and subsecond clocks.
+	// rid03EvidenceHash and ridWholeDigest both SHA256 json.Marshal for row slices.
+	expected.Materialization = rid03EvidenceHash(remaining)
 	expected.ServiceAccounts = []map[string]any{}
 	removed := 0
 	for _, sa := range a.Projection.ServiceAccounts {
@@ -257,7 +292,7 @@ func rid05DeleteProjectionValid(a, b rid03NewmanSnapshot, creator string, failed
 		expected.ServiceAccounts = append(expected.ServiceAccounts, sa)
 	}
 	if removed != 1 {
-		return false
+		return expected, false
 	}
 	affected := map[string]bool{}
 	for _, member := range a.Raw["access_binding_target_members"] {
@@ -280,21 +315,21 @@ func rid05DeleteProjectionValid(a, b rid03NewmanSnapshot, creator string, failed
 				}
 				at, ok := rid03Cell[time.Time](member, "updated_at")
 				if !ok {
-					return false
+					return expected, false
 				}
 				if at.After(latest) {
 					latest = at
 				}
 			}
-			if latest.IsZero() {
-				copy["materializedAt"] = nil
-			} else {
-				copy["materializedAt"] = latest.UTC().Truncate(time.Second).Format(time.RFC3339)
+			value, valid := rid05CanonicalMaterializedAt(latest)
+			if !valid {
+				return expected, false
 			}
+			copy["materializedAt"] = value
 		}
 		expected.Bindings = append(expected.Bindings, copy)
 	}
-	return reflect.DeepEqual(expected, b.Projection)
+	return expected, true
 }
 func (p *rid05PublicContext) deleteAction(t *testing.T, w *ridLifecycleWorld, scenario, blocking string, failed bool) ridLifecycleOperation {
 	a := rid05SnapshotRead(t, w, true)
@@ -321,7 +356,7 @@ func (p *rid05PublicContext) deleteAction(t *testing.T, w *ridLifecycleWorld, sc
 	func() {
 		defer func() {
 			b = rid05SnapshotRead(t, w, true)
-			require.True(t, rid05DeleteProjectionValid(a.Core, b.Core, w.f.creator.ID, failed), "full public state must equal independent BEFORE-derived Delete consequences")
+			rid05RequireDeleteProjection(t, w, a.Core, b.Core, failed, "public-delete")
 			require.True(t, reflect.DeepEqual(a.Core.Whole.OwnCeilings, b.Core.Whole.OwnCeilings), "public Delete cannot change own ceilings")
 			op := rid05RequireDeleteOperation(t, w, a, b, failed, blocking)
 			adapted = rid05LifecycleOperation(t, op)
@@ -440,7 +475,7 @@ func (p *rid05PublicContext) nativeDeleted(t *testing.T, w *ridLifecycleWorld) {
 	require.NotNil(t, p.beforeNativeDeletion)
 	a := *p.beforeNativeDeletion
 	b := rid05SnapshotRead(t, w, true)
-	require.True(t, rid05DeleteProjectionValid(a.Core, b.Core, w.f.creator.ID, false), "native Delete public state must equal BEFORE-derived consequences")
+	rid05RequireDeleteProjection(t, w, a.Core, b.Core, false, "native-delete")
 	require.True(t, reflect.DeepEqual(a.Core.Whole.OwnCeilings, b.Core.Whole.OwnCeilings))
 	op := rid05RequireDeleteOperation(t, w, a, b, false, "")
 	require.True(t, reflect.DeepEqual(a.Core.BusinessAudit, b.Core.BusinessAudit), "native Delete adds no AB/GD audit")
@@ -451,4 +486,49 @@ func (p *rid05PublicContext) nativeDeleted(t *testing.T, w *ridLifecycleWorld) {
 	proof.OperationID = op.ID
 	proof.NewDeleteAuditID = auditID
 	rid08Write(t, w.f.session.Root, "rid05-"+p.owner+"-"+rid03Mode(t, w)+"-native-delete-proof", map[string]any{"integrationOnly": true, "actualNewmanExecuted": false, "proof": proof, "wholeDoDAccepted": false})
+}
+
+// Canonical data-only domain→DTO→protojson projection, exactly as RID09's SQL
+// oracle. No REST/usecase/AFTER value participates; zero emits JSON null.
+func rid05CanonicalMaterializedAt(at time.Time) (any, bool) {
+	var pb *iamv1.AccessBinding
+	if dto.Transfer(dto.FromTo(domain.AccessBinding{MaterializedAt: at}, &pb)) != nil {
+		return nil, false
+	}
+	raw, err := (protojson.MarshalOptions{EmitUnpopulated: true}).Marshal(pb)
+	if err != nil {
+		return nil, false
+	}
+	var fields map[string]any
+	if json.Unmarshal(raw, &fields) != nil {
+		return nil, false
+	}
+	value, present := fields["materializedAt"]
+	return value, present
+}
+
+// Failure evidence is a closed nonsecret field/hash census. In particular no
+// raw Operation, credential, arbitrary bookkeeping payload or response is logged.
+func rid05RequireDeleteProjection(t *testing.T, w *ridLifecycleWorld, a, b rid03NewmanSnapshot, failed bool, label string) {
+	expected, valid := a.Projection, true
+	if !failed {
+		expected, valid = rid05DeleteProjectionExpected(a, w.f.creator.ID)
+	}
+	fields := func(p rid09NewmanProjection) map[string]any {
+		return map[string]any{"accounts": p.Accounts, "serviceAccounts": p.ServiceAccounts, "groups": p.Groups, "members": p.Members, "roles": p.Roles, "bindings": p.Bindings, "delegations": p.Delegations, "catalog": p.Catalog, "materializationLedger": p.Materialization}
+	}
+	before, want, actual := fields(a.Projection), fields(expected), fields(b.Projection)
+	census := map[string]any{}
+	for key, value := range want {
+		census[key] = map[string]any{"beforeSHA256": rid03EvidenceHash(before[key]), "expectedSHA256": rid03EvidenceHash(value), "actualSHA256": rid03EvidenceHash(actual[key]), "equal": reflect.DeepEqual(value, actual[key])}
+	}
+	removed := []map[string]string{}
+	for _, m := range a.Raw["access_binding_target_members"] {
+		if rid03S(m, "object_type") == "iam.serviceAccount" && rid03S(m, "object_id") == w.f.creator.ID {
+			removed = append(removed, map[string]string{"bindingId": rid03S(m, "binding_id"), "roleId": rid03S(m, "role_id"), "ruleFp": rid03S(m, "rule_fp"), "objectType": "iam.serviceAccount", "objectId": w.f.creator.ID})
+		}
+	}
+	rid08Write(t, w.f.session.Root, "rid05-"+label+"-projection-census", map[string]any{"beforeExpectedConsistent": valid, "expectedRemovedMemberCoordinates": removed, "projectionFields": census, "wholeDoDAccepted": false})
+	require.True(t, valid, "FIXTURE_NOT_ACCEPTED: BEFORE primary member rows and materialization fence inconsistent")
+	require.True(t, reflect.DeepEqual(expected, b.Projection), "full Delete projection differs from independent BEFORE-derived expectation; safe field/hash census retained")
 }
