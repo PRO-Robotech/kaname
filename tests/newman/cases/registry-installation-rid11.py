@@ -18,9 +18,17 @@ if(!valid){__MISSING__}else{
   if(e.issuerPresent){pm.expect(named[0]).to.eql(e.declaredIssuer);pm.expect(e.declaredIssuerSubjectType).to.eql('service_account');pm.expect(e.declaredIssuer.id===e.creatorId||e.stockServiceAccountIds.includes(e.declaredIssuer.id)).to.eql(false);pm.expect(e.declaredIssuer.enabled).to.eql(true);}
   p.delegations.forEach(gd=>{pm.expect(gd.status).to.eql('ACTIVE');pm.expect(gd.delegatedBy).to.eql({type:'service_account',id:e.creatorId});pm.expect(gd.delegate.id).to.eql(e.declaredIssuer.id);pm.expect(gd.accountId===e.systemId).to.eql(false);});
  });
+ // A recorded semantic premise failure does not stop the pre-script. Keep
+ // structural initialization closed so an absent first account/group never
+ // becomes a second, unclassified TypeError or an invented request identity.
+ const readable=['accounts','serviceAccounts','groups','roles','bindings','delegations'].every(k=>Array.isArray(p[k]))&&p.accounts.length>0&&p.groups.length>0&&p.accounts[0]&&typeof p.accounts[0].id==='string'&&p.accounts[0].id.length>0&&p.groups[0]&&typeof p.groups[0].id==='string'&&p.groups[0].id.length>0;
+ if(!readable){
+  pm.test('RID11 structural census initialization refused',()=>pm.expect(Boolean(readable)).to.eql(true));
+ }else{
  ['accounts','serviceAccounts','groups','roles','bindings','delegations'].forEach(k=>{pm.environment.set('rid10Seen_'+k,'[]');pm.environment.set('rid10Listed_'+k,'{}');pm.environment.set('rid10Tokens_'+k,'[""]');pm.environment.set('rid10Page_'+k,'');pm.environment.set('rid10AccountIndex_'+k,'0');pm.environment.set('rid10Account_'+k,p.accounts[0].id);pm.environment.set('rid10GetIndex_'+k,'0');pm.environment.set('rid10GetId_'+k,p[k][0]?p[k][0].id:'');pm.environment.set('rid10Got_'+k,'[]');});
  pm.environment.set('rid10GroupIndex','0');pm.environment.set('rid10GroupId',p.groups[0].id);pm.environment.set('rid10MembersSeen','{}');pm.environment.set('rid10MembersTokens','[""]');pm.environment.set('rid10MembersPage','');
  pm.environment.set('rid11Creator',e.creatorId);if(e.issuerPresent)pm.environment.set('rid11Issuer',e.declaredIssuer.id);
+ }
 }""".strip()
 _ISSUER_LIST=r"""const ie=JSON.parse(pm.environment.get('rid11Expected')),listed=JSON.parse(pm.environment.get('rid10Listed_serviceAccounts'));
 pm.test('declared I independently named in complete SYS List and typed primary',()=>{const rows=Object.values(listed).filter(sa=>sa.accountId===ie.systemId&&sa.name==='rid-public-issuer');pm.expect(rows.length).to.eql(ie.issuerPresent?1:0);if(ie.issuerPresent)pm.expect(rows[0]).to.eql(ie.declaredIssuer);});"""
