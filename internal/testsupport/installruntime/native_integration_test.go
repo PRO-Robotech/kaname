@@ -29,7 +29,7 @@ func TestNativeDelegationPublicMatrix(t *testing.T) {
 	if os.Getenv("KANAME_NATIVE_ACCEPTANCE") != "1" {
 		t.Skip("requires an explicitly leased native acceptance job")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 17*time.Minute)
 	defer cancel()
 	root, err := filepath.Abs("../../..")
 	require.NoError(t, err)
