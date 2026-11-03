@@ -293,16 +293,10 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	tree, err := ridNewmanTreeManifest(in.Module)
 	require.NoError(t, err)
 	in.TreeSHA = tree.SHA
-	expectedPath := os.Getenv("KANAME_RID_EXPECTED_IDENTITIES_FILE")
-	require.True(t, filepath.IsAbs(expectedPath), "externally frozen source/toolchain identities required")
-	external, err := os.ReadFile(expectedPath)
-	require.NoError(t, err)
-	require.LessOrEqual(t, len(external), 16384)
-	var expected ridNewmanExpected
-	require.NoError(t, json.Unmarshal(external, &expected))
-	for _, v := range []string{expected.Node, expected.Runner, expected.Tree, expected.Collection, expected.Test} {
-		require.Regexp(t, "^[a-f0-9]{64}$", v)
-	}
+	expected, err := ridNewmanExpectedForCollection(
+		os.Getenv("KANAME_RID_EXPECTED_IDENTITIES_FILE"),
+		os.Getenv("KANAME_RID_EXPECTED_IDENTITIES_DIR"), stem)
+	require.NoError(t, err, "externally frozen exact source/toolchain identities required")
 	require.Equal(t, expected.Node, in.NodeSHA)
 	require.Equal(t, expected.Runner, in.ScriptSHA)
 	require.Equal(t, expected.Tree, in.TreeSHA)

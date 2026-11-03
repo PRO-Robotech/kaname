@@ -69,11 +69,13 @@ func ridNativeSequentialAxisRepeatMode(t *testing.T, mode string) {
 	require.Equal(t, 4, subjects)
 	before := f.stableReceipt(t)
 	publicBefore := f.rid02PublicBoundsCensus(t, accounts)
+	newmanBefore := rid02NewmanPhase(t, f, mode, "BEFORE-REORDER", accounts, nil)
 	in.Manifests.First = reverseNativeDelegationAxes(t, full)
 	requireNativeOK(t, f.apply(t, in), len(accounts))
 	require.Equal(t, before, f.stableReceipt(t), "reorder-only restart preserves IDs dates creators axes and provisioned credentials")
 	require.Equal(t, publicBefore, f.rid02PublicBoundsCensus(t, accounts))
 	f.requireSameCredential(t)
+	rid02NewmanPhase(t, f, mode, "AFTER-REORDER", accounts, newmanBefore)
 }
 
 func (f *installationNativeWorld) rid02PublicBoundsCensus(t *testing.T, accounts []string) nativePublicReceipt {

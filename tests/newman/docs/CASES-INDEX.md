@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 919
+Всего кейсов: 955
 
 ## Перепись по модулям
 
@@ -83,7 +83,9 @@
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/rbac-subject-channel-equivalence.py` | 8 |
 | `cases/rbac-visibility-set.py` | 7 |
+| `cases/registry-installation-rid02.py` | 4 |
 | `cases/registry-installation-rid08.py` | 6 |
+| `cases/registry-installation-rid09.py` | 32 |
 
 ---
 
@@ -1393,3 +1395,49 @@ ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакци
 - `registry-installation-rid08-LATE-FAULT-N0`
 - `registry-installation-rid08-FAULT-TWIN-N3`
 - `registry-installation-rid08-RETRY-N3`
+
+## `cases/registry-installation-rid02.py` — 4 кейсов
+
+Публичные снимки до и после перестановки осей в тех же S1/S2 мирах; полные страницы и Get сверяются с независимым primary-снимком.
+
+- `registry-installation-rid02-S1-BEFORE-REORDER`
+- `registry-installation-rid02-S1-AFTER-REORDER`
+- `registry-installation-rid02-S2-BEFORE-REORDER`
+- `registry-installation-rid02-S2-AFTER-REORDER`
+
+## `cases/registry-installation-rid09.py` — 32 кейсов
+
+Публичные снимки до и после preflight для всех четырёх ошибок, обоих порядков манифестов и законных близнецов; каталог, роли, SA, группы, членства, привязки и доверенности сверяются с primary.
+
+- `registry-installation-rid09-ROLEIDS-M1-M2-NEGATIVE-BEFORE`
+- `registry-installation-rid09-ROLEIDS-M1-M2-NEGATIVE-AFTER`
+- `registry-installation-rid09-ROLEIDS-M1-M2-TWIN-BEFORE`
+- `registry-installation-rid09-ROLEIDS-M1-M2-TWIN-AFTER`
+- `registry-installation-rid09-ROLEIDS-M2-M1-NEGATIVE-BEFORE`
+- `registry-installation-rid09-ROLEIDS-M2-M1-NEGATIVE-AFTER`
+- `registry-installation-rid09-ROLEIDS-M2-M1-TWIN-BEFORE`
+- `registry-installation-rid09-ROLEIDS-M2-M1-TWIN-AFTER`
+- `registry-installation-rid09-TARGETTYPES-M1-M2-NEGATIVE-BEFORE`
+- `registry-installation-rid09-TARGETTYPES-M1-M2-NEGATIVE-AFTER`
+- `registry-installation-rid09-TARGETTYPES-M1-M2-TWIN-BEFORE`
+- `registry-installation-rid09-TARGETTYPES-M1-M2-TWIN-AFTER`
+- `registry-installation-rid09-TARGETTYPES-M2-M1-NEGATIVE-BEFORE`
+- `registry-installation-rid09-TARGETTYPES-M2-M1-NEGATIVE-AFTER`
+- `registry-installation-rid09-TARGETTYPES-M2-M1-TWIN-BEFORE`
+- `registry-installation-rid09-TARGETTYPES-M2-M1-TWIN-AFTER`
+- `registry-installation-rid09-SUBJECTTYPES-M1-M2-NEGATIVE-BEFORE`
+- `registry-installation-rid09-SUBJECTTYPES-M1-M2-NEGATIVE-AFTER`
+- `registry-installation-rid09-SUBJECTTYPES-M1-M2-TWIN-BEFORE`
+- `registry-installation-rid09-SUBJECTTYPES-M1-M2-TWIN-AFTER`
+- `registry-installation-rid09-SUBJECTTYPES-M2-M1-NEGATIVE-BEFORE`
+- `registry-installation-rid09-SUBJECTTYPES-M2-M1-NEGATIVE-AFTER`
+- `registry-installation-rid09-SUBJECTTYPES-M2-M1-TWIN-BEFORE`
+- `registry-installation-rid09-SUBJECTTYPES-M2-M1-TWIN-AFTER`
+- `registry-installation-rid09-DELEGATE-M1-M2-NEGATIVE-BEFORE`
+- `registry-installation-rid09-DELEGATE-M1-M2-NEGATIVE-AFTER`
+- `registry-installation-rid09-DELEGATE-M1-M2-TWIN-BEFORE`
+- `registry-installation-rid09-DELEGATE-M1-M2-TWIN-AFTER`
+- `registry-installation-rid09-DELEGATE-M2-M1-NEGATIVE-BEFORE`
+- `registry-installation-rid09-DELEGATE-M2-M1-NEGATIVE-AFTER`
+- `registry-installation-rid09-DELEGATE-M2-M1-TWIN-BEFORE`
+- `registry-installation-rid09-DELEGATE-M2-M1-TWIN-AFTER`

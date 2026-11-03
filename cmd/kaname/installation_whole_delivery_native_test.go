@@ -219,6 +219,9 @@ func rid09ReturnReceipt(t *testing.T, c *rid02OwnedChild, want codes.Code) ridWh
 func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) rid09Observation {
 	t.Helper()
 	f := newInstallationNativeWorldLifecycle(t, 7200, "", false, true)
+	if consumer == nil {
+		consumer = rid09DefaultNewmanConsumer(t, f, in)
+	}
 	accounts, namedSystem, initial, full := rid08SetupN3(t, f)
 	require.Len(t, accounts, 3)
 	require.EqualValues(t, 1, initial.Admitted)
@@ -237,7 +240,7 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 	// IDs remain those returned by normal ceremony/accounts/provisioning.
 	rid08Write(t, f.session.Root, "whole-before", before)
 	rid08Write(t, f.session.Root, "whole-input", in)
-	out := rid09Observation{Axis: in.Axis, Field: in.Field, Reverse: in.Reverse, Twin: in.Twin, Accounts: accounts, NamedSystem: namedSystem, CanonicalSystem: f.baseline.SystemID, Before: before, PublicBefore: beforePublic, Input: in, NewmanExecuted: consumer != nil}
+	out := rid09Observation{Axis: in.Axis, Field: in.Field, Reverse: in.Reverse, Twin: in.Twin, Accounts: accounts, NamedSystem: namedSystem, CanonicalSystem: f.baseline.SystemID, Before: before, PublicBefore: beforePublic, Input: in, NewmanExecuted: consumer != nil && os.Getenv("KANAME_RID_NEWMAN") == "1"}
 	watch := f.wire.StartReadinessWatch(f.given.ctx)
 	defer watch.Stop()
 	spawned := time.Now().UTC()

@@ -284,17 +284,234 @@ func TestRID_10_MidRunFaultAndRetirement(t *testing.T) {
 		}})
 }
 func TestRID_11_InputAuthnAuthorityBackend(t *testing.T) {
+	var negatives, twins []rid11Proof
+	var negativeAttempted, twinAttempted bool
+	ensure := func(t *testing.T, twin bool) []rid11Proof {
+		if twin {
+			if !twinAttempted {
+				twinAttempted = true
+				twins = rid11Matrix(t, true, nil)
+			}
+			require.Len(t, twins, 31)
+			return twins
+		}
+		if !negativeAttempted {
+			negativeAttempted = true
+			negatives = rid11Matrix(t, false, nil)
+		}
+		require.Len(t, negatives, 31)
+		return negatives
+	}
 	runInstallationRID(t,
-		ridPredicate{name: "every accepted result-table input authn authority backend row on absent and ACTIVE pair"},
-		ridPredicate{name: "exact exit stage field pair completedPairs; no bootstrap I fallback or self-provision"},
-		ridPredicate{name: "each fact-only legal twin succeeds and converges; missing S1 A before writes"},
-		ridPredicate{name: "real structured stdout stderr and absence of raw or JSON-escaped credential key token values"})
+		ridPredicate{name: "every accepted result-table input authn authority backend row on absent and ACTIVE pair", run: func(t *testing.T) {
+			observed := ensure(t, false)
+			seen := map[string]bool{}
+			for _, p := range observed {
+				require.False(t, seen[p.Case.key()])
+				seen[p.Case.key()] = true
+				require.Equal(t, p.Case.expected(), p.Expected)
+				if p.Case.Mode == "S2" {
+					require.Len(t, p.Accounts, 3)
+					require.Contains(t, p.Accounts, p.NamedSystem)
+					require.NotContains(t, p.Accounts, p.CanonicalSystem)
+				}
+			}
+		}},
+		ridPredicate{name: "exact exit stage field pair completedPairs; no bootstrap I fallback or self-provision", run: func(t *testing.T) {
+			for _, p := range ensure(t, false) {
+				require.Equal(t, int32(p.Case.returnCode()), p.Returned.Code)
+				require.True(t, p.Returned.ErrorPresent && p.Returned.MessageMatches)
+				require.False(t, p.Ready)
+				require.Zero(t, p.Expected.CompletedPairs)
+				require.Empty(t, p.Expected.DelegateID)
+				require.Equal(t, p.PairRowsBefore, p.PairRowsAfter)
+				if p.Case.Variant != "census" {
+					ridRequireWholeDeliveryUnchanged(t, p.Before, p.After)
+				}
+			}
+		}},
+		ridPredicate{name: "each fact-only legal twin succeeds and converges; missing S1 A before writes", run: func(t *testing.T) {
+			// Every state-based lawful twin omits only its named intervention.
+			// Retirement negatives separately prove Revoke-keeps-C then Delete-removes-C.
+			lawful := ensure(t, true)
+			byCase := map[string]rid11Proof{}
+			for _, p := range lawful {
+				byCase[p.Case.key()] = p
+				require.True(t, p.Ready)
+				require.False(t, p.Returned.ErrorPresent)
+				require.EqualValues(t, 0, p.Returned.Code)
+				require.NotEmpty(t, p.Issuer)
+				require.NotNil(t, p.CreatorCurrent)
+				rid11RequireSameIdentity(t, p.CreatorBefore, *p.CreatorCurrent)
+				require.NotNil(t, p.IssuerAfter)
+				require.Equal(t, p.Issuer, p.IssuerAfter.Public.Id)
+				require.Empty(t, p.MutationOperations)
+				require.Nil(t, p.CreatorAfterRevoke)
+				require.Nil(t, p.DeletedAfterMutation)
+				require.Nil(t, p.DeletedAfterRun)
+				if p.Case.Active {
+					require.NotNil(t, p.IssuerBefore)
+					rid11RequireSameIdentity(t, *p.IssuerBefore, *p.IssuerAfter)
+				}
+			}
+			for _, p := range ensure(t, false) {
+				twin, ok := byCase[p.Case.key()]
+				require.True(t, ok)
+				require.Equal(t, p.ManifestSHA256, twin.ManifestSHA256)
+				if p.Case.Variant == "revoked-key" || p.Case.Variant == "deleted-creator" {
+					require.NotNil(t, p.CreatorAfterRevoke)
+					rid11RequireSameIdentity(t, p.CreatorBefore, *p.CreatorAfterRevoke)
+					require.NotNil(t, p.KeysAfterRevoke)
+					require.True(t, p.KeysAfterRevoke.PublicListExecuted)
+					require.Zero(t, p.KeysAfterRevoke.PublicRows)
+					require.Zero(t, p.KeysAfterRevoke.PrimaryKeyRows)
+					require.Zero(t, p.KeysAfterRevoke.PrimaryCreatorKeys)
+					require.NotNil(t, p.KeysAfterRun)
+					require.Zero(t, p.KeysAfterRun.PrimaryKeyRows)
+					require.Zero(t, p.KeysAfterRun.PrimaryCreatorKeys)
+					require.True(t, p.PublicTokenRefused)
+					require.Equal(t, "UNAUTHENTICATED", p.Expected.Code)
+					if p.Case.Variant == "revoked-key" {
+						require.Len(t, p.MutationOperations, 1)
+						require.NotNil(t, p.CreatorCurrent)
+						rid11RequireSameIdentity(t, p.CreatorBefore, *p.CreatorCurrent)
+						require.True(t, p.KeysAfterRun.PublicListExecuted)
+						require.Zero(t, p.KeysAfterRun.PublicRows)
+						require.Nil(t, p.DeletedAfterMutation)
+						require.Nil(t, p.DeletedAfterRun)
+					} else {
+						require.Len(t, p.MutationOperations, 2)
+						require.NotEqual(t, p.MutationOperations[0], p.MutationOperations[1])
+						require.Nil(t, p.CreatorCurrent)
+						for _, absent := range []*rid11AbsentIdentity{p.DeletedAfterMutation, p.DeletedAfterRun} {
+							require.NotNil(t, absent)
+							require.Equal(t, 404, absent.HTTPStatus)
+							require.Equal(t, 5, absent.Code)
+							require.Zero(t, absent.PrimaryRows)
+						}
+					}
+				}
+				if p.Case.Active {
+					require.NotNil(t, p.IssuerBefore)
+					require.NotNil(t, p.IssuerAfter)
+					rid11RequireSameIdentity(t, *p.IssuerBefore, *p.IssuerAfter)
+					require.Equal(t, p.HistoryBeforeMutation, p.HistoryAfterRun)
+				}
+				if p.Case.Variant == "account" {
+					require.Equal(t, "S1", p.Case.Mode)
+					require.Equal(t, "tenantAccountId", p.Expected.Field)
+					ridRequireWholeDeliveryUnchanged(t, p.Before, p.After)
+				}
+			}
+		}},
+		ridPredicate{name: "real structured stdout stderr and absence of raw or JSON-escaped credential key token values", run: func(t *testing.T) {
+			for _, matrix := range [][]rid11Proof{ensure(t, false), ensure(t, true)} {
+				for _, p := range matrix {
+					require.True(t, p.RawStreamsAudited && p.Returned.CaptureOK)
+					if !p.Case.Twin && (p.Case.Variant == "deleted-creator" || p.Case.Variant == "revoked-key" || p.Case.Variant == "bad-signature") {
+						require.True(t, p.PublicTokenRefused)
+					}
+				}
+			}
+		}})
 }
 func TestRID_12_ClosedShapeAndBounds(t *testing.T) {
+	var noGD, negative, twins []*rid12Proof
+	attempted := map[string]bool{}
+	ensure := func(t *testing.T, kind string) []*rid12Proof {
+		t.Helper()
+		var target *[]*rid12Proof
+		switch kind {
+		case "no-GD":
+			target = &noGD
+		case "negative":
+			target = &negative
+		case "lawful-twin":
+			target = &twins
+		default:
+			t.Fatal("unknown RID12 matrix kind")
+		}
+		if !attempted[kind] {
+			attempted[kind] = true // before any t.Fatal; no blind reruns by later predicates
+			*target = rid12Matrix(t, kind, nil)
+		}
+		want := 15
+		if kind == "no-GD" {
+			want = 2
+		}
+		require.Len(t, *target, want, "earlier matrix failed; evidence reuse cannot allocate replacement PG worlds")
+		return *target
+	}
 	runInstallationRID(t,
-		ridPredicate{name: "absent and empty GD field normal full seed success zero GD"},
-		ridPredicate{name: "unknown field each empty or duplicate axis and17roles17types5subjects rejected before all writes"},
-		ridPredicate{name: "UNSPECIFIED unknown enum iam module role type rejected exact fields"},
-		ridPredicate{name: "all17 lawful catalog types and roles retained; legal16/16/4 N pairs"},
-		ridPredicate{name: "single-bad-field-only repair twins; array reorder idempotence"})
+		ridPredicate{name: "absent and empty GD field normal full seed success zero GD", run: func(t *testing.T) {
+			for _, p := range ensure(t, "no-GD") {
+				require.True(t, p.NoGD)
+				require.False(t, p.Invalid)
+				require.False(t, p.Return.ErrorPresent)
+				require.Zero(t, p.Return.CapturedRecords)
+				require.Zero(t, p.Return.IssuedTokens)
+				require.Empty(t, p.Census.Delegations)
+				require.Empty(t, p.Raw)
+				require.NotEmpty(t, p.Census.ServiceAccounts)
+				require.NotEqual(t, p.Before.Delivery, p.After.Delivery)
+			}
+		}},
+		ridPredicate{name: "unknown field each empty or duplicate axis and17roles17types5subjects rejected before all writes", run: func(t *testing.T) {
+			rid12RequireNegative(t, ensure(t, "negative"))
+		}},
+		ridPredicate{name: "UNSPECIFIED unknown enum iam module role type rejected exact fields", run: func(t *testing.T) {
+			proofs := ensure(t, "negative")
+			rid12RequireNegative(t, proofs)
+			found := map[string]bool{}
+			for _, p := range proofs {
+				switch p.Name {
+				case "subject-unspecified", "subject-unknown", "iam-role", "iam-type", "iam-module":
+					found[p.Name] = true
+					require.NotEmpty(t, p.Input.Field)
+					if p.Name == "iam-module" {
+						require.Equal(t, "manifests[1].roles[0].id", p.Input.Field)
+					}
+				}
+			}
+			require.Len(t, found, 5)
+		}},
+		ridPredicate{name: "all17 lawful catalog types and roles retained; legal16/16/4 N pairs", run: func(t *testing.T) {
+			proofs := ensure(t, "lawful-twin")
+			boundary := 0
+			for _, p := range proofs {
+				require.False(t, p.Invalid)
+				require.False(t, p.NoGD)
+				require.False(t, p.Return.ErrorPresent)
+				require.Len(t, p.Census.Delegations, 6)
+				if p.Name == "roles17" || p.Name == "types17" || p.Name == "subjects5" {
+					boundary++
+					declarations := rid12Declarations(t, p.Input)
+					m := declarations["ridbounds"]
+					require.NotNil(t, m)
+					require.Len(t, m.Roles, 17)
+					require.Len(t, m.Resources, 17)
+					require.Len(t, m.Seed.GrantDelegations[0].RoleIDs, 16)
+					require.Len(t, m.Seed.GrantDelegations[0].TargetTypes, 16)
+					require.Len(t, m.Seed.GrantDelegations[0].SubjectTypes, 4)
+				}
+			}
+			require.Equal(t, 3, boundary)
+		}},
+		ridPredicate{name: "single-bad-field-only repair twins; array reorder idempotence", run: func(t *testing.T) {
+			proofs := ensure(t, "lawful-twin")
+			require.Len(t, proofs, 15)
+			repeated := 0
+			for _, p := range proofs {
+				require.Equal(t, p.Input.LegalM2Digest, p.Input.M2Digest)
+				if p.Reordered {
+					repeated++
+					require.Equal(t, "roles17", p.Name)
+					require.Equal(t, p.Census, p.RepeatCensus)
+					require.Equal(t, p.Raw, p.RepeatRaw)
+					require.Len(t, p.Raw, 6)
+					require.False(t, p.RepeatReturn.ErrorPresent)
+				}
+			}
+			require.Equal(t, 1, repeated, "one second full startup in the same boundary lawful world")
+		}})
 }
