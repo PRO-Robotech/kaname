@@ -445,9 +445,46 @@ func (w *ridLifecycleWorld) grant(t *testing.T, body any) *iamv1.AccessBinding {
 	require.NotContains(t, beforeBindings, binding.Id)
 	w.requireGrantRequest(t, &request, &binding)
 	var got iamv1.AccessBinding
-	w.f.publicRead(t, "/iam/v1/accessBindings/"+binding.Id, &got)
-	w.recordGrantProjection(t, &binding, &got)
-	require.True(t, proto.Equal(&binding, &got))
+	var materialized *timestamppb.Timestamp
+	observationCtx, cancelObservation := context.WithTimeout(w.f.given.ctx, 5*time.Second)
+	defer cancelObservation()
+	for {
+		before := w.primaryBindingMaterializedAt(t, observationCtx, binding.Id)
+		var raw json.RawMessage
+		code, err := w.f.wire.JSON(observationCtx, http.MethodGet, "/iam/v1/accessBindings/"+binding.Id, w.f.operator.Bearer(), nil, &raw)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, code, "ordinary independent O read")
+		require.NoError(t, protojson.Unmarshal(raw, &got))
+		materialized = w.primaryBindingMaterializedAt(t, observationCtx, binding.Id)
+		w.recordGrantProjection(t, &binding, &got)
+		// Bracket the public read with independent PRIMARY observations. Retry
+		// only a moving ledger, never a mismatch in the checked API response.
+		// Null is legitimate; this is not a barrier requiring materialization.
+		require.NoError(t, observationCtx.Err(), "materialization observation deadline exceeded")
+		if proto.Equal(before, materialized) {
+			break
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-observationCtx.Done():
+			timer.Stop()
+			require.NoError(t, observationCtx.Err(), "materialization ledger did not stabilize across Get")
+		case <-timer.C:
+		}
+	}
+	if at := binding.MaterializedAt; at != nil {
+		// Operation.done does not promise this observable, but if supplied its
+		// historical instant must obey the same precision and lifetime bounds.
+		require.NoError(t, at.CheckValid())
+		require.Zero(t, at.Nanos)
+		require.NotNil(t, binding.CreatedAt)
+		require.False(t, at.AsTime().Before(binding.CreatedAt.AsTime()))
+		require.NotNil(t, materialized, "response claims materialization without an ACTIVE ledger member")
+		require.False(t, at.AsTime().After(materialized.AsTime()))
+	}
+	expectedGet := proto.Clone(&binding).(*iamv1.AccessBinding)
+	expectedGet.MaterializedAt = materialized
+	require.True(t, proto.Equal(expectedGet, &got), "Get must equal Operation response plus independently observed materialized_at")
 	w.requireGrantRequest(t, &request, &got)
 	require.Equal(t, iamv1.AccessBinding_ACTIVE, got.Status)
 	require.Equal(t, w.gd.Id, got.DelegationId)
@@ -661,4 +698,29 @@ func (w *ridLifecycleWorld) recordGrantProjection(t *testing.T, response, got *i
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(root, "observation.json"), raw, 0600))
 	t.Logf("AccessBinding Operation/Get differing proto fields: %v", changed)
+}
+
+// primaryBindingMaterializedAt independently implements the public observable's
+// documented MAX(updated_at) over ACTIVE members, truncated to whole seconds.
+// This is read-only observation of the real fixture PRIMARY, not an API-derived
+// expected value. PENDING_VERIFICATION rows cannot establish materialization.
+func (w *ridLifecycleWorld) primaryBindingMaterializedAt(t *testing.T, ctx context.Context, id string) *timestamppb.Timestamp {
+	t.Helper()
+	var recovery bool
+	var observed, created time.Time
+	var latest *time.Time
+	require.NoError(t, w.f.given.pool.QueryRow(ctx, `
+		SELECT pg_is_in_recovery(), clock_timestamp(), b.created_at,
+		       (SELECT MAX(m.updated_at) FROM kaname.access_binding_target_members m
+		        WHERE m.binding_id=b.id AND m.verification_status='ACTIVE')
+		FROM kaname.access_bindings b WHERE b.id=$1`, id).Scan(&recovery, &observed, &created, &latest))
+	require.False(t, recovery, "materialization oracle must read PRIMARY")
+	if latest == nil {
+		return nil
+	}
+	require.False(t, latest.Before(created), "member materialization predates binding creation")
+	require.False(t, latest.After(observed), "member materialization is in the PRIMARY clock's future")
+	result := timestamppb.New(latest.Truncate(time.Second))
+	require.NoError(t, result.CheckValid())
+	return result
 }
