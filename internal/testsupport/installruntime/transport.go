@@ -34,6 +34,7 @@ import (
 // context principal. Response bodies (which can contain credentials) are never
 // included in errors. Only the private fixture caller receives their bytes.
 type Wire struct {
+	ports                           NativePorts
 	PublicURL, IssuanceURL, JWKSURL string
 	http                            *http.Client
 	publicTLS, gatewayTLS           *tls.Config
@@ -69,7 +70,7 @@ func NewWire(pki, publicURL, issuanceURL, jwksURL string) (*Wire, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Wire{PublicURL: publicURL, IssuanceURL: issuanceURL, JWKSURL: jwksURL,
+	return &Wire{ports: DefaultNativePorts(), PublicURL: publicURL, IssuanceURL: issuanceURL, JWKSURL: jwksURL,
 		publicTLS: public, gatewayTLS: gateway,
 		http: &http.Client{Transport: &http.Transport{TLSClientConfig: public}, Timeout: 20 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
@@ -78,7 +79,7 @@ func NewWire(pki, publicURL, issuanceURL, jwksURL string) (*Wire, error) {
 func (w *Wire) Close() { w.http.CloseIdleConnections() }
 
 func (w *Wire) ListenersReady(ctx context.Context) error {
-	for _, port := range []int{9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100} {
+	for _, port := range w.ports.All() {
 		dialer := tls.Dialer{Config: w.publicTLS.Clone()}
 		conn, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
 		if err != nil {
@@ -234,7 +235,7 @@ func (w *Wire) JSON(ctx context.Context, method, path, bearer string, in, out an
 }
 
 func (w *Wire) Gateway(address string) (*grpc.ClientConn, error) {
-	if address != "localhost:9091" {
+	if address != w.InternalGatewayAddress() {
 		return nil, errors.New("gateway fixture must target the selected native loopback listener")
 	}
 	return grpc.NewClient(address, grpc.WithTransportCredentials(credentials.NewTLS(w.gatewayTLS.Clone())))
