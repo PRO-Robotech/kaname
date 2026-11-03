@@ -54,6 +54,12 @@ func rid02ProcessStart(pid int) (string, error) {
 	return fields[19], nil
 }
 func startRID02Child(t *testing.T, f *installationNativeWorld, label string, input rid02ChildInput) *rid02OwnedChild {
+	return startRIDInstallationChild(t, f, label, input, f.session.Environment, rid02ChildInputEnv, "TestRID02OwnedInstallationChild", "12m")
+}
+
+// The same ownership/FD/reap protocol serves the full-startup instrumented child.
+// Entry selection exists only in test source, never in production config or CLI.
+func startRIDInstallationChild(t *testing.T, f *installationNativeWorld, label string, input any, environment []string, inputEnv, entry, timeout string) *rid02OwnedChild {
 	t.Helper()
 	dir := filepath.Join(f.session.Root, label)
 	require.NoError(t, os.Mkdir(dir, 0700))
@@ -99,8 +105,8 @@ func startRID02Child(t *testing.T, f *installationNativeWorld, label string, inp
 	stderr, err := os.OpenFile(filepath.Join(dir, "stderr"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	ownFD(stderr)
 	require.NoError(t, err)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestRID02OwnedInstallationChild$", "-test.timeout=12m", "-test.v")
-	cmd.Env = append(append([]string{}, f.session.Environment...), rid02ChildInputEnv+"="+path)
+	cmd := exec.Command(os.Args[0], "-test.run=^"+entry+"$", "-test.timeout="+timeout, "-test.v")
+	cmd.Env = append(append([]string{}, environment...), inputEnv+"="+path)
 	cmd.ExtraFiles = []*os.File{ew, cr, secretInventory} // FD3 events, FD4 control, FD5 anonymous secret inventory.
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -163,6 +169,7 @@ func startRID02Child(t *testing.T, f *installationNativeWorld, label string, inp
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "ownership.json"), ownership, 0600))
 	return c
 }
+
 // Establish the exact launched argv before retaining a successful identity.
 // A successful early proc read can transiently contain no bytes. Only that
 // empty snapshot is retryable; unexpected identity, exit or timeout is FAIL.

@@ -53,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
@@ -90,7 +91,20 @@ func stopGRPCBounded(srv grpcStopper, timeout time.Duration) {
 	}
 }
 
-func runServe(cfg config.Config) error {
+// installationRepositoryDecorator is an internal composition seam. The published
+// entrypoint always supplies nil; it is not selectable by configuration or RPC.
+type installationRepositoryDecorator func(kanamerepo.Repository) kanamerepo.Repository
+
+type installationServeDependencies struct {
+	decorateInstallationRepository installationRepositoryDecorator
+	observeCredential              func(string, string)
+}
+
+func runServe(cfg config.Config, optional ...installationServeDependencies) error {
+	var installationDependencies installationServeDependencies
+	if len(optional) > 0 {
+		installationDependencies = optional[0]
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
@@ -369,6 +383,10 @@ func runServe(cfg config.Config) error {
 		if err != nil {
 			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
 		}
+		// Immutable copies only: observation cannot replace credentials, a
+		// principal, issuer, verifier or any authority decision.
+		installationAuthn.observeCredential = installationDependencies.observeCredential
+		installationAuthn.observeMaterial("")
 		verified, err := installationAuthn.Authenticate(ctx)
 		if err != nil {
 			return failInstallation(logger, "authentication", "", "", "", 0, err)
@@ -562,7 +580,11 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("configure LRO default-registry: %w", err)
 	}
 	operations.Start()
-	if err := applyInstallationDelegations(ctx, logger, installationAuthn, kanamepg.New(pool, nil), installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), 256, appliedManifests); err != nil {
+	var installationRepo kanamerepo.Repository = kanamepg.New(pool, nil)
+	if installationDependencies.decorateInstallationRepository != nil {
+		installationRepo = installationDependencies.decorateInstallationRepository(installationRepo)
+	}
+	if err := applyInstallationDelegations(ctx, logger, installationAuthn, installationRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), 256, appliedManifests); err != nil {
 		return err
 	}
 

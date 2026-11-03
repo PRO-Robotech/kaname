@@ -79,10 +79,10 @@ func TestRID_05_CreatorDeletionAndNewID(t *testing.T) {
 }
 func TestRID_06_RevokeDuringApply(t *testing.T) {
 	runInstallationRID(t,
-		ridPredicate{name: "apply at real before-pair barrier; O commits revoke before release"},
-		ridPredicate{name: "overlap and sequential reinstall refuse; old G and GD revoked; replacement zero"},
-		ridPredicate{name: "no-revoke overlap twin preserves original ID"},
-		ridPredicate{name: "explicit C Create recovery preserves revoked history and new issuer grant works"})
+		ridPredicate{name: "apply at real before-pair barrier; O commits revoke before release", run: ridNativeRevokeBeforePair},
+		ridPredicate{name: "overlap and sequential reinstall refuse; old G and GD revoked; replacement zero", run: ridNativeRevokeOverlapAndSequential},
+		ridPredicate{name: "no-revoke overlap twin preserves original ID", run: ridNativeNoRevokeOverlapTwin},
+		ridPredicate{name: "explicit C Create recovery preserves revoked history and new issuer grant works", run: ridNativeRevokeExplicitRecovery})
 }
 func TestRID_07_ExistingPairConflict(t *testing.T) {
 	var observed []rid07Observation
