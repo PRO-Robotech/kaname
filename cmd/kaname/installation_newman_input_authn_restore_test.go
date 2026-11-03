@@ -465,7 +465,7 @@ func rid11RestoreSelectorsValid(p rid11RestorePlan, actual []rid09PrimaryRow, lo
 	}
 	return true
 }
-func rid11RestoreRawValid(p rid11RestorePlan, a rid03NewmanSnapshot, b rid03NewmanSnapshot) bool {
+func rid11RestoreRawValid(p rid11RestorePlan, a rid03NewmanSnapshot, b rid03NewmanSnapshot, bindingProof ...rid11BindingRestoreProof) bool {
 	if len(p.Raw) != len(b.Raw) || !reflect.DeepEqual(a.Whole.Separation, b.Whole.Separation) || len(a.Whole.Delivery) != len(b.Whole.Delivery) {
 		return false
 	}
@@ -487,7 +487,11 @@ func rid11RestoreRawValid(p rid11RestorePlan, a rid03NewmanSnapshot, b rid03Newm
 		if !ok || !reflect.DeepEqual(old.Columns, now.Columns) {
 			return false
 		}
-		if keys, allowed := rid11RestoreSchemas[table]; allowed {
+		keys, allowed := rid11RestoreSchemas[table]
+		if !allowed && len(bindingProof) == 1 && bindingProof[0].Enabled {
+			keys, allowed = rid11BindingSchemas[table]
+		}
+		if allowed {
 			cols := append([]string(nil), old.Columns...)
 			want := append([]string(nil), keys...)
 			sort.Strings(cols)
@@ -557,12 +561,39 @@ func rid11RequireCensusRestoration(t *testing.T, w *ridLifecycleWorld, a, b rid0
 	facts := rid11RestoreFacts(t, a.Raw)
 	p, err := rid11BuildRestorePlan(a.Raw, facts)
 	require.True(t, err == nil, "closed BEFORE restoration premise")
-	require.True(t, rid11RestoreRawValid(p, a, b), "exact source-derived restoration raw delta; safe all-column diagnostics retained")
+	// Допуск касается только обычной материализации существующей выдачи после
+	// сохранённой границы отказа. Первичный failed-start checkpoint не меняется.
+	bindingChanged := false
+	for table := range rid11BindingSchemas {
+		bindingChanged = bindingChanged || !rid11RestoreRowsEqual(a.Raw[table], b.Raw[table])
+	}
+	bindingProof := rid11BindingRestoreProof{}
 	expected := a.Projection
+	if bindingChanged {
+		bp, valid := rid11BuildBindingRestore(a, facts, b.Whole.PrimaryStartedAt)
+		require.True(t, valid, "FIXTURE_NOT_ACCEPTED: closed BEFORE binding restoration premise")
+		bindingProof, valid = rid11ValidateBindingRestore(a, b, bp)
+		require.True(t, valid, "closed primary binding restoration coordinates and producer clocks")
+		for table, rows := range bindingProof.Raw {
+			p.Raw[table] = rows
+		}
+		expected, valid = rid11BindingProjection(a, bindingProof.Raw["access_binding_target_members"])
+		require.True(t, valid, "complete BEFORE-derived materialization projection")
+	}
+	require.True(t, rid11RestoreRawValid(p, a, b, bindingProof), "exact source-derived restoration raw delta; safe all-column diagnostics retained")
 	expected.Roles = rid11RestoreRoles(t, p.Raw, facts)
 	require.True(t, reflect.DeepEqual(expected, b.Projection), "complete independently derived restoration projection")
-	rid04RequireGDGUnchanged(t, a, b)
+	if !bindingChanged {
+		rid04RequireGDGUnchanged(t, a, b)
+	} else {
+		// Строки G/GD, их субъекты и вся прежняя история остаются неизменными.
+		// Новые members/ledger проверены выше; materializedAt выведен из их clocks.
+		for _, table := range []string{"access_bindings", "access_binding_subjects", "grant_delegations"} {
+			require.True(t, reflect.DeepEqual(a.Raw[table], b.Raw[table]), "unchanged complete G/GD identities and subjects")
+		}
+		require.True(t, reflect.DeepEqual(a.Projection.Delegations, b.Projection.Delegations), "unchanged full GD projection")
+	}
 	ridRequireOwnCeilingsPreserved(t, a.Whole, b.Whole)
 	require.True(t, reflect.DeepEqual(a.Whole.Bookkeeping["operations"], b.Whole.Bookkeeping["operations"]), "zero new/unchanged complete operations")
-	rid08Write(t, w.f.session.Root, "rid11-census-restoration-accepted", map[string]any{"sourceDerivedOracle": true, "actualNewmanExecuted": false, "wholeDoDAccepted": false, "eligibleRoleCount": len(p.Eligible), "beforeDerivedRoleVerbSHA256": rid03EvidenceHash(p.Raw["role_verb"]), "beforeDerivedRuleRefSHA256": rid03EvidenceHash(p.Raw["role_rule_ref"]), "beforeDerivedSelectorSemanticsSHA256": rid03EvidenceHash(p.Selectors), "selectorClockLower": a.Whole.PrimaryFinishedAt, "selectorClockUpper": b.Whole.PrimaryStartedAt, "actualRawSHA256": rid03EvidenceHash(b.Raw), "expectedProjectionSHA256": rid03EvidenceHash(expected), "actualProjectionSHA256": rid03EvidenceHash(b.Projection)})
+	rid08Write(t, w.f.session.Root, "rid11-census-restoration-accepted", map[string]any{"sourceDerivedOracle": true, "actualNewmanExecuted": false, "wholeDoDAccepted": false, "bindingRestoration": bindingProof, "eligibleRoleCount": len(p.Eligible), "beforeDerivedRoleVerbSHA256": rid03EvidenceHash(p.Raw["role_verb"]), "beforeDerivedRuleRefSHA256": rid03EvidenceHash(p.Raw["role_rule_ref"]), "beforeDerivedSelectorSemanticsSHA256": rid03EvidenceHash(p.Selectors), "selectorClockLower": a.Whole.PrimaryFinishedAt, "selectorClockUpper": b.Whole.PrimaryStartedAt, "actualRawSHA256": rid03EvidenceHash(b.Raw), "expectedProjectionSHA256": rid03EvidenceHash(expected), "actualProjectionSHA256": rid03EvidenceHash(b.Projection)})
 }
