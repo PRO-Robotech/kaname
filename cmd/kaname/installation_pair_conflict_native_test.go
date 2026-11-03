@@ -28,6 +28,10 @@ type rid07Observation struct {
 // Revoke/Create below is explicit Given construction, never convergence repair.
 // Its revoked history is included in the frozen snapshot before tested apply.
 func rid07Matrix(t *testing.T, exact bool) []rid07Observation {
+	return rid07MatrixWithPublic(t, exact, nil)
+}
+
+func rid07MatrixWithPublic(t *testing.T, exact bool, consumer rid07LivePublicConsumer) []rid07Observation {
 	t.Helper()
 	var records []rid07Observation
 	for _, axis := range []string{"role", "target", "subject", "creator"} {
@@ -137,6 +141,14 @@ func rid07Matrix(t *testing.T, exact bool) []rid07Observation {
 				require.NoError(t, err)
 				require.NoError(t, os.WriteFile(filepath.Join(f.session.Root, "rid07-given.json"), receipt, 0600))
 				_, operationsBefore := w.grantIdentityCensus(t)
+				publicInput := rid07NewmanInput{Axis: axis, Mode: mode, Exact: exact, OldPair: oldPair.Id, ActivePair: newID, OldGrant: oldGrant.Id, ActiveGrant: newGrant.Id}
+				publicConsumer := consumer
+				if publicConsumer == nil {
+					publicConsumer = rid07DefaultNewmanConsumer(t, w, publicInput)
+				}
+				if publicConsumer != nil {
+					publicConsumer(t, w, publicInput, "before")
+				}
 				if exact {
 					requireNativeOK(t, f.apply(t, w.delivery), len(w.accounts))
 					f.renewOperator(t, f.given.ctx)
@@ -163,6 +175,9 @@ func rid07Matrix(t *testing.T, exact bool) []rid07Observation {
 				}
 				rid07BindingUnchanged(t, w, &revokedGrant)
 				rid07BindingUnchanged(t, w, newGrant)
+				if publicConsumer != nil {
+					publicConsumer(t, w, publicInput, "after")
+				}
 				records = append(records, rid07Observation{Axis: axis, Mode: mode, Before: history, After: w.snapshot(t), OldPair: oldPair.Id, NewPair: newID, OldGrant: oldGrant.Id, NewGrant: newGrant.Id})
 			})
 		}

@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 961
+Всего кейсов: 1058
 
 ## Перепись по модулям
 
@@ -84,9 +84,11 @@
 | `cases/rbac-subject-channel-equivalence.py` | 8 |
 | `cases/rbac-visibility-set.py` | 7 |
 | `cases/registry-installation-rid02.py` | 4 |
+| `cases/registry-installation-rid07.py` | 32 |
 | `cases/registry-installation-rid08.py` | 6 |
 | `cases/registry-installation-rid09.py` | 32 |
 | `cases/registry-installation-rid10.py` | 6 |
+| `cases/registry-installation-rid12.py` | 65 |
 
 ---
 
@@ -1453,3 +1455,114 @@ ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакци
 - `registry-installation-rid10-RETIREMENT-PARTIAL`
 - `registry-installation-rid10-RETIREMENT-RECOVERED`
 - `registry-installation-rid10-RETIREMENT-TWIN`
+
+---
+
+## `cases/registry-installation-rid07.py` — 32 кейсов
+
+> Публичное наблюдение конфликтующих и совпадающих осей до и после повторного применения в S1/S2.
+
+- `registry-installation-rid07-ROLEIDS-S1-NEGATIVE-BEFORE`
+- `registry-installation-rid07-ROLEIDS-S1-NEGATIVE-AFTER`
+- `registry-installation-rid07-ROLEIDS-S1-TWIN-BEFORE`
+- `registry-installation-rid07-ROLEIDS-S1-TWIN-AFTER`
+- `registry-installation-rid07-ROLEIDS-S2-NEGATIVE-BEFORE`
+- `registry-installation-rid07-ROLEIDS-S2-NEGATIVE-AFTER`
+- `registry-installation-rid07-ROLEIDS-S2-TWIN-BEFORE`
+- `registry-installation-rid07-ROLEIDS-S2-TWIN-AFTER`
+- `registry-installation-rid07-TARGETTYPES-S1-NEGATIVE-BEFORE`
+- `registry-installation-rid07-TARGETTYPES-S1-NEGATIVE-AFTER`
+- `registry-installation-rid07-TARGETTYPES-S1-TWIN-BEFORE`
+- `registry-installation-rid07-TARGETTYPES-S1-TWIN-AFTER`
+- `registry-installation-rid07-TARGETTYPES-S2-NEGATIVE-BEFORE`
+- `registry-installation-rid07-TARGETTYPES-S2-NEGATIVE-AFTER`
+- `registry-installation-rid07-TARGETTYPES-S2-TWIN-BEFORE`
+- `registry-installation-rid07-TARGETTYPES-S2-TWIN-AFTER`
+- `registry-installation-rid07-SUBJECTTYPES-S1-NEGATIVE-BEFORE`
+- `registry-installation-rid07-SUBJECTTYPES-S1-NEGATIVE-AFTER`
+- `registry-installation-rid07-SUBJECTTYPES-S1-TWIN-BEFORE`
+- `registry-installation-rid07-SUBJECTTYPES-S1-TWIN-AFTER`
+- `registry-installation-rid07-SUBJECTTYPES-S2-NEGATIVE-BEFORE`
+- `registry-installation-rid07-SUBJECTTYPES-S2-NEGATIVE-AFTER`
+- `registry-installation-rid07-SUBJECTTYPES-S2-TWIN-BEFORE`
+- `registry-installation-rid07-SUBJECTTYPES-S2-TWIN-AFTER`
+- `registry-installation-rid07-DELEGATEDBY-S1-NEGATIVE-BEFORE`
+- `registry-installation-rid07-DELEGATEDBY-S1-NEGATIVE-AFTER`
+- `registry-installation-rid07-DELEGATEDBY-S1-TWIN-BEFORE`
+- `registry-installation-rid07-DELEGATEDBY-S1-TWIN-AFTER`
+- `registry-installation-rid07-DELEGATEDBY-S2-NEGATIVE-BEFORE`
+- `registry-installation-rid07-DELEGATEDBY-S2-NEGATIVE-AFTER`
+- `registry-installation-rid07-DELEGATEDBY-S2-TWIN-BEFORE`
+- `registry-installation-rid07-DELEGATEDBY-S2-TWIN-AFTER`
+
+---
+
+## `cases/registry-installation-rid12.py` — 65 кейсов
+
+> Публичное наблюдение закрытой формы, пределов осей, отсутствующей и пустой доверенности, а также перестановки осей.
+
+- `registry-installation-rid12-UNKNOWN-FIELD-NEGATIVE-BEFORE`
+- `registry-installation-rid12-UNKNOWN-FIELD-NEGATIVE-AFTER`
+- `registry-installation-rid12-UNKNOWN-FIELD-TWIN-BEFORE`
+- `registry-installation-rid12-UNKNOWN-FIELD-TWIN-AFTER`
+- `registry-installation-rid12-EMPTY-ROLEIDS-NEGATIVE-BEFORE`
+- `registry-installation-rid12-EMPTY-ROLEIDS-NEGATIVE-AFTER`
+- `registry-installation-rid12-EMPTY-ROLEIDS-TWIN-BEFORE`
+- `registry-installation-rid12-EMPTY-ROLEIDS-TWIN-AFTER`
+- `registry-installation-rid12-DUPLICATE-ROLEIDS-NEGATIVE-BEFORE`
+- `registry-installation-rid12-DUPLICATE-ROLEIDS-NEGATIVE-AFTER`
+- `registry-installation-rid12-DUPLICATE-ROLEIDS-TWIN-BEFORE`
+- `registry-installation-rid12-DUPLICATE-ROLEIDS-TWIN-AFTER`
+- `registry-installation-rid12-EMPTY-TARGETTYPES-NEGATIVE-BEFORE`
+- `registry-installation-rid12-EMPTY-TARGETTYPES-NEGATIVE-AFTER`
+- `registry-installation-rid12-EMPTY-TARGETTYPES-TWIN-BEFORE`
+- `registry-installation-rid12-EMPTY-TARGETTYPES-TWIN-AFTER`
+- `registry-installation-rid12-DUPLICATE-TARGETTYPES-NEGATIVE-BEFORE`
+- `registry-installation-rid12-DUPLICATE-TARGETTYPES-NEGATIVE-AFTER`
+- `registry-installation-rid12-DUPLICATE-TARGETTYPES-TWIN-BEFORE`
+- `registry-installation-rid12-DUPLICATE-TARGETTYPES-TWIN-AFTER`
+- `registry-installation-rid12-EMPTY-SUBJECTTYPES-NEGATIVE-BEFORE`
+- `registry-installation-rid12-EMPTY-SUBJECTTYPES-NEGATIVE-AFTER`
+- `registry-installation-rid12-EMPTY-SUBJECTTYPES-TWIN-BEFORE`
+- `registry-installation-rid12-EMPTY-SUBJECTTYPES-TWIN-AFTER`
+- `registry-installation-rid12-DUPLICATE-SUBJECTTYPES-NEGATIVE-BEFORE`
+- `registry-installation-rid12-DUPLICATE-SUBJECTTYPES-NEGATIVE-AFTER`
+- `registry-installation-rid12-DUPLICATE-SUBJECTTYPES-TWIN-BEFORE`
+- `registry-installation-rid12-DUPLICATE-SUBJECTTYPES-TWIN-AFTER`
+- `registry-installation-rid12-ROLES17-NEGATIVE-BEFORE`
+- `registry-installation-rid12-ROLES17-NEGATIVE-AFTER`
+- `registry-installation-rid12-ROLES17-TWIN-BEFORE`
+- `registry-installation-rid12-ROLES17-TWIN-AFTER`
+- `registry-installation-rid12-TYPES17-NEGATIVE-BEFORE`
+- `registry-installation-rid12-TYPES17-NEGATIVE-AFTER`
+- `registry-installation-rid12-TYPES17-TWIN-BEFORE`
+- `registry-installation-rid12-TYPES17-TWIN-AFTER`
+- `registry-installation-rid12-SUBJECTS5-NEGATIVE-BEFORE`
+- `registry-installation-rid12-SUBJECTS5-NEGATIVE-AFTER`
+- `registry-installation-rid12-SUBJECTS5-TWIN-BEFORE`
+- `registry-installation-rid12-SUBJECTS5-TWIN-AFTER`
+- `registry-installation-rid12-SUBJECT-UNSPECIFIED-NEGATIVE-BEFORE`
+- `registry-installation-rid12-SUBJECT-UNSPECIFIED-NEGATIVE-AFTER`
+- `registry-installation-rid12-SUBJECT-UNSPECIFIED-TWIN-BEFORE`
+- `registry-installation-rid12-SUBJECT-UNSPECIFIED-TWIN-AFTER`
+- `registry-installation-rid12-SUBJECT-UNKNOWN-NEGATIVE-BEFORE`
+- `registry-installation-rid12-SUBJECT-UNKNOWN-NEGATIVE-AFTER`
+- `registry-installation-rid12-SUBJECT-UNKNOWN-TWIN-BEFORE`
+- `registry-installation-rid12-SUBJECT-UNKNOWN-TWIN-AFTER`
+- `registry-installation-rid12-IAM-ROLE-NEGATIVE-BEFORE`
+- `registry-installation-rid12-IAM-ROLE-NEGATIVE-AFTER`
+- `registry-installation-rid12-IAM-ROLE-TWIN-BEFORE`
+- `registry-installation-rid12-IAM-ROLE-TWIN-AFTER`
+- `registry-installation-rid12-IAM-TYPE-NEGATIVE-BEFORE`
+- `registry-installation-rid12-IAM-TYPE-NEGATIVE-AFTER`
+- `registry-installation-rid12-IAM-TYPE-TWIN-BEFORE`
+- `registry-installation-rid12-IAM-TYPE-TWIN-AFTER`
+- `registry-installation-rid12-IAM-MODULE-NEGATIVE-BEFORE`
+- `registry-installation-rid12-IAM-MODULE-NEGATIVE-AFTER`
+- `registry-installation-rid12-IAM-MODULE-TWIN-BEFORE`
+- `registry-installation-rid12-IAM-MODULE-TWIN-AFTER`
+- `registry-installation-rid12-ABSENT-NO-GD-BEFORE`
+- `registry-installation-rid12-ABSENT-NO-GD-AFTER`
+- `registry-installation-rid12-EMPTY-NO-GD-BEFORE`
+- `registry-installation-rid12-EMPTY-NO-GD-AFTER`
+- `registry-installation-rid12-ROLES17-TWIN-AFTER-REORDER`
