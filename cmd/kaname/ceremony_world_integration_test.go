@@ -217,7 +217,8 @@ type ceremonyWorld struct {
 	signer      *tokensigner.Signer // same real signer exposed to installation acceptance
 	logs        *lockedBuffer
 	// lifespans — сроки церемонии, которые настройка мира называет сборке.
-	lifespans config.CeremonyConfig
+	lifespans       config.CeremonyConfig
+	clientAudiences []string // native Given uses the actual stand audience; nil preserves this fixture
 
 	user    domain.UserID
 	email   string
@@ -510,13 +511,17 @@ func (w *ceremonyWorld) seedClientAuthenticatedBy(name string, status domain.Int
 	w.t.Helper()
 	id := domain.InteractiveClientID(ids.NewHyphenID(ids.PrefixInteractiveClientHyphen))
 	repo := kanamepg.NewInteractiveClientRepo(w.pool)
+	audiences := w.clientAudiences
+	if len(audiences) == 0 {
+		audiences = []string{"https://api.kacho.local"}
+	}
 	in := domain.InteractiveClient{
 		ID:                      id,
 		Name:                    domain.InteractiveClientName(name),
 		RedirectURIs:            redirects,
 		PostLogoutRedirectURIs:  []string{},
 		ClientID:                string(id),
-		Audiences:               []string{"https://api.kacho.local"},
+		Audiences:               audiences,
 		GrantTypes:              []string{grantAuthorizationCode, grantRefreshToken},
 		TokenEndpointAuthMethod: method,
 		Status:                  status,

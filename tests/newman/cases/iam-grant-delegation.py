@@ -356,7 +356,7 @@ CASES.append(Case(
 ))
 
 
-# #1011: a separate normal delegation admits GROUP. The original D1 axes and
+# kaname#1011: a separate normal delegation admits GROUP. The original D1 axes and
 # GD-E1..E5 stay unchanged. Both twins use the same role/target/scope and caller;
 # only the group's membership differs. The delegate belongs to A because the
 # public AddMember contract requires the member and group to share an account.
@@ -402,7 +402,7 @@ def _group_self_grant_twin(contains_delegate):
     if contains_delegate:
         steps += [Step(name=prefix + "-grant-group", method="POST", path="/iam/v1/accessBindings",
                        body=grant_body, auth="jwtGDGroupDelegate",
-                       test_script=[*_denied("#1011 group contains delegate"),
+                       test_script=[*_denied("kaname#1011 group contains delegate"),
                                     "pm.test('synchronous refusal is not an operation', () => pm.expect(pm.response.json()).not.to.have.property('id'));"])]
     else:
         steps += [Step(name=prefix + "-grant-group", method="POST", path="/iam/v1/accessBindings",
@@ -433,8 +433,8 @@ def _group_self_grant_twin(contains_delegate):
               poll_operation_until_done(), assert_op_success()]
     return Case(id=("IAM-GD-1011-GROUP-CONTAINS-DELEGATE-DENIED" if contains_delegate
                     else "IAM-GD-1011-GROUP-WITHOUT-DELEGATE-ALLOWED"),
-                title=("#1011: группа содержит делегата — 403/7 до операции" if contains_delegate
-                       else "#1011: та же групповая ось без делегата — успешная операция с delegationId"),
+                title=("kaname#1011: группа содержит делегата — 403/7 до операции" if contains_delegate
+                       else "kaname#1011: та же групповая ось без делегата — успешная операция с delegationId"),
                 classes=["AUTHZ", "CONF"], priority="P1", steps=steps)
 
 

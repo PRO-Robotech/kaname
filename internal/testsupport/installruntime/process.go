@@ -85,6 +85,14 @@ func Start(ctx context.Context, in Input) (*Process, error) {
 		errout.Close()
 		return nil, err
 	}
+	identity, _ := json.Marshal(map[string]any{"pid": p.cmd.Process.Pid, "binarySHA256": digest})
+	if err := os.WriteFile(filepath.Join(in.EvidenceDir, "process.json"), identity, 0600); err != nil {
+		_ = p.cmd.Process.Kill()
+		_ = p.cmd.Wait()
+		out.Close()
+		errout.Close()
+		return nil, err
+	}
 	go func() {
 		err := p.cmd.Wait()
 		out.Close()
@@ -92,6 +100,8 @@ func Start(ctx context.Context, in Input) (*Process, error) {
 		p.mu.Lock()
 		p.err = err
 		p.mu.Unlock()
+		terminal, _ := json.Marshal(map[string]any{"pid": p.cmd.Process.Pid, "exited": true, "exitCode": p.cmd.ProcessState.ExitCode()})
+		_ = os.WriteFile(filepath.Join(in.EvidenceDir, "terminal.json"), terminal, 0600)
 		close(p.done)
 	}()
 	return p, nil
