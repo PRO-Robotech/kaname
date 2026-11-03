@@ -32,16 +32,18 @@ type ridNewmanToolInput struct {
 	NodeSHA, ScriptSHA, CollectionSHA, PackageSHA, TreeSHA, TestExecutableSHA, RunID string
 }
 type ridNewmanReceipt struct {
-	SchemaVersion int    `json:"schemaVersion"`
-	OK            bool   `json:"ok"`
-	CaseID        string `json:"caseId"`
-	CollectionSHA string `json:"collectionSHA256"`
-	NewmanVersion string `json:"newmanVersion"`
-	PackageSHA    string `json:"newmanPackageSHA256"`
-	NodeSHA       string `json:"nodeSHA256"`
-	RunnerSHA     string `json:"runnerSHA256"`
-	TreeSHA       string `json:"toolTreeSHA256"`
-	Producer      struct {
+	RID03ActGet            json.RawMessage         `json:"rid03ActGet,omitempty"`
+	RID03ActGetObservation *rid03ActGetObservation `json:"-"`
+	SchemaVersion          int                     `json:"schemaVersion"`
+	OK                     bool                    `json:"ok"`
+	CaseID                 string                  `json:"caseId"`
+	CollectionSHA          string                  `json:"collectionSHA256"`
+	NewmanVersion          string                  `json:"newmanVersion"`
+	PackageSHA             string                  `json:"newmanPackageSHA256"`
+	NodeSHA                string                  `json:"nodeSHA256"`
+	RunnerSHA              string                  `json:"runnerSHA256"`
+	TreeSHA                string                  `json:"toolTreeSHA256"`
+	Producer               struct {
 		RunID             string `json:"runId"`
 		TestExecutableSHA string `json:"testExecutableSHA256"`
 	} `json:"producer"`
@@ -282,7 +284,11 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 	raw, err = os.ReadFile(filepath.Join(dir, "stdout"))
 	require.NoError(t, err)
 	var receipt ridNewmanReceipt
+	require.NoError(t, rid03CheckReceiptObservationField(raw))
 	require.NoError(t, json.Unmarshal(raw, &receipt))
+	observation, observationErr := rid03DecodeReceiptObservation(receipt.CaseID, receipt.RID03ActGet)
+	require.NoError(t, observationErr)
+	receipt.RID03ActGetObservation = observation
 	require.True(t, receipt.OK, "Newman public assertions/coverage failed; arbitrary messages withheld")
 	require.Equal(t, in.CaseID, receipt.CaseID)
 	require.Equal(t, in.CollectionSHA, receipt.CollectionSHA)
@@ -481,7 +487,11 @@ func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseI
 	raw, err := os.ReadFile(filepath.Join(c.dir, "newman", "stdout"))
 	require.NoError(t, err)
 	var receipt ridNewmanReceipt
+	require.NoError(t, rid03CheckReceiptObservationField(raw))
 	require.NoError(t, json.Unmarshal(raw, &receipt))
+	observation, observationErr := rid03DecodeReceiptObservation(receipt.CaseID, receipt.RID03ActGet)
+	require.NoError(t, observationErr)
+	receipt.RID03ActGetObservation = observation
 	require.True(t, receipt.OK)
 	if probe == "" {
 		rid08Write(t, f.session.Root, "newman-"+label+"-accepted", receipt)
