@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/operations"
@@ -42,6 +43,11 @@ type installationCredential struct {
 }
 
 type installationAuthentication struct {
+	gateOnce          sync.Once
+	gate              chan struct{}
+	accessToken       string
+	accessOwner       string
+	accessExpires     time.Time
 	credential        installationCredential
 	key               *ecdsa.PrivateKey
 	resolver          clientassertion.ClientResolver
@@ -104,7 +110,7 @@ func prepareInstallationAuthentication(pool *pgxpool.Pool, cfg config.Config, si
 	if signer == nil || reader == nil || !cfg.AuthN.ClientToken.Enabled {
 		return nil, fmt.Errorf("installation credential requires shared token issuance and presented credential verification")
 	}
-	c, key, err := loadInstallationCredential(cfg.Installation.CredentialFile)
+	c, key, err := loadInstallationCredential(cfg.ModuleSeedInstaller.CredentialFile)
 	if err != nil {
 		return nil, err
 	}
@@ -117,55 +123,34 @@ func prepareInstallationAuthentication(pool *pgxpool.Pool, cfg config.Config, si
 	return &installationAuthentication{credential: c, key: key, resolver: resolver, verifier: verifier, issuer: issuer, reader: reader, audience: cfg.AuthN.PresentedCredential.Audience, assertionAudience: signer.Issuer()}, nil
 }
 
-// Authenticate renews from the same standing key on every pair. Only the normal
-// presented-credential reader can put the verified token's principal in context.
-func (a *installationAuthentication) Authenticate(ctx context.Context) (context.Context, error) {
-	parent := ctx
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+// Authenticate reuses an actual issued access token, checking it through the
+// normal presented reader every time. Authority is independently checked per pair.
+func (a *installationAuthentication) Authenticate(parent context.Context) (context.Context, error) {
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	client, err := a.resolver.ResolveAssertionClient(ctx, a.credential.ClientID)
-	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	a.gateOnce.Do(func() { a.gate = make(chan struct{}, 1) })
+	select {
+	case a.gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, status.FromContextError(ctx.Err()).Err()
 	}
-	if client.Kind != domain.AssertionClientServiceAccount {
-		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
+	defer func() { <-a.gate }()
+	if a.accessToken == "" || !time.Now().Before(a.accessExpires) {
+		token, owner, err := a.exchange(ctx)
+		if err != nil {
+			return nil, err
+		}
+		a.accessToken = token.AccessToken
+		a.accessOwner = owner
+		// Renew conservatively before the numeric-date rounding boundary; acceptance
+		// and revocation of each presentation still belong to the ordinary reader.
+		a.accessExpires = time.Now().Add(time.Duration(max(0, token.ExpiresIn-1)) * time.Second)
 	}
-	now := time.Now().UTC()
-	end := now.Add(min(60*time.Second, tokenpolicy.MaxAssertionLifetime))
-	if client.ExpiresAt > 0 && time.Unix(client.ExpiresAt, 0).Before(end) {
-		end = time.Unix(client.ExpiresAt, 0)
-	}
-	if !end.After(now) {
-		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
-	}
-	var nonce [32]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return nil, err
-	}
-	assertion := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.RegisteredClaims{
-		Issuer: a.credential.ClientID, Subject: a.credential.ClientID, Audience: jwt.ClaimStrings{a.assertionAudience},
-		IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(end), ID: hex.EncodeToString(nonce[:]),
-	})
-	assertion.Header["typ"] = tokenpolicy.TokenTypeClientAssertion
-	assertion.Header["kid"] = a.credential.KeyID
-	raw, err := assertion.SignedString(a.key)
-	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "unauthenticated")
-	}
-	verified, err := a.verifier.Verify(ctx, tokenpolicy.ClientAssertionType, raw)
-	if err != nil {
-		return nil, installationProofFailure(verified.Outcome)
-	}
-	token, outcome, err := a.issuer.Issue(ctx, client_token.Input{Client: verified.Client, RequestedAudience: []string{a.audience}})
-	if err != nil {
-		return nil, installationProofFailure(outcome)
-	}
-	// Preserve the caller's cancellation lifetime after the bounded authn call.
 	var authenticated context.Context
-	incoming := metadata.NewIncomingContext(ctx, metadata.Pairs(presentedcred.MetadataKey, "Bearer "+token.AccessToken))
-	_, err = a.reader.UnaryOver(nil)(incoming, nil, &grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.GrantDelegationService/Create"}, func(c context.Context, _ any) (any, error) {
+	incoming := metadata.NewIncomingContext(ctx, metadata.Pairs(presentedcred.MetadataKey, "Bearer "+a.accessToken))
+	_, err := a.reader.UnaryOver(nil)(incoming, nil, &grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.GrantDelegationService/Create"}, func(c context.Context, _ any) (any, error) {
 		p, ok := operations.PrincipalFromContextOK(c)
-		if !ok || p.Type != "service_account" || p.ID != verified.Client.OwnerID {
+		if !ok || p.Type != "service_account" || p.ID != a.accessOwner {
 			return nil, status.Error(codes.Unauthenticated, "unauthenticated")
 		}
 		authenticated = installationVerifiedContext{Context: parent, values: c}
@@ -175,6 +160,77 @@ func (a *installationAuthentication) Authenticate(ctx context.Context) (context.
 		return nil, err
 	}
 	return authenticated, nil
+}
+
+func (a *installationAuthentication) exchange(ctx context.Context) (client_token.Output, string, error) {
+	for {
+		client, outcome, err := clientassertion.ResolveRegisteredClient(ctx, a.resolver, a.credential.ClientID)
+		if err != nil {
+			return client_token.Output{}, "", installationProofFailure(outcome)
+		}
+		if client.Kind != domain.AssertionClientServiceAccount {
+			return client_token.Output{}, "", installationProofFailure(clientassertion.OutcomeClientUnknown)
+		}
+		raw, err := a.freshAssertion(client)
+		if err != nil {
+			return client_token.Output{}, "", err
+		}
+		verified, err := a.verifier.Verify(ctx, tokenpolicy.ClientAssertionType, raw)
+		if err != nil {
+			if verified.Outcome == clientassertion.OutcomeClientPaceExceeded {
+				if err := waitInstallationExchange(ctx, verified.RetryAfter); err != nil {
+					return client_token.Output{}, "", err
+				}
+				continue // Fresh lookup, assertion and jti; never retry a consumed proof.
+			}
+			return client_token.Output{}, "", installationProofFailure(verified.Outcome)
+		}
+		token, outcome, err := a.issuer.Issue(ctx, client_token.Input{Client: verified.Client, RequestedAudience: []string{a.audience}})
+		if err != nil {
+			return client_token.Output{}, "", installationProofFailure(outcome)
+		}
+		return token, verified.Client.OwnerID, nil
+	}
+}
+
+func waitInstallationExchange(ctx context.Context, retryAfter time.Duration) error {
+	if retryAfter <= 0 {
+		return status.Error(codes.ResourceExhausted, "client exchange pace exceeded")
+	}
+	timer := time.NewTimer(retryAfter)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return status.FromContextError(ctx.Err()).Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (a *installationAuthentication) freshAssertion(client domain.AssertionClient) (string, error) {
+	now := time.Now().UTC()
+	end := now.Add(min(60*time.Second, tokenpolicy.MaxAssertionLifetime))
+	if client.ExpiresAt > 0 && time.Unix(client.ExpiresAt, 0).Before(end) {
+		end = time.Unix(client.ExpiresAt, 0)
+	}
+	if !end.After(now) {
+		return "", status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", err
+	}
+	assertion := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.RegisteredClaims{
+		Issuer: a.credential.ClientID, Subject: a.credential.ClientID, Audience: jwt.ClaimStrings{a.assertionAudience},
+		IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(end), ID: hex.EncodeToString(nonce[:]),
+	})
+	assertion.Header["typ"] = tokenpolicy.TokenTypeClientAssertion
+	assertion.Header["kid"] = a.credential.KeyID
+	raw, err := assertion.SignedString(a.key)
+	if err != nil {
+		return "", status.Error(codes.Unauthenticated, "unauthenticated")
+	}
+	return raw, nil
 }
 
 type installationVerifiedContext struct {

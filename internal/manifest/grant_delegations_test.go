@@ -4,6 +4,7 @@
 package manifest_test
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -58,5 +59,25 @@ seed:
 				t.Fatalf("valid=%v: %v", tc.valid, err)
 			}
 		})
+	}
+}
+
+func TestInstallationUnknownFieldCoordinates(t *testing.T) {
+	base, err := os.ReadFile("testdata/registry.delegation-fixture.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ body, path string }{
+		{"    - delegate: {account: system, name: svc, mystery: secret-value}\n", "seed.grantDelegations[0].delegate.mystery"},
+		{"    - delegate: {account: system, name: svc}\n      mystery: secret-value\n", "seed.grantDelegations[0].mystery"},
+	} {
+		_, err := manifest.Load(append(append([]byte(nil), base...), []byte("\nseed:\n  grantDelegations:\n"+tc.body)...))
+		var field interface{ FieldPath() string }
+		if !errors.As(err, &field) || field.FieldPath() != tc.path {
+			t.Fatalf("coordinate: %v", err)
+		}
+		if strings.Contains(err.Error(), "secret-value") {
+			t.Fatal("input value exposed")
+		}
 	}
 }

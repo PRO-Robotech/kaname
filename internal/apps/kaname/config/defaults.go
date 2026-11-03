@@ -18,7 +18,6 @@ import (
 // through kacho-deploy. ENV-prefix is `KANAME` (vs `KACHO_VPC`), default
 // DB-name is `kaname`.
 func RegisterDefaults(v *viper.Viper) {
-	v.SetDefault("installation.account-page-size", 256)
 	// logger
 	v.SetDefault("logger.level", "INFO")
 

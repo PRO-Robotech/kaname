@@ -10,6 +10,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -36,16 +37,16 @@ type installationReadSource interface {
 	InstallationReferences(context.Context, string, string, []string) (domain.ServiceAccountID, []string, error)
 }
 
-func applyInstallationDelegations(ctx context.Context, logger *slog.Logger, authn *installationAuthentication, repo gdapp.Repo, reads installationReadSource, ops operations.Repo, cat catalog.Source, relations clients.RelationStore, target string, pageSize int, manifests []*manifest.Manifest) error {
+func applyInstallationDelegations(ctx context.Context, logger *slog.Logger, authn *installationAuthentication, repo gdapp.Repo, reads installationReadSource, ops operations.Repo, cat catalog.Source, relations clients.RelationStore, plans *authzmodel.Plans, target string, pageSize int, manifests []*manifest.Manifest) error {
 	if !hasInstallationDelegations(manifests) {
 		return nil
 	}
 	accounts, _, err := reads.InstallationAccounts(ctx, target, pageSize)
 	if err != nil {
-		return failInstallation(logger, "census", "", "", "", 0, shared.MapRepoErrAt(ctx, err))
+		return failInstallation(logger, "census", "accounts", "", "", 0, shared.MapRepoErrAt(ctx, err))
 	}
 	logger.Info("installation delegation account snapshot", slog.Int("accounts", len(accounts)))
-	create := gdapp.NewCreateGrantDelegationUseCase(repo, ops, cat).WithRelationStore(relations, logger)
+	create := gdapp.NewCreateGrantDelegationUseCase(repo, ops, cat).WithRelationStore(relations, logger).WithInstallationModel(plans)
 	pairs := 0
 	for _, m := range manifests {
 		if m.Seed == nil {
@@ -106,18 +107,19 @@ func waitInstallationOperation(ctx context.Context, repo operations.Repo, id str
 	}
 }
 
-func validateInstallationScope(input config.InstallationConfig) error {
-	switch input.Scope {
-	case "single-account":
-		if input.TargetAccountID == "" {
+func validateInstallationInput(input config.ModuleSeedInstallerConfig) error {
+	if input.TenantAccountID != nil {
+		if *input.TenantAccountID == "" {
 			return shared.InvalidArg("tenantAccountId", "one tenant account ID is required")
 		}
-	case "all-accounts":
-		if input.TargetAccountID != "" {
-			return shared.InvalidArg("tenantAccountId", "all-accounts scope cannot carry a tenant account ID")
-		}
-	default:
-		return shared.InvalidArg("scope", "scope must be single-account or all-accounts")
+		return shared.ValidateResourceID(*input.TenantAccountID, domain.PrefixAccount, "account")
 	}
 	return nil
+}
+
+func installationTarget(input config.ModuleSeedInstallerConfig) string {
+	if input.TenantAccountID == nil {
+		return ""
+	}
+	return *input.TenantAccountID
 }

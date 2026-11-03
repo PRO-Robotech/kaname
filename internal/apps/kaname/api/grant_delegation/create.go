@@ -31,6 +31,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -54,11 +55,12 @@ type CreateInput struct {
 
 // CreateGrantDelegationUseCase — заведение делегирования.
 type CreateGrantDelegationUseCase struct {
-	repo      Repo
-	opsRepo   operations.Repo
-	cat       catalog.Source
-	relations clients.RelationStore
-	logger    *slog.Logger
+	installationModel *authzmodel.Plans
+	repo              Repo
+	opsRepo           operations.Repo
+	cat               catalog.Source
+	relations         clients.RelationStore
+	logger            *slog.Logger
 }
 
 // NewCreateGrantDelegationUseCase — над хранилищем, операциями и каталожным
@@ -72,6 +74,18 @@ func (u *CreateGrantDelegationUseCase) WithRelationStore(relations clients.Relat
 	u.relations = relations
 	u.logger = logger
 	return u
+}
+
+// WithInstallationModel supplies the admitted instance plans for transaction-bound authority.
+func (u *CreateGrantDelegationUseCase) WithInstallationModel(plans *authzmodel.Plans) *CreateGrantDelegationUseCase {
+	u.installationModel = plans
+	return u
+}
+
+type installationTransaction interface {
+	LockPendingInstallationOperation(context.Context, string, string, string) error
+	RequireInstallationAuthority(context.Context, *authzmodel.Plans) error
+	BindInstallationOperation(context.Context, string, *anypb.Any, string) error
 }
 
 // Execute — синхронные проверки и операция заведения.
@@ -103,25 +117,10 @@ func (u *CreateGrantDelegationUseCase) execute(ctx context.Context, in CreateInp
 	d.Module = module
 	caller := operations.PrincipalFromContext(ctx)
 	d.DelegatedBy = domain.GrantDelegationActor{Type: caller.Type, ID: caller.ID}
-	if installation {
-		// Preserve the resource ID in ordinary Operation metadata for an idempotent
-		// active pair. The writer still serializes and rechecks history after this
-		// advisory read; a concurrent revoke can never make it create a replacement.
-		rd, err := u.repo.Reader(ctx)
-		if err != nil {
-			return nil, shared.MapRepoErrAt(ctx, err)
-		}
-		existing, err := rd.AccessBindings().GrantDelegations().ActiveFor(ctx, d.AccountID, d.DelegateID)
-		_ = rd.Rollback(ctx)
-		if err == nil {
-			d.ID = existing.ID
-		} else if !stderrors.Is(err, iamerr.ErrNotFound) {
-			return nil, shared.MapRepoErrAt(ctx, err)
-		}
+	if installation && u.installationModel == nil {
+		return nil, fmt.Errorf("installation authority model is not wired")
 	}
-	if d.ID == "" {
-		d.ID = domain.GrantDelegationID(ids.NewID(domain.PrefixGrantDelegation))
-	}
+	d.ID = domain.GrantDelegationID(ids.NewID(domain.PrefixGrantDelegation))
 	actor := authzguard.PrincipalUserID(ctx)
 
 	op, err := operations.NewFromContext(ctx, domain.PrefixOperationIAM,
@@ -135,7 +134,7 @@ func (u *CreateGrantDelegationUseCase) execute(ctx context.Context, in CreateInp
 		return nil, err
 	}
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		res, derr := u.doCreate(ctx, d, actor, installation)
+		res, derr := u.doCreate(ctx, d, actor, installation, op.ID)
 		if derr != nil && u.logger != nil {
 			u.logger.Error("grant_delegation create operation failed", "op", op.ID, "err", derr,
 				"account", string(d.AccountID), "delegate", string(d.DelegateID))
@@ -319,9 +318,20 @@ func (u *CreateGrantDelegationUseCase) validateComposition(ctx context.Context, 
 
 // doCreate — строка делегирования и строка аудита в одной транзакции писателя
 // (Р5). Второе действующее делегирование пары — 23505, `ALREADY_EXISTS` (Д1).
-func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.GrantDelegation, actor string, installation bool) (*anypb.Any, error) {
+func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.GrantDelegation, actor string, installation bool, opID string) (*anypb.Any, error) {
 	d.CreatedAt = time.Now().UTC()
 	created, err := shared.DoWithWriteTx(ctx, u.repo, func(ctx context.Context, w Writer) (domain.GrantDelegation, error) {
+		var transaction installationTransaction
+		if installation {
+			var ok bool
+			transaction, ok = w.(installationTransaction)
+			if !ok {
+				return domain.GrantDelegation{}, fmt.Errorf("installation transaction capability is not wired")
+			}
+			if err := transaction.LockPendingInstallationOperation(ctx, opID, string(d.AccountID), string(d.ID)); err != nil {
+				return domain.GrantDelegation{}, err
+			}
+		}
 		gw := w.AccessBindingsW().GrantDelegationsW()
 		if installation {
 			installer, ok := gw.(interface {
@@ -334,10 +344,14 @@ func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.Gr
 			if err != nil {
 				return domain.GrantDelegation{}, err
 			}
-			if err := authzguard.RequireClusterAdmin(ctx, u.relations); err != nil {
+			if err := transaction.RequireInstallationAuthority(ctx, u.installationModel); err != nil {
 				return domain.GrantDelegation{}, err
 			}
 			if found {
+				meta, _ := anypb.New(&iamv1.CreateGrantDelegationMetadata{GrantDelegationId: string(existing.ID), AccountId: string(existing.AccountID)})
+				if err := transaction.BindInstallationOperation(ctx, opID, meta, string(existing.ID)); err != nil {
+					return domain.GrantDelegation{}, err
+				}
 				return existing, nil
 			}
 		}
@@ -361,6 +375,12 @@ func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.Gr
 			},
 		}); aerr != nil {
 			return domain.GrantDelegation{}, aerr
+		}
+		if installation {
+			meta, _ := anypb.New(&iamv1.CreateGrantDelegationMetadata{GrantDelegationId: string(out.ID), AccountId: string(out.AccountID)})
+			if err := transaction.BindInstallationOperation(ctx, opID, meta, string(out.ID)); err != nil {
+				return domain.GrantDelegation{}, err
+			}
 		}
 		return out, nil
 	})

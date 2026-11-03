@@ -68,6 +68,7 @@ func (r *readTx) Rollback(ctx context.Context) error { return r.tx.Rollback(ctx)
 
 // writeTx — kaname.Writer поверх pgx.Tx (RW).
 type writeTx struct {
+	installationOperation *pendingInstallationOperation
 	readTx
 	// ownerFKHint — owner id of the account inserted on this tx (if any). Set by
 	// accountWriter.Insert via the AccountsW sink; consumed by Commit to render the

@@ -14,12 +14,15 @@ import (
 	"errors"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestInstallationCredentialPrivateClosedInput(t *testing.T) {
@@ -110,20 +113,64 @@ func TestInstallationVerifiedContextPreservesParentCancellation(t *testing.T) {
 
 type installationContextTestKey struct{}
 
-func TestInstallationScopeIsExplicit(t *testing.T) {
+func TestInstallationTargetPresence(t *testing.T) {
+	empty := ""
+	malformed := "not-an-account"
 	for _, tc := range []struct {
-		scope, target string
-		valid         bool
+		name   string
+		target *string
+		valid  bool
 	}{
-		{"single-account", "acc00000000000000001", true},
-		{"all-accounts", "", true},
-		{"single-account", "", false},
-		{"all-accounts", "acc00000000000000001", false},
-		{"", "", false}, {"arbitrary", "", false},
+		{"omitted all accounts", nil, true}, {"explicit empty", &empty, false}, {"malformed", &malformed, false},
 	} {
-		err := validateInstallationScope(config.InstallationConfig{Scope: tc.scope, TargetAccountID: tc.target})
-		if (err == nil) != tc.valid {
-			t.Fatalf("scope=%q,target=%q: %v", tc.scope, tc.target, err)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateInstallationInput(config.ModuleSeedInstallerConfig{TenantAccountID: tc.target})
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%v: %v", tc.valid, err)
+			}
+		})
+	}
+}
+
+func TestInstallationPaceWaitHonoursCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := status.Code(waitInstallationExchange(ctx, time.Hour)); got != codes.Canceled {
+		t.Fatalf("cancel: %v", got)
+	}
+	if got := status.Code(waitInstallationExchange(context.Background(), 0)); got != codes.ResourceExhausted {
+		t.Fatalf("invalid retry: %v", got)
+	}
+	start := time.Now()
+	if err := waitInstallationExchange(context.Background(), 5*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) < 5*time.Millisecond {
+		t.Fatal("retry-after ignored")
+	}
+}
+
+// A narrow error-boundary control: no database is replaced or simulated here.
+// Nil mutation dependencies make entering a GD operation after failed census fatal.
+type installationCensusError struct {
+	installationReadSource
+	cause error
+}
+
+func (r installationCensusError) InstallationAccounts(context.Context, string, int) ([]domain.AccountID, domain.AccountID, error) {
+	return nil, "", r.cause
+}
+func TestInstallationCensusFailureCoordinatesBeforeOperation(t *testing.T) {
+	cause := errors.New("driver secret-value")
+	err := applyInstallationDelegations(context.Background(), quietLogger(), nil, nil, installationCensusError{cause: cause}, nil, nil, nil, nil, "", 2, []*manifest.Manifest{{Seed: &manifest.Seed{GrantDelegations: []manifest.GrantDelegation{{}}}}})
+	var failed *installationFailure
+	if !errors.As(err, &failed) {
+		t.Fatalf("result: %v", err)
+	}
+	if failed.result.Stage != "census" || failed.result.Field != "accounts" || failed.result.Code != "INTERNAL" || failed.result.CompletedPairs != 0 {
+		t.Fatalf("result: %+v", failed.result)
+	}
+	if strings.Contains(err.Error(), "secret-value") {
+		t.Fatal("driver value exposed")
 	}
 }

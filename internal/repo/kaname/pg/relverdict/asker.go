@@ -90,6 +90,7 @@ func rollback(ctx context.Context, tx pgx.Tx) error {
 // шире, чем измерено. Ось у обратных вопросов та же и держится их пробами; если
 // понадобится число и по ним, оно заводится СВОИМ, а не расширением этого молча.
 type Asker struct {
+	transaction   pgx.Tx
 	preparedPlans *authzmodel.Plans
 	pool          *pgxpool.Pool
 	// labelMirror / labelIAMDirect — основания меточной ветви по осям.
@@ -197,6 +198,15 @@ func NewPreparedAsker(pool *pgxpool.Pool, plans *authzmodel.Plans) *Asker {
 	return &Asker{pool: pool, preparedPlans: plans}
 }
 
+// NewTransactionAsker runs the ordinary production verdict on the caller's held
+// transaction. It neither acquires another connection nor ends that transaction.
+func NewTransactionAsker(tx pgx.Tx, plans *authzmodel.Plans) *Asker {
+	if tx == nil || plans == nil {
+		return nil
+	}
+	return &Asker{transaction: tx, preparedPlans: plans}
+}
+
 // Allowed отвечает на прямой вопрос.
 //
 // Возвращает ОШИБКУ, а не false, когда ответа получить не удалось: сравнитель
@@ -204,14 +214,18 @@ func NewPreparedAsker(pool *pgxpool.Pool, plans *authzmodel.Plans) *Asker {
 // БД читалась бы как поток расхождений либо как согласие — в зависимости от
 // вердикта движка, то есть случайно.
 func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, relation string, condCtx map[string]any) (bool, error) {
-	if a == nil || a.pool == nil {
+	if a == nil || (a.pool == nil && a.transaction == nil) {
 		return false, fmt.Errorf("relverdict: источник не собран")
 	}
-	tx, err := a.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return false, fmt.Errorf("relverdict: транзакция чтения: %w", err)
+	tx := a.transaction
+	if tx == nil {
+		var err error
+		tx, err = a.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+		if err != nil {
+			return false, fmt.Errorf("relverdict: транзакция чтения: %w", err)
+		}
+		defer func() { _ = rollback(ctx, tx) }()
 	}
-	defer func() { _ = rollback(ctx, tx) }()
 
 	v, grounds, err := Ask(ctx, tx, Query{
 		PreparedPlans: a.preparedPlans,

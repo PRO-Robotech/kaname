@@ -106,3 +106,36 @@ func refuseNullDelegations(doc *yaml.Node) error {
 	}
 	return nil
 }
+
+// Refuse unknown fields from nodes so callers receive structural coordinates,
+// independently of yaml.Decoder's human-readable error formatting.
+func refuseUnknownDelegationFields(doc *yaml.Node) error {
+	entries := mapValue(mapValue(doc, "seed"), "grantDelegations")
+	if entries == nil || entries.Kind != yaml.SequenceNode {
+		return nil
+	}
+	for i, entry := range entries.Content {
+		if entry.Kind != yaml.MappingNode {
+			continue // the normal shape decoder owns non-mapping entries
+		}
+		for j := 0; j+1 < len(entry.Content); j += 2 {
+			key, value := entry.Content[j].Value, entry.Content[j+1]
+			switch key {
+			case "roleIds", "targetTypes", "subjectTypes":
+			case "delegate":
+				if value.Kind != yaml.MappingNode {
+					continue
+				}
+				for k := 0; k+1 < len(value.Content); k += 2 {
+					field := value.Content[k].Value
+					if field != "account" && field != "name" {
+						return linkFault{kind: ErrShape, coord: locate(doc, "seed", "grantDelegations", i, "delegate", field), detail: "unknown field"}
+					}
+				}
+			default:
+				return linkFault{kind: ErrShape, coord: locate(doc, "seed", "grantDelegations", i, key), detail: "unknown field"}
+			}
+		}
+	}
+	return nil
+}

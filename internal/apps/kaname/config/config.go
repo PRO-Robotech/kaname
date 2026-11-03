@@ -31,11 +31,11 @@ import (
 // Every section is `mapstructure`-tagged (viper uses mapstructure for
 // Unmarshal by default). Defaults live in defaults.go.
 type Config struct {
-	Installation InstallationConfig `mapstructure:"installation"`
-	Logger       LoggerConfig       `mapstructure:"logger"`
-	APIServer    APIServerConfig    `mapstructure:"api-server"`
-	Repository   RepositoryConfig   `mapstructure:"repository"`
-	AuthN        AuthNConfig        `mapstructure:"authn"`
+	ModuleSeedInstaller ModuleSeedInstallerConfig `mapstructure:"moduleSeedInstaller"`
+	Logger              LoggerConfig              `mapstructure:"logger"`
+	APIServer           APIServerConfig           `mapstructure:"api-server"`
+	Repository          RepositoryConfig          `mapstructure:"repository"`
+	AuthN               AuthNConfig               `mapstructure:"authn"`
 	// Jobs — фоновые задания сервиса (задача kacho#1264). Секция заведена по
 	// прецеденту сметателя целей nlb: интервал работы, удаляющей РЕСУРС
 	// АРЕНДАТОРА по времени, живёт в конфигурации со стражем старта, а не
@@ -766,14 +766,10 @@ func dsnHas(dsn, frag string) bool {
 	return false
 }
 
-// InstallationConfig supplies a standing installer credential; it never names a
-// principal. TargetAccountID requests the single-account variant; empty selects
-// the complete tenant snapshot. Credential contents are never logged.
-type InstallationConfig struct {
-	// AccountPageSize bounds each canonical primary membership page.
-	AccountPageSize int `mapstructure:"account-page-size"`
-	// Scope is all-accounts or single-account; selection is explicit.
-	Scope           string `mapstructure:"scope"`
-	CredentialFile  string `mapstructure:"credential-file"`
-	TargetAccountID string `mapstructure:"target-account-id"`
+// ModuleSeedInstallerConfig is the accepted protected installation input.
+// A present tenantAccountId selects S1 (empty is invalid); omission selects S2.
+// No default value is registered for this pointer: presence belongs to user input.
+type ModuleSeedInstallerConfig struct {
+	CredentialFile  string  `mapstructure:"credentialFile"`
+	TenantAccountID *string `mapstructure:"tenantAccountId"`
 }

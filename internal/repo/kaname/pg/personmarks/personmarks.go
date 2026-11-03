@@ -68,16 +68,25 @@ func Read(ctx context.Context, q Querier, ids []string) (map[string]bool, error)
 }
 
 // Reader — читатель отметок на пуле; реализует `admission.Marks`.
-type Reader struct{ pool *pgxpool.Pool }
+type Reader struct {
+	pool        *pgxpool.Pool
+	transaction pgx.Tx
+}
 
 // New — читатель поверх пула. nil-пул — читатель, отвечающий ошибкой на каждый
 // вопрос: «не провязан» не становится «подтверждён».
 func New(pool *pgxpool.Pool) *Reader { return &Reader{pool: pool} }
 
+// NewTransaction keeps ordinary person admission on the caller's transaction.
+func NewTransaction(tx pgx.Tx) *Reader { return &Reader{transaction: tx} }
+
 // PersonMarks — см. `admission.Marks`.
 func (r *Reader) PersonMarks(ctx context.Context, ids []string) (map[string]bool, error) {
-	if r == nil || r.pool == nil {
+	if r == nil || (r.pool == nil && r.transaction == nil) {
 		return nil, fmt.Errorf("personmarks: reader has no pool")
+	}
+	if r.transaction != nil {
+		return Read(ctx, r.transaction, ids)
 	}
 	return Read(ctx, r.pool, ids)
 }

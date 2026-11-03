@@ -4,7 +4,9 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"net/url"
 	"os"
 	"reflect"
@@ -69,9 +71,8 @@ func load(path string) (Config, *viper.Viper, error) {
 	v.SetEnvPrefix(EnvPrefix)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "__", "-", "_"))
 	v.AutomaticEnv()
-	_ = v.BindEnv("installation.scope")
-	_ = v.BindEnv("installation.credential-file")
-	_ = v.BindEnv("installation.target-account-id")
+	_ = v.BindEnv("moduleSeedInstaller.credentialFile")
+	_ = v.BindEnv("moduleSeedInstaller.tenantAccountId")
 
 	// СНЯТЫЕ КЛЮЧИ ИЗ ОКРУЖЕНИЯ отвергаются ДО всякого чтения: переменная, которую
 	// загрузчик больше не привязывает, иначе прошла бы молча (retired_settings.go).
@@ -177,10 +178,30 @@ func load(path string) (Config, *viper.Viper, error) {
 	}
 
 	// YAML file (optional).
+	tenantTargetDeclared := false
 	if path != "" {
 		v.SetConfigFile(path)
-		if err := v.ReadInConfig(); err != nil {
+		data, err := os.ReadFile(path)
+		if err != nil {
 			return Config{}, nil, fmt.Errorf("read config %q: %w", path, err)
+		}
+		if err := v.ReadConfig(bytes.NewReader(data)); err != nil {
+			return Config{}, nil, fmt.Errorf("read config %q: %w", path, err)
+		}
+		var input map[string]any
+		if err := yaml.Unmarshal(data, &input); err != nil {
+			return Config{}, nil, fmt.Errorf("read config %q: %w", path, err)
+		}
+		for key, value := range input {
+			if strings.EqualFold(key, "moduleSeedInstaller") {
+				if section, ok := value.(map[string]any); ok {
+					for field := range section {
+						if strings.EqualFold(field, "tenantAccountId") {
+							tenantTargetDeclared = true
+						}
+					}
+				}
+			}
 		}
 		// Снятый ключ в файле — отказ, а не молчание: у разбора нет запрета на
 		// незнакомые ключи, и без этой проверки строка профиля, написанная под
@@ -221,6 +242,15 @@ func load(path string) (Config, *viper.Viper, error) {
 		return Config{}, nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
+	// Presence belongs to operator input, not to decoded zero values/defaults.
+	// In particular YAML null and an explicitly empty environment override select
+	// S1 and must reach the startup validator as an empty (invalid) target.
+	if env, present := os.LookupEnv("KANAME_MODULESEEDINSTALLER__TENANTACCOUNTID"); present {
+		cfg.ModuleSeedInstaller.TenantAccountID = &env
+	} else if tenantTargetDeclared && cfg.ModuleSeedInstaller.TenantAccountID == nil {
+		empty := ""
+		cfg.ModuleSeedInstaller.TenantAccountID = &empty
+	}
 	return cfg, v, nil
 }
 

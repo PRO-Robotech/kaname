@@ -6,7 +6,6 @@ package pg
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/jackc/pgx/v5"
@@ -21,10 +20,34 @@ type InstallationReadFactory interface {
 	BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error)
 }
 
-type InstallationReader struct{ factory InstallationReadFactory }
+type InstallationPageFactory interface {
+	BeginTx(context.Context, pgx.Tx, pgx.TxOptions) (pgx.Tx, error)
+}
+
+// NestedInstallationPages opens real savepoint scopes on the existing read-only,
+// repeatable-read transaction; incompatible options are refused, never ignored.
+type NestedInstallationPages struct{}
+
+func (NestedInstallationPages) BeginTx(ctx context.Context, tx pgx.Tx, options pgx.TxOptions) (pgx.Tx, error) {
+	if options != (pgx.TxOptions{AccessMode: pgx.ReadOnly, IsoLevel: pgx.RepeatableRead}) {
+		return nil, fmt.Errorf("installation page requires read-only repeatable-read scope")
+	}
+	return tx.Begin(ctx)
+}
+
+type InstallationReader struct {
+	factory InstallationReadFactory
+	pages   InstallationPageFactory
+}
 
 func NewInstallationReader(factory InstallationReadFactory) *InstallationReader {
-	return &InstallationReader{factory: factory}
+	return &InstallationReader{factory: factory, pages: NestedInstallationPages{}}
+}
+
+// WithPageFactory decorates real nested transaction creation without replacing
+// canonical page SQL or membership. It does not create another connection.
+func (r *InstallationReader) WithPageFactory(pages InstallationPageFactory) *InstallationReader {
+	return &InstallationReader{factory: r.factory, pages: pages}
 }
 
 // InstallationAccounts captures complete canonical membership on the primary in
@@ -52,17 +75,11 @@ func (r *InstallationReader) InstallationAccounts(ctx context.Context, target st
 		}
 		return []domain.AccountID{account.ID}, domain.AccountID(sys), nil
 	}
-	// Export one canonical membership snapshot. Every page imports precisely
-	// that snapshot into its own normal read transaction, keeping Reader BeginTx
-	// failures observable even on later pages, before any delegation Operation.
-	var snapshot string
-	if err := tx.QueryRow(ctx, `SELECT pg_export_snapshot()`).Scan(&snapshot); err != nil {
-		return nil, "", err
-	}
+	// All page scopes share this real repeatable-read membership snapshot.
 	var ids []domain.AccountID
 	after := ""
 	for {
-		page, err := r.installationAccountPage(ctx, snapshot, after, pageSize)
+		page, err := r.installationAccountPage(ctx, tx, after, pageSize)
 		if err != nil {
 			return nil, "", err
 		}
@@ -107,18 +124,15 @@ func (r *InstallationReader) InstallationReferences(ctx context.Context, account
 	return domain.ServiceAccountID(delegate), ids, nil
 }
 
-func (r *InstallationReader) installationAccountPage(ctx context.Context, snapshot, after string, pageSize int) ([]domain.AccountID, error) {
-	tx, err := r.factory.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly, IsoLevel: pgx.RepeatableRead})
+func (r *InstallationReader) installationAccountPage(ctx context.Context, coordinator pgx.Tx, after string, pageSize int) ([]domain.AccountID, error) {
+	if r.pages == nil {
+		return nil, fmt.Errorf("installation page factory is not wired")
+	}
+	tx, err := r.pages.BeginTx(ctx, coordinator, pgx.TxOptions{AccessMode: pgx.ReadOnly, IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	// PostgreSQL requires a literal for SET TRANSACTION SNAPSHOT. The value is
-	// produced by pg_export_snapshot on our own primary, never installation input.
-	quoted := strings.ReplaceAll(snapshot, "'", "''")
-	if _, err := tx.Exec(ctx, "SET TRANSACTION SNAPSHOT '"+quoted+"'"); err != nil {
-		return nil, err
-	}
 	rows, err := tx.Query(ctx, `SELECT id FROM kaname.accounts WHERE id > $1 ORDER BY id LIMIT $2`, after, pageSize)
 	if err != nil {
 		return nil, err
