@@ -85,10 +85,19 @@ func TestRID_06_RevokeDuringApply(t *testing.T) {
 		ridPredicate{name: "explicit C Create recovery preserves revoked history and new issuer grant works"})
 }
 func TestRID_07_ExistingPairConflict(t *testing.T) {
+	var observed []rid07Observation
+	conflicts := func(t *testing.T) { observed = rid07Matrix(t, false) }
+	preserved := func(t *testing.T) {
+		if len(observed) == 0 {
+			conflicts(t)
+		}
+		requireRID07Preserved(t, observed)
+	}
+	twins := func(t *testing.T) { requireRID07Preserved(t, rid07Matrix(t, true)) }
 	runInstallationRID(t,
-		ridPredicate{name: "independent lawful role target subject creator conflicts each FAILED_PRECONDITION"},
-		ridPredicate{name: "each failure preserves complete pair and grants without update or revoke"},
-		ridPredicate{name: "one-axis-only twin for each conflict is idempotent exact match"})
+		ridPredicate{name: "independent lawful role target subject creator conflicts each FAILED_PRECONDITION", run: conflicts},
+		ridPredicate{name: "each failure preserves complete pair and grants without update or revoke", run: preserved},
+		ridPredicate{name: "one-axis-only twin for each conflict is idempotent exact match", run: twins})
 }
 func TestRID_08_SnapshotPagesAndFutureAccount(t *testing.T) {
 	runInstallationRID(t,
