@@ -51,7 +51,24 @@ import (
 // Перепись обеих ступеней печатается ВСЕГДА, независимо от исхода: без неё
 // «добавлено 0» неотличимо от «прочитано 0», а «находок 0» — от «судить не о
 // чем».
+type preparedModel struct {
+	text   string
+	report modelcompose.Report
+	plans  *authzmodel.Plans
+}
+
 func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) (modelcompose.Report, error) {
+	prepared, err := prepareComposedModel(logger, manifests)
+	if err != nil {
+		return prepared.report, err
+	}
+	if err := authzmodel.Install(prepared.text); err != nil {
+		return prepared.report, err
+	}
+	return prepared.report, nil
+}
+
+func prepareComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) (preparedModel, error) {
 	composed, rep, err := modelcompose.Compose(authzmodel.DSL, manifests)
 	logger.Info("перепись композиции модели прав",
 		slog.Int("manifests_seen", rep.ManifestsSeen),
@@ -62,7 +79,7 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) (
 		slog.Any("prior_edition", rep.PriorEdition),
 		slog.Int("public_read_key_terms", len(rep.KeyTerms)))
 	if err != nil {
-		return rep, fmt.Errorf("композиция модели прав: %w", err)
+		return preparedModel{report: rep}, fmt.Errorf("композиция модели прав: %w", err)
 	}
 
 	admission, err := authzmodel.Admit(composed, rep.KeyTerms...)
@@ -74,7 +91,7 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) (
 		// либо собранный текст не разобрался. Это НЕ «находок ноль» — отчёт при
 		// ней несуждён и отвечает «не допущено» сам (kacho#2000), но проверяется err
 		// ПЕРВЫМ: он называет стадию, а отчёт её назвать не может.
-		return rep, fmt.Errorf("допуск собранной модели прав: %w", err)
+		return preparedModel{report: rep}, fmt.Errorf("допуск собранной модели прав: %w", err)
 	}
 
 	// Исходов допуска ТРИ, и здесь законны два — но по разным причинам, поэтому
@@ -83,7 +100,7 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) (
 	case len(admission.Findings) > 0:
 		// Находка — отказ ПУСКА. Перечисляются ВСЕ: названная первая заставила
 		// бы оператора чинить их по одной, по выкатке на каждую.
-		return rep, fmt.Errorf("допуск собранной модели прав отверг её (%s):%s",
+		return preparedModel{report: rep}, fmt.Errorf("допуск собранной модели прав отверг её (%s):%s",
 			admission.Census(), formatFindings(admission.Findings))
 	case admission.NothingToJudge:
 		// Доставка не добавила НИ ОДНОГО типа: судить некого. Для допуска это
@@ -95,13 +112,11 @@ func installComposedModel(logger *slog.Logger, manifests []*manifest.Manifest) (
 		logger.Info("доставка не добавила ни одного типа — модель процесса равна канону образа")
 	}
 
-	if err := authzmodel.Install(composed); err != nil {
-		return rep, fmt.Errorf("установка модели процесса: %w", err)
+	plans, err := authzmodel.New(composed)
+	if err != nil {
+		return preparedModel{report: rep}, err
 	}
-	logger.Info("модель процесса установлена",
-		slog.Int("types_seen", admission.TypesSeen),
-		slog.Int("types_new", admission.TypesNew))
-	return rep, nil
+	return preparedModel{text: composed, report: rep, plans: plans}, nil
 }
 
 // formatFindings — находки допуска списком, каждая со своей строки.

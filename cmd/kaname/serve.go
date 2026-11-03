@@ -40,7 +40,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
+	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/edgecredential"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
@@ -53,6 +56,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -329,10 +333,66 @@ func runServe(cfg config.Config) error {
 	// Отчёт композиции корень сохраняет: из него шаг «модель против каталога»
 	// ниже узнаёт, какой модуль принёс в модель процесса тип вне канона
 	// (kaname#865, Д10) — второй композиции для этого не заводится.
-	composedReport, cErr := installComposedModel(logger, deliveredManifests)
+	preparedModel, cErr := prepareComposedModel(logger, deliveredManifests)
 	if cErr != nil {
 		return cErr
 	}
+
+	// Whole-delivery preflight precedes model installation and all delivery writers.
+	ownManifest, omErr := loadOwnManifest(logger)
+	if omErr != nil {
+		return omErr
+	}
+	if err := moduleseed.Preflight(ownManifest, deliveredManifests); err != nil {
+		return err
+	}
+	if hasInstallationDelegations(deliveredManifests) {
+		if cfg.Installation.AccountPageSize < 1 || cfg.Installation.AccountPageSize > 1000 {
+			return failInstallation(logger, "input", "accountPageSize", "", "", 0, shared.InvalidArg("accountPageSize", "page size must be 1..1000"))
+		}
+		if err := validateInstallationScope(cfg.Installation); err != nil {
+			return failInstallation(logger, "input", "tenantAccountId", "", "", 0, err)
+		}
+		if _, _, err := loadInstallationCredential(cfg.Installation.CredentialFile); err != nil {
+			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
+		}
+	}
+	signingKeystore, tokenSigner, err := buildTokenSigning(ctx, pool, cfg, logger)
+	if err != nil {
+		return fmt.Errorf("shared issuance preparation: %w", err)
+	}
+	presentedReader, err := preparePresentedReader(pool, cfg, signingKeystore, logger)
+	if err != nil {
+		return err
+	}
+	installationRelations := authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(pool, preparedModel.plans), personmarks.New(pool))
+	installationReader := kanamepg.NewInstallationReader(pool)
+	var installationAuthn *installationAuthentication
+	if hasInstallationDelegations(deliveredManifests) {
+		installationAuthn, err = prepareInstallationAuthentication(pool, cfg, tokenSigner, presentedReader, logger)
+		if err != nil {
+			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
+		}
+		verified, err := installationAuthn.Authenticate(ctx)
+		if err != nil {
+			return failInstallation(logger, "authentication", "", "", "", 0, err)
+		}
+		if err := authzguard.RequireClusterAdmin(verified, installationRelations); err != nil {
+			return failInstallation(logger, "preflight-authority", "moduleSeedInstaller.credentialFile", "", "", 0, err)
+		}
+		if cfg.Installation.TargetAccountID != "" {
+			if err := shared.ValidateResourceID(cfg.Installation.TargetAccountID, domain.PrefixAccount, "account"); err != nil {
+				return err
+			}
+			if _, _, err := installationReader.InstallationAccounts(ctx, cfg.Installation.TargetAccountID, cfg.Installation.AccountPageSize); err != nil {
+				return failInstallation(logger, "input", "tenantAccountId", "", "", 0, shared.MapRepoErrAt(ctx, err))
+			}
+		}
+	}
+	if err := authzmodel.Install(preparedModel.text); err != nil {
+		return err
+	}
+	composedReport := preparedModel.report
 
 	// ПРИМЕНЕНИЕ ДОСТАВЛЕННОГО — между чтением доставки и стражем паритета
 	// (задача kacho#1034).
@@ -459,10 +519,6 @@ func runServe(cfg config.Config) error {
 	// доставленных: новая роль модуля iam заводится объявлением манифеста образа,
 	// а не миграцией. Довод — шапка `applyImageModuleRoles`. Свой манифест читается
 	// здесь и тот же связанный идентификатор уходит ниже применителю посева.
-	ownManifest, omErr := loadOwnManifest(logger)
-	if omErr != nil {
-		return omErr
-	}
 	if riErr := applyImageModuleRoles(ctx, logger, rolesApplier, ownManifest); riErr != nil {
 		return riErr
 	}
@@ -513,6 +569,9 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("configure LRO default-registry: %w", err)
 	}
 	operations.Start()
+	if err := applyInstallationDelegations(ctx, logger, installationAuthn, kanameRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, cfg.Installation.TargetAccountID, cfg.Installation.AccountPageSize, appliedManifests); err != nil {
+		return err
+	}
 
 	// Orphan-reconciler backstop: разрешает осиротевшие done=false операции умершего
 	// процесса (kill-9 / истекший terminal-write budget) в терминал по
@@ -535,10 +594,6 @@ func runServe(cfg config.Config) error {
 	// Своя чеканка токенов (задача kacho#897): ключница, подписывающий ключ и
 	// подписант. Собирается ДО поверхностей, потому что от неё зависят обе —
 	// выдача докер-токена и публикация нашей записи набора.
-	signingKeystore, tokenSigner, err := buildTokenSigning(ctx, pool, cfg, logger)
-	if err != nil {
-		return fmt.Errorf("своя чеканка токенов: %w", err)
-	}
 	startSigningKeyMaintenance(ctx, signingKeystore, logger)
 
 	// ЛИЧНОСТИ МОДУЛЕЙ (kaname#984) — ОДИН перечень на все пути признания
@@ -959,43 +1014,10 @@ func runServe(cfg config.Config) error {
 	// поставщика личность приходит через край, и читателю нечего делать. Под
 	// посадкой own выключенный приём отвергается стражем настройки, а не
 	// молчаливым nil здесь.
-	var presentedReader *presentedcred.Reader
-	if cfg.AuthN.PresentedCredential.Enabled {
-		basicAuthority, err := newBasicCredentialAuthority(pool)
-		if err != nil {
-			return fmt.Errorf("basic credential authority: %w", err)
-		}
-		if signingKeystore == nil {
-			// Настройка это уже отвергла (страж связывает приём с чеканкой), и
-			// отказ здесь — не второй страж, а отказ ПОСТРОЕНИЯ: собранный
-			// наполовину читатель отвергал бы всё, и узналось бы это на первом
-			// запросе арендатора.
-			return fmt.Errorf("приём предъявленного удостоверения включён, но собственного " +
-				"реестра ключей нет — проверять подпись нечем")
-		}
-		presentedReader, err = presentedcred.New(presentedcred.Config{
-			BasicCredentials:   basicAuthority,
-			Issuer:             cfg.AuthN.TokenSigning.Issuer,
-			Audience:           cfg.AuthN.PresentedCredential.Audience,
-			AllowedAlgorithms:  cfg.AuthN.TokenSigning.AllowedAlgorithmList(),
-			Keys:               signingKeystore,
-			Revocations:        kanamepg.NewMintedTokenRevocationRepo(pool),
-			RevocationCacheTTL: cfg.AuthN.PresentedCredential.RevocationCacheTTL,
-			Logger:             logger.With(slog.String("component", "presented_credential")),
-			// Домен доверия — ТОТ ЖЕ объект, что уезжает в пару звеньев
-			// извлечения личности: читатель предъявленного удостоверения
-			// разбирает личность модуля тем же общим извлекателем, и своя
-			// величина здесь разошлась бы с той молча.
-			TrustDomain: cfg.AuthN.TrustDomain(),
-		})
-		if err != nil {
-			return fmt.Errorf("читатель предъявленного удостоверения: %w", err)
-		}
+	if presentedReader != nil {
 		metricsReg.NewPresentedCredentialCollector(func() metrics.PresentedCredentialCounts {
 			st := presentedReader.Stats()
-			return metrics.PresentedCredentialCounts{
-				Accepted: st.Accepted, Refused: st.Refused, Unavailable: st.Unavailable,
-			}
+			return metrics.PresentedCredentialCounts{Accepted: st.Accepted, Refused: st.Refused, Unavailable: st.Unavailable}
 		})
 	}
 

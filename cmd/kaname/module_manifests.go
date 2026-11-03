@@ -5,6 +5,8 @@ package main
 
 import (
 	"fmt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"log/slog"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
@@ -81,6 +83,11 @@ func loadDeliveredManifests(logger *slog.Logger, cfg config.ManifestsConfig) ([]
 		slog.String("type_table", report.Referent.String()),
 		slog.Any("modules", report.Modules()))
 	if err != nil {
+		field := "manifests"
+		if len(report.InputViolations) > 0 {
+			field = report.InputViolations[0]
+		}
+		failInstallation(logger, "preflight", field, "", "", 0, status.Error(codes.InvalidArgument, "invalid manifest delivery"))
 		return nil, fmt.Errorf("доставка манифестов модулей: %w", err)
 	}
 	return report.Manifests, nil

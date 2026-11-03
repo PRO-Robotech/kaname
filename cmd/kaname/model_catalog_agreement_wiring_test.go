@@ -60,6 +60,7 @@ func judgeAgreementWiring(t *testing.T, name, src string) agreementCensus {
 	var c agreementCensus
 	boundNotApplied := map[string]bool{}
 	boundComposed := map[string]bool{}
+	boundPrepared := map[string]bool{}
 	first := map[string]token.Pos{}
 	var stepCalls []*ast.CallExpr
 	checked := map[*ast.CallExpr]bool{}
@@ -70,6 +71,13 @@ func judgeAgreementWiring(t *testing.T, name, src string) agreementCensus {
 			if len(x.Rhs) != 1 {
 				return true
 			}
+			if sel, ok := x.Rhs[0].(*ast.SelectorExpr); ok && sel.Sel.Name == "report" && len(x.Lhs) == 1 {
+				if owner, ok := sel.X.(*ast.Ident); ok && boundPrepared[owner.Name] {
+					if id, ok := x.Lhs[0].(*ast.Ident); ok {
+						boundComposed[id.Name] = true
+					}
+				}
+			}
 			call, ok := x.Rhs[0].(*ast.CallExpr)
 			if !ok {
 				return true
@@ -79,6 +87,12 @@ func judgeAgreementWiring(t *testing.T, name, src string) agreementCensus {
 				if len(x.Lhs) == 3 {
 					if id, ok := x.Lhs[1].(*ast.Ident); ok && id.Name != "_" {
 						boundNotApplied[id.Name] = true
+					}
+				}
+			case "prepareComposedModel":
+				if len(x.Lhs) == 2 {
+					if id, ok := x.Lhs[0].(*ast.Ident); ok {
+						boundPrepared[id.Name] = true
 					}
 				}
 			case "installComposedModel":
@@ -152,7 +166,7 @@ func TestServeRunsTheModelCatalogAgreementStepBeforeParityRolesAndSeed(t *testin
 	if err != nil {
 		t.Fatalf("serve.go не прочитан: %v — вердикт беспредметен", err)
 	}
-	for _, need := range []string{"applyDeliveredManifests", "installComposedModel", "AssertCatalogParity",
+	for _, need := range []string{"applyDeliveredManifests", "prepareComposedModel", "AssertCatalogParity",
 		"applyDeliveredModuleRoles", "applyModuleSeed"} {
 		if !strings.Contains(string(src), need+"(") {
 			t.Fatalf("serve.go не зовёт %s — предпосылка порядка не создана", need)

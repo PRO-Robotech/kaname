@@ -69,6 +69,9 @@ func load(path string) (Config, *viper.Viper, error) {
 	v.SetEnvPrefix(EnvPrefix)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "__", "-", "_"))
 	v.AutomaticEnv()
+	_ = v.BindEnv("installation.scope")
+	_ = v.BindEnv("installation.credential-file")
+	_ = v.BindEnv("installation.target-account-id")
 
 	// СНЯТЫЕ КЛЮЧИ ИЗ ОКРУЖЕНИЯ отвергаются ДО всякого чтения: переменная, которую
 	// загрузчик больше не привязывает, иначе прошла бы молча (retired_settings.go).

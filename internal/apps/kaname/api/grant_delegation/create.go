@@ -76,6 +76,16 @@ func (u *CreateGrantDelegationUseCase) WithRelationStore(relations clients.Relat
 
 // Execute — синхронные проверки и операция заведения.
 func (u *CreateGrantDelegationUseCase) Execute(ctx context.Context, in CreateInput) (*operations.Operation, error) {
+	return u.execute(ctx, in, false)
+}
+
+// ExecuteInstallation retains the ordinary validation, authority, operation and audit path,
+// adding the immutable installation pair/history policy within its writer transaction.
+func (u *CreateGrantDelegationUseCase) ExecuteInstallation(ctx context.Context, in CreateInput) (*operations.Operation, error) {
+	return u.execute(ctx, in, true)
+}
+
+func (u *CreateGrantDelegationUseCase) execute(ctx context.Context, in CreateInput, installation bool) (*operations.Operation, error) {
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
@@ -93,7 +103,25 @@ func (u *CreateGrantDelegationUseCase) Execute(ctx context.Context, in CreateInp
 	d.Module = module
 	caller := operations.PrincipalFromContext(ctx)
 	d.DelegatedBy = domain.GrantDelegationActor{Type: caller.Type, ID: caller.ID}
-	d.ID = domain.GrantDelegationID(ids.NewID(domain.PrefixGrantDelegation))
+	if installation {
+		// Preserve the resource ID in ordinary Operation metadata for an idempotent
+		// active pair. The writer still serializes and rechecks history after this
+		// advisory read; a concurrent revoke can never make it create a replacement.
+		rd, err := u.repo.Reader(ctx)
+		if err != nil {
+			return nil, shared.MapRepoErrAt(ctx, err)
+		}
+		existing, err := rd.AccessBindings().GrantDelegations().ActiveFor(ctx, d.AccountID, d.DelegateID)
+		_ = rd.Rollback(ctx)
+		if err == nil {
+			d.ID = existing.ID
+		} else if !stderrors.Is(err, iamerr.ErrNotFound) {
+			return nil, shared.MapRepoErrAt(ctx, err)
+		}
+	}
+	if d.ID == "" {
+		d.ID = domain.GrantDelegationID(ids.NewID(domain.PrefixGrantDelegation))
+	}
 	actor := authzguard.PrincipalUserID(ctx)
 
 	op, err := operations.NewFromContext(ctx, domain.PrefixOperationIAM,
@@ -107,7 +135,7 @@ func (u *CreateGrantDelegationUseCase) Execute(ctx context.Context, in CreateInp
 		return nil, err
 	}
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		res, derr := u.doCreate(ctx, d, actor)
+		res, derr := u.doCreate(ctx, d, actor, installation)
 		if derr != nil && u.logger != nil {
 			u.logger.Error("grant_delegation create operation failed", "op", op.ID, "err", derr,
 				"account", string(d.AccountID), "delegate", string(d.DelegateID))
@@ -291,10 +319,29 @@ func (u *CreateGrantDelegationUseCase) validateComposition(ctx context.Context, 
 
 // doCreate — строка делегирования и строка аудита в одной транзакции писателя
 // (Р5). Второе действующее делегирование пары — 23505, `ALREADY_EXISTS` (Д1).
-func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.GrantDelegation, actor string) (*anypb.Any, error) {
+func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.GrantDelegation, actor string, installation bool) (*anypb.Any, error) {
 	d.CreatedAt = time.Now().UTC()
 	created, err := shared.DoWithWriteTx(ctx, u.repo, func(ctx context.Context, w Writer) (domain.GrantDelegation, error) {
-		out, ierr := w.AccessBindingsW().GrantDelegationsW().Insert(ctx, d)
+		gw := w.AccessBindingsW().GrantDelegationsW()
+		if installation {
+			installer, ok := gw.(interface {
+				InstallationPair(context.Context, domain.GrantDelegation) (domain.GrantDelegation, bool, error)
+			})
+			if !ok {
+				return domain.GrantDelegation{}, fmt.Errorf("grant delegation installation writer is not wired")
+			}
+			existing, found, err := installer.InstallationPair(ctx, d)
+			if err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			if err := authzguard.RequireClusterAdmin(ctx, u.relations); err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			if found {
+				return existing, nil
+			}
+		}
+		out, ierr := gw.Insert(ctx, d)
 		if ierr != nil {
 			return domain.GrantDelegation{}, ierr
 		}

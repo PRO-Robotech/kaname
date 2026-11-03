@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -223,6 +224,9 @@ func (r *gdReader) TargetObjectAccount(ctx context.Context, ref domain.ResourceR
 // порядок перечня (`created_at`, id) тогда совпадает с порядком по усечённому
 // `createdAt` ответа.
 func (w *gdWriter) Insert(ctx context.Context, d domain.GrantDelegation) (domain.GrantDelegation, error) {
+	if err := w.lockPair(ctx, d.AccountID, d.DelegateID); err != nil {
+		return domain.GrantDelegation{}, err
+	}
 	roles := make([]string, 0, len(d.RoleIDs))
 	for _, r := range d.RoleIDs {
 		roles = append(roles, string(r))
@@ -251,6 +255,15 @@ func (w *gdWriter) Insert(ctx context.Context, d domain.GrantDelegation) (domain
 
 // LockForRevoke — строка делегирования под `FOR UPDATE`.
 func (w *gdWriter) LockForRevoke(ctx context.Context, id domain.GrantDelegationID) (domain.GrantDelegation, error) {
+	// Acquire the same pair lock before the row lock used by grants and revocation.
+	pair, err := w.Get(ctx, id)
+	if err != nil {
+		return domain.GrantDelegation{}, err
+	}
+	if err := w.lockPair(ctx, pair.AccountID, pair.DelegateID); err != nil {
+		return domain.GrantDelegation{}, err
+	}
+
 	d, err := scanGrantDelegation(w.tx.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM kaname.grant_delegations WHERE id = $1 FOR UPDATE`, gdCols), string(id)))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -352,4 +365,42 @@ func (w *gdWriter) AccountOf(ctx context.Context, id domain.GrantDelegationID) (
 		return "", mapErr(err, "", string(id))
 	}
 	return domain.AccountID(acc), nil
+}
+
+// lockPair serializes create, installation history checks and committed revocation.
+// Advisory collisions can only serialize unrelated pairs; they cannot admit duplicates.
+func (w *gdWriter) lockPair(ctx context.Context, account domain.AccountID, delegate domain.ServiceAccountID) error {
+	_, err := w.tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1038))`, string(account)+"/"+string(delegate))
+	return err
+}
+
+// InstallationPair checks ALL history under the production pair lock. An explicit
+// ordinary Create may replace revoked history; installation never does so.
+func (w *gdWriter) InstallationPair(ctx context.Context, wanted domain.GrantDelegation) (domain.GrantDelegation, bool, error) {
+	if err := w.lockPair(ctx, wanted.AccountID, wanted.DelegateID); err != nil {
+		return domain.GrantDelegation{}, false, err
+	}
+	rows, err := w.tx.Query(ctx, fmt.Sprintf(`SELECT %s FROM kaname.grant_delegations
+ WHERE account_id=$1 AND delegate_id=$2 ORDER BY (status='ACTIVE') DESC,created_at,id LIMIT 1`, gdCols), string(wanted.AccountID), string(wanted.DelegateID))
+	if err != nil {
+		return domain.GrantDelegation{}, false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return domain.GrantDelegation{}, false, rows.Err()
+	}
+	current, err := scanGrantDelegation(rows)
+	if err != nil {
+		return domain.GrantDelegation{}, false, err
+	}
+	if !installationPairMatches(current, wanted) {
+		return domain.GrantDelegation{}, false, iamerr.Wrapf(iamerr.ErrFailedPrecondition, "installation grant delegation conflicts with pair history")
+	}
+	return current, true, nil
+}
+
+func installationPairMatches(current, wanted domain.GrantDelegation) bool {
+	a, b := domain.SortedGrantDelegationAxes(current), domain.SortedGrantDelegationAxes(wanted)
+	return current.Active() && current.DelegatedBy == wanted.DelegatedBy && current.Module == wanted.Module &&
+		slices.Equal(a.RoleIDs, b.RoleIDs) && slices.Equal(a.TargetTypes, b.TargetTypes) && slices.Equal(a.SubjectTypes, b.SubjectTypes)
 }
