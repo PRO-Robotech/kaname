@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 913
+Всего кейсов: 919
 
 ## Перепись по модулям
 
@@ -83,6 +83,7 @@
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/rbac-subject-channel-equivalence.py` | 8 |
 | `cases/rbac-visibility-set.py` | 7 |
+| `cases/registry-installation-rid08.py` | 6 |
 
 ---
 
@@ -1381,3 +1382,14 @@
 - `IAM-ESC-E4`
 
 ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакция 4.
+
+## `cases/registry-installation-rid08.py` — 6 кейсов
+
+Полные публичные последствия шести фаз RID08 в том же native-мире; состояние и токен выдаёт владеющий integration-производитель. Каждый кейс обязателен для общей приёмки.
+
+- `registry-installation-rid08-FIRST-N3`
+- `registry-installation-rid08-REPEAT-N4`
+- `registry-installation-rid08-EMPTY-N0`
+- `registry-installation-rid08-LATE-FAULT-N0`
+- `registry-installation-rid08-FAULT-TWIN-N3`
+- `registry-installation-rid08-RETRY-N3`

@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"testing"
@@ -44,7 +45,7 @@ type rid08EmptyProof struct {
 
 func rid08World(t *testing.T) *installationNativeWorld {
 	t.Helper()
-	return newInstallationNativeWorldLifecycle(t, 7200, "", false, true)
+	return newInstallationNativeWorldAccountCapacity(t, 7200, "", false, true, 4)
 }
 func rid08IDs(ids []domain.AccountID) []string {
 	out := make([]string, 0, len(ids))
@@ -100,6 +101,7 @@ func rid08FutureWorld(t *testing.T) *rid08FutureProof {
 	f := rid08World(t)
 	ids, namedSystem, initial, full := rid08SetupN3(t, f)
 	proof := &rid08FutureProof{Initial: initial, Full: full, AccountsN3: ids, TenantNamedSystem: namedSystem, System: f.baseline.SystemID, Operator: string(f.given.user)}
+	rid08RequireAccountCapacity(t, f, 3)
 	// No child, census transaction or writer exists during this normal-clock wait.
 	proof.Expired = rid08WaitRealWindow(t, f, full)
 	rid08Stage(t, f)
@@ -120,6 +122,7 @@ func rid08FutureWorld(t *testing.T) *rid08FutureProof {
 	// D is created through the SAME freshly verified O, before first GD release.
 	proof.D = rid08CreateAccount(t, f, "rid-d")
 	proof.DCommitted = time.Now().UTC()
+	rid08RequireAccountCapacity(t, f, 4)
 	proof.AfterD = rid08AdmissionRead(t, f)
 	require.Equal(t, initial.User, proof.AfterD.User)
 	require.Equal(t, initial.CarrierDigest, proof.AfterD.CarrierDigest)
@@ -137,6 +140,7 @@ func rid08FutureWorld(t *testing.T) *rid08FutureProof {
 	rid08Ready(t, f, child, wire, 6)
 	proof.First = rid08PublicCensus(t, f, ids)
 	proof.FirstRaw = rid08RawRows(t, f)
+	firstNewman := rid08NewmanPhase(t, f, "first-n3", ids, nil, namedSystem, proof.D, "")
 	rid08NewOperations(t, f, before, 6)
 	rid06GracefulStop(t, child)
 	repeatBefore := rid08GDOperations(t, f)
@@ -148,6 +152,7 @@ func rid08FutureWorld(t *testing.T) *rid08FutureProof {
 	rid08Ready(t, f, repeat, wire, 8)
 	proof.Repeat = rid08PublicCensus(t, f, all)
 	proof.RepeatRaw = rid08RawRows(t, f)
+	rid08NewmanPhase(t, f, "repeat-n4", all, firstNewman, namedSystem, proof.D, "")
 	rid08NewOperations(t, f, repeatBefore, 8)
 	rid06GracefulStop(t, repeat)
 	require.Equal(t, proof.First.ServiceAccounts, proof.Repeat.ServiceAccounts)
@@ -223,6 +228,7 @@ func rid08EmptyWorld(t *testing.T) *rid08EmptyProof {
 	public := rid08PublicCensus(t, f, nil)
 	require.Equal(t, savedCanonical, public.Accounts, "tested startup and public renewal preserve the full SYS-only census")
 	afterPublic := rid08RequireEmptyBoundary(t, f, savedCanonical)
+	rid08NewmanPhase(t, f, "empty-n0", nil, nil, "", "", f.tenantID)
 	require.Empty(t, public.Delegations)
 	require.Equal(t, ops, rid08GDOperations(t, f))
 	require.JSONEq(t, "[]", rid08PrimaryGD(t, f))
@@ -264,7 +270,7 @@ func rid08RequireEmptyBoundary(t *testing.T, f *installationNativeWorld, saved [
 func rid08FaultWorld(t *testing.T) *rid08FaultProof {
 	t.Helper()
 	f := rid08World(t)
-	ids, _, _, _ := rid08SetupN3(t, f)
+	ids, namedSystem, _, _ := rid08SetupN3(t, f)
 	rid08Stage(t, f)
 	canonical := rid08PrimaryAccounts(t, f)
 	before := rid08GDOperations(t, f)
@@ -283,6 +289,7 @@ func rid08FaultWorld(t *testing.T) *rid08FaultProof {
 	require.Equal(t, canonical, rid08PrimaryAccounts(t, f))
 	require.Equal(t, history, rid08PrimaryGD(t, f))
 	proof := &rid08FaultProof{Accounts: ids, FailedOpsBefore: before, FailedOpsAfter: after, FaultGDHistory: history}
+	rid08NewmanPhase(t, f, "late-fault-n0", nil, nil, namedSystem, "", "")
 	// Same world, manifests, C/O, account set, page size and real startup. Only the
 	// second-page fault flag is removed; no state repair or permission write.
 	twin := rid08Start(t, f, "rid08-late-page-twin", false, false)
@@ -292,6 +299,7 @@ func rid08FaultWorld(t *testing.T) *rid08FaultProof {
 	require.Equal(t, 3, proof.TwinSnapshot.Pages)
 	rid08Ready(t, f, twin, wire, 6)
 	proof.Twin = rid08PublicCensus(t, f, ids)
+	twinNewman := rid08NewmanPhase(t, f, "fault-twin-n3", ids, nil, namedSystem, "", "")
 	rid08NewOperations(t, f, after, 6)
 	rid06GracefulStop(t, twin)
 	stable := rid08PrimaryGD(t, f)
@@ -303,6 +311,7 @@ func rid08FaultWorld(t *testing.T) *rid08FaultProof {
 	require.Equal(t, 3, proof.RetrySnapshot.Pages)
 	rid08Ready(t, f, retry, wire, 6)
 	proof.Retry = rid08PublicCensus(t, f, ids)
+	rid08NewmanPhase(t, f, "retry-n3", ids, twinNewman, namedSystem, "", "")
 	rid08NewOperations(t, f, retryOps, 6)
 	require.Equal(t, stable, rid08PrimaryGD(t, f))
 	require.Equal(t, proof.Twin, proof.Retry)
@@ -311,4 +320,20 @@ func rid08FaultWorld(t *testing.T) *rid08FaultProof {
 	f.requireSameCredential(t)
 	rid08Write(t, f.session.Root, "late-page-proof", proof)
 	return proof
+}
+
+// The capacity and admission receipts name independent existing production
+// policies. The fourth account is permitted by the declared count ceiling only;
+// its normal Create still has to wait for the unchanged three-per-hour window.
+func rid08RequireAccountCapacity(t *testing.T, f *installationNativeWorld, owned int64) {
+	t.Helper()
+	var ceiling, count int64
+	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, "SELECT limit_value FROM kaname.own_ceilings WHERE kind='iam.account'").Scan(&ceiling))
+	require.EqualValues(t, 4, ceiling)
+	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, "SELECT count(*) FROM kaname.accounts WHERE owner_user_id=$1", string(f.given.user)).Scan(&count))
+	require.Equal(t, owned, count)
+	a := rid08AdmissionRead(t, f)
+	require.EqualValues(t, 3, a.Limit)
+	require.EqualValues(t, 3600, a.WindowSeconds)
+	rid08Write(t, f.session.Root, fmt.Sprintf("account-capacity-%d", owned), map[string]any{"declaredCountCeiling": ceiling, "actualOwnedAccounts": count, "admissionMax": a.Limit, "admissionWindowSeconds": a.WindowSeconds})
 }

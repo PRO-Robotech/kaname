@@ -66,10 +66,23 @@ func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL str
 // and actual initial-key observation without enabling W or altering F0/model.
 func newInstallationNativeWorldLifecycle(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool) *installationNativeWorld {
 	t.Helper()
+	return newInstallationNativeWorldAccountCapacity(t, keyTTL, accessTTL, moduleWriter, earlyLifecycle, 0)
+}
+
+// A snapshot crossing N3 -> N4 requires capacity for four simultaneously owned
+// accounts. This ordinary declared count ceiling is separate from the unchanged
+// three admissions per real hour. Zero preserves every historical stand profile;
+// no DB policy row or identity/carrier is rewritten by the fixture.
+func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool, accountCapacity int64) *installationNativeWorld {
+	t.Helper()
+	require.True(t, accountCapacity == 0 || accountCapacity == 4, "only the explicit RID08 N4 count profile is permitted")
 	// Declare a coherent short-lived production profile before creating the PG
 	// fixture. The revocation reader stays enabled; its ordinary cache window
 	// must be positive and strictly shorter than the issued-token lifetime.
 	overrides := map[string]string{}
+	if accountCapacity != 0 {
+		overrides["KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY"] = fmt.Sprint(accountCapacity)
+	}
 	if accessTTL != "" {
 		ttl, err := time.ParseDuration(accessTTL)
 		require.NoError(t, err)
