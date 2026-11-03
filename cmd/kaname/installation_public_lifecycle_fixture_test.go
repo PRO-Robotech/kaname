@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -655,7 +656,7 @@ func (w *ridLifecycleWorld) requireGrantRequest(t *testing.T, request *iamv1.Cre
 	require.True(t, proto.Equal(request.Target, got.Target), "exact requested target")
 	require.True(t, proto.Equal(request.ExpiresAt, got.ExpiresAt))
 	require.Equal(t, request.DeletionProtection, got.DeletionProtection)
-	require.Equal(t, request.Labels, got.Labels)
+	require.True(t, maps.Equal(request.Labels, got.Labels), "exact protobuf labels map entries")
 }
 
 // recordGrantProjection records data-only binding projections before the strict
