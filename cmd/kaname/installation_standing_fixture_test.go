@@ -85,18 +85,25 @@ func newInstallationStandingWorld(t *testing.T, pace int, accessTTL time.Duratio
 	cfg.AuthN.ClientToken.DefaultAudience = "https://api.kacho.local"
 	cfg.AuthN.ClientToken.ExchangesPerClientPerSec = pace
 	cfg.AuthN.ClientToken.TokenTTL = accessTTL
+	// Explicit existing native stand profile; configuration defaults are zero
+	// because production requires these issuance limits to be declared.
+	cfg.AuthN.ClientToken.BodyCeiling = 16384
+	cfg.AuthN.ClientToken.InFlightCeiling = 32
+	cfg.AuthN.ClientToken.FailedProofsPerSource = 50
+	cfg.AuthN.ClientToken.FailedProofWindow = 15 * time.Minute
 	cfg.AuthN.PresentedCredential.Enabled = true
 	cfg.AuthN.PresentedCredential.Audience = "https://api.kacho.local"
-	f := &installationStandingWorld{installationBootstrapWorld: base, cfg: cfg, ops: operations.NewRepo(base.world.pool, "kaname")}
+	normalOperations := operations.NewRepo(base.world.pool, "kaname")
+	f := &installationStandingWorld{installationBootstrapWorld: base, cfg: cfg, ops: normalOperations}
 	pool := base.world.pool
 	grants := kanamepg.NewClusterAdminGrantWriter(pool)
 	grantReads := kanamepg.NewClusterAdminGrantReader(pool)
 	txb := kanamepg.NewPoolTxBeginner(pool)
 	emit := kanamepg.NewFGAOutboxEmitter()
 	audit := kanamepg.NewAuditOutboxEmitter(pool)
-	grant := clusterapp.NewGrantAdminUseCase(grants, grantReads, emit, txb, f.ops).
+	grant := clusterapp.NewGrantAdminUseCase(grants, grantReads, emit, txb, normalOperations).
 		WithSubjectStateReader(kanamepg.NewSubjectStateReader(pool)).WithAdminChecker(f.relations).WithAuditEmitter(audit)
-	revoke := clusterapp.NewRevokeAdminUseCase(grants, emit, txb, f.ops).WithAdminChecker(f.relations).WithAuditEmitter(audit)
+	revoke := clusterapp.NewRevokeAdminUseCase(grants, emit, txb, normalOperations).WithAdminChecker(f.relations).WithAuditEmitter(audit)
 	handler := clusterapp.NewHandler(clusterapp.NewGetClusterUseCase(kanamepg.NewClusterReader(pool)), grant, revoke, clusterapp.NewListAdminsUseCase(grantReads))
 	registry, err := seed.LoadPermissionRegistry(base.world.ctx, nil)
 	require.NoError(t, err)

@@ -9683,7 +9683,7 @@
       ]
     },
     {
-      "name": "IAM-GD-1011-GROUP-CONTAINS-DELEGATE-DENIED — #1011: группа содержит делегата — 403/7 до операции",
+      "name": "IAM-GD-1011-GROUP-CONTAINS-DELEGATE-DENIED — kaname#1011: группа содержит делегата — 403/7 до операции",
       "description": "class:AUTHZ | class:CONF | priority:P1",
       "item": [
         {
@@ -10922,7 +10922,7 @@
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(7);",
                   "});",
-                  "pm.test('#1011 group contains delegate: текст отказа — permission denied', () => {",
+                  "pm.test('kaname#1011 group contains delegate: текст отказа — permission denied', () => {",
                   "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
                   "  pm.expect(j.message, JSON.stringify(j)).to.eql('permission denied');",
                   "});",
@@ -11988,7 +11988,7 @@
       ]
     },
     {
-      "name": "IAM-GD-1011-GROUP-WITHOUT-DELEGATE-ALLOWED — #1011: та же групповая ось без делегата — успешная операция с delegationId",
+      "name": "IAM-GD-1011-GROUP-WITHOUT-DELEGATE-ALLOWED — kaname#1011: та же групповая ось без делегата — успешная операция с delegationId",
       "description": "class:AUTHZ | class:CONF | priority:P1",
       "item": [
         {

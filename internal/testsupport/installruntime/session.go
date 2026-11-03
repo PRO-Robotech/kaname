@@ -26,6 +26,7 @@ type Session struct {
 	Environment  []string
 	Root         string
 	Probe        func(context.Context) error
+	History      []*Process
 	running      *Process
 	sequence     int
 }
@@ -62,6 +63,7 @@ func (s *Session) start(ctx context.Context, config []byte) (*Process, error) {
 		return nil, err
 	}
 	s.running = p
+	s.History = append(s.History, p)
 	if p.BinarySHA256 != s.BinarySHA256 {
 		stop, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -81,7 +83,9 @@ func (s *Session) StartBase(ctx context.Context) (*Process, error) {
 	if err != nil {
 		return p, err
 	}
-	return p, p.AwaitReady(ctx, s.Probe)
+	ready, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	return p, p.AwaitReady(ready, s.Probe)
 }
 
 // StartDelivery invokes ordinary full serve, preserving invalid input for
