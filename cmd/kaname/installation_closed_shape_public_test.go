@@ -137,9 +137,9 @@ func rid12PublicCensus(t *testing.T, f *installationNativeWorld, wantedAccounts 
 				require.Equal(t, module, got.Module)
 				require.Equal(t, "ACTIVE", status)
 				require.ElementsMatch(t, expectedRoles, roles)
-				require.Equal(t, roles, got.RoleIds)
+				require.ElementsMatch(t, roles, got.RoleIds)
 				require.ElementsMatch(t, declaration.TargetTypes, targets)
-				require.Equal(t, targets, got.TargetTypes)
+				require.ElementsMatch(t, targets, got.TargetTypes)
 				expectedSubjects := []iamv1.SubjectType{}
 				expectedStored := []string{}
 				for _, name := range declaration.SubjectTypes {

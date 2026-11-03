@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 955
+Всего кейсов: 961
 
 ## Перепись по модулям
 
@@ -86,6 +86,7 @@
 | `cases/registry-installation-rid02.py` | 4 |
 | `cases/registry-installation-rid08.py` | 6 |
 | `cases/registry-installation-rid09.py` | 32 |
+| `cases/registry-installation-rid10.py` | 6 |
 
 ---
 
@@ -1441,3 +1442,14 @@ ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакци
 - `registry-installation-rid09-DELEGATE-M2-M1-NEGATIVE-AFTER`
 - `registry-installation-rid09-DELEGATE-M2-M1-TWIN-BEFORE`
 - `registry-installation-rid09-DELEGATE-M2-M1-TWIN-AFTER`
+
+## `cases/registry-installation-rid10.py` — 6 кейсов
+
+Публичное состояние после частичного применения, восстановления и в независимых законных близнецах. Полная история доверенности, выдачи и операций сверяется с primary; операции читает их настоящий создатель.
+
+- `registry-installation-rid10-FAULT-PARTIAL`
+- `registry-installation-rid10-FAULT-RECOVERED`
+- `registry-installation-rid10-FAULT-TWIN`
+- `registry-installation-rid10-RETIREMENT-PARTIAL`
+- `registry-installation-rid10-RETIREMENT-RECOVERED`
+- `registry-installation-rid10-RETIREMENT-TWIN`
