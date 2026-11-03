@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -21,10 +22,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type rid01OperationColumnProof struct {
+	SHA256 string `json:"sha256"`
+	Kind   string `json:"kind"`
+	Null   bool   `json:"null"`
+}
+
 type rid01NewmanSnapshot struct {
-	Projection rid09NewmanProjection    `json:"projection"`
-	Whole      ridWholeDeliverySnapshot `json:"-"`
-	Operations map[string]string        `json:"-"`
+	Projection            rid09NewmanProjection                           `json:"projection"`
+	Whole                 ridWholeDeliverySnapshot                        `json:"-"`
+	Operations            map[string]string                               `json:"-"`
+	OperationColumnHashes map[string]map[string]rid01OperationColumnProof `json:"-"`
 }
 type rid01PublicContext struct {
 	f                    *installationNativeWorld
@@ -68,15 +76,43 @@ func rid01CaptureSnapshot(t *testing.T, ctx context.Context, f *installationNati
 	require.NoError(t, tx.QueryRow(ctx, "SELECT pg_is_in_recovery()").Scan(&recovery))
 	require.False(t, recovery)
 	ops := map[string]string{}
+	columns := map[string]map[string]rid01OperationColumnProof{}
 	for _, row := range rid09PrimaryRows(t, ctx, tx, "operations") {
 		id := rid09PrimaryValue[string](t, row, "id")
 		require.NotContains(t, ops, id)
 		ops[id] = ridWholeDigest(t, row)
+		columns[id] = map[string]rid01OperationColumnProof{}
+		for name, value := range row {
+			// A primary cell is json.RawMessage: SQL NULL is the literal
+			// bytes "null", not a nil Go wrapper. Decode only its JSON kind;
+			// the digest always covers the untouched original RawMessage.
+			var cell any
+			decoder := json.NewDecoder(bytes.NewReader(value))
+			decoder.UseNumber()
+			require.NoError(t, decoder.Decode(&cell))
+			kind := "null"
+			switch cell.(type) {
+			case nil:
+			case string:
+				kind = "string"
+			case json.Number:
+				kind = "number"
+			case bool:
+				kind = "boolean"
+			case map[string]any:
+				kind = "object"
+			case []any:
+				kind = "array"
+			default:
+				t.Fatal("unrecognized primary JSON cell kind")
+			}
+			columns[id][name] = rid01OperationColumnProof{SHA256: ridWholeDigest(t, value), Kind: kind, Null: cell == nil}
+		}
 	}
 	require.NoError(t, tx.Commit(ctx))
 	after := rid09ReadNewmanProjectionContext(t, ctx, f)
 	require.NoError(t, ctx.Err(), "aggregate RID01 snapshot budget expired before return")
-	return rid01NewmanSnapshot{Projection: p, Whole: whole, Operations: ops}, reflect.DeepEqual(p, after)
+	return rid01NewmanSnapshot{Projection: p, Whole: whole, Operations: ops, OperationColumnHashes: columns}, reflect.DeepEqual(p, after)
 }
 func rid01StableSnapshots(a, b rid01NewmanSnapshot) bool {
 	return reflect.DeepEqual(a.Projection, b.Projection) && reflect.DeepEqual(a.Whole.Delivery, b.Whole.Delivery) && reflect.DeepEqual(a.Whole.OwnCeilings, b.Whole.OwnCeilings) && reflect.DeepEqual(a.Operations, b.Operations) && reflect.DeepEqual(a.Whole.Bookkeeping["operations"], b.Whole.Bookkeeping["operations"])
@@ -225,6 +261,40 @@ func rid01RequireReentryPreserved(t *testing.T, before, after rid01NewmanSnapsho
 
 func rid01RequireOperations(t *testing.T, f *installationNativeWorld, before, after rid01NewmanSnapshot, delta int) {
 	t.Helper()
+	// Diagnose every changed historical row BEFORE any existing assertion can
+	// stop this phase. Values and credential response bodies never leave memory;
+	// only per-column SHA256 and identities from the real fixture are retained.
+	changed := map[string]any{}
+	for id, digest := range before.Operations {
+		if after.Operations[id] == digest {
+			continue
+		}
+		kind := "other"
+		switch id {
+		case f.creator.CreateOperation.ID:
+			kind = "standing-creator-create"
+		case f.creator.GrantOperation.ID:
+			kind = "standing-creator-admin-grant"
+		case f.creator.KeyOperation.ID:
+			kind = "standing-creator-key-issue"
+		}
+		fields := map[string]any{}
+		for name, old := range before.OperationColumnHashes[id] {
+			current, exists := after.OperationColumnHashes[id][name]
+			if !exists || current != old {
+				fields[name] = map[string]any{"beforePresent": true, "afterPresent": exists, "before": old, "after": current}
+			}
+		}
+		for name, current := range after.OperationColumnHashes[id] {
+			if _, exists := before.OperationColumnHashes[id][name]; !exists {
+				fields[name] = map[string]any{"beforePresent": false, "afterPresent": true, "after": current}
+			}
+		}
+		changed[id] = map[string]any{"kind": kind, "beforeRowSHA256": digest, "afterRowSHA256": after.Operations[id], "changedColumns": fields}
+	}
+	if len(changed) != 0 {
+		rid08Write(t, f.session.Root, "rid01-operation-history-diagnostic", map[string]any{"state": "CHANGED_HISTORICAL_OPERATIONS_NOT_ACCEPTED", "changed": changed, "beforeCount": len(before.Operations), "afterCount": len(after.Operations), "expectedNewCount": delta, "wholeDoDAccepted": false})
+	}
 	require.Len(t, after.Operations, len(before.Operations)+delta)
 	for id, row := range before.Operations {
 		require.Equal(t, row, after.Operations[id], "all existing full normal Operation rows exact")

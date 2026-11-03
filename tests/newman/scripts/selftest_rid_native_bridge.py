@@ -9,10 +9,14 @@ are deliberately not Kaname IDs. A rejected response echoes the fake bearer to
 prove failure-message sanitization. No native RID count may be incremented here.
 """
 import copy
+import errno
 import hashlib
 import importlib.util
 import json
 import os
+import selectors
+import signal
+import time
 import ssl
 import subprocess
 import sys
@@ -22,6 +26,238 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
+
+
+class ProtocolClientFailure(RuntimeError):
+    """Sanitized error with retained stream/audit evidence, never raw error text."""
+    def __init__(self, primary, cleanup, result, audit):
+        super().__init__("bounded protocol client failed; private evidence retained")
+        self.primary = primary
+        self.cleanup = cleanup
+        self.result = result
+        self.audit = audit
+
+
+def run_protocol_client(args, payload, env, timeout=100, audit_secrets=()):
+    """Drain/audit BOTH streams from spawn through every ACK/cleanup outcome."""
+    all_fds = set()
+    pid = None
+    reaped = False
+    status = None
+    primary = None
+    cleanup_errors = []
+    selector = None
+    stdout_r = stderr_r = ack_r = stdin_w = permit_w = None
+    stdin_r = stdout_w = stderr_w = ack_w = permit_r = None
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    eof = {"stdout": False, "stderr": False}
+    byte_counts = {"stdout": 0, "stderr": 0}
+    tails = {"stdout": b"", "stderr": b""}
+    secret_found = False
+    secret_checks = 0
+    ack_valid = False
+    permit_sent = False
+    data = memoryview(json.dumps(payload).encode())
+    ack = bytearray()
+    materials = tuple(x for x in audit_secrets if x)
+    tail_size = max((len(x) for x in materials), default=1) - 1
+    deadline = time.monotonic() + timeout
+
+    def pipe():
+        pair = os.pipe()
+        all_fds.update(pair)  # registered immediately, including partial allocation failure
+        return pair
+
+    def close(fd):
+        if fd is None or fd not in all_fds:
+            return
+        if selector is not None:
+            try:
+                selector.unregister(fd)
+            except (KeyError, ValueError):
+                pass
+        try:
+            os.close(fd)
+        except OSError as error:
+            if error.errno == errno.EBADF:
+                all_fds.discard(fd)
+            raise
+        all_fds.remove(fd)
+
+    def drain(fd, name):
+        nonlocal secret_found, secret_checks
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            eof[name] = True
+            close(fd)
+            return
+        byte_counts[name] += len(chunk)
+        joined = tails[name] + chunk
+        for secret in materials:
+            secret_checks += 1
+            if secret in joined:
+                secret_found = True
+        tails[name] = joined[-tail_size:] if tail_size else b""
+        room = 32 * 1048576 - len(buffers[name])
+        buffers[name].extend(chunk[:max(0, room)])
+        check(byte_counts[name] <= 32 * 1048576, "bounded client stream exceeded")
+
+    def poll_reap():
+        nonlocal reaped, status
+        if pid is not None and not reaped:
+            waited, observed = os.waitpid(pid, os.WNOHANG)
+            if waited:
+                reaped, status = True, observed
+
+    try:
+        stdin_r, stdin_w = pipe()
+        stdout_r, stdout_w = pipe()
+        stderr_r, stderr_w = pipe()
+        ack_r, ack_w = pipe()
+        permit_r, permit_w = pipe()
+        selector = selectors.DefaultSelector()
+        actions = [(os.POSIX_SPAWN_DUP2, stdin_r, 0), (os.POSIX_SPAWN_DUP2, stdout_w, 1),
+                   (os.POSIX_SPAWN_DUP2, stderr_w, 2), (os.POSIX_SPAWN_DUP2, ack_w, 3),
+                   (os.POSIX_SPAWN_DUP2, permit_r, 4)]
+        actions += [(os.POSIX_SPAWN_CLOSE, fd) for fd in sorted(all_fds) if fd > 4]
+        pid = os.posix_spawn(args[0], args, env, file_actions=actions)
+        # Register reads before any input/ACK wait: stderr/stdout can precede ACK.
+        for fd, name in ((stdout_r, "stdout"), (stderr_r, "stderr"), (ack_r, "ack")):
+            os.set_blocking(fd, False)
+            selector.register(fd, selectors.EVENT_READ, name)
+        os.set_blocking(stdin_w, False)
+        selector.register(stdin_w, selectors.EVENT_WRITE, "stdin")
+        for fd in (stdin_r, stdout_w, stderr_w, ack_w, permit_r):
+            close(fd)
+        while True:
+            check(time.monotonic() < deadline, "bounded protocol client deadline")
+            poll_reap()
+            if reaped and eof["stdout"] and eof["stderr"]:
+                check(ack_valid and permit_sent, "client ended before validated ACK/permit")
+                break
+            for key, _ in selector.select(min(0.1, max(0, deadline - time.monotonic()))):
+                fd, kind = key.fd, key.data
+                if kind in ("stdout", "stderr"):
+                    drain(fd, kind)
+                elif kind == "stdin":
+                    try:
+                        written = os.write(fd, data)
+                    except BlockingIOError:
+                        continue
+                    data = data[written:]
+                    if not data:
+                        close(fd)
+                elif kind == "ack":
+                    chunk = os.read(fd, 513)
+                    if chunk:
+                        ack.extend(chunk)
+                        check(len(ack) <= 512, "bounded Node ACK")
+                    else:
+                        close(fd)
+                        def unique_fields(pairs):
+                            result = {}
+                            for name, value in pairs:
+                                check(name not in result, "repeated Node ACK field")
+                                result[name] = value
+                            return result
+                        observed = json.loads(ack, object_pairs_hook=unique_fields)
+                        check(isinstance(observed, dict) and
+                              set(observed) == {"version", "pid", "caseId", "runId"} and
+                              type(observed["version"]) is int and type(observed["pid"]) is int and
+                              type(observed["caseId"]) is str and type(observed["runId"]) is str,
+                              "invalid Node ACK schema/types")
+                        check(observed == {"version": 1, "pid": pid, "caseId": args[-1], "runId": payload["runId"]},
+                              "invalid Node ACK")
+                        ack_valid = True
+                        # Invalid/empty/repeated ACK cannot reach this write.
+                        written = os.write(permit_w, b"RID_NEWMAN_PERMIT_V1\n")
+                        check(written == len(b"RID_NEWMAN_PERMIT_V1\n"), "incomplete Node permit")
+                        close(permit_w)
+                        permit_sent = True
+    except BaseException as error:
+        primary = error
+    finally:
+        # Preserve the original failure and every cleanup error. Even kill/reap
+        # errors cannot bypass both-stream drainage/audit or unconditional FD close.
+        try:
+            # A first post-spawn set_blocking/register failure can precede
+            # normal unused-end closes. Parent writer copies must never keep
+            # stdout/stderr/ACK alive while cleanup tries to prove real EOF.
+            for fd in (stdout_w, stderr_w, ack_w, stdin_r, permit_r):
+                try:
+                    close(fd)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+            if pid is not None and not reaped:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except BaseException as error:
+                    cleanup_errors.append(error)
+            cleanup_deadline = time.monotonic() + 5
+            drain_ready = set()
+            for fd, name in ((stdout_r, "stdout"), (stderr_r, "stderr")):
+                if fd in all_fds and not eof[name]:
+                    try:
+                        os.set_blocking(fd, False)
+                        drain_ready.add(fd)
+                    except BaseException as error:
+                        cleanup_errors.append(error)
+            for fd in (stdin_w, permit_w, ack_r):
+                try:
+                    close(fd)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+            # Drain directly without relying on a possibly failed selector.
+            while pid is not None and (not reaped or not all(eof.values())):
+                if time.monotonic() >= cleanup_deadline:
+                    cleanup_errors.append(RuntimeError("bounded cleanup/reap/stream drain incomplete"))
+                    break
+                try:
+                    poll_reap()
+                except BaseException as error:
+                    cleanup_errors.append(error)
+                for fd, name in ((stdout_r, "stdout"), (stderr_r, "stderr")):
+                    if fd in drain_ready and fd in all_fds and not eof[name]:
+                        try:
+                            drain(fd, name)
+                        except BlockingIOError:
+                            pass
+                        except BaseException as error:
+                            cleanup_errors.append(error)
+                if not reaped or not all(eof.values()):
+                    time.sleep(0.01)
+        finally:
+            # Always close every allocated fd, even if a previous close/reap failed.
+            for fd in list(all_fds):
+                try:
+                    close(fd)
+                except BaseException as error:
+                    cleanup_errors.append(error)
+                    try:
+                        os.close(fd)
+                        all_fds.discard(fd)
+                    except OSError:
+                        pass
+            if selector is not None:
+                try:
+                    selector.close()
+                except BaseException as error:
+                    cleanup_errors.append(error)
+    audit = {"stdoutEOF": eof["stdout"], "stderrEOF": eof["stderr"],
+             "stdoutBytes": byte_counts["stdout"], "stderrBytes": byte_counts["stderr"],
+             "secretChecks": secret_checks, "secretFound": secret_found,
+             "ackValid": ack_valid, "permitSent": permit_sent, "reaped": reaped,
+             "remainingFDs": len(all_fds)}
+    result = subprocess.CompletedProcess(args, os.waitstatus_to_exitcode(status) if status is not None else None,
+                                       bytes(buffers["stdout"]), bytes(buffers["stderr"]))
+    result.protocol_audit = audit
+    if secret_found:
+        cleanup_errors.append(RuntimeError("client output leaked private material"))
+    if primary is not None or cleanup_errors:
+        raise ProtocolClientFailure(primary, cleanup_errors, result, audit) from None
+    return result
 
 
 HERE = Path(__file__).resolve().parent
@@ -225,9 +461,9 @@ def main():
             payload = {"ownRestBaseUrl": origin, "variables": {"rid08Expected": e,
                        "ridSystemId": e["systemId"], "ridDeletedAccountId": "fixture-deleted-A",
                        "jwtRIDOperator": secret}, "runId": run_id, "testExecutableSHA256": executable_sha, "expectedIdentities": identities}
-            proc = subprocess.run([str(node), str(HERE / "run-rid-native.cjs"), str(collection_path),
-                                   str(package), str(cert), str(cert), str(key), case_id],
-                                  input=json.dumps(payload).encode(), capture_output=True, timeout=100,
+            proc = run_protocol_client([str(node), str(HERE / "run-rid-native.cjs"), str(collection_path),
+                                   str(package), str(cert), str(cert), str(key), case_id], payload, timeout=100,
+                                  audit_secrets=(secret.encode(), key.read_bytes(), b"-----BEGIN PRIVATE KEY-----"),
                                   env={"HOME": str(out), "PATH": str(node.parent) + ":/usr/bin:/bin",
                                        "NODE_OPTIONS": "--max-old-space-size=256", "NO_PROXY": "localhost,127.0.0.1"})
             for material in (secret.encode(), key.read_bytes(), b"-----BEGIN PRIVATE KEY-----"):
@@ -304,7 +540,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (PremiseFailure, AssertionError, ValueError, OSError, subprocess.SubprocessError) as exc:
+    except (PremiseFailure, ProtocolClientFailure, AssertionError, ValueError, OSError, subprocess.SubprocessError) as exc:
         # Never print arbitrary mock response/runner errors or private material.
         print(json.dumps({"kind": "CLIENT_PREMISE_ONLY_NOT_KANAME_ACCEPTANCE", "ok": False,
                           "failure": str(exc) if isinstance(exc, PremiseFailure) else "client-generation-execution-collector-or-redaction-premise"}))

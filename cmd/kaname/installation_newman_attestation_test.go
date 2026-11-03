@@ -170,10 +170,52 @@ func ridNewmanTreeManifest(root string) (ridNewmanTree, error) {
 
 // Registered in the parent before it releases ANY Node input. Unlike Go-child
 // Cleanup this still executes after a forced kill of that entire owned group.
-func ridNewmanParentAudit(t *testing.T, c *rid02OwnedChild, in ridNewmanToolInput, secrets []string) {
+type ridNewmanAuditError struct{ Code, Message string }
+type ridNewmanAuditResult struct {
+	Checks  map[string]bool
+	Streams rid02StreamScan
+	Errors  []ridNewmanAuditError
+}
+
+func ridNewmanGroupKillAccepted(r ridNewmanAuditResult) bool {
+	if r.Streams.Requested != 4 || r.Streams.Metadata != 4 || r.Streams.Read != 4 || r.Streams.JWTChecks != 4 || r.Streams.PEMChecks != 4 || r.Streams.SecretChecks == 0 || len(r.Streams.Errors) != 0 {
+		return false
+	}
+	if len(r.Errors) != 1 || r.Errors[0].Code != "MISSING_NODE_TERMINAL" {
+		return false
+	}
+	for _, key := range []string{"allFourStreams", "actualFD5Secrets", "nodeIdentity", "preStdinIdentity", "postACKIdentity", "nodeAbsent", "groupAbsent", "toolTree", "allToolIdentityReads"} {
+		if !r.Checks[key] {
+			return false
+		}
+	}
+	return true
+}
+func ridNewmanReportParentAudit(t *testing.T, r ridNewmanAuditResult) {
 	t.Helper()
+	for _, err := range r.Errors {
+		t.Error(err.Code + ": " + err.Message)
+	}
+}
+func ridNewmanParentAudit(t *testing.T, c *rid02OwnedChild, in ridNewmanToolInput, secrets []string, required ...string) {
+	t.Helper()
+	ridNewmanReportParentAudit(t, ridNewmanCollectParentAudit(c, in, secrets, required))
+}
+
+func ridNewmanCollectParentAudit(c *rid02OwnedChild, in ridNewmanToolInput, secrets, required []string) ridNewmanAuditResult {
+	r := ridNewmanAuditResult{Checks: map[string]bool{}}
+	add := func(code, message string) { r.Errors = append(r.Errors, ridNewmanAuditError{code, message}) }
 	dir := filepath.Join(c.dir, "newman")
-	rid02CheckStreams(t, []string{filepath.Join(dir, "stdout"), filepath.Join(dir, "stderr")}, secrets)
+	r.Streams = rid02ScanStreams([]string{filepath.Join(c.dir, "stdout"), filepath.Join(c.dir, "stderr"), filepath.Join(dir, "stdout"), filepath.Join(dir, "stderr")}, secrets)
+	for _, err := range r.Streams.Errors {
+		add("STREAM_AUDIT", err)
+	}
+	r.Checks["allFourStreams"] = r.Streams.Requested == 4 && r.Streams.Metadata == 4 && r.Streams.Read == 4 && r.Streams.JWTChecks == 4 && r.Streams.PEMChecks == 4 && r.Streams.SecretChecks > 0
+	if err := ridNewmanAuditAnonymousInventory(c.secretInventory, required); err != nil {
+		add("FD5_AUDIT", "anonymous FD5 actual secret audit failed")
+	} else {
+		r.Checks["actualFD5Secrets"] = true
+	}
 	var identity struct {
 		PID       int      `json:"pid"`
 		Start     string   `json:"starttime"`
@@ -182,19 +224,21 @@ func ridNewmanParentAudit(t *testing.T, c *rid02OwnedChild, in ridNewmanToolInpu
 		NodeSHA   string   `json:"nodeSHA256"`
 		ScriptSHA string   `json:"scriptSHA256"`
 	}
+	fullNodeIdentity := false
 	raw, err := os.ReadFile(filepath.Join(dir, "process.json"))
 	if err != nil {
-		t.Error("mandatory nested Node ownership receipt missing after admission")
+		add("PARENT_AUDIT", "mandatory nested Node ownership receipt missing after admission")
 	} else if json.Unmarshal(raw, &identity) != nil {
-		t.Error("nested Node ownership receipt invalid")
+		add("PARENT_AUDIT", "nested Node ownership receipt invalid")
 	} else {
 		expected := []string{in.Node, in.Script, in.Collection, in.Module, in.CA, in.Cert, in.Key, in.CaseID}
-		if identity.PID <= 0 || identity.Start == "" || identity.Group != c.cmd.Process.Pid || strings.Join(identity.Argv, "\x00") != strings.Join(expected, "\x00") || identity.NodeSHA != in.NodeSHA || identity.ScriptSHA != in.ScriptSHA {
-			t.Error("nested Node ownership does not match admitted child and toolchain")
+		fullNodeIdentity = identity.PID > 0 && identity.Start != "" && identity.Group == c.cmd.Process.Pid && strings.Join(identity.Argv, "\x00") == strings.Join(expected, "\x00") && identity.NodeSHA == in.NodeSHA && identity.ScriptSHA == in.ScriptSHA
+		if !fullNodeIdentity {
+			add("PARENT_AUDIT", "nested Node ownership does not match admitted child and toolchain")
 		}
 		if identity.PID > 0 {
 			if _, e := os.Stat("/proc/" + strconv.Itoa(identity.PID)); !errors.Is(e, os.ErrNotExist) {
-				t.Error("nested Node PID not proven absent independently")
+				add("PARENT_AUDIT", "nested Node PID not proven absent independently")
 			}
 		}
 	}
@@ -208,10 +252,23 @@ func ridNewmanParentAudit(t *testing.T, c *rid02OwnedChild, in ridNewmanToolInpu
 	}
 	observed, e := os.ReadFile(filepath.Join(dir, "parent-node-ownership.json"))
 	if e != nil || json.Unmarshal(observed, &parent) != nil || parent.PID != identity.PID || parent.Start != identity.Start || parent.Group != c.cmd.Process.Pid || !parent.ArgvExact || !parent.SameCgroup || !parent.BeforeStdin {
-		t.Error("independent parent Node ownership proof missing or inconsistent")
+		add("PARENT_AUDIT", "independent parent Node ownership proof missing or inconsistent")
 	}
 	if e := syscall.Kill(-c.cmd.Process.Pid, 0); !errors.Is(e, syscall.ESRCH) {
-		t.Error("nested Node owning process group not proven absent")
+		add("PARENT_AUDIT", "nested Node owning process group not proven absent")
+	}
+	var postACK struct {
+		PID        int    `json:"pid"`
+		Start      string `json:"starttime"`
+		Group      int    `json:"group"`
+		ArgvExact  bool   `json:"argvExact"`
+		SameCgroup bool   `json:"sameBoundedCgroup"`
+		AfterACK   bool   `json:"afterInputValidationACK"`
+	}
+	ackReceipt, ackErr := os.ReadFile(filepath.Join(dir, "parent-node-input-validated-ownership.json"))
+	r.Checks["postACKIdentity"] = ackErr == nil && json.Unmarshal(ackReceipt, &postACK) == nil && postACK.PID == identity.PID && postACK.Start == identity.Start && postACK.Group == c.cmd.Process.Pid && postACK.ArgvExact && postACK.SameCgroup && postACK.AfterACK
+	if !r.Checks["postACKIdentity"] {
+		add("PARENT_AUDIT", "independent post-ACK Node identity proof missing or inconsistent")
 	}
 	var terminal struct {
 		PID      int  `json:"pid"`
@@ -220,39 +277,62 @@ func ridNewmanParentAudit(t *testing.T, c *rid02OwnedChild, in ridNewmanToolInpu
 	}
 	raw, err = os.ReadFile(filepath.Join(dir, "terminal.json"))
 	if err != nil {
-		t.Error("mandatory nested Node terminal receipt missing; full stream audit still performed")
+		add(ridNewmanTerminalReadCode(err), "mandatory nested Node terminal receipt unavailable; full stream audit still performed")
 	} else if json.Unmarshal(raw, &terminal) != nil || !terminal.Exited || terminal.PID != identity.PID {
-		t.Error("nested Node terminal receipt inconsistent")
+		add("PARENT_AUDIT", "nested Node terminal receipt inconsistent")
 	}
+	r.Checks["nodeIdentity"] = fullNodeIdentity
+	r.Checks["preStdinIdentity"] = parent.PID == identity.PID && parent.Start == identity.Start && parent.ArgvExact && parent.SameCgroup && parent.BeforeStdin
+	_, nodeStatErr := os.Stat("/proc/" + strconv.Itoa(identity.PID))
+	r.Checks["nodeAbsent"] = identity.PID > 0 && errors.Is(nodeStatErr, os.ErrNotExist)
+	r.Checks["groupAbsent"] = errors.Is(syscall.Kill(-c.cmd.Process.Pid, 0), syscall.ESRCH)
 	after, e := ridNewmanTreeManifest(in.Module)
 	if e != nil {
-		t.Error("bounded post-reap tool tree census failed")
+		add("PARENT_AUDIT", "bounded post-reap tool tree census failed")
 	} else {
+		r.Checks["toolTree"] = after.SHA == in.TreeSHA
 		if after.SHA != in.TreeSHA {
-			t.Error("complete Newman tool tree changed")
+			add("PARENT_AUDIT", "complete Newman tool tree changed")
 		}
 		b, e := json.Marshal(after)
 		if e != nil || os.WriteFile(filepath.Join(dir, "tool-tree-after-parent.json"), b, 0600) != nil {
-			t.Error("parent tool tree evidence unavailable")
+			add("PARENT_AUDIT", "parent tool tree evidence unavailable")
 		}
 	}
+	toolReads := 0
 	for _, item := range []struct{ path, want string }{{in.Node, in.NodeSHA}, {in.Script, in.ScriptSHA}, {in.Collection, in.CollectionSHA}} {
-		f, e := os.Open(item.path)
-		if e != nil {
-			t.Error("parent tool identity read failed")
-			continue
-		}
-		h := sha256.New()
-		n, e := io.Copy(h, io.LimitReader(f, (256<<20)+1))
-		_ = f.Close()
-		if e != nil || n > 256<<20 || hex.EncodeToString(h.Sum(nil)) != item.want {
-			t.Error("parent tool/source identity changed")
+		if ridNewmanVerifiedToolRead(item.path, item.want) {
+			toolReads++
+		} else {
+			add("PARENT_AUDIT", "parent bounded tool/source identity verification failed")
 		}
 	}
+	r.Checks["allToolIdentityReads"] = toolReads == 3
+	return r
+}
+
+func ridNewmanTerminalReadCode(err error) string {
+	if errors.Is(err, os.ErrNotExist) {
+		return "MISSING_NODE_TERMINAL"
+	}
+	return "UNEXPECTED_NODE_TERMINAL_IO"
+}
+func ridNewmanVerifiedToolRead(path, want string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(f, (256<<20)+1))
+	return err == nil && n <= 256<<20 && hex.EncodeToString(h.Sum(nil)) == want
 }
 
 // Independent parent-side proof while Node is live but has received no stdin.
 func ridNewmanParentObserveNode(t *testing.T, c *rid02OwnedChild, in ridNewmanToolInput) {
+	ridNewmanParentObserveNodeStage(t, c, in, false)
+}
+func ridNewmanParentObserveNodeStage(t *testing.T, c *rid02OwnedChild, in ridNewmanToolInput, afterACK bool) {
 	t.Helper()
 	dir := filepath.Join(c.dir, "newman")
 	var identity struct {
@@ -282,5 +362,9 @@ func ridNewmanParentObserveNode(t *testing.T, c *rid02OwnedChild, in ridNewmanTo
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(own, node))
 	require.NoError(t, syscall.Kill(identity.PID, 0))
-	rid08Write(t, dir, "parent-node-ownership", map[string]any{"pid": identity.PID, "starttime": start, "group": group, "argvExact": true, "sameBoundedCgroup": true, "beforeNodeStdin": true})
+	label := "parent-node-ownership"
+	if afterACK {
+		label = "parent-node-input-validated-ownership"
+	}
+	rid08Write(t, dir, label, map[string]any{"pid": identity.PID, "starttime": start, "group": group, "argvExact": true, "sameBoundedCgroup": true, "beforeNodeStdin": !afterACK, "afterInputValidationACK": afterACK})
 }
