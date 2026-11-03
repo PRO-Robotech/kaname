@@ -75,8 +75,12 @@ func (d RIDDeliveryFixture) Write(dir string, reversed bool) ([]string, error) {
 	if err := os.Mkdir(dir, 0700); err != nil {
 		return nil, err
 	}
-	inputs := [][]byte{d.First, d.Second}
-	if reversed {
+	inputs := [][]byte{d.First}
+	// S1 can deliver one complete module. M1/M2 callers still supply both.
+	if len(d.Second) > 0 {
+		inputs = append(inputs, d.Second)
+	}
+	if reversed && len(inputs) == 2 {
 		inputs[0], inputs[1] = inputs[1], inputs[0]
 	}
 	var hashes []string
