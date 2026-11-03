@@ -114,6 +114,22 @@ const rid03Actors = Object.freeze({
   "registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT": "I",
   "registry-installation-rid03-S2-ANONYMOUS-TWIN-VERIFY": "O"
 });
+const rid04Actors=Object.freeze({
+  "registry-installation-rid04-S1-BEFORE-RETIREMENT": "O",
+  "registry-installation-rid04-S1-RETIRED-DENIED-ACT": "I",
+  "registry-installation-rid04-S1-RETIRED-DENIED-VERIFY": "O",
+  "registry-installation-rid04-S1-REFUSED-APPLY-SNAPSHOT": "O",
+  "registry-installation-rid04-S1-RESTORED-GRANT-ACT": "I",
+  "registry-installation-rid04-S1-RESTORED-GRANT-VERIFY": "O",
+  "registry-installation-rid04-S1-RESTORED-REAPPLY": "O",
+  "registry-installation-rid04-S2-BEFORE-RETIREMENT": "O",
+  "registry-installation-rid04-S2-RETIRED-DENIED-ACT": "I",
+  "registry-installation-rid04-S2-RETIRED-DENIED-VERIFY": "O",
+  "registry-installation-rid04-S2-REFUSED-APPLY-SNAPSHOT": "O",
+  "registry-installation-rid04-S2-RESTORED-GRANT-ACT": "I",
+  "registry-installation-rid04-S2-RESTORED-GRANT-VERIFY": "O",
+  "registry-installation-rid04-S2-RESTORED-REAPPLY": "O"
+});
 function clientSecretNames(stem, caseId, variables) {
   if (!caseId.startsWith(stem + '-') || caseId.length === stem.length + 1 ||
       !variables || typeof variables !== 'object' || Array.isArray(variables)) throw new Error('invalid-secret-policy');
@@ -129,6 +145,10 @@ function clientSecretNames(stem, caseId, variables) {
     if (!Object.hasOwn(rid03Actors, caseId)) throw new Error('invalid-secret-policy');
     if (rid03Actors[caseId] === 'I') names.push('jwtRIDIssuer');
     if (rid03Actors[caseId] === 'C') names.push('jwtRIDCreator');
+  }
+  if (stem === 'registry-installation-rid04') {
+    if (!Object.hasOwn(rid04Actors,caseId)) throw new Error('invalid-secret-policy');
+    if (rid04Actors[caseId] === 'I') names.push('jwtRIDIssuer');
   }
   if (Object.keys(variables).some(k => ((k.startsWith('jwtRID') || k === 'rid01ClientAssertion') && !names.includes(k)) ||
       (k === 'rid01IssuanceOrigin' && caseId !== expiredKeyCase)) ||
