@@ -59,23 +59,23 @@ func TestRID_02_ConcurrentAndRepeat(t *testing.T) {
 }
 func TestRID_03_DelegatedGrantAndIssuerBounds(t *testing.T) {
 	runInstallationRID(t,
-		ridPredicate{name: "real production listener grant Operation Get ACTIVE with installation delegationId"},
-		ridPredicate{name: "out-of-axis role denial and same-subject legal role twin"},
-		ridPredicate{name: "I Create denied without Operation; caller-only C twin succeeds"},
-		ridPredicate{name: "allowed anonymous system-class succeeds; authenticated refused"})
+		ridPredicate{name: "real production listener grant Operation Get ACTIVE with installation delegationId", run: ridNativeDelegatedGrant},
+		ridPredicate{name: "out-of-axis role denial and same-subject legal role twin", run: ridNativeDelegatedAxes},
+		ridPredicate{name: "I Create denied without Operation; caller-only C twin succeeds", run: ridNativeIssuerCannotDelegate},
+		ridPredicate{name: "allowed anonymous system-class succeeds; authenticated refused", run: ridNativeAnonymousClass})
 }
 func TestRID_04_CreatorRetirement(t *testing.T) {
 	runInstallationRID(t,
-		ridPredicate{name: "independent verified O gateway RevokeAdmin materialized before I grant and apply"},
-		ridPredicate{name: "new grant and apply denied; old G and GD ACTIVE and no self-restoration"},
-		ridPredicate{name: "O explicit GrantAdmin only -> same request succeeds with same delegationId"})
+		ridPredicate{name: "independent verified O gateway RevokeAdmin materialized before I grant and apply", run: ridNativeCreatorRetired},
+		ridPredicate{name: "new grant and apply denied; old G and GD ACTIVE and no self-restoration", run: ridNativeRetirementApplyDenied},
+		ridPredicate{name: "O explicit GrantAdmin only -> same request succeeds with same delegationId", run: ridNativeRetirementExplicitTwin})
 }
 func TestRID_05_CreatorDeletionAndNewID(t *testing.T) {
 	runInstallationRID(t,
-		ridPredicate{name: "normal full key revoke and reference census; Delete and Get NOT_FOUND"},
-		ridPredicate{name: "old creator credentials unauthenticated; new same-name C2 does not resurrect GD"},
-		ridPredicate{name: "active delegate reference blocks Delete; revoke-only twin permits Delete"},
-		ridPredicate{name: "O explicitly grants C2; old GD revoked; explicit new Create restores issuance"})
+		ridPredicate{name: "normal full key revoke and reference census; Delete and Get NOT_FOUND", run: ridNativeCreatorDelete},
+		ridPredicate{name: "old creator credentials unauthenticated; new same-name C2 does not resurrect GD", run: ridNativeSameNameDoesNotRestore},
+		ridPredicate{name: "active delegate reference blocks Delete; revoke-only twin permits Delete", run: ridNativeActiveDelegateDeleteGuard},
+		ridPredicate{name: "O explicitly grants C2; old GD revoked; explicit new Create restores issuance", run: ridNativeCreatorExplicitReplacement})
 }
 func TestRID_06_RevokeDuringApply(t *testing.T) {
 	runInstallationRID(t,

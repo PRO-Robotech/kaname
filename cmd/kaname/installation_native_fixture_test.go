@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,13 @@ func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 // Only ordinary declared credential lifetimes vary; all admission and authority
 // policy remains unchanged. Empty accessTTL retains the stand profile.
 func newInstallationNativeWorldLifetimes(t *testing.T, keyTTL int64, accessTTL string) *installationNativeWorld {
+	return newInstallationNativeWorldProfile(t, keyTTL, accessTTL, false)
+}
+
+// The writer profile only prepares the existing module PKI/roster. Manifest
+// environment is removed below: F0 and its stock/no-delivery assertions remain
+// unchanged, and the actual later full serve performs the first installation.
+func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL string, moduleWriter bool) *installationNativeWorld {
 	t.Helper()
 	// Declare a coherent short-lived production profile before creating the PG
 	// fixture. The revocation reader stays enabled; its ordinary cache window
@@ -76,7 +84,16 @@ func newInstallationNativeWorldLifetimes(t *testing.T, keyTTL int64, accessTTL s
 	evidence, err := installruntime.EvidenceDirectory(evidenceRoot, t.Name())
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(evidenceRoot, 0700))
-	stand := installruntime.PrepareNativeStand(t, ctx, root, evidence, false)
+	stand := installruntime.PrepareNativeStand(t, ctx, root, evidence, moduleWriter)
+	f := &installationNativeWorld{stand: stand}
+	if moduleWriter {
+		// Register before any native Start, bootstrap or key provisioning. The
+		// closure tolerates every partially initialized world and never Fatal's.
+		t.Cleanup(func() { f.ridLifecycleCleanup(t) })
+		writerKey, keyErr := os.ReadFile(filepath.Join(evidence, "pki", "registry.key"))
+		f.secrets = append(f.secrets, string(writerKey))
+		require.NoError(t, keyErr)
+	}
 	identity, err := json.Marshal(map[string]string{"testIdentity": t.Name()})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(evidence, "test-identity.json"), identity, 0600))
@@ -120,23 +137,37 @@ func newInstallationNativeWorldLifetimes(t *testing.T, keyTTL int64, accessTTL s
 	overrides["KANAME_BOOTSTRAP_ROOT_EMAIL"] = w.email
 	environment, err = stand.Environment(overrides)
 	require.NoError(t, err)
+	if moduleWriter {
+		filtered := environment[:0]
+		for _, entry := range environment {
+			name, _, _ := strings.Cut(entry, "=")
+			if name != "KANAME_MANIFESTS__DIR" && name != "KANAME_MANIFESTS__REQUIRED" {
+				filtered = append(filtered, entry)
+			}
+		}
+		environment = filtered
+	}
 	stand.StartMailbox(t, ctx, environment)
 	wire, err := installruntime.NewWire(filepath.Join(evidence, "pki"), "https://localhost:9098", "https://localhost:9096", "https://localhost:9097")
 	require.NoError(t, err)
 	t.Cleanup(wire.Close)
 	session := &installruntime.Session{Binary: os.Getenv("KANAME_RID_BINARY"), BinarySHA256: os.Getenv("KANAME_RID_BINARY_SHA256"),
 		Environment: environment, Root: evidence, Probe: wire.ProductionReady}
-	f := &installationNativeWorld{given: w, stand: stand, session: session, wire: wire, secrets: []string{w.ic1.secret, w.session.bearer.CookieValue()}, baseline: baseline, tenantID: tenantID}
-	t.Cleanup(func() {
-		stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		if err := session.Stop(stop); err != nil {
-			t.Errorf("native shutdown: %v", err)
-		}
-		for _, process := range session.History {
-			require.NoError(t, process.CheckSecretAbsence(f.secrets...))
-		}
-	})
+	f.given, f.session, f.wire = w, session, wire
+	f.baseline, f.tenantID = baseline, tenantID
+	f.secrets = append(f.secrets, w.ic1.secret, w.session.bearer.CookieValue())
+	if !moduleWriter {
+		t.Cleanup(func() {
+			stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if err := session.Stop(stop); err != nil {
+				t.Errorf("native shutdown: %v", err)
+			}
+			for _, process := range session.History {
+				require.NoError(t, process.CheckSecretAbsence(f.secrets...))
+			}
+		})
+	}
 	base, err := session.StartBase(ctx)
 	require.NoError(t, err)
 	require.NoError(t, base.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
@@ -149,7 +180,11 @@ func newInstallationNativeWorldLifetimes(t *testing.T, keyTTL int64, accessTTL s
 	requireNativeAuthority(t, w, "user", string(w.user), 1)
 	baseline.requirePreserved(t, w, 0, 1)
 	requireNativeNoDelivery(t, w)
-	f.creator, err = wire.ProvisionStandingCreatorWithKeyTTL(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"), keyTTL)
+	if moduleWriter {
+		f.creator, err = wire.ProvisionStandingCreatorWithKeyTTL(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"), keyTTL, func(secret string) { f.secrets = append(f.secrets, secret) })
+	} else {
+		f.creator, err = wire.ProvisionStandingCreatorWithKeyTTL(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"), keyTTL)
+	}
 	require.NoError(t, err)
 	require.NoError(t, pool.QueryRow(ctx, `SELECT expires_at FROM kaname.service_account_oauth_clients WHERE id=$1 AND sva_id=$2`, f.creator.KeyID, f.creator.ID).Scan(&f.creator.ExpiresAt))
 	f.secrets = append(f.secrets, f.creator.SecretMaterial()...)
