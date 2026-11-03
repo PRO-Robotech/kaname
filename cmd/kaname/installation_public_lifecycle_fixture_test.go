@@ -446,6 +446,7 @@ func (w *ridLifecycleWorld) grant(t *testing.T, body any) *iamv1.AccessBinding {
 	w.requireGrantRequest(t, &request, &binding)
 	var got iamv1.AccessBinding
 	w.f.publicRead(t, "/iam/v1/accessBindings/"+binding.Id, &got)
+	w.recordGrantProjection(t, &binding, &got)
 	require.True(t, proto.Equal(&binding, &got))
 	w.requireGrantRequest(t, &request, &got)
 	require.Equal(t, iamv1.AccessBinding_ACTIVE, got.Status)
@@ -618,4 +619,46 @@ func (w *ridLifecycleWorld) requireGrantRequest(t *testing.T, request *iamv1.Cre
 	require.True(t, proto.Equal(request.ExpiresAt, got.ExpiresAt))
 	require.Equal(t, request.DeletionProtection, got.DeletionProtection)
 	require.Equal(t, request.Labels, got.Labels)
+}
+
+// recordGrantProjection records data-only binding projections before the strict
+// equality assertion. It does not normalize any field or include HTTP headers,
+// credentials, keys, or tokens. Only field names may reach test diagnostics.
+func (w *ridLifecycleWorld) recordGrantProjection(t *testing.T, response, got *iamv1.AccessBinding) {
+	t.Helper()
+	fields := response.ProtoReflect().Descriptor().Fields()
+	changed := make([]string, 0)
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Get(i)
+		left, right := proto.Clone(response), proto.Clone(got)
+		lm, rm := left.ProtoReflect(), right.ProtoReflect()
+		lm.SetUnknown(nil)
+		rm.SetUnknown(nil)
+		for j := 0; j < fields.Len(); j++ {
+			if j != i {
+				lm.Clear(fields.Get(j))
+				rm.Clear(fields.Get(j))
+			}
+		}
+		if !proto.Equal(left, right) {
+			changed = append(changed, string(field.Name()))
+		}
+	}
+	if string(response.ProtoReflect().GetUnknown()) != string(got.ProtoReflect().GetUnknown()) {
+		changed = append(changed, "<unknown-fields>")
+	}
+	responseJSON, err := protojson.Marshal(response)
+	require.NoError(t, err)
+	getJSON, err := protojson.Marshal(got)
+	require.NoError(t, err)
+	raw, err := json.MarshalIndent(struct {
+		OperationResponse json.RawMessage `json:"operation_response"`
+		PublicGet         json.RawMessage `json:"public_get"`
+		DifferentFields   []string        `json:"different_proto_fields"`
+	}{responseJSON, getJSON, changed}, "", "  ")
+	require.NoError(t, err)
+	root, err := os.MkdirTemp(w.f.session.Root, "binding-projection-")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "observation.json"), raw, 0600))
+	t.Logf("AccessBinding Operation/Get differing proto fields: %v", changed)
 }
