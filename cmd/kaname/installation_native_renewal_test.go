@@ -88,6 +88,7 @@ func waitNativeWallClock(t *testing.T, ctx context.Context, until time.Time) {
 
 func ridNativeExactIdentityAxes(t *testing.T) {
 	f := newInstallationNativeWorld(t)
+	public := rid01NewmanContext(t, f, "identities")
 	requireNativeOK(t, f.apply(t, nativeSingleDelivery(f)), 1)
 	f.requireDeliveredPairs(t, "ridfirst")
 	require.NotEqual(t, f.creator.ID, f.tenantID)
@@ -95,12 +96,14 @@ func ridNativeExactIdentityAxes(t *testing.T) {
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT delegate_id FROM kaname.grant_delegations WHERE account_id=$1`, f.tenantID).Scan(&issuer))
 	require.NotEqual(t, issuer, f.tenantID)
 	f.requireSameCredential(t)
+	rid01NewmanPhase(t, public, "S1-EXACT-IDENTITIES", nil)
 }
 
 func ridNativeTokenRenewal(t *testing.T) {
 	// Explicit ordinary fixture profile; production defaults remain untouched.
 	f := newInstallationNativeWorldLifetimes(t, 300, "30s")
 	in := nativeSingleDelivery(f)
+	public := rid01NewmanContext(t, f, "renewal")
 	requireNativeOK(t, f.apply(t, in), 1)
 	f.requireDeliveredPairs(t, "ridfirst")
 	before := f.stableReceipt(t)
@@ -109,12 +112,14 @@ func ridNativeTokenRenewal(t *testing.T) {
 	require.NoError(t, err)
 	f.secrets = append(f.secrets, first.Bearer, first.Assertion)
 	require.LessOrEqual(t, first.ExpiresAt.Sub(first.IssuedAt), 30*time.Second)
+	rid01NewmanPhase(t, public, "RENEWAL-BEFORE", nil)
 	// Actual accepted token expires; include the PRESENTATION skew allowance.
 	waitNativeWallClock(t, f.given.ctx, first.ExpiresAt.Add(tokenpolicy.ClockSkew+time.Second))
 	require.True(t, time.Now().Before(f.creator.ExpiresAt), "renewal key must still be live")
 	code, err := f.wire.JSON(f.given.ctx, http.MethodGet, "/iam/v1/me", first.Bearer, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, code)
+	rid01NewmanPhase(t, public, "EXPIRED-ACCESS-TOKEN", map[string]any{"jwtRIDExpiredCreator": first.Bearer})
 	requireNativeOK(t, f.apply(t, in), 1)
 	next, err := f.wire.ExchangeStandingCreator(f.given.ctx, f.creator, "https://kaname.local", "https://kaname.local")
 	require.NoError(t, err)
@@ -128,11 +133,13 @@ func ridNativeTokenRenewal(t *testing.T) {
 	f.requireDeliveredPairs(t, "ridfirst")
 	require.Equal(t, publicBefore, f.lastPublic, "independent O public List/Get identities dates axes remain stable after renewal/restart")
 	f.requireSameCredential(t)
+	rid01NewmanPhase(t, public, "RENEWAL-AFTER", map[string]any{"jwtRIDCreator": next.Bearer})
 }
 
 func ridNativeExpiredKeyTimeTwin(t *testing.T) {
 	f := newInstallationNativeWorldLifetimes(t, 300, "30s")
 	in := nativeSingleDelivery(f)
+	public := rid01NewmanContext(t, f, "key")
 	// Positive twin FIRST, against the identical key, grant, delivery and world.
 	requireNativeOK(t, f.apply(t, in), 1)
 	f.requireDeliveredPairs(t, "ridfirst")
@@ -141,6 +148,7 @@ func ridNativeExpiredKeyTimeTwin(t *testing.T) {
 	require.NotEmpty(t, positive)
 	require.Equal(t, http.StatusOK, positive[0].HTTPStatus, "same observer must see valid twin production readiness")
 	require.False(t, positive[0].TransportFailed)
+	rid01NewmanPhase(t, public, "VALID-KEY-TWIN", nil)
 	stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	require.NoError(t, f.session.Stop(stop))
 	cancel()
@@ -186,4 +194,9 @@ func ridNativeExpiredKeyTimeTwin(t *testing.T) {
 	cleanupErr := f.session.Stop(cleanup)
 	cancel()
 	require.ErrorIs(t, cleanupErr, failed.ExitError())
+	if public != nil {
+		rid01RequireRefusalBeforeRestore(t, public)
+		rid01RestorePublicListeners(t, f, in)
+		rid01NewmanPhase(t, public, "EXPIRED-KEY-REFUSAL", nil)
+	}
 }

@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 1058
+Всего кейсов: 1066
 
 ## Перепись по модулям
 
@@ -83,6 +83,7 @@
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/rbac-subject-channel-equivalence.py` | 8 |
 | `cases/rbac-visibility-set.py` | 7 |
+| `cases/registry-installation-rid01.py` | 8 |
 | `cases/registry-installation-rid02.py` | 4 |
 | `cases/registry-installation-rid07.py` | 32 |
 | `cases/registry-installation-rid08.py` | 6 |
@@ -1566,3 +1567,18 @@ ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакци
 - `registry-installation-rid12-EMPTY-NO-GD-BEFORE`
 - `registry-installation-rid12-EMPTY-NO-GD-AFTER`
 - `registry-installation-rid12-ROLES17-TWIN-AFTER-REORDER`
+
+---
+
+## `cases/registry-installation-rid01.py` — 8 кейсов
+
+> Публичные последствия чистой установки, точных личностей, обновления токена и отказа с истёкшим ключом.
+
+- `registry-installation-rid01-CLEAN-BEFORE`
+- `registry-installation-rid01-CLEAN-INSTALLED`
+- `registry-installation-rid01-S1-EXACT-IDENTITIES`
+- `registry-installation-rid01-RENEWAL-BEFORE`
+- `registry-installation-rid01-EXPIRED-ACCESS-TOKEN`
+- `registry-installation-rid01-RENEWAL-AFTER`
+- `registry-installation-rid01-EXPIRED-KEY-REFUSAL`
+- `registry-installation-rid01-VALID-KEY-TWIN`

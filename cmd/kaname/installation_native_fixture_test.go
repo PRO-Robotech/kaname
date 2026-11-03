@@ -285,6 +285,8 @@ func (f *installationNativeWorld) apply(t *testing.T, input installruntime.Deliv
 // RID01 predicates separately assert complete axes, expiry and failure twins.
 func ridNativeFirstInstall(t *testing.T) {
 	f := newInstallationNativeWorld(t)
+	public := rid01NewmanContext(t, f, "clean")
+	rid01NewmanPhase(t, public, "CLEAN-BEFORE", nil)
 	process := f.apply(t, installruntime.DeliveryInput{Manifests: installruntime.NewRIDDeliveryFixture(), CredentialFile: f.creator.CredentialFile})
 	results, err := process.Results()
 	require.NoError(t, err)
@@ -295,6 +297,7 @@ func ridNativeFirstInstall(t *testing.T) {
 	require.Equal(t, "OK", result.Code)
 	require.Equal(t, 2, result.CompletedPairs)
 	f.requireDeliveredPairs(t)
+	rid01NewmanPhase(t, public, "CLEAN-INSTALLED", nil)
 	credential, err := os.ReadFile(f.creator.CredentialFile)
 	require.NoError(t, err)
 	require.True(t, f.credentialDigest == sha256.Sum256(credential), "full serve retains the same standing credential")

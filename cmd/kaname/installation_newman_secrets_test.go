@@ -11,31 +11,53 @@ import (
 	"syscall"
 )
 
-// These are the only bearer variables admitted by the reviewed public cases.
-// Keep the same closed set in run-rid-native.cjs. Error text never includes a
-// variable value: a malformed producer must not turn validation into a leak.
-func ridNewmanClientBearers(stem string, variables map[string]any) ([]string, error) {
+// Closed phase-bound actor/opaque-secret inventory. Assertion bytes are secrets,
+// not bearer tokens; both use the unchanged anonymous two-string FD5 protocol.
+func ridNewmanClientSecrets(stem, caseID string, variables map[string]any) ([]string, error) {
+	if !strings.HasPrefix(caseID, stem+"-") || len(caseID) == len(stem)+1 {
+		return nil, errors.New("invalid Newman case identity")
+	}
 	names := []string{"jwtRIDOperator"}
 	if stem == "registry-installation-rid10" {
 		names = append(names, "jwtRIDCreator")
 	}
-	for name := range variables {
-		if strings.HasPrefix(name, "jwtRID") && name != names[0] && !(len(names) == 2 && name == names[1]) {
-			return nil, errors.New("undeclared Newman bearer variable")
+	if stem == "registry-installation-rid01" {
+		if !rid01PublicCase(caseID) {
+			return nil, errors.New("invalid Newman case identity")
+		}
+		switch caseID {
+		case rid01ExpiredAccessCase:
+			names = append(names, "jwtRIDExpiredCreator")
+		case rid01RenewedAccessCase:
+			names = append(names, "jwtRIDCreator")
+		case rid01ExpiredKeyCase:
+			names = append(names, "rid01ClientAssertion")
 		}
 	}
-	bearers := make([]string, 0, len(names))
+	allowed := map[string]bool{}
+	for _, name := range names {
+		allowed[name] = true
+	}
+	for name := range variables {
+		if (strings.HasPrefix(name, "jwtRID") || name == "rid01ClientAssertion") && !allowed[name] {
+			return nil, errors.New("undeclared Newman client secret")
+		}
+		if name == "rid01IssuanceOrigin" && caseID != rid01ExpiredKeyCase {
+			return nil, errors.New("undeclared Newman issuance origin")
+		}
+	}
+	secrets := make([]string, 0, len(names))
 	for _, name := range names {
 		value, ok := variables[name].(string)
 		if !ok || value == "" || len(value) > 16<<10 {
-			return nil, errors.New("required Newman bearer is absent or invalid")
+			return nil, errors.New("required Newman client secret is absent or invalid")
 		}
-		bearers = append(bearers, value)
+		secrets = append(secrets, value)
 	}
-	return bearers, nil
+	return secrets, nil
 }
 
-// Every bearer gets its own existing two-string FD5 record. Capture all tokens
+// Every admitted bearer/assertion gets its existing two-string FD5 record. Capture all secrets
 // before reading the TLS key or doing any other fallible admission work.
 func ridNewmanRecordBearers(inventory io.Writer, bearers []string) error {
 	for _, bearer := range bearers {
