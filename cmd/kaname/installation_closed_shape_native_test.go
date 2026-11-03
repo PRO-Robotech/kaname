@@ -176,6 +176,9 @@ func rid12World(t *testing.T, in rid12NativeInput, consumer rid12LivePublicConsu
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT (SELECT count(*) FROM kaname.catalog_module WHERE module='ridbounds')+(SELECT count(*) FROM kaname.roles WHERE owner_module='ridbounds')+(SELECT count(*) FROM kaname.service_accounts WHERE name='svc-ridbounds')`).Scan(&boundaryBefore))
 	require.Zero(t, boundaryBefore)
 	beforePublic := rid09ReadPublic(t, f)
+	if consumer == nil {
+		consumer = rid12DefaultNewmanConsumer(t, f, in)
+	}
 	if consumer != nil {
 		consumer(t, f, in, "before")
 	}

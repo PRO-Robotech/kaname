@@ -147,7 +147,7 @@ if (j.nextPageToken) {
 }
 """.strip().splitlines()
 
-def midrun_read_steps(Step, assert_status, js_str):
+def midrun_read_steps(Step, assert_status, js_str, expected_var='rid10Expected'):
     catalog = [*assert_status(200),
                "const e = JSON.parse(pm.environment.get('rid10Expected'));",
                "pm.test('entire primary permissionCatalog', () => pm.expect(pm.response.json()).to.eql(e.snapshot.projection.catalog));"]
@@ -165,4 +165,10 @@ def midrun_read_steps(Step, assert_status, js_str):
     steps.append(Step(name='complete-all-group-member-pages', method='GET',
                       path='/iam/v1/groups/{{rid10GroupId}}:listMembers?pageSize=2&pageToken={{rid10MembersPage}}',
                       auth='jwtRIDOperator', test_script=[*assert_status(200), *_MEMBERS]))
+    # Backward-compatible default: RID10 output is byte-for-byte unchanged.
+    # RID12 composes these same complete checkers with its own primary envelope.
+    if expected_var != 'rid10Expected':
+        for step in steps:
+            step.test_script = [line.replace("get('rid10Expected')", "get(" + js_str(expected_var) + ")")
+                                for line in step.test_script]
     return steps
