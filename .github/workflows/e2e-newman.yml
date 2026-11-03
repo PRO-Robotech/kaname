@@ -1111,6 +1111,17 @@ jobs:
               exit "$rc" ;;
           esac
 
+      - name: условие делегирования — обычные test SA и предъявители
+        timeout-minutes: 5
+        run: |
+          rc=0
+          python3 tests/authz-fixtures/seed_delegation.py || rc=$?
+          if [ "$rc" -eq 75 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::delegation producer недоступен; вердикта о продукте нет"
+            exit 1
+          fi
+          exit "$rc"
+
       # ЧИСЛОВОЙ ВЕРДИКТ даёт прогонщик набора — строка на коллекцию и итог
       # «N/M коллекций отчиталось». Коллекции ОДНИМ вызовом, по той же причине,
       # что у задания `stand`. Коллекции волны прогонщик делегирует своей волне и
@@ -1137,6 +1148,7 @@ jobs:
             --service iam-access-binding-include-revoked \
             --service iam-access-binding-revocation-reason \
             --service iam-role-rights-stay-named \
+            --service iam-grant-delegation \
             --service iam-authz-grant-check-propagation \
             --service iam-service-account \
             --service iam-service-account-creator \

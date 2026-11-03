@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 911
+Всего кейсов: 913
 
 ## Перепись по модулям
 
@@ -45,7 +45,7 @@
 | `cases/iam-account.py` | 58 |
 | `cases/iam-authz-grant-check-propagation.py` | 10 |
 | `cases/iam-flat-authz-vbc.py` | 2 |
-| `cases/iam-grant-delegation.py` | 5 |
+| `cases/iam-grant-delegation.py` | 7 |
 | `cases/iam-role-rights-stay-named.py` | 4 |
 | `cases/iam-group.py` | 33 |
 | `cases/iam-invite-grant-fga.py` | 4 |
@@ -558,7 +558,7 @@
 - `IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE`
 - `IAM-VBC-ACB-BAD-PREFIX-SUBJECT`
 
-## `cases/iam-grant-delegation.py` — 5 кейсов
+## `cases/iam-grant-delegation.py` — 7 кейсов
 
 > Case-set: делегирование права выдавать на собственном фронте службы (GD-E1…GD-E5).
 
@@ -567,6 +567,8 @@
 - `IAM-GD-E3-DELEGATE-GRANT-CARRIES-DELEGATION-OK`
 - `IAM-GD-E4-DELEGATE-ROLE-OUTSIDE-DENIED`
 - `IAM-GD-E5-DELEGATE-REVOKE-DELETE-PASS-THE-LISTENER`
+- `IAM-GD-1011-GROUP-CONTAINS-DELEGATE-DENIED`
+- `IAM-GD-1011-GROUP-WITHOUT-DELEGATE-ALLOWED`
 
 ## `cases/iam-group.py` — 33 кейсов
 
