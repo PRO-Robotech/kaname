@@ -78,6 +78,7 @@ func Start(ctx context.Context, in Input) (*Process, error) {
 		return nil, err
 	}
 	p.cmd = exec.CommandContext(ctx, in.Binary, "serve")
+	p.cmd.Dir = in.EvidenceDir
 	p.cmd.Env = append(append([]string{}, in.Environment...), "KANAME_CONFIG_PATH="+in.ConfigFile)
 	p.cmd.Stdout, p.cmd.Stderr = out, errout
 	if err := p.cmd.Start(); err != nil {

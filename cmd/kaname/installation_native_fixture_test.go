@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -45,9 +44,13 @@ func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 	require.NoError(t, err)
 	evidenceRoot := os.Getenv("KANAME_RID_EVIDENCE")
 	require.True(t, filepath.IsAbs(evidenceRoot), "FIXTURE_INCOMPLETE: private absolute RID evidence directory required")
+	evidence, err := installruntime.EvidenceDirectory(evidenceRoot, t.Name())
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(evidenceRoot, 0700))
-	evidence := filepath.Join(evidenceRoot, strings.ReplaceAll(t.Name(), "/", "-"))
 	stand := installruntime.PrepareNativeStand(t, ctx, root, evidence, false)
+	identity, err := json.Marshal(map[string]string{"testIdentity": t.Name()})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(evidence, "test-identity.json"), identity, 0600))
 	environment, err := stand.Environment(nil)
 	require.NoError(t, err)
 	require.NoError(t, stand.RunMigrator(ctx, os.Getenv("KANAME_RID_MIGRATOR"), environment))

@@ -81,6 +81,7 @@ func (s *NativeStand) RunMigrator(ctx context.Context, binary string, environmen
 	}
 	defer log.Close()
 	cmd := exec.CommandContext(ctx, binary, "up")
+	cmd.Dir = s.Evidence
 	cmd.Env = append(append([]string{}, environment...), "KANAME_CONFIG_PATH="+config)
 	cmd.Stdout, cmd.Stderr = log, log
 	if err := cmd.Run(); err != nil {
@@ -96,6 +97,7 @@ func (s *NativeStand) StartMailbox(t *testing.T, ctx context.Context, environmen
 	require.NoError(t, err)
 	cmd := exec.CommandContext(ctx, "python3", filepath.Join(s.Root, ".github/scripts/stand-mailbox.py"), "serve",
 		"--host", "127.0.0.1", "--smtp-port", "14465", "--http-port", "18025", "--cert", filepath.Join(pki, "srv.crt"), "--key", filepath.Join(pki, "srv.key"))
+	cmd.Dir = s.Evidence
 	cmd.Env = environment
 	cmd.Stdout, cmd.Stderr = log, log
 	require.NoError(t, cmd.Start())
@@ -132,10 +134,12 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	}
 	root, err := filepath.Abs(repository)
 	require.NoError(t, err)
-	require.True(t, filepath.IsAbs(evidence), "private absolute evidence directory is required")
+	require.NoError(t, validateStandPath(evidence), "reject unsafe native stand paths before preparation")
 	require.NoError(t, os.Mkdir(evidence, 0700), "each run needs a fresh evidence directory")
 	// Generate exactly the existing stand PKI/configuration, before any container.
 	prepare := exec.CommandContext(ctx, "bash", filepath.Join(root, ".github/scripts/stand-own.sh"), "prepare-native")
+	// Any incidental relative output belongs to this private run, never the source tree.
+	prepare.Dir = evidence
 	var cleanEnvironment []string
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "KANAME_") {
