@@ -241,7 +241,11 @@ func (p *rid11PublicContext) afterNegative(t *testing.T, w *ridLifecycleWorld) {
 	}
 	require.True(t, p.refusalProved && p.preRestore != nil, "failed-start proof before ANY restoration mandatory")
 	s := rid03StableNewmanSnapshot(t, w)
-	rid04RequireNormalBoundary(t, w, *p.preRestore, s, 0)
+	if p.input.Variant == "census" {
+		rid11RequireCensusRestoration(t, w, *p.preRestore, s)
+	} else {
+		rid04RequireNormalBoundary(t, w, *p.preRestore, s, 0)
+	}
 	p.read(t, w, "AFTER", s)
 }
 func (p *rid11PublicContext) complete(t *testing.T) bool {
