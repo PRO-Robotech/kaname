@@ -25,6 +25,7 @@ import (
 const ridNewmanInputEnv = "KANAME_RID_NEWMAN_CHILD_INPUT"
 
 type ridNewmanToolInput struct {
+	Probe                                                                            string
 	PublicOrigin                                                                     string
 	RequestPolicy                                                                    *ridNewmanRequestPolicy
 	Node, Module, Collection, Script, CA, Cert, Key, CaseID, Evidence                string
@@ -154,7 +155,19 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = stdin.Close() })
 	cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "PATH=" + filepath.Dir(in.Node) + ":/usr/bin:/bin", "NODE_OPTIONS=--max-old-space-size=256", "NO_PROXY=localhost,127.0.0.1"}
+	ackRead, ackWrite, pipeErr := os.Pipe()
+	require.NoError(t, pipeErr)
+	permitRead, permitWrite, pipeErr := os.Pipe()
+	require.NoError(t, pipeErr)
+	closeProtocol := func() { _ = ackRead.Close(); _ = ackWrite.Close(); _ = permitRead.Close(); _ = permitWrite.Close() }
+	t.Cleanup(closeProtocol)
+	// The Go child's control/event/secret descriptors must not reach Node.
+	for _, fd := range []int{3, 4, 5} {
+		syscall.CloseOnExec(fd)
+	}
+	cmd.ExtraFiles = []*os.File{ackWrite, permitRead}
 	require.NoError(t, cmd.Start())
+	t.Cleanup(closeProtocol)
 	done := make(chan struct{})
 	var waitErr error
 	go func() { waitErr = cmd.Wait(); _ = out.Close(); _ = stderr.Close(); close(done) }()
@@ -172,11 +185,18 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 			return
 		}
 		rid02CheckStreams(t, []string{filepath.Join(dir, "stdout"), filepath.Join(dir, "stderr")}, append(append([]string{}, bearers...), string(privateKey)))
-		terminal, _ := json.Marshal(map[string]any{"pid": cmd.Process.Pid, "exited": true, "exitCode": cmd.ProcessState.ExitCode()})
+		status, statusOK := cmd.ProcessState.Sys().(syscall.WaitStatus)
+		if !statusOK {
+			t.Error("actual Node terminal wait status unavailable")
+			return
+		}
+		terminal, _ := json.Marshal(map[string]any{"pid": cmd.Process.Pid, "exited": cmd.ProcessState.Exited() || status.Signaled(), "exitCode": cmd.ProcessState.ExitCode(), "signaled": status.Signaled(), "signal": status.Signal().String()})
 		if err := os.WriteFile(filepath.Join(dir, "terminal.json"), terminal, 0600); err != nil {
 			t.Error("Newman terminal receipt unavailable")
 		}
 	})
+	_ = ackWrite.Close()
+	_ = permitRead.Close()
 	start, err := rid02ProcessStart(cmd.Process.Pid)
 	require.NoError(t, err)
 	expected := append([]string{in.Node}, cmd.Args[1:]...)
@@ -222,10 +242,41 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 	_, err = io.WriteString(stdin, payload)
 	require.NoError(t, err)
 	require.NoError(t, stdin.Close())
+	require.NoError(t, ridNewmanAwaitACK(ctx, ackRead, cmd.Process.Pid, in.CaseID, in.RunID))
+	_ = ackRead.Close()
+	emit("newman-node-input-validated")
+	deadline, bounded := ctx.Deadline()
+	require.True(t, bounded)
+	require.NoError(t, control.SetReadDeadline(deadline))
+	var permitMessage string
+	require.NoError(t, json.NewDecoder(control).Decode(&permitMessage))
+	require.True(t, permitMessage == ridNewmanPermitMessage(in.Probe), "unexpected post-ACK Node permit decision")
+	if permitMessage == "permit-owned-node" {
+		require.NoError(t, permitWrite.SetWriteDeadline(deadline))
+		_, writeErr := io.WriteString(permitWrite, ridNewmanPermitFrame)
+		require.NoError(t, writeErr)
+	}
+	require.NoError(t, permitWrite.Close())
 	select {
 	case <-done:
 	case <-ctx.Done():
 		t.Fatal("bounded owned Newman client deadline")
+	}
+	if in.Probe == "reject-missing-permit" {
+		var exit *exec.ExitError
+		require.ErrorAs(t, waitErr, &exit)
+		require.Equal(t, 1, exit.ExitCode())
+		var refusal struct {
+			OK   bool   `json:"ok"`
+			Kind string `json:"kind"`
+		}
+		raw, readErr := os.ReadFile(filepath.Join(dir, "stdout"))
+		require.NoError(t, readErr)
+		require.NoError(t, json.Unmarshal(raw, &refusal))
+		require.False(t, refusal.OK)
+		require.Equal(t, "node-permit-rejected", refusal.Kind)
+		emit("newman-probe-finished")
+		return
 	}
 	require.NoError(t, waitErr, "Newman failed; sanitized private report retained")
 	raw, err = os.ReadFile(filepath.Join(dir, "stdout"))
@@ -280,6 +331,11 @@ func ridNewmanAwait(t *testing.T, c *rid02OwnedChild, ctx context.Context, stage
 	}
 }
 func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, label string, variables map[string]any) ridNewmanReceipt {
+	return ridRunNewmanPhaseMode(t, f, stem, caseID, label, variables, "")
+}
+func ridRunNewmanPhaseMode(t *testing.T, f *installationNativeWorld, stem, caseID, label string, variables map[string]any, probe string) ridNewmanReceipt {
+	require.Contains(t, []string{"", "normal-permit", "reject-missing-permit", "node-kill", "group-kill"}, probe)
+
 	t.Helper()
 	if os.Getenv("KANAME_RID_NEWMAN") != "1" {
 		rid08Write(t, f.session.Root, "newman-"+label, map[string]any{"state": "NOT_EXECUTED", "caseId": caseID, "wholeDoDAccepted": false})
@@ -302,6 +358,7 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	executableSHA := ridNewmanHash(t, os.Args[0])
 	in := ridNewmanToolInput{Node: node, Module: module, Collection: filepath.Join(root, "tests/newman/collections", stem+".postman_collection.json"), Script: filepath.Join(root, "tests/newman/scripts/run-rid-native.cjs"), CA: filepath.Join(f.session.Root, "pki", "ca.crt"), Cert: filepath.Join(f.session.Root, "pki", "srv.crt"), Key: filepath.Join(f.session.Root, "pki", "srv.key"), CaseID: caseID, Evidence: filepath.Join(f.session.Root, "newman-"+label)}
 	in.PublicOrigin, in.RequestPolicy = f.wire.PublicURL, policy
+	in.Probe = probe
 	in.NodeSHA = ridNewmanHash(t, in.Node)
 	in.ScriptSHA = ridNewmanHash(t, in.Script)
 	in.CollectionSHA = ridNewmanHash(t, in.Collection)
@@ -337,14 +394,22 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	}
 	admitted := false
 	var actualKey string
+	var auditResult *ridNewmanAuditResult
 	c.afterReapAudit = func(t *testing.T, secrets []string) {
 		if !admitted {
 			return
 		}
-		if err := ridNewmanAuditAnonymousInventory(c.secretInventory, append(append([]string{}, bearers...), actualKey)); err != nil {
-			t.Error("parent anonymous inventory lacks actual admitted bearer/TLS key or is invalid")
+		result := ridNewmanCollectParentAudit(c, in, secrets, append(append([]string{}, bearers...), actualKey))
+		auditResult = &result
+		rid08Write(t, dir, "parent-structured-audit", result)
+		if probe == "group-kill" {
+			if !ridNewmanGroupKillAccepted(result) {
+				ridNewmanReportParentAudit(t, result)
+				t.Error("whole-group detector requires exact MISSING_NODE_TERMINAL plus all real independent checks")
+			}
+		} else {
+			ridNewmanReportParentAudit(t, result)
 		}
-		ridNewmanParentAudit(t, c, in, secrets)
 	}
 	rid08Write(t, dir, "tool-tree-before-parent", tree)
 	ctx, cancel := context.WithTimeout(f.given.ctx, 120*time.Second)
@@ -365,6 +430,51 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	ridNewmanParentObserveNode(t, c, in)
 	require.NoError(t, c.control.SetWriteDeadline(time.Now().Add(10*time.Second)))
 	c.release(t, "admit-owned-node")
+	ridNewmanAwait(t, c, ctx, "newman-node-input-validated")
+	ridNewmanParentObserveNodeStage(t, c, in, true)
+	if probe == "group-kill" {
+		require.NoError(t, c.kill())
+		absenceCtx, absenceCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer absenceCancel()
+		ridNewmanAwaitNodeAbsent(t, absenceCtx, c)
+		select {
+		case <-c.exited:
+		case <-ctx.Done():
+			t.Fatal("whole-group child reap exceeded overall deadline")
+		}
+		c.wait(t, true)
+		require.NotNil(t, auditResult)
+		require.True(t, ridNewmanGroupKillAccepted(*auditResult))
+		rid08Write(t, f.session.Root, label+"-protocol-result", map[string]any{"detector": "INCOMPLETE_TERMINAL_DETECTED", "audit": auditResult, "publicAcceptance": false})
+		return ridNewmanReceipt{}
+	}
+	if probe == "node-kill" {
+		ridNewmanKillExactNode(t, c, in)
+	}
+	require.NoError(t, c.control.SetWriteDeadline(time.Now().Add(10*time.Second)))
+	c.release(t, ridNewmanPermitMessage(probe))
+	if probe == "node-kill" {
+		select {
+		case <-c.exited:
+		case <-ctx.Done():
+			t.Fatal("Node-kill Go child terminal exceeded overall deadline")
+		}
+		c.waitExpectedExit(t, 1)
+		ridNewmanAssertNodeTerminal(t, c, true)
+		require.NotNil(t, auditResult)
+		require.Empty(t, auditResult.Errors)
+		rid08Write(t, f.session.Root, label+"-protocol-result", map[string]any{"detector": "NODE_SIGKILL_HONEST_TERMINAL", "audit": auditResult, "publicAcceptance": false})
+		return ridNewmanReceipt{}
+	}
+	if probe == "reject-missing-permit" {
+		ridNewmanAwait(t, c, ctx, "newman-probe-finished")
+		c.wait(t, false)
+		ridNewmanAssertNodeTerminal(t, c, false)
+		require.NotNil(t, auditResult)
+		require.Empty(t, auditResult.Errors)
+		rid08Write(t, f.session.Root, label+"-protocol-result", map[string]any{"detector": "MISSING_PERMIT_REJECTED", "audit": auditResult, "publicAcceptance": false})
+		return ridNewmanReceipt{}
+	}
 	ridNewmanAwait(t, c, ctx, "newman-finished")
 	c.seenEvent = true
 	c.wait(t, false)
@@ -373,6 +483,10 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	var receipt ridNewmanReceipt
 	require.NoError(t, json.Unmarshal(raw, &receipt))
 	require.True(t, receipt.OK)
-	rid08Write(t, f.session.Root, "newman-"+label+"-accepted", receipt)
+	if probe == "" {
+		rid08Write(t, f.session.Root, "newman-"+label+"-accepted", receipt)
+	} else {
+		rid08Write(t, f.session.Root, label+"-protocol-result", map[string]any{"detector": "NORMAL_PERMIT_ACTUAL_HTTP", "receipt": receipt, "publicAcceptance": false})
+	}
 	return receipt
 }

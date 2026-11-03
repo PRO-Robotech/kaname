@@ -129,6 +129,25 @@ function stopBeforeNetwork() {
   try { fs.writeSync(1, '{"schemaVersion":1,"ok":false,"kind":"request-policy-denied-before-network"}\n'); }
   finally { process.exit(1); }
 }
+const permitFrame = 'RID_NEWMAN_PERMIT_V1\n';
+function validatePermitFrame(raw, ended) {
+  if (!ended || raw !== permitFrame) throw new Error('invalid-node-permit');
+}
+async function validatedInputACK(caseId, runId) {
+  if (!fs.fstatSync(3).isFIFO() || !fs.fstatSync(4).isFIFO()) throw new Error('missing-node-protocol-pipes');
+  const ack = JSON.stringify({version:1,pid:process.pid,caseId,runId}) + '\n';
+  if (Buffer.byteLength(ack) > 512) throw new Error('oversized-node-ack');
+  fs.writeSync(3,ack); fs.closeSync(3);
+  await new Promise((resolve,reject)=>{
+    let raw='',ended=false;
+    const stream=fs.createReadStream(null,{fd:4,autoClose:true});
+    const rejectBound = () => { try { fs.writeSync(1, '{"schemaVersion":1,"ok":false,"kind":"node-permit-rejected"}\n'); } finally { process.exit(1); } };
+    const timer=setTimeout(rejectBound,15000);
+    stream.on('data',chunk=>{raw+=chunk.toString('utf8');if(Buffer.byteLength(raw)>64){clearTimeout(timer);rejectBound();}});
+    stream.on('end',()=>{ended=true;clearTimeout(timer);try{validatePermitFrame(raw,ended);resolve();}catch(_){reject(new Error('invalid-node-permit'));}});
+    stream.on('error',()=>{clearTimeout(timer);reject(new Error('node-permit-unavailable'));});
+  });
+}
 async function main() {
   // Await parent admission before ANY early validation/exit or HTTP request.
   let chunks = [], length = 0;
@@ -213,6 +232,7 @@ async function main() {
   variables.push({key: 'baseUrl', value: 'https://unused.invalid', enabled: true});
   const newman = require(packagePath);
   assertCache(beforeTree);
+  try { await validatedInputACK(caseId,input.runId); } catch (_) { fail('node-permit-rejected'); return; }
   const options = {
     collection, folder: folder.name,
     environment: {name: 'private-live-rid-input', values: variables},
@@ -308,5 +328,5 @@ async function main() {
     if (!allowed) stopBeforeNetwork();
   });
 }
-module.exports = {clientSecretNames, ownedOrigin, requestPolicy, allowedRequest};
+module.exports = {clientSecretNames, ownedOrigin, requestPolicy, allowedRequest, validatePermitFrame};
 if (require.main === module) main().catch(() => fail('client-precondition-or-execution-failed'));

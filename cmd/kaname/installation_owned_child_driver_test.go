@@ -306,6 +306,22 @@ func (c *rid02OwnedChild) wait(t *testing.T, killed bool) {
 	require.Equal(t, syscall.SIGKILL, status.Signal())
 }
 
+func (c *rid02OwnedChild) waitExpectedExit(t *testing.T, code int) {
+	t.Helper()
+	select {
+	case <-c.exited:
+	case <-time.After(15 * time.Second):
+		t.Fatal("owned child expected-exit deadline")
+	}
+	c.afterReap(t)
+	var exit *exec.ExitError
+	require.ErrorAs(t, c.waitErr, &exit)
+	status, ok := exit.Sys().(syscall.WaitStatus)
+	require.True(t, ok)
+	require.False(t, status.Signaled())
+	require.Equal(t, code, status.ExitStatus())
+}
+
 func (c *rid02OwnedChild) terminalAttempts(t *testing.T) []rid02TerminalAttempt {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(c.dir, "terminal-attempts.json"))
@@ -386,36 +402,55 @@ func rid02WorldSecretMaterial(t *testing.T, f *installationNativeWorld) []string
 var rid02JWTInStream = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
 var rid02PEMInStream = regexp.MustCompile(`-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----`)
 
+type rid02StreamScan struct {
+	Requested, Metadata, Read, SecretChecks, JWTChecks, PEMChecks int
+	Errors                                                        []string
+}
+
 func rid02CheckStreams(t *testing.T, paths []string, secrets []string) {
 	t.Helper()
+	scan := rid02ScanStreams(paths, secrets)
+	for _, err := range scan.Errors {
+		t.Error(err)
+	}
+}
+func rid02ScanStreams(paths []string, secrets []string) rid02StreamScan {
+	scan := rid02StreamScan{Requested: len(paths)}
+	add := func(format string, args ...any) { scan.Errors = append(scan.Errors, fmt.Sprintf(format, args...)) }
 	for stream, path := range paths {
 		info, err := os.Stat(path)
 		if err != nil {
-			t.Errorf("stream %d metadata unavailable", stream)
+			add("stream %d metadata unavailable", stream)
 			continue
 		}
+		scan.Metadata++
 		if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
-			t.Errorf("stream %d is not a private regular 0600 file", stream)
+			add("stream %d is not a private regular 0600 file", stream)
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			t.Errorf("stream %d unreadable", stream)
+			add("stream %d unreadable", stream)
 			continue
 		}
+		scan.Read++
 		for material, secret := range secrets {
 			if secret == "" {
 				continue
 			}
+			scan.SecretChecks++
 			encoded, _ := json.Marshal(secret)
 			if bytes.Contains(raw, []byte(secret)) || bytes.Contains(raw, encoded[1:len(encoded)-1]) {
-				t.Errorf("stream %d contains secret material index %d", stream, material)
+				add("stream %d contains secret material index %d", stream, material)
 			}
 		}
+		scan.JWTChecks++
 		if rid02JWTInStream.Match(raw) {
-			t.Errorf("stream %d contains compact JWT material", stream)
+			add("stream %d contains compact JWT material", stream)
 		}
+		scan.PEMChecks++
 		if rid02PEMInStream.Match(raw) {
-			t.Errorf("stream %d contains private PEM material", stream)
+			add("stream %d contains private PEM material", stream)
 		}
 	}
+	return scan
 }
