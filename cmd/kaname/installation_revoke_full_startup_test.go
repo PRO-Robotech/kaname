@@ -306,6 +306,7 @@ func rid06OverlapObserved(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBin
 
 	var event rid02ChildEvent
 	var arrived, committed, released time.Time
+	var afterAction string
 	revokeOp := ""
 	if public == nil {
 		// Original native-only path: no optional observer budget or bridge behavior.
@@ -319,7 +320,7 @@ func rid06OverlapObserved(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBin
 			revokeOp = rid06Revoke(t, w, w.gd.Id)
 		}
 		committed = time.Now().UTC()
-		afterAction := rid06BoundarySnapshot(t, w)
+		afterAction = rid06BoundarySnapshot(t, w)
 		if !revoke {
 			require.Equal(t, before, afterAction)
 		}
@@ -372,7 +373,7 @@ func rid06OverlapObserved(t *testing.T, w *ridLifecycleWorld, g *iamv1.AccessBin
 				return nil
 			},
 			Boundary: func(context.Context) error {
-				afterAction := rid06BoundarySnapshot(t, &scopedWorld)
+				afterAction = rid06BoundarySnapshot(t, &scopedWorld)
 				if !revoke {
 					require.Equal(t, before, afterAction)
 				}
