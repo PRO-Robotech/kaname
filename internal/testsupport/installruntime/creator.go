@@ -50,7 +50,7 @@ func (w *Wire) ProvisionStandingCreator(ctx context.Context, operator *VerifiedO
 
 // ProvisionStandingCreatorWithKeyTTL selects a declared ordinary Issue lifetime.
 // Validation and expiry remain the production key API and real wall clock.
-func (w *Wire) ProvisionStandingCreatorWithKeyTTL(ctx context.Context, operator *VerifiedOperator, systemAccountID, credentialFile string, ttlSeconds int64) (*StandingCreator, error) {
+func (w *Wire) ProvisionStandingCreatorWithKeyTTL(ctx context.Context, operator *VerifiedOperator, systemAccountID, credentialFile string, ttlSeconds int64, observers ...func(string)) (*StandingCreator, error) {
 	if ttlSeconds <= 0 {
 		return nil, errors.New("positive declared standing-key lifetime required")
 	}
@@ -102,12 +102,23 @@ func (w *Wire) ProvisionStandingCreatorWithKeyTTL(ctx context.Context, operator 
 		PrivateKeyPEM string `json:"privateKeyPem"`
 		Algorithm     string `json:"algorithm"`
 	}
-	if json.Unmarshal(issued.Response, &key) != nil || key.ClientID == "" || key.KeyID == "" || key.PrivateKeyPEM == "" || key.Algorithm != "ES256" {
+	decodeErr := json.Unmarshal(issued.Response, &key)
+	for _, observe := range observers {
+		if observe != nil {
+			observe(key.PrivateKeyPEM)
+		}
+	}
+	if decodeErr != nil || key.ClientID == "" || key.KeyID == "" || key.PrivateKeyPEM == "" || key.Algorithm != "ES256" {
 		return nil, errors.New("normal key Issue did not return a complete ES256 standing key")
 	}
 	material, err := json.Marshal(map[string]string{"clientId": key.ClientID, "keyId": key.KeyID, "privateKeyPem": key.PrivateKeyPEM})
 	if err != nil {
 		return nil, errors.New("standing credential cannot be serialized")
+	}
+	for _, observe := range observers {
+		if observe != nil {
+			observe(string(material))
+		}
 	}
 	file, err := os.OpenFile(credentialFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
