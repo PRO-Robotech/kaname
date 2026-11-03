@@ -24,10 +24,11 @@ import (
 )
 
 type Input struct {
-	Binary      string
-	ConfigFile  string
-	Environment []string
-	EvidenceDir string
+	Binary               string
+	ExpectedBinarySHA256 string
+	ConfigFile           string
+	Environment          []string
+	EvidenceDir          string
 }
 
 type Process struct {
@@ -58,10 +59,14 @@ func Start(ctx context.Context, in Input) (*Process, error) {
 	if err != nil {
 		return nil, err
 	}
+	digest := hex.EncodeToString(h.Sum(nil))
+	if in.ExpectedBinarySHA256 != "" && digest != in.ExpectedBinarySHA256 {
+		return nil, errors.New("serve executable differs from frozen artifact before launch")
+	}
 	if err := os.Mkdir(in.EvidenceDir, 0700); err != nil {
 		return nil, err
 	}
-	p := &Process{done: make(chan struct{}), BinarySHA256: hex.EncodeToString(h.Sum(nil)),
+	p := &Process{done: make(chan struct{}), BinarySHA256: digest,
 		StdoutPath: filepath.Join(in.EvidenceDir, "stdout.jsonl"), StderrPath: filepath.Join(in.EvidenceDir, "stderr.jsonl")}
 	out, err := os.OpenFile(p.StdoutPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
