@@ -141,7 +141,7 @@ func startRID02Child(t *testing.T, f *installationNativeWorld, label string, inp
 	require.NoError(t, stderr.Close())
 	c.start, err = rid02ProcessStart(cmd.Process.Pid)
 	require.NoError(t, err)
-	c.argv, err = os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", cmd.Process.Pid))
+	c.argv, err = c.establishArgv(2 * time.Second)
 	require.NoError(t, err)
 	pgid, err := syscall.Getpgid(cmd.Process.Pid)
 	require.NoError(t, err)
@@ -162,6 +162,67 @@ func startRID02Child(t *testing.T, f *installationNativeWorld, label string, inp
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "ownership.json"), ownership, 0600))
 	return c
+}
+// Establish the exact launched argv before retaining a successful identity.
+// A successful early proc read can transiently contain no bytes. Only that
+// empty snapshot is retryable; unexpected identity, exit or timeout is FAIL.
+// Until this succeeds, cleanup retains the Start-owned os.Process handle.
+func (c *rid02OwnedChild) establishArgv(limit time.Duration) ([]byte, error) {
+	pid := c.cmd.Process.Pid
+	expected := []byte(strings.Join(c.cmd.Args, "\x00") + "\x00")
+	deadline := time.NewTimer(limit)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-c.exited:
+			return nil, fmt.Errorf("owned child exited before identity establishment")
+		default:
+		}
+		rawStat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if err != nil {
+			return nil, err
+		}
+		_, rest, ok := strings.Cut(string(rawStat), ") ")
+		fields := strings.Fields(rest)
+		if !ok || len(fields) < 20 || fields[19] != c.start || fields[0] == "Z" || fields[0] == "X" || fields[0] == "x" {
+			return nil, fmt.Errorf("owned child is not live with its captured starttime")
+		}
+		argv, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		if err != nil {
+			return nil, err
+		}
+		pgid, err := syscall.Getpgid(pid)
+		if err != nil {
+			return nil, err
+		}
+		if pgid != pid {
+			return nil, fmt.Errorf("owned child process group changed during identity establishment")
+		}
+		if len(argv) != 0 {
+			if !bytes.Equal(argv, expected) {
+				return nil, fmt.Errorf("owned child argv differs from its exact launched command")
+			}
+			start, err := rid02ProcessStart(pid)
+			if err != nil || start != c.start {
+				return nil, fmt.Errorf("owned child starttime changed during identity establishment")
+			}
+			select {
+			case <-c.exited:
+				return nil, fmt.Errorf("owned child exited during identity establishment")
+			default:
+				return argv, nil
+			}
+		}
+		select {
+		case <-c.exited:
+			return nil, fmt.Errorf("owned child exited before identity establishment")
+		case <-deadline.C:
+			return nil, fmt.Errorf("owned child exact argv was not established before deadline")
+		case <-tick.C:
+		}
+	}
 }
 func (c *rid02OwnedChild) kill() error {
 	start, err := rid02ProcessStart(c.cmd.Process.Pid)

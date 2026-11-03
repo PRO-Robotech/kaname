@@ -265,7 +265,7 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 				observed = append(observed, requireNativeInstallationOperation(t, f.given.ctx, f.given.pool, id, account, f.creator.ID, winner))
 			}
 			var audits int
-			require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*) FROM kaname.audit_outbox WHERE event_type='iam.grant_delegation.created' AND payload->>'delegation_id'=$1`, winner).Scan(&audits))
+			require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*) FROM kaname.audit_outbox WHERE event_type='iam.grant_delegation.created' AND event_payload->>'delegation_id'=$1`, winner).Scan(&audits))
 			require.Equal(t, 1, audits)
 		}
 	}
