@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -51,28 +53,44 @@ func TestInstallationTransactionRepairPoolOne(t *testing.T) {
 	ops := operations.NewRepo(f.world.pool, "kaname")
 	create := accountapp.NewCreateAccountUseCase(repo, ops).WithRelationStore(f.relations, quietLogger())
 	reads := kanamepg.NewInstallationReader(f.world.pool)
-	_, system, err := reads.InstallationAccounts(ctx, "", 1)
+	initial, system, err := reads.InstallationAccounts(ctx, "", 1)
 	require.NoError(t, err, "initial migration supplies canonical system account")
+	require.EqualValues(t, 1, f.world.pool.Config().MaxConns)
+	require.Len(t, initial, 1, "SETUP_FAILED: only O's initial tenant may precede ordinary creates")
+	var admitted, maximum, windowSeconds int
+	require.NoError(t, f.world.pool.QueryRow(ctx, `SELECT w.admitted,l.max_events,l.window_seconds
+ FROM kaname.identity_admission_windows w JOIN kaname.users u ON u.external_id=w.carrier_id
+ JOIN kaname.account_admission_rate_limits l ON l.kind=w.kind AND l.withdrawn_at IS NULL
+ WHERE u.id=$1 AND w.kind='iam.account'`, string(f.world.user)).Scan(&admitted, &maximum, &windowSeconds))
+	require.Equal(t, 1, admitted, "SETUP_FAILED: initial ceremony account charges the real trigger")
+	require.Equal(t, 3, maximum, "SETUP_FAILED: fixture must preserve production admission policy")
+	require.Equal(t, 3600, windowSeconds)
+	t.Logf("fixture census: initial tenants=%d canonical system=1 admission=%d/%d window=%ds remaining=%d", len(initial), admitted, maximum, windowSeconds, maximum-admitted)
 	var tenants []domain.AccountID
 	// The initial ceremony account already charged one of the three admission
 	// events. Two ordinary creates respect that unchanged production policy.
 	for i := 0; i < 2; i++ {
 		name := fmt.Sprintf("repair-tenant-%d", i)
 		op, err := create.Execute(ctx, domain.Account{Name: domain.AccountName(name)})
-		require.NoError(t, err)
-		require.NoError(t, waitInstallationOperation(ctx, ops, op.ID))
+		require.NoError(t, err, "SETUP_FAILED: ordinary account create index=%d", i)
+		require.NoError(t, waitInstallationOperation(ctx, ops, op.ID), "SETUP_FAILED: account operation index=%d", i)
 		done, err := ops.Get(ctx, op.ID)
 		require.NoError(t, err)
 		var result iamv1.Account
 		require.NoError(t, done.Response.UnmarshalTo(&result))
 		tenants = append(tenants, domain.AccountID(result.Id))
 	}
+	expected := append(append([]domain.AccountID{}, initial...), tenants...)
+	sort.Slice(expected, func(i, j int) bool { return expected[i] < expected[j] })
+	require.NoError(t, f.world.pool.QueryRow(ctx, `SELECT w.admitted FROM kaname.identity_admission_windows w JOIN kaname.users u ON u.external_id=w.carrier_id WHERE u.id=$1 AND w.kind='iam.account'`, string(f.world.user)).Scan(&admitted))
+	require.Equal(t, maximum, admitted, "both normal completed account operations must charge actual admission")
 	t.Run("one connection full census and single target", func(t *testing.T) {
 		page := &installationFailPage{}
 		got, sys, err := reads.WithPageFactory(page).InstallationAccounts(ctx, "", 1)
 		require.NoError(t, err)
 		require.Equal(t, system, sys)
-		require.GreaterOrEqual(t, page.calls, 5)
+		require.Equal(t, 5, page.calls, "four rows plus terminal empty page")
+		require.Equal(t, expected, got, "complete canonical membership, not a subset assertion")
 		for _, id := range tenants {
 			require.Contains(t, got, id)
 		}
@@ -125,6 +143,16 @@ func TestInstallationTransactionRepairPoolOne(t *testing.T) {
 		var value iamv1.CreateGrantDelegationMetadata
 		require.NoError(t, stored.Metadata.UnmarshalTo(&value))
 		require.Equal(t, winning, value.GrantDelegationId)
+		var rawType, indexedResource, indexedAccount string
+		var rawValue []byte
+		require.NoError(t, f.world.pool.QueryRow(ctx, `SELECT metadata_type,metadata_data,resource_id,account_id FROM kaname.operations WHERE id=$1`, op.ID).Scan(&rawType, &rawValue, &indexedResource, &indexedAccount))
+		require.Equal(t, actual.TypeUrl, rawType)
+		require.Equal(t, actual.Value, rawValue)
+		require.Equal(t, winning, indexedResource)
+		require.Equal(t, string(tenants[0]), indexedAccount)
+		var decoded iamv1.CreateGrantDelegationMetadata
+		require.NoError(t, proto.Unmarshal(rawValue, &decoded))
+		require.Equal(t, winning, decoded.GrantDelegationId)
 		// A restart reading the normal Operation now sees the actual resource identity;
 		// terminalization is still the normal operations writer's responsibility.
 		require.NoError(t, ops.MarkDone(ctx, op.ID, nil))
