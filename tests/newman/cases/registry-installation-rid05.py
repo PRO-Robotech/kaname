@@ -70,6 +70,9 @@ if(!op.done)pm.execution.setNextRequest(pm.info.requestName);else{
   const c=e.deleteContract,creator=e.snapshot.projection.serviceAccounts.find(sa=>sa.id===e.oldCreatorId);
   pm.expect(!!c&&c.caseId===e.caseId&&c.resourceId===e.oldCreatorId&&creator&&c.accountId===creator.accountId&&c.operatorId===e.operatorId).to.eql(true);
   pm.expect(op.done).to.eql(true);
+  // Explicit outcome evidence prevents the generator from appending a success-only
+  // Delete fallback to the lawful FAILED guard case. The full skeleton stays strict.
+  pm.expect(op.error).to.eql(c.operation.error);
   // The full canonical typed skeleton is derived BEFORE this mutation. Only
   // allocated Operation ID and its two clocks are dynamic, and each is checked.
   pm.expect(Object.keys(op).sort()).to.eql(Object.keys(c.operation).sort());

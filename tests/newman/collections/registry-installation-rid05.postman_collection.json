@@ -17200,6 +17200,9 @@
                   "  const c=e.deleteContract,creator=e.snapshot.projection.serviceAccounts.find(sa=>sa.id===e.oldCreatorId);",
                   "  pm.expect(!!c&&c.caseId===e.caseId&&c.resourceId===e.oldCreatorId&&creator&&c.accountId===creator.accountId&&c.operatorId===e.operatorId).to.eql(true);",
                   "  pm.expect(op.done).to.eql(true);",
+                  "  // Explicit outcome evidence prevents the generator from appending a success-only",
+                  "  // Delete fallback to the lawful FAILED guard case. The full skeleton stays strict.",
+                  "  pm.expect(op.error).to.eql(c.operation.error);",
                   "  // The full canonical typed skeleton is derived BEFORE this mutation. Only",
                   "  // allocated Operation ID and its two clocks are dynamic, and each is checked.",
                   "  pm.expect(Object.keys(op).sort()).to.eql(Object.keys(c.operation).sort());",
@@ -17207,16 +17210,7 @@
                   "  const created=Date.parse(op.createdAt),modified=Date.parse(op.modifiedAt),lower=Date.parse(c.notBefore),upper=Date.parse(c.notAfter);",
                   "  pm.expect(Number.isFinite(created)&&Number.isFinite(modified)&&Number.isFinite(lower)&&Number.isFinite(upper)&&created>=lower&&created<=modified&&modified<=upper).to.eql(true);",
                   " });",
-                  "}",
-                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
-                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
-                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
-                  "(function () {",
-                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
-                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
-                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
+                  "}"
                 ]
               }
             }
@@ -21002,6 +20996,9 @@
                   "  const c=e.deleteContract,creator=e.snapshot.projection.serviceAccounts.find(sa=>sa.id===e.oldCreatorId);",
                   "  pm.expect(!!c&&c.caseId===e.caseId&&c.resourceId===e.oldCreatorId&&creator&&c.accountId===creator.accountId&&c.operatorId===e.operatorId).to.eql(true);",
                   "  pm.expect(op.done).to.eql(true);",
+                  "  // Explicit outcome evidence prevents the generator from appending a success-only",
+                  "  // Delete fallback to the lawful FAILED guard case. The full skeleton stays strict.",
+                  "  pm.expect(op.error).to.eql(c.operation.error);",
                   "  // The full canonical typed skeleton is derived BEFORE this mutation. Only",
                   "  // allocated Operation ID and its two clocks are dynamic, and each is checked.",
                   "  pm.expect(Object.keys(op).sort()).to.eql(Object.keys(c.operation).sort());",
@@ -21009,16 +21006,7 @@
                   "  const created=Date.parse(op.createdAt),modified=Date.parse(op.modifiedAt),lower=Date.parse(c.notBefore),upper=Date.parse(c.notAfter);",
                   "  pm.expect(Number.isFinite(created)&&Number.isFinite(modified)&&Number.isFinite(lower)&&Number.isFinite(upper)&&created>=lower&&created<=modified&&modified<=upper).to.eql(true);",
                   " });",
-                  "}",
-                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
-                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
-                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
-                  "(function () {",
-                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
-                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
-                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
+                  "}"
                 ]
               }
             }
@@ -46014,6 +46002,9 @@
                   "  const c=e.deleteContract,creator=e.snapshot.projection.serviceAccounts.find(sa=>sa.id===e.oldCreatorId);",
                   "  pm.expect(!!c&&c.caseId===e.caseId&&c.resourceId===e.oldCreatorId&&creator&&c.accountId===creator.accountId&&c.operatorId===e.operatorId).to.eql(true);",
                   "  pm.expect(op.done).to.eql(true);",
+                  "  // Explicit outcome evidence prevents the generator from appending a success-only",
+                  "  // Delete fallback to the lawful FAILED guard case. The full skeleton stays strict.",
+                  "  pm.expect(op.error).to.eql(c.operation.error);",
                   "  // The full canonical typed skeleton is derived BEFORE this mutation. Only",
                   "  // allocated Operation ID and its two clocks are dynamic, and each is checked.",
                   "  pm.expect(Object.keys(op).sort()).to.eql(Object.keys(c.operation).sort());",
@@ -46021,16 +46012,7 @@
                   "  const created=Date.parse(op.createdAt),modified=Date.parse(op.modifiedAt),lower=Date.parse(c.notBefore),upper=Date.parse(c.notAfter);",
                   "  pm.expect(Number.isFinite(created)&&Number.isFinite(modified)&&Number.isFinite(lower)&&Number.isFinite(upper)&&created>=lower&&created<=modified&&modified<=upper).to.eql(true);",
                   " });",
-                  "}",
-                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
-                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
-                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
-                  "(function () {",
-                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
-                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
-                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
+                  "}"
                 ]
               }
             }
@@ -49816,6 +49798,9 @@
                   "  const c=e.deleteContract,creator=e.snapshot.projection.serviceAccounts.find(sa=>sa.id===e.oldCreatorId);",
                   "  pm.expect(!!c&&c.caseId===e.caseId&&c.resourceId===e.oldCreatorId&&creator&&c.accountId===creator.accountId&&c.operatorId===e.operatorId).to.eql(true);",
                   "  pm.expect(op.done).to.eql(true);",
+                  "  // Explicit outcome evidence prevents the generator from appending a success-only",
+                  "  // Delete fallback to the lawful FAILED guard case. The full skeleton stays strict.",
+                  "  pm.expect(op.error).to.eql(c.operation.error);",
                   "  // The full canonical typed skeleton is derived BEFORE this mutation. Only",
                   "  // allocated Operation ID and its two clocks are dynamic, and each is checked.",
                   "  pm.expect(Object.keys(op).sort()).to.eql(Object.keys(c.operation).sort());",
@@ -49823,16 +49808,7 @@
                   "  const created=Date.parse(op.createdAt),modified=Date.parse(op.modifiedAt),lower=Date.parse(c.notBefore),upper=Date.parse(c.notAfter);",
                   "  pm.expect(Number.isFinite(created)&&Number.isFinite(modified)&&Number.isFinite(lower)&&Number.isFinite(upper)&&created>=lower&&created<=modified&&modified<=upper).to.eql(true);",
                   " });",
-                  "}",
-                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
-                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
-                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
-                  "(function () {",
-                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
-                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
-                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
+                  "}"
                 ]
               }
             }
