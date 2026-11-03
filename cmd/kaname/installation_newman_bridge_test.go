@@ -347,6 +347,16 @@ func ridRunNewmanPhaseBudget(t *testing.T, f *installationNativeWorld, stem, cas
 	return ridRunNewmanPhaseModeBudget(t, f, stem, caseID, label, variables, "", budget)
 }
 func ridRunNewmanPhaseModeBudget(t *testing.T, f *installationNativeWorld, stem, caseID, label string, variables map[string]any, probe string, budget context.Context) ridNewmanReceipt {
+	return ridRunNewmanPhaseModeObserved(t, f, stem, caseID, label, variables, probe, budget, nil)
+}
+
+// Only the closed RID11 authn-refusal phases may observe SQL after ordinary O
+// exchange and completed FD5 capture. Existing callers retain nil observer.
+func ridRunNewmanInputObserved(t *testing.T, f *installationNativeWorld, caseID, label string, variables map[string]any, observer func() error) ridNewmanReceipt {
+	require.True(t, rid11TokenCase(caseID) && observer != nil, "closed RID11 admission observer required")
+	return ridRunNewmanPhaseModeObserved(t, f, "registry-installation-rid11", caseID, label, variables, "", nil, observer)
+}
+func ridRunNewmanPhaseModeObserved(t *testing.T, f *installationNativeWorld, stem, caseID, label string, variables map[string]any, probe string, budget context.Context, observer func() error) ridNewmanReceipt {
 	require.Contains(t, []string{"", "normal-permit", "reject-missing-permit", "node-kill", "group-kill"}, probe)
 
 	t.Helper()
@@ -453,7 +463,11 @@ func ridRunNewmanPhaseModeBudget(t *testing.T, f *installationNativeWorld, stem,
 	if budget != nil {
 		require.NoError(t, ridNewmanBudgetCheck(budget))
 	}
-	require.NoError(t, ridNewmanRecordBearers(c.secretInventory, bearers))
+	if observer == nil {
+		require.NoError(t, ridNewmanRecordBearers(c.secretInventory, bearers))
+	} else {
+		require.NoError(t, rid11RecordThenObserve(func() error { return ridNewmanRecordBearers(c.secretInventory, bearers) }, observer))
+	}
 	keyBytes, err := os.ReadFile(in.Key)
 	require.NoError(t, err)
 	actualKey = string(keyBytes)

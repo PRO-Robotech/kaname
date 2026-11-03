@@ -165,6 +165,9 @@ func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
 // Credential mutations live exclusively in the existing private fixture store.
 // The original creator credential remains readable for the full post-reap audit.
 func rid11Mutate(t *testing.T, w *ridLifecycleWorld, c rid11Case, p *rid11Proof) string {
+	return rid11MutateObserved(t, w, c, p, nil)
+}
+func rid11MutateObserved(t *testing.T, w *ridLifecycleWorld, c rid11Case, p *rid11Proof, public *rid11PublicContext) string {
 	f := w.f
 	credential := f.creator.CredentialFile
 	if c.Twin {
@@ -211,6 +214,7 @@ func rid11Mutate(t *testing.T, w *ridLifecycleWorld, c rid11Case, p *rid11Proof)
 		p.CreatorAfterRevoke = &afterRevoke
 		p.KeysAfterRevoke = rid11RequireKeysAbsent(t, f, true)
 		if c.Variant == "deleted-creator" {
+			public.liveAfterRevoke(t, w)
 			op = f.ridOperation(t, "DELETE", "/iam/v1/serviceAccounts/"+f.creator.ID, f.operator.Bearer(), nil, 0)
 			p.MutationOperations = append(p.MutationOperations, op.ID)
 			p.DeletedAfterMutation = rid11RequireCreatorAbsent(t, f)
@@ -289,7 +293,7 @@ func rid11Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
 
 // Public OAuth twin uses the SAME supplied credential fields and normal ES256
 // assertion contract, including the wrong signature material when requested.
-func rid11PublicRefusal(t *testing.T, f *installationNativeWorld, credential string) {
+func rid11FreshInputAssertion(t *testing.T, f *installationNativeWorld, credential string) (string, time.Time) {
 	raw, err := os.ReadFile(credential)
 	require.NoError(t, err)
 	var input installationCredential
@@ -306,6 +310,10 @@ func rid11PublicRefusal(t *testing.T, f *installationNativeWorld, credential str
 	proof, err := assertion.SignedString(key)
 	require.NoError(t, err)
 	f.secrets = append(f.secrets, proof)
+	return proof, now.Add(60 * time.Second)
+}
+func rid11PublicRefusal(t *testing.T, f *installationNativeWorld, credential string) {
+	proof, _ := rid11FreshInputAssertion(t, f, credential)
 	pki := filepath.Join(f.session.Root, "pki")
 	ca, err := os.ReadFile(filepath.Join(pki, "ca.crt"))
 	require.NoError(t, err)
@@ -502,6 +510,7 @@ func rid11CheckPairs(t *testing.T, w *ridLifecycleWorld) rid11Identity {
 func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid11Proof {
 	w, named := rid11Prepare(t, c)
 	f := w.f
+	public := rid11PublicConsumer(t, w, c)
 	p := rid11Proof{Case: c, Accounts: w.accounts, CanonicalSystem: f.baseline.SystemID, NamedSystem: named, Creator: f.creator.ID, ManifestSHA256: ridWholeDigest(t, string(w.delivery.Manifests.First)), Expected: c.expected(), NewmanExecuted: consumer != nil}
 	p.CreatorBefore = rid11ReadIdentity(t, f, f.creator.ID)
 	require.Equal(t, f.baseline.SystemID, p.CreatorBefore.Public.AccountId)
@@ -515,10 +524,11 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 	if consumer != nil {
 		consumer(t, f, c, "before")
 	}
+	public.before(t, w)
 	if c.Active {
 		p.HistoryBeforeMutation = w.snapshot(t)
 	}
-	credential := rid11Mutate(t, w, c, &p)
+	credential := rid11MutateObserved(t, w, c, &p, public)
 	if c.Active {
 		require.Equal(t, p.HistoryBeforeMutation, w.snapshot(t), "the single changed authentication/input fact must preserve prior GD/G history")
 	}
@@ -526,6 +536,7 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 	p.Before = ridReadWholeDelivery(t, f)
 	p.PairRowsBefore = rid08PrimaryGD(t, f)
 	ops := rid08GDOperations(t, f)
+	public.beforeStartup(t, w, credential)
 	rid08Write(t, f.session.Root, "rid11-before", p.Before)
 	watch := f.wire.StartReadinessWatch(f.given.ctx)
 	defer watch.Stop()
@@ -549,6 +560,7 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 		if consumer != nil {
 			consumer(t, f, c, "after-positive")
 		}
+		public.afterPositive(t, w)
 		rid06GracefulStop(t, child)
 	} else {
 		rid06WaitExit(t, child, 1)
@@ -616,6 +628,7 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 		}
 		// Read-only public consequences after the stopped-process primary proof.
 		// Ordinary no-delivery startup cannot repair deleted C or restore authority.
+		public.beforeRestore(t, w, p.Returned)
 		base, err := f.session.StartBase(f.given.ctx)
 		require.NoError(t, err)
 		require.NoError(t, base.OwnsListeners(installruntime.DefaultNativePorts().All()...))
@@ -652,6 +665,7 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 		if consumer != nil {
 			consumer(t, f, c, "after-negative")
 		}
+		public.afterNegative(t, w)
 	} else {
 		require.Positive(t, p.Returned.ProofObservations)
 		require.True(t, p.Returned.ActualCreator && p.Returned.ActualQuestion && p.Returned.ForwardAllowed)
@@ -661,6 +675,9 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 			require.Equal(t, p.PairRowsBefore, p.PairRowsAfter)
 			require.Equal(t, p.Before.Delivery["access_bindings"], p.After.Delivery["access_bindings"])
 		}
+	}
+	if public != nil {
+		p.NewmanExecuted = public.complete(t)
 	}
 	rid08Write(t, f.session.Root, "rid11-proof", p)
 	return p

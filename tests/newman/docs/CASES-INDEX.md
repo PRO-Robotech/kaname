@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 1184
+Всего кейсов: 1312
 
 ## Перепись по модулям
 
@@ -93,6 +93,7 @@
 | `cases/registry-installation-rid08.py` | 6 |
 | `cases/registry-installation-rid09.py` | 32 |
 | `cases/registry-installation-rid10.py` | 6 |
+| `cases/registry-installation-rid11.py` | 128 |
 | `cases/registry-installation-rid12.py` | 65 |
 
 ---
@@ -1730,3 +1731,136 @@ ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакци
 - `registry-installation-rid06-S2-RECOVERY-REAPPLY`
 - `registry-installation-rid06-S2-EXPLICIT-RECOVERY-ACT`
 - `registry-installation-rid06-S2-EXPLICIT-RECOVERY-VERIFY`
+
+## cases/registry-installation-rid11.py — 128
+
+Same 62 native RID11 worlds; 124 BEFORE/AFTER + 4 same-C-live checkpoints. Startup/fault evidence remains integration-only. Only 12 literal negative AFTER phases request normal shared issuance; all other requests use the owned public front.
+
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-NEGATIVE-KEY-REVOKED-C-LIVE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-NEGATIVE-KEY-REVOKED-C-LIVE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-NEGATIVE-KEY-REVOKED-C-LIVE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-NEGATIVE-KEY-REVOKED-C-LIVE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-AUTHORITY-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-AUTHORITY-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-AUTHORITY-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-AUTHORITY-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-AUTHORITY-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-AUTHORITY-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-AUTHORITY-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-AUTHORITY-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-BACKEND-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BACKEND-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-BACKEND-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-BACKEND-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-BACKEND-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BACKEND-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-BACKEND-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-BACKEND-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-BACKEND-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BACKEND-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-BACKEND-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-BACKEND-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-BACKEND-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BACKEND-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-BACKEND-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-BACKEND-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-ACCOUNT-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-ACCOUNT-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-ACCOUNT-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-ACCOUNT-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CENSUS-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CENSUS-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CENSUS-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CENSUS-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CENSUS-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CENSUS-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CENSUS-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CENSUS-S2-ACTIVE-TWIN-AFTER`

@@ -162,7 +162,138 @@ const rid05Actors=Object.freeze({
   "registry-installation-rid05-S2-EXPLICIT-C2-RECOVERY-VERIFY": "O",
   "registry-installation-rid05-S2-RECOVERY-REAPPLY": "O"
 });
+const rid11Actors=Object.freeze({
+  "registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-NEGATIVE-KEY-REVOKED-C-LIVE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-NEGATIVE-KEY-REVOKED-C-LIVE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-NEGATIVE-KEY-REVOKED-C-LIVE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-NEGATIVE-KEY-REVOKED-C-LIVE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-REVOKED-KEY-S1-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-REVOKED-KEY-S1-ABSENT-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-REVOKED-KEY-S1-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-REVOKED-KEY-S1-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-REVOKED-KEY-S2-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-REVOKED-KEY-S2-ABSENT-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-REVOKED-KEY-S2-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-REVOKED-KEY-S2-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-NEGATIVE-AFTER": "A",
+  "registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-AUTHORITY-S1-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-AUTHORITY-S1-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-AUTHORITY-S1-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-AUTHORITY-S1-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-AUTHORITY-S1-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-AUTHORITY-S1-ACTIVE-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-AUTHORITY-S1-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-AUTHORITY-S1-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-AUTHORITY-S2-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-AUTHORITY-S2-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-AUTHORITY-S2-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-AUTHORITY-S2-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-AUTHORITY-S2-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-AUTHORITY-S2-ACTIVE-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-AUTHORITY-S2-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-AUTHORITY-S2-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-BACKEND-S1-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-BACKEND-S1-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-BACKEND-S1-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-BACKEND-S1-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-BACKEND-S1-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-BACKEND-S1-ACTIVE-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-BACKEND-S1-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-BACKEND-S1-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-BACKEND-S2-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-BACKEND-S2-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-BACKEND-S2-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-BACKEND-S2-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-BACKEND-S2-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-BACKEND-S2-ACTIVE-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-BACKEND-S2-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-BACKEND-S2-ACTIVE-TWIN-AFTER": "O",
+  "registry-installation-rid11-ACCOUNT-S1-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-ACCOUNT-S1-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-ACCOUNT-S1-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-ACCOUNT-S1-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-CENSUS-S2-ABSENT-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CENSUS-S2-ABSENT-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CENSUS-S2-ABSENT-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CENSUS-S2-ABSENT-TWIN-AFTER": "O",
+  "registry-installation-rid11-CENSUS-S2-ACTIVE-NEGATIVE-BEFORE": "O",
+  "registry-installation-rid11-CENSUS-S2-ACTIVE-NEGATIVE-AFTER": "O",
+  "registry-installation-rid11-CENSUS-S2-ACTIVE-TWIN-BEFORE": "O",
+  "registry-installation-rid11-CENSUS-S2-ACTIVE-TWIN-AFTER": "O"
+});
 function issuanceCase(caseId){
+ if(rid11Actors[caseId]==='A')return {variable:'rid11IssuanceOrigin',leaf:'input-standing-key-token-refusal'};
  if(caseId===expiredKeyCase)return {variable:'rid01IssuanceOrigin',leaf:'expired-standing-key-token-refusal'};
  if(caseId==='registry-installation-rid05-S1-OLD-C-TOKEN-REFUSED'||caseId==='registry-installation-rid05-S2-OLD-C-TOKEN-REFUSED')return {variable:'rid05IssuanceOrigin',leaf:'old-standing-key-token-refusal'};
  return null;
@@ -229,8 +360,12 @@ function clientSecretNames(stem, caseId, variables) {
     if(rid06Actors[caseId]==='I')names.push('jwtRIDIssuer');
     if(rid06Actors[caseId]==='C')names.push('jwtRIDCreator');
   }
-  if (Object.keys(variables).some(k => ((k.startsWith('jwtRID') || k === 'rid01ClientAssertion' || k==='rid05ClientAssertion') && !names.includes(k)) ||
-      (k === 'rid01IssuanceOrigin' && caseId !== expiredKeyCase) || (k==='rid05IssuanceOrigin' && !(issuanceCase(caseId)&&issuanceCase(caseId).variable===k))) ||
+  if(stem==='registry-installation-rid11'){
+   if(!Object.hasOwn(rid11Actors,caseId))throw new Error('invalid-secret-policy');
+   if(rid11Actors[caseId]==='A')names.push('rid11ClientAssertion');
+  }
+  if (Object.keys(variables).some(k => ((k.startsWith('jwtRID') || k === 'rid01ClientAssertion' || k==='rid05ClientAssertion'||k==='rid11ClientAssertion') && !names.includes(k)) ||
+      (k==='rid11IssuanceOrigin'&&!(issuanceCase(caseId)&&issuanceCase(caseId).variable===k)) || (k === 'rid01IssuanceOrigin' && caseId !== expiredKeyCase) || (k==='rid05IssuanceOrigin' && !(issuanceCase(caseId)&&issuanceCase(caseId).variable===k))) ||
       names.some(k => typeof variables[k] !== 'string' || !variables[k] || Buffer.byteLength(variables[k],'utf8') > 16384)) {
     throw new Error('invalid-secret-policy');
   }
@@ -247,9 +382,9 @@ function ownedOrigin(raw) {
 function requestPolicy(caseId, publicRaw, policy, variables) {
   const publicURL = ownedOrigin(publicRaw);
   const spec=issuanceCase(caseId);
-  if((Object.hasOwn(variables,'rid01IssuanceOrigin')&&(!spec||spec.variable!=='rid01IssuanceOrigin')) || (Object.hasOwn(variables,'rid05IssuanceOrigin')&&(!spec||spec.variable!=='rid05IssuanceOrigin')))throw new Error('unexpected-policy');
+  if((Object.hasOwn(variables,'rid01IssuanceOrigin')&&(!spec||spec.variable!=='rid01IssuanceOrigin')) || (Object.hasOwn(variables,'rid05IssuanceOrigin')&&(!spec||spec.variable!=='rid05IssuanceOrigin')) || (Object.hasOwn(variables,'rid11IssuanceOrigin')&&(!spec||spec.variable!=='rid11IssuanceOrigin')))throw new Error('unexpected-policy');
   if (!spec) {
-    if (policy != null || Object.hasOwn(variables,'rid01IssuanceOrigin') || Object.hasOwn(variables,'rid05IssuanceOrigin')) throw new Error('unexpected-policy');
+    if (policy != null || Object.hasOwn(variables,'rid01IssuanceOrigin') || Object.hasOwn(variables,'rid05IssuanceOrigin') || Object.hasOwn(variables,'rid11IssuanceOrigin')) throw new Error('unexpected-policy');
     return {publicOrigin:publicURL.origin, token:null};
   }
   if (!['9098','9198'].includes(publicURL.port)) throw new Error('invalid-public-policy');

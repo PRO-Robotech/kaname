@@ -79,13 +79,25 @@ func ridNewmanClientSecrets(stem, caseID string, variables map[string]any) ([]st
 			names = append(names, "jwtRIDCreator")
 		}
 	}
+	if stem == "registry-installation-rid11" {
+		rule, ok := rid11PublicRules[caseID]
+		if !ok {
+			return nil, errors.New("invalid Newman case identity")
+		}
+		if rule.Token401 {
+			names = append(names, "rid11ClientAssertion")
+		}
+	}
 	allowed := map[string]bool{}
 	for _, name := range names {
 		allowed[name] = true
 	}
 	for name := range variables {
-		if (strings.HasPrefix(name, "jwtRID") || name == "rid01ClientAssertion" || name == "rid05ClientAssertion") && !allowed[name] {
+		if (strings.HasPrefix(name, "jwtRID") || name == "rid01ClientAssertion" || name == "rid05ClientAssertion" || name == "rid11ClientAssertion") && !allowed[name] {
 			return nil, errors.New("undeclared Newman client secret")
+		}
+		if name == "rid11IssuanceOrigin" && !rid11TokenCase(caseID) {
+			return nil, errors.New("undeclared Newman issuance origin")
 		}
 		if name == "rid05IssuanceOrigin" && !rid05TokenCase(caseID) {
 			return nil, errors.New("undeclared Newman issuance origin")
