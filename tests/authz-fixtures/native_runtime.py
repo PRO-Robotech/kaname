@@ -121,6 +121,8 @@ def main() -> int:
             raise RuntimeError("native listener ownership/port census differs from the fixture")
 
     success = False
+    owned_environment = None
+    newman_started = False
     def stop_requested(signum, _frame):
         raise RuntimeError(f"native job cancelled by signal {signum}")
     signal.signal(signal.SIGTERM, stop_requested)
@@ -161,29 +163,48 @@ def main() -> int:
             for tool in ("newman", "grpcurl", "jq", "openssl"):
                 if not shutil.which(tool, path=env["PATH"]):
                     raise RuntimeError(f"required existing tool unavailable: {tool}")
-            step("seed-own", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--pki", str(pki)])
+            owned_environment = ROOT / "tests/newman/environments/local.postman_environment.json"
+            if owned_environment.exists():
+                owned_environment = None
+                raise RuntimeError("public matrix requires a fresh environment; existing file preserved")
+            step("seed-own", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--pki", str(pki)], timeout=240)
             step("seed-resource", ["python3", "tests/authz-fixtures/seed_registry_resource.py", "--pki", str(pki),
                                    "--ledger", str(evidence / "registry-intent.json")])
-            step("seed-ceremony", ["python3", "tests/authz-fixtures/seed_ceremony.py", "--wave",
-                                  "--lane-url", "https://localhost:9100", "--issuance-url", "https://localhost:9096",
-                                  "--own-url", "https://localhost:9098", "--grpc-addr", "localhost:9091",
-                                  "--pki", str(pki), "--mailbox-url", "http://127.0.0.1:18025"])
+            # This matrix uses ordinary machine delegates; human ceremony
+            # slots belong to their separate acceptance wave.
+            step("seed-delegates", ["python3", "tests/authz-fixtures/seed_delegation.py", "--pki", str(pki),
+                                    "--ledger", str(evidence / "delegation-subjects.json")])
             step("remint-bootstrap", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--remint-bootstrap", "--pki", str(pki)])
+            newman_started = True
             step("newman", ["bash", "tests/newman/scripts/run.sh", "--service", "iam-grant-delegation",
                             "--ssl-client-cert", str(pki / "srv.crt"), "--ssl-client-key", str(pki / "srv.key"),
                             "--ssl-extra-ca-certs", str(pki / "ca.crt"),
                             "--internal-front-client-cert", str(pki / "edge.crt"),
-                            "--internal-front-client-key", str(pki / "edge.key")], timeout=240)
+                            "--internal-front-client-key", str(pki / "edge.key")], timeout=360)
             report = json.loads((ROOT / "tests/newman/out/iam-grant-delegation.json").read_text())
             run = report["run"]
             if run["failures"] or run["stats"]["assertions"]["failed"] or not run["stats"]["assertions"]["total"]:
                 raise RuntimeError("Newman report has missing or failed assertions")
             executed = [item["item"]["name"] for item in run["executions"]]
+            def request_names(items):
+                return [name for item in items for name in
+                        (request_names(item["item"]) if "item" in item else [item["name"]])]
+            collection = json.loads((ROOT / "tests/newman/collections/iam-grant-delegation.postman_collection.json").read_text())
+            expected = request_names(collection["item"])
+            missing = sorted(set(expected) - set(executed))
+            skipped = sum(bool(assertion.get("skipped")) for execution in run["executions"]
+                          for assertion in execution.get("assertions", []))
+            if missing or skipped:
+                raise RuntimeError(f"public matrix incomplete: missing requests={len(missing)} skipped assertions={skipped}")
             for case in range(1, 6):
                 if not any(name.startswith(f"IAM-GD-E{case}-") for name in executed):
                     raise RuntimeError(f"GD-E{case} was not executed")
-            shutil.copytree(ROOT / "tests/newman/out", evidence / "newman")
+            for case in ("IAM-GD-1011-GROUP-CONTAINS-DELEGATE-DENIED", "IAM-GD-1011-GROUP-WITHOUT-DELEGATE-ALLOWED"):
+                if not any(name.startswith(case + " ::") and "-grant-group" in name for name in executed):
+                    raise RuntimeError(case + " was not executed")
             results["newmanStats"] = run["stats"]
+            results["newmanCoverage"] = {"expectedRequests": len(expected), "executedRequests": len(executed),
+                                        "missingRequests": missing, "skippedAssertions": skipped}
         success = True
     finally:
         for name, proc in reversed(processes):
@@ -201,6 +222,11 @@ def main() -> int:
                 success = False
         for log in files:
             log.close()
+        if newman_started and (ROOT / "tests/newman/out").exists():
+            shutil.copytree(ROOT / "tests/newman/out", evidence / "newman")
+        if owned_environment is not None and owned_environment.exists():
+            shutil.copyfile(owned_environment, evidence / "private.postman_environment.json")
+            owned_environment.unlink()
         results["success"] = success
         (evidence / "native-result.json").write_text(json.dumps(results, indent=2) + "\n")
     return 0 if success else 1
