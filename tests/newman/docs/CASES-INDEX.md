@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 1110
+Всего кейсов: 1124
 
 ## Перепись по модулям
 
@@ -86,6 +86,7 @@
 | `cases/registry-installation-rid01.py` | 8 |
 | `cases/registry-installation-rid02.py` | 4 |
 | `cases/registry-installation-rid03.py` | 44 |
+| `cases/registry-installation-rid04.py` | 14 |
 | `cases/registry-installation-rid07.py` | 32 |
 | `cases/registry-installation-rid08.py` | 6 |
 | `cases/registry-installation-rid09.py` | 32 |
@@ -1634,3 +1635,25 @@ ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакци
 - `registry-installation-rid03-S2-AUTHENTICATED-DENIED-VERIFY`
 - `registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT`
 - `registry-installation-rid03-S2-ANONYMOUS-TWIN-VERIFY`
+
+
+---
+
+## `cases/registry-installation-rid04.py` — 14 кейсов
+
+> Materialized creator retirement, real I refusal, O-only full census, explicit O recovery and same public request twin. Native fullserve/admin boundaries are integration-only.
+
+- `registry-installation-rid04-S1-BEFORE-RETIREMENT`
+- `registry-installation-rid04-S1-RETIRED-DENIED-ACT`
+- `registry-installation-rid04-S1-RETIRED-DENIED-VERIFY`
+- `registry-installation-rid04-S1-REFUSED-APPLY-SNAPSHOT`
+- `registry-installation-rid04-S1-RESTORED-GRANT-ACT`
+- `registry-installation-rid04-S1-RESTORED-GRANT-VERIFY`
+- `registry-installation-rid04-S1-RESTORED-REAPPLY`
+- `registry-installation-rid04-S2-BEFORE-RETIREMENT`
+- `registry-installation-rid04-S2-RETIRED-DENIED-ACT`
+- `registry-installation-rid04-S2-RETIRED-DENIED-VERIFY`
+- `registry-installation-rid04-S2-REFUSED-APPLY-SNAPSHOT`
+- `registry-installation-rid04-S2-RESTORED-GRANT-ACT`
+- `registry-installation-rid04-S2-RESTORED-GRANT-VERIFY`
+- `registry-installation-rid04-S2-RESTORED-REAPPLY`

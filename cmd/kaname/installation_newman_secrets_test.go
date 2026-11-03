@@ -46,6 +46,15 @@ func ridNewmanClientSecrets(stem, caseID string, variables map[string]any) ([]st
 			names = append(names, "jwtRIDCreator")
 		}
 	}
+	if stem == "registry-installation-rid04" {
+		actor, ok := rid04NewmanActor(caseID)
+		if !ok {
+			return nil, errors.New("invalid Newman case identity")
+		}
+		if actor == "I" {
+			names = append(names, "jwtRIDIssuer")
+		}
+	}
 	allowed := map[string]bool{}
 	for _, name := range names {
 		allowed[name] = true

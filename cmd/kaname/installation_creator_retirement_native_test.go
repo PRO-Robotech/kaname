@@ -41,6 +41,9 @@ func (f *installationNativeWorld) ridAuthorityMaterialized(t *testing.T, id stri
 	}
 }
 func rid04Retire(t *testing.T, w *ridLifecycleWorld) (*iamv1.AccessBinding, map[string]any) {
+	return rid04RetireObserved(t, w, nil)
+}
+func rid04RetireObserved(t *testing.T, w *ridLifecycleWorld, public *rid04PublicContext) (*iamv1.AccessBinding, map[string]any) {
 	t.Helper()
 	f := w.f
 	// C is a SYS service account; O owns A. No direct tenant role was given to C.
@@ -56,6 +59,7 @@ func rid04Retire(t *testing.T, w *ridLifecycleWorld) (*iamv1.AccessBinding, map[
 	g := w.grant(t, w.bindingInput("service_account", u, w.pull, "registry.registries", w.object))
 	u2 := f.ridSA(t, f.tenantID, "rid-after-retirement")
 	body := w.bindingInput("service_account", u2, w.pull, "registry.registries", w.object)
+	public.prepare(t, w, g)
 	before := w.snapshot(t)
 	f.ridAdmin(t, f.creator.ID, false)
 	f.ridAuthorityMaterialized(t, f.creator.ID, false)
@@ -64,6 +68,7 @@ func rid04Retire(t *testing.T, w *ridLifecycleWorld) (*iamv1.AccessBinding, map[
 	// the explanation for the current-creator authority refusal.
 	w.issuerToken = f.ridToken(t, w.issuer)
 	w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
+	public.retired(t, w)
 	return g, body
 }
 func (w *ridLifecycleWorld) unchangedActive(t *testing.T, g *iamv1.AccessBinding) {
@@ -83,31 +88,45 @@ func (w *ridLifecycleWorld) unchangedActive(t *testing.T, g *iamv1.AccessBinding
 	require.True(t, found)
 }
 func ridNativeCreatorRetired(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) { g, _ := rid04Retire(t, w); w.unchangedActive(t, g) })
+	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+		public := rid04PublicConsumer(t, w, "retired")
+		g, _ := rid04RetireObserved(t, w, public)
+		w.unchangedActive(t, g)
+	})
 }
 func ridNativeRetirementApplyDenied(t *testing.T) {
 	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
-		g, body := rid04Retire(t, w)
-		w.refusedApply(t, installationResult{Stage: "preflight-authority", Code: "PERMISSION_DENIED", Field: "moduleSeedInstaller.credentialFile"})
+		public := rid04PublicConsumer(t, w, "apply-denied")
+		g, body := rid04RetireObserved(t, w, public)
+		public.beforeRefusedApply(t, w)
+		w.refusedApplyObserved(t, installationResult{Stage: "preflight-authority", Code: "PERMISSION_DENIED", Field: "moduleSeedInstaller.credentialFile"}, func() { public.refusalBeforeRestore(t, w) })
+		public.afterRefusedApply(t, w)
 		w.f.ridAuthorityMaterialized(t, w.f.creator.ID, false)
 		w.issuerToken = w.f.ridToken(t, w.issuer)
 		w.denied(t, "/iam/v1/accessBindings", w.issuerToken, body)
 		w.unchangedActive(t, g)
+		public.completedApplyDenied(t, w)
 	})
 }
 func ridNativeRetirementExplicitTwin(t *testing.T) {
 	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
-		g, body := rid04Retire(t, w)
-		w.refusedApply(t, installationResult{Stage: "preflight-authority", Code: "PERMISSION_DENIED", Field: "moduleSeedInstaller.credentialFile"})
+		public := rid04PublicConsumer(t, w, "recovery")
+		g, body := rid04RetireObserved(t, w, public)
+		public.beforeRefusedApply(t, w)
+		w.refusedApplyObserved(t, installationResult{Stage: "preflight-authority", Code: "PERMISSION_DENIED", Field: "moduleSeedInstaller.credentialFile"}, func() { public.refusalBeforeRestore(t, w) })
+		public.afterRefusedApply(t, w)
 		before := w.snapshot(t)
 		w.f.ridAdmin(t, w.f.creator.ID, true)
 		w.f.ridAuthorityMaterialized(t, w.f.creator.ID, true)
 		require.Equal(t, before, w.snapshot(t), "only explicit admin authority changed")
 		w.issuerToken = w.f.ridToken(t, w.issuer)
+		public.restoredGrant(t, w)
 		next := w.grant(t, body)
 		require.Equal(t, w.gd.Id, next.DelegationId)
+		public.beforeReapply(t, w)
 		requireNativeOK(t, w.f.apply(t, w.delivery), len(w.accounts))
 		w.f.renewOperator(t, w.f.given.ctx)
 		w.unchangedActive(t, g)
+		public.afterReapply(t, w)
 	})
 }

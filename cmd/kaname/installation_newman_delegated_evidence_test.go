@@ -290,8 +290,20 @@ type rid03TechnicalReceipt struct {
 // selected fields again before returning a closed nonsecret receipt. Callers
 // write only after ACT observation validation (or strict VERIFY/denial bracket).
 func rid03BuildTechnicalReceipt(e *rid03NewmanExpectation, a, b rid03NewmanSnapshot, p *rid03DeltaPolicy) (rid03TechnicalReceipt, bool) {
-	out := rid03TechnicalReceipt{Version: 1, CaseID: e.CaseID, Phase: e.Phase, Denied: e.Denied, PrimaryLowerBound: a.Whole.PrimaryFinishedAt, PrimaryUpperBound: b.Whole.PrimaryStartedAt, Producers: []rid03ProducerEvidence{}, DirectFacts: []rid03FactEvidence{}, BusinessEvents: []rid03BusinessEventEvidence{}, ExpectedEmittedUnion: []rid03EvidenceTuple{}, ActualEmittedUnion: []rid03EvidenceTuple{}, ExpectedDirectUnion: []rid03EvidenceTuple{}, ActualDirectUnion: []rid03EvidenceTuple{}}
-	if _, ok := rid03NewmanActor(e.CaseID); !ok || !strings.HasSuffix(e.CaseID, "-"+e.Phase) || (e.Phase != "ACT" && e.Phase != "VERIFY") || out.PrimaryUpperBound.Before(out.PrimaryLowerBound) {
+	if _, ok := rid03NewmanActor(e.CaseID); !ok || !strings.HasSuffix(e.CaseID, "-"+e.Phase) || (e.Phase != "ACT" && e.Phase != "VERIFY") {
+		return ridNewmanInitialTechnicalReceipt(e, a, b), false
+	}
+	return ridNewmanBuildClosedTechnicalReceipt(e, a, b, p)
+}
+
+func ridNewmanInitialTechnicalReceipt(e *rid03NewmanExpectation, a, b rid03NewmanSnapshot) rid03TechnicalReceipt {
+	return rid03TechnicalReceipt{Version: 1, CaseID: e.CaseID, Phase: e.Phase, Denied: e.Denied, PrimaryLowerBound: a.Whole.PrimaryFinishedAt, PrimaryUpperBound: b.Whole.PrimaryStartedAt, Producers: []rid03ProducerEvidence{}, DirectFacts: []rid03FactEvidence{}, BusinessEvents: []rid03BusinessEventEvidence{}, ExpectedEmittedUnion: []rid03EvidenceTuple{}, ActualEmittedUnion: []rid03EvidenceTuple{}, ExpectedDirectUnion: []rid03EvidenceTuple{}, ActualDirectUnion: []rid03EvidenceTuple{}}
+}
+
+// Pure body: each caller must first validate its own closed literal case/phase map.
+func ridNewmanBuildClosedTechnicalReceipt(e *rid03NewmanExpectation, a, b rid03NewmanSnapshot, p *rid03DeltaPolicy) (rid03TechnicalReceipt, bool) {
+	out := ridNewmanInitialTechnicalReceipt(e, a, b)
+	if (e.Phase != "ACT" && e.Phase != "VERIFY" && e.Phase != "READ") || out.PrimaryUpperBound.Before(out.PrimaryLowerBound) {
 		return out, false
 	}
 	producers, ok := rid03NewEvidenceRows(a.Raw["fga_outbox"], b.Raw["fga_outbox"])

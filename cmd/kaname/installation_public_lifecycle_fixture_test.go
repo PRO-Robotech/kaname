@@ -533,6 +533,9 @@ func (w *ridLifecycleWorld) denied(t *testing.T, path, bearer string, body any) 
 	require.Equal(t, before, w.snapshot(t))
 }
 func (w *ridLifecycleWorld) refusedApply(t *testing.T, want installationResult) {
+	w.refusedApplyObserved(t, want, nil)
+}
+func (w *ridLifecycleWorld) refusedApplyObserved(t *testing.T, want installationResult, checkpoint func()) {
 	t.Helper()
 	f := w.f
 	stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -571,6 +574,9 @@ func (w *ridLifecycleWorld) refusedApply(t *testing.T, want installationResult) 
 	var same *exec.ExitError
 	require.ErrorAs(t, err, &same)
 	require.Equal(t, 1, same.ExitCode())
+	if checkpoint != nil {
+		checkpoint()
+	}
 	// Restore only normal listeners/catalog, with NO delegation declarations.
 	// Retired/deleted C remains unchanged and supplies no authority to this path.
 	w.catalogOnly(t)

@@ -425,12 +425,16 @@ func rid03RawDigest(t *testing.T, r rid09PrimaryRow) string { t.Helper(); return
 // tables, removals, unrelated updates or a second Operation are rejected.
 func rid03RequireActionDelta(t *testing.T, w *ridLifecycleWorld, e *rid03NewmanExpectation, a, b rid03NewmanSnapshot) {
 	t.Helper()
+	rid03RequireActionDeltaWithReceipt(t, w, e, a, b, rid03BuildTechnicalReceipt)
+}
+func rid03RequireActionDeltaWithReceipt(t *testing.T, w *ridLifecycleWorld, e *rid03NewmanExpectation, a, b rid03NewmanSnapshot, build func(*rid03NewmanExpectation, rid03NewmanSnapshot, rid03NewmanSnapshot, *rid03DeltaPolicy) (rid03TechnicalReceipt, bool)) {
+	t.Helper()
 	f := w.f
 	rid03WriteRawDeltaCensus(t, f, e.CaseID, a, b)
 	require.Equal(t, a.Whole.OwnCeilings, b.Whole.OwnCeilings)
 	if e.Denied {
 		rid03RequireReadOnly(t, a, b)
-		proof, ok := rid03BuildTechnicalReceipt(e, a, b, nil)
+		proof, ok := build(e, a, b, nil)
 		require.True(t, ok, "closed denied zero technical/business delta receipt required")
 		e.TechnicalEvidence = &proof
 		return
@@ -569,7 +573,7 @@ func rid03RequireActionDelta(t *testing.T, w *ridLifecycleWorld, e *rid03NewmanE
 	require.Equal(t, a.Whole.Separation, b.Whole.Separation)
 	policy := rid03BuildDeltaPolicy(t, e, a, b, resourceID)
 	rid03RequireClosedDelta(t, a, b, policy)
-	proof, ok := rid03BuildTechnicalReceipt(e, a, b, &policy)
+	proof, ok := build(e, a, b, &policy)
 	require.True(t, ok, "closed independent technical/business primary proof required")
 	e.TechnicalEvidence = &proof
 }
