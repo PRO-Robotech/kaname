@@ -227,6 +227,9 @@ func (c Census) String() string {
 // сразу.
 func (a *Applier) Apply(ctx context.Context, own *manifest.Manifest, delivered []*manifest.Manifest) (Census, error) {
 	census := Census{Manifests: len(delivered)}
+	if err := Preflight(own, delivered); err != nil {
+		return census, err
+	}
 
 	if own != nil {
 		report, err := a.applyOne(ctx, own)
@@ -400,4 +403,18 @@ func subjectOf(s manifest.Subject, seed *manifest.Seed) (Subject, error) {
 		return Subject{}, fmt.Errorf("%w: %q (принимаются %q и %q)",
 			ErrUnknownSubjectType, s.Type, subjectServiceAccount, subjectGroup)
 	}
+}
+
+// Preflight validates every seed target before the first writer is opened.
+func Preflight(own *manifest.Manifest, delivered []*manifest.Manifest) error {
+	all := append([]*manifest.Manifest{own}, delivered...)
+	for _, m := range all {
+		if m == nil || m.Seed == nil {
+			continue
+		}
+		if err := refuseNarrowedTargets(m.Seed); err != nil {
+			return fmt.Errorf("module %s: %w", m.Module, err)
+		}
+	}
+	return nil
 }

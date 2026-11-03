@@ -1,0 +1,123 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package main
+
+import (
+	"context"
+	"github.com/PRO-Robotech/corelib/operations"
+	gdapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/grant_delegation"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"log/slog"
+	"time"
+)
+
+func hasInstallationDelegations(manifests []*manifest.Manifest) bool {
+	for _, m := range manifests {
+		if m != nil && m.Seed != nil && len(m.Seed.GrantDelegations) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// installationReadSource is the canonical primary reader. Its real BeginTx
+// dependency can be decorated independently of the mutation repository.
+type installationReadSource interface {
+	InstallationAccounts(context.Context, string, int) ([]domain.AccountID, domain.AccountID, error)
+	InstallationReferences(context.Context, string, string, []string) (domain.ServiceAccountID, []string, error)
+}
+
+func applyInstallationDelegations(ctx context.Context, logger *slog.Logger, authn *installationAuthentication, repo gdapp.Repo, reads installationReadSource, ops operations.Repo, cat catalog.Source, relations clients.RelationStore, target string, pageSize int, manifests []*manifest.Manifest) error {
+	if !hasInstallationDelegations(manifests) {
+		return nil
+	}
+	accounts, _, err := reads.InstallationAccounts(ctx, target, pageSize)
+	if err != nil {
+		return failInstallation(logger, "census", "", "", "", 0, shared.MapRepoErrAt(ctx, err))
+	}
+	logger.Info("installation delegation account snapshot", slog.Int("accounts", len(accounts)))
+	create := gdapp.NewCreateGrantDelegationUseCase(repo, ops, cat).WithRelationStore(relations, logger)
+	pairs := 0
+	for _, m := range manifests {
+		if m.Seed == nil {
+			continue
+		}
+		for _, d := range m.Seed.GrantDelegations {
+			delegate, roles, err := reads.InstallationReferences(ctx, d.Delegate.Account, d.Delegate.Name, d.RoleIDs)
+			if err != nil {
+				return failInstallation(logger, "delegation", "", "", "", pairs, shared.MapRepoErrAt(ctx, err))
+			}
+			for _, account := range accounts {
+				verified, err := authn.Authenticate(ctx)
+				if err != nil {
+					return failInstallation(logger, "delegation", "", string(account), string(delegate), pairs, err)
+				}
+				if err := authzguard.RequireClusterAdmin(verified, relations); err != nil {
+					return failInstallation(logger, "delegation", "", string(account), string(delegate), pairs, err)
+				}
+				op, err := create.ExecuteInstallation(verified, gdapp.CreateInput{
+					AccountID: string(account), DelegateType: "SUBJECT_TYPE_SERVICE_ACCOUNT", DelegateID: string(delegate),
+					RoleIDs: roles, TargetTypes: d.TargetTypes, SubjectTypes: d.SubjectTypes,
+				})
+				if err != nil {
+					return failInstallation(logger, "delegation", "", string(account), string(delegate), pairs, err)
+				}
+				if err := waitInstallationOperation(ctx, ops, op.ID); err != nil {
+					return failInstallation(logger, "delegation", "", string(account), string(delegate), pairs, err)
+				}
+				pairs++
+			}
+		}
+	}
+	logger.Info("installation delegation stage complete", slog.Int("pairs", pairs), slog.Int("accounts", len(accounts)), slog.Any("installation", installationResult{Stage: "delegation", Code: "OK", CompletedPairs: pairs}))
+	return nil
+}
+
+func waitInstallationOperation(ctx context.Context, repo operations.Repo, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		op, err := repo.Get(ctx, id)
+		if err != nil {
+			return shared.MapRepoErrAt(ctx, err)
+		}
+		if op.Done {
+			if op.Error != nil {
+				return status.Error(codes.Code(op.Error.Code), op.Error.Message)
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return shared.MapRepoErrAt(ctx, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func validateInstallationScope(input config.InstallationConfig) error {
+	switch input.Scope {
+	case "single-account":
+		if input.TargetAccountID == "" {
+			return shared.InvalidArg("tenantAccountId", "one tenant account ID is required")
+		}
+	case "all-accounts":
+		if input.TargetAccountID != "" {
+			return shared.InvalidArg("tenantAccountId", "all-accounts scope cannot carry a tenant account ID")
+		}
+	default:
+		return shared.InvalidArg("scope", "scope must be single-account or all-accounts")
+	}
+	return nil
+}
