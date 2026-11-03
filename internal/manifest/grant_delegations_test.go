@@ -5,7 +5,9 @@ package manifest_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -79,5 +81,94 @@ func TestInstallationUnknownFieldCoordinates(t *testing.T) {
 		if strings.Contains(err.Error(), "secret-value") {
 			t.Fatal("input value exposed")
 		}
+	}
+}
+
+// Every mutation changes one node in the second declaration; the valid twin
+// proves the rejection is about its shape, not linkage or the fixture.
+func TestInstallationDelegationNodeShapeCoordinates(t *testing.T) {
+	base, err := os.ReadFile("testdata/registry.delegation-fixture.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const entry = `    - delegate: {account: system, name: svc-registry}
+      roleIds: [registry.puller]
+      targetTypes: [registry.registries]
+      subjectTypes: [SUBJECT_TYPE_USER]
+`
+	good := string(base) + "\nseed:\n  serviceAccounts:\n    - {name: svc-registry, account: system, description: Registry delegated issuer}\n  grantDelegations:\n" + entry + entry
+	// Alias resolution must preserve YAML forms already accepted by the decoder.
+	for _, tc := range []struct{ name, old, anchor, alias string }{
+		{"entry", entry, strings.Replace(entry, "- delegate:", "- &entry\n      delegate:", 1), "    - *entry\n"},
+		{"delegate", "{account: system, name: svc-registry}", "&delegate {account: system, name: svc-registry}", "*delegate"},
+		{"axis", "[registry.puller]", "&roles [registry.puller]", "*roles"},
+		{"scalar", "account: system", "account: &account system", "account: *account"},
+	} {
+		t.Run("valid alias/"+tc.name, func(t *testing.T) {
+			input := string(base) + "\nseed:\n  serviceAccounts:\n    - {name: svc-registry, account: system, description: Registry delegated issuer}\n  grantDelegations:\n" +
+				strings.Replace(entry, tc.old, tc.anchor, 1) + strings.Replace(entry, tc.old, tc.alias, 1)
+			if m, err := manifest.Load([]byte(input)); err != nil || m == nil {
+				t.Fatalf("valid alias: %v", err)
+			}
+		})
+	}
+	type mutation struct{ name, old, replacement, field string }
+	cases := []mutation{}
+	for _, bad := range []string{"secret-value", "[secret-value]", "null"} {
+		cases = append(cases, mutation{"entry/" + bad, entry, "    - " + bad + "\n", ""})
+		cases = append(cases, mutation{"delegate/" + bad, "{account: system, name: svc-registry}", bad, ".delegate"})
+	}
+	for _, axis := range []struct{ name, value string }{
+		{"roleIds", "registry.puller"}, {"targetTypes", "registry.registries"}, {"subjectTypes", "SUBJECT_TYPE_USER"},
+	} {
+		for _, bad := range []string{"secret-value", "{secret-value: secret-value}", "null"} {
+			cases = append(cases, mutation{axis.name + "/" + bad, axis.name + ": [" + axis.value + "]", axis.name + ": " + bad, "." + axis.name})
+		}
+		for _, bad := range []string{"{secret-value: secret-value}", "[secret-value]"} {
+			cases = append(cases, mutation{axis.name + "/item/" + bad, axis.name + ": [" + axis.value + "]", axis.name + ": [" + bad + "]", "." + axis.name + "[0]"})
+		}
+	}
+	for _, field := range []string{"account", "name"} {
+		value := "system"
+		if field == "name" {
+			value = "svc-registry"
+		}
+		for _, bad := range []string{"{secret-value: secret-value}", "[secret-value]"} {
+			cases = append(cases, mutation{"delegate/" + field + "/" + bad, field + ": " + value, field + ": " + bad, ".delegate." + field})
+		}
+	}
+	for i, tc := range cases {
+		t.Run(fmt.Sprintf("%02d/%s", i, tc.name), func(t *testing.T) {
+			m, err := manifest.Load([]byte(good))
+			if err != nil || m == nil {
+				t.Fatalf("valid twin: %v", err)
+			}
+			// Replace only the second declaration so a constant [0] cannot pass.
+			first := strings.LastIndex(good, entry)
+			bad := good[:first] + strings.Replace(good[first:], tc.old, tc.replacement, 1)
+			m, err = manifest.Load([]byte(bad))
+			if m != nil || !errors.Is(err, manifest.ErrShape) {
+				t.Fatalf("rejected input escaped preflight: %v", err)
+			}
+			want := "seed.grantDelegations[1]" + tc.field
+			var field interface{ FieldPath() string }
+			if !errors.As(err, &field) || field.FieldPath() != want {
+				t.Fatalf("want %s, got %v", want, err)
+			}
+			if strings.Contains(err.Error(), "secret-value") {
+				t.Fatalf("value exposed: %v", err)
+			}
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(bad), 0600); err != nil {
+				t.Fatal(err)
+			}
+			report := manifest.CheckSyntheticTree(root)
+			if report.ExitCode() != manifest.CheckFailed || len(report.Manifests) != 0 || len(report.InputViolations) != 1 || report.InputViolations[0] != "manifests[0]."+want {
+				t.Fatalf("whole delivery preflight: %+v", report)
+			}
+			if strings.Contains(report.Summary(), "secret-value") || strings.Contains(strings.Join(report.Findings, " "), "secret-value") {
+				t.Fatal("preflight exposed input value")
+			}
+		})
 	}
 }
