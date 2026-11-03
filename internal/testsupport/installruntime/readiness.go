@@ -14,14 +14,14 @@ import (
 // ReadinessStatus probes the real diagnostics readiness route using the same
 // verified fixture CA/client TLS. A TLS handshake or JWKS alone is not ready.
 func (w *Wire) ReadinessStatus(ctx context.Context) (int, error) {
-	code, _, _, err := w.request(ctx, http.MethodGet, "https://localhost:9095/readyz", nil, nil)
+	code, _, _, err := w.request(ctx, http.MethodGet, fmt.Sprintf("https://localhost:%d/readyz", w.ports.Metrics), nil, nil)
 	return code, err
 }
 func (w *Wire) ProductionReady(ctx context.Context) error {
 	if err := w.ListenersReady(ctx); err != nil {
 		return err
 	}
-	code, _, raw, err := w.request(ctx, http.MethodGet, "https://localhost:9095/readyz", nil, nil)
+	code, _, raw, err := w.request(ctx, http.MethodGet, fmt.Sprintf("https://localhost:%d/readyz", w.ports.Metrics), nil, nil)
 	if err != nil {
 		return err
 	}

@@ -42,12 +42,20 @@ func TestRID_01_CleanInstallAndRenewal(t *testing.T) {
 		ridPredicate{name: "pace1 and pace5 large repeated concurrent authentication and cancellation", run: ridStandingAuthentication})
 }
 func TestRID_02_ConcurrentAndRepeat(t *testing.T) {
+	var observed []nativeInstallationOperationObservation
+	concurrent := func(t *testing.T) { observed = ridNativeConcurrentAbsentPair(t) }
+	metadata := func(t *testing.T) {
+		if len(observed) == 0 {
+			concurrent(t)
+		}
+		requireRID02RawOperationEvidence(t, observed)
+	}
 	runInstallationRID(t,
-		ridPredicate{name: "axis reorder sequential repeat preserves IDs and createdAt"},
-		ridPredicate{name: "two real absent-pair arrivals -> one GD and two successful Operations"},
-		ridPredicate{name: "raw Any metadata index and response identities agree on both Operations"},
-		ridPredicate{name: "stop before writer before commit after commit before terminal; primary recovery"},
-		ridPredicate{name: "cancellation and reconciler overlap preserve terminal refusal"})
+		ridPredicate{name: "axis reorder sequential repeat preserves IDs and createdAt", run: ridNativeSequentialAxisRepeat},
+		ridPredicate{name: "two real absent-pair arrivals -> one GD and two successful Operations", run: concurrent},
+		ridPredicate{name: "raw Any metadata index and response identities agree on both Operations", run: metadata},
+		ridPredicate{name: "stop before writer before commit after commit before terminal; primary recovery", run: ridNativeCrashPrimaryRecovery},
+		ridPredicate{name: "cancellation and reconciler overlap preserve terminal refusal", run: ridNativeCancellationReconcilerOverlap})
 }
 func TestRID_03_DelegatedGrantAndIssuerBounds(t *testing.T) {
 	runInstallationRID(t,
