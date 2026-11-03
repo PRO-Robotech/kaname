@@ -356,6 +356,91 @@ CASES.append(Case(
 ))
 
 
+# kaname#1011: a separate normal delegation admits GROUP. The original D1 axes and
+# GD-E1..E5 stay unchanged. Both twins use the same role/target/scope and caller;
+# only the group's membership differs. The delegate belongs to A because the
+# public AddMember contract requires the member and group to share an account.
+def _group_self_grant_twin(contains_delegate):
+    prefix = "gdgroupdeny" if contains_delegate else "gdgroupallow"
+    delegation_var, group_var, binding_var = prefix + "Delegation", prefix + "Group", prefix + "Binding"
+    member = {"memberType": "service_account", "memberId": "{{gdGroupDelegateSaId}}"}
+    first = [*_seeded(),
+             "if (!pm.environment.get('gdGroupDelegateSaId') || !pm.environment.get('jwtGDGroupDelegate')) {",
+             *precondition_not_met("group delegation fixture", "normal group-test delegate and credential missing", indent="  "),
+             "}"]
+    steps = [
+        Step(name=prefix + "-create-delegation", method="POST", path="/iam/v1/grantDelegations",
+             body={"accountId": "{{accountAId}}",
+                   "delegate": {"type": "SUBJECT_TYPE_SERVICE_ACCOUNT", "id": "{{gdGroupDelegateSaId}}"},
+                   "roleIds": ["{{gdRolePusherId}}"], "targetTypes": ["registry.registries"],
+                   "subjectTypes": ["SUBJECT_TYPE_GROUP"]}, auth=OWNER_STEP_UP, pre_script=first,
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.grantDelegationId", delegation_var)]),
+        poll_operation_until_done(), assert_op_success(),
+        Step(name=prefix + "-create-group", method="POST", path="/iam/v1/groups",
+             body={"accountId": "{{accountAId}}", "name": prefix + "-{{runId}}",
+                   "description": "Independent delegation membership twin"}, auth=OWNER,
+             test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
+                          *save_from_response("j.metadata && j.metadata.groupId", group_var)]),
+        poll_operation_until_done(), assert_op_success(),
+    ]
+    if contains_delegate:
+        steps += [Step(name=prefix + "-add-delegate", method="POST",
+                       path="/iam/v1/groups/{{" + group_var + "}}:addMember", body=member, auth=OWNER_STEP_UP,
+                       test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+                  poll_operation_until_done(), assert_op_success()]
+    expected_members = ("[{memberType:'service_account',memberId:pm.environment.get('gdGroupDelegateSaId')}]"
+                        if contains_delegate else "[]")
+    steps += [Step(name=prefix + "-verify-membership", method="GET",
+                   path="/iam/v1/groups/{{" + group_var + "}}:listMembers?pageSize=1000", auth=OWNER,
+                   test_script=[*assert_status(200),
+                                "pm.test('membership Given is complete', () => { const j=pm.response.json();",
+                                "  pm.expect(j.nextPageToken || '').to.eql('');",
+                                "  pm.expect((j.members || []).map(m=>({memberType:m.memberType,memberId:m.memberId}))).to.eql(" + expected_members + "); });"])]
+    grant_body = _v_body(group_var)
+    grant_body["subjects"][0]["type"] = "SUBJECT_TYPE_GROUP"
+    if contains_delegate:
+        steps += [Step(name=prefix + "-grant-group", method="POST", path="/iam/v1/accessBindings",
+                       body=grant_body, auth="jwtGDGroupDelegate",
+                       test_script=[*_denied("kaname#1011 group contains delegate"),
+                                    "pm.test('synchronous refusal is not an operation', () => pm.expect(pm.response.json()).not.to.have.property('id'));"])]
+    else:
+        steps += [Step(name=prefix + "-grant-group", method="POST", path="/iam/v1/accessBindings",
+                       body=grant_body, auth="jwtGDGroupDelegate",
+                       test_script=[*assert_status(200), *save_from_response("j.id", "opId"),
+                                    *save_from_response("j.metadata && j.metadata.accessBindingId", binding_var)]),
+                  poll_operation_until_done(), assert_op_success(),
+                  Step(name=prefix + "-verify-delegated-binding", method="GET",
+                       path="/iam/v1/accessBindings/{{" + binding_var + "}}", auth=OWNER,
+                       test_script=[*assert_status(200),
+                                    "pm.test('group grant used the intended delegation', () => { const j=pm.response.json();",
+                                    "  pm.expect(j.delegationId).to.eql(pm.environment.get('" + delegation_var + "'));",
+                                    "  pm.expect(j.status).to.eql('ACTIVE');",
+                                    "  pm.expect(j.subjects).to.eql([{type:'SUBJECT_TYPE_GROUP',id:pm.environment.get('" + group_var + "')}]); });"])]
+    steps += [*_revoke_delegation(prefix + "-cleanup", delegation_var), assert_op_success()]
+    if not contains_delegate:
+        steps += [Step(name=prefix + "-cleanup-binding", method="DELETE",
+                       path="/iam/v1/accessBindings/{{" + binding_var + "}}", auth=OWNER_STEP_UP,
+                       test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+                  poll_operation_until_done(), assert_op_success()]
+    if contains_delegate:
+        steps += [Step(name=prefix + "-remove-delegate", method="POST",
+                       path="/iam/v1/groups/{{" + group_var + "}}:removeMember", body=member, auth=OWNER_STEP_UP,
+                       test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+                  poll_operation_until_done(), assert_op_success()]
+    steps += [Step(name=prefix + "-cleanup-group", method="DELETE", path="/iam/v1/groups/{{" + group_var + "}}",
+                   auth=OWNER_STEP_UP, test_script=[*assert_status(200), *save_from_response("j.id", "opId")]),
+              poll_operation_until_done(), assert_op_success()]
+    return Case(id=("IAM-GD-1011-GROUP-CONTAINS-DELEGATE-DENIED" if contains_delegate
+                    else "IAM-GD-1011-GROUP-WITHOUT-DELEGATE-ALLOWED"),
+                title=("kaname#1011: группа содержит делегата — 403/7 до операции" if contains_delegate
+                       else "kaname#1011: та же групповая ось без делегата — успешная операция с delegationId"),
+                classes=["AUTHZ", "CONF"], priority="P1", steps=steps)
+
+
+CASES.extend([_group_self_grant_twin(True), _group_self_grant_twin(False)])
+
+
 # Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а): служба
 # kaname наружу краем платформы не публикуется (Р-В5 приёмки), делегат ходит к ней
 # напрямую.
