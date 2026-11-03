@@ -350,6 +350,9 @@ func (p *rid05PublicContext) deleteAction(t *testing.T, w *ridLifecycleWorld, sc
 	e.Path = "/iam/v1/serviceAccounts/" + w.f.creator.ID
 	e.BlockingDelegationID = blocking
 	e.Denied = failed
+	var contractOK bool
+	e.DeleteContract, contractOK = rid05DeleteWireContractBefore(e.CaseID, w.f.creator.ID, w.f.creator.AccountID, w.f.operator.UserID(), a.Core.Whole.PrimaryFinishedAt, failed, blocking)
+	require.True(t, contractOK, "closed BEFORE-derived typed Delete wire contract required")
 	var b rid05Snapshot
 	var receipt ridNewmanReceipt
 	var adapted ridLifecycleOperation
@@ -379,6 +382,7 @@ func (p *rid05PublicContext) deleteAction(t *testing.T, w *ridLifecycleWorld, sc
 	e.CaseID = strings.TrimSuffix(e.CaseID, "-ACT") + "-VERIFY"
 	e.Phase = "VERIFY"
 	e.CreatorPresent = failed
+	e.DeleteContract = nil
 	var verify ridNewmanReceipt
 	func() {
 		defer func() {
