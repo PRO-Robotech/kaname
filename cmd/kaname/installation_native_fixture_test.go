@@ -40,6 +40,7 @@ type installationNativeWorld struct {
 	credentialDigest   [32]byte
 	lastPublic         nativePublicReceipt
 	publicReadSequence int
+	stockCatalog       json.RawMessage
 }
 
 func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
@@ -107,6 +108,12 @@ func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL str
 	// in-process token surface, signer, permission model or bootstrap admin.
 	w := &ceremonyWorld{t: t, id: "RID-NATIVE-F0", ctx: ctx, pool: pool, logs: &lockedBuffer{}, clientAudiences: []string{"https://kaname.local"}}
 	w.requireStorePremise()
+	if moduleWriter {
+		stock := readRIDStockPremise(t, w)
+		writeRIDStockPremise(t, evidence, "after-migrations", stock, nil)
+		requireRIDNoDeliveredIdentities(t, stock, 0)
+		f.stockCatalog = stock.Catalog
+	}
 	baseline := readNativeBaseline(t, w)
 	require.Len(t, baseline.ServiceAccounts, 2, "stock bootstrap and gateway identities remain")
 	require.Len(t, baseline.AdminGrants, 1, "stock bootstrap admin is part of F0")
@@ -168,6 +175,13 @@ func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL str
 			}
 		})
 	}
+	if moduleWriter {
+		beforeBase := readRIDStockPremise(t, w)
+		writeRIDStockPremise(t, evidence, "before-base", beforeBase, nil)
+		require.JSONEq(t, string(f.stockCatalog), string(beforeBase.Catalog), "Given must preserve the migration catalog")
+		requireRIDNoDeliveredIdentities(t, beforeBase, 0)
+		require.Equal(t, 1, beforeBase.AdminGrants, "O not bootstrapped before base")
+	}
 	base, err := session.StartBase(ctx)
 	require.NoError(t, err)
 	require.NoError(t, base.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
@@ -181,6 +195,7 @@ func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL str
 	baseline.requirePreserved(t, w, 0, 1)
 	requireNativeNoDelivery(t, w)
 	if moduleWriter {
+		f.requireRIDBasePremise(t, "base-before-C", 0)
 		f.creator, err = wire.ProvisionStandingCreatorWithKeyTTL(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"), keyTTL, func(secret string) { f.secrets = append(f.secrets, secret) })
 	} else {
 		f.creator, err = wire.ProvisionStandingCreatorWithKeyTTL(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"), keyTTL)
@@ -208,6 +223,9 @@ func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL str
 		seen[op.ID] = true
 		require.True(t, op.Done)
 		require.Nil(t, op.Error)
+	}
+	if moduleWriter {
+		f.requireRIDBasePremise(t, "base-after-C", 1)
 	}
 	return f
 }

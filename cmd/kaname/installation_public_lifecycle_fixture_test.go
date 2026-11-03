@@ -220,13 +220,9 @@ func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifec
 	t.Helper()
 	f := newInstallationNativeWorldProfile(t, 7200, "", true)
 
-	// Existing F0 stock assertions still run in the constructor. This profile
-	// additionally proves its prepared W manifest did not seed catalog or I.
-	var foreignModules, preparedIssuer, gdRows int
-	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT (SELECT count(*) FROM kaname.catalog_module WHERE module='registry'),(SELECT count(*) FROM kaname.service_accounts WHERE name='rid-public-issuer'),(SELECT count(*) FROM kaname.grant_delegations)`).Scan(&foreignModules, &preparedIssuer, &gdRows))
-	require.Zero(t, foreignModules)
-	require.Zero(t, preparedIssuer)
-	require.Zero(t, gdRows)
+	// Constructor already compared the full stock catalog before/after base,
+	// recorded real no-delivery receipts, and checked zero delivered I/W/GD.
+
 	accounts := []string{f.tenantID}
 	if mode == "S2" {
 		accounts = f.createRID02Accounts(t)
