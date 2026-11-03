@@ -58,6 +58,14 @@ func newInstallationNativeWorldLifetimes(t *testing.T, keyTTL int64, accessTTL s
 // unchanged, and the actual later full serve performs the first installation.
 func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL string, moduleWriter bool) *installationNativeWorld {
 	t.Helper()
+	return newInstallationNativeWorldLifecycle(t, keyTTL, accessTTL, moduleWriter, moduleWriter)
+}
+
+// Early lifecycle auditing is independent of the optional module-writer PKI.
+// Existing callers keep their previous profile; RID08 opts into early cleanup
+// and actual initial-key observation without enabling W or altering F0/model.
+func newInstallationNativeWorldLifecycle(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool) *installationNativeWorld {
+	t.Helper()
 	// Declare a coherent short-lived production profile before creating the PG
 	// fixture. The revocation reader stays enabled; its ordinary cache window
 	// must be positive and strictly shorter than the issued-token lifetime.
@@ -87,10 +95,12 @@ func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL str
 	require.NoError(t, os.MkdirAll(evidenceRoot, 0700))
 	stand := installruntime.PrepareNativeStand(t, ctx, root, evidence, moduleWriter)
 	f := &installationNativeWorld{stand: stand}
-	if moduleWriter {
+	if earlyLifecycle {
 		// Register before any native Start, bootstrap or key provisioning. The
 		// closure tolerates every partially initialized world and never Fatal's.
 		t.Cleanup(func() { f.ridLifecycleCleanup(t) })
+	}
+	if moduleWriter {
 		writerKey, keyErr := os.ReadFile(filepath.Join(evidence, "pki", "registry.key"))
 		f.secrets = append(f.secrets, string(writerKey))
 		require.NoError(t, keyErr)
@@ -163,7 +173,7 @@ func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL str
 	f.given, f.session, f.wire = w, session, wire
 	f.baseline, f.tenantID = baseline, tenantID
 	f.secrets = append(f.secrets, w.ic1.secret, w.session.bearer.CookieValue())
-	if !moduleWriter {
+	if !earlyLifecycle {
 		t.Cleanup(func() {
 			stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
@@ -196,6 +206,8 @@ func newInstallationNativeWorldProfile(t *testing.T, keyTTL int64, accessTTL str
 	requireNativeNoDelivery(t, w)
 	if moduleWriter {
 		f.requireRIDBasePremise(t, "base-before-C", 0)
+	}
+	if earlyLifecycle {
 		f.creator, err = wire.ProvisionStandingCreatorWithKeyTTL(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"), keyTTL, func(secret string) { f.secrets = append(f.secrets, secret) })
 	} else {
 		f.creator, err = wire.ProvisionStandingCreatorWithKeyTTL(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"), keyTTL)

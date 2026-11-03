@@ -98,6 +98,8 @@ type installationRepositoryDecorator func(kanamerepo.Repository) kanamerepo.Repo
 type installationServeDependencies struct {
 	decorateInstallationRepository installationRepositoryDecorator
 	observeCredential              func(string, string)
+	decorateInstallationReader     func(*kanamepg.InstallationReader) installationReadSource
+	installationPageSize           int
 }
 
 func runServe(cfg config.Config, optional ...installationServeDependencies) error {
@@ -376,7 +378,15 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		return err
 	}
 	installationRelations := authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(pool, preparedModel.plans), personmarks.New(pool))
-	installationReader := kanamepg.NewInstallationReader(pool)
+	realInstallationReader := kanamepg.NewInstallationReader(pool)
+	var installationReader installationReadSource = realInstallationReader
+	if installationDependencies.decorateInstallationReader != nil {
+		installationReader = installationDependencies.decorateInstallationReader(realInstallationReader)
+	}
+	installationPageSize := 256
+	if installationDependencies.installationPageSize > 0 {
+		installationPageSize = installationDependencies.installationPageSize
+	}
 	var installationAuthn *installationAuthentication
 	if hasInstallationDelegations(deliveredManifests) {
 		installationAuthn, err = prepareInstallationAuthentication(pool, cfg, tokenSigner, presentedReader, logger)
@@ -395,7 +405,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			return failInstallation(logger, "preflight-authority", "moduleSeedInstaller.credentialFile", "", "", 0, err)
 		}
 		if installationTarget(cfg.ModuleSeedInstaller) != "" {
-			if _, _, err := installationReader.InstallationAccounts(ctx, installationTarget(cfg.ModuleSeedInstaller), 256); err != nil {
+			if _, _, err := installationReader.InstallationAccounts(ctx, installationTarget(cfg.ModuleSeedInstaller), installationPageSize); err != nil {
 				return failInstallation(logger, "input", "tenantAccountId", "", "", 0, shared.MapRepoErrAt(ctx, err))
 			}
 		}
@@ -584,7 +594,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if installationDependencies.decorateInstallationRepository != nil {
 		installationRepo = installationDependencies.decorateInstallationRepository(installationRepo)
 	}
-	if err := applyInstallationDelegations(ctx, logger, installationAuthn, installationRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), 256, appliedManifests); err != nil {
+	if err := applyInstallationDelegations(ctx, logger, installationAuthn, installationRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), installationPageSize, appliedManifests); err != nil {
 		return err
 	}
 

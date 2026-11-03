@@ -6,6 +6,9 @@ package main
 import (
 	"os"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // The complete accepted RID inventory stays explicit while the executable
@@ -100,13 +103,92 @@ func TestRID_07_ExistingPairConflict(t *testing.T) {
 		ridPredicate{name: "one-axis-only twin for each conflict is idempotent exact match", run: twins})
 }
 func TestRID_08_SnapshotPagesAndFutureAccount(t *testing.T) {
+	// One complete real-hour world supplies immutable evidence to the first four
+	// named predicates. Selecting any one alone still executes the entire world.
+	var future *rid08FutureProof
+	var empty *rid08EmptyProof
+	var fault *rid08FaultProof
+	ensureFuture := func(t *testing.T) *rid08FutureProof {
+		if future == nil {
+			future = rid08FutureWorld(t)
+		}
+		require.NotNil(t, future)
+		return future
+	}
+	ensureFault := func(t *testing.T) *rid08FaultProof {
+		if fault == nil {
+			require.True(t, t.Run("real-second-page-fault-twin-retry", func(t *testing.T) { fault = rid08FaultWorld(t) }))
+		}
+		require.NotNil(t, fault)
+		return fault
+	}
 	runInstallationRID(t,
-		ridPredicate{name: "same verified O initial A plus normal B T; actual admission1+2 of3/hour"},
-		ridPredicate{name: "actual window expiry then same O creates D only after frozen N3 pageSize2 snapshot"},
-		ridPredicate{name: "first run N3 includes system-tenant excludes canonical SYS and D; repeat N4 stable IDs"},
-		ridPredicate{name: "full pages compared to canonical primary census"},
-		ridPredicate{name: "actual empty census success; second-page BeginTx unknown fault INTERNAL before Operations"},
-		ridPredicate{name: "fault-only removed twin and retry converge without duplicates"})
+		ridPredicate{name: "same verified O initial A plus normal B T; actual admission1+2 of3/hour", run: func(t *testing.T) {
+			p := ensureFuture(t)
+			require.EqualValues(t, 1, p.Initial.Admitted)
+			require.EqualValues(t, 3, p.Full.Admitted)
+			require.EqualValues(t, 3, p.Full.Limit)
+			require.EqualValues(t, 3600, p.Full.WindowSeconds)
+			require.Equal(t, p.Initial.User, p.Full.User)
+			require.Equal(t, p.Initial.CarrierDigest, p.Full.CarrierDigest)
+			require.Len(t, p.AccountsN3, 3)
+		}},
+		ridPredicate{name: "actual window expiry then same O creates D only after frozen N3 pageSize2 snapshot", run: func(t *testing.T) {
+			p := ensureFuture(t)
+			require.False(t, p.Expired.DBNow.Before(p.Full.Started.Add(time.Hour)))
+			require.False(t, p.Snapshot.CompletedAt.Before(p.Expired.DBNow))
+			require.False(t, p.DCommitted.Before(p.Snapshot.CompletedAt))
+			require.False(t, p.Released.Before(p.DCommitted))
+			require.Equal(t, p.Operator, p.AfterD.User)
+			require.EqualValues(t, 1, p.AfterD.Admitted)
+			require.Equal(t, 2, p.Snapshot.PageSize)
+			require.NotContains(t, rid08IDs(p.Snapshot.Accounts), p.D)
+		}},
+		ridPredicate{name: "first run N3 includes system-tenant excludes canonical SYS and D; repeat N4 stable IDs", run: func(t *testing.T) {
+			p := ensureFuture(t)
+			ids := rid08IDs(p.Snapshot.Accounts)
+			require.Len(t, ids, 3)
+			require.Contains(t, ids, p.TenantNamedSystem)
+			require.NotContains(t, ids, p.System)
+			require.NotContains(t, ids, p.D)
+			require.Len(t, p.First.Delegations, 6)
+			require.Len(t, p.RepeatSnapshot.Accounts, 4)
+			require.Contains(t, rid08IDs(p.RepeatSnapshot.Accounts), p.D)
+			require.Len(t, p.Repeat.Delegations, 8)
+			for id, value := range p.First.Delegations {
+				require.Equal(t, value, p.Repeat.Delegations[id])
+				require.Equal(t, p.First.Created[id], p.Repeat.Created[id])
+				require.Equal(t, p.FirstRaw[id], p.RepeatRaw[id])
+			}
+		}},
+		ridPredicate{name: "full pages compared to canonical primary census", run: func(t *testing.T) {
+			p := ensureFuture(t)
+			require.Equal(t, 3, p.Snapshot.Pages)
+			require.Equal(t, 3, p.RepeatSnapshot.Pages)
+			require.Equal(t, p.AccountsN3, rid08IDs(p.Snapshot.Accounts))
+			require.GreaterOrEqual(t, p.First.SAPages, 3)
+			require.GreaterOrEqual(t, p.First.GDPages, len(p.First.Accounts))
+			require.Equal(t, p.First.ServiceAccounts, p.Repeat.ServiceAccounts)
+			require.Len(t, p.FirstRaw, 6)
+			require.Len(t, p.RepeatRaw, 8)
+		}},
+		ridPredicate{name: "actual empty census success; second-page BeginTx unknown fault INTERNAL before Operations", run: func(t *testing.T) {
+			require.True(t, t.Run("normal-delete-real-empty", func(t *testing.T) { empty = rid08EmptyWorld(t) }))
+			require.NotNil(t, empty)
+			require.Empty(t, empty.Snapshot.Accounts)
+			require.Empty(t, empty.Public.Delegations)
+			p := ensureFault(t)
+			require.Empty(t, p.FailedOpsBefore)
+			require.Equal(t, p.FailedOpsBefore, p.FailedOpsAfter)
+			require.JSONEq(t, "[]", p.FaultGDHistory)
+		}},
+		ridPredicate{name: "fault-only removed twin and retry converge without duplicates", run: func(t *testing.T) {
+			p := ensureFault(t)
+			require.Len(t, p.TwinSnapshot.Accounts, 3)
+			require.Len(t, p.Twin.Delegations, 6)
+			require.Equal(t, p.Twin, p.Retry)
+			require.Equal(t, p.TwinSnapshot.Accounts, p.RetrySnapshot.Accounts)
+		}})
 }
 func TestRID_09_WholeDeliveryPreflight(t *testing.T) {
 	runInstallationRID(t,
