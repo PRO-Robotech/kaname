@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -23,6 +24,7 @@ type StandingCreator struct {
 	ID, AccountID, ClientID, KeyID, CredentialFile string
 	CreateOperation, GrantOperation, KeyOperation  Operation
 	privateKey                                     string
+	ExpiresAt                                      time.Time
 }
 
 func (c *StandingCreator) SecretMaterial() []string { return []string{c.privateKey} }
@@ -43,6 +45,15 @@ func (w *Wire) createOperation(ctx context.Context, operator *VerifiedOperator, 
 // through the real mTLS gateway-fronted listener with only verified O metadata;
 // that listener must independently enforce current authority and ACR.
 func (w *Wire) ProvisionStandingCreator(ctx context.Context, operator *VerifiedOperator, systemAccountID, credentialFile string) (*StandingCreator, error) {
+	return w.ProvisionStandingCreatorWithKeyTTL(ctx, operator, systemAccountID, credentialFile, 7200)
+}
+
+// ProvisionStandingCreatorWithKeyTTL selects a declared ordinary Issue lifetime.
+// Validation and expiry remain the production key API and real wall clock.
+func (w *Wire) ProvisionStandingCreatorWithKeyTTL(ctx context.Context, operator *VerifiedOperator, systemAccountID, credentialFile string, ttlSeconds int64) (*StandingCreator, error) {
+	if ttlSeconds <= 0 {
+		return nil, errors.New("positive declared standing-key lifetime required")
+	}
 	if operator == nil || operator.userID == "" || systemAccountID == "" || !filepath.IsAbs(credentialFile) {
 		return nil, errors.New("verified O, canonical system account and private absolute credential path are required")
 	}
@@ -81,7 +92,7 @@ func (w *Wire) ProvisionStandingCreator(ctx context.Context, operator *VerifiedO
 		return nil, err
 	}
 	issued, err := w.createOperation(ctx, operator, "/iam/v1/serviceAccounts/"+sa.ID+"/keys", map[string]any{
-		"credentialKind": "CREDENTIAL_KIND_KEYPAIR", "description": "RID durable standing creator", "ttlSeconds": 7200})
+		"credentialKind": "CREDENTIAL_KIND_KEYPAIR", "description": "RID durable standing creator", "ttlSeconds": ttlSeconds})
 	if err != nil {
 		return nil, err
 	}

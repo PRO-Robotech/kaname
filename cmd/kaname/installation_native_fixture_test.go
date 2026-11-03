@@ -25,20 +25,28 @@ import (
 // model/seed/bootstrap helper executes in the test process: all those steps run
 // inside the frozen native production executable using its real listener chain.
 type installationNativeWorld struct {
-	given            *ceremonyWorld
-	stand            *installruntime.NativeStand
-	session          *installruntime.Session
-	wire             *installruntime.Wire
-	operator         *installruntime.VerifiedOperator
-	creator          *installruntime.StandingCreator
-	base             *installruntime.Process
-	secrets          []string
-	baseline         nativeBaseline
-	tenantID         string
-	credentialDigest [32]byte
+	given              *ceremonyWorld
+	stand              *installruntime.NativeStand
+	session            *installruntime.Session
+	wire               *installruntime.Wire
+	operator           *installruntime.VerifiedOperator
+	creator            *installruntime.StandingCreator
+	base               *installruntime.Process
+	secrets            []string
+	baseline           nativeBaseline
+	tenantID           string
+	credentialDigest   [32]byte
+	lastPublic         nativePublicReceipt
+	publicReadSequence int
 }
 
 func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
+	return newInstallationNativeWorldLifetimes(t, 7200, "")
+}
+
+// Only ordinary declared credential lifetimes vary; all admission and authority
+// policy remains unchanged. Empty accessTTL retains the stand profile.
+func newInstallationNativeWorldLifetimes(t *testing.T, keyTTL int64, accessTTL string) *installationNativeWorld {
 	t.Helper()
 	requireNativeManifestPremise(t)
 	deadline, ok := t.Deadline()
@@ -93,14 +101,18 @@ func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 	require.Equal(t, []domain.AccountID{domain.AccountID(tenantID)}, tenants, "actual initial snapshot contains only O's tenant")
 	// The only changed startup fact is O's email. Audience, issuer, authority,
 	// lifetime and gateway policy remain the ordinary stand profile.
-	environment, err = stand.Environment(map[string]string{"KANAME_BOOTSTRAP_ROOT_EMAIL": w.email})
+	overrides := map[string]string{"KANAME_BOOTSTRAP_ROOT_EMAIL": w.email}
+	if accessTTL != "" {
+		overrides["KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL"] = accessTTL
+	}
+	environment, err = stand.Environment(overrides)
 	require.NoError(t, err)
 	stand.StartMailbox(t, ctx, environment)
 	wire, err := installruntime.NewWire(filepath.Join(evidence, "pki"), "https://localhost:9098", "https://localhost:9096", "https://localhost:9097")
 	require.NoError(t, err)
 	t.Cleanup(wire.Close)
 	session := &installruntime.Session{Binary: os.Getenv("KANAME_RID_BINARY"), BinarySHA256: os.Getenv("KANAME_RID_BINARY_SHA256"),
-		Environment: environment, Root: evidence, Probe: wire.ListenersReady}
+		Environment: environment, Root: evidence, Probe: wire.ProductionReady}
 	f := &installationNativeWorld{given: w, stand: stand, session: session, wire: wire, secrets: []string{w.ic1.secret, w.session.bearer.CookieValue()}, baseline: baseline, tenantID: tenantID}
 	t.Cleanup(func() {
 		stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -124,8 +136,9 @@ func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
 	requireNativeAuthority(t, w, "user", string(w.user), 1)
 	baseline.requirePreserved(t, w, 0, 1)
 	requireNativeNoDelivery(t, w)
-	f.creator, err = wire.ProvisionStandingCreator(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"))
+	f.creator, err = wire.ProvisionStandingCreatorWithKeyTTL(ctx, f.operator, string(system), filepath.Join(evidence, "standing-creator.json"), keyTTL)
 	require.NoError(t, err)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT expires_at FROM kaname.service_account_oauth_clients WHERE id=$1 AND sva_id=$2`, f.creator.KeyID, f.creator.ID).Scan(&f.creator.ExpiresAt))
 	f.secrets = append(f.secrets, f.creator.SecretMaterial()...)
 	credential, err := os.ReadFile(f.creator.CredentialFile)
 	require.NoError(t, err)
@@ -171,7 +184,7 @@ func (f *installationNativeWorld) apply(t *testing.T, input installruntime.Deliv
 	require.NoError(t, err)
 	ready, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	require.NoError(t, process.AwaitReady(ready, f.wire.ListenersReady))
+	require.NoError(t, process.AwaitReady(ready, f.wire.ProductionReady))
 	require.NoError(t, process.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
 	require.NoError(t, process.CheckSecretAbsence(append(f.creator.SecretMaterial(), f.operator.Bearer())...))
 	return process

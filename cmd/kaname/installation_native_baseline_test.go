@@ -103,13 +103,16 @@ func writeNativeBaseline(t *testing.T, evidence string, b nativeBaseline) {
 	require.NoError(t, os.WriteFile(filepath.Join(evidence, "migration-baseline.json"), raw, 0600))
 }
 
-func (f *installationNativeWorld) requireDeliveredPairs(t *testing.T) {
+func (f *installationNativeWorld) requireDeliveredPairs(t *testing.T, modules ...string) {
+	if len(modules) == 0 {
+		modules = []string{"ridfirst", "ridsecond"}
+	}
 	t.Helper()
 	var count int
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*) FROM kaname.grant_delegations`).Scan(&count))
-	require.Equal(t, 2, count, "one observed tenant times two delivered issuers")
+	require.Equal(t, len(modules), count, "one observed tenant times the delivered issuers")
 	seen := map[string]bool{}
-	for _, module := range []string{"ridfirst", "ridsecond"} {
+	for _, module := range modules {
 		var id, account, delegate, creatorType, creator, status, saAccount, role string
 		var roles, targets, subjects []string
 		require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT g.id,g.account_id,g.delegate_id,g.delegated_by_type,g.delegated_by_id,g.status,
@@ -130,7 +133,8 @@ func (f *installationNativeWorld) requireDeliveredPairs(t *testing.T) {
 		require.Equal(t, []string{string(domain.SubjectTypeServiceAccount)}, subjects)
 		requireNativeAuthority(t, f.given, "service_account", delegate, 0)
 	}
-	f.baseline.requirePreserved(t, f.given, 3, 2)
+	f.baseline.requirePreserved(t, f.given, len(modules)+1, 2)
 	requireNativeAuthority(t, f.given, "user", string(f.given.user), 1)
 	requireNativeAuthority(t, f.given, "service_account", f.creator.ID, 1)
+	f.lastPublic = f.requirePublicDeliveredPairs(t, modules...)
 }

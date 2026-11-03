@@ -36,9 +36,9 @@ func runInstallationRID(t *testing.T, predicates ...ridPredicate) {
 func TestRID_01_CleanInstallAndRenewal(t *testing.T) {
 	runInstallationRID(t,
 		ridPredicate{name: "real standalone F0 -> verified O -> standing C -> full serve delivery", run: ridNativeFirstInstall},
-		ridPredicate{name: "exact creator and axes; C I A distinct; I not admin"},
-		ridPredicate{name: "actual token expiry renewal with same live key and unchanged IDs createdAt counts"},
-		ridPredicate{name: "expired standing key refusal and valid-time-only twin"},
+		ridPredicate{name: "exact creator and axes; C I A distinct; I not admin", run: ridNativeExactIdentityAxes},
+		ridPredicate{name: "actual token expiry renewal with same live key and unchanged IDs createdAt counts", run: ridNativeTokenRenewal},
+		ridPredicate{name: "expired standing key refusal and valid-time-only twin", run: ridNativeExpiredKeyTimeTwin},
 		ridPredicate{name: "pace1 and pace5 large repeated concurrent authentication and cancellation", run: ridStandingAuthentication})
 }
 func TestRID_02_ConcurrentAndRepeat(t *testing.T) {
