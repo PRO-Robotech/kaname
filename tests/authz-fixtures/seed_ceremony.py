@@ -888,7 +888,7 @@ def revoked_binding(http, public, token, bid):
 
 
 def delete_revoked_binding(http, public, token, bid):
-    # The same actor sees the row first: a pre-existing 403 is not deletion proof.
+    # Сначала та же учётка видит строку: прежний 403 не доказывает удаление.
     code, before = http.json_ask(f"{public}/iam/v1/accessBindings/{bid}", token=token)
     if code != 200 or before.get("id") != bid or before.get("status") != "REVOKED":
         raise Finding("Esc delete target is not the visible REVOKED binding")
@@ -898,8 +898,8 @@ def delete_revoked_binding(http, public, token, bid):
         raise Finding("Esc public hard deletion was refused")
     own_seed.await_operation(http, public, token, operation["id"])
     code, after = http.json_ask(f"{public}/iam/v1/accessBindings/{bid}", token=token)
-    # Public Get deliberately hides absence (get.go): existing hard-delete case
-    # IAM-ACB-RD-DL-HARD-OK has the same 403/404 contract.
+    # Публичный Get намеренно скрывает отсутствие (get.go): существующий кейс жёсткого удаления
+    # IAM-ACB-RD-DL-HARD-OK имеет тот же контракт 403/404.
     if (code, after.get("code")) not in ((403, 7), (404, 5)):
         raise Finding("Esc binding still readable after completed hard deletion")
     say("  ok   Esc public hard delete: visible before; operation done; Get gone")
@@ -989,10 +989,10 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     values["jwtHumanEscStepUp"], _ = ceremony_bearer(
         stand, client, level2_session(lane, esc_session), esc_user, "2")
     values["humanEscUserId"] = esc_user
-    # Registration creates a protected owner binding in the personal account.
-    # S2 requires an absolutely empty ListBySubject, not an account-A filter.
-    # Prove soft revocation, then hard-delete these temporary fixture rows.
-    # Account.ownerUserId is a persisted ownership field, not an effective grant.
+    # Регистрация создаёт защищённую привязку владельца в личном аккаунте.
+    # S2 требует полностью пустой ListBySubject, а не фильтр аккаунта A.
+    # Доказываем мягкий отзыв, затем жёстко удаляем эти временные строки фикстуры.
+    # Account.ownerUserId — сохранённое поле владения, а не действующая выдача прав.
     code, bindings = http.json_ask(
         f"{stand.own}/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={esc_user}&pageSize=1000",
         token=boot)
@@ -1007,8 +1007,8 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     project_bindings = [binding for binding in initial if binding.get("scopeType") == "iam.project"]
     if len(owner_bindings) != 1 or len(project_bindings) + 1 != len(initial):
         raise Finding("Esc initial binding scopes do not identify one owner binding and its projects")
-    # Explicit lifecycle order: project rights first, account owner last. List order
-    # is not authoritative; after owner Revoke H has no removal authority.
+    # Явный порядок жизненного цикла: сначала права проекта, владелец аккаунта последним. Порядок списка
+    # не является источником истины; после Revoke владельца у H нет полномочий удаления.
     ordered = sorted(project_bindings, key=lambda binding: binding.get("id", "")) + owner_bindings
     owner_bid = owner_bindings[0].get("id")
     human = values["jwtHumanEscStepUp"]
@@ -1035,8 +1035,8 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     account_owner()
     owner_rights(True)
     prove_soft_revoke_rights(http, stand.own, boot, account, suffix)
-    # Clear every protection while H still owns the account; no mutation after
-    # its self-revocation may assume that ownerUserId grants owner authority.
+    # Снимаем все защиты, пока H ещё владеет аккаунтом; никакое изменение после
+    # его отзыва прав у себя не вправе считать ownerUserId полномочием владельца.
     for binding in ordered:
         bid = binding.get("id") or ""
         if not bid:
@@ -1050,8 +1050,8 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
             own_seed.await_operation(http, stand.own, human, op["id"])
     for binding in ordered:
         revoked_binding(http, stand.own, human, binding["id"])
-    # All seven checks happen after completed owner Revoke, before any initial
-    # binding hard deletion. The persisted owner field must survive rights loss.
+    # Все семь проверок идут после завершённого Revoke владельца, до первого
+    # жёсткого удаления привязки. Сохранённое поле владельца переживает потерю прав.
     owner_rights(False)
     account_owner()
     for binding in ordered:
@@ -1441,8 +1441,8 @@ class _WaveWorld:
             if not binding:
                 return 403, {"code": 7}
             method = kw.get("method", "GET")
-            # Only the exact token minted by this fake is its bootstrap actor.
-            # Every other token still uses the real parser; malformed JWT is not admin.
+            # Только точный токен, выпущенный этим дублёром, обозначает его bootstrap-учётку.
+            # Все прочие токены по-прежнему проходят настоящий разбор; некорректный JWT не делает администратором.
             token = kw.get("token", "")
             sub = (self.base.BOOT_PRINCIPAL if token == self.base.BOOT_TOKEN
                    else token_claims(token).get("sub"))

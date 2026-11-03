@@ -98,7 +98,7 @@ func registrationMigrationSource(ctx context.Context, opts *rootOptions, source 
 	}
 	defer func() { _ = db.Close() }()
 	// Проверка соединения не заменяет тот же отказ внутри Goose-транзакции.
-	// Старый snapshot RR нельзя освежить ожиданием табличного замка.
+	// Старый снимок RR нельзя освежить ожиданием табличного замка.
 	var isolation string
 	if err := db.QueryRowContext(ctx, `SHOW default_transaction_isolation`).Scan(&isolation); err != nil {
 		return nil, err

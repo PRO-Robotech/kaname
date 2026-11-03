@@ -136,7 +136,7 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	require.NoError(t, err)
 	require.NoError(t, validateStandPath(evidence), "reject unsafe native stand paths before preparation")
 	require.NoError(t, os.Mkdir(evidence, 0700), "each run needs a fresh evidence directory")
-	// Generate exactly the existing stand PKI/configuration, before any container.
+	// Генерируем ровно существующие PKI/конфигурацию стенда до любого контейнера.
 	prepare := exec.CommandContext(ctx, "bash", filepath.Join(root, ".github/scripts/stand-own.sh"), "prepare-native")
 	// Any incidental relative output belongs to this private run, never the source tree.
 	prepare.Dir = evidence
@@ -156,7 +156,7 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	pg, err := postgres.Run(ctx, "postgres:16-alpine", postgres.WithDatabase("kaname"),
 		postgres.WithUsername("kaname"), postgres.WithPassword("stand"), postgres.BasicWaitStrategies())
 	require.NoError(t, err)
-	// Register cleanup immediately; use a fresh deadline even after job failure.
+	// Сразу регистрируем уборку; используем новый срок даже после отказа задания.
 	t.Cleanup(func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stop()
@@ -173,14 +173,14 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	defer cli.Close()
 	inspect, err := cli.ContainerInspect(ctx, pg.GetContainerID(), client.ContainerInspectOptions{})
 	require.NoError(t, err)
-	// Capture anonymous volume names while the exact owned container still exists.
+	// Фиксируем имена анонимных томов, пока точный контейнер задачи ещё существует.
 	ownership, err := json.Marshal(map[string]any{"containerId": pg.GetContainerID(), "mounts": inspect.Container.Mounts})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(evidence, "pg-ownership.json"), ownership, 0600))
 	for _, suffix := range []string{"crt", "key"} {
 		material, err := os.ReadFile(filepath.Join(evidence, "pki", "pg."+suffix))
 		require.NoError(t, err)
-		// No secret in argv, Docker environment, log, host mount or socket.
+		// Секретов нет в argv, окружении Docker, журнале, монтировании хоста или сокете.
 		command := "umask 077; cat > /var/lib/postgresql/server." + suffix + "; chown postgres:postgres /var/lib/postgresql/server." + suffix
 		require.NoError(t, ownedExec(ctx, cli, pg.GetContainerID(), []string{"sh", "-ec", command}, material))
 	}
@@ -196,9 +196,9 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	return &NativeStand{Root: root, Evidence: evidence, PGPort: port.Port()}
 }
 
-// ownedExec uses the existing Docker SDK hijacked transport accepted by the
-// reviewed relay. Draining to EOF BEFORE inspect prevents a false exit-code zero
-// from an exec which has not started yet. Only the newly created owned ID enters.
+// ownedExec использует существующий захваченный транспорт Docker SDK, принятый
+// проверенным ретранслятором. Чтение до EOF ПЕРЕД inspect предотвращает ложный нулевой код
+// ещё не начавшегося exec. На вход идёт только новый собственный ID.
 func ownedExec(ctx context.Context, cli *client.Client, id string, command []string, stdin []byte) error {
 	created, err := cli.ExecCreate(ctx, id, client.ExecCreateOptions{Cmd: command,
 		AttachStdin: len(stdin) > 0, AttachStdout: true, AttachStderr: true, Privileged: false})

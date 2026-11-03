@@ -1,8 +1,8 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- САНКЦИЯ: docs/engineering/acceptance/object-keeps-its-project-after-unregistration.md
--- kaname#983: one complete DB-owned registration validator. No stored permit,
--- additional role, SECURITY DEFINER, client flag or callable partial writer.
+-- kaname#983: один полный валидатор регистрации под управлением БД. Без сохранённого допуска,
+-- дополнительной роли, SECURITY DEFINER, клиентского флага или вызываемого частичного пути записи.
 -- See docs/engineering/architecture/registration-command-validation.md.
 -- +goose Up
 
@@ -33,7 +33,7 @@ BEGIN
             USING ERRCODE = 'integrity_constraint_violation',
                   CONSTRAINT = 'resource_registration_command_direct_entry';
     END IF;
-    -- Outputs are exclusively DB decisions, never input authority.
+    -- Выходы — исключительно решения БД, никогда не входное полномочие.
     NEW.type_live := false;
     NEW.model_type := NULL;
     NEW.applied := false;
@@ -41,17 +41,17 @@ BEGIN
     NEW.labels := coalesce(NEW.labels, '{}'::jsonb);
     NEW.parent_chain := coalesce(NEW.parent_chain, ARRAY[]::text[]);
 
-    -- kaname#874: the comparison below is a DIFFERENT SPI statement/snapshot after
-    -- this lock has waited. VOLATILE is required; do not combine into one CTE.
+    -- kaname#874: сравнение ниже — ДРУГОЙ оператор/снимок SPI после
+    -- ожидания этого замка. VOLATILE обязателен; не объединять в один CTE.
     PERFORM 1 FROM kaname.resource_mirror m
      WHERE m.object_type = NEW.dotted_type AND m.object_id = NEW.object_id
        FOR NO KEY UPDATE;
     v_locked := FOUND;
-    -- A real tuple write is the RR conflict gate: a stale transaction must
-    -- serialize/retry, not validate an invisible binding or edge as absent.
-    -- The non-key assignment preserves every logical catalog column. The held
-    -- flag callback preserves its value; UPDATE OF permanent_project backfill
-    -- does not run. No additional binding lookup or stored witness is needed.
+    -- Настоящая запись кортежа — барьер конфликта RR: устаревшая транзакция должна
+    -- сериализоваться/повториться, а не считать невидимую привязку или ребро отсутствующим.
+    -- Присваивание неключевого поля сохраняет все логические столбцы каталога. Обратный вызов
+    -- признака удержания сохраняет его значение; дозаполнение UPDATE OF permanent_project
+    -- не вызывается. Дополнительное чтение привязки или сохранённое свидетельство не нужны.
     UPDATE kaname.catalog_resource cr
        SET project_bindings_held = cr.project_bindings_held
      WHERE cr.dotted = NEW.dotted_type AND cr.live
@@ -82,9 +82,9 @@ BEGIN
         v_chain := array_append(v_chain, v_type || ':' || v_id);
     END LOOP;
 
-    -- Mirror first, binding second for EVERY writer, including raw UPSERT.
-    -- These writes are provisional: the complete validation below is mandatory
-    -- even for stale/no-op, and any refusal rolls back this entire statement.
+    -- Сначала зеркало, затем привязка для КАЖДОГО писателя, включая прямой UPSERT.
+    -- Эти записи предварительные: полная валидация ниже обязательна
+    -- даже для устаревшего/пустого действия, любой отказ откатывает весь оператор.
     UPDATE kaname.resource_mirror m
        SET source_version = NEW.source_version, updated_at = now()
      WHERE v_locked AND m.object_type = NEW.dotted_type AND m.object_id = NEW.object_id
@@ -113,16 +113,16 @@ BEGIN
     END IF;
 
     IF v_held THEN
-        -- A stale request must never establish the first binding. A concurrent
-        -- insert won the mirror lock first; this effective write now serializes
-        -- on that same row before touching the binding unique index.
+        -- Устаревший запрос никогда не должен устанавливать первую привязку. Конкурентная
+        -- вставка первой взяла замок зеркала; эта фактическая запись теперь сериализуется
+        -- на той же строке до обращения к уникальному индексу привязки.
         IF NEW.applied AND v_declared AND NEW.parent_project_id <> '' THEN
             INSERT INTO kaname.object_project_binding (object_type, object_id, project_id)
             VALUES (NEW.model_type, NEW.object_id, NEW.parent_project_id)
             ON CONFLICT (object_type, object_id) DO NOTHING;
         END IF;
-        -- The ONLY binding lookup on the complete command path, fresh after
-        -- conflict wait. Every project link is compared with this local value.
+        -- ЕДИНСТВЕННОЕ чтение привязки на пути полной команды, свежее после
+        -- ожидания конфликта. Каждая ссылка на проект сравнивается с этим локальным значением.
         SELECT b.project_id INTO v_bound FROM kaname.object_project_binding b
          WHERE b.object_type = NEW.model_type AND b.object_id = NEW.object_id;
         IF v_bound IS NULL AND v_declared AND NEW.parent_project_id <> '' THEN
@@ -168,15 +168,15 @@ DECLARE
     v_new_binding boolean := false;
     v_raw_chain text[] := ARRAY[]::text[];
 BEGIN
-    -- Only the direct complete-command trigger writes these tables at depth 2.
-    -- This relies on the closed installed trigger/callback graph, not depth
-    -- alone. Binding permanence guards NEVER take this branch.
+    -- Только прямой триггер полной команды пишет эти таблицы на глубине 2.
+    -- Это опирается на замкнутый граф установленных триггеров/обратных вызовов, не только на
+    -- глубину. Защиты постоянства привязки НИКОГДА не входят в эту ветвь.
     IF pg_trigger_depth() = 2 THEN
         RETURN NEW;
     END IF;
     IF TG_WHEN = 'BEFORE' THEN
-        -- Same RR conflict gate as the complete command, before raw mutation.
-        -- SQLSTATE 40001 propagates unchanged; it is not an integrity verdict.
+        -- Тот же барьер конфликта RR, что и у полной команды, до прямого изменения.
+        -- SQLSTATE 40001 передаётся без изменения; это не вердикт целостности.
         UPDATE kaname.catalog_resource cr
            SET project_bindings_held = cr.project_bindings_held
          WHERE cr.dotted = NEW.object_type
@@ -184,7 +184,7 @@ BEGIN
                    cr.permanent_project OR cr.project_bindings_held
               INTO v_model_type, v_declared, v_held;
     ELSE
-        -- AFTER uses the catalog tuple already written by this raw statement.
+        -- AFTER использует кортеж каталога, уже записанный этим прямым оператором.
         SELECT cr.object_type, cr.permanent_project AND cr.live, cr.permanent_project OR cr.project_bindings_held
           INTO v_model_type, v_declared, v_held
           FROM kaname.catalog_resource cr
@@ -228,9 +228,9 @@ BEGIN
     IF pg_trigger_depth() = 2 THEN
         RETURN NEW;
     END IF;
-    -- Raw project edges participate in the same real write-conflict gate.
-    -- This also protects the reverse RR schedule: an edge committed after the
-    -- first-binding writer's snapshot makes that writer serialize/retry.
+    -- Прямые рёбра проекта участвуют в том же настоящем барьере конфликта записи.
+    -- Это также защищает обратное расписание RR: ребро, закоммиченное после снимка
+    -- писателя первой привязки, заставляет этого писателя сериализоваться/повториться.
     UPDATE kaname.catalog_resource cr
        SET project_bindings_held = cr.project_bindings_held
      WHERE cr.object_type = NEW.object_type;
@@ -247,9 +247,9 @@ END
 $$;
 -- +goose StatementEnd
 
--- The fence is acquired before physical row locks, including raw UPDATE.
--- Every participating statement takes EXCLUSIVE mode from the outset: a
--- command followed by raw DML in one transaction never upgrades a shared lock.
+-- Барьер берётся до физических замков строк, включая прямой UPDATE.
+-- Каждый участвующий оператор сразу берёт EXCLUSIVE:
+-- команда с последующим прямым DML в одной транзакции никогда не повышает общий замок.
 -- +goose StatementBegin
 CREATE FUNCTION kaname.resource_registration_locks_writers() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SET search_path = pg_catalog, kaname AS $$

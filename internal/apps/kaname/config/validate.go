@@ -398,8 +398,8 @@ func (c Config) validateTrustDomain() error {
 // moduleIdentitiesKnob — имя ручки перечня личностей модулей для текстов отказа.
 const moduleIdentitiesKnob = "authn.module-identities (env KANAME_AUTHN__MODULE_IDENTITIES)"
 
-// validateModuleIdentities refuses to start a binary whose module roster is
-// malformed (any mode) or empty (production) — kaname#984.
+// validateModuleIdentities отказывает в запуске бинарного файла с некорректным списком модулей
+// (в любом режиме) или пустым списком (в производстве) — kaname#984.
 //
 // Неразбираемая запись — отказ в ЛЮБОМ режиме: установка, объявившая
 // личность, которую разбор не принял, иначе поднялась бы с меньшим перечнем,

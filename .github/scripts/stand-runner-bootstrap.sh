@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Shared provider. All version and package literals belong to e2e-newman.yml.
-# Source this file so the measured environment also becomes the payload environment.
+# Общий поставщик. Все литералы версий и пакетов принадлежат e2e-newman.yml.
+# Подключайте этот файл через source, чтобы измеренное окружение стало окружением полезной нагрузки.
 runner_provider_command() {
   local log="$1" stage="$2" seconds="$3" rc log_rc
   shift 3
@@ -30,9 +30,9 @@ runner_bootstrap() {
   mkdir -p "$aptdir/lists/partial" "$aptdir/archives/partial" || return 125
   printf 'deb [check-valid-until=no] %s noble main universe\ndeb [check-valid-until=no] %s noble-updates main universe\ndeb [check-valid-until=no] %s noble-security main universe\n' \
     "$KANAME_RUNNER_SNAPSHOT" "$KANAME_RUNNER_SNAPSHOT" "$KANAME_RUNNER_SNAPSHOT" > "$aptdir/sources.list"
-  # The stock image has the Ubuntu archive keyring, but no TLS CA bundle.
-  # Bootstrap transport trust from signed Ubuntu main only, with isolated lists
-  # and archives so stock image sources cannot expand this preliminary update.
+  # Штатный образ содержит связку ключей архива Ubuntu, но не набор доверенных CA TLS.
+  # Начальное доверие транспорта берём только из подписанного Ubuntu main, с изолированными списками
+  # и архивами, чтобы штатные источники образа не расширили это предварительное обновление.
   if [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
     cadir="$aptdir/ca-bootstrap"
     mkdir -p "$cadir/lists/partial" "$cadir/archives/partial" || return 125
@@ -67,7 +67,7 @@ runner_bootstrap() {
   mkdir -p "$work/provider/bin" || return 125
   export PATH="$work/provider/bin:/usr/bin:/bin"
   arch=amd64; nodearch=x64
-  # Upstream release checksums are read only from the declared exact release URL.
+  # Контрольные суммы релиза upstream читаются только с объявленного URL точного релиза.
   printf 'RUNNER-PROVIDER artifact=go version=%s\n' "$KANAME_RUNNER_GO"
   url="https://go.dev/dl/go${KANAME_RUNNER_GO}.linux-$arch.tar.gz"
   curl -fsSL --retry 1 --connect-timeout 20 --max-time 180 "$url" -o "$work/go.tar.gz" || return 125
@@ -107,8 +107,8 @@ runner_bootstrap() {
   python3 -m venv --clear "$work/provider/python" || return 125
   export PATH="$work/provider/python/bin:$PATH"
   python3 -m pip install --quiet "pip==$KANAME_RUNNER_PIP" "PyYAML==$KANAME_RUNNER_PYYAML" || return 125
-  # Expose only the signing distribution supplied by the signed apt snapshot,
-  # not all system site-packages. Keep pip/PyYAML and the venv isolation intact.
+  # Открываем только signing-distribution из подписанного снимка apt,
+  # не все системные site-packages. Сохраняем изоляцию pip/PyYAML и venv.
   python3 - <<'PY' || return 125
 import importlib.metadata
 from email.parser import Parser

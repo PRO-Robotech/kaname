@@ -63,7 +63,7 @@ const (
 	// silently DROPPED the needed re-grant (the PK collided with the tombstone) → the
 	// account was left with NO active owner-binding. Keying off a fresh id makes the
 	// re-grant a genuine new ACTIVE row; idempotency rests on the active-grant
-	// partial-UNIQUE access_bindings_active_grant_uniq (WHERE revoked_at IS NULL AND
+	// частичный UNIQUE access_bindings_active_grant_uniq (WHERE revoked_at IS NULL AND
 	// narrowed_at IS NULL — условие сужения, kaname#963; предикат ON CONFLICT обязан
 	// совпадать с условием индекса, иначе вывод индекса отказывает 42P10) via
 	// ON CONFLICT on that partial index — a revoked tombstone is NOT in it, so it never

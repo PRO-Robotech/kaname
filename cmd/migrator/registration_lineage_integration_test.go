@@ -251,7 +251,7 @@ func TestRegistrationMigrator_CreatorDataCannotBeDiscarded(t *testing.T) {
 	}
 }
 
-// Deep Down восстанавливает девять законных значений. Их потребляют ранние Up,
+// Глубокий Down восстанавливает девять законных значений. Их потребляют ранние Up,
 // поэтому разрушительный полный Up сначала обязан отказаться без мутации.
 func registrationRestoreEarlyLimits(t *testing.T, dsn string, db *sql.DB) {
 	t.Helper()
@@ -316,7 +316,7 @@ func TestRegistrationMigrator_OriginFlagsAreBoundToOriginalDefinitions(t *testin
                 (SELECT jsonb_agg(to_jsonb(c) ORDER BY dotted) FROM kaname.catalog_resource c))::text`)
 			_, _, err = runCommandFS(t, migrations.FS, []string{"down", "--target", "1", "--dsn", dsn}, nil)
 			require.ErrorContains(t, err, "before any Down")
-			// SQL inverse is independently guarded, even without the CLI preflight.
+			// Обратный SQL независимо защищён даже без предварительной проверки CLI.
 			raw, err := fs.ReadFile(migrations.FS, "20261026090001_reconcile_registration_and_creator_lineages.sql")
 			require.NoError(t, err)
 			_, down, ok := strings.Cut(string(raw), migrations.SectionDownMarker)

@@ -245,7 +245,7 @@ func seedSystemRulesRole(t *testing.T, ctx context.Context, repo *kanamepg.Repos
 	require.NoError(t, err)
 	defer func() { _ = w.Rollback(ctx) }()
 	// Системную строку пишет писатель системных ролей: Insert ведёт только
-	// пользовательский ярус (cluster_id у него пуст by construction).
+	// пользовательский ярус (cluster_id у него пуст по построению).
 	inserted, _, err := w.RolesW().UpsertSystemRole(ctx, domain.Role{
 		ID: domain.RoleID(ids.NewID(domain.PrefixRole)), ClusterID: domain.ClusterSingletonID,
 		Name: domain.RoleName(name), Description: domain.Description("system rules role " + name),

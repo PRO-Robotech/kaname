@@ -318,8 +318,8 @@ func TestCallerPolicy_AuthorizeService_ModuleCert_Allowed(t *testing.T) {
 }
 
 // TestCallerPolicy_AuthorizeService_ListSubjectsOutsideModuleProfile — a
-// module-writer identity on AuthorizeService.ListSubjects (outside its profile,
-// kaname#984): prod → PermissionDenied; the edge, whose profile names it, passes.
+// личность module-writer на AuthorizeService.ListSubjects (вне её профиля,
+// kaname#984): производство → PermissionDenied; край с этим методом в профиле проходит.
 func TestCallerPolicy_AuthorizeService_ListSubjectsOutsideModuleProfile(t *testing.T) {
 	p := testPolicy(true)
 	if err := p.allow(newVPCCtx(), authorizeListSubjectsMethod); status.Code(err) != codes.PermissionDenied {

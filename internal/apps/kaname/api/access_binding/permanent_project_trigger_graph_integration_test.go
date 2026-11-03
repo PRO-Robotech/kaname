@@ -4,8 +4,8 @@
 package access_binding_test
 
 // verifies https://github.com/PRO-Robotech/kaname/issues/983
-// Conservative installed-schema gate for the reviewed trigger call graph. This
-// is a change detector, not a general SQL parser or an administrator DDL sandbox.
+// Консервативный гейт установленной схемы для проверенного графа вызовов триггеров.
+// Это детектор изменений, не общий парсер SQL и не песочница DDL администратора.
 
 import (
 	"regexp"
@@ -46,8 +46,8 @@ func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T) {
 	stripComments := regexp.MustCompile(`(?s)/\*.*?\*/|(?m)--[^\n]*`)
 	calls := regexp.MustCompile(`(?i)\b([a-z_][a-z0-9_]*)\s*\(`)
 	writes := regexp.MustCompile(`(?i)\b(?:insert\s+into|update|delete\s+from|merge\s+into)\s+(?:only\s+)?(?:kaname\.)?resource_(?:mirror|parent_edge)\b`)
-	// The only reviewed dynamic SQL reachable from existing triggers: reads of
-	// fixed trigger-argument relations. Any new EXECUTE requires explicit review.
+	// Единственный проверенный динамический SQL, достижимый из существующих триггеров: чтения
+	// фиксированных отношений из аргументов триггера. Каждый новый EXECUTE требует явного ревью.
 	dynamicReads := regexp.MustCompile(`(?is)EXECUTE\s+format\(\s*'(?:SELECT to_jsonb\(t\) FROM kaname\.%I t WHERE t\.id = \$1|SELECT count\(\*\) FROM %I\.%I WHERE %I = \$1 AND id <> \$2)'[^;]*;`)
 	dynamic := regexp.MustCompile(`(?i)\bEXECUTE\b`)
 	seen := map[uint32]bool{}

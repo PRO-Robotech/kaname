@@ -174,7 +174,7 @@ func TestRegistrationAudit1044_UnverifiedCertificateIsNotCaller(t *testing.T) {
 	assert.Equal(t, before, registrationMirrorSnapshot(t, w), "отказ не изменил регистрацию")
 }
 
-// Настоящая auditTX не фиксируется: исход становится opaque Internal, состояние
+// Настоящая auditTX не фиксируется: исход становится непрозрачным Internal, состояние
 // объекта остаётся прежним и событие не объявляется сохранённым.
 func TestRegistrationAudit1044_RefusalAuditFailureIsOpaque(t *testing.T) {
 	w := newURXWorld(t)
