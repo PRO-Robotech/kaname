@@ -329,6 +329,10 @@ func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifec
 	w.issuer = f.ridKey(t, issuerID, f.baseline.SystemID, "issuer")
 	w.issuerToken = f.ridToken(t, w.issuer)
 	w.project = ridResponseID(t, f.ridOperation(t, "POST", "/iam/v1/projects", f.operator.Bearer(), map[string]any{"accountId": f.tenantID, "name": "rid-public-project"}, 0))
+	var project iamv1.Project
+	f.publicRead(t, "/iam/v1/projects/"+w.project, &project)
+	require.Equal(t, w.project, project.Id)
+	require.Equal(t, f.tenantID, project.AccountId, "actual project belongs to the grant scope")
 	w.object = "rid-native-registry"
 	w.repository = "rid-native-repository"
 	conn, err := f.wire.ModuleWriter(filepath.Join(f.session.Root, "pki"))
@@ -336,14 +340,46 @@ func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifec
 	defer conn.Close()
 	module := iamv1.NewInternalIAMServiceClient(conn)
 	for _, entry := range []struct {
-		object string
-		chain  []string
-	}{{"registry_registry:" + w.object, []string{"project:" + w.project, "account:" + f.tenantID}}, {"registry_repository:" + w.repository, []string{"registry_registry:" + w.object, "project:" + w.project, "account:" + f.tenantID}}} {
-		_, err = module.RegisterResource(f.given.ctx, &iamv1.RegisterResourceRequest{SubjectId: "user:" + f.operator.UserID(), Relation: "owner", Object: entry.object, ParentProjectId: w.project, ParentAccountId: f.tenantID, ParentChain: entry.chain, SourceVersion: timestamppb.Now()})
-		require.NoError(t, err)
-		check, e := module.Check(f.given.ctx, &iamv1.CheckRequest{SubjectId: "user:" + f.operator.UserID(), Relation: "owner", Object: entry.object, Consistency: iamv1.CheckRequest_HIGHER_CONSISTENCY})
-		require.NoError(t, e)
-		require.True(t, check.Allowed)
+		modelType, dottedType, id, pointer, parentType, parentID string
+		chain                                                    []string
+	}{
+		{"registry_registry", "registry.registries", w.object, "project", "project", w.project, []string{"project:" + w.project, "account:" + f.tenantID}},
+		{"registry_repository", "registry.repositories", w.repository, "parent", "registry_registry", w.object, []string{"registry_registry:" + w.object, "project:" + w.project, "account:" + f.tenantID}},
+	} {
+		object := entry.modelType + ":" + entry.id
+		// Observe the actually applied policy before writing: model name, dotted
+		// catalog type, structural pointer and explicitly permitted owner writes.
+		var dotted string
+		var names, types, writes []string
+		require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT dotted,parent_names,parent_types,writes FROM kaname.catalog_resource WHERE object_type=$1 AND live`, entry.modelType).Scan(&dotted, &names, &types, &writes))
+		require.Equal(t, entry.dottedType, dotted)
+		require.Equal(t, []string{entry.pointer}, names)
+		require.Equal(t, []string{entry.parentType}, types)
+		require.Contains(t, writes, "owner:user")
+		// The existing RegisterResource protocol derives parenthood from a
+		// pointer fact. An owner write cannot create that fact implicitly.
+		// Registry follows the existing seed_registry_resource producer; repository
+		// follows the same protocol with its already registered container as parent.
+		for _, tuple := range []struct{ subject, relation string }{
+			{entry.parentType + ":" + entry.parentID, entry.pointer},
+			{"user:" + f.operator.UserID(), "owner"},
+		} {
+			_, err = module.RegisterResource(f.given.ctx, &iamv1.RegisterResourceRequest{SubjectId: tuple.subject, Relation: tuple.relation, Object: object, ParentProjectId: w.project, ParentAccountId: f.tenantID, ParentChain: entry.chain, SourceVersion: timestamppb.Now()})
+			require.NoError(t, err, "ordinary registration %s relation %s", entry.dottedType, tuple.relation)
+			check, e := module.Check(f.given.ctx, &iamv1.CheckRequest{SubjectId: tuple.subject, Relation: tuple.relation, Object: object, Consistency: iamv1.CheckRequest_HIGHER_CONSISTENCY})
+			require.NoError(t, e)
+			require.True(t, check.Allowed, "actual registered pointer/owner")
+		}
+		// Observe the result under catalog vocabulary and the complete ordered
+		// chain under model vocabulary; no observer writes domain state.
+		var parentProject, parentAccount string
+		var chain []string
+		require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT m.parent_project_id,m.parent_account_id,
+ (SELECT COALESCE(array_agg(e.parent_type||':'||e.parent_id ORDER BY e.depth),ARRAY[]::text[]) FROM kaname.resource_parent_edge e WHERE e.object_type=$3 AND e.object_id=$2)
+ FROM kaname.resource_mirror m WHERE m.object_type=$1 AND m.object_id=$2`, entry.dottedType, entry.id, entry.modelType).Scan(&parentProject, &parentAccount, &chain))
+		require.Equal(t, w.project, parentProject)
+		require.Equal(t, f.tenantID, parentAccount)
+		require.Equal(t, entry.chain, chain)
 	}
 
 	for _, account := range accounts {
