@@ -136,6 +136,15 @@ async function main() {
       !input.variables.jwtRIDOperator) {
     fail('live-operator-not-produced'); return;
   }
+  // Same closed actor set as the Go parent/child FD5 admission. Only RID10
+  // needs the lawful creator bearer for creator-owned Operation.Get reads.
+  const bearerNames = stem === 'registry-installation-rid10'
+    ? ['jwtRIDOperator', 'jwtRIDCreator'] : ['jwtRIDOperator'];
+  if (Object.keys(input.variables).some((key) => key.startsWith('jwtRID') && !bearerNames.includes(key)) ||
+      bearerNames.some((key) => typeof input.variables[key] !== 'string' ||
+        !input.variables[key] || Buffer.byteLength(input.variables[key], 'utf8') > 16384)) {
+    fail('invalid-declared-client-bearers'); return;
+  }
   const reserved = new Set(['ownRestBaseUrl', 'baseUrl', '__proto__', 'prototype', 'constructor']);
   if (Array.isArray(input.variables) ||
       Object.keys(input.variables).some((key) => reserved.has(key)) ||

@@ -104,22 +104,23 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 	require.NoError(t, json.NewDecoder(control).Decode(&payload))
 	require.LessOrEqual(t, len(payload), 1<<20)
 	var data struct {
-		Variables         map[string]json.RawMessage `json:"variables"`
-		RunID             string                     `json:"runId"`
-		TestExecutableSHA string                     `json:"testExecutableSHA256"`
+		Variables         map[string]any `json:"variables"`
+		RunID             string         `json:"runId"`
+		TestExecutableSHA string         `json:"testExecutableSHA256"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(payload), &data))
 	require.Equal(t, in.RunID, data.RunID)
 	require.Equal(t, in.TestExecutableSHA, data.TestExecutableSHA)
-	var token string
-	require.NoError(t, json.Unmarshal(data.Variables["jwtRIDOperator"], &token))
-	require.NotEmpty(t, token)
-	// This is the actual token freshly issued to O by the parent and observed
-	// on the anonymous control pipe, not a fabricated token or persisted fixture.
-	require.NoError(t, json.NewEncoder(inventory).Encode([]string{"", token}))
+	stem := strings.SplitN(in.CaseID, "-", 4)
+	require.Len(t, stem, 4)
+	bearers, err := ridNewmanClientBearers(strings.Join(stem[:3], "-"), data.Variables)
+	require.NoError(t, err)
+	// Actual parent-issued O and optional lawful C tokens are captured before
+	// the TLS key read and before any Node process can receive their bytes.
+	require.NoError(t, ridNewmanRecordBearers(inventory, bearers))
 	privateKey, err := os.ReadFile(in.Key)
 	require.NoError(t, err)
-	require.NoError(t, json.NewEncoder(inventory).Encode([]string{string(privateKey), token}))
+	require.NoError(t, json.NewEncoder(inventory).Encode([]string{string(privateKey), bearers[0]}))
 	dir := filepath.Join(in.Evidence, "newman")
 	info, err = os.Stat(dir)
 	require.NoError(t, err)
@@ -160,7 +161,7 @@ func TestRIDNewmanOwnedPublicChild(t *testing.T) {
 			t.Error("owned Newman process not reaped")
 			return
 		}
-		rid02CheckStreams(t, []string{filepath.Join(dir, "stdout"), filepath.Join(dir, "stderr")}, []string{token, string(privateKey)})
+		rid02CheckStreams(t, []string{filepath.Join(dir, "stdout"), filepath.Join(dir, "stderr")}, append(append([]string{}, bearers...), string(privateKey)))
 		terminal, _ := json.Marshal(map[string]any{"pid": cmd.Process.Pid, "exited": true, "exitCode": cmd.ProcessState.ExitCode()})
 		if err := os.WriteFile(filepath.Join(dir, "terminal.json"), terminal, 0600); err != nil {
 			t.Error("Newman terminal receipt unavailable")
@@ -281,6 +282,9 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	require.True(t, filepath.IsAbs(node) && filepath.IsAbs(module), "explicit immutable Newman tool inputs required")
 	f.renewOperator(t, f.given.ctx)
 	variables["jwtRIDOperator"] = f.operator.Bearer()
+	bearers, err := ridNewmanClientBearers(stem, variables)
+	require.NoError(t, err)
+	f.secrets = append(f.secrets, bearers...)
 	runID := os.Getenv("KANAME_RID_RUN_ID")
 	require.Regexp(t, "^[A-Za-z0-9-]{16,80}$", runID, "explicit fresh owned run ID required")
 	executableSHA := ridNewmanHash(t, os.Args[0])
@@ -319,19 +323,13 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 		require.NoError(t, stream.Close())
 	}
 	admitted := false
-	actualToken := f.operator.Bearer()
 	var actualKey string
 	c.afterReapAudit = func(t *testing.T, secrets []string) {
 		if !admitted {
 			return
 		}
-		tokenFound, keyFound := false, false
-		for _, secret := range secrets {
-			tokenFound = tokenFound || secret == actualToken
-			keyFound = keyFound || (actualKey != "" && secret == actualKey)
-		}
-		if !tokenFound || !keyFound {
-			t.Error("parent anonymous inventory lacks actual admitted O token/TLS key")
+		if err := ridNewmanAuditAnonymousInventory(c.secretInventory, append(append([]string{}, bearers...), actualKey)); err != nil {
+			t.Error("parent anonymous inventory lacks actual admitted bearer/TLS key or is invalid")
 		}
 		ridNewmanParentAudit(t, c, in, secrets)
 	}
@@ -342,11 +340,11 @@ func ridRunNewmanPhase(t *testing.T, f *installationNativeWorld, stem, caseID, l
 	require.NoError(t, c.control.SetWriteDeadline(time.Now().Add(15*time.Second)))
 	// Capture each actual secret before any subsequent fallible step or Node
 	// admission. FD5 is already anonymous/unlinked; no inventory pathname exists.
-	require.NoError(t, json.NewEncoder(c.secretInventory).Encode([]string{"", actualToken}))
+	require.NoError(t, ridNewmanRecordBearers(c.secretInventory, bearers))
 	keyBytes, err := os.ReadFile(in.Key)
 	require.NoError(t, err)
 	actualKey = string(keyBytes)
-	require.NoError(t, json.NewEncoder(c.secretInventory).Encode([]string{actualKey, actualToken}))
+	require.NoError(t, json.NewEncoder(c.secretInventory).Encode([]string{actualKey, bearers[0]}))
 	admitted = true
 	rid08Write(t, dir, "parent-admission", map[string]any{"ownedGroup": c.cmd.Process.Pid, "goStarttime": c.start, "nodeSHA256": in.NodeSHA, "runnerSHA256": in.ScriptSHA, "toolTreeSHA256": in.TreeSHA})
 	c.release(t, string(payload))

@@ -73,6 +73,15 @@ func rid09ReadNewmanProjection(t *testing.T, f *installationNativeWorld) rid09Ne
 	t.Helper()
 	ctx, cancel := context.WithTimeout(f.given.ctx, 30*time.Second)
 	defer cancel()
+	return rid09ReadNewmanProjectionContext(t, ctx, f)
+}
+
+// Context-taking entry point for a caller-owned, aggregate observation budget.
+// Existing RID09 callers retain their original 30s wrapper. All SQL/mapping is
+// shared here; no inner context resets or extends the caller's deadline.
+func rid09ReadNewmanProjectionContext(t *testing.T, ctx context.Context, f *installationNativeWorld) rid09NewmanProjection {
+	t.Helper()
+	require.NoError(t, ctx.Err(), "primary projection caller context expired")
 	tx, err := f.given.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	require.NoError(t, err)
 	defer func() {
@@ -126,6 +135,7 @@ func rid09ReadNewmanProjection(t *testing.T, f *installationNativeWorld) rid09Ne
 	// enrichment cannot be hidden by replacing MaterializedAt with a zero value.
 	e.Materialization = ridWholeDigest(t, rid09PrimaryRows(t, ctx, tx, "access_binding_target_members"))
 	require.NoError(t, tx.Commit(ctx))
+	require.NoError(t, ctx.Err(), "primary projection caller context expired before return")
 	return e
 }
 

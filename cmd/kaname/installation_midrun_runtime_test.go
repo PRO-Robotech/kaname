@@ -334,6 +334,7 @@ func rid10Run(t *testing.T, mode string, twin bool) *rid10Proof {
 	p := &rid10Proof{Mode: mode, Twin: twin, Accounts: append([]string{}, w.accounts...), System: f.baseline.SystemID, NamedSystem: x.namedSystem}
 	rid10FirstBoundary(t, x, child, p)
 	oldG := rid10BindingRows(t, w)
+	newmanHistory := rid10NewmanBaseline(t, x, p)
 	if mode == "retirement" && !twin {
 		f.ridAdmin(t, f.creator.ID, false)
 		requireNativeAuthority(t, f.given, "service_account", f.creator.ID, 0)
@@ -354,6 +355,7 @@ func rid10Run(t *testing.T, mode string, twin bool) *rid10Proof {
 		rid10Pairs(t, x, p)
 		rid10CheckOldG(t, x, p, oldG)
 		rid08NewOperations(t, f, nil, 3)
+		rid10NewmanPhase(t, x, p, newmanHistory, "twin")
 		rid06GracefulStop(t, child)
 		rid10Read(t, child, "actual-return", &p.Returned)
 		require.True(t, p.Returned.ControlOK && p.Returned.CaptureOK && p.Returned.MessageMatches)
@@ -409,6 +411,7 @@ func rid10Run(t *testing.T, mode string, twin bool) *rid10Proof {
 		}
 		rid10OnlyFirst(t, x, p)
 		rid10CheckOldG(t, x, p, oldG)
+		rid10NewmanPhase(t, x, p, newmanHistory, "partial")
 		// The actual failed startup has exited. Recovery uses the ordinary released
 		// executable of the NEW integrated source, with identical delivery/key.
 		if mode == "retirement" {
@@ -444,6 +447,7 @@ func rid10Run(t *testing.T, mode string, twin bool) *rid10Proof {
 		if mode == "fault" {
 			rid10CheckFailedOperation(t, x, p)
 		}
+		rid10NewmanPhase(t, x, p, newmanHistory, "recovered")
 	}
 	require.Equal(t, x.accountsBefore, rid08PrimaryAccounts(t, f))
 	f.requireSameCredential(t)
