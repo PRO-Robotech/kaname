@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 1124
+Всего кейсов: 1154
 
 ## Перепись по модулям
 
@@ -87,6 +87,7 @@
 | `cases/registry-installation-rid02.py` | 4 |
 | `cases/registry-installation-rid03.py` | 44 |
 | `cases/registry-installation-rid04.py` | 14 |
+| `cases/registry-installation-rid05.py` | 30 |
 | `cases/registry-installation-rid07.py` | 32 |
 | `cases/registry-installation-rid08.py` | 6 |
 | `cases/registry-installation-rid09.py` | 32 |
@@ -1657,3 +1658,41 @@ ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакци
 - `registry-installation-rid04-S2-RESTORED-GRANT-ACT`
 - `registry-installation-rid04-S2-RESTORED-GRANT-VERIFY`
 - `registry-installation-rid04-S2-RESTORED-REAPPLY`
+
+
+---
+
+## `cases/registry-installation-rid05.py` — 30 кейсов
+
+> OriginalC deletion, distinct nativeC2, oldcredential401, active-referenceDeleteguard/revoke-only twin and explicit recovery. Startup/admin remainnativeintegration boundaries.
+
+- `registry-installation-rid05-S1-KEYS-AND-REFERENCES-CLEAN`
+- `registry-installation-rid05-S1-DELETED-C-SNAPSHOT`
+- `registry-installation-rid05-S1-OLD-C-TOKEN-REFUSED`
+- `registry-installation-rid05-S1-DELETED-C-GRANT-ACT`
+- `registry-installation-rid05-S1-DELETED-C-GRANT-VERIFY`
+- `registry-installation-rid05-S1-SAME-NAME-C2-SNAPSHOT`
+- `registry-installation-rid05-S1-C2-NO-REVIVAL-ACT`
+- `registry-installation-rid05-S1-C2-NO-REVIVAL-VERIFY`
+- `registry-installation-rid05-S1-ACTIVE-DELEGATE-DELETE-ACT`
+- `registry-installation-rid05-S1-ACTIVE-DELEGATE-DELETE-VERIFY`
+- `registry-installation-rid05-S1-REVOKE-ONLY-DELETE-TWIN-ACT`
+- `registry-installation-rid05-S1-REVOKE-ONLY-DELETE-TWIN-VERIFY`
+- `registry-installation-rid05-S1-EXPLICIT-C2-RECOVERY-ACT`
+- `registry-installation-rid05-S1-EXPLICIT-C2-RECOVERY-VERIFY`
+- `registry-installation-rid05-S1-RECOVERY-REAPPLY`
+- `registry-installation-rid05-S2-KEYS-AND-REFERENCES-CLEAN`
+- `registry-installation-rid05-S2-DELETED-C-SNAPSHOT`
+- `registry-installation-rid05-S2-OLD-C-TOKEN-REFUSED`
+- `registry-installation-rid05-S2-DELETED-C-GRANT-ACT`
+- `registry-installation-rid05-S2-DELETED-C-GRANT-VERIFY`
+- `registry-installation-rid05-S2-SAME-NAME-C2-SNAPSHOT`
+- `registry-installation-rid05-S2-C2-NO-REVIVAL-ACT`
+- `registry-installation-rid05-S2-C2-NO-REVIVAL-VERIFY`
+- `registry-installation-rid05-S2-ACTIVE-DELEGATE-DELETE-ACT`
+- `registry-installation-rid05-S2-ACTIVE-DELEGATE-DELETE-VERIFY`
+- `registry-installation-rid05-S2-REVOKE-ONLY-DELETE-TWIN-ACT`
+- `registry-installation-rid05-S2-REVOKE-ONLY-DELETE-TWIN-VERIFY`
+- `registry-installation-rid05-S2-EXPLICIT-C2-RECOVERY-ACT`
+- `registry-installation-rid05-S2-EXPLICIT-C2-RECOVERY-VERIFY`
+- `registry-installation-rid05-S2-RECOVERY-REAPPLY`

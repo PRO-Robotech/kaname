@@ -93,14 +93,31 @@ func ridNewmanDecodeRequestPolicy(raw json.RawMessage) (*ridNewmanRequestPolicy,
 	}
 	return &ridNewmanRequestPolicy{fields["caseId"], fields["requestName"], fields["method"], fields["path"], fields["origin"]}, nil
 }
+
+// Exact closed origin contract; no input variable selects a policy or actor.
+func ridNewmanIssuanceCase(caseID string) (string, string, bool) {
+	if caseID == rid01ExpiredKeyCase {
+		return "rid01IssuanceOrigin", "expired-standing-key-token-refusal", true
+	}
+	if rid05TokenCase(caseID) {
+		return "rid05IssuanceOrigin", "old-standing-key-token-refusal", true
+	}
+	return "", "", false
+}
 func ridNewmanValidateRequestPolicy(caseID, public string, p *ridNewmanRequestPolicy, variables map[string]any) error {
 	_, host, port, err := ridNewmanOrigin(public)
 	if err != nil {
 		return errors.New("invalid public listener policy")
 	}
-	raw, has := variables["rid01IssuanceOrigin"]
-	if caseID != rid01ExpiredKeyCase {
-		if p != nil || has {
+	variable, leaf, tokenCase := ridNewmanIssuanceCase(caseID)
+	raw, has := variables[variable]
+	_, oldOrigin := variables["rid01IssuanceOrigin"]
+	_, deletedOrigin := variables["rid05IssuanceOrigin"]
+	if (oldOrigin && variable != "rid01IssuanceOrigin") || (deletedOrigin && variable != "rid05IssuanceOrigin") {
+		return errors.New("unexpected issuance policy")
+	}
+	if !tokenCase {
+		if p != nil || has || oldOrigin || deletedOrigin {
 			return errors.New("unexpected issuance policy")
 		}
 		return nil
@@ -108,7 +125,7 @@ func ridNewmanValidateRequestPolicy(caseID, public string, p *ridNewmanRequestPo
 	if port != "9098" && port != "9198" {
 		return errors.New("invalid issuance public listener policy")
 	}
-	if p == nil || p.CaseID != caseID || p.RequestName != caseID+" :: expired-standing-key-token-refusal" || p.Method != "POST" || p.Path != "/iam/v1/token" {
+	if p == nil || p.CaseID != caseID || p.RequestName != caseID+" :: "+leaf || p.Method != "POST" || p.Path != "/iam/v1/token" {
 		return errors.New("invalid issuance request policy")
 	}
 	expectedPort := "9096"
@@ -127,8 +144,8 @@ func ridNewmanValidateRequestPolicy(caseID, public string, p *ridNewmanRequestPo
 }
 func ridNewmanParentRequestPolicy(caseID, public, issuance string, variables map[string]any) (*ridNewmanRequestPolicy, error) {
 	var p *ridNewmanRequestPolicy
-	if caseID == rid01ExpiredKeyCase {
-		p = &ridNewmanRequestPolicy{caseID, caseID + " :: expired-standing-key-token-refusal", "POST", "/iam/v1/token", issuance}
+	if _, leaf, tokenCase := ridNewmanIssuanceCase(caseID); tokenCase {
+		p = &ridNewmanRequestPolicy{caseID, caseID + " :: " + leaf, "POST", "/iam/v1/token", issuance}
 	}
 	if err := ridNewmanValidateRequestPolicy(caseID, public, p, variables); err != nil {
 		return nil, err
