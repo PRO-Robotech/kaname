@@ -106,13 +106,15 @@ func TestRID_08_SnapshotPagesAndFutureAccount(t *testing.T) {
 	// One complete real-hour world supplies immutable evidence to the first four
 	// named predicates. Selecting any one alone still executes the entire world.
 	var future *rid08FutureProof
+	futureAttempted := false
 	var empty *rid08EmptyProof
 	var fault *rid08FaultProof
 	ensureFuture := func(t *testing.T) *rid08FutureProof {
-		if future == nil {
+		if !futureAttempted {
+			futureAttempted = true
 			future = rid08FutureWorld(t)
 		}
-		require.NotNil(t, future)
+		require.NotNil(t, future, "future-world prerequisite failed earlier; no duplicate real-hour run")
 		return future
 	}
 	ensureFault := func(t *testing.T) *rid08FaultProof {

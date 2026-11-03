@@ -34,6 +34,7 @@ type rid02OwnedChild struct {
 	waitErr         error
 	dir             string
 	world           *installationNativeWorld
+	afterReapAudit  func(*testing.T, []string) // optional parent-owned nested-client audit; normal nil
 	auditOnce       sync.Once
 	seenEvent       bool
 }
@@ -359,6 +360,9 @@ func (c *rid02OwnedChild) afterReap(t *testing.T) {
 		// An early startup failure can precede issuance. Neither that failure nor
 		// malformed inventory skips both complete streams and structural checks.
 		rid02CheckStreams(t, []string{filepath.Join(c.dir, "stdout"), filepath.Join(c.dir, "stderr")}, secrets)
+		if c.afterReapAudit != nil {
+			c.afterReapAudit(t, secrets)
+		}
 		t.Logf("RID02 anonymous inventory audited: records=%d issuedTokens=%d streams=2", records, issuedTokens)
 	})
 }
