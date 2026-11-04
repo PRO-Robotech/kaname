@@ -151,6 +151,21 @@ const e = JSON.parse(pm.environment.get('rid10Expected'));
 const index = Number(pm.environment.get('rid10OperationIndex'));
 const expected = e.snapshot.operations[index];
 const got = pm.response.json();
+// Счётчик привязан к текущему ID: переход к следующей строке не подменяет опрос этой операции.
+const operationId = pm.environment.get('rid10OperationId');
+if (pm.environment.get('rid10OperationPollId') !== operationId) {
+  pm.environment.set('rid10OperationPollId', operationId);
+  pm.environment.set('rid10OperationPollCount', '0');
+}
+const polls = Number(pm.environment.get('rid10OperationPollCount'));
+if (!got.done && expected && got.id === operationId && expected.id === operationId && polls < __POLL_CAP__) {
+  pm.environment.set('rid10OperationPollCount', String(polls + 1));
+  const _rid10PollStarted = Date.now(); while (Date.now() - _rid10PollStarted < 500) void 0;
+  pm.execution.setNextRequest(pm.info.requestName);
+  return;
+}
+pm.environment.unset('rid10OperationPollId');
+pm.environment.unset('rid10OperationPollCount');
 const seen = JSON.parse(pm.environment.get('rid10OperationsSeen'));
 pm.test('actual creator-owned Operation.Get equals full primary row/Any/status projection', () => {
   pm.expect(expected).to.be.an('object');
@@ -175,7 +190,7 @@ if (index + 1 < e.snapshot.operations.length) {
   pm.test('EVERY independently inventoried normal GD Operation was really Get once', () =>
     pm.expect([...seen].sort()).to.eql(e.snapshot.operations.map(x => x.id).sort()));
 }
-""".strip().splitlines()]
+""".replace("__POLL_CAP__", str(POLL_CAP)).strip().splitlines()]
 
 # Six literal phases, no additional before/Newman case and no convenience subset.
 for case_id, mode, phase, gd, ops, failed in [

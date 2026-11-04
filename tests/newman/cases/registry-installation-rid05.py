@@ -64,7 +64,12 @@ if(!op.done){pm.execution.setNextRequest(pm.info.requestName);}else{
 _DELETE_POLL=r"""const e=JSON.parse(pm.environment.get('rid05Expected')),op=pm.response.json();
 pm.test('same actual O-owned Delete Operation and deadline',()=>{pm.expect(op.id).to.eql(pm.environment.get('rid05ActionOperationId'));pm.expect(Date.now()).to.be.below(Number(pm.environment.get('rid05ActionDeadline')));pm.expect(Number(pm.environment.get('rid05Polls'))).to.be.below(5000);});
 pm.environment.set('rid05Polls',String(Number(pm.environment.get('rid05Polls'))+1));
-if(!op.done)pm.execution.setNextRequest(pm.info.requestName);else{
+// Повторяем ту же операцию только в исходных пределах счётчика и deadline, с реальной паузой.
+if(!op.done && op.id===pm.environment.get('rid05ActionOperationId') && Number(pm.environment.get('rid05Polls'))<5000 && Date.now()<Number(pm.environment.get('rid05ActionDeadline'))){
+ const _rid05Pause=Math.min(100,Math.max(0,Number(pm.environment.get('rid05ActionDeadline'))-Date.now()));
+ const _rid05PollStarted=Date.now();while(Date.now()-_rid05PollStarted<_rid05Pause)void 0;
+ pm.execution.setNextRequest(pm.info.requestName);
+}else{
  pm.test('exact normal asynchronous Delete outcome',()=>{
   const c=e.deleteContract,creator=e.snapshot.projection.serviceAccounts.find(sa=>sa.id===e.oldCreatorId);
   pm.expect(!!c&&c.caseId===e.caseId&&c.resourceId===e.oldCreatorId&&creator&&c.accountId===creator.accountId&&c.operatorId===e.operatorId).to.eql(true);
