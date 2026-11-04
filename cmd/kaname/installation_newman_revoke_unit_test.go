@@ -6,11 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/PRO-Robotech/corelib/operations"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRID06ClosedSecretLiteralCensus(t *testing.T) {
@@ -290,8 +291,8 @@ func TestRID06ClosedRevokeDelta(t *testing.T) {
 func TestRID06FailedStartupDeliveryBoundary(t *testing.T) {
 	for _, name := range []string{"legal-native-operation-only", "unrelated-delivery-update", "unknown-table", "missing-table", "business-event", "public-projection"} {
 		t.Run(name, func(t *testing.T) {
-			a, b := rid06UnitRevoke(t, false)
-			b = a
+			a, _ := rid06UnitRevoke(t, false)
+			b := a
 			b.Raw = map[string][]rid09PrimaryRow{}
 			for table, rows := range a.Raw {
 				if rows == nil {

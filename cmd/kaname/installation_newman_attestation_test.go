@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Тот же канонический алгоритм записи v1, что в run-rid-native.cjs и изолированной

@@ -5,10 +5,11 @@ package clientassertion_test
 import (
 	"context"
 	"errors"
+	"testing"
+
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestRegisteredClientResolutionPreservesFailureClass(t *testing.T) {

@@ -11,8 +11,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"github.com/PRO-Robotech/corelib/tokenpolicy"
-	"github.com/golang-jwt/jwt/v5"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,6 +18,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/stretchr/testify/require"
 )

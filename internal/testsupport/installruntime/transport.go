@@ -85,7 +85,9 @@ func (w *Wire) ListenersReady(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("owned TLS listener %d not ready", port)
 		}
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			return fmt.Errorf("закрытие проверочного TLS соединения не выполнено")
+		}
 	}
 	return w.JWKSReady(ctx)
 }

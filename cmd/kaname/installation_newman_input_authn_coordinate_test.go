@@ -745,9 +745,9 @@ func TestRID11Coordinate_UnknownCellSecretHashOnly(t *testing.T) {
 	rid11CoordinateNoSecret(t, d)
 }
 func TestRID11Coordinate_SensitivePrimaryCoordinateNeverEchoed(t *testing.T) {
-	a, k, r := rid11CoordinateFixture()
+	a, _, r := rid11CoordinateFixture()
 	a.Raw["users"] = append(a.Raw["users"], rid11RestoreRow(map[string]any{"id": rid11CoordinateJWT}))
-	k = rid11CoordinateKnownBefore(a)
+	k := rid11CoordinateKnownBefore(a)
 	r["object_id"], _ = json.Marshal(rid11CoordinateJWT)
 	d := rid11CoordinateDifference(k, "access_binding_target_members", nil, []rid09PrimaryRow{r})
 	require.Nil(t, d.Added[0].Fields["object_id"].Safe)

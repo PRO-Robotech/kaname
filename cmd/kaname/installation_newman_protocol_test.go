@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 const ridNewmanPermitFrame = "RID_NEWMAN_PERMIT_V1\n"

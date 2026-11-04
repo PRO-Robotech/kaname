@@ -5,13 +5,14 @@ package operationresolver
 import (
 	"context"
 	"errors"
+	"testing"
+
 	"github.com/PRO-Robotech/corelib/operations"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"testing"
 )
 
 type primaryRouteProbe struct {

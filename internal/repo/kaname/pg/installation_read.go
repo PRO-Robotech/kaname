@@ -60,7 +60,7 @@ func (r *InstallationReader) InstallationAccounts(ctx context.Context, target st
 	if err != nil {
 		return nil, "", err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	sys, err := (moduleSeedWriter{tx: tx}).accountID(ctx, domain.SystemAccountName)
 	if err != nil {
 		return nil, "", err
@@ -107,7 +107,7 @@ func (r *InstallationReader) InstallationReferences(ctx context.Context, account
 	if err != nil {
 		return "", nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	seed := moduleSeedWriter{tx: tx}
 	delegate, err := seed.serviceAccountID(ctx, account, name)
 	if err != nil {
@@ -132,7 +132,7 @@ func (r *InstallationReader) installationAccountPage(ctx context.Context, coordi
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	rows, err := tx.Query(ctx, `SELECT id FROM kaname.accounts WHERE id > $1 ORDER BY id LIMIT $2`, after, pageSize)
 	if err != nil {
 		return nil, err

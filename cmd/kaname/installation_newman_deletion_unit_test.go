@@ -4,14 +4,15 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/corelib/operations"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"strings"
-	"testing"
-	"time"
 )
 
 func TestRID05ClosedSecretLiteralCensus(t *testing.T) {

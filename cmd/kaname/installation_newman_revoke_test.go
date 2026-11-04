@@ -5,15 +5,16 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"github.com/PRO-Robotech/corelib/operations/operationspb"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-	"github.com/stretchr/testify/require"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/corelib/operations/operationspb"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"github.com/stretchr/testify/require"
 )
 
 var rid06PublicActors = map[string]string{"registry-installation-rid06-S1-BEFORE-REVOKE": "O",

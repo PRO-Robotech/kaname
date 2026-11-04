@@ -1309,6 +1309,26 @@ jobs:
           fi
           echo "инструменты на месте: newman $(newman --version), node $(node --version)"
 
+      - name: протокол native RID — 16 Python проверок
+        id: ridprotocol
+        run: python3 tests/newman/scripts/selftest_rid_native_protocol_unit.py -v
+
+      - name: реальный Node Newman HTTPS bridge
+        if: ${{ !cancelled() && steps.ridprotocol.outcome != 'skipped' }}
+        run: |
+          export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
+          export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
+          test -x "$KANAME_RID_NODE_BINARY"
+          test -d "$KANAME_RID_NEWMAN_MODULE"
+          "$KANAME_RID_NODE_BINARY" -e 'const fs=require("fs"),path=require("path"); if(JSON.parse(fs.readFileSync(path.join(process.env.KANAME_RID_NEWMAN_MODULE,"package.json"))).version!=="6.2.2")process.exit(125);'
+          python3 - <<'PY_RID_TOOLS'
+          import hashlib, os, pathlib, runpy
+          bridge = runpy.run_path("tests/newman/scripts/selftest_rid_native_bridge.py")
+          print("RID_NEWMAN_TREE_SHA256 " + bridge["tool_tree"](pathlib.Path(os.environ["KANAME_RID_NEWMAN_MODULE"])))
+          print("RID_NODE_SHA256 " + hashlib.sha256(pathlib.Path(os.environ["KANAME_RID_NODE_BINARY"]).read_bytes()).hexdigest())
+          PY_RID_TOOLS
+          python3 tests/newman/scripts/selftest_rid_native_bridge.py
+
       # ТРИ ИСХОДА РАЗЛИЧАЮТСЯ КОДОМ: 0 — свойство держится, 1 — находки,
       # 2 — предпосылка не выполнена (нет newman, нет коллекции, не исполнилась ни
       # одна ось). Двойка не зелёная и не «дефект кода»: она означает, что

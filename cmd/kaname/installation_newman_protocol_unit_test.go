@@ -7,10 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRIDNewmanValidatedACKProtocol(t *testing.T) {

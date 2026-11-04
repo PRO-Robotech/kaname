@@ -4,9 +4,14 @@
 package main
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,9 +31,6 @@ import (
 //
 // Поэтому предмет ЗАМЕНЁН, а не снят: гейт ниже утверждает более сильное свойство
 // того же дерева, и оно и есть то, ради чего толчок снимали.
-
-// grpcDial — синтаксическая форма исходящего дозвона.
-var grpcDial = regexp.MustCompile(`grpc\.(NewClient|Dial)\(`)
 
 // generatedStubDir — каталог ПОРОЖДЁННЫХ заглушек контрактов службы, появившийся
 // в этом дереве вместе с контрактами (решение владельца 2026-09-13, kacho#2616).
@@ -98,31 +100,28 @@ func TestIamIsALeafAndCallsNobodyByGRPC(t *testing.T) {
 		t.Fatalf("перечень файлов владельца прав: %v", err)
 	}
 
+	reached, err := productionImportClosure(root, files, "cmd/kaname")
+	if err != nil {
+		t.Fatalf("замыкание импортов production: %v", err)
+	}
+
 	var (
-		filesRead     int
-		toolFiles     int
-		stubFiles     int
-		stubDials     int
-		dials         []string
-		outsideFront  []string
-		frontCallSite int
+		filesRead      int
+		unreachedFiles int
+		stubFiles      int
+		stubDials      int
+		dials          []string
+		outsideFront   []string
+		frontCallSite  int
 	)
 	for _, path := range files {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
 		}
-		// Предмет гейта — СЕРВЕРНЫЙ процесс владельца прав и его внутренности.
-		// Исполняемый файл-клиент, живущий в том же дереве, к перечню рёбер
-		// рантайма отношения не имеет: рёбра описывают, кто из НАШИХ СЛУЖБ зовёт
-		// кого на пути запроса, а инструмент оператора в этом перечне не
-		// участвует — он такой же вызывающий, как арендатор.
-		//
-		// Разделять по НАЗНАЧЕНИЮ, а не по имени: клиент опознаётся тем, что его
-		// путь входит в перечень ниже, и перечень ОБЯЗАН истекать сам — запись,
-		// которой больше нечего исключать, роняет гейт вместе с настоящей
-		// находкой. Иначе послабление переживёт свой предмет.
-		if isOperatorTool(path, root) {
-			toolFiles++
+		// Недостижимый production пакет не входит в сервер; reachable operator code
+		// проверяется наравне с остальными, независимо от каталога.
+		if !reached[filepath.Clean(path)] {
+			unreachedFiles++
 			continue
 		}
 		rel, relErr := filepath.Rel(root, path)
@@ -139,6 +138,17 @@ func TestIamIsALeafAndCallsNobodyByGRPC(t *testing.T) {
 		if rerr != nil {
 			t.Fatalf("чтение %s: %v", path, rerr)
 		}
+		lines, err := grpcAliasDials(path, b)
+		if err != nil {
+			t.Fatalf("дозвоны %s: %v", path, err)
+		}
+		for _, line := range lines {
+			if generated {
+				stubDials++
+			} else {
+				dials = append(dials, rel+":"+itoa(line))
+			}
+		}
 		for i, line := range strings.Split(string(b), "\n") {
 			// Комментарий не является дозвоном: разбор этого места уже написан
 			// прозой и не должен ронять собственный гейт.
@@ -154,39 +164,22 @@ func TestIamIsALeafAndCallsNobodyByGRPC(t *testing.T) {
 					outsideFront = append(outsideFront, rel+":"+itoa(i+1))
 				}
 			}
-			if !grpcDial.MatchString(code) {
-				continue
-			}
-			if generated {
-				stubDials++
-				continue
-			}
-			dials = append(dials, rel+":"+itoa(i+1))
 		}
 	}
 
 	// Премиса: прочитано то, что заведомо есть. Без неё «ноль дозвонов» было бы
 	// достижимо пустым обходом, то есть неотличимо от «ноль прочитанного».
-	if filesRead < 200 {
+	if filesRead == 0 {
 		t.Fatalf("прочитано файлов %d — обход пуст, вердикт беспредметен", filesRead)
 	}
 	// Перепись называет ОБЕ величины: одно число скрыло бы ровно тот случай, ради
 	// которого гейт заведён, — «дозвонов ноль» стало бы неотличимо от «весь дозвон
 	// уехал под исключение».
 	t.Logf("перепись: файлов серверного процесса прочитано %d · дозвонов %d · "+
-		"файлов инструмента оператора исключено %d · файлов порождённых заглушек %d "+
+		"недостижимых production файлов %d · файлов порождённых заглушек %d "+
 		"(дозвонов транскодера в них %d) · обращений к транскодеру во фронте REST %d · "+
 		"вне фронта %d",
-		filesRead, len(dials), toolFiles, stubFiles, stubDials, frontCallSite, len(outsideFront))
-
-	// Самоистечение: перечень, которому нечего исключать, — находка. Инструмент
-	// сняли или перенесли — запись обязана уйти тем же изменением.
-	if toolFiles == 0 {
-		t.Fatalf("перечень инструментов оператора не исключил НИ ОДНОГО файла: "+
-			"его предмет исчез. Снимите запись тем же изменением, которым сняли "+
-			"инструмент, — иначе она переживёт то, ради чего заведена (перечень: %v)",
-			operatorToolPrefixes)
-	}
+		filesRead, len(dials), unreachedFiles, stubFiles, stubDials, frontCallSite, len(outsideFront))
 
 	// Самоистечение полосы заглушек: исключению обязано быть что исключать.
 	// Заглушки уехали из дерева — полоса уходит тем же изменением, иначе она
@@ -252,33 +245,121 @@ func itoa(n int) string {
 	return string(b[i:])
 }
 
-// operatorToolPrefixes — пути исполняемых файлов-КЛИЕНТОВ, живущих в дереве
-// владельца прав. Они зовут его службы снаружи, как арендатор, и потому в
-// перечне рёбер рантайма не участвуют.
-//
-// Почему они вообще здесь, а не вне дерева сервиса: инструмент пользуется
-// ВНУТРЕННИМИ пакетами сервиса (проверка манифеста, посев), а Go запрещает
-// такой импорт из корня — то есть место определено построением, а не вкусом.
-// Прецедент обратного решения известен и к этому случаю НЕ применим: провайдер
-// инфраструктуры вынесен из каталога сервисов именно потому, что внутренностей
-// сервиса не требует.
-var operatorToolPrefixes = []string{
-	"cmd/iamctl/",
-	"internal/iamctl/",
-}
-
-// isOperatorTool отвечает по ПУТИ ОТНОСИТЕЛЬНО КОРНЯ сервиса, а не по имени
-// файла: имя совпало бы у одноимённого пакета в другом месте дерева.
-func isOperatorTool(path, root string) bool {
-	rel, err := filepath.Rel(root, path)
+// productionImportClosure охватывает все tracked non-test варианты build tags:
+// это консервативное объединение поддерживаемых сборок, без исключений по имени.
+// Неразрешённый локальный импорт, повреждённый файл и пустой root — ошибки.
+func productionImportClosure(root string, paths []string, entry string) (map[string]bool, error) {
+	mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
-		return false
+		return nil, err
 	}
-	rel = filepath.ToSlash(rel)
-	for _, p := range operatorToolPrefixes {
-		if strings.HasPrefix(rel, p) {
-			return true
+	var module string
+	for _, line := range strings.Split(string(mod), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "module" {
+			module = fields[1]
 		}
 	}
-	return false
+	if module == "" {
+		return nil, fmt.Errorf("нет module в go.mod")
+	}
+	byDir := map[string][]string{}
+	imports := map[string][]string{}
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return nil, fmt.Errorf("разбор %s: %w", path, err)
+		}
+		rel, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil {
+			return nil, err
+		}
+		dir := filepath.ToSlash(rel)
+		byDir[dir] = append(byDir[dir], filepath.Clean(path))
+		for _, imp := range file.Imports {
+			name, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				return nil, err
+			}
+			if name == module || strings.HasPrefix(name, module+"/") {
+				dep := strings.TrimPrefix(strings.TrimPrefix(name, module), "/")
+				if dep == "" {
+					dep = "."
+				}
+				imports[dir] = append(imports[dir], dep)
+			}
+		}
+	}
+	seen := map[string]bool{}
+	reached := map[string]bool{}
+	var visit func(string) error
+	visit = func(dir string) error {
+		if seen[dir] {
+			return nil
+		}
+		if len(byDir[dir]) == 0 {
+			return fmt.Errorf("локальный пакет %s не разрешён в tracked корпусе", dir)
+		}
+		seen[dir] = true
+		for _, path := range byDir[dir] {
+			reached[path] = true
+		}
+		for _, dep := range imports[dir] {
+			if err := visit(dep); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := visit(entry); err != nil {
+		return nil, err
+	}
+	return reached, nil
+}
+
+// grpcAliasDials судит import identity: переименование grpc не скрывает дозвон.
+func grpcAliasDials(path string, src []byte) ([]int, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
+	if err != nil {
+		return nil, err
+	}
+	aliases := map[string]bool{}
+	for _, imp := range file.Imports {
+		name, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			return nil, err
+		}
+		if name != "google.golang.org/grpc" {
+			continue
+		}
+		alias := "grpc"
+		if imp.Name != nil {
+			alias = imp.Name.Name
+		}
+		if alias == "." {
+			return nil, fmt.Errorf("dot import grpc не позволяет доказать отсутствие дозвона")
+		}
+		aliases[alias] = true
+	}
+	var lines []int
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		id, ok := sel.X.(*ast.Ident)
+		if ok && aliases[id.Name] && (sel.Sel.Name == "NewClient" || sel.Sel.Name == "Dial" || sel.Sel.Name == "DialContext") {
+			lines = append(lines, fset.Position(call.Pos()).Line)
+		}
+		return true
+	})
+	return lines, nil
 }

@@ -168,9 +168,13 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 			t.Errorf("owned PostgreSQL termination: %v", err)
 		}
 	})
-	cli, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.New(client.FromEnv)
 	require.NoError(t, err)
-	defer cli.Close()
+	defer func() {
+		if closeErr := cli.Close(); closeErr != nil {
+			t.Error("закрытие клиента Docker не выполнено")
+		}
+	}()
 	inspect, err := cli.ContainerInspect(ctx, pg.GetContainerID(), client.ContainerInspectOptions{})
 	require.NoError(t, err)
 	// Фиксируем имена анонимных томов, пока точный контейнер задачи ещё существует.

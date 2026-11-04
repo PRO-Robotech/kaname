@@ -187,7 +187,7 @@ func rid03BusinessAuditDelta(e *rid03NewmanExpectation, newID string, before, af
 		return nil, false
 	}
 	event, tenant := "iam.access_binding.granted", e.Tenant
-	payload := map[string]any{}
+	var payload map[string]any
 	if e.Path == "/iam/v1/accessBindings" {
 		payload = map[string]any{"actor": e.Actor, "subject_type": e.Request["subjectType"], "subject_id": e.Request["subjectId"], "resource_type": "account", "resource_id": e.Tenant, "role_id": e.Request["roleId"], "binding_id": newID, "delegation_id": e.InstallationGD}
 	} else if e.Path == "/iam/v1/grantDelegations" {

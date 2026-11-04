@@ -5,6 +5,9 @@ package main
 
 import (
 	"context"
+	"log/slog"
+	"time"
+
 	"github.com/PRO-Robotech/corelib/operations"
 	gdapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/grant_delegation"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
@@ -17,8 +20,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"log/slog"
-	"time"
 )
 
 func hasInstallationDelegations(manifests []*manifest.Manifest) bool {

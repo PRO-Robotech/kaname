@@ -360,14 +360,14 @@ func TestRID11Restore_MissingFactsRejected(t *testing.T) {
 }
 
 func TestRID11Restore_ModulePolicyDoesNotInventDelete(t *testing.T) {
-	a, _, p := rid11RestoreFixture(t)
+	a, _, _ := rid11RestoreFixture(t)
 	rules, e := domain.EncodeRules(domain.Rules{{Module: "test", Resources: []string{"objects"}, Verbs: []string{"get", "update"}}})
 	require.True(t, e == nil)
 	a.Raw["roles"][0]["rules"] = rules
 	h := catalog.Halves{Live: catalog.Rows{Modules: []string{"test"}, Resources: []catalog.ResourceRow{{Module: "test", Resource: "objects", ObjectType: "test_object"}}, Verbs: []catalog.VerbRow{{Module: "test", Resource: "objects", Verb: "get", PerObject: true}, {Module: "test", Resource: "objects", Verb: "update", PerObject: true}, {Module: "test", Resource: "objects", Verb: "delete", PerObject: true}}}}
 	f, e := catalog.NewFacts(h)
 	require.True(t, e == nil)
-	p, e = rid11BuildRestorePlan(a.Raw, f)
+	p, e := rid11BuildRestorePlan(a.Raw, f)
 	require.True(t, e == nil)
 	hasDelete := func(p rid11RestorePlan) bool {
 		for _, r := range p.Raw["role_verb"] {

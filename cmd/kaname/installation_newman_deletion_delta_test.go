@@ -5,6 +5,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/operations/operationspb"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -16,10 +21,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
 )
 
 type rid05DeleteProof struct {

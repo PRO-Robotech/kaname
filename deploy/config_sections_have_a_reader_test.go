@@ -47,6 +47,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
@@ -78,16 +79,25 @@ var (
 	// templateComment — комментарий шаблона `{{/* … */}}`, в том числе
 	// многострочный и с обрезкой пробелов.
 	templateComment = regexp.MustCompile(`(?s)\{\{-?\s*/\*.*?\*/\s*-?\}\}`)
-	// sectionHead — ключ на уровне секции блока (отступ ровно четыре пробела).
-	sectionHead = regexp.MustCompile(`^ {4}([a-z][a-z0-9-]*):(\s|$)`)
 	// sectionDirective — подстановка на уровне секции.
 	sectionDirective = regexp.MustCompile(`^ {4}\{\{-?\s*(.*)$`)
+	// Отдельный полный action: broad directive выше также замечает незакрытые формы.
+	sectionControlAction = regexp.MustCompile(`^ {4}\{\{-?\s*(.*?)\s*-?\}\}\s*$`)
 )
 
 // controlDirective — управляющие формы, которые на уровне секции ничего не
 // отдают сами: ветвь, её конец, связывание переменной, отказ рендера.
 func controlDirective(body string) bool {
-	for _, p := range []string{"if ", "else", "end", "with ", "range ", "$", "fail "} {
+	if strings.Contains(body, "{{") || strings.Contains(body, "}}") {
+		return false // Несколько actions нельзя принять за одно невыводящее связывание.
+	}
+	if body == "else" || body == "end" {
+		return true
+	}
+	if templateVariableAssignment.MatchString(body) {
+		return true
+	}
+	for _, p := range []string{"if ", "else if ", "with ", "range ", "fail "} {
 		if strings.HasPrefix(body, p) {
 			return true
 		}
@@ -119,19 +129,84 @@ func templateConfigSections(body string) (sections, opaque []string, err error) 
 		if indent < 4 && !strings.HasPrefix(strings.TrimSpace(l), "{{") {
 			break // блок кончился: следующий ключ карты
 		}
-		if m := sectionHead.FindStringSubmatch(l); m != nil {
-			if !seen[m[1]] {
-				seen[m[1]] = true
-				sections = append(sections, m[1])
+		if indent != 4 || strings.HasPrefix(strings.TrimSpace(l), "#") {
+			continue
+		}
+		if sectionDirective.MatchString(l) {
+			m := sectionControlAction.FindStringSubmatch(l)
+			if m == nil || !controlDirective(m[1]) {
+				opaque = append(opaque, strings.TrimSpace(l))
 			}
 			continue
 		}
-		if m := sectionDirective.FindStringSubmatch(l); m != nil && !controlDirective(m[1]) {
+		name, ok := literalConfigSection(l[4:])
+		if !ok {
 			opaque = append(opaque, strings.TrimSpace(l))
+			continue
+		}
+		if !seen[name] {
+			seen[name] = true
+			sections = append(sections, name)
 		}
 	}
 	sort.Strings(sections)
 	return sections, opaque, nil
+}
+
+// Само чтение $variable выводит значение; только assignment остаётся control.
+var templateVariableAssignment = regexp.MustCompile(`^\$[A-Za-z_][A-Za-z0-9_]*\s*(?::=|=)\s*\S.*$`)
+
+// literalConfigSection читает YAML string key, а не соглашение о регистре
+// конкретного поля. Значение шаблона не разбирается: только literal key перед
+// separator, найденным вне кавычек. Complex/dynamic/malformed keys — opaque.
+func literalConfigSection(line string) (string, bool) {
+	var quote byte
+	separator := -1
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if quote != 0 {
+			if quote == '"' && c == '\\' {
+				i++
+				continue
+			}
+			if c == quote {
+				if quote == '\'' && i+1 < len(line) && line[i+1] == '\'' {
+					i++
+					continue
+				}
+				quote = 0
+			}
+			continue
+		}
+		if i == 0 && (c == '\'' || c == '"') {
+			quote = c
+			continue
+		}
+		if c == ':' && (i+1 == len(line) || line[i+1] == ' ' || line[i+1] == '\t') {
+			separator = i
+			break
+		}
+	}
+	if separator <= 0 {
+		return "", false
+	}
+	key := line[:separator]
+	if strings.Contains(key, "{{") || strings.Contains(key, "}}") {
+		return "", false
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(key+": null\n"), &document); err != nil || len(document.Content) != 1 {
+		return "", false
+	}
+	mapping := document.Content[0]
+	if mapping.Kind != yaml.MappingNode || len(mapping.Content) != 2 {
+		return "", false
+	}
+	node := mapping.Content[0]
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" || node.Value == "" {
+		return "", false
+	}
+	return node.Value, true
 }
 
 // configTypeSections — теги `mapstructure` верхнего уровня у типа настроек.

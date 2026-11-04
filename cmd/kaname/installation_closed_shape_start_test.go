@@ -5,12 +5,13 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // Путь RID09 владения/FD5/предварительной аутентификации с отдельными каталогами входов/доказательств для фаз.

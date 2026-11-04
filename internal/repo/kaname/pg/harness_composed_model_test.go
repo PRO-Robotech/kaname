@@ -88,6 +88,10 @@ func installHarnessComposedModel() (modelcompose.Report, authzmodel.AdmissionRep
 			admission.Census(), admission.Findings)
 	}
 
+	if _, err := authzmodel.New(composed); err != nil {
+		return rep, admission, fmt.Errorf("построение планов модели: %w", err)
+	}
+
 	if err := authzmodel.Install(composed); err != nil {
 		return rep, admission, fmt.Errorf("установка модели процесса: %w", err)
 	}

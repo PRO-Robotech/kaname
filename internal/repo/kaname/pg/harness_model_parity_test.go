@@ -39,12 +39,18 @@ package pg_test
 // и тот, кто шаг заводил, узнает о харнессе в тот же заход.
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+
 	"testing"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // modelStepPackages — чьи вызовы суть ШАГИ модели процесса.
@@ -62,47 +68,23 @@ var modelStepPackages = map[string]bool{"modelcompose": true, "authzmodel": true
 // разное.
 func orderedModelStepsIn(t *testing.T, path, funcName string) (steps []string, callsSeen int) {
 	t.Helper()
-	src, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- путь собран из констант гейта
+	entry, err := filepath.Abs(path)
 	if err != nil {
-		t.Fatalf("%s не прочитан: %v — непрочитанное есть НАХОДКА, а не «ноль шагов»", path, err)
+		t.Fatal(err)
 	}
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, src, 0)
+	paths, err := treecorpus.UnderWithSuffix(filepath.Dir(entry), ".go")
 	if err != nil {
-		t.Fatalf("%s не разобран: %v", path, err)
+		t.Fatalf("индекс helper пакета: %v", err)
+	}
+	sources, err := collectModelSources(entry, paths, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, callsSeen, err = expandModelSources(sources, funcName)
+	if err != nil {
+		t.Fatalf("%s.%s: %v", entry, funcName, err)
 	}
 
-	var body *ast.BlockStmt
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Name.Name == funcName && fn.Body != nil {
-			body = fn.Body
-			break
-		}
-	}
-	if body == nil {
-		t.Fatalf("%s не объявляет %s — предпосылка гейта исчезла, и сравнивать нечего "+
-			"(функция переименована либо снята: тогда снимите гейт ТЕМ ЖЕ изменением)",
-			path, funcName)
-	}
-
-	ast.Inspect(body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		callsSeen++
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		pkg, ok := sel.X.(*ast.Ident)
-		if !ok || !modelStepPackages[pkg.Name] {
-			return true
-		}
-		steps = append(steps, pkg.Name+"."+sel.Sel.Name)
-		return true
-	})
 	return steps, callsSeen
 }
 
@@ -147,4 +129,220 @@ func TestHarnessComposesTheModelTheCompositionRootWouldInstall(t *testing.T) {
 				harnessSteps[i], harnessPath, harnessFunc)
 		}
 	}
+}
+
+// modelSource сохраняет файл-владелец import bindings каждой функции.
+type modelSource struct {
+	path string
+	file *ast.File
+}
+
+// collectModelSources принимает только непосредственный каталог entry; одинаковое
+// имя package в дочернем каталоге не даёт права подменять локальные helpers.
+func collectModelSources(entry string, paths []string, read func(string) ([]byte, error)) ([]modelSource, error) {
+	entry, err := filepath.Abs(entry)
+	if err != nil {
+		return nil, err
+	}
+	entry = filepath.Clean(entry)
+	body, err := read(entry)
+	if err != nil {
+		return nil, err
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), entry, body, parser.SkipObjectResolution)
+	if err != nil {
+		return nil, err
+	}
+	out := []modelSource{{entry, file}}
+	seen := map[string]bool{entry: true}
+	for _, p := range paths {
+		p, err = filepath.Abs(p)
+		if err != nil {
+			return nil, err
+		}
+		p = filepath.Clean(p)
+		if seen[p] || filepath.Dir(p) != filepath.Dir(entry) {
+			continue
+		}
+		seen[p] = true
+		if !strings.HasSuffix(entry, "_test.go") && strings.HasSuffix(p, "_test.go") {
+			continue
+		}
+		body, err := read(p)
+		if err != nil {
+			return nil, err
+		}
+		other, err := parser.ParseFile(token.NewFileSet(), p, body, parser.SkipObjectResolution)
+		if err != nil {
+			return nil, err
+		}
+		if other.Name.Name == file.Name.Name {
+			out = append(out, modelSource{p, other})
+		}
+	}
+	return out, nil
+}
+
+func expandedModelSteps(file *ast.File, entry string) ([]string, int, error) {
+	return expandModelSources([]modelSource{{"fixture.go", file}}, entry)
+}
+
+// expandModelSources — ограниченный source predicate, без утверждения о CFG.
+// Невызванные literals, defer/go и неоднозначный local binding не дают шагов.
+func expandModelSources(sources []modelSource, entry string) ([]string, int, error) {
+	type ownedFunction struct {
+		fn    *ast.FuncDecl
+		owner *ast.File
+	}
+	functions := map[string]ownedFunction{}
+	for _, source := range sources {
+		for _, decl := range source.file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
+				if _, duplicate := functions[fn.Name.Name]; duplicate {
+					return nil, 0, fmt.Errorf("неоднозначная функция %s @%s", fn.Name.Name, source.path)
+				}
+				functions[fn.Name.Name] = ownedFunction{fn, source.file}
+			}
+		}
+	}
+	var steps []string
+	calls := 0
+	active := map[string]bool{}
+	var expand func(string) error
+	expand = func(name string) error {
+		owned, ok := functions[name]
+		if !ok || owned.fn.Body == nil {
+			return fmt.Errorf("функция %s не разобрана", name)
+		}
+		if active[name] {
+			return fmt.Errorf("цикл helper %s", name)
+		}
+		active[name] = true
+		defer delete(active, name)
+		locals := modelLocalBindings(owned.fn)
+		imports := map[string]string{}
+		for _, im := range owned.owner.Imports {
+			p, err := strconv.Unquote(im.Path.Value)
+			if err != nil {
+				return err
+			}
+			alias := filepath.Base(p)
+			if im.Name != nil {
+				alias = im.Name.Name
+			}
+			if p == "github.com/PRO-Robotech/kaname/internal/modelcompose" {
+				imports[alias] = "modelcompose"
+			}
+			if p == "github.com/PRO-Robotech/kaname/internal/authzmodel" {
+				imports[alias] = "authzmodel"
+			}
+		}
+		var walk func(ast.Node) error
+		walk = func(node ast.Node) error {
+			if node == nil {
+				return nil
+			}
+			var failure error
+			ast.Inspect(node, func(n ast.Node) bool {
+				if failure != nil {
+					return false
+				}
+				switch n.(type) {
+				case *ast.FuncLit, *ast.DeferStmt, *ast.GoStmt:
+					failure = fmt.Errorf("неподдержанная отложенная/косвенная форма в %s", name)
+					return false
+				}
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if err := walk(call.Fun); err != nil {
+					failure = err
+					return false
+				}
+				for _, arg := range call.Args {
+					if err := walk(arg); err != nil {
+						failure = err
+						return false
+					}
+				}
+				calls++
+				switch fun := call.Fun.(type) {
+				case *ast.Ident:
+					if locals[fun.Name] {
+						failure = fmt.Errorf("затенённый helper %s", fun.Name)
+					} else if _, ok := functions[fun.Name]; ok {
+						failure = expand(fun.Name)
+					} else if !modelLanguageBuiltin(fun.Name) {
+						failure = fmt.Errorf("неразрешённый helper %s", fun.Name)
+					}
+				case *ast.SelectorExpr:
+					pkg, ok := fun.X.(*ast.Ident)
+					if !ok {
+						failure = fmt.Errorf("неподдержанный вычисляемый callee в %s", name)
+						break
+					}
+					if canonical, ok := imports[pkg.Name]; ok {
+						if locals[pkg.Name] {
+							failure = fmt.Errorf("затенённый model import %s", pkg.Name)
+						} else {
+							steps = append(steps, canonical+"."+fun.Sel.Name)
+						}
+					} else if modelStepPackages[pkg.Name] {
+						failure = fmt.Errorf("model name %s не связан с импортом", pkg.Name)
+					}
+				default:
+					failure = fmt.Errorf("неподдержанный callee в %s", name)
+				}
+				return false
+			})
+			return failure
+		}
+		return walk(owned.fn.Body)
+	}
+	if err := expand(entry); err != nil {
+		return nil, calls, err
+	}
+	if len(steps) == 0 {
+		return nil, calls, fmt.Errorf("нет шагов модели")
+	}
+	return steps, calls, nil
+}
+
+func modelLocalBindings(fn *ast.FuncDecl) map[string]bool {
+	out := map[string]bool{}
+	ast.Inspect(fn, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.Field:
+			for _, id := range node.Names {
+				out[id.Name] = true
+			}
+		case *ast.ValueSpec:
+			for _, id := range node.Names {
+				out[id.Name] = true
+			}
+		case *ast.AssignStmt:
+			for _, lhs := range node.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok {
+					out[id.Name] = true
+				}
+			}
+		case *ast.RangeStmt:
+			for _, e := range []ast.Expr{node.Key, node.Value} {
+				if id, ok := e.(*ast.Ident); ok {
+					out[id.Name] = true
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+
+func modelLanguageBuiltin(name string) bool {
+	switch name {
+	case "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max", "min", "new", "panic", "print", "println", "real", "recover", "bool", "byte", "complex64", "complex128", "error", "float32", "float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr":
+		return true
+	}
+	return false
 }

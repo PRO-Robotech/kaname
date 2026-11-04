@@ -4,9 +4,10 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func rid06HistoryClockFixture(t *testing.T) (ridWholeDeliverySnapshot, ridWholeDeliverySnapshot) {

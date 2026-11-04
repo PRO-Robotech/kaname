@@ -4,11 +4,12 @@ package main
 
 import (
 	"encoding/json"
+	"net/url"
+	"testing"
+
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"net/url"
-	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
 	"github.com/stretchr/testify/require"

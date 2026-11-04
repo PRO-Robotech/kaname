@@ -4,9 +4,10 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRIDNewmanRID01SecretAdmission(t *testing.T) {

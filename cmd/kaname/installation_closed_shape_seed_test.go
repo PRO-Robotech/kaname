@@ -3,11 +3,12 @@
 package main
 
 import (
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 // Неизменённое доказательство штатного посева ограничено заявленными штатными модулями.

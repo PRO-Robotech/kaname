@@ -3,11 +3,12 @@
 package main
 
 import (
-	"github.com/stretchr/testify/require"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func ridNewmanProtocolEnabled(t *testing.T) {

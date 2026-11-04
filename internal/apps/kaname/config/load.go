@@ -6,12 +6,13 @@ package config
 import (
 	"bytes"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"net/url"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"

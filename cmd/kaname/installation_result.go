@@ -5,10 +5,11 @@ package main
 
 import (
 	"encoding/json"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"log/slog"
 	"strings"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // installationResult намеренно не содержит значений: удостоверения, токен, SQL,

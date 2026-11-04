@@ -774,3 +774,12 @@ authMode: production
 moduleManifests:
   dir: /etc/kaname/manifests
   configMaps: []
+
+# Необязательный защищённый вход установки. Секция намеренно отсутствует:
+# credentialFile — только путь уже смонтированного Secret, не его содержимое.
+# tenantAccountId отсутствует для S2; присутствующая строка выбирает S1.
+# Пустое значение сохраняется и отвергается loader/startup; null/type/unknown
+# отвергает шаблон. Никаких автоматически создаваемых удостоверений нет.
+# moduleSeedInstaller:
+#   credentialFile: /run/secrets/module-seed-installer.json
+#   tenantAccountId: acc00000000000000001

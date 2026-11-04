@@ -4,6 +4,10 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/operations/operationspb"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -12,9 +16,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"strings"
-	"testing"
-	"time"
 )
 
 // Этот несекретный контракт строится до ACT, без возвращённого ID/тела или снимка

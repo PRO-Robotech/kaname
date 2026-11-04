@@ -4,9 +4,10 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Независимо построенные ожидания публичного состояния/журнала: исправленный построитель

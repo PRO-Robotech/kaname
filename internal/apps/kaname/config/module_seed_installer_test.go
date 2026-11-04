@@ -3,11 +3,12 @@
 package config_test
 
 import (
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
-	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/stretchr/testify/require"
 )
 
 func TestModuleSeedInstallerLiteralInputPresence(t *testing.T) {

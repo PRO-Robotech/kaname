@@ -3,15 +3,16 @@
 package main
 
 import (
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
-	"net/url"
-	"strings"
-	"testing"
-	"time"
 )
 
 // Обобщённая публичная/первичная перепись RID08: принятые оси берутся из точно разобранной

@@ -5,16 +5,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/corelib/operations"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
 )
 
 type rid06RevokeProof struct {

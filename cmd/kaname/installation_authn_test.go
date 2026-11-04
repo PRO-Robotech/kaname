@@ -12,17 +12,18 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
 )
 
 func TestInstallationCredentialPrivateClosedInput(t *testing.T) {
