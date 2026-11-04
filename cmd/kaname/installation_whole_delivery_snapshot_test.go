@@ -3,10 +3,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"reflect"
+	"regexp"
 	"sort"
 	"testing"
 	"time"
@@ -32,6 +36,7 @@ type ridWholeOwnCeilings struct {
 	StatedAt map[string]time.Time `json:"statedAtByKind"`
 }
 type ridWholeDeliverySnapshot struct {
+	auditSQLRows      [][]byte                 `json:"-"`
 	PrimaryStartedAt  time.Time                `json:"primaryStartedAt"`
 	PrimaryFinishedAt time.Time                `json:"primaryFinishedAt"`
 	OwnCeilings       ridWholeOwnCeilings      `json:"ownCeilings"`
@@ -98,6 +103,9 @@ func ridReadWholeDelivery(t *testing.T, f *installationNativeWorld) ridWholeDeli
 		for rows.Next() {
 			var raw []byte
 			require.NoError(t, rows.Scan(&raw))
+			if table == "audit_outbox" {
+				out.auditSQLRows = append(out.auditSQLRows, append([]byte(nil), raw...))
+			}
 			sum := sha256.Sum256(raw)
 			entry.Rows = append(entry.Rows, hex.EncodeToString(sum[:]))
 			if table == "own_ceilings" {
@@ -187,4 +195,171 @@ func ridWholeDigest(t *testing.T, v any) string {
 	} // SHA манифеста покрывает точные байты, а не цитирование JSON
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
+}
+
+// Десять скобок на режим: отдельные ACT и явные пары VERIFY сюда не входят.
+func rid06ReadBracketCase(id string) bool {
+	for _, mode := range []string{"S1", "S2"} {
+		for _, suffix := range []string{"BEFORE-REVOKE", "AFTER-REVOKE", "SEQUENTIAL-BEFORE-REVOKE", "SEQUENTIAL-AFTER-OVERLAP", "AFTER-SEQUENTIAL-REFUSAL", "NO-REVOKE-BEFORE", "NO-REVOKE-TWIN", "RECOVERY-BEFORE-REVOKE", "RECOVERY-AFTER-REVOKE", "RECOVERY-REAPPLY"} {
+			if id == "registry-installation-rid06-"+mode+"-"+suffix {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func rid06PrimaryBounds(a, b ridWholeDeliverySnapshot) bool {
+	return !a.PrimaryStartedAt.IsZero() && !a.PrimaryFinishedAt.Before(a.PrimaryStartedAt) && !b.PrimaryStartedAt.IsZero() && !b.PrimaryFinishedAt.Before(b.PrimaryStartedAt) && !b.PrimaryStartedAt.Before(a.PrimaryFinishedAt)
+}
+
+func rid06PreparationEqual(a, b rid03NewmanSnapshot) bool {
+	return rid06PrimaryBounds(a.Whole, b.Whole) && rid03SnapshotEqual(a, b) && reflect.DeepEqual(a.Whole.Separation, b.Whole.Separation)
+}
+
+type rid06AuditTransportWitness struct {
+	Status        string     `json:"status"`
+	Attempts      int64      `json:"attempts"`
+	NextAttemptAt time.Time  `json:"nextAttemptAt"`
+	SentAt        *time.Time `json:"sentAt"`
+	ErrorPresent  bool       `json:"errorPresent"`
+	ErrorSHA256   string     `json:"errorSHA256"`
+}
+
+type rid06AuditRowWitness struct {
+	ID                    string                     `json:"id"`
+	CreatedAt             time.Time                  `json:"createdAt"`
+	BeforeRowSHA256       string                     `json:"beforeRowSHA256"`
+	AfterRowSHA256        string                     `json:"afterRowSHA256"`
+	BeforeImmutableSHA256 string                     `json:"beforeImmutableSHA256"`
+	AfterImmutableSHA256  string                     `json:"afterImmutableSHA256"`
+	Before                rid06AuditTransportWitness `json:"before"`
+	After                 rid06AuditTransportWitness `json:"after"`
+}
+
+type rid06AuditReadProof struct {
+	CaseID             string                 `json:"caseId"`
+	RunID              string                 `json:"runId"`
+	BeforeStartedAt    time.Time              `json:"beforePrimaryStartedAt"`
+	BeforeFinishedAt   time.Time              `json:"beforePrimaryFinishedAt"`
+	AfterStartedAt     time.Time              `json:"afterPrimaryStartedAt"`
+	AfterFinishedAt    time.Time              `json:"afterPrimaryFinishedAt"`
+	Columns            []string               `json:"columns"`
+	BeforeSQLRowSHA256 []string               `json:"beforeSQLRowSHA256"`
+	AfterSQLRowSHA256  []string               `json:"afterSQLRowSHA256"`
+	Rows               []rid06AuditRowWitness `json:"rows"`
+}
+
+func rid06ByteSHA(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// Разбираются только исходные байты того же SQL-чтения, которое дало Whole-дайджест.
+// Неизвестные/повторные ключи и расхождение полного мультимножества дают отказ.
+func rid06BoundAuditRows(s ridWholeDeliverySnapshot) ([]rid09PrimaryRow, map[string]string, bool) {
+	table, exists := s.Bookkeeping["audit_outbox"]
+	if !exists || !rid11SameColumns(table.Columns, rid11AuthnColumns["audit_outbox"]) || len(table.Rows) != len(s.auditSQLRows) {
+		return nil, nil, false
+	}
+	rows := []rid09PrimaryRow{}
+	hashes := []string{}
+	byID := map[string]string{}
+	for _, raw := range s.auditSQLRows {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		first, err := decoder.Token()
+		if err != nil || first != json.Delim('{') {
+			return nil, nil, false
+		}
+		row := rid09PrimaryRow{}
+		for decoder.More() {
+			token, err := decoder.Token()
+			key, ok := token.(string)
+			if err != nil || !ok || row[key] != nil {
+				return nil, nil, false
+			}
+			var value json.RawMessage
+			if decoder.Decode(&value) != nil {
+				return nil, nil, false
+			}
+			row[key] = value
+		}
+		last, err := decoder.Token()
+		var extra any
+		if err != nil || last != json.Delim('}') || decoder.Decode(&extra) != io.EOF || !rid11AuditRowShape(row, s.PrimaryFinishedAt) {
+			return nil, nil, false
+		}
+		id := rid03S(row, "id")
+		if _, duplicate := byID[id]; duplicate {
+			return nil, nil, false
+		}
+		hash := rid06ByteSHA(raw)
+		byID[id] = hash
+		hashes = append(hashes, hash)
+		rows = append(rows, row)
+	}
+	sort.Strings(hashes)
+	if !reflect.DeepEqual(hashes, table.Rows) {
+		return nil, nil, false
+	}
+	return rows, byID, true
+}
+
+func rid06TransportWitness(row rid09PrimaryRow) rid06AuditTransportWitness {
+	status, _ := rid03Cell[string](row, "status")
+	attempts, _ := rid03Cell[int64](row, "attempts")
+	next, _ := rid03Cell[time.Time](row, "next_attempt_at")
+	sent, _ := rid03Cell[*time.Time](row, "sent_at")
+	cause, _ := rid03Cell[*string](row, "last_error")
+	out := rid06AuditTransportWitness{Status: status, Attempts: attempts, NextAttemptAt: next, SentAt: sent, ErrorPresent: cause != nil}
+	if cause != nil {
+		out.ErrorSHA256 = rid06ByteSHA([]byte(*cause))
+	}
+	return out
+}
+
+// Истинность устанавливает неизменённый RID11-предикат по реальным нагрузкам в RAM.
+// Наружу выходят только полные хеши строк/неизменяемой части и типизированный транспорт.
+func rid06BuildReadBoundary(caseID, runID string, a, b rid03NewmanSnapshot) (rid06AuditReadProof, bool) {
+	fail := func() (rid06AuditReadProof, bool) { return rid06AuditReadProof{}, false }
+	if !rid06ReadBracketCase(caseID) || !regexp.MustCompile(`^[A-Za-z0-9-]{16,80}$`).MatchString(runID) || !rid06PreparationEqual(a, b) || len(a.Whole.Bookkeeping) != len(ridWholeBookkeeping) || len(b.Whole.Bookkeeping) != len(ridWholeBookkeeping) || !reflect.DeepEqual(a.Whole.Separation, ridWholeBookkeeping) {
+		return fail()
+	}
+	for table, old := range a.Whole.Bookkeeping {
+		now, exists := b.Whole.Bookkeeping[table]
+		if !exists || (table != "audit_outbox" && !reflect.DeepEqual(old, now)) {
+			return fail()
+		}
+	}
+	for table := range ridWholeBookkeeping {
+		if _, exists := a.Whole.Bookkeeping[table]; !exists {
+			return fail()
+		}
+	}
+	old, oldHashes, ok := rid06BoundAuditRows(a.Whole)
+	if !ok {
+		return fail()
+	}
+	now, nowHashes, ok := rid06BoundAuditRows(b.Whole)
+	if !ok || !reflect.DeepEqual(a.Whole.Bookkeeping["audit_outbox"].Columns, b.Whole.Bookkeeping["audit_outbox"].Columns) {
+		return fail()
+	}
+	before := rid11AuthnSnapshot{Finished: a.Whole.PrimaryFinishedAt, Raw: map[string][]rid09PrimaryRow{"audit_outbox": old}}
+	after := rid11AuthnSnapshot{Finished: b.Whole.PrimaryFinishedAt, Raw: map[string][]rid09PrimaryRow{"audit_outbox": now}}
+	if !rid11AuditHistoryValid(before, after) {
+		return fail()
+	}
+	out := rid06AuditReadProof{CaseID: caseID, RunID: runID, BeforeStartedAt: a.Whole.PrimaryStartedAt, BeforeFinishedAt: a.Whole.PrimaryFinishedAt, AfterStartedAt: b.Whole.PrimaryStartedAt, AfterFinishedAt: b.Whole.PrimaryFinishedAt, Columns: append([]string{}, a.Whole.Bookkeeping["audit_outbox"].Columns...), BeforeSQLRowSHA256: append([]string{}, a.Whole.Bookkeeping["audit_outbox"].Rows...), AfterSQLRowSHA256: append([]string{}, b.Whole.Bookkeeping["audit_outbox"].Rows...), Rows: []rid06AuditRowWitness{}}
+	oldByID := map[string]rid09PrimaryRow{}
+	for _, row := range old {
+		oldByID[rid03S(row, "id")] = row
+	}
+	for _, row := range now {
+		id := rid03S(row, "id")
+		previous := oldByID[id]
+		created, _ := rid03Cell[time.Time](row, "created_at")
+		out.Rows = append(out.Rows, rid06AuditRowWitness{ID: id, CreatedAt: created, BeforeRowSHA256: oldHashes[id], AfterRowSHA256: nowHashes[id], BeforeImmutableSHA256: rid03EvidenceHash(rid11AuditImmutable(previous)), AfterImmutableSHA256: rid03EvidenceHash(rid11AuditImmutable(row)), Before: rid06TransportWitness(previous), After: rid06TransportWitness(row)})
+	}
+	sort.Slice(out.Rows, func(i, j int) bool { return out.Rows[i].ID < out.Rows[j].ID })
+	return out, true
 }

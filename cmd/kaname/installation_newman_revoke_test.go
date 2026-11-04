@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -148,19 +149,32 @@ func (p *rid06PublicContext) read(t *testing.T, w *ridLifecycleWorld, suffix, st
 	if suffix == "AFTER-REVOKE" {
 		e.Operation = p.revokeOperation
 	}
+	prepared := s
+	baselineCaptured := false
 	var receipt ridNewmanReceipt
 	func() {
 		defer func() {
+			require.True(t, baselineCaptured, "post-authentication baseline was not captured")
 			after := rid06Primary(t, w, false)
+			auditProof, auditOK := rid06BuildReadBoundary(e.CaseID, os.Getenv("KANAME_RID_RUN_ID"), s, after)
+			require.True(t, auditOK, "closed audit transport/full bookkeeping proof refused")
 			rid03RequireReadOnly(t, s, after)
 			proof, ok := rid06BuildTechnicalReceipt(&e.rid03NewmanExpectation, s, after, nil)
 			require.True(t, ok)
 			require.True(t, receipt.OK)
 			proof.PhaseRuntimeChecksPassed = true
 			rid08Write(t, w.f.session.Root, "newman-"+strings.ToLower(e.CaseID)+"-primary-technical-proof", proof)
-			rid08Write(t, w.f.session.Root, "newman-"+strings.ToLower(e.CaseID)+"-primary-bracket", map[string]any{"caseId": e.CaseID, "fullPrimaryUnchanged": true, "before": s.Whole, "after": after.Whole, "wholeDoDAccepted": false})
+			rid08Write(t, w.f.session.Root, "newman-"+strings.ToLower(e.CaseID)+"-primary-bracket", map[string]any{"caseId": e.CaseID, "fullPrimaryUnchanged": true, "before": s.Whole, "after": after.Whole, "auditTransportProof": auditProof, "wholeDoDAccepted": false})
 		}()
-		receipt = ridRunNewmanPhase(t, w.f, "registry-installation-rid06", e.CaseID, strings.ToLower(e.CaseID), map[string]any{"rid06Expected": e})
+		receipt = ridRunNewmanRID06ReadObserved(t, w.f, e.CaseID, strings.ToLower(e.CaseID), map[string]any{"rid06Expected": e}, func() error {
+			baseline := rid06Primary(t, w, false)
+			if !rid06PreparationEqual(prepared, baseline) {
+				return errors.New("RID06 preparation changed protected primary state")
+			}
+			s = baseline
+			baselineCaptured = true
+			return nil
+		})
 		require.True(t, receipt.OK)
 	}()
 }

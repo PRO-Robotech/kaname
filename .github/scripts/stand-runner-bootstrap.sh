@@ -45,7 +45,7 @@ runner_bootstrap() {
     runner_provider_command "$work/out/step-provider-install.log" ca-install 60 \
       "${caapt[@]}" install -y -q --no-install-recommends --no-remove ca-certificates || return 125
   fi
-  local -a apt=(apt-get -o APT::Update::Error-Mode=any -o Acquire::Languages=none -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=0 -o "Dir::Etc::sourcelist=$aptdir/sources.list" -o Dir::Etc::sourceparts=-
+  local -a apt=(apt-get -o APT::Update::Error-Mode=any -o Acquire::Languages=none -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 -o "Dir::Etc::sourcelist=$aptdir/sources.list" -o Dir::Etc::sourceparts=-
     -o "Dir::State::lists=$aptdir/lists" -o "Dir::Cache::archives=$aptdir/archives" -o APT::Get::List-Cleanup=0)
   export DEBIAN_FRONTEND=noninteractive
   runner_provider_command "$work/out/step-provider-install.log" snapshot-index 170 "${apt[@]}" update -q || return 125

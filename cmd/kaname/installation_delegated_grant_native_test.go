@@ -53,7 +53,13 @@ func ridNativeIssuerCannotDelegate(t *testing.T) {
 		f := w.f
 		other := ""
 		if len(w.accounts) > 1 {
-			other = w.accounts[1]
+			for _, account := range w.accounts {
+				if account != f.tenantID {
+					other = account
+					break
+				}
+			}
+			require.NotEmpty(t, other, "FIXTURE_NOT_ACCEPTED: existing account census has no other account")
 		} else {
 			other = ridResponseID(t, f.ridOperation(t, "POST", "/iam/v1/accounts", f.operator.Bearer(), map[string]any{"name": "rid-other-account"}, 0))
 		}

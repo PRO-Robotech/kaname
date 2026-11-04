@@ -356,6 +356,12 @@ func ridRunNewmanInputObserved(t *testing.T, f *installationNativeWorld, caseID,
 	require.True(t, rid11TokenCase(caseID) && observer != nil, "closed RID11 admission observer required")
 	return ridRunNewmanPhaseModeObserved(t, f, "registry-installation-rid11", caseID, label, variables, "", nil, observer)
 }
+
+// Наблюдатель RID06 допускается только для двадцати закрытых скобок O.
+func ridRunNewmanRID06ReadObserved(t *testing.T, f *installationNativeWorld, caseID, label string, variables map[string]any, observer func() error) ridNewmanReceipt {
+	require.True(t, rid06ReadBracketCase(caseID) && observer != nil, "closed RID06 read observer required")
+	return ridRunNewmanPhaseModeObserved(t, f, "registry-installation-rid06", caseID, label, variables, "", nil, observer)
+}
 func ridRunNewmanPhaseModeObserved(t *testing.T, f *installationNativeWorld, stem, caseID, label string, variables map[string]any, probe string, budget context.Context, observer func() error) ridNewmanReceipt {
 	require.Contains(t, []string{"", "normal-permit", "reject-missing-permit", "node-kill", "group-kill"}, probe)
 
