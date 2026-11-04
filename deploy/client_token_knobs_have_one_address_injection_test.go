@@ -353,6 +353,15 @@ var shadowForms = []shadowForm{
 	},
 }
 
+// closedProbeMapGuard отвергает неизвестные ключи без вывода окружения:
+// его отказ на пробу не должен скрывать источник в другом месте шаблона.
+const closedProbeMapGuard = `{{- define "qz.closedProbeMap" -}}
+{{- range $key, $value := .Values.extraEnv -}}
+{{- if ne $key "allowed" -}}{{- fail "неизвестный ключ закрытой карты" -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+`
+
 // novelShadowForms — формы, которых нет ни в перечне выше, ни в прежних кругах,
 // ни в коде держателя: держатель не знает форм шаблона, и они обязаны
 // покраснеть тем же исполнением.
@@ -488,6 +497,52 @@ func TestPostureShadowInjection_NovelFormIsJudgedWithoutBeingKnown(t *testing.T)
 		t.Run(f.name, func(t *testing.T) {
 			t.Parallel()
 			requireShadowFormJudged(t, f)
+		})
+	}
+}
+
+// Закрытая карта отвергает пробу, но её ключи всё равно должны быть найдены
+// в имени окружения. Законный близнец меняет только имя на постоянное.
+func TestPostureShadowInjection_ClosedMapDoesNotHideOtherSources(t *testing.T) {
+	const body = `            {{- include "qz.closedProbeMap" . }}
+            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+`
+	const twin = `            {{- include "qz.closedProbeMap" . }}
+            {{- range $k, $v := .Values.extraEnv }}
+            - name: KANAME_EXTRA_FIXED
+              value: {{ $k | quote }}
+            {{- end }}
+`
+	for _, home := range shadowFormHomes {
+		t.Run(home.name, func(t *testing.T) {
+			t.Parallel()
+			dir := chartCopyWith(t, body, closedProbeMapGuard, home.declared)
+			out, err := renderChartAtAllowingFailure(t, dir, chartProfiles,
+				append(append([]string{}, operatorOverlay...), "extraEnv.unexpected=value")...)
+			require.Error(t, err, "настоящий рендер должен сохранить отказ закрытой карты")
+			require.Contains(t, out, "неизвестный ключ закрытой карты")
+
+			got, census, err := judgePodEnvByExecution(t, dir, podEnvConditions)
+			require.NoError(t, err)
+			t.Logf("перепись: %s · находок %d", census, len(got))
+			joined := strings.Join(got, "\n")
+			require.NotEmpty(t, got, "закрытая карта скрыла источник окружения")
+			require.Contains(t, joined, "Deployment/")
+			require.Contains(t, joined, "containers ")
+			if home.declared {
+				require.Contains(t, joined, "extraEnv.KANAME_AUTHN__CLIENT_TOKEN__")
+				require.Contains(t, joined, "рендер отказал, но не правилом тени")
+			} else {
+				require.Contains(t, joined, "проход deployment.yaml:")
+			}
+
+			lawful, _, err := judgePodEnvByExecution(t,
+				chartCopyWith(t, twin, closedProbeMapGuard, home.declared), podEnvConditions)
+			require.NoError(t, err)
+			require.Empty(t, lawful, "близнец с постоянным именем окружения дал находку")
 		})
 	}
 }
