@@ -9,7 +9,6 @@ are deliberately not Kaname IDs. A rejected response echoes the fake bearer to
 prove failure-message sanitization. No native RID count may be incremented here.
 """
 import copy
-import errno
 import hashlib
 import importlib.util
 import json
@@ -46,6 +45,7 @@ def run_protocol_client(args, payload, env, timeout=100, audit_secrets=()):
     status = None
     primary = None
     cleanup_errors = []
+    uncertain_close_fds = []
     selector = None
     stdout_r = stderr_r = ack_r = stdin_w = permit_w = None
     stdin_r = stdout_w = stderr_w = ack_w = permit_r = None
@@ -71,18 +71,25 @@ def run_protocol_client(args, payload, env, timeout=100, audit_secrets=()):
     def close(fd):
         if fd is None or fd not in all_fds:
             return
+        errors = []
         if selector is not None:
             try:
                 selector.unregister(fd)
             except (KeyError, ValueError):
                 pass
+            except BaseException as error:
+                errors.append(error)
+        # Снимаем владение до единственной попытки закрытия: номер может быть выдан повторно.
+        all_fds.remove(fd)
         try:
             os.close(fd)
-        except OSError as error:
-            if error.errno == errno.EBADF:
-                all_fds.discard(fd)
-            raise
-        all_fds.remove(fd)
+        except BaseException as error:
+            uncertain_close_fds.append(fd)
+            errors.append(error)
+        if errors:
+            # Отмена регистрации и закрытие независимы; обе ошибки и исходная причина сохраняются.
+            cleanup_errors.extend(errors)
+            raise errors[0]
 
     def drain(fd, name):
         nonlocal secret_found, secret_checks
@@ -235,11 +242,6 @@ def run_protocol_client(args, payload, env, timeout=100, audit_secrets=()):
                     close(fd)
                 except BaseException as error:
                     cleanup_errors.append(error)
-                    try:
-                        os.close(fd)
-                        all_fds.discard(fd)
-                    except OSError:
-                        pass
             if selector is not None:
                 try:
                     selector.close()
@@ -249,7 +251,7 @@ def run_protocol_client(args, payload, env, timeout=100, audit_secrets=()):
              "stdoutBytes": byte_counts["stdout"], "stderrBytes": byte_counts["stderr"],
              "secretChecks": secret_checks, "secretFound": secret_found,
              "ackValid": ack_valid, "permitSent": permit_sent, "reaped": reaped,
-             "remainingFDs": len(all_fds)}
+             "remainingFDs": len(all_fds), "uncertainCloseFDs": uncertain_close_fds}
     result = subprocess.CompletedProcess(args, os.waitstatus_to_exitcode(status) if status is not None else None,
                                        bytes(buffers["stdout"]), bytes(buffers["stderr"]))
     result.protocol_audit = audit
