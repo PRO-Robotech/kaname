@@ -1,7 +1,6 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """65 literal, read-only phases in the 32 existing RID12 native worlds."""
-from rid_midrun_public import midrun_read_steps
 
 HOME = 'kaname'
 CASES = []

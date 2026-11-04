@@ -91,7 +91,7 @@ func (w *Wire) ProvisionStandingCreatorWithKeyTTL(ctx context.Context, operator 
 	if err != nil {
 		return nil, err
 	}
-	issued, err := w.createOperation(ctx, operator, "/iam/v1/serviceAccounts/"+sa.ID+"/keys", map[string]any{
+	issued, err := w.createOperation(ctx, operator, "/iam/v1/serviceAccounts/"+sa.ID+"/keys", map[string]any{ // #nosec G101 -- константы задают вид и описание ключа; секрет получается настоящим вызовом API.
 		"credentialKind": "CREDENTIAL_KIND_KEYPAIR", "description": "RID durable standing creator", "ttlSeconds": ttlSeconds})
 	if err != nil {
 		return nil, err
@@ -120,7 +120,7 @@ func (w *Wire) ProvisionStandingCreatorWithKeyTTL(ctx context.Context, operator 
 			observe(string(material))
 		}
 	}
-	file, err := os.OpenFile(credentialFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := os.OpenFile(credentialFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600) // #nosec G304 -- новый закрытый файл в собственном каталоге фикстуры; существующий файл не перезаписывается.
 	if err != nil {
 		return nil, err
 	}

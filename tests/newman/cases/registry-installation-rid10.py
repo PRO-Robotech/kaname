@@ -6,7 +6,6 @@ Snapshot reads use O. Only /me ownership proof and stored C-owned Operation.Get
 use the lawfully authenticated C bearer (separate root FD5 extension required).
 Node remains restricted to the existing owned public origin, with no issuance.
 """
-from rid_midrun_public import midrun_read_steps
 
 HOME = 'kaname'
 CASES = []

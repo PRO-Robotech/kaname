@@ -4,7 +4,6 @@
 All standalone API requests are real HTTPS; no startup/admin RPC substitution.
 Opaque original-C assertion gets only its exact parent-owned issuance leaf.
 """
-from rid_midrun_public import midrun_read_steps
 HOME='kaname'
 CASES=[]
 _CONFIG=r"""const e=JSON.parse(pm.environment.get('rid05Expected')||'null');

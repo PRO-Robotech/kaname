@@ -147,7 +147,7 @@ func (s *Session) Stop(ctx context.Context) error {
 // Сообщения ошибок не воспроизводят секрет или нарушающую строку журнала.
 func (p *Process) CheckSecretAbsence(secrets ...string) error {
 	for _, path := range []string{p.StdoutPath, p.StderrPath} {
-		raw, err := os.ReadFile(path)
+		raw, err := os.ReadFile(path) // #nosec G304 -- читаются только два захваченных пути потоков собственного процесса фикстуры.
 		if err != nil {
 			return err
 		}

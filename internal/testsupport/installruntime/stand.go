@@ -80,7 +80,7 @@ func (s *NativeStand) RunMigrator(ctx context.Context, binary string, environmen
 		return err
 	}
 	defer log.Close()
-	cmd := exec.CommandContext(ctx, binary, "up")
+	cmd := exec.CommandContext(ctx, binary, "up") // #nosec G204 -- абсолютный путь артефакта задаёт фикстура; argv постоянен, оболочки нет.
 	cmd.Dir = s.Evidence
 	cmd.Env = append(append([]string{}, environment...), "KANAME_CONFIG_PATH="+config)
 	cmd.Stdout, cmd.Stderr = log, log
@@ -96,7 +96,7 @@ func (s *NativeStand) StartMailbox(t *testing.T, ctx context.Context, environmen
 	log, err := os.OpenFile(filepath.Join(s.Evidence, "mailbox.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	require.NoError(t, err)
 	cmd := exec.CommandContext(ctx, "python3", filepath.Join(s.Root, ".github/scripts/stand-mailbox.py"), "serve",
-		"--host", "127.0.0.1", "--smtp-port", "14465", "--http-port", "18025", "--cert", filepath.Join(pki, "srv.crt"), "--key", filepath.Join(pki, "srv.key"))
+		"--host", "127.0.0.1", "--smtp-port", "14465", "--http-port", "18025", "--cert", filepath.Join(pki, "srv.crt"), "--key", filepath.Join(pki, "srv.key")) // #nosec G204 -- скрипт и аргументы принадлежат фикстуре, входящих команд и оболочки нет.
 	cmd.Dir = s.Evidence
 	cmd.Env = environment
 	cmd.Stdout, cmd.Stderr = log, log
@@ -105,7 +105,13 @@ func (s *NativeStand) StartMailbox(t *testing.T, ctx context.Context, environmen
 	raw, _ := json.Marshal(map[string]any{"name": "mailbox", "pid": pid})
 	require.NoError(t, os.WriteFile(filepath.Join(s.Evidence, "mailbox-process.json"), raw, 0600))
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait(); log.Close() }()
+	go func() {
+		err := cmd.Wait()
+		if closeErr := log.Close(); closeErr != nil {
+			t.Error("закрытие журнала собственного почтового сервера не выполнено")
+		}
+		done <- err
+	}()
 	t.Cleanup(func() {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		timer := time.NewTimer(15 * time.Second)
@@ -137,7 +143,7 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	require.NoError(t, validateStandPath(evidence), "reject unsafe native stand paths before preparation")
 	require.NoError(t, os.Mkdir(evidence, 0700), "each run needs a fresh evidence directory")
 	// Генерируем ровно существующие PKI/конфигурацию стенда до любого контейнера.
-	prepare := exec.CommandContext(ctx, "bash", filepath.Join(root, ".github/scripts/stand-own.sh"), "prepare-native")
+	prepare := exec.CommandContext(ctx, "bash", filepath.Join(root, ".github/scripts/stand-own.sh"), "prepare-native") // #nosec G204 -- постоянная команда собственного подготовительного скрипта; root задаёт фикстура, не входящий запрос.
 	// Любой случайный относительный вывод относится к этому закрытому запуску, а не дереву исходников.
 	prepare.Dir = evidence
 	var cleanEnvironment []string
@@ -182,7 +188,7 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(evidence, "pg-ownership.json"), ownership, 0600))
 	for _, suffix := range []string{"crt", "key"} {
-		material, err := os.ReadFile(filepath.Join(evidence, "pki", "pg."+suffix))
+		material, err := os.ReadFile(filepath.Join(evidence, "pki", "pg."+suffix)) // #nosec G304 -- собственный каталог PKI и закрытый список расширений crt/key.
 		require.NoError(t, err)
 		// Секретов нет в argv, окружении Docker, журнале, монтировании хоста или сокете.
 		command := "umask 077; cat > /var/lib/postgresql/server." + suffix + "; chown postgres:postgres /var/lib/postgresql/server." + suffix

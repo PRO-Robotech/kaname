@@ -82,7 +82,7 @@ func preparePresentedReader(pool *pgxpool.Pool, cfg config.Config, keys *signing
 }
 
 func loadInstallationCredential(path string) (installationCredential, *ecdsa.PrivateKey, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- путь файла задаёт оператор; ниже проверяются тип, закрытые права и размер открытого файла.
 	if err != nil {
 		return installationCredential{}, nil, fmt.Errorf("installation credential file cannot be opened")
 	}

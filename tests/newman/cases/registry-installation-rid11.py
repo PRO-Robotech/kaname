@@ -1,7 +1,6 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """RID11 same62-world public consequences; startup/fault proof stays native."""
-from rid_midrun_public import midrun_read_steps
 HOME='kaname'
 CASES=[]
 _CONFIG=r"""const e=JSON.parse(pm.environment.get('rid11Expected')||'null');

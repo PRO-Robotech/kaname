@@ -7,7 +7,6 @@ RID01 FD5 secret/issuance-origin extension. No token is issued in JavaScript
 except the mandatory actual expired-standing-key refusal request.
 """
 import json
-from rid_midrun_public import midrun_read_steps
 
 HOME = 'kaname'
 CASES = []

@@ -4,7 +4,6 @@
 The critical Revoke phase has only actual POST+owner poll inside the unchanged
 before-pair pause; full read census is outside that critical section.
 """
-from rid_midrun_public import midrun_read_steps
 HOME='kaname'
 CASES=[]
 _CONFIG=r"""const e=JSON.parse(pm.environment.get('rid06Expected')||'null');

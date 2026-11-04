@@ -6,7 +6,6 @@ Depends on RID12 R1's frozen shared optional expected_var API, SHA256
 7761859f66733af35308ade3809a680c9bade7695efb904d453d6fabc3aeb942.
 No setup, credential issuance, Operation Get or HTTP mutation is added.
 """
-from rid_midrun_public import midrun_read_steps
 
 HOME = 'kaname'
 CASES = []

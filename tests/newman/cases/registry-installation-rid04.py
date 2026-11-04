@@ -6,7 +6,6 @@ Only I ACT POST mutates public state. Fullserve/RevokeAdmin/GrantAdmin remain
 native integration boundaries. EVERY Get/List in O-only VERIFY uses independent
 post-ACT primary input. No RID03 ACT Get metadata or response self-oracle.
 """
-from rid_midrun_public import midrun_read_steps
 HOME = 'kaname'
 CASES = []
 _CONFIG = r"""const e=JSON.parse(pm.environment.get('rid04Expected')||'null');

@@ -532,7 +532,9 @@ def payload_checks(root, payload, axis="all"):
         if axis in ("all", "prologue"):
             original = (root / ".github/scripts/stand-own.sh").read_text()
             prefix = original.split('if [ "${1:-}" = "--registry-self-test" ]; then', 1)[0]
-            dispatch = original[original.index('# Mounted identity also guards'):]
+            dispatch_boundary = '\ncase "${1:-}" in\n  up|down|census|db-fold|db-unfold)\n'
+            assert original.count(dispatch_boundary) == 1, "граница защищённой диспетчеризации должна быть единственной"
+            dispatch = original[original.index(dispatch_boundary) + 1:]
             cases = [(label, "chain") for label in ("lawful", "wrong-namespace", "missing-account", "partial-marker", "wrong-marker", "invalid-uid")]
             cases += [(label, operation) for label in ("missing-account", "wrong-namespace") for operation in ("down", "census")]
             for label, operation in cases:

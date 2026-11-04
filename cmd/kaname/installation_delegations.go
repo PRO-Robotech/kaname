@@ -110,7 +110,11 @@ func waitInstallationOperation(ctx context.Context, repo operations.Repo, id str
 		}
 		if op.Done {
 			if op.Error != nil {
-				return status.Error(codes.Code(op.Error.Code), op.Error.Message)
+				code := op.Error.Code
+				if code < int32(codes.OK) || code > int32(codes.Unauthenticated) {
+					code = int32(codes.Unknown)
+				}
+				return status.Error(codes.Code(code), op.Error.Message)
 			}
 			return nil
 		}

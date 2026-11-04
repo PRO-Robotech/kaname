@@ -5,7 +5,6 @@
 ACT returned IDs only connect its own Operation/Get requests. VERIFY receives
 independent primary IDs, never report bodies. Common census is reused unchanged.
 """
-from rid_midrun_public import midrun_read_steps
 HOME = 'kaname'
 CASES = []
 _CONFIG = r"""

@@ -47,7 +47,7 @@ func NewWire(pki, publicURL, issuanceURL, jwksURL string) (*Wire, error) {
 			return nil, errors.New("native acceptance requires explicit HTTPS localhost endpoints")
 		}
 	}
-	root, err := os.ReadFile(filepath.Join(pki, "ca.crt"))
+	root, err := os.ReadFile(filepath.Join(pki, "ca.crt")) // #nosec G304 -- каталог PKI принадлежит подготовленной фикстуре; имя файла постоянно.
 	if err != nil {
 		return nil, err
 	}

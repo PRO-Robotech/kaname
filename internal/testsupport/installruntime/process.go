@@ -49,13 +49,13 @@ func Start(ctx context.Context, in Input) (*Process, error) {
 	if !filepath.IsAbs(in.Binary) || !filepath.IsAbs(in.ConfigFile) || !filepath.IsAbs(in.EvidenceDir) {
 		return nil, errors.New("runtime fixture requires absolute binary, config and evidence paths")
 	}
-	f, err := os.Open(in.Binary)
+	f, err := os.Open(in.Binary) // #nosec G304 -- абсолютный путь исполняемого файла задаёт фикстура; его байты хешируются до запуска.
 	if err != nil {
 		return nil, err
 	}
 	h := sha256.New()
 	_, err = io.Copy(h, f)
-	f.Close()
+	err = errors.Join(err, f.Close())
 	if err != nil {
 		return nil, err
 	}
@@ -74,35 +74,28 @@ func Start(ctx context.Context, in Input) (*Process, error) {
 	}
 	errout, err := os.OpenFile(p.StderrPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		out.Close()
-		return nil, err
+		return nil, errors.Join(err, out.Close())
 	}
-	p.cmd = exec.CommandContext(ctx, in.Binary, "serve")
+	p.cmd = exec.CommandContext(ctx, in.Binary, "serve") // #nosec G204 -- абсолютный путь задаёт вызывающая фикстура, argv постоянен и оболочка не используется.
 	p.cmd.Dir = in.EvidenceDir
 	p.cmd.Env = append(append([]string{}, in.Environment...), "KANAME_CONFIG_PATH="+in.ConfigFile)
 	p.cmd.Stdout, p.cmd.Stderr = out, errout
 	if err := p.cmd.Start(); err != nil {
-		out.Close()
-		errout.Close()
-		return nil, err
+		return nil, errors.Join(err, out.Close(), errout.Close())
 	}
 	identity, _ := json.Marshal(map[string]any{"pid": p.cmd.Process.Pid, "binarySHA256": digest})
 	if err := os.WriteFile(filepath.Join(in.EvidenceDir, "process.json"), identity, 0600); err != nil {
 		_ = p.cmd.Process.Kill()
 		_ = p.cmd.Wait()
-		out.Close()
-		errout.Close()
-		return nil, err
+		return nil, errors.Join(err, out.Close(), errout.Close())
 	}
 	go func() {
-		err := p.cmd.Wait()
-		out.Close()
-		errout.Close()
+		err := errors.Join(p.cmd.Wait(), out.Close(), errout.Close())
+		terminal, _ := json.Marshal(map[string]any{"pid": p.cmd.Process.Pid, "exited": true, "exitCode": p.cmd.ProcessState.ExitCode()})
+		err = errors.Join(err, os.WriteFile(filepath.Join(in.EvidenceDir, "terminal.json"), terminal, 0600))
 		p.mu.Lock()
 		p.err = err
 		p.mu.Unlock()
-		terminal, _ := json.Marshal(map[string]any{"pid": p.cmd.Process.Pid, "exited": true, "exitCode": p.cmd.ProcessState.ExitCode()})
-		_ = os.WriteFile(filepath.Join(in.EvidenceDir, "terminal.json"), terminal, 0600)
 		close(p.done)
 	}()
 	return p, nil
@@ -181,7 +174,7 @@ func (p *Process) Stop(ctx context.Context) error {
 func (p *Process) Results() ([]json.RawMessage, error) {
 	var results []json.RawMessage
 	for _, path := range []string{p.StdoutPath, p.StderrPath} {
-		f, err := os.Open(path)
+		f, err := os.Open(path) // #nosec G304 -- пути двух потоков сохранены при запуске собственного процесса фикстуры.
 		if err != nil {
 			return nil, err
 		}
@@ -193,8 +186,7 @@ func (p *Process) Results() ([]json.RawMessage, error) {
 				results = append(results, append(json.RawMessage{}, record["installation"]...))
 			}
 		}
-		err = s.Err()
-		f.Close()
+		err = errors.Join(s.Err(), f.Close())
 		if err != nil {
 			return nil, err
 		}

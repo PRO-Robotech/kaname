@@ -41,7 +41,7 @@ func CheckOwnedListeners(pid int, evidenceDir string, expected ...int) error {
 	}
 	found := map[int]bool{}
 	for _, family := range []string{"tcp", "tcp6"} {
-		raw, err := os.ReadFile(filepath.Join(root, "net", family))
+		raw, err := os.ReadFile(filepath.Join(root, "net", family)) // #nosec G304 -- путь /proc собственного процесса и закрытый список tcp/tcp6, без пользовательской части.
 		if err != nil {
 			return err
 		}

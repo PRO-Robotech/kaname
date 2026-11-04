@@ -182,7 +182,7 @@ func load(path string) (Config, *viper.Viper, error) {
 	tenantTargetDeclared := false
 	if path != "" {
 		v.SetConfigFile(path)
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- путь конфигурации задаёт оператор запуска, а не входящий запрос.
 		if err != nil {
 			return Config{}, nil, fmt.Errorf("read config %q: %w", path, err)
 		}

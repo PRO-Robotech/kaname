@@ -39,7 +39,7 @@ func (w *Wire) IssueStandingKey(ctx context.Context, o *VerifiedOperator, id, ac
 	if observe == nil {
 		return nil, errors.New("private secret observer required")
 	}
-	op, err := w.createOperation(ctx, o, "/iam/v1/serviceAccounts/"+url.PathEscape(id)+"/keys", map[string]any{"credentialKind": "CREDENTIAL_KIND_KEYPAIR", "ttlSeconds": 7200, "description": "Generic RID lifecycle key"})
+	op, err := w.createOperation(ctx, o, "/iam/v1/serviceAccounts/"+url.PathEscape(id)+"/keys", map[string]any{"credentialKind": "CREDENTIAL_KIND_KEYPAIR", "ttlSeconds": 7200, "description": "Generic RID lifecycle key"}) // #nosec G101 -- здесь только вид удостоверения и описание; сам закрытый ключ выдаётся API ниже.
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (w *Wire) IssueStandingKey(ctx context.Context, o *VerifiedOperator, id, ac
 		return nil, err
 	}
 	observe(string(material))
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- новый закрытый файл удостоверения в собственном каталоге фикстуры, без перезаписи.
 	if err != nil {
 		return nil, err
 	}
