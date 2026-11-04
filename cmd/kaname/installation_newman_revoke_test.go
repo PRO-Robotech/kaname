@@ -71,6 +71,7 @@ func rid06BuildTechnicalReceipt(e *rid03NewmanExpectation, a, b rid03NewmanSnaps
 }
 
 type rid06PublicContext struct {
+	failedStartupExpected                                                                  rid06FailedStartupExpected
 	owner, oldGD, oldG, pendingOp                                                          string
 	before, atPending, preRevoke, postRevoke, beforeSequentialRun, preRestore, beforeApply *rid03NewmanSnapshot
 	publicBody                                                                             map[string]any
@@ -226,9 +227,13 @@ func (p *rid06PublicContext) beforeSequential(t *testing.T, w *ridLifecycleWorld
 	}
 	s := rid06Primary(t, w, true)
 	p.beforeSequentialRun = &s
+	credential, _, err := loadInstallationCredential(w.delivery.CredentialFile)
+	require.NoError(t, err)
+	rid06RequireExpectedClient(t, w.f.creator.ClientID, credential.ClientID)
+	p.failedStartupExpected = rid06FailedStartupExpected{CaseID: "registry-installation-rid06-" + rid03Mode(t, w) + "-SEQUENTIAL-FAILED-STARTUP", RunID: os.Getenv("KANAME_RID_RUN_ID"), TestExecutableSHA256: rid06HashExecutable(t), ClientSHA256: installationIdentitySHA(credential.ClientID), CredentialExpiresAt: w.f.creator.ExpiresAt, CreatorID: w.f.creator.ID, TenantID: w.f.tenantID, DelegateID: w.issuer.ID, OldDelegationID: w.gd.Id, Accounts: append([]string{}, w.accounts...)}
 	p.refusalProof = false
 }
-func (p *rid06PublicContext) sequentialBeforeRestore(t *testing.T, w *ridLifecycleWorld) {
+func (p *rid06PublicContext) sequentialBeforeRestore(t *testing.T, w *ridLifecycleWorld, process *installruntime.Process) {
 	if p == nil {
 		return
 	}
@@ -238,9 +243,12 @@ func (p *rid06PublicContext) sequentialBeforeRestore(t *testing.T, w *ridLifecyc
 	rid06RequireNativeHistory(t, *p.beforeSequentialRun, s)
 	ridRequireWholeDeliveryUnchanged(t, p.beforeSequentialRun.Whole, s.Whole)
 	require.True(t, rid06FailedDeliveryEqual(*p.beforeSequentialRun, s), "full delivery/raw/business delta before ANY restoration must be zero; only independently checked installer Operations may be new")
+	logs := rid06ReadFailedLogs(t, w.f.session.Root, process)
+	startupProof, ok := rid06BuildFailedStartup("registry-installation-rid06-"+rid03Mode(t, w)+"-SEQUENTIAL-FAILED-STARTUP", os.Getenv("KANAME_RID_RUN_ID"), rid06HashExecutable(t), p.failedStartupExpected, logs, *p.beforeSequentialRun, s)
+	require.True(t, ok, "closed failed-startup replay and native Operation proof required before restoration")
 	p.preRestore = &s
 	p.refusalProof = true
-	rid08Write(t, w.f.session.Root, "rid06-"+rid03Mode(t, w)+"-sequential-pre-restore", map[string]any{"integrationOnly": true, "actualNewmanExecuted": false, "before": p.beforeSequentialRun.Whole, "after": s.Whole, "wholeDoDAccepted": false})
+	rid08Write(t, w.f.session.Root, "rid06-"+rid03Mode(t, w)+"-sequential-pre-restore", map[string]any{"integrationOnly": true, "actualNewmanExecuted": false, "before": p.beforeSequentialRun.Whole, "after": s.Whole, "failedStartupProof": startupProof, "wholeDoDAccepted": false})
 }
 func (p *rid06PublicContext) afterSequential(t *testing.T, w *ridLifecycleWorld) {
 	if p == nil {

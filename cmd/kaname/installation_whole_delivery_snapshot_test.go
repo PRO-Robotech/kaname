@@ -36,6 +36,8 @@ type ridWholeOwnCeilings struct {
 	StatedAt map[string]time.Time `json:"statedAtByKind"`
 }
 type ridWholeDeliverySnapshot struct {
+	replaySQLRows     [][]byte                 `json:"-"`
+	operationSQLRows  [][]byte                 `json:"-"`
 	auditSQLRows      [][]byte                 `json:"-"`
 	PrimaryStartedAt  time.Time                `json:"primaryStartedAt"`
 	PrimaryFinishedAt time.Time                `json:"primaryFinishedAt"`
@@ -105,6 +107,12 @@ func ridReadWholeDelivery(t *testing.T, f *installationNativeWorld) ridWholeDeli
 			require.NoError(t, rows.Scan(&raw))
 			if table == "audit_outbox" {
 				out.auditSQLRows = append(out.auditSQLRows, append([]byte(nil), raw...))
+			}
+			if table == "client_assertion_replay" {
+				out.replaySQLRows = append(out.replaySQLRows, append([]byte(nil), raw...))
+			}
+			if table == "operations" {
+				out.operationSQLRows = append(out.operationSQLRows, append([]byte(nil), raw...))
 			}
 			sum := sha256.Sum256(raw)
 			entry.Rows = append(entry.Rows, hex.EncodeToString(sum[:]))

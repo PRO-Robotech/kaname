@@ -536,6 +536,18 @@ func (w *ridLifecycleWorld) refusedApply(t *testing.T, want installationResult) 
 	w.refusedApplyObserved(t, want, nil)
 }
 func (w *ridLifecycleWorld) refusedApplyObserved(t *testing.T, want installationResult, checkpoint func()) {
+	w.refusedApplyRun(t, want, false, func(_ *installruntime.Process) {
+		if checkpoint != nil {
+			checkpoint()
+		}
+	})
+}
+
+func (w *ridLifecycleWorld) refusedApplyProcessObserved(t *testing.T, want installationResult, checkpoint func(*installruntime.Process)) {
+	w.refusedApplyRun(t, want, true, checkpoint)
+}
+
+func (w *ridLifecycleWorld) refusedApplyRun(t *testing.T, want installationResult, debug bool, checkpoint func(*installruntime.Process)) {
 	t.Helper()
 	f := w.f
 	stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -545,7 +557,21 @@ func (w *ridLifecycleWorld) refusedApplyObserved(t *testing.T, want installation
 	watch := f.wire.StartReadinessWatch(f.given.ctx)
 	defer watch.Stop()
 	spawnAt := time.Now().UTC()
-	p, err := f.session.StartDelivery(f.given.ctx, w.delivery)
+	input := w.delivery
+	if debug {
+		// Только две последовательные скобки используют существующий диагностический уровень.
+		input.ExtraConfig = maps.Clone(input.ExtraConfig)
+		if input.ExtraConfig == nil {
+			input.ExtraConfig = map[string]any{}
+		}
+		logger := map[string]any{}
+		if old, ok := input.ExtraConfig["logger"].(map[string]any); ok {
+			logger = maps.Clone(old)
+		}
+		logger["level"] = "debug"
+		input.ExtraConfig["logger"] = logger
+	}
+	p, err := f.session.StartDelivery(f.given.ctx, input)
 	require.NoError(t, err)
 	ctx, c := context.WithTimeout(f.given.ctx, 60*time.Second)
 	defer c()
@@ -575,7 +601,7 @@ func (w *ridLifecycleWorld) refusedApplyObserved(t *testing.T, want installation
 	require.ErrorAs(t, err, &same)
 	require.Equal(t, 1, same.ExitCode())
 	if checkpoint != nil {
-		checkpoint()
+		checkpoint(p)
 	}
 	// Восстанавливаем только штатные слушатели/каталог, БЕЗ объявлений делегирования.
 	// Выведенный/удалённый C остаётся неизменным и не даёт полномочий этому пути.

@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -42,7 +43,21 @@ type installationCredential struct {
 	PrivateKeyPEM string `json:"privateKeyPem"`
 }
 
+// Наблюдение содержит только отпечатки входа издателя; секреты не покидают память.
+type installationAssertionInput struct {
+	ClientSHA256    string    `json:"clientSHA256"`
+	AssertionSHA256 string    `json:"assertionSHA256"`
+	IssuedAt        time.Time `json:"issuedAt"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+}
+
+func installationIdentitySHA(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
 type installationAuthentication struct {
+	logger            *slog.Logger
 	gateOnce          sync.Once
 	gate              chan struct{}
 	accessToken       string
@@ -122,7 +137,7 @@ func prepareInstallationAuthentication(pool *pgxpool.Pool, cfg config.Config, si
 	if err != nil {
 		return nil, err
 	}
-	return &installationAuthentication{credential: c, key: key, resolver: resolver, verifier: verifier, issuer: issuer, reader: reader, audience: cfg.AuthN.PresentedCredential.Audience, assertionAudience: signer.Issuer()}, nil
+	return &installationAuthentication{logger: logger, credential: c, key: key, resolver: resolver, verifier: verifier, issuer: issuer, reader: reader, audience: cfg.AuthN.PresentedCredential.Audience, assertionAudience: signer.Issuer()}, nil
 }
 
 // Authenticate повторно использует настоящий выданный токен доступа, каждый раз проверяя его
@@ -179,7 +194,7 @@ func (a *installationAuthentication) exchange(ctx context.Context) (client_token
 		if client.Kind != domain.AssertionClientServiceAccount {
 			return client_token.Output{}, "", installationProofFailure(clientassertion.OutcomeClientUnknown)
 		}
-		raw, err := a.freshAssertion(client)
+		raw, input, err := a.freshAssertionInput(client)
 		a.observeMaterial(raw)
 		if err != nil {
 			return client_token.Output{}, "", err
@@ -199,6 +214,7 @@ func (a *installationAuthentication) exchange(ctx context.Context) (client_token
 		if err != nil {
 			return client_token.Output{}, "", installationProofFailure(outcome)
 		}
+		a.observeAcceptedAssertion(ctx, input, verified, token.AccessToken != "")
 		return token, verified.Client.OwnerID, nil
 	}
 }
@@ -218,17 +234,22 @@ func waitInstallationExchange(ctx context.Context, retryAfter time.Duration) err
 }
 
 func (a *installationAuthentication) freshAssertion(client domain.AssertionClient) (string, error) {
+	raw, _, err := a.freshAssertionInput(client)
+	return raw, err
+}
+
+func (a *installationAuthentication) freshAssertionInput(client domain.AssertionClient) (string, installationAssertionInput, error) {
 	now := time.Now().UTC()
 	end := now.Add(min(60*time.Second, tokenpolicy.MaxAssertionLifetime))
 	if client.ExpiresAt > 0 && time.Unix(client.ExpiresAt, 0).Before(end) {
 		end = time.Unix(client.ExpiresAt, 0)
 	}
 	if !end.After(now) {
-		return "", status.Error(codes.Unauthenticated, "unauthenticated")
+		return "", installationAssertionInput{}, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
 	var nonce [32]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return "", err
+		return "", installationAssertionInput{}, err
 	}
 	assertion := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.RegisteredClaims{
 		Issuer: a.credential.ClientID, Subject: a.credential.ClientID, Audience: jwt.ClaimStrings{a.assertionAudience},
@@ -238,9 +259,20 @@ func (a *installationAuthentication) freshAssertion(client domain.AssertionClien
 	assertion.Header["kid"] = a.credential.KeyID
 	raw, err := assertion.SignedString(a.key)
 	if err != nil {
-		return "", status.Error(codes.Unauthenticated, "unauthenticated")
+		return "", installationAssertionInput{}, status.Error(codes.Unauthenticated, "unauthenticated")
 	}
-	return raw, nil
+	claims := assertion.Claims.(jwt.RegisteredClaims)
+	input := installationAssertionInput{ClientSHA256: installationIdentitySHA(claims.Issuer), AssertionSHA256: installationIdentitySHA(claims.ID), IssuedAt: claims.IssuedAt.Time, ExpiresAt: claims.ExpiresAt.Time}
+	return raw, input, nil
+}
+
+// Отсутствие или несогласованность диагностики не меняет исход аутентификации.
+// Событие появляется только после настоящего приёма и успешной выдачи токена.
+func (a *installationAuthentication) observeAcceptedAssertion(ctx context.Context, input installationAssertionInput, verified clientassertion.Result, issued bool) {
+	if a.logger == nil || !a.logger.Enabled(ctx, slog.LevelDebug) || !issued || verified.Outcome != clientassertion.OutcomeAccepted || verified.Client.ID == "" || verified.AssertionID == "" || input.IssuedAt.IsZero() || !input.ExpiresAt.After(input.IssuedAt) || input.ClientSHA256 != installationIdentitySHA(verified.Client.ID) || input.AssertionSHA256 != installationIdentitySHA(verified.AssertionID) || !input.ExpiresAt.Equal(verified.ExpiresAt) {
+		return
+	}
+	a.logger.DebugContext(ctx, "installation authentication accepted", slog.Any("installationAuthentication", input))
 }
 
 type installationVerifiedContext struct {

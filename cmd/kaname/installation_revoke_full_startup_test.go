@@ -470,7 +470,7 @@ func ridNativeRevokeOverlapAndSequential(t *testing.T) {
 		before := w.snapshot(t)
 		_, ops := w.grantIdentityCensus(t)
 		public.beforeSequential(t, w)
-		w.refusedApplyObserved(t, rid06Result(w), func() { public.sequentialBeforeRestore(t, w) })
+		w.refusedApplyProcessObserved(t, rid06Result(w), func(process *installruntime.Process) { public.sequentialBeforeRestore(t, w, process) })
 		public.afterSequential(t, w)
 		require.Equal(t, before, w.snapshot(t))
 		rid07CheckApplyOperations(t, w, ops, false)
