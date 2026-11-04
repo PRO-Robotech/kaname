@@ -74,7 +74,7 @@ C — отдельная долговременная cloud-admin SA; I нико
 Защищённый input добавляется в СУЩЕСТВУЮЩУЮ конфигурацию Kaname
 (`KANAME_CONFIG_PATH`): секция `moduleSeedInstaller` содержит `credentialFile`,
 для S1 один `tenantAccountId`, для S2 — canonical census вместо входного списка.
-Файл содержит только `clientId` и `privateKeyPem` из однократного Issue C;
+Файл содержит только `clientId`, `keyId` и `privateKeyPem` из однократного Issue C;
 доступ — installation process, 0600 либо эквивалентный ограниченный Secret mount.
 Principal/creator ID не задаётся конфигурацией; C определяется проверенной строкой
 реестра. Ключи/токены не попадают в argv, manifest, отчёты или диагностику.
