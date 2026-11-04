@@ -167,7 +167,9 @@ data:
         {{- end }}
       {{- end }}
 
-    {{- if hasKey .Values "moduleSeedInstaller" }}
+    {{- if not (hasKey .Values "moduleSeedInstaller") }}
+    {{- fail "moduleSeedInstaller должен быть картой, null недопустим" }}
+    {{- end }}
     {{- $installer := .Values.moduleSeedInstaller }}
     {{- if not (kindIs "map" $installer) }}
     {{- fail "moduleSeedInstaller должен быть картой" }}
@@ -180,6 +182,7 @@ data:
     {{- fail "поля moduleSeedInstaller должны быть строками, null недопустим" }}
     {{- end }}
     {{- end }}
+    {{- if gt (len $installer) 0 }}
     moduleSeedInstaller:
       {{- if hasKey $installer "credentialFile" }}
       credentialFile: {{ $installer.credentialFile | quote }}

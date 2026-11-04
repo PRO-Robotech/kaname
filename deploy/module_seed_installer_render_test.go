@@ -17,17 +17,20 @@ import (
 func TestProdProfile_RenderedModuleSeedInstallerPresenceAndTypes(t *testing.T) {
 	for _, tc := range []struct {
 		name, overlay, credential, tenant string
-		present, refusal                  bool
+		present, refusal, sectionAbsent   bool
 	}{
-		{"секция отсутствует", "", "", "", false, false},
-		{"S2 только путь", "moduleSeedInstaller:\n  credentialFile: /run/secrets/C.json\n", "/run/secrets/C.json", "", false, false},
-		{"S1 аккаунт", "moduleSeedInstaller:\n  credentialFile: /run/secrets/C.json\n  tenantAccountId: acc00000000000000001\n", "/run/secrets/C.json", "acc00000000000000001", true, false},
-		{"явная пустота", "moduleSeedInstaller:\n  tenantAccountId: ''\n", "", "", true, false},
-		{"null", "moduleSeedInstaller:\n  tenantAccountId: null\n", "", "", false, true},
-		{"число", "moduleSeedInstaller:\n  tenantAccountId: 7\n", "", "", false, true},
-		{"карта вместо строки", "moduleSeedInstaller:\n  tenantAccountId: {unexpected: value}\n", "", "", false, true},
-		{"unknown key", "moduleSeedInstaller:\n  unknownCredentialContents: SECRET_CONTENT_SENTINEL\n", "", "", false, true},
-		{"кавычки и новая строка", "moduleSeedInstaller:\n  credentialFile: \"/run/secrets/\\\"name\\nsecond\"\n  tenantAccountId: \"acc\\\"quoted\\nline\"\n", "/run/secrets/\"name\nsecond", "acc\"quoted\nline", true, false},
+		{"секция отсутствует", "", "", "", false, false, true},
+		{"пустая карта секции", "moduleSeedInstaller: {}\n", "", "", false, false, true},
+		{"null секции", "moduleSeedInstaller: null\n", "", "", false, true, false},
+		{"булев тип секции", "moduleSeedInstaller: false\n", "", "", false, true, false},
+		{"S2 только путь", "moduleSeedInstaller:\n  credentialFile: /run/secrets/C.json\n", "/run/secrets/C.json", "", false, false, false},
+		{"S1 аккаунт", "moduleSeedInstaller:\n  credentialFile: /run/secrets/C.json\n  tenantAccountId: acc00000000000000001\n", "/run/secrets/C.json", "acc00000000000000001", true, false, false},
+		{"явная пустота", "moduleSeedInstaller:\n  tenantAccountId: ''\n", "", "", true, false, false},
+		{"null", "moduleSeedInstaller:\n  tenantAccountId: null\n", "", "", false, true, false},
+		{"число", "moduleSeedInstaller:\n  tenantAccountId: 7\n", "", "", false, true, false},
+		{"карта вместо строки", "moduleSeedInstaller:\n  tenantAccountId: {unexpected: value}\n", "", "", false, true, false},
+		{"unknown key", "moduleSeedInstaller:\n  unknownCredentialContents: SECRET_CONTENT_SENTINEL\n", "", "", false, true, false},
+		{"кавычки и новая строка", "moduleSeedInstaller:\n  credentialFile: \"/run/secrets/\\\"name\\nsecond\"\n  tenantAccountId: \"acc\\\"quoted\\nline\"\n", "/run/secrets/\"name\nsecond", "acc\"quoted\nline", true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := chartCopy(t)
@@ -56,7 +59,7 @@ func TestProdProfile_RenderedModuleSeedInstallerPresenceAndTypes(t *testing.T) {
 			} else {
 				require.Nil(t, cfg.ModuleSeedInstaller.TenantAccountID)
 			}
-			if tc.overlay == "" {
+			if tc.sectionAbsent {
 				require.NotContains(t, in.ConfigBody, "moduleSeedInstaller:")
 			}
 		})
