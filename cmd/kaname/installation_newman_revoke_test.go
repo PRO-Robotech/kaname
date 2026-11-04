@@ -244,7 +244,10 @@ func (p *rid06PublicContext) sequentialBeforeRestore(t *testing.T, w *ridLifecyc
 	ridRequireWholeDeliveryUnchanged(t, p.beforeSequentialRun.Whole, s.Whole)
 	require.True(t, rid06FailedDeliveryEqual(*p.beforeSequentialRun, s), "full delivery/raw/business delta before ANY restoration must be zero; only independently checked installer Operations may be new")
 	logs := rid06ReadFailedLogs(t, w.f.session.Root, process)
-	startupProof, ok := rid06BuildFailedStartup("registry-installation-rid06-"+rid03Mode(t, w)+"-SEQUENTIAL-FAILED-STARTUP", os.Getenv("KANAME_RID_RUN_ID"), rid06HashExecutable(t), p.failedStartupExpected, logs, *p.beforeSequentialRun, s)
+	startupProof, ok, rejectionReason := rid06BuildFailedStartupWithReason("registry-installation-rid06-"+rid03Mode(t, w)+"-SEQUENTIAL-FAILED-STARTUP", os.Getenv("KANAME_RID_RUN_ID"), rid06HashExecutable(t), p.failedStartupExpected, logs, *p.beforeSequentialRun, s)
+	if !ok {
+		t.Logf("RID06 failed-startup rejection reason=%s", rejectionReason)
+	}
 	require.True(t, ok, "closed failed-startup replay and native Operation proof required before restoration")
 	p.preRestore = &s
 	p.refusalProof = true

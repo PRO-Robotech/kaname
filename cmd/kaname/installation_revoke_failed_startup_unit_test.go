@@ -111,6 +111,54 @@ func rid06FailedUnitFixture(mode string) (rid06FailedStartupExpected, rid06Faile
 
 // Каждая отрицательная проба меняет один факт законного полного запуска.
 func TestRID06FailedStartupProof(t *testing.T) {
+	// Причина каждой исходной пробы закрыта; законные двойники возвращают пустую причину.
+	expectedReasons := map[string]string{
+		"lawful-S1":                     "",
+		"lawful-S2":                     "",
+		"lawful-key-expiry":             "",
+		"wrong-client":                  "RID06_ASSERTION_BINDING_TIME_CLOSURE",
+		"wrong-assertion":               "RID06_ASSERTION_BINDING_TIME_CLOSURE",
+		"wrong-run":                     "RID06_EXPECTED_IDENTITY",
+		"wrong-case":                    "RID06_EXPECTED_IDENTITY",
+		"wrong-executable":              "RID06_EXPECTED_IDENTITY",
+		"extra-replay":                  "RID06_AFTER_REPLAY_BOUND_OR_CARDINALITY",
+		"deleted-replay":                "RID06_AFTER_REPLAY_BOUND_OR_CARDINALITY",
+		"modified-old-replay":           "RID06_OLD_REPLAY_IMMUTABLE",
+		"duplicate-old-replay":          "RID06_AFTER_REPLAY_BOUND_OR_CARDINALITY",
+		"raw-replay-sha":                "RID06_AFTER_REPLAY_BOUND_OR_CARDINALITY",
+		"replay-columns":                "RID06_BOOKKEEPING_CLOSURE",
+		"expiry":                        "RID06_ASSERTION_BINDING_TIME_CLOSURE",
+		"redemption-before":             "RID06_ASSERTION_BINDING_TIME_CLOSURE",
+		"redemption-after":              "RID06_ASSERTION_BINDING_TIME_CLOSURE",
+		"issued-before":                 "RID06_ASSERTION_BINDING_TIME_CLOSURE",
+		"reversed-clocks":               "RID06_PRIMARY_BOUNDS",
+		"zero-clock":                    "RID06_PRIMARY_BOUNDS",
+		"zero-issued":                   "RID06_ASSERTION_BINDING_TIME_CLOSURE",
+		"zero-event-time":               "RID06_EVENT_WINDOW",
+		"event-before":                  "RID06_EVENT_WINDOW",
+		"event-after":                   "RID06_EVENT_WINDOW",
+		"zero-replay-expiry":            "RID06_REPLAY_EXPIRY_PARSE",
+		"zero-redemption":               "RID06_REPLAY_REDEMPTION_PARSE",
+		"noncanonical-time":             "RID06_REPLAY_REDEMPTION_PARSE",
+		"other-bookkeeping":             "RID06_BOOKKEEPING_CLOSURE",
+		"audit-mutation":                "RID06_BOOKKEEPING_CLOSURE",
+		"domain-mutation":               "RID06_WHOLE_DELIVERY",
+		"business-mutation":             "RID06_DELIVERY_RAW_BUSINESS",
+		"operation-deletion":            "RID06_NEW_OPERATION_CARDINALITY",
+		"old-operation-mutation":        "RID06_OLD_OPERATION_IMMUTABLE",
+		"duplicate-old-operation":       "RID06_AFTER_OPERATIONS_BOUND",
+		"operation-wrong-creator":       "RID06_NEW_OPERATION_IDENTITY",
+		"operation-wrong-code":          "RID06_TENANT_FAILURE_CLOSURE",
+		"operation-response-on-failure": "RID06_TENANT_FAILURE_CLOSURE",
+		"operation-metadata":            "RID06_OPERATION_METADATA_CLOSURE",
+		"raw-operation-sha":             "RID06_AFTER_OPERATIONS_BOUND",
+		"raw-operation-mismatch":        "RID06_RAW_OPERATION_COHERENCE",
+		"ceiling-semantic":              "RID06_HISTORY_CEILINGS",
+		"ceiling-clock":                 "RID06_HISTORY_CEILINGS",
+		"separation":                    "RID06_SEPARATION_STABLE",
+		"missing-bookkeeping":           "RID06_BOOKKEEPING_AFTER_COUNT",
+	}
+
 	for _, name := range []string{"lawful-S1", "lawful-S2", "lawful-key-expiry", "wrong-client", "wrong-assertion", "wrong-run", "wrong-case", "wrong-executable", "extra-replay", "deleted-replay", "modified-old-replay", "duplicate-old-replay", "raw-replay-sha", "replay-columns", "expiry", "redemption-before", "redemption-after", "issued-before", "reversed-clocks", "zero-clock", "zero-issued", "zero-event-time", "event-before", "event-after", "zero-replay-expiry", "zero-redemption", "noncanonical-time", "other-bookkeeping", "audit-mutation", "domain-mutation", "business-mutation", "operation-deletion", "old-operation-mutation", "duplicate-old-operation", "operation-wrong-creator", "operation-wrong-code", "operation-response-on-failure", "operation-metadata", "raw-operation-sha", "raw-operation-mismatch", "ceiling-semantic", "ceiling-clock", "separation", "missing-bookkeeping"} {
 		t.Run(name, func(t *testing.T) {
 			mode := "S1"
@@ -233,9 +281,12 @@ func TestRID06FailedStartupProof(t *testing.T) {
 			case "missing-bookkeeping":
 				delete(b.Whole.Bookkeeping, "refresh_tokens")
 			}
-			proof, ok := rid06BuildFailedStartup(caseID, runID, executable, e, logs, a, b)
+			proof, ok, reason := rid06BuildFailedStartupWithReason(caseID, runID, executable, e, logs, a, b)
 			want := strings.HasPrefix(name, "lawful-")
 			require.Equal(t, want, ok)
+			expectedReason, covered := expectedReasons[name]
+			require.True(t, covered)
+			require.Equal(t, expectedReason, reason)
 			if !want {
 				require.Empty(t, proof)
 				return

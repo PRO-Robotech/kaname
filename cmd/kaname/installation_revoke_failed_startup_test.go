@@ -210,35 +210,64 @@ func rid06ReadFailedLogs(t *testing.T, root string, p *installruntime.Process) r
 }
 
 func rid06BuildFailedStartup(caseID, runID, executableSHA string, e rid06FailedStartupExpected, logs rid06FailedStartupLogs, a, b rid03NewmanSnapshot) (rid06FailedStartupProof, bool) {
-	fail := func() (rid06FailedStartupProof, bool) { return rid06FailedStartupProof{}, false }
+	proof, ok, _ := rid06BuildFailedStartupWithReason(caseID, runID, executableSHA, e, logs, a, b)
+	return proof, ok
+}
+
+// Закрытый код описывает только отвергнутый предикат, без частных значений.
+func rid06BuildFailedStartupWithReason(caseID, runID, executableSHA string, e rid06FailedStartupExpected, logs rid06FailedStartupLogs, a, b rid03NewmanSnapshot) (rid06FailedStartupProof, bool, string) {
+	fail := func(reason string) (rid06FailedStartupProof, bool, string) {
+		return rid06FailedStartupProof{}, false, reason
+	}
 	sha := regexp.MustCompile(`^[a-f0-9]{64}$`)
 	if e.CaseID != caseID || e.RunID != runID || e.TestExecutableSHA256 != executableSHA || !rid06FailedStartupCase(e.CaseID) || !regexp.MustCompile(`^[A-Za-z0-9-]{16,80}$`).MatchString(e.RunID) || !sha.MatchString(e.TestExecutableSHA256) || !sha.MatchString(e.ClientSHA256) || e.CreatorID == "" || e.TenantID == "" || e.DelegateID == "" || e.OldDelegationID == "" || e.CredentialExpiresAt.IsZero() || len(e.Accounts) == 0 {
-		return fail()
+		return fail("RID06_EXPECTED_IDENTITY")
 	}
 	if !sha.MatchString(logs.BinarySHA256) || !sha.MatchString(logs.StdoutSHA256) || !sha.MatchString(logs.StderrSHA256) || logs.ProcessDir == "" || filepath.IsAbs(logs.ProcessDir) || filepath.Clean(logs.ProcessDir) != logs.ProcessDir || strings.HasPrefix(logs.ProcessDir, "..") {
-		return fail()
+		return fail("RID06_LOG_BINDING")
 	}
-	if !rid06PrimaryBounds(a.Whole, b.Whole) || !rid06HistoryOwnCeilingsValid(a.Whole, b.Whole) || !rid06FailedDeliveryEqual(a, b) || !reflect.DeepEqual(a.Whole.Delivery, b.Whole.Delivery) || !reflect.DeepEqual(a.Whole.Separation, ridWholeBookkeeping) || !reflect.DeepEqual(a.Whole.Separation, b.Whole.Separation) || len(a.Whole.Bookkeeping) != len(ridWholeBookkeeping) || len(b.Whole.Bookkeeping) != len(ridWholeBookkeeping) {
-		return fail()
+	if !rid06PrimaryBounds(a.Whole, b.Whole) {
+		return fail("RID06_PRIMARY_BOUNDS")
+	}
+	if !rid06HistoryOwnCeilingsValid(a.Whole, b.Whole) {
+		return fail("RID06_HISTORY_CEILINGS")
+	}
+	if !rid06FailedDeliveryEqual(a, b) {
+		return fail("RID06_DELIVERY_RAW_BUSINESS")
+	}
+	if !reflect.DeepEqual(a.Whole.Delivery, b.Whole.Delivery) {
+		return fail("RID06_WHOLE_DELIVERY")
+	}
+	if !reflect.DeepEqual(a.Whole.Separation, ridWholeBookkeeping) {
+		return fail("RID06_EXPECTED_SEPARATION")
+	}
+	if !reflect.DeepEqual(a.Whole.Separation, b.Whole.Separation) {
+		return fail("RID06_SEPARATION_STABLE")
+	}
+	if len(a.Whole.Bookkeeping) != len(ridWholeBookkeeping) {
+		return fail("RID06_BOOKKEEPING_BEFORE_COUNT")
+	}
+	if len(b.Whole.Bookkeeping) != len(ridWholeBookkeeping) {
+		return fail("RID06_BOOKKEEPING_AFTER_COUNT")
 	}
 	for table := range ridWholeBookkeeping {
 		old, found := a.Whole.Bookkeeping[table]
 		now, exists := b.Whole.Bookkeeping[table]
 		if !found || !exists || !reflect.DeepEqual(old.Columns, now.Columns) || (table != "operations" && table != "client_assertion_replay" && !reflect.DeepEqual(old, now)) {
-			return fail()
+			return fail("RID06_BOOKKEEPING_CLOSURE")
 		}
 	}
 	old, oldHash, ok := rid06FailedBoundRows(a.Whole, "client_assertion_replay")
 	if !ok {
-		return fail()
+		return fail("RID06_BEFORE_REPLAY_BOUND")
 	}
 	now, nowHash, ok := rid06FailedBoundRows(b.Whole, "client_assertion_replay")
 	if !ok || len(now) != len(old)+1 {
-		return fail()
+		return fail("RID06_AFTER_REPLAY_BOUND_OR_CARDINALITY")
 	}
 	for key := range old {
 		if oldHash[key] != nowHash[key] {
-			return fail()
+			return fail("RID06_OLD_REPLAY_IMMUTABLE")
 		}
 	}
 	var replay rid06ReplayWitness
@@ -248,37 +277,37 @@ func rid06BuildFailedStartup(caseID, runID, executableSHA string, e rid06FailedS
 		}
 		expires, ok := rid06FailedTime(row["expires_at"])
 		if !ok {
-			return fail()
+			return fail("RID06_REPLAY_EXPIRY_PARSE")
 		}
 		redeemed, ok := rid06FailedTime(row["redeemed_at"])
 		if !ok {
-			return fail()
+			return fail("RID06_REPLAY_REDEMPTION_PARSE")
 		}
 		replay = rid06ReplayWitness{RowSHA256: nowHash[key], ClientSHA256: installationIdentitySHA(rid03S(row, "client_id")), AssertionSHA256: installationIdentitySHA(rid03S(row, "assertion_id")), ExpiresAt: expires, RedeemedAt: redeemed}
 	}
 	low, high := a.Whole.PrimaryFinishedAt, b.Whole.PrimaryStartedAt
 	input := logs.Event
 	if logs.AcceptedAt.IsZero() || logs.AcceptedAt.Before(low) || logs.AcceptedAt.After(high) {
-		return fail()
+		return fail("RID06_EVENT_WINDOW")
 	}
 	end := input.IssuedAt.Add(min(60*time.Second, tokenpolicy.MaxAssertionLifetime))
 	if e.CredentialExpiresAt.Truncate(time.Second).Before(end) {
 		end = e.CredentialExpiresAt.Truncate(time.Second)
 	}
 	if input.ClientSHA256 != e.ClientSHA256 || replay.ClientSHA256 != e.ClientSHA256 || !sha.MatchString(input.AssertionSHA256) || input.AssertionSHA256 != replay.AssertionSHA256 || input.IssuedAt.IsZero() || !input.IssuedAt.Equal(input.IssuedAt.Truncate(time.Second)) || input.IssuedAt.Before(low.Truncate(time.Second)) || input.IssuedAt.After(high) || !input.ExpiresAt.Equal(end) || !end.After(input.IssuedAt) || !replay.ExpiresAt.Equal(end) || replay.RedeemedAt.Before(low) || replay.RedeemedAt.After(high) || input.IssuedAt.After(replay.RedeemedAt.Add(tokenpolicy.ClockSkew)) || !replay.RedeemedAt.Before(end.Add(tokenpolicy.ClockSkew)) {
-		return fail()
+		return fail("RID06_ASSERTION_BINDING_TIME_CLOSURE")
 	}
 	ops, hashes, ok := rid06FailedBoundRows(b.Whole, "operations")
 	if !ok {
-		return fail()
+		return fail("RID06_AFTER_OPERATIONS_BOUND")
 	}
 	previous, previousHashes, ok := rid06FailedBoundRows(a.Whole, "operations")
 	if !ok {
-		return fail()
+		return fail("RID06_BEFORE_OPERATIONS_BOUND")
 	}
 	for key := range previous {
 		if previousHashes[key] != hashes[key] {
-			return fail()
+			return fail("RID06_OLD_OPERATION_IMMUTABLE")
 		}
 	}
 	// Независимый Raw снимок обязан описывать те же полные строки Operation.
@@ -290,18 +319,18 @@ func rid06BuildFailedStartup(caseID, runID, executableSHA string, e rid06FailedS
 		for _, row := range pair.raw {
 			id := rid03S(row, "id")
 			if id == "" || bound[id] != nil {
-				return fail()
+				return fail("RID06_RAW_OPERATION_IDENTITY")
 			}
 			bound[id] = row
 		}
 		if rid03EvidenceHash(bound) != rid03EvidenceHash(pair.rows) {
-			return fail()
+			return fail("RID06_RAW_OPERATION_COHERENCE")
 		}
 	}
 	wanted := map[string]bool{}
 	for _, account := range e.Accounts {
 		if account == "" || wanted[account] {
-			return fail()
+			return fail("RID06_EXPECTED_ACCOUNT_SET")
 		}
 		wanted[account] = true
 		if account == e.TenantID {
@@ -313,7 +342,7 @@ func rid06BuildFailedStartup(caseID, runID, executableSHA string, e rid06FailedS
 		expectedCount = 3
 	}
 	if len(wanted) != expectedCount || !wanted[e.TenantID] || len(ops) != len(previous)+len(wanted) {
-		return fail()
+		return fail("RID06_NEW_OPERATION_CARDINALITY")
 	}
 	proof := rid06FailedStartupProof{Expected: e, Logs: logs, Replay: replay, Operations: []rid06FailedOperationWitness{}, BeforeStartedAt: a.Whole.PrimaryStartedAt, BeforeFinishedAt: low, AfterStartedAt: high, AfterFinishedAt: b.Whole.PrimaryFinishedAt}
 	seen := map[string]bool{}
@@ -324,43 +353,43 @@ func rid06BuildFailedStartup(caseID, runID, executableSHA string, e rid06FailedS
 		account, resource := rid03S(row, "account_id"), rid03S(row, "resource_id")
 		done, ok := rid03Cell[bool](row, "done")
 		if !ok || !done || !wanted[account] || seen[account] || resource == "" || resource == e.OldDelegationID || rid03S(row, "principal_type") != "service_account" || rid03S(row, "principal_id") != e.CreatorID || rid03S(row, "principal_display_name") != e.CreatorID {
-			return fail()
+			return fail("RID06_NEW_OPERATION_IDENTITY")
 		}
 		seen[account] = true
 		created, ok := rid06FailedTime(row["created_at"])
 		if !ok {
-			return fail()
+			return fail("RID06_OPERATION_CREATED_PARSE")
 		}
 		modified, ok := rid06FailedTime(row["modified_at"])
 		if !ok || created.Before(low) || modified.Before(created) || modified.After(high) {
-			return fail()
+			return fail("RID06_OPERATION_TIME_WINDOW")
 		}
 		md, err := rid01ReadByteaCell(row, "metadata_data")
 		if err != nil {
-			return fail()
+			return fail("RID06_OPERATION_METADATA_BYTES")
 		}
 		var meta iamv1.CreateGrantDelegationMetadata
 		if (&anypb.Any{TypeUrl: rid03S(row, "metadata_type"), Value: md}).UnmarshalTo(&meta) != nil || meta.AccountId != account || meta.GrantDelegationId != resource {
-			return fail()
+			return fail("RID06_OPERATION_METADATA_CLOSURE")
 		}
 		witness := rid06FailedOperationWitness{RowSHA256: hashes[id], ID: id, AccountID: account, ResourceID: resource, CreatorID: e.CreatorID, CreatedAt: created, ModifiedAt: modified}
 		if account == e.TenantID {
 			code, ok := rid03Cell[*int32](row, "error_code")
 			if !ok || code == nil || *code != 9 || !rid03SameCell(row, "response_type", nil) || !rid03SameCell(row, "response_data", nil) {
-				return fail()
+				return fail("RID06_TENANT_FAILURE_CLOSURE")
 			}
 			witness.ErrorCode = *code
 		} else {
 			if !rid03SameCell(row, "error_code", nil) {
-				return fail()
+				return fail("RID06_ANCESTOR_SUCCESS_CODE")
 			}
 			rd, err := rid01ReadByteaCell(row, "response_data")
 			if err != nil {
-				return fail()
+				return fail("RID06_ANCESTOR_RESPONSE_BYTES")
 			}
 			var response iamv1.GrantDelegation
 			if (&anypb.Any{TypeUrl: rid03S(row, "response_type"), Value: rd}).UnmarshalTo(&response) != nil || response.Id != resource || response.AccountId != account || response.Delegate == nil || response.Delegate.Id != e.DelegateID {
-				return fail()
+				return fail("RID06_ANCESTOR_RESPONSE_CLOSURE")
 			}
 			witness.ResponseID = response.Id
 			matched := 0
@@ -370,13 +399,13 @@ func rid06BuildFailedStartup(caseID, runID, executableSHA string, e rid06FailedS
 				}
 			}
 			if matched != 1 {
-				return fail()
+				return fail("RID06_ANCESTOR_DELEGATION_CLOSURE")
 			}
 		}
 		proof.Operations = append(proof.Operations, witness)
 	}
 	sort.Slice(proof.Operations, func(i, j int) bool { return proof.Operations[i].ID < proof.Operations[j].ID })
-	return proof, true
+	return proof, true, ""
 }
 
 // Сравнение независимого входа сохраняется до запуска; исходные ID не форматируются.
