@@ -113,86 +113,13 @@ func New(
 	claims client_token.ClaimSource,
 	revocations client_token.RevocationLookup,
 ) (*clienttokenhttp.Handler, error) {
-	if cfg.PeerTimeout <= 0 {
-		return nil, fmt.Errorf("clienttokenwire: per-call timeout must be declared as a positive number " +
-			"(got none) — an external call without its own deadline hangs on an unresponsive peer forever")
-	}
-	if strings.TrimSpace(cfg.ExpectedAudience) == "" {
-		return nil, fmt.Errorf("clienttokenwire: expected assertion audience is required " +
-			"(empty means 'accept any audience')")
-	}
-	if clients == nil {
-		return nil, fmt.Errorf("clienttokenwire: client resolver is required")
-	}
-	if issuers == nil {
-		// Перечень доверенных издателей — не «дополнительная возможность»:
-		// эндпоинт объявляет федеративную выдачу, и без перечня она отвергала
-		// бы всякое утверждение молча.
-		return nil, fmt.Errorf("clienttokenwire: trusted issuer resolver is required")
-	}
-	if replay == nil {
-		return nil, fmt.Errorf("clienttokenwire: replay guard is required")
-	}
-	if revocations == nil {
-		// Отсечка отзыва-всех владельца — не «дополнительная проверка»: без
-		// читателя выдача не отличала бы «отсечек нет» от «спросить некого».
-		return nil, fmt.Errorf("clienttokenwire: revoke-all cutoff reader is required")
-	}
-	if cfg.InFlightCeiling <= 0 {
-		return nil, fmt.Errorf("clienttokenwire: in-flight exchange ceiling must be declared as a positive number "+
-			"(got %d) — zero means «no ceiling»", cfg.InFlightCeiling)
-	}
-
-	if cfg.Source == nil {
-		return nil, fmt.Errorf("clienttokenwire: source address rule is required — the failed-proof window " +
-			"per source would have nothing to key by")
-	}
-
-	// Темп строится ЗДЕСЬ, одним экземпляром на эндпоинт: обе полосы
-	// проверяющего списывают из него, и второй экземпляр удвоил бы темп.
-	pace, err := exchangepace.New(cfg.ExchangesPerClientPerSec, cfg.Clock)
+	verifier, issue, err := Prepare(cfg, clients, issuers, replay, signer, claims, revocations)
 	if err != nil {
-		return nil, fmt.Errorf("clienttokenwire: pace: %w", err)
+		return nil, err
 	}
-	// Окно П3 — тоже одно на эндпоинт: его делят все четыре вида выдачи.
 	failedProofs, err := failurewindow.New(cfg.FailedProofsPerSource, cfg.FailedProofWindow, cfg.Clock)
 	if err != nil {
-		return nil, fmt.Errorf("clienttokenwire: failed-proof window per source: %w", err)
-	}
-
-	verifier, err := clientassertion.New(clientassertion.Policy{
-		ExpectedAudience:     cfg.ExpectedAudience,
-		MaxLifetime:          cfg.AssertionLifetimeCeiling,
-		MaxFederatedLifetime: cfg.FederatedLifetimeCeiling,
-		ClockSkew:            cfg.ClockSkew,
-		Clock:                cfg.Clock,
-	},
-		WithDeadlineResolver(clients, cfg.PeerTimeout),
-		WithDeadlineIssuers(issuers, cfg.PeerTimeout),
-		WithDeadlineReplay(replay, cfg.PeerTimeout),
-		pace)
-	if err != nil {
-		return nil, fmt.Errorf("clienttokenwire: verifier: %w", err)
-	}
-
-	// Та же обёртка, что ставит сборка полос хука (`revocationpolicy`), с
-	// объявленным пределом на вызов: одно чтение одной строки несёт один
-	// предел на любой полосе (полоса базового секрета читает ту же строку
-	// в одном операторе со своей и несёт ту же величину пределом
-	// оператора).
-	cutoffs, err := revocationpolicy.WithDeadline(revocations, cfg.PeerTimeout)
-	if err != nil {
-		return nil, fmt.Errorf("clienttokenwire: revoke-all cutoff reader: %w", err)
-	}
-	issue, err := client_token.New(client_token.Config{
-		AllowedAudiences: cfg.AllowedAudiences,
-		DefaultAudience:  cfg.DefaultAudience,
-		TokenTTL:         cfg.TokenTTL,
-		Clock:            cfg.Clock,
-	},
-		signer, claims, cutoffs)
-	if err != nil {
-		return nil, fmt.Errorf("clienttokenwire: issuance: %w", err)
+		return nil, err
 	}
 
 	h, err := clienttokenhttp.NewHandler(clienttokenhttp.Config{
@@ -207,6 +134,98 @@ func New(
 		return nil, fmt.Errorf("clienttokenwire: endpoint: %w", err)
 	}
 	return h, nil
+}
+
+// Prepare строит общий проверяющий доказательства и издатель без открытия слушателя.
+// Повторы, отзыв, ограничение частоты и сроки каждого вызова совпадают с New.
+func Prepare(cfg BuildConfig, clients clientassertion.ClientResolver,
+	issuers clientassertion.TrustedIssuerResolver, replay clientassertion.ReplayGuard,
+	signer client_token.Signer, claims client_token.ClaimSource,
+	revocations client_token.RevocationLookup,
+) (*clientassertion.Verifier, *client_token.UseCase, error) {
+	if cfg.PeerTimeout <= 0 {
+		return nil, nil, fmt.Errorf("clienttokenwire: per-call timeout must be declared as a positive number " +
+			"(got none) — an external call without its own deadline hangs on an unresponsive peer forever")
+	}
+	if strings.TrimSpace(cfg.ExpectedAudience) == "" {
+		return nil, nil, fmt.Errorf("clienttokenwire: expected assertion audience is required " +
+			"(empty means 'accept any audience')")
+	}
+	if clients == nil {
+		return nil, nil, fmt.Errorf("clienttokenwire: client resolver is required")
+	}
+	if issuers == nil {
+		// Перечень доверенных издателей — не «дополнительная возможность»:
+		// эндпоинт объявляет федеративную выдачу, и без перечня она отвергала
+		// бы всякое утверждение молча.
+		return nil, nil, fmt.Errorf("clienttokenwire: trusted issuer resolver is required")
+	}
+	if replay == nil {
+		return nil, nil, fmt.Errorf("clienttokenwire: replay guard is required")
+	}
+	if revocations == nil {
+		// Отсечка отзыва-всех владельца — не «дополнительная проверка»: без
+		// читателя выдача не отличала бы «отсечек нет» от «спросить некого».
+		return nil, nil, fmt.Errorf("clienttokenwire: revoke-all cutoff reader is required")
+	}
+	if cfg.InFlightCeiling <= 0 {
+		return nil, nil, fmt.Errorf("clienttokenwire: in-flight exchange ceiling must be declared as a positive number "+
+			"(got %d) — zero means «no ceiling»", cfg.InFlightCeiling)
+	}
+
+	if cfg.Source == nil {
+		return nil, nil, fmt.Errorf("clienttokenwire: source address rule is required — the failed-proof window " +
+			"per source would have nothing to key by")
+	}
+
+	// Темп строится ЗДЕСЬ, одним экземпляром на эндпоинт: обе полосы
+	// проверяющего списывают из него, и второй экземпляр удвоил бы темп.
+	pace, err := exchangepace.New(cfg.ExchangesPerClientPerSec, cfg.Clock)
+	if err != nil {
+		return nil, nil, fmt.Errorf("clienttokenwire: pace: %w", err)
+	}
+	// Окно П3 — тоже одно на эндпоинт: его делят все четыре вида выдачи.
+	_, err = failurewindow.New(cfg.FailedProofsPerSource, cfg.FailedProofWindow, cfg.Clock)
+	if err != nil {
+		return nil, nil, fmt.Errorf("clienttokenwire: failed-proof window per source: %w", err)
+	}
+
+	verifier, err := clientassertion.New(clientassertion.Policy{
+		ExpectedAudience:     cfg.ExpectedAudience,
+		MaxLifetime:          cfg.AssertionLifetimeCeiling,
+		MaxFederatedLifetime: cfg.FederatedLifetimeCeiling,
+		ClockSkew:            cfg.ClockSkew,
+		Clock:                cfg.Clock,
+	},
+		WithDeadlineResolver(clients, cfg.PeerTimeout),
+		WithDeadlineIssuers(issuers, cfg.PeerTimeout),
+		WithDeadlineReplay(replay, cfg.PeerTimeout),
+		pace)
+	if err != nil {
+		return nil, nil, fmt.Errorf("clienttokenwire: verifier: %w", err)
+	}
+
+	// Та же обёртка, что ставит сборка полос хука (`revocationpolicy`), с
+	// объявленным пределом на вызов: одно чтение одной строки несёт один
+	// предел на любой полосе (полоса базового секрета читает ту же строку
+	// в одном операторе со своей и несёт ту же величину пределом
+	// оператора).
+	cutoffs, err := revocationpolicy.WithDeadline(revocations, cfg.PeerTimeout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("clienttokenwire: revoke-all cutoff reader: %w", err)
+	}
+	issue, err := client_token.New(client_token.Config{
+		AllowedAudiences: cfg.AllowedAudiences,
+		DefaultAudience:  cfg.DefaultAudience,
+		TokenTTL:         cfg.TokenTTL,
+		Clock:            cfg.Clock,
+	},
+		signer, claims, cutoffs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("clienttokenwire: issuance: %w", err)
+	}
+
+	return verifier, issue, nil
 }
 
 // FromPool собирает эндпоинт от пула: реестр, способный к утверждению,

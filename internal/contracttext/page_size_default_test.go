@@ -55,7 +55,7 @@ var pageSizeOwnDefault = map[string]int{
 
 // namedDefault — число, которое проза называет умолчанием: «Default value: N»,
 // «default N», «platform default (N)».
-var namedDefault = regexp.MustCompile(`(?i)\bdefault\b(?:\s+value)?\s*[:(]?\s*\(?(\d+)\)?`)
+var namedDefault = regexp.MustCompile(`(?i)(?:\bdefault\b(?:\s+value)?|по умолчанию)\s*[:(]?\s*\(?(\d+)\)?`)
 
 // pageSizeDefaultFindings — находки по полям `PageSize`; пусто = контракт
 // называет ровно умолчание службы в каждом поле.
@@ -113,6 +113,10 @@ func TestPageSizeDefaultPredicateInjection(t *testing.T) {
 		name, text string
 		red        bool
 	}{
+		{"русское верное", "0 выбирает значение по умолчанию (50), максимум 1000.", false},
+		{"русское чужое", "по умолчанию (100)", true},
+		{"русское не названо", "Размер страницы от 0 до 1000.", true},
+		{"русские противоречат", "по умолчанию (50); по умолчанию (100)", true},
 		{"чужое число", "The maximum number of results per page to return. Default value: 100.", true},
 		{"не названо", "The maximum number of results per page to return.", true},
 		{"два числа, одно чужое", "Default value: 50. Default 100 for old clients.", true},

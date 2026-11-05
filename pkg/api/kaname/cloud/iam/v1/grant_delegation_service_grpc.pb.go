@@ -33,7 +33,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// A set of methods for managing GrantDelegation resources — делегирований права
+// Набор методов управления ресурсами GrantDelegation — делегированиями права
 // выдавать.
 //
 // Право на каждом методе решает обработчик (`HANDLER_DECIDES`): право выдавать на
@@ -43,21 +43,21 @@ const (
 // Отказ в праве и несуществующее делегирование отвечают побайтово одинаково:
 // `PERMISSION_DENIED` `permission denied`.
 type GrantDelegationServiceClient interface {
-	// Returns the specified GrantDelegation resource. Право — право выдавать на
+	// Возвращает заданный ресурс GrantDelegation. Право — право выдавать на
 	// аккаунте делегирования либо вызывающий — его делегат.
 	Get(ctx context.Context, in *GetGrantDelegationRequest, opts ...grpc.CallOption) (*GrantDelegation, error)
-	// Lists grant delegations of an account, active and revoked, ordered by
+	// Перечисляет активные и отозванные делегирования выдачи аккаунта в порядке
 	// (created_at, id). Право — право выдавать на аккаунте; форма страницы судится
 	// до права.
 	List(ctx context.Context, in *ListGrantDelegationsRequest, opts ...grpc.CallOption) (*ListGrantDelegationsResponse, error)
-	// Creates a grant delegation. Право — право выдавать на аккаунте
+	// Создаёт делегирование выдачи. Право — право выдавать на аккаунте
 	// (`account_id`): владелец аккаунта, администратор аккаунта либо
 	// администратор облака. Делегат делегирований не заводит. Одно действующее
 	// делегирование на пару «аккаунт, делегат»: второе — `ALREADY_EXISTS` в
 	// `Operation.error`.
 	Create(ctx context.Context, in *CreateGrantDelegationRequest, opts ...grpc.CallOption) (*operation.Operation, error)
-	// Revokes the specified grant delegation and, in the same transaction, every
-	// active access binding granted under it (`REVOCATION_REASON_DELEGATION_REVOKED`).
+	// Отзывает заданное делегирование выдачи и в той же транзакции все
+	// активные привязки доступа, выданные по нему (`REVOCATION_REASON_DELEGATION_REVOKED`).
 	// Защита выдачи от удаления отзыву не мешает. Право — право выдавать на
 	// аккаунте делегирования; делегат своё делегирование не отзывает. Повторный
 	// отзыв — `FAILED_PRECONDITION`.
@@ -116,7 +116,7 @@ func (c *grantDelegationServiceClient) Revoke(ctx context.Context, in *RevokeGra
 // All implementations must embed UnimplementedGrantDelegationServiceServer
 // for forward compatibility.
 //
-// A set of methods for managing GrantDelegation resources — делегирований права
+// Набор методов управления ресурсами GrantDelegation — делегированиями права
 // выдавать.
 //
 // Право на каждом методе решает обработчик (`HANDLER_DECIDES`): право выдавать на
@@ -126,21 +126,21 @@ func (c *grantDelegationServiceClient) Revoke(ctx context.Context, in *RevokeGra
 // Отказ в праве и несуществующее делегирование отвечают побайтово одинаково:
 // `PERMISSION_DENIED` `permission denied`.
 type GrantDelegationServiceServer interface {
-	// Returns the specified GrantDelegation resource. Право — право выдавать на
+	// Возвращает заданный ресурс GrantDelegation. Право — право выдавать на
 	// аккаунте делегирования либо вызывающий — его делегат.
 	Get(context.Context, *GetGrantDelegationRequest) (*GrantDelegation, error)
-	// Lists grant delegations of an account, active and revoked, ordered by
+	// Перечисляет активные и отозванные делегирования выдачи аккаунта в порядке
 	// (created_at, id). Право — право выдавать на аккаунте; форма страницы судится
 	// до права.
 	List(context.Context, *ListGrantDelegationsRequest) (*ListGrantDelegationsResponse, error)
-	// Creates a grant delegation. Право — право выдавать на аккаунте
+	// Создаёт делегирование выдачи. Право — право выдавать на аккаунте
 	// (`account_id`): владелец аккаунта, администратор аккаунта либо
 	// администратор облака. Делегат делегирований не заводит. Одно действующее
 	// делегирование на пару «аккаунт, делегат»: второе — `ALREADY_EXISTS` в
 	// `Operation.error`.
 	Create(context.Context, *CreateGrantDelegationRequest) (*operation.Operation, error)
-	// Revokes the specified grant delegation and, in the same transaction, every
-	// active access binding granted under it (`REVOCATION_REASON_DELEGATION_REVOKED`).
+	// Отзывает заданное делегирование выдачи и в той же транзакции все
+	// активные привязки доступа, выданные по нему (`REVOCATION_REASON_DELEGATION_REVOKED`).
 	// Защита выдачи от удаления отзыву не мешает. Право — право выдавать на
 	// аккаунте делегирования; делегат своё делегирование не отзывает. Повторный
 	// отзыв — `FAILED_PRECONDITION`.

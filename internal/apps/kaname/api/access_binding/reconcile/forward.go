@@ -38,7 +38,7 @@ package reconcile
 //   - The forward path is ADDITIVE: it only WRITES the one new object's ACTIVE member +
 //     tuples and NEVER deletes anything. Two forward passes for DIFFERENT objects (R1,
 //     R2) of the SAME binding touch DISJOINT rows (member keyed by object, fga_outbox
-//     append-only, ledger keyed by (binding,member,user,relation,object)) → they do not
+//     только добавление, ключ журнала (binding,member,user,relation,object)) → они не
 //     conflict → they need no mutual serialization. So forward does NOT take the
 //     EXCLUSIVE lock; N registrations proceed CONCURRENTLY (the fix).
 //   - Idempotency (forward re-run, or forward + the async full backstop both emitting

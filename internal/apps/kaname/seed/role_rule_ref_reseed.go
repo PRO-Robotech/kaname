@@ -94,6 +94,8 @@ type RuleRefReseedObserver interface {
 // «Пересеяно» считает ЗАКОММИЧЕННЫЕ роли, а не начатые: при зернистости по роли
 // транзакция роли либо закоммичена, либо нет, и называть надо первое.
 type RuleRefReseedCensus struct {
+	// Completed — обход завершён; отменённая или непрочитанная перепись неполна.
+	Completed bool
 	// Examined — системных ролей с непустыми правилами прочитано.
 	Examined int
 	// Reseeded — ролей, чья транзакция закоммичена.
@@ -107,8 +109,9 @@ type RuleRefReseedCensus struct {
 // Structural — полоса, на которой повтор даст то же самое: роли есть, пересеяна
 // ни одна. Пустое множество ролей структурной полосой НЕ является — это свежая
 // база, и роняя на ней старт, проверка краснела бы на достижении цели.
+// Незавершённый обход не доказывает структурный отказ даже при нуле успехов.
 func (c RuleRefReseedCensus) Structural() bool {
-	return c.Examined > 0 && c.Reseeded == 0
+	return c.Completed && c.Examined > 0 && c.Reseeded == 0 && c.Failed == c.Examined
 }
 
 // ReseedSystemRoleRuleRefs пересчитывает проекцию объявленных сегментов КАЖДОЙ
@@ -129,30 +132,47 @@ func ReseedSystemRoleRuleRefs(
 	obs RuleRefReseedObserver,
 ) (RuleRefReseedCensus, error) {
 	var census RuleRefReseedCensus
+	if err := ctx.Err(); err != nil {
+		return census, err
+	}
 
 	roles, err := listMaterializingSystemRoles(ctx, pool)
 	if err != nil {
-		return census, err
+		return census, errors.Join(err, ctx.Err())
 	}
 	census.Examined = len(roles)
 
 	var failures []error
-	for _, rr := range roles {
+	for i, rr := range roles {
+		if err := ctx.Err(); err != nil {
+			return census, errors.Join(append(failures, err)...)
+		}
 		refs := domain.RuleRefsOf(rr.rules)
 		if rerr := replaceRuleRefsInOwnTx(ctx, repo, rr.id, refs); rerr != nil {
+			// Фиксируем исход работы до вызова наблюдателя: отмена после
+			// последней законченной роли уже не прерывает обход.
+			interrupted := ctx.Err()
+			census.Completed = i == len(roles)-1 && interrupted == nil
 			census.Failed++
 			failures = append(failures, rerr)
 			if obs != nil {
 				obs.IncRuleRefReseed(RuleRefReseedOutcomeFailed)
 			}
+			// Ошибка транзакционного helper уже отображена для RPC. Отмену
+			// сохраняет сама перепись, пока обход ещё не завершён.
+			if interrupted != nil {
+				return census, errors.Join(append(failures, interrupted)...)
+			}
 			continue
 		}
+		census.Completed = i == len(roles)-1
 		census.Reseeded++
 		census.Refs += len(refs)
 		if obs != nil {
 			obs.IncRuleRefReseed(RuleRefReseedOutcomeReseeded)
 		}
 	}
+	census.Completed = true
 	if len(failures) == 0 {
 		return census, nil
 	}

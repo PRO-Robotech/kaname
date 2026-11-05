@@ -126,7 +126,7 @@ resources:
       - {name: addCidrBlocks,    class: update}
       - {name: removeCidrBlocks, class: update}
 
-  # Административный ресурс кластера. Аннотации о нём молчат BY CONSTRUCTION:
+  # Административный ресурс кластера. Аннотации о нём молчат ПО ПОСТРОЕНИЮ:
   # его глаголы живут на внутреннем слушателе (ban #6), и якоря области этот
   # тип не несут — отсюда `producer: authored`.
   - name: addressPool

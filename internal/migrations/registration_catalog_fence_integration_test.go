@@ -29,8 +29,8 @@ func registrationCatalogWitness(t *testing.T, ctx context.Context, tx pgx.Tx) st
 	return witness
 }
 
-// Physical writes, not elapsed time or implementation text: one top-level
-// transaction registers eight real objects and recolors their raw projections.
+// Физические записи, а не время или текст реализации: одна транзакция верхнего уровня
+// регистрирует восемь настоящих объектов и перекрашивает их прямые проекции.
 func TestRegistrationCatalogFence_PhysicalWrites(t *testing.T) {
 	ctx, _, writer, _ := registrationRRDB(t)
 	tx, err := writer.Begin(ctx)
@@ -58,7 +58,7 @@ func TestRegistrationCatalogFence_PhysicalWrites(t *testing.T) {
 	require.Equal(t, 8, bindings)
 	require.Equal(t, 16, edges)
 	require.Zero(t, bad)
-	// Non-fatal assertions retain all three real baseline failure counts.
+	// Неостанавливающие утверждения сохраняют все три исходных числа отказов.
 	t.Logf("catalog updates registration=%d raw-mirror=%d raw-edge=%d", afterRegister-start, afterMirror-afterRegister, afterEdge-afterMirror)
 	if afterRegister-start > 2 {
 		t.Errorf("eight registrations rewrote the same protected catalog row %d times; want at most 2", afterRegister-start)
@@ -152,8 +152,8 @@ func TestRegistrationCatalogFence_RawEdgeAllCatalogRows(t *testing.T) {
 
 func TestRegistrationCatalogFence_DifferentTypesAndInvalidSecondCall(t *testing.T) {
 	ctx, observer, writer, _ := registrationRRDB(t)
-	// A dedicated, committed fixture type declares exactly the two parents used
-	// below; no arbitrary production catalog type or empty-parent assumption.
+	// Отдельный закоммиченный тип фикстуры объявляет ровно двух родителей, используемых
+	// ниже; без произвольного производственного типа каталога или допущения пустых родителей.
 	_, err := observer.Exec(ctx, `INSERT INTO kaname.catalog_resource
  (module,resource,dotted,object_type,parent_types,parent_names,permanent_project)
  VALUES ('registry','fence_probe','registry.fence_probe','catalog_fence_probe',

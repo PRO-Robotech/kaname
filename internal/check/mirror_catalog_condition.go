@@ -202,7 +202,7 @@ func MirrorWritesThroughCommands(filename, src string, commands map[string]strin
 	return writes, mentions, nil
 }
 
-// Используется общая SQL-лексика: quoted names точны, комментарии и dollar
+// Используется общая SQL-лексика: имена в кавычках точны, комментарии и dollar
 // bodies не становятся исполняемыми DDL. Это fold известного протокола команд,
 // а не разбор произвольного SQL.
 func mirrorRelation(tokens []sqlTok, at int) (string, int) {
@@ -224,8 +224,8 @@ func mirrorRelation(tokens []sqlTok, at int) (string, int) {
 	return name, at
 }
 
-// An unqualified mutation may resolve to the tracked schema through search_path.
-// Refuse that ambiguity; another explicitly qualified schema is unrelated.
+// Изменение без схемы может разрешиться в отслеживаемую схему через search_path.
+// Отклоняем неоднозначность; другая явно заданная схема к предмету не относится.
 func mirrorDependencyMatches(name, tracked string) bool {
 	if name == tracked {
 		return true
@@ -410,7 +410,7 @@ func mirrorFoldStatement(s []sqlTok, functions map[string]string, bindings map[s
 					j++
 				}
 			}
-			// A different named trigger on this relation is unrelated.
+			// Другой именованный триггер этого отношения к предмету не относится.
 			if tr := find("trigger"); word(0) == "alter" && tr >= 0 && word(tr+1) != "all" && word(tr+1) != "user" && word(tr+1) != b.trigger {
 				touched = false
 			}

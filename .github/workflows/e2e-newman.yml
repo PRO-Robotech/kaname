@@ -72,7 +72,7 @@ concurrency:
   group: e2e-newman-${{ github.ref }}
   cancel-in-progress: true
 
-# Used tool providers; these declarations also feed the native runner bootstrap.
+# Используемые поставщики инструментов; эти объявления также питают bootstrap нативного исполнителя.
 env:
   KANAME_RUNNER_IMAGE: ubuntu:24.04
   KANAME_RUNNER_OS: ubuntu/24.04
@@ -86,7 +86,7 @@ env:
     python3.12=3.12.3-1ubuntu0.17 python3.12-minimal=3.12.3-1ubuntu0.17
     libpython3.12-minimal=3.12.3-1ubuntu0.17 libpython3.12-stdlib=3.12.3-1ubuntu0.17
     libpython3.12t64=3.12.3-1ubuntu0.17
-  # Package releases and their self-reported CLI versions are distinct contracts.
+  # Версии релизов пакетов и версии, сообщаемые CLI, — разные контракты.
   KANAME_RUNNER_SYSTEM_CLI: '{"git":"2.43.0","openssl":"3.0.13","jq":"1.7","python3":"3.12.3"}'
   KANAME_RUNNER_NODE: '20.20.2'
   KANAME_RUNNER_NPM: '10.8.2'
@@ -136,7 +136,7 @@ jobs:
           import json, os, pathlib, subprocess
           work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
           raw = json.loads((work / "runtime-tools.json").read_text())
-          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          # Пропускаем только структурированные факты; исключаем PATH, пути исполняемых файлов и произвольный вывод.
           receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
           text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
           (work / "runtime-tools-public.json").write_text(text + "\n")
@@ -199,7 +199,7 @@ jobs:
           import json, os, pathlib, subprocess
           work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
           raw = json.loads((work / "runtime-tools.json").read_text())
-          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          # Пропускаем только структурированные факты; исключаем PATH, пути исполняемых файлов и произвольный вывод.
           receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
           text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
           (work / "runtime-tools-public.json").write_text(text + "\n")
@@ -542,7 +542,7 @@ jobs:
           import json, os, pathlib, subprocess
           work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
           raw = json.loads((work / "runtime-tools.json").read_text())
-          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          # Пропускаем только структурированные факты; исключаем PATH, пути исполняемых файлов и произвольный вывод.
           receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
           text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
           (work / "runtime-tools-public.json").write_text(text + "\n")
@@ -853,7 +853,7 @@ jobs:
               >> tests/newman/out-public/redaction-failed.txt
             exit 1
           fi
-          # Attach only after successful redaction and only to an existing report.
+          # Прикрепляем только после успешного обезличивания и только к существующему отчёту.
           if [ -f "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" ] && [ -n "$(find tests/newman/out-public -type f -print -quit)" ]; then
             cp "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" tests/newman/out-public/runner-provider.json
           fi
@@ -993,7 +993,7 @@ jobs:
           import json, os, pathlib, subprocess
           work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
           raw = json.loads((work / "runtime-tools.json").read_text())
-          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          # Пропускаем только структурированные факты; исключаем PATH, пути исполняемых файлов и произвольный вывод.
           receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
           text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
           (work / "runtime-tools-public.json").write_text(text + "\n")
@@ -1182,7 +1182,7 @@ jobs:
               > tests/newman/out-public/redaction-failed.txt
             exit 1
           fi
-          # Attach only after successful redaction and only to an existing report.
+          # Прикрепляем только после успешного обезличивания и только к существующему отчёту.
           if [ -f "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" ] && [ -n "$(find tests/newman/out-public -type f -print -quit)" ]; then
             cp "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" tests/newman/out-public/runner-provider.json
           fi
@@ -1285,7 +1285,7 @@ jobs:
           import json, os, pathlib, subprocess
           work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
           raw = json.loads((work / "runtime-tools.json").read_text())
-          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          # Пропускаем только структурированные факты; исключаем PATH, пути исполняемых файлов и произвольный вывод.
           receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
           text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
           (work / "runtime-tools-public.json").write_text(text + "\n")
@@ -1308,6 +1308,26 @@ jobs:
             exit 1
           fi
           echo "инструменты на месте: newman $(newman --version), node $(node --version)"
+
+      - name: протокол native RID — 16 Python проверок
+        id: ridprotocol
+        run: python3 tests/newman/scripts/selftest_rid_native_protocol_unit.py -v
+
+      - name: реальный Node Newman HTTPS bridge
+        if: ${{ !cancelled() && steps.ridprotocol.outcome != 'skipped' }}
+        run: |
+          export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
+          export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
+          test -x "$KANAME_RID_NODE_BINARY"
+          test -d "$KANAME_RID_NEWMAN_MODULE"
+          "$KANAME_RID_NODE_BINARY" -e 'const fs=require("fs"),path=require("path"); if(JSON.parse(fs.readFileSync(path.join(process.env.KANAME_RID_NEWMAN_MODULE,"package.json"))).version!=="6.2.2")process.exit(125);'
+          python3 - <<'PY_RID_TOOLS'
+          import hashlib, os, pathlib, runpy
+          bridge = runpy.run_path("tests/newman/scripts/selftest_rid_native_bridge.py")
+          print("RID_NEWMAN_TREE_SHA256 " + bridge["tool_tree"](pathlib.Path(os.environ["KANAME_RID_NEWMAN_MODULE"])))
+          print("RID_NODE_SHA256 " + hashlib.sha256(pathlib.Path(os.environ["KANAME_RID_NODE_BINARY"]).read_bytes()).hexdigest())
+          PY_RID_TOOLS
+          python3 tests/newman/scripts/selftest_rid_native_bridge.py
 
       # ТРИ ИСХОДА РАЗЛИЧАЮТСЯ КОДОМ: 0 — свойство держится, 1 — находки,
       # 2 — предпосылка не выполнена (нет newman, нет коллекции, не исполнилась ни
@@ -1433,7 +1453,7 @@ jobs:
           import json, os, pathlib, subprocess
           work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
           raw = json.loads((work / "runtime-tools.json").read_text())
-          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          # Пропускаем только структурированные факты; исключаем PATH, пути исполняемых файлов и произвольный вывод.
           receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
           text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
           (work / "runtime-tools-public.json").write_text(text + "\n")
@@ -1693,7 +1713,7 @@ jobs:
               > tests/newman/out-public/redaction-failed.txt
             exit 1
           fi
-          # Attach only after successful redaction and only to an existing report.
+          # Прикрепляем только после успешного обезличивания и только к существующему отчёту.
           if [ -f "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" ] && [ -n "$(find tests/newman/out-public -type f -print -quit)" ]; then
             cp "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" tests/newman/out-public/runner-provider.json
           fi
@@ -1784,7 +1804,7 @@ jobs:
           import json, os, pathlib, subprocess
           work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
           raw = json.loads((work / "runtime-tools.json").read_text())
-          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          # Пропускаем только структурированные факты; исключаем PATH, пути исполняемых файлов и произвольный вывод.
           receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
           text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
           (work / "runtime-tools-public.json").write_text(text + "\n")
@@ -1850,7 +1870,7 @@ jobs:
           import json, os, pathlib, subprocess
           work = pathlib.Path(os.environ["RUNNER_TEMP"]) / "kaname-runner"
           raw = json.loads((work / "runtime-tools.json").read_text())
-          # Whitelist structured facts; exclude PATH, executable paths and free-form output.
+          # Пропускаем только структурированные факты; исключаем PATH, пути исполняемых файлов и произвольный вывод.
           receipt = {"uid": os.getuid(), "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "checkout_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "packages": raw["packages"], "tools": {name: {key: row[key] for key in ("version", "expected", "sha256", "declared_version_equality")} for name, row in raw["tools"].items()}, "python_runtime": {key: raw["python_runtime"][key] for key in ("version", "openssl")}, "git_https_helper_startup_rc": raw["git_https_helper"]["startup_rc"]}
           text = json.dumps(receipt, sort_keys=True, ensure_ascii=True)
           (work / "runtime-tools-public.json").write_text(text + "\n")

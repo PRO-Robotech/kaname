@@ -101,7 +101,7 @@ type User struct {
 	// регистрация адресом живого приглашения ложится на строку этого
 	// приглашения, а не заводит вторую.
 	Email string `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`
-	// Human-readable display name. Задаёт пригласивший при Invite; не задано —
+	// Читаемое человеком отображаемое имя. Задаёт пригласивший при Invite; не задано —
 	// берётся локальная часть адреса (до `@`).
 	DisplayName string `protobuf:"bytes,4,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	// Creation timestamp.

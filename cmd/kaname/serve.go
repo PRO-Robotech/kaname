@@ -40,7 +40,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
+	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/edgecredential"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
@@ -51,8 +53,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -87,7 +91,24 @@ func stopGRPCBounded(srv grpcStopper, timeout time.Duration) {
 	}
 }
 
-func runServe(cfg config.Config) error {
+// installationRepositoryDecorator — внутренний шов композиции. Опубликованная
+// точка входа всегда передаёт nil; конфигурация или RPC не могут его выбрать.
+type installationRepositoryDecorator func(kanamerepo.Repository) kanamerepo.Repository
+
+type installationServeDependencies struct {
+	decorateInstallationRelations  func(authzguard.RelationChecker) authzguard.RelationChecker
+	decorateInstallationRepository installationRepositoryDecorator
+	observeCredential              func(string, string)
+	decorateInstallationReader     func(*kanamepg.InstallationReader) installationReadSource
+	installationPageSize           int
+	afterCompletedInstallationPair func(context.Context, installationCompletedPair) error
+}
+
+func runServe(cfg config.Config, optional ...installationServeDependencies) error {
+	var installationDependencies installationServeDependencies
+	if len(optional) > 0 {
+		installationDependencies = optional[0]
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
@@ -329,10 +350,75 @@ func runServe(cfg config.Config) error {
 	// Отчёт композиции корень сохраняет: из него шаг «модель против каталога»
 	// ниже узнаёт, какой модуль принёс в модель процесса тип вне канона
 	// (kaname#865, Д10) — второй композиции для этого не заводится.
-	composedReport, cErr := installComposedModel(logger, deliveredManifests)
+	preparedModel, cErr := prepareComposedModel(logger, deliveredManifests)
 	if cErr != nil {
 		return cErr
 	}
+
+	// Предварительная проверка всей поставки идёт до установки модели и всех записей поставки.
+	ownManifest, omErr := loadOwnManifest(logger)
+	if omErr != nil {
+		return omErr
+	}
+	if err := moduleseed.Preflight(ownManifest, deliveredManifests); err != nil {
+		return err
+	}
+	if hasInstallationDelegations(deliveredManifests) {
+		if err := validateInstallationInput(cfg.ModuleSeedInstaller); err != nil {
+			return failInstallation(logger, "input", "tenantAccountId", "", "", 0, err)
+		}
+		if _, _, err := loadInstallationCredential(cfg.ModuleSeedInstaller.CredentialFile); err != nil {
+			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
+		}
+	}
+	signingKeystore, tokenSigner, err := buildTokenSigning(ctx, pool, cfg, logger)
+	if err != nil {
+		return fmt.Errorf("shared issuance preparation: %w", err)
+	}
+	presentedReader, err := preparePresentedReader(pool, cfg, signingKeystore, logger)
+	if err != nil {
+		return err
+	}
+	var installationRelations authzguard.RelationChecker = authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(pool, preparedModel.plans), personmarks.New(pool))
+	if installationDependencies.decorateInstallationRelations != nil {
+		installationRelations = installationDependencies.decorateInstallationRelations(installationRelations)
+	}
+	realInstallationReader := kanamepg.NewInstallationReader(pool)
+	var installationReader installationReadSource = realInstallationReader
+	if installationDependencies.decorateInstallationReader != nil {
+		installationReader = installationDependencies.decorateInstallationReader(realInstallationReader)
+	}
+	installationPageSize := 256
+	if installationDependencies.installationPageSize > 0 {
+		installationPageSize = installationDependencies.installationPageSize
+	}
+	var installationAuthn *installationAuthentication
+	if hasInstallationDelegations(deliveredManifests) {
+		installationAuthn, err = prepareInstallationAuthentication(pool, cfg, tokenSigner, presentedReader, logger)
+		if err != nil {
+			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
+		}
+		// Только неизменяемые копии: наблюдение не может заменить удостоверения,
+		// субъекта, издателя, проверяющего или любое решение о полномочиях.
+		installationAuthn.observeCredential = installationDependencies.observeCredential
+		installationAuthn.observeMaterial("")
+		verified, err := installationAuthn.Authenticate(ctx)
+		if err != nil {
+			return failInstallation(logger, "authentication", "", "", "", 0, err)
+		}
+		if err := authzguard.RequireClusterAdmin(verified, installationRelations); err != nil {
+			return failInstallation(logger, "preflight-authority", "moduleSeedInstaller.credentialFile", "", "", 0, err)
+		}
+		if installationTarget(cfg.ModuleSeedInstaller) != "" {
+			if _, _, err := installationReader.InstallationAccounts(ctx, installationTarget(cfg.ModuleSeedInstaller), installationPageSize); err != nil {
+				return failInstallation(logger, "input", "tenantAccountId", "", "", 0, shared.MapRepoErrAt(ctx, err))
+			}
+		}
+	}
+	if err := authzmodel.Install(preparedModel.text); err != nil {
+		return err
+	}
+	composedReport := preparedModel.report
 
 	// ПРИМЕНЕНИЕ ДОСТАВЛЕННОГО — между чтением доставки и стражем паритета
 	// (задача kacho#1034).
@@ -459,10 +545,6 @@ func runServe(cfg config.Config) error {
 	// доставленных: новая роль модуля iam заводится объявлением манифеста образа,
 	// а не миграцией. Довод — шапка `applyImageModuleRoles`. Свой манифест читается
 	// здесь и тот же связанный идентификатор уходит ниже применителю посева.
-	ownManifest, omErr := loadOwnManifest(logger)
-	if omErr != nil {
-		return omErr
-	}
 	if riErr := applyImageModuleRoles(ctx, logger, rolesApplier, ownManifest); riErr != nil {
 		return riErr
 	}
@@ -513,6 +595,13 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("configure LRO default-registry: %w", err)
 	}
 	operations.Start()
+	var installationRepo kanamerepo.Repository = kanamepg.New(pool, nil)
+	if installationDependencies.decorateInstallationRepository != nil {
+		installationRepo = installationDependencies.decorateInstallationRepository(installationRepo)
+	}
+	if err := applyInstallationDelegations(ctx, logger, installationAuthn, installationRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), installationPageSize, appliedManifests, installationDependencies.afterCompletedInstallationPair); err != nil {
+		return err
+	}
 
 	// Orphan-reconciler backstop: разрешает осиротевшие done=false операции умершего
 	// процесса (kill-9 / истекший terminal-write budget) в терминал по
@@ -535,10 +624,6 @@ func runServe(cfg config.Config) error {
 	// Своя чеканка токенов (задача kacho#897): ключница, подписывающий ключ и
 	// подписант. Собирается ДО поверхностей, потому что от неё зависят обе —
 	// выдача докер-токена и публикация нашей записи набора.
-	signingKeystore, tokenSigner, err := buildTokenSigning(ctx, pool, cfg, logger)
-	if err != nil {
-		return fmt.Errorf("своя чеканка токенов: %w", err)
-	}
 	startSigningKeyMaintenance(ctx, signingKeystore, logger)
 
 	// ЛИЧНОСТИ МОДУЛЕЙ (kaname#984) — ОДИН перечень на все пути признания
@@ -959,43 +1044,10 @@ func runServe(cfg config.Config) error {
 	// поставщика личность приходит через край, и читателю нечего делать. Под
 	// посадкой own выключенный приём отвергается стражем настройки, а не
 	// молчаливым nil здесь.
-	var presentedReader *presentedcred.Reader
-	if cfg.AuthN.PresentedCredential.Enabled {
-		basicAuthority, err := newBasicCredentialAuthority(pool)
-		if err != nil {
-			return fmt.Errorf("basic credential authority: %w", err)
-		}
-		if signingKeystore == nil {
-			// Настройка это уже отвергла (страж связывает приём с чеканкой), и
-			// отказ здесь — не второй страж, а отказ ПОСТРОЕНИЯ: собранный
-			// наполовину читатель отвергал бы всё, и узналось бы это на первом
-			// запросе арендатора.
-			return fmt.Errorf("приём предъявленного удостоверения включён, но собственного " +
-				"реестра ключей нет — проверять подпись нечем")
-		}
-		presentedReader, err = presentedcred.New(presentedcred.Config{
-			BasicCredentials:   basicAuthority,
-			Issuer:             cfg.AuthN.TokenSigning.Issuer,
-			Audience:           cfg.AuthN.PresentedCredential.Audience,
-			AllowedAlgorithms:  cfg.AuthN.TokenSigning.AllowedAlgorithmList(),
-			Keys:               signingKeystore,
-			Revocations:        kanamepg.NewMintedTokenRevocationRepo(pool),
-			RevocationCacheTTL: cfg.AuthN.PresentedCredential.RevocationCacheTTL,
-			Logger:             logger.With(slog.String("component", "presented_credential")),
-			// Домен доверия — ТОТ ЖЕ объект, что уезжает в пару звеньев
-			// извлечения личности: читатель предъявленного удостоверения
-			// разбирает личность модуля тем же общим извлекателем, и своя
-			// величина здесь разошлась бы с той молча.
-			TrustDomain: cfg.AuthN.TrustDomain(),
-		})
-		if err != nil {
-			return fmt.Errorf("читатель предъявленного удостоверения: %w", err)
-		}
+	if presentedReader != nil {
 		metricsReg.NewPresentedCredentialCollector(func() metrics.PresentedCredentialCounts {
 			st := presentedReader.Stats()
-			return metrics.PresentedCredentialCounts{
-				Accepted: st.Accepted, Refused: st.Refused, Unavailable: st.Unavailable,
-			}
+			return metrics.PresentedCredentialCounts{Accepted: st.Accepted, Refused: st.Refused, Unavailable: st.Unavailable}
 		})
 	}
 
@@ -2091,9 +2143,12 @@ func runServe(cfg config.Config) error {
 	// поднимала бы тревогу одинаково там, где арендатор получает отказ, и там,
 	// где перестаёт работать наша собственная проверка (kacho#1821).
 	ruleRefReseed := metricsReg.NewRuleRefReseedRecorder()
-	tasks = append(tasks, func() error {
+	startupSeedTask := func(startupCtx context.Context) error {
 		defer close(startupSeedDone)
-		if ores, oerr := orphanScopeSweeper.RunOnce(taskCtx); oerr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if ores, oerr := orphanScopeSweeper.RunOnce(startupCtx); oerr != nil {
 			logger.Warn("orphan-scope sweep failed (next boot will retry)",
 				slog.Any("err", oerr),
 				slog.Int("scopes_revoked", ores.ScopesRevoked),
@@ -2102,7 +2157,10 @@ func runServe(cfg config.Config) error {
 		// Перепись прохода по зеркалу печатается НА ЛЮБОМ исходе, включая чистый:
 		// «сирот ноль» обязано быть отличимо от «проход не состоялся», а строки
 		// журнала у этих двух случаев иначе одинаковы — их нет.
-		if mres, merr := orphanMirrorSweeper.RunOnce(taskCtx); merr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if mres, merr := orphanMirrorSweeper.RunOnce(startupCtx); merr != nil {
 			logger.Warn("orphan-mirror sweep failed (next boot will retry)",
 				slog.Any("err", merr), slog.String("census", mres.Census()))
 		} else if mres.Executed {
@@ -2113,7 +2171,10 @@ func runServe(cfg config.Config) error {
 		// включая чистый, и на чистом дереве проход ПРОХОДИТ, а не падает:
 		// проверка, падающая на достижении своей цели, толкает держать сироту
 		// ради зелёного.
-		if dres, derr := danglingProjectMirrorSweeper.RunOnce(taskCtx); derr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if dres, derr := danglingProjectMirrorSweeper.RunOnce(startupCtx); derr != nil {
 			logger.Warn("dangling-project-mirror sweep failed (next boot will retry)",
 				slog.Any("err", derr), slog.String("census", dres.Census()))
 		} else if dres.Executed {
@@ -2135,7 +2196,10 @@ func runServe(cfg config.Config) error {
 		// числа. Уровень выбирается по НЕРАЗРЕШИМОЙ части: снятое с преемником —
 		// объявленное свойство дерева, и жалоба на нём краснела бы после всякого
 		// законного снятия типа.
-		if drows, dscanned, derr := resource_mirror.Divergence(taskCtx, pool); derr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if drows, dscanned, derr := resource_mirror.Divergence(startupCtx, pool); derr != nil {
 			logger.Warn("resource-mirror divergence unread (next boot will retry)",
 				slog.Any("err", derr))
 		} else if census := resource_mirror.DivergenceCensus(drows, dscanned); len(
@@ -2145,7 +2209,10 @@ func runServe(cfg config.Config) error {
 		} else {
 			logger.Info("resource-mirror divergence: " + census)
 		}
-		if oerr := seed.BackfillOwnerBindings(taskCtx, pool); oerr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		if oerr := seed.BackfillOwnerBindings(startupCtx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
 		}
 		// Страж расхождения литерала и строк каталога отработал РАНЬШЕ — в
@@ -2166,9 +2233,12 @@ func runServe(cfg config.Config) error {
 		// самолечащая, менять ограниченное отставание на полный отказ службы
 		// нельзя); структурная — системные роли есть, пересеяна ни одна —
 		// РОНЯЕТ старт, потому что «повтори позже» на ней есть ложь.
-		verbs, verr := seed.ReseedSystemRoleVerbs(taskCtx, kanameRepo, pool,
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		verbs, verr := seed.ReseedSystemRoleVerbs(startupCtx, kanameRepo, pool,
 			catalogSnapshot.Facts(), roleVerbReseed)
-		if verr != nil {
+		if verr != nil && (verbs.Completed || startupCtx.Err() == nil) {
 			logger.Error("пересчёт проекции глаголов роли отказал",
 				slog.Any("err", verr),
 				slog.Int("roles_examined", verbs.Examined),
@@ -2181,12 +2251,18 @@ func runServe(cfg config.Config) error {
 			slog.Int("roles_examined", verbs.Examined),
 			slog.Int("roles_reseeded", verbs.Reseeded),
 			slog.Int("roles_failed", verbs.Failed),
-			slog.Int("pairs", verbs.Pairs))
+			slog.Int("pairs", verbs.Pairs),
+			slog.Bool("completed", verbs.Completed))
 		if verbs.Structural() {
 			return fmt.Errorf("пересчёт проекции глаголов роли: осмотрено %d системных ролей, "+
 				"пересеяно 0 — повтор даст то же самое, и цепь вердикта собирает ответ "+
 				"«разрешено ли действие» из строк, которых нет: %w",
 				verbs.Examined, verr)
+		}
+		if !verbs.Completed {
+			if err := startupCtx.Err(); err != nil {
+				return err
+			}
 		}
 		// Пересчёт проекции ОБЪЯВЛЕННЫХ СЕГМЕНТОВ правила — третья сторона того
 		// же правила и СВОЯ полоса отказа (kacho#1821).
@@ -2205,8 +2281,11 @@ func runServe(cfg config.Config) error {
 		// ненаписанного стража значило бы менять ограниченную потерю проверки на
 		// полный отказ. Поэтому здесь `Error` плюс счётчик плюс перепись — и
 		// структурная полоса НАЗВАНА в тексте, а не проглочена.
-		refs, rerr := seed.ReseedSystemRoleRuleRefs(taskCtx, kanameRepo, pool, ruleRefReseed)
-		if rerr != nil {
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		refs, rerr := seed.ReseedSystemRoleRuleRefs(startupCtx, kanameRepo, pool, ruleRefReseed)
+		if rerr != nil && (refs.Completed || startupCtx.Err() == nil) {
 			logger.Error("пересчёт проекции сегментов правила отказал",
 				slog.Any("err", rerr),
 				slog.Bool("structural", refs.Structural()),
@@ -2220,15 +2299,27 @@ func runServe(cfg config.Config) error {
 			slog.Int("roles_examined", refs.Examined),
 			slog.Int("roles_reseeded", refs.Reseeded),
 			slog.Int("roles_failed", refs.Failed),
-			slog.Int("refs", refs.Refs))
+			slog.Int("refs", refs.Refs),
+			slog.Bool("completed", refs.Completed))
+		if !refs.Completed {
+			if err := startupCtx.Err(); err != nil {
+				return err
+			}
+		}
 		// Перепись встроенного доступа. Системные выдачи можно ОТОЗВАТЬ — это и есть
 		// предмет kacho#893/#895, — поэтому их отсутствие обязано быть видно оператору, а
 		// не выглядеть поломкой продукта.
-		seed.LogSystemGrantCensus(taskCtx, pool, logger.With(slog.String("component", "system_grants")))
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		seed.LogSystemGrantCensus(startupCtx, pool, logger.With(slog.String("component", "system_grants")))
 		// Перепись прохода печатает сам проход, на любом исходе. Отказ старт не
 		// роняет: отказавшие выдачи повторяет такт `RunEvery` (задача выше), без
 		// перезапуска процесса.
-		res, berr := backfillRunner.RunOnce(taskCtx)
+		if err := startupCtx.Err(); err != nil {
+			return err
+		}
+		res, berr := backfillRunner.RunOnce(startupCtx)
 		if berr != nil {
 			logger.Error("сводящий проход по выдачам на старте свёл не все — повторит такт",
 				slog.Duration("interval", convergeWindows.Interval),
@@ -2237,7 +2328,10 @@ func runServe(cfg config.Config) error {
 				slog.Any("err", berr))
 		}
 		if res.Executed {
-			report, verr := verifyGate.Verify(taskCtx)
+			if err := startupCtx.Err(); err != nil {
+				return err
+			}
+			report, verr := verifyGate.Verify(startupCtx)
 			if verr != nil {
 				logger.Warn("p8 verify-gate: verify failed", slog.Any("err", verr))
 			} else {
@@ -2272,7 +2366,10 @@ func runServe(cfg config.Config) error {
 			// Отчёт о том, РАЗРЕШАЮТСЯ ли материализованные чтения (F-12 / VBC-19):
 			// настоящий Check по каждой тройке v_* активной выдачи. Именно отчёт:
 			// вызывающий журналирует вердикт и ничего не переключает (#119).
-			relReport, rerr := verifyGate.VerifyRelationSatisfiesAction(taskCtx)
+			if err := startupCtx.Err(); err != nil {
+				return err
+			}
+			relReport, rerr := verifyGate.VerifyRelationSatisfiesAction(startupCtx)
 			if rerr != nil {
 				logger.Warn("p8 verify-gate: relation-satisfies-action check failed", slog.Any("err", rerr))
 			} else {
@@ -2284,6 +2381,9 @@ func runServe(cfg config.Config) error {
 			}
 		}
 		return nil
+	}
+	tasks = append(tasks, func() error {
+		return superviseStartupTask(taskCtx, triggerShutdown, startupSeedTask)
 	})
 
 	// Пересчёт ОЧЕРЕДИ глаголов правил (kaname#878) — своя задача, а не шаг

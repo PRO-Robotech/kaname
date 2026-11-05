@@ -48,7 +48,7 @@ def main() -> int:
         "REST_ENDPOINT": 9098, "INTERNAL_REST_ENDPOINT": 9099, "LOGIN_LANE_ENDPOINT": 9100,
     }.items():
         env["KANAME_API_SERVER__" + key] = f"tcp://127.0.0.1:{port}"
-    # Explicit empty YAML plus the exact stand environment; no inherited config.
+    # Явный пустой YAML и точное окружение стенда; унаследованной конфигурации нет.
     config = evidence / "config.yaml"
     config.write_text("{}\n")
     env["KANAME_CONFIG_PATH"] = str(config)
@@ -149,7 +149,7 @@ def main() -> int:
                     with tls.wrap_socket(conn, server_hostname="localhost"):
                         pass
         wait_probe(listeners_probe)
-        # Real own public application protocol (not a PID/startup-log assertion).
+        # Настоящий собственный публичный протокол приложения (не утверждение по PID/журналу запуска).
         def jwks_probe():
             with urllib.request.urlopen("https://localhost:9097/.well-known/kaname/jwks.json", context=tls, timeout=2) as response:
                 doc = json.load(response)
@@ -169,8 +169,8 @@ def main() -> int:
             step("seed-own", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--pki", str(pki)], timeout=240)
             step("seed-resource", ["python3", "tests/authz-fixtures/seed_registry_resource.py", "--pki", str(pki),
                                    "--ledger", str(evidence / "registry-intent.json")])
-            # This matrix uses ordinary machine delegates; human ceremony
-            # slots belong to their separate acceptance wave.
+            # Эта матрица использует обычных машинных делегатов; слоты человеческой
+            # церемонии относятся к своей отдельной волне приёмки.
             step("seed-delegates", ["python3", "tests/authz-fixtures/seed_delegation.py", "--pki", str(pki),
                                     "--ledger", str(evidence / "delegation-subjects.json")])
             step("remint-bootstrap", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--remint-bootstrap", "--pki", str(pki)])

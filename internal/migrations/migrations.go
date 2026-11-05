@@ -11,8 +11,8 @@ import "embed"
 //go:embed *.sql
 var FS embed.FS
 
-// Historical contains the exact retired collision lineage for upgrade evidence.
-// It is deliberately separate from FS: goose must never collect both 90000s.
+// Historical содержит точную снятую конфликтующую линию для доказательств обновления.
+// Она намеренно отделена от FS: goose никогда не должен собирать обе 90000.
 //
 //go:embed historical/*.sql
 var Historical embed.FS

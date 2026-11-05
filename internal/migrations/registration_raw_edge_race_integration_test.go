@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Reviewer-only external probe: no injected trigger/DDL/callback. The normal
-// migration runner creates the schema; the contested schedule uses plain DML.
+// Внешняя проба только рецензента: без внедрённых триггера/DDL/обратного вызова. Обычный
+// исполнитель миграций создаёт схему; спорное расписание использует простой DML.
 func TestReview983_RawEdgeVersusFirstBinding(t *testing.T) {
 	for _, tc := range []struct{ name, edgeProject string }{
 		{"legal_same_project_twin", "review-project-P"},
@@ -72,9 +72,9 @@ func TestReview983_RawEdgeVersusFirstBinding(t *testing.T) {
 				}
 				done <- e
 			}()
-			// Support an implementation that serializes this schedule: if command is
-			// blocked by raw's transaction, commit raw and let it continue. No sleeps
-			// decide correctness: blocking is established by PostgreSQL's lock graph.
+			// Допускаем реализацию, сериализующую это расписание: если command
+			// заблокирована транзакцией raw, коммитим raw и даём продолжиться. Корректность не
+			// решается сном: блокировка установлена графом замков PostgreSQL.
 			ticker := time.NewTicker(10 * time.Millisecond)
 			defer ticker.Stop()
 			var commandErr error
@@ -181,9 +181,9 @@ func TestRegistrationRawUpdateVersusFirstBinding(t *testing.T) {
 					}
 					done <- e
 				}()
-				// Support an implementation that serializes this schedule: if command is
-				// blocked by raw's transaction, commit raw and let it continue. No sleeps
-				// decide correctness: blocking is established by PostgreSQL's lock graph.
+				// Допускаем реализацию, сериализующую это расписание: если command
+				// заблокирована транзакцией raw, коммитим raw и даём продолжиться. Корректность не
+				// решается сном: блокировка установлена графом замков PostgreSQL.
 				ticker := time.NewTicker(10 * time.Millisecond)
 				defer ticker.Stop()
 				var commandErr error

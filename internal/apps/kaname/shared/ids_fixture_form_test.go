@@ -86,6 +86,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/corelib/treecorpus"
+
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 )
 
@@ -464,32 +466,11 @@ type testFile struct {
 // намеренно негодной формы живёт в комментарии, и без них она была бы невидима.
 func parseTestTree(t *testing.T, root string) []testFile {
 	t.Helper()
-	var out []testFile
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "testdata", "node_modules", "docs":
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), "_test.go") {
-			return nil
-		}
-		fset := token.NewFileSet()
-		f, perr := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
-		if perr != nil {
-			return perr
-		}
-		out = append(out, testFile{Path: path, AST: f, FSet: fset})
-		return nil
-	})
+	out, err := readIDCorpus(root, true)
 	if err != nil {
-		t.Fatalf("обход файлов проб не состоялся: %v", err)
+		t.Fatalf("корпус проб: %v", err)
 	}
+
 	return out
 }
 
@@ -594,4 +575,38 @@ func ownFormOf(domainDir string) map[string]*regexp.Regexp {
 		return nil
 	})
 	return out
+}
+
+// readIDCorpus — единый индексный reader обоих guards. Синтетика инъекций
+// передаёт отдельный корпус; падение index/read/parse возвращается ошибкой.
+func readIDCorpus(root string, tests bool) ([]testFile, error) {
+	paths, err := treecorpus.UnderWithSuffix(root, ".go")
+	if err != nil {
+		return nil, err
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	var files []testFile
+	for _, path := range paths {
+		relative, err := filepath.Rel(abs, path)
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(root, relative)
+		if strings.HasSuffix(path, "_test.go") != tests || idCorpusExcluded(root, path) {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, testFile{Path: path, AST: file, FSet: fset})
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("индекс не содержит файлов выбранного ID корпуса")
+	}
+	return files, nil
 }

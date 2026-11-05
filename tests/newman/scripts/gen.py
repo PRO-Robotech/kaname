@@ -41,6 +41,8 @@ from pathlib import Path
 from dataclasses import dataclass, field, replace
 from typing import List, Dict, Optional, Tuple
 
+from rid_midrun_public import midrun_read_steps
+
 # --- общий слой генератора (задача kacho#1367) ------------------------------------
 # Помощники ниже общие для ВСЕХ наборов newman и живут в дереве в одном
 # экземпляре: `tests/newman/kacholib/gen_shared.py`. До сведения каждый набор нёс
@@ -2061,6 +2063,7 @@ _EMIT = Emit(
 _INJECTED = {
     "Step": Step,
     "Case": Case,
+    "midrun_read_steps": midrun_read_steps,
     "assert_status": assert_status,
     "assert_answered": assert_answered,
     "assert_grpc_code": assert_grpc_code,

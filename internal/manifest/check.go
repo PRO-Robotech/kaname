@@ -4,6 +4,7 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -166,6 +167,8 @@ var skippedDirNames = []string{"node_modules", "vendor", "dist", "build"}
 // Перепись печатается ВСЕГДА, а не только при находках: без неё зелёный вердикт
 // не отличить от вердикта обхода, не прочитавшего ничего.
 type CheckReport struct {
+	// InputViolations обозначает неверные поля в порядке поставки, без значений.
+	InputViolations []string
 	// ManifestsRead — манифестов прочитано. Считается и негодный: он прочитан,
 	// и именно поэтому о нём есть что сказать.
 	ManifestsRead int
@@ -524,6 +527,12 @@ func readAndJudge(root string, listing manifestListing, referent TypeReferent,
 		m, err := LoadWithReferent(data, referent, judgeOpts...)
 		if err != nil {
 			report.Findings = append(report.Findings, report.Paths[i]+": "+err.Error())
+			var field interface{ FieldPath() string }
+			path := fmt.Sprintf("manifests[%d]", i)
+			if errors.As(err, &field) {
+				path += "." + field.FieldPath()
+			}
+			report.InputViolations = append(report.InputViolations, path)
 			continue
 		}
 		report.Manifests = append(report.Manifests, m)

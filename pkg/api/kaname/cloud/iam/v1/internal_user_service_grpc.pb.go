@@ -29,11 +29,11 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// InternalUserService — cluster-internal user API (port 9091).
+// InternalUserService — внутренний пользовательский API кластера (порт 9091).
 //
 // НЕ публикуется на external TLS listener.
 //
-// Transport: `Get` — регистрируется в api-gateway internal mux (нужен
+// Транспорт: `Get` — регистрируется во внутреннем мультиплексоре api-gateway (нужен
 // interceptor'у).
 type InternalUserServiceClient interface {
 	// Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).
@@ -62,11 +62,11 @@ func (c *internalUserServiceClient) Get(ctx context.Context, in *GetUserRequest,
 // All implementations must embed UnimplementedInternalUserServiceServer
 // for forward compatibility.
 //
-// InternalUserService — cluster-internal user API (port 9091).
+// InternalUserService — внутренний пользовательский API кластера (порт 9091).
 //
 // НЕ публикуется на external TLS listener.
 //
-// Transport: `Get` — регистрируется в api-gateway internal mux (нужен
+// Транспорт: `Get` — регистрируется во внутреннем мультиплексоре api-gateway (нужен
 // interceptor'у).
 type InternalUserServiceServer interface {
 	// Internal Get без auth (для api-gateway interceptor'а; не выставляется на public mux).

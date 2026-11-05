@@ -90,7 +90,7 @@ func (d GrantDelegation) AllowsSubjectType(t SubjectType) bool {
 //
 // Сравнивается ПАРА, а не голый идентификатор: вид принципала нормализуется
 // одной функцией (`SubjectTypeOfPrincipal`), поэтому человек с совпавшим
-// идентификатором делегатом не считается by construction.
+// идентификатором делегатом не считается по построению.
 func (d GrantDelegation) IsDelegate(principalType, principalID string) bool {
 	t, ok := SubjectTypeOfPrincipal(principalType)
 	return ok && t == SubjectTypeServiceAccount && principalID != "" && principalID == string(d.DelegateID)

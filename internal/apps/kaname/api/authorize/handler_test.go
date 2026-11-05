@@ -149,7 +149,7 @@ func TestHandler_BatchCheck_OrderPreserved(t *testing.T) {
 // system_admin) must NOT be silently dropped on the batch path. Here the verb
 // "list" would derive `viewer`, but the explicit override is "system_admin";
 // the verdict source MUST be asked about "system_admin", proving the override was
-// forwarded (and not the relation derived from the action).
+// передаётся дальше (а не отношение, выведенное из действия).
 func TestHandler_BatchCheck_ForwardsRequiredRelation(t *testing.T) {
 	h, stub := newHandlerWithStub(true)
 	_, err := h.BatchCheck(moduleCertCtx(), &iamv1.BatchAuthorizeCheckRequest{

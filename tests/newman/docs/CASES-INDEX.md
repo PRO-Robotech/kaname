@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 913
+Всего кейсов: 1312
 
 ## Перепись по модулям
 
@@ -83,6 +83,18 @@
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/rbac-subject-channel-equivalence.py` | 8 |
 | `cases/rbac-visibility-set.py` | 7 |
+| `cases/registry-installation-rid01.py` | 8 |
+| `cases/registry-installation-rid02.py` | 4 |
+| `cases/registry-installation-rid03.py` | 44 |
+| `cases/registry-installation-rid04.py` | 14 |
+| `cases/registry-installation-rid05.py` | 30 |
+| `cases/registry-installation-rid06.py` | 30 |
+| `cases/registry-installation-rid07.py` | 32 |
+| `cases/registry-installation-rid08.py` | 6 |
+| `cases/registry-installation-rid09.py` | 32 |
+| `cases/registry-installation-rid10.py` | 6 |
+| `cases/registry-installation-rid11.py` | 128 |
+| `cases/registry-installation-rid12.py` | 65 |
 
 ---
 
@@ -1381,3 +1393,474 @@
 - `IAM-ESC-E4`
 
 ESC-E1…E4 приёмки role-rights-stay-within-what-is-named, редакция 4.
+
+## `cases/registry-installation-rid08.py` — 6 кейсов
+
+Полные публичные последствия шести фаз RID08 в том же native-мире; состояние и токен выдаёт владеющий integration-производитель. Каждый кейс обязателен для общей приёмки.
+
+- `registry-installation-rid08-FIRST-N3`
+- `registry-installation-rid08-REPEAT-N4`
+- `registry-installation-rid08-EMPTY-N0`
+- `registry-installation-rid08-LATE-FAULT-N0`
+- `registry-installation-rid08-FAULT-TWIN-N3`
+- `registry-installation-rid08-RETRY-N3`
+
+## `cases/registry-installation-rid02.py` — 4 кейсов
+
+Публичные снимки до и после перестановки осей в тех же S1/S2 мирах; полные страницы и Get сверяются с независимым primary-снимком.
+
+- `registry-installation-rid02-S1-BEFORE-REORDER`
+- `registry-installation-rid02-S1-AFTER-REORDER`
+- `registry-installation-rid02-S2-BEFORE-REORDER`
+- `registry-installation-rid02-S2-AFTER-REORDER`
+
+## `cases/registry-installation-rid09.py` — 32 кейсов
+
+Публичные снимки до и после preflight для всех четырёх ошибок, обоих порядков манифестов и законных близнецов; каталог, роли, SA, группы, членства, привязки и доверенности сверяются с primary.
+
+- `registry-installation-rid09-ROLEIDS-M1-M2-NEGATIVE-BEFORE`
+- `registry-installation-rid09-ROLEIDS-M1-M2-NEGATIVE-AFTER`
+- `registry-installation-rid09-ROLEIDS-M1-M2-TWIN-BEFORE`
+- `registry-installation-rid09-ROLEIDS-M1-M2-TWIN-AFTER`
+- `registry-installation-rid09-ROLEIDS-M2-M1-NEGATIVE-BEFORE`
+- `registry-installation-rid09-ROLEIDS-M2-M1-NEGATIVE-AFTER`
+- `registry-installation-rid09-ROLEIDS-M2-M1-TWIN-BEFORE`
+- `registry-installation-rid09-ROLEIDS-M2-M1-TWIN-AFTER`
+- `registry-installation-rid09-TARGETTYPES-M1-M2-NEGATIVE-BEFORE`
+- `registry-installation-rid09-TARGETTYPES-M1-M2-NEGATIVE-AFTER`
+- `registry-installation-rid09-TARGETTYPES-M1-M2-TWIN-BEFORE`
+- `registry-installation-rid09-TARGETTYPES-M1-M2-TWIN-AFTER`
+- `registry-installation-rid09-TARGETTYPES-M2-M1-NEGATIVE-BEFORE`
+- `registry-installation-rid09-TARGETTYPES-M2-M1-NEGATIVE-AFTER`
+- `registry-installation-rid09-TARGETTYPES-M2-M1-TWIN-BEFORE`
+- `registry-installation-rid09-TARGETTYPES-M2-M1-TWIN-AFTER`
+- `registry-installation-rid09-SUBJECTTYPES-M1-M2-NEGATIVE-BEFORE`
+- `registry-installation-rid09-SUBJECTTYPES-M1-M2-NEGATIVE-AFTER`
+- `registry-installation-rid09-SUBJECTTYPES-M1-M2-TWIN-BEFORE`
+- `registry-installation-rid09-SUBJECTTYPES-M1-M2-TWIN-AFTER`
+- `registry-installation-rid09-SUBJECTTYPES-M2-M1-NEGATIVE-BEFORE`
+- `registry-installation-rid09-SUBJECTTYPES-M2-M1-NEGATIVE-AFTER`
+- `registry-installation-rid09-SUBJECTTYPES-M2-M1-TWIN-BEFORE`
+- `registry-installation-rid09-SUBJECTTYPES-M2-M1-TWIN-AFTER`
+- `registry-installation-rid09-DELEGATE-M1-M2-NEGATIVE-BEFORE`
+- `registry-installation-rid09-DELEGATE-M1-M2-NEGATIVE-AFTER`
+- `registry-installation-rid09-DELEGATE-M1-M2-TWIN-BEFORE`
+- `registry-installation-rid09-DELEGATE-M1-M2-TWIN-AFTER`
+- `registry-installation-rid09-DELEGATE-M2-M1-NEGATIVE-BEFORE`
+- `registry-installation-rid09-DELEGATE-M2-M1-NEGATIVE-AFTER`
+- `registry-installation-rid09-DELEGATE-M2-M1-TWIN-BEFORE`
+- `registry-installation-rid09-DELEGATE-M2-M1-TWIN-AFTER`
+
+## `cases/registry-installation-rid10.py` — 6 кейсов
+
+Публичное состояние после частичного применения, восстановления и в независимых законных близнецах. Полная история доверенности, выдачи и операций сверяется с primary; операции читает их настоящий создатель.
+
+- `registry-installation-rid10-FAULT-PARTIAL`
+- `registry-installation-rid10-FAULT-RECOVERED`
+- `registry-installation-rid10-FAULT-TWIN`
+- `registry-installation-rid10-RETIREMENT-PARTIAL`
+- `registry-installation-rid10-RETIREMENT-RECOVERED`
+- `registry-installation-rid10-RETIREMENT-TWIN`
+
+---
+
+## `cases/registry-installation-rid07.py` — 32 кейсов
+
+> Публичное наблюдение конфликтующих и совпадающих осей до и после повторного применения в S1/S2.
+
+- `registry-installation-rid07-ROLEIDS-S1-NEGATIVE-BEFORE`
+- `registry-installation-rid07-ROLEIDS-S1-NEGATIVE-AFTER`
+- `registry-installation-rid07-ROLEIDS-S1-TWIN-BEFORE`
+- `registry-installation-rid07-ROLEIDS-S1-TWIN-AFTER`
+- `registry-installation-rid07-ROLEIDS-S2-NEGATIVE-BEFORE`
+- `registry-installation-rid07-ROLEIDS-S2-NEGATIVE-AFTER`
+- `registry-installation-rid07-ROLEIDS-S2-TWIN-BEFORE`
+- `registry-installation-rid07-ROLEIDS-S2-TWIN-AFTER`
+- `registry-installation-rid07-TARGETTYPES-S1-NEGATIVE-BEFORE`
+- `registry-installation-rid07-TARGETTYPES-S1-NEGATIVE-AFTER`
+- `registry-installation-rid07-TARGETTYPES-S1-TWIN-BEFORE`
+- `registry-installation-rid07-TARGETTYPES-S1-TWIN-AFTER`
+- `registry-installation-rid07-TARGETTYPES-S2-NEGATIVE-BEFORE`
+- `registry-installation-rid07-TARGETTYPES-S2-NEGATIVE-AFTER`
+- `registry-installation-rid07-TARGETTYPES-S2-TWIN-BEFORE`
+- `registry-installation-rid07-TARGETTYPES-S2-TWIN-AFTER`
+- `registry-installation-rid07-SUBJECTTYPES-S1-NEGATIVE-BEFORE`
+- `registry-installation-rid07-SUBJECTTYPES-S1-NEGATIVE-AFTER`
+- `registry-installation-rid07-SUBJECTTYPES-S1-TWIN-BEFORE`
+- `registry-installation-rid07-SUBJECTTYPES-S1-TWIN-AFTER`
+- `registry-installation-rid07-SUBJECTTYPES-S2-NEGATIVE-BEFORE`
+- `registry-installation-rid07-SUBJECTTYPES-S2-NEGATIVE-AFTER`
+- `registry-installation-rid07-SUBJECTTYPES-S2-TWIN-BEFORE`
+- `registry-installation-rid07-SUBJECTTYPES-S2-TWIN-AFTER`
+- `registry-installation-rid07-DELEGATEDBY-S1-NEGATIVE-BEFORE`
+- `registry-installation-rid07-DELEGATEDBY-S1-NEGATIVE-AFTER`
+- `registry-installation-rid07-DELEGATEDBY-S1-TWIN-BEFORE`
+- `registry-installation-rid07-DELEGATEDBY-S1-TWIN-AFTER`
+- `registry-installation-rid07-DELEGATEDBY-S2-NEGATIVE-BEFORE`
+- `registry-installation-rid07-DELEGATEDBY-S2-NEGATIVE-AFTER`
+- `registry-installation-rid07-DELEGATEDBY-S2-TWIN-BEFORE`
+- `registry-installation-rid07-DELEGATEDBY-S2-TWIN-AFTER`
+
+---
+
+## `cases/registry-installation-rid12.py` — 65 кейсов
+
+> Публичное наблюдение закрытой формы, пределов осей, отсутствующей и пустой доверенности, а также перестановки осей.
+
+- `registry-installation-rid12-UNKNOWN-FIELD-NEGATIVE-BEFORE`
+- `registry-installation-rid12-UNKNOWN-FIELD-NEGATIVE-AFTER`
+- `registry-installation-rid12-UNKNOWN-FIELD-TWIN-BEFORE`
+- `registry-installation-rid12-UNKNOWN-FIELD-TWIN-AFTER`
+- `registry-installation-rid12-EMPTY-ROLEIDS-NEGATIVE-BEFORE`
+- `registry-installation-rid12-EMPTY-ROLEIDS-NEGATIVE-AFTER`
+- `registry-installation-rid12-EMPTY-ROLEIDS-TWIN-BEFORE`
+- `registry-installation-rid12-EMPTY-ROLEIDS-TWIN-AFTER`
+- `registry-installation-rid12-DUPLICATE-ROLEIDS-NEGATIVE-BEFORE`
+- `registry-installation-rid12-DUPLICATE-ROLEIDS-NEGATIVE-AFTER`
+- `registry-installation-rid12-DUPLICATE-ROLEIDS-TWIN-BEFORE`
+- `registry-installation-rid12-DUPLICATE-ROLEIDS-TWIN-AFTER`
+- `registry-installation-rid12-EMPTY-TARGETTYPES-NEGATIVE-BEFORE`
+- `registry-installation-rid12-EMPTY-TARGETTYPES-NEGATIVE-AFTER`
+- `registry-installation-rid12-EMPTY-TARGETTYPES-TWIN-BEFORE`
+- `registry-installation-rid12-EMPTY-TARGETTYPES-TWIN-AFTER`
+- `registry-installation-rid12-DUPLICATE-TARGETTYPES-NEGATIVE-BEFORE`
+- `registry-installation-rid12-DUPLICATE-TARGETTYPES-NEGATIVE-AFTER`
+- `registry-installation-rid12-DUPLICATE-TARGETTYPES-TWIN-BEFORE`
+- `registry-installation-rid12-DUPLICATE-TARGETTYPES-TWIN-AFTER`
+- `registry-installation-rid12-EMPTY-SUBJECTTYPES-NEGATIVE-BEFORE`
+- `registry-installation-rid12-EMPTY-SUBJECTTYPES-NEGATIVE-AFTER`
+- `registry-installation-rid12-EMPTY-SUBJECTTYPES-TWIN-BEFORE`
+- `registry-installation-rid12-EMPTY-SUBJECTTYPES-TWIN-AFTER`
+- `registry-installation-rid12-DUPLICATE-SUBJECTTYPES-NEGATIVE-BEFORE`
+- `registry-installation-rid12-DUPLICATE-SUBJECTTYPES-NEGATIVE-AFTER`
+- `registry-installation-rid12-DUPLICATE-SUBJECTTYPES-TWIN-BEFORE`
+- `registry-installation-rid12-DUPLICATE-SUBJECTTYPES-TWIN-AFTER`
+- `registry-installation-rid12-ROLES17-NEGATIVE-BEFORE`
+- `registry-installation-rid12-ROLES17-NEGATIVE-AFTER`
+- `registry-installation-rid12-ROLES17-TWIN-BEFORE`
+- `registry-installation-rid12-ROLES17-TWIN-AFTER`
+- `registry-installation-rid12-TYPES17-NEGATIVE-BEFORE`
+- `registry-installation-rid12-TYPES17-NEGATIVE-AFTER`
+- `registry-installation-rid12-TYPES17-TWIN-BEFORE`
+- `registry-installation-rid12-TYPES17-TWIN-AFTER`
+- `registry-installation-rid12-SUBJECTS5-NEGATIVE-BEFORE`
+- `registry-installation-rid12-SUBJECTS5-NEGATIVE-AFTER`
+- `registry-installation-rid12-SUBJECTS5-TWIN-BEFORE`
+- `registry-installation-rid12-SUBJECTS5-TWIN-AFTER`
+- `registry-installation-rid12-SUBJECT-UNSPECIFIED-NEGATIVE-BEFORE`
+- `registry-installation-rid12-SUBJECT-UNSPECIFIED-NEGATIVE-AFTER`
+- `registry-installation-rid12-SUBJECT-UNSPECIFIED-TWIN-BEFORE`
+- `registry-installation-rid12-SUBJECT-UNSPECIFIED-TWIN-AFTER`
+- `registry-installation-rid12-SUBJECT-UNKNOWN-NEGATIVE-BEFORE`
+- `registry-installation-rid12-SUBJECT-UNKNOWN-NEGATIVE-AFTER`
+- `registry-installation-rid12-SUBJECT-UNKNOWN-TWIN-BEFORE`
+- `registry-installation-rid12-SUBJECT-UNKNOWN-TWIN-AFTER`
+- `registry-installation-rid12-IAM-ROLE-NEGATIVE-BEFORE`
+- `registry-installation-rid12-IAM-ROLE-NEGATIVE-AFTER`
+- `registry-installation-rid12-IAM-ROLE-TWIN-BEFORE`
+- `registry-installation-rid12-IAM-ROLE-TWIN-AFTER`
+- `registry-installation-rid12-IAM-TYPE-NEGATIVE-BEFORE`
+- `registry-installation-rid12-IAM-TYPE-NEGATIVE-AFTER`
+- `registry-installation-rid12-IAM-TYPE-TWIN-BEFORE`
+- `registry-installation-rid12-IAM-TYPE-TWIN-AFTER`
+- `registry-installation-rid12-IAM-MODULE-NEGATIVE-BEFORE`
+- `registry-installation-rid12-IAM-MODULE-NEGATIVE-AFTER`
+- `registry-installation-rid12-IAM-MODULE-TWIN-BEFORE`
+- `registry-installation-rid12-IAM-MODULE-TWIN-AFTER`
+- `registry-installation-rid12-ABSENT-NO-GD-BEFORE`
+- `registry-installation-rid12-ABSENT-NO-GD-AFTER`
+- `registry-installation-rid12-EMPTY-NO-GD-BEFORE`
+- `registry-installation-rid12-EMPTY-NO-GD-AFTER`
+- `registry-installation-rid12-ROLES17-TWIN-AFTER-REORDER`
+
+---
+
+## `cases/registry-installation-rid01.py` — 8 кейсов
+
+> Публичные последствия чистой установки, точных личностей, обновления токена и отказа с истёкшим ключом.
+
+- `registry-installation-rid01-CLEAN-BEFORE`
+- `registry-installation-rid01-CLEAN-INSTALLED`
+- `registry-installation-rid01-S1-EXACT-IDENTITIES`
+- `registry-installation-rid01-RENEWAL-BEFORE`
+- `registry-installation-rid01-EXPIRED-ACCESS-TOKEN`
+- `registry-installation-rid01-RENEWAL-AFTER`
+- `registry-installation-rid01-EXPIRED-KEY-REFUSAL`
+- `registry-installation-rid01-VALID-KEY-TWIN`
+
+---
+
+## `cases/registry-installation-rid03.py` — 44 кейса
+
+> Выдача через установленную доверенность: реальные ACT и независимые VERIFY в S1/S2, отказы вне осей и разрешённые близнецы.
+
+- `registry-installation-rid03-S1-GRANT-ACT`
+- `registry-installation-rid03-S1-GRANT-VERIFY`
+- `registry-installation-rid03-S1-ROLE-DENIED-ACT`
+- `registry-installation-rid03-S1-ROLE-DENIED-VERIFY`
+- `registry-installation-rid03-S1-ROLE-TWIN-ACT`
+- `registry-installation-rid03-S1-ROLE-TWIN-VERIFY`
+- `registry-installation-rid03-S1-TARGET-DENIED-ACT`
+- `registry-installation-rid03-S1-TARGET-DENIED-VERIFY`
+- `registry-installation-rid03-S1-TARGET-TWIN-ACT`
+- `registry-installation-rid03-S1-TARGET-TWIN-VERIFY`
+- `registry-installation-rid03-S1-SUBJECT-DENIED-ACT`
+- `registry-installation-rid03-S1-SUBJECT-DENIED-VERIFY`
+- `registry-installation-rid03-S1-SUBJECT-TWIN-ACT`
+- `registry-installation-rid03-S1-SUBJECT-TWIN-VERIFY`
+- `registry-installation-rid03-S1-ISSUER-GD-DENIED-ACT`
+- `registry-installation-rid03-S1-ISSUER-GD-DENIED-VERIFY`
+- `registry-installation-rid03-S1-CREATOR-GD-TWIN-ACT`
+- `registry-installation-rid03-S1-CREATOR-GD-TWIN-VERIFY`
+- `registry-installation-rid03-S1-AUTHENTICATED-DENIED-ACT`
+- `registry-installation-rid03-S1-AUTHENTICATED-DENIED-VERIFY`
+- `registry-installation-rid03-S1-ANONYMOUS-TWIN-ACT`
+- `registry-installation-rid03-S1-ANONYMOUS-TWIN-VERIFY`
+- `registry-installation-rid03-S2-GRANT-ACT`
+- `registry-installation-rid03-S2-GRANT-VERIFY`
+- `registry-installation-rid03-S2-ROLE-DENIED-ACT`
+- `registry-installation-rid03-S2-ROLE-DENIED-VERIFY`
+- `registry-installation-rid03-S2-ROLE-TWIN-ACT`
+- `registry-installation-rid03-S2-ROLE-TWIN-VERIFY`
+- `registry-installation-rid03-S2-TARGET-DENIED-ACT`
+- `registry-installation-rid03-S2-TARGET-DENIED-VERIFY`
+- `registry-installation-rid03-S2-TARGET-TWIN-ACT`
+- `registry-installation-rid03-S2-TARGET-TWIN-VERIFY`
+- `registry-installation-rid03-S2-SUBJECT-DENIED-ACT`
+- `registry-installation-rid03-S2-SUBJECT-DENIED-VERIFY`
+- `registry-installation-rid03-S2-SUBJECT-TWIN-ACT`
+- `registry-installation-rid03-S2-SUBJECT-TWIN-VERIFY`
+- `registry-installation-rid03-S2-ISSUER-GD-DENIED-ACT`
+- `registry-installation-rid03-S2-ISSUER-GD-DENIED-VERIFY`
+- `registry-installation-rid03-S2-CREATOR-GD-TWIN-ACT`
+- `registry-installation-rid03-S2-CREATOR-GD-TWIN-VERIFY`
+- `registry-installation-rid03-S2-AUTHENTICATED-DENIED-ACT`
+- `registry-installation-rid03-S2-AUTHENTICATED-DENIED-VERIFY`
+- `registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT`
+- `registry-installation-rid03-S2-ANONYMOUS-TWIN-VERIFY`
+
+
+---
+
+## `cases/registry-installation-rid04.py` — 14 кейсов
+
+> Materialized creator retirement, real I refusal, O-only full census, explicit O recovery and same public request twin. Native fullserve/admin boundaries are integration-only.
+
+- `registry-installation-rid04-S1-BEFORE-RETIREMENT`
+- `registry-installation-rid04-S1-RETIRED-DENIED-ACT`
+- `registry-installation-rid04-S1-RETIRED-DENIED-VERIFY`
+- `registry-installation-rid04-S1-REFUSED-APPLY-SNAPSHOT`
+- `registry-installation-rid04-S1-RESTORED-GRANT-ACT`
+- `registry-installation-rid04-S1-RESTORED-GRANT-VERIFY`
+- `registry-installation-rid04-S1-RESTORED-REAPPLY`
+- `registry-installation-rid04-S2-BEFORE-RETIREMENT`
+- `registry-installation-rid04-S2-RETIRED-DENIED-ACT`
+- `registry-installation-rid04-S2-RETIRED-DENIED-VERIFY`
+- `registry-installation-rid04-S2-REFUSED-APPLY-SNAPSHOT`
+- `registry-installation-rid04-S2-RESTORED-GRANT-ACT`
+- `registry-installation-rid04-S2-RESTORED-GRANT-VERIFY`
+- `registry-installation-rid04-S2-RESTORED-REAPPLY`
+
+
+---
+
+## `cases/registry-installation-rid05.py` — 30 кейсов
+
+> OriginalC deletion, distinct nativeC2, oldcredential401, active-referenceDeleteguard/revoke-only twin and explicit recovery. Startup/admin remainnativeintegration boundaries.
+
+- `registry-installation-rid05-S1-KEYS-AND-REFERENCES-CLEAN`
+- `registry-installation-rid05-S1-DELETED-C-SNAPSHOT`
+- `registry-installation-rid05-S1-OLD-C-TOKEN-REFUSED`
+- `registry-installation-rid05-S1-DELETED-C-GRANT-ACT`
+- `registry-installation-rid05-S1-DELETED-C-GRANT-VERIFY`
+- `registry-installation-rid05-S1-SAME-NAME-C2-SNAPSHOT`
+- `registry-installation-rid05-S1-C2-NO-REVIVAL-ACT`
+- `registry-installation-rid05-S1-C2-NO-REVIVAL-VERIFY`
+- `registry-installation-rid05-S1-ACTIVE-DELEGATE-DELETE-ACT`
+- `registry-installation-rid05-S1-ACTIVE-DELEGATE-DELETE-VERIFY`
+- `registry-installation-rid05-S1-REVOKE-ONLY-DELETE-TWIN-ACT`
+- `registry-installation-rid05-S1-REVOKE-ONLY-DELETE-TWIN-VERIFY`
+- `registry-installation-rid05-S1-EXPLICIT-C2-RECOVERY-ACT`
+- `registry-installation-rid05-S1-EXPLICIT-C2-RECOVERY-VERIFY`
+- `registry-installation-rid05-S1-RECOVERY-REAPPLY`
+- `registry-installation-rid05-S2-KEYS-AND-REFERENCES-CLEAN`
+- `registry-installation-rid05-S2-DELETED-C-SNAPSHOT`
+- `registry-installation-rid05-S2-OLD-C-TOKEN-REFUSED`
+- `registry-installation-rid05-S2-DELETED-C-GRANT-ACT`
+- `registry-installation-rid05-S2-DELETED-C-GRANT-VERIFY`
+- `registry-installation-rid05-S2-SAME-NAME-C2-SNAPSHOT`
+- `registry-installation-rid05-S2-C2-NO-REVIVAL-ACT`
+- `registry-installation-rid05-S2-C2-NO-REVIVAL-VERIFY`
+- `registry-installation-rid05-S2-ACTIVE-DELEGATE-DELETE-ACT`
+- `registry-installation-rid05-S2-ACTIVE-DELEGATE-DELETE-VERIFY`
+- `registry-installation-rid05-S2-REVOKE-ONLY-DELETE-TWIN-ACT`
+- `registry-installation-rid05-S2-REVOKE-ONLY-DELETE-TWIN-VERIFY`
+- `registry-installation-rid05-S2-EXPLICIT-C2-RECOVERY-ACT`
+- `registry-installation-rid05-S2-EXPLICIT-C2-RECOVERY-VERIFY`
+- `registry-installation-rid05-S2-RECOVERY-REAPPLY`
+
+## `cases/registry-installation-rid06.py` — 30 кейсов
+
+- `registry-installation-rid06-S1-BEFORE-REVOKE`
+- `registry-installation-rid06-S1-REVOKE-ACT`
+- `registry-installation-rid06-S1-AFTER-REVOKE`
+- `registry-installation-rid06-S1-SEQUENTIAL-BEFORE-REVOKE`
+- `registry-installation-rid06-S1-SEQUENTIAL-AFTER-OVERLAP`
+- `registry-installation-rid06-S1-AFTER-SEQUENTIAL-REFUSAL`
+- `registry-installation-rid06-S1-NO-REVOKE-BEFORE`
+- `registry-installation-rid06-S1-NO-REVOKE-TWIN`
+- `registry-installation-rid06-S1-RECOVERY-BEFORE-REVOKE`
+- `registry-installation-rid06-S1-RECOVERY-AFTER-REVOKE`
+- `registry-installation-rid06-S1-EXPLICIT-CREATE-ACT`
+- `registry-installation-rid06-S1-EXPLICIT-CREATE-VERIFY`
+- `registry-installation-rid06-S1-RECOVERY-REAPPLY`
+- `registry-installation-rid06-S1-EXPLICIT-RECOVERY-ACT`
+- `registry-installation-rid06-S1-EXPLICIT-RECOVERY-VERIFY`
+- `registry-installation-rid06-S2-BEFORE-REVOKE`
+- `registry-installation-rid06-S2-REVOKE-ACT`
+- `registry-installation-rid06-S2-AFTER-REVOKE`
+- `registry-installation-rid06-S2-SEQUENTIAL-BEFORE-REVOKE`
+- `registry-installation-rid06-S2-SEQUENTIAL-AFTER-OVERLAP`
+- `registry-installation-rid06-S2-AFTER-SEQUENTIAL-REFUSAL`
+- `registry-installation-rid06-S2-NO-REVOKE-BEFORE`
+- `registry-installation-rid06-S2-NO-REVOKE-TWIN`
+- `registry-installation-rid06-S2-RECOVERY-BEFORE-REVOKE`
+- `registry-installation-rid06-S2-RECOVERY-AFTER-REVOKE`
+- `registry-installation-rid06-S2-EXPLICIT-CREATE-ACT`
+- `registry-installation-rid06-S2-EXPLICIT-CREATE-VERIFY`
+- `registry-installation-rid06-S2-RECOVERY-REAPPLY`
+- `registry-installation-rid06-S2-EXPLICIT-RECOVERY-ACT`
+- `registry-installation-rid06-S2-EXPLICIT-RECOVERY-VERIFY`
+
+## cases/registry-installation-rid11.py — 128
+
+Same 62 native RID11 worlds; 124 BEFORE/AFTER + 4 same-C-live checkpoints. Startup/fault evidence remains integration-only. Only 12 literal negative AFTER phases request normal shared issuance; all other requests use the owned public front.
+
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-MISSING-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CREDENTIAL-UNREADABLE-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-NEGATIVE-KEY-REVOKED-C-LIVE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-NEGATIVE-KEY-REVOKED-C-LIVE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-NEGATIVE-KEY-REVOKED-C-LIVE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-NEGATIVE-KEY-REVOKED-C-LIVE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-DELETED-CREATOR-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-REVOKED-KEY-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-BAD-SIGNATURE-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-AUTHORITY-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-AUTHORITY-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-AUTHORITY-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-AUTHORITY-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-AUTHORITY-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-AUTHORITY-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-AUTHORITY-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-AUTHORITY-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-AUTHORITY-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-BACKEND-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BACKEND-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-BACKEND-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-BACKEND-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-BACKEND-S1-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BACKEND-S1-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-BACKEND-S1-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-BACKEND-S1-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-BACKEND-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BACKEND-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-BACKEND-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-BACKEND-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-BACKEND-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-BACKEND-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-BACKEND-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-BACKEND-S2-ACTIVE-TWIN-AFTER`
+- `registry-installation-rid11-ACCOUNT-S1-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-ACCOUNT-S1-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-ACCOUNT-S1-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-ACCOUNT-S1-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CENSUS-S2-ABSENT-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CENSUS-S2-ABSENT-NEGATIVE-AFTER`
+- `registry-installation-rid11-CENSUS-S2-ABSENT-TWIN-BEFORE`
+- `registry-installation-rid11-CENSUS-S2-ABSENT-TWIN-AFTER`
+- `registry-installation-rid11-CENSUS-S2-ACTIVE-NEGATIVE-BEFORE`
+- `registry-installation-rid11-CENSUS-S2-ACTIVE-NEGATIVE-AFTER`
+- `registry-installation-rid11-CENSUS-S2-ACTIVE-TWIN-BEFORE`
+- `registry-installation-rid11-CENSUS-S2-ACTIVE-TWIN-AFTER`

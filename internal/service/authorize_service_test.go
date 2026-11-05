@@ -414,10 +414,10 @@ func TestResolveActionToRelation(t *testing.T) {
 }
 
 // TestAuthorize_Check_UnknownVerb_DeniesEvenForViewerSubject — M2: a subject
-// the relation store would happily allow (checkResp:true) must STILL be denied
-// for a verb the object type does not declare in the module catalog. Fail-closed:
-// an unrecognised (possibly mutating) action is never silently downgraded to a
-// read relation. Близнец — TestAuthorize_Check_KnownMutatingVerb_StillMaps: тот
+// который хранилище отношений разрешило бы (checkResp:true), всё равно должен получать отказ
+// для глагола, не объявленного типом объекта в каталоге модуля. Закрыто при отказе:
+// нераспознанное (возможно изменяющее) действие никогда молча не понижается до
+// отношение чтения. Близнец — TestAuthorize_Check_KnownMutatingVerb_StillMaps: тот
 // же каталог, объявленный глагол.
 func TestAuthorize_Check_UnknownVerb_DeniesEvenForViewerSubject(t *testing.T) {
 	mock := &mockRelations{checkResp: true} // the relation store would ALLOW
@@ -441,9 +441,9 @@ func TestAuthorize_Check_UnknownVerb_DeniesEvenForViewerSubject(t *testing.T) {
 	}
 }
 
-// TestAuthorize_Check_KnownMutatingVerb_StillMaps — guard: a mutating verb the
-// object type declares in the module catalog resolves to its verb relation
-// (delete → v_delete) and reaches the per-object question.
+// TestAuthorize_Check_KnownMutatingVerb_StillMaps — защита: изменяющий глагол,
+// объявленный типом объекта в каталоге модуля, разрешается в своё отношение
+// (delete → v_delete) и доходит до пообъектного вопроса.
 func TestAuthorize_Check_KnownMutatingVerb_StillMaps(t *testing.T) {
 	mock := &mockRelations{checkResp: true}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: mock, Catalog: catalog.Fixed{F: moduleVerbFacts(t)}})

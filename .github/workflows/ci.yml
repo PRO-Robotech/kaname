@@ -187,7 +187,7 @@ jobs:
       # ТРЕТЬЯ ПРОБА — БЮДЖЕТ ПАМЯТИ ХУКА. Хук исполняется на каждой отправке
       # на машине, где идут другие полосы; решение владельца 2026-09-24 — память
       # машины не выше 45 ГБ, тяжёлое на агрегате. Проба гоняет настоящий хук с
-      # записывающими `go` и `systemd-run`: детектора гонок нет, bounded lint есть,
+      # записывающими `go` и `systemd-run`: детектора гонок нет, ограниченный lint есть,
       # параллелизм Go — 4, прогон перезапущен под потолком 10 ГБ, а без потолка
       # отсутствие его названо строкой. Исход — кодом: 0 · 1 · 2 (не исполнялось).
       - name: хук отправки держит бюджет памяти — опыт
@@ -629,9 +629,14 @@ jobs:
         # kaname#1020, kaname#1034: обе поставки используют пять частей.
         # Прежние job30m и Go25m сохранены; полный план проверяет каждый шард.
         shard: [1, 2, 3, 4, 5]
+    env:
+      # Полный вывод проб без изменения текстового отбора go list.
+      GOFLAGS: '-p=1 -test.v=true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
+          # Внешний driver исполняет только зафиксированный исходник приложения.
+          ref: d8b88c077d6ec7d68c3e275d6f0460ec6cf82dc8
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
         with:
@@ -657,6 +662,73 @@ jobs:
       - uses: ./.github/actions/platform-tree
         id: platform-tree
 
+      - name: перепись выбранных пакетов и скомпилированных проб
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          INTEGRATION_TIMEOUT: 25m
+          INTEGRATION_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
+          PLATFORM_TREE: ${{ steps.platform-tree.outputs.root }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          out="$RUNNER_TEMP/integration-evidence-${{ strategy.job-index }}"
+          mkdir -p "$out"
+          # Проверяем исходник приложения; github.sha здесь относится к driver.
+          git rev-parse HEAD > "$out/checkout-head.txt"
+          git rev-parse 'HEAD^{tree}' > "$out/checkout-tree.txt"
+          git show -s --format=%P HEAD > "$out/checkout-parents.txt"
+          git status --porcelain --untracked-files=all > "$out/checkout-status.txt"
+          git status --porcelain --untracked-files=no > "$out/checkout-tracked-status.txt"
+          source_guard_rc=0
+          if [ "$(cat "$out/checkout-head.txt")" != "d8b88c077d6ec7d68c3e275d6f0460ec6cf82dc8" ] || \
+             [ "$(cat "$out/checkout-tree.txt")" != "c3056a6f388134a12a6515a1bca16a78a3d78847" ] || \
+             [ -s "$out/checkout-tracked-status.txt" ]; then source_guard_rc=1; fi
+          printf '%s\n' "$source_guard_rc" > "$out/source-inventory.rc"
+          if [ "$source_guard_rc" -ne 0 ]; then
+            echo "::error title=ИСХОДНИК НЕ СОВПАЛ::Требуется чистый checkout фиксированного d8b88c и его дерева; перепись не разрешена."
+            exit "$source_guard_rc"
+          fi
+          printf 'event=%s\nref=%s\nsha=%s\nprHead=%s\nprBase=%s\n' \
+            "$GITHUB_EVENT_NAME" "$GITHUB_REF" "$GITHUB_SHA" "$PR_HEAD_SHA" "$PR_BASE_SHA" > "$out/event.txt"
+          command -v go > "$out/go-path.txt"
+          go version > "$out/go-version.txt"
+          go env -json GOVERSION GOROOT GOTOOLCHAIN GOFLAGS CGO_ENABLED GOOS GOARCH > "$out/go-env.json"
+          rc=0
+          .github/scripts/run-integration.sh --plan > "$out/plan.raw" 2> "$out/plan.stderr" || rc=$?
+          printf '%s\n' "$rc" > "$out/plan.rc"
+          if [ "$rc" -ne 0 ]; then
+            cat "$out/plan.raw" "$out/plan.stderr"
+            exit "$rc"
+          fi
+          # Формат строк плана задаёт сам канонический прогонщик, не исходники Go.
+          awk -F '\t' 'NF == 3 && $1 ~ /^  [0-9]+$/ {print $3}' "$out/plan.raw" > "$out/eligible.packages"
+          awk -F '\t' -v s="${INTEGRATION_SHARD%/*}" \
+            'NF == 3 && $1 ~ /^  [0-9]+$/ && $1 + 0 == s {print $3}' "$out/plan.raw" > "$out/shard.packages"
+          test -s "$out/eligible.packages" && test -s "$out/shard.packages"
+          mapfile -t shard_packages < "$out/shard.packages"
+          rc=0
+          go list -tags=integration -race -json "${shard_packages[@]}" > "$out/packages.json" 2> "$out/packages.stderr" || rc=$?
+          printf '%s\n' "$rc" > "$out/packages.rc"
+          if [ "$rc" -ne 0 ]; then
+            cat "$out/packages.stderr"
+            exit "$rc"
+          fi
+          inventory_rc=0
+          n=0
+          for pkg in "${shard_packages[@]}"; do
+            n=$((n + 1))
+            printf '%s\n' "$pkg" > "$out/compiled-$n.package"
+            rc=0
+            # Это только перечень от скомпилированного бинаря, не исполнение проб.
+            go test -tags=integration -race -count=1 -timeout "$INTEGRATION_TIMEOUT" -p 1 -list . "$pkg" \
+              > "$out/compiled-$n.raw" 2> "$out/compiled-$n.stderr" || rc=$?
+            printf '%s\n' "$rc" > "$out/compiled-$n.rc"
+            if [ "$rc" -ne 0 ] && [ "$inventory_rc" -eq 0 ]; then inventory_rc=$rc; fi
+          done
+          printf '%s\n' "$n" > "$out/inventory-packages.txt"
+          printf '%s\n' "$inventory_rc" > "$out/inventory.rc"
+          # Неудавшаяся перепись не разрешает producer и не выдаётся за PASS.
+          exit "$inventory_rc"
       - name: контейнерные пробы
         env:
           # Уборщик контейнеров на ЭФЕМЕРНОМ исполнителе не нужен: машина
@@ -673,14 +745,46 @@ jobs:
           # успевшие пройти. Красным это подавать нельзя — читатель идёт искать
           # дефект в коде, которого нет; зелёным тем более нельзя — не
           # исполнено ничего. Отсюда свой текст и НЕНУЛЕВОЙ исход.
-          rc=0
-          .github/scripts/run-integration.sh || rc=$?
+          out="$RUNNER_TEMP/integration-evidence-${{ strategy.job-index }}"
+          observe_source() {
+            git rev-parse HEAD > "$out/source-$1.head" &&
+            git rev-parse 'HEAD^{tree}' > "$out/source-$1.tree" &&
+            git status --porcelain --untracked-files=no > "$out/source-$1.tracked-status" &&
+            git diff --binary HEAD -- > "$out/source-$1.tracked.diff" &&
+            sha256sum "$out/source-$1.tracked.diff" > "$out/source-$1.tracked-diff.sha256" &&
+            [ "$(cat "$out/source-$1.head")" = "d8b88c077d6ec7d68c3e275d6f0460ec6cf82dc8" ] &&
+            [ "$(cat "$out/source-$1.tree")" = "c3056a6f388134a12a6515a1bca16a78a3d78847" ] &&
+            [ ! -s "$out/source-$1.tracked-status" ]
+          }
+          observe_source before
+          set +e
+          .github/scripts/run-integration.sh 2>&1 | tee "$out/full.raw"
+          producer_status=("${PIPESTATUS[@]}")
+          set -e
+          rc="${producer_status[0]}"
+          capture_rc="${producer_status[1]}"
+          # Снимок исходников обязателен и после красного producer, до его exit.
+          source_after_rc=0
+          observe_source after || source_after_rc=$?
+          printf '%s\n' "$source_after_rc" > "$out/source-after.rc"
+          printf '%s\n' "$rc" > "$out/producer.rc"
+          printf '%s\n' "$capture_rc" > "$out/capture.rc"
           if [ "$rc" -eq 75 ]; then
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::Postgres для контейнерных проб не поднялся — прогон недействителен, это не дефект кода. Повторить после устранения причины."
             exit 1
           fi
-          exit "$rc"
+          if [ "$rc" -ne 0 ]; then exit "$rc"; fi
+          if [ "$source_after_rc" -ne 0 ]; then exit "$source_after_rc"; fi
+          # Отказ сохранения вывода не может сделать нулевой producer зелёным.
+          exit "$capture_rc"
 
+      - name: полный вывод и перепись шарда
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: integration-shard-${{ matrix.shard }}-evidence
+          path: ${{ runner.temp }}/integration-evidence-${{ strategy.job-index }}/
+          if-no-files-found: error
   # Сводный исход шардов под ПРЕЖНИМ именем контекста: «интеграция (Postgres в
   # контейнерах)» — обязательный контекст защиты ствола (`.github/TRUNK-VERDICT.md`),
   # и шарды с другими именами его не дали бы вовсе — запрос стоял бы в ожидании.

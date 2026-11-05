@@ -14,7 +14,7 @@ import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
 
-// A set of methods for managing GrantDelegation resources — делегирований права
+// Набор методов управления ресурсами GrantDelegation — делегированиями права
 // выдавать.
 //
 // Право на каждом методе решает обработчик (`HANDLER_DECIDES`): право выдавать на
@@ -24,7 +24,7 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 // Отказ в праве и несуществующее делегирование отвечают побайтово одинаково:
 // `PERMISSION_DENIED` `permission denied`.
 service GrantDelegationService {
-  // Returns the specified GrantDelegation resource. Право — право выдавать на
+  // Возвращает заданный ресурс GrantDelegation. Право — право выдавать на
   // аккаунте делегирования либо вызывающий — его делегат.
   rpc Get (GetGrantDelegationRequest) returns (GrantDelegation) {
     option (google.api.http) = { get: "/iam/v1/grantDelegations/{grant_delegation_id}" };
@@ -33,7 +33,7 @@ service GrantDelegationService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
-  // Lists grant delegations of an account, active and revoked, ordered by
+  // Перечисляет активные и отозванные делегирования выдачи аккаунта в порядке
   // (created_at, id). Право — право выдавать на аккаунте; форма страницы судится
   // до права.
   rpc List (ListGrantDelegationsRequest) returns (ListGrantDelegationsResponse) {
@@ -43,7 +43,7 @@ service GrantDelegationService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
-  // Creates a grant delegation. Право — право выдавать на аккаунте
+  // Создаёт делегирование выдачи. Право — право выдавать на аккаунте
   // (`account_id`): владелец аккаунта, администратор аккаунта либо
   // администратор облака. Делегат делегирований не заводит. Одно действующее
   // делегирование на пару «аккаунт, делегат»: второе — `ALREADY_EXISTS` в
@@ -59,8 +59,8 @@ service GrantDelegationService {
     option (corelib.authz.v1.required_acr_min) = "2";
   }
 
-  // Revokes the specified grant delegation and, in the same transaction, every
-  // active access binding granted under it (`REVOCATION_REASON_DELEGATION_REVOKED`).
+  // Отзывает заданное делегирование выдачи и в той же транзакции все
+  // активные привязки доступа, выданные по нему (`REVOCATION_REASON_DELEGATION_REVOKED`).
   // Защита выдачи от удаления отзыву не мешает. Право — право выдавать на
   // аккаунте делегирования; делегат своё делегирование не отзывает. Повторный
   // отзыв — `FAILED_PRECONDITION`.
@@ -77,68 +77,68 @@ service GrantDelegationService {
 }
 
 message GetGrantDelegationRequest {
-  // ID of the GrantDelegation resource to return.
+  // ID возвращаемого ресурса GrantDelegation.
   string grant_delegation_id = 1;
 }
 
 message ListGrantDelegationsRequest {
-  // ID of the Account whose grant delegations are listed. Required.
+  // ID Account, чьи делегирования выдачи перечисляются. Обязателен.
   string account_id = 1;
 
-  // The maximum number of results per page to return. 0 selects the platform
-  // default (50); a value outside [0..1000] is rejected with INVALID_ARGUMENT
-  // rather than clamped.
+  // Максимальное число результатов страницы. 0 выбирает значение платформы
+  // по умолчанию (50); значение вне [0..1000] отклоняется с INVALID_ARGUMENT,
+  // а не ограничивается границей.
   int64 page_size = 2;
 
-  // Page token.
+  // Токен страницы.
   string page_token = 3;
 }
 
 message ListGrantDelegationsResponse {
-  // List of GrantDelegation resources, ordered by (created_at, id).
+  // Список ресурсов GrantDelegation в порядке (created_at, id).
   repeated GrantDelegation grant_delegations = 1;
 
-  // Token for the next page; empty on the last page.
+  // Токен следующей страницы; на последней странице пуст.
   string next_page_token = 2;
 }
 
 message CreateGrantDelegationRequest {
-  // ID of the Account the delegation is scoped to. Required.
+  // ID Account, которым ограничено делегирование. Обязателен.
   string account_id = 1;
 
-  // The delegate: a service account (`SUBJECT_TYPE_SERVICE_ACCOUNT` only).
+  // Делегат: системная учётка (только `SUBJECT_TYPE_SERVICE_ACCOUNT`).
   Subject delegate = 2;
 
-  // Role ids the delegate may grant: 1..16, no repeats; roles declared by ONE
-  // module manifest (not `iam`).
+  // ID ролей, которые делегат вправе выдавать: 1..16, без повторов; роли объявлены ОДНИМ
+  // манифестом модуля (не `iam`).
   repeated string role_ids = 3;
 
-  // Catalog types (dotted, e.g. `registry.registries`) of the same module whose
-  // objects the delegate may grant on: 1..16, no repeats.
+  // Типы каталога (с точками, например `registry.registries`) того же модуля,
+  // на объекты которых делегат вправе выдавать: 1..16, без повторов.
   repeated string target_types = 4;
 
-  // Subject types the delegate may grant to: 1..4, no repeats, never
+  // Типы субъектов, которым делегат вправе выдавать: 1..4, без повторов, никогда
   // `SUBJECT_TYPE_UNSPECIFIED`.
   repeated SubjectType subject_types = 5;
 }
 
 message CreateGrantDelegationMetadata {
-  // ID of the GrantDelegation being created.
+  // ID создаваемого GrantDelegation.
   string grant_delegation_id = 1;
 
-  // ID of the Account the delegation is scoped to.
+  // ID Account, которым ограничено делегирование.
   string account_id = 2;
 }
 
 message RevokeGrantDelegationRequest {
-  // ID of the GrantDelegation resource to revoke.
+  // ID отзываемого ресурса GrantDelegation.
   string grant_delegation_id = 1;
 }
 
 message RevokeGrantDelegationMetadata {
-  // ID of the GrantDelegation being revoked.
+  // ID отзываемого GrantDelegation.
   string grant_delegation_id = 1;
 
-  // ID of the Account the delegation is scoped to.
+  // ID Account, которым ограничено делегирование.
   string account_id = 2;
 }
