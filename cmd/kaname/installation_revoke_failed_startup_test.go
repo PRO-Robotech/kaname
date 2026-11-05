@@ -327,21 +327,34 @@ func rid06BuildFailedStartupWithReason(caseID, runID, executableSHA string, e ri
 			return fail("RID06_RAW_OPERATION_COHERENCE")
 		}
 	}
-	wanted := map[string]bool{}
-	for _, account := range e.Accounts {
-		if account == "" || wanted[account] {
-			return fail("RID06_EXPECTED_ACCOUNT_SET")
-		}
-		wanted[account] = true
-		if account == e.TenantID {
-			break
-		}
-	}
 	expectedCount := 1
 	if strings.Contains(e.CaseID, "-S2-") {
 		expectedCount = 3
 	}
-	if len(wanted) != expectedCount || !wanted[e.TenantID] || len(ops) != len(previous)+len(wanted) {
+	// Полный снимок проверяется целиком, включая ещё не обработанный суффикс.
+	if len(e.Accounts) != expectedCount {
+		return fail("RID06_EXPECTED_ACCOUNT_SET")
+	}
+	accounts := map[string]bool{}
+	tenantIndex := -1
+	for index, account := range e.Accounts {
+		if account == "" || accounts[account] {
+			return fail("RID06_EXPECTED_ACCOUNT_SET")
+		}
+		accounts[account] = true
+		if account == e.TenantID {
+			tenantIndex = index
+		}
+	}
+	if tenantIndex < 0 {
+		return fail("RID06_EXPECTED_ACCOUNT_SET")
+	}
+	// После первой ошибки есть ровно операции исходного префикса до tenant включительно.
+	wanted := map[string]bool{}
+	for _, account := range e.Accounts[:tenantIndex+1] {
+		wanted[account] = true
+	}
+	if len(ops) != len(previous)+tenantIndex+1 {
 		return fail("RID06_NEW_OPERATION_CARDINALITY")
 	}
 	proof := rid06FailedStartupProof{Expected: e, Logs: logs, Replay: replay, Operations: []rid06FailedOperationWitness{}, BeforeStartedAt: a.Whole.PrimaryStartedAt, BeforeFinishedAt: low, AfterStartedAt: high, AfterFinishedAt: b.Whole.PrimaryFinishedAt}

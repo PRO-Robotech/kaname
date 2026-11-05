@@ -50,10 +50,27 @@ func rid06FailedUnitBind(s *rid03NewmanSnapshot, table string, rows []rid09Prima
 }
 
 func rid06FailedUnitFixture(mode string) (rid06FailedStartupExpected, rid06FailedStartupLogs, rid03NewmanSnapshot, rid03NewmanSnapshot) {
+	tenantIndex := 0
+	if mode == "S2" {
+		tenantIndex = 1
+	}
+	return rid06FailedUnitFixtureAt(mode, tenantIndex)
+}
+
+func rid06FailedUnitFixtureAt(mode string, tenantIndex int) (rid06FailedStartupExpected, rid06FailedStartupLogs, rid03NewmanSnapshot, rid03NewmanSnapshot) {
 	at := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	e := rid06FailedStartupExpected{CaseID: "registry-installation-rid06-" + mode + "-SEQUENTIAL-FAILED-STARTUP", RunID: "rid06-failed-startup-unit-20261104", TestExecutableSHA256: strings.Repeat("a", 64), ClientSHA256: installationIdentitySHA("private-unit-client"), CredentialExpiresAt: at.Add(time.Hour), CreatorID: "creator", TenantID: "tenant", DelegateID: "issuer", OldDelegationID: "revoked-gd", Accounts: []string{"tenant"}}
 	if mode == "S2" {
-		e.Accounts = []string{"system", "other", "tenant"}
+		switch tenantIndex {
+		case 0:
+			e.Accounts = []string{"tenant", "system", "other"}
+		case 1:
+			e.Accounts = []string{"system", "tenant", "other"}
+		case 2:
+			e.Accounts = []string{"system", "other", "tenant"}
+		default:
+			panic("invalid unit tenant position")
+		}
 	}
 	makeSnapshot := func(after bool) rid03NewmanSnapshot {
 		start := at.Add(-2 * time.Second)
@@ -102,6 +119,9 @@ func rid06FailedUnitFixture(mode string) (rid06FailedStartupExpected, rid06Faile
 			b.Raw["grant_delegations"] = append(b.Raw["grant_delegations"], gd)
 		}
 		ops = append(ops, row)
+		if account == e.TenantID {
+			break
+		}
 	}
 	rid06FailedUnitBind(&a, "operations", []rid09PrimaryRow{oldOp})
 	rid06FailedUnitBind(&b, "operations", ops)
@@ -296,9 +316,140 @@ func TestRID06FailedStartupProof(t *testing.T) {
 			for _, secret := range []string{"private-unit-client", "private-unit-assertion", "old-assertion", "privateKeyPem", "accessToken", "replaySQLRows", "operationSQLRows"} {
 				require.NotContains(t, string(raw), secret)
 			}
-			require.Len(t, proof.Operations, len(e.Accounts))
+			expectedOperations := 1
+			if mode == "S2" {
+				expectedOperations = 2
+			}
+			require.Len(t, proof.Operations, expectedOperations)
 		})
 	}
+
+	// Положение tenant меняет только законный префикс, а не полный снимок из трёх аккаунтов.
+	t.Run("tenant-prefix", func(t *testing.T) {
+		for _, position := range []struct {
+			name  string
+			index int
+		}{{"first", 0}, {"middle", 1}, {"last", 2}} {
+			t.Run(position.name, func(t *testing.T) {
+				cases := []struct{ name, reason string }{
+					{"lawful", ""},
+					{"missing-operation", "RID06_NEW_OPERATION_CARDINALITY"},
+					{"extra-operation", "RID06_NEW_OPERATION_CARDINALITY"},
+					{"wrong-account", "RID06_NEW_OPERATION_IDENTITY"},
+					{"outside-prefix-account", "RID06_NEW_OPERATION_IDENTITY"},
+					{"wrong-pair", "RID06_OPERATION_METADATA_CLOSURE"},
+					{"missing-tenant", "RID06_EXPECTED_ACCOUNT_SET"},
+					{"empty-account-first", "RID06_EXPECTED_ACCOUNT_SET"},
+					{"empty-account-last", "RID06_EXPECTED_ACCOUNT_SET"},
+					{"duplicate-account-first-last", "RID06_EXPECTED_ACCOUNT_SET"},
+					{"empty-census", "RID06_EXPECTED_IDENTITY"},
+					{"incomplete-census", "RID06_EXPECTED_ACCOUNT_SET"},
+					{"extra-census", "RID06_EXPECTED_ACCOUNT_SET"},
+					{"tenant-success", "RID06_TENANT_FAILURE_CLOSURE"},
+					{"tenant-response", "RID06_TENANT_FAILURE_CLOSURE"},
+					{"operation-clock", "RID06_OPERATION_TIME_WINDOW"},
+					{"operation-metadata", "RID06_OPERATION_METADATA_CLOSURE"},
+					{"operation-old-resource", "RID06_NEW_OPERATION_IDENTITY"},
+				}
+				// Только непустой предшествующий префикс может нести успешную пару.
+				if position.index > 0 {
+					cases = append(cases, struct{ name, reason string }{"duplicate-operation-account", "RID06_NEW_OPERATION_IDENTITY"}, struct{ name, reason string }{"predecessor-failure", "RID06_ANCESTOR_SUCCESS_CODE"}, struct{ name, reason string }{"predecessor-delegate", "RID06_ANCESTOR_RESPONSE_CLOSURE"})
+				}
+				for _, tc := range cases {
+					t.Run(tc.name, func(t *testing.T) {
+						e, logs, before, after := rid06FailedUnitFixtureAt("S2", position.index)
+						require.Len(t, e.Accounts, 3)
+						require.Equal(t, e.TenantID, e.Accounts[position.index])
+						require.Len(t, after.Raw["operations"], position.index+2)
+						rows := after.Raw["operations"]
+						tenant := position.index + 1
+						switch tc.name {
+						case "missing-operation":
+							rows = rows[:len(rows)-1]
+						case "extra-operation":
+							extra := rid09PrimaryRow{}
+							for key, value := range rows[tenant] {
+								extra[key] = value
+							}
+							extra["id"] = rid06FailedUnitCell("extra-operation")
+							rows = append(rows, extra)
+						case "wrong-account":
+							rows[tenant]["account_id"] = rid06FailedUnitCell("foreign-account")
+						case "outside-prefix-account":
+							account := "foreign-account"
+							if position.index < 2 {
+								account = e.Accounts[position.index+1]
+							}
+							rows[tenant]["account_id"] = rid06FailedUnitCell(account)
+						case "wrong-pair":
+							rows[tenant]["resource_id"] = rid06FailedUnitCell("other-pair")
+						case "missing-tenant":
+							e.Accounts[position.index] = "missing-tenant"
+						case "empty-account-first":
+							e.Accounts[0] = ""
+						case "empty-account-last":
+							e.Accounts[2] = ""
+						case "duplicate-account-first-last":
+							e.Accounts[2] = e.Accounts[0]
+						case "empty-census":
+							e.Accounts = nil
+						case "incomplete-census":
+							e.Accounts = e.Accounts[:2]
+						case "extra-census":
+							e.Accounts = append(e.Accounts, "extra-account")
+						case "tenant-success":
+							rows[tenant]["error_code"] = rid06FailedUnitCell(nil)
+						case "tenant-response":
+							rows[tenant]["response_type"] = rid06FailedUnitCell("unexpected-response")
+						case "operation-clock":
+							rows[tenant]["modified_at"] = rid06FailedUnitCell(after.Whole.PrimaryStartedAt.Add(time.Nanosecond))
+						case "operation-metadata":
+							rows[tenant]["metadata_data"] = rid06FailedUnitCell("\\x00")
+						case "operation-old-resource":
+							rows[tenant]["resource_id"] = rid06FailedUnitCell(e.OldDelegationID)
+						case "duplicate-operation-account":
+							duplicate := rid09PrimaryRow{}
+							for key, value := range rows[1] {
+								duplicate[key] = value
+							}
+							duplicate["id"] = rows[tenant]["id"]
+							rows[tenant] = duplicate
+						case "predecessor-failure":
+							rows[1]["error_code"] = rid06FailedUnitCell(13)
+						case "predecessor-delegate":
+							response, err := anypb.New(&iamv1.GrantDelegation{Id: rid03S(rows[1], "resource_id"), AccountId: rid03S(rows[1], "account_id"), Delegate: &iamv1.Subject{Id: "foreign-delegate"}})
+							require.NoError(t, err)
+							rows[1]["response_type"] = rid06FailedUnitCell(response.TypeUrl)
+							rows[1]["response_data"] = rid06FailedUnitCell("\\x" + hex.EncodeToString(response.Value))
+						}
+						rid06FailedUnitBind(&after, "operations", rows)
+						proof, ok, reason := rid06BuildFailedStartupWithReason(e.CaseID, e.RunID, e.TestExecutableSHA256, e, logs, before, after)
+						require.Equal(t, tc.name == "lawful", ok, "reason=%s", reason)
+						require.Equal(t, tc.reason, reason)
+						if tc.name != "lawful" {
+							require.Empty(t, proof)
+							return
+						}
+						require.Len(t, proof.Operations, position.index+1)
+						accounts := []string{}
+						for _, operation := range proof.Operations {
+							accounts = append(accounts, operation.AccountID)
+						}
+						require.ElementsMatch(t, e.Accounts[:position.index+1], accounts)
+					})
+				}
+			})
+		}
+		t.Run("S1-full-census-extra", func(t *testing.T) {
+			e, logs, before, after := rid06FailedUnitFixture("S1")
+			e.Accounts = append(e.Accounts, "extra-account")
+			proof, ok, reason := rid06BuildFailedStartupWithReason(e.CaseID, e.RunID, e.TestExecutableSHA256, e, logs, before, after)
+			require.False(t, ok)
+			require.Empty(t, proof)
+			require.Equal(t, "RID06_EXPECTED_ACCOUNT_SET", reason)
+		})
+	})
+
 }
 
 func TestInstallationAcceptedAssertionObservation(t *testing.T) {

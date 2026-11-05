@@ -248,10 +248,11 @@ func (p *rid06PublicContext) sequentialBeforeRestore(t *testing.T, w *ridLifecyc
 	if !ok {
 		t.Logf("RID06 failed-startup rejection reason=%s", rejectionReason)
 	}
+	// Уже собранные безопасные снимки сохраняются и при отказе закрытого oracle.
+	rid08Write(t, w.f.session.Root, "rid06-"+rid03Mode(t, w)+"-sequential-pre-restore", map[string]any{"integrationOnly": true, "actualNewmanExecuted": false, "before": p.beforeSequentialRun.Whole, "after": s.Whole, "failedStartupProof": startupProof, "wholeDoDAccepted": false})
 	require.True(t, ok, "closed failed-startup replay and native Operation proof required before restoration")
 	p.preRestore = &s
 	p.refusalProof = true
-	rid08Write(t, w.f.session.Root, "rid06-"+rid03Mode(t, w)+"-sequential-pre-restore", map[string]any{"integrationOnly": true, "actualNewmanExecuted": false, "before": p.beforeSequentialRun.Whole, "after": s.Whole, "failedStartupProof": startupProof, "wholeDoDAccepted": false})
 }
 func (p *rid06PublicContext) afterSequential(t *testing.T, w *ridLifecycleWorld) {
 	if p == nil {
