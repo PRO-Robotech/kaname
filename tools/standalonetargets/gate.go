@@ -367,7 +367,8 @@ func standaloneUniqueJSON(body []byte) error {
 		if !nested {
 			return nil
 		}
-		if delimiter == '{' {
+		switch delimiter {
+		case '{':
 			seen := map[string]bool{}
 			for decoder.More() {
 				key, err := decoder.Token()
@@ -383,13 +384,13 @@ func standaloneUniqueJSON(body []byte) error {
 					return err
 				}
 			}
-		} else if delimiter == '[' {
+		case '[':
 			for decoder.More() {
 				if err := visit(); err != nil {
 					return err
 				}
 			}
-		} else {
+		default:
 			return errors.New("некорректная граница JSON диагностики")
 		}
 		_, err = decoder.Token()
