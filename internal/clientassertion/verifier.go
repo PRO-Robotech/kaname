@@ -496,9 +496,9 @@ func (v *Verifier) verifyRegistered(
 	// (8) Разрешение клиента по реестру. Зеркальное значение (идентификатор во
 	// внешнем сервере) на этом пути НЕ УЧАСТВУЕТ вовсе — ни как второй ключ
 	// поиска, ни как запасной.
-	client, err := v.clients.ResolveAssertionClient(ctx, issuer)
+	client, outcome, err := ResolveRegisteredClient(ctx, v.clients, issuer)
 	switch {
-	case domain.IsAssertionClientUnknown(err):
+	case outcome == OutcomeClientUnknown:
 		return refuse(OutcomeClientUnknown, "client does not resolve")
 	case err != nil:
 		// Недоступность реестра — ОТКАЗ, никогда «пропустить». Реестр лежит на
@@ -903,4 +903,18 @@ func parsePublicKey(pemText string) (crypto.PublicKey, error) {
 		return nil, fmt.Errorf("registered key is not a PKIX public key: %w", err)
 	}
 	return key, nil
+}
+
+// ResolveRegisteredClient — общая классификация отказов реестра для
+// проверки и ограниченного поиска истечения, нужного для подготовки доказательства клиента.
+// Неизвестная идентичность и вопрос реестру без ответа намеренно различаются.
+func ResolveRegisteredClient(ctx context.Context, resolver ClientResolver, id string) (domain.AssertionClient, Outcome, error) {
+	client, err := resolver.ResolveAssertionClient(ctx, id)
+	if domain.IsAssertionClientUnknown(err) {
+		return domain.AssertionClient{}, OutcomeClientUnknown, err
+	}
+	if err != nil {
+		return domain.AssertionClient{}, OutcomeRegistryUnavailable, err
+	}
+	return client, OutcomeAccepted, nil
 }

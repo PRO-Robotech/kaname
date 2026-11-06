@@ -214,9 +214,11 @@ type ceremonyWorld struct {
 	surfaceAuth servicecontract.Axis[servicecontract.SurfaceAuthMech]
 	priv        *ecdsa.PrivateKey
 	kid         string
+	signer      *tokensigner.Signer // тот же настоящий подписант, доступный приёмке установки
 	logs        *lockedBuffer
 	// lifespans — сроки церемонии, которые настройка мира называет сборке.
-	lifespans config.CeremonyConfig
+	lifespans       config.CeremonyConfig
+	clientAudiences []string // нативный Given использует настоящую аудиторию стенда; nil сохраняет эту фикстуру
 
 	user    domain.UserID
 	email   string
@@ -509,13 +511,17 @@ func (w *ceremonyWorld) seedClientAuthenticatedBy(name string, status domain.Int
 	w.t.Helper()
 	id := domain.InteractiveClientID(ids.NewHyphenID(ids.PrefixInteractiveClientHyphen))
 	repo := kanamepg.NewInteractiveClientRepo(w.pool)
+	audiences := w.clientAudiences
+	if len(audiences) == 0 {
+		audiences = []string{"https://api.kacho.local"}
+	}
 	in := domain.InteractiveClient{
 		ID:                      id,
 		Name:                    domain.InteractiveClientName(name),
 		RedirectURIs:            redirects,
 		PostLogoutRedirectURIs:  []string{},
 		ClientID:                string(id),
-		Audiences:               []string{"https://api.kacho.local"},
+		Audiences:               audiences,
 		GrantTypes:              []string{grantAuthorizationCode, grantRefreshToken},
 		TokenEndpointAuthMethod: method,
 		Status:                  status,
@@ -587,6 +593,7 @@ func (w *ceremonyWorld) buildSurface() {
 		w.fixture("подписант: %v", err)
 	}
 
+	w.signer = signer
 	logger := slog.New(slog.NewJSONHandler(w.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	mux, err := registrytokenwire.Build(w.pool, registrytokenwire.BuildConfig{
 		Realm:    "https://api.kacho.local/iam/token",

@@ -61,8 +61,8 @@ const registrationRRCommand = `INSERT INTO kaname.resource_registration_command(
 const registrationRREdge = `INSERT INTO kaname.resource_parent_edge(object_type,object_id,parent_type,parent_id,depth,source_version) VALUES ('registry_registry',$1,'project',$2,3,now())`
 
 // verifies https://github.com/PRO-Robotech/kaname/issues/983
-// A stale RR snapshot aborts honestly with 40001. A fresh retry distinguishes
-// lawful equality from a visible integrity violation; neither error is renamed.
+// Устаревший снимок RR честно прерывается с 40001. Свежий повтор различает
+// допустимое равенство и видимое нарушение целостности; ни одна ошибка не переименовывается.
 func TestRegistrationRepeatableRead_EdgeAfterBinding(t *testing.T) {
 	for _, wait := range []bool{false, true} {
 		for _, tc := range []struct {
@@ -161,8 +161,8 @@ func TestRegistrationRepeatableRead_FirstBindingAfterEdge(t *testing.T) {
 				require.NoError(t, err)
 				defer retry.Rollback(context.Background())
 				_, err = retry.Exec(ctx, sql, id)
-				// Full command replaces the complete unbound chain; raw mirror must respect
-				// the existing chain. No old edge is silently lost by a stale RR snapshot.
+				// Полная команда заменяет всю непривязанную цепочку; прямое зеркало обязано соблюдать
+				// существующую цепочку. Устаревший снимок RR не должен молча терять старое ребро.
 				if command || project == "registrationRR-P" {
 					require.NoError(t, err)
 					require.NoError(t, retry.Commit(ctx))

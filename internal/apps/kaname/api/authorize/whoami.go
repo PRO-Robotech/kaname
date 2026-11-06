@@ -14,8 +14,8 @@
 //  4. FGA Check `viewer@cluster:cluster_root`.
 //  5. Reader.Users().ListAccountsForUser → set of account ids.
 //  6. For each account: Reader.Accounts().Get + AccessBindings().ListBySubject
-//     (filtered to account-scope) + Roles().Get per DISTINCT bound role →
-//     coarse role tags (the tag follows the role name; see roleTags).
+//     (отфильтрованные до области аккаунта) и Roles().Get для каждой РАЗНОЙ привязанной роли →
+//     общие метки ролей (метка следует имени роли; см. roleTags).
 //
 // Designed for UI bootstrap and CLI permission previews — the data is
 // coarse (cluster flags + per-account role tags) and intentionally NOT a
@@ -311,9 +311,9 @@ func roleTags(ctx context.Context, rd kanamerepo.Reader, ids map[domain.RoleID]s
 	return out, nil
 }
 
-// classifyRoleName maps a role NAME to a coarse role tag (owner / admin /
-// editor / viewer): the trailing dot-separated segment of the name, falling
-// back to `viewer` (least privilege) for anything unrecognised.
+// classifyRoleName отображает ИМЯ роли в общую метку (owner / admin /
+// editor / viewer): последний сегмент имени после точки, с переходом
+// к `viewer` (минимальным привилегиям) для всего нераспознанного.
 func classifyRoleName(name domain.RoleName) string {
 	v := strings.ToLower(string(name))
 	if i := strings.LastIndexByte(v, '.'); i >= 0 {

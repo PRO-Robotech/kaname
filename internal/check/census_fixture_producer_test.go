@@ -7,6 +7,7 @@
 package check_test
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -112,9 +113,6 @@ func TestCensusFixturesSeedThroughTheProducer(t *testing.T) {
 			ownProofSeen = true
 			continue
 		}
-		if !strings.Contains(string(body), check.CensusEdgeTable) {
-			continue
-		}
 		facts, ferr := check.CensusFactsOf(rel, body, producerPkg)
 		if ferr != nil {
 			t.Fatalf("разбор %s: %v", rel, ferr)
@@ -125,7 +123,11 @@ func TestCensusFixturesSeedThroughTheProducer(t *testing.T) {
 		if facts.Census {
 			censusFiles++
 		}
-		dir := path.Dir(rel)
+		parsed, err := parser.ParseFile(token.NewFileSet(), rel, body, parser.PackageClauseOnly)
+		if err != nil {
+			t.Fatalf("пакет %s: %v", rel, err)
+		}
+		dir := path.Dir(rel) + "/" + parsed.Name.Name
 		byDir[dir] = append(byDir[dir], facts)
 	}
 
@@ -150,6 +152,30 @@ func TestCensusFixturesSeedThroughTheProducer(t *testing.T) {
 			check.CensusMirrorTable, check.CensusEdgeTable)
 	}
 
+	all, err := treecorpus.UnderWithSuffix(root, ".go")
+	if err != nil {
+		t.Fatalf("полный корпус RPC: %v", err)
+	}
+	corpus := map[string][]byte{}
+	for _, p := range all {
+		body, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("чтение supporting source: %v", err)
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		corpus[filepath.ToSlash(rel)] = body
+	}
+	producers, routes, err := check.CensusRPCProducers(corpus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for dir := range producers {
+		byDir[dir] = append(byDir[dir], check.CensusFileFacts{Rel: fmt.Sprintf("RPC route %s", dir), Producer: true})
+	}
+	t.Logf("полный tracked корпус %d файлов; доказано typed RPC→registered handler→wired adapter→mirror путей %d", len(corpus), routes)
 	if findings := check.JudgeCensusFixtures(byDir); len(findings) > 0 {
 		t.Fatalf("перепись утверждает свойство собственной фикстуры:\n  %s",
 			strings.Join(findings, "\n  "))

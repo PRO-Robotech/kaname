@@ -14,8 +14,8 @@ import (
 //
 // PENDING — created via `UserService.Invite`, external_id="" until first
 // login; the invitee has not yet registered and verified the address.
-// ACTIVE  — either self-registration on our sign-in lane without a pending
-// invite, or a PENDING row activated by confirming the invited address.
+// ACTIVE — либо саморегистрация на нашей полосе входа без ожидающего
+// приглашения, либо строка PENDING, активированная подтверждением приглашённого адреса.
 // BLOCKED — административный запрет на членство в Account'е. Ставится и снимается
 // ДЕЙСТВИЯМИ `UserService.Block` / `Unblock` (право `identity_suspender@iam_user`
 // = админ аккаунта плюс каскад облака; `v_update` с этого типа снят, kacho#1128);

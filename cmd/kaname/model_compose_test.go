@@ -273,15 +273,13 @@ func TestServeInstallsTheComposedModelBetweenDeliveryAndItsFirstReader(t *testin
 			return true
 		}
 		callsSeen++
-		fn, ok := call.Fun.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		switch {
-		case fn.Name == "loadDeliveredManifests" && !deliveryPos.IsValid():
+		if fn, ok := call.Fun.(*ast.Ident); ok && fn.Name == "loadDeliveredManifests" && !deliveryPos.IsValid() {
 			deliveryPos = call.Pos()
-		case fn.Name == "installComposedModel" && !installPos.IsValid():
-			installPos = call.Pos()
+		}
+		if fn, ok := call.Fun.(*ast.SelectorExpr); ok && fn.Sel.Name == "Install" {
+			if pkg, ok := fn.X.(*ast.Ident); ok && pkg.Name == "authzmodel" && !installPos.IsValid() {
+				installPos = call.Pos()
+			}
 		}
 		return true
 	})
@@ -293,7 +291,7 @@ func TestServeInstallsTheComposedModelBetweenDeliveryAndItsFirstReader(t *testin
 		t.Fatal("обход не нашёл ни одного вызова — вердикт беспредметен")
 	}
 	if !installPos.IsValid() {
-		t.Fatal("serve.go не зовёт installComposedModel — композиция объявлена и не исполняется " +
+		t.Fatal("serve.go не зовёт authzmodel.Install — композиция объявлена и не исполняется " +
 			"на пути старта: модель процесса остаётся вшитым каноном, а доставленные типы " +
 			"не доезжают до вердикта вовсе")
 	}

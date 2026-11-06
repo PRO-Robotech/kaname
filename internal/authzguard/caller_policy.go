@@ -6,9 +6,9 @@
 // platform's single authZ front door validates the JWT and runs per-user ReBAC
 // via iam.Check). iam's :9091 enforces only WHO MAY CALL each RPC:
 //
-//  1. Floor — every internal RPC requires a VERIFIED mTLS module cert (SPIRE SAN
+//  1. Основание — каждый внутренний RPC требует ПРОВЕРЕННЫЙ mTLS-сертификат модуля (SPIRE SAN
 //     spiffe://<домен>/ns/<ns>/sa/kacho-<svc>) in production. dev (no verified
-//     cert) → no-op (insecure back-compat, mirror RelationWriteGate).
+//     сертификат) → без действия (небезопасная обратная совместимость, как RelationWriteGate).
 //     Модулем признаётся ТОЛЬКО пара (пространство, учётка), объявленная
 //     установкой (WithModuleRoster, kaname#984), и признанная личность зовёт
 //     только методы СВОЕГО профиля (module_profiles.go) — в том числе среди

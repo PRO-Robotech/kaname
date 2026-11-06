@@ -139,8 +139,8 @@ func (r *CatalogWriteRepo) RunInWriteTx(
 	return r.tx.InTx(ctx, func(tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
 }
 
-// registrationWriterLockSQL соответствует statement fence миграции 31090000.
-// Ранние писатели берут его до своих явных row locks, раньше физического DML.
+// registrationWriterLockSQL соответствует барьеру операторов миграции 31090000.
+// Ранние писатели берут его до своих явных замков строк, раньше физического DML.
 const registrationWriterLockSQL = `SELECT pg_advisory_xact_lock(hashtextextended('kaname.resource_registration_writers', 0))`
 
 // catalogWriter — `modulecatalog.CatalogWriter` над одной транзакцией.
@@ -150,7 +150,7 @@ type catalogWriter struct{ tx pgx.Tx }
 // И откатом, поэтому оборванный применитель не оставляет каталог запертым.
 func (w catalogWriter) LockCatalog(ctx context.Context) error {
 	// Применитель заранее запирает строки ресурсов через SELECT FOR UPDATE.
-	// Общий writer fence нужен ДО этих замков, а не только в триггере UPDATE:
+	// Общий барьер писателей нужен ДО этих замков, а не только в триггере UPDATE:
 	// иначе command держал бы fence и ждал строку каталога, а применение — его.
 	if _, err := w.tx.Exec(ctx, registrationWriterLockSQL); err != nil {
 		return err

@@ -1,0 +1,158 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: AGPL-3.0-or-later
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/url"
+	"strconv"
+)
+
+const rid01ExpiredAccessCase = "registry-installation-rid01-EXPIRED-ACCESS-TOKEN"
+const rid01RenewedAccessCase = "registry-installation-rid01-RENEWAL-AFTER"
+const rid01ExpiredKeyCase = "registry-installation-rid01-EXPIRED-KEY-REFUSAL"
+
+func rid01PublicCase(id string) bool {
+	switch id {
+	case "registry-installation-rid01-CLEAN-BEFORE", "registry-installation-rid01-CLEAN-INSTALLED", "registry-installation-rid01-S1-EXACT-IDENTITIES", "registry-installation-rid01-RENEWAL-BEFORE", rid01ExpiredAccessCase, rid01RenewedAccessCase, rid01ExpiredKeyCase, "registry-installation-rid01-VALID-KEY-TWIN":
+		return true
+	}
+	return false
+}
+
+type ridNewmanRequestPolicy struct {
+	CaseID      string `json:"caseId"`
+	RequestName string `json:"requestName"`
+	Method      string `json:"method"`
+	Path        string `json:"path"`
+	Origin      string `json:"origin"`
+}
+
+func ridNewmanOrigin(raw string) (string, string, string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u == nil || u.Scheme != "https" || u.User != nil || u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawFragment != "" || (u.Path != "" && u.Path != "/") || u.RawPath != "" || (u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1") {
+		return "", "", "", errors.New("invalid owned HTTPS origin")
+	}
+	portNumber, portErr := strconv.Atoi(u.Port())
+	// Повторяем канонизацию URL WHATWG: явный непустой десятичный порт,
+	// без ведущих нулей/выхода за диапазон и неявного HTTPS default443.
+	if portErr != nil || portNumber < 0 || portNumber > 65535 || portNumber == 443 || strconv.Itoa(portNumber) != u.Port() {
+		return "", "", "", errors.New("invalid owned HTTPS origin")
+	}
+	origin := "https://" + u.Host
+	if raw != origin && raw != origin+"/" {
+		return "", "", "", errors.New("invalid owned HTTPS origin")
+	}
+	return origin, u.Hostname(), u.Port(), nil
+}
+func ridNewmanDecodeRequestPolicy(raw json.RawMessage) (*ridNewmanRequestPolicy, error) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, nil
+	}
+	// Сначала декодируем через карту, чтобы отклонить повторные, отсутствующие и лишние ключи.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	token, err := dec.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, errors.New("invalid request policy")
+	}
+	fields := map[string]string{}
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return nil, errors.New("invalid request policy")
+		}
+		name, ok := key.(string)
+		if !ok {
+			return nil, errors.New("invalid request policy")
+		}
+		if _, ok := fields[name]; ok {
+			return nil, errors.New("invalid request policy")
+		}
+		var value string
+		if dec.Decode(&value) != nil {
+			return nil, errors.New("invalid request policy")
+		}
+		fields[name] = value
+	}
+	if _, err = dec.Token(); err != nil {
+		return nil, errors.New("invalid request policy")
+	}
+	if _, err = dec.Token(); err != io.EOF {
+		return nil, errors.New("invalid request policy")
+	}
+	if len(fields) != 5 {
+		return nil, errors.New("invalid request policy")
+	}
+	for _, key := range []string{"caseId", "requestName", "method", "path", "origin"} {
+		if _, ok := fields[key]; !ok {
+			return nil, errors.New("invalid request policy")
+		}
+	}
+	return &ridNewmanRequestPolicy{fields["caseId"], fields["requestName"], fields["method"], fields["path"], fields["origin"]}, nil
+}
+
+// Точный замкнутый контракт адреса; входная переменная не выбирает политику или участника.
+func ridNewmanIssuanceCase(caseID string) (string, string, bool) {
+	if caseID == rid01ExpiredKeyCase {
+		return "rid01IssuanceOrigin", "expired-standing-key-token-refusal", true
+	}
+	if rid05TokenCase(caseID) {
+		return "rid05IssuanceOrigin", "old-standing-key-token-refusal", true
+	}
+	if rid11TokenCase(caseID) {
+		return "rid11IssuanceOrigin", "input-standing-key-token-refusal", true
+	}
+	return "", "", false
+}
+func ridNewmanValidateRequestPolicy(caseID, public string, p *ridNewmanRequestPolicy, variables map[string]any) error {
+	_, host, port, err := ridNewmanOrigin(public)
+	if err != nil {
+		return errors.New("invalid public listener policy")
+	}
+	variable, leaf, tokenCase := ridNewmanIssuanceCase(caseID)
+	raw, has := variables[variable]
+	_, oldOrigin := variables["rid01IssuanceOrigin"]
+	_, deletedOrigin := variables["rid05IssuanceOrigin"]
+	_, inputOrigin := variables["rid11IssuanceOrigin"]
+	if (oldOrigin && variable != "rid01IssuanceOrigin") || (deletedOrigin && variable != "rid05IssuanceOrigin") || (inputOrigin && variable != "rid11IssuanceOrigin") {
+		return errors.New("unexpected issuance policy")
+	}
+	if !tokenCase {
+		if p != nil || has || oldOrigin || deletedOrigin || inputOrigin {
+			return errors.New("unexpected issuance policy")
+		}
+		return nil
+	}
+	if port != "9098" && port != "9198" {
+		return errors.New("invalid issuance public listener policy")
+	}
+	if p == nil || p.CaseID != caseID || p.RequestName != caseID+" :: "+leaf || p.Method != "POST" || p.Path != "/iam/v1/token" {
+		return errors.New("invalid issuance request policy")
+	}
+	expectedPort := "9096"
+	if port == "9198" {
+		expectedPort = "9196"
+	}
+	origin, tokenHost, tokenPort, err := ridNewmanOrigin(p.Origin)
+	if err != nil || tokenHost != host || tokenPort != expectedPort || origin != p.Origin {
+		return errors.New("invalid issuance origin policy")
+	}
+	value, ok := raw.(string)
+	if !has || !ok || value != origin {
+		return errors.New("issuance variable differs from owned policy")
+	}
+	return nil
+}
+func ridNewmanParentRequestPolicy(caseID, public, issuance string, variables map[string]any) (*ridNewmanRequestPolicy, error) {
+	var p *ridNewmanRequestPolicy
+	if _, leaf, tokenCase := ridNewmanIssuanceCase(caseID); tokenCase {
+		p = &ridNewmanRequestPolicy{caseID, caseID + " :: " + leaf, "POST", "/iam/v1/token", issuance}
+	}
+	if err := ridNewmanValidateRequestPolicy(caseID, public, p, variables); err != nil {
+		return nil, err
+	}
+	return p, nil
+}

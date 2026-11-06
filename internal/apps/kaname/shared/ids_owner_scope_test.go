@@ -34,9 +34,7 @@ package shared_test
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -84,35 +82,15 @@ type ownerScopeCensus struct {
 // parseProdTree разбирает непроверочные файлы Go поддерева.
 func parseProdTree(t *testing.T, root string) []sourceFile {
 	t.Helper()
-	var out []sourceFile
-	fset := token.NewFileSet()
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			// Каталоги без прод-кода Go — обходить их значило бы тратить время
-			// и рисковать разбором чужих фикстур.
-			switch d.Name() {
-			case "testdata", "node_modules", "docs":
-				return fs.SkipDir
-			}
-			return nil
-		}
-		name := d.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			return nil
-		}
-		f, perr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if perr != nil {
-			return perr
-		}
-		out = append(out, sourceFile{Path: path, AST: f})
-		return nil
-	})
+	files, err := readIDCorpus(root, false)
 	if err != nil {
-		t.Fatalf("обход дерева сервиса не состоялся: %v", err)
+		t.Fatalf("production корпус: %v", err)
 	}
+	var out []sourceFile
+	for _, file := range files {
+		out = append(out, sourceFile{Path: file.Path, AST: file.AST})
+	}
+
 	return out
 }
 
@@ -411,4 +389,18 @@ func TestStrictIDFormatCheckStaysOwnerScoped(t *testing.T) {
 			"(конвенция запрещает это прямо — api-conventions.md §By-lane code-split):\n%s",
 			strings.Join(c.Findings, "\n"))
 	}
+}
+
+// idCorpusExcluded — только явно непроизводственные сегменты tracked корпуса.
+func idCorpusExcluded(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if part == "testdata" || part == "node_modules" || part == "docs" {
+			return true
+		}
+	}
+	return false
 }

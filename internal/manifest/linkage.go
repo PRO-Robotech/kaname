@@ -295,6 +295,9 @@ func (f linkFault) Error() string {
 // прозу сообщения.
 func (f linkFault) Unwrap() error { return f.kind }
 
+// FieldPath обозначает неверное поле документа без раскрытия значения.
+func (f linkFault) FieldPath() string { return f.coord.path }
+
 // locate — путь и номер строки места, адресованного шагами: строка — ключ
 // отображения, целое — индекс списка.
 //
@@ -370,7 +373,7 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs, oracle Rela
 	seededAccounts := namesOfServiceAccounts(seed.ServiceAccounts)
 	seededGroups := namesOfGroups(seed.Groups)
 
-	var faults []error
+	faults := validateGrantDelegations(m, doc)
 	grantedGroups := map[string]struct{}{}
 
 	for i, b := range seed.AccessBindings {

@@ -96,8 +96,8 @@ const (
 //   - InternalIAMService/{RegisterResource,UnregisterResource}
 //     — fga_writer-gated mutations.
 //   - ForceLogout / Cluster GrantAdmin/RevokeAdmin / Authorize
-//     WriteTuples/ReloadModel / SessionRevocations Revoke — gateway-only /
-//     admin-tier mutations.
+//     WriteTuples/ReloadModel / SessionRevocations Revoke — изменения только для gateway /
+//     яруса admin.
 func ReadFloorRPCs() []string {
 	return []string{
 		// InternalIAMService — service→service read lookups.
@@ -204,7 +204,7 @@ func (f *SystemViewerFloor) allow(ctx context.Context, fullMethod string) error 
 	// Признание — объявленная пара перечня (kaname#984).
 	module, ok := f.modules.FromContext(ctx)
 	if !ok {
-		// Malformed / foreign-trust-domain / undeclared SAN → not a module identity.
+		// Некорректный SAN / чужой домен доверия / необъявленный SAN → не личность модуля.
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	sva := ServiceAccountIDForService(module.Service)

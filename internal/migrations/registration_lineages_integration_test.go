@@ -27,7 +27,7 @@ func TestRegistrationLineages_ProductMigratorReconcilesBothHistories(t *testing.
 	if testing.Short() {
 		t.Skip("integration: PostgreSQL")
 	}
-	// Do not run in parallel: the product runner and goose own process globals.
+	// Не запускать параллельно: производственный исполнитель и goose владеют глобальным состоянием процесса.
 	for _, lineage := range []string{"fresh", "main", "feature", "both", "partial", "changed"} {
 		t.Run(lineage, func(t *testing.T) {
 			dsn := pgtest.NewEmptyDB(t)
@@ -38,8 +38,8 @@ func TestRegistrationLineages_ProductMigratorReconcilesBothHistories(t *testing.
 			names, err := fs.Glob(migrations.FS, "*.sql")
 			require.NoError(t, err)
 			for _, name := range names {
-				// Actual full main HEAD ends at creator90000; actual full
-				// registration b8 ends at binding120000. No invented prefix.
+				// Настоящий полный main HEAD заканчивается creator90000; настоящая полная
+				// регистрация b8 — binding120000. Без выдуманного префикса.
 				if name >= "20261031000000" || strings.HasPrefix(name, "20261026090001_") {
 					continue
 				}
@@ -77,14 +77,14 @@ func TestRegistrationLineages_ProductMigratorReconcilesBothHistories(t *testing.
 						require.NoError(t, err)
 					}
 				}
-				// A lawful later catalog update must survive: do not replay seeds.
+				// Допустимое более позднее обновление каталога должно сохраниться: посев заново не проигрываем.
 				if lineage == "feature" || lineage == "both" {
 					_, err = db.Exec(`UPDATE kaname.catalog_resource SET writes=ARRAY['owner:user'] WHERE dotted='registry.registries'`)
 					require.NoError(t, err)
 				}
 			}
-			// Exact product runner (includes WithAllowMissing), not a fabricated
-			// goose option in the test. Existing version rows are never rewritten.
+			// Точный производственный исполнитель (включая WithAllowMissing), а не выдуманный
+			// параметр goose в пробе. Существующие строки версий никогда не переписываются.
 			runner, err := migratorrun.New(migratorrun.Config{Service: "kaname", Dialect: "postgres", DSN: dsn, FS: migrations.FS, MigrationsDir: "."})
 			require.NoError(t, err)
 			err = runner.Up(context.Background(), "")

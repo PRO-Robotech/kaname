@@ -141,6 +141,8 @@ func (v Verdict) String() string {
 
 // Query — вопрос к форме E.
 type Query struct {
+	// PreparedPlans разрешает предварительную проверку запуска с аутентификацией до установки модели процесса.
+	PreparedPlans *authzmodel.Plans
 	// Subject — целиком, в форме `"user:usr-1"`: подстановочный и групповой
 	// субъекты на пару не раскладываются.
 	Subject string
@@ -636,7 +638,7 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 		return Unknown, g, fmt.Errorf("relverdict: неполный вопрос %+v — пустая часть делает "+
 			"ответ бессмысленным, и отдавать за него Deny значит выдавать незнание за отказ", in)
 	}
-	factParents, factRelations, bindVerbs, err := sourcesOf(in.ObjectType, in.Relation)
+	factParents, factRelations, bindVerbs, err := sourcesOfPrepared(in.PreparedPlans, in.ObjectType, in.Relation)
 	if err != nil {
 		// Тип, не объявленный моделью, — ОТКАЗ, а не ошибка. Разница в том, что
 		// именно мы утверждаем: «объектов такого типа не существует» — это ответ
@@ -1137,9 +1139,15 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 // заметить. Обе предпосылки-запрета ниже поэтому проверяются один раз и
 // действуют для всех четырёх.
 func sourcesOf(objectType, relation string) (parents, relations, verbs []string, err error) {
-	plans, err := authzmodel.Shared()
-	if err != nil {
-		return nil, nil, nil, err
+	return sourcesOfPrepared(nil, objectType, relation)
+}
+
+func sourcesOfPrepared(plans *authzmodel.Plans, objectType, relation string) (parents, relations, verbs []string, err error) {
+	if plans == nil {
+		plans, err = authzmodel.Shared()
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	plan, err := plans.Plan(objectType, relation)
 	if err != nil {

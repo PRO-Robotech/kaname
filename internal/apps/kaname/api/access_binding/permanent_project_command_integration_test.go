@@ -62,8 +62,8 @@ func TestPermanentProjectCommand_RawUpsertWaitsOnMirrorBeforeBinding(t *testing.
 	defer func() { _ = command.Rollback(context.Background()) }()
 	var commandPID int32
 	require.NoError(t, command.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&commandPID))
-	// Барьер создаёт настоящий command: строка зеркала и общий writer fence
-	// удерживаются до коммита. Ручной row lock до входа в протокол не является
+	// Барьер создаёт настоящая команда: строка зеркала и общий барьер писателей
+	// удерживаются до коммита. Ручной замок строки до входа в протокол не является
 	// расписанием реального UpsertTx и может инвертировать любой ранний fence.
 	held, err := resource_mirror.UpsertTx(ctx, command, resource_mirror.Row{
 		ObjectType: ppRegCat, ObjectID: id, SourceVersion: version.Add(-time.Second),
@@ -89,8 +89,8 @@ func TestPermanentProjectCommand_RawUpsertWaitsOnMirrorBeforeBinding(t *testing.
 		e := w.pool.QueryRow(ctx, `SELECT $1::integer=ANY(pg_blocking_pids($2::integer))`, commandPID, int32(rawPID)).Scan(&waiting)
 		return e == nil && waiting
 	}, 5*time.Second, 10*time.Millisecond, "законный raw UPSERT ждёт транзакцию настоящего command")
-	// Old BEFORE INSERT bound first, then waited on this mirror. The command
-	// would next wait on that binding: a real cycle, not a synthetic SQL order.
+	// Прежний BEFORE INSERT сначала брал привязку, затем ждал это зеркало. Команда
+	// затем ждала бы ту привязку: настоящий цикл, а не синтетический порядок SQL.
 	out, err := resource_mirror.UpsertTx(ctx, command, resource_mirror.Row{
 		ObjectType: ppRegCat, ObjectID: id, ParentProjectID: string(w.prjA), ParentAccountID: string(w.accA),
 		ParentChain: []string{"project:" + string(w.prjA)}, SourceVersion: version.Add(time.Second),

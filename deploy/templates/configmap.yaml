@@ -167,6 +167,31 @@ data:
         {{- end }}
       {{- end }}
 
+    {{- if not (hasKey .Values "moduleSeedInstaller") }}
+    {{- fail "moduleSeedInstaller должен быть картой, null недопустим" }}
+    {{- end }}
+    {{- $installer := .Values.moduleSeedInstaller }}
+    {{- if not (kindIs "map" $installer) }}
+    {{- fail "moduleSeedInstaller должен быть картой" }}
+    {{- end }}
+    {{- range $key, $value := $installer }}
+    {{- if not (has $key (list "credentialFile" "tenantAccountId")) }}
+    {{- fail "неизвестный ключ moduleSeedInstaller" }}
+    {{- end }}
+    {{- if not (kindIs "string" $value) }}
+    {{- fail "поля moduleSeedInstaller должны быть строками, null недопустим" }}
+    {{- end }}
+    {{- end }}
+    {{- if gt (len $installer) 0 }}
+    moduleSeedInstaller:
+      {{- if hasKey $installer "credentialFile" }}
+      credentialFile: {{ $installer.credentialFile | quote }}
+      {{- end }}
+      {{- if hasKey $installer "tenantAccountId" }}
+      tenantAccountId: {{ $installer.tenantAccountId | quote }}
+      {{- end }}
+    {{- end }}
+
     repository:
       type: POSTGRES
       postgres:

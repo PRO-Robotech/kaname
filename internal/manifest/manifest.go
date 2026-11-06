@@ -288,6 +288,8 @@ func (m *Manifest) RolesDeclared() bool { return m.rolesDeclared }
 // объявлением; после kacho#2452 он зовёт применитель сам, поэтому судит уже не
 // согласие двух копий, а то, доезжает ли объявленное до строк.
 type Seed struct {
+	// GrantDelegations объявляет делегирование установки; отсутствие и [] не запрашивают записей.
+	GrantDelegations []GrantDelegation `yaml:"grantDelegations"`
 	// ServiceAccounts — личности самого модуля: под ними он ходит к соседям.
 	ServiceAccounts []ServiceAccount `yaml:"serviceAccounts"`
 	// Groups — группы модуля для его потребителей. Объявляются пустыми и без
@@ -418,6 +420,12 @@ func LoadWithReferent(data []byte, referent TypeReferent, opts ...LoadOption) (*
 
 	if faults := checkStringKeys(doc); len(faults) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrNonStringKey, joinFaults(faults))
+	}
+	if err := refuseUnknownDelegationFields(doc); err != nil {
+		return nil, err
+	}
+	if err := refuseNullDelegations(doc); err != nil {
+		return nil, err
 	}
 	if err := refuseNullSeed(doc); err != nil {
 		return nil, err

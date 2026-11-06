@@ -34,12 +34,12 @@ func (c *escSQLCapture) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.
 }
 func (*escSQLCapture) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
-// S1.8 captures the actual repository producer, including the subject OR predicate,
-// complete projection, LIMIT and subsequent-page cursor. No planner knobs are changed.
+// S1.8 фиксирует настоящего производителя репозитория, включая предикат OR субъекта,
+// полную проекцию, LIMIT и курсор следующей страницы. Настройки планировщика не меняются.
 func TestRoleRights_S1P8_ActualGrantReadPlans(t *testing.T) {
 	w := newGDWorld(t)
-	// Repository fixture API, one transaction, distinct grants. There are 1001 group
-	// grants so the same pagination loop as activeScopesOfGroup must read a cursor page.
+	// API фикстуры репозитория, одна транзакция, разные выдачи. Выдач группе 1001,
+	// поэтому тот же цикл пагинации, что в activeScopesOfGroup, должен прочитать страницу по курсору.
 	projects := make([]domain.ProjectID, 1001)
 	for i := range projects {
 		projects[i] = seedProjectInAccount(t, w.ctx, w.pool, w.accA, fmt.Sprintf("plan-%d", i))
@@ -114,8 +114,8 @@ func TestRoleRights_S1P8_ActualGrantReadPlans(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { _ = tx.Rollback(w.ctx) }()
 			positive := escActualPlan(t, w.ctx, tx, q, "positive")
-			// A data-identical no-index twin changes only access-path availability. pg_temp
-			// shadows unqualified producer tables; explicit kaname schema remains untouched.
+			// Двойник с одинаковыми данными без индекса меняет только доступность пути чтения. pg_temp
+			// затеняет таблицы производителя без схемы; явная схема kaname не меняется.
 			_, err = tx.Exec(w.ctx, `CREATE TEMP TABLE access_bindings AS TABLE kaname.access_bindings;
 CREATE TEMP TABLE access_binding_subjects AS TABLE kaname.access_binding_subjects;
 SET LOCAL search_path = pg_temp, kaname, public;
@@ -143,8 +143,8 @@ func escActualPlan(t *testing.T, ctx context.Context, tx pgx.Tx, q escCapturedSQ
 	return docs[0]["Plan"].(map[string]any)
 }
 
-// Judge only the acceptance's indexed grant read; no index-name or timing budget
-// is invented. A scan of the full grant table fails even if another subtree indexes.
+// Судим только индексированное чтение выдач из приёмки; имя индекса и лимит времени
+// не выдумываются. Сканирование всей таблицы выдач краснит, даже если другое поддерево использует индекс.
 func escGrantPlanIndexed(plan map[string]any) bool {
 	indexed, sequential := false, false
 	var visit func(map[string]any)

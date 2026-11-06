@@ -39,7 +39,7 @@
 //     пробный ключ смешанного регистра (`podEnvCanary`): так видно и
 //     приставку, и окончание, и смену регистра;
 //   - исполнения — КАЖДЫЙ узел управления шаблонов принуждается: `if`, `with`,
-//     `range`, `ternary` (`forceNodesIn`). Три исполнения на посадку: как есть;
+//     `range`, `ternary` (`forceNodesIn`). Три исполнения на посадку: исходные ветви;
 //     каждая ветвь — then; каждая ветвь — else. Принуждение правит текст
 //     шаблона по позициям разбора (узел `text/template/parse`), а не образцом:
 //     условие `if` заменяется постоянной, `with` и `range` над пустым получают
@@ -50,6 +50,10 @@
 //     (`forcedRangeKey`): им судится и карта, которой нет в дереве значений ни
 //     одной посадки. Суд стража (исход 1 ниже) идёт исполнением как есть —
 //     принуждение его отказ заглушило бы.
+//     При поиске источников с исходными ветвями заглушается только `fail`:
+//     пробный ключ закрытой карты не должен останавливать обход остальных карт.
+//     Условия, `required` и ошибки типов сохраняются. Исходный чарт до проб
+//     и каждый настоящий отказ стража проверяются без этой правки.
 //
 // Разбор здесь даёт ПОЗИЦИИ узлов, и только их: какой узел меняет имя
 // переменной и меняет ли вообще, решает рендер.
@@ -153,9 +157,10 @@ const (
 	execAsIs execState = iota
 	execThen
 	execElse
+	execObserve
 )
 
-var execStates = []execState{execAsIs, execThen, execElse}
+var execStates = []execState{execObserve, execThen, execElse}
 
 func (s execState) String() string {
 	switch s {
@@ -163,6 +168,8 @@ func (s execState) String() string {
 		return "каждая ветвь — then"
 	case execElse:
 		return "каждая ветвь — else"
+	case execObserve:
+		return "исходные ветви, пробные fail заглушены"
 	}
 	return "как есть"
 }
@@ -366,7 +373,7 @@ func forceNodesIn(files map[string]string) ([]*forceNode, error) {
 					if action && len(p.Cmds) == 1 && len(p.Decl) == 0 {
 						if at, end, ok := pipeSpan(text, p); ok {
 							e := []textEdit{{at: at, end: end, text: `""`}}
-							add("fail", file, at, map[execState][]textEdit{execThen: e, execElse: e})
+							add("fail", file, at, map[execState][]textEdit{execThen: e, execElse: e, execObserve: e})
 						}
 					}
 				}
@@ -464,7 +471,9 @@ type appliedEdit struct {
 func applyForcing(files map[string]string, nodes []*forceNode, state execState, off map[*forceNode]bool) (map[string]string, map[string][]appliedEdit) {
 	byFile := map[string][]appliedEdit{}
 	for _, n := range nodes {
-		if off[n] {
+		// Снятие принуждения возвращает условия, но поиск с пробными ключами
+		// по-прежнему требует заглушённого fail закрытых карт.
+		if off[n] && n.kind != "fail" {
 			continue
 		}
 		for _, e := range n.edits[state] {
@@ -610,7 +619,7 @@ func newPodEnvWork(t *testing.T, src string) *podEnvWork {
 
 	top, err := os.ReadDir(src)
 	require.NoError(t, err)
-	for _, st := range execStates {
+	for _, st := range append([]execState{execAsIs}, execStates...) {
 		dir := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "templates"), 0o750))
 		for _, e := range top {
@@ -671,7 +680,7 @@ func (w *podEnvWork) forcedRender(t *testing.T, st execState, cond podEnvConditi
 	t.Helper()
 	for {
 		out, err := w.render(t, st, cond, probes)
-		if err == nil || st == execAsIs {
+		if err == nil || st == execObserve {
 			return out, err
 		}
 		texts, _ := applyForcing(w.files, w.nodes, st, w.off[st])
@@ -683,7 +692,7 @@ func (w *podEnvWork) forcedRender(t *testing.T, st execState, cond podEnvConditi
 		if pos >= 0 {
 			orig := originalOffset(w.applied[st][file], pos)
 			for _, e := range w.applied[st][file] {
-				if e.at <= orig {
+				if e.at <= orig && e.node.kind != "fail" {
 					drop = e.node
 				}
 			}
@@ -708,7 +717,7 @@ func (w *podEnvWork) yamlCulprit(t *testing.T, st execState, cond podEnvConditio
 	var order []*forceNode
 	seen := map[*forceNode]bool{}
 	for _, e := range w.applied[st][file] {
-		if !seen[e.node] {
+		if e.node.kind != "fail" && !seen[e.node] {
 			seen[e.node] = true
 			order = append(order, e.node)
 		}
@@ -989,8 +998,8 @@ func judgePodEnvByExecution(t *testing.T, dir string, conds []podEnvCondition) (
 		probes := probeTree(entries)
 		for _, st := range execStates {
 			out, rerr := w.forcedRender(t, st, cond, probes)
-			if rerr != nil || (st == execAsIs && out == "") {
-				if st == execAsIs {
+			if rerr != nil || (st == execObserve && out == "") {
+				if st == execObserve {
 					return nil, census, fmt.Errorf("не выполнилось: чарт с пробами при посадке «%s» не рендерится как есть: %v\n%s", cond.name, rerr, headOf(out))
 				}
 				findings = append(findings, fmt.Sprintf("не выполнилось: %v\n%s", rerr, headOf(out)))
@@ -998,13 +1007,13 @@ func judgePodEnvByExecution(t *testing.T, dir string, conds []podEnvCondition) (
 			}
 			got, containers, perr := podEnvEntries(out)
 			if perr != nil {
-				if st == execAsIs {
+				if st == execObserve {
 					return nil, census, fmt.Errorf("не выполнилось: рендер посадки «%s» как есть не прочитан: %w", cond.name, perr)
 				}
 				findings = append(findings, fmt.Sprintf("не выполнилось: исполнение «%s», посадка «%s»: %v", st, cond.name, perr))
 				continue
 			}
-			if st == execAsIs {
+			if st == execObserve {
 				if containers == 0 {
 					return nil, census, fmt.Errorf("не выполнилось: рендер посадки «%s» не дал ни одного контейнера — судить нечего", cond.name)
 				}

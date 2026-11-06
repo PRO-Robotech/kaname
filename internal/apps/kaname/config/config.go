@@ -31,10 +31,11 @@ import (
 // Every section is `mapstructure`-tagged (viper uses mapstructure for
 // Unmarshal by default). Defaults live in defaults.go.
 type Config struct {
-	Logger     LoggerConfig     `mapstructure:"logger"`
-	APIServer  APIServerConfig  `mapstructure:"api-server"`
-	Repository RepositoryConfig `mapstructure:"repository"`
-	AuthN      AuthNConfig      `mapstructure:"authn"`
+	ModuleSeedInstaller ModuleSeedInstallerConfig `mapstructure:"moduleSeedInstaller"`
+	Logger              LoggerConfig              `mapstructure:"logger"`
+	APIServer           APIServerConfig           `mapstructure:"api-server"`
+	Repository          RepositoryConfig          `mapstructure:"repository"`
+	AuthN               AuthNConfig               `mapstructure:"authn"`
 	// Jobs — фоновые задания сервиса (задача kacho#1264). Секция заведена по
 	// прецеденту сметателя целей nlb: интервал работы, удаляющей РЕСУРС
 	// АРЕНДАТОРА по времени, живёт в конфигурации со стражем старта, а не
@@ -763,4 +764,12 @@ func dsnHas(dsn, frag string) bool {
 		}
 	}
 	return false
+}
+
+// ModuleSeedInstallerConfig — принятый защищённый вход установки.
+// Присутствующий tenantAccountId выбирает S1 (пустое значение недопустимо); отсутствие выбирает S2.
+// Для этого указателя не регистрируется умолчание: наличие принадлежит пользовательскому входу.
+type ModuleSeedInstallerConfig struct {
+	CredentialFile  string  `mapstructure:"credentialFile"`
+	TenantAccountID *string `mapstructure:"tenantAccountId"`
 }

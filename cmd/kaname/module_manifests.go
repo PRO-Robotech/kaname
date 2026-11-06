@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
@@ -81,6 +84,12 @@ func loadDeliveredManifests(logger *slog.Logger, cfg config.ManifestsConfig) ([]
 		slog.String("type_table", report.Referent.String()),
 		slog.Any("modules", report.Modules()))
 	if err != nil {
+		field := "manifests"
+		if len(report.InputViolations) > 0 {
+			field = report.InputViolations[0]
+		}
+		// Преобразованный отказ журналируется; наружу сохраняется исходный manifest error.
+		_ = failInstallation(logger, "preflight", field, "", "", 0, status.Error(codes.InvalidArgument, "invalid manifest delivery"))
 		return nil, fmt.Errorf("доставка манифестов модулей: %w", err)
 	}
 	return report.Manifests, nil

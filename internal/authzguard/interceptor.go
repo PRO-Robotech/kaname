@@ -59,8 +59,8 @@ var readonlySuffixes = []string{
 // whitelistFullMethod — RPCs that do NOT require an authenticated principal
 // (bootstrap-flow, internal-listener-only RPCs).
 //
-// Minimal set: internal lookups and preflight authz-queries of peers. Anything
-// else — even legitimate self-registration — must come through an explicit
+// Минимальный набор: внутренние чтения и предварительные запросы авторизации соседей. Всё
+// остальное — даже допустимая саморегистрация — проходит через явное
 // allow.
 //
 // Записи глагола заведения личности по внешнему удостоверению здесь больше нет:

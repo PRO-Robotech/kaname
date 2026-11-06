@@ -15,17 +15,17 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
-// IsAnonymousSelfCheck admits only the credential-free, subject-free Check
-// shape (kaname#959). Both public unary admission and the handler use this
-// predicate. It grants no resource permission: the normal decision service
-// evaluates the server-selected anonymous subject.
+// IsAnonymousSelfCheck допускает только форму Check без учётных данных и субъекта
+// (kaname#959). Этим предикатом пользуются публичный unary-допуск и обработчик.
+// Он не даёт разрешения на ресурс: обычный сервис решения
+// оценивает выбранный сервером анонимный субъект.
 func IsAnonymousSelfCheck(ctx context.Context, req *iamv1.AuthorizeCheckRequest, modules moduleidentity.Roster) bool {
 	if req == nil || req.GetSubject() != "" || req.GetContext() != nil ||
 		req.GetRequiredRelation() != "" || req.GetResource() == nil || req.GetAction() == "" {
 		return false
 	}
-	// Presence, not a default principal or a recognized credential scheme:
-	// even an empty/unsupported Authorization must not become anonymous.
+	// Наличие, а не principal по умолчанию или распознанная схема учётных данных:
+	// даже пустой/неподдерживаемый Authorization не должен становиться анонимным.
 	if _, present := operations.PrincipalFromContextOK(ctx); present {
 		return false
 	}
@@ -37,8 +37,8 @@ func IsAnonymousSelfCheck(ctx context.Context, req *iamv1.AuthorizeCheckRequest,
 			return false
 		}
 	}
-	// A verified module is a different caller. A non-module certificate used
-	// by our own REST front names the transport hop, not an end-user identity.
+	// Проверенный модуль — другой вызывающий. Сертификат не модуля, используемый
+	// нашим собственным REST-входом, обозначает транспортный переход, а не личность пользователя.
 	// Модуль — объявленная пара перечня (kaname#984): тот же разбор, что у
 	// политик вызывающего обоих слушателей.
 	if _, module := modules.FromContext(ctx); module {

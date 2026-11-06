@@ -129,3 +129,86 @@ func TestConfigMapHeaderNamesAHolderThatExists(t *testing.T) {
 	require.True(t, named, "шапка %s не называет держателя класса секций "+
 		"(config_sections_have_a_reader_test.go)", configMapTemplatePath)
 }
+
+// Грамматика literal YAML string keys общая: регистр и способ quoting не
+// являются исключениями конкретного поля. Каждый lawful twin имеет свой reader;
+// тот же ключ без reader даёт ровно одну находку.
+func TestConfigSectionsInjection_LiteralKeyGrammar(t *testing.T) {
+	for _, tc := range []struct{ name, key, want string }{
+		{"camelCase", "camelCaseSection", "camelCaseSection"},
+		{"upper case", "UPPERSection2", "UPPERSection2"},
+		{"underscore", "snake_case_section", "snake_case_section"},
+		{"hyphen", "hyphen-section", "hyphen-section"},
+		{"leading underscore", "_privateSection7", "_privateSection7"},
+		{"quoted colon", `'quoted: section'`, "quoted: section"},
+		{"Unicode", `"секцияНастроек"`, "секцияНастроек"},
+		{"single quote escape", `'operator''s section'`, "operator's section"},
+		{"double quote escape", `"quoted\"Section"`, "quoted\"Section"},
+		{"plain apostrophe", `operator'sSection`, "operator'sSection"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "data:\n  config.yaml: |\n    base:\n      nestedCamelCase: true\n    # комментарий не секция\n    " + tc.key + ": {{ .Values.optional | quote }}\n"
+			sections, opaque, err := templateConfigSections(body)
+			require.NoError(t, err)
+			require.Empty(t, opaque)
+			require.ElementsMatch(t, []string{"base", tc.want}, sections)
+			findings, census, err := judgeConfigSections(body, []string{"base", tc.want}, nil)
+			require.NoError(t, err)
+			require.Empty(t, findings)
+			require.Equal(t, 2, census.Template)
+			findings, census, err = judgeConfigSections(body, []string{"base"}, nil)
+			require.NoError(t, err)
+			require.Len(t, findings, 1)
+			require.Contains(t, findings[0], "шаблон рендерит")
+			require.Equal(t, 2, census.Template)
+		})
+	}
+}
+
+func TestConfigSectionsInjection_UnsupportedKeysAreOpaque(t *testing.T) {
+	for _, tc := range []struct{ name, line string }{
+		{"malformed quote", `"unfinished: null`},
+		{"non-string scalar", `123: null`},
+		{"complex key", `[one, two]: null`},
+		{"dynamic key", `{{ .Values.dynamicSection }}: null`},
+		{"variable dynamic key", `{{ $section }}: null`},
+		{"variable output", `{{ $section }}`},
+		{"variable output pipeline", `{{ $section | quote }}: null`},
+		{"assignment with key suffix", `{{- $section := "unread" }}: null`},
+		{"assignment and output", `{{- $section := "unread" }}{{ $section }}: null`},
+		{"control keyword prefix is output", `{{ endSection }}: null`},
+		{"missing separator", `sectionWithoutSeparator`},
+		{"colon without whitespace", `section:value`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "data:\n  config.yaml: |\n    base: {}\n    " + tc.line + "\n"
+			findings, census, err := judgeConfigSections(body, []string{"base"}, nil)
+			require.NoError(t, err)
+			require.Equal(t, 1, census.Template)
+			require.Equal(t, 1, census.Opaque)
+			require.Len(t, findings, 1)
+			require.Contains(t, findings[0], "форма, которой проба не судит")
+		})
+	}
+}
+
+func TestConfigSectionsInjection_VariableAssignmentDoesNotHideOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name, output string
+		opaque       int
+	}{
+		{"declaration and assignment are control", "", 0},
+		{"trimmed action with trailing whitespace", "    {{- $other := \"unused\" -}}   \n", 0},
+		{"declared variable as key", "    {{ $section }}: null\n", 1},
+		{"declared variable as output", "    {{ $section }}\n", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "data:\n  config.yaml: |\n    {{- $section := \"unread\" }}\n    {{- $section = \"stillUnread\" }}\n    base: {}\n" + tc.output
+			findings, census, err := judgeConfigSections(body, []string{"base"}, nil)
+			require.NoError(t, err)
+			require.Equal(t, 1, census.Template)
+			require.Equal(t, tc.opaque, census.Opaque)
+			require.Len(t, findings, tc.opaque)
+		})
+	}
+}

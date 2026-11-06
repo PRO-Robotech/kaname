@@ -949,7 +949,7 @@ ks() { kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" "$@"; }
 # которое машина завела и снимет сама. Подъём в нём — тот же внешний путь, но
 # кластер уже доказан машиной (контекст -client, узлы профиля) ДО заведения
 # пространства, а учётка pod пространств не заводит и не читает: роль у неё
-# лишь в своём. Маршрут определяется canonical SA/DownwardAPI mount, не env sentinel:
+# лишь в своём. Маршрут определяется каноническим монтированием SA/DownwardAPI, не маркером окружения:
 #   маршрут     внешний, пространство — СВОЁ пространство учётки pod, и оно же
 #               обязано быть названо KANAME_STAND_EXT_NS (иначе отказ 64: стенд
 #               ставится лишь туда, где pod сам и живёт);
@@ -958,7 +958,7 @@ ks() { kubectl --kubeconfig "$EXT_KCFG" --context "$EXT_CTX" "$@"; }
 #   пространство не заводится и не снимается: подъём убирает остаток прежнего
 #               стенда в нём, снос — объекты стенда, перепись — под стенда в нём.
 IN_POD=""
-# Canonical mounted data is the child-process route signal; host env cannot move it.
+# Канонические смонтированные данные задают маршрут дочернего процесса; окружение хоста его не сдвигает.
 SA_DIR=/var/run/secrets/kubernetes.io/serviceaccount
 POD_ID_DIR=/var/run/kaname-runner/pod
 in_pod_detect() {
@@ -1699,7 +1699,7 @@ ext_unfold() {
 #                 первой записи; --ship — файлы машины в /work/ship (исполнитель шагов
 #                 задания конвейера и т. п.), отпечаток каждого сверяется;
 #   стенд         команда поднимает его сама тем же stand-own.sh: pod несёт
-#                 canonical SA/DownwardAPI identity; env sentinel до payload сбрасывается;
+#                 каноническая личность SA/DownwardAPI; маркер окружения до полезной нагрузки сбрасывается;
 #   трекер        удостоверений площадки в pod НЕТ: `gh` pod — лишь чтение публичного
 #                 REST (`gh api repos/… [--jq …]`), прочее — отказ с объяснением;
 #   отчёты        команда пишет их в /work/out; машина забирает RUNNER_GLOBS (без venv,
@@ -3273,7 +3273,7 @@ EOF
     exit 0
 fi
 
-# Mounted identity also guards down/census/db commands that may load a saved route.
+# Смонтированная личность также защищает команды down/census/db, способные загрузить сохранённый маршрут.
 case "${1:-}" in
   up|down|census|db-fold|db-unfold)
     if [ -n "$IN_POD" ]; then
@@ -3286,9 +3286,9 @@ esac
 case "${1:-}" in
   up) stand_up; exit $? ;;
   prepare-native)
-    # Test orchestration only: reuse the stand's real CA, leaf identities and
-    # production posture without starting Docker, a server, or a build. The
-    # bounded acceptance runner supplies its own already-proven binaries/PG.
+    # Только оркестрация проб: используем настоящие CA стенда, личности конечных узлов и
+    # производственный профиль, не запуская Docker, сервер или сборку. Ограниченный
+    # исполнитель приёмки предоставляет свои уже проверенные бинарные файлы/PG.
     make_pki || exit $?
     registry_world_prepare || exit $?
     stand_env || exit $?

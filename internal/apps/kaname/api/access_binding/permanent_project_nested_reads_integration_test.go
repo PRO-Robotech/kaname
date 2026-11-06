@@ -4,8 +4,8 @@
 package access_binding_test
 
 // verifies https://github.com/PRO-Robotech/kaname/issues/983
-// The counter observes nested production SQL from the complete UpsertTx call.
-// A missing auto_explain extension is a fixture failure, never a read-budget RED.
+// Счётчик наблюдает вложенный производственный SQL полного вызова UpsertTx.
+// Отсутствие расширения auto_explain — несозданная фикстура, а не RED бюджета чтений.
 
 import (
 	"context"
@@ -76,8 +76,8 @@ func TestPermanentProjectNestedReads_FullUpsertBudget(t *testing.T) {
 		}
 		return n
 	}
-	// Positive instrumentation control: observe the real binding read, twice;
-	// this establishes that the counter cannot silently accept an empty trace.
+	// Положительный контроль прибора: дважды наблюдаем настоящее чтение привязки;
+	// это доказывает, что счётчик не может молча принять пустую трассу.
 	notices = nil
 	for range 2 {
 		_, err = conn.Exec(w.ctx, `SELECT project_id FROM kaname.object_project_binding WHERE object_type=$1 AND object_id=$2`, pcrRegType, "counter-control")
@@ -129,8 +129,8 @@ func TestPermanentProjectNestedReads_FullUpsertBudget(t *testing.T) {
 			assert.Equal(t, tc.wantReads, reads, "983 approved binding read budget includes mirror/edge triggers")
 		})
 	}
-	// Whole accepted Register, including admission/derive and transactional
-	// audit/outbox. Its successful path must not add BindingRefusesTx reads.
+	// Весь принятый Register, включая допуск/вывод и транзакционные
+	// аудит/outbox. Его успешный путь не должен добавлять чтения BindingRefusesTx.
 	registrar := internaliam.NewRegisterResourceUseCase(
 		kanamepg.NewFGAOutboxEmitter(), kanamepg.NewResourceMirrorEmitter(),
 		observedRegistrationBeginner{conn}, kanamepg.NewCatalogTypeReader(),

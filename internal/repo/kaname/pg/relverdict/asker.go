@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -89,7 +90,9 @@ func rollback(ctx context.Context, tx pgx.Tx) error {
 // шире, чем измерено. Ось у обратных вопросов та же и держится их пробами; если
 // понадобится число и по ним, оно заводится СВОИМ, а не расширением этого молча.
 type Asker struct {
-	pool *pgxpool.Pool
+	transaction   pgx.Tx
+	preparedPlans *authzmodel.Plans
+	pool          *pgxpool.Pool
 	// labelMirror / labelIAMDirect — основания меточной ветви по осям.
 	labelMirror    atomic.Int64
 	labelIAMDirect atomic.Int64
@@ -186,6 +189,24 @@ func NewAsker(pool *pgxpool.Pool) *Asker {
 	return &Asker{pool: pool}
 }
 
+// NewPreparedAsker использует допущенную модель для запуска без чтения или замены
+// глобальной модели процесса. Все запросы отношений и допуск базы остаются общими.
+func NewPreparedAsker(pool *pgxpool.Pool, plans *authzmodel.Plans) *Asker {
+	if pool == nil || plans == nil {
+		return nil
+	}
+	return &Asker{pool: pool, preparedPlans: plans}
+}
+
+// NewTransactionAsker выполняет штатный производственный вердикт в удерживаемой транзакции
+// вызывающего. Он не берёт другое соединение и не завершает эту транзакцию.
+func NewTransactionAsker(tx pgx.Tx, plans *authzmodel.Plans) *Asker {
+	if tx == nil || plans == nil {
+		return nil
+	}
+	return &Asker{transaction: tx, preparedPlans: plans}
+}
+
 // Allowed отвечает на прямой вопрос.
 //
 // Возвращает ОШИБКУ, а не false, когда ответа получить не удалось: сравнитель
@@ -193,17 +214,22 @@ func NewAsker(pool *pgxpool.Pool) *Asker {
 // БД читалась бы как поток расхождений либо как согласие — в зависимости от
 // вердикта движка, то есть случайно.
 func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, relation string, condCtx map[string]any) (bool, error) {
-	if a == nil || a.pool == nil {
+	if a == nil || (a.pool == nil && a.transaction == nil) {
 		return false, fmt.Errorf("relverdict: источник не собран")
 	}
-	tx, err := a.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return false, fmt.Errorf("relverdict: транзакция чтения: %w", err)
+	tx := a.transaction
+	if tx == nil {
+		var err error
+		tx, err = a.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+		if err != nil {
+			return false, fmt.Errorf("relverdict: транзакция чтения: %w", err)
+		}
+		defer func() { _ = rollback(ctx, tx) }()
 	}
-	defer func() { _ = rollback(ctx, tx) }()
 
 	v, grounds, err := Ask(ctx, tx, Query{
-		Subject: subject, ObjectType: objectType, ObjectID: objectID, Relation: relation,
+		PreparedPlans: a.preparedPlans,
+		Subject:       subject, ObjectType: objectType, ObjectID: objectID, Relation: relation,
 		Context: condCtx,
 	})
 	// Наблюдение засчитывается ДО разбора вердикта: меточное основание было

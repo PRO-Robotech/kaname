@@ -501,6 +501,72 @@
       "description": "Что заводит УСТАНОВКА модуля. Ни один из четырёх подразделов не обязателен: модуль без своих групп и без вступлений — законный случай, а не неполный манифест. Раздел целиком тоже необязателен, но объявленный пустым (seed: {}) и не объявленный вовсе — РАЗНЫЕ утверждения, и загрузчик их различает; seed: без значения отвергается отдельным отказом.",
       "properties": {
 
+        "grantDelegations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "delegate",
+              "roleIds",
+              "targetTypes",
+              "subjectTypes"
+            ],
+            "properties": {
+              "delegate": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "account",
+                  "name"
+                ],
+                "properties": {
+                  "account": {
+                    "enum": [
+                      "system"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "roleIds": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "targetTypes": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "subjectTypes": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "SUBJECT_TYPE_USER",
+                    "SUBJECT_TYPE_SERVICE_ACCOUNT",
+                    "SUBJECT_TYPE_GROUP",
+                    "SUBJECT_TYPE_SYSTEM_CLASS"
+                  ]
+                }
+              }
+            }
+          }
+        },
+
         "serviceAccounts": {
           "type": "array",
           "maxItems": 16,

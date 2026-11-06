@@ -4,12 +4,15 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"net/url"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
@@ -69,6 +72,8 @@ func load(path string) (Config, *viper.Viper, error) {
 	v.SetEnvPrefix(EnvPrefix)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "__", "-", "_"))
 	v.AutomaticEnv()
+	_ = v.BindEnv("moduleSeedInstaller.credentialFile")
+	_ = v.BindEnv("moduleSeedInstaller.tenantAccountId")
 
 	// СНЯТЫЕ КЛЮЧИ ИЗ ОКРУЖЕНИЯ отвергаются ДО всякого чтения: переменная, которую
 	// загрузчик больше не привязывает, иначе прошла бы молча (retired_settings.go).
@@ -174,10 +179,30 @@ func load(path string) (Config, *viper.Viper, error) {
 	}
 
 	// YAML file (optional).
+	tenantTargetDeclared := false
 	if path != "" {
 		v.SetConfigFile(path)
-		if err := v.ReadInConfig(); err != nil {
+		data, err := os.ReadFile(path) // #nosec G304 -- путь конфигурации задаёт оператор запуска, а не входящий запрос.
+		if err != nil {
 			return Config{}, nil, fmt.Errorf("read config %q: %w", path, err)
+		}
+		if err := v.ReadConfig(bytes.NewReader(data)); err != nil {
+			return Config{}, nil, fmt.Errorf("read config %q: %w", path, err)
+		}
+		var input map[string]any
+		if err := yaml.Unmarshal(data, &input); err != nil {
+			return Config{}, nil, fmt.Errorf("read config %q: %w", path, err)
+		}
+		for key, value := range input {
+			if strings.EqualFold(key, "moduleSeedInstaller") {
+				if section, ok := value.(map[string]any); ok {
+					for field := range section {
+						if strings.EqualFold(field, "tenantAccountId") {
+							tenantTargetDeclared = true
+						}
+					}
+				}
+			}
 		}
 		// Снятый ключ в файле — отказ, а не молчание: у разбора нет запрета на
 		// незнакомые ключи, и без этой проверки строка профиля, написанная под
@@ -218,6 +243,15 @@ func load(path string) (Config, *viper.Viper, error) {
 		return Config{}, nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
+	// Наличие принадлежит входу оператора, а не декодированным нулевым значениям/умолчаниям.
+	// В частности, YAML null и явно пустое переопределение окружения выбирают
+	// S1 и должны дойти до проверки запуска пустой (недопустимой) целью.
+	if env, present := os.LookupEnv("KANAME_MODULESEEDINSTALLER__TENANTACCOUNTID"); present {
+		cfg.ModuleSeedInstaller.TenantAccountID = &env
+	} else if tenantTargetDeclared && cfg.ModuleSeedInstaller.TenantAccountID == nil {
+		empty := ""
+		cfg.ModuleSeedInstaller.TenantAccountID = &empty
+	}
 	return cfg, v, nil
 }
 
