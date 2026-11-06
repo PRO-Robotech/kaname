@@ -488,6 +488,8 @@ jobs:
     name: цели рецепта работают в самостоятельном клоне
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      STANDALONE_DIAGNOSTICS_DIR: ${{ runner.temp }}/standalone-private
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
@@ -505,10 +507,29 @@ jobs:
 
       - run: go mod download
 
+      - name: контроли публикации диагностики standalone
+        id: diagnostic_controls
+        run: python3 .github/scripts/standalone-diagnostics_test.py
+
       # `-short` НЕ ПЕРЕДАЁТСЯ намеренно: под ним проба пропускает себя, и
       # задание стало бы зелёным, ничего не спросив.
       - name: цели рецепта в самостоятельном клоне (без -short)
         run: go test ./tools/standalonetargets/ -count=1 -v -timeout 25m
+
+      # В артефакт попадает только отдельная очищенная производная.
+      # Ошибка экспорта не заменяет исход тестов и не разрешает raw fallback.
+      - name: очистка диагностики standalone
+        id: diagnostic_export
+        if: ${{ always() && steps.diagnostic_controls.outcome == 'success' }}
+        run: python3 .github/scripts/standalone-diagnostics.py "$STANDALONE_DIAGNOSTICS_DIR" "${{ runner.temp }}/standalone-public"
+      - name: очищенная диагностика standalone
+        if: ${{ always() && steps.diagnostic_export.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: standalone-diagnostics
+          path: ${{ steps.diagnostic_export.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
 
   # ── СТАТИЧЕСКИЙ АНАЛИЗ БЕЗОПАСНОСТИ ──────────────────────────────────────────
   gosec:
