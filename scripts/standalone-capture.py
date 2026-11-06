@@ -42,7 +42,7 @@ def identity():
 
 
 def main():
-    os.umask(0o077)
+    caller_umask = os.umask(0o077)
     args = sys.argv[1:] or ["-short"]
     capture = None
     manifest = None
@@ -81,7 +81,7 @@ def main():
             signal.signal(sig, stop)
         print("пробы модуля: go test ./... %s -count=1 -json" % " ".join(args), flush=True)
         with (capture / "stdout.jsonl").open("wb") as stdout, (capture / "stderr.log").open("wb") as stderr:
-            child = subprocess.Popen(manifest["args"], stdout=stdout, stderr=stderr)
+            child = subprocess.Popen(manifest["args"], stdout=stdout, stderr=stderr, umask=caller_umask)
             rc = child.wait()
         (capture / "go.rc").write_text(str(rc) + "\n", encoding="ascii")
         manifest["goRC"] = rc

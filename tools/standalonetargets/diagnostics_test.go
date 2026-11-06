@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 	"github.com/PRO-Robotech/kaname/tools/standalonetargets"
 )
 
@@ -101,6 +102,78 @@ func runDiagnosticProducer(t *testing.T, stdout, stderr string, goCode int, brok
 	require.NoError(t, os.RemoveAll(fixture))
 	t.Logf("producer: код %d, вывод %d байт; внешний capture %s", code, len(out), capture)
 	return diagnosticResult{code: code, output: string(out), capture: capture}
+}
+
+func TestStandaloneDiagnosticPreservesCallerUmask(t *testing.T) {
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	root, err := standalonetargets.ModuleRootFrom(wd)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		mask string
+		mode os.FileMode
+	}{
+		{mask: "022", mode: 0o644},
+		{mask: "077", mode: 0o600},
+	} {
+		t.Run("маска_вызывающей_оболочки_"+tc.mask, func(t *testing.T) {
+			base := t.TempDir()
+			fixture, capture := filepath.Join(base, "fixture"), filepath.Join(base, "private")
+			bin := filepath.Join(fixture, "bin")
+			require.NoError(t, os.MkdirAll(bin, 0o700))
+			stream := diagnosticEvent("run", "example.test/umask", "TestContext", "") +
+				diagnosticEvent("pass", "example.test/umask", "TestContext", "") + diagnosticEvent("pass", "example.test/umask", "", "")
+			require.NoError(t, os.WriteFile(filepath.Join(fixture, "stdout"), []byte(stream), 0o600))
+			// Обычная shell-redirection создаёт файл с 0666, ограниченными унаследованной маской.
+			fake := "#!/bin/bash\nset -eu\n: > \"$DIAGNOSTIC_FIXTURE/child-file\"\numask > \"$DIAGNOSTIC_FIXTURE/child-mask\"\ncat \"$DIAGNOSTIC_FIXTURE/stdout\"\n"
+			require.NoError(t, os.WriteFile(filepath.Join(bin, "go"), []byte(fake), 0o700))
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			// Маска меняется только в явном subprocess, никогда в процессе Go test.
+			cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-c",
+				`umask "$1"; : > "$DIAGNOSTIC_FIXTURE/caller-file"; exec bash "$2"`,
+				"контроль-umask", tc.mask, filepath.Join(root, "scripts/test-standalone.sh"))
+			cmd.Dir = fixture
+			for _, item := range os.Environ() {
+				key, _, _ := strings.Cut(item, "=")
+				if key != "PATH" && key != "STANDALONE_DIAGNOSTICS_DIR" && key != "DIAGNOSTIC_FIXTURE" {
+					cmd.Env = append(cmd.Env, item)
+				}
+			}
+			cmd.Env = append(cmd.Env, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"DIAGNOSTIC_FIXTURE="+fixture, "STANDALONE_DIAGNOSTICS_DIR="+capture)
+			out, runErr := cmd.CombinedOutput()
+			require.NoError(t, ctx.Err())
+			require.NoError(t, runErr, "законный поток не захвачен: %s", out)
+			caller, err := os.Stat(filepath.Join(fixture, "caller-file"))
+			require.NoError(t, err)
+			require.Equal(t, tc.mode, caller.Mode().Perm(), "предпосылка: оболочка не установила заданную маску")
+			child, err := os.Stat(filepath.Join(fixture, "child-file"))
+			require.NoError(t, err)
+			assert.Equal(t, tc.mode, child.Mode().Perm(), "collector изменил файловую семантику дочернего Go")
+			mask, err := os.ReadFile(filepath.Join(fixture, "child-mask"))
+			require.NoError(t, err)
+			assert.Equal(t, "0"+tc.mask, strings.TrimSpace(string(mask)), "дочерний процесс получил другую umask")
+			files := 0
+			require.NoError(t, filepath.WalkDir(capture, func(path string, entry fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				info, err := entry.Info()
+				if err != nil {
+					return err
+				}
+				if entry.IsDir() {
+					assert.Equal(t, os.FileMode(0o700), info.Mode().Perm(), "приватный каталог: %s", path)
+				} else {
+					files++
+					assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "приватный файл: %s", path)
+				}
+				return nil
+			}))
+			assert.Equal(t, 5, files, "проверены все пять файлов полного приватного capture")
+		})
+	}
 }
 
 func diagnosticFiles(t *testing.T, dir string) string {
@@ -712,7 +785,7 @@ func TestStandaloneDiagnosticReviewR2DuplicateMembers(t *testing.T) {
 func TestStandaloneDiagnosticCriticalCIExecutesPythonNegativeControls(t *testing.T) {
 	wd, err := os.Getwd()
 	require.NoError(t, err)
-	root, err := standalonetargets.ModuleRootFrom(wd)
+	root, err := platformtree.ModuleRootFrom(wd)
 	require.NoError(t, err)
 	body, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
 	require.NoError(t, err)
@@ -730,83 +803,86 @@ func TestStandaloneDiagnosticCriticalCIExecutesPythonNegativeControls(t *testing
 	job, ok := workflow.Jobs["standalone"]
 	require.True(t, ok, "предмет проверки отсутствует: standalone job")
 	require.NotEmpty(t, job.Steps)
+	runCase := func(t *testing.T, broken bool) {
+		fixture := t.TempDir()
+		bin := filepath.Join(fixture, "bin")
+		scripts := filepath.Join(fixture, ".github/scripts")
+		require.NoError(t, os.MkdirAll(scripts, 0o700))
+		require.NoError(t, os.Mkdir(bin, 0o700))
+		// Исполняется настоящий run-step, но тяжёлый Go и публикация здесь не предмет.
+		require.NoError(t, os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\nexit 0\n"), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(scripts, "standalone-diagnostics.py"), []byte("raise SystemExit(0)\n"), 0o600))
+		truth := "True"
+		if broken {
+			truth = "False"
+		}
+		control := "import unittest\nclass Control(unittest.TestCase):\n def test_injected(self):\n  print('DIAGNOSTIC_CONTROL_EXECUTED')\n  self.assertTrue(" + truth + ", 'контрольный отказ Python')\nif __name__ == '__main__': unittest.main()\n"
+		require.NoError(t, os.WriteFile(filepath.Join(scripts, "standalone-diagnostics_test.py"), []byte(control), 0o600))
+		// Сначала удостоверяем саму инъекцию; ниже проверяется только её достижимость из CI.
+		probe := exec.Command("python3", filepath.Join(scripts, "standalone-diagnostics_test.py"))
+		probeOutput, probeErr := probe.CombinedOutput()
+		require.Contains(t, string(probeOutput), "DIAGNOSTIC_CONTROL_EXECUTED")
+		require.Equal(t, broken, probeErr != nil, "фикстура unittest не создала заданный исход: %s", probeOutput)
+		// Штатный discovery тоже настоящий: его DEFAULT_PATTERNS не подменяются.
+		runner, err := os.ReadFile(filepath.Join(root, ".github/scripts/run-python-probes.py"))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(scripts, "run-python-probes.py"), runner, 0o600))
+		for _, relative := range []string{"tests/newman/scripts/twin_test.py", "tests/authz-fixtures/twin_test.py"} {
+			path := filepath.Join(fixture, relative)
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+			require.NoError(t, os.WriteFile(path, []byte("if __name__ == '__main__':\n raise SystemExit(0)\n"), 0o600))
+		}
+		seen, failed, steps := false, false, 0
+		outcomes := map[string]string{}
+		for _, step := range job.Steps {
+			if step.Run == "" {
+				continue
+			}
+			condition := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(step.If), "${{"), "}}"))
+			switch condition {
+			case "", "success()":
+				if failed {
+					continue
+				}
+			case "always()", "!cancelled()", "true":
+			case "false":
+				continue
+			default:
+				guard := regexp.MustCompile(`^always\(\) && steps\.([A-Za-z0-9_-]+)\.outcome == 'success'$`).FindStringSubmatch(condition)
+				require.Len(t, guard, 2, "условие CI-step требует явной семантики в контрольной фикстуре: %q", condition)
+				if outcomes[guard[1]] != "success" {
+					continue
+				}
+			}
+			steps++
+			script := strings.ReplaceAll(step.Run, "${{ runner.temp }}", fixture)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script)
+			cmd.Dir = fixture
+			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+fixture, "STANDALONE_DIAGNOSTICS_DIR="+filepath.Join(fixture, "private"))
+			out, runErr := cmd.CombinedOutput()
+			require.NoError(t, ctx.Err(), "CI-step превысил срок: %s", out)
+			cancel()
+			outcomes[step.ID] = "success"
+			if runErr != nil {
+				outcomes[step.ID] = "failure"
+			}
+			if strings.Contains(string(out), "DIAGNOSTIC_CONTROL_EXECUTED") {
+				seen = true
+				if runErr != nil && !step.ContinueOnError {
+					failed = true
+				}
+			} else {
+				require.NoError(t, runErr, "сломалась подпорка другого CI-step: %s", out)
+			}
+		}
+		t.Logf("разобрано и исполнено run-steps: %d; Python-control достигнут: %t", steps, seen)
+		assert.True(t, seen, "CI standalone не исполнил контроль именно из standalone-diagnostics_test.py")
+		assert.Equal(t, broken, failed, "инъекция assertion не управляет исходом настоящего CI path")
+	}
 	for _, broken := range []bool{false, true} {
 		t.Run(fmt.Sprintf("инъекция_отказа=%t", broken), func(t *testing.T) {
-			fixture := t.TempDir()
-			bin := filepath.Join(fixture, "bin")
-			scripts := filepath.Join(fixture, ".github/scripts")
-			require.NoError(t, os.MkdirAll(scripts, 0o700))
-			require.NoError(t, os.Mkdir(bin, 0o700))
-			// Исполняется настоящий run-step, но тяжёлый Go и публикация здесь не предмет.
-			require.NoError(t, os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\nexit 0\n"), 0o700))
-			require.NoError(t, os.WriteFile(filepath.Join(scripts, "standalone-diagnostics.py"), []byte("raise SystemExit(0)\n"), 0o600))
-			truth := "True"
-			if broken {
-				truth = "False"
-			}
-			control := "import unittest\nclass Control(unittest.TestCase):\n def test_injected(self):\n  print('DIAGNOSTIC_CONTROL_EXECUTED')\n  self.assertTrue(" + truth + ", 'контрольный отказ Python')\nif __name__ == '__main__': unittest.main()\n"
-			require.NoError(t, os.WriteFile(filepath.Join(scripts, "standalone-diagnostics_test.py"), []byte(control), 0o600))
-			// Сначала удостоверяем саму инъекцию; ниже проверяется только её достижимость из CI.
-			probe := exec.Command("python3", filepath.Join(scripts, "standalone-diagnostics_test.py"))
-			probeOutput, probeErr := probe.CombinedOutput()
-			require.Contains(t, string(probeOutput), "DIAGNOSTIC_CONTROL_EXECUTED")
-			require.Equal(t, broken, probeErr != nil, "фикстура unittest не создала заданный исход: %s", probeOutput)
-			// Штатный discovery тоже настоящий: его DEFAULT_PATTERNS не подменяются.
-			runner, err := os.ReadFile(filepath.Join(root, ".github/scripts/run-python-probes.py"))
-			require.NoError(t, err)
-			require.NoError(t, os.WriteFile(filepath.Join(scripts, "run-python-probes.py"), runner, 0o600))
-			for _, relative := range []string{"tests/newman/scripts/twin_test.py", "tests/authz-fixtures/twin_test.py"} {
-				path := filepath.Join(fixture, relative)
-				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-				require.NoError(t, os.WriteFile(path, []byte("if __name__ == '__main__':\n raise SystemExit(0)\n"), 0o600))
-			}
-			seen, failed, steps := false, false, 0
-			outcomes := map[string]string{}
-			for _, step := range job.Steps {
-				if step.Run == "" {
-					continue
-				}
-				condition := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(step.If), "${{"), "}}"))
-				switch condition {
-				case "", "success()":
-					if failed {
-						continue
-					}
-				case "always()", "!cancelled()", "true":
-				case "false":
-					continue
-				default:
-					guard := regexp.MustCompile(`^always\(\) && steps\.([A-Za-z0-9_-]+)\.outcome == 'success'$`).FindStringSubmatch(condition)
-					require.Len(t, guard, 2, "условие CI-step требует явной семантики в контрольной фикстуре: %q", condition)
-					if outcomes[guard[1]] != "success" {
-						continue
-					}
-				}
-				steps++
-				script := strings.ReplaceAll(step.Run, "${{ runner.temp }}", fixture)
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script)
-				cmd.Dir = fixture
-				cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+fixture, "STANDALONE_DIAGNOSTICS_DIR="+filepath.Join(fixture, "private"))
-				out, runErr := cmd.CombinedOutput()
-				require.NoError(t, ctx.Err(), "CI-step превысил срок: %s", out)
-				cancel()
-				outcomes[step.ID] = "success"
-				if runErr != nil {
-					outcomes[step.ID] = "failure"
-				}
-				if strings.Contains(string(out), "DIAGNOSTIC_CONTROL_EXECUTED") {
-					seen = true
-					if runErr != nil && !step.ContinueOnError {
-						failed = true
-					}
-				} else {
-					require.NoError(t, runErr, "сломалась подпорка другого CI-step: %s", out)
-				}
-			}
-			t.Logf("разобрано и исполнено run-steps: %d; Python-control достигнут: %t", steps, seen)
-			assert.True(t, seen, "CI standalone не исполнил контроль именно из standalone-diagnostics_test.py")
-			assert.Equal(t, broken, failed, "инъекция assertion не управляет исходом настоящего CI path")
+			runCase(t, broken)
 		})
 	}
 }
