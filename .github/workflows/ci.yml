@@ -488,8 +488,6 @@ jobs:
     name: цели рецепта работают в самостоятельном клоне
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      STANDALONE_DIAGNOSTICS_DIR: ${{ runner.temp }}/standalone-private
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
@@ -514,6 +512,8 @@ jobs:
       # `-short` НЕ ПЕРЕДАЁТСЯ намеренно: под ним проба пропускает себя, и
       # задание стало бы зелёным, ничего не спросив.
       - name: цели рецепта в самостоятельном клоне (без -short)
+        env:
+          STANDALONE_DIAGNOSTICS_DIR: ${{ runner.temp }}/standalone-private
         run: go test ./tools/standalonetargets/ -count=1 -v -timeout 25m
 
       # В артефакт попадает только отдельная очищенная производная.
@@ -521,6 +521,8 @@ jobs:
       - name: очистка диагностики standalone
         id: diagnostic_export
         if: ${{ always() && steps.diagnostic_controls.outcome == 'success' }}
+        env:
+          STANDALONE_DIAGNOSTICS_DIR: ${{ runner.temp }}/standalone-private
         run: python3 .github/scripts/standalone-diagnostics.py "$STANDALONE_DIAGNOSTICS_DIR" "${{ runner.temp }}/standalone-public"
       - name: очищенная диагностика standalone
         if: ${{ always() && steps.diagnostic_export.outputs.ready == 'true' }}

@@ -791,11 +791,13 @@ func TestStandaloneDiagnosticCriticalCIExecutesPythonNegativeControls(t *testing
 	require.NoError(t, err)
 	var workflow struct {
 		Jobs map[string]struct {
+			Env   map[string]string `yaml:"env"`
 			Steps []struct {
-				ID              string `yaml:"id"`
-				Run             string `yaml:"run"`
-				If              string `yaml:"if"`
-				ContinueOnError bool   `yaml:"continue-on-error"`
+				ID              string            `yaml:"id"`
+				Run             string            `yaml:"run"`
+				If              string            `yaml:"if"`
+				ContinueOnError bool              `yaml:"continue-on-error"`
+				Env             map[string]string `yaml:"env"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -803,6 +805,11 @@ func TestStandaloneDiagnosticCriticalCIExecutesPythonNegativeControls(t *testing
 	job, ok := workflow.Jobs["standalone"]
 	require.True(t, ok, "предмет проверки отсутствует: standalone job")
 	require.NotEmpty(t, job.Steps)
+	// У job.env ещё нет runner context. Новые выражения требуют отдельной предпосылки,
+	// а не молчаливой подстановки фикстурой несуществующего контекста.
+	for key, value := range job.Env {
+		require.NotContains(t, value, "${{", "неподдержанная предпосылка job.env %s; runner.temp доступен только после назначения runner", key)
+	}
 	runCase := func(t *testing.T, broken bool) {
 		fixture := t.TempDir()
 		bin := filepath.Join(fixture, "bin")
@@ -810,8 +817,10 @@ func TestStandaloneDiagnosticCriticalCIExecutesPythonNegativeControls(t *testing
 		require.NoError(t, os.MkdirAll(scripts, 0o700))
 		require.NoError(t, os.Mkdir(bin, 0o700))
 		// Исполняется настоящий run-step, но тяжёлый Go и публикация здесь не предмет.
-		require.NoError(t, os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\nexit 0\n"), 0o700))
-		require.NoError(t, os.WriteFile(filepath.Join(scripts, "standalone-diagnostics.py"), []byte("raise SystemExit(0)\n"), 0o600))
+		goProbe := "#!/bin/sh\nset -eu\nif [ \"$1\" = test ]; then\n test \"${STANDALONE_DIAGNOSTICS_DIR-}\" = \"$RUNNER_TEMP/standalone-private\"\n printf '%s' \"$STANDALONE_DIAGNOSTICS_DIR\" > \"$RUNNER_TEMP/producer-path\"\nfi\n"
+		require.NoError(t, os.WriteFile(filepath.Join(bin, "go"), []byte(goProbe), 0o700))
+		exportProbe := "import os, pathlib, sys\nbase = pathlib.Path(os.environ['RUNNER_TEMP'])\nexpected = str(base / 'standalone-private')\nassert sys.argv[1:] == [expected, str(base / 'standalone-public')], 'неверные границы экспорта'\nassert os.environ.get('STANDALONE_DIAGNOSTICS_DIR') == expected, 'export не получил private env'\nassert (base / 'producer-path').read_text() == expected, 'producer и export используют разные capture'\n(base / 'export-path').write_text(expected)\n"
+		require.NoError(t, os.WriteFile(filepath.Join(scripts, "standalone-diagnostics.py"), []byte(exportProbe), 0o600))
 		truth := "True"
 		if broken {
 			truth = "False"
@@ -859,7 +868,27 @@ func TestStandaloneDiagnosticCriticalCIExecutesPythonNegativeControls(t *testing
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", script)
 			cmd.Dir = fixture
-			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+fixture, "STANDALONE_DIAGNOSTICS_DIR="+filepath.Join(fixture, "private"))
+			// Только действительный YAML задаёт capture env; окружение ROOT не подменяет его.
+			stepEnv := map[string]string{}
+			for key, value := range job.Env {
+				stepEnv[key] = value
+			}
+			for key, value := range step.Env {
+				value = strings.ReplaceAll(value, "${{ runner.temp }}", fixture)
+				require.NotContains(t, value, "${{", "неподдержанная предпосылка step.env %s", key)
+				stepEnv[key] = value
+			}
+			for _, item := range os.Environ() {
+				key, _, _ := strings.Cut(item, "=")
+				_, overridden := stepEnv[key]
+				if !overridden && key != "PATH" && key != "RUNNER_TEMP" && key != "STANDALONE_DIAGNOSTICS_DIR" {
+					cmd.Env = append(cmd.Env, item)
+				}
+			}
+			cmd.Env = append(cmd.Env, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+fixture)
+			for key, value := range stepEnv {
+				cmd.Env = append(cmd.Env, key+"="+value)
+			}
 			out, runErr := cmd.CombinedOutput()
 			require.NoError(t, ctx.Err(), "CI-step превысил срок: %s", out)
 			cancel()
@@ -879,6 +908,16 @@ func TestStandaloneDiagnosticCriticalCIExecutesPythonNegativeControls(t *testing
 		t.Logf("разобрано и исполнено run-steps: %d; Python-control достигнут: %t", steps, seen)
 		assert.True(t, seen, "CI standalone не исполнил контроль именно из standalone-diagnostics_test.py")
 		assert.Equal(t, broken, failed, "инъекция assertion не управляет исходом настоящего CI path")
+		if !broken {
+			publishedFrom, err := os.ReadFile(filepath.Join(fixture, "export-path"))
+			require.NoError(t, err, "после успешных controls шаг экспорта не достигнут")
+			assert.Equal(t, filepath.Join(fixture, "standalone-private"), string(publishedFrom))
+		} else {
+			_, err := os.Stat(filepath.Join(fixture, "producer-path"))
+			assert.True(t, os.IsNotExist(err), "Go не должен запускаться после отказа controls")
+			_, err = os.Stat(filepath.Join(fixture, "export-path"))
+			assert.True(t, os.IsNotExist(err), "экспорт не должен запускаться после отказа controls")
+		}
 	}
 	for _, broken := range []bool{false, true} {
 		t.Run(fmt.Sprintf("инъекция_отказа=%t", broken), func(t *testing.T) {
