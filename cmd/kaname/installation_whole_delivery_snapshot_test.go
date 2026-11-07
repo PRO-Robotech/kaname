@@ -36,6 +36,7 @@ type ridWholeOwnCeilings struct {
 	StatedAt map[string]time.Time `json:"statedAtByKind"`
 }
 type ridWholeDeliverySnapshot struct {
+	retiredSQLRows    map[string][]string      `json:"-"`
 	replaySQLRows     [][]byte                 `json:"-"`
 	operationSQLRows  [][]byte                 `json:"-"`
 	auditSQLRows      [][]byte                 `json:"-"`
@@ -102,9 +103,20 @@ func ridReadWholeDelivery(t *testing.T, f *installationNativeWorld) ridWholeDeli
 		// учётную запись, статус, живые/выведенные строки, происхождение посева, создателя или модуль.
 		rows, err := tx.Query(ctx, `SELECT to_jsonb(r)::text FROM `+pgx.Identifier{"kaname", table}.Sanitize()+` r ORDER BY to_jsonb(r)::text`)
 		require.NoError(t, err)
+		if rid11RetiredPrivateTable(table) {
+			if out.retiredSQLRows == nil {
+				out.retiredSQLRows = map[string][]string{}
+			}
+			out.retiredSQLRows[table] = []string{}
+		}
 		for rows.Next() {
 			var raw []byte
 			require.NoError(t, rows.Scan(&raw))
+			// Сохраняем именно уже прочитанный SQL text, а не повторную JSON-сериализацию.
+			// Закрытый список не включает auth, operations или outbox payload.
+			if rid11RetiredPrivateTable(table) {
+				out.retiredSQLRows[table] = append(out.retiredSQLRows[table], string(raw))
+			}
 			if table == "audit_outbox" {
 				out.auditSQLRows = append(out.auditSQLRows, append([]byte(nil), raw...))
 			}
