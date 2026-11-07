@@ -40,6 +40,8 @@ type installationNativeWorld struct {
 	credentialDigest   [32]byte
 	lastPublic         nativePublicReceipt
 	publicReadSequence int
+	writerPlan         *installruntime.RegistrationWriterPlan
+	stockLegacyGroup   json.RawMessage
 	stockCatalog       json.RawMessage
 }
 
@@ -107,7 +109,7 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(evidenceRoot, 0700))
 	stand := installruntime.PrepareNativeStand(t, ctx, root, evidence, moduleWriter)
-	f := &installationNativeWorld{stand: stand}
+	f := &installationNativeWorld{stand: stand, writerPlan: installruntime.EmptyRegistrationWriterPlan()}
 	if earlyLifecycle {
 		// Регистрируем до любого нативного Start, начальной настройки или выдачи ключа.
 		// Замыкание допускает любой частично инициализированный мир и никогда не вызывает Fatal.
@@ -200,12 +202,13 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	}
 	if moduleWriter {
 		beforeBase := readRIDStockPremise(t, w)
+		f.stockLegacyGroup = append(json.RawMessage{}, beforeBase.LegacyGroup...)
 		writeRIDStockPremise(t, evidence, "before-base", beforeBase, nil)
 		require.JSONEq(t, string(f.stockCatalog), string(beforeBase.Catalog), "Given must preserve the migration catalog")
 		requireRIDNoDeliveredIdentities(t, beforeBase, 0)
 		require.Equal(t, 1, beforeBase.AdminGrants, "O not bootstrapped before base")
 	}
-	base, err := session.StartBase(ctx)
+	base, err := session.StartBase(ctx, f.writerPlan)
 	require.NoError(t, err)
 	require.NoError(t, base.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
 	f.base = base
@@ -278,6 +281,9 @@ func (f *installationNativeWorld) apply(t *testing.T, input installruntime.Deliv
 	require.NoError(t, process.AwaitReady(ready, f.wire.ProductionReady))
 	require.NoError(t, process.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
 	require.NoError(t, process.CheckSecretAbsence(append(f.creator.SecretMaterial(), f.operator.Bearer())...))
+	f.writerPlan = installruntime.CloneRegistrationWriterPlan(input.RegistrationWriters)
+	f.requireRegistrationWriterPlan(t, input.RegistrationWriters)
+	rid08Write(t, filepath.Dir(process.StdoutPath), "registration-writer-input", map[string]any{"plan": input.RegistrationWriters, "planSHA256": rid01RedactionHash(input.RegistrationWriters), "fullStartupConfigSHA256": process.ConfigSHA256})
 	return process
 }
 
@@ -287,7 +293,7 @@ func ridNativeFirstInstall(t *testing.T) {
 	f := newInstallationNativeWorld(t)
 	public := rid01NewmanContext(t, f, "clean")
 	rid01NewmanPhase(t, public, "CLEAN-BEFORE", nil)
-	process := f.apply(t, installruntime.DeliveryInput{Manifests: installruntime.NewRIDDeliveryFixture(), CredentialFile: f.creator.CredentialFile})
+	process := f.apply(t, installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: installruntime.NewRIDDeliveryFixture(), CredentialFile: f.creator.CredentialFile})
 	results, err := process.Results()
 	require.NoError(t, err)
 	require.Len(t, results, 1, "actual full serve must publish exactly one structured installation result")

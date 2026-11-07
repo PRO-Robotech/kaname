@@ -163,7 +163,7 @@ func TestTokenFamilyMigration_KN_FRV_16_DownRestoresTheClientRevokeDefinition(t 
 
 	// Рабочая база на голове. Семейства отозваны по одному каждым словом
 	// словаря, последнее (L) живо; метки разной длины.
-	db := consentLeavesDB(t)
+	db := historicalRegistrationDB(t)
 	vocabulary := domainRevocationReasons()
 	families := make([]string, len(vocabulary)+1)
 	for i := range families {

@@ -17,6 +17,7 @@ import (
 // Захватываем каждый столбец и каждую живую/выведенную строку; без сокращения до живых строк/числа.
 type ridStockPremise struct {
 	Catalog         json.RawMessage `json:"catalog"`
+	LegacyGroup     json.RawMessage `json:"migrationLegacyGroup"`
 	Issuers         int             `json:"deliveredIssuers"`
 	Writers         int             `json:"deliveredWriters"`
 	Delegations     int             `json:"delegations"`
@@ -40,6 +41,10 @@ func readRIDStockPremise(t *testing.T, w *ceremonyWorld) ridStockPremise {
  (SELECT count(*) FROM kaname.service_accounts),
  (SELECT count(*) FROM kaname.cluster_admin_grants)`).Scan(&catalog, &p.Issuers, &p.Writers, &p.Delegations, &p.Creators, &p.ServiceAccounts, &p.AdminGrants))
 	p.Catalog = catalog
+	var legacy []byte
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT jsonb_build_object('identity',to_jsonb(i),'group',to_jsonb(g))
+ FROM kaname.registration_legacy_cluster_writer_identity i JOIN kaname.groups g ON g.id=i.group_id AND g.account_id=i.account_id WHERE i.singleton`).Scan(&legacy))
+	p.LegacyGroup = legacy
 	return p
 }
 func writeRIDStockPremise(t *testing.T, root, phase string, p ridStockPremise, startup map[string][]map[string]json.RawMessage) {
@@ -104,6 +109,8 @@ func (f *installationNativeWorld) requireRIDBasePremise(t *testing.T, phase stri
 	receipts := readRIDBaseReceipts(t, f.base.StdoutPath)
 	writeRIDStockPremise(t, f.session.Root, phase, p, receipts)
 	require.NotEmpty(t, f.stockCatalog, "post-migration stock snapshot required")
+	require.NotEmpty(t, p.LegacyGroup, "retained group is witnessed from the migration ledger independently of own seed")
+	require.JSONEq(t, string(f.stockLegacyGroup), string(p.LegacyGroup), "entire migration group and identity rows survive base startup unchanged")
 	require.JSONEq(t, string(f.stockCatalog), string(p.Catalog), "full live+retired stock catalog preserved without delivery")
 	requireRIDNoDeliveredIdentities(t, p, creators)
 	// Существующие проверки сохранения штатных строк идентичности/администратора остаются
@@ -143,7 +150,19 @@ func (f *installationNativeWorld) requireRIDBasePremise(t *testing.T, phase stri
 	require.NoError(t, err)
 	require.NotNil(t, own.Seed, "normal own manifest must declare its seed")
 	declared := len(own.Seed.ServiceAccounts) + len(own.Seed.Groups) + len(own.Seed.Joins) + len(own.Seed.AccessBindings)
-	require.Positive(t, declared, "independent own manifest seed is nonempty")
+	require.Zero(t, declared, "the loaded own manifest explicitly declares seed: {}")
+	require.Empty(t, own.Seed.GrantDelegations, "own seed issues no delegations")
+	require.NotNil(t, f.writerPlan)
+	require.NotNil(t, f.writerPlan.Assignments)
+	require.Empty(t, f.writerPlan.Assignments, "base explicitly chooses no registration writers")
+	require.NotEmpty(t, f.base.ConfigSHA256, "real serialized startup profile is bound to process evidence")
+	f.requireRegistrationWriterPlan(t, f.writerPlan)
+	var assignments, accountBindings int
+	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT
+ (SELECT count(*) FROM kaname.registration_account_writer_assignment),
+ (SELECT count(*) FROM kaname.access_bindings WHERE resource_type='account' AND granted_relation='fga_writer')`).Scan(&assignments, &accountBindings))
+	require.Zero(t, assignments, "base has no assignment history")
+	require.Zero(t, accountBindings, "explicit-empty plan has issued no writer rights")
 	require.Equal(t, declared, ridRequiredReceiptScalar[int](t, seedReceipt, "declared_rows"))
 	// Считаем настоящий полный снимок после миграции независимо от
 	// проверяемой переписи запуска. Точное равенство полного снимка проверено выше.

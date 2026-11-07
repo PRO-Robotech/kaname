@@ -323,11 +323,11 @@ func TestAdmitLawfulDerivationIsExpressible(t *testing.T) {
 	if n := len(findingsOf(rep, RuleD5)); n != 0 {
 		t.Fatalf("законная форма вывода обязана проходить, находок Д5′: %d", n)
 	}
-	// Тот же ответ даёт канон целиком: невыразимых пар 0 из 272 (было 271 — до
-	// заведения `account#service_account_creator`, kaname#1003).
+	// Тот же ответ даёт канон целиком: невыразимых пар 0 из 273: #1031 добавил прямое
+	// `account#fga_writer` к прежним 272 объявлениям.
 	// До того — перемерено после заведения `registry_registry#public_reader`
 	// (kaname#856): было 270; до того — после снятия `cluster#console`
-	// (kacho#1820), было 273. План `public_reader from parent` выразим.
+	// (kacho#1820), было 272. План `public_reader from parent` выразим.
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -342,8 +342,8 @@ func TestAdmitLawfulDerivationIsExpressible(t *testing.T) {
 			}
 		}
 	}
-	if pairs != 272 || bad != 0 {
-		t.Fatalf("канон: невыразимых пар %d из %d (ждали 0 из 272)", bad, pairs)
+	if pairs != 273 || bad != 0 {
+		t.Fatalf("канон: невыразимых пар %d из %d (ждали 0 из 273)", bad, pairs)
 	}
 }
 
@@ -494,10 +494,10 @@ func TestAdmitRelationDeclaredTwiceInOneType(t *testing.T) {
 	if !strings.Contains(got[0].Text, "2") {
 		t.Fatalf("находка обязана называть число объявлений, получено %q", got[0].Text)
 	}
-	// Положительный близнец: в каноне 272 объявления и 0 имён, объявленных дважды
+	// Положительный близнец: в каноне 273 объявления и 0 имён, объявленных дважды
 	// (было 271 — до заведения `account#service_account_creator`, kaname#1003);
 	// до того 270 — перемерено после заведения `registry_registry#public_reader`,
-	// kaname#856; до того 273 — после снятия `cluster#console`, kacho#1820).
+	// kaname#856; до того 272 — после снятия `cluster#console`, kacho#1820).
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -515,8 +515,8 @@ func TestAdmitRelationDeclaredTwiceInOneType(t *testing.T) {
 			}
 		}
 	}
-	if decls != 272 || dups != 0 {
-		t.Fatalf("канон: объявлений %d (ждали 272), дублей имени %d (ждали 0)", decls, dups)
+	if decls != 273 || dups != 0 {
+		t.Fatalf("канон: объявлений %d (ждали 273), дублей имени %d (ждали 0)", decls, dups)
 	}
 }
 
@@ -617,7 +617,7 @@ func TestAdmitLawfulDerivationSourcesAreSilent(t *testing.T) {
 	}
 }
 
-// ── §2.1 · запретное множество канона: 5 из 272, транзитивных сверх прямых 0 ──
+// ── §2.1 · запретное множество канона: 5 из 273, транзитивных сверх прямых 0 ──
 //
 // Это ПРОИЗВОДИТЕЛЬ премиссы, которой ревизия круга 4 (§17.5) не нашла ни одного:
 // «два ребра и три дают на каноне один ответ» названо там числом-ориентиром, а
@@ -627,14 +627,15 @@ func TestAdmitLawfulDerivationSourcesAreSilent(t *testing.T) {
 //
 // ЧИСЛО СТОИТ В ИМЕНИ, и потому имя движется вместе с каноном: всякое снятие
 // или заведение объявления переименовывает эту пробу. Последний раз её двигало
-// право создавать учётки (kaname#1003) — 5 из 271 → 5 из 272: отношение
+// #1031: прямое account#fga_writer увеличило 272 до 273 без wildcard;
+// до того право создавать учётки (kaname#1003) — 5 из 271 → 5 из 272: отношение
 // `account#service_account_creator` прибавило пару, подстановки и класса в нём нет;
 // до того — публичное чтение контейнера (kaname#856) — 2 из 270 → 5 из 271: отношение
 // `registry_registry#public_reader` и `system_class` в составе `v_get`, `v_list`
 // реестра (Р9 «Способ» приёмки anonymous-and-authenticated-are-subject-classes.md);
 // до того — снятие `v_get` с типа `iam_role` (kacho#1922), 271 → 270. Так и
 // задумано: имя, называющее величину, не вправе пережить её молча.
-func TestCanonWildcardSetIsFiveOfTwoHundredSeventyTwo(t *testing.T) {
+func TestCanonWildcardSetIsFiveOfTwoHundredSeventyThree(t *testing.T) {
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -656,8 +657,8 @@ func TestCanonWildcardSetIsFiveOfTwoHundredSeventyTwo(t *testing.T) {
 			}
 		}
 	}
-	if pairs != 272 {
-		t.Fatalf("пар (тип, отношение) в каноне %d, ждали 272 — числа приёмки перемеряются, а не помнятся", pairs)
+	if pairs != 273 {
+		t.Fatalf("пар (тип, отношение) в каноне %d, ждали 273 — числа приёмки перемеряются, а не помнятся", pairs)
 	}
 	wantDirect := []string{"cluster.viewer", "registry_repository.v_get",
 		"registry_registry.public_reader", "registry_registry.v_get", "registry_registry.v_list"}

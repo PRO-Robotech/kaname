@@ -21,7 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
-	"gopkg.in/yaml.v3"
 )
 
 type rid10FailureOperation struct {
@@ -54,10 +53,11 @@ func rid10Start(t *testing.T, x *rid10World, mode string) *rid02OwnedChild {
 	manifestDir := filepath.Join(configRoot, "delivery")
 	_, err := x.w.delivery.Manifests.Write(manifestDir, false)
 	require.NoError(t, err)
-	raw, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": manifestDir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}})
+	raw, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": manifestDir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}}, x.w.delivery.RegistrationWriters)
 	require.NoError(t, err)
 	configPath := filepath.Join(configRoot, "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, raw, 0600))
+	ridRegistrationStartupProof(t, configRoot, raw, x.w.delivery.RegistrationWriters)
 	digest := rid06HashExecutable(t)
 	child := startRIDInstallationChild(t, f, "rid10-child", rid10ChildInput{ConfigPath: configPath, EvidenceDir: filepath.Join(f.session.Root, "rid10-child"), Creator: f.creator.ID, Mode: mode}, nativeConcurrentEnvironment(t, f, installruntime.SecondNativePorts(), "rid10-full-root"), rid10ChildEnv, "TestRID10OwnedMidrunStartupChild", "4m")
 	parentCG, err := os.ReadFile("/proc/self/cgroup")

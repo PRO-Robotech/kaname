@@ -3,32 +3,33 @@
 
 package pg_test
 
-// reconcile_rules_t31_iam_integration_test.go — cross-service ARM_LABELS revoke
-// on label change, IAM-side confirmation test.
+// reconcile_rules_t31_iam_integration_test.go — межсервисный отзыв ARM_LABELS
+// при смене метки, подтверждающий тест на стороне IAM.
 //
-// An OBLIGATORY new integration test that fixes the eager-revoke
-// guarantee END-TO-END through the reconciler-worker DRAIN path:
+// ОБЯЗАТЕЛЬНЫЙ новый интеграционный тест, закрепляющий гарантию немедленного
+// отзыва СКВОЗНЫМ проходом через РАЗБОР ОЧЕРЕДИ работника согласования:
 //
-//   grant ACTIVE member by matchLabels:{network:treska}
-//     → RegisterResource(object="vpc_network:X", labels={}) with a NEWER
-//       source_version  (the consumer-side emit will add on label-Update)
-//     → mirror.upsert FULL-REPLACE labels + enqueue resource_reconcile_outbox
-//       event "mirror.upsert"  (RegisterResource use-case, ban #10 co-commit)
-//     → worker.drain (NOT a direct ReconcileObject call) claims the event and
-//       runs ReconcileObject(type,id)
-//     → THEN: the matchLabels member is EAGER-REVOKED — a real DELETE from
-//       access_binding_target_members + the FGA tuple-delete is emitted
-//       (fell-out-loop reconcile.go:480-492).
+// выдать участнику ACTIVE через matchLabels:{network:treska}
+// → RegisterResource(object="vpc_network:X", labels={}) с НОВОЙ
+// source_version (запись потребителя добавит её при обновлении меток)
+// → mirror.upsert ПОЛНОСТЬЮ ЗАМЕНЯЕТ метки и ставит в resource_reconcile_outbox
+// событие "mirror.upsert" (сценарий RegisterResource, общий коммит по запрету №10)
+// → worker.drain, а НЕ прямой вызов ReconcileObject, захватывает событие и
+// запускает ReconcileObject(type,id)
+// → ТОГДА участник matchLabels НЕМЕДЛЕННО ОТОЗВАН: реальный DELETE из
+// access_binding_target_members и запись удаления кортежа FGA
+// (цикл выбывших в reconcile.go:480-492).
 //
-// Expectation: GREEN against the CURRENT iam reconciler — the bug is purely
-// the consumer-side emit; IAM already revokes correctly once the mirror gets the
-// fresh (empty) labels. If this goes RED it is an IAM-side finding.
+// Ожидание: УСПЕХ на ТЕКУЩЕМ работнике IAM. Дефект целиком
+// в записи потребителя; IAM уже верно отзывает доступ, получив в зеркале
+// свежие пустые метки. Провал означает находку на стороне IAM.
 //
-// TEST-ONLY (ban #13): no production code is touched.
-// Run: `make test` (testcontainers + Docker). Skipped under -short.
+// ТОЛЬКО ТЕСТ (запрет №13): боевой код не затрагивается.
+// Запуск: `make test` (testcontainers + Docker). Пропускается при -short.
 
 import (
 	"context"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"testing"
 	"time"
 
@@ -49,11 +50,11 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
-// newRegisterUCWired builds the RegisterResource use-case wired exactly like the
-// composition-root (cmd/kaname): fga_outbox emitter + resource_mirror emitter
-// + tx beginner + reconcile-event emitter + account resolver.
-// The reconcile-event wiring is what lets a label-change RegisterResource enqueue
-// the resource_reconcile_outbox event the worker drains.
+// newRegisterUCWired собирает сценарий RegisterResource точно как
+// корень сборки (cmd/kaname): запись fga_outbox и resource_mirror,
+// начало транзакции, запись события согласования и разрешитель аккаунта.
+// Именно подключение записи событий позволяет RegisterResource при смене метки поставить
+// событие resource_reconcile_outbox, которое вычитывает работник.
 func newRegisterUCWired(pool *pgxpool.Pool) *internal_iam.RegisterResourceUseCase {
 	return internal_iam.NewRegisterResourceUseCase(
 		kanamepg.NewFGAOutboxEmitter(),
@@ -64,25 +65,25 @@ func newRegisterUCWired(pool *pgxpool.Pool) *internal_iam.RegisterResourceUseCas
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	).
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"}).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver())
 }
 
-// drainOnce drives the REAL reconciler-worker drain path to convergence (the
-// test exercises the end-to-end RegisterResource→outbox→drain→ReconcileObject
-// chain, NOT a direct ReconcileObject call). The worker's drain is unexported, so
-// we run the worker loop with a tiny drain interval and a long sweep interval,
-// then poll for the drained outbox event and cancel. Setting SweepInterval far in
-// the future keeps the periodic sweep from racing the drain (the drain is the
-// path under test); the one boot-sweep is harmless (idempotent reconcile).
+// drainOnce доводит НАСТОЯЩИЙ путь разбора очереди работника до сходимости:
+// тест проверяет всю цепочку RegisterResource→outbox→drain→ReconcileObject,
+// а НЕ прямой вызов ReconcileObject. Метод разбора не экспортирован, поэтому
+// запускаем цикл работника с малым интервалом разбора и большим интервалом обхода,
+// затем ждём вычитанного события и отменяем работу. Большой SweepInterval
+// не даёт периодическому обходу состязаться с разбором очереди, который и
+// проверяется; единственный обход при старте безвреден благодаря идемпотентности.
 func drainOnce(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
 	adapter := kanamepg.NewReconcileAdapter(pool, catalogfixture.Source())
 	engine := newReconcilerEngine(pool)
 	worker := seed.NewReconcileWorker(engine, adapter, seed.ReconcileWorkerConfig{
 		DrainInterval: 20 * time.Millisecond,
-		SweepInterval: time.Hour, // keep the periodic sweep out of the way
+		SweepInterval: time.Hour, // не даём периодическому обходу вмешиваться
 		BatchSize:     64,
 	})
 
@@ -90,8 +91,8 @@ func drainOnce(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	done := make(chan struct{})
 	go func() { defer close(done); _ = worker.Run(runCtx) }()
 
-	// Wait until the worker has drained the reconcile event (sent_at set) — that
-	// proves the DRAIN path (not the sweep) consumed the mirror.upsert event.
+	// Ждём разбора события работником (sent_at установлен): это
+	// доказывает, что событие mirror.upsert потребил РАЗБОР ОЧЕРЕДИ, а не обход.
 	require.Eventually(t, func() bool {
 		var unsent int
 		if err := pool.QueryRow(ctx,
@@ -106,14 +107,14 @@ func drainOnce(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	<-done
 }
 
-// newReconcilerEngine builds the reconcile use-case (ReconcileObject/Binding/
-// ExpireBinding) backed by the pg adapter — the engine the worker drives.
+// newReconcilerEngine собирает сценарий согласования (ReconcileObject/Binding/
+// ExpireBinding) на адаптере pg: этот движок запускает работник.
 func newReconcilerEngine(pool *pgxpool.Pool) seed.ReconcileEngine {
 	rec, _ := newReconciler(pool)
 	return rec
 }
 
-// ── label-change via RegisterResource → eager-revoke via drain ───────────────
+// ── смена метки через RegisterResource → немедленный отзыв через очередь ─────
 
 func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testing.T) {
 	if testing.Short() {
@@ -126,8 +127,8 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 	fx := setupGamma(t, ctx, pool, "t31iam01")
 	rec, _ := newReconciler(pool)
 
-	// Given: a rules-role granting v_get/v_list on vpc_network by matchLabels
-	// {network:treska}, bound (thin) on the member's project scope.
+	// Дано: роль с правилами выдаёт v_get/v_list на vpc_network по matchLabels
+	// {network:treska} и привязана тонкой привязкой к области проекта участника.
 	rule := domain.Rule{
 		Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get", "list"},
 		MatchLabels: map[string]string{"network": "treska"},
@@ -136,10 +137,10 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 	roleID := seedRulesRole(t, ctx, pool, fx.repo, fx.prj, "t31iam01role", domain.Rules{rule})
 	bid := insertThinBinding(t, ctx, fx.repo, fx.member, roleID, fx.prj)
 
-	// Given: the network is in the mirror WITH the matching label, reconciled
-	// ACTIVE (member row materialized + FGA write-tuple emitted). The mirror row
-	// is created via the real RegisterResource use-case (same edge the consumer
-	// uses on Create), with an early source_version.
+	// Дано: сеть в зеркале С подходящей меткой, согласована как
+	// ACTIVE (строка участника материализована, запись кортежа FGA поставлена). Строка зеркала
+	// создана настоящим сценарием RegisterResource, тем же входом, которым потребитель
+	// пользуется при создании, с ранней source_version.
 	uc := newRegisterUCWired(pool)
 	v0 := time.Now().Add(-time.Minute)
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
@@ -151,7 +152,7 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 		ParentAccountId: string(fx.accID),
 		SourceVersion:   timestamppb.New(v0),
 	}))
-	require.NoError(t, rec.ReconcileBinding(ctx, bid)) // materialize the ACTIVE member
+	require.NoError(t, rec.ReconcileBinding(ctx, bid)) // материализовать участника ACTIVE
 
 	st, ok := memberStatusByRule(t, ctx, pool, bid, fp, "vpc.network", "net-treska")
 	require.True(t, ok, "matchLabels member materialized")
@@ -159,37 +160,37 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 	require.GreaterOrEqual(t, countFGAOutbox(t, ctx, pool, "fga.tuple.write", "vpc_network:net-treska"), 1,
 		"ACTIVE member emits the v_get/v_list write-tuple")
 
-	// When: the label is REMOVED on the source resource → the consumer
-	// re-emits RegisterResource with labels={} and a NEWER source_version. This is
-	// the exact edge added on label-Update; here we drive it directly (IAM is
-	// the callee — it must revoke regardless of which consumer emitted).
+	// Когда: метка УДАЛЕНА на исходном ресурсе, потребитель
+	// повторно отправляет RegisterResource с labels={} и НОВОЙ source_version. Это
+	// ровно вход, добавляемый при обновлении меток; здесь вызываем его напрямую, ведь IAM —
+	// принимающая сторона и обязан отзывать независимо от отправившего потребителя.
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId:       "project:" + string(fx.prj),
 		Relation:        "project",
 		Object:          "vpc_network:net-treska",
-		Labels:          map[string]string{}, // label removed (upsert {}, not Unregister)
+		Labels:          map[string]string{}, // метка удалена: UPSERT {}, а не Unregister
 		ParentProjectId: string(fx.prj),
 		ParentAccountId: string(fx.accID),
-		SourceVersion:   timestamppb.New(v0.Add(time.Minute)), // monotonic newer
+		SourceVersion:   timestamppb.New(v0.Add(time.Minute)), // монотонно новая версия
 	}))
 
-	// Drive the REAL worker drain path (RegisterResource enqueued a mirror.upsert
-	// reconcile event in the same writer-tx; the worker claims it and runs
-	// ReconcileObject end-to-end — NOT a direct ReconcileObject call).
+	// Запускаем НАСТОЯЩИЙ разбор очереди работника: RegisterResource поставил событие согласования
+	// mirror.upsert в той же транзакции записи; работник захватывает его и выполняет
+	// ReconcileObject сквозным путём, а НЕ прямым вызовом ReconcileObject.
 	drainOnce(t, ctx, pool)
 
-	// Then (eager-revoke): the matchLabels member is GONE — a real DELETE from
-	// access_binding_target_members (fell-out-loop reconcile.go:480-492).
+	// Тогда (немедленный отзыв): участник matchLabels ИСЧЕЗ — реальный DELETE из
+	// access_binding_target_members (цикл выбывших reconcile.go:480-492).
 	_, stillMember := memberStatusByRule(t, ctx, pool, bid, fp, "vpc.network", "net-treska")
 	assert.False(t, stillMember,
 		"label removed → member eager-revoked (real DELETE from access_binding_target_members)")
 
-	// And: the FGA tuple-delete was emitted for the revoked member.
+	// И: для отозванного участника записано удаление кортежа FGA.
 	assert.GreaterOrEqual(t, countFGAOutbox(t, ctx, pool, "fga.tuple.delete", "vpc_network:net-treska"), 1,
 		"label removed → FGA tuple-delete emitted (visibility revoked)")
 
-	// And: the mirror row STAYS with labels={} (upsert, not Unregister) — the
-	// drain consumed a mirror.upsert event, and the row is present but label-empty.
+	// И: строка зеркала ОСТАЁТСЯ с labels={} (UPSERT, а не Unregister):
+	// очередь потребила mirror.upsert, строка существует, но меток нет.
 	var mirrorRows int
 	var labelsText string
 	require.NoError(t, pool.QueryRow(ctx,
@@ -198,7 +199,7 @@ func TestReconcile_T31Iam01_LabelChangeViaRegisterResource_EagerRevoke(t *testin
 	assert.Equal(t, 1, mirrorRows, "mirror row survives the label removal (upsert, not Unregister)")
 	assert.Equal(t, "{}", labelsText, "mirror labels fully replaced with {} (FULL-REPLACE upsert)")
 
-	// And: the ledger no longer holds the revoked member's tuples (no orphan).
+	// И: журнал больше не хранит кортежей отозванного участника, сирот нет.
 	var ledger int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.access_binding_emitted_tuples

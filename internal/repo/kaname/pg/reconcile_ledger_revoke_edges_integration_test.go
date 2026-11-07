@@ -20,6 +20,8 @@ package pg_test
 import (
 	"context"
 	"errors"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,7 +67,16 @@ func insertThinBindingSubjects(t *testing.T, ctx context.Context, repo *kanamepg
 // registerUnderProject — цепь предков объекта тем же входом, каким её пишет продукт.
 func registerUnderProject(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fx gammaFixture, fgaObject string) {
 	t.Helper()
-	require.NoError(t, newRegisterUCWired(pool).Register(ctx, &iamv1.RegisterResourceRequest{
+	module := ""
+	switch {
+	case strings.HasPrefix(fgaObject, "compute_instance:"):
+		module = "compute"
+	case strings.HasPrefix(fgaObject, "vpc_network:"):
+		module = "vpc"
+	default:
+		t.Fatalf("fixture has no declared owner for %q", fgaObject)
+	}
+	require.NoError(t, newRegisterUCWired(pool).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: module}).Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId: "project:" + string(fx.prj), Relation: "project", Object: fgaObject,
 		ParentProjectId: string(fx.prj), ParentAccountId: string(fx.accID),
 		SourceVersion: timestamppb.New(time.Now().Add(time.Minute)),

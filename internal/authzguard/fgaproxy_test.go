@@ -1,14 +1,14 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// fgaproxy_test.go — the FGA-proxy authz ReBAC gate + cert-SAN→SA mapping.
+// fgaproxy_test.go — страж авторизации ReBAC прокси FGA и отображение SAN сертификата в SA.
 //
-// Unit-level: the FGA-proxy gate resolves the verified mTLS client-cert SAN
-// (SPIRE format spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>) to a deterministic
-// ServiceAccount id, then ReBAC-checks `service_account:<sva>#fga_writer@
-// cluster:cluster_root` via the injected RelationChecker. No DB / no live TLS:
-//   - cert-identity injected via grpcsrv.WithCertIdentity;
-//   - ReBAC decision injected via a fake RelationChecker.
+// Модульный уровень: страж прокси FGA разрешает проверенный SAN клиентского сертификата mTLS
+// (формат SPIRE spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>) в детерминированный
+// идентификатор ServiceAccount, затем проверяет ReBAC `service_account:<sva>#fga_writer@
+// account:acc_writer_probe` через внедрённый RelationChecker. Без БД и живого TLS:
+//   - личность сертификата внедряется через grpcsrv.WithCertIdentity;
+//   - решение ReBAC внедряется поддельным RelationChecker.
 //
 // Со снятия внешнего движка прав вопрос уходит не чужому хранилищу, а двери
 // решения над реляционной формой собственной базы (`authzcascade.Client` поверх
@@ -17,14 +17,14 @@
 // безразличен: он и есть вход двух проб ниже, поэтому берётся из сегодняшнего
 // мира, а не из мира снятого движка.
 //
-// Scenarios:
+// Сценарии:
 //
-//	valid SAN → resolved to module SA → ReBAC allow → nil.
-//	SA without fga_writer relation → PermissionDenied.
-//	SAN references unknown SA (no relation) → PermissionDenied (fail-closed).
-//	malformed / foreign-trust-domain SAN → PermissionDenied.
-//	unverified peer (verified=false) → PermissionDenied (no trust).
-//	SA-cert path never consults required_acr_min (no ACR in ctx) → allow.
+// Корректный SAN → служебная учётка модуля → разрешение ReBAC → nil.
+// SA без отношения fga_writer → PermissionDenied.
+// SAN ссылается на неизвестную SA (нет отношения) → PermissionDenied (безопасный отказ).
+// Неверный SAN / чужой домен доверия → PermissionDenied.
+// Непроверенный пир (verified=false) → PermissionDenied (нет доверия).
+// Путь сертификата SA не спрашивает required_acr_min (нет ACR в ctx) → разрешение.
 package authzguard_test
 
 import (
@@ -45,19 +45,19 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
-// sva derives the deterministic ServiceAccount id for a module svc-name
-// (`'sva' || substr(md5('kacho-<svc>'), 1, 17)`), matching the seed migration.
-// md5 here is an id-derivation function chosen to agree with Postgres `md5()`,
-// not a security primitive — the digest guards nothing.
+// sva выводит детерминированный идентификатор ServiceAccount для имени службы модуля
+// (`'sva' || substr(md5('kacho-<svc>'), 1, 17)`), совпадающий с начальной миграцией.
+// Здесь md5 — функция вывода идентификатора, выбранная в согласии с Postgres `md5()`,
+// а не примитив безопасности: хеш ничего не защищает.
 func sva(svc string) string {
 	sum := md5.Sum([]byte("kacho-" + svc))
 	return "sva" + hex.EncodeToString(sum[:])[:17]
 }
 
-// fakeChecker records the (subject,relation,object) and returns a canned allow.
-// When err is non-nil it is returned verbatim (modelling a source failure: база
-// не отвечает / дверь решения собрана без формы), so the gate can distinguish a
-// Check that never got an answer from an explicit deny (allowed==false, nil err).
+// fakeChecker записывает (subject,relation,object) и возвращает заданное разрешение.
+// При ненулевом err возвращает его дословно (моделирует сбой источника: база
+// не отвечает / дверь решения собрана без формы), чтобы страж различал
+// Check без ответа и явный отказ (allowed==false, ошибка nil).
 //
 // Дублёр НЕ снисходительнее настоящего: единственная его вольность — отвечать
 // без базы, а форму ответа он повторяет дословно, включая то, что «ошибка» и
@@ -86,6 +86,9 @@ func TestRelationWriteGate_C01_B07_ValidSANResolvedAndAllowed(t *testing.T) {
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
 
 	dom, err := gate.Authorize(ctx)
+	if err == nil {
+		err = gate.AuthorizeAccount(ctx, "acc_writer_probe")
+	}
 	require.NoError(t, err, "vpc SA with fga_writer relation → allow")
 	require.Equal(t, "vpc", dom, "Authorize returns the caller module domain for object-type binding")
 	require.Equal(t, "service_account:"+sva("vpc"), chk.gotSubject, "SAN mapped to deterministic sva-id")
@@ -93,19 +96,19 @@ func TestRelationWriteGate_C01_B07_ValidSANResolvedAndAllowed(t *testing.T) {
 	// Объект вопроса — платформенный синглтон кластера (kacho#914). Утверждение
 	// стоит дословно: гейт, спросивший про ДРУГОЙ объект, задаёт вопрос, на
 	// который системная выдача не отвечает, — и отказ выглядел бы честным.
-	require.Equal(t, "cluster:cluster_root", chk.gotObject)
+	require.Equal(t, "account:acc_writer_probe", chk.gotObject)
 }
 
 func TestRelationWriteGate_B08_NoFGAWriterRelationDenied(t *testing.T) {
-	// A well-formed module SAN resolves to its deterministic SA id, and ReBAC
-	// then denies it: geo holds no fga_writer relation.
+	// Корректный SAN модуля разрешается в детерминированный идентификатор SA, после чего
+	// ReBAC отказывает: у geo нет отношения fga_writer.
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 		"spiffe://kacho.cloud/ns/kacho/sa/kacho-geo", true)
 
-	_, err := gate.Authorize(ctx)
+	err := gate.AuthorizeAccount(ctx, "acc_writer_probe")
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "no fga_writer relation → PermissionDenied")
 }
 
@@ -114,13 +117,13 @@ func TestRelationWriteGate_C03_MalformedOrForeignSANDenied(t *testing.T) {
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	for _, san := range []string{
-		"spiffe://other-trust-domain/x",      // foreign trust domain — never extracted
-		"spiffe://kacho.cloud/garbage",       // wrong path shape
-		"spiffe://kacho.cloud/ns//sa/kacho-", // empty segments
-		"",                                   // no identity
+		"spiffe://other-trust-domain/x",      // Чужой домен доверия — никогда не извлекается.
+		"spiffe://kacho.cloud/garbage",       // Неверная форма пути.
+		"spiffe://kacho.cloud/ns//sa/kacho-", // Пустые сегменты.
+		"",                                   // Личности нет.
 	} {
 		ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
-		_, err := gate.Authorize(ctx)
+		err := gate.AuthorizeAccount(ctx, "acc_writer_probe")
 		require.Equal(t, codes.PermissionDenied, status.Code(err), "malformed SAN %q → PermissionDenied", san)
 	}
 }
@@ -129,10 +132,10 @@ func TestRelationWriteGate_C05_UnverifiedPeerDenied(t *testing.T) {
 	chk := &fakeChecker{allowSubjects: map[string]bool{"service_account:" + sva("vpc"): true}}
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
-	// Verified=false (TLS peer without verified client-cert) → never trusted.
+	// Verified=false (пир TLS без проверенного клиентского сертификата) → никогда не доверяем.
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", false)
-	_, err := gate.Authorize(ctx)
+	err := gate.AuthorizeAccount(ctx, "acc_writer_probe")
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "unverified peer → fail-closed")
 }
 
@@ -140,46 +143,49 @@ func TestRelationWriteGate_C02_UnknownSADenied(t *testing.T) {
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
-	// Well-formed SPIRE SAN, but the resolved SA has no fga_writer relation
-	// (unknown / unregistered module) → fail-closed PermissionDenied.
+	// Корректный SAN SPIRE, но у найденной SA нет отношения fga_writer
+	// (неизвестный / незарегистрированный модуль) → безопасный отказ PermissionDenied.
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-unknown", true)
-	_, err := gate.Authorize(ctx)
+	err := gate.AuthorizeAccount(ctx, "acc_writer_probe")
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 }
 
 func TestRelationWriteGate_B09_NoACRConsulted(t *testing.T) {
-	// service→service (mTLS-SA) is exempt from required_acr_min: the gate
-	// decision is purely the ReBAC relation; there is no ACR floor in the SA path.
+	// Межсервисный путь (mTLS-SA) освобождён от required_acr_min: решение стража
+	// зависит лишь от отношения ReBAC; нижнего предела ACR на пути SA нет.
 	chk := &fakeChecker{allowSubjects: map[string]bool{"service_account:" + sva("vpc"): true}}
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
-	// ctx carries NO acr claim of any kind — must still pass on relation alone.
+	// ctx НЕ несёт никакого утверждения acr — одного отношения всё равно должно хватить.
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
-	_, err := gate.Authorize(ctx)
+	err := gate.AuthorizeAccount(ctx, "acc_writer_probe")
 	require.NoError(t, err, "SA exempt from ACR-floor")
 }
 
 func TestRelationWriteGate_D01_DevModeInsecureAllowed(t *testing.T) {
-	// Dev-mode (production=false): insecure listener, no verified cert →
-	// backward-compat allow. New RPCs must not break dev flow.
+	// Режим разработки (production=false): незащищённый слушатель, нет проверенного сертификата →
+	// разрешение для обратной совместимости. Новые RPC не должны ломать поток разработки.
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
-	gate := authzguard.NewRelationWriteGate(chk).WithModuleRoster(writerRoster(t)) // dev-mode default
+	gate := authzguard.NewRelationWriteGate(chk).WithModuleRoster(writerRoster(t)) // Режим разработки по умолчанию.
 
-	ctx := context.Background() // no cert-identity ever set (insecure listener)
+	ctx := context.Background() // Личность сертификата никогда не задавалась (незащищённый слушатель).
 	dom, err := gate.Authorize(ctx)
-	require.NoError(t, err, "dev-mode insecure → allow (backward-compat)")
+	if err == nil {
+		err = gate.AuthorizeAccount(ctx, "acc_writer_probe")
+	}
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "registration has no insecure bypass")
 	require.Empty(t, dom, "dev-mode (no cert) → empty domain disables object-domain binding")
 }
 
 func TestRelationWriteGate_D02_ProdModeAnonymousFailClosed(t *testing.T) {
-	// Production-mode: no verified cert (anonymous) → fail-closed.
+	// Боевой режим: нет проверенного сертификата (аноним) → безопасный отказ.
 	chk := &fakeChecker{allowSubjects: map[string]bool{}}
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := context.Background()
-	_, err := gate.Authorize(ctx)
+	err := gate.AuthorizeAccount(ctx, "acc_writer_probe")
 	require.Equal(t, codes.PermissionDenied, status.Code(err), "prod-mode anonymous → fail-closed")
 }
 
@@ -204,9 +210,9 @@ func TestRelationWriteGate_I1_BackendFailureIsUnavailable(t *testing.T) {
 		{"дверь решения собрана без формы", authzcascade.ErrFormNotWired},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// A well-formed, verified module cert that resolves to a known SA;
-			// the relation WOULD be allowed, but the Check call fails at the
-			// backend before any decision can be made.
+			// Корректный проверенный сертификат модуля разрешается в известную SA;
+			// отношение БЫЛО БЫ разрешено, но вызов Check падает в
+			// хранилище до принятия решения.
 			chk := &fakeChecker{
 				allowSubjects: map[string]bool{"service_account:" + sva("vpc"): true},
 				err:           tc.err,
@@ -216,7 +222,7 @@ func TestRelationWriteGate_I1_BackendFailureIsUnavailable(t *testing.T) {
 			ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 				"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
 
-			_, err := gate.Authorize(ctx)
+			err := gate.AuthorizeAccount(ctx, "acc_writer_probe")
 			require.Equal(t, codes.Unavailable, status.Code(err),
 				"backend Check failure must be Unavailable (retryable), never PermissionDenied — "+
 					"else the drainer poisons a legitimate intent")
@@ -233,20 +239,20 @@ func TestRelationWriteGate_I1_BackendFailureIsUnavailable(t *testing.T) {
 	}
 }
 
-// TestRelationWriteGate_I1_ExplicitDenyIsPermissionDenied — explicit deny → PermissionDenied.
+// TestRelationWriteGate_I1_ExplicitDenyIsPermissionDenied — явный отказ → PermissionDenied.
 //
-// The other branch: a successful Check that returns allowed==false is a genuine
-// authorization decision (the SA lacks fga_writer). That is PermissionDenied —
-// NOT Unavailable — so the caller does not pointlessly retry a real deny.
+// Другая ветвь: успешный Check с allowed==false — настоящее
+// решение авторизации (у SA нет fga_writer). Это PermissionDenied,
+// а НЕ Unavailable, чтобы вызывающий бессмысленно не повторял настоящий отказ.
 func TestRelationWriteGate_I1_ExplicitDenyIsPermissionDenied(t *testing.T) {
-	// Known SA, Check succeeds (nil err) but returns allowed==false.
-	chk := &fakeChecker{allowSubjects: map[string]bool{}} // empty → allowed=false, err=nil
+	// Известная SA, Check успешен (ошибка nil), но возвращает allowed==false.
+	chk := &fakeChecker{allowSubjects: map[string]bool{}} // Пусто → allowed=false, err=nil.
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))
 
 	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"),
 		"spiffe://kacho.cloud/ns/kacho-system/sa/kacho-vpc", true)
 
-	_, err := gate.Authorize(ctx)
+	err := gate.AuthorizeAccount(ctx, "acc_writer_probe")
 	require.Equal(t, codes.PermissionDenied, status.Code(err),
 		"explicit deny (allowed=false, nil err) must be PermissionDenied, not Unavailable")
 }

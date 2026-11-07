@@ -368,7 +368,12 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"refresh_tokens": nil,
 	// Происхождение наката записывает только миграция: версия формата, флаги
 	// исходных линий и состояние не поступают от вызывающего (kaname#1096).
-	"registration_lineage_origin": nil,
+	// Назначения установки, переключатель снятия и захваченная прежняя личность
+	// производятся службой/миграцией, никогда не полями запроса регистрации.
+	"registration_account_writer_assignment":      nil,
+	"registration_account_writer_switch":          nil,
+	"registration_legacy_cluster_writer_identity": nil,
+	"registration_lineage_origin":                 nil,
 	// Факт отношения выводит триггер схемы из очереди кортежей.
 	"relation_fact": nil,
 	// Журнал ресурсов — событие пишет служба.

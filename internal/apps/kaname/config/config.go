@@ -16,26 +16,27 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
-// Config — root configuration struct for kaname.
+// Config — корневая структура конфигурации kaname.
 //
-// YAML hierarchy:
+// Иерархия YAML:
 //
 //	logger:        { level }
 //	api-server:    { endpoint, internal-endpoint, graceful-shutdown }
 //	repository:    { postgres }
-//	authn:         { mode, domain, hooks, jwks, dpop }
+//	authn:         { mode, domain, hooks, jwks, dpop } # режим, домен, обработчики, ключи JWKS и привязка DPoP
 //
-// The gateway-internal drainer is configured from KANAME_* env vars in the
-// composition root (cmd/kaname), not from this YAML.
+// Внутренний обработчик шлюза настраивается переменными KANAME_* в
+// корне сборки (cmd/kaname), а не этим YAML.
 //
-// Every section is `mapstructure`-tagged (viper uses mapstructure for
-// Unmarshal by default). Defaults live in defaults.go.
+// Каждый раздел имеет метки `mapstructure` (viper по умолчанию использует mapstructure для
+// Unmarshal). Значения по умолчанию — в defaults.go.
 type Config struct {
-	ModuleSeedInstaller ModuleSeedInstallerConfig `mapstructure:"moduleSeedInstaller"`
-	Logger              LoggerConfig              `mapstructure:"logger"`
-	APIServer           APIServerConfig           `mapstructure:"api-server"`
-	Repository          RepositoryConfig          `mapstructure:"repository"`
-	AuthN               AuthNConfig               `mapstructure:"authn"`
+	ModuleSeedInstaller        ModuleSeedInstallerConfig         `mapstructure:"moduleSeedInstaller"`
+	RegistrationAccountWriters *RegistrationAccountWritersConfig `mapstructure:"registration-account-writers"`
+	Logger                     LoggerConfig                      `mapstructure:"logger"`
+	APIServer                  APIServerConfig                   `mapstructure:"api-server"`
+	Repository                 RepositoryConfig                  `mapstructure:"repository"`
+	AuthN                      AuthNConfig                       `mapstructure:"authn"`
 	// Jobs — фоновые задания сервиса (задача kacho#1264). Секция заведена по
 	// прецеденту сметателя целей nlb: интервал работы, удаляющей РЕСУРС
 	// АРЕНДАТОРА по времени, живёт в конфигурации со стражем старта, а не
@@ -107,9 +108,9 @@ type AuthZConfig struct {
 	CacheTTL time.Duration `mapstructure:"cache-ttl"`
 }
 
-// LoggerConfig — logger section.
+// LoggerConfig — раздел логирования.
 type LoggerConfig struct {
-	// Level — one of FATAL|ERROR|WARN|INFO|DEBUG.
+	// Level — одно из FATAL|ERROR|WARN|INFO|DEBUG.
 	Level string `mapstructure:"level"`
 }
 
@@ -133,33 +134,33 @@ type SubscriptionConfig struct {
 	IdlePoll time.Duration `mapstructure:"idle-poll"`
 }
 
-// APIServerConfig — api-server section.
+// APIServerConfig — раздел api-server.
 //
-// Endpoint / InternalEndpoint accept two formats:
-//   - `tcp://0.0.0.0:9090` (full URL-style, recommended);
-//   - `9090` (legacy: bare port; preserved for backward-compat
-//     with older values.yaml, see listenAddress in load.go).
+// Endpoint / InternalEndpoint принимают два формата:
+//   - `tcp://0.0.0.0:9090` (полная форма URL, рекомендуется);
+//   - `9090` (прежняя форма: только порт; сохранена для совместимости
+//     со старыми values.yaml, см. listenAddress в load.go).
 type APIServerConfig struct {
 	Endpoint         string        `mapstructure:"endpoint"`
 	InternalEndpoint string        `mapstructure:"internal-endpoint"`
 	GracefulShutdown time.Duration `mapstructure:"graceful-shutdown"`
-	// MetricsEndpoint — Prometheus /metrics HTTP listener. A SEPARATE
-	// cluster-internal port (default `tcp://0.0.0.0:9095`), never the public
-	// tenant gRPC surface — exposing the registry there would leak internal
-	// cardinality. Empty disables the metrics listener.
+	// MetricsEndpoint — слушатель HTTP Prometheus /metrics. ОТДЕЛЬНЫЙ
+	// внутренний порт кластера (по умолчанию `tcp://0.0.0.0:9095`), никогда не публичная
+	// поверхность gRPC арендатора: размещение реестра там раскрыло бы внутреннюю
+	// кардинальность. Пустое значение отключает слушатель метрик.
 	MetricsEndpoint string `mapstructure:"metrics-endpoint"`
-	// RegistryToken — the Docker Registry v2 `/iam/token` auth-server HTTP
-	// listener. A SEPARATE, EXTERNAL-reachable plaintext port (default
-	// `tcp://0.0.0.0:9096`; TLS terminated at the ingress, like the metrics
-	// listener) — docker clients hit `/iam/token` through the edge to
-	// exchange an SA-key for a short-lived identity-JWT. Distinct from the
-	// cluster-internal metrics (:9095) and key-set (:9097) listeners. Empty
-	// endpoint disables it.
+	// RegistryToken — слушатель HTTP сервера аутентификации Docker Registry v2 `/iam/token`.
+	// ОТДЕЛЬНЫЙ, доступный ИЗВНЕ порт без шифрования (по умолчанию
+	// `tcp://0.0.0.0:9096`; TLS завершается на ingress, как у слушателя
+	// метрик): клиенты docker обращаются к `/iam/token` через край, чтобы
+	// обменять ключ SA на краткоживущий JWT идентичности. Отличается от внутренних
+	// слушателей метрик (:9095) и набора ключей (:9097). Пустой
+	// адрес отключает его.
 	RegistryToken RegistryTokenConfig `mapstructure:"registry-token"`
 	// RESTEndpoint — собственный ПУБЛИЧНЫЙ REST-фронт службы.
 	//
 	// Пока служба стоит за краем платформы, её HTTP-поверхность принадлежит
-	// краю. Вынесенная отдельным продуктом, края она не имеет by construction —
+	// краю. Вынесенная отдельным продуктом, края она не имеет по построению —
 	// и её REST обязан существовать сам.
 	//
 	// УМОЛЧАНИЯ НЕТ намеренно, и это отличает ребро от трёх соседних. У тех
@@ -183,7 +184,7 @@ type APIServerConfig struct {
 	//
 	// Умолчания нет по той же причине, что у публичного.
 	InternalRESTEndpoint string `mapstructure:"internal-rest-endpoint"`
-	// JWKSProxy — the cluster-INTERNAL key-set publisher HTTP listener (default
+	// JWKSProxy — ВНУТРЕННИЙ слушатель HTTP публикации набора ключей кластера (по умолчанию
 	// `tcp://0.0.0.0:9097`). Запись у него ОДНА — НАША, проекция ключницы iam по
 	// `authn.token-signing.key-set-path`; запись зеркала набора прежнего
 	// провайдера снята вместе с ним (kaname#361). Плоскость данных берёт ключи
@@ -191,8 +192,8 @@ type APIServerConfig struct {
 	//
 	// Разбор — в шапке jwks_proxy.go, второго места об этом предмете здесь нет.
 	//
-	// Served ONLY on the cluster-internal `kaname-internal` Service (never
-	// external, ban #6) over one-way server-TLS. Empty disables it.
+	// Обслуживается ТОЛЬКО внутренним Service `kaname-internal` кластера (никогда
+	// извне, ban #6) с односторонним серверным TLS. Пустое значение отключает его.
 	JWKSProxy JWKSProxyConfig `mapstructure:"jwks-proxy"`
 
 	// RateLimit — ПОТОЛОК ТЕМПА и ОДНОВРЕМЕННОСТИ на вызывающего, по одному
@@ -234,21 +235,24 @@ type RateLimitConfig struct {
 	Internal grpcsrv.AdmissionKnobs `mapstructure:"internal"`
 }
 
-// RepositoryConfig — repository section. Postgres-only (the repository type
-// was never branched on; the dead `type` knob was removed).
+// RepositoryConfig — раздел repository. Только Postgres (ветвления по типу хранилища
+// никогда не было; неиспользуемая ручка `type` снята).
 type RepositoryConfig struct {
 	Postgres PostgresConfig `mapstructure:"postgres"`
 }
 
-// PostgresConfig — repository.postgres section.
+// PostgresConfig — раздел repository.postgres.
 //
-//	URL              — standard DSN postgres://user:pass@host:port/db (master).
-//	SlaveURL         — DSN of the read-replica (optional).
-//	MaxConns         — pgxpool max conns (0 = pgx default).
+// URL — стандартный DSN postgres://user:pass@host:port/db (основная база).
+// SlaveURL — DSN реплики чтения (необязателен).
+// MaxConns — предел соединений pgxpool (0 = по умолчанию в pgx).
+//
 //	ReplicaBudget    — под сколько реплик рассчитана посадка (см. PostgresConfig).
-//	SSLMode          — disable|require|verify-ca|verify-full (validated in Validate).
-//	PasswordFromEnv  — name of the ENV var the password is read from and
-//	                   substituted into URL and SlaveURL. Default — KANAME_DB_PASSWORD.
+//
+// SSLMode — disable|require|verify-ca|verify-full (проверяется в Validate).
+// PasswordFromEnv — имя переменной окружения, откуда читается пароль для
+//
+//	подстановки в URL и SlaveURL. По умолчанию — KANAME_DB_PASSWORD.
 type PostgresConfig struct {
 	URL      string `mapstructure:"url"`
 	SlaveURL string `mapstructure:"slave-url"`
@@ -264,17 +268,17 @@ type PostgresConfig struct {
 	// Нужна затем, что предел соединений у базы ОБЩИЙ на все реплики, а пул
 	// объявлен на ОДНУ. Произведение не записано нигде, и потому расхождение
 	// между обещанным и принимаемым не видно ни в одном файле по отдельности
-	// (загрузочный страж — `assertConnBudgetFits` в composition root).
+	// (загрузочный страж — `assertConnBudgetFits` в корне сборки).
 	ReplicaBudget   int    `mapstructure:"replica-budget"`
 	SSLMode         string `mapstructure:"ssl-mode"`
 	PasswordFromEnv string `mapstructure:"password-from-env"`
 }
 
-// AuthNConfig — authn section.
+// AuthNConfig — раздел authn.
 //
-// Mode — overall service mode (see mode.go).
+// Mode — общий режим сервиса (см. mode.go).
 //
-// AuthN core fields:
+// Основные поля AuthN:
 //
 //	Domain                — доменное имя посадки, объявленное оператором.
 //	                        Умолчания НЕТ — незаданное значение доезжает
@@ -291,37 +295,46 @@ type PostgresConfig struct {
 //	SAKeyRedactGrace      — задержка между Done-ом Issue-Operation и затиранием
 //	                        одноразового private_key_pem в её response. Даёт
 //	                        поллящему клиенту окно, чтобы забрать ключ до вычистки.
-//	                        Default 120s; override KANAME_SAKEY_REDACT_GRACE.
+//
+// По умолчанию 120с; переопределение KANAME_SAKEY_REDACT_GRACE.
+//
 //	UserTokenRedactGrace  — то же для UserTokenService.Issue (персональные токены
-//	                        пользователя). Default 120s; override
+//	                        пользователя). По умолчанию 120с; переопределение
 //	                        KANAME_USERTOKEN_REDACT_GRACE.
 //	SAKeyDefaultTTL       — срок жизни SA-ключа, когда вызывающий не передал
 //	                        ttl_seconds. Машинный принципал освобождён от
 //	                        усиленного входа (у машины нет второго фактора) —
 //	                        это защитимо лишь пока сам ключ ограничен по времени,
 //	                        поэтому умолчание конечно, а не «никогда».
-//	                        Default 2160h (90d); override KANAME_SAKEY_DEFAULT_TTL.
+//
+// По умолчанию 2160ч (90д); переопределение KANAME_SAKEY_DEFAULT_TTL.
+//
 //	SAKeyMaxTTL           — включительный потолок ttl_seconds. Запрос сверх него
 //	                        отвергается InvalidArgument ДО всякой записи.
-//	                        Default 8760h (365d); override KANAME_SAKEY_MAX_TTL.
-//	SAKeyBindDPoP         — требование sender-constrained токенов (RFC 9449
-//	                        `cnf.jkt`) на РЕГИСТРАЦИИ клиента SA-ключа у внешнего
-//	                        поставщика. ЧИТАТЕЛЯ НЕТ: регистрации выдача больше не
-//	                        заводит ни на одной посадке (kaname#362). Страж старта
-//	                        отвергает ручку на посадке с токен-эндпоинтом
-//	                        (validateMachineTokenBinding); без эндпоинта ключевая
-//	                        пара не выдаётся вовсе, и связанного-по-убеждению ключа
-//	                        не возникает. Default false; override KANAME_SAKEY_BIND_DPOP.
-//	SAKeyAccessTokenTTL   — per-client access_token_lifespan на РЕГИСТРАЦИИ
-//	                        клиента SA-ключа у внешнего поставщика. ЧИТАТЕЛЯ НЕТ с
-//	                        kaname#362 — регистрации нет; срок наших токенов
-//	                        задаёт authn.client-token.token-ttl. Ручка остаётся,
-//	                        пока её эмитирует чарт платформы (kacho:
-//	                        deploy/helm/umbrella/charts/kaname/templates/deployment.yaml,
-//	                        KANAME_SAKEY_ACCESS_TOKEN_TTL): снятая здесь раньше,
-//	                        она перестала бы читаться без единого слова. Снимается
-//	                        тем изменением, которым её перестанет эмитировать чарт.
-//	                        Override KANAME_SAKEY_ACCESS_TOKEN_TTL.
+//
+// По умолчанию 8760ч (365д); переопределение KANAME_SAKEY_MAX_TTL.
+//
+//		SAKeyBindDPoP         — требование sender-constrained токенов (RFC 9449
+//		                        `cnf.jkt`) на РЕГИСТРАЦИИ клиента SA-ключа у внешнего
+//		                        поставщика. ЧИТАТЕЛЯ НЕТ: регистрации выдача больше не
+//		                        заводит ни на одной посадке (kaname#362). Страж старта
+//		                        отвергает ручку на посадке с токен-эндпоинтом
+//		                        (validateMachineTokenBinding); без эндпоинта ключевая
+//		                        пара не выдаётся вовсе, и связанного-по-убеждению ключа
+//	                        не возникает. По умолчанию false; переопределение KANAME_SAKEY_BIND_DPOP.
+//
+// SAKeyAccessTokenTTL — значение access_token_lifespan каждого клиента при РЕГИСТРАЦИИ
+//
+//	клиента SA-ключа у внешнего поставщика. ЧИТАТЕЛЯ НЕТ с
+//	kaname#362 — регистрации нет; срок наших токенов
+//	задаёт authn.client-token.token-ttl. Ручка остаётся,
+//	пока её эмитирует чарт платформы (kacho:
+//	deploy/helm/umbrella/charts/kaname/templates/deployment.yaml,
+//	KANAME_SAKEY_ACCESS_TOKEN_TTL): снятая здесь раньше,
+//	она перестала бы читаться без единого слова. Снимается
+//	тем изменением, которым её перестанет эмитировать чарт.
+//
+// Переопределение KANAME_SAKEY_ACCESS_TOKEN_TTL.
 type AuthNConfig struct {
 	Mode                    Mode   `mapstructure:"mode"`
 	Domain                  string `mapstructure:"domain"`
@@ -379,7 +392,7 @@ type AuthNConfig struct {
 	SAKeyMaxTTL          time.Duration             `mapstructure:"sakey-max-ttl"`
 	SAKeyAccessTokenTTL  time.Duration             `mapstructure:"sakey-access-token-ttl"`
 	SAKeyBindDPoP        bool                      `mapstructure:"sakey-bind-dpop"`
-	// BootstrapMint — caller gate + key source for
+	// BootstrapMint — проверка вызывающего и источник ключа для
 	// InternalBootstrapTokenService.MintBootstrapToken.
 	BootstrapMint BootstrapMintConfig `mapstructure:"bootstrap-mint"`
 	// Login — полоса входа паролем и наша сессия (Ф3, kacho#1269): срок и домен
@@ -396,28 +409,28 @@ type AuthNConfig struct {
 	// авторизации и срок семейства токенов обновления. Величины посадки `own`
 	// без умолчания, не выше потолков фундамента.
 	Ceremony CeremonyConfig `mapstructure:"ceremony"`
-	// TrustedForwarderSANs — EXACT client-certificate SPIFFE SAN URIs allowed to
-	// FORWARD an end-user identity (`x-kacho-principal-*` metadata) to iam. Fed
-	// into grpcsrv.WithTrustedForwarders on BOTH gRPC listeners
+	// TrustedForwarderSANs — ТОЧНЫЕ URI SPIFFE SAN сертификатов клиентов, которым разрешено
+	// ПЕРЕДАВАТЬ идентичность пользователя (метаданные `x-kacho-principal-*`) в iam. Подаются
+	// в grpcsrv.WithTrustedForwarders на ОБОИХ слушателях gRPC
 	// (cmd/kaname/serve.go identityUnary/identityStream).
 	//
-	// Why this is a knob and not a constant: the corelib contract
-	// (pkg/grpcsrv principalIsTrusted) narrows the circle of senders ONLY when the
-	// list is non-empty; on an empty list it answers "trusted" for ANY peer that
-	// passed client-certificate verification. Both gRPC ports are ordinary Services
-	// inside the namespace and every neighbour's client certificate is issued by the
-	// same internal authority — so an empty list means any pod may send a victim's
-	// identity headers and have iam decide in that victim's name (the whole tenant
-	// CRUD surface on :9090, including credential issuance). Network position is not
-	// a substitute: the only NetworkPolicy selecting the iam pod covers the internal
-	// port, and it is off outside production.
+	// Почему это ручка, а не константа: контракт corelib
+	// (pkg/grpcsrv principalIsTrusted) сужает круг отправителей ТОЛЬКО при
+	// непустом списке; при пустом он отвечает «доверен» ЛЮБОМУ соседу,
+	// прошедшему проверку сертификата клиента. Оба порта gRPC — обычные Service
+	// внутри пространства имён; сертификат клиента каждого соседа выпускается тем же
+	// внутренним центром, поэтому пустой список означает, что любой pod может передать
+	// заголовки идентичности жертвы и заставить iam решать от её имени (вся поверхность
+	// CRUD арендатора на :9090, включая выпуск учётных данных). Сетевое положение не
+	// заменяет проверку: единственная NetworkPolicy, выбирающая pod iam, покрывает внутренний
+	// порт и выключена вне производственного режима.
 	//
-	// Format: comma-separated in the env override
-	// KANAME_AUTHN__TRUSTED_FORWARDER_SANS; a YAML list under
+	// Формат: значения через запятую при переопределении переменной
+	// KANAME_AUTHN__TRUSTED_FORWARDER_SANS; список YAML под
 	// authn.trusted-forwarder-sans.
 	//
-	// Empty is tolerated ONLY in dev (in-process fixtures); in any production mode
-	// Validate refuses to start (fail-closed, mirroring geo/compute/nlb/storage/
+	// Пустой список допустим ТОЛЬКО в dev (внутрипроцессные фикстуры); в любом производственном режиме
+	// Validate отказывает в запуске (отказ по умолчанию, как в geo/compute/nlb/storage/
 	// registry).
 	TrustedForwarderSANs []string `mapstructure:"trusted-forwarder-sans"`
 
@@ -587,59 +600,59 @@ func (a AuthNConfig) TrustDomain() grpcsrv.TrustDomain {
 	return grpcsrv.NewTrustDomain(a.TrustDomainName)
 }
 
-// TrustedForwarders — the circle of senders that REALLY reaches
-// grpcsrv.WithTrustedForwarders on both listeners.
+// TrustedForwarders — круг отправителей, РЕАЛЬНО доходящий до
+// grpcsrv.WithTrustedForwarders на обоих слушателях.
 //
-// Single source of this value per process: the wiring (cmd/kaname/serve.go),
-// the boot guard (validateProductionTrustedForwarders) and the boot self-report
-// (cmd/kaname/bootposture.go) all read this one object and ask its ONE
-// predicate. So "the guard passed" ⟺ "the circle is really narrowed" — by
-// construction, not by three separately written bodies happening to agree.
+// Единственный источник значения в процессе: сборка (cmd/kaname/serve.go),
+// проверка при старте (validateProductionTrustedForwarders) и отчёт о режиме запуска
+// (cmd/kaname/bootposture.go) читают этот объект и спрашивают ЕГО ЕДИНСТВЕННЫЙ
+// предикат. Поэтому «проверка пройдена» ⟺ «круг действительно сужен» по
+// построению, а не случайному совпадению трёх отдельно написанных реализаций.
 //
-// Normalisation of the circle (blank entries, surrounding whitespace,
-// duplicates) lives in the type's constructor and is not restated here: two
-// places about one subject drift apart silently. See
+// Нормализация круга (пустые элементы, пробелы по краям,
+// повторы) находится в конструкторе типа и здесь не повторяется: два
+// места об одном предмете молча расходятся. См.
 // grpcsrv.NewTrustedForwarders.
 func (a AuthNConfig) TrustedForwarders() grpcsrv.TrustedForwarders {
 	return grpcsrv.NewTrustedForwarders(a.TrustedForwarderSANs...)
 }
 
-// BootstrapMintConfig — authn.bootstrap-mint section: the non-interactive
-// cluster-admin token mint (#58).
+// BootstrapMintConfig — раздел authn.bootstrap-mint: неинтерактивный
+// выпуск токена администратора кластера (#58).
 //
-// The mint hands out a Bearer signed by our own signer for a cluster `system_admin`
-// ServiceAccount. It cannot be gated by a ReBAC relation (it exists to obtain the
-// FIRST token, when no relation exists yet) and it must NOT be gated by network
-// position, so its credential is the CALLER'S CLIENT CERTIFICATE: only the SPIFFE
-// SANs listed here may call it, enforced on :9091 by authzguard.CallerPolicy.
+// Выпускается Bearer, подписанный нашим подписантом, для ServiceAccount кластера с `system_admin`.
+// Проверить его отношением ReBAC нельзя (он нужен для получения
+// ПЕРВОГО токена, когда отношений ещё нет), а сетевое положение НЕ должно быть основанием,
+// поэтому учётные данные — СЕРТИФИКАТ КЛИЕНТА ВЫЗЫВАЮЩЕГО: лишь перечисленные здесь SPIFFE
+// SAN могут вызывать метод; на :9091 это обеспечивает authzguard.CallerPolicy.
 //
-// Two fail-closed layers:
-//   - runtime — an empty allow-list denies every caller (the mint has no default
-//     caller), in dev as well as production;
-//   - boot — an ENABLED mint (signing key present) with an empty allow-list
-//     REFUSES TO START in production (Validate), so the insecure combination
-//     cannot be reached by omission (core rule #16).
+// Два уровня отказа по умолчанию:
+//   - При работе пустой разрешающий список отвергает всех вызывающих (вызывающего
+//     по умолчанию нет), как в dev, так и в производственном режиме;
+//   - При старте ВКЛЮЧЁННЫЙ выпуск (ключ подписи есть) с пустым разрешающим списком
+//     ОТКАЗЫВАЕТ В ЗАПУСКЕ в производственном режиме (Validate), поэтому небезопасная комбинация
+//     недостижима из-за пропуска настройки (правило ядра #16).
 type BootstrapMintConfig struct {
-	// SigningKeyEnv — name of the env var holding the bootstrap SA private key
-	// PEM (supplied from a k8s Secret; never in YAML). An EMPTY value in that
-	// var means the mint is DISABLED — the use-case fails closed with
-	// UNAVAILABLE and the boot-guard does not apply. Default:
+	// SigningKeyEnv — имя переменной окружения с закрытым ключом начальной SA в формате
+	// PEM (поставляется из Secret k8s; никогда в YAML). ПУСТОЕ значение этой
+	// переменной означает, что выпуск ВЫКЛЮЧЕН: сценарий отказывает по умолчанию с
+	// UNAVAILABLE, а проверка при старте не применяется. По умолчанию:
 	// KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM.
 	SigningKeyEnv string `mapstructure:"signing-key-env"`
-	// AllowedClientSANs — EXACT client-certificate SPIFFE SAN URIs allowed to
-	// call MintBootstrapToken (e.g.
-	// `spiffe://kacho.cloud/ns/kacho/sa/kacho-bootstrap-seeder`). Empty → nobody
-	// may mint. Env: comma-separated
+	// AllowedClientSANs — ТОЧНЫЕ URI SPIFFE SAN сертификатов клиентов, которым разрешён
+	// вызов MintBootstrapToken (например,
+	// `spiffe://kacho.cloud/ns/kacho/sa/kacho-bootstrap-seeder`). Пусто → никто
+	// не может выпускать токены. Переменная окружения: значения через запятую в
 	// KANAME_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS.
 	AllowedClientSANs []string `mapstructure:"allowed-client-sans"`
 }
 
-// defaultBootstrapSigningKeyEnv — the env var the composition root has always
-// read the bootstrap SA key from.
+// defaultBootstrapSigningKeyEnv — переменная окружения, из которой корень сборки всегда
+// читал ключ начальной SA.
 const defaultBootstrapSigningKeyEnv = "KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM"
 
-// ResolveSigningKeyEnv returns the env-var NAME holding the bootstrap signing
-// key, falling back to the documented default when unset.
+// ResolveSigningKeyEnv возвращает ИМЯ переменной окружения с ключом начальной подписи,
+// при отсутствии настройки выбирая документированное значение по умолчанию.
 func (b BootstrapMintConfig) ResolveSigningKeyEnv() string {
 	if name := strings.TrimSpace(b.SigningKeyEnv); name != "" {
 		return name
@@ -647,19 +660,19 @@ func (b BootstrapMintConfig) ResolveSigningKeyEnv() string {
 	return defaultBootstrapSigningKeyEnv
 }
 
-// ResolveSigningKeyPEM reads the bootstrap SA private key PEM from its env var.
-// Empty → the mint is disabled. Only os.Getenv is read (no other side-effects),
-// consistent with the other Resolve* methods; the VALUE is never logged or
-// echoed in an error.
+// ResolveSigningKeyPEM читает PEM закрытого ключа начальной SA из переменной окружения.
+// Пусто → выпуск отключён. Читается только os.Getenv (без иных побочных эффектов),
+// как в других методах Resolve*; ЗНАЧЕНИЕ никогда не попадает в журнал или
+// сообщение ошибки.
 func (b BootstrapMintConfig) ResolveSigningKeyPEM() string {
 	return strings.TrimSpace(os.Getenv(b.ResolveSigningKeyEnv()))
 }
 
-// Enabled reports whether the mint is provisioned at all (signing key present).
+// Enabled сообщает, настроен ли выпуск вообще (присутствует ключ подписи).
 func (b BootstrapMintConfig) Enabled() bool { return b.ResolveSigningKeyPEM() != "" }
 
-// AllowedSANs returns the allow-list with blanks dropped — an empty result means
-// "deny everyone", which is exactly what CallerPolicy enforces.
+// AllowedSANs возвращает разрешающий список без пустых элементов; пустой результат означает
+// «запретить всем», ровно как требует CallerPolicy.
 func (b BootstrapMintConfig) AllowedSANs() []string {
 	out := make([]string, 0, len(b.AllowedClientSANs))
 	for _, san := range b.AllowedClientSANs {
@@ -670,25 +683,25 @@ func (b BootstrapMintConfig) AllowedSANs() []string {
 	return out
 }
 
-// schemaOptionsParam — URL-encoded libpq parameter `options=-c search_path=…`.
-// Appended to baseDSN automatically so every connection (pgxpool, dedicated
-// pgx.Conn for LISTEN, goose via database/sql) sees kaname tables under
-// their unqualified names.
+// schemaOptionsParam — закодированный для URL параметр libpq `options=-c search_path=…`.
+// Автоматически добавляется к baseDSN, чтобы каждое соединение (pgxpool, выделенный
+// pgx.Conn для LISTEN, goose через database/sql) видело таблицы kaname под
+// неквалифицированными именами.
 //
-// search_path is "kaname, public":
-//   - `kaname` first — our tables;
-//   - `public` second — Postgres built-ins / extensions.
+// search_path имеет значение "kaname, public":
+// - `kaname` первым — наши таблицы;
+// - `public` вторым — встроенные объекты / расширения Postgres.
 const schemaOptionsParam = "options=-c%20search_path%3Dkaname%2Cpublic"
 
-// baseDSN — standard postgres DSN without pgxpool parameters; used by both
-// pgxpool and database/sql.Open("pgx").
+// baseDSN — стандартный DSN postgres без параметров pgxpool; используется и
+// pgxpool, и database/sql.Open("pgx").
 func (c Config) baseDSN() string {
 	return c.composeDSN(c.Repository.Postgres.URL)
 }
 
-// composeDSN appends missing libpq parameters to raw-DSN: `sslmode=<mode>`
-// and `options=-c search_path=kaname,public`. If a parameter is already
-// present in raw-URL we do not overwrite it (eases ENV/yaml override).
+// composeDSN добавляет недостающие параметры libpq к исходному DSN: `sslmode=<mode>`
+// и `options=-c search_path=kaname,public`. Если параметр уже
+// присутствует в исходном URL, не заменяем его (проще переопределять через окружение/yaml).
 func (c Config) composeDSN(raw string) string {
 	if raw == "" {
 		return ""
@@ -714,8 +727,8 @@ func (c Config) composeDSN(raw string) string {
 	return raw
 }
 
-// DSN — connection string for pgxpool (supports pool_max_conns).
-// Do NOT use for database/sql.Open("pgx") — it FATALs on unknown server param.
+// DSN — строка соединения для pgxpool (поддерживает pool_max_conns).
+// НЕ использовать для database/sql.Open("pgx"): неизвестный серверный параметр приводит к FATAL.
 func (c Config) DSN() string {
 	dsn := c.baseDSN()
 	if dsn == "" {
@@ -735,8 +748,8 @@ func (c Config) DSN() string {
 // не на сборке, поэтому композиционный корень сверяет строку стражем.
 func (c Config) SingleConnDSN() string { return c.baseDSN() }
 
-// SlaveDSN — connection string for the slave pool (read-replica). Empty
-// string → no replica configured, caller falls back to master.
+// SlaveDSN — строка соединения пула реплики чтения. Пустая
+// строка → реплика не настроена, вызывающий использует основную базу.
 func (c Config) SlaveDSN() string {
 	slaveRaw := c.Repository.Postgres.SlaveURL
 	if slaveRaw == "" || slaveRaw == c.Repository.Postgres.URL {
@@ -752,9 +765,9 @@ func (c Config) SlaveDSN() string {
 	return dsn
 }
 
-// MigrateDSN — connection string for goose/database/sql (without
-// pool_max_conns). Always points to master — goose must not write to the
-// replica.
+// MigrateDSN — строка соединения для goose/database/sql (без
+// pool_max_conns). Всегда указывает на основную базу: goose не должен писать в
+// реплику.
 func (c Config) MigrateDSN() string { return c.baseDSN() }
 
 func dsnHas(dsn, frag string) bool {

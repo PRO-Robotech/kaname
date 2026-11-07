@@ -96,7 +96,7 @@ func lmDB(t *testing.T) *sql.DB {
 // три раза из трёх на пустой машине и зелёная на голове без них.
 func lmDBAtOwn(t *testing.T) *sql.DB {
 	t.Helper()
-	db := lmDB(t)
+	db := historicalRegistrationDB(t)
 	own, _ := loginMethodVersions(t)
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
@@ -639,7 +639,7 @@ func TestIntegration_LoginMethodRollbackRefusesToDestroyMaterial(t *testing.T) {
 	require.False(t, hasColumn, "после отката колонки подтверждённости нет")
 
 	// И накат снова приводит схему к предмету — обратный ход не оставил мусора.
-	require.NoError(t, goose.Up(db, "."), "повторный накат обязан пройти")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат обязан пройти")
 	require.NoError(t, db.QueryRow(`SELECT to_regclass('kaname.user_login_methods') IS NOT NULL`).Scan(&exists))
 	require.True(t, exists)
 }

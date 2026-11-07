@@ -1,22 +1,23 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// register_resource_integration_test.go — SEC-C group A (A-01..A-05).
+// register_resource_integration_test.go — группа A SEC-C (A-01..A-05).
 //
-// Verifies RegisterResource / UnregisterResource (Internal FGA-proxy):
-//   - A-01 happy: tuple enqueued into kaname.fga_outbox (event fga.tuple.write),
-//     in the SAME writer-tx (rollback ⇒ no orphan row);
-//   - A-02 idempotent register: re-issue same tuple → OK (вторая строка журнала;
+// Проверяет RegisterResource / UnregisterResource (внутренний прокси FGA):
+// - A-01, успех: кортеж поставлен в kaname.fga_outbox (событие fga.tuple.write)
+// в ТОЙ ЖЕ транзакции записи (откат ⇒ нет осиротевшей строки);
+//   - A-02, идемпотентная регистрация: повтор того же кортежа → OK (вторая строка журнала;
 //     схлопывает их ПРОЕКЦИЯ — триггер `relation_fact_from_journal` пишет прямой
 //     факт через ON CONFLICT, поэтому два намерения дают один факт);
-//   - A-03 unregister: enqueues fga.tuple.delete;
-//   - A-04 idempotent unregister: missing tuple → OK (no NotFound);
-//   - A-05 invalid args: empty subject/relation/object + malformed object →
-//     sync InvalidArgument, NO outbox row.
+//   - A-03, снятие: ставит fga.tuple.delete;
+//   - A-04, идемпотентное снятие: нет кортежа → OK (без NotFound);
+//   - A-05, неверные аргументы: пустые субъект/отношение/объект либо неверный объект →
 //
-// The use-case writes the owner-hierarchy tuple verbatim from the request
-// ({subject_id, relation, object}); the SEC-A proto carries the pre-composed
-// relation strings.
+// синхронный InvalidArgument, БЕЗ строки очереди.
+//
+// Сценарий пишет кортеж иерархии владельца дословно из запроса
+// ({subject_id, relation, object}); proto SEC-A несёт готовые
+// строки отношений.
 //
 // ЗДЕСЬ СТОЯЛА ССЫЛКА НА ПРИМЕНИТЕЛЯ ДРЕНАЖА — ни его, ни его файла в дереве нет.
 // Дренаж снят вместе с внешним движком прав (стадия S6 эпика kacho#747); единственный
@@ -24,9 +25,9 @@
 // транзакции. Прежняя проза объявляла асинхронное применение, которого не бывает,
 // и следующий читатель искал бы координату, которой не существует (kacho#1049).
 //
-// Authz-gate (group B) is exercised in the rebac test.
+// Страж прав (группа B) проверяется тестом rebac.
 //
-// Skipped under `go test -short`.
+// Пропускается при `go test -short`.
 package internal_iam_test
 
 import (
@@ -49,10 +50,11 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
-// newRegisterUC builds the RegisterResource use-case backed by a real pool's
-// outbox emitter + tx beginner (внешнего вызова нет: строку журнала подхватывает
+// newRegisterUC собирает сценарий RegisterResource на настоящем пуле
+// через запись очереди и начало транзакции (внешнего вызова нет: строку журнала подхватывает
 // триггер проекции в той же транзакции).
 func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxProbe) {
 	t.Helper()
@@ -69,7 +71,7 @@ func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxP
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"})
 	return uc, &outboxProbe{pool: pool, scene: registrationscene.Seed(t, ctx, pool)}
 }
 
@@ -119,12 +121,12 @@ func TestRegisterResource_A02_IdempotentRegister(t *testing.T) {
 	}
 	err := uc.Register(ctx, req)
 	require.NoError(t, err)
-	err = uc.Register(ctx, req) // repeat — must be OK, never AlreadyExists.
+	err = uc.Register(ctx, req) // повтор должен дать OK, никогда AlreadyExists.
 	require.NoError(t, err, "repeat register must be OK, not AlreadyExists (idempotency contract)")
 
-	// Two write rows enqueued; схлопывает их ПРОЕКЦИЯ (триггер журнала пишет прямой
+	// Поставлены две строки записи; схлопывает их ПРОЕКЦИЯ (триггер журнала пишет прямой
 	// факт через ON CONFLICT), а не применитель дренажа — его не существует.
-	// The RPC never surfaces AlreadyExists.
+	// RPC никогда не возвращает AlreadyExists.
 	n, _, _ := h.lastOutbox(t, ctx, obj)
 	require.Equal(t, 2, n)
 }
@@ -138,13 +140,17 @@ func TestRegisterResource_A03_UnregisterEnqueuesDeleteTuple(t *testing.T) {
 
 	const obj = "vpc_network:enp00000000000000001"
 
+	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
+		SubjectId: "project:" + h.scene.Project, Relation: "project", Object: obj,
+		ParentProjectId: h.scene.Project, ParentAccountId: h.scene.Account,
+	}))
 	err := uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: "project:prj-1", Relation: "parent", Object: obj,
+		SubjectId: "project:" + h.scene.Project, Relation: "project", Object: obj,
 	})
 	require.NoError(t, err)
 
 	n, et, _ := h.lastOutbox(t, ctx, obj)
-	require.Equal(t, 1, n)
+	require.Equal(t, 2, n)
 	require.Equal(t, "fga.tuple.delete", et)
 }
 
@@ -155,11 +161,12 @@ func TestRegisterResource_A04_IdempotentUnregister(t *testing.T) {
 	ctx := context.Background()
 	uc, _ := newRegisterUC(t)
 
-	// Tuple never registered — unregister must be OK, never NotFound.
+	// Неизвестная область намеренно отвергается без метки удаления (kaname#1031).
 	err := uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
 		SubjectId: "project:prj-1", Relation: "parent", Object: "vpc_network:enp99999999999999999",
 	})
-	require.NoError(t, err, "unregister of absent tuple must be OK, not NotFound")
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	require.Equal(t, "permission denied", status.Convert(err).Message())
 }
 
 func TestRegisterResource_A05_InvalidArgsNoOutbox(t *testing.T) {
@@ -200,9 +207,9 @@ func TestRegisterResource_A05_InvalidArgsNoOutbox(t *testing.T) {
 	require.Equal(t, before, h.totalRows(t, ctx), "no outbox row on validation failure — at all")
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── вспомогательные функции ──────────────────────────────────────────────────
 
-// outboxProbe reads back kaname.fga_outbox rows for assertions.
+// outboxProbe читает строки kaname.fga_outbox обратно для проверок.
 //
 // scene — проект пробы в kaname: родителя регистрации kaname выводит из своих
 // данных (kaname#982), и регистрация под проектом, которого нет, отвергается.
@@ -256,8 +263,8 @@ func outboxTotalRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int 
 	return n
 }
 
-// lastOutbox returns the row count and the latest row's event_type + payload,
-// scoped to the objects THIS test named in its own requests.
+// lastOutbox возвращает число строк, а также event_type и нагрузку последней строки,
+// ограничиваясь объектами, которые ЭТОТ тест назвал в своих запросах.
 func (p *outboxProbe) lastOutbox(t *testing.T, ctx context.Context, objects ...string) (count int, eventType string, payload map[string]string) {
 	t.Helper()
 	own := scopedToOwnObjects(t, objects)

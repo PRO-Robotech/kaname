@@ -1,10 +1,10 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// wiring.go — composition-builder for the kaname service bundle.
-// Holds the `services` struct (single composition point), buildServices
-// (per-resource handler wiring), and buildAuthZServices (AuthorizeService),
-// and the small adapter types they need.
+// wiring.go — сборка композиции набора служб kaname.
+// Содержит структуру `services` (единую точку композиции), buildServices
+// (провязку обработчиков ресурсов), buildAuthZServices (AuthorizeService)
+// и небольшие типы адаптеров, необходимые этим функциям.
 package main
 
 import (
@@ -87,37 +87,37 @@ type services struct {
 	// grantDelegationHandler — GrantDelegationService (kaname#986): только
 	// публичный (арендаторский) слушатель.
 	grantDelegationHandler *grantdelegationapp.Handler
-	// internalIAMHandler — InternalIAMService (LookupSubject for the
-	// api-gateway auth-interceptor; Check delegates to AuthorizeService).
+	// internalIAMHandler — InternalIAMService (LookupSubject для
+	// перехватчика аутентификации api-gateway; Check делегирует AuthorizeService).
 	internalIAMHandler *internaliamapp.Handler
 
-	// AuthZ core handlers.
+	// Обработчики ядра авторизации.
 	authorizeHandler *authorizeapp.Handler
 
 	// permissionCatalogHandler — PermissionCatalogService.ListPermissionCatalog
-	// (RBAC rules-model G): PUBLIC sync read of the backend-driven grantable
-	// role-rule taxonomy. Platform metadata (not infra-sensitive — G-D3),
-	// authenticated-floor; registered on the public listener.
+	// (модель правил RBAC G): ПУБЛИЧНОЕ синхронное чтение определяемой сервером
+	// таксономии назначаемых правил ролей. Метаданные платформы (без чувствительных
+	// инфраструктурных сведений — G-D3); доступны аутентифицированным на публичном слушателе.
 	permissionCatalogHandler *permissioncatalogapp.Handler
 
-	// SAKey handler — public.
+	// Обработчик SAKey — публичный.
 	saKeysHandler *sakeysapp.Handler
 
-	// UserToken handler — public (персональные access-токены пользователя).
+	// Обработчик UserToken — публичный (персональные access-токены пользователя).
 	userTokensHandler *usertokensapp.Handler
 
-	// internalClusterHandler — InternalClusterService: cluster admin
-	// RBAC management. Internal-only (запрет #6), registered on port 9091.
+	// internalClusterHandler — InternalClusterService: управление RBAC
+	// администратором кластера. Только внутренний (запрет #6), на порту 9091.
 	internalClusterHandler *clusterapp.Handler
 
-	// publicClusterHandler — ClusterService: the PUBLIC twin of
-	// InternalClusterService (acceptance ADM-CA, Р1/Р3/Р8). It is built over the
-	// internal handler, i.e. over the SAME four use-case instances — one write
-	// path to the grant table. Registered on the public listener only.
+	// publicClusterHandler — ClusterService: ПУБЛИЧНЫЙ двойник
+	// InternalClusterService (приёмка ADM-CA, Р1/Р3/Р8). Строится поверх
+	// внутреннего обработчика, то есть ТЕХ ЖЕ четырёх экземпляров сценариев — один
+	// путь записи в таблицу выдач. Регистрируется только на публичном слушателе.
 	publicClusterHandler *clusterpublicapp.Handler
 
-	// interactiveClientHandler — InternalInteractiveClientService: lifecycle of
-	// the OAuth2 client a HUMAN signs in through (IAM-INT-1). Internal-only.
+	// interactiveClientHandler — InternalInteractiveClientService: жизненный цикл
+	// клиента OAuth2, через которого входит ЧЕЛОВЕК (IAM-INT-1). Только внутренний.
 	interactiveClientHandler *interactiveclientapp.Handler
 
 	// moduleHandler — InternalModuleService: четыре глагола над строками
@@ -133,8 +133,8 @@ type services struct {
 	// наружу для полосы своего входа: регистрация человека материализует его
 	// собственническую выдачу (`buildLoginLane`).
 	//
-	// Полем, а не вторым построением. Шапка построения ниже обещает «created once
-	// here so every consumer drives the same instance», и до задачи #116 это было
+	// Полем, а не вторым построением. Шапка построения ниже обещает «создаётся один раз
+	// здесь, чтобы все потребители вели тот же экземпляр», и до задачи #116 это было
 	// неправдой: хук внешнего поставщика (снят, kaname#363) собирал свой
 	// экземпляр БЕЗ приёмника размера, поэтому гистограмма не видела живой
 	// полосы регистрации человека — и выглядела при этом полной. Гистограмма, не
@@ -154,24 +154,24 @@ type services struct {
 	identityQuotaHandler *identityquotaapp.Handler
 
 	// sessionRevocationsHandler — InternalSessionRevocationsService:
-	// token revocation on logout + the api-gateway
-	// IsRevoked hot-path. Internal-only (запрет #6), registered on port 9091.
+	// отзыв токенов при выходе и горячий путь api-gateway
+	// IsRevoked. Только внутренний (запрет #6), регистрируется на порту 9091.
 	sessionRevocationsHandler *sessionrevapp.Handler
 
 	// internalOperationsHandler — InternalOperationsService.ListIamOperations:
-	// cluster-wide admin feed of all IAM operations.
-	// Internal-only (запрет #6), registered on port 9091; admin-tier gated
-	// (system_admin@cluster ReBAC Check in-handler + gateway permission-catalog).
+	// административная лента всех операций IAM по всему кластеру.
+	// Только внутренний (запрет #6), порт 9091; ограничен административным уровнем
+	// (проверка ReBAC system_admin@cluster в обработчике и каталог прав шлюза).
 	internalOperationsHandler *internaloperationsapp.Handler
 
 	// internalBootstrapTokenHandler — InternalBootstrapTokenService.MintBootstrapToken:
-	// non-interactive bootstrap RS256 token mint (#58). Internal-only (ban #6),
-	// registered on port 9091 ONLY, and reachable ONLY by a direct mTLS gRPC dial
-	// (no REST route on the api-gateway — there it would be credential-free).
-	// The gate is authzguard.CallerPolicy's explicit client-certificate SPIFFE
-	// allow-list (authn.bootstrap-mint.allowed-client-sans); permission="<exempt>"
-	// only means there is no ReBAC Check (no relation exists before the first
-	// token), NOT that authN is waived.
+	// неинтерактивная чеканка начального токена RS256 (#58). Только внутренний (запрет #6),
+	// регистрируется ТОЛЬКО на порту 9091 и доступен ТОЛЬКО прямым gRPC-подключением с mTLS
+	// (без маршрута REST в api-gateway — там он оказался бы без удостоверения).
+	// Страж — явный разрешающий список SPIFFE клиентских сертификатов authzguard.CallerPolicy
+	// (authn.bootstrap-mint.allowed-client-sans); permission="<exempt>"
+	// означает только отсутствие ReBAC Check (до первого токена отношения
+	// ещё нет), а НЕ отмену аутентификации.
 	internalBootstrapTokenHandler *bootstraptoken.Handler
 
 	// ownGates — ЗНАЧЕНИЕ, КОТОРОЕ ДЕРЖАТ СОБСТВЕННЫЕ СТРАЖИ iam: дверь решения
@@ -189,10 +189,10 @@ type services struct {
 	ownGates *authzcascade.Client
 }
 
-// ownGateWiringComplaint reports why iam's own authorization gates cannot be trusted with
-// this wiring, or "" when they can. The composition root turns a complaint into a refusal to
-// start; it is a separate function so the refusal is testable — an os.Exit inside the builder
-// can only be read, not exercised, and a guard nobody can exercise is one nobody knows works.
+// ownGateWiringComplaint сообщает, почему собственным стражам авторизации iam нельзя доверять
+// при этой провязке, либо "", если можно. Корень композиции превращает жалобу в отказ
+// старта; отдельная функция позволяет проверить отказ — os.Exit внутри построителя
+// можно лишь прочитать, а работа непроверяемого стража никому не известна.
 //
 // Условие ОДНО, и оно осталось от четырёх не потому, что требования ослабли, а
 // потому, что три из них были условиями ЧУЖОГО транспорта: второй шанс поверх
@@ -207,13 +207,13 @@ type services struct {
 // старте называет это прямо: рантайм-диагностика оператору, который иначе не
 // поймёт, почему поднявшаяся служба ничего не решает.
 //
-// NOT gated on the authentication mode. Every deployed stand runs production
-// posture, and a guard absent from the stands where anyone would notice it firing is not a
-// guard.
+// НЕ зависит от режима аутентификации. Каждый развёрнутый стенд работает в боевом
+// режиме, а страж, отсутствующий на стендах, где заметили бы его срабатывание, не является
+// защитой.
 //
-// The message names the knob and the consequence deliberately: it is what an operator sees
-// when the stand will not come up, and a refusal that does not say what to fix cannot be
-// acted on.
+// Сообщение намеренно называет ручку и последствие: его видит оператор,
+// когда стенд не поднимается; отказ, не говорящий, что исправить, не позволяет
+// предпринять действие.
 func ownGateWiringComplaint(store *authzcascade.Client) string {
 	if !store.FormReachable() {
 		return "источник вердикта о доступе не провязан: дверь решения собрана без " +
@@ -227,12 +227,12 @@ func ownGateWiringComplaint(store *authzcascade.Client) string {
 }
 
 // buildServices создает все repo'ы поверх pool и собирает бизнес-сервисы.
-// Composition root passes a fully-configured decision door — wiring
-// of every per-resource use-case is unconditional (no fallback stub).
-// opsRepo is the FULL corelib repo (operations.NewRepo), not the narrow
-// operations.Repo: the cluster-admin use-cases finalize their Operation
-// metadata on the terminal write (the grant id exists only after the mutation),
-// and that capability must be proven at compile time, not type-asserted here.
+// Корень композиции передаёт полностью настроенную дверь решения — провязка
+// каждого сценария ресурса безусловна (без резервной заглушки).
+// opsRepo — ПОЛНЫЙ репозиторий corelib (operations.NewRepo), а не узкий
+// operations.Repo: административные сценарии кластера завершают метаданные Operation
+// при терминальной записи (идентификатор выдачи появляется лишь после мутации),
+// и эта возможность должна доказываться сборкой, а не приведением типа здесь.
 func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	kanameRepo kanamerepo.Repository,
 	// membershipRepo — УЗКИЙ корень чтения членства, приходящий ОТДЕЛЬНЫМ
@@ -264,7 +264,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// политики вызывающего.
 	moduleRoster moduleidentity.Roster,
 	tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
-	_ = slavePool // kanameRepo is built and passed in by main()
+	_ = slavePool // kanameRepo собирается и передаётся из main()
 
 	// sharedClock — ОДИН источник моментов, сравниваемых с отсечкой отзыва-всех,
 	// на все глаголы этого корня (kaname#589): ForceLogout, отзыв-всех, выдача
@@ -313,22 +313,22 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// Отказ в старте, а не надежда: дверь без формы отвечала бы ошибкой на каждый
 	// вопрос о доступе, и служба была бы Ready, не решая ничего.
 	//
-	// NOT conditioned on the authentication mode: every deployed stand runs production
-	// posture, and a guard absent from the stands where anyone would notice it firing is
-	// not a guard.
+	// НЕ зависит от режима аутентификации: каждый развёрнутый стенд работает в боевом
+	// режиме, а страж, отсутствующий на стендах, где заметили бы его срабатывание,
+	// не является защитой.
 	if complaint := ownGateWiringComplaint(relationStore); complaint != "" {
 		logger.Error("refusing to start: " + complaint)
 		os.Exit(1)
 	}
 
-	// rsabReconciler — the SINGLE per-object materialization engine of the REQUEST
-	// PATH (RBAC explicit-model 2026 P4). Shared by AccessBinding.Create, the
-	// Role.Update membership fan-out, the P6 Account.Create owner auto-binding
-	// materialization (C-01/C-01b) AND the first-login provision hook, which takes
-	// this very instance through `services.bindingReconciler` — it used to build
-	// its own, without the size recorder (#116).
+	// rsabReconciler — ЕДИНСТВЕННЫЙ движок материализации объекта на ПУТИ
+	// ЗАПРОСА (явная модель RBAC 2026 P4). Общий для AccessBinding.Create,
+	// распространения членства Role.Update, материализации автоматической привязки владельца
+	// P6 Account.Create (C-01/C-01b) И хука подготовки первого входа, который получает
+	// именно этот экземпляр через `services.bindingReconciler` — прежде он собирал
+	// собственный, без приёмника размера (#116).
 	//
-	// «Every consumer» здесь означает потребителей ПУТИ ЗАПРОСА, и это не оговорка:
+	// «Каждый потребитель» здесь означает потребителей ПУТИ ЗАПРОСА, и это не оговорка:
 	// фоновый воркер обхода (`serve.go`) строит свой экземпляр со своим именем
 	// в журнале, и его материализации в эту гистограмму НЕ попадают. Решение
 	// о том, должны ли они туда попадать, не принималось — предмет заведён
@@ -348,14 +348,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithReconciler(rsabReconciler)
 	accountUpdate := accountapp.NewUpdateAccountUseCase(kanameRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
-		// A LABEL change flips iam-direct selector membership, so removing a label an
-		// ARM_LABELS grant matches is a REVOCATION. The cross-service twin already gets
-		// this: vpc/compute/nlb re-call RegisterResource on a label update and that runs
-		// the object-forward in-process (its delete-stale guard hands an object with
-		// existing members to the FULL recompute, which strips the stale tuples). Without
-		// the same wiring here, the iam-native path had only the co-committed reconcile
-		// event, so revoke latency became the depth of the FIFO reconcile queue —
-		// measured 7m30s of queue plus a 65s sweep before the tuple died.
+		// Изменение МЕТОК меняет членство селектора iam-direct, поэтому удаление метки,
+		// совпадающей с выдачей ARM_LABELS, — ОТЗЫВ. Межсервисный двойник уже делает
+		// это: vpc/compute/nlb повторно вызывают RegisterResource при обновлении меток и запускают
+		// прямой проход объекта в процессе (защита удаления устаревшего передаёт объект с
+		// имеющимися участниками ПОЛНОМУ пересчёту, удаляющему устаревшие кортежи). Без
+		// такой же провязки здесь путь iam имел только совместно коммитимое событие
+		// сверки, поэтому задержка отзыва равнялась глубине очереди сверки FIFO —
+		// измерено 7м30с в очереди плюс 65с обхода до исчезновения кортежа.
 		WithObjectReconciler(rsabReconciler)
 	accountDelete := accountapp.NewDeleteAccountUseCase(kanameRepo, opsRepo)
 	accountGet := accountapp.NewGetAccountUseCase(kanameRepo).WithRelationStore(relationStore)
@@ -374,21 +374,21 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ProjectService.
 	projectCreate := projectapp.NewCreateProjectUseCase(kanameRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
-		// rbac-contract-a-flat: synchronously materialize the owner's
-		// per-object admin/v_* tuple on a freshly-created project (sync ReconcileObject
-		// post-commit through the shared rsabReconciler's sync-FGA writer) so a GET right
-		// after the Operation reports done does not race the async fga_outbox drain (403).
+		// rbac-contract-a-flat: синхронно материализовать кортеж владельца
+		// admin/v_* на только что созданном проекте (синхронный ReconcileObject
+		// после коммита через синхронного писателя FGA общего rsabReconciler), чтобы GET сразу
+		// после завершения Operation не гонялся с асинхронной выгрузкой fga_outbox (403).
 		WithObjectReconciler(rsabReconciler)
 	projectUpdate := projectapp.NewUpdateProjectUseCase(kanameRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
-		// A LABEL change flips iam-direct selector membership, so removing a label an
-		// ARM_LABELS grant matches is a REVOCATION. The cross-service twin already gets
-		// this: vpc/compute/nlb re-call RegisterResource on a label update and that runs
-		// the object-forward in-process (its delete-stale guard hands an object with
-		// existing members to the FULL recompute, which strips the stale tuples). Without
-		// the same wiring here, the iam-native path had only the co-committed reconcile
-		// event, so revoke latency became the depth of the FIFO reconcile queue —
-		// measured 7m30s of queue plus a 65s sweep before the tuple died.
+		// Изменение МЕТОК меняет членство селектора iam-direct, поэтому удаление метки,
+		// совпадающей с выдачей ARM_LABELS, — ОТЗЫВ. Межсервисный двойник уже делает
+		// это: vpc/compute/nlb повторно вызывают RegisterResource при обновлении меток и запускают
+		// прямой проход объекта в процессе (защита удаления устаревшего передаёт объект с
+		// имеющимися участниками ПОЛНОМУ пересчёту, удаляющему устаревшие кортежи). Без
+		// такой же провязки здесь путь iam имел только совместно коммитимое событие
+		// сверки, поэтому задержка отзыва равнялась глубине очереди сверки FIFO —
+		// измерено 7м30с в очереди плюс 65с обхода до исчезновения кортежа.
 		WithObjectReconciler(rsabReconciler)
 	projectDelete := projectapp.NewDeleteProjectUseCase(kanameRepo, opsRepo)
 	projectGet := projectapp.NewGetProjectUseCase(kanameRepo).WithRelationStore(relationStore)
@@ -402,10 +402,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	userList := userapp.NewListUsersUseCase(kanameRepo).WithRelationStore(relationStore).
 		WithListScanRecorder(listScanRec)
 	userUpdate := userapp.NewUpdateUserUseCase(kanameRepo, opsRepo).
-		// Same revoke-latency fix as accountUpdate above: iam.user is label-selectable,
-		// so a label clear is a REVOCATION, and without the in-process object-forward it
-		// waited out the FIFO reconcile queue (measured 7m30s + a 65s sweep) instead of
-		// converging in-process the way the cross-service RegisterResource path does.
+		// То же исправление задержки отзыва, что у accountUpdate выше: iam.user выбирается по меткам,
+		// поэтому очистка метки — ОТЗЫВ; без прямого прохода объекта в процессе он
+		// ждал очередь сверки FIFO (измерено 7м30с + 65с обхода), вместо
+		// сходимости в процессе, как на межсервисном пути RegisterResource.
 		WithObjectReconciler(rsabReconciler, logger)
 	userDelete := userapp.NewDeleteUserUseCase(kanameRepo, opsRepo)
 	userInvite := userapp.NewInviteUserUseCase(kanameRepo, opsRepo, relationStore).
@@ -445,21 +445,21 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler)
 	saUpdate := serviceaccountapp.NewUpdateServiceAccountUseCase(kanameRepo, opsRepo).
-		// Same revoke-latency fix as accountUpdate above: iam.serviceAccount is
-		// label-selectable, so a label clear is a REVOCATION, and without the in-process
-		// object-forward it waited out the FIFO reconcile queue (measured 7m30s + a 65s
-		// sweep) instead of converging in-process the way the cross-service
-		// RegisterResource path does.
+		// То же исправление задержки отзыва, что у accountUpdate выше: iam.serviceAccount
+		// выбирается по меткам, поэтому очистка метки — ОТЗЫВ; без прямого прохода объекта
+		// в процессе он ждал очередь сверки FIFO (измерено 7м30с + 65с
+		// обхода), вместо сходимости в процессе, как на межсервисном
+		// пути RegisterResource.
 		WithObjectReconciler(rsabReconciler, logger)
 	saDelete := serviceaccountapp.NewDeleteServiceAccountUseCase(kanameRepo, opsRepo)
 	saGet := serviceaccountapp.NewGetServiceAccountUseCase(kanameRepo).WithRelationStore(relationStore)
 	saList := serviceaccountapp.NewListServiceAccountsUseCase(kanameRepo).WithRelationStore(relationStore).
 		WithListScanRecorder(listScanRec)
-	// Disable / Enable — the writers for the state that decides whether a service
-	// account may authenticate. The state was read by the token hook, by key
-	// issuance and by the docker-token validator long before anything could set
-	// it; until these were wired, the only way to move it was a statement against
-	// the database by hand.
+	// Disable / Enable — писатели состояния, определяющего, может ли служебная
+	// учётная запись аутентифицироваться. Хук токена, выдача ключей
+	// и проверка docker-токена читали состояние задолго до появления возможности
+	// его задать; до этой провязки изменить его можно было только оператором
+	// в базе данных вручную.
 	saDisable := serviceaccountapp.NewDisableServiceAccountUseCase(kanameRepo, opsRepo)
 	saEnable := serviceaccountapp.NewEnableServiceAccountUseCase(kanameRepo, opsRepo)
 	saHandler := serviceaccountapp.NewHandler(saCreate, saUpdate, saDelete, saGet, saList, saDisable, saEnable).
@@ -470,13 +470,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler)
 	groupUpdate := groupapp.NewUpdateGroupUseCase(kanameRepo, opsRepo).
-		// Same revoke-latency fix as accountUpdate above: iam.group is label-selectable,
-		// so a label clear is a REVOCATION. Group.Update was the last path with NEITHER
-		// half — no co-committed reconcile event and no in-process object-forward — so a
-		// revoke converged only when the 30s periodic sweep happened to reach the binding.
-		// The event (added in doUpdate) is the at-least-once backstop; this wiring adds the
-		// accelerator the cross-service RegisterResource path runs in-process, without
-		// which revoke latency is the depth of the FIFO reconcile queue (measured 7m30s).
+		// То же исправление задержки отзыва, что у accountUpdate выше: iam.group выбирается по меткам,
+		// поэтому очистка метки — ОТЗЫВ. Group.Update оставался последним путём БЕЗ ОБЕИХ
+		// частей — совместно коммитимого события сверки и прямого прохода объекта в процессе, — поэтому
+		// отзыв сходился лишь тогда, когда периодический обход раз в 30с доходил до привязки.
+		// Событие (добавлено в doUpdate) — страховка доставки хотя бы раз; эта провязка добавляет
+		// ускоритель, который межсервисный путь RegisterResource запускает в процессе; без него
+		// задержка отзыва равна глубине очереди сверки FIFO (измерено 7м30с).
 		WithObjectReconciler(rsabReconciler, logger)
 	groupDelete := groupapp.NewDeleteGroupUseCase(kanameRepo, opsRepo)
 	groupGet := groupapp.NewGetGroupUseCase(kanameRepo).WithRelationStore(relationStore)
@@ -488,9 +488,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	groupAdd := groupapp.NewAddMemberUseCase(kanameRepo, opsRepo).
 		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(kanameRepo, relationStore))
 	groupRemove := groupapp.NewRemoveMemberUseCase(kanameRepo, opsRepo)
-	// ListMembers names the group in the request, so it re-asks the model about
-	// that group on `v_list` — the same relation the front door requires, and the
-	// layer its two sibling reads already carry.
+	// ListMembers называет группу в запросе, поэтому повторно спрашивает модель об
+	// этой группе по `v_list` — тому же отношению, которое требует входная дверь,
+	// и на том же уровне, что уже есть у двух соседних чтений.
 	groupListMembers := groupapp.NewListMembersUseCase(kanameRepo).WithRelationStore(relationStore)
 	groupHandler := groupapp.NewHandler(groupCreate, groupUpdate, groupDelete, groupGet, groupList,
 		groupAdd, groupRemove, groupListMembers).
@@ -528,19 +528,19 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// Роль, принятая до снятия регистрации названного ключа и записанная после,
 		// снятого ключа не называет (kaname#963, Р8).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool))
-	// Role.Update of an active role's permissions reconciles the FGA
-	// tuples of every active binding of that role in the SAME writer-tx (atomic,
-	// ban #10) via the access_binding RoleTupleReconciler (it owns the FGA
-	// tuple-builder + the persisted emitted-tuple store). Without it a permission
-	// downgrade left orphan FGA tuples = standing privilege.
-	// The resource-scoped AccessBinding reconciler is
-	// shared between AccessBinding.Create (post-commit selector materialization),
-	// the serve.go worker (event drain + sweep + expiry), AND the Role.Update
-	// membership fan-out (a rules change re-materializes the role.rules
-	// ARM_LABELS membership of every active binding, eager-revoking removed rules by
-	// rule_fp). One use-case over the pg ReconcileAdapter (Clean Architecture port).
-	// NOTE: rsabReconciler is created once near the top of buildServices (shared
-	// with the Account.Create owner auto-binding materialization).
+	// Role.Update прав активной роли сверяет кортежи FGA
+	// каждой активной привязки этой роли в ТОЙ ЖЕ транзакции писателя (атомарно,
+	// запрет #10) через RoleTupleReconciler из access_binding (ему принадлежат
+	// построитель кортежей FGA и хранилище сохранённых отправленных кортежей). Без него понижение
+	// прав оставляло осиротевшие кортежи FGA, то есть действующие привилегии.
+	// Сверщик AccessBinding с областью ресурса
+	// общий для AccessBinding.Create (материализация селектора после коммита),
+	// воркера serve.go (выгрузка событий, обход, истечение) И распространения членства Role.Update
+	// (изменение правил перематериализует членство ARM_LABELS из role.rules
+	// каждой активной привязки, немедленно отзывая снятые правила по
+	// rule_fp). Один сценарий поверх pg ReconcileAdapter (порт чистой архитектуры).
+	// ПРИМЕЧАНИЕ: rsabReconciler создаётся один раз в начале buildServices (общий
+	// с материализацией автоматической привязки владельца Account.Create).
 	roleUpdate := roleapp.NewUpdateRoleUseCase(kanameRepo, opsRepo, catalogSource).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool)).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
@@ -549,75 +549,75 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// правом выдавать её на каждой области этих выдач; та же дверь решения, что у
 		// AccessBindingService.Create. Без провязки правка правил отказывает.
 		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(kanameRepo, relationStore)).
-		// Same revoke-latency fix as accountUpdate above, for the role AS AN OBJECT
-		// (iam.role is label-selectable, so clearing one of the ROLE's own labels is a
-		// REVOCATION of access TO the role — orthogonal to the rules fan-out wired
-		// above, which covers what the role GRANTS). Without the in-process
-		// object-forward it waited out the FIFO reconcile queue (measured 7m30s + a 65s
-		// sweep) instead of converging in-process the way the cross-service
-		// RegisterResource path does.
+		// То же исправление задержки отзыва, что у accountUpdate выше, для роли КАК ОБЪЕКТА
+		// (iam.role выбирается по меткам, поэтому очистка одной из СОБСТВЕННЫХ меток РОЛИ —
+		// ОТЗЫВ доступа К роли, независимый от распространения правил, провязанного
+		// выше и отвечающего за то, что роль ВЫДАЁТ). Без прямого прохода
+		// объекта в процессе он ждал очередь сверки FIFO (измерено 7м30с + 65с
+		// обхода), вместо сходимости в процессе, как на межсервисном
+		// пути RegisterResource.
 		WithObjectReconciler(rsabReconciler, logger)
 	roleDelete := roleapp.NewDeleteRoleUseCase(kanameRepo, opsRepo)
-	// roleGet — D-1 fix: system roles are served to all (catalog floor, exempt);
-	// CUSTOM roles enforce per-object via the SAME FGA v_list set as List
-	// (read==enforce, D-45). relationStore is always non-nil, so a custom-role Get
-	// fails closed on an FGA outage (Unavailable, D-47) — never a body leak.
+	// roleGet — исправление D-1: системные роли доступны всем (базовый каталог, исключение);
+	// ПОЛЬЗОВАТЕЛЬСКИЕ роли проверяются по объектам тем же множеством FGA v_list, что и List
+	// (чтение равно применению, D-45). relationStore всегда не nil, поэтому Get пользовательской роли
+	// закрывается отказом при сбое FGA (Unavailable, D-47), не раскрывая тело.
 	roleGet := roleapp.NewGetRoleUseCase(kanameRepo, catalogSource).WithRelationStore(relationStore)
-	// roleList — per-object scope-filtered: the FGA v_list set on
-	// iam_role is intersected with the catalog (system roles bypass). relationStore
-	// is always non-nil, so List fails closed on an FGA outage (D-47).
+	// roleList — фильтрация области по объектам: множество FGA v_list на
+	// iam_role пересекается с каталогом (системные роли проходят мимо). relationStore
+	// всегда не nil, поэтому List закрывается отказом при сбое FGA (D-47).
 	roleList := roleapp.NewListRolesUseCase(kanameRepo, catalogSource).WithRelationStore(relationStore).
 		WithListScanRecorder(listScanRec)
 	roleHandler := roleapp.NewHandler(roleCreate, roleUpdate, roleDelete, roleGet, roleList).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 
-	// AccessBindingService. (rsabReconciler is created above — shared with the
-	// Role.Update membership fan-out; the same instance drives Create + worker.)
+	// AccessBindingService. (rsabReconciler создан выше — общий с
+	// распространением членства Role.Update; тот же экземпляр ведёт Create и воркер.)
 	abCreate := accessbindingapp.NewCreateAccessBindingUseCase(kanameRepo, opsRepo, catalogSource).
 		WithRelationStore(relationStore, logger).
 		WithReconciler(rsabReconciler).
 		// Выдача, принятая до снятия регистрации объекта цели и записанная после,
 		// живой не остаётся (kaname#963, Р8).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool))
-	// abDelete — relationStore drives the grant-authority gate, and ONLY that. The
-	// post-commit tuple-removal it also used to drive is gone with the external store:
-	// the in-tx EmitRelationDelete is now the whole mechanism, because a trigger folds
-	// the journal row into the direct fact in the SAME commit. The deny is therefore
-	// observable at Operation-done by construction, not by a second write racing it.
+	// abDelete — relationStore ведёт страж полномочий выдачи, и ТОЛЬКО его. Удаление
+	// кортежей после коммита, которое он также вёл, ушло с внешним хранилищем:
+	// EmitRelationDelete внутри транзакции теперь составляет весь механизм, поскольку триггер сворачивает
+	// строку журнала в прямой факт в ТОМ ЖЕ коммите. Поэтому отказ
+	// виден при завершении Operation по устройству, без гонки со второй записью.
 	abDelete := accessbindingapp.NewDeleteAccessBindingUseCase(kanameRepo, opsRepo).
 		WithRelationStore(relationStore, logger)
-	// Revoke — F10 (IAM-1-28) SOFT-revoke (status ACTIVE→REVOKED, row retained for
-	// audit-retention), contrast with Delete=HARD. Same grant-authority +
-	// deletion_protection gate as Delete; same post-commit synchronous FGA
-	// tuple-removal so deny is observable at Operation-done.
+	// Revoke — F10 (IAM-1-28): МЯГКИЙ отзыв (статус ACTIVE→REVOKED, строка сохранена
+	// для срока хранения аудита), в отличие от ЖЁСТКОГО Delete. Тот же страж полномочий выдачи и
+	// защиты deletion_protection, что у Delete; то же синхронное удаление кортежей FGA
+	// после коммита, чтобы отказ был виден при завершении Operation.
 	abRevoke := accessbindingapp.NewRevokeAccessBindingUseCase(kanameRepo, opsRepo).
 		WithRelationStore(relationStore, logger)
-	// Update — P6 (C-03): clear deletion_protection so a protected binding can be
-	// deleted. Same grant-authority gate as Create/Delete. WithObjectReconciler adds the
-	// post-commit label re-materialization: iam.accessBinding is label-selectable, so
-	// clearing a label an ARM_LABELS grant matches is a REVOCATION, and without an
-	// in-process pass its latency is the depth of the FIFO reconcile queue (one worker,
-	// ~5 events/s of FULL O(scope) recomputes — measured 7m30s enqueue→drain on the
-	// sibling iam.project path). The co-committed reconcile event stays the backstop.
+	// Update — P6 (C-03): снимает deletion_protection, позволяя удалить защищённую
+	// привязку. Тот же страж полномочий выдачи, что у Create/Delete. WithObjectReconciler добавляет
+	// перематериализацию меток после коммита: iam.accessBinding выбирается по меткам, поэтому
+	// очистка метки, совпадающей с выдачей ARM_LABELS, — ОТЗЫВ; без
+	// прохода в процессе его задержка равна глубине очереди сверки FIFO (один воркер,
+	// около 5 событий/с ПОЛНОГО пересчёта O(scope) — измерено 7м30с от постановки до выгрузки на
+	// соседнем пути iam.project). Совместно коммитимое событие сверки остаётся страховкой.
 	abUpdate := accessbindingapp.NewUpdateAccessBindingUseCase(kanameRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler)
-	// D-6 (T3.3): the AB read RPCs union the existing self/granted floor with the
-	// label-selector visibility (viewer ∪ v_list on iam_access_binding). relationStore
-	// (the decision door) satisfies BOTH RelationStore (Check) and RelationQueries
-	// (the contextual and paged forms); WithRelationQueries wires the per-object
-	// visibility floor.
+	// D-6 (T3.3): RPC чтения AB объединяют существующий базовый доступ себе/по выдаче с
+	// видимостью по селектору меток (viewer ∪ v_list на iam_access_binding). relationStore
+	// (дверь решения) удовлетворяет ОБОИМ портам: RelationStore (Check) и RelationQueries
+	// (контекстная и постраничная формы); WithRelationQueries провязывает базовую
+	// видимость по объектам.
 	abGet := accessbindingapp.NewGetAccessBindingUseCase(kanameRepo).
 		WithRelationStore(relationStore, logger).
 		WithRelationQueries(relationStore)
 	abListByScope := accessbindingapp.NewListByScopeUseCase(kanameRepo).
 		WithRelationStore(relationStore, logger).
 		WithRelationQueries(relationStore)
-	// F11 (IAM-1-32): the unified List — viewer ∪ v_list push-down (same
-	// RelationQueries floor as the other AB reads) PLUS the D-9 cluster-admin
-	// super-gate (RelationStore), without which a cluster-admin — who holds no
-	// per-object tuple on iam_access_binding — would get an empty page here while
-	// every sibling read returns the full set.
+	// F11 (IAM-1-32): единый List — проталкивание viewer ∪ v_list (тот же базовый
+	// RelationQueries, что у других чтений AB) ПЛЮС надстраж администратора кластера D-9
+	// (RelationStore), без которого администратор кластера, не имеющий
+	// кортежа по объекту на iam_access_binding, получил бы здесь пустую страницу, хотя
+	// каждое соседнее чтение возвращает полное множество.
 	// Соседняя поверхность верхнего яруса супер-доступа читается ОТСЮДА ЖЕ
 	// (kacho#914, решение 2): выдают и отзывают кластерного администратора своим
 	// глаголом, но спрашивающий «кто имеет доступ» обязан получать полный ответ
@@ -641,9 +641,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	abListByAcc := accessbindingapp.NewListByAccountUseCase(kanameRepo).
 		WithRelationStore(relationStore, logger).
 		WithRelationQueries(relationStore)
-	// ListSubjectPrivileges — enriched self|account-admin read.
-	// RelationStore wired so the delegated-admin (FGA admin@account) authz path
-	// resolves admins who are not the home-account owner (D-4 path b);
+	// ListSubjectPrivileges — обогащённое чтение себя либо администратором аккаунта.
+	// RelationStore провязан, чтобы путь авторизации делегированного администратора (FGA admin@account)
+	// находил администраторов, не являющихся владельцем домашнего аккаунта (D-4, путь b);
 	// RelationQueries — пообъектный вопрос, которым СТРАНИЦА сужается по правам
 	// вызывающего (kacho#1354). Непровязанный порт этим чтением ОТКАЗЫВАЕТ, поэтому
 	// провязка здесь — не удобство, а условие работоспособности полосы
@@ -651,21 +651,21 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	abListSubjPriv := accessbindingapp.NewListSubjectPrivilegesUseCase(kanameRepo).
 		WithRelationStore(relationStore, logger).
 		WithRelationQueries(relationStore)
-	// ListAssignableRoles — roles valid to bind on a resource,
-	// scope_group-annotated. Same grant-authority gate as ListByScope/Create
-	// (RelationStore wired so the delegated-admin + cluster-scope authority paths
-	// resolve).
+	// ListAssignableRoles — роли, допустимые для привязки к ресурсу,
+	// с аннотацией scope_group. Тот же страж полномочий выдачи, что у ListByScope/Create
+	// (RelationStore провязан, чтобы пути полномочий делегированного администратора и области кластера
+	// разрешались).
 	abListAssignable := accessbindingapp.NewListAssignableRolesUseCase(kanameRepo).
 		WithRelationStore(relationStore, logger)
-	// ListByRole audit (same grant-authority scope-filter as
-	// the other List RPCs) + ExpandAccess effective-principal audit
-	// (resolves group usersets via the door's ListSubjects).
+	// Аудит ListByRole (тот же фильтр области по полномочиям выдачи, что у
+	// других RPC List) и аудит действующих субъектов ExpandAccess
+	// (раскрывает множества пользователей групп через ListSubjects двери).
 	abListByRole := accessbindingapp.NewListByRoleUseCase(kanameRepo).
 		WithRelationStore(relationStore, logger)
-	// ExpandAccess: the decision door doubles as the userset expander (ListSubjects)
-	// AND the RelationStore for the per-object grant-authority gate (В3 — a caller may
-	// expand "who can do X" only on objects they are authorized to administer, the
-	// SAME requireGrantAuthority predicate ListByScope/ListByRole enforce).
+	// ExpandAccess: дверь решения также раскрывает множества пользователей (ListSubjects)
+	// И RelationStore для стража полномочий выдачи по объекту (В3 — вызывающий может
+	// раскрывать «кто может X» только на объектах, которыми им разрешено управлять, по
+	// ТОМУ ЖЕ предикату requireGrantAuthority, который применяют ListByScope/ListByRole).
 	abExpandAccess := accessbindingapp.NewExpandAccessUseCase(relationStore).
 		WithGrantAuthority(kanameRepo, relationStore, logger)
 	// Делегированный путь права выдавать (kaname#986, Р2): делегат выдаёт, отзывает
@@ -694,29 +694,29 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithExpandAccess(abExpandAccess).
 		WithRevoke(abRevoke)
 
-	// ── AuthZ core wiring ─────────────────────────────────────────────────
+	// ── Провязка ядра авторизации ─────────────────────────────────────────────────
 	authzServices := buildAuthZServices(kanameRepo, relationStore, kanamepg.NewHumanSessionRepo(pool),
 		catalogSource, metricsReg, cfg.AuthN.Mode.IsProduction(), moduleRoster)
-	// InternalIAMService — LookupSubject (for the api-gateway
-	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
-	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
-	// the external endpoint (ban #6). "gRPC-direct only" used to stand here and
-	// is wrong — the api-gateway also exposes these two over REST on its
-	// INTERNAL mux; internal-only is the invariant, gRPC-direct is not.
+	// InternalIAMService — LookupSubject (для перехватчика аутентификации
+	// api-gateway) и Check (делегирует AuthorizeService.CheckRelation
+	// в тот же конвейер FGA + OPA). Только внутренний слушатель, порт 9091: никогда
+	// на внешнем эндпоинте (запрет #6). Прежнее «только прямой gRPC» здесь
+	// неверно — api-gateway также выставляет эти два метода по REST на своём
+	// ВНУТРЕННЕМ мультиплексоре; инвариант — внутренний доступ, а не прямой gRPC.
 	lookupSubject := internaliamapp.NewLookupSubjectUseCase(kanameRepo)
-	// SEC-C — FGA-proxy: RegisterResource / UnregisterResource enqueue the
-	// owner-hierarchy tuple into kaname.fga_outbox in one writer-tx, out of which
-	// a trigger folds the direct fact in the same commit. Least-priv enforced via the
-	// ReBAC gate (cert-cert→SA → fga_writer@cluster:cluster_root); the gate's
-	// RelationChecker is the same Check surface (relationStore).
-	// β (epic «Resource-scoped AccessBinding»): the same writer-tx also UPSERTs
-	// /DELETEs the kaname.resource_mirror row (labels + parent-scope of the
-	// owner object) — atomic co-commit with the owner-tuple emit (ban #10 — D-β3).
-	// γ (epic «Resource-scoped AccessBinding»): the SAME writer-tx also (D4)
-	// backfills parent_account_id from projects.account_id same-DB and (Q1=(c))
-	// enqueues a resource_reconcile_outbox event so the reconciler re-evaluates
-	// affected selector/byName memberships — all atomic with the mirror UPSERT/
-	// DELETE (ban #10).
+	// SEC-C — прокси FGA: RegisterResource / UnregisterResource ставят
+	// кортеж иерархии владельца в kaname.fga_outbox в одной транзакции писателя, из которой
+	// триггер сворачивает прямой факт в том же коммите. Минимальные полномочия обеспечивает
+	// страж ReBAC (проверенная личность модуля → канонический fga_writer аккаунта); его
+	// RelationChecker — та же поверхность Check (relationStore).
+	// β (эпик «Resource-scoped AccessBinding»): та же транзакция писателя также вставляет/обновляет
+	// либо удаляет строку kaname.resource_mirror (метки и родительскую область
+	// объекта владельца), атомарно с отправкой кортежа владельца (запрет #10 — D-β3).
+	// γ (эпик «Resource-scoped AccessBinding»): ТА ЖЕ транзакция писателя также (D4)
+	// заполняет parent_account_id из projects.account_id в той же базе и (Q1=(c))
+	// ставит событие resource_reconcile_outbox, чтобы сверщик пересмотрел
+	// членство затронутых селекторов/byName — всё атомарно с вставкой/обновлением либо
+	// удалением зеркала (запрет #10).
 	registerResourceUC := internaliamapp.NewRegisterResourceUseCase(
 		kanamepg.NewFGAOutboxEmitter(),
 		kanamepg.NewResourceMirrorEmitter(),
@@ -746,11 +746,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
-		// Design-B instant-visibility (VBC-15): after the owner-tuple + mirror co-commit,
-		// drive a SYNCHRONOUS ReconcileObject (shared rsabReconciler's sync-FGA writer) so
-		// the creator's per-object v_get materializes before the consumer's create-Operation
-		// reports done — a create→immediate-GET resolves ALLOW without racing the async
-		// reconcile-outbox drain. nil-safe + non-fatal (the drain + sweep are the backstop).
+		// Мгновенная видимость Design-B (VBC-15): после совместного коммита кортежа владельца и зеркала
+		// выполнить СИНХРОННЫЙ ReconcileObject (синхронный писатель FGA общего rsabReconciler), чтобы
+		// v_get создателя по объекту материализовался до того, как операция создания потребителя
+		// сообщит о завершении: создание и немедленный GET получают ALLOW без гонки с асинхронной
+		// выгрузкой очереди сверки. Безопасно при nil, ошибка нефатальна (выгрузка и обход страхуют).
 		WithObjectReconciler(rsabReconciler, logger).
 		// УКАЗАТЕЛЬ ОБЛАСТИ БОЛЬШЕ НЕ ПРИМЕНЯЕТСЯ ВТОРЫМ ПИСАТЕЛЕМ.
 		//
@@ -762,44 +762,45 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		//
 		// Строка журнала, положенная той же транзакцией, делает то же самое и раньше:
 		// прямой факт складывается из неё триггером в момент коммита. Догонять нечего.
-		// A teardown must take away EVERY relationship this proxy could have written on
-		// the object, not only the one the consumer was able to name. The consumer names
-		// the scope pointer because that is all it holds; the creator's own `owner` was
-		// written from an identity nobody stores afterwards, so the store is the only
-		// side that can still name it. Without this reader that relationship outlived its
-		// object silently — the withdrawal was emitted, delivered and marked sent with no
-		// error, while the model went on deriving all five verbs from what it left behind.
+		// Снятие должно отбирать КАЖДОЕ отношение, которое этот прокси мог записать на
+		// объекте, а не только названное потребителем. Потребитель называет
+		// указатель области, поскольку владеет лишь им; собственный `owner` создателя
+		// записан от личности, которую затем никто не хранит, поэтому хранилище — единственная
+		// сторона, ещё способная её назвать. Без этого читателя отношение молча переживало
+		// объект: отзыв отправлялся, доставлялся и отмечался отправленным без
+		// ошибки, а модель продолжала выводить все пять глаголов из оставшегося.
 		//
-		// The bare transport is used deliberately: this needs the STRONG object listing,
-		// and it must not travel the cascade wrapper, whose job is to widen answers to
-		// questions rather than to enumerate what is physically there.
+		// Голый транспорт используется намеренно: здесь нужен СТРОГИЙ список объектов,
+		// не проходящий через каскадную обёртку, чья задача — расширять ответы на
+		// вопросы, а не перечислять физически имеющееся.
 		WithResidualTupleReader(kanamepg.NewResidualTupleReader(pool))
-	// Both post-commit steps above are best-effort: they front a durable queue, so a
-	// failure costs latency and never the change. That is what makes a permanently broken
-	// one invisible — one WARN and a product that keeps working, slower, forever. The
-	// recorder counts RUNS as well as FAILURES, so "never refused" stays distinguishable
-	// from "never reached", and it labels WHICH materialization path each registration
-	// took, so a regression back onto the EXCLUSIVE recompute is a visible shift between
-	// two series instead of latency somebody has to notice. nil-safe: without a metrics
-	// registry the steps still run and still log, they are just not counted.
+	// Оба шага после коммита выше выполняются по возможности: перед ними надёжная очередь,
+	// поэтому сбой стоит задержки, а не потери изменения. Это делает постоянно сломанный
+	// шаг невидимым — один WARN и продукт продолжает работать медленнее вечно.
+	// Приёмник считает ЗАПУСКИ и СБОИ, различая «никогда не отказал»
+	// и «никогда не достигнут», и помечает, КАКИМ путём материализации пошла каждая регистрация,
+	// чтобы регрессия к ЭКСКЛЮЗИВНОМУ пересчёту была видимым сдвигом между
+	// двумя рядами, а не задержкой, которую кто-то должен заметить. Безопасно при nil: без реестра
+	// метрик шаги по-прежнему исполняются и журналируются, лишь не считаются.
 	if metricsReg != nil {
 		registerResourceUC = registerResourceUC.WithMetrics(metricsReg.NewRegisterPostCommitRecorder())
 	}
 	regGate := authzguard.NewRelationWriteGate(relationStore).
 		WithProductionMode(cfg.AuthN.Mode.IsProduction()).
 		WithModuleRoster(moduleRoster)
-	// Session-revocation writer. Pool-scoped adapter over
-	// session_revocations — the InternalSessionRevocationsService Revoke path
-	// and its IsRevoked / ListByUser readers (one table). ForceLogout does not
-	// write through it: its cutoff and its outcome-carrying record are laid by
-	// the teardown transaction below (kaname#340, kaname#380).
+	registerResourceUC.WithRegistrationAuthority(regGate)
+	// Писатель отзывов сессий. Адаптер уровня пула поверх
+	// session_revocations — путь Revoke InternalSessionRevocationsService
+	// и его читатели IsRevoked / ListByUser (одна таблица). ForceLogout через него не
+	// пишет: отсечку и запись с исходом кладёт
+	// транзакция снятия ниже (kaname#340, kaname#380).
 	sessionRevAdapter := kanamepg.NewSessionRevocationsAdapter(pool)
-	// Instrument the authz Check hot path at the adapter boundary (Clean
-	// Architecture): the metrics decorator wraps the CheckRelation port the
-	// InternalIAMService gate calls per-RPC (vpc/compute/nlb), recording the
-	// kaname_authz_check_* histogram + decision counter without the
-	// AuthorizeService use-case importing prometheus. nil registry → plain
-	// authorizer (metrics disabled).
+	// Инструментировать горячий путь Check авторизации на границе адаптера (чистая
+	// архитектура): декоратор метрик оборачивает порт CheckRelation, который
+	// страж InternalIAMService вызывает на каждом RPC (vpc/compute/nlb), записывая
+	// гистограмму kaname_authz_check_* и счётчик решений без
+	// импорта prometheus сценарием AuthorizeService. Реестр nil → обычный
+	// авторизатор (метрики выключены).
 	var checkAuthz internaliamapp.Authorizer = authzServices.authorizeSvc
 	if metricsReg != nil {
 		checkAuthz = metrics.NewInstrumentedAuthorizer(authzServices.authorizeSvc, metricsReg)
@@ -814,8 +815,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// Личности модулей (kaname#987): Check плоскости данных ограничен
 		// доменом её модуля — тот же перечень, что у политик вызывающего.
 		WithModuleRoster(moduleRoster).
-		// PollSubjectChanges drains subject_change_outbox for api-gateway
-		// authz-cache invalidation. Internal-only (port 9091).
+		// PollSubjectChanges выгружает subject_change_outbox для сброса кеша
+		// авторизации api-gateway. Только внутренний (порт 9091).
 		//
 		// Журнал процесса адаптеру НАЗЫВАЕТСЯ, а не берётся умолчанием: чтение
 		// идёт окном до границы устоявшегося, и удержание границы
@@ -824,7 +825,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// неотличимо от «событий нет» (kacho#1374).
 		WithSubjectChange(service.NewSubjectChangeService(
 			kanamepg.NewSubjectChangeRepo(pool, logger))).
-		// SEC-C — FGA-proxy RPCs + ReBAC authz gate.
+		// SEC-C — RPC прокси FGA и страж авторизации ReBAC.
 		WithResourceRegistrar(registerResourceUC, regGate).
 		// kacho#1142 — авторитет о предъявленном базовом секрете. Край зовёт его на
 		// промахе своего кэша вердикта; отзыв доходит до предъявления тем, что
@@ -840,17 +841,17 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithOwnSessions(kanamepg.NewHumanSessionRepo(pool)).
 		// Момент отсечки ForceLogout — общим источником (kaname#589).
 		WithCutoffClock(sharedClock).
-		// ForceLogout returns an Operation — the row it names is persisted here,
-		// before the cutoff is written and terminally after it, so the id the
-		// admin gets back is queryable and the force-logout shows up in the
-		// operation list like every other mutation.
+		// ForceLogout возвращает Operation — названная строка сохраняется здесь
+		// до записи отсечки и терминально после неё, чтобы идентификатор, полученный
+		// администратором, можно было запросить, а принудительный выход появлялся в
+		// списке операций, как любая другая мутация.
 		WithOperations(opsRepo).
-		// Defense-in-depth ReBAC gate for ForceLogout (§"AuthN+AuthZ
-		// ВЕЗДЕ"): require the authenticated principal hold system_admin@cluster.
-		// relationStore satisfies authzguard.RelationChecker; nil-safe fail-closed.
+		// Дополнительный страж ReBAC для ForceLogout (§«AuthN+AuthZ
+		// ВЕЗДЕ»): требует system_admin@cluster у аутентифицированного субъекта.
+		// relationStore удовлетворяет authzguard.RelationChecker; при nil закрывается отказом.
 		WithAdminChecker(relationStore).
-		// F5 (IAM-1-13): GetRoleCompiled — Internal-only compiled-permission
-		// projection (two-projection; public RoleService carries only rules[]).
+		// F5 (IAM-1-13): GetRoleCompiled — внутренняя проекция скомпилированных прав
+		// (две проекции; публичный RoleService несёт только rules[]).
 		WithRoleCompiledReader(roleapp.NewGetRoleCompiledUseCase(kanameRepo))
 	// ЧИТАТЕЛЬ ПЕРЕПИСИ ИСХОДОВ ПОЛОСЫ БАЗОВОГО СЕКРЕТА — вплотную к построению
 	// (kaname#379). Наружу полоса отвечает одним отказом на любую причину;
@@ -861,13 +862,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		basicCredentialCells(), basicCredentialOutcomeReader(internalIAMHandler))
 
 	// ── InternalSessionRevocationsService ─────────────────────────────────
-	// Revoke (logout) + IsRevoked (api-gateway hot-path) +
-	// ListByUser (admin audit). Internal-only (запрет #6).
+	// Revoke (выход), IsRevoked (горячий путь api-gateway) и
+	// ListByUser (административный аудит). Только внутренний (запрет #6).
 	//
-	// ListByUser answers about the user NAMED IN THE REQUEST, so it is authorized
-	// against that user through the same relation store UserService.Get uses. The
-	// listener's own gates narrow the calling MODULE and never read `user_id`;
-	// unwired, the RPC serves nobody but the caller themselves.
+	// ListByUser отвечает о пользователе, НАЗВАННОМ В ЗАПРОСЕ, поэтому авторизуется
+	// относительно него через то же хранилище отношений, что у UserService.Get.
+	// Собственные стражи слушателя сужают вызывающий МОДУЛЬ и не читают `user_id`;
+	// без провязки RPC обслуживает лишь самого вызывающего.
 	sessionRevocationsHandler := sessionrevapp.NewHandler(
 		sessionrevapp.NewRevokeUseCase(sessionRevAdapter, opsRepo, sharedClock),
 		sessionRevAdapter,
@@ -878,13 +879,13 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// означает «выведен по одной полосе и работает по другой».
 		WithCutoffReader(kanamepg.NewUserTokenRevocationRepo(pool))
 
-	// ── SAKey wiring (Class A static SA keys of service accounts) ─────────
+	// ── Провязка SAKey (статические ключи класса A служебных учёток) ─────────
 	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, logger)
 
 	// ── UserToken wiring (персональные access-токены пользователя, наша чеканка) ──
 	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, sharedClock, logger)
 
-	// ── InternalBootstrapTokenService — non-interactive bootstrap token mint (#58) ──
+	// ── InternalBootstrapTokenService — неинтерактивная чеканка начального токена (#58) ──
 	// Чеканит НАШ подписант: дороги к внешнему поставщику на этом пути нет ни
 	// одной (задача kacho#1119). Сборка — bootstrap_token.go.
 	bootstrapTokenH, bootstrapErr := buildBootstrapTokenHandler(pool, cfg, tokenSigner, logger)
@@ -905,15 +906,15 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	clusterSubjectState := kanamepg.NewSubjectStateReader(pool)
 
 	clusterGetUC := clusterapp.NewGetClusterUseCase(clusterReader)
-	// Durable audit_outbox emitter — emits the
-	// iam.cluster_admin.{granted,revoked} compliance row atomically inside the
-	// grant/revoke writer-tx (запрет #10). Shared stateless adapter.
+	// Надёжный отправитель audit_outbox — атомарно пишет
+	// строку соответствия iam.cluster_admin.{granted,revoked} внутри
+	// транзакции писателя выдачи/отзыва (запрет #10). Общий адаптер без состояния.
 	clusterAuditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
-	// Defense-in-depth ReBAC gate (§"AuthN+AuthZ ВЕЗДЕ"): the
-	// highest-blast cluster-admin RPCs must run their OWN per-RPC system_admin
-	// Check, not rely solely on the gateway caller-policy. relationStore
-	// (the decision door) satisfies authzguard.RelationChecker. nil-safe
-	// fail-closed inside the use-case if ever unwired.
+	// Дополнительный страж ReBAC (§«AuthN+AuthZ ВЕЗДЕ»):
+	// административные RPC кластера с наибольшей зоной поражения обязаны исполнять СОБСТВЕННЫЙ
+	// Check system_admin на каждом RPC, не полагаясь лишь на политику вызывающего шлюза. relationStore
+	// (дверь решения) удовлетворяет authzguard.RelationChecker. При nil сценарий
+	// закрывается отказом, если провязка отсутствует.
 	clusterGrantUC := clusterapp.NewGrantAdminUseCase(
 		clusterGrantWriter, clusterGrantReader, clusterRelEmitter, clusterTxb, opsRepo,
 	).WithSubjectStateReader(clusterSubjectState).WithAdminChecker(relationStore).
@@ -928,12 +929,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// сценариев (Р3): второй экземпляр сценариев был бы второй копией проверок.
 	publicClusterHandler := clusterpublicapp.NewHandler(internalClusterHandler)
 
-	// ── InternalInteractiveClientService — interactive-login client (IAM-INT-1) ──
-	// The audience stamped on every client this service registers is the EDGE's
-	// audience — the same `https://{API_DOMAIN}` the bootstrap mint requests and
-	// the gateway verifies. It is iam's decision, never a request field (Р2): a
-	// caller-supplied audience can be set but cannot be set correctly, and a wrong
-	// one is refused by the edge long after the client was created.
+	// ── InternalInteractiveClientService — клиент интерактивного входа (IAM-INT-1) ──
+	// Аудитория каждого регистрируемого этой службой клиента — аудитория КРАЯ,
+	// та же `https://{API_DOMAIN}`, которую запрашивает начальная чеканка и
+	// проверяет шлюз. Это решение iam, а не поле запроса (Р2):
+	// аудиторию от вызывающего можно задать, но нельзя задать правильно, а неверную
+	// край отвергнет намного позже создания клиента.
 	interactiveAudience := os.Getenv("KANAME_INTERACTIVE_CLIENT_AUDIENCE")
 	if interactiveAudience == "" {
 		interactiveAudience = "https://" + cfg.AuthN.ResolveDomain()
@@ -955,11 +956,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		interactiveclientapp.NewDeleteUseCase(interactiveRepo, interactiveProvider, opsRepo, logger),
 	)
 
-	// ── InternalOperationsService — cluster-wide admin op feed ────────────────
-	// §"AuthN+AuthZ ВЕЗДЕ": the in-handler ReBAC gate (relationStore
-	// satisfies authzguard.RelationChecker) enforces system_admin@cluster even
-	// when the caller bypasses the api-gateway and dials :9091 directly. nil-safe
-	// fail-closed inside the use-case if ever unwired.
+	// ── InternalOperationsService — административная лента операций всего кластера ────────────────
+	// §«AuthN+AuthZ ВЕЗДЕ»: страж ReBAC в обработчике (relationStore,
+	// удовлетворяющий authzguard.RelationChecker) требует system_admin@cluster даже
+	// при обходе api-gateway и прямом подключении к :9091. При nil сценарий
+	// закрывается отказом, если провязка отсутствует.
 	internalOperationsUC := internaloperationsapp.NewListIamOperationsUseCase(opsRepo).
 		WithAdminChecker(relationStore)
 	internalOperationsHandler := internaloperationsapp.NewHandler(internalOperationsUC)
@@ -991,8 +992,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// неотличим от поломки.
 	identityQuotaHandler := identityquotaapp.NewHandler(kanamepg.NewIdentityQuotaRepo(pool))
 
-	// ── PermissionCatalogService — RBAC rules-model G public catalog ──
-	// In-code projection (authzmap + domain): no repo, no peer-call. Stateless.
+	// ── PermissionCatalogService — публичный каталог модели правил RBAC G ──
+	// Проекция в коде (authzmap + domain): без репозитория, без вызова пира, без состояния.
 	permissionCatalogHandler := permissioncatalogapp.NewHandler(
 		permissioncatalogapp.NewListPermissionCatalogUseCase(catalogSource))
 
@@ -1042,7 +1043,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		internalClusterHandler: internalClusterHandler,
 		publicClusterHandler:   publicClusterHandler,
 
-		// interactive-login client lifecycle.
+		// Жизненный цикл клиента интерактивного входа.
 		interactiveClientHandler: interactiveClientHandler,
 
 		// каталог прав одного модуля — план, применение, два чтения.
@@ -1051,22 +1052,22 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// квоты личности — единственная поверхность, читаемая о себе самом.
 		identityQuotaHandler: identityQuotaHandler,
 
-		// token revocation (logout).
+		// Отзыв токенов (выход).
 		sessionRevocationsHandler: sessionRevocationsHandler,
 
-		// cluster-wide admin operations feed.
+		// Административная лента операций всего кластера.
 		internalOperationsHandler: internalOperationsHandler,
 
-		// non-interactive bootstrap token mint (#58).
+		// Неинтерактивная чеканка начального токена (#58).
 		internalBootstrapTokenHandler: bootstrapTokenH,
 
-		// AuthZ core.
+		// Ядро авторизации.
 		authorizeHandler: authzServices.authorize,
 
-		// RBAC rules-model G — public grantable role-rule catalog.
+		// Модель правил RBAC G — публичный каталог назначаемых правил ролей.
 		permissionCatalogHandler: permissionCatalogHandler,
 
-		// SAKey (Class A static keys; токен чеканит наш подписант).
+		// SAKey (статические ключи класса A; токен чеканит наш подписант).
 		saKeysHandler: saKeysH,
 
 		// UserToken (персональные access-токены пользователя, наша чеканка).
@@ -1127,8 +1128,8 @@ func saKeyIssuanceIsOurs(cfg config.Config) bool {
 	return cfg.SAKeyIssuanceIsOurs()
 }
 
-// buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys of
-// service accounts.
+// buildSAKeysHandler провязывает обработчик SAKeyService — статические ключи класса A
+// служебных учётных записей.
 func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config,
 	logger *slog.Logger) *sakeysapp.Handler {
 	saClientRepo := kanamepg.NewSAOAuthClientRepo(pool)
@@ -1168,9 +1169,9 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 				"(задача kacho#1120)")
 	}
 
-	// Durable audit_outbox emitter — emits iam.sa_key.issued /
-	// iam.sa_key.revoked rows inside the SAKey worker-tx, atomic with the
-	// key-mapping mutation (запрет #10). Payload carries no key material.
+	// Надёжный отправитель audit_outbox — пишет строки iam.sa_key.issued /
+	// iam.sa_key.revoked внутри транзакции воркера SAKey, атомарно с
+	// изменением отображения ключа (запрет #10). Полезная нагрузка не несёт ключевого материала.
 	auditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
 
 	issueUC := sakeysapp.NewIssueSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
@@ -1182,25 +1183,25 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// Перечень доверенных издателей федеративного ключа — НАША таблица (kacho#1124):
 	// писатель провязан здесь, читает её проверка утверждения на пути запроса.
 	issueUC.WithTrustedIssuerWriter(kanamepg.NewTrustedIssuerRepo(pool))
-	// Wire the post-Issue secret redactor. After the Operation is
-	// MarkDone'd with plaintext client_secret, this pg adapter clears the
-	// client_secret field in the proto-marshalled response_data (BYTEA) via a
-	// single-statement UPDATE on the operations row. Idempotent.
+	// Провязать удаление секрета после Issue. После завершения Operation
+	// через MarkDone с открытым client_secret этот адаптер pg очищает
+	// поле client_secret в сериализованном proto response_data (BYTEA) одним
+	// оператором UPDATE строки operations. Идемпотентно.
 	issueUC.WithResponseRedactor(kanamepg.NewOpsResponseRedactor(pool, "kaname"))
 	issueUC.WithAuditEmitter(auditEmitter)
 	// Grace-окно перед затиранием одноразового private_key_pem: поллящий клиент
 	// (docker-login / CI / UI) должен успеть прочитать ключ из op.response до его
 	// вычистки. Без окна затирание выигрывало гонку и клиент получал пустое поле.
 	issueUC.WithRedactGrace(cfg.AuthN.SAKeyRedactGrace)
-	// Lifetime discipline for the machine credential. A service-account key is
-	// what a machine authenticates with, and machine principals are exempt from
-	// step-up (a machine has no second factor) — that exemption holds only while
-	// the credential itself is time-bounded. DefaultTTL replaces the old
-	// "ttl_seconds omitted ⇒ never expires"; MaxTTL is the inclusive ceiling.
+	// Ограничение срока машинного удостоверения. Ключ служебной учётки — то,
+	// чем аутентифицируется машина, а машинные субъекты освобождены от
+	// повышения подтверждения (у машины нет второго фактора); исключение действует лишь пока
+	// само удостоверение ограничено по времени. DefaultTTL заменяет прежнее
+	// «ttl_seconds пропущен ⇒ бессрочно»; MaxTTL — включительный верхний предел.
 	issueUC.DefaultTTL = cfg.AuthN.SAKeyDefaultTTL
 	issueUC.MaxTTL = cfg.AuthN.SAKeyMaxTTL
-	// Surface redaction failures (error / give-up / recovered panic) of the
-	// detached redaction goroutine — the only place a key can stay un-redacted.
+	// Вывести сбои удаления секрета (ошибка, исчерпание попыток, перехваченная паника)
+	// отдельной горутины — единственного места, где ключ может остаться неочищенным.
 	issueUC.WithLogger(logger)
 	revokeUC := sakeysapp.NewRevokeSAKeyUseCase(saClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
 	revokeUC.WithAuditEmitter(auditEmitter)
@@ -1214,7 +1215,7 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	return sakeysapp.NewHandler(issueUC, revokeUC, listKeysUC)
 }
 
-// buildUserTokensHandler wires the UserTokenService handler — персональные
+// buildUserTokensHandler провязывает обработчик UserTokenService — персональные
 // access-токены пользователя (поток private_key_jwt к НАШЕМУ издателю).
 //
 // Клиента у внешнего поставщика этот контур не заводит и не снимает (kacho#1121),
@@ -1225,9 +1226,9 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	sharedClock revocationpolicy.Clock, logger *slog.Logger) *usertokensapp.Handler {
 	userClientRepo := kanamepg.NewUserOAuthClientRepo(pool)
 
-	// Durable audit_outbox emitter — эмитит iam.user_token.{issued,revoked} строки
-	// внутри worker-tx, атомарно с token-mapping-мутацией (запрет #10). Payload без
-	// key material.
+	// Надёжный отправитель audit_outbox — пишет строки iam.user_token.{issued,revoked}
+	// внутри транзакции воркера, атомарно с изменением отображения токена (запрет #10). Нагрузка без
+	// ключевого материала.
 	auditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
 
 	// Момент выдачи — тем же общим источником, что отсечка (kaname#589).
@@ -1248,7 +1249,7 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	// Grace-окно перед затиранием одноразового private_key_pem: поллящий клиент
 	// (CLI/UI) должен успеть прочитать ключ из op.response до вычистки.
 	issueUC.WithRedactGrace(cfg.AuthN.UserTokenRedactGrace)
-	// Surface redaction-сбоев detached redaction-goroutine.
+	// Вывод сбоев удаления секрета отдельной горутины.
 	issueUC.WithLogger(logger)
 	revokeUC := usertokensapp.NewRevokeUserTokenUseCase(userClientRepo, kanamepg.NewPoolTxBeginner(pool), opsRepo)
 	revokeUC.WithAuditEmitter(auditEmitter)
@@ -1259,11 +1260,11 @@ func buildUserTokensHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg con
 	return usertokensapp.NewHandler(issueUC, revokeUC, listUC)
 }
 
-// authzServiceBundle — handlers produced by buildAuthZServices.
+// authzServiceBundle — обработчики, произведённые buildAuthZServices.
 type authzServiceBundle struct {
 	authorize *authorizeapp.Handler
-	// authorizeSvc — raw AuthorizeService use-case, exposed so the
-	// InternalIAMService.Check gate can delegate to the SAME FGA pipeline.
+	// authorizeSvc — исходный сценарий AuthorizeService, вынесенный наружу, чтобы
+	// страж InternalIAMService.Check делегировал ТОМУ ЖЕ конвейеру FGA.
 	authorizeSvc *service.AuthorizeService
 }
 
@@ -1274,7 +1275,7 @@ type authzServiceBundle struct {
 // у стражей, — и держались они порознь именно потому, что край добавлял к ответу
 // движка то, чего обёртка не добавляла. Добавлять больше нечего: цепь областей и
 // надзор администратора облака форма поднимает своим планом, поэтому «два ответа
-// на один вопрос» перестало быть возможным by construction, а не по договорённости.
+// на один вопрос» стало невозможным по устройству, а не по договорённости.
 //
 // sessions — записи сессий человека: из записи сессии вопроса служба выводит
 // доводы способов и момента условия `mfa_fresh` (kaname#133, исход (а)).
@@ -1296,16 +1297,16 @@ func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade
 		Catalog:             catalogSource,
 	})
 	whoAmIUC := authorizeapp.NewWhoAmIUseCase(kanameRepo, ownGates)
-	// WithCallerAuthority wires the caller-authority gate (a tenant principal may
-	// only query authz decisions about itself, a resource it administers, or as a
-	// cluster-admin). The SAME decision door answers the authority Check; a
-	// verified module PDP peer passes through. This gate is not a second opinion
-	// behind a narrower gateway check — the catalog entry these RPCs carry is
-	// answered by every authenticated subject, so it is the only one there is.
+	// WithCallerAuthority провязывает страж полномочий вызывающего (субъект арендатора может
+	// спрашивать решения доступа лишь о себе, об управляемом им ресурсе либо как
+	// администратор кластера). ТА ЖЕ дверь решения отвечает на Check полномочий;
+	// проверенный пир PDP модуля проходит. Этот страж не является вторым мнением
+	// за более узкой проверкой шлюза: запись каталога этих RPC доступна
+	// любому аутентифицированному субъекту, поэтому этот страж — единственный.
 	//
-	// WithInsecureAnonymousPeer is the EXCEPTION for a stand without mTLS, where
-	// the public and internal listeners cannot be told apart. Fail-closed is the
-	// default; only a non-production AuthN mode opts out.
+	// WithInsecureAnonymousPeer — ИСКЛЮЧЕНИЕ для стенда без mTLS, где
+	// публичный и внутренний слушатели неразличимы. По умолчанию при сомнении
+	// следует отказ; отступает от этого лишь небоевой режим AuthN.
 	// Полоса КРАЯ наблюдается ЗДЕСЬ, на границе адаптера: между транспортом
 	// публичной службы и решателем встаёт декоратор, считающий вопросы края и
 	// вопросы сужателя списочной выдачи. До него счётчик владельца прав видел

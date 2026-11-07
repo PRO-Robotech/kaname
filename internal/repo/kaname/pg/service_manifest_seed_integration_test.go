@@ -5,7 +5,13 @@
 // группу и её выдачу, и применитель приводит к объявленному живую базу
 // (приёмка MRW-1, стадия S1; задача kaname#106).
 //
-// # Почему против живой базы, поднятой ВСЕМИ миграциями дерева
+// # Исторический операнд движка MRW до перехода AW-14/1031
+//
+// База намеренно поднята реальной обратимой цепью до 20261031150000.
+// Текущие начальные данные установки больше не объявляют общий доступ записи; его снятие
+// проверяет набор AW. Здесь сохранён общий контракт начальных данных/принятия/порядка.
+//
+// # Почему против живой базы исторической цепи
 //
 // Строка группы `module-relation-writers` и её выдача `fga_writer` живы на
 // каждой установке из свода (`0001_initial.sql`), а якорь кластера переименован
@@ -28,6 +34,9 @@ package pg_test
 
 import (
 	"context"
+	"database/sql"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/pressly/goose/v3"
 	"strings"
 	"testing"
 
@@ -123,7 +132,15 @@ func seedPool(ctx context.Context, t *testing.T) *pgxpool.Pool {
 	if testing.Short() {
 		t.Skip("нужен Postgres: свойство утверждается прогоном против живой базы")
 	}
-	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
+	// Это явная фикстура движка MRW до снятия, а не текущие производственные начальные данные.
+	dsn := pgtest.NewEmptyDB(t)
+	db, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	require.NoError(t, goose.UpTo(db, ".", 20261031150000))
+	require.NoError(t, db.Close())
+	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 	return pool
@@ -133,6 +150,10 @@ func ownManifest(t *testing.T) *manifest.Manifest {
 	t.Helper()
 	m, err := servicemanifest.Load()
 	require.NoError(t, err, "встроенный манифест службы не разобран — вердикт беспредметен")
+	// Явный исторический операнд сохраняет общий контракт применения.
+	// Текущий производственный манифест намеренно не восстанавливает эти снятые начальные данные.
+	m.Seed.Groups = []manifest.Group{{Name: writersGroupName, Account: systemAccountName, Description: "Module service accounts allowed to write relation tuples through iam (issue #914)"}}
+	m.Seed.AccessBindings = []manifest.AccessBinding{{Subjects: []manifest.Subject{{Type: "group", Name: writersGroupName}}, GrantedRelation: writersRelation, ScopeType: "iam.cluster", ScopeID: clusterAnchor, Target: "allInScope"}}
 	return m
 }
 

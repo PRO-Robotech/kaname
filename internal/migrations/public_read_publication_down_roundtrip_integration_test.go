@@ -62,7 +62,7 @@ func TestPublicReadPublication_DownRestoresTheProjectionAndTheReapplyConverges(t
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 
 	// Положительный контроль: на голове публикация складывается в факт. Без него
 	// утверждение «после отката факта нет» зеленело бы и на проекции, которая не
@@ -95,7 +95,7 @@ func TestPublicReadPublication_DownRestoresTheProjectionAndTheReapplyConverges(t
 	enqueueOwnerOrderedPublication(t, db, "reg0000000000back/team/app")
 	require.Zero(t, publicationFacts(t, db, "reg0000000000back/team/app"), "после отката проекция складывает глагол — тело не вернулось")
 
-	require.NoError(t, goose.Up(db, "."), "повторный накат обязан проходить")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат обязан проходить")
 	enqueueOwnerOrderedPublication(t, db, "reg0000000000again/team/app")
 	require.Equal(t, 1, publicationFacts(t, db, "reg0000000000again/team/app"), "после повторного наката публикация не складывается")
 }

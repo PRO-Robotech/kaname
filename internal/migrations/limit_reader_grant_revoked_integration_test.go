@@ -143,7 +143,7 @@ func TestLimitReaderGrant_DownRestoresTheGrantAndTheReapplyConverges(t *testing.
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 
 	// Откат идёт ДО СВОЕЙ версии, а не «на один шаг»: шаг утверждал бы, что
 	// предмет пробы — последняя миграция дерева, и ломался бы от следующей.
@@ -174,7 +174,7 @@ func TestLimitReaderGrant_DownRestoresTheGrantAndTheReapplyConverges(t *testing.
 
 	// Повторный накат: откат, оставивший дерево непригодным для наката, хуже
 	// отсутствующего.
-	require.NoError(t, goose.Up(db, "."), "повторный накат обязан сходиться")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат обязан сходиться")
 
 	var again int
 	require.NoError(t, db.QueryRow(

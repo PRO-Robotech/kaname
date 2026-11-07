@@ -358,7 +358,7 @@ func TestIntegration_ConsentLeavingRollsBackToTheSameStructure(t *testing.T) {
 	require.NotZero(t, idx, "до наката у таблицы согласий обязаны быть индексы")
 
 	// База С ГОЛОВЫ, откаченная на ту же версию.
-	after := consentLeavesDB(t)
+	after := historicalRegistrationDB(t)
 	require.NoError(t, goose.DownTo(after, ".", previous), "обратный ход обязан проходить")
 	got, _, _, _ := consentStructure(t, after)
 	require.Equal(t, want, got,
@@ -381,7 +381,7 @@ func TestIntegration_ConsentLeavingRollsBackToTheSameStructure(t *testing.T) {
 	}, findings, "на откаченной базе расхождений ровно четыре, и каждое называет слово и сторону")
 
 	// Повторный накат снимает предмет снова.
-	require.NoError(t, goose.Up(after, "."), "цепочка обязана накатываться снова")
+	require.NoError(t, goose.UpTo(after, ".", registrationReversibleTip), "цепочка обязана накатываться снова")
 	require.Zero(t, kanameRelationCount(t, after, "consent_grants"),
 		"после повторного наката таблицы согласий быть не должно")
 	require.Empty(t, revocationVocabularyFindings(dbRevocationReasons(t, after), domainRevocationReasons()),

@@ -126,7 +126,7 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 	full := installruntime.NewRIDDeliveryFixture()
 	// Штатный полный посев модуля устанавливает I через производственный код. Пара/история
 	// не подставляются подготовкой, и этот подготовительный запуск не считается приёмкой F6.
-	staging := f.apply(t, installruntime.DeliveryInput{Manifests: nativeWithoutDelegations(t, full), CredentialFile: f.creator.CredentialFile})
+	staging := f.apply(t, installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: nativeWithoutDelegations(t, full), CredentialFile: f.creator.CredentialFile})
 	results, err := staging.Results()
 	require.NoError(t, err)
 	require.Empty(t, results)
@@ -188,7 +188,7 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 				rid02CheckStreams(t, []string{filepath.Join(dir, "stdout.jsonl"), filepath.Join(dir, "stderr.jsonl")}, rid02WorldSecretMaterial(t, f))
 			}
 		})
-		in := installruntime.DeliveryInput{Manifests: full, CredentialFile: f.creator.CredentialFile}
+		in := installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: full, CredentialFile: f.creator.CredentialFile}
 		if mode == "S1" {
 			in.TenantAccountID = &f.tenantID
 		}

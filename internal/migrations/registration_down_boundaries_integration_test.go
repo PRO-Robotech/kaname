@@ -3,8 +3,8 @@
 
 package migrations_test
 
-// verifies https://github.com/PRO-Robotech/kaname/issues/983
-// verifies https://github.com/PRO-Robotech/kaname/issues/1020
+// Проверяет https://github.com/PRO-Robotech/kaname/issues/983
+// Проверяет https://github.com/PRO-Robotech/kaname/issues/1020
 
 import (
 	"context"
@@ -28,14 +28,14 @@ func TestRegistrationCommand_DownUpRetainsBindingAndGuards(t *testing.T) {
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 	_, err = db.Exec(`UPDATE kaname.catalog_resource SET permanent_project=true WHERE dotted='registry.registries';
  INSERT INTO kaname.resource_registration_command(dotted_type,object_id,parent_project_id,parent_account_id,labels,source_version,parent_chain)
  VALUES ('registry.registries','roundtrip-object','roundtrip-project','roundtrip-account','{}',now(),ARRAY['project:roundtrip-project'])`)
 	require.NoError(t, err)
 	for _, up := range []bool{false, true} {
 		if up {
-			require.NoError(t, goose.Up(db, "."))
+			require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 		} else {
 			require.NoError(t, goose.DownTo(db, ".", 20261026120000))
 		}
@@ -86,4 +86,72 @@ func TestRegistrationReconciliation_DownRefusesAtomically(t *testing.T) {
  AND to_regprocedure('kaname.service_account_creator_is_immutable()') IS NOT NULL
  AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='kaname' AND table_name='catalog_resource' AND column_name='writes')`).Scan(&intact))
 	require.True(t, intact, "отказ не снимает ни одну из согласованных схем")
+}
+
+// registrationReversibleTip — настоящая последняя обратимая миграция перед AW.
+// Исторические контракты Down начинаются на этом реальном префиксе, а не на текущей установке,
+// чью историю назначений установки намеренно нельзя уничтожить.
+const registrationReversibleTip int64 = 20261031150000
+
+func historicalRegistrationDB(t *testing.T) *sql.DB {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("integration: PostgreSQL")
+	}
+	db, err := sql.Open("pgx", pgtest.NewEmptyDB(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
+	version, err := goose.GetDBVersion(db)
+	require.NoError(t, err)
+	require.Equal(t, registrationReversibleTip, version)
+	return db
+}
+
+func TestRegistrationAccountWriter_CurrentHistoryRefusesDownAtomically(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: PostgreSQL")
+	}
+	db := historicalRegistrationDB(t)
+	require.NoError(t, goose.Up(db, "."))
+	_, err := db.Exec(`INSERT INTO kaname.registration_account_writer_assignment(assignment_id,account_id,module,binding_id,removed_at)
+ VALUES ('down-history-probe','acc1a18042d81fb438d6','registry','down-history-binding',clock_timestamp());
+ INSERT INTO kaname.registration_account_writer_switch(singleton,cluster_writer_retired_at) VALUES(true,clock_timestamp())`)
+	require.NoError(t, err)
+	snapshot := func() string {
+		var data string
+		require.NoError(t, db.QueryRow(`SELECT jsonb_build_array(
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.registration_account_writer_assignment t),
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.registration_account_writer_switch t),
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.registration_legacy_cluster_writer_identity t))::text`).Scan(&data))
+		return data
+	}
+	beforeData := snapshot()
+	require.Contains(t, beforeData, "down-history-probe")
+	fence := func() {
+		_, refusal := db.Exec(`UPDATE kaname.groups SET name=name WHERE id='grp258e6bbe9bbe45568'`)
+		var violation *pgconn.PgError
+		require.ErrorAs(t, refusal, &violation)
+		require.Equal(t, "registration_legacy_seed_namespace_retired", violation.ConstraintName)
+	}
+	fence()
+	beforeVersion, err := goose.GetDBVersion(db)
+	require.NoError(t, err)
+	var beforeRows int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version`).Scan(&beforeRows))
+	err = goose.Down(db, ".")
+	require.ErrorContains(t, err, "registration account writer history is irreversible")
+	afterVersion, err := goose.GetDBVersion(db)
+	require.NoError(t, err)
+	require.Equal(t, beforeVersion, afterVersion)
+	var afterRows int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version`).Scan(&afterRows))
+	require.Equal(t, beforeRows, afterRows)
+	var intact bool
+	require.NoError(t, db.QueryRow(`SELECT to_regclass('kaname.registration_account_writer_assignment') IS NOT NULL AND to_regclass('kaname.registration_account_writer_switch') IS NOT NULL AND to_regclass('kaname.registration_legacy_cluster_writer_identity') IS NOT NULL`).Scan(&intact))
+	require.True(t, intact)
+	require.Equal(t, beforeData, snapshot())
+	fence()
 }

@@ -3,23 +3,23 @@
 
 package internal_iam
 
-// register_resource_public_grant_test.go — publishing a resource for anonymous
-// read is a TUPLE intent, not a statement about the resource.
+// register_resource_public_grant_test.go — публикация ресурса для анонимного
+// чтения — намерение КОРТЕЖА, а не утверждение о ресурсе.
 //
-// kacho-registry publishes a repository by proxying the wildcard read tuple
-// `user:* # v_get @ registry_repository:<reg>/<repo>` — and that intent carries
-// no parent scope and no labels, because none of that changed. The mirror row is
-// keyed by the SAME object as the repository's own registration, so treating the
-// grant like a registration would:
+// kacho-registry публикует репозиторий передачей кортежа чтения с подстановкой
+// `user:* # v_get @ registry_repository:<reg>/<repo>`; это намерение не несёт
+// родительской области и меток, поскольку они не менялись. Ключ строки зеркала —
+// ТОТ ЖЕ объект, что у собственной регистрации репозитория, поэтому
+// трактовка выдачи как регистрации привела бы к следующему:
 //
-//	on register   — overwrite the repository's parent scope with the empty one
-//	                the grant carries (containment lost: bindings scoped to the
-//	                owning project stop matching it);
-//	on unregister — DELETE the repository's mirror row outright, while the
-//	                repository still exists (making a repository private would
-//	                erase it from the authz projection).
+// При register — замена родительской области репозитория пустой,
+//                переданной выдачей (теряется включение: выдачи в области
+//                проекта-владельца перестают совпадать);
+// При unregister — полное УДАЛЕНИЕ строки зеркала репозитория, хотя сам
+//                  репозиторий существует (перевод в закрытое состояние
+//                  стёр бы его из проекции авторизации).
 //
-// So a pure grant writes/deletes the tuple and touches nothing else.
+// Поэтому чистая выдача пишет/удаляет кортеж и больше ничего не трогает.
 
 import (
 	"context"
@@ -34,12 +34,13 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
-// ── fakes ────────────────────────────────────────────────────────────────────
+// ── Двойники ──────────────────────────────────────────────────────────────
 
-// mirrorSpy records the mirror rows written and removed, keeping the last state
-// per object so the test can assert the repository's parent scope survives.
+// mirrorSpy запоминает записанные и снятые строки зеркала, сохраняя последнее состояние
+// каждого объекта, чтобы проба проверяла сохранение родительской области репозитория.
 type mirrorSpy struct {
 	noDescendants
 	mu      sync.Mutex
@@ -61,8 +62,8 @@ func (m *mirrorSpy) UpsertTx(_ context.Context, _ service.Tx, row service.Resour
 		return false, false, nil
 	}
 	m.rows[key] = row
-	// These cases are about the wildcard grant, which writes no projection at all; they
-	// never claim staleness-freedom, so the guarded entry point stays in force.
+	// Эти случаи касаются выдачи с подстановкой, которая вообще не пишет проекцию;
+	// они не заявляют отсутствие устаревания, поэтому защищённая точка входа остаётся обязательной.
 	return true, false, nil
 }
 
@@ -91,8 +92,8 @@ func (m *mirrorSpy) counts() (upserts, deletes int) {
 	return m.upserts, m.deletes
 }
 
-// grantReq — a register/unregister input as the public-grant intent really
-// arrives: tuple only, no parent scope, no labels.
+// grantReq — вход register/unregister в форме реального намерения публичной выдачи:
+// только кортеж, без родительской области и меток.
 type grantReq struct {
 	subject, relation, object string
 	parentProject             string
@@ -129,7 +130,7 @@ func publicGrantRig() (*RegisterResourceUseCase, *mirrorSpy, *countingEmitter, *
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	pub := &recordingPublisher{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub, &recordingWithdrawal{}, noAudit{}, publicGrantScene()).WithReconcile(ev)
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub, &recordingWithdrawal{}, noAudit{}, publicGrantScene()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"}).WithReconcile(ev)
 	return uc, m, e, ev, pub
 }
 
@@ -144,25 +145,26 @@ func mirrorKey(t *testing.T, object string) string {
 	t.Helper()
 	ti := tupleIntent{object: object}
 	fgaType, oid := ti.splitObject()
-	dotted, ok, err := seededCatalogTypes{}.DottedTypeTx(context.Background(), nil, fgaType)
+	identity, ok, err := seededCatalogTypes{}.CatalogTypeTx(context.Background(), nil, fgaType)
 	require.NoError(t, err)
+	dotted := identity.Dotted
 	if !ok {
 		dotted = fgaType
 	}
 	return dotted + ":" + oid
 }
 
-// ── tests ────────────────────────────────────────────────────────────────────
+// ── Пробы ────────────────────────────────────────────────────────────────
 
-// TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone — the grant
-// must not restate the resource: the repository's parent scope survives it.
+// TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone — выдача
+// не должна заново описывать ресурс: родительская область репозитория сохраняется.
 func TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone(t *testing.T) {
 	uc, mirror, emitter, events, pub := publicGrantRig()
 	ctx := context.Background()
 	key := mirrorKey(t, publicGrantObject)
 
 	base := time.Now()
-	// (1) The repository registers itself: parent scope + labels.
+	// (1) Репозиторий регистрирует себя: родительская область + метки.
 	require.NoError(t, uc.Register(ctx, &grantReq{
 		subject: publicGrantContainer, relation: "parent", object: publicGrantObject,
 		parentProject: "prj0000000000000proj", labels: map[string]string{"tier": "gold"},
@@ -175,15 +177,15 @@ func TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone(t *testin
 	upsertsBefore, _ := mirror.counts()
 	eventsBefore := events.count()
 
-	// (2) The repository is made public: wildcard read tuple, nothing else, and
-	// necessarily a LATER version (it is a later outbox row).
+	// (2) Репозиторий становится публичным: только кортеж чтения с подстановкой
+	// и обязательно БОЛЕЕ ПОЗДНЯЯ версия (это более поздняя строка outbox).
 	require.NoError(t, uc.Register(ctx, &grantReq{
 		subject: "user:*", relation: "v_get", object: publicGrantObject,
 		version: base.Add(5 * time.Millisecond),
 	}))
 
-	// The grant travels the publication port, WITH the owner's version, and never
-	// reaches the bare journal emitter: only the repository's own registration did.
+	// Выдача идёт через порт публикации С версией владельца и никогда не
+	// достигает простого выпуска журнала: туда пришла лишь собственная регистрация репозитория.
 	assert.Equal(t, 1, emitter.writes, "the grant must not be enqueued as a bare tuple")
 	assertPublications(t, []publicationCall{{
 		objectType: "registry_repository", objectID: "reg53eeeg3578y4ah0q9/team/app",
@@ -202,7 +204,7 @@ func TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone(t *testin
 }
 
 // TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection —
-// making a repository private removes the wildcard tuple, not the repository.
+// закрытие репозитория снимает кортеж с подстановкой, а не сам репозиторий.
 func TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection(t *testing.T) {
 	uc, mirror, emitter, _, pub := publicGrantRig()
 	ctx := context.Background()
@@ -215,7 +217,7 @@ func TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection(t *te
 	}))
 	require.NotEqual(t, 0, emitter.writes)
 
-	// The repository goes private: the wildcard tuple is withdrawn.
+	// Репозиторий становится закрытым: кортеж с подстановкой снимается.
 	require.NoError(t, uc.Unregister(ctx, &grantReq{
 		subject: "user:*", relation: "v_get", object: publicGrantObject,
 		version: base.Add(5 * time.Millisecond),
@@ -233,9 +235,9 @@ func TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection(t *te
 	assert.Equal(t, 0, deletes, "a pure grant withdrawal must not reach the mirror at all")
 }
 
-// TestUnregisterResource_Repository_StillDeletesTheProjection — the guard is
-// narrow: an ordinary hierarchy unregister (the repository itself going away)
-// still removes the projection.
+// TestUnregisterResource_Repository_StillDeletesTheProjection — защита
+// узкая: обычное снятие иерархической регистрации (уходит сам репозиторий)
+// всё ещё удаляет проекцию.
 func TestUnregisterResource_Repository_StillDeletesTheProjection(t *testing.T) {
 	uc, mirror, _, _, pub := publicGrantRig()
 	ctx := context.Background()
@@ -253,19 +255,23 @@ func TestUnregisterResource_Repository_StillDeletesTheProjection(t *testing.T) {
 
 	_, ok := mirror.row(key)
 	assert.False(t, ok, "removing the repository must still remove its projection")
-	// …and its publication, under the SAME version: a repository's id is its name,
-	// and a publication surviving the repository would open the next one so named.
+	// …и его публикацию под ТОЙ ЖЕ версией: id репозитория — его имя,
+	// поэтому пережившая репозиторий публикация открыла бы следующий с таким именем.
 	assertPublications(t, []publicationCall{{
 		objectType: "registry_repository", objectID: "reg53eeeg3578y4ah0q9/team/app",
 		published: false, version: base.Add(5 * time.Millisecond),
 	}}, pub.seen(), "the object's withdrawal must withdraw its publication under its own version")
 }
 
-// TestUnregisterResource_TypeWithoutPublications_LeavesThePublicationPortAlone — the
-// legal twin of the case above: an object whose type admits no publication at all has
-// none to withdraw, and its removal must not seed a tombstone for one.
+// TestUnregisterResource_TypeWithoutPublications_LeavesThePublicationPortAlone —
+// законный близнец предыдущего случая: у объекта типа без публикаций
+// нечего снимать, и его удаление не должно создавать отметку снятия публикации.
 func TestUnregisterResource_TypeWithoutPublications_LeavesThePublicationPortAlone(t *testing.T) {
 	uc, _, _, _, pub := publicGrantRig()
+	uc.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"})
+	scopes := publicGrantScene()
+	scopes.pointers = map[string][]string{"vpc_network:enp0000000000000net1": {"project:prj0000000000000proj"}}
+	uc.scopes = scopes
 	ctx := context.Background()
 	const network = "vpc_network:enp0000000000000net1"
 
@@ -281,9 +287,9 @@ func TestUnregisterResource_TypeWithoutPublications_LeavesThePublicationPortAlon
 	assert.Empty(t, pub.seen(), "a type that admits no publication must not reach the publication port")
 }
 
-// TestRegisterResource_PublicGrant_CarriesTheOwnersVersion — the version the owner
-// stamped is the one the publication is ordered by. A zero here (the version dropped on
-// the way) would make every delivery unordered — the defect kaname#107 names.
+// TestRegisterResource_PublicGrant_CarriesTheOwnersVersion — публикация упорядочивается
+// по версии, поставленной владельцем. Ноль здесь (потеря версии
+// по пути) сделал бы каждую доставку неупорядоченной — дефект kaname#107.
 func TestRegisterResource_PublicGrant_CarriesTheOwnersVersion(t *testing.T) {
 	uc, _, _, _, pub := publicGrantRig()
 	v := time.Date(2026, 9, 16, 1, 2, 3, 456789000, time.UTC)
@@ -301,9 +307,9 @@ func TestRegisterResource_PublicGrant_CarriesTheOwnersVersion(t *testing.T) {
 	assert.True(t, v.Add(time.Second).Equal(calls[1].version), "withdrawal version = %v", calls[1].version)
 }
 
-// TestRegisterResource_PublicGrant_StoreFailureIsARefusal — a publication the store did
-// not take is an ERROR to the caller, never a quiet success: the consumer's durable
-// queue redelivers it only if it hears a refusal.
+// TestRegisterResource_PublicGrant_StoreFailureIsARefusal — не принятая хранилищем публикация
+// возвращается вызывающему ОШИБКОЙ, никогда молчаливым успехом: постоянная очередь
+// потребителя доставит её повторно, лишь получив отказ.
 func TestRegisterResource_PublicGrant_StoreFailureIsARefusal(t *testing.T) {
 	uc, _, _, _, pub := publicGrantRig()
 	pub.err = assertAnError
@@ -320,6 +326,7 @@ func TestRegisterResource_PublicGrant_StoreFailureIsARefusal(t *testing.T) {
 func publicGrantScene() sceneScopes {
 	s := unitScopes()
 	s.containers = map[string]domain.ContainerScope{
+		publicGrantObject:    {Registered: true, ProjectID: publicGrantProject, AccountID: publicGrantAccount},
 		publicGrantContainer: {Registered: true, ProjectID: publicGrantProject, AccountID: publicGrantAccount},
 	}
 	return s

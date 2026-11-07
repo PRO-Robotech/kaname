@@ -277,7 +277,7 @@ func TestMRW17_GroupAbsentBeforeTheUpIsACensusNotARefusal(t *testing.T) {
 // аудита; повторный накат снимает снова, и записей аудита становится две.
 func TestMRW25_DownRestoresTheSeedGroupAndTheReapplyConverges(t *testing.T) {
 	db, _, sink := retiredChain(t, quotaReadersGroupVersion-1)
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 	require.Zero(t, groupRows(t, db))
 	journalAfterUp, auditAfterUp := journalRows(t, db), allAuditRows(t, db)
 	require.Equal(t, 1, auditRows(t, db))
@@ -305,7 +305,7 @@ func TestMRW25_DownRestoresTheSeedGroupAndTheReapplyConverges(t *testing.T) {
 	require.Equal(t, journalAfterUp, journalRows(t, db), "откат написал в журнал прав")
 	require.Equal(t, auditAfterUp, allAuditRows(t, db), "откат написал в аудит")
 
-	require.NoError(t, goose.Up(db, "."), "повторный накат обязан сходиться")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат обязан сходиться")
 	require.Zero(t, groupRows(t, db), "повторный накат не снял возвращённую откатом группу")
 	require.Equal(t, 2, auditRows(t, db), "записей аудита о снятии группы не две — по одной на каждый прямой ход")
 	require.Contains(t, sink.text(), "членств 0 · группа 1")

@@ -759,7 +759,8 @@ func (x *UnregisterResourceRequest) GetSourceVersion() *timestamppb.Timestamp {
 }
 
 // UnregisterResourceResponse — пусто; success implicit (gRPC OK). Удаление
-// отсутствующего tuple → OK (контракт идемпотентности).
+// отсутствующего tuple → OK только при разрешимой сохранённой области и праве аккаунта.
+// Неизвестная/потерянная область → PermissionDenied без записи tombstone.
 type UnregisterResourceResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields

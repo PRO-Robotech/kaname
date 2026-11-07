@@ -87,7 +87,7 @@ func (RegistrationScopeReader) ProjectAccountTx(ctx context.Context, tx service.
 //
 // Строка зеркала названа словарём каталога, цепь — словарём модели; переход —
 // через строку каталога (живая предпочитается снятой, как у
-// [CatalogTypeReader.DottedTypeTx]).
+// [CatalogTypeReader.CatalogTypeTx]).
 func (RegistrationScopeReader) ContainerScopeTx(
 	ctx context.Context, tx service.Tx, modelType, id string,
 ) (domain.ContainerScope, error) {
@@ -143,4 +143,85 @@ func (RegistrationScopeReader) BindingRefusesTx(
 		return false, fmt.Errorf("object_project_binding: суд привязки %s:%s: %w", modelType, id, err)
 	}
 	return refuses, nil
+}
+
+// SavedRegistrationScopeTx разрешает очистку/публикацию по сохранённому зеркалу
+// либо постоянной выдаче, оставшейся после снятия регистрации. Утверждения запроса и
+// субъекты кортежей не выбирают аккаунт. Сам проект должен всё ещё существовать.
+func (r RegistrationScopeReader) SavedRegistrationScopeTx(ctx context.Context, tx service.Tx, modelType, id string) (domain.ContainerScope, error) {
+	var s domain.ContainerScope
+	err := txAsPgx(tx).QueryRow(ctx, `
+ SELECT p.id, p.account_id FROM kaname.projects p
+ JOIN (
+ SELECT coalesce(nullif(m.parent_project_id, ''),
+   (SELECT e.parent_id FROM kaname.resource_parent_edge e WHERE e.object_type=$1 AND e.object_id=$2 AND e.parent_type='project' ORDER BY depth LIMIT 1)) project
+ FROM kaname.resource_mirror m JOIN kaname.catalog_resource c ON c.dotted=m.object_type
+ WHERE c.object_type=$1 AND m.object_id=$2
+ UNION ALL
+ SELECT b.project_id FROM kaname.object_project_binding b WHERE b.object_type=$1 AND b.object_id=$2
+ ) saved ON saved.project=p.id LIMIT 1`, modelType, id).Scan(&s.ProjectID, &s.AccountID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ContainerScope{}, nil
+	}
+	if err != nil {
+		return domain.ContainerScope{}, err
+	}
+	s.Registered = true
+	return s, nil
+}
+
+// SaveRegistrationScopesTx сохраняет уже выведенные полномочия отдельно от
+// необязательных утверждений клиента. Запускается только после авторизации и применённой
+// регистрации зеркала в той же транзакции. Иерархия повторно не читается.
+func (RegistrationScopeReader) SaveRegistrationScopesTx(ctx context.Context, tx service.Tx, modelType, id string, hs []domain.ContainerScope) error {
+	ptx := txAsPgx(tx)
+	if _, err := ptx.Exec(ctx, `DELETE FROM kaname.resource_registration_scope WHERE object_type=$1 AND object_id=$2`, modelType, id); err != nil {
+		return err
+	}
+	for _, h := range hs {
+		if _, err := ptx.Exec(ctx, `INSERT INTO kaname.resource_registration_scope(object_type,object_id,project_id,account_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, modelType, id, h.ProjectID, h.AccountID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SavedRegistrationScopesTx предпочитает сохранённую каноническую область (включая пропущенные
+// утверждения). Прежние регистрации используют существующее сохранённое зеркало/выдачу.
+func (r RegistrationScopeReader) SavedRegistrationScopesTx(ctx context.Context, tx service.Tx, modelType, id string) ([]domain.ContainerScope, error) {
+	rows, err := txAsPgx(tx).Query(ctx, `SELECT s.project_id,coalesce(p.account_id,'') FROM kaname.resource_registration_scope s LEFT JOIN kaname.projects p ON p.id=s.project_id WHERE s.object_type=$1 AND s.object_id=$2 ORDER BY p.account_id,s.project_id`, modelType, id)
+	if err != nil {
+		return nil, err
+	}
+	scopes, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.ContainerScope, error) {
+		s := domain.ContainerScope{Registered: true}
+		e := row.Scan(&s.ProjectID, &s.AccountID)
+		return s, e
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(scopes) > 0 {
+		return scopes, nil
+	}
+	rows, err = txAsPgx(tx).Query(ctx, `SELECT project_id,account_id FROM kaname.registration_legacy_scopes($1,$2) ORDER BY account_id,project_id`, modelType, id)
+	if err != nil {
+		return nil, err
+	}
+	scopes, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.ContainerScope, error) {
+		s := domain.ContainerScope{Registered: true}
+		e := row.Scan(&s.ProjectID, &s.AccountID)
+		return s, e
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(scopes) > 0 {
+		return scopes, nil
+	}
+	s, err := r.SavedRegistrationScopeTx(ctx, tx, modelType, id)
+	if err != nil || !s.Registered {
+		return nil, err
+	}
+	return []domain.ContainerScope{s}, nil
 }

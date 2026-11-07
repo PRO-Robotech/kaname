@@ -170,7 +170,7 @@ func rid12RequireNewmanPremise(t *testing.T, f *installationNativeWorld, in rid1
 	delivered := e.Phase != "before" && !in.Invalid
 	require.Len(t, p.Accounts, 4)
 	// Каждый мир RID12 уже имеет готовую базу. Встроенный собственный манифест
-	// безусловно засеивает эту группу SYS до любого поставленного манифеста.
+	// сохраняет созданную миграцией legacy-группу SYS; own seed явно пуст.
 	require.NotEmpty(t, p.Groups)
 	stockWriterGroups := 0
 	for _, group := range p.Groups {
@@ -178,7 +178,7 @@ func rid12RequireNewmanPremise(t *testing.T, f *installationNativeWorld, in rid1
 			stockWriterGroups++
 		}
 	}
-	require.Equal(t, 1, stockWriterGroups, "canonical own-seed group exists in every BEFORE/AFTER phase")
+	require.Equal(t, 1, stockWriterGroups, "canonical migration-provenance legacy group exists in every BEFORE/AFTER phase")
 	normal := map[string]bool{}
 	for _, a := range p.Accounts {
 		id := a["id"].(string)

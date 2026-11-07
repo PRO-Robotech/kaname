@@ -15,7 +15,7 @@ package pg_test
 // НИКОГДА — проекция журнала отбрасывала отношение-глагол целиком, и
 // опубликованный репозиторий оставался закрытым для анонимного чтения. Замер на
 // стволе до правки: строка журнала 1, прямых фактов 0, вердикт `deny`.
-// Утверждение о строке этого не видит by construction; видит только вопрос,
+// Утверждение о строке этого не видит по построению; видит только вопрос,
 // который задаёт enforcement.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -36,6 +36,8 @@ package pg_test
 
 import (
 	"context"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -78,7 +80,7 @@ func publicReadRig(t *testing.T) (*internal_iam.RegisterResourceUseCase, *pgxpoo
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	).
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"}).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
 		WithResidualTupleReader(kanamepg.NewResidualTupleReader(pool))
@@ -185,6 +187,7 @@ func versions() (v1, v2 time.Time) {
 func TestPublicRead_PublicationReachesTheVerdict(t *testing.T) {
 	uc, pool := publicReadRig(t)
 	const id = "reg00000000000000pub/team/app"
+	registerPublicReadTarget(t, uc, pool, id)
 	v1, v2 := versions()
 
 	requirePrivate(t, pool, id, "до публикации репозиторий закрыт")
@@ -204,6 +207,7 @@ func TestPublicRead_PublicationReachesTheVerdict(t *testing.T) {
 func TestPublicRead_LateRedeliveryAfterWithdrawalDoesNotReopen(t *testing.T) {
 	uc, pool := publicReadRig(t)
 	const id = "reg00000000000late/team/app"
+	registerPublicReadTarget(t, uc, pool, id)
 	v1, v2 := versions()
 
 	publish(t, uc, id, v1)
@@ -221,6 +225,7 @@ func TestPublicRead_LateRedeliveryAfterWithdrawalDoesNotReopen(t *testing.T) {
 func TestPublicRead_InOrderRepublicationOpens(t *testing.T) {
 	uc, pool := publicReadRig(t)
 	const id = "reg000000000order/team/app"
+	registerPublicReadTarget(t, uc, pool, id)
 	v1, v2 := versions()
 
 	withdraw(t, uc, id, v1)
@@ -240,6 +245,7 @@ func TestPublicRead_InOrderRepublicationOpens(t *testing.T) {
 func TestPublicRead_UnversionedWithdrawalClosesFailClosed(t *testing.T) {
 	uc, pool := publicReadRig(t)
 	const id = "reg00000000nover/team/app"
+	registerPublicReadTarget(t, uc, pool, id)
 	v1, v2 := versions()
 
 	publish(t, uc, id, v1)
@@ -332,6 +338,8 @@ func TestPublicRead_ConcurrentDeliveriesConvergeToTheNewestIntent(t *testing.T) 
 	)
 	for i := 0; i < rounds; i++ {
 		id := "reg00000000race" + string(rune('a'+i%26)) + string(rune('a'+i/26)) + "/team/app"
+		registerPublicReadTarget(t, uc, pool, id)
+		registerPublicReadTarget(t, uc, pool, "reg0000000filler/x/"+id)
 		older := base.Add(time.Duration(i) * 10 * time.Millisecond)
 		newer := older.Add(time.Millisecond)
 		closeWins := i%2 == 0
@@ -448,4 +456,25 @@ func TestPublicRead_ProjectionFoldsOnlyTheOwnerOrderedVerb(t *testing.T) {
 		storedPublicSubject, publicReadRelation, publicReadObject(broken))
 	require.Error(t, err, "неразбираемая версия владельца обязана ронять строку, а не подменяться меткой журнала")
 	requirePrivate(t, pool, broken, "строка с неразбираемой версией оставила факт")
+}
+
+// registerPublicReadTarget устанавливает настоящую зарегистрированную область, требуемую
+// AW-14/15, до проверки порядка публикаций. Полномочия никогда не выводятся
+// из анонимного субъекта кортежа.
+func registerPublicReadTarget(t *testing.T, uc *internal_iam.RegisterResourceUseCase, pool *pgxpool.Pool, id string) {
+	t.Helper()
+	ctx := context.Background()
+	registry, _, _ := strings.Cut(id, "/")
+	var registered bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.resource_mirror WHERE object_type='registry.registries' AND object_id=$1)`, registry).Scan(&registered))
+	if !registered {
+		scene := registrationscene.Seed(t, ctx, pool)
+		require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
+			SubjectId: "project:" + scene.Project, Relation: "project", Object: "registry_registry:" + registry,
+			ParentProjectId: scene.Project, ParentAccountId: scene.Account, ParentChain: scene.ProjectChain(),
+		}))
+	}
+	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
+		SubjectId: "registry_registry:" + registry, Relation: "parent", Object: publicReadObject(id),
+	}))
 }

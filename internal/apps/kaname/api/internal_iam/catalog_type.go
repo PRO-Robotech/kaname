@@ -44,12 +44,13 @@ package internal_iam
 //
 //	регистрация  зеркало отвергает строку, называя тип и правило
 //	             (`ErrUnknownResourceType` → `INVALID_ARGUMENT` на поле `object`);
-//	снятие       удалять нечего, и это успех по контракту прокси
-//	             («unregister of an absent tuple → OK»).
+//	аудит/перевод имя сохраняется, окончательный вердикт выносит вызывающий.
+//
+// Снятие дополнительно требует канонического владельца и сохранённой области
+// (account_writer.go): неизвестный ключ не разрешается этим переводом (AW15).
 //
 // Отказать здесь значило бы завести ВТОРОЕ место, выносящее тот же вердикт, и
-// сломать второй контракт заодно: снятие несуществующего перестало бы быть
-// успехом.
+// смешать перевод имени с решением о полномочиях.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЖИВАЯ СТРОКА ПРЕДПОЧИТАЕТСЯ СНЯТОЙ, И СНЯТАЯ ТОЖЕ ЧИТАЕТСЯ
@@ -89,11 +90,11 @@ import (
 // промах, решает вызывающий, и у регистрации со снятием ответы разные.
 //
 // WritePolicyTx — та же живая строка, прочитанная для регистрации (kaname#982,
-// Р1): точечное имя И политика записи модуля на тип, одним чтением. `live=false` —
+// Р1): точечное имя, канонический владелец И политика записи типа одним чтением. `live=false` —
 // живой строки нет, и политику с выводом регистрация не судит (Р3): тип отвергает
 // строка зеркала, как и прежде.
 type catalogTypeReader interface {
-	DottedTypeTx(ctx context.Context, tx service.Tx, modelType string) (dotted string, ok bool, err error)
+	CatalogTypeTx(ctx context.Context, tx service.Tx, modelType string) (identity domain.CatalogTypeIdentity, ok bool, err error)
 	WritePolicyTx(ctx context.Context, tx service.Tx, typeName string) (dotted string, policy domain.WritePolicy, live bool, err error)
 }
 
@@ -111,7 +112,7 @@ func (uc *RegisterResourceUseCase) catalogObjectType(
 		// точкой не существует.
 		return typeName, nil
 	}
-	dotted, ok, err := uc.catalogTypes.DottedTypeTx(ctx, tx, typeName)
+	identity, ok, err := uc.catalogTypes.CatalogTypeTx(ctx, tx, typeName)
 	if err != nil {
 		return "", err
 	}
@@ -120,5 +121,5 @@ func (uc *RegisterResourceUseCase) catalogObjectType(
 		// его выносит (см. шапку): здесь имя проходит неизменным.
 		return typeName, nil
 	}
-	return dotted, nil
+	return identity.Dotted, nil
 }

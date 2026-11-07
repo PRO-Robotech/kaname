@@ -1,10 +1,10 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package internal_iam — InternalIAMService (internal-only, gRPC port :9091).
+// Package internal_iam — InternalIAMService (только внутренний, порт gRPC :9091).
 //
-// Ban #6 (Internal.* не публикуется на external endpoint): internal-only сервис.
-// Регистрируется ТОЛЬКО на internal listener (port 9091).
+// Запрет №6 (Internal.* не публикуется на внешней точке входа): только внутренний сервис.
+// Регистрируется ТОЛЬКО на внутреннем слушателе (порт 9091).
 //
 // Инвариант — INTERNAL-ONLY, а не «только gRPC». LookupSubject и Check несут
 // http-аннотации, и api-gateway заводит им REST-маршруты на СВОЁМ внутреннем mux
@@ -16,9 +16,11 @@
 // Методы:
 //   - LookupSubject(by external_id|id|email) — для auth-interceptor api-gateway
 //     после валидации JWT.
-//   - Check — single-tuple authorization gate; delegate к AuthorizeService.
-//     Вызывается per-RPC authz-interceptor'ами
-//     kacho-vpc / kacho-compute / kacho-loadbalancer.
+//
+// - Check — проверка прав на один кортеж; передаёт вызов AuthorizeService.
+// Вызывается перехватчиками прав каждого RPC в
+//
+//	kacho-vpc / kacho-compute / kacho-loadbalancer.
 package internal_iam
 
 import (
@@ -43,48 +45,48 @@ import (
 	"github.com/PRO-Robotech/kaname/pkg/subjectchange"
 )
 
-// Authorizer — narrow port-iface over service.AuthorizeService, exposing only
-// the relation-native check the InternalIAMService gate needs (narrow port).
-// Implemented by *service.AuthorizeService directly, or by
-// the metrics-instrumented decorator (*metrics.InstrumentedAuthorizer) wired in
-// the composition root. Exported so the composition root can name it when
-// selecting between the plain and instrumented variant.
+// Authorizer — узкий интерфейс порта над service.AuthorizeService, открывающий только
+// проверку родного отношения, нужную стражу InternalIAMService.
+// Реализуется *service.AuthorizeService напрямую либо
+// декоратором с метриками (*metrics.InstrumentedAuthorizer), подключённым в
+// корне сборки. Экспортирован, чтобы корень мог назвать его при
+// выборе обычного варианта или варианта с метриками.
 type Authorizer interface {
 	CheckRelation(ctx context.Context, req service.CheckRelationRequest) (*service.CheckResult, error)
 }
 
-// subjectChanger — narrow port-iface over service.SubjectChangeService,
-// exposing only the PollSubjectChanges use-case (narrow port). Implemented by
+// subjectChanger — узкий интерфейс порта над service.SubjectChangeService,
+// открывающий только сценарий PollSubjectChanges. Реализация —
 // *service.SubjectChangeService.
 type subjectChanger interface {
 	PollSubjectChanges(ctx context.Context, sinceID int64, limit int32) ([]service.SubjectChange, int64, error)
 }
 
-// relationWriteGate — narrow authz port for the resource-registration RPCs.
-// Authorize resolves the mTLS client-cert→SA identity and
-// ReBAC-checks `fga_writer` on `cluster:cluster_root` (kacho#914). Implemented by
+// relationWriteGate — узкий порт проверки прав RPC регистрации ресурсов.
+// Authorize выводит личность служебной учётной записи из клиентского сертификата mTLS и
+// проверяет ReBAC `fga_writer` на `cluster:cluster_root` (kacho#914). Реализация —
 // *authzguard.RelationWriteGate.
 type relationWriteGate interface {
 	Authorize(ctx context.Context) (callerDomain string, err error)
 }
 
-// resourceRegistrar — narrow use-case port for RegisterResource /
-// UnregisterResource. Implemented by *RegisterResourceUseCase. Register
-// consumes the mirror fields (labels + parent-scope) + the hardening
-// source_version via registerInput; Unregister consumes the tuple + the
-// tombstone source_version via unregisterInput (mirror row removed by PK,
-// conditionally on the tombstone-version).
+// resourceRegistrar — узкий порт сценария RegisterResource /
+// UnregisterResource. Реализация — *RegisterResourceUseCase. Register
+// потребляет поля зеркала (метки и родительскую область), а также защитную
+// source_version через registerInput; Unregister потребляет кортеж и
+// source_version метки удаления через unregisterInput (строка зеркала удаляется по первичному ключу,
+// условно по версии метки удаления).
 type resourceRegistrar interface {
 	Register(ctx context.Context, in registerInput) error
 	Unregister(ctx context.Context, in unregisterInput) error
 	RecordRefusal(ctx context.Context, in unregisterInput, unregister bool, outcome string) error
 }
 
-// roleCompiledReader — narrow read port returning a Role's compiled permission
-// projection (redesign-2026 F5 GetRoleCompiled). Implemented by
-// *role.GetRoleCompiledUseCase, wired in the composition root. nil → the RPC fails
-// closed (Unavailable). Errors (malformed id → InvalidArgument, missing → NotFound)
-// are already gRPC-status shaped by the use-case.
+// roleCompiledReader — узкий порт чтения скомпилированной проекции разрешений
+// роли (redesign-2026 F5 GetRoleCompiled). Реализация —
+// *role.GetRoleCompiledUseCase, подключённый в корне сборки. nil → RPC отвечает
+// закрытым отказом Unavailable. Ошибки (неверный id → InvalidArgument, отсутствие → NotFound)
+// уже оформлены сценарием как статусы gRPC.
 type roleCompiledReader interface {
 	Execute(ctx context.Context, id domain.RoleID) ([]string, error)
 }
@@ -98,9 +100,9 @@ type Handler struct {
 	subjectChange subjectChanger
 	roleCompiled  roleCompiledReader
 
-	// Resource-registration gate. Both nil when the registration
-	// stack is not wired (degraded/dev) — RegisterResource then returns
-	// Unavailable, fail-closed.
+	// Страж регистрации ресурсов. Оба поля nil, если стек регистрации
+	// не подключён (деградация/dev): RegisterResource тогда возвращает
+	// Unavailable, закрытый отказ.
 	registrar resourceRegistrar
 	regGate   relationWriteGate
 
@@ -117,23 +119,23 @@ type Handler struct {
 	// жизнь контроля» обязано быть заметно, иначе мёртвый контроль невидим.
 	logger *slog.Logger
 
-	// adminCheck — defense-in-depth ReBAC system_admin@cluster gate for the
-	// privileged admin RPCs (ForceLogout). nil → fail-closed (the gate denies).
-	// See force_logout.go requireSystemAdmin.
+	// adminCheck — дополнительный страж ReBAC system_admin@cluster для
+	// привилегированных административных RPC (ForceLogout). nil → закрытый отказ стража.
+	// См. requireSystemAdmin в force_logout.go.
 	adminCheck authzguard.RelationChecker
 
-	// operations — Operation repository ForceLogout persists its operation row
-	// in, before the mutation and terminally after it. nil → the RPC fails
-	// closed Unavailable rather than returning an id that names no row.
+	// operations — репозиторий Operation, в котором ForceLogout сохраняет строку операции
+	// до изменения и окончательно после него. nil → RPC отвечает
+	// закрытым отказом Unavailable вместо идентификатора несуществующей строки.
 	operations forceLogoutOperationRepo
 
 	// ownSessions — снятие НАШИХ записей сессии входа (`human_sessions`),
 	// отсечка и запись события одной транзакцией (kaname#340). nil → ForceLogout
-	// fails closed Unavailable.
+	// отвечает закрытым отказом Unavailable.
 	ownSessions OwnSessions
 
 	// cutoffClock — ОБЩИЙ для всех реплик источник момента отсечки ForceLogout
-	// (kaname#589). nil → ForceLogout fails closed Unavailable.
+	// (kaname#589). nil → ForceLogout отвечает закрытым отказом Unavailable.
 	cutoffClock revocationpolicy.Clock
 
 	// modules — личности модулей установки (kaname#987): Check плоскости
@@ -154,44 +156,40 @@ func (h *Handler) WithModuleRoster(r moduleidentity.Roster) *Handler {
 	return h
 }
 
-// NewHandler — builder. `authz` may be nil when the FGA stack is not
-// configured (dev); in that case Check returns Unavailable rather than
-// Unimplemented (fail-closed for the gate).
+// NewHandler — конструктор. `authz` может быть nil, если стек FGA
+// не настроен (dev); тогда Check возвращает Unavailable вместо
+// Unimplemented (закрытый отказ стража).
 func NewHandler(l *LookupSubjectUseCase, authz Authorizer) *Handler {
 	return &Handler{lookup: l, authz: authz}
 }
 
-// WithLogger — attaches the process logger to the handler.
-// Called from the composition root (cmd/kaname/main.go).
+// WithLogger — подключает журнал процесса к обработчику.
+// Вызывается из корня сборки (cmd/kaname/main.go).
 func (h *Handler) WithLogger(l *slog.Logger) *Handler {
 	h.logger = l
 	return h
 }
 
-// WithSubjectChange — attaches the SubjectChangeService to the handler.
+// WithSubjectChange — подключает SubjectChangeService к обработчику.
 func (h *Handler) WithSubjectChange(sc subjectChanger) *Handler {
 	h.subjectChange = sc
 	return h
 }
 
-// WithResourceRegistrar — attaches the RegisterResource use-case + ReBAC authz
-// gate. Both must be non-nil for the resource-registration RPCs to
-// function; if either is nil the RPCs fail-closed (Unavailable on missing
-// use-case, PermissionDenied when the gate denies).
+// WithResourceRegistrar — подключает сценарий RegisterResource и страж прав ReBAC.
+// Оба должны быть не nil для работы RPC регистрации
+// ресурсов; иначе RPC отвечают закрытым отказом (Unavailable при отсутствии
+// сценария, PermissionDenied при отказе стража).
 func (h *Handler) WithResourceRegistrar(registrar resourceRegistrar, gate relationWriteGate) *Handler {
 	h.registrar = registrar
 	h.regGate = gate
 	return h
 }
 
-// validateProxyTuple applies the shared proxy-write rule and maps its verdict to the
-// transport. This is the ONE place the refusal becomes a gRPC status, so the code and
-// the text cannot drift between the three RPCs that share the rule; the rule itself is
-// transport-free by design (corelib/authz/proxytuple.ErrRefused) so a consumer's domain
-// layer can import it without taking a dependency on gRPC.
-//
-// The refusal carries no reason: which clause refused is deliberately not observable
-// (fail-closed, no oracle). Locked by TestProxyTupleRefusalMapsToPermissionDenied.
+// validateProxyTuple сохраняет эталон совместимости скомпилированной политики для
+// проверок общей политики. Сама регистрация использует validateRegistrationShape
+// и обязательную транзакционную проверку владельца каталога; скомпилированный словарь
+// не может разрешать или отвергать динамически доставленный тип.
 func validateProxyTuple(callerDomain, subject, relation, object string) error {
 	// Словарь владения типом подаётся ЗДЕСЬ: правило живёт в общем фундаменте, а
 	// закрытая таблица типов — за границей его видимости (см. proxy_type_owner.go).
@@ -204,6 +202,47 @@ func validateProxyTuple(callerDomain, subject, relation, object string) error {
 	return nil
 }
 
+// validateRegistrationShape проверяет только безопасную форму до TX. Допуск
+// нестандартного отношения завершается точной тройкой parents живого каталога;
+// оно не становится глобально разрешённым отношением прокси.
+func validateRegistrationShape(module, subject, relation, object string) error {
+	if module == "" || strings.ContainsAny(module, "* \t\n") {
+		return proxyWriteRefusal()
+	}
+	if proxytuple.Hierarchical(proxytuple.Relation(relation)) || proxytuple.IsPublicReadGrant(subject, relation) {
+		if err := proxytuple.ValidateTuple("", subject, relation, object); err != nil {
+			return proxyWriteRefusal()
+		}
+		return nil
+	}
+	if validateRelationString("subject_id", subject) != nil || validateRelationString("object", object) != nil || !registrationRelationName(relation) {
+		return proxyWriteRefusal()
+	}
+	subjectType, subjectID, _ := strings.Cut(subject, ":")
+	if subjectType == "system_class" || strings.Contains(subjectID, "*") {
+		return proxyWriteRefusal()
+	}
+	objectType, _, _ := strings.Cut(object, ":")
+	for _, forbidden := range proxytuple.ForbiddenObjectTypes() {
+		if objectType == forbidden {
+			return proxyWriteRefusal()
+		}
+	}
+	return nil
+}
+
+func registrationRelationName(name string) bool {
+	if name == "" || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for _, c := range name {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
 // proxyWriteRefusal — ЕДИНСТВЕННЫЙ производитель отказа проксируемой записи по
 // правам: его отдают и правило приёма здесь, и политика записи модуля в use-case
 // (kaname#982, Р3). Ответ побайтово один — `PERMISSION_DENIED`, `permission
@@ -213,53 +252,53 @@ func proxyWriteRefusal() error {
 	return status.Error(codes.PermissionDenied, "permission denied")
 }
 
-// RegisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple write
-// into kaname.fga_outbox, out of which a trigger folds the direct fact in the
-// same commit. Idempotent: repeat of the same tuple → OK, never AlreadyExists.
+// RegisterResource — внутренний прокси FGA: ставит запись кортежа иерархии владельца
+// в kaname.fga_outbox, из которой триггер складывает прямой факт тем
+// же коммитом. Идемпотентен: повтор того же кортежа → OK, никогда AlreadyExists.
 //
-// authz: exempt in proto-catalog; least-priv enforced HERE via ReBAC
-// (cert-cert→SA → `fga_writer@cluster:cluster_root`). cluster-internal :9091.
+// Права: исключён из каталога proto; минимум привилегий проверяется ЗДЕСЬ через ReBAC
+// (проверенная личность модуля → допустимая каноническая учётная запись fga_writer). Внутренний :9091.
 func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResourceRequest) (response *iamv1.RegisterResourceResponse, err error) {
 	defer func() { err = h.registrationRefusal(ctx, req, false, err) }()
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
+	if err := validateRegistrationShape(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
 		return nil, err
 	}
 	if h.registrar == nil {
 		return nil, status.Error(codes.Unavailable, "fga proxy not configured")
 	}
 	if err := h.registrar.Register(ctx, req); err != nil {
-		// Map the use-case error via the single sentinel→gRPC translator:
-		// validation status errors pass through, ErrUnavailable → Unavailable
-		// (retriable fail-closed), any un-sentineled pgx/DB error → opaque
-		// codes.Internal "internal error" (hardening-invariant #1: never echo the
-		// raw driver text — host/port/user/db — nor leak it as codes.Unknown).
+		// Переводим ошибку сценария единым преобразователем признака ошибки в gRPC:
+		// статусы проверки проходят как есть, ErrUnavailable → Unavailable
+		// (повторяемый закрытый отказ), любая ошибка pgx/базы без признака → непрозрачный
+		// codes.Internal "internal error" (инвариант усиления №1: никогда не возвращать
+		// сырой текст драйвера host/port/user/db и не раскрывать его через codes.Unknown).
 		return nil, shared.MapRepoErr(err)
 	}
 	return &iamv1.RegisterResourceResponse{}, nil
 }
 
-// UnregisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple
-// delete. Idempotent: absent tuple → OK, never NotFound (drainer
-// cannot_delete→success). Same authz gate as RegisterResource.
+// UnregisterResource — внутренний прокси FGA: ставит удаление кортежа иерархии
+// владельца. Идемпотентен: отсутствующий кортеж → OK, никогда NotFound (исполнитель
+// превращает cannot_delete в успех). Тот же страж прав, что у RegisterResource.
 func (h *Handler) UnregisterResource(ctx context.Context, req *iamv1.UnregisterResourceRequest) (response *iamv1.UnregisterResourceResponse, err error) {
 	defer func() { err = h.registrationRefusal(ctx, req, true, err) }()
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateProxyTuple(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
+	if err := validateRegistrationShape(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
 		return nil, err
 	}
 	if h.registrar == nil {
 		return nil, status.Error(codes.Unavailable, "fga proxy not configured")
 	}
 	if err := h.registrar.Unregister(ctx, req); err != nil {
-		// Same sentinel→gRPC mapping as RegisterResource (opaque Internal for
-		// un-sentineled pgx/DB errors; no raw-text leak, no codes.Unknown).
+		// То же преобразование признаков ошибок в gRPC, что у RegisterResource: непрозрачный Internal
+		// для ошибок pgx/базы без признака; без утечки сырого текста и codes.Unknown.
 		return nil, shared.MapRepoErr(err)
 	}
 	return &iamv1.UnregisterResourceResponse{}, nil
@@ -289,9 +328,9 @@ func (h *Handler) registrationRefusal(ctx context.Context, in unregisterInput, u
 	return refusal
 }
 
-// authorizeRegistration runs the ReBAC gate and returns the caller's module
-// domain (vpc/compute/nlb) for object-type binding. nil gate → fail-closed
-// PermissionDenied (never silently allow an unwired gate in production).
+// authorizeRegistration запускает страж ReBAC и возвращает домен модуля
+// вызывающего (vpc/compute/nlb) для привязки типа объекта. nil страж → закрытый отказ
+// PermissionDenied: никогда не разрешать молча неподключённый страж в боевом режиме.
 func (h *Handler) authorizeRegistration(ctx context.Context) (string, error) {
 	if h.regGate == nil {
 		return "", status.Error(codes.PermissionDenied, "permission denied")
@@ -310,17 +349,17 @@ func (h *Handler) LookupSubject(ctx context.Context, req *iamv1.LookupSubjectReq
 	return h.lookup.Execute(ctx, req)
 }
 
-// Check — single-tuple authorization gate.
+// Check — проверка прав на один кортеж.
 //
-// Thin transport-wrapper: delegates to AuthorizeService.CheckRelation, which
-// runs the same FGA `Check` + OPA-guardrail pipeline as the public
-// AuthorizeService.Check use-case. The InternalIAMService.CheckRequest is
-// FGA-native ({subject_id, relation, object}) — the caller (vpc/compute
-// per-RPC interceptor) has already resolved the RPC → relation, so no
-// action→relation step is needed here.
+// Тонкая транспортная обёртка: передаёт вызов AuthorizeService.CheckRelation, который
+// выполняет тот же конвейер FGA `Check` и ограничителя OPA, что публичный
+// сценарий AuthorizeService.Check. InternalIAMService.CheckRequest имеет родную форму
+// FGA ({subject_id, relation, object}): вызывающий, перехватчик каждого RPC vpc/compute,
+// уже перевёл RPC → отношение, поэтому шаг
+// действие→отношение здесь не нужен.
 //
-// Coarse-grained gate: there is no per-call `action`/condition context on the
-// wire, so the OPA overlay sees a synthesised action (object-type.relation).
+// Общий страж: на проводе нет контекста `action` или условия для отдельного вызова,
+// поэтому надстройка OPA видит синтезированное действие (тип объекта.отношение).
 func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.CheckResponse, error) {
 	if req.GetSubjectId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument subject_id: required")
@@ -350,7 +389,7 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 		Object:   req.GetObject(),
 		// Требование свежести передаётся дальше, и оно ВЫПОЛНЕНО безусловно:
 		// вердикт читает ведущую базу службы, поэтому собственная закоммиченная
-		// запись вызывающего видна следующему же чтению by construction.
+		// запись вызывающего видна следующему же чтению по построению.
 		//
 		// Поле остаётся не «на всякий случай», а как ИМЯ требования: пути чтения с
 		// отстающей реплики сегодня нет (он вне границ приёмки R7-3), и появится
@@ -385,8 +424,8 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 			}
 			return nil, status.Error(codes.Unavailable, shared.UnavailableMessage)
 		default:
-			// Opaque INTERNAL — unmapped errors must not echo err.Error() (would
-			// leak pgx/DB driver text: host/port/user/db).
+			// Непрозрачный INTERNAL: нераспознанные ошибки не возвращают err.Error(), иначе
+			// утёк бы текст драйвера pgx/базы: host/port/user/db.
 			return nil, status.Error(codes.Internal, "internal error")
 		}
 	}
@@ -407,8 +446,8 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 // `service/shadow_port.go`, свойство держит гейт
 // `TestEveryEngineAskingQuestionAlsoAsksTheShadowForm`.
 
-// PollSubjectChanges — drains subject_change_outbox by ascending-id cursor.
-// Internal-only (cluster-internal listener; ban #6).
+// PollSubjectChanges — вычитывает subject_change_outbox по курсору возрастающего id.
+// Только внутренний: слушатель внутри кластера, запрет №6.
 func (h *Handler) PollSubjectChanges(ctx context.Context, req *iamv1.PollSubjectChangesRequest) (*iamv1.PollSubjectChangesResponse, error) {
 	if h.subjectChange == nil {
 		return nil, status.Error(codes.Unavailable, "subject change service not configured")
@@ -433,8 +472,8 @@ func (h *Handler) PollSubjectChanges(ctx context.Context, req *iamv1.PollSubject
 		// утраченной позиции вечно, и петля отзыва встала бы навсегда — молча
 		// для клиента, у которого кэш вердиктов отвечает по снятым правам.
 		//
-		// С общим отказом — потому что `INTERNAL` текста не несёт by
-		// construction (он приносит имена схемы и драйвера), а возобновимая
+		// С общим отказом — потому что `INTERNAL` текста не несёт по
+		// построению (он приносит имена схемы и драйвера), а возобновимая
 		// позиция ОБЯЗАНА доехать: без неё вызывающему некуда сесть.
 		//
 		// Отказ собирается ТЕМ ЖЕ конструктором, каким его разбирает край:

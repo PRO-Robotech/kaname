@@ -15,6 +15,7 @@ package internal_iam_test
 
 import (
 	"context"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"testing"
 	"time"
 
@@ -59,12 +60,20 @@ func TestSystemClass_SC12_SC13_PublicationIsAGrantToAnonymous(t *testing.T) {
 	}
 	ctx := context.Background()
 	uc, probe := newRegisterUC(t)
+	uc.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	a := relverdict.NewAsker(probe.pool)
 	// Вошедший — СТРОКОЙ учётки: класс выводится лишь существующей учётке
 	// (kaname#909), и говорящий без строки отвечал бы «нет» не по предмету пробы.
 	person := "user:" + string(seedForceLogoutUser(t, ctx, probe.pool))
 	obj := "registry_repository:" + scPublicRepo
 	base := time.Now()
+	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
+		SubjectId: "project:" + probe.scene.Project, Relation: "project", Object: "registry_registry:reg53eeeg3578y4ah0q9",
+		ParentProjectId: probe.scene.Project, ParentAccountId: probe.scene.Account, ParentChain: probe.scene.ProjectChain(),
+	}))
+	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
+		SubjectId: "registry_registry:reg53eeeg3578y4ah0q9", Relation: "parent", Object: obj,
+	}))
 
 	// Положительный контроль: системная выдача чтения справочников действует
 	// для вошедшего (Р8, SC-40) — без неё «нет» анониму ниже ничего не различало бы.

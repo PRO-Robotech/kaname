@@ -785,3 +785,9 @@ moduleManifests:
 #   credentialFile: /run/secrets/module-seed-installer.json
 #   tenantAccountId: acc00000000000000001
 moduleSeedInstaller: {}
+
+# Explicit installation authority for registration (kaname#1031). Required in
+# production. Omitted has no default; to intentionally disable all registrars use:
+# registrationAccountWriters: { assignments: [], disabled: [] }
+# Each assignment: {assignment_id: <new-stable-id>, account_id: <existing-id>, module: registry}
+# disabled is an explicit first-upgrade census exception: {account_id, module, reason}.

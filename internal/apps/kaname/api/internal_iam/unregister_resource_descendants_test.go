@@ -19,6 +19,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
 // noDescendants — у двойника зеркала потомков нет: пробы, которые его встраивают,
@@ -109,7 +110,7 @@ func registryDescendants() []service.RegisteredDescendant {
 
 func unregisterRegistry(t *testing.T, m *descendantMirror, w *recordingWithdrawal, e *recordingEmitter) {
 	t.Helper()
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, w, noAudit{}, unitScopes())
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, w, noAudit{}, unitScopes()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_a", relation: "project", object: "registry_registry:reg1",
 		version: time.Now(),
@@ -242,7 +243,7 @@ func TestUnregister_AuditCountsOnlyDescendantsThisCallRemoved(t *testing.T) {
 			m := &descendantMirror{parentGone: true, descendants: two(), removedMeanwhile: tc.removed}
 			a := &recordingAudit{}
 			uc := NewRegisterResourceUseCase(&recordingEmitter{}, m, &smTxBeginner{}, seededCatalogTypes{},
-				&recordingPublisher{}, &recordingWithdrawal{}, a, unitScopes())
+				&recordingPublisher{}, &recordingWithdrawal{}, a, unitScopes()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 			require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 				subject: "project:prj_a", relation: "project", object: "registry_registry:reg1", version: time.Now(),
 			}))

@@ -1,0 +1,41 @@
+{
+  "kind": "implementation_delta_review",
+  "reviewer_agent": "/root/account_writer_1031_review",
+  "reviewed_at": "2026-11-02T13:07:04.930145+00:00",
+  "head": "1f47efedc351a55105c95239fb4621688093164e",
+  "tree": "084d5fff1b4b1eb5567203826b61c2cff61e2990",
+  "base_review_head": "cc952f41c2c98c76e1c8c1e03eb26f6c7f816d6d",
+  "acceptance_sha256": "7595d5da1e0b962c44c429018f9d1425030ea2e1b4bd472ce14a9524b87c317e",
+  "verdict": "CHANGES_REQUESTED",
+  "runtime_executed": 0,
+  "worktree_clean_before_and_after": true,
+  "closed_findings": [
+    {
+      "id": "D1",
+      "status": "closed_source",
+      "evidence": "Baseline account/group/binding lineage and canonical cluster anchor verified. One predicate now governs selection, locked recheck and INSERT/UPDATE fence. Mutable rename of original group no longer loses ownership; foreign same-name tenant groups and noncanonical clusters are excluded. Test source covers these positive/refusal controls."
+    }
+  ],
+  "findings": [
+    {
+      "id": "D2",
+      "priority": 1,
+      "path": "internal/migrations/20261102130000_registration_account_writer_assignments.sql",
+      "line": 105,
+      "title": "Full old seed can recreate the blanket under a new group ID after rename",
+      "evidence": "The supported normal rename leaves system/module-relation-writers natural key unused. Pre-1031 service manifest at fe607b38 declares that group and its cluster fga_writer grant. Old and current module_seed_writer.go:208-214 UpsertGroup generate a random ID and upsert on (account_id,name); apply.go:303-326 creates groups before applying bindings. Thus full old seed after retirement creates a new group and new ACTIVE system fga_writer binding. This predicate matches only the baseline group ID, so its fence accepts the new blanket and its retirement selector also misses it. Current test at account_writer_world_integration_test.go:752 calls only GrantRelation on the renamed original group; it cannot detect full seed recreation. This violates acceptance section4 rollback nonrestoration, even if ingress is kept closed.",
+      "fix": "Prevent the actual legacy installation seed lifecycle from recreating its retired blanket after a supported rename/deletion, while preserving unrelated tenant grants; cover complete old service seed group-upsert plus grant sequence, not only GrantRelation against original ID. Do not broaden ownership to all same-named groups."
+    }
+  ],
+  "positive_checks": [
+    "Exact historical assignment predicate includes is_system, group subject, immutable group/account IDs, cluster type and canonical ID, fga_writer relation and NULL role.",
+    "Original binding ID is recorded as provenance rather than required for matching, so new binding IDs for the same original group are correctly fenced.",
+    "Delta does not change admission/read-reuse, account authority or general validators."
+  ],
+  "limits": [
+    "Read-only source delta review; no tests/build/lint/runtime/migrations/CI/publication executed.",
+    "Prior-SHA runtime counts are not transferred to this SHA.",
+    "New-SHA integration execution and real old-binary rollback/reupgrade remain unverified. Calling legacy writer code is not actual old-binary runtime proof.",
+    "Other prior source findings remain closed as recorded in the cc952 receipt; this review does not rerun full implementation review."
+  ]
+}
