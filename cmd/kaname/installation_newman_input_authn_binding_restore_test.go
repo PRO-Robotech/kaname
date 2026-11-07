@@ -26,8 +26,9 @@ var rid11BindingSchemas = map[string][]string{
 }
 
 type rid11BindingRestorePlan struct {
-	Policy  rid03DeltaPolicy
-	Desired map[rid03Member][]rid03Tuple
+	Policy               rid03DeltaPolicy
+	Desired              map[rid03Member][]rid03Tuple
+	RetiredLegacyBinding string
 }
 type rid11BindingRestoreProof struct {
 	Enabled                 bool `json:"enabled"`
@@ -294,11 +295,133 @@ func rid11BindingTuples(facts *catalog.Facts, policy domain.RulePolicy, sel doma
 	return out, len(out) > 0
 }
 
+// Допуск относится только к исторической owned-выдаче из миграции
+// 20261102130000_registration_account_writer_assignments.sql. Имена текущей
+// группы могут меняться; происхождение берётся из сохранённой identity, а якорь
+// кластера — из единственной строки clusters, как в cluster_anchor().
+// Обе служебные таблицы уже входят в полный RR-снимок; новых запросов нет.
+func rid11RetiredLegacyHistory(a rid03NewmanSnapshot) (string, bool) {
+	identities, hasIdentity := a.Raw["registration_legacy_cluster_writer_identity"]
+	switches, hasSwitch := a.Raw["registration_account_writer_switch"]
+	if !hasIdentity && !hasSwitch {
+		// Старые чистые примеры без retirement сохраняют прежний ACTIVE-only путь.
+		return "", true
+	}
+	if !hasIdentity || !hasSwitch || len(identities) != 1 || len(switches) != 1 {
+		return "", false
+	}
+	i, sw := identities[0], switches[0]
+	if !rid03Columns(i, "singleton account_id group_id cluster_id original_binding_id original_seed_name granted_relation") || !rid03Columns(sw, "singleton switched_at disabled_modules cluster_writer_retired_at") {
+		return "", false
+	}
+	// Эти координаты взяты из исходной миграции, не из неуспешного запуска.
+	if !rid03SameCell(i, "singleton", true) || rid03S(i, "account_id") != "acc1a18042d81fb438d6" || rid03S(i, "group_id") != "grp258e6bbe9bbe45568" || rid03S(i, "original_binding_id") != "acb9e920fb038c7e4f74" || rid03S(i, "original_seed_name") != "module-relation-writers" || rid03S(i, "granted_relation") != "fga_writer" || !rid03SameCell(sw, "singleton", true) || !rid03SameCell(sw, "disabled_modules", []any{}) {
+		return "", false
+	}
+	// Полные строки authority и их связи должны совпадать с независимым SQL hash census.
+	for _, table := range []string{"registration_legacy_cluster_writer_identity", "registration_account_writer_switch", "clusters", "accounts", "groups", "access_bindings", "access_binding_subjects", "access_binding_emitted_tuples"} {
+		rows, exists := a.Raw[table]
+		whole, recorded := a.Whole.Delivery[table]
+		hashes, ok := rid11BindingWholeHashes(rows)
+		if !exists || !recorded || !ok || !reflect.DeepEqual(hashes, whole.Rows) {
+			return "", false
+		}
+		for _, row := range rows {
+			if !rid11RestoreKeys(row, whole.Columns) {
+				return "", false
+			}
+		}
+	}
+	clusters := a.Raw["clusters"]
+	if len(clusters) != 1 || rid03S(i, "cluster_id") == "" || rid03S(clusters[0], "id") != rid03S(i, "cluster_id") {
+		return "", false
+	}
+	accounts, ok := rid11BindingIndex(a.Raw, "accounts")
+	if !ok {
+		return "", false
+	}
+	if _, exists := accounts[rid03S(i, "account_id")]; !exists {
+		return "", false
+	}
+	groups, ok := rid11BindingIndex(a.Raw, "groups")
+	if !ok || rid03S(groups[rid03S(i, "group_id")], "account_id") != rid03S(i, "account_id") {
+		return "", false
+	}
+	bindings, ok := rid11BindingIndex(a.Raw, "access_bindings")
+	if !ok {
+		return "", false
+	}
+	// original_binding_id хранит lineage; текущее владение, как в SQL predicate,
+	// определяется immutable assignment, а не обязательным совпадением ID строки.
+	owned := []rid09PrimaryRow{}
+	for _, row := range bindings {
+		if rid03SameCell(row, "is_system", true) && rid03S(row, "subject_type") == "group" && rid03S(row, "resource_type") == "cluster" && rid03SameCell(row, "role_id", nil) && rid03S(row, "subject_id") == rid03S(i, "group_id") && rid03S(row, "resource_id") == rid03S(i, "cluster_id") && rid03S(row, "granted_relation") == rid03S(i, "granted_relation") {
+			owned = append(owned, row)
+		}
+	}
+	if len(owned) != 1 {
+		return "", false
+	}
+	binding := owned[0]
+	id := rid03S(binding, "id")
+	if rid03S(binding, "status") != "REVOKED" || !rid03SameCell(binding, "is_system", true) || !rid03SameCell(binding, "role_id", nil) || rid03S(binding, "subject_type") != "group" || rid03S(binding, "subject_id") != rid03S(i, "group_id") || rid03S(binding, "resource_type") != "cluster" || rid03S(binding, "resource_id") != rid03S(i, "cluster_id") || rid03S(binding, "granted_relation") != rid03S(i, "granted_relation") || !rid03SameCell(binding, "scope", domain.ScopeCluster) || !rid03SameCell(binding, "deletion_protection", false) || rid03S(binding, "revoked_by_user_id") != "system:registration-account-writers" || rid03S(binding, "revocation_reason") != "REVOKE" || !rid03SameCell(binding, "target", map[string]any{"allInScope": true}) || rid03S(binding, "target_digest") != (domain.AccessTarget{AllInScope: true}).Digest() {
+		return "", false
+	}
+	for _, key := range []string{"expires_at", "narrowed_at", "delegation_id"} {
+		if !rid03SameCell(binding, key, nil) {
+			return "", false
+		}
+	}
+	created, cOK := rid03Cell[time.Time](binding, "created_at")
+	revoked, rOK := rid03Cell[time.Time](binding, "revoked_at")
+	switched, sOK := rid03Cell[time.Time](sw, "switched_at")
+	retired, tOK := rid03Cell[time.Time](sw, "cluster_writer_retired_at")
+	if !cOK || !rOK || !sOK || !tOK || created.IsZero() || revoked.IsZero() || switched.IsZero() || retired.IsZero() || a.Whole.PrimaryStartedAt.IsZero() || created.After(revoked) || switched.After(revoked) || revoked.After(retired) || retired.After(a.Whole.PrimaryStartedAt) {
+		return "", false
+	}
+	subjects := []rid09PrimaryRow{}
+	for _, row := range a.Raw["access_binding_subjects"] {
+		if rid03S(row, "binding_id") == id {
+			subjects = append(subjects, row)
+		}
+	}
+	if len(subjects) != 1 || !rid03Columns(subjects[0], "binding_id subject_type subject_id ordinal resource_type resource_id") || !rid03SameCell(subjects[0], "ordinal", 0) || rid03S(subjects[0], "subject_type") != "group" || rid03S(subjects[0], "subject_id") != rid03S(i, "group_id") || rid03S(subjects[0], "resource_type") != "cluster" || rid03S(subjects[0], "resource_id") != rid03S(i, "cluster_id") {
+		return "", false
+	}
+	for _, row := range a.Raw["access_binding_target_members"] {
+		if rid03S(row, "binding_id") == id {
+			return "", false
+		}
+	}
+	ledger := []rid09PrimaryRow{}
+	for _, row := range a.Raw["access_binding_emitted_tuples"] {
+		if rid03S(row, "binding_id") == id {
+			ledger = append(ledger, row)
+		}
+	}
+	if len(ledger) != 1 || !rid03Columns(ledger[0], "binding_id fga_user relation object source member_object_type member_object_id") || rid03S(ledger[0], "source") != "binding" || rid03S(ledger[0], "fga_user") != "group:"+rid03S(i, "group_id")+"#member" || rid03S(ledger[0], "relation") != "fga_writer" || rid03S(ledger[0], "object") != "cluster:"+rid03S(i, "cluster_id") || !rid03SameCell(ledger[0], "member_object_type", "") || !rid03SameCell(ledger[0], "member_object_id", "") {
+		return "", false
+	}
+	// Исторический ledger не является действующим правом. Даже неизменный
+	// остаток blanket-факта не может получить допуск вместе с retirement.
+	for _, row := range a.Raw["relation_fact"] {
+		if rid03S(row, "subject") == "group:"+rid03S(i, "group_id")+"#member" && rid03S(row, "relation") == "fga_writer" && rid03S(row, "object_type") == "cluster" && rid03S(row, "object_id") == rid03S(i, "cluster_id") {
+			return "", false
+		}
+	}
+	return id, true
+}
+
 func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper time.Time) (rid11BindingRestorePlan, bool) {
 	p := rid11BindingRestorePlan{Desired: map[rid03Member][]rid03Tuple{}, Policy: rid03DeltaPolicy{Path: "/iam/v1/accessBindings", Start: a.Whole.PrimaryFinishedAt, End: upper, Members: map[rid03Member]bool{}, Ledger: map[rid03Ledger]bool{}, Tuples: map[rid03Tuple]bool{}, DirectTuples: map[rid03Tuple]bool{}}}
 	if facts == nil || p.Policy.Start.IsZero() || upper.Before(p.Policy.Start) {
 		return p, false
 	}
+	retired, valid := rid11RetiredLegacyHistory(a)
+	if !valid {
+		return p, false
+	}
+	p.RetiredLegacyBinding = retired
 	objects, ok := rid11BindingInventory(a.Raw)
 	if !ok {
 		return p, false
@@ -333,6 +456,10 @@ func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper
 	for _, binding := range a.Raw["access_bindings"] {
 		id := rid03S(binding, "id")
 		roleID := rid03S(binding, "role_id")
+		if id == p.RetiredLegacyBinding {
+			// История проверена целиком; она не порождает Desired или новые права.
+			continue
+		}
 		if rid03S(binding, "status") != "ACTIVE" || !rid03SameCell(binding, "revoked_at", nil) {
 			return p, false
 		}
@@ -576,6 +703,19 @@ func rid11BindingProjection(a rid03NewmanSnapshot, members []rid09PrimaryRow) (r
 // устанавливает происхождение clocks и лишь после этого допускает физические facts.
 func rid11ValidateBindingRestore(a, b rid03NewmanSnapshot, p rid11BindingRestorePlan) (rid11BindingRestoreProof, bool) {
 	proof := rid11BindingRestoreProof{Enabled: true, Lower: p.Policy.Start, Upper: p.Policy.End, Raw: map[string][]rid09PrimaryRow{}, Members: []rid03Member{}, Producers: []rid03ProducerEvidence{}, Facts: []rid03FactEvidence{}}
+	if p.RetiredLegacyBinding != "" {
+		id, valid := rid11RetiredLegacyHistory(a)
+		afterID, afterValid := rid11RetiredLegacyHistory(b)
+		if !valid || !afterValid || id != p.RetiredLegacyBinding || afterID != id {
+			return proof, false
+		}
+		// Неизменность истории требуется также при отдельной проверке binding proof.
+		for _, table := range []string{"registration_legacy_cluster_writer_identity", "registration_account_writer_switch", "clusters", "access_bindings", "access_binding_subjects"} {
+			if !rid11RestoreRowsEqual(a.Raw[table], b.Raw[table]) {
+				return proof, false
+			}
+		}
+	}
 	fresh := map[string][]rid09PrimaryRow{}
 	for table, keys := range rid11BindingSchemas {
 		for _, s := range []rid03NewmanSnapshot{a, b} {
