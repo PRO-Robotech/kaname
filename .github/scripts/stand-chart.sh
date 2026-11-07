@@ -656,6 +656,11 @@ EOF
 	# именно эта посадка, и величины — перенос поведения сборки до ручек,
 	# равного потолкам фундамента; коллекции церемонии судят прежнее поведение.
 	cat > "$WORK/values.stand-own.yaml" <<EOF
+# Этот стенд не включает регистраторов модулей; полномочия аккаунтам не выдаются.
+registrationAccountWriters:
+  assignments: []
+  disabled: []
+  retire-cluster-writer: false
 authn:
   trustedForwarderSANs:
     - "spiffe://$DOMAIN/ns/$NS/sa/$RELEASE"

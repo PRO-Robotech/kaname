@@ -402,6 +402,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 	},
 	// Очередь сверки зеркала — пишет служба.
 	"resource_reconcile_outbox": nil,
+	// Историю допущенных указателей и квитанции снятия производит служба после
+	// допуска регистрации; вызывающий не пишет строки истории напрямую.
+	"resource_registration_pointer":    nil,
+	"resource_registration_retirement": nil,
 	// Сирота выдачи — следствие снятия, пишет служба.
 	"role_grant_orphan": nil,
 	// Ссылки правил роли: модуль, ресурс и глагол — из присланного правила;

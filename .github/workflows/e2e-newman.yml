@@ -1080,6 +1080,10 @@ jobs:
               exit "$rc" ;;
           esac
 
+      - name: конечный account-scoped план registry после машинного посева
+        timeout-minutes: 5
+        run: .github/scripts/stand-own.sh registration-writer-plan tests/newman/environments/local.postman_environment.json
+
       - name: условие registry создано владельцем модуля
         timeout-minutes: 5
         run: |
