@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -223,7 +224,7 @@ func (f Finding) String() string {
 
 // Читается отдельный документ producer, а не текст Output вложенной пробы.
 // Проверка байтов связывает классификацию с сохранённым потоком этого запуска.
-func standaloneDiagnostic(output string) (string, bool) {
+func standaloneDiagnostic(output string, invocation *os.Root) (string, bool) {
 	const prefix = "Диагностика standalone: "
 	var path string
 	for _, line := range strings.Split(output, "\n") {
@@ -235,14 +236,38 @@ func standaloneDiagnostic(output string) (string, bool) {
 		}
 	}
 	unknown := "неизвестный исход standalone; причина не установлена"
-	if path == "" || !filepath.IsAbs(path) || filepath.Base(path) != "manifest.json" {
+	if invocation == nil || path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path || filepath.Base(path) != "manifest.json" {
 		return unknown, false
 	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil || resolved != path {
+	base := invocation.Name()
+	rel, err := filepath.Rel(base, path)
+	parts := strings.Split(rel, string(os.PathSeparator))
+	if err != nil || !filepath.IsAbs(base) || filepath.Clean(base) != base || len(parts) != 2 || !strings.HasPrefix(parts[0], "producer-") || parts[0] == "producer-" || parts[1] != "manifest.json" {
+		return unknown + "; capture вне текущего запуска", false
+	}
+	parent, err := invocation.Stat(".")
+	if err != nil || !parent.IsDir() || parent.Mode().Perm() != 0o700 {
+		return unknown + "; корень capture не приватен", false
+	}
+	before, err := invocation.Lstat(parts[0])
+	if err != nil || !before.IsDir() || before.Mode().Perm() != 0o700 {
 		return unknown + "; capture недоступен", false
 	}
-	data, err := os.ReadFile(path)
+	// Producer закрепляется без следования ссылке и далее не открывается повторно по имени.
+	directory, err := standaloneOpenNoFollow(invocation, parts[0], true)
+	if err != nil {
+		return unknown + "; capture недоступен", false
+	}
+	defer directory.Close()
+	pinned, err := directory.Stat()
+	if err != nil || !pinned.IsDir() || pinned.Mode().Perm() != 0o700 || !os.SameFile(before, pinned) {
+		return unknown + "; capture изменился при открытии", false
+	}
+	after, afterErr := invocation.Lstat(parts[0])
+	if afterErr != nil || !after.IsDir() || after.Mode().Perm() != 0o700 || !os.SameFile(pinned, after) {
+		return unknown + "; capture изменился при открытии", false
+	}
+	data, err := standalonePrivateRead(invocation, directory, parts[0], "manifest.json")
 	if err != nil {
 		return unknown + "; capture недоступен", false
 	}
@@ -265,17 +290,16 @@ func standaloneDiagnostic(output string) (string, bool) {
 	if standaloneUniqueJSON(data) != nil || json.Unmarshal(data, &m) != nil || m.Version != 1 || m.Kind != "producer" || m.GoRC == nil {
 		return unknown + "; manifest некорректен", false
 	}
+	validated := map[string][]byte{}
 	for _, name := range []string{"stdout.jsonl", "stderr.log", "go.rc", "census.json"} {
-		file := filepath.Join(filepath.Dir(path), name)
-		real, err := filepath.EvalSymlinks(file)
-		if err != nil || real != file {
-			return unknown + "; capture неполон: " + path, false
-		}
-		body, err := os.ReadFile(file)
+		body, err := standalonePrivateRead(invocation, directory, parts[0], name)
 		entry, ok := m.Files[name]
 		sum := sha256.Sum256(body)
 		if err != nil || !ok || entry.Bytes != int64(len(body)) || entry.SHA256 != hex.EncodeToString(sum[:]) {
 			return unknown + "; capture не подтверждён: " + path, false
+		}
+		if name != "stderr.log" {
+			validated[name] = body
 		}
 	}
 	if !m.Complete || m.CaptureStatus != "complete" || m.CensusStatus != "complete" {
@@ -284,23 +308,14 @@ func standaloneDiagnostic(output string) (string, bool) {
 	if m.ParseRC == nil || *m.ParseRC != 0 || m.CaptureRC == nil || *m.CaptureRC != 0 || m.HelperRC == nil {
 		return unknown + "; захват или разбор не подтверждён: " + path, false
 	}
-	code, err := os.ReadFile(filepath.Join(filepath.Dir(path), "go.rc"))
-	if err != nil || strings.TrimSpace(string(code)) != strconv.Itoa(*m.GoRC) {
+	if strings.TrimSpace(string(validated["go.rc"])) != strconv.Itoa(*m.GoRC) {
 		return unknown + "; исход Go не подтверждён: " + path, false
 	}
-	body, err := os.ReadFile(filepath.Join(filepath.Dir(path), "census.json"))
-	if err != nil {
-		return unknown + "; перепись неполна: " + path, false
-	}
-	supplied, err := standaloneJSONMap(body)
+	supplied, err := standaloneJSONMap(validated["census.json"])
 	if err != nil {
 		return unknown + "; перепись некорректна: " + path, false
 	}
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "stdout.jsonl"))
-	if err != nil {
-		return unknown + "; поток недоступен: " + path, false
-	}
-	c, ok := standaloneCensus(raw)
+	c, ok := standaloneCensus(validated["stdout.jsonl"])
 	if !ok || c.Events == 0 || c.NonJSON != 0 || len(c.Packages) == 0 || len(c.UnterminatedPackages)+len(c.UnterminatedTests) != 0 {
 		return unknown + "; поток неполон: " + path, false
 	}
@@ -348,6 +363,38 @@ func standaloneDiagnostic(output string) (string, bool) {
 	default:
 		return unknown + "; полный capture: " + path, false
 	}
+}
+
+// Открывается только конечное имя внутри удерживаемого producer root. NOFOLLOW
+// запрещает ссылки при самом open, NONBLOCK не даёт подмене на FIFO остановить чтение.
+func standalonePrivateRead(invocation *os.Root, producer *os.File, producerName, name string) ([]byte, error) {
+	// Метаданные сравниваются с путём внутри authority; данные читаются только от pinned fd.
+	relative := filepath.Join(producerName, name)
+	before, err := invocation.Lstat(relative)
+	if err != nil {
+		return nil, err
+	}
+	if !before.Mode().IsRegular() || before.Mode().Perm() != 0o600 {
+		return nil, errors.New("capture не является приватным обычным файлом")
+	}
+	file, err := standaloneOpenAt(producer, name, false)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || opened.Mode().Perm() != 0o600 || !os.SameFile(before, opened) {
+		return nil, errors.New("capture изменился при открытии файла")
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+	after, err := invocation.Lstat(relative)
+	if err != nil || !after.Mode().IsRegular() || after.Mode().Perm() != 0o600 || !os.SameFile(opened, after) {
+		return nil, errors.New("capture изменился при чтении файла")
+	}
+	return data, nil
 }
 
 // Повтор ключа запрещён на любой глубине до обычного декодирования документа.
@@ -689,12 +736,36 @@ func (u Unmet) String() string {
 // Ошибка ЗАПУСКА (`make` не нашёлся) — четвёртое, и она возвращается ошибкой:
 // это «проверка не исполнялась» про весь обход, а не про одну цель.
 func RunTargets(dir string, targets []Target, run func(dir, target string) (int, string, error)) ([]Finding, []Unmet, error) {
-	var out []Finding
-	var unmet []Unmet
+	return RunTargetsWithCapture(dir, targets, func(dir, target string) (TargetResult, error) {
+		code, output, err := run(dir, target)
+		return TargetResult{Code: code, Output: output}, err
+	})
+}
+
+// TargetResult передаёт authority отдельно от недоверенного вывода цели.
+// Capture открывает владелец invocation до запуска child; потребитель закрывает его.
+type TargetResult struct {
+	Code    int
+	Output  string
+	Capture *os.Root
+}
+
+// RunTargetsWithCapture принимает принадлежащий конкретному invocation root handle.
+// Старый callback без этого handle сохраняет отказ, но не подтверждает классификацию.
+func RunTargetsWithCapture(dir string, targets []Target, run func(dir, target string) (TargetResult, error)) (out []Finding, unmet []Unmet, finalErr error) {
 	for _, t := range targets {
-		code, output, err := run(dir, t.Name)
+		result, err := run(dir, t.Name)
+		code, output := result.Code, result.Output
+		if result.Capture != nil {
+			// Отказ освобождения добавляется к исходу, не стирая находки и ошибку запуска.
+			defer func(root *os.Root, target string) {
+				if closeErr := root.Close(); closeErr != nil {
+					finalErr = errors.Join(finalErr, fmt.Errorf("%w: capture цели %s не закрыт: %w", ErrPostureNotBuilt, target, closeErr))
+				}
+			}(result.Capture, t.Name)
+		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: цель %s не запустилась: %w", ErrPostureNotBuilt, t.Name, err)
+			return out, unmet, fmt.Errorf("%w: цель %s не запустилась: %w", ErrPostureNotBuilt, t.Name, err)
 		}
 		if code == 0 {
 			continue
@@ -705,7 +776,7 @@ func RunTargets(dir string, targets []Target, run func(dir, target string) (int,
 		}
 		finding := Finding{Target: t, Code: code, Tail: Tail(output, 25)}
 		if t.Name == "test-standalone" {
-			finding.Diagnostic, finding.Probes = standaloneDiagnostic(output)
+			finding.Diagnostic, finding.Probes = standaloneDiagnostic(output, result.Capture)
 		}
 		out = append(out, finding)
 	}

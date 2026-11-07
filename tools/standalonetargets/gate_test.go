@@ -127,7 +127,7 @@ func TestStandaloneTargetsWorkInAStandaloneClone(t *testing.T) {
 		"записи ведомости, которым больше нечего прощать: %v — послабление живёт, пока у него есть предмет",
 		census.StaleWaiv)
 
-	findings, unmet, err := standalonetargets.RunTargets(clone, judged, makeRunner(t))
+	findings, unmet, err := standalonetargets.RunTargetsWithCapture(clone, judged, makeCaptureRunner(t))
 	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ")
 
 	// Перепись печатается ПОСЛЕ прогона и несёт ТРИ величины, а не две: без
@@ -223,6 +223,26 @@ func buildStandaloneClone(t *testing.T, moduleRoot string) string {
 func makeRunner(t *testing.T) func(dir, target string) (int, string, error) {
 	t.Helper()
 	return func(dir, target string) (int, string, error) {
+		result, err := makeCaptureRunner(t)(dir, target)
+		if result.Capture != nil {
+			defer result.Capture.Close()
+		}
+		return result.Code, result.Output, err
+	}
+}
+
+func makeCaptureRunner(t *testing.T) func(dir, target string) (standalonetargets.TargetResult, error) {
+	t.Helper()
+	return func(dir, target string) (standalonetargets.TargetResult, error) {
+		var root *os.Root
+		code, output, err := makeRunnerOwned(t, &root)(dir, target)
+		return standalonetargets.TargetResult{Code: code, Output: output, Capture: root}, err
+	}
+}
+
+func makeRunnerOwned(t *testing.T, captureRoot **os.Root) func(dir, target string) (int, string, error) {
+	t.Helper()
+	return func(dir, target string) (int, string, error) {
 		base := os.Getenv("STANDALONE_DIAGNOSTICS_DIR")
 		if base == "" {
 			base = os.TempDir()
@@ -245,6 +265,12 @@ func makeRunner(t *testing.T) func(dir, target string) (int, string, error) {
 		if err != nil {
 			return 0, "", err
 		}
+		// Handle удерживает именно созданный invocation до первого действия child.
+		owned, err := os.OpenRoot(capture)
+		if err != nil {
+			return 0, "", err
+		}
+		*captureRoot = owned
 		path := filepath.Join(capture, "target.log")
 		stream, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {

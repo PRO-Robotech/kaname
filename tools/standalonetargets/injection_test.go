@@ -320,8 +320,9 @@ func TestRun_TargetWhoseProbesFailedNamesTheProbesNotTheRecipe(t *testing.T) {
 		diagnosticEvent("fail", "example.test/check", "TestSomethingUnrelated", "")+
 			diagnosticEvent("fail", "example.test/check", "", ""), "", 1, false, false)
 	out := result.output
-	findings, unmet, err := standalonetargets.RunTargets("посадка", targets,
-		func(_, _ string) (int, string, error) { return 2, out, nil })
+	result.code, result.output = 2, out
+	findings, unmet, err := standalonetargets.RunTargetsWithCapture("посадка", targets,
+		diagnosticCaptureCallback(t, result, ""))
 	require.NoError(t, err)
 	require.Empty(t, unmet, "упавшие пробы подались третьим исходом — красное исчезло бы из вердикта")
 	require.Len(t, findings, 1, "упавшие пробы перестали быть находкой")

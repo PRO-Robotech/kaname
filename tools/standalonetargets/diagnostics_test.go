@@ -56,7 +56,8 @@ func runDiagnosticProducer(t *testing.T, stdout, stderr string, goCode int, brok
 	root, err := standalonetargets.ModuleRootFrom(wd)
 	require.NoError(t, err)
 	fixture := t.TempDir()
-	capture := t.TempDir()
+	capture, err := os.MkdirTemp(t.TempDir(), "target-")
+	require.NoError(t, err)
 	if brokenCapture {
 		capture = filepath.Join(capture, "не-каталог")
 		require.NoError(t, os.WriteFile(capture, []byte("занято"), 0o600))
@@ -176,6 +177,68 @@ func TestStandaloneDiagnosticPreservesCallerUmask(t *testing.T) {
 	}
 }
 
+// Этот мост использует действительный runner; authority не берётся из marker.
+func diagnosticRunTarget(t *testing.T, dir string) ([]standalonetargets.Finding, []standalonetargets.Unmet, error) {
+	t.Helper()
+	return standalonetargets.RunTargetsWithCapture(dir, []standalonetargets.Target{{Name: "test-standalone", Desc: "пробы"}}, makeCaptureRunner(t))
+}
+
+func TestStandaloneDiagnosticInvocationBoundary(t *testing.T) {
+	const pkg, name = "example.test/authority", "TestContext"
+	baseline := runDiagnosticProducer(t, diagnosticEvent("fail", pkg, name, "")+diagnosticEvent("fail", pkg, "", ""), "", 1, false, false)
+	manifest, _, _ := criticalDiagnosticDocuments(t, baseline)
+	foreign, err := os.MkdirTemp(t.TempDir(), "target-")
+	require.NoError(t, err)
+	foreignProducer := filepath.Join(foreign, "producer-foreign")
+	require.NoError(t, os.Mkdir(foreignProducer, 0o700))
+	for _, filename := range []string{"manifest.json", "stdout.jsonl", "stderr.log", "go.rc", "census.json"} {
+		body, err := os.ReadFile(filepath.Join(filepath.Dir(manifest), filename))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(foreignProducer, filename), body, 0o600))
+	}
+	for _, mode := range []string{"owned", "foreign-target", "escape", "producer-symlink", "manifest-symlink", "sidecar-symlink", "public-file", "public-directory"} {
+		t.Run(mode, func(t *testing.T) {
+			fixture, capture := t.TempDir(), t.TempDir()
+			t.Setenv("STANDALONE_DIAGNOSTICS_DIR", capture)
+			t.Setenv("DIAGNOSTIC_FOREIGN", foreignProducer)
+			t.Setenv("DIAGNOSTIC_MODE", mode)
+			// Все байты и hashes законны; меняется только связь с текущим owned target.
+			script := `#!/bin/bash
+set -eu
+owned="$STANDALONE_DIAGNOSTICS_DIR/producer-owned"
+mkdir -m 700 "$owned"
+cp "$DIAGNOSTIC_FOREIGN/"* "$owned/"
+chmod 600 "$owned/"*
+marker="$owned/manifest.json"
+case "$DIAGNOSTIC_MODE" in
+foreign-target) marker="$DIAGNOSTIC_FOREIGN/manifest.json" ;;
+escape) marker="$owned/../producer-owned/manifest.json" ;;
+producer-symlink) mv "$owned" "$STANDALONE_DIAGNOSTICS_DIR/real-producer"; ln -s real-producer "$owned" ;;
+manifest-symlink) mv "$marker" "$owned/real-manifest"; ln -s real-manifest "$marker" ;;
+sidecar-symlink) mv "$owned/stdout.jsonl" "$owned/real-stdout"; ln -s real-stdout "$owned/stdout.jsonl" ;;
+public-file) chmod 644 "$owned/stdout.jsonl" ;;
+public-directory) chmod 755 "$owned" ;;
+esac
+printf 'Диагностика standalone: %s\n' "$marker"
+exit 1
+`
+			require.NoError(t, os.WriteFile(filepath.Join(fixture, "control.sh"), []byte(script), 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(fixture, "Makefile"), []byte("test-standalone:\n\t@bash control.sh\n"), 0o600))
+			findings, unmet, err := diagnosticRunTarget(t, fixture)
+			require.NoError(t, err)
+			require.Empty(t, unmet)
+			require.Len(t, findings, 1)
+			if mode == "owned" {
+				assert.True(t, findings[0].Probes, "законный текущий capture потерял классификацию")
+				assert.Contains(t, findings[0].String(), "именованные отказы")
+			} else {
+				assert.False(t, findings[0].Probes, "чужой либо небезопасный capture объявлен доказательством текущего запуска")
+				assert.Contains(t, findings[0].String(), "неизвестный исход")
+			}
+		})
+	}
+}
+
 func diagnosticFiles(t *testing.T, dir string) string {
 	t.Helper()
 	var body strings.Builder
@@ -199,15 +262,24 @@ func diagnosticFiles(t *testing.T, dir string) string {
 
 func diagnosticFinding(t *testing.T, result diagnosticResult, nestedOutput string) string {
 	t.Helper()
-	findings, unmet, err := standalonetargets.RunTargets("синтетическая посадка",
+	findings, unmet, err := standalonetargets.RunTargetsWithCapture("синтетическая посадка",
 		[]standalonetargets.Target{{Name: "test-standalone", Desc: "пробы модуля"}},
-		func(_, _ string) (int, string, error) { return result.code, result.output + nestedOutput, nil })
+		diagnosticCaptureCallback(t, result, nestedOutput))
 	require.NoError(t, err)
 	assert.Empty(t, unmet, "отказ пакета превратился в необязательный третий исход")
 	if !assert.Len(t, findings, 1, "отказ producer исчез из находок") {
 		return ""
 	}
 	return findings[0].String()
+}
+
+// Фикстура владеет capture независимо от marker; consumer получает handle напрямую.
+func diagnosticCaptureCallback(t *testing.T, result diagnosticResult, suffix string) func(string, string) (standalonetargets.TargetResult, error) {
+	t.Helper()
+	return func(_, _ string) (standalonetargets.TargetResult, error) {
+		root, _ := os.OpenRoot(result.capture)
+		return standalonetargets.TargetResult{Code: result.code, Output: result.output + suffix, Capture: root}, nil
+	}
 }
 
 // Проверяется диагностический смысл, а не форма нового manifest: имя доступно читателю
@@ -600,7 +672,8 @@ func TestStandaloneDiagnosticCriticalGateRejectsRehashedContradictions(t *testin
 	manifestPath, _, _ := criticalDiagnosticDocuments(t, baseline)
 	for _, mutation := range []string{"законный близнец", "parseRC", "captureRC", "helperRC", "outcome", "packageOnlyFailures", "passedTests", "otherSkips", "unmetSkips", "passedPackages", "skippedPackages", "unterminatedPackages", "unterminatedTests", "hidden_package_start", "hidden_test_run"} {
 		t.Run(mutation, func(t *testing.T) {
-			capture := t.TempDir()
+			capture, err := os.MkdirTemp(t.TempDir(), "target-")
+			require.NoError(t, err)
 			directory := filepath.Join(capture, "producer-control")
 			require.NoError(t, os.Mkdir(directory, 0o700))
 			for _, filename := range []string{"manifest.json", "census.json", "stdout.jsonl", "stderr.log", "go.rc"} {
@@ -639,7 +712,7 @@ func TestStandaloneDiagnosticCriticalGateRejectsRehashedContradictions(t *testin
 				files[filename] = map[string]any{"bytes": len(body), "sha256": hex.EncodeToString(sum[:])}
 			}
 			criticalDiagnosticWrite(t, path, manifest)
-			findings, unmet, err := standalonetargets.RunTargets("синтетическая посадка", []standalonetargets.Target{{Name: "test-standalone", Desc: "пробы"}}, func(_, _ string) (int, string, error) { return result.code, result.output, nil })
+			findings, unmet, err := standalonetargets.RunTargetsWithCapture("синтетическая посадка", []standalonetargets.Target{{Name: "test-standalone", Desc: "пробы"}}, diagnosticCaptureCallback(t, result, ""))
 			require.NoError(t, err)
 			require.Empty(t, unmet)
 			require.Len(t, findings, 1)
@@ -736,7 +809,8 @@ func TestStandaloneDiagnosticReviewR2DuplicateMembers(t *testing.T) {
 	baselinePath, _, _ := criticalDiagnosticDocuments(t, baseline)
 	for _, mutation := range []string{"unique", "captureRC-2-0", "captureRC-0-2", "parseRC-2-0", "parseRC-0-2", "census", "event"} {
 		t.Run(mutation, func(t *testing.T) {
-			capture := t.TempDir()
+			capture, err := os.MkdirTemp(t.TempDir(), "target-")
+			require.NoError(t, err)
 			directory := filepath.Join(capture, "producer-review-r2")
 			require.NoError(t, os.Mkdir(directory, 0o700))
 			for _, filename := range []string{"manifest.json", "census.json", "stdout.jsonl", "stderr.log", "go.rc"} {
@@ -767,7 +841,7 @@ func TestStandaloneDiagnosticReviewR2DuplicateMembers(t *testing.T) {
 				require.Contains(t, string(body), needle)
 				require.NoError(t, os.WriteFile(path, []byte(strings.Replace(string(body), needle, replacement, 1)), 0o600))
 			}
-			findings, unmet, err := standalonetargets.RunTargets("синтетическая посадка", []standalonetargets.Target{{Name: "test-standalone", Desc: "пробы"}}, func(_, _ string) (int, string, error) { return result.code, result.output, nil })
+			findings, unmet, err := standalonetargets.RunTargetsWithCapture("синтетическая посадка", []standalonetargets.Target{{Name: "test-standalone", Desc: "пробы"}}, diagnosticCaptureCallback(t, result, ""))
 			require.NoError(t, err)
 			require.Empty(t, unmet)
 			require.Len(t, findings, 1)
