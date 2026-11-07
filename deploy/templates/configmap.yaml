@@ -214,9 +214,16 @@ data:
         ssl-mode: {{ required "repository.postgres.sslMode не задан: канал к Postgres обязан быть объявлен явно (disable|require|verify-ca|verify-full); пустое значение молча дало бы открытый текст" .Values.repository.postgres.sslMode | quote }}
         password-from-env: KANAME_DB_PASSWORD
 
-    {{- if hasKey .Values "registrationAccountWriters" }}
+    {{- if and (hasKey .Values "registrationAccountWriters") (not (kindIs "invalid" .Values.registrationAccountWriters)) }}
+    {{- $writers := .Values.registrationAccountWriters }}
+    {{- if not (kindIs "map" $writers) }}
+    {{- fail "registrationAccountWriters должен быть картой или null" }}
+    {{- end }}
+    {{- if not (and (hasKey $writers "assignments") (kindIs "slice" (get $writers "assignments"))) }}
+    {{- fail "registrationAccountWriters.assignments должен быть явно заданным списком" }}
+    {{- end }}
     registration-account-writers:
-      {{- toYaml .Values.registrationAccountWriters | nindent 6 }}
+      {{- toYaml $writers | nindent 6 }}
     {{- end }}
     authn:
       mode: {{ default "production" (include "kaname-svc.authMode" .) | quote }}

@@ -78,6 +78,52 @@ func (f *fakeChecker) Check(_ context.Context, subject, relation, object string)
 	return f.allowSubjects[subject], nil
 }
 
+func TestRelationWriteGateCatalogIdentityDoesNotChangeAccountSubject(t *testing.T) {
+	for _, tc := range []struct{ service, module string }{
+		{"nlb", "loadbalancer"},
+		{"probemod", "probemod"},
+	} {
+		t.Run(tc.service, func(t *testing.T) {
+			san := "spiffe://kacho.cloud/ns/modules/sa/kacho-" + tc.service
+			roster := rosterOf(t, moduleidentity.ProfileModuleWriter, san)
+			checker := &fakeChecker{allowSubjects: map[string]bool{"service_account:" + sva(tc.service): true}}
+			gate := authzguard.NewRelationWriteGate(checker).WithModuleRoster(roster)
+			ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
+			service, err := gate.Authorize(ctx)
+			require.NoError(t, err)
+			require.Equal(t, tc.service, service)
+			module, err := gate.AuthorizeCatalogModule(ctx)
+			require.NoError(t, err)
+			require.Equal(t, tc.module, module)
+			require.NoError(t, gate.AuthorizeAccount(ctx, "acc_writer_probe"))
+			require.Equal(t, "service_account:"+sva(tc.service), checker.gotSubject)
+			require.Equal(t, "account:acc_writer_probe", checker.gotObject)
+		})
+	}
+}
+
+func TestRelationWriteGateCatalogIdentityRequiresVerifiedDeclaredPeer(t *testing.T) {
+	san := "spiffe://kacho.cloud/ns/modules/sa/kacho-probemod"
+	domain := grpcsrv.NewTrustDomain("kacho.cloud")
+	gate := authzguard.NewRelationWriteGate(nil).WithModuleRoster(rosterOf(t, moduleidentity.ProfileModuleWriter, san))
+	for name, ctx := range map[string]context.Context{
+		"missing":       context.Background(),
+		"unverified":    grpcsrv.WithCertIdentityIn(context.Background(), domain, san, false),
+		"undeclared":    grpcsrv.WithCertIdentityIn(context.Background(), domain, "spiffe://kacho.cloud/ns/foreign/sa/kacho-probemod", true),
+		"wildcard":      grpcsrv.WithCertIdentityIn(context.Background(), domain, "spiffe://kacho.cloud/ns/modules/sa/kacho-*", true),
+		"empty-service": grpcsrv.WithCertIdentityIn(context.Background(), domain, "spiffe://kacho.cloud/ns/modules/sa/kacho-", true),
+	} {
+		t.Run(name, func(t *testing.T) {
+			module, err := gate.AuthorizeCatalogModule(ctx)
+			require.Empty(t, module)
+			require.Equal(t, codes.PermissionDenied, status.Code(err))
+		})
+	}
+	module, err := authzguard.NewRelationWriteGate(nil).AuthorizeCatalogModule(grpcsrv.WithCertIdentityIn(context.Background(), domain, san, true))
+	require.Empty(t, module)
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
 func TestRelationWriteGate_C01_B07_ValidSANResolvedAndAllowed(t *testing.T) {
 	chk := &fakeChecker{allowSubjects: map[string]bool{"service_account:" + sva("vpc"): true}}
 	gate := authzguard.NewRelationWriteGate(chk).WithProductionMode(true).WithModuleRoster(writerRoster(t))

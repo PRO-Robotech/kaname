@@ -219,7 +219,7 @@ func validateRegistrationShape(module, subject, relation, object string) error {
 		return proxyWriteRefusal()
 	}
 	subjectType, subjectID, _ := strings.Cut(subject, ":")
-	if subjectType == "system_class" || strings.Contains(subjectID, "*") {
+	if !namedPointerSubjectType(subjectType) || strings.Contains(subjectID, "*") {
 		return proxyWriteRefusal()
 	}
 	objectType, _, _ := strings.Cut(object, ":")

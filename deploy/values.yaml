@@ -786,8 +786,10 @@ moduleManifests:
 #   tenantAccountId: acc00000000000000001
 moduleSeedInstaller: {}
 
-# Explicit installation authority for registration (kaname#1031). Required in
-# production. Omitted has no default; to intentionally disable all registrars use:
+# Полномочия регистрации задаются установкой явно (kaname#1031). Значение null
+# сохраняет отсутствие плана и отказ боевого старта; пустой список assignments
+# выбирают только явно, чтобы отключить всех регистраторов:
 # registrationAccountWriters: { assignments: [], disabled: [] }
-# Each assignment: {assignment_id: <new-stable-id>, account_id: <existing-id>, module: registry}
-# disabled is an explicit first-upgrade census exception: {account_id, module, reason}.
+# Назначение: {assignment_id: <новый-постоянный-id>, account_id: <существующий-id>, module: registry}.
+# disabled — явное исключение переписи первого обновления: {account_id, module, reason}.
+registrationAccountWriters: null

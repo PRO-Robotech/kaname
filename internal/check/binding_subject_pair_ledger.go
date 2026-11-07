@@ -25,6 +25,10 @@ const bindingPairFallbackGo = "пустой набор — выдача, зап�
 // BindingSubjectPairLedger — законные места и точные числа доступов.
 var BindingSubjectPairLedger = map[string]BindingPairEntry{
 	// ── запись проекции ────────────────────────────────────────────────────
+	"internal/repo/kaname/pg/registration_account_writer.go::RegistrationAccountWriterStore.ApplyRegistrationAccountWriters": {
+		Go: 2, Class: BindingPairProjection,
+		Why: "установщик пишет проекцию единственного субъекта назначенного модуля и тот же полный набор через InsertSubjects",
+	},
 	"internal/apps/kaname/api/access_binding/create.go::CreateAccessBindingUseCase.Execute": {
 		Go: 4, Class: BindingPairProjection,
 		Why: "нормализация набора: пара прежней формы запроса — вход NormalizeSubjects, затем пара " +
@@ -50,6 +54,10 @@ var BindingSubjectPairLedger = map[string]BindingPairEntry{
 			"нормализации; набор того же запроса — поле subjects",
 	},
 	// ── якорь уникальности ─────────────────────────────────────────────────
+	"internal/repo/kaname/pg/registration_account_writer.go::registrationWriterOwnsGrant": {
+		Go: 2, Class: BindingPairUniqueAnchor,
+		Why: "при отзыве установщик сверяет естественный ключ прямой выдачи (access_bindings_active_relation_grant_uniq) с координатами своего журнала; полный набор обязан содержать ровно ту же служебную учётку",
+	},
 	"internal/repo/kaname/pg/module_seed_writer.go::moduleSeedWriter.grant": {
 		SQL: 4, Class: BindingPairUniqueAnchor,
 		Why: "системная выдача пишет строку с проекцией и проверяет её естественный ключ по паре — тот же, " +

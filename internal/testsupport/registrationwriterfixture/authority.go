@@ -6,7 +6,17 @@ package registrationwriterfixture
 
 import "context"
 
-type Authority struct{ Module string }
+type Authority struct {
+	Module        string
+	CatalogModule string
+}
 
 func (a Authority) Authorize(context.Context) (string, error)    { return a.Module, nil }
 func (Authority) AuthorizeAccount(context.Context, string) error { return nil }
+
+func (a Authority) AuthorizeCatalogModule(context.Context) (string, error) {
+	if a.CatalogModule != "" {
+		return a.CatalogModule, nil
+	}
+	return a.Module, nil
+}

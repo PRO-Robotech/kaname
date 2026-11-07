@@ -90,8 +90,9 @@ func newDPWorld(t *testing.T) *dpWorld {
 // dpGate — заглушка порта личности: ворота отвечают доменом модуля.
 type dpGate struct{ module string }
 
-func (g dpGate) Authorize(context.Context) (string, error)      { return g.module, nil }
-func (g dpGate) AuthorizeAccount(context.Context, string) error { return nil }
+func (g dpGate) Authorize(context.Context) (string, error)              { return g.module, nil }
+func (g dpGate) AuthorizeCatalogModule(context.Context) (string, error) { return g.module, nil }
+func (g dpGate) AuthorizeAccount(context.Context, string) error         { return nil }
 
 // hReg — обработчик с воротами домена module поверх use-case мира.
 func (w *dpWorld) hReg(module string) *internaliam.Handler {

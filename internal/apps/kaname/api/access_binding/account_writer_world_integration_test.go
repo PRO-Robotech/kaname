@@ -515,8 +515,11 @@ func TestAccountWriter_AW19To22_BootstrapLedger(t *testing.T) {
 		require.Equal(t, before, w.snapshot())
 	})
 	t.Run("AW20-entire-invalid-plan-refused", func(t *testing.T) {
+		var absentExists bool
+		require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT EXISTS(SELECT 1 FROM kaname.accounts WHERE id=$1)`, "acc00000000000000999").Scan(&absentExists))
+		require.False(t, absentExists, "сценарий проверяет отсутствующий аккаунт с допустимой формой ID")
 		p := w.plan
-		p.Assignments = append(append([]domain.RegistrationAccountWriter{}, p.Assignments...), domain.RegistrationAccountWriter{AssignmentID: "invalid", AccountID: "acc-absent", Module: "registry"})
+		p.Assignments = append(append([]domain.RegistrationAccountWriter{}, p.Assignments...), domain.RegistrationAccountWriter{AssignmentID: "invalid", AccountID: "acc00000000000000999", Module: "registry"})
 		before := w.snapshot()
 		require.Error(t, w.apply(p))
 		require.Equal(t, before, w.snapshot())
@@ -589,6 +592,69 @@ func TestAccountWriter_AW19To22_BootstrapLedger(t *testing.T) {
 
 // Отдельный пул чтения обнаруживает случайные вложенные чтения иерархии, когда
 // запись заняла единственное соединение регистрации; полномочия читаются обычным пулом.
+// Установщик не вправе отзывать изменённую выдачу даже по своему binding_id.
+// Прямые изменения ниже — инъекции порчи уже созданного обычным путём состояния.
+func TestAccountWriter_RevocationRejectsChangedGrantOrSubjectSet(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		statements []string
+	}{
+		{"lawful", nil},
+		{"foreign-projection-and-set", []string{
+			`UPDATE kaname.access_bindings SET subject_id=$2 WHERE id=$1`,
+			`UPDATE kaname.access_binding_subjects SET subject_id=$2 WHERE binding_id=$1`,
+		}},
+		{"foreign-projection-with-both-subjects", []string{
+			`INSERT INTO kaname.access_binding_subjects(binding_id,subject_type,subject_id,ordinal,resource_type,resource_id)
+ SELECT id,'service_account',$2,1,resource_type,resource_id FROM kaname.access_bindings WHERE id=$1`,
+			`UPDATE kaname.access_bindings SET subject_id=$2 WHERE id=$1`,
+		}},
+		{"extra-subject", []string{`INSERT INTO kaname.access_binding_subjects(binding_id,subject_type,subject_id,ordinal,resource_type,resource_id)
+ SELECT id,'service_account',$2,1,resource_type,resource_id FROM kaname.access_bindings WHERE id=$1`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newAWWorld(t)
+			var binding string
+			require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT binding_id FROM kaname.registration_account_writer_assignment WHERE assignment_id='aw-registry-a'`).Scan(&binding))
+			if len(tc.statements) > 0 {
+				tx, err := w.pool.Begin(w.ctx)
+				require.NoError(t, err)
+				defer func() { _ = tx.Rollback(w.ctx) }()
+				for _, statement := range tc.statements {
+					changed, err := tx.Exec(w.ctx, statement, binding, authzguard.ServiceAccountIDForService("vpc"))
+					require.NoError(t, err)
+					require.EqualValues(t, 1, changed.RowsAffected())
+				}
+				// Схема требует вхождения проекции в полный набор при commit.
+				// Согласованная подмена должна дойти до собственного отказа установщика.
+				require.NoError(t, tx.Commit(w.ctx))
+			}
+			snapshot := func() string {
+				var extra string
+				require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT jsonb_build_array(
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.registration_account_writer_assignment t),
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.registration_account_writer_switch t),
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.access_binding_subjects t),
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.audit_outbox t))::text`).Scan(&extra))
+				return w.snapshot() + extra
+			}
+			before := snapshot()
+			plan := w.plan
+			plan.Assignments = append([]domain.RegistrationAccountWriter{}, plan.Assignments[1:]...)
+			err := w.apply(plan)
+			if len(tc.statements) == 0 {
+				require.NoError(t, err)
+				var state string
+				require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT status FROM kaname.access_bindings WHERE id=$1`, binding).Scan(&state))
+				require.Equal(t, "REVOKED", state)
+			} else {
+				require.Error(t, err)
+				require.Equal(t, before, snapshot(), "отказ не меняет выдачи, наборы, журналы, события и аудит")
+			}
+		})
+	}
+}
+
 func TestAccountWriter_SingleRegistrationConnection(t *testing.T) {
 	w := newAWWorld(t)
 	cfg := w.pool.Config().Copy()
@@ -738,8 +804,11 @@ func TestAccountWriter_ProductionDeclarationAndEmptyInstall(t *testing.T) {
 	require.EqualError(t, cfg.ValidateRegistrationAccountWriters(), "registration-account-writers.assignments must be explicitly declared (an empty list disables registrars)")
 	require.Equal(t, before, state())
 	// Ошибочное назначение не должно зафиксировать даже первый switch.
+	var absentExists bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.accounts WHERE id=$1)`, "acc00000000000000999").Scan(&absentExists))
+	require.False(t, absentExists, "сценарий проверяет отсутствие, а не неверную форму ID")
 	require.Error(t, seed.ApplyRegistrationAccountWriters(ctx, store, roster, seed.RegistrationWriterPlan{
-		Assignments: []domain.RegistrationAccountWriter{{AssignmentID: "aw-empty-invalid", AccountID: "acc-absent", Module: "registry"}},
+		Assignments: []domain.RegistrationAccountWriter{{AssignmentID: "aw-empty-invalid", AccountID: "acc00000000000000999", Module: "registry"}},
 	}))
 	require.Equal(t, before, state())
 	cfg.RegistrationAccountWriters.Assignments = []domain.RegistrationAccountWriter{}
@@ -905,8 +974,8 @@ func TestAccountWriter_LegacyOmittedClaimsUpgradeCleanupAndPublication(t *testin
 	child := dpReq(pcrRegType+":"+pcrX, "parent", pcrRepoType+":"+pcrX+"/aw-legacy", "", "")
 	require.NoError(t, d.reg.Register(d.ctx, top))
 	require.NoError(t, d.reg.Register(d.ctx, child))
-	// Восстанавливаем снимок до #1031: две регистрации сделаны
-	// обычным путём #982, необязательные утверждения остаются пустыми, факты указателей сохранены,
+	// Восстанавливаем снимок до kaname#1031: две регистрации сделаны
+	// обычным путём kaname#982, необязательные утверждения остаются пустыми, факты указателей сохранены,
 	// а канонического реестра, появившегося только в новой версии, ещё не было.
 	_, err := d.pool.Exec(d.ctx, `DELETE FROM kaname.resource_registration_scope`)
 	require.NoError(t, err)
@@ -926,6 +995,40 @@ func TestAccountWriter_LegacyOmittedClaimsUpgradeCleanupAndPublication(t *testin
 	require.NoError(t, w.unregister("registry", child))
 	require.NoError(t, w.unregister("registry", top))
 	w.denied(func() error { return w.unregister("registry", w.regIn("aw-truly-unknown", w.prjA, w.accA)) })
+}
+
+// Принадлежащая установке проекция не разрешает снять выдачу с лишним субъектом.
+// Законное снятие без подмены проверяет соседняя проба с переименованной группой.
+func TestAccountWriter_RetirementRefusesExtraSubject(t *testing.T) {
+	w := newAWWorld(t)
+	var foreignGroup string
+	require.NoError(t, kanamepg.NewModuleSeedWriteRepo(w.pool).RunInWriteTx(w.ctx, func(ctx context.Context, writer moduleseed.Writer) error {
+		_, err := writer.UpsertGroup(ctx, "system", "retirement-extra-subject", "Группа отрицательной пробы полного набора субъектов")
+		return err
+	}))
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT g.id FROM kaname.groups g JOIN kaname.accounts a ON a.id=g.account_id
+ WHERE a.name='system' AND g.name='retirement-extra-subject'`).Scan(&foreignGroup))
+	var binding string
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT b.id FROM kaname.access_bindings b
+ WHERE kaname.registration_owns_legacy_cluster_writer(b) AND b.status='ACTIVE' ORDER BY b.id LIMIT 1`).Scan(&binding))
+	// Инъекция портит полный набор уже существующей выдачи; это не создание фикстуры прав.
+	_, err := w.pool.Exec(w.ctx, `INSERT INTO kaname.access_binding_subjects(binding_id,subject_type,subject_id,ordinal,resource_type,resource_id)
+ SELECT id,'group',$2,1,resource_type,resource_id FROM kaname.access_bindings WHERE id=$1`, binding, foreignGroup)
+	require.NoError(t, err)
+	snapshot := func() string {
+		var extra string
+		require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT jsonb_build_array(
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.registration_account_writer_assignment t),
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.registration_account_writer_switch t),
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.access_binding_subjects t),
+ (SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) FROM kaname.audit_outbox t))::text`).Scan(&extra))
+		return w.snapshot() + extra
+	}
+	before := snapshot()
+	plan := w.plan
+	plan.RetireClusterWriter = true
+	require.ErrorContains(t, w.apply(plan), "legacy writer binding subjects changed")
+	require.Equal(t, before, snapshot(), "отказ не снимает защиты, не отзывает выдачи и не пишет события")
 }
 
 // Изменяемые имена не определяют принадлежность снимаемого и не блокируют чужие группы.
@@ -1005,7 +1108,7 @@ func TestAccountWriter_RetirementOwnsImmutableInstallationAssignment(t *testing.
 	// барьер пространства имён установки должен отвергнуть всю транзакцию.
 	fullSeedBefore := w.snapshot()
 	err = kanamepg.NewModuleSeedWriteRepo(w.pool).RunInWriteTx(w.ctx, func(ctx context.Context, writer moduleseed.Writer) error {
-		if _, e := writer.UpsertGroup(ctx, "system", "module-relation-writers", "Module service accounts allowed to write relation tuples through iam (issue #914)"); e != nil {
+		if _, e := writer.UpsertGroup(ctx, "system", "module-relation-writers", "Module service accounts allowed to write relation tuples through iam (issue kacho#914)"); e != nil {
 			return e
 		}
 		_, e := writer.GrantRelation(ctx, moduleseed.Subject{Kind: "group", Account: "system", Name: "module-relation-writers"}, "fga_writer", "cluster", cluster)
@@ -1048,7 +1151,7 @@ func TestAccountWriter_RetirementRefusesRecreatedLegacySeedNamespace(t *testing.
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit(w.ctx))
 	require.NoError(t, kanamepg.NewModuleSeedWriteRepo(w.pool).RunInWriteTx(w.ctx, func(ctx context.Context, writer moduleseed.Writer) error {
-		if _, e := writer.UpsertGroup(ctx, "system", "module-relation-writers", "Module service accounts allowed to write relation tuples through iam (issue #914)"); e != nil {
+		if _, e := writer.UpsertGroup(ctx, "system", "module-relation-writers", "Module service accounts allowed to write relation tuples through iam (issue kacho#914)"); e != nil {
 			return e
 		}
 		_, e := writer.GrantRelation(ctx, moduleseed.Subject{Kind: "group", Account: "system", Name: "module-relation-writers"}, "fga_writer", "cluster", cluster)

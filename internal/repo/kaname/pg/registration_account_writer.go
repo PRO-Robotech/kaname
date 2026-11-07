@@ -199,15 +199,12 @@ func revokeRegistrationWriter(ctx context.Context, tx pgx.Tx, a writerAssignment
 	if err != nil {
 		return err
 	}
-	if !b.System || b.ResourceType != domain.ResourceType("account") || b.ResourceID != a.account || string(b.SubjectID) != authzguard.ServiceAccountIDForService(a.module) || b.GrantedRelation != authzguard.RelationWriteRelation || b.RoleID != "" {
-		return fmt.Errorf("registration writer ledger does not own binding %s", a.binding)
-	}
 	subjects, err := wtx.AccessBindings().ListSubjects(ctx, b.ID)
 	if err != nil {
 		return err
 	}
-	if len(subjects) != 1 || subjects[0].Type != b.SubjectType || subjects[0].ID != b.SubjectID {
-		return fmt.Errorf("registration writer binding subjects changed")
+	if !registrationWriterOwnsGrant(b, a, subjects) {
+		return fmt.Errorf("registration writer ledger does not own binding %s", a.binding)
 	}
 	if b.Status != domain.AccessBindingStatusActive {
 		return nil
@@ -225,7 +222,19 @@ func revokeRegistrationWriter(ctx context.Context, tx pgx.Tx, a writerAssignment
 	if err = w.EmitRelationDelete(ctx, stored); err != nil {
 		return err
 	}
-	return registrationWriterEvent(ctx, w, "revoked", a.binding, a.account, string(b.SubjectID))
+	return registrationWriterEvent(ctx, w, "revoked", a.binding, a.account, string(subjects[0].ID))
+}
+
+// registrationWriterOwnsGrant сверяет естественный ключ прямой выдачи с журналом
+// установки. Проекция проверяется только как часть этого ключа; её совпадение
+// не заменяет чтение полного набора и отказ при лишнем или чужом субъекте.
+func registrationWriterOwnsGrant(b domain.AccessBinding, a writerAssignment, subjects []domain.Subject) bool {
+	expected := domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: domain.SubjectID(authzguard.ServiceAccountIDForService(a.module))}
+	return b.ID == domain.AccessBindingID(a.binding) && b.System &&
+		b.ResourceType == domain.ResourceType("account") && b.ResourceID == a.account &&
+		b.SubjectType == expected.Type && b.SubjectID == expected.ID &&
+		b.GrantedRelation == authzguard.RelationWriteRelation && b.RoleID == "" &&
+		len(subjects) == 1 && subjects[0] == expected
 }
 
 func registrationWriterEvent(ctx context.Context, w ab.WriterIface, action, binding, account, subject string) error {
@@ -275,11 +284,21 @@ func retireClusterRegistrationWriter(ctx context.Context, tx pgx.Tx) error {
 			return err
 		}
 		var owned bool
-		if err = tx.QueryRow(ctx, `SELECT kaname.registration_owns_legacy_cluster_writer(b) FROM kaname.access_bindings b WHERE b.id=$1`, id).Scan(&owned); err != nil {
+		var ownedSubject string
+		if err = tx.QueryRow(ctx, `SELECT kaname.registration_owns_legacy_cluster_writer(b),i.group_id
+ FROM kaname.access_bindings b CROSS JOIN kaname.registration_legacy_cluster_writer_identity i
+ WHERE b.id=$1 AND i.singleton`, id).Scan(&owned, &ownedSubject); err != nil {
 			return err
 		}
 		if !owned {
 			return fmt.Errorf("legacy writer binding ownership changed")
+		}
+		subjects, err := wtx.AccessBindings().ListSubjects(ctx, b.ID)
+		if err != nil {
+			return err
+		}
+		if len(subjects) != 1 || subjects[0].Type != domain.SubjectTypeGroup || string(subjects[0].ID) != ownedSubject {
+			return fmt.Errorf("legacy writer binding subjects changed")
 		}
 
 		if b.Status != domain.AccessBindingStatusActive {
@@ -298,10 +317,10 @@ func retireClusterRegistrationWriter(ctx context.Context, tx pgx.Tx) error {
 		if err = w.EmitRelationDelete(ctx, stored); err != nil {
 			return err
 		}
-		if err = w.EmitSubjectChangeEvent(ctx, ab.SubjectChangeEvent{SubjectType: "group", SubjectID: string(b.SubjectID), EventType: "binding_revoke", Op: "binding_delete"}); err != nil {
+		if err = w.EmitSubjectChangeEvent(ctx, ab.SubjectChangeEvent{SubjectType: "group", SubjectID: string(subjects[0].ID), EventType: "binding_revoke", Op: "binding_delete"}); err != nil {
 			return err
 		}
-		if err = w.EmitAuditEvent(ctx, ab.AuditEvent{EventType: ab.AuditEventTypeRevoked, Actor: "system:registration-account-writers", SubjectType: "group", SubjectID: string(b.SubjectID), ResourceType: "cluster", ResourceID: b.ResourceID, BindingID: id}); err != nil {
+		if err = w.EmitAuditEvent(ctx, ab.AuditEvent{EventType: ab.AuditEventTypeRevoked, Actor: "system:registration-account-writers", SubjectType: "group", SubjectID: string(subjects[0].ID), ResourceType: "cluster", ResourceID: b.ResourceID, BindingID: id}); err != nil {
 			return err
 		}
 	}

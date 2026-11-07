@@ -7,8 +7,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/PRO-Robotech/corelib/platformmodules"
-
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -17,6 +15,7 @@ import (
 // полномочия аккаунта после допуска. Отсутствующая зависимость всегда отвергает запись.
 type registrationAuthority interface {
 	Authorize(context.Context) (string, error)
+	AuthorizeCatalogModule(context.Context) (string, error)
 	AuthorizeAccount(context.Context, string) error
 }
 
@@ -39,7 +38,7 @@ func (uc *RegisterResourceUseCase) authorizeIntent(ctx context.Context, t tupleI
 	if uc.authority == nil {
 		return "", proxyWriteRefusal()
 	}
-	module, err := uc.authority.Authorize(ctx)
+	module, err := uc.authority.AuthorizeCatalogModule(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -53,13 +52,7 @@ func authorizeCatalogOwner(module, owner string) error {
 	if module == "" || strings.ContainsAny(module, "* \t\n") || owner == "" {
 		return proxyWriteRefusal()
 	}
-	// Сохраняем объявленные псевдонимы платформы (nlb -> loadbalancer). В остальных случаях
-	// аутентифицированный списком установки сервис точно называет свой модуль.
-	catalogModule, known := platformmodules.CatalogModuleOfService(module)
-	if !known {
-		catalogModule = module
-	}
-	if catalogModule != owner {
+	if module != owner {
 		return proxyWriteRefusal()
 	}
 	return nil

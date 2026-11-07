@@ -5,6 +5,7 @@ package internal_iam
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
@@ -64,6 +65,8 @@ func (uc *RegisterResourceUseCase) retireRegistrationPointers(ctx context.Contex
 	return store.RetireRegistrationPointersTx(ctx, tx, owner, object, version)
 }
 
+// namedPointerSubjectType — общий предел формы родителя до чтения каталога
+// и при допуске точного указателя. Проект допустим; принципалы и вершины IAM — нет.
 func namedPointerSubjectType(typ string) bool {
 	if typ == "project" {
 		return true
@@ -73,7 +76,7 @@ func namedPointerSubjectType(typ string) bool {
 			return false
 		}
 	}
-	return typ != ""
+	return typ != "" && !strings.Contains(typ, "*")
 }
 
 // versionedWithdrawalEmitter — обязательная capability named/mixed пути.

@@ -109,6 +109,17 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 	return module.Service, nil
 }
 
+// AuthorizeCatalogModule возвращает каталоговую личность из доверенного перечня.
+// Принадлежность конкретного типа всё равно судится текущей строкой каталога
+// в транзакции регистрации; имя из запроса не участвует в признании личности.
+func (g *RelationWriteGate) AuthorizeCatalogModule(ctx context.Context) (string, error) {
+	module, ok := g.modules.FromContext(ctx)
+	if !ok || module.CatalogModule == "" {
+		return "", status.Error(codes.PermissionDenied, "permission denied")
+	}
+	return module.CatalogModule, nil
+}
+
 // AuthorizeAccount проверяет лишь названный аккаунт; выдачи кластера не имеют значения.
 // Намеренно не кеширует успешные решения между доставками.
 func (g *RelationWriteGate) AuthorizeAccount(ctx context.Context, accountID string) error {

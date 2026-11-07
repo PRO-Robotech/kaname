@@ -26,6 +26,9 @@ func (a *awAuthority) Authorize(context.Context) (string, error) {
 	}
 	return a.module, nil
 }
+func (a *awAuthority) AuthorizeCatalogModule(ctx context.Context) (string, error) {
+	return a.Authorize(ctx)
+}
 func (a *awAuthority) AuthorizeAccount(_ context.Context, id string) error {
 	a.calls = append(a.calls, id)
 	if a.err != nil {

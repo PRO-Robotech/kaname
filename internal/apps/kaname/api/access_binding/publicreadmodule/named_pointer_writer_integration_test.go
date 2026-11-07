@@ -50,6 +50,9 @@ type namedAuthority struct {
 }
 
 func (a *namedAuthority) Authorize(context.Context) (string, error) { return a.module, nil }
+func (a *namedAuthority) AuthorizeCatalogModule(context.Context) (string, error) {
+	return a.module, nil
+}
 func (a *namedAuthority) AuthorizeAccount(_ context.Context, id string) error {
 	a.accounts = append(a.accounts, id)
 	if id == a.denied {

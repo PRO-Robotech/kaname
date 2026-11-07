@@ -152,7 +152,7 @@ func ownManifest(t *testing.T) *manifest.Manifest {
 	require.NoError(t, err, "встроенный манифест службы не разобран — вердикт беспредметен")
 	// Явный исторический операнд сохраняет общий контракт применения.
 	// Текущий производственный манифест намеренно не восстанавливает эти снятые начальные данные.
-	m.Seed.Groups = []manifest.Group{{Name: writersGroupName, Account: systemAccountName, Description: "Module service accounts allowed to write relation tuples through iam (issue #914)"}}
+	m.Seed.Groups = []manifest.Group{{Name: writersGroupName, Account: systemAccountName, Description: "Module service accounts allowed to write relation tuples through iam (issue kacho#914)"}}
 	m.Seed.AccessBindings = []manifest.AccessBinding{{Subjects: []manifest.Subject{{Type: "group", Name: writersGroupName}}, GrantedRelation: writersRelation, ScopeType: "iam.cluster", ScopeID: clusterAnchor, Target: "allInScope"}}
 	return m
 }
