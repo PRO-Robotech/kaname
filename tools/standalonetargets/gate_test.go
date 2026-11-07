@@ -11,7 +11,9 @@ package standalonetargets_test
 // выглядит как обычный зелёный.
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,7 +127,7 @@ func TestStandaloneTargetsWorkInAStandaloneClone(t *testing.T) {
 		"записи ведомости, которым больше нечего прощать: %v — послабление живёт, пока у него есть предмет",
 		census.StaleWaiv)
 
-	findings, unmet, err := standalonetargets.RunTargets(clone, judged, makeRunner(t))
+	findings, unmet, err := standalonetargets.RunTargetsWithCapture(clone, judged, makeCaptureRunner(t))
 	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ")
 
 	// Перепись печатается ПОСЛЕ прогона и несёт ТРИ величины, а не две: без
@@ -221,20 +223,114 @@ func buildStandaloneClone(t *testing.T, moduleRoot string) string {
 func makeRunner(t *testing.T) func(dir, target string) (int, string, error) {
 	t.Helper()
 	return func(dir, target string) (int, string, error) {
+		result, err := makeCaptureRunner(t)(dir, target)
+		if result.Capture != nil {
+			defer result.Capture.Close()
+		}
+		return result.Code, result.Output, err
+	}
+}
+
+func makeCaptureRunner(t *testing.T) func(dir, target string) (standalonetargets.TargetResult, error) {
+	t.Helper()
+	return func(dir, target string) (standalonetargets.TargetResult, error) {
+		var root *os.Root
+		code, output, err := makeRunnerOwned(t, &root)(dir, target)
+		return standalonetargets.TargetResult{Code: code, Output: output, Capture: root}, err
+	}
+}
+
+func makeRunnerOwned(t *testing.T, captureRoot **os.Root) func(dir, target string) (int, string, error) {
+	t.Helper()
+	return func(dir, target string) (int, string, error) {
+		base := os.Getenv("STANDALONE_DIAGNOSTICS_DIR")
+		if base == "" {
+			base = os.TempDir()
+		}
+		if !filepath.IsAbs(base) {
+			return 0, "", fmt.Errorf("capture должен быть абсолютным путём")
+		}
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			return 0, "", err
+		}
+		real, err := filepath.EvalSymlinks(base)
+		if err != nil || real != base {
+			return 0, "", fmt.Errorf("capture содержит ссылку")
+		}
+		rel, err := filepath.Rel(dir, base)
+		if err != nil || rel == "." || (!strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != "..") {
+			return 0, "", fmt.Errorf("capture находится внутри удаляемой фикстуры")
+		}
+		capture, err := os.MkdirTemp(base, "target-")
+		if err != nil {
+			return 0, "", err
+		}
+		// Handle удерживает именно созданный invocation до первого действия child.
+		owned, err := os.OpenRoot(capture)
+		if err != nil {
+			return 0, "", err
+		}
+		*captureRoot = owned
+		path := filepath.Join(capture, "target.log")
+		stream, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return 0, "", err
+		}
+		defer stream.Close()
+		state := map[string]any{"version": 1, "kind": "runner", "target": target, "complete": false, "rc": nil}
+		writeState := func() error {
+			data, err := json.MarshalIndent(state, "", "  ")
+			if err != nil {
+				return err
+			}
+			tmp := filepath.Join(capture, "runner.json.tmp")
+			if err := os.WriteFile(tmp, data, 0o600); err != nil {
+				return err
+			}
+			return os.Rename(tmp, filepath.Join(capture, "runner.json"))
+		}
+		if err := writeState(); err != nil {
+			return 0, "", err
+		}
 		cmd := exec.Command("make", target)
 		cmd.Dir = dir
-		cmd.Env = append(nestedEnv(gitenv.Env()), "GOFLAGS=-mod=mod")
+		env := nestedEnv(gitenv.Env())
+		for _, item := range env {
+			if !strings.HasPrefix(item, "STANDALONE_DIAGNOSTICS_DIR=") {
+				cmd.Env = append(cmd.Env, item)
+			}
+		}
+		cmd.Env = append(cmd.Env, "GOFLAGS=-mod=mod", "STANDALONE_DIAGNOSTICS_DIR="+capture)
+		// Оригинальная ревизия сохраняется отдельно от технического git commit клона.
+		for _, pair := range [][2]string{{"COMMIT", "HEAD"}, {"TREE", "HEAD^{tree}"}} {
+			if value, err := gitenv.Command(".", "rev-parse", pair[1]).Output(); err == nil {
+				cmd.Env = append(cmd.Env, "STANDALONE_SOURCE_"+pair[0]+"="+strings.TrimSpace(string(value)))
+			}
+		}
+		cmd.Stdout, cmd.Stderr = stream, stream
 		start := time.Now()
-		out, err := cmd.CombinedOutput()
-		t.Logf("цель %s: %s, вывода %d байт", target, time.Since(start).Round(time.Millisecond), len(out))
-		if err == nil {
-			return 0, string(out), nil
+		runErr := cmd.Run()
+		if err := stream.Close(); err != nil {
+			return 0, "", err
 		}
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			return ee.ExitCode(), string(out), nil
+		code := 0
+		if runErr != nil {
+			var ee *exec.ExitError
+			if !errors.As(runErr, &ee) {
+				return 0, "", runErr
+			}
+			code = ee.ExitCode()
 		}
-		return 0, "", err
+		state["complete"], state["rc"] = true, code
+		if err := writeState(); err != nil {
+			return 0, "", err
+		}
+		out, err := os.ReadFile(path)
+		if err != nil {
+			return 0, "", err
+		}
+		t.Logf("цель %s: %s, вывода %d байт; полный поток: %s", target, time.Since(start).Round(time.Millisecond), len(out), path)
+		return code, string(out) + "\nполный вывод цели: " + path + "\n", nil
 	}
 }
 
