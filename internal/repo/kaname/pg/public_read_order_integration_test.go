@@ -36,11 +36,12 @@ package pg_test
 
 import (
 	"context"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"

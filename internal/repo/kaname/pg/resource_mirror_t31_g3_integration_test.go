@@ -29,9 +29,10 @@ package pg_test
 
 import (
 	"context"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"

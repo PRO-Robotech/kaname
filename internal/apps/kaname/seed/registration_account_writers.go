@@ -5,10 +5,11 @@ package seed
 import (
 	"context"
 	"fmt"
-	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 )
 
 // RegistrationWriterPlan — конечный, проверенный вход установки. Отключённые

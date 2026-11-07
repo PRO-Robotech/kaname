@@ -4,10 +4,11 @@ package seed
 
 import (
 	"context"
+	"testing"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 type registrationPlanStore struct{ calls int }

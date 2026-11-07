@@ -15,9 +15,10 @@ package internal_iam_test
 
 import (
 	"context"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

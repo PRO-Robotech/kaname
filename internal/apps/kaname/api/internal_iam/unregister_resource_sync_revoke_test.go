@@ -27,8 +27,9 @@ package internal_iam
 import (
 	"context"
 	"errors"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

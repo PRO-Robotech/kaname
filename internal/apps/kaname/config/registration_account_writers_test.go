@@ -3,9 +3,10 @@
 package config
 
 import (
+	"testing"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestRegistrationWriterDeclarationDistinguishesOmissionAndEmpty(t *testing.T) {

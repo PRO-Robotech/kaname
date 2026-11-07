@@ -6,11 +6,12 @@ package publicreadmodule_test
 import (
 	"context"
 	"errors"
-	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/jackc/pgx/v5"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"

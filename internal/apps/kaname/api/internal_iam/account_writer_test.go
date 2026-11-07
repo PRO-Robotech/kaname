@@ -4,13 +4,14 @@ package internal_iam
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"testing"
-	"time"
 )
 
 type awAuthority struct {

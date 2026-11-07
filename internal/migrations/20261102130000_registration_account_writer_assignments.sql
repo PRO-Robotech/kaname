@@ -2,6 +2,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1031: persistent identity of explicit installation assignments.
 -- No FK to access_bindings: deleting a binding must not erase revocation history.
+-- Приёмка: docs/engineering/acceptance/account-scoped-registration-writer.md
+-- §4/§5.5: стабильная identity назначения, сохранённый отзыв и безопасный upgrade/rollback.
 -- +goose Up
 CREATE TABLE kaname.registration_account_writer_assignment (
  assignment_id text PRIMARY KEY CHECK (assignment_id <> ''),

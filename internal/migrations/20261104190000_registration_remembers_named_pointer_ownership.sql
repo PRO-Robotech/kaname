@@ -3,6 +3,9 @@
 -- kaname#1031: точное доказательство ранее допущенного named pointer.
 -- Старые факты и текущий каталог не доказывают прежнее владение: backfill нет.
 -- История без FK к каталогу/зеркалу сохраняется для повторного cleanup.
+-- Приёмка: docs/engineering/acceptance/account-scoped-registration-writer.md
+-- §1/§2.1/§2.2(5): сохранённая регистрация для законного снятия после изменения policy,
+-- повтор и порядок source_version без восстановления снятого владения.
 -- +goose Up
 CREATE TABLE kaname.resource_registration_pointer (
  module text NOT NULL CHECK (module <> ''),

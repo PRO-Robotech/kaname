@@ -35,10 +35,11 @@ package pg_test
 import (
 	"context"
 	"database/sql"
-	"github.com/PRO-Robotech/kaname/internal/migrations"
-	"github.com/pressly/goose/v3"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/pressly/goose/v3"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"

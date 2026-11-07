@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
