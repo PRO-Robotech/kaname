@@ -62,10 +62,12 @@ func CensusDirectProducers(corpus map[string][]byte) (map[string]bool, int, erro
 		for _, f := range pkg {
 			for _, d := range f.Decls {
 				factory, ok := d.(*ast.FuncDecl)
-				if !ok || factory.Recv != nil || factory.Body == nil || factory.Type.Results == nil || !directFactoryCalled(files, pkg, factory) {
+				if !ok || factory.Recv != nil || factory.Body == nil || factory.Type.Results == nil {
 					continue
 				}
-				if directFactoryProof(files, pkg, f, factory) {
+				// Оба доказательства чистые: дешёвые отказы формы предшествуют
+				// поиску вызовов во всех Test пакета. Критерий A && B не меняется.
+				if directFactoryProof(files, pkg, f, factory) && directFactoryCalled(files, pkg, factory) {
 					result[key] = true
 					count++
 				}
@@ -813,6 +815,12 @@ func directUniqueImmediateCall(body *ast.BlockStmt, receiver, method, truth stri
 func directProductionPrefix(stmt ast.Stmt, truth string) bool {
 	if branch, ok := stmt.(*ast.IfStmt); ok {
 		if branch.Init != nil && !directProductionPrefix(branch.Init, truth) {
+			return false
+		}
+		// Вычисление Cond предшествует выбору ветви. Поглощающий bool operand
+		// не стирает terminal/closure; даже short-circuited closure закрываем
+		// консервативно, без отдельного анализа её достижимости.
+		if directStops(&ast.ExprStmt{X: branch.Cond}) {
 			return false
 		}
 		value, known := directBool(branch.Cond, truth)

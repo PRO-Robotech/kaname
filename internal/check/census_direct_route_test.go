@@ -435,3 +435,68 @@ func TestCensusDirectProducerBooleanContinuation(t *testing.T) {
 		})
 	}
 }
+
+// Безопасность вычисления условия проверяется раньше bool folding. Closure
+// здесь намеренно не поддержана даже на short-circuited стороне выражения.
+func TestCensusDirectProducerConditionEvaluation(t *testing.T) {
+	corpus := directRouteCorpus(t)
+	actual, count, err := check.CensusDirectProducers(corpus)
+	require.NoError(t, err)
+	require.Positive(t, count)
+	require.True(t, actual["internal/apps/kaname/api/access_binding/publicreadmodule/publicreadmodule_test"])
+	const file = "internal/apps/kaname/api/internal_iam/register_resource.go"
+	for _, tc := range []struct {
+		name, condition string
+		admitted        bool
+	}{
+		{"F4R3 executed left panic and false", `func() bool {panic("stop")}() && false`, false},
+		{"F4R3 executed left panic or true", `func() bool {panic("stop")}() || true`, false},
+		{"F4R3 executed right panic after true", `true && func() bool {panic("stop")}()`, false},
+		{"F4R3 executed right panic after false", `false || func() bool {panic("stop")}()`, false},
+		{"F4R3 executed left panic and write", `func() bool {panic("stop")}() && write`, false},
+		{"F4R3 executed right panic after write", `write && func() bool {panic("stop")}()`, false},
+		{"F4R3 unknown left and right panic", `ctx.Err() != nil && func() bool {panic("stop")}()`, false},
+		{"F4R3 unknown left or right panic", `ctx.Err() != nil || func() bool {panic("stop")}()`, false},
+		{"F4R3 nested absorbing condition", `(func() bool {panic("stop")}() && false) == false`, false},
+		{"F4R3 negated absorbing condition", `!(func() bool {panic("stop")}() || true)`, false},
+		{"F4R3 conservative unreachable right and", `false && func() bool {panic("stop")}()`, false},
+		{"F4R3 conservative unreachable right or", `true || func() bool {panic("stop")}()`, false},
+		{"F4R3 conservative unreachable right write", `write || func() bool {panic("stop")}()`, false},
+		{"F4R3 conservative nonterminal left closure", `func() bool {return true}() && false`, false},
+		{"F4R3 conservative nonterminal right closure", `true && func() bool {return true}()`, false},
+		{"F4R3 conservative unused closure argument", `fmt.Sprint(func(){panic("stop")}) != "" && false`, false},
+		{"F4R3 conservative terminal method in closure", `func() bool {var stop interface{SkipNow()}; stop.SkipNow(); return false}() && false`, false},
+		{"F4R3 terminal selector before absorbing false", `interface{Fatal() bool}(nil).Fatal() && false`, false},
+		{"F4R3 terminal selector before absorbing true", `interface{SkipNow() bool}(nil).SkipNow() || true`, false},
+		{"F4R3 conservative unreachable terminal selector", `false && interface{Fatal() bool}(nil).Fatal()`, false},
+		{"F4R3 pure literal and twin", "true && false", true},
+		{"F4R3 pure literal or twin", "false || true", true},
+		{"F4R3 pure write and twin", "write && false", true},
+		{"F4R3 pure write or twin", "write || true", true},
+		{"F4R3 pure comparison twin", "(write == true) && !false", true},
+		{"F4R3 supported dynamic left and twin", "ctx.Err() != nil && false", true},
+		{"F4R3 supported dynamic left or twin", "ctx.Err() != nil || true", true},
+		{"F4R3 supported dynamic right and twin", "false && (ctx.Err() != nil)", true},
+		{"F4R3 supported dynamic right or twin", "true || (ctx.Err() != nil)", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			copy := directRouteFixture(corpus)
+			requireDirectFixture(t, copy)
+			copy[file] = []byte(mutateRouteFunction(t, file, string(copy[file]), "RegisterResourceUseCase", "emitAttempt", func(declaration string) string {
+				const target = "module, err := uc.authorizeIntent"
+				require.Equal(t, 1, strings.Count(declaration, target))
+				// Тело не останавливает путь: отрицание относится именно к Cond.
+				return strings.Replace(declaration, target, "if "+tc.condition+" {_ = 0};"+target, 1)
+			}))
+			got, n, err := check.CensusDirectProducers(copy)
+			require.NoError(t, err)
+			if tc.admitted {
+				require.Equal(t, 1, n)
+				require.True(t, got["fixture/fixture"])
+			} else {
+				require.Zero(t, n)
+				require.Empty(t, got)
+			}
+		})
+	}
+}
