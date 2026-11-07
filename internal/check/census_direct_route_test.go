@@ -56,6 +56,10 @@ func newWorld(t *testing.T) *world {
 }
 func(w *world) seed() { if err := w.reg.Register(nil,&api.RegisterResourceRequest{}); err != nil { panic(err) } }
 func TestWorld(t *testing.T) { w := newWorld(t); _ = w }
+func setup() error { return nil }
+func setupPair() (int,error) { return 0,nil }
+func referencePair(t *testing.T) (int,*testing.T) { return 0,t }
+func referenceFirst(t *testing.T) (*testing.T,error) { return t,nil }
 `)
 	return out
 }
@@ -301,6 +305,123 @@ func TestCensusDirectProducerWriteIntent(t *testing.T) {
 			copy[file] = []byte(mutateRouteFunction(t, file, string(copy[file]), "RegisterResourceUseCase", tc.method, func(declaration string) string {
 				require.Equal(t, 1, strings.Count(declaration, tc.old), "одна целевая позиция production source")
 				return strings.Replace(declaration, tc.old, tc.replacement, 1)
+			}))
+			got, n, err := check.CensusDirectProducers(copy)
+			require.NoError(t, err)
+			if tc.admitted {
+				require.Equal(t, 1, n)
+				require.True(t, got["fixture/fixture"])
+			} else {
+				require.Zero(t, n)
+				require.Empty(t, got)
+			}
+		})
+	}
+}
+
+// R3 проверяет не имя err, а свежий результат прямого вызова и его guard.
+// Все новые snippets используют допустимые Go bindings и типы.
+func TestCensusDirectProducerErrorBinding(t *testing.T) {
+	corpus := directRouteCorpus(t)
+	actual, count, err := check.CensusDirectProducers(corpus)
+	require.NoError(t, err)
+	require.Positive(t, count)
+	require.True(t, actual["internal/apps/kaname/api/access_binding/publicreadmodule/publicreadmodule_test"])
+	for _, tc := range []struct {
+		name, old, replacement string
+		admitted               bool
+	}{
+		{"F3R2 testing parameter before factory", "w := newWorld(t)", `if t != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 testing parameter before constructor", "w := &world{}", `if t != nil {t.Fatal("stop")}; w := &world{}`, false},
+		{"F3R2 parameter renamed err", "func TestWorld(t *testing.T) { w := newWorld(t); _ = w }", `func TestWorld(err *testing.T) {if err != nil {err.Fatal("stop")}; w := newWorld(err); _ = w}`, false},
+		{"F3R2 alias parameter", "w := newWorld(t)", `other := t; if other != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 reference literal", "w := newWorld(t)", `other := &testing.T{}; if other != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 nil nonerror", "w := newWorld(t)", `var other *testing.T; if other != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 local reference result", "w := newWorld(t)", `_, result := referencePair(t); if result != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 wrong result position", "w := newWorld(t)", `result, _ := referenceFirst(t); if result != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 dead result declaration", "w := newWorld(t)", `var result error; if false {_, result = setupPair()}; if result != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 error result reassigned", "w := newWorld(t)", `_, result := setupPair(); result = setup(); if result != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 result alias", "w := newWorld(t)", `_, original := setupPair(); result := original; if result != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 result shadow", "w := newWorld(t)", `_, result := setupPair(); {result := t; if result != nil {t.Fatal("stop")}}; _ = result; w := newWorld(t)`, false},
+		{"F3R2 nonadjacent result", "w := newWorld(t)", `_, result := setupPair(); _ = 0; if result != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 shadow function value", "w := newWorld(t)", `setupPair := referencePair; _, result := setupPair(t); if result != nil {t.Fatal("stop")}; w := newWorld(t)`, false},
+		{"F3R2 error guard else stops", "w := newWorld(t)", `_, result := setupPair(); if result != nil {t.Fatal("stop")} else {t.SkipNow()}; w := newWorld(t)`, false},
+		{"F3R2 shadow builtin error type", "func setupPair() (int,error)", "type error = *testing.T; func setupPair() (int,error)", false},
+		{"F3R2 shadow nil binding", "w := newWorld(t)", `nil := error(nil); _, result := setupPair(); if result != nil {t.Fatal(result)}; w := newWorld(t)`, false},
+		{"F3R2 direct local error pair", "w := newWorld(t)", `_, result := setupPair(); if result != nil {t.Fatal(result)}; w := newWorld(t)`, true},
+		{"F3R2 local error single", "w := newWorld(t)", `result := setup(); if result != nil {t.Fatal(result)}; w := newWorld(t)`, true},
+		{"F3R2 local error if init", "w := newWorld(t)", `if _, result := setupPair(); result != nil {t.Fatal(result)}; w := newWorld(t)`, true},
+		{"F3R2 local error assigned if init", "w := newWorld(t)", `var result error; if _, result = setupPair(); result != nil {t.Fatal(result)}; w := newWorld(t)`, true},
+		{"F3R2 fresh setup before constructor", "w := &world{}", `_, result := setupPair(); if result != nil {t.Fatalf("setup: %v", result)}; w := &world{}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			copy := directRouteFixture(corpus)
+			if tc.name == "F3R2 shadow builtin error type" {
+				copy["fixture/world_test.go"] = []byte(strings.Replace(string(copy["fixture/world_test.go"]), "w := newWorld(t)", "_, result := setupPair(); if result != nil {t.Fatal(result)}; w := newWorld(t)", 1))
+			}
+			requireDirectFixture(t, copy)
+			source := string(copy["fixture/world_test.go"])
+			require.Equal(t, 1, strings.Count(source, tc.old))
+			copy["fixture/world_test.go"] = []byte(strings.Replace(source, tc.old, tc.replacement, 1))
+			got, n, err := check.CensusDirectProducers(copy)
+			require.NoError(t, err)
+			if tc.admitted {
+				require.Equal(t, 1, n)
+				require.True(t, got["fixture/fixture"])
+			} else {
+				require.Zero(t, n)
+				require.Empty(t, got)
+			}
+		})
+	}
+}
+
+// R3: comparison/continuation proof при единственном поддержанном write=true.
+func TestCensusDirectProducerBooleanContinuation(t *testing.T) {
+	corpus := directRouteCorpus(t)
+	actual, count, err := check.CensusDirectProducers(corpus)
+	require.NoError(t, err)
+	require.Positive(t, count)
+	require.True(t, actual["internal/apps/kaname/api/access_binding/publicreadmodule/publicreadmodule_test"])
+	const file = "internal/apps/kaname/api/internal_iam/register_resource.go"
+	for _, tc := range []struct {
+		name, prefix string
+		admitted     bool
+	}{
+		{"F4R2 true comparison return", "if write == true {return};", false},
+		{"F4R2 fixed value self comparison", "if write == write {return};", false},
+		{"F4R2 unknown value self comparison", "if ctx == ctx {return};", false},
+		{"F4R2 constant comparison", "if 1 == 1 {return};", false},
+		{"F4R2 alias bool conversion", "aliasWrite := write; if bool(aliasWrite) {return};", false},
+		{"F4R2 self inequality false twin", "if write != write {return};", true},
+		{"F4R2 reversed comparison return", "if true == write {return};", false},
+		{"F4R2 inequality return", "if write != false {return};", false},
+		{"F4R2 negated comparison return", "if !(write != true) {return};", false},
+		{"F4R2 conjunction return", "if write && true {return};", false},
+		{"F4R2 disjunction return", "if write || false {return};", false},
+		{"F4R2 nested comparison return", "if (write == true) == true {return};", false},
+		{"F4R2 both comparison branches return", "if write == true {return} else {return};", false},
+		{"F4R2 both unknown branches return", "if ctx.Err() != nil {return} else {return};", false},
+		{"F4R2 both nested unknown branches return", "if ctx.Err() != nil {if write {return}} else {return};", false},
+		{"F4R2 unknown fixed-write expression", "if write == (len([]int{}) == 0) {return};", false},
+		{"F4R2 opaque closure condition", "if func(value bool) bool {return value}(write) {return};", false},
+		{"F4R2 bool alias return", "aliasWrite := write; if aliasWrite {return};", false},
+		{"F4R2 bool alias comparison return", "aliasWrite := write; if aliasWrite != false {return};", false},
+		{"F4R2 unsupported loop branch", "if ctx.Err() != nil {for {}};", false},
+		{"F4R2 false comparison twin", "if write == false {return};", true},
+		{"F4R2 false inequality twin", "if write != true {return};", true},
+		{"F4R2 false conjunction twin", "if !write && true {return};", true},
+		{"F4R2 false literal conjunction twin", "if write && false {return};", true},
+		{"F4R2 error return twin", "if setupErr := ctx.Err(); setupErr != nil {return};", true},
+		{"F4R2 else continuation twin", "if ctx.Err() != nil {return} else {_ = 0};", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			copy := directRouteFixture(corpus)
+			requireDirectFixture(t, copy)
+			copy[file] = []byte(mutateRouteFunction(t, file, string(copy[file]), "RegisterResourceUseCase", "emitAttempt", func(declaration string) string {
+				const target = "module, err := uc.authorizeIntent"
+				require.Equal(t, 1, strings.Count(declaration, target))
+				return strings.Replace(declaration, target, tc.prefix+target, 1)
 			}))
 			got, n, err := check.CensusDirectProducers(copy)
 			require.NoError(t, err)

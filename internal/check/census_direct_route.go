@@ -62,7 +62,7 @@ func CensusDirectProducers(corpus map[string][]byte) (map[string]bool, int, erro
 		for _, f := range pkg {
 			for _, d := range f.Decls {
 				factory, ok := d.(*ast.FuncDecl)
-				if !ok || factory.Recv != nil || factory.Body == nil || factory.Type.Results == nil || !directFactoryCalled(pkg, factory) {
+				if !ok || factory.Recv != nil || factory.Body == nil || factory.Type.Results == nil || !directFactoryCalled(files, pkg, factory) {
 					continue
 				}
 				if directFactoryProof(files, pkg, f, factory) {
@@ -121,7 +121,7 @@ func directTestParameter(file *ast.File, fn *ast.FuncDecl) string {
 	return name
 }
 
-func directFactoryCalled(pkg map[string]*ast.File, factory *ast.FuncDecl) bool {
+func directFactoryCalled(files, pkg map[string]*ast.File, factory *ast.FuncDecl) bool {
 	unique := 0
 	for _, f := range pkg {
 		for _, d := range f.Decls {
@@ -149,6 +149,8 @@ func directFactoryCalled(pkg map[string]*ast.File, factory *ast.FuncDecl) bool {
 			}
 			if directStraightCalls(fn.Body, func(c *ast.CallExpr) bool {
 				return routeIdent(c.Fun, factory.Name.Name) && len(c.Args) == 1 && routeIdent(c.Args[0], param)
+			}, func(branch *ast.IfStmt, previous ast.Stmt) bool {
+				return directErrorFatalGuard(files, pkg, f, fn, branch, previous)
 			}) {
 				return true
 			}
@@ -213,9 +215,16 @@ func directFactoryProof(files, pkg map[string]*ast.File, file *ast.File, fn *ast
 			continue
 		}
 		prefixSafe := true
-		for _, previous := range fn.Body.List[:index] {
-			if directStops(previous) {
-				prefixSafe = false
+		for at, statement := range fn.Body.List[:index] {
+			if directStops(statement) {
+				var previous ast.Stmt
+				if at > 0 {
+					previous = fn.Body.List[at-1]
+				}
+				branch, ok := statement.(*ast.IfStmt)
+				if !ok || !directErrorFatalGuard(files, pkg, file, fn, branch, previous) {
+					prefixSafe = false
+				}
 			}
 		}
 		if !prefixSafe || !directWorldSafe(files, pkg, fn, world.Name, typ.Name, lhs.Sel.Name, initial, a, map[string]bool{}) {
@@ -389,7 +398,7 @@ func directWorldPath(pkg map[string]*ast.File, body *ast.BlockStmt, receiver, ty
 // Читается только линейная часть до return/перехода/цикла. У if исполняется
 // init, но ни одна условная ветка не считается свидетелем. У &&/|| правая
 // часть может не вычисляться; аргументы обычного вызова вычисляются всегда.
-func directStraightCalls(body *ast.BlockStmt, predicate func(*ast.CallExpr) bool) bool {
+func directStraightCalls(body *ast.BlockStmt, predicate func(*ast.CallExpr) bool, guards ...func(*ast.IfStmt, ast.Stmt) bool) bool {
 	if body == nil {
 		return false
 	}
@@ -447,12 +456,22 @@ func directStraightCalls(body *ast.BlockStmt, predicate func(*ast.CallExpr) bool
 		}
 		return false
 	}
-	for _, s := range body.List {
+	for index, s := range body.List {
 		if simple(s) {
 			return true
 		}
-		if stopped || directStops(s) {
+		if stopped {
 			return false
+		}
+		if directStops(s) {
+			var previous ast.Stmt
+			if index > 0 {
+				previous = body.List[index-1]
+			}
+			branch, ok := s.(*ast.IfStmt)
+			if !ok || len(guards) != 1 || !guards[0](branch, previous) {
+				return false
+			}
 		}
 	}
 	return false
@@ -467,9 +486,6 @@ func directStops(stmt ast.Stmt) bool {
 		}
 		if routeIdent(branch.Cond, "false") {
 			return branch.Else != nil && directStops(branch.Else)
-		}
-		if directErrorFatalGuard(branch) {
-			return false
 		}
 	}
 	return routeAny(stmt, func(n ast.Node) bool {
@@ -499,31 +515,149 @@ func directTerminalCall(call *ast.CallExpr) bool {
 	return false
 }
 
-// Поддержанная предпосылка factory: обычный error != nil → Fatal[f].
-// Она не даёт producer-свидетельства и не объявляет, что внешний вызов успешен.
-// Постоянный/иной terminal guard, else, closure или дополнительный оператор
-// требуют отдельного доказательства, поэтому продолжение через них запрещено.
-func directErrorFatalGuard(branch *ast.IfStmt) bool {
-	if branch.Else != nil || len(branch.Body.List) != 1 {
+// Guard разрешён лишь непосредственно после call-result assignment либо в его
+// if-init. Параметр, alias, literal, отложенная/ветвящаяся запись не являются
+// результатом этого вызова. Известную локальную сигнатуру проверяем по error;
+// внешний two-result setup остаётся явно условной предпосылкой, не успехом.
+func directErrorFatalGuard(files, pkg map[string]*ast.File, file *ast.File, fn *ast.FuncDecl, branch *ast.IfStmt, previous ast.Stmt) bool {
+	if branch.Else != nil || len(branch.Body.List) != 1 || fn.Type.Params == nil {
 		return false
 	}
 	cond, ok := routeUnparen(branch.Cond).(*ast.BinaryExpr)
 	if !ok || cond.Op != token.NEQ || !routeIdent(cond.Y, "nil") {
 		return false
 	}
-	if _, ok := routeUnparen(cond.X).(*ast.Ident); !ok {
+	binding, ok := routeUnparen(cond.X).(*ast.Ident)
+	if !ok || binding.Name == "_" {
+		return false
+	}
+	tester := directParameterName(fn, 0)
+	if tester == "" || binding.Name == tester || !routeParameter(fn, tester, file, "testing", "T") || routeLocalBindings(fn)[tester] != 1 {
 		return false
 	}
 	expr, ok := branch.Body.List[0].(*ast.ExprStmt)
 	if !ok {
 		return false
 	}
-	call, ok := routeUnparen(expr.X).(*ast.CallExpr)
-	if !ok {
+	fatal, ok := routeUnparen(expr.X).(*ast.CallExpr)
+	if !ok || (!routeSelector(fatal.Fun, tester, "Fatal") && !routeSelector(fatal.Fun, tester, "Fatalf")) {
 		return false
 	}
+	statement := previous
+	if branch.Init != nil {
+		statement = branch.Init
+	}
+	assignment, ok := statement.(*ast.AssignStmt)
+	if !ok || len(assignment.Rhs) != 1 || len(assignment.Lhs) == 0 || len(assignment.Lhs) > 2 || !routeIdent(assignment.Lhs[len(assignment.Lhs)-1], binding.Name) {
+		return false
+	}
+	// Вне if-init принимается только новое прямое объявление результата.
+	if assignment.Tok != token.DEFINE && (branch.Init == nil || assignment.Tok != token.ASSIGN || len(assignment.Lhs) != 2) {
+		return false
+	}
+	if len(assignment.Lhs) == 2 && routeIdent(assignment.Lhs[0], binding.Name) {
+		return false
+	}
+	call, ok := routeUnparen(assignment.Rhs[0]).(*ast.CallExpr)
+	if !ok || directStops(assignment) {
+		return false
+	}
+	if id, ok := routeUnparen(call.Fun).(*ast.Ident); ok && routeLocalBindings(fn)[id.Name] != 0 {
+		return false
+	}
+	declaration, external := directSetupDeclaration(files, pkg, file, call)
+	if external {
+		return len(assignment.Lhs) == 2
+	}
+	if declaration == nil || declaration.Type.Results == nil {
+		return false
+	}
+	results := []ast.Expr{}
+	for _, field := range declaration.Type.Results.List {
+		n := len(field.Names)
+		if n == 0 {
+			n = 1
+		}
+		for i := 0; i < n; i++ {
+			results = append(results, field.Type)
+		}
+	}
+	return len(results) == len(assignment.Lhs) && routeIdent(results[len(results)-1], "error")
+}
+
+// Разрешаются только package function и constructor().Method с видимой
+// сигнатурой; локальные function values и произвольные receiver chains закрыты.
+func directSetupDeclaration(files, pkg map[string]*ast.File, file *ast.File, call *ast.CallExpr) (*ast.FuncDecl, bool) {
+	if id, ok := routeUnparen(call.Fun).(*ast.Ident); ok {
+		var found *ast.FuncDecl
+		for _, f := range pkg {
+			if !directPredeclaredNameUnshadowed(f, "error") {
+				return nil, false
+			}
+			if fn := routeFunction(f, id.Name); fn != nil {
+				if found != nil {
+					return nil, false
+				}
+				found = fn
+			}
+		}
+		return found, false
+	}
 	sel, ok := routeUnparen(call.Fun).(*ast.SelectorExpr)
-	return ok && (sel.Sel.Name == "Fatal" || sel.Sel.Name == "Fatalf")
+	if !ok {
+		return nil, false
+	}
+	if alias, ok := routeUnparen(sel.X).(*ast.Ident); ok {
+		imported := routeImport(file, alias.Name)
+		if imported == "" || !routeAliasUnshadowed(file, alias.Name) {
+			return nil, false
+		}
+		const module = "github.com/PRO-Robotech/kaname/"
+		if !strings.HasPrefix(imported, module) {
+			return nil, true
+		}
+		var found *ast.FuncDecl
+		for rel, f := range files {
+			if path.Dir(rel) == strings.TrimPrefix(imported, module) && !strings.HasSuffix(rel, "_test.go") {
+				if !directPredeclaredNameUnshadowed(f, "error") {
+					return nil, false
+				}
+				if fn := routeFunction(f, sel.Sel.Name); fn != nil {
+					if found != nil {
+						return nil, false
+					}
+					found = fn
+				}
+			}
+		}
+		return found, false
+	}
+	constructor, ok := routeUnparen(sel.X).(*ast.CallExpr)
+	if !ok {
+		return nil, false
+	}
+	decl, external := directSetupDeclaration(files, pkg, file, constructor)
+	if external || decl == nil || decl.Type.Results == nil || len(decl.Type.Results.List) != 1 {
+		return nil, false
+	}
+	pointer, ok := routeUnparen(decl.Type.Results.List[0].Type).(*ast.StarExpr)
+	if !ok {
+		return nil, false
+	}
+	typ, ok := routeUnparen(pointer.X).(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	owner, ok := routeUnparen(constructor.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return nil, false
+	}
+	alias, ok := routeUnparen(owner.X).(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	dir := strings.TrimPrefix(routeImport(file, alias.Name), "github.com/PRO-Robotech/kaname/")
+	return routeMethodIn(files, dir, typ.Name, sel.Sel.Name), false
 }
 
 // Здесь доказан только существующий протокол Register→emit→emitAttempt:
@@ -683,14 +817,22 @@ func directProductionPrefix(stmt ast.Stmt, truth string) bool {
 		}
 		value, known := directBool(branch.Cond, truth)
 		if !known {
-			// Условные отказы продукта разрешены, а terminal/closure-подмены нет.
-			return !routeAny(branch, func(n ast.Node) bool {
-				if c, ok := n.(*ast.CallExpr); ok {
-					return directTerminalCall(c)
+			// Неизвестное выражение с фиксированным write не объявляем
+			// динамической предпосылкой. Нужна хотя бы одна продолжающая ветвь.
+			if (truth != "" && routeExprHasName(branch.Cond, truth)) || !directDynamicGuard(branch.Cond) || routeAny(branch, func(n ast.Node) bool {
+				switch node := n.(type) {
+				case *ast.CallExpr:
+					return directTerminalCall(node)
+				case *ast.FuncLit, *ast.BranchStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt, *ast.LabeledStmt:
+					return true
 				}
-				_, closure := n.(*ast.FuncLit)
-				return closure
-			})
+				return false
+			}) {
+				return false
+			}
+			thenContinues := directProductionPrefix(branch.Body, truth)
+			elseContinues := branch.Else == nil || directProductionPrefix(branch.Else, truth)
+			return thenContinues || elseContinues
 		}
 		if value {
 			for _, s := range branch.Body.List {
@@ -721,35 +863,70 @@ func directProductionPrefix(stmt ast.Stmt, truth string) bool {
 // true/false обозначают предобъявленные константы только при отсутствии
 // локальной или пакетной подмены. Неизвестное связывание не вычисляем.
 func directBooleanLiteralsUnshadowed(file *ast.File) bool {
-	for _, name := range []string{"true", "false"} {
-		if !routeAliasUnshadowed(file, name) {
-			return false
-		}
-		for _, decl := range file.Decls {
-			switch d := decl.(type) {
-			case *ast.FuncDecl:
-				if d.Recv == nil && d.Name.Name == name {
-					return false
-				}
-			case *ast.GenDecl:
-				for _, spec := range d.Specs {
-					switch s := spec.(type) {
-					case *ast.ValueSpec:
-						for _, id := range s.Names {
-							if id.Name == name {
-								return false
-							}
-						}
-					case *ast.TypeSpec:
-						if s.Name.Name == name {
+	return directPredeclaredNameUnshadowed(file, "true") && directPredeclaredNameUnshadowed(file, "false") && directPredeclaredNameUnshadowed(file, "nil")
+}
+
+func directPredeclaredNameUnshadowed(file *ast.File, name string) bool {
+	if !routeAliasUnshadowed(file, name) {
+		return false
+	}
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if d.Recv == nil && d.Name.Name == name {
+				return false
+			}
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.ValueSpec:
+					for _, id := range s.Names {
+						if id.Name == name {
 							return false
 						}
+					}
+				case *ast.TypeSpec:
+					if s.Name.Name == name {
+						return false
 					}
 				}
 			}
 		}
 	}
 	return true
+}
+
+// Неподдержанный naked bool/сравнение с bool literal может быть alias write.
+// Обычные nil/error, строковые и доменные call guards остаются предусловиями.
+func directDynamicGuard(expr ast.Expr) bool {
+	switch e := routeUnparen(expr).(type) {
+	case *ast.BinaryExpr:
+		if e.Op == token.LAND || e.Op == token.LOR {
+			return directDynamicGuard(e.X) && directDynamicGuard(e.Y)
+		}
+		if e.Op != token.EQL && e.Op != token.NEQ {
+			return false
+		}
+		if routeIdent(e.X, "true") || routeIdent(e.X, "false") || routeIdent(e.Y, "true") || routeIdent(e.Y, "false") {
+			return false
+		}
+		// Поддержанные сравнения динамического входа — с nil/пустой строкой.
+		// x==x, арифметику и произвольные constant comparisons не угадываем.
+		boundary := func(value ast.Expr) bool {
+			if routeIdent(value, "nil") {
+				return true
+			}
+			literal, ok := routeUnparen(value).(*ast.BasicLit)
+			return ok && literal.Kind == token.STRING && literal.Value == `""`
+		}
+		return boundary(e.X) != boundary(e.Y)
+	case *ast.CallExpr:
+		_, selector := routeUnparen(e.Fun).(*ast.SelectorExpr)
+		return selector
+	case *ast.UnaryExpr:
+		return e.Op == token.NOT && directDynamicGuard(e.X)
+	}
+	return false
 }
 
 func directBool(expr ast.Expr, truth string) (bool, bool) {
@@ -762,6 +939,26 @@ func directBool(expr ast.Expr, truth string) (bool, bool) {
 	if u, ok := routeUnparen(expr).(*ast.UnaryExpr); ok && u.Op == token.NOT {
 		v, k := directBool(u.X, truth)
 		return !v, k
+	}
+	if b, ok := routeUnparen(expr).(*ast.BinaryExpr); ok {
+		x, xKnown := directBool(b.X, truth)
+		y, yKnown := directBool(b.Y, truth)
+		switch b.Op {
+		case token.EQL:
+			return x == y, xKnown && yKnown
+		case token.NEQ:
+			return x != y, xKnown && yKnown
+		case token.LAND:
+			if (xKnown && !x) || (yKnown && !y) {
+				return false, true
+			}
+			return x && y, xKnown && yKnown
+		case token.LOR:
+			if (xKnown && x) || (yKnown && y) {
+				return true, true
+			}
+			return x || y, xKnown && yKnown
+		}
 	}
 	return false, false
 }
