@@ -62,7 +62,7 @@ func (o *owner) authorize(r request) error {
 	return nil
 }
 
-// JSON — также законный YAML. Принимается только конечный план этой фикстуры.
+// plan — конечный план этой фикстуры в JSON, совместимом с YAML.
 func plan(path string, assigned bool, expected string) ([]byte, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
@@ -383,11 +383,12 @@ func ownedPeerUID(conn net.Conn, expectedUID uint32) error {
 }
 
 type ownerOps struct {
-	launch    func(string, string) (*child, error)
-	snapshot  func(string, []byte) error
-	peer      func(net.Conn) error
-	stop      stopPolicy
-	addresses []string
+	launch        func(string, string) (*child, error)
+	snapshot      func(string, []byte) error
+	peer          func(net.Conn) error
+	stop          stopPolicy
+	addresses     []string
+	closeListener func(*net.UnixListener) error
 }
 
 func defaults() ownerOps {
@@ -395,7 +396,7 @@ func defaults() ownerOps {
 	for _, port := range []string{"9090", "9091", "9095", "9096", "9097", "9098", "9099", "9100"} {
 		addresses = append(addresses, "127.0.0.1:"+port)
 	}
-	return ownerOps{launch, exclusive, ownedPeer, defaultStop(), addresses}
+	return ownerOps{launch, exclusive, ownedPeer, defaultStop(), addresses, (*net.UnixListener).Close}
 }
 
 // Восемь исходных слушателей в исходном бюджете. Ни готовность, ни её отказ
@@ -470,20 +471,7 @@ func serveWith(binary, config, socket string, readySeconds int, signals <-chan o
 	}
 	// Не удаляем pathname при закрытии: replacement inode нам не принадлежит.
 	listener.SetUnlinkOnClose(false)
-	defer listener.Close()
-	if err = os.Chmod(socket, 0600); err != nil {
-		return 1
-	}
-	token := make([]byte, 32)
-	if _, err = rand.Read(token); err != nil {
-		return 1
-	}
-	o := owner{instance: hex.EncodeToString(token)}
-	raw, _ := json.Marshal(state{Instance: o.instance, Generation: 1, ReadySeconds: readySeconds})
-	if err = ops.snapshot(socket+".state", raw); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
+	var o owner
 	var c *child
 	var primary error
 	var pending net.Conn
@@ -494,6 +482,9 @@ func serveWith(binary, config, socket string, readySeconds int, signals <-chan o
 			sig = requested.signal
 		}
 		cleanup := finalize(c, sig, ops.stop)
+		if closeErr := ops.closeListener(listener); closeErr != nil {
+			cleanup = errors.Join(cleanup, fmt.Errorf("control listener close: %w", closeErr))
+		}
 		combined := errors.Join(primary, cleanup)
 		if pending != nil {
 			message := "owner stopped before phase2 ACK"
@@ -514,6 +505,18 @@ func serveWith(binary, config, socket string, readySeconds int, signals <-chan o
 			code = exitCode(primary)
 		}
 	}()
+	if primary = os.Chmod(socket, 0600); primary != nil {
+		return 1
+	}
+	token := make([]byte, 32)
+	if _, primary = rand.Read(token); primary != nil {
+		return 1
+	}
+	o.instance = hex.EncodeToString(token)
+	raw, _ := json.Marshal(state{Instance: o.instance, Generation: 1, ReadySeconds: readySeconds})
+	if primary = ops.snapshot(socket+".state", raw); primary != nil {
+		return 1
+	}
 	c, primary = ops.launch(binary, snapshot)
 	if primary != nil {
 		return 1

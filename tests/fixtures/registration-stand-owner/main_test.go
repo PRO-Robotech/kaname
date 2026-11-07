@@ -772,6 +772,23 @@ func TestOwnerForwardsTERMAndINTToLiveOwnedChild(t *testing.T) {
 			h.assertChildren(1)
 		})
 	}
+	t.Run("listener-close-failure", func(t *testing.T) {
+		closes := 0
+		h := newHarness(t, "", func(ops *ownerOps) {
+			ops.closeListener = func(listener *net.UnixListener) error {
+				closes++
+				return errors.Join(listener.Close(), errors.New("injected listener close failure"))
+			}
+		})
+		h.signals <- syscall.SIGTERM
+		if code := h.finish(); code != 1 {
+			t.Fatalf("listener cleanup failure became code=%d, want 1", code)
+		}
+		if closes != 1 {
+			t.Fatalf("listener close count=%d want 1", closes)
+		}
+		h.assertChildren(1)
+	})
 }
 func TestReadinessPrimaryAndCleanupExitSevenBothReported(t *testing.T) {
 	h := newHarness(t, "missing-eight phase1-term-seven", nil)
@@ -783,6 +800,26 @@ func TestReadinessPrimaryAndCleanupExitSevenBothReported(t *testing.T) {
 		t.Fatalf("cleanup exit7 became %d", code)
 	}
 	h.assertChildren(2)
+	t.Run("listener-close-failure", func(t *testing.T) {
+		closes := 0
+		h := newHarness(t, "missing-eight phase1-term-seven", func(ops *ownerOps) {
+			ops.closeListener = func(listener *net.UnixListener) error {
+				closes++
+				return errors.Join(listener.Close(), errors.New("injected listener close failure"))
+			}
+		})
+		err := restart(h.socket, h.assignment())
+		if err == nil || !strings.Contains(err.Error(), "deadline exceeded") || !strings.Contains(err.Error(), "exit status=7") || !strings.Contains(err.Error(), "control listener close: injected listener close failure") {
+			t.Fatalf("primary, child cleanup or listener cleanup lost: %v", err)
+		}
+		if code := h.finish(); code != 7 {
+			t.Fatalf("child cleanup exit7 overwritten by listener failure: %d", code)
+		}
+		if closes != 1 {
+			t.Fatalf("listener close count=%d want 1", closes)
+		}
+		h.assertChildren(2)
+	})
 }
 func TestSignalsDuringReadinessDoNotAcknowledge(t *testing.T) {
 	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
@@ -833,11 +870,23 @@ func TestPreLaunchEvidenceFailuresNeverStartChild(t *testing.T) {
 				t.Fatal(err)
 			}
 			starts := 0
+			closes := 0
 			ops := defaults()
+			ops.closeListener = func(listener *net.UnixListener) error {
+				closes++
+				return listener.Close()
+			}
 			ops.launch = func(string, string) (*child, error) { starts++; return nil, errors.New("unexpected launch") }
 			code := serveWith(filepath.Join(root, "kaname"), config, socket, 1, make(chan os.Signal), ops)
 			if code == 0 || starts != 0 {
 				t.Fatalf("prelaunch refusal code=%d starts=%d", code, starts)
+			}
+			wantCloses := 0
+			if kind == "state" {
+				wantCloses = 1
+			}
+			if closes != wantCloses {
+				t.Fatalf("prelaunch listener close count=%d want=%d", closes, wantCloses)
 			}
 			body, err := os.ReadFile(evidence)
 			if err != nil || string(body) != "foreign evidence" {
