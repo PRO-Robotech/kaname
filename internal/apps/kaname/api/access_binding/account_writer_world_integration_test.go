@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -475,9 +476,9 @@ func TestAccountWriter_AW12To18And23_Lifecycle(t *testing.T) {
 		p.Assignments = p.Assignments[1:]
 		require.NoError(t, w.apply(p))
 		for _, v := range []*timestamppb.Timestamp{reg.SourceVersion, timestamppb.New(time.Unix(1, 0)), dpVersion()} {
-			r := *reg
+			r := proto.Clone(reg).(*iamv1.RegisterResourceRequest)
 			r.SourceVersion = v
-			w.denied(func() error { return w.call("registry", &r) })
+			w.denied(func() error { return w.call("registry", r) })
 		}
 		w.denied(func() error { return w.unregister("registry", reg) })
 		w.denied(func() error {
