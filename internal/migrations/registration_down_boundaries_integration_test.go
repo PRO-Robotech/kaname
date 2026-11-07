@@ -19,6 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const registrationAccountWriterVersion int64 = 20261102130000
+
 func TestRegistrationCommand_DownUpRetainsBindingAndGuards(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: PostgreSQL")
@@ -115,7 +117,7 @@ func TestRegistrationAccountWriter_CurrentHistoryRefusesDownAtomically(t *testin
 		t.Skip("integration: PostgreSQL")
 	}
 	db := historicalRegistrationDB(t)
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationAccountWriterVersion))
 	_, err := db.Exec(`INSERT INTO kaname.registration_account_writer_assignment(assignment_id,account_id,module,binding_id,removed_at)
  VALUES ('down-history-probe','acc1a18042d81fb438d6','registry','down-history-binding',clock_timestamp());
  INSERT INTO kaname.registration_account_writer_switch(singleton,cluster_writer_retired_at) VALUES(true,clock_timestamp())`)
@@ -139,6 +141,7 @@ func TestRegistrationAccountWriter_CurrentHistoryRefusesDownAtomically(t *testin
 	fence()
 	beforeVersion, err := goose.GetDBVersion(db)
 	require.NoError(t, err)
+	require.Equal(t, registrationAccountWriterVersion, beforeVersion)
 	var beforeRows int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version`).Scan(&beforeRows))
 	err = goose.Down(db, ".")

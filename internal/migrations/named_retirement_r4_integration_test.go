@@ -18,7 +18,7 @@ import (
 )
 
 func TestNamedRetirementMigration_NoBackfillEmptyDownAndReapply(t *testing.T) {
-	db := serOpenAt(t, namedPointerProvenanceVersion-1)
+	db := serOpenAt(t, namedPointerProvenancePreviousVersion)
 	_, err := db.Exec(`INSERT INTO kaname.fga_outbox(event_type,payload) VALUES('fga.tuple.write','{"user":"user:old","relation":"owner","object":"probemod_item:unproven-retirement","source_version":"2999-01-01T00:00:00Z"}')`)
 	require.NoError(t, err)
 	require.NoError(t, goose.UpTo(db, ".", namedPointerProvenanceVersion))
@@ -27,8 +27,14 @@ func TestNamedRetirementMigration_NoBackfillEmptyDownAndReapply(t *testing.T) {
 	require.Zero(t, receipts)
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.relation_fact WHERE object_id='unproven-retirement'`).Scan(&facts))
 	require.Equal(t, 1, facts)
-	require.NoError(t, goose.DownTo(db, ".", namedPointerProvenanceVersion-1))
+	require.NoError(t, goose.DownTo(db, ".", namedPointerProvenancePreviousVersion))
+	version, err := goose.GetDBVersion(db)
+	require.NoError(t, err)
+	require.Equal(t, namedPointerProvenancePreviousVersion, version)
 	require.NoError(t, goose.UpTo(db, ".", namedPointerProvenanceVersion))
+	version, err = goose.GetDBVersion(db)
+	require.NoError(t, err)
+	require.Equal(t, namedPointerProvenanceVersion, version)
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.resource_registration_retirement`).Scan(&receipts))
 	require.Zero(t, receipts)
 }
@@ -39,7 +45,7 @@ func TestNamedRetirementMigration_ReceiptOnlyHistoryRefusesDown(t *testing.T) {
 	require.NoError(t, err)
 	var before string
 	require.NoError(t, db.QueryRow(`SELECT pg_get_functiondef('kaname.relation_fact_fold_row(text,jsonb,timestamptz)'::regprocedure)`).Scan(&before))
-	require.ErrorContains(t, goose.DownTo(db, ".", namedPointerProvenanceVersion-1), "named registration provenance requires explicit quiescence and reconciliation")
+	require.ErrorContains(t, goose.DownTo(db, ".", namedPointerProvenancePreviousVersion), "named registration provenance requires explicit quiescence and reconciliation")
 	var n int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.resource_registration_retirement`).Scan(&n))
 	require.Equal(t, 1, n)
@@ -114,7 +120,7 @@ func TestNamedRetirementMigration_ConcurrentReceiptWriterCommitOrRollback(t *tes
 			}()
 			require.NoError(t, <-ready)
 			down := make(chan error, 1)
-			go func() { down <- goose.DownToContext(ctx, db, ".", namedPointerProvenanceVersion-1) }()
+			go func() { down <- goose.DownToContext(ctx, db, ".", namedPointerProvenancePreviousVersion) }()
 			require.Eventually(t, func() bool {
 				var waiting bool
 				err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE relation='kaname.resource_registration_pointer'::regclass AND mode='AccessExclusiveLock' AND NOT granted)`).Scan(&waiting)

@@ -18,6 +18,7 @@ import (
 )
 
 const namedPointerProvenanceVersion int64 = 20261104190000
+const namedPointerProvenancePreviousVersion int64 = 20261102130000
 
 func TestNamedPointerProvenance_DowngradeRefusesHistory(t *testing.T) {
 	for _, active := range []bool{false, true} {
@@ -25,7 +26,7 @@ func TestNamedPointerProvenance_DowngradeRefusesHistory(t *testing.T) {
 			db := serOpenAt(t, namedPointerProvenanceVersion)
 			_, err := db.Exec(`INSERT INTO kaname.resource_registration_pointer(module,object_type,object_id,relation,subject,source_version,active) VALUES('probemod','probemod_item','i1','box','probemod_box:b1','2000-01-01', $1)`, active)
 			require.NoError(t, err)
-			err = goose.DownTo(db, ".", namedPointerProvenanceVersion-1)
+			err = goose.DownTo(db, ".", namedPointerProvenancePreviousVersion)
 			require.ErrorContains(t, err, "named registration provenance requires explicit quiescence and reconciliation")
 			version, err := goose.GetDBVersion(db)
 			require.NoError(t, err)
@@ -38,7 +39,7 @@ func TestNamedPointerProvenance_DowngradeRefusesHistory(t *testing.T) {
 }
 
 func TestNamedPointerProvenance_EmptyDowngradeAndReapply(t *testing.T) {
-	db := serOpenAt(t, namedPointerProvenanceVersion-1)
+	db := serOpenAt(t, namedPointerProvenancePreviousVersion)
 	_, err := db.Exec(`INSERT INTO kaname.fga_outbox(event_type,payload) VALUES('fga.tuple.write','{"user":"probemod_box:b1","relation":"box","object":"probemod_item:unproven"}'::jsonb)`)
 	require.NoError(t, err, "стоящий tuple сам по себе не является registrar provenance")
 	require.NoError(t, goose.UpTo(db, ".", namedPointerProvenanceVersion))
@@ -47,8 +48,14 @@ func TestNamedPointerProvenance_EmptyDowngradeAndReapply(t *testing.T) {
 	require.Zero(t, n, "накат не присваивает standing facts из прежней схемы")
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.relation_fact WHERE object_type='probemod_item' AND object_id='unproven' AND relation='box'`).Scan(&n))
 	require.Equal(t, 1, n, "неподтверждённый факт не присваивается и не удаляется накатом")
-	require.NoError(t, goose.DownTo(db, ".", namedPointerProvenanceVersion-1))
+	require.NoError(t, goose.DownTo(db, ".", namedPointerProvenancePreviousVersion))
+	version, err := goose.GetDBVersion(db)
+	require.NoError(t, err)
+	require.Equal(t, namedPointerProvenancePreviousVersion, version)
 	require.NoError(t, goose.UpTo(db, ".", namedPointerProvenanceVersion))
+	version, err = goose.GetDBVersion(db)
+	require.NoError(t, err)
+	require.Equal(t, namedPointerProvenanceVersion, version)
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.resource_registration_pointer`).Scan(&n))
 	require.Zero(t, n)
 }
@@ -117,7 +124,7 @@ func TestNamedPointerProvenance_ConcurrentWriterCommitOrRollbackBeforeDown(t *te
 			}()
 			require.NoError(t, <-writerReady)
 			downDone := make(chan error, 1)
-			go func() { downDone <- goose.DownToContext(ctx, db, ".", namedPointerProvenanceVersion-1) }()
+			go func() { downDone <- goose.DownToContext(ctx, db, ".", namedPointerProvenancePreviousVersion) }()
 			require.Eventually(t, func() bool {
 				var blocked bool
 				err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE relation='kaname.resource_registration_pointer'::regclass AND mode='AccessExclusiveLock' AND NOT granted)`).Scan(&blocked)
