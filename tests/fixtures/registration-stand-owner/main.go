@@ -64,12 +64,20 @@ func (o *owner) authorize(r request) error {
 
 // Файл открывается относительно захваченного каталога. Root удерживает путь,
 // openat сохраняет O_NOFOLLOW для последнего компонента без обхода symlink.
-func openLeaf(path string, flag int, perm os.FileMode) (*os.File, error) {
+func openLeaf(path string, flag int, perm os.FileMode) (result *os.File, resultErr error) {
 	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, closeErr)
+			if result != nil {
+				resultErr = errors.Join(resultErr, result.Close())
+				result = nil
+			}
+		}
+	}()
 	dir, err := root.Open(".")
 	if err != nil {
 		return nil, err
@@ -503,7 +511,14 @@ func serveWith(binary, config, socket string, readySeconds int, signals <-chan o
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	defer root.Close()
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			fmt.Fprintln(os.Stderr, closeErr)
+			if code == 0 {
+				code = 1
+			}
+		}
+	}()
 	body, err := plan(config, false, "")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -669,12 +684,16 @@ func serveWith(binary, config, socket string, readySeconds int, signals <-chan o
 		}
 	}
 }
-func exclusive(path string, body []byte) error {
+func exclusive(path string, body []byte) (resultErr error) {
 	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, closeErr)
+		}
+	}()
 	f, err := root.OpenFile(filepath.Base(path), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
 	if err != nil {
 		return err
@@ -771,7 +790,7 @@ func dialOwnerUnix(dir *os.File) (*net.UnixConn, error) {
 	}
 }
 
-func restart(socket, sha string) error {
+func restart(socket, sha string) (resultErr error) {
 	if !filepath.IsAbs(socket) || filepath.Base(socket) != "registration-owner.sock" {
 		return errors.New("не original control socket path")
 	}
@@ -779,7 +798,11 @@ func restart(socket, sha string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, closeErr)
+		}
+	}()
 	info, err := root.Lstat("registration-owner.sock")
 	if err != nil {
 		return err
