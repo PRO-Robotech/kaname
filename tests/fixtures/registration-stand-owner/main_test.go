@@ -480,7 +480,7 @@ func TestProtocolPeerAndPrivateState(t *testing.T) {
 		h := newHarness(t, "", func(ops *ownerOps) {
 			// Read real SO_PEERCRED, compare with a different expected owner. This
 			// exercises the denial on an actual Unix connection without setuid.
-			ops.peer = func(conn net.Conn) error { return ownedPeerUID(conn, uint32(os.Getuid()+1)) }
+			ops.peer = func(conn net.Conn) error { return ownedPeerUID(conn, int64(os.Getuid()+1)) }
 		})
 		if err := restart(h.socket, h.assignment()); err == nil {
 			t.Fatal("foreign peer accepted")
@@ -990,5 +990,78 @@ func TestFixtureRaceEnvironmentPreservesParentAndReporting(t *testing.T) {
 				t.Fatal("child environment aliases parent")
 			}
 		})
+	}
+}
+
+// Захваченный executable сохраняется даже при замене его имени до lease.
+func TestActivationUsesOpenedExecutableAfterPathReplacement(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OWNER_FIXTURE_ROOT", root)
+	t.Setenv("OWNER_FIXTURE_MODE", "")
+	raw, _ := json.Marshal(fixtureAddresses(t))
+	t.Setenv("OWNER_FIXTURE_ADDRESSES", string(raw))
+	config := filepath.Join(root, "registration-writers.json.phase0.json")
+	if err := os.WriteFile(config, []byte(emptyPlan), 0600); err != nil {
+		t.Fatal(err)
+	}
+	binary := fixtureBinary(t, root)
+	c, err := launchWith(binary, config, launchOps{
+		capability: pidfdCapability,
+		lease:      5 * time.Second,
+		start: func(path string, args []string, attr *os.ProcAttr) (*os.Process, error) {
+			if err := os.Rename(binary, binary+".original"); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(binary, []byte("invalid replacement executable"), 0700); err != nil {
+				return nil, err
+			}
+			return fixtureStartProcess(path, args, attr)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := finalize(c, syscall.SIGTERM, defaultStop()); err != nil {
+			t.Errorf("original executable cleanup: %v", err)
+		}
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(root, "phase0.listening")); err == nil {
+			break
+		}
+		if done, err := c.poll(); done {
+			t.Fatalf("opened executable was replaced: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("opened executable did not reach readiness")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	body, err := os.ReadFile(binary)
+	if err != nil || string(body) != "invalid replacement executable" {
+		t.Fatalf("foreign replacement changed: %q %v", body, err)
+	}
+}
+
+func TestActivationRefusesExecutableSymlinkBeforeStart(t *testing.T) {
+	root := t.TempDir()
+	binary := fixtureBinary(t, root)
+	link := filepath.Join(root, "linked-kaname")
+	if err := os.Symlink(binary, link); err != nil {
+		t.Fatal(err)
+	}
+	starts := 0
+	_, err := launchWith(link, filepath.Join(root, "config"), launchOps{
+		capability: pidfdCapability,
+		lease:      5 * time.Second,
+		start: func(string, []string, *os.ProcAttr) (*os.Process, error) {
+			starts++
+			return nil, errors.New("unexpected start")
+		},
+	})
+	if err == nil || starts != 0 {
+		t.Fatalf("executable symlink admitted: starts=%d err=%v", starts, err)
 	}
 }

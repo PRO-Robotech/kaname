@@ -62,9 +62,29 @@ func (o *owner) authorize(r request) error {
 	return nil
 }
 
+// Файл открывается относительно захваченного каталога. Root удерживает путь,
+// openat сохраняет O_NOFOLLOW для последнего компонента без обхода symlink.
+func openLeaf(path string, flag int, perm os.FileMode) (*os.File, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	dir, err := root.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	fd, err := unix.Openat(int(dir.Fd()), filepath.Base(path), flag|unix.O_NOFOLLOW|unix.O_CLOEXEC, uint32(perm))
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(fd), path), nil
+}
+
 // plan — конечный план этой фикстуры в JSON, совместимом с YAML.
 func plan(path string, assigned bool, expected string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := openLeaf(path, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +93,7 @@ func plan(path string, assigned bool, expected string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !st.Mode().IsRegular() || st.Sys().(*syscall.Stat_t).Uid != uint32(os.Getuid()) {
+	if !st.Mode().IsRegular() || int64(st.Sys().(*syscall.Stat_t).Uid) != int64(os.Getuid()) {
 		return nil, errors.New("не owned regular config")
 	}
 	body, err := io.ReadAll(io.LimitReader(f, 16385))
@@ -228,6 +248,20 @@ func launchWith(binary, config string, ops launchOps) (*child, error) {
 	if err := ops.capability(); err != nil {
 		return nil, err
 	}
+	// Дескриптор закрепляет именно этот executable до выдачи activation lease.
+	// Замена pathname после start не может подменить исполняемый файл.
+	executable, err := openLeaf(binary, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer executable.Close()
+	info, err := executable.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return nil, errors.New("service executable должен быть regular executable")
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -247,7 +281,7 @@ func launchWith(binary, config string, ops launchOps) (*child, error) {
 	}
 	env = append(env, "KANAME_CONFIG_PATH="+config)
 	process, err := ops.start(self, []string{self, "__activate", binary}, &os.ProcAttr{
-		Env: env, Files: []*os.File{os.Stdin, os.Stdout, os.Stderr, gate},
+		Env: env, Files: []*os.File{os.Stdin, os.Stdout, os.Stderr, gate, executable},
 		Sys: &syscall.SysProcAttr{PidFD: &fd},
 	})
 	if err != nil {
@@ -292,7 +326,19 @@ func activate() int {
 	if !deadline.Stop() {
 		return 125
 	}
-	if err := syscall.Exec(os.Args[2], []string{os.Args[2], "serve"}, os.Environ()); err != nil {
+	// FD4 передан владельцем вместе с FD3 lease; argv не выбирает программу.
+	// CLOEXEC закрывает дескриптор в самой службе после загрузки Go executable.
+	executable := os.NewFile(4, "kaname")
+	if executable == nil {
+		return 125
+	}
+	defer executable.Close()
+	info, err := executable.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return 125
+	}
+	unix.CloseOnExec(4)
+	if err := unix.Exec("/proc/self/fd/4", []string{os.Args[2], "serve"}, os.Environ()); err != nil {
 		fmt.Fprintln(os.Stderr, "service exec:", err)
 		return 126
 	}
@@ -356,8 +402,8 @@ type shutdown struct{ signal syscall.Signal }
 func (e *shutdown) Error() string { return "owner shutdown: " + e.signal.String() }
 
 // private socket проверяется также kernel peer credentials, не только именем файла.
-func ownedPeer(conn net.Conn) error { return ownedPeerUID(conn, uint32(os.Getuid())) }
-func ownedPeerUID(conn net.Conn, expectedUID uint32) error {
+func ownedPeer(conn net.Conn) error { return ownedPeerUID(conn, int64(os.Getuid())) }
+func ownedPeerUID(conn net.Conn, expectedUID int64) error {
 	u, ok := conn.(*net.UnixConn)
 	if !ok {
 		return errors.New("не Unix control")
@@ -376,7 +422,7 @@ func ownedPeerUID(conn net.Conn, expectedUID uint32) error {
 	if socketErr != nil {
 		return socketErr
 	}
-	if credential == nil || credential.Uid != expectedUID {
+	if credential == nil || int64(credential.Uid) != expectedUID {
 		return errors.New("foreign control peer")
 	}
 	return nil
@@ -452,6 +498,12 @@ func serveWith(binary, config, socket string, readySeconds int, signals <-chan o
 	if !filepath.IsAbs(binary) || filepath.Base(binary) != "kaname" || filepath.Base(config) != "registration-writers.json" || filepath.Base(socket) != "registration-owner.sock" || filepath.Dir(binary) != filepath.Dir(config) || filepath.Dir(binary) != filepath.Dir(socket) || readySeconds < 1 || len(ops.addresses) != 8 {
 		return 1
 	}
+	root, err := os.OpenRoot(filepath.Dir(socket))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer root.Close()
 	body, err := plan(config, false, "")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -505,7 +557,7 @@ func serveWith(binary, config, socket string, readySeconds int, signals <-chan o
 			code = exitCode(primary)
 		}
 	}()
-	if primary = os.Chmod(socket, 0600); primary != nil {
+	if primary = root.Chmod("registration-owner.sock", 0600); primary != nil {
 		return 1
 	}
 	token := make([]byte, 32)
@@ -618,7 +670,12 @@ func serveWith(binary, config, socket string, readySeconds int, signals <-chan o
 	}
 }
 func exclusive(path string, body []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	f, err := root.OpenFile(filepath.Base(path), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
 	if err != nil {
 		return err
 	}
@@ -633,7 +690,7 @@ func exclusive(path string, body []byte) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	dir, err := os.Open(filepath.Dir(path))
+	dir, err := root.Open(".")
 	if err != nil {
 		return err
 	}
@@ -641,14 +698,22 @@ func exclusive(path string, body []byte) error {
 	return dir.Sync()
 }
 func restart(socket, sha string) error {
-	info, err := os.Lstat(socket)
+	if !filepath.IsAbs(socket) || filepath.Base(socket) != "registration-owner.sock" {
+		return errors.New("не original control socket path")
+	}
+	root, err := os.OpenRoot(filepath.Dir(socket))
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0600 || info.Sys().(*syscall.Stat_t).Uid != uint32(os.Getuid()) {
+	defer root.Close()
+	info, err := root.Lstat("registration-owner.sock")
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0600 || int64(info.Sys().(*syscall.Stat_t).Uid) != int64(os.Getuid()) {
 		return errors.New("не private owned socket")
 	}
-	file, err := os.OpenFile(socket+".state", os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	file, err := openLeaf(socket+".state", os.O_RDONLY, 0)
 	if err != nil {
 		return err
 	}
@@ -657,7 +722,7 @@ func restart(socket, sha string) error {
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm() != 0400 || info.Sys().(*syscall.Stat_t).Uid != uint32(os.Getuid()) {
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0400 || int64(info.Sys().(*syscall.Stat_t).Uid) != int64(os.Getuid()) {
 		return errors.New("не private owned instance state")
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, 4096))
@@ -672,7 +737,15 @@ func restart(socket, sha string) error {
 		return errors.New("foreign phase")
 	}
 	r := request{Instance: current.Instance, Generation: 1, ConfigSHA256: sha}
-	conn, err := net.DialTimeout("unix", socket, 5*time.Second)
+	// Только fixed Unix leaf внутри захваченного каталога, не произвольный URL.
+	// Каталог остаётся открытым до завершения обмена; peer проверяется ниже.
+	dir, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	address := "/proc/self/fd/" + strconv.FormatUint(uint64(dir.Fd()), 10) + "/registration-owner.sock"
+	conn, err := net.DialTimeout("unix", address, 5*time.Second)
 	if err != nil {
 		return err
 	}
