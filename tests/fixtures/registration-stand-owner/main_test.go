@@ -1065,3 +1065,156 @@ func TestActivationRefusesExecutableSymlinkBeforeStart(t *testing.T) {
 		t.Fatalf("executable symlink admitted: starts=%d err=%v", starts, err)
 	}
 }
+
+// Реальная локальная Unix fixture: короткий pathname не зависит от длины имени теста.
+func ownerUnixFixture(t *testing.T) (*os.File, *net.UnixListener) {
+	t.Helper()
+	root, err := os.MkdirTemp("", "rwo-connect-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	dir, err := os.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dir.Close() })
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(root, "registration-owner.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	return dir, listener
+}
+
+func ownerOpenFDs(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries)
+}
+
+func TestOwnerUnixConnectLawfulPeerDeadlineAndNoFDLeak(t *testing.T) {
+	dir, listener := ownerUnixFixture(t)
+	// ListenUnix уже инициализировал netpoll до исходного FD census.
+	before := ownerOpenFDs(t)
+	for range 4 {
+		conn, err := dialOwnerUnix(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		peer, err := listener.AcceptUnix()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = peer.Close() })
+		if err = ownedPeer(conn); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := conn.SyscallConn()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var socketErr error
+		if err = raw.Control(func(fd uintptr) {
+			flags, flagErr := unix.FcntlInt(fd, unix.F_GETFD, 0)
+			timeout, timeoutErr := unix.GetsockoptTimeval(int(fd), unix.SOL_SOCKET, unix.SO_SNDTIMEO)
+			socketErr = errors.Join(flagErr, timeoutErr)
+			if socketErr == nil && (flags&unix.FD_CLOEXEC == 0 || timeout.Sec != 0 || timeout.Usec != 0) {
+				socketErr = errors.New("connection lost CLOEXEC or retained kernel send timeout")
+			}
+		}); err != nil || socketErr != nil {
+			t.Fatal(errors.Join(err, socketErr))
+		}
+		if err = conn.SetDeadline(time.Now().Add(30 * time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		var body [1]byte
+		_, err = conn.Read(body[:]) // Настоящий peer открыт, но ничего не посылает.
+		var timeout net.Error
+		if !errors.Is(err, os.ErrDeadlineExceeded) || !errors.As(err, &timeout) || !timeout.Timeout() {
+			t.Fatalf("Go I/O deadline lost: %v", err)
+		}
+		if err = errors.Join(conn.Close(), peer.Close()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if after := ownerOpenFDs(t); after != before {
+		t.Fatalf("lawful connect FD leak: before=%d after=%d", before, after)
+	}
+}
+
+func TestOwnerUnixConnectBacklogTimeoutAndFailureNoFDLeak(t *testing.T) {
+	dir, listener := ownerUnixFixture(t)
+	raw, err := listener.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listenErr error
+	if err = raw.Control(func(fd uintptr) { listenErr = unix.Listen(int(fd), 0) }); err != nil || listenErr != nil {
+		t.Fatal(errors.Join(err, listenErr))
+	}
+	// Linux backlog0 допускает один ожидающий peer; accept пока не вызывается.
+	filler, err := dialOwnerUnix(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = filler.Close() })
+	probe, err := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = unix.Connect(probe, &unix.SockaddrUnix{Name: filepath.Join(dir.Name(), "registration-owner.sock")})
+	closeErr := unix.Close(probe)
+	if !errors.Is(err, unix.EAGAIN) || closeErr != nil {
+		t.Fatalf("fixture backlog is not full: connect=%v close=%v", err, closeErr)
+	}
+	before := ownerOpenFDs(t)
+	// Даже mutant без SO_SNDTIMEO разблокируется закрытием настоящего listener.
+	rescue := time.AfterFunc(8*time.Second, func() { _ = listener.Close() })
+	defer rescue.Stop()
+	started := time.Now()
+	conn, err := dialOwnerUnix(dir)
+	elapsed := time.Since(started)
+	if !rescue.Stop() {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		t.Fatal("connect required listener rescue instead of kernel deadline")
+	}
+	if conn != nil {
+		_ = conn.Close()
+		t.Fatal("full backlog unexpectedly connected")
+	}
+	var timeout net.Error
+	if !errors.Is(err, os.ErrDeadlineExceeded) || !errors.As(err, &timeout) || !timeout.Timeout() {
+		t.Fatalf("backlog did not produce timeout: %v", err)
+	}
+	// Допуск только на Linux timer tick и планирование теста; production budget=5s.
+	if elapsed < 4500*time.Millisecond || elapsed > 8*time.Second {
+		t.Fatalf("connect deadline not preserved: %s", elapsed)
+	}
+	if after := ownerOpenFDs(t); after != before {
+		t.Fatalf("timeout FD leak: before=%d after=%d", before, after)
+	}
+	if err = errors.Join(filler.Close(), listener.Close()); err != nil {
+		t.Fatal(err)
+	}
+	before = ownerOpenFDs(t)
+	for range 4 {
+		conn, err = dialOwnerUnix(dir)
+		if conn != nil {
+			_ = conn.Close()
+			t.Fatal("missing pathname connected")
+		}
+		if !errors.Is(err, unix.ENOENT) {
+			t.Fatalf("missing pathname errno lost: %v", err)
+		}
+	}
+	if after := ownerOpenFDs(t); after != before {
+		t.Fatalf("failed connect FD leak: before=%d after=%d", before, after)
+	}
+}

@@ -697,6 +697,80 @@ func exclusive(path string, body []byte) error {
 	defer dir.Close()
 	return dir.Sync()
 }
+
+// dialOwnerUnix не принимает URL, network или произвольное имя сокета:
+// только fixed leaf в уже удерживаемом каталоге, AF_UNIX и SOCK_STREAM.
+func dialOwnerUnix(dir *os.File) (*net.UnixConn, error) {
+	address := "/proc/self/fd/" + strconv.FormatUint(uint64(dir.Fd()), 10) + "/registration-owner.sock"
+	addr := &net.UnixAddr{Name: address, Net: "unix"}
+	dialError := func(err, closeErr error) error {
+		if err == nil {
+			err, closeErr = closeErr, nil
+		}
+		opErr := &net.OpError{Op: "dial", Net: "unix", Addr: addr, Err: err}
+		if closeErr != nil {
+			return errors.Join(opErr, closeErr)
+		}
+		return opErr
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, dialError(os.ErrDeadlineExceeded, nil)
+		}
+		fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+		if err != nil {
+			return nil, dialError(os.NewSyscallError("socket", err), nil)
+		}
+		file := os.NewFile(uintptr(fd), "registration-owner-connect")
+		remaining = time.Until(deadline)
+		if remaining <= 0 {
+			return nil, dialError(os.ErrDeadlineExceeded, file.Close())
+		}
+		// Blocking AF_UNIX connect использует SO_SNDTIMEO при полном backlog.
+		// EINTR не получает новый бюджет и не переиспользует failed socket.
+		timeout := unix.NsecToTimeval(remaining.Nanoseconds())
+		err = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_SNDTIMEO, &timeout)
+		if err != nil {
+			return nil, dialError(os.NewSyscallError("setsockopt", err), file.Close())
+		}
+		err = unix.Connect(fd, &unix.SockaddrUnix{Name: address})
+		if err != nil {
+			closeErr := file.Close()
+			if errors.Is(err, unix.EINTR) && closeErr == nil {
+				continue
+			}
+			if errors.Is(err, unix.EAGAIN) {
+				err = os.ErrDeadlineExceeded
+			} else {
+				err = os.NewSyscallError("connect", err)
+			}
+			return nil, dialError(err, closeErr)
+		}
+		if !time.Now().Before(deadline) {
+			return nil, dialError(os.ErrDeadlineExceeded, file.Close())
+		}
+		// После connect за I/O отвечает Go netpoll + исходный SetDeadline.
+		if err = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_SNDTIMEO, &unix.Timeval{}); err != nil {
+			return nil, dialError(os.NewSyscallError("setsockopt", err), file.Close())
+		}
+		conn, err := net.FileConn(file)
+		closeErr := file.Close() // FileConn владеет отдельным CLOEXEC duplicate.
+		if err != nil || closeErr != nil {
+			if conn != nil {
+				closeErr = errors.Join(closeErr, conn.Close())
+			}
+			return nil, dialError(err, closeErr)
+		}
+		unixConn, ok := conn.(*net.UnixConn)
+		if !ok {
+			return nil, dialError(errors.New("не Unix control connection"), conn.Close())
+		}
+		return unixConn, nil
+	}
+}
+
 func restart(socket, sha string) error {
 	if !filepath.IsAbs(socket) || filepath.Base(socket) != "registration-owner.sock" {
 		return errors.New("не original control socket path")
@@ -744,8 +818,7 @@ func restart(socket, sha string) error {
 		return err
 	}
 	defer dir.Close()
-	address := "/proc/self/fd/" + strconv.FormatUint(uint64(dir.Fd()), 10) + "/registration-owner.sock"
-	conn, err := net.DialTimeout("unix", address, 5*time.Second)
+	conn, err := dialOwnerUnix(dir)
 	if err != nil {
 		return err
 	}
