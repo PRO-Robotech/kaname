@@ -167,18 +167,8 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	// Адрес почты O и любой явный профиль сроков — штатные входы запуска.
 	// Аудитория, издатель, полномочия и политика шлюза сохраняют профиль стенда.
 	overrides["KANAME_BOOTSTRAP_ROOT_EMAIL"] = w.email
-	environment, err = stand.Environment(overrides)
+	environment, err = nativeSessionEnvironment(stand, overrides, moduleWriter)
 	require.NoError(t, err)
-	if moduleWriter {
-		filtered := environment[:0]
-		for _, entry := range environment {
-			name, _, _ := strings.Cut(entry, "=")
-			if name != "KANAME_MANIFESTS__DIR" && name != "KANAME_MANIFESTS__REQUIRED" {
-				filtered = append(filtered, entry)
-			}
-		}
-		environment = filtered
-	}
 	stand.StartMailbox(t, ctx, environment)
 	wire, err := installruntime.NewWire(filepath.Join(evidence, "pki"), "https://localhost:9098", "https://localhost:9096", "https://localhost:9097")
 	require.NoError(t, err)
@@ -256,6 +246,45 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 		f.requireRIDBasePremise(t, "base-after-C", 1)
 	}
 	return f
+}
+
+// nativeSessionEnvironment отделяет профиль подготовленного стенда от typed config Session.
+// Снимается только собственный точный config pointer; чужой путь или явный override — отказ.
+func nativeSessionEnvironment(stand *installruntime.NativeStand, overrides map[string]string, moduleWriter bool) ([]string, error) {
+	if !filepath.IsAbs(stand.Evidence) || filepath.Clean(stand.Evidence) != stand.Evidence {
+		return nil, fmt.Errorf("Session требует точный абсолютный Evidence подготовленного стенда")
+	}
+	for name := range overrides {
+		if strings.EqualFold(name, "KANAME_CONFIG_PATH") {
+			return nil, fmt.Errorf("явный override %s недопустим для Session", name)
+		}
+	}
+	environment, err := stand.Environment(overrides)
+	if err != nil {
+		return nil, err
+	}
+	expected := filepath.Join(stand.Evidence, "delivery", "registration-writers.json")
+	result := make([]string, 0, len(environment))
+	preparedConfig := false
+	for _, entry := range environment {
+		name, value, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, "KANAME_CONFIG_PATH") {
+			if name != "KANAME_CONFIG_PATH" || value != expected || preparedConfig {
+				return nil, fmt.Errorf("неожиданный config pointer подготовленного стенда для Session")
+			}
+			preparedConfig = true
+			continue
+		}
+		// Прежняя граница F0 для moduleWriter: поставка манифестов остаётся в typed config.
+		if moduleWriter && (name == "KANAME_MANIFESTS__DIR" || name == "KANAME_MANIFESTS__REQUIRED") {
+			continue
+		}
+		result = append(result, entry)
+	}
+	if !preparedConfig {
+		return nil, fmt.Errorf("нет собственного config pointer подготовленного стенда для Session")
+	}
+	return result, nil
 }
 
 func (f *installationNativeWorld) renewOperator(t *testing.T, ctx context.Context) {
