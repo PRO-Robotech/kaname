@@ -23,7 +23,7 @@ import (
 func rid02PublicRecoveredCensus(t *testing.T, f *installationNativeWorld, records []rid02CrashRecord) {
 	t.Helper()
 	before := f.stableReceipt(t)
-	f.apply(t, installruntime.DeliveryInput{Manifests: nativeWithoutDelegations(t, installruntime.NewRIDDeliveryFixture()), CredentialFile: f.creator.CredentialFile})
+	f.apply(t, installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: nativeWithoutDelegations(t, installruntime.NewRIDDeliveryFixture()), CredentialFile: f.creator.CredentialFile})
 	require.Equal(t, before, f.stableReceipt(t), "public-read restart cannot change recovered identities or rows")
 	f.renewOperator(t, f.given.ctx)
 	expected := map[string]map[string]rid02CrashRecord{}

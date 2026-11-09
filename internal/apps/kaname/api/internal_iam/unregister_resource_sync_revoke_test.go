@@ -3,41 +3,43 @@
 
 package internal_iam
 
-// unregister_resource_sync_revoke_test.go — the withdrawal half of the registration
-// contract.
+// unregister_resource_sync_revoke_test.go — половина контракта регистрации,
+// отвечающая за снятие.
 //
-// Register does three things in one writer-tx (mirror row, owner tuple, reconcile event)
-// and then, after the commit, drives the materialisation in-process so the caller's next
-// question is answered by the new state. Unregister did the symmetric three (mirror row
-// removed, tuple-delete enqueued, reconcile event) and then stopped: the materialisation
-// it needs — the pass that strips the object's per-object verbs now that its projection
-// is gone — was left entirely to whatever depth the reconcile queue happened to have.
+// Register делает три записи в одной транзакции (зеркало, кортеж владельца, событие согласования),
+// а после коммита запускает материализацию в процессе, чтобы следующий
+// вопрос вызывающего получил новое состояние. Unregister делал симметричные три записи (удаление
+// зеркала, постановка удаления кортежа, событие согласования), а затем останавливался: нужная
+// материализация — проход, снимающий глаголы объекта после исчезновения его
+// проекции, — полностью зависела от случайной глубины очереди согласования.
 //
-// The asymmetry is not cosmetic. It means granting is bounded by one in-process pass and
-// withdrawing is bounded by a queue, i.e. the product is fast at saying yes and slow at
-// saying no. Measured on the stand (boevaya posadka, one storage volume): its verbs were
-// present within the create request and were still answered ALLOW for twelve seconds
-// after the resource itself had begun answering 404.
+// Асимметрия не косметическая. Выдача ограничена одним проходом в процессе, а
+// снятие — очередью: продукт быстро говорит «да» и медленно
+// говорит «нет». По замеру на стенде (боевая посадка, один том хранения) глаголы
+// появлялись внутри запроса создания и продолжали отвечать ALLOW двенадцать секунд
+// после того, как сам ресурс начал отвечать 404.
 //
-// The forward entry point is the right one to call: it hands an object that ALREADY has
-// materialised members to the full pass, whose delete-stale diff is exactly the removal
-// wanted here (see ReconcileObjectForward's delete-stale guard). The co-committed
-// reconcile event remains the at-least-once backstop.
+// Вызывать нужно прямую точку входа: объект с УЖЕ материализованными
+// участниками она передаёт полному проходу, чья разница с удалением устаревшего — именно
+// нужное здесь снятие (см. защиту ReconcileObjectForward). Событие согласования,
+// записанное тем же коммитом, остаётся страховкой повторной доставки.
 
 import (
 	"context"
 	"errors"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestUnregisterResource_DrivesTheRevokeInTheSameRequest — withdrawal starts its
-// materialisation in-process, exactly as registration does.
+// TestUnregisterResource_DrivesTheRevokeInTheSameRequest — снятие начинает
+// материализацию в процессе точно так же, как регистрация.
 //
-// RED before the fix: zero post-commit passes — the revoke began only when the reconcile
-// queue reached the co-committed event.
+// До исправления ПРОВАЛ: ноль проходов после коммита; отзыв начинался только когда очередь
+// согласования доходила до события того же коммита.
 func TestUnregisterResource_DrivesTheRevokeInTheSameRequest(t *testing.T) {
 	rec := &smObjectReconciler{}
 	uc, txb := newStorageRevokeUC(t, rec)
@@ -58,8 +60,8 @@ func TestUnregisterResource_DrivesTheRevokeInTheSameRequest(t *testing.T) {
 		"the pass must target the withdrawn object (dotted type)")
 }
 
-// TestUnregisterResource_NilReconciler_NonFatal — an unwired reconciler leaves the
-// withdrawal on the queue-only path (the pre-existing behaviour), never an error.
+// TestUnregisterResource_NilReconciler_NonFatal — неподключённый работник оставляет
+// снятие только на очереди, как прежде, и никогда не даёт ошибки.
 func TestUnregisterResource_NilReconciler_NonFatal(t *testing.T) {
 	uc, txb := newStorageRevokeUC(t, nil)
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
@@ -68,9 +70,9 @@ func TestUnregisterResource_NilReconciler_NonFatal(t *testing.T) {
 	require.True(t, txb.tx.committed)
 }
 
-// TestUnregisterResource_ReconcileError_NonFatal — the withdrawal is already durable when
-// the pass runs (mirror row deleted, tuple-delete enqueued, event co-committed), so a
-// failed pass must not turn a completed withdrawal into an error the caller retries.
+// TestUnregisterResource_ReconcileError_NonFatal — к моменту прохода снятие уже надёжно записано:
+// строка зеркала удалена, удаление кортежа поставлено, событие закоммичено вместе с ними, поэтому
+// отказ прохода не должен превращать завершённое снятие в повторяемую вызывающим ошибку.
 func TestUnregisterResource_ReconcileError_NonFatal(t *testing.T) {
 	rec := &smObjectReconciler{err: errors.New("reconcile transient")}
 	uc, txb := newStorageRevokeUC(t, rec)
@@ -86,6 +88,7 @@ func TestUnregisterResource_ReconcileError_NonFatal(t *testing.T) {
 func newStorageRevokeUC(t *testing.T, rec *smObjectReconciler) (*RegisterResourceUseCase, *smTxBeginner) {
 	t.Helper()
 	uc, txb := newRegUC(t, rec)
+	uc.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "storage"})
 	scopes := unitScopes()
 	scopes.projects["prj_owner"] = "acc_owner"
 	scopes.pointers = map[string][]string{"storage_volume:vol_gone": {"project:prj_owner"}}
@@ -93,19 +96,23 @@ func newStorageRevokeUC(t *testing.T, rec *smObjectReconciler) (*RegisterResourc
 	return uc, txb
 }
 
-// TestUnregisterResource_PureGrantWithdrawal_LeavesTheObjectAlone — withdrawing the
-// public wildcard grant says nothing about the object's own projection, so it must not
-// drive an object pass. Without this the previous tests could be satisfied by
-// reconciling unconditionally, which would re-derive membership for an object that is
-// still alive and untouched.
+// TestUnregisterResource_PureGrantWithdrawal_LeavesTheObjectAlone — снятие
+// публичной выдачи с wildcard ничего не говорит о проекции самого объекта, поэтому не должно
+// запускать его проход. Без этого предыдущие тесты проходили бы при
+// безусловном согласовании, которое заново вывело бы членство ещё живого
+// и нетронутого объекта.
 func TestUnregisterResource_PureGrantWithdrawal_LeavesTheObjectAlone(t *testing.T) {
 	rec := &smObjectReconciler{}
 	uc, _ := newRegUC(t, rec)
+	uc.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
+	scopes := unitScopes()
+	scopes.pointers = map[string][]string{"registry_repository:reg1/public": {"registry_registry:reg1"}}
+	uc.scopes = scopes
 
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject:  "user:*",
 		relation: "v_get",
-		object:   "geo_region:reg_ru_central",
+		object:   "registry_repository:reg1/public",
 	}))
 	assert.Empty(t, rec.snapshot(),
 		"a pure-grant withdrawal touches no projection, so it must drive no object pass")

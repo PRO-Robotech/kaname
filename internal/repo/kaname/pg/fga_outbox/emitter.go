@@ -1,12 +1,12 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package fga_outbox — atomic emit-in-tx helper for kaname.fga_outbox.
+// Package fga_outbox — помощник атомарной отправки внутри транзакции в kaname.fga_outbox.
 //
-// Mirror of the SubjectChangeEmitter pattern
+// Повторяет образец SubjectChangeEmitter
 // (internal/repo/kaname/pg/subject_change_emitter.go).
 //
-// Background
+// Предыстория
 //
 //	Раньше каждая мутация отношения шла пост-коммитным синхронным вызовом в
 //	чужое хранилище (незаметный Warn на отказе), а часть путей не писала туда
@@ -27,8 +27,8 @@
 //	переименование журнала, чьё имя называет снятый движок, — предмет отдельной
 //	задачи (§7 приёмки).
 //
-//	Per ban #10 — within-service refs/invariants live on DB-level: tx-commit is
-//	the atomicity primitive, not "INSERT then call the store and hope".
+// По запрету #10 внутрисервисные ссылки и инварианты живут на уровне БД: коммит транзакции —
+// примитив атомарности, а не «INSERT, затем вызвать хранилище и надеяться».
 //
 // Форма `kaname.fga_outbox` (таблица и триггеры — миграция `0001_initial.sql`).
 // ЧЕТЫРЕ колонки, и это вся таблица:
@@ -83,48 +83,48 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// EventTypeWrite / EventTypeDelete — the two event types this table carries.
-// Exported so every producer names the row's kind through the package that owns
-// the row's shape, instead of repeating the literal at its own INSERT.
+// EventTypeWrite / EventTypeDelete — два типа событий этой таблицы.
+// Экспортируются, чтобы каждый производитель называл вид строки через пакет, владеющий
+// её формой, а не повторял литерал в собственном INSERT.
 const (
 	EventTypeWrite  = "fga.tuple.write"
 	EventTypeDelete = "fga.tuple.delete"
 )
 
-// RelationPredicate renders the SQL predicate «this row carries <arg> as one of its
-// relations», matching BOTH row shapes — the single-relation payload and the set.
+// RelationPredicate строит предикат SQL «эта строка несёт <arg> среди своих
+// отношений», совпадающий с ОБОИМИ формами строки — одним отношением и набором.
 //
-// It exists because a reader that keys on `payload->>'relation'` alone sees only the
-// FIRST member of a set, and the direction that fails is the quiet one: a query asking
-// "is this tuple queued?" answers NO for a tuple that is queued, so a de-duplication
-// enqueues a second time and an assertion that a tuple is ABSENT passes without ever
-// looking at the row that holds it.
+// Он нужен, поскольку читатель только по `payload->>'relation'` видит лишь
+// ПЕРВЫЙ элемент набора, а сбой происходит незаметно: запрос
+// «этот кортеж в очереди?» отвечает НЕТ для имеющегося кортежа, поэтому устранение дублей
+// ставит его повторно, а утверждение об ОТСУТСТВИИ кортежа проходит, даже не
+// посмотрев строку, где тот лежит.
 //
-// payloadExpr is the jsonb column expression (`payload`, `o.payload`); arg is the
-// placeholder or literal carrying the relation.
+// payloadExpr — выражение колонки jsonb (`payload`, `o.payload`); arg —
+// плейсхолдер или литерал с отношением.
 func RelationPredicate(payloadExpr, arg string) string {
 	return "(" + payloadExpr + "->>'relation' = " + arg +
 		" OR " + payloadExpr + "->'relations' @> to_jsonb(" + arg + "::text))"
 }
 
-// EmitWriteTx INSERTs N grant rows into `kaname.fga_outbox` (event_type
-// `fga.tuple.write`) using the caller-supplied transaction.
+// EmitWriteTx вставляет N строк выдачи в `kaname.fga_outbox` (event_type
+// `fga.tuple.write`), используя транзакцию вызывающего.
 //
-// MUST run in the same pgx.Tx as the domain state-change (AccessBinding
-// insert, JIT auto-grant InsertTx, cluster_admin_grants insert). Tx rollback
-// ⇒ outbox rows are not visible to the drainer.
+// ОБЯЗАН исполняться в той же pgx.Tx, что изменение доменного состояния (вставка AccessBinding,
+// автовыдача InsertTx JIT, вставка cluster_admin_grants). Откат транзакции
+// ⇒ строки outbox не видны выгрузчику.
 //
-// len(tuples)==0 is a no-op (returns nil) — caller decides whether 0 tuples
-// is an error.
+// len(tuples)==0 ничего не меняет (возвращает nil); вызывающий решает, являются ли 0 кортежей
+// ошибкой.
 func EmitWriteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {
 	return emitTx(ctx, tx, EventTypeWrite, tuples)
 }
 
-// EmitDeleteTx INSERTs N revoke rows into `kaname.fga_outbox` (event_type
+// EmitDeleteTx вставляет N строк отзыва в `kaname.fga_outbox` (event_type
 // `fga.tuple.delete`).
 //
-// Caller supplies the EXACT tuples that were originally written by EmitWriteTx
-// — symmetric revoke. Same atomicity contract as EmitWriteTx.
+// Вызывающий передаёт ТОЧНЫЕ кортежи, изначально записанные EmitWriteTx,
+// для симметричного отзыва. Контракт атомарности тот же, что у EmitWriteTx.
 func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {
 	return emitTx(ctx, tx, EventTypeDelete, tuples)
 }
@@ -155,7 +155,7 @@ func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple
 //
 // Поэтому функция принимает ТОЛЬКО объект: субъект и отношение она берёт у
 // перевода входного слова (`domain.PublicationSubject` / `PublicationRelation`),
-// а не у вызывающего. Строку другой формы с этим полем положить нельзя by construction,
+// а не у вызывающего. Строку другой формы с этим полем положить нельзя по устройству,
 // и глагол, выведенный из выдачи, мимо запрета проекции не проедет.
 //
 // Тем же полем с kaname#969 упорядочены и строки иерархии посредника регистрации
@@ -262,6 +262,13 @@ func EmitOwnerOrderedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples
 		}
 		users, relations, objects = append(users, t.User), append(relations, t.Relation), append(objects, t.Object)
 	}
+	if eventType == EventTypeWrite {
+		// Настоящая отправка владельца начинает новую жизнь точного кортежа, включая ноль.
+		// Устаревший Register сюда не доходит; обычный AB EmitWriteTx не сбрасывает доказательство.
+		if err := invalidateRetirementTx(ctx, tx, users, relations, objects); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
 		 SELECT $1, jsonb_build_object('user', u, 'relation', r, 'object', o, 'source_version', $5::timestamptz), now()
@@ -274,27 +281,27 @@ func EmitOwnerOrderedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples
 	return nil
 }
 
-// emitTx enqueues the tuples GROUPED BY (user, object): one row per subject per
-// object, carrying that subject's WHOLE relation set on it.
+// emitTx ставит кортежи С ГРУППИРОВКОЙ ПО (user, object): одна строка на субъекта
+// на объекте, несущая ВЕСЬ его набор отношений к объекту.
 //
-// WHY THE ROW IS THE SET AND NOT THE TUPLE. The drainer applies one row per call,
-// so the row is the unit that lands atomically. With a row per tuple the
-// subject's verb set arrived one relation at a time — and between the first arrival
-// and the last, the subject could read its own freshly created resource but not
-// change or delete it. Observed on a stand: read allowed at t, update refused 50 ms
-// later, both calls resolving against the same object with exactly one relation
-// standing on it. A caller that has just been told it may read its own resource is
-// entitled to conclude it may act on it; the set is one grant, so it has to move as
-// one. (The synchronous writer already applied a whole object at once — the queue,
-// which is the at-least-once path and therefore the one that runs whenever the
-// synchronous attempt is skipped, cancelled or lost, did not.)
+// ПОЧЕМУ СТРОКА — НАБОР, А НЕ КОРТЕЖ. Выгрузчик применяет одну строку за вызов,
+// поэтому строка — единица атомарного применения. При строке на кортеж набор
+// глаголов субъекта прибывал по отношению, и между первым
+// и последним субъект мог читать собственный только что созданный ресурс, но не
+// менять или удалять его. На стенде: чтение разрешено в момент t, обновление отвергнуто через 50 мс,
+// оба вызова решались для одного объекта ровно с одним действующим
+// отношением. Только что получивший доступ на чтение своего ресурса вправе
+// заключить, что может действовать с ним; набор — одна выдача, поэтому должен перемещаться
+// целиком. (Синхронный писатель уже применял весь объект разом, а очередь,
+// которая обеспечивает доставку хотя бы раз и поэтому исполняется, когда
+// синхронная попытка пропущена, отменена или потеряна, — нет.)
 //
-// SHAPE. A group of one relation keeps the historical single-tuple payload
-// verbatim, so the many emitters that grant one relation at a time (bootstrap, JIT,
-// break-glass, the register proxy) produce byte-identical rows and nothing about
-// them changes. Only a genuine SET takes the `relations` form, and only a GRANT set
-// additionally carries the compatibility echo — see the branch below for why the two
-// directions differ.
+// ФОРМА. Группа из одного отношения сохраняет историческую нагрузку одного кортежа
+// дословно, поэтому многие отправители одного отношения (начальная загрузка, JIT,
+// аварийный доступ, прокси регистрации) производят побайтно одинаковые строки, и для
+// них ничего не меняется. Лишь настоящий НАБОР принимает форму `relations`, и только набор ВЫДАЧИ
+// дополнительно несёт эхо совместимости — ниже объяснено, почему два
+// направления различаются.
 func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple) error {
 	if tx == nil {
 		return fmt.Errorf("fga_outbox: tx must not be nil")
@@ -311,24 +318,24 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 		} else {
 			fields["relations"] = g.relations
 			if eventType == EventTypeWrite {
-				// COMPATIBILITY ECHO — GRANTS ONLY, and the asymmetry is the point.
+				// ЭХО СОВМЕСТИМОСТИ — ТОЛЬКО ВЫДАЧИ, и асимметрия намеренна.
 				//
-				// During a rolling upgrade a pod that predates the set form still claims
-				// these rows. Given an echo it applies ONE relation and marks the row
-				// delivered; given none it cannot decode the row and poisons it.
+				// При постепенном обновлении pod, предшествующий форме набора, всё ещё захватывает
+				// эти строки. При наличии эха он применяет ОДНО отношение и отмечает строку
+				// доставленной; без эха не декодирует строку и объявляет её неисправимой.
 				//
-				// For a GRANT the first outcome is better: the subject ends up with less
-				// access than it is owed (fail-closed), the row is consumed, and the next
-				// reconcile pass completes it.
+				// Для ВЫДАЧИ первый исход лучше: субъект получает меньше
+				// доступа, чем положено (безопасный отказ), строка потреблена, а следующий
+				// проход сверки дополняет её.
 				//
-				// For a REVOKE it is strictly worse, and irrecoverably so: the row is
-				// marked delivered while most of the set SURVIVES ITS OWN REMOVAL — an
-				// over-grant that is invisible to the poison ledger, to the wedge warning
-				// and to the redrive, because as far as the queue is concerned the work
-				// is done. A poisoned revoke, by contrast, is visible in all three and is
-				// re-driven on the first model observation after a pod starts — which the
-				// end of the rollout guarantees. So revokes carry no echo: better stuck
-				// and loud than applied in part and silent.
+				// Для ОТЗЫВА это строго хуже и невосстановимо: строка
+				// отмечена доставленной, хотя большая часть набора ПЕРЕЖИВАЕТ СОБСТВЕННОЕ УДАЛЕНИЕ —
+				// избыточная выдача невидима реестру неисправимых записей, предупреждению о застревании
+				// и повторному запуску, поскольку с точки зрения очереди работа
+				// завершена. Неисправимый отзыв, напротив, виден всем трём и
+				// перезапускается при первом наблюдении модели после старта pod, что
+				// гарантирует завершение обновления. Поэтому отзывы не несут эха: лучше застрять
+				// заметно, чем частично примениться молча.
 				fields["relation"] = g.relations[0]
 			}
 		}
@@ -391,43 +398,43 @@ const (
 	deleteStamp = "clock_timestamp()"
 )
 
-// grantGroup — one subject's relation set on one object: the unit a row carries and
-// the unit the drainer's ordering partition covers.
+// grantGroup — набор отношений одного субъекта к одному объекту: единица строки
+// и единица раздела упорядочения выгрузчика.
 type grantGroup struct {
 	user      string
 	object    string
 	relations []string
 }
 
-// groupByGrant buckets tuples by (user, object), drops a relation repeated within
-// one group, and returns the groups in ONE canonical order — by object, then user,
-// with the relations inside a group sorted too.
+// groupByGrant группирует кортежи по (user, object), удаляет повтор отношения внутри
+// группы и возвращает группы в ОДНОМ каноническом порядке — объект, затем пользователь;
+// отношения внутри группы также отсортированы.
 //
-// WHO HOLDS THE LOCK ORDER — AND HOW FAR IT REACHES. The journal trigger locks one
-// fact row per tuple. Two transactions folding overlapping tuples of one subject in
-// different orders take the same locks crosswise, and the database breaks the cycle
-// by failing one of them with 40P01. Observed on a stand: a binding delete that ran
-// while a sibling binding of the same subject was being materialized ended ABORTED,
-// and the binding the caller removed stayed alive.
+// КТО ДЕРЖИТ ПОРЯДОК БЛОКИРОВОК И КАК ДАЛЕКО ОН ДЕЙСТВУЕТ. Триггер журнала блокирует одну
+// строку факта на кортеж. Две транзакции, сворачивающие пересекающиеся кортежи субъекта
+// в разном порядке, берут одни блокировки перекрёстно, и база разрывает цикл,
+// завершая одну ошибкой 40P01. Наблюдалось на стенде: удаление привязки,
+// запущенное во время материализации соседней привязки того же субъекта, завершалось ABORTED,
+// а удаляемая вызывающим привязка оставалась жива.
 //
-// The order is held by the DATABASE, not by this function: the fold is a statement
-// trigger (`kaname.relation_fact_from_journal`, migration 20261005040457) that walks
-// the rows of one statement by (object, user) byte-wise, same-key rows by id, and
-// the relations of a set byte-wise — whoever wrote them: this emitter, the boot
-// backfill's `INSERT … SELECT`, the module seed, raw migration SQL. Its reach is ONE
-// STATEMENT: across the statements of one transaction the order is the writer's.
-// The sort here is kept because it makes the journal itself canonical (one row per
-// set, relations in one order) — not because the locks depend on it.
+// Порядок держит БАЗА ДАННЫХ, а не эта функция: свёртка — операторный
+// триггер (`kaname.relation_fact_from_journal`, миграция 20261005040457), обходящий
+// строки одного оператора побайтно по (object, user), строки одного ключа по id, а
+// отношения набора побайтно, кто бы их ни записал: этот отправитель, стартовое
+// заполнение `INSERT … SELECT`, начальное заполнение модуля, сырой SQL миграции. Предел — ОДИН
+// ОПЕРАТОР: между операторами транзакции порядок принадлежит писателю.
+// Сортировка здесь сохранена ради каноничности самого журнала (одна строка на
+// набор, один порядок отношений), а не зависимости блокировок от неё.
 //
-// Reordering is safe because nothing inside one call depends on the caller's order:
-// the rows of one set are always different (user, object) keys, and rows of different
-// keys commute. The order that does matter — a grant and a revoke of the SAME key —
-// lies across calls, and the INSERT below keeps it (later call, larger id).
+// Перестановка безопасна: внутри вызова ничто не зависит от порядка вызывающего;
+// строки одного набора всегда имеют разные ключи (user, object), а строки разных
+// ключей коммутируют. Значимый порядок — выдача и отзыв ОДНОГО ключа —
+// лежит между вызовами, и INSERT ниже сохраняет его (поздний вызов, больший id).
 //
-// De-duplication matters because the store rejected a request naming the same tuple
-// twice (cannot_allow_duplicate_tuples_in_one_request), and a caller that
-// legitimately derives one tuple from two rules would otherwise turn a whole grant
-// into a permanent poison.
+// Устранение дублей важно: хранилище отвергало запрос, называющий один кортеж
+// дважды (cannot_allow_duplicate_tuples_in_one_request), и вызывающий, законно
+// выводящий кортеж из двух правил, иначе превращал бы всю выдачу
+// в постоянно неисправимую запись.
 func groupByGrant(tuples []clients.RelationTuple) []grantGroup {
 	type key struct{ user, object string }
 	idx := make(map[key]int, len(tuples))

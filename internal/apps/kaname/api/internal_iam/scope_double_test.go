@@ -14,6 +14,7 @@ package internal_iam
 
 import (
 	"context"
+	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -36,7 +37,13 @@ type sceneScopes struct {
 // unitScopes — сцена по умолчанию: проекты, под которыми регистрируют пробы на
 // подставных портах, каждый в своём аккаунте.
 func unitScopes() sceneScopes {
-	return sceneScopes{projects: map[string]string{
+	return sceneScopes{containers: map[string]domain.ContainerScope{
+		"vpc_network:net-1":       {Registered: true, ProjectID: "prj-1", AccountID: "acc-1"},
+		"vpc_network:vpcn_new":    {Registered: true, ProjectID: unitProject, AccountID: unitAccount},
+		"vpc_network:enp_1":       {Registered: true, ProjectID: unitProject, AccountID: unitAccount},
+		"registry_registry:rep-1": {Registered: true, ProjectID: "prj-1", AccountID: "acc-1"},
+		"registry_registry:reg1":  {Registered: true, ProjectID: "prj_a", AccountID: "acc_a"},
+	}, projects: map[string]string{
 		unitProject:            unitAccount,
 		"prj-1":                "acc-1",
 		"prj-2":                "acc-2",
@@ -84,4 +91,34 @@ func (s sceneScopes) PointerSubjectsTx(_ context.Context, _ service.Tx, modelTyp
 // база (kaname#983), и судят их пробы на живой базе.
 func (s sceneScopes) BindingRefusesTx(context.Context, service.Tx, string, string, string, []string) (bool, error) {
 	return false, nil
+}
+
+// SavedRegistrationScopeTx читает лишь объявленную сохранённую область фикстуры.
+func (s sceneScopes) SavedRegistrationScopeTx(ctx context.Context, tx service.Tx, modelType, id string) (domain.ContainerScope, error) {
+	if c, ok := s.containers[modelType+":"+id]; ok {
+		return c, nil
+	}
+	for _, anchor := range s.pointers[modelType+":"+id] {
+		typ, key, _ := strings.Cut(anchor, ":")
+		if typ == "project" {
+			if acc, ok := s.projects[key]; ok {
+				return domain.ContainerScope{Registered: true, ProjectID: key, AccountID: acc}, nil
+			}
+		}
+		if c, ok := s.containers[anchor]; ok {
+			return c, nil
+		}
+	}
+	return domain.ContainerScope{}, nil
+}
+
+func (s sceneScopes) SavedRegistrationScopesTx(ctx context.Context, tx service.Tx, typ, id string) ([]domain.ContainerScope, error) {
+	c, err := s.SavedRegistrationScopeTx(ctx, tx, typ, id)
+	if err != nil || !c.Registered {
+		return nil, err
+	}
+	return []domain.ContainerScope{c}, nil
+}
+func (sceneScopes) SaveRegistrationScopesTx(context.Context, service.Tx, string, string, []domain.ContainerScope) error {
+	return nil
 }

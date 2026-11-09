@@ -26,7 +26,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"gopkg.in/yaml.v3"
 )
 
 func rid06Revoke(t *testing.T, w *ridLifecycleWorld, id string) string {
@@ -161,10 +160,11 @@ func rid06Start(t *testing.T, w *ridLifecycleWorld, label string) *rid02OwnedChi
 	if w.delivery.TenantAccountID != nil {
 		installer["tenantAccountId"] = *w.delivery.TenantAccountID
 	}
-	raw, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": manifestDir, "required": true}, "moduleSeedInstaller": installer})
+	raw, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": manifestDir, "required": true}, "moduleSeedInstaller": installer}, w.delivery.RegistrationWriters)
 	require.NoError(t, err)
 	configPath := filepath.Join(root, "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, raw, 0600))
+	ridRegistrationStartupProof(t, root, raw, w.delivery.RegistrationWriters)
 	ordinal := int64(rid06Result(w).CompletedPairs + 1)
 	digest := rid06HashExecutable(t)
 	c := startRIDInstallationChild(t, f, label, rid06ChildInput{ConfigPath: configPath, Creator: f.creator.ID, PairOrdinal: ordinal}, nativeConcurrentEnvironment(t, f, installruntime.SecondNativePorts(), "rid06-full-root"), rid06ChildInputEnv, "TestRID06OwnedFullStartupChild", "2m")

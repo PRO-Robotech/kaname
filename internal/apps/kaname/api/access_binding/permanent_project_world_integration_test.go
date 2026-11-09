@@ -517,10 +517,38 @@ func TestPermanentProject_PB13_TwinsOfTheFormRefusal(t *testing.T) {
 		w := newPPWorld(t)
 		w.deliverDK()
 		w.requireReg(dpQ, w.prjA, w.accA, "PB-13 b «Дано»")
-		require.NoError(t, w.call(&iamv1.RegisterResourceRequest{
+		// AW-14 сохраняет закрытое правило публикации: прежний пример PB-13 с корнем registry
+		// запрещён. Сохраняем его как отрицательный; положительное свойство
+		// (публикация не несёт утверждений о проекте) проверяет допустимый постоянный репозиторий.
+		before := registrationAccessSnapshot(t, w.ctx, w.pool)
+		err := w.call(&iamv1.RegisterResourceRequest{
 			SubjectId: pcrAnon, Relation: "v_get", Object: ppObj(dpQ), SourceVersion: w.next(),
-		}), "PB-13 b: публикация проектом не адресуется")
-		w.pollAsk(pcrAnon, "v_get", pcrRegType, dpQ, true, "PB-13 b: публикация действует")
+		})
+		require.Equal(t, codes.PermissionDenied, status.Code(err))
+		require.Equal(t, before, registrationAccessSnapshot(t, w.ctx, w.pool))
+		require.NoError(t, w.call(w.repoReq(dpQ, ppTeamApp, w.prjA, w.accA)))
+		chain := []string{pcrRegType + ":" + dpQ, "project:" + string(w.prjA), "account:" + string(w.accA)}
+		require.Equal(t, chain, w.chain(pcrRepoType, dpQ+ppTeamApp))
+		project, account, present := w.mirrorScope(pcrRepoType, dpQ+ppTeamApp)
+		require.True(t, present)
+		require.Equal(t, string(w.prjA), project)
+		require.Equal(t, string(w.accA), account)
+		var bound string
+		require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT project_id FROM kaname.object_project_binding WHERE object_type=$1 AND object_id=$2`, pcrRepoType, dpQ+ppTeamApp).Scan(&bound))
+		require.Equal(t, string(w.prjA), bound)
+
+		require.NoError(t, w.call(&iamv1.RegisterResourceRequest{
+			SubjectId: pcrAnon, Relation: "v_get", Object: pcrRepoType + ":" + dpQ + ppTeamApp, SourceVersion: w.next(),
+		}), "PB-13 b: lawful publication is not addressed by project claims")
+		w.pollAsk(pcrAnon, "v_get", pcrRepoType, dpQ+ppTeamApp, true, "PB-13 b: lawful publication works")
+		require.Equal(t, chain, w.chain(pcrRepoType, dpQ+ppTeamApp))
+		afterProject, afterAccount, afterPresent := w.mirrorScope(pcrRepoType, dpQ+ppTeamApp)
+		require.True(t, afterPresent)
+		require.Equal(t, project, afterProject)
+		require.Equal(t, account, afterAccount)
+		require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT project_id FROM kaname.object_project_binding WHERE object_type=$1 AND object_id=$2`, pcrRepoType, dpQ+ppTeamApp).Scan(&bound))
+		require.Equal(t, string(w.prjA), bound)
+
 	})
 }
 

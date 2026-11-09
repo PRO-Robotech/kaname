@@ -15,6 +15,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"github.com/stretchr/testify/require"
 )
 
@@ -119,7 +120,7 @@ func TestUnregisterClosure_Boundaries(t *testing.T) {
 			}
 			withdrawal := &recordingWithdrawal{}
 			emitter := &recordingEmitter{}
-			uc := NewRegisterResourceUseCase(emitter, m, b, seededCatalogTypes{}, &recordingPublisher{}, withdrawal, closureBoundaryAudit{}, unitScopes())
+			uc := NewRegisterResourceUseCase(emitter, m, b, seededCatalogTypes{}, &recordingPublisher{}, withdrawal, closureBoundaryAudit{}, unitScopes()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 			err := uc.Unregister(ctx, &unregReq{subject: "project:prj_a", relation: "project", object: "registry_registry:reg1", version: time.Now()})
 			switch scenario {
 			case "hints_are_not_authority":

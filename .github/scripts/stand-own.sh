@@ -251,7 +251,40 @@ start_pg() {
 # отказывается стартовать и называет причину. Значит перечень не «настройки
 # стенда», а измеренная цена боевой посадки, и он обязан меняться вместе с
 # требованиями, а не жить своей жизнью.
+# Состояние регистрации принадлежит подтверждённому экземпляру БД/пода.
+# Переподъём всего стенда архивирует прежние файлы; restart службы их сохраняет.
+# prepare-native/env do not create a stand; preserve their existing exclusive
+# empty-config preparation. Real up uses the confirmed generation below.
+registration_config_empty() {
+  mkdir -p "$BIN" || return 75
+  [ ! -L "$BIN/registration-writers.json" ] || { fail "конфигурация регистрации — ссылка"; return 1; }
+  if [ ! -e "$BIN/registration-writers.json" ]; then
+    ( umask 077; set -C
+      printf '%s\n' '{"registration-account-writers":{"assignments":[],"disabled":[],"retire-cluster-writer":false}}' > "$BIN/registration-writers.json"
+    ) || return 75
+  fi
+}
+
+registration_generation_identity() {
+  local identity
+  if route_load; then
+    identity="$(ks -n "$EXT_NS" get pod "$EXT_POD" -o jsonpath='{.metadata.uid}')" || return 75
+    printf 'pod:%s' "$identity"
+  else
+    identity="$(docker inspect --format '{{.Id}}' "$PG_NAME")" || return 75
+    printf 'docker:%s' "$identity"
+  fi
+}
+
+registration_generation() {
+  local identity
+  identity="$(registration_generation_identity)" || return $?
+  python3 "$ROOT/tests/authz-fixtures/registration_writer_plan.py" "$1" "$identity" \
+    --run-dir "$RUNDIR" --bin-dir "$BIN"
+}
+
 stand_env() {
+  export KANAME_CONFIG_PATH="$BIN/registration-writers.json"
   mkdir -p "$RUNDIR"
   [ -f "$WRAPKEY_FILE" ] || openssl rand -hex 32 > "$WRAPKEY_FILE"
   # КОНТУР БУТСТРАПА ВКЛЮЧЁН НА СТЕНДЕ, И БЕЗ НЕГО СТЕНД НЕ ПРОВЕРЯЕТ НИЧЕГО
@@ -485,7 +518,8 @@ build_binaries() {
   # библиотеками машины сборки, в нём бы не запустился.
   CGO_ENABLED=0 go build -o "$BIN/kaname" ./cmd/kaname || { fail "сборка kaname не прошла"; exit 1; }
   CGO_ENABLED=0 go build -o "$BIN/kaname-migrator" ./cmd/migrator || { fail "сборка накатчика не прошла"; exit 1; }
-  say "собрано: kaname, kaname-migrator"
+  CGO_ENABLED=0 go build -o "$BIN/registration-stand-owner" ./tests/fixtures/registration-stand-owner || { fail "сборка владельца test svc не прошла"; exit 1; }
+  say "собрано: kaname, kaname-migrator, registration-stand-owner"
 }
 
 # КЛАСС ОТКАЗА НАКАТА НАЗЫВАЕТ САМ НАКАТ — СВОИМ КОДОМ ВЫХОДА.
@@ -580,6 +614,7 @@ SERVICE_IMAGE="${KANAME_STAND_SERVICE_IMAGE:-$PG_IMAGE}"
 SERVICE_MEMORY="${KANAME_STAND_SERVICE_MEMORY:-1280m}"
 
 start_service() {
+  local replacement="${1:-initial}"
   mkdir -p "$RUNDIR"
   local envs=() v
   # Посадка уезжает в контейнер ИМЕНАМИ, а не значениями: `-e ИМЯ` берёт
@@ -588,8 +623,15 @@ start_service() {
   for v in $(compgen -e); do
     case "$v" in KANAME_STAND_*) ;; KANAME_*) envs+=(-e "$v") ;; esac
   done
-  docker rm -fv "$SERVICE_NAME" >/dev/null 2>&1
-  nohup docker run --rm --name "$SERVICE_NAME" --network host \
+  if [ "$replacement" = replacement ]; then
+    # Имя мог занять чужой контейнер после owned stop: docker run обязан
+    # отказать на коллизии. Никакого rm по имени на этом пути нет.
+    [ ! -e "$RUNDIR/kaname.cid" ] && [ ! -L "$RUNDIR/kaname.cid" ] || return 1
+  else
+    docker rm -fv "$SERVICE_NAME" >/dev/null 2>&1
+    rm -f "$RUNDIR/kaname.cid"
+  fi
+  nohup docker run --rm --name "$SERVICE_NAME" --cidfile "$RUNDIR/kaname.cid" --network host \
     --memory "$SERVICE_MEMORY" --memory-swap "$SERVICE_MEMORY" \
     --user "$(id -u):$(id -g)" -v "$BIN:$BIN:ro" -v "$PKI:$PKI:ro" "${envs[@]}" \
     --entrypoint "" "$SERVICE_IMAGE" "$BIN/kaname" > "$RUNDIR/kaname.log" 2>&1 &
@@ -1297,7 +1339,7 @@ spec:
         - {name: ctl, mountPath: /ctl}
     - name: svc
       image: "$SERVICE_IMAGE"
-      command: [sh, -c, "while [ ! -e $EXT_BIN/.start ]; do sleep 1; done; exec $EXT_BIN/kaname"]
+      command: [sh, -c, "while [ ! -e $EXT_BIN/.start ]; do sleep 1; done; exec $EXT_BIN/registration-stand-owner serve $EXT_BIN/kaname $EXT_BIN/registration-writers.json $EXT_BIN/registration-owner.sock $SERVICE_TRIES"]
       envFrom: [{secretRef: {name: kaname-own-env}}]
       resources: {requests: {cpu: 200m, memory: $mem}, limits: {memory: $mem}}
       securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
@@ -1345,7 +1387,7 @@ ext_wait_running() {
 # ровно то, что собрано здесь.
 ext_upload() {
   local f want got
-  for f in kaname kaname-migrator; do
+  for f in kaname kaname-migrator registration-stand-owner; do
     # shellcheck disable=SC2016  # $1 и $2 раскрывает оболочка пода
     ks -n "$EXT_NS" exec -i "$EXT_POD" -c svc -- sh -c \
       'cat > "$1/.part" && chmod 0755 "$1/.part" && mv "$1/.part" "$1/$2"' sh "$EXT_BIN" "$f" \
@@ -1354,7 +1396,14 @@ ext_upload() {
     got="$(ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- sha256sum "$EXT_BIN/$f" 2>/dev/null | cut -d' ' -f1)"
     [ -n "$want" ] && [ "$want" = "$got" ] || { unmet "отпечаток бинаря $f в поде не совпал с собранным"; return 75; }
   done
-  say "бинари доехали в под, отпечатки совпали: kaname, kaname-migrator"
+  say "бинари доехали в под, отпечатки совпали: kaname, kaname-migrator, registration-stand-owner"
+  # Тот же конечный YAML, путь которого объявлен Secret-ом окружения.
+  ks -n "$EXT_NS" exec -i "$EXT_POD" -c svc -- sh -c \
+    'umask 077; cat > "$1/registration-writers.json.part" && mv "$1/registration-writers.json.part" "$1/registration-writers.json"' sh "$EXT_BIN" \
+    < "$BIN/registration-writers.json" || return 75
+  want="$(sha256sum "$BIN/registration-writers.json" | cut -d' ' -f1)"
+  got="$(ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- sha256sum "$EXT_BIN/registration-writers.json" | cut -d' ' -f1)"
+  [ -n "$want" ] && [ "$want" = "$got" ] || { unmet "план регистрации не совпал с доставленным"; return 75; }
   if [ "$REGISTRY_WORLD" = 1 ]; then
     ks -n "$EXT_NS" exec -i "$EXT_POD" -c svc -- sh -c \
       'mkdir -p "$1/manifests" && cat > "$1/manifests/registry.yaml"' sh "$EXT_BIN" \
@@ -1426,9 +1475,13 @@ ext_listeners_report() {
 # ext_start_service — отказ старта (контейнер службы завершился) — НАХОДКА, как
 # у локального пути; готовность — по таблице сокетов пода.
 ext_start_service() {
-  local i code
   ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- touch "$EXT_BIN/.start" >/dev/null 2>&1 || {
     unmet "службу пода не запустить: exec отказал"; return 75; }
+  ext_wait_service
+}
+
+ext_wait_service() {
+  local i code
   for i in $(seq 1 "$SERVICE_TRIES"); do
     code="$(kc -n "$EXT_NS" get pod "$EXT_POD" -o 'jsonpath={.status.containerStatuses[?(@.name=="svc")].state.terminated.exitCode}' 2>/dev/null)"
     if [ -n "$code" ]; then
@@ -1587,6 +1640,7 @@ ext_up() {
   ext_put_config || exit $?
   ext_put_pod || exit $?
   ext_wait_running || exit $?
+  registration_generation --begin-generation || exit $?
   ext_upload || exit $?
   ext_pg_ready || exit $?
   ext_migrate; rc=$?
@@ -1598,7 +1652,9 @@ ext_up() {
 
 up_local() {
   make_pki; registry_world_prepare || return $?
-  start_pg; start_mailbox; stand_env; build_binaries; migrate; start_service
+  start_pg
+  registration_generation --begin-generation || return $?
+  start_mailbox; stand_env; build_binaries; migrate; start_service
   say "===== стенд поднят: своя база + свой УЦ, без платформы и без поставщика ====="
   listeners_report
 }
@@ -1633,6 +1689,64 @@ stand_down() {
     return "$rc"
   fi
   down
+}
+
+# Единственный переход fixture accountAId → настоящий startup-план registry.
+# Docker принимает immutable ID созданного нами контейнера; чужим PID не сигналим.
+registration_writer_plan() {
+  local environment="$1" cid snapshot waiter rc stopped
+  [ "$REGISTRY_WORLD" = 1 ] || { fail "план registry допустим только в registry-world"; return 1; }
+  registration_generation --verify-generation || return $?
+  ( umask 077; set -C; : > "$RUNDIR/registration-plan.attempt" ) || {
+    fail "фаза регистрации уже начиналась; повтор не разрешён"; return 1; }
+  if route_load; then
+    # Только существующий svc: helper держит pidfd, private instance и generation1.
+    # Аккаунтный план проверен и загружен атомарно ДО сигнала старому child.
+    python3 "$ROOT/tests/authz-fixtures/registration_writer_plan.py" --env-file "$environment" \
+      --output "$BIN/registration-writers.next.json" || return $?
+    local expected got
+    expected="$(sha256sum "$BIN/registration-writers.next.json" | cut -d' ' -f1)"
+    ks -n "$EXT_NS" exec -i "$EXT_POD" -c svc -- sh -c \
+      'umask 077; set -C; cat > "$1/registration-writers.next.json" && mv "$1/registration-writers.next.json" "$1/registration-writers.json"' sh "$EXT_BIN" \
+      < "$BIN/registration-writers.next.json" || return 75
+    got="$(ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- sha256sum "$EXT_BIN/registration-writers.json" | cut -d' ' -f1)"
+    [ -n "$expected" ] && [ "$expected" = "$got" ] || { fail "account plan SHA drift"; return 1; }
+    ks -n "$EXT_NS" exec "$EXT_POD" -c svc -- "$EXT_BIN/registration-stand-owner" restart \
+      "$EXT_BIN/registration-owner.sock" "$expected" || return $?
+    mv "$BIN/registration-writers.next.json" "$BIN/registration-writers.json" || return 75
+    ext_wait_service
+    return $?
+  fi
+  [ -f "$RUNDIR/kaname.cid" ] && [ ! -L "$RUNDIR/kaname.cid" ] || return 1
+  cid="$(cat "$RUNDIR/kaname.cid")"
+  [[ "$cid" =~ ^[0-9a-f]{64}$ ]] || { fail "нет точного owned container ID"; return 1; }
+  snapshot="$(docker inspect "$cid")" || return 75
+  jq -e --arg id "$cid" --arg binary "$BIN/kaname" --arg bin "$BIN" \
+    'length == 1 and .[0].Id == $id and .[0].State.Running == true and .[0].Path == $binary and any(.[0].Mounts[]; .Source == $bin and .Destination == $bin)' \
+    <<< "$snapshot" >/dev/null || { fail "контейнер не принадлежит точному исполняемому стенду"; return 1; }
+  [ ! -e "$RUNDIR/registration-stop.rc" ] && [ ! -L "$RUNDIR/registration-stop.rc" ] &&
+    [ ! -e "$RUNDIR/registration-stop.stderr" ] && [ ! -L "$RUNDIR/registration-stop.stderr" ] &&
+    [ ! -e "$BIN/registration-writers.next.json" ] && [ ! -L "$BIN/registration-writers.next.json" ] || {
+    fail "фаза регистрации уже начиналась; повтор не разрешён"; return 1; }
+  python3 "$ROOT/tests/authz-fixtures/registration_writer_plan.py" --env-file "$environment" \
+    --output "$BIN/registration-writers.next.json" || return $?
+  ( umask 077; set -C; cat "$RUNDIR/kaname.log" > "$RUNDIR/kaname.bootstrap.log" ) || return 75
+  ( umask 077; set -C
+    exec timeout --kill-after=5s 25s docker wait "$cid" > "$RUNDIR/registration-stop.rc" 2> "$RUNDIR/registration-stop.stderr"
+  ) &
+  waiter=$!
+  timeout --kill-after=5s 20s docker stop --time=15 "$cid" >/dev/null
+  stopped=$?
+  wait "$waiter"; rc=$?
+  [ "$stopped" -eq 0 ] && [ "$rc" -eq 0 ] && [ "$(cat "$RUNDIR/registration-stop.rc")" = 0 ] || {
+    fail "служба не завершилась штатно для применения конечного плана"; return 1; }
+  [ -f "$RUNDIR/kaname.cid" ] && [ ! -L "$RUNDIR/kaname.cid" ] &&
+    [ "$(cat "$RUNDIR/kaname.cid")" = "$cid" ] &&
+    [ ! -e "$RUNDIR/kaname.bootstrap.cid" ] && [ ! -L "$RUNDIR/kaname.bootstrap.cid" ] || return 1
+  mv "$RUNDIR/kaname.cid" "$RUNDIR/kaname.bootstrap.cid" || return 75
+  mv "$BIN/registration-writers.next.json" "$BIN/registration-writers.json" || return 75
+  stand_env
+  start_service replacement
 }
 
 db_fold_routed() { if route_load; then ext_fold; else fold_db; fi; }
@@ -3275,7 +3389,7 @@ fi
 
 # Смонтированная личность также защищает команды down/census/db, способные загрузить сохранённый маршрут.
 case "${1:-}" in
-  up|down|census|db-fold|db-unfold)
+  up|down|census|db-fold|db-unfold|registration-writer-plan)
     if [ -n "$IN_POD" ]; then
       route_decide || exit $?
       ext_name_ns || exit $?
@@ -3285,12 +3399,16 @@ esac
 
 case "${1:-}" in
   up) stand_up; exit $? ;;
+  registration-writer-plan)
+    [ "$#" -eq 2 ] || { refuse "registration-writer-plan требует один файл исходного посева"; exit 64; }
+    registration_writer_plan "$2"; exit $? ;;
   prepare-native)
     # Только оркестрация проб: используем настоящие CA стенда, личности конечных узлов и
     # производственный профиль, не запуская Docker, сервер или сборку. Ограниченный
     # исполнитель приёмки предоставляет свои уже проверенные бинарные файлы/PG.
     make_pki || exit $?
     registry_world_prepare || exit $?
+    registration_config_empty || exit $?
     stand_env || exit $?
     mkdir -p "$RUNDIR"
     KANAME_STAND_NATIVE_ENV="$RUNDIR/native-environment.json" python3 - <<'PY_NATIVE_ENV'
@@ -3305,6 +3423,7 @@ PY_NATIVE_ENV
     exit $? ;;
   env)
     # Печать посадки для соседнего шага: он читает её `eval`-ом, а не повторяет.
+    registration_config_empty || exit $?
     stand_env
     env | grep -E '^KANAME_' | sort
     exit 0

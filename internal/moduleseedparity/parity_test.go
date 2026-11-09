@@ -95,8 +95,9 @@
 // (`2 · 1 · 3`, §6 S1 п. 9 приёмки MRW-1), линия #140 сняла числа вовсе — см.
 // разбор у `TestModuleManifestDeclaresTheSeedTheLiveBaseHolds`. Обвал чтения
 // различим и без чисел: якорь по имени стережёт служебные записи, а
-// `NotZero(Groups.Owned)` и `NotZero(Bindings.Owned)` (положительная сторона Р5)
-// — группы и выдачи: ноль прочитанных групп и ноль выдач по-прежнему красны.
+// `NotZero(Groups.Owned)` и `NotZero(Bindings.Owned)` на явном объявлении
+// владельца (положительная сторона Р5) — группы и выдачи. Пустой собственный
+// seed не подменяет этот контроль: его положительный операнд задан отдельно.
 package moduleseedparity_test
 
 import (
@@ -224,13 +225,36 @@ func TestModuleManifestDeclaresTheSeedTheLiveBaseHolds(t *testing.T) {
 			len(res.Findings), strings.Join(res.Findings, "\n  "))
 	}
 
-	// Положительная сторона атрибуции (Р5): группа службы и её выдача отнесены
-	// к модулю `iam` по объявлению. Без этого реализация, отбрасывающая обе из
-	// сравнения, была бы зелена по «находок ноль».
-	require.NotZero(t, census.Groups.Owned,
-		"перепись групп печатает «с владельцем 0» — объявленная манифестом службы группа не отнесена к нему")
-	require.NotZero(t, census.Bindings.Owned,
-		"перепись выдач печатает «с владельцем 0» — выдача группе службы не отнесена к модулю по объявлению группы")
+	// Фактически поставленные документы проверены целиком выше; собственный
+	// seed может быть пуст после снятия прежней cluster-выдачи (kaname#1031).
+	// Положительная сторона Р5 имеет отдельного законного производителя:
+	// ту же фикстуру объявления, что отрицания MRW12 и MRW22 ниже.
+	t.Run("явный владелец группы и выдачи", func(t *testing.T) {
+		states, census, _ := moduleStates(ctx, t, ownerFixtureSet(), nil)
+		t.Logf("перепись явной фикстуры владельца: %s", census)
+		require.Empty(t, moduleseedparity.Compare(states).Findings)
+		require.Equal(t, 1, census.Manifests)
+		require.Equal(t, 1, census.Groups.Declared)
+		require.Equal(t, 1, census.Bindings.Declared)
+		require.NotZero(t, census.Groups.Owned,
+			"перепись групп печатает «с владельцем 0» — объявленная группа не отнесена к модулю")
+		require.NotZero(t, census.Bindings.Owned,
+			"перепись выдач печатает «с владельцем 0» — выдача не отнесена по объявлению группы")
+		require.Equal(t, 1, census.Groups.Owned)
+		require.Equal(t, 1, census.Bindings.Owned)
+	})
+}
+
+// Фикстура проверяет контракт атрибуции на текущей схеме, не восстанавливая
+// снятое объявление production-манифеста и его защищённую legacy identity.
+const ownerFixtureGroup = "parity-owned-group"
+
+func ownerFixtureSet() modulemanifests.Set {
+	return modulemanifests.Set{
+		Posture: modulemanifests.StandaloneModule,
+		Root:    "testdata",
+		Files:   []string{"owner-manifest.yaml"},
+	}
 }
 
 // removeServiceGroup снимает строку группы службы ВМЕСТЕ с её выдачей: иного
@@ -241,13 +265,13 @@ func removeServiceGroup(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		DELETE FROM kaname.access_bindings b
 		 USING kaname.groups g JOIN kaname.accounts a ON a.id = g.account_id
 		 WHERE b.subject_type = 'group' AND b.subject_id = g.id
-		   AND a.name = 'system' AND g.name = 'module-relation-writers'`)
+		   AND a.name = 'system' AND g.name = $1`, ownerFixtureGroup)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, tag.RowsAffected(), "выдачи группы службы в базе не оказалось — дом не построен")
 	tag, err = pool.Exec(ctx, `
 		DELETE FROM kaname.groups g
 		 USING kaname.accounts a
-		 WHERE a.id = g.account_id AND a.name = 'system' AND g.name = 'module-relation-writers'`)
+		 WHERE a.id = g.account_id AND a.name = 'system' AND g.name = $1`, ownerFixtureGroup)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, tag.RowsAffected(), "группы службы в базе не оказалось — дом не построен")
 }
@@ -270,7 +294,7 @@ func TestMRW12_DeclaredGroupMissingFromTheBaseIsAFinding(t *testing.T) {
 		t.Skip("нужен Postgres")
 	}
 	ctx := context.Background()
-	states, census, _ := moduleStates(ctx, t, manifestSet(t), removeServiceGroup)
+	states, census, _ := moduleStates(ctx, t, ownerFixtureSet(), removeServiceGroup)
 	t.Logf("перепись: %s", census)
 	res := moduleseedparity.Compare(states)
 	t.Logf("находки: %s", strings.Join(res.Findings, " · "))
@@ -331,12 +355,12 @@ func TestMRW22_LiveGroupWithADriftedDescriptionIsAFindingBothWays(t *testing.T) 
 		t.Skip("нужен Postgres")
 	}
 	ctx := context.Background()
-	states, census, _ := moduleStates(ctx, t, manifestSet(t), func(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	states, census, _ := moduleStates(ctx, t, ownerFixtureSet(), func(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		t.Helper()
 		tag, err := pool.Exec(ctx, `
 			UPDATE kaname.groups g SET description = 'назначение, разошедшееся с объявленным'
 			  FROM kaname.accounts a
-			 WHERE a.id = g.account_id AND a.name = 'system' AND g.name = 'module-relation-writers'`)
+			 WHERE a.id = g.account_id AND a.name = 'system' AND g.name = $1`, ownerFixtureGroup)
 		require.NoError(t, err)
 		require.EqualValues(t, 1, tag.RowsAffected(), "живой группы службы нет — дом не построен")
 	})

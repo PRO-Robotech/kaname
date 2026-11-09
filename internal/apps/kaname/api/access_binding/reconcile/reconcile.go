@@ -1,26 +1,29 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package reconcile — selector/containment reconciler.
+// Пакет reconcile — сведение селекторов и включения в область.
 //
-// Selector membership is DYNAMIC: labels change in the owning service and arrive
-// over the compute→iam RegisterResource edge into kaname.resource_mirror.
-// The reconciler MATERIALIZES the desired per-object set for a binding from the
-// mirror (same-DB, no iam→owner peer call — keeps the graph acyclic), DIFFS
-// it against the stored access_binding_target_members, and EMITS/EAGER-REVOKEs
-// the per-object FGA tuples through fga_outbox — all in ONE writer-tx (ban #10).
+// Членство по селектору ДИНАМИЧЕСКОЕ: метки меняются в сервисе-владельце и поступают
+// по ребру compute→iam RegisterResource в kaname.resource_mirror.
+// Сведение МАТЕРИАЛИЗУЕТ желаемый набор объектов выдачи из
+// зеркала (та же БД, без вызова iam→владелец — граф остаётся ацикличным), СРАВНИВАЕТ
+// его с сохранённым access_binding_target_members и ВЫПУСКАЕТ/НЕМЕДЛЕННО ОТЗЫВАЕТ
+// пообъектные кортежи FGA через fga_outbox — в ОДНОЙ транзакции записи (ban #10).
 //
-// Clean Architecture: this use-case depends ONLY on the domain + the
-// ReconcileStore / BindingSource ports (defined here). The pgx implementation is
-// the adapter in repo/kaname/pg. No pgx/grpc here.
+// Чистая архитектура: этот сценарий зависит ТОЛЬКО от домена и
+// портов ReconcileStore / BindingSource (определены здесь). Реализация pgx —
+// адаптер в repo/kaname/pg. Здесь нет pgx/grpc.
 //
-// Triggers:
+// Поводы запуска:
 //
-//	(a) Create / Role.Update (rules change) — ReconcileBinding(bindingID).
-//	(b) resource_mirror change (RegisterResource) — ReconcileObject(type,id) via
-//	    the resource_reconcile_outbox event.
-//	(c) periodic sweep — ReconcileBinding over every label-selector binding,
-//	    defense-in-depth against a lost event / worker restart.
+// (a) Create / Role.Update (смена правил) — ReconcileBinding(bindingID).
+// (b) смена resource_mirror (RegisterResource) — ReconcileObject(type,id) через
+//
+//	событие resource_reconcile_outbox.
+//
+// (c) периодический обход — ReconcileBinding для каждой выдачи с селектором меток,
+//
+//	дополнительная защита от потери события / перезапуска обработчика.
 package reconcile
 
 import (
@@ -34,12 +37,12 @@ import (
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
-// BindingScope — the minimal binding facts the reconciler needs to materialize
-// membership: the scope-anchor and the FGA emission inputs (subject + the role's
-// ARM_LABELS selectors). Loaded by BindingSource from a binding id. The
-// rules-based RBAC model has no per-binding target arm — the
-// binding is thin; the only dynamic membership source is the role's ARM_LABELS
-// rules (LabelSelectors).
+// BindingScope — минимальные факты выдачи, нужные сведению для материализации
+// членства: якорь области и входы выпуска FGA (субъект + селекторы
+// ARM_LABELS роли). BindingSource загружает их по идентификатору выдачи.
+// В модели RBAC на правилах у выдачи нет собственной ветви цели —
+// выдача тонкая; единственный динамический источник членства — правила ARM_LABELS
+// роли (LabelSelectors).
 type BindingScope struct {
 	BindingID domain.AccessBindingID
 	Scope     domain.ScopeAnchor
@@ -54,47 +57,47 @@ type BindingScope struct {
 	// арендатора и не влечёт у роли модуля (kaname#1006). Нулевая — самая строгая
 	// ветвь: удаление не приписывается.
 	Policy domain.RulePolicy
-	// Selectors — the role's UNIFIED materializing selectors (flat explicit
-	// RBAC model): ARM_ANCHOR(all) + ARM_NAMES + ARM_LABELS. When non-empty the
-	// binding has dynamic per-rule membership: each selector (rule_fp) is matched
-	// against the feed per its arm (all-in-scope / by-id / by-label) and
-	// materialized; the per-object tuples are derived from the selector's VERBS.
-	// Empty ⇒ a thin binding with no materialized members (e.g. a legacy
-	// permissions-only role — its tier tuples are the binding-level Create concern,
-	// not here). Binding-time scope_grant emission is removed; the reconciler is the
-	// SINGLE materialization path.
+	// Selectors — ЕДИНЫЕ материализующие селекторы роли (плоская явная
+	// модель RBAC): ARM_ANCHOR(all) + ARM_NAMES + ARM_LABELS. Непустой набор даёт
+	// выдаче динамическое членство по правилам: каждый селектор (rule_fp) сопоставляется
+	// с источником по своей ветви (все в области / по id / по меткам) и
+	// материализуется; кортежи объекта выводятся из ГЛАГОЛОВ селектора.
+	// Пустой набор ⇒ тонкая выдача без материализованных членов (например, прежняя
+	// роль только с разрешениями — её кортежами яруса ведает Create выдачи,
+	// а не этот код). Выпуск scope_grant при создании выдачи снят; сведение —
+	// ЕДИНСТВЕННЫЙ путь материализации.
 	Selectors []domain.RuleSelector
-	// ScopeSelfVerbs — the role's verbs that apply to the binding's OWN scope
-	// resource-type: a `*.*` superuser rule OR an
-	// `iam.<scopeResource>` rule. When non-empty the reconciler materializes the
-	// tier (+ verb-bearing v_*) tuple ON THE SCOPE OBJECT ITSELF (the write-authz /
-	// no-access-loss anchor). Empty ⇒ a content-only role grants nothing on the
-	// scope anchor (its access lives on the matched content objects). Derived by the
-	// adapter from role.Rules.ScopeSelfVerbs(scope.resource).
+	// ScopeSelfVerbs — глаголы роли, применимые к типу ресурса СОБСТВЕННОЙ области
+	// выдачи: правило суперпользователя `*.*` ИЛИ
+	// правило `iam.<scopeResource>`. Непустой набор заставляет сведение материализовать
+	// кортеж яруса (+ глагольный v_*) НА САМОМ ОБЪЕКТЕ ОБЛАСТИ (якорь проверки записи /
+	// сохранения доступа). Пустой ⇒ роль содержимого ничего не даёт на
+	// якоре области (доступ живёт на совпавших объектах содержимого). Адаптер выводит
+	// набор через role.Rules.ScopeSelfVerbs(scope.resource).
 	ScopeSelfVerbs []string
-	// Target — the binding's per-object least-privilege selection (redesign-2026 F8,
-	// IAM-1-21). When Target.Resources is non-empty the grant is restricted to EXACTLY
-	// the listed objects: the role.rules ARM_ANCHOR arm is resolved by the target ids
-	// (never MatchAllInScope), every arm's matches are INTERSECTED with the target set,
-	// and the scope-self anchor grant is SUPPRESSED (a per-object target never grants
-	// tier on the whole scope object). AllInScope / empty ⇒ the whole-anchor grant
-	// (existing behaviour — the role.rules selectors drive membership across the scope).
-	// Loaded by the adapter from the persisted access_bindings.target column.
+	// Target — пообъектный отбор выдачи с минимальными привилегиями (redesign-2026 F8,
+	// IAM-1-21). Непустой Target.Resources ограничивает выдачу РОВНО
+	// перечисленными объектами: ветвь ARM_ANCHOR role.rules разрешается по id целей
+	// (никогда не MatchAllInScope), совпадения всех ветвей ПЕРЕСЕКАЮТСЯ с набором целей,
+	// а выдача на якоре собственной области ПОДАВЛЯЕТСЯ (пообъектная цель никогда не даёт
+	// ярус на всём объекте области). AllInScope / пусто ⇒ выдача на всём якоре
+	// (прежнее поведение — селекторы role.rules определяют членство в области).
+	// Загружается адаптером из сохранённого столбца access_bindings.target.
 	Target domain.AccessTarget
-	// Active reports whether the binding is still ACTIVE (a REVOKED/expired
-	// binding is not re-materialized).
+	// Active сообщает, остаётся ли выдача ACTIVE (REVOKED/истёкшая
+	// выдача повторно не материализуется).
 	Active bool
 }
 
-// DesiredMember — one object the reconciler decided belongs to a binding's
-// membership, with the containment verdict and the FGA tuples to emit when
-// ACTIVE. ObjectType is the dotted closed-table key.
+// DesiredMember — объект, который сведение включило в членство
+// выдачи, с решением о включении в область и кортежами FGA для выпуска при
+// ACTIVE. ObjectType — точечный ключ закрытой таблицы.
 //
-// RuleFP attributes the desired member to the producing role.rules ARM_LABELS rule
-// — its content-hash. Tuples is the per-object FGA tuple set to emit
-// on an ACTIVE transition, precomputed from the rule's verbs (carried here so
-// applyDiff need not re-derive). In the rules-based RBAC model there
-// is no legacy selector/byName arm — every member is rule-derived.
+// RuleFP связывает желаемого члена с породившим правилом ARM_LABELS из role.rules
+// через хеш его содержимого. Tuples — пообъектный набор кортежей FGA для выпуска
+// при переходе в ACTIVE, заранее вычисленный из глаголов правила (передаётся здесь,
+// чтобы applyDiff не выводил его заново). В модели RBAC на правилах
+// нет прежней ветви selector/byName — каждый член выведен из правила.
 type DesiredMember struct {
 	RuleFP     string
 	ObjectType string
@@ -144,23 +147,23 @@ type EmittedTupleRef struct {
 	Tuple     domain.MembershipTuple
 }
 
-// ReconcileStore — the tx-scoped port the reconciler drives. Every method runs
-// inside the single writer-tx the implementation opens for one reconcile pass,
-// so the membership writes + FGA tuple emits + containment audit all commit
-// together or roll back together (ban #10). The implementation is the pg
-// adapter. NOTE: reconcile commits its OWN tx; the resource_reconcile_outbox
-// event is marked sent in a SEPARATE short tx by the worker after this commit
-// (at-least-once, redelivery safe — the reconcile diff is idempotent), NOT in
-// this tx.
+// ReconcileStore — порт транзакции, которым управляет сведение. Каждый метод работает
+// внутри единой транзакции записи, открываемой реализацией для одного прохода,
+// поэтому запись членства + выпуск кортежей FGA + аудит включения в область фиксируются
+// вместе либо вместе откатываются (ban #10). Реализация — адаптер
+// pg. ВНИМАНИЕ: сведение фиксирует СВОЮ транзакцию; событие resource_reconcile_outbox
+// обработчик помечает отправленным в ОТДЕЛЬНОЙ короткой транзакции после этой фиксации
+// (доставка хотя бы один раз, безопасный повтор — разница сведения идемпотентна), НЕ в
+// этой транзакции.
 type ReconcileStore interface {
-	// AcquireBindingLock takes pg_advisory_xact_lock(hashtext(binding_id)) on the
-	// reconcile writer-tx. It is the FIRST statement
-	// of a per-binding reconcile so concurrent passes of the SAME binding serialize
-	// on the xact-scoped lock (released automatically on commit/rollback — never
-	// pool-scoped). This makes the concurrent integration assertion
-	// deterministic and, together with the LoadBinding `SELECT … FOR NO KEY UPDATE`
-	// row lock + the ledger partial-UNIQUE backstop, guarantees exactly-once
-	// materialization under N replicas.
+	// AcquireBindingLock берёт pg_advisory_xact_lock(hashtext(binding_id)) в
+	// транзакции записи сведения. Это ПЕРВЫЙ оператор
+	// прохода по выдаче: параллельные проходы ОДНОЙ выдачи сериализуются
+	// транзакционным замком (автоматически снимается при фиксации/откате — никогда
+	// не замком пула). Это делает параллельную интеграционную проверку
+	// детерминированной и вместе с замком строки LoadBinding `SELECT … FOR NO KEY UPDATE`
+	// и страховкой partial-UNIQUE реестра гарантирует однократную
+	// материализацию при N репликах.
 	//
 	// SHARE-режима у этого порта НЕТ и он не нужен: аддитивный форвард не берёт
 	// advisory вовсе (reconcile/forward.go, «LOCK CHOICE»). Прежний
@@ -188,7 +191,7 @@ type ReconcileStore interface {
 	// Свойство, которое даёт этот порт: пока проход ждёт чужой advisory, он НЕ
 	// удерживает ни одной строки прямого факта. Тогда сторона, держащая этот
 	// advisory, доводит свою работу до конца, и цикла ожидания не существует
-	// by construction — а не «редко случается».
+	// по построению, а не «редко случается».
 	//
 	// Идемпотентен внутри транзакции: повторный захват уже удерживаемого ключа
 	// возвращается немедленно.
@@ -206,8 +209,8 @@ type ReconcileStore interface {
 	// факт предыдущей, а к выдаче следующей — уже держа роль предыдущей. Общий факт
 	// двух выдач одного субъекта на одном объекте и роль с именем ключа замыкали
 	// кольцо со снятием: Postgres снимал одну сторону (40P01). Порядок родов у обеих
-	// сторон теперь один — выдачи, роли, затем записи, — и кольца нет by
-	// construction. Идемпотентен внутри транзакции: последующие чтения прохода берут
+	// сторон теперь один — выдачи, роли, затем записи, — и кольца нет по
+	// построению. Идемпотентен внутри транзакции: последующие чтения прохода берут
 	// уже удерживаемые замки.
 	LockBindingsAndRoles(ctx context.Context, bindingIDs []domain.AccessBindingID) error
 
@@ -247,33 +250,33 @@ type ReconcileStore interface {
 	// одиночного чтения, одним оператором в порядке `id` (kaname#919).
 	LoadBindingsForForward(ctx context.Context, ids []domain.AccessBindingID) (map[domain.AccessBindingID]BindingScope, error)
 
-	// MatchSelector returns the MIRROR objects matching a selector's
-	// types+matchLabels (labels @> matchLabels) — the consumer-owned feed
-	// (compute/vpc/nlb, FeedMirror). Used to compute the desired set on a
-	// ReconcileBinding pass.
+	// MatchSelector возвращает объекты ЗЕРКАЛА, совпавшие с
+	// types+matchLabels селектора (labels @> matchLabels), — источник сервиса-потребителя
+	// (compute/vpc/nlb, FeedMirror). Нужен для вычисления желаемого набора при
+	// проходе ReconcileBinding.
 	MatchSelector(ctx context.Context, types []string, matchLabels map[string]string) ([]domain.MirrorObject, error)
 
-	// MatchAllInScope returns the mirror objects of the given types (ARM_ANCHOR /
-	// `all` — no label filter) NARROWED to the binding's containment `scope`. The scope
-	// is pushed into the SQL as a PROVEN SUPERSET of the reconciler's IsContainedIn
-	// re-verify (which STILL runs — the SQL only PRE-filters), so the reconciler receives
-	// O(scope) rows instead of O(cluster mirror). The consumer-owned feed (FeedMirror).
-	// `types` contains ONLY mirror-fed types (the reconciler partitions by feed-source
-	// before calling).
+	// MatchAllInScope возвращает объекты зеркала заданных типов (ARM_ANCHOR /
+	// `all` — без фильтра меток), СУЖЕННЫЕ до области включения `scope` выдачи. Область
+	// передаётся в SQL как ДОКАЗАННОЕ НАДМНОЖЕСТВО повторной проверки IsContainedIn
+	// сведения (она ВСЁ РАВНО выполняется — SQL лишь предварительно фильтрует), поэтому приходят
+	// строки O(scope) вместо O(зеркало кластера). Источник сервиса-потребителя (FeedMirror).
+	// `types` содержит ТОЛЬКО питаемые зеркалом типы (сведение разделяет их по источнику
+	// перед вызовом).
 	MatchAllInScope(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error)
 
-	// MatchByIDs returns the mirror objects of the given types whose object_id is in
-	// `ids` (ARM_NAMES — exact-id selector). An id not
-	// (yet) in the mirror is simply absent (PENDING until its RegisterResource lands,
-	// then the forward path picks it up). The consumer-owned feed (FeedMirror).
+	// MatchByIDs возвращает объекты зеркала заданных типов с object_id из
+	// `ids` (ARM_NAMES — селектор точных id). Идентификатор, которого
+	// пока нет в зеркале, просто отсутствует (PENDING до прихода его RegisterResource,
+	// после чего его подхватывает прямой путь). Источник сервиса-потребителя (FeedMirror).
 	MatchByIDs(ctx context.Context, types []string, ids []string) ([]domain.MirrorObject, error)
 
-	// MatchAllInScopeIAMDirect / MatchByIDsIAMDirect are the iam-direct
-	// analogues for IAM's OWN objects (iam.project / iam.account + content) read SAME-DB
-	// from the native tables. `types` contains ONLY iam-direct types. MatchAllInScopeIAMDirect
-	// pushes the binding's containment `scope` into the SQL as a PROVEN SUPERSET of the
-	// IsContainedIn re-verify (same as MatchAllInScope); MatchByIDsIAMDirect (names arm) stays
-	// unscoped — a foreign-scope id-match is a wanted REJECTED-containment audit signal.
+	// MatchAllInScopeIAMDirect / MatchByIDsIAMDirect — аналоги для прямого чтения
+	// СОБСТВЕННЫХ объектов IAM (iam.project / iam.account + содержимое) из родных таблиц
+	// ТОЙ ЖЕ БД. `types` содержит ТОЛЬКО такие типы. MatchAllInScopeIAMDirect
+	// передаёт область включения `scope` выдачи в SQL как ДОКАЗАННОЕ НАДМНОЖЕСТВО
+	// повторной проверки IsContainedIn (как MatchAllInScope); MatchByIDsIAMDirect (ветвь имён)
+	// областью не ограничен — совпавший чужой id нужен для аудита REJECTED по включению.
 	MatchAllInScopeIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor) ([]domain.MirrorObject, error)
 	MatchByIDsIAMDirect(ctx context.Context, types []string, ids []string) ([]domain.MirrorObject, error)
 
@@ -285,18 +288,18 @@ type ReconcileStore interface {
 	// области — то же доказанное надмножество IsContainedIn, что у ветви якоря.
 	MatchCreatedByIAMDirect(ctx context.Context, types []string, scope domain.ScopeAnchor, creators []string) ([]domain.MirrorObject, error)
 
-	// MatchIAMDirect returns IAM's OWN objects matching a selector's
-	// types+matchLabels read SAME-DB from the native tables (FeedIAMDirect —
-	// iam.project/iam.account). The returned MirrorObject carries the iam-hierarchy
-	// parent (project→its account_id; account→its own id) so the SAME
-	// IsContainedIn predicate decides containment. iam-direct objects are always
-	// in their source table, so they are never PENDING. `types` here contains ONLY
-	// iam-direct types (the reconciler partitions by feed-source before calling).
+	// MatchIAMDirect возвращает СОБСТВЕННЫЕ объекты IAM, совпавшие с
+	// types+matchLabels селектора, из родных таблиц ТОЙ ЖЕ БД (FeedIAMDirect —
+	// iam.project/iam.account). Возвращённый MirrorObject несёт родителя иерархии iam
+	// (project→его account_id; account→свой id), чтобы ТОТ ЖЕ
+	// предикат IsContainedIn решал включение в область. Объекты iam-direct всегда
+	// находятся в исходной таблице и никогда не PENDING. `types` содержит ТОЛЬКО
+	// типы iam-direct (сведение разделяет их по источнику до вызова).
 	MatchIAMDirect(ctx context.Context, types []string, matchLabels map[string]string) ([]domain.MirrorObject, error)
 
-	// GetMirrorObject returns the mirror row for one object (containment verify of
-	// a specific member on a mirror-change event / byName ref). ok=false ⇒ not in
-	// mirror ⇒ PENDING_VERIFICATION.
+	// GetMirrorObject возвращает строку зеркала одного объекта (проверка включения
+	// конкретного члена при событии смены зеркала / ссылке byName). ok=false ⇒ нет в
+	// зеркале ⇒ PENDING_VERIFICATION.
 	GetMirrorObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error)
 	// LockMirrorObjects запирает строки зеркала объектов `objs` под `FOR KEY SHARE`
 	// одним оператором в порядке (тип, id) и возвращает те, что есть (kaname#975).
@@ -324,58 +327,58 @@ type ReconcileStore interface {
 	// глубине (kaname#874): кандидаты вложенного правила на полном проходе.
 	MatchDescendants(ctx context.Context, types []string, containerType string, containerIDs []string) ([]domain.MirrorObject, error)
 
-	// GetIAMDirectObject returns the same-DB own-table projection (containment
-	// parents + labels) of ONE iam-native object (iam.project / iam.account + the
-	// content types user/serviceAccount/group/role/accessBinding). It is the
-	// iam-direct analogue of GetMirrorObject, used by the ADDITIVE forward fast-path
-	// for a brand-new iam-direct object — which lives in ITS OWN table, never the
-	// mirror. The projection stamps the SAME containment parents (parentAccount /
-	// parentProject) and labels the iam-direct match queries produce, so the shared
-	// per-object verdict (IsContainedIn / selectorMatchesObject / desiredMemberForObject)
-	// decides identically to the FULL path. ok=false when the type is not iam-direct
-	// or the row does not exist. Never PENDING (an iam object is in its own table the
-	// instant it exists) — same-DB read, no peer call (graph stays acyclic).
+	// GetIAMDirectObject возвращает проекцию СОБСТВЕННОЙ таблицы той же БД (родители
+	// включения + метки) ОДНОГО родного объекта iam (iam.project / iam.account + типы
+	// содержимого user/serviceAccount/group/role/accessBinding). Это
+	// аналог GetMirrorObject для iam-direct, нужный АДДИТИВНОМУ прямому пути
+	// нового объекта iam-direct, который живёт в СВОЕЙ таблице, никогда не в
+	// зеркале. Проекция задаёт ТЕХ ЖЕ родителей включения (parentAccount /
+	// parentProject) и метки, что и запросы отбора iam-direct, поэтому общее
+	// пообъектное решение (IsContainedIn / selectorMatchesObject / desiredMemberForObject)
+	// совпадает с ПОЛНЫМ путём. ok=false, если тип не iam-direct
+	// либо строки нет. Никогда не PENDING (объект iam находится в своей таблице с
+	// момента появления) — чтение той же БД, без вызова соседа (граф ацикличен).
 	GetIAMDirectObject(ctx context.Context, objectType, objectID string) (domain.MirrorObject, bool, error)
 
-	// CurrentMembers returns the materialized members of a binding (the diff base) —
-	// the WHOLE-binding read, used only by the binding-triggered passes (ReconcileBinding
-	// / ExpireBinding / sweep), whose desired set genuinely spans the whole scope.
+	// CurrentMembers возвращает материализованных членов выдачи (базу сравнения) —
+	// чтение ВСЕЙ выдачи, нужное лишь проходам по выдаче (ReconcileBinding
+	// / ExpireBinding / обход), чей желаемый набор действительно охватывает всю область.
 	CurrentMembers(ctx context.Context, bindingID domain.AccessBindingID) ([]domain.TargetMember, error)
 
-	// CurrentMembersForObject returns the materialized members of ONE binding on ONE
-	// object — the NARROW diff base of the object-triggered pass (ReconcileObject). A
-	// mirror upsert/delete changes exactly one object, so only that object's members can
-	// change; reading the binding's WHOLE member set for it is the O(mirror) recompute
-	// (the two hottest measured bindings carry 10 140 members each). Indexed by the
-	// members' (binding_id, object_type, object_id) key.
+	// CurrentMembersForObject возвращает материализованных членов ОДНОЙ выдачи на ОДНОМ
+	// объекте — УЗКУЮ базу сравнения прохода по объекту (ReconcileObject).
+	// Вставка/удаление зеркала меняет ровно один объект, поэтому могут измениться лишь его
+	// члены; чтение ВСЕГО набора членов выдачи ради него — пересчёт O(зеркало)
+	// (две самые горячие измеренные выдачи несут по 10 140 членов). Используется индекс
+	// членов по ключу (binding_id, object_type, object_id).
 	CurrentMembersForObject(ctx context.Context, bindingID domain.AccessBindingID, objectType, objectID string) ([]domain.TargetMember, error)
 
-	// BindingsForObject returns binding ids that have a member referencing the
-	// object (used to fan a mirror-change event out to affected bindings).
+	// BindingsForObject возвращает id выдач с членом, ссылающимся на
+	// объект (для разворачивания события смены зеркала на затронутые выдачи).
 	BindingsForObject(ctx context.Context, objectType, objectID string) ([]domain.AccessBindingID, error)
 
-	// SelectorBindingsMatchingObject returns ACTIVE selector-binding ids whose
-	// selector NOW matches the given mirror object (objectType ∈ selector.types
-	// AND mirror.labels @> selector.match_labels) — INCLUDING bindings that do
-	// NOT yet have a member row for it. This is the fast-path that lets a brand-
-	// new matching object be picked up on the mirror-change event (≤2s) instead
-	// of waiting for the periodic sweep. Same-DB read of the
-	// selector spec + mirror labels (no peer call — graph stays acyclic).
+	// SelectorBindingsMatchingObject возвращает id ACTIVE-выдач, чей
+	// селектор СЕЙЧАС совпадает с данным объектом зеркала (objectType ∈ selector.types
+	// AND mirror.labels @> selector.match_labels), ВКЛЮЧАЯ выдачи, у которых
+	// ещё НЕТ строки члена для него. Это быстрый путь, позволяющий
+	// подхватить новый совпавший объект при событии смены зеркала (≤2с) вместо
+	// ожидания периодического обхода. Чтение той же БД:
+	// спецификация селектора + метки зеркала (без вызова соседа — граф ацикличен).
 	SelectorBindingsMatchingObject(ctx context.Context, objectType, objectID string) ([]domain.AccessBindingID, error)
 
-	// IAMDirectSelectorBindingsMatchingObject is the iam-direct analogue of
-	// SelectorBindingsMatchingObject: ACTIVE selector-binding ids whose selector
-	// NOW matches the given IAM-OWN object (objectType ∈ selector.types AND the
-	// object's OWN-TABLE labels @> selector.match_labels), INCLUDING bindings with
-	// no member row yet. Used by the Q2 trigger (Project/Account.Update labels) to
-	// pick up a freshly-matching iam-direct object on the label-change event. Same-
-	// DB read (own table), no mirror, no peer-call.
+	// IAMDirectSelectorBindingsMatchingObject — аналог для iam-direct метода
+	// SelectorBindingsMatchingObject: id ACTIVE-выдач, чей селектор
+	// СЕЙЧАС совпадает с данным СОБСТВЕННЫМ объектом IAM (objectType ∈ selector.types AND
+	// метки СОБСТВЕННОЙ ТАБЛИЦЫ @> selector.match_labels), ВКЛЮЧАЯ выдачи без
+	// строки члена. Нужен поводу Q2 (смена меток Project/Account.Update), чтобы
+	// подхватить только что совпавший объект iam-direct по событию смены меток. Чтение той
+	// же БД (своя таблица), без зеркала и вызова соседа.
 	IAMDirectSelectorBindingsMatchingObject(ctx context.Context, objectType, objectID string) ([]domain.AccessBindingID, error)
 
-	// UpsertMember / DeleteMember materialize/remove a membership row. The member
-	// is keyed by the FULL rule coordinate (binding, role-via-binding, rule_fp,
-	// object) — so the SAME object under two rules is two rows and a
-	// removed rule deletes ONLY its row.
+	// UpsertMember / DeleteMember материализуют/удаляют строку членства. Ключ члена —
+	// ПОЛНАЯ координата правила (выдача, роль через выдачу, rule_fp,
+	// объект), поэтому ОДИН объект под двумя правилами — две строки, а
+	// снятое правило удаляет ТОЛЬКО свою строку.
 	UpsertMember(ctx context.Context, m domain.TargetMember) error
 	DeleteMember(ctx context.Context, bindingID domain.AccessBindingID, ruleFP, objectType, objectID string) error
 
@@ -393,21 +396,21 @@ type ReconcileStore interface {
 	// снимающее весь учтённый набор.
 	LedgerTuples(ctx context.Context, bindingID domain.AccessBindingID) ([]LedgerRow, error)
 
-	// EmitTupleWrite / EmitTupleDelete enqueue the per-object FGA tuples (+ the
-	// scope hierarchy parent-pointer is the binding-lifecycle concern handled at
-	// Create/Delete, NOT per member) into fga_outbox on the tx.
+	// EmitTupleWrite / EmitTupleDelete ставят пообъектные кортежи FGA в очередь
+	// fga_outbox транзакции (+ указатель родителя иерархии области — предмет жизненного цикла
+	// выдачи в Create/Delete, а НЕ отдельного члена).
 	EmitTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error
 	EmitTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error
 
-	// RecordEmittedTuples / ForgetEmittedTuples co-commit the per-member FGA tuples
-	// into the persisted emitted-tuple ledger (access_binding_emitted_tuples)
-	// in the SAME reconcile writer-tx as the matching EmitTupleWrite /
-	// EmitTupleDelete (ban #10). The ledger is the authoritative "what was emitted"
-	// set the symmetric revoke (delete.go) replays and the Role.Update reconcile
-	// fan-out diffs against — UNIFYING the selector arm's per-member tuples with the
-	// all_in_scope / resources[] arms' tuples already in the ledger. Without this the
-	// selector member-tuples were emitted to fga_outbox but never recorded, so the
-	// revoke orphaned them and a role tier change never reconciled them.
+	// RecordEmittedTuples / ForgetEmittedTuples фиксируют кортежи FGA каждого члена
+	// в постоянном реестре выпущенных кортежей (access_binding_emitted_tuples)
+	// В ТОЙ ЖЕ транзакции записи сведения, что и соответствующий EmitTupleWrite /
+	// EmitTupleDelete (ban #10). Реестр — достоверный набор «что выпущено»,
+	// который воспроизводит симметричный отзыв (delete.go) и с которым сравнивает
+	// веер сведения Role.Update, ОБЪЕДИНЯЯ кортежи членов ветви селектора с
+	// кортежами ветвей all_in_scope / resources[], уже внесёнными в реестр. Без этого
+	// кортежи членов селектора выпускались в fga_outbox без учёта, поэтому
+	// отзыв оставлял их без владельца, а смена яруса роли их не сводила.
 	// RecordEmittedTuples пишет строки ОДНОГО члена — с его координатой, INSERT … ON
 	// CONFLICT DO NOTHING по полному ключу (повтор идемпотентен); ForgetEmittedTuples
 	// снимает ровно названные строки по полному ключу (eager-revoke / fell-out /
@@ -428,15 +431,15 @@ type ReconcileStore interface {
 	RecordEmittedTuplesBatch(ctx context.Context, refs []EmittedTupleRef) error
 	ForgetEmittedTuples(ctx context.Context, bindingID domain.AccessBindingID, rows []LedgerRow) error
 
-	// EmitContainmentAudit writes the "rejected: not contained in scope" audit
-	// event (not silent) on the tx.
+	// EmitContainmentAudit пишет в транзакции событие аудита «отказ: нет включения в область»
+	// (отказ не остаётся молчаливым).
 	EmitContainmentAudit(ctx context.Context, bindingID domain.AccessBindingID, objectType, objectID string, scope domain.ScopeAnchor) error
 
-	// RevokeExpiredBinding atomically CAS-transitions an ACTIVE binding to REVOKED
-	// (`UPDATE … WHERE status='ACTIVE' AND id=$id`, ban #10 — not TOCTOU). ok=false
-	// when 0 rows updated (already revoked / concurrent Delete won). Used by the
-	// expiry eager-revoke pass; the per-object tuple revokes are emitted
-	// separately by the caller via the ACTIVE members it loaded.
+	// RevokeExpiredBinding атомарно переводит ACTIVE-выдачу в REVOKED через CAS
+	// (`UPDATE … WHERE status='ACTIVE' AND id=$id`, ban #10 — без TOCTOU). ok=false,
+	// если обновлено 0 строк (уже отозвана / параллельный Delete победил). Нужен проходу
+	// немедленного отзыва по истечению; пообъектные отзывы кортежей выпускает
+	// вызывающая сторона отдельно по загруженным ACTIVE-членам.
 	RevokeExpiredBinding(ctx context.Context, bindingID domain.AccessBindingID) (ok bool, err error)
 
 	// LockBindingForDeactivation берёт строку выдачи `FOR UPDATE` — единственный режим
@@ -458,20 +461,20 @@ type ReconcileStore interface {
 	EmitAuditEvent(ctx context.Context, ev abrepo.AuditEvent) error
 }
 
-// ExpiredBindingSource lists bindings whose TTL has elapsed (expiry scan,
-// index (status, expires_at)). Pool-scoped (the scan reads outside the per-binding
-// revoke tx); each id is then revoked in its own writer-tx via ExpireBinding.
+// ExpiredBindingSource перечисляет выдачи с истёкшим TTL (поиск истечения,
+// индекс (status, expires_at)). Чтение через пул (вне транзакции отзыва
+// выдачи); затем каждый id отзывается в своей транзакции записи через ExpireBinding.
 type ExpiredBindingSource interface {
 	ListExpiredBindingIDs(ctx context.Context) ([]domain.AccessBindingID, error)
 }
 
-// TxRunner runs fn inside a single writer-tx, committing on success and rolling
-// back on error/panic. The reconciler's whole pass is one atomic unit.
+// TxRunner выполняет fn в одной транзакции записи, фиксируя успех и откатывая
+// ошибку/панику. Весь проход сведения — единая атомарная операция.
 type TxRunner interface {
 	WithTx(ctx context.Context, fn func(ctx context.Context, s ReconcileStore) error) error
 }
 
-// Reconciler — the selector/containment reconciler use-case.
+// Reconciler — сценарий сведения селекторов и включения в область.
 type Reconciler struct {
 	tx     TxRunner
 	logger *slog.Logger
@@ -481,21 +484,21 @@ type Reconciler struct {
 	// вычислить ни одного кортежа, и незаполненное поле дало бы не «наблюдение
 	// выключено», а «выдача не материализуется» — тихо и целиком.
 	cat catalog.Source
-	// size — OPTIONAL recorder of how big one binding's materialization is. nil ⇒ the
-	// observation is a no-op; the pass itself does not depend on it.
+	// size — НЕОБЯЗАТЕЛЬНЫЙ регистратор размера материализации выдачи. nil ⇒
+	// наблюдение ничего не делает; сам проход от него не зависит.
 	size SizeRecorder
 }
 
-// SizeRecorder receives the SIZE of one binding's desired set: how many objects its
-// selectors matched, and how many tuples those objects produce.
+// SizeRecorder получает РАЗМЕР желаемого набора выдачи: сколько объектов
+// совпало с селекторами и сколько кортежей эти объекты порождают.
 //
-// A grant below the three cascading levels expands PER OBJECT, so its cost is «matched
-// objects × the verbs of the rule». Nothing counted that expansion, which left «this
-// grant grew large» indistinguishable from «this grant is ordinary» — and the
-// difference surfaces not where the grant is issued but later, on somebody else's
-// request, along a path that never mentions the binding. No ceiling is enforced here:
-// the reachable size has not been measured, and a limit chosen before the measurement
-// either refuses legitimate grants or refuses nothing while looking like a control.
+// Выдача ниже трёх каскадных уровней разворачивается ПО ОБЪЕКТАМ, её цена — «совпавшие
+// объекты × глаголы правила». Такое разворачивание никто не считал, поэтому «эта
+// выдача выросла» нельзя было отличить от «эта выдача обычная», а
+// различие проявляется не при выдаче, а позже, на чужом
+// запросе, на пути, который выдачу вообще не называет. Предел здесь не навязывается:
+// достижимый размер не измерен, а выбранное до замера ограничение
+// либо отвергает законные выдачи, либо ничего не отвергает, лишь изображая контроль.
 type SizeRecorder interface {
 	ObserveBindingMaterialization(objects, tuples int)
 }
@@ -522,7 +525,7 @@ type SyncFGATuple struct {
 // переживших выдач при снятии («кортеж, который держит другая действующая
 // выдача, не снимается») делается его же данными и делается в базе.
 
-// New constructs the reconciler.
+// New создаёт сведение.
 //
 // `cat` — источник каталожного факта; параметр ОБЯЗАТЕЛЬНЫЙ (см. поле `cat`).
 func New(tx TxRunner, logger *slog.Logger, cat catalog.Source) *Reconciler {
@@ -532,20 +535,20 @@ func New(tx TxRunner, logger *slog.Logger, cat catalog.Source) *Reconciler {
 	return &Reconciler{tx: tx, logger: logger, cat: cat}
 }
 
-// WithSizeRecorder wires the OPTIONAL materialization-size recorder. nil-safe: an
-// unwired recorder leaves the pass byte-identical, it only stops being measured.
+// WithSizeRecorder подключает НЕОБЯЗАТЕЛЬНЫЙ регистратор размера материализации. nil безопасен:
+// без регистратора проход побайтово тот же, только больше не измеряется.
 func (r *Reconciler) WithSizeRecorder(rec SizeRecorder) *Reconciler {
 	r.size = rec
 	return r
 }
 
-// observeSize reports the size of a binding's desired set. Objects are counted as
-// DISTINCT (type, id): the same object matched by two rules of one role is two members
-// but ONE object, and counting members instead would inflate the object figure by the
-// rule count, which the tuple figure already carries.
+// observeSize сообщает размер желаемого набора выдачи. Объекты считаются как
+// РАЗЛИЧНЫЕ (тип, id): один объект под двумя правилами роли — два члена,
+// но ОДИН объект; счёт членов завысил бы число объектов в
+// число правил, уже отражённое числом кортежей.
 //
-// A pass that matched nothing is reported as zero rather than skipped — a selector that
-// stopped matching would otherwise look exactly like a binding nobody reconciles.
+// Проход без совпадений сообщает ноль, а не пропускается — иначе переставший
+// совпадать селектор выглядел бы точно как выдача, которую никто не сводит.
 func (r *Reconciler) observeSize(desired []DesiredMember) {
 	if r.size == nil {
 		return
@@ -559,14 +562,14 @@ func (r *Reconciler) observeSize(desired []DesiredMember) {
 	r.size.ObserveBindingMaterialization(len(objects), tuples)
 }
 
-// syncFGACollector accumulates, across a single reconcile pass, the per-object tuples a
-// reconcileBinding emitted to fga_outbox for ACTIVE members. NOTHING is applied anywhere
-// after the pass commits — see the note above SyncFGATuple: the direct fact is folded out
-// of the journal row by a trigger, inside the same transaction. What the collector is
-// still FOR is the subtraction at the end of the pass: flushDeletes must not strip a
-// tuple this very pass re-wrote. A nil collector de-duplicates nothing and the collect
-// calls degrade to cheap pass-throughs. Not concurrency-shared: one collector per WithTx
-// pass, and a pass runs single-goroutine under the per-binding advisory lock.
+// syncFGACollector собирает в одном проходе сведения пообъектные кортежи,
+// выпущенные reconcileBinding в fga_outbox для ACTIVE-членов. НИЧЕГО никуда не применяется
+// после фиксации прохода — см. примечание выше SyncFGATuple: прямой факт сворачивает
+// из строки журнала триггер внутри той же транзакции. Коллектор всё ещё
+// НУЖЕН для вычитания в конце прохода: flushDeletes не должен снимать
+// кортеж, заново записанный этим же проходом. nil-коллектор ничего не устраняет, а вызовы
+// collect становятся дешёвой передачей насквозь. Между горутинами не разделяется: один коллектор
+// на проход WithTx, проход идёт одной горутиной под advisory-замком выдачи.
 type syncFGACollector struct {
 	// seen — что ЭТОТ проход уже записал. Единственный носитель, ради которого
 	// сбор и существует: вычитание в конце прохода.
@@ -591,7 +594,7 @@ type pendingDelete struct {
 	tuples  []domain.MembershipTuple
 }
 
-// deferDelete records a binding's would-be tuple-deletes for the end-of-pass flush.
+// deferDelete сохраняет предполагаемые удаления кортежей выдачи до сброса в конце прохода.
 func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []domain.MembershipTuple) {
 	if c == nil || len(tuples) == 0 {
 		return
@@ -599,31 +602,31 @@ func (c *syncFGACollector) deferDelete(binding domain.AccessBindingID, tuples []
 	c.pendingDeletes = append(c.pendingDeletes, pendingDelete{binding: binding, tuples: tuples})
 }
 
-// collectNew records a member's ACTIVE-emit tuples DE-DUPLICATED across the whole pass
-// and returns exactly the subset NOT already emitted in this pass — the set the caller
-// must enqueue into fga_outbox.
+// collectNew учитывает кортежи выпуска ACTIVE-члена БЕЗ ПОВТОРОВ во всём проходе
+// и возвращает ровно подмножество, ЕЩЁ НЕ выпущенное этим проходом, — набор, который
+// вызывающая сторона должна поставить в fga_outbox.
 //
-// One reconcile pass (ReconcileObject fanning over many bindings, or the scope-self
-// member plus a `*.*` content member that both target account:<X>, or two rules of one
-// binding whose verb sets overlap) derives the SAME tuple more than once. The de-dup used
-// to be mandatory for a second reason as well — the external engine's batch write refused
-// a whole request that carried a duplicate — and that reason went away with the engine.
+// Один проход сведения (веер ReconcileObject по многим выдачам либо член собственной
+// области и член содержимого `*.*`, оба на account:<X>, либо два правила одной
+// выдачи с пересекающимися глаголами) выводит ОДИН кортеж несколько раз. Устранение повторов
+// прежде было обязательно ещё потому, что пакетная запись внешнего движка отвергала
+// запрос целиком при повторе, но вместе с движком эта причина исчезла.
 //
-// What remains is producer cost, and it is enough on its own: a second fga_outbox row for
-// a tuple this very transaction already enqueued buys nothing, because both rows fold
-// into the same direct fact. The measured stand showed 27 outbox
-// rows for 21 distinct tuples in a single pass — 2.2 rows per distinct tuple table-wide.
-// The de-dup is strictly PER-PASS (per writer-tx) and keyed on the tuple, so it can never
-// collapse a grant → revoke → grant sequence: those are three separate passes, each with
-// its own collector, and the revoke in between clears the member row and the ledger.
+// Осталась цена производителя, и её самой достаточно: вторая строка fga_outbox для
+// кортежа, уже поставленного этой транзакцией, ничего не даёт, ведь обе строки сворачиваются
+// в один прямой факт. На измеренном стенде один проход давал 27 строк outbox
+// для 21 различного кортежа — 2,2 строки на различный кортеж по всей таблице.
+// Устранение повторов строго ВНУТРИ ПРОХОДА (транзакции записи), по ключу кортежа, поэтому не может
+// схлопнуть последовательность выдача → отзыв → выдача: это три отдельных прохода,
+// каждый со своим коллектором; промежуточный отзыв очищает строку члена и реестр.
 //
-// The per-binding LEDGER write is deliberately NOT de-duplicated by this set: the ledger
-// PK — (binding_id, member coordinate, fga_user, relation, object), поэтому две привязки (и
+// Запись РЕЕСТРА каждой выдачи намеренно НЕ устраняет повторы этим набором: реестр
+// PK — (binding_id, координата члена, fga_user, relation, object), поэтому две привязки (и
 // две координаты одной выдачи), претендующие на один кортеж, должны каждая сохранять СВОЮ
 // row — по нему свёртка строки снятия и узнаёт, что факт ещё держит другой держатель
 // (kaname#919, kaname#933).
 //
-// A nil collector (sync-FGA unwired) de-duplicates nothing and returns the input as-is.
+// nil-коллектор (без подключения sync-FGA) ничего не устраняет и возвращает вход как есть.
 func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.MembershipTuple {
 	if c == nil {
 		return tuples
@@ -680,8 +683,8 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 	return nil
 }
 
-// ReconcileBinding recomputes the full desired membership of one binding from the
-// mirror and diffs it against the materialized set (trigger (a) + sweep (c)).
+// ReconcileBinding пересчитывает полное желаемое членство выдачи по
+// зеркалу и сравнивает его с материализованным набором (повод (a) + обход (c)).
 func (r *Reconciler) ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error {
 	return r.fullPass(ctx, bindingID, false)
 }
@@ -711,39 +714,39 @@ func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindin
 	}
 	// После коммита не применяется НИЧЕГО: откат выше возвращает управление раньше,
 	// а прямой факт складывается из строки журнала триггером в той же транзакции —
-	// значит незакоммиченный diff не материализуется by construction.
+	// значит незакоммиченный diff не материализуется по построению.
 	return nil
 }
 
-// ReconcileObject re-evaluates every binding that has a member referencing the
-// changed object (trigger (b) — a resource_mirror upsert/delete). For each such
-// binding it re-derives THAT OBJECT's membership and diffs it against THAT OBJECT's
-// materialized members, so a label flip or a parent change is reflected — including
-// the delete-stale revoke and the PENDING→ACTIVE/REJECTED transition.
+// ReconcileObject повторно проверяет каждую выдачу с членом, ссылающимся на
+// изменённый объект (повод (b) — вставка/удаление resource_mirror). Для каждой такой
+// выдачи заново выводится членство ЭТОГО ОБЪЕКТА и сравнивается с материализованными
+// членами ЭТОГО ОБЪЕКТА, отражая смену метки или родителя, включая
+// отзыв устаревшего и переход PENDING→ACTIVE/REJECTED.
 //
-// COST — the pass is O(1) in the binding's scope size (the producer-cost fix). The
-// event carries exactly ONE changed object, so exactly one object's membership can
-// change; the pass therefore re-derives only that object's desired members
-// (desiredMembersForObject) and reads only that object's current members
-// (CurrentMembersForObject). It previously ran reconcileBinding — a FULL O(scope)
-// desired recompute (MatchAllInScope over every mirror object of the scope) plus the
-// binding's WHOLE materialized member set — for each fanned-out binding. Measured on
-// the stand: the two hottest bindings carry 10 140 members each over a 10 132-object
-// account and one object change fans out to 3.2 bindings on average, so a single
-// re-register or label update read ~64 000 rows while holding the per-binding
-// EXCLUSIVE advisory lock that every sibling registration in that account queues
-// behind. That is what pushed grant materialisation past the clients' retry budgets
-// under load.
+// ЦЕНА — проход имеет O(1) по размеру области выдачи (исправление цены производителя).
+// Событие несёт ровно ОДИН изменённый объект, поэтому измениться может членство
+// ровно одного объекта; проход заново выводит только его желаемых членов
+// (desiredMembersForObject) и читает только его текущих членов
+// (CurrentMembersForObject). Прежде он вызывал reconcileBinding — ПОЛНЫЙ пересчёт O(scope)
+// желаемого набора (MatchAllInScope по всем объектам зеркала области) плюс
+// ВЕСЬ материализованный набор выдачи — для каждой выдачи веера. Замер на
+// стенде: две самые горячие выдачи несут по 10 140 членов в аккаунте из 10 132 объектов,
+// а одно изменение объекта разворачивается в среднем на 3,2 выдачи, поэтому одна
+// повторная регистрация или смена меток читала ~64 000 строк, удерживая
+// ИСКЛЮЧИТЕЛЬНЫЙ advisory-замок выдачи, за которым стоят все соседние регистрации
+// аккаунта. Именно это выводило материализацию выдач за бюджеты повторов клиентов
+// под нагрузкой.
 //
-// WHY NARROWING IS EXACT, not an approximation:
+// ПОЧЕМУ СУЖЕНИЕ ТОЧНОЕ, а не приближённое:
 //
-//   - Members are keyed BY OBJECT (binding, rule_fp, object_type, object_id), so a
-//     change to object X cannot add, remove or re-status a member on object Y. The
-//     desired verdict for X is derived by desiredMemberForObject — the SAME per-object
-//     decision point the full recompute uses — so the two paths stay byte-identical.
+//   - Ключ членов — ОБЪЕКТ (binding, rule_fp, object_type, object_id), поэтому
+//     смена объекта X не может добавить, удалить или сменить статус члена объекта Y.
+//     Решение для X выводит desiredMemberForObject — ТО ЖЕ пообъектное
+//     место решения, что и при полном пересчёте, поэтому оба пути побайтово совпадают.
 //   - Вычитание survivingClaims внутри привязки (applyDiff), определяющее,
 //     какие строки журнала ЗАБЫВАЮТСЯ, затрагивает только участников с ОБЩЕЙ строкой журнала,
-//     а PK журнала — (binding_id, member coordinate, fga_user, relation, object):
+//     а PK журнала — (binding_id, координата члена, fga_user, relation, object):
 //     общая строка означает ТУ ЖЕ координату, то есть тот же объект. Сужение
 //     желаемого набора до одного объекта забывает ровно то же, что забыл бы полный набор.
 //     Строку снятия кортежа, который выдача ещё выпускает ДРУГОЙ координатой на том же
@@ -752,31 +755,31 @@ func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindin
 //   - Удержание факта, который держит ДРУГАЯ выдача, — дело свёртки журнала: она
 //     спрашивает реестр под замком строки факта (kaname#919) и желаемого набора не
 //     читает вовсе, поэтому сужение до объекта её не касается.
-//   - The fan-out itself was ALREADY object-narrowed (BindingsForObject ∪
-//     SelectorBindingsMatchingObject) — only the per-binding recompute inside it was not.
+//   - Сам веер УЖЕ сужен до объекта (BindingsForObject ∪
+//     SelectorBindingsMatchingObject) — не сужен был только пересчёт выдачи внутри него.
 //
-// The binding-triggered passes (ReconcileBinding, ExpireBinding, the periodic sweep)
-// keep the FULL O(scope) recompute: there the binding's role/selectors/scope changed,
-// so the whole desired set genuinely has to be re-derived. They also remain the
-// at-least-once backstop that re-converges anything an object pass could have missed.
+// Проходы по выдаче (ReconcileBinding, ExpireBinding, периодический обход)
+// сохраняют ПОЛНЫЙ пересчёт O(scope): там менялись роль/селекторы/область выдачи,
+// поэтому весь желаемый набор действительно нужно вывести заново. Они также остаются
+// страховкой доставки хотя бы один раз, сводящей всё, что мог пропустить пообъектный проход.
 func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID string) error {
 	col := &syncFGACollector{}
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
-		// (1) Bindings that ALREADY have a member row referencing the object — a
-		// label flip / parent change / object-left-the-mirror is reflected by the
-		// full recompute below.
+		// (1) Выдачи, УЖЕ имеющие строку члена со ссылкой на объект: смена
+		// метки / родителя / уход объекта из зеркала отражается
+		// полным пересчётом ниже.
 		existing, err := s.BindingsForObject(ctx, objectType, objectID)
 		if err != nil {
 			return fmt.Errorf("bindings for object %s:%s: %w", objectType, objectID, err)
 		}
-		// (2) FAST-PATH: selector-bindings whose selector NOW
-		// matches the object but which do NOT yet have a member row for it (a
-		// brand-new matching object). Without this, a just-arrived object only
-		// gets access on the next periodic sweep (≤30s lag); with it, the change
-		// event materializes membership within ~2s. The sweep remains as defense-
-		// in-depth. The match source is per feed-source: mirror-fed
-		// objects probe resource_mirror; iam-direct objects (Project/Account
-		// label change) probe the OWN table.
+		// (2) БЫСТРЫЙ ПУТЬ: выдачи, чей селектор СЕЙЧАС
+		// совпадает с объектом, но строки члена ещё НЕТ (новый
+		// совпавший объект). Без этого только что прибывший объект
+		// получает доступ при следующем обходе (задержка ≤30с); с этим путь
+		// события материализует членство за ~2с. Обход остаётся дополнительной
+		// страховкой. Источник совпадений зависит от источника данных:
+		// питаемые зеркалом объекты читают resource_mirror; объекты iam-direct (смена меток
+		// Project/Account) читают СОБСТВЕННУЮ таблицу.
 		var matching []domain.AccessBindingID
 		if domain.FeedSourceForType(objectType) == domain.FeedIAMDirect {
 			matching, err = s.IAMDirectSelectorBindingsMatchingObject(ctx, objectType, objectID)
@@ -786,10 +789,10 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		if err != nil {
 			return fmt.Errorf("selector bindings matching object %s:%s: %w", objectType, objectID, err)
 		}
-		// The changed object's projection, read ONCE for the whole fan-out (every
-		// binding diffs the same object). Absent from its source — a mirror DELETE, or
-		// an iam row that raced a delete — leaves an EMPTY desired set for every
-		// binding, which is exactly what drives the delete-stale revoke below.
+		// Проекция изменённого объекта читается ОДИН РАЗ на весь веер (каждая
+		// выдача сравнивает тот же объект). Отсутствие в источнике — DELETE зеркала либо
+		// строка iam, попавшая в гонку с удалением, — оставляет ПУСТОЙ желаемый набор каждой
+		// выдачи, что и запускает отзыв устаревшего ниже.
 		var obj domain.MirrorObject
 		objPresent := false
 		if domain.FeedSourceForType(objectType) == domain.FeedIAMDirect {
@@ -806,17 +809,17 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		// другой контейнер (ND-09) переносит и члены. Память предков заводится ниже,
 		// после замка строки объекта: её чтение ленивое и идёт уже под замками выдач.
 
-		// Fan out over the de-duplicated union; the per-binding pass is an idempotent
-		// diff of THIS OBJECT's membership, so reconciling a binding once is enough
-		// regardless of which source it came from.
+		// Разворачиваем веер по объединению без повторов; проход выдачи — идемпотентное
+		// сравнение членства ЭТОГО ОБЪЕКТА, поэтому одного сведения выдачи достаточно
+		// независимо от источника кандидата.
 		//
-		// DEADLOCK-CLASS: the pass takes pg_advisory_xact_lock(hashtext(binding_id))
-		// for every binding of the fan-out inside the ONE writer-tx. The two source
-		// queries return binding ids in NON-deterministic order, so locking in arrival
-		// order lets two concurrent ReconcileObject passes (on different objects with
-		// overlapping binding-sets) acquire the shared locks in DIFFERENT orders → ABBA
-		// deadlock (40P01). Sorting the deduped union ASC gives every pass a
-		// GLOBALLY-consistent acquisition order.
+		// КЛАСС ВЗАИМОБЛОКИРОВОК: проход берёт pg_advisory_xact_lock(hashtext(binding_id))
+		// для каждой выдачи веера в ОДНОЙ транзакции записи. Два запроса
+		// источников возвращают id выдач в НЕдетерминированном порядке; захват по приходу
+		// позволяет двум параллельным ReconcileObject (разные объекты с
+		// пересекающимися наборами выдач) брать общие замки в РАЗНОМ порядке → взаимоблокировка
+		// ABBA (40P01). Сортировка объединения без повторов по возрастанию даёт каждому проходу
+		// ГЛОБАЛЬНО согласованный порядок захвата.
 		union := dedupSortBindingIDs(existing, matching)
 		// ВСЕ advisory-замки — ДО ПЕРВОЙ ЗАПИСИ прохода, в этом же порядке.
 		//
@@ -833,7 +836,7 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		// набора получало ALREADY_EXISTS.
 		//
 		// Взяв весь набор вперёд, проход ждёт чужой advisory, НЕ удерживая ни одной
-		// общей строки, — и цикла ожидания не существует by construction.
+		// общей строки, — и цикла ожидания не существует по построению.
 		if err := s.AcquireBindingLocks(ctx, union); err != nil {
 			return fmt.Errorf("acquire binding locks for object %s:%s: %w", objectType, objectID, err)
 		}
@@ -867,7 +870,7 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 	}); err != nil {
 		return err
 	}
-	// AFTER commit only.
+	// Только ПОСЛЕ фиксации.
 	return nil
 }
 
@@ -921,10 +924,10 @@ func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessB
 			return fmt.Errorf("expire: load binding %s: %w", bindingID, err)
 		}
 		if !ok || !bs.Active {
-			return nil // already gone / not ACTIVE — nothing to expire (idempotent)
+			return nil // Уже исчезла / не ACTIVE — истекать нечему (идемпотентно).
 		}
-		// CAS ACTIVE→REVOKED first: if another path already revoked it, bail out
-		// without touching tuples (they were revoked by that path).
+		// Сначала CAS ACTIVE→REVOKED: если другой путь уже отозвал, выходим,
+		// не трогая кортежи (их отозвал тот путь).
 		revoked, err := s.RevokeExpiredBinding(ctx, bindingID)
 		if err != nil {
 			return fmt.Errorf("expire: cas revoke %s: %w", bindingID, err)
@@ -1021,12 +1024,12 @@ func emitRevokedAuditOfExpiry(ctx context.Context, s ReconcileStore, bs BindingS
 	return nil
 }
 
-// reconcileBinding is the core diff. It computes the desired member set for a
-// binding and reconciles it against the materialized set within the caller's tx.
+// reconcileBinding — основное сравнение. Вычисляет желаемый набор членов
+// выдачи и сводит его с материализованным набором в транзакции вызывающей стороны.
 func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID, converge bool, col *syncFGACollector) error {
-	// Serialize concurrent reconcile passes of the same binding on the
-	// xact-scoped advisory lock BEFORE any read/write, so the exactly-once
-	// materialization invariant holds under N replicas.
+	// Сериализуем параллельные проходы одной выдачи на
+	// транзакционном advisory-замке ДО чтения/записи, сохраняя инвариант однократной
+	// материализации при N репликах.
 	if err := s.AcquireBindingLock(ctx, bindingID); err != nil {
 		return fmt.Errorf("acquire binding lock %s: %w", bindingID, err)
 	}
@@ -1035,7 +1038,7 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 		return fmt.Errorf("load binding %s: %w", bindingID, err)
 	}
 	if !ok || !bs.Active {
-		// Deleted or no longer ACTIVE — do not re-materialize.
+		// Удалена либо больше не ACTIVE — повторно не материализуем.
 		return nil
 	}
 
@@ -1057,25 +1060,25 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 	return r.applyDiff(ctx, s, bs, desired, current, bindingEmitted(s, bindingID, converge), col)
 }
 
-// reconcileBindingForObject is the OBJECT-NARROWED twin of reconcileBinding: it diffs
-// ONE binding's membership ON ONE OBJECT, instead of recomputing the binding's whole
-// desired set over its whole scope. It is what an object-change event (a mirror
-// upsert/delete, a label UPDATE) actually needs — see the ReconcileObject doc for why
-// the narrowing is exact rather than an approximation.
+// reconcileBindingForObject — СУЖЕННЫЙ ДО ОБЪЕКТА аналог reconcileBinding: сравнивает
+// членство ОДНОЙ выдачи НА ОДНОМ ОБЪЕКТЕ вместо пересчёта всего
+// желаемого набора во всей области выдачи. Именно это нужно событию смены объекта
+// (вставка/удаление зеркала, UPDATE меток) — обоснование точного, а не приближённого
+// сужения дано в описании ReconcileObject.
 //
-// It keeps everything the full path does per object: the ACTIVE/REJECTED verdict, the
-// containment audit, the eager-revoke of a member that fell out, and the deferred
+// Сохраняется всё, что полный путь делает для объекта: решение ACTIVE/REJECTED,
+// аудит включения, немедленный отзыв выбывшего члена и отложенный
 // сброс удаления. Взаимное исключение с параллельным проходом той же
 // выдачи тоже сохраняется — тем же EXCLUSIVE advisory-замком, — но берёт его
-// ВЫЗЫВАЮЩИЙ, сразу на весь веер и до первой записи прохода (см. тело функции). Only the SIZE of
-// the diffed set changes: O(1) in the scope instead of O(scope). Because the critical
-// section is now a handful of indexed rows rather than a whole-scope recompute, the
-// per-binding lock every sibling registration in the account queues behind is held for
-// a fraction of the time — which is the throughput property this fix is after.
+// ВЫЗЫВАЮЩИЙ, сразу на весь веер и до первой записи прохода (см. тело функции). Меняется лишь РАЗМЕР
+// сравниваемого набора: O(1) по области вместо O(scope). Критическая
+// секция теперь охватывает несколько индексированных строк вместо пересчёта всей области,
+// поэтому замок выдачи, за которым стоят все соседние регистрации аккаунта, удерживается
+// лишь долю прежнего времени — это и есть цель исправления пропускной способности.
 //
-// objPresent=false (the object left its source — a mirror DELETE) yields an EMPTY
-// desired set, which drives exactly the delete-stale revoke the full path produced when
-// the object stopped appearing in MatchAllInScope.
+// objPresent=false (объект ушёл из источника — DELETE зеркала) даёт ПУСТОЙ
+// желаемый набор, вызывающий ровно тот отзыв устаревшего, который полный путь делал,
+// когда объект переставал появляться в MatchAllInScope.
 func (r *Reconciler) reconcileBindingForObject(
 	ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID,
 	objectType, objectID string, obj domain.MirrorObject, objPresent bool, ancestors *ancestorMemo,
@@ -1093,7 +1096,7 @@ func (r *Reconciler) reconcileBindingForObject(
 		return fmt.Errorf("load binding %s: %w", bindingID, err)
 	}
 	if !ok || !bs.Active {
-		// Deleted or no longer ACTIVE — do not re-materialize.
+		// Удалена либо больше не ACTIVE — повторно не материализуем.
 		return nil
 	}
 
@@ -1122,7 +1125,7 @@ func (r *Reconciler) reconcileBindingForObject(
 		desired = desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
 	}
 
-	// The NARROW diff base: this binding's members ON THIS OBJECT only.
+	// УЗКАЯ база сравнения: члены этой выдачи только НА ЭТОМ ОБЪЕКТЕ.
 	current, err := s.CurrentMembersForObject(ctx, bindingID, objectType, objectID)
 	if err != nil {
 		return fmt.Errorf("current members for object %s %s:%s: %w", bindingID, objectType, objectID, err)
@@ -1131,27 +1134,29 @@ func (r *Reconciler) reconcileBindingForObject(
 	return r.applyDiff(ctx, s, bs, desired, current, objectEmitted(s, bindingID, objectType, objectID), col)
 }
 
-// desiredMembersForObject derives the members ONE binding wants ON ONE OBJECT. It is
-// the object-narrowed equivalent of desiredMembers/desiredRuleMembers, built from the
-// SAME per-object decision points those use — selectorMatchesObject (the pure-Go mirror
-// of the arm-match SQL), the per-object target intersection, desiredMemberForObject (the
-// containment verdict + tuple derivation) and scopeSelfMember — so the narrow and full
-// paths can never drift in what an object is granted.
+// desiredMembersForObject выводит членов, нужных ОДНОЙ выдаче НА ОДНОМ ОБЪЕКТЕ. Это
+// суженный до объекта эквивалент desiredMembers/desiredRuleMembers, собранный из
+// ТЕХ ЖЕ пообъектных решений: selectorMatchesObject (чистый Go-аналог
+// SQL отбора ветви), пересечение с пообъектной целью, desiredMemberForObject
+// (решение о включении + вывод кортежей) и scopeSelfMember, — поэтому узкий и полный
+// пути не могут разойтись в доступе, выдаваемом объекту.
 //
-// The full path resolves a candidate SET per arm (MatchAllInScope / MatchByIDs /
-// MatchSelector) and then decides per candidate; here the candidate is given, so only
-// the per-candidate half runs. The three arms map exactly:
+// Полный путь находит НАБОР кандидатов для ветви (MatchAllInScope / MatchByIDs /
+// MatchSelector), затем решает по каждому; здесь кандидат дан, поэтому выполняется
+// лишь решение по кандидату. Три ветви соответствуют точно:
 //
-//	ARM_ANCHOR → type membership (the scope push-down is subsumed: the object is the
-//	             one that changed, and IsContainedIn re-verifies its scope as before)
-//	ARM_NAMES  → id ∈ ResourceNames
-//	ARM_LABELS → labels @> matchLabels
+// ARM_ANCHOR → принадлежность типу (фильтр области уже учтён: объект — тот,
 //
-// The scope-self member (the binding's tier on account:<X>/project:<X>) belongs to this
-// object's desired set exactly when the changed object IS the binding's own scope anchor
-// — a project/account label update reaches it through the iam-direct feed. Suppressed for
-// a per-object target, matching desiredRuleMembers (granting the whole scope anchor
-// contradicts a least-priv per-object grant).
+//	что изменился, а IsContainedIn повторно проверяет его область как прежде)
+//
+// ARM_NAMES → условие id ∈ ResourceNames
+// ARM_LABELS → условие labels @> matchLabels
+//
+// Член собственной области (ярус выдачи на account:<X>/project:<X>) входит в желаемый
+// набор объекта ровно тогда, когда изменённый объект — СОБСТВЕННЫЙ якорь области выдачи:
+// смена меток project/account приходит через iam-direct. Подавляется для
+// пообъектной цели, как в desiredRuleMembers (выдача на всём якоре области
+// противоречит пообъектной выдаче минимальных привилегий).
 func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject,
 	ancestors []domain.MirrorObject) []DesiredMember {
 	perObject := len(bs.Target.Resources) > 0
@@ -1169,9 +1174,9 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 	if o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
 		out = append(out, containerMembers(cat, bs)...)
 	}
-	// Per-object target least-priv (F8, IAM-1-21): a rule may only grant an object the
-	// binding's target also lists. Uniform across all arms, exactly as
-	// matchSelectorObjects intersects the matched set. Вложенное правило (kaname#874)
+	// Минимальные привилегии пообъектной цели (F8, IAM-1-21): правило даёт объект лишь тогда,
+	// когда цель выдачи тоже его называет. Едино для всех ветвей, ровно как
+	// matchSelectorObjects пересекает совпавший набор. Вложенное правило (kaname#874)
 	// судит цель по КОНТЕЙНЕРУ среди предков объекта, а не по самому объекту.
 	inTarget := !perObject || bs.Target.Contains(o.ObjectType, o.ObjectID)
 	for _, sel := range bs.Selectors {
@@ -1188,8 +1193,8 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 		}
 		dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
 		if !ok {
-			// A type the model has no FGA object for → no tuple → skip the object
-			// (fail-closed: a typo'd type never grants).
+			// У типа нет объекта FGA в модели → нет кортежа → пропускаем объект
+			// (отказ по умолчанию: опечатка в типе ничего не выдаёт).
 			continue
 		}
 		out = append(out, dm)
@@ -1199,32 +1204,32 @@ func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.Mirro
 	return withPublicReaders(cat, bs, out)
 }
 
-// desiredMembers computes the desired member set + containment verdict for a
-// binding. The flat explicit RBAC model uses the UNIFIED materializer — the only
-// dynamic membership source is the role's materializing rules (ARM_ANCHOR(all) +
-// ARM_NAMES + ARM_LABELS). A binding whose role carries no materializing selectors
-// is thin — no materialized members (a legacy permissions-only role's tier tuples
-// are the Create-time concern, not here).
+// desiredMembers вычисляет желаемый набор членов и решения о включении для
+// выдачи. Плоская явная модель RBAC использует ЕДИНУЮ материализацию: единственный
+// источник динамического членства — материализующие правила роли (ARM_ANCHOR(all) +
+// ARM_NAMES + ARM_LABELS). Выдача роли без материализующих селекторов
+// тонкая — без материализованных членов (кортежи яруса прежней роли только с разрешениями
+// относятся к Create, а не к этому коду).
 func (r *Reconciler) desiredMembers(ctx context.Context, s ReconcileStore, bs BindingScope) ([]DesiredMember, error) {
 	if len(bs.Selectors) > 0 {
 		return r.desiredRuleMembers(ctx, s, bs)
 	}
-	return nil, nil // thin binding — no materialized members
+	return nil, nil // Тонкая выдача — без материализованных членов.
 }
 
-// matchSelectorObjects resolves the candidate objects for ONE selector per its arm,
-// across both feeds (mirror-fed + iam-direct, partitioned): ARM_ANCHOR(all) →
+// matchSelectorObjects находит кандидатов ОДНОГО селектора по его ветви,
+// по обоим источникам (зеркало + iam-direct, раздельно): ARM_ANCHOR(all) →
 // MatchAllInScope; ARM_NAMES → MatchByIDs; ARM_LABELS → MatchSelector(labels @>).
-// Containment is re-asserted by the caller (IsContainedIn); this only resolves the
-// candidate set. The binding's `scope` is passed to the ANCHOR arm so the candidate set
-// is pushed-down to O(scope) in SQL rather than scanned cluster-wide + narrowed in Go —
-// the Go re-verify remains authoritative (the SQL predicate is a proven superset).
+// Включение повторно проверяет вызывающая сторона (IsContainedIn); здесь определяется лишь
+// набор кандидатов. `scope` выдачи передаётся ветви ANCHOR, чтобы набор кандидатов
+// сужался в SQL до O(scope), а не читался по кластеру с последующим сужением в Go:
+// окончательна проверка Go (SQL-предикат — доказанное надмножество).
 //
-// PER-OBJECT TARGET (F8, IAM-1-21): when the binding carries a per-object target
-// (target.Resources non-empty), the ANCHOR arm is resolved BY the target ids
-// (MatchByIDs) instead of MatchAllInScope — so a least-priv grant never scans/materializes
-// the whole scope — and the matched set of EVERY arm is finally INTERSECTED with the
-// target (a role rule can only grant an object the target also lists).
+// ПООБЪЕКТНАЯ ЦЕЛЬ (F8, IAM-1-21): если выдача несёт пообъектную цель
+// (target.Resources непуст), ветвь ANCHOR находит кандидатов ПО id цели
+// (MatchByIDs) вместо MatchAllInScope, поэтому выдача минимальных привилегий никогда не
+// читает/материализует всю область, а совпадения КАЖДОЙ ветви в конце ПЕРЕСЕКАЮТСЯ
+// с целью (правило роли даёт объект, только если цель тоже его называет).
 func (r *Reconciler) matchSelectorObjects(ctx context.Context, s ReconcileStore, sel domain.RuleSelector, scope domain.ScopeAnchor, target domain.AccessTarget) ([]domain.MirrorObject, error) {
 	mirrorTypes, iamTypes := partitionByFeed(sel.ObjectTypes)
 	var matched []domain.MirrorObject
@@ -1242,24 +1247,24 @@ func (r *Reconciler) matchSelectorObjects(ctx context.Context, s ReconcileStore,
 		}
 		matched = append(matched, objs...)
 	}
-	// Per-object target intersection: keep ONLY objects the target lists (uniform across
-	// all arms — anchor already resolves by target ids, but names/labels may match objects
-	// the target does not list, so intersect them out; least-priv, IAM-1-21).
+	// Пересечение с пообъектной целью: оставляем ТОЛЬКО названные целью объекты (едино для
+	// всех ветвей: якорь уже разрешён по id цели, но имена/метки могут совпасть с объектами
+	// вне цели, поэтому отсекаем их пересечением; минимальные привилегии, IAM-1-21).
 	if len(target.Resources) > 0 {
 		matched = filterMatchedToTarget(matched, target)
 	}
 	return matched, nil
 }
 
-// matchByArm dispatches the per-arm match to the right feed (mirror vs iam-direct). The
-// ANCHOR arm passes the binding's `scope` for the SQL scope push-down; the NAMES/LABELS arms
-// are already narrow (specific ids / labels) AND a foreign-scope match is a wanted
-// REJECTED-containment audit signal, so they are LEFT UNSCOPED (the reconciler re-verifies).
+// matchByArm направляет отбор ветви к нужному источнику (зеркало или iam-direct).
+// Ветвь ANCHOR передаёт `scope` выдачи для сужения области в SQL; ветви NAMES/LABELS
+// уже узкие (конкретные id / метки), И совпадение чужой области нужно для
+// аудита REJECTED по включению, поэтому они НЕ ОГРАНИЧЕНЫ ОБЛАСТЬЮ (сведение перепроверяет).
 //
-// For a PER-OBJECT target the ANCHOR arm resolves the candidate set BY the target ids
-// (MatchByIDs) rather than MatchAllInScope: a least-priv grant materializes only the listed
-// objects, never the whole scope (IAM-1-21). The NAMES/LABELS arms keep their own narrow
-// resolution and are intersected with the target by the caller (matchSelectorObjects).
+// Для ПООБЪЕКТНОЙ цели ветвь ANCHOR находит кандидатов ПО id цели
+// (MatchByIDs) вместо MatchAllInScope: выдача минимальных привилегий материализует лишь
+// названные объекты, никогда всю область (IAM-1-21). Ветви NAMES/LABELS сохраняют свой узкий
+// отбор; вызывающая сторона пересекает его с целью (matchSelectorObjects).
 func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, types []string, iamDirect bool, s ReconcileStore, scope domain.ScopeAnchor, target domain.AccessTarget) ([]domain.MirrorObject, error) {
 	switch sel.Arm {
 	case domain.ArmNames:
@@ -1272,10 +1277,10 @@ func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, ty
 			return s.MatchIAMDirect(ctx, types, sel.MatchLabels)
 		}
 		return s.MatchSelector(ctx, types, sel.MatchLabels)
-	default: // ArmAnchor (all)
+	default: // ArmAnchor (все).
 		if len(target.Resources) > 0 {
-			// Per-object target: resolve the anchor candidates by the target ids of these
-			// types (never the whole-scope scan). Empty ⇒ no candidate of these types.
+			// Пообъектная цель: находим кандидатов якоря по id цели этих
+			// типов (никогда не читаем всю область). Пусто ⇒ кандидатов этих типов нет.
 			ids := target.ResourceIDsForTypes(types)
 			if len(ids) == 0 {
 				return nil, nil
@@ -1292,11 +1297,11 @@ func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, ty
 	}
 }
 
-// filterMatchedToTarget keeps only the matched objects listed in a per-object target
-// (exact dotted-type + id). It is the uniform intersection applied to EVERY arm when the
-// binding carries a per-object target, so a role rule (anchor/names/labels) can only grant
-// an object the target also lists (least-priv, IAM-1-21). Never called for an
-// AllInScope/empty target (the caller gates on len(target.Resources) > 0).
+// filterMatchedToTarget оставляет лишь совпавшие объекты, названные пообъектной целью
+// (точные точечный тип + id). Это единое пересечение для КАЖДОЙ ветви, когда
+// выдача несёт пообъектную цель, поэтому правило роли (якорь/имена/метки) может дать
+// только названный целью объект (минимальные привилегии, IAM-1-21). Не вызывается для
+// AllInScope/пустой цели (вызывающий проверяет len(target.Resources) > 0).
 func filterMatchedToTarget(matched []domain.MirrorObject, target domain.AccessTarget) []domain.MirrorObject {
 	out := matched[:0:0]
 	for _, o := range matched {
@@ -1307,13 +1312,13 @@ func filterMatchedToTarget(matched []domain.MirrorObject, target domain.AccessTa
 	return out
 }
 
-// desiredRuleMembers computes the desired per-rule membership for a role.rules-
-// driven binding (unified materializer). For EACH materializing selector
-// (rule_fp) it resolves the candidate objects per its arm, applies containment,
-// and emits the per-object tuple set DERIVED FROM THE RULE'S VERBS (per-verb v_* +
-// tier — the same domain helpers the prior emit path used). A matched-but-foreign
-// object is REJECTED (no tuple + audit, cross-scope defence). The SAME object
-// matched by two rules yields two desired members keyed by distinct rule_fp.
+// desiredRuleMembers вычисляет желаемое членство по правилам для выдачи,
+// управляемой role.rules (единая материализация). Для КАЖДОГО материализующего селектора
+// (rule_fp) находит кандидатов по его ветви, проверяет включение
+// и выпускает пообъектные кортежи, ВЫВЕДЕННЫЕ ИЗ ГЛАГОЛОВ ПРАВИЛА (v_* по глаголам +
+// ярус — те же доменные функции, что у прежнего пути выпуска). Совпавший чужой
+// объект получает REJECTED (без кортежа + аудит, защита границ области). ОДИН объект
+// под двумя правилами даёт двух желаемых членов с разными rule_fp.
 func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, bs BindingScope) ([]DesiredMember, error) {
 	var out []DesiredMember
 	// Каталожный факт берётся ОДИН раз на проход: обновление снимка подменяет
@@ -1321,26 +1326,26 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	// правила по одному, член `public_reader` по другому.
 	cat := r.cat.Facts()
 
-	// perObject — the binding carries a per-object target (Target.Resources non-empty):
-	// the grant is restricted to EXACTLY the listed objects (least-priv, IAM-1-21). The
-	// scope-self anchor grant is suppressed and every selector's matches are intersected
-	// with the target set below.
+	// perObject — выдача несёт пообъектную цель (Target.Resources непуст):
+	// выдача ограничена РОВНО названными объектами (минимальные привилегии, IAM-1-21).
+	// Выдача на якоре собственной области подавляется; совпадения каждого селектора
+	// пересекаются ниже с набором цели.
 	perObject := len(bs.Target.Resources) > 0
 
-	// Scope-self member: the role's tier (+ verb-bearing v_*) ON
-	// THE BINDING'S OWN SCOPE OBJECT (`account:<X>`/`project:<X>`). This is the
-	// write-authz / no-access-loss anchor the removed binding-time scope-anchor emit
-	// produced — now materialized by the SINGLE reconciler path. It is NOT a content
-	// object matched by a selector: a `*.*` superuser role has empty selector
-	// ObjectTypes (wildcard skipped), so without this the subject would lose the tier
-	// on the scope entirely. Keyed by
-	// a sentinel rule_fp so it has its own member row + ledger lineage (symmetric
-	// revoke). The cluster super-admin path short-circuits and is not materialized here.
+	// Член собственной области: ярус роли (+ глагольные v_*) НА
+	// СОБСТВЕННОМ ОБЪЕКТЕ ОБЛАСТИ ВЫДАЧИ (`account:<X>`/`project:<X>`). Это
+	// якорь проверки записи / сохранения доступа, который давал снятый выпуск
+	// при создании выдачи; теперь он материализуется ЕДИНСТВЕННЫМ путём сведения. Это НЕ объект
+	// содержимого, совпавший с селектором: у роли суперпользователя `*.*` пустой
+	// ObjectTypes селектора (шаблон пропущен), поэтому без этого субъект потерял бы ярус
+	// на области полностью. Ключуется
+	// сигнальным rule_fp, чтобы иметь свою строку члена + происхождение в реестре (симметричный
+	// отзыв). Путь супер-администратора кластера обрывается раньше и здесь не материализуется.
 	//
-	// SUPPRESSED for a per-object target: granting the tier on the WHOLE scope object
-	// (account:<X>/project:<X>) contradicts a per-object least-priv grant — the target
-	// lists specific content objects, not the scope anchor. So a per-object target never
-	// materializes the scope-self member (over-grant guard, IAM-1-21).
+	// ПОДАВЛЯЕТСЯ для пообъектной цели: выдача яруса на ВСЁМ объекте области
+	// (account:<X>/project:<X>) противоречит пообъектной выдаче минимальных привилегий: цель
+	// называет конкретное содержимое, а не якорь области. Поэтому пообъектная цель никогда не
+	// материализует члена собственной области (защита от избыточной выдачи, IAM-1-21).
 	if len(bs.ScopeSelfVerbs) > 0 && !perObject {
 		if sm, ok := scopeSelfMember(cat, grantees(bs, bs.ScopeSelfVerbs, false), bs.Scope.Type, bs.Scope.ID); ok {
 			out = append(out, sm)
@@ -1394,14 +1399,14 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			return nil, err
 		}
 		for _, o := range matched {
-			// Per-object verdict — SHARED with the forward fast-path
-			// (desiredMemberForObject), so the full recompute and the forward path
-			// derive BYTE-IDENTICAL tuples (idempotency: forward + async full both
-			// emit the same set, and the read-delta FGA writer skips duplicates).
+			// Пообъектное решение ОБЩЕЕ с быстрым прямым путём
+			// (desiredMemberForObject), поэтому полный пересчёт и прямой путь
+			// выводят ПОБАЙТОВО ОДИНАКОВЫЕ кортежи (идемпотентность: прямой и асинхронный полный
+			// пути выпускают один набор, а запись FGA по разнице чтения пропускает повторы).
 			dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
 			if !ok {
-				// A type the model has no FGA object for → no tuple → skip the object
-				// (fail-closed: a typo'd type never grants).
+				// У типа нет объекта FGA в модели → нет кортежа → пропускаем объект
+				// (отказ по умолчанию: опечатка в типе ничего не выдаёт).
 				continue
 			}
 			out = append(out, dm)
@@ -1416,20 +1421,20 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	return withPublicReaders(cat, bs, out), nil
 }
 
-// desiredMemberForObject computes the DesiredMember a materializing selector produces
-// for ONE candidate object. It is the single per-object decision point SHARED by the
-// full recompute (desiredRuleMembers) and the ADDITIVE forward fast-path
-// (forwardObjectForBinding), so the two paths can never drift in what tuples an object
-// grants (idempotency across forward + async-backstop).
+// desiredMemberForObject вычисляет DesiredMember, порождённого материализующим селектором
+// для ОДНОГО кандидата. Это единственное пообъектное место решения, ОБЩЕЕ для
+// полного пересчёта (desiredRuleMembers) и АДДИТИВНОГО быстрого прямого пути
+// (forwardObjectForBinding), поэтому пути не могут разойтись в кортежах доступа
+// объекта (идемпотентность прямого пути + асинхронной страховки).
 //
-//   - not contained in the binding's scope (cross-scope label-tampering / foreign parent)
-//     → a REJECTED member (ok=true, no tuples). The full path records it + audits; the
-//     forward path skips it (additive-only never writes a non-ACTIVE member).
-//   - contained → an ACTIVE member with the per-object tuples derived from the RULE's
-//     verbs (v_* + back-compat tier via ruleObjectTuples). ARM_LABELS/ANCHOR rules are
-//     excluded from CompileRules, so the tuples come from the rule verbs, not RolePerms.
-//   - the object's type has no FGA object type → ok=false (skip; a typo'd type never
-//     grants, fail-closed).
+//   - Вне области выдачи (подмена меток через границу области / чужой родитель)
+//     → член REJECTED (ok=true, без кортежей). Полный путь записывает его и аудит;
+//     прямой путь пропускает (только добавляющий путь не пишет не-ACTIVE члена).
+//   - В области → ACTIVE-член с пообъектными кортежами, выведенными из ГЛАГОЛОВ
+//     правила (v_* + совместимый прежний ярус через ruleObjectTuples). Правила ARM_LABELS/ANCHOR
+//     исключены из CompileRules, поэтому кортежи идут из глаголов правила, а не RolePerms.
+//   - Типу объекта не соответствует тип объекта FGA → ok=false (пропуск; опечатка в типе
+//     ничего не выдаёт, отказ по умолчанию).
 func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []grantee, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
 	// Селектор создателя (kaname#1003, creator.go): объект входит в охват правила
 	// только для субъекта, который его создал. Никому — объект правилом не
@@ -1474,14 +1479,14 @@ func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []g
 	}, true
 }
 
-// applyDiff reconciles the desired set against the current materialized set: it
-// UPSERTs members whose status changed, emits/eager-revokes the per-object FGA
-// tuple on ACTIVE transitions, writes the containment audit on REJECTED, and
-// removes members no longer in the desired set (eager-revoke their tuple).
+// applyDiff сводит желаемый набор с текущим материализованным: записывает через
+// UPSERT членов со сменой статуса, выпускает/немедленно отзывает пообъектный кортеж FGA
+// при переходах ACTIVE, пишет аудит включения при REJECTED и
+// удаляет членов, ушедших из желаемого набора (немедленно отзывает их кортеж).
 func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs BindingScope, desired []DesiredMember, current []domain.TargetMember, emitted *emittedView, col *syncFGACollector) error {
-	// Key by (rule_fp, object): a member is attributed to the role.rules rule that
-	// produced it, so the SAME object under two rules is two members
-	// and a removed rule eager-revokes ONLY its members.
+	// Ключ — (rule_fp, объект): член связан с породившим его правилом role.rules,
+	// поэтому ОДИН объект под двумя правилами — два члена,
+	// а снятое правило немедленно отзывает ТОЛЬКО своих членов.
 	currentByKey := make(map[string]domain.TargetMember, len(current))
 	for _, m := range current {
 		currentByKey[memberRuleKey(m.RuleFP, m.ObjectType, m.ObjectID)] = m
@@ -1493,6 +1498,21 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 	if err != nil {
 		return err
 	}
+	// Только пустая исходная материализация и только ACTIVE после прежнего
+	// keepLiveDesired: переходы статусов, отзыв и completion остаются ниже.
+	if len(current) == 0 {
+		allActive := true
+		for _, d := range desired {
+			if d.Status != domain.VerificationActive {
+				allActive = false
+				break
+			}
+		}
+		if allActive {
+			return r.applyColdActiveDiff(ctx, s, bs, desired, col)
+		}
+	}
+
 	desiredByKey := make(map[string]struct{}, len(desired))
 
 	// survivingClaims — кортежи, на которые после прохода ещё претендуют желаемые
@@ -1527,7 +1547,7 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			continue
 		}
 
-		// Persist the new member status (UPSERT keyed by the full rule coordinate).
+		// Сохраняем новый статус члена (UPSERT по полной координате правила).
 		if err := s.UpsertMember(ctx, domain.TargetMember{
 			BindingID: bs.BindingID, RoleID: domain.RoleID(bs.RoleID), RuleFP: d.RuleFP,
 			ObjectType: d.ObjectType, ObjectID: d.ObjectID, VerificationStatus: d.Status,
@@ -1535,7 +1555,7 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			return fmt.Errorf("upsert member %s/%s:%s: %w", d.RuleFP, d.ObjectType, d.ObjectID, err)
 		}
 
-		// The tuple set for this member: precomputed from the producing rule's verbs
+		// Набор кортежей этого члена: заранее вычислен из глаголов породившего правила
 		// (d.Tuples).
 		tuples, tupleOK := r.memberTuples(d)
 		switch d.Status {
@@ -1543,10 +1563,10 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 			if !tupleOK {
 				return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
 			}
-			// Enqueue ONLY the tuples this pass has not already enqueued, and record the
-			// same set in the pass collector — the set the deletion subtraction below
-			// reads, so a tuple re-written here is never stripped by a sibling's revoke
-			// in the same pass.
+			// Ставим ТОЛЬКО кортежи, ещё не поставленные этим проходом, и учитываем
+			// тот же набор в коллекторе прохода; его читает вычитание удаления
+			// ниже, поэтому повторно записанный здесь кортеж никогда не снимет отзыв соседнего члена
+			// того же прохода.
 			if fresh := col.collectNew(tuples); len(fresh) > 0 {
 				if err := s.EmitTupleWrite(ctx, fresh); err != nil {
 					return fmt.Errorf("emit tuple write %s:%s: %w", d.ObjectType, d.ObjectID, err)
@@ -1559,9 +1579,9 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 				return fmt.Errorf("record emitted tuple %s:%s: %w", d.ObjectType, d.ObjectID, err)
 			}
 		case domain.VerificationRejected:
-			// Was it ACTIVE before? Then eager-revoke the now-stale tuple + forget it.
-			// The revoke set is the member's SAVED ledger (d.Tuples is empty for a
-			// REJECTED transition), NOT d.Tuples.
+			// Был ACTIVE? Немедленно отзываем устаревший кортеж и забываем его.
+			// Набор отзыва — СОХРАНЁННЫЙ реестр члена (d.Tuples пуст при
+			// переходе в REJECTED), а НЕ d.Tuples.
 			if prevStatus == domain.VerificationActive {
 				if err := r.revokeMemberTuples(ctx, s, bs, prev, survivingClaims, col); err != nil {
 					return err
@@ -1571,7 +1591,7 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 				return fmt.Errorf("emit containment audit %s:%s: %w", d.ObjectType, d.ObjectID, err)
 			}
 		case domain.VerificationPending:
-			// No tuple; if it was ACTIVE before (object left the mirror), revoke + forget.
+			// Кортежа нет; если был ACTIVE (объект ушёл из зеркала), отзываем и забываем.
 			if prevStatus == domain.VerificationActive {
 				if err := r.revokeMemberTuples(ctx, s, bs, prev, survivingClaims, col); err != nil {
 					return err
@@ -1580,11 +1600,11 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 		}
 	}
 
-	// Members that fell out of the desired set entirely (rule removed / label
-	// removed): eager-revoke their tuple + remove the row. The fell-out
-	// member's tuple set is read from the member's recorded ledger rows
-	// (revokeTuplesFor) — a removed rule's verbs are gone, so the ledger is the only
-	// authority.
+	// Члены, полностью ушедшие из желаемого набора (снято правило /
+	// метка): немедленно отзываем кортеж и удаляем строку. Набор кортежей выбывшего
+	// члена читается из сохранённых для него строк реестра
+	// (revokeTuplesFor): глаголы снятого правила исчезли, поэтому реестр — единственный
+	// источник истины.
 	for key, m := range currentByKey {
 		if _, stillDesired := desiredByKey[key]; stillDesired {
 			continue
@@ -1599,6 +1619,49 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 		}
 	}
 	return nil
+}
+
+// Пределы одного сброса: число членов и верхняя оценка кортежей реестра/новых кортежей.
+// Один большой член сохраняется целиком, отдельной партией, как в прежнем diff.
+const (
+	coldActiveBatchMembers = 4096
+	coldActiveBatchTuples  = 4096
+)
+
+// applyColdActiveDiff вызывается после общего замка и фильтра keepLiveDesired.
+// Все партии используют тот же store/tx и общий collector: порядок первых кортежей
+// и реестр каждой полной координаты сохраняются между партиями и правилами.
+func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, bs BindingScope, desired []DesiredMember, col *syncFGACollector) error {
+	var writes forwardWriteSet
+	for _, d := range desired {
+		tuples, ok := r.memberTuples(d)
+		if !ok {
+			return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
+		}
+		// Проверка до collectNew не меняет общий collector и порядок первых tuples.
+		// Ledger содержит все tuples члена, fresh — только их подмножество.
+		if len(writes.members) > 0 && (len(writes.members) == coldActiveBatchMembers || len(tuples) > coldActiveBatchTuples-len(writes.ledger)) {
+			if err := writes.writeLive(ctx, s); err != nil {
+				return err
+			}
+			writes = forwardWriteSet{}
+		}
+		d.Tuples = tuples
+		if err := r.materializeForwardMember(ctx, s, bs, d, col, &writes); err != nil {
+			return err
+		}
+		if len(writes.members) == coldActiveBatchMembers || len(writes.ledger) >= coldActiveBatchTuples {
+			// Исходный keepLiveDesired уже отфильтровал весь набор под замками этой tx.
+			if err := writes.writeLive(ctx, s); err != nil {
+				return err
+			}
+			writes = forwardWriteSet{}
+		}
+	}
+	if len(writes.members) == 0 {
+		return nil
+	}
+	return writes.writeLive(ctx, s)
 }
 
 // mirrorFed — объект питается зеркалом регистраций: его строку удаляет снятие
@@ -1680,11 +1743,11 @@ func keepLiveDesired(ctx context.Context, s ReconcileStore, desired []DesiredMem
 	return out, nil
 }
 
-// memberTuples returns the FGA tuple set for a DESIRED member. In the rules-based
-// RBAC model every materialized member comes from a role.rules
-// ARM_LABELS rule, so its tuples were precomputed from the rule's verbs (d.Tuples).
-// A member with no tuples is an unknown-FGA-type ACTIVE member the caller already
-// skipped in desiredRuleMembers — treated as a coverage desync (fail-closed).
+// memberTuples возвращает набор кортежей FGA ЖЕЛАЕМОГО члена. В модели RBAC
+// на правилах каждый материализованный член происходит из правила ARM_LABELS
+// роли role.rules, его кортежи заранее выведены из глаголов правила (d.Tuples).
+// Член без кортежей — ACTIVE-член с неизвестным типом FGA, уже пропущенный вызывающим в
+// desiredRuleMembers; считается рассогласованием покрытия (отказ по умолчанию).
 func (r *Reconciler) memberTuples(d DesiredMember) ([]domain.MembershipTuple, bool) {
 	if len(d.Tuples) > 0 {
 		return d.Tuples, true
@@ -1692,12 +1755,12 @@ func (r *Reconciler) memberTuples(d DesiredMember) ([]domain.MembershipTuple, bo
 	return nil, false
 }
 
-// revokeMemberTuples eager-revokes the live FGA tuples of a previously-ACTIVE
-// member (ACTIVE→REJECTED/PENDING transition OR a fell-out member) and forgets them
-// from the ledger, in lock-step (ban #10). The revoke set is the member's SAVED
+// revokeMemberTuples немедленно отзывает живые кортежи FGA прежде ACTIVE-члена
+// (переход ACTIVE→REJECTED/PENDING ЛИБО выбывший член) и синхронно забывает их
+// из реестра (ban #10). Набор отзыва — СОХРАНЁННЫЙ для члена
 // набор кортежей — строки реестра ЕГО координаты (revokeTuplesFor), НЕ выведенные заново из
 // возможно изменённой роли (глаголы снятого правила исчезли, поэтому единственный источник истины —
-// ledger).
+// реестр).
 //
 // Множеств два (claims — набор выживших ACTIVE-членов этой выдачи после прохода):
 //   - ЗАБЫТЬ: строки своей координаты минус кортежи, на которые претендует выживший
@@ -1797,7 +1860,7 @@ func desiredActiveClaims(desired []DesiredMember) *memberClaims {
 
 // revokeTuplesFor возвращает кортежи FGA для отзыва участника: СОХРАНЁННЫЕ строки журнала
 // его координаты (access_binding_emitted_tuples) — «отозвать то, что было
-// actually emitted, do NOT re-derive from the role", because the role may have been
+// действительно выпущено, НЕ выводить заново из роли», потому что роль могла быть
 // изменённого независимо от участника. Координата — та же, что у строки члена, и снимку
 // каталога процесса здесь нечего решать: член по типу, выпавшему из снимка реплики,
 // снимается тем же чтением, а строки члена ДРУГОГО типа с тем же идентификатором
@@ -1840,9 +1903,9 @@ func (r *Reconciler) revokeWholeLedger(ctx context.Context, s ReconcileStore, bi
 	return nil
 }
 
-// partitionByFeed splits selector types into the mirror-fed set (compute/vpc/
-// nlb) and the iam-direct set (iam.project/iam.account) by the pure-domain
-// feed-source classifier. Order within each partition is preserved.
+// partitionByFeed разделяет типы селектора на питаемые зеркалом (compute/vpc/
+// nlb) и iam-direct (iam.project/iam.account) по чистому доменному
+// классификатору источника данных. Порядок внутри каждой части сохраняется.
 func partitionByFeed(types []string) (mirror, iamDirect []string) {
 	for _, t := range types {
 		switch domain.FeedSourceForType(t) {
@@ -1855,21 +1918,21 @@ func partitionByFeed(types []string) (mirror, iamDirect []string) {
 	return mirror, iamDirect
 }
 
-// memberRuleKey joins (ruleFP, objectType, objectID) with NUL separators — the
-// member identity. The rule_fp discriminates the SAME object selected
-// by two different rules (distinct members at possibly distinct tiers), so the
-// diff in applyDiff revokes exactly the removed rule's members. NUL never
-// occurs in a hex fingerprint / dotted type / crockford id, so the join is
-// unambiguous.
+// memberRuleKey соединяет (ruleFP, objectType, objectID) разделителями NUL —
+// это идентичность члена. rule_fp различает ОДИН объект, выбранный
+// двумя правилами (разные члены, возможно на разных ярусах), поэтому
+// сравнение applyDiff отзывает ровно членов снятого правила. NUL никогда не
+// встречается в шестнадцатеричном отпечатке / точечном типе / id crockford, поэтому соединение
+// однозначно.
 func memberRuleKey(ruleFP, objectType, objectID string) string {
 	return ruleFP + "\x00" + objectType + "\x00" + objectID
 }
 
-// dedupSortBindingIDs merges the fan-out source id sets into a de-duplicated,
-// sorted-ASC slice. The sort gives the ReconcileObject fan-out a GLOBALLY-consistent
-// advisory-lock acquisition order across concurrent passes (deadlock-class fix):
-// two passes on different objects with overlapping binding-sets
-// acquire the shared locks in the SAME order, so they cannot deadlock (ABBA / 40P01).
+// dedupSortBindingIDs объединяет наборы id источников веера в срез без повторов,
+// отсортированный по возрастанию. Сортировка даёт вееру ReconcileObject ГЛОБАЛЬНО согласованный
+// порядок захвата advisory-замков параллельных проходов (исправление класса взаимоблокировок):
+// два прохода разных объектов с пересекающимися наборами выдач
+// берут общие замки в ОДНОМ порядке, поэтому взаимоблокировка невозможна (ABBA / 40P01).
 func dedupSortBindingIDs(sets ...[]domain.AccessBindingID) []domain.AccessBindingID {
 	seen := make(map[domain.AccessBindingID]struct{})
 	for _, set := range sets {

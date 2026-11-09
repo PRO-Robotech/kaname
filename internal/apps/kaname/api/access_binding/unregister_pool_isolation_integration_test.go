@@ -14,6 +14,7 @@ import (
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -42,7 +43,7 @@ func TestUnregisterLateDescendant_PoolDefaultIsolation(t *testing.T) {
 			uc := internaliam.NewRegisterResourceUseCase(kanamepg.NewFGAOutboxEmitter(), h, kanamepg.NewRegistrationTxBeginner(upool),
 				kanamepg.NewCatalogTypeReader(), kanamepg.NewPublicReadPublisher(),
 				accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld}),
-				kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader())
+				kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 			first, releaseRaw := h.first.arm()
 			var once sync.Once
 			release := func() { once.Do(releaseRaw) }

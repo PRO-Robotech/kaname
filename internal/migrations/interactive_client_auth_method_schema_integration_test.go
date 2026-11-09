@@ -212,7 +212,7 @@ func TestIntegration_SecretVerifierLivesOnlyOnASecretClient(t *testing.T) {
 // ровно заведённое и возвращает то, что стояло до предмета: умолчание колонки
 // способа и описания обеих колонок. Повторный накат возвращает предмет.
 func TestIntegration_AuthMethodMigrationRollsBackAndForward(t *testing.T) {
-	db := svDB(t)
+	db := historicalRegistrationDB(t)
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
 
@@ -250,7 +250,7 @@ func TestIntegration_AuthMethodMigrationRollsBackAndForward(t *testing.T) {
 	require.Equal(t, declaredBefore, s.verifierComment.String,
 		"после отката описание материала — ровно объявленное миграцией колонки")
 
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 	requireApplied("после повторного наката")
 
 	head, err := goose.GetDBVersion(db)

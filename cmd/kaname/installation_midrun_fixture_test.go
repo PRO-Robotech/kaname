@@ -41,8 +41,9 @@ func rid10Prepare(t *testing.T) *rid10World {
 	require.NoError(t, err)
 	f := newInstallationNativeWorldProfile(t, 7200, "", true)
 	accounts, namedSystem, _, _ := rid08SetupN3(t, f)
+	f.writerPlan = installruntime.RegistryRegistrationWriterPlan(accounts)
 	before := rid08PrimaryAccounts(t, f)
-	p := f.apply(t, installruntime.DeliveryInput{Manifests: installruntime.RIDDeliveryFixture{First: staged}, CredentialFile: f.creator.CredentialFile})
+	p := f.apply(t, installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: installruntime.RIDDeliveryFixture{First: staged}, CredentialFile: f.creator.CredentialFile})
 	results, err := p.Results()
 	require.NoError(t, err)
 	require.Empty(t, results)
@@ -53,7 +54,7 @@ func rid10Prepare(t *testing.T) *rid10World {
 	f.requireSameCredential(t)
 	requireNativeAuthority(t, f.given, "user", f.operator.UserID(), 1)
 	requireNativeAuthority(t, f.given, "service_account", f.creator.ID, 1)
-	w := &ridLifecycleWorld{f: f, accounts: accounts, delivery: installruntime.DeliveryInput{Manifests: full, CredentialFile: f.creator.CredentialFile}}
+	w := &ridLifecycleWorld{f: f, accounts: accounts, delivery: installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: full, CredentialFile: f.creator.CredentialFile}}
 	var issuerID, writerID string
 	for _, raw := range f.ridList(t, "/iam/v1/serviceAccounts", "serviceAccounts", url.Values{"accountId": {f.baseline.SystemID}}) {
 		var sa iamv1.ServiceAccount

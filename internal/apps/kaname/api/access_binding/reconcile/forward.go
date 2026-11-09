@@ -3,51 +3,51 @@
 
 package reconcile
 
-// forward.go — the ADDITIVE forward fast-path for a freshly-REGISTERED object.
+// forward.go — ДОБАВЛЯЮЩИЙ прямой быстрый путь только что ЗАРЕГИСТРИРОВАННОГО объекта.
 //
-// PROBLEM (throughput, diagnosed under parallel e2e load). The full ReconcileObject
-// fans out to every binding whose selector matches the changed object and, for EACH
-// such binding, takes the per-binding advisory lock (pg_advisory_xact_lock) + a
-// `SELECT … FOR UPDATE` on the binding row and does a FULL O(scope) desired-set
-// recompute. Every resource of one project/account shares ONE editor@project /
-// owner@account binding, so under N concurrent RegisterResource calls in the same
-// scope ALL N reconciles SERIALIZE on that single binding's advisory lock → a queue
-// forms → the creator's owner-tuple materialization lag exceeds the newman
-// read-your-writes retry budget (transient 403 "lacks relation" on one's OWN fresh
-// resource).
+// ПРОБЛЕМА (пропускная способность, выявлена параллельной сквозной нагрузкой). Полный ReconcileObject
+// распространяется на каждую привязку, чей селектор совпадает с изменённым объектом, и для КАЖДОЙ
+// такой привязки берёт рекомендательную блокировку привязки (pg_advisory_xact_lock),
+// `SELECT … FOR UPDATE` строки привязки и выполняет ПОЛНЫЙ пересчёт желаемого множества
+// за O(scope). Все ресурсы проекта/аккаунта делят ОДНУ привязку editor@project /
+// owner@account, поэтому при N одновременных RegisterResource в одной
+// области ВСЕ N сверок СЕРИАЛИЗУЮТСЯ на её рекомендательной блокировке → образуется очередь
+// → задержка материализации кортежа владельца создателя превышает бюджет повторов чтения
+// своих записей newman (временный 403 "lacks relation" на СОБСТВЕННОМ новом
+// ресурсе).
 //
-// FIX. On the create/register happy-path we do NOT need a full recompute: the only
-// thing that changed is that ONE new object now exists, so the only new access to
-// materialize is THAT object's per-object tuples for the bindings that match it.
-// ReconcileObjectForward materializes EXACTLY the freshly-registered object's tuples
-// for each scope-narrowed matching binding — WITHOUT MatchAllInScope, WITHOUT the full
-// desired-diff, WITHOUT the FOR UPDATE binding row-lock, and — critically for
-// throughput — WITHOUT the EXCLUSIVE per-binding advisory lock the full path takes. It
-// holds NO advisory lock on the binding at all (see "LOCK CHOICE" below).
+// ИСПРАВЛЕНИЕ. На успешном пути создания/регистрации полный пересчёт НЕ нужен: изменилось
+// лишь то, что появился ОДИН новый объект, поэтому материализовать требуется доступ
+// ТОЛЬКО к этому объекту для совпадающих привязок.
+// ReconcileObjectForward материализует В ТОЧНОСТИ кортежи нового объекта
+// для каждой совпадающей привязки с сужением области — БЕЗ MatchAllInScope, БЕЗ полного
+// сравнения желаемого множества, БЕЗ строковой блокировки привязки FOR UPDATE и, что критично для
+// пропускной способности, БЕЗ ЭКСКЛЮЗИВНОЙ рекомендательной блокировки полного пути.
+// Рекомендательной блокировки привязки НЕТ вовсе (см. «ВЫБОР БЛОКИРОВКИ» ниже).
 //
-// WHY THE FULL PATH'S EXCLUSIVE LOCK SERIALIZES, AND WHY FORWARD DOES NOT NEED IT:
+// ПОЧЕМУ ЭКСКЛЮЗИВНАЯ БЛОКИРОВКА ПОЛНОГО ПУТИ СЕРИАЛИЗУЕТ И ПОЧЕМУ ФОРВАРДУ ОНА НЕ НУЖНА:
 //
-//   - The EXCLUSIVE advisory lock + FOR UPDATE on the full path exist to make the
-//     DELETE-STALE diff consistent: a full recompute computes desired = {all in-scope
-//     objects} and REVOKES every current member not in desired. Two concurrent full
-//     passes of the same binding from different snapshots could revoke each other's
-//     just-written members — so they serialize on the EXCLUSIVE lock (exactly-once
-//     materialization under N replicas). Because every resource of one project/account
-//     shares ONE binding, that EXCLUSIVE lock serializes ALL N registrations → the
-//     bottleneck.
-//   - The forward path is ADDITIVE: it only WRITES the one new object's ACTIVE member +
-//     tuples and NEVER deletes anything. Two forward passes for DIFFERENT objects (R1,
-//     R2) of the SAME binding touch DISJOINT rows (member keyed by object, fga_outbox
+//   - ЭКСКЛЮЗИВНАЯ рекомендательная блокировка и FOR UPDATE полного пути обеспечивают
+//     согласованность сравнения DELETE-STALE: полный пересчёт вычисляет desired = {все объекты
+//     области} и ОТЗЫВАЕТ каждого текущего участника вне desired. Два одновременных полных
+//     прохода одной привязки из разных снимков могли бы отзывать только что записанных
+//     участников друг друга, поэтому сериализуются ЭКСКЛЮЗИВНОЙ блокировкой (материализация
+//     ровно один раз при N репликах). Поскольку все ресурсы проекта/аккаунта
+//     делят ОДНУ привязку, эта блокировка сериализует ВСЕ N регистраций →
+//     узкое место.
+//   - Прямой путь ДОБАВЛЯЮЩИЙ: он только ПИШЕТ участника ACTIVE нового объекта и
+//     кортежи, НИКОГДА ничего не удаляя. Два прохода для РАЗНЫХ объектов (R1,
+//     R2) ОДНОЙ привязки затрагивают НЕПЕРЕСЕКАЮЩИЕСЯ строки (участник ключуется объектом, fga_outbox
 //     только добавление, ключ журнала (binding,member,user,relation,object)) → они не
-//     conflict → they need no mutual serialization. So forward does NOT take the
-//     EXCLUSIVE lock; N registrations proceed CONCURRENTLY (the fix).
-//   - Idempotency (forward re-run, or forward + the async full backstop both emitting
-//     the SAME object's tuples) is guaranteed downstream: UpsertMember is an UPSERT,
-//     RecordEmittedTuples is INSERT … ON CONFLICT, the fga_outbox drain treats
-//     already_exists as applied, and the post-commit sync FGA writer reconciles by
-//     read-then-write-delta. An object materialized twice is a safe no-op.
+//     конфликтуют и не требуют взаимной сериализации. Поэтому форвард НЕ берёт
+//     ЭКСКЛЮЗИВНУЮ блокировку; N регистраций идут ОДНОВРЕМЕННО (исправление).
+//   - Идемпотентность (повтор форварда либо форвард и полная асинхронная страховка, отправляющие
+//     кортежи ОДНОГО объекта) гарантируется ниже: UpsertMember — UPSERT,
+//     RecordEmittedTuples — INSERT … ON CONFLICT, выгрузка fga_outbox считает
+//     already_exists применением, а синхронный писатель FGA после коммита сверяет через
+//     чтение и запись дельты. Двойная материализация объекта безопасна и ничего не меняет.
 //
-// LOCK CHOICE — НИКАКОЙ advisory-блокировки (ни EXCLUSIVE, ни SHARE).
+// ВЫБОР БЛОКИРОВКИ — НИКАКОЙ рекомендательной блокировки (ни EXCLUSIVE, ни SHARE).
 //
 // Здесь стояла SHARE-блокировка, и она была введена не от избытка осторожности: без
 // неё форвард ловил перекрёстное ожидание с параллельным ПОЛНЫМ проходом того же
@@ -116,7 +116,7 @@ package reconcile
 // reconcile_deactivation_order_race_integration_test.go.
 //
 // ПОЧЕМУ ОДНОВРЕМЕННЫЙ delete-stale ПОЛНОГО ПРОХОДА НЕ СНОСИТ ТО, ЧТО ПИШЕТ ФОРВАРД
-// (это же рассуждение стояло здесь и раньше, в разделе «CORRECTNESS ENVELOPE», и
+// (это же рассуждение стояло здесь и раньше, в разделе «ГРАНИЦЫ КОРРЕКТНОСТИ», и
 // перекрёстным ожиданием не обеспечивалось): форвард материализует объект, УЖЕ
 // лежащий в зеркале, поэтому желаемый набор параллельного полного пересчёта —
 // читаемый из того же зеркала — этот объект СОДЕРЖИТ, и «устаревшим» полный проход
@@ -129,17 +129,17 @@ package reconcile
 // требует, чтобы форвард прошёл в пределах бюджета, — с парным положительным
 // контролем, что тот же форвард без держателя объект материализует.
 //
-// CORRECTNESS ENVELOPE. Forward is an OPTIMIZATION of the happy path, not a replacement:
-// the co-committed resource_reconcile_outbox event + the async worker's FULL
-// ReconcileObject + the periodic sweep REMAIN the at-least-once backstop. They cover
-// everything forward deliberately does NOT: delete-stale (object removed / label flipped
-// off), REJECTED-containment audit, PENDING re-verify, and any binding the fast-path
-// index missed. A skipped or failed forward pass is re-converged by the async full path
-// — so the forward path carries a LOW correctness risk. Additionally, because forward
-// only materializes an object ALREADY in the mirror (GetMirrorObject succeeded), a
-// concurrent full recompute's desired set (read from the same mirror) ALSO contains that
-// object → the full pass never treats it as stale. The integration Race case pins this
-// (R survives a concurrent full recompute; no deadlock without any advisory lock).
+// ГРАНИЦЫ КОРРЕКТНОСТИ. Форвард — ОПТИМИЗАЦИЯ успешного пути, не замена:
+// совместно коммитимое событие resource_reconcile_outbox, ПОЛНЫЙ ReconcileObject асинхронного
+// воркера и периодический обход ОСТАЮТСЯ страховкой доставки хотя бы раз. Они покрывают
+// всё, чего форвард намеренно НЕ делает: удаление устаревшего (удалён объект / снята
+// метка), аудит REJECTED по вложенности, перепроверку PENDING и привязки, пропущенные
+// индексом быстрого пути. Пропущенный или неудачный проход восстанавливает сходимость полным асинхронным путём,
+// поэтому риск для корректности у форварда НИЗКИЙ. Кроме того, поскольку форвард
+// материализует лишь объект, УЖЕ лежащий в зеркале (GetMirrorObject успешен),
+// желаемое множество параллельного полного пересчёта (из того же зеркала) ТОЖЕ содержит этот
+// объект → полный проход никогда не считает его устаревшим. Это закрепляет интеграционный случай Race
+// (R переживает одновременный полный пересчёт; без рекомендательной блокировки нет взаимоблокировки).
 
 import (
 	"context"
@@ -148,26 +148,26 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// ReconcileBindingForward is the ADDITIVE forward fast-path used by the AccessBinding
-// create-path (post-commit membership materialization, sub-phase IAM-FMB). It is the
-// binding-side twin of ReconcileObjectForward: where the object-forward materializes ONE
-// freshly-registered object across every matching binding, this materializes ONE freshly-
-// CREATED binding's desired ACTIVE per-object members across the whole scope — holding NO
-// advisory lock (neither the EXCLUSIVE full-path lock nor a SHARE one) and no FOR UPDATE
-// row-lock, and doing NO delete-stale diff.
+// ReconcileBindingForward — ДОБАВЛЯЮЩИЙ прямой быстрый путь создания
+// AccessBinding (материализация членства после коммита, подфаза IAM-FMB). Это
+// двойник ReconcileObjectForward со стороны привязки: прямой проход объекта материализует ОДИН
+// новый объект по всем совпавшим привязкам, а этот материализует желаемых участников ACTIVE
+// ОДНОЙ только что СОЗДАННОЙ привязки по всей области — БЕЗ
+// рекомендательной блокировки (ни ЭКСКЛЮЗИВНОЙ полного пути, ни SHARE), без строковой блокировки
+// FOR UPDATE и БЕЗ сравнения удаления устаревшего.
 //
-// WHY IT IS THE THROUGHPUT FIX. The create-path previously ran the FULL EXCLUSIVE
-// ReconcileBinding post-commit: it takes the per-binding EXCLUSIVE advisory lock + a
-// `SELECT … FOR UPDATE` on the binding row and does an O(scope) desired recompute WITH a
-// delete-stale diff (CurrentMembers read + cross-binding surviving-claims flush). That
-// EXCLUSIVE lock + delete-stale exist ONLY for the Role.Update fan-out / sweep, where a
-// concurrent re-materialization of the SAME binding must not race its own delete-stale. On
-// a mass-binding-create burst (a role grant-wave over an account / many subjects) those
-// serial O(scope) delete-stale recomputes do not keep up → grant materialization lags past
-// the client read-your-writes retry budget (transient 403 «lacks relation» on one's OWN
-// fresh grant). A create is PURELY additive — the binding is brand-new, so there is NOTHING
-// stale to delete — so the create-forward drops the delete-stale diff, the FOR UPDATE
-// row-lock, and the advisory lock entirely.
+// ПОЧЕМУ ЭТО ИСПРАВЛЯЕТ ПРОПУСКНУЮ СПОСОБНОСТЬ. Путь создания прежде запускал ПОЛНЫЙ ЭКСКЛЮЗИВНЫЙ
+// ReconcileBinding после коммита: он берёт ЭКСКЛЮЗИВНУЮ рекомендательную блокировку привязки,
+// `SELECT … FOR UPDATE` её строки и пересчитывает желаемое за O(scope) СО
+// сравнением удаления устаревшего (чтение CurrentMembers и сведение сохранившихся притязаний других привязок).
+// ЭКСКЛЮЗИВНАЯ блокировка и удаление устаревшего нужны ТОЛЬКО распространению Role.Update / обходу, где
+// повторная материализация ОДНОЙ привязки не должна гоняться со своим удалением устаревшего. При
+// массовом создании привязок (волна выдач роли в аккаунте / многим субъектам) эти
+// последовательные пересчёты за O(scope) не успевают → материализация выдачи выходит за
+// бюджет повторов чтения своих записей клиента (временный 403 «lacks relation» на СОБСТВЕННОЙ
+// новой выдаче). Создание ЧИСТО добавляющее — привязка новая и удалять НЕЧЕГО, —
+// поэтому прямой проход создания снимает сравнение удаления устаревшего, строковую блокировку FOR UPDATE
+// и рекомендательную блокировку полностью.
 //
 // LOCK CHOICE — без advisory-блокировки (то же обоснование, что у ReconcileObjectForward,
 // см. шапку файла): полный проход держит строку биндинга как `FOR NO KEY UPDATE`, что с
@@ -175,45 +175,45 @@ import (
 // ожидания (40P01), ни прямого ожидания создания за фоновым проходом больше нет, и
 // брать SHARE незачем.
 //
-// DELETE-STALE GUARD (create-only, D-4). The additive path only ADDS the binding's desired
-// ACTIVE members; it NEVER delete-stale. That is correct ONLY for a brand-NEW binding (a
-// create — no materialized members yet). A call on a binding that ALREADY has materialized
-// members (a replay create / a call on an existing binding) transparently delegates to the
-// FULL ReconcileBinding (EXCLUSIVE + delete-stale) so a now-unmatched grant is revoked. The
-// check is one indexed read (CurrentMembers); on the create hot-path it is empty → the pass
-// stays on the fast additive path (throughput intact).
+// СТРАЖ УДАЛЕНИЯ УСТАРЕВШЕГО (только создание, D-4). Добавляющий путь лишь ДОБАВЛЯЕТ желаемых
+// участников ACTIVE привязки и НИКОГДА не удаляет устаревшее. Это верно ТОЛЬКО для НОВОЙ привязки
+// (создание — материализованных участников ещё нет). Вызов для привязки с УЖЕ материализованными
+// участниками (повтор создания / существующая привязка) прозрачно делегирует
+// ПОЛНОМУ ReconcileBinding (EXCLUSIVE и удаление устаревшего), чтобы отозвать переставшую совпадать выдачу.
+// Проверка — одно индексное чтение CurrentMembers; на горячем пути создания оно пусто → проход
+// остаётся быстрым и добавляющим (пропускная способность сохраняется).
 //
-// CORRECTNESS ENVELOPE (D-5). Forward is an OPTIMIZATION, not a replacement: the per-object
-// member-tuples are DURABLE in fga_outbox inside the forward writer-tx (ban #10) → the async
-// drainer applies them at-least-once even if the post-commit sync FGA write fails; the
-// periodic sweep (FULL ReconcileBinding) re-converges any member forward skipped. A
-// skipped/failed forward converges via (drainer + sweep). Operation.done does NOT wait for
-// tuple visibility (ban #9). The per-object verdict is SHARED with the full recompute
-// (desiredMemberForObject via desiredMembers), so the two paths derive BYTE-IDENTICAL tuples
-// (no over-/under-grant; idempotent forward + async-backstop overlap).
+// ГРАНИЦЫ КОРРЕКТНОСТИ (D-5). Форвард — ОПТИМИЗАЦИЯ, не замена: кортежи
+// участников объектов НАДЁЖНО записываются в fga_outbox внутри его транзакции писателя (запрет #10) → асинхронный
+// выгрузчик применяет их хотя бы раз даже при сбое синхронной записи FGA после коммита;
+// периодический обход (ПОЛНЫЙ ReconcileBinding) восстанавливает участников, пропущенных форвардом.
+// Пропуск/сбой сходится через выгрузку и обход. Operation.done НЕ ждёт
+// видимости кортежей (запрет #9). Вердикт объекта ОБЩИЙ с полным пересчётом
+// (desiredMemberForObject через desiredMembers), поэтому оба пути выводят ПОБАЙТНО ОДИНАКОВЫЕ кортежи
+// (без избыточной/недостающей выдачи; идемпотентное перекрытие форварда и асинхронной страховки).
 func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID domain.AccessBindingID) error {
 	col := &syncFGACollector{}
 	w := &forwardWriteSet{}
-	// needsFull is set inside the peek below when the binding already has materialized
-	// members (a replay create / a call on an existing binding), which requires the FULL
-	// delete-stale diff the additive forward path deliberately omits (DELETE-STALE GUARD).
+	// needsFull устанавливается в чтении ниже, если у привязки уже материализованы
+	// участники (повтор создания / существующая привязка), что требует ПОЛНОГО
+	// сравнения удаления устаревшего, намеренно отсутствующего у добавляющего пути (СТРАЖ УДАЛЕНИЯ).
 	needsFull := false
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
-		// DELETE-STALE GUARD (create-only). Discriminate a true create (no members) from a
-		// replay / existing-binding call (has members) by ONE indexed read. On the create
-		// hot-path this is empty, so the extra cost is a single cheap SELECT in the same
-		// forward tx.
+		// СТРАЖ УДАЛЕНИЯ УСТАРЕВШЕГО (только создание). Отличить настоящее создание (нет участников) от
+		// повтора / существующей привязки (есть участники) ОДНИМ индексным чтением. На горячем пути
+		// создания оно пусто, поэтому добавочная цена — один дешёвый SELECT в той же
+		// транзакции форварда.
 		existing, err := s.CurrentMembers(ctx, bindingID)
 		if err != nil {
 			return fmt.Errorf("forward binding: current members %s: %w", bindingID, err)
 		}
 		if len(existing) > 0 {
 			needsFull = true
-			return nil // commit the read-only peek; run the FULL path below (fresh tx).
+			return nil // Закоммитить только читающую пробу; ниже выполнить ПОЛНЫЙ путь (новая транзакция).
 		}
 		// БЕЗ advisory-блокировки — ни EXCLUSIVE, ни SHARE (см. «LOCK CHOICE» в шапке
 		// файла): аддитивный проход не удаляет ничего, а перекрёстного ожидания с полным
-		// проходом больше нет by construction — тот держит строку в режиме
+		// проходом больше нет по устройству — тот держит строку в режиме
 		// `FOR NO KEY UPDATE`, который с `FOR KEY SHARE` не конфликтует. Строку выдачи
 		// чтение берёт `FOR KEY SHARE` — «выдача жива» верно до коммита против её
 		// снятия (шапка файла, «ЗАМОК СТРОКИ ВЫДАЧИ»).
@@ -222,11 +222,11 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 			return fmt.Errorf("forward binding: load %s: %w", bindingID, err)
 		}
 		if !ok || !bs.Active {
-			return nil // deleted / not ACTIVE — nothing to materialize.
+			return nil // Удалена / не ACTIVE — материализовать нечего.
 		}
-		// The binding's desired member set — SHARED with the FULL recompute
-		// (desiredMembers → desiredRuleMembers → desiredMemberForObject), so the forward and
-		// full paths derive BYTE-IDENTICAL tuples (equivalence; idempotency across overlap).
+		// Желаемое множество участников привязки — ОБЩЕЕ с ПОЛНЫМ пересчётом
+		// (desiredMembers → desiredRuleMembers → desiredMemberForObject), поэтому прямой и
+		// полный пути выводят ПОБАЙТНО ОДИНАКОВЫЕ кортежи (эквивалентность, идемпотентное перекрытие).
 		desired, err := r.desiredMembers(ctx, s, bs)
 		if err != nil {
 			return err
@@ -245,9 +245,9 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 		// привязок — то есть перекашивал бы ровно хвост распределения.
 		r.observeSize(desired)
 		for _, d := range desired {
-			// Additive-only: materialize ONLY ACTIVE grants. A REJECTED containment verdict
-			// (cross-scope) — and its containment audit — is LEFT to the async FULL backstop
-			// (the additive path never writes a non-grant).
+			// Только добавление: материализовать ТОЛЬКО выдачи ACTIVE. Вердикт вложенности REJECTED
+			// (чужая область) и его аудит ОСТАЮТСЯ полной асинхронной страховке
+			// (добавляющий путь никогда не пишет не-выдачу).
 			if d.Status != domain.VerificationActive {
 				continue
 			}
@@ -259,9 +259,9 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 	}); err != nil {
 		return err
 	}
-	// Replay / existing-binding call: the additive fast-path is unsafe (it cannot delete-
-	// stale). Run the FULL ReconcileBinding (its own tx, EXCLUSIVE lock + delete-stale diff)
-	// so a now-unmatched grant is synchronously revoked. Keeps the create hot-path additive.
+	// Повтор / существующая привязка: быстрый добавляющий путь небезопасен (не умеет удалять
+	// устаревшее). Выполнить ПОЛНЫЙ ReconcileBinding (своя транзакция, EXCLUSIVE и сравнение удаления),
+	// чтобы синхронно отозвать переставшую совпадать выдачу. Горячий путь создания остаётся добавляющим.
 	if needsFull {
 		return r.ReconcileBinding(ctx, bindingID)
 	}
@@ -271,130 +271,130 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 	return nil
 }
 
-// ReconcileObjectForward is the ADDITIVE forward fast-path WITH the delete-stale guard
-// (the entry point for a caller that cannot prove the object carries nothing stale — a
-// re-registration that replaced the projection, and every withdrawal). It materializes ONLY the freshly-
-// registered object's per-object tuples for each binding whose selector NOW matches it,
-// holding NO advisory lock (neither the EXCLUSIVE full-path lock nor a SHARE one) and no
-// FOR UPDATE row-lock, and doing NO full O(scope) desired recompute (see the file-level doc
-// for the lock choice and why it is the throughput fix).
+// ReconcileObjectForward — ДОБАВЛЯЮЩИЙ прямой быстрый путь СО стражем удаления устаревшего
+// (вход для вызывающего, не способного доказать отсутствие устаревшего на объекте, —
+// повторная регистрация с заменой проекции и любое снятие). Он материализует ТОЛЬКО кортежи
+// нового зарегистрированного объекта для каждой привязки, чей селектор совпадает с ним СЕЙЧАС,
+// БЕЗ рекомендательной блокировки (ни ЭКСКЛЮЗИВНОЙ полного пути, ни SHARE) и без
+// строковой блокировки FOR UPDATE, БЕЗ полного пересчёта желаемого за O(scope) (см. документацию
+// файла о выборе блокировки и исправлении пропускной способности).
 //
-// The full ReconcileObject REMAINS the backstop (delete-stale / audit / PENDING /
-// sweep), driven by the co-committed reconcile-outbox event; forward is purely the
-// happy-path accelerator.
+// Полный ReconcileObject ОСТАЁТСЯ страховкой (удаление устаревшего, аудит, PENDING,
+// обход), запускаемой совместно коммитимым событием очереди сверки; форвард — лишь
+// ускоритель успешного пути.
 //
-// DELETE-STALE GUARD (create-only). RegisterResource is called on a label UPDATE as well
-// as a create, and the additive forward CANNOT revoke a now-unmatched grant (it never
-// deletes). So this method is additive ONLY for a brand-NEW object (no materialized
-// members); a RE-REGISTER / label-update (the object ALREADY has members) transparently
-// delegates to the FULL ReconcileObject, whose delete-stale diff synchronously revokes the
-// stale grant. Without this, removing a grant-matching label leaves a standing grant (the
-// T31 label-revoke `post-revoke-deny` regression). The create hot-path (new resources
-// under load) has no prior members → stays on the fast additive path (throughput intact).
+// СТРАЖ УДАЛЕНИЯ УСТАРЕВШЕГО (только создание). RegisterResource вызывается и при ОБНОВЛЕНИИ меток,
+// и при создании, а добавляющий форвард НЕ МОЖЕТ отозвать переставшую совпадать выдачу (он никогда
+// не удаляет). Поэтому метод добавляющий ТОЛЬКО для НОВОГО объекта (нет материализованных
+// участников); ПОВТОРНАЯ РЕГИСТРАЦИЯ / обновление меток (участники УЖЕ есть) прозрачно
+// делегирует ПОЛНОМУ ReconcileObject, чьё сравнение удаления устаревшего синхронно отзывает
+// старую выдачу. Без этого удаление совпадающей с выдачей метки оставляет действующую выдачу
+// (регрессия T31 отзыва по метке `post-revoke-deny`). Горячий путь создания (новые ресурсы
+// под нагрузкой) не имеет прежних участников → остаётся быстрым и добавляющим.
 //
-// iam-direct objects (iam.project / iam.account + iam content) are NOT registered over
-// the cross-service RegisterResource edge — they arrive on the iam-native create-path
-// (Project/AccessBinding/Role/... Create emits a reconcile event for its OWN object).
-// The forward path is iam-direct-AWARE (sub-phase IAM-FMB, throughput fix for the
-// iam.accessBinding / iam.project owner materialization): a brand-NEW iam-direct object
-// is materialized ADDITIVELY (lock-free, single-object) EXACTLY like a mirror-fed one,
-// reading its own-table projection (GetIAMDirectObject) and the matching bindings from
-// the iam-direct fan-out (IAMDirectSelectorBindingsMatchingObject). Before this the
-// create-path used the FULL EXCLUSIVE ReconcileObject, whose per-binding advisory lock +
-// O(scope) recompute serialized on the SINGLE owner/account binding every resource of an
-// account shares → owner-tuple materialization lag past the client read-your-writes retry
-// budget (transient 403 on one's OWN fresh grant). The per-object verdict / tuple emission
-// (forwardObjectForBinding → desiredMemberForObject → ruleObjectTuples) is FEED-AGNOSTIC and
-// SHARED with the FULL path, so the two derive BYTE-IDENTICAL tuples (no over-/under-grant).
+// Объекты iam-direct (iam.project / iam.account и содержимое iam) НЕ регистрируются
+// через межсервисный край RegisterResource — они приходят на собственный путь создания iam
+// (Project/AccessBinding/Role/... Create отправляет событие сверки СВОЕГО объекта).
+// Прямой путь УЧИТЫВАЕТ iam-direct (подфаза IAM-FMB, исправление пропускной способности
+// материализации владельца iam.accessBinding / iam.project): НОВЫЙ объект iam-direct
+// материализуется ДОБАВЛЯЮЩЕ (без блокировки, один объект) РОВНО как полученный через зеркало,
+// читая проекцию своей таблицы (GetIAMDirectObject) и совпавшие привязки из
+// распространения iam-direct (IAMDirectSelectorBindingsMatchingObject). Прежде
+// путь создания использовал ПОЛНЫЙ ЭКСКЛЮЗИВНЫЙ ReconcileObject, чья рекомендательная блокировка и
+// пересчёт O(scope) сериализовались на ЕДИНСТВЕННОЙ привязке владельца/аккаунта, общей всем ресурсам
+// аккаунта → задержка материализации кортежа владельца превышала бюджет повторов чтения своих
+// записей клиента (временный 403 на СОБСТВЕННОЙ новой выдаче). Вердикт и отправка кортежей объекта
+// (forwardObjectForBinding → desiredMemberForObject → ruleObjectTuples) НЕ ЗАВИСЯТ ОТ ИСТОЧНИКА и
+// ОБЩИЕ с ПОЛНЫМ путём, поэтому оба выводят ПОБАЙТНО ОДИНАКОВЫЕ кортежи (без лишних/недостающих прав).
 //
-// The full ReconcileObject REMAINS the async at-least-once backstop for BOTH feeds
-// (delete-stale / REJECTED-containment audit / PENDING / sweep), driven by the co-committed
-// reconcile-outbox event; forward is purely the happy-path accelerator.
+// Полный ReconcileObject ОСТАЁТСЯ асинхронной страховкой доставки хотя бы раз для ОБОИХ источников
+// (удаление устаревшего, аудит вложенности REJECTED, PENDING, обход), запускаемой совместно коммитимым
+// событием очереди сверки; форвард — лишь ускоритель успешного пути.
 func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, objectID string) error {
-	return r.reconcileObjectForward(ctx, objectType, objectID, false /* not proven — keep the delete-stale guard */)
+	return r.reconcileObjectForward(ctx, objectType, objectID, false /* не доказано — сохранить страж удаления устаревшего */)
 }
 
-// ReconcileObjectForwardNoStale is ReconcileObjectForward for an object whose caller can
-// PROVE that nothing materialized on it can have gone stale. It is the SAME pass in every
-// other respect (same object projection, same fan-out, same per-object verdict, same
-// additive materialization, same async backstop); the ONLY difference is that the
-// delete-stale guard below is skipped.
+// ReconcileObjectForwardNoStale — ReconcileObjectForward для объекта, вызывающий которого может
+// ДОКАЗАТЬ, что ничто материализованное на нём не устарело. Во всём остальном проход ТОТ ЖЕ
+// (та же проекция объекта, распространение, вердикт объекта,
+// добавляющая материализация, асинхронная страховка); ЕДИНСТВЕННОЕ отличие —
+// пропуск стража удаления устаревшего ниже.
 //
-// TWO ADMISSIBLE PROOFS, BOTH ESTABLISHED BY THE CALLER'S OWN DATABASE — never by a flag
-// on an incoming request:
+// ДВА ДОПУСТИМЫХ ДОКАЗАТЕЛЬСТВА, ОБА ИЗ СОБСТВЕННОЙ БАЗЫ ВЫЗЫВАЮЩЕГО, никогда не из флага
+// входящего запроса:
 //
-//  1. THE ID IS BRAND-NEW: it was minted in the caller's writer-tx and that tx has just
-//     committed, so the object never existed before this call (AccessBinding.Create).
-//  2. THE REGISTRATION REPLACED NOTHING: the object's stored projection — parent-scope and
-//     labels, the only things a selector reads — was already byte-identical to the one
-//     just written, and only its source_version advanced (the cross-service
-//     RegisterResource path, where the mirror UPSERT decides this in SQL).
+//  1. ИДЕНТИФИКАТОР НОВЫЙ: создан в транзакции писателя вызывающего, только что
+//     закоммиченной, поэтому объект до вызова не существовал (AccessBinding.Create).
+//  2. РЕГИСТРАЦИЯ НИЧЕГО НЕ ЗАМЕНИЛА: сохранённая проекция объекта — родительская область и
+//     метки, единственные читаемые селектором факты — уже была побайтно тождественна
+//     только что записанной, а продвинулась лишь source_version (межсервисный
+//     путь RegisterResource, где UPSERT зеркала определяет это в SQL).
 //
-// A member can only become stale when the facts that justified it change. Under (1) there
-// are no earlier facts at all; under (2) the facts this pass re-derives are the same ones
-// the earlier delivery derived, so the desired set it computes is the same set — an
-// additive pass over it removes nothing because there is nothing to remove.
+// Участник устаревает лишь при изменении обосновавших его фактов. При (1)
+// прежних фактов нет вовсе; при (2) этот проход выводит те же факты,
+// что прежняя доставка, и вычисляет то же желаемое множество —
+// добавляющий проход ничего не удаляет, поскольку удалять нечего.
 //
-// WHY IT IS NEEDED (create-path starvation, measured against the Read API). Members can
-// exist on the object before this pass runs — either written seconds earlier by the same
-// create, or written by the FIRST of the two deliveries every consumer performs. The
-// guard then finds a non-empty member set and routes the object to the FULL EXCLUSIVE
-// ReconcileObject. Since every object of an account shares the single account-admin
-// binding, those full passes queue on one advisory lock, and the account-admin's
-// per-object verbs arrived ~67s after the create — far past a client's read-your-writes
-// budget. Reordering the passes only moves the starvation; what the guard needs is the
-// fact only the caller holds.
+// ЗАЧЕМ ЭТО НУЖНО (голодание пути создания, измерено через Read API). Участники могут
+// появиться на объекте до этого прохода — записанные секундами раньше тем же
+// созданием либо ПЕРВОЙ из двух доставок каждого потребителя. Тогда
+// страж находит непустое множество и отправляет объект в ПОЛНЫЙ ЭКСКЛЮЗИВНЫЙ
+// ReconcileObject. Поскольку все объекты аккаунта делят единственную привязку
+// администратора аккаунта, полные проходы стоят в очереди на одной рекомендательной блокировке, и
+// глаголы администратора по объекту появлялись примерно через 67с после создания — далеко за бюджетом
+// чтения своих записей клиента. Перестановка проходов лишь переносит голодание; стражу нужен
+// факт, имеющийся только у вызывающего.
 //
-// WHAT IT DOES NOT LICENSE. The guard exists so a RE-REGISTER / label-UPDATE revokes a
-// now-unmatched grant (delete-stale, the T31 label-revoke regression). A registration
-// that REPLACED a different projection — a label flipped off, a move to another parent —
-// is exactly that case and must NOT come through here: an additive pass on it would add
-// the new grants and leave the old ones standing, i.e. an UNAPPLIED REVOKE. Neither may
-// a withdrawal: stripping an object's tuples IS the full pass's delete-stale diff.
+// ЧЕГО ЭТО НЕ РАЗРЕШАЕТ. Страж нужен, чтобы ПОВТОРНАЯ РЕГИСТРАЦИЯ / ОБНОВЛЕНИЕ меток отзывали
+// переставшую совпадать выдачу (удаление устаревшего, регрессия T31 отзыва по метке). Регистрация,
+// ЗАМЕНИВШАЯ отличающуюся проекцию — снята метка, сменился родитель, —
+// как раз такой случай и НЕ должна попадать сюда: добавляющий проход добавит
+// новые выдачи, оставив прежние действующими, то есть ОТЗЫВ НЕ ПРИМЕНИТСЯ. Также недопустимо
+// снятие: удаление кортежей объекта И ЕСТЬ сравнение удаления устаревшего полного прохода.
 //
-// The FULL ReconcileObject remains the at-least-once backstop (co-committed reconcile
-// event + sweep) for delete-stale, REJECTED-containment audit and PENDING re-verify,
-// exactly as for the ordinary forward. It does NOT gate Operation.done on tuple
-// visibility (ban #9): materialization stays eventually-consistent, this only keeps it
-// on the fast path.
+// ПОЛНЫЙ ReconcileObject остаётся страховкой доставки хотя бы раз (совместно коммитимое событие
+// сверки и обход) для удаления устаревшего, аудита вложенности REJECTED и перепроверки PENDING,
+// как у обычного форварда. Он НЕ ставит Operation.done в зависимость от
+// видимости кортежей (запрет #9): материализация остаётся согласованной в конечном счёте, это лишь удерживает её
+// на быстром пути.
 func (r *Reconciler) ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error {
-	return r.reconcileObjectForward(ctx, objectType, objectID, true /* proven — nothing stale can exist */)
+	return r.reconcileObjectForward(ctx, objectType, objectID, true /* доказано — устаревшего быть не может */)
 }
 
-// reconcileObjectForward is the shared implementation of the two entry points above;
-// noStale lifts the delete-stale guard (see ReconcileObjectForwardNoStale).
+// reconcileObjectForward — общая реализация двух точек входа выше;
+// noStale снимает страж удаления устаревшего (см. ReconcileObjectForwardNoStale).
 func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, objectID string, noStale bool) error {
-	// Feed classifier: an iam.* object lives in ITS OWN table (iam-direct, never PENDING);
-	// every other selectable family (compute/vpc/loadbalancer/...) is mirror-fed. The
-	// object getter + the fast-path fan-out differ per feed; everything else is shared.
+	// Классификатор источника: объект iam.* живёт в СВОЕЙ таблице (iam-direct, никогда не PENDING);
+	// все остальные выбираемые семейства (compute/vpc/loadbalancer/...) приходят из зеркала.
+	// Получение объекта и распространение быстрого пути различаются по источнику; остальное общее.
 	iamDirect := domain.FeedSourceForType(objectType) == domain.FeedIAMDirect
 	col := &syncFGACollector{}
 	w := &forwardWriteSet{}
-	// needsFull is set inside the peek below when the object already has materialized
-	// members (a RE-REGISTER / label-UPDATE), which requires the FULL delete-stale diff
-	// that the additive forward path deliberately omits (see the DELETE-STALE GUARD note).
+	// needsFull устанавливается в чтении ниже, если у объекта уже материализованы
+	// участники (ПОВТОРНАЯ РЕГИСТРАЦИЯ / ОБНОВЛЕНИЕ меток), что требует ПОЛНОГО сравнения удаления устаревшего,
+	// намеренно отсутствующего у добавляющего пути (см. СТРАЖ УДАЛЕНИЯ УСТАРЕВШЕГО).
 	needsFull := false
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
-		// DELETE-STALE GUARD (regression fix — T31 label-revoke `post-revoke-deny`). The
-		// additive forward path only ADDS the object's tuples; it NEVER revokes. That is
-		// correct ONLY for a brand-NEW object (a create — nothing stale to remove). But the
-		// object may ALSO be re-materialized on a label UPDATE (mirror-fed RegisterResource
-		// re-call OR iam-direct Project/AccessBinding.Update label change), and removing a
-		// grant-matching label must REVOKE the now-unmatched grant — a DELETE-STALE the
-		// forward path cannot do. Discriminate by whether the object ALREADY has materialized
-		// members (feed-agnostic — members are keyed by object regardless of feed):
-		//   - none  ⇒ create ⇒ fast additive forward (the throughput hot-path);
-		//   - some  ⇒ re-register/update ⇒ bail to the FULL ReconcileObject (delete-stale).
-		// The check is one indexed read (target_members by object); on the create hot-path
-		// it is empty, so the extra cost is a single cheap SELECT in the same forward tx.
+		// СТРАЖ УДАЛЕНИЯ УСТАРЕВШЕГО (исправление регрессии T31 отзыва по метке `post-revoke-deny`).
+		// Добавляющий прямой путь лишь ДОБАВЛЯЕТ кортежи объекта и НИКОГДА не отзывает. Это
+		// верно ТОЛЬКО для НОВОГО объекта (создание — удалять устаревшее нечего). Но
+		// объект ТАКЖЕ может перематериализоваться при ОБНОВЛЕНИИ меток (повтор RegisterResource
+		// из зеркала ИЛИ изменение меток Project/AccessBinding.Update iam-direct); удаление
+		// совпадающей с выдачей метки должно ОТОЗВАТЬ переставшую совпадать выдачу — УДАЛИТЬ УСТАРЕВШЕЕ,
+		// чего форвард не умеет. Различаем по тому, есть ли УЖЕ материализованные
+		// участники объекта (независимо от источника — участники ключуются объектом):
+		//   - нет ⇒ создание ⇒ быстрый добавляющий форвард (горячий путь пропускной способности);
+		//   - есть ⇒ повтор регистрации/обновление ⇒ ПОЛНЫЙ ReconcileObject (удаление устаревшего).
+		// Проверка — одно индексное чтение (target_members по объекту); на горячем пути создания
+		// оно пусто, поэтому добавочная цена — один дешёвый SELECT в той же транзакции форварда.
 		//
-		// SKIPPED when the caller PROVED nothing stale can exist (ReconcileObjectForwardNoStale):
-		// either the id never existed before, or the registration replaced nothing — see the
-		// two admissible proofs in that method's doc. The members such an object DOES carry
-		// were written by the same create, or by the first of the two deliveries of the very
-		// same registration; reading them would bounce the hot path onto the FULL EXCLUSIVE
-		// recompute it is trying to avoid. The query is skipped rather than its result
-		// ignored: it is a pure cost then.
+		// ПРОПУСКАЕТСЯ, если вызывающий ДОКАЗАЛ невозможность устаревшего (ReconcileObjectForwardNoStale):
+		// либо идентификатор прежде не существовал, либо регистрация ничего не заменила — см.
+		// два допустимых доказательства в документации метода. Участников, которые у такого объекта ЕСТЬ,
+		// записало то же создание либо первая из двух доставок той же
+		// регистрации; чтение отбросило бы горячий путь на ПОЛНЫЙ ЭКСКЛЮЗИВНЫЙ
+		// пересчёт, которого он избегает. Запрос пропускается, а не игнорируется его
+		// результат: в таком случае это чистые затраты.
 		if !noStale {
 			existing, err := s.BindingsForObject(ctx, objectType, objectID)
 			if err != nil {
@@ -402,13 +402,13 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 			}
 			if len(existing) > 0 {
 				needsFull = true
-				return nil // commit the read-only peek; run the FULL path below (fresh tx).
+				return nil // Закоммитить только читающую пробу; ниже выполнить ПОЛНЫЙ путь (новая транзакция).
 			}
 		}
-		// The registered object's same-DB projection — containment parents (parent_project_id
-		// + the account resolved through the project→account join) and labels — the SAME
-		// projection the full path's IsContainedIn / arm match consume. Read from the mirror
-		// (consumer-owned feed) or the iam-native own table (iam-direct feed).
+		// Проекция зарегистрированного объекта в той же базе — родители вложенности (parent_project_id
+		// и аккаунт, найденный соединением проект→аккаунт) и метки — ТА ЖЕ
+		// проекция, которую читают IsContainedIn / сопоставление ветви полного пути. Читается из зеркала
+		// (источник потребителя) либо собственной таблицы iam (источник iam-direct).
 		var (
 			obj domain.MirrorObject
 			ok  bool
@@ -423,30 +423,30 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 			return fmt.Errorf("forward: get object %s:%s: %w", objectType, objectID, err)
 		}
 		if !ok {
-			// Not (yet) present in its source (mirror not landed / iam row raced a delete) —
-			// nothing to materialize on the fast-path. The register / create writer-tx lands
-			// the source row BEFORE this post-commit call, so in the create-path this is
-			// present; a stray call simply defers to the async backstop.
+			// В источнике (ещё) отсутствует (зеркало не пришло / строка iam столкнулась с удалением) —
+			// быстрому пути материализовать нечего. Транзакция писателя регистрации/создания кладёт
+			// строку источника ДО этого вызова после коммита, поэтому на пути создания она
+			// есть; случайный вызов просто оставляет работу асинхронной страховке.
 			return nil
 		}
 		// Предки объекта — для вложенных правил выдач (kaname#874): не более одного
 		// раза на веер и лишь по спросу выдачи с вложенным правилом.
 		ancestors := r.ancestorsOf(ctx, s, objectType, objectID, ok)
-		// Candidate bindings whose selector matches this object, INCLUDING bindings with no
-		// member row yet (the brand-new-object case). This is the SAME fast-path source the
-		// full ReconcileObject uses (feed-agnostic verdict downstream). NOTE (doc-truthfulness,
-		// db-review finding A): the two feeds narrow scope differently — the MIRROR-fed
-		// SelectorBindingsMatchingObject pushes the containment predicate (b.resource_id =
-		// parent_account) into the JOIN, so its ANCHOR arm is O(containing bindings); the
-		// IAM-DIRECT IAMDirectSelectorBindingsMatchingObject anchor arm is currently
-		// UN-narrowed (matches every active anchor binding of the type system-wide), so its
-		// fan-out is O(anchor bindings of the type across all accounts). Correctness is
-		// unaffected — the per-binding IsContainedIn re-verify (ruleObjectTuples path) is
-		// authoritative and rejects foreign-scope candidates (unit ForeignScope + integration
-		// scope-boundary test) — but it is an O(N-accounts) hot-path cost at tenant scale.
-		// This is PRE-EXISTING (the full ReconcileObject uses the same fan-out), not a
-		// regression of this fast-path; pushing the containment predicate into the iam-direct
-		// anchor arm (mirroring the mirror-fed branch) is a tracked follow-up optimization.
+		// Привязки-кандидаты, чей селектор совпадает с объектом, ВКЛЮЧАЯ привязки ещё без
+		// строки участника (новый объект). Это ТОТ ЖЕ источник быстрого пути, что у
+		// полного ReconcileObject (вердикт далее независим от источника). ПРИМЕЧАНИЕ (правдивость документации,
+		// замечание A обзора БД): два источника по-разному сужают область — получающий ЗЕРКАЛО
+		// SelectorBindingsMatchingObject проталкивает предикат вложенности (b.resource_id =
+		// parent_account) в JOIN, поэтому его ветвь ANCHOR имеет O(содержащих привязок);
+		// ветвь якоря IAM-DIRECT IAMDirectSelectorBindingsMatchingObject сейчас
+		// НЕ сужена (находит все активные якорные привязки типа во всей системе), поэтому её
+		// распространение имеет O(якорных привязок типа по всем аккаунтам). Корректность
+		// не меняется — повторная IsContainedIn на привязке (путь ruleObjectTuples)
+		// авторитетна и отвергает кандидатов чужой области (модульный ForeignScope и интеграционная
+		// проверка границы области), — но цена горячего пути при множестве арендаторов составляет O(N-аккаунтов).
+		// Это ПРЕЖНЕЕ поведение (полный ReconcileObject использует то же распространение), а не
+		// регрессия быстрого пути; проталкивание предиката вложенности в якорную ветвь iam-direct
+		// (подобно зеркальной ветви) — учтённая последующая оптимизация.
 		var matching []domain.AccessBindingID
 		if iamDirect {
 			matching, err = s.IAMDirectSelectorBindingsMatchingObject(ctx, objectType, objectID)
@@ -494,10 +494,10 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 	}); err != nil {
 		return err
 	}
-	// Re-register / label-update: the object already had members, so the additive fast-path
-	// is unsafe (it cannot delete-stale). Run the FULL ReconcileObject (its own tx, EXCLUSIVE
-	// lock + delete-stale diff) so a now-unmatched grant is synchronously revoked. This keeps
-	// the create hot-path on the fast additive path while restoring correct revoke-on-update.
+	// Повтор регистрации / обновление меток: участники уже были, поэтому быстрый добавляющий путь
+	// небезопасен (не умеет удалять устаревшее). Выполнить ПОЛНЫЙ ReconcileObject (своя транзакция, ЭКСКЛЮЗИВНАЯ
+	// блокировка и сравнение удаления), чтобы синхронно отозвать переставшую совпадать выдачу. Это сохраняет
+	// быстрый добавляющий путь создания и восстанавливает правильный отзыв при обновлении.
 	if needsFull {
 		return r.ReconcileObject(ctx, objectType, objectID)
 	}
@@ -508,32 +508,32 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 	return nil
 }
 
-// forwardObjectForBinding materializes the ONE object's ACTIVE per-object tuples for a
-// single matching binding whose facts the caller has ALREADY read (пакетом — см.
-// reconcileObjectForward). It takes NO advisory lock (neither the EXCLUSIVE lock the full
-// path takes nor a SHARE one) and NO FOR UPDATE row-lock: the pass is additive-only (see
-// file-level doc). A binding whose (scope-aware) selectors do not match this object is a
-// no-op; выдачи, которой уже нет или которая не ACTIVE, вызывающий сюда не приносит.
-// Non-ACTIVE per-object verdicts (REJECTED containment) are LEFT to the async full
-// backstop — the additive path never writes a non-grant.
+// forwardObjectForBinding материализует кортежи ACTIVE ОДНОГО объекта для
+// одной совпавшей привязки, факты которой вызывающий УЖЕ прочитал (пакетом — см.
+// reconcileObjectForward). НЕ берёт рекомендательную блокировку (ни EXCLUSIVE полного
+// пути, ни SHARE) и НЕ берёт строковую блокировку FOR UPDATE: проход лишь добавляет (см.
+// документацию файла). Привязка, чьи селекторы с учётом области не совпали с объектом, ничего
+// не меняет; выдачи, которой уже нет или которая не ACTIVE, вызывающий сюда не приносит.
+// Вердикты объекта вне ACTIVE (вложенность REJECTED) ОСТАЮТСЯ полной асинхронной
+// страховке — добавляющий путь никогда не пишет не-выдачу.
 func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileStore, bs BindingScope, obj domain.MirrorObject,
 	ancestors *ancestorMemo, col *syncFGACollector, w *forwardWriteSet) error {
-	// The object's desired members under this binding — derived by the SHARED
-	// desiredMembersForObject (per-object target least-priv, arm match, containment
-	// verdict, scope-self anchor), so the forward fast-path, the object-narrowed full
-	// pass and the whole-scope recompute all derive BYTE-IDENTICAL tuples. A cluster
-	// `*.*` binding carries selectors with EMPTY ObjectTypes (the D-9 flat short-circuit
-	// owns cluster super-admin), so nothing matches → no per-object materialization on
-	// cluster (short-circuit preserved).
+	// Желаемые участники объекта под этой привязкой — выводятся ОБЩИМ
+	//  desiredMembersForObject (минимальные права цели по объекту, сопоставление ветви, вердикт
+	// вложенности, якорь собственной области), поэтому быстрый прямой путь, полный проход с сужением
+	// по объекту и пересчёт всей области выводят ПОБАЙТНО ОДИНАКОВЫЕ кортежи. Привязка кластера
+	// `*.*` несёт селекторы с ПУСТЫМ ObjectTypes (плоское сокращение D-9
+	// владеет надзором администратора кластера), поэтому ничто не совпадает → материализации по объектам
+	// на кластере нет (сокращение сохранено).
 	anc, err := ancestors.forBinding(bs)
 	if err != nil {
 		return fmt.Errorf("forward: %w", err)
 	}
 	for _, dm := range desiredMembersForObject(r.cat.Facts(), bs, obj, anc) {
 		if dm.Status != domain.VerificationActive {
-			// A REJECTED containment verdict: the additive forward path materializes only
-			// ACTIVE grants; the async full backstop owns the REJECTED member row +
-			// containment audit.
+			// Вердикт вложенности REJECTED: добавляющий прямой путь материализует только
+			// выдачи ACTIVE; полной асинхронной страховке принадлежат строка участника REJECTED и
+			// аудит вложенности.
 			continue
 		}
 		if err := r.materializeForwardMember(ctx, s, bs, dm, col, w); err != nil {
@@ -565,6 +565,12 @@ func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
 	if err := w.keepLive(ctx, s); err != nil {
 		return err
 	}
+	return w.writeLive(ctx, s)
+}
+
+// writeLive пишет только накопленное: вызывающий уже отфильтровал members
+// и удерживает их строки зеркала в той же транзакции (keepLive либо keepLiveDesired).
+func (w *forwardWriteSet) writeLive(ctx context.Context, s ReconcileStore) error {
 	if err := s.UpsertMembers(ctx, w.members); err != nil {
 		return fmt.Errorf("forward: upsert members (%d): %w", len(w.members), err)
 	}
@@ -632,9 +638,9 @@ func (r *Reconciler) materializeForwardMember(_ context.Context, _ ReconcileStor
 		BindingID: bs.BindingID, RoleID: domain.RoleID(bs.RoleID), RuleFP: dm.RuleFP,
 		ObjectType: dm.ObjectType, ObjectID: dm.ObjectID, VerificationStatus: domain.VerificationActive,
 	})
-	// Enqueue ONLY the tuples this pass has not already enqueued, and record the same set
-	// in the pass collector, whose surviving consumer is the deletion subtraction. Per-pass
-	// de-dup — never across passes, so a re-grant after a revoke is always re-emitted.
+	// Ставить ТОЛЬКО кортежи, ещё не поставленные этим проходом, и записывать то же множество
+	// в коллектор прохода, оставшийся потребитель которого — вычитание при удалении. Устранение дублей в проходе,
+	// никогда между проходами, чтобы повторная выдача после отзыва всегда отправлялась снова.
 	w.fresh = append(w.fresh, col.collectNew(dm.Tuples)...)
 	// Кортежи члена ложатся в реестр под его координатой той же транзакцией: на реестре
 	// стоят симметричное снятие и сверка Role.Update (ban #10). Вставка — `ON CONFLICT
@@ -646,17 +652,17 @@ func (r *Reconciler) materializeForwardMember(_ context.Context, _ ReconcileStor
 	return nil
 }
 
-// selectorMatchesObject reports whether ONE materializing selector matches ONE object
-// per its arm — the pure-Go mirror of the SQL predicate in
-// SelectorBindingsMatchingObject, so the forward fast-path picks EXACTLY the same
-// selector→object matches the fan-out query found (no drift):
+// selectorMatchesObject сообщает, совпадает ли ОДИН материализующий селектор с ОДНИМ объектом
+// по своей ветви — чистый Go-двойник предиката SQL в
+// SelectorBindingsMatchingObject, чтобы быстрый прямой путь выбирал РОВНО те же
+// совпадения селектор→объект, что и запрос распространения (без расхождений):
 //
-//   - the object's dotted type must be in the selector's ObjectTypes (empty ⇒ no match,
-//     which is the cluster `*.*` short-circuit — cluster super-admin is not per-object);
-//   - ARM_NAMES  → the object id must be in ResourceNames;
-//   - ARM_LABELS → the object labels must satisfy MatchLabels (labels @> matchLabels);
-//   - ARM_ANCHOR → type membership is sufficient (containment is re-verified separately
-//     by desiredMemberForObject → IsContainedIn).
+//   - тип объекта с точкой должен входить в ObjectTypes селектора (пусто ⇒ нет совпадения,
+//     это ранний выход для кластерного `*.*`: права супер-администратора кластера не пообъектные);
+//   - ARM_NAMES → идентификатор объекта должен входить в ResourceNames;
+//   - ARM_LABELS → метки объекта должны удовлетворять MatchLabels (labels @> matchLabels);
+//   - ARM_ANCHOR → достаточно вхождения типа (вложенность отдельно перепроверяет
+//     desiredMemberForObject → IsContainedIn).
 func selectorMatchesObject(sel domain.RuleSelector, o domain.MirrorObject) bool {
 	if !containsStringForward(sel.ObjectTypes, o.ObjectType) {
 		return false
@@ -671,7 +677,7 @@ func selectorMatchesObject(sel domain.RuleSelector, o domain.MirrorObject) bool 
 	}
 }
 
-// containsStringForward reports set membership (small closed lists — linear scan).
+// containsStringForward сообщает о вхождении в множество (малые закрытые списки — линейный проход).
 func containsStringForward(list []string, want string) bool {
 	for _, v := range list {
 		if v == want {

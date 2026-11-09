@@ -37,6 +37,7 @@ type Process struct {
 	mu           sync.Mutex
 	err          error
 	BinarySHA256 string
+	ConfigSHA256 string
 	StdoutPath   string
 	StderrPath   string
 }
@@ -60,13 +61,18 @@ func Start(ctx context.Context, in Input) (*Process, error) {
 		return nil, err
 	}
 	digest := hex.EncodeToString(h.Sum(nil))
+	config, err := os.ReadFile(in.ConfigFile) // #nosec G304 -- абсолютный путь профиля принадлежит фикстуре, байты связаны с квитанцией процесса.
+	if err != nil {
+		return nil, err
+	}
+	configDigest := sha256.Sum256(config)
 	if in.ExpectedBinarySHA256 != "" && digest != in.ExpectedBinarySHA256 {
 		return nil, errors.New("serve executable differs from frozen artifact before launch")
 	}
 	if err := os.Mkdir(in.EvidenceDir, 0700); err != nil {
 		return nil, err
 	}
-	p := &Process{done: make(chan struct{}), BinarySHA256: digest,
+	p := &Process{done: make(chan struct{}), BinarySHA256: digest, ConfigSHA256: hex.EncodeToString(configDigest[:]),
 		StdoutPath: filepath.Join(in.EvidenceDir, "stdout.jsonl"), StderrPath: filepath.Join(in.EvidenceDir, "stderr.jsonl")}
 	out, err := os.OpenFile(p.StdoutPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
@@ -83,7 +89,7 @@ func Start(ctx context.Context, in Input) (*Process, error) {
 	if err := p.cmd.Start(); err != nil {
 		return nil, errors.Join(err, out.Close(), errout.Close())
 	}
-	identity, _ := json.Marshal(map[string]any{"pid": p.cmd.Process.Pid, "binarySHA256": digest})
+	identity, _ := json.Marshal(map[string]any{"pid": p.cmd.Process.Pid, "binarySHA256": digest, "configSHA256": p.ConfigSHA256})
 	if err := os.WriteFile(filepath.Join(in.EvidenceDir, "process.json"), identity, 0600); err != nil {
 		_ = p.cmd.Process.Kill()
 		_ = p.cmd.Wait()

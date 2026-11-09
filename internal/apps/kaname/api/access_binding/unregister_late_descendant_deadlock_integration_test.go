@@ -26,6 +26,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
 type lateCensus struct {
@@ -114,7 +115,7 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 	uc := internaliam.NewRegisterResourceUseCase(kanamepg.NewFGAOutboxEmitter(), h, kanamepg.NewPoolTxBeginner(upool),
 		kanamepg.NewCatalogTypeReader(), kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld}),
-		kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader())
+		kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	first, releaseFirstRaw := h.first.arm()
 	beforeDelete, releaseDeleteRaw := h.beforeDelete.arm()
 	var firstOnce, deleteOnce sync.Once

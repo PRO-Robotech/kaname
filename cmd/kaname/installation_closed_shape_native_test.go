@@ -212,7 +212,7 @@ func rid12World(t *testing.T, in rid12NativeInput, consumer rid12LivePublicConsu
 		if consumer != nil {
 			consumer(t, f, in, "refusal-before-restore")
 		}
-		p, err := f.session.StartBase(f.given.ctx)
+		p, err := f.session.StartBase(f.given.ctx, f.writerPlan)
 		require.NoError(t, err)
 		require.NoError(t, p.OwnsListeners(installruntime.DefaultNativePorts().All()...))
 		rid09RequireNoDelivery(t, f, accounts)

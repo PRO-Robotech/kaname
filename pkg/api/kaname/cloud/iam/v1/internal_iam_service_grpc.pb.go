@@ -158,14 +158,14 @@ type InternalIAMServiceClient interface {
 	//
 	// authz: `<exempt>` на уровне permission-каталога (как все Internal IAM RPC).
 	// Least-priv энфорсится в IAM-handler через ReBAC: mTLS client-cert →
-	// ServiceAccount → relation `fga_writer` на системном объекте
-	// `cluster:cluster_root`. Нет relation → PermissionDenied. cluster-internal
+	// ServiceAccount → relation `fga_writer` на каноническом аккаунте
+	// `account:<id>`. Нет relation → PermissionDenied. cluster-internal
 	// listener :9091 only — нет google.api.http.
 	RegisterResource(ctx context.Context, in *RegisterResourceRequest, opts ...grpc.CallOption) (*RegisterResourceResponse, error)
 	// UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
 	// (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
 	//
-	// ИДЕМПОТЕНТНО (контракт): снятие отсутствующего/уже снятого tuple → gRPC OK,
+	// ИДЕМПОТЕНТНО при разрешимой сохранённой области и праве аккаунта: повтор → gRPC OK,
 	// НЕ NotFound — drainer ретраит безопасно.
 	//
 	// Снятие, которое удалило регистрацию объекта (надгробие не старше хранимой
@@ -177,7 +177,7 @@ type InternalIAMServiceClient interface {
 	// регистрация того же ключа начинается с пустого набора выдач.
 	//
 	// Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
-	// `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
+	// `account:<id>` (см. RegisterResource). cluster-internal :9091 only,
 	// нет google.api.http.
 	UnregisterResource(ctx context.Context, in *UnregisterResourceRequest, opts ...grpc.CallOption) (*UnregisterResourceResponse, error)
 	// GetRoleCompiled — Internal two-projection read (redesign-2026 F5): returns a
@@ -462,14 +462,14 @@ type InternalIAMServiceServer interface {
 	//
 	// authz: `<exempt>` на уровне permission-каталога (как все Internal IAM RPC).
 	// Least-priv энфорсится в IAM-handler через ReBAC: mTLS client-cert →
-	// ServiceAccount → relation `fga_writer` на системном объекте
-	// `cluster:cluster_root`. Нет relation → PermissionDenied. cluster-internal
+	// ServiceAccount → relation `fga_writer` на каноническом аккаунте
+	// `account:<id>`. Нет relation → PermissionDenied. cluster-internal
 	// listener :9091 only — нет google.api.http.
 	RegisterResource(context.Context, *RegisterResourceRequest) (*RegisterResourceResponse, error)
 	// UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
 	// (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
 	//
-	// ИДЕМПОТЕНТНО (контракт): снятие отсутствующего/уже снятого tuple → gRPC OK,
+	// ИДЕМПОТЕНТНО при разрешимой сохранённой области и праве аккаунта: повтор → gRPC OK,
 	// НЕ NotFound — drainer ретраит безопасно.
 	//
 	// Снятие, которое удалило регистрацию объекта (надгробие не старше хранимой
@@ -481,7 +481,7 @@ type InternalIAMServiceServer interface {
 	// регистрация того же ключа начинается с пустого набора выдач.
 	//
 	// Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
-	// `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
+	// `account:<id>` (см. RegisterResource). cluster-internal :9091 only,
 	// нет google.api.http.
 	UnregisterResource(context.Context, *UnregisterResourceRequest) (*UnregisterResourceResponse, error)
 	// GetRoleCompiled — Internal two-projection read (redesign-2026 F5): returns a

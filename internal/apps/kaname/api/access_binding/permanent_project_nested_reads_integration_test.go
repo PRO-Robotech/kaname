@@ -24,6 +24,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
 type observedRegistrationBeginner struct{ conn *pgx.Conn }
@@ -137,7 +138,7 @@ func TestPermanentProjectNestedReads_FullUpsertBudget(t *testing.T) {
 		kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld}),
 		kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader(),
-	).WithReconcile(kanamepg.NewReconcileEventEmitter()).WithAccountResolver(kanamepg.NewProjectAccountResolver())
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"}).WithReconcile(kanamepg.NewReconcileEventEmitter()).WithAccountResolver(kanamepg.NewProjectAccountResolver())
 	notices = nil
 	require.NoError(t, registrar.Register(w.ctx, w.regReq("983-whole-register-budget", w.prjA, w.accA)))
 	require.Equal(t, 1, countBinding(), "whole Register must reuse the complete command's one binding read")

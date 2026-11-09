@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -92,7 +94,7 @@ func newLedgerProbe(t *testing.T, suffix string, retired bool) *ledgerProbe {
 	bid, subj := seedRaceBinding(t, ctx, pool, fx, suffix, projectRoleFixture)
 	// Цепь предков объекта — тем же входом, каким её пишет продукт: без указателя на
 	// проект вердикт области объекта не видит, и прямой факт отказывает ещё до снятия.
-	require.NoError(t, newRegisterUCWired(pool).Register(ctx, &iamv1.RegisterResourceRequest{
+	require.NoError(t, newRegisterUCWired(pool).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "compute"}).Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId: "project:" + string(fx.prj), Relation: "project", Object: "compute_instance:iRace",
 		ParentProjectId: string(fx.prj), ParentAccountId: string(fx.accID),
 		SourceVersion: timestamppb.New(time.Now().Add(time.Minute)),

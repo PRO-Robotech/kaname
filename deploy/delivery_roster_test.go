@@ -104,6 +104,7 @@ var deliveryRoster = []string{
 	"mail_relay_render_guard_test.go",
 	"module_manifests_mount_render_test.go",
 	"module_seed_installer_render_test.go",
+	"registration_writer_installer_render_test.go",
 	"login_lane_our_side_outcomes_ledger_test.go",
 	"mail_lane_undeliverable_test.go",
 	"offered_chains_declare_production_posture_injection_test.go",

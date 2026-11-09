@@ -84,34 +84,56 @@ const anchorProjectType = "project"
 // [iamerr.ParentScopeMismatch]. Оба возвращаются НЕОБЁРНУТЫМИ: переводчик
 // узнаёт их по виду, а обёртка дописала бы в ответ имя внутреннего шага.
 func (uc *RegisterResourceUseCase) admitRegistration(
-	ctx context.Context, tx service.Tx, t tupleIntent, row service.ResourceMirrorRow,
-) (string, error) {
+	ctx context.Context, tx service.Tx, module string, t tupleIntent, row service.ResourceMirrorRow,
+) (registrationAdmission, error) {
 	dotted, policy, live, err := uc.catalogTypes.WritePolicyTx(ctx, tx, row.ObjectType)
 	if err != nil {
-		return "", fmt.Errorf("read write policy: %w", err)
+		return registrationAdmission{}, fmt.Errorf("read write policy: %w", err)
 	}
 	if !live {
 		catalogType, cerr := uc.catalogObjectType(ctx, tx, row.ObjectType)
 		if cerr != nil {
-			return "", fmt.Errorf("resolve catalog object type: %w", cerr)
+			return registrationAdmission{}, fmt.Errorf("resolve catalog object type: %w", cerr)
 		}
-		return catalogType, nil
+		return registrationAdmission{}, shared.InvalidArg("object", fmt.Sprintf("resource type %q is not a live entry of the platform resource catalog", catalogType))
+	}
+	if err := authorizeCatalogOwner(module, policy.Module); err != nil {
+		return registrationAdmission{}, err
+	}
+	_, id := t.splitObject()
+	if err := validateRegistrationShape(module, t.subject, t.relation, policy.ObjectType+":"+id); err != nil {
+		return registrationAdmission{}, err
 	}
 	if err := permanentProjectForm(policy, row); err != nil {
-		return "", err
+		return registrationAdmission{}, err
 	}
 	subjectType, _, _ := strings.Cut(t.subject, ":")
-	if !policy.Admits(t.relation, subjectType) {
-		return "", proxyWriteRefusal()
+	// Сверх прежних трёх отношений разрешён только точный указатель, не writes.
+	if !legacyRegistrationRelation(t.relation) {
+		pointer, ok := policy.Pointer(t.relation)
+		if !ok || pointer.Type != subjectType || !namedPointerSubjectType(subjectType) {
+			return registrationAdmission{}, proxyWriteRefusal()
+		}
+		if _, ok := uc.scopes.(registrationPointerStore); !ok {
+			return registrationAdmission{}, proxyWriteRefusal()
+		}
 	}
-	if err := uc.deriveParent(ctx, tx, t, policy, domain.ParentClaim{
+	if !policy.Admits(t.relation, subjectType) {
+		return registrationAdmission{}, proxyWriteRefusal()
+	}
+	hierarchies, err := uc.deriveParent(ctx, tx, t, policy, domain.ParentClaim{
 		ProjectID: row.ParentProjectID,
 		AccountID: row.ParentAccountID,
 		Chain:     row.ParentChain,
-	}); err != nil {
-		return "", uc.preferBindingRefusal(ctx, tx, t, policy, row, err)
+	})
+	if err != nil {
+		return registrationAdmission{}, uc.preferBindingRefusal(ctx, tx, t, policy, row, err)
 	}
-	return dotted, nil
+	authorities, err := uc.registrationAuthorities(ctx, tx, hierarchies)
+	if err != nil {
+		return registrationAdmission{}, uc.preferProjectBindingRefusal(ctx, tx, t, policy.ObjectType, row, err)
+	}
+	return registrationAdmission{catalogType: dotted, hierarchies: hierarchies, authorities: authorities}, nil
 }
 
 // permanentProjectForm — форма регистрации типа с неизменным проектом
@@ -150,15 +172,25 @@ func (uc *RegisterResourceUseCase) preferBindingRefusal(ctx context.Context, tx 
 	if !stderrors.Is(derr, iamerr.ErrParentScopeMismatch) {
 		return derr
 	}
+	return uc.preferProjectBindingRefusal(ctx, tx, t, policy.ObjectType, row, derr)
+}
+
+// preferProjectBindingRefusal сохраняет прежний отказ привязки перед отказом
+// вывода либо account authority. Читаем предикат только на отказном пути:
+// успешный Register по-прежнему проверяет привязку единственным чтением внутри
+// UpsertTx, без повторного вывода иерархии и без записи до account authority.
+func (uc *RegisterResourceUseCase) preferProjectBindingRefusal(ctx context.Context, tx service.Tx, t tupleIntent,
+	modelType string, row service.ResourceMirrorRow, refusal error,
+) error {
 	_, objID := t.splitObject()
-	refuses, err := uc.scopes.BindingRefusesTx(ctx, tx, policy.ObjectType, objID, row.ParentProjectID, row.ParentChain)
+	refuses, err := uc.scopes.BindingRefusesTx(ctx, tx, modelType, objID, row.ParentProjectID, row.ParentChain)
 	if err != nil {
 		return fmt.Errorf("derive parent: judge project binding: %w", err)
 	}
 	if refuses {
-		return iamerr.ObjectBoundToOtherProject(t.object, policy.ObjectType, objID)
+		return iamerr.ObjectBoundToOtherProject(t.object, modelType, objID)
 	}
-	return derr
+	return refusal
 }
 
 // deriveParent — вывод родителя (Р4) и сверка сведений модуля с ним (Р6).
@@ -175,25 +207,34 @@ func (uc *RegisterResourceUseCase) preferBindingRefusal(ctx context.Context, tx 
 // один (различие было бы оракулом иерархии).
 func (uc *RegisterResourceUseCase) deriveParent(
 	ctx context.Context, tx service.Tx, t tupleIntent, policy domain.WritePolicy, claim domain.ParentClaim,
-) error {
+) ([]domain.ParentHierarchy, error) {
 	_, objID := t.splitObject()
 	anchors := []string{t.subject}
 	if _, isPointer := policy.Pointer(t.relation); !isPointer {
 		var err error
 		if anchors, err = uc.scopes.PointerSubjectsTx(ctx, tx, policy.ObjectType, objID, policy.PointerNames()); err != nil {
-			return fmt.Errorf("derive parent: read pointer facts: %w", err)
+			return nil, fmt.Errorf("derive parent: read pointer facts: %w", err)
 		}
 	}
+	var admitted []domain.ParentHierarchy
+	seen := map[string]bool{}
 	for _, anchor := range anchors {
+		if seen[anchor] {
+			continue
+		}
+		seen[anchor] = true
 		h, ok, err := uc.hierarchyOf(ctx, tx, anchor)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if ok && h.Admits(claim) {
-			return nil
+			admitted = append(admitted, h)
 		}
 	}
-	return iamerr.ParentScopeMismatch(t.object, policy.ObjectType, objID)
+	if len(admitted) > 0 {
+		return admitted, nil
+	}
+	return nil, iamerr.ParentScopeMismatch(t.object, policy.ObjectType, objID)
 }
 
 // hierarchyOf — иерархия kaname от опоры anchor (`<тип>:<id>`), Р5. ok=false —

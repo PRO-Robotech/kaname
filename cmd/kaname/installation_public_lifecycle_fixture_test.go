@@ -243,7 +243,8 @@ func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, s
 			accounts = f.createRID02Accounts(t)
 		}
 	}
-	in := installruntime.DeliveryInput{Manifests: manifests, CredentialFile: f.creator.CredentialFile}
+	f.writerPlan = installruntime.RegistryRegistrationWriterPlan(accounts)
+	in := installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: manifests, CredentialFile: f.creator.CredentialFile}
 	if mode == "S1" {
 		in.TenantAccountID = &f.tenantID
 	}
@@ -620,7 +621,7 @@ func (w *ridLifecycleWorld) catalogOnly(t *testing.T) {
 	delete(seed, "grantDelegations")
 	raw, err := yaml.Marshal(doc)
 	require.NoError(t, err)
-	p, err := w.f.session.StartCatalogOnly(w.f.given.ctx, installruntime.RIDDeliveryFixture{First: raw})
+	p, err := w.f.session.StartCatalogOnly(w.f.given.ctx, installruntime.RIDDeliveryFixture{First: raw}, w.delivery.RegistrationWriters)
 	require.NoError(t, err)
 	require.NoError(t, p.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
 	results, err := p.Results()

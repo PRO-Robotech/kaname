@@ -38,6 +38,9 @@ type rid01NewmanSnapshot struct {
 type rid01PublicContext struct {
 	RestoreRedactionProfile *rid01KeyRedactionProfile
 	RestoreExtraConfig      map[string]any
+	RestoreWriterPlan       *installruntime.RegistrationWriterPlan
+	RestoreWriterPlanSHA256 string
+	RestoreConfigSHA256     string
 	f                       *installationNativeWorld
 	Kind                    string
 	Phases                  []string
@@ -550,6 +553,9 @@ func rid01RestorePublicListeners(t *testing.T, f *installationNativeWorld, in in
 	rid01SealRestoreProfile(t, f, in, public)
 	process, err := f.session.StartDelivery(f.given.ctx, in)
 	require.NoError(t, err)
+	public.RestoreConfigSHA256 = process.ConfigSHA256
+	require.NotEmpty(t, public.RestoreConfigSHA256)
+	rid08Write(t, f.session.Root, "rid01-restoration-writer-profile", map[string]any{"writerPlan": public.RestoreWriterPlan, "writerPlanSHA256": public.RestoreWriterPlanSHA256, "fullStartupConfigSHA256": public.RestoreConfigSHA256, "extraConfigSHA256": public.RestoreRedactionProfile.ExtraConfigSHA256})
 	ctx, cancel := context.WithTimeout(f.given.ctx, 60*time.Second)
 	defer cancel()
 	require.NoError(t, process.AwaitReady(ctx, f.wire.ProductionReady))

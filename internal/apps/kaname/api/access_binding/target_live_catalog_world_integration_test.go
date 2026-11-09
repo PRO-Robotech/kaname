@@ -60,6 +60,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -120,7 +121,7 @@ func newATCWorld(t *testing.T) *atcWorld {
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	doc, err := atcProbemodDoc()
 	require.NoError(t, err, "М2: фикстура probemod без ключа публичного чтения")
 	a.doc = doc
@@ -225,6 +226,8 @@ func (a *atcWorld) itemsLiveInDB() bool {
 // нуждается (выдачи судят цель, а не владельца).
 func (a *atcWorld) registerBox(id string) {
 	a.t.Helper()
+	a.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "probemod"})
+	defer a.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	obj := atcBoxType + ":" + id
 	for _, r := range []*iamv1.RegisterResourceRequest{
 		{SubjectId: "project:" + string(a.prjA), Relation: "project", Object: obj},

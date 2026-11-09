@@ -46,6 +46,7 @@ import (
 	"google.golang.org/grpc/peer"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/platformmodules"
 )
 
 // Profile — имя закрытого перечня методов внутреннего слушателя.
@@ -94,6 +95,9 @@ type Identity struct {
 	Account string
 	// Service — короткое имя службы, выведенное из учётки (`vpc`, `api-gateway`).
 	Service string
+	// CatalogModule — имя владельца каталога, закреплённое при сборке перечня.
+	// Не заменяет Service: идентификатор служебной учётки выводится из Service.
+	CatalogModule string
 	// Profile — профиль, объявленный установкой для этой пары.
 	Profile Profile
 	// Issuer — имя доверенного удостоверяющего центра, который ВПРАВЕ выпускать
@@ -260,7 +264,13 @@ func parseEntry(entry string) (Identity, error) {
 		return Identity{}, fmt.Errorf("module identity %q: issuer name %q is not a name "+
 			"(lower-case latin letters, digits and '-', starting and ending with a letter or a digit)", entry, issuer)
 	}
-	return Identity{Namespace: ns, Account: account, Service: svc, Profile: p, Issuer: issuer}, nil
+	// Совместимость имён платформы разрешается один раз при сборке доверенного
+	// перечня, до запросов. Новый установленный модуль не требует вшитой записи.
+	catalogModule, known := platformmodules.CatalogModuleOfService(svc)
+	if !known {
+		catalogModule = svc
+	}
+	return Identity{Namespace: ns, Account: account, Service: svc, CatalogModule: catalogModule, Profile: p, Issuer: issuer}, nil
 }
 
 // profileList — словарь профилей строкой для текста отказа.

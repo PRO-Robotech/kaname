@@ -31,7 +31,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"gopkg.in/yaml.v3"
 )
 
 type rid11Case struct {
@@ -144,7 +143,7 @@ func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
 		if c.Mode == "S2" {
 			ids = setup(t, f)
 		}
-		in := installruntime.DeliveryInput{Manifests: ridLifecycleDelivery(t, false), CredentialFile: f.creator.CredentialFile}
+		in := installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: ridLifecycleDelivery(t, false), CredentialFile: f.creator.CredentialFile}
 		if c.Mode == "S1" {
 			in.TenantAccountID = &f.tenantID
 		}
@@ -242,10 +241,11 @@ func rid11Start(t *testing.T, w *ridLifecycleWorld, c rid11Case, credential stri
 	if w.delivery.TenantAccountID != nil {
 		installer["tenantAccountId"] = *w.delivery.TenantAccountID
 	}
-	raw, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": installer})
+	raw, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": installer}, w.delivery.RegistrationWriters)
 	require.NoError(t, err)
 	config := filepath.Join(root, "config.yaml")
 	require.NoError(t, os.WriteFile(config, raw, 0600))
+	ridRegistrationStartupProof(t, root, raw, w.delivery.RegistrationWriters)
 	executable := rid06HashExecutable(t)
 	child := startRIDInstallationChild(t, f, "rid11-child", rid11ChildInput{ConfigPath: config, EvidenceDir: filepath.Join(f.session.Root, "rid11-child"), Creator: f.creator.ID, Variant: c.Variant, Twin: c.Twin}, f.session.Environment, rid11ChildEnv, "TestRID11OwnedInputAuthnStartupChild", "4m")
 	parentCG, err := os.ReadFile("/proc/self/cgroup")
@@ -629,7 +629,7 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 		// Публичные последствия наблюдаются только чтением после первичного доказательства остановленного процесса.
 		// Штатный запуск без поставки не может починить удалённый C или восстановить полномочия.
 		public.beforeRestore(t, w, p.Returned)
-		base, err := f.session.StartBase(f.given.ctx)
+		base, err := f.session.StartBase(f.given.ctx, f.writerPlan)
 		require.NoError(t, err)
 		require.NoError(t, base.OwnsListeners(installruntime.DefaultNativePorts().All()...))
 		f.renewOperator(t, f.given.ctx)

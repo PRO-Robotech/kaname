@@ -230,7 +230,7 @@ func TestTokenFamilyMigration_KN_FRV_10_DownRefusesWhileAFamilyCarriesTheWord(t 
 	require.Len(t, refValues, len(priorFamilyReasons), "Дано: эталон несёт пять слов: %s", want)
 	require.NotContains(t, refValues, clientRevokeReason, "Дано: эталон слова отзыва клиентом не знает")
 
-	db := consentLeavesDB(t)
+	db := historicalRegistrationDB(t)
 	_, _, _, a := acScene(t, db, "fr10")
 	_, _, _, b := acScene(t, db, "fr10b")
 	_, _, _, c := acScene(t, db, "fr10cc")
@@ -276,7 +276,7 @@ func TestTokenFamilyMigration_KN_FRV_10_DownRefusesWhileAFamilyCarriesTheWord(t 
 	}, revocationVocabularyFindings(dbRevocationReasons(t, db), domainRevocationReasons()),
 		"10/2: на откаченной базе расхождений ровно три, и каждое называет слово и сторону")
 
-	require.NoError(t, goose.Up(db, "."), "10/2: повторный накат")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "10/2: повторный накат")
 	_, err = db.Exec(revokeFamilySQL, c, clientRevokeReason)
 	require.NoError(t, err, "10/2: после повторного наката отзыв C словом снова принимается")
 	require.Empty(t, revocationVocabularyFindings(dbRevocationReasons(t, db), domainRevocationReasons()),

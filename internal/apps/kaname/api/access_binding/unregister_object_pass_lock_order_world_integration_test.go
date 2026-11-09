@@ -178,6 +178,17 @@ func (s *memberHoldStore) UpsertMember(ctx context.Context, m domain.TargetMembe
 	return s.ReconcileStore.UpsertMember(ctx, m)
 }
 
+// UpsertMembers удерживает пакетную первую запись члена B2 так же, как одиночную.
+func (s *memberHoldStore) UpsertMembers(ctx context.Context, members []domain.TargetMember) error {
+	for _, m := range members {
+		if m.BindingID == s.binding {
+			s.p.hit()
+			break
+		}
+	}
+	return s.ReconcileStore.UpsertMembers(ctx, members)
+}
+
 // awaitStalledOrDone — ждёт, пока снятие либо встанет на замке (в базе мира есть
 // обслуживающий процесс, которого держит другой), либо закончится. В отличие от
 // awaitBlockedOrDone исход закончившегося снятия возвращается, а не утверждается:

@@ -42,6 +42,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
 // factStore — ПРЯМЫЕ ФАКТЫ, а не журнал вызовов. Он отвечает на вопрос «есть ли сейчас
@@ -186,7 +187,7 @@ func (journalEmitter) EmitOrderedDeleteTx(_ context.Context, tx service.Tx, tupl
 func newRegUCWithStore(t *testing.T, s *factStore) (*RegisterResourceUseCase, *factTxBeginner) {
 	t.Helper()
 	txb := &factTxBeginner{store: s}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, deliveredRegistryTypes{}, s, &recordingWithdrawal{}, noAudit{}, residualScene()).
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, deliveredRegistryTypes{}, s, &recordingWithdrawal{}, noAudit{}, residualScene()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"}).
 		WithResidualTupleReader(s)
 	return uc, txb
 }
@@ -354,7 +355,7 @@ func TestUnregisterResource_ResidualReadFailure_FailsClosed(t *testing.T) {
 func TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour(t *testing.T) {
 	store := &factStore{}
 	txb := &factTxBeginner{store: store}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store, &recordingWithdrawal{}, noAudit{}, unitScopes()) // без WithResidualTupleReader
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store, &recordingWithdrawal{}, noAudit{}, residualScene()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"}) // без WithResidualTupleReader
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
 	}))

@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Session владеет последовательными НАСТОЯЩИМИ процессами serve на одной существующей базе.
@@ -32,9 +30,10 @@ type Session struct {
 }
 
 type DeliveryInput struct {
-	Manifests      RIDDeliveryFixture
-	Reverse        bool
-	CredentialFile string
+	RegistrationWriters *RegistrationWriterPlan
+	Manifests           RIDDeliveryFixture
+	Reverse             bool
+	CredentialFile      string
 	// nil означает S2; ненулевой указатель — ТОЧНОЕ значение S1, включая намеренно пустой вход.
 	TenantAccountID *string
 	// ExtraConfig — полный профиль фикстуры (PKI/DB обычно остаются в окружении).
@@ -75,11 +74,15 @@ func (s *Session) start(ctx context.Context, config []byte) (*Process, error) {
 
 // StartBase явно исключает поставленные модули и вход установщика. Та же
 // база впоследствии получает полную поставку через StartDelivery.
-func (s *Session) StartBase(ctx context.Context) (*Process, error) {
+func (s *Session) StartBase(ctx context.Context, plan *RegistrationWriterPlan) (*Process, error) {
 	if err := s.checkEnvironment(); err != nil {
 		return nil, err
 	}
-	p, err := s.start(ctx, []byte("manifests:\n  dir: ''\n  required: false\n"))
+	body, err := FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": "", "required": false}}, plan)
+	if err != nil {
+		return nil, err
+	}
+	p, err := s.start(ctx, body)
 	if err != nil {
 		return p, err
 	}
@@ -100,7 +103,7 @@ func (s *Session) StartDelivery(ctx context.Context, in DeliveryInput) (*Process
 	}
 	doc := make(map[string]any, len(in.ExtraConfig)+2)
 	for k, v := range in.ExtraConfig {
-		if k == "manifests" || k == "moduleSeedInstaller" {
+		if k == "manifests" || k == "moduleSeedInstaller" || k == "registration-account-writers" {
 			return nil, fmt.Errorf("reserved installation profile key %s", k)
 		}
 		doc[k] = v
@@ -115,7 +118,7 @@ func (s *Session) StartDelivery(ctx context.Context, in DeliveryInput) (*Process
 		installer["tenantAccountId"] = *in.TenantAccountID
 	}
 	doc["moduleSeedInstaller"] = installer
-	body, err := yaml.Marshal(doc)
+	body, err := FullStartupConfig(doc, in.RegistrationWriters)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +129,8 @@ func (s *Session) checkEnvironment() error {
 	for _, entry := range s.Environment {
 		name, _, _ := strings.Cut(entry, "=")
 		upper := strings.ToUpper(name)
-		if upper == "KANAME_CONFIG_PATH" || strings.HasPrefix(upper, "KANAME_MANIFESTS") || strings.HasPrefix(upper, "KANAME_MODULESEEDINSTALLER") {
+		compact := strings.NewReplacer("_", "", "-", "").Replace(upper)
+		if strings.HasPrefix(compact, "KANAMEREGISTRATIONACCOUNTWRITERS") || upper == "KANAME_CONFIG_PATH" || strings.HasPrefix(upper, "KANAME_MANIFESTS") || strings.HasPrefix(upper, "KANAME_MODULESEEDINSTALLER") {
 			return fmt.Errorf("environment would shadow installation input: %s", name)
 		}
 	}

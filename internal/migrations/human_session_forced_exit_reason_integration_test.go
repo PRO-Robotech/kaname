@@ -528,7 +528,7 @@ func TestHumanSessionMigration_KN_SER_09_DownTurnsForcedExitIntoLogoutAndReapply
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
 	cat := serReadCatalog(t)
-	db := upAllIAMMigrations(t, pgtest.NewEmptyDB(t))
+	db := historicalRegistrationDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	person := serSeedPerson(t, db, "ser9")
 	const a, b, c, d = "hss-ser9-a", "hss-ser9-b", "hss-ser9-c", "hss-ser9-d"
@@ -563,6 +563,6 @@ func TestHumanSessionMigration_KN_SER_09_DownTurnsForcedExitIntoLogoutAndReapply
 		"после отката снятие с %q обязано отвергаться ограничением словаря, получено %v", serForcedExit, err)
 
 	// Когда: повторный накат.
-	require.NoError(t, goose.Up(db, "."), "повторный накат")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат")
 	assert.NoError(t, serEnd(db, d, at, serForcedExit), "после повторного наката снятие с %q снова принимается", serForcedExit)
 }

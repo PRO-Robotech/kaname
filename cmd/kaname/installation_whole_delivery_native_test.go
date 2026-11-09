@@ -20,7 +20,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
-	"gopkg.in/yaml.v3"
 )
 
 type rid09Input struct {
@@ -100,10 +99,11 @@ func rid09Start(t *testing.T, f *installationNativeWorld, in rid09Input) *rid02O
 	dir := filepath.Join(root, "delivery")
 	_, err := in.Delivery.Write(dir, in.Reverse)
 	require.NoError(t, err)
-	body, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}})
+	body, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}}, f.writerPlan)
 	require.NoError(t, err)
 	config := filepath.Join(root, "config.yaml")
 	require.NoError(t, os.WriteFile(config, body, 0600))
+	ridRegistrationStartupProof(t, root, body, f.writerPlan)
 	executable := rid06HashExecutable(t)
 	child := startRIDInstallationChild(t, f, "whole-startup", ridWholeChildInput{ConfigPath: config, EvidenceDir: filepath.Join(f.session.Root, "whole-startup")}, f.session.Environment, ridWholeChildEnv, "TestRIDWholeDeliveryOwnedStartupChild", "3m")
 	parentCG, err := os.ReadFile("/proc/self/cgroup")
@@ -266,7 +266,7 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 		require.Equal(t, ops, rid08GDOperations(t, f))
 		// Читаем публичные последствия только после авторитетного доказательства до/после
 		// остановленного процесса. Перезапуск — штатный запуск без поставки, а не починка.
-		p, err := f.session.StartBase(f.given.ctx)
+		p, err := f.session.StartBase(f.given.ctx, f.writerPlan)
 		require.NoError(t, err)
 		require.NoError(t, p.OwnsListeners(installruntime.DefaultNativePorts().All()...))
 		rid09RequireNoDelivery(t, f, accounts)

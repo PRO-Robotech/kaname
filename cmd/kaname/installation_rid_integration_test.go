@@ -62,6 +62,7 @@ func TestRID_02_ConcurrentAndRepeat(t *testing.T) {
 }
 func TestRID_03_DelegatedGrantAndIssuerBounds(t *testing.T) {
 	runInstallationRID(t,
+		ridPredicate{name: "explicit account registration writer authority, missing/revoked/wildcard refusals and lawful twins", run: ridRegistrationWriterAuthorityTwins},
 		ridPredicate{name: "real production listener grant Operation Get ACTIVE with installation delegationId", run: ridNativeDelegatedGrant},
 		ridPredicate{name: "out-of-axis role denial and same-subject legal role twin", run: ridNativeDelegatedAxes},
 		ridPredicate{name: "I Create denied without Operation; caller-only C twin succeeds", run: ridNativeIssuerCannotDelegate},

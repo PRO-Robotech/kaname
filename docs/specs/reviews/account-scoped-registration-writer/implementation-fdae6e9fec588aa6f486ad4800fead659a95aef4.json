@@ -1,0 +1,61 @@
+{
+  "kind": "implementation_review",
+  "reviewer_agent": "/root/account_writer_1031_review",
+  "reviewed_at": "2026-11-02T12:41:21.381647+00:00",
+  "head": "fdae6e9fec588aa6f486ad4800fead659a95aef4",
+  "tree": "00f3c81d27e9c8771eb54c013d1f98c45c5d565c",
+  "acceptance_sha256": "7595d5da1e0b962c44c429018f9d1425030ea2e1b4bd472ce14a9524b87c317e",
+  "verdict": "CHANGES_REQUESTED",
+  "runtime_executed": 0,
+  "worktree_clean_before_and_after": true,
+  "findings": [
+    {
+      "id": "F1",
+      "priority": 1,
+      "path": "internal/servicemanifest/manifest.embedded.yaml",
+      "line": 824,
+      "title": "Embedded service manifest cannot load after blanket removal",
+      "evidence": "seed.groups retains module-relation-writers but accessBindings is removed. Unchanged internal/manifest/linkage.go:503-514 produces ErrGroupNeverGranted for that exact shape; manifest.Load returns joined faults. servicemanifest.Load is called by loadOwnManifest and cmd/kaname/serve.go:462-464 returns the error before registration bootstrap.",
+      "fix": "Provide a valid transition for the compatibility group without restoring a blanket grant or weakening general manifest validation; update actual embedded-manifest positive/negative probes."
+    },
+    {
+      "id": "F2",
+      "priority": 1,
+      "path": "internal/repo/kaname/pg/registration_account_writer.go",
+      "line": 91,
+      "title": "Upgrade cannot resolve legal legacy registrations with omitted parent claims",
+      "evidence": "Pre-1031 #982 allows a pointer registration with empty parent_project_id and parent_chain; the valid project pointer remains in relation_fact. New migration creates resource_registration_scope empty. The first-upgrade census joins only mirror parent_project_id or project parent_edge, never pointer facts or a canonical backfill; p[0]==empty is always rejected at line113 even with complete account/module assignments. SavedRegistrationScopeTx in registration_scope_reader.go:156-165 repeats the missing source and returns no scope for these legacy objects.",
+      "fix": "Resolve/backfill pre-existing canonical scopes from authoritative registration pointer data using the #982 rules, preserving claims. Cover first upgrade and cleanup/publication of a pre-1031 omitted-claims object; refuse truly unresolved scope."
+    },
+    {
+      "id": "F3",
+      "priority": 1,
+      "path": "internal/apps/kaname/api/access_binding/account_writer_world_integration_test.go",
+      "line": 247,
+      "title": "Named AW cases do not cover the accepted refusal and lifecycle transitions",
+      "evidence": "AW06:247-253 uses a direct vpc/project refusal instead of a child under a B container. AW07:255-257 has only the A success. AW13:438-447 has only allowed cleanup. AW14:279-286 denies an unknown object, not a registered B object, and never tests forbidden publication removal. AW19:346-367 uses repo Get/List only; no public normal Revoke/Delete and subsequent reseed/deletion persistence. AW22:391-396 toggles retirement without proving a standing cluster grant existed, was removed, and stayed removed, and has no rollback/reupgrade. These branches can regress while the named cases pass.",
+      "fix": "Complete these same accepted GWT pairs with existing real writers, a pre-1031 snapshot, normal binding lifecycle and negative access-state snapshots; establish fixture state before retirement. Do not replace required branches with unknown-object rejection or merely successful plan application."
+    },
+    {
+      "id": "F4",
+      "priority": 2,
+      "path": "internal/migrations/20261102130000_registration_account_writer_assignments.sql",
+      "line": 32,
+      "title": "Successful no-op Down makes the next Up fail on existing tables",
+      "evidence": "Down executes SELECT 1 and preserves all three tables while the migration runner records the migration as rolled back. A subsequent Up executes unconditional CREATE TABLE for those existing names and fails. The data-preservation intention is valid but this is not a repeatable rollback/upgrade path.",
+      "fix": "Declare this migration explicitly irreversible by failing Down, or make the supported rollback/reapply procedure preserve both ledger contents and consistent migration bookkeeping. Keep binary-only rollback instructions explicit."
+    }
+  ],
+  "positive_static_observations": [
+    "Identity and account authority separated, real roster reused, no cluster/admin fallback introduced in account model.",
+    "Register, Unregister, publish, emitAttempt enforce authority; missing dependency refuses; backend error uses canonical unavailable text.",
+    "Admission result reused for registration account check/audit/backfill; PB preference kept in derivation error path.",
+    "Bootstrap uses ordinary binding writer, subjects, emitted-set, relation outbox and audit in one tx; assignment ledger prevents old IDs from resurrection.",
+    "Owned revoke takes deactivation locks and removes exact emitted set; explicit operator retirement flag is present."
+  ],
+  "limitations": [
+    "No source edits, builds, tests, lint, runtime, push, PR, CI or publication.",
+    "Findings are source-derived, not executed failures.",
+    "Approval of acceptance digest remains valid; this implementation is not approved."
+  ]
+}

@@ -368,7 +368,12 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"refresh_tokens": nil,
 	// Происхождение наката записывает только миграция: версия формата, флаги
 	// исходных линий и состояние не поступают от вызывающего (kaname#1096).
-	"registration_lineage_origin": nil,
+	// Назначения установки, переключатель снятия и захваченная прежняя личность
+	// производятся службой/миграцией, никогда не полями запроса регистрации.
+	"registration_account_writer_assignment":      nil,
+	"registration_account_writer_switch":          nil,
+	"registration_legacy_cluster_writer_identity": nil,
+	"registration_lineage_origin":                 nil,
 	// Факт отношения выводит триггер схемы из очереди кортежей.
 	"relation_fact": nil,
 	// Журнал ресурсов — событие пишет служба.
@@ -397,6 +402,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 	},
 	// Очередь сверки зеркала — пишет служба.
 	"resource_reconcile_outbox": nil,
+	// Историю допущенных указателей и квитанции снятия производит служба после
+	// допуска регистрации; вызывающий не пишет строки истории напрямую.
+	"resource_registration_pointer":    nil,
+	"resource_registration_retirement": nil,
 	// Сирота выдачи — следствие снятия, пишет служба.
 	"role_grant_orphan": nil,
 	// Ссылки правил роли: модуль, ресурс и глагол — из присланного правила;

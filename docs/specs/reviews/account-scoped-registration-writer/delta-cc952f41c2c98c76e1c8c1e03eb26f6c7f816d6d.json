@@ -1,0 +1,58 @@
+{
+  "kind": "implementation_delta_review",
+  "reviewer_agent": "/root/account_writer_1031_review",
+  "reviewed_at": "2026-11-02T12:54:15.647618+00:00",
+  "head": "cc952f41c2c98c76e1c8c1e03eb26f6c7f816d6d",
+  "tree": "a40b255b080ad73319bd5d667db8b806b513375f",
+  "base_review_head": "fdae6e9fec588aa6f486ad4800fead659a95aef4",
+  "acceptance_sha256": "7595d5da1e0b962c44c429018f9d1425030ea2e1b4bd472ce14a9524b87c317e",
+  "verdict": "CHANGES_REQUESTED",
+  "runtime_executed": 0,
+  "worktree_clean_before_and_after": true,
+  "closed_findings": [
+    {
+      "id": "F1",
+      "status": "closed_source",
+      "evidence": "Both canonical and embedded manifests now have seed:{}; existing group-without-grant validator unchanged; actual shipped-manifest Load probe added."
+    },
+    {
+      "id": "F2",
+      "status": "closed_source",
+      "evidence": "registration_legacy_scopes recursively follows catalog-declared pointer names/types through registered containers; saved project wins, cycles stop; backfill plus shared preflight/runtime fallback added; legacy omitted-claim fixture clears new-only ledger and exercises cleanup/publication."
+    },
+    {
+      "id": "F3",
+      "status": "source_gaps_addressed_runtime_pending",
+      "evidence": "AW06/07/13/14 actual B refusal arms added; AW19 now invokes public handlers Update/Revoke/Delete and checks Operation outcomes/reseed/new assignment ID; AW22 asserts standing historical blanket and its removal. Old seed writer invocation is a source-path compatibility probe, not an actual old-binary deployment/rollback proof."
+    },
+    {
+      "id": "F4",
+      "status": "closed_source",
+      "evidence": "Down now raises an explicit irreversible-migration error; binary-only rollback documented, preserving schema/history and migration bookkeeping."
+    }
+  ],
+  "findings": [
+    {
+      "id": "D1",
+      "priority": 1,
+      "path": "internal/repo/kaname/pg/registration_account_writer.go",
+      "line": 242,
+      "related_path": "internal/migrations/20261102130000_registration_account_writer_assignments.sql",
+      "related_line": 83,
+      "title": "Retirement ownership uses mutable non-global group name",
+      "evidence": "Selection restricts g.name=module-relation-writers but not immutable owned group/account identity; timestamp is set unconditionally at line289 even when selection found none. Group.Update supports name (internal/apps/kaname/api/group/update.go:32,99-101), so renaming the historical group leaves its active blanket binding behind while retirement is recorded complete. The new guard repeats name-based selection, so that binding is not fenced. groups_account_name_unique at 0001_initial.sql:4137 scopes names to account: a same-named group in another account can instead be selected/revoked or blocked. The trigger also omits the singleton resource_id restriction used by retirement.",
+      "fix": "Resolve and persist the exact installation-owned immutable legacy group/binding identity and canonical cluster coordinate; use the same identity predicate for selection, locked-row ownership recheck and retirement guard. Prove rename still retires the owned binding and an unrelated same-name group remains unchanged; do not weaken general validators or restore blanket grants."
+    }
+  ],
+  "positive_checks": [
+    "New StructuralParent and reconcile enqueue use existing binding mechanisms and are co-committed with subjects/grant/emitted registry.",
+    "Registration admission/read-reuse code unchanged by delta; recursive legacy resolution is fallback/backfill, not a new unconditional second admission walk.",
+    "No cluster/admin fallback added; no new public grant protocol; retired-account assignment anti-resurrection unchanged."
+  ],
+  "limits": [
+    "Read-only source review, no tests/build/lint/migration/runtime/push/CI/publication.",
+    "Recursive SQL execution, migration backfill on a real old snapshot, production startup and actual old-binary rollback/reupgrade remain unverified.",
+    "Restarting a test listener is not a whole production-process restart proof.",
+    "Model census change 272 to273 matches the added relation in source; no executed census claimed."
+  ]
+}

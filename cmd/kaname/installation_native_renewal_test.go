@@ -45,7 +45,7 @@ func (f *installationNativeWorld) stableReceipt(t *testing.T) nativeStableReceip
 func nativeSingleDelivery(f *installationNativeWorld) installruntime.DeliveryInput {
 	m := installruntime.NewRIDDeliveryFixture()
 	m.Second = nil
-	return installruntime.DeliveryInput{Manifests: m, CredentialFile: f.creator.CredentialFile, TenantAccountID: &f.tenantID}
+	return installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: m, CredentialFile: f.creator.CredentialFile, TenantAccountID: &f.tenantID}
 }
 
 func requireNativeOK(t *testing.T, p *installruntime.Process, pairs int) {

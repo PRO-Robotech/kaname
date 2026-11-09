@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io/fs"
 	"strings"
 	"testing"
@@ -24,6 +25,20 @@ import (
 
 // registrationOriginDB накатывает точные исходные файлы, без правки ledger.
 func registrationOriginDB(t *testing.T, origin string) (string, *sql.DB) {
+	t.Helper()
+	return registrationOriginDBTo(t, origin, "")
+}
+
+// Исторические обратные ходы начинаются на настоящей версии ДО необратимой
+// истории назначений; ни SQL, ни журнал миграций ради фикстуры не меняются.
+const registrationReversibleTip = "20261031150000"
+
+func registrationHistoricalOriginDB(t *testing.T, origin string) (string, *sql.DB) {
+	t.Helper()
+	return registrationOriginDBTo(t, origin, registrationReversibleTip)
+}
+
+func registrationOriginDBTo(t *testing.T, origin, target string) (string, *sql.DB) {
 	t.Helper()
 	dsn := pgtest.NewEmptyDB(t)
 	db, err := sql.Open("pgx", dsn)
@@ -64,8 +79,17 @@ func registrationOriginDB(t *testing.T, origin string) (string, *sql.DB) {
                 EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='kaname' AND table_name='catalog_resource' AND column_name='writes')::text`))
 		}
 	}
-	_, _, err = runCommandFS(t, migrations.FS, []string{"up", "--dsn", dsn}, nil)
+	args := []string{"up", "--dsn", dsn}
+	if target != "" {
+		args = append(args, "--target", target)
+	}
+	_, _, err = runCommandFS(t, migrations.FS, args, nil)
 	require.NoError(t, err)
+	if target != "" {
+		version, err := goose.GetDBVersion(db)
+		require.NoError(t, err)
+		require.Equal(t, target, fmt.Sprint(version), "фикстура обязана накатить названный префикс")
+	}
 	return dsn, db
 }
 
@@ -82,7 +106,7 @@ func TestRegistrationMigrator_OriginalLineageDownUpRoundTrips(t *testing.T) {
 	}
 	for _, origin := range []string{"fresh", "main", "feature"} {
 		t.Run(origin, func(t *testing.T) {
-			dsn, db := registrationOriginDB(t, origin)
+			dsn, db := registrationHistoricalOriginDB(t, origin)
 			shape := registrationScalar(t, db, `SELECT kaname.registration_lineage_shape()::text`)
 			originShape := registrationScalar(t, db, `SELECT jsonb_build_array(had_creator,had_writer,original_shape)::text FROM kaname.registration_lineage_origin`)
 			catalog := registrationScalar(t, db, `SELECT jsonb_agg(to_jsonb(c) ORDER BY dotted)::text FROM kaname.catalog_resource c`)
@@ -107,7 +131,7 @@ func TestRegistrationMigrator_OriginalLineageDownUpRoundTrips(t *testing.T) {
 					registrationRestoreEarlyLimits(t, dsn, db)
 				}
 				require.Equal(t, originShape, registrationScalar(t, db, `SELECT jsonb_build_array(had_creator,had_writer,original_shape)::text FROM kaname.registration_lineage_origin`))
-				_, _, err = runCommandFS(t, migrations.FS, []string{"up", "--dsn", dsn}, nil)
+				_, _, err = runCommandFS(t, migrations.FS, []string{"up", "--target", registrationReversibleTip, "--dsn", dsn}, nil)
 				require.NoError(t, err)
 				require.Equal(t, shape, registrationScalar(t, db, `SELECT kaname.registration_lineage_shape()::text`))
 				require.Equal(t, catalog, registrationScalar(t, db, `SELECT jsonb_agg(to_jsonb(c) ORDER BY dotted)::text FROM kaname.catalog_resource c`))
@@ -149,7 +173,7 @@ func TestRegistrationMigrator_PreservesExistingWriterPolicy(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: PostgreSQL")
 	}
-	dsn, db := registrationOriginDB(t, "feature")
+	dsn, db := registrationHistoricalOriginDB(t, "feature")
 	_, err := db.Exec(`UPDATE kaname.catalog_resource SET writes=ARRAY['owner:user'] WHERE dotted='registry.registries'`)
 	require.NoError(t, err)
 	_, _, err = runCommandFS(t, migrations.FS, []string{"down", "--target", "20261026090000", "--dsn", dsn}, nil)
@@ -171,7 +195,7 @@ func TestRegistrationMigrator_RollbackWaitsForWriterThenJudgesCommittedPolicy(t 
 	}
 	for _, commit := range []bool{true, false} {
 		t.Run(map[bool]string{true: "commit", false: "rollback"}[commit], func(t *testing.T) {
-			dsn, db := registrationOriginDB(t, "main")
+			dsn, db := registrationHistoricalOriginDB(t, "main")
 			_, _, err := runCommandFS(t, migrations.FS, []string{"down", "--target", "20261026090001", "--dsn", dsn}, nil)
 			require.NoError(t, err)
 			tx, err := db.Begin()
@@ -213,7 +237,7 @@ func TestRegistrationMigrator_CreatorDataCannotBeDiscarded(t *testing.T) {
 	}
 	for _, scenario := range []string{"creator fact", "creator rule", "container declaration", "plain named role"} {
 		t.Run(scenario, func(t *testing.T) {
-			dsn, db := registrationOriginDB(t, "feature")
+			dsn, db := registrationHistoricalOriginDB(t, "feature")
 			var mutation string
 			switch scenario {
 			case "creator fact":
@@ -276,7 +300,7 @@ func TestRegistrationMigrator_PhasedUpStillRefusesUnconsumedLimit(t *testing.T) 
 	if testing.Short() {
 		t.Skip("integration: PostgreSQL")
 	}
-	dsn, db := registrationOriginDB(t, "fresh")
+	dsn, db := registrationHistoricalOriginDB(t, "fresh")
 	_, _, err := runCommandFS(t, migrations.FS, []string{"down", "--target", "1", "--dsn", dsn}, nil)
 	require.NoError(t, err)
 	registrationRestoreEarlyLimits(t, dsn, db)
@@ -337,7 +361,7 @@ func TestRegistrationMigrator_RepeatableReadRefusesBeforeHistoricalDown(t *testi
 	}
 	for _, commit := range []bool{false, true} {
 		t.Run(map[bool]string{true: "writer-commit", false: "writer-rollback"}[commit], func(t *testing.T) {
-			dsn, db := registrationOriginDB(t, "feature")
+			dsn, db := registrationHistoricalOriginDB(t, "feature")
 			_, _, err := runCommandFS(t, migrations.FS, []string{"down", "--target", "20261026090000", "--dsn", dsn}, nil)
 			require.NoError(t, err)
 			tx, err := db.BeginTx(context.Background(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
@@ -395,7 +419,7 @@ func TestRegistrationMigrator_UnrelatedPlainRoleSurvivesCreatorDown(t *testing.T
 	if testing.Short() {
 		t.Skip("integration: PostgreSQL")
 	}
-	dsn, db := registrationOriginDB(t, "feature")
+	dsn, db := registrationHistoricalOriginDB(t, "feature")
 	_, err := db.Exec(`INSERT INTO kaname.roles(id,name,permissions,rules,cluster_id)
         VALUES ('rol-lineage-unrelated','iam.service_account.observer','[]',
         '[{"module":"iam","resources":["serviceAccount"],"verbs":["get"]}]','cluster_root')`)
@@ -412,7 +436,7 @@ func TestRegistrationMigrator_ChangedValidatorStillRefusesReconciliation(t *test
 	}
 	for _, origin := range []string{"main", "feature"} {
 		t.Run(origin, func(t *testing.T) {
-			dsn, db := registrationOriginDB(t, origin)
+			dsn, db := registrationHistoricalOriginDB(t, origin)
 			_, _, err := runCommandFS(t, migrations.FS, []string{"down", "--target", "20261026090000", "--dsn", dsn}, nil)
 			require.NoError(t, err)
 			_, err = db.Exec(`CREATE OR REPLACE FUNCTION kaname.iam_rules_valid(rules jsonb) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$ BEGIN RETURN true; END; $$`)

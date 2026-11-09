@@ -65,7 +65,7 @@ func TestPersonMachineEntryFactCarriesTheModelsCondition(t *testing.T) {
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 
 	// Голова: человек на `ssh` и `console` — с условием модели.
 	journalWrite(t, db, "compute_instance:ins-head", "ssh", "user:usr-head")
@@ -105,7 +105,7 @@ func TestPersonMachineEntryFactCarriesTheModelsCondition(t *testing.T) {
 
 	// Накат: обратное заполнение даёт условие строкам прежнего писателя, а
 	// служебной учётке — нет.
-	require.NoError(t, goose.Up(db, "."), "повторный накат обязан проходить")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат обязан проходить")
 	requireCondition(t, db, "ins-before", "ssh", "user:usr-before", "mfa_fresh",
 		"обратное заполнение: факт человека без условия на ssh не переживает миграцию")
 	requireCondition(t, db, "ins-head", "console", "user:usr-head", "mfa_fresh",

@@ -163,7 +163,7 @@ func TestIntegration_ClientSecretVerifierLeavesPlannerStatistics(t *testing.T) {
 
 // TestIntegration_ClientSecretVerifierMigrationRollsBackAndForward — обратный ход.
 func TestIntegration_ClientSecretVerifierMigrationRollsBackAndForward(t *testing.T) {
-	db := svDB(t)
+	db := historicalRegistrationDB(t)
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
 
@@ -178,7 +178,7 @@ func TestIntegration_ClientSecretVerifierMigrationRollsBackAndForward(t *testing
 	require.NoError(t, db.QueryRow(countColumns).Scan(&columns))
 	require.Zero(t, columns, "после отката колонок остаться не должно, осталось %d", columns)
 
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 	require.NoError(t, db.QueryRow(countColumns).Scan(&columns))
 	require.Equal(t, 2, columns, "после повторного наката обязаны стоять обе колонки, стоит %d", columns)
 

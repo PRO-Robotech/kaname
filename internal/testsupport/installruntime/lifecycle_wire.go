@@ -147,7 +147,7 @@ func (w *Wire) StandingKeyRefusal(ctx context.Context, c *StandingCreator, issue
 // StartCatalogOnly открывает существующий путь запуска без объявлений, чтобы O мог
 // восстановить состояние через живые штатные API, пока старый C остаётся выведенным из обращения.
 // Он отклоняет любое объявление делегирования, не обходя его проверку аутентификации.
-func (s *Session) StartCatalogOnly(ctx context.Context, in RIDDeliveryFixture) (*Process, error) {
+func (s *Session) StartCatalogOnly(ctx context.Context, in RIDDeliveryFixture, plan *RegistrationWriterPlan) (*Process, error) {
 	if err := s.checkEnvironment(); err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func (s *Session) StartCatalogOnly(ctx context.Context, in RIDDeliveryFixture) (
 	if _, err := in.Write(dir, false); err != nil {
 		return nil, err
 	}
-	config, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}})
+	config, err := FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}}, plan)
 	if err != nil {
 		return nil, err
 	}

@@ -1,15 +1,15 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// governance_ports.go — narrow port-iface definitions for the writer-tx outbox
-// emitters. TxBeginner opens the transaction; RelationOutboxEmitter (fga_outbox),
-// ResourceMirrorEmitter (resource_mirror) and AuditOutboxEmitter (audit_outbox)
-// emit their rows inside that same caller-owned transaction, so each side-effect
-// commits atomically with the mutation that produced it.
+// governance_ports.go — определения узких портов-интерфейсов отправителей
+// outbox внутри транзакции писателя. TxBeginner открывает транзакцию; RelationOutboxEmitter (fga_outbox),
+// ResourceMirrorEmitter (resource_mirror) и AuditOutboxEmitter (audit_outbox)
+// пишут строки в той же транзакции вызывающего, поэтому каждый побочный эффект
+// коммитится атомарно с породившей его мутацией.
 //
-// Service layer defines these ports; adapters in repo/kaname/pg and clients/
-// implement them. Composition root (cmd/kaname/main.go) injects concrete
-// implementations.
+// Слой служб определяет порты; адаптеры repo/kaname/pg и clients/
+// реализуют их. Корень композиции (cmd/kaname/main.go) внедряет конкретные
+// реализации.
 package service
 
 import (
@@ -19,30 +19,33 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
-// TxBeginner opens a transaction. The returned handle is the opaque service.Tx
-// (see tx.go) — the concrete pgx.Tx is materialized only inside repo adapters.
+// TxBeginner открывает транзакцию. Возвращаемый дескриптор — непрозрачный service.Tx
+// (см. tx.go); конкретный pgx.Tx материализуется лишь внутри адаптеров репозитория.
 type TxBeginner interface {
 	Begin(ctx context.Context) (Tx, error)
 }
 
-// RelationTuple — {User, Relation, Object} triple for fga_outbox writes.
-// Neutral value type owned by internal/outboxtypes so the repo-ports package
-// (internal/repo/kaname) can reference it without importing this use-case package
-// (dependency-rule fix); the alias keeps the ergonomic service.RelationTuple name.
+// RelationTuple — тройка {User, Relation, Object} для записи fga_outbox.
+// Нейтральный тип значения принадлежит internal/outboxtypes, чтобы пакет портов репозитория
+// (internal/repo/kaname) ссылался на него без импорта пакета сценариев
+// (исправление правила зависимостей); псевдоним сохраняет удобное имя service.RelationTuple.
 type RelationTuple = outboxtypes.RelationTuple
 
-// RelationOutboxEmitter — port for emitting kaname.fga_outbox grant/revoke
-// rows from writer-tx-owning code paths. Atomic with the surrounding
-// mutation; the drainer applies tuples to the relation backend asynchronously.
+// VersionedRelationTuple — строка атомарного снятия с собственной версией.
+type VersionedRelationTuple = outboxtypes.VersionedRelationTuple
+
+// RelationOutboxEmitter — порт отправки строк выдачи/отзыва kaname.fga_outbox
+// из путей, владеющих транзакцией писателя. Атомарен с окружающей
+// мутацией; выгрузчик асинхронно применяет кортежи к хранилищу отношений.
 type RelationOutboxEmitter interface {
 	EmitWriteTx(ctx context.Context, tx Tx, tuples []RelationTuple) error
 	EmitDeleteTx(ctx context.Context, tx Tx, tuples []RelationTuple) error
 }
 
-// ResourceMirrorRow — service-layer payload for one kaname.resource_mirror
-// row. OUTPUT-ONLY mirror of the labels + parent-scope of a
-// resource owned by another service (source of truth = owner). Labels nil →
-// persisted as JSONB '{}'.
+// ResourceMirrorRow — нагрузка слоя служб для одной строки kaname.resource_mirror.
+// Зеркало ТОЛЬКО ВЫХОДА: метки и родительская область
+// ресурса другой службы (источник истины — владелец). Метки nil →
+// сохраняются как JSONB '{}'.
 type ResourceMirrorRow struct {
 	ObjectType      string
 	ObjectID        string
@@ -54,35 +57,35 @@ type ResourceMirrorRow struct {
 	// области выдачи и из каскада.
 	ParentChain []string
 	Labels      map[string]string
-	// SourceVersion — monotonic per-object marker from the owner.
-	// The mirror UPSERT applies a register only when this is strictly newer than
-	// the stored version (last-source-state-wins). Zero → '-infinity' (legacy).
+	// SourceVersion — монотонный маркер объекта от владельца.
+	// UPSERT зеркала применяет регистрацию лишь при строго большем значении,
+	// чем сохранённая версия (побеждает последнее состояние источника). Ноль → '-infinity' (старый формат).
 	SourceVersion time.Time
 }
 
-// ResourceMirrorEmitter — port for UPSERT/DELETE of a kaname.resource_mirror
-// row inside a caller-owned writer-tx. Atomic with the
-// owner-tuple fga_outbox emit (one writer-tx): a rolled-back caller-tx leaves
-// neither the mirror row nor the tuple intent. The mirror-fill path only FILLS
-// the mirror; the reconciler reads it. UPSERT-on-PK gives idempotency under the
-// at-least-once drainer.
-// UpsertTx reports TWO independent DB-decided facts about the write, because the
-// duplicate delivery every consumer performs cannot be recognised by one of them alone.
+// ResourceMirrorEmitter — порт вставки/обновления и удаления строки kaname.resource_mirror
+// в транзакции писателя вызывающего. Атомарен с отправкой
+// кортежа владельца в fga_outbox (одна транзакция): откат транзакции вызывающего не оставляет
+// ни строки зеркала, ни намерения кортежа. Путь заполнения зеркала лишь ЗАПОЛНЯЕТ
+// зеркало; читает его сверщик. UPSERT по первичному ключу даёт идемпотентность при
+// выгрузке с доставкой хотя бы раз.
+// UpsertTx сообщает ДВА независимых факта записи, решённых БД, поскольку
+// двойную доставку каждого потребителя нельзя распознать лишь по одному из них.
 //
-//   - `applied` — the statement CHANGED a row. The monotonic guard means a register
-//     whose SourceVersion is not strictly newer than the stored one updates ZERO rows —
-//     a redelivery whose work was already done, so the second delivery skips it.
-//   - `projectionUnchanged` — the write advanced ONLY SourceVersion: parent-scope and
-//     labels were already byte-identical. This is the case `applied` CANNOT see. The
-//     two deliveries of one registration carry DIFFERENT versions (the synchronous
-//     registrar stamps wall-clock after the commit; the drainer replays the version the
-//     DB stamped inside the writer-tx, i.e. earlier), and their arrival order is not
-//     fixed — so when the drainer arrives first, the synchronous call applies with the
-//     NEWER version while changing nothing about the object. Only a registration that
-//     REPLACED a different projection can have made an earlier materialization stale,
-//     and only that one needs the delete-stale-capable reconcile pass.
+//   - `applied` — оператор ИЗМЕНИЛ строку. Монотонный страж означает, что регистрация
+//     с SourceVersion не строго новее сохранённой обновляет НОЛЬ строк —
+//     повторная доставка уже выполненной работы, поэтому вторая доставка пропускает её.
+//   - `projectionUnchanged` — запись продвинула ТОЛЬКО SourceVersion: родительская область и
+//     метки уже побайтно совпадали. Этого случая `applied` НЕ ВИДИТ.
+//     Две доставки регистрации несут РАЗНЫЕ версии (синхронный
+//     регистратор ставит настенные часы после коммита; выгрузчик повторяет версию,
+//     поставленную БД внутри транзакции писателя, то есть раньше), а их порядок прибытия не
+//     фиксирован; когда выгрузчик первый, синхронный вызов применяется с
+//     БОЛЕЕ НОВОЙ версией, ничего не меняя в объекте. Лишь регистрация,
+//     ЗАМЕНИВШАЯ отличающуюся проекцию, могла сделать прежнюю материализацию устаревшей,
+//     и лишь ей нужен проход сверки, способный удалять устаревшее.
 //
-// Reporting both costs nothing: the statements already evaluate the conditions.
+// Сообщение обоих фактов ничего не стоит: операторы уже вычисляют условия.
 type ResourceMirrorEmitter interface {
 	UpsertTx(ctx context.Context, tx Tx, row ResourceMirrorRow) (applied, projectionUnchanged bool, err error)
 	// DeleteTx снимает строку зеркала, если надгробие не старше хранимой
@@ -118,29 +121,29 @@ type PublicReadPublisher interface {
 	ApplyTx(ctx context.Context, tx Tx, objectType, objectID string, published bool, version time.Time) (applied bool, err error)
 }
 
-// AuditEvent — service-layer payload for a durable kaname.audit_outbox
-// compliance row. The repo adapter generates the id (evt_<22-char> — bug kacho-iam#126
-// regression-guard), marshals Payload to the event_payload jsonb, and inserts
-// it with status='pending'. EventType must satisfy the audit_outbox_event_type
+// AuditEvent — нагрузка слоя служб для надёжной строки соответствия kaname.audit_outbox.
+// Адаптер репозитория создаёт id (evt_<22-char> — защита от регрессии ошибки kacho-iam#126),
+// сериализует Payload в event_payload jsonb и вставляет
+// со status='pending'. EventType должен удовлетворять ограничению audit_outbox_event_type
 // CHECK (`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`).
 //
-// Payload carries the compliance dimensions (actor / subject / resource / key
-// domain fields). It MUST NOT contain secret material (no tokens, no key PEM,
-// no client_secret) — see acceptance 5.2-36.
+// Payload несёт измерения соответствия (доменные поля действующего лица, субъекта, ресурса,
+// ключа). Он НЕ ДОЛЖЕН содержать секретный материал (токены, PEM ключа,
+// client_secret) — см. приёмку 5.2-36.
 //
-// Neutral value type owned by internal/outboxtypes so the repo-ports package can
-// reference it without importing this use-case package (dependency-rule fix);
-// the alias keeps the ergonomic service.AuditEvent name.
+// Нейтральный тип значения принадлежит internal/outboxtypes, чтобы пакет портов репозитория
+// ссылался на него без импорта пакета сценариев (исправление правила зависимостей);
+// псевдоним сохраняет удобное имя service.AuditEvent.
 type AuditEvent = outboxtypes.AuditEvent
 
-// AuditOutboxEmitter — port for emitting one durable kaname.audit_outbox row
-// inside a caller-owned writer-tx. Atomic with the surrounding security-relevant
-// mutation (запрет #10): the audit row commits iff the mutation commits, so a
-// rolled-back mutation leaves no orphan compliance row and a committed mutation
-// always leaves its trail.
+// AuditOutboxEmitter — порт отправки одной надёжной строки kaname.audit_outbox
+// в транзакции писателя вызывающего. Атомарен с окружающей значимой для безопасности
+// мутацией (запрет #10): строка аудита коммитится тогда и только тогда, когда коммитится мутация, поэтому
+// откат не оставляет осиротевшей строки соответствия, а коммит
+// всегда оставляет след.
 //
-// Mirrors RelationOutboxEmitter's emit-in-tx shape: the concrete pgx.Tx is
-// recovered from the opaque service.Tx inside the repo adapter (txAsPgx).
+// Повторяет форму отправки внутри транзакции RelationOutboxEmitter: конкретный pgx.Tx
+// восстанавливается из непрозрачного service.Tx внутри адаптера репозитория (txAsPgx).
 type AuditOutboxEmitter interface {
 	EmitTx(ctx context.Context, tx Tx, ev AuditEvent) error
 }

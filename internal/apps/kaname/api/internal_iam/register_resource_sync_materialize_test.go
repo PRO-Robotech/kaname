@@ -3,18 +3,18 @@
 
 package internal_iam
 
-// register_resource_sync_materialize_test.go — Design-B (flat-authz verb-bearing
-// complete) acceptance VBC-15 (instant visibility). RegisterResource (the
-// vpc/compute/nlb fgaproxy create path) co-commits the owner-tuple + mirror row +
-// reconcile event, then drives a SYNCHRONOUS post-commit ReconcileObject so the
-// owner's per-object v_get materializes BEFORE the consumer's create-Operation
-// reports done — a create→immediate-GET resolves ALLOW without waiting for the
-// async reconcile-outbox drain. nil-safe + non-fatal: an unwired reconciler (or a
-// reconcile error) does not fail Register (the outbox drain + periodic sweep are
-// the backstop).
+// register_resource_sync_materialize_test.go — приёмка Design-B (завершённая плоская
+// авторизация с глаголами) VBC-15 (мгновенная видимость). RegisterResource (путь создания
+// прокси FGA vpc/compute/nlb) совместно коммитит кортеж владельца, строку зеркала и
+// событие сверки, затем ведёт СИНХРОННЫЙ ReconcileObject после коммита, чтобы
+// v_get владельца по объекту материализовался ДО того, как операция создания потребителя
+// сообщит о завершении: создание и немедленный GET получают ALLOW, не ожидая
+// асинхронной выгрузки очереди сверки. Безопасно при nil, ошибка нефатальна: непровязанный сверщик (или
+// ошибка сверки) не роняет Register (выгрузка outbox и периодический обход —
+// страховка).
 //
-// RED until RegisterResourceUseCase.WithObjectReconciler drives a post-commit
-// ReconcileObject.
+// КРАСНЫЙ, пока RegisterResourceUseCase.WithObjectReconciler не запускает
+// ReconcileObject после коммита.
 
 import (
 	"context"
@@ -29,9 +29,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
-// ── unit fakes (Tx / emitter / mirror / object-reconciler) ──────────────────
+// ── Модульные дублёры (Tx / отправитель / зеркало / сверщик объекта) ──────────────────
 
 type smTx struct{ committed bool }
 
@@ -56,11 +57,11 @@ func (smEmitter) EmitOrderedDeleteTx(context.Context, service.Tx, []service.Rela
 
 type mirrorAdapter struct{ noDescendants }
 
-// UpsertTx always reports `applied` and never `projectionUnchanged` — these cases
-// exercise the materialisation path, not the redelivery gate (which
-// register_resource_redelivery_test.go owns) and not the routing verdict (which
-// register_resource_forward_route_test.go owns). Reporting no proof of staleness-freedom
-// keeps them on the guarded entry point, i.e. on the pre-existing behaviour.
+// UpsertTx всегда сообщает `applied` и никогда `projectionUnchanged`: эти случаи
+// проверяют путь материализации, а не страж повторной доставки (которым владеет
+// register_resource_redelivery_test.go) и не вердикт маршрутизации (которым владеет
+// register_resource_forward_route_test.go). Отсутствие доказательства неустаревания
+// оставляет их на защищённой точке входа, то есть в прежнем поведении.
 func (mirrorAdapter) UpsertTx(context.Context, service.Tx, service.ResourceMirrorRow) (bool, bool, error) {
 	return true, false, nil
 }
@@ -68,8 +69,8 @@ func (mirrorAdapter) DeleteTx(context.Context, service.Tx, string, string, time.
 	return false, nil
 }
 
-// regReq satisfies the registerInput interface (tupleInput + versionedInput +
-// labels + parent-scope) the use-case consumes at the handler boundary.
+// regReq удовлетворяет интерфейсу registerInput (tupleInput, versionedInput,
+// метки, родительская область), который сценарий читает на границе обработчика.
 type regReq struct {
 	subject  string
 	relation string
@@ -90,9 +91,9 @@ func (r *regReq) GetParentProjectId() string               { return "" }
 func (r *regReq) GetParentAccountId() string               { return "" }
 func (r *regReq) GetParentChain() []string                 { return r.chain }
 
-// smObjectReconciler records post-commit forward calls (the create-path additive
-// fast-path the register use-case drives post-commit), regardless of which entry point
-// the use-case picked — these cases assert THAT a pass ran, not which one.
+// smObjectReconciler записывает прямые вызовы после коммита (быстрый добавляющий
+// путь создания, запускаемый сценарием регистрации), независимо от выбранной им точки
+// входа: эти случаи проверяют ФАКТ прохода, а не его вид.
 type smObjectReconciler struct {
 	mu    sync.Mutex
 	calls [][2]string // (objectType, objectID)
@@ -123,16 +124,16 @@ func (r *smObjectReconciler) snapshot() [][2]string {
 func newRegUC(t *testing.T, rec *smObjectReconciler) (*RegisterResourceUseCase, *smTxBeginner) {
 	t.Helper()
 	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes())
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"})
 	if rec != nil {
 		uc = uc.WithObjectReconciler(rec, nil)
 	}
 	return uc, txb
 }
 
-// TestRegisterResource_VBC15_SyncReconcileAfterCommit — a successful Register drives
-// a SYNCHRONOUS ReconcileObject on the registered object AFTER commit (instant
-// visibility: owner v_get materializes before the consumer's Operation reports done).
+// TestRegisterResource_VBC15_SyncReconcileAfterCommit — успешный Register запускает
+// СИНХРОННЫЙ ReconcileObject зарегистрированного объекта ПОСЛЕ коммита (мгновенная
+// видимость: v_get владельца материализуется до завершения Operation потребителя).
 func TestRegisterResource_VBC15_SyncReconcileAfterCommit(t *testing.T) {
 	rec := &smObjectReconciler{}
 	uc, txb := newRegUC(t, rec)
@@ -154,10 +155,10 @@ func TestRegisterResource_VBC15_SyncReconcileAfterCommit(t *testing.T) {
 		"VBC-15: post-commit ReconcileObjectForward must target the registered object (dotted type)")
 }
 
-// TestRegisterResource_VBC15_NilReconciler_NonFatal — an unwired reconciler does
-// not fail Register (async outbox drain is the backstop).
+// TestRegisterResource_VBC15_NilReconciler_NonFatal — непровязанный сверщик
+// не роняет Register (асинхронная выгрузка outbox — страховка).
 func TestRegisterResource_VBC15_NilReconciler_NonFatal(t *testing.T) {
-	uc, txb := newRegUC(t, nil) // no WithObjectReconciler
+	uc, txb := newRegUC(t, nil) // Без WithObjectReconciler.
 	err := uc.Register(context.Background(), &regReq{
 		subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_new",
 	})
@@ -165,9 +166,9 @@ func TestRegisterResource_VBC15_NilReconciler_NonFatal(t *testing.T) {
 	require.True(t, txb.tx.committed)
 }
 
-// TestRegisterResource_VBC15_ReconcileError_NonFatal — a reconcile error after a
-// committed register is NON-fatal (the resource is durably registered; the drain
-// + sweep retry). Register still returns success.
+// TestRegisterResource_VBC15_ReconcileError_NonFatal — ошибка сверки после
+// закоммиченной регистрации НЕ фатальна (ресурс надёжно зарегистрирован; выгрузка
+// и обход повторяют). Register по-прежнему возвращает успех.
 func TestRegisterResource_VBC15_ReconcileError_NonFatal(t *testing.T) {
 	rec := &smObjectReconciler{err: errors.New("reconcile transient")}
 	uc, txb := newRegUC(t, rec)
