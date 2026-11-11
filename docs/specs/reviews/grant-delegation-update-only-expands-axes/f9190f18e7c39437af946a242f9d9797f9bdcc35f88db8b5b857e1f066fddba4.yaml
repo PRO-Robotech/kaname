@@ -69,6 +69,19 @@ effective_approval:
   issued: false
   ban1_lifted: false
   why: Один блокирующий COVERAGE; отказ не даёт санкции на реализацию.
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_sha256: cc2c4f14721b30d04c52c0663f3bd41c6db4d09d015c69d24f1c7dcd2dd5eeca
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  note: >-
+    Координата дописана по действующей политике для осмотра гейтом
+    review-event-silence (kaname#1032): исходная запись не называла учётку
+    события. Это допуск курьера по политике, а не факт публикации или личного
+    ревью. Исторические CHANGES_REQUESTED, event.status: not_performed,
+    effective_approval.issued: false и publishing_actor: none сохранены.
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#1032
