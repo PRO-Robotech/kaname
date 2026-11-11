@@ -74,11 +74,11 @@ route_signs:
 effective_approval:
   issued_at: "2026-11-11T17:45:38Z"
   issued: true
-  ban1_lifted: false
+  ban1_lifted: true
   why: >-
-    Контракт APPROVED, но event ещё не опубликован. Для действующего одобрения
-    нужны опубликованные точные документ и review-record и подтверждённое
-    внешнее событие на тот же SHA. Последующие этапы и TDD этим не заменяются.
+    Точные документ и вердикт опубликованы; внешнее APPROVED-событие на тот же
+    SHA прочитано из GitHub, actor, редакция и отпечаток тела сверены.
+    Метаданные курьера приведены к факту. Последующие этапы и TDD не заменены.
 authority:
   mode: versioned_policy_authority
   repository: PRO-Robotech/kacho-workspace
@@ -106,7 +106,7 @@ event:
 attribution:
   reviewer_kind: codex_agent
   assigned_agent: acceptance-reviewer
-  publishing_actor: none
+  publishing_actor: pointpu
   publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
   history_is_appended_not_rewritten: true
@@ -118,6 +118,6 @@ premise:
     совпал с независимо построенной дельтой R1->R2; 17 уникальных GDU ID.
   boundary: B1 закрыт в контракте; реализации и runtime Update ещё нет.
 next:
-  role: Root-курьер
-  action: Опубликовать точные документ и новую запись, внешнее APPROVED-событие на тот же SHA и привести event к факту.
+  role: class-exposure-analyst
+  action: Разобрать риски Update по одобренному отпечатку; после публикации метаданных подготовить честные красные пробы до реализации.
 owner_questions: []
