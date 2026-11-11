@@ -126,13 +126,15 @@ def seed_update_given(args, http, values, patch, ledger, run_id):
     registrar = registry.Registrar(Path(args.pki), args.grpc_addr)
     x = "reg" + "".join(secrets.choice("0123456789abcdefghjkmnpqrstvwxyz") for _ in range(17))
     y = x + "/gdu-" + run_id
-    stamp = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    version = datetime.datetime.now(datetime.timezone.utc)
     lineage = []
-    for obj, subject, relation, chain in (
+    # Версия упорядочивает объект целиком: owner должен быть новее его указателя.
+    for offset, (obj, subject, relation, chain) in enumerate((
             ("registry_registry:" + x, "project:" + project, "project", ["project:" + project, "account:" + account]),
             ("registry_registry:" + x, "user:" + user, "owner", ["project:" + project, "account:" + account]),
             ("registry_repository:" + y, "registry_registry:" + x, "parent", ["registry_registry:" + x, "project:" + project, "account:" + account]),
-            ("registry_repository:" + y, "user:" + user, "owner", ["registry_registry:" + x, "project:" + project, "account:" + account])):
+            ("registry_repository:" + y, "user:" + user, "owner", ["registry_registry:" + x, "project:" + project, "account:" + account]))):
+        stamp = (version + datetime.timedelta(microseconds=offset)).isoformat().replace("+00:00", "Z")
         intent = {"object": obj, "subjectId": subject, "relation": relation,
                   "parentProjectId": project, "parentAccountId": account,
                   "parentChain": chain, "sourceVersion": stamp}
