@@ -72,7 +72,8 @@ route_signs:
   subscribe_rpc: false
   internal_audit_event: true
 effective_approval:
-  issued: false
+  issued_at: "2026-11-11T17:45:38Z"
+  issued: true
   ban1_lifted: false
   why: >-
     Контракт APPROVED, но event ещё не опубликован. Для действующего одобрения
@@ -87,12 +88,21 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#1032
-  status: not_performed
-  published: false
-  publication_expected_from_orchestrator: true
-  subject_sha256: fcd2f43633032408952fc2c2f6a44c55d478d09352e9bfafacb4f6b5496687cb
-  verdict: APPROVED
-  body: 'acceptance-reviewer · APPROVED · SHA-256 fcd2f43633032408952fc2c2f6a44c55d478d09352e9bfafacb4f6b5496687cb'
+  status: performed
+  published: true
+  database_id: 6803060597
+  node_id: "IC_kwDOUO26pM8AAAABlX53dQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/1032#issuecomment-6803060597"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6803060597"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-11-11T17:45:38Z"
+  body_sha256: "e658faf55b588722c34845946f1e1863120acb6b7643a1661c23a8adaa788c22"
+  subject_sha256: "fcd2f43633032408952fc2c2f6a44c55d478d09352e9bfafacb4f6b5496687cb"
+  subject_revision_commit: "0a44b381e3a5228f877cc768a9ad875eb223073e"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: codex_agent
   assigned_agent: acceptance-reviewer
