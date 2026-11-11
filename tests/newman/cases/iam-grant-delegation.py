@@ -669,7 +669,7 @@ def _gdu_error(name, body, code, text, auth=_GDU_U, field=None, http=400, challe
              *assert_refusal_message(text, name + ": точный текст"),
              "pm.test('нет операции при синхронном отказе', () => pm.expect(pm.response.json().id).to.eql(undefined));"]
     if field:
-        tests.append("pm.test('точный BadRequest', () => { const j=pm.response.json(); const ds=j.details || (j.error && j.error.details) || []; const b=ds.filter(d => /google.rpc.BadRequest$/.test(d['@type'] || '')); pm.expect(ds).to.have.length(1); pm.expect(b).to.have.length(1); pm.expect(b[0].fieldViolations).to.deep.eql([{field:" + js_str(field) + ",description:" + js_str(text) + "}]); });")
+        tests.append("pm.test('точный BadRequest', () => { const j=pm.response.json(); const ds=j.details || (j.error && j.error.details) || []; const b=ds.filter(d => /google.rpc.BadRequest$/.test(d['@type'] || '')); pm.expect(ds).to.have.length(1); pm.expect(b).to.have.length(1); pm.expect(b[0].fieldViolations).to.deep.eql([{field:" + js_str(field) + ",description:" + js_str(text) + ",reason:'',localizedMessage:null}]); });")
     if challenge:
         tests.append("pm.test('точный WWW-Authenticate challenge', () => pm.expect(pm.response.headers.get('WWW-Authenticate')).to.eql(" + js_str(challenge) + "));")
     return Step(name=name, method="PATCH", path="/iam/v1/grantDelegations/{{gduId}}", auth=auth, body=body, test_script=tests)
@@ -707,10 +707,28 @@ def _gdu_e_authority(name, allowed):
             "pm.test('самостоятельный account-admin E', () => pm.expect(pm.response.json().allowed).to.eql(" + str(allowed).lower() + "));"])
 
 
-def _gdu_e_empty(name):
+def _gdu_e_snapshot(name, capture=False):
+    # Полный исходный список E может содержать штатные выдачи другого аккаунта.
+    # Ничего не отбрасываем: после уборки сравниваем каждый объект целиком.
+    tests = [*assert_status(200),
+        "const j=pm.response.json(), bindings=j.accessBindings || [];",
+        "pm.test('полный список E без скрытой страницы и чужих субъектов', () => {",
+        "  pm.expect(j.accessBindings).to.be.an('array'); pm.expect(j.incompleteMembershipGroupIds || []).to.deep.eql([]);",
+        "  pm.expect(j.nextPageToken || '').to.eql(''); pm.expect(bindings).to.be.an('array');",
+        "  const ids=bindings.map(b => b.id); ids.forEach(id => pm.expect(id).to.be.a('string').and.not.empty);",
+        "  pm.expect(new Set(ids).size).to.eql(bindings.length);",
+        "  bindings.forEach(b => pm.expect((b.subjects || []).some(s => s.type === 'SUBJECT_TYPE_USER' && s.id === pm.environment.get('humanEscUserId'))).to.eql(true)); });",
+        "const snapshot=bindings.slice().sort((a,b) => a.id.localeCompare(b.id));"]
+    if capture:
+        tests.extend([
+            "pm.test('E не имеет выдач на GDU-аккаунте или глобальной области', () => {",
+            "  bindings.forEach(b => { pm.expect(b.scopeType).to.be.oneOf(['iam.account','iam.project']);",
+            "    pm.expect(b.scopeId).not.to.eql(pm.environment.get('gduAccountId')); }); });",
+            "pm.environment.set('gduEBindingsBaseline', JSON.stringify(snapshot));"])
+    else:
+        tests.append("pm.test('полный исходный список E восстановлен без добавлений, удалений и изменений', () => { const baseline=pm.environment.get('gduEBindingsBaseline'); pm.expect(baseline).to.be.a('string').and.not.empty; pm.expect(snapshot).to.deep.eql(JSON.parse(baseline)); });")
     return Step(name=name, method="GET", path="/iam/v1/accessBindings:listBySubject?subjectType=user&subjectId={{humanEscUserId}}&pageSize=1000",
-        auth=_GDU_E, test_script=[*assert_status(200),
-            "pm.test('соседнее Дано Esc без выдач сохранено', () => { const j=pm.response.json(); pm.expect(j.accessBindings || []).to.deep.eql([]); pm.expect(j.nextPageToken || '').to.eql(''); });"])
+        auth=_GDU_E, test_script=tests)
 
 
 _owner_id = "IAM-GDU-OWNER-UPDATE-ALLOWED"
@@ -721,7 +739,7 @@ _owner_steps = [Step(name=_owner_id + "-E-identity", method="GET", path="/iam/v1
         "pm.test('E настоящий человек без cloud-admin', () => { const j=pm.response.json(); pm.expect(j.subject).to.eql('user:' + pm.environment.get('humanEscUserId')); pm.expect(j.systemAdmin || false).to.eql(false); });"]),
     Step(name=_owner_id + "-C-identity", method="GET", path="/iam/v1/me", auth=_GDU_C,
         test_script=[*assert_status(200), "pm.test('C настоящий cloud-admin', () => { const j=pm.response.json(); pm.expect(j.subject).to.eql('user:' + pm.environment.get('humanAidAdmSharedUserId')); pm.expect(j.systemAdmin).to.eql(true); });"]),
-    _gdu_e_empty(_owner_id + "-E-initially-empty"),
+    _gdu_e_snapshot(_owner_id + "-E-initial-bindings", capture=True),
     _gdu_e_authority(_owner_id + "-E-initially-denied", False),
     *_gdu_mutate(_owner_id + "-grant-E-admin", "/iam/v1/accessBindings",
         {"subjects": [{"type": "SUBJECT_TYPE_USER", "id": "{{humanEscUserId}}"}], "roleId": "{{gduAccountAdminRoleId}}",
@@ -739,7 +757,7 @@ _owner_steps = [Step(name=_owner_id + "-E-identity", method="GET", path="/iam/v1
     *_gdu_mutate(_owner_id + "-revoke-E-admin", "/iam/v1/accessBindings/{{gduEAdminBinding}}:revoke", {}),
     _gdu_e_authority(_owner_id + "-E-admin-removed", False),
     *_gdu_mutate(_owner_id + "-delete-own-E-fixture", "/iam/v1/accessBindings/{{gduEAdminBinding}}", None, method="DELETE"),
-    _gdu_e_empty(_owner_id + "-E-empty-again")]
+    _gdu_e_snapshot(_owner_id + "-E-bindings-restored")]
 CASES.append(Case(id=_owner_id, title="#1032: настоящий U, отдельные E/C, первоначальный автор неизменен", classes=["CRUD", "CONF"], priority="P1", steps=_owner_steps))
 
 

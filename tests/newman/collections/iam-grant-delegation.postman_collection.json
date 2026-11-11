@@ -45760,7 +45760,7 @@
                   "  pm.expect(j.message, JSON.stringify(j)).to.eql('subject_types: required');",
                   "});",
                   "pm.test('нет операции при синхронном отказе', () => pm.expect(pm.response.json().id).to.eql(undefined));",
-                  "pm.test('точный BadRequest', () => { const j=pm.response.json(); const ds=j.details || (j.error && j.error.details) || []; const b=ds.filter(d => /google.rpc.BadRequest$/.test(d['@type'] || '')); pm.expect(ds).to.have.length(1); pm.expect(b).to.have.length(1); pm.expect(b[0].fieldViolations).to.deep.eql([{field:'subject_types',description:'subject_types: required'}]); });"
+                  "pm.test('точный BadRequest', () => { const j=pm.response.json(); const ds=j.details || (j.error && j.error.details) || []; const b=ds.filter(d => /google.rpc.BadRequest$/.test(d['@type'] || '')); pm.expect(ds).to.have.length(1); pm.expect(b).to.have.length(1); pm.expect(b[0].fieldViolations).to.deep.eql([{field:'subject_types',description:'subject_types: required',reason:'',localizedMessage:null}]); });"
                 ]
               }
             }
@@ -48449,7 +48449,7 @@
           ]
         },
         {
-          "name": "IAM-GDU-OWNER-UPDATE-ALLOWED :: IAM-GDU-OWNER-UPDATE-ALLOWED-E-initially-empty",
+          "name": "IAM-GDU-OWNER-UPDATE-ALLOWED :: IAM-GDU-OWNER-UPDATE-ALLOWED-E-initial-bindings",
           "request": {
             "method": "GET",
             "header": [
@@ -48525,7 +48525,18 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('соседнее Дано Esc без выдач сохранено', () => { const j=pm.response.json(); pm.expect(j.accessBindings || []).to.deep.eql([]); pm.expect(j.nextPageToken || '').to.eql(''); });"
+                  "const j=pm.response.json(), bindings=j.accessBindings || [];",
+                  "pm.test('полный список E без скрытой страницы и чужих субъектов', () => {",
+                  "  pm.expect(j.accessBindings).to.be.an('array'); pm.expect(j.incompleteMembershipGroupIds || []).to.deep.eql([]);",
+                  "  pm.expect(j.nextPageToken || '').to.eql(''); pm.expect(bindings).to.be.an('array');",
+                  "  const ids=bindings.map(b => b.id); ids.forEach(id => pm.expect(id).to.be.a('string').and.not.empty);",
+                  "  pm.expect(new Set(ids).size).to.eql(bindings.length);",
+                  "  bindings.forEach(b => pm.expect((b.subjects || []).some(s => s.type === 'SUBJECT_TYPE_USER' && s.id === pm.environment.get('humanEscUserId'))).to.eql(true)); });",
+                  "const snapshot=bindings.slice().sort((a,b) => a.id.localeCompare(b.id));",
+                  "pm.test('E не имеет выдач на GDU-аккаунте или глобальной области', () => {",
+                  "  bindings.forEach(b => { pm.expect(b.scopeType).to.be.oneOf(['iam.account','iam.project']);",
+                  "    pm.expect(b.scopeId).not.to.eql(pm.environment.get('gduAccountId')); }); });",
+                  "pm.environment.set('gduEBindingsBaseline', JSON.stringify(snapshot));"
                 ]
               }
             }
@@ -62392,7 +62403,7 @@
           ]
         },
         {
-          "name": "IAM-GDU-OWNER-UPDATE-ALLOWED :: IAM-GDU-OWNER-UPDATE-ALLOWED-E-empty-again",
+          "name": "IAM-GDU-OWNER-UPDATE-ALLOWED :: IAM-GDU-OWNER-UPDATE-ALLOWED-E-bindings-restored",
           "request": {
             "method": "GET",
             "header": [
@@ -62468,7 +62479,15 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('соседнее Дано Esc без выдач сохранено', () => { const j=pm.response.json(); pm.expect(j.accessBindings || []).to.deep.eql([]); pm.expect(j.nextPageToken || '').to.eql(''); });"
+                  "const j=pm.response.json(), bindings=j.accessBindings || [];",
+                  "pm.test('полный список E без скрытой страницы и чужих субъектов', () => {",
+                  "  pm.expect(j.accessBindings).to.be.an('array'); pm.expect(j.incompleteMembershipGroupIds || []).to.deep.eql([]);",
+                  "  pm.expect(j.nextPageToken || '').to.eql(''); pm.expect(bindings).to.be.an('array');",
+                  "  const ids=bindings.map(b => b.id); ids.forEach(id => pm.expect(id).to.be.a('string').and.not.empty);",
+                  "  pm.expect(new Set(ids).size).to.eql(bindings.length);",
+                  "  bindings.forEach(b => pm.expect((b.subjects || []).some(s => s.type === 'SUBJECT_TYPE_USER' && s.id === pm.environment.get('humanEscUserId'))).to.eql(true)); });",
+                  "const snapshot=bindings.slice().sort((a,b) => a.id.localeCompare(b.id));",
+                  "pm.test('полный исходный список E восстановлен без добавлений, удалений и изменений', () => { const baseline=pm.environment.get('gduEBindingsBaseline'); pm.expect(baseline).to.be.a('string').and.not.empty; pm.expect(snapshot).to.deep.eql(JSON.parse(baseline)); });"
                 ]
               }
             }
