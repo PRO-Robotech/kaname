@@ -39,12 +39,23 @@ import (
 // gdWireSubject — регистрация испытуемого в мир Д (Р1 приёмки) теми же
 // конструкторами, что в корне службы (`cmd/kaname/wiring.go`).
 func gdWireSubject(w *gdWorld, reg grpc.ServiceRegistrar) {
-	src := catalog.Fixed{F: w.facts}
+	var src catalog.Source = catalog.Fixed{F: w.facts}
+	if w.updateCatalog != nil {
+		src = w.updateCatalog
+	}
+	repo := w.updateRepo
+	if repo == nil {
+		repo = w.repo
+	}
+	door := w.updateDoor
+	if door == nil {
+		door = w.door
+	}
 	h := gdapp.NewHandler(
-		gdapp.NewCreateGrantDelegationUseCase(w.repo, w.ops, src).WithRelationStore(w.door, nil),
+		gdapp.NewCreateGrantDelegationUseCase(repo, w.ops, src).WithRelationStore(door, nil),
 		gdapp.NewGetGrantDelegationUseCase(w.repo).WithRelationStore(w.door),
 		gdapp.NewListGrantDelegationsUseCase(w.repo).WithRelationStore(w.door),
-		gdapp.NewRevokeGrantDelegationUseCase(w.repo, w.ops).WithRelationStore(w.door, nil),
+		gdapp.NewRevokeGrantDelegationUseCase(repo, w.ops).WithRelationStore(door, nil),
 	)
 	iamv1.RegisterGrantDelegationServiceServer(reg, h)
 }
