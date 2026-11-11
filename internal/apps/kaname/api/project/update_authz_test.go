@@ -10,6 +10,8 @@ package project
 import (
 	"context"
 	"fmt"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"sync"
 	"testing"
 	"time"
@@ -253,4 +255,9 @@ func (w *authzProjWriter) EmitInviteMail(_ context.Context, intent outboxtypes.I
 		return false, fmt.Errorf("invite mail: rate limit must be positive — there is no «unlimited»")
 	}
 	return true, nil
+}
+
+// Проверки доверенностей в этом дублёре не поддерживаются: отказ вместо фиктивного допуска.
+func (w *authzProjWriter) TransactionRelationChecker(*authzmodel.Plans) (kanamerepo.RelationChecker, error) {
+	return nil, iamerr.ErrUnavailable
 }

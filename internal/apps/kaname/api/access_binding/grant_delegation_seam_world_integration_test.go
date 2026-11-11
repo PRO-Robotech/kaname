@@ -56,7 +56,7 @@ func gdWireSubject(w *gdWorld, reg grpc.ServiceRegistrar) {
 		gdapp.NewGetGrantDelegationUseCase(w.repo).WithRelationStore(w.door),
 		gdapp.NewListGrantDelegationsUseCase(w.repo).WithRelationStore(w.door),
 		gdapp.NewRevokeGrantDelegationUseCase(repo, w.ops).WithRelationStore(door, nil),
-	)
+	).WithUpdate(gdapp.NewUpdateGrantDelegationUseCase(repo, w.ops, src).WithRelationStore(door, nil))
 	iamv1.RegisterGrantDelegationServiceServer(reg, h)
 }
 

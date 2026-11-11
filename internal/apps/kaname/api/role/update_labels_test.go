@@ -22,6 +22,8 @@ import (
 	"errors"
 	stderrors "errors"
 	"fmt"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"testing"
 	"time"
 
@@ -402,4 +404,9 @@ func (_ *rlRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) 
 
 func (w *rlRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, domain.RulePolicy, bool, error) {
 	return nil, domain.RulePolicy{}, false, nil
+}
+
+// Проверки доверенностей в этом дублёре не поддерживаются: отказ вместо фиктивного допуска.
+func (w *rlUpdWriter) TransactionRelationChecker(*authzmodel.Plans) (kanamerepo.RelationChecker, error) {
+	return nil, iamerr.ErrUnavailable
 }

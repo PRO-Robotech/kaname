@@ -19,6 +19,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"testing"
 	"time"
 
@@ -464,3 +465,8 @@ func (_ delABReader) PublicReadContainer(context.Context, string) (domain.Public
 // GrantDelegations — делегирований этот дублёр не несёт (kaname#986): пробы файла
 // делегированного пути права выдавать не касаются.
 func (delABReader) GrantDelegations() gdrepo.ReaderIface { return nil }
+
+// Проверки доверенностей в этом дублёре не поддерживаются: отказ вместо фиктивного допуска.
+func (w *delFakeWriter) TransactionRelationChecker(*authzmodel.Plans) (kanamerepo.RelationChecker, error) {
+	return nil, iamerr.ErrUnavailable
+}

@@ -268,44 +268,9 @@ func (u *CreateGrantDelegationUseCase) validateComposition(ctx context.Context, 
 		return "", shared.MapRepoErr(gerr)
 	}
 
-	modules := map[string]struct{}{}
-	for _, id := range d.RoleIDs {
-		role, gerr := rd.Roles().Get(ctx, id)
-		if gerr != nil {
-			if stderrors.Is(gerr, iamerr.ErrNotFound) {
-				return "", status.Errorf(codes.FailedPrecondition, "Role %s not found", id)
-			}
-			return "", shared.MapRepoErr(gerr)
-		}
-		m := domain.RoleDeclaringModule(role)
-		if m == "" {
-			return "", status.Errorf(codes.FailedPrecondition, "role %s is not declared by a module manifest", id)
-		}
-		modules[m] = struct{}{}
-		for _, rule := range role.Rules {
-			if rule.Module != "" {
-				modules[rule.Module] = struct{}{}
-			}
-		}
-	}
-	for _, t := range d.TargetTypes {
-		modules[domain.ModuleOfCatalogType(t)] = struct{}{}
-	}
-	if len(modules) != 1 {
-		found := make([]string, 0, len(modules))
-		for m := range modules {
-			found = append(found, m)
-		}
-		sort.Strings(found)
-		return "", status.Errorf(codes.FailedPrecondition,
-			"role_ids and target_types must belong to one module; found %s", strings.Join(found, ", "))
-	}
-	var module string
-	for m := range modules {
-		module = m
-	}
-	if module == "iam" {
-		return "", status.Error(codes.FailedPrecondition, "module iam cannot be delegated")
+	module, err := delegationModule(ctx, rd, d)
+	if err != nil {
+		return "", err
 	}
 	if _, gerr := rd.ServiceAccounts().Get(ctx, d.DelegateID); gerr != nil {
 		if stderrors.Is(gerr, iamerr.ErrNotFound) {
@@ -388,4 +353,49 @@ func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.Gr
 		return nil, err
 	}
 	return marshalGD(created)
+}
+
+// delegationModule проверяет декларации всех ролей, их правила и общий модуль
+// всех итоговых целей. Используется Create и Update на переданном читателе.
+func delegationModule(ctx context.Context, rd Reader, d domain.GrantDelegation) (string, error) {
+	modules := map[string]struct{}{}
+	for _, id := range d.RoleIDs {
+		role, gerr := rd.Roles().Get(ctx, id)
+		if gerr != nil {
+			if stderrors.Is(gerr, iamerr.ErrNotFound) {
+				return "", status.Errorf(codes.FailedPrecondition, "Role %s not found", id)
+			}
+			return "", shared.MapRepoErr(gerr)
+		}
+		m := domain.RoleDeclaringModule(role)
+		if m == "" {
+			return "", status.Errorf(codes.FailedPrecondition, "role %s is not declared by a module manifest", id)
+		}
+		modules[m] = struct{}{}
+		for _, rule := range role.Rules {
+			if rule.Module != "" {
+				modules[rule.Module] = struct{}{}
+			}
+		}
+	}
+	for _, t := range d.TargetTypes {
+		modules[domain.ModuleOfCatalogType(t)] = struct{}{}
+	}
+	if len(modules) != 1 {
+		found := make([]string, 0, len(modules))
+		for m := range modules {
+			found = append(found, m)
+		}
+		sort.Strings(found)
+		return "", status.Errorf(codes.FailedPrecondition,
+			"role_ids and target_types must belong to one module; found %s", strings.Join(found, ", "))
+	}
+	var module string
+	for m := range modules {
+		module = m
+	}
+	if module == "iam" {
+		return "", status.Error(codes.FailedPrecondition, "module iam cannot be delegated")
+	}
+	return module, nil
 }

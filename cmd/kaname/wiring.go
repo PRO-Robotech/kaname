@@ -683,7 +683,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		grantdelegationapp.NewGetGrantDelegationUseCase(kanameRepo).WithRelationStore(relationStore),
 		grantdelegationapp.NewListGrantDelegationsUseCase(kanameRepo).WithRelationStore(relationStore),
 		grantdelegationapp.NewRevokeGrantDelegationUseCase(kanameRepo, opsRepo).WithRelationStore(relationStore, logger),
-	)
+	).WithUpdate(grantdelegationapp.NewUpdateGrantDelegationUseCase(kanameRepo, opsRepo, catalogSource).WithRelationStore(relationStore, logger))
 	abHandler := accessbindingapp.NewHandler(abCreate, abDelete, abGet, abListByScope, abListBySub, abListByAcc,
 		abListSubjPriv).
 		WithUpdate(abUpdate).

@@ -31,18 +31,27 @@ const accountGrantObjectType = "account"
 // аккаунт — отказ в праве, побайтово как у вызывающего без права (скрытие
 // существования).
 func requireAccountGrantAuthority(ctx context.Context, repo Repo, relations clients.RelationStore, accountID domain.AccountID) error {
-	admin, err := authzguard.IsClusterAdminE(ctx, relations)
+	return requireAccountGrantAuthorityWithOwner(ctx, relations, accountID, func(ctx context.Context) (domain.UserID, error) {
+		return accountOwner(ctx, repo, accountID)
+	})
+}
+
+// requireAccountGrantAuthorityWithOwner сохраняет те же три пути для обычного
+// чтения и Writer. Владелец читается лениво: администратор облака, как прежде,
+// не занимает соединение для этого вопроса.
+func requireAccountGrantAuthorityWithOwner(ctx context.Context, checker authzguard.RelationChecker, accountID domain.AccountID, ownerOf func(context.Context) (domain.UserID, error)) error {
+	admin, err := authzguard.IsClusterAdminE(ctx, checker)
 	if err != nil {
 		return authzguard.AuthzBackendUnavailable()
 	}
 	if admin {
 		return nil
 	}
-	owner, err := accountOwner(ctx, repo, accountID)
+	owner, err := ownerOf(ctx)
 	if err != nil {
 		return err
 	}
-	return authzguard.RequireScopeRelation(ctx, relations, accountGrantObjectType, string(accountID), string(owner), "admin")
+	return authzguard.RequireScopeRelation(ctx, checker, accountGrantObjectType, string(accountID), string(owner), "admin")
 }
 
 // accountOwner — владелец аккаунта; нет аккаунта — отказ в праве.
@@ -52,6 +61,11 @@ func accountOwner(ctx context.Context, repo Repo, accountID domain.AccountID) (d
 		return "", shared.MapRepoErr(err)
 	}
 	defer func() { _ = rd.Rollback(ctx) }()
+	return accountOwnerFromReader(ctx, rd, accountID)
+}
+
+// accountOwnerFromReader не открывает и не завершает транзакцию вызывающего.
+func accountOwnerFromReader(ctx context.Context, rd Reader, accountID domain.AccountID) (domain.UserID, error) {
 	acct, err := rd.Accounts().Get(ctx, accountID)
 	if err != nil {
 		if stderrors.Is(err, iamerr.ErrNotFound) {
