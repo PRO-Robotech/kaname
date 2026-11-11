@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package access_binding_test
 
-// Приёмка #1032 SHA256 fcd2f43633032408952fc2c2f6a44c55d478d09352e9bfafacb4f6b5496687cb.
+// Приёмка kaname#1032 SHA256 daad435d16de8f5a23f38f6b8cc3d7a4a9bb12202457b078b89e6d8b3b686b7b.
 // Никакая функция не заканчивается пробой дескриптора: за ней настоящий When/Then.
 import (
 	"context"

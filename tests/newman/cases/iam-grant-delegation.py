@@ -444,7 +444,7 @@ CASES.extend([_group_self_grant_twin(True), _group_self_grant_twin(False)])
 # Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а): служба
 # kaname наружу краем платформы не публикуется (Р-В5 приёмки), делегат ходит к ней
 # напрямую.
-# #1032: настоящий собственный край. Check всегда предъявляется самим S/S2/M.
+# kaname#1032: настоящий собственный край. Check всегда предъявляется самим S/S2/M.
 _GDU_U = "jwtHumanCeremonyStepUp"
 _GDU_E = "jwtHumanEscStepUp"
 _GDU_C = "jwtHumanAidAdmSharedStepUp"
@@ -648,7 +648,7 @@ def _gdu_distinct(name, axis, allowed=False, wait=False):
 
 
 def _gdu_expand(axis, case_id):
-    return Case(id=case_id, title="#1032: расширение " + axis + ", та же выдача и собственный effective false/false/true", classes=["CRUD", "CONF", "NEG"], priority="P1",
+    return Case(id=case_id, title="kaname#1032: расширение " + axis + ", та же выдача и собственный effective false/false/true", classes=["CRUD", "CONF", "NEG"], priority="P1",
         steps=[*_gdu_given(case_id), _gdu_distinct(case_id + "-before", axis),
             *_gdu_grant(case_id + "-grant-denied", axis, denied=True),
             *_gdu_patch(case_id + "-PATCH", _gdu_axes(axis)),
@@ -692,7 +692,7 @@ for _id, _axis, _bad, _code, _text, _field in (
         _gdu_error(_id + "-refused", _bad, _code, _text, field=_field),
         _gdu_snapshot(_id + "-atomic-D", delegation=True), *_gdu_invariant(_id + "-atomic-I"),
         *_gdu_patch(_id + "-corrected-twin", _gdu_axes(_axis)), *_gdu_cleanup(_id)])
-    CASES.append(Case(id=_id, title="#1032: точный отказ и исправленный близнец " + _axis, classes=["NEG", "VAL"], priority="P1", steps=_steps))
+    CASES.append(Case(id=_id, title="kaname#1032: точный отказ и исправленный близнец " + _axis, classes=["NEG", "VAL"], priority="P1", steps=_steps))
 
 
 def _gdu_e_authority(name, allowed):
@@ -758,7 +758,7 @@ _owner_steps = [Step(name=_owner_id + "-E-identity", method="GET", path="/iam/v1
     _gdu_e_authority(_owner_id + "-E-admin-removed", False),
     *_gdu_mutate(_owner_id + "-delete-own-E-fixture", "/iam/v1/accessBindings/{{gduEAdminBinding}}", None, method="DELETE"),
     _gdu_e_snapshot(_owner_id + "-E-bindings-restored")]
-CASES.append(Case(id=_owner_id, title="#1032: настоящий U, отдельные E/C, первоначальный автор неизменен", classes=["CRUD", "CONF"], priority="P1", steps=_owner_steps))
+CASES.append(Case(id=_owner_id, title="kaname#1032: настоящий U, отдельные E/C, первоначальный автор неизменен", classes=["CRUD", "CONF"], priority="P1", steps=_owner_steps))
 
 
 for _id, _auth, _http, _code, _message, _challenge in (
@@ -776,11 +776,11 @@ for _id, _auth, _http, _code, _message, _challenge in (
     _steps.extend([_gdu_error(_id + "-PATCH", _gdu_axes("role"), _code, _message, auth=_auth, http=_http, challenge=_challenge),
         _gdu_snapshot(_id + "-unchanged-D", delegation=True), *_gdu_invariant(_id + "-I"),
         *_gdu_patch(_id + "-owner-positive-twin", _gdu_axes("role")), *_gdu_cleanup(_id)])
-    CASES.append(Case(id=_id, title="#1032: публичная дверь и принимаемый близнец " + _id, classes=["NEG", "CONF"], priority="P1", steps=_steps))
+    CASES.append(Case(id=_id, title="kaname#1032: публичная дверь и принимаемый близнец " + _id, classes=["NEG", "CONF"], priority="P1", steps=_steps))
 
 
 _repeat = "IAM-GDU-REPEAT-UNCHANGED"
-CASES.append(Case(id=_repeat, title="#1032: успешный повтор полного набора — no-op, B0 и доступ прежние", classes=["CRUD", "CONF"], priority="P1", steps=[
+CASES.append(Case(id=_repeat, title="kaname#1032: успешный повтор полного набора — no-op, B0 и доступ прежние", classes=["CRUD", "CONF"], priority="P1", steps=[
     *_gdu_given(_repeat), *_gdu_patch(_repeat + "-first", _gdu_axes("role")),
     _gdu_snapshot(_repeat + "-save-expanded", capture=True, delegation=True),
     *_gdu_patch(_repeat + "-repeat", {"updateMask": "roleIds", "roleIds": ["{{gdRolePullerId}}", "{{gdRolePusherId}}"]}),
@@ -788,7 +788,7 @@ CASES.append(Case(id=_repeat, title="#1032: успешный повтор пол
     *_gdu_cleanup(_repeat)]))
 
 _revoked = "IAM-GDU-REVOKED-UPDATE-DENIED"
-CASES.append(Case(id=_revoked, title="#1032: ACTIVE-близнец и REVOKED, включая no-op, без оживления", classes=["NEG", "CONF"], priority="P1", steps=[
+CASES.append(Case(id=_revoked, title="kaname#1032: ACTIVE-близнец и REVOKED, включая no-op, без оживления", classes=["NEG", "CONF"], priority="P1", steps=[
     *_gdu_given(_revoked), *_gdu_patch(_revoked + "-ACTIVE", _gdu_axes("role")),
     *_gdu_cleanup(_revoked), _gdu_snapshot(_revoked + "-save-D", capture=True, delegation=True),
     _gdu_snapshot(_revoked + "-save-B0", capture=True), _gdu_inventory(_revoked + "-save-bindings", capture=True),

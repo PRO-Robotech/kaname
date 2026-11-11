@@ -244,8 +244,8 @@ func TestGrantDelegation_GD32_ListenerDoorPassesRevokeAndDeleteButNotUpdate(t *t
 	row("e GrantDelegationService.Update", reached && err == nil && len(log) == 0,
 		fmt.Sprintf("обработчик достигнут=%v, отказ=%v, вопросы двери=%v", reached, err, log))
 
-	// База CE-21: 21 метод iam.v1 и 2 operation; #986 добавил шесть.
-	// #1032 добавляет ровно GrantDelegationService.Update, что держит строка e.
+	// База CE-21: 21 метод iam.v1 и 2 operation; kaname#986 добавил шесть.
+	// kaname#1032 добавляет ровно GrantDelegationService.Update, что держит строка e.
 	// AccessBinding.Update по-прежнему обязан отказать в строке c; ACR и
 	// бизнес-полномочия нового Update отдельно проверяют GDU-09 и TLS-близнецы.
 	iamExempt, opExempt := exemptCounts(t)

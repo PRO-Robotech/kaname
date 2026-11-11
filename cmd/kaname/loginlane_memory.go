@@ -163,7 +163,7 @@ func readOwnCgroupMemoryLimit(read func(string) ([]byte, error)) (uint64, bool) 
 		raw, err := read(path.Join(dir, name))
 		if err != nil {
 			// Настоящий v2 hierarchy root может не иметь memory.max по модели ядра.
-			if !(h.version == 2 && h.root == "/" && dir == h.mount && os.IsNotExist(err)) {
+			if h.version != 2 || h.root != "/" || dir != h.mount || !os.IsNotExist(err) {
 				return 0, false
 			}
 		} else {
@@ -189,7 +189,7 @@ func readOwnCgroupMemoryLimit(read func(string) ([]byte, error)) (uint64, bool) 
 			break
 		}
 		parent := path.Dir(dir)
-		if parent == dir || !(parent == h.mount || h.mount == "/" || strings.HasPrefix(parent, h.mount+"/")) {
+		if parent == dir || (parent != h.mount && h.mount != "/" && !strings.HasPrefix(parent, h.mount+"/")) {
 			return 0, false
 		}
 	}

@@ -42,7 +42,6 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
-	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"sort"
 	"strings"
 	"sync"
@@ -56,6 +55,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/operations"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"

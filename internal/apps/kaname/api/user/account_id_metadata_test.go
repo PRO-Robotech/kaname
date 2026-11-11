@@ -13,7 +13,6 @@ package user
 import (
 	"context"
 	"fmt"
-	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 

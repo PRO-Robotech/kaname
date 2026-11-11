@@ -18,7 +18,6 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
-	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +31,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"

@@ -167,7 +167,7 @@ def main() -> int:
                 owned_environment = None
                 raise RuntimeError("public matrix requires a fresh environment; existing file preserved")
             step("seed-own", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--pki", str(pki)], timeout=240)
-            # #1032 U — человек уровня 2 и владелец собственного аккаунта.
+            # kaname#1032 U — человек уровня 2 и владелец собственного аккаунта.
             # Ceremony не требует registry; оба аккаунта существуют до единственного
             # конечного плана и штатного restart. История исходного процесса сохраняется.
             step("seed-ceremony", ["python3", "tests/authz-fixtures/seed_ceremony.py", "--wave",

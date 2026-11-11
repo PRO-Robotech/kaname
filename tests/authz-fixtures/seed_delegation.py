@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Обычное Дано делегирования через собственные API Kaname.
 
-Сохраняет прежние GD-E фикстуры и добавляет #1032: настоящий U из ceremony,
+Сохраняет прежние GD-E фикстуры и добавляет kaname#1032: настоящий U из ceremony,
 отдельные P/X/Y, S/S2/M с обычными ключами/обменами и G={M}. Делегирования
 и выдачи создаёт сама коллекция. Штатный seed_ceremony должен завершиться
 раньше этого производителя; отсутствие входа не считается RED Update.
@@ -98,7 +98,7 @@ def run(args):
 
 
 def seed_update_given(args, http, values, patch, ledger, run_id):
-    """Дано #1032: обычные публичные мутации и доставка ресурса владельцем модуля."""
+    """Дано kaname#1032: обычные публичные мутации и доставка ресурса владельцем модуля."""
     public = values["ownRestBaseUrl"]
     owner, user = values["jwtHumanCeremonyStepUp"], values["ceremonyUserId"]
     account = values["ceremonyAccountId"]

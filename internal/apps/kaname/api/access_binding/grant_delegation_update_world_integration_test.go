@@ -3,7 +3,7 @@
 
 package access_binding_test
 
-// Мир #1032. Здесь нет реализации Update: JSON проходит реальный MethodHandler.
+// Мир kaname#1032. Здесь нет реализации Update: JSON проходит реальный MethodHandler.
 // Живые контроли Дано предшествуют отсутствующему дескриптору. Self Check идёт
 // от S/S2/M через Authorize.Check; транспортную дверь отдельно проверяет newman.
 import (
@@ -44,7 +44,7 @@ type gduWorld struct {
 func newGDUWorld(t *testing.T, creatorE bool) *gduWorld {
 	t.Helper()
 	w := newGDWorld(t)
-	w.requireSubject("#1032 Дано: прежние Create/Get/List/Revoke")
+	w.requireSubject("kaname#1032 Дано: прежние Create/Get/List/Revoke")
 	u := &gduWorld{gdWorld: w}
 	u.liveCatalog()
 	owner := asUser(w.ctx, w.usrA)
@@ -91,7 +91,7 @@ func (u *gduWorld) subject() {
 	u.t.Helper()
 	d, err := protoregistry.GlobalFiles.FindDescriptorByName(gdServiceName)
 	require.NoError(u.t, err)
-	require.NotNil(u.t, d.(protoreflect.ServiceDescriptor).Methods().ByName("Update"), "#1032 ПРЕДМЕТА НЕТ: GrantDelegationService.Update после живых контролей Дано; behavioral Then ещё не исполнялся")
+	require.NotNil(u.t, d.(protoreflect.ServiceDescriptor).Methods().ByName("Update"), "kaname#1032 ПРЕДМЕТА НЕТ: GrantDelegationService.Update после живых контролей Дано; behavioral Then ещё не исполнялся")
 }
 func (u *gduWorld) get() map[string]any {
 	u.t.Helper()

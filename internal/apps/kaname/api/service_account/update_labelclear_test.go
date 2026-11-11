@@ -10,10 +10,11 @@ package service_account
 import (
 	"context"
 	"fmt"
-	"github.com/PRO-Robotech/kaname/internal/authzmodel"
-	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
