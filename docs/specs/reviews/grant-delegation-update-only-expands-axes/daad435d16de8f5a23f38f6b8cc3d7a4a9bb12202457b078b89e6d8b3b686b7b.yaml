@@ -70,7 +70,8 @@ route_signs:
   new_cross_service_edge: false
   scope_note: Узкая дельта исправляет Given и oracle; продуктовый Update не меняется.
 effective_approval:
-  issued: false
+  issued_at: "2026-11-11T23:07:37Z"
+  issued: true
   ban1_lifted: false
   why: >-
     Это подготовленный независимый вердикт. Root-курьер ещё не публиковал
@@ -84,11 +85,20 @@ authority:
 event:
   type: issue_comment
   target: PRO-Robotech/kaname#1032
-  status: prepared
-  published: false
-  subject_sha256: daad435d16de8f5a23f38f6b8cc3d7a4a9bb12202457b078b89e6d8b3b686b7b
-  role: acceptance-reviewer
-  verdict: APPROVED
+  status: performed
+  published: true
+  database_id: 6809312833
+  node_id: "IC_kwDOUO26pM8AAAABld3eQQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/1032#issuecomment-6809312833"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6809312833"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-11-11T23:07:37Z"
+  body_sha256: "b1f17e4c336567f37c1d3a97769f04526a0d5a89ed000917993c88fb00445034"
+  subject_sha256: "daad435d16de8f5a23f38f6b8cc3d7a4a9bb12202457b078b89e6d8b3b686b7b"
+  subject_revision_commit: "49fec6de00732879ebd87a32f2973b99581f417a"
+  verdict: "APPROVED"
   publication_mode: scripts/rituals/approval-event.sh
 attribution:
   reviewer_kind: codex_agent
