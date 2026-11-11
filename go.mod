@@ -2,7 +2,7 @@ module github.com/PRO-Robotech/kaname
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/PRO-Robotech/corelib v1.16.1
