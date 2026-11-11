@@ -265,7 +265,7 @@ func TestGrantDelegation_GDU06_WholeFinalComposition(t *testing.T) {
 				bad[key] = []string{"registry.registries", value}
 				good = map[string]any{key: u.all()[key]}
 				if name == "retired_selected" {
-					good[key] = []string{"registry.registries", value, gdRepoTgt}
+					good = bad
 				}
 				code = codes.InvalidArgument
 				field = "target_types"
@@ -283,6 +283,17 @@ func TestGrantDelegation_GDU06_WholeFinalComposition(t *testing.T) {
 			}
 			u.refuse(asUser(u.ctx, u.usrA), gduMask(key), bad, code, text, field)
 			restore()
+			if name == "retired_selected" || name == "retired_unselected" {
+				require.Equal(t, u.body(gduMask(key), bad), u.body(gduMask(key), good), "близнец меняет только живость каталога, тело PATCH прежнее")
+			}
+			if name == "retired_selected" {
+				before := u.get()
+				audits := len(u.audit())
+				u.patch(key, good)
+				require.Equal(t, before, u.get(), "успешный близнец остаётся no-op")
+				require.Len(t, u.audit(), audits, "no-op не создаёт событие расширения")
+				return
+			}
 			u.patch(key, good)
 		})
 	}
