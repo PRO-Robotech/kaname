@@ -26,6 +26,7 @@ const (
 	GrantDelegationService_Get_FullMethodName    = "/kaname.cloud.iam.v1.GrantDelegationService/Get"
 	GrantDelegationService_List_FullMethodName   = "/kaname.cloud.iam.v1.GrantDelegationService/List"
 	GrantDelegationService_Create_FullMethodName = "/kaname.cloud.iam.v1.GrantDelegationService/Create"
+	GrantDelegationService_Update_FullMethodName = "/kaname.cloud.iam.v1.GrantDelegationService/Update"
 	GrantDelegationService_Revoke_FullMethodName = "/kaname.cloud.iam.v1.GrantDelegationService/Revoke"
 )
 
@@ -56,6 +57,11 @@ type GrantDelegationServiceClient interface {
 	// делегирование на пару «аккаунт, делегат»: второе — `ALREADY_EXISTS` в
 	// `Operation.error`.
 	Create(ctx context.Context, in *CreateGrantDelegationRequest, opts ...grpc.CallOption) (*operation.Operation, error)
+	// Расширяет выбранные оси действующего делегирования того же модуля.
+	// Существующие выдачи сохраняются; само расширение доступа не выдаёт.
+	// Право — право выдавать на аккаунте; исходный автор также должен сохранять
+	// это право. Удаление значений оси и изменение прочих свойств запрещены.
+	Update(ctx context.Context, in *UpdateGrantDelegationRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Отзывает заданное делегирование выдачи и в той же транзакции все
 	// активные привязки доступа, выданные по нему (`REVOCATION_REASON_DELEGATION_REVOKED`).
 	// Защита выдачи от удаления отзыву не мешает. Право — право выдавать на
@@ -102,6 +108,16 @@ func (c *grantDelegationServiceClient) Create(ctx context.Context, in *CreateGra
 	return out, nil
 }
 
+func (c *grantDelegationServiceClient) Update(ctx context.Context, in *UpdateGrantDelegationRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(operation.Operation)
+	err := c.cc.Invoke(ctx, GrantDelegationService_Update_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *grantDelegationServiceClient) Revoke(ctx context.Context, in *RevokeGrantDelegationRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(operation.Operation)
@@ -139,6 +155,11 @@ type GrantDelegationServiceServer interface {
 	// делегирование на пару «аккаунт, делегат»: второе — `ALREADY_EXISTS` в
 	// `Operation.error`.
 	Create(context.Context, *CreateGrantDelegationRequest) (*operation.Operation, error)
+	// Расширяет выбранные оси действующего делегирования того же модуля.
+	// Существующие выдачи сохраняются; само расширение доступа не выдаёт.
+	// Право — право выдавать на аккаунте; исходный автор также должен сохранять
+	// это право. Удаление значений оси и изменение прочих свойств запрещены.
+	Update(context.Context, *UpdateGrantDelegationRequest) (*operation.Operation, error)
 	// Отзывает заданное делегирование выдачи и в той же транзакции все
 	// активные привязки доступа, выданные по нему (`REVOCATION_REASON_DELEGATION_REVOKED`).
 	// Защита выдачи от удаления отзыву не мешает. Право — право выдавать на
@@ -163,6 +184,9 @@ func (UnimplementedGrantDelegationServiceServer) List(context.Context, *ListGran
 }
 func (UnimplementedGrantDelegationServiceServer) Create(context.Context, *CreateGrantDelegationRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method Create not implemented")
+}
+func (UnimplementedGrantDelegationServiceServer) Update(context.Context, *UpdateGrantDelegationRequest) (*operation.Operation, error) {
+	return nil, status.Error(codes.Unimplemented, "method Update not implemented")
 }
 func (UnimplementedGrantDelegationServiceServer) Revoke(context.Context, *RevokeGrantDelegationRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method Revoke not implemented")
@@ -243,6 +267,24 @@ func _GrantDelegationService_Create_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GrantDelegationService_Update_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateGrantDelegationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GrantDelegationServiceServer).Update(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GrantDelegationService_Update_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GrantDelegationServiceServer).Update(ctx, req.(*UpdateGrantDelegationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _GrantDelegationService_Revoke_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RevokeGrantDelegationRequest)
 	if err := dec(in); err != nil {
@@ -279,6 +321,10 @@ var GrantDelegationService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Create",
 			Handler:    _GrantDelegationService_Create_Handler,
+		},
+		{
+			MethodName: "Update",
+			Handler:    _GrantDelegationService_Update_Handler,
 		},
 		{
 			MethodName: "Revoke",
