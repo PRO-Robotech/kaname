@@ -72,10 +72,8 @@ route_signs:
 effective_approval:
   issued_at: "2026-11-11T23:07:37Z"
   issued: true
-  ban1_lifted: false
-  why: >-
-    Это подготовленный независимый вердикт. Root-курьер ещё не публиковал
-    новое внешнее APPROVED-событие на exact SHA и не выполнил его readback.
+  ban1_lifted: true
+  why: "Внешнее APPROVED-событие acceptance-reviewer на exact SHA daad435d16de8f5a23f38f6b8cc3d7a4a9bb12202457b078b89e6d8b3b686b7b опубликовано pointpu и прочитано обратно: https://github.com/PRO-Robotech/kaname/issues/1032#issuecomment-6809312833; subject_revision=49fec6de00732879ebd87a32f2973b99581f417a; ID, тело, актор и время сверены с записью."
 authority:
   mode: versioned_policy_authority
   repository: PRO-Robotech/kacho-workspace
@@ -104,7 +102,7 @@ attribution:
   reviewer_kind: codex_agent
   assigned_agent: acceptance-reviewer
   publishing_actor: pointpu
-  publishing_actor_status: intended_authorized_courier_not_performed
+  publishing_actor_status: "performed_readback_verified"
   publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
   history_is_appended_not_rewritten: true
