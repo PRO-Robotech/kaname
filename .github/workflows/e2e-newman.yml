@@ -1080,21 +1080,8 @@ jobs:
               exit "$rc" ;;
           esac
 
-      - name: конечный account-scoped план registry после машинного посева
-        timeout-minutes: 5
-        run: .github/scripts/stand-own.sh registration-writer-plan tests/newman/environments/local.postman_environment.json
-
-      - name: условие registry создано владельцем модуля
-        timeout-minutes: 5
-        run: |
-          rc=0
-          python3 tests/authz-fixtures/seed_registry_resource.py || rc=$?
-          if [ "$rc" -eq 75 ]; then
-            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::registry producer недоступен; вердикта о продукте нет"
-            exit 1
-          fi
-          exit "$rc"
-
+      # Ceremony создаёт второго владельца ДО единственного startup-плана:
+      # registry получает конечные назначения accountAId + ceremonyAccountId.
       # УСЛОВИЕ ВОЛНЫ — ОТДЕЛЬНЫМ ШАГОМ: отказ церемонии не должен читаться отказом
       # машинного посева и не должен читаться вердиктом о наборе.
       - name: условие создано — люди и их предъявители своей церемонией службы
@@ -1114,6 +1101,21 @@ jobs:
               echo "::error title=Посев церемонии отвергнут продуктом::посев предъявил всё, чего требует контракт церемонии, и получил отказ — это вердикт о дереве"
               exit "$rc" ;;
           esac
+
+      - name: конечный account-scoped план registry после машинного посева и ceremony
+        timeout-minutes: 5
+        run: .github/scripts/stand-own.sh registration-writer-plan tests/newman/environments/local.postman_environment.json
+
+      - name: условие registry создано владельцем модуля
+        timeout-minutes: 5
+        run: |
+          rc=0
+          python3 tests/authz-fixtures/seed_registry_resource.py || rc=$?
+          if [ "$rc" -eq 75 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::registry producer недоступен; вердикта о продукте нет"
+            exit 1
+          fi
+          exit "$rc"
 
       - name: условие делегирования — обычные test SA и предъявители
         timeout-minutes: 5

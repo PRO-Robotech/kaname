@@ -90,6 +90,9 @@ type updatePatch struct {
 
 func validateUpdateInput(in UpdateInput) (updatePatch, error) {
 	p := updatePatch{id: domain.GrantDelegationID(in.GrantDelegationID)}
+	if in.GrantDelegationID == "" {
+		return p, shared.InvalidArg("grant_delegation_id", "grant_delegation_id: required")
+	}
 	if err := validateDelegationID(p.id); err != nil {
 		return p, err
 	}

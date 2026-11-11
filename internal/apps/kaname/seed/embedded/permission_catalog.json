@@ -2825,6 +2825,17 @@
     "exempt_reason": "HANDLER_DECIDES"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.GrantDelegationService/Update",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "2",
+    "exempt_reason": "HANDLER_DECIDES"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.GroupService/AddMember",
     "permission": "iam.group_members.addMember",
     "required_relation": "v_update",

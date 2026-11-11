@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Конечный план registry только для actual accountAId исходного машинного посева."""
+"""Конечный план registry для accountAId и, после ceremony, ceremonyAccountId."""
 import argparse
 import hashlib
 import stat
@@ -93,15 +93,24 @@ def main():
     if args.env_file is None or args.output is None:
         parser.error("план требует env-file и output")
     values = json.loads(args.env_file.read_text())["values"]
-    accounts = [row["value"] for row in values if row.get("key") == "accountAId"]
-    if len(accounts) != 1 or not isinstance(accounts[0], str) or not re.fullmatch(r"acc[0-9a-hjkmnp-tv-z]{17}", accounts[0]):
-        raise ValueError("требуется ровно один actual accountAId исходного посева")
-    account = accounts[0]
-    # Единственный реальный producer этих lanes — registry-own-stand-fixture.yaml:30.
-    # vpc_network в seed_registry_resource — отрицательная чужая пара, не второй writer.
+    # Два именованных производителя; произвольный набор аккаунтов и wildcard
+    # не принимаются. При старом машинном посеве байты первого assignment прежние.
+    keys = ["accountAId"]
+    if any(row.get("key") == "ceremonyAccountId" and row.get("enabled", True)
+           and row.get("value") for row in values):
+        keys.append("ceremonyAccountId")
+    accounts = []
+    for key in keys:
+        found = [row.get("value") for row in values
+                 if row.get("key") == key and row.get("enabled", True)]
+        if (len(found) != 1 or not isinstance(found[0], str)
+                or not re.fullmatch(r"acc[0-9a-hjkmnp-tv-z]{17}", found[0])):
+            raise ValueError("требуется ровно один actual " + key + " штатного посева")
+        if found[0] not in accounts:
+            accounts.append(found[0])
     plan = {"registration-account-writers": {
         "assignments": [{"assignment_id": "stand-registry-" + account,
-                         "account_id": account, "module": "registry"}],
+                         "account_id": account, "module": "registry"} for account in accounts],
         "disabled": [], "retire-cluster-writer": False}}
     # Файл новый и закрытый; повтор не переписывает чужую/непринятую фазу.
     descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

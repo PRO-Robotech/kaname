@@ -136,17 +136,35 @@ func (u *gduWorld) refreshFacts() {
 	u.buildHandlers()
 }
 
-func (u *gduWorld) retireRepository() func() {
+// Роли мира Д ссылаются на repositories, и БД закономерно запрещает его
+// снятие. Отдельная живая цель без ссылок правил даёт законный Given снятия,
+// сохраняя все роли, B0 и ограничения каталога.
+const gduRetiredTarget = "registry.gduRetired"
+
+func (u *gduWorld) retirementManifest() *manifest.Manifest {
 	raw, err := publicreadfixture.Read(gdFixture)
 	require.NoError(u.t, err)
 	raw, err = publicreadfixture.WithWrites(raw)
 	require.NoError(u.t, err)
-	full, err := manifest.Load(raw)
+	resource := "\n  - name: gduRetired\n    objectType: registry_gdu_retired\n    parents: [project]\n    producer: authored\n    verbs: [{name: get}]\n"
+	doc := strings.Replace(string(raw), "\nroles:", resource+"\nroles:", 1)
+	full, err := manifest.Load([]byte(doc))
 	require.NoError(u.t, err)
+	return full
+}
+
+func (u *gduWorld) deliverRetirementTarget() {
+	u.applyDelivered("GDU06: отдельная живая цель без ссылок правил", u.retirementManifest())
+	u.refreshFacts()
+	require.True(u.t, domain.ValidTargetType(u.facts, gduRetiredTarget))
+}
+
+func (u *gduWorld) retireTarget() func() {
+	full := u.retirementManifest()
 	cut := *full
 	cut.Resources = nil
 	for _, r := range full.Resources {
-		if r.Name != "repositories" {
+		if r.Name != "gduRetired" {
 			cut.Resources = append(cut.Resources, r)
 		}
 	}
@@ -157,7 +175,7 @@ func (u *gduWorld) retireRepository() func() {
 	}
 	apply(&cut)
 	var live bool
-	require.NoError(u.t, u.pool.QueryRow(u.ctx, `SELECT live FROM kaname.catalog_resource WHERE dotted=$1`, gdRepoTgt).Scan(&live))
+	require.NoError(u.t, u.pool.QueryRow(u.ctx, `SELECT live FROM kaname.catalog_resource WHERE dotted=$1`, gduRetiredTarget).Scan(&live))
 	require.False(u.t, live)
 	return func() { apply(full) }
 }

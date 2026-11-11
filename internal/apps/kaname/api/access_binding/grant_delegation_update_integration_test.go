@@ -257,12 +257,16 @@ func TestGrantDelegation_GDU06_WholeFinalComposition(t *testing.T) {
 				case "foreign_target":
 					value = "vpc.addressPool"
 				case "retired_selected", "retired_unselected":
-					value = gdRepoTgt
-					u.patch("targetTypes", map[string]any{"targetTypes": u.all()["targetTypes"]})
-					restore = u.retireRepository()
+					value = gduRetiredTarget
+					u.deliverRetirementTarget()
+					u.patch("targetTypes", map[string]any{"targetTypes": []string{"registry.registries", value}})
+					restore = u.retireTarget()
 				}
 				bad[key] = []string{"registry.registries", value}
 				good = map[string]any{key: u.all()[key]}
+				if name == "retired_selected" {
+					good[key] = []string{"registry.registries", value, gdRepoTgt}
+				}
 				code = codes.InvalidArgument
 				field = "target_types"
 				text = gduDeadType(value)
@@ -285,11 +289,12 @@ func TestGrantDelegation_GDU06_WholeFinalComposition(t *testing.T) {
 	t.Run("catalog_retired_after_acceptance", func(t *testing.T) {
 		u := newGDUWorld(t, false)
 		u.subject()
-		u.patch("targetTypes", map[string]any{"targetTypes": u.all()["targetTypes"]})
+		u.deliverRetirementTarget()
+		u.patch("targetTypes", map[string]any{"targetTypes": []string{"registry.registries", gdRepoTgt, gduRetiredTarget}})
 		op, release := u.acceptHeld(u.body(gduMask("roleIds"), map[string]any{"roleIds": u.all()["roleIds"]}))
-		restore := u.retireRepository()
+		restore := u.retireTarget()
 		release()
-		gduOpError(t, u, op, codes.InvalidArgument, gduDeadType(gdRepoTgt))
+		gduOpError(t, u, op, codes.InvalidArgument, gduDeadType(gduRetiredTarget))
 		u.invariant(false)
 		restore()
 		u.patch("roleIds", map[string]any{"roleIds": u.all()["roleIds"]})
@@ -473,7 +478,11 @@ func TestGrantDelegation_GDU11_RevokedAndExpiredBindings(t *testing.T) {
 			if expired {
 				delta = "-1 day"
 			}
-			_, err := u.pool.Exec(u.ctx, `UPDATE kaname.access_bindings SET expires_at=now()+$2::interval WHERE id=$1`, id, delta)
+			// Изолированный исторический посев сохраняет expires_at > created_at:
+			// срок уже прошёл, но наступил после создания. Ограничение не снимается.
+			_, err := u.pool.Exec(u.ctx, `UPDATE kaname.access_bindings
+				SET created_at=now()-interval '2 days', expires_at=now()+$2::interval
+				WHERE id=$1`, id, delta)
 			require.NoError(t, err)
 			if expired {
 				require.NoError(t, u.rec.ExpireBinding(u.ctx, domain.AccessBindingID(id)))
@@ -554,7 +563,17 @@ func TestGrantDelegation_GDU16_AuditExactlyOnceOnExpansion(t *testing.T) {
 		m, ok := ev.payload[side.name].(map[string]any)
 		require.True(t, ok)
 		for _, a := range []struct{ json, key string }{{"roleIds", "role_ids"}, {"targetTypes", "target_types"}, {"subjectTypes", "subject_types"}} {
-			require.Equal(t, gduSorted(side.axes[a.json]), gotSlice(m[a.key]), side.name+"/"+a.key)
+			want := gduSorted(side.axes[a.json])
+			if a.key == "subject_types" {
+				// Аудит использует доменные имена, как существующий Create;
+				// вход публичного RPC несёт protobuf enum. Сравниваем все значения.
+				for i, name := range want {
+					subject, ok := domain.SubjectTypeOfPrincipal(name)
+					require.True(t, ok, "тип субъекта известен домену")
+					want[i] = string(subject)
+				}
+			}
+			require.Equal(t, want, gotSlice(m[a.key]), side.name+"/"+a.key)
 		}
 	}
 	for _, event := range []string{"iam.access_binding.granted", "iam.access_binding.revoked", "iam.access_binding.delegation_revoked"} {
