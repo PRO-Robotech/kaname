@@ -1,0 +1,98 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/grant-delegation-update-only-expands-axes.md
+  sha256: f9190f18e7c39437af946a242f9d9797f9bdcc35f88db8b5b857e1f066fddba4
+  revision: 1
+  static_status: DRAFT
+  static_status_note: >-
+    Шапка документа намеренно не правлена. Вердикт относится к точным байтам,
+    прежнее одобрение другой приёмки его не заменяет.
+  base_commit: ff92566173a2cfb75f4042138cb86c3d0830ce9c
+  base_commit_provenance: передано Root; самостоятельно Git не исполнялся
+  content_commit: none
+  task: PRO-Robotech/kaname#1032
+  lines: 281
+  round: 1
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-11-11T16:34:45+00:00'
+review_mode: source_only
+blocking_count: 1
+blocking:
+  - id: B1
+    kind: COVERAGE
+    scenarios: [GDU-01b]
+    coordinate: 'документ:97-102,113-116,274-275'
+    title: Новый effective результат targetTypes перекрыт старой выдачей
+    predicate: >-
+      Документ задаёт B0 как registry.puller на X для S, а Y как дочерний
+      репозиторий X. Закреплённая registry.delegation-fixture.yaml:156-169
+      уже даёт puller get/list дочерних repositories. Положительный Check S->Y
+      после новой выдачи не различает отсутствие её эффекта.
+    required_change: >-
+      Субъект S2 без B0 и альтернативного права; Check false до PATCH и до
+      новой выдачи после PATCH; точная выдача запрещена до расширения t2,
+      успешна после него; затем Check true. S/B0 отдельно продолжают держать I.
+      Между отрицательной и положительной выдачами меняется только наличие t2.
+    source_revision: ff92566173a2cfb75f4042138cb86c3d0830ce9c
+    runtime_reproduction: not_performed
+important_nonblocking:
+  - id: N1
+    text: Явная параметризация caller denied одновременно с creator lost для закрепления порядка.
+  - id: N2
+    text: Каталоговый отказ по невыбранной оси при проверке всего результирующего набора.
+  - id: N3
+    text: Отличимый от B0 effective результат r2 и конкретный субъект group-пары.
+producers:
+  scenarios_total: 17
+  scenarios_with_assigned_producer: 17
+  scenarios_without_producer: []
+constructibility:
+  named_builder_rows: 8
+  seeded: 0
+  not_executed: 8
+  reason: SOURCE-only запрет; фактическая исполнимость посевом не подтверждалась
+  note: Названные существующие строители прочитаны; будущие дополнения не объявлены исполненными.
+route_signs:
+  proto: true
+  schema: false
+  schema_note: Необходимость новой миграции не установлена; сценарии не требуют смены схемы.
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+  consumer_required: false
+  new_cross_service_edge: false
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: Один блокирующий COVERAGE; отказ не даёт санкции на реализацию.
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1032
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  subject_sha256: f9190f18e7c39437af946a242f9d9797f9bdcc35f88db8b5b857e1f066fddba4
+  verdict: CHANGES_REQUESTED
+  body: 'acceptance-reviewer · CHANGES_REQUESTED · SHA-256 f9190f18e7c39437af946a242f9d9797f9bdcc35f88db8b5b857e1f066fddba4'
+attribution:
+  reviewer_kind: codex_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: true
+premise:
+  status: confirmed
+  predicate: >-
+    sha256sum --check относительно S, W, WS; 9/9, 47/47, 15/15 совпали.
+    Чтение proto показывает Get/List/Create/Revoke и отсутствие Update.
+  boundary: Новая приёмка нужна; готовность реализации и runtime не утверждается.
+next:
+  role: acceptance-author
+  action: Исправить B1 новой редакцией после очередности Root; новый круг автоматически не запускается.
+owner_questions: []

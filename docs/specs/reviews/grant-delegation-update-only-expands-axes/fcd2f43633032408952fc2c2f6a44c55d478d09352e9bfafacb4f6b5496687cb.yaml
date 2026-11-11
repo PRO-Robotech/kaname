@@ -1,0 +1,113 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/grant-delegation-update-only-expands-axes.md
+  sha256: fcd2f43633032408952fc2c2f6a44c55d478d09352e9bfafacb4f6b5496687cb
+  revision: 2
+  static_status: DRAFT
+  static_status_note: >-
+    Шапка намеренно не правлена. Действующий вердикт связывается с точным
+    отпечатком этой записью и внешним событием; прежний SHA одобрения не даёт.
+  base_commit: ff92566173a2cfb75f4042138cb86c3d0830ce9c
+  base_commit_note: Авторская база S2, передана Root.
+  review_source_commit: e0ce15b84b215ecd35424c456eac4d3f78b05ddd
+  review_source_tree: 78db9d9a8a46b26f572db04d6a02fd8ffb9458ee
+  revision_provenance: Текущая Git-идентичность передана Root; 82 source pins сверены по байтам, Git не исполнялся.
+  content_commit: none
+  task: PRO-Robotech/kaname#1032
+  lines: 294
+  round: 2
+  predecessor_record: docs/specs/reviews/grant-delegation-update-only-expands-axes/f9190f18e7c39437af946a242f9d9797f9bdcc35f88db8b5b857e1f066fddba4.yaml
+  predecessor_record_sha256: bc3bb8f3bffcff7a83301569748ba47fe852841f609d3f6235c147916575f51d
+  fingerprint_predicate: sha256sum SOURCE/docs/engineering/acceptance/grant-delegation-update-only-expands-axes.md
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-11-11T17:00:03+00:00'
+review_mode: source_only
+blocking_count: 0
+blocking: []
+blocking_closed:
+  - id: B1
+    kind: COVERAGE
+    scenario: GDU-01b
+    evidence: >-
+      Отдельный S2 без B0/альтернативных прав; exact Create от D отказан только
+      по t2 до PATCH, после PATCH повтор того же тела успешен. Check false до
+      PATCH и до новой выдачи, true после выдачи; S/B0 отдельно держат I.
+    document_lines: '97-103,111-127,291-292'
+nonblocking_closed:
+  - N1 — матрица actor-authority и creator-authority с отдельными положительными парами
+  - N2 — неживой тип в невыбранной оси итогового набора
+  - N3 — отличимое v_update новой роли и конкретный участник новой группы
+important_nonblocking:
+  - id: F1
+    text: >-
+      При реализации фикстуры провязать существующий ListMembers use-case в
+      newGDWorld: сейчас w.groups передаёт nil для этого метода. Проверить
+      чтением состав G и штатным ожиданием доступ U, не принимать поломку
+      посева за RED отсутствующего Update. Нового продуктового API не требуется.
+producers:
+  scenarios_total: 17
+  scenarios_with_assigned_producer: 17
+  scenarios_without_producer: []
+constructibility:
+  named_builder_rows: 9
+  seeded: 0
+  not_executed: 9
+  basis: Названные существующие фикстуры и прочитанная достижимость; runtime не заявлен.
+  reason: SOURCE-only задание
+  additions_required: граница 16/17, управляемые барьеры Update, адаптация Bexp, провязка ListMembers
+route_signs:
+  proto: true
+  schema: false
+  schema_note: Необходимость новой миграции не установлена; инварианты реализации оцениваются отдельно.
+  public_rpc: true
+  ui: false
+  new_domain: false
+  security_surface: true
+  consumer_required: false
+  new_cross_service_edge: false
+  subscription: false
+  subscribe_rpc: false
+  internal_audit_event: true
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Контракт APPROVED, но event ещё не опубликован. Для действующего одобрения
+    нужны опубликованные точные документ и review-record и подтверждённое
+    внешнее событие на тот же SHA. Последующие этапы и TDD этим не заменяются.
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1032
+  status: not_performed
+  published: false
+  publication_expected_from_orchestrator: true
+  subject_sha256: fcd2f43633032408952fc2c2f6a44c55d478d09352e9bfafacb4f6b5496687cb
+  verdict: APPROVED
+  body: 'acceptance-reviewer · APPROVED · SHA-256 fcd2f43633032408952fc2c2f6a44c55d478d09352e9bfafacb4f6b5496687cb'
+attribution:
+  reviewer_kind: codex_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: none
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: true
+premise:
+  status: confirmed
+  predicate: >-
+    82/82 input pins и 11/11 payload S2 совпали; revision.patch побайтово
+    совпал с независимо построенной дельтой R1->R2; 17 уникальных GDU ID.
+  boundary: B1 закрыт в контракте; реализации и runtime Update ещё нет.
+next:
+  role: Root-курьер
+  action: Опубликовать точные документ и новую запись, внешнее APPROVED-событие на тот же SHA и привести event к факту.
+owner_questions: []
