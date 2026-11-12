@@ -192,6 +192,9 @@ fill_preinstalled_dependency() {
   status_before=$(sha256sum /var/lib/dpkg/status) || return 1
   runner_apt_fill_cache /case /case/apt-provider kaname-cache-dependent=1:1.0 || return 1
   status_after=$(sha256sum /var/lib/dpkg/status) || return 1
+  printf 'FILL-PROBE status-before=%s status-after=%s\n' "$status_before" "$status_after"
+  printf 'FILL-PROBE archive=%s\n' /case/apt-provider/archives/*
+  dpkg-query -W -f='FILL-PROBE installed=${Package}=${Version}\n' kaname-cache-fixture || return 1
   [ "$status_before" = "$status_after" ] || return 1
   [ "$(dpkg-query -W -f='${Version}' kaname-cache-fixture)" = 1:1.0 ] || return 1
   [ ! -e /usr/share/kaname-cache-dependent/proof ] || return 1
