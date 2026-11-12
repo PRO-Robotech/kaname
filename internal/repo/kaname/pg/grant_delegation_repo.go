@@ -275,6 +275,33 @@ func (w *gdWriter) LockForRevoke(ctx context.Context, id domain.GrantDelegationI
 	return d, nil
 }
 
+// UpdateAxes меняет только наборы под ранее захваченным замком строки.
+// ACTIVE в условии сохраняет конечность отзыва даже при ошибке вызывающего.
+func (w *gdWriter) UpdateAxes(ctx context.Context, d domain.GrantDelegation) (domain.GrantDelegation, error) {
+	d = domain.SortedGrantDelegationAxes(d)
+	roles := make([]string, len(d.RoleIDs))
+	for i, role := range d.RoleIDs {
+		roles[i] = string(role)
+	}
+	subjects := make([]string, len(d.SubjectTypes))
+	for i, subject := range d.SubjectTypes {
+		subjects[i] = string(subject)
+	}
+	out, err := scanGrantDelegation(w.tx.QueryRow(ctx, fmt.Sprintf(`
+		UPDATE kaname.grant_delegations
+		   SET role_ids = $2, target_types = $3, subject_types = $4
+		 WHERE id = $1 AND status = 'ACTIVE'
+		RETURNING %s`, gdCols), string(d.ID), roles, d.TargetTypes, subjects))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.GrantDelegation{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"grant delegation %s is already revoked", d.ID)
+	}
+	if err != nil {
+		return domain.GrantDelegation{}, mapErr(err, "GrantDelegation.Update", string(d.ID))
+	}
+	return out, nil
+}
+
 // MarkRevoked — CAS `ACTIVE → REVOKED`: ссылка на учётку-делегата снимается тем же
 // оператором (`grant_delegations_active_delegate_ck`), и учётка больше не держится
 // отозванным делегированием (Д8).

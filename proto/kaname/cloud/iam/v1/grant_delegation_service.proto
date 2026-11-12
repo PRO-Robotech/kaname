@@ -6,6 +6,7 @@ syntax = "proto3";
 package kaname.cloud.iam.v1;
 
 import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/access_binding.proto";
 import "kaname/cloud/iam/v1/grant_delegation.proto";
@@ -52,6 +53,21 @@ service GrantDelegationService {
     option (google.api.http) = { post: "/iam/v1/grantDelegations" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "CreateGrantDelegationMetadata"
+      response: "GrantDelegation"
+    };
+    option (corelib.authz.v1.permission)       = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)    = "HANDLER_DECIDES";
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // Расширяет выбранные оси действующего делегирования того же модуля.
+  // Существующие выдачи сохраняются; само расширение доступа не выдаёт.
+  // Право — право выдавать на аккаунте; исходный автор также должен сохранять
+  // это право. Удаление значений оси и изменение прочих свойств запрещены.
+  rpc Update (UpdateGrantDelegationRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = { patch: "/iam/v1/grantDelegations/{grant_delegation_id}" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "UpdateGrantDelegationMetadata"
       response: "GrantDelegation"
     };
     option (corelib.authz.v1.permission)       = "<exempt>";
@@ -124,6 +140,33 @@ message CreateGrantDelegationRequest {
 
 message CreateGrantDelegationMetadata {
   // ID создаваемого GrantDelegation.
+  string grant_delegation_id = 1;
+
+  // ID Account, которым ограничено делегирование.
+  string account_id = 2;
+}
+
+message UpdateGrantDelegationRequest {
+  // ID существующего GrantDelegation; не новое значение идентификатора.
+  string grant_delegation_id = 1;
+
+  // Полный желаемый набор выбранной оси: 1..16 ролей без повторов.
+  repeated string role_ids = 2;
+
+  // Полный желаемый набор выбранной оси: 1..16 живых типов того же модуля.
+  repeated string target_types = 3;
+
+  // Полный желаемый набор выбранной оси: 1..4 типа субъекта без повторов.
+  repeated SubjectType subject_types = 4;
+
+  // Выбор role_ids, target_types, subject_types. Пустая или отсутствующая
+  // маска выбирает все три оси. Выбранная пустая ось отвергается; значения
+  // невыбранных осей игнорируются. Наборы могут только сохраняться/расширяться.
+  google.protobuf.FieldMask update_mask = 5;
+}
+
+message UpdateGrantDelegationMetadata {
+  // ID обновляемого GrantDelegation.
   string grant_delegation_id = 1;
 
   // ID Account, которым ограничено делегирование.

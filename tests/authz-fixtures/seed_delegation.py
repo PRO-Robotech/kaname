@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Complete the ordinary own-stand delegation Given through public Kaname APIs.
+"""Обычное Дано делегирования через собственные API Kaname.
 
-The existing module/resource producer remains authoritative. This adds only two
-unprivileged test SAs and their normally issued/exchanged credentials: the GD-E
-delegate in B, and the group-membership twin delegate in A. No delegation or
-binding is pre-created; Newman owns those mutations and their assertions.
+Сохраняет прежние GD-E фикстуры и добавляет kaname#1032: настоящий U из ceremony,
+отдельные P/X/Y, S/S2/M с обычными ключами/обменами и G={M}. Делегирования
+и выдачи создаёт сама коллекция. Штатный seed_ceremony должен завершиться
+раньше этого производителя; отсутствие входа не считается RED Update.
 """
 from __future__ import annotations
 
 import argparse
+import datetime
+import time
 import hashlib
 import json
 import os
@@ -18,11 +20,97 @@ from pathlib import Path
 import secrets
 
 import seed_own_stand as own
+import seed_registry_resource as registry
 
 ROOT = Path(__file__).resolve().parents[2]
 KEYS = ("gdDelegateSaId", "jwtGDDelegate", "gdGroupDelegateSaId",
         "jwtGDGroupDelegate", "gdRegistryRolesDelivered",
-        "gdRolePullerId", "gdRolePusherId", "gdRoleAdminId")
+        "gdRolePullerId", "gdRolePusherId", "gdRoleAdminId",
+        "gduAccountId", "gduProjectId", "gduRegistryId", "gduRepositoryId",
+        "gduSId", "jwtGDUS", "gduS2Id", "jwtGDUS2", "gduMId", "jwtGDUM",
+        "gduGroupId", "gduGivenReady", "gduAccountAdminRoleId")
+
+
+def prepare_esc_given(http, public, values):
+    """Возвращаем точное Дано H после конечного плана и перезапуска службы."""
+    user, account = values["humanEscUserId"], values["ceremonyEscAccountId"]
+    human, admin = values["jwtHumanEscStepUp"], values["jwtHumanAidAdmSharedStepUp"]
+    for token, subject, system_admin in (
+            (human, user, False), (admin, values["humanAidAdmSharedUserId"], True)):
+        code, me = http.json_ask(public + "/iam/v1/me", token=token)
+        if (code != 200 or me.get("subject") != "user:" + subject
+                or bool(me.get("systemAdmin")) != system_admin):
+            raise own.Finding("Esc: личность и полномочия производителя не подтверждены")
+
+    def owner_unchanged():
+        code, row = http.json_ask(public + "/iam/v1/accounts/" + account, token=admin)
+        if code != 200 or row.get("id") != account or row.get("ownerUserId") != user:
+            raise own.Finding("Esc: личный аккаунт не совпал с сохранённым посевом")
+
+    def bindings():
+        code, row = http.json_ask(public + "/iam/v1/accessBindings:listBySubject"
+            + "?subjectType=user&subjectId=" + user + "&pageSize=1000", token=human)
+        if (code != 200 or not isinstance(row.get("accessBindings"), list)
+                or row.get("nextPageToken") or row.get("incompleteMembershipGroupIds")):
+            raise own.Finding("Esc: полный список выдач не прочитан")
+        return row["accessBindings"]
+
+    owner_unchanged()
+    initial = bindings()
+    if initial:
+        # Разрешена только штатная owner-выдача, восстановленная при старте.
+        # Чужую выдачу или новый источник прав нельзя прятать общей уборкой.
+        role = "rol" + hashlib.md5(b"owner", usedforsecurity=False).hexdigest()[:17]
+        if len(initial) != 1:
+            raise own.Finding("Esc: после перезапуска найдены неожиданные выдачи")
+        binding = initial[0]
+        if (not binding.get("id") or binding.get("subjectType") != "user"
+                or binding.get("subjectId") != user
+                or binding.get("subjects") != [{"type": "SUBJECT_TYPE_USER", "id": user}]
+                or binding.get("roleId") != role or binding.get("scopeType") != "iam.account"
+                or binding.get("scopeId") != account or binding.get("status") != "ACTIVE"
+                or binding.get("grantedByUserId") != "system"
+                or binding.get("deletionProtection") is not True
+                or binding.get("target") != {"allInScope": {}}
+                or binding.get("delegationId") or binding.get("expiresAt")
+                or binding.get("revokedAt")):
+            raise own.Finding("Esc: строка не является восстановленной owner-выдачей посева")
+        path = public + "/iam/v1/accessBindings/" + binding["id"]
+        code, operation = http.json_ask(path, method="PATCH", token=human,
+            body={"updateMask": "deletionProtection", "deletionProtection": False})
+        if code != 200 or not operation.get("id"):
+            raise own.Finding("Esc: владелец не снял защиту своей выдачи")
+        own.await_operation(http, public, human, operation["id"])
+        response = own.post_operation(http, public, admin,
+            "/iam/v1/accessBindings/" + binding["id"] + ":revoke", {}, "Esc повторное Дано")
+        code, retained = http.json_ask(path, token=admin)
+        if (response.get("id") != binding["id"] or response.get("status") != "REVOKED"
+                or code != 200 or retained.get("id") != binding["id"]
+                or retained.get("status") != "REVOKED" or not retained.get("revokedAt")):
+            raise own.Finding("Esc: отзыв не сохранил ту же отозванную строку")
+        # Сохранённое поле владельца не подменяет действующую выдачу прав.
+        for kind, resource_id, relations in (
+                ("account", account, ("owner", "admin", "v_get", "v_update", "v_delete")),
+                ("iam_access_binding", binding["id"], ("v_get", "v_delete"))):
+            for relation in relations:
+                code, decision = http.json_ask(public + "/iam/v1/authorize:check",
+                    method="POST", token=admin, body={"subject": "user:" + user,
+                        "resource": {"type": kind, "id": resource_id},
+                        "action": "iam.accounts.get" if kind == "account" else "iam.accessBindings.get",
+                        "requiredRelation": relation})
+                if code != 200 or decision.get("allowed") is not False:
+                    raise own.Finding("Esc: отозванная выдача сохранила право " + relation)
+        code, operation = http.json_ask(path, method="DELETE", token=admin)
+        if code != 200 or not operation.get("id"):
+            raise own.Finding("Esc: жёсткое удаление отозванной выдачи отказало")
+        own.await_operation(http, public, admin, operation["id"])
+        code, missing = http.json_ask(path, token=admin)
+        if (code, missing.get("code")) not in ((403, 7), (404, 5)):
+            raise own.Finding("Esc: удалённая выдача всё ещё читается")
+    owner_unchanged()
+    if bindings() != []:
+        raise own.Finding("Esc: полное Дано после перезапуска не пусто")
+    print("Esc: после конечного плана полный ListBySubject пуст; личный аккаунт сохранён")
 
 
 def run(args):
@@ -37,6 +125,11 @@ def run(args):
         return value
     if any(values.get(key) for key in KEYS):
         raise own.Unmet("delegation producer requires a fresh own-stand environment")
+    # Реальные люди создаются предшествующей штатной ceremony-полосой.
+    for key in ("jwtHumanCeremony", "jwtHumanCeremonyStepUp", "ceremonyUserId",
+                "ceremonyAccountId", "jwtHumanEscStepUp", "humanEscUserId", "ceremonyEscAccountId",
+                "jwtHumanAidAdmSharedStepUp", "humanAidAdmSharedUserId"):
+        required(key)
     public = required("ownRestBaseUrl")
     token_url = required("iamRegistryTokenBaseUrl") + "/iam/v1/token"
     account_a, account_b = required("accountAId"), required("accountBId")
@@ -45,6 +138,8 @@ def run(args):
     required("gdRegistryId")
     required("gdRegistryProjectId")
     http = own.Http(Path(args.pki))
+    # Ceremony нужна плану registry; пустое Дано H восстанавливается после его restart.
+    prepare_esc_given(http, public, values)
     admin_a = required("jwtAccountAdminAStepUp")
     admin_b = required("jwtAccountAdminB")
     roles = []
@@ -78,15 +173,118 @@ def run(args):
         own.assert_serves(http, public, token, "/iam/v1/me", prefix)
         patch.update({id_key: subject, token_key: token})
         ledger["subjects"].append({"id": subject, "accountId": account, "directBindings": 0})
+    seed_update_given(args, http, values, patch, ledger, run_id)
     own.write_env(patch, env_file, env_file)
     Path(args.ledger).write_text(json.dumps(ledger, indent=2) + "\n")
-    print("delegation seed: 3 live module roles; 2 distinct unprivileged test SAs; 2 real credential exchanges")
+    print("delegation seed: 3 живые роли; 5 непривилегированных SA и обменов; G={M}; X/Y и lineage; selfCheck=false")
     return 0
+
+
+
+def seed_update_given(args, http, values, patch, ledger, run_id):
+    """Дано kaname#1032: обычные публичные мутации и доставка ресурса владельцем модуля."""
+    public = values["ownRestBaseUrl"]
+    owner, user = values["jwtHumanCeremonyStepUp"], values["ceremonyUserId"]
+    account = values["ceremonyAccountId"]
+    code, row = http.json_ask(public + "/iam/v1/accounts/" + account, token=owner)
+    if code != 200 or row.get("ownerUserId") != user:
+        raise own.Finding("GDU U не подтверждён как Account.ownerUserId")
+    # ACR1 и ACR2 — один настоящий человек; C — другой настоящий cloud-admin.
+    for token_key, expected, system_admin in (
+            ("jwtHumanCeremony", "user:" + user, False),
+            ("jwtHumanCeremonyStepUp", "user:" + user, False),
+            ("jwtHumanEscStepUp", "user:" + values["humanEscUserId"], False),
+            ("jwtHumanAidAdmSharedStepUp", "user:" + values["humanAidAdmSharedUserId"], True)):
+        code, me = http.json_ask(public + "/iam/v1/me", token=values[token_key])
+        if code != 200 or me.get("subject") != expected or bool(me.get("systemAdmin")) != system_admin:
+            raise own.Finding("GDU живая личность/облачное полномочие не совпало: " + token_key)
+    if len({user, values["humanEscUserId"], values["humanAidAdmSharedUserId"]}) != 3:
+        raise own.Finding("GDU U/E/C должны быть разными людьми")
+    project = own.post_operation(http, public, owner, "/iam/v1/projects",
+        {"accountId": account, "name": "gdu-" + run_id}, "GDU Project.Create")["id"]
+    code, row = http.json_ask(public + "/iam/v1/projects/" + project, token=owner)
+    if code != 200 or row.get("accountId") != account:
+        raise own.Finding("GDU проект не подтвердил account lineage")
+    patch.update({"gduAccountId": account, "gduProjectId": project,
+                  "gduAccountAdminRoleId": own.builtin_role_id(http, public, owner, "admin")})
+    registrar = registry.Registrar(Path(args.pki), args.grpc_addr)
+    x = "reg" + "".join(secrets.choice("0123456789abcdefghjkmnpqrstvwxyz") for _ in range(17))
+    y = x + "/gdu-" + run_id
+    version = datetime.datetime.now(datetime.timezone.utc)
+    lineage = []
+    # Версия упорядочивает объект целиком: owner должен быть новее его указателя.
+    for offset, (obj, subject, relation, chain) in enumerate((
+            ("registry_registry:" + x, "project:" + project, "project", ["project:" + project, "account:" + account]),
+            ("registry_registry:" + x, "user:" + user, "owner", ["project:" + project, "account:" + account]),
+            ("registry_repository:" + y, "registry_registry:" + x, "parent", ["registry_registry:" + x, "project:" + project, "account:" + account]),
+            ("registry_repository:" + y, "user:" + user, "owner", ["registry_registry:" + x, "project:" + project, "account:" + account]))):
+        stamp = (version + datetime.timedelta(microseconds=offset)).isoformat().replace("+00:00", "Z")
+        intent = {"object": obj, "subjectId": subject, "relation": relation,
+                  "parentProjectId": project, "parentAccountId": account,
+                  "parentChain": chain, "sourceVersion": stamp}
+        registrar.call("RegisterResource", intent)
+        got = registrar.call("Check", {"object": obj, "subjectId": subject,
+            "relation": relation, "consistency": "HIGHER_CONSISTENCY"})
+        if got.get("allowed") is not True:
+            raise own.Finding("GDU RegisterResource не подтвердил объявленную связь")
+        lineage.append(intent)
+    patch.update({"gduRegistryId": x, "gduRepositoryId": y})
+    token_url = values["iamRegistryTokenBaseUrl"] + "/iam/v1/token"
+    for tag, id_key, token_key in (("s", "gduSId", "jwtGDUS"),
+                                  ("s2", "gduS2Id", "jwtGDUS2"),
+                                  ("m", "gduMId", "jwtGDUM")):
+        subject = own.make_service_account(http, public, owner, account,
+            "gdu-" + tag + "-" + run_id, run_id, "GDU " + tag)
+        own.assert_no_bindings(http, public, owner, subject)
+        code, row = http.json_ask(public + "/iam/v1/serviceAccounts/" + subject, token=owner)
+        if code != 200 or row.get("accountId") != account or row.get("id") != subject:
+            raise own.Finding("GDU субъект не подтвердил account lineage")
+        token = own.sa_token(http, public, token_url, owner, subject, run_id, "GDU " + tag)
+        code, me = http.json_ask(public + "/iam/v1/me", token=token)
+        if code != 200 or me.get("subject") != "service_account:" + subject or me.get("systemAdmin", False):
+            raise own.Finding("GDU машинное удостоверение не подтвердило свой субъект")
+        patch.update({id_key: subject, token_key: token})
+        ledger["subjects"].append({"id": subject, "accountId": account, "directBindings": 0})
+    group = own.post_operation(http, public, owner, "/iam/v1/groups",
+        {"accountId": account, "name": "gdu-only-m-" + run_id}, "GDU Group.Create")["id"]
+    own.post_operation(http, public, owner, "/iam/v1/groups/" + group + ":addMember",
+        {"memberType": "service_account", "memberId": patch["gduMId"]}, "GDU Group.AddMember")
+    # Ждём готовность существующего пути чтения, а не угадываем задержку проекции.
+    deadline = time.monotonic() + 60
+    while True:
+        code, decision = http.json_ask(public + "/iam/v1/authorize:check", method="POST", token=owner,
+            body={"subject": "user:" + user, "resource": {"type": "iam_group", "id": group},
+                  "action": "iam.group_memberses.listMembers", "requiredRelation": "v_list"})
+        if code != 200:
+            raise own.Finding("GDU готовность Group.ListMembers не дала HTTP 200")
+        if decision.get("allowed") is True:
+            break
+        if time.monotonic() >= deadline:
+            raise own.Finding("GDU Group.ListMembers не стал готов за 60 секунд")
+        time.sleep(0.25)
+    code, members = http.json_ask(public + "/iam/v1/groups/" + group + ":listMembers", token=owner)
+    got = [(m.get("memberType"), m.get("memberId")) for m in members.get("members", [])]
+    if code != 200 or got != [("service_account", patch["gduMId"])] or members.get("nextPageToken"):
+        raise own.Finding("GDU группа должна содержать ровно M")
+    patch["gduGroupId"] = group
+    for id_key, token_key in (("gduSId", "jwtGDUS"), ("gduS2Id", "jwtGDUS2"), ("gduMId", "jwtGDUM")):
+        for typ, ident, resource, verb in (("registry_registry", x, "registries", "get"),
+                ("registry_repository", y, "repositories", "get"),
+                ("registry_repository", y, "repositories", "update")):
+            code, result = http.json_ask(public + "/iam/v1/authorize:check", method="POST", token=patch[token_key],
+                body={"subject": "service_account:" + patch[id_key], "resource": {"type": typ, "id": ident},
+                      "action": "registry." + resource + "." + verb, "requiredRelation": "v_" + verb})
+            if code != 200 or result.get("allowed") is not False:
+                raise own.Finding("GDU новый субъект обязан получить HTTP 200 allowed=false")
+    patch["gduGivenReady"] = "true"
+    ledger["gdu"] = {"ownerUserId": user, "accountId": account, "projectId": project,
+                     "lineage": lineage, "groupId": group, "memberId": patch["gduMId"]}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pki", default=str(ROOT / ".stand/pki"))
+    parser.add_argument("--grpc-addr", default="localhost:9091")
     parser.add_argument("--ledger", default=str(ROOT / ".stand/run/delegation-subjects.json"))
     parser.add_argument("--env-file", default=str(ROOT / "tests/newman/environments/local.postman_environment.json"))
     parser.add_argument("--minted-keys", action="store_true")

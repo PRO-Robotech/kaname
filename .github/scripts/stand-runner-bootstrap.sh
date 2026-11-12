@@ -26,6 +26,8 @@ runner_bootstrap() {
     mode=portable
   fi
   if [ "$mode" != portable ]; then
+  # CNF нужен только подсказке command-not-found; Packages и подписи проверяются как прежде.
+  # Отключаем этот необязательный индекс только у команд изолированного поставщика, без изменения настроек хоста.
   aptdir="$work/apt-provider"
   mkdir -p "$aptdir/lists/partial" "$aptdir/archives/partial" || return 125
   printf 'deb [check-valid-until=no] %s noble main universe\ndeb [check-valid-until=no] %s noble-updates main universe\ndeb [check-valid-until=no] %s noble-security main universe\n' \
@@ -37,7 +39,7 @@ runner_bootstrap() {
     cadir="$aptdir/ca-bootstrap"
     mkdir -p "$cadir/lists/partial" "$cadir/archives/partial" || return 125
     printf 'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu noble main\ndeb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu noble-updates main\ndeb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://security.ubuntu.com/ubuntu noble-security main\n' > "$cadir/sources.list" || return 125
-    local -a caapt=(apt-get -o APT::Update::Error-Mode=any -o Acquire::Languages=none -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=0
+    local -a caapt=(apt-get -o APT::Update::Error-Mode=any -o Acquire::Languages=none -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=0
       -o "Dir::Etc::sourcelist=$cadir/sources.list" -o Dir::Etc::sourceparts=-
       -o "Dir::State::lists=$cadir/lists" -o "Dir::Cache::archives=$cadir/archives" -o APT::Get::List-Cleanup=0)
     runner_provider_command "$work/out/step-provider-install.log" ca-index 60 \
@@ -45,10 +47,10 @@ runner_bootstrap() {
     runner_provider_command "$work/out/step-provider-install.log" ca-install 60 \
       "${caapt[@]}" install -y -q --no-install-recommends --no-remove ca-certificates || return 125
   fi
-  local -a apt=(apt-get -o APT::Update::Error-Mode=any -o Acquire::Languages=none -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 -o "Dir::Etc::sourcelist=$aptdir/sources.list" -o Dir::Etc::sourceparts=-
+  local -a apt=(apt-get -o APT::Update::Error-Mode=any -o Acquire::Languages=none -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 -o "Dir::Etc::sourcelist=$aptdir/sources.list" -o Dir::Etc::sourceparts=-
     -o "Dir::State::lists=$aptdir/lists" -o "Dir::Cache::archives=$aptdir/archives" -o APT::Get::List-Cleanup=0)
   export DEBIAN_FRONTEND=noninteractive
-  runner_provider_command "$work/out/step-provider-install.log" snapshot-index 170 "${apt[@]}" update -q || return 125
+  runner_provider_command "$work/out/step-provider-install.log" snapshot-index 420 "${apt[@]}" update -q || return 125
   local -a packages=()
   for spec in $KANAME_RUNNER_APT; do
     [[ "$spec" =~ ^[a-z0-9.+-]+=[a-zA-Z0-9:~.+-]+$ ]] || return 125

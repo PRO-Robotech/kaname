@@ -273,6 +273,14 @@ var catalogPendingEntries = []CatalogPendingEntry{
 		Removal: grantDelegationPendingRemoval,
 		Refs:    "PRO-Robotech/kaname#986",
 	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.GrantDelegationService/Update",
+		Why: "расширение делегирования выдачи заведено контрактом службы (kaname#1032); " +
+			"край назовёт глагол после подъёма пина службы и регенерации каталога; " +
+			"до того край отвечает на глагол отказом «нет записи каталога»",
+		Removal: grantDelegationPendingRemoval,
+		Refs:    "PRO-Robotech/kaname#1032",
+	},
 }
 
 const (

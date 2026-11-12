@@ -167,6 +167,15 @@ def main() -> int:
                 owned_environment = None
                 raise RuntimeError("public matrix requires a fresh environment; existing file preserved")
             step("seed-own", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--pki", str(pki)], timeout=240)
+            # kaname#1032 U — человек уровня 2 и владелец собственного аккаунта.
+            # Ceremony не требует registry; оба аккаунта существуют до единственного
+            # конечного плана и штатного restart. История исходного процесса сохраняется.
+            step("seed-ceremony", ["python3", "tests/authz-fixtures/seed_ceremony.py", "--wave",
+                                  "--lane-url", "https://localhost:9100",
+                                  "--issuance-url", "https://localhost:9096",
+                                  "--own-url", "https://localhost:9098",
+                                  "--grpc-addr", "localhost:9091", "--pki", str(pki),
+                                  "--mailbox-url", "http://127.0.0.1:18025"], timeout=300)
             # Аккаунт создан службой. Его конечный план применяется настоящим новым стартом.
             next_config = evidence / "registration-writers.next.json"
             step("registration-writer-plan", ["python3", "tests/authz-fixtures/registration_writer_plan.py",
@@ -187,8 +196,7 @@ def main() -> int:
             results["steps"].append({"name": "registration-plan-restart", "rc": 0, "pid": service.pid})
             step("seed-resource", ["python3", "tests/authz-fixtures/seed_registry_resource.py", "--pki", str(pki),
                                    "--ledger", str(evidence / "registry-intent.json")])
-            # Эта матрица использует обычных машинных делегатов; слоты человеческой
-            # церемонии относятся к своей отдельной волне приёмки.
+            # Дано готово: машинные делегаты и реальные люди U/E/C своей ceremony.
             step("seed-delegates", ["python3", "tests/authz-fixtures/seed_delegation.py", "--pki", str(pki),
                                     "--ledger", str(evidence / "delegation-subjects.json")])
             step("remint-bootstrap", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--remint-bootstrap", "--pki", str(pki)])
@@ -218,6 +226,15 @@ def main() -> int:
                     raise RuntimeError(f"GD-E{case} was not executed")
             for case in ("IAM-GD-1011-GROUP-CONTAINS-DELEGATE-DENIED", "IAM-GD-1011-GROUP-WITHOUT-DELEGATE-ALLOWED"):
                 if not any(name.startswith(case + " ::") and "-grant-group" in name for name in executed):
+                    raise RuntimeError(case + " was not executed")
+            for case in ("IAM-GDU-EXPAND-ROLE-ALLOWED", "IAM-GDU-NARROW-ROLE-DENIED",
+                         "IAM-GDU-EXPAND-TARGET-ALLOWED", "IAM-GDU-CROSS-MODULE-TARGET-DENIED",
+                         "IAM-GDU-EXPAND-SUBJECT-ALLOWED", "IAM-GDU-EMPTY-SUBJECT-DENIED",
+                         "IAM-GDU-OWNER-UPDATE-ALLOWED", "IAM-GDU-DELEGATE-UPDATE-DENIED",
+                         "IAM-GDU-REPEAT-UNCHANGED", "IAM-GDU-REVOKED-UPDATE-DENIED",
+                         "IAM-GDU-ANONYMOUS-DENIED", "IAM-GDU-ACR1-DENIED",
+                         "IAM-GDU-MACHINE-AUTHORITY-DENIED"):
+                if not any(name.startswith(case + " ::") for name in executed):
                     raise RuntimeError(case + " was not executed")
             results["newmanStats"] = run["stats"]
             results["newmanCoverage"] = {"expectedRequests": len(expected), "executedRequests": len(executed),

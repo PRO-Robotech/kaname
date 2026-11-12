@@ -20,8 +20,9 @@
 # проверку покрытия типа (`Rules.CoversType` судит только верхний уровень
 # правил), и проба красела бы по фикстуре, а не по предмету.
 #
-# Прочие роли и раздел `resources` — дословно как в исходной редакции: мир Д
-# стоит поверх мира П6, и доставка этой редакции не снимает ни одной его роли.
+# Прочие роли сохранены. Оба ресурса явно объявляют запись owner по контракту
+# kaname#982: объявление отношения само по себе не разрешает модулю его писать.
+# Мир Д стоит поверх мира П6; доставка не снимает ни одной его роли.
 #
 # Имя файла — НЕ `manifest.yaml`: проверка дерева читает файлы ровно с этим
 # базовым именем, и фикстура, названная так, судилась бы как манифест модуля.
@@ -64,6 +65,9 @@ resources:
       - name: owner
         definition: '[user, service_account]'
         position: beforeTiers
+    writes:
+      - relation: owner
+        subjects: [user, service_account]
     verbs:
       - {name: get, from: [owner, super_admin]}
       - {name: list, from: [owner, super_admin]}
@@ -97,6 +101,9 @@ resources:
       - name: owner
         definition: '[user, service_account]'
         position: beforeTiers
+    writes:
+      - relation: owner
+        subjects: [user, service_account]
     verbs:
       - {name: get, subjects: ['user:*', user, service_account, 'group#member'], from: [owner, super_admin]}
       - {name: list, from: [owner, super_admin]}

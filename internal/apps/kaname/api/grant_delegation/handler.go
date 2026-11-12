@@ -24,12 +24,35 @@ type Handler struct {
 	get    *GetGrantDelegationUseCase
 	list   *ListGrantDelegationsUseCase
 	revoke *RevokeGrantDelegationUseCase
+	update *UpdateGrantDelegationUseCase
 }
 
 // NewHandler — службу собирает корень (`cmd/kaname/wiring.go`).
 func NewHandler(c *CreateGrantDelegationUseCase, g *GetGrantDelegationUseCase,
 	l *ListGrantDelegationsUseCase, r *RevokeGrantDelegationUseCase) *Handler {
 	return &Handler{create: c, get: g, list: l, revoke: r}
+}
+
+// WithUpdate подключает расширение осей, сохраняя прежние конструкторы CRUD.
+func (h *Handler) WithUpdate(u *UpdateGrantDelegationUseCase) *Handler {
+	h.update = u
+	return h
+}
+
+// Update переносит запрос в use-case; решения о правах и составе — там.
+func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateGrantDelegationRequest) (*operationpb.Operation, error) {
+	if h.update == nil {
+		return h.UnimplementedGrantDelegationServiceServer.Update(ctx, req)
+	}
+	in := UpdateInput{GrantDelegationID: req.GetGrantDelegationId(), RoleIDs: req.GetRoleIds(), TargetTypes: req.GetTargetTypes(), UpdateMask: req.GetUpdateMask().GetPaths()}
+	for _, subject := range req.GetSubjectTypes() {
+		in.SubjectTypes = append(in.SubjectTypes, subject.String())
+	}
+	op, err := h.update.Execute(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
 }
 
 // Create — заведение делегирования.

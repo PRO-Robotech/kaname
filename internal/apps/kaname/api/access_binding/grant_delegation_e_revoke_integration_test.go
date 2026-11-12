@@ -239,13 +239,19 @@ func TestGrantDelegation_GD32_ListenerDoorPassesRevokeAndDeleteButNotUpdate(t *t
 	row("d GrantDelegationService.Revoke", reached && err == nil,
 		fmt.Sprintf("обработчик достигнут=%v, отказ=%v, вопросы двери=%v", reached, err, log))
 
-	// Число методов пакета, освобождённых дверью: база на 5c6b7c078 — 21 в
-	// `kaname.cloud.iam.v1` и 2 в `corelib.operation` (разбор классов, CE-21);
-	// после реализации — на шесть больше в iam.v1 (Р1а).
+	reached, log, err = call("/"+gdServiceName+"/Update",
+		&iamv1.UpdateGrantDelegationRequest{GrantDelegationId: "gdl00000000000000001"})
+	row("e GrantDelegationService.Update", reached && err == nil && len(log) == 0,
+		fmt.Sprintf("обработчик достигнут=%v, отказ=%v, вопросы двери=%v", reached, err, log))
+
+	// База CE-21: 21 метод iam.v1 и 2 operation; kaname#986 добавил шесть.
+	// kaname#1032 добавляет ровно GrantDelegationService.Update, что держит строка e.
+	// AccessBinding.Update по-прежнему обязан отказать в строке c; ACR и
+	// бизнес-полномочия нового Update отдельно проверяют GDU-09 и TLS-близнецы.
 	iamExempt, opExempt := exemptCounts(t)
 	t.Logf("GD-32: освобождённых дверью методов — kaname.cloud.iam.v1 %d, corelib.operation %d (база 21 и 2)", iamExempt, opExempt)
-	row("число освобождённых", iamExempt == 21+6 && opExempt == 2,
-		fmt.Sprintf("iam.v1 %d (ожидается 27), operation %d (ожидается 2)", iamExempt, opExempt))
+	row("число освобождённых", iamExempt == 21+6+1 && opExempt == 2,
+		fmt.Sprintf("iam.v1 %d (ожидается 28), operation %d (ожидается 2)", iamExempt, opExempt))
 
 	if len(fails) > 0 {
 		t.Fatalf("GD-32: не сошлись строки %v — дверь слушателя судит Revoke/Delete по v_delete либо не знает GrantDelegationService", fails)

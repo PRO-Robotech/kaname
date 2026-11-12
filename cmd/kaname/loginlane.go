@@ -462,7 +462,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	if err := login.ValidateAll(); err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
-	limit, limited := readMemoryLimit(memoryLimitFiles)
+	limit, limited := readEnvironmentMemoryLimit(memoryLimitFiles)
 	if err := login.ValidateMemoryBudget(limit, limited); err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}

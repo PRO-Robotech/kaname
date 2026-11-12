@@ -109,7 +109,8 @@ jobs:
   changes:
     name: выбор затронутого (e2e-newman)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # Полный поставщик сохранён: до 420 с на индекс снимка и конечный общий бюджет остальных стадий.
+    timeout-minutes: 15
     outputs:
       full: ${{ steps.pick.outputs.full }}
       jobs: ${{ steps.pick.outputs.jobs }}
@@ -973,6 +974,9 @@ jobs:
       KANAME_STAND_REGISTRY_WORLD: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          # Нужны реальные два родителя synthetic merge и отдельный объект PR head.
+          fetch-depth: 2
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
         with:
           go-version-file: go.mod
@@ -1051,6 +1055,10 @@ jobs:
         timeout-minutes: 5
         run: python3 tests/authz-fixtures/seed_ceremony.py --self-test
 
+      - name: повторное Дано H отвергает чужие выдачи
+        timeout-minutes: 5
+        run: python3 tests/authz-fixtures/esc_given_fixture_test.py
+
       - name: профиль и посев registry способны упасть
         timeout-minutes: 5
         run: |
@@ -1080,21 +1088,8 @@ jobs:
               exit "$rc" ;;
           esac
 
-      - name: конечный account-scoped план registry после машинного посева
-        timeout-minutes: 5
-        run: .github/scripts/stand-own.sh registration-writer-plan tests/newman/environments/local.postman_environment.json
-
-      - name: условие registry создано владельцем модуля
-        timeout-minutes: 5
-        run: |
-          rc=0
-          python3 tests/authz-fixtures/seed_registry_resource.py || rc=$?
-          if [ "$rc" -eq 75 ]; then
-            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::registry producer недоступен; вердикта о продукте нет"
-            exit 1
-          fi
-          exit "$rc"
-
+      # Ceremony создаёт второго владельца ДО единственного startup-плана:
+      # registry получает конечные назначения accountAId + ceremonyAccountId.
       # УСЛОВИЕ ВОЛНЫ — ОТДЕЛЬНЫМ ШАГОМ: отказ церемонии не должен читаться отказом
       # машинного посева и не должен читаться вердиктом о наборе.
       - name: условие создано — люди и их предъявители своей церемонией службы
@@ -1114,6 +1109,21 @@ jobs:
               echo "::error title=Посев церемонии отвергнут продуктом::посев предъявил всё, чего требует контракт церемонии, и получил отказ — это вердикт о дереве"
               exit "$rc" ;;
           esac
+
+      - name: конечный account-scoped план registry после машинного посева и ceremony
+        timeout-minutes: 5
+        run: .github/scripts/stand-own.sh registration-writer-plan tests/newman/environments/local.postman_environment.json
+
+      - name: условие registry создано владельцем модуля
+        timeout-minutes: 5
+        run: |
+          rc=0
+          python3 tests/authz-fixtures/seed_registry_resource.py || rc=$?
+          if [ "$rc" -eq 75 ]; then
+            echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::registry producer недоступен; вердикта о продукте нет"
+            exit 1
+          fi
+          exit "$rc"
 
       - name: условие делегирования — обычные test SA и предъявители
         timeout-minutes: 5
@@ -1163,6 +1173,15 @@ jobs:
             --internal-front-client-key ../../.stand/pki/edge.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt
 
+      # Исходные имена ещё целы: неизменный verifier судит ровно19 объявленных коллекций.
+      - name: исполнение волны доказано до очистки отчёта
+        if: always()
+        timeout-minutes: 5
+        run: |
+          python3 .github/scripts/preclean-execution-proof.py prove \
+            --root "$GITHUB_WORKSPACE" --original "$GITHUB_WORKSPACE/tests/newman/out" \
+            --private "$RUNNER_TEMP/preclean-ceremony-execution"
+
       # Артефакт публичного репозитория — только после чистки: окружение прогона
       # несёт предъявителей людей и машин. Три исхода, как у задания `stand`.
       - name: отчёт прогона вычищен от удостоверений
@@ -1186,6 +1205,11 @@ jobs:
               > tests/newman/out-public/redaction-failed.txt
             exit 1
           fi
+          # В receipt идут только разрешённые hashes/числа; private оригиналы остаются вне артефакта.
+          python3 .github/scripts/preclean-execution-proof.py seal \
+            --root "$GITHUB_WORKSPACE" --original "$GITHUB_WORKSPACE/tests/newman/out" \
+            --private "$RUNNER_TEMP/preclean-ceremony-execution" \
+            --cleaned "$GITHUB_WORKSPACE/tests/newman/out-public"
           # Прикрепляем только после успешного обезличивания и только к существующему отчёту.
           if [ -f "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" ] && [ -n "$(find tests/newman/out-public -type f -print -quit)" ]; then
             cp "$RUNNER_TEMP/kaname-runner/runtime-tools-public.json" tests/newman/out-public/runner-provider.json
@@ -1781,7 +1805,8 @@ jobs:
       - changes
       - prverdict
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Полный поставщик сохранён: до 420 с на индекс снимка и конечный общий бюджет остальных стадий.
+    timeout-minutes: 15
     # Право на запись задач — ТОЛЬКО у этого задания, и оно наименьшее из
     # достаточных.
     permissions:
@@ -1850,7 +1875,8 @@ jobs:
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     needs: [changes, chart-own, edgeselftests, stand, stand-ceremony, suite]
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # Полный поставщик сохранён: до 420 с на индекс снимка и конечный общий бюджет остальных стадий.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:

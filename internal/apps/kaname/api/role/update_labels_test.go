@@ -25,6 +25,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
@@ -402,4 +405,9 @@ func (_ *rlRoleWtr) GuardSystemClassReads(context.Context, domain.RoleID, bool) 
 
 func (w *rlRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rules, domain.RulePolicy, bool, error) {
 	return nil, domain.RulePolicy{}, false, nil
+}
+
+// Проверки доверенностей в этом дублёре не поддерживаются: отказ вместо фиктивного допуска.
+func (w *rlUpdWriter) TransactionRelationChecker(*authzmodel.Plans) (kanamerepo.RelationChecker, error) {
+	return nil, iamerr.ErrUnavailable
 }

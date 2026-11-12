@@ -74,6 +74,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
@@ -137,6 +138,10 @@ type gdWorld struct {
 
 	// subject — службы, зарегистрированные провязкой испытуемого.
 	subject *gdRegistrar
+	// Только порты тестового мира; штатный путь по умолчанию сохранён.
+	updateRepo    kanamerepo.Repository
+	updateDoor    clients.RelationStore
+	updateCatalog catalog.Source
 }
 
 // newGDWorld поднимает мир Д и доказывает живость посева положительными
@@ -379,9 +384,9 @@ func (w *gdWorld) buildHandlers() {
 		projectapp.NewUpdateProjectUseCase(w.repo, w.ops).WithRelationStore(w.door, nil),
 		projectapp.NewDeleteProjectUseCase(w.repo, w.ops), nil, nil)
 	w.groups = groupapp.NewHandler(
-		groupapp.NewCreateGroupUseCase(w.repo, w.ops).WithRelationStore(w.door, nil),
+		groupapp.NewCreateGroupUseCase(w.repo, w.ops).WithRelationStore(w.door, nil).WithObjectReconciler(w.rec),
 		nil, nil, nil, nil, groupapp.NewAddMemberUseCase(w.repo, w.ops).
-			WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door)), nil, nil)
+			WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door)), nil, groupapp.NewListMembersUseCase(w.repo).WithRelationStore(w.door))
 	w.roles = roleapp.NewHandler(
 		roleapp.NewCreateRoleUseCase(w.repo, w.ops, src).WithRelationStore(w.door, nil), nil, nil, nil, nil)
 	w.sas = serviceaccountapp.NewHandler(

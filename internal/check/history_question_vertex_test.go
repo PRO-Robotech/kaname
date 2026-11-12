@@ -100,6 +100,13 @@ func vertexLedger() map[string]vertexWaiver {
 		"internal/check/docs_measurement_dating_test.go#rev-list": {Calls: 1,
 			Why: "граница усечения — свойство ЭТОГО клона, а не посадки: `--max-parents=0 HEAD` " +
 				"ищет самую старую доступную точку выборки. У ствола она та же либо недостижима"},
+		"tests/newman/scripts/preclean_execution_proof_test.py#rev-list": {Calls: 2,
+			Why: "предмет — родители HEAD двух изолированных shallow-клонов СИНТЕТИЧЕСКОГО " +
+				"репозитория фикстуры: глубина 1 обязана скрыть родителей checkout-коммита, " +
+				"а глубина 2 — открыть ровно отдельные base и PR head. Эти два вызова держат " +
+				"настоящий file:// transport и провенанс прогона; вопрос стволу Kaname судил бы " +
+				"чужую историю, а подстановка иной ссылки вместо HEAD не проверяла бы сам " +
+				"checkout, который получает producer"},
 		"internal/check/migration_not_a_writer_of_module_role_test.go#diff": {Calls: 1,
 			Why: "предмет — САМО ИЗМЕНЕНИЕ (`<ствол>...HEAD`), а не дерево. Состав добавленного " +
 				"живёт между стволом и рабочей вершиной by construction; вершина здесь — второй " +
@@ -150,6 +157,12 @@ func vertexLedger() map[string]vertexWaiver {
 				"Вершина здесь и есть предмет замера, а ствола `origin/main` в таком дереве " +
 				"нет вовсе — спрашивать о нём было бы вопросом к тому, чего фикстура не заводит",
 		},
+		"tests/newman/scripts/preclean_execution_proof_test.py#cat-file": {Calls: 1,
+			Why: "предмет — доступность commit-объекта PR head в изолированном shallow-клоне " +
+				"глубины 2 СИНТЕТИЧЕСКОЙ фикстуры: head взят из её event, отдельно от base и " +
+				"checkout-коммита слияния. Это предпосылка проверки провенанса producer, " +
+				"а не вопрос о вхождении в историю Kaname; ствол вместо head проверил бы " +
+				"другой объект и не доказал бы доступность именно головы PR"},
 		"internal/check/history_question_vertex_parent_test.go#merge-base": {Calls: 1,
 			Why: "вершина — коммит слияния СИНТЕТИЧЕСКОГО репозитория, который фикстура строит " +
 				"сама: спрашивается, предком какого его родителя (`HEAD^1`/`HEAD^2`) стал " +
