@@ -82,6 +82,9 @@ func (s Set) Obligations() []Obligation { return append([]Obligation(nil), s.obl
 
 // Binding описывает один полный предлагаемый источник на одного получателя.
 // Для нескольких получателей Compile вызывается для каждого, не только первого.
+// Subjects содержит полный перечень получателей источника; для system_class
+// обязателен, поскольку ключ public_reader зависит от всех классов сразу.
+// Непустой перечень проверяется на валидность, уникальность и наличие Recipient.
 // CapabilityVersion=0 сохраняет ordinary семантику старого carrier.
 type Binding struct {
 	SourceID          string
@@ -89,6 +92,7 @@ type Binding struct {
 	Scope             domain.ScopeAnchor
 	Target            domain.AccessTarget
 	Recipient         domain.Subject
+	Subjects          []domain.Subject
 	CapabilityVersion int
 }
 

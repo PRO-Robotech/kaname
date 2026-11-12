@@ -113,9 +113,10 @@ func bindingBytes(b Binding) ([]byte, error) {
 		Scope             domain.ScopeAnchor
 		Target            domain.AccessTarget
 		Recipient         domain.Subject
+		Subjects          []domain.Subject
 		CapabilityVersion int
 	}{b.SourceID, b.Role.ID, b.Role.Rules, b.Role.Permissions, b.Role.IsSystem,
-		b.Role.OwnerModule, b.Scope, b.Target, b.Recipient, b.CapabilityVersion})
+		b.Role.OwnerModule, b.Scope, b.Target, b.Recipient, b.Subjects, b.CapabilityVersion})
 }
 
 func (c *Compiler) Compile(b Binding) Set {
@@ -144,12 +145,20 @@ func (c *Compiler) Compile(b Binding) Set {
 		return s
 	}
 	switch b.Recipient.Type {
-	case domain.SubjectTypeUser, domain.SubjectTypeServiceAccount, domain.SubjectTypeGroup:
+	case domain.SubjectTypeUser, domain.SubjectTypeServiceAccount, domain.SubjectTypeGroup, domain.SubjectTypeSystemClass:
 	default:
-		fail("recipient_producer", "system-class public_reader requires shared subject emitter")
+		fail("recipient_producer", "unsupported recipient type")
+		return s
+	}
+	if err := validateBindingSubjects(b); err != nil {
+		fail("recipient_input", err.Error())
 		return s
 	}
 	if len(b.Role.Rules) == 0 {
+		if b.Recipient.IsSystemClass() && len(b.Role.Permissions) > 0 {
+			fail("recipient_legacy", "class legacy producer is not established")
+			return s
+		}
 		if len(b.Role.Permissions) > 0 {
 			// Прежняя ветвь пишет на scope, в том числе при конечном target. Нельзя
 			// подменить её пообъектным смыслом rules либо новым meta split.
@@ -176,6 +185,10 @@ func (c *Compiler) Compile(b Binding) Set {
 		}
 		if len(caps) > 0 && len(b.Target.Resources) > 0 {
 			fail("input", "meta carrier requires allInScope")
+			return s
+		}
+		if b.Recipient.IsSystemClass() && len(caps) > 0 {
+			fail("recipient_meta", "class capability producer is not established")
 			return s
 		}
 		rules = ordinary
@@ -224,6 +237,9 @@ func (c *Compiler) Compile(b Binding) Set {
 		}
 	}
 	selectors := c.facts.GrantSelectors(rules.MaterializingSelectorsInScope(domain.DeriveFromResourceType(b.Scope.Type)), policy)
+	if b.Recipient.IsSystemClass() {
+		c.compilePublicReaders(&s, b, selectors, origins, p)
+	}
 	roleVerbs := map[domain.RoleVerb]bool{}
 	for _, v := range c.facts.RoleVerbsFromSelectors(selectors, policy) {
 		roleVerbs[v] = true
@@ -249,17 +265,24 @@ func (c *Compiler) Compile(b Binding) Set {
 					s.obligations = append(s.obligations, Obligation{"projection_mismatch", dotted + "." + v, ep})
 				}
 			}
+			recipientVerbs := domain.RecipientVerbs(b.Recipient, sel.Verbs, sel.Container != nil)
+			if len(recipientVerbs) == 0 {
+				continue
+			}
 			regions, err := c.selectorRegions(sel, dotted, typ, b)
 			if err != nil {
 				s.obligations = append(s.obligations, Obligation{"selector", err.Error(), ep})
 				continue
 			}
-			verbs := c.facts.ObjectVerbs(dotted, sel.Verbs)
+			verbs := c.facts.ObjectVerbs(dotted, recipientVerbs)
 			if len(verbs) > 0 {
 				relations := c.facts.ObjectRelations(typ, verbs, c.typeVerbs(typ), policy)
 				for _, region := range regions {
 					for _, rel := range relations {
 						if sel.CreatedBySubject && !strings.HasPrefix(rel, "v_") {
+							continue
+						}
+						if !c.classDeclaration(&s, b.Recipient, typ, rel, ep) {
 							continue
 						}
 						c.derive(&s, typ, rel, region, Condition{}, ep)
@@ -284,13 +307,20 @@ func (c *Compiler) Compile(b Binding) Set {
 		}
 	}
 	if len(b.Target.Resources) == 0 && b.Scope.Type != "cluster" {
-		verbs := rules.ScopeSelfVerbs(b.Scope.Type, c.typeVerbs(b.Scope.Type))
+		verbs := domain.RecipientVerbs(b.Recipient, rules.ScopeSelfVerbs(b.Scope.Type, c.typeVerbs(b.Scope.Type)), false)
 		if len(verbs) > 0 {
 			ep := p
 			ep.Primitive = "scope_self"
 			ep.ProjectedRuleFP = "scope_self"
 			ep.AuthoredRuleFP = digest(raw)
+			if _, ok := c.facts.FGAObjectType("iam." + b.Scope.Type); !ok {
+				s.obligations = append(s.obligations, Obligation{"catalog_type", "iam." + b.Scope.Type, ep})
+				return s
+			}
 			for _, rel := range c.facts.ScopeSelfRelations(b.Scope.Type, verbs, c.typeVerbs(b.Scope.Type)) {
+				if !c.classDeclaration(&s, b.Recipient, b.Scope.Type, rel, ep) {
+					continue
+				}
 				c.derive(&s, b.Scope.Type, rel, exact(b.Scope.Type, b.Scope.ID), Condition{}, ep)
 			}
 		}
