@@ -370,8 +370,10 @@ func TestCollectAndCompileBindingsSeedRejectsNonScopeObject(t *testing.T) {
 	b.System = true
 	b.ResourceType = "service_account"
 	b.ResourceID = "sa-target"
-	if err := b.Validate(); err != nil {
-		t.Fatalf("исходная форма должна пройти домен: %v", err)
+	// Вокабуляр домена допускает только три якоря области. Некорректный
+	// системный источник должен быть отвергнут и на входе адаптера.
+	if err := b.Validate(); err == nil {
+		t.Fatal("домен неожиданно допустил пообъектный тип как якорь")
 	}
 	w.bindings.list = func(s domain.Subject, _ access_binding.PageFilter) ([]domain.AccessBinding, string, error) {
 		if s == effectSA {
