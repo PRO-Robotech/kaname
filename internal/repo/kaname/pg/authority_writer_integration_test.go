@@ -121,6 +121,15 @@ func authorityWaitLock(t *testing.T, ctx context.Context, pool *pgxpool.Pool) in
 	return pid
 }
 
+func authorityWaitReleased(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	// После отмены pgx передаёт повреждённое соединение асинхронному destructor
+	// puddle: Release уже вызван, но slot ещё учитывается до CleanupDone.
+	// Наблюдаем завершение очистки; устойчивая утечка остаётся отказом.
+	require.Eventually(t, func() bool { return pool.Stat().AcquiredConns() == 0 },
+		2*time.Second, 10*time.Millisecond, "очистка должна вернуть все pool slots")
+}
+
 func TestAuthorityWriterRejectsPlanBeforeOpeningTransaction(t *testing.T) {
 	// nil pool намерен: неверный план обязан завершиться до первого вызова BeginTx.
 	repo := kanamepg.New(nil, nil)
@@ -172,7 +181,7 @@ func TestAuthorityWriterSameAccountAndGlobalBarriers(t *testing.T) {
 			require.False(t, result.w.AuthorityFence().DecisionAt().Before(afterWait), "decision_at должен быть после ожидания, не временем BEGIN")
 			require.Equal(t, tc.second.Mode, result.w.AuthorityFence().Mode())
 			require.NoError(t, result.w.Rollback(ctx))
-			require.EqualValues(t, 0, pool.Stat().AcquiredConns(), "обе транзакции вернули соединения")
+			authorityWaitReleased(t, pool)
 		})
 	}
 }
@@ -202,7 +211,7 @@ func TestAuthorityWriterDifferentAccountsAndSnapshotCopies(t *testing.T) {
 	global := authorityOpen(t, ctx, repo, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal})
 	require.Empty(t, global.AuthorityFence().Accounts())
 	require.NoError(t, global.Rollback(ctx))
-	require.EqualValues(t, 0, pool.Stat().AcquiredConns())
+	authorityWaitReleased(t, pool)
 }
 
 func TestAuthorityWriterReadsCommittedSourceAfterFenceWait(t *testing.T) {
@@ -258,7 +267,7 @@ func TestAuthorityWriterPhysicalOrderAndCancellationCleanup(t *testing.T) {
 	require.Error(t, result.err)
 	require.Nil(t, result.w)
 	require.NoError(t, holder.Rollback(ctx))
-	require.EqualValues(t, 0, pool.Stat().AcquiredConns())
+	authorityWaitReleased(t, pool)
 
 	// Теперь low должен быть уже взят, когда writer ждёт high. Его отмена
 	// обязана освободить частично полученный план, не затрагивая holder high.
@@ -278,7 +287,7 @@ func TestAuthorityWriterPhysicalOrderAndCancellationCleanup(t *testing.T) {
 	require.NoError(t, holder.Rollback(ctx))
 	global := authorityOpen(t, ctx, repo, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal})
 	require.NoError(t, global.Rollback(ctx))
-	require.EqualValues(t, 0, pool.Stat().AcquiredConns(), "после отмены нет занятого pool slot")
+	authorityWaitReleased(t, pool)
 }
 
 func TestAuthorityWriterRealHashCollisionRetainsLogicalAccounts(t *testing.T) {
@@ -286,18 +295,15 @@ func TestAuthorityWriterRealHashCollisionRetainsLogicalAccounts(t *testing.T) {
 		t.Skip("integration: требует PostgreSQL")
 	}
 	ctx, pool, repo := authorityTestDB(t)
-	var pair []string
-	// Ограниченная детерминированная перепись настоящего hashtext. Если версия
-	// БД не даёт пары в этом диапазоне, фикстура падает; ложной коллизии/Skip нет.
-	require.NoError(t, pool.QueryRow(ctx, `WITH keys AS (SELECT 'acc-collision-' || n AS id, hashtext('acc-collision-' || n) AS key FROM generate_series(1,1000000) n)
- SELECT (array_agg(id ORDER BY id))[1:2] FROM keys GROUP BY key HAVING count(*) > 1 ORDER BY key LIMIT 1`).Scan(&pair))
-	require.Len(t, pair, 2)
+	// Пара найдена первым native прогоном на PostgreSQL 16. Повторный census
+	// миллиона строк не нужен: сама БД заново подтверждает реальную коллизию.
+	pair := []string{"acc-collision-716556", "acc-collision-916815"}
 	var same bool
 	require.NoError(t, pool.QueryRow(ctx, `SELECT hashtext($1)=hashtext($2)`, pair[0], pair[1]).Scan(&same))
 	require.True(t, same)
 	var collisionKey int32
 	require.NoError(t, pool.QueryRow(ctx, `SELECT hashtext($1)`, pair[0]).Scan(&collisionKey))
-	t.Logf("проверенная PostgreSQL collision fixture: accounts=%q key=%d; после первого native прогона закрепить пару вместо переписи", pair, collisionKey)
+	require.Equal(t, int32(-2116289360), collisionKey)
 	writer := authorityOpen(t, ctx, repo, authorityAccounts(pair[1], pair[0], pair[1]))
 	require.Equal(t, []domain.AccountID{domain.AccountID(pair[0]), domain.AccountID(pair[1])}, writer.AuthorityFence().Accounts())
 	var physicalLocks int
