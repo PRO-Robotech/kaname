@@ -131,8 +131,11 @@ runner_apt_from_cache() {
   for suite in noble noble-updates noble-security; do
     printf 'deb [arch=amd64 check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] file:%s %s main universe\n' "$offline" "$suite" >> "$sources" || return 1
   done
+  # Загрузка и хранение индекса согласованы: иначе APT сохраняет .lz4,
+  # а последующая установка с целью uncompressed не находит этот индекс.
   local -a apt=(apt-get -o APT::Update::Error-Mode=any -o APT::Architecture=amd64 -o APT::Architectures=amd64
     -o Acquire::Languages=none -o Acquire::By-Hash=false -o Acquire::IndexTargets::deb::Packages::CompressionTypes=uncompressed
+    -o Acquire::IndexTargets::deb::Packages::KeepCompressed=false
     -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false
     -o "Dir::Etc::sourcelist=$sources" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$lists"
     -o "Dir::Cache::archives=$aptdir/archives" -o Binary::apt-get::APT::Keep-Downloaded-Packages=true -o APT::Keep-Downloaded-Packages=true -o APT::Get::List-Cleanup=0)
