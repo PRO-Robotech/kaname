@@ -84,20 +84,16 @@ func buildBindingTuples(b domain.AccessBinding, subject domain.Subject, role dom
 	// Роль без правил И без прав (kaname#963, Р6) — правила потеряли адресатов
 	// снятием регистрации — не даёт ничего: веткой «только с перечнем прав» она не
 	// читается, и выдача кладёт лишь указатель на родителя.
-	if len(role.Rules) > 0 || len(role.Permissions) == 0 {
+	relations := authzmap.BindingScopeRelations(string(b.ResourceType), role)
+	if len(relations) == 0 {
 		var tuples []abrepo.RelationTuple
 		if hp, ok := hierarchyParentTuple(b); ok {
 			tuples = append(tuples, hp)
 		}
 		return tuples
 	}
-	// Legacy permissions-only role (no rules): emit the whole-role tier relations
-	// on the scope anchor + the hierarchy parent-pointer (via tuplesForBinding).
-	permissions := make([]string, len(role.Permissions))
-	for i, p := range role.Permissions {
-		permissions[i] = string(p)
-	}
-	relations := authzmap.LegacyScopeTierRelations(string(b.ResourceType), permissions)
+	// Общий производитель уже вернул прямые отношения области; последующее
+	// отображение cluster в tuplesForBinding на прямых именах тождественно.
 	return tuplesForBinding(b, subject, relations)
 }
 

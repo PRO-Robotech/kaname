@@ -398,6 +398,33 @@ func TestLegacyAndUnknownProducerRemainExplicit(t *testing.T) {
 		t.Fatal("неизвестная версия")
 	}
 }
+
+func TestWildcardProducerDoesNotTurnFiniteOrSuppressedProjectionIntoProof(t *testing.T) {
+	c := compiler(t)
+	for _, scope := range []domain.ScopeAnchor{
+		{Type: "account", ID: "acc-a"},
+		{Type: "cluster", ID: domain.ClusterSingletonID},
+	} {
+		for _, rule := range []domain.Rule{
+			{Module: "probemod", Resources: []string{"*"}, Verbs: []string{"get"}},
+			{Module: "*", Resources: []string{"*"}, Verbs: []string{"get"}},
+		} {
+			b := binding(rule)
+			b.Scope = scope
+			s := c.Compile(b)
+			if s.Complete() || Prove(s, s).Status == grantcoverage.Proved {
+				t.Fatalf("подстановка без полного доказательства принята: scope=%+v rule=%+v", scope, rule)
+			}
+			found := false
+			for _, obligation := range s.Obligations() {
+				found = found || obligation.Code == "wildcard_type_producer"
+			}
+			if !found {
+				t.Fatalf("потеряно обязательство реального wildcard producer: %+v", s.Obligations())
+			}
+		}
+	}
+}
 func TestConditionParametersDoNotRoundLargeIntegers(t *testing.T) {
 	c := compiler(t)
 	d := Direct{SourceID: "fact", ObjectType: "strange_box", ObjectID: "x", Relation: "console", Recipient: domain.Subject{Type: domain.SubjectTypeUser, ID: "user-a"}, Condition: Condition{Name: "fresh", Parameters: `{"n":9007199254740992}`}}

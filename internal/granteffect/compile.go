@@ -151,17 +151,12 @@ func (c *Compiler) Compile(b Binding) Set {
 	}
 	if len(b.Role.Rules) == 0 {
 		if len(b.Role.Permissions) > 0 {
-			permissions := make([]string, len(b.Role.Permissions))
-			for i, v := range b.Role.Permissions {
-				permissions[i] = string(v)
-			}
 			// Прежняя ветвь пишет на scope, в том числе при конечном target. Нельзя
 			// подменить её пообъектным смыслом rules либо новым meta split.
 			ep := p
 			ep.Primitive = "legacy_scope"
 			ep.AuthoredRuleFP = digest(raw)
-			relations := authzmap.LegacyScopeTierRelations(b.Scope.Type, permissions)
-			for _, rel := range authzmap.ScopeDirectRelations(b.Scope.Type, relations) {
+			for _, rel := range authzmap.BindingScopeRelations(b.Scope.Type, b.Role) {
 				c.derive(&s, b.Scope.Type, string(rel), exact(b.Scope.Type, b.Scope.ID), Condition{}, ep)
 			}
 		}
@@ -221,8 +216,11 @@ func (c *Compiler) Compile(b Binding) Set {
 		}
 	}
 	for _, r := range rules {
-		if r.Module == "*" || contains(r.Resources, "*") {
-			fail("wildcard_type_producer", "shared live-catalog wildcard expansion and cluster short-circuit required")
+		projection := r.MaterializedTypeProjection(domain.DeriveFromResourceType(b.Scope.Type))
+		if projection.WildcardKind != domain.RuleTypeWildcardNone {
+			// Реальный producer использует статический реестр либо подавляет
+			// подстановку. Это ещё не доказательство полного будущего эффекта.
+			fail("wildcard_type_producer", "static type expansion or suppressed wildcard requires a whole-effect proof")
 		}
 	}
 	selectors := c.facts.GrantSelectors(rules.MaterializingSelectorsInScope(domain.DeriveFromResourceType(b.Scope.Type)), policy)
