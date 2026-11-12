@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import lzma
 import os
 from pathlib import Path
 import shutil
@@ -48,6 +49,9 @@ def prepare(root):
         for component in ("main", "universe"):
             data = ("".join(records) if suite == "noble" and component == "main" else "").encode()
             files[component + "/binary-amd64/Packages"] = data
+            # Ubuntu публикует также сжатый индекс. Локальное зеркало кэша
+            # содержит только распакованный: порядок APT обязан выбрать его.
+            files[component + "/binary-amd64/Packages.xz"] = lzma.compress(data)
             (lists / (prefix + "dists_" + suite + "_" + component + "_binary-amd64_Packages")).write_bytes(data)
         release = root / (suite + ".Release")
         release.write_text(f"Origin: Cache fixture\nLabel: Cache fixture\nSuite: {suite}\nCodename: {suite}\n"
@@ -63,6 +67,9 @@ def prepare(root):
 INSIDE = r'''
 set -euo pipefail
 test -f /.dockerenv
+# У hosted runner уже может быть свой порядок: добавление элемента списка
+# командной строкой не ставит его перед существующим предпочтением xz.
+printf 'Acquire::CompressionTypes::Order { "xz"; };\n' > /etc/apt/apt.conf.d/99-cache-test-order
 . /src/.github/scripts/stand-runner-bootstrap.sh
 export KANAME_RUNNER_OS=ubuntu/24.04
 export KANAME_RUNNER_SNAPSHOT=https://snapshot.ubuntu.com/ubuntu/20261025T000000Z/
