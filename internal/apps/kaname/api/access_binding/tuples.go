@@ -97,7 +97,7 @@ func buildBindingTuples(b domain.AccessBinding, subject domain.Subject, role dom
 	for i, p := range role.Permissions {
 		permissions[i] = string(p)
 	}
-	relations := capSynthesizedAccountAdmin(b, permissions, authzmap.PermissionsToRelations(permissions))
+	relations := authzmap.LegacyScopeTierRelations(string(b.ResourceType), permissions)
 	return tuplesForBinding(b, subject, relations)
 }
 
@@ -118,60 +118,6 @@ func buildSubjectsBindingTuples(b domain.AccessBinding, subjects []domain.Subjec
 		tuples = append(tuples, buildBindingTuples(b, s, role)...)
 	}
 	return dedupeTuples(tuples)
-}
-
-// capSynthesizedAccountAdmin keeps the legacy whole-role projection from
-// SYNTHESIZING the third tier of super-access.
-//
-// `account:<A>#admin` is level 3 — the account administrator, who may do
-// everything within the account. Since the cascade landed it is a real cascade
-// source: the model derives `project.super_admin: admin from account`, and every
-// leaf type reads `super_admin from project`. One tuple is therefore every
-// resource in the account.
-//
-// The legacy projection picks its tier from the VERB alone and ignores which
-// module and resource the permission names — correct for the question
-// PermissionsToRelations asks ("how strong is this role?"), wrong for the one a
-// tuple builder asks ("what may it grant HERE"). A verb-position wildcard such as
-// `vpc.network.*.*` reads as the admin tier, so a role that only ever named vpc
-// networks would land level 3 on the account anchor. Before the cascade that tuple
-// reached the account object and stopped; afterwards it reaches everything.
-//
-// Level 3 is DELEGATED, never derived as a side effect: it is kept when the role
-// actually covers `iam.account`, and otherwise the anchor takes the next rung of
-// the same ladder. That is a strict reduction — the model declares `admin ⇒ editor
-// ⇒ viewer`, so the capped grant is a subset of what was emitted before, and
-// `account:<A>#editor` is a source of nothing (no type derives from it).
-//
-// Scope of the cap is deliberately the ACCOUNT anchor only. `project:<P>#admin` is
-// not a cascade source (the project's own admin is excluded by design — project
-// scope and below stay flat), so the established legacy semantics of a
-// scope-anchored tier is left exactly as it is everywhere else.
-func capSynthesizedAccountAdmin(
-	b domain.AccessBinding, permissions []string, relations []authzmap.Relation,
-) []authzmap.Relation {
-	const accountAnchor = "account"
-	if strings.ToLower(string(b.ResourceType)) != accountAnchor {
-		return relations
-	}
-	if covering := authzmap.PermissionsCoveringType(permissions, accountAnchor); len(covering) > 0 {
-		// The role names the account, so the delegation is authored — but the TIER
-		// must come from the permissions that name it, not from the role as a whole.
-		// Checking only that SOME permission covers the anchor leaves the hole open
-		// by a different route: a role carrying `iam.account.*.get` alongside
-		// `vpc.network.*.*` covers the account with a read verb, while the admin tier
-		// arrives from a permission that never mentions it. That is the same
-		// synthesis, one indirection further out.
-		return authzmap.PermissionsToRelations(covering)
-	}
-	out := make([]authzmap.Relation, 0, len(relations))
-	for _, r := range relations {
-		if r == "admin" {
-			r = "editor"
-		}
-		out = append(out, r)
-	}
-	return out
 }
 
 // tuplesForBinding builds the FGA tuple set for an AccessBinding given the
@@ -275,39 +221,8 @@ func hierarchyParentTuple(b domain.AccessBinding) (abrepo.RelationTuple, bool) {
 	return abrepo.RelationTuple{User: st.User, Relation: st.Relation, Object: st.Object}, true
 }
 
-// mapClusterRelations rewrites tier-derived relations to the canonical
-// direct relations on the FGA `cluster` type (Item #5 unification):
-//
-//	admin   → system_admin   (full CRUD; computed `admin`/`editor`/`viewer` on
-//	                          cluster all derive from system_admin)
-//	editor  → system_admin   (cluster has no separate "editor" tier; treat
-//	                          write-tier on the cluster as system_admin)
-//	viewer  → system_viewer  (read-only; covers the `viewer` computed
-//	                          relation via cascade)
-//
-// Unknown relations pass through unchanged.
-//
-// Output is deduplicated (a binding granting both editor + viewer collapses
-// to a single system_admin + system_viewer pair).
+// mapClusterRelations сохраняет прежнюю локальную координату проб;
+// смысл перевода отношений общий с компилятором выдаваемого эффекта.
 func mapClusterRelations(rels []authzmap.Relation) []authzmap.Relation {
-	if len(rels) == 0 {
-		return rels
-	}
-	seen := make(map[authzmap.Relation]struct{}, len(rels))
-	out := make([]authzmap.Relation, 0, len(rels))
-	for _, r := range rels {
-		mapped := r
-		switch r {
-		case "admin", "editor":
-			mapped = "system_admin"
-		case "viewer":
-			mapped = "system_viewer"
-		}
-		if _, dup := seen[mapped]; dup {
-			continue
-		}
-		seen[mapped] = struct{}{}
-		out = append(out, mapped)
-	}
-	return out
+	return authzmap.ScopeDirectRelations("cluster", rels)
 }
