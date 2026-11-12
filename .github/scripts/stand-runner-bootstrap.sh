@@ -132,7 +132,7 @@ runner_apt_from_cache() {
     printf 'deb [arch=amd64 check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] file:%s %s main universe\n' "$offline" "$suite" >> "$sources" || return 1
   done
   local -a apt=(apt-get -o APT::Update::Error-Mode=any -o APT::Architecture=amd64 -o APT::Architectures=amd64
-    -o Acquire::Languages=none -o Acquire::By-Hash=false -o Acquire::CompressionTypes::Order=uncompressed
+    -o Acquire::Languages=none -o Acquire::By-Hash=false -o Acquire::IndexTargets::deb::Packages::CompressionTypes=uncompressed
     -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false
     -o "Dir::Etc::sourcelist=$sources" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$lists"
     -o "Dir::Cache::archives=$aptdir/archives" -o Binary::apt-get::APT::Keep-Downloaded-Packages=true -o APT::Keep-Downloaded-Packages=true -o APT::Get::List-Cleanup=0)
