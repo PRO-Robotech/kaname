@@ -31,6 +31,88 @@ KEYS = ("gdDelegateSaId", "jwtGDDelegate", "gdGroupDelegateSaId",
         "gduGroupId", "gduGivenReady", "gduAccountAdminRoleId")
 
 
+def prepare_esc_given(http, public, values):
+    """Возвращаем точное Дано H после конечного плана и перезапуска службы."""
+    user, account = values["humanEscUserId"], values["humanEscAccountId"]
+    human, admin = values["jwtHumanEscStepUp"], values["jwtHumanAidAdmSharedStepUp"]
+    for token, subject, system_admin in (
+            (human, user, False), (admin, values["humanAidAdmSharedUserId"], True)):
+        code, me = http.json_ask(public + "/iam/v1/me", token=token)
+        if (code != 200 or me.get("subject") != "user:" + subject
+                or bool(me.get("systemAdmin")) != system_admin):
+            raise own.Finding("Esc: личность и полномочия производителя не подтверждены")
+
+    def owner_unchanged():
+        code, row = http.json_ask(public + "/iam/v1/accounts/" + account, token=admin)
+        if code != 200 or row.get("id") != account or row.get("ownerUserId") != user:
+            raise own.Finding("Esc: личный аккаунт не совпал с сохранённым посевом")
+
+    def bindings():
+        code, row = http.json_ask(public + "/iam/v1/accessBindings:listBySubject"
+            + "?subjectType=user&subjectId=" + user + "&pageSize=1000", token=human)
+        if (code != 200 or not isinstance(row.get("accessBindings"), list)
+                or row.get("nextPageToken") or row.get("incompleteMembershipGroupIds")):
+            raise own.Finding("Esc: полный список выдач не прочитан")
+        return row["accessBindings"]
+
+    owner_unchanged()
+    initial = bindings()
+    if initial:
+        # Разрешена только штатная owner-выдача, восстановленная при старте.
+        # Чужую выдачу или новый источник прав нельзя прятать общей уборкой.
+        role = "rol" + hashlib.md5(b"owner", usedforsecurity=False).hexdigest()[:17]
+        if len(initial) != 1:
+            raise own.Finding("Esc: после перезапуска найдены неожиданные выдачи")
+        binding = initial[0]
+        if (not binding.get("id") or binding.get("subjectType") != "user"
+                or binding.get("subjectId") != user
+                or binding.get("subjects") != [{"type": "SUBJECT_TYPE_USER", "id": user}]
+                or binding.get("roleId") != role or binding.get("scopeType") != "iam.account"
+                or binding.get("scopeId") != account or binding.get("status") != "ACTIVE"
+                or binding.get("grantedByUserId") != "system"
+                or binding.get("deletionProtection") is not True
+                or binding.get("target") != {"allInScope": {}}
+                or binding.get("delegationId") or binding.get("expiresAt")
+                or binding.get("revokedAt")):
+            raise own.Finding("Esc: строка не является восстановленной owner-выдачей посева")
+        path = public + "/iam/v1/accessBindings/" + binding["id"]
+        code, operation = http.json_ask(path, method="PATCH", token=human,
+            body={"updateMask": "deletionProtection", "deletionProtection": False})
+        if code != 200 or not operation.get("id"):
+            raise own.Finding("Esc: владелец не снял защиту своей выдачи")
+        own.await_operation(http, public, human, operation["id"])
+        response = own.post_operation(http, public, admin,
+            "/iam/v1/accessBindings/" + binding["id"] + ":revoke", {}, "Esc повторное Дано")
+        code, retained = http.json_ask(path, token=admin)
+        if (response.get("id") != binding["id"] or response.get("status") != "REVOKED"
+                or code != 200 or retained.get("id") != binding["id"]
+                or retained.get("status") != "REVOKED" or not retained.get("revokedAt")):
+            raise own.Finding("Esc: отзыв не сохранил ту же отозванную строку")
+        # Сохранённое поле владельца не подменяет действующую выдачу прав.
+        for kind, resource_id, relations in (
+                ("account", account, ("owner", "admin", "v_get", "v_update", "v_delete")),
+                ("iam_access_binding", binding["id"], ("v_get", "v_delete"))):
+            for relation in relations:
+                code, decision = http.json_ask(public + "/iam/v1/authorize:check",
+                    method="POST", token=admin, body={"subject": "user:" + user,
+                        "resource": {"type": kind, "id": resource_id},
+                        "action": "iam.accounts.get" if kind == "account" else "iam.accessBindings.get",
+                        "requiredRelation": relation})
+                if code != 200 or decision.get("allowed") is not False:
+                    raise own.Finding("Esc: отозванная выдача сохранила право " + relation)
+        code, operation = http.json_ask(path, method="DELETE", token=admin)
+        if code != 200 or not operation.get("id"):
+            raise own.Finding("Esc: жёсткое удаление отозванной выдачи отказало")
+        own.await_operation(http, public, admin, operation["id"])
+        code, missing = http.json_ask(path, token=admin)
+        if (code, missing.get("code")) not in ((403, 7), (404, 5)):
+            raise own.Finding("Esc: удалённая выдача всё ещё читается")
+    owner_unchanged()
+    if bindings() != []:
+        raise own.Finding("Esc: полное Дано после перезапуска не пусто")
+    print("Esc: после конечного плана полный ListBySubject пуст; личный аккаунт сохранён")
+
+
 def run(args):
     os.umask(0o077)
     env_file = Path(args.env_file)
@@ -45,7 +127,7 @@ def run(args):
         raise own.Unmet("delegation producer requires a fresh own-stand environment")
     # Реальные люди создаются предшествующей штатной ceremony-полосой.
     for key in ("jwtHumanCeremony", "jwtHumanCeremonyStepUp", "ceremonyUserId",
-                "ceremonyAccountId", "jwtHumanEscStepUp", "humanEscUserId",
+                "ceremonyAccountId", "jwtHumanEscStepUp", "humanEscUserId", "humanEscAccountId",
                 "jwtHumanAidAdmSharedStepUp", "humanAidAdmSharedUserId"):
         required(key)
     public = required("ownRestBaseUrl")
@@ -56,6 +138,8 @@ def run(args):
     required("gdRegistryId")
     required("gdRegistryProjectId")
     http = own.Http(Path(args.pki))
+    # Ceremony нужна плану registry; пустое Дано H восстанавливается после его restart.
+    prepare_esc_given(http, public, values)
     admin_a = required("jwtAccountAdminAStepUp")
     admin_b = required("jwtAccountAdminB")
     roles = []
