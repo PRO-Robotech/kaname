@@ -12,6 +12,144 @@ runner_provider_command() {
   [ "$rc" = 0 ] && [ "$log_rc" = 0 ]
 }
 
+
+# Кэш не является источником доверия: InRelease закреплён суммой workflow,
+# а APT повторно проверяет подпись и хэши Packages из локального зеркала.
+runner_apt_cache_key() {
+  printf '%s\0' 'apt-cache-v1' "$KANAME_RUNNER_OS" "$KANAME_RUNNER_SNAPSHOT" "$KANAME_RUNNER_APT" "$KANAME_RUNNER_RELEASES" | sha256sum | cut -d' ' -f1
+}
+
+# Восстановленный архив содержит только данные. Root никогда не использует его
+# каталоги как рабочие пути APT и не следует его ссылкам.
+runner_apt_import_cache() {
+  local cache="$1" aptdir="$2" file directory
+  [ -d "$cache" ] && [ ! -L "$cache" ] || return 1
+  for directory in lists archives; do
+    [ -d "$cache/$directory" ] && [ ! -L "$cache/$directory" ] || return 1
+  done
+  [ -f "$cache/verified-cache" ] && [ ! -L "$cache/verified-cache" ] && [ "$(stat -c %h "$cache/verified-cache")" = 1 ] || return 1
+  cp -- "$cache/verified-cache" "$aptdir/verified-cache" || return 1
+  for directory in lists archives; do
+    for file in "$cache/$directory/"*; do
+      [ -e "$file" ] || continue
+      [ -f "$file" ] && [ ! -L "$file" ] && [ "$(stat -c %h "$file")" = 1 ] || return 1
+      case "$directory/${file##*/}" in
+        lists/*_InRelease|lists/*_binary-amd64_Packages|lists/*_binary-amd64_Packages.lz4|lists/*_binary-amd64_Packages.xz|archives/*.deb) ;;
+        *) return 1;;
+      esac
+      cp -- "$file" "$aptdir/$directory/${file##*/}" || return 1
+    done
+  done
+}
+
+runner_apt_archive_hashes() {
+  local work="$1" aptdir="$2" file name wanted="$1/apt-archives.wanted" checks="$1/apt-archives.sha256"
+  : > "$wanted" || return 1
+  for file in "$aptdir/archives/"*.deb; do
+    [ -e "$file" ] || continue
+    name="${file##*/}"
+    [[ "$name" =~ ^[a-z0-9][a-z0-9+.-]*_[a-zA-Z0-9%:~+.-]+_(amd64|all)\.deb$ ]] && [ -f "$file" ] && [ ! -L "$file" ] || return 1
+    printf '%s\n' "$name" >> "$wanted" || return 1
+  done
+  [ -s "$wanted" ] || return 0
+  # Packages здесь уже удостоверены signed file-only apt update. Сверяем САМИ
+  # байты deb, не полагаясь на доверие APT к собственному root-owned archive cache.
+  awk -v wanted="$wanted" '
+    BEGIN { while ((getline n < wanted)>0) { k=n; gsub(/%3A/,"%3a",k); gsub(/:/,"%3a",k); if (k in names) bad=1; names[k]=n }; close(wanted); RS=""; FS="\n" }
+    { package=version=arch=sha="";
+      for (i=1;i<=NF;i++) {
+        if ($i ~ /^Package: /) package=substr($i,10);
+        else if ($i ~ /^Version: /) version=substr($i,10);
+        else if ($i ~ /^Architecture: /) arch=substr($i,15);
+        else if ($i ~ /^SHA256: /) sha=substr($i,9);
+      }
+      gsub(/:/,"%3a",version); key=package "_" version "_" arch ".deb";
+      if (key in names) {
+        if (sha !~ /^[a-f0-9]+$/ || length(sha)!=64 || ((key in hashes) && hashes[key]!=sha)) bad=1;
+        hashes[key]=sha
+      }
+    }
+    END { for (key in names) { if (!(key in hashes)) bad=1; else print hashes[key] "  " names[key] }; if (bad) exit 1 }
+  ' "$work/apt-offline/dists/"*/main/binary-amd64/Packages "$work/apt-offline/dists/"*/universe/binary-amd64/Packages > "$checks" || return 1
+  (cd "$aptdir/archives" && sha256sum --strict --check "$checks") || return 1
+}
+
+runner_apt_export_cache() {
+  local work="$1" aptdir="$2" cache="$1/apt-cache" next="$1/apt-cache.next" file directory
+  rm -rf -- "$next" || return 1
+  mkdir -m 0755 -p "$next/lists" "$next/archives" || return 1
+  cp -- "$aptdir/verified-cache" "$next/verified-cache" || return 1
+  for directory in lists archives; do
+    for file in "$aptdir/$directory/"*; do
+      [ -f "$file" ] && [ ! -L "$file" ] || continue
+      case "$directory/${file##*/}" in
+        lists/*_InRelease|lists/*_binary-amd64_Packages|lists/*_binary-amd64_Packages.lz4|lists/*_binary-amd64_Packages.xz|archives/*.deb)
+          cp -- "$file" "$next/$directory/${file##*/}" || return 1;;
+      esac
+    done
+  done
+  # locks/partial/CA state не публикуются; обычный UID cache action читает всё.
+  chmod 0644 "$next/verified-cache" "$next/lists/"* || return 1
+  for file in "$next/archives/"*.deb; do [ ! -e "$file" ] || chmod 0644 "$file" || return 1; done
+  rm -rf -- "$cache" || return 1
+  mv -- "$next" "$cache" || return 1
+}
+
+runner_apt_cached_snapshot() {
+  local work="$1" aptdir="$2" prefix suite sum extra component input offline="$1/apt-offline" count=0
+  local -A seen=()
+  prefix="${KANAME_RUNNER_SNAPSHOT#https://}"; prefix="${prefix//\//_}"
+  rm -rf -- "$offline" || return 1
+  mkdir -p "$offline/dists" || return 1
+  while read -r sum suite extra; do
+    [ -n "$sum$suite$extra" ] || continue
+    [[ "$sum" =~ ^[a-f0-9]{64}$ && "$suite" =~ ^noble(-updates|-security)?$ && -z "$extra" && -z "${seen[$suite]:-}" ]] || return 1
+    seen[$suite]=1; count=$((count+1))
+    input="$aptdir/lists/${prefix}dists_${suite}_InRelease"
+    [ -f "$input" ] && [ ! -L "$input" ] || return 1
+    printf '%s  %s\n' "$sum" "$input" | sha256sum --check --status || return 1
+    mkdir -p "$offline/dists/$suite" || return 1
+    cp -- "$input" "$offline/dists/$suite/InRelease" || return 1
+    for component in main universe; do
+      local -a indices=("$aptdir/lists/${prefix}dists_${suite}_${component}_binary-amd64_Packages"*)
+      [ "${#indices[@]}" = 1 ] && [ -f "${indices[0]}" ] && [ ! -L "${indices[0]}" ] || return 1
+      mkdir -p "$offline/dists/$suite/$component/binary-amd64" || return 1
+      /usr/lib/apt/apt-helper cat-file "${indices[0]}" > "$offline/dists/$suite/$component/binary-amd64/Packages" || return 1
+    done
+  done <<< "$KANAME_RUNNER_RELEASES"
+  [ "$count" = 3 ] && [ -n "${seen[noble]:-}" ] && [ -n "${seen[noble-updates]:-}" ] && [ -n "${seen[noble-security]:-}" ]
+}
+
+runner_apt_from_cache() {
+  local work="$1" aptdir="$2" key="$3"; shift 3
+  [ -f "$aptdir/verified-cache" ] && [ ! -L "$aptdir/verified-cache" ] && [ "$(cat "$aptdir/verified-cache")" = "$key" ] || return 1
+  runner_apt_cached_snapshot "$work" "$aptdir" || return 1
+  local offline="$work/apt-offline" lists="$work/apt-offline-lists" sources="$work/apt-offline.sources.list" suite
+  rm -rf -- "$lists" || return 1
+  mkdir -p "$lists/partial" || return 1
+  : > "$sources" || return 1
+  for suite in noble noble-updates noble-security; do
+    printf 'deb [arch=amd64 check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] file:%s %s main universe\n' "$offline" "$suite" >> "$sources" || return 1
+  done
+  local -a apt=(apt-get -o APT::Update::Error-Mode=any -o APT::Architecture=amd64 -o APT::Architectures=amd64
+    -o Acquire::Languages=none -o Acquire::By-Hash=false -o Acquire::CompressionTypes::Order::=uncompressed
+    -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false
+    -o "Dir::Etc::sourcelist=$sources" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$lists"
+    -o "Dir::Cache::archives=$aptdir/archives" -o Binary::apt-get::APT::Keep-Downloaded-Packages=true -o APT::Keep-Downloaded-Packages=true -o APT::Get::List-Cleanup=0)
+  runner_provider_command "$work/out/step-provider-install.log" cached-signed-index 60 "${apt[@]}" update -q || return 1
+  runner_apt_archive_hashes "$work" "$aptdir" || return 1
+  # --no-download вместе с --download-only может вернуть 0 при недостающем deb.
+  # Просим APT только перечислить загрузки: непустой список означает cache miss,
+  # до dpkg и без попытки получить пакет из сети или локального зеркала.
+  local closure_log="$work/out/step-provider-closure.log" line
+  : > "$closure_log" || return 1
+  runner_provider_command "$closure_log" cached-closure 60 "${apt[@]}" install --print-uris --download-only -y -q --no-install-recommends --allow-downgrades --no-remove "$@" || return 1
+  while IFS= read -r line; do [[ "$line" != \'* ]] || return 1; done < "$closure_log"
+  # Ошибка самой установки не становится cache miss и не маскируется повтором.
+  runner_provider_command "$work/out/step-provider-install.log" cached-exact-install 300 "${apt[@]}" install --no-download -y -q --no-install-recommends --allow-downgrades --no-remove "$@" || return 2
+  printf 'RUNNER-PROVIDER apt cache=verified-offline\n'
+}
+
 runner_bootstrap() {
   local root="$1" work="$2" mode="${3:-all}" aptdir cadir package spec url file sum arch nodearch
   [ "$(uname -m)" = x86_64 ] || { echo 'runner provider: only verified amd64 is supported' >&2; return 125; }
@@ -20,49 +158,61 @@ runner_bootstrap() {
   mkdir -p "$work" "$work/out" || return 125
   export KANAME_RUNNER_WORK="$work" DEBIAN_FRONTEND=noninteractive
   if [ "$(id -u)" != 0 ]; then
-    sudo --preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT \
+    sudo --preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT,KANAME_RUNNER_RELEASES \
       bash -c '. "$1"; runner_bootstrap "$2" "$3" apt-only' bootstrap "$root/.github/scripts/stand-runner-bootstrap.sh" "$root" "$work" || return 125
     [ "$mode" != apt-only ] || return 0
     mode=portable
   fi
   if [ "$mode" != portable ]; then
-  # CNF нужен только подсказке command-not-found; Packages и подписи проверяются как прежде.
-  # Отключаем этот необязательный индекс только у команд изолированного поставщика, без изменения настроек хоста.
   aptdir="$work/apt-provider"
+  rm -rf -- "$aptdir" || return 125
   mkdir -p "$aptdir/lists/partial" "$aptdir/archives/partial" || return 125
-  printf 'deb [check-valid-until=no] %s noble main universe\ndeb [check-valid-until=no] %s noble-updates main universe\ndeb [check-valid-until=no] %s noble-security main universe\n' \
-    "$KANAME_RUNNER_SNAPSHOT" "$KANAME_RUNNER_SNAPSHOT" "$KANAME_RUNNER_SNAPSHOT" > "$aptdir/sources.list"
-  # Штатный образ содержит связку ключей архива Ubuntu, но не набор доверенных CA TLS.
-  # Начальное доверие транспорта берём только из подписанного Ubuntu main, с изолированными списками
-  # и архивами, чтобы штатные источники образа не расширили это предварительное обновление.
-  if [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
-    cadir="$aptdir/ca-bootstrap"
-    mkdir -p "$cadir/lists/partial" "$cadir/archives/partial" || return 125
-    printf 'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu noble main\ndeb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu noble-updates main\ndeb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://security.ubuntu.com/ubuntu noble-security main\n' > "$cadir/sources.list" || return 125
-    local -a caapt=(apt-get -o APT::Update::Error-Mode=any -o Acquire::Languages=none -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=0
-      -o "Dir::Etc::sourcelist=$cadir/sources.list" -o Dir::Etc::sourceparts=-
-      -o "Dir::State::lists=$cadir/lists" -o "Dir::Cache::archives=$cadir/archives" -o APT::Get::List-Cleanup=0)
-    runner_provider_command "$work/out/step-provider-install.log" ca-index 60 \
-      "${caapt[@]}" update -q &&
-    runner_provider_command "$work/out/step-provider-install.log" ca-install 60 \
-      "${caapt[@]}" install -y -q --no-install-recommends --no-remove ca-certificates || return 125
-  fi
-  local -a apt=(apt-get -o APT::Update::Error-Mode=any -o Acquire::Languages=none -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 -o "Dir::Etc::sourcelist=$aptdir/sources.list" -o Dir::Etc::sourceparts=-
-    -o "Dir::State::lists=$aptdir/lists" -o "Dir::Cache::archives=$aptdir/archives" -o APT::Get::List-Cleanup=0)
-  export DEBIAN_FRONTEND=noninteractive
-  runner_provider_command "$work/out/step-provider-install.log" snapshot-index 420 "${apt[@]}" update -q || return 125
+  runner_apt_import_cache "$work/apt-cache" "$aptdir" || true
   local -a packages=()
   for spec in $KANAME_RUNNER_APT; do
     [[ "$spec" =~ ^[a-z0-9.+-]+=[a-zA-Z0-9:~.+-]+$ ]] || return 125
     packages+=("$spec")
   done
   [ "${#packages[@]}" -gt 0 ] || return 125
-  runner_provider_command "$work/out/step-provider-install.log" exact-install 300 "${apt[@]}" install -y -q --no-install-recommends --allow-downgrades --no-remove \
-    "${packages[@]}" ca-certificates curl tar gzip xz-utils procps python3-venv python3-cryptography || return 125
+  local -a closure=("${packages[@]}" ca-certificates curl tar gzip xz-utils procps python3-venv python3-cryptography)
+  local cache_rc=0 cache_key
+  cache_key="$(runner_apt_cache_key)" || return 125
+  runner_apt_from_cache "$work" "$aptdir" "$cache_key" "${closure[@]}" || cache_rc=$?
+  [ "$cache_rc" != 2 ] || return 125
+  if [ "$cache_rc" != 0 ]; then
+    printf 'RUNNER-PROVIDER apt cache=miss-or-invalid; signed snapshot required\n'
+    # Холодный путь не наследует ни одного байта отвергнутого кэша.
+    rm -rf -- "$aptdir" || return 125
+    mkdir -p "$aptdir/lists/partial" "$aptdir/archives/partial" || return 125
+    # Без валидного кэша начальное доверие TLS ставится из подписанного Ubuntu main.
+    if [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then
+      cadir="$aptdir/ca-bootstrap"
+      mkdir -p "$cadir/lists/partial" "$cadir/archives/partial" || return 125
+      printf 'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu noble main\ndeb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu noble-updates main\ndeb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://security.ubuntu.com/ubuntu noble-security main\n' > "$cadir/sources.list" || return 125
+      local -a caapt=(apt-get -o APT::Update::Error-Mode=any -o Acquire::Languages=none -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=0
+        -o "Dir::Etc::sourcelist=$cadir/sources.list" -o Dir::Etc::sourceparts=-
+        -o "Dir::State::lists=$cadir/lists" -o "Dir::Cache::archives=$cadir/archives" -o APT::Get::List-Cleanup=0)
+      runner_provider_command "$work/out/step-provider-install.log" ca-index 60 "${caapt[@]}" update -q &&
+      runner_provider_command "$work/out/step-provider-install.log" ca-install 60 "${caapt[@]}" install -y -q --no-install-recommends --no-remove ca-certificates || return 125
+    fi
+    : > "$aptdir/sources.list" || return 125
+    for suite in noble noble-updates noble-security; do
+      printf 'deb [arch=amd64 check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] %s %s main universe\n' "$KANAME_RUNNER_SNAPSHOT" "$suite" >> "$aptdir/sources.list" || return 125
+    done
+    local -a apt=(apt-get -o APT::Update::Error-Mode=any -o APT::Architecture=amd64 -o APT::Architectures=amd64
+      -o Acquire::Languages=none -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2
+      -o "Dir::Etc::sourcelist=$aptdir/sources.list" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$aptdir/lists"
+      -o "Dir::Cache::archives=$aptdir/archives" -o Binary::apt-get::APT::Keep-Downloaded-Packages=true -o APT::Keep-Downloaded-Packages=true -o APT::Get::List-Cleanup=0)
+    runner_provider_command "$work/out/step-provider-install.log" snapshot-index 420 "${apt[@]}" update -q || return 125
+    runner_apt_cached_snapshot "$work" "$aptdir" || return 125
+    runner_provider_command "$work/out/step-provider-install.log" exact-install 300 "${apt[@]}" install -y -q --no-install-recommends --allow-downgrades --no-remove "${closure[@]}" || return 125
+  fi
   for spec in "${packages[@]}"; do
     package="${spec%%=*}"
     [ "$(dpkg-query -W -f='${Version}' "$package")" = "${spec#*=}" ] || return 125
   done
+  printf '%s\n' "$cache_key" > "$aptdir/verified-cache" || return 125
+  runner_apt_export_cache "$work" "$aptdir" || printf '::warning::проверенные инструменты установлены, но APT-кэш не опубликован\n'
   printf 'RUNNER-PROVIDER apt exact closure verified snapshot=%s packages=%s\n' "$KANAME_RUNNER_SNAPSHOT" "${#packages[@]}"
   [ "$mode" != apt-only ] || return 0
   fi

@@ -174,6 +174,11 @@ class World:
                     shutil.copyfile(file, self.work / "ship" / file.name)
         self.provider = {k: str(v) for k, v in yaml.safe_load((source_root / ".github/workflows/e2e-newman.yml").read_text())["env"].items()}
         self.env = dict(os.environ)
+        # Подписывающий APT-peer моделируется отдельно; здесь фиксируем его точные
+        # байты индекса, чтобы проверка immutable source не становилась обходом.
+        self.provider["KANAME_RUNNER_RELEASES"] = "\n".join(
+            hashlib.sha256(("fixture-release:" + suite + "\n").encode()).hexdigest() + " " + suite
+            for suite in ("noble", "noble-updates", "noble-security"))
         self.env.update(self.provider)
         self.env["KANAME_RUNNER_GO"] = declarations(source_root)[0]["go"][0]
         self.env["FIXTURE_NPM"] = self.provider["KANAME_RUNNER_NPM"]
@@ -220,7 +225,7 @@ class World:
         executable(self.bin / "sudo", '''#!/usr/bin/env python3
 import json,os,pathlib,sys
 args=sys.argv[1:]
-assert args[0] == '--preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT'
+assert args[0] == '--preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT,KANAME_RUNNER_RELEASES'
 assert args[1:3] == ['bash','-c']
 with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'sudo-peer.jsonl').open('a') as out: out.write(json.dumps(args)+'\\n')
 os.execvpe('bash',args[1:],dict(os.environ,FIXTURE_UID='0'))
@@ -230,6 +235,15 @@ import json,os,pathlib,sys
 with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'apt-peer.jsonl').open('a') as out: out.write(json.dumps({'peer':str(pathlib.Path(__file__).resolve()),'uid':os.environ['FIXTURE_UID'],'argv':sys.argv[1:]})+'\\n')
 if os.environ.get('FIXTURE_APT_FAIL'):
  print('controlled apt peer failure',file=sys.stderr);sys.exit(23)
+if 'update' in sys.argv:
+ options=[sys.argv[i+1] for i,a in enumerate(sys.argv[:-1]) if a=='-o']
+ lists=pathlib.Path(next(v.split('=',1)[1] for v in options if v.startswith('Dir::State::lists=')))
+ prefix=os.environ['KANAME_RUNNER_SNAPSHOT'].removeprefix('https://').replace('/','_')
+ for suite in ('noble','noble-updates','noble-security'):
+  (lists/(prefix+'dists_'+suite+'_InRelease')).write_text('fixture-release:'+suite+'\\n')
+  for component in ('main','universe'):
+   (lists/(prefix+'dists_'+suite+'_'+component+'_binary-amd64_Packages')).write_text('')
+
 ''')
         # Устаревший запасной файл остаётся: допустимый bootstrap должен выбрать своего
         # точного поставщика, не удаляя и не принимая этот старый исполняемый файл.
