@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Приёмка: выдача роли ограничена полным выдаваемым эффектом
 
-- **Статическая форма:** DRAFT, редакция 1 от 2026-11-12. Полный контракт этой редакции ещё не получил одобрения по отпечатку. Слово DRAFT после ревью не меняется; действующий вердикт выводится из отдельной записи и события ревью.
+- **Статическая форма:** DRAFT, редакция 2 от 2026-11-12. Полный контракт этой редакции ещё не получил одобрения по отпечатку. Слово DRAFT после ревью не меняется; действующий вердикт выводится из отдельной записи и события ревью.
 - **Задачи:** Kaname #1034, #1035; взаимодействие с поставленными узкими исправлениями #1036/#1037/#1039 и с общими доверенностями #986/#1032.
 - **Область:** Kaname и общие доверенности. Kachō, Terraform, Registry-потребитель и svc-registry не участвуют.
 - **Предыдущая приёмка:** `role-rights-stay-within-what-is-named.md`, r4, SHA-256 `3131d7ddfffa9b66857b94c70138b6ebfe7bdb77c7ca07f5333db88aefaae690` покрывает прежний узкий срез. Её одобрение не переносится на полный bind/escalate, Role.Create и этот документ.
@@ -271,3 +271,158 @@ commit. Sleeps, поддельный authorizer и чтение на отдел�
 5. Полного обычного хука публикации, канонического CI на точном SHA, слияния,
    успешного CI ветки main и собственного DoD каждой дочерней задачи. Локальный
    компонент, его unit tests или наличие PR этот результат не заменяют.
+
+## 8. Выбранный протокол реализации, редакция 2
+
+ROOT выбрал следующее направление после архитектурного SOURCE-разбора
+2026-11-12. Это конкретизация проектируемой реализации, **не одобрение полного
+отпечатка приёмки и не утверждение об исполнении проб**. До включения публичных
+дверей нужны полный review, фактическая реализация и проверки §7.
+
+### 8.1. Явные управляющие источники
+
+`SplitGrantCapabilityRules` распознаёт только авторские пары
+`iam/accessBinding/create` и `iam/role/bind`. Остаток смешанного правила сохраняет
+все остальные клетки `resources × verbs`. `*` не раскрывается в meta-право.
+Общий `Rules.Validate` и проверка каталога обязательны отдельно. Отпечаток
+meta-проекции относится к исходному авторскому правилу; отпечаток остаточного
+leaf-селектора вычисляется последовательно по этому остатку, без поиска нового
+отпечатка в старом raw JSON.
+
+Проекции: `role_create_binding_rule(role_id,rule_fp)` и
+`role_bind_role_rule(role_id,rule_fp,bound_role_id)`. У второй два самостоятельных
+FK: владелец правила и названная роль. Они ссылаются на настоящие `roles`, включая
+system/module роли, без требования регистрации ID в `resource_mirror`.
+Замена проекций идёт в одной транзакции с ролью, selectors/verbs/refs.
+
+Ссылка разрешается после обычной authority метода на том же writer: сначала
+действующий tenant/Get visibility contract, затем lifecycle и существование
+хотя бы одного законного anchor для обеих ролей. Невидимая и отсутствующая роль
+дают одинаковый непрозрачный отказ; сырой FK не раскрывает существование ID.
+Account definition допускает project role своего account, которую можно выдать
+в соответствующем project. Assignability в home-anchor не подменяет эту проверку.
+При выдаче carrier named role дополнительно проверяется на фактическом anchor.
+Снятая/удалённая ссылка не изображается активной в preview.
+
+В модели объявляются внутренние виртуальные координаты
+`iam_grant_scope#create_binding` и `iam_grant_role#bind`. Они адресуют точный
+anchor и, для bind, roleID; parent/cascade отсутствуют. Codec однозначен,
+версионирован и проверяет канонический round-trip. Нового публичного ресурса
+или RPC нет. Вопрос проходит через `TransactionRelationChecker(pinnedPlans)`,
+тот же допуск личности и настоящий native `relverdict`, со специализацией
+source-backed arm для этих объявленных отношений.
+
+Источник arm — текущая meta-проекция, live роли, ACTIVE carrier, весь набор его
+субъектов/актуальное членство, whole-scope shape, версия carrier и срок на
+`decision_at`. Отдельный вечный tuple не создаётся. Две выдачи сохраняют два
+независимых источника: отзыв одной не снимает право от другой.
+
+### 8.2. Полнота обычных и административных эффектов
+
+`RoleEffectCompiler` переиспользует реальные catalogue selectors/verbs и
+выделенные общие primitives нынешнего tuple producer: leaf, tier, scope-self,
+container action и creator restriction. Нынешний reconciler и новый normalizer
+потребляют один смысл. Reverse mapping опирается на admitted `Plans`, а не на
+самодельный порядок строк verbs. Для non-verb отношений нужна source-backed
+проекция с rule/source origin и checkpoint её rules/catalog/projector inputs;
+задержавшийся materialized tuple без живого источника не обходит её.
+
+Помимо ResourceUse и двух explicit meta kinds эффект включает
+`ScopeAdmin(scope,conditions)`: способность будущей произвольной выдачи не
+покрывается конечным списком нынешних roleID. Такой proposed primitive требует
+соответствующего usable source-backed административного источника actor либо
+остаётся недоказанным; wildcard leaf сам по себе его не создаёт. Независимая
+D2-ветка назначения конкретной admin-role сохраняется. Bind не разрешает
+расширение правил роли.
+
+Region сохраняет пересечение leaf IDs/all, equality labels, typed creator,
+scope и typed ancestor/path ограничений. Alternatives образуют union. Children
+сохраняют ограничения родительского контейнера и будущих потомков; сегодняшние
+parent links и inventory не объявляются вечным включением. Conditions остаются
+символическими именованными предикатами с параметрами; успешное MFA сейчас не
+стирает условие. Все текущие поддерживаемые классы из §6 требуют положительного
+производственного примера; неизвестный компонент не удаляется из результата.
+
+Actor-source — реально usable ACTIVE и неистёкшие источники. Population для
+Role.Update/AddMember включает также неотозванные PENDING выдачи, способные
+активироваться: иначе последующая активация выпустит непроверенный эффект.
+Необратимо истёкшая выдача не даёт источник и не требует будущего эффекта.
+Empty group не превращает unconditional group-held grant в пустое предложение;
+следующий AddMember защищён отдельно. Proposed rules и добавляемое membership
+не участвуют в оправдании собственной мутации.
+
+### 8.3. Единый порядок writer
+
+Входной порт writer принимает intent account/global, полный набор accountID,
+immutable semantic bundle и kind операции. Он приобретает барьеры до возврата
+доступного writer и до прежних row/advisory locks:
+
+1. Общий cluster key: shared для account-операций, exclusive для global.
+2. Все account keys exclusive в одном порядке физических ключей, с удалением
+   совпадений; отдельный two-int namespace не пересекается с legacy bigint keys.
+3. Проверка protocol/bundle, свежая перепроверка discovered ownership. Изменение
+   classification означает rollback/restart, без повышения shared до exclusive.
+4. DB `clock_timestamp()` после ожидания барьеров задаёт единый `decision_at`.
+   Native authority, source expiry и normalizer используют его, не `now()` начала
+   транзакции. Это момент решения, без нового TTL-контракта выдачи.
+5. Прежние внутренние замки, полный census/decision и атомарная запись
+   mutation/projections/subjects/ledger/outbox/audit на том же writer.
+
+Используется READ COMMITTED с полным участием писателей. SERIALIZABLE только у
+трёх gates при остальных RC writers не является заменой этого протокола.
+Bounded retry пересчитывает authority с новым чтением; исчерпание — Aborted.
+Post-commit reconcile открывает свою транзакцию после освобождения первой.
+Сетевых вызовов, ожидания async effect и полного inventory materialization под
+writer fence нет.
+
+Участники: все Binding/Role/Group writers, expiry/reconcile/activation,
+member/identity/admission lifecycle, приглашение с необязательной выдачей,
+GrantDelegation, cluster-admin, catalog/module roles/seed/registration writers,
+resource parents/mirror/withdrawal и их folded relation facts. Catalog/model,
+system/module roles, cluster admin и глобальные изменения личности используют
+global режим. Обычные изменения account используют его partition; неоднозначный
+или межаккаунтный ownership требует полного набора либо global режима до замков.
+
+DB backstop **проверяет** уже полученное transaction attestation, версию и
+реально удерживаемые барьеры; одного свободно установленного GUC недостаточно.
+BEFORE STATEMENT проверяет вход/версию; отдельный BEFORE ROW проверяет OLD/NEW
+anchor coverage. Он не получает новый fence и не расширяет account set после
+row locks. TRUNCATE допускается только в global режиме. Неучаствующий старый/raw
+writer откатывается; отдельная проверка каждого adapter нужна и для
+совместимости, поскольку громкий отказ сам по себе не доказывает работоспособность.
+
+Разные accounts сохраняют параллелизм. Сериализация внутри account и короткая
+global задержка имеют цену: обязательны измерения contention, независимости
+accounts, reconcile/registration throughput и локальности native чтений.
+Ухудшение сверх действующих бюджетов требует исправления протокола, не снятия
+барьеров.
+
+### 8.4. Bundle и безопасное включение
+
+Один immutable bundle содержит Plans, Facts, digest composed/admitted model,
+канонический digest семантических catalog rows и projector version. Вход сверяет
+его с active DB identity; несовпадение или устаревший Facts не разрешает mutation.
+Role projection checkpoint учитывает свои relevant inputs, не случайный порядок
+строк и не нерелевантное изменение чужого модуля.
+
+Аддитивная миграция добавляет `grant_capability_version` carrier с default 0.
+Исторические carrier и прежний inert `iam.accessBinding.create` **не получают**
+новую authority при backfill. Их обычные leaf-эффекты сохраняются; D3 выводится
+из собственных живых источников независимо от этого флага.
+
+Новый Create после полного D1 с meta-effect пишет version 1. Role.Update rules
+может поднять существующие whole-scope carrier до 1 в той же транзакции только
+после полного proposed-meta coverage/admin и проверки всех затронутых shape.
+Metadata-only и фоновый regrain ничего не активируют. Legacy finite carrier
+остаётся leaf-only; rules mutation не может незаметно превратить его в scoped
+управляющее право.
+
+Включение требует сначала всех writer adapters и source/projection provenance,
+затем подтверждённого drain/quiescence старых открытых транзакций и strict
+активации protocol+identity под global барьером. Сам новый advisory fence не
+доказывает исчезновения прежних unfenced транзакций. Старые процессы и queued
+writers после cutover получают DB отказ. Capability producer и три policy gates
+переключаются вместе после полного fingerprint review и проверок §7. Будущая
+смена model/catalog использует закрытую transition phase и активирует только
+целую согласованную identity; произвольная online смена половины модели не
+обещается.
