@@ -461,7 +461,14 @@ def _gdu_ready():
     return [
         "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
         "const missing = needed.filter(k => !pm.environment.get(k));",
-        "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+        "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+        *precondition_not_met(
+            "Дано: собственная GDU-фикстура создана",
+            "Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; "
+            "посев обязан подготовить отдельные S/S2/M/D.",
+            indent="  "),
+        "  return;",
+        "}",
         "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
     ]
 
@@ -541,9 +548,9 @@ def _gdu_snapshot(name, capture=False, delegation=False):
     tests = [*assert_status(200)]
     slot = "gduBefore" if delegation else "gduB0Before"
     if capture:
-        tests.append("pm.environment.set(" + js_str(slot) + ", JSON.stringify(pm.response.json()));")
+        tests.append("pm.environment.set(" + js_str(slot) + ", pm.response.text());")
     else:
-        tests.append("pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get(" + js_str(slot) + "))));")
+        tests.append("pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get(" + js_str(slot) + ")));")
     return Step(name=name, method="GET",
         path="/iam/v1/grantDelegations/{{gduId}}" if delegation else "/iam/v1/accessBindings/{{gduB0}}",
         auth=_GDU_U, test_script=tests)
@@ -572,7 +579,7 @@ def _gdu_readback(name, response="gduResponse", creator="ceremonyUserId"):
             "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get(" + js_str(response) + "))));",
             "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get(" + js_str(creator) + ")}); });",
             "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-            "pm.environment.set('gduCurrent', JSON.stringify(j));"]),
+            "pm.environment.set('gduCurrent', pm.response.text());"]),
         Step(name=name + "-List", method="GET", path="/iam/v1/grantDelegations?accountId={{gduAccountId}}&pageSize=1000", auth=_GDU_U,
             test_script=[*assert_status(200),
                 "const j = pm.response.json();",

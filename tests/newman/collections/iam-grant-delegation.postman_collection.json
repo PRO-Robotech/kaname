@@ -14371,7 +14371,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -15884,7 +15890,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -16633,7 +16639,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -16753,7 +16759,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -17637,7 +17643,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -17961,7 +17967,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -18897,7 +18903,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -20035,7 +20041,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -21548,7 +21560,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -22297,7 +22309,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -22417,7 +22429,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -23301,7 +23313,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -23625,7 +23637,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -24561,7 +24573,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -25699,7 +25711,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -27212,7 +27230,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -27961,7 +27979,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -28081,7 +28099,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -28965,7 +28983,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -29289,7 +29307,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -30225,7 +30243,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -31363,7 +31381,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -32876,7 +32900,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -33625,7 +33649,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -33745,7 +33769,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -34435,7 +34459,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -34759,7 +34783,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -35057,7 +35081,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -35278,7 +35302,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduBefore'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduBefore')));"
                 ]
               }
             }
@@ -35398,7 +35422,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -36180,7 +36204,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -36504,7 +36528,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -37728,7 +37752,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -39241,7 +39271,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -39990,7 +40020,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -40110,7 +40140,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -40399,7 +40429,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -40620,7 +40650,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduBefore'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduBefore')));"
                 ]
               }
             }
@@ -40740,7 +40770,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -41522,7 +41552,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -41846,7 +41876,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -43070,7 +43100,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -44583,7 +44619,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -45332,7 +45368,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -45452,7 +45488,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -45658,7 +45694,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -45880,7 +45916,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduBefore'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduBefore')));"
                 ]
               }
             }
@@ -46000,7 +46036,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -46782,7 +46818,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -47106,7 +47142,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -48329,7 +48365,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -49113,7 +49155,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -50626,7 +50674,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -51375,7 +51423,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -51495,7 +51543,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -52185,7 +52233,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -52509,7 +52557,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -53291,7 +53339,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -53615,7 +53663,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -54397,7 +54445,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -54721,7 +54769,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -55939,7 +55987,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -57452,7 +57506,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('humanEscUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -58201,7 +58255,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -58321,7 +58375,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -59011,7 +59065,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('humanEscUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -59335,7 +59389,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -60117,7 +60171,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('humanEscUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -60441,7 +60495,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -62551,7 +62605,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -64064,7 +64124,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -64813,7 +64873,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -64933,7 +64993,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -65240,7 +65300,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduBefore'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduBefore')));"
                 ]
               }
             }
@@ -65360,7 +65420,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -66142,7 +66202,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -66466,7 +66526,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -67690,7 +67750,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -69203,7 +69269,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -69952,7 +70018,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -70072,7 +70138,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -70371,7 +70437,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduBefore'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduBefore')));"
                 ]
               }
             }
@@ -70491,7 +70557,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -71273,7 +71339,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -71597,7 +71663,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -72821,7 +72887,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -74334,7 +74406,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -75083,7 +75155,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -75203,7 +75275,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -75511,7 +75583,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduBefore'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduBefore')));"
                 ]
               }
             }
@@ -75631,7 +75703,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -76413,7 +76485,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -76737,7 +76809,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -77961,7 +78033,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -79474,7 +79552,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -80223,7 +80301,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -80343,7 +80421,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -80733,7 +80811,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduBefore'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduBefore')));"
                 ]
               }
             }
@@ -80853,7 +80931,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -81635,7 +81713,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -81959,7 +82037,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -83183,7 +83261,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -84696,7 +84780,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -85445,7 +85529,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -85565,7 +85649,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -86255,7 +86339,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -86579,7 +86663,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -86877,7 +86961,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -87481,7 +87565,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -87805,7 +87889,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -88103,7 +88187,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduBefore'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduBefore')));"
                 ]
               }
             }
@@ -89149,7 +89233,13 @@
                   "}",
                   "const needed = ['gduGivenReady','gduAccountId','gduProjectId','gduRegistryId','gduRepositoryId','gduSId','jwtGDUS','gduS2Id','jwtGDUS2','gduMId','jwtGDUM','gduGroupId','gdDelegateSaId','jwtGDDelegate','gdRolePullerId','gdRolePusherId','gdRoleAdminId','gduAccountAdminRoleId','jwtHumanCeremony','jwtHumanCeremonyStepUp','ceremonyUserId','jwtHumanEscStepUp','humanEscUserId','jwtHumanAidAdmSharedStepUp','humanAidAdmSharedUserId'];",
                   "const missing = needed.filter(k => !pm.environment.get(k));",
-                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') { throw new Error('precondition_not_met: GDU own fixture: ' + missing.join(',')); }",
+                  "if (missing.length || pm.environment.get('gduGivenReady') !== 'true') {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] Дано: собственная GDU-фикстура создана', () => {",
+                  "    pm.expect.fail('Не заданы обязательные переменные GDU-фикстуры либо gduGivenReady не равен true; посев обязан подготовить отдельные S/S2/M/D.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "  return;",
+                  "}",
                   "pm.test('Дано: отдельные S/S2/M/D', () => pm.expect(new Set(['gduSId','gduS2Id','gduMId','gdDelegateSaId'].map(k => pm.environment.get(k))).size).to.eql(4));",
                   "(function () {",
                   "  var _u = '';",
@@ -90662,7 +90752,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -91411,7 +91501,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -91531,7 +91621,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -92221,7 +92311,7 @@
                   "pm.test('Get = Operation.response', () => pm.expect(j).to.deep.eql(JSON.parse(pm.environment.get('gduResponse'))));",
                   "pm.test('тот же ID и первоначальный автор', () => { pm.expect(j.id).to.eql(pm.environment.get('gduId')); pm.expect(j.delegatedBy).to.deep.eql({type:'user', id:pm.environment.get('ceremonyUserId')}); });",
                   "pm.test('наборы нормализованы', () => ['roleIds','targetTypes','subjectTypes'].forEach(k => pm.expect(j[k]).to.deep.eql([...j[k]].sort())));",
-                  "pm.environment.set('gduCurrent', JSON.stringify(j));"
+                  "pm.environment.set('gduCurrent', pm.response.text());"
                 ]
               }
             }
@@ -92545,7 +92635,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
@@ -93825,7 +93915,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduBefore', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduBefore', pm.response.text());"
                 ]
               }
             }
@@ -93945,7 +94035,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.environment.set('gduB0Before', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('gduB0Before', pm.response.text());"
                 ]
               }
             }
@@ -94353,7 +94443,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduBefore'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduBefore')));"
                 ]
               }
             }
@@ -94473,7 +94563,7 @@
                   "pm.environment.unset('_authRetryCount');",
                   "pm.environment.unset('_authRetryStarted');",
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.environment.get('gduB0Before'))));"
+                  "pm.test('полный прежний ресурс без изменений', () => pm.expect(pm.response.text()).to.eql(pm.environment.get('gduB0Before')));"
                 ]
               }
             }
