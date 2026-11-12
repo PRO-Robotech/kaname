@@ -39,8 +39,8 @@ func CollectAndCompileBindings(ctx context.Context, w kaname.AuthorityWriter, c 
 	if err != nil {
 		return BindingEffects{}, err
 	}
-	out := BindingEffects{Bindings: make([]CompiledBinding, 0, len(sources))}
-	sets := make([]granteffect.Set, 0, len(sources))
+	out := BindingEffects{}
+	var builder granteffect.UnionBuilder
 	for _, source := range sources {
 		if err := ctx.Err(); err != nil {
 			return BindingEffects{}, err
@@ -73,11 +73,13 @@ func CollectAndCompileBindings(ctx context.Context, w kaname.AuthorityWriter, c 
 				CapabilityVersion: source.CapabilityVersion,
 			})
 		}
+		if err := builder.Add(effects); err != nil {
+			return BindingEffects{}, fmt.Errorf("%w: %w", ErrBindingSourceLimit, err)
+		}
 		out.Bindings = append(out.Bindings, CompiledBinding{Source: source, Effects: effects})
-		sets = append(sets, effects)
 	}
 	// Union сохраняет обязательства каждого носителя. Пустой сбор остаётся
 	// без удостоверенной identity; адаптер не фабрикует Complete/Ready.
-	out.Effects = granteffect.Union(sets...)
+	out.Effects = builder.Build()
 	return out, nil
 }

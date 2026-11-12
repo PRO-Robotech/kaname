@@ -52,6 +52,8 @@ type AuthorityFence interface {
 type AuthorityWriter interface {
 	Writer
 	AuthorityFence() AuthorityFence
+	CanonicalDirectSources(context.Context, CanonicalSourceFilter) ([]CanonicalDirectSource, string, error)
+	CanonicalCreatorSources(context.Context, CanonicalSourceFilter) ([]CanonicalCreatorSource, string, error)
 	// BindingCapabilityVersions читает внутренний признак носителя на этой же
 	// транзакции. Отсутствующий ID не включён в карту; это не версия 0.
 	BindingCapabilityVersions(context.Context, []domain.AccessBindingID) (map[domain.AccessBindingID]int, error)

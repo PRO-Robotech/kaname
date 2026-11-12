@@ -6,7 +6,9 @@ package grantsource
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
@@ -384,5 +386,46 @@ func TestCollectAndCompileBindingsSeedRejectsNonScopeObject(t *testing.T) {
 	out, err := CollectAndCompileBindings(context.Background(), w, bindingEffectCompiler(t), effectSA)
 	if !errors.Is(err, ErrBindingSourceInvalid) || len(out.Bindings) != 0 || len(out.Effects.Effects()) != 0 || out.Effects.Complete() {
 		t.Fatalf("необластной seed принят: %+v %v", out, err)
+	}
+}
+
+// Много допустимых выдач укладываются в сбор строк, но не в общий эффект.
+func TestCollectAndCompileBindingsGlobalBudgetReturnsZero(t *testing.T) {
+	w, base := effectFixture(t, effectSA, []domain.Subject{effectSA}, effectRule(false))
+	total := granteffect.MaxEffects + 1
+	bindings := make([]domain.AccessBinding, total)
+	for i := range bindings {
+		b := base
+		b.ID = domain.AccessBindingID(fmt.Sprintf("budget-%d", i))
+		bindings[i] = b
+		w.versions[b.ID] = 0
+		w.bindings.subjects[b.ID] = []domain.Subject{effectSA}
+	}
+	w.groups.list = func(group.ListFilter) ([]domain.Group, string, error) { return nil, "", nil }
+	w.bindings.list = func(s domain.Subject, f access_binding.PageFilter) ([]domain.AccessBinding, string, error) {
+		if s != effectSA {
+			t.Fatal("чужой получатель")
+		}
+		start := 0
+		if f.PageToken != "" {
+			var err error
+			start, err = strconv.Atoi(f.PageToken)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		end := start + bindingPageSize
+		if end > total {
+			end = total
+		}
+		next := ""
+		if end < total {
+			next = strconv.Itoa(end)
+		}
+		return bindings[start:end], next, nil
+	}
+	got, err := CollectAndCompileBindings(context.Background(), w, bindingEffectCompiler(t), effectSA)
+	if !errors.Is(err, ErrBindingSourceLimit) || !errors.Is(err, granteffect.ErrUnionLimit) || !reflect.DeepEqual(got, BindingEffects{}) {
+		t.Fatalf("общий бюджет оставил результат: %+v %v", got, err)
 	}
 }
