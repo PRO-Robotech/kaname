@@ -39,6 +39,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -191,6 +192,9 @@ func (h *Handler) WithResourceRegistrar(registrar resourceRegistrar, gate relati
 // и обязательную транзакционную проверку владельца каталога; скомпилированный словарь
 // не может разрешать или отвергать динамически доставленный тип.
 func validateProxyTuple(callerDomain, subject, relation, object string) error {
+	if internalGrantReference(subject) || internalGrantReference(object) {
+		return proxyWriteRefusal()
+	}
 	// Словарь владения типом подаётся ЗДЕСЬ: правило живёт в общем фундаменте, а
 	// закрытая таблица типов — за границей его видимости (см. proxy_type_owner.go).
 	// Без него «чей это тип» отвечала бы приставка имени, то есть соглашение об
@@ -206,6 +210,9 @@ func validateProxyTuple(callerDomain, subject, relation, object string) error {
 // нестандартного отношения завершается точной тройкой parents живого каталога;
 // оно не становится глобально разрешённым отношением прокси.
 func validateRegistrationShape(module, subject, relation, object string) error {
+	if internalGrantReference(subject) || internalGrantReference(object) {
+		return proxyWriteRefusal()
+	}
 	if module == "" || strings.ContainsAny(module, "* \t\n") {
 		return proxyWriteRefusal()
 	}
@@ -229,6 +236,13 @@ func validateRegistrationShape(module, subject, relation, object string) error {
 		}
 	}
 	return nil
+}
+
+// internalGrantReference закрывает управляющие координаты для обеих сторон
+// регистрации до каталога и привилегий модуля. Общий фундамент этих типов не знает.
+func internalGrantReference(reference string) bool {
+	typ, _, _ := strings.Cut(reference, ":")
+	return grantcapability.IsInternalObjectType(typ)
 }
 
 func registrationRelationName(name string) bool {

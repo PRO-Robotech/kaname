@@ -68,6 +68,9 @@ func (uc *RegisterResourceUseCase) retireRegistrationPointers(ctx context.Contex
 // namedPointerSubjectType — общий предел формы родителя до чтения каталога
 // и при допуске точного указателя. Проект допустим; принципалы и вершины IAM — нет.
 func namedPointerSubjectType(typ string) bool {
+	if internalGrantReference(typ) {
+		return false
+	}
 	if typ == "project" {
 		return true
 	}
