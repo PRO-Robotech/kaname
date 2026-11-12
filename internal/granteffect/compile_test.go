@@ -648,7 +648,7 @@ func TestRoleReadProjectionCallbackIsNotCompilerInput(t *testing.T) {
 	c := compiler(t)
 	b := binding(box("get"))
 	plain := complete(t, c.Compile(b))
-	b.Role.TypeVerbs = func(string) []string { panic("read projection callback reached compiler") }
+	b.Role.TypeVerbs = func(string, string) ([]string, bool) { panic("read projection callback reached compiler") }
 	withProjection := complete(t, c.Compile(b))
 	if !EqualEffects(plain, withProjection) {
 		t.Fatal("проекция чтения изменила выдаваемый эффект")
