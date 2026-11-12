@@ -44,8 +44,8 @@ type project
     define viewer: [user, service_account, group#member] or editor
 type strange_box
   relations
-    define project: [project]
-    define admin: [user, service_account, group#member] or admin from project
+    define account: [account]
+    define admin: [user, service_account, group#member] or admin from account
     define editor: [user, service_account, group#member] or admin
     define viewer: [user, service_account, group#member] or editor
     define v_get: [user, service_account, group#member] or viewer
@@ -97,7 +97,7 @@ condition fresh(at: timestamp) {
 
 func rows() catalog.Halves {
 	resources := []catalog.ResourceRow{
-		{Module: "probemod", Resource: "boxes", ObjectType: "strange_box", ParentTypes: []string{"project"}, ParentNames: []string{"project"}},
+		{Module: "probemod", Resource: "boxes", ObjectType: "strange_box", ParentTypes: []string{"account"}, ParentNames: []string{"account"}},
 		{Module: "probemod", Resource: "items", ObjectType: "strange_item", ParentTypes: []string{"strange_box"}, ParentNames: []string{"parent"}},
 		{Module: "probemod", Resource: "tags", ObjectType: "strange_tag", ParentTypes: []string{"strange_item"}, ParentNames: []string{"parent"}},
 		{Module: "iam", Resource: "account", ObjectType: "account"},
@@ -640,5 +640,40 @@ func TestStructuralCycleKeepsExplicitIncompleteObligation(t *testing.T) {
 		if result.Status == grantcoverage.Proved || result.Reason != grantcoverage.ReasonIncomplete {
 			t.Fatalf("цикл %s: %+v", variant, result)
 		}
+	}
+}
+
+// Проекции чтения роли не меняют effect и не вызываются компилятором.
+func TestRoleReadProjectionCallbackIsNotCompilerInput(t *testing.T) {
+	c := compiler(t)
+	b := binding(box("get"))
+	plain := complete(t, c.Compile(b))
+	b.Role.TypeVerbs = func(string) []string { panic("read projection callback reached compiler") }
+	withProjection := complete(t, c.Compile(b))
+	if !EqualEffects(plain, withProjection) {
+		t.Fatal("проекция чтения изменила выдаваемый эффект")
+	}
+}
+
+// Положительный мир содержит допустимую цепь из четырёх указателей. Возврат
+// лишнего project сохраняет прежний отказ: глубина модели не ослаблена ради проб.
+func TestUnsupportedModelPointerDepthRemainsIncomplete(t *testing.T) {
+	deep := strings.Replace(modelFixture,
+		"type strange_box\n  relations\n    define account: [account]\n    define admin: [user, service_account, group#member] or admin from account",
+		"type strange_box\n  relations\n    define project: [project]\n    define admin: [user, service_account, group#member] or admin from project", 1)
+	h := rows()
+	h.Live.Resources[0].ParentTypes = []string{"project"}
+	h.Live.Resources[0].ParentNames = []string{"project"}
+	c, err := New(deep, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Compile(binding(box("get")))
+	found := false
+	for _, o := range s.Obligations() {
+		found = found || o.Code == "model_plan" && strings.Contains(o.Detail, "глубже 4")
+	}
+	if s.Complete() || !found || Prove(s, s).Reason != grantcoverage.ReasonIncomplete {
+		t.Fatalf("недопустимая глубина модели потеряна: %+v", s.Obligations())
 	}
 }

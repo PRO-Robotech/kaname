@@ -99,11 +99,30 @@ func New(modelSource string, halves catalog.Halves) (*Compiler, error) {
 	return c, nil
 }
 
+// bindingBytes описывает только вход действительного producer. Role также несёт
+// read-only проекции и TypeVerbs callback: они не входят в выдаваемый эффект,
+// не должны вызываться и не пригодны для JSON-сериализации даже при nil.
+func bindingBytes(b Binding) ([]byte, error) {
+	return json.Marshal(struct {
+		SourceID          string
+		RoleID            domain.RoleID
+		Rules             domain.Rules
+		Permissions       domain.Permissions
+		IsSystem          bool
+		OwnerModule       string
+		Scope             domain.ScopeAnchor
+		Target            domain.AccessTarget
+		Recipient         domain.Subject
+		CapabilityVersion int
+	}{b.SourceID, b.Role.ID, b.Role.Rules, b.Role.Permissions, b.Role.IsSystem,
+		b.Role.OwnerModule, b.Scope, b.Target, b.Recipient, b.CapabilityVersion})
+}
+
 func (c *Compiler) Compile(b Binding) Set {
 	s := Set{identity: c.identity, obligations: append([]Obligation(nil), c.modelObligations...)}
 	p := Provenance{SourceID: b.SourceID, RoleID: b.Role.ID}
 	fail := func(code, detail string) { s.obligations = append(s.obligations, Obligation{code, detail, p}) }
-	raw, err := json.Marshal(b)
+	raw, err := bindingBytes(b)
 	if err != nil || len(raw) > MaxInputBytes {
 		fail("structural_limit", "binding input")
 		return s
