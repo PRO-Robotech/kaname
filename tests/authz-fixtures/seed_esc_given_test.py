@@ -11,7 +11,7 @@ import seed_delegation as seed
 
 
 VALUES = {
-    "humanEscUserId": "usr-esc", "humanEscAccountId": "acc-esc",
+    "humanEscUserId": "usr-esc", "ceremonyEscAccountId": "acc-esc",
     "jwtHumanEscStepUp": "human", "jwtHumanAidAdmSharedStepUp": "admin",
     "humanAidAdmSharedUserId": "usr-admin",
 }

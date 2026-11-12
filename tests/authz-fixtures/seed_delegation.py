@@ -33,7 +33,7 @@ KEYS = ("gdDelegateSaId", "jwtGDDelegate", "gdGroupDelegateSaId",
 
 def prepare_esc_given(http, public, values):
     """Возвращаем точное Дано H после конечного плана и перезапуска службы."""
-    user, account = values["humanEscUserId"], values["humanEscAccountId"]
+    user, account = values["humanEscUserId"], values["ceremonyEscAccountId"]
     human, admin = values["jwtHumanEscStepUp"], values["jwtHumanAidAdmSharedStepUp"]
     for token, subject, system_admin in (
             (human, user, False), (admin, values["humanAidAdmSharedUserId"], True)):
@@ -127,7 +127,7 @@ def run(args):
         raise own.Unmet("delegation producer requires a fresh own-stand environment")
     # Реальные люди создаются предшествующей штатной ceremony-полосой.
     for key in ("jwtHumanCeremony", "jwtHumanCeremonyStepUp", "ceremonyUserId",
-                "ceremonyAccountId", "jwtHumanEscStepUp", "humanEscUserId", "humanEscAccountId",
+                "ceremonyAccountId", "jwtHumanEscStepUp", "humanEscUserId", "ceremonyEscAccountId",
                 "jwtHumanAidAdmSharedStepUp", "humanAidAdmSharedUserId"):
         required(key)
     public = required("ownRestBaseUrl")
