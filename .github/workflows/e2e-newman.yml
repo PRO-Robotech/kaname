@@ -1053,7 +1053,7 @@ jobs:
 
       - name: повторное Дано H отвергает чужие выдачи
         timeout-minutes: 5
-        run: python3 tests/authz-fixtures/seed_esc_given_test.py
+        run: python3 tests/authz-fixtures/esc_given_fixture_test.py
 
       - name: профиль и посев registry способны упасть
         timeout-minutes: 5

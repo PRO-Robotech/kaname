@@ -498,7 +498,7 @@ def payload_checks(root, payload, axis="all"):
             repaired = existing.run("node --version")
             assert repaired.returncode == 0 and ("v" + existing.provider["KANAME_RUNNER_NODE"]) in repaired.stdout
             print("PARITY-MUTANT existing-version repaired=exact-workflow-pin", flush=True)
-            controls = ("fetch-failure", "PATH-shadowing", "python-package-version", "missing-stdlib", "missing-git-helper", "system-cli-version")
+            controls = ("fetch-failure", "PATH-shadowing", "python-package-version", "missing-stdlib", "missing-git-helper", "system-cli-version", "go-version")
             for label in controls:
                 world = World(base / label, payload)
                 if label == "fetch-failure":
@@ -515,6 +515,9 @@ def payload_checks(root, payload, axis="all"):
                     (world.base / "python-peers/lzma.py").write_text("raise ImportError('controlled missing stdlib')\n")
                 elif label == "missing-git-helper":
                     world.env["GIT_EXEC_PATH"] = str(world.base / "absent-git-helpers")
+                elif label == "go-version":
+                    # Один неверный факт поставщика: Go отличается от неизменённого go.mod.
+                    world.env["RUNNER_GO"] = "0.0.1042"
                 elif label == "system-cli-version":
                     declaration = world.src / ".github/workflows/e2e-newman.yml"
                     document = yaml.safe_load(declaration.read_text())
@@ -526,7 +529,8 @@ def payload_checks(root, payload, axis="all"):
                 assert rejected.returncode == 125 and not (world.work / "out/should-not-run").exists(), label
                 reasons = {"fetch-failure": "controlled provider fetch failure", "PATH-shadowing": "PATH shadowing: git",
                            "python-package-version": "Python package version disagrees:", "missing-stdlib": "controlled missing stdlib",
-                           "missing-git-helper": "Git helper closure missing or shadowed", "system-cli-version": "CLI version disagrees: jq"}
+                           "missing-git-helper": "Git helper closure missing or shadowed", "system-cli-version": "CLI version disagrees: jq",
+                           "go-version": "CLI version disagrees: go"}
                 assert reasons[label] in rejected.stdout, (label, rejected.stdout)
                 print("PARITY-MUTANT provider rejected=" + label + " stage=setup code=125 payload=not-run", flush=True)
         if axis in ("all", "prologue"):

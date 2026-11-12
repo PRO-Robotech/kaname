@@ -2937,8 +2937,9 @@ EOF
     # runner_form_world [порча] — настоящий вывод runner_objects под судом runner_judge;
     # порча — jq-фильтр, меняющий ОДИН факт против законного близнеца.
     runner_form_world() {
-        ( objs="$(runner_objects t841-kaname-own docker.io/library/golang:1.26.10 \
-                    0123456789abcdef0123456789abcdef01234567 841 v1.31.2 1.26.10 'true ' PRO-Robotech/kaname)" || exit 9
+        ( fixture_go="$(ROOT="$SELFTEST_SOURCE_ROOT" runner_go HEAD)" || exit 9
+          objs="$(runner_objects t841-kaname-own "docker.io/library/golang:$fixture_go" \
+                    0123456789abcdef0123456789abcdef01234567 841 v1.31.2 "$fixture_go" 'true ' PRO-Robotech/kaname)" || exit 9
           if [ -n "${1:-}" ]; then objs="$(jq "$1" <<< "$objs")" || exit 9; fi
           runner_judge t841-kaname-own <<< "$objs" )
     }
@@ -3055,7 +3056,9 @@ EOF
     runner_world() {
         ( PATH="$TMP/kc:$PATH"; kc_reset
           R="$TMP/rrepo"; rm -rf "$R"; mkdir -p "$R"
-          { git -C "$R" init -q && printf 'module x\n\ngo 1.26.0\n\ntoolchain go1.26.10\n' > "$R/go.mod" && git -C "$R" add go.mod &&
+          # Законный близнец берёт Go тем же parser из исходной ревизии, что и runner.
+          fixture_go="$(ROOT="$SELFTEST_SOURCE_ROOT" runner_go HEAD)" || exit 9
+          { git -C "$R" init -q && printf 'module x\n\ngo 1.26.0\n\ntoolchain go%s\n' "$fixture_go" > "$R/go.mod" && git -C "$R" add go.mod &&
             git -C "$R" -c user.name=t -c user.email=t@t.invalid commit -q -m t &&
             git -C "$R" remote add origin https://github.com/PRO-Robotech/kaname.git; } || exit 9
           mkdir -p "$R/.github/scripts" "$R/.github/workflows"
