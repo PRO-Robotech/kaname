@@ -262,7 +262,11 @@ func TestCollectBindingsMetadataFailsClosed(t *testing.T) {
 				b.SubjectID = "other"
 				w = sourceWriter(b)
 			case "legacy mismatch":
-				w.bindings.subjects[b.ID] = []domain.Subject{{Type: sourceActor.Type, ID: "other"}}
+				b.SubjectID = "legacy-other"
+				w = sourceWriter(b)
+				// Запрошенный actor есть: отказ должен зависеть именно от
+				// отсутствующей legacy-пары, а не от проверки recipient.
+				w.bindings.subjects[b.ID] = []domain.Subject{sourceActor}
 			case "too many subjects":
 				w.bindings.subjects[b.ID] = make([]domain.Subject, 33)
 			case "invalid subject":
