@@ -109,7 +109,8 @@ jobs:
   changes:
     name: выбор затронутого (e2e-newman)
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # Полный поставщик сохранён: до 420 с на индекс снимка и конечный общий бюджет остальных стадий.
+    timeout-minutes: 15
     outputs:
       full: ${{ steps.pick.outputs.full }}
       jobs: ${{ steps.pick.outputs.jobs }}
@@ -1804,7 +1805,8 @@ jobs:
       - changes
       - prverdict
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Полный поставщик сохранён: до 420 с на индекс снимка и конечный общий бюджет остальных стадий.
+    timeout-minutes: 15
     # Право на запись задач — ТОЛЬКО у этого задания, и оно наименьшее из
     # достаточных.
     permissions:
@@ -1873,7 +1875,8 @@ jobs:
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     needs: [changes, chart-own, edgeselftests, stand, stand-ceremony, suite]
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # Полный поставщик сохранён: до 420 с на индекс снимка и конечный общий бюджет остальных стадий.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
