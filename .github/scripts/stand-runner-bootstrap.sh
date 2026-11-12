@@ -16,7 +16,24 @@ runner_provider_command() {
 # Кэш не является источником доверия: InRelease закреплён суммой workflow,
 # а APT повторно проверяет подпись и хэши Packages из локального зеркала.
 runner_apt_cache_key() {
-  printf '%s\0' 'apt-cache-v1' "$KANAME_RUNNER_OS" "$KANAME_RUNNER_SNAPSHOT" "$KANAME_RUNNER_APT" "$KANAME_RUNNER_RELEASES" | sha256sum | cut -d' ' -f1
+  printf '%s\0' 'apt-cache-v2-full-closure' "$KANAME_RUNNER_OS" "$KANAME_RUNNER_SNAPSHOT" "$KANAME_RUNNER_APT" "$KANAME_RUNNER_RELEASES" | sha256sum | cut -d' ' -f1
+}
+
+# Состав архива не зависит от уже установленных пакетов холодного runner.
+# Пустой status используется только решателем download-only: настоящий dpkg
+# не вызывается и не меняется. В частности, CA из отдельного bootstrap archive
+# заново загружается из закреплённого snapshot вместе со всеми зависимостями.
+runner_apt_fill_cache() {
+  local work="$1" aptdir="$2"; shift 2
+  : > "$aptdir/cache-empty.status" || return 1
+  local -a apt=(apt-get -o APT::Update::Error-Mode=any -o APT::Architecture=amd64 -o APT::Architectures=amd64
+    -o Acquire::Languages=none -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2
+    -o "Dir::Etc::sourcelist=$aptdir/sources.list" -o Dir::Etc::sourceparts=- -o "Dir::State::lists=$aptdir/lists"
+    -o "Dir::State::status=$aptdir/cache-empty.status" -o "Dir::State::extended_states=$aptdir/cache-empty.extended_states"
+    -o Dir::Cache::pkgcache= -o Dir::Cache::srcpkgcache=
+    -o "Dir::Cache::archives=$aptdir/archives" -o Binary::apt-get::APT::Keep-Downloaded-Packages=true -o APT::Keep-Downloaded-Packages=true)
+  runner_provider_command "$work/out/step-provider-install.log" snapshot-cache-fill 300 "${apt[@]}" \
+    install --download-only -y -q --no-install-recommends --allow-downgrades --no-remove "$@"
 }
 
 # Восстановленный архив содержит только данные. Root никогда не использует его
@@ -154,7 +171,7 @@ runner_apt_from_cache() {
 }
 
 runner_bootstrap() {
-  local root="$1" work="$2" mode="${3:-all}" aptdir cadir package spec url file sum arch nodearch
+  local root="$1" work="$2" mode="${3:-all}" aptdir cadir package spec url file sum arch nodearch cache_complete=1
   [ "$(uname -m)" = x86_64 ] || { echo 'runner provider: only verified amd64 is supported' >&2; return 125; }
   . /etc/os-release
   [ "$ID/$VERSION_ID" = "$KANAME_RUNNER_OS" ] || { echo 'runner provider: OS declaration mismatch' >&2; return 125; }
@@ -209,13 +226,22 @@ runner_bootstrap() {
     runner_provider_command "$work/out/step-provider-install.log" snapshot-index 420 "${apt[@]}" update -q || return 125
     runner_apt_cached_snapshot "$work" "$aptdir" || return 125
     runner_provider_command "$work/out/step-provider-install.log" exact-install 300 "${apt[@]}" install -y -q --no-install-recommends --allow-downgrades --no-remove "${closure[@]}" || return 125
+    if ! runner_apt_fill_cache "$work" "$aptdir" "${closure[@]}" || ! runner_apt_archive_hashes "$work" "$aptdir"; then
+      cache_complete=0
+      # Инструменты установлены: отказ необязательного наполнения кэша не
+      # отменяет этот факт, но неполный архив публиковать нельзя.
+      rm -rf -- "$work/apt-cache" || return 125
+      printf '::warning::полная цепочка пакетов APT не загружена; кэш не опубликован\n'
+    fi
   fi
   for spec in "${packages[@]}"; do
     package="${spec%%=*}"
     [ "$(dpkg-query -W -f='${Version}' "$package")" = "${spec#*=}" ] || return 125
   done
-  printf '%s\n' "$cache_key" > "$aptdir/verified-cache" || return 125
-  runner_apt_export_cache "$work" "$aptdir" || printf '::warning::проверенные инструменты установлены, но APT-кэш не опубликован\n'
+  if [ "$cache_complete" = 1 ]; then
+    printf '%s\n' "$cache_key" > "$aptdir/verified-cache" || return 125
+    runner_apt_export_cache "$work" "$aptdir" || printf '::warning::проверенные инструменты установлены, но APT-кэш не опубликован\n'
+  fi
   printf 'RUNNER-PROVIDER apt exact closure verified snapshot=%s packages=%s\n' "$KANAME_RUNNER_SNAPSHOT" "${#packages[@]}"
   [ "$mode" != apt-only ] || return 0
   fi

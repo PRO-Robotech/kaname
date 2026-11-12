@@ -154,6 +154,66 @@ mv /case/apt-cache /exported
 fresh; rm -r /case/apt-cache; cp -a /exported /case/apt-cache
 check 0 exported-cache-fresh-import-offline-install attempt
 dpkg --purge kaname-cache-fixture >/dev/null
+# Холодный producer уже имеет dependency из отдельного bootstrap archive.
+# Его main archives сначала непригоден для действительно свежего consumer.
+fresh
+rm '/case/apt-cache/archives/kaname-cache-fixture_1%3a1.0_all.deb'
+check 1 cold-export-before-fill-fresh-consumer-misses attempt kaname-cache-dependent=1:1.0
+test ! -e /usr/share/kaname-cache-dependent/proof
+test ! -e /usr/share/kaname-cache-fixture/proof
+test ! -e '/case/apt-provider/archives/kaname-cache-fixture_1%3a1.0_all.deb'
+# Отдельный bootstrap archive не входит ни в main archives, ни в export.
+mkdir -p /case/apt-provider/ca-bootstrap/archives
+cp '/fixture/seed/archives/kaname-cache-fixture_1%3a1.0_all.deb' /case/apt-provider/ca-bootstrap/archives/
+dpkg -i '/case/apt-provider/ca-bootstrap/archives/kaname-cache-fixture_1%3a1.0_all.deb' >/dev/null
+test "$(dpkg-query -W -f='${Version}' kaname-cache-fixture)" = 1:1.0
+test ! -e /usr/share/kaname-cache-dependent/proof
+# Настоящий signed file-only mirror содержит исходные deb, но main archive
+# получает недостающую dependency только через production download helper.
+mkdir -p /case/apt-offline/pool
+cp /fixture/seed/archives/*.deb /case/apt-offline/pool/
+: > /case/apt-provider/sources.list
+for suite in noble noble-updates noble-security; do
+  printf 'deb [arch=amd64 check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] file:/case/apt-offline %s main universe\n' "$suite" >> /case/apt-provider/sources.list
+done
+apt-get -o APT::Update::Error-Mode=any -o APT::Architecture=amd64 -o APT::Architectures=amd64 \
+  -o Acquire::Languages=none -o Acquire::By-Hash=false \
+  -o Acquire::IndexTargets::deb::Packages::CompressionTypes=uncompressed \
+  -o Acquire::IndexTargets::deb::Packages::KeepCompressed=false \
+  -o Acquire::IndexTargets::deb::CNF::DefaultEnabled=false \
+  -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false \
+  -o Dir::Etc::sourcelist=/case/apt-provider/sources.list -o Dir::Etc::sourceparts=- \
+  -o Dir::State::lists=/case/apt-provider/lists -o Dir::Cache::archives=/case/apt-provider/archives \
+  -o APT::Get::List-Cleanup=0 update -q > /case/out/cold-signed-index.log 2>&1 || {
+    cat /case/out/cold-signed-index.log; exit 1;
+  }
+fill_preinstalled_dependency() {
+  local status_before status_after
+  status_before=$(sha256sum /var/lib/dpkg/status) || return 1
+  runner_apt_fill_cache /case /case/apt-provider kaname-cache-dependent=1:1.0 || return 1
+  status_after=$(sha256sum /var/lib/dpkg/status) || return 1
+  [ "$status_before" = "$status_after" ] || return 1
+  [ "$(dpkg-query -W -f='${Version}' kaname-cache-fixture)" = 1:1.0 ] || return 1
+  [ ! -e /usr/share/kaname-cache-dependent/proof ] || return 1
+  [ -f '/case/apt-provider/archives/kaname-cache-fixture_1%3a1.0_all.deb' ] || return 1
+  [ -f '/case/apt-provider/archives/kaname-cache-dependent_1%3a1.0_all.deb' ] || return 1
+  runner_apt_archive_hashes /case /case/apt-provider
+}
+check 0 cold-preinstalled-dependency-filled-without-dpkg-mutation fill_preinstalled_dependency
+check 0 cold-full-closure-export runner_apt_export_cache /case /case/apt-provider
+test ! -e /case/apt-cache/ca-bootstrap
+mv /case/apt-cache /cold-exported
+# Удаляем producer state, bootstrap archive и mirror; остаётся только export.
+dpkg --purge kaname-cache-fixture >/dev/null
+fresh
+rm -r /case/apt-cache
+cp -a /cold-exported /case/apt-cache
+check 0 cold-full-export-fresh-consumer-offline-install attempt kaname-cache-dependent=1:1.0
+test "$(dpkg-query -W -f='${Version}' kaname-cache-fixture)" = 1:1.0
+test "$(dpkg-query -W -f='${Version}' kaname-cache-dependent)" = 1:1.0
+test "$(cat /usr/share/kaname-cache-fixture/proof)" = kaname-cache-fixture
+test "$(cat /usr/share/kaname-cache-dependent/proof)" = kaname-cache-dependent
+dpkg --purge kaname-cache-dependent kaname-cache-fixture >/dev/null
 # Последний отрицательный случай: после успешной проверки closure ошибка dpkg
 # должна остаться fatal=2; это не cache miss и не повод повторять online install.
 fresh; mkdir /case/bin
