@@ -21,6 +21,9 @@ const (
 	// Если полный набор неизвестен или больше предела, вызывающий выбирает Global
 	// заранее; открытый Accounts writer нельзя повысить до Global.
 	MaxAuthorityFenceAccounts = 256
+	// MaxAuthorityBindingVersionBatch ограничивает одно чтение метаданных
+	// носителей; отсутствие строки отличается от исторической версии 0.
+	MaxAuthorityBindingVersionBatch = 1000
 )
 
 var ErrInvalidAuthorityFencePlan = errors.New("invalid authority writer fence plan")
@@ -49,6 +52,9 @@ type AuthorityFence interface {
 type AuthorityWriter interface {
 	Writer
 	AuthorityFence() AuthorityFence
+	// BindingCapabilityVersions читает внутренний признак носителя на этой же
+	// транзакции. Отсутствующий ID не включён в карту; это не версия 0.
+	BindingCapabilityVersions(context.Context, []domain.AccessBindingID) (map[domain.AccessBindingID]int, error)
 }
 
 // AuthorityWriterFactory — отдельный порт: действующий Repository не расширяется
