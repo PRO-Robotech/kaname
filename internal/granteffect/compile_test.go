@@ -410,6 +410,7 @@ func TestWildcardProducerDoesNotTurnFiniteOrSuppressedProjectionIntoProof(t *tes
 			{Module: "*", Resources: []string{"*"}, Verbs: []string{"get"}},
 		} {
 			b := binding(rule)
+			b.Role.IsSystem = true
 			b.Scope = scope
 			s := c.Compile(b)
 			if s.Complete() || Prove(s, s).Status == grantcoverage.Proved {
