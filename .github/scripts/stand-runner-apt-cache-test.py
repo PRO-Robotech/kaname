@@ -173,8 +173,10 @@ test ! -e /usr/share/kaname-cache-dependent/proof
 mkdir -p /case/apt-offline/pool
 cp /fixture/seed/archives/*.deb /case/apt-offline/pool/
 : > /case/apt-provider/sources.list
+# copy: действительно помещает deb в archive; file: может использовать пакет
+# прямо из зеркала. Ручное копирование dependency обошло бы проверку helper.
 for suite in noble noble-updates noble-security; do
-  printf 'deb [arch=amd64 check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] file:/case/apt-offline %s main universe\n' "$suite" >> /case/apt-provider/sources.list
+  printf 'deb [arch=amd64 check-valid-until=no signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] copy:/case/apt-offline %s main universe\n' "$suite" >> /case/apt-provider/sources.list
 done
 apt-get -o APT::Update::Error-Mode=any -o APT::Architecture=amd64 -o APT::Architectures=amd64 \
   -o Acquire::Languages=none -o Acquire::By-Hash=false \
