@@ -43,6 +43,12 @@ type Reference struct {
 	Relation   string
 }
 
+// IsInternalObjectType отделяет координаты управляющего решения от публичных
+// ресурсов. Даже администратор или доверенный PDP-сосед не публикует эту дверь.
+func IsInternalObjectType(objectType string) bool {
+	return objectType == ScopeObjectType || objectType == RoleObjectType
+}
+
 func (r Reference) Object() string { return r.ObjectType + ":" + r.ObjectID }
 
 // Encode использует version/kind и три length-prefixed поля. Base64url без

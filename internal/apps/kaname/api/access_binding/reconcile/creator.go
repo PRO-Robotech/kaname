@@ -68,14 +68,7 @@ func creatorGrantees(sel domain.RuleSelector, gs []grantee, o domain.MirrorObjec
 // `objectType`: контейнерные действия типа вычитаются (они дают отношение на
 // родителе, а не на объекте, и яруса на объекте не выводят).
 func objectVerbsOf(cat *catalog.Facts, objectType string, verbs []string) []string {
-	out := make([]string, 0, len(verbs))
-	for _, v := range verbs {
-		if _, ok := cat.ContainerVerb(objectType, v); ok {
-			continue
-		}
-		out = append(out, v)
-	}
-	return out
+	return cat.ObjectVerbs(objectType, verbs)
 }
 
 // verbTuplesOnly — кортежи глаголов без яруса: правило с селектором создателя

@@ -65,41 +65,10 @@ func typeVerbsOf(cat *catalog.Facts, fgaType string) []string {
 // появления первого пользователя.
 func ruleObjectTuplesWithTypeVerbs(cat *catalog.Facts, policy domain.RulePolicy, subject string, verbs []string, fgaType, objectID string,
 	typeVerbs []string) ([]domain.MembershipTuple, bool) {
-	_, tier := domain.ResolveVerbsAndTier(verbs, typeVerbs)
 	object := fmt.Sprintf("%s:%s", fgaType, objectID)
-	// Набор глаголов считает ОДИН предикат — тот же, которым наполняется проекция
-	// `role_verb`, читаемая формой E. Две реализации одного вопроса («что роль
-	// разрешает на типе») по отдельности непротиворечивы и расходятся молча: ровно
-	// так роль-администратор давала движку всё, а форме E — ничего (kacho#496).
-	granted := cat.GrantedVerbs(fgaType, verbs, typeVerbs, policy)
-
-	seen := map[domain.MembershipTuple]struct{}{}
 	var out []domain.MembershipTuple
-	add := func(relation string) {
-		t := domain.MembershipTuple{User: subject, Relation: relation, Object: object}
-		if _, dup := seen[t]; dup {
-			return
-		}
-		seen[t] = struct{}{}
-		out = append(out, t)
-	}
-	// Набор — включая развёрнутую подстановку, отсев чужого глагола и удаление,
-	// которое влечёт правка на листе, — целиком принадлежит предикату выше. Разбор
-	// каждого из трёх правил живёт рядом с ним; здесь остаётся только форма
-	// отношения.
-	for _, verb := range granted {
-		add("v_" + verb)
-	}
-	// Ярусный кортеж — носитель доступа доменного глагола, у которого отношения
-	// `v_*` нет по построению, и ответ вопросам, спрашивающим ярус.
-	//
-	// Условий у него два. Тип обязан резолвиться (иначе вызывающий получил ok=false
-	// выше и ни одного кортежа). И правило обязано давать ярус: правило, все
-	// глаголы которого — удаление, яруса не даёт (domain.ResolveVerbsAndTier,
-	// kaname#1035), и тогда на объекте остаётся только `v_delete`. От набора
-	// глаголов типа ярусный кортеж не зависит.
-	if tier != "" {
-		add(tier)
+	for _, relation := range cat.ObjectRelations(fgaType, verbs, typeVerbs, policy) {
+		out = append(out, domain.MembershipTuple{User: subject, Relation: relation, Object: object})
 	}
 	return out, true
 }
@@ -181,33 +150,10 @@ func scopeSelfTuples(cat *catalog.Facts, subject, scopeType, scopeID string, ver
 // (см. ruleObjectTuplesWithTypeVerbs про то, зачем набор параметром).
 func scopeSelfTuplesWithTypeVerbs(cat *catalog.Facts, subject, scopeType, scopeID string,
 	verbs, typeVerbs []string) ([]domain.MembershipTuple, bool) {
-	_, tier := domain.ResolveVerbsAndTier(verbs, typeVerbs)
 	object := scopeType + ":" + scopeID
-	emitVerbs := len(typeVerbsDeclared(cat, scopeType)) > 0
-
-	seen := map[domain.MembershipTuple]struct{}{}
 	var out []domain.MembershipTuple
-	add := func(relation string) {
-		t := domain.MembershipTuple{User: subject, Relation: relation, Object: object}
-		if _, dup := seen[t]; dup {
-			return
-		}
-		seen[t] = struct{}{}
-		out = append(out, t)
-	}
-	if emitVerbs {
-		for _, v := range verbs {
-			if !domain.IsVerbOfType(v, typeVerbs) {
-				continue
-			}
-			add("v_" + domain.NormalizeVerb(v))
-		}
-	}
-	// Ярусный кортеж на объекте области — якорь права писать и сохранности доступа.
-	// Правило одного удаления яруса не даёт (kaname#1035): удалить область не
-	// значит распоряжаться ею, и якоря у такой выдачи нет — только `v_delete`.
-	if tier != "" {
-		add(tier)
+	for _, relation := range cat.ScopeSelfRelations(scopeType, verbs, typeVerbs) {
+		out = append(out, domain.MembershipTuple{User: subject, Relation: relation, Object: object})
 	}
 	return out, true
 }
@@ -229,11 +175,3 @@ func scopeSelfTuplesWithTypeVerbs(cat *catalog.Facts, subject, scopeType, scopeI
 // отказом в пуске при расхождении. Собственной оболочки пакет больше не держит:
 // однострочный переадресатор к `catalog.Facts` не добавлял ничего, кроме второго
 // имени у одного вопроса.
-
-// typeVerbsDeclared — набор, ОБЪЯВЛЕННЫЙ типом, без запасного варианта. Именно он
-// решает, эмитить ли `v_*` вообще: тип, ничего не объявивший, не получает ни
-// одного отношения (fail-closed), даже когда подстановка правила развёрнута общим
-// словарём ради вывода яруса.
-func typeVerbsDeclared(cat *catalog.Facts, fgaType string) []string {
-	return cat.VerbsOfType(fgaType)
-}
