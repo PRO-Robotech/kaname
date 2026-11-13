@@ -117,12 +117,14 @@ func (b *sourceBudget) charge(n int) bool {
 // Creators остаются evidence селекторов, а не независимой выдачей.
 // Identity/DecisionAt описывают источник вычисления, не DB attestation.
 type ActorEffects struct {
-	Actor      domain.Subject
-	Identity   grantcoverage.Identity
-	DecisionAt time.Time
-	Bindings   []CompiledBinding
-	Structural StructuralSources
-	Component  granteffect.Set
+	Producers       []kaname.ProducerSource
+	RoleCheckpoints map[domain.RoleID]granteffect.ProjectionCheckpoint
+	Actor           domain.Subject
+	Identity        grantcoverage.Identity
+	DecisionAt      time.Time
+	Bindings        []CompiledBinding
+	Structural      StructuralSources
+	Component       granteffect.Set
 }
 
 func nilSource(v any) bool {
@@ -159,6 +161,16 @@ func CollectSemanticActor(ctx context.Context, w kaname.SemanticAuthorityWriter,
 	at := fence.DecisionAt()
 	budget := &sourceBudget{}
 	builder := &granteffect.UnionBuilder{}
+	provenance, hasProvenance := w.(kaname.SemanticSourceReader)
+	if hasProvenance {
+		cost, err := provenance.AdmitSourceActor(ctx, actor)
+		if err != nil {
+			return ActorEffects{}, err
+		}
+		if !budget.chargeCost(cost) {
+			return ActorEffects{}, ErrBindingSourceLimit
+		}
+	}
 	bindings, err := collectAndCompileBindings(ctx, w, bundle, actor, budget, builder)
 	if err != nil {
 		return ActorEffects{}, err
@@ -166,6 +178,16 @@ func CollectSemanticActor(ctx context.Context, w kaname.SemanticAuthorityWriter,
 	structural, err := collectAndCompileStructuralSources(ctx, w, bundle, actor, budget, builder)
 	if err != nil {
 		return ActorEffects{}, err
+	}
+	var producers []kaname.ProducerSource
+	var checkpoints map[domain.RoleID]granteffect.ProjectionCheckpoint
+	extra := []granteffect.Obligation{{Code: "role_projection_checkpoint", Detail: "authored rules, relevant catalog dependencies and projector checkpoint are not confirmed"}}
+	if hasProvenance {
+		var e error
+		producers, checkpoints, extra, e = collectActorProvenance(ctx, provenance, bundle, actor, bindings.Bindings, budget, builder)
+		if e != nil {
+			return ActorEffects{}, e
+		}
 	}
 	if err = ctx.Err(); err != nil {
 		return ActorEffects{}, err
@@ -177,11 +199,14 @@ func CollectSemanticActor(ctx context.Context, w kaname.SemanticAuthorityWriter,
 		return ActorEffects{}, kaname.ErrSemanticIdentityUnavailable
 	}
 	component := structural.Component
+	if hasProvenance {
+		component = granteffect.WithObligations(builder.Build(), StructuralSourceObligations()...)
+	}
 	if (len(bindings.Bindings) > 0 || len(structural.Sources.Direct) > 0) && component.Identity() != bundle.Identity() {
 		return ActorEffects{}, kaname.ErrSemanticIdentityUnavailable
 	}
 	// Полнота чтения строк не подтверждает живую role projection. Этот шов
 	// добавляется к неослабленным registration/creator/protocol obligations.
-	component = granteffect.WithObligations(component, granteffect.Obligation{Code: "role_projection_checkpoint", Detail: "authored rules, relevant catalog dependencies and projector checkpoint are not confirmed"})
-	return ActorEffects{Actor: actor, Identity: bundle.Identity(), DecisionAt: at, Bindings: bindings.Bindings, Structural: structural.Sources, Component: component}, nil
+	component = granteffect.WithObligations(component, extra...)
+	return ActorEffects{Producers: producers, RoleCheckpoints: checkpoints, Actor: actor, Identity: bundle.Identity(), DecisionAt: at, Bindings: bindings.Bindings, Structural: structural.Sources, Component: component}, nil
 }
