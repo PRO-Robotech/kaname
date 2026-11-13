@@ -349,17 +349,22 @@ func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 		return out, nil
 	}
 	rows, err := tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1) ORDER BY id %s`, roleCols, lockKeyShare), ids)
+		fmt.Sprintf(`SELECT %s, live, ARRAY(SELECT rule_fp FROM kaname.role_rule_selectors s WHERE s.role_id=roles.id LIMIT 4097) FROM roles WHERE id = ANY($1) ORDER BY id %s`, roleCols, lockKeyShare), ids)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load roles: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var live bool
-		ro, serr := scanRoleWithTrailing(rows, &live)
+		var storedFPs []string
+		ro, serr := scanRoleWithTrailing(rows, &live, &storedFPs)
 		if serr != nil {
 			return nil, fmt.Errorf("reconcile: scan role row: %w", serr)
 		}
+		if len(storedFPs) > 4096 {
+			return nil, fmt.Errorf("reconcile: selector read limit")
+		}
+		ro.Rules = domain.RulesForStoredSelectorLayout(ro.Rules, storedFPs)
 		ro.Lifecycle.State = domain.RoleLifecycleDeclared
 		if !live {
 			ro.Lifecycle.State = domain.RoleLifecycleWithdrawn

@@ -20,7 +20,7 @@ import (
 // ProjectorVersion обозначает семантику Compile/CompileDirect и нормализации
 // селекторов этого пакета. При изменении смысла проекции версия меняется явно;
 // это не версия carrier и не признак готовности миграции/роли.
-const ProjectorVersion = "granteffect/v1"
+const ProjectorVersion = "granteffect/v2"
 
 var ErrInvalidBundle = errors.New("invalid semantic bundle")
 
@@ -156,5 +156,9 @@ func (b *Bundle) GrantSelectors(rules domain.Rules, policy domain.RulePolicy, sc
 	if err = copy.Validate(policy, b.compiler.facts); err != nil {
 		return nil, err
 	}
-	return b.compiler.facts.GrantSelectors(copy.MaterializingSelectorsInScope(domain.DeriveFromResourceType(scope.Type)), policy), nil
+	ordinary, _, err := domain.SplitGrantCapabilityRules(copy)
+	if err != nil {
+		return nil, err
+	}
+	return b.compiler.facts.GrantSelectors(ordinary.MaterializingSelectorsInScope(domain.DeriveFromResourceType(scope.Type)), policy), nil
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -63,8 +64,9 @@ var roleImmutableFields = map[string]string{
 }
 
 type UpdateRoleUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	referencePlans *authzmodel.Plans
+	repo           Repo
+	opsRepo        operations.Repo
 	// reconciler — FGA tuple reconcile fan-out for a permissions change
 	// (nil-safe: when unwired the role UPDATE still succeeds but active-binding
 	// tuples are not reconciled — only the case in standalone unit tests of the
@@ -211,12 +213,12 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		if verr := validateRuleCatalog(in.Rules, current.IsSystem, facts); verr != nil {
 			return nil, shared.MapValidationErr(verr)
 		}
-		compiled, cerr := domain.CompileRules(in.Rules)
+		projection, cerr := facts.ProjectGrantRules(in.Rules, domain.PolicyOfRole(current.IsSystem, current.OwnerModule))
 		if cerr != nil {
 			return nil, shared.MapValidationErr(cerr)
 		}
 		target.Rules = in.Rules
-		target.Permissions = compiled
+		target.Permissions = projection.Permissions
 		changed = append(changed, "rules")
 		held, herr := heldNamesOf(ctx, u.keys, in.Rules)
 		if herr != nil {
@@ -300,7 +302,11 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	}
 	maskCopy := append([]string{}, in.UpdateMask...)
 	changedCopy := append([]string{}, changed...)
+	// kaname#1034: worker отделяет request context; сохраняем именно typed
+	// principal, допущенный до принятия операции, для same-TX проверки ссылок.
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		return u.doUpdate(ctx, target, maskCopy, actor, changedCopy, version)
 	})
 	return &op, nil
@@ -309,6 +315,18 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []string, actor string, changed []string, expectedVersion string) (*anypb.Any, error) {
 	updated, err := shared.DoWithWriteTx(ctx, u.repo,
 		func(ctx context.Context, w Writer) (domain.Role, error) {
+			var projection catalog.GrantProjection
+			if slices.Contains(changed, "rules") {
+				var err error
+				projection, err = u.cat.Facts().ProjectGrantRules(r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
+				if err != nil {
+					return domain.Role{}, shared.MapValidationErr(err)
+				}
+				if err = checkGrantReferences(ctx, w, r, projection.Capabilities, false, u.referencePlans); err != nil {
+					return domain.Role{}, err
+				}
+				r.Permissions = projection.Permissions
+			}
 			// xmin-CAS: the worker-tx UPDATE is guarded by the version
 			// captured on the sync path. A concurrent Role.Update that committed first
 			// bumped xmin → this CAS matches 0 rows → ErrFailedPrecondition and the
@@ -345,19 +363,20 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			// rule_fp) runs post-commit.
 			if slices.Contains(changed, "rules") {
 				// Каталожный факт — один на обе стороны (довод — на создании).
-				facts := u.cat.Facts()
 				// Политика — та же, которой правила судились (kaname#1006).
-				policy := domain.PolicyOfRole(r.IsSystem, r.OwnerModule)
 				if serr := w.RolesW().ReplaceRuleSelectors(ctx, upd.ID,
-					facts.GrantSelectors(upd.Rules.MaterializingSelectors(), policy)); serr != nil {
+					projection.Selectors); serr != nil {
 					return domain.Role{}, serr
 				}
 				// Та же пара, что на создании: снятый из правил глагол обязан
 				// исчезнуть из проекции, иначе отзыв права не применяется — молча,
 				// потому что добавление проходит успешно.
 				if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
-					facts.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors(), policy)); verr != nil {
+					projection.Verbs); verr != nil {
 					return domain.Role{}, verr
+				}
+				if err := w.RolesW().ReplaceGrantCapabilities(ctx, upd.ID, projection.Capabilities); err != nil {
+					return domain.Role{}, err
 				}
 				// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и
 				// пишется она в той же транзакции по той же причине. Отличие от двух

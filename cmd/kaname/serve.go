@@ -660,7 +660,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
-		metricsReg, cfg, moduleRoster, tokenSigner, logger)
+		metricsReg, cfg, moduleRoster, tokenSigner, logger, preparedModel.plans)
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
 	// kacho#1270) — строится на каждом старте (kaname#363): отказ сборки есть

@@ -83,3 +83,33 @@ func TestProjectionCanonicalFormKeepsCreatorAndStoredContainer(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, string(first), string(third))
 }
+
+func TestProjectionCheckpointIncludesAllMetaRowsAndCopies(t *testing.T) {
+	rows := bundleRows()
+	rows.Live.Resources = append(rows.Live.Resources, catalog.ResourceRow{Module: "iam", Resource: "role", ObjectType: "iam_role"}, catalog.ResourceRow{Module: "iam", Resource: "accessBinding", ObjectType: "iam_access_binding"})
+	rows.Live.Verbs = append(rows.Live.Verbs, catalog.VerbRow{Module: "iam", Resource: "role", Verb: "bind"}, catalog.VerbRow{Module: "iam", Resource: "accessBinding", Verb: "create"})
+	b, e := NewBundle(context.Background(), authzmodel.DSL, rows, ProjectorVersion)
+	require.NoError(t, e)
+	r := domain.Role{Rules: domain.Rules{{Module: "iam", Resources: []string{"role"}, Verbs: []string{"bind"}, ResourceNames: []string{"rol_target_one", "rol_target_two"}}, {Module: "iam", Resources: []string{"accessBinding"}, Verbs: []string{"create"}}}}
+	p, e := b.Projection(r)
+	require.NoError(t, e)
+	require.Len(t, p.Capabilities, 3)
+	require.Empty(t, p.Selectors)
+	require.Empty(t, p.Verbs)
+	canonical, e := ProjectionJSON(p.Selectors, p.Verbs, p.Capabilities)
+	require.NoError(t, e)
+	partial, e := ProjectionJSON(p.Selectors, p.Verbs, p.Capabilities[:2])
+	require.NoError(t, e)
+	require.NotEqual(t, string(canonical), string(partial))
+	p.Capabilities[0].RuleFP = "mutated"
+	again, e := b.Projection(r)
+	require.NoError(t, e)
+	require.NotEqual(t, "mutated", again.Capabilities[0].RuleFP)
+	r.TypeVerbs = func(string, string) ([]string, bool) {
+		t.Fatal("callback не является authored input")
+		return nil, false
+	}
+	again, e = b.Projection(r)
+	require.NoError(t, e)
+	require.Equal(t, p.Checkpoint, again.Checkpoint)
+}

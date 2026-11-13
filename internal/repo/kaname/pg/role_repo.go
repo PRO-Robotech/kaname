@@ -134,7 +134,7 @@ func (r *roleReader) UnresolvedSegments(
 		)
 		SELECT d.role_id, d.object_type, d.verb
 		  FROM d
-		 WHERE NOT EXISTS (
+		 WHERE ((d.object_type='iam.role' AND d.verb='bind') OR (d.object_type='iam.accessBinding' AND d.verb='create')) OR NOT EXISTS (
 		   SELECT 1 FROM kaname.role_verb rv
 		    WHERE rv.role_id     = d.role_id
 		      AND rv.object_type = d.object_type
@@ -153,6 +153,10 @@ func (r *roleReader) UnresolvedSegments(
 	}
 	if rerr := rows.Err(); rerr != nil {
 		return nil, mapErr(rerr, "", "")
+	}
+	rows.Close()
+	if err := r.resolveGrantSegments(ctx, declared, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

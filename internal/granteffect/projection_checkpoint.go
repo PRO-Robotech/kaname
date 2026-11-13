@@ -16,11 +16,12 @@ import (
 // RelevantCatalogID не зависит от постороннего модуля. Нулевое значение не proof.
 type ProjectionCheckpoint struct{ AuthoredID, RelevantCatalogID, ProjectionID, ModelID, ProjectorVersion string }
 type RoleProjection struct {
-	Checkpoint ProjectionCheckpoint
-	Modules    []string
-	Catalog    catalog.Halves
-	Selectors  []domain.RuleSelector
-	Verbs      []domain.RoleVerb
+	Checkpoint   ProjectionCheckpoint
+	Modules      []string
+	Catalog      catalog.Halves
+	Selectors    []domain.RuleSelector
+	Verbs        []domain.RoleVerb
+	Capabilities []domain.GrantCapabilityRule
 }
 
 // Projection использует тот же Facts и scope-agnostic primitive, что producer
@@ -49,8 +50,21 @@ func (b *Bundle) Projection(role domain.Role) (RoleProjection, error) {
 	if err = r.Rules.Validate(policy, b.compiler.facts); err != nil {
 		return RoleProjection{}, err
 	}
-	selectors := b.compiler.facts.GrantSelectors(r.Rules.MaterializingSelectors(), policy)
-	verbs := b.compiler.facts.RoleVerbsFromSelectors(r.Rules.MaterializingSelectors(), policy)
+	ordinary, caps, err := domain.SplitGrantCapabilityRules(r.Rules)
+	if err != nil {
+		return RoleProjection{}, err
+	}
+	for _, cap := range caps {
+		dotted, verb := "iam.accessBinding", "create"
+		if cap.Kind == domain.GrantCapabilityBindRole {
+			dotted, verb = "iam.role", "bind"
+		}
+		if !b.compiler.facts.GrantVerb(dotted, verb) {
+			return RoleProjection{}, fmt.Errorf("grant catalog axis unavailable")
+		}
+	}
+	selectors := b.compiler.facts.GrantSelectors(ordinary.MaterializingSelectors(), policy)
+	verbs := b.compiler.facts.RoleVerbsFromSelectors(ordinary.MaterializingSelectors(), policy)
 	var halves catalog.Halves
 	if err = json.Unmarshal(b.canonicalCatalog, &halves); err != nil {
 		return RoleProjection{}, err
@@ -127,7 +141,7 @@ func (b *Bundle) Projection(role domain.Role) (RoleProjection, error) {
 	if err != nil {
 		return RoleProjection{}, err
 	}
-	projection, err := ProjectionJSON(selectors, verbs)
+	projection, err := ProjectionJSON(selectors, verbs, caps)
 	if err != nil {
 		return RoleProjection{}, err
 	}
@@ -136,12 +150,12 @@ func (b *Bundle) Projection(role domain.Role) (RoleProjection, error) {
 		names = append(names, m)
 	}
 	sort.Strings(names)
-	return RoleProjection{Checkpoint: ProjectionCheckpoint{AuthoredID: digest(authored), RelevantCatalogID: digest(canonical), ProjectionID: digest(projection), ModelID: b.Identity().ModelID, ProjectorVersion: ProjectorVersion}, Modules: names, Catalog: relevant, Selectors: selectors, Verbs: verbs}, nil
+	return RoleProjection{Checkpoint: ProjectionCheckpoint{AuthoredID: digest(authored), RelevantCatalogID: digest(canonical), ProjectionID: digest(projection), ModelID: b.Identity().ModelID, ProjectorVersion: ProjectorVersion}, Modules: names, Catalog: relevant, Selectors: selectors, Verbs: verbs, Capabilities: caps}, nil
 }
 
 // ProjectionJSON канонизирует именно сохраняемые producer поля. Verbs в
 // RuleSelector — вход вычисления, а не колонка; Grants — сохраняемый результат.
-func ProjectionJSON(selectors []domain.RuleSelector, verbs []domain.RoleVerb) ([]byte, error) {
+func ProjectionJSON(selectors []domain.RuleSelector, verbs []domain.RoleVerb, capabilities ...[]domain.GrantCapabilityRule) ([]byte, error) {
 	type row struct {
 		FP, Arm      string
 		Types, Names []string
@@ -195,8 +209,18 @@ func ProjectionJSON(selectors []domain.RuleSelector, verbs []domain.RoleVerb) ([
 		z, _ := json.Marshal(vv[j])
 		return string(a) < string(z)
 	})
+	caps := []domain.GrantCapabilityRule{}
+	for _, batch := range capabilities {
+		caps = append(caps, batch...)
+	}
+	sort.Slice(caps, func(i, j int) bool {
+		a, _ := json.Marshal(caps[i])
+		z, _ := json.Marshal(caps[j])
+		return string(a) < string(z)
+	})
 	return json.Marshal(struct {
-		Selectors []row
-		Verbs     []domain.RoleVerb
-	}{rows, vv})
+		Capabilities []domain.GrantCapabilityRule
+		Selectors    []row
+		Verbs        []domain.RoleVerb
+	}{caps, rows, vv})
 }

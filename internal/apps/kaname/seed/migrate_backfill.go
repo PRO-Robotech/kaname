@@ -337,7 +337,11 @@ func syncAllSystemRoleSelectorsTx(ctx context.Context, tx pgxQuerierExecer) erro
 
 	// (2) Per role: self-heal stale fps, then UPSERT the current materializing selectors.
 	for _, rr := range all {
-		selectors := rr.rules.MaterializingSelectors()
+		ordinary, _, err := domain.SplitGrantCapabilityRules(rr.rules)
+		if err != nil {
+			ordinary = rr.rules
+		}
+		selectors := ordinary.MaterializingSelectors()
 		currentFPs := make([]string, 0, len(selectors))
 		for _, sel := range selectors {
 			if len(sel.ObjectTypes) == 0 {
