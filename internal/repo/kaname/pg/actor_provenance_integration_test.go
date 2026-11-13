@@ -5,6 +5,7 @@ package pg_test
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	"github.com/PRO-Robotech/kaname/internal/grantsource"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
@@ -28,6 +30,19 @@ import (
 func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t *testing.T) {
 	uc, pool := publicReadRig(t)
 	ctx := context.Background()
+	// kaname#1034: свежий каталог не разрешает owner без объявления модуля.
+	// Применяем настоящий стендовый манифест, затем вызываем actual Register.
+	var writes []string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT writes FROM kaname.catalog_resource WHERE dotted='registry.registries'`).Scan(&writes))
+	require.NotContains(t, writes, "owner:user")
+	body, err := os.ReadFile("../../../../tests/authz-fixtures/registry-own-stand-fixture.yaml")
+	require.NoError(t, err)
+	declaration, err := manifest.Load(body)
+	require.NoError(t, err)
+	_, err = applierOver(t, pool).Apply(ctx, declaration)
+	require.NoError(t, err)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT writes FROM kaname.catalog_resource WHERE dotted='registry.registries'`).Scan(&writes))
+	require.Contains(t, writes, "owner:user")
 	scene := registrationscene.Seed(t, ctx, pool)
 	var uid string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT owner_user_id FROM kaname.accounts WHERE id=$1`, scene.Account).Scan(&uid))
@@ -38,6 +53,12 @@ func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t 
 		if i == 0 {
 			request.SourceVersion = timestamppb.New(base)
 		}
+		// kaname#1034: owner опирается на сохранённый project pointer.
+		// Безверсионный pointer не опережает ни finite, ни versionless owner.
+		require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
+			SubjectId: "project:" + scene.Project, Relation: "project", Object: request.Object,
+			ParentProjectId: scene.Project, ParentAccountId: scene.Account, ParentChain: scene.ProjectChain(),
+		}))
 		require.NoError(t, uc.Register(ctx, request))
 	}
 	id := "provenance-public/team/app"
