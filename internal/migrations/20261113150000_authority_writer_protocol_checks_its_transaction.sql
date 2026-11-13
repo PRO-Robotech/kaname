@@ -135,7 +135,9 @@ CREATE FUNCTION kaname.authority_protocol_attestation() RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE proof jsonb; temp_oid oid; current_invoker oid; strict_mode boolean; k integer; expected_mode text;
 BEGIN
- SELECT enforcement='strict' INTO STRICT strict_mode FROM kaname.authority_writer_protocol WHERE singleton;
+ -- kaname#1034: locking read не позволяет старому RR/SSI snapshot сохранить
+ -- compatibility после strict commit. У participant этот row lock уже взят entry.
+ SELECT enforcement='strict' INTO STRICT strict_mode FROM kaname.authority_writer_protocol WHERE singleton FOR SHARE;
  temp_oid:=to_regclass('pg_temp.kaname_authority_attestation');
  IF temp_oid IS NULL THEN
   IF NOT strict_mode THEN RETURN NULL; END IF;

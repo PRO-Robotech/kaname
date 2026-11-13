@@ -63,3 +63,30 @@ func TestWriterProtocolOldSnapshotCannotBypassStrictBackstop(t *testing.T) {
 		})
 	}
 }
+
+// kaname#1034: до cutover законный legacy writer остаётся работоспособным
+// и при повторяемом снимке; отказ выше относится именно к смене policy.
+func TestWriterProtocolStableCompatibilitySnapshotStillWrites(t *testing.T) {
+	for _, isolation := range []pgx.TxIsoLevel{pgx.RepeatableRead, pgx.Serializable} {
+		t.Run(string(isolation), func(t *testing.T) {
+			r := writerProtocolRig(t)
+			current, err := r.runtime.BeginTx(r.ctx, pgx.TxOptions{IsoLevel: isolation})
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = current.Rollback(ctx)
+			})
+			var phase string
+			require.NoError(t, current.QueryRow(r.ctx, `SELECT phase FROM kaname.authority_semantic_identity WHERE singleton`).Scan(&phase))
+			require.Equal(t, "prepared", phase)
+			tag, err := current.Exec(r.ctx, `UPDATE kaname.accounts SET description='stable compatibility write' WHERE id=$1`, r.a)
+			require.NoError(t, err)
+			require.EqualValues(t, 1, tag.RowsAffected())
+			require.NoError(t, current.Commit(r.ctx))
+			var description string
+			require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT description FROM kaname.accounts WHERE id=$1`, r.a).Scan(&description))
+			require.Equal(t, "stable compatibility write", description)
+		})
+	}
+}
