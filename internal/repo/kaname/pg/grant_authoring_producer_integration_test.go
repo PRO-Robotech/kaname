@@ -210,8 +210,16 @@ func TestGrantAuthoringActualCreateUpdateProjectionAndRollback(t *testing.T) {
 	denied[0].ResourceNames = []string{string(foreign)}
 	create("meta_foreign_owner", denied, "", false)
 	// System/module роль — реальная строка каталога, а не prefix/ID shortcut.
-	var systemID, systemModule string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id,owner_module FROM kaname.roles WHERE is_system AND live AND owner_module IS NOT NULL ORDER BY id LIMIT 1`).Scan(&systemID, &systemModule))
+	// TestMain применяет миграции; роли модуля создаёт отдельный production writer.
+	systemDeclared := declaredModuleRole(t, "iam.meta_grant_reference_probe", "Цель проверки ссылки на роль модуля.", ordinary)
+	systemDeclared.OwnerModule = "iam"
+	systemStored, systemChanged, err := upsertSystemRoleTx(ctx, t, repo, systemDeclared)
+	require.NoError(t, err)
+	require.True(t, systemChanged)
+	require.True(t, systemStored.IsSystem)
+	require.Equal(t, "iam", systemStored.OwnerModule)
+	systemID, systemModule := string(systemStored.ID), systemStored.OwnerModule
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id,owner_module FROM kaname.roles WHERE id=$1 AND is_system AND live`, systemID).Scan(&systemID, &systemModule))
 	systemRules := domain.Rules{{Module: "iam", Resources: []string{"role"}, Verbs: []string{"bind"}, ResourceNames: []string{systemID}}}
 	systemOwner := create("meta_system_reference", systemRules, "", true)
 	check(systemOwner, 0, 1)
@@ -371,7 +379,7 @@ func TestGrantAuthoringUnregisterGlobalMaxRulesCommits(t *testing.T) {
 				require.NotContains(t, perms, domain.Permission("registry.repositories."+removed+".get"))
 			}
 			require.Equal(t, perms, stored.Permissions)
-			require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.audit_outbox WHERE event_type=$1 AND payload->>'role_id'=$2`, accessbindingapp.AuditEventRoleResourceUnregistered, c.id).Scan(&n))
+			require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.audit_outbox WHERE event_type=$1 AND event_payload->>'role_id'=$2`, accessbindingapp.AuditEventRoleResourceUnregistered, c.id).Scan(&n))
 			require.Equal(t, 1, n)
 			if c.meta {
 				require.Len(t, c.before, 1)

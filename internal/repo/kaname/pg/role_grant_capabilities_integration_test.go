@@ -193,20 +193,31 @@ func TestGrantProjection_CarriersDefaultToVersionZeroAndRejectUnknownVersions(t 
 // Откат снимает только новую проекцию; исходная роль и прежняя привязка живут.
 // Повторное применение не включает управляющие права у сохранившейся привязки.
 func TestGrantProjection_MigrationRoundTripKeepsLegacyCarrierInactive(t *testing.T) {
-	ctx, pool, repo, account, user := grantProjectionFixture(t)
-	role := seedAccountRole(t, ctx, pool, account, "grant_owner")
-	require.NoError(t, insertBinding(ctx, pool, role, user, "account", string(account)))
-	require.NoError(t, writeGrantProjection(t, ctx, repo, role, []domain.GrantCapabilityRule{grantCreate("a")}))
-	db, err := sql.Open("pgx", pool.Config().ConnString())
+	if testing.Short() {
+		t.Skip("нужен PostgreSQL")
+	}
+	ctx := context.Background()
+	// Проверяем конкретный шаг на собственной пустой БД. Позднейшие миграции
+	// имеют свои зависимости и не являются предметом этого Down/Up.
+	dsn := pgtest.NewEmptyDB(t)
+	db, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	// При первом старте kaname ещё не существует: журнал Goose создаётся в public.
-	// После создания схемы неразмеченное имя у Provider создало бы пустой журнал
-	// в kaname и ошибочно объявило установленную базу версией 0.
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS,
 		goose.WithTableName("public.goose_db_version"))
 	require.NoError(t, err)
 	const version int64 = 20261112123000
+	_, err = provider.UpTo(ctx, version)
+	require.NoError(t, err)
+	pool, err := coredb.NewPool(ctx, pgtest.WithSearchPath(dsn, "kaname,public"))
+	require.NoError(t, err)
+	pgtest.ClosePoolAtEnd(t, pool)
+	repo := kanamepg.New(pool, nil)
+	user := mustSeedUser(t, ctx, pool, "grant-projection")
+	account := seedAccount(t, ctx, repo, "acc-grant-projection", user)
+	role := seedAccountRole(t, ctx, pool, account.ID, "grant_owner")
+	require.NoError(t, insertBinding(ctx, pool, role, user, "account", string(account.ID)))
+	require.NoError(t, writeGrantProjection(t, ctx, repo, role, []domain.GrantCapabilityRule{grantCreate("a")}))
 	current, err := provider.GetDBVersion(ctx)
 	require.NoError(t, err)
 	require.Equal(t, version, current, "тест обязан снимать именно новую миграцию")
@@ -225,7 +236,7 @@ func TestGrantProjection_MigrationRoundTripKeepsLegacyCarrierInactive(t *testing
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.access_bindings
 	    WHERE role_id=$1`, string(role)).Scan(&kept))
 	require.Equal(t, 1, kept)
-	up, err := provider.Up(ctx)
+	up, err := provider.UpTo(ctx, version)
 	require.NoError(t, err)
 	require.Len(t, up, 1)
 	require.Equal(t, version, up[0].Source.Version)
