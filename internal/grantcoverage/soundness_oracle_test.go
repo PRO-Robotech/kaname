@@ -140,7 +140,7 @@ func TestFiniteWorldSoundness(t *testing.T) {
 		}
 		return e
 	}
-	identity := Identity{ModelID: "oracle-model", CatalogID: "oracle-catalog"}
+	identity := Identity{ModelID: "oracle-model", CatalogID: "oracle-catalog", ProjectorVersion: "test-projector/v1"}
 	proved := 0
 	for i := 0; i < 180; i++ {
 		actor := []Effect{makeEffect(), makeEffect(), makeEffect()}
@@ -185,7 +185,7 @@ func TestWorkExhaustionDependsOnOrderingButIsDistinct(t *testing.T) {
 		proposed[i] = makeUse("b")
 	}
 	actor[len(actor)-1] = makeUse("b")
-	identity := Identity{ModelID: "oracle-model", CatalogID: "oracle-catalog"}
+	identity := Identity{ModelID: "oracle-model", CatalogID: "oracle-catalog", ProjectorVersion: "test-projector/v1"}
 	req := Request{Identity: identity, Actor: EffectSet{Identity: identity, Complete: true, Effects: actor}, Proposed: EffectSet{Identity: identity, Complete: true, Effects: proposed}}
 	if r := Prove(req); r.Status != NotProved || r.Reason != ReasonWorkLimit {
 		t.Fatalf("late witness: %+v", r)

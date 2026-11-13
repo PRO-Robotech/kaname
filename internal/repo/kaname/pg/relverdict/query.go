@@ -142,8 +142,9 @@ func (v Verdict) String() string {
 // Query — вопрос к форме E.
 type Query struct {
 	// PreparedPlans разрешает предварительную проверку запуска с аутентификацией до установки модели процесса.
-	PreparedPlans *authzmodel.Plans
-	// DecisionAt задаётся после ожидания замка полномочий; внутренние координаты не используют now() транзакции.
+	PreparedPlans PlanSource
+	// DecisionAt задаётся после всех ожиданий writer. При ненулевом времени
+	// прямой Ask проверяет срок ordinary и meta carriers на одной границе.
 	DecisionAt time.Time
 	// Subject — целиком, в форме `"user:usr-1"`: подстановочный и групповой
 	// субъекты на пару не раскладываются.
@@ -638,11 +639,21 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	if err != nil {
 		return Unknown, g, err
 	}
-	rows, err := q.Query(ctx, sql,
+	args := []any{
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
 		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
-	)
+	}
+	if !in.DecisionAt.IsZero() {
+		// Общую ветвь используют также списки. Меняем только прямой Ask нового
+		// writer; прежние вызовы без времени сохраняют now() своей транзакции.
+		sql, err = replaceOnce(sql, "b.expires_at > now()", "b.expires_at > $12::timestamptz")
+		if err != nil {
+			return Unknown, g, err
+		}
+		args = append(args, in.DecisionAt)
+	}
+	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
 	}
@@ -1111,7 +1122,10 @@ func sourcesOf(objectType, relation string) (parents, relations, verbs []string,
 	return sourcesOfPrepared(nil, objectType, relation)
 }
 
-func sourcesOfPrepared(plans *authzmodel.Plans, objectType, relation string) (parents, relations, verbs []string, err error) {
+func sourcesOfPrepared(plans PlanSource, objectType, relation string) (parents, relations, verbs []string, err error) {
+	if old, ok := plans.(*authzmodel.Plans); ok && old == nil {
+		plans = nil
+	}
 	if plans == nil {
 		plans, err = authzmodel.Shared()
 		if err != nil {

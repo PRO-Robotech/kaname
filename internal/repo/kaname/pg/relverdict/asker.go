@@ -92,7 +92,7 @@ func rollback(ctx context.Context, tx pgx.Tx) error {
 type Asker struct {
 	decisionAt    time.Time
 	transaction   pgx.Tx
-	preparedPlans *authzmodel.Plans
+	preparedPlans PlanSource
 	pool          *pgxpool.Pool
 	// labelMirror / labelIAMDirect — основания меточной ветви по осям.
 	labelMirror    atomic.Int64

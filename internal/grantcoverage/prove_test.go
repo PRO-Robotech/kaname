@@ -45,7 +45,7 @@ func bind(role string) Effect {
 }
 func createBinding() Effect { e := bind(""); e.Kind = CreateBinding; return e }
 func request(actor, proposed []Effect) Request {
-	id := Identity{ModelID: "model-1", CatalogID: "catalog-1"}
+	id := Identity{ModelID: "model-1", CatalogID: "catalog-1", ProjectorVersion: "test-projector/v1"}
 	return Request{Identity: id, Actor: EffectSet{Identity: id, Complete: true, Effects: actor},
 		Proposed: EffectSet{Identity: id, Complete: true, Effects: proposed}}
 }
@@ -353,5 +353,24 @@ func TestStructuralAndWorkLimitsFailClosed(t *testing.T) {
 	}
 	if got := Prove(request(actor, proposed)); got.Status != NotProved || got.Reason != ReasonWorkLimit {
 		t.Fatalf("work limit: %+v", got)
+	}
+}
+
+func TestCoverageRequiresProjectorIdentity(t *testing.T) {
+	get := resourceEffect("get")
+	req := request([]Effect{get}, []Effect{get})
+	if got := Prove(req); got.Status != Proved {
+		t.Fatalf("positive control: %+v", got)
+	}
+	req.Proposed.Identity.ProjectorVersion = "test-projector/v2"
+	if got := Prove(req); got.Reason != ReasonIdentity {
+		t.Fatalf("cross-version: %+v", got)
+	}
+	req = request([]Effect{get}, []Effect{get})
+	req.Identity.ProjectorVersion = ""
+	req.Actor.Identity.ProjectorVersion = ""
+	req.Proposed.Identity.ProjectorVersion = ""
+	if got := Prove(req); got.Status == Proved {
+		t.Fatal("пустая общая версия не должна доказывать покрытие")
 	}
 }

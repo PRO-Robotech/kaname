@@ -75,7 +75,7 @@ type Set struct {
 
 func (s Set) Identity() grantcoverage.Identity { return s.identity }
 func (s Set) Complete() bool {
-	return s.identity.ModelID != "" && s.identity.CatalogID != "" && len(s.obligations) == 0
+	return s.identity.ModelID != "" && s.identity.CatalogID != "" && s.identity.ProjectorVersion == ProjectorVersion && len(s.obligations) == 0
 }
 func (s Set) Effects() []Effect         { return cloneEffects(s.effects) }
 func (s Set) Obligations() []Obligation { return append([]Obligation(nil), s.obligations...) }

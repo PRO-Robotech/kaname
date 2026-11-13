@@ -61,7 +61,10 @@ func (v *validator) identity(id Identity) Reason {
 	if r := v.token(id.ModelID); r != ReasonNone {
 		return r
 	}
-	return v.token(id.CatalogID)
+	if r := v.token(id.CatalogID); r != ReasonNone {
+		return r
+	}
+	return v.token(id.ProjectorVersion)
 }
 
 func (v *validator) effect(e Effect) Reason {

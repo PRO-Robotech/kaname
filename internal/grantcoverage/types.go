@@ -12,11 +12,13 @@ package grantcoverage
 
 import "github.com/PRO-Robotech/kaname/internal/domain"
 
-// Identity закрепляет семантику обеих сторон одного доказательства.
+// Identity закрепляет модель, каталог и версию проекции обеих сторон
+// одного доказательства. Пустая версия и расхождение любой оси закрывают proof.
 // Идентификаторы должны меняться при изменении соответствующего содержимого.
 type Identity struct {
-	ModelID   string
-	CatalogID string
+	ModelID          string
+	CatalogID        string
+	ProjectorVersion string
 }
 
 // Anchor — уже эффективная область. Наследование здесь не выводится.

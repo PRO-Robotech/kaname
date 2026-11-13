@@ -63,7 +63,7 @@ func New(modelSource string, halves catalog.Halves) (*Compiler, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Compiler{plans: plans, facts: facts, identity: grantcoverage.Identity{ModelID: digest([]byte(modelSource)), CatalogID: digest(raw)}}
+	c := &Compiler{plans: plans, facts: facts, identity: grantcoverage.Identity{ModelID: digest([]byte(modelSource)), CatalogID: digest(raw), ProjectorVersion: ProjectorVersion}}
 	c.parents = map[string][]authzmodel.EffectHop{}
 	for _, r := range copy.Live.Resources {
 		if len(r.ParentTypes) != len(r.ParentNames) {

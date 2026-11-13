@@ -45,6 +45,9 @@ SELECT EXISTS(SELECT 1 FROM capability_source)`
 func askGrantCapability(ctx context.Context, tx pgx.Tx, in Query) (Verdict, Grounds, error) {
 	g := Grounds{}
 	plans := in.PreparedPlans
+	if old, ok := plans.(*authzmodel.Plans); ok && old == nil {
+		plans = nil
+	}
 	if plans == nil {
 		var err error
 		plans, err = authzmodel.Shared()
