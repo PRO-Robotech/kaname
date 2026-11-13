@@ -15,8 +15,8 @@ import (
 
 var ErrStructuralSourceLimit = errors.New("structural source resource limit exceeded")
 
-const maxStructuralSourceRows = 100000
-const maxStructuralSourcePages = 4096
+const maxStructuralSourceRows = maxBindingSourceRows
+const maxStructuralSourcePages = maxBindingSourcePages
 
 // StructuralSources — компонент источников, не полная authority actor.
 // Отсутствие Complete/Ready намеренно: обязательства других semantic classes
@@ -37,11 +37,13 @@ func StructuralSourceObligations() []granteffect.Obligation {
 }
 
 func CollectStructuralSources(ctx context.Context, w kaname.AuthorityWriter, actor domain.Subject) (StructuralSources, error) {
+	return collectStructuralSources(ctx, w, actor, &sourceBudget{})
+}
+func collectStructuralSources(ctx context.Context, w kaname.AuthorityWriter, actor domain.Subject, budget *sourceBudget) (StructuralSources, error) {
 	if w == nil || w.AuthorityFence() == nil || w.AuthorityFence().DecisionAt().IsZero() || actor.Validate() != nil || actor.ID == "*" || (actor.Type != domain.SubjectTypeUser && actor.Type != domain.SubjectTypeServiceAccount) {
 		return StructuralSources{}, kaname.ErrCanonicalSourceInvalid
 	}
 	out := StructuralSources{}
-	pages, rows := 0, 0
 	// Каждый вид имеет свой cursor; общий бюджет считает и direct, и creator.
 	for _, creators := range []bool{false, true} {
 		token := ""
@@ -50,13 +52,13 @@ func CollectStructuralSources(ctx context.Context, w kaname.AuthorityWriter, act
 			if err := ctx.Err(); err != nil {
 				return StructuralSources{}, err
 			}
-			if pages >= maxStructuralSourcePages {
+			if !budget.pageAvailable() {
 				return StructuralSources{}, ErrStructuralSourceLimit
 			}
-			pages++
 			filter := kaname.CanonicalSourceFilter{Actor: actor, After: token, Limit: kaname.MaxCanonicalSourcePage}
 			var next string
 			var err error
+			pageRows := 0
 			if creators {
 				var ss []kaname.CanonicalCreatorSource
 				ss, next, err = w.CanonicalCreatorSources(ctx, filter)
@@ -67,7 +69,7 @@ func CollectStructuralSources(ctx context.Context, w kaname.AuthorityWriter, act
 						}
 					}
 				}
-				rows += len(ss)
+				pageRows = len(ss)
 				out.Creators = append(out.Creators, ss...)
 			} else {
 				var ss []kaname.CanonicalDirectSource
@@ -82,13 +84,13 @@ func CollectStructuralSources(ctx context.Context, w kaname.AuthorityWriter, act
 						}
 					}
 				}
-				rows += len(ss)
+				pageRows = len(ss)
 				out.Direct = append(out.Direct, ss...)
 			}
 			if err != nil {
 				return StructuralSources{}, err
 			}
-			if rows > maxStructuralSourceRows {
+			if !budget.charge(pageRows) {
 				return StructuralSources{}, ErrStructuralSourceLimit
 			}
 			if next == "" {
@@ -139,11 +141,13 @@ func CollectAndCompileStructuralSources(ctx context.Context, w kaname.AuthorityW
 	if c == nil {
 		return StructuralEffects{}, kaname.ErrCanonicalSourceInvalid
 	}
-	ss, err := CollectStructuralSources(ctx, w, actor)
+	return collectAndCompileStructuralSources(ctx, w, c, actor, &sourceBudget{}, &granteffect.UnionBuilder{})
+}
+func collectAndCompileStructuralSources(ctx context.Context, w kaname.AuthorityWriter, c effectCompiler, actor domain.Subject, budget *sourceBudget, builder *granteffect.UnionBuilder) (StructuralEffects, error) {
+	ss, err := collectStructuralSources(ctx, w, actor, budget)
 	if err != nil {
 		return StructuralEffects{}, err
 	}
-	var builder granteffect.UnionBuilder
 	for _, s := range ss.Direct {
 		if err := ctx.Err(); err != nil {
 			return StructuralEffects{}, err

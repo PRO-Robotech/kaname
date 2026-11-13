@@ -44,6 +44,11 @@ const (
 // CollectBindings читает только переданный writer и его время после барьеров.
 // Членство уже отбирается Groups.List; отдельных IsMember здесь нет.
 func CollectBindings(ctx context.Context, w kaname.AuthorityWriter, actor domain.Subject) ([]BindingSource, error) {
+	return collectBindings(ctx, w, actor, &sourceBudget{})
+}
+
+// Один бюджет может обслуживать несколько классов источников semantic writer.
+func collectBindings(ctx context.Context, w kaname.AuthorityWriter, actor domain.Subject, budget *sourceBudget) ([]BindingSource, error) {
 	if err := actor.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: actor: %v", ErrBindingSourceInvalid, err)
 	}
@@ -57,11 +62,8 @@ func CollectBindings(ctx context.Context, w kaname.AuthorityWriter, actor domain
 	if at.IsZero() {
 		return nil, fmt.Errorf("%w: zero decision time", ErrBindingSourceInvalid)
 	}
-	pages, rows := 0, 0
 	charge := func(n int) error {
-		pages++
-		rows += n
-		if pages > maxBindingSourcePages || rows > maxBindingSourceRows {
+		if !budget.charge(n) {
 			return ErrBindingSourceLimit
 		}
 		return nil
@@ -74,7 +76,7 @@ func CollectBindings(ctx context.Context, w kaname.AuthorityWriter, actor domain
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if pages >= maxBindingSourcePages {
+		if !budget.pageAvailable() {
 			return nil, ErrBindingSourceLimit
 		}
 		gs, next, err := w.Groups().List(ctx, group.ListFilter{Member: &actor, PageSize: bindingPageSize, PageToken: token})
@@ -114,7 +116,7 @@ func CollectBindings(ctx context.Context, w kaname.AuthorityWriter, actor domain
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			if pages >= maxBindingSourcePages {
+			if !budget.pageAvailable() {
 				return nil, ErrBindingSourceLimit
 			}
 			bs, next, err := w.AccessBindings().ListBySubject(ctx, recipient.Type, recipient.ID, access_binding.PageFilter{PageSize: bindingPageSize, PageToken: token})
@@ -162,13 +164,37 @@ func CollectBindings(ctx context.Context, w kaname.AuthorityWriter, actor domain
 			end = len(ids)
 		}
 		batch := ids[start:end]
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !budget.pageAvailable() {
+			return nil, ErrBindingSourceLimit
+		}
 		ss, err := w.AccessBindings().ListSubjectsForBindings(ctx, batch)
 		if err != nil {
 			return nil, fmt.Errorf("binding subjects: %w", err)
 		}
+		// Считаются все физически возвращённые строки, включая дубликаты между
+		// страницами и metadata. Кэш не превращает чтение в бесплатное.
+		subjectRows := 0
+		for _, set := range ss {
+			if len(set) > maxBindingSourceRows-subjectRows {
+				return nil, ErrBindingSourceLimit
+			}
+			subjectRows += len(set)
+		}
+		if err := charge(subjectRows); err != nil {
+			return nil, err
+		}
+		if !budget.pageAvailable() {
+			return nil, ErrBindingSourceLimit
+		}
 		vv, err := w.BindingCapabilityVersions(ctx, batch)
 		if err != nil {
 			return nil, fmt.Errorf("binding capability versions: %w", err)
+		}
+		if err := charge(len(vv)); err != nil {
+			return nil, err
 		}
 		for _, id := range batch {
 			s, ok := ss[id]
@@ -226,9 +252,18 @@ func CollectBindings(ctx context.Context, w kaname.AuthorityWriter, actor domain
 		if b.RoleID != "" {
 			r = roles[b.RoleID]
 			if r == nil {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				if !budget.pageAvailable() {
+					return nil, ErrBindingSourceLimit
+				}
 				value, err := w.Roles().Get(ctx, b.RoleID)
 				if err != nil {
 					return nil, fmt.Errorf("binding role %s: %w", b.RoleID, err)
+				}
+				if err := charge(1); err != nil {
+					return nil, err
 				}
 				if value.ID != b.RoleID {
 					return nil, fmt.Errorf("%w: role id mismatch", ErrBindingSourceInvalid)

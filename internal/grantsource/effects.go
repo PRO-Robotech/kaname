@@ -6,8 +6,11 @@ package grantsource
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/grantcoverage"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
@@ -35,12 +38,21 @@ func CollectAndCompileBindings(ctx context.Context, w kaname.AuthorityWriter, c 
 	if c == nil {
 		return BindingEffects{}, fmt.Errorf("%w: missing effect compiler", ErrBindingSourceInvalid)
 	}
-	sources, err := CollectBindings(ctx, w, actor)
+	return collectAndCompileBindings(ctx, w, c, actor, &sourceBudget{}, &granteffect.UnionBuilder{})
+}
+
+// effectCompiler не раскрывает mutable Compiler и одинаково принимает Bundle.
+type effectCompiler interface {
+	Compile(granteffect.Binding) granteffect.Set
+	CompileDirect(granteffect.Direct) granteffect.Set
+}
+
+func collectAndCompileBindings(ctx context.Context, w kaname.AuthorityWriter, c effectCompiler, actor domain.Subject, budget *sourceBudget, builder *granteffect.UnionBuilder) (BindingEffects, error) {
+	sources, err := collectBindings(ctx, w, actor, budget)
 	if err != nil {
 		return BindingEffects{}, err
 	}
 	out := BindingEffects{}
-	var builder granteffect.UnionBuilder
 	for _, source := range sources {
 		if err := ctx.Err(); err != nil {
 			return BindingEffects{}, err
@@ -82,4 +94,94 @@ func CollectAndCompileBindings(ctx context.Context, w kaname.AuthorityWriter, c 
 	// без удостоверенной identity; адаптер не фабрикует Complete/Ready.
 	out.Effects = builder.Build()
 	return out, nil
+}
+
+// sourceBudget считает чтения и строки group/binding/direct/creator,
+// subjects/versions и прочитанных ролей одного сбора, включая пустые страницы
+// и повторяющиеся строки.
+// Нулевое значение готово к работе; лимит не задаётся вызывающим API.
+type sourceBudget struct{ pages, rows int }
+
+func (b *sourceBudget) pageAvailable() bool { return b.pages < maxBindingSourcePages }
+func (b *sourceBudget) charge(n int) bool {
+	if !b.pageAvailable() || n < 0 || n > maxBindingSourceRows-b.rows {
+		return false
+	}
+	b.pages++
+	b.rows += n
+	return true
+}
+
+// ActorEffects — доступные компоненты actor, не полная authority (kaname#1034).
+// Component содержит все binding/direct эффекты и незакрытые obligations.
+// Creators остаются evidence селекторов, а не независимой выдачей.
+// Identity/DecisionAt описывают источник вычисления, не DB attestation.
+type ActorEffects struct {
+	Actor      domain.Subject
+	Identity   grantcoverage.Identity
+	DecisionAt time.Time
+	Bindings   []CompiledBinding
+	Structural StructuralSources
+	Component  granteffect.Set
+}
+
+func nilSource(v any) bool {
+	if v == nil {
+		return true
+	}
+	r := reflect.ValueOf(v)
+	switch r.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return r.IsNil()
+	}
+	return false
+}
+
+// CollectSemanticActor использует только writer и его immutable bundle. Ни
+// внешний Compiler, ни caller-provided полнота/Ready на вход не принимаются.
+// Все классы делят бюджет сбора и UnionBuilder; отказ возвращает нулевой исход.
+// Действующие writers не переключаются, публичный gate здесь не открывается.
+func CollectSemanticActor(ctx context.Context, w kaname.SemanticAuthorityWriter, actor domain.Subject) (ActorEffects, error) {
+	if err := ctx.Err(); err != nil {
+		return ActorEffects{}, err
+	}
+	if nilSource(w) {
+		return ActorEffects{}, ErrBindingSourceInvalid
+	}
+	bundle := w.SemanticBundle()
+	if err := bundle.Validate(); err != nil {
+		return ActorEffects{}, err
+	}
+	fence := w.AuthorityFence()
+	if nilSource(fence) || fence.DecisionAt().IsZero() {
+		return ActorEffects{}, ErrBindingSourceInvalid
+	}
+	at := fence.DecisionAt()
+	budget := &sourceBudget{}
+	builder := &granteffect.UnionBuilder{}
+	bindings, err := collectAndCompileBindings(ctx, w, bundle, actor, budget, builder)
+	if err != nil {
+		return ActorEffects{}, err
+	}
+	structural, err := collectAndCompileStructuralSources(ctx, w, bundle, actor, budget, builder)
+	if err != nil {
+		return ActorEffects{}, err
+	}
+	if err = ctx.Err(); err != nil {
+		return ActorEffects{}, err
+	}
+	// Реальный semantic writer закрепляет эти величины. Подмена адаптером в ходе
+	// сбора не должна выдать результат с identity чужого набора или иным expiry.
+	currentFence := w.AuthorityFence()
+	if w.SemanticBundle() != bundle || nilSource(currentFence) || !currentFence.DecisionAt().Equal(at) {
+		return ActorEffects{}, kaname.ErrSemanticIdentityUnavailable
+	}
+	component := structural.Component
+	if (len(bindings.Bindings) > 0 || len(structural.Sources.Direct) > 0) && component.Identity() != bundle.Identity() {
+		return ActorEffects{}, kaname.ErrSemanticIdentityUnavailable
+	}
+	// Полнота чтения строк не подтверждает живую role projection. Этот шов
+	// добавляется к неослабленным registration/creator/protocol obligations.
+	component = granteffect.WithObligations(component, granteffect.Obligation{Code: "role_projection_checkpoint", Detail: "authored rules, relevant catalog dependencies and projector checkpoint are not confirmed"})
+	return ActorEffects{Actor: actor, Identity: bundle.Identity(), DecisionAt: at, Bindings: bindings.Bindings, Structural: structural.Sources, Component: component}, nil
 }
