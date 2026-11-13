@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 )
 
@@ -51,4 +52,34 @@ type CoordinatedAuthorityWriterFactory interface {
 // cutover. Здесь намеренно нет SemanticBundle/checker и нет grant decision proof.
 type TransitionalAuthorityWriterFactory interface {
 	TransitionalAuthorityWriter(context.Context, AuthorityWriteIntent) (AuthorityWriter, error)
+}
+
+// ParticipantAuthorityWriterFactory обслуживает обычную mutation и до, и после
+// cutover. kaname#1034: это участие в TX protocol, не semantic decision API.
+type ParticipantAuthorityWriterFactory interface {
+	ParticipantAuthorityWriter(context.Context, AuthorityWriteIntent) (AuthorityWriter, error)
+}
+
+// AuthorityBundleLifecycle — явный privileged lifecycle. DB owner отличается
+// от runtime LOGIN; ни один метод не удостоверяет полноту adapters/D1/D2/D3.
+// Stage/Activate сверяют actual catalog после полного drain, без cached Facts.
+type AuthorityBundleLifecycle interface {
+	StageAuthorityBundle(context.Context, *granteffect.Bundle, ...AuthorityModuleEdition) error
+	ActivateAuthorityBundle(context.Context, *granteffect.Bundle, ...AuthorityModuleEdition) error
+	CloseAuthorityBundle(context.Context) error
+}
+
+// AuthorityBundleHandoff возвращает immutable bundle только после сверки
+// ожидаемого composed model, сохранённой целой identity и actual catalog.
+// Prepared/compatibility handoff пригоден лишь для ordinary participation.
+type AuthorityBundleHandoff interface {
+	LoadAuthorityBundle(context.Context, string, ...authzmodel.KeyTerm) (*granteffect.Bundle, error)
+}
+
+// AuthorityModuleEdition — ожидаемая фактически применённая редакция delivery.
+// Нулевая пара означает безверсионный документ; это не признак готовности.
+type AuthorityModuleEdition struct {
+	Module   string
+	Revision int64
+	Digest   string
 }

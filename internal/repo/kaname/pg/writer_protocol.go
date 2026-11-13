@@ -153,27 +153,20 @@ func (r *Repository) TransitionalAuthorityWriter(ctx context.Context, in kaname.
 
 // PrepareAuthorityBundle доступен только доверенному migration owner в БД.
 // Подготовка целой identity не переводит protocol в strict и не включает gates.
-func (r *Repository) PrepareAuthorityBundle(ctx context.Context, bundle *granteffect.Bundle) (err error) {
-	if err = ctx.Err(); err != nil {
-		return err
-	}
-	if err = bundle.Validate(); err != nil {
-		return err
-	}
-	tx, err := r.master.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
-	if err != nil {
-		return err
-	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = tx.Rollback(cleanup)
-	}()
-	id := bundle.Identity()
-	if _, err = tx.Exec(ctx, `SELECT kaname.authority_protocol_prepare($1,$2,$3)`, id.ModelID, id.CatalogID, id.ProjectorVersion); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+func (r *Repository) PrepareAuthorityBundle(ctx context.Context, bundle *granteffect.Bundle) error {
+	return r.StageAuthorityBundle(ctx, bundle)
 }
+
+// kaname#1034: обычный participant сохраняет тот же entry/fences и в strict,
+// но не получает SemanticBundle/checker для принятия policy decision.
+func (r *Repository) ParticipantAuthorityWriter(ctx context.Context, in kaname.AuthorityWriteIntent) (kaname.AuthorityWriter, error) {
+	w, err := r.coordinatedAuthorityWriter(ctx, in, "participant")
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+var _ kaname.ParticipantAuthorityWriterFactory = (*Repository)(nil)
 
 var _ kaname.TransitionalAuthorityWriterFactory = (*Repository)(nil)
