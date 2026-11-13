@@ -1839,11 +1839,70 @@ jobs:
           path: tests/newman/out-public
           if-no-files-found: error
 
-      - name: журнал стенда
+      # Метка из deploy/templates/deployment.yaml. Полный журнал нужен и при
+      # раннем отказе: последние 200 строк после обеих коллекций теряли причину.
+      # Читается JSON-журнал serve контейнера kaname, без текстового init migrate.
+      - name: журнал посадки own — сбор и очистка
+        id: own-logs
         if: always()
+        timeout-minutes: 5
         run: |
-          kubectl --context "kind-$KANAME_STAND_CLUSTER" -n kaname get pods -o wide || true
-          kubectl --context "kind-$KANAME_STAND_CLUSTER" -n kaname logs -l app.kubernetes.io/name=kaname --tail=200 --all-containers || true
+          private=$(mktemp -d "$RUNNER_TEMP/kaname-chart-logs.XXXXXX")
+          cleaned=$(mktemp -d "$RUNNER_TEMP/kaname-chart-clean.XXXXXX")
+          admitted=$(mktemp -d "$RUNNER_TEMP/kaname-chart-json.XXXXXX")
+          public=tests/newman/own-log-public
+          rm -rf "$public"
+          mkdir -p "$public"
+          capture_rc=0
+          kubectl --context "kind-$KANAME_STAND_CLUSTER" -n kaname --request-timeout=30s \
+            get pods -l app=kaname -o name > "$private/pods.txt" 2> "$private/discovery.log" || capture_rc=$?
+          if [ "$capture_rc" -eq 0 ] && [ -s "$private/pods.txt" ]; then
+            while IFS= read -r pod; do
+              file="$private/${pod#pod/}.log"
+              kubectl --context "kind-$KANAME_STAND_CLUSTER" -n kaname --request-timeout=30s \
+                logs "$pod" -c kaname --timestamps --tail=-1 > "$file" 2> "$file.stderr.log" || capture_rc=$?
+              if [ ! -s "$file" ]; then capture_rc=1; fi
+            done < "$private/pods.txt"
+          else
+            capture_rc=1
+          fi
+          # kaname#1125: timestamp и JSON разбираются до рекурсивной очистки по
+          # именам. Неизвестная строка остаётся приватной и закрывает payload.
+          admission_rc=0
+          python3 .github/scripts/chart-own-log-admission.py --in "$private" --out "$admitted" --container kaname \
+            > "$public/admission.json" || admission_rc=$?
+          redact_rc=125
+          if [ "$admission_rc" -eq 0 ]; then
+            redact_rc=0
+            python3 .github/scripts/redact-newman-report.py --in "$admitted" --out "$cleaned" || redact_rc=$?
+            if [ "$redact_rc" -eq 0 ] && [ "$capture_rc" -eq 0 ]; then
+              # Публикуется только целиком собранный и очищенный журнал.
+              mv "$public/admission.json" "$cleaned/admission.json"
+              rmdir "$public"
+              mv "$cleaned" "$public"
+            elif [ "$redact_rc" -ne 0 ]; then
+              echo 'ЧИСТКА НЕ СОШЛАСЬ: сырые журналы не опубликованы.' > "$public/redaction-failed.txt"
+            else
+              echo 'СБОР НЕ СОШЁЛСЯ: неполный журнал остался приватным.' > "$public/capture-failed.txt"
+            fi
+          else
+            echo 'РАЗБОР НЕ СОШЁЛСЯ: журнал неполон, сырые данные остались приватными.' > "$public/admission-failed.txt"
+          fi
+          printf '%s\n' "$capture_rc" > "$public/capture.rc"
+          printf '%s\n' "$admission_rc" > "$public/admission.rc"
+          printf '%s\n' "$redact_rc" > "$public/redaction.rc"
+          if [ "$capture_rc" -ne 0 ] || [ "$admission_rc" -ne 0 ] || [ "$redact_rc" -ne 0 ]; then
+            echo '::error title=Журнал не подтверждён::сбор, разбор или очистка не завершились; числовые исходы приложены к артефакту'
+            exit 1
+          fi
+
+      - name: журнал посадки own — очищенный артефакт
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: own-landing-logs-${{ matrix.half }}
+          path: tests/newman/own-log-public
+          if-no-files-found: error
 
       - name: снос стенда
         if: always()
