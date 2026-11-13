@@ -96,7 +96,7 @@ func TestAuthorityLifecycleRealHandoffAndOrdinaryParticipant(t *testing.T) {
 			lifecycleWriterCleanup(t, writer)
 			_, semantic := writer.(kaname.SemanticAuthorityWriter)
 			require.False(t, semantic, "ordinary participant не является semantic decision writer")
-			_, err = writer.GroupsW().Insert(r.ctx, domain.Group{ID: "grp-lifecycle-" + phase, AccountID: domain.AccountID(r.a), Name: "lifecycle-" + phase})
+			_, err = writer.GroupsW().Insert(r.ctx, domain.Group{ID: domain.GroupID("grp-lifecycle-" + phase), AccountID: domain.AccountID(r.a), Name: domain.GroupName("lifecycle-" + phase)})
 			require.NoError(t, err)
 			require.NoError(t, writer.Commit(r.ctx))
 			if phase == "prepared" {
