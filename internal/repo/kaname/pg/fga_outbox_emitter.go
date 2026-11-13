@@ -16,11 +16,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // FGAOutboxEmitter — адаптер, реализующий service.RelationOutboxEmitter поверх
@@ -58,11 +57,7 @@ func (e *FGAOutboxEmitter) EmitOrderedWriteTx(ctx context.Context, tx service.Tx
 // него остаются. Надгробие без версии упорядочить нечем, и снятие идёт прежней
 // формой — меткой момента вставки, то есть снимает всё, что видит (fail-closed).
 func (e *FGAOutboxEmitter) EmitOrderedDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, tombstone time.Time) error {
-	if tombstone.IsZero() {
-		return e.EmitDeleteTx(ctx, tx, tuples)
-	}
-	return fga_outbox.EmitOwnerOrderedTx(ctx, txAsPgx(tx), fga_outbox.EventTypeDelete,
-		serviceTuplesToClients(tuples), pgtype.Timestamptz{Time: tombstone, Valid: true})
+	return fga_outbox.EmitRegistrationDeleteTx(ctx, txAsPgx(tx), serviceTuplesToClients(tuples), tombstone)
 }
 
 // ownerVersionOrMinusInfinity — версия владельца; нулевая — '-infinity'.

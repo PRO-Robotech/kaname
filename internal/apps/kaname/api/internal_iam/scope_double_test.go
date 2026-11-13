@@ -15,6 +15,7 @@ package internal_iam
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -120,5 +121,13 @@ func (s sceneScopes) SavedRegistrationScopesTx(ctx context.Context, tx service.T
 	return []domain.ContainerScope{c}, nil
 }
 func (sceneScopes) SaveRegistrationScopesTx(context.Context, service.Tx, string, string, []domain.ContainerScope) error {
+	return nil
+}
+
+// Общая сцена сохраняет прежний маршрут; отдельный receipt probe проверяет данные.
+func (sceneScopes) SaveProducerReceiptTx(context.Context, service.Tx, domain.ProducerReceipt) error {
+	return nil
+}
+func (sceneScopes) InvalidateRegistrationReceiptsTx(context.Context, service.Tx, string, time.Time, string) error {
 	return nil
 }

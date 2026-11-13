@@ -6,6 +6,7 @@ package migrations_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -65,6 +67,24 @@ func TestNamedRetirementMigration_ConcurrentReceiptWriterCommitOrRollback(t *tes
 			db := serOpenAt(t, namedPointerProvenanceVersion)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
+			// Текущему production emitter нужна новая producer receipt-схема.
+			// Берём её настоящий Up как отдельную prerequisite, не двигая goose:
+			// предмет ниже — именно старый named-pointer Down и его table lock.
+			raw, err := migrations.FS.ReadFile("20261112220000_registration_producers_keep_current_receipts.sql")
+			require.NoError(t, err)
+			up, _, hasDown := strings.Cut(string(raw), "-- +goose Down")
+			require.True(t, hasDown, "prerequisite должна содержать отделённый Down")
+			_, up, hasUp := strings.Cut(up, "-- +goose Up")
+			require.True(t, hasUp, "prerequisite должна содержать настоящий Up")
+			prerequisite, err := db.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			defer prerequisite.Rollback()
+			_, err = prerequisite.ExecContext(ctx, up)
+			require.NoError(t, err)
+			require.NoError(t, prerequisite.Commit())
+			version, err := goose.GetDBVersion(db)
+			require.NoError(t, err)
+			require.Equal(t, namedPointerProvenanceVersion, version, "проверяемая историческая goose-граница не сдвинута")
 			ready := make(chan error, 1)
 			done := make(chan error, 1)
 			proceed := make(chan struct{})

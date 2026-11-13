@@ -41,10 +41,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 )
 
 // Publication — одно намерение владельца об анонимном чтении одного объекта.
@@ -130,6 +129,11 @@ func ApplyTx(ctx context.Context, tx pgx.Tx, p Publication) (Outcome, error) {
 	}
 	if err != nil {
 		return Outcome{}, fmt.Errorf("public_read: apply publication: %w", err)
+	}
+	// Любое применившееся намерение заменяет прежнюю provenance. Admission
+	// поставит новую receipt в этой же TX; голый backend не наследует чужую.
+	if _, err := tx.Exec(ctx, `UPDATE kaname.producer_source_receipt SET active=false,invalidation='publication_replaced',source_version=greatest(source_version,$3::timestamptz),model_identity=NULL,catalog_identity=NULL,projector_version=NULL WHERE kind='publication' AND object_type=$1 AND object_id=$2`, p.ObjectType, p.ObjectID, version); err != nil {
+		return Outcome{}, err
 	}
 	if err := fga_outbox.EmitPublicationTx(ctx, tx, published, p.ObjectType+":"+p.ObjectID, version); err != nil {
 		return Outcome{}, err
