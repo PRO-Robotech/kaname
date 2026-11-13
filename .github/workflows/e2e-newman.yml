@@ -1866,7 +1866,7 @@ jobs:
           else
             capture_rc=1
           fi
-          # #1125: timestamp и JSON разбираются до рекурсивной очистки по
+          # kaname#1125: timestamp и JSON разбираются до рекурсивной очистки по
           # именам. Неизвестная строка остаётся приватной и закрывает payload.
           admission_rc=0
           python3 .github/scripts/chart-own-log-admission.py --in "$private" --out "$admitted" --container kaname \

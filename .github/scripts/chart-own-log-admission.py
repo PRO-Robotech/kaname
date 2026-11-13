@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""#1125: допуск журналов chart-own к JSON-ветке существующего redactor.
+"""kaname#1125: допуск журналов chart-own к JSON-ветке существующего redactor.
 
 Никакой raw-текст не становится строковым полем публичного документа. Поток
 контейнера — timestamp kubectl и объект slog JSON; stderr kubectl — объект JSON
