@@ -199,6 +199,10 @@ db:
   name: kaname
   passwordSecretName: ""
   passwordSecretKey: ""
+  # kaname#1034: DSN владельца схемы доступен только migrator init-container.
+  # Пара пуста для прежней посадки; strict rollout требует отдельного runtime.
+  migrationDSNSecretName: ""
+  migrationDSNSecretKey: ""
 
 # ─── Config sections (viper YAML, parity с kacho-vpc) ───────────────────
 # Все ключи ниже рендерятся в /etc/kaname/config.yaml через

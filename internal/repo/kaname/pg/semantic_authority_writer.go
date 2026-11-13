@@ -73,10 +73,16 @@ func (r *Repository) SemanticAuthorityWriter(ctx context.Context, plan kaname.Au
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
-	checker := authzcascade.WrapAdmitted(relverdict.NewSemanticTransactionAsker(w.tx, bundle, w.fence.decisionAt), personmarks.NewTransaction(w.tx))
 	transferred = true
-	return &semanticAuthorityWriteTx{authorityWriteTx: w, bundle: bundle, checker: checker}, nil
+	return newSemanticAuthorityWriter(w, bundle), nil
 }
 
 var _ kaname.SemanticAuthorityWriterFactory = (*Repository)(nil)
 var _ kaname.SemanticAuthorityWriter = (*semanticAuthorityWriteTx)(nil)
+
+// Единственная сборка native checker: новый entry и прежний compare-only порт
+// используют тот же bundle и время после всех своих ожиданий.
+func newSemanticAuthorityWriter(w *authorityWriteTx, bundle *granteffect.Bundle) *semanticAuthorityWriteTx {
+	checker := authzcascade.WrapAdmitted(relverdict.NewSemanticTransactionAsker(w.tx, bundle, w.fence.decisionAt), personmarks.NewTransaction(w.tx))
+	return &semanticAuthorityWriteTx{authorityWriteTx: w, bundle: bundle, checker: checker}
+}
