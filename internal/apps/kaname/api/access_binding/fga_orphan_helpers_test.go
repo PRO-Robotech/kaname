@@ -387,3 +387,8 @@ func (w *fakeRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Ru
 // GrantDelegations — делегирований этот дублёр не несёт (kaname#986): пробы файла
 // делегированного пути права выдавать не касаются.
 func (rd *fakeABRdr) GrantDelegations() gdrepo.ReaderIface { return nil }
+
+// Неактивный порт проекции: эти тесты не включают управляющие права.
+func (w *fakeRoleWtr) ReplaceGrantCapabilities(context.Context, domain.RoleID, []domain.GrantCapabilityRule) error {
+	return nil
+}

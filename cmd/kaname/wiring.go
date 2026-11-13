@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -263,7 +264,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// отношений и допуск пира у службы решений судят по тому же значению, что
 	// политики вызывающего.
 	moduleRoster moduleidentity.Roster,
-	tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
+	tokenSigner *tokensigner.Signer, logger *slog.Logger, referencePlans ...*authzmodel.Plans) *services {
+	var rolePlans *authzmodel.Plans
+	if len(referencePlans) == 1 {
+		rolePlans = referencePlans[0]
+	}
 	_ = slavePool // kanameRepo собирается и передаётся из main()
 
 	// sharedClock — ОДИН источник моментов, сравниваемых с отсечкой отзыва-всех,
@@ -523,6 +528,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// RoleService.
 	roleCreate := roleapp.NewCreateRoleUseCase(kanameRepo, opsRepo, catalogSource).
+		WithGrantReferencePlans(rolePlans).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler).
 		// Роль, принятая до снятия регистрации названного ключа и записанная после,
@@ -542,6 +548,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ПРИМЕЧАНИЕ: rsabReconciler создаётся один раз в начале buildServices (общий
 	// с материализацией автоматической привязки владельца Account.Create).
 	roleUpdate := roleapp.NewUpdateRoleUseCase(kanameRepo, opsRepo, catalogSource).
+		WithGrantReferencePlans(rolePlans).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool)).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(kanameRepo, rsabReconciler)).

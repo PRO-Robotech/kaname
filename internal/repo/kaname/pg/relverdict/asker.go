@@ -90,8 +90,9 @@ func rollback(ctx context.Context, tx pgx.Tx) error {
 // шире, чем измерено. Ось у обратных вопросов та же и держится их пробами; если
 // понадобится число и по ним, оно заводится СВОИМ, а не расширением этого молча.
 type Asker struct {
+	decisionAt    time.Time
 	transaction   pgx.Tx
-	preparedPlans *authzmodel.Plans
+	preparedPlans PlanSource
 	pool          *pgxpool.Pool
 	// labelMirror / labelIAMDirect — основания меточной ветви по осям.
 	labelMirror    atomic.Int64
@@ -200,11 +201,18 @@ func NewPreparedAsker(pool *pgxpool.Pool, plans *authzmodel.Plans) *Asker {
 
 // NewTransactionAsker выполняет штатный производственный вердикт в удерживаемой транзакции
 // вызывающего. Он не берёт другое соединение и не завершает эту транзакцию.
-func NewTransactionAsker(tx pgx.Tx, plans *authzmodel.Plans) *Asker {
+func NewTransactionAsker(tx pgx.Tx, plans *authzmodel.Plans, decisionAt ...time.Time) *Asker {
 	if tx == nil || plans == nil {
 		return nil
 	}
-	return &Asker{transaction: tx, preparedPlans: plans}
+	if len(decisionAt) > 1 {
+		return nil
+	}
+	a := &Asker{transaction: tx, preparedPlans: plans}
+	if len(decisionAt) == 1 {
+		a.decisionAt = decisionAt[0]
+	}
+	return a
 }
 
 // Allowed отвечает на прямой вопрос.
@@ -229,6 +237,7 @@ func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, rela
 
 	v, grounds, err := Ask(ctx, tx, Query{
 		PreparedPlans: a.preparedPlans,
+		DecisionAt:    a.decisionAt,
 		Subject:       subject, ObjectType: objectType, ObjectID: objectID, Relation: relation,
 		Context: condCtx,
 	})

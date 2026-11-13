@@ -411,3 +411,8 @@ func (w *rlRoleWtr) RulesForRegrain(context.Context, domain.RoleID) (domain.Rule
 func (w *rlUpdWriter) TransactionRelationChecker(*authzmodel.Plans) (kanamerepo.RelationChecker, error) {
 	return nil, iamerr.ErrUnavailable
 }
+
+// Неактивный порт проекции: эти тесты не включают управляющие права.
+func (w *rlRoleWtr) ReplaceGrantCapabilities(context.Context, domain.RoleID, []domain.GrantCapabilityRule) error {
+	return nil
+}

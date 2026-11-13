@@ -189,7 +189,7 @@ func regrainOneRole(ctx context.Context, repo kanamerepo.Repository, cat *catalo
 			}
 			var sels []domain.RuleSelector
 			if live {
-				sels = cat.GrantSelectors(rules.MaterializingSelectors(), policy)
+				sels = cat.GrantSelectors(domain.RegrainSelectors(rules), policy)
 			}
 			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(id), sels)
 		}); err != nil {

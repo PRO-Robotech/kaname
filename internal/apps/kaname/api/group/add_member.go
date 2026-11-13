@@ -45,8 +45,9 @@ type AddMemberInput struct {
 }
 
 type AddMemberUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	membershipWriter membershipWriterSelection
+	repo             Repo
+	opsRepo          operations.Repo
 	// authority — право добавляющего выдавать на областях действующих выдач
 	// группы (Р3, kaname#1037). Без провязки добавление отказывает (fail-closed):
 	// контроль, которому нечем исполниться, не должен молча пропускать.
@@ -143,7 +144,7 @@ func (u *AddMemberUseCase) doAdd(ctx context.Context, in AddMemberInput) (*anypb
 		MemberType: in.MemberType,
 		MemberID:   in.MemberID,
 	}
-	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
+	if err := u.membershipWriter.run(ctx, u.repo, m,
 		func(ctx context.Context, w Writer) error {
 			// Д-3 (kaname#1037): участник — только из аккаунта группы. Той же
 			// транзакцией, что вставка, и под FOR SHARE строки, на которой

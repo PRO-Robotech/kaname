@@ -34,9 +34,6 @@ package reconcile
 // `revokeMemberTuples`).
 
 import (
-	"sort"
-	"strings"
-
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -52,15 +49,15 @@ import (
 // kaname#880 одному первому классу: с классами в ключе он выпадает из состава
 // при следующем проходе, а новый пишется тем же проходом — снятие вычитает
 // кортежи, которые новый член удерживает (`survivingClaims`), разрыва чтения нет.
-const publicReaderRuleFPPrefix = "public_reader:"
+const publicReaderRuleFPPrefix = catalog.PublicReaderRuleFPPrefix
 
 // publicReaderClassesSep — разделитель отпечатков правил и классов в ключе члена
 // `public_reader`; в отпечатке правила (шестнадцатеричном) и в имени класса его
 // не бывает.
-const publicReaderClassesSep = "@"
+const publicReaderClassesSep = catalog.PublicReaderClassesSep
 
 // publicReaderMember — член состава с кортежами `public_reader` на контейнере
-// (objectType, objectID) — по одному на каждый класс выдачи `classes`, если
+// (objectType, objectID) — по одному на каждый класс выдачи, если
 // выдача его даёт; ok=false — не даёт. `ownerFPs` — отпечатки правил, которыми
 // контейнер в составе выдачи ДЕЙСТВУЮЩИМ членом с чтением класса: основание
 // даёт только вложенное правило под одним из них.
@@ -72,48 +69,18 @@ const publicReaderClassesSep = "@"
 // членом правила: его сопоставило правило-селектор, он входит в цель
 // (least-priv, IAM-1-21) и в область выдачи (`IsContainedIn`). Здесь эти
 // вопросы не задаются второй раз.
-func publicReaderMember(cat *catalog.Facts, bs BindingScope, classes []string, objectType, objectID string,
+func publicReaderMember(cat *catalog.Facts, bs BindingScope, objectType, objectID string,
 	ownerFPs map[string]bool) (DesiredMember, bool) {
-	if len(classes) == 0 {
-		return DesiredMember{}, false
-	}
-	children := cat.PublicReadChildren(objectType)
-	if len(children) == 0 {
-		return DesiredMember{}, false
-	}
-	var fps []string
-	for _, sel := range bs.Selectors {
-		if sel.Container == nil || !ownerFPs[sel.Container.OwnerFP] {
-			continue
-		}
-		sel.Verbs = classReadVerbs(sel.Verbs)
-		if sel.PublicReadsChildOf(objectType, children) {
-			fps = append(fps, sel.RuleFP)
-		}
-	}
-	if len(fps) == 0 {
-		return DesiredMember{}, false
-	}
-	fgaType, ok := cat.FGAObjectType(objectType)
+	effect, ok := cat.PublicReaderEffect(bs.Selectors, bs.Subjects, objectType, ownerFPs)
 	if !ok {
 		return DesiredMember{}, false
 	}
-	sort.Strings(fps)
-	keyClasses := append([]string(nil), classes...)
-	sort.Strings(keyClasses)
-	tuples := make([]domain.MembershipTuple, 0, len(classes))
-	for _, c := range classes {
-		tuples = append(tuples, domain.MembershipTuple{
-			User: c, Relation: domain.PublicReaderRelation, Object: fgaType + ":" + objectID,
-		})
-	}
 	return DesiredMember{
-		RuleFP: publicReaderRuleFPPrefix + strings.Join(fps, ",") +
-			publicReaderClassesSep + strings.Join(keyClasses, ","),
+		RuleFP:     effect.RuleFP,
 		ObjectType: objectType,
 		ObjectID:   objectID,
 		Status:     domain.VerificationActive,
-		Tuples:     tuples,
+		Tuples:     effect.Tuples(objectID),
 	}, true
 }
 
@@ -126,16 +93,11 @@ func publicReaderMember(cat *catalog.Facts, bs BindingScope, classes []string, o
 // той же выдачи), основанием не служит: у одного класса в выдаче такого члена
 // не было бы вовсе, и исход не должен зависеть от соседства (kaname#880).
 func withPublicReaders(cat *catalog.Facts, bs BindingScope, members []DesiredMember) []DesiredMember {
-	classes := classSubjects(bs)
+	classes := domain.SystemClassSubjects(bs.Subjects)
 	if len(classes) == 0 {
 		return members
 	}
-	classRead := map[string]bool{}
-	for _, sel := range bs.Selectors {
-		if sel.Container == nil && len(classReadVerbs(sel.Verbs)) > 0 {
-			classRead[sel.RuleFP] = true
-		}
-	}
+	classRead := domain.PublicReaderOwnerRuleFPs(bs.Selectors)
 	type object struct{ typ, id string }
 	owners := map[object]map[string]bool{}
 	var order []object
@@ -152,7 +114,7 @@ func withPublicReaders(cat *catalog.Facts, bs BindingScope, members []DesiredMem
 	}
 	out := members
 	for _, key := range order {
-		if pm, ok := publicReaderMember(cat, bs, classes, key.typ, key.id, owners[key]); ok {
+		if pm, ok := publicReaderMember(cat, bs, key.typ, key.id, owners[key]); ok {
 			out = append(out, pm)
 		}
 	}

@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	rolerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -242,18 +243,32 @@ func (u *UnregisteredKeyWithdrawal) withdrawRoleNames(ctx context.Context, tx se
 		if err != nil {
 			return fmt.Errorf("read role %s: %w", id, err)
 		}
-		rules, removed, changed := role.Rules.WithoutResourceName(key.Type, key.ID)
+		rules, removed, changed := role.Rules.WithoutOrdinaryResourceName(key.Type, key.ID)
 		if !changed {
 			continue
 		}
-		perms, err := domain.CompileRules(rules)
+		ordinary, newCaps, err := domain.SplitGrantCapabilityRules(rules)
+		if err != nil {
+			ordinary = rules
+		}
+		_, oldCaps, oldErr := domain.SplitGrantCapabilityRules(role.Rules)
+		if oldErr == nil && len(oldCaps) > 0 {
+			retainer, ok := w.RolesW().(rolerepo.GrantProjectionRetainer)
+			if !ok {
+				return fmt.Errorf("grant projection retainer unavailable")
+			}
+			if err := retainer.RetainGrantCapabilities(ctx, id, oldCaps, newCaps); err != nil {
+				return err
+			}
+		}
+		perms, err := domain.CompileRules(ordinary)
 		if err != nil {
 			return fmt.Errorf("compile narrowed rules of role %s: %w", id, err)
 		}
 		if err := u.store.RewriteRoleRules(ctx, tx, id, rules, perms); err != nil {
 			return fmt.Errorf("rewrite rules of role %s: %w", id, err)
 		}
-		sels := rules.MaterializingSelectors()
+		sels := ordinary.MaterializingSelectors()
 		policy := domain.PolicyOfRole(role.IsSystem, role.OwnerModule)
 		if err := w.RolesW().ReplaceRuleSelectors(ctx, id, facts.GrantSelectors(sels, policy)); err != nil {
 			return fmt.Errorf("replace rule selectors of role %s: %w", id, err)

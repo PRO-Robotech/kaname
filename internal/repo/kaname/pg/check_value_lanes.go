@@ -111,6 +111,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"access_bindings_wildcard_subject_is_system_ck",
 		},
 		service: []string{
+			// Версию управляющего источника выбирает служба после проверки выдачи.
+			"access_bindings_grant_capability_version_check",
 			"access_bindings_granted_by_check",
 			"access_bindings_granted_relation_shape_ck",
 			"access_bindings_relation_form_anchor_ck",
@@ -406,6 +408,14 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// допуска регистрации; вызывающий не пишет строки истории напрямую.
 	"resource_registration_pointer":    nil,
 	"resource_registration_retirement": nil,
+	// Отпечаток исходного правила вычисляет служба; вызывающий его не присылает.
+	// Будущие проверки остальных полей требуют самостоятельного решения.
+	"role_bind_role_rule": {
+		service: []string{"role_bind_role_rule_fp_check"},
+	},
+	"role_create_binding_rule": {
+		service: []string{"role_create_binding_rule_fp_check"},
+	},
 	// Сирота выдачи — следствие снятия, пишет служба.
 	"role_grant_orphan": nil,
 	// Ссылки правил роли: модуль, ресурс и глагол — из присланного правила;

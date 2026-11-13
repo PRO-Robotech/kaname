@@ -148,6 +148,17 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	}
 	defer pool.Close()
 
+	// kaname#1034: проверка реального runtime LOGIN до первой startup-записи.
+	// Owner DSN допустим лишь прежнему режиму; participant не делает SET ROLE.
+	if err := cfg.AuthorityProtocol.Validate(); err != nil {
+		return err
+	}
+	if cfg.AuthorityProtocol.Participant() {
+		if err := kanamepg.New(pool, nil).ValidateAuthorityRuntime(ctx); err != nil {
+			return fmt.Errorf("authority-protocol runtime LOGIN: %w", err)
+		}
+	}
+
 	// Загрузочный страж: служба не поднимается поверх базы прежней установки.
 	//
 	// Стоит ПЕРВЫМ из стражей базы и до любой записи: он спрашивает не «посильна
@@ -606,6 +617,20 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// Orphan-reconciler backstop: разрешает осиротевшие done=false операции умершего
 	// процесса (kill-9 / истекший terminal-write budget) в терминал по
 	// committed-реальности ресурса. Boot-sweep + периодический фон; non-fatal.
+
+	// Целый handoff после реального catalog/seed, до фоновых LRO и API.
+	// Stage/activation принадлежат отдельному privileged command и здесь не запускаются.
+	var membershipParticipant *kanamepg.GroupMembershipParticipant
+	if cfg.AuthorityProtocol.Participant() {
+		bundle, loadErr := loadGroupParticipationBundle(ctx, cfg.AuthorityProtocol, kanameRepo, preparedModel)
+		if loadErr != nil {
+			return loadErr
+		}
+		membershipParticipant, loadErr = kanamepg.NewGroupMembershipParticipant(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return loadErr
+		}
+	}
 	startLROReconciler(ctx, pool, kanameRepo, catalogSnapshot, lroRec, logger)
 
 	// Надёжная страховка одноразовых секретов, помещённых в ответы ЗАВЕРШЁННЫХ операций.
@@ -660,7 +685,10 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
-		metricsReg, cfg, moduleRoster, tokenSigner, logger)
+		metricsReg, cfg, moduleRoster, tokenSigner, logger, preparedModel.plans)
+	if cfg.AuthorityProtocol.Participant() {
+		svcs.groupHandler.WithMembershipWriter(membershipParticipant)
+	}
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
 	// kacho#1270) — строится на каждом старте (kaname#363): отказ сборки есть

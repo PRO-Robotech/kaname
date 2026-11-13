@@ -97,11 +97,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
+	"github.com/jackc/pgx/v5"
 )
 
 // MaxAncestorDepth — предел обхода цепи предков.
@@ -142,7 +142,10 @@ func (v Verdict) String() string {
 // Query — вопрос к форме E.
 type Query struct {
 	// PreparedPlans разрешает предварительную проверку запуска с аутентификацией до установки модели процесса.
-	PreparedPlans *authzmodel.Plans
+	PreparedPlans PlanSource
+	// DecisionAt задаётся после всех ожиданий writer. При ненулевом времени
+	// прямой Ask проверяет срок ordinary и meta carriers на одной границе.
+	DecisionAt time.Time
 	// Subject — целиком, в форме `"user:usr-1"`: подстановочный и групповой
 	// субъекты на пару не раскладываются.
 	Subject string
@@ -317,43 +320,7 @@ scope(s_type, s_id, depth) AS (
 scope_distinct(s_type, s_id, depth) AS (
     SELECT s_type, s_id, min(depth) FROM scope GROUP BY s_type, s_id
 ),
-speaker_pair(s_type, s_id, via) AS (
-    -- СУБЪЕКТ ВЫДАЧИ — ПАРОЙ КОЛОНОК, а не склейкой.
-    --
-    -- Склейка subject_type || ':' || subject_id выводит колонки из-под любого
-    -- индекса: сравнивать приходится вычисленное значение, а вычисленное
-    -- значение отбирает строки только ПОСЛЕ того, как они прочитаны. Пара
-    -- колонок сужает набор ДО чтения. Паритет, а не новое устройство: соседнее
-    -- соединение того же запроса читает членство парой колонок и обслуживается
-    -- индексом (member_type, member_id) с самого начала.
-    --
-    -- Колонка via называет, ОТКУДА взялась пара, и существует ради текстовой
-    -- формы ниже: хвост #member раскрывает ЧЛЕНСТВО, и приписать его группе,
-    -- которая сама является вызывающим, значило бы расширить ответ на факты,
-    -- которых вызывающему не выдавали.
-    SELECT split_part($1::text, ':', 1),
-           substr($1::text, length(split_part($1::text, ':', 1)) + 2),
-           'self'
-  UNION ALL
-    SELECT 'group', gm.group_id, 'member'
-      FROM kaname.group_members gm
-     WHERE gm.member_type = split_part($1::text, ':', 1)
-       AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
-  UNION ALL
-    -- КЛАССЫ ГОВОРЯЩЕГО (Р2) — значением запроса, а не выводом по месту: их
-    -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
-    -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
-    -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
-    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
-    -- двух, и они приходят двумя скалярами. Строк здесь от этого становится
-    -- больше, и порядок соединения с субъектами выдач держит не оценка числа
-    -- строк, а обращение вбок в ветви выдач (довод — там). Пустое имя класса не
-    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
-    SELECT 'system_class', $10::text, 'class' WHERE ` + speakerExistsSQL + `
-  UNION ALL
-    SELECT 'system_class', $11::text, 'class' WHERE ` + speakerExistsSQL + `
-),
-speaker(subject) AS (
+` + directSpeakerPairsSQL + `speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
     -- не разбирается на пару нигде в дереве. Обе формы имени группы, и это не
     -- перестраховка: канонический производитель кортежей пишет
@@ -646,11 +613,14 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 		// Выдавать второе за первое запрещено (см. ветвь Unknown ниже), но и
 		// отвечать ошибкой на первое неверно: вызывающий перестаёт отличать «нет
 		// прав» от «сломалось», а снятый тип отвечает пятисоткой вместо «нет».
-		if errors.Is(err, authzplan.ErrTypeNotDeclared) {
+		if errors.Is(err, authzplan.ErrTypeNotDeclared) && !isGrantCapabilityType(in.ObjectType) {
 			g.TypeNotDeclared = true
 			return Deny, g, nil
 		}
 		return Unknown, g, err
+	}
+	if isGrantCapabilityType(in.ObjectType) {
+		return askGrantCapability(ctx, q, in)
 	}
 	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
@@ -669,11 +639,21 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	if err != nil {
 		return Unknown, g, err
 	}
-	rows, err := q.Query(ctx, sql,
+	args := []any{
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
 		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
-	)
+	}
+	if !in.DecisionAt.IsZero() {
+		// Общую ветвь используют также списки. Меняем только прямой Ask нового
+		// writer; прежние вызовы без времени сохраняют now() своей транзакции.
+		sql, err = replaceOnce(sql, "b.expires_at > now()", "b.expires_at > $12::timestamptz")
+		if err != nil {
+			return Unknown, g, err
+		}
+		args = append(args, in.DecisionAt)
+	}
+	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
 	}
@@ -1142,7 +1122,10 @@ func sourcesOf(objectType, relation string) (parents, relations, verbs []string,
 	return sourcesOfPrepared(nil, objectType, relation)
 }
 
-func sourcesOfPrepared(plans *authzmodel.Plans, objectType, relation string) (parents, relations, verbs []string, err error) {
+func sourcesOfPrepared(plans PlanSource, objectType, relation string) (parents, relations, verbs []string, err error) {
+	if old, ok := plans.(*authzmodel.Plans); ok && old == nil {
+		plans = nil
+	}
 	if plans == nil {
 		plans, err = authzmodel.Shared()
 		if err != nil {

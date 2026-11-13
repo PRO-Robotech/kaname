@@ -31,6 +31,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -143,6 +144,9 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.AuthorizeCheckRequest) (
 	if req.GetResource() == nil {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument resource: required")
 	}
+	if err := publicResourceType(req.GetResource()); err != nil {
+		return nil, err
+	}
 	if req.GetAction() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument action: required")
 	}
@@ -225,6 +229,12 @@ func (h *Handler) BatchCheck(ctx context.Context, req *iamv1.BatchAuthorizeCheck
 	if len(req.GetChecks()) > 100 {
 		return nil, status.Errorf(codes.InvalidArgument, "Illegal argument checks: batch size %d > 100", len(req.GetChecks()))
 	}
+	// Проверяем всю партию до вопросов о вызывающем и до обращения к PDP.
+	for _, check := range req.GetChecks() {
+		if err := publicResourceType(check.GetResource()); err != nil {
+			return nil, err
+		}
+	}
 	// Inner defense-in-depth: gate every item's subject/resource before fanning
 	// out — a single unauthorized item denies the whole batch (caller_authority.go).
 	for _, c := range req.GetChecks() {
@@ -280,6 +290,9 @@ func (h *Handler) ListSubjects(ctx context.Context, req *iamv1.ListSubjectsReque
 	if req.GetResource() == nil {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument resource: required")
 	}
+	if err := publicResourceType(req.GetResource()); err != nil {
+		return nil, err
+	}
 	if req.GetAction() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument action: required")
 	}
@@ -314,6 +327,9 @@ func (h *Handler) ListSubjects(ctx context.Context, req *iamv1.ListSubjectsReque
 func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelationsRequest) (*iamv1.ExpandRelationsResponse, error) {
 	if req.GetResource() == nil {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument resource: required")
+	}
+	if err := publicResourceType(req.GetResource()); err != nil {
+		return nil, err
 	}
 	if req.GetRelation() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument relation: required")
@@ -372,6 +388,15 @@ func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelation
 // него не бывает глубины, которой неоткуда взяться. Рёбра графа сняты с контракта
 // вместе с движком, который их производил: заполнять их было бы нечем, а поле,
 // которое никогда не заполняется, обещает возможность, которой нет.
+// publicResourceType не расширяет публичный каталог внутренними координатами.
+// Список принадлежит codec; свой перечень имён у транспортной двери отсутствует.
+func publicResourceType(resource *iamv1.ResourceRef) error {
+	if grantcapability.IsInternalObjectType(resource.GetType()) {
+		return status.Errorf(codes.InvalidArgument, "Illegal argument resource.type %q", resource.GetType())
+	}
+	return nil
+}
+
 func treeToProto(t *authztypes.ExpandTree) *iamv1.UsersetTree {
 	if t == nil {
 		return nil

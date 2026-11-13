@@ -37,17 +37,15 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
-
-	corevalidate "github.com/PRO-Robotech/corelib/validate"
-
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // relationOutboxEmitter — узкий порт записи: кортежи иерархии, которые пишет
@@ -918,7 +916,8 @@ func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, p
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // ничего не делает после Commit
 
-	if _, err := uc.authorizeCatalogType(ctx, tx, module, t); err != nil {
+	catalogType, err := uc.authorizeCatalogType(ctx, tx, module, t)
+	if err != nil {
 		return err
 	}
 	hs, err := uc.savedAuthorityScopes(ctx, tx, t)
@@ -929,8 +928,15 @@ func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, p
 		return err
 	}
 	objType, objID := t.splitObject()
-	if _, err := uc.publications.ApplyTx(ctx, tx, objType, objID, published, version); err != nil {
+	applied, err := uc.publications.ApplyTx(ctx, tx, objType, objID, published, version)
+	if err != nil {
 		return fmt.Errorf("apply public-read publication: %w", err)
+	}
+	if applied && published {
+		canonical := tupleIntent{subject: domain.PublicationSubject, relation: domain.PublicationRelation, object: t.object}
+		if err := uc.saveProducerReceipt(ctx, tx, domain.PublicationReceipt, module, catalogType, canonical, hs, version); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
@@ -1126,6 +1132,16 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 			changed = true
 			projectionUnchanged = false
 		}
+		if projectionReplaced {
+			if err := uc.invalidateRegistrationReceipts(ctx, tx, t.object, row.SourceVersion, "projection_replaced"); err != nil {
+				return "", false, false, err
+			}
+		}
+		if changed && t.relation == "owner" {
+			if err := uc.saveProducerReceipt(ctx, tx, domain.RegistrationOwnerReceipt, module, row.ObjectType, t, canonical, row.SourceVersion); err != nil {
+				return "", false, false, err
+			}
+		}
 		if changed && !legacyRegistrationRelation(t.relation) {
 			owned, ok := uc.scopes.(registrationPointerStore)
 			if !ok {
@@ -1212,6 +1228,11 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 		}
 		if derr != nil {
 			return "", false, false, fmt.Errorf("delete resource mirror: %w", derr)
+		}
+		if deleted {
+			if err := uc.invalidateRegistrationReceipts(ctx, tx, t.object, row.SourceVersion, "withdrawn"); err != nil {
+				return "", false, false, err
+			}
 		}
 		// ПОТОМКИ УХОДЯТ ВМЕСТЕ С РОДИТЕЛЕМ (kaname#1002) — под тем же условием,
 		// что отзыв выдач: только снятие, удалившее строку регистрации родителя.
@@ -1498,6 +1519,11 @@ func (uc *RegisterResourceUseCase) dropRegistrations(ctx context.Context, tx ser
 		dropped, version, err := uc.mirror.DropRegistrationTx(ctx, tx, d.catalogType, d.ModelType, d.ID)
 		if err != nil {
 			return nil, fmt.Errorf("drop descendant registration: %w", err)
+		}
+		if dropped {
+			if err := uc.invalidateRegistrationReceipts(ctx, tx, d.ModelType+":"+d.ID, version, "withdrawn"); err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, droppedDescendant{unregisteredDescendant: d, dropped: dropped, version: version})
 	}

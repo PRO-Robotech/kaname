@@ -1,0 +1,18 @@
+# Разделение DB identities для kaname#1034
+
+В прежней посадке migrate и serve использовали db.user/password. Обычная goose migration не получает CREATE ROLE. Существующий владелец схемы остаётся доверенным migration owner. До строгого включения оператор БД выполняет deploy/sql/authority-runtime-role.sql с именами отдельных runtime/migration ролей. Runtime не владеет БД, схемой, таблицами или функциями, не наследует migration role и не имеет DDL/расширенных привилегий. Скрипт отказывает при несовместимом существующем runtime; не переносит ownership тайно и не меняет пароли.
+
+Последовательность rollout:
+
+1. Под прежним владельцем накатить additive schema. Default compatibility сохраняет legacy writers; semantic identity остаётся закрытой по умолчанию. Gates не переключаются.
+2. Доверенный владелец через PrepareAuthorityBundle готовит полную immutable identity в phase prepared. TransitionalAuthorityWriter допускается только при compatibility+prepared и возвращает AuthorityWriter без semantic checker/bundle API. Старый SemanticAuthorityWriter и новый CoordinatedAuthorityWriter отказывают до active/strict соответственно. Это устраняет цикл адаптации: старые операции уже получают fences, но новые D1/D2/coverage двери закрыты.
+3. Администратор БД создаёт/проверяет runtime role bootstrap-скриптом и предоставляет её credential штатным secret manager. Скрипт получает только имена ролей, не пароль. Повторить grants после последующих migrations; default privileges для будущих authority metadata не выдаются.
+4. В db.user/passwordSecret* указать runtime credential. В db.migrationDSNSecretName/Key указать другой Secret с полным DSN прежнего владельца. Только init-container получает MIGRATOR_DSN; основной контейнер не монтирует этот secret. Оператор обеспечивает TLS/connection settings в DSN.
+5. Подключить все adapters принятого finite writer census, завершить source/projection evidence и capability/policy wiring. Проверить реальные runtime paths под ограниченной ролью: loud backstop denial не является совместимостью.
+6. Отдельным согласованным cutover обеспечить quiescence/drain всех старых TX и затем protocol/identity activation под global fence. Эта поставка не содержит API активации и не считает новый advisory lock доказательством drain. Изменение compatibility→strict в PG regression — синтетическая предпосылка backstop, не product activation.
+
+DB entry создаёт закрытую temporary attestation relation от имени migration owner. ON COMMIT DELETE ROWS и rollback удаляют свидетельство без постоянного мусора; disconnect удаляет саму temp relation. Entry сверяет её owner, исключает default grants, получает transaction advisory locks сама, закрепляет full xid8/backend/nonce/effective role и identity. Guard не выдаёт свидетельств, не приобретает fences и не расширяет accounts. Свободный GUC, session advisory locks, прежний nonce либо смена SET ROLE не заменяют entry. Owner/superuser, способный изменить функцию или выключить triggers, относится к доверенному административному контуру; защита от него не заявляется.
+
+Текущий core footprint использует точные account/project/role/group/binding anchors. Неоднозначные folded/registration строки требуют global; полная ownership-классификация этих adapters и полный dependency-table footprint обязательны перед strict. Проверки протокола не снимают normalizer obligations и не разрешают предложенный effect.
+
+DELETE roles/groups/accounts требует заранее global intent: каскадные children могут потерять parent anchor, а удаление target role — затронуть правила других accounts. Statement guard отказывает до row mutations при account intent; существующие adapters ещё не переключены. Локальная конкурентность этих delete paths и их runtime-совместимость не заявлены.

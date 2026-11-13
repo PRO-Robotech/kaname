@@ -37,20 +37,29 @@ import (
 
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 )
 
-// TestProxyAdmittedObjectTypesAreInTheCatalog — тип, допущенный правилом приёма,
-// обязан резолвиться в точечное имя каталога.
+// TestProxyAdmittedResourceTypesAreInTheCatalog — ресурсный тип, допущенный общим
+// правилом приёма, обязан резолвиться в точечное имя каталога. Внутренние координаты
+// управляющих прав ресурсами не являются: их закрывает принимающая сторона Kaname
+// до каталога и вызова регистратора (TestRegistrationRejectsInternalGrantCoordinates).
 //
 // Домен вызывающего выводится из САМОГО типа (часть до первого `_`): именно так
 // связывает их правило приёма, и другой формы у этой связи в дереве нет. Помимо
 // него спрашивается посадка с НЕИЗВЕСТНЫМ доменом — там связывание по домену
 // отключено, и множество допущенного шире, поэтому проверять надо обе.
-func TestProxyAdmittedObjectTypesAreInTheCatalog(t *testing.T) {
+func TestProxyAdmittedResourceTypesAreInTheCatalog(t *testing.T) {
 	model := parseModel(t)
 
 	var admitted, findings []string
 	for typ := range model.types {
+		if grantcapability.IsInternalObjectType(typ) {
+			require.NotEmpty(t, nonGrantableModelTypes[typ], "внутренняя координата обязана быть явно описана как не-ресурс")
+			_, resource := authzmap.DottedType(typ)
+			require.False(t, resource, "управляющая координата не должна попадать в каталог ресурсов")
+			continue
+		}
 		for _, caller := range []string{callerDomainOf(typ), ""} {
 			// Отношение и субъект берутся из объявленного набора приёма, а не
 			// придумываются: гейт спрашивает про ТИП, и всё прочее в тройке обязано
