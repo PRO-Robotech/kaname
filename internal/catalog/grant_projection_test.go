@@ -59,8 +59,15 @@ func TestGrantProjectionRejectsUnavailableAndInvalidMeta(t *testing.T) {
 		require.Empty(t, p.Capabilities)
 		require.Empty(t, p.Selectors)
 	}
-	empty, e := catalog.NewFacts(catalog.Halves{Live: catalog.Rows{Modules: []string{"iam"}, Resources: []catalog.ResourceRow{{Module: "iam", Resource: "accessBinding", ObjectType: "iam_access_binding"}}}})
+	// kaname#1034: валидный ordinary каталог, но explicit meta axis отсутствует.
+	ordinaryOnly, e := catalog.NewFacts(catalog.Halves{Live: catalog.Rows{Modules: []string{"iam"}, Resources: []catalog.ResourceRow{{Module: "iam", Resource: "accessBinding", ObjectType: "iam_access_binding"}}, Verbs: []catalog.VerbRow{{Module: "iam", Resource: "accessBinding", Verb: "get", PerObject: true}}}})
 	require.NoError(t, e)
-	_, e = empty.ProjectGrantRules(domain.Rules{{Module: "iam", Resources: []string{"accessBinding"}, Verbs: []string{"create"}}}, domain.TenantPolicy())
+	ordinary, e := ordinaryOnly.ProjectGrantRules(domain.Rules{{Module: "iam", Resources: []string{"accessBinding"}, Verbs: []string{"get"}}}, domain.TenantPolicy())
+	require.NoError(t, e)
+	require.NotEmpty(t, ordinary.Selectors)
+	require.False(t, ordinaryOnly.GrantVerb("iam.accessBinding", "create"))
+	unavailable, e := ordinaryOnly.ProjectGrantRules(domain.Rules{{Module: "iam", Resources: []string{"accessBinding"}, Verbs: []string{"create"}}}, domain.TenantPolicy())
 	require.Error(t, e)
+	require.Empty(t, unavailable.Capabilities)
+	require.Empty(t, unavailable.Selectors)
 }

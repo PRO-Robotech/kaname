@@ -14,6 +14,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	rolerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
 )
 
@@ -92,7 +93,7 @@ func checkGrantReferences(ctx context.Context, w Writer, owner domain.Role, caps
 		}
 		// Один ID: канонический Get predicate не распараллеливает SQL одной TX.
 		if !ref.Role.IsSystem {
-			visible, e := authzfilter.VisibleSet(ctx, checker, subject, "iam_role", []string{string(id)})
+			visible, e := authzfilter.VisibleSet(ctx, grantReferenceObjectChecker{checker}, subject, "iam_role", []string{string(id)})
 			if e != nil {
 				return e
 			}
@@ -109,3 +110,20 @@ func checkGrantReferences(ctx context.Context, w Writer, owner domain.Role, caps
 	}
 	return nil
 }
+
+// kaname#1034: canonical Get использует ObjectChecker, а same-TX native порт
+// предоставляет Check с уже сохранёнными Plans и person admission. Передаём
+// вопрос тому же checker; непустые условия этот узкий порт не умеет доказать.
+type grantReferenceObjectChecker struct{ checker kanamerepo.RelationChecker }
+
+func (c grantReferenceObjectChecker) CheckWithContext(ctx context.Context, subject, relation, object string, conditions map[string]any) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if c.checker == nil || len(conditions) != 0 {
+		return false, iamerr.Wrapf(iamerr.ErrUnavailable, "Grant reference conditional checker unavailable")
+	}
+	return c.checker.Check(ctx, subject, relation, object)
+}
+
+var _ authzfilter.ObjectChecker = grantReferenceObjectChecker{}

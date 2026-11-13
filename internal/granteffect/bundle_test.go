@@ -72,7 +72,7 @@ func TestSemanticBundleRejectsDefaultInvalidAndCancelledInputs(t *testing.T) {
 	}{
 		{"missing-model", "", ProjectorVersion, bundleRows()},
 		{"default-version", authzmodel.DSL, "", bundleRows()},
-		{"future-version", authzmodel.DSL, "granteffect/v2", bundleRows()},
+		{"future-version", authzmodel.DSL, "granteffect/v3", bundleRows()},
 		{"missing-catalog", authzmodel.DSL, ProjectorVersion, catalog.Halves{}},
 		{"invalid-model", "model invalid", ProjectorVersion, bundleRows()},
 	} {
@@ -169,7 +169,7 @@ func TestSemanticBundleCompilerIdentityAndConcurrentIsolation(t *testing.T) {
 	require.True(t, set.Complete(), "каноническая прямая выдача должна компилироваться: %v", set.Obligations())
 	require.Equal(t, grantcoverage.Proved, Prove(set, set).Status)
 	other := set
-	other.identity.ProjectorVersion = "granteffect/v2"
+	other.identity.ProjectorVersion = "granteffect/v3"
 	require.Equal(t, grantcoverage.ReasonIdentity, Prove(set, other).Reason)
 	other.identity.ProjectorVersion = ""
 	require.False(t, other.Complete())

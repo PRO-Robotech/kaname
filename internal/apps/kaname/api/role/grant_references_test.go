@@ -11,6 +11,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/authzfilter"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -112,4 +113,70 @@ func TestGrantReferenceHoldsKeepAuthoredRuleIndices(t *testing.T) {
 
 func (r *metaReferenceRows) LockGrantAuthoringAxes(context.Context, []domain.GrantCapabilityRule) error {
 	return nil
+}
+
+func TestGrantReferenceObjectCheckerPreservesCanonicalVisibilityAndErrors(t *testing.T) {
+	backendErr := errors.New("native unavailable")
+	for _, tc := range []struct {
+		name, allowedRelation string
+		backendErr            error
+		want                  bool
+		calls                 []string
+	}{
+		{name: "viewer", allowedRelation: "viewer", want: true, calls: []string{"viewer"}},
+		{name: "v_list", allowedRelation: "v_list", want: true, calls: []string{"viewer", "v_list"}},
+		{name: "denied", calls: []string{"viewer", "v_list"}},
+		{name: "backend", backendErr: backendErr, calls: []string{"viewer"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			type contextKey struct{}
+			ctx := context.WithValue(context.Background(), contextKey{}, "same-tx-context")
+			var calls []string
+			var subjects, objects []string
+			var contexts []any
+			adapter := grantReferenceObjectChecker{metaReferenceCheck(func(got context.Context, subject, relation, object string) (bool, error) {
+				contexts = append(contexts, got.Value(contextKey{}))
+				subjects = append(subjects, subject)
+				objects = append(objects, object)
+				calls = append(calls, relation)
+				return relation == tc.allowedRelation, tc.backendErr
+			})}
+			visible, err := authzfilter.VisibleSet(ctx, adapter, "service_account:sa_actor", "iam_role", []string{"rol_target"})
+			if tc.backendErr != nil {
+				require.ErrorIs(t, err, tc.backendErr)
+				require.Empty(t, visible)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.want, visible["rol_target"])
+			}
+			require.Equal(t, tc.calls, calls)
+			for i := range calls {
+				require.Equal(t, "same-tx-context", contexts[i])
+				require.Equal(t, "service_account:sa_actor", subjects[i])
+				require.Equal(t, "iam_role:rol_target", objects[i])
+			}
+		})
+	}
+}
+
+func TestGrantReferenceObjectCheckerRejectsConditionsBeforeNativeCall(t *testing.T) {
+	calls := 0
+	adapter := grantReferenceObjectChecker{metaReferenceCheck(func(context.Context, string, string, string) (bool, error) { calls++; return true, nil })}
+	allowed, err := adapter.CheckWithContext(context.Background(), "user:usr_actor", "viewer", "iam_role:rol_target", map[string]any{"mfa": true})
+	require.ErrorIs(t, err, iamerr.ErrUnavailable)
+	require.False(t, allowed)
+	require.Zero(t, calls)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	allowed, err = adapter.CheckWithContext(canceled, "user:usr_actor", "viewer", "iam_role:rol_target", nil)
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, allowed)
+	require.Zero(t, calls)
+	allowed, err = adapter.CheckWithContext(context.Background(), "user:usr_actor", "viewer", "iam_role:rol_target", map[string]any{})
+	require.NoError(t, err)
+	require.True(t, allowed)
+	require.Equal(t, 1, calls)
+	allowed, err = (grantReferenceObjectChecker{}).CheckWithContext(context.Background(), "user:usr_actor", "viewer", "iam_role:rol_target", nil)
+	require.ErrorIs(t, err, iamerr.ErrUnavailable)
+	require.False(t, allowed)
 }

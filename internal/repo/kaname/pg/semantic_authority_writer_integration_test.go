@@ -122,7 +122,7 @@ func TestSemanticAuthorityWriterDefaultsAndAllIdentityAxesDeny(t *testing.T) {
 		{"protocol", `UPDATE kaname.authority_semantic_identity SET protocol_version=2`},
 		{"model", `UPDATE kaname.authority_semantic_identity SET model_id=repeat('a',64)`},
 		{"catalog", `UPDATE kaname.authority_semantic_identity SET catalog_id=repeat('b',64)`},
-		{"projector", `UPDATE kaname.authority_semantic_identity SET projector_version='granteffect/v2'`},
+		{"projector", `UPDATE kaname.authority_semantic_identity SET projector_version='granteffect/v3'`},
 		{"missing", `DELETE FROM kaname.authority_semantic_identity`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
