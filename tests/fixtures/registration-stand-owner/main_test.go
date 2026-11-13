@@ -461,7 +461,14 @@ func TestProtocolExitCodesBeforeAndAfterACK(t *testing.T) {
 			if err := restart(h.socket, h.assignment()); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(h.root, "phase1.exit"), []byte(strconv.Itoa(code)), 0600); err != nil {
+			// kaname#1125: дочерний процесс не должен увидеть созданный, но ещё
+			// пустой файл команды. Публикуем целое значение только после записи.
+			exitPath := filepath.Join(h.root, "phase1.exit")
+			pendingPath := exitPath + ".pending"
+			if err := exclusive(pendingPath, []byte(strconv.Itoa(code))); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(pendingPath, exitPath); err != nil {
 				t.Fatal(err)
 			}
 			want := code
