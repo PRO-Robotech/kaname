@@ -16,6 +16,8 @@ import (
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/modelcompose"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -56,8 +58,24 @@ func TestGroupMembershipParticipantActualWorkersPreparedAndStrict(t *testing.T) 
 	require.Nil(t, bad)
 	halves, err := kanamepg.NewCatalogRepo(r.admin).ReadCatalogHalves(r.ctx)
 	require.NoError(t, err)
-	changed, err := granteffect.NewBundle(r.ctx, r.bundle.ModelSource()+"\n", halves, granteffect.ProjectorVersion)
+	// Другая модель должна пройти настоящий допуск композиции. Пустая строка
+	// после канона не добавляет ни одного нового типа и допуском отвергается.
+	extra, err := manifest.Load([]byte(`apiVersion: iam/v1
+module: vpc
+resources:
+  - name: widget
+    objectType: vpc_group_member_probe
+    parents: [project]
+    producer: derived
+    verbs: [get, list, update, delete]
+`))
 	require.NoError(t, err)
+	otherModel, report, err := modelcompose.Compose(r.bundle.ModelSource(), []*manifest.Manifest{extra})
+	require.NoError(t, err)
+	changed, err := granteffect.NewBundle(r.ctx, otherModel, halves, granteffect.ProjectorVersion, report.KeyTerms...)
+	require.NoError(t, err)
+	require.NotEqual(t, r.bundle.Identity().ModelID, changed.Identity().ModelID)
+	require.Equal(t, r.bundle.Identity().CatalogID, changed.Identity().CatalogID)
 	foreign, err := kanamepg.NewGroupMembershipParticipant(r.ctx, r.repo, changed)
 	require.NoError(t, err)
 	absent, err := foreign.GroupMembershipWriter(r.ctx, domain.GroupMember{GroupID: g.ID, MemberType: domain.SubjectTypeUser, MemberID: domain.SubjectID(uid)})
