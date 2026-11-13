@@ -36,9 +36,9 @@ func writerProtocolRig(t *testing.T) protocolRig {
 	_, a := kac127SeedUserAndAccount(t, ctx, admin, "protocol-a")
 	_, b := kac127SeedUserAndAccount(t, ctx, admin, "protocol-b")
 	bundle := semanticBundleDB(t, ctx, admin)
-	role := fmt.Sprintf("protocol_runtime_%s", strings.ReplaceAll(ids.NewID("r"), "-", "_"))
+	role := fmt.Sprintf("protocol_runtime_%s", strings.ReplaceAll(ids.NewID("rol"), "-", "_"))
 	quoted := pgx.Identifier{role}.Sanitize()
-	password := ids.NewID("test_password")
+	password := ids.NewID("pwd")
 	_, err := admin.Exec(ctx, "CREATE ROLE "+quoted+" LOGIN PASSWORD '"+strings.ReplaceAll(password, "'", "''")+"' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT")
 	require.NoError(t, err)
 	t.Cleanup(func() {

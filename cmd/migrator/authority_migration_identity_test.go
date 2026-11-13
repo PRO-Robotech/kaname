@@ -36,7 +36,7 @@ func TestAuthorityMigrationIdentityUsesOneActualDSNSource(t *testing.T) {
 			require.NoError(t, err)
 			expected := migrationDSN
 			if mode == "default" {
-				expected = runtimeDSN
+				expected = runtimeDSN + "?sslmode=disable&options=-c%20search_path%3Dkaname%2Cpublic"
 			}
 			require.Equal(t, expected, got)
 			runner, err := buildRunner(&rootOptions{dialect: defaultDialect}, fstest.MapFS{})
