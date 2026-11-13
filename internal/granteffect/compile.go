@@ -45,6 +45,16 @@ func New(modelSource string, halves catalog.Halves) (*Compiler, error) {
 	if err = json.Unmarshal(raw, &copy); err != nil {
 		return nil, err
 	}
+	// Чтение SQL не обещает порядок строк. И facts, и fingerprint должны
+	// происходить из одной канонической формы, иначе одинаковые каталоги
+	// дают разные identity, а дубликаты скрывают разные last-wins значения.
+	raw, err = catalog.CanonicalJSON(copy)
+	if err != nil {
+		return nil, err
+	}
+	if err = json.Unmarshal(raw, &copy); err != nil {
+		return nil, err
+	}
 	facts, err := catalog.NewFacts(copy)
 	if err != nil {
 		return nil, err
