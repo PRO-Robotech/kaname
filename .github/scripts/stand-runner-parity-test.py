@@ -174,11 +174,20 @@ class World:
                     shutil.copyfile(file, self.work / "ship" / file.name)
         self.provider = {k: str(v) for k, v in yaml.safe_load((source_root / ".github/workflows/e2e-newman.yml").read_text())["env"].items()}
         self.env = dict(os.environ)
+        # Подписывающий APT-peer моделируется отдельно; здесь фиксируем его точные
+        # байты индекса, чтобы проверка immutable source не становилась обходом.
+        self.provider["KANAME_RUNNER_RELEASES"] = "\n".join(
+            hashlib.sha256(("fixture-release:" + suite + "\n").encode()).hexdigest() + " " + suite
+            for suite in ("noble", "noble-updates", "noble-security"))
         self.env.update(self.provider)
         self.env["KANAME_RUNNER_GO"] = declarations(source_root)[0]["go"][0]
         self.env["FIXTURE_NPM"] = self.provider["KANAME_RUNNER_NPM"]
         self.env["FIXTURE_REAL_GOROOT"] = os.environ["GOROOT"]
         self.env.update(env or {})
+        # В step-мире env приходит из настоящего pod. Его реальные release pins
+        # не удостоверяют синтетический индекс APT-peer: окончательная привязка
+        # фикстуры ставится после переноса env. Остальной pod env сохраняется.
+        self.env["KANAME_RUNNER_RELEASES"] = self.provider["KANAME_RUNNER_RELEASES"]
         self.env.update(HOME=str(base / "home"), PATH=f"{self.bin}:{self.prefix}/bin:/usr/bin:/bin",
                         RUNNER_SHA="fixture-source", RUNNER_REPO="PRO-Robotech/kaname",
                         RUNNER_NODE=self.provider["KANAME_RUNNER_NODE"], RUNNER_KUBECTL=self.provider["KANAME_RUNNER_KUBECTL"], RUNNER_GO=self.env["KANAME_RUNNER_GO"],
@@ -220,7 +229,7 @@ class World:
         executable(self.bin / "sudo", '''#!/usr/bin/env python3
 import json,os,pathlib,sys
 args=sys.argv[1:]
-assert args[0] == '--preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT'
+assert args[0] == '--preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT,KANAME_RUNNER_RELEASES'
 assert args[1:3] == ['bash','-c']
 with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'sudo-peer.jsonl').open('a') as out: out.write(json.dumps(args)+'\\n')
 os.execvpe('bash',args[1:],dict(os.environ,FIXTURE_UID='0'))
@@ -230,6 +239,15 @@ import json,os,pathlib,sys
 with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'apt-peer.jsonl').open('a') as out: out.write(json.dumps({'peer':str(pathlib.Path(__file__).resolve()),'uid':os.environ['FIXTURE_UID'],'argv':sys.argv[1:]})+'\\n')
 if os.environ.get('FIXTURE_APT_FAIL'):
  print('controlled apt peer failure',file=sys.stderr);sys.exit(23)
+if 'update' in sys.argv:
+ options=[sys.argv[i+1] for i,a in enumerate(sys.argv[:-1]) if a=='-o']
+ lists=pathlib.Path(next(v.split('=',1)[1] for v in options if v.startswith('Dir::State::lists=')))
+ prefix=os.environ['KANAME_RUNNER_SNAPSHOT'].removeprefix('https://').replace('/','_')
+ for suite in ('noble','noble-updates','noble-security'):
+  (lists/(prefix+'dists_'+suite+'_InRelease')).write_text('fixture-release:'+suite+'\\n')
+  for component in ('main','universe'):
+   (lists/(prefix+'dists_'+suite+'_'+component+'_binary-amd64_Packages')).write_text('')
+
 ''')
         # Устаревший запасной файл остаётся: допустимый bootstrap должен выбрать своего
         # точного поставщика, не удаляя и не принимая этот старый исполняемый файл.
@@ -403,11 +421,38 @@ else: sys.exit(74)
         return result
 
 
+def apt_fixture_checks(root, payload, base):
+    # Вход как у step_checks: полный env реально сгенерированного pod, включая
+    # настоящие pins workflow. Общий bootstrap проверяет байты APT-peer сам.
+    declared = {k: str(v) for k, v in yaml.safe_load((root / ".github/workflows/e2e-newman.yml").read_text())["env"].items()}
+    world = World(base, payload, env=declared)
+    aptdir = world.work / "apt-fixture"
+    (aptdir / "lists").mkdir(parents=True)
+    result = subprocess.run([str(world.bin / "apt-get"), "-o", "Dir::State::lists=" + str(aptdir / "lists"), "update"],
+                            env=world.env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    script = '. "$1"; runner_apt_cached_snapshot "$2" "$3"'
+    argv = ["bash", "-c", script, "fixture-proof", str(root / ".github/scripts/stand-runner-bootstrap.sh"), str(world.work), str(aptdir)]
+    positive = subprocess.run(argv, env=world.env, capture_output=True, text=True, timeout=10)
+    assert positive.returncode == 0, "pod env затенил индекс APT-peer: " + positive.stdout + positive.stderr
+    wrong_pins = dict(world.env, KANAME_RUNNER_RELEASES=declared["KANAME_RUNNER_RELEASES"])
+    mutant = subprocess.run(argv, env=wrong_pins, capture_output=True, text=True, timeout=10)
+    assert mutant.returncode != 0, "настоящие pins приняли синтетические байты"
+    release = next((aptdir / "lists").glob("*_noble_InRelease"))
+    release.write_text(release.read_text() + "changed")
+    damaged = subprocess.run(argv, env=world.env, capture_output=True, text=True, timeout=10)
+    assert damaged.returncode != 0, "изменённый индекс APT-peer принят"
+    print("PARITY-APT-FIXTURE pod-env=preserved peer-pins=bound wrong-pins=rejected changed-index=rejected controls=3", flush=True)
+
+
 def payload_checks(root, payload, axis="all"):
     installs, checks, blocks, modules = declarations(root)
     failures = 0
     with tempfile.TemporaryDirectory(prefix="stand-parity-") as temp:
         base = Path(temp)
+        apt_fixture_checks(root, payload, base / "apt-fixture-world")
+        if axis == "apt-fixture":
+            return 0
         roots = {"/usr/local": base / "workflow-lawful/usr/local", "/work": base / "workflow-lawful/work", "/src": base / "workflow-lawful/src"}
         sample = "'/usr/local/bin/kubectl' /work/out /src/root /workflow-lawful/bin"
         expected = f"'{roots['/usr/local']}/bin/kubectl' {roots['/work']}/out {roots['/src']}/root /workflow-lawful/bin"
@@ -667,7 +712,7 @@ if __name__ == "__main__":
         if sys.argv[1] == "--steps":
             sys.exit(step_checks(Path(sys.argv[2]), Path(sys.argv[3])))
         if sys.argv[1] == "--axis":
-            assert sys.argv[2] in ("tools", "prologue", "opaque", "real-tool"), "неизвестная ось fixture"
+            assert sys.argv[2] in ("tools", "prologue", "opaque", "real-tool", "apt-fixture"), "неизвестная ось fixture"
             sys.exit(payload_checks(Path(sys.argv[3]), Path(sys.argv[4]).read_text(), sys.argv[2]))
         sys.exit(payload_checks(Path(sys.argv[1]), Path(sys.argv[2]).read_text()))
     except Exception as error:

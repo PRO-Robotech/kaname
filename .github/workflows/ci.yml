@@ -272,7 +272,7 @@ jobs:
     # -timeout 45m ограничивает отдельный тестовый пакет, а не весь go test ./...:
     # общий бюджет включает сборку и исполнение множества пакетов. Лимит 55m
     # отменил полный прогон до числового вердикта (kaname#986). Даём завершить весь набор;
-    # команда, per-package timeout, самопроба и строгий прогонщик ниже неизменны.
+    # Два обязательных прогона ниже сохраняют отдельные числовые вердикты.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -295,22 +295,28 @@ jobs:
       # поднимающие Postgres на каждом пакете, и задание упирается в предел
       # времени. Контейнерные гоняет отдельное задание ниже.
       #
-      # Код `go test` берётся ДАННЫМИ: под `-e` ненулевой оборвал бы шаг до
-      # прогонщика, и вердикта — числа исполненного, отказов и пропущенного —
-      # не было бы вовсе. Роняет шаг ПРОГОНЩИК, а не `go test`.
-      #
-      # `-timeout 45m` — запас к самому долгому пакету (kaname#949): `internal/check`
-      # на d34eab3f7 под этой формой — 1723,754 с, код 0 (внешний кластер, 4 CPU);
-      # при 25m тот же пакет снят паникой на 1501 с. 45m — 2700 с: доля пакета 64 %,
-      # запас 57 %. Предел растёт вслед за пакетом, а не вместо его ускорения: доля
-      # выше 75 % — предмет задачи, а не новое число. Маршрут `ci.yml:unit` стенда
-      # воркспейса (`scripts/stand-report.sh`) берёт эту команду из этого шага.
-      - name: пробы (-race -short)
+      # Полный обход дерева читает тот же корпус без детектора гонок: его
+      # парсер и инъекции остаются в общем -race прогоне. Исключено ровно одно
+      # имя, которое обязательно отдельно исполняется и проходит один раз.
+      # Потоки JSON раздельны: стенд читает test.json как один общий прогон.
+      # Все четыре кода берутся данными, чтобы обе группы дали перепись даже
+      # при отказе первой. Итог требует и сырого кода Go, и числового вердикта.
+      - name: пробы (-race -short и отдельный полный обход дерева)
         run: |
-          rc=0
-          go test ./... -race -short -count=1 -timeout 45m -json > test.json 2>&1 || rc=$?
-          echo "go test завершился с кодом $rc (вердикт выносит прогонщик ниже)"
-          python3 .github/scripts/go-test-verdict.py < test.json
+          tree_go_rc=0
+          tree_verdict_rc=0
+          race_go_rc=0
+          race_verdict_rc=0
+          go test ./internal/check -run '^TestNoDeferredWorkInTheTree$' -short -count=1 -timeout 4m -json > deferred-tree.json 2>&1 || tree_go_rc=$?
+          echo "Полный обход дерева без -race: go test код $tree_go_rc; отдельная перепись:"
+          python3 .github/scripts/go-test-verdict.py --require-pass 'github.com/PRO-Robotech/kaname/internal/check::TestNoDeferredWorkInTheTree' < deferred-tree.json || tree_verdict_rc=$?
+          go test ./... -race -short -count=1 -timeout 45m -skip '^TestNoDeferredWorkInTheTree$' -json > test.json 2>&1 || race_go_rc=$?
+          echo "Общий прогон -race: go test код $race_go_rc; отдельная перепись:"
+          python3 .github/scripts/go-test-verdict.py < test.json || race_verdict_rc=$?
+          echo "Коды: дерево Go=$tree_go_rc вердикт=$tree_verdict_rc; -race Go=$race_go_rc вердикт=$race_verdict_rc"
+          if [ "$tree_go_rc" -ne 0 ] || [ "$tree_verdict_rc" -ne 0 ] || [ "$race_go_rc" -ne 0 ] || [ "$race_verdict_rc" -ne 0 ]; then
+            exit 1
+          fi
 
   # ── ЛИНТ ────────────────────────────────────────────────────────────────────
   lint:

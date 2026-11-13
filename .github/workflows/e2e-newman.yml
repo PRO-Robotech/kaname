@@ -77,6 +77,10 @@ env:
   KANAME_RUNNER_IMAGE: ubuntu:24.04
   KANAME_RUNNER_OS: ubuntu/24.04
   KANAME_RUNNER_SNAPSHOT: https://snapshot.ubuntu.com/ubuntu/20261025T000000Z/
+  KANAME_RUNNER_RELEASES: |-
+    cdb2f31d809f589719a53c6ad15f255b27569c4059542ada282aaa21b8e164b0 noble
+    c053de67f316159b441e167f3f29b3f00751b71409dc1537bb90cb86d58b2024 noble-updates
+    d53de120a213d4e17ede2854718ed8eedfc04f3ea2e263994d7f21317f7b851b noble-security
   KANAME_RUNNER_APT: |-
     git=1:2.43.0-1ubuntu7.4 git-man=1:2.43.0-1ubuntu7.4
     openssl=3.0.13-0ubuntu3.16 libssl3t64=3.0.13-0ubuntu3.16
@@ -121,7 +125,14 @@ jobs:
             .github
             go.mod
           sparse-checkout-cone-mode: false
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        id: provider-apt-cache
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
       - name: единый provider инструментов (native/hosted)
+        id: runner-provider
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
           . .github/scripts/stand-runner-bootstrap.sh
@@ -131,6 +142,12 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        if: steps.runner-provider.outcome == 'success' && steps.provider-apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ steps.provider-apt-cache.outputs.cache-primary-key }}
       - name: измеренный UID и публичный receipt provider
         run: |
           python3 - <<'PY_RECEIPT'
@@ -184,7 +201,14 @@ jobs:
       # перенесла их дом в это дерево (`proto/kaname/` — 41 контракт), и гейт
       # покрытия читает их оттуда. Прежде они приезжали модулем платформы, и
       # обоснование этого шага было именно таким.
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        id: provider-apt-cache
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
       - name: единый provider инструментов (native/hosted)
+        id: runner-provider
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
           . .github/scripts/stand-runner-bootstrap.sh
@@ -194,6 +218,12 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        if: steps.runner-provider.outcome == 'success' && steps.provider-apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ steps.provider-apt-cache.outputs.cache-primary-key }}
       - name: измеренный UID и публичный receipt provider
         run: |
           python3 - <<'PY_RECEIPT'
@@ -266,6 +296,9 @@ jobs:
       # ПРОГОНЩИК ВЫНОСИТ ВЕРДИКТ, значит его способность УПАСТЬ доказывается ДО
       # того, как вердикту поверят. Инъекция идёт по каждой оси в обе стороны,
       # включая законных близнецов и третий исход.
+      - name: APT-кэш — подписи, полнота и установка без сети
+        run: python3 .github/scripts/stand-runner-apt-cache-test.py --image "$KANAME_RUNNER_IMAGE"
+
       - name: прогонщик проб способен упасть (самопроба инъекцией)
         run: python3 .github/scripts/run-python-probes.py --self-test
 
@@ -527,7 +560,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        id: provider-apt-cache
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
       - name: единый provider инструментов (native/hosted)
+        id: runner-provider
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
           . .github/scripts/stand-runner-bootstrap.sh
@@ -537,6 +577,12 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        if: steps.runner-provider.outcome == 'success' && steps.provider-apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ steps.provider-apt-cache.outputs.cache-primary-key }}
       - name: измеренный UID и публичный receipt provider
         run: |
           python3 - <<'PY_RECEIPT'
@@ -981,7 +1027,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        id: provider-apt-cache
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
       - name: единый provider инструментов (native/hosted)
+        id: runner-provider
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
           . .github/scripts/stand-runner-bootstrap.sh
@@ -991,6 +1044,12 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        if: steps.runner-provider.outcome == 'success' && steps.provider-apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ steps.provider-apt-cache.outputs.cache-primary-key }}
       - name: измеренный UID и публичный receipt provider
         run: |
           python3 - <<'PY_RECEIPT'
@@ -1297,7 +1356,14 @@ jobs:
       # Чеканка удостоверения идёт КОДОМ ПРОДУКТА (`go run …/credsecretmint`), и
       # его зависимости — модули: без этого шага самопроверка формы выходит
       # «предпосылкой не выполненной», а не вердиктом.
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        id: provider-apt-cache
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
       - name: единый provider инструментов (native/hosted)
+        id: runner-provider
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
           . .github/scripts/stand-runner-bootstrap.sh
@@ -1307,6 +1373,12 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        if: steps.runner-provider.outcome == 'success' && steps.provider-apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ steps.provider-apt-cache.outputs.cache-primary-key }}
       - name: измеренный UID и публичный receipt provider
         run: |
           python3 - <<'PY_RECEIPT'
@@ -1465,7 +1537,14 @@ jobs:
 
       # Координаты стенда — ВНЕ рабочего дерева и одни на все шаги: каталог
       # стенда несёт ключи листов, и в дереве им не место.
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        id: provider-apt-cache
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
       - name: единый provider инструментов (native/hosted)
+        id: runner-provider
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
           . .github/scripts/stand-runner-bootstrap.sh
@@ -1475,6 +1554,12 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        if: steps.runner-provider.outcome == 'success' && steps.provider-apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ steps.provider-apt-cache.outputs.cache-primary-key }}
       - name: измеренный UID и публичный receipt provider
         run: |
           python3 - <<'PY_RECEIPT'
@@ -1817,7 +1902,14 @@ jobs:
 
       # Самопроверка идёт ДО вердикта: держатель, потерявший способность
       # производить событие, молчит ровно так же, как исправный на зелёном стволе.
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        id: provider-apt-cache
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
       - name: единый provider инструментов (native/hosted)
+        id: runner-provider
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
           . .github/scripts/stand-runner-bootstrap.sh
@@ -1827,6 +1919,12 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        if: steps.runner-provider.outcome == 'success' && steps.provider-apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ steps.provider-apt-cache.outputs.cache-primary-key }}
       - name: измеренный UID и публичный receipt provider
         run: |
           python3 - <<'PY_RECEIPT'
@@ -1884,7 +1982,14 @@ jobs:
             .github
             go.mod
           sparse-checkout-cone-mode: false
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        id: provider-apt-cache
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
       - name: единый provider инструментов (native/hosted)
+        id: runner-provider
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
           . .github/scripts/stand-runner-bootstrap.sh
@@ -1894,6 +1999,12 @@ jobs:
             echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::provider инструментов не установлен (125); команды набора не исполнялись"
             exit 1
           fi
+      - uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        if: steps.runner-provider.outcome == 'success' && steps.provider-apt-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ steps.provider-apt-cache.outputs.cache-primary-key }}
       - name: измеренный UID и публичный receipt provider
         run: |
           python3 - <<'PY_RECEIPT'
