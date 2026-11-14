@@ -85,6 +85,15 @@ kaname-svc.requireOperatorSuppliedNames — ОТКАЗ УСТАНОВКИ ОДН
 {{- if not $db.passwordSecretKey -}}
 {{- $missing = append $missing "  db.passwordSecretKey   — ключ внутри этого Secret, под которым лежит пароль.\n                           Переменной окружения НЕТ: величина живёт только в профиле чарта." -}}
 {{- end -}}
+{{/* kaname#1034: отдельный migrator DSN требует полной пары координат. */}}
+{{- if or $db.migrationDSNSecretName $db.migrationDSNSecretKey -}}
+{{- if not $db.migrationDSNSecretName -}}
+{{- $missing = append $missing "  db.migrationDSNSecretName — имя Secret с отдельным DSN владельца миграций." -}}
+{{- end -}}
+{{- if not $db.migrationDSNSecretKey -}}
+{{- $missing = append $missing "  db.migrationDSNSecretKey — ключ DSN владельца миграций внутри Secret." -}}
+{{- end -}}
+{{- end -}}
 {{/* КООРДИНАТЫ TLS — ОБЯЗАТЕЛЬНЫ ОТ АНТЕЦЕДЕНТА, А НЕ ВСЕГДА (kacho#2488).
 
 Перечень судил четыре координаты, а текст его отказа утверждал, что чарт «не

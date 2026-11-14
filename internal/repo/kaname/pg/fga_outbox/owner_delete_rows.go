@@ -8,11 +8,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // EmitVersionedDeleteTx кладёт объединённый набор ОДНИМ оператором: свёртка
@@ -58,10 +57,14 @@ func EmitVersionedDeleteTx(ctx context.Context, tx pgx.Tx, rows []outboxtypes.Ve
 	if err := prepareRetirementTx(ctx, tx, unique); err != nil {
 		return err
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO kaname.fga_outbox(event_type,payload,created_at)
- SELECT $1,jsonb_build_object('user',u,'relation',r,'object',o,'protect_holders',true) || CASE WHEN v IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('source_version',v) END,clock_timestamp()
+	actionAt, err := retireProducerOwnersTx(ctx, tx, users, relations, objects, versions)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO kaname.fga_outbox(event_type,payload,created_at)
+ SELECT $1,jsonb_build_object('user',u,'relation',r,'object',o,'protect_holders',true) || CASE WHEN v IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('source_version',v) END,$6::timestamptz
  FROM unnest($2::text[],$3::text[],$4::text[],$5::timestamptz[]) AS t(u,r,o,v)
- ORDER BY o COLLATE "C",u COLLATE "C",r COLLATE "C"`, EventTypeDelete, users, relations, objects, versions)
+ ORDER BY o COLLATE "C",u COLLATE "C",r COLLATE "C"`, EventTypeDelete, users, relations, objects, versions, actionAt)
 	if err != nil {
 		return fmt.Errorf("fga_outbox: insert versioned withdrawal: %w", err)
 	}

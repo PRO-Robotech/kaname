@@ -18,7 +18,18 @@ func heldNamesOf(ctx context.Context, keys shared.RegisteredKeys, rules domain.R
 	if keys == nil {
 		return nil, nil
 	}
-	named := rules.NamedKeys()
+	var named []domain.RuleNameHold
+	// Split может менять количество правил; hold сохраняет исходный индекс.
+	for i, rule := range rules {
+		ordinary, _, err := domain.SplitGrantCapabilityRules(domain.Rules{rule})
+		if err != nil {
+			return nil, shared.MapValidationErr(err)
+		}
+		for _, hold := range ordinary.NamedKeys() {
+			hold.Rule = i
+			named = append(named, hold)
+		}
+	}
 	if len(named) == 0 {
 		return nil, nil
 	}

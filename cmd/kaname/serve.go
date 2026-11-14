@@ -20,11 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
-
 	"github.com/PRO-Robotech/corelib/authz"
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/grpcsrv"
@@ -32,7 +27,6 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	"github.com/PRO-Robotech/corelib/servicehost"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
@@ -40,9 +34,12 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/edgecredential"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
@@ -52,6 +49,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
+	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -60,11 +58,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
-
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
-	"github.com/PRO-Robotech/kaname/internal/catalog"
-	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
+	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 )
 
 // grpcStopper — поверхность graceful/forced остановки gRPC-сервера. *grpc.Server
@@ -147,6 +144,17 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		return err
 	}
 	defer pool.Close()
+
+	// kaname#1034: проверка реального runtime LOGIN до первой startup-записи.
+	// Owner DSN допустим лишь прежнему режиму; participant не делает SET ROLE.
+	if err := cfg.AuthorityProtocol.Validate(); err != nil {
+		return err
+	}
+	if cfg.AuthorityProtocol.Participant() {
+		if err := kanamepg.New(pool, nil).ValidateAuthorityRuntime(ctx); err != nil {
+			return fmt.Errorf("authority-protocol runtime LOGIN: %w", err)
+		}
+	}
 
 	// Загрузочный страж: служба не поднимается поверх базы прежней установки.
 	//
@@ -606,6 +614,55 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// Orphan-reconciler backstop: разрешает осиротевшие done=false операции умершего
 	// процесса (kill-9 / истекший terminal-write budget) в терминал по
 	// committed-реальности ресурса. Boot-sweep + периодический фон; non-fatal.
+
+	// Целый handoff после реального catalog/seed, до фоновых LRO и API.
+	// Stage/activation принадлежат отдельному privileged command и здесь не запускаются.
+	var membershipParticipant *kanamepg.GroupMembershipParticipant
+	var admissionParticipant *kanamepg.HumanAdmissionParticipant
+	var inviteDecisions *kanamepg.InviteDecisions
+	var clusterAdminParticipant *kanamepg.ClusterAdminParticipant
+	var resourceParticipant *kanamepg.ResourceObjectParticipant
+	var resourceObjectParticipant *reconcile.Reconciler
+	var groupObjectParticipant *reconcile.Reconciler
+	var bindingStageParticipant *kanamepg.BindingStageParticipant
+	if cfg.AuthorityProtocol.Participant() {
+		bundle, loadErr := loadGroupParticipationBundle(ctx, cfg.AuthorityProtocol, kanameRepo, preparedModel)
+		if loadErr != nil {
+			return loadErr
+		}
+		clusterAdminParticipant, loadErr = kanamepg.NewClusterAdminParticipant(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return loadErr
+		}
+		admissionParticipant, loadErr = kanamepg.NewHumanAdmissionParticipant(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return loadErr
+		}
+		inviteDecisions, loadErr = kanamepg.NewInviteDecisionRunner(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return fmt.Errorf("invite authority participant: %w", loadErr)
+		}
+		resourceParticipant, loadErr = kanamepg.NewResourceObjectParticipant(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return loadErr
+		}
+		resourceObjectParticipant, loadErr = resourceParticipant.NewObjectReconciler(logger)
+		if loadErr != nil {
+			return loadErr
+		}
+		membershipParticipant, loadErr = kanamepg.NewGroupMembershipParticipant(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return loadErr
+		}
+		bindingStageParticipant, loadErr = membershipParticipant.NewBindingStageParticipant(ctx, logger)
+		if loadErr != nil {
+			return loadErr
+		}
+		groupObjectParticipant, loadErr = membershipParticipant.NewGroupObjectReconciler(logger)
+		if loadErr != nil {
+			return loadErr
+		}
+	}
 	startLROReconciler(ctx, pool, kanameRepo, catalogSnapshot, lroRec, logger)
 
 	// Надёжная страховка одноразовых секретов, помещённых в ответы ЗАВЕРШЁННЫХ операций.
@@ -660,7 +717,30 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
-		metricsReg, cfg, moduleRoster, tokenSigner, logger)
+		metricsReg, cfg, moduleRoster, tokenSigner, logger, preparedModel.plans)
+	if cfg.AuthorityProtocol.Participant() {
+		resourceBeginner, participantErr := resourceParticipant.RegistrationTxBeginner(pool)
+		if participantErr != nil {
+			return participantErr
+		}
+		svcs.resourceRegistrar.WithResourceTxBeginner(resourceBeginner)
+		resourceObjectParticipant.WithSizeRecorder(svcs.bindingSizeRecorder)
+		if err := svcs.bindingReconciler.WithObjectReconciler(resourceObjectParticipant); err != nil {
+			return err
+		}
+		svcs.internalClusterHandler.WithAdminTxBeginner(clusterAdminParticipant)
+		svcs.userHandler.WithIdentityLifecycleWriter(admissionParticipant)
+		// UserService.Invite и MembershipService.Create уже делят этот UC.
+		// TTL, ограничение писем и post-commit callbacks заданы при его сборке.
+		svcs.userInvite.WithInviteDecisions(inviteDecisions)
+		svcs.groupHandler.WithMembershipWriter(membershipParticipant).WithLifecycleWriter(membershipParticipant)
+		if err := svcs.bindingReconciler.WithStagedBindingReconciler(bindingStageParticipant); err != nil {
+			return err
+		}
+		if err := svcs.bindingReconciler.WithGroupObjectReconciler(groupObjectParticipant); err != nil {
+			return err
+		}
+	}
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
 	// kacho#1270) — строится на каждом старте (kaname#363): отказ сборки есть
@@ -668,7 +748,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// ПРИНИМАЕТ тот же реконсайлер материализации привязки, что путь запроса
 	// (`sign_in_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
 	// потому что её таблицы — предметы той же петли.
-	lane, err := buildLoginLane(ctx, cfg, moduleRoster, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
+	lane, err := buildLoginLane(ctx, cfg, moduleRoster, pool, kanameRepo, admissionParticipant, svcs.bindingReconciler, metricsReg, logger)
 	if err != nil {
 		return err
 	}
@@ -2030,6 +2110,23 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	reconcileAdapter := kanamepg.NewReconcileAdapter(pool, catalogSnapshot)
 	reconcileEngine := reconcile.New(reconcileAdapter,
 		logger.With(slog.String("component", "rsab_reconciler")), catalogSnapshot)
+	if cfg.AuthorityProtocol.Participant() {
+		if err := reconcileEngine.WithStagedBindingReconciler(bindingStageParticipant); err != nil {
+			return err
+		}
+		// Фоновая очередь имеет отдельный engine и, как прежде, не пишет
+		// размер в гистограмму пути запроса; протокол TX остаётся тем же.
+		backgroundObjects, err := resourceParticipant.NewObjectReconciler(logger.With("worker", "selector-reconcile"))
+		if err != nil {
+			return err
+		}
+		if err := reconcileEngine.WithObjectReconciler(backgroundObjects); err != nil {
+			return err
+		}
+		if err := reconcileEngine.WithGroupObjectReconciler(groupObjectParticipant); err != nil {
+			return err
+		}
+	}
 	// resource_reconcile_outbox дренажится NOTIFY-driven (паритет с fga_outbox drainer):
 	// AFTER INSERT триггер (миграция 0042) шлет pg_notify на канал
 	// kaname_resource_reconcile_outbox, reconcileAdapter LISTEN'ит его и будит worker —

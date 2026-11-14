@@ -8,16 +8,14 @@ import (
 	"fmt"
 	"log/slog"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/PRO-Robotech/corelib/operations"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type UpdateGroupInput struct {
@@ -43,8 +41,9 @@ var groupImmutableFields = map[string]string{
 }
 
 type UpdateGroupUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	lifecycleWriter lifecycleWriterSelection
+	repo            Repo
+	opsRepo         operations.Repo
 	// Optional post-commit per-object materializer (the SAME port the create-path
 	// uses). A LABEL change flips iam-direct selector membership, so the object must
 	// be re-materialized; nil-safe, the co-committed reconcile event + periodic sweep
@@ -166,7 +165,7 @@ func (u *UpdateGroupUseCase) Execute(ctx context.Context, in UpdateGroupInput) (
 // co-committed reconcile event and the periodic sweep stay the at-least-once backstop,
 // so this changes WHEN the revoke is observed, not WHETHER it happens.
 func (u *UpdateGroupUseCase) doUpdate(ctx context.Context, g domain.Group, mask []string, actor string, changed []string) (*anypb.Any, error) {
-	updated, err := shared.DoWithWriteTx(ctx, u.repo,
+	updated, err := withGroupLifecycleTx(ctx, u.lifecycleWriter, u.repo, kaname.GroupUpdate, g,
 		func(ctx context.Context, w Writer) (domain.Group, error) {
 			upd, uerr := w.GroupsW().Update(ctx, g, mask)
 			if uerr != nil {

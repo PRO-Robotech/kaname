@@ -140,7 +140,9 @@ type InviteUserUseCase struct {
 	// mailIntents — счётчик исходов намерения отправки (queued ·
 	// rate_limited). nil-safe: без наблюдателя исход не считается, но и не
 	// меняется.
-	mailIntents InviteMailIntentObserver
+	mailIntents               InviteMailIntentObserver
+	inviteDecisions           InviteDecisionRunner
+	inviteDecisionsConfigured bool
 }
 
 // InviteMailIntentObserver — узкий порт наблюдаемости намерения отправки.
@@ -318,6 +320,9 @@ type admission struct {
 //   - Permission check (CanInviteUsers cascade). 401/PERMISSION_DENIED — НЕ
 //     создаем Operation.
 func (uc *InviteUserUseCase) admit(ctx context.Context, in InviteUserInput) (admission, error) {
+	if err := uc.validateInviteDecisionSelection(); err != nil {
+		return admission{}, shared.MapRepoErr(err)
+	}
 	// 1. Sync validation.
 	if in.AccountID == "" {
 		return admission{}, shared.InvalidArg("account_id", "Illegal argument account_id: required")
@@ -536,218 +541,253 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 		mailAsked  bool
 		mailQueued bool
 	}
-	res, err := shared.DoWithWriteTx(ctx, uc.repo,
-		func(ctx context.Context, w Writer) (inviteTxResult, error) {
-			var out inviteTxResult
-			// ОПЕРАТОР ВСТАВКИ — ОДИН НА КАЖДОЙ ВЕТВИ, и строка, которая уже есть
-			// в этом аккаунте, проходит через него так же, как новая и как строка
-			// человека, приглашаемого во второй аккаунт (приёмка A198, Р5). Срок
-			// приглашения пишет ТОЛЬКО он — правилом «продлить, не укорачивая,
-			// лишь у PENDING» под замком строки (`ON CONFLICT … DO UPDATE`).
-			// Прежде здесь стояла быстрая ветвь «строка уже в этом аккаунте —
-			// взять как есть» по чтению ДО транзакции: она решала ветвь вне
-			// замка (запрет #10) и обходила правило срока, так что повторное
-			// приглашение истёкшей строки отвечало успехом, ставило письмо — и
-			// оставляло приглашение невыкупаемым. Второй писатель срока в той
-			// ветви дал бы два места об одном правиле; поэтому ветви нет вовсе.
-			//
-			// Признак заведения — несущий: с глобальным ключом идентичности
-			// конфликт означает «человек уже есть в платформе», и для такой
-			// строки указатель на предка и материализация не эмитятся.
-			ins, insertedNow, err := w.UsersW().InsertPending(ctx, domain.User{
-				ID:           candidateID,
-				AccountID:    in.AccountID,
-				Email:        in.Email,
-				DisplayName:  dn,
-				InviteStatus: domain.InviteStatusPending,
-				InvitedBy:    invitedBy,
-			}, uc.inviteDeadline())
-			if err != nil {
+	body := func(ctx context.Context, w InviteMutationWriter, prepared PreparedInvite) (inviteTxResult, error) {
+		deadline := uc.inviteDeadline()
+		if prepared != nil && uc.inviteTTL > 0 {
+			deadline = prepared.DecisionAt().Add(uc.inviteTTL)
+		}
+		var out inviteTxResult
+		// ОПЕРАТОР ВСТАВКИ — ОДИН НА КАЖДОЙ ВЕТВИ, и строка, которая уже есть
+		// в этом аккаунте, проходит через него так же, как новая и как строка
+		// человека, приглашаемого во второй аккаунт (приёмка A198, Р5). Срок
+		// приглашения пишет ТОЛЬКО он — правилом «продлить, не укорачивая,
+		// лишь у PENDING» под замком строки (`ON CONFLICT … DO UPDATE`).
+		// Прежде здесь стояла быстрая ветвь «строка уже в этом аккаунте —
+		// взять как есть» по чтению ДО транзакции: она решала ветвь вне
+		// замка (запрет #10) и обходила правило срока, так что повторное
+		// приглашение истёкшей строки отвечало успехом, ставило письмо — и
+		// оставляло приглашение невыкупаемым. Второй писатель срока в той
+		// ветви дал бы два места об одном правиле; поэтому ветви нет вовсе.
+		//
+		// Признак заведения — несущий: с глобальным ключом идентичности
+		// конфликт означает «человек уже есть в платформе», и для такой
+		// строки указатель на предка и материализация не эмитятся.
+		ins, insertedNow, err := w.UsersW().InsertPending(ctx, domain.User{
+			ID:           candidateID,
+			AccountID:    in.AccountID,
+			Email:        in.Email,
+			DisplayName:  dn,
+			InviteStatus: domain.InviteStatusPending,
+			InvitedBy:    invitedBy,
+		}, deadline)
+		if err != nil {
+			return inviteTxResult{}, err
+		}
+		if prepared != nil && ins.ID != prepared.RecipientID() {
+			return inviteTxResult{}, iamerr.ErrAborted
+		}
+		out.user = ins
+		out.userIsNew = insertedNow
+
+		// Optional bind-to-Project. The insert is STRICT create, NOT idempotent:
+		// the `ON CONFLICT DO UPDATE SET id = access_bindings.id` this comment used
+		// to describe was deliberately removed (see abWriter.Insert in
+		// internal/repo/kaname/pg/access_binding_repo.go — the silent upsert hid a
+		// real duplicate grant and polluted the audit chain). Re-inviting into a
+		// project the subject already holds an ACTIVE grant on collides on the
+		// partial UNIQUE access_bindings_active_grant_uniq (migration 0003, the
+		// 5-tuple + target digest WHERE revoked_at IS NULL) → SQLSTATE 23505 →
+		// ErrAlreadyExists, and since this runs inside the invite writer-tx the
+		// WHOLE invite rolls back with it. Do not "restore" idempotency here.
+		//
+		// The AccessBinding subject must be the SAME user-row that the
+		// api-gateway resolves the invitee's JWT to (InternalIAMService.
+		// LookupSubject → the oldest row of the identity that may
+		// authenticate). With the
+		// user-per-Account model one identity has N user-rows (one per Account):
+		// `user` above is the per-Account row in `in.AccountID` (a fresh PENDING
+		// row, or an existing row in that Account). If the invitee is ALREADY
+		// ACTIVE in another Account (e.g. their bootstrap personal Account), the
+		// gateway resolves the JWT to that older row, NOT this one — so a
+		// project-grant tuple on `user.ID` would be `no path` for the
+		// gateway-resolved subject. AccessBinding.subject_id is Account-agnostic
+		// (it grants ANY user a role on ANY resource), so resolve the canonical
+		// (gateway-visible) identity row and bind the project-scoped grant to it.
+		if in.ProjectID != "" {
+			subjectID := domain.SubjectID(out.user.ID)
+			if prepared != nil {
+				subjectID = domain.SubjectID(prepared.RecipientID())
+			} else {
+				subjectID = uc.resolveCanonicalSubjectID(ctx, out.user, in.Email)
+			}
+			ab := domain.AccessBinding{
+				ID:           domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
+				SubjectType:  domain.SubjectTypeUser,
+				SubjectID:    subjectID,
+				RoleID:       in.RoleID,
+				ResourceType: domain.ResourceType("project"),
+				ResourceID:   string(in.ProjectID),
+				// Выдавший — тем же правилом, что у AccessBindingService.Create:
+				// одно право, положенное двумя глаголами, не различается по полю
+				// аудита (kaname#262). Записи об отзыве и удалении берут актора
+				// отсюда.
+				GrantedByUserID: adm.grantedBy,
+				// F8: whole-project invite grant (explicit allInScope).
+				Target: domain.AccessTarget{AllInScope: true},
+			}
+			if prepared != nil {
+				ab = prepared.Binding()
+			}
+			ins, abErr := w.AccessBindingsW().Insert(ctx, ab)
+			if abErr != nil {
+				return inviteTxResult{}, abErr
+			}
+			// Состав субъектов выдачи ОБЯЗАН быть записан вместе с ней.
+			// Форма вердикта заходит в выдачи с пары «субъект + область»
+			// через дочернюю таблицу: выдача без неё невидима вердикту
+			// целиком — право записано, читается списками и не действует.
+			// Отличить это состояние от «права не выдавали» нечем, поэтому
+			// оно и прожило незамеченным, пока право вычислял внешний
+			// движок: ему кортежи писались другим путём.
+			if serr := w.AccessBindingsW().InsertSubjects(ctx, ins.ID,
+				[]domain.Subject{{Type: domain.SubjectTypeUser, ID: subjectID}}); serr != nil {
+				return inviteTxResult{}, serr
+			}
+			out.createdAB = ins
+			out.haveAB = true
+			// Co-commit a reconcile
+			// event for the NEW access_binding object so the owner `*.*` binding
+			// materializes admin on iam_access_binding:<id> (the flat model dropped
+			// the `from <scope>` access cascade). ban #10 co-commit.
+			if err := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.accessBinding", string(ins.ID)); err != nil {
 				return inviteTxResult{}, err
 			}
-			out.user = ins
-			out.userIsNew = insertedNow
-
-			// Optional bind-to-Project. The insert is STRICT create, NOT idempotent:
-			// the `ON CONFLICT DO UPDATE SET id = access_bindings.id` this comment used
-			// to describe was deliberately removed (see abWriter.Insert in
-			// internal/repo/kaname/pg/access_binding_repo.go — the silent upsert hid a
-			// real duplicate grant and polluted the audit chain). Re-inviting into a
-			// project the subject already holds an ACTIVE grant on collides on the
-			// partial UNIQUE access_bindings_active_grant_uniq (migration 0003, the
-			// 5-tuple + target digest WHERE revoked_at IS NULL) → SQLSTATE 23505 →
-			// ErrAlreadyExists, and since this runs inside the invite writer-tx the
-			// WHOLE invite rolls back with it. Do not "restore" idempotency here.
+			// Указатель на предка для объекта привязки
+			// (`iam_access_binding:<id>#project@project:<id>`), без которого
+			// iam_access_binding-scoped Get/Delete не резолвится.
 			//
-			// The AccessBinding subject must be the SAME user-row that the
-			// api-gateway resolves the invitee's JWT to (InternalIAMService.
-			// LookupSubject → the oldest row of the identity that may
-			// authenticate). With the
-			// user-per-Account model one identity has N user-rows (one per Account):
-			// `user` above is the per-Account row in `in.AccountID` (a fresh PENDING
-			// row, or an existing row in that Account). If the invitee is ALREADY
-			// ACTIVE in another Account (e.g. their bootstrap personal Account), the
-			// gateway resolves the JWT to that older row, NOT this one — so a
-			// project-grant tuple on `user.ID` would be `no path` for the
-			// gateway-resolved subject. AccessBinding.subject_id is Account-agnostic
-			// (it grants ANY user a role on ANY resource), so resolve the canonical
-			// (gateway-visible) identity row and bind the project-scoped grant to it.
-			if in.ProjectID != "" {
-				subjectID := uc.resolveCanonicalSubjectID(ctx, out.user, in.Email)
-				ab := domain.AccessBinding{
-					ID:           domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
-					SubjectType:  domain.SubjectTypeUser,
-					SubjectID:    subjectID,
-					RoleID:       in.RoleID,
-					ResourceType: domain.ResourceType("project"),
-					ResourceID:   string(in.ProjectID),
-					// Выдавший — тем же правилом, что у AccessBindingService.Create:
-					// одно право, положенное двумя глаголами, не различается по полю
-					// аудита (kaname#262). Записи об отзыве и удалении берут актора
-					// отсюда.
-					GrantedByUserID: adm.grantedBy,
-					// F8: whole-project invite grant (explicit allInScope).
-					Target: domain.AccessTarget{AllInScope: true},
-				}
-				ins, abErr := w.AccessBindingsW().Insert(ctx, ab)
-				if abErr != nil {
-					return inviteTxResult{}, abErr
-				}
-				// Состав субъектов выдачи ОБЯЗАН быть записан вместе с ней.
-				// Форма вердикта заходит в выдачи с пары «субъект + область»
-				// через дочернюю таблицу: выдача без неё невидима вердикту
-				// целиком — право записано, читается списками и не действует.
-				// Отличить это состояние от «права не выдавали» нечем, поэтому
-				// оно и прожило незамеченным, пока право вычислял внешний
-				// движок: ему кортежи писались другим путём.
-				if serr := w.AccessBindingsW().InsertSubjects(ctx, ins.ID,
-					[]domain.Subject{{Type: domain.SubjectTypeUser, ID: subjectID}}); serr != nil {
-					return inviteTxResult{}, serr
-				}
-				out.createdAB = ins
-				out.haveAB = true
-				// Co-commit a reconcile
-				// event for the NEW access_binding object so the owner `*.*` binding
-				// materializes admin on iam_access_binding:<id> (the flat model dropped
-				// the `from <scope>` access cascade). ban #10 co-commit.
-				if err := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.accessBinding", string(ins.ID)); err != nil {
-					return inviteTxResult{}, err
-				}
-				// Указатель на предка для объекта привязки
-				// (`iam_access_binding:<id>#project@project:<id>`), без которого
-				// iam_access_binding-scoped Get/Delete не резолвится.
-				//
-				// СО-КОММИТ, а не запись после коммита. Прежде тут стоял
-				// post-commit best-effort прямо в движок: он терял кортеж на
-				// недоступности движка И — что тише и потому хуже — клал в движок
-				// строку, которой НЕТ в журнале `kaname.fga_outbox`. Состояние
-				// движка обязано быть свёрткой журнала (миграция 0098): кортеж мимо
-				// журнала проекция `relation_fact` не увидит никогда, и форма E
-				// ответит «нет» там, где движок отвечает «да», — молча, потому что
-				// пустая проекция неотличима от честного отказа.
-				//
-				// ВЕДОМОСТЬ — ТЕМ ЖЕ НАБОРОМ И В ТОЙ ЖЕ ТРАНЗАКЦИИ (kaname#670, класс
-				// #665). Снятие выдачи — штатное (`AccessBinding.Delete`) и дренажом
-				// области при удалении проекта (`shared.RevokeBindingsInScope`) —
-				// снимает РОВНО записанное в ведомости выпущенных кортежей. Без неё
-				// строка выдачи уходила, а указатель оставался фактом модели прав на
-				// проект, которого больше нет. Эмитируемое и записанное выпущенным —
-				// одно значение, а не два списка.
-				bindingTuples := []service.RelationTuple{{
-					User:     fmt.Sprintf("project:%s", ins.ResourceID),
-					Relation: "project",
-					Object:   fmt.Sprintf("iam_access_binding:%s", ins.ID),
-				}}
-				if ferr := w.EmitFGARelationWrite(ctx, bindingTuples); ferr != nil {
-					return inviteTxResult{}, ferr
-				}
-				if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, ins.ID, ledgerTuples(bindingTuples)); lerr != nil {
-					return inviteTxResult{}, lerr
-				}
+			// СО-КОММИТ, а не запись после коммита. Прежде тут стоял
+			// post-commit best-effort прямо в движок: он терял кортеж на
+			// недоступности движка И — что тише и потому хуже — клал в движок
+			// строку, которой НЕТ в журнале `kaname.fga_outbox`. Состояние
+			// движка обязано быть свёрткой журнала (миграция 0098): кортеж мимо
+			// журнала проекция `relation_fact` не увидит никогда, и форма E
+			// ответит «нет» там, где движок отвечает «да», — молча, потому что
+			// пустая проекция неотличима от честного отказа.
+			//
+			// ВЕДОМОСТЬ — ТЕМ ЖЕ НАБОРОМ И В ТОЙ ЖЕ ТРАНЗАКЦИИ (kaname#670, класс
+			// #665). Снятие выдачи — штатное (`AccessBinding.Delete`) и дренажом
+			// области при удалении проекта (`shared.RevokeBindingsInScope`) —
+			// снимает РОВНО записанное в ведомости выпущенных кортежей. Без неё
+			// строка выдачи уходила, а указатель оставался фактом модели прав на
+			// проект, которого больше нет. Эмитируемое и записанное выпущенным —
+			// одно значение, а не два списка.
+			bindingTuples := []service.RelationTuple{{
+				User:     fmt.Sprintf("project:%s", ins.ResourceID),
+				Relation: "project",
+				Object:   fmt.Sprintf("iam_access_binding:%s", ins.ID),
+			}}
+			if ferr := w.EmitFGARelationWrite(ctx, bindingTuples); ferr != nil {
+				return inviteTxResult{}, ferr
 			}
-			// A freshly-inserted invitee user row must forward-materialize under the
-			// owner `*.*` binding. Co-commit the reconcile event in the SAME writer-tx
-			// as the InsertPending (ban #10).
-			//
-			// ЗДЕСЬ СТОЯЛО «the flat model dropped the iam_user `from account` access
-			// cascade» — И ЭТО НЕВЕРНО. Модель объявляет `define super_admin: admin from
-			// account` у типа `iam_user` и сегодня, а компилятор плана даёт от неё два
-			// источника всем семи отношениям типа. Плоская модель сняла ЯРУСНЫЙ каскад
-			// (`viewer`/`editor` от аккаунта), а не уровень супер-доступа. Комментарий,
-			// объявляющий каскад снятым, ведёт к правке модели «раз его всё равно нет» —
-			// и она отняла бы доступ у владельца аккаунта и у делегированного
-			// администратора (измерено вердиктом, обе стороны).
-			if out.userIsNew {
-				if err := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.user", string(out.user.ID)); err != nil {
-					return inviteTxResult{}, err
-				}
-				// Указатель `iam_user:<id>#account@account:<acc>`: без него
-				// per-resource UserService.Get на приглашённом — FGA `no path`.
-				// Со-коммит по той же причине, что и у привязки выше; форма
-				// кортежа байт-идентична пути активации приглашения
-				// (internal_upsert.go), который ушёл с post-commit-записи раньше.
-				if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{{
-					User:     fmt.Sprintf("account:%s", out.user.AccountID),
-					Relation: "account",
-					Object:   fmt.Sprintf("iam_user:%s", out.user.ID),
-				}}); ferr != nil {
-					return inviteTxResult{}, ferr
-				}
+			if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, ins.ID, ledgerTuples(bindingTuples)); lerr != nil {
+				return inviteTxResult{}, lerr
 			}
-			// ПИСЬМО ПРИГЛАШЕНИЯ — намерение в очередь, В ЭТОЙ ЖЕ транзакции
-			// (Р23/Р25 приёмки ID-MAIL-1). Атомарность несущая: при откате
-			// приглашения намерения нет ВОВСЕ, поэтому письма о приглашении,
-			// которого не случилось, не бывает by construction. Прямой вызов
-			// ретранслятора отсюда не дал бы ни этого, ни переживания
-			// намерением смерти процесса.
-			//
-			// ПИСЬМО УХОДИТ, ПОКА ПРИГЛАШЕНИЕ НЕ ВЫКУПЛЕНО, — и на заведении
-			// строки, и на повторном приглашении того же адреса в тот же аккаунт
-			// (MAIL-36: повтор идемпотентен, письмо отправляется повторно В
-			// ПРЕДЕЛАХ ограничения частоты). Здесь стояло «только на заведении
-			// строки», и предел держался построением, потому что ограничителя
-			// ещё не было; теперь предел держит ОКНО АДРЕСАТА, которое писатель
-			// очереди списывает перед постановкой (MAIL-25), и обладатель права
-			// приглашать не сделает из глагола средство рассылки.
-			//
-			// Выкупленному (ACTIVE) и заблокированному письмо не уходит:
-			// приглашать некуда, а писать «вы приглашены» тому, кто уже в
-			// аккаунте, значит слать письмо без предмета.
-			//
-			// Адрес страницы входа намеренно НЕ передаётся: он величина
-			// установки, а не сведение use-case'а, и подставляет его
-			// отправитель из своей настройки.
-			if out.user.InviteStatus == domain.InviteStatusPending {
-				queued, merr := w.EmitInviteMail(ctx, outboxtypes.InviteMailIntent{
-					UserID:    string(out.user.ID),
-					AccountID: string(in.AccountID),
-					To:        string(in.Email),
-					Limit:     uc.mailLimit,
-				})
-				if merr != nil {
-					return inviteTxResult{}, merr
-				}
-				out.mailQueued = queued
-				out.mailAsked = true
+		}
+		// A freshly-inserted invitee user row must forward-materialize under the
+		// owner `*.*` binding. Co-commit the reconcile event in the SAME writer-tx
+		// as the InsertPending (ban #10).
+		//
+		// ЗДЕСЬ СТОЯЛО «the flat model dropped the iam_user `from account` access
+		// cascade» — И ЭТО НЕВЕРНО. Модель объявляет `define super_admin: admin from
+		// account` у типа `iam_user` и сегодня, а компилятор плана даёт от неё два
+		// источника всем семи отношениям типа. Плоская модель сняла ЯРУСНЫЙ каскад
+		// (`viewer`/`editor` от аккаунта), а не уровень супер-доступа. Комментарий,
+		// объявляющий каскад снятым, ведёт к правке модели «раз его всё равно нет» —
+		// и она отняла бы доступ у владельца аккаунта и у делегированного
+		// администратора (измерено вердиктом, обе стороны).
+		if out.userIsNew {
+			if err := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.user", string(out.user.ID)); err != nil {
+				return inviteTxResult{}, err
 			}
-			// ЧЛЕНСТВО ЧИТАЕТСЯ ЗДЕСЬ — ЭТОЙ ЖЕ ТРАНЗАКЦИЕЙ, ДО ФИКСАЦИИ. Строка
-			// заведена (или уже была) вставкой выше, и ответ операции создания
-			// членства обязан нести именно её: идентификатор, состояние (из
-			// личности) и след приглашения. Чтение после коммита узким корнем
-			// шло бы на пул чтения, а на реплике этой строки могло бы ещё не быть.
-			// Пары нет только при нарушенной конструкции хранилища — вставка
-			// заводит её тем же оператором, — поэтому отсутствие здесь ОТКАЗ, а
-			// не пустой ответ.
-			m, merr := w.Users().Membership(ctx, out.user.ID, in.AccountID)
+			// Указатель `iam_user:<id>#account@account:<acc>`: без него
+			// per-resource UserService.Get на приглашённом — FGA `no path`.
+			// Со-коммит по той же причине, что и у привязки выше; форма
+			// кортежа байт-идентична пути активации приглашения
+			// (internal_upsert.go), который ушёл с post-commit-записи раньше.
+			if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{{
+				User:     fmt.Sprintf("account:%s", out.user.AccountID),
+				Relation: "account",
+				Object:   fmt.Sprintf("iam_user:%s", out.user.ID),
+			}}); ferr != nil {
+				return inviteTxResult{}, ferr
+			}
+		}
+		// ПИСЬМО ПРИГЛАШЕНИЯ — намерение в очередь, В ЭТОЙ ЖЕ транзакции
+		// (Р23/Р25 приёмки ID-MAIL-1). Атомарность несущая: при откате
+		// приглашения намерения нет ВОВСЕ, поэтому письма о приглашении,
+		// которого не случилось, не бывает by construction. Прямой вызов
+		// ретранслятора отсюда не дал бы ни этого, ни переживания
+		// намерением смерти процесса.
+		//
+		// ПИСЬМО УХОДИТ, ПОКА ПРИГЛАШЕНИЕ НЕ ВЫКУПЛЕНО, — и на заведении
+		// строки, и на повторном приглашении того же адреса в тот же аккаунт
+		// (MAIL-36: повтор идемпотентен, письмо отправляется повторно В
+		// ПРЕДЕЛАХ ограничения частоты). Здесь стояло «только на заведении
+		// строки», и предел держался построением, потому что ограничителя
+		// ещё не было; теперь предел держит ОКНО АДРЕСАТА, которое писатель
+		// очереди списывает перед постановкой (MAIL-25), и обладатель права
+		// приглашать не сделает из глагола средство рассылки.
+		//
+		// Выкупленному (ACTIVE) и заблокированному письмо не уходит:
+		// приглашать некуда, а писать «вы приглашены» тому, кто уже в
+		// аккаунте, значит слать письмо без предмета.
+		//
+		// Адрес страницы входа намеренно НЕ передаётся: он величина
+		// установки, а не сведение use-case'а, и подставляет его
+		// отправитель из своей настройки.
+		if out.user.InviteStatus == domain.InviteStatusPending {
+			queued, merr := w.EmitInviteMail(ctx, outboxtypes.InviteMailIntent{
+				UserID:    string(out.user.ID),
+				AccountID: string(in.AccountID),
+				To:        string(in.Email),
+				Limit:     uc.mailLimit,
+			})
 			if merr != nil {
-				return inviteTxResult{}, fmt.Errorf("membership of %s in %s after invite: %w",
-					out.user.ID, in.AccountID, merr)
+				return inviteTxResult{}, merr
 			}
-			out.membership = m
-			return out, nil
+			out.mailQueued = queued
+			out.mailAsked = true
+		}
+		// ЧЛЕНСТВО ЧИТАЕТСЯ ЗДЕСЬ — ЭТОЙ ЖЕ ТРАНЗАКЦИЕЙ, ДО ФИКСАЦИИ. Строка
+		// заведена (или уже была) вставкой выше, и ответ операции создания
+		// членства обязан нести именно её: идентификатор, состояние (из
+		// личности) и след приглашения. Чтение после коммита узким корнем
+		// шло бы на пул чтения, а на реплике этой строки могло бы ещё не быть.
+		// Пары нет только при нарушенной конструкции хранилища — вставка
+		// заводит её тем же оператором, — поэтому отсутствие здесь ОТКАЗ, а
+		// не пустой ответ.
+		m, merr := w.Users().Membership(ctx, out.user.ID, in.AccountID)
+		if merr != nil {
+			return inviteTxResult{}, fmt.Errorf("membership of %s in %s after invite: %w",
+				out.user.ID, in.AccountID, merr)
+		}
+		out.membership = m
+		return out, nil
+	}
+	var res inviteTxResult
+	var err error
+	if uc.inviteDecisionsConfigured {
+		if err = uc.validateInviteDecisionSelection(); err != nil {
+			return inviteOutcome{}, err
+		}
+		p := operations.PrincipalFromContext(ctx)
+		intent := InviteDecisionIntent{Actor: domain.Subject{Type: domain.SubjectType(p.Type), ID: domain.SubjectID(p.ID)}, CandidateUserID: candidateID, AccountID: in.AccountID, Email: in.Email, ProjectID: in.ProjectID, RoleID: in.RoleID, InvitedBy: adm.invitedBy, GrantedBy: adm.grantedBy}
+		if in.ProjectID != "" {
+			intent.BindingID = domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
+		}
+		err = uc.inviteDecisions.RunInviteDecision(ctx, intent, func(ctx context.Context, w InviteMutationWriter, p PreparedInvite) error {
+			var e error
+			res, e = body(ctx, w, p)
+			return e
 		})
+	} else {
+		res, err = shared.DoWithWriteTx(ctx, uc.repo, func(ctx context.Context, w Writer) (inviteTxResult, error) { return body(ctx, w, nil) })
+	}
 	if err != nil {
-		return inviteOutcome{}, err
+		// Runner сохраняет ошибки для whole-attempt retry; публичную полосу
+		// переводим только после его завершения, как прежний DoWithWriteTx.
+		return inviteOutcome{}, shared.MapRepoErrAt(ctx, err)
 	}
 	user := res.user
 	userIsNew := res.userIsNew

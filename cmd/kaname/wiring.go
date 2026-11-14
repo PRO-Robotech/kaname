@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -71,10 +72,12 @@ type services struct {
 	accessKeyHandler *access_keys.Handler
 	// humanSessionHandler — InternalHumanSessionService.Resolve (Ф3). Ставится
 	// корнем ПОСЛЕ сборки: полоса входа строится отдельно, на каждом старте.
-	humanSessionHandler   *humansession.Handler
-	accountHandler        *accountapp.Handler
-	projectHandler        *projectapp.Handler
-	userHandler           *userapp.Handler
+	humanSessionHandler *humansession.Handler
+	accountHandler      *accountapp.Handler
+	projectHandler      *projectapp.Handler
+	userHandler         *userapp.Handler
+	// Общий UC обеих дверей приглашения; корень подключает один decision runner.
+	userInvite            *userapp.InviteUserUseCase
 	internalUserHandler   *userapp.InternalHandler
 	serviceAccountHandler *serviceaccountapp.Handler
 	groupHandler          *groupapp.Handler
@@ -90,6 +93,10 @@ type services struct {
 	// internalIAMHandler — InternalIAMService (LookupSubject для
 	// перехватчика аутентификации api-gateway; Check делегирует AuthorizeService).
 	internalIAMHandler *internaliamapp.Handler
+	// Тот же UC регистрации, который уже передан обработчику и модулю.
+	resourceRegistrar *internaliamapp.RegisterResourceUseCase
+	// Единственный recorder запроса: новые object engines получают тот же instance.
+	bindingSizeRecorder reconcileapp.SizeRecorder
 
 	// Обработчики ядра авторизации.
 	authorizeHandler *authorizeapp.Handler
@@ -263,7 +270,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// отношений и допуск пира у службы решений судят по тому же значению, что
 	// политики вызывающего.
 	moduleRoster moduleidentity.Roster,
-	tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
+	tokenSigner *tokensigner.Signer, logger *slog.Logger, referencePlans ...*authzmodel.Plans) *services {
+	var rolePlans *authzmodel.Plans
+	if len(referencePlans) == 1 {
+		rolePlans = referencePlans[0]
+	}
 	_ = slavePool // kanameRepo собирается и передаётся из main()
 
 	// sharedClock — ОДИН источник моментов, сравниваемых с отсечкой отзыва-всех,
@@ -334,12 +345,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// о том, должны ли они туда попадать, не принималось — предмет заведён
 	// задачей #157.
 	rsabReconciler := reconcileapp.New(kanamepg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
+	var bindingSizeRecorder reconcileapp.SizeRecorder
 	if metricsReg != nil {
 		// Размер материализации привязки — измерение, не потолок. Он ничего не
 		// отвергает: величина, которой привязка может достичь, не измерена, а предел,
 		// назначенный до замера, либо отвергнет законную выдачу, либо не отвергнет
 		// ничего, оставаясь на вид контролем.
-		rsabReconciler = rsabReconciler.WithSizeRecorder(metricsReg.NewBindingMaterializationRecorder())
+		bindingSizeRecorder = metricsReg.NewBindingMaterializationRecorder()
+		rsabReconciler = rsabReconciler.WithSizeRecorder(bindingSizeRecorder)
 	}
 
 	// AccountService.
@@ -523,6 +536,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// RoleService.
 	roleCreate := roleapp.NewCreateRoleUseCase(kanameRepo, opsRepo, catalogSource).
+		WithGrantReferencePlans(rolePlans).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler).
 		// Роль, принятая до снятия регистрации названного ключа и записанная после,
@@ -542,6 +556,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ПРИМЕЧАНИЕ: rsabReconciler создаётся один раз в начале buildServices (общий
 	// с материализацией автоматической привязки владельца Account.Create).
 	roleUpdate := roleapp.NewUpdateRoleUseCase(kanameRepo, opsRepo, catalogSource).
+		WithGrantReferencePlans(rolePlans).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool)).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(kanameRepo, rsabReconciler)).
@@ -1032,6 +1047,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		accountHandler:         accountHandler,
 		projectHandler:         projectHandler,
 		userHandler:            userHandler,
+		userInvite:             userInvite,
 		internalUserHandler:    internalUserHandler,
 		serviceAccountHandler:  saHandler,
 		groupHandler:           groupHandler,
@@ -1040,6 +1056,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		accessBindingHandler:   abHandler,
 		grantDelegationHandler: grantDelegationHandler,
 		internalIAMHandler:     internalIAMHandler,
+		resourceRegistrar:      registerResourceUC,
+		bindingSizeRecorder:    bindingSizeRecorder,
 		internalClusterHandler: internalClusterHandler,
 		publicClusterHandler:   publicClusterHandler,
 

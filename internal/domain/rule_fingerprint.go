@@ -257,33 +257,12 @@ func (rs Rules) materializingSelectors(expandWildcard bool) []RuleSelector {
 	return out
 }
 
-// dottedTypes returns the `{module}.<resource>` closed-table keys a rule selects.
-// A concrete rule maps each resource to `{module}.<resource>`. A wildcard rule
-// (`*` module OR `*` resource) is the `*.*` superuser shape: when expandWildcard is
-// true (BOUNDED scope) it expands to the full materializable type set so
-// the owner becomes an explicit per-object admin on every object kind in the scope;
-// when false (GLOBAL/CLUSTER) it yields NO types — that is the cluster
-// super-admin short-circuit, not per-object materialization. The module is scalar
-// (no module unroll).
+// dottedTypes возвращает типы реального producer через общий расчёт проекции.
+// Подстановка раскрывает статический реестр только в ограниченной области;
+// подавление подстановки на cluster само по себе прав администратора не даёт.
+// Конкретные ресурсы смешанного правила сохраняются и без раскрытия подстановки.
 func dottedTypes(r Rule, expandWildcard bool) []string {
-	if r.Module == wildcard {
-		if expandWildcard {
-			return AllMaterializableTypes()
-		}
-		return nil
-	}
-	types := make([]string, 0, len(r.Resources))
-	for _, res := range r.Resources {
-		if res == wildcard {
-			if expandWildcard {
-				// `concrete.*` — every materializable type within the module.
-				return materializableTypesForModule(r.Module)
-			}
-			continue
-		}
-		types = append(types, r.Module+"."+res)
-	}
-	return types
+	return r.materializedTypeProjection(expandWildcard).ObjectTypes
 }
 
 // materializableTypesForModule returns the sorted materializable types of ONE module

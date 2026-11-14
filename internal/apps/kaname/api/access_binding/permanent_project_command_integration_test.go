@@ -113,6 +113,16 @@ func TestPermanentProjectCommand_RefusalRollsBackProvisionalMirrorAndBinding(t *
 	w := newPPWorld(t)
 	w.deliverDK()
 	const id = "983-command-foreign-chain"
+	const snapshot = `SELECT jsonb_build_object(
+ 'identity',(SELECT to_jsonb(a) FROM kaname.authority_semantic_identity a),
+ 'protocol',(SELECT to_jsonb(p) FROM kaname.authority_writer_protocol p),
+ 'handoff',(SELECT count(*) FROM kaname.authority_bundle_handoff),
+ 'audit',(SELECT count(*) FROM kaname.audit_outbox),
+ 'reconcile',(SELECT count(*) FROM kaname.resource_reconcile_outbox),
+ 'journal',(SELECT count(*) FROM kaname.fga_outbox),
+ 'receipts',(SELECT count(*) FROM kaname.producer_source_receipt))::text`
+	var before, after string
+	require.NoError(t, w.pool.QueryRow(w.ctx, snapshot).Scan(&before))
 	_, err := w.pool.Exec(w.ctx, `INSERT INTO kaname.resource_registration_command
         (dotted_type,object_id,parent_project_id,parent_account_id,labels,source_version,parent_chain,
          type_live,model_type,applied,projection_unchanged)
@@ -122,6 +132,8 @@ func TestPermanentProjectCommand_RefusalRollsBackProvisionalMirrorAndBinding(t *
 	require.ErrorAs(t, err, &pgerr)
 	require.Equal(t, "23000", pgerr.Code)
 	require.Equal(t, "object_project_binding_holds", pgerr.ConstraintName)
+	require.NoError(t, w.pool.QueryRow(w.ctx, snapshot).Scan(&after))
+	require.JSONEq(t, before, after, "отказ полной команды не меняет semantic effects или authority bookkeeping")
 	for _, table := range []string{"resource_mirror", "resource_parent_edge", "object_project_binding"} {
 		var n int
 		require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM kaname.`+table+` WHERE object_id=$1`, id).Scan(&n))

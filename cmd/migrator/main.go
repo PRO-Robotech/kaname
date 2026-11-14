@@ -177,6 +177,7 @@ func newRootCmd(migrationsFS fs.FS) *cobra.Command {
 		newUpCmd(opts, migrationsFS),
 		newDownCmd(opts, migrationsFS),
 		newStatusCmd(opts, migrationsFS),
+		newAuthorityBundleCmd(opts),
 	)
 	// Дополнения оболочки cobra доводит сама; у прямой формы такой команды нет и
 	// не будет. Перечень команд читает оператор — значит он тоже поверхность.

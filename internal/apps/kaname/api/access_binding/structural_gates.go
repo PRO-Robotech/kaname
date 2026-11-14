@@ -72,6 +72,11 @@ func (u *CreateAccessBindingUseCase) validateStructuralGates(ctx context.Context
 		return shared.MapRepoErr(err)
 	}
 
+	return u.validateStructuralGatesIn(ctx, rd, role, b)
+}
+
+func (u *CreateAccessBindingUseCase) validateStructuralGatesIn(ctx context.Context, rd Reader, role domain.Role, b domain.AccessBinding) error {
+
 	// Gate 2 — IsRoleAssignable: the role's definition tier ↔ scope anchor. The
 	// stateless STRICT predicate runs first (system / own-account / own-project); if it
 	// rejects, an iam.account-tier role may still be assignable on a project NESTED in

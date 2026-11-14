@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 )
 
 // serverAuthoritativeCondKeys are CEL condition-context attributes that describe
@@ -513,6 +514,10 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time, facts *cata
 		p.invalid = fmt.Errorf("Illegal argument resource: required")
 		return p
 	}
+	if grantcapability.IsInternalObjectType(req.Resource.Type) {
+		p.invalid = fmt.Errorf("Illegal argument resource.type %q", req.Resource.Type)
+		return p
+	}
 	if req.Action == "" {
 		p.invalid = fmt.Errorf("Illegal argument action: required")
 		return p
@@ -771,6 +776,11 @@ func (s *AuthorizeService) CheckRelation(ctx context.Context, req CheckRelationR
 	}
 	if req.Object == "" {
 		return result, fmt.Errorf("Illegal argument object: required")
+	}
+	// Публичная и межсервисная PDP-двери не являются координатором выдачи.
+	// Внутреннее решение идёт прямо через writer TransactionRelationChecker.
+	if objectType, _, ok := splitFGAObject(req.Object); ok && grantcapability.IsInternalObjectType(objectType) {
+		return result, fmt.Errorf("Illegal argument object type %q", objectType)
 	}
 
 	denied, derr := s.admissionDenied(ctx, req.Subject)
@@ -1249,6 +1259,9 @@ type ListSubjectsResult struct {
 
 // ListSubjects — inverse of ListObjects.
 func (s *AuthorizeService) ListSubjects(ctx context.Context, req ListSubjectsRequest) (_ *ListSubjectsResult, err error) {
+	if grantcapability.IsInternalObjectType(req.ResourceType) {
+		return nil, fmt.Errorf("Illegal argument resource.type %q", req.ResourceType)
+	}
 	if s.relations == nil {
 		return nil, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}
@@ -1303,6 +1316,9 @@ type ExpandResult struct {
 // (решение S6): поле, которое не заполняется никогда, обещает возможность,
 // которой нет.
 func (s *AuthorizeService) ExpandRelations(ctx context.Context, req ExpandRequest) (*ExpandResult, error) {
+	if grantcapability.IsInternalObjectType(req.ResourceType) {
+		return nil, fmt.Errorf("Illegal argument resource.type %q", req.ResourceType)
+	}
 	if s.relations == nil {
 		return nil, fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
 	}

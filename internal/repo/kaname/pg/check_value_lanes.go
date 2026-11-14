@@ -80,6 +80,11 @@ type checkTableLanes struct {
 // checkValueLanes — перепись проверок схемы. Основание — рядом с каждой
 // таблицей.
 var checkValueLanes = map[string]*checkTableLanes{
+	// kaname#1034: закрытое поколение DB snapshot; caller его не присылает.
+	"authority_binding_epoch": nil,
+	// kaname#1034: поколения источников и отложенная очередь их обновления
+	// принадлежат службе; runtime не может прислать или изменить эти значения.
+	"authority_policy_epoch": nil,
 	// Выведенные строки материализации выдачи — служба раскладывает принятую
 	// выдачу в кортежи.
 	"access_binding_emitted_tuples": nil,
@@ -111,6 +116,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"access_bindings_wildcard_subject_is_system_ck",
 		},
 		service: []string{
+			// Версию управляющего источника выбирает служба после проверки выдачи.
+			"access_bindings_grant_capability_version_check",
 			"access_bindings_granted_by_check",
 			"access_bindings_granted_relation_shape_ck",
 			"access_bindings_relation_form_anchor_ck",
@@ -169,6 +176,11 @@ var checkValueLanes = map[string]*checkTableLanes{
 	},
 	// Журнал аудита — событие пишет служба.
 	"audit_outbox": nil,
+	// Сохранённый bundle, его фаза и режим записи выводятся службой из принятой
+	// модели и каталога. Их контрольные значения не являются полями запроса.
+	"authority_bundle_handoff":    nil,
+	"authority_semantic_identity": nil,
+	"authority_writer_protocol":   nil,
 	// Код авторизации: вызов PKCE, его способ и адрес возврата прислал клиент;
 	// дайджест, сроки и погашение — служба.
 	"authorization_codes": {
@@ -351,6 +363,9 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// Очередь компенсаций поставщика — пишет служба.
 	"provider_compensation_outbox": nil,
 	// Публикация чтения: тип и идентификатор объекта прислал его владелец.
+	// Receipt составляет адаптер из фактически принятого источника; формат,
+	// версия, область и связь с bundle принадлежат служебной проекции.
+	"producer_source_receipt": nil,
 	"public_read_publication": {caller: []string{
 		"public_read_publication_object_id_nonempty",
 		"public_read_publication_object_type_model_dictionary",
@@ -406,6 +421,14 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// допуска регистрации; вызывающий не пишет строки истории напрямую.
 	"resource_registration_pointer":    nil,
 	"resource_registration_retirement": nil,
+	// Отпечаток исходного правила вычисляет служба; вызывающий его не присылает.
+	// Будущие проверки остальных полей требуют самостоятельного решения.
+	"role_bind_role_rule": {
+		service: []string{"role_bind_role_rule_fp_check"},
+	},
+	"role_create_binding_rule": {
+		service: []string{"role_create_binding_rule_fp_check"},
+	},
 	// Сирота выдачи — следствие снятия, пишет служба.
 	"role_grant_orphan": nil,
 	// Ссылки правил роли: модуль, ресурс и глагол — из присланного правила;

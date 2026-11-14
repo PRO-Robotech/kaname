@@ -455,7 +455,7 @@ func laneHasher(cfg config.Config) (*passwordverify.Hasher, error) {
 // modules — перечень личностей модулей, прочитанный корнем ОДИН раз с проверкой
 // ошибки (kaname#987): допуск края полосы судит по тому же значению, что
 // политики вызывающего.
-func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidentity.Roster, pool *pgxpool.Pool, repo kanamerepo.Repository,
+func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidentity.Roster, pool *pgxpool.Pool, repo kanamerepo.Repository, admission *kanamepg.HumanAdmissionParticipant,
 	reconciler *reconcileapp.Reconciler, reg *metrics.Registry, logger *slog.Logger,
 ) (*loginLane, error) {
 	login := cfg.AuthN.Login
@@ -614,7 +614,10 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	// Окно обращений по источнику для регистрации и запроса восстановления —
 	// ось источника полосы входа, те же величины (kaname#456).
 	sourcePace := humansession.SourcePace{Limit: login.SourceAttempts, Window: login.SourceWindow}
-	registrationPG := kanamepg.NewRegistrationStore(pool)
+	registrationPG, completionStore, err := humanAdmissionStores(pool, cfg.AuthorityProtocol, admission)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	registerUC, err := registration.NewRegisterUseCase(registration.Deps{
 		Store: registrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler),
@@ -640,10 +643,6 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	// зеркала и операторы перехода записи к владельцу ящика над одной
 	// транзакцией; активацию приглашения исполняет та же функция, что исход
 	// подтверждения адреса.
-	completionStore, err := kanamepg.NewRecoveryCompletionStore(pool, userapp.ActivateInviteForLane)
-	if err != nil {
-		return nil, fmt.Errorf("sign-in lane: %w", err)
-	}
 	completeUC, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
 		Store: sessions, Completion: completionStore, Reconciler: ownerReconcilerOrNone(reconciler),
 		Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
@@ -1062,4 +1061,25 @@ func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog
 				"переданная личность не читается"),
 		TLS: tlsCfg,
 	})
+}
+
+// Оба исхода используют один admitted participant. Legacy выбирается только
+// явным default mode; configured nil не превращается в legacy store.
+func humanAdmissionStores(pool *pgxpool.Pool, mode config.AuthorityProtocolConfig, participant *kanamepg.HumanAdmissionParticipant) (*kanamepg.RegistrationStore, *kanamepg.RecoveryCompletionStore, error) {
+	if err := mode.Validate(); err != nil {
+		return nil, nil, err
+	}
+	if mode.Participant() && participant == nil {
+		return nil, nil, fmt.Errorf("human admission participant is absent")
+	}
+	registration := kanamepg.NewRegistrationStore(pool)
+	recovery, err := kanamepg.NewRecoveryCompletionStore(pool, userapp.ActivateInviteForLane)
+	if err != nil {
+		return nil, nil, err
+	}
+	if mode.Participant() {
+		registration = registration.WithHumanAdmissionParticipant(participant)
+		recovery = recovery.WithHumanAdmissionParticipant(participant)
+	}
+	return registration, recovery, nil
 }

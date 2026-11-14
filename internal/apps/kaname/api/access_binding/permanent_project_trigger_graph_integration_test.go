@@ -12,11 +12,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/authoritycallbacks"
 	"github.com/stretchr/testify/require"
 )
 
 func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T) {
 	w := newPPWorld(t)
+	authoritycallbacks.AssertReviewedGraph(t, w.ctx, w.pool)
 	type fn struct{ name, body, language string }
 	funcs := map[uint32]fn{}
 	byName := map[string][]uint32{}
@@ -84,7 +86,10 @@ func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T) {
 	require.Zero(t, bad, "RLS callbacks require a new graph proof")
 	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
         WHERE t.tgrelid IN ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)
-        AND NOT t.tgisinternal AND p.proname NOT IN ('resource_mirror_keeps_the_bound_project','resource_parent_edge_keeps_the_bound_project','resource_registration_locks_writers')`).Scan(&bad))
+        AND NOT t.tgisinternal AND NOT (
+ p.proname IN ('resource_mirror_keeps_the_bound_project','resource_parent_edge_keeps_the_bound_project','resource_registration_locks_writers') OR
+ (t.tgname='authority_protocol_row' AND t.tgfoid='kaname.authority_protocol_row_guard()'::regprocedure AND t.tgtype=31 AND t.tgenabled='O') OR
+ (t.tgname='authority_protocol_statement' AND t.tgfoid='kaname.authority_protocol_statement_guard()'::regprocedure AND t.tgtype=62 AND t.tgenabled='O'))`).Scan(&bad))
 	require.Zero(t, bad, "no observable callback may precede complete command validation")
 	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_constraint WHERE conrelid IN
         ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)

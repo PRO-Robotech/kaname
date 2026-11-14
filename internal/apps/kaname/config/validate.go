@@ -27,6 +27,7 @@ import (
 // production-strict TLS invariants.
 func (c Config) Validate() error {
 	var errs error
+	errs = multierr.Append(errs, c.AuthorityProtocol.Validate())
 
 	errs = multierr.Append(errs, c.validateMode())
 

@@ -107,6 +107,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -123,9 +124,10 @@ import (
 // `:block` quietly becomes `:unblock` — the one mistake that turns the control
 // into its own opposite. Distinct types make that a compile error.
 type setInviteStatusUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
-	target  domain.InviteStatus
+	identityWriter identityWriterSelection
+	repo           Repo
+	opsRepo        operations.Repo
+	target         domain.InviteStatus
 }
 
 // BlockUserUseCase — the membership may no longer authenticate into its Account.
@@ -242,7 +244,11 @@ func (u *setInviteStatusUseCase) metadata(id domain.UserID, accountID domain.Acc
 // this asked for it, and «who tried, and when» is precisely what the trail is for
 // — a repeat that leaves no trace is a repeat nobody can see.
 func (u *setInviteStatusUseCase) doSetInviteStatus(ctx context.Context, id domain.UserID, actor, eventType string) (*anypb.Any, error) {
-	updated, err := shared.DoWithWriteTx(ctx, u.repo,
+	kind := kaname.IdentityUnblock
+	if u.target == domain.InviteStatusBlocked {
+		kind = kaname.IdentityBlock
+	}
+	updated, err := shared.DoWithWriteTx(ctx, u.identityWriter.repository(u.repo, kind, id),
 		func(ctx context.Context, w Writer) (domain.User, error) {
 			row, serr := w.UsersW().SetInviteStatus(ctx, id, u.target)
 			if serr != nil {

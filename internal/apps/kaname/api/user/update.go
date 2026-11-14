@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -97,8 +98,9 @@ type ObjectForwardReconciler interface {
 }
 
 type UpdateUserUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	identityWriter identityWriterSelection
+	repo           Repo
+	opsRepo        operations.Repo
 	// Optional post-commit per-object materializer. A LABEL change flips iam-direct
 	// selector membership, so the object must be re-materialized; nil-safe, the
 	// co-committed reconcile event + periodic sweep remain the backstop.
@@ -210,7 +212,7 @@ func (u *UpdateUserUseCase) Execute(ctx context.Context, in UpdateUserInput) (*o
 // reconcile event above and the periodic sweep stay the at-least-once backstop, so this
 // changes WHEN the revoke is observed, not WHETHER it happens.
 func (u *UpdateUserUseCase) doUpdate(ctx context.Context, id domain.UserID, labels domain.Labels, actor string, changed []string) (*anypb.Any, error) {
-	updated, err := shared.DoWithWriteTx(ctx, u.repo,
+	updated, err := shared.DoWithWriteTx(ctx, u.identityWriter.repository(u.repo, kaname.IdentityUpdate, id),
 		func(ctx context.Context, w Writer) (domain.User, error) {
 			if len(changed) == 0 {
 				// Нечего применять (labels не изменились) — read-back актуального row.

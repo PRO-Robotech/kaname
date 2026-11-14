@@ -257,6 +257,32 @@ func AncestorsOf(ctx context.Context, q querier, objectType, objectID string) ([
 	return scanRows(rows)
 }
 
+// AncestorsSnapshot — kaname#1034: тот же источник в RR staging без row locks.
+func AncestorsSnapshot(ctx context.Context, q querier, objectType, objectID string) ([]MirrorRow, error) {
+	rows, err := q.Query(ctx,
+		`SELECT m.object_type, m.object_id, m.parent_project_id,
+		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
+		        m.labels
+		   FROM kaname.catalog_resource co
+		   JOIN kaname.resource_parent_edge pe
+		     ON pe.object_type = co.object_type AND pe.object_id = $2
+		   JOIN kaname.catalog_resource cp
+		     ON cp.object_type = pe.parent_type AND cp.live
+		   JOIN kaname.resource_mirror m
+		     ON m.object_type = cp.dotted AND m.object_id = pe.parent_id
+		   LEFT JOIN kaname.projects pj ON pj.id = m.parent_project_id
+		  WHERE co.dotted = $1 AND co.live
+		  ORDER BY pe.depth ASC
+		    `,
+		objectType, objectID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("resource_mirror: ancestors of %s:%s: %w", objectType, objectID, err)
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
 // DescendantsOf — строки зеркала объектов типов `types`, у которых среди предков
 // есть контейнер типа `containerType` с идентификатором из `containerIDs`
 // (kaname#874): кандидаты вложенного правила, пообъектно. Обход — индексом рёбер

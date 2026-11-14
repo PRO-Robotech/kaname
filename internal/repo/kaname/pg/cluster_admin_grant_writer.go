@@ -28,6 +28,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -95,10 +96,10 @@ func (w *ClusterAdminGrantWriter) Grant(
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO kaname.cluster_admin_grants
 		    (id, cluster_id, subject_type, subject_id, granted_by, granted_at, granted_until)
-		VALUES ($1, $2, $5, $3, $4, now(), NULL)
+		VALUES ($1, $2, $5, $3, $4, COALESCE($6::timestamptz,now()), NULL)
 		ON CONFLICT ON CONSTRAINT cluster_admin_grants_cluster_subject_uniq
 		DO NOTHING`,
-		id, domain.ClusterSingletonID, string(subject), grantedBy, string(subjectType))
+		id, domain.ClusterSingletonID, string(subject), grantedBy, string(subjectType), clusterAdminMutationAt(txh))
 	if err != nil {
 		return domain.ClusterAdminGrant{}, false, fmt.Errorf("cluster_admin_grants insert: %w", err)
 	}
@@ -163,7 +164,7 @@ func (w *ClusterAdminGrantWriter) Revoke(
 
 	const q = `
 		UPDATE kaname.cluster_admin_grants
-		   SET granted_until = now()
+		   SET granted_until = COALESCE($4::timestamptz,now())
 		 WHERE subject_type = $3
 		   AND subject_id   = $1
 		   AND granted_until IS NULL
@@ -172,7 +173,7 @@ func (w *ClusterAdminGrantWriter) Revoke(
 		          FROM kaname.cluster_admin_grants
 		         WHERE granted_until IS NULL) > 1  -- D-6 last-admin guard
 		RETURNING id, cluster_id, subject_type, subject_id, granted_by, granted_at, granted_until`
-	row := tx.QueryRow(ctx, q, string(subject), principalID, string(subjectType))
+	row := tx.QueryRow(ctx, q, string(subject), principalID, string(subjectType), clusterAdminMutationAt(txh))
 	out, err := scanCAG(row)
 	if err == nil {
 		return out, nil
@@ -274,12 +275,12 @@ func (w *ClusterAdminGrantWriter) Reactivate(
 		UPDATE kaname.cluster_admin_grants
 		   SET granted_until = NULL,
 		       granted_by    = $2,
-		       granted_at    = now()
+		       granted_at    = COALESCE($4::timestamptz,now())
 		 WHERE subject_type = $3
 		   AND subject_id   = $1
 		   AND granted_until IS NOT NULL   -- CAS: only revoked rows
 		RETURNING id, cluster_id, subject_type, subject_id, granted_by, granted_at, granted_until`
-	row := tx.QueryRow(ctx, q, string(subject), grantedBy, string(subjectType))
+	row := tx.QueryRow(ctx, q, string(subject), grantedBy, string(subjectType), clusterAdminMutationAt(txh))
 	out, err := scanCAG(row)
 	if err == nil {
 		return out, nil
@@ -306,4 +307,15 @@ func subjectDisplayName(t domain.GrantSubjectType) string {
 		return "ServiceAccount"
 	}
 	return "User"
+}
+
+// Только final-decision TX заменяет прежние часы. Legacy и простой Begin
+// сохраняют свой контракт; SQL получает NULL, а не нулевой timestamp.
+func clusterAdminMutationAt(tx service.Tx) any {
+	if clock, ok := tx.(interface{ ClusterAdminDecisionAt() time.Time }); ok {
+		if at := clock.ClusterAdminDecisionAt(); !at.IsZero() {
+			return at
+		}
+	}
+	return nil
 }
