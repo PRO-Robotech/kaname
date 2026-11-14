@@ -4,8 +4,9 @@
 package authzplan
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Полный путь до cluster сохраняет единственный разрешающий источник.

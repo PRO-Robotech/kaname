@@ -604,7 +604,7 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 		// (it grants ANY user a role on ANY resource), so resolve the canonical
 		// (gateway-visible) identity row and bind the project-scoped grant to it.
 		if in.ProjectID != "" {
-			subjectID := domain.SubjectID(out.user.ID)
+			var subjectID domain.SubjectID
 			if prepared != nil {
 				subjectID = domain.SubjectID(prepared.RecipientID())
 			} else {

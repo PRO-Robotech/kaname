@@ -105,9 +105,6 @@ func administrativeQuerySQL(labelTable string, nesting bool) (string, error) {
 	}
 	return sql, nil
 }
-func askAdministrative(ctx context.Context, tx pgx.Tx, in Query, verify AdministrativeVerifier) (Verdict, Grounds, error) {
-	return askAdministrativeBound(ctx, tx, in, verify, nil, nil, false)
-}
 func askAdministrativeBound(ctx context.Context, tx pgx.Tx, in Query, verify AdministrativeVerifier, boundary AdministrativeReadBoundary, budget *AdministrativeReadBudget, bound bool) (Verdict, Grounds, error) {
 	var g Grounds
 	if err := ctx.Err(); err != nil {

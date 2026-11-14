@@ -5,9 +5,10 @@ package pg
 
 import (
 	"context"
+	"testing"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
-	"testing"
 )
 
 func TestAdministrativeIAMDirectHasNoMirrorAncestors(t *testing.T) {

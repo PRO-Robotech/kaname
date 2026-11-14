@@ -4,9 +4,10 @@ package relverdict
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestCapturedBudgetUnboundNativeNeverResetsAllowance(t *testing.T) {

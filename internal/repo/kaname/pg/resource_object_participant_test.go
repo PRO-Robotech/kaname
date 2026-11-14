@@ -4,10 +4,11 @@ package pg
 
 import (
 	"context"
+	"testing"
+
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestResourceObjectParticipantRejectsMissingAndForeignPoolBeforeSQL(t *testing.T) {

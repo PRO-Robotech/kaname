@@ -23,7 +23,7 @@ func (u *RevokeGrantDelegationUseCase) WithRevokeAuthorityWriter(f kaname.GrantD
 
 func (u *RevokeGrantDelegationUseCase) stagedRevokeOnce(ctx context.Context, id domain.GrantDelegationID, by domain.GrantDelegationActor, actor string) (domain.GrantDelegation, error) {
 	f := u.revokeAuthorityWriter
-	if f == nil || (reflect.ValueOf(f).Kind() == reflect.Ptr && reflect.ValueOf(f).IsNil()) {
+	if f == nil || (reflect.ValueOf(f).Kind() == reflect.Pointer && reflect.ValueOf(f).IsNil()) {
 		return domain.GrantDelegation{}, authzguard.AuthzBackendUnavailable()
 	}
 	w, err := f.GrantDelegationRevokeWriter(ctx, id)

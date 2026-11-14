@@ -4,8 +4,9 @@ package grantsource
 
 import (
 	"errors"
-	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"testing"
+
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
 func TestSourceCollectionsShareWriterBudgetWithoutReset(t *testing.T) {

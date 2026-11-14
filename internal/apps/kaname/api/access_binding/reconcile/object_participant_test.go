@@ -5,8 +5,9 @@ package reconcile
 import (
 	"context"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestObjectParticipantRoutesAllThreeDoorsAndKeepsGroup(t *testing.T) {

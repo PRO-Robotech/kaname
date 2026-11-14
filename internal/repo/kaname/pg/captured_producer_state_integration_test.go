@@ -5,12 +5,13 @@ package pg
 import (
 	"context"
 	"encoding/json"
+	"testing"
+	"time"
+
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 // Фикстура проверяет только хранилище: из этих строк не выводится право.

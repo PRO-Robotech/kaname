@@ -94,7 +94,9 @@ func scopeEffectMatches(e granteffect.Effect, scope domain.ScopeAnchor, objects 
 	for _, c := range e.Constraints {
 		typ := scope.Type
 		for _, hop := range c.Path {
-			if hop.From != typ || !((typ == "project" && hop.To == "account" && hop.Pointer == "account") || ((typ == "project" || typ == "account") && hop.To == "cluster" && hop.Pointer == "cluster")) {
+			toAccount := typ == "project" && hop.To == "account" && hop.Pointer == "account"
+			toCluster := (typ == "project" || typ == "account") && hop.To == "cluster" && hop.Pointer == "cluster"
+			if hop.From != typ || !toAccount && !toCluster {
 				return false
 			}
 			typ = hop.To

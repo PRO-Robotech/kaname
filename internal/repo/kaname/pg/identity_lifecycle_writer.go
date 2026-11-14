@@ -5,10 +5,11 @@ package pg
 
 import (
 	"context"
-	"github.com/PRO-Robotech/kaname/internal/domain"
-	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"strings"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
 // IdentityLifecycleWriter использует уже загруженный неизменяемый bundle.

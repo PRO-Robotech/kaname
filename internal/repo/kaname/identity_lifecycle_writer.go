@@ -5,6 +5,7 @@ package kaname
 
 import (
 	"context"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 

@@ -4,9 +4,10 @@ package pg
 
 import (
 	"errors"
+	"testing"
+
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
-	"testing"
 )
 
 func TestNativeDiscoveryAndProtectedSourcesShareExhaustion(t *testing.T) {
