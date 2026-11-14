@@ -24,6 +24,35 @@ const bindingPairFallbackGo = "пустой набор — выдача, зап�
 
 // BindingSubjectPairLedger — законные места и точные числа доступов.
 var BindingSubjectPairLedger = map[string]BindingPairEntry{
+	// ── новые closed structural proofs: само имя в ledger не даёт разрешения ──
+	"internal/repo/kaname/pg/invite_preparation.go::inviteBinding": {
+		Go: 2, Class: BindingPairSingleton,
+		Why: "оба поля проекции и единственный Subjects member берутся из одного typed Subject в том же AccessBinding literal",
+	},
+	"internal/repo/kaname/pg/grant_delegation_revoke_stage.go::grantDelegationRevokeTx.WithdrawGrantDelegation": {
+		Go: 2, Class: BindingPairGuardedFanout,
+		Why: "b.Subjects сохраняется целиком; fallback пары только при len==0; оба события обходят каждый member без фильтра или среза",
+	},
+	"internal/repo/kaname/pg/role_mutation_stage.go::roleMutationStage.stageBinding": {
+		Go: 2, Class: BindingPairStagedSet,
+		Why: "query читает весь набор того же binding ID до MaxSubjects+1; overflow и row errors не дают усечения; NormalizeSubjects и BuildRoleTuples используют весь результат",
+	},
+	"internal/repo/kaname/pg/group_native_questions.go::var groupNativeCarrierQueries": {
+		SQL: 2, Class: BindingPairCompleteSetSQL,
+		Why: "проверены обе correlated SQL фазы, единственный полный range массива и весь paging consumer; одна primary фаза отдельно proof не получает",
+	},
+	"internal/repo/kaname/pg/policy_partition_plan.go::const policyActorSources": {
+		SQL: 4, Class: BindingPairCompleteSetSQL,
+		Why: "primary speaker/wildcard OR correlated child subject predicate с тем же binding и speaker array; весь query и complete paging consumer имеют closed proof",
+	},
+	"internal/repo/kaname/pg/policy_partition_plan.go::const policyMutationCarriers": {
+		SQL: 5, Class: BindingPairCompleteSetSQL,
+		Why: "выбор по primary OR child group и UNION всех child guards для тех же carriers; полнота statement и paging проверяется до разрешения пары",
+	},
+	"internal/repo/kaname/pg/policy_partition_plan.go::const policyOldBindingSubjects": {
+		SQL: 7, Class: BindingPairCompleteSetSQL,
+		Why: "UNION ALL primary и полного child set одного binding $3; conservative unqualified census тоже покрыт whole-program proof",
+	},
 	// ── запись проекции ────────────────────────────────────────────────────
 	"internal/repo/kaname/pg/registration_account_writer.go::RegistrationAccountWriterStore.ApplyRegistrationAccountWriters": {
 		Go: 2, Class: BindingPairProjection,
@@ -63,6 +92,19 @@ var BindingSubjectPairLedger = map[string]BindingPairEntry{
 		Why: "системная выдача пишет строку с проекцией и проверяет её естественный ключ по паре — тот же, " +
 			"что стерегут частичные UNIQUE (access_bindings_active_grant_uniq / _active_relation_grant_uniq); " +
 			"набор из одного субъекта пишется следом",
+	},
+	// ── каноническая нормализация: типизированное доказательство вызова ─────
+	"internal/repo/kaname/pg/binding_decision.go::GrantPolicyWriters.bindingDecisionOnce": {
+		Go: 2, Class: BindingPairCanonicalFallback,
+		Why: "полный Subjects прочитан для существующей выдачи либо передан предложением Create; пара служит только входом канонической нормализации того же binding",
+	},
+	"internal/repo/kaname/pg/binding_withdrawal_stage.go::BindingStageParticipant.stageWithdrawal": {
+		Go: 2, Class: BindingPairCanonicalFallback,
+		Why: "ListSubjects загружает полный набор; NormalizeSubjects сохраняет набор перед сериализацией заголовка staged withdrawal",
+	},
+	"internal/repo/kaname/pg/grant_mutation_preflight.go::bindingDecisionPreflight": {
+		Go: 2, Class: BindingPairCanonicalFallback,
+		Why: "NormalizeSubjects получает полный набор предложения; canonical primary не меняется, сортируется только копия полного результата для блокировок",
 	},
 	// ── откат к прежней форме: Go ──────────────────────────────────────────
 	"internal/domain/access_binding.go::AccessBinding.Validate": {
