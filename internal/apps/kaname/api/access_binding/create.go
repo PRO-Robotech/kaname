@@ -480,16 +480,18 @@ func (u *CreateAccessBindingUseCase) writeCreatedBinding(ctx context.Context, w 
 		return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 	}
 
-	var created domain.AccessBinding
+	// Проверяем именно возвращаемый порт: внешний writer может продвинуть
+	// методы embedded receiver, но переопределить AccessBindingsW. Несогласованная
+	// пара legacy/semantic закрывается до вставки, не меняя путь проверки прав.
+	port, marked := w.AccessBindingsW().(kanamerepo.BindingCapabilityWriter)
 	if capability {
-		inserter, ok := w.(kanamerepo.BindingCapabilityInserter)
-		if !ok {
+		if !marked || port.BindingCapabilityVersion() != 1 {
 			return domain.AccessBinding{}, domain.Role{}, authzguard.AuthzBackendUnavailable()
 		}
-		created, err = inserter.InsertBindingWithCapabilities(ctx, b)
-	} else {
-		created, err = w.AccessBindingsW().Insert(ctx, b)
+	} else if marked {
+		return domain.AccessBinding{}, domain.Role{}, authzguard.AuthzBackendUnavailable()
 	}
+	created, err := w.AccessBindingsW().Insert(ctx, b)
 	if err != nil {
 		return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 	}

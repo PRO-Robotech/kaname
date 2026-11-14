@@ -20,10 +20,13 @@ type BindingDecisionRunner interface {
 		func(context.Context, SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error
 }
 
-// BindingCapabilityInserter создаёт новую строку; существующий carrier этим
-// портом не повышается. Вызывает только Create ПОСЛЕ полного policy gate.
-type BindingCapabilityInserter interface {
-	InsertBindingWithCapabilities(context.Context, domain.AccessBinding) (domain.AccessBinding, error)
+// BindingCapabilityWriter отмечает протокол фактического порта записи привязок.
+// Его Insert повышает версию только у созданной строки в той же транзакции.
+// Версия не заменяет проверку полномочий: владелец операции проходит полный
+// policy gate до вставки и сохраняет ведомость выпущенных кортежей после неё.
+type BindingCapabilityWriter interface {
+	ab.WriterIface
+	BindingCapabilityVersion() int
 }
 
 // DelegatedBindingDecisionRunner сохраняет выбранный GD ID через whole-TX retry.

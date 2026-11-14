@@ -306,7 +306,10 @@ func TestCapturedProducerActualNonemptyPublicationD1AndRestage(t *testing.T) {
 			if e := grantpolicy.RequireBinding(ctx, w, owner, granteffect.Binding{SourceID: string(b.ID), Role: role, Scope: domain.ScopeAnchor{Type: "project", ID: scene.Project}, Recipient: actor, Subjects: []domain.Subject{actor}, Target: b.Target, CapabilityVersion: 1}); e != nil {
 				return e
 			}
-			created, e := w.(kaname.BindingCapabilityInserter).InsertBindingWithCapabilities(ctx, b)
+			capability, ok := w.AccessBindingsW().(kaname.BindingCapabilityWriter)
+			require.True(t, ok)
+			require.Equal(t, 1, capability.BindingCapabilityVersion())
+			created, e := w.AccessBindingsW().Insert(ctx, b)
 			if e != nil {
 				return e
 			}

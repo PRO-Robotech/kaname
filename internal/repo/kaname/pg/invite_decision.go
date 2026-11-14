@@ -258,7 +258,11 @@ func (p *InviteDecisions) once(ctx context.Context, in kaname.InviteDecisionInte
 		}
 	}
 	prepared := &preparedInvite{recipient: identity.recipient, binding: binding, at: w.fence.decisionAt}
-	facade := &inviteMutationFacade{InviteMutationWriter: w, bindings: &inviteBindingWriter{WriterIface: w.AccessBindingsW(), semantic: semantic, prepared: prepared, active: plan != nil}}
+	bindings := w.AccessBindingsW()
+	if plan != nil {
+		bindings = semantic.AccessBindingsW()
+	}
+	facade := &inviteMutationFacade{InviteMutationWriter: w, bindings: &inviteBindingWriter{WriterIface: bindings, prepared: prepared}}
 	if err = body(ctx, facade, prepared); err != nil {
 		return err
 	}
@@ -278,17 +282,12 @@ func (w *inviteMutationFacade) AccessBindingsW() ab.WriterIface { return w.bindi
 
 type inviteBindingWriter struct {
 	ab.WriterIface
-	semantic *semanticAuthorityWriteTx
 	prepared *preparedInvite
-	active   bool
 }
 
 func (w *inviteBindingWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
 	if w.prepared.binding.ID == "" || !reflect.DeepEqual(b, w.prepared.Binding()) {
 		return domain.AccessBinding{}, kaname.ErrInvalidAuthorityFencePlan
-	}
-	if w.active {
-		return w.semantic.InsertBindingWithCapabilities(ctx, b)
 	}
 	return w.WriterIface.Insert(ctx, b)
 }

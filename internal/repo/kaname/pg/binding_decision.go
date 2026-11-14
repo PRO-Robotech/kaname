@@ -313,8 +313,21 @@ func (p *GrantPolicyWriters) bindingDecisionOnce(ctx context.Context, actor doma
 var _ kaname.BindingDecisionRunner = (*GrantPolicyWriters)(nil)
 var _ kaname.DelegatedBindingDecisionRunner = (*GrantPolicyWriters)(nil)
 
-func (w *semanticAuthorityWriteTx) InsertBindingWithCapabilities(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
-	created, err := w.AccessBindingsW().Insert(ctx, b)
+// Порт собирается из одного receiver: вставка и повышение версии используют
+// исходный writer и его транзакцию. Остальные методы сохраняют прежний порт.
+func (w *semanticAuthorityWriteTx) AccessBindingsW() ab.WriterIface {
+	return &capabilityBindingWriter{WriterIface: w.authorityWriteTx.AccessBindingsW(), tx: w.tx}
+}
+
+type capabilityBindingWriter struct {
+	ab.WriterIface
+	tx pgx.Tx
+}
+
+func (w *capabilityBindingWriter) BindingCapabilityVersion() int { return 1 }
+
+func (w *capabilityBindingWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
+	created, err := w.WriterIface.Insert(ctx, b)
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
@@ -328,4 +341,4 @@ func (w *semanticAuthorityWriteTx) InsertBindingWithCapabilities(ctx context.Con
 	return created, nil
 }
 
-var _ kaname.BindingCapabilityInserter = (*semanticAuthorityWriteTx)(nil)
+var _ kaname.BindingCapabilityWriter = (*capabilityBindingWriter)(nil)
