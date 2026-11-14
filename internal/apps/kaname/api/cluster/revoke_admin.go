@@ -195,12 +195,34 @@ func (uc *RevokeAdminUseCase) doRevoke(
 	subject domain.SubjectID,
 	principalID string,
 ) (domain.ClusterAdminGrant, error) {
+	if runner, ok := uc.txb.(AdminDecisionRunner); ok {
+		intent, err := adminMutationIntent(ctx, AdminActionRevoke, subjectType, subject)
+		if err != nil {
+			return domain.ClusterAdminGrant{}, err
+		}
+		return runner.RunAdminDecision(ctx, intent, func(ctx context.Context, tx service.Tx) (domain.ClusterAdminGrant, error) {
+			return uc.revokeInTx(ctx, tx, subjectType, subject, principalID)
+		})
+	}
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
 		return domain.ClusterAdminGrant{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
+	grant, err := uc.revokeInTx(ctx, tx, subjectType, subject, principalID)
+	if err != nil {
+		return domain.ClusterAdminGrant{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.ClusterAdminGrant{}, fmt.Errorf("commit: %w", err)
+	}
+	return grant, nil
+}
+
+// revokeInTx не завершает TX: configured runner повторяет всю попытку вместе с Commit.
+func (uc *RevokeAdminUseCase) revokeInTx(ctx context.Context, tx service.Tx, subjectType domain.GrantSubjectType, subject domain.SubjectID, principalID string) (domain.ClusterAdminGrant, error) {
 	grant, rerr := uc.writer.Revoke(ctx, tx, subjectType, subject, principalID)
 	if rerr != nil {
 		// Map sentinel errors to gRPC codes before shared.MapRepoErr, because
@@ -214,7 +236,7 @@ func (uc *RevokeAdminUseCase) doRevoke(
 			return domain.ClusterAdminGrant{}, shared.MapRepoErr(
 				iamerr.Wrapf(iamerr.ErrFailedPrecondition, "%s", iamerr.StripSentinel(rerr)))
 		default:
-			return domain.ClusterAdminGrant{}, shared.MapRepoErr(rerr)
+			return domain.ClusterAdminGrant{}, rerr
 		}
 	}
 
@@ -237,8 +259,5 @@ func (uc *RevokeAdminUseCase) doRevoke(
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return domain.ClusterAdminGrant{}, fmt.Errorf("commit: %w", err)
-	}
 	return grant, nil
 }

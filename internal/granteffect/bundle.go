@@ -57,7 +57,7 @@ func NewBundle(ctx context.Context, modelSource string, halves catalog.Halves, v
 		return nil, fmt.Errorf("%w: admission: %v", ErrInvalidBundle, err)
 	}
 	if !admission.Judged || len(admission.Findings) != 0 ||
-		(!admission.Admitted() && !(admission.NothingToJudge && modelSource == authzmodel.DSL)) {
+		(!admission.Admitted() && (!admission.NothingToJudge || modelSource != authzmodel.DSL)) {
 		return nil, fmt.Errorf("%w: admission %s", ErrInvalidBundle, admission.Census())
 	}
 	var pinned catalog.Halves

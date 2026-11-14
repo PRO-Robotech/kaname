@@ -13,7 +13,8 @@ package pg_test
 // в дереве было четыре, и каждое наследовало уровень от умолчания сессии.
 // Перепись держит, что это непредставимо:
 //
-//   - R1 писатель сессии строится ТОЛЬКО открытием `beginHumanSessionWriter`;
+//   - R1 писатель сессии строится открытием `beginHumanSessionWriter` либо
+//     узкой admission-цепочкой, дополнительно проверяемой правилом R6;
 //     формы построения — составной литерал (и под `&`), `new(…)` и объявление
 //     переменной значения;
 //   - R2 открытие писателя сессии и открытие писателя порта (`beginWriter`)
@@ -36,8 +37,10 @@ package pg_test
 //   - обращение порта к пулу не через поле `pool`.
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -139,6 +142,8 @@ func censusCeremonyWriterOpeners(srcs map[string]string, scenes []string) (write
 				body = fd.Body
 			}
 			isOpener := fn == sessionWriterOpener
+			isAdmissionBuild := fn == "HumanAdmissionParticipant.begin"
+			isAdmissionBegin := fn == "HumanAdmissionParticipant.beginCeremonyTx"
 			isPortOpener := fn == ceremonyPortOpener
 			namedOpen, wrongOpen := 0, 0
 			at := func(n ast.Node) string {
@@ -147,7 +152,7 @@ func censusCeremonyWriterOpeners(srcs map[string]string, scenes []string) (write
 			}
 			built := func(n ast.Node, form string) {
 				c.writerBuilds++
-				if !isOpener {
+				if !isOpener && !isAdmissionBuild {
 					findings = append(findings, fmt.Sprintf(
 						"R1 %s — писатель сессии построен (%s) мимо открытия %s: его транзакция "+
 							"открыта не на названном уровне", at(n), form, sessionWriterOpener))
@@ -169,7 +174,9 @@ func censusCeremonyWriterOpeners(srcs map[string]string, scenes []string) (write
 						case id.Name == "new" && len(x.Args) == 1 && isIdentNamed(x.Args[0], sessionWriterType):
 							built(x, "new")
 						case id.Name == sessionWriterOpener:
-							doors[fn] = true
+							if fn != "RegistrationStore.beginAdmissionSession" {
+								doors[fn] = true
+							}
 						case sessionEndRevocations[id.Name]:
 							c.revocationCalls++
 							if recv != sessionWriterType && fn != sessionEndDoorFunc {
@@ -183,7 +190,10 @@ func censusCeremonyWriterOpeners(srcs map[string]string, scenes []string) (write
 					if !ok {
 						return true
 					}
-					if (isOpener || isPortOpener) && (sel.Sel.Name == "BeginTx" || sel.Sel.Name == "Begin") {
+					if sel.Sel.Name == "beginAdmissionSession" {
+						doors[fn] = true
+					}
+					if (isOpener || isPortOpener || isAdmissionBegin) && (sel.Sel.Name == "BeginTx" || sel.Sel.Name == "Begin") {
 						if sel.Sel.Name == "BeginTx" && len(x.Args) == 2 && isNamedLevelCall(x.Args[1]) {
 							namedOpen++
 						} else {
@@ -213,7 +223,7 @@ func censusCeremonyWriterOpeners(srcs map[string]string, scenes []string) (write
 			if isPortOpener {
 				portOpenerFound = true
 			}
-			if (isOpener || isPortOpener) && namedOpen == 0 && wrongOpen == 0 {
+			if (isOpener || isPortOpener || isAdmissionBegin) && namedOpen == 0 && wrongOpen == 0 {
 				findings = append(findings, fmt.Sprintf(
 					"R2 %s — открытие писателя не открывает транзакцию на %s()", at(decl), ceremonyNamedLevel))
 			}
@@ -247,6 +257,7 @@ func censusCeremonyWriterOpeners(srcs map[string]string, scenes []string) (write
 		}
 	}
 	sort.Strings(findings)
+	findings = append(findings, admissionCeremonyChain(srcs)...)
 	return c, findings, nil
 }
 
@@ -515,4 +526,134 @@ func (s *RegistrationStore) Writer(ctx context.Context) (*humanSessionWriter, er
 		// Пустой обход — не «зелёное»: открытий нет, и перепись это называет.
 		assert.Len(t, findings, 2, "пустой обход обязан называть отсутствие обоих открытий: %v", findings)
 	})
+}
+
+// Узкая проверка новой цепочки: имя helper само по себе не даёт исключения.
+// Четыре фактические двери, закрытый selector и настоящий coordinator/callback
+// проверяются вместе. Старые инъекции без этой цепочки сохраняют свой предмет.
+func admissionCeremonyChain(srcs map[string]string) []string {
+	funcs := map[string]*ast.FuncDecl{}
+	for name, src := range srcs {
+		f, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
+		if err != nil {
+			return []string{"admission parse failed"}
+		}
+		for _, d := range f.Decls {
+			if fn, ok := d.(*ast.FuncDecl); ok {
+				_, key := declName(fn)
+				funcs[key] = fn
+			}
+		}
+	}
+	if funcs["HumanAdmissionParticipant.begin"] == nil {
+		return nil
+	}
+	render := func(n ast.Node) string {
+		var b bytes.Buffer
+		_ = format.Node(&b, token.NewFileSet(), n)
+		return b.String()
+	}
+	calls := func(f *ast.FuncDecl, name string) int {
+		n := 0
+		if f != nil {
+			ast.Inspect(f.Body, func(node ast.Node) bool {
+				if c, ok := node.(*ast.CallExpr); ok && render(c.Fun) == name {
+					n++
+				}
+				return true
+			})
+		}
+		return n
+	}
+	var findings []string
+	fail := func(s string) { findings = append(findings, "R6 admission "+s) }
+	for _, name := range []string{"RegistrationStore.Writer", "RegistrationStore.VerificationWriter", "RegistrationStore.EmailChangeWriter", "RecoveryCompletionStore.RecoveryCompletionWriter"} {
+		f := funcs[name]
+		if f == nil {
+			fail("missing door " + name)
+			continue
+		}
+		want := "s.beginAdmissionSession"
+		if strings.HasPrefix(name, "Recovery") {
+			want = "s.registration.beginAdmissionSession"
+		}
+		if calls(f, want) != 1 || calls(f, sessionWriterOpener) != 0 {
+			fail("door bypass " + name)
+		}
+	}
+	selectFn := funcs["RegistrationStore.beginAdmissionSession"]
+	if selectFn == nil || len(selectFn.Body.List) != 3 || calls(selectFn, "s.participant.begin") != 1 || calls(selectFn, sessionWriterOpener) != 1 {
+		fail("explicit configured selector")
+	} else {
+		branch, ok := selectFn.Body.List[1].(*ast.IfStmt)
+		if !ok || render(branch.Cond) != "s.participantConfigured" || len(branch.Body.List) != 1 || render(branch.Body.List[0]) != "return s.participant.begin(ctx, s.pool)" {
+			fail("configured fallback")
+		}
+	}
+	begin := funcs["HumanAdmissionParticipant.begin"]
+	if calls(begin, "p.repo.coordinatedAuthorityWriterWithBegin") != 1 {
+		fail("coordinator required")
+	}
+	found := false
+	identityGlobal := false
+	ast.Inspect(begin.Body, func(n ast.Node) bool {
+		if a, ok := n.(*ast.AssignStmt); ok && len(a.Rhs) == 1 {
+			if c, ok := a.Rhs[0].(*ast.CallExpr); ok && render(c.Fun) == "p.repo.coordinatedAuthorityWriterWithBegin" {
+				found = len(a.Lhs) == 2 && render(a.Lhs[0]) == "w" && len(c.Args) == 4 && render(c.Args[0]) == "ctx" && render(c.Args[1]) == "intent" && render(c.Args[2]) == "\"participant\"" && render(c.Args[3]) == "p.beginCeremonyTx"
+			}
+		}
+		if c, ok := n.(*ast.CompositeLit); ok && render(c.Type) == "kaname.AuthorityWriteIntent" {
+			fields := map[string]ast.Expr{}
+			for _, e := range c.Elts {
+				if kv, ok := e.(*ast.KeyValueExpr); ok {
+					fields[render(kv.Key)] = kv.Value
+				}
+			}
+			plan, ok := fields["Plan"].(*ast.CompositeLit)
+			identityGlobal = len(fields) == 3 && render(fields["Kind"]) == "kaname.AuthorityIdentity" && render(fields["Bundle"]) == "p.bundle" && ok && render(plan.Type) == "kaname.AuthorityFencePlan" && len(plan.Elts) == 1 && render(plan.Elts[0]) == "Mode: kaname.AuthorityFenceGlobal"
+		}
+		if c, ok := n.(*ast.CompositeLit); ok && isIdentNamed(c.Type, sessionWriterType) {
+			if len(c.Elts) != 1 || render(c.Elts[0]) != "tx: w.tx" {
+				fail("foreign transaction constructor")
+			}
+		}
+		return true
+	})
+	if !found {
+		fail("coordinator purpose/callback")
+	}
+	if !identityGlobal {
+		fail("GLOBAL Identity intent")
+	}
+	callback := funcs["HumanAdmissionParticipant.beginCeremonyTx"]
+	if callback == nil || len(callback.Body.List) != 2 || calls(callback, "p.repo.master.BeginTx") != 1 {
+		fail("ceremony callback")
+	} else if render(callback.Body.List[1]) != "return p.repo.master.BeginTx(ctx, ceremonyWriterTx())" {
+		fail("ceremony options")
+	}
+	return findings
+}
+
+func TestHumanAdmissionCeremonyChainRejectsBypasses(t *testing.T) {
+	original := packageSources(t)
+	for _, tc := range []struct{ name, path, old, new string }{
+		{"recovery_direct", "recovery_completion_store.go", "s.registration.beginAdmissionSession(ctx)", "beginHumanSessionWriter(ctx, s.registration.pool)"},
+		{"purpose", "human_admission_participant.go", "ctx, intent, \"participant\", p.beginCeremonyTx", "ctx, intent, \"decision\", p.beginCeremonyTx"},
+		{"wrong_level", "human_admission_participant.go", "return p.repo.master.BeginTx(ctx, ceremonyWriterTx())", "return p.repo.master.BeginTx(ctx, pgx.TxOptions{})"},
+		{"configured_fallback", "human_admission_participant.go", "return s.participant.begin(ctx, s.pool)", "return beginHumanSessionWriter(ctx, s.pool)"},
+		{"foreign_tx", "human_admission_participant.go", "tx: w.tx", "tx: nil"},
+		{"kind", "human_admission_participant.go", "kaname.AuthorityIdentity", "kaname.AuthorityGroup"},
+		{"scope", "human_admission_participant.go", "kaname.AuthorityFenceGlobal", "kaname.AuthorityFenceAccounts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			copy := map[string]string{}
+			for k, v := range original {
+				copy[k] = v
+			}
+			require.Contains(t, copy[tc.path], tc.old)
+			copy[tc.path] = strings.Replace(copy[tc.path], tc.old, tc.new, 1)
+			require.NotEmpty(t, admissionCeremonyChain(copy))
+		})
+	}
+	require.Empty(t, admissionCeremonyChain(original))
 }

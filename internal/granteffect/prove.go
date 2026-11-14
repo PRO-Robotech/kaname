@@ -114,7 +114,7 @@ func effectCovers(h, w Effect, identity grantcoverage.Identity, steps *int) bool
 	case BindRole:
 		return h.Anchor == w.Anchor && h.RoleID == w.RoleID
 	case Use:
-		if h.Type != w.Type || !(h.Action == w.Action || h.Action.Kind == grantcoverage.AllVerbs && w.Action.Kind == grantcoverage.Verb) {
+		if h.Type != w.Type || (h.Action != w.Action && (h.Action.Kind != grantcoverage.AllVerbs || w.Action.Kind != grantcoverage.Verb)) {
 			return false
 		}
 	case ScopeAdmin:
@@ -187,7 +187,7 @@ func residualObligation(h, w Effect) bool {
 	if h.Kind != w.Kind || h.Type != w.Type {
 		return false
 	}
-	if w.Kind == Use && !(h.Action == w.Action || h.Action.Kind == grantcoverage.AllVerbs && w.Action.Kind == grantcoverage.Verb) {
+	if w.Kind == Use && (h.Action != w.Action && (h.Action.Kind != grantcoverage.AllVerbs || w.Action.Kind != grantcoverage.Verb)) {
 		return false
 	}
 	if h.Condition.Name != "" && h.Condition != w.Condition {

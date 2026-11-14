@@ -9,12 +9,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/grantcoverage"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -83,6 +80,6 @@ var _ kaname.SemanticAuthorityWriter = (*semanticAuthorityWriteTx)(nil)
 // Единственная сборка native checker: новый entry и прежний compare-only порт
 // используют тот же bundle и время после всех своих ожиданий.
 func newSemanticAuthorityWriter(w *authorityWriteTx, bundle *granteffect.Bundle) *semanticAuthorityWriteTx {
-	checker := authzcascade.WrapAdmitted(relverdict.NewSemanticTransactionAsker(w.tx, bundle, w.fence.decisionAt), personmarks.NewTransaction(w.tx))
+	checker := newLiveAdministrativeChecker(w, bundle)
 	return &semanticAuthorityWriteTx{authorityWriteTx: w, bundle: bundle, checker: checker}
 }

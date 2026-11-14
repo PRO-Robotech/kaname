@@ -101,16 +101,15 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/jackc/pgx/v5"
 )
 
 // MaxAncestorDepth — предел обхода цепи предков.
 //
-// Совпадает с ограничением таблицы рёбер и с пределом компилятора модели. Здесь
-// он повторён НЕ как вторая истина, а как страховка обхода: рекурсивный запрос
-// без предела на данных с циклом не завершается, и полагаться на то, что цикла
-// нет, — значит полагаться на ограничение, которое проверяет другая сторона.
-const MaxAncestorDepth = 4
+// Считает переходы обхода, а не позиции сохранённой цепи и не число
+// родителей одного узла. Общая граница совпадает с компилятором модели.
+const MaxAncestorDepth = hierarchy.MaxPointerHops
 
 // Verdict — исход вопроса. Три состояния, а не два: «не знаю» отличимо от «нет».
 type Verdict int
@@ -204,6 +203,7 @@ const maxConditionRows = 256
 // сборкой, о типе, заведённом применением манифеста в работающем процессе, не
 // знает (kacho#1986). Двух словарей в одном соединении быть не должно —
 // соединение по разным написаниям не совпадает НИКОГДА и молча.
+// $12 — независимый предел родителей одного шага; explicit clock использует $13.
 const verdictSQL = `
 WITH RECURSIVE
 -- scope — ОБЛАСТИ, на которые может быть сделана действующая выдача: сам объект
@@ -269,16 +269,11 @@ WITH RECURSIVE
 -- каждом шаге: измерено 2412 строк за один вердикт при трёх рёбрах у объекта.
 -- Соединение вбок с пределом заставляет ходить указателем по ключу.
 --
--- ПРЕДЕЛ НЕ УСЕКАЕТ — ДОВОД ЧИСЛОМ, А НЕ РАВЕНСТВОМ. Прежний довод («рёбер у
--- объекта не больше глубин, ключ таблицы уникален по глубине») отменён 781001: у
--- проекта указателей ДВА — аккаунт и кластер, — и оба лежат на глубине 1.
--- Действующий довод: звеньев у объекта столько, сколько у его типа РАЗНЫХ
--- отношений-указателей, и каждая достроенная ветвь даёт объекту ровно одно звено
--- (ветви взаимоисключающи: NOT EXISTS отменяет вывод там, где владелец цепь
--- назвал, а две ветви роли разведены ограничением схемы). Максимум по дереву —
--- 2 при пределе 4, и это число ПРОВЕРЯЕТСЯ переписью источников, а не выводится:
--- объект, у которого звеньев столько же, сколько предел, усекался бы МОЛЧА, а
--- отказ по усечённой цепи неотличим от честного.
+-- Предел числа родителей и глубина пути независимы: первый остаётся 4,
+-- второй включает 5 переходов до cluster. Сохранённая цепь имеет до 4 позиций;
+-- выведенные ветви resource_scope_edge требуют собственной проверки полноты.
+-- Captured writer дочитывает страницы и отвергает graph с fanout>4 либо
+-- продолжающийся после предельной глубины; LIMIT сам полноту не доказывает.
 -- Та же форма и по той же причине стоит на пути перечисления — одна семантика
 -- области на обе точки входа.
 scope(s_type, s_id, depth) AS (
@@ -291,7 +286,7 @@ scope(s_type, s_id, depth) AS (
                FROM kaname.resource_scope_edge pe
               WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
               ORDER BY pe.depth
-              LIMIT $7::int
+              LIMIT $12::int
            ) e
      WHERE s.depth < $7::int
 ),
@@ -642,12 +637,12 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	args := []any{
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), hierarchy.MaxImmediateParents,
 	}
 	if !in.DecisionAt.IsZero() {
 		// Общую ветвь используют также списки. Меняем только прямой Ask нового
 		// writer; прежние вызовы без времени сохраняют now() своей транзакции.
-		sql, err = replaceOnce(sql, "b.expires_at > now()", "b.expires_at > $12::timestamptz")
+		sql, err = replaceOnce(sql, "b.expires_at > now()", "b.expires_at > $13::timestamptz")
 		if err != nil {
 			return Unknown, g, err
 		}
@@ -846,7 +841,7 @@ scope(object_id, s_type, s_id, depth) AS (
                FROM kaname.resource_scope_edge pe
               WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
               ORDER BY pe.depth
-              LIMIT $7::int
+              LIMIT $12::int
            ) e
      WHERE s.depth < $7::int
 ),
@@ -1000,7 +995,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectIDs,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), hierarchy.MaxImmediateParents,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relverdict: запрос о странице: %w", err)

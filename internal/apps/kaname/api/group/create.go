@@ -8,19 +8,17 @@ import (
 	"fmt"
 	"log/slog"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // ObjectReconciler — narrow port (rbac-contract-a-fix, C-01b): SYNCHRONOUSLY
@@ -54,8 +52,9 @@ type ObjectReconciler interface {
 }
 
 type CreateGroupUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	lifecycleWriter lifecycleWriterSelection
+	repo            Repo
+	opsRepo         operations.Repo
 	// Optional FGA hierarchy-tuple writer. When non-nil, a successful Group
 	// INSERT also writes `iam_group:<id>#account@account:<acc>` so FGA
 	// `<rel> from account` cascades resolve for the per-RPC authz middleware
@@ -124,7 +123,7 @@ func (u *CreateGroupUseCase) Execute(ctx context.Context, g domain.Group) (*oper
 }
 
 func (u *CreateGroupUseCase) doCreate(ctx context.Context, g domain.Group, actor string) (*anypb.Any, error) {
-	created, err := shared.DoWithWriteTx(ctx, u.repo,
+	created, err := withGroupLifecycleTx(ctx, u.lifecycleWriter, u.repo, kaname.GroupCreate, g,
 		func(ctx context.Context, w Writer) (domain.Group, error) {
 			inserted, ierr := w.GroupsW().Insert(ctx, g)
 			if ierr != nil {

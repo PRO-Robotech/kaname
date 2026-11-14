@@ -56,6 +56,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -121,6 +122,7 @@ const DefaultPageSize = 500
 // сборкой, о типе, заведённом применением манифеста в работающем процессе, не
 // знает (kacho#1986). Двух словарей в одном соединении быть не должно —
 // соединение по разным написаниям не совпадает НИКОГДА и молча.
+// $12 — предел родителей одного шага; $5 ограничивает только глубину обхода.
 const listSQL = `
 WITH RECURSIVE speaker_pair(s_type, s_id, via) AS (
     -- СУБЪЕКТ ВЫДАЧИ — ПАРОЙ КОЛОНОК, а не склейкой.
@@ -222,16 +224,9 @@ scope(object_id, s_type, s_id, depth) AS (
     -- кандидатов, а через рёбра, и предел на кандидатах этого не ловит.
     -- Измерено: страница из 50 объектов читала все рёбра типа.
     --
-    -- Предел внутри — НЕ усечение и не может им стать: у объекта не бывает
-    -- больше рёбер, чем глубин, потому что первичный ключ таблицы уникален по
-    -- глубине, а сама глубина ограничена проверкой схемы тем же числом
-    -- (миграция 0082). Выведенное схемой звено этого равенства не нарушает:
-    -- представление выводит предка ТОЛЬКО там, где владелец объекта своей цепи
-    -- не назвал (миграция 740001), поэтому строки не складываются. То есть предел
-    -- равен собственной границе строки объекта, а порядок по глубине делает
-    -- выборку определённой на случай, если границы когда-нибудь разойдутся:
-    -- ближние предки останутся, дальние — те, до которых обход всё равно не
-    -- доходит.
+    -- Число родителей одного шага ограничено отдельно от числа переходов.
+    -- LIMIT не доказывает полноту произвольного графа: captured writer
+    -- проверяет её полным чтением до native dispatch. Предел fanout прежний.
     SELECT s.object_id, e.parent_type, e.parent_id, s.depth + 1
       FROM scope s
       CROSS JOIN LATERAL (
@@ -239,7 +234,7 @@ scope(object_id, s_type, s_id, depth) AS (
                FROM kaname.resource_scope_edge pe
               WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
               ORDER BY pe.depth
-              LIMIT $5::int
+              LIMIT $12::int
            ) e
      WHERE s.depth < $5::int
 ),
@@ -442,7 +437,7 @@ func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after st
 ) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1))
+		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), hierarchy.MaxImmediateParents)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

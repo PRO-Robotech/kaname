@@ -15,6 +15,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
 // Отдельные двухцелочисленные пространства cluster/account не пересекаются
@@ -38,7 +39,20 @@ func (f authorityFence) DecisionAt() time.Time           { return f.decisionAt }
 
 type authorityWriteTx struct {
 	*writeTx
-	fence authorityFence
+	fence            authorityFence
+	nativeRead       *protectedNativeRead
+	producerCaptures map[domain.Subject]*boundProducerPopulation
+	producerBudget   *relverdict.AdministrativeReadBudget
+	closed           bool
+}
+
+func (w *authorityWriteTx) Commit(ctx context.Context) error {
+	w.closed = true
+	return w.writeTx.Commit(ctx)
+}
+func (w *authorityWriteTx) Rollback(ctx context.Context) error {
+	w.closed = true
+	return w.writeTx.Rollback(ctx)
 }
 
 func (w *authorityWriteTx) AuthorityFence() kaname.AuthorityFence { return w.fence }

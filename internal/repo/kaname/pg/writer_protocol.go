@@ -55,6 +55,13 @@ func validateAuthorityIntent(in kaname.AuthorityWriteIntent) error {
 // kaname#1034: каждая попытка — новая физическая TX. До entry доступны только
 // readonly ownership discovery и immutable bundle; callback/старых locks нет.
 func (r *Repository) coordinatedAuthorityWriter(ctx context.Context, in kaname.AuthorityWriteIntent, purpose string) (*authorityWriteTx, error) {
+	return r.coordinatedAuthorityWriterWithBegin(ctx, in, purpose, r.master.BeginTx)
+}
+
+// kaname#1034: завершённый RR stage передаёт idle connection в тот же coordinator.
+// Это всегда НОВАЯ RC TX; один проход не ждёт второй slot удерживая первый.
+// Обычные callers сохраняют pool.BeginTx и его прежний release lifecycle.
+func (r *Repository) coordinatedAuthorityWriterWithBegin(ctx context.Context, in kaname.AuthorityWriteIntent, purpose string, begin func(context.Context, pgx.TxOptions) (pgx.Tx, error)) (*authorityWriteTx, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -72,7 +79,7 @@ func (r *Repository) coordinatedAuthorityWriter(ctx context.Context, in kaname.A
 	}
 	mode := in.Plan.Mode
 	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
-		tx, e := r.master.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		tx, e := begin(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 		if e != nil {
 			return nil, e
 		}

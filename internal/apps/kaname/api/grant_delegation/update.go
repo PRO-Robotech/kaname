@@ -38,11 +38,13 @@ type UpdateInput struct {
 }
 
 type UpdateGrantDelegationUseCase struct {
-	repo      Repo
-	opsRepo   operations.Repo
-	cat       catalog.Source
-	relations clients.RelationStore
-	logger    *slog.Logger
+	repo                Repo
+	authorityWriter     delegationWriterFactory
+	authorityConfigured bool
+	opsRepo             operations.Repo
+	cat                 catalog.Source
+	relations           clients.RelationStore
+	logger              *slog.Logger
 }
 
 func NewUpdateGrantDelegationUseCase(repo Repo, ops operations.Repo, cat catalog.Source) *UpdateGrantDelegationUseCase {
@@ -177,9 +179,12 @@ func (u *UpdateGrantDelegationUseCase) Execute(ctx context.Context, in UpdateInp
 	if err != nil {
 		return nil, err
 	}
-	plans, err := authzmodel.Shared()
-	if err != nil || plans == nil {
-		return nil, authzguard.AuthzBackendUnavailable()
+	var plans *authzmodel.Plans
+	if !u.authorityConfigured {
+		plans, err = authzmodel.Shared()
+		if err != nil || plans == nil {
+			return nil, authzguard.AuthzBackendUnavailable()
+		}
 	}
 	op, err := operations.NewFromContext(ctx, domain.PrefixOperationIAM,
 		fmt.Sprintf("Update grant delegation %s", patch.id),
@@ -259,10 +264,13 @@ func narrowing(id domain.GrantDelegationID, axis string) error {
 }
 
 func (u *UpdateGrantDelegationUseCase) doUpdate(ctx context.Context, patch updatePatch, plans *authzmodel.Plans) (*anypb.Any, error) {
-	out, err := shared.DoWithWriteTx(ctx, u.repo, func(ctx context.Context, w Writer) (domain.GrantDelegation, error) {
+	out, err := doDelegationWriteTx(ctx, delegationWriteRepo{Repo: u.repo, factory: u.authorityWriter, configured: u.authorityConfigured, mutation: delegationUpdate, proposed: domain.GrantDelegation{ID: patch.id, RoleIDs: patch.roles}}, func(ctx context.Context, w Writer) (domain.GrantDelegation, error) {
 		gw := w.AccessBindingsW().GrantDelegationsW()
 		current, err := gw.LockForRevoke(ctx, patch.id)
 		if err != nil {
+			return domain.GrantDelegation{}, err
+		}
+		if err := refreshDelegationDecision(ctx, w); err != nil {
 			return domain.GrantDelegation{}, err
 		}
 		checker, err := w.TransactionRelationChecker(plans)

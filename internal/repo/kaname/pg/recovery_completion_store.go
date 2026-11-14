@@ -10,8 +10,9 @@ package pg
 //
 // # Одна транзакция — обычное восстановление и переход записи
 //
-// Транзакция открывается дверью писателя нескольких сессий: строка человека
-// взята замком `FOR NO KEY UPDATE` ПЕРВЫМ оператором (`holdPersonOf`), и
+// Транзакция открывается дверью admission: при явной настройке сначала
+// GLOBAL participant, затем строка человека замком `FOR NO KEY UPDATE`
+// первым бизнес-оператором (`holdPersonOf`), и
 // писатель сессии, писатель зеркала и операторы перехода работают над ОДНОЙ
 // `pgx.Tx`. Порядок «личность → всё прочее» общий с удалением личности, сменой
 // пароля и сбросами администратора облака; захват выдачи входа (`FOR SHARE`)
@@ -59,9 +60,17 @@ func NewRecoveryCompletionStore(pool *pgxpool.Pool, activate InviteActivatorTx) 
 	return &RecoveryCompletionStore{registration: NewRegistrationStore(pool), activate: activate}, nil
 }
 
+// WithHumanAdmissionParticipant сохраняет explicit configuration, включая nil,
+// в собственном registration store: recovery не открывает legacy TX мимо него.
+func (s *RecoveryCompletionStore) WithHumanAdmissionParticipant(p *HumanAdmissionParticipant) *RecoveryCompletionStore {
+	copy := *s
+	copy.registration = s.registration.WithHumanAdmissionParticipant(p)
+	return &copy
+}
+
 // RecoveryCompletionWriter — см. порт.
 func (s *RecoveryCompletionStore) RecoveryCompletionWriter(ctx context.Context, userID domain.UserID) (humansession.RecoveryCompletionWriter, error) {
-	w, err := beginHumanSessionWriter(ctx, s.registration.pool)
+	w, err := s.registration.beginAdmissionSession(ctx)
 	if err != nil {
 		return nil, mapErr(err, "RecoveryCompletion.Writer", "")
 	}

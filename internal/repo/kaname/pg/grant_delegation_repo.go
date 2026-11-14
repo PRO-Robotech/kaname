@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -197,9 +198,9 @@ chain(s_type, s_id, depth) AS (
                FROM kaname.resource_scope_edge pe
               WHERE pe.object_type = c.s_type AND pe.object_id = c.s_id
               ORDER BY pe.depth
-              LIMIT 4
+              LIMIT $4::int
            ) e
-     WHERE c.depth < 4
+     WHERE c.depth < $3::int
 )
 SELECT EXISTS (SELECT 1 FROM kaname.resource_mirror m WHERE m.object_type = $1::text AND m.object_id = $2::text),
        COALESCE((SELECT p.account_id
@@ -214,7 +215,7 @@ func (r *gdReader) TargetObjectAccount(ctx context.Context, ref domain.ResourceR
 		registered bool
 		account    string
 	)
-	if err := r.tx.QueryRow(ctx, targetObjectAccountSQL, ref.Type, ref.ID).Scan(&registered, &account); err != nil {
+	if err := r.tx.QueryRow(ctx, targetObjectAccountSQL, ref.Type, ref.ID, hierarchy.MaxPointerHops, hierarchy.MaxImmediateParents).Scan(&registered, &account); err != nil {
 		return false, "", mapErr(err, "", ref.ID)
 	}
 	return registered, domain.AccountID(account), nil

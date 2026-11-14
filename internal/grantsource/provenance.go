@@ -17,6 +17,9 @@ func (b *sourceBudget) chargeCost(cost kaname.SourceReadCost) bool {
 	if cost.Reads < 0 || cost.Rows < 0 || cost.Reads > maxBindingSourcePages-b.pages || cost.Rows > maxBindingSourceRows-b.rows {
 		return false
 	}
+	if b.shared != nil && b.shared(cost) != nil {
+		return false
+	}
 	b.pages += cost.Reads
 	b.rows += cost.Rows
 	return true

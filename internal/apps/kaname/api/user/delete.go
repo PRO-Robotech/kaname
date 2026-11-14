@@ -36,13 +36,15 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 type DeleteUserUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	identityWriter identityWriterSelection
+	repo           Repo
+	opsRepo        operations.Repo
 }
 
 func NewDeleteUserUseCase(r Repo, opsRepo operations.Repo) *DeleteUserUseCase {
@@ -158,7 +160,7 @@ func identityTuplesForRemoval(id domain.UserID, memberOf []domain.AccountID) []s
 }
 
 func (uc *DeleteUserUseCase) doDelete(ctx context.Context, id domain.UserID, actor, accountID string) (*anypb.Any, error) {
-	if err := shared.DoWithWriteTxVoid(ctx, uc.repo,
+	if err := shared.DoWithWriteTxVoid(ctx, uc.identityWriter.repository(uc.repo, kaname.IdentityDelete, id),
 		func(ctx context.Context, w Writer) error {
 			// ПЕРВЫЙ ОПЕРАТОР — замок строки человека и перечень его членств
 			// (Р6): новое членство ссылается на строку внешним ключом и потому

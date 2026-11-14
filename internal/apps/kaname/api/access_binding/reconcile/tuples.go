@@ -26,7 +26,7 @@ import (
 // from the role's compiled permissions (ARM_LABELS rules are excluded from
 // CompileRules). v_<verb> tuples are emitted ONLY when (a) ТИП объявляет
 // непустой набор `v_*` AND (b) глагол входит в набор ИМЕННО ЭТОГО типа
-// (domain.IsVerbOfType) — не в платформенный словарь: набор есть атрибут типа.
+// (catalog.Facts.ObjectRelations) — не в платформенный словарь: набор есть атрибут типа.
 // Иначе доступ несёт ярусный кортеж. ok=false
 // when the (objectType) has no FGA object type (a typo'd type never grants —
 // fail-closed). The subject is the binding's subject (already FGA-formatted).
@@ -51,7 +51,7 @@ func ruleObjectTuples(cat *catalog.Facts, policy domain.RulePolicy, subject stri
 // РАЗВЁРНУТЫХ глаголов правила, поэтому подстановка `*` на типе без собственного
 // набора обязана по-прежнему давать полный набор — иначе роль-суперпользователь
 // молча понизилась бы с администратора до наблюдателя. Отношения `v_*` при этом не
-// эмитятся всё равно: пустой набор не принадлежит никому (domain.IsVerbOfType).
+// эмитятся всё равно: catalog.Facts.ObjectRelations проверяет набор самого типа.
 func typeVerbsOf(cat *catalog.Facts, fgaType string) []string {
 	if set := cat.VerbsOfType(fgaType); len(set) > 0 {
 		return set

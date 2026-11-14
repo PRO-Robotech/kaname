@@ -12,6 +12,7 @@ import (
 	"github.com/PRO-Robotech/corelib/migratorrun"
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/authoritycallbacks"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
@@ -184,8 +185,9 @@ func TestRegistrationRepeatableRead_FirstBindingAfterEdge(t *testing.T) {
 
 func TestRegistrationRepeatableRead_CatalogGateHasNoSemanticEffects(t *testing.T) {
 	ctx, observer, raw, _ := registrationRRDB(t)
+	authoritycallbacks.AssertReviewedGraph(t, ctx, observer)
 	var before, after string
-	const snapshot = `SELECT jsonb_build_object('catalog',(SELECT to_jsonb(cr) FROM kaname.catalog_resource cr WHERE dotted='registry.registries'),'audit',(SELECT count(*) FROM kaname.audit_outbox),'reconcile',(SELECT count(*) FROM kaname.resource_reconcile_outbox))::text`
+	const snapshot = `SELECT jsonb_build_object('catalog',(SELECT to_jsonb(cr) FROM kaname.catalog_resource cr WHERE dotted='registry.registries'),'audit',(SELECT count(*) FROM kaname.audit_outbox),'reconcile',(SELECT count(*) FROM kaname.resource_reconcile_outbox),'authority',(SELECT to_jsonb(a) FROM kaname.authority_semantic_identity a),'protocol',(SELECT to_jsonb(p) FROM kaname.authority_writer_protocol p),'handoff',(SELECT count(*) FROM kaname.authority_bundle_handoff),'receipts',(SELECT count(*) FROM kaname.producer_source_receipt),'journal',(SELECT count(*) FROM kaname.fga_outbox))::text`
 	require.NoError(t, observer.QueryRow(ctx, snapshot).Scan(&before))
 	_, err := raw.Exec(ctx, registrationRREdge, "rr-catalog-only", "registrationRR-P")
 	require.NoError(t, err)
@@ -204,7 +206,23 @@ func TestRegistrationRepeatableRead_CatalogGateHasNoSemanticEffects(t *testing.T
 		t.Logf("catalog callback %s", definition)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"catalog_resource_binds_registered_objects_on_declare", "catalog_resource_binds_registered_objects_on_insert", "catalog_resource_holds_project_bindings", "registration_catalog_fence_forget_all", "registration_catalog_fence_forget_identity", "registration_catalog_fence_forget_row", "resource_registration_locks_writers"}, names, "new callbacks require gate re-review")
+	require.Equal(t, []string{"authority_catalog_changed", "authority_catalog_truncated", "authority_protocol_row", "authority_protocol_statement", "binding_epoch_delete", "binding_epoch_insert", "binding_epoch_truncate", "binding_epoch_update", "catalog_resource_binds_registered_objects_on_declare", "catalog_resource_binds_registered_objects_on_insert", "catalog_resource_holds_project_bindings", "policy_epoch_delete", "policy_epoch_insert", "policy_epoch_truncate", "policy_epoch_update", "registration_catalog_fence_forget_all", "registration_catalog_fence_forget_identity", "registration_catalog_fence_forget_row", "resource_registration_locks_writers"}, names, "новые callbacks требуют повторного разбора графа")
+	rows.Close()
+	var reviewed int
+	require.NoError(t, observer.QueryRow(ctx, `SELECT count(*) FROM pg_catalog.pg_trigger t WHERE t.tgrelid='kaname.catalog_resource'::regclass AND t.tgenabled='O' AND NOT t.tgisinternal AND (
+ (t.tgname='authority_catalog_changed' AND t.tgfoid='kaname.authority_protocol_catalog_changed()'::regprocedure AND t.tgtype=29) OR
+ (t.tgname='authority_catalog_truncated' AND t.tgfoid='kaname.authority_protocol_catalog_changed()'::regprocedure AND t.tgtype=32) OR
+ (t.tgname='authority_protocol_row' AND t.tgfoid='kaname.authority_protocol_row_guard()'::regprocedure AND t.tgtype=31) OR
+ (t.tgname='authority_protocol_statement' AND t.tgfoid='kaname.authority_protocol_statement_guard()'::regprocedure AND t.tgtype=62) OR
+ (t.tgname='binding_epoch_insert' AND t.tgfoid='kaname.authority_binding_epoch_changed()'::regprocedure AND t.tgtype=4 AND t.tgnewtable='new_epoch_rows' AND t.tgoldtable IS NULL) OR
+ (t.tgname='binding_epoch_update' AND t.tgfoid='kaname.authority_binding_epoch_changed()'::regprocedure AND t.tgtype=16 AND t.tgnewtable='new_epoch_rows' AND t.tgoldtable='old_epoch_rows') OR
+ (t.tgname='binding_epoch_delete' AND t.tgfoid='kaname.authority_binding_epoch_changed()'::regprocedure AND t.tgtype=8 AND t.tgoldtable='old_epoch_rows' AND t.tgnewtable IS NULL) OR
+ (t.tgname='binding_epoch_truncate' AND t.tgfoid='kaname.authority_binding_epoch_changed()'::regprocedure AND t.tgtype=32 AND t.tgoldtable IS NULL AND t.tgnewtable IS NULL) OR
+ (t.tgname='policy_epoch_insert' AND t.tgfoid='kaname.authority_policy_changed()'::regprocedure AND t.tgtype=4 AND t.tgnewtable='new_policy_rows' AND t.tgoldtable IS NULL) OR
+ (t.tgname='policy_epoch_update' AND t.tgfoid='kaname.authority_policy_changed()'::regprocedure AND t.tgtype=16 AND t.tgnewtable='new_policy_rows' AND t.tgoldtable='old_policy_rows') OR
+ (t.tgname='policy_epoch_delete' AND t.tgfoid='kaname.authority_policy_changed()'::regprocedure AND t.tgtype=8 AND t.tgoldtable='old_policy_rows' AND t.tgnewtable IS NULL) OR
+ (t.tgname='policy_epoch_truncate' AND t.tgfoid='kaname.authority_policy_changed()'::regprocedure AND t.tgtype=32 AND t.tgoldtable IS NULL AND t.tgnewtable IS NULL))`).Scan(&reviewed))
+	require.Equal(t, 12, reviewed, "имя callback не заменяет проверку функции, события, фазы и transition tables")
 }
 
 func TestRegistrationRepeatableRead_MovedRawEdgeUpdate(t *testing.T) {

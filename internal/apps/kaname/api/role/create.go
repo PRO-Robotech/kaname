@@ -12,12 +12,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
@@ -26,6 +23,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // ObjectReconciler — narrow port (rbac-contract-a-fix, C-01b): SYNCHRONOUSLY
@@ -57,6 +55,7 @@ type ObjectReconciler interface {
 }
 
 type CreateRoleUseCase struct {
+	policy         rolePolicySelection
 	referencePlans *authzmodel.Plans
 	repo           Repo
 	opsRepo        operations.Repo
@@ -205,9 +204,12 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 }
 
 func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor string) (*anypb.Any, error) {
-	created, err := shared.DoWithWriteTx(ctx, u.repo,
+	created, err := u.policy.run(ctx, u.repo, r, true, true,
 		func(ctx context.Context, w Writer) (domain.Role, error) {
-			facts := u.cat.Facts()
+			facts, ferr := writerRoleFacts(w, u.cat)
+			if ferr != nil {
+				return domain.Role{}, ferr
+			}
 			projection, perr := facts.ProjectGrantRules(r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
 			if perr != nil {
 				return domain.Role{}, shared.MapValidationErr(perr)

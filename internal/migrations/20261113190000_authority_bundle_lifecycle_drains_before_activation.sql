@@ -2,6 +2,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: явный lifecycle; migration НЕ выполняет stage/activation.
 -- +goose Up
+-- Приёмка: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+-- kaname#1034: защита полного действия выдачи и сохранение прежних строк при накате (ESC-32).
 CREATE TABLE kaname.authority_bundle_handoff (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  model_source text NOT NULL CHECK(octet_length(model_source) BETWEEN 1 AND 8388608),

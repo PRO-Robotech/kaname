@@ -22,20 +22,18 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/PRO-Robotech/corelib/operations"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
-
-	"github.com/PRO-Robotech/corelib/operations"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 type AddMemberInput struct {
@@ -45,6 +43,7 @@ type AddMemberInput struct {
 }
 
 type AddMemberUseCase struct {
+	policy           additionPolicySelection
 	membershipWriter membershipWriterSelection
 	repo             Repo
 	opsRepo          operations.Repo
@@ -115,8 +114,10 @@ func (u *AddMemberUseCase) Execute(ctx context.Context, in AddMemberInput) (*ope
 	// правом выдавать на каждой их области. Порядок несущий (Д-4): форма,
 	// существование группы и вид участника уже проверены, об участнике отказ не
 	// говорит ничего. Отказ синхронный, операции нет.
-	if err := u.requireMembersGrantAuthority(ctx, in.GroupID); err != nil {
-		return nil, err
+	if !u.policy.configured {
+		if err := u.requireMembersGrantAuthority(ctx, in.GroupID); err != nil {
+			return nil, err
+		}
 	}
 
 	op, err := operations.NewFromContext(ctx,
@@ -132,7 +133,9 @@ func (u *AddMemberUseCase) Execute(ctx context.Context, in AddMemberInput) (*ope
 	if err := u.opsRepo.Create(ctx, op); err != nil {
 		return nil, err
 	}
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		return u.doAdd(ctx, in)
 	})
 	return &op, nil
@@ -144,7 +147,7 @@ func (u *AddMemberUseCase) doAdd(ctx context.Context, in AddMemberInput) (*anypb
 		MemberType: in.MemberType,
 		MemberID:   in.MemberID,
 	}
-	if err := u.membershipWriter.run(ctx, u.repo, m,
+	if err := u.runAddition(ctx, m,
 		func(ctx context.Context, w Writer) error {
 			// Д-3 (kaname#1037): участник — только из аккаунта группы. Той же
 			// транзакцией, что вставка, и под FOR SHARE строки, на которой

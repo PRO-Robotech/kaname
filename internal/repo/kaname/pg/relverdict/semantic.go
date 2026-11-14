@@ -4,9 +4,10 @@
 package relverdict
 
 import (
+	"time"
+
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
 	"github.com/jackc/pgx/v5"
-	"time"
 )
 
 // PlanSource — только чтение планов, без mutable Model(). Реализация immutable

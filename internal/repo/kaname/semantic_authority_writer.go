@@ -6,6 +6,7 @@ package kaname
 import (
 	"context"
 	"errors"
+
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 )
 

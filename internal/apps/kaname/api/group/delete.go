@@ -12,22 +12,21 @@ import (
 	"context"
 	"fmt"
 
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/PRO-Robotech/corelib/operations"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type DeleteGroupUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	lifecycleWriter lifecycleWriterSelection
+	repo            Repo
+	opsRepo         operations.Repo
 }
 
 func NewDeleteGroupUseCase(r Repo, opsRepo operations.Repo) *DeleteGroupUseCase {
@@ -74,7 +73,7 @@ func (u *DeleteGroupUseCase) Execute(ctx context.Context, id domain.GroupID) (*o
 }
 
 func (u *DeleteGroupUseCase) doDelete(ctx context.Context, id domain.GroupID, actor, accountID string) (*anypb.Any, error) {
-	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
+	if err := u.lifecycleWriter.run(ctx, u.repo, kaname.GroupDelete, domain.Group{ID: id, AccountID: domain.AccountID(accountID)},
 		func(ctx context.Context, w Writer) error {
 			if derr := w.GroupsW().Delete(ctx, id); derr != nil {
 				return derr

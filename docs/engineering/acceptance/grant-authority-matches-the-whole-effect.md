@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Приёмка: выдача роли ограничена полным выдаваемым эффектом
 
-- **Статическая форма:** DRAFT, редакция 2 от 2026-11-12. Полный контракт этой редакции ещё не получил одобрения по отпечатку. Слово DRAFT после ревью не меняется; действующий вердикт выводится из отдельной записи и события ревью.
+- **Статическая форма:** DRAFT, редакция 3 от 2026-11-13. Текущий вердикт относится только к точному отпечатку этой редакции. Слово DRAFT после ревью не меняется; действующий вердикт выводится из отдельной записи и события ревью.
 - **Задачи:** Kaname #1034, #1035; взаимодействие с поставленными узкими исправлениями #1036/#1037/#1039 и с общими доверенностями #986/#1032.
 - **Область:** Kaname и общие доверенности. Kachō, Terraform, Registry-потребитель и svc-registry не участвуют.
 - **Предыдущая приёмка:** `role-rights-stay-within-what-is-named.md`, r4, SHA-256 `3131d7ddfffa9b66857b94c70138b6ebfe7bdb77c7ca07f5333db88aefaae690` покрывает прежний узкий срез. Её одобрение не переносится на полный bind/escalate, Role.Create и этот документ.
@@ -237,9 +237,11 @@ writer serialization и совместимость D3/D5/#986. Удаление 
 
 Планируемый держатель обычных FB-сценариев:
 `internal/apps/kaname/api/access_binding/full_bind_contract_integration_test.go`,
-семейство `TestFullBind_FBxx`; Role и Group вызываются через реальные use-cases
+семейство `TestFullBind_FB`; например, `TestFullBind_FB01_CoverageNeedsSeparateCreateBinding`
+и `TestFullBind_FB04_BindNamesTheGrantedRole`. Role и Group вызываются через реальные use-cases
 того же мира. Сквозные проверки входного admission и формы отказа идут через
-настоящий gRPC/HTTP listener. Эти держатели пока заказаны, не объявлены готовыми.
+настоящий gRPC/HTTP listener. Обычные FB-держатели реализованы, но успешное исполнение полного контракта
+ещё не подтверждено. Сквозные listener-держатели остаются обязательным заказом.
 Прежние GD/GDU/ESC остаются самостоятельными держателями.
 
 Для положительного исхода сначала проверяются сохранённые строки binding,
@@ -362,11 +364,19 @@ immutable semantic bundle и kind операции. Он приобретает 
    совпадений; отдельный two-int namespace не пересекается с legacy bigint keys.
 3. Проверка protocol/bundle, свежая перепроверка discovered ownership. Изменение
    classification означает rollback/restart, без повышения shared до exclusive.
-4. DB `clock_timestamp()` после ожидания барьеров задаёт единый `decision_at`.
+4. До решения завершаются все фактические ожидания mutation: прежние row/advisory
+   locks целевой строки, каталога, проекций и полного staged fanout. Полный footprint
+   подготовлен bounded страницами до fences; его поколения и защищённые источники
+   перепроверяются после последнего ожидания без расширения режима или account set.
+5. Только затем DB `clock_timestamp()` задаёт единый окончательный `decision_at`.
    Native authority, source expiry и normalizer используют его, не `now()` начала
-   транзакции. Это момент решения, без нового TTL-контракта выдачи.
-5. Прежние внутренние замки, полный census/decision и атомарная запись
-   mutation/projections/subjects/ledger/outbox/audit на том же writer.
+   транзакции. Все method/content/reference gates читают OLD authority: proposed
+   rules и уже добавленные membership не оправдывают собственную мутацию. Это
+   момент решения, без нового TTL-контракта выдачи.
+6. Атомарная запись mutation/projections/subjects/ledger/outbox/audit на том же
+   writer использует подготовленный footprint. Неожиданное новое ожидание требует
+   безопасного rollback/restage; post-body проверка по уже изменённой роли не
+   заменяет решение. Retry охватывает всю попытку, включая body и Commit.
 
 Используется READ COMMITTED с полным участием писателей. SERIALIZABLE только у
 трёх gates при остальных RC writers не является заменой этого протокола.
@@ -374,6 +384,20 @@ Bounded retry пересчитывает authority с новым чтением;
 Post-commit reconcile открывает свою транзакцию после освобождения первой.
 Сетевых вызовов, ожидания async effect и полного inventory materialization под
 writer fence нет.
+
+Полный Binding reconcile разделяется на подготовку и применение. Подготовка
+читает согласованный snapshot bounded страницами без authority/legacy locks,
+вычисляет diff и сохраняет закрытый staging. После coordinator scoped поколения
+всех source/projection inputs перепроверяются под удерживаемыми epoch row locks:
+одного счётчика без защиты интервала recheck→commit недостаточно до strict.
+Изменение поколения или deadlock требует rollback всей попытки и нового staging;
+число повторов ограничено. После ожиданий заново берётся DB decision_at.
+Под fence допустимо применение заранее вычисленного diff bounded batches в одной
+TX, атомарно с ledger/facts/outbox/audit; commit-per-page не заменяет этот контракт.
+Цена O(changed rows) и длительность fence hold требуют настоящих измерений.
+Это уточнение не снимает обязанности охватить direct writers, expiry и все
+single-object/nested/fanout входы до полного cutover.
+
 
 Участники: все Binding/Role/Group writers, expiry/reconcile/activation,
 member/identity/admission lifecycle, приглашение с необязательной выдачей,

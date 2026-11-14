@@ -5,8 +5,9 @@
 package grantcoverage
 
 import (
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // Точка — конкретное разрешение, а не импликация селекторов.

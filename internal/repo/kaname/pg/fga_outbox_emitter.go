@@ -34,11 +34,19 @@ func NewFGAOutboxEmitter() *FGAOutboxEmitter {
 // EmitWriteTx — реализует service.RelationOutboxEmitter. Восстанавливает конкретный
 // pgx.Tx из непрозрачного дескриптора и пересылает в fga_outbox.EmitWriteTx.
 func (e *FGAOutboxEmitter) EmitWriteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+	// Только частный cluster wrapper несёт завершённый защищённый decision.
+	if held, ok := tx.(*clusterAdminParticipantTx); ok && !held.ClusterAdminDecisionAt().IsZero() {
+		return fga_outbox.EmitDecisionTx(ctx, txAsPgx(tx), fga_outbox.EventTypeWrite, serviceTuplesToClients(tuples), held.ClusterAdminDecisionAt())
+	}
 	return fga_outbox.EmitWriteTx(ctx, txAsPgx(tx), serviceTuplesToClients(tuples))
 }
 
 // EmitDeleteTx — симметричная сторона отзыва.
 func (e *FGAOutboxEmitter) EmitDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+	// Только частный cluster wrapper несёт завершённый защищённый decision.
+	if held, ok := tx.(*clusterAdminParticipantTx); ok && !held.ClusterAdminDecisionAt().IsZero() {
+		return fga_outbox.EmitDecisionTx(ctx, txAsPgx(tx), fga_outbox.EventTypeDelete, serviceTuplesToClients(tuples), held.ClusterAdminDecisionAt())
+	}
 	return fga_outbox.EmitDeleteTx(ctx, txAsPgx(tx), serviceTuplesToClients(tuples))
 }
 

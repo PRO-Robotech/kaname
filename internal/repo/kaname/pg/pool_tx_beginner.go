@@ -42,7 +42,11 @@ func NewRegistrationTxBeginner(pool *pgxpool.Pool) *PoolTxBeginner {
 
 // Begin — opens a read-write transaction from the pool.
 func (b *PoolTxBeginner) Begin(ctx context.Context) (service.Tx, error) {
-	return b.pool.BeginTx(ctx, b.options)
+	tx, err := b.pool.BeginTx(ctx, b.options)
+	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	return tx, nil
 }
 
 // Compile-time assertion.

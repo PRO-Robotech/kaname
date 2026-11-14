@@ -28,7 +28,8 @@ import (
 // delegatedPathRule — закрытый перечень законных мест вызова.
 var delegatedPathRule = map[string][]string{
 	"delegatedGrantAuthority": {"CreateAccessBindingUseCase.Execute", "removalAuthority"},
-	"removalAuthority":        {"DeleteAccessBindingUseCase.Execute", "RevokeAccessBindingUseCase.Execute"},
+	"removalAuthority":        {"DeleteAccessBindingUseCase.Execute", "RevokeAccessBindingUseCase.Execute", "stagedRemovalAuthority"},
+	"stagedRemovalAuthority":  {"DeleteAccessBindingUseCase.withdrawStaged", "RevokeAccessBindingUseCase.withdrawStaged"},
 }
 
 // sharedAuthorityFuncs — общие функции права выдавать: делегированного пути в них
@@ -165,6 +166,9 @@ func (u *CreateAccessBindingUseCase) Execute() { delegatedGrantAuthority() }
 func removalAuthority() { delegatedGrantAuthority() }
 func (u *RevokeAccessBindingUseCase) Execute() { removalAuthority() }
 func (u *DeleteAccessBindingUseCase) Execute() { removalAuthority() }
+func stagedRemovalAuthority() { removalAuthority() }
+func (u *DeleteAccessBindingUseCase) withdrawStaged() { stagedRemovalAuthority() }
+func (u *RevokeAccessBindingUseCase) withdrawStaged() { stagedRemovalAuthority() }
 `
 	const injected = `package p
 func requireGrantAuthority() error { delegatedGrantAuthority(); return nil }
@@ -172,6 +176,9 @@ func (u *CreateAccessBindingUseCase) Execute() { delegatedGrantAuthority() }
 func removalAuthority() { delegatedGrantAuthority() }
 func (u *RevokeAccessBindingUseCase) Execute() { removalAuthority() }
 func (u *DeleteAccessBindingUseCase) Execute() { removalAuthority() }
+func stagedRemovalAuthority() { removalAuthority() }
+func (u *DeleteAccessBindingUseCase) withdrawStaged() { stagedRemovalAuthority() }
+func (u *RevokeAccessBindingUseCase) withdrawStaged() { stagedRemovalAuthority() }
 func (u *ListByRoleUseCase) Execute() { removalAuthority() }
 `
 	parse := func(src string) []*ast.File {
@@ -192,5 +199,16 @@ func (u *ListByRoleUseCase) Execute() { removalAuthority() }
 	}
 	if !shared || !extra {
 		t.Fatalf("инъекция не найдена обеими находками: %v", got)
+	}
+	// Новый внутренний adapter не становится четвёртым публичным путём:
+	// оба нарушения его закрытой границы обязан найти тот же AST-судья.
+	for name, source := range map[string]string{
+		"read":   lawful + "func (u *ListByRoleUseCase) ExecuteStaged() { stagedRemovalAuthority() }\n",
+		"shared": strings.Replace(lawful, "func requireGrantAuthority() error { return nil }", "func requireGrantAuthority() error { stagedRemovalAuthority(); return nil }", 1),
+	} {
+		findings, _ := judgeDelegatedPathCallers(parse(source))
+		if len(findings) == 0 {
+			t.Fatalf("вторжение %s в staged путь не найдено", name)
+		}
 	}
 }

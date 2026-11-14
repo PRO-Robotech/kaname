@@ -30,7 +30,6 @@ func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 	root := &cobra.Command{Use: "authority-bundle", Short: "Явное управление согласованным bundle и drain", Args: cobraargs.OnlyKnownCommands,
 		RunE: func(*cobra.Command, []string) error { return migratorcli.ErrNoCommand }}
 	for _, action := range []string{"stage", "activate", "verify", "close"} {
-		action := action
 		var dir string
 		var imageOnly bool
 		cmd := &cobra.Command{Use: action, Args: cobraargs.NoExtraArguments, RunE: func(cmd *cobra.Command, _ []string) error {

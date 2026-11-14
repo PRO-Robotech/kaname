@@ -83,3 +83,19 @@ func TestAuthorityMigrationCredentialStaysInInitContainer(t *testing.T) {
 		require.Error(t, err, "неполная пара не должна возвращаться к runtime credential")
 	}
 }
+
+// kaname#1034: legacy — явное умолчание, participant только по настройке.
+func TestAuthorityParticipationChartRendersTheProcessSection(t *testing.T) {
+	for _, tc := range []struct{ setting, want string }{
+		{"", "legacy"}, {"authorityProtocol.participation=participant", "participant"},
+	} {
+		settings := []string{}
+		if tc.setting != "" {
+			settings = append(settings, tc.setting)
+		}
+		out, err := renderChartAtAllowingFailure(t, ".", chartProfiles, withOperatorOverlay(settings...)...)
+		require.NoError(t, err)
+		require.Contains(t, out, "authority-protocol:")
+		require.Contains(t, out, "participation: \""+tc.want+"\"")
+	}
+}

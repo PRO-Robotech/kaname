@@ -75,6 +75,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -302,7 +303,21 @@ func EmitOwnerOrderedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples
 // них ничего не меняется. Лишь настоящий НАБОР принимает форму `relations`, и только набор ВЫДАЧИ
 // дополнительно несёт эхо совместимости — ниже объяснено, почему два
 // направления различаются.
+// EmitDecisionTx связывает обычный tuple payload с защищённым final decision.
+// Метка приходит от coordinated writer, а не из запроса. Ordered registration
+// использует свои отдельные отправители и через этот путь не проходит.
+func EmitDecisionTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, at time.Time) error {
+	if at.IsZero() || (eventType != EventTypeWrite && eventType != EventTypeDelete) {
+		return fmt.Errorf("fga_outbox: invalid decision coordinate")
+	}
+	return emitStampedTx(ctx, tx, eventType, tuples, at)
+}
+
 func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple) error {
+	return emitStampedTx(ctx, tx, eventType, tuples, time.Time{})
+}
+
+func emitStampedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, at time.Time) error {
 	if tx == nil {
 		return fmt.Errorf("fga_outbox: tx must not be nil")
 	}
@@ -354,10 +369,14 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 	if eventType == EventTypeDelete {
 		stamp = deleteStamp
 	}
+	args := []any{eventType, payloads}
+	if !at.IsZero() {
+		stamp = "$3::timestamptz"
+		args = append(args, at.UTC())
+	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
-		 SELECT $1, p::jsonb, `+stamp+` FROM unnest($2::text[]) AS p`,
-		eventType, payloads,
+   SELECT $1, p::jsonb, `+stamp+` FROM unnest($2::text[]) AS p`, args...,
 	); err != nil {
 		return fmt.Errorf("fga_outbox: insert %s: %w", eventType, err)
 	}

@@ -373,6 +373,7 @@ func residualScene() sceneScopes {
 		"registry_registry:reg_x": {Registered: true, ProjectID: "prj_home", AccountID: "acc_home"},
 	}
 	s.pointers = map[string][]string{
+		"registry_registry:reg_x":       {"project:prj_home"},
 		"registry_registry:reg_doomed":  {"project:prj_home"},
 		"registry_repository:reg_x/app": {"registry_registry:reg_x"},
 	}

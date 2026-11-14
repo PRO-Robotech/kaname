@@ -72,10 +72,12 @@ type services struct {
 	accessKeyHandler *access_keys.Handler
 	// humanSessionHandler — InternalHumanSessionService.Resolve (Ф3). Ставится
 	// корнем ПОСЛЕ сборки: полоса входа строится отдельно, на каждом старте.
-	humanSessionHandler   *humansession.Handler
-	accountHandler        *accountapp.Handler
-	projectHandler        *projectapp.Handler
-	userHandler           *userapp.Handler
+	humanSessionHandler *humansession.Handler
+	accountHandler      *accountapp.Handler
+	projectHandler      *projectapp.Handler
+	userHandler         *userapp.Handler
+	// Общий UC обеих дверей приглашения; корень подключает один decision runner.
+	userInvite            *userapp.InviteUserUseCase
 	internalUserHandler   *userapp.InternalHandler
 	serviceAccountHandler *serviceaccountapp.Handler
 	groupHandler          *groupapp.Handler
@@ -91,6 +93,10 @@ type services struct {
 	// internalIAMHandler — InternalIAMService (LookupSubject для
 	// перехватчика аутентификации api-gateway; Check делегирует AuthorizeService).
 	internalIAMHandler *internaliamapp.Handler
+	// Тот же UC регистрации, который уже передан обработчику и модулю.
+	resourceRegistrar *internaliamapp.RegisterResourceUseCase
+	// Единственный recorder запроса: новые object engines получают тот же instance.
+	bindingSizeRecorder reconcileapp.SizeRecorder
 
 	// Обработчики ядра авторизации.
 	authorizeHandler *authorizeapp.Handler
@@ -339,12 +345,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// о том, должны ли они туда попадать, не принималось — предмет заведён
 	// задачей #157.
 	rsabReconciler := reconcileapp.New(kanamepg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
+	var bindingSizeRecorder reconcileapp.SizeRecorder
 	if metricsReg != nil {
 		// Размер материализации привязки — измерение, не потолок. Он ничего не
 		// отвергает: величина, которой привязка может достичь, не измерена, а предел,
 		// назначенный до замера, либо отвергнет законную выдачу, либо не отвергнет
 		// ничего, оставаясь на вид контролем.
-		rsabReconciler = rsabReconciler.WithSizeRecorder(metricsReg.NewBindingMaterializationRecorder())
+		bindingSizeRecorder = metricsReg.NewBindingMaterializationRecorder()
+		rsabReconciler = rsabReconciler.WithSizeRecorder(bindingSizeRecorder)
 	}
 
 	// AccountService.
@@ -1039,6 +1047,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		accountHandler:         accountHandler,
 		projectHandler:         projectHandler,
 		userHandler:            userHandler,
+		userInvite:             userInvite,
 		internalUserHandler:    internalUserHandler,
 		serviceAccountHandler:  saHandler,
 		groupHandler:           groupHandler,
@@ -1047,6 +1056,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		accessBindingHandler:   abHandler,
 		grantDelegationHandler: grantDelegationHandler,
 		internalIAMHandler:     internalIAMHandler,
+		resourceRegistrar:      registerResourceUC,
+		bindingSizeRecorder:    bindingSizeRecorder,
 		internalClusterHandler: internalClusterHandler,
 		publicClusterHandler:   publicClusterHandler,
 

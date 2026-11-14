@@ -14,6 +14,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/grantpolicy"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	rolerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
 )
@@ -32,31 +33,45 @@ func checkGrantReferences(ctx context.Context, w Writer, owner domain.Role, caps
 	if len(caps) == 0 {
 		return nil
 	}
-	if plans == nil {
-		return iamerr.Wrapf(iamerr.ErrUnavailable, "Grant reference model unavailable")
-	}
-	checker, err := w.TransactionRelationChecker(plans)
-	if err != nil {
-		return err
-	}
+	var checker kanamerepo.RelationChecker
+	var err error
 	subject := principalSubject(operations.PrincipalFromContext(ctx))
-	relation, object := "v_update", "iam_role:"+string(owner.ID)
-	if create {
-		relation = "editor"
-		object = "account:" + string(owner.AccountID)
-		if owner.ProjectID != "" {
-			object = "project:" + string(owner.ProjectID)
+	if semantic, ok := w.(kanamerepo.SemanticAuthorityWriter); ok {
+		// Обычная authority подтверждается независимо от proposed content.
+		// Проверка ссылок продолжает использовать настоящий pinned native checker.
+		if err = grantpolicy.RequireRoleMethod(ctx, semantic, grantpolicy.Actor(ctx), owner, create); err != nil {
+			return err
 		}
-	}
-	if subject == "" {
-		return iamerr.Wrapf(iamerr.ErrPermissionDenied, "Role authoring denied")
-	}
-	allowed, err := checker.Check(ctx, subject, relation, object)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return iamerr.Wrapf(iamerr.ErrPermissionDenied, "Role authoring denied")
+		checker = semantic.SemanticRelationChecker()
+		if checker == nil {
+			return iamerr.Wrapf(iamerr.ErrUnavailable, "Grant reference model unavailable")
+		}
+	} else {
+		if plans == nil {
+			return iamerr.Wrapf(iamerr.ErrUnavailable, "Grant reference model unavailable")
+		}
+		checker, err = w.TransactionRelationChecker(plans)
+		if err != nil {
+			return err
+		}
+		relation, object := "v_update", "iam_role:"+string(owner.ID)
+		if create {
+			relation = "editor"
+			object = "account:" + string(owner.AccountID)
+			if owner.ProjectID != "" {
+				object = "project:" + string(owner.ProjectID)
+			}
+		}
+		if subject == "" {
+			return iamerr.Wrapf(iamerr.ErrPermissionDenied, "Role authoring denied")
+		}
+		allowed, e := checker.Check(ctx, subject, relation, object)
+		if e != nil {
+			return e
+		}
+		if !allowed {
+			return iamerr.Wrapf(iamerr.ErrPermissionDenied, "Role authoring denied")
+		}
 	}
 	refs, ok := w.RolesW().(rolerepo.GrantReferenceReader)
 	if !ok {

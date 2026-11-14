@@ -329,5 +329,7 @@ func publicGrantScene() sceneScopes {
 		publicGrantObject:    {Registered: true, ProjectID: publicGrantProject, AccountID: publicGrantAccount},
 		publicGrantContainer: {Registered: true, ProjectID: publicGrantProject, AccountID: publicGrantAccount},
 	}
+	// Текущий серверный указатель задан отдельно от сохранённой области.
+	s.pointers[publicGrantContainer] = []string{"project:" + publicGrantProject}
 	return s
 }

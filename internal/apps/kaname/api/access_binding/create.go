@@ -45,6 +45,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
@@ -102,8 +103,9 @@ type SelectorReconciler interface {
 }
 
 type CreateAccessBindingUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	decisions kanamerepo.BindingDecisionRunner
+	repo      Repo
+	opsRepo   operations.Repo
 	// cat — источник КАТАЛОЖНОГО ФАКТА: тип пообъектной цели годен тогда и
 	// только тогда, когда у него есть живая строка каталога (kaname#904, Р1).
 	// Тот же снимок судит правило роли (`CreateRoleUseCase`), поэтому выдача и
@@ -232,6 +234,11 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	b.Subjects = subjects
 	b.SubjectType = subjects[0].Type
 	b.SubjectID = subjects[0].ID
+	// Один server-minted ID используется preflight и повторным решением LRO.
+	b.ID = domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
+	// kaname#986: связь устанавливает только прошедший D5 precheck; входной
+	// domain value не выбирает delegation и не переносит её от старой выдачи.
+	b.DelegationID = ""
 
 	// Stamp granted_by from the authenticated caller (anti-spoofing — never
 	// from a request-body field).
@@ -275,7 +282,13 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// every member, so an admin/editor-tier binding with a GROUP subject must be
 	// authored by a grant-authority holder on the scope. Enforced for EVERY Create,
 	// so the guard holds by construction.
-	if err := u.requireGrantAuthority(ctx, string(b.ResourceType), string(b.ResourceID)); err != nil {
+	if u.decisions != nil {
+		id, err := u.checkBindingDecision(ctx, b)
+		if err != nil {
+			return nil, err
+		}
+		b.DelegationID = id
+	} else if err := u.requireGrantAuthority(ctx, string(b.ResourceType), string(b.ResourceID)); err != nil {
 		// Делегированный путь (kaname#986, Р2) — только после ОТКАЗА прежних путей и
 		// на их месте: до структурных ворот, поэтому отказ ничего не говорит о роли
 		// и объекте. Неполадка двери к нему не ведёт (условие CE-04). Ссылку на
@@ -333,7 +346,7 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// (mapped to ErrAlreadyExists in the worker). No pre-resolution via
 	// FindExisting: idempotent-upsert behaviour is intentionally gone
 	// (migration 0003).
-	abID := ids.NewID(domain.PrefixAccessBinding)
+	abID := string(b.ID)
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Create access binding (%s → %s on %s/%s)",
@@ -361,7 +374,9 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// at-least-once backstop. It does NOT gate op.done; an immediate mutate by the
 	// creator may briefly race the materialization and is handled by the client's
 	// bounded retry (design-review: eventual-consistency model).
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (res *anypb.Any, derr error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		// The operations worker masks any non-gRPC-status error (including a
 		// panic) from the worker fn as `Internal "internal worker error"` and
 		// does not log it — so a failing async AccessBinding.Create silently
@@ -392,16 +407,26 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 }
 
 func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.AccessBinding, actor string) (*anypb.Any, error) {
+	if u.decisions != nil {
+		return u.doCreateDecision(ctx, b, actor)
+	}
 	w, err := u.repo.Writer(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = w.Rollback(ctx)
-		}
-	}()
+	defer func() { _ = w.Rollback(context.WithoutCancel(ctx)) }()
+	created, role, err := u.writeCreatedBinding(ctx, w, b, actor, false)
+	if err != nil {
+		return nil, err
+	}
+	if err = w.Commit(ctx); err != nil {
+		return nil, shared.MapRepoErr(err)
+	}
+	u.afterCreatedBinding(ctx, created, role)
+	return marshalAB(created)
+}
+
+func (u *CreateAccessBindingUseCase) writeCreatedBinding(ctx context.Context, w Writer, b domain.AccessBinding, actor string, capability bool) (domain.AccessBinding, domain.Role, error) {
 	// Вторая половина проверки цели (Р2) — В ЭТОЙ транзакции и ПЕРВЫМ её
 	// оператором: строки каталога типов цели читаются под замком, согласованным с
 	// применением манифеста (применитель держит `FOR UPDATE` на строках ресурсов
@@ -412,10 +437,10 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	if types := b.Target.DistinctTypes(); len(types) > 0 {
 		live, lerr := w.AccessBindingsW().LockLiveTargetTypes(ctx, types)
 		if lerr != nil {
-			return nil, shared.MapRepoErr(lerr)
+			return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(lerr)
 		}
 		if typ, bad := b.Target.FirstNonLiveType(newLiveTypeSet(live)); bad {
-			return nil, status.Error(codes.FailedPrecondition, targetTypeNotLiveTxMsg(typ))
+			return domain.AccessBinding{}, domain.Role{}, status.Error(codes.FailedPrecondition, targetTypeNotLiveTxMsg(typ))
 		}
 	}
 	// Выдача делегатом (kaname#986): решение делегированного пути принято
@@ -430,10 +455,10 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	if b.DelegationID != "" {
 		account, active, herr := w.AccessBindingsW().GrantDelegationsW().HoldActive(ctx, b.DelegationID)
 		if herr != nil {
-			return nil, shared.MapRepoErr(herr)
+			return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(herr)
 		}
 		if !active {
-			return nil, status.Errorf(codes.FailedPrecondition,
+			return domain.AccessBinding{}, domain.Role{}, status.Errorf(codes.FailedPrecondition,
 				"grant delegation %s was revoked before the access binding was written", b.DelegationID)
 		}
 		// Аудит выдачи делегатом несёт ссылку на делегирование, а аккаунт строки —
@@ -450,14 +475,23 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	role, err := w.Roles().Get(ctx, b.RoleID)
 	if err != nil {
 		if stderrors.Is(err, iamerr.ErrNotFound) {
-			return nil, status.Errorf(codes.FailedPrecondition, "Role %s not found", b.RoleID)
+			return domain.AccessBinding{}, domain.Role{}, status.Errorf(codes.FailedPrecondition, "Role %s not found", b.RoleID)
 		}
-		return nil, shared.MapRepoErr(err)
+		return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 	}
 
-	created, err := w.AccessBindingsW().Insert(ctx, b)
+	var created domain.AccessBinding
+	if capability {
+		inserter, ok := w.(kanamerepo.BindingCapabilityInserter)
+		if !ok {
+			return domain.AccessBinding{}, domain.Role{}, authzguard.AuthzBackendUnavailable()
+		}
+		created, err = inserter.InsertBindingWithCapabilities(ctx, b)
+	} else {
+		created, err = w.AccessBindingsW().Insert(ctx, b)
+	}
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 	}
 
 	// Persist the multi-subject set atomically with the binding
@@ -467,7 +501,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	// Execute always normalizes Subjects to ≥1 element before doCreate.
 	created.Subjects = b.Subjects
 	if err := w.AccessBindingsW().InsertSubjects(ctx, created.ID, b.Subjects); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 	}
 
 	// Кортежи уровня выдачи — НЕЗАВИСИМЫЙ набор на каждого субъекта
@@ -484,7 +518,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	// INSERT commits (запрет #10), and a trigger on that INSERT folds the row
 	// into a direct fact within the same commit.
 	if err := w.AccessBindingsW().EmitRelationWrite(ctx, tuples); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 	}
 	// Persist the EXACT emitted-set in the SAME writer-tx (co-commit
 	// with the fga_outbox emit, ban #10). This is the source of truth for a
@@ -492,7 +526,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	// possibly-mutated role) and the diff base for the Role.Update reconcile
 	// fan-out. "What is emitted to FGA is what is recorded as emitted."
 	if err := w.AccessBindingsW().InsertEmittedTuples(ctx, created.ID, tuples); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 	}
 
 	// Emit a subject_change_outbox row + a durable audit_outbox compliance event
@@ -507,7 +541,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 			EventType:   "binding_grant",
 			Op:          "binding_upsert",
 		}); err != nil {
-			return nil, shared.MapRepoErr(err)
+			return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 		}
 		if err := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
 			EventType:       abrepo.AuditEventTypeGranted,
@@ -521,7 +555,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 			TenantAccountID: auditTenant,
 			ExtraPayload:    auditExtra,
 		}); err != nil {
-			return nil, shared.MapRepoErr(err)
+			return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 		}
 	}
 	// rbac-contract-a-fix (forward-mat, C-01b): co-commit a reconcile event for the
@@ -534,13 +568,12 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	// ReconcileBinding(created.ID) below which materializes THIS binding's own grant
 	// membership. Drained → ReconcileObject("iam.accessBinding", id).
 	if err := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.accessBinding", string(created.ID)); err != nil {
-		return nil, shared.MapRepoErr(err)
+		return domain.AccessBinding{}, domain.Role{}, shared.MapRepoErr(err)
 	}
-	if err := w.Commit(ctx); err != nil {
-		return nil, shared.MapRepoErr(err)
-	}
-	committed = true
+	return created, role, nil
+}
 
+func (u *CreateAccessBindingUseCase) afterCreatedBinding(ctx context.Context, created domain.AccessBinding, role domain.Role) {
 	// RBAC explicit-model 2026 P4 (КФ-3): a binding whose ROLE carries ANY
 	// materializing rule (ARM_ANCHOR(all) / ARM_NAMES / ARM_LABELS) needs a
 	// post-commit reconcile to materialize the per-object membership — the reconciler
@@ -581,7 +614,6 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 		u.reconcileNewBindingObject(ctx, bindingID)
 	})
 
-	return marshalAB(created)
 }
 
 // reconcileNewBindingObject is the create-path's SECOND post-commit materialization

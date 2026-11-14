@@ -63,7 +63,13 @@ func Encode(c Coordinate) (Reference, error) {
 	}
 	wire := []byte{coordinateVersion, kind}
 	for _, field := range []string{c.Anchor.Type, c.Anchor.ID, string(c.RoleID)} {
-		wire = binary.BigEndian.AppendUint16(wire, uint16(len(field)))
+		// kaname#1034: граница codec проверяется рядом с сужением длины.
+		// len неотрицательна, maxFieldBytes=4096 помещается в uint16.
+		n := len(field)
+		if n > maxFieldBytes {
+			return Reference{}, invalid("field bounds")
+		}
+		wire = binary.BigEndian.AppendUint16(wire, uint16(n))
 		wire = append(wire, field...)
 	}
 	r.ObjectID = base64.RawURLEncoding.EncodeToString(wire)

@@ -36,7 +36,7 @@ func New(master, slave *pgxpool.Pool) *Repository {
 func (r *Repository) Reader(ctx context.Context) (kaname.Reader, error) {
 	tx, err := r.readPool().BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, err
+		return nil, mapErr(err, "", "")
 	}
 	return &readTx{tx: tx}, nil
 }
@@ -45,7 +45,7 @@ func (r *Repository) Reader(ctx context.Context) (kaname.Reader, error) {
 func (r *Repository) Writer(ctx context.Context) (kaname.Writer, error) {
 	tx, err := r.master.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return nil, err
+		return nil, mapErr(err, "", "")
 	}
 	return &writeTx{readTx: readTx{tx: tx}}, nil
 }
@@ -82,7 +82,7 @@ var _ kaname.Repository = (*Repository)(nil)
 func (r *Repository) ReaderFromPrimary(ctx context.Context) (kaname.Reader, error) {
 	tx, err := r.master.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, err
+		return nil, mapErr(err, "", "")
 	}
 	return &readTx{tx: tx}, nil
 }

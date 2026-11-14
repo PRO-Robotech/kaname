@@ -204,6 +204,7 @@ func TestWriterProtocolOrdinaryRuntimeCannotForgeOrReplay(t *testing.T) {
 			require.Error(t, err, "BEFORE STATEMENT обязан отказать даже при нуле строк")
 		})
 	}
+	attestationNonceObserver(t, r)
 	// Та же физическая connection: COMMIT очищает temp rows, прежний nonce не живёт.
 	conn, err := r.runtime.Acquire(r.ctx)
 	require.NoError(t, err)
@@ -212,9 +213,13 @@ func TestWriterProtocolOrdinaryRuntimeCannotForgeOrReplay(t *testing.T) {
 	for _, commit := range []bool{true, false, true} {
 		tx, e := conn.Begin(r.ctx)
 		require.NoError(t, e)
+		defer attestationLocksetRollback(tx)
 		r.enter(t, tx, r.intent(r.a), "decision")
+		// Проверку выполняет настоящий guard; observer только показывает nonce.
+		_, e = tx.Exec(r.ctx, `UPDATE kaname.groups SET description='fresh-entry' WHERE false`)
+		require.NoError(t, e)
 		var nonce string
-		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname.authority_protocol_attestation()->>'nonce'`).Scan(&nonce))
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname.test_attestation_nonce()`).Scan(&nonce))
 		require.NotEmpty(t, nonce)
 		require.NotEqual(t, previous, nonce)
 		previous = nonce
@@ -225,6 +230,7 @@ func TestWriterProtocolOrdinaryRuntimeCannotForgeOrReplay(t *testing.T) {
 		}
 		tx, e = conn.Begin(r.ctx)
 		require.NoError(t, e)
+		defer attestationLocksetRollback(tx)
 		_, e = tx.Exec(r.ctx, `UPDATE kaname.groups SET description='replay' WHERE false`)
 		require.Error(t, e)
 		require.NoError(t, tx.Rollback(r.ctx))

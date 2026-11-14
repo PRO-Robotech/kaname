@@ -2,6 +2,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
 -- +goose Up
+-- Приёмка: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+-- kaname#1034: защита полного действия выдачи и сохранение прежних строк при накате (ESC-32).
 -- kaname#1034: узкая классификация group#member; остальные факты требуют global.
 -- Миграция не активирует protocol и не удостоверяет полноту adapters/D1/D2/D3.
 -- +goose StatementBegin

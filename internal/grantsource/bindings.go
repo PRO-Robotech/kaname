@@ -121,7 +121,7 @@ func collectBindings(ctx context.Context, w kaname.AuthorityWriter, actor domain
 			}
 			bs, next, err := w.AccessBindings().ListBySubject(ctx, recipient.Type, recipient.ID, access_binding.PageFilter{PageSize: bindingPageSize, PageToken: token})
 			if err != nil {
-				return nil, fmt.Errorf("list binding recipient %v: %w", recipient, err)
+				return nil, fmt.Errorf("list binding source: %w", err)
 			}
 			if err := charge(len(bs)); err != nil {
 				return nil, err

@@ -100,11 +100,17 @@ func collectAndCompileBindings(ctx context.Context, w kaname.AuthorityWriter, c 
 // subjects/versions и прочитанных ролей одного сбора, включая пустые страницы
 // и повторяющиеся строки.
 // Нулевое значение готово к работе; лимит не задаётся вызывающим API.
-type sourceBudget struct{ pages, rows int }
+type sourceBudget struct {
+	pages, rows int
+	shared      func(kaname.SourceReadCost) error
+}
 
 func (b *sourceBudget) pageAvailable() bool { return b.pages < maxBindingSourcePages }
 func (b *sourceBudget) charge(n int) bool {
 	if !b.pageAvailable() || n < 0 || n > maxBindingSourceRows-b.rows {
+		return false
+	}
+	if b.shared != nil && b.shared(kaname.SourceReadCost{Rows: n, Reads: 1}) != nil {
 		return false
 	}
 	b.pages++
@@ -117,14 +123,15 @@ func (b *sourceBudget) charge(n int) bool {
 // Creators остаются evidence селекторов, а не независимой выдачей.
 // Identity/DecisionAt описывают источник вычисления, не DB attestation.
 type ActorEffects struct {
-	Producers       []kaname.ProducerSource
-	RoleCheckpoints map[domain.RoleID]granteffect.ProjectionCheckpoint
-	Actor           domain.Subject
-	Identity        grantcoverage.Identity
-	DecisionAt      time.Time
-	Bindings        []CompiledBinding
-	Structural      StructuralSources
-	Component       granteffect.Set
+	Producers          []kaname.ProducerSource
+	ProducerPopulation kaname.CapturedProducerPopulation
+	RoleCheckpoints    map[domain.RoleID]granteffect.ProjectionCheckpoint
+	Actor              domain.Subject
+	Identity           grantcoverage.Identity
+	DecisionAt         time.Time
+	Bindings           []CompiledBinding
+	Structural         StructuralSources
+	Component          granteffect.Set
 }
 
 func nilSource(v any) bool {
@@ -159,7 +166,27 @@ func CollectSemanticActor(ctx context.Context, w kaname.SemanticAuthorityWriter,
 		return ActorEffects{}, ErrBindingSourceInvalid
 	}
 	at := fence.DecisionAt()
+	var population kaname.CapturedProducerPopulation
+	if reader, ok := w.(kaname.CapturedProducerPopulationReader); ok {
+		var err error
+		population, err = reader.CapturedProducerPopulation(ctx, actor)
+		if err != nil {
+			return ActorEffects{}, err
+		}
+		if population != nil {
+			if err := population.Validate(w, actor, at); err != nil {
+				return ActorEffects{}, err
+			}
+		}
+	}
 	budget := &sourceBudget{}
+	// Подключённый writer сохраняет единый бюджет RR discovery, повторных
+	// census и native вопросов; caller не может передать собственный allowance.
+	if shared, ok := w.(interface {
+		ChargeSourceRead(kaname.SourceReadCost) error
+	}); ok {
+		budget.shared = shared.ChargeSourceRead
+	}
 	builder := &granteffect.UnionBuilder{}
 	provenance, hasProvenance := w.(kaname.SemanticSourceReader)
 	if hasProvenance {
@@ -208,5 +235,11 @@ func CollectSemanticActor(ctx context.Context, w kaname.SemanticAuthorityWriter,
 	// Полнота чтения строк не подтверждает живую role projection. Этот шов
 	// добавляется к неослабленным registration/creator/protocol obligations.
 	component = granteffect.WithObligations(component, extra...)
-	return ActorEffects{Producers: producers, RoleCheckpoints: checkpoints, Actor: actor, Identity: bundle.Identity(), DecisionAt: at, Bindings: bindings.Bindings, Structural: structural.Sources, Component: component}, nil
+	if population != nil {
+		if err := population.Validate(w, actor, at); err != nil {
+			return ActorEffects{}, err
+		}
+		component = granteffect.WithObligations(component, granteffect.Obligation{Code: "captured_producer_population", Detail: "RR captured positive sources only; current original population is not complete"})
+	}
+	return ActorEffects{ProducerPopulation: population, Producers: producers, RoleCheckpoints: checkpoints, Actor: actor, Identity: bundle.Identity(), DecisionAt: at, Bindings: bindings.Bindings, Structural: structural.Sources, Component: component}, nil
 }

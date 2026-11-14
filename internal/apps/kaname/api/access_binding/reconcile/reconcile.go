@@ -476,8 +476,12 @@ type TxRunner interface {
 
 // Reconciler — сценарий сведения селекторов и включения в область.
 type Reconciler struct {
-	tx     TxRunner
-	logger *slog.Logger
+	stagedBindings   StagedBindingReconciler
+	groupObjects     *Reconciler
+	objectObjects    *Reconciler
+	objectConfigured bool
+	tx               TxRunner
+	logger           *slog.Logger
 	// cat — источник КАТАЛОЖНОГО ФАКТА: какие глаголы объявлены живым типом.
 	//
 	// Обязателен, а не опционален, как `size` ниже: без него проход не может
@@ -701,6 +705,9 @@ func (r *Reconciler) ConvergeBinding(ctx context.Context, bindingID domain.Acces
 }
 
 func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindingID, converge bool) error {
+	if r.stagedBindings != nil {
+		return r.stagedBindings.ReconcileStagedBinding(ctx, bindingID, converge, r.size)
+	}
 	col := &syncFGACollector{}
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
 		if err := r.reconcileBinding(ctx, s, bindingID, converge, col); err != nil {
@@ -763,8 +770,17 @@ func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindin
 // поэтому весь желаемый набор действительно нужно вывести заново. Они также остаются
 // страховкой доставки хотя бы один раз, сводящей всё, что мог пропустить пообъектный проход.
 func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID string) error {
+	if objectType == "iam.group" && r.groupObjects != nil {
+		return r.groupObjects.ReconcileObject(ctx, objectType, objectID)
+	}
+	if r.objectConfigured {
+		if r.objectObjects == nil {
+			return errObjectParticipantAbsent
+		}
+		return r.objectObjects.ReconcileObject(ctx, objectType, objectID)
+	}
 	col := &syncFGACollector{}
-	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
+	if err := r.withObjectTx(ctx, objectType, objectID, func(ctx context.Context, s ReconcileStore) error {
 		// (1) Выдачи, УЖЕ имеющие строку члена со ссылкой на объект: смена
 		// метки / родителя / уход объекта из зеркала отражается
 		// полным пересчётом ниже.
@@ -911,6 +927,15 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 // сбрасывает кэш решений субъекта и закрывает его открытые потоки, вторая
 // закрывает в следе соответствия выдачу, которую туда положило создание.
 func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessBindingID) error {
+	if r.stagedBindings != nil {
+		staged, ok := r.stagedBindings.(interface {
+			ExpireStagedBinding(context.Context, domain.AccessBindingID) error
+		})
+		if !ok {
+			return fmt.Errorf("binding stage has no atomic expiry adapter")
+		}
+		return staged.ExpireStagedBinding(ctx, bindingID)
+	}
 	col := &syncFGACollector{}
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
 		if err := s.AcquireBindingLock(ctx, bindingID); err != nil {

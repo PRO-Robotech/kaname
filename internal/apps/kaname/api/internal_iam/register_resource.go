@@ -1034,6 +1034,8 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 		}
 		row.ObjectType = admission.catalogType
 		canonical = admission.authorities
+		// Полный H уже проверен admission: сохраняем его для аудита успешной
+		// регистрации, не пересчитывая через legacy helper снятия/отказа.
 		hierarchy = admission.hierarchies[0]
 	} else {
 		if row.ObjectType, err = uc.authorizeCatalogType(ctx, tx, module, t); err != nil {

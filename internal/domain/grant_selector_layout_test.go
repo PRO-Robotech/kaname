@@ -4,8 +4,9 @@
 package domain
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestGrantSelectorLayoutPreservesLegacyFPAndUsesActualResidual(t *testing.T) {

@@ -77,6 +77,17 @@ func (*pointerScopeProbe) RetireDescendantRegistrationPointersTx(context.Context
 	panic("unexpected descendant retirement in registration probe")
 }
 
+// Родитель имеет собственную текущую политику и owning строку проекта.
+type namedParentCatalog struct{ *ownerCatalog }
+
+func (c namedParentCatalog) WritePolicyTx(ctx context.Context, tx service.Tx, typ string) (string, domain.WritePolicy, bool, error) {
+	if typ == "probemod_box" {
+		c.policyReads++
+		return "probemod.boxes", domain.WritePolicy{ObjectType: typ, Module: "probemod", Pointers: []domain.ParentPointer{{Name: "project", Type: "project"}}}, true, nil
+	}
+	return c.ownerCatalog.WritePolicyTx(ctx, tx, typ)
+}
+
 func TestNamedPointerLawfulDynamicAndProjectParentsReachWrite(t *testing.T) {
 	for _, tc := range []struct{ name, subject, relation, parentType string }{
 		{"container", "probemod_box:b1", "box", "probemod_box"},
@@ -87,15 +98,20 @@ func TestNamedPointerLawfulDynamicAndProjectParentsReachWrite(t *testing.T) {
 				pointers: []domain.ParentPointer{{Name: tc.relation, Type: tc.parentType}}}
 			scopes := &pointerScopeProbe{sceneScopes: unitScopes()}
 			scopes.containers["probemod_box:b1"] = domain.ContainerScope{Registered: true, ProjectID: unitProject, AccountID: unitAccount}
+			scopes.pointers["probemod_box:b1"] = []string{"project:" + unitProject}
 			txb := &smTxBeginner{}
 			mirror := newMirrorSpy()
 			emitter := &countingEmitter{}
-			uc := NewRegisterResourceUseCase(emitter, mirror, txb, catalog, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, scopes).
+			uc := NewRegisterResourceUseCase(emitter, mirror, txb, namedParentCatalog{catalog}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, scopes).
 				WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "probemod"})
 			req := &regReq{subject: tc.subject, relation: tc.relation, object: "probemod_item:i1"}
 			require.NoError(t, uc.Register(context.Background(), req))
 			require.True(t, txb.tx.committed)
-			require.Equal(t, 1, catalog.policyReads)
+			wantReads := 1
+			if tc.parentType == "probemod_box" {
+				wantReads++
+			}
+			require.Equal(t, wantReads, catalog.policyReads)
 			require.Equal(t, 1, mirror.upserts)
 			require.Equal(t, 1, emitter.writes)
 			require.Equal(t, 1, scopes.saves)

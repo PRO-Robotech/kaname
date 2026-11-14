@@ -5,7 +5,9 @@ package grantcapability_test
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -97,5 +99,72 @@ func TestGrantCoordinate_InvalidTypedInputsFailBeforeEncoding(t *testing.T) {
 		if _, err := grantcapability.Encode(changed); !errors.Is(err, grantcapability.ErrInvalidCoordinate) {
 			t.Fatalf("некорректная координата принята: %+v %v", changed, err)
 		}
+	}
+}
+
+// kaname#1034: длина поля — байты, не руны; uint16 prefix и версия
+// остаются прежними, переполнение не возвращает частичную reference.
+func TestGrantCoordinate_FieldByteBoundsPreserveWireFormat(t *testing.T) {
+	for _, tc := range []struct {
+		name, anchor, role string
+		size               uint16
+	}{
+		{"below", "acc" + strings.Repeat("a", 4092), "rol" + strings.Repeat("r", 4092), 4095},
+		{"maximum", "acc" + strings.Repeat("a", 4093), "rol" + strings.Repeat("r", 4093), 4096},
+		{"utf8_bytes", "acc" + strings.Repeat("a", 4093), "rol" + strings.Repeat("я", 2046) + "x", 4096},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := grantcapability.Coordinate{Kind: domain.GrantCapabilityBindRole, Anchor: domain.ScopeAnchor{Type: "account", ID: tc.anchor}, RoleID: domain.RoleID(tc.role)}
+			r, err := grantcapability.Encode(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := base64.RawURLEncoding.DecodeString(r.ObjectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(raw) != 15+2*int(tc.size) {
+				t.Fatalf("неверная полная длина wire: %d", len(raw))
+			}
+			// Независимый известный префикс version=1/kind=bind(2), type=account.
+			if string(raw[:11]) != string([]byte{1, 2, 0, 7, 'a', 'c', 'c', 'o', 'u', 'n', 't'}) {
+				t.Fatalf("изменён wire prefix: %x", raw[:11])
+			}
+			if binary.BigEndian.Uint16(raw[11:13]) != tc.size {
+				t.Fatal("неверная byte length anchor")
+			}
+			roleOffset := 13 + int(tc.size)
+			if binary.BigEndian.Uint16(raw[roleOffset:roleOffset+2]) != tc.size || len(raw) != roleOffset+2+int(tc.size) {
+				t.Fatal("неверная byte length role или лишний хвост")
+			}
+			back, err := grantcapability.Decode(r)
+			if err != nil || back != c {
+				t.Fatalf("пограничный round-trip: %v", err)
+			}
+		})
+	}
+	for _, n := range []int{4097, 65536} {
+		for _, roleOverflow := range []bool{false, true} {
+			c := grantcapability.Coordinate{Kind: domain.GrantCapabilityBindRole, Anchor: domain.ScopeAnchor{Type: "account", ID: "accA"}, RoleID: "rolA"}
+			if roleOverflow {
+				c.RoleID = domain.RoleID("rol" + strings.Repeat("r", n-3))
+			} else {
+				c.Anchor.ID = "acc" + strings.Repeat("a", n-3)
+			}
+			r, err := grantcapability.Encode(c)
+			if !errors.Is(err, grantcapability.ErrInvalidCoordinate) || r != (grantcapability.Reference{}) {
+				t.Fatalf("oversized field %d принят или вернул partial result", n)
+			}
+		}
+	}
+	// Полный, не усечённый wire с допустимым uint16, но сверх codec budget.
+	raw := []byte{1, 2, 0, 7, 'a', 'c', 'c', 'o', 'u', 'n', 't'}
+	raw = binary.BigEndian.AppendUint16(raw, 4097)
+	raw = append(raw, []byte("acc"+strings.Repeat("a", 4094))...)
+	raw = binary.BigEndian.AppendUint16(raw, 4)
+	raw = append(raw, []byte("rolA")...)
+	_, err := grantcapability.Decode(grantcapability.Reference{ObjectType: grantcapability.RoleObjectType, Relation: grantcapability.BindRelation, ObjectID: base64.RawURLEncoding.EncodeToString(raw)})
+	if !errors.Is(err, grantcapability.ErrInvalidCoordinate) {
+		t.Fatal("Decode принял поле сверх общего codec budget")
 	}
 }

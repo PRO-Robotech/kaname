@@ -4,6 +4,8 @@
 -- pg_temp указан последним; все system relations квалифицированы против shadowing.
 -- Владелец migration доверенный; обычный runtime не владеет схемой/функциями.
 -- +goose Up
+-- Приёмка: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+-- kaname#1034: защита полного действия выдачи и сохранение прежних строк при накате (ESC-32).
 ALTER TABLE kaname.authority_semantic_identity DROP CONSTRAINT authority_semantic_identity_phase_check;
 ALTER TABLE kaname.authority_semantic_identity ADD CONSTRAINT authority_semantic_identity_phase_check CHECK(phase IN ('uninitialized','prepared','transition','active'));
 ALTER TABLE kaname.authority_semantic_identity ADD CONSTRAINT authority_semantic_identity_prepared_check CHECK(phase<>'prepared' OR (protocol_version=1 AND model_id IS NOT NULL AND model_id ~ '^[0-9a-f]{64}$' AND catalog_id IS NOT NULL AND catalog_id ~ '^[0-9a-f]{64}$' AND projector_version IS NOT NULL AND projector_version<>''));

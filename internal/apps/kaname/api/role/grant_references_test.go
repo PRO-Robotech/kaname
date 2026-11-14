@@ -39,7 +39,7 @@ type metaReferenceRows struct {
 
 func (r *metaReferenceRows) LockGrantOwnerAccount(context.Context, domain.Role) (domain.AccountID, error) {
 	r.reads++
-	return "acc_owner", nil
+	return "accaaaaaaaaaaaaaaaaa", nil
 }
 func (r *metaReferenceRows) LockGrantReference(context.Context, domain.RoleID) (rolerepo.GrantReference, error) {
 	r.reads++
@@ -54,10 +54,10 @@ func (f metaReferenceCheck) Check(ctx context.Context, s, r, o string) (bool, er
 func TestGrantReferencesMethodBeforeExistenceVisibilityBeforeLifecycle(t *testing.T) {
 	plans, e := authzmodel.New(authzmodel.DSL)
 	require.NoError(t, e)
-	ctx := operations.WithPrincipal(context.Background(), operations.Principal{Type: "user", ID: "usr_owner"})
-	owner := domain.Role{AccountID: "acc_owner"}
-	caps := []domain.GrantCapabilityRule{{Kind: domain.GrantCapabilityBindRole, BoundRoleID: "rol_target"}}
-	refs := &metaReferenceRows{reference: rolerepo.GrantReference{Role: domain.Role{ID: "rol_target", ProjectID: "prj_owner"}, AccountID: "acc_owner", Live: true}}
+	ctx := operations.WithPrincipal(context.Background(), operations.Principal{Type: "user", ID: "usraaaaaaaaaaaaaaaaa"})
+	owner := domain.Role{AccountID: "accaaaaaaaaaaaaaaaaa"}
+	caps := []domain.GrantCapabilityRule{{Kind: domain.GrantCapabilityBindRole, BoundRoleID: "rolaaaaaaaaaaaaaaaaa"}}
+	refs := &metaReferenceRows{reference: rolerepo.GrantReference{Role: domain.Role{ID: "rolaaaaaaaaaaaaaaaaa", ProjectID: "prjaaaaaaaaaaaaaaaaa"}, AccountID: "accaaaaaaaaaaaaaaaaa", Live: true}}
 	w := metaReferenceWriter{refs: refs, checker: metaReferenceCheck(func(context.Context, string, string, string) (bool, error) { return false, nil })}
 	require.ErrorIs(t, checkGrantReferences(ctx, w, owner, caps, true, plans), iamerr.ErrPermissionDenied)
 	require.Zero(t, refs.reads)
@@ -69,7 +69,7 @@ func TestGrantReferencesMethodBeforeExistenceVisibilityBeforeLifecycle(t *testin
 	require.ErrorIs(t, checkGrantReferences(ctx, w, owner, caps, true, plans), iamerr.ErrNotFound)
 	refs.reference.Live = true
 	require.NoError(t, checkGrantReferences(ctx, w, owner, caps, true, plans))
-	refs.reference.AccountID = "acc_other"
+	refs.reference.AccountID = "accbbbbbbbbbbbbbbbbb"
 	require.ErrorIs(t, checkGrantReferences(ctx, w, owner, caps, true, plans), iamerr.ErrFailedPrecondition)
 	refs.reference.Role.IsSystem = true
 	require.NoError(t, checkGrantReferences(ctx, w, owner, caps, true, plans))
@@ -85,13 +85,13 @@ func TestGrantReferencesMethodBeforeExistenceVisibilityBeforeLifecycle(t *testin
 	require.NotContains(t, err.Error(), "hidden backend detail")
 }
 func TestGrantReferenceCommonAnchorAllowsNestedAccountButNotSiblingProject(t *testing.T) {
-	a := domain.Role{AccountID: "acc_a"}
-	p := domain.Role{ProjectID: "prj_a"}
-	q := domain.Role{ProjectID: "prj_b"}
-	require.True(t, rolerepo.CommonGrantAnchor(a, "acc_a", p, "acc_a"))
-	require.True(t, rolerepo.CommonGrantAnchor(p, "acc_a", a, "acc_a"))
-	require.False(t, rolerepo.CommonGrantAnchor(p, "acc_a", q, "acc_a"))
-	require.False(t, rolerepo.CommonGrantAnchor(a, "acc_a", p, "acc_b"))
+	a := domain.Role{AccountID: "accccccccccccccccccc"}
+	p := domain.Role{ProjectID: "prjccccccccccccccccc"}
+	q := domain.Role{ProjectID: "prjddddddddddddddddd"}
+	require.True(t, rolerepo.CommonGrantAnchor(a, "accccccccccccccccccc", p, "accccccccccccccccccc"))
+	require.True(t, rolerepo.CommonGrantAnchor(p, "accccccccccccccccccc", a, "accccccccccccccccccc"))
+	require.False(t, rolerepo.CommonGrantAnchor(p, "accccccccccccccccccc", q, "accccccccccccccccccc"))
+	require.False(t, rolerepo.CommonGrantAnchor(a, "accccccccccccccccccc", p, "accddddddddddddddddd"))
 }
 
 type metaHeldKeys struct{ seen []domain.ResourceRef }
@@ -102,13 +102,13 @@ func (k *metaHeldKeys) RegisteredOf(_ context.Context, refs []domain.ResourceRef
 }
 func TestGrantReferenceHoldsKeepAuthoredRuleIndices(t *testing.T) {
 	keys := &metaHeldKeys{}
-	rules := domain.Rules{{Module: "iam", Resources: []string{"role"}, Verbs: []string{"bind"}, ResourceNames: []string{"rol_reference"}}, {Module: "iam", Resources: []string{"role"}, Verbs: []string{"get", "bind"}, ResourceNames: []string{"rol_mixed"}}, {Module: "iam", Resources: []string{"account"}, Verbs: []string{"get"}, ResourceNames: []string{"acc_named"}}}
+	rules := domain.Rules{{Module: "iam", Resources: []string{"role"}, Verbs: []string{"bind"}, ResourceNames: []string{"rolbbbbbbbbbbbbbbbbb"}}, {Module: "iam", Resources: []string{"role"}, Verbs: []string{"get", "bind"}, ResourceNames: []string{"rolccccccccccccccccc"}}, {Module: "iam", Resources: []string{"account"}, Verbs: []string{"get"}, ResourceNames: []string{"acc_named"}}}
 	held, e := heldNamesOf(context.Background(), keys, rules)
 	require.NoError(t, e)
 	require.Len(t, held, 2)
 	require.Equal(t, 1, held[0].Rule)
 	require.Equal(t, 2, held[1].Rule)
-	require.NotContains(t, keys.seen, domain.ResourceRef{Type: "iam.role", ID: "rol_reference"})
+	require.NotContains(t, keys.seen, domain.ResourceRef{Type: "iam.role", ID: "rolbbbbbbbbbbbbbbbbb"})
 }
 
 func (r *metaReferenceRows) LockGrantAuthoringAxes(context.Context, []domain.GrantCapabilityRule) error {
@@ -141,19 +141,19 @@ func TestGrantReferenceObjectCheckerPreservesCanonicalVisibilityAndErrors(t *tes
 				calls = append(calls, relation)
 				return relation == tc.allowedRelation, tc.backendErr
 			})}
-			visible, err := authzfilter.VisibleSet(ctx, adapter, "service_account:sa_actor", "iam_role", []string{"rol_target"})
+			visible, err := authzfilter.VisibleSet(ctx, adapter, "service_account:sa_actor", "iam_role", []string{"rolaaaaaaaaaaaaaaaaa"})
 			if tc.backendErr != nil {
 				require.ErrorIs(t, err, tc.backendErr)
 				require.Empty(t, visible)
 			} else {
 				require.NoError(t, err)
-				require.Equal(t, tc.want, visible["rol_target"])
+				require.Equal(t, tc.want, visible["rolaaaaaaaaaaaaaaaaa"])
 			}
 			require.Equal(t, tc.calls, calls)
 			for i := range calls {
 				require.Equal(t, "same-tx-context", contexts[i])
 				require.Equal(t, "service_account:sa_actor", subjects[i])
-				require.Equal(t, "iam_role:rol_target", objects[i])
+				require.Equal(t, "iam_role:rolaaaaaaaaaaaaaaaaa", objects[i])
 			}
 		})
 	}

@@ -2,6 +2,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: авторинг и lifecycle; ни одна привязка не получает version=1.
 -- +goose Up
+-- Приёмка: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+-- kaname#1034: защита полного действия выдачи и сохранение прежних строк при накате (ESC-32).
 SET LOCAL lock_timeout='10s';
 INSERT INTO kaname.catalog_verb(module,resource,verb,per_object)
  VALUES('iam','role','bind',false) ON CONFLICT(module,resource,verb) DO NOTHING;

@@ -1,6 +1,7 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- Добавляется только хранение: выдача, чтение и прежние привязки не активируются.
+-- Приёмка: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md §§2, 8.1–8.4.
 
 -- +goose Up
 SET LOCAL lock_timeout = '10s';

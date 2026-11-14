@@ -12,13 +12,10 @@ import (
 	"log/slog"
 	"slices"
 
+	"github.com/PRO-Robotech/corelib/operations"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
-
-	"github.com/PRO-Robotech/corelib/operations"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
@@ -27,6 +24,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 type UpdateRoleInput struct {
@@ -64,6 +62,7 @@ var roleImmutableFields = map[string]string{
 }
 
 type UpdateRoleUseCase struct {
+	policy         rolePolicySelection
 	referencePlans *authzmodel.Plans
 	repo           Repo
 	opsRepo        operations.Repo
@@ -242,7 +241,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	// форма, существование, системность и правила уже проверены — отказ в праве не
 	// говорит ни о чём, кроме права. Отказ синхронный, операции нет. Правка, не
 	// называющая правил (имя, описание, метки), права выдавать не требует (Д-5).
-	if slices.Contains(changed, "rules") {
+	if slices.Contains(changed, "rules") && !u.policy.configured {
 		if err := u.requireRulesGrantAuthority(ctx, in.ID); err != nil {
 			return nil, err
 		}
@@ -313,12 +312,16 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 }
 
 func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []string, actor string, changed []string, expectedVersion string) (*anypb.Any, error) {
-	updated, err := shared.DoWithWriteTx(ctx, u.repo,
+	updated, err := u.policy.run(ctx, u.repo, r, false, slices.Contains(changed, "rules"),
 		func(ctx context.Context, w Writer) (domain.Role, error) {
 			var projection catalog.GrantProjection
 			if slices.Contains(changed, "rules") {
 				var err error
-				projection, err = u.cat.Facts().ProjectGrantRules(r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
+				facts, ferr := writerRoleFacts(w, u.cat)
+				if ferr != nil {
+					return domain.Role{}, ferr
+				}
+				projection, err = facts.ProjectGrantRules(r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
 				if err != nil {
 					return domain.Role{}, shared.MapValidationErr(err)
 				}
@@ -419,7 +422,7 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 				}
 			}
 			return upd, nil
-		})
+		}, u.reconciler)
 	if err != nil {
 		return nil, err
 	}

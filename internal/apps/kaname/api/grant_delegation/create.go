@@ -55,12 +55,14 @@ type CreateInput struct {
 
 // CreateGrantDelegationUseCase — заведение делегирования.
 type CreateGrantDelegationUseCase struct {
-	installationModel *authzmodel.Plans
-	repo              Repo
-	opsRepo           operations.Repo
-	cat               catalog.Source
-	relations         clients.RelationStore
-	logger            *slog.Logger
+	installationModel   *authzmodel.Plans
+	repo                Repo
+	authorityWriter     delegationWriterFactory
+	authorityConfigured bool
+	opsRepo             operations.Repo
+	cat                 catalog.Source
+	relations           clients.RelationStore
+	logger              *slog.Logger
 }
 
 // NewCreateGrantDelegationUseCase — над хранилищем, операциями и каталожным
@@ -285,7 +287,8 @@ func (u *CreateGrantDelegationUseCase) validateComposition(ctx context.Context, 
 // (Р5). Второе действующее делегирование пары — 23505, `ALREADY_EXISTS` (Д1).
 func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.GrantDelegation, actor string, installation bool, opID string) (*anypb.Any, error) {
 	d.CreatedAt = time.Now().UTC()
-	created, err := shared.DoWithWriteTx(ctx, u.repo, func(ctx context.Context, w Writer) (domain.GrantDelegation, error) {
+	created, err := doDelegationWriteTx(ctx, delegationWriteRepo{Repo: u.repo, factory: u.authorityWriter, configured: u.authorityConfigured, mutation: delegationCreate, proposed: d}, func(ctx context.Context, w Writer) (domain.GrantDelegation, error) {
+		d.CreatedAt = delegationDecisionAt(w, d.CreatedAt)
 		var transaction installationTransaction
 		if installation {
 			var ok bool
@@ -297,6 +300,25 @@ func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.Gr
 				return domain.GrantDelegation{}, err
 			}
 		}
+		if !installation && u.authorityConfigured {
+			prepare, ok := w.(interface {
+				LockGrantDelegationCreate(context.Context, domain.GrantDelegation) error
+			})
+			if !ok {
+				return domain.GrantDelegation{}, authzguard.AuthzBackendUnavailable()
+			}
+			if err := prepare.LockGrantDelegationCreate(ctx, d); err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			checker, err := w.TransactionRelationChecker(nil)
+			if err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			if err := requireAccountGrantAuthorityWithOwner(ctx, checker, d.AccountID, func(ctx context.Context) (domain.UserID, error) { return accountOwnerFromReader(ctx, w, d.AccountID) }); err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			d.CreatedAt = delegationDecisionAt(w, d.CreatedAt)
+		}
 		gw := w.AccessBindingsW().GrantDelegationsW()
 		if installation {
 			installer, ok := gw.(interface {
@@ -307,6 +329,9 @@ func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.Gr
 			}
 			existing, found, err := installer.InstallationPair(ctx, d)
 			if err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			if err := refreshDelegationDecision(ctx, w); err != nil {
 				return domain.GrantDelegation{}, err
 			}
 			if err := transaction.RequireInstallationAuthority(ctx, u.installationModel); err != nil {

@@ -27,6 +27,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,7 +38,9 @@ import (
 
 // RegistrationStore — хранилище регистрации на пуле.
 type RegistrationStore struct {
-	pool *pgxpool.Pool
+	pool                  *pgxpool.Pool
+	participantConfigured bool
+	participant           *HumanAdmissionParticipant
 }
 
 // NewRegistrationStore — адаптер поверх пула.
@@ -47,12 +50,13 @@ func NewRegistrationStore(pool *pgxpool.Pool) *RegistrationStore {
 
 // Writer — одна транзакция трёх следствий.
 //
-// Транзакцию открывает открытие писателя сессии (`beginHumanSessionWriter`),
-// а не эта дверь: писатель сессии встроен сюда целиком, снятие записи с
+// Транзакцию открывает beginAdmissionSession: по умолчанию beginHumanSessionWriter,
+// при явной настройке — GLOBAL participant перед бизнес-замками.
+// Писатель сессии встроен сюда целиком, снятие записи с
 // отзывом выданного в ней этой транзакции представимо, и уровень её назван
 // там же, где у остальных дверей писателя сессии (kaname#316).
 func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, error) {
-	w, err := beginHumanSessionWriter(ctx, s.pool)
+	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
 		return nil, mapErr(err, "Registration.Writer", "")
 	}
@@ -66,11 +70,11 @@ func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, er
 // VerificationWriter — транзакция исхода подтверждения адреса (kaname#456,
 // Р10): тот же состав, что у регистрации (писатель сессии и писатель зеркала
 // над ОДНОЙ `pgx.Tx`, — активация приглашения идёт тем же исходом), но ПЕРВЫМ
-// оператором взята строка человека замком писателя нескольких сессий:
+// бизнес-оператором взята строка человека замком писателя нескольких сессий:
 // подтверждение снимает прочие сессии человека, а запрос письма судит предел
 // писем, и одновременные обращения одного человека сериализованы этим замком.
 func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
-	w, err := beginHumanSessionWriter(ctx, s.pool)
+	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
 		return nil, mapErr(err, "Verification.Writer", "")
 	}
@@ -80,18 +84,18 @@ func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domai
 // EmailChangeWriter — транзакция глаголов смены адреса (kaname#635, Р6, Р8):
 // тот же состав, что у подтверждения адреса. Исход смены снимает прочие сессии
 // человека, а запрос смены судит темп человека, и одновременные обращения
-// одного человека сериализованы замком строки человека, взятым первым. Сила
+// одного человека сериализованы замком строки человека, взятым первым
+// бизнес-оператором после необязательного admission entry. Сила
 // замка — глагола, решающего по заведённому (`holdPersonAgainstEnrollment`,
 // kaname#770): условие уровня (Р2) читает заведённое этой транзакцией, и
 // заведение способа «2», идущее одновременно, с ним не разминётся.
 func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
-	w, err := beginHumanSessionWriter(ctx, s.pool)
+	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
 		return nil, mapErr(err, "EmailChange.Writer", "")
 	}
 	if err := w.holdPersonAgainstEnrollment(ctx, userID); err != nil {
-		_ = w.tx.Rollback(ctx)
-		return nil, err
+		return nil, errors.Join(err, policyRollback(ctx, w.tx))
 	}
 	return &RegistrationWriter{
 		humanSessionWriter: w,
@@ -100,13 +104,12 @@ func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain
 	}, nil
 }
 
-// holdPersonOf — ПЕРВЫМ оператором открытой транзакции строка человека взята
+// holdPersonOf — ПЕРВЫМ бизнес-оператором открытой транзакции строка человека взята
 // замком писателя нескольких сессий; писатель сессии и писатель зеркала — над
 // той же `pgx.Tx`. Отказ замка откатывает транзакцию.
 func holdPersonOf(ctx context.Context, w *humanSessionWriter, userID domain.UserID) (*RegistrationWriter, error) {
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
-		_ = w.tx.Rollback(ctx)
-		return nil, err
+		return nil, errors.Join(err, policyRollback(ctx, w.tx))
 	}
 	return &RegistrationWriter{
 		humanSessionWriter: w,

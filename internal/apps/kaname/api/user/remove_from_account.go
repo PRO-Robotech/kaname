@@ -66,13 +66,15 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // RemoveFromAccountUseCase — исключение человека из аккаунта.
 type RemoveFromAccountUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	repo           Repo
+	opsRepo        operations.Repo
+	identityWriter identityWriterSelection
 }
 
 // NewRemoveFromAccountUseCase — конструктор.
@@ -136,7 +138,7 @@ func membershipScopeTuple(userID domain.UserID, accountID domain.AccountID) serv
 }
 
 func (uc *RemoveFromAccountUseCase) doRemove(ctx context.Context, userID domain.UserID, accountID domain.AccountID, actor string) (*anypb.Any, error) {
-	if err := shared.DoWithWriteTxVoid(ctx, uc.repo,
+	if err := shared.DoWithWriteTxVoid(ctx, uc.identityWriter.repository(uc.repo, kaname.IdentityRemoveFromAccount, userID),
 		func(ctx context.Context, w Writer) error {
 			removed, derr := w.UsersW().RemoveMembership(ctx, userID, accountID)
 			if derr != nil {

@@ -3,7 +3,7 @@
 
 package access_binding_test
 
-// Полный контракт #1034/#1035: публичные роли и выдачи, настоящий каталог
+// Полный контракт kaname#1034/kaname#1035: публичные роли и выдачи, настоящий каталог
 // probemod и отдельный нижний вердикт PostgreSQL. Проверки не провязывают
 // разрешающий дублёр и не записывают исследуемые роли/выдачи напрямую в БД.
 // Это первые держатели полной приёмки; остальные FB-сценарии остаются отдельным
@@ -21,8 +21,8 @@ import (
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
-	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -30,11 +30,13 @@ import (
 
 type fullBindWorld struct {
 	*atcWorld
-	roles *roleapp.Handler
-	plans *authzmodel.Plans
+	roles        *roleapp.Handler
+	plans        *authzmodel.Plans
+	stages       *kanamepg.BindingStageParticipant
+	ownerBinding domain.AccessBindingID
 }
 
-func newFullBindWorld(t *testing.T) *fullBindWorld {
+func newFullBindWorld(t *testing.T, observers ...fullBindSelectorObserverFactory) *fullBindWorld {
 	t.Helper()
 	a := newATCWorld(t)
 	// Личности и членство — общая фикстура. Исследуемые права ниже выдаются API.
@@ -43,13 +45,9 @@ func newFullBindWorld(t *testing.T) *fullBindWorld {
 	plans, err := authzmodel.Shared()
 	require.NoError(t, err, "FB: допущенная модель процесса")
 	w := &fullBindWorld{atcWorld: a, plans: plans}
-	src := catalog.Fixed{F: a.facts}
-	w.roles = roleapp.NewHandler(
-		roleapp.NewCreateRoleUseCase(a.repo, a.ops, src).
-			WithRelationStore(a.door, nil).WithObjectReconciler(a.rec),
-		nil, nil, nil, nil)
 	a.registerBox(atcB1)
 	a.registerBox(atcB2)
+	w.installFullBindParticipants(observers...)
 	w.native("user:"+string(a.usrD), "v_get", atcBoxType, atcB1, relverdict.Deny)
 	w.native("user:"+string(a.usrE), "v_get", atcBoxType, atcB1, relverdict.Deny)
 	return w
@@ -73,6 +71,10 @@ func (w *fullBindWorld) role(name string, rules ...*iamv1.Rule) domain.RoleID {
 	var md iamv1.CreateRoleMetadata
 	require.NoError(w.t, op.GetMetadata().UnmarshalTo(&md))
 	require.NotEmpty(w.t, md.GetRoleId())
+	// Доводим прежний настоящий holder владельца до нового role-AS-OBJECT.
+	// Это await production materializer, не новое право; generic object hook
+	// Role.Create пока имеет отдельно отмеченный legacy-entry остаток.
+	require.NoError(w.t, w.rec.ReconcileBinding(w.ctx, w.ownerBinding))
 	return domain.RoleID(md.GetRoleId())
 }
 
@@ -85,7 +87,10 @@ func (w *fullBindWorld) request(subject domain.UserID, role domain.RoleID, targe
 
 func (w *fullBindWorld) source(role domain.RoleID, target *iamv1.AccessTarget) string {
 	w.t.Helper()
-	return w.createDone(asUser(w.ctx, w.usrA), w.request(w.usrD, role, target), "FB: источник полномочий actor")
+	id := w.createDone(asUser(w.ctx, w.usrA), w.request(w.usrD, role, target), "FB: источник полномочий actor")
+	// Durable LRO не подменяет завершение materialization перед native Given.
+	require.NoError(w.t, w.rec.ReconcileBinding(w.ctx, domain.AccessBindingID(id)))
+	return id
 }
 
 func (w *fullBindWorld) createCapability() {
@@ -178,7 +183,7 @@ func (w *fullBindWorld) ordinary(req *iamv1.CreateAccessBindingRequest, allow bo
 func (w *fullBindWorld) revokeSource(id string) {
 	w.t.Helper()
 	w.ownerMayRemove("FB: владелец отзывает источник", id)
-	u := accessbindingapp.NewRevokeAccessBindingUseCase(w.repo, w.ops).WithRelationStore(w.door, nil)
+	u := accessbindingapp.NewRevokeAccessBindingUseCase(w.repo, w.ops).WithRelationStore(w.door, nil).WithBindingWithdrawal(w.stages)
 	op, err := u.Execute(asUser(w.ctx, w.usrA), domain.AccessBindingID(id))
 	require.NoError(w.t, err)
 	require.Nil(w.t, awaitOp(w.t, w.ctx, w.ops, op.ID).Error)

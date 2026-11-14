@@ -60,6 +60,13 @@ func (w *semanticAuthorityWriteTx) AdmitSourceActor(ctx context.Context, actor d
 // ProducerSources читает receipt и все подтверждающие строки одним SQL snapshot.
 // Источник владельца — accepted typed receipt; relation_fact не является входом.
 func (w *semanticAuthorityWriteTx) ProducerSources(ctx context.Context, f kaname.CanonicalSourceFilter) (kaname.ProducerSourcePage, string, error) {
+	if w.producerCaptures != nil {
+		return w.capturedProducerSources(ctx, f)
+	}
+	return w.producerSourcesQuery(ctx, f, nil)
+}
+
+func (w *semanticAuthorityWriteTx) producerSourcesQuery(ctx context.Context, f kaname.CanonicalSourceFilter, captured []byte) (kaname.ProducerSourcePage, string, error) {
 	if _, err := canonicalPage(kaname.CanonicalSourceFilter{Actor: f.Actor, Limit: f.Limit}); err != nil {
 		return kaname.ProducerSourcePage{}, "", err
 	}
@@ -77,7 +84,13 @@ func (w *semanticAuthorityWriteTx) ProducerSources(ctx context.Context, f kaname
 		return kaname.ProducerSourcePage{}, "", err
 	}
 	public := slices.Contains(domain.SpeakerClasses(string(f.Actor.Type)+":"+string(f.Actor.ID)), domain.SpeakerAnonymous)
-	rows, err := w.tx.Query(ctx, producerSourcesSQL, string(f.Actor.Type), string(f.Actor.ID), public, cursor[:], f.Limit)
+	query := producerSourcesSQL
+	args := []any{string(f.Actor.Type), string(f.Actor.ID), public, cursor[:], f.Limit}
+	if captured != nil {
+		query = producerSourcesCapturedSQL
+		args = append(args, captured)
+	}
+	rows, err := w.tx.Query(ctx, query, args...)
 	if err != nil {
 		return kaname.ProducerSourcePage{}, "", err
 	}
@@ -218,10 +231,17 @@ func (w *semanticAuthorityWriteTx) ProducerSources(ctx context.Context, f kaname
 const sourceActorExistsSQL = `(($1::text='user' AND EXISTS(SELECT 1 FROM kaname.users WHERE id=$2::text))
  OR ($1::text='service_account' AND EXISTS(SELECT 1 FROM kaname.service_accounts WHERE id=$2::text)))`
 
-const producerSourcesSQL = `WITH actor AS (SELECT ` + sourceActorExistsSQL + ` AS present), page AS (
+const producerSourcesSQL = producerSourcesHead + producerSourcesTail
+
+const producerSourcesHead = `WITH actor AS (SELECT ` + sourceActorExistsSQL + ` AS present), page AS (
  SELECT r.* FROM kaname.producer_source_receipt r
  WHERE (SELECT present FROM actor) AND r.active AND ((r.kind='registration_owner' AND r.subject_type=$1 AND r.subject_id=$2) OR (r.kind='publication' AND $3))
- AND (r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id)>(($4::text[])[1],($4::text[])[2],($4::text[])[3],($4::text[])[4],($4::text[])[5],($4::text[])[6],($4::text[])[7])
+`
+
+const producerSourcesCapturedSQL = producerSourcesHead + ` AND EXISTS (SELECT 1 FROM jsonb_array_elements($6::jsonb) wanted WHERE wanted.value=jsonb_build_array(r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id))
+` + producerSourcesTail
+
+const producerSourcesTail = ` AND (r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id)>(($4::text[])[1],($4::text[])[2],($4::text[])[3],($4::text[])[4],($4::text[])[5],($4::text[])[6],($4::text[])[7])
  ORDER BY r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id LIMIT $5
 ) SELECT actor.present,source.* FROM actor LEFT JOIN LATERAL (SELECT r.kind,r.module,r.catalog_type,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id,r.condition_name,r.condition_parameters,r.scopes,r.source_version,r.versionless,
  coalesce(sc.data,'[]'::jsonb),

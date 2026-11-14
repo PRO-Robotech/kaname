@@ -2,6 +2,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: граница сравнения identity, не активация strict authority.
 -- +goose Up
+-- Приёмка: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+-- kaname#1034: защита полного действия выдачи и сохранение прежних строк при накате (ESC-32).
 CREATE TABLE kaname.authority_semantic_identity (
  singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
  phase text NOT NULL DEFAULT 'uninitialized' CHECK (phase IN ('uninitialized','transition','active')),

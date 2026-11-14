@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_review",
+  "subject": {
+    "repository": "PRO-Robotech/kaname",
+    "path": "docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md",
+    "sha256": "96dbee75a3116f6e38d8618235956fa8a1ee41ec873ce0c07b45f07f2bb12e98",
+    "revision": 3,
+    "static_status": "DRAFT",
+    "static_status_note": "Шапка автора сохранена. Этот SOURCE review оценивает требования, не реализацию и не runtime.",
+    "lines": 452,
+    "round": "finite_delta_after_WE_ACC_F1",
+    "base_commit": "8455a9a2c997d16b3c026ac2c9fbc01457e68fba",
+    "content_commit_note": "Текущий файл проверен чтением и SHA-256; Git и remote не запускались.",
+    "predecessor_record": "docs/specs/reviews/grant-authority-matches-the-whole-effect/c009e74d2a3871c73e3635c5e17121620a52f9b93d8c80dd11a7ca559a56e998.yaml"
+  },
+  "verdict": "APPROVED",
+  "reviewer_role": "acceptance-reviewer",
+  "reviewed_at": "2026-11-13T20:01:05.233885+00:00",
+  "effective_approval": {
+    "issued": false,
+    "ban1_lifted": false,
+    "why": "Агент одобрил точный контракт. Внешнее событие полномочия не публиковалось; runtime/реализация/activation не приняты."
+  },
+  "blocking": [],
+  "important_nonblocking": [
+    "Performance budgets и реальные измерения остаются обязательными §8.3; SOURCE review не подтверждает их прохождение.",
+    "Generic/children/creator Given описаны конкретными production fixtures и ограничениями; здесь не выполнялись. Ошибка построения мира остаётся отдельным исходом, а не deny.",
+    "Полный FB набор и listener holders ещё не выполнены/не завершены; принятие требований не заменяет их.",
+    "Live/expired row-only Role.Update metadata/rules и catalog-wait регрессии проверяют общий §8.3 вместе с FB31; это обязательная проверка реализации, SOURCE approval не объявляет её исполненной."
+  ],
+  "constructibility": {
+    "seeded": 0,
+    "by_named_fixture": "probemod.public-read-fixture.yaml; probemod.children-fixture.yaml; штатная iam.service_account.creator для direct SA; текущие GD/GDU/ESC. Вручную разрешающие tuples запрещены.",
+    "not_executed": "SOURCE-only запрет Root: никаких Go/tests/PG/network. Наличие источников проверено чтением; новый Given не сеялся."
+  },
+  "review_coverage": [
+    "D1 Create AND (bind OR coverage), exact anchors и meta effect",
+    "D3 old administrative sources и D4 used-role population/fallback",
+    "D5 no inherited expiry/no retroactive revoke/GD explicit revoke",
+    "FB01–34, одиночные Given twins и отдельно названные payload/race сценарии",
+    "Durable Operation и real lower Allow/Deny nil-error oracle",
+    "Actor typed admission/all subjects/full pages/model/catalog/source provenance",
+    "Bounded stage/sameTX/retry/audit/cutover/all writers/legacy version0",
+    "Performance measurements and Kacho/Terraform/Registry/svc exclusions"
+  ],
+  "event": {
+    "type": "issue_comment",
+    "target": "PRO-Robotech/kaname#1034",
+    "status": "not_performed",
+    "published": false
+  },
+  "attribution": {
+    "reviewer_kind": "codex_agent",
+    "assigned_agent": "/root/1034_delegated_decision_critical_review",
+    "assigned_role_for_this_task": "acceptance-reviewer",
+    "publication_mode": "pending_root_courier",
+    "personal_review_by_publishing_actor_claimed": false,
+    "history_is_appended_not_rewritten": true
+  },
+  "delta_check": {
+    "preimage_sha256": "c009e74d2a3871c73e3635c5e17121620a52f9b93d8c80dd11a7ca559a56e998",
+    "postimage_sha256": "96dbee75a3116f6e38d8618235956fa8a1ee41ec873ce0c07b45f07f2bb12e98",
+    "changed_blocks": [
+      "header revision/date/status note",
+      "§8.3 steps 4–6"
+    ],
+    "closed": [
+      "WE-ACC-F1"
+    ],
+    "evidence": "Все actual row/catalog/projection/fanout waits теперь до защищённого recheck и finalclock. Method/content/reference gates явно читают OLDauthority. Неожиданный wait требует rollback/restage, retry включает body/Commit. Исходные D1–D5, FB twins/oracles/fixtures, migration/cutover/allwriters/performance/exclusions не изменены."
+  }
+}
