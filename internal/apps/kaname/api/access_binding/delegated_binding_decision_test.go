@@ -45,8 +45,8 @@ func TestDelegatedBindingDecisionOnlyPermissionDenialSelectsException(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			f := &delegatedDecisionFailure{bindingDecisionFailure: &bindingDecisionFailure{err: tc.ordinary}, failure: errors.New("delegated path reached")}
 			u := (&CreateAccessBindingUseCase{delegated: &DelegatedGrantPath{}}).WithBindingDecisions(f)
-			ctx := operations.WithPrincipal(context.Background(), operations.Principal{Type: "service_account", ID: "sva-caller"})
-			id, err := u.checkBindingDecision(ctx, domain.AccessBinding{ID: "acb-candidate"})
+			ctx := operations.WithPrincipal(context.Background(), operations.Principal{Type: "service_account", ID: "sva00000000000000002"})
+			id, err := u.checkBindingDecision(ctx, domain.AccessBinding{ID: "acb00000000000000002"})
 			require.Empty(t, id)
 			require.Equal(t, tc.want, f.delegated)
 			require.Equal(t, 1, f.called)
@@ -61,10 +61,10 @@ func TestDelegatedBindingDecisionOnlyPermissionDenialSelectsException(t *testing
 func TestDelegatedBindingDecisionWorkerKeepsCapturedIDWithoutOrdinaryFallback(t *testing.T) {
 	f := &delegatedDecisionFailure{bindingDecisionFailure: &bindingDecisionFailure{}, failure: iamerr.ErrPermissionDenied}
 	u := (&CreateAccessBindingUseCase{delegated: &DelegatedGrantPath{}}).WithBindingDecisions(f)
-	ctx := operations.WithPrincipal(context.Background(), operations.Principal{Type: "service_account", ID: "sva-caller"})
-	_, err := u.doCreate(ctx, domain.AccessBinding{ID: "acb-candidate", DelegationID: "gdl-captured"}, "sva-caller")
+	ctx := operations.WithPrincipal(context.Background(), operations.Principal{Type: "service_account", ID: "sva00000000000000002"})
+	_, err := u.doCreate(ctx, domain.AccessBinding{ID: "acb00000000000000002", DelegationID: "gdl00000000000000001"}, "sva00000000000000002")
 	require.Error(t, err)
 	require.Zero(t, f.called)
 	require.Equal(t, 1, f.delegated)
-	require.Equal(t, domain.GrantDelegationID("gdl-captured"), f.captured)
+	require.Equal(t, domain.GrantDelegationID("gdl00000000000000001"), f.captured)
 }

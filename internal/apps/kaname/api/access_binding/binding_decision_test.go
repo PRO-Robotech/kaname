@@ -35,20 +35,20 @@ func (f *bindingDecisionFailure) RunBindingDecision(ctx context.Context, actor d
 	return f.err
 }
 func TestBindingDecisionActualWorkersDoNotFallbackAndKeepTypedSubjects(t *testing.T) {
-	ctx := operations.WithPrincipal(context.Background(), operations.Principal{Type: "service_account", ID: "sva-test"})
+	ctx := operations.WithPrincipal(context.Background(), operations.Principal{Type: "service_account", ID: "sva00000000000000001"})
 	failure := &bindingDecisionFailure{err: errors.New("native source unavailable")}
 	create := &CreateAccessBindingUseCase{}
 	handler := (&Handler{create: create, update: &UpdateAccessBindingUseCase{}}).WithBindingDecisions(failure)
-	b := domain.AccessBinding{ID: "acb-test", Subjects: []domain.Subject{{Type: domain.SubjectTypeUser, ID: "usr-test"}, {Type: domain.SubjectTypeGroup, ID: "grp-test"}}}
-	_, err := create.doCreate(ctx, b, "sva-test")
+	b := domain.AccessBinding{ID: "acb00000000000000001", Subjects: []domain.Subject{{Type: domain.SubjectTypeUser, ID: "usr00000000000000001"}, {Type: domain.SubjectTypeGroup, ID: "grp00000000000000001"}}}
+	_, err := create.doCreate(ctx, b, "sva00000000000000001")
 	require.Error(t, err)
 	require.Equal(t, 1, failure.called)
 	require.True(t, failure.create)
-	require.Equal(t, domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: "sva-test"}, failure.actor)
+	require.Equal(t, domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: "sva00000000000000001"}, failure.actor)
 	require.Equal(t, b.Subjects, failure.binding.Subjects)
 	// Нулевой repo намеренно не пригоден: silent legacy fallback дал бы panic.
 	update := handler.update
-	_, err = update.doUpdate(ctx, "acb-test", true, false, true, domain.Labels{"purpose": "metadata"})
+	_, err = update.doUpdate(ctx, "acb00000000000000001", true, false, true, domain.Labels{"purpose": "metadata"})
 	require.Error(t, err)
 	require.Equal(t, 2, failure.called)
 	require.False(t, failure.create)
@@ -56,12 +56,12 @@ func TestBindingDecisionActualWorkersDoNotFallbackAndKeepTypedSubjects(t *testin
 func TestBindingDecisionAnonymousAndCancellationNeverReachMutation(t *testing.T) {
 	f := &bindingDecisionFailure{err: errors.New("must not mutate")}
 	u := (&CreateAccessBindingUseCase{}).WithBindingDecisions(f)
-	_, err := u.doCreate(context.Background(), domain.AccessBinding{ID: "acb-test"}, "forged")
+	_, err := u.doCreate(context.Background(), domain.AccessBinding{ID: "acb00000000000000001"}, "forged")
 	require.Error(t, err)
 	require.Zero(t, f.called)
-	ctx, cancel := context.WithCancel(operations.WithPrincipal(context.Background(), operations.Principal{Type: "user", ID: "usr-test"}))
+	ctx, cancel := context.WithCancel(operations.WithPrincipal(context.Background(), operations.Principal{Type: "user", ID: "usr00000000000000001"}))
 	cancel()
-	_, err = u.doCreate(ctx, domain.AccessBinding{ID: "acb-test"}, "usr-test")
+	_, err = u.doCreate(ctx, domain.AccessBinding{ID: "acb00000000000000001"}, "usr00000000000000001")
 	require.Error(t, err)
 	require.Zero(t, f.called)
 }
@@ -80,10 +80,10 @@ func TestBindingWithdrawalActualDeleteAndRevokeWorkersRouteClosed(t *testing.T) 
 	f := &bindingWithdrawalFailure{}
 	handler := (&Handler{delete: &DeleteAccessBindingUseCase{}, revoke: &RevokeAccessBindingUseCase{}}).WithBindingWithdrawal(f)
 	remove := handler.delete
-	require.Error(t, remove.deleteOnce(context.Background(), "acb-test", "usr-test"))
+	require.Error(t, remove.deleteOnce(context.Background(), "acb00000000000000001", "usr00000000000000001"))
 	require.Equal(t, kaname.BindingWithdrawalDelete, f.kind)
 	revoke := handler.revoke
-	_, err := revoke.doRevoke(context.Background(), "acb-test", "usr-test")
+	_, err := revoke.doRevoke(context.Background(), "acb00000000000000001", "usr00000000000000001")
 	require.Error(t, err)
 	require.Equal(t, kaname.BindingWithdrawalRevoke, f.kind)
 	require.Equal(t, 2, f.called)

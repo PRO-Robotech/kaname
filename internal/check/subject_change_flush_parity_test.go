@@ -53,6 +53,12 @@ var subjectChangeProducerRoster = map[string]int{
 	"internal/apps/kaname/api/access_binding/create.go": 1,
 	"internal/apps/kaname/api/access_binding/delete.go": 1,
 	"internal/apps/kaname/api/access_binding/revoke.go": 1,
+	// Staged Delete/Revoke (kaname#1034) — альтернативные ветви тех же RPC,
+	// новых FQN самосброса не создают. Каждый after callback пишет по полному
+	// сохранённому Subjects через тот же writer до Commit; его ошибка откатывает
+	// мутацию и очередь вместе. Два source-обращения объявлены отдельно от
+	// сохранённых legacy ветвей, а не как два события одной транзакции.
+	"internal/apps/kaname/api/access_binding/staged_withdrawal.go": 2,
 	// Снятие выдачи сроком (kaname#920): строка той же формы, что у отзыва и
 	// удаления, на каждого субъекта. Самосброса у края здесь нет и не нужно:
 	// истечение — фоновый проход сведения, а не RPC, и реплики, обслужившей

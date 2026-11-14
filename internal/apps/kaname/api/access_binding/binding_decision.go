@@ -53,7 +53,7 @@ func proposedBinding(b domain.AccessBinding, r domain.Role) granteffect.Binding 
 }
 func bindingDecisionError(err error) error {
 	// Отказ не раскрывает путь решения: публичный контракт одинаков для
-	// отсутствующего источника и недостаточной authority (приёмка #1034).
+	// отсутствующего источника и недостаточной authority (приёмка kaname#1034).
 	if errors.Is(err, iamerr.ErrNotFound) || errors.Is(err, iamerr.ErrPermissionDenied) || isPermissionDenied(err) {
 		return authzguard.PermissionDenied()
 	}

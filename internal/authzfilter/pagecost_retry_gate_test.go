@@ -105,7 +105,7 @@ func (u *worker) page(ctx context.Context, ids []string) {
 		{name: "same callee in another page stays visible", source: retryGateFixture + pageMethod, findings: 1, cleared: 1, loopCalls: 2},
 		{name: "retry nested inside page", source: change("\tfor attempt := 1; ; attempt++ {", "\tfor _, id := range ids {\n\tfor attempt := 1; ; attempt++ {") + "}\n", findings: 1, loopCalls: 1},
 		{name: "callee page remains visible", source: retryGateFixture,
-			staged: strings.Replace(retryGateStagedFixture, "\treturn \"\", nil", "\tfor _, other := range ids { _, _ = u.stage(ctx, other) }\n\treturn \"\", nil", 1),
+			staged:   strings.Replace(retryGateStagedFixture, "\treturn \"\", nil", "\tfor _, other := range ids { _, _ = u.stage(ctx, other) }\n\treturn \"\", nil", 1),
 			findings: 1, cleared: 1, loopCalls: 2},
 		{name: "transaction spelling is no exemption", source: strings.ReplaceAll(retryGateFixture+pageMethod, "once", "deleteOnce"),
 			staged: strings.ReplaceAll(retryGateStagedFixture, "once", "deleteOnce"), findings: 1, cleared: 1, loopCalls: 2},
