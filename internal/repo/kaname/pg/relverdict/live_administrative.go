@@ -91,7 +91,7 @@ func administrativeQuerySQL(labelTable string, nesting bool) (string, error) {
 		return "", err
 	}
 	replacements := [][2]string{
-		{"rs.arm AS arm", "rs.arm AS arm, ''::text AS object_type, ''::text AS object_id, ''::text AS relation, ''::text AS subject"},
+		{"SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params, rs.arm AS arm", "SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params, rs.arm AS arm, ''::text AS object_type, ''::text AS object_id, ''::text AS relation, ''::text AS subject"},
 		{"''::text AS arm\n      FROM kaname.relation_fact f", "''::text AS arm, f.object_type, f.object_id, f.relation, f.subject\n      FROM kaname.relation_fact f"},
 		{"SELECT src.cond_name, src.cond_params, src.arm FROM (", "SELECT src.cond_name, src.cond_params, src.arm, src.object_type, src.object_id, src.relation, src.subject, src.cond_params::text FROM ("},
 		{"b.expires_at > now()", "b.expires_at > $13::timestamptz"},
