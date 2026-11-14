@@ -161,7 +161,10 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 	case "cluster":
 		err = s.w.tx.QueryRow(ctx, `SELECT ''::text FROM kaname.clusters WHERE id=$1`, f.ObjectID).Scan(&account)
 	default:
-		dotted, _ := authzmap.DottedType(f.ObjectType)
+		dotted, known := authzmap.DottedType(f.ObjectType)
+		if !known {
+			return false, relverdict.ErrAdministrativeSourceUnconfirmed
+		}
 		store := &reconcileStore{tx: s.w.tx, decisionAt: s.w.fence.decisionAt}
 		object, found, readErr := s.currentObject(ctx, store, dotted, f.ObjectID, budget)
 		if readErr != nil || !found {
