@@ -871,7 +871,11 @@ type abWriter struct {
 // revoked_at, revoked_by_user_id) передаются через
 // nullableString/nullableTimePtr хелперы.
 func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
-	now := time.Now().UTC()
+	return w.insertAt(ctx, b, time.Now().UTC())
+}
+
+// Prepared CRUD передаёт время из закрытой программы. Старый Insert сохраняет свои часы.
+func (w *abWriter) insertAt(ctx context.Context, b domain.AccessBinding, now time.Time) (domain.AccessBinding, error) {
 	// Scope: явное значение, когда оно не Unspecified, иначе область выводит из
 	// resource_type триггер access_bindings_scope_default_trg (миграция 0005).
 	// SMALLINT NULL нарушил бы NOT NULL ПОСЛЕ триггера лишь тогда, когда триггер
@@ -1009,6 +1013,9 @@ func (w *abWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID)
 // FailedPrecondition. revoked_at проставляется, чтобы частичная UNIQUE
 // действующей выдачи (`WHERE revoked_at IS NULL`) освободила место повторной выдаче.
 func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID, revokedBy domain.UserID) (domain.AccessBinding, error) {
+	return w.revokeGuardedAt(ctx, id, revokedBy, time.Now().UTC())
+}
+func (w *abWriter) revokeGuardedAt(ctx context.Context, id domain.AccessBindingID, revokedBy domain.UserID, now time.Time) (domain.AccessBinding, error) {
 	if revokedBy == "" {
 		// CHECK access_bindings_revoked_consistency_ck требует, чтобы revoked_at
 		// менялся вместе со status='REVOKED'; строка REVOKED без отозвавшего
@@ -1016,7 +1023,6 @@ func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID,
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg,
 			"revoked_by_user_id is required for REVOKED transition")
 	}
-	now := time.Now().UTC()
 	row := w.tx.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE access_bindings
 		   SET status             = 'REVOKED',

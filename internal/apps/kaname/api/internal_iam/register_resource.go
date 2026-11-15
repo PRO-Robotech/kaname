@@ -44,6 +44,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -297,21 +298,23 @@ func admitsPublication(modelType string) bool {
 // общий коммит resource_mirror (метки и родительская область объекта владельца),
 // постановку события согласования и заполнение parent_account_id.
 type RegisterResourceUseCase struct {
-	authority    registrationAuthority
-	emitter      relationOutboxEmitter
-	mirror       resourceMirrorEmitter
-	txb          service.TxBeginner
-	catalogTypes catalogTypeReader       // ОБЯЗАТЕЛЕН, см. конструктор
-	publications publicReadPublisher     // ОБЯЗАТЕЛЕН, см. конструктор
-	withdrawal   keyWithdrawal           // ОБЯЗАТЕЛЕН, см. конструктор
-	audit        registrationAudit       // ОБЯЗАТЕЛЕН, см. конструктор
-	scopes       registrationScopeReader // ОБЯЗАТЕЛЕН, см. конструктор
-	reconcile    reconcileEventEmitter   // необязателен, безопасен при nil
-	accounts     accountResolver         // необязателен, безопасен при nil
-	objRecon     objectReconciler        // синхронно после коммита, необязателен, безопасен при nil
-	residual     residualTupleReader     // называет оставшиеся для снятия отношения, необязателен, безопасен при nil
-	metrics      materializationRecorder
-	logger       *slog.Logger
+	resourceDecisionConfigured bool
+	resourceDecision           ResourceDecisionRunner
+	authority                  registrationAuthority
+	emitter                    relationOutboxEmitter
+	mirror                     resourceMirrorEmitter
+	txb                        service.TxBeginner
+	catalogTypes               catalogTypeReader       // ОБЯЗАТЕЛЕН, см. конструктор
+	publications               publicReadPublisher     // ОБЯЗАТЕЛЕН, см. конструктор
+	withdrawal                 keyWithdrawal           // ОБЯЗАТЕЛЕН, см. конструктор
+	audit                      registrationAudit       // ОБЯЗАТЕЛЕН, см. конструктор
+	scopes                     registrationScopeReader // ОБЯЗАТЕЛЕН, см. конструктор
+	reconcile                  reconcileEventEmitter   // необязателен, безопасен при nil
+	accounts                   accountResolver         // необязателен, безопасен при nil
+	objRecon                   objectReconciler        // синхронно после коммита, необязателен, безопасен при nil
+	residual                   residualTupleReader     // называет оставшиеся для снятия отношения, необязателен, безопасен при nil
+	metrics                    materializationRecorder
+	logger                     *slog.Logger
 }
 
 // NewRegisterResourceUseCase — конструктор. `mirror` записывает
@@ -679,10 +682,15 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	// здесь превращает лишь ДОСТАВЛЕННОЕ снятие в снятие, которое
 	// подействовало. Читаем ДО транзакции: это внешний вызов, нельзя удерживать
 	// соединение базы во время его выполнения.
-	residual, err := uc.residualTuples(ctx, t)
-	if err != nil {
-		return err
+	var residual []service.RelationTuple
+	if !uc.resourceDecisionConfigured {
+		residual, err = uc.residualTuples(ctx, t)
+		if err != nil {
+			return err
+		}
 	}
+	// В final runner остатки входят в RR-подготовку той же lease, а не являются
+	// отдельным pool-backed наблюдением до полной транзакционной попытки.
 	// SourceVersion несёт версию метки снятия: DELETE зеркала
 	// выполняется, только если она >= сохранённой регистрации (перестановка Delete после Update
 	// не может стереть более свежую строку).
@@ -905,6 +913,17 @@ func validateRelationString(field, v string) error {
 // одинаково для каждого производителя; второй писатель здесь создал бы второе
 // место об одном предмете.
 func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, published bool, version time.Time) error {
+	if uc.resourceDecisionConfigured {
+		action := kanamerepo.ResourceDecisionUnpublish
+		if published {
+			action = kanamerepo.ResourceDecisionPublish
+		}
+		typ, id := t.splitObject()
+		_, err := uc.runResourceDecision(ctx, kanamerepo.ResourceDecisionIntent{Action: action,
+			Tuple:  service.RelationTuple{User: t.subject, Relation: t.relation, Object: t.object},
+			Mirror: service.ResourceMirrorRow{ObjectType: typ, ObjectID: id, SourceVersion: version}})
+		return err
+	}
 	module, err := uc.authorizeIntent(ctx, t)
 	if err != nil {
 		return err
@@ -971,6 +990,15 @@ type descendantClosureExpanded struct {
 func (*descendantClosureExpanded) Error() string { return "unregistration descendant closure expanded" }
 
 func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, extra ...service.RelationTuple) (string, bool, bool, error) {
+	if uc.resourceDecisionConfigured {
+		action := kanamerepo.ResourceDecisionUnregister
+		if write {
+			action = kanamerepo.ResourceDecisionRegister
+		}
+		result, err := uc.runResourceDecision(ctx, kanamerepo.ResourceDecisionIntent{Action: action,
+			Tuple: service.RelationTuple{User: t.subject, Relation: t.relation, Object: t.object}, Mirror: row})
+		return result.CatalogType, result.Changed, result.ProjectionUnchanged, err
+	}
 	hints := make(map[domain.ResourceRef]struct{})
 	for attempt := 0; attempt < unregisterClosureAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {

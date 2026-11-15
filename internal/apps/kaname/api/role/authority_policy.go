@@ -72,6 +72,15 @@ func roleMutationAttempts(ctx context.Context, attempt func() (domain.Role, erro
 }
 
 func (s rolePolicySelection) run(ctx context.Context, repo Repo, r domain.Role, create, rules bool, body func(context.Context, Writer) (domain.Role, error), reconcilers ...TupleReconciler) (out domain.Role, result error) {
+	return s.runPrepared(ctx, repo, r, create, rules, nil, "", body, reconcilers...)
+}
+func (s rolePolicySelection) runUpdate(ctx context.Context, repo Repo, r domain.Role, rules bool, mask []string, version string,
+	body func(context.Context, Writer) (domain.Role, error), reconcilers ...TupleReconciler) (domain.Role, error) {
+	exactMask := append([]string{}, mask...)
+	return s.runPrepared(ctx, repo, r, false, rules, &exactMask, version, body, reconcilers...)
+}
+func (s rolePolicySelection) runPrepared(ctx context.Context, repo Repo, r domain.Role, create, rules bool,
+	mask *[]string, version string, body func(context.Context, Writer) (domain.Role, error), reconcilers ...TupleReconciler) (out domain.Role, result error) {
 	if !s.configured {
 		return shared.DoWithWriteTx(ctx, repo, body)
 	}
@@ -88,6 +97,14 @@ func (s rolePolicySelection) run(ctx context.Context, repo Repo, r domain.Role, 
 		return out, iamerr.Wrapf(iamerr.ErrUnavailable, "Role mutation preparation unavailable")
 	}
 	request := kaname.RoleMutationRequest{Role: r, Create: create, Rules: rules}
+	if !create {
+		if mask == nil {
+			return out, iamerr.Wrapf(iamerr.ErrUnavailable, "Role update preparation unavailable")
+		}
+		request.Update = true
+		request.UpdateMask = append([]string{}, (*mask)...)
+		request.ExpectedVersion = version
+	}
 	if !create && rules && len(reconcilers) != 0 && reconcilers[0] != nil {
 		request.Tuples, ok = reconcilers[0].(kaname.RoleTupleBuilder)
 		if !ok {

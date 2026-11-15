@@ -23,6 +23,25 @@ var ErrAdministrativeSourceLimit = errors.New("administrative source budget exce
 // Пределы совпадают с bounded actor source census; достижение предела — ошибка.
 type AdministrativeReadBudget struct{ rows, reads int }
 
+// RemainingRows ограничивает следующий SQL scan остатком ОБЩЕЙ попытки.
+// Sentinel сверх остатка допустим лишь для обнаружения переполнения и отказа;
+// он никогда не превращается в частичный census или разрешающий token.
+func (b *AdministrativeReadBudget) RemainingRows() int {
+	if b == nil || b.rows < 0 || b.rows > 100000 {
+		return 0
+	}
+	return 100000 - b.rows
+}
+
+// RemainingReads позволяет закрытому SQL preflight получить остаток того же
+// бюджета; вложенные чтения не начинают новый счётчик на стороне сервера.
+func (b *AdministrativeReadBudget) RemainingReads() int {
+	if b == nil || b.reads < 0 || b.reads > 4096 {
+		return 0
+	}
+	return 4096 - b.reads
+}
+
 func (b *AdministrativeReadBudget) Charge(rows, reads int) error {
 	if rows < 0 || reads < 0 || rows > 100000-b.rows || reads > 4096-b.reads {
 		return ErrAdministrativeSourceLimit
@@ -34,7 +53,7 @@ func (b *AdministrativeReadBudget) Charge(rows, reads int) error {
 
 type AdministrativeFact struct {
 	ObjectType, ObjectID, Relation, Subject, ConditionName string
-	QuestionRelation                                       string
+	QuestionRelation, QuestionSubject                      string
 	ConditionParameters                                    map[string]any
 }
 type AdministrativeVerifier func(context.Context, AdministrativeFact, *AdministrativeReadBudget) (bool, error)
@@ -211,6 +230,7 @@ func askAdministrativeBound(ctx context.Context, tx pgx.Tx, in Query, verify Adm
 				return Unknown, g, err
 			}
 			c.fact.QuestionRelation = in.Relation
+			c.fact.QuestionSubject = in.Subject
 			ok, e := checkAdministrativeCandidate(ctx, c.fact, in.Context, budget, verify)
 			var unknownCondition errUnknownCondition
 			if errors.Is(e, ErrAdministrativeSourceUnconfirmed) || errors.As(e, &unknownCondition) {

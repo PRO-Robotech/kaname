@@ -14,6 +14,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -67,6 +68,12 @@ func (w *semanticAuthorityWriteTx) ProducerSources(ctx context.Context, f kaname
 }
 
 func (w *semanticAuthorityWriteTx) producerSourcesQuery(ctx context.Context, f kaname.CanonicalSourceFilter, captured []byte) (kaname.ProducerSourcePage, string, error) {
+	return w.producerSourcesQueryForFact(ctx, f, captured, nil)
+}
+
+// Точный native leaf использует тот же typed producer proof, но не читает
+// остальные объекты actor. Полный actor census сохраняет прежний запрос.
+func (w *semanticAuthorityWriteTx) producerSourcesQueryForFact(ctx context.Context, f kaname.CanonicalSourceFilter, captured []byte, fact *relverdict.AdministrativeFact) (kaname.ProducerSourcePage, string, error) {
 	if _, err := canonicalPage(kaname.CanonicalSourceFilter{Actor: f.Actor, Limit: f.Limit}); err != nil {
 		return kaname.ProducerSourcePage{}, "", err
 	}
@@ -89,6 +96,14 @@ func (w *semanticAuthorityWriteTx) producerSourcesQuery(ctx context.Context, f k
 	if captured != nil {
 		query = producerSourcesCapturedSQL
 		args = append(args, captured)
+	}
+	if fact != nil {
+		if captured != nil {
+			return kaname.ProducerSourcePage{}, "", kaname.ErrCanonicalSourceInvalid
+		}
+		query = producerSourcesHead + ` AND r.object_type=$6 AND r.object_id=$7 AND r.relation=$8 AND r.subject_type||':'||r.subject_id=$9
+` + producerSourcesTail
+		args = append(args, fact.ObjectType, fact.ObjectID, fact.Relation, fact.Subject)
 	}
 	rows, err := w.tx.Query(ctx, query, args...)
 	if err != nil {

@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/resourceeffect"
 )
 
 // BindingScope — минимальные факты выдачи, нужные сведению для материализации
@@ -99,6 +100,8 @@ type BindingScope struct {
 // чтобы applyDiff не выводил его заново). В модели RBAC на правилах
 // нет прежней ветви selector/byName — каждый член выведен из правила.
 type DesiredMember struct {
+	// Derivation используется только сертификатом protected Resource runner.
+	Derivation string
 	RuleFP     string
 	ObjectType string
 	ObjectID   string
@@ -476,6 +479,7 @@ type TxRunner interface {
 
 // Reconciler — сценарий сведения селекторов и включения в область.
 type Reconciler struct {
+	objectDecisions  ObjectDecisionRunner
 	stagedBindings   StagedBindingReconciler
 	groupObjects     *Reconciler
 	objectObjects    *Reconciler
@@ -777,7 +781,13 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		if r.objectObjects == nil {
 			return errObjectParticipantAbsent
 		}
+		if r.objectObjects.objectDecisions != nil {
+			return r.objectObjects.runObjectDecision(ctx, objectType, objectID, ObjectDecisionFull, r.size)
+		}
 		return r.objectObjects.ReconcileObject(ctx, objectType, objectID)
+	}
+	if r.objectDecisions != nil {
+		return r.runObjectDecision(ctx, objectType, objectID, ObjectDecisionFull, r.size)
 	}
 	col := &syncFGACollector{}
 	if err := r.withObjectTx(ctx, objectType, objectID, func(ctx context.Context, s ReconcileStore) error {
@@ -1147,7 +1157,10 @@ func (r *Reconciler) reconcileBindingForObject(
 		if err != nil {
 			return err
 		}
-		desired = desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
+		desired, err = desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
+		if err != nil {
+			return err
+		}
 	}
 
 	// УЗКАЯ база сравнения: члены этой выдачи только НА ЭТОМ ОБЪЕКТЕ.
@@ -1183,50 +1196,21 @@ func (r *Reconciler) reconcileBindingForObject(
 // пообъектной цели, как в desiredRuleMembers (выдача на всём якоре области
 // противоречит пообъектной выдаче минимальных привилегий).
 func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject,
-	ancestors []domain.MirrorObject) []DesiredMember {
-	perObject := len(bs.Target.Resources) > 0
-
-	var out []DesiredMember
-	if len(bs.ScopeSelfVerbs) > 0 && !perObject &&
-		o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
-		if sm, ok := scopeSelfMember(cat, grantees(bs, bs.ScopeSelfVerbs, false), bs.Scope.Type, bs.Scope.ID); ok {
-			out = append(out, sm)
-		}
+	ancestors []domain.MirrorObject) ([]DesiredMember, error) {
+	compiled, err := resourceeffect.CompileObjectDesired(cat, resourceeffect.ObjectBinding{
+		BindingID: bs.BindingID, Scope: bs.Scope, Subjects: bs.Subjects,
+		RoleID: bs.RoleID, Policy: bs.Policy, Selectors: bs.Selectors,
+		ScopeSelfVerbs: bs.ScopeSelfVerbs, Target: bs.Target, Active: bs.Active,
+	}, o, ancestors)
+	if err != nil {
+		return nil, err
 	}
-	// Контейнерные действия правил (kaname#1003, creator.go) — члены на объекте
-	// ОБЛАСТИ: путь по объекту обязан их выводить, иначе событие аккаунта сняло бы
-	// их как устаревшие.
-	if o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
-		out = append(out, containerMembers(cat, bs)...)
+	var desired []DesiredMember
+	for _, member := range compiled {
+		desired = append(desired, DesiredMember{Derivation: member.Derivation, RuleFP: member.RuleFP, ObjectType: member.ObjectType,
+			ObjectID: member.ObjectID, Status: member.Status, Tuples: member.Tuples})
 	}
-	// Минимальные привилегии пообъектной цели (F8, IAM-1-21): правило даёт объект лишь тогда,
-	// когда цель выдачи тоже его называет. Едино для всех ветвей, ровно как
-	// matchSelectorObjects пересекает совпавший набор. Вложенное правило (kaname#874)
-	// судит цель по КОНТЕЙНЕРУ среди предков объекта, а не по самому объекту.
-	inTarget := !perObject || bs.Target.Contains(o.ObjectType, o.ObjectID)
-	for _, sel := range bs.Selectors {
-		gs := selectorGrantees(bs, sel)
-		if len(gs) == 0 {
-			continue
-		}
-		if sel.Container != nil {
-			if !nestedCoversObject(sel, bs, o, ancestors) {
-				continue
-			}
-		} else if !inTarget || !selectorMatchesObject(sel, o) {
-			continue
-		}
-		dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
-		if !ok {
-			// У типа нет объекта FGA в модели → нет кортежа → пропускаем объект
-			// (отказ по умолчанию: опечатка в типе ничего не выдаёт).
-			continue
-		}
-		out = append(out, dm)
-	}
-	// Публичное чтение детям (kaname#856): тот же вывод, что у полного прохода
-	// (desiredRuleMembers), — иначе два пути разошлись бы в составе.
-	return withPublicReaders(cat, bs, out)
+	return desired, nil
 }
 
 // desiredMembers вычисляет желаемый набор членов и решения о включении для

@@ -140,17 +140,24 @@ func TestBindingPublicActualCreateMetadataUpdateRevokeDelete(t *testing.T) {
 
 func TestBindingWithdrawalLastPageRollbackAndHeldFold(t *testing.T) {
 	r := writerProtocolRig(t)
+	fixtureBase := context.WithoutCancel(r.ctx)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	groups := stageSeedGroups(t, r, r.a, 259, "blue")
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	id := stageBinding(t, r, r.a, false)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	engine := bindingStageEngine(t, r, nil)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.NoError(t, engine.ReconcileBinding(r.ctx, id))
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.Equal(t, 259, stageCount(t, r, id))
 	b := bindingRow(t, r, id)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	p := withdrawalParticipant(t, r, nil)
 	var ledgerBefore, auditBefore int
 	require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT (SELECT count(*) FROM kaname.access_binding_emitted_tuples WHERE binding_id=$1),(SELECT count(*) FROM kaname.audit_outbox)`, string(id)).Scan(&ledgerBefore, &auditBefore))
 	require.Greater(t, ledgerBefore, 256)
-	ctx := declarerCtx(r.ctx, bindingPublicOwner(t, r))
+	owner := bindingPublicOwner(t, r)
 	// Atomicity probe: production authority callback проверен отдельным API/LRO
 	// сценарием выше; здесь убеждаемся, что runner передал native SAME-TX порт.
 	before := func(_ context.Context, w kaname.Writer, native clients.RelationStore, _ domain.AccessBinding) error {
@@ -159,26 +166,34 @@ func TestBindingWithdrawalLastPageRollbackAndHeldFold(t *testing.T) {
 		return nil
 	}
 	failure := errors.New("audit callback failed")
-	_, err := p.WithdrawBinding(ctx, id, kaname.BindingWithdrawalRevoke, "system:test", before, func(context.Context, kaname.Writer, domain.AccessBinding) error { return failure })
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
+	_, err := p.WithdrawBinding(declarerCtx(r.ctx, owner), id, kaname.BindingWithdrawalRevoke, "system:test", before, func(context.Context, kaname.Writer, domain.AccessBinding) error { return failure })
 	require.ErrorIs(t, err, failure)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.Equal(t, domain.AccessBindingStatusActive, bindingRow(t, r, id).Status)
 	var ledgerAfter, auditAfter int
 	require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT (SELECT count(*) FROM kaname.access_binding_emitted_tuples WHERE binding_id=$1),(SELECT count(*) FROM kaname.audit_outbox)`, string(id)).Scan(&ledgerAfter, &auditAfter))
 	require.Equal(t, ledgerBefore, ledgerAfter)
 	require.Equal(t, auditBefore, auditAfter)
 	// Второй действующий producer держит тот же folded viewer после первого revoke.
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	held := groupLifecycleBinding(t, r, r.a, string(b.Subjects[0].ID), "binding_withdraw_held", domain.Rule{Module: "iam", Resources: []string{"group"}, Verbs: []string{"get", "list"}})
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.NoError(t, engine.ReconcileBinding(r.ctx, held))
 	noAudit := func(context.Context, kaname.Writer, domain.AccessBinding) error { return nil }
-	_, err = p.WithdrawBinding(ctx, id, kaname.BindingWithdrawalRevoke, "system:test", before, noAudit)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
+	_, err = p.WithdrawBinding(declarerCtx(r.ctx, owner), id, kaname.BindingWithdrawalRevoke, "system:test", before, noAudit)
 	require.NoError(t, err)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	for _, gid := range []string{groups[0], groups[len(groups)-1]} {
 		var present bool
 		require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT EXISTS(SELECT 1 FROM kaname.relation_fact WHERE object_type='iam_group' AND object_id=$1 AND relation='viewer' AND subject=$2)`, gid, "user:"+string(b.Subjects[0].ID)).Scan(&present))
 		require.True(t, present)
 	}
-	_, err = p.WithdrawBinding(ctx, held, kaname.BindingWithdrawalRevoke, "system:test", before, noAudit)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
+	_, err = p.WithdrawBinding(declarerCtx(r.ctx, owner), held, kaname.BindingWithdrawalRevoke, "system:test", before, noAudit)
 	require.NoError(t, err)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	for _, gid := range []string{groups[0], groups[len(groups)-1]} {
 		var present bool
 		require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT EXISTS(SELECT 1 FROM kaname.relation_fact WHERE object_type='iam_group' AND object_id=$1 AND relation='viewer' AND subject=$2)`, gid, "user:"+string(b.Subjects[0].ID)).Scan(&present))
@@ -259,7 +274,8 @@ func TestBindingPublicRevokeRechecksOwnerBeforeCAS(t *testing.T) {
 	plans, err := authzmodel.New(r.bundle.ModelSource())
 	require.NoError(t, err)
 	native := authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(r.runtime, plans), personmarks.New(r.runtime))
-	trace := stageBarrier(t, "SELECT kaname.authority_policy_epoch_lock_for_write")
+	// Worker уже построил RR plan, но ещё не вошёл в consumer/fence protocol.
+	trace := stageBarrier(t, "SELECT kaname.authority_protocol_enter")
 	participant := withdrawalParticipant(t, r, trace)
 	t.Cleanup(trace.releaseStage)
 	ops := operations.NewRepo(r.runtime, "kaname")
@@ -267,9 +283,13 @@ func TestBindingPublicRevokeRechecksOwnerBeforeCAS(t *testing.T) {
 	op, err := revoke.Execute(declarerCtx(r.ctx, owner), id)
 	require.NoError(t, err)
 	stageWait(t, r, trace.reached)
+	stageAssertBeforeEntry(t, r, trace)
 	tag, err := r.admin.Exec(r.ctx, `UPDATE kaname.accounts SET owner_user_id=$2 WHERE id=$1 AND owner_user_id=$3`, r.a, replacement, owner)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, tag.RowsAffected())
+	var committedOwner string
+	require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT owner_user_id FROM kaname.accounts WHERE id=$1`, r.a).Scan(&committedOwner))
+	require.Equal(t, replacement, committedOwner, "owner source commit виден до worker revalidation")
 	trace.releaseStage()
 	require.NotNil(t, awaitOperation(t, r.ctx, ops, op.ID).Error)
 	require.Equal(t, domain.AccessBindingStatusActive, bindingRow(t, r, id).Status)
@@ -383,12 +403,20 @@ func TestBindingWithdrawalIndependentAccountsWhileFoldLocked(t *testing.T) {
 func TestBindingWithdrawalRestagesActualLastPageAndCancellationIsAtomic(t *testing.T) {
 	t.Run("late-ledger", func(t *testing.T) {
 		r := writerProtocolRig(t)
+		fixtureBase := context.WithoutCancel(r.ctx)
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		owner := bindingPublicOwner(t, r)
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		groups := stageSeedGroups(t, r, r.a, 257, "blue")
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		id := stageBinding(t, r, r.a, false)
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		engine := bindingStageEngine(t, r, nil)
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		require.NoError(t, engine.ReconcileBinding(r.ctx, id))
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		require.Equal(t, 257, stageCount(t, r, id))
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		groupLifecycleBinding(t, r, r.a, owner, "binding_late_method", domain.Rule{Module: "iam", Resources: []string{"accessBinding"}, Verbs: []string{"get", "delete"}})
 		plans, err := authzmodel.New(r.bundle.ModelSource())
 		require.NoError(t, err)
@@ -396,16 +424,23 @@ func TestBindingWithdrawalRestagesActualLastPageAndCancellationIsAtomic(t *testi
 		// RR уже закончен; callback tracer останавливает вход ДО любых fences.
 		trace := stageBarrier(t, "SELECT kaname.authority_protocol_enter")
 		ops := operations.NewRepo(r.runtime, "kaname")
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		revoke := bindingapp.NewRevokeAccessBindingUseCase(r.repo, ops).WithRelationStore(native, slog.Default()).WithBindingWithdrawal(withdrawalParticipant(t, r, trace))
 		t.Cleanup(trace.releaseStage)
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		op, err := revoke.Execute(declarerCtx(r.ctx, owner), id)
 		require.NoError(t, err)
 		stageWait(t, r, trace.reached)
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		late := stageSeedGroups(t, r, r.a, 1, "late")
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		require.NoError(t, engine.ReconcileBinding(r.ctx, id))
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		require.Equal(t, 258, stageCount(t, r, id))
 		trace.releaseStage()
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		require.Nil(t, awaitOperation(t, r.ctx, ops, op.ID).Error)
+		r = bindingFunctionalRequestRig(t, r, fixtureBase)
 		subject := bindingRow(t, r, id).SubjectID
 		for _, gid := range []string{groups[0], groups[len(groups)-1], late[0]} {
 			var exists bool

@@ -32,6 +32,16 @@ type protocolRig struct {
 
 func writerProtocolRig(t *testing.T) protocolRig {
 	t.Helper()
+	rig, owner := writerProtocolRigBeforePreparation(t)
+	require.NoError(t, owner.PrepareAuthorityBundle(rig.ctx, rig.bundle))
+	return rig
+}
+
+// Установочные writers работают до создания handoff. Общая фикстура
+// делегирования сначала устанавливает каталог и роли, затем явно готовит
+// окончательный bundle. Остальные protocol tests сохраняют prepared вход.
+func writerProtocolRigBeforePreparation(t *testing.T) (protocolRig, *kanamepg.Repository) {
+	t.Helper()
 	ctx, admin, owner := authorityTestDB(t)
 	_, a := kac127SeedUserAndAccount(t, ctx, admin, "protocol-a")
 	_, b := kac127SeedUserAndAccount(t, ctx, admin, "protocol-b")
@@ -68,8 +78,7 @@ func writerProtocolRig(t *testing.T) protocolRig {
 	require.Error(t, err, "default identity не допускает даже transitional entry")
 	require.Nil(t, uninitialized)
 	authorityWaitReleased(t, runtime)
-	require.NoError(t, owner.PrepareAuthorityBundle(ctx, bundle))
-	return rig
+	return rig, owner
 }
 func (r protocolRig) intent(accounts ...string) kaname.AuthorityWriteIntent {
 	refs := make([]kaname.AuthorityOwnerRef, len(accounts))
@@ -105,13 +114,13 @@ func protocolEnter(ctx context.Context, tx pgx.Tx, in kaname.AuthorityWriteInten
 	}
 	id := in.Bundle.Identity()
 	var at time.Time
-	err = tx.QueryRow(ctx, `SELECT kaname.authority_protocol_enter($1,$2::text[],$3::jsonb,$4,$5,$6,$7,1,$8)`, mode, accounts, refs, string(in.Kind), id.ModelID, id.CatalogID, id.ProjectorVersion, purpose).Scan(&at)
+	err = tx.QueryRow(ctx, `SELECT kaname.authority_protocol_enter_typed_v2($1,$2::text[],$3::jsonb,$4,$5,$6,$7,$8)`, mode, accounts, refs, string(in.Kind), id.ModelID, id.CatalogID, id.ProjectorVersion, purpose).Scan(&at)
 	return at, err
 }
 func TestWriterProtocolStagesAdaptersWithoutSemanticDecision(t *testing.T) {
 	r := writerProtocolRig(t)
 	in := r.intent(r.a)
-	decision, err := r.repo.CoordinatedAuthorityWriter(r.ctx, in)
+	decision, err := r.repo.CoordinatedEntryWriter(r.ctx, in)
 	require.Error(t, err)
 	require.Nil(t, decision)
 	old, err := r.repo.SemanticAuthorityWriter(r.ctx, in.Plan, r.bundle)
@@ -128,7 +137,7 @@ func TestWriterProtocolStagesAdaptersWithoutSemanticDecision(t *testing.T) {
 	transition, err = r.repo.TransitionalAuthorityWriter(r.ctx, in)
 	require.Error(t, err)
 	require.Nil(t, transition)
-	decision, err = r.repo.CoordinatedAuthorityWriter(r.ctx, in)
+	decision, err = r.repo.CoordinatedEntryWriter(r.ctx, in)
 	require.NoError(t, err)
 	require.Same(t, r.bundle, decision.SemanticBundle())
 	require.NoError(t, decision.Rollback(r.ctx))
@@ -285,6 +294,27 @@ func TestWriterProtocolFreshOwnershipRestartsAndAccountsRemainParallel(t *testin
 	other, err := r.repo.TransitionalAuthorityWriter(r.ctx, r.intent(r.b))
 	require.NoError(t, err)
 	require.NoError(t, other.Rollback(r.ctx))
+	require.NoError(t, first.Commit(r.ctx))
+	// Два typed account writer выше действительно сосуществуют. Перенос
+	// выполняет другой настоящий signed writer, заранее покрывающий OLD A
+	// и NEW B. Его proof создаёт штатный entry на ordinary LOGIN connection.
+	holder, err := r.runtime.Begin(r.ctx)
+	require.NoError(t, err)
+	defer holder.Rollback(context.Background())
+	moveIntent := r.intent(r.a, r.b)
+	moveIntent.Owners = append(moveIntent.Owners, kaname.AuthorityOwnerRef{Kind: "group", ID: "grp-protocol-move"})
+	r.enter(t, holder, moveIntent, "transition")
+	var holderAdmitted bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT EXISTS(
+ SELECT 1 FROM pg_locks WHERE pid=$1 AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+ AND locktype='advisory' AND classid=1262569292::oid AND objid=0::oid AND objsubid=2
+ AND mode='ShareLock' AND granted) AND NOT EXISTS(
+ SELECT 1 FROM unnest(ARRAY[$2::text,$3::text]) a WHERE NOT EXISTS(
+  SELECT 1 FROM pg_locks WHERE pid=$1 AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+  AND locktype='advisory' AND classid=1262569281::oid
+  AND objid=((hashtext(a)::bigint & 4294967295)::oid) AND objsubid=2
+  AND mode='ExclusiveLock' AND granted))`, int(holder.Conn().PgConn().PID()), r.a, r.b).Scan(&holderAdmitted))
+	require.True(t, holderAdmitted, "holder уже прошёл signed admission и удерживает оба account fence")
 	ctx, cancel := context.WithCancel(r.ctx)
 	defer cancel()
 	in := r.intent(r.a)
@@ -312,13 +342,26 @@ func TestWriterProtocolFreshOwnershipRestartsAndAccountsRemainParallel(t *testin
 		}
 	}()
 	go func() { w, e := r.repo.TransitionalAuthorityWriter(ctx, in); result <- answer{w, e} }()
-	authorityWaitLock(t, r.ctx, r.admin)
-	// Ещё допустимый legacy writer меняет ownership, пока новый entry ждёт fence.
-	_, err = r.admin.Exec(r.ctx, `UPDATE kaname.groups SET account_id=$1 WHERE id='grp-protocol-move'`, r.b)
+	waiter := receiptWaitForBlocker(t, r.ctx, r.admin, int(holder.Conn().PgConn().PID()))
+	var waitingOnAccount bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT EXISTS(
+ SELECT 1 FROM pg_locks WHERE pid=$1 AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+ AND locktype='advisory' AND classid=1262569281::oid
+ AND objid=((hashtext($2)::bigint & 4294967295)::oid) AND objsubid=2
+ AND mode='ExclusiveLock' AND NOT granted)`, waiter, r.a).Scan(&waitingOnAccount))
+	require.True(t, waitingOnAccount, "entry ждёт именно account fence до повторной классификации")
+	// OLD и NEW покрыты тем же signed holder. Commit публикует новый owner
+	// и освобождает оба fence атомарно; queued entry обязан повторить
+	// классификацию в новой TX, а не принять старый account A.
+	moved, err := holder.Exec(r.ctx, `UPDATE kaname.groups SET account_id=$1 WHERE id='grp-protocol-move'`, r.b)
 	require.NoError(t, err)
+	require.EqualValues(t, 1, moved.RowsAffected())
 	var afterWait time.Time
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT clock_timestamp()`).Scan(&afterWait))
-	require.NoError(t, first.Commit(r.ctx))
+	require.NoError(t, holder.Commit(r.ctx))
+	var committedOwner string
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT account_id FROM kaname.groups WHERE id='grp-protocol-move'`).Scan(&committedOwner))
+	require.Equal(t, r.b, committedOwner)
 	select {
 	case got := <-result:
 		consumed = true
@@ -346,7 +389,7 @@ type protocolChurnTracer struct {
 }
 
 func (c *protocolChurnTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
-	if strings.Contains(d.SQL, "SELECT kaname.authority_protocol_enter(") {
+	if strings.Contains(d.SQL, "SELECT kaname.authority_protocol_enter_") {
 		c.calls.Add(1)
 		_, err := c.admin.Exec(ctx, `UPDATE kaname.groups SET account_id=CASE account_id WHEN $1 THEN $2 ELSE $1 END WHERE id='grp-protocol-churn'`, c.a, c.b)
 		if err != nil {
@@ -426,7 +469,7 @@ func TestWriterProtocolRejectsInvalidIntentBeforePool(t *testing.T) {
 			case "nil-bundle":
 				in.Bundle = nil
 			}
-			w, err := kanamepg.New(nil, nil).CoordinatedAuthorityWriter(context.Background(), in)
+			w, err := kanamepg.New(nil, nil).CoordinatedEntryWriter(context.Background(), in)
 			require.Error(t, err)
 			require.Nil(t, w)
 		})
@@ -452,13 +495,13 @@ func TestWriterProtocolRoleDeleteCascadeUsesGlobalIntent(t *testing.T) {
 	in := r.intent(r.a)
 	in.Kind = kaname.AuthorityRole
 	in.Owners = []kaname.AuthorityOwnerRef{{Kind: "role", ID: string(role.ID)}}
-	local, err := r.repo.CoordinatedAuthorityWriter(r.ctx, in)
+	local, err := r.repo.CoordinatedEntryWriter(r.ctx, in)
 	require.NoError(t, err)
 	require.Error(t, local.RolesW().Delete(r.ctx, role.ID), "parent cascade требует global до row locks, scope не угадывается")
 	require.NoError(t, local.Rollback(r.ctx))
 	require.Equal(t, before, grantProjectionRows(t, r.ctx, r.admin, role.ID), "отказ откатывает parent и оба children")
 	in.Plan = kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}
-	global, err := r.repo.CoordinatedAuthorityWriter(r.ctx, in)
+	global, err := r.repo.CoordinatedEntryWriter(r.ctx, in)
 	require.NoError(t, err)
 	defer global.Rollback(context.Background())
 	require.NoError(t, global.RolesW().Delete(r.ctx, role.ID))

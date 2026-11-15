@@ -93,7 +93,7 @@ func (p *ClusterAdminParticipant) runAdminAttempt(ctx context.Context, in cluste
 	}()
 	// GLOBAL выбран до входа. Закрытый SQL profile ждёт все source/DDL/row/fold
 	// и legacy advisory locks, не материализует полный inventory под fence.
-	if err = tx.QueryRow(ctx, `SELECT kaname.authority_cluster_admin_preflight($1,$2)`, string(in.Target.Type), string(in.Target.ID)).Scan(&tx.owner.fence.decisionAt); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT kaname.authority_cluster_admin_preflight_v4($1,$2,$3)`, string(in.Target.Type), string(in.Target.ID), string(in.Action)).Scan(&tx.owner.fence.decisionAt); err != nil {
 		return result, err
 	}
 	tx.owner.fence.decisionAt = tx.owner.fence.decisionAt.UTC()

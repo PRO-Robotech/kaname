@@ -94,9 +94,10 @@ func sc65BoxObject() domain.MirrorObject {
 }
 
 // sc65Tuples — все кортежи, которые разворачивание выдачи даёт объекту.
-func sc65Tuples(cat *catalog.Facts, bs BindingScope) map[domain.MembershipTuple]bool {
+func sc65Tuples(t *testing.T, cat *catalog.Facts, bs BindingScope) map[domain.MembershipTuple]bool {
+	t.Helper()
 	out := map[domain.MembershipTuple]bool{}
-	for _, dm := range desiredMembersForObject(cat, bs, sc65BoxObject(), nil) {
+	for _, dm := range desiredObjectMembersForTest(t, cat, bs, sc65BoxObject(), nil) {
 		for _, tu := range dm.Tuples {
 			out[tu] = true
 		}
@@ -134,7 +135,7 @@ func sc65Control(t *testing.T) (keyed []byte, keyless *catalog.Facts) {
 	}
 	cat := sc65Facts(t, twin)
 	want := domain.MembershipTuple{User: "user:usr0000000000000sc65", Relation: "v_get", Object: "probemod_box:" + sc65Box}
-	if got := sc65Tuples(cat, sc65Scope("user", "usr0000000000000sc65", sc65ReadBoth)); !got[want] {
+	if got := sc65Tuples(t, cat, sc65Scope("user", "usr0000000000000sc65", sc65ReadBoth)); !got[want] {
 		t.Fatalf("фикстура: выдача человеку не развернулась в %v; получено %v — разворачивание не видит объект", want, got)
 	}
 	return doc, cat
@@ -145,12 +146,12 @@ func sc65Control(t *testing.T) (keyed []byte, keyless *catalog.Facts) {
 // Близнец — тот же манифест без ключа: `public_reader` нет. Один факт — ключ.
 func TestRuleObjectTuples_SC65_DeclaredContainerGetsPublicReader(t *testing.T) {
 	doc, keyless := sc65Control(t)
-	if got := sc65Tuples(keyless, sc65Scope("system_class", "anonymous", sc65ReadBoth)); got[sc65PublicReader()] {
+	if got := sc65Tuples(t, keyless, sc65Scope("system_class", "anonymous", sc65ReadBoth)); got[sc65PublicReader()] {
 		t.Fatalf("SC-65 близнец: без ключа `public_reader` писаться не вправе, получено %v", got)
 	}
 
 	keyed := sc65Facts(t, doc)
-	got := sc65Tuples(keyed, sc65Scope("system_class", "anonymous", sc65ReadBoth))
+	got := sc65Tuples(t, keyed, sc65Scope("system_class", "anonymous", sc65ReadBoth))
 	if !got[sc65PublicReader()] {
 		t.Fatalf("SC-65: выдача классу на объявленный контейнер ролью с вложенным правилом над ребёнком обязана писать %v; получено %v",
 			sc65PublicReader(), got)
@@ -165,10 +166,10 @@ func TestRuleObjectTuples_SC65_RoleWithoutAChildRuleWritesNoPublicReader(t *test
 	doc, _ := sc65Control(t)
 	keyed := sc65Facts(t, doc)
 
-	if got := sc65Tuples(keyed, sc65Scope("system_class", "anonymous", sc65ReadBoth)); !got[sc65PublicReader()] {
+	if got := sc65Tuples(t, keyed, sc65Scope("system_class", "anonymous", sc65ReadBoth)); !got[sc65PublicReader()] {
 		t.Fatalf("SC-65 близнец: роль с вложенным правилом над ребёнком обязана писать %v; получено %v", sc65PublicReader(), got)
 	}
-	if got := sc65Tuples(keyed, sc65Scope("system_class", "anonymous", sc65ReadBox)); got[sc65PublicReader()] {
+	if got := sc65Tuples(t, keyed, sc65Scope("system_class", "anonymous", sc65ReadBox)); got[sc65PublicReader()] {
 		t.Fatalf("SC-65: роль без вложенного правила над ребёнком `public_reader` писать не вправе; получено %v", got)
 	}
 }
@@ -180,10 +181,10 @@ func TestRuleObjectTuples_SC65_HumanGrantWritesNoPublicReader(t *testing.T) {
 	doc, _ := sc65Control(t)
 	keyed := sc65Facts(t, doc)
 
-	if got := sc65Tuples(keyed, sc65Scope("system_class", "anonymous", sc65ReadBoth)); !got[sc65PublicReader()] {
+	if got := sc65Tuples(t, keyed, sc65Scope("system_class", "anonymous", sc65ReadBoth)); !got[sc65PublicReader()] {
 		t.Fatalf("SC-65 близнец: выдача классу обязана писать %v; получено %v", sc65PublicReader(), got)
 	}
-	for tu := range sc65Tuples(keyed, sc65Scope("user", "usr0000000000000sc65", sc65ReadBoth)) {
+	for tu := range sc65Tuples(t, keyed, sc65Scope("user", "usr0000000000000sc65", sc65ReadBoth)) {
 		if tu.Relation == "public_reader" {
 			t.Fatalf("SC-65: выдача человеку пишет %v — `public_reader` принимает лишь system_class", tu)
 		}

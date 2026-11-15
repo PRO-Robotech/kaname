@@ -16,8 +16,10 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	ab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -25,7 +27,7 @@ import (
 func (p *GrantPolicyWriters) RunBindingDecision(ctx context.Context, actor domain.Subject, proposed domain.AccessBinding, create bool,
 	tuples func(domain.AccessBinding, domain.Role) []ab.RelationTuple,
 	apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
-	return p.runBindingDecision(ctx, actor, proposed, create, nil, tuples, apply)
+	return p.runBindingDecision(ctx, actor, proposed, create, nil, nil, false, tuples, apply)
 }
 
 // kaname#1034, kaname#986: захваченный ID не меняется даже при serialization retry.
@@ -36,11 +38,14 @@ func (p *GrantPolicyWriters) RunDelegatedBindingDecision(ctx context.Context, ac
 		return iamerr.ErrPermissionDenied
 	}
 	captured := proposed.DelegationID
-	return p.runBindingDecision(ctx, actor, proposed, true, &captured, tuples, apply)
+	return p.runBindingDecision(ctx, actor, proposed, true, &captured, nil, false, tuples, apply)
 }
 func (p *GrantPolicyWriters) runBindingDecision(ctx context.Context, actor domain.Subject, proposed domain.AccessBinding, create bool,
-	captured *domain.GrantDelegationID, tuples func(domain.AccessBinding, domain.Role) []ab.RelationTuple,
+	captured *domain.GrantDelegationID, metadata *kaname.BindingMetadataDecision, checkOnly bool, tuples func(domain.AccessBinding, domain.Role) []ab.RelationTuple,
 	apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
+	if (!create && !checkOnly && metadata == nil) || (metadata != nil && (create || metadata.ID != proposed.ID)) {
+		return kaname.ErrInvalidAuthorityFencePlan
+	}
 	if p == nil || p.repo == nil || apply == nil || proposed.ID == "" || actor.Validate() != nil {
 		return kaname.ErrInvalidAuthorityFencePlan
 	}
@@ -49,7 +54,7 @@ func (p *GrantPolicyWriters) runBindingDecision(ctx context.Context, actor domai
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		last = p.bindingDecisionOnce(ctx, actor, proposed, create, captured, tuples, apply)
+		last = p.bindingDecisionOnce(ctx, actor, proposed, create, captured, metadata, checkOnly, tuples, apply)
 		if last == nil {
 			return nil
 		}
@@ -61,7 +66,7 @@ func (p *GrantPolicyWriters) runBindingDecision(ctx context.Context, actor domai
 	return fmt.Errorf("binding decision retry exhausted: %w", errors.Join(iamerr.ErrAborted, last))
 }
 func (p *GrantPolicyWriters) bindingDecisionOnce(ctx context.Context, actor domain.Subject, proposed domain.AccessBinding, create bool,
-	captured *domain.GrantDelegationID, tuples func(domain.AccessBinding, domain.Role) []ab.RelationTuple,
+	captured *domain.GrantDelegationID, metadata *kaname.BindingMetadataDecision, checkOnly bool, tuples func(domain.AccessBinding, domain.Role) []ab.RelationTuple,
 	apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
 	conn, err := p.repo.master.Acquire(ctx)
 	if err != nil {
@@ -218,7 +223,7 @@ func (p *GrantPolicyWriters) bindingDecisionOnce(ctx context.Context, actor doma
 	if err = snapshot.Commit(ctx); err != nil {
 		return err
 	}
-	w, err := p.repo.coordinatedAuthorityWriterWithBegin(ctx, plan.intent(p.bundle), "decision", conn.BeginTx)
+	w, err := p.repo.coordinatedAuthorityWriterWithBegin(ctx, plan.intent(p.bundle), "decision", conn.BeginTx, plan)
 	if err != nil {
 		return err
 	}
@@ -282,7 +287,13 @@ func (p *GrantPolicyWriters) bindingDecisionOnce(ctx context.Context, actor doma
 	if err = bindingDecisionPreflight(ctx, w.tx, b, create); err != nil {
 		return err
 	}
+	if err = prepareBindingSequenceProgram(ctx, w, b, metadata, create, checkOnly); err != nil {
+		return err
+	}
 	if err = p.protectPolicyPlan(ctx, w, plan); err != nil {
+		return err
+	}
+	if _, err = w.tx.Exec(ctx, `SELECT kaname.authority_binding_sequence_finalize_v3()`); err != nil {
 		return err
 	}
 	// Повторный read под защитой возвращает актуальное состояние, а не proposal
@@ -307,6 +318,11 @@ func (p *GrantPolicyWriters) bindingDecisionOnce(ctx context.Context, actor doma
 	if err = ctx.Err(); err != nil {
 		return err
 	}
+	// Проверочный callback никогда не фиксирует транзакцию: даже побочный
+	// журнал, не являющийся domain write, не может пережить этот режим.
+	if checkOnly {
+		return w.Rollback(ctx)
+	}
 	return w.Commit(ctx)
 }
 
@@ -327,7 +343,21 @@ type capabilityBindingWriter struct {
 func (w *capabilityBindingWriter) BindingCapabilityVersion() int { return 1 }
 
 func (w *capabilityBindingWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
-	created, err := w.WriterIface.Insert(ctx, b)
+	var stamp pgtype.Timestamptz
+	if err := w.tx.QueryRow(ctx, `SELECT kaname.authority_binding_insert_stamp_v3($1)`, string(b.ID)).Scan(&stamp); err != nil {
+		return domain.AccessBinding{}, err
+	}
+	var created domain.AccessBinding
+	var err error
+	if stamp.Valid {
+		raw, ok := w.WriterIface.(*abWriter)
+		if !ok {
+			return domain.AccessBinding{}, kaname.ErrInvalidAuthorityFencePlan
+		}
+		created, err = raw.insertAt(ctx, b, stamp.Time)
+	} else {
+		created, err = w.WriterIface.Insert(ctx, b)
+	}
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
@@ -342,3 +372,80 @@ func (w *capabilityBindingWriter) Insert(ctx context.Context, b domain.AccessBin
 }
 
 var _ kaname.BindingCapabilityWriter = (*capabilityBindingWriter)(nil)
+
+func (p *GrantPolicyWriters) RunBindingMetadataDecision(ctx context.Context, actor domain.Subject, request kaname.BindingMetadataDecision,
+	apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
+	return p.runBindingDecision(ctx, actor, domain.AccessBinding{ID: request.ID}, false, nil, &request, false, nil, apply)
+}
+func (p *GrantPolicyWriters) RunBindingAuthorizationDecision(ctx context.Context, actor domain.Subject, proposed domain.AccessBinding,
+	create, delegated bool, tuples func(domain.AccessBinding, domain.Role) []ab.RelationTuple,
+	apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
+	if delegated {
+		if !create || actor.Type != domain.SubjectTypeServiceAccount {
+			return iamerr.ErrPermissionDenied
+		}
+		captured := proposed.DelegationID
+		return p.runBindingDecision(ctx, actor, proposed, true, &captured, nil, true, tuples, apply)
+	}
+	return p.runBindingDecision(ctx, actor, proposed, create, nil, nil, true, tuples, apply)
+}
+
+var _ kaname.BindingMetadataDecisionRunner = (*GrantPolicyWriters)(nil)
+var _ kaname.BindingAuthorizationDecisionRunner = (*GrantPolicyWriters)(nil)
+
+// Запрос несёт только поля существующего UC. Кортежи и origin выводит owner SQL
+// из сохранённой роли и этих полей; caller не передаёт программу или reserved ID.
+func prepareBindingSequenceProgram(ctx context.Context, w *authorityWriteTx, b domain.AccessBinding,
+	metadata *kaname.BindingMetadataDecision, create, checkOnly bool) error {
+	mode := "authorize"
+	input := map[string]any{"id": string(b.ID)}
+	if !checkOnly && create {
+		mode = "create"
+		target, err := relverdict.EncodeTarget(b.Target)
+		if err != nil {
+			return err
+		}
+		labels, err := marshalLabels(b.Labels)
+		if err != nil {
+			return err
+		}
+		normalized, err := domain.NormalizeSubjects(b.Subjects, b.SubjectType, b.SubjectID)
+		if err != nil {
+			return err
+		}
+		subjects := make([]map[string]string, 0, len(normalized))
+		for _, subject := range normalized {
+			subjects = append(subjects, map[string]string{"type": string(subject.Type), "id": string(subject.ID)})
+		}
+		input = map[string]any{
+			"id": string(b.ID), "subject_type": string(b.SubjectType), "subject_id": string(b.SubjectID),
+			"role_id": string(b.RoleID), "resource_type": string(b.ResourceType), "resource_id": b.ResourceID,
+			"status": string(b.Status), "expires_at": b.ExpiresAt, "granted_by_user_id": string(b.GrantedByUserID),
+			"revoked_at": b.RevokedAt, "revoked_by_user_id": b.RevokedByUserID, "scope": int16(b.Scope),
+			"deletion_protection": b.DeletionProtection, "labels": json.RawMessage(labels),
+			"target": json.RawMessage(target), "target_digest": b.Target.Digest(), "granted_relation": b.GrantedRelation,
+			"is_system": b.System, "delegation_id": string(b.DelegationID), "subjects": subjects,
+		}
+	} else if !checkOnly {
+		if metadata == nil || metadata.ID != b.ID {
+			return kaname.ErrInvalidAuthorityFencePlan
+		}
+		mode = "metadata"
+		if metadata.ApplyDeletionProtection {
+			input["deletion_protection"] = metadata.DeletionProtection
+		}
+		if metadata.ApplyLabels {
+			labels, err := marshalLabels(metadata.Labels)
+			if err != nil {
+				return err
+			}
+			input["labels"] = json.RawMessage(labels)
+		}
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+	_, err = w.tx.Exec(ctx, `SELECT kaname.authority_binding_sequence_prepare_v3($1,$2::jsonb)`, mode, raw)
+	return err
+}

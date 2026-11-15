@@ -4,6 +4,7 @@ package pg_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/pgtest"
 	accessbinding "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
@@ -30,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -369,7 +373,60 @@ func TestResourceParticipantCommandViewRequiresEntry(t *testing.T) {
 // Реальные SQL sections проверяют существующий runtime, будущий вызов installer,
 // посторонний custom ACL и точное сохранение OID/owner/ACL функции. Goose journal не меняется.
 func TestResourceParticipantCommandViewMigrationACL(t *testing.T) {
-	r := writerProtocolRig(t)
+	// Проверяется исторический шаг 1000 на его собственной схеме. Latest rig
+	// уже содержит замену installer в 1300: старый Up не обязан её воспроизводить.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	dsn := pgtest.NewEmptyDB(t)
+	db, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS,
+		goose.WithTableName("public.goose_db_version"))
+	require.NoError(t, err)
+	const baseline int64 = 20261114100000
+	_, err = provider.UpTo(ctx, baseline)
+	require.NoError(t, err)
+	version, err := provider.GetDBVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, baseline, version)
+	admin, err := coredb.NewPool(ctx, pgtest.WithSearchPath(dsn, "kaname,public"))
+	require.NoError(t, err)
+	pgtest.ClosePoolAtEnd(t, admin)
+	var laterAbsent bool
+	require.NoError(t, admin.QueryRow(ctx, `SELECT
+	 NOT EXISTS(SELECT 1 FROM public.goose_db_version WHERE version_id > 20261114100000 AND is_applied)
+	 AND to_regprocedure('kaname.authority_resource_prewait_v2(jsonb,integer,integer)') IS NULL`).Scan(&laterAbsent))
+	require.True(t, laterAbsent, "поздний Resource cutover не входит в исторический baseline")
+	r := protocolRig{ctx: ctx, admin: admin, role: "registration_runtime_" + strings.ReplaceAll(ids.NewID("rol"), "-", "_")}
+	runtimeQuoted := pgx.Identifier{r.role}.Sanitize()
+	password := ids.NewID("pwd")
+	_, err = admin.Exec(ctx, "CREATE ROLE "+runtimeQuoted+" LOGIN PASSWORD '"+strings.ReplaceAll(password, "'", "''")+"' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		_, cleanupErr := admin.Exec(cleanup, "DROP OWNED BY "+runtimeQuoted)
+		require.NoError(t, cleanupErr)
+		_, cleanupErr = admin.Exec(cleanup, "DROP ROLE "+runtimeQuoted)
+		require.NoError(t, cleanupErr)
+	})
+	// Runtime получает только профиль исторического production installer.
+	_, err = admin.Exec(ctx, `SELECT kaname.authority_protocol_grant_runtime($1::regrole)`, r.role)
+	require.NoError(t, err)
+	config := admin.Config()
+	config.ConnConfig.User, config.ConnConfig.Password = r.role, password
+	config.AfterConnect = nil
+	r.runtime, err = pgxpool.NewWithConfig(ctx, config)
+	require.NoError(t, err)
+	t.Cleanup(r.runtime.Close)
+	var effective, session string
+	require.NoError(t, r.runtime.QueryRow(ctx, `SELECT current_user,session_user`).Scan(&effective, &session))
+	require.Equal(t, r.role, effective)
+	require.Equal(t, r.role, session, "настоящий LOGIN, не SET ROLE поверх owner")
+	var elevated bool
+	require.NoError(t, r.runtime.QueryRow(ctx, `SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls OR rolinherit OR has_schema_privilege(current_user,'kaname','CREATE') OR has_table_privilege(current_user,'kaname.groups','TRIGGER') FROM pg_catalog.pg_roles WHERE rolname=current_user`).Scan(&elevated))
+	require.False(t, elevated)
 	raw, err := migrations.FS.ReadFile("20261114100000_authority_runtime_can_submit_registration_commands.sql")
 	require.NoError(t, err)
 	parts := strings.Split(string(raw), "-- +goose Down")

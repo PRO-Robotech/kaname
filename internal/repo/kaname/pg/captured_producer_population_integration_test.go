@@ -4,6 +4,8 @@ package pg_test
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -128,7 +130,7 @@ func TestCapturedProducerUnknownRestagesWholeAttemptWithBoundedBudget(t *testing
 	defer cancel()
 	calls := 0
 	var previous kaname.CapturedProducerPopulation
-	err = factory.RunBindingDecision(ctx, actor, proposal, false, nil, func(ctx context.Context, w kaname.SemanticAuthorityWriter, _ domain.AccessBinding, _ domain.Role) error {
+	err = factory.RunBindingAuthorizationDecision(ctx, actor, proposal, false, false, nil, func(ctx context.Context, w kaname.SemanticAuthorityWriter, _ domain.AccessBinding, _ domain.Role) error {
 		calls++
 		if previous != nil {
 			require.ErrorIs(t, previous.Validate(w, actor, w.AuthorityFence().DecisionAt()), kaname.ErrSourceUnconfirmed)
@@ -155,6 +157,31 @@ func (capturedPGRoleTuples) BuildRoleTuples(domain.AccessBinding, []domain.Subje
 }
 func TestCapturedPreparedCommitFailureReleasesSingleLeaseOnRollback(t *testing.T) {
 	r := writerProtocolRig(t)
+	// Неприменённая tuple-обязанность относится к rules UPDATE существующей роли.
+	// Create+retier запрещён раньше Commit и не проверяет освобождение lease.
+	role := policyNewRole(r.a)
+	role.ID = domain.RoleID(ids.NewID("rol"))
+	var halves catalog.Halves
+	require.NoError(t, json.Unmarshal(r.bundle.CanonicalCatalog(), &halves))
+	facts, err := catalog.NewFacts(halves)
+	require.NoError(t, err)
+	projection, err := facts.ProjectGrantRules(role.Rules, domain.TenantPolicy())
+	require.NoError(t, err)
+	role.Permissions = projection.Permissions
+	setup, err := lifecycleOwner(r).Writer(r.ctx)
+	require.NoError(t, err)
+	defer policyFixtureRollback(setup)
+	role, err = setup.RolesW().Insert(r.ctx, role)
+	require.NoError(t, err)
+	require.NoError(t, setup.RolesW().ReplaceRuleSelectors(r.ctx, role.ID, facts.GrantSelectors(role.Rules.MaterializingSelectors(), domain.TenantPolicy())))
+	require.NoError(t, setup.RolesW().ReplaceRoleVerbs(r.ctx, role.ID, facts.RoleVerbsFromSelectors(role.Rules.MaterializingSelectors(), domain.TenantPolicy())))
+	require.NoError(t, setup.Commit(r.ctx))
+	rd, err := r.repo.Reader(r.ctx)
+	require.NoError(t, err)
+	defer policyFixtureRollback(rd)
+	role, version, err := rd.Roles().GetWithVersion(r.ctx, role.ID)
+	require.NoError(t, err)
+	require.NoError(t, rd.Rollback(r.ctx))
 	require.NoError(t, lifecycleOwner(r).ActivateAuthorityBundle(r.ctx, r.bundle))
 	cfg := r.runtime.Config()
 	cfg.MaxConns = 1
@@ -167,11 +194,9 @@ func TestCapturedPreparedCommitFailureReleasesSingleLeaseOnRollback(t *testing.T
 	factory, err = factory.WithCapturedProducerSources()
 	require.NoError(t, err)
 	actor := policyActor(t, r, r.a)
-	role := policyNewRole(r.a)
-	role.ID = domain.RoleID(ids.NewID("rol"))
 	ctx, cancel := context.WithTimeout(r.ctx, 10*time.Second)
 	defer cancel()
-	w, err := factory.RoleMutationWriter(ctx, kaname.RoleMutationRequest{Role: role, Create: true, Rules: true, Tuples: capturedPGRoleTuples{}}, actor)
+	w, err := factory.RoleMutationWriter(ctx, kaname.RoleMutationRequest{Role: role, Update: true, UpdateMask: []string{"rules"}, ExpectedVersion: version, Rules: true, Tuples: capturedPGRoleTuples{}}, actor)
 	defer policyFixtureRollback(w)
 	require.NoError(t, err)
 	token, err := w.(kaname.CapturedProducerPopulationReader).CapturedProducerPopulation(ctx, actor)
@@ -313,7 +338,15 @@ func TestCapturedProducerActualNonemptyPublicationD1AndRestage(t *testing.T) {
 			if e != nil {
 				return e
 			}
-			return w.AccessBindingsW().InsertSubjects(ctx, created.ID, b.Subjects)
+			if e = w.AccessBindingsW().InsertSubjects(ctx, created.ID, b.Subjects); e != nil {
+				return e
+			}
+			// Обе роли содержат rules: actual Create публикует только parent pointer.
+			tuples := []ab.RelationTuple{{User: "project:" + scene.Project, Relation: "project", Object: "iam_access_binding:" + string(created.ID)}}
+			if e = w.AccessBindingsW().EmitRelationWrite(ctx, tuples); e != nil {
+				return e
+			}
+			return w.AccessBindingsW().InsertEmittedTuples(ctx, created.ID, tuples)
 		}))
 	}
 	factory, err = factory.WithCapturedProducerSources()
@@ -508,6 +541,13 @@ func TestCapturedPhysicalCommitFailureActualWritersReleaseLease(t *testing.T) {
 	for _, prepared := range []bool{false, true} {
 		role := policyNewRole(r.a)
 		role.ID = domain.RoleID(ids.NewID("rol"))
+		var halves catalog.Halves
+		require.NoError(t, json.Unmarshal(r.bundle.CanonicalCatalog(), &halves))
+		facts, projectionErr := catalog.NewFacts(halves)
+		require.NoError(t, projectionErr)
+		projection, projectionErr := facts.ProjectGrantRules(role.Rules, domain.PolicyOfRole(role.IsSystem, role.OwnerModule))
+		require.NoError(t, projectionErr)
+		role.Permissions = projection.Permissions
 		var w kaname.SemanticAuthorityWriter
 		if prepared {
 			w, err = factory.RoleMutationWriter(ctx, kaname.RoleMutationRequest{Role: role, Create: true, Rules: true}, actor)

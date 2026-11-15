@@ -85,13 +85,31 @@ func stageCount(t *testing.T, r protocolRig, id domain.AccessBindingID) int {
 	return n
 }
 
+// Каждый независимый запрос получает прежний предел 30 секунд и значения фикстуры.
+// База сохраняется до запросов: отмену активного запроса здесь не снимаем.
+// Весь функциональный сценарий может длиться дольше 30 секунд; это не замер скорости.
+func bindingFunctionalRequestRig(t *testing.T, r protocolRig, fixtureBase context.Context) protocolRig {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(fixtureBase, 30*time.Second)
+	t.Cleanup(cancel)
+	r.ctx = ctx
+	return r
+}
+
 func TestBindingStageActualEntryPointsCoverLastPageAndStrict(t *testing.T) {
 	r := writerProtocolRig(t)
+	fixtureBase := context.WithoutCancel(r.ctx)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	groups := stageSeedGroups(t, r, r.a, 259, "blue")
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	foreign := stageSeedGroups(t, r, r.b, 1, "foreign")
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	id := stageBinding(t, r, r.a, false)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	engine := bindingStageEngine(t, r, nil)
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.NoError(t, engine.ReconcileBindingForward(r.ctx, id))
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.Equal(t, 259, stageCount(t, r, id))
 	var uid string
 	require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT subject_id FROM kaname.access_bindings WHERE id=$1`, string(id)).Scan(&uid))
@@ -100,6 +118,7 @@ func TestBindingStageActualEntryPointsCoverLastPageAndStrict(t *testing.T) {
 	}
 	// Получатель — обычный member, без owner/admin источника. Доступ доказывает
 	// настоящий native Ask, включая отрицательную границу чужого аккаунта.
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	tx, err := r.runtime.BeginTx(r.ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	require.NoError(t, err)
 	lifecycleRollback(t, tx)
@@ -112,14 +131,19 @@ func TestBindingStageActualEntryPointsCoverLastPageAndStrict(t *testing.T) {
 		require.Equal(t, gid != foreign[0], allowed)
 	}
 	require.NoError(t, tx.Rollback(r.ctx))
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.NoError(t, lifecycleOwner(r).ActivateAuthorityBundle(r.ctx, r.bundle))
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.NoError(t, engine.ConvergeBinding(r.ctx, id))
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.NoError(t, engine.ReconcileBinding(r.ctx, id))
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	require.Equal(t, 259, stageCount(t, r, id))
 	var raw, unconfirmed bool
 	require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT EXISTS(SELECT 1 FROM kaname.relation_fact WHERE subject=$1 AND relation='viewer'),EXISTS(SELECT 1 FROM kaname.access_bindings WHERE id=$2 AND grant_capability_version<>0)`, "user:"+uid, string(id)).Scan(&raw, &unconfirmed))
 	require.True(t, raw, "настоящий emitter/fold должен дать viewer")
 	require.False(t, unconfirmed, "background stage не активирует meta carrier")
+	r = bindingFunctionalRequestRig(t, r, fixtureBase)
 	_, err = r.runtime.Exec(r.ctx, `UPDATE kaname.groups SET labels='{}' WHERE id=$1`, groups[0])
 	require.Error(t, err, "strict raw writer не получает participation")
 }
@@ -171,17 +195,39 @@ func stageWait(t *testing.T, r protocolRig, ch <-chan struct{}) {
 	}
 }
 
+// Пауза наступает после завершённого RR stage, но до coordinator entry.
+// Проверяем реальный backend: источник должен иметь возможность коммититься,
+// пока stale spool удерживается тестом, без authority/consumer/business locks.
+func stageAssertBeforeEntry(t *testing.T, r protocolRig, barrier *stageQueryBarrier) {
+	t.Helper()
+	require.NotZero(t, barrier.pid.Load())
+	var bad int
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM pg_catalog.pg_locks l LEFT JOIN pg_catalog.pg_class c ON c.oid=l.relation LEFT JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE l.pid=$1 AND (l.locktype='advisory' OR (n.nspname='kaname' AND l.mode<>'AccessShareLock'))`, barrier.pid.Load()).Scan(&bad))
+	require.Zero(t, bad, "пауза до entry не удерживает business/consumer fences")
+}
+func stageEpochSource(t *testing.T, r protocolRig) string {
+	t.Helper()
+	var epochs string
+	// NULL снимает полный aggregate epoch set, как global stage: изменения
+	// groups повышают account scopes, а не обязательно revision пустого scope.
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT kaname.authority_binding_epoch_read(NULL::text[])::text`).Scan(&epochs))
+	return epochs
+}
+
 func TestBindingStageLegacyLatePageAndMovedSourceRestageAtomically(t *testing.T) {
 	for _, change := range []string{"last-page-insert", "label-change", "old-new-account"} {
 		t.Run(change, func(t *testing.T) {
 			r := writerProtocolRig(t)
 			groups := stageSeedGroups(t, r, r.a, 257, "blue")
 			id := stageBinding(t, r, r.a, true)
-			b := stageBarrier(t, "SELECT kaname.authority_binding_epoch_lock")
+			b := stageBarrier(t, "SELECT kaname.authority_protocol_enter")
 			engine := bindingStageEngine(t, r, b)
 			done := make(chan error, 1)
 			go func() { done <- engine.ReconcileBinding(r.ctx, id) }()
 			stageWait(t, r, b.reached)
+			stageAssertBeforeEntry(t, r, b)
+			require.EqualValues(t, 1, b.stages.Load(), "первый stale spool уже построен")
+			epochsBefore := stageEpochSource(t, r)
 			require.Zero(t, stageCount(t, r, id), "до apply stage не пишет domain")
 			want := 257
 			switch change {
@@ -199,6 +245,8 @@ func TestBindingStageLegacyLatePageAndMovedSourceRestageAtomically(t *testing.T)
 				require.NoError(t, err)
 				want--
 			}
+			require.NotEqual(t, epochsBefore, stageEpochSource(t, r), "реальный source commit меняет captured epoch до release")
+			require.Zero(t, stageCount(t, r, id), "producer commit не применяет stale spool")
 			close(b.release)
 			require.NoError(t, <-done)
 			require.GreaterOrEqual(t, b.stages.Load(), int32(2), "stale diff обязан полностью re-stage")
@@ -352,14 +400,19 @@ func TestBindingStageForeignSelectorAppendInvalidatesLocalScope(t *testing.T) {
 	stageSeedGroups(t, r, r.a, 2, "blue")
 	id := stageBinding(t, r, r.a, false)
 	foreignUser := seedMemberUser(t, r.ctx, r.admin, r.b, "foreign-stage")
-	barrier := stageBarrier(t, "SELECT kaname.authority_binding_epoch_lock")
+	barrier := stageBarrier(t, "SELECT kaname.authority_protocol_enter")
 	engine := bindingStageEngine(t, r, barrier)
 	done := make(chan error, 1)
 	go func() { done <- engine.ReconcileBinding(r.ctx, id) }()
 	stageWait(t, r, barrier.reached)
+	stageAssertBeforeEntry(t, r, barrier)
+	require.EqualValues(t, 1, barrier.stages.Load(), "первый stale spool уже построен")
+	epochsBefore := stageEpochSource(t, r)
 	// Новая foreign labels выдача расширяет реальный group classifier, хотя её
 	// carrier принадлежит B и ещё не породил member/ledger на объекте A.
 	groupLifecycleBinding(t, r, r.b, foreignUser, "foreign_stage", domain.Rule{Module: "iam", Resources: []string{"group"}, Verbs: []string{"get"}, MatchLabels: map[string]string{"tier": "blue"}})
+	require.NotEqual(t, epochsBefore, stageEpochSource(t, r), "foreign source commit предшествует revalidation")
+	require.Zero(t, stageCount(t, r, id), "до apply нет target effects")
 	close(barrier.release)
 	require.NoError(t, <-done)
 	require.GreaterOrEqual(t, barrier.stages.Load(), int32(2))
@@ -414,9 +467,8 @@ func TestBindingStageEpochWaitUsesPostWaitTimeAndCancellationReleases(t *testing
 			} else {
 				require.NoError(t, got.err)
 				require.True(t, got.at.After(boundary))
-				var witness time.Time
-				require.NoError(t, tx.QueryRow(r.ctx, `SELECT (kaname.authority_protocol_attestation()->>'decision_at')::timestamptz`).Scan(&witness))
-				require.True(t, witness.Equal(got.at))
+				// Проверяется публичный результат настоящего epoch lock после ожидания.
+				// Равенство закрытому private decision_at этот holder не заявляет.
 			}
 			_ = tx.Rollback(context.WithoutCancel(r.ctx))
 			fresh, e := r.runtime.Begin(r.ctx)
@@ -572,7 +624,7 @@ func (b *stagePoolBarrier) TraceQueryStart(ctx context.Context, conn *pgx.Conn, 
 		b.staged[pid] = true
 		b.mu.Unlock()
 	}
-	if strings.Contains(d.SQL, "SELECT kaname.authority_protocol_enter(") {
+	if strings.Contains(d.SQL, "SELECT kaname.authority_protocol_enter_") {
 		b.mu.Lock()
 		b.entered[pid] = true
 		if len(b.entered) == b.want {
@@ -705,41 +757,100 @@ func TestBindingStageOneSlotAndSaturatedPoolCompleteOrCancelWithoutLeaks(t *test
 	}
 }
 
-type stageClockObservation struct {
-	at  time.Time
-	err error
+// Трасса различает prelock spool и replay по завершённому второму epoch lock.
+// Она не выполняет SQL и не читает закрытый authority proof.
+type stageLegacyClockState struct {
+	attempt        int32
+	pid            uint32
+	epochStarted   int
+	epochCompleted int
+	prelockReads   int
+	replayReads    int
+	lockSeen       bool
+	invalid        bool
 }
+
+type stageLegacyEpochQuery struct {
+	attempt int32
+	pid     uint32
+	ordinal int
+}
+
+type stageLegacyEpochKey struct{}
+
 type stageLegacyClockTrace struct {
-	lockSQL    string
-	pid        atomic.Uint32
-	stages     atomic.Int32
-	before     chan stageClockObservation
-	after      chan stageClockObservation
-	beforeOnce sync.Once
-	afterOnce  sync.Once
+	lockSQL string
+	stages  atomic.Int32
+	before  chan uint32
+	mu      sync.Mutex
+	state   stageLegacyClockState
 }
 
 func (b *stageLegacyClockTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+	pid := conn.PgConn().PID()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if strings.Contains(d.SQL, "CREATE TEMP TABLE kaname_binding_stage") {
-		b.stages.Add(1)
+		// Новый snapshot означает новую попытку; фазу прежней TX не переносим.
+		b.state = stageLegacyClockState{attempt: b.stages.Add(1), pid: pid}
 	}
-	observe := func(ch chan stageClockObservation) {
-		var at time.Time
-		// QueryStart вызывается до отправки внешнего SQL; вложенное чтение
-		// использует разрешённый validated API, а не private temp relation.
-		err := conn.QueryRow(ctx, `SELECT (kaname.authority_protocol_attestation()->>'decision_at')::timestamptz`).Scan(&at)
-		ch <- stageClockObservation{at, err}
+	if strings.Contains(d.SQL, "SELECT kaname.authority_binding_epoch_lock(") {
+		b.state.epochStarted++
+		if b.state.attempt == 0 || b.state.pid != pid || b.state.epochStarted != b.state.epochCompleted+1 {
+			b.state.invalid = true
+		}
+		return context.WithValue(ctx, stageLegacyEpochKey{}, stageLegacyEpochQuery{
+			attempt: b.state.attempt, pid: pid, ordinal: b.state.epochStarted,
+		})
 	}
 	if strings.Contains(d.SQL, b.lockSQL) {
-		b.pid.Store(conn.PgConn().PID())
-		b.beforeOnce.Do(func() { observe(b.before) })
+		if b.state.attempt == 0 || b.state.pid != pid || b.state.epochCompleted != 1 {
+			b.state.invalid = true
+		}
+		if !b.state.lockSeen {
+			b.state.lockSeen = true
+			select {
+			case b.before <- pid:
+			default:
+				b.state.invalid = true
+			}
+		}
 	}
 	if strings.Contains(d.SQL, "SELECT seq,body FROM pg_temp.kaname_binding_stage") {
-		b.afterOnce.Do(func() { observe(b.after) })
+		if b.state.attempt == 0 || b.state.pid != pid {
+			b.state.invalid = true
+		}
+		switch b.state.epochCompleted {
+		case 1:
+			b.state.prelockReads++
+		case 2:
+			b.state.replayReads++
+		default:
+			b.state.invalid = true
+		}
 	}
 	return ctx
 }
-func (*stageLegacyClockTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func (b *stageLegacyClockTrace) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, d pgx.TraceQueryEndData) {
+	query, ok := ctx.Value(stageLegacyEpochKey{}).(stageLegacyEpochQuery)
+	if !ok {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if d.Err != nil || query.attempt != b.state.attempt || query.pid != b.state.pid || query.pid != conn.PgConn().PID() || query.ordinal != b.state.epochCompleted+1 {
+		b.state.invalid = true
+		return
+	}
+	b.state.epochCompleted++
+}
+
+func (b *stageLegacyClockTrace) snapshot() stageLegacyClockState {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.state
+}
 
 func TestBindingStageExpiryAndWitnessAfterEveryLegacyLockWait(t *testing.T) {
 	for _, kind := range []string{"advisory", "binding-row", "role-row"} {
@@ -755,7 +866,7 @@ func TestBindingStageExpiryAndWitnessAfterEveryLegacyLockWait(t *testing.T) {
 				if kind == "role-row" {
 					lockSQL = kanamepg.LockRolesOfBindingsSQL
 				}
-				trace := &stageLegacyClockTrace{lockSQL: lockSQL, before: make(chan stageClockObservation, 1), after: make(chan stageClockObservation, 1)}
+				trace := &stageLegacyClockTrace{lockSQL: lockSQL, before: make(chan uint32, 1)}
 				engine := bindingStageEngine(t, r, trace)
 				var expires time.Time
 				interval := "1 hour"
@@ -781,19 +892,28 @@ func TestBindingStageExpiryAndWitnessAfterEveryLegacyLockWait(t *testing.T) {
 				defer cancel()
 				done := make(chan error, 1)
 				go func() { done <- engine.ReconcileBinding(ctx, id) }()
-				var before stageClockObservation
+				var pid uint32
 				select {
-				case before = <-trace.before:
+				case pid = <-trace.before:
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				require.NoError(t, before.err)
-				require.True(t, before.at.Before(expires), "carrier обязан быть живым до старого lock wait")
 				require.Eventually(t, func() bool {
 					var waiting bool
-					e := r.admin.QueryRow(r.ctx, `SELECT cardinality(pg_catalog.pg_blocking_pids($1))>0`, trace.pid.Load()).Scan(&waiting)
+					e := r.admin.QueryRow(r.ctx, `SELECT $2::integer=ANY(pg_catalog.pg_blocking_pids($1))`, pid, blocker.Conn().PgConn().PID()).Scan(&waiting)
 					return e == nil && waiting
 				}, 5*time.Second, 10*time.Millisecond)
+				waiting := trace.snapshot()
+				require.False(t, waiting.invalid)
+				require.Equal(t, int32(1), waiting.attempt)
+				require.Equal(t, pid, waiting.pid)
+				require.Equal(t, 1, waiting.epochStarted)
+				require.Equal(t, 1, waiting.epochCompleted)
+				require.Zero(t, waiting.replayReads)
+				// Это server boundary наблюдения, а не чтение private decision_at.
+				var aliveBoundary time.Time
+				require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT clock_timestamp()`).Scan(&aliveBoundary))
+				require.True(t, aliveBoundary.Before(expires), "carrier жив уже во время настоящего legacy lock wait")
 				if expired {
 					require.Eventually(t, func() bool {
 						var reached bool
@@ -804,6 +924,12 @@ func TestBindingStageExpiryAndWitnessAfterEveryLegacyLockWait(t *testing.T) {
 				require.Zero(t, stageCount(t, r, id))
 				var releaseBoundary time.Time
 				require.NoError(t, blocker.QueryRow(r.ctx, `SELECT clock_timestamp()`).Scan(&releaseBoundary))
+				require.True(t, releaseBoundary.After(aliveBoundary))
+				if expired {
+					require.True(t, releaseBoundary.After(expires), "expiry пересечён до освобождения legacy lock")
+				} else {
+					require.True(t, releaseBoundary.Before(expires))
+				}
 				require.NoError(t, blocker.Commit(r.ctx)) // Ни одной source mutation/epoch bump.
 				select {
 				case err = <-done:
@@ -812,6 +938,13 @@ func TestBindingStageExpiryAndWitnessAfterEveryLegacyLockWait(t *testing.T) {
 					t.Fatal(ctx.Err())
 				}
 				require.Equal(t, int32(1), trace.stages.Load(), "без mutation нет restage, clock обязан обновиться сам")
+				finished := trace.snapshot()
+				require.False(t, finished.invalid, "epoch calls должны завершаться на connection своей попытки")
+				require.Equal(t, int32(1), finished.attempt)
+				require.Equal(t, pid, finished.pid)
+				require.Equal(t, 2, finished.epochStarted)
+				require.Equal(t, 2, finished.epochCompleted, "final epoch lock завершён после всех legacy waits")
+				require.Positive(t, finished.prelockReads, "prelock spool предшествует final epoch lock и не считается replay")
 				var ledger, outbox int
 				require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT count(*) FROM kaname.access_binding_emitted_tuples WHERE binding_id=$1`, string(id)).Scan(&ledger))
 				require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT count(*) FROM kaname.fga_outbox`).Scan(&outbox))
@@ -819,24 +952,12 @@ func TestBindingStageExpiryAndWitnessAfterEveryLegacyLockWait(t *testing.T) {
 					require.Zero(t, stageCount(t, r, id))
 					require.Zero(t, ledger)
 					require.Equal(t, outboxBefore, outbox)
-					select {
-					case <-trace.after:
-						t.Fatal("expired carrier дошёл до replay")
-					default:
-					}
+					require.Zero(t, finished.replayReads, "expired carrier не доходит до replay после final epoch lock")
 				} else {
 					require.Equal(t, 3, stageCount(t, r, id))
 					require.Positive(t, ledger)
 					require.Greater(t, outbox, outboxBefore)
-					select {
-					case after := <-trace.after:
-						require.NoError(t, after.err)
-						require.True(t, after.at.After(releaseBoundary))
-						require.True(t, after.at.After(before.at))
-						require.True(t, after.at.Before(expires))
-					default:
-						t.Fatal("нет validated witness перед replay")
-					}
+					require.Positive(t, finished.replayReads, "живой carrier проходит replay после final epoch lock")
 				}
 			})
 		}

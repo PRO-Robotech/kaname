@@ -74,12 +74,13 @@ func (c BindingCommand) Apply(ctx context.Context, s ReconcileStore) error {
 // StageBindingCoordinate читает лишь одну полную координату. Все rule_fp одной
 // координаты остаются вместе: они могут делить ledger tuple. Исходный diff и
 // creator/nested/public-reader semantics используются без второго compiler.
-func (r *Reconciler) StageBindingCoordinate(ctx context.Context, s ReconcileStore, bs BindingScope, coord MemberCoord, obj domain.MirrorObject, present bool, ancestors []domain.MirrorObject, converge bool, emit func(BindingCommand) error, size SizeRecorder) error {
-	if emit == nil {
-		return errors.New("binding stage sink is absent")
-	}
+// CaptureStagedBindingCoordinate сохраняет прежний выбор desired для полного
+// binding, включая creator/containment исключение. Результат ещё не proof:
+// owner verifier обязан проверить canonical sources до резерва sequence keys.
+func (r *Reconciler) CaptureStagedBindingCoordinate(ctx context.Context, s ReconcileStore, bs BindingScope, coord MemberCoord, obj domain.MirrorObject, present bool, ancestors []domain.MirrorObject) (CapturedObjectDiff, error) {
+	var empty CapturedObjectDiff
 	if err := ctx.Err(); err != nil {
-		return err
+		return empty, err
 	}
 	var desired []DesiredMember
 	if present && len(bs.Selectors) > 0 {
@@ -93,30 +94,125 @@ func (r *Reconciler) StageBindingCoordinate(ctx context.Context, s ReconcileStor
 			}
 			selected.Selectors = append(selected.Selectors, sel)
 		}
-		desired = desiredMembersForObject(r.cat.Facts(), selected, obj, ancestors)
+		var err error
+		desired, err = desiredMembersForObject(r.cat.Facts(), selected, obj, ancestors)
+		if err != nil {
+			return empty, err
+		}
+	}
+
+	current, err := s.CurrentMembersForObject(ctx, bs.BindingID, coord.ObjectType, coord.ObjectID)
+	if err != nil {
+		return empty, err
+	}
+	tuples, err := s.LedgerTuplesForMember(ctx, bs.BindingID, coord)
+	if err != nil {
+		return empty, err
+	}
+	ledger := make([]LedgerRow, 0, len(tuples))
+	for _, tuple := range tuples {
+		ledger = append(ledger, LedgerRow{Member: coord, Tuple: tuple})
+	}
+	return CapturedObjectDiff{Binding: bs, Desired: desired, Current: current, Ledger: ledger,
+		Live: map[MemberCoord]bool{coord: present}}, nil
+}
+
+func (r *Reconciler) StageBindingCoordinate(ctx context.Context, s ReconcileStore, bs BindingScope, coord MemberCoord, obj domain.MirrorObject, present bool, ancestors []domain.MirrorObject, converge bool, emit func(BindingCommand) error, size SizeRecorder) error {
+	if emit == nil {
+		return errors.New("binding stage sink is absent")
+	}
+	input, err := r.CaptureStagedBindingCoordinate(ctx, s, bs, coord, obj, present, ancestors)
+	if err != nil {
+		return err
 	}
 	if size != nil {
 		objects, tuples := 0, 0
-		if len(desired) > 0 {
+		if len(input.Desired) > 0 {
 			objects = 1
 		}
-		for _, member := range desired {
+		for _, member := range input.Desired {
 			tuples += len(member.Tuples)
 		}
 		size.ObserveBindingMaterialization(objects, tuples)
 	}
-	current, err := s.CurrentMembersForObject(ctx, bs.BindingID, coord.ObjectType, coord.ObjectID)
+	commands, err := CompileCapturedBindingCoordinate(ctx, input, coord, converge)
 	if err != nil {
 		return err
 	}
-	recorder := &bindingRecorder{ReconcileStore: s, emit: emit}
-	view := objectEmitted(s, bs.BindingID, coord.ObjectType, coord.ObjectID)
-	view.converge = converge
-	col := &syncFGACollector{}
-	if err = r.applyDiff(ctx, recorder, bs, desired, current, view, col); err != nil {
-		return err
+	for _, command := range commands {
+		if err = emit(command); err != nil {
+			return err
+		}
 	}
-	return r.flushDeletes(ctx, recorder, col)
+	return nil
+}
+
+// Один collector на coordinate и objectEmitted(converge) — исходная семантика
+// StageBindingCoordinate. Whole-binding collector здесь намеренно не заменяет
+// повторные эффекты одинаковых tuples от разных coordinates.
+func CompileCapturedBindingCoordinate(ctx context.Context, input CapturedObjectDiff, coord MemberCoord, converge bool) ([]BindingCommand, error) {
+	if input.Additive || input.Binding.BindingID == "" || coord.ObjectType == "" || coord.ObjectID == "" || len(input.Live) != 1 {
+		return nil, ErrIncompleteObjectDiff
+	}
+	if _, ok := input.Live[coord]; !ok {
+		return nil, ErrIncompleteObjectDiff
+	}
+	for _, member := range input.Current {
+		if member.ObjectType != coord.ObjectType || member.ObjectID != coord.ObjectID {
+			return nil, ErrIncompleteObjectDiff
+		}
+	}
+	for _, member := range input.Desired {
+		if member.ObjectType != coord.ObjectType || member.ObjectID != coord.ObjectID {
+			return nil, ErrIncompleteObjectDiff
+		}
+	}
+	for _, row := range input.Ledger {
+		if row.Member != coord {
+			return nil, ErrIncompleteObjectDiff
+		}
+	}
+	var commands []BindingCommand
+	emit := func(command BindingCommand) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		switch command.Kind {
+		case "members":
+			if command.Members == nil {
+				command.Members = []domain.TargetMember{}
+			}
+		case "record":
+			if command.Refs == nil {
+				command.Refs = []EmittedTupleRef{}
+			}
+		case "forget":
+			if command.Rows == nil {
+				command.Rows = []LedgerRow{}
+			}
+		case "write", "delete":
+			if command.Tuples == nil {
+				command.Tuples = []domain.MembershipTuple{}
+			}
+		}
+		commands = append(commands, command)
+		return nil
+	}
+	store, err := newCapturedDiffStore(input, emit)
+	if err != nil {
+		return nil, err
+	}
+	view := objectEmitted(store, input.Binding.BindingID, coord.ObjectType, coord.ObjectID)
+	view.converge = converge
+	collector := &syncFGACollector{}
+	reconciler := &Reconciler{}
+	if err = reconciler.applyDiff(ctx, store, input.Binding, input.Desired, input.Current, view, collector); err != nil {
+		return nil, err
+	}
+	if err = reconciler.flushDeletes(ctx, store, collector); err != nil {
+		return nil, err
+	}
+	return commands, nil
 }
 
 type bindingRecorder struct {

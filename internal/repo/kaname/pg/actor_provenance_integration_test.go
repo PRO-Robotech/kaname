@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	"github.com/PRO-Robotech/kaname/internal/grantsource"
@@ -67,7 +69,22 @@ func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t 
 	repo := kanamepg.New(pool, nil)
 	bundle := semanticBundleDB(t, ctx, pool)
 	semanticFixtureIdentity(t, ctx, pool, bundle)
-	w, err := repo.SemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle)
+	// Все typed principals объявлены до RR, включая заведомо отсутствующих.
+	// Отсутствие не выдаёт authority: защищённое чтение проверяет реальные rows.
+	saActor := domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: actor.ID}
+	standalone := seedSA(t, ctx, repo, domain.AccountID(scene.Account), "provenance-only-sa")
+	deletedUser := mustSeedUser(t, ctx, pool, "provenance-deleted")
+	_, err = pool.Exec(ctx, `UPDATE kaname.users SET email_verified_at=clock_timestamp() WHERE id=$1`, deletedUser)
+	require.NoError(t, err)
+	deletedActor := domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(deletedUser)}
+	reads := []kaname.SemanticReadIntent{}
+	for _, subject := range []domain.Subject{actor, saActor,
+		{Type: domain.SubjectTypeUser, ID: "usr-provenance-absent"},
+		{Type: domain.SubjectTypeServiceAccount, ID: "sva-provenance-absent"},
+		{Type: domain.SubjectTypeUser, ID: domain.SubjectID(standalone.ID)}, deletedActor} {
+		reads = append(reads, kaname.SemanticReadIntent{Actor: subject, Native: []kaname.SemanticNativeQuestion{{Relation: publicReadRelation, Object: publicReadObject(id)}}})
+	}
+	w, err := repo.PlannedSemanticPopulationWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, reads)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -75,6 +92,12 @@ func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t 
 		_ = w.Rollback(cleanup)
 	})
 	reader := w.(kaname.SemanticSourceReader)
+	reopen := func() {
+		w, err = repo.PlannedSemanticPopulationWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, reads)
+		require.NoError(t, err)
+		reader = w.(kaname.SemanticSourceReader)
+	}
+
 	read := func(actor domain.Subject) []kaname.ProducerSource {
 		out := []kaname.ProducerSource{}
 		token := ""
@@ -121,17 +144,21 @@ func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t 
 	require.Zero(t, stamped)
 	// Поддельно опережающая mirror квитанция не даёт эффекта. Это отрицательная
 	// порча metadata, не положительный обход actual producer.
+	require.NoError(t, w.Rollback(ctx))
 	_, err = pool.Exec(ctx, `UPDATE kaname.producer_source_receipt SET source_version=$1 WHERE object_id='provenance-finite'`, base.Add(time.Hour))
 	require.NoError(t, err)
+	reopen()
 	for _, s := range read(actor) {
 		if s.Receipt.ObjectID == "provenance-finite" {
 			require.Equal(t, "producer_version", s.Issue)
 		}
 	}
+	require.NoError(t, w.Rollback(ctx))
 	_, err = pool.Exec(ctx, `UPDATE kaname.producer_source_receipt SET source_version=$1 WHERE object_id='provenance-finite'`, base)
 	require.NoError(t, err)
 	// Новый mirror watermark без замены projection сохраняет прежнего owner.
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{SubjectId: "project:" + scene.Project, Relation: "project", Object: "registry_registry:provenance-finite", ParentProjectId: scene.Project, ParentAccountId: scene.Account, ParentChain: scene.ProjectChain(), SourceVersion: timestamppb.New(base.Add(time.Minute))}))
+	reopen()
 	for _, s := range read(actor) {
 		if s.Receipt.ObjectID == "provenance-finite" {
 			require.Empty(t, s.Issue)
@@ -154,7 +181,6 @@ func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t 
 		require.NoError(t, e)
 		require.False(t, allowed)
 	}
-	saActor := domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: actor.ID}
 	absent(saActor)
 	absent(domain.Subject{Type: domain.SubjectTypeUser, ID: "usr-provenance-absent"})
 	absent(domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: "sva-provenance-absent"})
@@ -175,14 +201,10 @@ func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t 
 	// Удалённая учётка перестаёт наследовать anonymous в следующем снимке.
 	require.NoError(t, w.ServiceAccountsW().Delete(ctx, domain.ServiceAccountID(actor.ID)))
 	absent(saActor)
-	standalone := seedSA(t, ctx, repo, domain.AccountID(scene.Account), "provenance-only-sa")
 	absent(domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(standalone.ID)})
-	deletedUser := mustSeedUser(t, ctx, pool, "provenance-deleted")
-	_, err = pool.Exec(ctx, `UPDATE kaname.users SET email_verified_at=clock_timestamp() WHERE id=$1`, deletedUser)
-	require.NoError(t, err)
-	deletedActor := domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(deletedUser)}
 	_, err = reader.AdmitSourceActor(ctx, deletedActor)
 	require.NoError(t, err)
+	require.NoError(t, w.Rollback(ctx))
 	remove, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	defer remove.Rollback(context.Background())
@@ -192,6 +214,7 @@ func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t 
 	_, err = remove.Exec(ctx, `DELETE FROM kaname.users WHERE id=$1`, deletedUser)
 	require.NoError(t, err)
 	require.NoError(t, remove.Commit(ctx))
+	reopen()
 	absent(deletedActor)
 	got, err := grantsource.CollectSemanticActor(ctx, w, actor)
 	require.NoError(t, err)
@@ -201,7 +224,7 @@ func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t 
 	// Применившийся withdrawal и его старый replay не оживляют publication.
 	withdraw(t, uc, id, base.Add(time.Hour))
 	publish(t, uc, id, time.Time{})
-	next, err := repo.SemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle)
+	next, err := repo.PlannedSemanticPopulationWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, reads)
 	require.NoError(t, err)
 	defer next.Rollback(ctx)
 	page, _, err := next.(kaname.SemanticSourceReader).ProducerSources(ctx, kaname.CanonicalSourceFilter{Actor: actor, Limit: 256})
@@ -209,9 +232,13 @@ func TestProducerSourcesActualRegistrationPublicationVersionlessAndTypedActor(t 
 	for _, s := range page.Sources {
 		require.NotEqual(t, domain.PublicationReceipt, s.Receipt.Kind)
 	}
-	// Текущая отметка человека, а не успешность предыдущего вопроса.
+	// Новая защищённая попытка читает изменённую отметку человека.
+	require.NoError(t, next.Rollback(ctx))
 	_, err = pool.Exec(ctx, `UPDATE kaname.users SET email_verified_at=NULL WHERE id=$1`, uid)
 	require.NoError(t, err)
+	next, err = repo.PlannedSemanticPopulationWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, reads)
+	require.NoError(t, err)
+	defer next.Rollback(ctx)
 	none, err := grantsource.CollectSemanticActor(ctx, next, actor)
 	require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed)
 	require.Equal(t, grantsource.ActorEffects{}, none)
@@ -222,14 +249,15 @@ func TestRoleProjectionCheckpointSameWriterRollbackAndRelevantCatalog(t *testing
 	uid, account := kac127SeedUserAndAccount(t, ctx, pool, "provrole")
 	bundle := semanticBundleDB(t, ctx, pool)
 	semanticFixtureIdentity(t, ctx, pool, bundle)
-	w, err := repo.SemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle)
+	role := domain.Role{ID: domain.RoleID(ids.NewID(domain.PrefixRole)), AccountID: domain.AccountID(account), Name: "provenance_role", Rules: domain.Rules{{Module: "iam", Resources: []string{"account"}, Verbs: []string{"get"}}}, CreatedByUserID: domain.UserID(uid)}
+	readIntent := kaname.SemanticReadIntent{Actor: domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)}, Roles: []domain.RoleID{role.ID}}
+	w, err := repo.PlannedSemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, readIntent)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = w.Rollback(cleanup)
 	})
-	role := domain.Role{ID: domain.RoleID(ids.NewID(domain.PrefixRole)), AccountID: domain.AccountID(account), Name: "provenance_role", Rules: domain.Rules{{Module: "iam", Resources: []string{"account"}, Verbs: []string{"get"}}}, CreatedByUserID: domain.UserID(uid)}
 	role.Permissions, err = domain.CompileRules(role.Rules)
 	require.NoError(t, err)
 	_, err = w.RolesW().Insert(ctx, role)
@@ -246,8 +274,21 @@ func TestRoleProjectionCheckpointSameWriterRollbackAndRelevantCatalog(t *testing
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.roles WHERE id=$1`, role.ID).Scan(&count))
 	require.Zero(t, count)
+	// Защищённый SOURCE reader завершён до внешнего catalog writer. Следующая
+	// попытка заново создаёт ту же незакоммиченную роль через настоящие adapters.
+	require.NoError(t, w.Rollback(ctx))
+	reopenRole := func() {
+		w, err = repo.PlannedSemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, readIntent)
+		require.NoError(t, err)
+		_, err = w.RolesW().Insert(ctx, role)
+		require.NoError(t, err)
+		require.NoError(t, w.RolesW().ReplaceRoleVerbs(ctx, role.ID, projection.Verbs))
+		require.NoError(t, w.RolesW().ReplaceRuleSelectors(ctx, role.ID, projection.Selectors))
+		reader = w.(kaname.SemanticSourceReader)
+	}
 	_, err = pool.Exec(ctx, `INSERT INTO kaname.catalog_module(module) VALUES('provenanceforeign')`)
 	require.NoError(t, err)
+	reopenRole()
 	unchanged, _, err := reader.RoleProjectionCheckpoint(ctx, role.ID)
 	require.NoError(t, err)
 	require.Equal(t, checkpoint, unchanged)
@@ -256,23 +297,25 @@ func TestRoleProjectionCheckpointSameWriterRollbackAndRelevantCatalog(t *testing
 	_, _, err = reader.RoleProjectionCheckpoint(ctx, role.ID)
 	require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed)
 	require.NoError(t, w.RolesW().ReplaceRoleVerbs(ctx, role.ID, projection.Verbs))
-	// Relevant catalog изменён старым writer вне нового fence. Active identity
-	// специально осталась прежней: одного совпадения её строки недостаточно.
+	// Между защищёнными попытками изменён relevant catalog. Active identity
+	// специально прежняя: одного совпадения её строки недостаточно.
+	require.NoError(t, w.Rollback(ctx))
 	_, err = pool.Exec(ctx, `INSERT INTO kaname.catalog_verb(module,resource,verb,per_object) VALUES('iam','account','provenanceprobe',true)`)
 	require.NoError(t, err)
+	reopenRole()
 	_, _, err = reader.RoleProjectionCheckpoint(ctx, role.ID)
 	require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed)
 	require.NoError(t, w.Rollback(ctx))
 	authorityWaitReleased(t, pool)
-	next, err := repo.SemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle)
+	next, err := repo.PlannedSemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, readIntent)
 	require.NoError(t, err)
 	defer next.Rollback(ctx)
 	_, _, err = next.(kaname.SemanticSourceReader).RoleProjectionCheckpoint(ctx, role.ID)
 	require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed)
 }
 
-// Барьер стоит в настоящем pgx entrypoint второго SQL, а не в production hook.
-// Preliminary SELECT уже завершён; concurrent writer коммитится до snapshot.
+// Барьер SQL-компонента стоит перед вторым запросом через настоящий pgx.
+// Здесь нет authority entry: первый SELECT завершён, writer коммитится до второго.
 type projectionSnapshotBarrier struct {
 	armed   atomic.Bool
 	reached chan struct{}
@@ -293,15 +336,16 @@ func (b *projectionSnapshotBarrier) TraceQueryStart(ctx context.Context, _ *pgx.
 }
 func (*projectionSnapshotBarrier) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
-func TestRoleProjectionCheckpointConcurrentAuthoredMismatchChargesSnapshot(t *testing.T) {
+func TestRoleProjectionCheckpointSQLComponentConcurrentAuthoredMismatchChargesSnapshot(t *testing.T) {
 	for _, large := range []bool{false, true} {
 		name := "mismatch"
 		if large {
 			name = "mismatch-over-limit"
 		}
 		t.Run(name, func(t *testing.T) {
-			parent, pool, repo := authorityTestDB(t)
-			ctx, cancel := context.WithCancel(parent)
+			rig := writerProtocolRig(t)
+			parent, pool, repo := rig.ctx, rig.admin, kanamepg.New(rig.admin, nil)
+			ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 			defer cancel()
 			uid, account := kac127SeedUserAndAccount(t, ctx, pool, "provcost")
 			bundle := semanticBundleDB(t, ctx, pool)
@@ -321,22 +365,32 @@ func TestRoleProjectionCheckpointConcurrentAuthoredMismatchChargesSnapshot(t *te
 			require.NoError(t, seed.RolesW().ReplaceRoleVerbs(ctx, role.ID, projection.Verbs))
 			require.NoError(t, seed.Commit(ctx))
 			barrier := &projectionSnapshotBarrier{reached: make(chan struct{}), resume: make(chan struct{})}
-			config := pool.Config()
+			config := rig.runtime.Config()
 			config.ConnConfig.Tracer = barrier
 			traced, err := pgxpool.NewWithConfig(ctx, config)
 			require.NoError(t, err)
 			defer traced.Close()
-			w, err := kanamepg.New(traced, nil).SemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle)
+			var effective, session string
+			require.NoError(t, traced.QueryRow(ctx, `SELECT current_user,session_user`).Scan(&effective, &session))
+			require.Equal(t, rig.role, effective)
+			require.Equal(t, rig.role, session)
+			w, err := kanamepg.OpenUnprotectedProjectionComponentProbe(ctx, kanamepg.New(traced, nil), bundle)
 			require.NoError(t, err)
-			defer w.Rollback(context.Background())
-			reader := w.(kaname.SemanticSourceReader)
+			defer func() {
+				cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
+				_ = w.Rollback(cleanup)
+			}()
+			reader := w
 			positive, baselineCost, err := reader.RoleProjectionCheckpoint(ctx, role.ID)
 			require.NoError(t, err)
 			require.Equal(t, projection.Checkpoint, positive)
 			require.Greater(t, baselineCost.Rows, 2)
+			require.LessOrEqual(t, baselineCost.Rows, 4096)
+			require.Equal(t, 2, baselineCost.Reads)
 			if large {
-				// Старый catalog writer обходит новый fence: snapshot уже прочёл
-				// больше локального лимита даже при concurrent authored mismatch.
+				// SQL-компонент работает без GLOBAL: snapshot обязан списать
+				// превышение бюджета раньше проверки concurrent authored mismatch.
 				_, err = pool.Exec(ctx, `INSERT INTO kaname.catalog_verb(module,resource,verb,per_object) SELECT 'iam','account','provenancecost'||n,true FROM generate_series(1,4097) n`)
 				require.NoError(t, err)
 			}
@@ -363,7 +417,7 @@ func TestRoleProjectionCheckpointConcurrentAuthoredMismatchChargesSnapshot(t *te
 			case <-ctx.Done():
 				t.Fatal("snapshot не достиг pgx барьера: ", ctx.Err())
 			}
-			// Настоящий legacy writer, разрешённый нынешней compare-only границей.
+			// Настоящий legacy writer в SQL component probe без protected SOURCE plan.
 			role.Rules[0].Verbs = []string{"list"}
 			role.Permissions, err = domain.CompileRules(role.Rules)
 			require.NoError(t, err)
@@ -391,6 +445,224 @@ func TestRoleProjectionCheckpointConcurrentAuthoredMismatchChargesSnapshot(t *te
 			case <-ctx.Done():
 				t.Fatal("snapshot не завершился: ", ctx.Err())
 			}
+		})
+	}
+}
+
+// Трассировка наблюдает реальные BEGIN/ROLLBACK и задерживает первый RC entry
+// до получения GLOBAL. Изменение после этой границы под GLOBAL запрещено.
+type provenanceCompareTraceKey struct{}
+type provenanceCompareBoundary struct {
+	reached     chan struct{}
+	resume      chan struct{}
+	releaseOnce sync.Once
+	pauseOnce   sync.Once
+	rr          atomic.Int32
+	rrClosed    atomic.Int32
+	rc          atomic.Int32
+	entries     atomic.Int32
+	rrPID       atomic.Uint32
+	rcPID       atomic.Uint32
+	phase       string
+}
+
+func (b *provenanceCompareBoundary) release() { b.releaseOnce.Do(func() { close(b.resume) }) }
+func (b *provenanceCompareBoundary) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "FROM kaname.authority_compare_full_v2(") {
+		b.entries.Add(1)
+		b.rcPID.Store(conn.PgConn().PID())
+		b.pauseOnce.Do(func() {
+			close(b.reached)
+			select {
+			case <-b.resume:
+			case <-ctx.Done():
+			}
+		})
+	}
+	if strings.HasPrefix(data.SQL, "begin") && strings.Contains(data.SQL, "repeatable read") {
+		b.rrPID.Store(conn.PgConn().PID())
+	}
+	return context.WithValue(ctx, provenanceCompareTraceKey{}, data.SQL)
+}
+func (b *provenanceCompareBoundary) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if data.Err != nil {
+		return
+	}
+	sql, _ := ctx.Value(provenanceCompareTraceKey{}).(string)
+	switch {
+	case strings.HasPrefix(sql, "begin") && strings.Contains(sql, "repeatable read"):
+		b.phase = "rr"
+		b.rr.Add(1)
+	case strings.HasPrefix(sql, "begin") && strings.Contains(sql, "read committed"):
+		b.phase = "rc"
+		b.rc.Add(1)
+	case sql == "rollback":
+		if b.phase == "rr" {
+			b.rrClosed.Add(1)
+		}
+		b.phase = ""
+	}
+}
+
+func TestRoleProjectionCheckpointPlannedCompareRestagesBeforeGlobal(t *testing.T) {
+	for _, change := range []string{"unchanged", "authored", "relevant-catalog"} {
+		t.Run(change, func(t *testing.T) {
+			r, owner := writerProtocolRigBeforePreparation(t)
+			ctx, cancel := context.WithTimeout(r.ctx, 15*time.Second)
+			defer cancel()
+			uid, account := kac127SeedUserAndAccount(t, ctx, r.admin, "provstage")
+			role := domain.Role{ID: domain.RoleID(ids.NewID(domain.PrefixRole)), AccountID: domain.AccountID(account), Name: "provenance_stage", Rules: domain.Rules{{Module: "iam", Resources: []string{"account"}, Verbs: []string{"get"}}}, CreatedByUserID: domain.UserID(uid)}
+			var err error
+			role.Permissions, err = domain.CompileRules(role.Rules)
+			require.NoError(t, err)
+			projection, err := r.bundle.Projection(role)
+			require.NoError(t, err)
+			seed, err := kanamepg.New(r.admin, nil).Writer(ctx)
+			require.NoError(t, err)
+			defer seed.Rollback(context.Background())
+			_, err = seed.RolesW().Insert(ctx, role)
+			require.NoError(t, err)
+			require.NoError(t, seed.RolesW().ReplaceRuleSelectors(ctx, role.ID, projection.Selectors))
+			require.NoError(t, seed.RolesW().ReplaceRoleVerbs(ctx, role.ID, projection.Verbs))
+			require.NoError(t, seed.Commit(ctx))
+			// Полный посев предшествует handoff. Compare-only SQL допускает
+			// active identity, а Prepare является только Stage, не активацией.
+			require.NoError(t, owner.PrepareAuthorityBundle(ctx, r.bundle))
+			require.NoError(t, owner.ActivateAuthorityBundle(ctx, r.bundle))
+			var phase, enforcement string
+			var identityVersion, protocolVersion int
+			installed := r.bundle.Identity()
+			require.NoError(t, r.admin.QueryRow(ctx, `SELECT a.phase,a.protocol_version,p.protocol_version,p.enforcement,
+                a.model_id,a.catalog_id,a.projector_version
+                FROM kaname.authority_semantic_identity a CROSS JOIN kaname.authority_writer_protocol p
+                WHERE a.singleton AND p.singleton`).Scan(&phase, &identityVersion, &protocolVersion, &enforcement,
+				&installed.ModelID, &installed.CatalogID, &installed.ProjectorVersion))
+			require.Equal(t, "active", phase)
+			require.Equal(t, 1, identityVersion)
+			require.Equal(t, 1, protocolVersion)
+			require.Equal(t, "strict", enforcement)
+			require.Equal(t, r.bundle.Identity(), installed)
+			want := projection.Checkpoint
+			actor := domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)}
+			intent := kaname.SemanticReadIntent{Actor: actor, Roles: []domain.RoleID{role.ID}}
+			barrier := &provenanceCompareBoundary{reached: make(chan struct{}), resume: make(chan struct{})}
+			cfg := r.runtime.Config()
+			cfg.MaxConns, cfg.MinConns = 1, 0
+			cfg.ConnConfig.Tracer = barrier
+			pool, err := pgxpool.NewWithConfig(ctx, cfg)
+			require.NoError(t, err)
+			defer pool.Close()
+			type result struct {
+				writer kaname.SemanticAuthorityWriter
+				err    error
+			}
+			done := make(chan result, 1)
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				w, e := kanamepg.New(pool, nil).PlannedSemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, r.bundle, intent)
+				done <- result{w, e}
+			}()
+			// Даже fatal assertion освобождает паузу, TX и единственный lease.
+			var opened kaname.SemanticAuthorityWriter
+			defer func() {
+				cancel()
+				barrier.release()
+				<-finished
+				if opened == nil {
+					select {
+					case out := <-done:
+						opened = out.writer
+					default:
+					}
+				}
+				if opened != nil {
+					cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+					defer stop()
+					_ = opened.Rollback(cleanup)
+				}
+			}()
+			select {
+			case <-barrier.reached:
+			case <-ctx.Done():
+				t.Fatal("нет границы RR→RC: ", ctx.Err())
+			}
+			require.Equal(t, int32(1), barrier.rr.Load())
+			require.Equal(t, int32(1), barrier.rrClosed.Load(), "RR завершён до entry")
+			require.Equal(t, int32(1), barrier.rc.Load())
+			require.Equal(t, barrier.rrPID.Load(), barrier.rcPID.Load(), "RR и RC используют один backend")
+			require.Equal(t, int32(1), pool.Stat().AcquiredConns())
+			switch change {
+			case "authored":
+				role.Rules[0].Verbs = []string{"list"}
+				role.Permissions, err = domain.CompileRules(role.Rules)
+				require.NoError(t, err)
+				changed, e := r.bundle.Projection(role)
+				require.NoError(t, e)
+				want = changed.Checkpoint
+				require.NotEqual(t, projection.Checkpoint.AuthoredID, want.AuthoredID)
+				// После активации изменение SOURCE входит существующим typed installation port.
+				writer, e := owner.InstallationAuthorityWriter(ctx, kaname.AuthorityRole)
+				require.NoError(t, e)
+				defer writer.Rollback(context.Background())
+				_, e = writer.RolesW().Update(ctx, role, []string{"rules"})
+				require.NoError(t, e)
+				require.NoError(t, writer.RolesW().ReplaceRuleSelectors(ctx, role.ID, changed.Selectors))
+				require.NoError(t, writer.RolesW().ReplaceRoleVerbs(ctx, role.ID, changed.Verbs))
+				require.NoError(t, writer.Commit(ctx))
+			case "relevant-catalog":
+				// Тот же relevant verb коммитится настоящим catalog installation writer.
+				// Commit закрывает прежнюю identity; старый bundle не реактивируем.
+				err = kanamepg.NewCatalogWriteRepo(r.admin).RunInWriteTx(ctx, func(ctx context.Context, writer modulecatalog.CatalogWriter) error {
+					changed, e := writer.UpsertVerb(ctx, catalog.VerbRow{Module: "iam", Resource: "account", Verb: "provenancestage", PerObject: true})
+					require.NoError(t, e)
+					require.True(t, changed)
+					return e
+				})
+				require.NoError(t, err)
+			}
+			barrier.release()
+			select {
+			case out := <-done:
+				opened = out.writer
+				if change == "relevant-catalog" {
+					// Active Given исключает отказ из-за исходного prepared state:
+					// здесь старую identity закрыл именно новый catalog commit.
+					require.ErrorIs(t, out.err, kaname.ErrSemanticIdentityUnavailable)
+					require.Nil(t, opened)
+					require.Equal(t, int32(1), barrier.rr.Load())
+					require.Equal(t, int32(1), barrier.rrClosed.Load())
+					require.Equal(t, int32(1), barrier.rc.Load())
+					require.Equal(t, int32(1), barrier.entries.Load())
+					require.Equal(t, barrier.rrPID.Load(), barrier.rcPID.Load())
+					require.Zero(t, pool.Stat().AcquiredConns())
+					return
+				}
+				require.NoError(t, out.err)
+				require.NotNil(t, opened)
+			case <-ctx.Done():
+				t.Fatal("planned compare не завершился: ", ctx.Err())
+			}
+			attempts := int32(2)
+			if change == "unchanged" {
+				attempts = 1
+			}
+			require.Equal(t, attempts, barrier.rr.Load(), "изменённый stage должен быть перечитан целиком")
+			require.Equal(t, attempts, barrier.rrClosed.Load())
+			require.Equal(t, attempts, barrier.rc.Load())
+			require.Equal(t, attempts, barrier.entries.Load())
+			require.Equal(t, barrier.rrPID.Load(), barrier.rcPID.Load())
+			checkpoint, cost, err := opened.(kaname.SemanticSourceReader).RoleProjectionCheckpoint(ctx, role.ID)
+			require.Equal(t, 2, cost.Reads)
+			require.Positive(t, cost.Rows)
+			require.NoError(t, err)
+			require.Equal(t, want, checkpoint)
+			// Role checkpoint не превращает незаявленный native вопрос в allow.
+			allowed, err := opened.SemanticRelationChecker().Check(ctx, "user:"+uid, "admin", "account:"+account)
+			require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed)
+			require.False(t, allowed)
+			require.NoError(t, opened.Rollback(ctx))
+			require.Zero(t, pool.Stat().AcquiredConns())
 		})
 	}
 }

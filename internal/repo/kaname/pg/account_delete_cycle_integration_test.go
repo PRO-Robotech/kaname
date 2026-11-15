@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -374,8 +375,42 @@ func TestKN664_15_IntentRefusalLeavesNothing(t *testing.T) {
 // TestKN664_20_AccountRemovalRacesProjectCreation — KN664-20: сто повторов,
 // исход каждого — из замкнутого набора. Исход (в) — синхронный отказ двери
 // прав края — на этом уровне не производится: дверь стоит на слушателе.
+// Только диагностический tracer: сохраняет исходный query tracer и не меняет
+// SQL, isolation, повторы или строгий набор допустимых исходов KN664-20.
+// Args не журналируются; исходный SQLSTATE нужен до публичного pgmaperr.
+type accountRemovalConflictTrace struct {
+	t     *testing.T
+	prior pgx.QueryTracer
+}
+type accountRemovalConflictSQLKey struct{}
+
+func (q *accountRemovalConflictTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if q.prior != nil {
+		ctx = q.prior.TraceQueryStart(ctx, conn, data)
+	}
+	return context.WithValue(ctx, accountRemovalConflictSQLKey{}, data.SQL)
+}
+func (q *accountRemovalConflictTrace) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
+	if q.prior != nil {
+		q.prior.TraceQueryEnd(ctx, conn, data)
+	}
+	var pe *pgconn.PgError
+	if !stderrors.As(data.Err, &pe) || (pe.Code != "40001" && pe.Code != "40P01") {
+		return
+	}
+	query, _ := ctx.Value(accountRemovalConflictSQLKey{}).(string)
+	q.t.Logf("KN664-20 исходный conflict pid=%d state=%s detail=%s where=%s SQL=%s", conn.PgConn().PID(), pe.Code, pe.Detail, pe.Where, query)
+}
+
 func TestKN664_20_AccountRemovalRacesProjectCreation(t *testing.T) {
 	e := newRemovalEnv(t)
+	// Подключение к той же test DB; наблюдатель видит исходную ошибку до mapper.
+	config := e.pool.Config()
+	config.ConnConfig.Tracer = &accountRemovalConflictTrace{t: t, prior: config.ConnConfig.Tracer}
+	traced, err := pgxpool.NewWithConfig(context.Background(), config)
+	require.NoError(t, err)
+	t.Cleanup(traced.Close)
+	e = &removalEnv{pool: traced, repo: kanamepg.New(traced, nil), ops: operations.NewRepo(traced, "kaname")}
 	ctx := context.Background()
 	const repeats = 100
 	counts := map[string]int{}

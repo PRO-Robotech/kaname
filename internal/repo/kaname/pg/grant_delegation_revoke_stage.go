@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
@@ -77,15 +78,23 @@ func (p *GrantDelegationRevokeParticipant) GrantDelegationRevokeWriter(ctx conte
 	if err = stage.lockBindings(ctx, w); err != nil {
 		return nil, err
 	}
-	// Pair, GD row, binding advisory/rows могли ждать legacy writers. Только
-	// после всех ожиданий проверяем тот же epoch snapshot и берём DB decision_at.
-	if err = stage.recheck(ctx, w); err != nil {
+	if err = stage.prepareSequenceProgram(ctx, w, "delegation", string(id), authzguard.PrincipalUserID(ctx)); err != nil {
 		return nil, err
 	}
-	return &grantDelegationRevokeTx{
+	// Pair, GD row, binding advisory/rows могли ждать legacy writers. Только
+	// после всех ожиданий проверяем тот же epoch snapshot и берём DB decision_at.
+	candidate := &grantDelegationRevokeTx{
 		grantDelegationWriteTx: &grantDelegationWriteTx{authorityWriteTx: w, bundle: p.binding.owner.bundle},
 		stage:                  stage, delegation: current,
-	}, nil
+	}
+	// Factory возвращает законченный prepared writer: существующий refresh
+	// повторяет protected epochs, берёт final clock и выбирает frozen subset.
+	// Native authority ещё проверяется вызывающим до DML; отказ откатывает TX.
+	// Отдельный stage.recheck оставлял программу без finalize, в том числе пустую.
+	if err = candidate.RefreshGrantDelegationDecision(ctx); err != nil {
+		return nil, err
+	}
+	return candidate, nil
 }
 
 func delegationRevokeStageError(err error) error {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -30,19 +31,20 @@ var errPolicyDiscoveryBudget = errors.New("policy source discovery budget exceed
 // owners содержат OLD/NEW ownerrefs; дополнительные account scopes из stage
 // защищаются её собственным epoch token, не считаются здесь доказанными.
 type policyWriteRequest struct {
-	actor              domain.Subject
-	kind               kaname.AuthorityOperation
-	owners             []kaname.AuthorityOwnerRef
-	roleID             domain.RoleID
-	groupID            domain.GroupID
-	mutationSubjects   []domain.Subject
-	readRoles          []domain.RoleID
-	additionalAccounts []domain.AccountID
-	global             bool
-	nativeQuestions    *nativePolicyQuestions
-	consumedReads      int
-	roleNative         *roleNativeRequest
-	groupNative        *groupAdditionNativeRequest
+	compareGlobalAbsence bool
+	actor                domain.Subject
+	kind                 kaname.AuthorityOperation
+	owners               []kaname.AuthorityOwnerRef
+	roleID               domain.RoleID
+	groupID              domain.GroupID
+	mutationSubjects     []domain.Subject
+	readRoles            []domain.RoleID
+	additionalAccounts   []domain.AccountID
+	global               bool
+	nativeQuestions      *nativePolicyQuestions
+	consumedReads        int
+	roleNative           *roleNativeRequest
+	groupNative          *groupAdditionNativeRequest
 }
 
 type policyPlan struct {
@@ -56,6 +58,7 @@ type policyPlan struct {
 	native         *nativeReadBoundary
 	nativeBudget   *relverdict.AdministrativeReadBudget
 	producers      *producerPopulationCapture
+	population     *policyPopulationToken
 	groupReference *groupAdditionReferenceWitness
 }
 
@@ -160,6 +163,12 @@ func (p *policyPlan) scan(ctx context.Context, tx pgx.Tx, query string, args ...
 			if p.nativeBudget != nil {
 				if err = chargeNativePolicyBudget(p.nativeBudget, 1, 0); err != nil {
 					rows.Close()
+					// The shared budget intercepts the same first excess physical
+					// row before rows++ below. Preserve both exact boundaries;
+					// an earlier native-only exhaustion is not a census overflow.
+					if p.rows >= policyDiscoveryRows {
+						return errors.Join(err, errPolicyDiscoveryBudget)
+					}
 					return err
 				}
 			}
@@ -206,7 +215,7 @@ func (p *GrantPolicyWriters) discoverPolicyPlan(ctx context.Context, tx pgx.Tx, 
 // Составной caller/creator census делит один физический бюджет строк.
 // Проверка consumed предшествует первому запросу; scan останавливается на
 // первой лишней строке, а не после второго полного inventory.
-func (p *GrantPolicyWriters) discoverPolicyPlanWithRows(ctx context.Context, tx pgx.Tx, in policyWriteRequest, consumed int) (*policyPlan, error) {
+func (p *GrantPolicyWriters) discoverPolicyPlanWithRows(ctx context.Context, tx pgx.Tx, in policyWriteRequest, consumed int, shared ...*relverdict.AdministrativeReadBudget) (*policyPlan, error) {
 	if consumed < 0 || consumed > policyDiscoveryRows || in.consumedReads < 0 || in.consumedReads > 4096 {
 		return nil, errPolicyDiscoveryBudget
 	}
@@ -218,12 +227,17 @@ func (p *GrantPolicyWriters) discoverPolicyPlanWithRows(ctx context.Context, tx 
 	}
 	// Предыдущие RR reads входят в тот же бюджет до следующего SQL. У старых
 	// callers consumedReads=0; два прежних initial reads считаются как раньше.
-	var nativeBudget *relverdict.AdministrativeReadBudget
-	if p.captureProducers || in.nativeQuestions != nil || in.roleNative != nil || in.groupNative != nil {
-		nativeBudget = &relverdict.AdministrativeReadBudget{}
-		if err := chargeNativePolicyBudget(nativeBudget, consumed, 2+in.consumedReads); err != nil {
-			return nil, err
-		}
+	if len(shared) > 1 || (len(shared) == 1 && shared[0] == nil) {
+		return nil, kaname.ErrSourceUnconfirmed
+	}
+	nativeBudget := &relverdict.AdministrativeReadBudget{}
+	initialRows := consumed
+	if len(shared) == 1 {
+		nativeBudget = shared[0]
+		initialRows = 0 // Предыдущий collector уже списал эти строки.
+	}
+	if err := chargeNativePolicyBudget(nativeBudget, initialRows, 2+in.consumedReads); err != nil {
+		return nil, err
 	}
 	var isolation string
 	if err := tx.QueryRow(ctx, `SELECT current_setting('transaction_isolation')`).Scan(&isolation); err != nil {
@@ -262,7 +276,7 @@ func (p *GrantPolicyWriters) discoverPolicyPlanWithRows(ctx context.Context, tx 
 	if err != nil {
 		return nil, err
 	}
-	consumed += referenceRows // Точное чтение уже начислено helper-ом общему budget.
+	consumed += referenceRows // Helper уже начислил точное чтение общему budget.
 	plan := &policyPlan{request: in, accounts: map[string]bool{}, guards: map[string]bool{"*": true, subjectPolicyKey(in.actor): true}, global: in.global, rows: consumed, nativeBudget: nativeBudget}
 	plan.groupReference = groupReference
 	plan.request.owners = slices.Clone(in.owners)
@@ -367,7 +381,15 @@ func (p *GrantPolicyWriters) discoverPolicyPlanWithRows(ctx context.Context, tx 
 			return nil, err
 		}
 		if plan.rows-before != len(readIDs) {
-			return nil, kaname.ErrAuthorityClassificationChanged
+			if !in.compareGlobalAbsence || !in.global {
+				return nil, kaname.ErrAuthorityClassificationChanged
+			}
+			// Compare-only GLOBAL может проверить создание новой роли своим TX.
+			// Отсутствующая definition сохраняется exact null, а не считается
+			// существующей; checkpoint всё равно читает реальные authored rows.
+			for _, id := range readIDs {
+				plan.add("", "role:"+id, false)
+			}
 		}
 	}
 	// Binding OLD carriers включаются даже если caller передал только NEW subjects.
@@ -403,33 +425,40 @@ func (p *GrantPolicyWriters) discoverPolicyPlanWithRows(ctx context.Context, tx 
 	}
 	plan.finishClassification()
 	keys := []string{"*"}
-	// Новая отсутствующая ссылка не отменяет версии остальных RR sources.
-	// GLOBAL исключает будущие записи, token обнаруживает уже завершённые.
-	if !plan.global || plan.groupReference != nil {
-		for k := range plan.guards {
-			if k != "*" && !plan.groupReference.excludes(k) {
-				keys = append(keys, k)
-			}
+	for k := range plan.guards {
+		if k != "*" && !plan.groupReference.excludes(k) {
+			keys = append(keys, k)
 		}
-		slices.Sort(keys)
-	} else if in.groupNative != nil {
-		// GLOBAL закрывает будущие записи, но обычный binding не меняет root.
-		// Epoch группы связывает RR carrier/questions census с новой RC TX.
-		keys = append(keys, "group:"+string(in.groupID))
 	}
+	slices.Sort(keys)
 	if len(keys) > policyDiscoveryGuards {
 		return nil, kaname.ErrSourceReadLimit
 	}
-	// После entry GLOBAL держит root эксклюзивно; group epoch дополнительно
-	// обнаруживает изменение population между RR discovery и этим entry.
+	// GLOBAL не стирает exact guards: Resource мог commit между RR и entry.
+	// Полный population token отдельно защищает историческую полноту census.
 	if plan.nativeBudget != nil {
 		if err = chargeNativePolicyBudget(plan.nativeBudget, len(keys), 1); err != nil {
 			return nil, err
 		}
 	}
-	if err = tx.QueryRow(ctx, `SELECT kaname.authority_policy_epoch_read($1::text[])`, keys).Scan(&plan.epochs); err != nil {
+	epochRead := `SELECT kaname.authority_policy_epoch_read($1::text[])`
+	if in.compareGlobalAbsence {
+		// Только явно GLOBAL compare-only порт сохраняет отсутствие exact keys
+		// как null. Future absence защищают root EXCLUSIVE + полный RR→RC token;
+		// production policy writers и положительная actor admission не меняются.
+		if !in.global || p.captureProducers {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		epochRead = `SELECT kaname.authority_compare_epoch_read_v2($1::text[])`
+	}
+	if err = tx.QueryRow(ctx, epochRead, keys).Scan(&plan.epochs); err != nil {
 		return nil, err
 	}
+	population, err := readPolicyPopulationToken(ctx, tx, plan.nativeBudget)
+	if err != nil {
+		return nil, err
+	}
+	plan.population = &population
 	return plan, ctx.Err()
 }
 
@@ -450,14 +479,44 @@ func (p *GrantPolicyWriters) protectPolicyPlan(ctx context.Context, w *authority
 		}
 		slices.Sort(writes)
 	}
-	var at time.Time
-	if err := w.tx.QueryRow(ctx, `SELECT kaname.authority_policy_epoch_lock_for_write($1::jsonb,$2::text[])`, []byte(plan.epochs), writes).Scan(&at); err != nil {
+	if plan.population == nil || w.population == nil || *plan.population != *w.population || !plan.population.valid() || plan.nativeBudget == nil {
+		return kaname.ErrSourceUnconfirmed
+	}
+	var guards map[string]json.RawMessage
+	if json.Unmarshal(plan.epochs, &guards) != nil || len(guards) == 0 || len(guards) > policyDiscoveryGuards {
+		return kaname.ErrSourceUnconfirmed
+	}
+	// SQL читает exact keys до locks, запирает их и повторно читает после.
+	// Все три bounded прохода входят в бюджет до отдельного population scan.
+	if err := chargeNativePolicyBudget(plan.nativeBudget, 3*len(guards), 1); err != nil {
 		return err
 	}
-	if err := plan.groupReference.recheck(ctx, w, plan.nativeBudget); err != nil {
+	remaining := plan.nativeBudget.RemainingRows()
+	if remaining == 0 {
+		return kaname.ErrSourceReadLimit
+	}
+	population, err := plan.population.json()
+	if err != nil {
+		return err
+	}
+	var at time.Time
+	var scanned int
+	if err = w.tx.QueryRow(ctx, `SELECT decision_at, population_rows FROM kaname.authority_policy_epoch_lock_full_v2($1::jsonb,$2::text[],$3::jsonb,$4)`, []byte(plan.epochs), writes, population, remaining).Scan(&at, &scanned); err != nil {
+		return err
+	}
+	if scanned != plan.population.count || scanned > remaining {
+		return kaname.ErrSourceUnconfirmed
+	}
+	if err = chargeNativePolicyBudget(plan.nativeBudget, scanned, 0); err != nil {
+		return err
+	}
+	if err = plan.groupReference.recheck(ctx, w, plan.nativeBudget); err != nil {
 		return err
 	}
 	w.fence.decisionAt = at.UTC()
+	// Full и captured consumers продолжают один бюджет и после metadata scans.
+	w.producerBudget = plan.nativeBudget
+	w.policyGuards = maps.Clone(plan.guards)
 	if plan.producers != nil {
 		if err := plan.producers.bind(w, p.bundle, plan.nativeBudget); err != nil {
 			return err

@@ -37,3 +37,25 @@ type DelegatedBindingDecisionRunner interface {
 		func(domain.AccessBinding, domain.Role) []ab.RelationTuple,
 		func(context.Context, SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error
 }
+
+// BindingMetadataDecision сообщает весь resolved mutable набор ДО clock.
+// Здесь нет SQL, emitter program или выбираемых caller sequence IDs.
+type BindingMetadataDecision struct {
+	ID                      domain.AccessBindingID
+	ApplyDeletionProtection bool
+	DeletionProtection      bool
+	ApplyLabels             bool
+	Labels                  domain.Labels
+}
+type BindingMetadataDecisionRunner interface {
+	RunBindingMetadataDecision(context.Context, domain.Subject, BindingMetadataDecision,
+		func(context.Context, SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error
+}
+
+// Синхронная проверка RPC — отдельная нулевая программа. Она не может
+// потребить reserved effects будущего LRO и не угадывает режим по callback.
+type BindingAuthorizationDecisionRunner interface {
+	RunBindingAuthorizationDecision(context.Context, domain.Subject, domain.AccessBinding, bool, bool,
+		func(domain.AccessBinding, domain.Role) []ab.RelationTuple,
+		func(context.Context, SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error
+}

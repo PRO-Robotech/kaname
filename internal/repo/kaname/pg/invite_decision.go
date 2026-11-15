@@ -158,6 +158,12 @@ func (p *InviteDecisions) once(ctx context.Context, in kaname.InviteDecisionInte
 		return err
 	}
 	w, err := enterInviteWriter(ctx, conn.BeginTx, func(ctx context.Context, tx pgx.Tx) (*authorityWriteTx, error) {
+		// Активный путь передаёт тот же RR-снимок источников в защищённый
+		// вход: protectPolicyPlan затем сравнивает его с токеном writer.
+		// Prepared не передаёт nil-план как подтверждённый снимок.
+		if plan != nil {
+			return p.policy.repo.enterAuthority(ctx, tx, intent, []byte("[]"), kaname.AuthorityFenceGlobal, nil, false, "participant", plan)
+		}
 		return p.policy.repo.enterAuthority(ctx, tx, intent, []byte("[]"), kaname.AuthorityFenceGlobal, nil, false, "participant")
 	})
 	if err != nil {

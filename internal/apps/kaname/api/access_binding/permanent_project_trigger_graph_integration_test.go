@@ -84,13 +84,52 @@ func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T) {
         ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass,'kaname.resource_registration_command'::regclass,'kaname.catalog_resource'::regclass,'kaname.registration_catalog_fence'::regclass)
         AND (relrowsecurity OR relforcerowsecurity)`).Scan(&bad))
 	require.Zero(t, bad, "RLS callbacks require a new graph proof")
-	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
+	// Остаток графа — ровно 16 исторических AFTER STATEMENT epoch callbacks.
+	// Закреплены функция, событие, режим и transition tables; новое имя,
+	// BEFORE/ROW, условие, аргументы или иной transition alias не допускаются.
+	// Тела и private callees уже проверены AssertReviewedGraph выше.
+	var epochCallbacks []string
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT array_agg(
+ c.relname||'|'||t.tgname||'|'||n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')'||
+ '|'||t.tgtype::text||'|'||t.tgenabled::text||'|'||coalesce(t.tgoldtable::text,'')||'|'||coalesce(t.tgnewtable::text,'')||
+ '|'||t.tgnargs::text||'|'||(t.tgqual IS NOT NULL)::text||'|'||t.tgdeferrable::text||'|'||t.tginitdeferred::text
+ ORDER BY c.relname COLLATE "C",t.tgname COLLATE "C")
+ FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
+ JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_class c ON c.oid=t.tgrelid
         WHERE t.tgrelid IN ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)
         AND NOT t.tgisinternal AND NOT (
  p.proname IN ('resource_mirror_keeps_the_bound_project','resource_parent_edge_keeps_the_bound_project','resource_registration_locks_writers') OR
  (t.tgname='authority_protocol_row' AND t.tgfoid='kaname.authority_protocol_row_guard()'::regprocedure AND t.tgtype=31 AND t.tgenabled='O') OR
- (t.tgname='authority_protocol_statement' AND t.tgfoid='kaname.authority_protocol_statement_guard()'::regprocedure AND t.tgtype=62 AND t.tgenabled='O'))`).Scan(&bad))
-	require.Zero(t, bad, "no observable callback may precede complete command validation")
+ (t.tgname='authority_protocol_statement' AND t.tgfoid='kaname.authority_protocol_statement_guard()'::regprocedure AND t.tgtype=62 AND t.tgenabled='O') OR
+ (t.tgname='authority_resource_effect_applied' AND t.tgfoid='kaname._authority_resource_effect_applied_v2()'::regprocedure AND t.tgtype=29 AND t.tgenabled='O'))`).Scan(&epochCallbacks))
+	require.Equal(t, []string{
+		"resource_mirror|binding_epoch_delete|kaname.authority_binding_epoch_changed()|8|O|old_epoch_rows||0|false|false|false",
+		"resource_mirror|binding_epoch_insert|kaname.authority_binding_epoch_changed()|4|O||new_epoch_rows|0|false|false|false",
+		"resource_mirror|binding_epoch_truncate|kaname.authority_binding_epoch_changed()|32|O|||0|false|false|false",
+		"resource_mirror|binding_epoch_update|kaname.authority_binding_epoch_changed()|16|O|old_epoch_rows|new_epoch_rows|0|false|false|false",
+		"resource_mirror|policy_epoch_delete|kaname.authority_policy_changed()|8|O|old_policy_rows||0|false|false|false",
+		"resource_mirror|policy_epoch_insert|kaname.authority_policy_changed()|4|O||new_policy_rows|0|false|false|false",
+		"resource_mirror|policy_epoch_truncate|kaname.authority_policy_changed()|32|O|||0|false|false|false",
+		"resource_mirror|policy_epoch_update|kaname.authority_policy_changed()|16|O|old_policy_rows|new_policy_rows|0|false|false|false",
+		"resource_parent_edge|binding_epoch_delete|kaname.authority_binding_epoch_changed()|8|O|old_epoch_rows||0|false|false|false",
+		"resource_parent_edge|binding_epoch_insert|kaname.authority_binding_epoch_changed()|4|O||new_epoch_rows|0|false|false|false",
+		"resource_parent_edge|binding_epoch_truncate|kaname.authority_binding_epoch_changed()|32|O|||0|false|false|false",
+		"resource_parent_edge|binding_epoch_update|kaname.authority_binding_epoch_changed()|16|O|old_epoch_rows|new_epoch_rows|0|false|false|false",
+		"resource_parent_edge|policy_epoch_delete|kaname.authority_policy_changed()|8|O|old_policy_rows||0|false|false|false",
+		"resource_parent_edge|policy_epoch_insert|kaname.authority_policy_changed()|4|O||new_policy_rows|0|false|false|false",
+		"resource_parent_edge|policy_epoch_truncate|kaname.authority_policy_changed()|32|O|||0|false|false|false",
+		"resource_parent_edge|policy_epoch_update|kaname.authority_policy_changed()|16|O|old_policy_rows|new_policy_rows|0|false|false|false",
+	}, epochCallbacks, "epoch callbacks должны точно совпадать с проверенным AFTER STATEMENT графом")
+	// AFTER ROW обязан подтвердить каждый реально применённый эффект. Его
+	// точное тело закреплено AssertReviewedGraph; BEFORE попытка не заменяет
+	// required-consumption, а legacy без manifest остаётся no-op.
+	var applied int
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_trigger t
+ WHERE t.tgrelid IN ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)
+ AND NOT t.tgisinternal AND t.tgname='authority_resource_effect_applied'
+ AND t.tgfoid='kaname._authority_resource_effect_applied_v2()'::regprocedure
+ AND t.tgtype=29 AND t.tgenabled='O'`).Scan(&applied))
+	require.Equal(t, 2, applied, "обязательный AFTER-consumption установлен на обеих проекциях")
 	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_constraint WHERE conrelid IN
         ('kaname.resource_mirror'::regclass,'kaname.resource_parent_edge'::regclass)
         AND pg_get_constraintdef(oid) LIKE '%kaname.%'`).Scan(&bad))

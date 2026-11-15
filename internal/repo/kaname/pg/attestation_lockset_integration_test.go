@@ -4,6 +4,7 @@ package pg_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"testing"
@@ -163,8 +164,12 @@ func TestAttestationLocksetMigrationSQLRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	parts := strings.Split(string(raw), "-- +goose Down")
 	require.Len(t, parts, 2)
-	var original, acl string
-	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT prosrc,coalesce(proacl::text,'') FROM pg_catalog.pg_proc WHERE oid='kaname.authority_protocol_attestation()'::regprocedure`).Scan(&original, &acl))
+	// Up восстанавливает собственную историческую версию, а не функцию
+	// из более поздней append-миграции. Оба prosrc закреплены точными hash.
+	const upBodySHA256 = "67714f8db5e7ee3e0b071834695d3239ef029bd122f8ee3bf0bff0cc00ae3086"
+	const downBodySHA256 = "00c423f2ebc7fbbfbf77e2b3126a803c4c00f677ed6b517f71d0f88762181ce1"
+	var acl string
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT coalesce(proacl::text,'') FROM pg_catalog.pg_proc WHERE oid='kaname.authority_protocol_attestation()'::regprocedure`).Scan(&acl))
 	for _, restoreUp := range []bool{false, true} {
 		sql := parts[1]
 		if restoreUp {
@@ -182,11 +187,13 @@ func TestAttestationLocksetMigrationSQLRoundTrip(t *testing.T) {
 		require.Equal(t, acl, actualACL)
 		require.True(t, definer)
 		require.Equal(t, "search_path=pg_catalog,pg_temp", strings.ReplaceAll(config, " ", ""))
+		expectedBodySHA256 := downBodySHA256
 		if restoreUp {
-			require.Equal(t, original, body)
+			expectedBodySHA256 = upBodySHA256
 		} else {
 			require.Contains(t, body, "FOR k IN SELECT DISTINCT hashtext(value)")
 		}
+		require.Equal(t, expectedBodySHA256, fmt.Sprintf("%x", sha256.Sum256([]byte(body))), "точный prosrc собственной версии Down/Up")
 		runtimeTX, e := r.runtime.Begin(r.ctx)
 		require.NoError(t, e)
 		defer attestationLocksetRollback(runtimeTX)

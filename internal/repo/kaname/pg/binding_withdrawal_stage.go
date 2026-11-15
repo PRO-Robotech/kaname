@@ -315,7 +315,11 @@ func (s *bindingWithdrawalStage) open(ctx context.Context, owner *GroupMembershi
 	if s.policy != nil {
 		in = s.policy.intent(owner.bundle)
 	}
-	w, err := owner.repo.coordinatedAuthorityWriterWithBegin(ctx, in, purpose, s.conn.BeginTx)
+	var policy []*policyPlan
+	if s.policy != nil {
+		policy = append(policy, s.policy)
+	}
+	w, err := owner.repo.coordinatedAuthorityWriterWithBegin(ctx, in, purpose, s.conn.BeginTx, policy...)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +442,7 @@ func (s *bindingWithdrawalStage) lockBindings(ctx context.Context, w *authorityW
 }
 func (s *bindingWithdrawalStage) emitDeletes(ctx context.Context, w *authorityWriteTx) error {
 	return s.visitTuplePages(ctx, w, func(ctx context.Context, tuples []ab.RelationTuple) error {
-		return w.AccessBindingsW().EmitRelationDelete(ctx, tuples)
+		return emitPreparedBindingDelete(ctx, w, tuples)
 	})
 }
 func (s *bindingWithdrawalStage) visitTuplePages(ctx context.Context, w *authorityWriteTx, visit func(context.Context, []ab.RelationTuple) error) error {
@@ -464,4 +468,26 @@ func (s *bindingWithdrawalStage) visitTuplePages(ctx context.Context, w *authori
 			return err
 		}
 	}
+}
+
+func (s *bindingWithdrawalStage) prepareSequenceProgram(ctx context.Context, w *authorityWriteTx, mode, id, actor string) error {
+	rows, reads := 100000, 4096
+	if s.policy != nil && s.policy.nativeBudget != nil {
+		rows, reads = s.policy.nativeBudget.RemainingRows(), s.policy.nativeBudget.RemainingReads()
+	}
+	var raw []byte
+	if err := w.tx.QueryRow(ctx, `SELECT kaname.authority_binding_withdrawal_sequence_prepare_v3($1,$2,$3,$4,$5)`, mode, id, actor, rows, reads).Scan(&raw); err != nil {
+		return err
+	}
+	var cost struct {
+		Rows  int `json:"rows"`
+		Reads int `json:"reads"`
+	}
+	if err := json.Unmarshal(raw, &cost); err != nil {
+		return err
+	}
+	if s.policy != nil && s.policy.nativeBudget != nil {
+		return chargeNativePolicyBudget(s.policy.nativeBudget, cost.Rows, cost.Reads)
+	}
+	return ctx.Err()
 }

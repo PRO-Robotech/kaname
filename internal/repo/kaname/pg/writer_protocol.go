@@ -54,14 +54,14 @@ func validateAuthorityIntent(in kaname.AuthorityWriteIntent) error {
 
 // kaname#1034: каждая попытка — новая физическая TX. До entry доступны только
 // readonly ownership discovery и immutable bundle; callback/старых locks нет.
-func (r *Repository) coordinatedAuthorityWriter(ctx context.Context, in kaname.AuthorityWriteIntent, purpose string) (*authorityWriteTx, error) {
-	return r.coordinatedAuthorityWriterWithBegin(ctx, in, purpose, r.master.BeginTx)
+func (r *Repository) coordinatedAuthorityWriter(ctx context.Context, in kaname.AuthorityWriteIntent, purpose string, policy ...*policyPlan) (*authorityWriteTx, error) {
+	return r.coordinatedAuthorityWriterWithBegin(ctx, in, purpose, r.master.BeginTx, policy...)
 }
 
 // kaname#1034: завершённый RR stage передаёт idle connection в тот же coordinator.
 // Это всегда НОВАЯ RC TX; один проход не ждёт второй slot удерживая первый.
 // Обычные callers сохраняют pool.BeginTx и его прежний release lifecycle.
-func (r *Repository) coordinatedAuthorityWriterWithBegin(ctx context.Context, in kaname.AuthorityWriteIntent, purpose string, begin func(context.Context, pgx.TxOptions) (pgx.Tx, error)) (*authorityWriteTx, error) {
+func (r *Repository) coordinatedAuthorityWriterWithBegin(ctx context.Context, in kaname.AuthorityWriteIntent, purpose string, begin func(context.Context, pgx.TxOptions) (pgx.Tx, error), policy ...*policyPlan) (*authorityWriteTx, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (r *Repository) coordinatedAuthorityWriterWithBegin(ctx context.Context, in
 		if e != nil {
 			return nil, e
 		}
-		opened, e := r.enterAuthority(ctx, tx, in, owners, mode, accounts, attempt > 0, purpose)
+		opened, e := r.enterAuthority(ctx, tx, in, owners, mode, accounts, attempt > 0, purpose, policy...)
 		if e == nil {
 			return opened, nil
 		}
@@ -104,7 +104,7 @@ func (r *Repository) coordinatedAuthorityWriterWithBegin(ctx context.Context, in
 	return nil, kaname.ErrAuthorityClassificationChanged
 }
 
-func (r *Repository) enterAuthority(ctx context.Context, tx pgx.Tx, in kaname.AuthorityWriteIntent, owners []byte, mode kaname.AuthorityFenceMode, accounts []domain.AccountID, rediscover bool, purpose string) (*authorityWriteTx, error) {
+func (r *Repository) enterAuthority(ctx context.Context, tx pgx.Tx, in kaname.AuthorityWriteIntent, owners []byte, mode kaname.AuthorityFenceMode, accounts []domain.AccountID, rediscover bool, purpose string, policy ...*policyPlan) (*authorityWriteTx, error) {
 	if rediscover && mode == kaname.AuthorityFenceAccounts {
 		var actual []string
 		var global bool
@@ -129,26 +129,62 @@ func (r *Repository) enterAuthority(ctx context.Context, tx pgx.Tx, in kaname.Au
 	if mode == kaname.AuthorityFenceGlobal {
 		label = "global"
 	}
+	if r.fullContract != nil && !r.fullContractMatches(in.Bundle) {
+		return nil, kaname.ErrSemanticIdentityUnavailable
+	}
 	identity := in.Bundle.Identity()
 	var at time.Time
-	if err := tx.QueryRow(ctx, `SELECT kaname.authority_protocol_enter($1,$2::text[],$3::jsonb,$4,$5,$6,$7,1,$8)`, label, ids, owners, string(in.Kind), identity.ModelID, identity.CatalogID, identity.ProjectorVersion, purpose).Scan(&at); err != nil {
-		return nil, err
+	var population *policyPopulationToken
+	if len(policy) > 1 || (len(policy) == 1 && policy[0] == nil) {
+		return nil, kaname.ErrInvalidAuthorityFencePlan
+	}
+	if len(policy) == 1 {
+		plan := policy[0]
+		if plan.population == nil || !plan.population.valid() || plan.nativeBudget == nil {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		copy := *plan.population
+		population = &copy
+		encoded, err := population.json()
+		if err != nil {
+			return nil, err
+		}
+		query := `SELECT kaname.authority_protocol_enter_full_v2($1,$2::text[],$3::jsonb,$4,$5,$6,$7,$8,$9::jsonb)`
+		if r.fullContract != nil {
+			query = `SELECT kaname.authority_protocol_enter_full_v3($1,$2::text[],$3::jsonb,$4,$5,$6,$7,$8,$9::jsonb)`
+		}
+		if err = tx.QueryRow(ctx, query, label, ids, owners, string(in.Kind), identity.ModelID, identity.CatalogID, identity.ProjectorVersion, purpose, encoded).Scan(&at); err != nil {
+			return nil, err
+		}
+	} else {
+		query := `SELECT kaname.authority_protocol_enter_typed_v2($1,$2::text[],$3::jsonb,$4,$5,$6,$7,$8)`
+		if r.fullContract != nil {
+			query = `SELECT kaname.authority_protocol_enter_typed_v3($1,$2::text[],$3::jsonb,$4,$5,$6,$7,$8)`
+		}
+		if err := tx.QueryRow(ctx, query, label, ids, owners, string(in.Kind), identity.ModelID, identity.CatalogID, identity.ProjectorVersion, purpose).Scan(&at); err != nil {
+			return nil, err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	w := &authorityWriteTx{writeTx: &writeTx{readTx: readTx{tx: tx}}, fence: authorityFence{mode: mode, accounts: slices.Clone(accounts), decisionAt: at.UTC()}}
+	w := &authorityWriteTx{population: population, writeTx: &writeTx{readTx: readTx{tx: tx}}, fence: authorityFence{mode: mode, accounts: slices.Clone(accounts), decisionAt: at.UTC()}}
 	return w, nil
 }
 
 var _ kaname.CoordinatedAuthorityWriterFactory = (*Repository)(nil)
 
+// Старый широкий порт не содержал actor/source intent. После ABI2 его нельзя
+// выдавать за protected full reader; вызывающий выбирает explicit read plan
+// либо entry-only участие. Отказ происходит до acquire и до любого SQL.
 func (r *Repository) CoordinatedAuthorityWriter(ctx context.Context, in kaname.AuthorityWriteIntent) (kaname.SemanticAuthorityWriter, error) {
-	w, err := r.coordinatedAuthorityWriter(ctx, in, "decision")
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return newSemanticAuthorityWriter(w, in.Bundle), nil
+	if err := validateAuthorityIntent(in); err != nil {
+		return nil, err
+	}
+	return nil, kaname.ErrSemanticReadPlanRequired
 }
 func (r *Repository) TransitionalAuthorityWriter(ctx context.Context, in kaname.AuthorityWriteIntent) (kaname.AuthorityWriter, error) {
 	w, err := r.coordinatedAuthorityWriter(ctx, in, "transition")

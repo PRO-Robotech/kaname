@@ -11,6 +11,7 @@ package account
 import (
 	"context"
 	"fmt"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -27,8 +28,10 @@ import (
 
 // DeleteAccountUseCase.
 type DeleteAccountUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	crudConfigured bool
+	crudFactory    kanamerepo.AccountDeleteWriterFactory
+	repo           Repo
+	opsRepo        operations.Repo
 }
 
 // NewDeleteAccountUseCase.
@@ -78,14 +81,16 @@ func (u *DeleteAccountUseCase) Execute(ctx context.Context, id domain.AccountID)
 	}
 
 	actor := authzguard.PrincipalUserID(ctx)
+	crudPrincipal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, crudPrincipal)
 		return u.doDelete(ctx, id, actor)
 	})
 	return &op, nil
 }
 
 func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID, actor string) (*anypb.Any, error) {
-	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
+	if err := shared.DoWithWriteTxVoid(ctx, u.crudRepo(id),
 		func(ctx context.Context, w Writer) error {
 			// ПЕРВЫЙ ОПЕРАТОР — замок строки аккаунта и перечень его участников
 			// (kaname#664, Р6). Членства уходят каскадом ключа

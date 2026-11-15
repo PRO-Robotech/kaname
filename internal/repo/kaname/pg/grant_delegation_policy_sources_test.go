@@ -45,6 +45,7 @@ func TestDelegationPolicyCreatorSharesEarlyPhysicalRowBudget(t *testing.T) {
 			p := &GrantPolicyWriters{repo: &Repository{}}
 			plan, err := p.discoverPolicyPlanWithRows(context.Background(), tx, policyWriteRequest{actor: domain.Subject{Type: domain.SubjectTypeUser, ID: "creator"}, kind: kaname.AuthorityDelegation}, consumed)
 			require.ErrorIs(t, err, errPolicyDiscoveryBudget)
+			require.ErrorIs(t, err, kaname.ErrSourceReadLimit)
 			require.Nil(t, plan)
 			require.Equal(t, 1, tx.pages)
 			require.Equal(t, policyDiscoveryRows-consumed+1, tx.returned)

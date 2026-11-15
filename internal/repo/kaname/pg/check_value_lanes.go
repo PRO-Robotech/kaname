@@ -181,6 +181,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"authority_bundle_handoff":    nil,
 	"authority_semantic_identity": nil,
 	"authority_writer_protocol":   nil,
+	// Owner-managed ACL recovery metadata and the fixed writer generation are
+	// produced by migrations/lifecycle, never supplied by a public caller.
+	"authority_producer_acl_restore_v2": nil,
+	"authority_writer_contract":         nil,
 	// Код авторизации: вызов PKCE, его способ и адрес возврата прислал клиент;
 	// дайджест, сроки и погашение — служба.
 	"authorization_codes": {

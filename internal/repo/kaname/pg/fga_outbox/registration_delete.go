@@ -19,6 +19,19 @@ import (
 // EmitRegistrationDeleteTx — только отзыв регистрации. Общий EmitDeleteTx
 // обслуживает и AB, поэтому не вправе отзывать provenance регистрации.
 func EmitRegistrationDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple, version time.Time) error {
+	return emitRegistrationDeleteAt(ctx, tx, tuples, version, time.Time{})
+}
+
+// Финальное время принадлежит подготовленному coordinated writer. Legacy
+// вызов выше сохраняет прежний clock; этот путь его повторно не читает.
+func EmitRegistrationDecisionDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple, version, decisionAt time.Time) error {
+	if decisionAt.IsZero() {
+		return fmt.Errorf("fga_outbox: invalid decision coordinate")
+	}
+	return emitRegistrationDeleteAt(ctx, tx, tuples, version, decisionAt)
+}
+
+func emitRegistrationDeleteAt(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple, version, decisionAt time.Time) error {
 	if tx == nil {
 		return fmt.Errorf("fga_outbox: tx must not be nil")
 	}
@@ -41,7 +54,7 @@ func EmitRegistrationDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.R
 		objects = append(objects, t.Object)
 		versions = append(versions, pgtype.Timestamptz{Time: version, Valid: !version.IsZero()})
 	}
-	actionAt, err := retireProducerOwnersTx(ctx, tx, users, relations, objects, versions)
+	actionAt, err := retireProducerOwnersAt(ctx, tx, users, relations, objects, versions, decisionAt)
 	if err != nil {
 		return err
 	}
@@ -82,10 +95,12 @@ func EmitRegistrationDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.R
 // INSERT/его trigger не может захватить fact locks до завершения этой функции.
 // Ordered строки сравниваются с SourceVersion; legacy — с той же actionAt,
 // которая передаётся как created_at, даже если UPDATE пришлось ждать.
-func retireProducerOwnersTx(ctx context.Context, tx pgx.Tx, users, relations, objects []string, versions []pgtype.Timestamptz) (time.Time, error) {
-	var actionAt time.Time
-	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&actionAt); err != nil {
-		return actionAt, err
+func retireProducerOwnersAt(ctx context.Context, tx pgx.Tx, users, relations, objects []string, versions []pgtype.Timestamptz, decisionAt time.Time) (time.Time, error) {
+	actionAt := decisionAt
+	if actionAt.IsZero() {
+		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&actionAt); err != nil {
+			return actionAt, err
+		}
 	}
 	_, err := tx.Exec(ctx, `UPDATE kaname.producer_source_receipt p
  SET active=false,invalidation='owner_withdrawn',model_identity=NULL,catalog_identity=NULL,projector_version=NULL

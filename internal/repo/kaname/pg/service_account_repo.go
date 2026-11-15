@@ -154,7 +154,11 @@ type saWriter struct {
 }
 
 func (w *saWriter) Insert(ctx context.Context, sa domain.ServiceAccount) (domain.ServiceAccount, error) {
-	now := time.Now().UTC()
+	return w.insertAt(ctx, sa, time.Now().UTC())
+}
+
+// Prepared CRUD передаёт время из закрытой программы. Старый Insert сохраняет свои часы.
+func (w *saWriter) insertAt(ctx context.Context, sa domain.ServiceAccount, now time.Time) (domain.ServiceAccount, error) {
 	labelsJSON, err := marshalLabels(sa.Labels)
 	if err != nil {
 		return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())

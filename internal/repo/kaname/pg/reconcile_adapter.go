@@ -62,7 +62,7 @@ func NewReconcileAdapter(pool *pgxpool.Pool, cat catalog.Source) *ReconcileAdapt
 
 // WithTx runs fn inside a single writer-tx (reconcile.TxRunner). Commit on
 // success, rollback on error/panic.
-func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Context, s reconcile.ReconcileStore) error) error {
+func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Context, s reconcile.ReconcileStore) error) (err error) {
 	tx, err := a.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("reconcile: begin tx: %w", err)
@@ -70,9 +70,27 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 	committed := false
 	defer func() {
 		if !committed {
-			_ = tx.Rollback(ctx)
+			// Отмена запроса не должна отменить освобождение самой транзакции.
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			rollbackErr := tx.Rollback(cleanup)
+			stop()
+			if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+				err = errors.Join(err, fmt.Errorf("reconcile: rollback: %w", rollbackErr))
+			}
 		}
 	}()
+	// Drain берёт EXCLUSIVE root до dependency tables. Наш shared root нужен
+	// до protocol row admission: иначе drain успеет закрыть callback его table
+	// locks и затем ждать удерживаемую нами protocol row.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(1262569283,0)`); err != nil {
+		return fmt.Errorf("reconcile: enter lifecycle barrier: %w", err)
+	}
+	// Admission берётся до callback и его row/advisory locks. Иначе форвард
+	// держит binding KEY SHARE, ждёт admission, а AccountDelete — наоборот.
+	// Отсутствие ABI или EXECUTE завершает вход: unsigned strict не обходится.
+	if _, err := tx.Exec(ctx, `SELECT kaname.authority_parent_prelock_admit_v3()`); err != nil {
+		return fmt.Errorf("reconcile: admit writer transaction: %w", err)
+	}
 	store := &reconcileStore{tx: tx, cat: a.cat.Facts()}
 	if err := fn(ctx, store); err != nil {
 		return err

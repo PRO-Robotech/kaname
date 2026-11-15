@@ -297,15 +297,19 @@ func TestGroup_ListMembers_PagesWithTheContinuationToken(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-gpage", owner)
 	g := seedGroup(t, ctx, repo, acc.ID, "g-page")
 
-	w, err := repo.Writer(ctx)
-	require.NoError(t, err)
+	// Независимые seed-транзакции завершаются до записи членств.
+	// Иначе очередной seed ждёт consumer, удерживаемый этой же проверкой.
 	want := make([]string, 0, 3)
 	for _, suffix := range []string{"p1", "p2", "p3"} {
-		uid := mustSeedUser(t, ctx, pool, "gpage-"+suffix)
+		want = append(want, string(mustSeedUser(t, ctx, pool, "gpage-"+suffix)))
+	}
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	defer func() { _ = w.Rollback(ctx) }()
+	for _, uid := range want {
 		require.NoError(t, w.GroupsW().AddMember(ctx, domain.GroupMember{
 			GroupID: g.ID, MemberType: domain.SubjectTypeUser, MemberID: domain.SubjectID(uid),
 		}))
-		want = append(want, string(uid))
 	}
 	require.NoError(t, w.Commit(ctx))
 

@@ -1018,11 +1018,15 @@ func TestInviteDecisionSelfAndNewMembershipDoNotSupplyOldAuthority(t *testing.T)
 	}
 }
 
-// Проверяется настоящий read-time checkpoint на coordinated writer. Вычисленный
+// Проверяется настоящий read-time checkpoint на writer с явным планом чтения.
 // bundle.Projection сам по себе не подтверждает ни строки БД, ни снятие pending.
 func inviteAssertTypedAuthority(t *testing.T, f inviteDecisionFixture, actor domain.Subject, roleID domain.RoleID, owner bool) {
 	t.Helper()
-	w, err := f.r.repo.CoordinatedAuthorityWriter(f.r.ctx, kaname.AuthorityWriteIntent{Kind: kaname.AuthorityIdentity, Bundle: f.r.bundle, Plan: kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}})
+	read := kaname.SemanticReadIntent{Actor: actor, Roles: []domain.RoleID{roleID}, Native: []kaname.SemanticNativeQuestion{
+		{Relation: "admin", Object: "account:" + f.r.a},
+		{Relation: "admin", Object: "project:" + string(f.project)},
+	}}
+	w, err := f.r.repo.PlannedSemanticAuthorityWriter(f.r.ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, f.r.bundle, read)
 	require.NoError(t, err)
 	defer policyFixtureRollback(w)
 	role, err := w.Roles().Get(f.r.ctx, roleID)

@@ -22,8 +22,9 @@ import (
 
 // Repository — реализация kaname.Repository поверх pgxpool.
 type Repository struct {
-	master *pgxpool.Pool
-	slave  *pgxpool.Pool // nil = fallback на master
+	fullContract *FullWriterContract
+	master       *pgxpool.Pool
+	slave        *pgxpool.Pool // nil = fallback на master
 }
 
 // New собирает Repository. slave может быть nil — тогда Reader-TX идут на master

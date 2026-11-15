@@ -70,6 +70,9 @@ func discoverNativeReadBoundary(ctx context.Context, tx pgx.Tx, bundle *granteff
 		return nil, err
 	}
 	keys := p.guardKeys()
+	if len(keys) > policyDiscoveryGuards {
+		return nil, kaname.ErrSourceReadLimit
+	}
 	if err = tx.QueryRow(ctx, `SELECT kaname.authority_policy_epoch_read($1::text[])`, keys).Scan(&p.epochs); err != nil {
 		return nil, err
 	}

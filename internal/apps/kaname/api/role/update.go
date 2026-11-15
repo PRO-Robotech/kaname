@@ -312,7 +312,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 }
 
 func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []string, actor string, changed []string, expectedVersion string) (*anypb.Any, error) {
-	updated, err := u.policy.run(ctx, u.repo, r, false, slices.Contains(changed, "rules"),
+	updated, err := u.policy.runUpdate(ctx, u.repo, r, slices.Contains(changed, "rules"), mask, expectedVersion,
 		func(ctx context.Context, w Writer) (domain.Role, error) {
 			var projection catalog.GrantProjection
 			if slices.Contains(changed, "rules") {

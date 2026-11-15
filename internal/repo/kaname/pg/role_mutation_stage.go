@@ -70,7 +70,7 @@ func (s *roleMutationStage) include(scopes groupMembershipScope) {
 }
 
 func (p *GrantPolicyWriters) RoleMutationWriter(ctx context.Context, request kaname.RoleMutationRequest, actor domain.Subject) (out kaname.SemanticAuthorityWriter, err error) {
-	if p == nil || p.repo == nil || actor.Validate() != nil || request.Role.ID == "" || (request.Create && !request.Rules) {
+	if p == nil || p.repo == nil || actor.Validate() != nil || request.Role.ID == "" || (request.Create && !request.Rules) || (!request.Create && !request.Update) {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
 	conn, err := p.repo.master.Acquire(ctx)
@@ -112,7 +112,7 @@ func (p *GrantPolicyWriters) RoleMutationWriter(ctx context.Context, request kan
 	if err != nil {
 		return nil, err
 	}
-	w, err := p.repo.enterAuthority(ctx, tx, intent, owners, intent.Plan.Mode, intent.Plan.Accounts, false, "decision")
+	w, err := p.repo.enterAuthority(ctx, tx, intent, owners, intent.Plan.Mode, intent.Plan.Accounts, false, "decision", stage.plan)
 	if err != nil {
 		return nil, err
 	}
@@ -127,12 +127,18 @@ func (p *GrantPolicyWriters) RoleMutationWriter(ctx context.Context, request kan
 	if err = stage.lockMutation(ctx, w); err != nil {
 		return nil, err
 	}
+	if err = stage.prepareSequenceProgram(ctx, w); err != nil {
+		return nil, err
+	}
 	// Ни одной записи роли/проекции ещё нет. После ВСЕХ legacy row waits
 	// сверяем оба снимка и берём final decision_at для исходного authority.
 	if err = stage.recheck(ctx, w); err != nil {
 		return nil, err
 	}
 	if err = p.protectPolicyPlan(ctx, w, stage.plan); err != nil {
+		return nil, err
+	}
+	if _, err = w.tx.Exec(ctx, `SELECT kaname.authority_role_sequence_finalize_v3()`); err != nil {
 		return nil, err
 	}
 	transferred = true
@@ -481,7 +487,7 @@ func (w *preparedRoleWriteTx) ApplyPreparedRoleTuples(ctx context.Context, id do
 		}); err != nil {
 			return err
 		}
-		if err := w.stage.visitTuples(ctx, w.tx, id, "old", true, func(page []ab.RelationTuple) error { return w.AccessBindingsW().EmitRelationDelete(ctx, page) }); err != nil {
+		if err := w.stage.visitTuples(ctx, w.tx, id, "old", true, func(page []ab.RelationTuple) error { return emitPreparedBindingDelete(ctx, w.authorityWriteTx, page) }); err != nil {
 			return err
 		}
 		return w.stage.visitTuples(ctx, w.tx, id, "new", true, func(page []ab.RelationTuple) error { return w.AccessBindingsW().EmitRelationWrite(ctx, page) })

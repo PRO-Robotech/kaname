@@ -15,10 +15,9 @@ package pg
 // бы у всех. Читатель каталога (`catalog_repo.go`) по этой же причине живёт над
 // пулом, а не за `kaname.Reader`; писатель следует за ним.
 //
-// Транзакцию открывает `pkg/db.Transactor` — ЕДИНСТВЕННОЕ платформенное
-// объявление этого паттерна над пулом. Своя последовательность
-// begin→commit→rollback была бы вторым местом об одном предмете и разошлась бы
-// с первым молча.
+// Транзакцию открывает общий typed protocol установки: GLOBAL берётся до
+// консультативных и строчных замков каталога. Тело и Commit исполняются один раз,
+// а отказ освобождает соединение ограниченным cleanup независимо от отмены.
 //
 // # Отказы приходят СЫРЫМИ, и это решение
 //
@@ -44,7 +43,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	coredb "github.com/PRO-Robotech/corelib/db"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
@@ -122,12 +121,25 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 
 // CatalogWriteRepo — исполнитель транзакций применителя каталога над пулом.
 type CatalogWriteRepo struct {
-	tx *coredb.Transactor
+	pool         *pgxpool.Pool
+	fullContract *FullWriterContract
 }
 
 // NewCatalogWriteRepo собирает исполнителя транзакций поверх пула.
 func NewCatalogWriteRepo(pool *pgxpool.Pool) *CatalogWriteRepo {
-	return &CatalogWriteRepo{tx: coredb.NewTransactor(pool)}
+	return &CatalogWriteRepo{pool: pool}
+}
+
+// WithFullWriterContract retains the validated immutable profile on this
+// executor. RPC contexts do not inherit startup contexts. The returned copy
+// selects v3 at every transaction entry; the original stays generation1.
+func (r *CatalogWriteRepo) WithFullWriterContract(contract *FullWriterContract) (*CatalogWriteRepo, error) {
+	if r == nil || contract == nil || !contract.profile.UsesPool(r.pool) {
+		return nil, kaname.ErrInvalidAuthorityFencePlan
+	}
+	copy := *r
+	copy.fullContract = contract
+	return &copy, nil
 }
 
 // RunInWriteTx исполняет fn под ОДНОЙ писательской транзакцией: все шаги
@@ -136,7 +148,13 @@ func (r *CatalogWriteRepo) RunInWriteTx(
 	ctx context.Context,
 	fn func(context.Context, modulecatalog.CatalogWriter) error,
 ) error {
-	return r.tx.InTx(ctx, func(tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
+	if r == nil || r.pool == nil || fn == nil {
+		return kaname.ErrInvalidAuthorityFencePlan
+	}
+	if r.fullContract != nil {
+		ctx = r.fullContract.Context(ctx)
+	}
+	return runInstallationTx(ctx, r.pool, kaname.AuthorityCatalog, func(tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
 }
 
 // registrationWriterLockSQL соответствует барьеру операторов миграции 31090000.

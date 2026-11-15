@@ -56,7 +56,7 @@ func (p *GrantDelegationParticipant) discoverDelegationPolicy(ctx context.Contex
 		creator := domain.Subject{Type: domain.SubjectType(scope.creator.Type), ID: domain.SubjectID(scope.creator.ID)}
 		if creator != actor {
 			in.actor = creator
-			other, e := policy.discoverPolicyPlanWithRows(ctx, tx, in, plan.rows)
+			other, e := policy.discoverPolicyPlanWithRows(ctx, tx, in, plan.rows, plan.nativeBudget)
 			if e != nil {
 				return nil, scope, e
 			}
@@ -75,17 +75,26 @@ func (p *GrantDelegationParticipant) discoverDelegationPolicy(ctx context.Contex
 	}
 	plan.finishClassification()
 	keys := []string{"*"}
-	if !plan.global {
-		for key := range plan.guards {
-			if key != "*" {
-				keys = append(keys, key)
-			}
+	for key := range plan.guards {
+		if key != "*" {
+			keys = append(keys, key)
 		}
-		slices.Sort(keys)
+	}
+	slices.Sort(keys)
+	if len(keys) > policyDiscoveryGuards {
+		return nil, scope, kaname.ErrSourceReadLimit
+	}
+	if err = chargeNativePolicyBudget(plan.nativeBudget, len(keys), 1); err != nil {
+		return nil, scope, err
 	}
 	if err = tx.QueryRow(ctx, `SELECT kaname.authority_policy_epoch_read($1::text[])`, keys).Scan(&plan.epochs); err != nil {
 		return nil, scope, err
 	}
+	population, err := readPolicyPopulationToken(ctx, tx, plan.nativeBudget)
+	if err != nil {
+		return nil, scope, err
+	}
+	plan.population = &population
 	return plan, scope, ctx.Err()
 }
 
@@ -156,7 +165,7 @@ func (p *GrantDelegationParticipant) openDelegationPolicyWriter(ctx context.Cont
 		if e != nil {
 			return nil, e
 		}
-		w, e := p.repo.enterAuthority(ctx, tx, intent, owners, intent.Plan.Mode, intent.Plan.Accounts, false, "participant")
+		w, e := p.repo.enterAuthority(ctx, tx, intent, owners, intent.Plan.Mode, intent.Plan.Accounts, false, "participant", plan)
 		if e == nil {
 			var actual delegationScope
 			actual, e = readDelegationScope(ctx, tx, kind, proposed)
@@ -194,7 +203,11 @@ func (w *grantDelegationRevokeTx) RefreshGrantDelegationDecision(ctx context.Con
 	if w == nil || w.stage == nil || w.applied {
 		return kaname.ErrInvalidAuthorityFencePlan
 	}
-	return delegationRevokeStageError(w.stage.recheck(ctx, w.authorityWriteTx))
+	if err := w.stage.recheck(ctx, w.authorityWriteTx); err != nil {
+		return delegationRevokeStageError(err)
+	}
+	_, err := w.tx.Exec(ctx, `SELECT kaname.authority_binding_withdrawal_sequence_finalize_v3()`)
+	return delegationRevokeStageError(err)
 }
 
 // Порядок совпадает с withdrawal stage: policy guards, затем A epoch rows.

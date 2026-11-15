@@ -92,7 +92,7 @@ func (p *GrantPolicyWriters) openPolicyWriter(ctx context.Context, in policyWrit
 		}
 		// Не вызываем internal rediscover(owner-only): потерялся бы полный actor
 		// footprint. Любое изменение возвращает целую новую RR/RC попытку.
-		w, e := p.repo.enterAuthority(ctx, tx, intent, owners, intent.Plan.Mode, intent.Plan.Accounts, false, "decision")
+		w, e := p.repo.enterAuthority(ctx, tx, intent, owners, intent.Plan.Mode, intent.Plan.Accounts, false, "decision", plan)
 		if e == nil {
 			e = p.protectPolicyPlan(ctx, w, plan)
 		}

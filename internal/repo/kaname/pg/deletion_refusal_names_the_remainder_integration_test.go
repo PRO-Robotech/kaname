@@ -29,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 // repoRefusal — отказ оператора снятия, как его видит клиент: тот же
@@ -232,7 +233,9 @@ func TestDRS13_HolderCommittedAfterTheGuardSnapshotIsNamedTheSameWay(t *testing.
 	uid := e.homeless(t, "drs13")
 	_, accF, _ := e.selfRegistered(t, "drs13f")
 
-	t0, err := e.repo.Writer(ctx)
+	holderTrace := &finalDecisionTrace{}
+	holderPool := finalDecisionTracePool(t, ctx, e.pool, holderTrace)
+	t0, err := kanamepg.New(holderPool, nil).Writer(ctx)
 	require.NoError(t, err)
 	defer func() { _ = t0.Rollback(ctx) }()
 	ab, err := t0.AccessBindingsW().Insert(ctx, domain.AccessBinding{
@@ -248,9 +251,13 @@ func TestDRS13_HolderCommittedAfterTheGuardSnapshotIsNamedTheSameWay(t *testing.
 	require.NoError(t, err, "Дано: выдача B3 в незафиксированной T0")
 	require.NoError(t, t0.AccessBindingsW().InsertSubjects(ctx, ab.ID, []domain.Subject{userSubject(uid)}))
 
+	holderPID := int(holderTrace.pid.Load())
+	require.NotZero(t, holderPID)
+	deleteTrace := &finalDecisionTrace{}
+	deletePool := finalDecisionTracePool(t, ctx, e.pool, deleteTrace)
 	done := make(chan error, 1)
 	go func() {
-		w, err := e.repo.Writer(ctx)
+		w, err := kanamepg.New(deletePool, nil).Writer(ctx)
 		if err != nil {
 			done <- err
 			return
@@ -259,18 +266,23 @@ func TestDRS13_HolderCommittedAfterTheGuardSnapshotIsNamedTheSameWay(t *testing.
 		done <- w.UsersW().Delete(ctx, uid)
 	}()
 
-	// Снятие стоит в окне — ждёт замка строки человека, который держит T0.
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		var waiting int
-		require.NoError(t, e.pool.QueryRow(ctx,
-			`SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('transactionid', 'tuple')`).Scan(&waiting))
-		if waiting > 0 {
-			break
+	// Настоящий guarded DELETE уже исполняется со своим statement snapshot.
+	// Compatibility BEFORE STATEMENT может ждать consumer раньше user tuple:
+	// вид lock не подменяет доказательство точного DELETE→T0 blocker graph.
+	require.Eventually(t, func() bool {
+		pid := int(deleteTrace.pid.Load())
+		if pid == 0 {
+			return false
 		}
-		require.True(t, time.Now().Before(deadline), "НЕ-ВЫПОЛНИЛОСЬ(фикстура): снятие не дошло до окна гонки")
-		time.Sleep(10 * time.Millisecond)
-	}
+		var waiting bool
+		err := e.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+ WHERE pid=$1 AND datname=current_database() AND wait_event_type='Lock'
+ AND $2::integer=ANY(pg_blocking_pids(pid)) AND position('DELETE FROM users u' in query)>0)`, pid, holderPID).Scan(&waiting)
+		return err == nil && waiting
+	}, 30*time.Second, 10*time.Millisecond, "guarded DELETE должен ждать именно T0 до её commit")
+	var visible bool
+	require.NoError(t, e.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.access_bindings WHERE id=$1)`, string(ab.ID)).Scan(&visible))
+	require.False(t, visible, "B3 ещё не видна statement snapshot ожидающего DELETE")
 	require.NoError(t, t0.Commit(ctx), "Дано: B3 зафиксирована в окне")
 
 	st, meta := mappedRefusal(t, <-done)

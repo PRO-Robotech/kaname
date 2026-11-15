@@ -52,7 +52,7 @@ func TestNativeBoundaryActualBindingCreateAndMissingQuestion(t *testing.T) {
 	// и запись той же выдачи, поэтому здесь не появляется duplicate ACTIVE grant.
 	proposed := input
 	proposed.ID = domain.AccessBindingID(ids.NewID("acb"))
-	err = writers.RunBindingDecision(r.ctx, actor, proposed, true, nil, func(ctx context.Context, w kaname.SemanticAuthorityWriter, _ domain.AccessBinding, _ domain.Role) error {
+	err = writers.RunBindingAuthorizationDecision(r.ctx, actor, proposed, true, false, nil, func(ctx context.Context, w kaname.SemanticAuthorityWriter, _ domain.AccessBinding, _ domain.Role) error {
 		require.Equal(t, kaname.AuthorityFenceAccounts, w.AuthorityFence().Mode(), "create native вопрос проходит локальный captured scope SQL")
 		ok, e := w.SemanticRelationChecker().Check(ctx, "user:"+actorID, "admin", "account:"+r.a)
 		require.NoError(t, e)
@@ -68,7 +68,7 @@ func TestNativeBoundaryActualBindingCreateAndMissingQuestion(t *testing.T) {
 	require.Nil(t, awaitOperation(t, r.ctx, ops, op.ID).Error)
 	// Metadata runner открывает настоящий protected writer. Разрешённый вопрос
 	// остаётся native, отсутствующий root не дополняет граф после coordinator.
-	err = writers.RunBindingDecision(r.ctx, actor, template, false, nil, func(ctx context.Context, w kaname.SemanticAuthorityWriter, _ domain.AccessBinding, _ domain.Role) error {
+	err = writers.RunBindingAuthorizationDecision(r.ctx, actor, template, false, false, nil, func(ctx context.Context, w kaname.SemanticAuthorityWriter, _ domain.AccessBinding, _ domain.Role) error {
 		require.Equal(t, kaname.AuthorityFenceGlobal, w.AuthorityFence().Mode(), "metadata заранее выбирает GLOBAL для binding-AS-OBJECT")
 		ok, e := w.SemanticRelationChecker().Check(ctx, "user:"+actorID, "admin", "account:"+r.a)
 		require.NoError(t, e)

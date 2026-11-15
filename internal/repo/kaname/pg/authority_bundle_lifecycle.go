@@ -141,6 +141,46 @@ func (r *Repository) ActivateAuthorityBundle(ctx context.Context, b *granteffect
 		return err
 	})
 }
+func (r *Repository) StageFullAuthorityBundle(ctx context.Context, b *granteffect.Bundle, editions ...kaname.AuthorityModuleEdition) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := b.Validate(); err != nil {
+		return err
+	}
+	editions = append([]kaname.AuthorityModuleEdition(nil), editions...)
+	return r.authorityLifecycle(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := authorityCatalogMatches(ctx, tx, b); err != nil {
+			return err
+		}
+		if err := authorityEditionsMatch(ctx, tx, editions); err != nil {
+			return err
+		}
+		id := b.Identity()
+		_, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_stage_full_v3($1,$2,$3,$4,$5)`, b.ModelSource(), b.CanonicalCatalog(), id.ModelID, id.CatalogID, id.ProjectorVersion)
+		return err
+	})
+}
+func (r *Repository) ActivateFullAuthorityBundle(ctx context.Context, b *granteffect.Bundle, editions ...kaname.AuthorityModuleEdition) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := b.Validate(); err != nil {
+		return err
+	}
+	editions = append([]kaname.AuthorityModuleEdition(nil), editions...)
+	return r.authorityLifecycle(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := authorityCatalogMatches(ctx, tx, b); err != nil {
+			return err
+		}
+		if err := authorityEditionsMatch(ctx, tx, editions); err != nil {
+			return err
+		}
+		id := b.Identity()
+		_, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_activate_full_v3($1,$2,$3)`, id.ModelID, id.CatalogID, id.ProjectorVersion)
+		return err
+	})
+}
 func (r *Repository) CloseAuthorityBundle(ctx context.Context) error {
 	return r.authorityLifecycle(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_close()`)

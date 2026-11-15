@@ -175,11 +175,15 @@ type projectWriter struct {
 // FK projects_account_fk (23503) — account_id не существует → FailedPrecondition.
 // UNIQUE projects_account_name_unique (23505) — дубль name per account → AlreadyExists.
 func (w *projectWriter) Insert(ctx context.Context, p domain.Project) (domain.Project, error) {
+	return w.insertAt(ctx, p, time.Now().UTC())
+}
+
+// Prepared CRUD передаёт время из закрытой программы. Старый Insert сохраняет свои часы.
+func (w *projectWriter) insertAt(ctx context.Context, p domain.Project, now time.Time) (domain.Project, error) {
 	labelsJSON, err := marshalLabels(p.Labels)
 	if err != nil {
 		return domain.Project{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
-	now := time.Now().UTC()
 	q := fmt.Sprintf(`
 		INSERT INTO projects (id, account_id, name, description, labels, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)

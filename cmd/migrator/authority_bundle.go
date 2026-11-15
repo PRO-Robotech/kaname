@@ -29,7 +29,7 @@ import (
 func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 	root := &cobra.Command{Use: "authority-bundle", Short: "Явное управление согласованным bundle и drain", Args: cobraargs.OnlyKnownCommands,
 		RunE: func(*cobra.Command, []string) error { return migratorcli.ErrNoCommand }}
-	for _, action := range []string{"stage", "activate", "verify", "close"} {
+	for _, action := range []string{"stage", "activate", "verify", "stage-full", "activate-full", "verify-full", "close"} {
 		var dir string
 		var imageOnly bool
 		cmd := &cobra.Command{Use: action, Args: cobraargs.NoExtraArguments, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -79,6 +79,12 @@ func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 				err = repository.StageAuthorityBundle(ctx, bundle, editions...)
 			case "activate":
 				err = repository.ActivateAuthorityBundle(ctx, bundle, editions...)
+			case "stage-full":
+				err = repository.StageFullAuthorityBundle(ctx, bundle, editions...)
+			case "activate-full":
+				err = repository.ActivateFullAuthorityBundle(ctx, bundle, editions...)
+			case "verify-full":
+				err = repository.ValidateFullAuthorityBundle(ctx, bundle)
 			case "verify":
 				var handed *granteffect.Bundle
 				handed, err = repository.LoadAuthorityBundle(ctx, source, report.KeyTerms...)

@@ -9,9 +9,14 @@ import "fmt"
 // Legacy сохраняет прежних writers; participant не допускает fallback.
 type AuthorityProtocolConfig struct {
 	Participation string `mapstructure:"participation"`
+	// Полная семантика — отдельный explicit opt-in, не значение staged participation.
+	FullSemantics bool `mapstructure:"full-semantics"`
 }
 
 func (c AuthorityProtocolConfig) Validate() error {
+	if c.FullSemantics && !c.Participant() {
+		return fmt.Errorf("authority-protocol.full-semantics requires participation=participant")
+	}
 	switch c.Participation {
 	case "", "legacy", "participant":
 		return nil

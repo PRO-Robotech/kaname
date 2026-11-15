@@ -19,6 +19,7 @@ import (
 // DB-name is `kaname`.
 func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authority-protocol.participation", "legacy")
+	v.SetDefault("authority-protocol.full-semantics", false)
 	// logger
 	v.SetDefault("logger.level", "INFO")
 

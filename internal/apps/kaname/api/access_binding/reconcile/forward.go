@@ -323,7 +323,13 @@ func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, obj
 		if r.objectObjects == nil {
 			return errObjectParticipantAbsent
 		}
+		if r.objectObjects.objectDecisions != nil {
+			return r.objectObjects.runObjectDecision(ctx, objectType, objectID, ObjectDecisionForward, r.size)
+		}
 		return r.objectObjects.ReconcileObjectForward(ctx, objectType, objectID)
+	}
+	if r.objectDecisions != nil {
+		return r.runObjectDecision(ctx, objectType, objectID, ObjectDecisionForward, r.size)
 	}
 	return r.reconcileObjectForward(ctx, objectType, objectID, false /* не доказано — сохранить страж удаления устаревшего */)
 }
@@ -379,7 +385,13 @@ func (r *Reconciler) ReconcileObjectForwardNoStale(ctx context.Context, objectTy
 		if r.objectObjects == nil {
 			return errObjectParticipantAbsent
 		}
+		if r.objectObjects.objectDecisions != nil {
+			return r.objectObjects.runObjectDecision(ctx, objectType, objectID, ObjectDecisionForwardNoStale, r.size)
+		}
 		return r.objectObjects.ReconcileObjectForwardNoStale(ctx, objectType, objectID)
+	}
+	if r.objectDecisions != nil {
+		return r.runObjectDecision(ctx, objectType, objectID, ObjectDecisionForwardNoStale, r.size)
 	}
 	return r.reconcileObjectForward(ctx, objectType, objectID, true /* доказано — устаревшего быть не может */)
 }
@@ -552,7 +564,11 @@ func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileSto
 	if err != nil {
 		return fmt.Errorf("forward: %w", err)
 	}
-	for _, dm := range desiredMembersForObject(r.cat.Facts(), bs, obj, anc) {
+	desired, err := desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
+	if err != nil {
+		return fmt.Errorf("forward object compiler: %w", err)
+	}
+	for _, dm := range desired {
 		if dm.Status != domain.VerificationActive {
 			// Вердикт вложенности REJECTED: добавляющий прямой путь материализует только
 			// выдачи ACTIVE; полной асинхронной страховке принадлежат строка участника REJECTED и

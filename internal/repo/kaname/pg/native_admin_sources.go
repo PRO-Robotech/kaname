@@ -23,8 +23,8 @@ import (
 )
 
 // Узкий wrapper не экспортирует обратные методы embedded native form. Public
-// read, admission и модель прежние; только административные direct основания
-// mutation-вопроса требуют текущего источника. Время читается при каждом Check.
+// read, admission и модель прежние; прямые tier/verb основания mutation-вопроса
+// требуют текущего источника. Время читается при каждом Check.
 type liveAdministrativeChecker struct {
 	inner kaname.RelationChecker
 	w     *authorityWriteTx
@@ -75,7 +75,11 @@ func newLiveAdministrativeChecker(w *authorityWriteTx, bundle *granteffect.Bundl
 	if w == nil || w.tx == nil || bundle.Validate() != nil {
 		return &liveAdministrativeChecker{}
 	}
-	sources := &nativeAdministrativeSources{w: w, bundle: bundle}
+	var halves catalog.Halves
+	if json.Unmarshal(bundle.CanonicalCatalog(), &halves) != nil {
+		return &liveAdministrativeChecker{}
+	}
+	sources := &nativeAdministrativeSources{w: w, bundle: bundle, catalogRelations: mutationCatalogRelations(halves)}
 	form := relverdict.NewAdministrativeAsker(w.tx, bundle, func() time.Time { return w.fence.decisionAt }, sources.verify)
 	if w.nativeRead != nil {
 		form.BindReadBoundary(w.nativeRead, w.nativeRead.budget)
@@ -87,8 +91,9 @@ func newLiveAdministrativeChecker(w *authorityWriteTx, bundle *granteffect.Bundl
 }
 
 type nativeAdministrativeSources struct {
-	w      *authorityWriteTx
-	bundle *granteffect.Bundle
+	w                *authorityWriteTx
+	bundle           *granteffect.Bundle
+	catalogRelations map[[2]string]bool
 }
 
 func administrativeRelation(relation string) bool {
@@ -117,9 +122,9 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	// Ordinary direct verb/subject/registration факты сохраняют native semantics.
-	// Административный leaf, в том числе в каскаде v_update, не обходит проверку.
-	if !administrativeRelation(f.Relation) {
+	// Проверяется исходный leaf, а не только отношение вопроса: прямой v_*
+	// и editor/viewer могли пережить срок своей выдачи в материализации.
+	if !mutationSourceRelation(f.ObjectType, f.Relation) && !s.catalogRelations[[2]string{f.ObjectType, f.Relation}] {
 		if administrativeRelation(f.QuestionRelation) {
 			return false, relverdict.ErrAdministrativeSourceUnconfirmed
 		}
@@ -136,6 +141,7 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 		return false, relverdict.ErrAdministrativeSourceUnconfirmed
 	}
 	actor := domain.Subject{Type: domain.SubjectType(typ), ID: domain.SubjectID(id)}
+	publication := f.Subject == domain.PublicationSubject && f.Relation == domain.PublicationRelation
 	if actor.Validate() != nil || domain.FGASubjectRef(typ, id) != f.Subject {
 		return false, relverdict.ErrAdministrativeSourceUnconfirmed
 	}
@@ -143,7 +149,7 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 		return false, err
 	}
 	var exists bool
-	err := s.w.tx.QueryRow(ctx, `SELECT CASE $1 WHEN 'user' THEN EXISTS(SELECT 1 FROM kaname.users WHERE id=$2) WHEN 'service_account' THEN EXISTS(SELECT 1 FROM kaname.service_accounts WHERE id=$2) WHEN 'group' THEN EXISTS(SELECT 1 FROM kaname.groups WHERE id=$2) ELSE false END`, typ, id).Scan(&exists)
+	err := s.w.tx.QueryRow(ctx, `SELECT CASE $1 WHEN 'user' THEN EXISTS(SELECT 1 FROM kaname.users WHERE id=$2) WHEN 'service_account' THEN EXISTS(SELECT 1 FROM kaname.service_accounts WHERE id=$2) WHEN 'group' THEN EXISTS(SELECT 1 FROM kaname.groups WHERE id=$2) WHEN 'system_class' THEN $2 IN ('anonymous','authenticated') ELSE false END`, typ, id).Scan(&exists)
 	if err != nil || !exists {
 		return false, err
 	}
@@ -188,6 +194,7 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 		return false, err
 	}
 	known := false
+	var unconfirmed bool
 	if f.ObjectType == "account" {
 		if err = s.w.canonicalCoverage(domain.AccountID(f.ObjectID)); err != nil {
 			return false, err
@@ -215,10 +222,18 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 		}
 		known = true
 	}
+	if (f.Relation == "owner" && f.ObjectType != "account") || publication {
+		live, found, e := s.producerFact(ctx, f, budget)
+		known = known || found
+		if errors.Is(e, relverdict.ErrAdministrativeSourceUnconfirmed) {
+			unconfirmed = true
+		} else if e != nil || live {
+			return live, e
+		}
+	}
 	// Ledger — только индекс кандидатов. Каждая физическая строка учитывается;
 	// ни source='member', ни сам ledger не подтверждают право без текущего вывода.
 	var cursor [3]string
-	var unconfirmed bool
 	for {
 		if err = ctx.Err(); err != nil {
 			return false, err
@@ -404,7 +419,7 @@ func (s *nativeAdministrativeSources) bindingProduces(ctx context.Context, id do
 		return false, err
 	}
 	bs := bindingScopeFrom(facts, b, role)
-	return reconcile.ProducesObjectTuple(facts, bs, object, ancestors, domain.MembershipTuple{User: f.Subject, Relation: f.Relation, Object: f.ObjectType + ":" + f.ObjectID}), nil
+	return reconcile.ProducesObjectTuple(facts, bs, object, ancestors, domain.MembershipTuple{User: f.Subject, Relation: f.Relation, Object: f.ObjectType + ":" + f.ObjectID})
 }
 
 // IAM берётся из собственной таблицы; внешний тип — из текущего mirror,

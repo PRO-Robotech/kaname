@@ -317,14 +317,39 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 	return emitStampedTx(ctx, tx, eventType, tuples, time.Time{})
 }
 
+// EmitReservedDecisionTx потребляет ровно предварительно зарезервированные ID.
+// Порядок групп и форма payload общие со штатным emitter; один INSERT сохраняет
+// операторную свёртку и её canonical порядок, callback/произвольного SQL нет.
+func EmitReservedDecisionTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, at time.Time, ids []int64) error {
+	if at.IsZero() || ids == nil || (eventType != EventTypeWrite && eventType != EventTypeDelete) {
+		return fmt.Errorf("fga_outbox: invalid reserved decision coordinate")
+	}
+	for i, id := range ids {
+		if id <= 0 || (i > 0 && id <= ids[i-1]) {
+			return fmt.Errorf("fga_outbox: invalid reserved ID order")
+		}
+	}
+	return emitReservedStampedTx(ctx, tx, eventType, tuples, at, ids)
+}
+
 func emitStampedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, at time.Time) error {
+	return emitReservedStampedTx(ctx, tx, eventType, tuples, at, nil)
+}
+
+func emitReservedStampedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, at time.Time, ids []int64) error {
 	if tx == nil {
 		return fmt.Errorf("fga_outbox: tx must not be nil")
 	}
 	if len(tuples) == 0 {
+		if len(ids) != 0 {
+			return fmt.Errorf("fga_outbox: unused reserved IDs")
+		}
 		return nil
 	}
 	groups := groupByGrant(tuples)
+	if ids != nil && len(ids) != len(groups) {
+		return fmt.Errorf("fga_outbox: reserved ID count differs from effects")
+	}
 	payloads := make([]string, 0, len(groups))
 	for _, g := range groups {
 		fields := map[string]any{"user": g.user, "object": g.object}
@@ -359,6 +384,13 @@ func emitStampedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []cl
 			return fmt.Errorf("fga_outbox: marshal payload: %w", err)
 		}
 		payloads = append(payloads, string(payload))
+	}
+	if ids != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO kaname.fga_outbox(id,event_type,payload,created_at)
+SELECT i,$1,p::jsonb,$3::timestamptz FROM unnest($4::bigint[],$2::text[]) AS prepared(i,p)`, eventType, payloads, at.UTC(), ids); err != nil {
+			return fmt.Errorf("fga_outbox: insert reserved %s: %w", eventType, err)
+		}
+		return nil
 	}
 	// ОДИН стейтмент на все строки вместо одного на строку: свёртка журнала в
 	// прямой факт — операторная (kaname#568), и порядок захвата строк факта

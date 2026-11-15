@@ -286,7 +286,9 @@ func (w *fbRoleMutationWorld) assertRules(id domain.RoleID, rules []*iamv1.Rule)
 // цикл принятой Operation намеренно отделён от бизнес/projection/audit/FGA.
 func (w *fbRoleMutationWorld) business() map[string]string {
 	w.t.Helper()
-	tx, err := w.pool.BeginTx(w.ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	// Закрытые durable rows читает fixture owner, а не исследуемый runtime actor.
+	require.NotNil(w.t, w.observer)
+	tx, err := w.observer.BeginTx(w.ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	require.NoError(w.t, err)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(w.ctx), 5*time.Second)

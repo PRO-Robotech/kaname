@@ -95,6 +95,9 @@ func waitAdvisoryWaiter(t *testing.T, ctx context.Context, pool *pgxpool.Pool, d
 // форварда, форвард берёт строку выдачи и фиксируется раньше снятия.
 func runDeactivationFirstRace(t *testing.T, kind forwardKind, suffix string, deact deactivation) (pool *pgxpool.Pool, bid domain.AccessBindingID, subj string) {
 	t.Helper()
+	if deact == accountDeleteDeactivation {
+		return runAccountDeactivationEntryPauseRace(t, kind, suffix)
+	}
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, setupTestDB(t))
 	require.NoError(t, err)

@@ -37,6 +37,14 @@ package pg_test
 // когда `WHERE` ветви `DO UPDATE` ложен и строка не меняется, поэтому шаг 4
 // берёт замок на КАЖДУЮ объявленную строку, а не только на изменяемые.
 //
+// # Текущий admission и законная запись роли
+//
+// Применитель удерживает consumer admission до строк каталога. Роль должна
+// войти до собственных row locks; иначе возникает инверсия consumer/row.
+// После catalog-first снятый aaa нельзя заново записывать в selector. Поэтому
+// роль меняет fingerprint и пишет два сохраняемых типа mmm/zzz; aaa снимается
+// настоящим manifest apply. Обе работы обязаны успешно завершиться.
+//
 // # Почему проба, а не чтение
 //
 // Порядок взятия замков прочитать нельзя: он есть свойство ИСПОЛНЕНИЯ, и обе
@@ -64,10 +72,12 @@ import (
 // сортировке текста. Снимается РАННИЙ, сохраняется ПОЗДНИЙ — именно эта пара и
 // даёт применителю обратный порядок.
 const (
-	crossEarlyName = "aaa"
-	crossLateName  = "zzz"
-	crossLockEarly = applierProbeModule + "." + crossEarlyName
-	crossLockLate  = applierProbeModule + "." + crossLateName
+	crossEarlyName  = "aaa"
+	crossMiddleName = "mmm"
+	crossLateName   = "zzz"
+	crossLockEarly  = applierProbeModule + "." + crossEarlyName
+	crossLockMiddle = applierProbeModule + "." + crossMiddleName
+	crossLockLate   = applierProbeModule + "." + crossLateName
 )
 
 // isDeadlock — взаимная блокировка в ЛЮБОМ из двух видов, в каких она доезжает
@@ -103,13 +113,13 @@ func TestCatalogApplierTakesCatalogRowLocksInTheSameOrderAsTheRoleWriter(t *test
 		t.Skip("integration: требует Postgres")
 	}
 	raceApplierAgainstRoleWriter(t, "crosslock2012",
-		probeManifest(probeResource(crossEarlyName, "get"), probeResource(crossLateName, "get")),
-		probeManifest(probeResource(crossLateName, "get")))
+		probeManifest(probeResource(crossEarlyName, "get"), probeResource(crossMiddleName, "get"), probeResource(crossLateName, "get")),
+		probeManifest(probeResource(crossMiddleName, "get"), probeResource(crossLateName, "get")))
 }
 
 // raceApplierAgainstRoleWriter — гонка НАСТОЯЩЕГО применителя, снимающего
-// раннее имя (`withdraw`), с НАСТОЯЩЕЙ правкой правил роли по обоим типам.
-// `install` заводит оба типа живыми. Утверждения — три из шапки
+// раннее имя (`withdraw`), с НАСТОЯЩЕЙ правкой роли по двум сохраняемым типам.
+// `install` заводит все три типа живыми. Утверждения — три из шапки
 // `TestCatalogApplierTakesCatalogRowLocksInTheSameOrderAsTheRoleWriter`.
 func raceApplierAgainstRoleWriter(t *testing.T, suffix string, install, withdraw *manifest.Manifest) (context.Context, *pgxpool.Pool) {
 	t.Helper()
@@ -117,22 +127,21 @@ func raceApplierAgainstRoleWriter(t *testing.T, suffix string, install, withdraw
 	applier := applierOver(t, pool)
 	repo := kanamepg.New(pool, nil)
 
-	// ── ВХОД: два живых типа одного модуля ────────────────────────────────────
+	// ── ВХОД: три живых типа одного модуля ────────────────────────────────────
 	_, err := applier.Apply(ctx, install)
 	require.NoError(t, err)
 
 	role := catalogRole(t, ctx, pool, suffix)
 	require.NoError(t,
-		upsertSelector(ctx, pool, role, "fp-crosslock", []string{crossLockEarly, crossLockLate}),
-		"ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: оба типа живы и селектор, называющий их, записывается")
+		upsertSelector(ctx, pool, role, "fp-crosslock", []string{crossLockEarly, crossLockMiddle, crossLockLate}),
+		"ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: все три типа живы и селектор, называющий их, записывается")
 
 	// ── ДЕРЖАТЕЛЬ раннего имени: задерживает применителя, пропускает роль ─────
 	//
-	// `FOR KEY SHARE`, а не `FOR UPDATE`, и это несущее: держатель обязан
-	// ЗАДЕРЖАТЬ применителя (тот меняет `live`, входящий в ключ, — значит берёт
-	// `FOR UPDATE`) и НЕ задержать писателя роли (тот берёт ровно `FOR KEY
-	// SHARE`, а два таких замка совместимы). Держатель `FOR UPDATE` остановил бы
-	// обе стороны, и встретиться им было бы негде.
+	// Holder держит снимаемый aaa. Он задерживает общий resource prelock
+	// применителя; Role использует только сохраняемые mmm/zzz и не ждёт holder.
+	// До исправления admission Role успевал взять эти строки, затем ждал
+	// consumer применителя; после release применитель ждал те же mmm/zzz.
 	holder, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	holderDone := false
@@ -156,14 +165,12 @@ func raceApplierAgainstRoleWriter(t *testing.T, suffix string, install, withdraw
 		ares <- aerr
 	}()
 
-	// ПРЕДПОСЫЛКА п. 1: применитель встал на строке каталога. Без неё всё ниже
-	// вакуумно — стороны не встретились бы вовсе.
-	select {
-	case aerr := <-ares:
-		t.Fatalf("применитель НЕ встал на строке каталога (%v) — предпосылка пробы нарушена, "+
-			"и утверждение о порядке замков беспредметно", aerr)
-	case <-time.After(2 * time.Second):
-	}
+	// Реально наблюдаем resource wait на нашем holder до старта Role.
+	applierPID := receiptWaitForBlocker(t, ctx, pool, int(holder.Conn().PgConn().PID()))
+	var resourceWait bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT query LIKE '%catalog_resource%FOR UPDATE%'
+	 FROM pg_stat_activity WHERE pid=$1`, applierPID).Scan(&resourceWait))
+	require.True(t, resourceWait, "применитель ждёт именно resource prelock")
 
 	// ── СТОРОНА B: НАСТОЯЩАЯ правка правил роли по ОБОИМ типам ────────────────
 	bres := make(chan error, 1)
@@ -174,8 +181,8 @@ func raceApplierAgainstRoleWriter(t *testing.T, suffix string, install, withdraw
 			return
 		}
 		if rerr := w.RolesW().ReplaceRuleSelectors(ctx, role, []domain.RuleSelector{{
-			RuleFP: "fp-crosslock", Arm: domain.ArmAnchor,
-			ObjectTypes: []string{crossLockEarly, crossLockLate}, Grants: map[string][]string{},
+			RuleFP: "fp-crosslock-updated", Arm: domain.ArmAnchor,
+			ObjectTypes: []string{crossLockMiddle, crossLockLate}, Grants: map[string][]string{},
 		}}); rerr != nil {
 			_ = w.Rollback(ctx)
 			bres <- rerr
@@ -184,9 +191,15 @@ func raceApplierAgainstRoleWriter(t *testing.T, suffix string, install, withdraw
 		bres <- w.Commit(ctx)
 	}()
 
-	// Держатель отпускается: дальше стороны разбираются между собой, и если их
-	// порядки обратны — Postgres обнаружит пару и отвергнет одну из них.
-	time.Sleep(2 * time.Second)
+	// Role уже дошёл до consumer, которым владеет именно этот применитель.
+	// Наблюдение не требует отсутствия row locks: старый порядок обязан
+	// дойти сюда, а затем провалить прежние обязательные no-deadlock/assertions.
+	rolePID := receiptWaitForBlocker(t, ctx, pool, applierPID)
+	var consumerWait bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks
+	 WHERE pid=$1 AND locktype='advisory' AND classid=1262569292::oid
+	 AND objid=0::oid AND objsubid=2 AND mode='ExclusiveLock' AND NOT granted)`, rolePID).Scan(&consumerWait))
+	require.True(t, consumerWait, "Role ждёт consumer admission применителя")
 	require.NoError(t, holder.Rollback(ctx))
 	holderDone = true
 
@@ -202,10 +215,9 @@ func raceApplierAgainstRoleWriter(t *testing.T, suffix string, install, withdraw
 	t.Logf("исход: применитель %v · правка роли %v", aerr, berr)
 
 	require.Falsef(t, isDeadlock(aerr),
-		"ПРИМЕНИТЕЛЬ отвергнут взаимной блокировкой (%v): его порядок взятия замков на "+
-			"строки каталога обратен порядку писателя роли — объявленные он берёт на шаге "+
-			"upsert, снимаемые на шаге retire, и снимаемое имя, сортирующееся раньше "+
-			"сохраняемого, достаётся ему последним", aerr)
+		"ПРИМЕНИТЕЛЬ отвергнут взаимной блокировкой (%v): admission и resource locks "+
+			"должны идти в согласованном порядке; Role не может удерживать mmm/zzz "+
+			"до ожидания consumer применителя", aerr)
 	require.Falsef(t, isDeadlock(berr),
 		"ПРАВКА РОЛИ отвергнута взаимной блокировкой (%v): цену за инверсию, которую "+
 			"создаёт выкатка, платит арендатор, и повтор её не меняет — условие "+
@@ -223,6 +235,21 @@ func raceApplierAgainstRoleWriter(t *testing.T, suffix string, install, withdraw
 		crossLockEarly).Scan(&liveEarly))
 	require.Zerof(t, liveEarly, "строка %s не снята — применитель отчитался успехом впустую",
 		crossLockEarly)
+	// Новый fingerprint доказывает запись настоящего Role writer: catalog
+	// prune мог убрать aaa, но не мог создать этот fingerprint вместо старого.
+	var selectorCount, oldCount int
+	var types []string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE rule_fp='fp-crosslock')
+	 FROM kaname.role_rule_selectors WHERE role_id=$1`, string(role)).Scan(&selectorCount, &oldCount))
+	require.Equal(t, 1, selectorCount)
+	require.Zero(t, oldCount)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT object_types FROM kaname.role_rule_selectors
+	 WHERE role_id=$1 AND rule_fp='fp-crosslock-updated' AND live`, string(role)).Scan(&types))
+	require.Equal(t, []string{crossLockMiddle, crossLockLate}, types)
+	var liveRetained int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.catalog_resource
+	 WHERE dotted=ANY($1) AND live`, []string{crossLockMiddle, crossLockLate}).Scan(&liveRetained))
+	require.Equal(t, 2, liveRetained)
 	return ctx, pool
 }
 
