@@ -1,6 +1,8 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: admission Account/User предшествует explicit parent row locks.
+-- Приёмка: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md
+-- Основание: §8.3: Account/User writers получают admission до parent row locks, с общим порядком и повторной проверкой ownership.
 -- +goose Up
 -- +goose StatementBegin
 DO $$ BEGIN PERFORM kaname.authority_protocol_drain(); END $$;

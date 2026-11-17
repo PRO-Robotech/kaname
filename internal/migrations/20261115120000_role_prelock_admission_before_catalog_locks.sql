@@ -1,6 +1,8 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: admission роли предшествует её explicit row locks.
+-- Приёмка: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md
+-- Основание: §8.3: admission роли и protocol/bundle проверяются до прежних row/catalog locks; OLD authority после всех ожиданий.
 -- +goose Up
 -- +goose StatementBegin
 DO $$ BEGIN PERFORM kaname.authority_protocol_drain(); END $$;

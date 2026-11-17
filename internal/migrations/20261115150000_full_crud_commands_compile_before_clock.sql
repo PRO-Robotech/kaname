@@ -2,6 +2,8 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: семь закрытых команд Resource ABI, все ожидания до decision_at.
 -- Приёмка: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
+-- Приёмка полного протокола: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md
+-- Основание: §8.1–8.2: полный управляющий эффект; §8.3: команды и все ожидания до decision_at; §8.4: целая identity и безопасное включение.
 -- +goose Up
 -- +goose StatementBegin
 DO $$ BEGIN PERFORM kaname.authority_protocol_drain(); END $$;

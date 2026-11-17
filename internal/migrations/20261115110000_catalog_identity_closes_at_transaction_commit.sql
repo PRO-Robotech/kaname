@@ -1,6 +1,8 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: the whole signed catalog TX precedes commit-time identity close.
+-- Приёмка: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md
+-- Основание: §8.3–8.4: catalog writer в том же протоколе; transition закрывается целой согласованной identity при commit.
 -- +goose Up
 -- +goose StatementBegin
 DO $$ BEGIN PERFORM kaname.authority_protocol_drain(); END $$;

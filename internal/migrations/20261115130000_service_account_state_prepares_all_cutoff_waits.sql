@@ -1,6 +1,8 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: полный prepared Enable/Disable и общий cutoff key до UNIQUE wait.
+-- Приёмка: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md
+-- Основание: §8.3: Enable/Disable service account входит в единый writer; все cutoff/UNIQUE ожидания готовятся до decision_at.
 -- +goose Up
 -- +goose StatementBegin
 DO $$ BEGIN PERFORM kaname.authority_protocol_drain(); END $$;

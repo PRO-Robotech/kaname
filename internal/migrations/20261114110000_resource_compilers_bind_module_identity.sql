@@ -1,3 +1,5 @@
+-- Приёмка: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md
+-- Основание: §8.1–8.2: compiler управляющего и полного эффекта; §8.4: единая identity модуля и каталога.
 -- +goose Up
 -- +goose StatementBegin
 SELECT kaname.authority_protocol_drain();

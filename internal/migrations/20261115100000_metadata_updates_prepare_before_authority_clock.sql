@@ -1,6 +1,8 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: explicit three-object metadata preflight; no lifecycle activation.
+-- Приёмка: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md
+-- Основание: §8.3: metadata mutation готовит row/catalog waits до authority clock; §8.4: metadata ничего не активирует.
 -- +goose Up
 -- +goose StatementBegin
 DO $$ BEGIN PERFORM kaname.authority_protocol_drain(); END $$;

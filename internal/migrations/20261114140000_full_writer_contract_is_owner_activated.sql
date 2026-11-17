@@ -1,3 +1,5 @@
+-- Приёмка: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md
+-- Основание: §8.3–8.4: согласованные writer adapters, fail-closed совместимость и включение владельцем после drain.
 -- +goose Up
 -- +goose StatementBegin
 -- A writer contract is an owner-activated compatibility boundary, not a GUC,

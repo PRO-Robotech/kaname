@@ -1,3 +1,5 @@
+-- Приёмка: docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md
+-- Основание: §8.3: полный footprint и все ожидания до окончательного decision_at; атомарное применение и retry.
 -- +goose Up
 -- +goose StatementBegin
 SELECT kaname.authority_protocol_drain();
