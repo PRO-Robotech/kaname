@@ -5,11 +5,12 @@ package pg
 import (
 	"context"
 	"encoding/json"
+	"slices"
+
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/jackc/pgx/v5"
-	"slices"
 )
 
 // Runtime proposal не является доказательством: RR owner verifier проверяет

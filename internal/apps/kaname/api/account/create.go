@@ -28,23 +28,20 @@ package account
 import (
 	"context"
 	"fmt"
-	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"log/slog"
-
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // OwnerBindingReconciler — narrow port (P6 C-01/C-01b): materialize the owner

@@ -4,11 +4,12 @@ package pg_test
 
 import (
 	"context"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/stretchr/testify/require"
 )
 
 // Actual FK SET NULL с полным AFTER-образом выполняет AccountDeletePublic.

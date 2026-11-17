@@ -281,7 +281,9 @@ func TestForwardAllocationReceiptRXBeforeKeyAndCrossBackend(t *testing.T) {
 	defer cancel()
 	done := lifecycleAsync(t, ctx, func(ctx context.Context) error {
 		tx, e := pool.Begin(ctx)
-		if e != nil { return e }
+		if e != nil {
+			return e
+		}
 		defer tx.Rollback(context.WithoutCancel(ctx))
 		_, e = tx.Exec(ctx, `SELECT kaname.authority_forward_emit_v4(ARRAY[`+forwardReceiptPayload+`])`, r.a)
 		return e

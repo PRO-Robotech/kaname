@@ -11,22 +11,19 @@ package project
 import (
 	"context"
 	"fmt"
-	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"log/slog"
-
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // ObjectReconciler — narrow post-commit port (rbac-contract-a-fix, C-01b /

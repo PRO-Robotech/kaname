@@ -4,14 +4,15 @@ package pg_test
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func sevenCRUDDedicatedFactory(t *testing.T, f sevenCRUDPublicWorld) (context.Context, *kanamepg.CRUDWriters, int) {

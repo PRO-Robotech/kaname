@@ -5,12 +5,13 @@ package pg_test
 import (
 	"context"
 	"fmt"
+	"testing"
+	"time"
+
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func TestPreparedSequenceIndexedStoresRejectRuntimeTamper(t *testing.T) {

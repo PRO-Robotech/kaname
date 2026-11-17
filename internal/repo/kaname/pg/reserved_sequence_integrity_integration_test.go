@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"testing"
+
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
@@ -14,8 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
-	"sync"
-	"testing"
 )
 
 func TestPreparedMetadataSequenceRejectsMissingReplayedForeignAndCrossFamilyEffects(t *testing.T) {

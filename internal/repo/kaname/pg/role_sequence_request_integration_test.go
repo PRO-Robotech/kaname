@@ -4,14 +4,15 @@ package pg_test
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/grantpolicy"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func TestPreparedRoleSequencePreservesMetadataMaskEmptyMaskAndStaleCAS(t *testing.T) {

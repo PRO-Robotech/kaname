@@ -5,6 +5,10 @@ package pg_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	accountapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/account"
@@ -16,9 +20,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
-	"strings"
-	"testing"
-	"time"
 )
 
 func TestSevenCRUDAccountCreateBothIDOriginsHaveCompleteOwnerImage(t *testing.T) {

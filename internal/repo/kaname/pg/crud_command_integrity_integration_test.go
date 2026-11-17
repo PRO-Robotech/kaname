@@ -3,12 +3,13 @@
 package pg_test
 
 import (
+	"testing"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func sevenCRUDCommandSnapshot(t *testing.T, r protocolRig) string {

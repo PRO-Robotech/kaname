@@ -23,7 +23,7 @@ import (
 func TestSequenceExplicitIDUpdateRequiresBothKeysAndPreservesRollback(t *testing.T) {
 	for _, relation := range []struct {
 		table, column, sequence string
-		namespace int
+		namespace               int
 	}{
 		{"resource_journal", "sequence_no", "resource_journal_sequence_no_seq", 1262569304},
 		{"fga_outbox", "id", "fga_outbox_id_seq", 1262569305},
@@ -71,9 +71,9 @@ func TestSequenceExplicitIDUpdateRequiresBothKeysAndPreservesRollback(t *testing
 					require.NoError(t, err)
 					require.True(t, updateAllowed, "GIVEN: отказ должен исходить от guard, не от отсутствия UPDATE ACL")
 					for _, tc := range []struct {
-						name string
+						name                                                   string
 						oldLock, newLock, shared, physical, unchanged, allowed bool
-						delta int64
+						delta                                                  int64
 					}{
 						{name: "no-keys", delta: 1},
 						{name: "only-old-key", oldLock: true, delta: 1},
@@ -117,7 +117,10 @@ func TestSequenceExplicitIDUpdateRequiresBothKeysAndPreservesRollback(t *testing
 							if tc.shared {
 								lockSQL = `SELECT pg_advisory_xact_lock_shared($1,hashtext($2::bigint::text))`
 							}
-							for _, key := range []struct { held bool; id int64 }{{tc.oldLock, oldID}, {tc.newLock, target}} {
+							for _, key := range []struct {
+								held bool
+								id   int64
+							}{{tc.oldLock, oldID}, {tc.newLock, target}} {
 								if key.held {
 									_, err := tx.Exec(ctx, lockSQL, relation.namespace, key.id)
 									require.NoError(t, err)

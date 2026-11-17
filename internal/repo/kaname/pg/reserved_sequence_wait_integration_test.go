@@ -4,14 +4,15 @@ package pg_test
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	clusterapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"testing"
-	"time"
 )
 
 // Отдельно доказываем participation actual INSERT и RX-before-key. Consumer

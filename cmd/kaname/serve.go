@@ -776,10 +776,10 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		if composeErr != nil {
 			return fmt.Errorf("authority-protocol full public composition: %w", composeErr)
 		}
-		// Одни и те же validated handles: public, login и background потребители.
-		membershipParticipant, admissionParticipant = participants.membership, participants.admission
-		inviteDecisions, clusterAdminParticipant = participants.invites, participants.cluster
-		resourceParticipant, resourceObjectParticipant = participants.resources, participants.objects
+		// Публичные службы уже провязаны сборщиком; сохраняем тех же участников
+		// для полосы входа и фонового согласования.
+		admissionParticipant = participants.admission
+		resourceObjectParticipant = participants.objects
 		groupObjectParticipant, bindingStageParticipant = participants.groups, participants.bindings
 	}
 

@@ -24,7 +24,7 @@ var errForwardAllocationRollback = errors.New("forward allocation: refuse after 
 
 type forwardAllocationRunner struct {
 	inner *kanamepg.ReconcileAdapter
-	fail bool
+	fail  bool
 }
 
 func (p *forwardAllocationRunner) WithTx(ctx context.Context, fn func(context.Context, reconcile.ReconcileStore) error) error {
@@ -88,21 +88,31 @@ func TestReconcileForward_AllocationPreservesPublicEffects(t *testing.T) {
 					} else {
 						for i := 0; i < n; i++ {
 							err = rec.ReconcileObjectForward(ctx, "compute.instance", fmt.Sprintf("wdi-%07d", i))
-							if err != nil { break }
+							if err != nil {
+								break
+							}
 						}
 					}
-					if fail && n > 0 { require.ErrorIs(t, err, errForwardAllocationRollback) } else { require.NoError(t, err) }
+					if fail && n > 0 {
+						require.ErrorIs(t, err, errForwardAllocationRollback)
+					} else {
+						require.NoError(t, err)
+					}
 					wantCalls := int64(0)
 					if n > 0 {
 						wantCalls = 1
-						if route == "object" && !fail { wantCalls = int64(n) }
+						if route == "object" && !fail {
+							wantCalls = int64(n)
+						}
 					}
 					counter.mu.Lock()
 					calls := counter.byTag["SELECT kaname.authority_forward_emit_v4($1::jsonb[])"]
 					counter.mu.Unlock()
 					subj := "user:" + string(fx.member)
 					wantObjects := n
-					if fail { wantObjects = 0 }
+					if fail {
+						wantObjects = 0
+					}
 					var members, ledger, facts, outbox int
 					require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.access_binding_target_members WHERE binding_id=$1`, string(bid)).Scan(&members))
 					require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.access_binding_emitted_tuples WHERE binding_id=$1`, string(bid)).Scan(&ledger))

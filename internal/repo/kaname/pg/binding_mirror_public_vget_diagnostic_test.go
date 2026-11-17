@@ -5,11 +5,12 @@ package pg_test
 import (
 	"context"
 	"encoding/json"
+	"testing"
+	"time"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/jackc/pgx/v5"
-	"testing"
-	"time"
 )
 
 // Только наблюдение после FALSE: исходный assertion остаётся обязательным.

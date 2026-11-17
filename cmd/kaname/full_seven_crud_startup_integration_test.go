@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"testing"
+
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
@@ -11,7 +13,6 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 // Здесь нет ручных With...Writer: все семь actual handlers получают ports
