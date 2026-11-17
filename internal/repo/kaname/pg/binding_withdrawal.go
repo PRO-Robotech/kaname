@@ -68,9 +68,16 @@ func (p *BindingStageParticipant) withdrawBindingOnce(ctx context.Context, id do
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
+	mode := map[kaname.BindingWithdrawalKind]string{kaname.BindingWithdrawalDelete: "delete", kaname.BindingWithdrawalRevoke: "revoke", kaname.BindingWithdrawalExpiry: "expiry"}[kind]
+	if err = stage.prepareSequenceProgram(ctx, w, mode, string(id), actor); err != nil {
+		return domain.AccessBinding{}, err
+	}
 	// Epoch удерживает ровно тот же полный source graph. Финальное время — после
 	// advisory/deactivation row waits; TTL не судится по времени начала TX.
 	if err = stage.recheck(ctx, w); err != nil {
+		return domain.AccessBinding{}, err
+	}
+	if _, err = w.tx.Exec(ctx, `SELECT kaname.authority_binding_withdrawal_sequence_finalize_v3()`); err != nil {
 		return domain.AccessBinding{}, err
 	}
 	current.Subjects = stage.binding.Subjects
@@ -94,7 +101,7 @@ func (p *BindingStageParticipant) withdrawBindingOnce(ctx context.Context, id do
 		if revoker == "" {
 			revoker = "system:revoke"
 		}
-		out, err = w.AccessBindingsW().RevokeGuarded(ctx, id, domain.UserID(revoker))
+		out, err = (&abWriter{abReader: abReader{tx: w.tx}}).revokeGuardedAt(ctx, id, domain.UserID(revoker), w.fence.decisionAt)
 		if err != nil {
 			return domain.AccessBinding{}, err
 		}

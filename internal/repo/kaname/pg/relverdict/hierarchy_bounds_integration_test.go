@@ -64,14 +64,37 @@ func TestNativeHierarchySQLFiveHopsFourParents(t *testing.T) {
 				prefix = table + "(object_id) AS (SELECT $2::text), "
 			}
 			marker := "scope(" + columns + ") AS ("
+			endMarker := "\n),"
+			nestedList := false
+			if f.name == "list" && strings.Count(f.sql, marker) == 0 {
+				// У новой формы List цепь живёт внутри скалярного вопроса
+				// кандидата. Принимаем только точную известную форму, чтобы
+				// смена прибора не подменила проверяемый рекурсивный CTE.
+				columns = "s_type, s_id, depth"
+				marker = "        WITH RECURSIVE scope(" + columns + ") AS ("
+				endMarker = "\n        ),"
+				prefix = ""
+				nestedList = true
+			}
+			require.Equal(t, 1, strings.Count(f.sql, marker), "единственный scope проверяемой формы")
 			start := strings.Index(f.sql, marker)
 			require.GreaterOrEqual(t, start, 0)
 			tail := f.sql[start+len(marker):]
-			end := strings.Index(tail, "\n),")
+			end := strings.Index(tail, endMarker)
 			require.GreaterOrEqual(t, end, 0)
 			body := tail[:end]
+			if nestedList {
+				// Внешний кандидат заменяется только параметром корня той же
+				// пробы. Рёбра, рекурсия, глубина и fanout остаются боевыми.
+				require.Equal(t, 1, strings.Count(body, "SELECT $2::text, c.object_id, 0"))
+				require.Equal(t, 1, strings.Count(body, "c.object_id"))
+			}
 			// Остальные параметры основного запроса этому CTE не принадлежат.
 			body = strings.NewReplacer(f.fanout+"::int", "$4::int", f.depth+"::int", "$3::int", f.typ+"::text", "$1::text", f.id+"::text", "$2::text").Replace(body)
+			if nestedList {
+				// Корень подставляется ПОСЛЕ перенумерации: исходный $2 — тип.
+				body = strings.Replace(body, "c.object_id", "$2::text", 1)
+			}
 			sql := "WITH RECURSIVE " + prefix + "scope(" + columns + ") AS (" + body + ") SELECT s_id,min(depth) FROM scope GROUP BY s_id ORDER BY s_id"
 			ask := func(root string) map[string]int {
 				rows, err := tx.Query(ctx, sql, "hierarchy_probe", root, hierarchy.MaxPointerHops, hierarchy.MaxImmediateParents)

@@ -6,9 +6,10 @@ package user
 import (
 	"context"
 	"errors"
+	"reflect"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
-	"reflect"
 )
 
 type identityWriterSelection struct {

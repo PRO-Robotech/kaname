@@ -5,11 +5,11 @@ package internal_iam
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 
+	"github.com/PRO-Robotech/kaname/internal/registrationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -68,18 +68,7 @@ func (uc *RegisterResourceUseCase) retireRegistrationPointers(ctx context.Contex
 // namedPointerSubjectType — общий предел формы родителя до чтения каталога
 // и при допуске точного указателя. Проект допустим; принципалы и вершины IAM — нет.
 func namedPointerSubjectType(typ string) bool {
-	if internalGrantReference(typ) {
-		return false
-	}
-	if typ == "project" {
-		return true
-	}
-	for _, forbidden := range proxytuple.ForbiddenObjectTypes() {
-		if typ == forbidden {
-			return false
-		}
-	}
-	return typ != "" && !strings.Contains(typ, "*")
+	return registrationpolicy.NamedPointerSubjectType(typ)
 }
 
 // versionedWithdrawalEmitter — обязательная capability named/mixed пути.

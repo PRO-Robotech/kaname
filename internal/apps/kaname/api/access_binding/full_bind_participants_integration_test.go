@@ -25,7 +25,6 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -43,6 +42,13 @@ type fullBindSetupAwaiter interface {
 // завершается ДО lifecycle; исследуемые роли и выдачи затем идут через API
 // и реальные configured factories обычного LOGIN.
 func (w *fullBindWorld) installFullBindParticipants(observers ...fullBindSelectorObserverFactory) {
+	w.t.Helper()
+	w.installFullBindParticipantsWithRegistrationExceptions(nil, observers...)
+}
+
+// Конкретный мир объявляет только известные статические регистрации, для
+// которых после activation нет producer. Общие runtime writers не меняются.
+func (w *fullBindWorld) installFullBindParticipantsWithRegistrationExceptions(disabled []domain.DisabledRegistrationModule, observers ...fullBindSelectorObserverFactory) {
 	w.t.Helper()
 	ownerPool, ownerRepo := w.pool, w.repo
 	require.LessOrEqual(w.t, len(observers), 1)
@@ -81,6 +87,7 @@ func (w *fullBindWorld) installFullBindParticipants(observers ...fullBindSelecto
 	require.NoError(w.t, err)
 	bundle, err := granteffect.NewBundle(w.ctx, composed, halves, granteffect.ProjectorVersion, report.KeyTerms...)
 	require.NoError(w.t, err)
+	roster := fbInstallResourceRegistrationWriter(w.t, w.ctx, ownerRepo, ownerPool, w.accA, true, disabled...)
 	require.NoError(w.t, ownerRepo.PrepareAuthorityBundle(w.ctx, bundle))
 	facts, err := catalog.NewFacts(halves)
 	require.NoError(w.t, err)
@@ -115,6 +122,7 @@ func (w *fullBindWorld) installFullBindParticipants(observers ...fullBindSelecto
 	handed, err := repo.LoadAuthorityBundle(w.ctx, composed, report.KeyTerms...)
 	require.NoError(w.t, err)
 	require.Equal(w.t, bundle.Identity(), handed.Identity())
+	repo = fbActivateFullResourceWriter(w.t, w.ctx, ownerRepo, repo, handed)
 	writers, err := kanamepg.NewGrantPolicyWriters(w.ctx, repo, handed)
 	require.NoError(w.t, err)
 	participant, err := kanamepg.NewGroupMembershipParticipant(w.ctx, repo, handed)
@@ -123,14 +131,11 @@ func (w *fullBindWorld) installFullBindParticipants(observers ...fullBindSelecto
 	require.NoError(w.t, err)
 	rec := reconcile.New(kanamepg.NewReconcileAdapter(runtime, source), slog.Default(), source)
 	require.NoError(w.t, rec.WithStagedBindingReconciler(stages))
-	resources, err := kanamepg.NewResourceObjectParticipant(w.ctx, repo, handed)
-	require.NoError(w.t, err)
-	resourceBeginner, err := resources.RegistrationTxBeginner(runtime)
-	require.NoError(w.t, err)
-	objects, err := resources.NewObjectReconciler(slog.Default())
+	door := authzcascade.WrapAdmitted(relverdict.NewAsker(runtime), personmarks.New(runtime))
+	resourceDecisions, resourceGate, registrationContext := fbFullResourceRegistration(w.t, w.ctx, repo, handed, door, roster)
+	objects, err := resourceDecisions.NewObjectReconciler(slog.Default())
 	require.NoError(w.t, err)
 	require.NoError(w.t, rec.WithObjectReconciler(objects))
-	door := authzcascade.WrapAdmitted(relverdict.NewAsker(runtime), personmarks.New(runtime))
 	ops := operations.NewRepo(runtime, "kaname")
 	keys := kanamepg.NewRegisteredKeys(runtime)
 	var selector accessbindingapp.SelectorReconciler = rec
@@ -157,14 +162,14 @@ func (w *fullBindWorld) installFullBindParticipants(observers ...fullBindSelecto
 		kanamepg.NewPoolTxBeginner(runtime), kanamepg.NewCatalogTypeReader(), kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), source),
 		kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader(),
-	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"}).
-		WithResourceTxBeginner(resourceBeginner).WithObjectReconciler(rec, slog.Default())
-	require.NoError(w.t, ownerRepo.ActivateAuthorityBundle(w.ctx, bundle))
+	).WithRegistrationAuthority(resourceGate).WithObjectReconciler(rec, slog.Default())
+	require.NoError(w.t, w.reg.WithResourceDecisionRunner(resourceDecisions))
+	w.fullResourceRegistrationContext = registrationContext
 	var phase, enforcement string
 	// Закрытое состояние наблюдает fixture owner; runtime ACL и actor-пути
 	// остаются прежними и проверяются отдельным настоящим LOGIN.
 	require.NoError(w.t, ownerPool.QueryRow(w.ctx, `SELECT a.phase,p.enforcement FROM kaname.authority_semantic_identity a CROSS JOIN kaname.authority_writer_protocol p`).Scan(&phase, &enforcement))
 	require.Equal(w.t, "active", phase)
 	require.Equal(w.t, "strict", enforcement)
-	w.t.Log("FB explicit mode: ordinary LOGIN, active/strict; binding, role, registration and object participants connected")
+	w.t.Log("FB explicit FULL2 mode: ordinary LOGIN, active/strict; tagged binding, role, registration and object participants connected")
 }

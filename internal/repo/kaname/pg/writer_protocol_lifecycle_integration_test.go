@@ -100,7 +100,7 @@ func TestAuthorityLifecycleRealHandoffAndOrdinaryParticipant(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, writer.Commit(r.ctx))
 			if phase == "prepared" {
-				decision, err := r.repo.CoordinatedAuthorityWriter(r.ctx, in)
+				decision, err := r.repo.CoordinatedEntryWriter(r.ctx, in)
 				require.Error(t, err)
 				require.Nil(t, decision)
 			}
@@ -174,7 +174,13 @@ func TestAuthorityLifecycleOwnerAndWholeIdentityAreRequired(t *testing.T) {
 		require.NoError(t, err)
 		lifecycleRollback(t, fresh)
 		id := r.bundle.Identity()
-		_, err = fresh.Exec(r.ctx, `SELECT kaname.authority_protocol_enter('accounts',ARRAY[$1::text],jsonb_build_array(jsonb_build_object('kind','account','id',$1::text)),'group',$2,$3,$4,$5,'participant')`, r.a, id.ModelID, id.CatalogID, tc.projector, tc.version)
+		if tc.version == 1 {
+			_, err = fresh.Exec(r.ctx, `SELECT kaname.authority_protocol_enter_typed_v2('accounts',ARRAY[$1::text],jsonb_build_array(jsonb_build_object('kind','account','id',$1::text)),'group',$2,$3,$4,'participant')`, r.a, id.ModelID, id.CatalogID, tc.projector)
+		} else {
+			// ABI2 фиксирует stored protocol=1; старая форма с caller version
+			// отвергается целиком, включая неизвестную версию прежнего клиента.
+			_, err = fresh.Exec(r.ctx, `SELECT kaname.authority_protocol_enter('accounts',ARRAY[$1::text],jsonb_build_array(jsonb_build_object('kind','account','id',$1::text)),'group',$2,$3,$4,$5,'participant')`, r.a, id.ModelID, id.CatalogID, tc.projector, tc.version)
+		}
 		require.Error(t, err)
 		require.NoError(t, fresh.Rollback(r.ctx))
 	}
@@ -230,22 +236,88 @@ func TestAuthorityLifecycleCancellationReleasesDrain(t *testing.T) {
 	lifecycleRollback(t, old)
 	_, err = old.Exec(r.ctx, `UPDATE kaname.accounts SET description='held legacy write' WHERE id=$1`, r.a)
 	require.NoError(t, err)
+	oldPID := int(old.Conn().PgConn().PID())
 	ctx, cancel := context.WithCancel(r.ctx)
 	defer cancel()
 	done := lifecycleAsync(t, ctx, func(ctx context.Context) error { return lifecycleOwner(r).ActivateAuthorityBundle(ctx, r.bundle) })
-	receiptWaitForBlocker(t, r.ctx, r.admin, int(old.Conn().PgConn().PID()))
+	activationPID := receiptWaitForBlocker(t, r.ctx, r.admin, oldPID)
+	var drainWaiting bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT EXISTS(
+ SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='relation'
+ AND mode='AccessExclusiveLock' AND NOT granted)`, activationPID).Scan(&drainWaiting))
+	require.True(t, drainWaiting, "отмена проверяется во время реального ожидания drain")
 	cancel()
 	require.ErrorIs(t, lifecycleResult(t, r.ctx, done), context.Canceled)
 	lifecycleState(t, r, "prepared", "compatibility")
-	// Global/table locks не утекли: независимый participant входит до конца old TX.
-	current, err := r.repo.ParticipantAuthorityWriter(r.ctx, r.intent(r.b))
-	require.NoError(t, err)
-	lifecycleWriterCleanup(t, current)
-	require.NoError(t, current.Rollback(r.ctx))
+	// Проверяем освобождение именно activation, а не законных locks old TX.
+	// Пул может уже использовать тот же PID для observer SELECT (AccessShare).
+	// Синхронное bounded ожидание подтверждения server cleanup: без фонового
+	// condition, который мог бы пережить таймер и изменить прочитанные флаги.
+	releaseErr := waitAuthorityPIDRelease(r.ctx, r.admin, activationPID)
+	var activationReleased, legacyAdmissionHeld bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT NOT EXISTS(
+ SELECT 1 FROM pg_locks WHERE pid=$1 AND (locktype='advisory'
+ OR (locktype='relation' AND mode<>'AccessShareLock'))), EXISTS(
+ SELECT 1 FROM pg_locks WHERE pid=$2 AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+ AND locktype='advisory' AND classid=1262569292::oid AND objid=0::oid
+ AND objsubid=2 AND mode='ExclusiveLock' AND granted)`, activationPID, oldPID).Scan(&activationReleased, &legacyAdmissionHeld))
+	if !activationReleased {
+		// Снимок не меняет вычисленный verdict и не повторяет ожидание release.
+		// PID мог быть переиспользован пулом: сохраняем observer PID и времена
+		// backend/TX/query, но не текст SQL и не бизнес-параметры.
+		diagnosticCtx, stopDiagnostic := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		var snapshot string
+		diagnosticErr := r.admin.QueryRow(diagnosticCtx, `WITH p AS (
+ SELECT pid,backend_start,xact_start,query_start,state_change,state,
+        wait_event_type,wait_event,pg_blocking_pids(pid) AS blockers,md5(query) AS query_hash
+ FROM pg_stat_activity WHERE datname=current_database() AND pid IN ($1,$2)
+ ORDER BY pid LIMIT 2
+), l AS (
+ SELECT pid,locktype,mode,granted,database,relation::regclass::text AS relation,
+        classid,objid,objsubid,transactionid::text AS transaction_id,virtualxid,virtualtransaction
+ FROM pg_locks WHERE pid IN ($1,$2)
+ ORDER BY granted,pid,locktype,relation,classid,objid LIMIT 64
+)
+SELECT jsonb_build_object('observer_pid',pg_backend_pid(),
+ 'activity',coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY pid) FROM p),'[]'::jsonb),
+ 'locks',coalesce((SELECT jsonb_agg(to_jsonb(l)) FROM l),'[]'::jsonb))::text`, activationPID, oldPID).Scan(&snapshot)
+		stopDiagnostic()
+		if diagnosticErr != nil {
+			t.Logf("cancel lock diagnostic: activation_pid=%d old_pid=%d snapshot_unavailable=true", activationPID, oldPID)
+		} else {
+			t.Logf("cancel lock diagnostic: activation_pid=%d old_pid=%d state=%s", activationPID, oldPID, snapshot)
+		}
+	}
+	require.NoError(t, releaseErr)
+	require.True(t, activationReleased, "cancel освободил все advisory/table drain locks своего PID")
+	require.True(t, legacyAdmissionHeld, "ещё открытая raw TX законно удерживает compatibility admission")
+	var enteredAccounts []domain.AccountID
+	current := lifecycleAsync(t, r.ctx, func(ctx context.Context) error {
+		writer, openErr := r.repo.ParticipantAuthorityWriter(ctx, r.intent(r.b))
+		if openErr != nil {
+			return openErr
+		}
+		enteredAccounts = writer.AuthorityFence().Accounts()
+		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer stop()
+		return writer.Rollback(cleanup)
+	})
+	participantPID := receiptWaitForBlocker(t, r.ctx, r.admin, oldPID)
+	require.NotEqual(t, activationPID, participantPID, "runtime participant использует отдельный LOGIN pool")
+	var participantWaiting bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT EXISTS(
+ SELECT 1 FROM pg_locks WHERE pid=$1 AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+ AND locktype='advisory' AND classid=1262569292::oid AND objid=0::oid
+ AND objsubid=2 AND mode='ShareLock' AND NOT granted)
+ AND $2=ANY(pg_blocking_pids($1))`, participantPID, oldPID).Scan(&participantWaiting))
+	require.True(t, participantWaiting, "participant ждёт old TX, а не отменённый activation")
 	require.NoError(t, old.Rollback(r.ctx))
+	require.NoError(t, lifecycleResult(t, r.ctx, current))
+	require.Equal(t, []domain.AccountID{domain.AccountID(r.b)}, enteredAccounts)
 	authorityWaitReleased(t, r.admin)
 	authorityWaitReleased(t, r.runtime)
 	require.NoError(t, lifecycleOwner(r).ActivateAuthorityBundle(r.ctx, r.bundle))
+	lifecycleState(t, r, "active", "strict")
 }
 
 func TestAuthorityLifecycleRejectsOldSnapshotsAndQueuedRawWriter(t *testing.T) {
@@ -347,4 +419,25 @@ func TestAuthorityLifecycleRejectsInputBeforeConnection(t *testing.T) {
 	bundle, err := repository.LoadAuthorityBundle(context.Background(), "")
 	require.Error(t, err)
 	require.Nil(t, bundle)
+}
+
+// Даже точный active bundle не разрешает old-binary entry после ABI2 cutover.
+func TestAuthorityConsumerV2RejectsOldEntryWithValidBundle(t *testing.T) {
+	r := writerProtocolRig(t)
+	r.strict(t)
+	tx, err := r.runtime.Begin(r.ctx)
+	require.NoError(t, err)
+	lifecycleRollback(t, tx)
+	identity := r.bundle.Identity()
+	_, err = tx.Exec(r.ctx, `SELECT kaname.authority_protocol_enter('accounts',ARRAY[$1::text],jsonb_build_array(jsonb_build_object('kind','account','id',$1::text)),'group',$2,$3,$4,1,'participant')`, r.a, identity.ModelID, identity.CatalogID, identity.ProjectorVersion)
+	var pgerr *pgconn.PgError
+	require.ErrorAs(t, err, &pgerr)
+	require.Equal(t, "42501", pgerr.Code)
+	require.NoError(t, tx.Rollback(r.ctx))
+	fresh, err := r.runtime.Begin(r.ctx)
+	require.NoError(t, err)
+	lifecycleRollback(t, fresh)
+	_, err = protocolEnter(r.ctx, fresh, r.intent(r.a), "participant")
+	require.NoError(t, err, "тот же ordinary LOGIN и bundle проходят явный ABI2 entry")
+	require.NoError(t, fresh.Rollback(r.ctx))
 }

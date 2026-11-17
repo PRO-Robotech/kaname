@@ -242,7 +242,7 @@ jobs:
             exit 1
           fi
           echo "прочитано файлов Go: $(printf '%s\n' "$files" | wc -l)"
-          unformatted=$(gofmt -l $files || true)
+          unformatted=$(gofmt -l $files) || exit 1
           if [ -n "$unformatted" ]; then
             echo "требуется gofmt:"; echo "$unformatted"; exit 1
           fi
@@ -301,6 +301,25 @@ jobs:
       # Потоки JSON раздельны: стенд читает test.json как один общий прогон.
       # Все четыре кода берутся данными, чтобы обе группы дали перепись даже
       # при отказе первой. Итог требует и сырого кода Go, и числового вердикта.
+      - name: контекст сырых событий проб
+        env:
+          EVIDENCE_KIND: unit
+        run: |
+          mkdir -p ci-test-evidence/unit
+          git rev-parse HEAD > ci-test-evidence/unit/checkout-sha.txt
+          python3 - <<'PYMETA'
+          import json, os, pathlib
+          keys = ("GITHUB_SHA", "GITHUB_WORKFLOW", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+                  "GITHUB_EVENT_NAME", "GITHUB_JOB", "RUNNER_OS", "RUNNER_ARCH",
+                  "TESTCONTAINERS_RYUK_DISABLED", "TESTCONTAINERS_HOST_OVERRIDE", "KANAME_REQUIRE_INTEGRATION",
+                  "KACHO_DERIVE_PARENT_COST", "KACHO_PERMANENT_PROJECT_COST", "KACHO_MATRIX_VOLUME",
+                  "KACHO_SCALEGRID_FULL", "KACHO_STRENGTH_FULL", "KACHO_STRENGTH_WRITE", "KACHO_RECOVERY_TIMING")
+          data = {key: os.environ.get(key) for key in keys}
+          data["kind"] = os.environ["EVIDENCE_KIND"]
+          pathlib.Path("ci-test-evidence/unit/context.json").write_text(
+              json.dumps(data, indent=2, sort_keys=True) + "\n")
+          PYMETA
+
       - name: пробы (-race -short и отдельный полный обход дерева)
         run: |
           tree_go_rc=0
@@ -314,9 +333,21 @@ jobs:
           echo "Общий прогон -race: go test код $race_go_rc; отдельная перепись:"
           python3 .github/scripts/go-test-verdict.py < test.json || race_verdict_rc=$?
           echo "Коды: дерево Go=$tree_go_rc вердикт=$tree_verdict_rc; -race Go=$race_go_rc вердикт=$race_verdict_rc"
+          printf 'tree_go=%s\ntree_verdict=%s\nrace_go=%s\nrace_verdict=%s\n' "$tree_go_rc" "$tree_verdict_rc" "$race_go_rc" "$race_verdict_rc" > ci-test-evidence/unit/exit-codes.txt
           if [ "$tree_go_rc" -ne 0 ] || [ "$tree_verdict_rc" -ne 0 ] || [ "$race_go_rc" -ne 0 ] || [ "$race_verdict_rc" -ne 0 ]; then
             exit 1
           fi
+
+      - name: сырые события unit (включая отказ и прерывание)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-test-unit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            deferred-tree.json
+            test.json
+            ci-test-evidence/unit
+          if-no-files-found: error
 
   # ── ЛИНТ ────────────────────────────────────────────────────────────────────
   lint:
@@ -688,6 +719,25 @@ jobs:
       - uses: ./.github/actions/platform-tree
         id: platform-tree
 
+      - name: контекст сырых событий проб
+        env:
+          EVIDENCE_KIND: integration
+        run: |
+          mkdir -p ci-test-evidence/integration
+          git rev-parse HEAD > ci-test-evidence/integration/checkout-sha.txt
+          python3 - <<'PYMETA'
+          import json, os, pathlib
+          keys = ("GITHUB_SHA", "GITHUB_WORKFLOW", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+                  "GITHUB_EVENT_NAME", "GITHUB_JOB", "RUNNER_OS", "RUNNER_ARCH",
+                  "TESTCONTAINERS_RYUK_DISABLED", "TESTCONTAINERS_HOST_OVERRIDE", "KANAME_REQUIRE_INTEGRATION",
+                  "KACHO_DERIVE_PARENT_COST", "KACHO_PERMANENT_PROJECT_COST", "KACHO_MATRIX_VOLUME",
+                  "KACHO_SCALEGRID_FULL", "KACHO_STRENGTH_FULL", "KACHO_STRENGTH_WRITE", "KACHO_RECOVERY_TIMING")
+          data = {key: os.environ.get(key) for key in keys}
+          data["kind"] = os.environ["EVIDENCE_KIND"]
+          pathlib.Path("ci-test-evidence/integration/context.json").write_text(
+              json.dumps(data, indent=2, sort_keys=True) + "\n")
+          PYMETA
+
       - name: контейнерные пробы
         env:
           # Уборщик контейнеров на ЭФЕМЕРНОМ исполнителе не нужен: машина
@@ -696,6 +746,7 @@ jobs:
           # которых вердикта не было вовсе.
           TESTCONTAINERS_RYUK_DISABLED: "true"
           INTEGRATION_TIMEOUT: 25m
+          INTEGRATION_EVIDENCE_DIR: ci-test-evidence/integration
           INTEGRATION_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
           PLATFORM_TREE: ${{ steps.platform-tree.outputs.root }}
         run: |
@@ -711,6 +762,14 @@ jobs:
             exit 1
           fi
           exit "$rc"
+
+      - name: сырые события и план integration (включая отказ и прерывание)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-test-integration-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/integration
+          if-no-files-found: error
 
   # Сводный исход шардов под ПРЕЖНИМ именем контекста: «интеграция (Postgres в
   # контейнерах)» — обязательный контекст защиты ствола (`.github/TRUNK-VERDICT.md`),

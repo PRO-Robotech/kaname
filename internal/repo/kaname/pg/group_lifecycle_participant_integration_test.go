@@ -225,14 +225,49 @@ func TestGroupLifecycleParticipantRollbackClosedAndIndependentAccounts(t *testin
 	require.Error(t, engine.ReconcileBinding(r.ctx, domain.AccessBindingID("acb-no-whole-scan")))
 	authorityWaitReleased(t, r.runtime)
 }
+
+// NEW carrier записывается тем же global producer, которого ждёт entrant.
+func groupPendingBindingInHeldProducer(t *testing.T, r protocolRig, tx pgx.Tx, role, account, typ, subject string) string {
+	t.Helper()
+	id := ids.NewID("acb")
+	_, err := tx.Exec(r.ctx, `INSERT INTO kaname.access_bindings(id,subject_type,subject_id,role_id,resource_type,resource_id,status) VALUES($1,$2,$3,$4,'account',$5,'PENDING')`, id, typ, subject, role, account)
+	require.NoError(t, err)
+	_, err = tx.Exec(r.ctx, `INSERT INTO kaname.access_binding_subjects(binding_id,subject_type,subject_id) VALUES($1,$2,$3)`, id, typ, subject)
+	require.NoError(t, err)
+	return id
+}
+
+// Global producer блокирует typed entrant на общем барьере ДО consumer.
+// Проверяется точный ключ, режим ShareLock и entrant SQL.
+func groupParticipantGlobalWait(t *testing.T, r protocolRig, blocker int) {
+	t.Helper()
+	receiptWaitForBlocker(t, r.ctx, r.admin, blocker)
+	var pid int
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT a.pid FROM pg_stat_activity a WHERE a.datname=current_database() AND a.wait_event_type='Lock' AND $1=ANY(pg_blocking_pids(a.pid)) AND a.query LIKE '%authority_protocol_enter_typed_v2(%' AND EXISTS(SELECT 1 FROM pg_locks l WHERE l.pid=a.pid AND l.locktype='advisory' AND l.classid=1262569283::oid AND l.objid=0 AND l.objsubid=2 AND l.mode='ShareLock' AND NOT l.granted)`, blocker).Scan(&pid))
+	require.NotZero(t, pid)
+}
+
 func TestGroupObjectParticipantWaitReclassifiesAndCancellationReleases(t *testing.T) {
 	r := writerProtocolRig(t)
 	g, uid, _ := membershipFixture(t, r)
+	// Role/projection seed завершается до global wait; carrier ещё отсутствует.
+	seeded := groupLifecycleBinding(t, r, r.b, uid, "group_lifecycle_foreign", domain.Rule{Module: "iam", Resources: []string{"group"}, ResourceNames: []string{string(g.ID)}, Verbs: []string{"get"}})
+	var lateRole string
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT role_id FROM kaname.access_bindings WHERE id=$1`, seeded).Scan(&lateRole))
+	_, err := r.admin.Exec(r.ctx, `DELETE FROM kaname.access_bindings WHERE id=$1`, seeded)
+	require.NoError(t, err)
+	var initialAccounts []string
+	var initialGlobal bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT accounts,global_scope FROM kaname.authority_group_object_scopes($1)`, string(g.ID)).Scan(&initialAccounts, &initialGlobal))
+	require.False(t, initialGlobal)
+	require.ElementsMatch(t, []string{r.a}, initialAccounts)
 	p := membershipParticipant(t, r)
 	hold, err := r.runtime.Begin(r.ctx)
 	require.NoError(t, err)
 	lifecycleRollback(t, hold)
-	r.enter(t, hold, r.intent(r.a), "participant")
+	producerIntent := r.intent(r.a)
+	producerIntent.Plan = kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}
+	r.enter(t, hold, producerIntent, "participant")
 	var blocker int
 	require.NoError(t, hold.QueryRow(r.ctx, `SELECT pg_backend_pid()`).Scan(&blocker))
 	var fence kaname.AuthorityFence
@@ -244,12 +279,13 @@ func TestGroupObjectParticipantWaitReclassifiesAndCancellationReleases(t *testin
 		fence = w.(kaname.AuthorityWriter).AuthorityFence()
 		return w.Rollback(context.WithoutCancel(ctx))
 	})
-	receiptWaitForBlocker(t, r.ctx, r.admin, blocker)
-	// Настоящий совместимый producer добавляет потенциальный NEW names carrier,
-	// пока entry ждёт. Первый fence недостаточен: нужен полный rollback/restart.
-	bid := groupLifecycleBinding(t, r, r.b, uid, "group_lifecycle_foreign", domain.Rule{Module: "iam", Resources: []string{"group"}, ResourceNames: []string{string(g.ID)}, Verbs: []string{"get"}})
-	_, err = r.admin.Exec(r.ctx, `UPDATE kaname.access_bindings SET status='PENDING' WHERE id=$1`, bid)
-	require.NoError(t, err)
+	groupParticipantGlobalWait(t, r, blocker)
+	// Producer добавляет NEW B carrier во время настоящего global wait.
+	// Исходный scope был только A; после commit нужен rollback/restart на A+B.
+	bid := groupPendingBindingInHeldProducer(t, r, hold, lateRole, r.b, "user", uid)
+	var outside int
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.access_bindings WHERE id=$1`, bid).Scan(&outside))
+	require.Zero(t, outside, "producer ещё не коммитил NEW carrier")
 	var released time.Time
 	require.NoError(t, hold.QueryRow(r.ctx, `SELECT clock_timestamp()`).Scan(&released))
 	require.NoError(t, hold.Commit(r.ctx))

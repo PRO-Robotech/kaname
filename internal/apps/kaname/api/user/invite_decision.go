@@ -3,9 +3,10 @@
 package user
 
 import (
+	"reflect"
+
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
-	"reflect"
 )
 
 // API сохраняет публичные имена порта, принадлежащего нейтральному repo слою.
@@ -27,7 +28,7 @@ func (uc *InviteUserUseCase) validateInviteDecisionSelection() error {
 	}
 	v := reflect.ValueOf(uc.inviteDecisions)
 	switch v.Kind() {
-	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Func, reflect.Slice, reflect.Chan:
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Func, reflect.Slice, reflect.Chan:
 		if v.IsNil() {
 			return iamerr.ErrUnavailable
 		}

@@ -46,22 +46,7 @@ type RelationOutboxEmitter interface {
 // Зеркало ТОЛЬКО ВЫХОДА: метки и родительская область
 // ресурса другой службы (источник истины — владелец). Метки nil →
 // сохраняются как JSONB '{}'.
-type ResourceMirrorRow struct {
-	ObjectType      string
-	ObjectID        string
-	ParentProjectID string
-	ParentAccountID string
-	// ParentChain — цепь предков от ближайшего к дальнему, каждый элемент
-	// `"<type>:<id>"`. Двух колонок выше хватает не всякому объекту: модель
-	// требует цепи произвольной формы, а объект без предка молча выпадает из
-	// области выдачи и из каскада.
-	ParentChain []string
-	Labels      map[string]string
-	// SourceVersion — монотонный маркер объекта от владельца.
-	// UPSERT зеркала применяет регистрацию лишь при строго большем значении,
-	// чем сохранённая версия (побеждает последнее состояние источника). Ноль → '-infinity' (старый формат).
-	SourceVersion time.Time
-}
+type ResourceMirrorRow = outboxtypes.ResourceMirrorRow
 
 // ResourceMirrorEmitter — порт вставки/обновления и удаления строки kaname.resource_mirror
 // в транзакции писателя вызывающего. Атомарен с отправкой

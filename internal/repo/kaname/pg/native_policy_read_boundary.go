@@ -78,9 +78,10 @@ func (p *nativeReadBoundary) reason(s string) { p.globalReasons[s] = true }
 func (p *nativeReadBoundary) global() bool    { return p == nil || len(p.globalReasons) > 0 }
 func (p *nativeReadBoundary) guardKeys() []string {
 	keys := []string{"*"}
-	if p.global() {
+	if p == nil {
 		return keys
 	}
+	// GLOBAL исключает будущих writers, но не отменяет точный RR→RC compare.
 	for k := range p.guards {
 		if k != "*" {
 			keys = append(keys, k)

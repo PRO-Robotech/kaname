@@ -52,7 +52,7 @@ func (r delegationWriteRepo) Writer(ctx context.Context) (Writer, error) {
 		return nil, authzguard.AuthzBackendUnavailable()
 	}
 	value := reflect.ValueOf(r.factory)
-	if value.Kind() == reflect.Ptr && value.IsNil() {
+	if value.Kind() == reflect.Pointer && value.IsNil() {
 		return nil, authzguard.AuthzBackendUnavailable()
 	}
 

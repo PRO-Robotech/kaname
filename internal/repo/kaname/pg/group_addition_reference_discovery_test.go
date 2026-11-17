@@ -21,10 +21,13 @@ type optionalReferenceProbeTx struct {
 	exists bool
 	err    error
 	reads  int
+	query  string
+	args   []any
 }
 
-func (tx *optionalReferenceProbeTx) QueryRow(context.Context, string, ...any) pgx.Row {
+func (tx *optionalReferenceProbeTx) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
 	tx.reads++
+	tx.query, tx.args = query, args
 	return optionalReferenceProbeRow{exists: tx.exists, err: tx.err}
 }
 
@@ -100,7 +103,7 @@ func TestGroupAdditionOptionalReferenceQualification(t *testing.T) {
 // Появившаяся после RR ссылка требует restage, а ошибка повторного чтения
 // остаётся ошибкой. Ни один исход не превращается в reference refusal здесь.
 func TestGroupAdditionOptionalReferenceRecheckRequiresUnchangedAbsence(t *testing.T) {
-	witness := &groupAdditionReferenceWitness{serviceAccountID: ids.NewID(domain.PrefixServiceAccount)}
+	witness := &groupAdditionReferenceWitness{member: domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: domain.SubjectID(ids.NewID(domain.PrefixServiceAccount))}}
 	tx := &optionalReferenceProbeTx{}
 	writer := &authorityWriteTx{writeTx: &writeTx{readTx: readTx{tx: tx}}, fence: authorityFence{mode: kaname.AuthorityFenceGlobal}}
 	require.NoError(t, witness.recheck(context.Background(), writer, &relverdict.AdministrativeReadBudget{}))
@@ -112,4 +115,67 @@ func TestGroupAdditionOptionalReferenceRecheckRequiresUnchangedAbsence(t *testin
 	reads := tx.reads
 	require.ErrorIs(t, witness.recheck(context.Background(), writer, &relverdict.AdministrativeReadBudget{}), kaname.ErrSourceUnconfirmed)
 	require.Equal(t, reads, tx.reads)
+}
+
+// Отсутствующий новый USER не является отсутствующим actor. Его логический
+// guard сохраняется, а отсутствие проверяется повторно под GLOBAL entry.
+func TestGroupAdditionOptionalUserReferenceQualification(t *testing.T) {
+	in := optionalReferenceProbeRequest()
+	member := domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(ids.NewID(domain.PrefixUser))}
+	in.groupNative.member.MemberType = member.Type
+	in.groupNative.member.MemberID = member.ID
+	in.mutationSubjects = []domain.Subject{member}
+	in.owners = in.owners[:1]
+	for _, present := range []bool{false, true} {
+		tx := &optionalReferenceProbeTx{exists: present}
+		out, witness, rows, err := discoverGroupAdditionReference(context.Background(), tx, in, &relverdict.AdministrativeReadBudget{})
+		require.NoError(t, err)
+		require.Equal(t, 1, rows)
+		require.Equal(t, `SELECT EXISTS(SELECT 1 FROM kaname.users WHERE id=$1)`, tx.query)
+		require.Equal(t, []any{string(member.ID)}, tx.args)
+		require.Equal(t, in.owners, out.owners)
+		require.Equal(t, in.mutationSubjects, out.mutationSubjects)
+		if present {
+			require.Nil(t, witness)
+			require.False(t, out.global)
+			continue
+		}
+		require.NotNil(t, witness)
+		require.True(t, out.global)
+		require.True(t, witness.excludes(subjectPolicyKey(member)))
+		require.False(t, witness.excludes(subjectPolicyKey(in.actor)))
+		require.False(t, witness.excludes("service_account:"+string(member.ID)))
+		require.False(t, witness.excludes("*"))
+		writer := &authorityWriteTx{writeTx: &writeTx{readTx: readTx{tx: tx}}, fence: authorityFence{mode: kaname.AuthorityFenceGlobal}}
+		require.NoError(t, witness.recheck(context.Background(), writer, &relverdict.AdministrativeReadBudget{}))
+		require.Equal(t, `SELECT EXISTS(SELECT 1 FROM kaname.users WHERE id=$1)`, tx.query)
+		tx.exists = true
+		require.ErrorIs(t, witness.recheck(context.Background(), writer, &relverdict.AdministrativeReadBudget{}), kaname.ErrAuthorityClassificationChanged)
+		tx.err = errors.New("ошибка повторного чтения USER")
+		require.ErrorIs(t, witness.recheck(context.Background(), writer, &relverdict.AdministrativeReadBudget{}), tx.err)
+		writer.fence.mode = kaname.AuthorityFenceAccounts
+		reads := tx.reads
+		require.ErrorIs(t, witness.recheck(context.Background(), writer, &relverdict.AdministrativeReadBudget{}), kaname.ErrSourceUnconfirmed)
+		require.Equal(t, reads, tx.reads)
+	}
+	tx := &optionalReferenceProbeTx{err: errors.New("ошибка чтения USER")}
+	out, witness, _, err := discoverGroupAdditionReference(context.Background(), tx, in, &relverdict.AdministrativeReadBudget{})
+	require.ErrorIs(t, err, tx.err)
+	require.Nil(t, witness)
+	require.False(t, out.global)
+	require.Equal(t, in.owners, out.owners)
+	budget := &relverdict.AdministrativeReadBudget{}
+	require.NoError(t, budget.Charge(100000, 0))
+	tx = &optionalReferenceProbeTx{}
+	_, witness, _, err = discoverGroupAdditionReference(context.Background(), tx, in, budget)
+	require.ErrorIs(t, err, kaname.ErrSourceReadLimit)
+	require.Nil(t, witness)
+	require.Zero(t, tx.reads)
+	in.actor = member
+	out, witness, _, err = discoverGroupAdditionReference(context.Background(), tx, in, &relverdict.AdministrativeReadBudget{})
+	require.NoError(t, err)
+	require.Nil(t, witness)
+	require.False(t, out.global)
+	require.Equal(t, in.owners, out.owners)
+	require.Zero(t, tx.reads)
 }

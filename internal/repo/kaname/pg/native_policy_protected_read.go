@@ -4,10 +4,11 @@
 package pg
 
 import (
+	"sort"
+
 	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
-	"sort"
 )
 
 // Создаётся только protectPolicyPlan после проверки объединённого RR token.

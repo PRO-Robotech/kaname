@@ -80,6 +80,15 @@ func NewRelationWriteGate(checker RelationChecker) *RelationWriteGate {
 	return &RelationWriteGate{checker: checker}
 }
 
+// BindRelationChecker создаёт отдельный страж попытки с тем же перечнем модулей.
+// Общий экземпляр UC не меняется; явный nil сохраняет закрытый отказ проверки.
+func (g *RelationWriteGate) BindRelationChecker(checker RelationChecker) *RelationWriteGate {
+	if g == nil {
+		return NewRelationWriteGate(nil)
+	}
+	return &RelationWriteGate{checker: checker, modules: g.modules}
+}
+
 // WithProductionMode сохраняет совместимость исходников с корнями композиции.
 // Контроль личности/аккаунта регистрации строг в любом режиме.
 func (g *RelationWriteGate) WithProductionMode(prod bool) *RelationWriteGate {

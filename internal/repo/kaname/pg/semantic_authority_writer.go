@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/PRO-Robotech/kaname/internal/grantcoverage"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type semanticAuthorityWriteTx struct {
@@ -27,7 +27,7 @@ func (w *semanticAuthorityWriteTx) SemanticRelationChecker() kaname.RelationChec
 // SemanticAuthorityWriter не активирует identity и не пересчитывает её из
 // глобального кэша. Строка БД остаётся закрытой для изменения до конца writer.
 // Это узкая граница сравнения; legacy writers ещё не подчинены её протоколу.
-func (r *Repository) SemanticAuthorityWriter(ctx context.Context, plan kaname.AuthorityFencePlan, bundle *granteffect.Bundle) (_ kaname.SemanticAuthorityWriter, err error) {
+func (r *Repository) compareAuthorityIdentity(ctx context.Context, plan kaname.AuthorityFencePlan, bundle *granteffect.Bundle) (_ kaname.SemanticAuthorityWriter, err error) {
 	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -50,20 +50,15 @@ func (r *Repository) SemanticAuthorityWriter(ctx context.Context, plan kaname.Au
 			err = errors.Join(err, fmt.Errorf("semantic writer rollback: %w", rollbackErr))
 		}
 	}()
-	var phase string
-	var protocol int
-	var active grantcoverage.Identity
-	err = w.tx.QueryRow(ctx, `SELECT phase, protocol_version, COALESCE(model_id,''), COALESCE(catalog_id,''), COALESCE(projector_version,'')
- FROM kaname.authority_semantic_identity WHERE singleton FOR SHARE`).Scan(&phase, &protocol, &active.ModelID, &active.CatalogID, &active.ProjectorVersion)
+	identity := bundle.Identity()
+	// Владелец helper берёт identity FOR SHARE; обычный LOGIN сохраняет только
+	// SELECT ACL на private identity и не получает UPDATE ради row lock.
+	err = w.tx.QueryRow(ctx, `SELECT kaname.authority_compare_identity_v2($1,$2,$3)`, identity.ModelID, identity.CatalogID, identity.ProjectorVersion).Scan(&w.fence.decisionAt)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", kaname.ErrSemanticIdentityUnavailable, err)
-	}
-	if phase != "active" || protocol != 1 || active != bundle.Identity() {
-		return nil, kaname.ErrSemanticIdentityUnavailable
-	}
-	// FOR SHARE мог ждать коммита. Время прежнего AuthorityWriter уже устарело:
-	// решение и expiry используют новое время ПОСЛЕ всех ожиданий и сравнения.
-	if err = w.tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&w.fence.decisionAt); err != nil {
+		var pgerr *pgconn.PgError
+		if errors.As(err, &pgerr) && pgerr.Code == "P1036" {
+			return nil, errors.Join(kaname.ErrSemanticIdentityUnavailable, err)
+		}
 		return nil, err
 	}
 	w.fence.decisionAt = w.fence.decisionAt.UTC()
@@ -82,4 +77,19 @@ var _ kaname.SemanticAuthorityWriter = (*semanticAuthorityWriteTx)(nil)
 func newSemanticAuthorityWriter(w *authorityWriteTx, bundle *granteffect.Bundle) *semanticAuthorityWriteTx {
 	checker := newLiveAdministrativeChecker(w, bundle)
 	return &semanticAuthorityWriteTx{authorityWriteTx: w, bundle: bundle, checker: checker}
+}
+
+// Старый широкий read API не содержал входного actor/native плана. После
+// consumer cutover он закрыт; identity-only пробы используют явный пустой intent.
+func (r *Repository) SemanticAuthorityWriter(ctx context.Context, plan kaname.AuthorityFencePlan, bundle *granteffect.Bundle) (kaname.SemanticAuthorityWriter, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := bundle.Validate(); err != nil {
+		return nil, err
+	}
+	if _, err := canonicalAuthorityAccounts(plan); err != nil {
+		return nil, err
+	}
+	return nil, kaname.ErrSemanticReadPlanRequired
 }

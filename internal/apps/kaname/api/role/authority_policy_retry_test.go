@@ -30,11 +30,11 @@ func TestRoleMutationAttemptsRestartAfterReturnedWriterConflict(t *testing.T) {
 				if calls == 1 {
 					return domain.Role{}, fmt.Errorf("body or commit: %w", failure)
 				}
-				return domain.Role{ID: "rol-success"}, nil
+				return domain.Role{ID: "rol00000000000000001"}, nil
 			})
 			require.NoError(t, err)
 			require.Equal(t, 2, calls)
-			require.Equal(t, domain.RoleID("rol-success"), got.ID)
+			require.Equal(t, domain.RoleID("rol00000000000000001"), got.ID)
 		})
 	}
 }

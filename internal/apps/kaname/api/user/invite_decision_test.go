@@ -4,10 +4,11 @@ package user
 
 import (
 	"context"
+	"testing"
+
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"testing"
 )
 
 type missingInviteRunner struct{}

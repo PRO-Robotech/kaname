@@ -27,6 +27,7 @@ package project
 import (
 	"context"
 	"fmt"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -42,8 +43,10 @@ import (
 )
 
 type DeleteProjectUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	crudConfigured bool
+	crudFactory    kanamerepo.ProjectDeleteWriterFactory
+	repo           Repo
+	opsRepo        operations.Repo
 }
 
 func NewDeleteProjectUseCase(r Repo, opsRepo operations.Repo) *DeleteProjectUseCase {
@@ -89,7 +92,9 @@ func (u *DeleteProjectUseCase) Execute(ctx context.Context, id domain.ProjectID)
 
 	actor := authzguard.PrincipalUserID(ctx)
 	accountID := string(proj.AccountID)
+	crudPrincipal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, crudPrincipal)
 		return u.doDelete(ctx, id, actor, accountID)
 	})
 	return &op, nil
@@ -145,7 +150,7 @@ func (u *DeleteProjectUseCase) Execute(ctx context.Context, id domain.ProjectID)
 // вправе оставить снятыми права живого проекта, а удавшееся — оставить права
 // снятого.
 func (u *DeleteProjectUseCase) doDelete(ctx context.Context, id domain.ProjectID, actor, accountID string) (*anypb.Any, error) {
-	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
+	if err := shared.DoWithWriteTxVoid(ctx, u.crudRepo(id),
 		func(ctx context.Context, w Writer) error {
 			// Снятие ВЫДАЧ идёт ПЕРЕД удалением строки: ведомость выпущенных
 			// кортежей читается, пока строки выдач ещё на месте. Отказ дренажа

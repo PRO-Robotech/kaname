@@ -112,7 +112,11 @@ func TestNativeReadBoundaryLastPageAndLateErrorNeverPartial(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, p.accounts["acc_0256"])
 	require.True(t, p.global())
-	require.Equal(t, []string{"*"}, p.guardKeys()) // fanout/account budget preselect GLOBAL.
+	// GLOBAL не отменяет сравнение exact guards, захваченных в RR.
+	require.Contains(t, p.guardKeys(), "*")
+	require.Contains(t, p.guardKeys(), "scope:acc_native")
+	require.Contains(t, p.guardKeys(), "scope:acc_0256")
+	require.Len(t, p.guardKeys(), 259)
 	boom := errors.New("late page unavailable")
 	s.err = boom
 	s.failAfter = "acc_0255"

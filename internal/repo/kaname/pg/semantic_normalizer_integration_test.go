@@ -26,7 +26,7 @@ func TestSemanticActorSameWriterUncommittedUnionAndRollback(t *testing.T) {
 	// Это не product activation и не подтверждение полной authority.
 	semanticFixtureIdentity(t, ctx, pool, bundle)
 	open := func() kaname.SemanticAuthorityWriter {
-		w, err := repo.SemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle)
+		w, err := repo.PlannedSemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, kaname.SemanticReadIntent{Actor: actor, Roles: []domain.RoleID{rid}})
 		require.NoError(t, err)
 		t.Cleanup(func() {
 			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)

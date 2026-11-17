@@ -12,7 +12,8 @@
     "round": "finite_delta_after_WE_ACC_F1",
     "base_commit": "8455a9a2c997d16b3c026ac2c9fbc01457e68fba",
     "content_commit_note": "Текущий файл проверен чтением и SHA-256; Git и remote не запускались.",
-    "predecessor_record": "docs/specs/reviews/grant-authority-matches-the-whole-effect/c009e74d2a3871c73e3635c5e17121620a52f9b93d8c80dd11a7ca559a56e998.yaml"
+    "predecessor_record": "docs/specs/reviews/grant-authority-matches-the-whole-effect/c009e74d2a3871c73e3635c5e17121620a52f9b93d8c80dd11a7ca559a56e998.yaml",
+    "task": "PRO-Robotech/kaname#1034"
   },
   "verdict": "APPROVED",
   "reviewer_role": "acceptance-reviewer",
@@ -69,5 +70,14 @@
       "WE-ACC-F1"
     ],
     "evidence": "Все actual row/catalog/projection/fanout waits теперь до защищённого recheck и finalclock. Method/content/reference gates явно читают OLDauthority. Неожиданный wait требует rollback/restage, retry включает body/Commit. Исходные D1–D5, FB twins/oracles/fixtures, migration/cutover/allwriters/performance/exclusions не изменены."
+  },
+  "authority": {
+    "mode": "versioned_policy_authority",
+    "repository": "PRO-Robotech/kacho-workspace",
+    "policy_document": "docs/changes/policy.yaml",
+    "policy_field": "review_authority.acceptance-reviewer",
+    "authorized_actors": [
+      "pointpu"
+    ]
   }
 }

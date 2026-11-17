@@ -23,6 +23,10 @@ type RoleMutationRequest struct {
 	Create bool
 	Rules  bool
 	Tuples RoleTupleBuilder
+	// Update отличает точный пустой update_mask от отсутствующего запроса.
+	Update          bool
+	UpdateMask      []string
+	ExpectedVersion string
 }
 
 type RoleMutationWriterFactory interface {

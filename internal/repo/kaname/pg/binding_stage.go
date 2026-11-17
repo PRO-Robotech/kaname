@@ -18,6 +18,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -91,6 +93,7 @@ type bindingStage struct {
 	global   bool
 	objects  int
 	tuples   int
+	sequence *bindingSequenceCapture
 }
 
 func (s *bindingStage) ObserveBindingMaterialization(objects, tuples int) {
@@ -191,11 +194,20 @@ func (p *BindingStageParticipant) once(ctx context.Context, id domain.AccessBind
 	if err = prelockBindingCommands(ctx, w.tx); err != nil {
 		return err
 	}
+	if stage.sequence == nil {
+		return kaname.ErrSourceUnconfirmed
+	}
+	if err = stage.sequence.prepare(ctx, w.tx, id, accounts, encoded); err != nil {
+		return err
+	}
 	if err = w.tx.QueryRow(ctx, `SELECT kaname.authority_binding_epoch_lock($1::text[],$2::jsonb)`, accounts, encoded).Scan(&at); err != nil {
 		return err
 	}
 	w.fence.decisionAt = at.UTC()
 	store.decisionAt = at.UTC()
+	if _, err = w.tx.Exec(ctx, `SELECT kaname.authority_binding_stage_sequence_finalize_v3($1)`, string(id)); err != nil {
+		return err
+	}
 	if current.Status != domain.AccessBindingStatusActive || (current.ExpiresAt != nil && !current.ExpiresAt.After(at)) {
 		return nil
 	}
@@ -230,7 +242,7 @@ func (p *BindingStageParticipant) once(ctx context.Context, id domain.AccessBind
 				return e
 			}
 			for _, command := range commands {
-				if e = command.Apply(ctx, store); e != nil {
+				if e = command.Apply(ctx, &preparedBindingStageStore{reconcileStore: store, at: at.UTC()}); e != nil {
 					return e
 				}
 			}
@@ -320,17 +332,27 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 	if !stage.global {
 		stage.accounts[bs.Scope.ID] = true
 	}
+	lifetime, e := newResourceAttemptLifetime(tx.Conn(), p.owner.bundle)
+	if e != nil {
+		return nil, e
+	}
+	source, e := newResourceSourceCapture(tx, &relverdict.AdministrativeReadBudget{}, lifetime)
+	if e != nil {
+		return nil, e
+	}
+	parents, e := newResourceParentCapture(tx, source)
+	if e != nil {
+		return nil, e
+	}
+	stage.sequence = &bindingSequenceCapture{parents: parents, binding: id, converge: converge, coordinates: []bindingSequenceCoordinate{}}
+	if e = stage.sequence.captureCarrier(ctx); e != nil {
+		return nil, e
+	}
 	store := &bindingSnapshotStore{reconcileStore: &reconcileStore{tx: tx, cat: p.facts}}
+	mirrorLocalSeen := false
 	emit := func(command reconcile.BindingCommand) error {
 		if err := ctx.Err(); err != nil {
 			return err
-		}
-		// Единственный пока локально классифицированный folded object — настоящий
-		// group emitter. Остальные shapes безопасно требуют global до первого lock.
-		for _, tuple := range command.Tuples {
-			if !strings.HasPrefix(tuple.Object, "iam_group:") {
-				stage.global = true
-			}
 		}
 		data, e := json.Marshal(command)
 		if e != nil {
@@ -384,7 +406,12 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 			for _, oid := range ids {
 				var obj domain.MirrorObject
 				var present bool
-				if _, direct := iamDirectScanSpecs[typ]; direct {
+				var capturedGroup *bindingCapturedGroupStore
+				var coordinateStore reconcile.ReconcileStore = store
+				if typ == "iam.group" {
+					capturedGroup, obj, present, e = stage.sequence.captureGroup(ctx, store, oid)
+					coordinateStore = capturedGroup
+				} else if _, direct := iamDirectScanSpecs[typ]; direct {
 					obj, present, e = store.GetIAMDirectObject(ctx, typ, oid)
 				} else {
 					obj, present, e = store.GetMirrorObject(ctx, typ, oid)
@@ -410,8 +437,48 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 						stage.global = true
 					}
 				}
-				if e = p.engine.StageBindingCoordinate(ctx, store, bs, reconcile.MemberCoord{ObjectType: typ, ObjectID: oid}, obj, present, ancestors, converge, emit, stage); e != nil {
+				input, e := p.engine.CaptureStagedBindingCoordinate(ctx, coordinateStore, bs, reconcile.MemberCoord{ObjectType: typ, ObjectID: oid}, obj, present, ancestors)
+				if e != nil {
 					return nil, e
+				}
+				commands, e := reconcile.CompileCapturedBindingCoordinate(ctx, input, reconcile.MemberCoord{ObjectType: typ, ObjectID: oid}, converge)
+				if e != nil {
+					return nil, e
+				}
+				if e = stage.sequence.captureCoordinate(ctx, typ, oid, input, commands, capturedGroup); e != nil {
+					return nil, e
+				}
+				if !stage.global {
+					if domain.FeedSourceForType(typ) != domain.FeedIAMDirect {
+						local, err := stage.sequence.captureMirrorLocality(ctx, p.facts, typ, oid, input, commands)
+						if err != nil {
+							return nil, err
+						}
+						stage.global = !local
+						mirrorLocalSeen = mirrorLocalSeen || local
+					} else {
+						// Прежняя классификация IAM не расширяется mirror-доказательством.
+						for _, command := range commands {
+							for _, tuple := range command.Tuples {
+								if !strings.HasPrefix(tuple.Object, "iam_group:") {
+									stage.global = true
+								}
+							}
+						}
+					}
+				}
+				objects, tuples := 0, 0
+				if len(input.Desired) > 0 {
+					objects = 1
+				}
+				for _, member := range input.Desired {
+					tuples += len(member.Tuples)
+				}
+				stage.ObserveBindingMaterialization(objects, tuples)
+				for _, command := range commands {
+					if e = emit(command); e != nil {
+						return nil, e
+					}
 				}
 			}
 			if len(ids) < bindingStagePage {
@@ -419,6 +486,10 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 			}
 			after = ids[len(ids)-1]
 		}
+	}
+	// Новая mirror ветвь остаётся singleton даже при смешанных IAM coordinates.
+	if mirrorLocalSeen && len(stage.accounts) != 1 {
+		stage.global = true
 	}
 	// Всё ещё тот же RR snapshot, зафиксированный root-read ДО первой страницы.
 	// Локальный путь читает лишь discovered epochs, global — scalar digest;
@@ -438,6 +509,9 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 	}
 	if _, ok := stage.epochs["$generation"]; !ok {
 		return nil, errors.New("binding epochs are uninitialized")
+	}
+	if err = stage.sequence.verifySnapshot(ctx, accounts, stage.epochs); err != nil {
+		return nil, err
 	}
 	return stage, tx.Commit(ctx)
 }
@@ -527,4 +601,53 @@ func (*bindingSnapshotStore) LoadBindingForForward(context.Context, domain.Acces
 }
 func (*bindingSnapshotStore) LoadBindingsForForward(context.Context, []domain.AccessBindingID) (map[domain.AccessBindingID]reconcile.BindingScope, error) {
 	return nil, errors.New("binding snapshot cannot use locking loader")
+}
+
+// Prepared Stage уже выбрал owner-программу и единственный final clock.
+// Отзыв использует эту координату, а не новые часы обычного reconcile adapter.
+// DEFAULT берёт только заранее зарезервированный ID; payload остаётся штатным.
+type preparedBindingStageStore struct {
+	*reconcileStore
+	at time.Time
+}
+
+func (s *preparedBindingStageStore) EmitTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return fga_outbox.EmitDecisionTx(ctx, s.tx, fga_outbox.EventTypeDelete, membershipTuplesToClients(tuples), s.at)
+}
+
+// Каждый prepared wrapper использует тот же tx; локальный флаг не даёт authority.
+func (s *preparedBindingStageStore) BeginBindingCommand(ctx context.Context, command reconcile.BindingCommand) (bool, error) {
+	encoded, err := json.Marshal(command)
+	if err != nil {
+		return false, err
+	}
+	var active bool
+	err = s.tx.QueryRow(ctx, `SELECT kaname.authority_binding_command_begin_v3($1::jsonb)`, encoded).Scan(&active)
+	return active, err
+}
+
+func (s *preparedBindingStageStore) EndBindingCommand(ctx context.Context, command reconcile.BindingCommand) error {
+	encoded, err := json.Marshal(command)
+	if err != nil {
+		return err
+	}
+	_, err = s.tx.Exec(ctx, `SELECT kaname.authority_binding_command_end_v3($1::jsonb)`, encoded)
+	return err
+}
+
+func (s *preparedBindingStageStore) EmitContainmentAudit(ctx context.Context, binding domain.AccessBindingID, typ, id string, scope domain.ScopeAnchor) error {
+	command := reconcile.BindingCommand{Kind: "audit", Binding: binding, Member: reconcile.MemberCoord{ObjectType: typ, ObjectID: id}, Scope: scope}
+	encoded, err := json.Marshal(command)
+	if err != nil {
+		return err
+	}
+	var applied bool
+	if err = s.tx.QueryRow(ctx, `SELECT kaname.authority_binding_command_audit_v3($1::jsonb)`, encoded).Scan(&applied); err != nil {
+		return err
+	}
+	if applied {
+		return nil
+	}
+	// Только owner-подтверждённый legacy stage; mirror никогда не делает late tenant lookup.
+	return s.reconcileStore.EmitContainmentAudit(ctx, binding, typ, id, scope)
 }

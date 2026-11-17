@@ -4,11 +4,12 @@ package kaname
 
 import (
 	"context"
+	"time"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	ab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	person "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
-	"time"
 )
 
 // Intent не несёт разрешения, режима протокола или готового proof.

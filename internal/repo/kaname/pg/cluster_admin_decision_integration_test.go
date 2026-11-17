@@ -6,6 +6,9 @@ package pg_test
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -35,13 +39,89 @@ func clusterFinalSeedTarget(t *testing.T, f clusterParticipantFixture) {
 	_, err := f.grant.Execute(f.ctx(), iamv1.ClusterGrantSubjectType_USER, f.target)
 	require.NoError(t, err)
 }
-func clusterFinalWait(t *testing.T, f clusterParticipantFixture, blocker pgx.Tx) {
-	t.Helper()
-	pid := receiptWaitForBlocker(t, f.r.ctx, f.r.admin, int(blocker.Conn().PgConn().PID()))
-	var sql string
-	require.NoError(t, f.r.admin.QueryRow(f.r.ctx, `SELECT query FROM pg_stat_activity WHERE pid=$1`, pid).Scan(&sql))
-	require.Contains(t, sql, "authority_cluster_admin_preflight", "достигнут настоящий final preflight, не ранний проверяющий или Begin")
+
+// Tracer наблюдает настоящий SQL; пауза entry стоит ДО отправки запроса.
+// Завершённый final preflight учитывается отдельно от раннего consumer wait.
+type finalDecisionTraceKey struct{}
+type finalDecisionTrace struct {
+	pid         atomic.Uint32
+	preflights  atomic.Int32
+	pauseEntry  bool
+	reached     chan struct{}
+	release     chan struct{}
+	once        sync.Once
+	releaseOnce sync.Once
 }
+
+func (v *finalDecisionTrace) TraceQueryStart(ctx context.Context, c *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+	v.pid.Store(c.PgConn().PID())
+	if strings.Contains(d.SQL, "SELECT kaname.authority_cluster_admin_preflight_v4(") {
+		ctx = context.WithValue(ctx, finalDecisionTraceKey{}, true)
+	}
+	if v.pauseEntry && strings.HasPrefix(d.SQL, "SELECT kaname.authority_protocol_enter_") {
+		v.once.Do(func() {
+			close(v.reached)
+			select {
+			case <-v.release:
+			case <-ctx.Done():
+			}
+		})
+	}
+	return ctx
+}
+func (v *finalDecisionTrace) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryEndData) {
+	if ctx.Value(finalDecisionTraceKey{}) == true && d.Err == nil {
+		v.preflights.Add(1)
+	}
+}
+func (v *finalDecisionTrace) resume() {
+	if v.release != nil {
+		v.releaseOnce.Do(func() { close(v.release) })
+	}
+}
+func finalDecisionTracePool(t *testing.T, ctx context.Context, source *pgxpool.Pool, trace *finalDecisionTrace) *pgxpool.Pool {
+	t.Helper()
+	cfg := source.Config()
+	cfg.ConnConfig.Tracer = trace
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	t.Cleanup(trace.resume)
+	return pool
+}
+func clusterFinalObserve(t *testing.T, f *clusterParticipantFixture, pause bool) *finalDecisionTrace {
+	t.Helper()
+	trace := &finalDecisionTrace{pauseEntry: pause, reached: make(chan struct{}), release: make(chan struct{})}
+	pool := finalDecisionTracePool(t, f.r.ctx, f.r.runtime, trace)
+	p, err := kanamepg.NewClusterAdminParticipant(f.r.ctx, kanamepg.New(pool, nil), f.r.bundle)
+	require.NoError(t, err)
+	clusterapp.NewHandler(nil, f.grant, f.revoke, nil).WithAdminTxBeginner(p)
+	f.participant = p
+	return trace
+}
+func clusterFinalAssertWait(t *testing.T, f clusterParticipantFixture, pid, blockerPID int) {
+	t.Helper()
+	var query string
+	var blocked, consumerWait bool
+	require.NoError(t, f.r.admin.QueryRow(f.r.ctx, `SELECT query,$2::integer=ANY(pg_blocking_pids(pid)),
+ EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND classid=1262569292::oid AND objid=0 AND objsubid=2 AND mode='ExclusiveLock' AND NOT granted)
+ FROM pg_stat_activity WHERE pid=$1 AND datname=current_database() AND wait_event_type='Lock'`, pid, blockerPID).Scan(&query, &blocked, &consumerWait))
+	require.True(t, blocked, "writer ждёт точно указанный producer")
+	if strings.Contains(query, "authority_protocol_enter_typed_v2(") {
+		require.True(t, consumerWait, "compat producer удерживает consumer перед final preflight")
+	} else {
+		require.Contains(t, query, "authority_cluster_admin_preflight", "ожидание относится к настоящему decision path")
+	}
+}
+func clusterFinalWait(t *testing.T, f clusterParticipantFixture, blocker pgx.Tx, trace *finalDecisionTrace) {
+	t.Helper()
+	blockerPID := int(blocker.Conn().PgConn().PID())
+	pid := receiptWaitForBlocker(t, f.r.ctx, f.r.admin, blockerPID)
+	require.Equal(t, int(trace.pid.Load()), pid, "ожидает backend настоящего public participant")
+	require.Zero(t, trace.preflights.Load(), "final preflight ещё не завершён до source commit")
+	clusterFinalAssertWait(t, f, pid, blockerPID)
+}
+
 func clusterFinalActive(t *testing.T, f clusterParticipantFixture, expected bool) {
 	t.Helper()
 	var active bool
@@ -65,6 +145,7 @@ func TestClusterAdminFinalDecisionSeesCompatSourceChangeAfterWait(t *testing.T) 
 				if revoke {
 					clusterFinalSeedTarget(t, f)
 				}
+				trace := clusterFinalObserve(t, &f, false)
 				before := f.auditCount(t, f.target)
 				blocker, err := f.r.admin.Begin(f.r.ctx)
 				require.NoError(t, err)
@@ -83,9 +164,10 @@ func TestClusterAdminFinalDecisionSeesCompatSourceChangeAfterWait(t *testing.T) 
 				ctx, cancel := context.WithTimeout(f.ctx(), 10*time.Second)
 				defer cancel()
 				done := lifecycleAsync(t, ctx, func(ctx context.Context) error { return clusterFinalCall(f, ctx, revoke) })
-				clusterFinalWait(t, f, blocker)
+				clusterFinalWait(t, f, blocker, trace)
 				require.NoError(t, blocker.Commit(f.r.ctx))
 				err = lifecycleResult(t, ctx, done)
+				require.GreaterOrEqual(t, trace.preflights.Load(), int32(1), "после source commit выполнен actual final preflight")
 				if change == "live" {
 					require.NoError(t, err)
 					clusterFinalActive(t, f, !revoke)
@@ -298,18 +380,24 @@ func TestClusterAdminFinalDecisionOutboxCoordinateAfterNewerProducer(t *testing.
 		t.Run(name, func(t *testing.T) {
 			f := newClusterParticipantFixture(t, false)
 			clusterFinalSeedTarget(t, f)
-			fence, err := f.r.runtime.Begin(f.r.ctx)
-			require.NoError(t, err)
-			defer policyFixtureRollback(fence)
-			f.r.enter(t, fence, f.r.intent(f.r.a), "participant")
+			trace := clusterFinalObserve(t, &f, true)
 			ctx, cancel := context.WithTimeout(f.ctx(), 10*time.Second)
 			defer cancel()
 			done := lifecycleAsync(t, ctx, func(ctx context.Context) error { return clusterFinalCall(f, ctx, revoke) })
-			pid := receiptWaitForBlocker(t, ctx, f.r.admin, int(fence.Conn().PgConn().PID()))
+			select {
+			case <-trace.reached:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			pid := int(trace.pid.Load())
+			require.NotZero(t, pid)
+			var held int
+			require.NoError(t, f.r.admin.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE pid=$1 AND locktype='advisory'`, pid).Scan(&held))
+			require.Zero(t, held, "до entry public TX не держит consumer/fences")
 			var began time.Time
 			require.NoError(t, f.r.admin.QueryRow(ctx, `SELECT xact_start FROM pg_stat_activity WHERE pid=$1`, pid).Scan(&began))
-			// Настоящий producer фиксируется после начала ожидающей public TX.
-			// Compat допускает такой raw writer; final decision не использует старый snapshot.
+			// Producer начинается после public RC, пока entry ещё не отправлен.
+			// Его настоящий DML удерживает consumer до commit; затем public реально ждёт его.
 			producer, err := f.r.admin.Begin(ctx)
 			require.NoError(t, err)
 			defer policyFixtureRollback(producer)
@@ -327,9 +415,14 @@ func TestClusterAdminFinalDecisionOutboxCoordinateAfterNewerProducer(t *testing.
 			var newer time.Time
 			require.NoError(t, producer.QueryRow(ctx, `SELECT max(created_at) FROM kaname.fga_outbox WHERE payload->>'user'=$1`, "user:"+f.target).Scan(&newer))
 			require.True(t, newer.After(began))
+			trace.resume()
+			waiter := receiptWaitForBlocker(t, ctx, f.r.admin, int(producer.Conn().PgConn().PID()))
+			require.Equal(t, pid, waiter, "ждёт та же public RC, начавшаяся раньше producer")
+			clusterFinalAssertWait(t, f, pid, int(producer.Conn().PgConn().PID()))
+			require.Zero(t, trace.preflights.Load(), "final preflight ещё не мог пройти consumer")
 			require.NoError(t, producer.Commit(ctx))
-			require.NoError(t, fence.Commit(ctx))
 			require.NoError(t, lifecycleResult(t, ctx, done))
+			require.GreaterOrEqual(t, trace.preflights.Load(), int32(1), "actual final preflight после newer producer commit")
 			clusterFinalActive(t, f, !revoke)
 			var source, stamp time.Time
 			var versioned bool
@@ -362,7 +455,7 @@ func TestClusterAdminFinalDecisionPreflightRequiresExactAttestation(t *testing.T
 			if participant {
 				f.r.enter(t, tx, f.r.intent(f.r.a), "participant")
 			}
-			_, err = tx.Exec(f.r.ctx, `SELECT kaname.authority_cluster_admin_preflight('user',$1)`, f.target)
+			_, err = tx.Exec(f.r.ctx, `SELECT kaname.authority_cluster_admin_preflight_v4('user',$1,'grant')`, f.target)
 			var pgerr *pgconn.PgError
 			require.ErrorAs(t, err, &pgerr)
 			require.Equal(t, "42501", pgerr.Code)
@@ -387,6 +480,7 @@ func TestClusterAdminFinalDecisionMachineActorFreshness(t *testing.T) {
 			native, err := (delegationNativeDoor{f.r}).Check(f.r.ctx, "service_account:"+sa, "system_admin", "cluster:"+domain.ClusterSingletonID)
 			require.NoError(t, err)
 			require.True(t, native)
+			trace := clusterFinalObserve(t, &f, false)
 			blocker, err := f.r.admin.Begin(f.r.ctx)
 			require.NoError(t, err)
 			defer policyFixtureRollback(blocker)
@@ -399,9 +493,10 @@ func TestClusterAdminFinalDecisionMachineActorFreshness(t *testing.T) {
 			ctx, cancel := context.WithTimeout(operations.WithPrincipal(f.r.ctx, operations.Principal{Type: "service_account", ID: sa}), 10*time.Second)
 			defer cancel()
 			done := lifecycleAsync(t, ctx, func(ctx context.Context) error { return clusterFinalCall(f, ctx, false) })
-			clusterFinalWaitOrTerminal(t, f, blocker, done)
+			clusterFinalWaitOrTerminal(t, f, blocker, done, trace)
 			require.NoError(t, blocker.Commit(f.r.ctx))
 			err = lifecycleResult(t, ctx, done)
+			require.GreaterOrEqual(t, trace.preflights.Load(), int32(1), "typed actor проверяется после actual final preflight")
 			if disabled {
 				require.Equal(t, codes.PermissionDenied, status.Code(err))
 				f.assertAbsent(t)
@@ -416,7 +511,7 @@ func TestClusterAdminFinalDecisionMachineActorFreshness(t *testing.T) {
 
 // Сохраняет прежний предел 5 секунд и точный pg_blocking_pids oracle.
 // Ранний terminal (включая nil) не принимается за доказательство ожидания.
-func clusterFinalWaitOrTerminal(t *testing.T, f clusterParticipantFixture, blocker pgx.Tx, done <-chan error) {
+func clusterFinalWaitOrTerminal(t *testing.T, f clusterParticipantFixture, blocker pgx.Tx, done <-chan error, traces ...*finalDecisionTrace) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(f.r.ctx, 5*time.Second)
 	defer cancel()
@@ -426,15 +521,20 @@ func clusterFinalWaitOrTerminal(t *testing.T, f clusterParticipantFixture, block
 	for {
 		select {
 		case err := <-done:
-			t.Fatalf("cluster operation завершилась до preflight wait: blocker=%d code=%s err=%v", blockerPID, status.Code(err), err)
+			t.Fatalf("cluster operation завершилась до decision wait: blocker=%d code=%s err=%v", blockerPID, status.Code(err), err)
 		default:
 		}
 		var pid int
-		var preflight bool
+		var query string
 		var event string
-		err := f.r.admin.QueryRow(ctx, `SELECT pid,position('authority_cluster_admin_preflight' in query)>0,coalesce(wait_event,'') FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND $1=ANY(pg_blocking_pids(pid)) LIMIT 1`, blockerPID).Scan(&pid, &preflight, &event)
+		err := f.r.admin.QueryRow(ctx, `SELECT pid,query,coalesce(wait_event,'') FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND $1=ANY(pg_blocking_pids(pid)) LIMIT 1`, blockerPID).Scan(&pid, &query, &event)
 		if err == nil {
-			require.True(t, preflight, "настоящий blocker достигнут после final preflight: waiter=%d blocker=%d wait_event=%s", pid, blockerPID, event)
+			if len(traces) > 0 {
+				require.Equal(t, int(traces[0].pid.Load()), pid, "ожидает backend typed actor public participant")
+				require.Zero(t, traces[0].preflights.Load(), "final preflight ещё не завершён до source commit")
+			}
+			clusterFinalAssertWait(t, f, pid, blockerPID)
+			t.Logf("actual decision wait: waiter=%d blocker=%d event=%s query=%s", pid, blockerPID, event, query)
 			return
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -442,9 +542,9 @@ func clusterFinalWaitOrTerminal(t *testing.T, f clusterParticipantFixture, block
 		}
 		select {
 		case err := <-done:
-			t.Fatalf("cluster operation завершилась до preflight wait: blocker=%d code=%s err=%v", blockerPID, status.Code(err), err)
+			t.Fatalf("cluster operation завершилась до decision wait: blocker=%d code=%s err=%v", blockerPID, status.Code(err), err)
 		case <-ctx.Done():
-			t.Fatalf("preflight не ждёт конкретный blocker=%d за прежние 5 секунд: %v", blockerPID, ctx.Err())
+			t.Fatalf("decision path не ждёт конкретный blocker=%d за прежние 5 секунд: %v", blockerPID, ctx.Err())
 		case <-tick.C:
 		}
 	}

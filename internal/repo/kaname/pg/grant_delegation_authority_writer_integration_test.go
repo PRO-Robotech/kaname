@@ -6,6 +6,7 @@ package pg_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 )
@@ -149,7 +151,9 @@ type delegationUCWorld struct {
 
 func delegationUCFixture(t *testing.T) delegationUCWorld {
 	t.Helper()
-	r := writerProtocolRig(t)
+	// Как в bootstrap: catalog/roles устанавливаются при uninitialized,
+	// затем существующий Prepare ниже фиксирует фактическую полную модель.
+	r, _ := writerProtocolRigBeforePreparation(t)
 	raw, err := publicreadfixture.Read("registry.delegation-fixture.yaml")
 	require.NoError(t, err)
 	raw, err = publicreadfixture.WithWrites(raw)
@@ -157,6 +161,19 @@ func delegationUCFixture(t *testing.T) delegationUCWorld {
 	m, err := manifest.Load(raw)
 	require.NoError(t, err)
 	_, err = modulecatalog.NewApplier(kanamepg.NewCatalogWriteRepo(r.admin)).ApplyAll(r.ctx, []*manifest.Manifest{m})
+	if err != nil {
+		// Контекст PostgreSQL нужен для общего отказа фикстуры; исходное
+		// утверждение ниже сохраняет ошибку и не допускает продолжения.
+		var refusal *pgconn.PgError
+		if errors.As(err, &refusal) {
+			t.Logf("catalog SQLSTATE=%s where=%s detail=%s table=%s constraint=%s", refusal.Code, refusal.Where, refusal.Detail, refusal.TableName, refusal.ConstraintName)
+		}
+		var phase, enforcement, modelID, catalogID, projector string
+		var semanticVersion, protocolVersion int
+		stateErr := r.admin.QueryRow(r.ctx, `SELECT a.phase,p.enforcement,a.protocol_version,p.protocol_version,a.model_id,a.catalog_id,a.projector_version
+			FROM kaname.authority_semantic_identity a CROSS JOIN kaname.authority_writer_protocol p WHERE a.singleton AND p.singleton`).Scan(&phase, &enforcement, &semanticVersion, &protocolVersion, &modelID, &catalogID, &projector)
+		t.Logf("catalog identity after rollback: phase=%s enforcement=%s versions=%d/%d model=%s catalog=%s projector=%s readError=%v", phase, enforcement, semanticVersion, protocolVersion, modelID, catalogID, projector, stateErr)
+	}
 	require.NoError(t, err)
 	live, err := kanamepg.NewCatalogRepo(r.admin).ReadLiveCatalog(r.ctx)
 	require.NoError(t, err)

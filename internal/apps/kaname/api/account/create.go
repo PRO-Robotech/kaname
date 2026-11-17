@@ -28,6 +28,7 @@ package account
 import (
 	"context"
 	"fmt"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"log/slog"
 
 	"google.golang.org/protobuf/types/known/anypb"
@@ -135,8 +136,10 @@ const (
 // Скоупный гэп с kacho-vpc-pattern: kaname НЕ имеет folder/parent peer-check
 // на request-path (Account — top-level), поэтому FolderClient-аналога нет.
 type CreateAccountUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	crudConfigured bool
+	crudFactory    kanamerepo.AccountCreateWriterFactory
+	repo           Repo
+	opsRepo        operations.Repo
 	// relations — порт модели прав. Создание спрашивает его ровно об одном:
 	// вправе ли вызывающий задать идентификатор аккаунта (администратор облака),
 	// и только когда идентификатор указан. Неподключённый порт — отказ права,
@@ -309,7 +312,9 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 	// the principal, so it is resolved here and passed into doCreate.
 	actor := authzguard.PrincipalUserID(ctx)
 
+	crudPrincipal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, crudPrincipal)
 		return u.doCreate(ctx, a, domain.ProjectID(defaultProjID), actor, idSource)
 	})
 	return &op, nil
@@ -323,7 +328,10 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 // над содержимым — C-01/C-01b; единый materialization-путь). Возвращает anypb с
 // финальным state Account'а.
 func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, defaultProjID domain.ProjectID, actor, idSource string) (*anypb.Any, error) {
-	w, err := u.repo.Writer(ctx)
+	// Идентификатор входит в prepared intent и затем единожды потребляется телом.
+	ownerBindingID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
+	request := kanamerepo.AccountCreateAuthority{Account: a, DefaultProjectID: defaultProjID, OwnerBindingID: ownerBindingID, IDSource: idSource}
+	w, err := u.crudRepo(request).Writer(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
@@ -410,7 +418,6 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	// Per-object access tuples (scope-self + content) are materialized FORWARD by
 	// the reconciler after commit (the account is empty at Create, D-8a) — the
 	// single materialization path; no binding-time scope_grant emission.
-	ownerBindingID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	ownerBinding := domain.AccessBinding{
 		ID:                 ownerBindingID,
 		SubjectType:        domain.SubjectTypeUser,

@@ -28,6 +28,8 @@ type ObjectBinding struct {
 // ObjectDesiredMember сохраняет ключ правила, отказ по включению и точные
 // кортежи общего materializer. Сам по себе он не разрешает запись в БД.
 type ObjectDesiredMember struct {
+	// Derivation помечает ветвь чистого вывода; сервер проверяет её независимо.
+	Derivation string
 	RuleFP     string
 	ObjectType string
 	ObjectID   string
@@ -115,6 +117,10 @@ func desiredMembersForObject(cat *catalog.Facts, bs ObjectBinding, o domain.Mirr
 }
 
 func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []grantee, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (ObjectDesiredMember, bool) {
+	derivation := "ordinary"
+	if sel.Container != nil {
+		derivation = "nested"
+	}
 	// Селектор создателя (kaname#1003, creator.go): объект входит в охват правила
 	// только для субъекта, который его создал. Никому — объект правилом не
 	// выбран вовсе (ни члена, ни отвергнутого члена: охвата нет, а не вне области).
@@ -124,7 +130,7 @@ func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []g
 	}
 	if !o.IsContainedIn(scope) {
 		return ObjectDesiredMember{
-			RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
+			Derivation: derivation, RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
 			Status: domain.VerificationRejected,
 		}, true
 	}
@@ -153,7 +159,7 @@ func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []g
 		return ObjectDesiredMember{}, false
 	}
 	return ObjectDesiredMember{
-		RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
+		Derivation: derivation, RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
 		Status: domain.VerificationActive, Tuples: tuples,
 	}, true
 }
@@ -243,6 +249,7 @@ func scopeSelfMember(cat *catalog.Facts, gs []grantee, scopeType, scopeID string
 		return ObjectDesiredMember{}, false
 	}
 	return ObjectDesiredMember{
+		Derivation: "scope_self",
 		RuleFP:     scopeSelfRuleFP,
 		ObjectType: dotted,
 		ObjectID:   scopeID,
@@ -353,6 +360,7 @@ func containerMembers(cat *catalog.Facts, bs ObjectBinding) []ObjectDesiredMembe
 			continue
 		}
 		out = append(out, ObjectDesiredMember{
+			Derivation: "container",
 			RuleFP:     sel.RuleFP,
 			ObjectType: "iam." + bs.Scope.Type,
 			ObjectID:   bs.Scope.ID,
@@ -403,6 +411,7 @@ func publicReaderMember(cat *catalog.Facts, bs ObjectBinding, objectType, object
 		return ObjectDesiredMember{}, false
 	}
 	return ObjectDesiredMember{
+		Derivation: "public_reader",
 		RuleFP:     effect.RuleFP,
 		ObjectType: objectType,
 		ObjectID:   objectID,

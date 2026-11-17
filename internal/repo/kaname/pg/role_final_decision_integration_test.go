@@ -39,26 +39,34 @@ func roleFinalCleanup(t *testing.T, tx interface{ Rollback(context.Context) erro
 	})
 }
 
-// Сохраняем прежний global drain и его 20s: это диагностическая поправка,
-// не исправление пока неизвестной причины задержки /255. Даже own Done=true
-// не превращает отказ общего ожидания в PASS.
+// Собственная операция должна завершиться за прежние20s. Чужая очередь
+// не определяет её исход. Стоимость массовой правки в /255 проверяется отдельно.
 func roleFinalAwaitOperation(t *testing.T, w delegationUCWorld, id string) *operations.Operation {
 	t.Helper()
 	wait, cancel := context.WithTimeout(w.r.ctx, 20*time.Second)
-	err := operations.Wait(wait)
-	cancel()
-	if err != nil {
-		roleFinalQueueDiagnostic(t, w, id)
-		require.NoError(t, err, "исполнитель операций не завершил очередь; op=%s", id)
+	defer cancel()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	// Ожидается только собственная операция. Общая очередь включает workers
+	// соседних случаев и не доказывает терминальность именно этого ID.
+	for {
+		op, err := w.ops.Get(wait, id)
+		if err != nil || op == nil {
+			roleFinalQueueDiagnostic(t, w, id)
+			require.NoErrorf(t, err, "операция %s не прочитана", id)
+			require.NotNil(t, op, "операция %s отсутствует", id)
+		}
+		if op != nil && op.Done {
+			return op
+		}
+		select {
+		case <-wait.Done():
+			roleFinalQueueDiagnostic(t, w, id)
+			require.NoErrorf(t, wait.Err(), "собственная операция %s не завершилась", id)
+			return nil
+		case <-tick.C:
+		}
 	}
-	op, err := w.ops.Get(w.r.ctx, id)
-	if err != nil || op == nil || !op.Done {
-		roleFinalQueueDiagnostic(t, w, id)
-	}
-	require.NoErrorf(t, err, "операция %s не прочитана", id)
-	require.NotNil(t, op, "операция %s отсутствует", id)
-	require.Truef(t, op.Done, "операция %s не терминальна", id)
-	return op
 }
 
 // Снимки выполняются ДО Fatal и pool cleanup, каждый с собственными 2s.
@@ -328,6 +336,12 @@ func TestRoleMutationPreparationCancellationReleasesLease(t *testing.T) {
 			require.NoError(t, lifecycleOwner(w.r).ActivateAuthorityBundle(w.r.ctx, w.r.bundle))
 			var id domain.RoleID
 			require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT id FROM kaname.roles WHERE is_system ORDER BY id LIMIT 1`).Scan(&id))
+			// Подготовка получает тот же полный OLD и CAS-version, что actual Update UC.
+			rd, err := w.r.repo.Reader(w.r.ctx)
+			require.NoError(t, err)
+			current, version, err := rd.Roles().GetWithVersion(w.r.ctx, id)
+			require.NoError(t, err)
+			require.NoError(t, rd.Rollback(w.r.ctx))
 			blocker, err := w.r.admin.Begin(w.r.ctx)
 			if blocker != nil {
 				roleFinalCleanup(t, blocker)
@@ -348,7 +362,7 @@ func TestRoleMutationPreparationCancellationReleasesLease(t *testing.T) {
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {
-				writer, e := writers.RoleMutationWriter(ctx, kaname.RoleMutationRequest{Role: domain.Role{ID: id, IsSystem: true, ClusterID: domain.ClusterID(domain.ClusterSingletonID)}}, domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(w.owner)})
+				writer, e := writers.RoleMutationWriter(ctx, kaname.RoleMutationRequest{Role: current, Update: true, UpdateMask: []string{"description"}, ExpectedVersion: version}, domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(w.owner)})
 				if writer != nil {
 					cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 					_ = writer.Rollback(cleanup)
@@ -422,9 +436,14 @@ func TestRoleMutationForeignRecipientAccountBoundary(t *testing.T) {
 			writers, err := kanamepg.NewGrantPolicyWriters(w.r.ctx, w.r.repo, w.r.bundle)
 			require.NoError(t, err)
 			require.NoError(t, lifecycleOwner(w.r).ActivateAuthorityBundle(w.r.ctx, w.r.bundle))
-			proposed := r
+			rd, err := w.r.repo.Reader(w.r.ctx)
+			require.NoError(t, err)
+			current, version, err := rd.Roles().GetWithVersion(w.r.ctx, r.ID)
+			require.NoError(t, err)
+			require.NoError(t, rd.Rollback(w.r.ctx))
+			proposed := current
 			proposed.Rules = domain.Rules{{Module: "iam", Resources: []string{"role"}, Verbs: []string{"list", "update"}}}
-			prepared, err := writers.RoleMutationWriter(w.r.ctx, kaname.RoleMutationRequest{Role: proposed, Rules: true, Tuples: bindingapp.NewRoleTupleReconciler()}, domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(w.owner)})
+			prepared, err := writers.RoleMutationWriter(w.r.ctx, kaname.RoleMutationRequest{Role: proposed, Update: true, UpdateMask: []string{"rules"}, ExpectedVersion: version, Rules: true, Tuples: bindingapp.NewRoleTupleReconciler()}, domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(w.owner)})
 			if prepared != nil {
 				roleFinalCleanup(t, prepared)
 			}

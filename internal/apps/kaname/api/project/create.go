@@ -11,6 +11,7 @@ package project
 import (
 	"context"
 	"fmt"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"log/slog"
 
 	"google.golang.org/protobuf/types/known/anypb"
@@ -60,8 +61,10 @@ type ObjectReconciler interface {
 }
 
 type CreateProjectUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	crudConfigured bool
+	crudFactory    kanamerepo.ProjectCreateWriterFactory
+	repo           Repo
+	opsRepo        operations.Repo
 	// Optional hook into the rights model. When wired, a freshly-created Project also
 	// gets its `project:<id>#account@account:<account_id>` hierarchy tuple written
 	// so the `from account` cascades resolve — without it
@@ -129,14 +132,16 @@ func (u *CreateProjectUseCase) Execute(ctx context.Context, p domain.Project) (*
 
 	actor := authzguard.PrincipalUserID(ctx)
 	p.ID = domain.ProjectID(projID)
+	crudPrincipal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, crudPrincipal)
 		return u.doCreate(ctx, p, actor)
 	})
 	return &op, nil
 }
 
 func (u *CreateProjectUseCase) doCreate(ctx context.Context, p domain.Project, actor string) (*anypb.Any, error) {
-	created, err := shared.DoWithWriteTx(ctx, u.repo,
+	created, err := shared.DoWithWriteTx(ctx, u.crudRepo(p),
 		func(ctx context.Context, w Writer) (domain.Project, error) {
 			inserted, ierr := w.ProjectsW().Insert(ctx, p)
 			if ierr != nil {

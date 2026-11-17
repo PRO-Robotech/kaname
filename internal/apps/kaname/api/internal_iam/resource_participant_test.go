@@ -4,8 +4,9 @@ package internal_iam
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestResourceExplicitNilReplacesLegacyBeginner(t *testing.T) {

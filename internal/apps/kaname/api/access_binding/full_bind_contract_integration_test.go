@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -34,6 +35,7 @@ type fullBindWorld struct {
 	plans        *authzmodel.Plans
 	stages       *kanamepg.BindingStageParticipant
 	ownerBinding domain.AccessBindingID
+	observer     *pgxpool.Pool // Заимствован у fixture: закрывается существующим cleanup.
 }
 
 func newFullBindWorld(t *testing.T, observers ...fullBindSelectorObserverFactory) *fullBindWorld {
@@ -44,7 +46,7 @@ func newFullBindWorld(t *testing.T, observers ...fullBindSelectorObserverFactory
 	gdSeedMembership(t, a.ctx, a.pool, a.usrE, a.accA, "ACTIVE")
 	plans, err := authzmodel.Shared()
 	require.NoError(t, err, "FB: допущенная модель процесса")
-	w := &fullBindWorld{atcWorld: a, plans: plans}
+	w := &fullBindWorld{atcWorld: a, plans: plans, observer: a.pool}
 	a.registerBox(atcB1)
 	a.registerBox(atcB2)
 	w.installFullBindParticipants(observers...)

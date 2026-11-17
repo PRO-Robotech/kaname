@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/resourceeffect"
 )
 
 // BindingScope — минимальные факты выдачи, нужные сведению для материализации
@@ -99,6 +100,8 @@ type BindingScope struct {
 // чтобы applyDiff не выводил его заново). В модели RBAC на правилах
 // нет прежней ветви selector/byName — каждый член выведен из правила.
 type DesiredMember struct {
+	// Derivation используется только сертификатом protected Resource runner.
+	Derivation string
 	RuleFP     string
 	ObjectType string
 	ObjectID   string
@@ -476,6 +479,7 @@ type TxRunner interface {
 
 // Reconciler — сценарий сведения селекторов и включения в область.
 type Reconciler struct {
+	objectDecisions  ObjectDecisionRunner
 	stagedBindings   StagedBindingReconciler
 	groupObjects     *Reconciler
 	objectObjects    *Reconciler
@@ -650,6 +654,12 @@ func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.
 	return fresh
 }
 
+// nativeTupleDeleter доступен только unsigned compatibility store. Signed и
+// staged хранилища сохраняют свой emitter и окончательную метку.
+type nativeTupleDeleter interface {
+	EmitNativeTupleDelete(context.Context, []domain.MembershipTuple) error
+}
+
 // flushDeletes кладёт ОТЛОЖЕННЫЕ строки снятия прохода в его пишущую транзакцию —
 // ПОСЛЕ сверки всех выдач прохода, когда записанное им известно целиком. Из каждого
 // набора вычитаются кортежи, ЗАПИСАННЫЕ любым членом этого же прохода (соседняя
@@ -668,6 +678,10 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 	if c == nil || len(c.pendingDeletes) == 0 {
 		return nil
 	}
+	emit := s.EmitTupleDelete
+	if native, ok := s.(nativeTupleDeleter); ok {
+		emit = native.EmitNativeTupleDelete
+	}
 	for _, pd := range c.pendingDeletes {
 		// Кандидаты, не записанные этим проходом заново.
 		var revoke []domain.MembershipTuple
@@ -680,7 +694,7 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 		if len(revoke) == 0 {
 			continue
 		}
-		if err := s.EmitTupleDelete(ctx, revoke); err != nil {
+		if err := emit(ctx, revoke); err != nil {
 			return fmt.Errorf("flush deletes: emit tuple delete for %s: %w", pd.binding, err)
 		}
 	}
@@ -777,7 +791,13 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		if r.objectObjects == nil {
 			return errObjectParticipantAbsent
 		}
+		if r.objectObjects.objectDecisions != nil {
+			return r.objectObjects.runObjectDecision(ctx, objectType, objectID, ObjectDecisionFull, r.size)
+		}
 		return r.objectObjects.ReconcileObject(ctx, objectType, objectID)
+	}
+	if r.objectDecisions != nil {
+		return r.runObjectDecision(ctx, objectType, objectID, ObjectDecisionFull, r.size)
 	}
 	col := &syncFGACollector{}
 	if err := r.withObjectTx(ctx, objectType, objectID, func(ctx context.Context, s ReconcileStore) error {
@@ -1147,7 +1167,10 @@ func (r *Reconciler) reconcileBindingForObject(
 		if err != nil {
 			return err
 		}
-		desired = desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
+		desired, err = desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
+		if err != nil {
+			return err
+		}
 	}
 
 	// УЗКАЯ база сравнения: члены этой выдачи только НА ЭТОМ ОБЪЕКТЕ.
@@ -1183,50 +1206,21 @@ func (r *Reconciler) reconcileBindingForObject(
 // пообъектной цели, как в desiredRuleMembers (выдача на всём якоре области
 // противоречит пообъектной выдаче минимальных привилегий).
 func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject,
-	ancestors []domain.MirrorObject) []DesiredMember {
-	perObject := len(bs.Target.Resources) > 0
-
-	var out []DesiredMember
-	if len(bs.ScopeSelfVerbs) > 0 && !perObject &&
-		o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
-		if sm, ok := scopeSelfMember(cat, grantees(bs, bs.ScopeSelfVerbs, false), bs.Scope.Type, bs.Scope.ID); ok {
-			out = append(out, sm)
-		}
+	ancestors []domain.MirrorObject) ([]DesiredMember, error) {
+	compiled, err := resourceeffect.CompileObjectDesired(cat, resourceeffect.ObjectBinding{
+		BindingID: bs.BindingID, Scope: bs.Scope, Subjects: bs.Subjects,
+		RoleID: bs.RoleID, Policy: bs.Policy, Selectors: bs.Selectors,
+		ScopeSelfVerbs: bs.ScopeSelfVerbs, Target: bs.Target, Active: bs.Active,
+	}, o, ancestors)
+	if err != nil {
+		return nil, err
 	}
-	// Контейнерные действия правил (kaname#1003, creator.go) — члены на объекте
-	// ОБЛАСТИ: путь по объекту обязан их выводить, иначе событие аккаунта сняло бы
-	// их как устаревшие.
-	if o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
-		out = append(out, containerMembers(cat, bs)...)
+	var desired []DesiredMember
+	for _, member := range compiled {
+		desired = append(desired, DesiredMember{Derivation: member.Derivation, RuleFP: member.RuleFP, ObjectType: member.ObjectType,
+			ObjectID: member.ObjectID, Status: member.Status, Tuples: member.Tuples})
 	}
-	// Минимальные привилегии пообъектной цели (F8, IAM-1-21): правило даёт объект лишь тогда,
-	// когда цель выдачи тоже его называет. Едино для всех ветвей, ровно как
-	// matchSelectorObjects пересекает совпавший набор. Вложенное правило (kaname#874)
-	// судит цель по КОНТЕЙНЕРУ среди предков объекта, а не по самому объекту.
-	inTarget := !perObject || bs.Target.Contains(o.ObjectType, o.ObjectID)
-	for _, sel := range bs.Selectors {
-		gs := selectorGrantees(bs, sel)
-		if len(gs) == 0 {
-			continue
-		}
-		if sel.Container != nil {
-			if !nestedCoversObject(sel, bs, o, ancestors) {
-				continue
-			}
-		} else if !inTarget || !selectorMatchesObject(sel, o) {
-			continue
-		}
-		dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
-		if !ok {
-			// У типа нет объекта FGA в модели → нет кортежа → пропускаем объект
-			// (отказ по умолчанию: опечатка в типе ничего не выдаёт).
-			continue
-		}
-		out = append(out, dm)
-	}
-	// Публичное чтение детям (kaname#856): тот же вывод, что у полного прохода
-	// (desiredRuleMembers), — иначе два пути разошлись бы в составе.
-	return withPublicReaders(cat, bs, out)
+	return desired, nil
 }
 
 // desiredMembers вычисляет желаемый набор членов и решения о включении для
@@ -1344,7 +1338,18 @@ func filterMatchedToTarget(matched []domain.MirrorObject, target domain.AccessTa
 // ярус — те же доменные функции, что у прежнего пути выпуска). Совпавший чужой
 // объект получает REJECTED (без кортежа + аудит, защита границ области). ОДИН объект
 // под двумя правилами даёт двух желаемых членов с разными rule_fp.
+// readOnlyRuleMemberStore создаёт отдельный view на один расчёт. Labels из него
+// только читаются внутри обычного matchSelectorObjects и не выходят в DesiredMember.
+// Creator/nested пути сохраняют исходный store и его дополнительные возможности.
+type readOnlyRuleMemberStore interface {
+	ReadOnlyRuleMemberStore() ReconcileStore
+}
+
 func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, bs BindingScope) ([]DesiredMember, error) {
+	var selectorStore ReconcileStore = s
+	if provider, ok := s.(readOnlyRuleMemberStore); ok {
+		selectorStore = provider.ReadOnlyRuleMemberStore()
+	}
 	var out []DesiredMember
 	// Каталожный факт берётся ОДИН раз на проход: обновление снимка подменяет
 	// указатель, и три чтения могли бы увидеть два разных каталога — член
@@ -1418,7 +1423,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// по цели (по id для пообъектной; иначе O(scope) с проталкиванием фильтра), а совпадения
 			// каждой ветви пересекаются с целью. IsContainedIn ниже остаётся
 			// окончательной повторной проверкой включения.
-			matched, err = r.matchSelectorObjects(ctx, s, sel, bs.Scope, bs.Target)
+			matched, err = r.matchSelectorObjects(ctx, selectorStore, sel, bs.Scope, bs.Target)
 		}
 		if err != nil {
 			return nil, err

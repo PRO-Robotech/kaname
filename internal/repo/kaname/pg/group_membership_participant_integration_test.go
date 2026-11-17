@@ -226,12 +226,25 @@ func TestGroupMembershipParticipantFullScopesAndBackstop(t *testing.T) {
 func TestGroupMembershipParticipantReclassifiesAfterWaitAndCancels(t *testing.T) {
 	r := writerProtocolRig(t)
 	g, uid, _ := membershipFixture(t, r)
+	// Role/projection seed завершается до global wait; carrier ещё отсутствует.
+	seeded := membershipBinding(t, r, string(g.ID), r.b, "PENDING", false)
+	var lateRole string
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT role_id FROM kaname.access_bindings WHERE id=$1`, seeded).Scan(&lateRole))
+	_, err := r.admin.Exec(r.ctx, `DELETE FROM kaname.access_bindings WHERE id=$1`, seeded)
+	require.NoError(t, err)
+	var initialAccounts []string
+	var initialGlobal bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT accounts,global_scope FROM kaname.authority_group_member_scopes($1,$2,$3)`, string(g.ID), "user", uid).Scan(&initialAccounts, &initialGlobal))
+	require.False(t, initialGlobal)
+	require.ElementsMatch(t, []string{r.a}, initialAccounts)
 	p := membershipParticipant(t, r)
 	m := domain.GroupMember{GroupID: g.ID, MemberType: domain.SubjectTypeUser, MemberID: domain.SubjectID(uid)}
 	hold, err := r.runtime.Begin(r.ctx)
 	require.NoError(t, err)
 	lifecycleRollback(t, hold)
-	r.enter(t, hold, r.intent(r.a), "participant")
+	producerIntent := r.intent(r.a)
+	producerIntent.Plan = kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}
+	r.enter(t, hold, producerIntent, "participant")
 	var blocker int
 	require.NoError(t, hold.QueryRow(r.ctx, `SELECT pg_backend_pid()`).Scan(&blocker))
 	var got kaname.AuthorityFence
@@ -245,10 +258,13 @@ func TestGroupMembershipParticipantReclassifiesAfterWaitAndCancels(t *testing.T)
 		defer cancel()
 		return opened.Rollback(cleanup)
 	})
-	receiptWaitForBlocker(t, r.ctx, r.admin, blocker)
-	// Настоящий unfenced compatibility producer меняет read-set во время
-	// ожидания. Adapter обязан освободить первую TX и повторить полный entry.
-	membershipBinding(t, r, string(g.ID), r.b, "PENDING", false)
+	groupParticipantGlobalWait(t, r, blocker)
+	// Producer добавляет NEW B carrier во время настоящего global wait.
+	// Исходный scope был только A; после commit нужен rollback/restart на A+B.
+	bid := groupPendingBindingInHeldProducer(t, r, hold, lateRole, r.b, "group", string(g.ID))
+	var outside int
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.access_bindings WHERE id=$1`, bid).Scan(&outside))
+	require.Zero(t, outside, "producer ещё не коммитил NEW carrier")
 	var released time.Time
 	require.NoError(t, hold.QueryRow(r.ctx, `SELECT clock_timestamp()`).Scan(&released))
 	require.NoError(t, hold.Commit(r.ctx))

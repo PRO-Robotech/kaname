@@ -114,6 +114,14 @@ func logCeiling(volumeFactor float64) float64 {
 // renderMatrixReport — отчёт целиком.
 func renderMatrixReport(results []matrixResult, wall time.Duration, pgVersion string) string {
 	prov := scalegrid.TakeProvenance(matrixRunCommand, [][]scalegrid.Point{gridOf(matrixPoints)})
+	root, err := scalegrid.AbsPathOf("")
+	if err != nil {
+		return fmt.Sprintf("отчёт не собран: %v", err)
+	}
+	prov.Fingerprint, err = matrixFingerprint(root)
+	if err != nil {
+		return fmt.Sprintf("отчёт не собран: %v", err)
+	}
 	prov.Postgres = pgVersion
 	// Сетка описывается СВОИМ текстом: `scalegrid.Describe` печатает «ось X …
 	// неподвижны …», что для матрицы было бы ложью — здесь неподвижных нет.

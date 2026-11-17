@@ -45,11 +45,17 @@ package relverdict_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/PRO-Robotech/corelib/pgtest"
 
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
 
 // membershipCostRatioCeiling — K, объявленный ДО прогона.
@@ -98,16 +104,13 @@ func TestVerdict_CostDoesNotBelongToOtherTenantsMemberships(t *testing.T) {
 // measureVerdictRowsAtMembershipScale — строки, прочитанные ОДНИМ прямым вердиктом
 // на схеме, где всего n членств.
 //
-// Транзакция откатывается: точки кривой не должны видеть посев друг друга.
+// Каждая точка получает отдельную базу; измеряемая транзакция откатывается.
 func measureVerdictRowsAtMembershipScale(t *testing.T, n int) int64 {
 	t.Helper()
 
 	var rows int64
-	// Харнесс дерева, а не своё соединение: транзакция откатывается, и точки
-	// кривой не видят посева друг друга.
-	withTx(t, func(ctx context.Context, tx pgx.Tx) {
-		seedMembershipNoise(t, ctx, tx, n)
-
+	// Посев завершён в отдельной базе до начала измеряемой транзакции.
+	withMembershipCostTx(t, n, func(ctx context.Context, tx pgx.Tx) {
 		before := tuplesRead(t, ctx, tx)
 		allowed := askDirectVerdict(t, ctx, tx)
 		after := tuplesRead(t, ctx, tx)
@@ -123,92 +126,155 @@ func measureVerdictRowsAtMembershipScale(t *testing.T, n int) int64 {
 	return rows
 }
 
-// seedMembershipNoise — n членств в схеме, из которых РОВНО ОДНО принадлежит
-// спрашивающему и даёт ему право.
-//
-// Остальные — членства других субъектов в других группах: то, что вопрос читать
-// не обязан. Именно их число и варьируется.
-func seedMembershipNoise(t *testing.T, ctx context.Context, tx pgx.Tx, n int) {
+// withMembershipCostTx выдаёт отдельную базу каждой точке и отделяет Given от замера.
+func withMembershipCostTx(t *testing.T, n int, fn func(context.Context, pgx.Tx)) {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
+	if pool != nil {
+		defer pool.Close()
+	}
+	if err != nil {
+		t.Fatalf("пул точки членств: %v", err)
+	}
+	if pool == nil {
+		t.Fatal("пустой пул точки членств")
+	}
+	seedMembershipNoise(t, pool, n)
+	membershipCostTransaction(t, pool, false, fn)
+}
 
-	// Аккаунт — предпосылка группы (внешний ключ). Соседние пробы пакета сеют
-	// `acc-1` своим харнессом; здесь заводится собственный, чтобы посев шума не
-	// зависел от того, что успела положить соседняя проба.
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO kaname.accounts (id, name, owner_user_id)
-		VALUES ($1, 'membership-cost', $2)
-		ON CONFLICT DO NOTHING`, membershipCostAccountID, membershipCostSubjectID); err != nil {
-		t.Fatalf("посев аккаунта: %v", err)
+// membershipCostTransaction ограничивает одну операцию, включая её завершение.
+func membershipCostTransaction(t *testing.T, pool *pgxpool.Pool, commit bool, fn func(context.Context, pgx.Tx)) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tx, err := pool.Begin(ctx)
+	if tx != nil {
+		defer func() {
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer stop()
+			if rollbackErr := tx.Rollback(cleanup); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+				t.Errorf("откат точки членств: %v", rollbackErr)
+			}
+		}()
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO kaname.groups (id, account_id, name, description)
-		VALUES ($1, $2, 'membership-cost', '')
-		ON CONFLICT DO NOTHING`, membershipCostGroupID, membershipCostAccountID); err != nil {
-		t.Fatalf("посев группы: %v", err)
+	if err != nil {
+		t.Fatalf("транзакция точки членств: %v", err)
 	}
-	// Пользователь — предпосылка членства (внешний ключ проверяется).
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO kaname.users (id, external_id, email, account_id)
-		VALUES ($1, $1, $1 || '@kacho.local', $2)
-		ON CONFLICT DO NOTHING`, membershipCostSubjectID, membershipCostAccountID); err != nil {
-		t.Fatalf("посев спрашивающего: %v", err)
+	if tx == nil {
+		t.Fatal("пустая транзакция точки членств")
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO kaname.group_members (group_id, member_type, member_id)
-		VALUES ($1, 'user', $2)
-		ON CONFLICT DO NOTHING`, membershipCostGroupID, membershipCostSubjectID); err != nil {
-		t.Fatalf("посев членства спрашивающего: %v", err)
+	fn(ctx, tx)
+	if commit {
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("фиксация посева членств: %v", err)
+		}
 	}
+}
 
-	// Шум: n−1 членств ЧУЖИХ субъектов в чужих группах.
-	if n > 1 {
+// seedMembershipNoise сохраняет n членств и ровно одно членство спрашивающего.
+// Короткие фиксации освобождают journal-ключи; счётчики снимаются позднее в новой TX.
+func seedMembershipNoise(t *testing.T, pool *pgxpool.Pool, n int) {
+	t.Helper()
+	if n < 1 {
+		t.Fatal("число членств должно быть положительным")
+	}
+	membershipCostTransaction(t, pool, true, func(ctx context.Context, tx pgx.Tx) {
+		// Аккаунт — предпосылка группы (внешний ключ). Соседние пробы пакета сеют
+		// `acc-1` своим харнессом; здесь заводится собственный, чтобы посев шума не
+		// зависел от того, что успела положить соседняя проба.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO kaname.groups (id, account_id, name, description)
-			SELECT 'grp-noise-' || lpad(i::text, 12, '0'), $2, 'noise-' || i, ''
-			  FROM generate_series(1, $1) AS i
-			ON CONFLICT DO NOTHING`, n-1, membershipCostAccountID); err != nil {
-			t.Fatalf("посев чужих групп: %v", err)
+			INSERT INTO kaname.accounts (id, name, owner_user_id)
+			VALUES ($1, 'membership-cost', $2)
+			ON CONFLICT DO NOTHING`, membershipCostAccountID, membershipCostSubjectID); err != nil {
+			t.Fatalf("посев аккаунта: %v", err)
 		}
 		if _, err := tx.Exec(ctx, `
+			INSERT INTO kaname.groups (id, account_id, name, description)
+			VALUES ($1, $2, 'membership-cost', '')
+			ON CONFLICT DO NOTHING`, membershipCostGroupID, membershipCostAccountID); err != nil {
+			t.Fatalf("посев группы: %v", err)
+		}
+		// Пользователь — предпосылка членства (внешний ключ проверяется).
+		if _, err := tx.Exec(ctx, activewayin.WithWayIn(`
 			INSERT INTO kaname.users (id, external_id, email, account_id)
-			SELECT 'usr-noise-' || lpad(i::text, 12, '0'), 'ext-noise-' || i,
-			       'noise-' || i || '@kacho.local', $2
-			  FROM generate_series(1, $1) AS i
-			ON CONFLICT DO NOTHING`, n-1, membershipCostAccountID); err != nil {
-			t.Fatalf("посев чужих субъектов: %v", err)
+			VALUES ($1, $1, $1 || '@kacho.local', $2)
+			ON CONFLICT DO NOTHING`), membershipCostSubjectID, membershipCostAccountID); err != nil {
+			t.Fatalf("посев спрашивающего: %v", err)
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO kaname.group_members (group_id, member_type, member_id)
-			SELECT 'grp-noise-' || lpad(i::text, 12, '0'), 'user', 'usr-noise-' || lpad(i::text, 12, '0')
-			  FROM generate_series(1, $1) AS i
-			ON CONFLICT DO NOTHING`, n-1); err != nil {
-			t.Fatalf("посев чужих членств: %v", err)
+			VALUES ($1, 'user', $2)
+			ON CONFLICT DO NOTHING`, membershipCostGroupID, membershipCostSubjectID); err != nil {
+			t.Fatalf("посев членства спрашивающего: %v", err)
 		}
+		// Факт, выданный ГРУППЕ: без него цепочка членств не читалась бы вовсе, и
+		// проба мерила бы вопрос, который до неё не доходит.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
+			VALUES ('vpc_network', $1, 'v_get', 'group:' || $2)
+			ON CONFLICT DO NOTHING`, membershipCostObjectID, membershipCostGroupID); err != nil {
+			t.Fatalf("посев факта группы: %v", err)
+		}
+	})
+
+	// Каждая группа, пользователь и членство диапазона остаются в одной TX.
+	const batchSize = 128
+	for first := 1; first < n; first += batchSize {
+		last := min(first+batchSize-1, n-1)
+		membershipCostTransaction(t, pool, true, func(ctx context.Context, tx pgx.Tx) {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO kaname.groups (id, account_id, name, description)
+				SELECT 'grp-noise-' || lpad(i::text, 12, '0'), $2, 'noise-' || i, ''
+				  FROM generate_series($1::int, $3::int) AS i
+				ON CONFLICT DO NOTHING`, first, membershipCostAccountID, last); err != nil {
+				t.Fatalf("посев чужих групп: %v", err)
+			}
+			if _, err := tx.Exec(ctx, activewayin.WithWayIn(`
+				INSERT INTO kaname.users (id, external_id, email, account_id)
+				SELECT 'usr-noise-' || lpad(i::text, 12, '0'), 'ext-noise-' || i,
+				       'noise-' || i || '@kacho.local', $2
+				  FROM generate_series($1::int, $3::int) AS i
+				ON CONFLICT DO NOTHING`), first, membershipCostAccountID, last); err != nil {
+				t.Fatalf("посев чужих субъектов: %v", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO kaname.group_members (group_id, member_type, member_id)
+				SELECT 'grp-noise-' || lpad(i::text, 12, '0'), 'user', 'usr-noise-' || lpad(i::text, 12, '0')
+				  FROM generate_series($1::int, $2::int) AS i
+				ON CONFLICT DO NOTHING`, first, last); err != nil {
+				t.Fatalf("посев чужих членств: %v", err)
+			}
+		})
 	}
 
-	// Факт, выданный ГРУППЕ: без него цепочка членств не читалась бы вовсе, и
-	// проба мерила бы вопрос, который до неё не доходит.
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
-		VALUES ('vpc_network', $1, 'v_get', 'group:' || $2)
-		ON CONFLICT DO NOTHING`, membershipCostObjectID, membershipCostGroupID); err != nil {
-		t.Fatalf("посев факта группы: %v", err)
-	}
-
-	// Статистика: без неё планировщик выбирает план по пустым оценкам, и проба
-	// утверждала бы о другом состоянии мира, чем развёрнутая база.
-	if _, err := tx.Exec(ctx, `ANALYZE kaname.group_members, kaname.groups`); err != nil {
-		t.Fatalf("ANALYZE: %v", err)
-	}
-
-	var got int64
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM kaname.group_members`).Scan(&got); err != nil {
-		t.Fatalf("перепись членств: %v", err)
-	}
-	if got < int64(n) {
-		t.Fatalf("посев не создал заявленного числа членств: объявлено %d, в таблице %d — "+
-			"кривая мерила бы не ту ось", n, got)
-	}
+	membershipCostTransaction(t, pool, true, func(ctx context.Context, tx pgx.Tx) {
+		if _, err := tx.Exec(ctx, `ANALYZE kaname.group_members, kaname.groups`); err != nil {
+			t.Fatalf("ANALYZE: %v", err)
+		}
+		var total, groups, users, local, foreign, facts int64
+		if err := tx.QueryRow(ctx, `
+			SELECT (SELECT count(*) FROM kaname.group_members),
+			       (SELECT count(*) FROM kaname.groups WHERE account_id=$1),
+			       (SELECT count(*) FROM kaname.users WHERE account_id=$1),
+			       (SELECT count(*) FROM kaname.group_members
+			         WHERE member_type='user' AND member_id=$2 AND group_id=$3),
+			       (SELECT count(*) FROM kaname.group_members gm
+			         JOIN kaname.groups g ON g.id=gm.group_id
+			         WHERE g.account_id=$1 AND gm.member_id<>$2),
+			       (SELECT count(*) FROM kaname.relation_fact
+			         WHERE object_type='vpc_network' AND object_id=$4 AND relation='v_get'
+			           AND subject='group:' || $3)`, membershipCostAccountID, membershipCostSubjectID,
+			membershipCostGroupID, membershipCostObjectID).Scan(&total, &groups, &users, &local, &foreign, &facts); err != nil {
+			t.Fatalf("перепись посева членств: %v", err)
+		}
+		if total != int64(n) || groups != int64(n) || users != int64(n) || local != 1 || foreign != int64(n-1) || facts != 1 {
+			t.Fatalf("посев оси n=%d: членств=%d групп=%d пользователей=%d локальных=%d чужих=%d фактов=%d",
+				n, total, groups, users, local, foreign, facts)
+		}
+	})
 }
 
 const (
@@ -278,9 +344,8 @@ func measureListRowsAtMembershipScale(t *testing.T, n int) int64 {
 	const objects = 10
 
 	var rows int64
-	withTx(t, func(ctx context.Context, tx pgx.Tx) {
+	withMembershipCostTx(t, n, func(ctx context.Context, tx pgx.Tx) {
 		seedLabelledSet(t, ctx, tx, objects)
-		seedMembershipNoise(t, ctx, tx, n)
 
 		before := tuplesRead(t, ctx, tx)
 		ids, _, err := relverdict.List(ctx, tx, relverdict.ListQuery{

@@ -145,7 +145,7 @@ func TestGrantAuthoringActualCreateUpdateProjectionAndRollback(t *testing.T) {
 	bundle := semanticBundleDB(t, ctx, pool)
 	semanticFixtureIdentity(t, ctx, pool, bundle)
 	readProof := func(wantOK bool) {
-		w, e := repo.SemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle)
+		w, e := repo.PlannedSemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, kaname.SemanticReadIntent{Actor: domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)}, Roles: []domain.RoleID{owner}})
 		require.NoError(t, e)
 		defer w.Rollback(ctx)
 		cp, cost, e := w.(kaname.SemanticSourceReader).RoleProjectionCheckpoint(ctx, owner)
@@ -191,7 +191,7 @@ func TestGrantAuthoringActualCreateUpdateProjectionAndRollback(t *testing.T) {
 	readProof(true)
 
 	// Бюджет учитывает ВСЕ прочитанные meta rows до recoverable mismatch.
-	sw, err := repo.SemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle)
+	sw, err := repo.PlannedSemanticAuthorityWriter(ctx, kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}, bundle, kaname.SemanticReadIntent{Actor: domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(uid)}, Roles: []domain.RoleID{owner}})
 	require.NoError(t, err)
 	defer sw.Rollback(ctx)
 	extra := make([]domain.GrantCapabilityRule, 4096)

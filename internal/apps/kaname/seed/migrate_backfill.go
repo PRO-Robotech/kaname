@@ -46,6 +46,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/authorityprotocol"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 )
 
@@ -178,17 +180,12 @@ WHERE b.role_id       = 'rol' || substr(md5('owner'), 1, 17)
 // дважды, а его отказ приезжал бы вызывающему обёрнутым в чужую ошибку — то есть
 // снова без собственного уровня. Это держит гейт дерева
 // `internal/repohygiene/roleverbreseedwiring_test.go`.
-func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) error {
-	tx, err := pool.Begin(ctx)
+func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) (err error) {
+	tx, err := authorityprotocol.OpenParticipant(ctx, pool, kaname.AuthorityCluster)
 	if err != nil {
 		return fmt.Errorf("backfill owner-bindings: begin tx: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback(ctx)
-		}
-	}()
+	defer func() { err = errors.Join(err, rollbackSeedAuthority(ctx, tx)) }()
 	if _, err := tx.Exec(ctx, backfillOwnerBindingsSQL); err != nil {
 		return fmt.Errorf("backfill owner-bindings: insert bindings: %w", err)
 	}
@@ -204,7 +201,6 @@ func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("backfill owner-bindings: commit: %w", err)
 	}
-	committed = true
 	return nil
 }
 
@@ -232,24 +228,18 @@ func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) error {
 // пережила громкую на годы; здесь они разведены НАМЕРЕННО и по одной причине:
 // у отказа пересчёта обязана быть собственная полоса, а вход у него —
 // порт записи, которого у этой функции нет.
-func SyncAllSystemRoleSelectors(ctx context.Context, pool *pgxpool.Pool) error {
-	tx, err := pool.Begin(ctx)
+func SyncAllSystemRoleSelectors(ctx context.Context, pool *pgxpool.Pool) (err error) {
+	tx, err := authorityprotocol.OpenParticipant(ctx, pool, kaname.AuthorityRole)
 	if err != nil {
 		return fmt.Errorf("sync system role selectors: begin tx: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback(ctx)
-		}
-	}()
+	defer func() { err = errors.Join(err, rollbackSeedAuthority(ctx, tx)) }()
 	if err := syncAllSystemRoleSelectorsTx(ctx, tx); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("sync system role selectors: commit: %w", err)
 	}
-	committed = true
 	return nil
 }
 

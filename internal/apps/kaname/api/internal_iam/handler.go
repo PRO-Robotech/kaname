@@ -39,8 +39,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
-	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
+	"github.com/PRO-Robotech/kaname/internal/registrationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/pkg/subjectchange"
@@ -210,51 +210,13 @@ func validateProxyTuple(callerDomain, subject, relation, object string) error {
 // нестандартного отношения завершается точной тройкой parents живого каталога;
 // оно не становится глобально разрешённым отношением прокси.
 func validateRegistrationShape(module, subject, relation, object string) error {
-	if internalGrantReference(subject) || internalGrantReference(object) {
-		return proxyWriteRefusal()
-	}
-	if module == "" || strings.ContainsAny(module, "* \t\n") {
-		return proxyWriteRefusal()
-	}
-	if proxytuple.Hierarchical(proxytuple.Relation(relation)) || proxytuple.IsPublicReadGrant(subject, relation) {
-		if err := proxytuple.ValidateTuple("", subject, relation, object); err != nil {
-			return proxyWriteRefusal()
-		}
-		return nil
-	}
-	if validateRelationString("subject_id", subject) != nil || validateRelationString("object", object) != nil || !registrationRelationName(relation) {
-		return proxyWriteRefusal()
-	}
-	subjectType, subjectID, _ := strings.Cut(subject, ":")
-	if !namedPointerSubjectType(subjectType) || strings.Contains(subjectID, "*") {
-		return proxyWriteRefusal()
-	}
-	objectType, _, _ := strings.Cut(object, ":")
-	for _, forbidden := range proxytuple.ForbiddenObjectTypes() {
-		if objectType == forbidden {
-			return proxyWriteRefusal()
-		}
-	}
-	return nil
+	return registrationpolicy.ValidateShape(module, subject, relation, object)
 }
 
 // internalGrantReference закрывает управляющие координаты для обеих сторон
 // регистрации до каталога и привилегий модуля. Общий фундамент этих типов не знает.
 func internalGrantReference(reference string) bool {
-	typ, _, _ := strings.Cut(reference, ":")
-	return grantcapability.IsInternalObjectType(typ)
-}
-
-func registrationRelationName(name string) bool {
-	if name == "" || name[0] < 'a' || name[0] > 'z' {
-		return false
-	}
-	for _, c := range name {
-		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
-			return false
-		}
-	}
-	return true
+	return registrationpolicy.InternalGrantReference(reference)
 }
 
 // proxyWriteRefusal — ЕДИНСТВЕННЫЙ производитель отказа проксируемой записи по

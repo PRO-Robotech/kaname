@@ -158,6 +158,12 @@ func (p *InviteDecisions) once(ctx context.Context, in kaname.InviteDecisionInte
 		return err
 	}
 	w, err := enterInviteWriter(ctx, conn.BeginTx, func(ctx context.Context, tx pgx.Tx) (*authorityWriteTx, error) {
+		// Активный путь передаёт тот же RR-снимок источников в защищённый
+		// вход: protectPolicyPlan затем сравнивает его с токеном writer.
+		// Prepared не передаёт nil-план как подтверждённый снимок.
+		if plan != nil {
+			return p.policy.repo.enterAuthority(ctx, tx, intent, []byte("[]"), kaname.AuthorityFenceGlobal, nil, false, "participant", plan)
+		}
 		return p.policy.repo.enterAuthority(ctx, tx, intent, []byte("[]"), kaname.AuthorityFenceGlobal, nil, false, "participant")
 	})
 	if err != nil {
@@ -258,7 +264,11 @@ func (p *InviteDecisions) once(ctx context.Context, in kaname.InviteDecisionInte
 		}
 	}
 	prepared := &preparedInvite{recipient: identity.recipient, binding: binding, at: w.fence.decisionAt}
-	facade := &inviteMutationFacade{InviteMutationWriter: w, bindings: &inviteBindingWriter{WriterIface: w.AccessBindingsW(), semantic: semantic, prepared: prepared, active: plan != nil}}
+	bindings := w.AccessBindingsW()
+	if plan != nil {
+		bindings = semantic.AccessBindingsW()
+	}
+	facade := &inviteMutationFacade{InviteMutationWriter: w, bindings: &inviteBindingWriter{WriterIface: bindings, prepared: prepared}}
 	if err = body(ctx, facade, prepared); err != nil {
 		return err
 	}
@@ -278,17 +288,12 @@ func (w *inviteMutationFacade) AccessBindingsW() ab.WriterIface { return w.bindi
 
 type inviteBindingWriter struct {
 	ab.WriterIface
-	semantic *semanticAuthorityWriteTx
 	prepared *preparedInvite
-	active   bool
 }
 
 func (w *inviteBindingWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
 	if w.prepared.binding.ID == "" || !reflect.DeepEqual(b, w.prepared.Binding()) {
 		return domain.AccessBinding{}, kaname.ErrInvalidAuthorityFencePlan
-	}
-	if w.active {
-		return w.semantic.InsertBindingWithCapabilities(ctx, b)
 	}
 	return w.WriterIface.Insert(ctx, b)
 }

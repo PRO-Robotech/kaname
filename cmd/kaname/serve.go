@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
@@ -186,6 +187,13 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// чей потолок эта проекция и объявляет. Слушатель, поднятый раньше, открыл бы
 	// окно, в котором действует величина ПРЕДЫДУЩЕГО пуска, а журнал уже сообщил
 	// новую.
+	// Full profile проверяется read-only ДО любых startup/maintenance writes.
+	// false-ветка также отказывает поверх уже активированного full2.
+	ctx, fullStartup, err := prepareFullStartup(ctx, cfg, pool, logger)
+	if err != nil {
+		return err
+	}
+
 	if err := projectOwnCeilings(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg.OwnCeilings); err != nil {
 		return err
 	}
@@ -246,6 +254,12 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 
 	// kanameRepo общий для всех сценариев отдельных ресурсов.
 	kanameRepo := kanamepg.New(pool, slavePool)
+	if fullStartup != nil {
+		kanameRepo, err = kanameRepo.WithFullWriterContract(fullStartup.contract)
+		if err != nil {
+			return err
+		}
+	}
 
 	// ВЫБОРА ПОСТАВЩИКА РЕШЕНИЯ О ДОСТУПЕ ЗДЕСЬ БОЛЬШЕ НЕТ.
 	//
@@ -310,9 +324,16 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// Сорванная доставка обязана назваться своим именем РАНЬШЕ, чем о
 	// расхождении заговорит страж: иначе оператор прочтёт отказ доставки как
 	// расхождение каталога и пойдёт чинить не то.
-	deliveredManifests, mErr := loadDeliveredManifests(logger, cfg.Manifests)
-	if mErr != nil {
-		return mErr
+	// Full mode использует те же immutable входы раннего read-only preflight.
+	var deliveredManifests []*manifest.Manifest
+	if fullStartup != nil {
+		deliveredManifests = fullStartup.manifests
+	} else {
+		var mErr error
+		deliveredManifests, mErr = loadDeliveredManifests(logger, cfg.Manifests)
+		if mErr != nil {
+			return mErr
+		}
 	}
 
 	// ОПОРА ПАРИТЕТА — сразу за чтением доставки и ДО первой записи (kacho#1861).
@@ -358,9 +379,15 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// Отчёт композиции корень сохраняет: из него шаг «модель против каталога»
 	// ниже узнаёт, какой модуль принёс в модель процесса тип вне канона
 	// (kaname#865, Д10) — второй композиции для этого не заводится.
-	preparedModel, cErr := prepareComposedModel(logger, deliveredManifests)
-	if cErr != nil {
-		return cErr
+	var preparedModel preparedModel
+	if fullStartup != nil {
+		preparedModel = fullStartup.model
+	} else {
+		var cErr error
+		preparedModel, cErr = prepareComposedModel(logger, deliveredManifests)
+		if cErr != nil {
+			return cErr
+		}
 	}
 
 	// Предварительная проверка всей поставки идёт до установки модели и всех записей поставки.
@@ -604,6 +631,9 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	}
 	operations.Start()
 	var installationRepo kanamerepo.Repository = kanamepg.New(pool, nil)
+	if fullStartup != nil {
+		installationRepo = fullStartup.primary
+	}
 	if installationDependencies.decorateInstallationRepository != nil {
 		installationRepo = installationDependencies.decorateInstallationRepository(installationRepo)
 	}
@@ -625,7 +655,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	var resourceObjectParticipant *reconcile.Reconciler
 	var groupObjectParticipant *reconcile.Reconciler
 	var bindingStageParticipant *kanamepg.BindingStageParticipant
-	if cfg.AuthorityProtocol.Participant() {
+	if cfg.AuthorityProtocol.Participant() && fullStartup == nil {
 		bundle, loadErr := loadGroupParticipationBundle(ctx, cfg.AuthorityProtocol, kanameRepo, preparedModel)
 		if loadErr != nil {
 			return loadErr
@@ -718,7 +748,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
 		metricsReg, cfg, moduleRoster, tokenSigner, logger, preparedModel.plans)
-	if cfg.AuthorityProtocol.Participant() {
+	if cfg.AuthorityProtocol.Participant() && fullStartup == nil {
 		resourceBeginner, participantErr := resourceParticipant.RegistrationTxBeginner(pool)
 		if participantErr != nil {
 			return participantErr
@@ -740,6 +770,17 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		if err := svcs.bindingReconciler.WithGroupObjectReconciler(groupObjectParticipant); err != nil {
 			return err
 		}
+	}
+	if fullStartup != nil {
+		participants, composeErr := wireFullStartupServices(ctx, fullStartup, kanameRepo, svcs, pool)
+		if composeErr != nil {
+			return fmt.Errorf("authority-protocol full public composition: %w", composeErr)
+		}
+		// Одни и те же validated handles: public, login и background потребители.
+		membershipParticipant, admissionParticipant = participants.membership, participants.admission
+		inviteDecisions, clusterAdminParticipant = participants.invites, participants.cluster
+		resourceParticipant, resourceObjectParticipant = participants.resources, participants.objects
+		groupObjectParticipant, bindingStageParticipant = participants.groups, participants.bindings
 	}
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
@@ -2111,22 +2152,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	reconcileEngine := reconcile.New(reconcileAdapter,
 		logger.With(slog.String("component", "rsab_reconciler")), catalogSnapshot)
 	if cfg.AuthorityProtocol.Participant() {
-		if err := reconcileEngine.WithStagedBindingReconciler(bindingStageParticipant); err != nil {
-			return err
-		}
-		// Фоновая очередь имеет отдельный engine и, как прежде, не пишет
-		// размер в гистограмму пути запроса; протокол TX остаётся тем же.
-		backgroundObjects, err := resourceParticipant.NewObjectReconciler(logger.With("worker", "selector-reconcile"))
-		if err != nil {
-			return err
-		}
-		if err := reconcileEngine.WithObjectReconciler(backgroundObjects); err != nil {
-			return err
-		}
-		if err := reconcileEngine.WithGroupObjectReconciler(groupObjectParticipant); err != nil {
+		if err := wireBackgroundAuthorityParticipants(reconcileEngine, bindingStageParticipant, resourceObjectParticipant, groupObjectParticipant); err != nil {
 			return err
 		}
 	}
+
 	// resource_reconcile_outbox дренажится NOTIFY-driven (паритет с fga_outbox drainer):
 	// AFTER INSERT триггер (миграция 0042) шлет pg_notify на канал
 	// kaname_resource_reconcile_outbox, reconcileAdapter LISTEN'ит его и будит worker —

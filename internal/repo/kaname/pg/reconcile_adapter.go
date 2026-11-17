@@ -62,7 +62,7 @@ func NewReconcileAdapter(pool *pgxpool.Pool, cat catalog.Source) *ReconcileAdapt
 
 // WithTx runs fn inside a single writer-tx (reconcile.TxRunner). Commit on
 // success, rollback on error/panic.
-func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Context, s reconcile.ReconcileStore) error) error {
+func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Context, s reconcile.ReconcileStore) error) (err error) {
 	tx, err := a.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("reconcile: begin tx: %w", err)
@@ -70,10 +70,28 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 	committed := false
 	defer func() {
 		if !committed {
-			_ = tx.Rollback(ctx)
+			// Отмена запроса не должна отменить освобождение самой транзакции.
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			rollbackErr := tx.Rollback(cleanup)
+			stop()
+			if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+				err = errors.Join(err, fmt.Errorf("reconcile: rollback: %w", rollbackErr))
+			}
 		}
 	}()
-	store := &reconcileStore{tx: tx, cat: a.cat.Facts()}
+	// Drain берёт EXCLUSIVE root до dependency tables. Наш shared root нужен
+	// до protocol row admission: иначе drain успеет закрыть callback его table
+	// locks и затем ждать удерживаемую нами protocol row.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(1262569283,0)`); err != nil {
+		return fmt.Errorf("reconcile: enter lifecycle barrier: %w", err)
+	}
+	// Admission берётся до callback и его row/advisory locks. Иначе форвард
+	// держит binding KEY SHARE, ждёт admission, а AccountDelete — наоборот.
+	// Отсутствие ABI или EXECUTE завершает вход: unsigned strict не обходится.
+	if _, err := tx.Exec(ctx, `SELECT kaname.authority_parent_prelock_admit_v3()`); err != nil {
+		return fmt.Errorf("reconcile: admit writer transaction: %w", err)
+	}
+	store := &legacyForwardStore{reconcileStore: &reconcileStore{tx: tx, cat: a.cat.Facts()}}
 	if err := fn(ctx, store); err != nil {
 		return err
 	}
@@ -82,6 +100,45 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 	}
 	committed = true
 	return nil
+}
+
+// legacyForwardStore принадлежит только unsigned compatibility WithTx. Signed
+// participant создаёт reconcileStore напрямую и сохраняет свой emitter/clock.
+// Выбор оболочки не выдаёт authority: допуск и receipt проверяет сама база.
+type legacyForwardStore struct {
+	*reconcileStore
+}
+
+// ReadOnlyRuleMemberStore выдаёт новый function-scoped view, а не меняет обычный
+// MatchSelector. Его Labels нельзя изменять или удерживать после расчёта правил.
+func (s *legacyForwardStore) ReadOnlyRuleMemberStore() reconcile.ReconcileStore {
+	return &readOnlyRuleMemberView{ReconcileStore: s, tx: s.tx, decode: resource_mirror.NewReadOnlyLabelDecoder()}
+}
+
+type readOnlyRuleMemberView struct {
+	reconcile.ReconcileStore
+	tx     pgx.Tx
+	decode func([]byte) (map[string]string, error)
+}
+
+func (s *readOnlyRuleMemberView) MatchSelector(ctx context.Context, types []string, matchLabels map[string]string) ([]domain.MirrorObject, error) {
+	rows, err := resource_mirror.MatchByLabelsReadOnly(ctx, s.tx, types, matchLabels, s.decode)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.MirrorObject, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, mirrorRowToDomain(row))
+	}
+	return out, nil
+}
+
+func (s *legacyForwardStore) EmitForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return fga_outbox.EmitForwardWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
+}
+
+func (s *legacyForwardStore) EmitNativeTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return fga_outbox.EmitNativeDeleteTx(ctx, s.tx, membershipTuplesToClients(tuples))
 }
 
 // reconcileStore — tx-scoped reconcile.ReconcileStore implementation.

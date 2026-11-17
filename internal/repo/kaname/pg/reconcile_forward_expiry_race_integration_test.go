@@ -116,9 +116,12 @@ func (s *pausingStore) LoadBindingForForward(ctx context.Context, id domain.Acce
 }
 
 // waitDeactivationOutcome — ждёт, пока снятие (истечение, отзыв, удаление) либо
-// завершится, либо встанет на строчном замке. Возвращает true, если оно завершилось.
-func waitDeactivationOutcome(t *testing.T, ctx context.Context, pool *pgxpool.Pool, done <-chan error) (finished bool, err error) {
+// завершится, либо встанет за точным PID форварда на строчном замке или
+// prelock admission. Возвращает true, если оно завершилось.
+func waitDeactivationOutcome(t *testing.T, ctx context.Context, pool *pgxpool.Pool, done <-chan error, forwardHolderPID int) (finished bool, err error) {
 	t.Helper()
+	queryCtx, queryCancel := context.WithTimeout(ctx, expiryRaceBudget)
+	defer queryCancel()
 	deadline := time.NewTimer(expiryRaceBudget)
 	defer deadline.Stop()
 	tick := time.NewTicker(20 * time.Millisecond)
@@ -132,10 +135,16 @@ func waitDeactivationOutcome(t *testing.T, ctx context.Context, pool *pgxpool.Po
 			return false, nil
 		case <-tick.C:
 			var n int
-			require.NoError(t, pool.QueryRow(ctx, `
-				SELECT count(*) FROM pg_stat_activity
-				 WHERE datname = current_database() AND wait_event_type = 'Lock'
-				   AND query ILIKE '%access_bindings%'`).Scan(&n))
+			require.NoError(t, pool.QueryRow(queryCtx, `
+				SELECT count(*) FROM pg_stat_activity a
+				 WHERE a.datname = current_database() AND a.wait_event_type = 'Lock'
+				 AND $1::integer=ANY(pg_catalog.pg_blocking_pids(a.pid))
+				 AND (a.query ILIKE '%access_bindings%' OR
+				  (a.query='SELECT kaname.authority_parent_prelock_admit_v3()'
+				   AND EXISTS(SELECT 1 FROM pg_catalog.pg_locks l
+				    WHERE l.pid=a.pid AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database())
+				    AND l.locktype='advisory' AND l.classid=1262569292::oid
+				    AND l.objid=0::oid AND l.objsubid=2 AND l.mode='ExclusiveLock' AND NOT l.granted)))`, forwardHolderPID).Scan(&n))
 			if n > 0 {
 				return false, nil
 			}
@@ -328,6 +337,9 @@ func runForwardDeactivationRace(t *testing.T, kind forwardKind, suffix string, d
 // области гонят её без снятия.
 func runForwardDeactivationRaceOn(t *testing.T, kind forwardKind, suffix string, fix raceFixture, deact deactivation) (pool *pgxpool.Pool, bid domain.AccessBindingID, subj string) {
 	t.Helper()
+	if deact == projectDeleteDeactivation {
+		return runProjectForwardUnregisterEntryRace(t, kind, suffix, fix)
+	}
 	ctx := context.Background()
 	pool, err := coredb.NewPool(ctx, setupTestDB(t))
 	require.NoError(t, err)
@@ -358,10 +370,14 @@ func runForwardDeactivationRaceOn(t *testing.T, kind forwardKind, suffix string,
 		t.Fatalf("ПРЕДПОСЫЛКА: форвард не дошёл до чтения фактов выдачи за %s", expiryRaceBudget)
 	}
 
+	forwardHolderPID := 0
+	if deact != noDeactivation {
+		forwardHolderPID = deactivationForwardAdmissionHolderPID(t, ctx, pool)
+	}
 	unregisterRaceObjectFor(t, ctx, pool, deact)
 	expDone := startDeactivation(t, ctx, pool, expirer, fx, bid, deact)
 	if expDone != nil {
-		finished, err := waitDeactivationOutcome(t, ctx, pool, expDone)
+		finished, err := waitDeactivationOutcome(t, ctx, pool, expDone, forwardHolderPID)
 		if finished {
 			require.NoError(t, err, deact.String())
 			t.Logf("исход: снятие (%s) завершилось, не дожидаясь форварда", deact)

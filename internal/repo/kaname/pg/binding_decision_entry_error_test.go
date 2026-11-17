@@ -51,8 +51,14 @@ func TestBindingDecisionEntryFailureKeepsBackendClassification(t *testing.T) {
 			if mode == "delegated" {
 				actor.Type = domain.SubjectTypeServiceAccount
 				err = writers.RunDelegatedBindingDecision(context.Background(), actor, proposed, nil, apply)
+			} else if mode == "update" {
+				// Изменение binding требует resolved metadata intent до входа.
+				// Legacy create=false без него закономерно отвергается до Acquire.
+				err = writers.RunBindingMetadataDecision(context.Background(), actor, kaname.BindingMetadataDecision{
+					ID: proposed.ID, ApplyDeletionProtection: true, DeletionProtection: true,
+				}, apply)
 			} else {
-				err = writers.RunBindingDecision(context.Background(), actor, proposed, mode == "create", nil, apply)
+				err = writers.RunBindingDecision(context.Background(), actor, proposed, true, nil, apply)
 			}
 			require.ErrorIs(t, err, iamerr.ErrUnavailable)
 			require.ErrorIs(t, err, cause)

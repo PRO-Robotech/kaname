@@ -21,7 +21,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/modelcompose"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
@@ -96,13 +95,12 @@ func newFBRoleMutationWorld(t *testing.T) *fbRoleMutationWorld {
 		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door)).
 		WithObjectReconciler(objects, slog.Default()).WithRoleAuthorityWriter(writers)
 	w.roles = roleapp.NewHandler(create, update, nil, nil, nil)
-	w.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "probemod"})
-	require.NoError(t, w.reg.Register(w.ctx, &iamv1.RegisterResourceRequest{
+	require.NotNil(t, w.fullResourceRegistrationContext)
+	require.NoError(t, w.reg.Register(w.fullResourceRegistrationContext, &iamv1.RegisterResourceRequest{
 		SubjectId: "project:" + string(w.prjB), Relation: "project", Object: atcBoxType + ":" + fbRoleBoxQ,
 		ParentProjectId: string(w.prjB), ParentAccountId: string(w.accA),
 		ParentChain: []string{"project:" + string(w.prjB), "account:" + string(w.accA)},
 	}))
-	w.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	return w
 }
 
@@ -286,7 +284,9 @@ func (w *fbRoleMutationWorld) assertRules(id domain.RoleID, rules []*iamv1.Rule)
 // цикл принятой Operation намеренно отделён от бизнес/projection/audit/FGA.
 func (w *fbRoleMutationWorld) business() map[string]string {
 	w.t.Helper()
-	tx, err := w.pool.BeginTx(w.ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	// Закрытые durable rows читает fixture owner, а не исследуемый runtime actor.
+	require.NotNil(w.t, w.observer)
+	tx, err := w.observer.BeginTx(w.ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	require.NoError(w.t, err)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(w.ctx), 5*time.Second)

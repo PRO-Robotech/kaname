@@ -39,12 +39,16 @@ func semanticFixtureIdentity(t *testing.T, ctx context.Context, pool *pgxpool.Po
  VALUES(true,'active',1,$1,$2,$3) ON CONFLICT(singleton) DO UPDATE SET phase=EXCLUDED.phase,protocol_version=EXCLUDED.protocol_version,model_id=EXCLUDED.model_id,catalog_id=EXCLUDED.catalog_id,projector_version=EXCLUDED.projector_version`, id.ModelID, id.CatalogID, id.ProjectorVersion)
 	require.NoError(t, err)
 }
-func semanticStart(t *testing.T, ctx context.Context, repo *kanamepg.Repository, plan kaname.AuthorityFencePlan, b *granteffect.Bundle) *authorityPending {
+func semanticStart(t *testing.T, ctx context.Context, repo *kanamepg.Repository, plan kaname.AuthorityFencePlan, b *granteffect.Bundle, intent ...kaname.SemanticReadIntent) *authorityPending {
 	t.Helper()
+	read := kaname.SemanticReadIntent{}
+	if len(intent) != 0 {
+		read = intent[0]
+	}
 	waitCtx, cancel := context.WithCancel(ctx)
 	p := &authorityPending{result: make(chan authorityOpenResult, 1), cancel: cancel}
 	go func() {
-		w, err := repo.SemanticAuthorityWriter(waitCtx, plan, b)
+		w, err := repo.PlannedSemanticAuthorityWriter(waitCtx, plan, b, read)
 		p.result <- authorityOpenResult{w, err}
 	}()
 	t.Cleanup(func() {
@@ -92,13 +96,13 @@ func semanticWaitIdentity(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 func TestSemanticAuthorityWriterRejectsInvalidBundleBeforeTransaction(t *testing.T) {
 	repo := kanamepg.New(nil, nil)
 	for _, b := range []*granteffect.Bundle{nil, {}} {
-		w, err := repo.SemanticAuthorityWriter(context.Background(), authorityAccounts("acc-one"), b)
+		w, err := repo.PlannedSemanticAuthorityWriter(context.Background(), authorityAccounts("acc-one"), b, kaname.SemanticReadIntent{})
 		require.ErrorIs(t, err, granteffect.ErrInvalidBundle)
 		require.Nil(t, w)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	w, err := repo.SemanticAuthorityWriter(ctx, authorityAccounts("acc-one"), nil)
+	w, err := repo.PlannedSemanticAuthorityWriter(ctx, authorityAccounts("acc-one"), nil, kaname.SemanticReadIntent{})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, w)
 }
@@ -111,7 +115,7 @@ func TestSemanticAuthorityWriterDefaultsAndAllIdentityAxesDeny(t *testing.T) {
 	b := semanticBundleDB(t, ctx, pool)
 	deny := func(t *testing.T) {
 		t.Helper()
-		w, err := repo.SemanticAuthorityWriter(ctx, authorityAccounts("acc-one"), b)
+		w, err := repo.PlannedSemanticAuthorityWriter(ctx, authorityAccounts("acc-one"), b, kaname.SemanticReadIntent{})
 		require.ErrorIs(t, err, kaname.ErrSemanticIdentityUnavailable)
 		require.Nil(t, w)
 		authorityWaitReleased(t, pool)
@@ -142,7 +146,7 @@ func TestSemanticAuthorityWriterDefaultsAndAllIdentityAxesDeny(t *testing.T) {
 		_, err := pool.Exec(ctx, sql)
 		require.Error(t, err, "schema должна отвергнуть неполную active identity")
 	}
-	w, err := repo.SemanticAuthorityWriter(ctx, authorityAccounts("acc-one"), b)
+	w, err := repo.PlannedSemanticAuthorityWriter(ctx, authorityAccounts("acc-one"), b, kaname.SemanticReadIntent{})
 	require.NoError(t, err)
 	require.Same(t, b, w.SemanticBundle())
 	require.NotNil(t, w.SemanticRelationChecker())
@@ -185,7 +189,7 @@ func TestSemanticAuthorityWriterIdentityWaitCancellationReleasesTransaction(t *t
 	require.Nil(t, result.w)
 	require.NoError(t, holder.Rollback(ctx))
 	authorityWaitReleased(t, pool)
-	next, err := repo.SemanticAuthorityWriter(ctx, authorityAccounts("acc-one"), b)
+	next, err := repo.PlannedSemanticAuthorityWriter(ctx, authorityAccounts("acc-one"), b, kaname.SemanticReadIntent{})
 	require.NoError(t, err)
 	require.NoError(t, next.Rollback(ctx))
 	authorityWaitReleased(t, pool)
@@ -229,6 +233,10 @@ func TestSemanticAuthorityWriterPostIdentityWaitExpiryUsesOneTime(t *testing.T) 
 	b := semanticBundleDB(t, ctx, pool)
 	semanticFixtureIdentity(t, ctx, pool, b)
 	plan := authorityAccounts(string(account.ID))
+	read := kaname.SemanticReadIntent{Actor: domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: "sva-semantic"}, Native: []kaname.SemanticNativeQuestion{
+		{Relation: "v_get", Object: "account:" + string(account.ID)},
+		{Relation: ref.Relation, Object: ref.ObjectType + ":" + ref.ObjectID},
+	}}
 	check := func(w kaname.SemanticAuthorityWriter, want bool) {
 		t.Helper()
 		for _, q := range [][2]string{{"v_get", "account:" + string(account.ID)}, {ref.Relation, ref.ObjectType + ":" + ref.ObjectID}} {
@@ -237,12 +245,12 @@ func TestSemanticAuthorityWriterPostIdentityWaitExpiryUsesOneTime(t *testing.T) 
 			require.Equal(t, want, allowed, q[0])
 		}
 	}
-	before, err := repo.SemanticAuthorityWriter(ctx, plan, b)
+	before, err := repo.PlannedSemanticAuthorityWriter(ctx, plan, b, read)
 	require.NoError(t, err)
 	check(before, true)
 	require.NoError(t, before.Rollback(ctx))
 	holder, xid := semanticIdentityLock(t, ctx, pool)
-	pending := semanticStart(t, ctx, repo, plan, b)
+	pending := semanticStart(t, ctx, repo, plan, b, read)
 	semanticWaitIdentity(t, ctx, pool, xid)
 	var expiredAt time.Time
 	require.NoError(t, holder.QueryRow(ctx, `UPDATE kaname.access_bindings SET expires_at=clock_timestamp() WHERE id='acb-semantic' RETURNING expires_at`).Scan(&expiredAt))

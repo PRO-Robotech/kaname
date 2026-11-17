@@ -33,7 +33,7 @@ func TestWildcardProjection_ActualMaterializerStaticAndLiveTypeTwins(t *testing.
 				bs := sc65Scope("user", "typed-reader", domain.Rules{rule})
 				bs.Target = domain.AccessTarget{Resources: []domain.ResourceRef{{Type: tc.dotted, ID: object.ObjectID}}}
 				var users []string
-				for _, m := range desiredMembersForObject(cat, bs, object, nil) {
+				for _, m := range desiredObjectMembersForTest(t, cat, bs, object, nil) {
 					for _, tuple := range m.Tuples {
 						if tuple.Relation == "v_get" && tuple.Object == tc.fga+":"+object.ObjectID {
 							users = append(users, tuple.User)

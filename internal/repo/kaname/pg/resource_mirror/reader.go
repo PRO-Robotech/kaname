@@ -61,6 +61,17 @@ type querier interface {
 // shapes synchronously; this is a defensive belt). The GIN index on labels
 // serves the `@>` probe.
 func MatchByLabels(ctx context.Context, q querier, types []string, matchLabels map[string]string) ([]MirrorRow, error) {
+	return matchByLabels(ctx, q, types, matchLabels, decodeLabels)
+}
+
+// MatchByLabelsReadOnly сохраняет SQL и ошибки обычного reader. Переданный decoder
+// может разделять Labels только между объектами закрытого readonly расчёта правил.
+// Публичный MatchByLabels по-прежнему возвращает независимые изменяемые maps.
+func MatchByLabelsReadOnly(ctx context.Context, q querier, types []string, matchLabels map[string]string, decode func([]byte) (map[string]string, error)) ([]MirrorRow, error) {
+	return matchByLabels(ctx, q, types, matchLabels, decode)
+}
+
+func matchByLabels(ctx context.Context, q querier, types []string, matchLabels map[string]string, decode func([]byte) (map[string]string, error)) ([]MirrorRow, error) {
 	if len(types) == 0 || len(matchLabels) == 0 {
 		return nil, nil
 	}
@@ -83,7 +94,7 @@ func MatchByLabels(ctx context.Context, q querier, types []string, matchLabels m
 		return nil, fmt.Errorf("resource_mirror: match by labels: %w", err)
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsWithDecoder(rows, decode)
 }
 
 // AllByTypes returns the mirror rows whose object_type ∈ types NARROWED to the binding's
@@ -195,6 +206,10 @@ func GetByObject(ctx context.Context, q querier, objectType, objectID string) (M
 }
 
 func scanRows(rows pgx.Rows) ([]MirrorRow, error) {
+	return scanRowsWithDecoder(rows, decodeLabels)
+}
+
+func scanRowsWithDecoder(rows pgx.Rows, decode func([]byte) (map[string]string, error)) ([]MirrorRow, error) {
 	var out []MirrorRow
 	for rows.Next() {
 		var (
@@ -204,9 +219,11 @@ func scanRows(rows pgx.Rows) ([]MirrorRow, error) {
 		if err := rows.Scan(&r.ObjectType, &r.ObjectID, &r.ParentProjectID, &r.ParentAccountID, &labelsJSON); err != nil {
 			return nil, fmt.Errorf("resource_mirror: scan: %w", err)
 		}
-		if err := json.Unmarshal(labelsJSON, &r.Labels); err != nil {
+		labels, err := decode(labelsJSON)
+		if err != nil {
 			return nil, fmt.Errorf("resource_mirror: unmarshal labels: %w", err)
 		}
+		r.Labels = labels
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {

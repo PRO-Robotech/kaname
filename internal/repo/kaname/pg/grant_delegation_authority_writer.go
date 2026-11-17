@@ -103,16 +103,6 @@ func readDelegationScope(ctx context.Context, q interface {
 	}
 	return s, err
 }
-func (s delegationScope) intent(bundle *granteffect.Bundle) kaname.AuthorityWriteIntent {
-	in := kaname.AuthorityWriteIntent{Kind: kaname.AuthorityDelegation, Bundle: bundle, Owners: s.refs, Plan: kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}}
-	if !s.global {
-		in.Plan.Mode = kaname.AuthorityFenceAccounts
-		for _, a := range s.accounts {
-			in.Plan.Accounts = append(in.Plan.Accounts, domain.AccountID(a))
-		}
-	}
-	return in
-}
 func (p *GrantDelegationParticipant) GrantDelegationWriter(ctx context.Context, kind kaname.GrantDelegationMutation, proposed domain.GrantDelegation) (kaname.Writer, error) {
 	return p.openDelegationPolicyWriter(ctx, kind, proposed)
 }

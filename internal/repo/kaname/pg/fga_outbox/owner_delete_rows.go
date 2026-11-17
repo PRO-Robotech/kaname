@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -20,6 +21,19 @@ import (
 // protect_holders — внутренний literal этого оператора: даже legacy строка
 // смешанного набора не снимает факт, который ещё держит независимая выдача.
 func EmitVersionedDeleteTx(ctx context.Context, tx pgx.Tx, rows []outboxtypes.VersionedRelationTuple) error {
+	return emitVersionedDeleteAt(ctx, tx, rows, time.Time{})
+}
+
+// Время удержанного решения используется и для retirement, и для journal.
+// Версии отдельных доставок при этом не заменяются временем решения.
+func EmitVersionedDecisionDeleteTx(ctx context.Context, tx pgx.Tx, rows []outboxtypes.VersionedRelationTuple, decisionAt time.Time) error {
+	if decisionAt.IsZero() {
+		return fmt.Errorf("fga_outbox: invalid decision coordinate")
+	}
+	return emitVersionedDeleteAt(ctx, tx, rows, decisionAt)
+}
+
+func emitVersionedDeleteAt(ctx context.Context, tx pgx.Tx, rows []outboxtypes.VersionedRelationTuple, decisionAt time.Time) error {
 	if tx == nil {
 		return fmt.Errorf("fga_outbox: tx must not be nil")
 	}
@@ -57,7 +71,7 @@ func EmitVersionedDeleteTx(ctx context.Context, tx pgx.Tx, rows []outboxtypes.Ve
 	if err := prepareRetirementTx(ctx, tx, unique); err != nil {
 		return err
 	}
-	actionAt, err := retireProducerOwnersTx(ctx, tx, users, relations, objects, versions)
+	actionAt, err := retireProducerOwnersAt(ctx, tx, users, relations, objects, versions, decisionAt)
 	if err != nil {
 		return err
 	}

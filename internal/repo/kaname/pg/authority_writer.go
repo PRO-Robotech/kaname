@@ -38,11 +38,13 @@ func (f authorityFence) Accounts() []domain.AccountID    { return slices.Clone(f
 func (f authorityFence) DecisionAt() time.Time           { return f.decisionAt }
 
 type authorityWriteTx struct {
+	policyGuards map[string]bool
 	*writeTx
 	fence            authorityFence
 	nativeRead       *protectedNativeRead
 	producerCaptures map[domain.Subject]*boundProducerPopulation
 	producerBudget   *relverdict.AdministrativeReadBudget
+	population       *policyPopulationToken
 	closed           bool
 }
 

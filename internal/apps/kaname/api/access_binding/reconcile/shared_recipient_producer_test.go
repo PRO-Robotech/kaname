@@ -23,7 +23,7 @@ func TestSharedRecipientProducer_MaterializesBothEffectsWithTypedRecipients(t *t
 		{Type: domain.SubjectTypeSystemClass, ID: domain.ClassAnonymous},
 		{Type: domain.SubjectTypeGroup, ID: "same-id"},
 	}
-	members := desiredMembersForObject(cat, bs, sc65BoxObject(), nil)
+	members := desiredObjectMembersForTest(t, cat, bs, sc65BoxObject(), nil)
 	users := func(relation string) []string {
 		var out []string
 		for _, m := range members {
@@ -129,7 +129,7 @@ func TestSharedRecipientProducer_SelectedActiveOwnRuleRequired(t *testing.T) {
 func TestSharedRecipientProducer_TargetStillRestrictsContainer(t *testing.T) {
 	cat := ndFacts(t)
 	bs := sc65Scope("system_class", "anonymous", ndReaderRules(nil, nil, "items"))
-	positive := desiredMembersForObject(cat, bs, sc65BoxObject(), nil)
+	positive := desiredObjectMembersForTest(t, cat, bs, sc65BoxObject(), nil)
 	found := false
 	for _, m := range positive {
 		found = found || hasRelation(m, domain.PublicReaderRelation)
@@ -139,7 +139,7 @@ func TestSharedRecipientProducer_TargetStillRestrictsContainer(t *testing.T) {
 	}
 	other := sc65BoxObject()
 	other.ObjectID = "another-box"
-	for _, m := range desiredMembersForObject(cat, bs, other, nil) {
+	for _, m := range desiredObjectMembersForTest(t, cat, bs, other, nil) {
 		if hasRelation(m, domain.PublicReaderRelation) {
 			t.Fatalf("unselected container received public_reader: %+v", m)
 		}

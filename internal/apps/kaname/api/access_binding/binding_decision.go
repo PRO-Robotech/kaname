@@ -53,7 +53,7 @@ func proposedBinding(b domain.AccessBinding, r domain.Role) granteffect.Binding 
 }
 func bindingDecisionError(err error) error {
 	// Отказ не раскрывает путь решения: публичный контракт одинаков для
-	// отсутствующего источника и недостаточной authority (приёмка #1034).
+	// отсутствующего источника и недостаточной authority (приёмка kaname#1034).
 	if errors.Is(err, iamerr.ErrNotFound) || errors.Is(err, iamerr.ErrPermissionDenied) || isPermissionDenied(err) {
 		return authzguard.PermissionDenied()
 	}
@@ -64,7 +64,11 @@ func (u *CreateAccessBindingUseCase) checkBindingDecision(ctx context.Context, b
 	if err != nil {
 		return "", err
 	}
-	err = u.decisions.RunBindingDecision(ctx, actor, b, true, buildSubjectsDecisionTuples, func(ctx context.Context, w kaname.SemanticAuthorityWriter, current domain.AccessBinding, r domain.Role) error {
+	checker, ok := u.decisions.(kaname.BindingAuthorizationDecisionRunner)
+	if !ok {
+		return "", authzguard.PermissionDenied()
+	}
+	err = checker.RunBindingAuthorizationDecision(ctx, actor, b, true, false, buildSubjectsDecisionTuples, func(ctx context.Context, w kaname.SemanticAuthorityWriter, current domain.AccessBinding, r domain.Role) error {
 		return grantpolicy.RequireBinding(ctx, w, actor, proposedBinding(current, r))
 	})
 	if err == nil {
@@ -74,12 +78,12 @@ func (u *CreateAccessBindingUseCase) checkBindingDecision(ctx context.Context, b
 	if !errors.Is(err, iamerr.ErrPermissionDenied) && !isPermissionDenied(err) {
 		return "", bindingDecisionError(err)
 	}
-	runner, ok := u.decisions.(kaname.DelegatedBindingDecisionRunner)
+	runner, ok := u.decisions.(kaname.BindingAuthorizationDecisionRunner)
 	if !ok || u.delegated == nil {
 		return "", bindingDecisionError(err)
 	}
 	var captured domain.GrantDelegationID
-	err = runner.RunDelegatedBindingDecision(ctx, actor, b, buildSubjectsDecisionTuples, func(ctx context.Context, w kaname.SemanticAuthorityWriter, current domain.AccessBinding, r domain.Role) error {
+	err = runner.RunBindingAuthorizationDecision(ctx, actor, b, true, true, buildSubjectsDecisionTuples, func(ctx context.Context, w kaname.SemanticAuthorityWriter, current domain.AccessBinding, r domain.Role) error {
 		if err := requireDelegatedBindingDecision(ctx, w, actor, current, r); err != nil {
 			return err
 		}
@@ -148,7 +152,11 @@ func (u *UpdateAccessBindingUseCase) checkUpdateDecision(ctx context.Context, b 
 	if err != nil {
 		return err
 	}
-	err = u.decisions.RunBindingDecision(ctx, actor, b, false, nil, func(ctx context.Context, w kaname.SemanticAuthorityWriter, current domain.AccessBinding, _ domain.Role) error {
+	checker, ok := u.decisions.(kaname.BindingAuthorizationDecisionRunner)
+	if !ok {
+		return authzguard.PermissionDenied()
+	}
+	err = checker.RunBindingAuthorizationDecision(ctx, actor, b, false, false, nil, func(ctx context.Context, w kaname.SemanticAuthorityWriter, current domain.AccessBinding, _ domain.Role) error {
 		return grantpolicy.RequireScopeAdministration(ctx, w, actor, domain.ScopeAnchor{Type: string(current.ResourceType), ID: current.ResourceID})
 	})
 	return bindingDecisionError(err)
@@ -159,7 +167,13 @@ func (u *UpdateAccessBindingUseCase) updateDecision(ctx context.Context, id doma
 		return domain.AccessBinding{}, err
 	}
 	var updated domain.AccessBinding
-	err = u.decisions.RunBindingDecision(ctx, actor, domain.AccessBinding{ID: id}, false, nil, func(ctx context.Context, w kaname.SemanticAuthorityWriter, current domain.AccessBinding, _ domain.Role) error {
+	runner, ok := u.decisions.(kaname.BindingMetadataDecisionRunner)
+	if !ok {
+		return domain.AccessBinding{}, authzguard.PermissionDenied()
+	}
+	request := kaname.BindingMetadataDecision{ID: id, ApplyDeletionProtection: applyDP,
+		DeletionProtection: deletionProtection, ApplyLabels: labelsChanged, Labels: labels}
+	err = runner.RunBindingMetadataDecision(ctx, actor, request, func(ctx context.Context, w kaname.SemanticAuthorityWriter, current domain.AccessBinding, _ domain.Role) error {
 		if err := grantpolicy.RequireScopeAdministration(ctx, w, actor, domain.ScopeAnchor{Type: string(current.ResourceType), ID: current.ResourceID}); err != nil {
 			return err
 		}

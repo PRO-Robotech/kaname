@@ -563,15 +563,20 @@ type child
 		add("d", "next", "e")
 		dsl += "type e\n"
 		cat.Live.Resources = append(cat.Live.Resources, catalog.ResourceRow{Module: "probemod", Resource: "e", ObjectType: "e"})
-	case "long", "cycle":
+	case "boundary", "long", "cycle":
 		dsl = strings.Replace(dsl, "    define direct: [box]", "    define direct: [box]\n    define tail: [a]", 1)
 		cat.Live.Resources[1].ParentTypes = append(cat.Live.Resources[1].ParentTypes, "a")
 		cat.Live.Resources[1].ParentNames = append(cat.Live.Resources[1].ParentNames, "tail")
 		add("a", "next", "b")
-		if variant == "long" {
+		if variant == "long" || variant == "boundary" {
 			add("b", "next", "c")
 			add("c", "next", "d")
-			add("d", "next", "box")
+			if variant == "long" {
+				add("d", "next", "e")
+				add("e", "next", "box")
+			} else {
+				add("d", "next", "box")
+			}
 		} else {
 			add("b", "loop", "a")
 			dsl += "    define finish: [box]\n"
@@ -609,6 +614,31 @@ func structuralPathProposal() (Binding, Binding) {
 	return binding(actorRule), binding(proposedRule)
 }
 
+// Ровно пять переходов допустимы; полнота не означает, что длинную ветвь
+// разрешено выбросить. Проверяем сам сохранённый selector в обоих порядках.
+func TestMixedShortFiveHopChildrenKeepBothBranches(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		c := structuralPathCompiler(t, "boundary", reverse)
+		_, pb := structuralPathProposal()
+		proposed := complete(t, c.Compile(pb))
+		short, boundary := false, false
+		for _, effect := range proposed.Effects() {
+			if effect.Type != "child" {
+				continue
+			}
+			for _, constraint := range effect.Constraints {
+				if constraint.Type == "box" {
+					short = short || len(constraint.Path) == 1
+					boundary = boundary || len(constraint.Path) == 5
+				}
+			}
+		}
+		if !short || !boundary {
+			t.Fatalf("потеря ветви на допустимой границе reverse=%v: short=%v five=%v; %+v", reverse, short, boundary, proposed.Effects())
+		}
+	}
+}
+
 func TestMixedShortLongChildrenNeverProveDroppedBranch(t *testing.T) {
 	for _, reverse := range []bool{false, true} {
 		c := structuralPathCompiler(t, "long", reverse)
@@ -616,7 +646,7 @@ func TestMixedShortLongChildrenNeverProveDroppedBranch(t *testing.T) {
 		actor := complete(t, c.Compile(ab))
 		proposed := c.Compile(pb)
 		if proposed.Complete() {
-			t.Fatalf("пятишаговая ветвь потеряна при reverse=%v", reverse)
+			t.Fatalf("шестишаговая ветвь потеряна при reverse=%v", reverse)
 		}
 		found := false
 		for _, o := range proposed.Obligations() {
@@ -683,25 +713,41 @@ func TestRoleReadProjectionCallbackIsNotCompilerInput(t *testing.T) {
 	}
 }
 
-// Положительный мир содержит допустимую цепь из четырёх указателей. Возврат
-// лишнего project сохраняет прежний отказ: глубина модели не ослаблена ради проб.
+// Пять указателей tag→item→box→project→account→cluster допустимы.
+// Вставка bridge перед project добавляет шестой, не меняя остальных правил.
 func TestUnsupportedModelPointerDepthRemainsIncomplete(t *testing.T) {
-	deep := strings.Replace(modelFixture,
+	five := strings.Replace(modelFixture,
 		"type strange_box\n  relations\n    define account: [account]\n    define admin: [user, service_account, group#member] or admin from account",
 		"type strange_box\n  relations\n    define project: [project]\n    define admin: [user, service_account, group#member] or admin from project", 1)
-	h := rows()
-	h.Live.Resources[0].ParentTypes = []string{"project"}
-	h.Live.Resources[0].ParentNames = []string{"project"}
-	c, err := New(deep, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := c.Compile(binding(box("get")))
-	found := false
-	for _, o := range s.Obligations() {
-		found = found || o.Code == "model_plan" && strings.Contains(o.Detail, "глубже 4")
-	}
-	if s.Complete() || !found || Prove(s, s).Reason != grantcoverage.ReasonIncomplete {
-		t.Fatalf("недопустимая глубина модели потеряна: %+v", s.Obligations())
+	for _, beyond := range []bool{false, true} {
+		model := five
+		h := rows()
+		h.Live.Resources[0].ParentTypes = []string{"project"}
+		h.Live.Resources[0].ParentNames = []string{"project"}
+		if beyond {
+			model = strings.Replace(model,
+				"type strange_box\n  relations\n    define project: [project]\n    define admin: [user, service_account, group#member] or admin from project",
+				"type strange_box\n  relations\n    define project: [bridge]\n    define admin: [user, service_account, group#member] or admin from project", 1)
+			model += "\ntype bridge\n  relations\n    define project: [project]\n    define admin: admin from project\n"
+			h.Live.Resources[0].ParentTypes = []string{"bridge"}
+			h.Live.Resources = append(h.Live.Resources, catalog.ResourceRow{Module: "probemod", Resource: "bridges", ObjectType: "bridge", ParentTypes: []string{"project"}, ParentNames: []string{"project"}})
+		}
+		c, err := New(model, h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := c.Compile(binding(box("get")))
+		if !beyond {
+			complete(t, s)
+			proves(t, s, s, true)
+			continue
+		}
+		found := false
+		for _, o := range s.Obligations() {
+			found = found || o.Code == "model_plan" && strings.Contains(o.Detail, "глубже 5")
+		}
+		if s.Complete() || !found || Prove(s, s).Reason != grantcoverage.ReasonIncomplete {
+			t.Fatalf("шестой переход модели потерян: %+v", s.Obligations())
+		}
 	}
 }

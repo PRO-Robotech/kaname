@@ -135,8 +135,12 @@ type flakyRepo struct {
 	left    *atomic.Int32
 }
 
-func (r flakyRepo) Writer(ctx context.Context) (kanamerepo.Writer, error) {
-	w, err := r.Repository.Writer(ctx)
+func (r flakyRepo) InstallationAuthorityWriter(ctx context.Context, kind kanamerepo.AuthorityOperation) (kanamerepo.Writer, error) {
+	factory, ok := r.Repository.(kanamerepo.InstallationAuthorityWriterFactory)
+	if !ok {
+		return nil, kanamerepo.ErrInvalidAuthorityFencePlan
+	}
+	w, err := factory.InstallationAuthorityWriter(ctx, kind)
 	if err != nil {
 		return nil, err
 	}
