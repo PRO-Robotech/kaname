@@ -70,9 +70,10 @@ func TestInviteDeadline_ExpiredRowDoesNotActivate(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
+	markAddressVerified(t, ctx, pool, pending.ID)
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, pending.ID)
+	defer func() { _ = w2.Rollback(ctx) }()
 	_, aerr := w2.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("sub-mail23a"), domain.DisplayName("Real"))
 	_ = w2.Rollback(ctx)
@@ -125,9 +126,10 @@ func TestInviteDeadline_RowInsideTheDeadlineActivates(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
+	markAddressVerified(t, ctx, pool, pending.ID)
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, pending.ID)
+	defer func() { _ = w2.Rollback(ctx) }()
 	activated, aerr := w2.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("sub-mail23b"), domain.DisplayName("Real"))
 	require.NoError(t, aerr)
@@ -166,9 +168,10 @@ func TestInviteDeadline_NoDeadlineRowStillActivates(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
+	markAddressVerified(t, ctx, pool, pending.ID)
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, pending.ID)
+	defer func() { _ = w2.Rollback(ctx) }()
 	activated, aerr := w2.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("sub-mail23c"), domain.DisplayName("Real"))
 	require.NoError(t, aerr)
@@ -306,9 +309,10 @@ func TestInviteDeadline_ReInvitingExtendsAnExpiredRow(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 
 	// Контроль: до повторного приглашения строка НЕ активируется.
+	markAddressVerified(t, ctx, pool, first.ID)
 	wx, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, first.ID)
+	defer func() { _ = wx.Rollback(ctx) }()
 	_, xerr := wx.UsersW().ActivateInvite(ctx, first.ID,
 		domain.ExternalSubject("sub-mail23d-pre"), domain.DisplayName("Real"))
 	_ = wx.Rollback(ctx)
@@ -329,9 +333,10 @@ func TestInviteDeadline_ReInvitingExtendsAnExpiredRow(t *testing.T) {
 	require.NoError(t, w2.Commit(ctx))
 
 	// Теперь выкупается.
+	markAddressVerified(t, ctx, pool, first.ID)
 	w3, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, first.ID)
+	defer func() { _ = w3.Rollback(ctx) }()
 	activated, aerr := w3.UsersW().ActivateInvite(ctx, first.ID,
 		domain.ExternalSubject("sub-mail23d"), domain.DisplayName("Real"))
 	require.NoError(t, aerr, "приглашение, выданное заново, родилось истёкшим")
@@ -382,9 +387,10 @@ func TestInviteDeadline_ReInvitingNeverShortensALongerDeadline(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w2.Commit(ctx))
 
+	markAddressVerified(t, ctx, pool, first.ID)
 	w3, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, first.ID)
+	defer func() { _ = w3.Rollback(ctx) }()
 	activated, aerr := w3.UsersW().ActivateInvite(ctx, first.ID,
 		domain.ExternalSubject("sub-mail23e"), domain.DisplayName("Real"))
 	require.NoError(t, aerr, "второе приглашение укоротило срок, выданный первым")

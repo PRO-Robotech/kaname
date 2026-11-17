@@ -291,9 +291,10 @@ func TestUserInvite_S05_ActivateInvite_Happy(t *testing.T) {
 	require.NoError(t, w.Commit(ctx))
 
 	// Activate
+	markAddressVerified(t, ctx, pool, pending.ID)
 	w2, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, pending.ID)
+	defer func() { _ = w2.Rollback(ctx) }()
 	activated, err := w2.UsersW().ActivateInvite(ctx, pending.ID,
 		domain.ExternalSubject("external-sub-s05"),
 		domain.DisplayName("Real Name"))
@@ -332,9 +333,10 @@ func TestUserInvite_S05b_ActivateInvite_NotPending_NotFound(t *testing.T) {
 	// bootstrapAdmin создает ACTIVE-row сразу. Попытка ActivateInvite на нее
 	// → 0 rows RETURNING → ErrNotFound (row уже не в PENDING-состоянии).
 	adminID, _ := bootstrapAdmin(t, ctx, repo, "s05b")
+	markAddressVerified(t, ctx, pool, adminID)
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, adminID)
+	defer func() { _ = w.Rollback(ctx) }()
 	_, err = w.UsersW().ActivateInvite(ctx, adminID,
 		domain.ExternalSubject("new-sub"), domain.DisplayName("X"))
 	_ = w.Rollback(ctx)
