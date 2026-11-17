@@ -82,6 +82,9 @@ type checkTableLanes struct {
 var checkValueLanes = map[string]*checkTableLanes{
 	// kaname#1034: закрытое поколение DB snapshot; caller его не присылает.
 	"authority_binding_epoch": nil,
+	// kaname#1034: закрытую строку команды Forward пишет служба; число эффектов
+	// вычисляет cardinality(payloads), вызывающий его и поля anchor не задаёт.
+	"authority_forward_emit_anchor_v4": nil,
 	// kaname#1034: поколения источников и отложенная очередь их обновления
 	// принадлежат службе; runtime не может прислать или изменить эти значения.
 	"authority_policy_epoch": nil,

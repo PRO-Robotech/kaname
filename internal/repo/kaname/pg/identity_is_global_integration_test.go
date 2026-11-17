@@ -184,9 +184,10 @@ func TestIntegration_FirstLoginActivatesEveryMembership(t *testing.T) {
 
 	// Первый вход.
 	{
+		markAddressVerified(t, ctx, pool, u.ID)
 		w, werr := repo.Writer(ctx)
 		require.NoError(t, werr)
-		markAddressVerified(t, ctx, pool, u.ID)
+		defer func() { _ = w.Rollback(ctx) }()
 		_, aerr := w.UsersW().ActivateInvite(ctx, u.ID,
 			domain.ExternalSubject("ext-"+string(u.ID)), domain.DisplayName("Logged In"))
 		require.NoError(t, aerr)
