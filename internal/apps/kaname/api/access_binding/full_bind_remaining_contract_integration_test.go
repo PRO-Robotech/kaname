@@ -206,7 +206,13 @@ func TestFullBind_FB21_GroupAdditionChecksTheLastBindingPage(t *testing.T) {
 		req := fbStructuredRequest(&iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_GROUP, Id: string(g)}, role, "project", string(w.prjA))
 		id := w.createDone(asUser(w.ctx, w.usrA), req, "FB21: настоящая выдача группе")
 		require.NoError(t, w.callbacks.awaitSetup(w.ctx, "iam.accessBinding", id))
-		require.NoError(t, w.rec.ReconcileBinding(w.ctx, domain.AccessBindingID(id)))
+		// Object callback идёт после ReconcileBindingForward в той же фоновой
+		// задаче. В configured world Forward и Full вызывают один staged pass
+		// (converge=false): проверяем первый результат, не повторяем его 257 раз.
+		// Одного успешного object callback мало: ошибка первого только логируется.
+		forwardErr, completed := w.callbacks.bindingForwardResult(domain.AccessBindingID(id))
+		require.True(t, completed, "FB21: первый настоящий binding pass должен завершиться до object callback")
+		require.NoError(t, forwardErr, "FB21: первый настоящий binding pass должен материализовать выдачу")
 		last = domain.AccessBindingID(id)
 		if (n+1)%64 == 0 || n == 256 {
 			t.Logf("FB21 подготовлено выдач: %d/257, прошло %s", n+1, time.Since(started))

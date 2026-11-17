@@ -24,8 +24,9 @@ import (
 // только после возврата последнего настоящего прохода detached callback.
 // Тип и ID берутся из публичного результата Create, а не из таймера тишины.
 type fb11SetupCallbacks struct {
-	mu   sync.Mutex
-	done map[string]chan error
+	mu             sync.Mutex
+	done           map[string]chan error
+	bindingForward map[domain.AccessBindingID]error
 }
 
 func (c *fb11SetupCallbacks) completion(objectType, objectID string) chan error {
@@ -39,6 +40,28 @@ func (c *fb11SetupCallbacks) completion(objectType, objectID string) chan error 
 		c.done[key] = make(chan error, 1)
 	}
 	return c.done[key]
+}
+
+// Результат первого настоящего прохода отделён от object callback: продукт
+// логирует его ошибку и продолжает второй проход. Наличие записи отличается
+// от nil error, поэтому отсутствующий вызов нельзя принять за успешный.
+func (c *fb11SetupCallbacks) recordBindingForward(id domain.AccessBindingID, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.bindingForward == nil {
+		c.bindingForward = make(map[domain.AccessBindingID]error)
+	}
+	// Повторный успешный callback не скрывает первую ошибку.
+	if _, recorded := c.bindingForward[id]; !recorded {
+		c.bindingForward[id] = err
+	}
+}
+
+func (c *fb11SetupCallbacks) bindingForwardResult(id domain.AccessBindingID) (error, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	err, completed := c.bindingForward[id]
+	return err, completed
 }
 
 func (c *fb11SetupCallbacks) awaitSetup(ctx context.Context, objectType, objectID string) error {
@@ -55,6 +78,12 @@ func (c *fb11SetupCallbacks) awaitSetup(ctx context.Context, objectType, objectI
 type fb11SetupReconciler struct {
 	accessbindingapp.SelectorReconciler
 	callbacks *fb11SetupCallbacks
+}
+
+func (r *fb11SetupReconciler) ReconcileBindingForward(ctx context.Context, id domain.AccessBindingID) error {
+	err := r.SelectorReconciler.ReconcileBindingForward(ctx, id)
+	r.callbacks.recordBindingForward(id, err)
+	return err
 }
 
 func (r *fb11SetupReconciler) ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error {
