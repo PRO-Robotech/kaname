@@ -368,6 +368,7 @@ fi
 run_tests() {
     local packages="$1" mode="$2" label="$3" raw log rc out decode_rc verdict_rc
     local destination="${evidence:-$work}" filter=()
+    command_red=0
     [ -z "$mode" ] || filter=("-$mode" "$partition_pattern")
     raw="$destination/$label.json"
     log="$destination/$label.log"
@@ -425,8 +426,15 @@ PYDECODE
         python3 "$ROOT/.github/scripts/go-test-verdict.py" < "$raw" || verdict_rc=$?
         out=0
         "$ROOT/.github/scripts/classify-integration-outcome.sh" "$rc" "$log" || out=$?
-        # Исход окружения/Go старше ошибки свидетельства и не теряется.
-        [ "$out" -eq 0 ] || return "$out"
+        # Настоящий отказ старше неполного свидетельства и отказа окружения.
+        if [ "$out" -ne 0 ]; then
+            [ "$out" -eq 75 ] || command_red=1
+            return "$out"
+        fi
+        if [ "$verdict_rc" -eq 1 ]; then
+            command_red=1
+            return 1
+        fi
         [ "$decode_rc" -eq 0 ] || return "$decode_rc"
         return "$verdict_rc"
     else
@@ -434,20 +442,31 @@ PYDECODE
         # shellcheck disable=SC2086
         go test -tags=integration -race -count=1 -timeout "$TIMEOUT" -p 1 $packages 2>&1 | tee "$log"
         rc="${PIPESTATUS[0]}"
-        "$ROOT/.github/scripts/classify-integration-outcome.sh" "$rc" "$log"
+        out=0
+        "$ROOT/.github/scripts/classify-integration-outcome.sh" "$rc" "$log" || out=$?
+        if [ "$out" -ne 0 ] && [ "$out" -ne 75 ]; then
+            command_red=1
+        fi
+        return "$out"
     fi
 }
 
 # Первый отказ не отменяет вторую запланированную команду. Сигнал по-прежнему
 # завершает весь сценарий общей ловушкой, поэтому прерывание не даёт PASS.
 result=0
+result_red=0
 if [ -n "$pkgs" ]; then
     run_tests "$pkgs" "" go-test-packages || result=$?
+    result_red="$command_red"
 fi
 if [ -n "$partition_mode" ]; then
     part_rc=0
     run_tests "$partition_package" "$partition_mode" go-test-access-binding || part_rc=$?
-    [ "$result" -ne 0 ] || result="$part_rc"
+    # Код 2 бывает и настоящим отказом Go, и неполным свидетельством:
+    # приоритет определяется происхождением, а первичные коды не переписываются.
+    if [ "$result" -eq 0 ] || { [ "$result_red" -eq 0 ] && [ "$command_red" -eq 1 ]; }; then
+        result="$part_rc"
+    fi
 fi
 if [ -n "$evidence" ]; then
     printf '%s\n' "$result" > "$evidence/runner-exit-code.txt" || exit 2

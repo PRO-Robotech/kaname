@@ -43,6 +43,13 @@ mode = "run" if "-run" in args else "skip" if "-skip" in args else "all"
 if os.environ.get("FAKE_SIGNAL") == mode:
     os.kill(os.getppid(), signal.SIGTERM)
     sys.exit(0)
+outcome = os.environ.get("FAKE_FIRST_OUTCOME" if mode == "all" else "FAKE_SECOND_OUTCOME", "")
+if outcome == "unavailable":
+    print("integration Postgres unavailable")
+    sys.exit(1)
+if outcome == "incomplete":
+    print("{broken")
+real_fail = os.environ.get("FAKE_FIRST_FAIL" if mode == "all" else "FAKE_SECOND_FAIL") == "1"
 for package in (a for a in args if a in packages):
     def emit(action, name=None):
         event = {"Package": package, "Action": action}
@@ -64,9 +71,10 @@ for package in (a for a in args if a in packages):
         names.append("TestFullBind_FB21_GroupAdditionChecksTheLastBindingPage")
     for name in names:
         emit("run", name)
-        emit("skip" if defect == "run-skipped" else "pass", name)
-    emit("pass")
-sys.exit(int(os.environ.get("FAKE_FIRST_RC", "0")) if mode == "all" else 0)
+        emit("fail" if real_fail else "skip" if defect == "run-skipped" else "pass", name)
+    emit("fail" if real_fail else "pass")
+rc = int(os.environ.get("FAKE_FIRST_RC", "0")) if mode == "all" else 0
+sys.exit(1 if real_fail else rc)
 `
 
 type shardOutcome struct {
@@ -218,6 +226,34 @@ func TestRunIntegrationShardsKeepActualCodesAndContinueAfterFailure(t *testing.T
 	require.Equal(t, "37\n", shardEvidence(t, o, "go-test-packages-exit-code.txt"))
 	require.Equal(t, "0\n", shardEvidence(t, o, "go-test-access-binding-exit-code.txt"))
 	require.Equal(t, "37\n", shardEvidence(t, o, "runner-exit-code.txt"))
+	for _, first := range []string{"unavailable", "incomplete"} {
+		t.Run(first+" then real failure", func(t *testing.T) {
+			firstRaw, firstResult := "1\n", 75
+			if first == "incomplete" {
+				firstRaw, firstResult = "0\n", 2
+			}
+			// Близнец подтверждает исход первой команды; один факт добавляет RED второй.
+			control := runShardFixture(t, runIntegrationSource(t), "1/5", false, false, "FAKE_FIRST_OUTCOME="+first)
+			require.Equal(t, firstResult, control.rc, control.output)
+			o := runShardFixture(t, runIntegrationSource(t), "1/5", false, false,
+				"FAKE_FIRST_OUTCOME="+first, "FAKE_SECOND_FAIL=1")
+			require.Equal(t, 1, o.rc, o.output)
+			require.Len(t, o.calls, 2)
+			require.Equal(t, firstRaw, shardEvidence(t, o, "go-test-packages-exit-code.txt"))
+			require.Equal(t, "1\n", shardEvidence(t, o, "go-test-access-binding-exit-code.txt"))
+			require.Equal(t, "1\n", shardEvidence(t, o, "runner-exit-code.txt"))
+			require.Contains(t, shardEvidence(t, o, "go-test-access-binding.json"), `"Action": "fail"`)
+			// Перестановка команд не должна менять доказанный RED.
+			reversed := runShardFixture(t, runIntegrationSource(t), "1/5", false, false,
+				"FAKE_FIRST_FAIL=1", "FAKE_SECOND_OUTCOME="+first)
+			require.Equal(t, 1, reversed.rc, reversed.output)
+			require.Len(t, reversed.calls, 2)
+			require.Equal(t, "1\n", shardEvidence(t, reversed, "go-test-packages-exit-code.txt"))
+			require.Equal(t, firstRaw, shardEvidence(t, reversed, "go-test-access-binding-exit-code.txt"))
+			require.Equal(t, "1\n", shardEvidence(t, reversed, "runner-exit-code.txt"))
+			require.Contains(t, shardEvidence(t, reversed, "go-test-packages.json"), `"Action": "fail"`)
+		})
+	}
 }
 
 func TestRunIntegrationShardsPlanFallbackAndUnpartitionedMode(t *testing.T) {
