@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
@@ -28,6 +29,157 @@ func auditAdmissionRootHeld(t *testing.T, r protocolRig, tx pgx.Tx) bool {
  AND locktype='advisory' AND classid=1262569283::oid AND objid=0::oid AND objsubid=2
  AND mode IN ('ShareLock','ExclusiveLock') AND granted)`).Scan(&held))
 	return held
+}
+
+// Настоящий первичный ApplyAll, включая audit в той же транзакции. Одного
+// ручного INSERT audit недостаточно: regression возник именно на installation.
+func TestAuditBootstrapCatalogInstallationWritesAudit(t *testing.T) {
+	r, _ := writerProtocolRigBeforePreparation(t)
+	r = identityLifecycleSingle(t, r)
+	var phase string
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT phase FROM kaname.authority_semantic_identity WHERE singleton`).Scan(&phase))
+	require.Equal(t, "uninitialized", phase)
+	before := auditRowsOfType(t, r.ctx, r.admin, moduleCatalogAppliedEvent)
+	declared := []*manifest.Manifest{probeManifest(probeResource("bootstrapaudit", "get"))}
+	_, err := applierOver(t, r.runtime).ApplyAll(r.ctx, declared)
+	require.NoError(t, err, "законная первичная установка фиксирует каталог и audit")
+	require.Equal(t, before+1, auditRowsOfType(t, r.ctx, r.admin, moduleCatalogAppliedEvent))
+	var rows int
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.catalog_resource WHERE module=$1 AND resource='bootstrapaudit'`, applierProbeModule).Scan(&rows))
+	require.Equal(t, 1, rows)
+	_, err = applierOver(t, r.runtime).ApplyAll(r.ctx, declared)
+	require.NoError(t, err, "пустая owner-квитанция после COMMIT допускает следующий canonical entry")
+	require.Equal(t, before+1, auditRowsOfType(t, r.ctx, r.admin, moduleCatalogAppliedEvent), "неизменный каталог не пишет второй audit")
+}
+
+// Runtime может взять root и drain сам. Даже в точном initial state это
+// не квитанция canonical entry; смена lifecycle также не открывает этот путь.
+func TestAuditBootstrapLocksDoNotProveInstallationAdmission(t *testing.T) {
+	for _, phase := range []string{"uninitialized", "prepared", "transition", "active", "strict"} {
+		t.Run(phase, func(t *testing.T) {
+			r, owner := writerProtocolRigBeforePreparation(t)
+			if phase != "uninitialized" {
+				require.NoError(t, owner.PrepareAuthorityBundle(r.ctx, r.bundle))
+			}
+			if phase == "transition" || phase == "active" {
+				_, err := r.admin.Exec(r.ctx, `UPDATE kaname.authority_semantic_identity SET phase=$1 WHERE singleton`, phase)
+				require.NoError(t, err)
+			}
+			if phase == "strict" {
+				r.strict(t)
+			}
+			conn, err := r.runtime.Acquire(r.ctx)
+			require.NoError(t, err)
+			defer conn.Release()
+			_, err = conn.Exec(r.ctx, `DISCARD TEMP`)
+			require.NoError(t, err)
+			tx, err := conn.Begin(r.ctx)
+			require.NoError(t, err)
+			defer attestationLocksetRollback(tx)
+			_, err = tx.Exec(r.ctx, `SELECT pg_advisory_xact_lock(1262569283,0); SELECT pg_advisory_xact_lock(1262569292,0)`)
+			require.NoError(t, err)
+			_, err = tx.Exec(r.ctx, auditAdmissionInsert)
+			var denied *pgconn.PgError
+			require.ErrorAs(t, err, &denied)
+			require.Equal(t, "42501", denied.Code)
+			require.Error(t, tx.Commit(r.ctx))
+			var count int
+			require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.audit_outbox WHERE id=$1`, auditAdmissionID).Scan(&count))
+			require.Zero(t, count)
+		})
+	}
+}
+
+// Проверяется именно runtime LOGIN: чужая квитанция не принимается, а
+// DISCARD/rollback/предыдущий COMMIT не превращают потерянный entry в ordinary.
+func TestAuditBootstrapWitnessCannotBeForgedOrReused(t *testing.T) {
+	r, _ := writerProtocolRigBeforePreparation(t)
+	_, err := r.admin.Exec(r.ctx, auditAdmissionInsert)
+	require.NoError(t, err)
+	for _, fault := range []string{"foreign-table", "foreign-view", "discard", "rollback-entry", "failed-entry", "pooled-empty"} {
+		for _, operation := range []string{"insert", "update", "delete"} {
+			t.Run(fault+"/"+operation, func(t *testing.T) {
+				conn, err := r.runtime.Acquire(r.ctx)
+				require.NoError(t, err)
+				defer conn.Release()
+				_, err = conn.Exec(r.ctx, `DISCARD TEMP`)
+				require.NoError(t, err)
+				if fault == "pooled-empty" {
+					previous, e := conn.Begin(r.ctx)
+					require.NoError(t, e)
+					defer attestationLocksetRollback(previous)
+					_, e = previous.Exec(r.ctx, `SELECT kaname.authority_installation_enter_v2('catalog')`)
+					require.NoError(t, e)
+					require.NoError(t, previous.Commit(r.ctx))
+					var present bool
+					require.NoError(t, conn.QueryRow(r.ctx, `SELECT to_regclass('pg_temp.kaname_authority_installation') IS NOT NULL`).Scan(&present))
+					require.True(t, present, "проверяется сохранённая owner-квитанция после COMMIT")
+				}
+				tx, err := conn.Begin(r.ctx)
+				require.NoError(t, err)
+				defer attestationLocksetRollback(tx)
+				switch fault {
+				case "foreign-table":
+					_, err = tx.Exec(r.ctx, `CREATE TEMP TABLE kaname_authority_installation(singleton boolean)`)
+				case "foreign-view":
+					_, err = tx.Exec(r.ctx, `CREATE TEMP VIEW kaname_authority_installation AS SELECT true AS singleton WHERE false`)
+				case "discard":
+					_, err = tx.Exec(r.ctx, `SELECT kaname.authority_installation_enter_v2('catalog')`)
+					require.NoError(t, err)
+					_, err = tx.Exec(r.ctx, `DISCARD TEMP; SELECT pg_advisory_unlock_all()`)
+					require.NoError(t, err)
+					require.True(t, auditAdmissionRootHeld(t, r, tx))
+				case "rollback-entry", "failed-entry":
+					_, err = tx.Exec(r.ctx, `SAVEPOINT before_entry`)
+					require.NoError(t, err)
+					kind := "catalog"
+					if fault == "failed-entry" {
+						kind = "not-an-installation-family"
+					}
+					_, err = tx.Exec(r.ctx, `SELECT kaname.authority_installation_enter_v2($1)`, kind)
+					if fault == "failed-entry" {
+						var refused *pgconn.PgError
+						require.ErrorAs(t, err, &refused)
+						require.Equal(t, "22023", refused.Code)
+					} else {
+						require.NoError(t, err)
+					}
+					_, err = tx.Exec(r.ctx, `ROLLBACK TO SAVEPOINT before_entry`)
+					require.NoError(t, err)
+					require.False(t, auditAdmissionRootHeld(t, r, tx), "откат отменил admission")
+					// Законный близнец: после полного отката entry обычный audit
+					// разрешён. Только последующая ручная подделка root+D откажет.
+					_, err = tx.Exec(r.ctx, strings.ReplaceAll(auditAdmissionInsert, auditAdmissionID, auditAdmissionProbeID))
+					require.NoError(t, err)
+					_, err = tx.Exec(r.ctx, `DELETE FROM kaname.audit_outbox WHERE id=$1`, auditAdmissionProbeID)
+					require.NoError(t, err)
+				}
+				require.NoError(t, err)
+				_, err = tx.Exec(r.ctx, `SELECT pg_advisory_xact_lock(1262569283,0); SELECT pg_advisory_xact_lock(1262569292,0)`)
+				require.NoError(t, err)
+				statement := strings.ReplaceAll(auditAdmissionInsert, auditAdmissionID, auditAdmissionProbeID)
+				if operation == "update" {
+					statement = `UPDATE kaname.audit_outbox SET attempts=attempts+1 WHERE id='` + auditAdmissionID + `'`
+				} else if operation == "delete" {
+					statement = `DELETE FROM kaname.audit_outbox WHERE id='` + auditAdmissionID + `'`
+				}
+				_, err = tx.Exec(r.ctx, statement)
+				var denied *pgconn.PgError
+				require.ErrorAs(t, err, &denied)
+				require.Equal(t, "42501", denied.Code)
+				require.Error(t, tx.Commit(r.ctx))
+				var count, attempts int
+				queriedID := auditAdmissionID
+				expected := 1
+				if operation == "insert" {
+					queriedID, expected = auditAdmissionProbeID, 0
+				}
+				require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*),coalesce(sum(attempts),0) FROM kaname.audit_outbox WHERE id=$1`, queriedID).Scan(&count, &attempts))
+				require.Equal(t, expected, count)
+				require.Zero(t, attempts)
+			})
+		}
+	}
 }
 
 // Один backend после настоящего signed COMMIT сохраняет пустые owner TEMP

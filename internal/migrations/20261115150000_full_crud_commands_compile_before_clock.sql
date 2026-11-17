@@ -3600,13 +3600,90 @@ BEGIN
 END $$;
 
 
+-- Bootstrap installation сохраняет прежний ABI/ACL и выдаёт отдельный
+-- owner witness только после неизменных проверок и обоих xact fences.
+CREATE OR REPLACE FUNCTION kaname.authority_installation_enter_v2(p_kind text) RETURNS integer
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE active kaname.authority_semantic_identity%ROWTYPE;
+ protocol kaname.authority_writer_protocol%ROWTYPE;
+ invoker oid;owner_oid oid;storage oid;grantee record;
+BEGIN
+ IF p_kind IS NULL OR p_kind NOT IN ('catalog','role','binding','identity','cluster') THEN
+  RAISE EXCEPTION 'unsupported installation writer family' USING ERRCODE='22023';
+ END IF;
+ IF current_setting('transaction_isolation')<>'read committed'
+ OR pg_current_xact_id_if_assigned() IS NOT NULL
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_locks WHERE pid=pg_backend_pid()
+  AND (locktype='advisory' OR (locktype='relation' AND mode<>'AccessShareLock'))) THEN
+  RAISE EXCEPTION 'installation entry requires a fresh unlocked transaction' USING ERRCODE='25001';
+ END IF;
+ -- EXECUTE протокола не расширяет исходное право чтения identity. Проверяем
+ -- effective invoker до первого owner SELECT и до любого замка этой строки.
+ SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles
+ WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
+ IF NOT pg_catalog.has_table_privilege(invoker,'kaname.authority_semantic_identity','SELECT') THEN
+  RAISE EXCEPTION 'authority identity read denied' USING ERRCODE='42501';
+ END IF;
+ -- Это только выбор закрытой ветки. Signed entry повторяет identity после
+ -- coordinator; ошибка этой проверки никогда не переходит в unsigned ветку.
+ SELECT * INTO STRICT active FROM kaname.authority_semantic_identity WHERE singleton;
+ IF active.phase<>'uninitialized' THEN
+  PERFORM kaname._authority_protocol_enter_v2('global',ARRAY[]::text[],'[]'::jsonb,
+   p_kind,active.model_id,active.catalog_id,active.projector_version,
+   'participant','typed',NULL);
+  RETURN 2;
+ END IF;
+ -- Первичная установка ещё не имеет bundle. Подлинный compatibility state
+ -- перепроверяется под тем же GLOBAL/phase drain до business locks и DML.
+ -- Не создаём ни semantic identity, ни signed attestation за вызывающего.
+ PERFORM pg_advisory_xact_lock(1262569283,0);
+ SELECT * INTO STRICT protocol FROM kaname.authority_writer_protocol WHERE singleton FOR SHARE;
+ SELECT * INTO STRICT active FROM kaname.authority_semantic_identity WHERE singleton FOR SHARE;
+ IF protocol.enforcement<>'compatibility' OR active.phase<>'uninitialized'
+ OR active.protocol_version<>0 OR active.model_id IS NOT NULL
+ OR active.catalog_id IS NOT NULL OR active.projector_version IS NOT NULL THEN
+  RAISE EXCEPTION 'installation phase changed before admission' USING ERRCODE='P1036';
+ END IF;
+ -- Даже оставшаяся private signed форма не может быть проигнорирована.
+ PERFORM kaname._authority_protocol_attestation_v1_body();
+ PERFORM pg_advisory_xact_lock(1262569292,0);
+ -- Только canonical bootstrap entry выдаёт owner witness. Advisory keys
+ -- доступны вызывающему и сами по себе не доказывают происхождение admission.
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ storage:=to_regclass('pg_temp.kaname_authority_installation');
+ IF storage IS NULL THEN
+  CREATE TEMP TABLE pg_temp.kaname_authority_installation (
+   singleton boolean PRIMARY KEY CHECK(singleton),backend integer NOT NULL,
+   transaction_id xid8 NOT NULL,invoker_oid oid NOT NULL,kind text NOT NULL
+  ) ON COMMIT DELETE ROWS;
+  REVOKE ALL ON pg_temp.kaname_authority_installation FROM PUBLIC;
+  storage:='pg_temp.kaname_authority_installation'::regclass;
+  FOR grantee IN SELECT DISTINCT r.rolname FROM pg_catalog.pg_class c
+   CROSS JOIN LATERAL aclexplode(c.relacl) a JOIN pg_catalog.pg_roles r ON r.oid=a.grantee
+   WHERE c.oid=storage AND a.grantee<>owner_oid LOOP
+   EXECUTE format('REVOKE ALL ON pg_temp.kaname_authority_installation FROM %I',grantee.rolname);
+  END LOOP;
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=storage
+  AND c.relowner=owner_oid AND c.relpersistence='t' AND c.relkind='r')
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c
+  CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+  WHERE c.oid=storage AND a.grantee<>owner_oid) THEN
+  RAISE EXCEPTION 'untrusted installation audit witness' USING ERRCODE='42501';END IF;
+ IF EXISTS(SELECT 1 FROM pg_temp.kaname_authority_installation) THEN
+  RAISE EXCEPTION 'installation audit witness already present' USING ERRCODE='42501';END IF;
+ INSERT INTO pg_temp.kaname_authority_installation
+ VALUES(true,pg_backend_pid(),pg_current_xact_id(),invoker,p_kind);
+ RETURN 2;
+END $$;
+
 -- Audit не является новым authority admission. Чистый либо повторно взятый
 -- из пула ordinary backend не должен брать compatibility fence после users row.
 -- Signed/compare witness проверяется прежним getter; DISCARD TEMP не стирает
 -- xact root lock, поэтому исчезнувший witness не переводит такую TX в ordinary.
 CREATE FUNCTION kaname._authority_audit_binding_store_v3() RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE storage oid;name text;populated boolean;owner_oid oid;
+DECLARE storage oid;name text;populated boolean;owner_oid oid;installation jsonb;invoker oid;rows_count bigint;
 BEGIN
  SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
  FOREACH name IN ARRAY ARRAY['kaname_authority_attestation','kaname_authority_compare'] LOOP
@@ -3619,6 +3696,39 @@ BEGIN
   EXECUTE format('SELECT EXISTS(SELECT 1 FROM pg_temp.%I)',name) INTO populated;
   IF populated THEN RETURN kaname._authority_binding_mirror_store_v3();END IF;
  END LOOP;
+ -- Пустая owner таблица после COMMIT не выдаёт нового admission. Непустая
+ -- обязана быть квитанцией именно текущего canonical bootstrap entry.
+ storage:=to_regclass('pg_temp.kaname_authority_installation');
+ IF storage IS NOT NULL THEN
+  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=storage
+   AND c.relowner=owner_oid AND c.relpersistence='t' AND c.relkind='r')
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c
+   CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+   WHERE c.oid=storage AND a.grantee<>owner_oid) THEN
+   RAISE EXCEPTION 'untrusted installation audit witness' USING ERRCODE='42501';END IF;
+  SELECT count(*) INTO rows_count FROM pg_temp.kaname_authority_installation;
+  IF rows_count>0 THEN
+   IF rows_count<>1 THEN RAISE EXCEPTION 'ambiguous installation audit witness' USING ERRCODE='42501';END IF;
+   SELECT to_jsonb(i) INTO STRICT installation FROM pg_temp.kaname_authority_installation i;
+   SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles
+    WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
+   IF installation->>'singleton' IS DISTINCT FROM 'true'
+   OR installation->>'backend' IS DISTINCT FROM pg_backend_pid()::text
+   OR installation->>'transaction_id' IS DISTINCT FROM pg_current_xact_id_if_assigned()::text
+   OR installation->>'invoker_oid' IS DISTINCT FROM invoker::text
+   OR installation->>'kind' IS NULL OR installation->>'kind' NOT IN ('catalog','role','binding','identity','cluster')
+   OR to_regclass('pg_temp.kaname_binding_mirror_program') IS NOT NULL
+   OR NOT EXISTS(SELECT 1 FROM kaname.authority_semantic_identity a,kaname.authority_writer_protocol p
+    WHERE a.singleton AND p.singleton AND a.phase='uninitialized' AND p.enforcement='compatibility'
+    AND a.protocol_version=0 AND a.model_id IS NULL AND a.catalog_id IS NULL AND a.projector_version IS NULL)
+   OR (SELECT count(DISTINCT l.classid) FROM pg_catalog.pg_locks l
+    WHERE l.pid=pg_backend_pid() AND l.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+    AND l.locktype='advisory' AND l.classid IN (1262569283::oid,1262569292::oid)
+    AND l.objid=0::oid AND l.objsubid=2 AND l.mode='ExclusiveLock' AND l.granted)<>2 THEN
+    RAISE EXCEPTION 'installation audit witness does not cover transaction' USING ERRCODE='42501';END IF;
+   RETURN NULL;
+  END IF;
+ END IF;
  -- Обе формы successful entry держат один root key до конца TX. Session
  -- unlock и DISCARD TEMP его не снимают; rollback до entry отменяет и эффекты.
  IF to_regclass('pg_temp.kaname_binding_mirror_program') IS NOT NULL
@@ -8864,7 +8974,8 @@ BEGIN
  ('_authority_binding_stage_snapshot_v3()','9e9d561435b0f86c51aec452283505184beee36e1dc02f4af708590955d2eebf',true,'v',true,'private'),
  ('authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','efdbe3e491e0c3bd8ade664a61d8e049094cc5b781f7fe14347a94e2dd5979e6',true,'v',true,'export'),
  ('authority_binding_stage_sequence_finalize_v3(text)','cd285782054ce7720b1072484e7b24758bcae7f8b7c7a117556b9836c1299a18',true,'v',true,'export'),
- ('_authority_audit_binding_store_v3()','c250435ecf40819b992439ff59b3435fe8a12e8f121677bbf17f8ed2b84d08ce',true,'v',true,'private'),
+ ('authority_installation_enter_v2(text)','9c008ba02cb19f92581324e2b9652fef0fd3555118f1fd5536e74c1a85c5eee8',true,'v',true,'preserve'),
+ ('_authority_audit_binding_store_v3()','f1836b62dc819674ed1b85104ebd923b4841f5fc5f456172184d45c243ca2b8e',true,'v',true,'private'),
  ('_authority_binding_mirror_store_v3()','94398fb5e832f685ced7c84e6975e21e04729db15a39893977cce3dc32809b61',true,'v',true,'private'),
  ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','e6dd22497757ec3e7362e45c6d5f4a45cd5ecf5b43714b6849143e5da1bf134a',true,'v',true,'private'),
  ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','8e4c9745f4df62265cb114849d1306493616a93049905a25f17c874dc0e35b9e',true,'v',true,'private'),
@@ -9086,7 +9197,7 @@ BEGIN
    AND NOT p.proleakproof AND p.proparallel='u' AND p.pronargs=6 AND p.pronargdefaults=0
    AND p.proargmodes IS NULL AND p.provariadic=0 AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')) THEN RETURN false;END IF;
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_audit_binding_store_v3()','jsonb',0,false), ('_authority_binding_mirror_store_v3()','jsonb',0,false), ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','void',3,false), ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','record',3,true), ('_authority_binding_mirror_finalize_v3(text)','void',1,false), ('_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','boolean',4,false)
+ ('authority_installation_enter_v2(text)','integer',1,false), ('_authority_audit_binding_store_v3()','jsonb',0,false), ('_authority_binding_mirror_store_v3()','jsonb',0,false), ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','void',3,false), ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','record',3,true), ('_authority_binding_mirror_finalize_v3(text)','void',1,false), ('_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','boolean',4,false)
  ) abi_expected(signature,result_type,nargs,returns_set) LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||abi_expected.signature)
  WHERE p.oid IS NULL OR p.prokind<>'f' OR p.prorettype<>abi_expected.result_type::regtype OR p.proretset<>abi_expected.returns_set
  OR p.proisstrict OR p.proleakproof OR p.proparallel<>'u' OR p.pronargs<>abi_expected.nargs OR p.pronargdefaults<>0 OR p.provariadic<>0
@@ -9443,7 +9554,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','7b17d2f654879c1df3ccca4e3c55cc02f5b17522675114e76dbe1bf122de8937',true),
+ ('_authority_crud_storage_v3()','18ddbb62467f20ca53e77f81052e607bbe1cff0466100e8bb210f3dcfa6d1027',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -10219,6 +10330,55 @@ DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM kaname.authority_writer_contract WHERE required_contract=2) THEN
   RAISE EXCEPTION 'cannot remove active full CRUD contract' USING ERRCODE='P1036';
  END IF;
+END $$;
+-- +goose StatementEnd
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_installation_enter_v2(p_kind text) RETURNS integer
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE active kaname.authority_semantic_identity%ROWTYPE;
+ protocol kaname.authority_writer_protocol%ROWTYPE;
+ invoker oid;
+BEGIN
+ IF p_kind IS NULL OR p_kind NOT IN ('catalog','role','binding','identity','cluster') THEN
+  RAISE EXCEPTION 'unsupported installation writer family' USING ERRCODE='22023';
+ END IF;
+ IF current_setting('transaction_isolation')<>'read committed'
+ OR pg_current_xact_id_if_assigned() IS NOT NULL
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_locks WHERE pid=pg_backend_pid()
+  AND (locktype='advisory' OR (locktype='relation' AND mode<>'AccessShareLock'))) THEN
+  RAISE EXCEPTION 'installation entry requires a fresh unlocked transaction' USING ERRCODE='25001';
+ END IF;
+ -- EXECUTE протокола не расширяет исходное право чтения identity. Проверяем
+ -- effective invoker до первого owner SELECT и до любого замка этой строки.
+ SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles
+ WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
+ IF NOT pg_catalog.has_table_privilege(invoker,'kaname.authority_semantic_identity','SELECT') THEN
+  RAISE EXCEPTION 'authority identity read denied' USING ERRCODE='42501';
+ END IF;
+ -- Это только выбор закрытой ветки. Signed entry повторяет identity после
+ -- coordinator; ошибка этой проверки никогда не переходит в unsigned ветку.
+ SELECT * INTO STRICT active FROM kaname.authority_semantic_identity WHERE singleton;
+ IF active.phase<>'uninitialized' THEN
+  PERFORM kaname._authority_protocol_enter_v2('global',ARRAY[]::text[],'[]'::jsonb,
+   p_kind,active.model_id,active.catalog_id,active.projector_version,
+   'participant','typed',NULL);
+  RETURN 2;
+ END IF;
+ -- Первичная установка ещё не имеет bundle. Подлинный compatibility state
+ -- перепроверяется под тем же GLOBAL/phase drain до business locks и DML.
+ -- Не создаём ни semantic identity, ни signed attestation за вызывающего.
+ PERFORM pg_advisory_xact_lock(1262569283,0);
+ SELECT * INTO STRICT protocol FROM kaname.authority_writer_protocol WHERE singleton FOR SHARE;
+ SELECT * INTO STRICT active FROM kaname.authority_semantic_identity WHERE singleton FOR SHARE;
+ IF protocol.enforcement<>'compatibility' OR active.phase<>'uninitialized'
+ OR active.protocol_version<>0 OR active.model_id IS NOT NULL
+ OR active.catalog_id IS NOT NULL OR active.projector_version IS NOT NULL THEN
+  RAISE EXCEPTION 'installation phase changed before admission' USING ERRCODE='P1036';
+ END IF;
+ -- Даже оставшаяся private signed форма не может быть проигнорирована.
+ PERFORM kaname._authority_protocol_attestation_v1_body();
+ PERFORM pg_advisory_xact_lock(1262569292,0);
+ RETURN 2;
 END $$;
 -- +goose StatementEnd
 -- Восстановление определения FK предшествующей схемы.
