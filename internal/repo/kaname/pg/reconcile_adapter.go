@@ -91,7 +91,7 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 	if _, err := tx.Exec(ctx, `SELECT kaname.authority_parent_prelock_admit_v3()`); err != nil {
 		return fmt.Errorf("reconcile: admit writer transaction: %w", err)
 	}
-	store := &reconcileStore{tx: tx, cat: a.cat.Facts()}
+	store := &legacyForwardStore{reconcileStore: &reconcileStore{tx: tx, cat: a.cat.Facts()}}
 	if err := fn(ctx, store); err != nil {
 		return err
 	}
@@ -100,6 +100,45 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 	}
 	committed = true
 	return nil
+}
+
+// legacyForwardStore принадлежит только unsigned compatibility WithTx. Signed
+// participant создаёт reconcileStore напрямую и сохраняет свой emitter/clock.
+// Выбор оболочки не выдаёт authority: допуск и receipt проверяет сама база.
+type legacyForwardStore struct {
+	*reconcileStore
+}
+
+// ReadOnlyRuleMemberStore выдаёт новый function-scoped view, а не меняет обычный
+// MatchSelector. Его Labels нельзя изменять или удерживать после расчёта правил.
+func (s *legacyForwardStore) ReadOnlyRuleMemberStore() reconcile.ReconcileStore {
+	return &readOnlyRuleMemberView{ReconcileStore: s, tx: s.tx, decode: resource_mirror.NewReadOnlyLabelDecoder()}
+}
+
+type readOnlyRuleMemberView struct {
+	reconcile.ReconcileStore
+	tx     pgx.Tx
+	decode func([]byte) (map[string]string, error)
+}
+
+func (s *readOnlyRuleMemberView) MatchSelector(ctx context.Context, types []string, matchLabels map[string]string) ([]domain.MirrorObject, error) {
+	rows, err := resource_mirror.MatchByLabelsReadOnly(ctx, s.tx, types, matchLabels, s.decode)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.MirrorObject, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, mirrorRowToDomain(row))
+	}
+	return out, nil
+}
+
+func (s *legacyForwardStore) EmitForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return fga_outbox.EmitForwardWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
+}
+
+func (s *legacyForwardStore) EmitNativeTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return fga_outbox.EmitNativeDeleteTx(ctx, s.tx, membershipTuplesToClients(tuples))
 }
 
 // reconcileStore — tx-scoped reconcile.ReconcileStore implementation.

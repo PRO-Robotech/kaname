@@ -607,13 +607,23 @@ func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
 	return w.writeLive(ctx, s)
 }
 
+// forwardTupleWriter — дополнительная возможность pg legacy adapter. Основной
+// порт остаётся совместимым с signed participant и существующими хранилищами.
+type forwardTupleWriter interface {
+	EmitForwardTupleWrite(context.Context, []domain.MembershipTuple) error
+}
+
 // writeLive пишет только накопленное: вызывающий уже отфильтровал members
 // и удерживает их строки зеркала в той же транзакции (keepLive либо keepLiveDesired).
 func (w *forwardWriteSet) writeLive(ctx context.Context, s ReconcileStore) error {
 	if err := s.UpsertMembers(ctx, w.members); err != nil {
 		return fmt.Errorf("forward: upsert members (%d): %w", len(w.members), err)
 	}
-	if err := s.EmitTupleWrite(ctx, w.fresh); err != nil {
+	emit := s.EmitTupleWrite
+	if forward, ok := s.(forwardTupleWriter); ok {
+		emit = forward.EmitForwardTupleWrite
+	}
+	if err := emit(ctx, w.fresh); err != nil {
 		return fmt.Errorf("forward: emit tuple write (%d): %w", len(w.fresh), err)
 	}
 	if err := s.RecordEmittedTuplesBatch(ctx, w.ledger); err != nil {

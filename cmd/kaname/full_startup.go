@@ -112,6 +112,9 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 		svcs.roleDelete == nil {
 		return nil, fmt.Errorf("authority-protocol full CRUD handlers are absent")
 	}
+	if svcs.resourceRegistrar == nil || svcs.resourceGate == nil {
+		return nil, fmt.Errorf("authority-protocol full resource composition is incomplete")
+	}
 	// Те же участники, что staged serve; full-ветка строит их из fullRepo.
 	membership, err := kanamepg.NewGroupMembershipParticipant(ctx, repo, profile.bundle)
 	if err != nil {
@@ -125,11 +128,11 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	if err != nil {
 		return nil, err
 	}
-	resourceBeginner, err := resources.RegistrationTxBeginner(pool)
+	resourceDecisions, err := kanamepg.NewResourceDecisionRunner(ctx, repo, profile.bundle, svcs.resourceGate)
 	if err != nil {
 		return nil, err
 	}
-	objects, err := resources.NewObjectReconciler(slog.Default())
+	objects, err := resourceDecisions.NewObjectReconciler(slog.Default())
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +152,10 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	if err != nil {
 		return nil, err
 	}
-	svcs.resourceRegistrar.WithResourceTxBeginner(resourceBeginner)
+	// Тот же gate, что у публичного handler: полномочия заново судит prepared attempt.
+	if err = svcs.resourceRegistrar.WithResourceDecisionRunner(resourceDecisions); err != nil {
+		return nil, err
+	}
 	objects.WithSizeRecorder(svcs.bindingSizeRecorder)
 	if err = svcs.bindingReconciler.WithObjectReconciler(objects); err != nil {
 		return nil, err
@@ -222,17 +228,14 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 // Общая настоящая провязка фоновой очереди. Вызывается serve и native holder;
 // configured nil по-прежнему ошибка, не молчаливый legacy fallback.
 func wireBackgroundAuthorityParticipants(engine *reconcile.Reconciler, bindings *kanamepg.BindingStageParticipant,
-	resources *kanamepg.ResourceObjectParticipant, groups *reconcile.Reconciler, logger *slog.Logger) error {
-	if engine == nil || bindings == nil || resources == nil || groups == nil {
+	objects *reconcile.Reconciler, groups *reconcile.Reconciler) error {
+	if engine == nil || bindings == nil || objects == nil || groups == nil {
 		return fmt.Errorf("authority-protocol background participants are incomplete")
 	}
 	if err := engine.WithStagedBindingReconciler(bindings); err != nil {
 		return err
 	}
-	objects, err := resources.NewObjectReconciler(logger.With("worker", "selector-reconcile"))
-	if err != nil {
-		return err
-	}
+	// Повторно используем engine выбранного startup profile; FULL не откатывается к legacy factory.
 	if err := engine.WithObjectReconciler(objects); err != nil {
 		return err
 	}

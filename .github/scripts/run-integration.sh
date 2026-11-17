@@ -86,6 +86,23 @@ TIMEOUT="${INTEGRATION_TIMEOUT:-25m}"
 
 cd "$ROOT" || exit 2
 
+# Только CI включает сохранение событий; обычный локальный вызов остаётся прежним.
+evidence="${INTEGRATION_EVIDENCE_DIR:-}"
+if [ -n "$evidence" ]; then
+    mkdir -p -- "$evidence" || exit 2
+    python3 - "$evidence" <<'PYENV'
+import json, os, pathlib, sys
+keys = ("GITHUB_SHA", "INTEGRATION_TIMEOUT", "INTEGRATION_SHARD", "PLATFORM_TREE",
+        "TESTCONTAINERS_RYUK_DISABLED", "TESTCONTAINERS_HOST_OVERRIDE", "KANAME_REQUIRE_INTEGRATION",
+        "KACHO_DERIVE_PARENT_COST", "KACHO_PERMANENT_PROJECT_COST", "KACHO_MATRIX_VOLUME",
+        "KACHO_SCALEGRID_FULL", "KACHO_STRENGTH_FULL", "KACHO_STRENGTH_WRITE", "KACHO_RECOVERY_TIMING")
+# Отсутствующая ручка сохраняется как null: условие нельзя выводить из имени задания.
+pathlib.Path(sys.argv[1], "environment.json").write_text(
+    json.dumps({key: os.environ.get(key) for key in keys}, indent=2, sort_keys=True) + "\n")
+PYENV
+    [ "$?" -eq 0 ] || exit 2
+fi
+
 # ШАРД: `INTEGRATION_SHARD=<k>/<N>`, k от 0 — ровно `strategy.job-index` и
 # `strategy.job-total` задания, то есть число шардов берётся у самой матрицы и
 # разойтись с ней не может. `--plan` печатает раскладку всех N шардов и выходит,
@@ -181,6 +198,9 @@ if [ -z "$raised" ]; then
     exit 2
 fi
 pkgs="$raised"
+if [ -n "$evidence" ]; then
+    printf '%s\n' "$pkgs" > "$evidence/selected-packages.txt" || exit 2
+fi
 with_db="$(printf '%s\n' "$raised" | wc -l)"
 selected="$(printf '%s\n' "$pkgs" | wc -l)"
 
@@ -284,6 +304,9 @@ if [ -n "$shard_total" ]; then
         fi
     done
     echo "в плане пакетов       : $planned из $selected, каждый ровно в одном шарде"
+    if [ -n "$evidence" ]; then
+        printf '%s\n' "$plan" > "$evidence/shard-plan.tsv" || exit 2
+    fi
     if [ "$plan_only" -eq 1 ]; then
         printf '%s\n' "$plan" | awk -F'\t' 'NF {print "  " $1 "\t" $2 "\t" $3}'
         exit 0
@@ -291,6 +314,10 @@ if [ -n "$shard_total" ]; then
     pkgs="$(printf '%s\n' "$plan" | awk -F'\t' -v s="$shard_index" '$1 == s {print $3}')"
     echo "исполняется в шарде $shard_index: $(printf '%s\n' "$pkgs" | wc -l)"
     echo ""
+fi
+
+if [ -n "$evidence" ]; then
+    printf '%s\n' "$pkgs" > "$evidence/executed-packages.txt" || exit 2
 fi
 
 log="$work/go-test.log"
@@ -307,10 +334,53 @@ log="$work/go-test.log"
 # Поэтому: без `xargs` (пути пакетов Go пробелов не содержат, разбиение по словам
 # здесь безопасно) и `PIPESTATUS[0]` снимается СРАЗУ после трубы, до любой другой
 # команды — иначе его затрёт даже присваивание.
-# shellcheck disable=SC2086
-go test -tags=integration -race -count=1 -timeout "$TIMEOUT" -p 1 $pkgs 2>&1 | tee "$log"
-rc="${PIPESTATUS[0]}"
-
-out=0
-"$ROOT/.github/scripts/classify-integration-outcome.sh" "$rc" "$log" || out=$?
-exit "$out"
+if [ -n "$evidence" ]; then
+    # Один и тот же прогон; JSON меняет представление, не состав и не бюджет.
+    # Сырой stderr сохраняется рядом с JSON в том же потоке. Код Go снимается
+    # напрямую, без tee/декодера в трубе, поэтому чужой код его не маскирует.
+    raw="$evidence/test.json"
+    log="$evidence/go-test.log"
+    rc=0
+    # shellcheck disable=SC2086
+    go test -tags=integration -race -count=1 -timeout "$TIMEOUT" -p 1 -json $pkgs > "$raw" 2>&1 || rc=$?
+    printf '%s\n' "$rc" > "$evidence/go-test-exit-code.txt" || exit 2
+    # Классификатор читает прежний текст Output, а не JSON-обёртку:
+    # его ^go: и признак недоступности Postgres сохраняют прежний смысл.
+    decode_rc=0
+    python3 - "$raw" "$log" <<'PYDECODE' || decode_rc=$?
+import json, pathlib, sys
+bad = False
+with pathlib.Path(sys.argv[1]).open() as source, pathlib.Path(sys.argv[2]).open("w") as target:
+    for line in source:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            target.write(line)
+            # Обычная диагностика Go законна; оборванный JSON — потерянное событие.
+            if line.lstrip().startswith("{"):
+                bad = True
+            continue
+        if not isinstance(event, dict):
+            bad = True
+            continue
+        text = event.get("Output")
+        if isinstance(text, str):
+            target.write(text)
+sys.exit(2 if bad else 0)
+PYDECODE
+    verdict_rc=0
+    python3 "$ROOT/.github/scripts/go-test-verdict.py" < "$raw" || verdict_rc=$?
+    out=0
+    "$ROOT/.github/scripts/classify-integration-outcome.sh" "$rc" "$log" || out=$?
+    # Исход окружения/Go старше ошибки свидетельства и не теряется.
+    [ "$out" -eq 0 ] || exit "$out"
+    [ "$decode_rc" -eq 0 ] || exit "$decode_rc"
+    exit "$verdict_rc"
+else
+    # shellcheck disable=SC2086
+    go test -tags=integration -race -count=1 -timeout "$TIMEOUT" -p 1 $pkgs 2>&1 | tee "$log"
+    rc="${PIPESTATUS[0]}"
+    out=0
+    "$ROOT/.github/scripts/classify-integration-outcome.sh" "$rc" "$log" || out=$?
+    exit "$out"
+fi

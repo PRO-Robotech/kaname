@@ -21,7 +21,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/modelcompose"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
@@ -96,13 +95,12 @@ func newFBRoleMutationWorld(t *testing.T) *fbRoleMutationWorld {
 		WithGrantAuthority(accessbindingapp.NewScopeGrantAuthority(w.repo, w.door)).
 		WithObjectReconciler(objects, slog.Default()).WithRoleAuthorityWriter(writers)
 	w.roles = roleapp.NewHandler(create, update, nil, nil, nil)
-	w.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "probemod"})
-	require.NoError(t, w.reg.Register(w.ctx, &iamv1.RegisterResourceRequest{
+	require.NotNil(t, w.fullResourceRegistrationContext)
+	require.NoError(t, w.reg.Register(w.fullResourceRegistrationContext, &iamv1.RegisterResourceRequest{
 		SubjectId: "project:" + string(w.prjB), Relation: "project", Object: atcBoxType + ":" + fbRoleBoxQ,
 		ParentProjectId: string(w.prjB), ParentAccountId: string(w.accA),
 		ParentChain: []string{"project:" + string(w.prjB), "account:" + string(w.accA)},
 	}))
-	w.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	return w
 }
 

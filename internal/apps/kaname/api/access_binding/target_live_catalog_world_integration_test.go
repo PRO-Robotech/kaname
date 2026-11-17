@@ -87,9 +87,10 @@ func atcT2(typ string) string {
 // atcWorld — мир М2 одной базы.
 type atcWorld struct {
 	*pcrWorld
-	usrE domain.UserID
-	prjB domain.ProjectID
-	doc  []byte // фикстура probemod целиком
+	usrE                            domain.UserID
+	prjB                            domain.ProjectID
+	doc                             []byte          // фикстура probemod целиком
+	fullResourceRegistrationContext context.Context // только явно установленный FULL fixture
 
 	rolBoxGet, rolBoxRead, rolBoxUpd, rolItemGet, rolPoolGet, rolInstGet, rolInstBox domain.RoleID
 }
@@ -226,15 +227,20 @@ func (a *atcWorld) itemsLiveInDB() bool {
 // нуждается (выдачи судят цель, а не владельца).
 func (a *atcWorld) registerBox(id string) {
 	a.t.Helper()
-	a.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "probemod"})
-	defer a.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
+	registrationContext := a.ctx
+	if a.fullResourceRegistrationContext != nil {
+		registrationContext = a.fullResourceRegistrationContext
+	} else {
+		a.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "probemod"})
+		defer a.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
+	}
 	obj := atcBoxType + ":" + id
 	for _, r := range []*iamv1.RegisterResourceRequest{
 		{SubjectId: "project:" + string(a.prjA), Relation: "project", Object: obj},
 	} {
 		r.ParentProjectId, r.ParentAccountId = string(a.prjA), string(a.accA)
 		r.ParentChain = []string{"project:" + string(a.prjA), "account:" + string(a.accA)}
-		require.NoErrorf(a.t, a.reg.Register(a.ctx, r), "регистрация %s (%s)", obj, r.GetRelation())
+		require.NoErrorf(a.t, a.reg.Register(registrationContext, r), "регистрация %s (%s)", obj, r.GetRelation())
 	}
 }
 

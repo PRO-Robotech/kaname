@@ -13,6 +13,8 @@ package pg
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -46,6 +48,19 @@ func (r *Repository) Reader(ctx context.Context) (kaname.Reader, error) {
 func (r *Repository) Writer(ctx context.Context) (kaname.Writer, error) {
 	tx, err := r.master.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	// Общий compatibility fence предшествует бизнес-блокировкам: поздний
+	// вход из statement guard допускает взаимную блокировку с отзывом права.
+	// Здесь нужен только advisory fence; attestation запирает control rows
+	// и нарушил бы порядок блокировок lifecycle drain.
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(1262569292,0)"); err != nil {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		rollbackErr := tx.Rollback(cleanup)
+		cancel()
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			err = errors.Join(err, rollbackErr)
+		}
 		return nil, mapErr(err, "", "")
 	}
 	return &writeTx{readTx: readTx{tx: tx}}, nil

@@ -2152,7 +2152,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	reconcileEngine := reconcile.New(reconcileAdapter,
 		logger.With(slog.String("component", "rsab_reconciler")), catalogSnapshot)
 	if cfg.AuthorityProtocol.Participant() {
-		if err := wireBackgroundAuthorityParticipants(reconcileEngine, bindingStageParticipant, resourceParticipant, groupObjectParticipant, logger); err != nil {
+		if err := wireBackgroundAuthorityParticipants(reconcileEngine, bindingStageParticipant, resourceObjectParticipant, groupObjectParticipant); err != nil {
 			return err
 		}
 	}

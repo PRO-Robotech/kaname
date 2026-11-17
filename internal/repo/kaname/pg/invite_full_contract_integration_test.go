@@ -30,6 +30,19 @@ func inviteFullContractFixture(t *testing.T, membership, optional bool) (inviteD
 	var capability domain.RoleID
 	if optional {
 		capability = inviteCoverageHolder(t, f)
+		// Coverage — часть Given до полного cutover. Прежнему promoter нужен
+		// активный контракт первого поколения; Invite здесь ещё не исполняется.
+		require.NoError(t, lifecycleOwner(f.r).ActivateAuthorityBundle(f.r.ctx, f.r.bundle))
+		invitePromoteCoverage(t, f, capability)
+		var carriers int
+		require.NoError(t, f.r.runtime.QueryRow(f.r.ctx, `SELECT count(*) FROM kaname.access_bindings
+ WHERE role_id=$1 AND subject_type='user' AND subject_id=$2
+ AND resource_type='project' AND resource_id=$3 AND status='ACTIVE'
+ AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())
+ AND grant_capability_version=1`, string(capability), f.actor, string(f.project)).Scan(&carriers))
+		require.Equal(t, 1, carriers, "Дано: живой coverage carrier подготовлен до FULL activation")
+		// Подготовка coverage завершена: закрываем активный контракт перед FULL staging.
+		require.NoError(t, lifecycleOwner(f.r).CloseAuthorityBundle(f.r.ctx))
 	}
 	full, contract := fullContractActivate(t, f.r)
 	f.r.repo = full
@@ -54,9 +67,6 @@ func inviteFullContractFixture(t *testing.T, membership, optional bool) (inviteD
 	require.NoError(t, objects.WithStagedBindingReconciler(withdrawalParticipant(t, f.r, nil)))
 	native := delegationNativeDoor{r: f.r}
 	f.uc = userapp.NewInviteUserUseCase(full, f.ops, native).WithInviteDecisions(f.runner).WithInviteTTL(time.Hour).WithInviteMailRateLimit(outboxtypes.InviteMailRateLimit{MaxPerWindow: 5, Window: time.Hour}, nil).WithObjectReconciler(objects)
-	if optional {
-		invitePromoteCoverage(t, f, capability)
-	}
 	return f, email, foreign
 }
 

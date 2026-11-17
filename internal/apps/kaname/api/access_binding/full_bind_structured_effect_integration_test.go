@@ -555,6 +555,7 @@ func newFB13ChildrenWorld(t *testing.T) *fb13ChildrenWorld {
 	require.NoError(t, err)
 	bundle, err := granteffect.NewBundle(ctx, composed, halves, granteffect.ProjectorVersion, report.KeyTerms...)
 	require.NoError(t, err)
+	roster := fbInstallResourceRegistrationWriter(t, ctx, repo, pool, sc.accA, false)
 	require.NoError(t, repo.PrepareAuthorityBundle(ctx, bundle))
 	facts, err := catalog.NewFacts(halves)
 	require.NoError(t, err)
@@ -587,6 +588,7 @@ func newFB13ChildrenWorld(t *testing.T) *fb13ChildrenWorld {
 	handed, err := runtimeRepo.LoadAuthorityBundle(ctx, composed, report.KeyTerms...)
 	require.NoError(t, err)
 	require.Equal(t, bundle.Identity(), handed.Identity())
+	runtimeRepo = fbActivateFullResourceWriter(t, ctx, repo, runtimeRepo, handed)
 	writers, err := kanamepg.NewGrantPolicyWriters(ctx, runtimeRepo, handed)
 	require.NoError(t, err)
 	groups, err := kanamepg.NewGroupMembershipParticipant(ctx, runtimeRepo, handed)
@@ -595,14 +597,11 @@ func newFB13ChildrenWorld(t *testing.T) *fb13ChildrenWorld {
 	require.NoError(t, err)
 	rec := reconcile.New(kanamepg.NewReconcileAdapter(runtime, source), slog.Default(), source)
 	require.NoError(t, rec.WithStagedBindingReconciler(stages))
-	resources, err := kanamepg.NewResourceObjectParticipant(ctx, runtimeRepo, handed)
-	require.NoError(t, err)
-	resourceBeginner, err := resources.RegistrationTxBeginner(runtime)
-	require.NoError(t, err)
-	objects, err := resources.NewObjectReconciler(slog.Default())
+	runtimeDoor := authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(runtime, plans), personmarks.New(runtime))
+	resourceDecisions, resourceGate, registrationContext := fbFullResourceRegistration(t, ctx, runtimeRepo, handed, runtimeDoor, roster)
+	objects, err := resourceDecisions.NewObjectReconciler(slog.Default())
 	require.NoError(t, err)
 	require.NoError(t, rec.WithObjectReconciler(objects))
-	runtimeDoor := authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(runtime, plans), personmarks.New(runtime))
 	runtimeOps := operations.NewRepo(runtime, "kaname")
 	keys := kanamepg.NewRegisteredKeys(runtime)
 	create := accessbindingapp.NewCreateAccessBindingUseCase(runtimeRepo, runtimeOps, source).WithRelationStore(runtimeDoor, slog.Default()).WithRegisteredKeys(keys).WithBindingDecisions(writers).WithReconciler(observe(rec))
@@ -610,9 +609,10 @@ func newFB13ChildrenWorld(t *testing.T) *fb13ChildrenWorld {
 	w.roles = roleapp.NewHandler(roleapp.NewCreateRoleUseCase(runtimeRepo, runtimeOps, source).WithRelationStore(runtimeDoor, slog.Default()).WithRegisteredKeys(keys).WithGrantReferencePlans(plans).WithRoleAuthorityWriter(writers).WithObjectReconciler(&fbStructuredObjects{Reconciler: rec, callbacks: callbacks}), nil, nil, nil, nil)
 	w.pool, w.repo, w.ops, w.door, w.rec = runtime, runtimeRepo, runtimeOps, runtimeDoor, rec
 	w.facts, w.stages = facts, stages
-	w.reg = internaliam.NewRegisterResourceUseCase(kanamepg.NewFGAOutboxEmitter(), kanamepg.NewResourceMirrorEmitter(), kanamepg.NewPoolTxBeginner(runtime), kanamepg.NewCatalogTypeReader(), kanamepg.NewPublicReadPublisher(), accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), source), kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader()).WithRegistrationAuthority(authority).WithResourceTxBeginner(resourceBeginner).WithReconcile(kanamepg.NewReconcileEventEmitter()).WithObjectReconciler(rec, slog.Default())
-	w.registration = internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).WithResourceRegistrar(w.reg, authority)
-	require.NoError(t, repo.ActivateAuthorityBundle(ctx, bundle))
+	w.reg = internaliam.NewRegisterResourceUseCase(kanamepg.NewFGAOutboxEmitter(), kanamepg.NewResourceMirrorEmitter(), kanamepg.NewPoolTxBeginner(runtime), kanamepg.NewCatalogTypeReader(), kanamepg.NewPublicReadPublisher(), accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), source), kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader()).WithRegistrationAuthority(resourceGate).WithReconcile(kanamepg.NewReconcileEventEmitter()).WithObjectReconciler(rec, slog.Default())
+	require.NoError(t, w.reg.WithResourceDecisionRunner(resourceDecisions))
+	w.fullResourceRegistrationContext = registrationContext
+	w.registration = internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).WithResourceRegistrar(w.reg, resourceGate)
 	var phase, enforcement string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT a.phase,p.enforcement FROM kaname.authority_semantic_identity a CROSS JOIN kaname.authority_writer_protocol p`).Scan(&phase, &enforcement))
 	require.Equal(t, "active", phase)
@@ -624,7 +624,11 @@ func (w *fb13ChildrenWorld) register(subject, relation, typ, dotted, id string, 
 	w.t.Helper()
 	w.version = w.version.Add(time.Microsecond)
 	req := &iamv1.RegisterResourceRequest{SubjectId: subject, Relation: relation, Object: typ + ":" + id, ParentProjectId: string(w.prjA), ParentAccountId: string(w.accA), ParentChain: append([]string(nil), chain...), SourceVersion: timestamppb.New(w.version)}
-	response, err := w.registration.RegisterResource(w.ctx, req)
+	registrationContext := w.ctx
+	if w.fullResourceRegistrationContext != nil {
+		registrationContext = w.fullResourceRegistrationContext
+	}
+	response, err := w.registration.RegisterResource(registrationContext, req)
 	require.NoError(w.t, err, "реальный canonical RegisterResource %s", req.Object)
 	require.NotNil(w.t, response)
 	var project, account string

@@ -96,6 +96,17 @@ func (p *GrantPolicyWriters) openPolicyWriter(ctx context.Context, in policyWrit
 		if e == nil {
 			e = p.protectPolicyPlan(ctx, w, plan)
 		}
+		var groupStage *groupAdditionStage
+		if e == nil && p.repo.fullContract != nil && in.groupNative != nil {
+			groupStage, e = prepareGroupAdditionStage(ctx, w, plan, in.groupNative.member)
+			if e == nil {
+				// Все ожидания подготовленного тела предшествуют последнему policy clock.
+				e = p.protectPolicyPlan(ctx, w, plan)
+			}
+			if e == nil {
+				e = groupStage.finalize(ctx, w, plan)
+			}
+		}
 		if e != nil {
 			if cleanup := policyRollback(ctx, tx); cleanup != nil {
 				return nil, errors.Join(e, cleanup)
@@ -110,7 +121,11 @@ func (p *GrantPolicyWriters) openPolicyWriter(ctx context.Context, in policyWrit
 		}
 		w.tx = &policyLeaseTx{Tx: tx, conn: conn}
 		transferred = true
-		return newSemanticAuthorityWriter(w, p.bundle), nil
+		semantic := newSemanticAuthorityWriter(w, p.bundle)
+		if groupStage != nil {
+			return &preparedGroupAdditionWriter{semanticAuthorityWriteTx: semantic, stage: groupStage}, nil
+		}
+		return semantic, nil
 	}
 	return nil, kaname.ErrAuthorityClassificationChanged
 }

@@ -120,6 +120,16 @@ BEGIN
  IF TG_WHEN<>'BEFORE' OR TG_LEVEL<>'ROW' THEN
   RAISE EXCEPTION 'resource BEFORE guard context invalid' USING ERRCODE='42501';
  END IF;
+ -- Group Add не использует образы target members: свежая проверка
+ -- программы сохраняется и отклоняет эту таблицу как другую семью мутаций.
+ -- Последующие ветки ресурса и привязки сами получают точные образы строк.
+ IF TG_TABLE_NAME<>'access_binding_target_members' THEN
+  IF TG_OP<>'INSERT' THEN old_image:=to_jsonb(OLD);END IF;
+  IF TG_OP<>'DELETE' THEN new_image:=to_jsonb(NEW);END IF;
+ END IF;
+ IF kaname._authority_group_add_row_v3(TG_TABLE_NAME,TG_OP,old_image,new_image) THEN
+  IF TG_OP='DELETE' THEN RETURN OLD;END IF;RETURN NEW;
+ END IF;
  manifest:=kaname._authority_producer_resource_v2();
  IF manifest IS NOT NULL THEN
   IF TG_OP<>'INSERT' THEN old_image:=to_jsonb(OLD); END IF;
@@ -132,6 +142,13 @@ BEGIN
   RETURN NEW;
  END IF;
  proof:=kaname.authority_protocol_attestation();
+ IF proof IS NOT NULL AND proof->>'mode'='accounts' AND proof->>'kind'='binding' THEN
+  IF TG_OP<>'INSERT' THEN old_image:=to_jsonb(OLD);END IF;
+  IF TG_OP<>'DELETE' THEN new_image:=to_jsonb(NEW);END IF;
+  IF kaname._authority_binding_mirror_before_write_v3(TG_TABLE_NAME,TG_OP,old_image,new_image) THEN
+   IF TG_OP='DELETE' THEN RETURN OLD;END IF;RETURN NEW;
+  END IF;
+ END IF;
  IF proof IS NOT NULL AND proof->>'mode'<>'global' THEN
   IF TG_OP<>'INSERT' THEN
    SELECT * INTO STRICT scope FROM kaname.authority_protocol_row_scopes(TG_TABLE_NAME,pg_catalog.to_jsonb(OLD));
@@ -478,6 +495,7 @@ BEGIN
  OR TG_TABLE_NAME NOT IN ('issued_account_ids','project_resource_quotas','identity_admission_windows',
   'role_grant_orphan','role_selector_prune','resource_journal') THEN
   RAISE EXCEPTION 'invalid CRUD auxiliary statement graph' USING ERRCODE='42501';END IF;
+ IF kaname._authority_group_add_statement_v3(TG_TABLE_NAME,TG_OP) THEN RETURN NULL;END IF;
  manifest:=kaname._authority_producer_resource_v2();
  IF manifest IS NULL OR manifest->'intent'->>'kind' IS DISTINCT FROM 'crud' THEN RETURN NULL;END IF;
  IF manifest->>'state' IS DISTINCT FROM 'body' OR manifest->>'registration_program_claimed' IS DISTINCT FROM 'true' OR TG_OP='TRUNCATE' THEN
@@ -1005,7 +1023,42 @@ DECLARE manifest jsonb;item jsonb;expected jsonb;row_value jsonb;image jsonb;inv
  ordinal integer;write_ordinal integer;selected integer:=0;outboxes jsonb;fold_images jsonb;outbox_ordinals jsonb;requires_update boolean:=true;
 BEGIN
  manifest:=kaname._authority_producer_resource_v2();
- IF manifest IS NULL THEN RETURN false;END IF;
+ IF manifest IS NULL THEN
+  IF kaname._authority_binding_mirror_store_v3() IS NULL THEN RETURN false;END IF;
+  expected:=jsonb_build_object('event_type',p_event_type,'payload',p_payload,'created_at',p_created_at);
+  SELECT i.image_no,i.outbox_no INTO write_ordinal,selected FROM pg_temp.kaname_binding_mirror_images i
+   WHERE i.table_name='fga_outbox' AND i.new_image=expected AND i.attempted AND i.consumed AND NOT i.folded
+   ORDER BY i.command_no,i.image_no LIMIT 1;
+  IF write_ordinal IS NULL THEN RAISE EXCEPTION 'binding mirror fold lacks actual journal' USING ERRCODE='42501';END IF;
+  UPDATE pg_temp.kaname_binding_mirror_program SET active_outbox=selected WHERE singleton;
+  invoker:=(kaname.authority_protocol_attestation()->>'invoker_oid')::oid;
+  FOR image IN SELECT jsonb_build_object('operation',i.operation,'old',i.old_image,'new',i.new_image)
+   FROM pg_temp.kaname_binding_mirror_images i WHERE i.table_name='relation_fact' AND i.outbox_no=selected ORDER BY i.image_no LOOP
+   IF image->>'operation'='UPDATE' THEN CONTINUE;END IF;
+   IF NOT has_table_privilege(invoker,'kaname.relation_fact','SELECT') THEN
+    RAISE EXCEPTION 'binding mirror fold requires original SELECT ACL' USING ERRCODE='42501';END IF;
+   IF image->>'operation'='INSERT' THEN
+    IF NOT has_table_privilege(invoker,'kaname.relation_fact','INSERT') OR NOT has_table_privilege(invoker,'kaname.relation_fact','UPDATE') THEN
+     RAISE EXCEPTION 'binding mirror fold requires original upsert ACL' USING ERRCODE='42501';END IF;
+    row_value:=image->'new';
+    INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version,created_at,condition_name,condition_params)
+    VALUES(row_value->>'object_type',row_value->>'object_id',row_value->>'relation',row_value->>'subject',
+     (row_value->>'source_version')::timestamptz,(row_value->>'created_at')::timestamptz,row_value->>'condition_name',row_value->'condition_params')
+    ON CONFLICT(object_type,object_id,relation,subject) DO UPDATE
+     SET source_version=EXCLUDED.source_version,condition_name=EXCLUDED.condition_name
+     WHERE relation_fact.source_version<EXCLUDED.source_version;
+   ELSE
+    IF NOT has_table_privilege(invoker,'kaname.relation_fact','DELETE') OR NOT has_any_column_privilege(invoker,'kaname.relation_fact','UPDATE') THEN
+     RAISE EXCEPTION 'binding mirror fold requires original delete ACL' USING ERRCODE='42501';END IF;
+    row_value:=image->'old';
+    DELETE FROM ONLY kaname.relation_fact WHERE object_type=row_value->>'object_type' AND object_id=row_value->>'object_id'
+     AND relation=row_value->>'relation' AND subject=row_value->>'subject';
+   END IF;
+  END LOOP;
+  UPDATE pg_temp.kaname_binding_mirror_program SET active_outbox=NULL WHERE singleton;
+  UPDATE pg_temp.kaname_binding_mirror_images SET folded=true WHERE image_no=write_ordinal;
+  RETURN true;
+ END IF;
  IF manifest->'intent'->>'kind'='object' THEN
   outboxes:=manifest#>'{object_physical,outboxes}';fold_images:=manifest#>'{object_fold,images}';
   outbox_ordinals:=manifest->'object_outbox_write_ordinals';
@@ -1956,6 +2009,10 @@ BEGIN
  IF new_key IS NULL THEN RAISE EXCEPTION 'missing CRUD sequence identity' USING ERRCODE='42501';END IF;
  IF TG_OP='INSERT' THEN
   SELECT q.proof,q.header INTO STRICT proof,program FROM kaname._authority_sequence_probe_v3() q;
+  -- Только положительный receipt точного allocation-only INSERT. Свежий proof
+  -- выше сохранён; scalar DEFAULT и обе ветви UPDATE ниже не меняются.
+  IF proof IS NULL AND TG_TABLE_NAME='fga_outbox'
+   AND kaname._authority_forward_row_v4((new_key)::bigint,to_jsonb(NEW)-'id',false) THEN RETURN NEW;END IF;
   IF proof IS NOT NULL THEN
    prepared:=program IS NOT NULL OR (proof->>'consumer_finalized'='true' AND proof->>'writer_contract'='2') OR kaname._authority_sequence_expected_v3();
   END IF;
@@ -2748,11 +2805,13 @@ CREATE OR REPLACE FUNCTION kaname.authority_protocol_statement_guard() RETURNS t
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE proof jsonb; manifest jsonb; allowed boolean;step jsonb;sequence_program jsonb;
 BEGIN
- proof:=kaname.authority_protocol_attestation();
- IF proof IS NOT NULL THEN sequence_program:=kaname._authority_sequence_header_v3();END IF;
+ -- Один свежий proof/header на этот вызов. Probe сохраняет unsigned NULL
+ -- и прежний порядок attestation перед owner/ACL/header проверками.
+ SELECT q.proof,q.header INTO STRICT proof,sequence_program FROM kaname._authority_sequence_probe_v3() q;
  IF sequence_program#>>'{frozen,mode}'='authorize' THEN
   RAISE EXCEPTION 'authorization-only callback cannot mutate persistent state' USING ERRCODE='42501';
  END IF;
+ IF kaname._authority_group_add_statement_v3(TG_TABLE_NAME,TG_OP) THEN RETURN NULL;END IF;
  manifest:=kaname._authority_producer_resource_v2();
  IF manifest IS NOT NULL THEN
   allowed:=false;
@@ -2787,7 +2846,8 @@ BEGIN
   END IF;
   RETURN NULL;
  END IF;
- proof:=kaname.authority_protocol_attestation();
+ -- В NULL-ветке producer выполнены только private consumer reads;
+ -- ни DML, ни callback, ни изменение clock/identity между proof и проверкой нет.
  -- kaname#1034: после удаления parent каскадный child уже не обязан видеть
  -- его anchor; role target cascade также может затронуть другой account.
  -- До отдельной proven классификации adapter выбирает global ДО всех locks.
@@ -3199,15 +3259,27 @@ BEGIN
 END $$;
 CREATE OR REPLACE FUNCTION kaname.authority_protocol_attestation() RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE proof jsonb; consumer jsonb; storage oid; lock_mode text; snapshot record;
+DECLARE proof jsonb; consumer jsonb; storage oid; lock_mode text; snapshot record; strict_mode boolean; ignored_result boolean;
 BEGIN
+ -- Отсутствующий TEMP proof проверяем заново на каждом вызове, без SRF frame.
+ -- Тот же свежий FOR SHARE и IF NOT: NULL enforcement не разрешает unsigned.
+ IF to_regclass('pg_temp.kaname_authority_attestation') IS NULL THEN
+  SELECT enforcement='strict' INTO STRICT strict_mode FROM kaname.authority_writer_protocol WHERE singleton FOR SHARE;
+  IF NOT strict_mode THEN
+   ignored_result := kaname._authority_compare_legacy_write_allowed_v2() IS NULL;
+   ignored_result := pg_advisory_xact_lock(1262569292,0) IS NULL;
+   RETURN NULL;
+  END IF;
+  RAISE EXCEPTION 'authority transaction attestation required' USING ERRCODE='42501';
+ END IF;
+ -- Present storage, включая пустое/повреждённое, идёт в прежний snapshot.
  -- Невалидная signed attestation здесь бросает ошибку; unsigned fallback нет.
  SELECT s.* INTO STRICT snapshot FROM kaname._authority_protocol_snapshot_v3() s;
  proof:=snapshot.proof;
  IF proof IS NULL THEN
   PERFORM kaname._authority_compare_legacy_write_allowed_v2();
   -- Compatibility RR/direct/maintenance writer должен войти до первой DML
-  -- через общий BEFORE STATEMENT guard. Это единственная unsigned ветка.
+  -- через общий BEFORE STATEMENT guard. NULL proof сохраняет unsigned admission.
   PERFORM pg_advisory_xact_lock(1262569292,0);
   RETURN NULL;
  END IF;
@@ -3428,6 +3500,7 @@ CREATE FUNCTION kaname.authority_binding_insert_stamp_v3(p_id text) RETURNS time
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE program jsonb;
 BEGIN
+ IF kaname.authority_protocol_attestation() IS NULL THEN RETURN NULL;END IF;
  program:=kaname._authority_sequence_store_v3();
  IF program IS NULL THEN RETURN NULL;END IF;
  IF program->>'family'<>'binding' OR program#>>'{frozen,mode}'<>'create'
@@ -3438,6 +3511,337 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
+-- Независимое чистое доказательство current+retained OLD scope для mirror.
+-- Источники уже перечитаны owner с исходными SELECT правами вызывающего.
+CREATE FUNCTION kaname._authority_binding_mirror_locality_v3(p_index jsonb,p_catalog jsonb,p_graph jsonb,p_binding jsonb,p_coordinate jsonb,p_ledger jsonb)
+RETURNS boolean LANGUAGE plpgsql IMMUTABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE typ text:=p_coordinate->>'type';identifier text:=p_coordinate->>'id';model text;matches integer;
+ captured jsonb;state jsonb;data jsonb;accounts jsonb:=p_graph->'accounts';account_id text;
+ command jsonb;item jsonb;tuple_value jsonb;exact_object text;local_scope boolean:=true;
+BEGIN
+ IF jsonb_typeof(accounts) IS DISTINCT FROM 'object' OR p_graph->>'object_type' IS DISTINCT FROM typ
+ OR p_graph->>'object_id' IS DISTINCT FROM identifier OR p_binding->>'resource_type' IS DISTINCT FROM 'account'
+ OR coalesce(typ,'')='' OR coalesce(identifier,'')='' THEN
+  RAISE EXCEPTION 'binding mirror locality identity missing' USING ERRCODE='42501';END IF;
+ SELECT count(*),min(r->>'ObjectType') INTO matches,model
+ FROM jsonb_array_elements(coalesce(nullif(p_catalog#>'{Live,Resources}','null'::jsonb),'[]'::jsonb)) r
+ WHERE (r->>'Module')||'.'||(r->>'Resource')=typ;
+ IF matches=0 THEN RETURN false;END IF;
+ IF matches<>1 OR coalesce(model,'')='' OR model~'[:#*[:space:][:cntrl:]]' OR length(model)>16384
+ OR (SELECT count(*) FROM jsonb_array_elements(p_catalog#>'{Live,Resources}') r WHERE r->>'ObjectType'=model)<>1 THEN
+  RAISE EXCEPTION 'binding mirror live mapping ambiguous' USING ERRCODE='42501';END IF;
+ captured:=kaname._authority_resource_require_capture_v2(p_index,4,model,identifier);
+ FOR state IN SELECT value FROM jsonb_array_elements(captured->'states') LOOP
+  data:=state->2;account_id:=data->>'account_id';
+  IF data->>'object_type' IS DISTINCT FROM model OR data->>'object_id' IS DISTINCT FROM identifier
+  OR coalesce(account_id,'')='' OR account_id~'[:#*[:space:][:cntrl:]]' OR length(account_id)>16384
+  OR (coalesce(data->>'project_id','')<>'' AND ((data->>'project_id')~'[:#*[:space:][:cntrl:]]' OR length(data->>'project_id')>16384)) THEN
+   RAISE EXCEPTION 'binding retained scope linkage invalid' USING ERRCODE='42501';END IF;
+  accounts:=accounts||jsonb_build_object(account_id,true);
+ END LOOP;
+ IF accounts='{}'::jsonb THEN RAISE EXCEPTION 'binding mirror owner absent' USING ERRCODE='42501';END IF;
+ FOR account_id IN SELECT jsonb_object_keys(accounts) LOOP
+  IF coalesce(account_id,'')='' OR account_id~'[:#*[:space:][:cntrl:]]' OR length(account_id)>16384 THEN
+   RAISE EXCEPTION 'binding mirror account identity invalid' USING ERRCODE='42501';END IF;
+  captured:=kaname._authority_resource_require_capture_v2(p_index,23,'account',account_id);
+  IF jsonb_array_length(captured->'states')<>1 OR captured->'states'->0->2->>'id' IS DISTINCT FROM account_id THEN
+   RAISE EXCEPTION 'binding mirror account source absent' USING ERRCODE='42501';END IF;
+  IF account_id IS DISTINCT FROM p_binding->>'resource_id' THEN local_scope:=false;END IF;
+ END LOOP;
+ exact_object:=model||':'||identifier;
+ -- OLD claims не доказывают владение чужим адресом. Такой подлинный старый
+ -- ledger сохраняет GLOBAL; forged commands отсекают исходные obligations.
+ FOR item IN SELECT value FROM jsonb_array_elements(p_ledger) LOOP
+  IF item->>'object' IS DISTINCT FROM exact_object THEN local_scope:=false;END IF;
+ END LOOP;
+ FOR item IN SELECT value FROM jsonb_array_elements(p_coordinate->'desired') LOOP
+  FOR tuple_value IN SELECT value FROM jsonb_array_elements(coalesce(nullif(item->'Tuples','null'::jsonb),'[]'::jsonb)) LOOP
+   IF tuple_value->>'Object' IS DISTINCT FROM exact_object THEN local_scope:=false;END IF;
+  END LOOP;
+ END LOOP;
+ FOR command IN SELECT value FROM jsonb_array_elements(p_coordinate->'commands') LOOP
+  FOR tuple_value IN
+   SELECT value FROM jsonb_array_elements(coalesce(nullif(command->'Tuples','null'::jsonb),'[]'::jsonb))
+   UNION ALL SELECT value->'Tuple' FROM jsonb_array_elements(coalesce(nullif(command->'Refs','null'::jsonb),'[]'::jsonb))
+   UNION ALL SELECT value->'Tuple' FROM jsonb_array_elements(coalesce(nullif(command->'Rows','null'::jsonb),'[]'::jsonb)) LOOP
+   IF tuple_value->>'Object' IS DISTINCT FROM exact_object THEN local_scope:=false;END IF;
+  END LOOP;
+ END LOOP;
+ RETURN local_scope;
+END $$;
+
+-- Закрытые записи принадлежат owner, связаны с nonce текущего RC и не
+-- принимают caller scope. Хеш служит индексом; OLD/NEW сравниваются целиком.
+CREATE FUNCTION kaname._authority_binding_mirror_store_v3() RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;owner_oid oid;relation_id oid;result jsonb;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind'<>'binding' OR proof->>'purpose'<>'participant' THEN RETURN NULL;END IF;
+ IF to_regclass('pg_temp.kaname_binding_mirror_program') IS NULL THEN RETURN NULL;END IF;
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ FOREACH relation_id IN ARRAY ARRAY[to_regclass('pg_temp.kaname_binding_mirror_program'),to_regclass('pg_temp.kaname_binding_mirror_images'),to_regclass('pg_temp.kaname_binding_mirror_policy_receipt')] LOOP
+  IF relation_id IS NULL OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=relation_id
+   AND c.relowner=owner_oid AND c.relpersistence='t' AND c.relkind='r')
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+   WHERE c.oid=relation_id AND a.grantee<>owner_oid) THEN
+   RAISE EXCEPTION 'untrusted binding mirror program' USING ERRCODE='42501';END IF;
+ END LOOP;
+ -- Горячая проверка не читает frozen sources или полный массив images.
+ SELECT jsonb_build_object('backend',p.backend,'transaction_id',p.transaction_id,'invoker_oid',p.invoker_oid,
+  'nonce',p.nonce,'binding',p.binding_id,'accounts',p.accounts,'epochs',p.epochs,'epoch_clock',p.epoch_clock,
+  'final_clock',p.final_clock,'image_limit',p.image_limit) INTO STRICT result FROM pg_temp.kaname_binding_mirror_program p WHERE singleton;
+ IF result->>'backend' IS DISTINCT FROM proof->>'backend' OR result->>'transaction_id' IS DISTINCT FROM proof->>'transaction_id'
+ OR result->>'invoker_oid' IS DISTINCT FROM proof->>'invoker_oid' OR result->>'nonce' IS DISTINCT FROM proof->>'nonce'
+ OR proof->>'mode' IS DISTINCT FROM 'accounts' OR result->'accounts' IS DISTINCT FROM proof->'accounts' THEN
+  RAISE EXCEPTION 'binding mirror program identity changed' USING ERRCODE='42501';END IF;
+ RETURN result;
+END $$;
+
+-- Квитанция создаётся только после неизменных actual epoch locks и сравнения
+-- поколений. Она не заменяет locks и не допускает другой clock refresher.
+CREATE FUNCTION kaname._authority_binding_mirror_epoch_v3(p_accounts text[],p_epochs jsonb,p_at timestamptz) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;snapshot jsonb;program jsonb;owner_oid oid;storage oid;has_mirror boolean;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof->>'kind' IS DISTINCT FROM 'binding' OR to_regclass('pg_temp.kaname_binding_sequence_snapshot') IS NULL THEN RETURN;END IF;
+ storage:='pg_temp.kaname_binding_sequence_snapshot'::regclass;
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=storage AND c.relowner=owner_oid AND c.relpersistence='t' AND c.relkind='r')
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+  WHERE c.oid=storage AND a.grantee<>owner_oid) THEN RAISE EXCEPTION 'untrusted binding epoch receipt storage' USING ERRCODE='42501';END IF;
+ SELECT s.mirror IS NOT NULL INTO STRICT has_mirror FROM pg_temp.kaname_binding_sequence_snapshot s WHERE singleton;
+ IF NOT has_mirror THEN RETURN;END IF;
+ snapshot:=kaname._authority_binding_stage_snapshot_v3();
+ IF snapshot->'accounts' IS DISTINCT FROM to_jsonb(p_accounts) OR snapshot->'epochs' IS DISTINCT FROM p_epochs
+ OR proof->'accounts' IS DISTINCT FROM to_jsonb(p_accounts) OR proof->>'mode' IS DISTINCT FROM 'accounts'
+ OR p_at IS DISTINCT FROM (proof->>'decision_at')::timestamptz THEN
+  RAISE EXCEPTION 'binding mirror epoch receipt differs' USING ERRCODE='42501';END IF;
+ -- После Binding ROW locks разрешена только проверка уже удерживаемой квитанции.
+ -- Отсутствующий early receipt не может открыть прежний поздний acquire путь.
+ IF to_regclass('pg_temp.kaname_binding_mirror_policy_receipt') IS NULL THEN
+  RAISE EXCEPTION 'binding policy receipt missing before epoch recheck' USING ERRCODE='42501';END IF;
+ PERFORM kaname._authority_binding_mirror_policy_prepare_v3(snapshot);
+ UPDATE pg_temp.kaname_binding_sequence_snapshot SET locked_xid=proof->>'transaction_id',locked_at=p_at WHERE singleton;
+ program:=kaname._authority_binding_mirror_store_v3();
+ IF program IS NOT NULL THEN
+  IF program->'epochs' IS DISTINCT FROM p_epochs OR program->>'binding' IS DISTINCT FROM snapshot->>'binding_id'
+  OR program->>'final_clock' IS NOT NULL THEN RAISE EXCEPTION 'binding mirror epoch receipt repeated after finalization' USING ERRCODE='42501';END IF;
+  UPDATE pg_temp.kaname_binding_mirror_program SET epoch_clock=p_at WHERE singleton;
+ END IF;
+END $$;
+
+-- Подготовка после прежнего prelockBindingCommands. Все шесть реальных
+-- fold SELECT используют остаток общего бюджета, исходные SELECT ACL и RC.
+CREATE FUNCTION kaname._authority_binding_mirror_prepare_v3(p_snapshot jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;mirror jsonb;commands jsonb;fold_program jsonb;sources jsonb;physical jsonb;image_limit integer;
+ owner_oid oid;grantee record;table_name text;relation_id oid;used_rows integer;used_reads integer;audit_command jsonb;audit_key text;audit_id text;audit_tenant text;
+ audit_ids jsonb:='{}';audit_plan jsonb:='{}';audit_rows jsonb:='{}';audit_part record;audit_lock record;audit_present boolean;ordinal integer:=0;policy_read_cost integer;policy_row_cost integer;policy_keys text[];policy_key text;
+BEGIN
+ mirror:=p_snapshot->'mirror';
+ IF mirror IS NULL OR mirror='null'::jsonb THEN RETURN QUERY SELECT 0,0;RETURN;END IF;
+ proof:=kaname.authority_protocol_attestation();
+ IF p_snapshot IS DISTINCT FROM kaname._authority_binding_stage_snapshot_v3()
+ OR p_snapshot->>'locked_xid' IS DISTINCT FROM proof->>'transaction_id'
+ OR p_snapshot->>'locked_at' IS DISTINCT FROM proof->>'decision_at'
+ OR proof->>'mode' IS DISTINCT FROM 'accounts' OR p_snapshot->'accounts' IS DISTINCT FROM proof->'accounts'
+ OR p_rows IS NULL OR p_rows<0 OR p_rows>100000 OR p_reads IS NULL OR p_reads<0 OR p_reads>4096
+ OR to_regclass('pg_temp.kaname_binding_mirror_program') IS NOT NULL OR to_regclass('pg_temp.kaname_binding_mirror_images') IS NOT NULL THEN
+  RAISE EXCEPTION 'binding mirror prepare lacks exact held epoch witness' USING ERRCODE='42501';END IF;
+ commands:=mirror->'commands';
+ SELECT jsonb_build_object('commands',coalesce(jsonb_agg(jsonb_build_object('kind',CASE WHEN c->>'Kind' IN ('write','delete')
+  THEN 'fga.tuple.'||(c->>'Kind') ELSE 'binding.domain' END,'request',coalesce(nullif(c->'Tuples','null'::jsonb),'[]'::jsonb)) ORDER BY n),'[]'::jsonb))
+ INTO fold_program FROM jsonb_array_elements(commands) WITH ORDINALITY q(c,n);
+ FOREACH table_name IN ARRAY ARRAY['relation_fact','access_binding_emitted_tuples','resource_registration_pointer',
+  'resource_registration_retirement','cluster_admin_grants','access_bindings'] LOOP
+  IF NOT has_table_privilege((proof->>'invoker_oid')::oid,('kaname.'||table_name)::regclass,'SELECT') THEN
+   RAISE EXCEPTION 'binding mirror fold requires original SELECT privileges' USING ERRCODE='42501';END IF;
+ END LOOP;
+ SELECT r.logical_reads,r.logical_rows INTO STRICT policy_read_cost,policy_row_cost FROM pg_temp.kaname_binding_mirror_policy_receipt r WHERE r.singleton;
+ sources:=kaname._authority_crud_fold_capture_v3(fold_program,p_rows-policy_row_cost,p_reads-policy_read_cost);
+ -- Новый собственный claim может не иметь OLD ledger. Его carrier уже
+ -- перечитан в RR и защищён неизменными epoch/row locks; новое SQL не нужно.
+ IF sources->'bindings' ? (p_snapshot->>'binding_id') AND sources->'bindings'->(p_snapshot->>'binding_id') IS DISTINCT FROM mirror->'binding' THEN
+  RAISE EXCEPTION 'binding mirror carrier changed under epoch witness' USING ERRCODE='P1034';END IF;
+ sources:=jsonb_set(sources,'{bindings}',(sources->'bindings')||jsonb_build_object(p_snapshot->>'binding_id',mirror->'binding'));
+ used_rows:=(sources->>'logical_rows')::integer+policy_row_cost;used_reads:=(sources->>'logical_reads')::integer+policy_read_cost;
+ -- Audit присутствует в том же stream. Tenant/ID и UNIQUE wait готовятся до clock.
+ FOR audit_command IN SELECT value FROM jsonb_array_elements(commands) LOOP
+  ordinal:=ordinal+1;
+  IF audit_command->>'Kind'<>'audit' THEN CONTINUE;END IF;
+  IF NOT has_table_privilege((proof->>'invoker_oid')::oid,'kaname.audit_outbox','INSERT') THEN
+   RAISE EXCEPTION 'binding audit requires original INSERT ACL' USING ERRCODE='42501';END IF;
+  audit_tenant:=NULL;
+  IF audit_command#>>'{Scope,Type}'='account' THEN audit_tenant:=nullif(audit_command#>>'{Scope,ID}','');
+  ELSIF audit_command#>>'{Scope,Type}'='project' THEN
+   IF NOT has_table_privilege((proof->>'invoker_oid')::oid,'kaname.projects','SELECT') THEN
+    RAISE EXCEPTION 'binding audit requires original project SELECT ACL' USING ERRCODE='42501';END IF;
+   used_reads:=used_reads+1;IF used_reads>p_reads THEN RAISE EXCEPTION 'binding audit read budget exceeded' USING ERRCODE='54000';END IF;
+   SELECT account_id INTO audit_tenant FROM kaname.projects WHERE id=audit_command#>>'{Scope,ID}' FOR KEY SHARE;
+   IF FOUND THEN used_rows:=used_rows+1;END IF;
+  END IF;
+  audit_id:='evt_'||substr(replace(gen_random_uuid()::text,'-',''),1,22);
+  IF audit_ids ? audit_id THEN RAISE EXCEPTION 'binding audit random ID repeated' USING ERRCODE='P1034';END IF;
+  audit_ids:=audit_ids||jsonb_build_object(audit_id,true);
+  audit_key:=jsonb_build_array(audit_command->>'Binding',audit_command#>>'{Member,ObjectType}',audit_command#>>'{Member,ObjectID}',
+   audit_command#>>'{Scope,Type}',audit_command#>>'{Scope,ID}')::text;
+  audit_plan:=audit_plan||jsonb_build_object(audit_key,coalesce(audit_plan->audit_key,'[]'::jsonb)||
+   jsonb_build_array(jsonb_build_object('id',audit_id,'tenant_account_id',audit_tenant)));
+ END LOOP;
+ IF audit_ids<>'{}'::jsonb THEN
+  LOCK TABLE kaname.audit_outbox IN ROW EXCLUSIVE MODE;
+  FOR audit_lock IN SELECT DISTINCT hashtext(k) h FROM jsonb_object_keys(audit_ids) k ORDER BY h LOOP
+   PERFORM pg_advisory_xact_lock(1262569298,audit_lock.h);
+  END LOOP;
+  FOR audit_id IN SELECT k FROM jsonb_object_keys(audit_ids) k ORDER BY k COLLATE "C" LOOP
+   used_reads:=used_reads+1;IF used_reads>p_reads THEN RAISE EXCEPTION 'binding audit reservation read budget exceeded' USING ERRCODE='54000';END IF;
+   SELECT true INTO audit_present FROM kaname.audit_outbox a WHERE a.id=audit_id FOR UPDATE;
+   IF coalesce(audit_present,false) THEN RAISE EXCEPTION 'binding reserved audit ID already exists' USING ERRCODE='P1034';END IF;
+  END LOOP;
+ END IF;
+ physical:=kaname._authority_resource_object_physical_v2(commands,mirror->'members',mirror->'ledger',audit_plan,
+  transaction_timestamp(),(proof->>'decision_at')::timestamptz);
+ SELECT ARRAY(SELECT jsonb_array_elements_text(r.keys)),r.logical_reads,r.logical_rows
+ INTO policy_keys,policy_read_cost,policy_row_cost FROM pg_temp.kaname_binding_mirror_policy_receipt r WHERE singleton;
+ IF policy_keys IS NULL OR used_reads>p_reads OR used_rows>p_rows THEN
+  RAISE EXCEPTION 'binding mirror early policy receipt budget exceeded' USING ERRCODE='54000';END IF;
+ -- Верхняя граница включает оба BEFORE images для каждого fact upsert.
+ -- Это work charge, а не объявление фиктивных SELECT или changed rows.
+ SELECT jsonb_array_length(physical->'images')+jsonb_array_length(physical->'audits')+2*coalesce(sum(jsonb_array_length(coalesce(nullif(c->'Tuples','null'::jsonb),'[]'::jsonb))),0)
+ INTO image_limit FROM jsonb_array_elements(commands) c;
+ IF image_limit>100000 OR used_rows+image_limit>p_rows THEN
+  RAISE EXCEPTION 'binding mirror image work budget exceeded' USING ERRCODE='54000';END IF;
+ CREATE TEMP TABLE kaname_binding_mirror_program(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
+  backend integer NOT NULL,transaction_id text NOT NULL,invoker_oid oid NOT NULL,nonce text NOT NULL,binding_id text NOT NULL,
+  accounts jsonb NOT NULL,epochs jsonb NOT NULL,epoch_clock timestamptz NOT NULL,final_clock timestamptz,
+  image_limit integer NOT NULL,frozen jsonb NOT NULL,policy_keys jsonb NOT NULL,active_outbox integer,commands jsonb NOT NULL,
+  next_command integer NOT NULL DEFAULT 1,active_command integer,audit_rows jsonb NOT NULL DEFAULT '{}'::jsonb) ON COMMIT DROP;
+ CREATE TEMP TABLE kaname_binding_mirror_images(image_no integer PRIMARY KEY,table_name text NOT NULL,operation text NOT NULL,
+  image_hash bytea NOT NULL,old_hash bytea,new_hash bytea,old_image jsonb,new_image jsonb,
+  command_no integer NOT NULL,origin jsonb NOT NULL,required boolean NOT NULL,
+  attempted boolean NOT NULL DEFAULT false,consumed boolean NOT NULL DEFAULT false,
+  outbox_no integer,folded boolean NOT NULL DEFAULT false,epoch_keys jsonb) ON COMMIT DROP;
+ CREATE INDEX kaname_binding_mirror_obligations ON kaname_binding_mirror_images(command_no) WHERE required AND NOT consumed;
+ CREATE INDEX kaname_binding_mirror_image_key ON kaname_binding_mirror_images(table_name,operation,image_hash);
+ CREATE INDEX kaname_binding_mirror_old_key ON kaname_binding_mirror_images(table_name,old_hash);
+ CREATE INDEX kaname_binding_mirror_new_key ON kaname_binding_mirror_images(table_name,new_hash);
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ FOREACH relation_id IN ARRAY ARRAY['pg_temp.kaname_binding_mirror_program'::regclass,'pg_temp.kaname_binding_mirror_images'::regclass] LOOP
+  EXECUTE format('REVOKE ALL ON %s FROM PUBLIC',relation_id::regclass);
+  FOR grantee IN SELECT DISTINCT r.rolname FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a JOIN pg_catalog.pg_roles r ON r.oid=a.grantee
+   WHERE c.oid=relation_id AND a.grantee<>owner_oid LOOP
+   EXECUTE format('REVOKE ALL ON %s FROM %I',relation_id::regclass,grantee.rolname);
+  END LOOP;
+ END LOOP;
+ INSERT INTO pg_temp.kaname_binding_mirror_program(backend,transaction_id,invoker_oid,nonce,binding_id,accounts,epochs,epoch_clock,image_limit,frozen,policy_keys,commands)
+ VALUES((proof->>'backend')::integer,proof->>'transaction_id',(proof->>'invoker_oid')::oid,proof->>'nonce',p_snapshot->>'binding_id',
+  proof->'accounts',p_snapshot->'epochs',(proof->>'decision_at')::timestamptz,image_limit,
+  jsonb_build_object('mirror',mirror,'fold_program',fold_program,'sources',sources,'tx_at',transaction_timestamp(),'audit_plan',audit_plan),to_jsonb(policy_keys),commands);
+ used_reads:=used_reads+2*jsonb_array_length(commands)+(SELECT count(*) FROM jsonb_object_keys(audit_ids));
+ IF used_reads>p_reads THEN RAISE EXCEPTION 'binding command lifecycle read budget exceeded' USING ERRCODE='54000';END IF;
+ RETURN QUERY SELECT used_rows+image_limit,used_reads;
+END $$;
+
+-- После окончательных часов только чистые previously bounded images.
+-- Никаких новых scope/source reads, locks или reserved IDs здесь нет.
+CREATE FUNCTION kaname._authority_binding_mirror_finalize_v3(p_binding text) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE metadata jsonb;program jsonb;frozen jsonb;physical jsonb;folded jsonb;images jsonb;at_time timestamptz;proof jsonb;
+BEGIN
+ metadata:=kaname._authority_binding_mirror_store_v3();IF metadata IS NULL THEN RETURN;END IF;
+ proof:=kaname.authority_protocol_attestation();program:=kaname._authority_sequence_store_v3();
+ at_time:=(proof->>'decision_at')::timestamptz;
+ IF metadata->>'binding' IS DISTINCT FROM p_binding OR metadata->>'final_clock' IS NOT NULL
+ OR metadata->>'epoch_clock' IS DISTINCT FROM proof->>'decision_at'
+ OR program#>>'{frozen,kind}' IS DISTINCT FROM 'binding.stage' OR program#>>'{frozen,binding}' IS DISTINCT FROM p_binding
+ OR program->>'decision_at' IS DISTINCT FROM proof->>'decision_at' OR program->'selected'='null'::jsonb THEN
+  RAISE EXCEPTION 'binding mirror finalization lacks final epoch/sequence witness' USING ERRCODE='42501';END IF;
+ images:='[]'::jsonb;
+ IF program#>>'{frozen,expires_at}' IS NOT NULL AND (program#>>'{frozen,expires_at}')::timestamptz<=at_time THEN
+  UPDATE pg_temp.kaname_binding_mirror_program SET commands='[]'::jsonb WHERE singleton;
+ END IF;
+ IF program#>>'{frozen,expires_at}' IS NULL OR (program#>>'{frozen,expires_at}')::timestamptz>at_time THEN
+  SELECT p.frozen INTO STRICT frozen FROM pg_temp.kaname_binding_mirror_program p WHERE singleton;
+  physical:=kaname._authority_resource_object_physical_v2(frozen#>'{mirror,commands}',frozen#>'{mirror,members}',
+   frozen#>'{mirror,ledger}',frozen->'audit_plan',(frozen->>'tx_at')::timestamptz,at_time);
+  folded:=kaname._authority_crud_fold_images_v3(frozen->'fold_program',physical->'images',physical->'outboxes',
+   frozen->'sources',(frozen->>'tx_at')::timestamptz,at_time);
+  SELECT coalesce(jsonb_agg(i||CASE WHEN i->>'table'='fga_outbox' THEN jsonb_build_object('outbox',
+   outbox_number) ELSE '{}'::jsonb END ORDER BY n),'[]'::jsonb)
+ INTO images FROM (SELECT i,n,count(*) FILTER (WHERE i->>'table'='fga_outbox') OVER (ORDER BY n) AS outbox_number
+  FROM jsonb_array_elements(physical->'images') WITH ORDINALITY q(i,n)) numbered;
+ images:=images||(folded->'images');
+ SELECT coalesce(jsonb_object_agg(a->>'command',a->'row'),'{}'::jsonb) INTO physical FROM jsonb_array_elements(physical->'audits') a;
+ UPDATE pg_temp.kaname_binding_mirror_program SET audit_rows=physical WHERE singleton;
+ END IF;
+ IF jsonb_array_length(images)>(metadata->>'image_limit')::integer THEN
+  RAISE EXCEPTION 'binding mirror final images exceed prepared maximum' USING ERRCODE='54000';END IF;
+ INSERT INTO pg_temp.kaname_binding_mirror_images(image_no,table_name,operation,image_hash,old_hash,new_hash,old_image,new_image,command_no,origin,required,outbox_no)
+ SELECT n::integer,i->>'table',i->>'operation',sha256(convert_to(jsonb_build_array(i->'old',i->'new')::text,'UTF8')),
+  sha256(convert_to(nullif(i->'old','null'::jsonb)::text,'UTF8')),sha256(convert_to(nullif(i->'new','null'::jsonb)::text,'UTF8')),
+  nullif(i->'old','null'::jsonb),nullif(i->'new','null'::jsonb),(i->>'command')::integer,
+  frozen#>'{mirror,origins}'->((i->>'command')::integer-1),(i->>'required')::boolean,(i->>'outbox')::integer
+ FROM jsonb_array_elements(images) WITH ORDINALITY q(i,n);
+ UPDATE pg_temp.kaname_binding_mirror_images i SET epoch_keys=(
+  SELECT to_jsonb(array_remove(ARRAY[
+   CASE WHEN subject ~ '^(user|service_account):[^#*]+$' THEN subject
+ WHEN subject ~ '^(group|iam_group):[^#*]+#member$' THEN 'group:'||split_part(split_part(subject,':',2),'#',1)
+ WHEN subject ~ '^(account|project|cluster):[^#*]+$' THEN NULL ELSE '*' END],NULL))||(frozen#>'{mirror,policy_objects}'->((coalesce(i.new_image,i.old_image)->>'object_type')||':'||(coalesce(i.new_image,i.old_image)->>'object_id'))) FROM (SELECT coalesce(i.new_image,i.old_image)->>'subject' AS subject) q)
+ WHERE i.table_name='relation_fact';
+ IF EXISTS(SELECT 1 FROM pg_temp.kaname_binding_mirror_images i CROSS JOIN pg_temp.kaname_binding_mirror_program p
+  WHERE i.table_name='relation_fact' AND (i.epoch_keys IS NULL OR NOT p.policy_keys @> i.epoch_keys)) THEN
+  RAISE EXCEPTION 'binding mirror policy final keys exceed held maximum' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_binding_mirror_program SET final_clock=at_time,frozen='{}'::jsonb WHERE singleton;
+END $$;
+
+CREATE FUNCTION kaname._authority_binding_mirror_before_write_v3(p_table text,p_operation text,p_old jsonb,p_new jsonb) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE metadata jsonb;proof jsonb;header jsonb;v_row_value jsonb;identifier bigint;candidate jsonb;v_image_hash bytea;matched record;sequence_origin jsonb;
+BEGIN
+ IF p_table NOT IN ('access_binding_target_members','access_binding_emitted_tuples','fga_outbox','relation_fact') THEN RETURN false;END IF;
+ metadata:=kaname._authority_binding_mirror_store_v3();IF metadata IS NULL THEN RETURN false;END IF;
+ proof:=kaname.authority_protocol_attestation();
+ IF metadata->>'final_clock' IS NULL OR metadata->>'final_clock' IS DISTINCT FROM proof->>'decision_at'
+ OR metadata->>'epoch_clock' IS DISTINCT FROM proof->>'decision_at' THEN
+  RAISE EXCEPTION 'binding mirror write before final held proof' USING ERRCODE='42501';END IF;
+ header:=kaname._authority_sequence_header_v3();
+ IF header IS NULL OR header->>'family' IS DISTINCT FROM 'binding' OR header->'selected'='null'::jsonb THEN
+  RAISE EXCEPTION 'binding mirror selected sequence absent' USING ERRCODE='42501';END IF;
+ IF p_table IN ('access_binding_target_members','access_binding_emitted_tuples') THEN
+  IF (p_old IS NOT NULL AND p_old->>'binding_id' IS DISTINCT FROM metadata->>'binding')
+  OR (p_new IS NOT NULL AND p_new->>'binding_id' IS DISTINCT FROM metadata->>'binding') THEN
+   RAISE EXCEPTION 'binding mirror physical binding differs from prepared witness' USING ERRCODE='42501';END IF;
+ ELSIF p_table='fga_outbox' THEN
+  IF p_operation<>'INSERT' OR p_old IS NOT NULL THEN RETURN false;END IF;
+  identifier:=(p_new->>'id')::bigint;v_row_value:=p_new-'id';
+  IF NOT EXISTS(SELECT 1 FROM pg_temp.kaname_authority_sequence_effects e WHERE e.nonce=(header->>'nonce')::uuid
+   AND e.table_name='fga_outbox' AND e.reserved_id=identifier AND e.selected AND e.claimed AND NOT e.consumed
+   AND e.origin->>'family'='binding.stage' AND e.origin->>'binding'=metadata->>'binding' AND e.row_value=v_row_value) THEN
+   RAISE EXCEPTION 'binding mirror journal differs from selected sequence row' USING ERRCODE='42501';END IF;
+  SELECT e.origin INTO STRICT sequence_origin FROM pg_temp.kaname_authority_sequence_effects e
+   WHERE e.nonce=(header->>'nonce')::uuid AND e.table_name='fga_outbox' AND e.reserved_id=identifier;
+  p_new:=v_row_value;
+ END IF;
+ v_image_hash:=sha256(convert_to(jsonb_build_array(p_old,p_new)::text,'UTF8'));
+ SELECT i.* INTO matched FROM pg_temp.kaname_binding_mirror_images i
+ WHERE i.table_name=p_table AND i.operation=p_operation AND i.image_hash=v_image_hash
+ AND i.old_image IS NOT DISTINCT FROM p_old AND i.new_image IS NOT DISTINCT FROM p_new
+ AND NOT i.attempted
+ AND i.command_no=(SELECT p.active_command FROM pg_temp.kaname_binding_mirror_program p WHERE singleton)
+ AND (p_table<>'relation_fact' OR i.outbox_no=(SELECT p.active_outbox FROM pg_temp.kaname_binding_mirror_program p WHERE singleton))
+ AND (sequence_origin IS NULL OR (i.origin->'command'=sequence_origin->'command' AND i.origin->'coordinate'=sequence_origin->'coordinate'))
+ ORDER BY i.command_no,i.image_no LIMIT 1;
+ IF NOT FOUND THEN RAISE EXCEPTION 'binding mirror physical image absent or replayed' USING ERRCODE='42501';END IF;
+ IF EXISTS(SELECT 1 FROM pg_temp.kaname_binding_mirror_images i
+  WHERE i.command_no<matched.command_no AND ((i.required AND NOT i.consumed) OR (i.table_name='fga_outbox' AND NOT i.folded))) THEN
+  RAISE EXCEPTION 'binding mirror command precedes required effects' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_binding_mirror_images SET attempted=true WHERE image_no=matched.image_no;
+ RETURN true;
+END $$;
+
 -- RR compiler замыкает один полный binding. Owner хранит проверенный
 -- maximum; caller получает только счётчики, не разрешение и не reserved IDs.
 CREATE FUNCTION kaname.authority_binding_stage_sequence_capture_v3(p_input jsonb,p_accounts text[],p_epochs jsonb,p_rows integer,p_reads integer)
@@ -3447,10 +3851,11 @@ DECLARE invoker oid;owner_oid oid;source_index jsonb;entry record;actual record;
  binding jsonb;selectors jsonb;members jsonb;ledger jsonb;subjects integer;types text[]:=ARRAY[]::text[];
  catalog jsonb;coordinate jsonb;typ text;identifier text;graph jsonb;ancestry jsonb;certificate jsonb;
  current_members jsonb;current_ledger jsonb;member_proof jsonb;ledger_proof jsonb;
+ member_partitions jsonb;ledger_partitions jsonb;
  supplied jsonb:='{}'::jsonb;commands jsonb:='[]'::jsonb;maximum jsonb:='[]'::jsonb;
  command jsonb;tuple_value jsonb;seen_tuples jsonb;key text;supplied_count integer;
- narrow boolean;global_scope boolean;accounts text[];scope_result record;grantee record;
- used_rows integer:=0;used_reads integer:=0;
+ narrow boolean;global_scope boolean;mirror_local boolean;accounts text[];scope_result record;grantee record;
+ used_rows integer:=0;used_reads integer:=0;mirror_keys jsonb:='{}';mirror jsonb;coordinate_no integer:=0;policy_objects jsonb:='{}';policy_scopes jsonb;policy_model text;policy_state jsonb;policy_account text;
 BEGIN
  IF current_setting('transaction_isolation')<>'repeatable read' OR p_rows IS NULL OR p_rows<0 OR p_rows>100000
  OR p_reads IS NULL OR p_reads<0 OR p_reads>4096 OR jsonb_typeof(p_input) IS DISTINCT FROM 'object'
@@ -3511,15 +3916,34 @@ BEGIN
  OR encode(sha256(convert_to(bundle.model_source,'UTF8')),'hex') IS DISTINCT FROM bundle.model_id THEN
   RAISE EXCEPTION 'binding canonical bundle corrupt' USING ERRCODE='42501';END IF;
  catalog:=convert_from(bundle.catalog_json,'UTF8')::jsonb;
+ -- Полные owner-проверенные строки делятся один раз, без DISTINCT и фильтра статусов.
+ -- Порядок внутри coordinate сохраняет исходную последовательность witnesses.
+ -- НАЧАЛО разбиения coordinate
+ WITH member_groups AS (
+  SELECT jsonb_build_array(s.value->2->>'object_type',s.value->2->>'object_id')::text COLLATE "C" AS coordinate_key,
+   jsonb_agg(s.value->2 ORDER BY s.position) AS rows_value
+  FROM jsonb_array_elements(members->'states') WITH ORDINALITY s(value,position)
+  GROUP BY jsonb_build_array(s.value->2->>'object_type',s.value->2->>'object_id')::text COLLATE "C"
+ ), ledger_groups AS (
+  SELECT jsonb_build_array(s.value->2->>'member_object_type',s.value->2->>'member_object_id')::text COLLATE "C" AS coordinate_key,
+   jsonb_agg(s.value->2 ORDER BY s.position) AS rows_value
+  FROM jsonb_array_elements(ledger->'states') WITH ORDINALITY s(value,position)
+  GROUP BY jsonb_build_array(s.value->2->>'member_object_type',s.value->2->>'member_object_id')::text COLLATE "C"
+ )
+ SELECT coalesce((SELECT jsonb_object_agg(coordinate_key,rows_value) FROM member_groups),'{}'::jsonb),
+  coalesce((SELECT jsonb_object_agg(coordinate_key,rows_value) FROM ledger_groups),'{}'::jsonb)
+ INTO member_partitions,ledger_partitions;
+ -- КОНЕЦ разбиения coordinate
  -- Тот же coordinate order, что keyset typ/id; map iteration caller его не выбирает.
  FOR coordinate IN SELECT value FROM jsonb_array_elements(p_input->'coordinates') ORDER BY value->>'type' COLLATE "C",value->>'id' COLLATE "C" LOOP
-  typ:=coordinate->>'type';identifier:=coordinate->>'id';
+  coordinate_no:=coordinate_no+1;typ:=coordinate->>'type';identifier:=coordinate->>'id';
   graph:=kaname._authority_resource_projection_v2(source_index,typ,identifier);
   ancestry:=kaname._authority_resource_ancestor_graph_v2(source_index,catalog,graph);
   graph:=graph||jsonb_build_object('ancestors',ancestry->'ancestors');
   certificate:=kaname._authority_resource_coordinate_certificate_v2(source_index,catalog,binding->>'id',graph,coordinate->'desired');
-  SELECT coalesce(jsonb_agg(value->2),'[]'::jsonb) INTO current_members FROM jsonb_array_elements(members->'states') WHERE value->2->>'object_type'=typ AND value->2->>'object_id'=identifier;
-  SELECT coalesce(jsonb_agg(value->2),'[]'::jsonb) INTO current_ledger FROM jsonb_array_elements(ledger->'states') WHERE value->2->>'member_object_type'=typ AND value->2->>'member_object_id'=identifier;
+  key:=jsonb_build_array(typ,identifier)::text;
+  current_members:=coalesce(member_partitions->key,'[]'::jsonb);
+  current_ledger:=coalesce(ledger_partitions->key,'[]'::jsonb);
   member_proof:=kaname._authority_resource_member_obligations_v2(binding,current_members,certificate->'desired',coordinate->'commands',false,true);
   -- Converge явно включает completion даже при одном subject; остальные
   -- ветви ledger verifier используют фактический subject_count без подмены.
@@ -3532,6 +3956,32 @@ BEGIN
    SELECT * INTO STRICT scope_result FROM kaname.authority_group_object_scopes(identifier);
    global_scope:=scope_result.global_scope;accounts:=accounts||scope_result.accounts;
   END IF;
+  mirror_local:=false;
+  IF NOT global_scope AND typ NOT IN ('iam.account','iam.project','iam.role','iam.group','iam.serviceAccount','iam.accessBinding','iam.user') THEN
+   mirror_local:=kaname._authority_binding_mirror_locality_v3(source_index,catalog,graph,binding,coordinate,current_ledger);
+   global_scope:=NOT mirror_local;
+   IF mirror_local THEN mirror_keys:=mirror_keys||jsonb_build_object(coordinate_no::text,jsonb_build_array(typ,identifier));END IF;
+  END IF;
+  IF mirror_local OR typ='iam.group' THEN
+   policy_model:=CASE WHEN typ='iam.group' THEN 'iam_group' ELSE NULL END;
+   IF policy_model IS NULL THEN
+    SELECT r->>'ObjectType' INTO STRICT policy_model FROM jsonb_array_elements(catalog#>'{Live,Resources}') r
+     WHERE (r->>'Module')||'.'||(r->>'Resource')=typ;
+   END IF;
+   SELECT coalesce(jsonb_agg('scope:'||a ORDER BY a COLLATE "C"),'[]'::jsonb) INTO policy_scopes FROM jsonb_object_keys(graph->'accounts') a;
+   IF mirror_local THEN
+    FOR policy_state IN SELECT value FROM jsonb_array_elements(kaname._authority_resource_require_capture_v2(source_index,4,policy_model,identifier)->'states') LOOP
+     policy_account:=policy_state->2->>'account_id';
+     IF coalesce(policy_account,'')='' THEN RAISE EXCEPTION 'binding retained policy owner absent' USING ERRCODE='42501';END IF;
+     policy_scopes:=policy_scopes||jsonb_build_array('scope:'||policy_account);
+    END LOOP;
+   END IF;
+   -- Legacy object lookup при отсутствии current owner инвалидировал ROOT.
+   -- Retained области добавляются, но не отменяют этот исходный ROOT эффект.
+   IF graph->'current_accounts'='[]'::jsonb THEN policy_scopes:=policy_scopes||jsonb_build_array('*');END IF;
+   SELECT coalesce(jsonb_agg(DISTINCT k ORDER BY k),'[]'::jsonb) INTO policy_scopes FROM jsonb_array_elements(policy_scopes) k;
+   policy_objects:=policy_objects||jsonb_build_object(policy_model||':'||identifier,policy_scopes);
+  END IF;
   seen_tuples:='{}'::jsonb;
   FOR command IN SELECT value FROM jsonb_array_elements(coordinate->'commands') LOOP
    IF command->>'Kind' NOT IN ('write','delete') THEN CONTINUE;END IF;
@@ -3539,12 +3989,12 @@ BEGIN
     key:=jsonb_build_array(command->>'Kind',tuple_value)::text;
     IF seen_tuples ? key THEN RAISE EXCEPTION 'binding duplicate physical tuple within coordinate' USING ERRCODE='42501';END IF;
     seen_tuples:=seen_tuples||jsonb_build_object(key,true);
-    IF tuple_value->>'Object' NOT LIKE 'iam_group:%' THEN global_scope:=true;END IF;
+    IF NOT mirror_local AND tuple_value->>'Object' NOT LIKE 'iam_group:%' THEN global_scope:=true;END IF;
    END LOOP;
   END LOOP;
  END LOOP;
  SELECT coalesce(array_agg(DISTINCT x COLLATE "C" ORDER BY x COLLATE "C"),ARRAY[]::text[]) INTO accounts FROM unnest(accounts) x;
- IF cardinality(accounts)>256 THEN global_scope:=true;END IF;
+ IF cardinality(accounts)>256 OR (mirror_keys<>'{}'::jsonb AND (cardinality(accounts)<>1 OR accounts[1] IS DISTINCT FROM binding->>'resource_id')) THEN global_scope:=true;END IF;
  IF global_scope THEN accounts:=NULL;END IF;
  IF accounts IS DISTINCT FROM p_accounts OR kaname.authority_binding_epoch_read(accounts) IS DISTINCT FROM p_epochs THEN
   RAISE EXCEPTION 'binding owner scope/epochs differ' USING ERRCODE='P1034';END IF;
@@ -3592,16 +4042,27 @@ BEGIN
  )
  SELECT coalesce(jsonb_agg(d.descriptor ORDER BY d.effect_no),'[]'::jsonb) INTO maximum FROM descriptors d;
  IF jsonb_array_length(maximum)>100000 OR octet_length(maximum::text)>67108864 THEN RAISE EXCEPTION 'binding maximum exceeded' USING ERRCODE='54000';END IF;
+ -- Подлинные canonical OLD строки и commands остаются private owner witness.
+ -- Порядок физического применения: все обычные commands, затем delete phase.
+ IF NOT global_scope AND mirror_keys<>'{}'::jsonb THEN
+  SELECT jsonb_build_object('binding',binding,'coordinates',mirror_keys,'origins',jsonb_agg(c-'body' ORDER BY CASE WHEN c#>>'{body,Kind}'='delete' THEN 1 ELSE 0 END,(c->>'command')::integer),'commands',coalesce(jsonb_agg(c->'body'
+   ORDER BY CASE WHEN c#>>'{body,Kind}'='delete' THEN 1 ELSE 0 END,(c->>'command')::integer),'[]'::jsonb))
+  INTO mirror FROM jsonb_array_elements(commands) c;
+  mirror:=mirror||jsonb_build_object('policy_objects',policy_objects,'budget_reads',p_reads-used_reads,'budget_rows',p_rows-used_rows,'members',(SELECT coalesce(jsonb_agg(s->2),'[]'::jsonb) FROM jsonb_array_elements(members->'states') s
+   WHERE true),
+   'ledger',(SELECT coalesce(jsonb_agg(s->2),'[]'::jsonb) FROM jsonb_array_elements(ledger->'states') s
+   WHERE true));
+ END IF;
  CREATE TEMP TABLE kaname_binding_sequence_snapshot(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),backend integer NOT NULL,
   invoker_oid oid NOT NULL,stage_xid text NOT NULL,binding_id text NOT NULL,model_id text NOT NULL,catalog_id text NOT NULL,projector_version text NOT NULL,
-  accounts text[],epochs jsonb NOT NULL,expires_at timestamptz,commands jsonb NOT NULL,maximum jsonb NOT NULL,consumed boolean NOT NULL DEFAULT false) ON COMMIT PRESERVE ROWS;
+  accounts text[],epochs jsonb NOT NULL,expires_at timestamptz,commands jsonb NOT NULL,maximum jsonb NOT NULL,mirror jsonb,locked_xid text,locked_at timestamptz,consumed boolean NOT NULL DEFAULT false) ON COMMIT PRESERVE ROWS;
  REVOKE ALL ON pg_temp.kaname_binding_sequence_snapshot FROM PUBLIC;
  FOR grantee IN SELECT DISTINCT r.rolname FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a JOIN pg_catalog.pg_roles r ON r.oid=a.grantee
   WHERE c.oid='pg_temp.kaname_binding_sequence_snapshot'::regclass AND a.grantee<>owner_oid LOOP
   EXECUTE format('REVOKE ALL ON pg_temp.kaname_binding_sequence_snapshot FROM %I',grantee.rolname);
  END LOOP;
- INSERT INTO pg_temp.kaname_binding_sequence_snapshot(backend,invoker_oid,stage_xid,binding_id,model_id,catalog_id,projector_version,accounts,epochs,expires_at,commands,maximum)
- VALUES(pg_backend_pid(),invoker,pg_current_xact_id()::text,binding->>'id',bundle.model_id,bundle.catalog_id,bundle.projector_version,accounts,p_epochs,(binding->>'expires_at')::timestamptz,commands,maximum);
+ INSERT INTO pg_temp.kaname_binding_sequence_snapshot(backend,invoker_oid,stage_xid,binding_id,model_id,catalog_id,projector_version,accounts,epochs,expires_at,commands,maximum,mirror)
+ VALUES(pg_backend_pid(),invoker,pg_current_xact_id()::text,binding->>'id',bundle.model_id,bundle.catalog_id,bundle.projector_version,accounts,p_epochs,(binding->>'expires_at')::timestamptz,commands,maximum,mirror);
  RETURN QUERY SELECT used_rows,used_reads;
 END $$;
 
@@ -3630,7 +4091,7 @@ END $$;
 CREATE FUNCTION kaname.authority_binding_stage_sequence_prepare_v3(p_binding text,p_accounts text[],p_epochs jsonb,p_rows integer,p_reads integer)
 RETURNS TABLE(logical_rows integer,logical_reads integer)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE snapshot jsonb;proof jsonb;expected jsonb;actual jsonb;used integer;count_rows integer;
+DECLARE snapshot jsonb;proof jsonb;expected jsonb;actual jsonb;used integer;count_rows integer;mirror_cost record;
 BEGIN
  snapshot:=kaname._authority_binding_stage_snapshot_v3();proof:=kaname.authority_protocol_attestation();
  IF current_setting('transaction_isolation')<>'read committed' OR snapshot->>'binding_id' IS DISTINCT FROM p_binding
@@ -3652,11 +4113,13 @@ BEGIN
  SELECT coalesce(jsonb_agg(q.body ORDER BY q.seq),'[]'::jsonb) INTO actual FROM
   (SELECT seq,body FROM pg_temp.kaname_binding_stage ORDER BY seq LIMIT p_rows+1) q;
  IF actual IS DISTINCT FROM expected THEN RAISE EXCEPTION 'binding runtime spool differs from owner program' USING ERRCODE='42501';END IF;
- used:=kaname._authority_sequence_reserve_v3('binding',snapshot->'maximum',p_reads-2);
+ SELECT * INTO STRICT mirror_cost FROM kaname._authority_binding_mirror_prepare_v3(snapshot,p_rows-count_rows,p_reads-2);
+ count_rows:=count_rows+mirror_cost.logical_rows;
+ used:=kaname._authority_sequence_reserve_v3('binding',snapshot->'maximum',p_reads-2-mirror_cost.logical_reads);
  PERFORM kaname._authority_sequence_freeze_v3(jsonb_build_object('kind','binding.stage','binding',p_binding,
   'expires_at',snapshot->'expires_at','epochs',p_epochs,'accounts',snapshot->'accounts'));
  UPDATE pg_temp.kaname_binding_sequence_snapshot SET consumed=true WHERE singleton;
- RETURN QUERY SELECT count_rows,used+2;
+ RETURN QUERY SELECT count_rows,used+2+mirror_cost.logical_reads;
 END $$;
 
 CREATE FUNCTION kaname.authority_binding_stage_sequence_finalize_v3(p_binding text) RETURNS void
@@ -3676,6 +4139,7 @@ BEGIN
   SELECT coalesce(array_agg((value->>'ordinal')::integer ORDER BY (value->>'ordinal')::integer),ARRAY[]::integer[]) INTO ordinals FROM jsonb_array_elements(program->'maximum');
  END IF;
  PERFORM kaname._authority_sequence_select_v3(ordinals,at_time);
+ PERFORM kaname._authority_binding_mirror_finalize_v3(p_binding);
 END $$;
 -- +goose StatementEnd
 
@@ -3698,6 +4162,7 @@ BEGIN
  WHEN 1 THEN table_name:='projects';predicate:='r.id=$2';IF typ<>'project' THEN RAISE EXCEPTION 'source type' USING ERRCODE='42501';END IF;
  WHEN 2 THEN table_name:='resource_mirror';predicate:='r.object_type=$1 AND r.object_id=$2';
  WHEN 3 THEN table_name:='resource_parent_edge';predicate:='r.object_type=$1 AND r.object_id=$2';
+ WHEN 4 THEN table_name:='resource_registration_scope';predicate:='r.object_type=$1 AND r.object_id=$2';
  WHEN 8 THEN table_name:='access_bindings';predicate:='r.id=$2';
  WHEN 9 THEN table_name:='access_binding_subjects';predicate:='r.binding_id=$2';
  WHEN 10 THEN table_name:='access_binding_target_members';predicate:='r.binding_id=$2';
@@ -4366,7 +4831,12 @@ BEGIN
  OR TG_OP<>'INSERT' OR TG_WHEN<>'AFTER' OR TG_LEVEL<>'ROW' THEN
   RAISE EXCEPTION 'sequence applied trigger graph changed' USING ERRCODE='42501';END IF;
  SELECT q.proof,q.header INTO STRICT proof,program FROM kaname._authority_sequence_probe_v3() q;
- IF proof IS NULL THEN RETURN NULL;END IF;
+ IF proof IS NULL THEN
+  IF TG_TABLE_NAME='fga_outbox' THEN
+   PERFORM kaname._authority_forward_row_v4((to_jsonb(NEW)->>'id')::bigint,to_jsonb(NEW)-'id',true);
+  END IF;
+  RETURN NULL;
+ END IF;
  IF program IS NULL THEN RETURN NULL;END IF;
  row_value:=to_jsonb(NEW);
  IF TG_TABLE_NAME='resource_journal' THEN
@@ -4448,7 +4918,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS
 DECLARE proof jsonb;storage oid;owner_oid oid;item record;actual jsonb;
 BEGIN
  proof:=kaname.authority_protocol_attestation();
- IF proof IS NULL OR p_family NOT IN ('binding','role') OR p_family IS NULL THEN RAISE EXCEPTION 'invalid sequence expectation' USING ERRCODE='42501';END IF;
+ IF proof IS NULL OR p_family NOT IN ('binding','role','group_add') OR p_family IS NULL THEN RAISE EXCEPTION 'invalid sequence expectation' USING ERRCODE='42501';END IF;
  SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
  storage:=to_regclass('pg_temp.kaname_sequence_expectation');
  IF storage IS NULL THEN
@@ -4633,6 +5103,13 @@ BEGIN
   FROM pg_temp.kaname_authority_sequence_effects e
   WHERE e.nonce=(program->>'nonce')::uuid AND e.table_name='resource_journal' AND e.selected
    AND e.origin_digest=sha256(convert_to(actual_origin::text,'UTF8')) AND e.origin=actual_origin AND NOT e.registered;
+  IF program->>'family'='group_add' THEN
+   IF TG_TABLE_NAME<>'group_members' OR TG_OP<>'INSERT' OR TG_WHEN<>'AFTER' OR matches<>1
+   OR (kaname._authority_group_add_program_v3())#>>'{command_state,member_attempted}'<>'true'
+   OR (kaname._authority_group_add_program_v3())#>>'{command_state,member_inserted}'<>'false' THEN
+    RAISE EXCEPTION 'group addition actual member origin differs' USING ERRCODE='42501';END IF;
+   UPDATE pg_temp.kaname_group_add_command SET member_inserted=true WHERE singleton;
+  END IF;
   IF matches>1 THEN RAISE EXCEPTION 'ambiguous journal source ordinal' USING ERRCODE='42501';END IF;
   IF matches=1 THEN
    UPDATE pg_temp.kaname_authority_sequence_effects e SET registered=true
@@ -4697,7 +5174,7 @@ DECLARE proof jsonb;owner_oid oid;storage oid;grantee record;entry jsonb;item re
 BEGIN
  proof:=kaname.authority_protocol_attestation();
  IF proof IS NULL OR current_setting('transaction_isolation')<>'read committed'
- OR p_family IS NULL OR p_family NOT IN ('resource','binding','role','cluster','metadata','sa_state')
+ OR p_family IS NULL OR p_family NOT IN ('resource','binding','role','cluster','metadata','sa_state','group_add')
  OR jsonb_typeof(p_maximum) IS DISTINCT FROM 'array' OR jsonb_array_length(p_maximum)>100000
  OR p_reads IS NULL OR p_reads<0 OR p_reads>4096 THEN
   RAISE EXCEPTION 'invalid bounded sequence maximum' USING ERRCODE='42501';END IF;
@@ -4890,6 +5367,13 @@ CREATE FUNCTION kaname._authority_sequence_complete_v3() RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE program jsonb;
 BEGIN
+ PERFORM kaname._authority_group_add_complete_v3();
+ IF kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN
+  IF EXISTS(SELECT 1 FROM pg_temp.kaname_binding_mirror_program WHERE final_clock IS NULL OR active_command IS NOT NULL OR next_command<>jsonb_array_length(commands)+1 OR audit_rows<>'{}'::jsonb)
+  OR EXISTS(SELECT 1 FROM pg_temp.kaname_binding_mirror_images WHERE (required AND NOT consumed)
+   OR (table_name='fga_outbox' AND NOT folded)) THEN
+   RAISE EXCEPTION 'binding mirror required program incomplete' USING ERRCODE='42501';END IF;
+ END IF;
  program:=kaname._authority_sequence_header_v3();
  IF program IS NULL THEN RETURN;END IF;
  IF program#>>'{frozen,mode}'='authorize' THEN
@@ -5287,7 +5771,7 @@ BEGIN
   IF slot IS NULL OR slot<=last_slot OR jsonb_typeof(relations) IS DISTINCT FROM 'array'
   OR jsonb_array_length(relations)=0 OR NOT (option_value->'relations') @> relations
   OR row_value-ARRAY['event_type','payload','created_at']<>'{}'::jsonb
-  OR row_value->'payload'-ARRAY['user','object','relation','relations']<>'{}'::jsonb THEN
+  OR (row_value->'payload')-ARRAY['user','object','relation','relations']<>'{}'::jsonb THEN
    RAISE EXCEPTION 'object final sequence escaped frozen origin or order' USING ERRCODE='42501';END IF;
   chosen:=chosen||jsonb_build_array(jsonb_build_object('ordinal',slot,
    'origin',origin||jsonb_build_object('command',outbox->'command'),'row',row_value-'created_at'));
@@ -5553,7 +6037,7 @@ BEGIN
   RAISE EXCEPTION 'registration sequence final lacks frozen maximum' USING ERRCODE='42501';END IF;
  FOR outbox IN SELECT value FROM jsonb_array_elements(p_body#>'{physical,outboxes}') LOOP
   expected:=program#>ARRAY['frozen','fga',n::text];n:=n+1;
-  IF expected IS NULL OR expected->'row' IS DISTINCT FROM outbox->'row'-'created_at'
+  IF expected IS NULL OR expected->'row' IS DISTINCT FROM (outbox->'row')-'created_at'
   OR expected#>'{origin,command}' IS DISTINCT FROM outbox->'command' THEN
    RAISE EXCEPTION 'registration FGA origin/row/multiplicity changed after maximum' USING ERRCODE='42501';END IF;
   chosen:=chosen||jsonb_build_array(jsonb_build_object('ordinal',expected->'slot','origin',expected->'origin','row',expected->'row'));
@@ -6167,7 +6651,2055 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 $$;
 -- +goose StatementEnd
 
+
 -- +goose StatementBegin
+-- Только FULL Add: frozen команда не меняет typed Remove/lifecycle.
+-- Программа effects хранит exact origin/row и ID; отдельный приватный ряд
+-- доказывает выполнение тела, в том числе INSERT ON CONFLICT DO NOTHING.
+CREATE FUNCTION kaname._authority_group_add_program_v3() RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb; state_oid oid; sequence_oid oid; owner_oid oid; state jsonb;
+BEGIN
+ state_oid:=to_regclass('pg_temp.kaname_group_add_command');
+ IF state_oid IS NOT NULL THEN
+  SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class WHERE oid=state_oid AND relowner=owner_oid AND relkind='r' AND relpersistence='t')
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+  WHERE c.oid=state_oid AND a.grantee<>owner_oid)
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl) x
+  WHERE a.attrelid=state_oid AND x.grantee<>owner_oid) THEN
+  RAISE EXCEPTION 'untrusted group addition command storage' USING ERRCODE='42501';END IF;
+ SELECT to_jsonb(s) INTO state FROM pg_temp.kaname_group_add_command s WHERE singleton;
+ END IF;
+ IF state IS NULL THEN
+  -- Отсутствующий/пустой private state не превращает уже зарезервированный
+  -- Add в обычный default. При другой family сохраняется прежний путь без
+  -- требования attestation для обычных subject-change producers.
+  sequence_oid:=to_regclass('pg_temp.kaname_authority_sequence_program');
+  IF sequence_oid IS NOT NULL THEN
+   -- Владелец нужен только для существующего storage. При двух отсутствующих
+   -- таблицах нет ни строки private-программы, ни объекта для проверки ACL.
+   IF owner_oid IS NULL THEN
+    SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+   END IF;
+   IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class WHERE oid=sequence_oid AND relowner=owner_oid AND relkind='r' AND relpersistence='t')
+   OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+    WHERE c.oid=sequence_oid AND a.grantee<>owner_oid) THEN
+    RAISE EXCEPTION 'untrusted group addition sequence storage' USING ERRCODE='42501';END IF;
+   IF EXISTS(SELECT 1 FROM pg_temp.kaname_authority_sequence_program WHERE family='group_add') THEN
+    RAISE EXCEPTION 'group addition command storage disappeared' USING ERRCODE='42501';END IF;
+  END IF;
+  RETURN NULL;
+ END IF;
+ program:=kaname._authority_sequence_store_v3();
+ IF program IS NULL OR program->>'family' IS DISTINCT FROM 'group_add'
+ OR state_oid IS DISTINCT FROM (program#>>'{frozen,state_oid}')::oid
+ OR state->>'nonce' IS DISTINCT FROM program->>'nonce'
+ OR program#>>'{frozen,kind}' IS DISTINCT FROM 'group.add'
+ OR (SELECT count(*) FROM pg_temp.kaname_group_add_command)<>1 THEN
+  RAISE EXCEPTION 'group addition command lifetime changed' USING ERRCODE='42501';END IF;
+ RETURN program||jsonb_build_object('command_state',state);
+END $$;
+
+CREATE FUNCTION kaname.authority_group_add_prepare_v3(p_request jsonb,p_rows integer,p_reads integer)
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb; group_row jsonb; locked_group jsonb; old_member jsonb; old_fact jsonb;
+ member_template jsonb; fact_insert jsonb; fact_final jsonb; subject_row jsonb;
+ d3 jsonb; target jsonb; valid boolean; duplicate boolean; invoker oid; owner_oid oid;
+ table_name text; keys text[]; k text; maximum jsonb:='[]'; source_rows integer:=0; source_reads integer:=0;
+ cost integer; reserved_subject_id bigint; state_oid oid; grant_row record; member_keys text[]; fact_keys text[];
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'group' OR proof->>'purpose' IS DISTINCT FROM 'decision'
+ OR proof->>'writer_contract' IS DISTINCT FROM '2' OR proof->>'consumer_profile' IS DISTINCT FROM 'full'
+ OR proof->>'consumer_finalized' IS DISTINCT FROM 'true'
+ OR jsonb_typeof(p_request) IS DISTINCT FROM 'object'
+ OR p_request-ARRAY['group_id','member_type','member_id']<>'{}'::jsonb
+ OR jsonb_typeof(p_request->'group_id') IS DISTINCT FROM 'string'
+ OR jsonb_typeof(p_request->'member_id') IS DISTINCT FROM 'string'
+ OR p_request->>'group_id' !~ '^[^:#*[:space:]]+$' OR p_request->>'member_id' !~ '^[^:#*[:space:]]+$'
+ OR coalesce(p_request->>'member_type','') NOT IN ('user','service_account') THEN
+  RAISE EXCEPTION 'group addition requires closed FULL decision request' USING ERRCODE='42501';END IF;
+ IF p_rows IS NULL OR p_rows NOT BETWEEN 1 AND 100000 OR p_reads IS NULL OR p_reads NOT BETWEEN 1 AND 4096 THEN
+  RAISE EXCEPTION 'group addition preparation budget absent' USING ERRCODE='54000';END IF;
+ IF kaname._authority_sequence_store_v3() IS NOT NULL THEN
+  RAISE EXCEPTION 'group addition command already prepared' USING ERRCODE='42501';END IF;
+ PERFORM kaname._authority_sequence_expect_v3('group_add');
+ invoker:=(proof->>'invoker_oid')::oid;
+ -- Оригинальные права тела проверяются до SD чтений/резерва; EXECUTE не
+ -- предоставляет ни нового INSERT/UPDATE, ни доступа к sequence без USAGE.
+ FOREACH table_name IN ARRAY ARRAY['groups','accounts','group_members','relation_fact',
+  CASE WHEN p_request->>'member_type'='user' THEN 'users' ELSE 'service_accounts' END] LOOP
+  IF NOT has_table_privilege(invoker,to_regclass('kaname.'||table_name),'SELECT') THEN
+   RAISE EXCEPTION 'group addition original SELECT privilege absent' USING ERRCODE='42501';END IF;
+ END LOOP;
+ IF NOT has_table_privilege(invoker,'kaname.group_members','INSERT')
+ OR NOT has_table_privilege(invoker,'kaname.relation_fact','INSERT') OR NOT has_table_privilege(invoker,'kaname.relation_fact','UPDATE')
+ OR NOT has_table_privilege(invoker,'kaname.subject_change_outbox','INSERT')
+ OR NOT has_sequence_privilege(invoker,'kaname.subject_change_outbox_id_seq','USAGE,UPDATE')
+ OR (p_request->>'member_type'='user' AND (NOT has_table_privilege(invoker,'kaname.memberships','SELECT')
+  OR NOT has_any_column_privilege(invoker,'kaname.memberships','UPDATE')))
+ OR NOT has_any_column_privilege(invoker,to_regclass('kaname.'||CASE WHEN p_request->>'member_type'='user' THEN 'users' ELSE 'service_accounts' END),'UPDATE') THEN
+  RAISE EXCEPTION 'group addition original body privileges absent' USING ERRCODE='42501';END IF;
+ -- RX actual union предшествует каждому row/unique/sequence ожиданию.
+ LOCK TABLE kaname.authority_policy_epoch,kaname.fga_outbox,kaname.group_members,
+  kaname.relation_fact,kaname.resource_journal,kaname.subject_change_outbox IN ROW EXCLUSIVE MODE;
+ LOCK TABLE kaname.accounts,kaname.groups IN ROW SHARE MODE;
+ IF p_request->>'member_type'='user' THEN LOCK TABLE kaname.memberships,kaname.users IN ROW SHARE MODE;
+ ELSE LOCK TABLE kaname.service_accounts IN ROW SHARE MODE;END IF;
+ source_reads:=source_reads+8;
+ SELECT to_jsonb(g) INTO group_row FROM ONLY kaname.groups g WHERE id=p_request->>'group_id';
+ source_reads:=source_reads+1;source_rows:=source_rows+1;
+ IF group_row IS NULL OR (proof->>'mode'<>'global' AND NOT (proof->'accounts' ? (group_row->>'account_id'))) THEN
+  RAISE EXCEPTION 'group addition owner scope changed' USING ERRCODE='P1034';END IF;
+ member_template:=p_request||jsonb_build_object('added_at',NULL);
+ member_keys:=ARRAY['group:'||(p_request->>'group_id'),(p_request->>'member_type')||':'||(p_request->>'member_id')];
+ fact_keys:=ARRAY[(p_request->>'member_type')||':'||(p_request->>'member_id'),'scope:'||(group_row->>'account_id')];
+ SELECT array_agg(DISTINCT value COLLATE "C" ORDER BY value COLLATE "C") INTO keys FROM unnest(member_keys||fact_keys) value;
+ -- Coordinator уже исключает чужой signed writer той же account и GLOBAL.
+ -- Policy root -> exact keys -> physical tuples: все новые ожидания до второго
+ -- protectPolicyPlan. Отсутствующая ссылка не создаёт epoch и не раскрывает D3.
+ PERFORM key FROM kaname.authority_policy_epoch WHERE key='*' FOR SHARE;
+ source_reads:=source_reads+1;source_rows:=source_rows+1;
+ FOREACH k IN ARRAY keys LOOP
+  PERFORM key FROM kaname.authority_policy_epoch WHERE key=k FOR UPDATE;
+  source_reads:=source_reads+1;source_rows:=source_rows+CASE WHEN FOUND THEN 1 ELSE 0 END;
+  IF NOT FOUND AND k<>((p_request->>'member_type')||':'||(p_request->>'member_id')) THEN
+   RAISE EXCEPTION 'group addition policy epoch disappeared' USING ERRCODE='P1034';END IF;
+ END LOOP;
+ SELECT to_jsonb(g) INTO locked_group FROM ONLY kaname.groups g WHERE id=p_request->>'group_id' FOR SHARE;
+ source_reads:=source_reads+1;source_rows:=source_rows+1;
+ IF locked_group IS DISTINCT FROM group_row THEN RAISE EXCEPTION 'group addition parent changed' USING ERRCODE='P1034';END IF;
+ PERFORM id FROM ONLY kaname.accounts WHERE id=group_row->>'account_id' FOR KEY SHARE;
+ source_reads:=source_reads+1;source_rows:=source_rows+1;
+ IF NOT FOUND THEN RAISE EXCEPTION 'group addition account disappeared' USING ERRCODE='P1034';END IF;
+ -- Исходный D3 фильтрует own ACTIVE membership/SA account ДО row lock.
+ -- Чужая и отсутствующая ссылка не ждут чужого пользователя/SA; FK target
+ -- нужен только после подтверждённого own membership и тоже до final clock.
+ IF p_request->>'member_type'='user' THEN
+  SELECT to_jsonb(m) INTO d3 FROM ONLY kaname.memberships m
+   WHERE user_id=p_request->>'member_id' AND account_id=group_row->>'account_id' AND state='ACTIVE' FOR SHARE;
+  source_reads:=source_reads+1;
+  IF d3 IS NOT NULL THEN
+   SELECT to_jsonb(u) INTO target FROM ONLY kaname.users u WHERE id=p_request->>'member_id' FOR KEY SHARE;
+   source_reads:=source_reads+1;
+  END IF;
+  valid:=d3 IS NOT NULL AND target IS NOT NULL;
+ ELSE
+  SELECT to_jsonb(s) INTO target FROM ONLY kaname.service_accounts s
+   WHERE id=p_request->>'member_id' AND account_id=group_row->>'account_id' FOR SHARE;
+  valid:=target IS NOT NULL;source_reads:=source_reads+1;
+ END IF;
+ valid:=coalesce(valid,false);
+ source_rows:=source_rows+CASE WHEN target IS NULL THEN 0 ELSE 1 END+CASE WHEN d3 IS NULL THEN 0 ELSE 1 END;
+ -- Отсутствие PK защищено уже удостоверенным EXCLUSIVE account coordinator
+ -- (либо обоими GLOBAL barriers). Runtime не может писать эту группу/факт в
+ -- чужом account scope: существующий OLD/NEW backstop остаётся включённым.
+ SELECT to_jsonb(m) INTO old_member FROM ONLY kaname.group_members m
+  WHERE group_id=p_request->>'group_id' AND member_type=p_request->>'member_type' AND member_id=p_request->>'member_id' FOR UPDATE;
+ SELECT to_jsonb(f) INTO old_fact FROM ONLY kaname.relation_fact f
+  WHERE object_type='group' AND object_id=p_request->>'group_id' AND relation='member'
+   AND subject=(p_request->>'member_type')||':'||(p_request->>'member_id') FOR UPDATE;
+ source_reads:=source_reads+2;source_rows:=source_rows+CASE WHEN old_member IS NULL THEN 0 ELSE 1 END+CASE WHEN old_fact IS NULL THEN 0 ELSE 1 END;
+ duplicate:=old_member IS NOT NULL;
+ fact_insert:=to_jsonb(jsonb_populate_record(NULL::kaname.relation_fact,jsonb_build_object(
+  'object_type','group','object_id',p_request->>'group_id','relation','member',
+  'subject',(p_request->>'member_type')||':'||(p_request->>'member_id'),'source_version',transaction_timestamp(),
+  'created_at',transaction_timestamp(),'condition_name','','condition_params','{}'::jsonb)));
+ fact_final:=CASE WHEN old_fact IS NULL THEN fact_insert
+  WHEN (old_fact->>'source_version')::timestamptz<transaction_timestamp()
+   THEN old_fact||jsonb_build_object('source_version',transaction_timestamp(),'condition_name','') ELSE old_fact END;
+ IF valid THEN
+  IF NOT duplicate THEN maximum:=jsonb_build_array(jsonb_build_object('ordinal',1,'table','resource_journal','origin','{}'::jsonb,'row','{}'::jsonb,'stamp','transaction'));END IF;
+  maximum:=maximum||jsonb_build_array(jsonb_build_object('ordinal',jsonb_array_length(maximum)+1,'table','fga_outbox','origin','{}'::jsonb,'row','{}'::jsonb,'stamp','transaction'));
+  -- Имя резерва отделено от колонки subject_id той же очереди.
+  reserved_subject_id:=nextval('kaname.subject_change_outbox_id_seq');
+  IF reserved_subject_id<=0 THEN RAISE EXCEPTION 'group addition subject identity exhausted' USING ERRCODE='P1034';END IF;
+  PERFORM pg_advisory_xact_lock(1262569301,hashtext(reserved_subject_id::text));
+  PERFORM o.id FROM ONLY kaname.subject_change_outbox o WHERE o.id=reserved_subject_id FOR UPDATE;
+  IF FOUND THEN RAISE EXCEPTION 'group addition subject identity collided' USING ERRCODE='P1034';END IF;
+  source_reads:=source_reads+2;
+  subject_row:=to_jsonb(jsonb_populate_record(NULL::kaname.subject_change_outbox,jsonb_build_object(
+   'id',reserved_subject_id,'subject_id',p_request->>'member_id','op','group_member_change','event_type','group_member_change',
+   'created_at',transaction_timestamp(),'payload',jsonb_build_object('subject_id',p_request->>'member_id',
+    'subject_type',p_request->>'member_type','op','group_member_change','event_type','group_member_change'))));
+ END IF;
+ source_rows:=source_rows+jsonb_array_length(maximum)+CASE WHEN valid THEN 1 ELSE 0 END;
+ IF source_rows>p_rows OR source_reads>p_reads THEN RAISE EXCEPTION 'group addition source budget exceeded' USING ERRCODE='54000';END IF;
+ cost:=kaname._authority_sequence_reserve_v3('group_add',maximum,p_reads-source_reads);
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ state_oid:=to_regclass('pg_temp.kaname_group_add_command');
+ IF state_oid IS NULL THEN
+  CREATE TEMP TABLE pg_temp.kaname_group_add_command(singleton boolean PRIMARY KEY CHECK(singleton),nonce uuid NOT NULL,
+   member_attempted boolean NOT NULL DEFAULT false,member_inserted boolean NOT NULL DEFAULT false,
+   fold_active boolean NOT NULL DEFAULT false,fold_done boolean NOT NULL DEFAULT false,
+   fact_attempted boolean NOT NULL DEFAULT false,fact_updated boolean NOT NULL DEFAULT false,
+   subject_claimed boolean NOT NULL DEFAULT false,subject_done boolean NOT NULL DEFAULT false) ON COMMIT DELETE ROWS;
+  REVOKE ALL ON pg_temp.kaname_group_add_command FROM PUBLIC;
+  FOR grant_row IN SELECT DISTINCT r.rolname FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+   JOIN pg_catalog.pg_roles r ON r.oid=a.grantee WHERE c.oid='pg_temp.kaname_group_add_command'::regclass AND a.grantee<>owner_oid LOOP
+   EXECUTE format('REVOKE ALL ON pg_temp.kaname_group_add_command FROM %I',grant_row.rolname);
+  END LOOP;
+  state_oid:='pg_temp.kaname_group_add_command'::regclass;
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class WHERE oid=state_oid AND relowner=owner_oid AND relpersistence='t' AND relkind='r')
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a WHERE c.oid=state_oid AND a.grantee<>owner_oid)
+ OR (SELECT array_agg(attname::text ORDER BY attnum) FROM pg_catalog.pg_attribute WHERE attrelid=state_oid AND attnum>0 AND NOT attisdropped)
+  IS DISTINCT FROM ARRAY['singleton','nonce','member_attempted','member_inserted','fold_active','fold_done','fact_attempted','fact_updated','subject_claimed','subject_done']
+ OR (SELECT array_agg(atttypid ORDER BY attnum) FROM pg_catalog.pg_attribute WHERE attrelid=state_oid AND attnum>0 AND NOT attisdropped)
+  IS DISTINCT FROM ARRAY['boolean'::regtype::oid,'uuid'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid] THEN
+  RAISE EXCEPTION 'untrusted group addition command shape' USING ERRCODE='42501';END IF;
+ INSERT INTO pg_temp.kaname_group_add_command(singleton,nonce) VALUES(true,(proof->>'nonce')::uuid);
+ PERFORM kaname._authority_sequence_freeze_v3(jsonb_build_object('kind','group.add','mode','mutation',
+  'request',p_request,'state_oid',state_oid,'reference_valid',valid,'duplicate',duplicate,'group',group_row,
+  'old_member',old_member,'member_template',member_template,'old_fact',old_fact,'fact_insert',fact_insert,'fact_final',fact_final,
+  'subject',subject_row,'member_keys',to_jsonb(member_keys),'fact_keys',to_jsonb(fact_keys)));
+ RETURN jsonb_build_object('rows',source_rows,'reads',source_reads+cost);
+END $$;
+
+CREATE FUNCTION kaname.authority_group_add_finalize_v3(p_request jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(reference_valid boolean,added_at timestamptz,logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb; proof jsonb; frozen jsonb; selected jsonb:='[]'; member_row jsonb; n integer:=0;
+BEGIN
+ program:=kaname._authority_group_add_program_v3();proof:=kaname.authority_protocol_attestation();frozen:=program->'frozen';
+ IF program IS NULL OR proof IS NULL OR frozen->'request' IS DISTINCT FROM p_request
+ OR program->'selected'<>'null'::jsonb OR proof->>'consumer_finalized' IS DISTINCT FROM 'true'
+ OR (proof->>'decision_at')::timestamptz<=(program->>'staged_decision_at')::timestamptz THEN
+  RAISE EXCEPTION 'group addition final decision/request changed' USING ERRCODE='42501';END IF;
+ IF p_rows IS NULL OR p_rows<0 OR p_reads IS NULL OR p_reads<1 THEN
+  RAISE EXCEPTION 'group addition finalization budget absent' USING ERRCODE='54000';END IF;
+ added_at:=(proof->>'decision_at')::timestamptz;reference_valid:=(frozen->>'reference_valid')::boolean;
+ IF reference_valid THEN
+  IF NOT (frozen->>'duplicate')::boolean THEN
+   n:=n+1;member_row:=(frozen->'member_template')||jsonb_build_object('added_at',added_at);
+   selected:=jsonb_build_array(jsonb_build_object('ordinal',n,'origin',jsonb_build_object(
+    'table','group_members','operation','INSERT','when','AFTER','old',NULL,'new',member_row),
+    'row',jsonb_build_object('resource_kind','iam_group','resource_id',p_request->>'group_id',
+     'project_id',kaname.resource_journal_project('iam_group',frozen->'group'),
+     'scope',kaname.resource_journal_scope('iam_group',frozen->'group'),'event_type','UPDATED',
+     'payload',jsonb_build_object('id',p_request->>'group_id'))));
+  END IF;
+  n:=n+1;selected:=selected||jsonb_build_array(jsonb_build_object('ordinal',n,
+   'origin',jsonb_build_object('family','group.add','request',p_request),
+   'row',jsonb_build_object('event_type','fga.tuple.write','payload',jsonb_build_object(
+    'user',(p_request->>'member_type')||':'||(p_request->>'member_id'),'relation','member','object','group:'||(p_request->>'group_id')))));
+ END IF;
+ -- После clock только private frozen data: ни нового nextval, ни business
+ -- SELECT/FOR SHARE, ни fallback. Тот же decision stamp у Go и actual origin.
+ IF n>p_rows THEN RAISE EXCEPTION 'group addition selection budget exceeded' USING ERRCODE='54000';END IF;
+ PERFORM kaname._authority_sequence_bind_v3(selected,added_at);
+ logical_rows:=n;logical_reads:=1;RETURN NEXT;
+END $$;
+
+CREATE FUNCTION kaname._authority_group_add_row_v3(p_table text,p_op text,p_old jsonb,p_new jsonb) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb; frozen jsonb; state jsonb; expected jsonb;
+BEGIN
+ program:=kaname._authority_group_add_program_v3();IF program IS NULL THEN RETURN false;END IF;
+ frozen:=program->'frozen';state:=program->'command_state';
+ IF program->'selected'='null'::jsonb OR frozen->>'reference_valid'<>'true' THEN
+  RAISE EXCEPTION 'group addition body not finalized or reference invalid' USING ERRCODE='42501';END IF;
+ CASE p_table
+ WHEN 'group_members' THEN
+  expected:=(frozen->'member_template')||jsonb_build_object('added_at',(program->>'decision_at')::timestamptz);
+  IF p_op<>'INSERT' OR p_old IS NOT NULL OR p_new IS DISTINCT FROM expected OR state->>'member_attempted'<>'false' THEN
+   RAISE EXCEPTION 'group addition member row or multiplicity differs' USING ERRCODE='42501';END IF;
+  UPDATE pg_temp.kaname_group_add_command SET member_attempted=true WHERE singleton;
+ WHEN 'fga_outbox' THEN
+  IF p_op<>'INSERT' OR state->>'member_attempted'<>'true'
+   OR (frozen->>'duplicate'='false' AND state->>'member_inserted'<>'true')
+   OR state->>'fold_done'<>'false'
+   OR NOT EXISTS(SELECT 1 FROM pg_temp.kaname_authority_sequence_effects e
+    WHERE e.nonce=(program->>'nonce')::uuid AND e.table_name='fga_outbox' AND e.selected AND e.claimed AND NOT e.consumed
+     AND e.reserved_id=(p_new->>'id')::bigint AND e.row_value=p_new-'id') THEN
+   RAISE EXCEPTION 'group addition FGA row or order differs' USING ERRCODE='42501';END IF;
+ WHEN 'relation_fact' THEN
+  IF state->>'fold_active'<>'true' OR pg_trigger_depth()<1
+   OR NOT ((p_op='INSERT' AND p_old IS NULL AND p_new=frozen->'fact_insert' AND state->>'fact_attempted'='false')
+    OR (p_op='UPDATE' AND p_old=frozen->'old_fact' AND p_new=frozen->'fact_final' AND p_old IS DISTINCT FROM p_new
+     AND state->>'fact_attempted'='true' AND state->>'fact_updated'='false')) THEN
+   RAISE EXCEPTION 'group addition fact outside actual fold' USING ERRCODE='42501';END IF;
+  IF p_op='INSERT' THEN UPDATE pg_temp.kaname_group_add_command SET fact_attempted=true WHERE singleton;
+  ELSE UPDATE pg_temp.kaname_group_add_command SET fact_updated=true WHERE singleton;END IF;
+ ELSE RAISE EXCEPTION 'group addition attempted another mutation family' USING ERRCODE='42501';END CASE;
+ RETURN true;
+END $$;
+
+CREATE FUNCTION kaname._authority_group_add_statement_v3(p_table text,p_op text) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb;
+BEGIN
+ program:=kaname._authority_group_add_program_v3();IF program IS NULL THEN RETURN false;END IF;
+ IF program->'selected'='null'::jsonb OR program#>>'{frozen,reference_valid}'<>'true'
+ OR NOT ((p_table='group_members' AND p_op='INSERT' AND program#>>'{command_state,member_attempted}'='false')
+  OR (p_table='fga_outbox' AND p_op='INSERT' AND program#>>'{command_state,member_attempted}'='true' AND program#>>'{command_state,fold_done}'='false')
+  OR (p_table='resource_journal' AND p_op='INSERT' AND pg_trigger_depth()>1 AND program#>>'{command_state,member_inserted}'='true')
+  OR (p_table='relation_fact' AND p_op IN ('INSERT','UPDATE') AND program#>>'{command_state,fold_active}'='true' AND pg_trigger_depth()>=1)) THEN
+  RAISE EXCEPTION 'group addition statement outside exact command' USING ERRCODE='42501';END IF;
+ RETURN true;
+END $$;
+
+-- Вызывается только реальным FGA statement trigger: consumed ID уже записан
+-- owner AFTER ROW guard. Прямой вызов/повтор не может объявить fold завершённым.
+CREATE FUNCTION kaname.authority_group_add_fold_v3(p_event_type text,p_payload jsonb,p_created_at timestamptz) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb; row_value jsonb; old_row jsonb; changed integer; invoker oid;
+BEGIN
+ program:=kaname._authority_group_add_program_v3();IF program IS NULL THEN RETURN false;END IF;
+ IF pg_trigger_depth()<1 OR program#>>'{command_state,fold_active}'<>'false' OR program#>>'{command_state,fold_done}'<>'false'
+ OR NOT EXISTS(SELECT 1 FROM pg_temp.kaname_authority_sequence_effects e
+  WHERE e.nonce=(program->>'nonce')::uuid AND e.table_name='fga_outbox' AND e.selected AND e.claimed AND e.consumed
+   AND e.row_value=jsonb_build_object('event_type',p_event_type,'payload',p_payload,'created_at',p_created_at)) THEN
+  RAISE EXCEPTION 'group addition fold lacks consumed actual FGA row' USING ERRCODE='42501';END IF;
+ invoker:=(program->>'invoker_oid')::oid;
+ IF NOT has_table_privilege(invoker,'kaname.relation_fact','INSERT') OR NOT has_table_privilege(invoker,'kaname.relation_fact','UPDATE')
+ OR NOT has_table_privilege(invoker,'kaname.relation_fact','SELECT') THEN
+  RAISE EXCEPTION 'group addition original fold privileges absent' USING ERRCODE='42501';END IF;
+ row_value:=program#>'{frozen,fact_insert}';old_row:=program#>'{frozen,old_fact}';
+ UPDATE pg_temp.kaname_group_add_command SET fold_active=true WHERE singleton;
+ -- Сохраняем и пустой/stale UPSERT: его BEFORE INSERT и statement UPDATE
+ -- действительно выполняются в исходном fold. Только row images уже frozen.
+ INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version,created_at,condition_name,condition_params)
+  SELECT r.object_type,r.object_id,r.relation,r.subject,r.source_version,r.created_at,r.condition_name,r.condition_params
+  FROM jsonb_populate_record(NULL::kaname.relation_fact,row_value) r
+  ON CONFLICT (object_type,object_id,relation,subject) DO UPDATE
+   SET source_version=EXCLUDED.source_version,condition_name=EXCLUDED.condition_name
+   WHERE relation_fact.source_version<EXCLUDED.source_version;
+ GET DIAGNOSTICS changed=ROW_COUNT;
+ -- Скобки удерживают внутренний THEN в CASE, отдельно от THEN оператора IF.
+ IF changed IS DISTINCT FROM (CASE WHEN old_row IS DISTINCT FROM program#>'{frozen,fact_final}' THEN 1 ELSE 0 END) THEN
+  RAISE EXCEPTION 'group addition exact fold was not applied' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_group_add_command SET fold_active=false,fold_done=true WHERE singleton;
+ RETURN true;
+END $$;
+
+CREATE FUNCTION kaname.authority_group_add_subject_id_v3() RETURNS bigint
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb; proof jsonb; invoker oid; identifier bigint;
+BEGIN
+ SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
+ IF NOT has_sequence_privilege(invoker,'kaname.subject_change_outbox_id_seq','USAGE,UPDATE') THEN
+  RAISE EXCEPTION 'subject change default lacks original sequence privilege' USING ERRCODE='42501';END IF;
+ program:=kaname._authority_group_add_program_v3();
+ IF program IS NULL THEN RETURN nextval('kaname.subject_change_outbox_id_seq');END IF;
+ IF NOT has_table_privilege(invoker,'kaname.subject_change_outbox','INSERT')
+ OR program#>>'{command_state,fold_done}'<>'true' OR program#>>'{command_state,subject_claimed}'<>'false'
+ OR program#>>'{frozen,reference_valid}'<>'true' OR program->'selected'='null'::jsonb THEN
+  RAISE EXCEPTION 'group addition subject claim order or privilege invalid' USING ERRCODE='42501';END IF;
+ identifier:=(program#>>'{frozen,subject,id}')::bigint;
+ PERFORM kaname._authority_resource_preheld_key_v2(1262569301,identifier::text,true);
+ UPDATE pg_temp.kaname_group_add_command SET subject_claimed=true WHERE singleton;
+ RETURN identifier;
+END $$;
+
+CREATE FUNCTION kaname._authority_group_add_subject_v3(p_phase text,p_op text,p_row jsonb) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb;
+BEGIN
+ program:=kaname._authority_group_add_program_v3();IF program IS NULL THEN RETURN false;END IF;
+ IF p_phase NOT IN ('before','after') OR p_phase IS NULL OR p_op<>'INSERT'
+ OR program#>>'{command_state,fold_done}'<>'true' OR program#>>'{command_state,subject_claimed}'<>'true'
+ OR program#>>'{command_state,subject_done}'<>'false' OR p_row IS DISTINCT FROM program#>'{frozen,subject}' THEN
+  RAISE EXCEPTION 'group addition subject row or multiplicity differs' USING ERRCODE='42501';END IF;
+ PERFORM kaname._authority_resource_preheld_key_v2(1262569301,p_row->>'id',true);
+ IF p_phase='after' THEN UPDATE pg_temp.kaname_group_add_command SET subject_done=true WHERE singleton;END IF;
+ RETURN true;
+END $$;
+
+CREATE FUNCTION kaname._authority_group_add_complete_v3() RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb;
+BEGIN
+ program:=kaname._authority_group_add_program_v3();IF program IS NULL THEN RETURN;END IF;
+ IF program#>>'{frozen,reference_valid}'<>'true' OR program->'selected'='null'::jsonb
+ OR program#>>'{command_state,member_attempted}'<>'true'
+ OR (program#>>'{command_state,member_inserted}')::boolean IS DISTINCT FROM (NOT (program#>>'{frozen,duplicate}')::boolean)
+ OR program#>>'{command_state,fold_active}'<>'false' OR program#>>'{command_state,fold_done}'<>'true'
+ OR program#>>'{command_state,fact_attempted}'<>'true'
+ OR (program#>>'{command_state,fact_updated}')::boolean IS DISTINCT FROM
+  (program#>'{frozen,old_fact}'<>'null'::jsonb AND program#>'{frozen,old_fact}' IS DISTINCT FROM program#>'{frozen,fact_final}')
+ OR program#>>'{command_state,subject_claimed}'<>'true' OR program#>>'{command_state,subject_done}'<>'true' THEN
+  RAISE EXCEPTION 'group addition required command incomplete' USING ERRCODE='42501';END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname.relation_fact_fold_row(
+    p_event_type text, p_payload jsonb, p_created_at timestamptz) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_delete_through timestamptz;
+    v_user      text := p_payload ->> 'user';
+    v_object    text := p_payload ->> 'object';
+    -- Версия ВЛАДЕЛЬЦА. Есть только у строки, которую владелец упорядочил сам.
+    v_owner     text := p_payload ->> 'source_version';
+    v_version   timestamptz;
+    v_relations text[];
+    v_relation  text;
+    v_type      text;
+    v_id        text;
+    v_colon     int;
+    -- Условие, которое модель объявляет на прямом списке этого отношения для
+    -- типа субъекта строки (`[user with mfa_fresh]`); пусто — безусловно.
+    v_condition text;
+    -- Хранимый субъект строки снятия (п. 4 шапки миграции kaname#829).
+    v_stored    text;
+BEGIN
+    -- Signed Resource исполняет только private final программу без позднего
+    -- holder lookup/clock/lock; legacy семантика ниже сохранена дословно.
+    IF kaname.authority_group_add_fold_v3(p_event_type,p_payload,p_created_at) THEN RETURN;END IF;
+    IF kaname.authority_resource_fold_body_v2(p_event_type,p_payload,p_created_at) THEN RETURN;END IF;
+    -- Набор ВЫИГРЫВАЕТ у скаляра: на выдаче набора присутствуют оба поля, и
+    -- скаляр там — эхо для пода прежнего выпуска, а не весь предмет строки.
+    IF jsonb_array_length(coalesce(p_payload -> 'relations', '[]'::jsonb)) > 0 THEN
+        -- Отношения набора — в ОБЩЕМ порядке, а не в порядке писателя: строка
+        -- факта ключуется отношением, и два набора одного субъекта на одном
+        -- объекте, перечисленные встречно, брали бы их блокировки встречно.
+        SELECT array_agg(value ORDER BY value COLLATE "C") INTO v_relations
+          FROM jsonb_array_elements_text(p_payload -> 'relations') AS value;
+    ELSIF p_payload ->> 'relation' IS NOT NULL THEN
+        v_relations := ARRAY[p_payload ->> 'relation'];
+    END IF;
+
+    IF v_user IS NULL OR v_relations IS NULL OR v_object IS NULL THEN
+        RAISE EXCEPTION
+            'fga_outbox: строка без user/relation/object (%). Прямой факт складывается из этого журнала, и строка, которую нельзя спроецировать, дала бы движку право, о котором своя БД не знает.',
+            p_payload;
+    END IF;
+
+    -- Порядок строки. У строки, упорядоченной владельцем, его задаёт версия
+    -- владельца: метка журнала — момент НАЧАЛА транзакции службы, и у снятия,
+    -- начавшего транзакцию раньше открытия, она оказалась бы старше того, что
+    -- снятие обязано снять. Неразбираемая версия роняет строку, а не
+    -- подменяется меткой: молчаливая подмена вернула бы ровно тот порядок, от
+    -- которого поле защищает.
+    v_version := coalesce(v_owner::timestamptz, p_created_at);
+
+    -- Глагол выводится из выдачи и копией не хранится (см. 0098). Набор из
+    -- одних глаголов выходит здесь — до разбора объекта, как и одиночный.
+    --
+    -- ИСКЛЮЧЕНИЕ ОДНО: строка, упорядоченная владельцем, — публикация для
+    -- анонимного чтения. Её не выводит ни одна выдача, и отброшенная здесь, она
+    -- не существовала бы нигде (kaname#107).
+    IF v_owner IS NULL THEN
+        v_relations := ARRAY(SELECT r FROM unnest(v_relations) AS r WHERE r NOT LIKE 'v\_%');
+        IF array_length(v_relations, 1) IS NULL THEN
+            RETURN;
+        END IF;
+    END IF;
+
+    v_colon := position(':' in v_object);
+    IF v_colon <= 1 OR v_colon = length(v_object) THEN
+        RAISE EXCEPTION
+            'fga_outbox: объект % не имеет формы "<тип>:<идентификатор>" — спроецировать прямой факт нельзя.',
+            v_object;
+    END IF;
+    v_type := substr(v_object, 1, v_colon - 1);
+    v_id   := substr(v_object, v_colon + 1);
+
+    IF v_type LIKE '%.%' THEN
+        RAISE EXCEPTION
+            'fga_outbox: тип объекта % назван словарём каталога. Вопрос о доступе приходит словарём модели прав, и такая строка не совпала бы ни с одним вопросом.',
+            v_type;
+    END IF;
+
+    FOREACH v_relation IN ARRAY v_relations LOOP
+        IF p_event_type = 'fga.tuple.write' THEN
+            -- Условие прикладывает ПИСАТЕЛЬ, и только он: факт человека на
+            -- условном отношении без условия значил бы безусловный допуск там,
+            -- где модель объявляет допуск лишь при выполненном условии.
+            -- Перечень — дословно `with`-записи канонической модели; гейт
+            -- `TestConditionedRelationHasAProducer` сверяет его с моделью в обе
+            -- стороны (запись модели без строки и строка без записи модели —
+            -- находки).
+            SELECT c.condition_name INTO v_condition
+              FROM (VALUES
+                    ('compute_instance', 'console', 'user', 'mfa_fresh'),
+                    ('compute_instance', 'ssh',     'user', 'mfa_fresh')
+                   ) AS c(object_type, relation, subject_type, condition_name)
+             WHERE c.object_type = v_type AND c.relation = v_relation
+               AND c.subject_type = split_part(v_user, ':', 1);
+
+            INSERT INTO kaname.relation_fact
+                   (object_type, object_id, relation, subject, source_version, created_at, condition_name)
+            VALUES (v_type, v_id, v_relation, v_user, v_version, now(), coalesce(v_condition, ''))
+            ON CONFLICT (object_type, object_id, relation, subject) DO UPDATE
+               SET source_version = EXCLUDED.source_version,
+                   condition_name = EXCLUDED.condition_name
+             WHERE relation_fact.source_version < EXCLUDED.source_version;
+        ELSIF p_event_type = 'fga.tuple.delete' THEN
+            -- Снятие с подстановкой прежнего писателя снимает строку, в которую
+            -- переезд (п. 3) перенёс то, что этот писатель когда-то положил:
+            -- перевод тот же, что у переписи, по отношению (п. 4 шапки).
+            v_stored := v_user;
+            IF v_user = 'user:*' THEN
+                v_stored := CASE WHEN v_relation = 'v_get' THEN 'system_class:anonymous'
+                                 ELSE 'system_class:authenticated' END;
+            END IF;
+            -- Факт, выведенный выдачей (строка без версии владельца), снимается
+            -- лишь тогда, когда его не держит больше НИКТО (п. 2 шапки). Сперва
+            -- замок строки факта: снятие ждёт любого, кто держит её незафиксированной
+            -- (выдачу, свёрнутую в той же строке, второе снятие), и вопрос «держит
+            -- ли кто-то ещё» задаётся уже после его коммита, свежим снимком.
+            -- Новый typed mixed-set также проверяет держателей legacy строки;
+            -- флаг кладёт только внутренний combined-delete, не запрос клиента.
+            IF v_owner IS NULL OR p_payload->'protect_holders' = 'true'::jsonb OR EXISTS (
+                   SELECT 1 FROM kaname.resource_registration_pointer rp
+                    WHERE rp.object_type=v_type AND rp.object_id=v_id AND rp.relation=v_relation AND rp.subject=v_stored) THEN
+                PERFORM 1 FROM kaname.relation_fact
+                 WHERE object_type = v_type AND object_id = v_id
+                   AND relation = v_relation AND subject = v_stored
+                   FOR UPDATE;
+                IF NOT FOUND THEN
+                    CONTINUE;
+                END IF;
+                IF EXISTS (
+                       SELECT 1
+                         FROM kaname.access_binding_emitted_tuples et
+                         JOIN kaname.access_bindings ab ON ab.id = et.binding_id
+                        WHERE et.object = v_object AND et.relation = v_relation
+                          AND et.fga_user = v_stored AND ab.status = 'ACTIVE')
+                   OR EXISTS (SELECT 1 FROM kaname.resource_registration_pointer rp
+                               WHERE rp.object_type=v_type AND rp.object_id=v_id AND rp.relation=v_relation
+                                 AND rp.subject=v_stored AND rp.active)
+                   OR (v_type = 'cluster' AND v_relation = 'system_admin' AND EXISTS (
+                       SELECT 1
+                         FROM kaname.cluster_admin_grants g
+                        WHERE g.cluster_id = v_id
+                          AND g.subject_type || ':' || g.subject_id = v_stored
+                          AND (g.granted_until IS NULL OR g.granted_until > clock_timestamp())))
+                THEN
+                    CONTINUE;
+                END IF;
+            END IF;
+            v_delete_through := NULL;
+            IF v_owner IS NULL AND v_relation IN ('project','parent','owner') THEN
+                -- Отдельный свежий RC statement ПОСЛЕ fact lock и held read.
+                -- Без обратного замка receipt: registrar меняет её ДО факта.
+                SELECT delete_through INTO v_delete_through
+                  FROM kaname.resource_registration_retirement
+                 WHERE object_type=v_type AND object_id=v_id
+                   AND relation=v_relation AND subject=v_stored;
+            END IF;
+            -- У exact named tuple последний держатель может уйти меткой AB,
+            -- отличной от шкалы владельца. После fresh held-check снимаем его
+            -- без произвольного повышения надгробия; stale owner не проходит
+            -- сохранённую версию claim. Для legacy tuple сравнение прежнее.
+            DELETE FROM kaname.relation_fact
+             WHERE object_type = v_type AND object_id = v_id
+               AND relation = v_relation AND subject = v_stored
+               AND (source_version <= v_version
+                    OR (v_owner IS NULL AND v_delete_through IS NOT NULL AND source_version <= v_delete_through) OR EXISTS (
+                    SELECT 1 FROM kaname.resource_registration_pointer rp
+                     WHERE rp.object_type=v_type AND rp.object_id=v_id
+                       AND rp.relation=v_relation AND rp.subject=v_stored
+                       AND NOT rp.active
+                       AND (v_owner IS NULL OR rp.source_version <= v_version)));
+        END IF;
+    END LOOP;
+    RETURN;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname.authority_subject_change_id_guard_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;matches integer;
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'subject_change_outbox' OR TG_WHEN<>'BEFORE'
+ OR TG_LEVEL<>'ROW' OR TG_OP NOT IN ('INSERT','UPDATE') THEN
+  RAISE EXCEPTION 'invalid subject_change ID guard context' USING ERRCODE='42501';END IF;
+ IF kaname._authority_group_add_subject_v3('before',TG_OP,to_jsonb(NEW)) THEN RETURN NEW;END IF;
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN PERFORM pg_advisory_xact_lock(1262569301,hashtext(NEW.id::text));RETURN NEW;END IF;
+ IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'Resource cannot update subject_change queue' USING ERRCODE='42501';END IF;
+ PERFORM kaname._authority_resource_preheld_key_v2(1262569301,NEW.id::text,true);
+ SELECT count(*) INTO matches FROM jsonb_array_elements(manifest#>'{registration_physical,subject_changes}') q
+  WHERE q->'row'=to_jsonb(NEW) AND q->'command'=manifest->'object_command';
+ IF matches<>1 OR coalesce((manifest->'consumed_subject_change_ids') @> jsonb_build_array(NEW.id),true) THEN
+  RAISE EXCEPTION 'subject_change insert outside exact registration command' USING ERRCODE='42501';END IF;
+ RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname.authority_subject_change_applied_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'subject_change_outbox' OR TG_WHEN<>'AFTER'
+ OR TG_LEVEL<>'ROW' OR TG_OP<>'INSERT' THEN RAISE EXCEPTION 'invalid subject_change applied context' USING ERRCODE='42501';END IF;
+ IF kaname._authority_group_add_subject_v3('after',TG_OP,to_jsonb(NEW)) THEN RETURN NULL;END IF;
+ manifest:=kaname._authority_producer_resource_v2();IF manifest IS NULL THEN RETURN NULL;END IF;
+ IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(manifest#>'{registration_physical,subject_changes}') q
+  WHERE q->'row'=to_jsonb(NEW) AND q->'command'=manifest->'object_command') THEN
+  RAISE EXCEPTION 'unverified subject_change row applied' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_authority_resource_manifest SET consumed_subject_change_ids=array_append(consumed_subject_change_ids,NEW.id);
+ RETURN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname.authority_subject_change_statement_guard_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF kaname._authority_group_add_program_v3() IS NOT NULL THEN
+  RAISE EXCEPTION 'group addition subject queue is append-only' USING ERRCODE='42501';END IF;
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'subject_change_outbox' OR TG_WHEN<>'BEFORE'
+ OR TG_LEVEL<>'STATEMENT' OR TG_OP NOT IN ('UPDATE','DELETE','TRUNCATE') THEN
+  RAISE EXCEPTION 'invalid subject_change statement guard context' USING ERRCODE='42501';END IF;
+ IF kaname._authority_producer_resource_v2() IS NOT NULL THEN
+  RAISE EXCEPTION 'Resource subject_change queue is append-only exact program' USING ERRCODE='42501';END IF;
+ RETURN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname._authority_resource_subject_change_wait_v2(p_count integer,p_reads integer)
+RETURNS TABLE(reserved_ids jsonb,held_relations jsonb,held_advisory jsonb,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;invoker oid;table_id oid;sequence_id oid;identifier bigint;item record;
+ ids jsonb:='[]'::jsonb;locks jsonb:='[]'::jsonb;relations jsonb;used integer:=5;i integer;present boolean;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'resource' OR proof->>'purpose' IS DISTINCT FROM 'participant'
+ OR proof->>'consumer_abi' IS DISTINCT FROM '2' OR proof->>'consumer_finalized' IS DISTINCT FROM 'false'
+ OR proof->>'consumer_profile' NOT IN ('resource_pending','resource_source_pending')
+ OR current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'subject_change reservation requires pending Resource RC' USING ERRCODE='42501';END IF;
+ IF p_count IS NULL OR p_count<1 OR p_count>100000 OR p_reads IS NULL OR p_reads<5+2*p_count OR p_reads>4096 THEN
+  RAISE EXCEPTION 'subject_change reservation budget exceeded' USING ERRCODE='54000';END IF;
+ invoker:=(proof->>'invoker_oid')::oid;table_id:='kaname.subject_change_outbox'::regclass;
+ IF NOT has_table_privilege(invoker,table_id,'INSERT') THEN
+  RAISE EXCEPTION 'subject_change INSERT privilege required' USING ERRCODE='42501';END IF;
+ LOCK TABLE ONLY kaname.subject_change_outbox IN ROW EXCLUSIVE MODE;
+ SELECT to_regclass(pg_get_serial_sequence('kaname.subject_change_outbox','id')) INTO sequence_id;
+ IF sequence_id IS NULL OR sequence_id<>'kaname.subject_change_outbox_id_seq'::regclass
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a WHERE a.attrelid=table_id AND a.attname='id'
+  AND a.atttypid='bigint'::regtype AND a.attidentity='' AND NOT a.attisdropped)
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid=table_id AND a.attname='id' AND pg_get_expr(d.adbin,d.adrelid)=$default$kaname.authority_group_add_subject_id_v3()$default$)
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=table_id OR inhparent=table_id) THEN
+  RAISE EXCEPTION 'subject_change physical identity schema changed' USING ERRCODE='42501';END IF;
+ -- Прежний INSERT serial вызывает nextval от invoker: owner helper сохраняет
+ -- USAGE либо UPDATE sequence, не добавляя SELECT на неё.
+ IF NOT (has_sequence_privilege(invoker,sequence_id,'USAGE') OR has_sequence_privilege(invoker,sequence_id,'UPDATE')) THEN
+  RAISE EXCEPTION 'subject change sequence privilege required' USING ERRCODE='42501';END IF;
+ -- nextval удерживает relation lock до конца всей TX даже при savepoint rollback.
+ FOR i IN 1..p_count LOOP
+  identifier:=nextval(sequence_id);used:=used+1;
+  IF identifier<=0 THEN RAISE EXCEPTION 'invalid reserved subject_change ID' USING ERRCODE='P1034';END IF;
+  ids:=ids||jsonb_build_array(identifier);
+ END LOOP;
+ -- Замки уникальности совместимы с legacy INSERT/переносом ID через trigger.
+ -- Сортировка по фактическому advisory hash исключает inversion внутри набора.
+ FOR item IN SELECT DISTINCT hashtext(v#>>'{}') h FROM jsonb_array_elements(ids) v ORDER BY h LOOP
+  PERFORM pg_advisory_xact_lock(1262569301,item.h);
+  locks:=locks||jsonb_build_array(jsonb_build_object('classid',1262569301,'objid',(item.h::bigint & 4294967295),
+   'objsubid',2,'mode','ExclusiveLock'));
+ END LOOP;
+ FOR identifier IN SELECT (v#>>'{}')::bigint FROM jsonb_array_elements(ids) v LOOP
+  used:=used+1;present:=false;
+  SELECT true INTO present FROM ONLY kaname.subject_change_outbox q WHERE q.id=identifier FOR UPDATE;
+  IF coalesce(present,false) THEN RAISE EXCEPTION 'reserved subject_change ID already exists' USING ERRCODE='P1034';END IF;
+ END LOOP;
+ relations:=jsonb_build_array(jsonb_build_object('oid',table_id,'mode','RowExclusiveLock'),
+  jsonb_build_object('oid',sequence_id,'mode','RowExclusiveLock'));
+ RETURN QUERY SELECT ids,relations,locks,used;
+END $$;
+
+ALTER TABLE kaname.subject_change_outbox ALTER COLUMN id SET DEFAULT kaname.authority_group_add_subject_id_v3();
+
+CREATE FUNCTION kaname._authority_group_add_storage_v3() RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM (VALUES
+ ('_authority_group_add_program_v3()','jsonb',0,false,NULL),
+ ('authority_group_add_prepare_v3(jsonb,integer,integer)','jsonb',3,false,ARRAY['p_request','p_rows','p_reads']::text[]),
+ ('authority_group_add_finalize_v3(jsonb,integer,integer)','record',3,true,ARRAY['p_request','p_rows','p_reads','reference_valid','added_at','logical_rows','logical_reads']::text[]),
+ ('_authority_group_add_row_v3(text,text,jsonb,jsonb)','boolean',4,false,ARRAY['p_table','p_op','p_old','p_new']::text[]),
+ ('_authority_group_add_statement_v3(text,text)','boolean',2,false,ARRAY['p_table','p_op']::text[]),
+ ('authority_group_add_fold_v3(text,jsonb,timestamptz)','boolean',3,false,ARRAY['p_event_type','p_payload','p_created_at']::text[]),
+ ('authority_group_add_subject_id_v3()','bigint',0,false,NULL),
+ ('_authority_group_add_subject_v3(text,text,jsonb)','boolean',3,false,ARRAY['p_phase','p_op','p_row']::text[]),
+ ('_authority_group_add_complete_v3()','void',0,false,NULL),
+ ('_authority_group_add_storage_v3()','boolean',0,false,NULL),
+ ('relation_fact_fold_row(text,jsonb,timestamptz)','void',3,false,ARRAY['p_event_type','p_payload','p_created_at']::text[]),
+ ('relation_fact_from_journal()','trigger',0,false,NULL),
+ ('authority_subject_change_id_guard_v2()','trigger',0,false,NULL),
+ ('authority_subject_change_applied_v2()','trigger',0,false,NULL),
+ ('authority_subject_change_statement_guard_v2()','trigger',0,false,NULL)
+ ) a(signature,result_type,nargs,returns_set,argnames)
+ LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||a.signature)
+ WHERE p.oid IS NULL OR p.prokind<>'f' OR p.prorettype<>a.result_type::regtype OR p.proretset<>a.returns_set
+ OR p.proisstrict OR p.proleakproof OR p.proparallel<>'u' OR p.pronargs<>a.nargs OR p.pronargdefaults<>0 OR p.provariadic<>0
+ OR p.proargnames IS DISTINCT FROM a.argnames
+ OR p.prolang<>(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')
+ OR CASE WHEN a.returns_set THEN
+  p.proargmodes IS DISTINCT FROM ARRAY['i','i','i','t','t','t','t']::"char"[]
+  OR p.proallargtypes IS DISTINCT FROM ARRAY['jsonb'::regtype,'integer'::regtype,'integer'::regtype,'boolean'::regtype,'timestamptz'::regtype,'integer'::regtype,'integer'::regtype]::oid[]
+ ELSE p.proargmodes IS NOT NULL OR p.proallargtypes IS NOT NULL END) THEN RETURN false;END IF;
+ -- Actual relay и три subject hooks остаются прежними attachments.
+ -- Полная shape исключает подмену BEFORE/AFTER, UPDATE OF id и transition table.
+ IF EXISTS(SELECT 1 FROM (VALUES
+  ('fga_outbox','relation_fact_00_native_batch','_authority_native_delete_batch_begin_v4()',4,ARRAY[]::text[],'journal_rows'::text),
+  ('fga_outbox','relation_fact_zz_native_batch','_authority_native_delete_batch_end_v4()',4,ARRAY[]::text[],'journal_rows'::text),
+  ('fga_outbox','relation_fact_follows_journal','relation_fact_from_journal()',4,ARRAY[]::text[],'journal_rows'::text),
+  ('subject_change_outbox','authority_subject_change_id_guard_v2','authority_subject_change_id_guard_v2()',23,ARRAY['id']::text[],NULL::text),
+  ('subject_change_outbox','authority_subject_change_applied_v2','authority_subject_change_applied_v2()',5,ARRAY[]::text[],NULL::text),
+  ('subject_change_outbox','authority_subject_change_statement_guard_v2','authority_subject_change_statement_guard_v2()',58,ARRAY[]::text[],NULL::text)
+ ) e(table_name,trigger_name,signature,trigger_type,columns,new_table)
+ LEFT JOIN pg_catalog.pg_trigger t ON t.tgrelid=to_regclass('kaname.'||e.table_name) AND t.tgname=e.trigger_name
+ WHERE t.oid IS NULL OR t.tgfoid<>to_regprocedure('kaname.'||e.signature)
+ OR t.tgtype::integer<>e.trigger_type OR t.tgenabled<>'O' OR t.tgisinternal OR t.tgconstraint<>0
+ OR t.tgdeferrable OR t.tginitdeferred OR t.tgqual IS NOT NULL OR t.tgnargs<>0 OR octet_length(t.tgargs)<>0
+ OR t.tgoldtable IS NOT NULL OR t.tgnewtable::text IS DISTINCT FROM e.new_table
+ OR ARRAY(SELECT a.attname::text FROM unnest(t.tgattr) WITH ORDINALITY x(num,pos)
+  JOIN pg_catalog.pg_attribute a ON a.attrelid=t.tgrelid AND a.attnum=x.num AND NOT a.attisdropped ORDER BY x.pos) IS DISTINCT FROM e.columns
+ OR (SELECT count(*) FROM pg_catalog.pg_trigger other WHERE other.tgfoid=t.tgfoid)<>1) THEN RETURN false;END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+  WHERE a.attrelid='kaname.subject_change_outbox'::regclass AND a.attname='id' AND NOT a.attisdropped
+   AND a.atttypid='bigint'::regtype AND a.attidentity='' AND a.attgenerated=''
+   AND pg_get_expr(d.adbin,d.adrelid)='kaname.authority_group_add_subject_id_v3()') THEN RETURN false;END IF;
+ RETURN true;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_binding_epoch_changed() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE retained_proof jsonb;mirror_metadata jsonb;mirror_covered boolean;keys text[]; k text; manifest jsonb; image jsonb; metadata jsonb; resource_keys text[]; resource_roles text[];
+BEGIN
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NOT NULL THEN
+  IF TG_OP='TRUNCATE' THEN RAISE EXCEPTION 'resource truncate denied' USING ERRCODE='42501'; END IF;
+  resource_keys:=ARRAY[]::text[]; resource_roles:=ARRAY[]::text[];
+  IF TG_OP<>'INSERT' THEN
+   FOR image IN SELECT to_jsonb(o) FROM old_epoch_rows o LOOP
+    metadata:=kaname._authority_resource_side_v2(manifest,TG_TABLE_NAME,TG_OP,'old',image);
+    resource_keys:=resource_keys||kaname._authority_resource_key_array_v2(metadata->'binding_epoch_write_scopes',true);
+    resource_roles:=resource_roles||kaname._authority_resource_key_array_v2(metadata->'deferred_carrier_roles');
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_keys FROM unnest(resource_keys) x;
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_roles FROM unnest(resource_roles) x;
+   END LOOP;
+  END IF;
+  IF TG_OP<>'DELETE' THEN
+   FOR image IN SELECT to_jsonb(n) FROM new_epoch_rows n LOOP
+    metadata:=kaname._authority_resource_side_v2(manifest,TG_TABLE_NAME,TG_OP,'new',image);
+    resource_keys:=resource_keys||kaname._authority_resource_key_array_v2(metadata->'binding_epoch_write_scopes',true);
+    resource_roles:=resource_roles||kaname._authority_resource_key_array_v2(metadata->'deferred_carrier_roles');
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_keys FROM unnest(resource_keys) x;
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_roles FROM unnest(resource_roles) x;
+   END LOOP;
+  END IF;
+  FOR k IN SELECT DISTINCT x COLLATE "C" FROM unnest(resource_keys) x ORDER BY 1 LOOP
+   IF NOT ((manifest->'binding_epoch_write_scopes') ? k) THEN
+    RAISE EXCEPTION 'resource epoch write was not prepared' USING ERRCODE='42501';
+   END IF;
+   PERFORM kaname._authority_resource_preheld_key_v2(1262569297,k,true);
+   -- Ни INSERT, ни повторного FOR UPDATE после final clock.
+   UPDATE kaname.authority_binding_epoch SET revision=revision+1 WHERE scope=k;
+   IF NOT FOUND THEN RAISE EXCEPTION 'resource prepared epoch missing' USING ERRCODE='40001'; END IF;
+  END LOOP;
+  RETURN NULL;
+ END IF;
+ -- Для exact prepared mirror member/ledger transition epoch keys уже
+ -- удерживаются. Ни carrier lookup, ни открытие нового ключа после часов.
+ IF TG_TABLE_NAME IN ('access_binding_target_members','access_binding_emitted_tuples') AND TG_OP<>'TRUNCATE' THEN
+  mirror_metadata:=kaname._authority_binding_mirror_store_v3();
+  IF mirror_metadata IS NOT NULL THEN
+   IF mirror_metadata->>'final_clock' IS NULL OR mirror_metadata->>'final_clock' IS DISTINCT FROM mirror_metadata->>'epoch_clock'
+   OR mirror_metadata->>'final_clock' IS DISTINCT FROM (kaname.authority_protocol_attestation()->>'decision_at') THEN
+    RAISE EXCEPTION 'binding mirror epoch statement lacks final proof' USING ERRCODE='42501';END IF;
+   mirror_covered:=true;
+   IF TG_OP<>'DELETE' THEN
+    SELECT NOT EXISTS(SELECT 1 FROM new_epoch_rows n WHERE NOT EXISTS(SELECT 1 FROM pg_temp.kaname_binding_mirror_images i
+     WHERE i.table_name=TG_TABLE_NAME AND i.new_hash=sha256(convert_to(to_jsonb(n)::text,'UTF8')) AND i.new_image=to_jsonb(n))) INTO mirror_covered;
+   END IF;
+   IF TG_OP<>'INSERT' AND mirror_covered THEN
+    SELECT NOT EXISTS(SELECT 1 FROM old_epoch_rows o WHERE NOT EXISTS(SELECT 1 FROM pg_temp.kaname_binding_mirror_images i
+     WHERE i.table_name=TG_TABLE_NAME AND i.old_hash=sha256(convert_to(to_jsonb(o)::text,'UTF8')) AND i.old_image=to_jsonb(o))) INTO mirror_covered;
+   END IF;
+   IF mirror_covered THEN
+    -- Пустые ON CONFLICT transitions не являются изменением поколения.
+    IF TG_OP='INSERT' THEN IF NOT EXISTS(SELECT 1 FROM new_epoch_rows) THEN RETURN NULL;END IF;
+    ELSIF TG_OP='DELETE' THEN IF NOT EXISTS(SELECT 1 FROM old_epoch_rows) THEN RETURN NULL;END IF;
+    ELSE IF NOT EXISTS(SELECT 1 FROM old_epoch_rows) AND NOT EXISTS(SELECT 1 FROM new_epoch_rows) THEN RETURN NULL;END IF;END IF;
+    UPDATE kaname.authority_binding_epoch SET revision=revision+1 WHERE scope IN (SELECT jsonb_array_elements_text(mirror_metadata->'accounts'));
+    IF NOT FOUND THEN RAISE EXCEPTION 'binding prepared epoch disappeared' USING ERRCODE='40001';END IF;
+    RETURN NULL;
+   END IF;
+  END IF;
+ END IF;
+ -- Unsigned RR может предшествовать compatibility barrier. Поэтому retained
+ -- predicate всегда инвалидирует ROOT, даже если snapshot не видит OLD owner.
+ IF TG_TABLE_NAME='resource_registration_scope' THEN
+  retained_proof:=kaname.authority_protocol_attestation();
+  -- Generation1 ResourceObjectParticipant заранее входит GLOBAL/typed. Свежая
+  -- attestation удостоверяет owner contract=1 и удерживаемые root/compatibility
+  -- locks; caller flag не участвует. Остальные signed writers требуют manifest.
+  IF retained_proof IS NOT NULL AND (
+   retained_proof->>'writer_contract' IS DISTINCT FROM '1'
+   OR retained_proof->>'kind' IS DISTINCT FROM 'resource'
+   OR retained_proof->>'purpose' IS DISTINCT FROM 'participant'
+   OR retained_proof->>'mode' IS DISTINCT FROM 'global'
+   OR retained_proof->>'consumer_profile' IS DISTINCT FROM 'typed'
+   OR TG_OP NOT IN ('INSERT','UPDATE','DELETE')) THEN
+   RAISE EXCEPTION 'signed retained write requires prepared resource manifest' USING ERRCODE='42501';
+  END IF;
+  IF TG_OP='INSERT' THEN
+   IF NOT EXISTS(SELECT 1 FROM new_epoch_rows) THEN RETURN NULL;END IF;
+  ELSIF TG_OP='DELETE' THEN
+   IF NOT EXISTS(SELECT 1 FROM old_epoch_rows) THEN RETURN NULL;END IF;
+  ELSIF TG_OP='UPDATE' THEN
+   IF NOT EXISTS(SELECT 1 FROM old_epoch_rows) AND NOT EXISTS(SELECT 1 FROM new_epoch_rows) THEN RETURN NULL;END IF;
+  END IF;
+  UPDATE kaname.authority_binding_epoch SET revision=revision+1 WHERE scope='';
+  IF NOT FOUND THEN RAISE EXCEPTION 'binding root epoch missing' USING ERRCODE='40001';END IF;
+  RETURN NULL;
+ END IF;
+ -- Transition tables принадлежат executor этого statement, не search_path.
+ -- По одному bump на distinct OLD+NEW account на statement, не на ledger row.
+ -- Target-member scope читает только binding и optional group coordinate.
+ -- C сохраняет byte-distinct identifiers; default повторяет JSON text predicate.
+ -- Оба MATERIALIZED ограничивают STABLE вычисление одним вызовом на dependency.
+ IF TG_TABLE_NAME='access_binding_target_members' AND TG_OP IN ('INSERT','UPDATE','DELETE') THEN
+  IF TG_OP='UPDATE' THEN
+   WITH dependencies AS MATERIALIZED (
+    SELECT DISTINCT d.binding_id,d.object_type,d.group_object_id FROM (
+    SELECT o.binding_id COLLATE "C" AS binding_id,o.object_type COLLATE "C" AS object_type,
+     (CASE WHEN o.object_type COLLATE "default"='iam.group' THEN o.object_id END) COLLATE "C" AS group_object_id
+    FROM old_epoch_rows o
+    UNION ALL
+    SELECT n.binding_id COLLATE "C" AS binding_id,n.object_type COLLATE "C" AS object_type,
+     (CASE WHEN n.object_type COLLATE "default"='iam.group' THEN n.object_id END) COLLATE "C" AS group_object_id
+    FROM new_epoch_rows n
+    ) d
+   ), scopes AS MATERIALIZED (
+    SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,
+     pg_catalog.jsonb_build_object('binding_id',d.binding_id,'object_type',d.object_type,'object_id',d.group_object_id)) AS x
+    FROM dependencies d
+   )
+   SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM scopes;
+  ELSIF TG_OP='INSERT' THEN
+   WITH dependencies AS MATERIALIZED (
+    SELECT DISTINCT d.binding_id,d.object_type,d.group_object_id FROM (
+    SELECT n.binding_id COLLATE "C" AS binding_id,n.object_type COLLATE "C" AS object_type,
+     (CASE WHEN n.object_type COLLATE "default"='iam.group' THEN n.object_id END) COLLATE "C" AS group_object_id
+    FROM new_epoch_rows n
+    ) d
+   ), scopes AS MATERIALIZED (
+    SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,
+     pg_catalog.jsonb_build_object('binding_id',d.binding_id,'object_type',d.object_type,'object_id',d.group_object_id)) AS x
+    FROM dependencies d
+   )
+   SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM scopes;
+  ELSE
+   WITH dependencies AS MATERIALIZED (
+    SELECT DISTINCT d.binding_id,d.object_type,d.group_object_id FROM (
+    SELECT o.binding_id COLLATE "C" AS binding_id,o.object_type COLLATE "C" AS object_type,
+     (CASE WHEN o.object_type COLLATE "default"='iam.group' THEN o.object_id END) COLLATE "C" AS group_object_id
+    FROM old_epoch_rows o
+    ) d
+   ), scopes AS MATERIALIZED (
+    SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,
+     pg_catalog.jsonb_build_object('binding_id',d.binding_id,'object_type',d.object_type,'object_id',d.group_object_id)) AS x
+    FROM dependencies d
+   )
+   SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM scopes;
+  END IF;
+ ELSIF TG_OP='UPDATE' THEN
+  SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM (
+   SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(o)) x FROM old_epoch_rows o
+   UNION SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(n)) FROM new_epoch_rows n) s;
+ ELSIF TG_OP='INSERT' THEN
+  SELECT pg_catalog.array_agg(DISTINCT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(n)) ORDER BY kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(n))) INTO keys FROM new_epoch_rows n;
+ ELSIF TG_OP='DELETE' THEN
+  SELECT pg_catalog.array_agg(DISTINCT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(o)) ORDER BY kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(o))) INTO keys FROM old_epoch_rows o;
+ ELSE keys:=ARRAY['']::text[];
+ END IF;
+ IF keys IS NULL THEN RETURN NULL; END IF;
+ -- Глобальная строка shared для account writes: разные accounts не конфликтуют.
+ -- Global source change конфликтует с любым apply snapshot.
+ IF ''=ANY(keys) THEN
+  UPDATE kaname.authority_binding_epoch SET revision=revision+1 WHERE scope='';
+ ELSE
+  PERFORM scope FROM kaname.authority_binding_epoch WHERE scope='' FOR KEY SHARE;
+ END IF;
+ FOREACH k IN ARRAY keys LOOP
+  IF k<>'' THEN INSERT INTO kaname.authority_binding_epoch(scope,revision) VALUES(k,1)
+   ON CONFLICT(scope) DO UPDATE SET revision=kaname.authority_binding_epoch.revision+1; END IF;
+ END LOOP;
+ RETURN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname.authority_binding_epoch_lock(p_accounts text[],p_expected jsonb) RETURNS timestamptz
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb; actual jsonb; at_time timestamptz; mirror_snapshot jsonb;
+BEGIN
+ IF p_expected IS NULL OR pg_catalog.jsonb_typeof(p_expected)<>'object' THEN RAISE EXCEPTION 'binding epoch snapshot is absent' USING ERRCODE='40001'; END IF;
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL THEN RAISE EXCEPTION 'binding apply requires participant entry' USING ERRCODE='42501'; END IF;
+ IF proof->>'purpose' IS DISTINCT FROM 'participant' THEN RAISE EXCEPTION 'binding apply requires ordinary participant' USING ERRCODE='42501'; END IF;
+ -- Общий порядок actual ROW locks: policy ROOT/typed keys → Binding ROOT/accounts.
+ -- Owner snapshot проверяется до первого ожидания; caller не выбирает policy set.
+ IF proof->>'kind'='binding' AND to_regclass('pg_temp.kaname_binding_sequence_snapshot') IS NOT NULL THEN
+  mirror_snapshot:=kaname._authority_binding_stage_snapshot_v3();
+  IF mirror_snapshot->'mirror' IS NOT NULL AND mirror_snapshot->'mirror'<>'null'::jsonb THEN
+   IF p_accounts IS NULL OR cardinality(p_accounts)=0
+   OR EXISTS(SELECT 1 FROM unnest(p_accounts) a WHERE a IS NULL OR a='')
+   OR proof->>'mode' IS DISTINCT FROM 'accounts'
+   OR proof->'accounts' IS DISTINCT FROM to_jsonb(p_accounts)
+   OR mirror_snapshot->'accounts' IS DISTINCT FROM to_jsonb(p_accounts)
+   OR mirror_snapshot->'epochs' IS DISTINCT FROM p_expected
+   OR (mirror_snapshot->>'consumed' IS DISTINCT FROM 'false'
+    AND to_regclass('pg_temp.kaname_binding_mirror_policy_receipt') IS NULL) THEN
+    RAISE EXCEPTION 'binding early policy footprint differs from owner stage' USING ERRCODE='42501';END IF;
+   PERFORM kaname._authority_binding_mirror_policy_prepare_v3(mirror_snapshot);
+  END IF;
+ END IF;
+ IF p_accounts IS NULL THEN
+  IF proof->>'mode' IS DISTINCT FROM 'global' THEN RAISE EXCEPTION 'binding global epoch requires global entry' USING ERRCODE='42501'; END IF;
+  PERFORM scope FROM kaname.authority_binding_epoch WHERE scope='' FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'binding epochs are uninitialized' USING ERRCODE='40001'; END IF;
+ ELSE
+  IF pg_catalog.cardinality(p_accounts)=0 OR EXISTS(SELECT 1 FROM pg_catalog.unnest(p_accounts) a WHERE a IS NULL OR a='') THEN RAISE EXCEPTION 'invalid binding epoch scope'; END IF;
+  IF proof->>'mode'='accounts' AND NOT (proof->'accounts') @> pg_catalog.to_jsonb(p_accounts) THEN RAISE EXCEPTION 'epoch accounts exceed participant scope' USING ERRCODE='42501'; END IF;
+  PERFORM scope FROM kaname.authority_binding_epoch WHERE scope='' FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'binding epochs are uninitialized' USING ERRCODE='40001'; END IF;
+  PERFORM scope FROM kaname.authority_binding_epoch WHERE scope=ANY(p_accounts) ORDER BY scope FOR SHARE;
+  IF (SELECT count(*) FROM kaname.authority_binding_epoch WHERE scope=ANY(p_accounts))<>(SELECT count(DISTINCT a) FROM pg_catalog.unnest(p_accounts) a) THEN RAISE EXCEPTION 'binding epoch disappeared' USING ERRCODE='40001'; END IF;
+ END IF;
+ actual:=kaname.authority_binding_epoch_read(p_accounts);
+ IF actual IS DISTINCT FROM p_expected THEN RAISE EXCEPTION 'binding stage changed' USING ERRCODE='40001'; END IF;
+ at_time:=pg_catalog.clock_timestamp();
+ UPDATE pg_temp.kaname_authority_attestation SET decision_at=at_time;
+ PERFORM kaname._authority_binding_mirror_epoch_v3(p_accounts,p_expected,at_time);
+ RETURN at_time;
+END $$;
+
+-- Allocation-only протокол обычного Forward. Payload не удостоверяет право:
+-- actual INSERT остаётся SECURITY INVOKER и проходит прежний authority/fold graph.
+-- Постоянный anchor закрывает DISCARD TEMP/удаление private storage до COMMIT.
+CREATE TABLE kaname.authority_forward_emit_anchor_v4(
+ backend integer NOT NULL,transaction_id xid8 NOT NULL,nonce uuid NOT NULL,
+ invoker_oid oid NOT NULL,program_oid oid NOT NULL,effects_oid oid NOT NULL,receipts_oid oid NOT NULL,
+ effect_count integer NOT NULL CHECK(effect_count>=0),finished boolean NOT NULL,batch jsonb NOT NULL,batch_required boolean NOT NULL,
+ write_batch jsonb NOT NULL,write_required boolean NOT NULL,
+ PRIMARY KEY(backend,transaction_id,nonce));
+REVOKE ALL ON kaname.authority_forward_emit_anchor_v4 FROM PUBLIC;
+DO $$ DECLARE r record;BEGIN
+ FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_class c
+ CROSS JOIN LATERAL aclexplode(c.relacl) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee
+ WHERE c.oid='kaname.authority_forward_emit_anchor_v4'::regclass AND a.grantee<>c.relowner LOOP
+  EXECUTE format('REVOKE ALL ON kaname.authority_forward_emit_anchor_v4 FROM %I',r.rolname);
+ END LOOP;
+END $$;
+
+CREATE FUNCTION kaname._authority_forward_context_v4() RETURNS oid
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE invoker oid;
+BEGIN
+ -- Невалидная подпись/strict/compare отвергается прежней свежей аттестацией.
+ -- Валидная signed подпись тоже не превращается в unsigned allocation.
+ IF kaname.authority_protocol_attestation() IS NOT NULL THEN
+  RAISE EXCEPTION 'forward allocation requires unsigned compatibility' USING ERRCODE='42501';END IF;
+ SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles
+ WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
+ IF NOT has_table_privilege(invoker,'kaname.fga_outbox'::regclass,'INSERT')
+ OR NOT has_sequence_privilege(invoker,'kaname.fga_outbox_id_seq'::regclass,'USAGE,UPDATE') THEN
+  RAISE EXCEPTION 'forward allocation lacks original privileges' USING ERRCODE='42501';END IF;
+ RETURN invoker;
+END $$;
+
+CREATE FUNCTION kaname._authority_forward_custody_v4() RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE owner_oid oid;
+BEGIN
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ -- Каждый вызов заново проверяет три OID; LEFT JOIN сохраняет отказ при отсутствии storage.
+ IF EXISTS(SELECT 1 FROM (VALUES
+  (to_regclass('pg_temp.kaname_forward_program_v4')),
+  (to_regclass('pg_temp.kaname_forward_effects_v4')),
+  (to_regclass('pg_temp.kaname_forward_receipts_v4'))
+ ) expected(relation_id) LEFT JOIN pg_catalog.pg_class c ON c.oid=expected.relation_id
+ WHERE expected.relation_id IS NULL OR c.oid IS NULL
+  OR NOT (c.relowner=owner_oid AND c.relkind='r' AND c.relpersistence='t'
+   AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT c.relhasrules AND NOT c.relhassubclass)
+  OR (SELECT t.oid FROM pg_catalog.pg_trigger t WHERE t.tgrelid=expected.relation_id LIMIT 1) IS NOT NULL
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=expected.relation_id OR inhparent=expected.relation_id)
+  OR EXISTS(SELECT 1 FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+   WHERE a.grantee<>owner_oid)
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl) x
+   WHERE a.attrelid=expected.relation_id AND a.attacl IS NOT NULL AND x.grantee<>owner_oid)) THEN
+  RAISE EXCEPTION 'untrusted forward allocation storage' USING ERRCODE='42501';END IF;
+END $$;
+
+CREATE FUNCTION kaname._authority_forward_shape_v4() RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE expected record;relation_id oid;
+BEGIN
+ PERFORM kaname._authority_forward_custody_v4();
+ FOR expected IN SELECT * FROM (VALUES
+  ('kaname_forward_program_v4',ARRAY['nonce','backend','transaction_id','invoker_oid','effects_oid','receipts_oid','effect_count','phase'],
+   ARRAY['uuid','integer','xid8','oid','oid','oid','integer','text'],1),
+  ('kaname_forward_effects_v4',ARRAY['nonce','ordinal','reserved_id','row_value','row_digest'],
+   ARRAY['uuid','integer','bigint','jsonb','bytea'],2),
+  ('kaname_forward_receipts_v4',ARRAY['nonce','ordinal','reserved_id','backend','transaction_id','invoker_oid','program_oid','effects_oid',
+   'table_oid','key_namespace','key_hash','objsubid','lock_mode','claimed','guarded','consumed'],
+   ARRAY['uuid','integer','bigint','integer','xid8','oid','oid','oid','oid','integer','integer','integer','text','boolean','boolean','boolean'],2)
+ ) x(table_name,column_names,type_names,index_count) LOOP
+  relation_id:=to_regclass('pg_temp.'||expected.table_name);
+  IF (SELECT array_agg(a.attname::text ORDER BY a.attnum) FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid=relation_id AND a.attnum>0 AND NOT a.attisdropped) IS DISTINCT FROM expected.column_names
+  OR (SELECT array_agg(a.atttypid ORDER BY a.attnum) FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid=relation_id AND a.attnum>0 AND NOT a.attisdropped) IS DISTINCT FROM
+   (SELECT array_agg(v::regtype::oid ORDER BY n) FROM unnest(expected.type_names) WITH ORDINALITY t(v,n))
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a WHERE a.attrelid=relation_id AND a.attnum>0
+   AND (a.attisdropped OR NOT a.attnotnull OR a.attgenerated<>'' OR a.attidentity<>'' OR a.atthasdef))
+  OR (SELECT count(*) FROM pg_catalog.pg_index WHERE indrelid=relation_id)<>expected.index_count
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid=i.indexrelid
+   JOIN pg_catalog.pg_am m ON m.oid=c.relam WHERE i.indrelid=relation_id AND
+   (NOT i.indisunique OR NOT i.indisvalid OR NOT i.indisready OR NOT i.indislive
+    OR i.indexprs IS NOT NULL OR i.indpred IS NOT NULL OR m.amname<>'btree' OR i.indnatts<>i.indnkeyatts
+    OR NOT (CASE WHEN expected.table_name='kaname_forward_program_v4' THEN i.indisprimary AND i.indkey='1'::int2vector
+     ELSE (i.indisprimary AND i.indkey='1 2'::int2vector) OR (NOT i.indisprimary AND i.indkey='3'::int2vector) END)))
+  THEN RAISE EXCEPTION 'forward allocation storage shape changed' USING ERRCODE='42501';END IF;
+ END LOOP;
+END $$;
+
+CREATE FUNCTION kaname._authority_forward_program_v4(p_nonce uuid) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program record;anchor kaname.authority_forward_emit_anchor_v4%ROWTYPE;invoker oid;
+BEGIN
+ PERFORM kaname._authority_forward_custody_v4();
+ SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles
+ WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
+ SELECT a.* INTO anchor FROM kaname.authority_forward_emit_anchor_v4 a
+ WHERE a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id() AND a.nonce=p_nonce;
+ IF NOT FOUND THEN RAISE EXCEPTION 'forward allocation anchor missing or foreign' USING ERRCODE='42501';END IF;
+ SELECT p.* INTO program FROM pg_temp.kaname_forward_program_v4 p WHERE p.nonce=p_nonce;
+ IF NOT FOUND THEN RAISE EXCEPTION 'forward allocation program missing' USING ERRCODE='42501';END IF;
+ IF program.backend IS DISTINCT FROM anchor.backend OR program.transaction_id IS DISTINCT FROM anchor.transaction_id
+ OR program.invoker_oid IS DISTINCT FROM invoker OR program.invoker_oid IS DISTINCT FROM anchor.invoker_oid
+ OR anchor.program_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_program_v4')
+ OR anchor.effects_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_effects_v4')
+ OR anchor.receipts_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_receipts_v4')
+ OR program.effects_oid IS DISTINCT FROM anchor.effects_oid OR program.receipts_oid IS DISTINCT FROM anchor.receipts_oid
+ OR program.effect_count IS DISTINCT FROM anchor.effect_count OR program.effect_count<0
+ OR program.phase NOT IN ('prepared','claimed','finished')
+ OR (program.phase='finished') IS DISTINCT FROM anchor.finished THEN
+  RAISE EXCEPTION 'forward allocation program scope changed' USING ERRCODE='42501';END IF;
+ RETURN to_jsonb(program)||jsonb_build_object('program_oid',anchor.program_oid);
+END $$;
+
+CREATE FUNCTION kaname.authority_forward_prepare_v4(p_payloads jsonb[]) RETURNS uuid
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE invoker oid;owner_oid oid;command_nonce uuid;item record;relation_id oid;grantee record;
+ identifiers bigint[];present boolean;effect_count integer;
+BEGIN
+ invoker:=kaname._authority_forward_context_v4();
+ IF p_payloads IS NULL OR coalesce(array_ndims(p_payloads),1)<>1
+ OR EXISTS(SELECT 1 FROM unnest(p_payloads) p WHERE jsonb_typeof(p) IS DISTINCT FROM 'object') THEN
+  RAISE EXCEPTION 'invalid forward allocation payload array' USING ERRCODE='42501';END IF;
+ effect_count:=cardinality(p_payloads);
+ IF pg_get_serial_sequence('kaname.fga_outbox','id')::regclass IS DISTINCT FROM 'kaname.fga_outbox_id_seq'::regclass
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid='kaname.fga_outbox'::regclass OR inhparent='kaname.fga_outbox'::regclass) THEN
+  RAISE EXCEPTION 'forward allocation requires exact owned sequence relation' USING ERRCODE='42501';END IF;
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ IF to_regclass('pg_temp.kaname_forward_program_v4') IS NULL
+  AND to_regclass('pg_temp.kaname_forward_effects_v4') IS NULL
+  AND to_regclass('pg_temp.kaname_forward_receipts_v4') IS NULL THEN
+  CREATE TEMP TABLE pg_temp.kaname_forward_program_v4(
+   nonce uuid PRIMARY KEY,backend integer NOT NULL,transaction_id xid8 NOT NULL,invoker_oid oid NOT NULL,
+   effects_oid oid NOT NULL,receipts_oid oid NOT NULL,effect_count integer NOT NULL,phase text NOT NULL) ON COMMIT DELETE ROWS;
+  CREATE TEMP TABLE pg_temp.kaname_forward_effects_v4(
+   nonce uuid NOT NULL,ordinal integer NOT NULL,reserved_id bigint NOT NULL UNIQUE,
+   row_value jsonb NOT NULL,row_digest bytea NOT NULL,PRIMARY KEY(nonce,ordinal)) ON COMMIT DELETE ROWS;
+  CREATE TEMP TABLE pg_temp.kaname_forward_receipts_v4(
+   nonce uuid NOT NULL,ordinal integer NOT NULL,reserved_id bigint NOT NULL UNIQUE,
+   backend integer NOT NULL,transaction_id xid8 NOT NULL,invoker_oid oid NOT NULL,program_oid oid NOT NULL,effects_oid oid NOT NULL,
+   table_oid oid NOT NULL,key_namespace integer NOT NULL,key_hash integer NOT NULL,objsubid integer NOT NULL,lock_mode text NOT NULL,
+   claimed boolean NOT NULL,guarded boolean NOT NULL,consumed boolean NOT NULL,PRIMARY KEY(nonce,ordinal)) ON COMMIT DELETE ROWS;
+  FOREACH relation_id IN ARRAY ARRAY['pg_temp.kaname_forward_program_v4'::regclass,
+   'pg_temp.kaname_forward_effects_v4'::regclass,'pg_temp.kaname_forward_receipts_v4'::regclass] LOOP
+   EXECUTE format('REVOKE ALL ON %s FROM PUBLIC',relation_id::regclass);
+   FOR grantee IN SELECT DISTINCT r.rolname FROM pg_catalog.pg_class c
+    CROSS JOIN LATERAL aclexplode(c.relacl) a JOIN pg_catalog.pg_roles r ON r.oid=a.grantee
+    WHERE c.oid=relation_id AND a.grantee<>owner_oid LOOP
+    EXECUTE format('REVOKE ALL ON %s FROM %I',relation_id::regclass,grantee.rolname);
+   END LOOP;
+  END LOOP;
+ END IF;
+ PERFORM kaname._authority_forward_shape_v4();
+ -- RX actual таблицы предшествует каждому key; никаких новых account/binding
+ -- или общих advisory замков. Порядок тот же, что signed sequence reserve.
+ LOCK TABLE ONLY kaname.fga_outbox IN ROW EXCLUSIVE MODE;
+ command_nonce:=gen_random_uuid();
+ INSERT INTO pg_temp.kaname_forward_program_v4 VALUES(command_nonce,pg_backend_pid(),pg_current_xact_id(),invoker,
+  'pg_temp.kaname_forward_effects_v4'::regclass,'pg_temp.kaname_forward_receipts_v4'::regclass,effect_count,'prepared');
+ INSERT INTO pg_temp.kaname_forward_effects_v4(nonce,ordinal,reserved_id,row_value,row_digest)
+ SELECT command_nonce,n::integer,nextval('kaname.fga_outbox_id_seq'::regclass),row_value,sha256(convert_to(row_value::text,'UTF8'))
+ FROM (SELECT p,n,jsonb_build_object('event_type','fga.tuple.write','payload',p,'created_at',transaction_timestamp()) row_value
+  FROM unnest(p_payloads) WITH ORDINALITY t(p,n)) q ORDER BY n;
+ IF EXISTS(SELECT 1 FROM pg_temp.kaname_forward_effects_v4 WHERE nonce=command_nonce AND reserved_id<=0) THEN
+  RAISE EXCEPTION 'sequence identity exhausted' USING ERRCODE='P1034';END IF;
+ FOR item IN SELECT DISTINCT hashtext(e.reserved_id::text) key_hash
+  FROM pg_temp.kaname_forward_effects_v4 e WHERE e.nonce=command_nonce ORDER BY key_hash LOOP
+  PERFORM pg_advisory_xact_lock(1262569305,item.key_hash);
+ END LOOP;
+ FOR identifiers IN SELECT array_agg(id ORDER BY id) FROM (
+  SELECT reserved_id id,(row_number() OVER (ORDER BY reserved_id)-1)/256 page
+  FROM pg_temp.kaname_forward_effects_v4 WHERE nonce=command_nonce) q GROUP BY page ORDER BY page LOOP
+  SELECT EXISTS(SELECT 1 FROM (SELECT id FROM ONLY kaname.fga_outbox WHERE id=ANY(identifiers) ORDER BY id FOR UPDATE) locked) INTO present;
+  IF present THEN RAISE EXCEPTION 'sequence reservation collided' USING ERRCODE='P1034';END IF;
+ END LOOP;
+ -- Публикация receipt только ПОСЛЕ actual успешного acquisition всех ключей.
+ -- Transactional DML и xact locks откатываются одним savepoint/subtransaction.
+ INSERT INTO pg_temp.kaname_forward_receipts_v4
+ SELECT e.nonce,e.ordinal,e.reserved_id,pg_backend_pid(),pg_current_xact_id(),invoker,
+  'pg_temp.kaname_forward_program_v4'::regclass,'pg_temp.kaname_forward_effects_v4'::regclass,
+  'kaname.fga_outbox'::regclass,1262569305,hashtext(e.reserved_id::text),2,'ExclusiveLock',false,false,false
+ FROM pg_temp.kaname_forward_effects_v4 e WHERE e.nonce=command_nonce;
+ INSERT INTO kaname.authority_forward_emit_anchor_v4 VALUES(pg_backend_pid(),pg_current_xact_id(),command_nonce,invoker,
+  'pg_temp.kaname_forward_program_v4'::regclass,'pg_temp.kaname_forward_effects_v4'::regclass,
+  'pg_temp.kaname_forward_receipts_v4'::regclass,effect_count,false,'{}'::jsonb,false,'{}'::jsonb,false);
+ RETURN command_nonce;
+END $$;
+
+CREATE FUNCTION kaname.authority_forward_claim_v4(p_nonce uuid)
+RETURNS TABLE(id bigint,event_type text,payload jsonb,created_at timestamptz)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb;changed integer;
+BEGIN
+ PERFORM kaname._authority_forward_context_v4();
+ program:=kaname._authority_forward_program_v4(p_nonce);
+ IF program->>'phase'<>'prepared' THEN RAISE EXCEPTION 'forward allocation claim replay' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_forward_receipts_v4 r SET claimed=true
+ WHERE r.nonce=p_nonce AND NOT r.claimed AND NOT r.guarded AND NOT r.consumed;
+ GET DIAGNOSTICS changed=ROW_COUNT;
+ IF changed<>(program->>'effect_count')::integer
+ OR (SELECT count(*) FROM pg_temp.kaname_forward_effects_v4 e WHERE e.nonce=p_nonce)<>changed THEN
+  RAISE EXCEPTION 'forward allocation exact claim changed' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_forward_program_v4 SET phase='claimed' WHERE nonce=p_nonce AND phase='prepared';
+ RETURN QUERY SELECT e.reserved_id,e.row_value->>'event_type',e.row_value->'payload',(e.row_value->>'created_at')::timestamptz
+ FROM pg_temp.kaname_forward_effects_v4 e WHERE e.nonce=p_nonce ORDER BY e.ordinal;
+END $$;
+
+CREATE FUNCTION kaname._authority_forward_row_v4(p_id bigint,p_row jsonb,p_applied boolean) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE effect record;receipt record;effect_found boolean;receipt_found boolean;program jsonb;changed integer;
+BEGIN
+ -- Этот helper private; оба actual trigger caller уже получили свежий NULL
+ -- proof. Нет active anchor — прежний произвольный SQL идёт в прежний guard.
+ IF NOT EXISTS(SELECT 1 FROM kaname.authority_forward_emit_anchor_v4 a
+  WHERE a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id_if_assigned()) THEN RETURN false;END IF;
+ PERFORM kaname._authority_forward_custody_v4();
+ SELECT e.* INTO effect FROM pg_temp.kaname_forward_effects_v4 e WHERE e.reserved_id=p_id;effect_found:=FOUND;
+ SELECT r.* INTO receipt FROM pg_temp.kaname_forward_receipts_v4 r WHERE r.reserved_id=p_id;receipt_found:=FOUND;
+ -- Непокрытый explicit ID сохраняет свежую старую проверку. Удаление обеих
+ -- строк owner fault не закрывает anchor: finish/COMMIT сверяют полный count.
+ IF NOT effect_found AND NOT receipt_found THEN RETURN false;END IF;
+ IF NOT effect_found OR NOT receipt_found THEN
+  RAISE EXCEPTION 'forward allocation exact receipt missing' USING ERRCODE='42501';END IF;
+ program:=kaname._authority_forward_program_v4(effect.nonce);
+ IF program->>'phase' IS DISTINCT FROM 'claimed' OR receipt.nonce IS DISTINCT FROM effect.nonce
+ OR receipt.ordinal IS DISTINCT FROM effect.ordinal OR effect.ordinal<1 OR effect.ordinal>(program->>'effect_count')::integer
+ OR receipt.backend IS DISTINCT FROM pg_backend_pid() OR receipt.transaction_id IS DISTINCT FROM pg_current_xact_id()
+ OR receipt.invoker_oid IS DISTINCT FROM (program->>'invoker_oid')::oid
+ OR receipt.program_oid IS DISTINCT FROM (program->>'program_oid')::oid
+ OR receipt.effects_oid IS DISTINCT FROM (program->>'effects_oid')::oid
+ OR receipt.table_oid IS DISTINCT FROM 'kaname.fga_outbox'::regclass::oid
+ OR receipt.key_namespace IS DISTINCT FROM 1262569305 OR receipt.key_hash IS DISTINCT FROM hashtext(p_id::text)
+ OR receipt.objsubid IS DISTINCT FROM 2 OR receipt.lock_mode IS DISTINCT FROM 'ExclusiveLock'
+ OR NOT receipt.claimed OR receipt.consumed OR receipt.guarded IS DISTINCT FROM p_applied
+ OR effect.row_digest IS DISTINCT FROM sha256(convert_to(p_row::text,'UTF8')) OR effect.row_value IS DISTINCT FROM p_row THEN
+  RAISE EXCEPTION 'forward allocation receipt scope or exact row changed' USING ERRCODE='42501';END IF;
+ IF p_applied THEN
+  UPDATE pg_temp.kaname_forward_receipts_v4 SET consumed=true
+  WHERE nonce=effect.nonce AND ordinal=effect.ordinal AND claimed AND guarded AND NOT consumed;
+ ELSE
+  UPDATE pg_temp.kaname_forward_receipts_v4 SET guarded=true
+  WHERE nonce=effect.nonce AND ordinal=effect.ordinal AND claimed AND NOT guarded AND NOT consumed;
+ END IF;
+ GET DIAGNOSTICS changed=ROW_COUNT;
+ IF changed<>1 THEN RAISE EXCEPTION 'forward allocation receipt replay' USING ERRCODE='42501';END IF;
+ RETURN true;
+END $$;
+
+CREATE FUNCTION kaname._authority_forward_complete_v4(p_nonce uuid) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb;expected integer;
+BEGIN
+ PERFORM kaname._authority_forward_shape_v4();
+ program:=kaname._authority_forward_program_v4(p_nonce);expected:=(program->>'effect_count')::integer;
+ IF EXISTS(SELECT 1 FROM kaname.authority_forward_emit_anchor_v4 WHERE backend=pg_backend_pid()
+  AND transaction_id=pg_current_xact_id() AND nonce=p_nonce AND batch_required
+  AND batch->>'phase' IS DISTINCT FROM 'finished') THEN
+  RAISE EXCEPTION 'native batch completion obligation unfinished' USING ERRCODE='42501';END IF;
+ PERFORM kaname.authority_native_delete_batch_read_v4();
+ IF EXISTS(SELECT 1 FROM kaname.authority_forward_emit_anchor_v4 WHERE backend=pg_backend_pid()
+  AND transaction_id=pg_current_xact_id() AND nonce=p_nonce AND write_required
+  AND write_batch->>'phase' IS DISTINCT FROM 'finished') THEN
+  RAISE EXCEPTION 'native write completion obligation unfinished' USING ERRCODE='42501';END IF;
+ PERFORM kaname.authority_native_write_read_v4();
+
+ IF program->>'phase' IS DISTINCT FROM 'finished'
+ OR (SELECT count(*) FROM pg_temp.kaname_forward_effects_v4 WHERE nonce=p_nonce)<>expected
+ OR (SELECT count(*) FROM pg_temp.kaname_forward_receipts_v4 WHERE nonce=p_nonce)<>expected
+ OR EXISTS(SELECT 1 FROM pg_temp.kaname_forward_effects_v4 e
+  LEFT JOIN pg_temp.kaname_forward_receipts_v4 r ON r.nonce=e.nonce AND r.ordinal=e.ordinal
+  WHERE e.nonce=p_nonce AND (r.reserved_id IS DISTINCT FROM e.reserved_id
+   OR e.ordinal<1 OR e.ordinal>expected OR e.reserved_id<=0
+   OR e.row_digest IS DISTINCT FROM sha256(convert_to(e.row_value::text,'UTF8'))
+   OR r.backend IS DISTINCT FROM pg_backend_pid() OR r.transaction_id IS DISTINCT FROM pg_current_xact_id()
+   OR r.invoker_oid IS DISTINCT FROM (program->>'invoker_oid')::oid
+   OR r.program_oid IS DISTINCT FROM (program->>'program_oid')::oid OR r.effects_oid IS DISTINCT FROM (program->>'effects_oid')::oid
+   OR r.table_oid IS DISTINCT FROM 'kaname.fga_outbox'::regclass::oid OR r.key_namespace IS DISTINCT FROM 1262569305
+   OR r.key_hash IS DISTINCT FROM hashtext(e.reserved_id::text) OR r.objsubid IS DISTINCT FROM 2
+   OR r.lock_mode IS DISTINCT FROM 'ExclusiveLock' OR r.claimed IS DISTINCT FROM true
+   OR r.guarded IS DISTINCT FROM true OR r.consumed IS DISTINCT FROM true)) THEN
+  RAISE EXCEPTION 'forward allocation program incomplete or changed' USING ERRCODE='42501';END IF;
+END $$;
+
+CREATE FUNCTION kaname.authority_forward_finish_v4(p_nonce uuid) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb;changed integer;
+BEGIN
+ PERFORM kaname._authority_forward_context_v4();
+ program:=kaname._authority_forward_program_v4(p_nonce);
+ IF program->>'phase' IS DISTINCT FROM 'claimed' THEN
+  RAISE EXCEPTION 'forward allocation finish replay' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_forward_program_v4 SET phase='finished' WHERE nonce=p_nonce AND phase='claimed';
+ GET DIAGNOSTICS changed=ROW_COUNT;
+ IF changed<>1 THEN RAISE EXCEPTION 'forward allocation finish replay' USING ERRCODE='42501';END IF;
+ UPDATE kaname.authority_forward_emit_anchor_v4 SET finished=true
+ WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND nonce=p_nonce AND NOT finished;
+ GET DIAGNOSTICS changed=ROW_COUNT;
+ IF changed<>1 THEN RAISE EXCEPTION 'forward allocation completion anchor missing' USING ERRCODE='42501';END IF;
+ PERFORM kaname._authority_forward_complete_v4(p_nonce);
+END $$;
+
+CREATE FUNCTION kaname.authority_forward_emit_v4(p_payloads jsonb[]) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE command_nonce uuid;
+BEGIN
+ IF p_payloads IS NOT NULL AND cardinality(p_payloads)=0 THEN RETURN;END IF;
+ command_nonce:=kaname.authority_forward_prepare_v4(p_payloads);
+ IF has_function_privilege(current_user,'kaname.authority_native_write_arm_v4(uuid)','EXECUTE') THEN
+  PERFORM kaname.authority_native_write_arm_v4(command_nonce);
+ END IF;
+ INSERT INTO kaname.fga_outbox(id,event_type,payload,created_at)
+ SELECT id,event_type,payload,created_at FROM kaname.authority_forward_claim_v4(command_nonce);
+ -- AFTER STATEMENT fold и остальные original triggers уже завершились.
+ PERFORM kaname.authority_forward_finish_v4(command_nonce);
+END $$;
+
+-- Отдельная дверь unsigned DELETE: резерв сохраняет прежние RX/key receipts,
+-- а окончательная метка возникает при вычислении строки actual INSERT.
+CREATE FUNCTION kaname.authority_native_delete_prepare_v4(p_payloads jsonb[]) RETURNS uuid
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE command_nonce uuid;program jsonb;changed integer;expected integer;
+BEGIN
+ PERFORM kaname._authority_forward_context_v4();
+ IF p_payloads IS NULL OR coalesce(array_ndims(p_payloads),1)<>1
+ OR EXISTS(SELECT 1 FROM unnest(p_payloads) p WHERE jsonb_typeof(p) IS DISTINCT FROM 'object'
+  OR nullif(p->'source_version','null'::jsonb) IS NOT NULL) THEN
+  RAISE EXCEPTION 'native delete requires unversioned payload objects' USING ERRCODE='42501';END IF;
+ -- Отказ owner-ordered payload происходит до nextval и любого резерва.
+ -- Только созданный этим вызовом nonce переводится из WRITE в DELETE.
+ command_nonce:=kaname.authority_forward_prepare_v4(p_payloads);
+ program:=kaname._authority_forward_program_v4(command_nonce);expected:=cardinality(p_payloads);
+ IF program->>'phase' IS DISTINCT FROM 'prepared' OR (program->>'effect_count')::integer<>expected
+ OR (SELECT count(*) FROM pg_temp.kaname_forward_effects_v4 WHERE nonce=command_nonce)<>expected
+ OR (SELECT count(*) FROM pg_temp.kaname_forward_receipts_v4 WHERE nonce=command_nonce)<>expected
+ OR EXISTS(SELECT 1 FROM pg_temp.kaname_forward_receipts_v4
+  WHERE nonce=command_nonce AND (claimed OR guarded OR consumed)) THEN
+  RAISE EXCEPTION 'native delete preparation scope changed' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_forward_effects_v4 e
+ SET row_value=jsonb_build_object('event_type','fga.tuple.delete','payload',q.p,'created_at',NULL),
+  row_digest=sha256(convert_to(jsonb_build_object('event_type','fga.tuple.delete','payload',q.p,'created_at',NULL)::text,'UTF8'))
+ FROM unnest(p_payloads) WITH ORDINALITY q(p,n)
+ WHERE e.nonce=command_nonce AND e.ordinal=q.n
+  AND e.row_value=jsonb_build_object('event_type','fga.tuple.write','payload',q.p,'created_at',transaction_timestamp())
+  AND e.row_digest=sha256(convert_to(e.row_value::text,'UTF8'));
+ GET DIAGNOSTICS changed=ROW_COUNT;
+ IF changed<>expected THEN RAISE EXCEPTION 'native delete exact preparation changed' USING ERRCODE='42501';END IF;
+ RETURN command_nonce;
+END $$;
+
+CREATE FUNCTION kaname.authority_native_delete_stamp_v4(p_nonce uuid,p_id bigint,p_payload jsonb) RETURNS timestamptz
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb;effect record;receipt record;expected jsonb;actual jsonb;at_time timestamptz;changed integer;
+BEGIN
+ PERFORM kaname._authority_forward_context_v4();
+ program:=kaname._authority_forward_program_v4(p_nonce);
+ IF program->>'phase' IS DISTINCT FROM 'claimed' OR p_id IS NULL OR p_id<=0
+ OR jsonb_typeof(p_payload) IS DISTINCT FROM 'object'
+ OR nullif(p_payload->'source_version','null'::jsonb) IS NOT NULL THEN
+  RAISE EXCEPTION 'native delete stamp requires claimed unversioned effect' USING ERRCODE='42501';END IF;
+ SELECT e.* INTO effect FROM pg_temp.kaname_forward_effects_v4 e WHERE e.nonce=p_nonce AND e.reserved_id=p_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'native delete stamp effect missing or foreign' USING ERRCODE='42501';END IF;
+ SELECT r.* INTO receipt FROM pg_temp.kaname_forward_receipts_v4 r WHERE r.nonce=p_nonce AND r.reserved_id=p_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'native delete stamp receipt missing or foreign' USING ERRCODE='42501';END IF;
+ expected:=jsonb_build_object('event_type','fga.tuple.delete','payload',p_payload,'created_at',NULL);
+ IF receipt.ordinal IS DISTINCT FROM effect.ordinal OR effect.ordinal<1 OR effect.ordinal>(program->>'effect_count')::integer
+ OR receipt.backend IS DISTINCT FROM pg_backend_pid() OR receipt.transaction_id IS DISTINCT FROM pg_current_xact_id()
+ OR receipt.invoker_oid IS DISTINCT FROM (program->>'invoker_oid')::oid
+ OR receipt.program_oid IS DISTINCT FROM (program->>'program_oid')::oid
+ OR receipt.effects_oid IS DISTINCT FROM (program->>'effects_oid')::oid
+ OR receipt.table_oid IS DISTINCT FROM 'kaname.fga_outbox'::regclass::oid
+ OR receipt.key_namespace IS DISTINCT FROM 1262569305 OR receipt.key_hash IS DISTINCT FROM hashtext(p_id::text)
+ OR receipt.objsubid IS DISTINCT FROM 2 OR receipt.lock_mode IS DISTINCT FROM 'ExclusiveLock'
+ OR receipt.claimed IS DISTINCT FROM true OR receipt.guarded IS DISTINCT FROM false OR receipt.consumed IS DISTINCT FROM false
+ OR effect.row_value IS DISTINCT FROM expected OR effect.row_digest IS DISTINCT FROM sha256(convert_to(expected::text,'UTF8')) THEN
+  RAISE EXCEPTION 'native delete stamp scope, payload or unbound clock changed' USING ERRCODE='42501';END IF;
+ -- VOLATILE вызывается в targetlist INSERT после materialized claim и всех
+ -- reserve waits. Часы не принимаются от клиента и не вычисляются в SRF.
+ at_time:=clock_timestamp();actual:=jsonb_set(expected,'{created_at}',to_jsonb(at_time));
+ UPDATE pg_temp.kaname_forward_effects_v4 SET row_value=actual,row_digest=sha256(convert_to(actual::text,'UTF8'))
+ WHERE nonce=p_nonce AND ordinal=effect.ordinal AND reserved_id=p_id AND row_value=expected
+  AND row_digest=sha256(convert_to(expected::text,'UTF8'));
+ GET DIAGNOSTICS changed=ROW_COUNT;
+ IF changed<>1 THEN RAISE EXCEPTION 'native delete stamp replay' USING ERRCODE='42501';END IF;
+ RETURN at_time;
+END $$;
+
+CREATE FUNCTION kaname.authority_native_delete_emit_v4(p_payloads jsonb[]) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE command_nonce uuid;
+BEGIN
+ IF p_payloads IS NOT NULL AND cardinality(p_payloads)=0 THEN RETURN;END IF;
+ command_nonce:=kaname.authority_native_delete_prepare_v4(p_payloads);
+ INSERT INTO kaname.fga_outbox(id,event_type,payload,created_at)
+ SELECT id,event_type,payload,kaname.authority_native_delete_stamp_v4(command_nonce,id,payload)
+ FROM kaname.authority_forward_claim_v4(command_nonce);
+ -- Finish выполняется только после всех прежних AFTER STATEMENT guards/fold.
+ PERFORM kaname.authority_forward_finish_v4(command_nonce);
+END $$;
+
+CREATE FUNCTION kaname._authority_forward_anchor_complete_v4() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'authority_forward_emit_anchor_v4'
+ OR TG_OP<>'INSERT' OR TG_WHEN<>'AFTER' OR TG_LEVEL<>'ROW'
+ OR TG_RELID IS DISTINCT FROM 'kaname.authority_forward_emit_anchor_v4'::regclass
+ OR NEW.backend IS DISTINCT FROM pg_backend_pid() OR NEW.transaction_id IS DISTINCT FROM pg_current_xact_id() THEN
+  RAISE EXCEPTION 'forward allocation completion trigger scope changed' USING ERRCODE='42501';END IF;
+ PERFORM kaname._authority_forward_context_v4();
+ PERFORM kaname._authority_forward_complete_v4(NEW.nonce);
+ DELETE FROM kaname.authority_forward_emit_anchor_v4
+ WHERE backend=NEW.backend AND transaction_id=NEW.transaction_id AND nonce=NEW.nonce AND finished;
+ IF NOT FOUND THEN RAISE EXCEPTION 'forward allocation completion anchor lost' USING ERRCODE='42501';END IF;
+ RETURN NULL;
+END $$;
+CREATE CONSTRAINT TRIGGER authority_forward_anchor_complete_v4
+ AFTER INSERT ON kaname.authority_forward_emit_anchor_v4 DEFERRABLE INITIALLY DEFERRED
+ FOR EACH ROW EXECUTE FUNCTION kaname._authority_forward_anchor_complete_v4();
+
+CREATE FUNCTION kaname._authority_forward_storage_v4() RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE owner_oid oid;anchor oid:=to_regclass('kaname.authority_forward_emit_anchor_v4');
+BEGIN
+ SELECT relowner INTO owner_oid FROM pg_catalog.pg_class WHERE oid='kaname.authority_writer_protocol'::regclass;
+ IF anchor IS NULL OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=anchor
+  AND c.relowner=owner_oid AND c.relkind='r' AND c.relpersistence='p' AND NOT c.relrowsecurity
+  AND NOT c.relforcerowsecurity AND NOT c.relhasrules AND NOT c.relhassubclass)
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=anchor OR inhparent=anchor)
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+  WHERE c.oid=anchor AND a.grantee<>owner_oid)
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl) x
+  WHERE a.attrelid=anchor AND x.grantee<>owner_oid)
+ OR (SELECT array_agg(a.attname::text ORDER BY a.attnum) FROM pg_catalog.pg_attribute a
+  WHERE a.attrelid=anchor AND a.attnum>0 AND NOT a.attisdropped) IS DISTINCT FROM
+  ARRAY['backend','transaction_id','nonce','invoker_oid','program_oid','effects_oid','receipts_oid','effect_count','finished','batch','batch_required','write_batch','write_required']
+ OR (SELECT array_agg(a.atttypid ORDER BY a.attnum) FROM pg_catalog.pg_attribute a
+  WHERE a.attrelid=anchor AND a.attnum>0 AND NOT a.attisdropped) IS DISTINCT FROM
+  ARRAY['integer'::regtype::oid,'xid8'::regtype::oid,'uuid'::regtype::oid,'oid'::regtype::oid,'oid'::regtype::oid,
+   'oid'::regtype::oid,'oid'::regtype::oid,'integer'::regtype::oid,'boolean'::regtype::oid,'jsonb'::regtype::oid,'boolean'::regtype::oid,'jsonb'::regtype::oid,'boolean'::regtype::oid]
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid=anchor AND attnum>0
+  AND (attisdropped OR NOT attnotnull OR attgenerated<>'' OR attidentity<>'' OR atthasdef))
+ OR (SELECT count(*) FROM pg_catalog.pg_index WHERE indrelid=anchor)<>1
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid=i.indexrelid
+  JOIN pg_catalog.pg_am m ON m.oid=c.relam WHERE i.indrelid=anchor AND i.indisprimary AND i.indisunique
+  AND i.indisvalid AND i.indisready AND i.indislive AND i.indkey='1 2 3'::int2vector
+  AND i.indexprs IS NULL AND i.indpred IS NULL AND i.indnatts=i.indnkeyatts AND m.amname='btree')
+ OR (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgrelid=anchor)<>1
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_trigger WHERE tgrelid=anchor AND tgname='authority_forward_anchor_complete_v4'
+  AND tgfoid='kaname._authority_forward_anchor_complete_v4()'::regprocedure AND tgtype::integer=5
+  AND tgenabled='O' AND NOT tgisinternal AND tgconstraint<>0 AND tgdeferrable AND tginitdeferred
+  AND tgnargs=0 AND tgargs=''::bytea AND tgattr=''::int2vector AND tgqual IS NULL AND tgoldtable IS NULL AND tgnewtable IS NULL)
+ OR (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname._authority_forward_anchor_complete_v4()'::regprocedure)<>1
+ THEN RETURN false;END IF;
+ IF (SELECT count(*) FROM pg_catalog.pg_constraint WHERE conrelid=anchor)<>3
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid=anchor AND contype='p'
+  AND conkey=ARRAY[1,2,3]::smallint[] AND convalidated AND NOT condeferrable AND NOT condeferred)
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid=anchor AND contype='c'
+  AND conkey=ARRAY[8]::smallint[] AND convalidated AND NOT condeferrable AND NOT condeferred
+  AND pg_get_expr(conbin,conrelid)='(effect_count >= 0)')
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_trigger t ON t.tgconstraint=c.oid
+  WHERE c.conrelid=anchor AND c.contype='t' AND c.conname='authority_forward_anchor_complete_v4'
+   AND c.convalidated AND c.condeferrable AND c.condeferred AND c.conkey IS NULL AND c.confkey IS NULL
+   AND c.confrelid=0 AND c.contypid=0 AND c.conbin IS NULL
+   AND t.tgrelid=anchor AND t.tgname='authority_forward_anchor_complete_v4'
+   AND t.tgconstrrelid=0 AND t.tgconstrindid=0) THEN RETURN false;END IF;
+ IF EXISTS(SELECT 1 FROM (VALUES
+  ('_authority_native_write_weights_v4(jsonb)','jsonb',1,false,ARRAY['p_rows']),
+  ('_authority_native_write_closure_v4()','boolean',0,false,NULL::text[]),
+  ('authority_native_write_arm_v4(uuid)','void',1,false,ARRAY['p_nonce']),
+  ('authority_native_write_read_v4()','jsonb',0,false,NULL::text[]),
+  ('_authority_native_delete_batch_graph_v4()','boolean',0,false,NULL::text[]),
+  ('authority_native_delete_batch_read_v4()','jsonb',0,false,NULL::text[]),
+  ('_authority_native_delete_batch_begin_v4()','trigger',0,false,NULL::text[]),
+  ('_authority_native_delete_batch_end_v4()','trigger',0,false,NULL::text[]),
+  ('authority_forward_emit_v4(jsonb[])','void',1,false,ARRAY['p_payloads']),
+  ('authority_forward_prepare_v4(jsonb[])','uuid',1,false,ARRAY['p_payloads']),
+  ('authority_forward_claim_v4(uuid)','record',1,true,ARRAY['p_nonce','id','event_type','payload','created_at']),
+  ('authority_forward_finish_v4(uuid)','void',1,false,ARRAY['p_nonce']),
+  ('_authority_forward_custody_v4()','void',0,false,NULL::text[]),
+  ('_authority_forward_shape_v4()','void',0,false,NULL::text[]),
+  ('_authority_forward_context_v4()','oid',0,false,NULL::text[]),
+  ('_authority_forward_program_v4(uuid)','jsonb',1,false,ARRAY['p_nonce']),
+  ('_authority_forward_row_v4(bigint,jsonb,boolean)','boolean',3,false,ARRAY['p_id','p_row','p_applied']),
+  ('_authority_forward_complete_v4(uuid)','void',1,false,ARRAY['p_nonce']),
+  ('_authority_forward_anchor_complete_v4()','trigger',0,false,NULL::text[]),
+  ('_authority_forward_storage_v4()','boolean',0,false,NULL::text[])
+ ) e(signature,result_type,nargs,returns_set,names) LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||e.signature)
+ WHERE p.oid IS NULL OR p.prokind<>'f' OR p.prorettype<>e.result_type::regtype OR p.proretset<>e.returns_set
+ OR p.proisstrict OR p.proleakproof OR p.proparallel<>'u' OR p.pronargs<>e.nargs OR p.pronargdefaults<>0 OR p.provariadic<>0
+ OR p.proargnames IS DISTINCT FROM e.names OR p.prolang<>(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')
+ OR (NOT e.returns_set AND (p.proargmodes IS NOT NULL OR p.proallargtypes IS NOT NULL))) THEN RETURN false;END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc WHERE oid='kaname.authority_forward_claim_v4(uuid)'::regprocedure
+  AND proretset AND prorettype='record'::regtype AND pronargs=1
+  AND proargnames=ARRAY['p_nonce','id','event_type','payload','created_at']
+  AND proargmodes=ARRAY['i','t','t','t','t']::"char"[]
+  AND proallargtypes=ARRAY['uuid'::regtype::oid,'bigint'::regtype::oid,'text'::regtype::oid,'jsonb'::regtype::oid,'timestamptz'::regtype::oid]) THEN RETURN false;END IF;
+ RETURN true;
+END $$;
+
+DO $$ DECLARE f record;r record;BEGIN
+ FOR f IN SELECT p.oid,p.oid::regprocedure signature,p.proowner FROM pg_catalog.pg_proc p
+ WHERE p.pronamespace='kaname'::regnamespace AND p.proname IN (
+  'authority_native_delete_emit_v4','authority_native_delete_prepare_v4','authority_native_delete_stamp_v4',
+  'authority_forward_emit_v4','authority_forward_prepare_v4','authority_forward_claim_v4','authority_forward_finish_v4',
+  '_authority_forward_custody_v4','_authority_forward_shape_v4','_authority_forward_context_v4','_authority_forward_program_v4',
+  '_authority_forward_row_v4','_authority_forward_complete_v4','_authority_forward_anchor_complete_v4','_authority_forward_storage_v4') LOOP
+  EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC',f.signature);
+  FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+   JOIN pg_catalog.pg_roles u ON u.oid=a.grantee WHERE p.oid=f.oid AND a.grantee<>f.proowner LOOP
+   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM %I',f.signature,r.rolname);
+  END LOOP;
+ END LOOP;
+END $$;
+
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+-- Замкнутый graph двух actual таблиц: лишний callback недопустим даже тогда,
+-- когда все ожидаемые attachments по отдельности присутствуют.
+CREATE FUNCTION kaname._authority_native_delete_batch_graph_v4() RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM pg_catalog.pg_class WHERE oid IN ('kaname.fga_outbox'::regclass,'kaname.relation_fact'::regclass)
+  AND (relkind<>'r' OR relpersistence<>'p' OR relrowsecurity OR relforcerowsecurity OR relhasrules OR relhassubclass
+   OR relowner<>(SELECT relowner FROM pg_catalog.pg_class WHERE oid='kaname.authority_writer_protocol'::regclass)))
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid IN ('kaname.fga_outbox'::regclass,'kaname.relation_fact'::regclass)
+  OR inhparent IN ('kaname.fga_outbox'::regclass,'kaname.relation_fact'::regclass)) THEN RETURN false;END IF;
+ IF EXISTS(SELECT 1 FROM (VALUES
+  ('fga_outbox','authority_protocol_statement','authority_protocol_statement_guard()',62,NULL::text,NULL::text),
+  ('fga_outbox','authority_protocol_row','authority_protocol_row_guard()',31,NULL,NULL),
+  ('fga_outbox','authority_resource_effect_applied','_authority_resource_effect_applied_v2()',29,NULL,NULL),
+  ('fga_outbox','policy_epoch_insert','authority_policy_changed()',4,NULL,'new_policy_rows'),
+  ('fga_outbox','policy_epoch_update','authority_policy_changed()',16,'old_policy_rows','new_policy_rows'),
+  ('fga_outbox','policy_epoch_delete','authority_policy_changed()',8,'old_policy_rows',NULL),
+  ('fga_outbox','authority_crud_sequence','authority_crud_sequence_guard_v3()',23,NULL,NULL),
+  ('fga_outbox','authority_crud_fga_id_guard','authority_crud_fga_id_guard_v3()',7,NULL,NULL),
+  ('fga_outbox','authority_crud_fga_id_applied','authority_crud_fga_id_applied_v3()',5,NULL,NULL),
+  ('fga_outbox','authority_sequence_program_applied_v3','authority_sequence_program_applied_v3()',5,NULL,NULL),
+  ('fga_outbox','relation_fact_00_native_batch','_authority_native_delete_batch_begin_v4()',4,NULL,'journal_rows'),
+  ('fga_outbox','relation_fact_follows_journal','relation_fact_from_journal()',4,NULL,'journal_rows'),
+  ('fga_outbox','relation_fact_zz_native_batch','_authority_native_delete_batch_end_v4()',4,NULL,'journal_rows'),
+  ('relation_fact','authority_protocol_statement','authority_protocol_statement_guard()',62,NULL,NULL),
+  ('relation_fact','authority_protocol_row','authority_protocol_row_guard()',31,NULL,NULL),
+  ('relation_fact','authority_resource_effect_applied','_authority_resource_effect_applied_v2()',29,NULL,NULL),
+  ('relation_fact','policy_epoch_insert','authority_policy_changed()',4,NULL,'new_policy_rows'),
+  ('relation_fact','policy_epoch_update','authority_policy_changed()',16,'old_policy_rows','new_policy_rows'),
+  ('relation_fact','policy_epoch_delete','authority_policy_changed()',8,'old_policy_rows',NULL),
+  ('relation_fact','policy_epoch_truncate','authority_policy_changed()',32,NULL,NULL)
+ ) e(table_name,trigger_name,signature,trigger_type,old_table,new_table)
+ FULL JOIN (SELECT t.* FROM pg_catalog.pg_trigger t WHERE t.tgrelid IN
+  ('kaname.fga_outbox'::regclass,'kaname.relation_fact'::regclass)) t
+ ON t.tgrelid=to_regclass('kaname.'||e.table_name) AND t.tgname=e.trigger_name
+ WHERE e.trigger_name IS NULL OR t.oid IS NULL OR t.tgfoid<>to_regprocedure('kaname.'||e.signature)
+  OR t.tgtype::integer<>e.trigger_type OR t.tgenabled<>'O' OR t.tgisinternal
+  OR t.tgconstraint<>0 OR t.tgdeferrable OR t.tginitdeferred OR t.tgnargs<>0 OR t.tgargs<>''::bytea
+  OR t.tgattr<>''::int2vector OR t.tgqual IS NOT NULL
+  OR t.tgoldtable::text IS DISTINCT FROM e.old_table OR t.tgnewtable::text IS DISTINCT FROM e.new_table) THEN RETURN false;END IF;
+ RETURN true;
+END $$;
+
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+-- Native DELETE: owner удостоверяет только происхождение; факт меняет invoker.
+CREATE FUNCTION kaname.authority_native_delete_batch_read_v4() RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE a kaname.authority_forward_emit_anchor_v4%ROWTYPE;program jsonb;result jsonb;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM kaname.authority_forward_emit_anchor_v4 WHERE backend=pg_backend_pid()
+  AND transaction_id=pg_current_xact_id_if_assigned() AND (batch_required OR batch<>'{}'::jsonb)) THEN RETURN NULL;END IF;
+ IF NOT kaname._authority_forward_storage_v4() OR NOT kaname._authority_native_delete_batch_graph_v4() THEN RAISE EXCEPTION 'native batch anchor custody changed' USING ERRCODE='42501';END IF;
+ FOR a IN SELECT * FROM kaname.authority_forward_emit_anchor_v4
+ WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id_if_assigned() AND (batch_required OR batch<>'{}'::jsonb) LOOP
+  program:=kaname._authority_forward_program_v4(a.nonce);
+  IF NOT a.batch_required OR coalesce(a.batch->>'phase' NOT IN ('deleting','policy-complete','finished'),true)
+   OR a.batch->>'nonce' IS DISTINCT FROM a.nonce::text
+   OR a.batch->>'digest' IS DISTINCT FROM encode(sha256(convert_to((a.batch->'rows')::text,'UTF8')),'hex')
+   OR jsonb_typeof(a.batch->'rows') IS DISTINCT FROM 'array'
+   OR jsonb_array_length(a.batch->'rows') IS DISTINCT FROM a.effect_count THEN
+   RAISE EXCEPTION 'native batch anchor changed' USING ERRCODE='42501';END IF;
+  IF a.batch->>'phase'='finished' THEN CONTINUE;END IF;
+  IF result IS NOT NULL OR a.finished OR program->>'phase'<>'claimed' THEN
+   RAISE EXCEPTION 'native batch invocation overlaps or changed' USING ERRCODE='42501';END IF;
+  IF pg_trigger_depth()=0 THEN RAISE EXCEPTION 'native batch outside trigger invocation' USING ERRCODE='42501';END IF;
+  IF (SELECT proof FROM kaname._authority_protocol_snapshot_v3()) IS NOT NULL
+   OR current_setting('transaction_isolation')<>'read committed'
+   OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()
+    AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+    AND classid=1262569292 AND objid=0 AND objsubid=2 AND mode='ExclusiveLock' AND granted) THEN
+   RAISE EXCEPTION 'native batch unsigned admission lost' USING ERRCODE='42501';END IF;
+  result:=a.batch;
+ END LOOP;
+ RETURN result;
+END $$;
+
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+-- WRITE имеет собственные обязательства. Старые prepare/claim их не создают.
+CREATE FUNCTION kaname._authority_native_write_weights_v4(p_rows jsonb) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE result jsonb;
+BEGIN
+ -- DISTINCT принадлежит одной исторической строке, SUM -- разным строкам.
+ WITH per_row AS MATERIALIZED (
+  SELECT j,ARRAY(SELECT DISTINCT k COLLATE "C" FROM unnest(kaname.authority_policy_keys('relation_fact',j)) k) keys
+  FROM jsonb_array_elements(p_rows) j),
+ weights AS (SELECT k,count(*) n FROM per_row CROSS JOIN LATERAL unnest(keys) k GROUP BY k)
+ SELECT CASE WHEN EXISTS(SELECT 1 FROM per_row WHERE '*'=ANY(keys) OR cardinality(keys)>4096)
+  THEN NULL ELSE coalesce((SELECT jsonb_object_agg(k,n) FROM weights),'{}'::jsonb) END INTO result;
+ RETURN result;
+END $$;
+
+CREATE FUNCTION kaname._authority_native_write_closure_v4() RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF NOT kaname._authority_full_contract_storage_v3() OR NOT kaname._authority_native_delete_batch_graph_v4() THEN RETURN false;END IF;
+ -- Builtin identity для типов/операторов/defaults, влияющих на actual DML.
+ IF EXISTS(SELECT 1 FROM (VALUES ('text','textin','textout'),('jsonb','jsonb_in','jsonb_out'),
+   ('timestamptz','timestamptz_in','timestamptz_out'),('int8','int8in','int8out')) e(typ,inp,outp)
+  LEFT JOIN pg_catalog.pg_type t ON t.oid=to_regtype('pg_catalog.'||e.typ)
+  LEFT JOIN pg_catalog.pg_proc i ON i.oid=t.typinput LEFT JOIN pg_catalog.pg_proc o ON o.oid=t.typoutput
+  WHERE t.oid IS NULL OR t.typtype<>'b' OR NOT t.typisdefined OR t.typbasetype<>0
+   OR i.pronamespace<>'pg_catalog'::regnamespace OR i.prosrc<>e.inp OR i.prosecdef OR i.proconfig IS NOT NULL
+   OR o.pronamespace<>'pg_catalog'::regnamespace OR o.prosrc<>e.outp OR o.prosecdef OR o.proconfig IS NOT NULL
+   OR i.prolang<>(SELECT oid FROM pg_catalog.pg_language WHERE lanname='internal')
+   OR o.prolang<>(SELECT oid FROM pg_catalog.pg_language WHERE lanname='internal'))
+ OR EXISTS(SELECT 1 FROM (VALUES ('=(text,text)','texteq'),('<>(text,text)','textne'),('<(text,text)','text_lt'),
+   ('!~~(text,text)','textnlike'),('!~(text,text)','textregexne'),('=(jsonb,jsonb)','jsonb_eq'),
+   ('<(timestamptz,timestamptz)','timestamp_lt'),('>=(bigint,bigint)','int8ge')) e(op,src)
+  LEFT JOIN pg_catalog.pg_operator o ON o.oid=to_regoperator('pg_catalog.'||e.op)
+  LEFT JOIN pg_catalog.pg_proc f ON f.oid=o.oprcode WHERE o.oid IS NULL OR f.oid IS NULL
+   OR f.pronamespace<>'pg_catalog'::regnamespace OR f.prosrc<>e.src OR f.prosecdef OR f.proconfig IS NOT NULL
+   OR f.prolang<>(SELECT oid FROM pg_catalog.pg_language WHERE lanname='internal'))
+ OR EXISTS(SELECT 1 FROM (VALUES ('now()','now'),('jsonb_typeof(jsonb)','jsonb_typeof'),
+   ('split_part(text,text,integer)','split_part'),('pg_current_xact_id()','pg_current_xact_id')) e(sig,src)
+  LEFT JOIN pg_catalog.pg_proc f ON f.oid=to_regprocedure('pg_catalog.'||e.sig)
+  WHERE f.oid IS NULL OR f.prosrc<>e.src OR f.prosecdef OR f.proconfig IS NOT NULL
+   OR f.prolang<>(SELECT oid FROM pg_catalog.pg_language WHERE lanname='internal')) THEN RETURN false;END IF;
+ -- Ровно builtin columns: domain/input/default hooks не становятся частью batch.
+ IF EXISTS(SELECT 1 FROM (VALUES
+  ('relation_fact',1,'object_type','text',NULL::text),('relation_fact',2,'object_id','text',NULL),
+  ('relation_fact',3,'relation','text',NULL),('relation_fact',4,'subject','text',NULL),
+  ('relation_fact',5,'source_version','timestamptz','''-infinity''::timestamp with time zone'),
+  ('relation_fact',6,'created_at','timestamptz','now()'),('relation_fact',7,'condition_name','text','''''::text'),
+  ('relation_fact',8,'condition_params','jsonb','''{}''::jsonb'),
+  ('fga_outbox',1,'id','bigint','kaname.authority_fga_outbox_id_v3()'),
+  ('fga_outbox',2,'event_type','text',NULL),('fga_outbox',3,'payload','jsonb',NULL),
+  ('fga_outbox',4,'created_at','timestamptz','now()')) e(tbl,num,name,typ,def)
+ FULL JOIN (SELECT a.*,d.adbin FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_attrdef d
+  ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid IN
+   ('kaname.relation_fact'::regclass,'kaname.fga_outbox'::regclass) AND a.attnum>0) a
+ ON a.attrelid=to_regclass('kaname.'||e.tbl) AND a.attnum=e.num
+ WHERE e.tbl IS NULL OR a.attrelid IS NULL OR a.attisdropped OR NOT a.attnotnull
+  OR a.attname<>e.name OR a.atttypid<>to_regtype('pg_catalog.'||e.typ) OR a.atttypmod<>-1
+  OR a.attgenerated<>'' OR a.attidentity<>'' OR a.attinhcount<>0 OR NOT a.attislocal
+  OR a.attcollation<>CASE WHEN e.typ='text' THEN 'pg_catalog."default"'::regcollation::oid ELSE 0 END
+  OR pg_get_expr(a.adbin,a.attrelid) IS DISTINCT FROM e.def) THEN RETURN false;END IF;
+ -- Полный индексный набор; никаких expression/opclass callbacks.
+ IF EXISTS(SELECT 1 FROM (VALUES
+  ('relation_fact','relation_fact_pkey','1 2 3 4',true,NULL::text),
+  ('relation_fact','relation_fact_by_subject','4 3',false,NULL),
+  ('relation_fact','relation_fact_conditioned','7',false,'(condition_name <> ''''::text)'),
+  ('fga_outbox','fga_outbox_pkey','1',true,NULL)) e(tbl,name,keys,pk,pred)
+ FULL JOIN (SELECT i.*,c.relname,c.relam FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid=i.indexrelid
+  WHERE i.indrelid IN ('kaname.relation_fact'::regclass,'kaname.fga_outbox'::regclass)) i
+ ON i.indrelid=to_regclass('kaname.'||e.tbl) AND i.relname=e.name
+ WHERE e.tbl IS NULL OR i.indexrelid IS NULL OR i.indkey::text<>e.keys OR i.indisprimary<>e.pk OR i.indisunique<>e.pk
+  OR NOT i.indisvalid OR NOT i.indisready OR NOT i.indislive OR NOT i.indimmediate
+  OR i.indnatts<>i.indnkeyatts OR i.indexprs IS NOT NULL OR i.indisexclusion
+  OR i.relam<>(SELECT oid FROM pg_catalog.pg_am WHERE amname='btree')
+  OR pg_get_expr(i.indpred,i.indrelid) IS DISTINCT FROM e.pred
+  OR EXISTS(SELECT 1 FROM unnest(i.indclass) op LEFT JOIN pg_catalog.pg_opclass c ON c.oid=op
+   WHERE c.opcnamespace<>'pg_catalog'::regnamespace OR c.opcname<>CASE WHEN e.tbl='fga_outbox' THEN 'int8_ops' ELSE 'text_ops' END)
+  OR EXISTS(SELECT 1 FROM unnest(i.indoption) opt WHERE opt<>0)) THEN RETURN false;END IF;
+ -- Существующие CHECK остаются actual executor checks; произвольный новый
+ -- callback в CHECK не допускается даже если он пропускает эти две строки.
+ IF EXISTS(SELECT 1 FROM (VALUES
+  ('relation_fact','relation_fact_condition_params_is_object','(jsonb_typeof(condition_params) = ''object''::text)'),
+  ('relation_fact','relation_fact_object_id_nonempty','(object_id <> ''''::text)'),
+  ('relation_fact','relation_fact_object_type_model_dictionary','(object_type !~~ ''%.%''::text)'),
+  ('relation_fact','relation_fact_object_type_nonempty','(object_type <> ''''::text)'),
+  ('relation_fact','relation_fact_params_require_condition','((condition_name <> ''''::text) OR (condition_params = ''{}''::jsonb))'),
+  ('relation_fact','relation_fact_relation_nonempty','(relation <> ''''::text)'),
+  ('relation_fact','relation_fact_subject_nonempty','(subject <> ''''::text)'),
+  ('relation_fact','relation_fact_subject_not_wildcard','(subject !~ '':\*($|#)''::text)'),
+  ('relation_fact','relation_fact_subject_class_reads_only','((split_part(subject, '':''::text, 1) <> ''system_class''::text) OR ((subject = ANY (ARRAY[''system_class:anonymous''::text, ''system_class:authenticated''::text])) AND (relation = ANY (ARRAY[''v_get''::text, ''viewer''::text, ''system_viewer''::text, ''public_reader''::text]))))'),
+  ('relation_fact','relation_fact_public_reader_subject_is_class','((relation <> ''public_reader''::text) OR (subject = ANY (ARRAY[''system_class:anonymous''::text, ''system_class:authenticated''::text])))'),
+  ('fga_outbox','fga_outbox_event_type_check','(event_type = ANY (ARRAY[''fga.tuple.write''::text, ''fga.tuple.delete''::text]))'),
+  ('fga_outbox','fga_outbox_relation_present_check','((((payload ->> ''relation''::text) IS NOT NULL) AND ((payload ->> ''relation''::text) <> ''''::text)) OR (jsonb_array_length(COALESCE((payload -> ''relations''::text), ''[]''::jsonb)) > 0))')) e(tbl,name,expr)
+ FULL JOIN (SELECT * FROM pg_catalog.pg_constraint WHERE conrelid IN
+  ('kaname.relation_fact'::regclass,'kaname.fga_outbox'::regclass) AND contype<>'p') c
+ ON c.conrelid=to_regclass('kaname.'||e.tbl) AND c.conname=e.name
+ WHERE e.tbl IS NULL OR c.oid IS NULL OR c.contype<>'c' OR c.condeferrable OR c.condeferred OR c.connoinherit
+  OR c.coninhcount<>0 OR NOT c.conislocal OR (NOT c.convalidated AND c.conname<>'fga_outbox_relation_present_check')
+  OR pg_get_expr(c.conbin,c.conrelid) IS DISTINCT FROM e.expr) THEN RETURN false;END IF;
+ -- Epoch UPSERT тоже сокращает физическую multiplicity: разрешены только
+ -- прежние monotonic callbacks, canonical private storage и builtin defaults.
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class WHERE oid='kaname.authority_policy_epoch'::regclass
+  AND relowner=(SELECT relowner FROM pg_catalog.pg_class WHERE oid='kaname.authority_writer_protocol'::regclass)
+  AND relkind='r' AND relpersistence='p' AND NOT relrowsecurity AND NOT relforcerowsecurity AND NOT relhasrules AND NOT relhassubclass)
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid='kaname.authority_policy_epoch'::regclass OR inhparent='kaname.authority_policy_epoch'::regclass)
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+  WHERE c.oid='kaname.authority_policy_epoch'::regclass AND a.grantee<>c.relowner)
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl) x
+  WHERE a.attrelid='kaname.authority_policy_epoch'::regclass AND x.grantee<>(SELECT relowner FROM pg_catalog.pg_class WHERE oid=a.attrelid))
+ OR EXISTS(SELECT 1 FROM (VALUES ('authority_policy_epoch_monotonic_v2',27),('authority_policy_epoch_no_truncate_v2',34)) e(name,kind)
+  FULL JOIN (SELECT * FROM pg_catalog.pg_trigger WHERE tgrelid='kaname.authority_policy_epoch'::regclass) t ON t.tgname=e.name
+  WHERE e.name IS NULL OR t.oid IS NULL OR t.tgtype::integer<>e.kind OR t.tgenabled<>'O' OR t.tgisinternal
+   OR t.tgfoid<>'kaname.authority_policy_epoch_monotonic_v2()'::regprocedure OR t.tgconstraint<>0
+   OR t.tgdeferrable OR t.tginitdeferred OR t.tgnargs<>0 OR t.tgargs<>''::bytea OR t.tgattr<>''::int2vector
+   OR t.tgqual IS NOT NULL OR t.tgoldtable IS NOT NULL OR t.tgnewtable IS NOT NULL)
+ OR EXISTS(SELECT 1 FROM (VALUES (1,'key','text',NULL::text),(2,'revision','int8','0'),
+   (3,'generation','text','(pg_current_xact_id())::text')) e(num,name,typ,def)
+  FULL JOIN (SELECT a.*,d.adbin FROM pg_catalog.pg_attribute a LEFT JOIN pg_catalog.pg_attrdef d
+   ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid='kaname.authority_policy_epoch'::regclass AND a.attnum>0) a ON a.attnum=e.num
+  WHERE e.num IS NULL OR a.attnum IS NULL OR a.attisdropped OR NOT a.attnotnull OR a.attname<>e.name
+   OR a.atttypid<>to_regtype('pg_catalog.'||e.typ) OR a.atttypmod<>-1 OR a.attgenerated<>'' OR a.attidentity<>''
+   OR a.attinhcount<>0 OR NOT a.attislocal OR pg_get_expr(a.adbin,a.attrelid) IS DISTINCT FROM e.def)
+ OR (SELECT count(*) FROM pg_catalog.pg_constraint WHERE conrelid='kaname.authority_policy_epoch'::regclass)<>2
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid='kaname.authority_policy_epoch'::regclass
+  AND contype='c' AND conname='authority_policy_epoch_revision_check' AND convalidated AND NOT condeferrable
+  AND NOT condeferred AND pg_get_expr(conbin,conrelid)='(revision >= 0)')
+ OR (SELECT count(*) FROM pg_catalog.pg_index WHERE indrelid='kaname.authority_policy_epoch'::regclass)<>1
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid=i.indexrelid
+  WHERE i.indrelid='kaname.authority_policy_epoch'::regclass AND i.indisprimary AND i.indisunique AND i.indisvalid
+   AND i.indisready AND i.indislive AND i.indimmediate AND i.indkey='1'::int2vector AND i.indnkeyatts=1 AND i.indnatts=1
+   AND i.indexprs IS NULL AND i.indpred IS NULL AND NOT i.indisexclusion
+   AND c.relam=(SELECT oid FROM pg_catalog.pg_am WHERE amname='btree')
+   AND i.indclass=ARRAY[(SELECT oid FROM pg_catalog.pg_opclass WHERE opcnamespace='pg_catalog'::regnamespace
+    AND opcname='text_ops' AND opcmethod=c.relam)]::oidvector AND i.indoption='0'::int2vector)
+ THEN RETURN false;END IF;
+ RETURN true;
+END $$;
+
+-- Единственная новая изменяющая private state возможность принимает только nonce.
+-- Owner не пишет факты и не возвращает owner fact images/результат отсутствия.
+CREATE FUNCTION kaname.authority_native_write_arm_v4(p_nonce uuid) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE program jsonb;invoker oid;rows_value jsonb;facts jsonb;weights jsonb;epochs jsonb;expected integer;
+ fallback_requested boolean:=false;published boolean:=false;
+BEGIN
+ invoker:=kaname._authority_forward_context_v4();
+ program:=kaname._authority_forward_program_v4(p_nonce);expected:=(program->>'effect_count')::integer;
+ IF program->>'phase'<>'prepared' OR EXISTS(SELECT 1 FROM kaname.authority_forward_emit_anchor_v4
+  WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND (write_required OR write_batch<>'{}'::jsonb)
+   AND (nonce=p_nonce OR write_batch->>'phase' IS DISTINCT FROM 'finished')) THEN
+  RAISE EXCEPTION 'native write arm replay or overlap' USING ERRCODE='42501';END IF;
+ IF expected=0 OR current_setting('transaction_isolation')<>'read committed' THEN RETURN;END IF;
+ IF kaname._authority_group_add_program_v3() IS NOT NULL OR kaname._authority_producer_resource_v2() IS NOT NULL
+  OR kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN RETURN;END IF;
+ -- Comma-list в has_table_privilege означает OR: здесь именно три AND.
+ IF NOT has_table_privilege(invoker,'kaname.relation_fact'::regclass,'SELECT')
+  OR NOT has_table_privilege(invoker,'kaname.relation_fact'::regclass,'INSERT')
+  OR NOT has_table_privilege(invoker,'kaname.relation_fact'::regclass,'UPDATE')
+  OR NOT has_function_privilege(invoker,'kaname.authority_native_write_read_v4()','EXECUTE') THEN RETURN;END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()
+  AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+  AND classid=1262569292 AND objid=0 AND objsubid=2 AND mode='ExclusiveLock' AND granted) THEN
+  RAISE EXCEPTION 'native write exclusive admission missing' USING ERRCODE='42501';END IF;
+ IF NOT kaname._authority_native_write_closure_v4() THEN RETURN;END IF;
+ SELECT jsonb_agg(e.row_value||jsonb_build_object('id',e.reserved_id) ORDER BY e.reserved_id) INTO rows_value
+ FROM pg_temp.kaname_forward_effects_v4 e WHERE e.nonce=p_nonce;
+ IF jsonb_array_length(rows_value) IS DISTINCT FROM expected OR EXISTS(
+  SELECT 1 FROM pg_temp.kaname_forward_effects_v4 e FULL JOIN
+   (SELECT * FROM pg_temp.kaname_forward_receipts_v4 WHERE nonce=p_nonce) r ON e.nonce=r.nonce AND e.ordinal=r.ordinal
+  WHERE (e.nonce=p_nonce OR e.nonce IS NULL) AND (e.nonce IS NULL OR r.nonce IS NULL
+   OR e.reserved_id IS DISTINCT FROM r.reserved_id OR e.ordinal<1 OR e.ordinal>expected
+   OR e.row_digest IS DISTINCT FROM sha256(convert_to(e.row_value::text,'UTF8'))
+   OR r.backend IS DISTINCT FROM pg_backend_pid() OR r.transaction_id IS DISTINCT FROM pg_current_xact_id()
+   OR r.invoker_oid IS DISTINCT FROM invoker OR r.program_oid IS DISTINCT FROM (program->>'program_oid')::oid
+   OR r.effects_oid IS DISTINCT FROM (program->>'effects_oid')::oid OR r.table_oid IS DISTINCT FROM 'kaname.fga_outbox'::regclass::oid
+   OR r.key_namespace IS DISTINCT FROM 1262569305 OR r.key_hash IS DISTINCT FROM hashtext(e.reserved_id::text)
+   OR r.objsubid IS DISTINCT FROM 2 OR r.lock_mode IS DISTINCT FROM 'ExclusiveLock'
+   OR r.claimed IS DISTINCT FROM false OR r.guarded IS DISTINCT FROM false OR r.consumed IS DISTINCT FROM false)) THEN
+  RAISE EXCEPTION 'native write prepared receipts changed' USING ERRCODE='42501';END IF;
+ IF EXISTS(SELECT 1 FROM jsonb_array_elements(rows_value) j WHERE j->>'event_type' IS DISTINCT FROM 'fga.tuple.write'
+  OR j->>'created_at' IS NULL OR (j->>'created_at')::timestamptz IS DISTINCT FROM transaction_timestamp()
+  OR nullif(j#>'{payload,source_version}','null'::jsonb) IS NOT NULL
+  OR j#>>'{payload,user}' IS NULL OR j#>>'{payload,user}' !~ '^user:[^#*]+$'
+  OR j#>>'{payload,object}' IS NULL OR j#>>'{payload,object}' !~ '^(compute_instance|account):[^:]+$'
+  OR (CASE WHEN jsonb_typeof(coalesce(j#>'{payload,relations}','[]'::jsonb))='array' THEN
+   CASE WHEN jsonb_array_length(coalesce(j#>'{payload,relations}','[]'::jsonb))>0 THEN
+    ARRAY(SELECT value FROM jsonb_array_elements_text(j#>'{payload,relations}') value WHERE value NOT LIKE 'v\_%' ORDER BY value COLLATE "C")
+   ELSE ARRAY[j#>>'{payload,relation}'] END ELSE NULL END) IS DISTINCT FROM ARRAY['editor'])
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(rows_value) j GROUP BY j#>>'{payload,object}',j#>>'{payload,user}' HAVING count(*)<>1) THEN RETURN;END IF;
+ SELECT jsonb_agg(jsonb_build_object('object_type',split_part(j#>>'{payload,object}',':',1),
+  'object_id',split_part(j#>>'{payload,object}',':',2),'relation','editor','subject',j#>>'{payload,user}',
+  'source_version',(j->>'created_at')::timestamptz,'created_at',transaction_timestamp(),'condition_name','','condition_params','{}'::jsonb)
+  ORDER BY j#>>'{payload,object}' COLLATE "C",j#>>'{payload,user}' COLLATE "C",(j->>'id')::bigint) INTO facts
+ FROM jsonb_array_elements(rows_value) j;
+ -- Только после всех исходных full-table прав и canonical no-RLS closure.
+ IF EXISTS(SELECT 1 FROM jsonb_array_elements(facts) j JOIN kaname.relation_fact f
+  ON f.object_type=j->>'object_type' AND f.object_id=j->>'object_id' AND f.relation=j->>'relation' AND f.subject=j->>'subject') THEN RETURN;END IF;
+ weights:=kaname._authority_native_write_weights_v4(facts);IF weights IS NULL THEN RETURN;END IF;
+ -- Никаких fact row locks в all-absent ветке. Существующий exclusive barrier
+ -- уже исключает другие canonical writers до lock policy; после waits читаем заново.
+ BEGIN
+  PERFORM key FROM kaname.authority_policy_epoch WHERE key='*' FOR SHARE NOWAIT;
+  PERFORM e.key FROM kaname.authority_policy_epoch e JOIN jsonb_each_text(weights) w ON w.key=e.key ORDER BY e.key COLLATE "C" FOR UPDATE OF e NOWAIT;
+ IF EXISTS(SELECT 1 FROM jsonb_array_elements(facts) j JOIN kaname.relation_fact f
+  ON f.object_type=j->>'object_type' AND f.object_id=j->>'object_id' AND f.relation=j->>'relation' AND f.subject=j->>'subject') THEN
+  fallback_requested:=true;
+  RAISE EXCEPTION 'native write pre-arm eligibility fallback' USING ERRCODE='ZFW01';
+ END IF;
+ IF weights IS DISTINCT FROM kaname._authority_native_write_weights_v4(facts) THEN
+  fallback_requested:=true;
+  RAISE EXCEPTION 'native write pre-arm eligibility fallback' USING ERRCODE='ZFW01';
+ END IF;
+ IF EXISTS(SELECT 1 FROM jsonb_each_text(weights) w JOIN kaname.authority_policy_epoch e ON e.key=w.key
+  WHERE e.revision>9223372036854775807::bigint-w.value::bigint) THEN
+  fallback_requested:=true;
+  RAISE EXCEPTION 'native write pre-arm eligibility fallback' USING ERRCODE='ZFW01';
+ END IF;
+ SELECT coalesce(jsonb_object_agg(w.key,to_jsonb(e)),'{}'::jsonb) INTO epochs
+ FROM (SELECT key FROM jsonb_each_text(weights) UNION ALL SELECT '*') w LEFT JOIN kaname.authority_policy_epoch e ON e.key=w.key;
+ UPDATE kaname.authority_forward_emit_anchor_v4 SET write_required=true,write_batch=jsonb_build_object(
+  'nonce',p_nonce,'phase','armed','rows',rows_value,'facts',facts,'weights',weights,'epochs',epochs,
+  'attempted_insert',expected,'empty_update',expected,'actual_new',expected,
+  'digest',encode(sha256(convert_to(jsonb_build_array(rows_value,facts,weights,epochs)::text,'UTF8')),'hex'))
+ WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND nonce=p_nonce
+  AND NOT finished AND NOT write_required AND write_batch='{}'::jsonb AND NOT batch_required AND batch='{}'::jsonb;
+ IF NOT FOUND THEN RAISE EXCEPTION 'native write arm anchor changed' USING ERRCODE='42501';END IF;
+ published:=true;
+ EXCEPTION
+ WHEN lock_not_available THEN
+  -- Speculative NOWAIT: откат ВСЕХ приобретений до любого generic fallback.
+  IF published THEN RAISE;END IF;
+  RETURN;
+ WHEN SQLSTATE 'ZFW01' THEN
+  -- Только наш непосредственный отказ до публикации. Чужая ошибка с тем же
+  -- SQLSTATE и любой отказ после публикации не превращаются в fallback.
+  IF NOT fallback_requested OR published THEN RAISE;END IF;
+  RETURN;
+ END;
+END $$;
+
+CREATE FUNCTION kaname.authority_native_write_read_v4() RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE a kaname.authority_forward_emit_anchor_v4%ROWTYPE;program jsonb;result jsonb;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM kaname.authority_forward_emit_anchor_v4 WHERE backend=pg_backend_pid()
+  AND transaction_id=pg_current_xact_id_if_assigned() AND (write_required OR write_batch<>'{}'::jsonb)) THEN RETURN NULL;END IF;
+ IF NOT kaname._authority_native_write_closure_v4() THEN RAISE EXCEPTION 'native write executable closure changed' USING ERRCODE='42501';END IF;
+ FOR a IN SELECT * FROM kaname.authority_forward_emit_anchor_v4 WHERE backend=pg_backend_pid()
+  AND transaction_id=pg_current_xact_id_if_assigned() AND (write_required OR write_batch<>'{}'::jsonb) LOOP
+  program:=kaname._authority_forward_program_v4(a.nonce);
+  IF NOT a.write_required OR a.batch_required OR a.batch<>'{}'::jsonb
+   OR a.write_batch->>'nonce' IS DISTINCT FROM a.nonce::text
+   OR coalesce(a.write_batch->>'phase' NOT IN ('armed','inserting','empty-update','policy-complete','finished'),true)
+   OR a.write_batch->>'digest' IS DISTINCT FROM encode(sha256(convert_to(jsonb_build_array(a.write_batch->'rows',
+    a.write_batch->'facts',a.write_batch->'weights',a.write_batch->'epochs')::text,'UTF8')),'hex')
+   OR jsonb_typeof(a.write_batch->'rows') IS DISTINCT FROM 'array' OR jsonb_typeof(a.write_batch->'facts') IS DISTINCT FROM 'array'
+   OR jsonb_array_length(a.write_batch->'rows') IS DISTINCT FROM a.effect_count
+   OR jsonb_array_length(a.write_batch->'facts') IS DISTINCT FROM a.effect_count
+   OR a.write_batch->'attempted_insert' IS DISTINCT FROM to_jsonb(a.effect_count)
+   OR a.write_batch->'empty_update' IS DISTINCT FROM to_jsonb(a.effect_count)
+   OR a.write_batch->'actual_new' IS DISTINCT FROM to_jsonb(a.effect_count) THEN
+   RAISE EXCEPTION 'native write immutable obligations changed' USING ERRCODE='42501';END IF;
+  IF a.write_batch->>'phase'='finished' THEN CONTINUE;END IF;
+  IF result IS NOT NULL OR a.finished OR program->>'phase' NOT IN ('prepared','claimed') OR pg_trigger_depth()=0 THEN
+   RAISE EXCEPTION 'native write invocation overlaps or changed' USING ERRCODE='42501';END IF;
+  IF (SELECT proof FROM kaname._authority_protocol_snapshot_v3()) IS NOT NULL OR current_setting('transaction_isolation')<>'read committed'
+   OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()
+    AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+    AND classid=1262569292 AND objid=0 AND objsubid=2 AND mode='ExclusiveLock' AND granted) THEN
+   RAISE EXCEPTION 'native write unsigned admission lost' USING ERRCODE='42501';END IF;
+  IF NOT has_table_privilege(a.invoker_oid,'kaname.relation_fact'::regclass,'SELECT')
+   OR NOT has_table_privilege(a.invoker_oid,'kaname.relation_fact'::regclass,'INSERT')
+   OR NOT has_table_privilege(a.invoker_oid,'kaname.relation_fact'::regclass,'UPDATE') THEN
+   RAISE EXCEPTION 'native write original privileges changed after arm' USING ERRCODE='42501';END IF;
+  -- projection depth=1: owner-read не заменяет actual invoker UPSERT.
+  -- Свежая проверка непосредственно перед ним ловит same-backend interference.
+  IF a.write_batch->>'phase'='inserting' AND pg_trigger_depth()=1 AND EXISTS(
+   SELECT 1 FROM jsonb_array_elements(a.write_batch->'facts') j JOIN kaname.relation_fact f
+    ON f.object_type=j->>'object_type' AND f.object_id=j->>'object_id' AND f.relation=j->>'relation' AND f.subject=j->>'subject') THEN
+   RAISE EXCEPTION 'native write absence changed after arm' USING ERRCODE='42501';END IF;
+  result:=a.write_batch;
+ END LOOP;
+ RETURN result;
+END $$;
+
+CREATE FUNCTION kaname._authority_native_delete_batch_begin_v4() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE command_nonce uuid;program jsonb;rows_value jsonb;expected integer;candidate record;keys text[];batch_value jsonb;
+BEGIN
+ IF TG_RELID<>'kaname.fga_outbox'::regclass OR TG_OP<>'INSERT' OR TG_LEVEL<>'STATEMENT'
+  OR TG_WHEN<>'AFTER' OR TG_NAME<>'relation_fact_00_native_batch' THEN
+  RAISE EXCEPTION 'native batch initializer trigger changed' USING ERRCODE='42501';END IF;
+ batch_value:=kaname.authority_native_write_read_v4();
+ IF batch_value IS NOT NULL THEN
+  IF batch_value->>'phase'<>'armed' THEN RAISE EXCEPTION 'native write initializer replay' USING ERRCODE='42501';END IF;
+  command_nonce:=(batch_value->>'nonce')::uuid;
+  program:=kaname._authority_forward_program_v4(command_nonce);expected:=(program->>'effect_count')::integer;
+  SELECT jsonb_agg(to_jsonb(j) ORDER BY j.id) INTO rows_value FROM journal_rows j;
+  IF rows_value IS DISTINCT FROM batch_value->'rows' THEN
+   RAISE EXCEPTION 'native write whole journal transition differs' USING ERRCODE='42501';END IF;
+ IF program->>'phase'<>'claimed' OR expected=0
+ OR (SELECT count(*) FROM journal_rows)<>expected
+ OR (SELECT count(*) FROM pg_temp.kaname_forward_effects_v4 WHERE nonce=command_nonce)<>expected
+ OR (SELECT count(*) FROM pg_temp.kaname_forward_receipts_v4 WHERE nonce=command_nonce)<>expected
+ OR EXISTS(SELECT 1 FROM journal_rows j FULL JOIN
+  (SELECT e.*,r.backend,r.transaction_id,r.invoker_oid,r.program_oid,r.effects_oid,r.table_oid,r.key_namespace,
+   r.key_hash,r.objsubid,r.lock_mode,r.claimed,r.guarded,r.consumed,r.reserved_id receipt_id,r.ordinal receipt_ordinal
+   FROM pg_temp.kaname_forward_effects_v4 e LEFT JOIN pg_temp.kaname_forward_receipts_v4 r
+    ON r.nonce=e.nonce AND r.ordinal=e.ordinal WHERE e.nonce=command_nonce) e ON e.reserved_id=j.id
+  WHERE j.id IS NULL OR e.reserved_id IS NULL OR e.receipt_id IS DISTINCT FROM j.id OR e.receipt_ordinal IS DISTINCT FROM e.ordinal
+   OR e.ordinal<1 OR e.ordinal>expected
+   OR e.row_value IS DISTINCT FROM to_jsonb(j)-'id'
+   OR e.row_digest IS DISTINCT FROM sha256(convert_to((to_jsonb(j)-'id')::text,'UTF8'))
+   OR e.backend IS DISTINCT FROM pg_backend_pid() OR e.transaction_id IS DISTINCT FROM pg_current_xact_id()
+   OR e.invoker_oid IS DISTINCT FROM (program->>'invoker_oid')::oid
+   OR e.program_oid IS DISTINCT FROM (program->>'program_oid')::oid
+   OR e.effects_oid IS DISTINCT FROM (program->>'effects_oid')::oid
+   OR e.table_oid IS DISTINCT FROM 'kaname.fga_outbox'::regclass::oid
+   OR e.key_namespace IS DISTINCT FROM 1262569305 OR e.key_hash IS DISTINCT FROM hashtext(j.id::text)
+   OR e.objsubid IS DISTINCT FROM 2 OR e.lock_mode IS DISTINCT FROM 'ExclusiveLock'
+   OR e.claimed IS DISTINCT FROM true OR e.guarded IS DISTINCT FROM true OR e.consumed IS DISTINCT FROM true) THEN
+  RAISE EXCEPTION 'native write incomplete exact transition receipts' USING ERRCODE='42501';END IF;
+  UPDATE kaname.authority_forward_emit_anchor_v4 SET write_batch=jsonb_set(write_batch,'{phase}','"inserting"'::jsonb)
+  WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND nonce=command_nonce
+   AND NOT finished AND write_required AND write_batch->>'phase'='armed';
+  IF NOT FOUND THEN RAISE EXCEPTION 'native write initializer anchor changed' USING ERRCODE='42501';END IF;
+  RETURN NULL;
+ END IF;
+ -- Signed precedence и произвольный SQL не получают unsigned batch.
+ IF kaname._authority_group_add_program_v3() IS NOT NULL
+  OR kaname._authority_producer_resource_v2() IS NOT NULL
+  OR kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN RETURN NULL;END IF;
+ -- WRITE/mixed оператор не платит за shape/count/digest batch-проверки.
+ -- Прежние row receipts, generic fold и forward finish остаются на месте.
+ IF EXISTS(SELECT 1 FROM journal_rows WHERE event_type IS DISTINCT FROM 'fga.tuple.delete') THEN RETURN NULL;END IF;
+ -- Тот же исходный principal, что записан forward context, а не owner
+ -- SECURITY DEFINER. Отсутствие нового read-only grant означает fallback.
+ IF NOT has_function_privilege(coalesce(nullif(current_setting('role'),'none'),session_user),
+  'kaname.authority_native_delete_batch_read_v4()','EXECUTE') THEN RETURN NULL;END IF;
+ IF NOT EXISTS(SELECT 1 FROM kaname.authority_forward_emit_anchor_v4
+  WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id_if_assigned() AND NOT finished) THEN RETURN NULL;END IF;
+ PERFORM kaname._authority_forward_shape_v4();
+ SELECT e.nonce INTO command_nonce FROM journal_rows j
+ JOIN pg_temp.kaname_forward_effects_v4 e ON e.reserved_id=j.id LIMIT 1;
+ IF command_nonce IS NULL THEN RETURN NULL;END IF;
+ program:=kaname._authority_forward_program_v4(command_nonce);expected:=(program->>'effect_count')::integer;
+ IF program->>'phase'<>'claimed' OR expected=0
+ OR (SELECT count(*) FROM journal_rows)<>expected
+ OR (SELECT count(*) FROM pg_temp.kaname_forward_effects_v4 WHERE nonce=command_nonce)<>expected
+ OR (SELECT count(*) FROM pg_temp.kaname_forward_receipts_v4 WHERE nonce=command_nonce)<>expected
+ OR EXISTS(SELECT 1 FROM journal_rows j FULL JOIN
+  (SELECT e.*,r.backend,r.transaction_id,r.invoker_oid,r.program_oid,r.effects_oid,r.table_oid,r.key_namespace,
+   r.key_hash,r.objsubid,r.lock_mode,r.claimed,r.guarded,r.consumed,r.reserved_id receipt_id,r.ordinal receipt_ordinal
+   FROM pg_temp.kaname_forward_effects_v4 e LEFT JOIN pg_temp.kaname_forward_receipts_v4 r
+    ON r.nonce=e.nonce AND r.ordinal=e.ordinal WHERE e.nonce=command_nonce) e ON e.reserved_id=j.id
+  WHERE j.id IS NULL OR e.reserved_id IS NULL OR e.receipt_id IS DISTINCT FROM j.id OR e.receipt_ordinal IS DISTINCT FROM e.ordinal
+   OR e.ordinal<1 OR e.ordinal>expected
+   OR e.row_value IS DISTINCT FROM to_jsonb(j)-'id'
+   OR e.row_digest IS DISTINCT FROM sha256(convert_to((to_jsonb(j)-'id')::text,'UTF8'))
+   OR e.backend IS DISTINCT FROM pg_backend_pid() OR e.transaction_id IS DISTINCT FROM pg_current_xact_id()
+   OR e.invoker_oid IS DISTINCT FROM (program->>'invoker_oid')::oid
+   OR e.program_oid IS DISTINCT FROM (program->>'program_oid')::oid
+   OR e.effects_oid IS DISTINCT FROM (program->>'effects_oid')::oid
+   OR e.table_oid IS DISTINCT FROM 'kaname.fga_outbox'::regclass::oid
+   OR e.key_namespace IS DISTINCT FROM 1262569305 OR e.key_hash IS DISTINCT FROM hashtext(j.id::text)
+   OR e.objsubid IS DISTINCT FROM 2 OR e.lock_mode IS DISTINCT FROM 'ExclusiveLock'
+   OR e.claimed IS DISTINCT FROM true OR e.guarded IS DISTINCT FROM true OR e.consumed IS DISTINCT FROM true) THEN
+  RAISE EXCEPTION 'native batch incomplete exact transition receipts' USING ERRCODE='42501';END IF;
+ IF current_setting('transaction_isolation')<>'read committed' THEN RETURN NULL;END IF;
+ IF kaname.authority_protocol_attestation() IS NOT NULL THEN RETURN NULL;END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()
+  AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+  AND classid=1262569292 AND objid=0 AND objsubid=2 AND mode='ExclusiveLock' AND granted) THEN
+  RAISE EXCEPTION 'native batch exclusive admission missing' USING ERRCODE='42501';END IF;
+ -- Консервативная первая дверь: одно effective editor после исходного verb filter, обычный user.
+ -- Любая неподдержанная строка возвращает ВЕСЬ оператор прежней свёртке.
+ IF EXISTS(SELECT 1 FROM journal_rows j WHERE j.event_type IS DISTINCT FROM 'fga.tuple.delete'
+  OR j.created_at IS NULL OR nullif(j.payload->'source_version','null'::jsonb) IS NOT NULL
+  OR (j.payload->>'user') IS NULL OR (j.payload->>'user') !~ '^user:[^#*]+$'
+  OR (j.payload->>'object') IS NULL OR (j.payload->>'object') !~ '^(compute_instance|account):[^:]+$'
+  OR (CASE WHEN jsonb_typeof(coalesce(j.payload->'relations','[]'::jsonb))='array' THEN
+    CASE WHEN jsonb_array_length(coalesce(j.payload->'relations','[]'::jsonb))>0 THEN
+     ARRAY(SELECT value FROM jsonb_array_elements_text(j.payload->'relations') value
+      WHERE value NOT LIKE 'v\_%' ORDER BY value COLLATE "C")
+    ELSE ARRAY[j.payload->>'relation'] END ELSE NULL END) IS DISTINCT FROM ARRAY['editor'])
+ OR EXISTS(SELECT 1 FROM journal_rows GROUP BY payload->>'object',payload->>'user' HAVING count(*)<>1) THEN RETURN NULL;END IF;
+ FOR candidate IN SELECT payload FROM journal_rows LOOP
+  SELECT array_agg(DISTINCT k) INTO keys FROM unnest(kaname.authority_policy_keys('relation_fact',
+   jsonb_build_object('object_type',split_part(candidate.payload->>'object',':',1),'object_id',split_part(candidate.payload->>'object',':',2),
+    'relation','editor','subject',candidate.payload->>'user'))) k;
+  IF '*'=ANY(keys) OR cardinality(keys)>4096 THEN RETURN NULL;END IF;
+ END LOOP;
+ -- Проверка исполняемого graph и ABI до публикации нового обязательства.
+ IF NOT kaname._authority_full_contract_storage_v3() OR NOT kaname._authority_native_delete_batch_graph_v4() THEN
+  RAISE EXCEPTION 'native batch executable closure changed' USING ERRCODE='42501';END IF;
+ SELECT jsonb_agg(to_jsonb(j) ORDER BY j.id) INTO rows_value FROM journal_rows j;
+ IF kaname.authority_native_delete_batch_read_v4() IS NOT NULL THEN
+  RAISE EXCEPTION 'native batch nested command' USING ERRCODE='42501';END IF;
+ UPDATE kaname.authority_forward_emit_anchor_v4 SET batch_required=true,batch=jsonb_build_object('nonce',command_nonce,
+  'phase','deleting','rows',rows_value,'digest',encode(sha256(convert_to(rows_value::text,'UTF8')),'hex'))
+ WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND nonce=command_nonce AND NOT finished AND NOT batch_required AND batch='{}'::jsonb;
+ IF NOT FOUND THEN RAISE EXCEPTION 'native batch anchor replay' USING ERRCODE='42501';END IF;
+ RETURN NULL;
+END $$;
+
+CREATE FUNCTION kaname._authority_native_delete_batch_end_v4() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE batch_value jsonb;rows_value jsonb;
+BEGIN
+ IF TG_RELID<>'kaname.fga_outbox'::regclass OR TG_OP<>'INSERT' OR TG_LEVEL<>'STATEMENT'
+  OR TG_WHEN<>'AFTER' OR TG_NAME<>'relation_fact_zz_native_batch' THEN
+  RAISE EXCEPTION 'native batch closer trigger changed' USING ERRCODE='42501';END IF;
+ batch_value:=kaname.authority_native_write_read_v4();
+ IF batch_value IS NOT NULL THEN
+  SELECT jsonb_agg(to_jsonb(j) ORDER BY j.id) INTO rows_value FROM journal_rows j;
+  IF batch_value->>'phase'<>'policy-complete' OR batch_value->'rows' IS DISTINCT FROM rows_value THEN
+   RAISE EXCEPTION 'native write policy or transition incomplete' USING ERRCODE='42501';END IF;
+  UPDATE kaname.authority_forward_emit_anchor_v4 SET write_batch=jsonb_set(write_batch,'{phase}','"finished"'::jsonb)
+  WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND nonce=(batch_value->>'nonce')::uuid
+   AND NOT finished AND write_required AND write_batch->>'phase'='policy-complete';
+  IF NOT FOUND THEN RAISE EXCEPTION 'native write closer replay' USING ERRCODE='42501';END IF;
+  RETURN NULL;
+ END IF;
+ batch_value:=kaname.authority_native_delete_batch_read_v4();
+ IF batch_value IS NULL THEN RETURN NULL;END IF;
+ SELECT jsonb_agg(to_jsonb(j) ORDER BY j.id) INTO rows_value FROM journal_rows j;
+ IF batch_value->>'phase'='deleting' THEN
+  -- Нулевой local approval не запускает fact DELETE и его callbacks.
+  -- Уже удерживаемые invoker locks + exclusive admission закрывают изменение
+  -- набора; closer лишь перепроверяет fresh отсутствие допустимых кандидатов.
+  IF EXISTS(SELECT 1 FROM journal_rows j JOIN kaname.relation_fact f
+   ON f.object_type=split_part(j.payload->>'object',':',1) AND f.object_id=split_part(j.payload->>'object',':',2)
+    AND f.relation='editor' AND f.subject=j.payload->>'user'
+   WHERE NOT EXISTS(SELECT 1 FROM kaname.access_binding_emitted_tuples et JOIN kaname.access_bindings ab ON ab.id=et.binding_id
+    WHERE et.object=j.payload->>'object' AND et.relation=f.relation AND et.fga_user=f.subject AND ab.status='ACTIVE')
+    AND NOT EXISTS(SELECT 1 FROM kaname.resource_registration_pointer rp WHERE rp.object_type=f.object_type
+     AND rp.object_id=f.object_id AND rp.relation=f.relation AND rp.subject=f.subject AND rp.active)
+    AND (f.source_version<=j.created_at OR EXISTS(SELECT 1 FROM kaname.resource_registration_pointer rp
+     WHERE rp.object_type=f.object_type AND rp.object_id=f.object_id AND rp.relation=f.relation
+      AND rp.subject=f.subject AND NOT rp.active))) THEN
+   RAISE EXCEPTION 'native batch skipped eligible fact' USING ERRCODE='42501';END IF;
+ END IF;
+ IF batch_value->>'phase' NOT IN ('deleting','policy-complete') OR batch_value->'rows' IS DISTINCT FROM rows_value THEN
+  RAISE EXCEPTION 'native batch policy or transition incomplete' USING ERRCODE='42501';END IF;
+ UPDATE kaname.authority_forward_emit_anchor_v4 SET batch=jsonb_set(batch,'{phase}','"finished"'::jsonb)
+ WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND nonce=(batch_value->>'nonce')::uuid
+ AND NOT finished AND batch->>'phase' IN ('deleting','policy-complete');
+ IF NOT FOUND THEN RAISE EXCEPTION 'native batch closer replay' USING ERRCODE='42501';END IF;
+ RETURN NULL;
+END $$;
+
+CREATE TRIGGER relation_fact_00_native_batch AFTER INSERT ON kaname.fga_outbox
+ REFERENCING NEW TABLE AS journal_rows FOR EACH STATEMENT EXECUTE FUNCTION kaname._authority_native_delete_batch_begin_v4();
+CREATE TRIGGER relation_fact_zz_native_batch AFTER INSERT ON kaname.fga_outbox
+ REFERENCING NEW TABLE AS journal_rows FOR EACH STATEMENT EXECUTE FUNCTION kaname._authority_native_delete_batch_end_v4();
+
+CREATE OR REPLACE FUNCTION kaname.relation_fact_from_journal() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE r record;batch_value jsonb;fact_value jsonb;approved jsonb[]:=ARRAY[]::jsonb[];
+ expected_rows jsonb;actual_rows jsonb;v_object text;v_user text;v_id text;v_type text;
+BEGIN
+ -- Только explicit arm; старый direct prepare/claim по-прежнему generic.
+ IF has_function_privilege(current_user,'kaname.authority_native_write_read_v4()','EXECUTE') THEN
+  batch_value:=kaname.authority_native_write_read_v4();
+ END IF;
+ IF batch_value IS NOT NULL THEN
+  IF batch_value->>'phase'<>'inserting' OR pg_trigger_depth()<>1
+   OR replace(current_setting('search_path'),' ','')<>'pg_catalog,pg_temp' THEN
+   RAISE EXCEPTION 'native write projection invocation changed' USING ERRCODE='42501';END IF;
+  SELECT jsonb_agg(to_jsonb(j) ORDER BY j.id) INTO expected_rows FROM journal_rows j;
+  IF expected_rows IS DISTINCT FROM batch_value->'rows' THEN
+   RAISE EXCEPTION 'native write projection transition differs' USING ERRCODE='42501';END IF;
+  -- Actual invoker UPSERT с исходными columns/defaults/conflict predicate.
+  -- BEFORE/AFTER row guards выполняются executor для каждого actual факта.
+  INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version,created_at,condition_name)
+   SELECT split_part(j.payload->>'object',':',1),split_part(j.payload->>'object',':',2),'editor',j.payload->>'user',j.created_at,now(),''
+   FROM journal_rows j ORDER BY j.payload->>'object' COLLATE "C",j.payload->>'user' COLLATE "C",j.id
+   ON CONFLICT(object_type,object_id,relation,subject) DO UPDATE
+    SET source_version=EXCLUDED.source_version,condition_name=EXCLUDED.condition_name
+    WHERE kaname.relation_fact.source_version<EXCLUDED.source_version;
+  RETURN NULL;
+ END IF;
+ -- Старый generic writer не обязан получать новый EXECUTE grant.
+ IF has_function_privilege(current_user,'kaname.authority_native_delete_batch_read_v4()','EXECUTE') THEN
+  batch_value:=kaname.authority_native_delete_batch_read_v4();
+ END IF;
+ IF batch_value IS NOT NULL THEN
+  IF batch_value->>'phase'<>'deleting' THEN RAISE EXCEPTION 'native batch projection replay' USING ERRCODE='42501';END IF;
+  SELECT jsonb_agg(to_jsonb(j) ORDER BY j.id) INTO expected_rows FROM journal_rows j;
+  IF expected_rows IS DISTINCT FROM batch_value->'rows' THEN
+   RAISE EXCEPTION 'native batch projection transition differs' USING ERRCODE='42501';END IF;
+  -- Lock и следующий held read остаются РАЗНЫМИ invoker statements.
+  FOR r IN SELECT j.* FROM journal_rows j ORDER BY j.payload->>'object' COLLATE "C",j.payload->>'user' COLLATE "C",j.id LOOP
+   v_object:=r.payload->>'object';v_user:=r.payload->>'user';v_id:=split_part(v_object,':',2);v_type:=split_part(v_object,':',1);
+   SELECT to_jsonb(f) INTO fact_value FROM kaname.relation_fact f
+    WHERE object_type=v_type AND object_id=v_id AND relation='editor' AND subject=v_user FOR UPDATE;
+   IF NOT FOUND THEN CONTINUE;END IF;
+   IF EXISTS(SELECT 1 FROM kaname.access_binding_emitted_tuples et JOIN kaname.access_bindings ab ON ab.id=et.binding_id
+     WHERE et.object=v_object AND et.relation='editor' AND et.fga_user=v_user AND ab.status='ACTIVE')
+    OR EXISTS(SELECT 1 FROM kaname.resource_registration_pointer rp WHERE rp.object_type=v_type
+     AND rp.object_id=v_id AND rp.relation='editor' AND rp.subject=v_user AND rp.active) THEN CONTINUE;END IF;
+   IF (fact_value->>'source_version')::timestamptz<=r.created_at
+    OR EXISTS(SELECT 1 FROM kaname.resource_registration_pointer rp WHERE rp.object_type=v_type
+     AND rp.object_id=v_id AND rp.relation='editor' AND rp.subject=v_user AND NOT rp.active) THEN
+    approved:=array_append(approved,fact_value);
+   END IF;
+  END LOOP;
+  IF cardinality(approved)=0 THEN RETURN NULL;END IF;
+  -- Один actual DELETE; guards/привилегии invoker сохранены, match полной
+  -- locked row image исключает новый/изменённый факт и поздний широкий поиск.
+  WITH deleted AS (
+   DELETE FROM kaname.relation_fact f USING jsonb_array_elements(to_jsonb(approved)) a(image)
+    WHERE f.object_type=a.image->>'object_type' AND f.object_id=a.image->>'object_id'
+     AND f.relation=a.image->>'relation' AND f.subject=a.image->>'subject' AND to_jsonb(f)=a.image
+    RETURNING to_jsonb(f) image)
+   SELECT coalesce(jsonb_agg(image ORDER BY image::text COLLATE "C"),'[]'::jsonb) INTO actual_rows FROM deleted;
+  SELECT jsonb_agg(image ORDER BY image::text COLLATE "C") INTO expected_rows FROM unnest(approved) image;
+  IF actual_rows IS DISTINCT FROM expected_rows THEN
+   RAISE EXCEPTION 'native batch actual deletion coverage differs' USING ERRCODE='42501';END IF;
+  RETURN NULL;
+ END IF;
+ -- Прежняя generic свёртка и порядок остаются неизменны.
+ FOR r IN SELECT j.event_type,j.payload,j.created_at FROM journal_rows j
+  ORDER BY j.payload->>'object' COLLATE "C",j.payload->>'user' COLLATE "C",j.id LOOP
+  PERFORM kaname.relation_fact_fold_row(r.event_type,r.payload,r.created_at);
+ END LOOP;
+ RETURN NULL;
+END $$;
+
+DO $$ DECLARE signature text;r record;BEGIN
+ FOREACH signature IN ARRAY ARRAY['_authority_native_write_weights_v4(jsonb)','_authority_native_write_closure_v4()','authority_native_write_arm_v4(uuid)','authority_native_write_read_v4()','authority_native_delete_batch_read_v4()','_authority_native_delete_batch_begin_v4()','_authority_native_delete_batch_end_v4()','_authority_native_delete_batch_graph_v4()'] LOOP
+  EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM PUBLIC',signature);
+  FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc f CROSS JOIN LATERAL aclexplode(f.proacl) a
+   JOIN pg_catalog.pg_roles u ON u.oid=a.grantee WHERE f.oid=to_regprocedure('kaname.'||signature) AND a.grantee<>f.proowner LOOP
+   EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM %I',signature,r.rolname);
+  END LOOP;
+ END LOOP;
+END $$;
+
 CREATE FUNCTION kaname._authority_crud_storage_v3() RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE expected record;owner_oid oid;
@@ -6178,9 +8710,56 @@ BEGIN
   WHERE a.attrelid='kaname.users'::regclass AND a.attname='expected_login_kind'
    AND NOT a.attisdropped AND a.attgenerated='s' AND a.atttypid='pg_catalog.name'::regtype) THEN RETURN false;END IF;
  FOR expected IN SELECT * FROM (VALUES
+ ('_authority_native_write_weights_v4(jsonb)','907111b7e806c46a660311a6a97fcc2ab2f86ea0430260fb501306f0e2ef522e',true,'s',true,'private'),
+ ('_authority_native_write_closure_v4()','a6da6a23e1899bf23d71ba4c5969f66cdfe15a4038fb9a89223df803b74c0e14',true,'s',true,'private'),
+ ('authority_native_write_arm_v4(uuid)','ec1e1600c2673f4d02947f7dca7b4a719abc794a91d0045bad38fc2c642e5638',true,'v',true,'export'),
+ ('authority_native_write_read_v4()','f6a0242967e246de3f3d305655783afd29ed8bef4f4e8d95a8821c965aa33e9c',true,'v',true,'export'),
+ ('authority_native_delete_batch_read_v4()','79e71a95aac2ded09885f8c65165ad8ac169ef3b7f09bbda82a11ce1baec80f9',true,'v',true,'export'),
+ ('_authority_native_delete_batch_begin_v4()','d5f062e5543ded46945e843444184aed9f958ee776d63413095cc98c0ad5bd10',true,'v',true,'private'),
+ ('_authority_native_delete_batch_end_v4()','3b8173b76b57f85ae4f73287e25b6e143a40c72a13d1423bf6ee218fa04d65fa',true,'v',true,'private'),
+ ('_authority_native_delete_batch_graph_v4()','7b70a67aa67a72d2bf2a1136bf0477cda6239ef79b6ace61e4b2e6d8f3f841e6',true,'s',true,'private'),
+ ('authority_native_delete_emit_v4(jsonb[])','3e36607d0fad78d6e89bf4b1d8212b939225c87f95bdfd0643020d5bb2933c1b',false,'v',true,'export'),
+ ('authority_native_delete_prepare_v4(jsonb[])','b25ff1292dbced07ecffa2be2f736411cc61a3bf75dbcacd879ceeb01bc719cf',true,'v',true,'export'),
+ ('authority_native_delete_stamp_v4(uuid,bigint,jsonb)','bed995919371e883bb0d88698a79f8d634c453068c4caab199d7a76cf026088c',true,'v',true,'export'),
+ ('authority_forward_emit_v4(jsonb[])','d41825e5a57dbdc4f78b630f19877f54e94303e6fefc2b79b10e483fc6dd65e3',false,'v',true,'export'),
+ ('authority_forward_prepare_v4(jsonb[])','8bfb60e9ff8c301d79c11215fdaac99c8788a78c920cae86182115bdc8e90d74',true,'v',true,'export'),
+ ('authority_forward_claim_v4(uuid)','8a7c8ee8eae47a467c0d3370ef6185e93f3db6138aa14319563990fabd3b7be7',true,'v',true,'export'),
+ ('authority_forward_finish_v4(uuid)','75683ffd52d23834a7e28814676b67a06d47cfa5a4fd2c2049d5f299f4c00199',true,'v',true,'export'),
+ ('_authority_forward_context_v4()','67a9f0c6d896048f52b3eeb396250c7e33e16ab3170b874734154197d247dd5c',true,'v',true,'private'),
+ ('_authority_forward_custody_v4()','a8007133abaae4f51966e623c6a515988e637ec2f0579838578602be2572801a',true,'v',true,'private'),
+ ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
+ ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
+ ('_authority_forward_row_v4(bigint,jsonb,boolean)','73e2e71c8a8eab73463ab36c58a5534333ba1ff88f308ac13d472e9be700888f',true,'v',true,'private'),
+ ('_authority_forward_complete_v4(uuid)','06cfcd8f144243fc529aacba57f452b0913cc6d5b1ab6bf2daf7c4e6a9a38290',true,'v',true,'private'),
+ ('_authority_forward_anchor_complete_v4()','0d9fdf6c02abe69e333b5584eee4628cafb7ec37849b7820e33aba4bea4396f1',true,'v',true,'private'),
+ ('_authority_forward_storage_v4()','e8a9cd61f6ee6cc4fbde7361210cf493c8df166cdf3bfd8c49ed47190aa4ef0c',true,'s',true,'private'),
+ ('_authority_group_add_program_v3()','e78556f1ccd014face052206b727651ce7e238bc9c3706f5a8d65f1f6559cce4',true,'v',true,'private'),
+ ('authority_group_add_prepare_v3(jsonb,integer,integer)','ffe5527b2aed54dd69fa79b366c3717044cafdc98bed16f4c8ed9d39702d606e',true,'v',true,'export'),
+ ('authority_group_add_finalize_v3(jsonb,integer,integer)','21d1ddc68b3e1cbf4bdbaabb6038c5bff865e7439420bd96c5e41590c91370dc',true,'v',true,'export'),
+ ('_authority_group_add_row_v3(text,text,jsonb,jsonb)','a5973b00860baf37167efaf588cd3f3fe492248214708e3db6fa94ad7367590a',true,'v',true,'private'),
+ ('_authority_group_add_statement_v3(text,text)','b2bad5333c59b9db498767c0a6546c089633f849799ab87efa991183ee799b11',true,'v',true,'private'),
+ ('authority_group_add_fold_v3(text,jsonb,timestamptz)','cb582cd47c5e210fa7f4c4a4c0a211ba1b120b455ce9a868a453d05335a2d1ef',true,'v',true,'export'),
+ ('authority_group_add_subject_id_v3()','bde80ceb4ed141b31a755dadb40e653acf46e9c89171b1bc93b2ac5f7916300e',true,'v',true,'export'),
+ ('_authority_group_add_subject_v3(text,text,jsonb)','93f1e1147874032a6e7f4e1c08ad7651148e6ec5f25da7ffc2486d234ae14a8c',true,'v',true,'private'),
+ ('_authority_group_add_complete_v3()','158eca8cc62068a844f08ce5f746ad909a504fb429567d11c30d6f496dcd17eb',true,'v',true,'private'),
+ ('_authority_group_add_storage_v3()','123966ac8ae04e91375122a48bc6c07c8c48bda2791a763d779f00e506ff81fc',true,'s',true,'private'),
+ ('relation_fact_fold_row(text,jsonb,timestamptz)','7f7b25757447007572b06ef18edbf60b3256b5ca218484ef98fefaf0f338e635',false,'v',false,'preserve'),
+ ('authority_subject_change_id_guard_v2()','aa4bc39730f137bdf11491afaf41d9c8451c88e2cda40358fc0e33be2f29cb53',true,'v',true,'private'),
+ ('authority_subject_change_applied_v2()','fa776df6d3b95dadb13fa1684424b2db105b21f5b8862bd045680fb8129d094e',true,'v',true,'private'),
+ ('authority_subject_change_statement_guard_v2()','600129602604e3cac17840ff155738e5c886677cd8be781b62b9b29f2fe785b0',true,'v',true,'private'),
+ ('relation_fact_from_journal()','604d827358eab2f756c0c53d9a65cfbaf31b3f5d19ff8adc6e3dab944e8fa70a',false,'v',false,'preserve'),
+ ('authority_protocol_grant_runtime(regrole)','bae7413fe8dc3f578263bec41689d1aebc54051bec4826100b380e2f8c2a914a',false,'v',true,'preserve'),
+ ('authority_binding_command_begin_v3(jsonb)','39696919bfed78731817c77a37920e661801933c5ac544bc26ea5603a7fa39b1',true,'v',true,'export'),
+ ('authority_binding_command_end_v3(jsonb)','2c9ee43be689f773c543fc800645f2aae482ec02d392fd28937efa50558915b2',true,'v',true,'export'),
+ ('authority_binding_command_audit_v3(jsonb)','93c1bfc6bd6b753868e68ff6e408089f701d189ed6e7c30a32c7998baade872f',true,'v',true,'export'),
+ ('_authority_binding_mirror_policy_prepare_v3(jsonb)','62483d22c74491cc60dcbc011c5517f743b3a764dc91a48fa8628ce31bfadcd4',true,'v',true,'private'),
+ ('authority_policy_changed()','d11c7b0992c5c8ddaa323fc03bfbc1822b52edbae5a181fa449589500e6440fe',true,'v',true,'preserve'),
+ ('authority_audit_id_guard_v2()','e07795b21011235396c014213731173c5f076bc234c837e23c84263091266e97',true,'v',true,'preserve'),
+ ('authority_audit_applied_v2()','f8fb88cf8edf42dd8d8e7b394bf12403e6733c5e2db5ac2dd8a1ad831b20876e',true,'v',true,'preserve'),
+ ('authority_audit_statement_guard_v2()','b25423f74b4fd11574c75b567571d85ff94a9524c59f52325eb6c874ba075ae6',true,'v',true,'preserve'),
  ('membership_mirror_from_user()','d763127654c0d5852aee7f86d8c5f5ea4fa89464c7f1e3c7df9efbace4e6c405',false,'v',false,'preserve'),
  ('_authority_resource_before_write_v3(jsonb,text,text,jsonb,jsonb)','10cfd5fcbe108b1f0b62f688d7ae80b72e34a536593fae3343c730cc0cb82da5',true,'v',true,'private'),
- ('_authority_resource_effect_applied_v2()','3c4ccafbb1580f3dae3f88ca5491fdbed5f99cbe70ea6d394e6b38996fe95028',true,'v',true,'private'),
+ ('_authority_resource_effect_applied_v2()','83057896665db04f47bf5837ca0f14cdbd83d187cba4d86c7aa40c11075d855a',true,'v',true,'private'),
  ('_authority_resource_write_v2(jsonb,text,text,jsonb,jsonb)','cdb26211660f6fc89ee193516c9bc7cfa3e3bdcd427d3cf71c17c4a047272c2f',true,'v',true,'private'),
  ('_authority_resource_side_v2(jsonb,text,text,text,jsonb)','09f8a713bf8e2a59ec0051910a49f5df93dec5bc5c776271c2f1a54dbb1eb8f1',true,'v',true,'private'),
  ('_authority_crud_anchor_capture_v3(jsonb,integer,integer)','2dee8b172ebd3b228b5c6cc4dec189feae30db2c1c9a4bc98752525025d823c7',true,'s',true,'private'),
@@ -6188,7 +8767,7 @@ BEGIN
  ('_authority_crud_aux_capture_v3(jsonb,jsonb,integer,integer)','cbe93565f4de42904c6a0e2434db9a21ce0d528902d2a3908a2fec92cb821318',true,'s',true,'private'),
  ('_authority_crud_aux_write_v3()','5b549be379610152a2c2efc86836606fb82c298d885be0125cee3b535cf8cd32',true,'v',true,'private'),
  ('_authority_crud_aux_images_v3(jsonb,jsonb,jsonb,timestamptz)','f7cf945fa67c0bf19182121b6e31655f1939257dabac972618a15cd6fa9eda8b',true,'i',true,'private'),
- ('_authority_crud_aux_statement_v3()','6f1ea38ba87217ba6a1e13ace6c1de40c3a9f05cfe6ab1765addbe7541c22f40',true,'v',true,'private'),
+ ('_authority_crud_aux_statement_v3()','8d2c6a5f46066b400d9c42c158a337eb784a405c895145beedc7205133be7bc6',true,'v',true,'private'),
  ('authority_resource_crud_capture_v3(jsonb,integer,integer)','4ed7f709885d233f48bfd4ff0ced2cabf6b0ec6db07906156530bb6120391f32',true,'s',true,'export'),
  ('_authority_crud_merge_tables_v3(jsonb,jsonb)','beb1fb11dc689c0b6e22411c4edd3ac6025b76fa6bdb74f49bad95b27fa9c1ae',true,'i',true,'private'),
  ('_authority_crud_capture_v3(jsonb,integer,integer)','794f687a5c86e36d6ff91984e7942497dc6765fa3c9c685b514ac8a406cf8182',true,'s',true,'private'),
@@ -6203,7 +8782,7 @@ BEGIN
  ('_authority_crud_command_plan_v3(jsonb,jsonb)','ea252acb7bcebc7c96da591416609deb3b606d01eeda6a3a32e911a0e77af3d1',true,'i',true,'private'),
  ('authority_resource_assert_body_v2(jsonb)','3c9b0e789716d0e0c9d50e98b80ea7e90746703425e13dc92246b210d5c68410',true,'v',true,'preserve'),
  ('_authority_resource_require_completion_v2()','bbcfca0b3d5ff59ad273695dfed2451f1ff37bf4030f8f7083415396dafee0e6',true,'v',true,'preserve'),
- ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','05f1c814b7e2ae4480d18581c24c9c427523798191abb88c1761a4f923997507',true,'v',true,'preserve'),
+ ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','3eb8735862b7643f353c9e10312c2fe9ca251489f875c1faf30289f3d166b5d9',true,'v',true,'preserve'),
  ('authority_resource_prewait_v2(jsonb,integer,integer)','e835d0c4f015334d151c7a902e7cb5c10a8f7d5d2ee2c4d6fad478bd558e5f83',true,'v',true,'preserve'),
  ('_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','967a84fb10617c3a5f376d63aaf2903538edc5fe1548150b307bae33a70ee3f9',true,'i',true,'private'),
  ('_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','2e4cf1562674897a696483469505925ba5862b6fe0422f663b330eb96f237b9e',true,'i',true,'private'),
@@ -6223,7 +8802,7 @@ BEGIN
  ('_authority_crud_unique_key_v3(text,jsonb)','b7407a60f467821e6fe19c697ea37079807dbd5bed88c51a4ad645de731cf5b3',true,'i',true,'private'),
  ('authority_crud_unique_guard_v3()','5e8dbb8ba000bde51e8aa64c8e2fb708666f4822bb677a059adc623b0b45eb7d',true,'v',true,'private'),
  ('_authority_crud_sequence_wait_v3(text,integer,integer)','3b40419c3cbb8e156a2926933f7d7075a93129fa34c2294122dcd04f9cf76edf',true,'v',true,'private'),
- ('authority_crud_sequence_guard_v3()','3b536b907c2a5ccb5cb3444463da506797202289e4091404cacf736cda2e37d8',true,'v',true,'private'),
+ ('authority_crud_sequence_guard_v3()','e7622cb38a1d1e6b81f01767a8071e9c46ab98e8f183aa2d05dde95c3740940b',true,'v',true,'private'),
  ('_authority_crud_key_maximum_v3(jsonb,jsonb,jsonb,jsonb,timestamptz)','e3ad0cc2300061a6630225ec8956cee4b552f4ff8d9c1804f0dbfb5af0b12692',true,'i',true,'private'),
  ('_authority_crud_lock_rows_v3(jsonb)','e04ceccbff7121da453fc79b071db7d7c3f54b8425cda74f53520143641a22d9',true,'i',true,'private'),
  ('_authority_crud_lock_plan_v3(jsonb,jsonb,jsonb,timestamptz)','85bef48d34921afb7fd0659fe6554288f47db763cd0c872dcaa92cb713065d85',true,'i',true,'private'),
@@ -6236,7 +8815,7 @@ BEGIN
  ('_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','424927c26adc58d65a55a4567766054c378f1340662d0401146e5e2dac2f0bad',true,'v',true,'private'),
  ('_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','a9e7a60de752dcf436571f457c67de751439e77276005238dab9abed9ef9049b',true,'v',true,'private'),
  ('_authority_crud_scope_capture_v3(jsonb,integer,integer)','7cd250c6e17d5c41737c1afebca7576744bae05ec46af01136678c515e23f5e5',true,'s',true,'private'),
- ('authority_protocol_statement_guard()','457d0003223d4ad53047310a311f677f94852a6aefd39523d38398b075613da8',true,'v',true,'preserve'),
+ ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true,'v',true,'preserve'),
  ('_authority_resource_crud_store_v3(jsonb)','b3c4cf46195b7a32a2454911b29c8ea51a0e37741ca98380890e911f4e765135',true,'v',true,'private'),
  ('_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','8ebecbc122a5558910017569ac3ea927ad37ea4066dec179a253807b4c5d9574',true,'v',true,'private'),
  ('_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','ded94e6b1bf461dfaf9753a2e71dc73f45f474826b1d7a2f950e097c455629b0',true,'v',true,'private'),
@@ -6248,12 +8827,19 @@ BEGIN
  ('_authority_binding_journal_v3(text,text,jsonb,jsonb,jsonb,integer)','9a34cb8196ba7de482bd9270115e1770a6210c9745b235703cb50cb6d0cbea34',true,'s',true,'private'),
  ('authority_binding_sequence_prepare_v3(text,jsonb)','bc276ed48b9a8e9d4eeb6cb472bfbda1a1a400dd8b34992f391f9423143272fc',true,'v',true,'export'),
  ('authority_binding_sequence_finalize_v3()','51e4b66f099b3b7c0a5f144af2ae540b5dbe72d00c52a170cfc7ec2e43f87fdb',true,'v',true,'export'),
- ('authority_binding_insert_stamp_v3(text)','2cf09a04b6655fe144aa8bcf9d8d5f032cee57173bf45dd3cd19c08def9a29f1',true,'v',true,'export'),
- ('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','36110eaf94450a319c4bb49eede73ab21c6df8fd25ad692620c889b6538fc944',true,'v',true,'export'),
+ ('authority_binding_insert_stamp_v3(text)','0e37cf1836a1625f1c518c7c847cafe3da04ef9ef692db8c1c23fb27b40d1c71',true,'v',true,'export'),
+ ('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','de942f0c6c21834ac9ecb177f4dce25e5c66c83101aaaf78bd23805ab04952a6',true,'v',true,'export'),
  ('_authority_binding_stage_snapshot_v3()','9e9d561435b0f86c51aec452283505184beee36e1dc02f4af708590955d2eebf',true,'v',true,'private'),
- ('authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','149e79febcfb21805027ec74dc740b85392372b72842f9d29d95f86ff935c15c',true,'v',true,'export'),
- ('authority_binding_stage_sequence_finalize_v3(text)','1f3a07c19d6385b555b3eec2967484b65d3d27aef9e340162520f41c3fbe624e',true,'v',true,'export'),
- ('_authority_binding_stage_source_v3(jsonb,oid,integer)','da7d9a57254d57e76becd34722bd349902ad6ed6a5662eac7db561efd21ecd40',true,'v',true,'private'),
+ ('authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','efdbe3e491e0c3bd8ade664a61d8e049094cc5b781f7fe14347a94e2dd5979e6',true,'v',true,'export'),
+ ('authority_binding_stage_sequence_finalize_v3(text)','cd285782054ce7720b1072484e7b24758bcae7f8b7c7a117556b9836c1299a18',true,'v',true,'export'),
+ ('_authority_binding_mirror_store_v3()','94398fb5e832f685ced7c84e6975e21e04729db15a39893977cce3dc32809b61',true,'v',true,'private'),
+ ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','e6dd22497757ec3e7362e45c6d5f4a45cd5ecf5b43714b6849143e5da1bf134a',true,'v',true,'private'),
+ ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','8e4c9745f4df62265cb114849d1306493616a93049905a25f17c874dc0e35b9e',true,'v',true,'private'),
+ ('_authority_binding_mirror_finalize_v3(text)','fe26d33c679cf15f72b04c243abff2c284fd2e5e35df1da58236cee3f826517e',true,'v',true,'private'),
+ ('_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','91ee46ad24bb6267178100747185c18546bd1f01566e7b2780403f60c8995854',true,'v',true,'private'),
+ ('authority_binding_epoch_lock(text[],jsonb)','621ce6546bd8a8fb0c64d73ba47b7094e8a8ddebcf0b76613d2896ebddb25d56',true,'v',true,'preserve'),
+ ('_authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)','41c8b30fb6b70b3dee28f7a54fa1e692784b63df7ade0c0d1f0dfa955883fe9a',true,'i',true,'private'),
+ ('_authority_binding_stage_source_v3(jsonb,oid,integer)','e3bd8688c1e38e2124e21c9f15bcbab1c2aad809352aa0002835d3e888d5088d',true,'v',true,'private'),
  ('_authority_binding_stage_coordinates_v3(jsonb,text[],boolean,oid,integer,integer)','3b17c2eb7e40b1d5a6eb09af09fd0c1e9c5c4d8b4678e7537d94abad2e668c22',true,'v',true,'private'),
  ('authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer)','c78567e12d9c2ac4dabed52f4ff57d538266787beadeba6c855bffe44281619f',true,'v',true,'export'),
  ('authority_binding_withdrawal_sequence_finalize_v3()','7ed02bf2fbfd3107060c4ca7815b99593d90400903676c8ccb32657d68511ea6',true,'v',true,'export'),
@@ -6265,14 +8851,14 @@ BEGIN
  ('_authority_sequence_default_v3(text)','55bbb442c7aefc7e080eb6dc33b7255444438eb653d9d1f493986315aa8c3196',true,'v',true,'private'),
  ('authority_resource_journal_id_v3()','1890af3f773bb503aa2d4324c56ed4925c1ffac60d36181cc0d7c579f1e8ae18',true,'v',true,'export'),
  ('authority_fga_outbox_id_v3()','75b2ab0cad8f6111bca3dc5bd119f87dbbffa0dbed74480f172aa0f465b672bb',true,'v',true,'export'),
- ('authority_sequence_program_applied_v3()','6a748b5a88787b5c9c7c59b0ebdd0e8244901881b91677cdd123b22527880610',true,'v',true,'private'),
+ ('authority_sequence_program_applied_v3()','008b3f5a88844e5708f4ec8c2c7cf7c105d2e1748f988b5945e65fa5800e9062',true,'v',true,'private'),
  ('authority_sequence_program_completion_v3()','055164a539031177a7605113484f5667702c9074b84d03ab1a827cd614b66e35',true,'v',true,'private'),
- ('_authority_sequence_expect_v3(text)','b1c9d01de1052d58906c288c676bac307fcee06c5648745ede4cc0c816bfe966',true,'v',true,'private'),
+ ('_authority_sequence_expect_v3(text)','52e5bda884d0c1cec7bff0ae4843cd1490747432d1a44ee11a5648d6e905bcc2',true,'v',true,'private'),
  ('_authority_sequence_expected_v3()','e318cafb455438dd9a40e3c2cec7cc2d88daedf4307dd1e43248175005ab045b',true,'v',true,'private'),
  ('authority_sequence_expectation_complete_v3()','aef5c1e0bfa60d5587aa8c0f342b3f5df1166a1a699af56019f5bdf36e856c99',true,'v',true,'private'),
  ('resource_journal_emit()','76c8f397a387cb6699642e1d3aa56c2c61f371245eb28f56b14ed19c1d1faeba',false,'v',false,'preserve'),
  ('resource_journal_emit_member()','4dfca2c401a428e6b4ad984b99aae3a34404999ea36ed26b14c70b2ceb1d4053',false,'v',false,'preserve'),
- ('authority_sequence_origin_v3()','6963f498b25abc1459fcb33eda43bca07b8e3602cfcae23c125601b3b5b9d747',true,'v',true,'private'),
+ ('authority_sequence_origin_v3()','d1b7a54b0cf83d53d416b6cc2bbcb1c20e60d985356931a45a6804ebf2f27df3',true,'v',true,'private'),
  ('authority_prepared_journal_value_v3(jsonb,jsonb)','ec8e01085af732139c0478e82abd29817d25ca342afa4963d96491f8daca4017',true,'v',true,'export'),
  ('_authority_sequence_excluded_v3(oid)','eb4872a7f8c5bb7c40564e17fcc1928eac64bdbd8ac2e5609d261bd9ad36594b',true,'s',true,'private'),
  ('_authority_sequence_shape_v3()','614125faa823e6f14b0d2f58f2a6ed7ea9a5239febef2dd83b7ba4508f0f9014',true,'v',true,'private'),
@@ -6281,19 +8867,19 @@ BEGIN
  ('_authority_sequence_header_v3()','375b51310e57a7016673ba26f5b9925d59e67a2599ba74fe9c11d3f5bf9c70f5',true,'v',true,'private'),
  ('_authority_sequence_publish_v3(jsonb)','013f8260baa0607516e57b791a92897d3d4bb143a401dd056166d1fbf70d3128',true,'v',true,'private'),
  ('_authority_sequence_store_v3()','adca627a6c7ce9b1ee755a231793134d5ebcc372f370c694cbac3f067fb471d2',true,'v',true,'private'),
- ('_authority_sequence_reserve_v3(text,jsonb,integer)','ced42594fe0db1104e09efa082898d3ffdf833cc18dc42e92f26de8d28e3fcc8',true,'v',true,'private'),
+ ('_authority_sequence_reserve_v3(text,jsonb,integer)','76e3ea26f6401f26ad25e168b0dc4399065648b354e7c8b96750a6d802128190',true,'v',true,'private'),
  ('_authority_sequence_select_v3(integer[],timestamptz)','7f9ce472e9d23f7a6182685661f2964bdc0266fefe1a59b9228d9908b171bb09',true,'v',true,'private'),
  ('_authority_sequence_claim_v3(text,jsonb,jsonb)','18cdb51c9e44fa944b355cadf1abcb291eba062ca09f3221118bcd60d736c740',true,'v',true,'private'),
  ('_authority_sequence_applied_v3(text,bigint,jsonb)','0a4c24ded6b6aad09fd077e4a1ad8d40dee440c4e27e44dc20e4300bfc0a5a7d',true,'v',true,'private'),
- ('_authority_sequence_complete_v3()','e3044a2938caa4b1e83320b8133c7241c5970b7883d1471cdf25bb353d2c02f4',true,'v',true,'private'),
+ ('_authority_sequence_complete_v3()','c9f728c4492acf65f92ea6a6f411b3af85e63e765c5226bbf3ea1e80fd9291d1',true,'v',true,'private'),
  ('authority_resource_finalize_v2(jsonb,integer,integer)','f68d6ef701f2e730fd10d2c65aec966d04aceaf54465ac87b684da8157985f0c',true,'v',true,'preserve'),
  ('_authority_resource_object_prepare_v2(jsonb,integer,integer)','47aae35f146c1d05bf9f5f52f9f7b929d69d91f64b39844fd697530c467af440',true,'v',true,'preserve'),
  ('_authority_resource_object_program_v2(jsonb,timestamptz)','97f643954fbef4036c37240711c9ce9650045102c77bce1d5e8396d89a4c8464',true,'i',true,'preserve'),
  ('_authority_resource_object_sequence_prepare_v3(jsonb,integer)','bbf639e8b58fee3ee80ce322a7946cd5ae4a3f0a84804270117a369914fc5153',true,'v',true,'private'),
- ('_authority_resource_object_sequence_final_v3(jsonb,timestamptz)','4a5b05945442bea77d6ac8a8623036f22e1a1eaaacde14c24aaad5cb6e20c2fe',true,'v',true,'private'),
+ ('_authority_resource_object_sequence_final_v3(jsonb,timestamptz)','48e8a4f9e9c57161fec84ede30f6a148a15a4cc5162d78dcfff4e048be037564',true,'v',true,'private'),
  ('_authority_resource_physical_relations_capture_v2(jsonb,integer,boolean)','e01481c788b47322941e6c6753d9d38e44e1bdcee973a8fb6292aed42d9ce54f',true,'v',true,'preserve'),
  ('_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','0d6ab18cc9cac1395df175c0c91912737bf8e78464d46da0c385e31aa36c9b66',true,'v',true,'private'),
- ('_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','27a740d1b160e5eae00567166293f738f7f6131e58998de2f7784629d2011e29',true,'v',true,'private'),
+ ('_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','ca262446dbab831c80c933c45b0095f12ceaa10367477a696266217b44736911',true,'v',true,'private'),
  ('_authority_resource_registration_direct_prepare_v2(jsonb,integer,integer)','ad9230edf198624a3d9caa84ee5a5a9954b79cd9afa58b1e0b64b60eb3dd2807',true,'v',true,'preserve'),
  ('_authority_resource_unregistration_prepare_v2(jsonb,integer,integer)','3b4c2286943cb21eb7a8f3f9875bd43a9da46c92268bb2838c30c01102df681d',true,'v',true,'preserve'),
  ('authority_role_stage_epoch_lock(text[],jsonb)','2f4e6d4569577abe84313594f72e973d8b5fb63ac2adbd5605640751c7bc5021',true,'v',true,'preserve'),
@@ -6315,13 +8901,13 @@ BEGIN
  ('_authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)','0dd211dcb360329fa856f8c14692b50169668f73e2c03fd90aea3d3a0d7737b0',true,'i',true,'preserve'),
  ('_authority_resource_binding_certificate_v2(jsonb,jsonb,text,text,text,boolean,jsonb)','ec4d5deaf2df7982eba06a3350b0ae874c7179af6b41912fae3ed4d93e5c9386',true,'i',true,'preserve'),
  ('_authority_resource_bundle_catalog_v2(integer,integer)','eab6ae0b0d35773cd85b32a52758804f843eb49b289c6296d44df34e92fa3842',true,'v',true,'preserve'),
- ('_authority_resource_capture_index_v2(jsonb,integer)','eb03f80f2dfdf2627a2f3a6268516126a758edd739b538dffbcdfca1b4a0068c',true,'i',true,'preserve'),
+ ('_authority_resource_capture_index_v2(jsonb,integer)','988ed25715d6c9322bff7d8a6dc4d60b9d849a512d30ff9b70f8a1afbaa464f4',true,'i',true,'preserve'),
  ('_authority_resource_carrier_graph_v2(jsonb,text[],text[],text[],text[])','25cfe0b7f33582cfbee3399700901690952f97cff1e63d989ddde23176f42c80',true,'i',true,'preserve'),
  ('_authority_resource_carrier_scopes_v2(jsonb,jsonb)','0440ef56bc4069d6e1029e94dbab6acea6bddf7b5de88fc109f09f743599b60c',true,'i',true,'preserve'),
  ('_authority_resource_catalog_capture_wait_v2(jsonb,integer,integer,boolean)','c2dce8593b8f7616af573591ed0d439f822054f78f96de78ff8fc20d59efde18',true,'v',true,'preserve'),
  ('_authority_resource_catalog_wait_v2(jsonb,integer,integer)','6231367fd8a56cec22aed190ae2eef6dd8b3f93b2db1a0d8810ca6d9d5d53e97',true,'v',true,'preserve'),
  ('_authority_resource_contained_v2(text,text,jsonb,text)','e8cd715375fb48ff94738b78d82f00087fa548634ca3ebc43edd45dd54c8a758',true,'i',true,'preserve'),
- ('_authority_resource_coordinate_certificate_v2(jsonb,jsonb,text,jsonb,jsonb)','05ae24720db11aeb157d0078be92678753fcf98bec6d695e0536d4e184eb43f0',true,'i',true,'preserve'),
+ ('_authority_resource_coordinate_certificate_v2(jsonb,jsonb,text,jsonb,jsonb)','f463bd9d8f543624d5ca5d9f685bc2548b56410689a30470bcab07f0aa0d6790',true,'i',true,'preserve'),
  ('_authority_resource_encode_proposed_rules_v2(jsonb,boolean)','e2f7cab577d72eedcbf78ccfbe3c3109cf1414d90617a036a95861ab199bbacc',true,'i',true,'preserve'),
  ('_authority_resource_epoch_wait_v2(jsonb,jsonb,jsonb,integer,integer)','52e0cc8f44374d68a98450683564534073a08be0727c31e8846757f906910129',true,'v',true,'preserve'),
  ('_authority_resource_grant_reference_v2(jsonb,text)','df8c0b484673605fdf285a40ab35045b49f622ed66da6d56962846d1228009b4',true,'i',true,'preserve'),
@@ -6400,8 +8986,9 @@ BEGIN
  ('_authority_resource_selector_rows_v2(jsonb,integer,integer)','d7da86929ecc720bfd1f617a1c02ae074a487c8280e931a91cba0f008c8060ef',true,'v',true,'preserve'),
  ('_authority_resource_selector_shape_v2(jsonb,integer,integer)','c044631ad4287271aa8540488883ec06983a5abb85f484388a25cba713191a3c',true,'v',true,'preserve'),
  ('_authority_resource_source_wait_v2(jsonb,boolean,integer,integer)','1ce9b16ec596aa1521e295cadb310ea5680c69ba5ea12ee995f186adeb5bd654',true,'v',true,'preserve'),
- ('_authority_resource_special_member_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','e47d34def68f6842c3151a02397b689c71ffd98e8d54dc26788f515ea956f783',true,'i',true,'preserve'),
- ('_authority_resource_subject_change_wait_v2(integer,integer)','cc7f8c5748e402e0db8aaf00cec19cd38600ab9744886f4f55ec86d29d803933',true,'v',true,'preserve'),
+ ('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','24e7fbc54d15adea39c37df0bff9d333725a2a17911080d1698329cabc603754',true,'i',true,'private'),
+ ('_authority_resource_special_member_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','9415be5436a7ed74e97131d996f346df3f1b02d23c7f5b108fa7788629a0c6ed',true,'i',true,'preserve'),
+ ('_authority_resource_subject_change_wait_v2(integer,integer)','bb5f61c161012d21fe2480ffbdc61fc8095ceb1d9d265a13b26530b22b568632',true,'v',true,'preserve'),
  ('_authority_resource_target_contains_v2(jsonb,text,text)','5c3e97459a3935ec873831692d25cf522a7ca8447a97fbb376a1be6aa9fd8186',true,'i',true,'preserve'),
  ('_authority_resource_tuple_relations_v2(jsonb,jsonb,text,jsonb,text)','12783ae0cb998e5b67d6fbb72bea4acea1467078509b818a2a2b0c4524d402a8',true,'i',true,'preserve'),
  ('_authority_resource_unregistration_audit_hierarchy_v2(jsonb,jsonb,jsonb,jsonb)','6f8f54188fade71649c640691ff5cabeffcf1512f89d4744e138be4b6f6a00d2',true,'i',true,'preserve'),
@@ -6437,7 +9024,7 @@ BEGIN
  ('_authority_resource_withdrawal_rules_v2(jsonb,text,text)','7bf6058618cf10048a6cb7671342c222e6dd24ff4825d6743990dd2a8c50e29c',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_split_v2(jsonb)','27da9c2fbe328e2cd4013f991dc62e7ee75ee1031a5bd5e42dd86bcd1fac7282',true,'i',true,'preserve'),
  ('_authority_resource_without_name_v2(jsonb,text,text,text,boolean,boolean)','d97ead12d3586dac0380d636ddfeb73100ddcf5310211834371babd3f3d0468a',true,'i',true,'preserve'),
- ('authority_binding_epoch_changed()','c75ff7ef8281b75973bd0a6d7fe2a4e3920adc4471a06d52a68613330205efc3',true,'v',true,'preserve'),
+ ('authority_binding_epoch_changed()','38ea9bd9f48943d6d093e4218fbc0e5a1184459719b89743e20cfb7089c7d614',true,'v',true,'preserve'),
  ('authority_binding_epoch_read(text[])','37c8fcd579b297a3c7a749b2889ad95a95561341c63bfa4eb3355284ed583b05',true,'s',true,'preserve'),
  ('authority_binding_epoch_scope(text,jsonb)','ae4b14d1640a4473eb8852512b1722b6439a178b2f1fde5fdc76dcc637e2fb30',true,'s',true,'preserve'),
  ('authority_group_object_scopes(text,text)','ed9f62070e461be31342d7c4e3cfcbbb2e3542f2309b63f9592b80a46bd3cc60',true,'s',true,'preserve'),
@@ -6460,6 +9047,37 @@ BEGIN
     WHERE e.oid='kaname.authority_protocol_enter_typed_v3(text,text[],jsonb,text,text,text,text,text)'::regprocedure
      AND g.grantee=a.grantee AND g.privilege_type='EXECUTE'))) THEN RETURN false;END IF;
  END LOOP;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
+  WHERE p.oid='kaname._authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)'::regprocedure
+   AND p.prokind='f' AND p.prorettype='boolean'::regtype AND NOT p.proretset AND NOT p.proisstrict
+   AND NOT p.proleakproof AND p.proparallel='u' AND p.pronargs=6 AND p.pronargdefaults=0
+   AND p.proargmodes IS NULL AND p.provariadic=0 AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')) THEN RETURN false;END IF;
+ IF EXISTS(SELECT 1 FROM (VALUES
+ ('_authority_binding_mirror_store_v3()','jsonb',0,false), ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','void',3,false), ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','record',3,true), ('_authority_binding_mirror_finalize_v3(text)','void',1,false), ('_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','boolean',4,false)
+ ) abi_expected(signature,result_type,nargs,returns_set) LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||abi_expected.signature)
+ WHERE p.oid IS NULL OR p.prokind<>'f' OR p.prorettype<>abi_expected.result_type::regtype OR p.proretset<>abi_expected.returns_set
+ OR p.proisstrict OR p.proleakproof OR p.proparallel<>'u' OR p.pronargs<>abi_expected.nargs OR p.pronargdefaults<>0 OR p.provariadic<>0
+ OR p.prolang<>(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')
+ OR CASE WHEN abi_expected.returns_set THEN p.proargmodes IS DISTINCT FROM ARRAY['i','i','i','t','t']::"char"[]
+  OR p.proallargtypes IS DISTINCT FROM ARRAY['jsonb'::regtype,'integer'::regtype,'integer'::regtype,'integer'::regtype,'integer'::regtype]::oid[]
+  OR p.proargnames IS DISTINCT FROM ARRAY['p_snapshot','p_rows','p_reads','logical_rows','logical_reads']::text[]
+ ELSE p.proargmodes IS NOT NULL OR p.proallargtypes IS NOT NULL END) THEN RETURN false;END IF;
+ IF EXISTS(SELECT 1 FROM (VALUES
+ ('authority_binding_command_begin_v3(jsonb)','boolean','p_command'),
+ ('authority_binding_command_end_v3(jsonb)','void','p_command'),
+ ('authority_binding_command_audit_v3(jsonb)','boolean','p_command'),
+ ('_authority_binding_mirror_policy_prepare_v3(jsonb)','void','p_snapshot')
+ ) e(signature,result_type,argname) LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||e.signature)
+ WHERE p.oid IS NULL OR p.prokind<>'f' OR p.prorettype<>e.result_type::regtype OR p.proretset
+ OR p.proisstrict OR p.proleakproof OR p.proparallel<>'u' OR p.pronargs<>1 OR p.pronargdefaults<>0
+ OR p.provariadic<>0 OR p.proargmodes IS NOT NULL OR p.proallargtypes IS NOT NULL
+ OR p.proargnames IS DISTINCT FROM ARRAY[e.argname]::text[] OR p.proargtypes[0]<>'jsonb'::regtype
+ OR p.prolang<>(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')) THEN RETURN false;END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p WHERE p.oid='kaname._authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)'::regprocedure
+  AND p.prorettype='pg_catalog.bool'::regtype AND p.pronargs=6 AND p.proargtypes='3802 3802 25 3802 3802 3802'::oidvector
+  AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')
+  AND NOT p.proretset AND NOT p.proisstrict AND p.prokind='f' AND p.pronargdefaults=0 AND p.provariadic=0
+  AND p.proallargtypes IS NULL AND p.proargmodes IS NULL) THEN RETURN false;END IF;
  -- Mirror остаётся единственным AFTER INSERT/UPDATE OF тех же трёх колонок.
  IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.membership_mirror_from_user()'::regprocedure)<>1
  OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid='kaname.users'::regclass
@@ -6636,6 +9254,10 @@ BEGIN
  ('resource_mirror','binding_epoch_update','authority_binding_epoch_changed()',16,0,'',false,'old_epoch_rows','new_epoch_rows'),
  ('resource_mirror','binding_epoch_delete','authority_binding_epoch_changed()',8,0,'',false,'old_epoch_rows',NULL),
  ('resource_mirror','binding_epoch_truncate','authority_binding_epoch_changed()',32,0,'',false,NULL,NULL),
+ ('resource_registration_scope','binding_epoch_insert','authority_binding_epoch_changed()',4,0,'',false,NULL,'new_epoch_rows'),
+ ('resource_registration_scope','binding_epoch_update','authority_binding_epoch_changed()',16,0,'',false,'old_epoch_rows','new_epoch_rows'),
+ ('resource_registration_scope','binding_epoch_delete','authority_binding_epoch_changed()',8,0,'',false,'old_epoch_rows',NULL),
+ ('resource_registration_scope','binding_epoch_truncate','authority_binding_epoch_changed()',32,0,'',false,NULL,NULL),
  ('resource_parent_edge','binding_epoch_insert','authority_binding_epoch_changed()',4,0,'',false,NULL,'new_epoch_rows'),
  ('resource_parent_edge','binding_epoch_update','authority_binding_epoch_changed()',16,0,'',false,'old_epoch_rows','new_epoch_rows'),
  ('resource_parent_edge','binding_epoch_delete','authority_binding_epoch_changed()',8,0,'',false,'old_epoch_rows',NULL),
@@ -6662,7 +9284,7 @@ BEGIN
  END LOOP;
  IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname._authority_crud_aux_statement_v3()'::regprocedure)<>6 THEN RETURN false;END IF;
  IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname._authority_crud_aux_write_v3()'::regprocedure)<>10 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_binding_epoch_changed()'::regprocedure)<>92 THEN RETURN false;END IF;
+ IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_binding_epoch_changed()'::regprocedure)<>96 THEN RETURN false;END IF;
  IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_crud_fga_id_applied_v3()'::regprocedure)<>1 THEN RETURN false;END IF;
  IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_crud_fga_id_guard_v3()'::regprocedure)<>1 THEN RETURN false;END IF;
  IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_crud_journal_applied_v3()'::regprocedure)<>1 THEN RETURN false;END IF;
@@ -6695,7 +9317,16 @@ BEGIN
   AND p.proargmodes=ARRAY['t','t','t','t','t','t','t','t']::"char"[]
   AND p.proallargtypes=ARRAY['jsonb'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid,'oid'::regtype::oid,
    'boolean'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid,'boolean'::regtype::oid]) THEN RETURN false;END IF;
- RETURN true;
+ IF EXISTS(SELECT 1 FROM (VALUES
+  ('authority_native_delete_emit_v4(jsonb[])','void',1,ARRAY['p_payloads']),
+  ('authority_native_delete_prepare_v4(jsonb[])','uuid',1,ARRAY['p_payloads']),
+  ('authority_native_delete_stamp_v4(uuid,bigint,jsonb)','timestamptz',3,ARRAY['p_nonce','p_id','p_payload'])
+ ) e(signature,result_type,nargs,names) LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||e.signature)
+ WHERE p.oid IS NULL OR p.prokind<>'f' OR p.prorettype<>e.result_type::regtype OR p.proretset
+ OR p.proisstrict OR p.proleakproof OR p.proparallel<>'u' OR p.pronargs<>e.nargs OR p.pronargdefaults<>0 OR p.provariadic<>0
+ OR p.proargnames IS DISTINCT FROM e.names OR p.proargmodes IS NOT NULL OR p.proallargtypes IS NOT NULL
+ OR p.prolang<>(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')) THEN RETURN false;END IF;
+ RETURN kaname._authority_group_add_storage_v3() AND kaname._authority_forward_storage_v4();
 END $$;
 -- +goose StatementEnd
 
@@ -6779,7 +9410,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','731830ada6d11ff80ad42efa8ab9f1db1ff3cf90ed96620fad82d58fb2b6f122',true),
+ ('_authority_crud_storage_v3()','9452abf88344f0d576717853fddfe07b82f94f85ba0d935d58a52e20bc9a81e8',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -6801,9 +9432,9 @@ BEGIN
  ('authority_staged_contract_validate_v3()','0438c79b89809642700ab1d12a3dee84f8a0432c3b33589d47d16e8d9ce885b8',true),
  ('authority_protocol_stage_full_v3(text,bytea,text,text,text)','1f7a9c17af7a4c3ec041405fa9f0dddc69cdf3fa666ba72db47247cde8447037',false),
  ('authority_protocol_activate_full_v3(text,text,text)','646328a2433e1d31d17a9c178ac3ab59a5a65d8252accf5295a20d22705d31cf',false),
- ('authority_protocol_attestation()','b14df1dbc506b990b23e320ae5be6bdabce9dbf993af99dae70e5e337de681e2',true),
- ('authority_protocol_statement_guard()','457d0003223d4ad53047310a311f677f94852a6aefd39523d38398b075613da8',true),
- ('authority_protocol_row_guard()','12e0aaa5fff5aadd930c78d09bc660438ad1000a36c978a594964b1532a30652',true),
+ ('authority_protocol_attestation()','130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502',true),
+ ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true),
+ ('authority_protocol_row_guard()','0207ee81f4012cabec1fccbf6e816763b4889d064bf896e7455be9a35e5417a1',true),
  ('_authority_protocol_stage_generation1(text,bytea,text,text,text)','7ffb942af742bff4b556f07b00d9d8f75fefba3aa1f00445073140b5c8072bde',false),
  ('_authority_protocol_activate_generation1(text,text,text)','00d97c37e2ab533c232e4cffb975e8d71c3eefa98228e0f39d90249526bf041c',false),
  ('authority_protocol_drain()','f0e36bb29e96ba0417e9143821391b9df518541a017dcd9b171c037e167bc500',false),
@@ -6826,14 +9457,31 @@ LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS
 DECLARE signature text; runtime_name text;
 BEGIN
  PERFORM kaname.authority_protocol_require_owner();
+ IF NOT kaname._authority_full_contract_storage_v3() THEN RAISE EXCEPTION 'binding runtime grant closure incomplete' USING ERRCODE='55000';END IF;
  PERFORM kaname._authority_protocol_grant_runtime_generation1(p_runtime);
  SELECT rolname INTO STRICT runtime_name FROM pg_catalog.pg_roles WHERE oid=p_runtime;
  FOREACH signature IN ARRAY ARRAY[
+  'authority_native_write_arm_v4(uuid)','authority_native_write_read_v4()',
+  'authority_native_delete_batch_read_v4()',
+  'authority_native_delete_emit_v4(jsonb[])',
+  'authority_native_delete_prepare_v4(jsonb[])',
+  'authority_native_delete_stamp_v4(uuid,bigint,jsonb)',
+  'authority_forward_emit_v4(jsonb[])',
+  'authority_forward_prepare_v4(jsonb[])',
+  'authority_forward_claim_v4(uuid)',
+  'authority_forward_finish_v4(uuid)',
+  'authority_group_add_prepare_v3(jsonb,integer,integer)',
+  'authority_group_add_finalize_v3(jsonb,integer,integer)',
+  'authority_group_add_fold_v3(text,jsonb,timestamptz)',
+  'authority_group_add_subject_id_v3()',
   'authority_resource_crud_capture_v3(jsonb,integer,integer)',
   'authority_resource_crud_body_values_v3()',
   'authority_resource_crud_step_v3(text,jsonb)',
   'authority_resource_crud_lock_held_v3(text)',
   'authority_resource_crud_journal_value_v3(jsonb,jsonb)',
+  'authority_binding_command_begin_v3(jsonb)',
+  'authority_binding_command_end_v3(jsonb)',
+  'authority_binding_command_audit_v3(jsonb)',
   'authority_binding_sequence_prepare_v3(text,jsonb)',
   'authority_binding_sequence_finalize_v3()',
   'authority_binding_insert_stamp_v3(text)',
@@ -6872,7 +9520,7 @@ END $$;
 
 -- +goose StatementBegin
 DO $$ DECLARE signature text;r record;BEGIN
- FOREACH signature IN ARRAY ARRAY['_authority_protocol_snapshot_v3()','_authority_sequence_probe_v3()','_authority_sequence_shape_v3()','_authority_sequence_publish_v3(jsonb)','_authority_sequence_header_v3()','_authority_resource_before_write_v3(jsonb,text,text,jsonb,jsonb)','_authority_crud_anchor_capture_v3(jsonb,integer,integer)','_authority_crud_authority_graph_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_capture_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_write_v3()','_authority_crud_aux_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_aux_statement_v3()','authority_resource_crud_capture_v3(jsonb,integer,integer)','_authority_crud_merge_tables_v3(jsonb,jsonb)','_authority_crud_capture_v3(jsonb,integer,integer)','_authority_crud_cascade_capture_v3(jsonb,integer,integer)','authority_resource_crud_body_values_v3()','_authority_crud_step_complete_v3(jsonb,integer)','authority_resource_crud_step_v3(text,jsonb)','authority_resource_crud_lock_held_v3(text)','_authority_crud_require_completion_v3(jsonb)','_authority_crud_command_v3(text,jsonb)','_authority_crud_structural_v3(text,text,text,text)','_authority_crud_command_plan_v3(jsonb,jsonb)','_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_intent_v3(jsonb)','_authority_crud_manifest_domain_v3(jsonb)','_authority_crud_fga_rows_v3(jsonb,text,jsonb,integer,timestamptz)','authority_crud_fga_id_guard_v3()','authority_crud_fga_id_applied_v3()','_authority_crud_fold_capture_v3(jsonb,integer,integer)','_authority_crud_fold_images_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_graph_index_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_capture_v3(jsonb,jsonb,integer,integer)','authority_resource_crud_journal_value_v3(jsonb,jsonb)','authority_crud_journal_applied_v3()','_authority_crud_journal_plan_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_rows_v3(jsonb,jsonb,timestamptz)','_authority_crud_unique_key_v3(text,jsonb)','authority_crud_unique_guard_v3()','_authority_crud_sequence_wait_v3(text,integer,integer)','authority_crud_sequence_guard_v3()','_authority_crud_key_maximum_v3(jsonb,jsonb,jsonb,jsonb,timestamptz)','_authority_crud_lock_rows_v3(jsonb)','_authority_crud_lock_plan_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_manifest_images_v3(jsonb,jsonb,jsonb,jsonb)','_authority_resource_crud_materialize_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_maximum_v3(jsonb,jsonb)','_authority_crud_pack_v3(jsonb,jsonb,jsonb)','_authority_crud_physical_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_resource_crud_prepare_v3(jsonb,integer,integer)','_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','_authority_crud_scope_capture_v3(jsonb,integer,integer)','_authority_resource_crud_store_v3(jsonb)','_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','_authority_crud_json_keys_v3(jsonb)','_authority_crud_write_metadata_v3(jsonb,jsonb,jsonb)','_authority_binding_scope_tier_v3(text,jsonb,jsonb)','_authority_binding_journal_v3(text,text,jsonb,jsonb,jsonb,integer)','authority_binding_sequence_prepare_v3(text,jsonb)','authority_binding_sequence_finalize_v3()','authority_binding_insert_stamp_v3(text)','authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','_authority_binding_stage_snapshot_v3()','authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','authority_binding_stage_sequence_finalize_v3(text)','_authority_binding_stage_source_v3(jsonb,oid,integer)','_authority_binding_stage_coordinates_v3(jsonb,text[],boolean,oid,integer,integer)','authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer)','authority_binding_withdrawal_sequence_finalize_v3()','authority_cluster_admin_preflight_v4(text,text,text)','_authority_metadata_preflight_body_v4(text,text,boolean,text)','_authority_sequence_freeze_v3(jsonb)','_authority_sequence_bind_v3(jsonb,timestamptz)','_authority_sequence_default_v3(text)','authority_resource_journal_id_v3()','authority_fga_outbox_id_v3()','authority_sequence_program_applied_v3()','authority_sequence_program_completion_v3()','_authority_sequence_expect_v3(text)','_authority_sequence_expected_v3()','authority_sequence_expectation_complete_v3()','authority_sequence_origin_v3()','authority_prepared_journal_value_v3(jsonb,jsonb)','_authority_sequence_excluded_v3(oid)','_authority_sequence_store_v3()','_authority_sequence_reserve_v3(text,jsonb,integer)','_authority_sequence_select_v3(integer[],timestamptz)','_authority_sequence_claim_v3(text,jsonb,jsonb)','_authority_sequence_applied_v3(text,bigint,jsonb)','_authority_sequence_complete_v3()','_authority_resource_object_sequence_prepare_v3(jsonb,integer)','_authority_resource_object_sequence_final_v3(jsonb,timestamptz)','_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','authority_role_sequence_prepare_v3(jsonb,integer,integer)','authority_role_sequence_finalize_v3()','authority_role_sequence_stamp_v3(jsonb)','_authority_sa_state_preflight_body_v4(text,boolean,text)','_authority_scalar_journal_v3(text,text,jsonb,jsonb)','authority_metadata_preflight_v4(text,text,boolean,text,jsonb)','authority_sa_state_preflight_v4(text,boolean,text)','authority_scalar_sequence_finalize_v3()','authority_crud_storage_v3()','_authority_crud_storage_v3()'] LOOP
+ FOREACH signature IN ARRAY ARRAY['_authority_protocol_snapshot_v3()','_authority_sequence_probe_v3()','_authority_sequence_shape_v3()','_authority_sequence_publish_v3(jsonb)','_authority_sequence_header_v3()','_authority_resource_before_write_v3(jsonb,text,text,jsonb,jsonb)','_authority_crud_anchor_capture_v3(jsonb,integer,integer)','_authority_crud_authority_graph_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_capture_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_write_v3()','_authority_crud_aux_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_aux_statement_v3()','authority_resource_crud_capture_v3(jsonb,integer,integer)','_authority_crud_merge_tables_v3(jsonb,jsonb)','_authority_crud_capture_v3(jsonb,integer,integer)','_authority_crud_cascade_capture_v3(jsonb,integer,integer)','authority_resource_crud_body_values_v3()','_authority_crud_step_complete_v3(jsonb,integer)','authority_resource_crud_step_v3(text,jsonb)','authority_resource_crud_lock_held_v3(text)','_authority_crud_require_completion_v3(jsonb)','_authority_crud_command_v3(text,jsonb)','_authority_crud_structural_v3(text,text,text,text)','_authority_crud_command_plan_v3(jsonb,jsonb)','_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_intent_v3(jsonb)','_authority_crud_manifest_domain_v3(jsonb)','_authority_crud_fga_rows_v3(jsonb,text,jsonb,integer,timestamptz)','authority_crud_fga_id_guard_v3()','authority_crud_fga_id_applied_v3()','_authority_crud_fold_capture_v3(jsonb,integer,integer)','_authority_crud_fold_images_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_graph_index_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_capture_v3(jsonb,jsonb,integer,integer)','authority_resource_crud_journal_value_v3(jsonb,jsonb)','authority_crud_journal_applied_v3()','_authority_crud_journal_plan_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_rows_v3(jsonb,jsonb,timestamptz)','_authority_crud_unique_key_v3(text,jsonb)','authority_crud_unique_guard_v3()','_authority_crud_sequence_wait_v3(text,integer,integer)','authority_crud_sequence_guard_v3()','_authority_crud_key_maximum_v3(jsonb,jsonb,jsonb,jsonb,timestamptz)','_authority_crud_lock_rows_v3(jsonb)','_authority_crud_lock_plan_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_manifest_images_v3(jsonb,jsonb,jsonb,jsonb)','_authority_resource_crud_materialize_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_maximum_v3(jsonb,jsonb)','_authority_crud_pack_v3(jsonb,jsonb,jsonb)','_authority_crud_physical_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_resource_crud_prepare_v3(jsonb,integer,integer)','_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','_authority_crud_scope_capture_v3(jsonb,integer,integer)','_authority_resource_crud_store_v3(jsonb)','_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','_authority_crud_json_keys_v3(jsonb)','_authority_crud_write_metadata_v3(jsonb,jsonb,jsonb)','_authority_binding_scope_tier_v3(text,jsonb,jsonb)','_authority_binding_journal_v3(text,text,jsonb,jsonb,jsonb,integer)','authority_binding_sequence_prepare_v3(text,jsonb)','authority_binding_sequence_finalize_v3()','authority_binding_insert_stamp_v3(text)','authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','_authority_binding_stage_snapshot_v3()','authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','authority_binding_stage_sequence_finalize_v3(text)','_authority_binding_mirror_store_v3()','_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','_authority_binding_mirror_finalize_v3(text)','_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','_authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)','_authority_binding_stage_source_v3(jsonb,oid,integer)','_authority_binding_stage_coordinates_v3(jsonb,text[],boolean,oid,integer,integer)','authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer)','authority_binding_withdrawal_sequence_finalize_v3()','authority_cluster_admin_preflight_v4(text,text,text)','_authority_metadata_preflight_body_v4(text,text,boolean,text)','_authority_sequence_freeze_v3(jsonb)','_authority_sequence_bind_v3(jsonb,timestamptz)','_authority_sequence_default_v3(text)','authority_resource_journal_id_v3()','authority_fga_outbox_id_v3()','authority_sequence_program_applied_v3()','authority_sequence_program_completion_v3()','_authority_sequence_expect_v3(text)','_authority_sequence_expected_v3()','authority_sequence_expectation_complete_v3()','authority_sequence_origin_v3()','authority_prepared_journal_value_v3(jsonb,jsonb)','_authority_sequence_excluded_v3(oid)','_authority_sequence_store_v3()','_authority_sequence_reserve_v3(text,jsonb,integer)','_authority_sequence_select_v3(integer[],timestamptz)','_authority_sequence_claim_v3(text,jsonb,jsonb)','_authority_sequence_applied_v3(text,bigint,jsonb)','_authority_sequence_complete_v3()','_authority_resource_object_sequence_prepare_v3(jsonb,integer)','_authority_resource_object_sequence_final_v3(jsonb,timestamptz)','_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','authority_role_sequence_prepare_v3(jsonb,integer,integer)','authority_role_sequence_finalize_v3()','authority_role_sequence_stamp_v3(jsonb)','_authority_sa_state_preflight_body_v4(text,boolean,text)','_authority_scalar_journal_v3(text,text,jsonb,jsonb)','authority_metadata_preflight_v4(text,text,boolean,text,jsonb)','authority_sa_state_preflight_v4(text,boolean,text)','authority_scalar_sequence_finalize_v3()','authority_crud_storage_v3()','_authority_crud_storage_v3()'] LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM PUBLIC',signature);
   FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc f CROSS JOIN LATERAL aclexplode(f.proacl) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee WHERE f.oid=to_regprocedure('kaname.'||signature) AND a.grantee<>f.proowner LOOP
    EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM %I',signature,r.rolname);
@@ -6941,10 +9589,596 @@ CREATE TRIGGER memberships_000_sequence_origin AFTER INSERT OR DELETE ON kaname.
 CREATE TRIGGER access_binding_subjects_000_sequence_origin AFTER INSERT OR DELETE ON kaname.access_binding_subjects FOR EACH ROW EXECUTE FUNCTION kaname.authority_sequence_origin_v3();
 ALTER TABLE kaname.resource_journal ALTER COLUMN sequence_no SET DEFAULT kaname.authority_resource_journal_id_v3();
 ALTER TABLE kaname.fga_outbox ALTER COLUMN id SET DEFAULT kaname.authority_fga_outbox_id_v3();
+CREATE TRIGGER binding_epoch_insert AFTER INSERT ON kaname.resource_registration_scope REFERENCING NEW TABLE AS new_epoch_rows FOR EACH STATEMENT EXECUTE FUNCTION kaname.authority_binding_epoch_changed();
+CREATE TRIGGER binding_epoch_update AFTER UPDATE ON kaname.resource_registration_scope REFERENCING OLD TABLE AS old_epoch_rows NEW TABLE AS new_epoch_rows FOR EACH STATEMENT EXECUTE FUNCTION kaname.authority_binding_epoch_changed();
+CREATE TRIGGER binding_epoch_delete AFTER DELETE ON kaname.resource_registration_scope REFERENCING OLD TABLE AS old_epoch_rows FOR EACH STATEMENT EXECUTE FUNCTION kaname.authority_binding_epoch_changed();
+CREATE TRIGGER binding_epoch_truncate AFTER TRUNCATE ON kaname.resource_registration_scope FOR EACH STATEMENT EXECUTE FUNCTION kaname.authority_binding_epoch_changed();
+
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname._authority_resource_effect_applied_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb; old_image jsonb; new_image jsonb; matched jsonb;
+ ordinal integer;v_old_image jsonb;v_new_image jsonb;
+BEGIN
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN
+  IF TG_TABLE_NAME NOT IN ('access_binding_target_members','access_binding_emitted_tuples','fga_outbox','relation_fact')
+   OR kaname._authority_binding_mirror_store_v3() IS NULL THEN RETURN NULL;END IF;
+  IF TG_WHEN<>'AFTER' OR TG_LEVEL<>'ROW' THEN RAISE EXCEPTION 'binding mirror applied context invalid' USING ERRCODE='42501';END IF;
+  IF TG_OP<>'INSERT' THEN v_old_image:=to_jsonb(OLD);END IF;
+  IF TG_OP<>'DELETE' THEN v_new_image:=to_jsonb(NEW);END IF;
+  IF TG_TABLE_NAME='fga_outbox' THEN v_new_image:=v_new_image-'id';END IF;
+  SELECT i.image_no INTO ordinal FROM pg_temp.kaname_binding_mirror_images i
+   WHERE i.table_name=TG_TABLE_NAME AND i.operation=TG_OP AND i.attempted AND NOT i.consumed
+   AND i.old_image IS NOT DISTINCT FROM v_old_image AND i.new_image IS NOT DISTINCT FROM v_new_image
+   ORDER BY i.command_no,i.image_no LIMIT 1;
+  IF ordinal IS NULL OR NOT (SELECT i.required FROM pg_temp.kaname_binding_mirror_images i WHERE i.image_no=ordinal) THEN
+   RAISE EXCEPTION 'binding mirror unprepared actual effect' USING ERRCODE='42501';END IF;
+  UPDATE pg_temp.kaname_binding_mirror_images i SET consumed=true WHERE i.image_no=ordinal;
+  RETURN NULL;
+ END IF;
+ IF TG_WHEN<>'AFTER' OR TG_LEVEL<>'ROW' OR TG_OP NOT IN ('INSERT','UPDATE','DELETE') THEN
+  RAISE EXCEPTION 'resource applied-effect trigger context invalid' USING ERRCODE='42501';
+ END IF;
+ IF TG_OP<>'INSERT' THEN old_image:=to_jsonb(OLD); END IF;
+ IF TG_OP<>'DELETE' THEN new_image:=to_jsonb(NEW); END IF;
+ matched:=kaname._authority_resource_write_v2(manifest,TG_TABLE_NAME,TG_OP,old_image,new_image);
+ IF jsonb_typeof(matched->'required') IS DISTINCT FROM 'boolean' THEN
+  RAISE EXCEPTION 'resource effect obligation is missing' USING ERRCODE='42501';
+ END IF;
+ IF matched->>'required'='false' THEN
+  -- Разрешение BEFORE на попытку INSERT не разрешает persisted INSERT:
+  -- ожидаемый ON CONFLICT/DO NOTHING должен остаться без AFTER ROW эффекта.
+  RAISE EXCEPTION 'resource attempted-only image persisted' USING ERRCODE='42501';
+ END IF;
+ IF TG_TABLE_NAME='fga_outbox' AND TG_OP='INSERT' THEN
+  -- BEFORE guard уже одноразово выбрал разрешение без surrogate id. Из
+  -- одинаковых разрешений учитывается лишь действительно потреблённое.
+  SELECT e.ordinality::integer INTO ordinal
+   FROM pg_temp.kaname_authority_resource_manifest r
+   CROSS JOIN LATERAL jsonb_array_elements(r.writes) WITH ORDINALITY e(value,ordinality)
+   WHERE e.value=matched AND e.ordinality::integer=ANY(r.consumed_outbox_writes)
+    AND NOT e.ordinality::integer=ANY(r.consumed_required_writes)
+   ORDER BY e.ordinality LIMIT 1;
+ ELSE
+  -- Повтор одного exact mandatory эффекта имеет отдельный ordinal.
+  -- Удалять multiplicity нельзя: DELETE/recreate/DELETE обязан завершить
+  -- оба удаления, а третий лишний actual эффект должен быть отвергнут.
+  SELECT e.ordinality::integer INTO ordinal
+   FROM pg_temp.kaname_authority_resource_manifest r
+   CROSS JOIN LATERAL jsonb_array_elements(r.writes) WITH ORDINALITY e(value,ordinality)
+   WHERE e.value=matched AND NOT e.ordinality::integer=ANY(r.consumed_required_writes)
+   ORDER BY e.ordinality LIMIT 1;
+ END IF;
+ IF ordinal IS NULL THEN RAISE EXCEPTION 'resource applied effect was not prepared' USING ERRCODE='42501'; END IF;
+ PERFORM kaname._authority_resource_consume_required_v2(ordinal);
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_policy_changed() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE group_program jsonb;keys text[]; k text; moved boolean:=false; manifest jsonb; image jsonb; metadata jsonb; resource_keys text[]; resource_roles text[];
+BEGIN
+ group_program:=kaname._authority_group_add_program_v3();
+ IF group_program IS NOT NULL THEN
+  -- Исходный FGA policy trigger остаётся no-op: actual AFTER STATEMENT
+  -- приходит до relation_fact relay. Проверяем только уже consumed frozen
+  -- строки; policy revisions меняются позднее от реальных fact transitions.
+  IF TG_TABLE_NAME='fga_outbox' AND TG_OP='INSERT' THEN
+   FOR image IN SELECT to_jsonb(n) FROM new_policy_rows n LOOP
+    IF NOT EXISTS(SELECT 1 FROM pg_temp.kaname_authority_sequence_effects e
+     WHERE e.nonce=(group_program->>'nonce')::uuid AND e.table_name='fga_outbox'
+      AND e.selected AND e.claimed AND e.consumed AND e.reserved_id=(image->>'id')::bigint
+      AND e.row_value=image-'id') THEN
+     RAISE EXCEPTION 'group addition FGA policy transition image differs' USING ERRCODE='42501';END IF;
+   END LOOP;
+   RETURN NULL;
+  END IF;
+  IF TG_TABLE_NAME NOT IN ('group_members','relation_fact') OR TG_OP NOT IN ('INSERT','UPDATE') THEN
+   RAISE EXCEPTION 'group addition policy transition outside command' USING ERRCODE='42501';END IF;
+  keys:=ARRAY[]::text[];
+  FOR image IN SELECT to_jsonb(n) FROM new_policy_rows n LOOP
+   IF (TG_TABLE_NAME='group_members' AND image IS DISTINCT FROM
+     (group_program#>'{frozen,member_template}')||jsonb_build_object('added_at',(group_program->>'decision_at')::timestamptz))
+   OR (TG_TABLE_NAME='relation_fact' AND image IS DISTINCT FROM group_program#>'{frozen,fact_final}') THEN
+    RAISE EXCEPTION 'group addition policy transition image differs' USING ERRCODE='42501';END IF;
+   keys:=ARRAY(SELECT jsonb_array_elements_text(group_program#>ARRAY['frozen',CASE TG_TABLE_NAME WHEN 'group_members' THEN 'member_keys' ELSE 'fact_keys' END]));
+  END LOOP;
+  FOR k IN SELECT DISTINCT x COLLATE "C" FROM unnest(keys) x ORDER BY 1 LOOP
+   -- FOR UPDATE уже выполнен compiler: здесь только прежний revision+1.
+   UPDATE kaname.authority_policy_epoch SET revision=revision+1 WHERE key=k;
+   IF NOT FOUND THEN RAISE EXCEPTION 'group addition prepared policy key absent' USING ERRCODE='42501';END IF;
+  END LOOP;
+  RETURN NULL;
+ END IF;
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NOT NULL THEN
+  IF TG_OP='TRUNCATE' THEN RAISE EXCEPTION 'resource truncate denied' USING ERRCODE='42501'; END IF;
+  resource_keys:=ARRAY[]::text[]; resource_roles:=ARRAY[]::text[];
+  IF TG_OP<>'INSERT' THEN
+   FOR image IN SELECT to_jsonb(o) FROM old_policy_rows o LOOP
+    metadata:=kaname._authority_resource_side_v2(manifest,TG_TABLE_NAME,TG_OP,'old',image);
+    resource_keys:=resource_keys||kaname._authority_resource_key_array_v2(metadata->'epoch_write_keys',false);
+    resource_roles:=resource_roles||kaname._authority_resource_key_array_v2(metadata->'deferred_carrier_roles');
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_keys FROM unnest(resource_keys) x;
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_roles FROM unnest(resource_roles) x;
+   END LOOP;
+  END IF;
+  IF TG_OP<>'DELETE' THEN
+   FOR image IN SELECT to_jsonb(n) FROM new_policy_rows n LOOP
+    metadata:=kaname._authority_resource_side_v2(manifest,TG_TABLE_NAME,TG_OP,'new',image);
+    resource_keys:=resource_keys||kaname._authority_resource_key_array_v2(metadata->'epoch_write_keys',false);
+    resource_roles:=resource_roles||kaname._authority_resource_key_array_v2(metadata->'deferred_carrier_roles');
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_keys FROM unnest(resource_keys) x;
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_roles FROM unnest(resource_roles) x;
+   END LOOP;
+  END IF;
+  FOR k IN SELECT DISTINCT x COLLATE "C" FROM unnest(resource_keys) x ORDER BY 1 LOOP
+   IF NOT ((manifest->'epoch_write_keys') ? k) THEN
+    RAISE EXCEPTION 'resource epoch write was not prepared' USING ERRCODE='42501';
+   END IF;
+   PERFORM kaname._authority_resource_preheld_key_v2(1262569296,k,true);
+   -- Ни INSERT, ни повторного FOR UPDATE после final clock.
+   UPDATE kaname.authority_policy_epoch SET revision=revision+1 WHERE key=k;
+   IF NOT FOUND THEN RAISE EXCEPTION 'resource prepared epoch missing' USING ERRCODE='40001'; END IF;
+  END LOOP;
+  FOR k IN SELECT DISTINCT x COLLATE "C" FROM unnest(resource_roles) x ORDER BY 1 LOOP
+   -- Только queued carrier metadata; actual bump сохраняется в deferred flush.
+   PERFORM kaname._authority_resource_preheld_key_v2(1262569296,'carrier_latch:role:'||k,false);
+   PERFORM kaname._authority_resource_preheld_key_v2(1262569296,'carriers:role:'||k,true);
+   INSERT INTO kaname.authority_policy_carrier_pending(transaction_id,backend_pid,role_id)
+   VALUES(pg_current_xact_id(),pg_backend_pid(),k) ON CONFLICT DO NOTHING;
+  END LOOP;
+  RETURN NULL;
+ END IF;
+ IF TG_TABLE_NAME='relation_fact' AND kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN
+  keys:=ARRAY[]::text[];
+  IF TG_OP='TRUNCATE' THEN RAISE EXCEPTION 'binding mirror policy truncate denied' USING ERRCODE='42501';END IF;
+  IF TG_OP<>'INSERT' THEN
+   FOR image IN SELECT to_jsonb(o) FROM old_policy_rows o LOOP
+    SELECT i.epoch_keys INTO metadata FROM pg_temp.kaname_binding_mirror_images i
+     WHERE i.table_name='relation_fact' AND i.operation=TG_OP AND i.old_image=image AND i.consumed LIMIT 1;
+    IF metadata IS NULL THEN RAISE EXCEPTION 'binding mirror policy OLD absent' USING ERRCODE='42501';END IF;
+    keys:=keys||ARRAY(SELECT jsonb_array_elements_text(metadata));
+   END LOOP;
+  END IF;
+  IF TG_OP<>'DELETE' THEN
+   FOR image IN SELECT to_jsonb(n) FROM new_policy_rows n LOOP
+    SELECT i.epoch_keys INTO metadata FROM pg_temp.kaname_binding_mirror_images i
+     WHERE i.table_name='relation_fact' AND i.operation=TG_OP AND i.new_image=image AND i.consumed LIMIT 1;
+    IF metadata IS NULL THEN RAISE EXCEPTION 'binding mirror policy NEW absent' USING ERRCODE='42501';END IF;
+    keys:=keys||ARRAY(SELECT jsonb_array_elements_text(metadata));
+   END LOOP;
+  END IF;
+  FOR k IN SELECT DISTINCT x COLLATE "C" FROM unnest(keys) x ORDER BY 1 LOOP
+   IF NOT EXISTS(SELECT 1 FROM pg_temp.kaname_binding_mirror_program p WHERE p.policy_keys ? k AND p.final_clock IS NOT NULL) THEN
+    RAISE EXCEPTION 'binding mirror policy key not preheld' USING ERRCODE='42501';END IF;
+   UPDATE kaname.authority_policy_epoch SET revision=revision+1 WHERE key=k;
+   IF NOT FOUND THEN RAISE EXCEPTION 'binding mirror policy epoch absent' USING ERRCODE='40001';END IF;
+  END LOOP;
+  RETURN NULL;
+ END IF;
+ -- WRITE-only obligations: actual empty UPDATE, then exact all-new INSERT.
+ IF TG_TABLE_NAME='relation_fact' AND TG_OP IN ('INSERT','UPDATE') THEN
+  metadata:=kaname.authority_native_write_read_v4();
+  IF metadata IS NOT NULL THEN
+   IF TG_RELID<>'kaname.relation_fact'::regclass OR TG_LEVEL<>'STATEMENT' OR TG_WHEN<>'AFTER' OR pg_trigger_depth()<>2 THEN
+    RAISE EXCEPTION 'native write policy invocation changed' USING ERRCODE='42501';END IF;
+   IF TG_OP='UPDATE' THEN
+    IF metadata->>'phase'<>'inserting' OR EXISTS(SELECT 1 FROM old_policy_rows) OR EXISTS(SELECT 1 FROM new_policy_rows) THEN
+     RAISE EXCEPTION 'native write conflict UPDATE was not empty' USING ERRCODE='42501';END IF;
+    UPDATE kaname.authority_forward_emit_anchor_v4 SET write_batch=jsonb_set(write_batch,'{phase}','"empty-update"'::jsonb)
+    WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND nonce=(metadata->>'nonce')::uuid
+     AND NOT finished AND write_batch->>'phase'='inserting';
+    IF NOT FOUND THEN RAISE EXCEPTION 'native write empty UPDATE replay' USING ERRCODE='42501';END IF;
+    RETURN NULL;
+   END IF;
+   IF metadata->>'phase'<>'empty-update'
+    OR (SELECT coalesce(jsonb_agg(to_jsonb(n) ORDER BY to_jsonb(n)::text COLLATE "C"),'[]'::jsonb) FROM new_policy_rows n)
+     IS DISTINCT FROM (SELECT jsonb_agg(j ORDER BY j::text COLLATE "C") FROM jsonb_array_elements(metadata->'facts') j) THEN
+    RAISE EXCEPTION 'native write actual NEW coverage changed' USING ERRCODE='42501';END IF;
+   -- Пересчёт fresh ownership после waits, без использования stale key proof.
+   IF kaname._authority_native_write_weights_v4((SELECT jsonb_agg(to_jsonb(n)) FROM new_policy_rows n))
+     IS DISTINCT FROM metadata->'weights'
+    OR (SELECT coalesce(jsonb_object_agg(w.key,to_jsonb(e)),'{}'::jsonb)
+      FROM (SELECT key FROM jsonb_each_text(metadata->'weights') UNION ALL SELECT '*') w LEFT JOIN kaname.authority_policy_epoch e ON e.key=w.key)
+     IS DISTINCT FROM metadata->'epochs' THEN
+    RAISE EXCEPTION 'native write policy dependencies changed after arm' USING ERRCODE='42501';END IF;
+   PERFORM key FROM kaname.authority_policy_epoch WHERE key='*' FOR SHARE;
+   INSERT INTO kaname.authority_policy_epoch(key,revision)
+    SELECT key,value::bigint FROM jsonb_each_text(metadata->'weights') ORDER BY key COLLATE "C"
+    ON CONFLICT(key) DO UPDATE SET revision=kaname.authority_policy_epoch.revision+EXCLUDED.revision;
+   UPDATE kaname.authority_forward_emit_anchor_v4 SET write_batch=jsonb_set(write_batch,'{phase}','"policy-complete"'::jsonb)
+   WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND nonce=(metadata->>'nonce')::uuid
+    AND NOT finished AND write_batch->>'phase'='empty-update';
+   IF NOT FOUND THEN RAISE EXCEPTION 'native write policy replay' USING ERRCODE='42501';END IF;
+   RETURN NULL;
+  END IF;
+ END IF;
+ -- Только actual OLD переход exact unsigned native command получает веса.
+ IF TG_TABLE_NAME='relation_fact' AND TG_OP='DELETE' THEN
+  metadata:=kaname.authority_native_delete_batch_read_v4();
+  IF metadata IS NOT NULL THEN
+   IF TG_RELID<>'kaname.relation_fact'::regclass OR TG_LEVEL<>'STATEMENT' OR TG_WHEN<>'AFTER'
+    OR metadata->>'phase'<>'deleting' OR pg_trigger_depth()<>2 THEN
+    RAISE EXCEPTION 'native batch policy phase or invocation changed' USING ERRCODE='42501';END IF;
+   -- NULL не должен совпасть с NULL через set operation; ordinary OLD обязан быть editor.
+   IF EXISTS(SELECT 1 FROM old_policy_rows o WHERE o.relation IS DISTINCT FROM 'editor'
+    OR o.subject IS NULL OR o.object_type IS NULL OR o.object_id IS NULL) THEN
+    RAISE EXCEPTION 'native batch actual OLD outside exact command' USING ERRCODE='42501';END IF;
+   -- Разность immutable command keys и actual OLD не требует попарного поиска.
+   -- Holder reads остаются прежними fresh invoker statements после fact locks.
+   IF EXISTS(SELECT o.subject,o.object_type||':'||o.object_id FROM old_policy_rows o
+    EXCEPT
+    SELECT j#>>'{payload,user}',j#>>'{payload,object}' FROM jsonb_array_elements(metadata->'rows') j
+    WHERE j->>'event_type'='fga.tuple.delete') THEN
+    RAISE EXCEPTION 'native batch actual OLD outside exact command' USING ERRCODE='42501';END IF;
+   -- DISTINCT внутри исторического DELETE; SUM между разными actual OLD.
+   IF EXISTS(SELECT 1 FROM old_policy_rows o CROSS JOIN LATERAL
+    (SELECT array_agg(DISTINCT x) ks FROM unnest(kaname.authority_policy_keys('relation_fact',to_jsonb(o))) x) k
+    WHERE '*'=ANY(k.ks) OR cardinality(k.ks)>4096) THEN
+    RAISE EXCEPTION 'native batch policy root eligibility changed' USING ERRCODE='42501';END IF;
+   IF EXISTS(SELECT 1 FROM old_policy_rows) THEN
+    PERFORM key FROM kaname.authority_policy_epoch WHERE key='*' FOR SHARE;
+    INSERT INTO kaname.authority_policy_epoch(key,revision)
+    SELECT q.k,count(*) FROM old_policy_rows o CROSS JOIN LATERAL
+     (SELECT DISTINCT x COLLATE "C" k FROM unnest(kaname.authority_policy_keys('relation_fact',to_jsonb(o))) x) q
+    GROUP BY q.k ORDER BY q.k COLLATE "C"
+    ON CONFLICT(key) DO UPDATE SET revision=kaname.authority_policy_epoch.revision+EXCLUDED.revision;
+   END IF;
+   UPDATE kaname.authority_forward_emit_anchor_v4 SET batch=jsonb_set(batch,'{phase}','"policy-complete"'::jsonb)
+    ||jsonb_build_object('deleted_count',(SELECT count(*) FROM old_policy_rows))
+   WHERE backend=pg_backend_pid() AND transaction_id=pg_current_xact_id() AND nonce=(metadata->>'nonce')::uuid
+    AND NOT finished AND batch->>'phase'='deleting';
+   IF NOT FOUND THEN RAISE EXCEPTION 'native batch policy replay' USING ERRCODE='42501';END IF;
+   RETURN NULL;
+  END IF;
+ END IF;
+ -- Для этих таблиц historical policy trigger отсутствовал.
+ IF TG_TABLE_NAME IN ('access_binding_target_members','access_binding_emitted_tuples','resource_registration_pointer','fga_outbox') THEN RETURN NULL; END IF;
+ IF TG_OP='UPDATE' THEN
+  SELECT pg_catalog.array_agg(DISTINCT q.k COLLATE "C" ORDER BY q.k COLLATE "C") INTO keys FROM (
+   SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(o))) k FROM old_policy_rows o
+   UNION SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(n))) FROM new_policy_rows n) q;
+  -- Смена родителя меняет ownership уже известного источника. Это редкая
+  -- неоднозначная структурная мутация, заранее требующая GLOBAL writer.
+  IF TG_TABLE_NAME IN ('projects','roles') THEN
+   SELECT EXISTS(SELECT 1 FROM old_policy_rows o JOIN new_policy_rows n ON to_jsonb(o)->>'id'=to_jsonb(n)->>'id'
+    WHERE (to_jsonb(o)->'account_id',to_jsonb(o)->'project_id',to_jsonb(o)->'is_system') IS DISTINCT FROM
+          (to_jsonb(n)->'account_id',to_jsonb(n)->'project_id',to_jsonb(n)->'is_system')) INTO moved;
+  END IF;
+ ELSIF TG_OP='INSERT' THEN
+  SELECT pg_catalog.array_agg(DISTINCT q.k COLLATE "C" ORDER BY q.k COLLATE "C") INTO keys FROM (SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(n))) k FROM new_policy_rows n) q;
+ ELSIF TG_OP='DELETE' THEN
+  SELECT pg_catalog.array_agg(DISTINCT q.k COLLATE "C" ORDER BY q.k COLLATE "C") INTO keys FROM (SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(o))) k FROM old_policy_rows o) q;
+  IF TG_TABLE_NAME='projects' THEN moved:=true; END IF;
+ ELSE moved:=true;
+ END IF;
+ IF moved OR pg_catalog.cardinality(keys)>4096 THEN keys:=ARRAY['*']; END IF;
+ IF keys IS NULL THEN RETURN NULL; END IF;
+ -- Порядок root -> typed keys совпадает с protect. Root не меняется от
+ -- обычных account/actor writes; его shared locks совместимы друг с другом.
+ IF '*'=ANY(keys) THEN UPDATE kaname.authority_policy_epoch SET revision=revision+1 WHERE key='*';
+ ELSE PERFORM key FROM kaname.authority_policy_epoch WHERE key='*' FOR SHARE; END IF;
+ -- keys уже DISTINCT и отсортирован по COLLATE "C" во всех трёх конструкторах.
+ FOREACH k IN ARRAY keys LOOP
+  IF k IS NULL OR k='*' THEN CONTINUE; END IF;
+  IF TG_TABLE_NAME IN ('access_bindings','access_binding_subjects') AND k LIKE 'carrier_latch:role:%' THEN
+   -- Binding держит только SHARE latch. Revision не блокируется во время apply.
+   PERFORM key FROM kaname.authority_policy_epoch WHERE key=k FOR SHARE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'carrier latch missing' USING ERRCODE='40001'; END IF;
+   INSERT INTO kaname.authority_policy_carrier_pending(transaction_id,backend_pid,role_id)
+    VALUES(pg_current_xact_id(),pg_backend_pid(),substr(k,length('carrier_latch:role:')+1)) ON CONFLICT DO NOTHING;
+  ELSE
+   INSERT INTO kaname.authority_policy_epoch(key,revision) VALUES(k,1)
+   ON CONFLICT(key) DO UPDATE SET revision=kaname.authority_policy_epoch.revision+1;
+  END IF;
+ END LOOP;
+ -- Epoch rows никогда не удаляются вместе с источником: delete/recreate
+ -- сохраняет монотонное поколение, а переустановка миграции меняет generation.
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+
+
+-- +goose StatementBegin
+CREATE FUNCTION kaname.authority_binding_command_begin_v3(p_command jsonb) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;metadata jsonb;program record;snapshot jsonb;storage oid;owner_oid oid;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'binding'
+ OR proof->>'purpose' IS DISTINCT FROM 'participant'
+ OR coalesce(proof->>'mode','') NOT IN ('accounts','global') THEN
+  RAISE EXCEPTION 'binding command requires authenticated participant' USING ERRCODE='42501';END IF;
+ metadata:=kaname._authority_binding_mirror_store_v3();
+ IF metadata IS NULL THEN
+  -- Отсутствие owner program не даёт caller обходить обязательный mirror stage.
+  IF to_regclass('pg_temp.kaname_binding_sequence_snapshot') IS NOT NULL THEN
+   -- На каждом Begin заново проверяются те же owner/ACL/identity/lifetime guards.
+   -- Для запрета обхода нужен только header и наличие mirror: сериализация всех
+   -- commands/maximum на каждом ordinal давала квадратичную работу group stage.
+   -- proof получен в начале этого вызова; до этой точки были только private reads.
+   -- Cursor/identity не кешируются между вызовами и не передаются caller.
+   IF proof IS NULL OR proof->>'kind'<>'binding' OR proof->>'purpose'<>'participant' THEN
+    RAISE EXCEPTION 'binding stage participant required' USING ERRCODE='42501';END IF;
+   storage:=to_regclass('pg_temp.kaname_binding_sequence_snapshot');
+   SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+   IF storage IS NULL OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=storage AND c.relowner=owner_oid AND c.relpersistence='t' AND c.relkind='r')
+   OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE c.oid=storage AND a.grantee<>owner_oid) THEN
+    RAISE EXCEPTION 'untrusted binding owner snapshot' USING ERRCODE='42501';END IF;
+   SELECT jsonb_build_object('backend',s.backend,'invoker_oid',s.invoker_oid,'stage_xid',s.stage_xid,
+    'model_id',s.model_id,'catalog_id',s.catalog_id,'projector_version',s.projector_version,
+    'has_mirror',s.mirror IS NOT NULL AND s.mirror<>'null'::jsonb)
+   INTO STRICT snapshot FROM pg_temp.kaname_binding_sequence_snapshot s WHERE singleton;
+   IF snapshot->>'backend' IS DISTINCT FROM proof->>'backend' OR snapshot->>'invoker_oid' IS DISTINCT FROM proof->>'invoker_oid'
+   OR snapshot->>'stage_xid'=proof->>'transaction_id' OR snapshot->>'model_id' IS DISTINCT FROM proof->>'model_id'
+   OR snapshot->>'catalog_id' IS DISTINCT FROM proof->>'catalog_id' OR snapshot->>'projector_version' IS DISTINCT FROM proof->>'projector_version' THEN
+    RAISE EXCEPTION 'binding owner snapshot identity/lifetime changed' USING ERRCODE='P1034';END IF;
+   IF (snapshot->>'has_mirror')::boolean THEN
+    RAISE EXCEPTION 'binding mirror command program missing' USING ERRCODE='42501';END IF;
+  END IF;
+  RETURN false;
+ END IF;
+ SELECT p.* INTO STRICT program FROM pg_temp.kaname_binding_mirror_program p WHERE singleton;
+ IF metadata->>'final_clock' IS DISTINCT FROM proof->>'decision_at'
+ OR program.final_clock IS NULL OR program.active_command IS NOT NULL
+ OR program.next_command>jsonb_array_length(program.commands)
+ OR p_command IS NULL OR program.commands->(program.next_command-1) IS DISTINCT FROM p_command THEN
+  RAISE EXCEPTION 'binding command differs from next owner operation' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_binding_mirror_program SET active_command=next_command WHERE singleton;
+ RETURN true;
+END $$;
+
+CREATE FUNCTION kaname.authority_binding_command_end_v3(p_command jsonb) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;program record;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'binding'
+ OR proof->>'purpose' IS DISTINCT FROM 'participant'
+ OR coalesce(proof->>'mode','') NOT IN ('accounts','global') THEN
+  RAISE EXCEPTION 'binding command requires authenticated participant' USING ERRCODE='42501';END IF;
+ IF kaname._authority_binding_mirror_store_v3() IS NULL THEN RAISE EXCEPTION 'binding command program absent' USING ERRCODE='42501';END IF;
+ SELECT p.* INTO STRICT program FROM pg_temp.kaname_binding_mirror_program p WHERE singleton;
+ IF program.active_command IS NULL OR program.active_command<>program.next_command
+ OR p_command IS NULL OR program.commands->(program.active_command-1) IS DISTINCT FROM p_command
+ OR program.audit_rows ? program.active_command::text
+ OR EXISTS(SELECT 1 FROM pg_temp.kaname_binding_mirror_images i WHERE i.command_no=program.active_command
+  AND ((i.required AND NOT i.consumed) OR (i.table_name='fga_outbox' AND NOT i.folded))) THEN
+  RAISE EXCEPTION 'binding command required effects incomplete' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_binding_mirror_program SET active_command=NULL,next_command=next_command+1 WHERE singleton;
+END $$;
+
+CREATE FUNCTION kaname.authority_binding_command_audit_v3(p_command jsonb) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;program record;row_value jsonb;actual jsonb;invoker oid;snapshot jsonb;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'binding'
+ OR proof->>'purpose' IS DISTINCT FROM 'participant'
+ OR coalesce(proof->>'mode','') NOT IN ('accounts','global') THEN
+  RAISE EXCEPTION 'binding command requires authenticated participant' USING ERRCODE='42501';END IF;
+ IF kaname._authority_binding_mirror_store_v3() IS NULL THEN
+  IF to_regclass('pg_temp.kaname_binding_sequence_snapshot') IS NOT NULL THEN
+   snapshot:=kaname._authority_binding_stage_snapshot_v3();
+   IF snapshot->'mirror' IS NOT NULL AND snapshot->'mirror'<>'null'::jsonb THEN
+    RAISE EXCEPTION 'binding audit owner program missing' USING ERRCODE='42501';END IF;
+  END IF;
+  RETURN false;END IF;
+ SELECT p.* INTO STRICT program FROM pg_temp.kaname_binding_mirror_program p WHERE singleton;
+ IF program.active_command IS NULL OR p_command->>'Kind' IS DISTINCT FROM 'audit'
+ OR program.commands->(program.active_command-1) IS DISTINCT FROM p_command THEN
+  RAISE EXCEPTION 'binding audit command differs from owner operation' USING ERRCODE='42501';END IF;
+ row_value:=program.audit_rows->program.active_command::text;
+ invoker:=(kaname.authority_protocol_attestation()->>'invoker_oid')::oid;
+ IF row_value IS NULL OR NOT has_table_privilege(invoker,'kaname.audit_outbox','INSERT') THEN
+  RAISE EXCEPTION 'binding audit row or original ACL absent' USING ERRCODE='42501';END IF;
+ INSERT INTO kaname.audit_outbox(id,event_type,tenant_account_id,event_payload,status,attempts,created_at,next_attempt_at)
+ VALUES(row_value->>'id',row_value->>'event_type',row_value->>'tenant_account_id',row_value->'event_payload',
+  row_value->>'status',(row_value->>'attempts')::integer,(row_value->>'created_at')::timestamptz,(row_value->>'next_attempt_at')::timestamptz)
+ RETURNING to_jsonb(audit_outbox) INTO actual;
+ IF actual IS DISTINCT FROM row_value THEN RAISE EXCEPTION 'binding audit actual row differs' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_binding_mirror_program SET audit_rows=audit_rows-program.active_command::text WHERE singleton;
+ RETURN true;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+DO $$ DECLARE sig text;r record;BEGIN
+ FOREACH sig IN ARRAY ARRAY['authority_binding_command_begin_v3(jsonb)','authority_binding_command_end_v3(jsonb)','authority_binding_command_audit_v3(jsonb)'] LOOP
+  EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM PUBLIC',sig);
+  FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc p CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee
+   WHERE p.oid=to_regprocedure('kaname.'||sig) AND a.grantee<>p.proowner LOOP
+   EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM %I',sig,r.rolname);
+  END LOOP;
+ END LOOP;
+END $$;
+-- +goose StatementEnd
+
+
+-- +goose StatementBegin
+CREATE FUNCTION kaname._authority_binding_mirror_policy_prepare_v3(p_snapshot jsonb) RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;mirror jsonb;keys text[];k text;owner_oid oid;r record;receipt record;reads integer;rows integer;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();mirror:=p_snapshot->'mirror';
+ IF mirror IS NULL OR mirror='null'::jsonb THEN RETURN;END IF;
+ IF p_snapshot IS DISTINCT FROM kaname._authority_binding_stage_snapshot_v3()
+ OR proof->>'kind' IS DISTINCT FROM 'binding' OR proof->>'purpose' IS DISTINCT FROM 'participant'
+ OR proof->>'mode' IS DISTINCT FROM 'accounts' OR current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'binding policy prelock lacks owner stage' USING ERRCODE='42501';END IF;
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ IF to_regclass('pg_temp.kaname_binding_mirror_policy_receipt') IS NOT NULL THEN
+  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid='pg_temp.kaname_binding_mirror_policy_receipt'::regclass
+   AND c.relowner=owner_oid AND c.relpersistence='t' AND c.relkind='r')
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+   WHERE c.oid='pg_temp.kaname_binding_mirror_policy_receipt'::regclass AND a.grantee<>owner_oid) THEN
+   RAISE EXCEPTION 'untrusted binding policy receipt' USING ERRCODE='42501';END IF;
+  SELECT * INTO STRICT receipt FROM pg_temp.kaname_binding_mirror_policy_receipt WHERE singleton;
+  IF receipt.identity IS DISTINCT FROM proof-ARRAY['decision_at'] OR receipt.binding_id IS DISTINCT FROM p_snapshot->>'binding_id' THEN
+   RAISE EXCEPTION 'binding policy receipt identity changed' USING ERRCODE='42501';END IF;
+  RETURN;
+ END IF;
+ IF jsonb_typeof(mirror->'policy_objects') IS DISTINCT FROM 'object' THEN RAISE EXCEPTION 'binding policy object closure absent' USING ERRCODE='42501';END IF;
+ SELECT array_agg(DISTINCT key_value COLLATE "C" ORDER BY key_value COLLATE "C") INTO keys FROM (
+  SELECT jsonb_array_elements_text(o.value) AS key_value FROM jsonb_each(mirror->'policy_objects') o
+  UNION ALL
+  SELECT CASE WHEN t->>'User' ~ '^(user|service_account):[^#*]+$' THEN t->>'User'
+   WHEN t->>'User' ~ '^(group|iam_group):[^#*]+#member$' THEN 'group:'||split_part(split_part(t->>'User',':',2),'#',1)
+   WHEN t->>'User' ~ '^(account|project|cluster):[^#*]+$' THEN NULL ELSE '*' END
+  FROM jsonb_array_elements(mirror->'commands') c CROSS JOIN LATERAL jsonb_array_elements(coalesce(nullif(c->'Tuples','null'::jsonb),'[]'::jsonb)) t
+ ) q WHERE key_value IS NOT NULL;
+ keys:=coalesce(keys,ARRAY[]::text[]);reads:=1+cardinality(array_remove(keys,'*'));rows:=1+cardinality(array_remove(keys,'*'));
+ IF cardinality(keys)>4096 OR reads>(mirror->>'budget_reads')::integer OR rows>(mirror->>'budget_rows')::integer THEN
+  RAISE EXCEPTION 'binding policy early lock budget exceeded' USING ERRCODE='54000';END IF;
+ LOCK TABLE kaname.authority_policy_epoch IN ROW EXCLUSIVE MODE;
+ IF '*'=ANY(keys) THEN PERFORM key FROM kaname.authority_policy_epoch WHERE key='*' FOR UPDATE;
+ ELSE PERFORM key FROM kaname.authority_policy_epoch WHERE key='*' FOR SHARE;END IF;
+ IF NOT FOUND THEN RAISE EXCEPTION 'binding policy ROOT absent' USING ERRCODE='40001';END IF;
+ FOR k IN SELECT value FROM unnest(keys) value WHERE value<>'*' ORDER BY value COLLATE "C" LOOP
+  INSERT INTO kaname.authority_policy_epoch(key) VALUES(k) ON CONFLICT DO NOTHING;
+  PERFORM key FROM kaname.authority_policy_epoch WHERE key=k FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'binding policy typed key absent' USING ERRCODE='40001';END IF;
+ END LOOP;
+ CREATE TEMP TABLE kaname_binding_mirror_policy_receipt(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
+  identity jsonb NOT NULL,binding_id text NOT NULL,keys jsonb NOT NULL,logical_reads integer NOT NULL,logical_rows integer NOT NULL) ON COMMIT DROP;
+ REVOKE ALL ON pg_temp.kaname_binding_mirror_policy_receipt FROM PUBLIC;
+ FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee
+  WHERE c.oid='pg_temp.kaname_binding_mirror_policy_receipt'::regclass AND a.grantee<>owner_oid LOOP
+  EXECUTE format('REVOKE ALL ON pg_temp.kaname_binding_mirror_policy_receipt FROM %I',r.rolname);
+ END LOOP;
+ INSERT INTO pg_temp.kaname_binding_mirror_policy_receipt(identity,binding_id,keys,logical_reads,logical_rows)
+ VALUES(proof-ARRAY['decision_at'],p_snapshot->>'binding_id',to_jsonb(keys),reads,rows);
+END $$;
+REVOKE ALL ON FUNCTION kaname._authority_binding_mirror_policy_prepare_v3(jsonb) FROM PUBLIC;
+DO $$ DECLARE r record;BEGIN
+ FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee
+ WHERE p.oid='kaname._authority_binding_mirror_policy_prepare_v3(jsonb)'::regprocedure AND a.grantee<>p.proowner LOOP
+ EXECUTE format('REVOKE ALL ON FUNCTION kaname._authority_binding_mirror_policy_prepare_v3(jsonb) FROM %I',r.rolname);END LOOP;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_audit_id_guard_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;row_value jsonb;matches integer;program record;hashed integer;
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'audit_outbox' OR TG_WHEN<>'BEFORE' OR TG_LEVEL<>'ROW'
+ OR TG_OP NOT IN ('INSERT','UPDATE') THEN RAISE EXCEPTION 'invalid audit ID guard context' USING ERRCODE='42501';END IF;
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN
+  IF kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN
+   SELECT p.* INTO STRICT program FROM pg_temp.kaname_binding_mirror_program p WHERE singleton;
+   hashed:=hashtext(NEW.id);
+   IF TG_OP<>'INSERT' OR program.active_command IS NULL OR program.commands->(program.active_command-1)->>'Kind'<>'audit'
+   OR program.audit_rows->program.active_command::text IS DISTINCT FROM to_jsonb(NEW)
+   OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks l WHERE l.pid=pg_backend_pid() AND l.locktype='advisory'
+    AND l.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database()) AND l.classid=1262569298::oid
+    AND l.objid=(hashed::bigint & 4294967295)::oid AND l.objsubid=2 AND l.mode='ExclusiveLock' AND l.granted) THEN
+    RAISE EXCEPTION 'binding audit lacks exact active row and preheld key' USING ERRCODE='42501';END IF;
+   RETURN NEW;
+  END IF;
+  PERFORM pg_advisory_xact_lock(1262569298,hashtext(NEW.id));
+  RETURN NEW;
+ END IF;
+ IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'Resource cannot update audit row' USING ERRCODE='42501';END IF;
+ PERFORM kaname._authority_resource_preheld_key_v2(1262569298,NEW.id,true);
+ row_value:=to_jsonb(NEW);
+ SELECT count(*) INTO matches FROM jsonb_array_elements(CASE WHEN manifest->'intent'->>'kind'='object'
+   THEN manifest#>'{object_physical,audits}' ELSE manifest#>'{registration_physical,audits}' END) a
+  WHERE a->'row'=row_value AND a->'command'=manifest->'object_command';
+ IF matches<>1 OR coalesce((manifest->'consumed_audit_ids') ? NEW.id,true) THEN
+  RAISE EXCEPTION 'audit insert outside exact private program' USING ERRCODE='42501';END IF;
+ RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname.authority_audit_applied_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;program record;
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'audit_outbox' OR TG_WHEN<>'AFTER' OR TG_LEVEL<>'ROW' OR TG_OP<>'INSERT' THEN
+  RAISE EXCEPTION 'invalid audit applied context' USING ERRCODE='42501';END IF;
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN
+  IF kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN
+   SELECT p.* INTO STRICT program FROM pg_temp.kaname_binding_mirror_program p WHERE singleton;
+   IF program.active_command IS NULL OR program.audit_rows->program.active_command::text IS DISTINCT FROM to_jsonb(NEW) THEN
+    RAISE EXCEPTION 'binding audit actual row is unprepared' USING ERRCODE='42501';END IF;
+   UPDATE pg_temp.kaname_binding_mirror_program SET audit_rows=audit_rows-program.active_command::text WHERE singleton;
+  END IF;
+  RETURN NULL;END IF;
+ IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN manifest->'intent'->>'kind'='object'
+   THEN manifest#>'{object_physical,audits}' ELSE manifest#>'{registration_physical,audits}' END) a WHERE a->'row'=to_jsonb(NEW) AND a->'command'=manifest->'object_command') THEN
+  RAISE EXCEPTION 'unverified audit applied' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_authority_resource_manifest SET consumed_audit_ids=array_append(consumed_audit_ids,NEW.id);
+ RETURN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname.authority_audit_statement_guard_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN
+  RAISE EXCEPTION 'binding audit mutation outside INSERT program' USING ERRCODE='42501';END IF;
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'audit_outbox' OR TG_WHEN<>'BEFORE' OR TG_LEVEL<>'STATEMENT'
+ OR TG_OP NOT IN ('UPDATE','DELETE','TRUNCATE') THEN
+  RAISE EXCEPTION 'invalid audit statement guard context' USING ERRCODE='42501';END IF;
+ IF kaname._authority_producer_resource_v2() IS NOT NULL THEN
+  RAISE EXCEPTION 'Resource audit is append-only exact program' USING ERRCODE='42501';END IF;
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+DO $$ DECLARE signature text;r record;BEGIN
+ FOREACH signature IN ARRAY ARRAY['_authority_group_add_program_v3()','authority_group_add_prepare_v3(jsonb,integer,integer)','authority_group_add_finalize_v3(jsonb,integer,integer)','_authority_group_add_row_v3(text,text,jsonb,jsonb)','_authority_group_add_statement_v3(text,text)','authority_group_add_fold_v3(text,jsonb,timestamptz)','authority_group_add_subject_id_v3()','_authority_group_add_subject_v3(text,text,jsonb)','_authority_group_add_complete_v3()','_authority_group_add_storage_v3()'] LOOP
+  EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM PUBLIC',signature);
+  FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc f CROSS JOIN LATERAL aclexplode(f.proacl) a
+   JOIN pg_catalog.pg_roles u ON u.oid=a.grantee WHERE f.oid=to_regprocedure('kaname.'||signature) AND a.grantee<>f.proowner LOOP
+   EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM %I',signature,r.rolname);
+  END LOOP;
+ END LOOP;
+END $$;
+-- +goose StatementEnd
+-- +goose StatementBegin
+DO $$ DECLARE r record;sig text;BEGIN
+ IF NOT kaname._authority_full_contract_storage_v3() THEN
+  RAISE EXCEPTION 'binding command pre-export closure incomplete' USING ERRCODE='55000';END IF;
+ FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc p
+ CROSS JOIN LATERAL aclexplode(p.proacl) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee
+ WHERE p.oid='kaname.authority_protocol_enter_typed_v3(text,text[],jsonb,text,text,text,text,text)'::regprocedure
+ AND a.grantee<>p.proowner AND a.privilege_type='EXECUTE' AND NOT a.is_grantable LOOP
+  FOREACH sig IN ARRAY ARRAY['authority_binding_command_begin_v3(jsonb)','authority_binding_command_end_v3(jsonb)','authority_binding_command_audit_v3(jsonb)'] LOOP
+   EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',sig,r.rolname);
+  END LOOP;
+ END LOOP;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+DO $$ DECLARE signature text;r record;BEGIN
+ FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc f CROSS JOIN LATERAL aclexplode(f.proacl) a
+  JOIN pg_catalog.pg_roles u ON u.oid=a.grantee
+  WHERE f.oid='kaname.authority_protocol_enter_typed_v3(text,text[],jsonb,text,text,text,text,text)'::regprocedure
+   AND a.grantee<>f.proowner AND a.privilege_type='EXECUTE' LOOP
+  FOREACH signature IN ARRAY ARRAY['authority_native_write_arm_v4(uuid)','authority_native_write_read_v4()','authority_native_delete_batch_read_v4()','authority_native_delete_emit_v4(jsonb[])','authority_native_delete_prepare_v4(jsonb[])','authority_native_delete_stamp_v4(uuid,bigint,jsonb)','authority_forward_emit_v4(jsonb[])','authority_forward_prepare_v4(jsonb[])','authority_forward_claim_v4(uuid)','authority_forward_finish_v4(uuid)','authority_group_add_prepare_v3(jsonb,integer,integer)','authority_group_add_finalize_v3(jsonb,integer,integer)','authority_group_add_fold_v3(text,jsonb,timestamptz)','authority_group_add_subject_id_v3()'] LOOP
+   EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,r.rolname);
+  END LOOP;
+ END LOOP;
+END $$;
+-- +goose StatementEnd
+-- role_id и live имеют NOT NULL; CHECK (live) закрепляет true.
+-- Составной role_live_fk сохраняет ссылку на существующую живую роль
+-- и тот же ON DELETE CASCADE без второго FK callback на каждую строку.
+ALTER TABLE ONLY kaname.access_binding_target_members
+    DROP CONSTRAINT access_binding_target_members_role_fk;
+
 -- +goose StatementBegin
 DO $$ BEGIN IF NOT kaname._authority_full_contract_storage_v3() THEN RAISE EXCEPTION 'full CRUD sequence closure installation incomplete' USING ERRCODE='55000';END IF;END $$;
 -- +goose StatementEnd
-
 -- +goose Down
 -- +goose StatementBegin
 DO $$ BEGIN
@@ -6952,6 +10186,599 @@ DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM kaname.authority_writer_contract WHERE required_contract=2) THEN
   RAISE EXCEPTION 'cannot remove active full CRUD contract' USING ERRCODE='P1036';
  END IF;
+END $$;
+-- +goose StatementEnd
+-- Восстановление определения FK предшествующей схемы.
+ALTER TABLE ONLY kaname.access_binding_target_members
+    ADD CONSTRAINT access_binding_target_members_role_fk FOREIGN KEY (role_id) REFERENCES kaname.roles(id) ON DELETE CASCADE;
+-- +goose StatementBegin
+
+DROP TRIGGER relation_fact_00_native_batch ON kaname.fga_outbox;
+DROP TRIGGER relation_fact_zz_native_batch ON kaname.fga_outbox;
+CREATE OR REPLACE FUNCTION kaname.relation_fact_from_journal() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    r record;
+BEGIN
+    -- Общий порядок захвата строк факта: по ключу (объект, субъект) побайтно;
+    -- строки одного ключа — в порядке их появления, который задал писатель.
+    FOR r IN
+        SELECT j.event_type, j.payload, j.created_at
+          FROM journal_rows j
+         ORDER BY j.payload ->> 'object' COLLATE "C",
+                  j.payload ->> 'user'   COLLATE "C",
+                  j.id
+    LOOP
+        PERFORM kaname.relation_fact_fold_row(r.event_type, r.payload, r.created_at);
+    END LOOP;
+    RETURN NULL;
+END $$;
+DROP FUNCTION kaname._authority_native_delete_batch_begin_v4();
+DROP FUNCTION kaname._authority_native_delete_batch_end_v4();
+DROP FUNCTION kaname.authority_native_delete_batch_read_v4();
+DROP FUNCTION kaname._authority_native_delete_batch_graph_v4();
+DROP FUNCTION kaname.authority_native_write_read_v4();
+DROP FUNCTION kaname.authority_native_write_arm_v4(uuid);
+DROP FUNCTION kaname._authority_native_write_closure_v4();
+DROP FUNCTION kaname._authority_native_write_weights_v4(jsonb);
+
+
+ALTER TABLE kaname.subject_change_outbox ALTER COLUMN id SET DEFAULT nextval('kaname.subject_change_outbox_id_seq'::regclass);
+CREATE OR REPLACE FUNCTION kaname.relation_fact_fold_row(
+    p_event_type text, p_payload jsonb, p_created_at timestamptz) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_delete_through timestamptz;
+    v_user      text := p_payload ->> 'user';
+    v_object    text := p_payload ->> 'object';
+    -- Версия ВЛАДЕЛЬЦА. Есть только у строки, которую владелец упорядочил сам.
+    v_owner     text := p_payload ->> 'source_version';
+    v_version   timestamptz;
+    v_relations text[];
+    v_relation  text;
+    v_type      text;
+    v_id        text;
+    v_colon     int;
+    -- Условие, которое модель объявляет на прямом списке этого отношения для
+    -- типа субъекта строки (`[user with mfa_fresh]`); пусто — безусловно.
+    v_condition text;
+    -- Хранимый субъект строки снятия (п. 4 шапки миграции kaname#829).
+    v_stored    text;
+BEGIN
+    -- Signed Resource исполняет только private final программу без позднего
+    -- holder lookup/clock/lock; legacy семантика ниже сохранена дословно.
+    IF kaname.authority_resource_fold_body_v2(p_event_type,p_payload,p_created_at) THEN RETURN;END IF;
+    -- Набор ВЫИГРЫВАЕТ у скаляра: на выдаче набора присутствуют оба поля, и
+    -- скаляр там — эхо для пода прежнего выпуска, а не весь предмет строки.
+    IF jsonb_array_length(coalesce(p_payload -> 'relations', '[]'::jsonb)) > 0 THEN
+        -- Отношения набора — в ОБЩЕМ порядке, а не в порядке писателя: строка
+        -- факта ключуется отношением, и два набора одного субъекта на одном
+        -- объекте, перечисленные встречно, брали бы их блокировки встречно.
+        SELECT array_agg(value ORDER BY value COLLATE "C") INTO v_relations
+          FROM jsonb_array_elements_text(p_payload -> 'relations') AS value;
+    ELSIF p_payload ->> 'relation' IS NOT NULL THEN
+        v_relations := ARRAY[p_payload ->> 'relation'];
+    END IF;
+
+    IF v_user IS NULL OR v_relations IS NULL OR v_object IS NULL THEN
+        RAISE EXCEPTION
+            'fga_outbox: строка без user/relation/object (%). Прямой факт складывается из этого журнала, и строка, которую нельзя спроецировать, дала бы движку право, о котором своя БД не знает.',
+            p_payload;
+    END IF;
+
+    -- Порядок строки. У строки, упорядоченной владельцем, его задаёт версия
+    -- владельца: метка журнала — момент НАЧАЛА транзакции службы, и у снятия,
+    -- начавшего транзакцию раньше открытия, она оказалась бы старше того, что
+    -- снятие обязано снять. Неразбираемая версия роняет строку, а не
+    -- подменяется меткой: молчаливая подмена вернула бы ровно тот порядок, от
+    -- которого поле защищает.
+    v_version := coalesce(v_owner::timestamptz, p_created_at);
+
+    -- Глагол выводится из выдачи и копией не хранится (см. 0098). Набор из
+    -- одних глаголов выходит здесь — до разбора объекта, как и одиночный.
+    --
+    -- ИСКЛЮЧЕНИЕ ОДНО: строка, упорядоченная владельцем, — публикация для
+    -- анонимного чтения. Её не выводит ни одна выдача, и отброшенная здесь, она
+    -- не существовала бы нигде (kaname#107).
+    IF v_owner IS NULL THEN
+        v_relations := ARRAY(SELECT r FROM unnest(v_relations) AS r WHERE r NOT LIKE 'v\_%');
+        IF array_length(v_relations, 1) IS NULL THEN
+            RETURN;
+        END IF;
+    END IF;
+
+    v_colon := position(':' in v_object);
+    IF v_colon <= 1 OR v_colon = length(v_object) THEN
+        RAISE EXCEPTION
+            'fga_outbox: объект % не имеет формы "<тип>:<идентификатор>" — спроецировать прямой факт нельзя.',
+            v_object;
+    END IF;
+    v_type := substr(v_object, 1, v_colon - 1);
+    v_id   := substr(v_object, v_colon + 1);
+
+    IF v_type LIKE '%.%' THEN
+        RAISE EXCEPTION
+            'fga_outbox: тип объекта % назван словарём каталога. Вопрос о доступе приходит словарём модели прав, и такая строка не совпала бы ни с одним вопросом.',
+            v_type;
+    END IF;
+
+    FOREACH v_relation IN ARRAY v_relations LOOP
+        IF p_event_type = 'fga.tuple.write' THEN
+            -- Условие прикладывает ПИСАТЕЛЬ, и только он: факт человека на
+            -- условном отношении без условия значил бы безусловный допуск там,
+            -- где модель объявляет допуск лишь при выполненном условии.
+            -- Перечень — дословно `with`-записи канонической модели; гейт
+            -- `TestConditionedRelationHasAProducer` сверяет его с моделью в обе
+            -- стороны (запись модели без строки и строка без записи модели —
+            -- находки).
+            SELECT c.condition_name INTO v_condition
+              FROM (VALUES
+                    ('compute_instance', 'console', 'user', 'mfa_fresh'),
+                    ('compute_instance', 'ssh',     'user', 'mfa_fresh')
+                   ) AS c(object_type, relation, subject_type, condition_name)
+             WHERE c.object_type = v_type AND c.relation = v_relation
+               AND c.subject_type = split_part(v_user, ':', 1);
+
+            INSERT INTO kaname.relation_fact
+                   (object_type, object_id, relation, subject, source_version, created_at, condition_name)
+            VALUES (v_type, v_id, v_relation, v_user, v_version, now(), coalesce(v_condition, ''))
+            ON CONFLICT (object_type, object_id, relation, subject) DO UPDATE
+               SET source_version = EXCLUDED.source_version,
+                   condition_name = EXCLUDED.condition_name
+             WHERE relation_fact.source_version < EXCLUDED.source_version;
+        ELSIF p_event_type = 'fga.tuple.delete' THEN
+            -- Снятие с подстановкой прежнего писателя снимает строку, в которую
+            -- переезд (п. 3) перенёс то, что этот писатель когда-то положил:
+            -- перевод тот же, что у переписи, по отношению (п. 4 шапки).
+            v_stored := v_user;
+            IF v_user = 'user:*' THEN
+                v_stored := CASE WHEN v_relation = 'v_get' THEN 'system_class:anonymous'
+                                 ELSE 'system_class:authenticated' END;
+            END IF;
+            -- Факт, выведенный выдачей (строка без версии владельца), снимается
+            -- лишь тогда, когда его не держит больше НИКТО (п. 2 шапки). Сперва
+            -- замок строки факта: снятие ждёт любого, кто держит её незафиксированной
+            -- (выдачу, свёрнутую в той же строке, второе снятие), и вопрос «держит
+            -- ли кто-то ещё» задаётся уже после его коммита, свежим снимком.
+            -- Новый typed mixed-set также проверяет держателей legacy строки;
+            -- флаг кладёт только внутренний combined-delete, не запрос клиента.
+            IF v_owner IS NULL OR p_payload->'protect_holders' = 'true'::jsonb OR EXISTS (
+                   SELECT 1 FROM kaname.resource_registration_pointer rp
+                    WHERE rp.object_type=v_type AND rp.object_id=v_id AND rp.relation=v_relation AND rp.subject=v_stored) THEN
+                PERFORM 1 FROM kaname.relation_fact
+                 WHERE object_type = v_type AND object_id = v_id
+                   AND relation = v_relation AND subject = v_stored
+                   FOR UPDATE;
+                IF NOT FOUND THEN
+                    CONTINUE;
+                END IF;
+                IF EXISTS (
+                       SELECT 1
+                         FROM kaname.access_binding_emitted_tuples et
+                         JOIN kaname.access_bindings ab ON ab.id = et.binding_id
+                        WHERE et.object = v_object AND et.relation = v_relation
+                          AND et.fga_user = v_stored AND ab.status = 'ACTIVE')
+                   OR EXISTS (SELECT 1 FROM kaname.resource_registration_pointer rp
+                               WHERE rp.object_type=v_type AND rp.object_id=v_id AND rp.relation=v_relation
+                                 AND rp.subject=v_stored AND rp.active)
+                   OR (v_type = 'cluster' AND v_relation = 'system_admin' AND EXISTS (
+                       SELECT 1
+                         FROM kaname.cluster_admin_grants g
+                        WHERE g.cluster_id = v_id
+                          AND g.subject_type || ':' || g.subject_id = v_stored
+                          AND (g.granted_until IS NULL OR g.granted_until > clock_timestamp())))
+                THEN
+                    CONTINUE;
+                END IF;
+            END IF;
+            v_delete_through := NULL;
+            IF v_owner IS NULL AND v_relation IN ('project','parent','owner') THEN
+                -- Отдельный свежий RC statement ПОСЛЕ fact lock и held read.
+                -- Без обратного замка receipt: registrar меняет её ДО факта.
+                SELECT delete_through INTO v_delete_through
+                  FROM kaname.resource_registration_retirement
+                 WHERE object_type=v_type AND object_id=v_id
+                   AND relation=v_relation AND subject=v_stored;
+            END IF;
+            -- У exact named tuple последний держатель может уйти меткой AB,
+            -- отличной от шкалы владельца. После fresh held-check снимаем его
+            -- без произвольного повышения надгробия; stale owner не проходит
+            -- сохранённую версию claim. Для legacy tuple сравнение прежнее.
+            DELETE FROM kaname.relation_fact
+             WHERE object_type = v_type AND object_id = v_id
+               AND relation = v_relation AND subject = v_stored
+               AND (source_version <= v_version
+                    OR (v_owner IS NULL AND v_delete_through IS NOT NULL AND source_version <= v_delete_through) OR EXISTS (
+                    SELECT 1 FROM kaname.resource_registration_pointer rp
+                     WHERE rp.object_type=v_type AND rp.object_id=v_id
+                       AND rp.relation=v_relation AND rp.subject=v_stored
+                       AND NOT rp.active
+                       AND (v_owner IS NULL OR rp.source_version <= v_version)));
+        END IF;
+    END LOOP;
+    RETURN;
+END $$;
+CREATE OR REPLACE FUNCTION kaname.authority_subject_change_id_guard_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;matches integer;
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'subject_change_outbox' OR TG_WHEN<>'BEFORE'
+ OR TG_LEVEL<>'ROW' OR TG_OP NOT IN ('INSERT','UPDATE') THEN
+  RAISE EXCEPTION 'invalid subject_change ID guard context' USING ERRCODE='42501';END IF;
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN PERFORM pg_advisory_xact_lock(1262569301,hashtext(NEW.id::text));RETURN NEW;END IF;
+ IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'Resource cannot update subject_change queue' USING ERRCODE='42501';END IF;
+ PERFORM kaname._authority_resource_preheld_key_v2(1262569301,NEW.id::text,true);
+ SELECT count(*) INTO matches FROM jsonb_array_elements(manifest#>'{registration_physical,subject_changes}') q
+  WHERE q->'row'=to_jsonb(NEW) AND q->'command'=manifest->'object_command';
+ IF matches<>1 OR coalesce((manifest->'consumed_subject_change_ids') @> jsonb_build_array(NEW.id),true) THEN
+  RAISE EXCEPTION 'subject_change insert outside exact registration command' USING ERRCODE='42501';END IF;
+ RETURN NEW;
+END $$;
+CREATE OR REPLACE FUNCTION kaname.authority_subject_change_applied_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'subject_change_outbox' OR TG_WHEN<>'AFTER'
+ OR TG_LEVEL<>'ROW' OR TG_OP<>'INSERT' THEN RAISE EXCEPTION 'invalid subject_change applied context' USING ERRCODE='42501';END IF;
+ manifest:=kaname._authority_producer_resource_v2();IF manifest IS NULL THEN RETURN NULL;END IF;
+ IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(manifest#>'{registration_physical,subject_changes}') q
+  WHERE q->'row'=to_jsonb(NEW) AND q->'command'=manifest->'object_command') THEN
+  RAISE EXCEPTION 'unverified subject_change row applied' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_authority_resource_manifest SET consumed_subject_change_ids=array_append(consumed_subject_change_ids,NEW.id);
+ RETURN NULL;
+END $$;
+CREATE OR REPLACE FUNCTION kaname.authority_subject_change_statement_guard_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'subject_change_outbox' OR TG_WHEN<>'BEFORE'
+ OR TG_LEVEL<>'STATEMENT' OR TG_OP NOT IN ('UPDATE','DELETE','TRUNCATE') THEN
+  RAISE EXCEPTION 'invalid subject_change statement guard context' USING ERRCODE='42501';END IF;
+ IF kaname._authority_producer_resource_v2() IS NOT NULL THEN
+  RAISE EXCEPTION 'Resource subject_change queue is append-only exact program' USING ERRCODE='42501';END IF;
+ RETURN NULL;
+END $$;
+CREATE OR REPLACE FUNCTION kaname._authority_resource_subject_change_wait_v2(p_count integer,p_reads integer)
+RETURNS TABLE(reserved_ids jsonb,held_relations jsonb,held_advisory jsonb,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;invoker oid;table_id oid;sequence_id oid;identifier bigint;item record;
+ ids jsonb:='[]'::jsonb;locks jsonb:='[]'::jsonb;relations jsonb;used integer:=5;i integer;present boolean;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'resource' OR proof->>'purpose' IS DISTINCT FROM 'participant'
+ OR proof->>'consumer_abi' IS DISTINCT FROM '2' OR proof->>'consumer_finalized' IS DISTINCT FROM 'false'
+ OR proof->>'consumer_profile' NOT IN ('resource_pending','resource_source_pending')
+ OR current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'subject_change reservation requires pending Resource RC' USING ERRCODE='42501';END IF;
+ IF p_count IS NULL OR p_count<1 OR p_count>100000 OR p_reads IS NULL OR p_reads<5+2*p_count OR p_reads>4096 THEN
+  RAISE EXCEPTION 'subject_change reservation budget exceeded' USING ERRCODE='54000';END IF;
+ invoker:=(proof->>'invoker_oid')::oid;table_id:='kaname.subject_change_outbox'::regclass;
+ IF NOT has_table_privilege(invoker,table_id,'INSERT') THEN
+  RAISE EXCEPTION 'subject_change INSERT privilege required' USING ERRCODE='42501';END IF;
+ LOCK TABLE ONLY kaname.subject_change_outbox IN ROW EXCLUSIVE MODE;
+ SELECT to_regclass(pg_get_serial_sequence('kaname.subject_change_outbox','id')) INTO sequence_id;
+ IF sequence_id IS NULL OR sequence_id<>'kaname.subject_change_outbox_id_seq'::regclass
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a WHERE a.attrelid=table_id AND a.attname='id'
+  AND a.atttypid='bigint'::regtype AND a.attidentity='' AND NOT a.attisdropped)
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE a.attrelid=table_id AND a.attname='id' AND pg_get_expr(d.adbin,d.adrelid)=$default$nextval('kaname.subject_change_outbox_id_seq'::regclass)$default$)
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=table_id OR inhparent=table_id) THEN
+  RAISE EXCEPTION 'subject_change physical identity schema changed' USING ERRCODE='42501';END IF;
+ -- Прежний INSERT serial вызывает nextval от invoker: owner helper сохраняет
+ -- USAGE либо UPDATE sequence, не добавляя SELECT на неё.
+ IF NOT (has_sequence_privilege(invoker,sequence_id,'USAGE') OR has_sequence_privilege(invoker,sequence_id,'UPDATE')) THEN
+  RAISE EXCEPTION 'subject change sequence privilege required' USING ERRCODE='42501';END IF;
+ -- nextval удерживает relation lock до конца всей TX даже при savepoint rollback.
+ FOR i IN 1..p_count LOOP
+  identifier:=nextval(sequence_id);used:=used+1;
+  IF identifier<=0 THEN RAISE EXCEPTION 'invalid reserved subject_change ID' USING ERRCODE='P1034';END IF;
+  ids:=ids||jsonb_build_array(identifier);
+ END LOOP;
+ -- Замки уникальности совместимы с legacy INSERT/переносом ID через trigger.
+ -- Сортировка по фактическому advisory hash исключает inversion внутри набора.
+ FOR item IN SELECT DISTINCT hashtext(v#>>'{}') h FROM jsonb_array_elements(ids) v ORDER BY h LOOP
+  PERFORM pg_advisory_xact_lock(1262569301,item.h);
+  locks:=locks||jsonb_build_array(jsonb_build_object('classid',1262569301,'objid',(item.h::bigint & 4294967295),
+   'objsubid',2,'mode','ExclusiveLock'));
+ END LOOP;
+ FOR identifier IN SELECT (v#>>'{}')::bigint FROM jsonb_array_elements(ids) v LOOP
+  used:=used+1;present:=false;
+  SELECT true INTO present FROM ONLY kaname.subject_change_outbox q WHERE q.id=identifier FOR UPDATE;
+  IF coalesce(present,false) THEN RAISE EXCEPTION 'reserved subject_change ID already exists' USING ERRCODE='P1034';END IF;
+ END LOOP;
+ relations:=jsonb_build_array(jsonb_build_object('oid',table_id,'mode','RowExclusiveLock'),
+  jsonb_build_object('oid',sequence_id,'mode','RowExclusiveLock'));
+ RETURN QUERY SELECT ids,relations,locks,used;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_audit_id_guard_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;row_value jsonb;matches integer;
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'audit_outbox' OR TG_WHEN<>'BEFORE' OR TG_LEVEL<>'ROW'
+ OR TG_OP NOT IN ('INSERT','UPDATE') THEN RAISE EXCEPTION 'invalid audit ID guard context' USING ERRCODE='42501';END IF;
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN
+  PERFORM pg_advisory_xact_lock(1262569298,hashtext(NEW.id));
+  RETURN NEW;
+ END IF;
+ IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'Resource cannot update audit row' USING ERRCODE='42501';END IF;
+ PERFORM kaname._authority_resource_preheld_key_v2(1262569298,NEW.id,true);
+ row_value:=to_jsonb(NEW);
+ SELECT count(*) INTO matches FROM jsonb_array_elements(CASE WHEN manifest->'intent'->>'kind'='object'
+   THEN manifest#>'{object_physical,audits}' ELSE manifest#>'{registration_physical,audits}' END) a
+  WHERE a->'row'=row_value AND a->'command'=manifest->'object_command';
+ IF matches<>1 OR coalesce((manifest->'consumed_audit_ids') ? NEW.id,true) THEN
+  RAISE EXCEPTION 'audit insert outside exact private program' USING ERRCODE='42501';END IF;
+ RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname.authority_audit_applied_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'audit_outbox' OR TG_WHEN<>'AFTER' OR TG_LEVEL<>'ROW' OR TG_OP<>'INSERT' THEN
+  RAISE EXCEPTION 'invalid audit applied context' USING ERRCODE='42501';END IF;
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN RETURN NULL;END IF;
+ IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN manifest->'intent'->>'kind'='object'
+   THEN manifest#>'{object_physical,audits}' ELSE manifest#>'{registration_physical,audits}' END) a WHERE a->'row'=to_jsonb(NEW) AND a->'command'=manifest->'object_command') THEN
+  RAISE EXCEPTION 'unverified audit applied' USING ERRCODE='42501';END IF;
+ UPDATE pg_temp.kaname_authority_resource_manifest SET consumed_audit_ids=array_append(consumed_audit_ids,NEW.id);
+ RETURN NULL;
+END $$;
+
+CREATE OR REPLACE FUNCTION kaname.authority_audit_statement_guard_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'audit_outbox' OR TG_WHEN<>'BEFORE' OR TG_LEVEL<>'STATEMENT'
+ OR TG_OP NOT IN ('UPDATE','DELETE','TRUNCATE') THEN
+  RAISE EXCEPTION 'invalid audit statement guard context' USING ERRCODE='42501';END IF;
+ IF kaname._authority_producer_resource_v2() IS NOT NULL THEN
+  RAISE EXCEPTION 'Resource audit is append-only exact program' USING ERRCODE='42501';END IF;
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+DROP FUNCTION kaname._authority_binding_mirror_policy_prepare_v3(jsonb);
+
+DROP FUNCTION kaname.authority_binding_command_audit_v3(jsonb);
+DROP FUNCTION kaname.authority_binding_command_end_v3(jsonb);
+DROP FUNCTION kaname.authority_binding_command_begin_v3(jsonb);
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_policy_changed() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE keys text[]; k text; moved boolean:=false; manifest jsonb; image jsonb; metadata jsonb; resource_keys text[]; resource_roles text[];
+BEGIN
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NOT NULL THEN
+  IF TG_OP='TRUNCATE' THEN RAISE EXCEPTION 'resource truncate denied' USING ERRCODE='42501'; END IF;
+  resource_keys:=ARRAY[]::text[]; resource_roles:=ARRAY[]::text[];
+  IF TG_OP<>'INSERT' THEN
+   FOR image IN SELECT to_jsonb(o) FROM old_policy_rows o LOOP
+    metadata:=kaname._authority_resource_side_v2(manifest,TG_TABLE_NAME,TG_OP,'old',image);
+    resource_keys:=resource_keys||kaname._authority_resource_key_array_v2(metadata->'epoch_write_keys',false);
+    resource_roles:=resource_roles||kaname._authority_resource_key_array_v2(metadata->'deferred_carrier_roles');
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_keys FROM unnest(resource_keys) x;
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_roles FROM unnest(resource_roles) x;
+   END LOOP;
+  END IF;
+  IF TG_OP<>'DELETE' THEN
+   FOR image IN SELECT to_jsonb(n) FROM new_policy_rows n LOOP
+    metadata:=kaname._authority_resource_side_v2(manifest,TG_TABLE_NAME,TG_OP,'new',image);
+    resource_keys:=resource_keys||kaname._authority_resource_key_array_v2(metadata->'epoch_write_keys',false);
+    resource_roles:=resource_roles||kaname._authority_resource_key_array_v2(metadata->'deferred_carrier_roles');
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_keys FROM unnest(resource_keys) x;
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_roles FROM unnest(resource_roles) x;
+   END LOOP;
+  END IF;
+  FOR k IN SELECT DISTINCT x COLLATE "C" FROM unnest(resource_keys) x ORDER BY 1 LOOP
+   IF NOT ((manifest->'epoch_write_keys') ? k) THEN
+    RAISE EXCEPTION 'resource epoch write was not prepared' USING ERRCODE='42501';
+   END IF;
+   PERFORM kaname._authority_resource_preheld_key_v2(1262569296,k,true);
+   -- Ни INSERT, ни повторного FOR UPDATE после final clock.
+   UPDATE kaname.authority_policy_epoch SET revision=revision+1 WHERE key=k;
+   IF NOT FOUND THEN RAISE EXCEPTION 'resource prepared epoch missing' USING ERRCODE='40001'; END IF;
+  END LOOP;
+  FOR k IN SELECT DISTINCT x COLLATE "C" FROM unnest(resource_roles) x ORDER BY 1 LOOP
+   -- Только queued carrier metadata; actual bump сохраняется в deferred flush.
+   PERFORM kaname._authority_resource_preheld_key_v2(1262569296,'carrier_latch:role:'||k,false);
+   PERFORM kaname._authority_resource_preheld_key_v2(1262569296,'carriers:role:'||k,true);
+   INSERT INTO kaname.authority_policy_carrier_pending(transaction_id,backend_pid,role_id)
+   VALUES(pg_current_xact_id(),pg_backend_pid(),k) ON CONFLICT DO NOTHING;
+  END LOOP;
+  RETURN NULL;
+ END IF;
+ -- Для этих таблиц historical policy trigger отсутствовал.
+ IF TG_TABLE_NAME IN ('access_binding_target_members','access_binding_emitted_tuples','resource_registration_pointer','fga_outbox') THEN RETURN NULL; END IF;
+ IF TG_OP='UPDATE' THEN
+  SELECT pg_catalog.array_agg(DISTINCT q.k COLLATE "C" ORDER BY q.k COLLATE "C") INTO keys FROM (
+   SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(o))) k FROM old_policy_rows o
+   UNION SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(n))) FROM new_policy_rows n) q;
+  -- Смена родителя меняет ownership уже известного источника. Это редкая
+  -- неоднозначная структурная мутация, заранее требующая GLOBAL writer.
+  IF TG_TABLE_NAME IN ('projects','roles') THEN
+   SELECT EXISTS(SELECT 1 FROM old_policy_rows o JOIN new_policy_rows n ON to_jsonb(o)->>'id'=to_jsonb(n)->>'id'
+    WHERE (to_jsonb(o)->'account_id',to_jsonb(o)->'project_id',to_jsonb(o)->'is_system') IS DISTINCT FROM
+          (to_jsonb(n)->'account_id',to_jsonb(n)->'project_id',to_jsonb(n)->'is_system')) INTO moved;
+  END IF;
+ ELSIF TG_OP='INSERT' THEN
+  SELECT pg_catalog.array_agg(DISTINCT q.k COLLATE "C" ORDER BY q.k COLLATE "C") INTO keys FROM (SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(n))) k FROM new_policy_rows n) q;
+ ELSIF TG_OP='DELETE' THEN
+  SELECT pg_catalog.array_agg(DISTINCT q.k COLLATE "C" ORDER BY q.k COLLATE "C") INTO keys FROM (SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(o))) k FROM old_policy_rows o) q;
+  IF TG_TABLE_NAME='projects' THEN moved:=true; END IF;
+ ELSE moved:=true;
+ END IF;
+ IF moved OR pg_catalog.cardinality(keys)>4096 THEN keys:=ARRAY['*']; END IF;
+ IF keys IS NULL THEN RETURN NULL; END IF;
+ -- Порядок root -> typed keys совпадает с protect. Root не меняется от
+ -- обычных account/actor writes; его shared locks совместимы друг с другом.
+ IF '*'=ANY(keys) THEN UPDATE kaname.authority_policy_epoch SET revision=revision+1 WHERE key='*';
+ ELSE PERFORM key FROM kaname.authority_policy_epoch WHERE key='*' FOR SHARE; END IF;
+ FOR k IN SELECT DISTINCT x COLLATE "C" FROM pg_catalog.unnest(keys) x WHERE x<>'*' ORDER BY 1 LOOP
+  IF TG_TABLE_NAME IN ('access_bindings','access_binding_subjects') AND k LIKE 'carrier_latch:role:%' THEN
+   -- Binding держит только SHARE latch. Revision не блокируется во время apply.
+   PERFORM key FROM kaname.authority_policy_epoch WHERE key=k FOR SHARE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'carrier latch missing' USING ERRCODE='40001'; END IF;
+   INSERT INTO kaname.authority_policy_carrier_pending(transaction_id,backend_pid,role_id)
+    VALUES(pg_current_xact_id(),pg_backend_pid(),substr(k,length('carrier_latch:role:')+1)) ON CONFLICT DO NOTHING;
+  ELSE
+   INSERT INTO kaname.authority_policy_epoch(key,revision) VALUES(k,1)
+   ON CONFLICT(key) DO UPDATE SET revision=kaname.authority_policy_epoch.revision+1;
+  END IF;
+ END LOOP;
+ -- Epoch rows никогда не удаляются вместе с источником: delete/recreate
+ -- сохраняет монотонное поколение, а переустановка миграции меняет generation.
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname._authority_resource_effect_applied_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb; old_image jsonb; new_image jsonb; matched jsonb;
+ ordinal integer;
+BEGIN
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN RETURN NULL; END IF;
+ IF TG_WHEN<>'AFTER' OR TG_LEVEL<>'ROW' OR TG_OP NOT IN ('INSERT','UPDATE','DELETE') THEN
+  RAISE EXCEPTION 'resource applied-effect trigger context invalid' USING ERRCODE='42501';
+ END IF;
+ IF TG_OP<>'INSERT' THEN old_image:=to_jsonb(OLD); END IF;
+ IF TG_OP<>'DELETE' THEN new_image:=to_jsonb(NEW); END IF;
+ matched:=kaname._authority_resource_write_v2(manifest,TG_TABLE_NAME,TG_OP,old_image,new_image);
+ IF jsonb_typeof(matched->'required') IS DISTINCT FROM 'boolean' THEN
+  RAISE EXCEPTION 'resource effect obligation is missing' USING ERRCODE='42501';
+ END IF;
+ IF matched->>'required'='false' THEN
+  -- Разрешение BEFORE на попытку INSERT не разрешает persisted INSERT:
+  -- ожидаемый ON CONFLICT/DO NOTHING должен остаться без AFTER ROW эффекта.
+  RAISE EXCEPTION 'resource attempted-only image persisted' USING ERRCODE='42501';
+ END IF;
+ IF TG_TABLE_NAME='fga_outbox' AND TG_OP='INSERT' THEN
+  -- BEFORE guard уже одноразово выбрал разрешение без surrogate id. Из
+  -- одинаковых разрешений учитывается лишь действительно потреблённое.
+  SELECT e.ordinality::integer INTO ordinal
+   FROM pg_temp.kaname_authority_resource_manifest r
+   CROSS JOIN LATERAL jsonb_array_elements(r.writes) WITH ORDINALITY e(value,ordinality)
+   WHERE e.value=matched AND e.ordinality::integer=ANY(r.consumed_outbox_writes)
+    AND NOT e.ordinality::integer=ANY(r.consumed_required_writes)
+   ORDER BY e.ordinality LIMIT 1;
+ ELSE
+  -- Повтор одного exact mandatory эффекта имеет отдельный ordinal.
+  -- Удалять multiplicity нельзя: DELETE/recreate/DELETE обязан завершить
+  -- оба удаления, а третий лишний actual эффект должен быть отвергнут.
+  SELECT e.ordinality::integer INTO ordinal
+   FROM pg_temp.kaname_authority_resource_manifest r
+   CROSS JOIN LATERAL jsonb_array_elements(r.writes) WITH ORDINALITY e(value,ordinality)
+   WHERE e.value=matched AND NOT e.ordinality::integer=ANY(r.consumed_required_writes)
+   ORDER BY e.ordinality LIMIT 1;
+ END IF;
+ IF ordinal IS NULL THEN RAISE EXCEPTION 'resource applied effect was not prepared' USING ERRCODE='42501'; END IF;
+ PERFORM kaname._authority_resource_consume_required_v2(ordinal);
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+
+
+DROP TRIGGER binding_epoch_insert ON kaname.resource_registration_scope;
+DROP TRIGGER binding_epoch_update ON kaname.resource_registration_scope;
+DROP TRIGGER binding_epoch_delete ON kaname.resource_registration_scope;
+DROP TRIGGER binding_epoch_truncate ON kaname.resource_registration_scope;
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_binding_epoch_changed() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE keys text[]; k text; manifest jsonb; image jsonb; metadata jsonb; resource_keys text[]; resource_roles text[];
+BEGIN
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NOT NULL THEN
+  IF TG_OP='TRUNCATE' THEN RAISE EXCEPTION 'resource truncate denied' USING ERRCODE='42501'; END IF;
+  resource_keys:=ARRAY[]::text[]; resource_roles:=ARRAY[]::text[];
+  IF TG_OP<>'INSERT' THEN
+   FOR image IN SELECT to_jsonb(o) FROM old_epoch_rows o LOOP
+    metadata:=kaname._authority_resource_side_v2(manifest,TG_TABLE_NAME,TG_OP,'old',image);
+    resource_keys:=resource_keys||kaname._authority_resource_key_array_v2(metadata->'binding_epoch_write_scopes',true);
+    resource_roles:=resource_roles||kaname._authority_resource_key_array_v2(metadata->'deferred_carrier_roles');
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_keys FROM unnest(resource_keys) x;
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_roles FROM unnest(resource_roles) x;
+   END LOOP;
+  END IF;
+  IF TG_OP<>'DELETE' THEN
+   FOR image IN SELECT to_jsonb(n) FROM new_epoch_rows n LOOP
+    metadata:=kaname._authority_resource_side_v2(manifest,TG_TABLE_NAME,TG_OP,'new',image);
+    resource_keys:=resource_keys||kaname._authority_resource_key_array_v2(metadata->'binding_epoch_write_scopes',true);
+    resource_roles:=resource_roles||kaname._authority_resource_key_array_v2(metadata->'deferred_carrier_roles');
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_keys FROM unnest(resource_keys) x;
+    SELECT coalesce(array_agg(DISTINCT x),ARRAY[]::text[]) INTO resource_roles FROM unnest(resource_roles) x;
+   END LOOP;
+  END IF;
+  FOR k IN SELECT DISTINCT x COLLATE "C" FROM unnest(resource_keys) x ORDER BY 1 LOOP
+   IF NOT ((manifest->'binding_epoch_write_scopes') ? k) THEN
+    RAISE EXCEPTION 'resource epoch write was not prepared' USING ERRCODE='42501';
+   END IF;
+   PERFORM kaname._authority_resource_preheld_key_v2(1262569297,k,true);
+   -- Ни INSERT, ни повторного FOR UPDATE после final clock.
+   UPDATE kaname.authority_binding_epoch SET revision=revision+1 WHERE scope=k;
+   IF NOT FOUND THEN RAISE EXCEPTION 'resource prepared epoch missing' USING ERRCODE='40001'; END IF;
+  END LOOP;
+  RETURN NULL;
+ END IF;
+ -- Transition tables принадлежат executor этого statement, не search_path.
+ -- По одному bump на distinct OLD+NEW account на statement, не на ledger row.
+ IF TG_OP='UPDATE' THEN
+  SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM (
+   SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(o)) x FROM old_epoch_rows o
+   UNION SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(n)) FROM new_epoch_rows n) s;
+ ELSIF TG_OP='INSERT' THEN
+  SELECT pg_catalog.array_agg(DISTINCT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(n)) ORDER BY kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(n))) INTO keys FROM new_epoch_rows n;
+ ELSIF TG_OP='DELETE' THEN
+  SELECT pg_catalog.array_agg(DISTINCT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(o)) ORDER BY kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(o))) INTO keys FROM old_epoch_rows o;
+ ELSE keys:=ARRAY['']::text[];
+ END IF;
+ IF keys IS NULL THEN RETURN NULL; END IF;
+ -- Глобальная строка shared для account writes: разные accounts не конфликтуют.
+ -- Global source change конфликтует с любым apply snapshot.
+ IF ''=ANY(keys) THEN
+  UPDATE kaname.authority_binding_epoch SET revision=revision+1 WHERE scope='';
+ ELSE
+  PERFORM scope FROM kaname.authority_binding_epoch WHERE scope='' FOR KEY SHARE;
+ END IF;
+ FOREACH k IN ARRAY keys LOOP
+  IF k<>'' THEN INSERT INTO kaname.authority_binding_epoch(scope,revision) VALUES(k,1)
+   ON CONFLICT(scope) DO UPDATE SET revision=kaname.authority_binding_epoch.revision+1; END IF;
+ END LOOP;
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_binding_epoch_lock(p_accounts text[],p_expected jsonb) RETURNS timestamptz
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb; actual jsonb; at_time timestamptz;
+BEGIN
+ IF p_expected IS NULL OR pg_catalog.jsonb_typeof(p_expected)<>'object' THEN RAISE EXCEPTION 'binding epoch snapshot is absent' USING ERRCODE='40001'; END IF;
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL THEN RAISE EXCEPTION 'binding apply requires participant entry' USING ERRCODE='42501'; END IF;
+ IF proof->>'purpose' IS DISTINCT FROM 'participant' THEN RAISE EXCEPTION 'binding apply requires ordinary participant' USING ERRCODE='42501'; END IF;
+ IF p_accounts IS NULL THEN
+  IF proof->>'mode' IS DISTINCT FROM 'global' THEN RAISE EXCEPTION 'binding global epoch requires global entry' USING ERRCODE='42501'; END IF;
+  PERFORM scope FROM kaname.authority_binding_epoch WHERE scope='' FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'binding epochs are uninitialized' USING ERRCODE='40001'; END IF;
+ ELSE
+  IF pg_catalog.cardinality(p_accounts)=0 OR EXISTS(SELECT 1 FROM pg_catalog.unnest(p_accounts) a WHERE a IS NULL OR a='') THEN RAISE EXCEPTION 'invalid binding epoch scope'; END IF;
+  IF proof->>'mode'='accounts' AND NOT (proof->'accounts') @> pg_catalog.to_jsonb(p_accounts) THEN RAISE EXCEPTION 'epoch accounts exceed participant scope' USING ERRCODE='42501'; END IF;
+  PERFORM scope FROM kaname.authority_binding_epoch WHERE scope='' FOR SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'binding epochs are uninitialized' USING ERRCODE='40001'; END IF;
+  PERFORM scope FROM kaname.authority_binding_epoch WHERE scope=ANY(p_accounts) ORDER BY scope FOR SHARE;
+  IF (SELECT count(*) FROM kaname.authority_binding_epoch WHERE scope=ANY(p_accounts))<>(SELECT count(DISTINCT a) FROM pg_catalog.unnest(p_accounts) a) THEN RAISE EXCEPTION 'binding epoch disappeared' USING ERRCODE='40001'; END IF;
+ END IF;
+ actual:=kaname.authority_binding_epoch_read(p_accounts);
+ IF actual IS DISTINCT FROM p_expected THEN RAISE EXCEPTION 'binding stage changed' USING ERRCODE='40001'; END IF;
+ at_time:=pg_catalog.clock_timestamp();
+ UPDATE pg_temp.kaname_authority_attestation SET decision_at=at_time;
+ RETURN at_time;
 END $$;
 -- +goose StatementEnd
 
@@ -8663,6 +12490,23 @@ BEGIN
 END $$;
 -- +goose StatementEnd
 DROP FUNCTION kaname._authority_crud_storage_v3();
+DROP TRIGGER authority_forward_anchor_complete_v4 ON kaname.authority_forward_emit_anchor_v4;
+DROP FUNCTION kaname.authority_native_delete_emit_v4(jsonb[]);
+DROP FUNCTION kaname.authority_native_delete_prepare_v4(jsonb[]);
+DROP FUNCTION kaname.authority_native_delete_stamp_v4(uuid,bigint,jsonb);
+DROP FUNCTION kaname.authority_forward_emit_v4(jsonb[]);
+DROP FUNCTION kaname.authority_forward_prepare_v4(jsonb[]);
+DROP FUNCTION kaname.authority_forward_claim_v4(uuid);
+DROP FUNCTION kaname.authority_forward_finish_v4(uuid);
+DROP FUNCTION kaname._authority_forward_custody_v4();
+DROP FUNCTION kaname._authority_forward_shape_v4();
+DROP FUNCTION kaname._authority_forward_context_v4();
+DROP FUNCTION kaname._authority_forward_program_v4(uuid);
+DROP FUNCTION kaname._authority_forward_row_v4(bigint,jsonb,boolean);
+DROP FUNCTION kaname._authority_forward_complete_v4(uuid);
+DROP FUNCTION kaname._authority_forward_anchor_complete_v4();
+DROP FUNCTION kaname._authority_forward_storage_v4();
+DROP TABLE kaname.authority_forward_emit_anchor_v4;
 DROP FUNCTION kaname.authority_crud_storage_v3();
 DROP FUNCTION kaname.authority_scalar_sequence_finalize_v3();
 DROP FUNCTION kaname.authority_sa_state_preflight_v4(text,boolean,text);
@@ -8705,6 +12549,12 @@ DROP FUNCTION kaname.authority_cluster_admin_preflight_v4(text,text,text);
 DROP FUNCTION kaname.authority_binding_withdrawal_sequence_finalize_v3();
 DROP FUNCTION kaname.authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer);
 DROP FUNCTION kaname._authority_binding_stage_coordinates_v3(jsonb,text[],boolean,oid,integer,integer);
+DROP FUNCTION kaname._authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb);
+DROP FUNCTION kaname._authority_binding_mirror_finalize_v3(text);
+DROP FUNCTION kaname._authority_binding_mirror_prepare_v3(jsonb,integer,integer);
+DROP FUNCTION kaname._authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz);
+DROP FUNCTION kaname._authority_binding_mirror_store_v3();
+DROP FUNCTION kaname._authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb);
 DROP FUNCTION kaname._authority_binding_stage_source_v3(jsonb,oid,integer);
 DROP FUNCTION kaname.authority_binding_stage_sequence_finalize_v3(text);
 DROP FUNCTION kaname.authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer);
@@ -8769,3 +12619,14 @@ DROP FUNCTION kaname._authority_crud_aux_write_v3();
 DROP FUNCTION kaname._authority_crud_aux_capture_v3(jsonb,jsonb,integer,integer);
 DROP FUNCTION kaname._authority_crud_authority_graph_v3(jsonb,jsonb,integer,integer);
 DROP FUNCTION kaname._authority_crud_anchor_capture_v3(jsonb,integer,integer);
+
+DROP FUNCTION kaname._authority_group_add_storage_v3();
+DROP FUNCTION kaname._authority_group_add_complete_v3();
+DROP FUNCTION kaname._authority_group_add_subject_v3(text,text,jsonb);
+DROP FUNCTION kaname.authority_group_add_subject_id_v3();
+DROP FUNCTION kaname.authority_group_add_fold_v3(text,jsonb,timestamptz);
+DROP FUNCTION kaname._authority_group_add_statement_v3(text,text);
+DROP FUNCTION kaname._authority_group_add_row_v3(text,text,jsonb,jsonb);
+DROP FUNCTION kaname.authority_group_add_finalize_v3(jsonb,integer,integer);
+DROP FUNCTION kaname.authority_group_add_prepare_v3(jsonb,integer,integer);
+DROP FUNCTION kaname._authority_group_add_program_v3();

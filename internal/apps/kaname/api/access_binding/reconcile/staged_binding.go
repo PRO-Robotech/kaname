@@ -47,7 +47,36 @@ type BindingCommand struct {
 	Scope   domain.ScopeAnchor
 }
 
+// Lifecycle необязателен для старых stores. Разрешение и cursor живут только у DB owner.
+type BindingCommandLifecycle interface {
+	BeginBindingCommand(context.Context, BindingCommand) (bool, error)
+	EndBindingCommand(context.Context, BindingCommand) error
+}
+
 func (c BindingCommand) Apply(ctx context.Context, s ReconcileStore) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	lifecycle, supported := s.(BindingCommandLifecycle)
+	active := false
+	if supported {
+		var err error
+		active, err = lifecycle.BeginBindingCommand(ctx, c)
+		if err != nil {
+			return err
+		}
+	}
+	if err := c.applyBody(ctx, s); err != nil {
+		return err
+	}
+	// Ошибка/отмена тела оставляет owner command открытой: COMMIT обязан отказать.
+	if active {
+		return lifecycle.EndBindingCommand(ctx, c)
+	}
+	return nil
+}
+
+func (c BindingCommand) applyBody(ctx context.Context, s ReconcileStore) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

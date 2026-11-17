@@ -113,6 +113,7 @@ type services struct {
 	internalIAMHandler *internaliamapp.Handler
 	// Тот же UC регистрации, который уже передан обработчику и модулю.
 	resourceRegistrar *internaliamapp.RegisterResourceUseCase
+	resourceGate      *authzguard.RelationWriteGate
 	// Единственный recorder запроса: новые object engines получают тот же instance.
 	bindingSizeRecorder reconcileapp.SizeRecorder
 
@@ -1103,6 +1104,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		grantDelegationRevoke:        grantDelegationRevoke,
 		internalIAMHandler:           internalIAMHandler,
 		resourceRegistrar:            registerResourceUC,
+		resourceGate:                 regGate,
 		bindingSizeRecorder:          bindingSizeRecorder,
 		internalClusterHandler:       internalClusterHandler,
 		publicClusterHandler:         publicClusterHandler,

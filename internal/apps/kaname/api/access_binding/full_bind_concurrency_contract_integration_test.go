@@ -512,10 +512,23 @@ type fbRaceBindings struct {
 	before, after *fbRaceGate
 }
 
+// Синхронная авторизация — отдельный порт настоящего runner. Передаём её
+// без барьера и без подмены проверки; она больше не вызывает RunBindingDecision.
+func (d *fbRaceBindings) RunBindingAuthorizationDecision(ctx context.Context, actor domain.Subject, b domain.AccessBinding, create, delegated bool, tuples func(domain.AccessBinding, domain.Role) []repoab.RelationTuple, apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
+	ctx, stop := fbRaceContext(ctx, d.life)
+	defer stop()
+	runner, ok := d.BindingDecisionRunner.(kaname.BindingAuthorizationDecisionRunner)
+	if !ok {
+		return fmt.Errorf("actual runner lacks BindingAuthorizationDecisionRunner")
+	}
+	return runner.RunBindingAuthorizationDecision(ctx, actor, b, create, delegated, tuples, apply)
+}
+
 func (d *fbRaceBindings) RunBindingDecision(ctx context.Context, actor domain.Subject, b domain.AccessBinding, create bool, tuples func(domain.AccessBinding, domain.Role) []repoab.RelationTuple, apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
 	ctx, stop := fbRaceContext(ctx, d.life)
 	defer stop()
-	worker := d.calls.Add(1) == 2
+	// Первый вызов этого порта уже принадлежит worker: RPC проверен отдельным портом выше.
+	worker := d.calls.Add(1) == 1
 	if worker {
 		if err := d.before.hold(ctx); err != nil {
 			return err
@@ -1112,6 +1125,7 @@ func (w *fbRaceWorld) operationCount() int {
 }
 
 var _ kaname.BindingDecisionRunner = (*fbRaceBindings)(nil)
+var _ kaname.BindingAuthorizationDecisionRunner = (*fbRaceBindings)(nil)
 var _ kaname.BindingWithdrawalRunner = (*fbRaceWithdrawal)(nil)
 var _ kaname.RoleAuthorityWriterFactory = (*fbRaceFactories)(nil)
 var _ kaname.RoleMutationWriterFactory = (*fbRaceFactories)(nil)

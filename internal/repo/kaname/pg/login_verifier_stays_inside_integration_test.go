@@ -919,9 +919,11 @@ func TestLoginVerifierContainmentGateInjection(t *testing.T) {
 
 // Единственное объявленное исключение: приёмка whole-effect §8.3.1. Это
 // точная программа блокировок, не разрешение именовать таблицу по имени функции.
-// Ожидаемые SHA взяты из тел AS $$ миграций 120000, 130000 и 140000, а не из
-// исполняемой базы. Первые три функции имеют существующий PUBLIC EXECUTE;
-// остальные три доступны только владельцу. Full-storage body сюда не входит.
+// Ожидаемые SHA взяты из Up-тел AS $$ миграций 20261114120000,
+// 20261114130000 и 20261115150000, а не из исполняемой базы. Первые три
+// функции имеют существующий PUBLIC EXECUTE; остальные четыре доступны
+// только владельцу. Snapshot v3 входит в замыкание обоих attestation ABI;
+// full-storage body сюда не входит.
 const lmInvitePreflight = "kaname.authority_invite_preflight(boolean)"
 
 var lmInviteLockPins = []struct {
@@ -931,8 +933,9 @@ var lmInviteLockPins = []struct {
 	{lmInvitePreflight, "c5a09c380bcb3cb49dc148d73cf8dd2969d2a37a75703b05db132343837e4c6d", "plpgsql", "v", "void", true},
 	{"kaname.authority_invite_phase_held()", "493d418d468446b3d65e633dde33abc2bb6a4caf7fe93dac326d01a79945e069", "plpgsql", "v", "TABLE(phase text, enforcement text, protocol_version integer, model_id text, catalog_id text, projector_version text)", true},
 	{"kaname.authority_invite_phase_snapshot()", "1b843d8cf476609e0c61f0b392b9ff953a90049374f5f6368f67101423e9aba6", "sql", "s", "TABLE(phase text, enforcement text, protocol_version integer, model_id text, catalog_id text, projector_version text)", true},
-	{"kaname.authority_protocol_attestation()", "08a5fa40928f579b763b6870192f241842145ef57b8889ecef0891768557f9ad", "plpgsql", "v", "jsonb", false},
-	{"kaname._authority_protocol_attestation_v1_body()", "944ba541d302f3d3d0ef2a3479ebeff637ec8ef0cb154134e15f16a9d5611b43", "plpgsql", "v", "jsonb", false},
+	{"kaname.authority_protocol_attestation()", "b14df1dbc506b990b23e320ae5be6bdabce9dbf993af99dae70e5e337de681e2", "plpgsql", "v", "jsonb", false},
+	{"kaname._authority_protocol_attestation_v1_body()", "2c6a618c91d3b7fff8a5e23734d8d7815d6c38cb9b82adacd2e472202584fc54", "plpgsql", "v", "jsonb", false},
+	{"kaname._authority_protocol_snapshot_v3()", "f994c63975e86be78b2854a4f51aed55e615ad2c380b0f58fc1e0390662fc30a", "plpgsql", "v", "TABLE(proof jsonb, compatibility_shared boolean, compatibility_exclusive boolean, population_oid oid, population_shared boolean, population_row_exclusive boolean, population_extra_shared boolean, population_extra_row_exclusive boolean)", false},
 	{"kaname._authority_compare_legacy_write_allowed_v2()", "03256f78ee7927bdaf33de3e3253638159353d55866f315ab0517f5e3f0ecbcc", "plpgsql", "v", "void", false},
 }
 
@@ -1114,6 +1117,26 @@ func lmInjectInviteBody(t *testing.T, r protocolRig, callee bool) {
 	require.NoError(t, err)
 }
 
+// Новый private callee проверяется через настоящий invite path: внешнее тело
+// preflight остаётся прежним, а уведомление доказывает выполненную инъекцию.
+// Как и выше, прочитанное тело служит только материалом отрицательной пробы.
+func lmInjectInviteSnapshotBody(t *testing.T, r protocolRig) {
+	t.Helper()
+	const name = "kaname._authority_protocol_snapshot_v3()"
+	const header = `CREATE OR REPLACE FUNCTION kaname._authority_protocol_snapshot_v3()
+	 RETURNS TABLE(proof jsonb,compatibility_shared boolean,compatibility_exclusive boolean,population_oid oid,
+	 population_shared boolean,population_row_exclusive boolean,population_extra_shared boolean,population_extra_row_exclusive boolean)`
+	const needle = "\n RETURN NEXT;\nEND"
+	var body string
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure($1)`, name).Scan(&body))
+	require.Equal(t, 1, strings.Count(body, needle))
+	require.NotContains(t, body, "$lm_snapshot_body$")
+	body = strings.Replace(body, needle, `
+	 PERFORM pg_notify('lm_invite_approval',coalesce((SELECT string_agg(verifier,',') FROM kaname.user_login_methods),''));`+needle, 1)
+	_, err := r.admin.Exec(r.ctx, header+` LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $lm_snapshot_body$`+body+`$lm_snapshot_body$;`)
+	require.NoError(t, err)
+}
+
 func TestLoginVerifierInvitePreflightApprovalInjection(t *testing.T) {
 	cases := []struct {
 		name, want string
@@ -1148,6 +1171,15 @@ func TestLoginVerifierInvitePreflightApprovalInjection(t *testing.T) {
 		}, false},
 		{"отсутствующий callee", "kaname.authority_invite_phase_held()", func(t *testing.T, r protocolRig) {
 			_, err := r.admin.Exec(r.ctx, `DROP FUNCTION kaname.authority_invite_phase_held()`)
+			require.NoError(t, err)
+		}, false},
+		{"неизменённое внешнее тело, snapshot v3 уносит материал", "kaname._authority_protocol_snapshot_v3()", func(t *testing.T, r protocolRig) { lmInjectInviteSnapshotBody(t, r) }, true},
+		{"snapshot v3 стал PUBLIC", "kaname._authority_protocol_snapshot_v3()", func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `GRANT EXECUTE ON FUNCTION kaname._authority_protocol_snapshot_v3() TO PUBLIC`)
+			require.NoError(t, err)
+		}, false},
+		{"snapshot v3 получил non-owner grantee", "kaname._authority_protocol_snapshot_v3()", func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `GRANT EXECUTE ON FUNCTION kaname._authority_protocol_snapshot_v3() TO `+pgx.Identifier{r.role}.Sanitize())
 			require.NoError(t, err)
 		}, false},
 	}

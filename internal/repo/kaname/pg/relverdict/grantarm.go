@@ -219,7 +219,10 @@ import (
 // (`resource_parent_edge.object_type`), тогда как `objectTypeExpr` — словарь
 // каталога, которым тип записан в цели. Двух словарей в одном сравнении нет:
 // каждое выражение сравнивается со своим.
-func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labelsExpr string, nesting bool) string {
+// necessaryOnly используется только предварительным фильтром List: true даёт
+// общую ветвь объекта с глаголом правила, без права разрешать доступ. Обычные
+// вызовы без этого аргумента получают прежний полный предикат.
+func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labelsExpr string, nesting bool, necessaryOnly ...bool) string {
 	// Глагол вопроса входит в глаголы ЭТОГО правила на типе объекта
 	// (`rs.verbs_by_type`, kaname#878).
 	//
@@ -275,13 +278,21 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
                 AND csa.id = ` + objectIDExpr + `
                 AND csa.created_by_type = 'service_account'
                 AND csa.created_by_id = bs.subject_id)), false) IS NOT NULL`
-	arm := verb + `
+	selector := `
      AND (
              rs.arm = 'anchor'
           OR (rs.arm = 'names'  AND ` + objectIDExpr + ` = ANY (rs.resource_names))
           OR (rs.arm = 'labels' AND ` + labelsExpr + ` IS NOT NULL
                                 AND ` + labelsExpr + ` @> rs.match_labels)
-         )` + creator
+         )`
+	// List сначала проверяет только необходимую собственную ветвь объекта.
+	// Текст остаётся в единственном доме: scope/target/creator и окончательный
+	// вердикт этой формой не заменяются. Вложенные строки List пропускает к
+	// полному суду независимо от результата этого предварительного условия.
+	if len(necessaryOnly) == 1 && necessaryOnly[0] {
+		return verb + selector
+	}
+	arm := verb + selector + creator
 	// Без признака вложенности — вид ствола: только строка верхнего уровня, ось
 	// цели — на привязке. Вложенная строка не пускается вовсе (сторона отказа).
 	if !nesting {

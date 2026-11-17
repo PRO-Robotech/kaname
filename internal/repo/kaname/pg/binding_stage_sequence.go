@@ -37,7 +37,7 @@ func (s *bindingSequenceCapture) captureCarrier(ctx context.Context) error {
 	out := &resourceOutputCapture{bindings: map[string]domain.AccessBinding{}, roles: map[string]domain.Role{}}
 	return out.captureBindings(ctx, s.parents, map[string]bool{string(s.binding): true})
 }
-func (s *bindingSequenceCapture) captureCoordinate(ctx context.Context, typ, id string, input reconcile.CapturedObjectDiff, commands []reconcile.BindingCommand) error {
+func (s *bindingSequenceCapture) captureCoordinate(ctx context.Context, typ, id string, input reconcile.CapturedObjectDiff, commands []reconcile.BindingCommand, group *bindingCapturedGroupStore) error {
 	object, present, err := s.parents.captureObjectProjection(ctx, typ, id)
 	if err != nil {
 		return err
@@ -51,7 +51,19 @@ func (s *bindingSequenceCapture) captureCoordinate(ctx context.Context, typ, id 
 			return err
 		}
 	}
-	if err = s.parents.source.budget.Charge(len(input.Current)+len(input.Ledger)+len(input.Desired)+len(commands)+1, 4); err != nil {
+	// Only the closed same-stage adapter can account for the three SELECTs
+	// it actually replaced. The independent SQL verifier still rereads all sources.
+	reads := 4
+	if group != nil {
+		if err = group.check(ctx, s, typ, id); err != nil {
+			return err
+		}
+		if !group.membersRead || !group.ledgerRead {
+			return kaname.ErrSourceUnconfirmed
+		}
+		reads = 1 // The unchanged AncestorObjects SELECT still ran.
+	}
+	if err = s.parents.source.budget.Charge(len(input.Current)+len(input.Ledger)+len(input.Desired)+len(commands)+1, reads); err != nil {
 		return err
 	}
 	desired := slices.Clone(input.Desired)

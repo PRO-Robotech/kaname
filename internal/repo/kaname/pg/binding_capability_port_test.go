@@ -15,6 +15,7 @@ import (
 	ab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const capabilityPortUpdateSQL = "UPDATE kaname.access_bindings SET grant_capability_version=1 WHERE id=$1 AND grant_capability_version=0"
@@ -37,11 +38,47 @@ func (s *capabilityPortBindingStub) InsertEmittedTuples(ctx context.Context, id 
 
 type capabilityPortTxStub struct {
 	pgx.Tx
-	exec func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	exec     func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	queryRow func(context.Context, string, ...any) pgx.Row
 }
 
 func (s *capabilityPortTxStub) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	return s.exec(ctx, sql, args...)
+}
+
+func (s *capabilityPortTxStub) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return s.queryRow(ctx, sql, args...)
+}
+
+type capabilityPortRowStub func(...any) error
+
+func (s capabilityPortRowStub) Scan(dest ...any) error { return s(dest...) }
+
+// Nullable stamp — штатный ответ SQL без выбранной binding create sequence.
+// Проба проверяет новый preflight до DML, не подменяя его общим успешным mock.
+func capabilityPortStampQuery(t *testing.T, ctx context.Context, proposedID string, events *[]string, scanErr error) func(context.Context, string, ...any) pgx.Row {
+	t.Helper()
+	return func(gotCtx context.Context, sql string, args ...any) pgx.Row {
+		*events = append(*events, "stamp_query")
+		if gotCtx != ctx || sql != `SELECT kaname.authority_binding_insert_stamp_v3($1)` || !reflect.DeepEqual(args, []any{proposedID}) {
+			t.Fatalf("stamp preflight изменил SQL/proposed ID/context: sql=%q args=%v", sql, args)
+		}
+		return capabilityPortRowStub(func(dest ...any) error {
+			*events = append(*events, "stamp_scan")
+			if len(dest) != 1 {
+				t.Fatalf("stamp Scan получил %d аргументов вместо одного", len(dest))
+			}
+			stamp, ok := dest[0].(*pgtype.Timestamptz)
+			if !ok || stamp == nil {
+				t.Fatalf("stamp Scan требует *pgtype.Timestamptz, получен %T", dest[0])
+			}
+			if scanErr != nil {
+				return scanErr
+			}
+			*stamp = pgtype.Timestamptz{}
+			return nil
+		})
+	}
 }
 
 func capabilityPortTestBinding(id domain.AccessBindingID) domain.AccessBinding {
@@ -61,19 +98,21 @@ func capabilityPortTestBinding(id domain.AccessBindingID) domain.AccessBinding {
 }
 
 func TestBindingCapabilityPortInsertSequenceAndErrors(t *testing.T) {
+	stampErr := errors.New("stamp query failure")
 	insertErr := errors.New("base Insert failure")
 	execErr := errors.New("version UPDATE failure")
 	for _, tc := range []struct {
-		name               string
-		insertErr, execErr error
-		tag                string
-		wantErr            error
+		name                         string
+		stampErr, insertErr, execErr error
+		tag                          string
+		wantErr                      error
 	}{
-		{"insert_error", insertErr, nil, "UPDATE 1", insertErr},
-		{"exec_error", nil, execErr, "UPDATE 1", execErr},
-		{"affected_zero", nil, nil, "UPDATE 0", kaname.ErrAuthorityClassificationChanged},
-		{"affected_two", nil, nil, "UPDATE 2", kaname.ErrAuthorityClassificationChanged},
-		{"affected_one", nil, nil, "UPDATE 1", nil},
+		{"stamp_error", stampErr, nil, nil, "UPDATE 1", stampErr},
+		{"insert_error", nil, insertErr, nil, "UPDATE 1", insertErr},
+		{"exec_error", nil, nil, execErr, "UPDATE 1", execErr},
+		{"affected_zero", nil, nil, nil, "UPDATE 0", kaname.ErrAuthorityClassificationChanged},
+		{"affected_two", nil, nil, nil, "UPDATE 2", kaname.ErrAuthorityClassificationChanged},
+		{"affected_one", nil, nil, nil, "UPDATE 1", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -98,6 +137,7 @@ func TestBindingCapabilityPortInsertSequenceAndErrors(t *testing.T) {
 				}
 				return pgconn.NewCommandTag(tc.tag), tc.execErr
 			}}
+			tx.queryRow = capabilityPortStampQuery(t, ctx, string(proposed.ID), &events, tc.stampErr)
 			port := &capabilityBindingWriter{WriterIface: base, tx: tx}
 			if port.BindingCapabilityVersion() != 1 || len(events) != 0 {
 				t.Fatal("marker должен быть 1 без DML")
@@ -106,9 +146,12 @@ func TestBindingCapabilityPortInsertSequenceAndErrors(t *testing.T) {
 			if err != tc.wantErr {
 				t.Fatalf("ошибка изменена: got=%v want=%v", err, tc.wantErr)
 			}
-			wantEvents := []string{"insert", "update"}
-			if tc.insertErr != nil {
-				wantEvents = []string{"insert"}
+			wantEvents := []string{"stamp_query", "stamp_scan"}
+			if tc.stampErr == nil {
+				wantEvents = append(wantEvents, "insert")
+				if tc.insertErr == nil {
+					wantEvents = append(wantEvents, "update")
+				}
 			}
 			if !reflect.DeepEqual(events, wantEvents) {
 				t.Fatalf("порядок/число операций: got=%v want=%v", events, wantEvents)
@@ -221,6 +264,7 @@ func TestInviteBindingCapabilityPortPreparedDelegation(t *testing.T) {
 						}
 						return pgconn.NewCommandTag("UPDATE 1"), nil
 					}}
+					tx.queryRow = capabilityPortStampQuery(t, ctx, "ab_prepared", &events, nil)
 					var delegate ab.WriterIface = base
 					if mode == "semantic" {
 						delegate = &capabilityBindingWriter{WriterIface: base, tx: tx}
@@ -232,7 +276,10 @@ func TestInviteBindingCapabilityPortPreparedDelegation(t *testing.T) {
 					}
 					var wantEvents []string
 					if wantErr != kaname.ErrInvalidAuthorityFencePlan {
-						wantEvents = []string{"insert"}
+						if mode == "semantic" {
+							wantEvents = []string{"stamp_query", "stamp_scan"}
+						}
+						wantEvents = append(wantEvents, "insert")
 						if mode == "semantic" && wantErr == nil {
 							wantEvents = append(wantEvents, "update")
 						}

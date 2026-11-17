@@ -5,7 +5,6 @@ package pg_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +15,7 @@ import (
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 	"github.com/PRO-Robotech/kaname/internal/grantcoverage"

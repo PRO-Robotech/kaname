@@ -1109,6 +1109,8 @@ END $$;
 CREATE FUNCTION kaname._authority_resource_capture_index_v2(p_sources jsonb,p_limit integer) RETURNS jsonb
 LANGUAGE plpgsql IMMUTABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE result jsonb:='{}'::jsonb; source jsonb; state_text jsonb; state jsonb;
+ seen_keys jsonb:='{}'::jsonb; decoded_values jsonb[];
+ entry_keys text[]:=ARRAY[]::text[]; entry_values jsonb[]:=ARRAY[]::jsonb[];
  item_key text; kind integer; expected_width integer; n integer; offset_value integer;
  total integer:=0; decoded jsonb; null_project boolean;
 BEGIN
@@ -1146,14 +1148,14 @@ BEGIN
    END;
   END IF;
   item_key:=jsonb_build_array(kind,source->>'type',source->>'id',source->>'projection')::text;
-  IF result ? item_key THEN
+  IF seen_keys ? item_key THEN
    RAISE EXCEPTION 'duplicate resource capture predicate' USING ERRCODE='22023';
   END IF;
   total:=total+jsonb_array_length(source->'states');
   IF total>p_limit THEN
    RAISE EXCEPTION 'resource capture inventory row budget exceeded' USING ERRCODE='54000';
   END IF;
-  decoded:='[]'::jsonb;
+  decoded_values:=ARRAY[]::jsonb[];
   FOR state_text IN SELECT value FROM jsonb_array_elements(source->'states') LOOP
    IF jsonb_typeof(state_text) IS DISTINCT FROM 'string' THEN
     RAISE EXCEPTION 'resource state must be encoded witness' USING ERRCODE='22023';
@@ -1185,10 +1187,17 @@ BEGIN
      RAISE EXCEPTION 'resource tuple witness is incomplete' USING ERRCODE='22023';
     END IF;
    END LOOP;
-   decoded:=decoded||jsonb_build_array(state);
+   decoded_values:=array_append(decoded_values,state);
   END LOOP;
-  result:=result||jsonb_build_object(item_key,jsonb_build_object('source',source,'states',decoded));
+  -- Keep validation sequential; materialize each validated array only once.
+  decoded:=to_jsonb(decoded_values);
+  seen_keys:=seen_keys||jsonb_build_object(item_key,true);
+  entry_keys:=array_append(entry_keys,item_key);
+  entry_values:=array_append(entry_values,jsonb_build_object('source',source,'states',decoded));
  END LOOP;
+ -- Duplicate keys were rejected before the row budget and state validation.
+ SELECT coalesce(jsonb_object_agg(entries.item_key,entries.item_value),'{}'::jsonb)
+ INTO result FROM unnest(entry_keys,entry_values) AS entries(item_key,item_value);
  RETURN result;
 END $$;
 
@@ -3525,7 +3534,7 @@ DECLARE captured jsonb;binding jsonb;role_row jsonb;layout jsonb;rule jsonb;chil
  stored_fps jsonb:='[]'::jsonb;obligations jsonb:='{}'::jsonb;seen jsonb:='{}'::jsonb;
  verified jsonb:='[]'::jsonb;active_base jsonb:='[]'::jsonb;public_member jsonb;desired jsonb;negative jsonb;
  role_id text;dotted text;identifier text;fp text;child_fp text;key text;derivation text;entry record;branch text;
- count_value integer;work integer:=0;special_empty boolean:=false;
+ count_value integer;work integer:=0;special_empty boolean:=false;special_input_checked boolean:=false;
 BEGIN
  IF jsonb_typeof(p_graph) IS DISTINCT FROM 'object' OR jsonb_typeof(p_graph->'present') IS DISTINCT FROM 'boolean'
  OR jsonb_typeof(p_desired) IS DISTINCT FROM 'array' OR coalesce(p_binding_id,'')=''
@@ -3608,7 +3617,18 @@ BEGIN
   IF derivation='ordinary' THEN
    PERFORM kaname._authority_resource_ordinary_member_v2(p_index,p_catalog,p_binding_id,desired,p_graph);
   ELSE
-   PERFORM kaname._authority_resource_special_member_v2(p_index,p_catalog,p_binding_id,desired,p_graph,'[]');
+   IF NOT special_input_checked THEN
+    IF p_index IS NULL OR p_catalog IS NULL OR p_binding_id IS NULL OR desired IS NULL
+    OR p_graph IS NULL OR ('[]') IS NULL THEN
+     RAISE EXCEPTION 'special member input missing' USING ERRCODE='42501';
+    END IF;
+    IF octet_length(p_index::text)>67108864 OR octet_length(p_catalog::text)>8388608
+    OR octet_length(p_graph::text)>1048576 THEN
+     RAISE EXCEPTION 'special member input byte budget exceeded' USING ERRCODE='54000';
+    END IF;
+    special_input_checked:=true;
+   END IF;
+   PERFORM kaname._authority_resource_special_member_core_v2(p_index,p_catalog,p_binding_id,desired,p_graph,'[]');
   END IF;
   verified:=verified||jsonb_build_array(desired);
   IF desired->>'Status'='ACTIVE' THEN active_base:=active_base||jsonb_build_array(desired);END IF;
@@ -3625,12 +3645,35 @@ BEGIN
   IF derivation='ordinary' THEN
    PERFORM kaname._authority_resource_ordinary_member_v2(p_index,p_catalog,p_binding_id,negative,p_graph);
   ELSE
-   PERFORM kaname._authority_resource_special_member_v2(p_index,p_catalog,p_binding_id,negative,p_graph,
+   IF NOT special_input_checked THEN
+    IF p_index IS NULL OR p_catalog IS NULL OR p_binding_id IS NULL OR negative IS NULL
+    OR p_graph IS NULL OR (
+    CASE WHEN derivation='public_reader' THEN active_base ELSE '[]'::jsonb END) IS NULL THEN
+     RAISE EXCEPTION 'special member input missing' USING ERRCODE='42501';
+    END IF;
+    IF octet_length(p_index::text)>67108864 OR octet_length(p_catalog::text)>8388608
+    OR octet_length(p_graph::text)>1048576 THEN
+     RAISE EXCEPTION 'special member input byte budget exceeded' USING ERRCODE='54000';
+    END IF;
+    special_input_checked:=true;
+   END IF;
+   PERFORM kaname._authority_resource_special_member_core_v2(p_index,p_catalog,p_binding_id,negative,p_graph,
     CASE WHEN derivation='public_reader' THEN active_base ELSE '[]'::jsonb END);
   END IF;
  END LOOP;
  IF public_member IS NOT NULL THEN
-  PERFORM kaname._authority_resource_special_member_v2(p_index,p_catalog,p_binding_id,public_member,p_graph,active_base);
+  IF NOT special_input_checked THEN
+   IF p_index IS NULL OR p_catalog IS NULL OR p_binding_id IS NULL OR public_member IS NULL
+   OR p_graph IS NULL OR (active_base) IS NULL THEN
+    RAISE EXCEPTION 'special member input missing' USING ERRCODE='42501';
+   END IF;
+   IF octet_length(p_index::text)>67108864 OR octet_length(p_catalog::text)>8388608
+   OR octet_length(p_graph::text)>1048576 THEN
+    RAISE EXCEPTION 'special member input byte budget exceeded' USING ERRCODE='54000';
+   END IF;
+   special_input_checked:=true;
+  END IF;
+  PERFORM kaname._authority_resource_special_member_core_v2(p_index,p_catalog,p_binding_id,public_member,p_graph,active_base);
   verified:=verified||jsonb_build_array(public_member);
  END IF;
  IF work>8192 THEN RAISE EXCEPTION 'coordinate proof work exceeded' USING ERRCODE='54000';END IF;
@@ -9368,7 +9411,7 @@ END $$;
 -- Один специальный вклад члена. Источники, полнота graph/candidate census и
 -- объединение ordinary/container вкладов одной координаты принадлежат C.
 -- ABSENT — только внутренний отрицательный сертификат, не статус записи БД.
-CREATE FUNCTION kaname._authority_resource_special_member_v2(
+CREATE FUNCTION kaname._authority_resource_special_member_core_v2(
  p_index jsonb,p_catalog jsonb,p_binding_id text,p_desired jsonb,p_graph jsonb,p_verified_members jsonb
 ) RETURNS boolean LANGUAGE plpgsql IMMUTABLE SECURITY DEFINER
 SET search_path=pg_catalog,pg_temp AS $$
@@ -9394,9 +9437,7 @@ BEGIN
  OR p_graph IS NULL OR p_verified_members IS NULL THEN
   RAISE EXCEPTION 'special member input missing' USING ERRCODE='42501';
  END IF;
- IF octet_length(p_index::text)>67108864 OR octet_length(p_catalog::text)>8388608
- OR octet_length(p_graph::text)>1048576 OR octet_length(p_desired::text)>8388608
- OR octet_length(p_verified_members::text)>8388608 THEN
+ IF octet_length(p_desired::text)>8388608 OR octet_length(p_verified_members::text)>8388608 THEN
   RAISE EXCEPTION 'special member input byte budget exceeded' USING ERRCODE='54000';
  END IF;
  IF jsonb_typeof(p_index) IS DISTINCT FROM 'object' OR jsonb_typeof(p_desired) IS DISTINCT FROM 'object'
@@ -9725,6 +9766,32 @@ BEGIN
 EXCEPTION WHEN invalid_parameter_value THEN
  -- Ошибка формы в общем predicate остаётся ошибкой, никогда не ABSENT.
  RAISE EXCEPTION 'invalid special member canonical source shape' USING ERRCODE='42501';
+END $$;
+
+REVOKE ALL ON FUNCTION kaname._authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb) FROM PUBLIC;
+DO $$ DECLARE r record;BEGIN
+ FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc p
+ CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee
+ WHERE p.oid='kaname._authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)'::regprocedure AND a.grantee<>p.proowner LOOP
+  EXECUTE format('REVOKE ALL ON FUNCTION kaname._authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb) FROM %I',r.rolname);
+ END LOOP;
+END $$;
+
+CREATE FUNCTION kaname._authority_resource_special_member_v2(
+ p_index jsonb,p_catalog jsonb,p_binding_id text,p_desired jsonb,p_graph jsonb,p_verified_members jsonb
+) RETURNS boolean LANGUAGE plpgsql IMMUTABLE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+ IF p_index IS NULL OR p_catalog IS NULL OR p_binding_id IS NULL OR p_desired IS NULL
+ OR p_graph IS NULL OR p_verified_members IS NULL THEN
+  RAISE EXCEPTION 'special member input missing' USING ERRCODE='42501';
+ END IF;
+ IF octet_length(p_index::text)>67108864 OR octet_length(p_catalog::text)>8388608
+ OR octet_length(p_graph::text)>1048576 OR octet_length(p_desired::text)>8388608
+ OR octet_length(p_verified_members::text)>8388608 THEN
+  RAISE EXCEPTION 'special member input byte budget exceeded' USING ERRCODE='54000';
+ END IF;
+ RETURN kaname._authority_resource_special_member_core_v2(p_index,p_catalog,p_binding_id,p_desired,p_graph,p_verified_members);
 END $$;
 
 REVOKE ALL ON FUNCTION kaname._authority_resource_special_member_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb) FROM PUBLIC;
@@ -16472,6 +16539,7 @@ DROP FUNCTION IF EXISTS kaname._authority_resource_row_image_v2(text,jsonb);
 DROP FUNCTION IF EXISTS kaname._authority_producer_resource_v2();
 DROP FUNCTION IF EXISTS kaname.authority_resource_registration_command_values_v2(jsonb);
 DROP FUNCTION IF EXISTS kaname._authority_resource_special_member_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb);
+DROP FUNCTION IF EXISTS kaname._authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb);
 DROP FUNCTION IF EXISTS kaname._authority_resource_source_wait_v2(jsonb,boolean,integer,integer);
 DROP FUNCTION IF EXISTS kaname._authority_resource_selector_rows_v2(jsonb,integer,integer);
 DROP FUNCTION IF EXISTS kaname._authority_resource_selector_shape_v2(jsonb,integer,integer);

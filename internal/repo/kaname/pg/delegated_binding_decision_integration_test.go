@@ -191,7 +191,9 @@ type delegatedDecisionWorkerBarrier struct {
 }
 
 func (b *delegatedDecisionWorkerBarrier) RunDelegatedBindingDecision(ctx context.Context, a domain.Subject, in domain.AccessBinding, tuples func(domain.AccessBinding, domain.Role) []ab.RelationTuple, apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
-	if b.calls.Add(1) == 2 {
+	// Предварительная проверка идёт через отдельный RunBindingAuthorizationDecision.
+	// Первый вызов этого метода уже принадлежит worker и ещё не открыл writer TX.
+	if b.calls.Add(1) == 1 {
 		close(b.arrived)
 		select {
 		case <-b.release:

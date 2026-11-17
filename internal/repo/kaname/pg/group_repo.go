@@ -481,7 +481,11 @@ func (w *groupWriter) RequireMemberOfGroupAccount(ctx context.Context, m domain.
 // users/service_accounts (23503 → FailedPrecondition). Принадлежность участника
 // аккаунту группы — RequireMemberOfGroupAccount, той же транзакцией до вставки.
 func (w *groupWriter) AddMember(ctx context.Context, m domain.GroupMember) error {
-	now := time.Now().UTC()
+	return w.addMemberAt(ctx, m, time.Now().UTC())
+}
+
+// Подготовленный путь передаёт окончательное время решения, обычный сохраняет прежние часы.
+func (w *groupWriter) addMemberAt(ctx context.Context, m domain.GroupMember, now time.Time) error {
 	_, err := w.tx.Exec(ctx, `
 		INSERT INTO group_members (group_id, member_type, member_id, added_at)
 		VALUES ($1, $2, $3, $4)

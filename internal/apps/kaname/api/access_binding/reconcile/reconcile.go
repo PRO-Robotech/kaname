@@ -654,6 +654,12 @@ func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.
 	return fresh
 }
 
+// nativeTupleDeleter доступен только unsigned compatibility store. Signed и
+// staged хранилища сохраняют свой emitter и окончательную метку.
+type nativeTupleDeleter interface {
+	EmitNativeTupleDelete(context.Context, []domain.MembershipTuple) error
+}
+
 // flushDeletes кладёт ОТЛОЖЕННЫЕ строки снятия прохода в его пишущую транзакцию —
 // ПОСЛЕ сверки всех выдач прохода, когда записанное им известно целиком. Из каждого
 // набора вычитаются кортежи, ЗАПИСАННЫЕ любым членом этого же прохода (соседняя
@@ -672,6 +678,10 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 	if c == nil || len(c.pendingDeletes) == 0 {
 		return nil
 	}
+	emit := s.EmitTupleDelete
+	if native, ok := s.(nativeTupleDeleter); ok {
+		emit = native.EmitNativeTupleDelete
+	}
 	for _, pd := range c.pendingDeletes {
 		// Кандидаты, не записанные этим проходом заново.
 		var revoke []domain.MembershipTuple
@@ -684,7 +694,7 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 		if len(revoke) == 0 {
 			continue
 		}
-		if err := s.EmitTupleDelete(ctx, revoke); err != nil {
+		if err := emit(ctx, revoke); err != nil {
 			return fmt.Errorf("flush deletes: emit tuple delete for %s: %w", pd.binding, err)
 		}
 	}
@@ -1328,7 +1338,18 @@ func filterMatchedToTarget(matched []domain.MirrorObject, target domain.AccessTa
 // ярус — те же доменные функции, что у прежнего пути выпуска). Совпавший чужой
 // объект получает REJECTED (без кортежа + аудит, защита границ области). ОДИН объект
 // под двумя правилами даёт двух желаемых членов с разными rule_fp.
+// readOnlyRuleMemberStore создаёт отдельный view на один расчёт. Labels из него
+// только читаются внутри обычного matchSelectorObjects и не выходят в DesiredMember.
+// Creator/nested пути сохраняют исходный store и его дополнительные возможности.
+type readOnlyRuleMemberStore interface {
+	ReadOnlyRuleMemberStore() ReconcileStore
+}
+
 func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, bs BindingScope) ([]DesiredMember, error) {
+	var selectorStore ReconcileStore = s
+	if provider, ok := s.(readOnlyRuleMemberStore); ok {
+		selectorStore = provider.ReadOnlyRuleMemberStore()
+	}
 	var out []DesiredMember
 	// Каталожный факт берётся ОДИН раз на проход: обновление снимка подменяет
 	// указатель, и три чтения могли бы увидеть два разных каталога — член
@@ -1402,7 +1423,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// по цели (по id для пообъектной; иначе O(scope) с проталкиванием фильтра), а совпадения
 			// каждой ветви пересекаются с целью. IsContainedIn ниже остаётся
 			// окончательной повторной проверкой включения.
-			matched, err = r.matchSelectorObjects(ctx, s, sel, bs.Scope, bs.Target)
+			matched, err = r.matchSelectorObjects(ctx, selectorStore, sel, bs.Scope, bs.Target)
 		}
 		if err != nil {
 			return nil, err

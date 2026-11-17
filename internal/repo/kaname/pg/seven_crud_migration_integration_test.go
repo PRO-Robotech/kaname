@@ -194,7 +194,13 @@ func TestSevenCRUDReadinessRejectsEveryRemovedTriggerAndPrivateGrant(t *testing.
 	}
 	require.NoError(t, rows.Err())
 	rows.Close()
-	require.Len(t, pairs, 145, "53 новых attachment и 92 существующих epoch edges")
+	// Canonical epoch graph: 22 исходные таблицы × 4 события, затем
+	// grant_delegations и resource_registration_scope × 4 = 96 edges.
+	// Retained scope обязан инвалидировать ROOT при INSERT/UPDATE/DELETE/TRUNCATE.
+	require.Len(t, pairs, 149, "53 новых attachment и 96 обязательных epoch edges (88 исходных + 4 delegation + 4 retained scope)")
+	for _, name := range []string{"binding_epoch_insert", "binding_epoch_update", "binding_epoch_delete", "binding_epoch_truncate"} {
+		require.Contains(t, pairs, [2]string{"resource_registration_scope", name}, "canonical retained-scope contract требует все четыре statement edges")
+	}
 	for _, pair := range pairs {
 		t.Run(pair[0]+"/"+pair[1], func(t *testing.T) {
 			tx, err := r.admin.Begin(r.ctx)
@@ -283,4 +289,90 @@ func TestSevenCRUDReadinessRejectsEveryRemovedTriggerAndPrivateGrant(t *testing.
   OR p.proname LIKE '\_authority\_sequence\_%' ESCAPE '\'
   OR p.proname LIKE '\_authority\_binding\_stage\_%' ESCAPE '\') AND has_function_privilege(current_user,p.oid,'EXECUTE'))`).Scan(&exposed))
 	require.False(t, exposed)
+}
+
+// Составной live FK сохраняет реальную ссылочную целостность и каскад, когда
+// binding принадлежит другой роли; простого FK на role_id после Up уже нет.
+func TestTargetMembersRetainedRoleLiveForeignKeyContract(t *testing.T) {
+	r := writerProtocolRig(t)
+	var simplePresent, retainedValid, columnsNotNull, trueCheck bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT
+ EXISTS(SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid='kaname.access_binding_target_members'::regclass AND conname='access_binding_target_members_role_fk'),
+ EXISTS(SELECT 1 FROM pg_catalog.pg_constraint c WHERE c.conrelid='kaname.access_binding_target_members'::regclass
+  AND c.conname='access_binding_target_members_role_live_fk' AND c.contype='f' AND c.convalidated
+  AND c.confrelid='kaname.roles'::regclass AND c.confdeltype='c'
+  AND ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY k(n,ord) JOIN pg_catalog.pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.n ORDER BY k.ord)=ARRAY['role_id','live']
+  AND ARRAY(SELECT a.attname::text FROM unnest(c.confkey) WITH ORDINALITY k(n,ord) JOIN pg_catalog.pg_attribute a ON a.attrelid=c.confrelid AND a.attnum=k.n ORDER BY k.ord)=ARRAY['id','live']),
+ (SELECT count(*)=2 AND bool_and(attnotnull) FROM pg_catalog.pg_attribute WHERE attrelid='kaname.access_binding_target_members'::regclass AND attname IN ('role_id','live') AND NOT attisdropped),
+ EXISTS(SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid='kaname.access_binding_target_members'::regclass
+  AND conname='access_binding_target_members_live_true' AND contype='c' AND convalidated
+  AND regexp_replace(pg_catalog.pg_get_expr(conbin,conrelid),'[()[:space:]]','','g')='live')`).Scan(&simplePresent, &retainedValid, &columnsNotNull, &trueCheck))
+	require.False(t, simplePresent)
+	require.True(t, retainedValid)
+	require.True(t, columnsNotNull)
+	require.True(t, trueCheck)
+
+	// Обычная compatibility fixture: ни один trigger или protocol guard не выключается.
+	fx := setupGamma(t, r.ctx, r.admin, "retainedfk")
+	roleA := seedCustomRole(t, r.ctx, fx.repo, fx.accID, "retained_fk_binding_role")
+	roleB := seedCustomRole(t, r.ctx, fx.repo, fx.accID, "retained_fk_member_role")
+	retired := seedCustomRole(t, r.ctx, fx.repo, fx.accID, "retained_fk_retired_role")
+	require.NotEqual(t, roleA.ID, roleB.ID)
+	require.Equal(t, roleA.AccountID, roleB.AccountID)
+	bid := insertThinBinding(t, r.ctx, fx.repo, fx.member, roleA.ID, fx.prj)
+	const insertMember = `INSERT INTO kaname.access_binding_target_members(binding_id,role_id,rule_fp,object_type,object_id,verification_status) VALUES($1,$2,$3,'compute.instance',$4,'ACTIVE')`
+	_, err := r.admin.Exec(r.ctx, insertMember, string(bid), string(roleB.ID), "retained-fk-b-fp", "retained-fk-b-object")
+	require.NoError(t, err, "живой roleB допустим при binding roleA")
+	_, err = r.admin.Exec(r.ctx, insertMember, string(bid), string(roleA.ID), "retained-fk-a-fp", "retained-fk-a-object")
+	require.NoError(t, err)
+	countMembers := func(role string) int64 {
+		var n int64
+		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.access_binding_target_members WHERE binding_id=$1 AND role_id=$2`, string(bid), role).Scan(&n))
+		return n
+	}
+	require.EqualValues(t, 1, countMembers(string(roleB.ID)))
+	require.EqualValues(t, 1, countMembers(string(roleA.ID)))
+	assertLiveFK := func(err error) {
+		var pgerr *pgconn.PgError
+		require.ErrorAs(t, err, &pgerr)
+		require.Equal(t, "23503", pgerr.Code)
+		require.Equal(t, "access_binding_target_members_role_live_fk", pgerr.ConstraintName)
+	}
+	missing := string(roleB.ID) + "-missing"
+	_, err = r.admin.Exec(r.ctx, insertMember, string(bid), missing, "retained-fk-missing-fp", "retained-fk-missing-object")
+	assertLiveFK(err)
+	require.Zero(t, countMembers(missing), "отказавшая INSERT не сохраняет строку")
+	// UPDATE той же существующей строки также нельзя перевести на отсутствующую роль.
+	_, err = r.admin.Exec(r.ctx, `UPDATE kaname.access_binding_target_members SET role_id=$2 WHERE binding_id=$1 AND role_id=$3`, string(bid), missing, string(roleB.ID))
+	assertLiveFK(err)
+	require.EqualValues(t, 1, countMembers(string(roleB.ID)))
+	require.Zero(t, countMembers(missing))
+
+	// Снятие повторяет существующую fixture retired-role: сначала убрать live-проекции.
+	for _, table := range []string{"role_verb", "role_rule_ref", "role_rule_selectors"} {
+		_, err = r.admin.Exec(r.ctx, `DELETE FROM kaname.`+table+` WHERE role_id=$1`, string(retired.ID))
+		require.NoError(t, err)
+	}
+	_, err = r.admin.Exec(r.ctx, `UPDATE kaname.roles SET live=false,retired_at=now(),retired_reason='проба',retired_by='проба' WHERE id=$1`, string(retired.ID))
+	require.NoError(t, err)
+	_, err = r.admin.Exec(r.ctx, insertMember, string(bid), string(retired.ID), "retained-fk-retired-fp", "retained-fk-retired-object")
+	assertLiveFK(err)
+	require.Zero(t, countMembers(string(retired.ID)))
+	require.EqualValues(t, 1, countMembers(string(roleB.ID)))
+	require.EqualValues(t, 1, countMembers(string(roleA.ID)))
+
+	// Реальный каскад удаляет непустой member roleB, сохраняя binding и чужой состав roleA.
+	tag, err := r.admin.Exec(r.ctx, `DELETE FROM kaname.roles WHERE id=$1`, string(roleB.ID))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected())
+	require.Zero(t, countMembers(string(roleB.ID)))
+	require.EqualValues(t, 1, countMembers(string(roleA.ID)))
+	var bindingCount, roleACount, roleBCount int64
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT
+ (SELECT count(*) FROM kaname.access_bindings WHERE id=$1 AND role_id=$2),
+ (SELECT count(*) FROM kaname.roles WHERE id=$2),
+ (SELECT count(*) FROM kaname.roles WHERE id=$3)`, string(bid), string(roleA.ID), string(roleB.ID)).Scan(&bindingCount, &roleACount, &roleBCount))
+	require.EqualValues(t, 1, bindingCount)
+	require.EqualValues(t, 1, roleACount)
+	require.Zero(t, roleBCount)
 }

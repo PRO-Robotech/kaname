@@ -91,7 +91,13 @@ roles:
 	plans, err := authzmodel.Shared()
 	require.NoError(t, err)
 	base := &fullBindWorld{atcWorld: a, plans: plans}
-	base.installFullBindParticipants(observe)
+	// В accB выше зарегистрирован только статический boxB для отрицательной
+	// проверки границы аккаунта. После activation регистраций в B нет:
+	// исключение первого переключения не даёт producer или людям новых прав.
+	base.installFullBindParticipantsWithRegistrationExceptions([]domain.DisabledRegistrationModule{{
+		AccountID: string(a.accB), Module: "probemod",
+		Reason: "existing FB05/06/07 foreign-account box is a static anchor fixture with no post-activation registration producer",
+	}}, observe)
 	w := &fbAnchorWorld{fullBindWorld: base, callbacks: callbacks, observerPool: observerPool, ownerB: domain.AccessBindingID(ownerB), projectB: projectB}
 	require.NoError(t, w.rec.ReconcileBinding(w.ctx, w.ownerB))
 	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT id FROM kaname.roles WHERE name=$1 AND account_id IS NULL AND project_id IS NULL`, "probemod.fb_anchor_osetr").Scan(&w.osetr))

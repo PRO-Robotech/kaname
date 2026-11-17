@@ -313,7 +313,7 @@ func TestFullStartupProductionCompositionGrantsOnlyWithSeparateCreate(t *testing
 	// Та же общая background composition, что serve: handles из public factory,
 	// реальный PG binding reconcile и независимый lower-port контроль после него.
 	background := reconcile.New(kanamepg.NewReconcileAdapter(runtime, catalog.Fixed{F: facts}), logger, catalog.Fixed{F: facts})
-	require.NoError(t, wireBackgroundAuthorityParticipants(background, participants.bindings, participants.resources, participants.groups, logger))
+	require.NoError(t, wireBackgroundAuthorityParticipants(background, participants.bindings, participants.objects, participants.groups))
 	require.NoError(t, background.ReconcileBinding(ctx, domain.AccessBindingID(id)))
 	ask(recipientID, relverdict.Allow)
 	// Реальные публичные Update handlers используют те же UC из buildServices.
