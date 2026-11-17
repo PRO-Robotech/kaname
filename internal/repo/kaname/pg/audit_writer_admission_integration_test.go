@@ -360,3 +360,170 @@ func TestAuditOrdinaryFastPathRejectsMissingOrForgedAuthorityWitness(t *testing.
 		}
 	}
 }
+
+// Нельзя сменить signed entry на unsigned после DISCARD TEMP. Даже session
+// unlock сохраняет xact root; отказ entry не оставляет audit effects.
+func TestAuditReconcileEntryCannotReplaceLostSignedWitness(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		r := writerProtocolRig(t)
+		purpose := "transition"
+		if strict {
+			r.strict(t)
+			purpose = "decision"
+		}
+		for _, mode := range []string{"accounts", "global"} {
+			t.Run(purpose+"/"+mode, func(t *testing.T) {
+				conn, err := r.runtime.Acquire(r.ctx)
+				require.NoError(t, err)
+				defer conn.Release()
+				_, err = conn.Exec(r.ctx, `DISCARD TEMP`)
+				require.NoError(t, err)
+				tx, err := conn.Begin(r.ctx)
+				require.NoError(t, err)
+				defer attestationLocksetRollback(tx)
+				intent := r.intent(r.a)
+				if mode == "global" {
+					intent = r.intent()
+					intent.Plan = kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}
+				}
+				r.enter(t, tx, intent, purpose)
+				_, err = tx.Exec(r.ctx, auditAdmissionInsert)
+				require.NoError(t, err, "signed близнец пишет audit до потери witness")
+				_, err = tx.Exec(r.ctx, `DISCARD TEMP; SELECT pg_advisory_unlock_all()`)
+				require.NoError(t, err)
+				require.True(t, auditAdmissionRootHeld(t, r, tx))
+				_, err = tx.Exec(r.ctx, `SELECT kaname.authority_reconcile_enter_v3()`)
+				var denied *pgconn.PgError
+				require.ErrorAs(t, err, &denied)
+				require.Equal(t, "25001", denied.Code)
+				require.Error(t, tx.Commit(r.ctx))
+				var count int
+				require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.audit_outbox WHERE id=$1`, auditAdmissionID).Scan(&count))
+				require.Zero(t, count)
+			})
+		}
+	}
+}
+
+// Даже законный executor не может войти после начала другого writer или
+// подделать root перед entry; owner-квитанция не доступна runtime для записи.
+func TestAuditReconcileEntryRequiresFreshTransaction(t *testing.T) {
+	r := writerProtocolRig(t)
+	for _, fault := range []string{"assigned-xid", "manual-root", "repeated-entry", "discard-entry", "witness-write"} {
+		t.Run(fault, func(t *testing.T) {
+			conn, err := r.runtime.Acquire(r.ctx)
+			require.NoError(t, err)
+			defer conn.Release()
+			_, err = conn.Exec(r.ctx, `DISCARD TEMP`)
+			require.NoError(t, err)
+			tx, err := conn.Begin(r.ctx)
+			require.NoError(t, err)
+			defer attestationLocksetRollback(tx)
+			switch fault {
+			case "assigned-xid":
+				_, err = tx.Exec(r.ctx, `SELECT pg_current_xact_id()`)
+			case "manual-root":
+				_, err = tx.Exec(r.ctx, `SELECT pg_advisory_xact_lock_shared(1262569283,0)`)
+			default:
+				_, err = tx.Exec(r.ctx, `SELECT kaname.authority_reconcile_enter_v3()`)
+			}
+			require.NoError(t, err)
+			if fault == "discard-entry" {
+				_, err = tx.Exec(r.ctx, `DISCARD TEMP; SELECT pg_advisory_unlock_all()`)
+				require.NoError(t, err)
+			}
+			statement := `SELECT kaname.authority_reconcile_enter_v3()`
+			want := "25001"
+			if fault == "witness-write" {
+				statement = `UPDATE pg_temp.kaname_authority_reconcile SET invoker_oid=0`
+				want = "42501"
+			}
+			_, err = tx.Exec(r.ctx, statement)
+			var denied *pgconn.PgError
+			require.ErrorAs(t, err, &denied)
+			require.Equal(t, want, denied.Code)
+			require.Error(t, tx.Commit(r.ctx))
+		})
+	}
+}
+
+// Потерянная, чужая или завершённая reconcile-квитанция не разрешает audit.
+func TestAuditReconcileWitnessCannotBeForgedOrReused(t *testing.T) {
+	r, _ := writerProtocolRigBeforePreparation(t)
+	_, err := r.admin.Exec(r.ctx, auditAdmissionInsert)
+	require.NoError(t, err)
+	for _, fault := range []string{"foreign-table", "foreign-view", "discard", "rollback-entry", "pooled-empty", "manual-locks"} {
+		for _, operation := range []string{"insert", "update", "delete"} {
+			t.Run(fault+"/"+operation, func(t *testing.T) {
+				conn, err := r.runtime.Acquire(r.ctx)
+				require.NoError(t, err)
+				defer conn.Release()
+				_, err = conn.Exec(r.ctx, `DISCARD TEMP`)
+				require.NoError(t, err)
+				if fault == "pooled-empty" {
+					previous, e := conn.Begin(r.ctx)
+					require.NoError(t, e)
+					defer attestationLocksetRollback(previous)
+					_, e = previous.Exec(r.ctx, `SELECT kaname.authority_reconcile_enter_v3()`)
+					require.NoError(t, e)
+					require.NoError(t, previous.Commit(r.ctx))
+					var present bool
+					require.NoError(t, conn.QueryRow(r.ctx, `SELECT to_regclass('pg_temp.kaname_authority_reconcile') IS NOT NULL`).Scan(&present))
+					require.True(t, present, "проверяется сохранённая owner-квитанция после COMMIT")
+				}
+				tx, err := conn.Begin(r.ctx)
+				require.NoError(t, err)
+				defer attestationLocksetRollback(tx)
+				switch fault {
+				case "foreign-table":
+					_, err = tx.Exec(r.ctx, `CREATE TEMP TABLE kaname_authority_reconcile(singleton boolean)`)
+				case "foreign-view":
+					_, err = tx.Exec(r.ctx, `CREATE TEMP VIEW kaname_authority_reconcile AS SELECT true AS singleton WHERE false`)
+				case "discard":
+					_, err = tx.Exec(r.ctx, `SELECT kaname.authority_reconcile_enter_v3()`)
+					require.NoError(t, err)
+					_, err = tx.Exec(r.ctx, `DISCARD TEMP; SELECT pg_advisory_unlock_all()`)
+					require.NoError(t, err)
+					require.True(t, auditAdmissionRootHeld(t, r, tx))
+				case "rollback-entry":
+					_, err = tx.Exec(r.ctx, `SAVEPOINT before_entry`)
+					require.NoError(t, err)
+					_, err = tx.Exec(r.ctx, `SELECT kaname.authority_reconcile_enter_v3()`)
+					require.NoError(t, err)
+					_, err = tx.Exec(r.ctx, `ROLLBACK TO SAVEPOINT before_entry`)
+					require.NoError(t, err)
+					require.False(t, auditAdmissionRootHeld(t, r, tx), "откат отменил admission")
+					// Законный близнец: после полного отката entry обычный audit
+					// разрешён. Только последующая ручная подделка root+D откажет.
+					_, err = tx.Exec(r.ctx, strings.ReplaceAll(auditAdmissionInsert, auditAdmissionID, auditAdmissionProbeID))
+					require.NoError(t, err)
+					_, err = tx.Exec(r.ctx, `DELETE FROM kaname.audit_outbox WHERE id=$1`, auditAdmissionProbeID)
+					require.NoError(t, err)
+				}
+				require.NoError(t, err)
+				_, err = tx.Exec(r.ctx, `SELECT pg_advisory_xact_lock_shared(1262569283,0); SELECT pg_advisory_xact_lock(1262569292,0)`)
+				require.NoError(t, err)
+				statement := strings.ReplaceAll(auditAdmissionInsert, auditAdmissionID, auditAdmissionProbeID)
+				if operation == "update" {
+					statement = `UPDATE kaname.audit_outbox SET attempts=attempts+1 WHERE id='` + auditAdmissionID + `'`
+				} else if operation == "delete" {
+					statement = `DELETE FROM kaname.audit_outbox WHERE id='` + auditAdmissionID + `'`
+				}
+				_, err = tx.Exec(r.ctx, statement)
+				var denied *pgconn.PgError
+				require.ErrorAs(t, err, &denied)
+				require.Equal(t, "42501", denied.Code)
+				require.Error(t, tx.Commit(r.ctx))
+				var count, attempts int
+				queriedID := auditAdmissionID
+				expected := 1
+				if operation == "insert" {
+					queriedID, expected = auditAdmissionProbeID, 0
+				}
+				require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*),coalesce(sum(attempts),0) FROM kaname.audit_outbox WHERE id=$1`, queriedID).Scan(&count, &attempts))
+				require.Equal(t, expected, count)
+				require.Zero(t, attempts)
+			})
+		}
+	}
+}

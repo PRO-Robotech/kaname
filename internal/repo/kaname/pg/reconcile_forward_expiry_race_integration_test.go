@@ -140,7 +140,7 @@ func waitDeactivationOutcome(t *testing.T, ctx context.Context, pool *pgxpool.Po
 				 WHERE a.datname = current_database() AND a.wait_event_type = 'Lock'
 				 AND $1::integer=ANY(pg_catalog.pg_blocking_pids(a.pid))
 				 AND (a.query ILIKE '%access_bindings%' OR
-				  (a.query='SELECT kaname.authority_parent_prelock_admit_v3()'
+				  (a.query IN ('SELECT kaname.authority_parent_prelock_admit_v3()', 'SELECT kaname.authority_reconcile_enter_v3()')
 				   AND EXISTS(SELECT 1 FROM pg_catalog.pg_locks l
 				    WHERE l.pid=a.pid AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database())
 				    AND l.locktype='advisory' AND l.classid=1262569292::oid

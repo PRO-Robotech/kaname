@@ -5,6 +5,7 @@ package pg_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -16,12 +17,13 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 func TestReconcileCompatibilityEntryAcquiresAdmissionAndFailsClosed(t *testing.T) {
-	for _, mode := range []string{"compatibility", "strict", "missing-helper", "revoked-helper"} {
+	for _, mode := range []string{"compatibility", "strict", "missing-helper", "revoked-helper", "missing-entry", "revoked-entry"} {
 		t.Run(mode, func(t *testing.T) {
 			r := writerProtocolRig(t)
 			adapter := kanamepg.NewReconcileAdapter(r.runtime, catalogfixture.Source())
@@ -33,6 +35,12 @@ func TestReconcileCompatibilityEntryAcquiresAdmissionAndFailsClosed(t *testing.T
 				require.NoError(t, err)
 			case "revoked-helper":
 				_, err := r.admin.Exec(r.ctx, `REVOKE ALL ON FUNCTION kaname.authority_parent_prelock_admit_v3() FROM `+pgx.Identifier{r.role}.Sanitize())
+				require.NoError(t, err)
+			case "missing-entry":
+				_, err := r.admin.Exec(r.ctx, `DROP FUNCTION kaname.authority_reconcile_enter_v3()`)
+				require.NoError(t, err)
+			case "revoked-entry":
+				_, err := r.admin.Exec(r.ctx, `REVOKE ALL ON FUNCTION kaname.authority_reconcile_enter_v3() FROM `+pgx.Identifier{r.role}.Sanitize())
 				require.NoError(t, err)
 			}
 			called := false
@@ -56,10 +64,49 @@ func TestReconcileCompatibilityEntryAcquiresAdmissionAndFailsClosed(t *testing.T
 			var pgerr *pgconn.PgError
 			require.ErrorAs(t, err, &pgerr)
 			want := "42501"
-			if mode == "missing-helper" {
+			if mode == "missing-helper" || mode == "missing-entry" {
 				want = "42883"
 			}
 			require.Equal(t, want, pgerr.Code)
+		})
+	}
+}
+
+// Настоящий callback адаптера пишет audit в той же TX; повтор использует тот
+// же pooled backend, а отказ callback откатывает уже выполненную запись.
+func TestReconcileCompatibilityEntryWritesAuditAtomically(t *testing.T) {
+	for _, prepared := range []bool{false, true} {
+		t.Run(fmt.Sprintf("prepared=%t", prepared), func(t *testing.T) {
+			r, _ := writerProtocolRigBeforePreparation(t)
+			if prepared {
+				require.NoError(t, lifecycleOwner(r).PrepareAuthorityBundle(r.ctx, r.bundle))
+			}
+			r = identityLifecycleSingle(t, r)
+			adapter := kanamepg.NewReconcileAdapter(r.runtime, catalogfixture.Source())
+			callbackErr := errors.New("reconcile callback rejected after audit")
+			for pass := 0; pass < 3; pass++ {
+				err := adapter.WithTx(r.ctx, func(ctx context.Context, store reconcile.ReconcileStore) error {
+					if err := store.EmitAuditEvent(ctx, abrepo.AuditEvent{
+						EventType: abrepo.AuditEventTypeRevoked, Actor: "system:expiry",
+						BindingID: "reconcile-admission-audit-probe",
+					}); err != nil {
+						return err
+					}
+					if pass == 2 {
+						return callbackErr
+					}
+					return nil
+				})
+				if pass == 2 {
+					require.ErrorIs(t, err, callbackErr)
+				} else {
+					require.NoError(t, err)
+				}
+				var count int
+				require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.audit_outbox
+ WHERE event_type='iam.access_binding.revoked' AND event_payload->>'binding_id'='reconcile-admission-audit-probe'`).Scan(&count))
+				require.Equal(t, min(pass+1, 2), count)
+			}
 		})
 	}
 }

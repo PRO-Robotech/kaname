@@ -3679,13 +3679,62 @@ BEGIN
  RETURN 2;
 END $$;
 
+-- Unsigned reconcile получает собственную квитанцию только на свежем входе.
+-- Проверка до root не позволяет восстановить admission после DISCARD signed
+-- witness. Прежний parent admission по-прежнему проверяет strict/compare.
+CREATE FUNCTION kaname.authority_reconcile_enter_v3() RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE invoker oid;owner_oid oid;storage oid;grantee record;
+BEGIN
+ IF current_setting('transaction_isolation')<>'read committed'
+ OR pg_current_xact_id_if_assigned() IS NOT NULL
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_locks WHERE pid=pg_backend_pid()
+  AND (locktype='advisory' OR (locktype='relation' AND mode<>'AccessShareLock'))) THEN
+  RAISE EXCEPTION 'reconcile entry requires a fresh unlocked transaction' USING ERRCODE='25001';END IF;
+ SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles
+  WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
+ -- Новый SECURITY DEFINER не возвращает отозванный доступ к прежнему входу.
+ IF NOT pg_catalog.has_function_privilege(invoker,'kaname.authority_parent_prelock_admit_v3()','EXECUTE') THEN
+  RAISE EXCEPTION 'reconcile admission execute denied' USING ERRCODE='42501';END IF;
+ PERFORM pg_advisory_xact_lock_shared(1262569283,0);
+ PERFORM kaname.authority_parent_prelock_admit_v3();
+ IF NOT EXISTS(SELECT 1 FROM kaname.authority_writer_protocol WHERE singleton AND enforcement='compatibility')
+ OR to_regclass('pg_temp.kaname_binding_mirror_program') IS NOT NULL THEN
+  RAISE EXCEPTION 'reconcile requires unsigned compatibility admission' USING ERRCODE='42501';END IF;
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ storage:=to_regclass('pg_temp.kaname_authority_reconcile');
+ IF storage IS NULL THEN
+  CREATE TEMP TABLE pg_temp.kaname_authority_reconcile (
+   singleton boolean PRIMARY KEY CHECK(singleton),backend integer NOT NULL,
+   transaction_id xid8 NOT NULL,invoker_oid oid NOT NULL
+  ) ON COMMIT DELETE ROWS;
+  REVOKE ALL ON pg_temp.kaname_authority_reconcile FROM PUBLIC;
+  storage:='pg_temp.kaname_authority_reconcile'::regclass;
+  FOR grantee IN SELECT DISTINCT r.rolname FROM pg_catalog.pg_class c
+   CROSS JOIN LATERAL aclexplode(c.relacl) a JOIN pg_catalog.pg_roles r ON r.oid=a.grantee
+   WHERE c.oid=storage AND a.grantee<>owner_oid LOOP
+   EXECUTE format('REVOKE ALL ON pg_temp.kaname_authority_reconcile FROM %I',grantee.rolname);
+  END LOOP;
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=storage
+  AND c.relowner=owner_oid AND c.relpersistence='t' AND c.relkind='r')
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c
+  CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+  WHERE c.oid=storage AND a.grantee<>owner_oid) THEN
+  RAISE EXCEPTION 'untrusted reconcile audit witness' USING ERRCODE='42501';END IF;
+ IF EXISTS(SELECT 1 FROM pg_temp.kaname_authority_reconcile) THEN
+  RAISE EXCEPTION 'reconcile audit witness already present' USING ERRCODE='42501';END IF;
+ INSERT INTO pg_temp.kaname_authority_reconcile
+ VALUES(true,pg_backend_pid(),pg_current_xact_id(),invoker);
+END $$;
+
 -- Audit не является новым authority admission. Чистый либо повторно взятый
 -- из пула ordinary backend не должен брать compatibility fence после users row.
 -- Signed/compare witness проверяется прежним getter; DISCARD TEMP не стирает
 -- xact root lock, поэтому исчезнувший witness не переводит такую TX в ordinary.
 CREATE FUNCTION kaname._authority_audit_binding_store_v3() RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE storage oid;name text;populated boolean;owner_oid oid;installation jsonb;invoker oid;rows_count bigint;
+DECLARE storage oid;name text;populated boolean;owner_oid oid;installation jsonb;reconcile_witness jsonb;invoker oid;rows_count bigint;
 BEGIN
  SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
  FOREACH name IN ARRAY ARRAY['kaname_authority_attestation','kaname_authority_compare'] LOOP
@@ -3731,7 +3780,38 @@ BEGIN
    RETURN NULL;
   END IF;
  END IF;
- -- Обе формы successful entry держат один root key до конца TX. Session
+ -- Квитанция unsigned reconcile проверяется без нового admission/fence после
+ -- business rows. Даже пустая чужая таблица не становится trusted storage.
+ storage:=to_regclass('pg_temp.kaname_authority_reconcile');
+ IF storage IS NOT NULL THEN
+  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=storage
+   AND c.relowner=owner_oid AND c.relpersistence='t' AND c.relkind='r')
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c
+   CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+   WHERE c.oid=storage AND a.grantee<>owner_oid) THEN
+   RAISE EXCEPTION 'untrusted reconcile audit witness' USING ERRCODE='42501';END IF;
+  SELECT count(*) INTO rows_count FROM pg_temp.kaname_authority_reconcile;
+  IF rows_count>0 THEN
+   IF rows_count<>1 THEN RAISE EXCEPTION 'ambiguous reconcile audit witness' USING ERRCODE='42501';END IF;
+   SELECT to_jsonb(i) INTO STRICT reconcile_witness FROM pg_temp.kaname_authority_reconcile i;
+   SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles
+    WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
+   IF reconcile_witness->>'singleton' IS DISTINCT FROM 'true'
+   OR reconcile_witness->>'backend' IS DISTINCT FROM pg_backend_pid()::text
+   OR reconcile_witness->>'transaction_id' IS DISTINCT FROM pg_current_xact_id_if_assigned()::text
+   OR reconcile_witness->>'invoker_oid' IS DISTINCT FROM invoker::text
+   OR to_regclass('pg_temp.kaname_binding_mirror_program') IS NOT NULL
+   OR NOT EXISTS(SELECT 1 FROM kaname.authority_writer_protocol WHERE singleton AND enforcement='compatibility')
+   OR (SELECT count(DISTINCT l.classid) FROM pg_catalog.pg_locks l
+    WHERE l.pid=pg_backend_pid() AND l.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+    AND l.locktype='advisory' AND l.objid=0::oid AND l.objsubid=2 AND l.granted
+    AND ((l.classid=1262569283::oid AND l.mode='ShareLock')
+      OR (l.classid=1262569292::oid AND l.mode='ExclusiveLock')))<>2 THEN
+    RAISE EXCEPTION 'reconcile audit witness does not cover transaction' USING ERRCODE='42501';END IF;
+   RETURN NULL;
+  END IF;
+ END IF;
+ -- Все формы successful entry держат один root key до конца TX. Session
  -- unlock и DISCARD TEMP его не снимают; rollback до entry отменяет и эффекты.
  IF to_regclass('pg_temp.kaname_binding_mirror_program') IS NOT NULL
  OR EXISTS(SELECT 1 FROM pg_catalog.pg_locks l WHERE l.pid=pg_backend_pid()
@@ -8892,7 +8972,7 @@ BEGIN
  ('authority_subject_change_applied_v2()','fa776df6d3b95dadb13fa1684424b2db105b21f5b8862bd045680fb8129d094e',true,'v',true,'private'),
  ('authority_subject_change_statement_guard_v2()','600129602604e3cac17840ff155738e5c886677cd8be781b62b9b29f2fe785b0',true,'v',true,'private'),
  ('relation_fact_from_journal()','604d827358eab2f756c0c53d9a65cfbaf31b3f5d19ff8adc6e3dab944e8fa70a',false,'v',false,'preserve'),
- ('authority_protocol_grant_runtime(regrole)','bae7413fe8dc3f578263bec41689d1aebc54051bec4826100b380e2f8c2a914a',false,'v',true,'preserve'),
+ ('authority_protocol_grant_runtime(regrole)','94ae2c19e29b666c57be670abf65ae931c36af865d31844aec44998df68939a5',false,'v',true,'preserve'),
  ('authority_binding_command_begin_v3(jsonb)','39696919bfed78731817c77a37920e661801933c5ac544bc26ea5603a7fa39b1',true,'v',true,'export'),
  ('authority_binding_command_end_v3(jsonb)','2c9ee43be689f773c543fc800645f2aae482ec02d392fd28937efa50558915b2',true,'v',true,'export'),
  ('authority_binding_command_audit_v3(jsonb)','93c1bfc6bd6b753868e68ff6e408089f701d189ed6e7c30a32c7998baade872f',true,'v',true,'export'),
@@ -8977,7 +9057,8 @@ BEGIN
  ('authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','efdbe3e491e0c3bd8ade664a61d8e049094cc5b781f7fe14347a94e2dd5979e6',true,'v',true,'export'),
  ('authority_binding_stage_sequence_finalize_v3(text)','cd285782054ce7720b1072484e7b24758bcae7f8b7c7a117556b9836c1299a18',true,'v',true,'export'),
  ('authority_installation_enter_v2(text)','9c008ba02cb19f92581324e2b9652fef0fd3555118f1fd5536e74c1a85c5eee8',true,'v',true,'preserve'),
- ('_authority_audit_binding_store_v3()','f1836b62dc819674ed1b85104ebd923b4841f5fc5f456172184d45c243ca2b8e',true,'v',true,'private'),
+ ('authority_reconcile_enter_v3()','905123661ed76a9f3da2f0374779e049cf2e89374fd4cf3c085c88555e32e013',true,'v',true,'export'),
+ ('_authority_audit_binding_store_v3()','77412a99e3ea64432ee6ffe551d84ae7eae02bc2e0be1cbbe8e15941b407f595',true,'v',true,'private'),
  ('_authority_binding_mirror_store_v3()','94398fb5e832f685ced7c84e6975e21e04729db15a39893977cce3dc32809b61',true,'v',true,'private'),
  ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','e6dd22497757ec3e7362e45c6d5f4a45cd5ecf5b43714b6849143e5da1bf134a',true,'v',true,'private'),
  ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','8e4c9745f4df62265cb114849d1306493616a93049905a25f17c874dc0e35b9e',true,'v',true,'private'),
@@ -9199,7 +9280,7 @@ BEGIN
    AND NOT p.proleakproof AND p.proparallel='u' AND p.pronargs=6 AND p.pronargdefaults=0
    AND p.proargmodes IS NULL AND p.provariadic=0 AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')) THEN RETURN false;END IF;
  IF EXISTS(SELECT 1 FROM (VALUES
- ('authority_installation_enter_v2(text)','integer',1,false), ('_authority_audit_binding_store_v3()','jsonb',0,false), ('_authority_binding_mirror_store_v3()','jsonb',0,false), ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','void',3,false), ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','record',3,true), ('_authority_binding_mirror_finalize_v3(text)','void',1,false), ('_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','boolean',4,false)
+ ('authority_reconcile_enter_v3()','void',0,false), ('authority_installation_enter_v2(text)','integer',1,false), ('_authority_audit_binding_store_v3()','jsonb',0,false), ('_authority_binding_mirror_store_v3()','jsonb',0,false), ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','void',3,false), ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','record',3,true), ('_authority_binding_mirror_finalize_v3(text)','void',1,false), ('_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','boolean',4,false)
  ) abi_expected(signature,result_type,nargs,returns_set) LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||abi_expected.signature)
  WHERE p.oid IS NULL OR p.prokind<>'f' OR p.prorettype<>abi_expected.result_type::regtype OR p.proretset<>abi_expected.returns_set
  OR p.proisstrict OR p.proleakproof OR p.proparallel<>'u' OR p.pronargs<>abi_expected.nargs OR p.pronargdefaults<>0 OR p.provariadic<>0
@@ -9556,7 +9637,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','18ddbb62467f20ca53e77f81052e607bbe1cff0466100e8bb210f3dcfa6d1027',true),
+ ('_authority_crud_storage_v3()','117d174e3a2baae3b026c60ffb274c199537079ec58869ec068593b0fee64c8f',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -9658,6 +9739,7 @@ BEGIN
   'authority_metadata_preflight_v3(text,text,boolean,text)',
   'authority_role_prelock_admit_v3()',
   'authority_parent_prelock_admit_v3()',
+  'authority_reconcile_enter_v3()',
   'authority_sa_state_preflight_v3(text,boolean,text)'] LOOP
   EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,runtime_name);
  END LOOP;
@@ -9666,14 +9748,14 @@ END $$;
 
 -- +goose StatementBegin
 DO $$ DECLARE signature text;r record;BEGIN
- FOREACH signature IN ARRAY ARRAY['_authority_protocol_snapshot_v3()','_authority_sequence_probe_v3()','_authority_sequence_shape_v3()','_authority_sequence_publish_v3(jsonb)','_authority_sequence_header_v3()','_authority_resource_before_write_v3(jsonb,text,text,jsonb,jsonb)','_authority_crud_anchor_capture_v3(jsonb,integer,integer)','_authority_crud_authority_graph_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_capture_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_write_v3()','_authority_crud_aux_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_aux_statement_v3()','authority_resource_crud_capture_v3(jsonb,integer,integer)','_authority_crud_merge_tables_v3(jsonb,jsonb)','_authority_crud_capture_v3(jsonb,integer,integer)','_authority_crud_cascade_capture_v3(jsonb,integer,integer)','authority_resource_crud_body_values_v3()','_authority_crud_step_complete_v3(jsonb,integer)','authority_resource_crud_step_v3(text,jsonb)','authority_resource_crud_lock_held_v3(text)','_authority_crud_require_completion_v3(jsonb)','_authority_crud_command_v3(text,jsonb)','_authority_crud_structural_v3(text,text,text,text)','_authority_crud_command_plan_v3(jsonb,jsonb)','_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_intent_v3(jsonb)','_authority_crud_manifest_domain_v3(jsonb)','_authority_crud_fga_rows_v3(jsonb,text,jsonb,integer,timestamptz)','authority_crud_fga_id_guard_v3()','authority_crud_fga_id_applied_v3()','_authority_crud_fold_capture_v3(jsonb,integer,integer)','_authority_crud_fold_images_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_graph_index_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_capture_v3(jsonb,jsonb,integer,integer)','authority_resource_crud_journal_value_v3(jsonb,jsonb)','authority_crud_journal_applied_v3()','_authority_crud_journal_plan_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_rows_v3(jsonb,jsonb,timestamptz)','_authority_crud_unique_key_v3(text,jsonb)','authority_crud_unique_guard_v3()','_authority_crud_sequence_wait_v3(text,integer,integer)','authority_crud_sequence_guard_v3()','_authority_crud_key_maximum_v3(jsonb,jsonb,jsonb,jsonb,timestamptz)','_authority_crud_lock_rows_v3(jsonb)','_authority_crud_lock_plan_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_manifest_images_v3(jsonb,jsonb,jsonb,jsonb)','_authority_resource_crud_materialize_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_maximum_v3(jsonb,jsonb)','_authority_crud_pack_v3(jsonb,jsonb,jsonb)','_authority_crud_physical_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_resource_crud_prepare_v3(jsonb,integer,integer)','_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','_authority_crud_scope_capture_v3(jsonb,integer,integer)','_authority_resource_crud_store_v3(jsonb)','_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','_authority_crud_json_keys_v3(jsonb)','_authority_crud_write_metadata_v3(jsonb,jsonb,jsonb)','_authority_binding_scope_tier_v3(text,jsonb,jsonb)','_authority_binding_journal_v3(text,text,jsonb,jsonb,jsonb,integer)','authority_binding_sequence_prepare_v3(text,jsonb)','authority_binding_sequence_finalize_v3()','authority_binding_insert_stamp_v3(text)','authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','_authority_binding_stage_snapshot_v3()','authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','authority_binding_stage_sequence_finalize_v3(text)','_authority_audit_binding_store_v3()','_authority_binding_mirror_store_v3()','_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','_authority_binding_mirror_finalize_v3(text)','_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','_authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)','_authority_binding_stage_source_v3(jsonb,oid,integer)','_authority_binding_stage_coordinates_v3(jsonb,text[],boolean,oid,integer,integer)','authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer)','authority_binding_withdrawal_sequence_finalize_v3()','authority_cluster_admin_preflight_v4(text,text,text)','_authority_metadata_preflight_body_v4(text,text,boolean,text)','_authority_sequence_freeze_v3(jsonb)','_authority_sequence_bind_v3(jsonb,timestamptz)','_authority_sequence_default_v3(text)','authority_resource_journal_id_v3()','authority_fga_outbox_id_v3()','authority_sequence_program_applied_v3()','authority_sequence_program_completion_v3()','_authority_sequence_expect_v3(text)','_authority_sequence_expected_v3()','authority_sequence_expectation_complete_v3()','authority_sequence_origin_v3()','authority_prepared_journal_value_v3(jsonb,jsonb)','_authority_sequence_excluded_v3(oid)','_authority_sequence_store_v3()','_authority_sequence_reserve_v3(text,jsonb,integer)','_authority_sequence_select_v3(integer[],timestamptz)','_authority_sequence_claim_v3(text,jsonb,jsonb)','_authority_sequence_applied_v3(text,bigint,jsonb)','_authority_sequence_complete_v3()','_authority_resource_object_sequence_prepare_v3(jsonb,integer)','_authority_resource_object_sequence_final_v3(jsonb,timestamptz)','_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','authority_role_sequence_prepare_v3(jsonb,integer,integer)','authority_role_sequence_finalize_v3()','authority_role_sequence_stamp_v3(jsonb)','_authority_sa_state_preflight_body_v4(text,boolean,text)','_authority_scalar_journal_v3(text,text,jsonb,jsonb)','authority_metadata_preflight_v4(text,text,boolean,text,jsonb)','authority_sa_state_preflight_v4(text,boolean,text)','authority_scalar_sequence_finalize_v3()','authority_crud_storage_v3()','_authority_crud_storage_v3()'] LOOP
+ FOREACH signature IN ARRAY ARRAY['authority_reconcile_enter_v3()','_authority_protocol_snapshot_v3()','_authority_sequence_probe_v3()','_authority_sequence_shape_v3()','_authority_sequence_publish_v3(jsonb)','_authority_sequence_header_v3()','_authority_resource_before_write_v3(jsonb,text,text,jsonb,jsonb)','_authority_crud_anchor_capture_v3(jsonb,integer,integer)','_authority_crud_authority_graph_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_capture_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_write_v3()','_authority_crud_aux_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_aux_statement_v3()','authority_resource_crud_capture_v3(jsonb,integer,integer)','_authority_crud_merge_tables_v3(jsonb,jsonb)','_authority_crud_capture_v3(jsonb,integer,integer)','_authority_crud_cascade_capture_v3(jsonb,integer,integer)','authority_resource_crud_body_values_v3()','_authority_crud_step_complete_v3(jsonb,integer)','authority_resource_crud_step_v3(text,jsonb)','authority_resource_crud_lock_held_v3(text)','_authority_crud_require_completion_v3(jsonb)','_authority_crud_command_v3(text,jsonb)','_authority_crud_structural_v3(text,text,text,text)','_authority_crud_command_plan_v3(jsonb,jsonb)','_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_intent_v3(jsonb)','_authority_crud_manifest_domain_v3(jsonb)','_authority_crud_fga_rows_v3(jsonb,text,jsonb,integer,timestamptz)','authority_crud_fga_id_guard_v3()','authority_crud_fga_id_applied_v3()','_authority_crud_fold_capture_v3(jsonb,integer,integer)','_authority_crud_fold_images_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_graph_index_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_capture_v3(jsonb,jsonb,integer,integer)','authority_resource_crud_journal_value_v3(jsonb,jsonb)','authority_crud_journal_applied_v3()','_authority_crud_journal_plan_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_rows_v3(jsonb,jsonb,timestamptz)','_authority_crud_unique_key_v3(text,jsonb)','authority_crud_unique_guard_v3()','_authority_crud_sequence_wait_v3(text,integer,integer)','authority_crud_sequence_guard_v3()','_authority_crud_key_maximum_v3(jsonb,jsonb,jsonb,jsonb,timestamptz)','_authority_crud_lock_rows_v3(jsonb)','_authority_crud_lock_plan_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_manifest_images_v3(jsonb,jsonb,jsonb,jsonb)','_authority_resource_crud_materialize_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_maximum_v3(jsonb,jsonb)','_authority_crud_pack_v3(jsonb,jsonb,jsonb)','_authority_crud_physical_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_resource_crud_prepare_v3(jsonb,integer,integer)','_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','_authority_crud_scope_capture_v3(jsonb,integer,integer)','_authority_resource_crud_store_v3(jsonb)','_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','_authority_crud_json_keys_v3(jsonb)','_authority_crud_write_metadata_v3(jsonb,jsonb,jsonb)','_authority_binding_scope_tier_v3(text,jsonb,jsonb)','_authority_binding_journal_v3(text,text,jsonb,jsonb,jsonb,integer)','authority_binding_sequence_prepare_v3(text,jsonb)','authority_binding_sequence_finalize_v3()','authority_binding_insert_stamp_v3(text)','authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','_authority_binding_stage_snapshot_v3()','authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','authority_binding_stage_sequence_finalize_v3(text)','_authority_audit_binding_store_v3()','_authority_binding_mirror_store_v3()','_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','_authority_binding_mirror_finalize_v3(text)','_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','_authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)','_authority_binding_stage_source_v3(jsonb,oid,integer)','_authority_binding_stage_coordinates_v3(jsonb,text[],boolean,oid,integer,integer)','authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer)','authority_binding_withdrawal_sequence_finalize_v3()','authority_cluster_admin_preflight_v4(text,text,text)','_authority_metadata_preflight_body_v4(text,text,boolean,text)','_authority_sequence_freeze_v3(jsonb)','_authority_sequence_bind_v3(jsonb,timestamptz)','_authority_sequence_default_v3(text)','authority_resource_journal_id_v3()','authority_fga_outbox_id_v3()','authority_sequence_program_applied_v3()','authority_sequence_program_completion_v3()','_authority_sequence_expect_v3(text)','_authority_sequence_expected_v3()','authority_sequence_expectation_complete_v3()','authority_sequence_origin_v3()','authority_prepared_journal_value_v3(jsonb,jsonb)','_authority_sequence_excluded_v3(oid)','_authority_sequence_store_v3()','_authority_sequence_reserve_v3(text,jsonb,integer)','_authority_sequence_select_v3(integer[],timestamptz)','_authority_sequence_claim_v3(text,jsonb,jsonb)','_authority_sequence_applied_v3(text,bigint,jsonb)','_authority_sequence_complete_v3()','_authority_resource_object_sequence_prepare_v3(jsonb,integer)','_authority_resource_object_sequence_final_v3(jsonb,timestamptz)','_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','authority_role_sequence_prepare_v3(jsonb,integer,integer)','authority_role_sequence_finalize_v3()','authority_role_sequence_stamp_v3(jsonb)','_authority_sa_state_preflight_body_v4(text,boolean,text)','_authority_scalar_journal_v3(text,text,jsonb,jsonb)','authority_metadata_preflight_v4(text,text,boolean,text,jsonb)','authority_sa_state_preflight_v4(text,boolean,text)','authority_scalar_sequence_finalize_v3()','authority_crud_storage_v3()','_authority_crud_storage_v3()'] LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM PUBLIC',signature);
   FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc f CROSS JOIN LATERAL aclexplode(f.proacl) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee WHERE f.oid=to_regprocedure('kaname.'||signature) AND a.grantee<>f.proowner LOOP
    EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM %I',signature,r.rolname);
   END LOOP;
  END LOOP;
  FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc f CROSS JOIN LATERAL aclexplode(f.proacl) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee WHERE f.oid='kaname.authority_protocol_enter_typed_v3(text,text[],jsonb,text,text,text,text,text)'::regprocedure AND a.grantee<>f.proowner AND a.privilege_type='EXECUTE' LOOP
-  FOREACH signature IN ARRAY ARRAY['authority_resource_crud_capture_v3(jsonb,integer,integer)','authority_resource_crud_body_values_v3()','authority_resource_crud_step_v3(text,jsonb)','authority_resource_crud_lock_held_v3(text)','authority_resource_crud_journal_value_v3(jsonb,jsonb)','authority_binding_sequence_prepare_v3(text,jsonb)','authority_binding_sequence_finalize_v3()','authority_binding_insert_stamp_v3(text)','authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','authority_binding_stage_sequence_finalize_v3(text)','authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer)','authority_binding_withdrawal_sequence_finalize_v3()','authority_cluster_admin_preflight_v4(text,text,text)','authority_resource_journal_id_v3()','authority_fga_outbox_id_v3()','authority_prepared_journal_value_v3(jsonb,jsonb)','authority_role_sequence_prepare_v3(jsonb,integer,integer)','authority_role_sequence_finalize_v3()','authority_role_sequence_stamp_v3(jsonb)','authority_metadata_preflight_v4(text,text,boolean,text,jsonb)','authority_sa_state_preflight_v4(text,boolean,text)','authority_scalar_sequence_finalize_v3()','authority_crud_storage_v3()'] LOOP
+  FOREACH signature IN ARRAY ARRAY['authority_reconcile_enter_v3()','authority_resource_crud_capture_v3(jsonb,integer,integer)','authority_resource_crud_body_values_v3()','authority_resource_crud_step_v3(text,jsonb)','authority_resource_crud_lock_held_v3(text)','authority_resource_crud_journal_value_v3(jsonb,jsonb)','authority_binding_sequence_prepare_v3(text,jsonb)','authority_binding_sequence_finalize_v3()','authority_binding_insert_stamp_v3(text)','authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','authority_binding_stage_sequence_finalize_v3(text)','authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer)','authority_binding_withdrawal_sequence_finalize_v3()','authority_cluster_admin_preflight_v4(text,text,text)','authority_resource_journal_id_v3()','authority_fga_outbox_id_v3()','authority_prepared_journal_value_v3(jsonb,jsonb)','authority_role_sequence_prepare_v3(jsonb,integer,integer)','authority_role_sequence_finalize_v3()','authority_role_sequence_stamp_v3(jsonb)','authority_metadata_preflight_v4(text,text,boolean,text,jsonb)','authority_sa_state_preflight_v4(text,boolean,text)','authority_scalar_sequence_finalize_v3()','authority_crud_storage_v3()'] LOOP
    EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,r.rolname);
   END LOOP;
  END LOOP;
@@ -12749,6 +12831,7 @@ DROP FUNCTION kaname._authority_binding_mirror_finalize_v3(text);
 DROP FUNCTION kaname._authority_binding_mirror_prepare_v3(jsonb,integer,integer);
 DROP FUNCTION kaname._authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz);
 DROP FUNCTION kaname._authority_audit_binding_store_v3();
+DROP FUNCTION kaname.authority_reconcile_enter_v3();
 DROP FUNCTION kaname._authority_binding_mirror_store_v3();
 DROP FUNCTION kaname._authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb);
 DROP FUNCTION kaname._authority_binding_stage_source_v3(jsonb,oid,integer);

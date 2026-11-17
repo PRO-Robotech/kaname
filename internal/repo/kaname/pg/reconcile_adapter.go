@@ -79,16 +79,10 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 			}
 		}
 	}()
-	// Drain берёт EXCLUSIVE root до dependency tables. Наш shared root нужен
-	// до protocol row admission: иначе drain успеет закрыть callback его table
-	// locks и затем ждать удерживаемую нами protocol row.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(1262569283,0)`); err != nil {
-		return fmt.Errorf("reconcile: enter lifecycle barrier: %w", err)
-	}
-	// Admission берётся до callback и его row/advisory locks. Иначе форвард
-	// держит binding KEY SHARE, ждёт admission, а AccountDelete — наоборот.
-	// Отсутствие ABI или EXECUTE завершает вход: unsigned strict не обходится.
-	if _, err := tx.Exec(ctx, `SELECT kaname.authority_parent_prelock_admit_v3()`); err != nil {
+	// Свежий unsigned entry получает shared root до protocol row и D, затем
+	// выдаёт owner-квитанцию аудита до callback и его row/advisory locks.
+	// Отсутствие ABI/EXECUTE и strict завершают вход без вызова callback.
+	if _, err := tx.Exec(ctx, `SELECT kaname.authority_reconcile_enter_v3()`); err != nil {
 		return fmt.Errorf("reconcile: admit writer transaction: %w", err)
 	}
 	store := &legacyForwardStore{reconcileStore: &reconcileStore{tx: tx, cat: a.cat.Facts()}}
