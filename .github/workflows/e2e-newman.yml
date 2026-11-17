@@ -783,6 +783,19 @@ jobs:
             --internal-front-client-key ../../.stand/pki/edge.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt
 
+      # Второй run.sh очищает out/. Сохраняем первую фазу до этой очистки;
+      # наружу обе фазы попадут только через существующую чистку удостоверений.
+      - name: сохранить отчёт собственного фронта перед свёрткой базы
+        id: preserve-own-front
+        if: always()
+        run: |
+          if [ -d tests/newman/out ]; then
+            test ! -e "$RUNNER_TEMP/kaname-own-front-newman-out"
+            cp -a tests/newman/out "$RUNNER_TEMP/kaname-own-front-newman-out"
+            # out второй фазы должен появиться только от её собственного run.sh.
+            rm -rf tests/newman/out
+          fi
+
       # ── ВОЛНА СВЁРТКИ БАЗЫ: отказ без вердикта, а не пустая страница ──────
       #
       # Коллекции `authz-failclosed` нужно условие, несовместимое с остальным
@@ -804,7 +817,7 @@ jobs:
       # доводом командной строки.
       - name: волна свёртки базы — отказ без вердикта, а не пустая страница (числовой вердикт)
         id: failclosed-wave
-        if: ${{ !cancelled() && steps.seed-own.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.seed-own.outcome == 'success' && steps.preserve-own-front.outcome == 'success' }}
         timeout-minutes: 10
         run: |
           rc=0
@@ -879,7 +892,12 @@ jobs:
         timeout-minutes: 5
         run: |
           mkdir -p tests/newman/out-public
-          if [ ! -d tests/newman/out ]; then
+          if [ "${{ steps.preserve-own-front.outcome }}" != success ]; then
+            echo 'СОХРАНЕНИЕ ПЕРВОЙ ФАЗЫ НЕ СОШЛОСЬ: отчёт не выложен. Смотрите шаг сохранения; исходный out не очищался второй фазой.' \
+              > tests/newman/out-public/report-preservation-failed.txt
+            exit 1
+          fi
+          if [ ! -d tests/newman/out ] && [ ! -d "$RUNNER_TEMP/kaname-own-front-newman-out" ]; then
             echo "::notice title=Отчёта нет::каталог tests/newman/out не создан — прогон коллекции не состоялся, выкладывать нечего"
             {
               echo 'ОТЧЁТА ПРОГОНА НЕТ: каталог tests/newman/out не создан.'
@@ -889,7 +907,21 @@ jobs:
             exit 0
           fi
           rc=0
-          python3 .github/scripts/redact-newman-report.py --in tests/newman/out --out tests/newman/out-public || rc=$?
+          for phase in own-front failclosed; do
+            input=tests/newman/out
+            if [ "$phase" = own-front ]; then
+              input="$RUNNER_TEMP/kaname-own-front-newman-out"
+            fi
+            if [ ! -d "$input" ]; then
+              printf 'ОТЧЁТА ФАЗЫ %s НЕТ: прогон не создал каталог отчёта. Смотрите соответствующий шаг.\n' "$phase" \
+                > "tests/newman/out-public/no-report-$phase.txt"
+              continue
+            fi
+            python3 .github/scripts/redact-newman-report.py --in "$input" --out "tests/newman/out-public/$phase" || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              break
+            fi
+          done
           if [ "$rc" -ne 0 ]; then
             echo "::error title=Артефакт НЕ выложен::чистка отчёта не сошлась (код $rc) — выкладывать отчёт с удостоверениями в ПУБЛИЧНЫЙ репозиторий нельзя"
             rm -rf tests/newman/out-public

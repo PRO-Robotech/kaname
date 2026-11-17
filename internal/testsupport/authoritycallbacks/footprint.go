@@ -85,9 +85,9 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 		{"_authority_resource_require_completion_v2", "bbcfca0b3d5ff59ad273695dfed2451f1ff37bf4030f8f7083415396dafee0e6", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_resource_effect_applied_v2", "83057896665db04f47bf5837ca0f14cdbd83d187cba4d86c7aa40c11075d855a", "v", "search_path=pg_catalog,pg_temp", true},
 		{"authority_policy_epoch_monotonic_v2", "c8b62494628d305d0bc031154f07f1aef6dd3df936801a387e593ca4eb1f2d94", "v", "search_path=pg_catalog", false},
-		{"authority_audit_id_guard_v2", "e07795b21011235396c014213731173c5f076bc234c837e23c84263091266e97", "v", "search_path=pg_catalog,pg_temp", true},
-		{"authority_audit_applied_v2", "f8fb88cf8edf42dd8d8e7b394bf12403e6733c5e2db5ac2dd8a1ad831b20876e", "v", "search_path=pg_catalog,pg_temp", true},
-		{"authority_audit_statement_guard_v2", "b25423f74b4fd11574c75b567571d85ff94a9524c59f52325eb6c874ba075ae6", "v", "search_path=pg_catalog,pg_temp", true},
+		{"authority_audit_id_guard_v2", "a349a4a051b336afdec4cb5422edf5738fe4e354acec98163abc0d4a2c70d8f2", "v", "search_path=pg_catalog,pg_temp", true},
+		{"authority_audit_applied_v2", "b43a45a017d3b646301d3b0eb746d46ae7ee7d3a0539b2c8b91600c5a4c697a3", "v", "search_path=pg_catalog,pg_temp", true},
+		{"authority_audit_statement_guard_v2", "cc9fd152b1c8fa68a65eb6451baf977a12b0866cc52668254280265f10f9271c", "v", "search_path=pg_catalog,pg_temp", true},
 		{"authority_reconcile_id_guard_v2", "6e414e43962580748f91ca1cbd9ba4f1a842baa0d3f7d004967444aaea9f85f9", "v", "search_path=pg_catalog,pg_temp", true},
 		{"authority_reconcile_applied_v2", "9c8514fc851017709d8dc63db0b71599df6681f04091dd7672cdc12f99045482", "v", "search_path=pg_catalog,pg_temp", true},
 		{"authority_reconcile_statement_guard_v2", "d4a7e5cdc6f1a9d5e1734b6483fe8625a3372b665212fec285f034229fbcb587", "v", "search_path=pg_catalog,pg_temp", true},
@@ -124,10 +124,18 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 	// Дополнительные private callees и новые trigger roots актуальной схемы.
 	// Единственная SQL-функция имеет собственный точный language pin; допуска
 	// произвольного языка, нового overload или второго digest здесь нет.
+	// Audit roots 151500 теперь читают _authority_audit_binding_store_v3:
+	// чужие TEMP, исчезнувший witness и несовпавший backend/xid/invoker
+	// отвергаются; bootstrap/reconcile требуют owner receipt и прежние locks.
+	// Binding-ветка идёт в уже закреплённый _authority_binding_mirror_store_v3,
+	// проверяет точную active audit row/preheld key, затем потребляет эту row.
+	// Ordinary audit не получает нового admission; UPDATE/DELETE/TRUNCATE
+	// при binding program запрещены. Старый Resource exact-step guard сохранён.
 	for _, f := range []struct {
 		name, signature, digest, language, volatility, settings string
 		definer                                                 bool
 	}{
+		{"_authority_audit_binding_store_v3", "_authority_audit_binding_store_v3()", "77412a99e3ea64432ee6ffe551d84ae7eae02bc2e0be1cbbe8e15941b407f595", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_binding_mirror_before_write_v3", "_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)", "91ee46ad24bb6267178100747185c18546bd1f01566e7b2780403f60c8995854", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_binding_mirror_store_v3", "_authority_binding_mirror_store_v3()", "94398fb5e832f685ced7c84e6975e21e04729db15a39893977cce3dc32809b61", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_crud_aux_statement_v3", "_authority_crud_aux_statement_v3()", "8d2c6a5f46066b400d9c42c158a337eb784a405c895145beedc7205133be7bc6", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
