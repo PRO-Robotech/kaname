@@ -23,8 +23,8 @@
 // мимо транзакции). Шов обёртывает `AccountsW()` той же транзакции; всё прочее —
 // настоящий адаптер на настоящей базе:
 //   - мир (i)  — запись аккаунта возвращает ПОСТОРОННИЙ отказ (не про каталог);
-//   - мир (ii) — перед каждой записью ОТДЕЛЬНОЙ транзакцией фиксируется аккаунт с
-//     тем именем, которое регистрация выбрала для этой попытки.
+//   - мир (ii) — до открытия писателя ОТДЕЛЬНОЙ транзакцией фиксируется аккаунт
+//     с занятым именем; шов направляет каждую попытку на это имя.
 //
 // # Чем краснеет ДО кода (§9)
 //
@@ -55,6 +55,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	repoaccount "github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -89,7 +90,7 @@ func (w seamWriter) Mirror(ctx context.Context, in registration.MirrorInput) (re
 // аккаунта; всё прочее — настоящий писатель транзакции.
 type accountSeamWriter struct {
 	kanamerepo.Writer
-	insert func(ctx context.Context, a domain.Account, real func() (domain.Account, error)) (domain.Account, error)
+	insert func(ctx context.Context, a domain.Account, real func(domain.Account) (domain.Account, error)) (domain.Account, error)
 }
 
 func (w accountSeamWriter) AccountsW() repoaccount.WriterIface {
@@ -98,17 +99,17 @@ func (w accountSeamWriter) AccountsW() repoaccount.WriterIface {
 
 type accountSeamAccounts struct {
 	repoaccount.WriterIface
-	insert func(ctx context.Context, a domain.Account, real func() (domain.Account, error)) (domain.Account, error)
+	insert func(ctx context.Context, a domain.Account, real func(domain.Account) (domain.Account, error)) (domain.Account, error)
 }
 
 func (a accountSeamAccounts) Insert(ctx context.Context, acc domain.Account) (domain.Account, error) {
-	return a.insert(ctx, acc, func() (domain.Account, error) { return a.WriterIface.Insert(ctx, acc) })
+	return a.insert(ctx, acc, func(candidate domain.Account) (domain.Account, error) { return a.WriterIface.Insert(ctx, candidate) })
 }
 
 // foreignFaultWrap — мир (i): запись аккаунта возвращает посторонний отказ
 // (`errInjected` из register_integration_test.go), не связанный с каталогом.
 func foreignFaultWrap(inner kanamerepo.Writer) kanamerepo.Writer {
-	return accountSeamWriter{Writer: inner, insert: func(_ context.Context, _ domain.Account, _ func() (domain.Account, error)) (domain.Account, error) {
+	return accountSeamWriter{Writer: inner, insert: func(_ context.Context, _ domain.Account, _ func(domain.Account) (domain.Account, error)) (domain.Account, error) {
 		return domain.Account{}, errInjected
 	}}
 }
@@ -118,38 +119,41 @@ func foreignFaultWrap(inner kanamerepo.Writer) kanamerepo.Writer {
 // уехал бы в ту же ветвь «хранилище отказало» и МАСКИРОВАЛ бы отсутствие
 // производителя ложным зелёным (§9, gate-authoring §11).
 type nameSeedCapture struct {
-	names []domain.AccountName
-	errs  []error
+	names      []domain.AccountName
+	errs       []error
+	candidates []domain.AccountName
+	collisions []error
 }
 
-// seedCollisionWrap — миры (ii)/Ф4-28: перед записью аккаунта ОТДЕЛЬНОЙ
-// транзакцией (`pool.Exec` — автокоммит на своём соединении) фиксируется аккаунт
-// с тем именем, которое регистрация выбрала для этой попытки; владелец — уже
-// заведённый holder (FK `accounts_owner_fk` при коммите). Дальше — настоящий
-// адаптер, и запись натыкается на `accounts_name_unique` → 23505 → ErrAlreadyExists.
+// seedCollisionWrap — миры (ii)/Ф4-28: ДО открытия писателя отдельным
+// автокоммитом фиксируется занятое имя. На записи шов меняет только имя
+// кандидата: ID, владелец и настоящий адаптер остаются прежними. Ограничение
+// accounts_name_unique само даёт ErrAlreadyExists через ON CONFLICT адаптера.
 //
-// every=true (мир ii) — сеет ПЕРЕД КАЖДОЙ попыткой; every=false (Ф4-28) — только
-// перед ПЕРВОЙ. Сегодня попытка одна (§5.5), поэтому обе формы красные; различие
-// проявится после правки 2 (регистрация переберёт свободное имя).
+// Вложенный внешний посев после INSERT users невозможен: текущая TX уже
+// держит compatibility fence, а синхронный посев ждёт его до её завершения.
+// every=true сталкивает каждую попытку; every=false — только первую,
+// после которой глагол обязан сам выбрать и записать свободное имя.
 func seedCollisionWrap(h *harness, owner domain.UserID, every bool, seedCap *nameSeedCapture) func(kanamerepo.Writer) kanamerepo.Writer {
-	seeded := 0
+	id := ids.NewID(domain.PrefixAccount)
+	occupied := domain.AccountName(domain.PersonalAccountNamePrefix + strings.ToLower(id[len(id)-6:]))
+	_, seedErr := h.pool.Exec(h.ctx,
+		`INSERT INTO accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`, id, string(occupied), string(owner))
+	seedCap.names = append(seedCap.names, occupied)
+	seedCap.errs = append(seedCap.errs, seedErr)
 	return func(inner kanamerepo.Writer) kanamerepo.Writer {
-		return accountSeamWriter{Writer: inner, insert: func(ctx context.Context, acc domain.Account, real func() (domain.Account, error)) (domain.Account, error) {
-			if every || seeded == 0 {
-				seeded++
-				_, err := h.pool.Exec(ctx,
-					`INSERT INTO accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
-					ids.NewID(domain.PrefixAccount), string(acc.Name), string(owner))
-				seedCap.names = append(seedCap.names, acc.Name)
-				seedCap.errs = append(seedCap.errs, err)
-				if err != nil {
-					// Посев не состоялся — это НЕ honest red, а сломанная фикстура.
-					// Отдаём именно этот отказ, но проба его увидит отдельным
-					// утверждением (require.NoError по seedCap.errs) и назовёт починку.
-					return domain.Account{}, err
-				}
+		return accountSeamWriter{Writer: inner, insert: func(_ context.Context, acc domain.Account, real func(domain.Account) (domain.Account, error)) (domain.Account, error) {
+			seedCap.candidates = append(seedCap.candidates, acc.Name)
+			if seedErr != nil {
+				return domain.Account{}, seedErr
 			}
-			return real()
+			if every || len(seedCap.candidates) == 1 {
+				acc.Name = occupied
+				out, err := real(acc)
+				seedCap.collisions = append(seedCap.collisions, err)
+				return out, err
+			}
+			return real(acc)
 		}}
 	}
 }
@@ -189,9 +193,15 @@ func TestRegisterIntegration_F4_25_AccountWriteRefusalIsNotOccupancy(t *testing.
 
 		// Сначала — что посев конфликтного имени СОСТОЯЛСЯ: иначе «невыполнение»
 		// было бы отказом фикстуры, а не отсутствием производителя (§9).
-		require.NotEmpty(t, seedCap.names, "шов записи аккаунта обязан исполниться")
+		require.NotEmpty(t, seedCap.candidates, "шов записи аккаунта обязан исполниться")
 		for i, e := range seedCap.errs {
 			require.NoError(t, e, "посев конфликтного имени %q обязан состояться", seedCap.names[i])
+		}
+		require.Len(t, seedCap.collisions, len(seedCap.candidates), "каждая попытка встретила реальное занятое имя")
+		for i, collision := range seedCap.collisions {
+			require.ErrorIs(t, collision, iamerr.ErrAlreadyExists, "отказ дал настоящий адаптер accounts")
+			require.True(t, strings.HasPrefix(string(seedCap.candidates[i]), domain.PersonalAccountNamePrefix), "глагол выбирал имя из зарезервированного пространства")
+			require.NotContains(t, seedCap.candidates[:i], seedCap.candidates[i], "после коллизии глагол выбирает новое имя")
 		}
 		require.True(t, strings.HasPrefix(string(seedCap.names[0]), "personal-cloud-"),
 			"имя личного аккаунта — из зарезервированного пространства (Р9): %q", seedCap.names[0])
@@ -235,8 +245,15 @@ func TestRegisterIntegration_F4_28_OccupiedNameDoesNotRefuseRegistration(t *test
 		out, err := h.register(t, h.useCase(t, store), email)
 
 		// Посев занятого имени обязан состояться — иначе «Дано» сценария не создано.
-		require.NotEmpty(t, seedCap.names, "шов записи аккаунта обязан исполниться")
+		require.NotEmpty(t, seedCap.candidates, "шов записи аккаунта обязан исполниться")
 		require.NoError(t, seedCap.errs[0], "посев занятого имени %q обязан состояться", seedCap.names[0])
+		require.Len(t, seedCap.collisions, 1, "занятым сделано только первое имя")
+		require.ErrorIs(t, seedCap.collisions[0], iamerr.ErrAlreadyExists, "первое имя отверг настоящий адаптер accounts")
+		require.Greater(t, len(seedCap.candidates), 1, "после столкновения глагол сам повторил запись")
+		for i, candidate := range seedCap.candidates {
+			require.True(t, strings.HasPrefix(string(candidate), domain.PersonalAccountNamePrefix), "глагол выбирал имя из зарезервированного пространства")
+			require.NotContains(t, seedCap.candidates[:i], candidate, "после коллизии глагол выбирает новое имя")
+		}
 		occupiedName := string(seedCap.names[0])
 
 		require.NoError(t, err, "занятое имя личного аккаунта НЕ отказывает регистрации свободного адреса (Р9)")
@@ -248,6 +265,8 @@ func TestRegisterIntegration_F4_28_OccupiedNameDoesNotRefuseRegistration(t *test
 			`SELECT a.name FROM accounts a JOIN users u ON u.id = a.owner_user_id WHERE lower(u.email) = lower($1)`,
 			email).Scan(&gotName))
 		require.NotEqual(t, occupiedName, gotName, "личный аккаунт получил СВОБОДНОЕ имя, не занятое")
+		require.Equal(t, string(seedCap.candidates[len(seedCap.candidates)-1]), gotName, "записан следующий настоящий кандидат глагола")
+		require.NotEqual(t, string(seedCap.candidates[0]), gotName, "повтор первоначального кандидата не скрыт швом")
 		require.True(t, strings.HasPrefix(gotName, "personal-cloud-"),
 			"имя личного аккаунта осталось из зарезервированного пространства: %q", gotName)
 

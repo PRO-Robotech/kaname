@@ -474,7 +474,10 @@ func (pp *bindingPairPkg) collectFile(f *ast.File, info *types.Info, fields map[
 		}
 		raw := text
 		text = asciiLower(stripSQLComments(text))
-		if !sqlMarker.MatchString(text) {
+		// Закрытый qualified subject fragment не содержит SQL keyword или
+		// сравнения. Он всё равно должен дойти до lineage-проверки: отсутствие
+		// доказанного terminal use означает два доступа пары, а не пустой census.
+		if !sqlMarker.MatchString(text) && !bindingPairReceiptFragment(raw) {
 			continue
 		}
 		c.Literals++
