@@ -242,7 +242,7 @@ jobs:
             exit 1
           fi
           echo "прочитано файлов Go: $(printf '%s\n' "$files" | wc -l)"
-          unformatted=$(gofmt -l $files || true)
+          unformatted=$(gofmt -l $files) || exit 1
           if [ -n "$unformatted" ]; then
             echo "требуется gofmt:"; echo "$unformatted"; exit 1
           fi

@@ -717,7 +717,56 @@ down() {
   fi
   # `-v` снимает анонимные тома контейнеров вместе с ними: без него каждый
   # подъём-снос оставлял том базы сиротой (kaname#710, ось 8 самопроверки).
-  command -v docker >/dev/null 2>&1 && docker rm -fv "$SERVICE_NAME" "$PG_NAME" >/dev/null 2>&1
+  # Снимаем только доказанные контейнеры этой посадки, по неизменяемому ID.
+  # Ошибка клиента или неизвестный остаток — не доказательство чистоты.
+  python3 - "$SERVICE_NAME" "$PG_NAME" "$PKI" "$BIN" "$RUNDIR" <<'PY_CLEAN'
+import json, pathlib, re, subprocess, sys
+svc, pg, pki, binary, run = sys.argv[1:]
+pki, binary = str(pathlib.Path(pki).resolve()), str(pathlib.Path(binary).resolve())
+def docker(*args):
+    return subprocess.check_output(['docker', *args], text=True, stderr=subprocess.PIPE).strip()
+try:
+    ids = docker('ps', '-aq', '--no-trunc').splitlines()
+    objects = json.loads(docker('inspect', *ids)) if ids else []
+    targets = []
+    for name in (svc, pg):
+        found = [o for o in objects if o['Name'] == '/' + name]
+        if not found:
+            continue
+        if len(found) != 1:
+            raise ValueError('ambiguous container name')
+        obj = found[0]
+        cid = obj['Id']
+        if not re.fullmatch('[0-9a-f]{64}', cid):
+            raise ValueError('invalid container identity')
+        binds = {(m['Source'], m['Destination']) for m in obj['Mounts'] if m['Type'] == 'bind'}
+        if name == pg:
+            owned = {(pki + '/pg.crt', '/tls/server.crt'), (pki + '/pg.key', '/tls/server.key')} <= binds
+        else:
+            identity = pathlib.Path(run) / 'kaname.cid'
+            owned = (not identity.is_symlink() and identity.is_file() and identity.read_text().strip() == cid
+                     and {(pki, pki), (binary, binary)} <= binds)
+        if not owned:
+            raise ValueError('foreign or unproven container: ' + name)
+        targets.append(cid)
+    # Все владельцы проверены ДО первого удаления; имена повторно не разрешаем.
+    failed = False
+    for cid in targets:
+        try:
+            docker('rm', '-fv', cid)
+        except subprocess.CalledProcessError:
+            failed = True
+    remaining = set(docker('ps', '-aq', '--no-trunc').splitlines())
+    residue = sum(cid in remaining for cid in targets)
+    print('остатков контейнеров посадки: ' + str(residue))
+    if failed or residue:
+        raise ValueError('container removal failed or residue remains')
+except (OSError, subprocess.CalledProcessError, ValueError, KeyError, TypeError) as error:
+    print('снос не подтверждён: ' + str(error), file=sys.stderr)
+    sys.exit(1)
+PY_CLEAN
+  local rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
   say "стенд снесён"
 }
 
@@ -2635,42 +2684,43 @@ EOF
     # ТОЛЬКО при флаге `v`. Прочие подкоманды (`exec` для pg_isready) — успех.
     mkdir -p "$TMP/vol"
     cat > "$TMP/vol/docker" <<'EOF'
-#!/bin/sh
-cmd="$1"; shift
-case "$cmd" in
-  run)
-    rm_flag=0; name=""
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --rm) rm_flag=1 ;;
-        --name) name="$2"; shift ;;
-      esac
-      shift
-    done
-    if [ "$rm_flag" -eq 0 ] && [ -n "$name" ]; then
-      mkdir -p "$SELFTEST_VOL_DIR/live"
-      vol="vol-$(date +%s%N)"
-      : > "$SELFTEST_VOL_DIR/$vol"
-      echo "$vol" > "$SELFTEST_VOL_DIR/live/$name"
-    fi
-    exit 0 ;;
-  rm)
-    vflag=0
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        -*v*) vflag=1 ;;
-        -*) ;;
-        *) live="$SELFTEST_VOL_DIR/live/$1"
-           if [ -f "$live" ]; then
-             [ "$vflag" -eq 1 ] && rm -f "$SELFTEST_VOL_DIR/$(cat "$live")"
-             rm -f "$live"
-           fi ;;
-      esac
-      shift
-    done
-    exit 0 ;;
-  *) exit 0 ;;
-esac
+#!/usr/bin/env python3
+import hashlib, json, os, pathlib, sys, time
+root = pathlib.Path(os.environ['SELFTEST_VOL_DIR']); live = root / 'live'; live.mkdir(exist_ok=True)
+args = sys.argv[1:]; cmd = args.pop(0); mode = os.environ.get('SELFTEST_CLEAN_MODE', '')
+cid = lambda name: hashlib.sha256(name.encode()).hexdigest()
+if cmd == 'run':
+    if '--rm' not in args and '--name' in args:
+        name = args[args.index('--name') + 1]; volume = 'vol-' + str(time.time_ns())
+        (root / volume).touch(); (live / name).write_text(volume)
+elif cmd == 'ps':
+    calls = root / 'calls'; calls.mkdir(exist_ok=True)
+    counter = calls / 'ps'
+    count = int(counter.read_text()) + 1 if counter.exists() else 1
+    counter.write_text(str(count))
+    if mode == 'census-error' or (mode == 'after-census-error' and count == 2): sys.exit(1)
+    print('\n'.join(cid(p.name) for p in live.iterdir()))
+elif cmd == 'inspect':
+    rows = []
+    for p in live.iterdir():
+        if cid(p.name) not in args: continue
+        pki = os.environ['SELFTEST_PKI']
+        mounts = [{'Type': 'bind', 'Source': pki + '/pg.' + ext,
+                   'Destination': '/tls/server.' + ext} for ext in ('crt', 'key')]
+        if mode == 'foreign': mounts = []
+        rows.append({'Id': cid(p.name), 'Name': '/' + p.name,
+                     'Mounts': mounts + [{'Type': 'volume', 'Name': p.read_text()}]})
+    print(json.dumps(rows))
+elif cmd == 'rm':
+    if mode == 'rm-error': sys.exit(1)
+    for p in list(live.iterdir()):
+        if p.name not in args and cid(p.name) not in args: continue
+        if mode == 'container-left': continue
+        if any(a.startswith('-') and 'v' in a for a in args):
+            (root / p.read_text()).unlink(missing_ok=True)
+        p.unlink()
+elif cmd == 'volume':
+    print('\n'.join(p.name for p in root.iterdir() if p.is_file()))
 EOF
     chmod +x "$TMP/vol/docker"
 
@@ -2789,10 +2839,12 @@ EOF
         ( PATH="$TMP/vol:$PATH"; export SELFTEST_VOL_DIR="$TMP/vol-state"
           rm -rf "$SELFTEST_VOL_DIR"; mkdir -p "$SELFTEST_VOL_DIR"
           PKI="$TMP/vol-pki"; RUNDIR="$TMP/vol-run"; mkdir -p "$PKI" "$RUNDIR"
-          "$1" >/dev/null 2>&1
+          export SELFTEST_PKI="$PKI"
+          local action_rc=0
+          "$1" >/dev/null 2>&1 || action_rc=$?
           n=$(find "$SELFTEST_VOL_DIR" -maxdepth 1 -type f | wc -l)
           echo "томов-сирот после сноса: $n"
-          [ "$n" -eq 0 ] )
+          [ "$n" -eq 0 ] && [ "$action_rc" -eq 0 ] )
     }
     vol_up_down()         { start_pg; down; }
     vol_up_up_down()      { start_pg; start_pg; down; }
@@ -2800,6 +2852,28 @@ EOF
     world_vol_down()      { vol_world vol_up_down; }
     world_vol_reup_down() { vol_world vol_up_up_down; }
     world_vol_bare_rm()   { vol_world vol_bare_rm; }
+    # Код каждого down измеряется прямо: перепись томов НЕ меняет результат мира.
+    cleanup_world() {
+        ( PATH="$TMP/vol:$PATH"; export SELFTEST_VOL_DIR="$TMP/cleanup-state"
+          rm -rf "$SELFTEST_VOL_DIR"; mkdir -p "$SELFTEST_VOL_DIR"
+          PKI="$TMP/cleanup-pki"; RUNDIR="$TMP/cleanup-run"; mkdir -p "$PKI" "$RUNDIR"
+          export SELFTEST_PKI="$PKI"
+          start_pg >/dev/null 2>&1 || return $?
+          local down_rc=0
+          SELFTEST_CLEAN_MODE="$1" down >"$SELFTEST_VOL_DIR/cleanup-output" 2>&1 || down_rc=$?
+          cat "$SELFTEST_VOL_DIR/cleanup-output"
+          echo "down actual RC: $down_rc"
+          n=$(find "$SELFTEST_VOL_DIR" -maxdepth 1 -name 'vol-*' -type f | wc -l)
+          echo "томов-сирот после сноса: $n"
+          return "$down_rc" )
+    }
+    world_cleanup_success() { cleanup_world ''; }
+    world_cleanup_rm_error() { cleanup_world rm-error; }
+    world_cleanup_container_left() { cleanup_world container-left; }
+    world_cleanup_census_error() { cleanup_world census-error; }
+    world_cleanup_after_census_error() { cleanup_world after-census-error; }
+    world_cleanup_foreign() { cleanup_world foreign; }
+
 
     # ─── миры маршрута (kaname#841): внешний кластер — первым, docker — по основанию ──
     #
@@ -3289,6 +3363,13 @@ EOF
     assert 0  "(−) up → down: томов-сирот 0"                           world_vol_down    "томов-сирот после сноса: 0" "-" "томов-сирот после сноса: 1"
     # (−) повторный подъём сносит прежний контейнер базы — тоже с его томом.
     assert 0  "(−) up → up → down: томов-сирот 0"                      world_vol_reup_down "томов-сирот после сноса: 0" "-" "томов-сирот после сноса: 1"
+
+    assert 0 "(−) cleanup: lawful success" world_cleanup_success "down actual RC: 0" "стенд снесён" "снос не подтверждён"
+    assert 1 "(+) cleanup: docker rm отказал" world_cleanup_rm_error "down actual RC: 1" "томов-сирот после сноса: 1" "стенд снесён"
+    assert 1 "(+) cleanup: rm сообщил успех, контейнер остался" world_cleanup_container_left "down actual RC: 1" "томов-сирот после сноса: 1" "стенд снесён"
+    assert 1 "(+) cleanup: начальная перепись недоступна" world_cleanup_census_error "down actual RC: 1" "томов-сирот после сноса: 1" "стенд снесён"
+    assert 1 "(+) cleanup: перепись ПОСЛЕ удаления недоступна" world_cleanup_after_census_error "down actual RC: 1" "томов-сирот после сноса: 0" "стенд снесён"
+    assert 1 "(+) cleanup: чужой контейнер не снимается" world_cleanup_foreign "down actual RC: 1" "томов-сирот после сноса: 1" "стенд снесён"
 
     echo "--- ось 9: внешний кластер доступен — стенд уходит туда; docker — только по записанному основанию (kaname#841)"
     # (−) ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ первым: кластер отвечает — внешний путь, локального нет.
