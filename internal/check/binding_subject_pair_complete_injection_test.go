@@ -60,7 +60,9 @@ func TestBindingSubjectPairCompleteProductionControls(t *testing.T) {
 	}
 	for _, suffix := range []string{
 		"actor_provenance.go::const producerSourcesCapturedSQL",
+		"actor_provenance.go::semanticAuthorityWriteTx.producerSourcesQueryForFact",
 		"captured_producer_population.go::const capturedProducerKeySQL",
+		"resource_registration_executor.go::executeResourceReceipt",
 	} {
 		place := bindingPairCompletePkg + "/" + suffix
 		if accesses := control.Places()[place]; len(accesses) != 0 {
@@ -129,7 +131,10 @@ func TestBindingSubjectPairCompleteSameCountInjections(t *testing.T) {
 import (
  "context"
  "encoding/json"
+ "errors"
+ "fmt"
  "slices"
+ "strings"
  "time"
  "github.com/PRO-Robotech/kaname/internal/domain"
  "github.com/PRO-Robotech/kaname/internal/granteffect"
@@ -246,6 +251,25 @@ import (
 			add("const "+name, body, check.BindingPairCompleteSetSQL, 0, c.count, good)
 		}
 	}
+	// Те же четыре доступа SQL: полнота зависит и от реального consumer.
+	// Ни поглощённый budget error, ни остановка на полной странице не дают proof.
+	for _, c := range []struct {
+		name, before, after string
+		ok                  bool
+	}{
+		{"Control", "", "", true},
+		{"SwallowedBudget", "return errors.Join(err, errPolicyDiscoveryBudget)", "return nil", false},
+		{"FullPageExit", "if count < limit", "if count <= limit", false},
+	} {
+		name := "probePairScan" + c.name
+		body := bindingPairCompleteClone(t, root, "policy_partition_plan.go", "policyActorSources", name+"SQL")
+		consumer := bindingPairCompleteClone(t, root, "policy_partition_plan.go", "scan", name)
+		if !c.ok {
+			consumer = bindingPairCompleteMutate(t, consumer, c.before, c.after)
+		}
+		body += consumer + fmt.Sprintf("func(p *policyPlan) %sUse(ctx context.Context, tx pgx.Tx, args ...any) error { return p.%s(ctx,tx,%sSQL,args...) }\n", name, name, name)
+		add("const "+name+"SQL", body, check.BindingPairCompleteSetSQL, 0, 4, c.ok)
+	}
 	// Один fragment object во всех конечных SQL uses. Неизвестная или смешанная
 	// lineage должна остаться доступом пары даже при чужом соседнем alias r.
 	type receiptCase struct {
@@ -263,21 +287,34 @@ import (
 		{"Mixed", "SELECT %s FROM kaname.producer_source_receipt r", true, true, false},
 		{"Dynamic", "SELECT %s FROM kaname.producer_source_receipt r", true, false, true},
 		{"UnknownAlias", "SELECT %s FROM kaname.producer_source_receipt other", true, false, false},
+		{"Record", "SELECT %s FROM jsonb_populate_record(NULL::kaname.producer_source_receipt,$1::jsonb) r", false, false, false},
+		{"RecordWrongType", "SELECT %s FROM jsonb_populate_record(NULL::kaname.access_bindings,$1::jsonb) r", true, false, false},
+		{"RecordWrongFunction", "SELECT %s FROM custom.jsonb_populate_record(NULL::kaname.producer_source_receipt,$1::jsonb) r", true, false, false},
+		{"RecordShadow", "SELECT %s FROM jsonb_populate_record(NULL::kaname.producer_source_receipt,$1::jsonb) r WHERE EXISTS(SELECT 1 FROM kaname.access_bindings r)", true, false, false},
 	}
-	const key = "jsonb_build_array(r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id)"
-	for _, c := range receipts {
-		name := "probePairReceiptKey" + c.name
-		fmt.Fprintf(&fixture, "const %s = %q\n", name, key)
-		parts := strings.Split(c.query, "%s")
-		expression := fmt.Sprintf("%q+%s+%q", parts[0], name, parts[1])
-		if c.dynamic {
-			expression += "+suffix"
+	receiptExpressions := []struct{ name, text string }{
+		{"Key", "jsonb_build_array(r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id)"},
+		{"Subject", "r.subject_type||':'||r.subject_id"},
+	}
+	for _, fragment := range receiptExpressions {
+		for _, c := range receipts {
+			name := "probePairReceipt" + fragment.name + c.name
+			fmt.Fprintf(&fixture, "const %s = %q\n", name, fragment.text)
+			parts := strings.Split(c.query, "%s")
+			expression := fmt.Sprintf("%q+%s+%q", parts[0], name, parts[1])
+			if c.dynamic {
+				expression += "+suffix"
+			}
+			method := "Query"
+			if strings.HasPrefix(c.name, "Record") {
+				method = "Exec"
+			}
+			fmt.Fprintf(&fixture, "func probePairReceiptUse%s%s(ctx context.Context,tx pgx.Tx,suffix string) error { _,err:=tx.%s(ctx,%s);", fragment.name, c.name, method, expression)
+			if c.mixed {
+				fmt.Fprintf(&fixture, "if err!=nil{return err}; _,err=tx.Query(ctx,\"SELECT \"+%s+\" FROM kaname.access_bindings r\");", name)
+			}
+			fixture.WriteString("return err}\n")
 		}
-		fmt.Fprintf(&fixture, "func probePairReceiptUse%s(ctx context.Context,tx pgx.Tx,suffix string) error { _,err:=tx.Query(ctx,%s);", c.name, expression)
-		if c.mixed {
-			fmt.Fprintf(&fixture, "if err!=nil{return err}; _,err=tx.Query(ctx,\"SELECT \"+%s+\" FROM kaname.access_bindings r\");", name)
-		}
-		fixture.WriteString("return err}\n")
 	}
 	// Реальная цепочка из четырёх const и двух typed Query consumers: состояние
 	// содержит to_jsonb(r), а ключ повторяется в SELECT/cursor/ORDER BY/EXISTS.
@@ -341,19 +378,21 @@ import (
 			t.Errorf("actual captured lineage bad=%v не подтверждён с координатой: %s: %v", c.bad, c.suffix, findings)
 		}
 	}
-	for _, c := range receipts {
-		place := bindingPairCompletePkg + "/" + bindingPairCompleteFile + "::const probePairReceiptKey" + c.name
-		want := 0
-		if c.bad {
-			want = 2
-		}
-		if got := len(census.Places()[place]); got != want {
-			t.Errorf("receipt lineage %s: accesses=%d, want %d", c.name, got, want)
-		}
-		if c.bad {
-			findings := check.JudgeBindingSubjectPair(check.BindingPairCensus{Accesses: census.Places()[place]}, map[string]check.BindingPairEntry{})
-			if len(findings) != 1 || !strings.Contains(findings[0], bindingPairCompleteFile+":") {
-				t.Errorf("unknown receipt lineage не RED с координатой: %s: %v", c.name, findings)
+	for _, fragment := range receiptExpressions {
+		for _, c := range receipts {
+			place := bindingPairCompletePkg + "/" + bindingPairCompleteFile + "::const probePairReceipt" + fragment.name + c.name
+			want := 0
+			if c.bad {
+				want = 2
+			}
+			if got := len(census.Places()[place]); got != want {
+				t.Errorf("receipt lineage %s/%s: accesses=%d, want %d", fragment.name, c.name, got, want)
+			}
+			if c.bad {
+				findings := check.JudgeBindingSubjectPair(check.BindingPairCensus{Accesses: census.Places()[place]}, map[string]check.BindingPairEntry{})
+				if len(findings) != 1 || !strings.Contains(findings[0], bindingPairCompleteFile+":") {
+					t.Errorf("unknown receipt lineage не RED с координатой: %s/%s: %v", fragment.name, c.name, findings)
+				}
 			}
 		}
 	}

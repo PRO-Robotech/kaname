@@ -15,7 +15,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
-// Proposal — сериализованный запрос закрытого compiler, а не аттестация.
+// resourceDecisionProposal — сериализованный запрос закрытого compiler, а не аттестация.
 // Сервер обязан вывести область из текущих строк и самого намерения, проверить
 // полноту и получить все waits. Нельзя принять список caller keys как proof.
 type resourceDecisionProposal struct {

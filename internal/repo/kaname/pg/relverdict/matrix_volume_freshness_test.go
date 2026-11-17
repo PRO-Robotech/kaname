@@ -354,6 +354,16 @@ func matrixFingerprintWithFixtures(fp scalegrid.Fingerprint, contentOf func(stri
 	return fp, nil
 }
 
+// matrixFixturePath приводит обе записи координаты к явно названному корню.
+func matrixFixturePath(t *testing.T, root, rel string) string {
+	t.Helper()
+	path, err := treeposture.PathUnder(root, rel)
+	if err != nil {
+		t.Fatalf("координата %s: %v", rel, err)
+	}
+	return path
+}
+
 // Проверяется реальный путь matrixFingerprint -> ComputeFingerprint/ContentOf,
 // включая нормализацию координат и verdict. Только копии в t.TempDir: исходная
 // поставка читается, но ни одна инъекция не пишет в неё. SQL здесь лишь текст
@@ -363,17 +373,9 @@ func TestMatrixVolumeFingerprintIncludesItsFixtureClosure(t *testing.T) {
 	moduleCoord := treeposture.ModuleDirInPlatform()
 	verdictDir := moduleCoord + "/internal/repo/kaname/pg/relverdict"
 	gridDir := moduleCoord + "/internal/repo/kaname/pg/scalegrid"
-	at := func(t *testing.T, root, rel string) string {
-		t.Helper()
-		path, err := treeposture.PathUnder(root, rel)
-		if err != nil {
-			t.Fatalf("координата %s: %v", rel, err)
-		}
-		return path
-	}
 	read := func(t *testing.T, root, rel string) []byte {
 		t.Helper()
-		body, err := os.ReadFile(at(t, root, rel))
+		body, err := os.ReadFile(matrixFixturePath(t, root, rel))
 		if err != nil {
 			t.Fatalf("чтение копируемой зависимости %s: %v", rel, err)
 		}
@@ -381,7 +383,7 @@ func TestMatrixVolumeFingerprintIncludesItsFixtureClosure(t *testing.T) {
 	}
 	write := func(t *testing.T, root, rel string, body []byte) {
 		t.Helper()
-		path := at(t, root, rel)
+		path := matrixFixturePath(t, root, rel)
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatal(err)
 		}
@@ -398,7 +400,7 @@ func TestMatrixVolumeFingerprintIncludesItsFixtureClosure(t *testing.T) {
 		verdictDir + "/query.go":                              []byte("package relverdict\nconst query = `SELECT id FROM kaname.access_bindings`\n"),
 		moduleCoord + "/internal/migrations/0001_initial.sql": []byte("CREATE TABLE kaname.access_bindings (id text PRIMARY KEY);\n"),
 	}
-	entries, err := os.ReadDir(at(t, sourceRoot, gridDir))
+	entries, err := os.ReadDir(matrixFixturePath(t, sourceRoot, gridDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +505,7 @@ func TestMatrixVolumeFingerprintIncludesItsFixtureClosure(t *testing.T) {
 			if got := judge(root, changed); len(got) == 0 || !strings.Contains(strings.Join(got, "\n"), file.identity) {
 				t.Fatalf("правка %s не отвергнута с именем виновника: %v", file.identity, got)
 			}
-			if err := os.Remove(at(t, root, file.path)); err != nil {
+			if err := os.Remove(matrixFixturePath(t, root, file.path)); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := matrixFingerprint(root); err == nil || !strings.Contains(err.Error(), file.identity) {

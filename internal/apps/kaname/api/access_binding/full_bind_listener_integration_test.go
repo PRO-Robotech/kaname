@@ -178,8 +178,14 @@ func fullBindListenerCall(t *testing.T, w *fullBindWorld, client iamv1.AccessBin
 
 func TestFullBindListener_CoverageRequiresScopedCreate(t *testing.T) {
 	var denied *status.Status
+	skippedWorlds := 0
 	for _, allow := range []bool{true, false} {
 		t.Run(map[bool]string{true: "with_scoped_create", false: "without_scoped_create"}[allow], func(t *testing.T) {
+			defer func() {
+				if t.Skipped() {
+					skippedWorlds++
+				}
+			}()
 			w := newFullBindWorld(t)
 			source := w.role("fb_listener_source", fullBindBoxRule("get", "list"))
 			proposed := w.role("fb_listener_proposed", fullBindBoxRule("get", "list"))
@@ -199,6 +205,10 @@ func TestFullBindListener_CoverageRequiresScopedCreate(t *testing.T) {
 			}
 		})
 	}
+	if skippedWorlds == 2 {
+		t.Skip("оба мира приёмки пропущены; доказательства парного исхода нет")
+	}
+	require.Zero(t, skippedWorlds, "для парного доказательства нужны оба мира")
 	require.NotNil(t, denied)
 	// Тот же отказ повторяется через тот же genuine listener без маскировки
 	// PermissionDenied ошибкой транспорта/мира. Сравнивается полное wire status.

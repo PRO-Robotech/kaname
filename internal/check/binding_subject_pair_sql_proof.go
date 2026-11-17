@@ -202,19 +202,24 @@ func bindingPairSQLRawOffset(raw string, offset int) int {
 	return -1
 }
 
-// Узкое доказательство receipt-key: только семь полей реальной таблицы,
-// причём оба чтения пары принадлежат одному qualified JSON key. Никакие
-// произвольные SQL-фрагменты или другие одинаково названные колонки сюда не входят.
+// Две закрытые формы receipt fragment: семипольный JSON key и строка субъекта.
+// Оба чтения принадлежат одному qualified выражению; неизвестный terminal use
+// не может получить освобождение через случайный package-wide alias.
 func bindingPairReceiptFragment(raw string) bool {
 	refs := bindingPairColRefs(asciiLower(stripSQLComments(raw)))
 	if len(refs) != 2 || refs[0].qualifier != "r" || refs[1].qualifier != "r" {
 		return false
 	}
-	want := sqlTokens("jsonb_build_array(r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id)")
 	tokens := sqlTokens(raw)
-	for i := 0; i+len(want) <= len(tokens); i++ {
-		if bindingPairSQLTokensEqual(tokens[i:i+len(want)], want) {
-			return true
+	for _, expression := range []string{
+		"jsonb_build_array(r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id)",
+		"r.subject_type||':'||r.subject_id",
+	} {
+		want := sqlTokens(expression)
+		for i := 0; i+len(want) <= len(tokens); i++ {
+			if bindingPairSQLTokensEqual(tokens[i:i+len(want)], want) {
+				return true
+			}
 		}
 	}
 	return false
@@ -254,12 +259,19 @@ func bindingPairReceiptAliasOnly(raw string) bool {
 	pageStart := -1
 	pageSource := -1
 	physical := false
+	// PostgreSQL задаёт тип результата record явно, а не по имени alias.
+	// Поддержан только этот полный FROM; произвольный SRF/каст не принимается.
+	recordSource := sqlTokens("FROM jsonb_populate_record(NULL::kaname.producer_source_receipt,$1::jsonb) r")
 	for i := range tokens {
 		if bare(i, BindingPairTable) || bare(i, "recursive") || bare(i, "materialized") || tokens[i].op == ';' {
 			return false
 		}
 		if bare(i, "r") && bare(i-1, "producer_source_receipt") && dot(i-2) && bare(i-3, "kaname") && bare(i-4, "from") {
 			allowed[i] = true
+			physical = true
+		}
+		if i+len(recordSource) <= len(tokens) && bindingPairSQLTokensEqual(tokens[i:i+len(recordSource)], recordSource) {
+			allowed[i+len(recordSource)-1] = true
 			physical = true
 		}
 		if bare(i, "page") && bare(i+1, "as") && i+11 < len(tokens) && tokens[i+2].op == '(' &&
@@ -299,7 +311,7 @@ func bindingPairReceiptAliasOnly(raw string) bool {
 }
 
 // Константа не доказывает динамически достроенную строку. Конечный потребитель
-// здесь — typed pgx Query; допускается локальная переменная, все чтения которой
+// здесь — typed pgx Query/Exec; допускается локальная переменная, все чтения которой
 // идут в этот SQL argument, а присваивания имеют целиком constant RHS.
 func bindingPairReceiptTerminal(e ast.Expr, parent ast.Node, parents map[ast.Node]ast.Node, consumers map[types.Object]bool, info *types.Info) bool {
 	queryArg := func(id ast.Expr, node ast.Node) bool {
@@ -328,7 +340,7 @@ func bindingPairReceiptTerminal(e ast.Expr, parent ast.Node, parents map[ast.Nod
 			return false
 		}
 		fn, ok := selection.Obj().(*types.Func)
-		return ok && fn.Pkg() != nil && fn.Pkg().Path() == "github.com/jackc/pgx/v5" && fn.Name() == "Query"
+		return ok && fn.Pkg() != nil && fn.Pkg().Path() == "github.com/jackc/pgx/v5" && (fn.Name() == "Query" || fn.Name() == "Exec")
 	}
 	if queryArg(e, parent) {
 		return true

@@ -7,7 +7,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
@@ -17,7 +16,7 @@ import (
 // Граница касается materialized leaf, а не имени всего вопроса. Пустой leaf
 // обычного grant-arm уже проверен native SQL на final DecisionAt. Структурные
 // subject/member/parent отношения не становятся выдачами из-за этого списка.
-func mutationSourceRelation(typ, relation string) bool {
+func mutationSourceRelation(relation string) bool {
 	if administrativeRelation(relation) {
 		return true
 	}
@@ -25,12 +24,10 @@ func mutationSourceRelation(typ, relation string) bool {
 	case "editor", "viewer", "system_viewer", domain.PublicReaderRelation:
 		return true
 	}
-	for _, verb := range authzmap.VerbRelationsOfType(typ) {
-		if verb == relation {
-			return true
-		}
-	}
-	return false
+	// Префикс определяет форму глагольного leaf, а не его наличие в каталоге.
+	// Даже снятый или неизвестный v_* обязан пройти проверку живого источника:
+	// отсутствие строки каталога не превращает его в структурное отношение.
+	return strings.HasPrefix(relation, "v_")
 }
 
 // Дополнительные глагольные и контейнерные leaf задаёт immutable каталог:

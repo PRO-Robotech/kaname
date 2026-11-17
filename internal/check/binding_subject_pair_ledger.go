@@ -63,7 +63,7 @@ var BindingSubjectPairLedger = map[string]BindingPairEntry{
 		Why: "нормализация набора: пара прежней формы запроса — вход NormalizeSubjects, затем пара " +
 			"записывается проекцией subjects[0] (строка выдачи и якорь уникальности)",
 	},
-	"internal/repo/kaname/pg/access_binding_repo.go::abWriter.Insert": {
+	"internal/repo/kaname/pg/access_binding_repo.go::abWriter.insertAt": {
 		Go: 3, SQL: 2, Class: BindingPairProjection,
 		Why: "строка access_bindings несёт проекцию subjects[0]; подсказка отказа уникальности называет пару, " +
 			"на которой стоит access_bindings_active_grant_uniq",
@@ -76,6 +76,14 @@ var BindingSubjectPairLedger = map[string]BindingPairEntry{
 		Go: 2, Class: BindingPairProjection,
 		Why: "перенос колонок пары строки в поле проекции; набор загружается отдельно (ListSubjects*)",
 	},
+	"internal/repo/kaname/pg/binding_decision.go::prepareBindingSequenceProgram": {
+		Go: 4, Class: BindingPairProjection,
+		Why: "полный b.Subjects вместе с парой нормализуется; каждый normalized subject сериализуется в subjects без фильтра, а пара отдельно переносится в поля заголовка подготовленной create-программы",
+	},
+	"internal/repo/kaname/pg/resource_withdrawal_snapshot.go::resourceCapturedBinding": {
+		Go: 2, Class: BindingPairProjection,
+		Why: "декодер захваченного header переносит поля проекции; snapshot и captureBindings отдельно требуют захваченный полный набор того же binding ID до разворачивания выдачи",
+	},
 	// ── прежняя форма запроса ──────────────────────────────────────────────
 	"internal/apps/kaname/api/access_binding/handler.go::Handler.Create": {
 		Go: 2, Class: BindingPairLegacyInput,
@@ -86,6 +94,10 @@ var BindingSubjectPairLedger = map[string]BindingPairEntry{
 	"internal/repo/kaname/pg/registration_account_writer.go::registrationWriterOwnsGrant": {
 		Go: 2, Class: BindingPairUniqueAnchor,
 		Why: "при отзыве установщик сверяет естественный ключ прямой выдачи (access_bindings_active_relation_grant_uniq) с координатами своего журнала; полный набор обязан содержать ровно ту же служебную учётку",
+	},
+	"internal/repo/kaname/pg/resource_installation_sources.go::const resourceInstallationWitnessSQL": {
+		SQL: 4, Class: BindingPairUniqueAnchor,
+		Why: "свидетельство собственного назначения требует ровно одного child subject той же service_account и того же account вместе с совпадающей парой системной fga_writer выдачи; LIMIT 33 и флаг unsupported отклоняют переполнение, а не принимают усечённый набор",
 	},
 	"internal/repo/kaname/pg/module_seed_writer.go::moduleSeedWriter.grant": {
 		SQL: 4, Class: BindingPairUniqueAnchor,
@@ -126,6 +138,10 @@ var BindingSubjectPairLedger = map[string]BindingPairEntry{
 	},
 	"internal/repo/kaname/pg/reconcile_adapter.go::bindingSubjects": {
 		Go: 2, Class: BindingPairFallback, Why: bindingPairFallbackGo,
+	},
+	"internal/repo/kaname/pg/resource_object_binding.go::resourceCapturedSubjects": {
+		Go: 2, Class: BindingPairFallback,
+		Why: "все captured rows декодируются, проверяются на binding ID, ordinal и дубликаты и целиком передаются NormalizeSubjects; пара используется только при пустом результате захвата",
 	},
 	// ── откат к прежней форме: SQL ─────────────────────────────────────────
 	"internal/repo/kaname/pg/access_binding_repo.go::abReader.ListSubjectPrivileges": {

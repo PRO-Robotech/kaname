@@ -24,6 +24,20 @@ type bindingDecisionFailure struct {
 	err     error
 }
 
+var _ kaname.BindingAuthorizationDecisionRunner = (*bindingDecisionFailure)(nil)
+var _ kaname.BindingMetadataDecisionRunner = (*bindingDecisionFailure)(nil)
+
+func (f *bindingDecisionFailure) RunBindingAuthorizationDecision(ctx context.Context, actor domain.Subject, b domain.AccessBinding, create, delegated bool, tuples func(domain.AccessBinding, domain.Role) []ab.RelationTuple, apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
+	if delegated {
+		return errors.New("неожиданная делегированная проверка")
+	}
+	return f.RunBindingDecision(ctx, actor, b, create, tuples, apply)
+}
+
+func (f *bindingDecisionFailure) RunBindingMetadataDecision(ctx context.Context, actor domain.Subject, request kaname.BindingMetadataDecision, _ func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
+	return f.RunBindingDecision(ctx, actor, domain.AccessBinding{ID: request.ID}, false, nil, nil)
+}
+
 func (f *bindingDecisionFailure) RunBindingDecision(ctx context.Context, actor domain.Subject, b domain.AccessBinding, create bool, _ func(domain.AccessBinding, domain.Role) []ab.RelationTuple, _ func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
 	if err := ctx.Err(); err != nil {
 		return err

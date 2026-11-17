@@ -124,7 +124,7 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 	}
 	// Проверяется исходный leaf, а не только отношение вопроса: прямой v_*
 	// и editor/viewer могли пережить срок своей выдачи в материализации.
-	if !mutationSourceRelation(f.ObjectType, f.Relation) && !s.catalogRelations[[2]string{f.ObjectType, f.Relation}] {
+	if !mutationSourceRelation(f.Relation) && !s.catalogRelations[[2]string{f.ObjectType, f.Relation}] {
 		if administrativeRelation(f.QuestionRelation) {
 			return false, relverdict.ErrAdministrativeSourceUnconfirmed
 		}

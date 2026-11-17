@@ -605,9 +605,14 @@ func (pp *bindingPairPkg) resolve() {
 	for i, l := range pp.lits {
 		for _, r := range bindingPairColRefs(l.sql) {
 			isPair := bindingPairRefIsPair(r, infos[i], byPlace[l.place], pkgAliases)
+			origin := pp.receiptOrigins[l.pos][bindingPairSQLRawOffset(l.raw, r.at)]
 			if bindingPairReceiptFragment(l.raw) {
 				// Неизвестное употребление не может воспользоваться package-wide alias.
-				isPair = pp.receiptOrigins[l.pos][bindingPairSQLRawOffset(l.raw, r.at)] != "producer_source_receipt"
+				isPair = origin != "producer_source_receipt"
+			} else if r.qualifier == "r" && origin == "producer_source_receipt" {
+				// То же полное lineage-доказательство относится к qualified
+				// predicate/SELECT, а не только к семипольному JSON ключу.
+				isPair = false
 			}
 			if isPair {
 				var proof BindingPairClass

@@ -1,6 +1,7 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1034: семь закрытых команд Resource ABI, все ожидания до decision_at.
+-- Приёмка: docs/engineering/acceptance/role-rights-stay-within-what-is-named.md
 -- +goose Up
 -- +goose StatementBegin
 DO $$ BEGIN PERFORM kaname.authority_protocol_drain(); END $$;
@@ -3596,6 +3597,37 @@ BEGIN
  OR proof->>'mode' IS DISTINCT FROM 'accounts' OR result->'accounts' IS DISTINCT FROM proof->'accounts' THEN
   RAISE EXCEPTION 'binding mirror program identity changed' USING ERRCODE='42501';END IF;
  RETURN result;
+END $$;
+
+
+-- Audit не является новым authority admission. Чистый либо повторно взятый
+-- из пула ordinary backend не должен брать compatibility fence после users row.
+-- Signed/compare witness проверяется прежним getter; DISCARD TEMP не стирает
+-- xact root lock, поэтому исчезнувший witness не переводит такую TX в ordinary.
+CREATE FUNCTION kaname._authority_audit_binding_store_v3() RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE storage oid;name text;populated boolean;owner_oid oid;
+BEGIN
+ SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+ FOREACH name IN ARRAY ARRAY['kaname_authority_attestation','kaname_authority_compare'] LOOP
+  storage:=to_regclass(format('pg_temp.%I',name));
+  IF storage IS NULL THEN CONTINUE;END IF;
+  -- Не читаем caller-owned таблицу/VIEW даже когда она объявляет себя пустой.
+  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class WHERE oid=storage
+   AND relowner=owner_oid AND relpersistence='t' AND relkind='r') THEN
+   RAISE EXCEPTION 'untrusted audit authority storage' USING ERRCODE='42501';END IF;
+  EXECUTE format('SELECT EXISTS(SELECT 1 FROM pg_temp.%I)',name) INTO populated;
+  IF populated THEN RETURN kaname._authority_binding_mirror_store_v3();END IF;
+ END LOOP;
+ -- Обе формы successful entry держат один root key до конца TX. Session
+ -- unlock и DISCARD TEMP его не снимают; rollback до entry отменяет и эффекты.
+ IF to_regclass('pg_temp.kaname_binding_mirror_program') IS NOT NULL
+ OR EXISTS(SELECT 1 FROM pg_catalog.pg_locks l WHERE l.pid=pg_backend_pid()
+  AND l.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+  AND l.locktype='advisory' AND l.classid=1262569283::oid AND l.objid=0::oid
+  AND l.objsubid=2 AND l.mode IN ('ShareLock','ExclusiveLock') AND l.granted) THEN
+  RAISE EXCEPTION 'audit authority witness disappeared' USING ERRCODE='42501';END IF;
+ RETURN NULL;
 END $$;
 
 -- Квитанция создаётся только после неизменных actual epoch locks и сравнения
@@ -8754,9 +8786,9 @@ BEGIN
  ('authority_binding_command_audit_v3(jsonb)','93c1bfc6bd6b753868e68ff6e408089f701d189ed6e7c30a32c7998baade872f',true,'v',true,'export'),
  ('_authority_binding_mirror_policy_prepare_v3(jsonb)','62483d22c74491cc60dcbc011c5517f743b3a764dc91a48fa8628ce31bfadcd4',true,'v',true,'private'),
  ('authority_policy_changed()','d11c7b0992c5c8ddaa323fc03bfbc1822b52edbae5a181fa449589500e6440fe',true,'v',true,'preserve'),
- ('authority_audit_id_guard_v2()','e07795b21011235396c014213731173c5f076bc234c837e23c84263091266e97',true,'v',true,'preserve'),
- ('authority_audit_applied_v2()','f8fb88cf8edf42dd8d8e7b394bf12403e6733c5e2db5ac2dd8a1ad831b20876e',true,'v',true,'preserve'),
- ('authority_audit_statement_guard_v2()','b25423f74b4fd11574c75b567571d85ff94a9524c59f52325eb6c874ba075ae6',true,'v',true,'preserve'),
+ ('authority_audit_id_guard_v2()','a349a4a051b336afdec4cb5422edf5738fe4e354acec98163abc0d4a2c70d8f2',true,'v',true,'preserve'),
+ ('authority_audit_applied_v2()','b43a45a017d3b646301d3b0eb746d46ae7ee7d3a0539b2c8b91600c5a4c697a3',true,'v',true,'preserve'),
+ ('authority_audit_statement_guard_v2()','cc9fd152b1c8fa68a65eb6451baf977a12b0866cc52668254280265f10f9271c',true,'v',true,'preserve'),
  ('membership_mirror_from_user()','d763127654c0d5852aee7f86d8c5f5ea4fa89464c7f1e3c7df9efbace4e6c405',false,'v',false,'preserve'),
  ('_authority_resource_before_write_v3(jsonb,text,text,jsonb,jsonb)','10cfd5fcbe108b1f0b62f688d7ae80b72e34a536593fae3343c730cc0cb82da5',true,'v',true,'private'),
  ('_authority_resource_effect_applied_v2()','83057896665db04f47bf5837ca0f14cdbd83d187cba4d86c7aa40c11075d855a',true,'v',true,'private'),
@@ -8832,6 +8864,7 @@ BEGIN
  ('_authority_binding_stage_snapshot_v3()','9e9d561435b0f86c51aec452283505184beee36e1dc02f4af708590955d2eebf',true,'v',true,'private'),
  ('authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','efdbe3e491e0c3bd8ade664a61d8e049094cc5b781f7fe14347a94e2dd5979e6',true,'v',true,'export'),
  ('authority_binding_stage_sequence_finalize_v3(text)','cd285782054ce7720b1072484e7b24758bcae7f8b7c7a117556b9836c1299a18',true,'v',true,'export'),
+ ('_authority_audit_binding_store_v3()','c250435ecf40819b992439ff59b3435fe8a12e8f121677bbf17f8ed2b84d08ce',true,'v',true,'private'),
  ('_authority_binding_mirror_store_v3()','94398fb5e832f685ced7c84e6975e21e04729db15a39893977cce3dc32809b61',true,'v',true,'private'),
  ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','e6dd22497757ec3e7362e45c6d5f4a45cd5ecf5b43714b6849143e5da1bf134a',true,'v',true,'private'),
  ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','8e4c9745f4df62265cb114849d1306493616a93049905a25f17c874dc0e35b9e',true,'v',true,'private'),
@@ -9053,7 +9086,7 @@ BEGIN
    AND NOT p.proleakproof AND p.proparallel='u' AND p.pronargs=6 AND p.pronargdefaults=0
    AND p.proargmodes IS NULL AND p.provariadic=0 AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='plpgsql')) THEN RETURN false;END IF;
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_binding_mirror_store_v3()','jsonb',0,false), ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','void',3,false), ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','record',3,true), ('_authority_binding_mirror_finalize_v3(text)','void',1,false), ('_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','boolean',4,false)
+ ('_authority_audit_binding_store_v3()','jsonb',0,false), ('_authority_binding_mirror_store_v3()','jsonb',0,false), ('_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','void',3,false), ('_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','record',3,true), ('_authority_binding_mirror_finalize_v3(text)','void',1,false), ('_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','boolean',4,false)
  ) abi_expected(signature,result_type,nargs,returns_set) LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||abi_expected.signature)
  WHERE p.oid IS NULL OR p.prokind<>'f' OR p.prorettype<>abi_expected.result_type::regtype OR p.proretset<>abi_expected.returns_set
  OR p.proisstrict OR p.proleakproof OR p.proparallel<>'u' OR p.pronargs<>abi_expected.nargs OR p.pronargdefaults<>0 OR p.provariadic<>0
@@ -9410,7 +9443,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','9452abf88344f0d576717853fddfe07b82f94f85ba0d935d58a52e20bc9a81e8',true),
+ ('_authority_crud_storage_v3()','7b17d2f654879c1df3ccca4e3c55cc02f5b17522675114e76dbe1bf122de8937',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -9520,7 +9553,7 @@ END $$;
 
 -- +goose StatementBegin
 DO $$ DECLARE signature text;r record;BEGIN
- FOREACH signature IN ARRAY ARRAY['_authority_protocol_snapshot_v3()','_authority_sequence_probe_v3()','_authority_sequence_shape_v3()','_authority_sequence_publish_v3(jsonb)','_authority_sequence_header_v3()','_authority_resource_before_write_v3(jsonb,text,text,jsonb,jsonb)','_authority_crud_anchor_capture_v3(jsonb,integer,integer)','_authority_crud_authority_graph_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_capture_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_write_v3()','_authority_crud_aux_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_aux_statement_v3()','authority_resource_crud_capture_v3(jsonb,integer,integer)','_authority_crud_merge_tables_v3(jsonb,jsonb)','_authority_crud_capture_v3(jsonb,integer,integer)','_authority_crud_cascade_capture_v3(jsonb,integer,integer)','authority_resource_crud_body_values_v3()','_authority_crud_step_complete_v3(jsonb,integer)','authority_resource_crud_step_v3(text,jsonb)','authority_resource_crud_lock_held_v3(text)','_authority_crud_require_completion_v3(jsonb)','_authority_crud_command_v3(text,jsonb)','_authority_crud_structural_v3(text,text,text,text)','_authority_crud_command_plan_v3(jsonb,jsonb)','_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_intent_v3(jsonb)','_authority_crud_manifest_domain_v3(jsonb)','_authority_crud_fga_rows_v3(jsonb,text,jsonb,integer,timestamptz)','authority_crud_fga_id_guard_v3()','authority_crud_fga_id_applied_v3()','_authority_crud_fold_capture_v3(jsonb,integer,integer)','_authority_crud_fold_images_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_graph_index_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_capture_v3(jsonb,jsonb,integer,integer)','authority_resource_crud_journal_value_v3(jsonb,jsonb)','authority_crud_journal_applied_v3()','_authority_crud_journal_plan_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_rows_v3(jsonb,jsonb,timestamptz)','_authority_crud_unique_key_v3(text,jsonb)','authority_crud_unique_guard_v3()','_authority_crud_sequence_wait_v3(text,integer,integer)','authority_crud_sequence_guard_v3()','_authority_crud_key_maximum_v3(jsonb,jsonb,jsonb,jsonb,timestamptz)','_authority_crud_lock_rows_v3(jsonb)','_authority_crud_lock_plan_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_manifest_images_v3(jsonb,jsonb,jsonb,jsonb)','_authority_resource_crud_materialize_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_maximum_v3(jsonb,jsonb)','_authority_crud_pack_v3(jsonb,jsonb,jsonb)','_authority_crud_physical_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_resource_crud_prepare_v3(jsonb,integer,integer)','_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','_authority_crud_scope_capture_v3(jsonb,integer,integer)','_authority_resource_crud_store_v3(jsonb)','_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','_authority_crud_json_keys_v3(jsonb)','_authority_crud_write_metadata_v3(jsonb,jsonb,jsonb)','_authority_binding_scope_tier_v3(text,jsonb,jsonb)','_authority_binding_journal_v3(text,text,jsonb,jsonb,jsonb,integer)','authority_binding_sequence_prepare_v3(text,jsonb)','authority_binding_sequence_finalize_v3()','authority_binding_insert_stamp_v3(text)','authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','_authority_binding_stage_snapshot_v3()','authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','authority_binding_stage_sequence_finalize_v3(text)','_authority_binding_mirror_store_v3()','_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','_authority_binding_mirror_finalize_v3(text)','_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','_authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)','_authority_binding_stage_source_v3(jsonb,oid,integer)','_authority_binding_stage_coordinates_v3(jsonb,text[],boolean,oid,integer,integer)','authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer)','authority_binding_withdrawal_sequence_finalize_v3()','authority_cluster_admin_preflight_v4(text,text,text)','_authority_metadata_preflight_body_v4(text,text,boolean,text)','_authority_sequence_freeze_v3(jsonb)','_authority_sequence_bind_v3(jsonb,timestamptz)','_authority_sequence_default_v3(text)','authority_resource_journal_id_v3()','authority_fga_outbox_id_v3()','authority_sequence_program_applied_v3()','authority_sequence_program_completion_v3()','_authority_sequence_expect_v3(text)','_authority_sequence_expected_v3()','authority_sequence_expectation_complete_v3()','authority_sequence_origin_v3()','authority_prepared_journal_value_v3(jsonb,jsonb)','_authority_sequence_excluded_v3(oid)','_authority_sequence_store_v3()','_authority_sequence_reserve_v3(text,jsonb,integer)','_authority_sequence_select_v3(integer[],timestamptz)','_authority_sequence_claim_v3(text,jsonb,jsonb)','_authority_sequence_applied_v3(text,bigint,jsonb)','_authority_sequence_complete_v3()','_authority_resource_object_sequence_prepare_v3(jsonb,integer)','_authority_resource_object_sequence_final_v3(jsonb,timestamptz)','_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','authority_role_sequence_prepare_v3(jsonb,integer,integer)','authority_role_sequence_finalize_v3()','authority_role_sequence_stamp_v3(jsonb)','_authority_sa_state_preflight_body_v4(text,boolean,text)','_authority_scalar_journal_v3(text,text,jsonb,jsonb)','authority_metadata_preflight_v4(text,text,boolean,text,jsonb)','authority_sa_state_preflight_v4(text,boolean,text)','authority_scalar_sequence_finalize_v3()','authority_crud_storage_v3()','_authority_crud_storage_v3()'] LOOP
+ FOREACH signature IN ARRAY ARRAY['_authority_protocol_snapshot_v3()','_authority_sequence_probe_v3()','_authority_sequence_shape_v3()','_authority_sequence_publish_v3(jsonb)','_authority_sequence_header_v3()','_authority_resource_before_write_v3(jsonb,text,text,jsonb,jsonb)','_authority_crud_anchor_capture_v3(jsonb,integer,integer)','_authority_crud_authority_graph_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_capture_v3(jsonb,jsonb,integer,integer)','_authority_crud_aux_write_v3()','_authority_crud_aux_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_aux_statement_v3()','authority_resource_crud_capture_v3(jsonb,integer,integer)','_authority_crud_merge_tables_v3(jsonb,jsonb)','_authority_crud_capture_v3(jsonb,integer,integer)','_authority_crud_cascade_capture_v3(jsonb,integer,integer)','authority_resource_crud_body_values_v3()','_authority_crud_step_complete_v3(jsonb,integer)','authority_resource_crud_step_v3(text,jsonb)','authority_resource_crud_lock_held_v3(text)','_authority_crud_require_completion_v3(jsonb)','_authority_crud_command_v3(text,jsonb)','_authority_crud_structural_v3(text,text,text,text)','_authority_crud_command_plan_v3(jsonb,jsonb)','_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_intent_v3(jsonb)','_authority_crud_manifest_domain_v3(jsonb)','_authority_crud_fga_rows_v3(jsonb,text,jsonb,integer,timestamptz)','authority_crud_fga_id_guard_v3()','authority_crud_fga_id_applied_v3()','_authority_crud_fold_capture_v3(jsonb,integer,integer)','_authority_crud_fold_images_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_graph_index_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_capture_v3(jsonb,jsonb,integer,integer)','authority_resource_crud_journal_value_v3(jsonb,jsonb)','authority_crud_journal_applied_v3()','_authority_crud_journal_plan_v3(jsonb,jsonb,jsonb)','_authority_crud_journal_rows_v3(jsonb,jsonb,timestamptz)','_authority_crud_unique_key_v3(text,jsonb)','authority_crud_unique_guard_v3()','_authority_crud_sequence_wait_v3(text,integer,integer)','authority_crud_sequence_guard_v3()','_authority_crud_key_maximum_v3(jsonb,jsonb,jsonb,jsonb,timestamptz)','_authority_crud_lock_rows_v3(jsonb)','_authority_crud_lock_plan_v3(jsonb,jsonb,jsonb,timestamptz)','_authority_crud_manifest_images_v3(jsonb,jsonb,jsonb,jsonb)','_authority_resource_crud_materialize_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_crud_maximum_v3(jsonb,jsonb)','_authority_crud_pack_v3(jsonb,jsonb,jsonb)','_authority_crud_physical_v3(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','_authority_resource_crud_prepare_v3(jsonb,integer,integer)','_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','_authority_crud_scope_capture_v3(jsonb,integer,integer)','_authority_resource_crud_store_v3(jsonb)','_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','_authority_crud_json_keys_v3(jsonb)','_authority_crud_write_metadata_v3(jsonb,jsonb,jsonb)','_authority_binding_scope_tier_v3(text,jsonb,jsonb)','_authority_binding_journal_v3(text,text,jsonb,jsonb,jsonb,integer)','authority_binding_sequence_prepare_v3(text,jsonb)','authority_binding_sequence_finalize_v3()','authority_binding_insert_stamp_v3(text)','authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','_authority_binding_stage_snapshot_v3()','authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','authority_binding_stage_sequence_finalize_v3(text)','_authority_audit_binding_store_v3()','_authority_binding_mirror_store_v3()','_authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz)','_authority_binding_mirror_prepare_v3(jsonb,integer,integer)','_authority_binding_mirror_finalize_v3(text)','_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)','_authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)','_authority_binding_stage_source_v3(jsonb,oid,integer)','_authority_binding_stage_coordinates_v3(jsonb,text[],boolean,oid,integer,integer)','authority_binding_withdrawal_sequence_prepare_v3(text,text,text,integer,integer)','authority_binding_withdrawal_sequence_finalize_v3()','authority_cluster_admin_preflight_v4(text,text,text)','_authority_metadata_preflight_body_v4(text,text,boolean,text)','_authority_sequence_freeze_v3(jsonb)','_authority_sequence_bind_v3(jsonb,timestamptz)','_authority_sequence_default_v3(text)','authority_resource_journal_id_v3()','authority_fga_outbox_id_v3()','authority_sequence_program_applied_v3()','authority_sequence_program_completion_v3()','_authority_sequence_expect_v3(text)','_authority_sequence_expected_v3()','authority_sequence_expectation_complete_v3()','authority_sequence_origin_v3()','authority_prepared_journal_value_v3(jsonb,jsonb)','_authority_sequence_excluded_v3(oid)','_authority_sequence_store_v3()','_authority_sequence_reserve_v3(text,jsonb,integer)','_authority_sequence_select_v3(integer[],timestamptz)','_authority_sequence_claim_v3(text,jsonb,jsonb)','_authority_sequence_applied_v3(text,bigint,jsonb)','_authority_sequence_complete_v3()','_authority_resource_object_sequence_prepare_v3(jsonb,integer)','_authority_resource_object_sequence_final_v3(jsonb,timestamptz)','_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','authority_role_sequence_prepare_v3(jsonb,integer,integer)','authority_role_sequence_finalize_v3()','authority_role_sequence_stamp_v3(jsonb)','_authority_sa_state_preflight_body_v4(text,boolean,text)','_authority_scalar_journal_v3(text,text,jsonb,jsonb)','authority_metadata_preflight_v4(text,text,boolean,text,jsonb)','authority_sa_state_preflight_v4(text,boolean,text)','authority_scalar_sequence_finalize_v3()','authority_crud_storage_v3()','_authority_crud_storage_v3()'] LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM PUBLIC',signature);
   FOR r IN SELECT DISTINCT u.rolname FROM pg_catalog.pg_proc f CROSS JOIN LATERAL aclexplode(f.proacl) a JOIN pg_catalog.pg_roles u ON u.oid=a.grantee WHERE f.oid=to_regprocedure('kaname.'||signature) AND a.grantee<>f.proowner LOOP
    EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM %I',signature,r.rolname);
@@ -10071,7 +10104,7 @@ BEGIN
  OR TG_OP NOT IN ('INSERT','UPDATE') THEN RAISE EXCEPTION 'invalid audit ID guard context' USING ERRCODE='42501';END IF;
  manifest:=kaname._authority_producer_resource_v2();
  IF manifest IS NULL THEN
-  IF kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN
+  IF kaname._authority_audit_binding_store_v3() IS NOT NULL THEN
    SELECT p.* INTO STRICT program FROM pg_temp.kaname_binding_mirror_program p WHERE singleton;
    hashed:=hashtext(NEW.id);
    IF TG_OP<>'INSERT' OR program.active_command IS NULL OR program.commands->(program.active_command-1)->>'Kind'<>'audit'
@@ -10104,7 +10137,7 @@ BEGIN
   RAISE EXCEPTION 'invalid audit applied context' USING ERRCODE='42501';END IF;
  manifest:=kaname._authority_producer_resource_v2();
  IF manifest IS NULL THEN
-  IF kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN
+  IF kaname._authority_audit_binding_store_v3() IS NOT NULL THEN
    SELECT p.* INTO STRICT program FROM pg_temp.kaname_binding_mirror_program p WHERE singleton;
    IF program.active_command IS NULL OR program.audit_rows->program.active_command::text IS DISTINCT FROM to_jsonb(NEW) THEN
     RAISE EXCEPTION 'binding audit actual row is unprepared' USING ERRCODE='42501';END IF;
@@ -10121,7 +10154,7 @@ END $$;
 CREATE OR REPLACE FUNCTION kaname.authority_audit_statement_guard_v2() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 BEGIN
- IF kaname._authority_binding_mirror_store_v3() IS NOT NULL THEN
+ IF kaname._authority_audit_binding_store_v3() IS NOT NULL THEN
   RAISE EXCEPTION 'binding audit mutation outside INSERT program' USING ERRCODE='42501';END IF;
  IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME<>'audit_outbox' OR TG_WHEN<>'BEFORE' OR TG_LEVEL<>'STATEMENT'
  OR TG_OP NOT IN ('UPDATE','DELETE','TRUNCATE') THEN
@@ -12553,6 +12586,7 @@ DROP FUNCTION kaname._authority_binding_mirror_before_write_v3(text,text,jsonb,j
 DROP FUNCTION kaname._authority_binding_mirror_finalize_v3(text);
 DROP FUNCTION kaname._authority_binding_mirror_prepare_v3(jsonb,integer,integer);
 DROP FUNCTION kaname._authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz);
+DROP FUNCTION kaname._authority_audit_binding_store_v3();
 DROP FUNCTION kaname._authority_binding_mirror_store_v3();
 DROP FUNCTION kaname._authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb);
 DROP FUNCTION kaname._authority_binding_stage_source_v3(jsonb,oid,integer);

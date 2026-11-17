@@ -22,6 +22,15 @@ type delegatedDecisionFailure struct {
 	failure   error
 }
 
+var _ kaname.BindingAuthorizationDecisionRunner = (*delegatedDecisionFailure)(nil)
+
+func (f *delegatedDecisionFailure) RunBindingAuthorizationDecision(ctx context.Context, actor domain.Subject, b domain.AccessBinding, create, delegated bool, tuples func(domain.AccessBinding, domain.Role) []ab.RelationTuple, apply func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
+	if delegated {
+		return f.RunDelegatedBindingDecision(ctx, actor, b, tuples, apply)
+	}
+	return f.bindingDecisionFailure.RunBindingAuthorizationDecision(ctx, actor, b, create, false, tuples, apply)
+}
+
 func (f *delegatedDecisionFailure) RunDelegatedBindingDecision(ctx context.Context, actor domain.Subject, b domain.AccessBinding, _ func(domain.AccessBinding, domain.Role) []ab.RelationTuple, _ func(context.Context, kaname.SemanticAuthorityWriter, domain.AccessBinding, domain.Role) error) error {
 	f.delegated++
 	f.captured = b.DelegationID

@@ -58,7 +58,7 @@ func TestBindingCapabilityActualPortAndLegacySelection(t *testing.T) {
 		{name: "legacy with semantic port", marked: true, version: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := newABFakeRepo("usr_owner", "acc_scope", "", "rol_target", "viewer", nil)
+			repo := newABFakeRepo("usr_owner", "acc_scope", "", "rol00000000000000001", "viewer", nil)
 			probe := &capabilityPortInsertProbe{}
 			var port ab.WriterIface = probe
 			if tc.marked {
@@ -69,7 +69,7 @@ func TestBindingCapabilityActualPortAndLegacySelection(t *testing.T) {
 				port:   port,
 			}
 			_, _, err := (&CreateAccessBindingUseCase{}).writeCreatedBinding(context.Background(), writer,
-				domain.AccessBinding{ID: "acb_target", RoleID: "rol_target"}, "usr_owner", tc.capability)
+				domain.AccessBinding{ID: "acb00000000000000001", RoleID: "rol00000000000000001"}, "usr_owner", tc.capability)
 			require.Error(t, err)
 			if tc.wantInsert {
 				require.Equal(t, 1, probe.calls)

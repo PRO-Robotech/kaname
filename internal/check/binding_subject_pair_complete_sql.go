@@ -109,6 +109,9 @@ const bindingPairCompleteScanBody = `{
 			if p.nativeBudget != nil {
 				if err = chargeNativePolicyBudget(p.nativeBudget, 1, 0); err != nil {
 					rows.Close()
+					if p.rows >= policyDiscoveryRows {
+						return errors.Join(err, errPolicyDiscoveryBudget)
+					}
 					return err
 				}
 			}

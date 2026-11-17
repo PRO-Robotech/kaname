@@ -1002,21 +1002,40 @@ func (w *roleWriter) Delete(ctx context.Context, id domain.RoleID) error {
 // какой слой ответил. Поэтому проверка, заведённая здесь снова и отвечающая
 // иначе, покраснеет.
 func (w *roleWriter) ReplaceRoleVerbs(ctx context.Context, roleID domain.RoleID, pairs []domain.RoleVerb) error {
-	if _, err := w.tx.Exec(ctx,
-		`DELETE FROM kaname.role_verb WHERE role_id = $1`, string(roleID)); err != nil {
+	id := string(roleID)
+	if err := writeRoleVerbProjection(ctx, w.tx, id, nil); err != nil {
 		return mapErr(err, "", string(roleID))
 	}
 	for _, pv := range pairs {
-		if _, err := w.tx.Exec(ctx,
-			`INSERT INTO kaname.role_verb (role_id, object_type, verb)
-			 VALUES ($1, $2, $3)
-			 ON CONFLICT (role_id, object_type, verb) DO NOTHING`,
-			string(roleID), pv.ObjectType, pv.Verb,
-		); err != nil {
+		row := roleVerbProjectionRow{RoleID: &id, ObjectType: &pv.ObjectType, Verb: &pv.Verb}
+		if err := writeRoleVerbProjection(ctx, w.tx, id, &row); err != nil {
 			return mapErr(err, "", string(roleID))
 		}
 	}
 	return nil
+}
+
+// roleVerbProjectionRow — физический образ общей формы записи проекции роли.
+// nil row снимает проекцию; иначе выполняется ровно одна вставка, даже для
+// повторной строки. Nullable поля сохраняют физический NULL подготовленного
+// образа; здесь нет повторной компиляции правил или проверки каталога.
+type roleVerbProjectionRow struct {
+	RoleID     *string `json:"role_id"`
+	ObjectType *string `json:"object_type"`
+	Verb       *string `json:"verb"`
+}
+
+func writeRoleVerbProjection(ctx context.Context, tx pgx.Tx, roleID string, row *roleVerbProjectionRow) error {
+	if row == nil {
+		_, err := tx.Exec(ctx, `DELETE FROM ONLY kaname.role_verb WHERE role_id = $1`, roleID)
+		return err
+	}
+	_, err := tx.Exec(ctx,
+		`INSERT INTO kaname.role_verb (role_id, object_type, verb)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (role_id, object_type, verb) DO NOTHING`,
+		row.RoleID, row.ObjectType, row.Verb)
+	return err
 }
 
 // LockOwnerModule берёт строку `catalog_module` модуля-владельца ключевым
@@ -1080,21 +1099,17 @@ func (w *roleWriter) LockOwnerModule(ctx context.Context, module string) error {
 // IMMEDIATE`, миграция 20260901113757): при отложенной оператор уже завершился успехом,
 // и подсказывать некому.
 func (w *roleWriter) ReplaceRuleRefs(ctx context.Context, roleID domain.RoleID, refs []domain.RoleRuleRef) error {
-	if _, err := w.tx.Exec(ctx,
-		`DELETE FROM kaname.role_rule_ref WHERE role_id = $1`, string(roleID)); err != nil {
+	id := string(roleID)
+	if err := writeRoleRuleRefProjection(ctx, w.tx, id, nil); err != nil {
 		return mapErr(err, "", string(roleID))
 	}
 	for _, ref := range refs {
-		var verb any
+		var verb *string
 		if !ref.IsAnchor() {
-			verb = ref.Verb
+			verb = &ref.Verb
 		}
-		if _, err := w.tx.Exec(ctx,
-			`INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb)
-			 VALUES ($1, $2, $3, $4)
-			 ON CONFLICT DO NOTHING`,
-			string(roleID), ref.Module, ref.Resource, verb,
-		); err != nil {
+		row := roleRuleRefProjectionRow{RoleID: &id, Module: &ref.Module, Resource: &ref.Resource, Verb: verb}
+		if err := writeRoleRuleRefProjection(ctx, w.tx, id, &row); err != nil {
 			// Подсказка — ТОТ САМЫЙ токен, на котором отказал оператор. Какой
 			// сегмент назвать, решает ветвь `fkText` по имени ограничения; здесь
 			// подаются оба, потому что писатель не знает, который из двух ключей
@@ -1103,6 +1118,26 @@ func (w *roleWriter) ReplaceRuleRefs(ctx context.Context, roleID domain.RoleID, 
 		}
 	}
 	return nil
+}
+
+type roleRuleRefProjectionRow struct {
+	RoleID   *string `json:"role_id"`
+	Module   *string `json:"module"`
+	Resource *string `json:"resource"`
+	Verb     *string `json:"verb"`
+}
+
+func writeRoleRuleRefProjection(ctx context.Context, tx pgx.Tx, roleID string, row *roleRuleRefProjectionRow) error {
+	if row == nil {
+		_, err := tx.Exec(ctx, `DELETE FROM ONLY kaname.role_rule_ref WHERE role_id = $1`, roleID)
+		return err
+	}
+	_, err := tx.Exec(ctx,
+		`INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT DO NOTHING`,
+		row.RoleID, row.Module, row.Resource, row.Verb)
+	return err
 }
 
 // ruleRefHint — подсказка вида «resource\x1fverb» для одного оператора вставки.

@@ -46,9 +46,9 @@ WHERE r.id=old.id AND n.id=old.id AND r.rules=old.rules`, v.Before, v.Row)
 		case "role_rule_selectors":
 			query = `DELETE FROM ONLY kaname.role_rule_selectors WHERE role_id=$1`
 		case "role_verb":
-			query = `DELETE FROM ONLY kaname.role_verb WHERE role_id=$1`
+			return writeRoleVerbProjection(ctx, tx, v.RoleID, nil)
 		case "role_rule_ref":
-			query = `DELETE FROM ONLY kaname.role_rule_ref WHERE role_id=$1`
+			return writeRoleRuleRefProjection(ctx, tx, v.RoleID, nil)
 		case "role_create_binding_rule":
 			query = `DELETE FROM ONLY kaname.role_create_binding_rule WHERE role_id=$1`
 		case "role_bind_role_rule":
@@ -83,13 +83,17 @@ container_arm=EXCLUDED.container_arm,container_resource_names=EXCLUDED.container
 container_match_labels=EXCLUDED.container_match_labels,verbs_by_type=EXCLUDED.verbs_by_type,
 created_by_subject=EXCLUDED.created_by_subject,updated_at=EXCLUDED.updated_at`
 	case "role_verb":
-		query = `INSERT INTO kaname.role_verb(role_id,object_type,verb)
-SELECT r.role_id,r.object_type,r.verb FROM jsonb_populate_record(NULL::kaname.role_verb,$1::jsonb->'rows'->0) r
-ON CONFLICT(role_id,object_type,verb) DO NOTHING`
+		var row roleVerbProjectionRow
+		if err := json.Unmarshal(v.Rows[0], &row); err != nil {
+			return err
+		}
+		return writeRoleVerbProjection(ctx, tx, v.RoleID, &row)
 	case "role_rule_ref":
-		query = `INSERT INTO kaname.role_rule_ref(role_id,module,resource,verb)
-SELECT r.role_id,r.module,r.resource,r.verb FROM jsonb_populate_record(NULL::kaname.role_rule_ref,$1::jsonb->'rows'->0) r
-ON CONFLICT DO NOTHING`
+		var row roleRuleRefProjectionRow
+		if err := json.Unmarshal(v.Rows[0], &row); err != nil {
+			return err
+		}
+		return writeRoleRuleRefProjection(ctx, tx, v.RoleID, &row)
 	case "role_create_binding_rule":
 		query = `INSERT INTO kaname.role_create_binding_rule(role_id,rule_fp)
 SELECT r.role_id,r.rule_fp FROM jsonb_array_elements($1::jsonb->'rows') WITH ORDINALITY x(v,n)

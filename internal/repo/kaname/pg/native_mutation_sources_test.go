@@ -15,14 +15,21 @@ import (
 func TestMutationSourceLeafBoundaryPreservesNativeGrantArm(t *testing.T) {
 	for _, typ := range []string{"account", "project", "iam_role", "iam_group", "iam_service_account", "registry_registry", "registry_repository"} {
 		for _, relation := range append(authzmap.VerbRelationsOfType(typ), "admin", "owner", "editor", "viewer", "system_admin", "system_viewer", "any_admin", "public_reader") {
-			if !mutationSourceRelation(typ, relation) {
+			if !mutationSourceRelation(relation) {
 				t.Fatalf("не проверяется источник %s#%s", typ, relation)
 			}
 		}
 	}
+	// Отсутствие глагола в статическом словаре не даёт обойти живое доказательство.
+	for _, relation := range []string{"v_retired", "v_not_declared_yet"} {
+		if !mutationSourceRelation(relation) {
+			t.Fatalf("неизвестный глагольный leaf принят за структурный: %s", relation)
+		}
+	}
+
 	sources := &nativeAdministrativeSources{}
 	for _, relation := range []string{"", "subject", "member", "parent", "project", "account", "cluster"} {
-		if mutationSourceRelation("iam_role", relation) {
+		if mutationSourceRelation(relation) {
 			t.Fatalf("структурный путь принят за producer: %s", relation)
 		}
 		for _, question := range []string{"editor", "viewer", "v_update", "v_list"} {

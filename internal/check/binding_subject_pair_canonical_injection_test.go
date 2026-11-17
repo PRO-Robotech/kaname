@@ -143,10 +143,16 @@ func TestBindingSubjectPairCanonicalRealSourcesRejectDroppedSet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Count(string(data), before) != 1 {
-			t.Fatalf("условие не создано: %s не содержит ровно один исходный вызов", path)
+		receiver, function, method := strings.Cut(target.fn, ".")
+		if !method {
+			function, receiver = receiver, ""
 		}
-		changed := strings.Replace(string(data), before, after, 1)
+		changed := mutateRouteFunction(t, target.file, string(data), receiver, function, func(declaration string) string {
+			if strings.Count(declaration, before) != 1 {
+				t.Fatalf("условие не создано: %s::%s не содержит ровно один исходный вызов", path, target.fn)
+			}
+			return strings.Replace(declaration, before, after, 1)
+		})
 		if err := os.WriteFile(path, []byte(changed), 0o600); err != nil {
 			t.Fatal(err)
 		}

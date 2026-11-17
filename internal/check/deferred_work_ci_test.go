@@ -70,6 +70,10 @@ func deferredPartitionFailure(t *testing.T, raw string) error {
 		return err
 	}
 	dir := t.TempDir()
+	// Настоящий шаг unit получает этот каталог от предыдущего шага оснастки.
+	if err := os.MkdirAll(filepath.Join(dir, "ci-test-evidence", "unit"), 0700); err != nil {
+		return err
+	}
 	scripts := map[string]string{
 		"go": `#!/bin/bash
 printf 'go %s\n' "$*" >> "$TRACE"
