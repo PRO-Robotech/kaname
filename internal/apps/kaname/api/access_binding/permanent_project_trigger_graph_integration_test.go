@@ -250,15 +250,20 @@ func ppTriggerExecuteTokens(body string) (string, []int, error) {
 // Одобрение применяется только с начала настоящей executable-лексемы, а не
 // с похожего текста внутри литерала. Неизвестный EXECUTE по-прежнему запрещён.
 func ppTriggerHasUnreviewedExecute(body string) (bool, error) {
-	// Единственный проверенный динамический SQL, достижимый из существующих триггеров: чтения
-	// фиксированных отношений из аргументов триггера. Каждый новый EXECUTE требует явного ревью.
+	// Прежние проверенные чтения фиксированных отношений из аргументов
+	// триггера сохраняются без расширения. Каждый новый EXECUTE требует ревью.
 	dynamicReads := regexp.MustCompile(`(?is)^EXECUTE\s+format\(\s*'(?:SELECT to_jsonb\(t\) FROM kaname\.%I t WHERE t\.id = \$1|SELECT count\(\*\) FROM %I\.%I WHERE %I = \$1 AND id <> \$2)'[^;]*;`)
+	// Точное чтение наличия строки в TEMP владельца закреплено телом графа: перед
+	// ним проверяются owner, relpersistence=t и relkind=r двух таблиц квитанций.
+	// Полный оператор ограничивает format одним name и результат populated:
+	// конкатенация либо дополнительные аргументы здесь не разрешаются.
+	tempPresenceRead := regexp.MustCompile(`(?is)^EXECUTE\s+format\(\s*'SELECT EXISTS\(SELECT 1 FROM pg_temp\.%I\)'\s*,\s*name\s*\)\s+INTO\s+populated\s*;`)
 	dynamicBody, executes, err := ppTriggerExecuteTokens(body)
 	if err != nil {
 		return true, err
 	}
 	for _, at := range executes {
-		if !dynamicReads.MatchString(dynamicBody[at:]) {
+		if !dynamicReads.MatchString(dynamicBody[at:]) && !tempPresenceRead.MatchString(dynamicBody[at:]) {
 			return true, nil
 		}
 	}

@@ -61,6 +61,7 @@ func TestPermanentProjectCommand_TriggerExecuteTokensRespectSQLQuoting(t *testin
 func TestPermanentProjectCommand_TriggerExecuteGateKeepsOnlyApprovedReads(t *testing.T) {
 	const rowRead = `EXECUTE format('SELECT to_jsonb(t) FROM kaname.%I t WHERE t.id = $1', TG_TABLE_NAME) INTO v_row USING NEW.id;`
 	const countRead = `EXECUTE format('SELECT count(*) FROM %I.%I WHERE %I = $1 AND id <> $2', TG_TABLE_SCHEMA, TG_TABLE_NAME, v_carrier_col) INTO v_existing USING v_carrier, NEW.id;`
+	const tempPresenceRead = `EXECUTE format('SELECT EXISTS(SELECT 1 FROM pg_temp.%I)',name) INTO populated;`
 	for _, tc := range []struct {
 		name, body string
 		unreviewed bool
@@ -75,6 +76,15 @@ func TestPermanentProjectCommand_TriggerExecuteGateKeepsOnlyApprovedReads(t *tes
 		{name: "approved_then_unknown", body: rowRead + `EXECUTE 'SELECT 1';`, unreviewed: true},
 		{name: "quoted_approval_cannot_hide_real_execute", body: `PERFORM $q$` + rowRead + `$q$; EXECUTE 'SELECT 1';`, unreviewed: true},
 		{name: "comments_cannot_fuse_keyword", body: `EXECUTE/* gap */suffix 'SELECT 1';`, unreviewed: true},
+		{name: "reviewed_temp_presence_read", body: tempPresenceRead},
+		{name: "temp_presence_other_namespace", body: `EXECUTE format('SELECT EXISTS(SELECT 1 FROM kaname.%I)',name) INTO populated;`, unreviewed: true},
+		{name: "temp_presence_write_in_format", body: `EXECUTE format('SELECT EXISTS(SELECT 1 FROM pg_temp.%I); DELETE FROM kaname.resource_mirror',name) INTO populated;`, unreviewed: true},
+		{name: "temp_presence_concatenated_format_input", body: `EXECUTE format('SELECT EXISTS(SELECT 1 FROM pg_temp.%I)' || extra_sql,name) INTO populated;`, unreviewed: true},
+		{name: "temp_presence_concatenated_result", body: `EXECUTE format('SELECT EXISTS(SELECT 1 FROM pg_temp.%I)',name) || extra_sql INTO populated;`, unreviewed: true},
+		{name: "temp_presence_other_format_argument", body: `EXECUTE format('SELECT EXISTS(SELECT 1 FROM pg_temp.%I)',other_name) INTO populated;`, unreviewed: true},
+		{name: "temp_presence_extra_format_argument", body: `EXECUTE format('SELECT EXISTS(SELECT 1 FROM pg_temp.%I)',name,extra) INTO populated;`, unreviewed: true},
+		{name: "temp_presence_quoted_approval_cannot_hide_execute", body: `PERFORM $q$` + tempPresenceRead + `$q$; EXECUTE 'SELECT 1';`, unreviewed: true},
+		{name: "temp_presence_then_unknown", body: tempPresenceRead + `EXECUTE 'DELETE FROM kaname.resource_mirror';`, unreviewed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			unreviewed, err := ppTriggerHasUnreviewedExecute(tc.body)
