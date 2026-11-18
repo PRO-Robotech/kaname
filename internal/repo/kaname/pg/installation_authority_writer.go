@@ -40,7 +40,7 @@ func rollbackInstallation(ctx context.Context, tx pgx.Tx) error {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	err := tx.Rollback(cleanup)
-	if errors.Is(err, pgx.ErrTxClosed) {
+	if err == pgx.ErrTxClosed {
 		return nil
 	}
 	return err

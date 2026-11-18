@@ -165,7 +165,7 @@ func runLegacyAdmission[T preparedTransaction](ctx context.Context, open func(co
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if cleanupErr := w.Rollback(cleanup); cleanupErr != nil && !errors.Is(cleanupErr, pgx.ErrTxClosed) { err = errors.Join(err, cleanupErr) }
+		if cleanupErr := w.Rollback(cleanup); cleanupErr != nil && cleanupErr != pgx.ErrTxClosed { err = errors.Join(err, cleanupErr) }
 	}()
 	if err = body(ctx, w); err != nil { return err }
 	return w.Commit(ctx)

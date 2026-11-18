@@ -71,7 +71,7 @@ func openParticipantProfile(ctx context.Context, begin func(context.Context, pgx
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	rollbackErr := tx.Rollback(cleanup)
 	cancel()
-	if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+	if rollbackErr != nil && rollbackErr != pgx.ErrTxClosed {
 		err = participantCleanupFailure{cause: errors.Join(err, rollbackErr)}
 	}
 	return nil, err
