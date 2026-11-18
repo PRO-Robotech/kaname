@@ -4,9 +4,11 @@ package humansession
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // Callback включает только записи одной транзакции; её фиксацией владеет хранилище.
@@ -61,4 +63,18 @@ func runRecoveryCompletionWrite(ctx context.Context, store RecoveryCompletionSto
 	return runAdmissionOnce(ctx, func(ctx context.Context) (RecoveryCompletionWriter, error) {
 		return store.RecoveryCompletionWriter(ctx, id)
 	}, body)
+}
+
+// AdmissionWriteFailure сохраняет публичный класс исчерпанного конфликта,
+// но не исходную диагностику хранилища. Отмена и отказ уборки терминальны.
+func AdmissionWriteFailure(err error) error {
+	var cleanup interface{ PreparedCleanupFailed() bool }
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		(errors.As(err, &cleanup) && cleanup.PreparedCleanupFailed()) {
+		return ErrStoreUnavailable
+	}
+	if errors.Is(err, iamerr.ErrAborted) {
+		return iamerr.Wrapf(iamerr.ErrAborted, "%s", iamerr.SerializationConflictSyncText)
+	}
+	return ErrStoreUnavailable
 }

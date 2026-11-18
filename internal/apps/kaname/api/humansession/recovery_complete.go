@@ -321,7 +321,7 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 		return CompleteRecoveryOutput{}, uc.refuse(ctx, RecoveryCompletionCodeRejected, addressKey, in.Source, now)
 	case err != nil:
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
-		return CompleteRecoveryOutput{}, ErrStoreUnavailable
+		return CompleteRecoveryOutput{}, AdmissionWriteFailure(err)
 	}
 	uc.reconcileOwnerBinding(ctx, res)
 	if res.blocked {

@@ -359,6 +359,6 @@ func (uc *RegisterUseCase) refuse(err error) error {
 	default:
 		uc.logger.Error("registration: not performed — store refused; state unchanged", "err", err.Error())
 		uc.observer.RegistrationObserved(uc.lane.Name, OutcomeStoreFailed)
-		return humansession.ErrStoreUnavailable
+		return humansession.AdmissionWriteFailure(err)
 	}
 }

@@ -467,7 +467,7 @@ func (uc *RequestEmailChangeUseCase) Execute(ctx context.Context, in RequestEmai
 func (uc *RequestEmailChangeUseCase) storeFailed(what string, user domain.UserID, err error) error {
 	uc.d.Observer.EmailChangeObserved(EmailChangeStoreFailed)
 	uc.d.Logger.Error("email change request: "+what, "err", err.Error(), "user_id", string(user))
-	return ErrStoreUnavailable
+	return AdmissionWriteFailure(err)
 }
 
 // judgeNewEmail — форма нового адреса (Р3): то же приведение и та же проверка
@@ -661,5 +661,5 @@ func (uc *ConfirmEmailChangeUseCase) Execute(ctx context.Context, in ConfirmEmai
 func (uc *ConfirmEmailChangeUseCase) storeFailed(what string, user domain.UserID, err error) error {
 	uc.d.Observer.EmailChangeObserved(EmailChangeStoreFailed)
 	uc.d.Logger.Error("email change confirm: "+what+"; outcome rolled back", "err", err.Error(), "user_id", string(user))
-	return ErrStoreUnavailable
+	return AdmissionWriteFailure(err)
 }

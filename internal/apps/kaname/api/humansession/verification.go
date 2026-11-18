@@ -401,7 +401,7 @@ func (uc *RequestVerificationUseCase) Execute(ctx context.Context, bearer domain
 		}
 		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
 		uc.d.Logger.Error("verification request: letter not recorded", "err", err.Error(), "user_id", string(resolved.User.ID))
-		return RequestVerificationOutput{}, ErrStoreUnavailable
+		return RequestVerificationOutput{}, AdmissionWriteFailure(err)
 	}
 	uc.d.Observer.AddressVerificationObserved(VerificationLetterQueued)
 	return RequestVerificationOutput{NextAllowedIn: uc.d.Pace.Interval}, nil
@@ -510,7 +510,7 @@ func (uc *ConfirmVerificationUseCase) Execute(ctx context.Context, in ConfirmVer
 			return ConfirmVerificationOutput{}, ErrInviteNotValid
 		default:
 			uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-			return ConfirmVerificationOutput{}, ErrStoreUnavailable
+			return ConfirmVerificationOutput{}, AdmissionWriteFailure(err)
 		}
 	}
 	if rejected {

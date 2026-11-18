@@ -4,12 +4,14 @@ package registration_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/momentclock"
 
@@ -114,4 +116,30 @@ func TestPreparedRegistrationKeepsMaterialsAndPublishesOnce(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, hashes)
+}
+
+func TestRegistrationPreservesTerminalWriteOutcome(t *testing.T) {
+	exhausted := errors.Join(iamerr.ErrAborted, errors.New("private-schema-secret"))
+	for name, failure := range map[string]error{
+		"exhausted": exhausted,
+		"cancel": errors.Join(exhausted, context.Canceled),
+		"unknown-commit": errors.New("private-connection-secret"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			u := newUnit(t, func(store *unitStore) { store.commitErr = failure })
+			_, err := u.register(t, "outcome@example.invalid")
+			if name == "exhausted" {
+				require.ErrorIs(t, err, iamerr.ErrAborted)
+				require.EqualError(t, err, "aborted: " + iamerr.SerializationConflictSyncText)
+				require.NotErrorIs(t, err, humansession.ErrStoreUnavailable)
+			} else {
+				require.ErrorIs(t, err, humansession.ErrStoreUnavailable)
+				require.NotErrorIs(t, err, iamerr.ErrAborted)
+			}
+			require.NotContains(t, err.Error(), "private-")
+			require.Len(t, u.store.writers, 1, "UC не исполняет собственный retry")
+			require.Zero(t, u.obs.seen[registration.OutcomeIssued])
+			require.Equal(t, 1, u.obs.seen[registration.OutcomeStoreFailed])
+		})
+	}
 }
