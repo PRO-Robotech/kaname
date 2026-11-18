@@ -183,8 +183,14 @@ func (p *ServiceAccountStateWriters) open(ctx context.Context, request serviceAc
 		}
 		last = err
 	}
-	return nil, iamerr.Wrapf(iamerr.ErrAborted, "%s: %w", iamerr.SerializationConflictSyncText, last)
+	return nil, iamerr.Wrapf(iamerr.ErrAborted, "%w", serviceAccountStateConflict{cause: last})
 }
+
+// Причина доступна внутренней диагностике, но её текст не выходит в публичный отказ.
+type serviceAccountStateConflict struct{ cause error }
+
+func (e serviceAccountStateConflict) Error() string { return iamerr.SerializationConflictSyncText }
+func (e serviceAccountStateConflict) Unwrap() error { return e.cause }
 
 var _ kaname.ServiceAccountStateWriterFactory = (*ServiceAccountStateWriters)(nil)
 
