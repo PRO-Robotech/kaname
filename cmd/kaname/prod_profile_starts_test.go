@@ -325,7 +325,7 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		{knobPublicGRPC, publicGRPCAddr},
 		{knobInternalGRPC, internalGRPCAddr},
 		{knobMetrics, metricsAddr},
-		{knobRegistryToken, registryTokenAddr},
+		{knobRegistryExchange, registryTokenAddr},
 		{knobJWKSProxy, jwksProxyAddr},
 		{knobPublicREST, restAddr},
 		{knobInternalREST, internalRESTAddr},

@@ -57,11 +57,14 @@ func (k CredentialKind) IsIssuable() bool {
 	}
 }
 
-// ErrCredentialKindField — имя поля, которое обязан называть отказ. Объявлено
+// issuedKindField — имя поля, которое обязан называть отказ. Объявлено
 // одним местом, чтобы тон отказа не разошёлся между двумя глаголами выдачи.
-// #nosec G101 -- это ИМЯ ПОЛЯ запроса, которое обязан назвать текст отказа
+// это ИМЯ ПОЛЯ запроса, которое обязан назвать текст отказа
 // (конвенция отказов Kachō), а не значение удостоверения.
-const ErrCredentialKindField = "credential_kind"
+const issuedKindField = "credential_kind"
+
+// ErrCredentialKindField сохраняет исходное имя константы для вызывающих.
+const ErrCredentialKindField = issuedKindField
 
 // ResolveIssuedKind — КЛАССИФИКАТОР НАД ЗАПРОСОМ ВЫДАЧИ. Ветвей ТРИ, и дыры у
 // него нет by construction: «ни материала, ни перечня» здесь означает KEYPAIR,

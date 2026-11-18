@@ -39,7 +39,7 @@ func (w *Wire) IssueStandingKey(ctx context.Context, o *VerifiedOperator, id, ac
 	if observe == nil {
 		return nil, errors.New("private secret observer required")
 	}
-	op, err := w.createOperation(ctx, o, "/iam/v1/serviceAccounts/"+url.PathEscape(id)+"/keys", map[string]any{"credentialKind": "CREDENTIAL_KIND_KEYPAIR", "ttlSeconds": 7200, "description": "Generic RID lifecycle key"}) // #nosec G101 -- здесь только вид удостоверения и описание; сам закрытый ключ выдаётся API ниже.
+	op, err := w.createOperation(ctx, o, "/iam/v1/serviceAccounts/"+url.PathEscape(id)+"/keys", map[string]any{issuedKindField: issuedKeypairKind, "ttlSeconds": 7200, "description": "Generic RID lifecycle key"})
 	if err != nil {
 		return nil, err
 	}

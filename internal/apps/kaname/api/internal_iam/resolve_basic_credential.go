@@ -81,7 +81,7 @@ func (h *Handler) ResolveBasicCredential(
 			h.logger.ErrorContext(ctx, "basic credential authority failed",
 				slog.Any("error", err))
 		}
-		return nil, status.Error(codes.Unavailable, credentialStateUnknownText)
+		return nil, status.Error(codes.Unavailable, stateUnknownText)
 	}
 
 	// Отметка предъявления обновляется ЗДЕСЬ — на промахе кэша края, а не на

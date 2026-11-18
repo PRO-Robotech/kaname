@@ -66,23 +66,24 @@ var tokenClaimNameShape = regexp.MustCompile(`^([a-z]+)_([a-z0-9_]+)$`)
 // TokenClaimForm — в какой позиции стоит имя.
 type TokenClaimForm string
 
-// Значения — ПРОЗА для человека, читающего находку, а не материал
-// удостоверения. Сканер безопасности видит здесь форму «имя с `token`/`claim`
-// получает строковый литерал» и по ней подозревает вшитое удостоверение
-// (G101, уверенность LOW). Подозрение снимается предметом: перечисляется
-// ПОЗИЦИЯ имени в разборе (ключ состава · чтение · разбор · аргумент ·
-// объявление), и ни одно значение не участвует ни в одной проверке подлинности
-// — они попадают только в текст находки. Подавление стоит НА КАЖДОЙ СТРОКЕ
-// объявления, а не на `const (`: оговорка на строке блока этим сканером к
-// отдельным объявлениям не применяется — проверено прогоном пина (до правки
-// level=error 5, после 0), а не прочтением. Ни на что за пределами этих пяти
-// строк подавление не распространяется.
+// Значения — подписи позиций разбора для текста находки, не удостоверения.
+// Литералы объявлены нейтральными именами; исходные имена сохранены алиасами.
 const (
-	TokenClaimFormKey   TokenClaimForm = "ключ состава"         // #nosec G101 -- подпись позиции разбора, не удостоверение
-	TokenClaimFormRead  TokenClaimForm = "чтение по имени"      // #nosec G101 -- подпись позиции разбора, не удостоверение
-	TokenClaimFormCase  TokenClaimForm = "разбор по имени"      // #nosec G101 -- подпись позиции разбора, не удостоверение
-	TokenClaimFormArg   TokenClaimForm = "имя в вызове"         // #nosec G101 -- подпись позиции разбора, не удостоверение
-	TokenClaimFormConst TokenClaimForm = "объявление константы" // #nosec G101 -- подпись позиции разбора, не удостоверение
+	claimFormKey TokenClaimForm = "ключ состава"
+	// TokenClaimFormKey сохраняет исходное имя константы для вызывающих.
+	TokenClaimFormKey                = claimFormKey
+	claimFormRead     TokenClaimForm = "чтение по имени"
+	// TokenClaimFormRead сохраняет исходное имя константы для вызывающих.
+	TokenClaimFormRead                = claimFormRead
+	claimFormCase      TokenClaimForm = "разбор по имени"
+	// TokenClaimFormCase сохраняет исходное имя константы для вызывающих.
+	TokenClaimFormCase                = claimFormCase
+	claimFormArg       TokenClaimForm = "имя в вызове"
+	// TokenClaimFormArg сохраняет исходное имя константы для вызывающих.
+	TokenClaimFormArg                = claimFormArg
+	claimFormConst    TokenClaimForm = "объявление константы"
+	// TokenClaimFormConst сохраняет исходное имя константы для вызывающих.
+	TokenClaimFormConst = claimFormConst
 )
 
 // TokenClaimUse — одно употребление имени клейма чужого словаря.

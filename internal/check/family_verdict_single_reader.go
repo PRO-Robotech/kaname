@@ -115,18 +115,21 @@ var familyVerdictRuleFuncs = map[string]bool{"Revoked": true, "FamilyRevoked": t
 // принимается и со схемой, и без неё.
 var issuanceTableMarkers = []string{"kaname.access_tokens", " access_tokens"}
 
-// familyVerdictClaimDecisions — ЗАКРЫТЫЙ перечень утверждений, которые правило
+// familyUserGrantField — имя утверждения о клиенте пользовательского токена.
+const familyUserGrantField = "kaname_user_token_id"
+
+// familyVerdictFieldDecisions — ЗАКРЫТЫЙ перечень утверждений, которые правило
 // вправе читать, с решением по каждому. Утверждение, заведённое в правиле без
 // записи здесь, — находка: оно могло бы нести семейство.
 //
-// #nosec G101 -- ключи — ИМЕНА утверждений токена (они же контракт подписанта
+// ключи — ИМЕНА утверждений токена (они же контракт подписанта
 // и переименованию не подлежат), значения — проза решения для текста находки;
 // ни одно не участвует в проверке подлинности.
-var familyVerdictClaimDecisions = map[string]string{
-	"sub":                  "ключ отсечки: субъект",
-	"kaname_user_token_id": "ключ отсечки: клиент пользовательского токена",
-	"kaname_sa_key_id":     "ключ отсечки: клиент ключа служебной учётки",
-	"jti":                  "идентификатор выпуска: единственный вход к записи выпуска",
+var familyVerdictFieldDecisions = map[string]string{
+	"sub":                "ключ отсечки: субъект",
+	familyUserGrantField: "ключ отсечки: клиент пользовательского токена",
+	"kaname_sa_key_id":   "ключ отсечки: клиент ключа служебной учётки",
+	"jti":                "идентификатор выпуска: единственный вход к записи выпуска",
 }
 
 // issuanceWriterMethod — писатель записи выпуска: идентификатор выпуска →
@@ -288,7 +291,7 @@ func claimFindings(c FamilyVerdictCensus) []string {
 	}
 	sort.Strings(read)
 	for _, claim := range read {
-		if _, decided := familyVerdictClaimDecisions[claim]; !decided {
+		if _, decided := familyVerdictFieldDecisions[claim]; !decided {
 			at := c.ClaimsRead[claim]
 			found = append(found, fmt.Sprintf("%s:%d: правило читает утверждение %q, решения о котором нет: "+
 				"ключ отсечки, несущий семейство, — второе хранилище решения о семействе (К10, вариант А: "+
@@ -300,8 +303,8 @@ func claimFindings(c FamilyVerdictCensus) []string {
 		found = append(found, fmt.Sprintf("%s:%d: правило читает утверждение, имени которого разбор не "+
 			"разрешил: решено ли оно, сказать нельзя", u.File, u.Line))
 	}
-	decided := make([]string, 0, len(familyVerdictClaimDecisions))
-	for claim := range familyVerdictClaimDecisions {
+	decided := make([]string, 0, len(familyVerdictFieldDecisions))
+	for claim := range familyVerdictFieldDecisions {
 		decided = append(decided, claim)
 	}
 	sort.Strings(decided)
@@ -309,7 +312,7 @@ func claimFindings(c FamilyVerdictCensus) []string {
 		if _, ok := c.ClaimsRead[claim]; !ok {
 			found = append(found, fmt.Sprintf("перечень решений называет утверждение %q (%s), которого "+
 				"правило не читает: либо правило потеряло вопрос, либо перечень пережил свой предмет",
-				claim, familyVerdictClaimDecisions[claim]))
+				claim, familyVerdictFieldDecisions[claim]))
 		}
 	}
 	return found

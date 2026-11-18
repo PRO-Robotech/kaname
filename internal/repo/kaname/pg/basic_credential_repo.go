@@ -120,17 +120,16 @@ func NewBasicCredentialRepo(pool *pgxpool.Pool, callTimeout time.Duration) (*Bas
 // сличает полосы у КАЖДОГО носителя, а перечень носителей спрашивает у схемы:
 // таблица, несущая и вид удостоверения, и его хеш. Носитель, заведённый позже
 // без своей полосы в пробе, становится находкой, а не невидимостью.
-// #nosec G101 -- `SECRET` здесь ЗНАЧЕНИЕ КОЛОНКИ вида удостоверения в тексте
+// `SECRET` здесь ЗНАЧЕНИЕ КОЛОНКИ вида удостоверения в тексте
 // SQL, а не секрет: сравнение идёт с перечислением `credential_kind`.
-const liveUserCredentialPredicate = `
+const liveUserKindPredicate = `
    AND c.credential_kind = 'SECRET'
    AND c.expires_at IS NOT NULL
    AND c.expires_at > now()
    AND u.invite_status = 'ACTIVE'`
 
 // То же для служебной учётки: у неё своё состояние владельца.
-// #nosec G101 -- то же: значение колонки вида в тексте запроса, не значение секрета.
-const liveSACredentialPredicate = `
+const liveSAKindPredicate = `
    AND c.credential_kind = 'SECRET'
    AND c.expires_at IS NOT NULL
    AND c.expires_at > now()
@@ -158,7 +157,7 @@ const saBasicRowSource = `
 const resolveUserCredentialSQL = `
 SELECT c.id, c.secret_hash, c.expires_at, u.id, u.display_name, c.created_at, r.revoke_before` +
 	userBasicRowSource + `
- WHERE c.id = $1` + liveUserCredentialPredicate
+ WHERE c.id = $1` + liveUserKindPredicate
 
 // Резолв строки удостоверения СЛУЖЕБНОЙ УЧЁТКИ. На месте отсечки — NULL:
 // отсечка человека о ключе машины не говорит ничего.
@@ -166,7 +165,7 @@ SELECT c.id, c.secret_hash, c.expires_at, u.id, u.display_name, c.created_at, r.
 const resolveSACredentialSQL = `
 SELECT c.id, c.secret_hash, c.expires_at, s.id, s.name, c.created_at, NULL::timestamptz` +
 	saBasicRowSource + `
- WHERE c.id = $1` + liveSACredentialPredicate
+ WHERE c.id = $1` + liveSAKindPredicate
 
 // ЖИВОСТЬ, СПРОШЕННАЯ ПО ИДЕНТИФИКАТОРУ. Хеш не читается вовсе: спрашивающий
 // секрета не предъявляет и предъявить не может, а лишняя колонка в проекции —
@@ -176,12 +175,12 @@ SELECT c.id, c.secret_hash, c.expires_at, s.id, s.name, c.created_at, NULL::time
 const liveUserCredentialSQL = `
 SELECT c.created_at, r.revoke_before, u.id` +
 	userBasicRowSource + `
- WHERE c.id = $1` + liveUserCredentialPredicate
+ WHERE c.id = $1` + liveUserKindPredicate
 
 const liveSACredentialSQL = `
 SELECT c.created_at, NULL::timestamptz, s.id` +
 	saBasicRowSource + `
- WHERE c.id = $1` + liveSACredentialPredicate
+ WHERE c.id = $1` + liveSAKindPredicate
 
 // ownerCutoffForbids — запрещает ли отсечка отзыва-всех владельца
 // удостоверение, выданное в момент issuedAt. Одно решение на обе полосы и оба

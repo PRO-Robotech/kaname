@@ -25,30 +25,14 @@ import (
 // pathPositionFindings — находки перечня Р2 по исходнику слушателя.
 func pathPositionFindings(src string, positions map[string]PathPosition) (inspected int, findings []string) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "handler.go", src, parser.SkipObjectResolution)
+	f, err := parser.ParseFile(fset, "handler.go", src, 0)
 	if err != nil {
 		return 0, []string{"разбор handler.go: " + err.Error()}
 	}
-	// Значения констант путей: имя → литерал.
-	consts := map[string]string{}
-	for _, d := range f.Decls {
-		gd, ok := d.(*ast.GenDecl)
-		if !ok || gd.Tok != token.CONST {
-			continue
-		}
-		for _, sp := range gd.Specs {
-			vs := sp.(*ast.ValueSpec)
-			for i, n := range vs.Names {
-				if i < len(vs.Values) {
-					if bl, ok := vs.Values[i].(*ast.BasicLit); ok && bl.Kind == token.STRING {
-						consts[n.Name] = strings.Trim(bl.Value, `"`)
-					}
-				}
-			}
-		}
-	}
+	constantString := laneFileStringConstant(f)
 	// Регистрации: константа пути → имя метода-обработчика.
 	routes := map[string]string{}
+	routesPathIDs := map[string]*ast.Ident{}
 	methods := map[string]*ast.FuncDecl{}
 	for _, d := range f.Decls {
 		fd, ok := d.(*ast.FuncDecl)
@@ -75,6 +59,7 @@ func pathPositionFindings(src string, positions map[string]PathPosition) (inspec
 			}
 			if hs, ok := wrap.Args[1].(*ast.SelectorExpr); ok {
 				routes[pathID.Name] = hs.Sel.Name
+				routesPathIDs[pathID.Name] = pathID
 			}
 			return true
 		})
@@ -90,7 +75,11 @@ func pathPositionFindings(src string, positions map[string]PathPosition) (inspec
 	sort.Strings(names)
 	for _, pathConst := range names {
 		inspected++
-		path := consts[pathConst]
+		path, known := constantString(routesPathIDs[pathConst])
+		if !known {
+			findings = append(findings, "путь "+pathConst+" — не строковая константа файла")
+			continue
+		}
 		seen[path] = true
 		pos, declared := positions[path]
 		if !declared {

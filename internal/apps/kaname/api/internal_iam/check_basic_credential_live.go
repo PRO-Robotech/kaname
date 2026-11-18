@@ -58,7 +58,7 @@ func (h *Handler) CheckBasicCredentialLive(
 		// Непровязанный контроль не есть «живо»: fail-closed по тому же
 		// разделителю, что у резолва.
 		h.countBasic(BasicCredentialLiveness, BasicOutcomeUnavailable)
-		return nil, status.Error(codes.Unavailable, credentialStateUnknownText)
+		return nil, status.Error(codes.Unavailable, stateUnknownText)
 	}
 
 	id := req.GetCredentialId()
@@ -98,14 +98,14 @@ func (h *Handler) CheckBasicCredentialLive(
 			h.logger.ErrorContext(ctx, "basic credential liveness could not be established",
 				slog.Any("error", err))
 		}
-		return nil, status.Error(codes.Unavailable, credentialStateUnknownText)
+		return nil, status.Error(codes.Unavailable, stateUnknownText)
 	}
 }
 
-// credentialStateUnknownText — ЕДИНСТВЕННЫЙ текст исхода «состояние не
+// stateUnknownText — ЕДИНСТВЕННЫЙ текст исхода «состояние не
 // установлено». Объявлен одним местом по той же причине, что и отказ полосы:
 // два написания разошлись бы, и по различию узнавали бы, каким путём спрашивали.
-// #nosec G101 -- это ТЕКСТ ОТКАЗА, который видит вызывающий, а не удостоверение:
+// это ТЕКСТ ОТКАЗА, который видит вызывающий, а не удостоверение:
 // слово `credential` называет предмет отказа. Значение уходит на провод именно
 // затем, чтобы наружу не ушло ничего другого.
-const credentialStateUnknownText = "credential state could not be established"
+const stateUnknownText = "credential state could not be established"

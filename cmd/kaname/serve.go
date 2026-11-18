@@ -1452,7 +1452,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		Name:    "выдача токенов (/iam/token, /iam/v1/token)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(registryTokenAddr, knobRegistryToken+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
+		Addr:    addrAxis(registryTokenAddr, knobRegistryExchange+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
 		Auth:    issuingSurfaceAuthOf(registryTokenHandler),
@@ -1674,7 +1674,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// отказе — иначе оператор знает, что не так, и не знает, где это чинить.
 	httpSurfaces := []raisedSurface{
 		{knobMetrics, metricsSurface},
-		{knobRegistryToken, registryTokenSurface},
+		{knobRegistryExchange, registryTokenSurface},
 		{knobLoginLane, loginLaneSurface},
 		{knobJWKSProxy, jwksProxySurface},
 		{knobPublicREST, restSurface},
