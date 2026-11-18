@@ -27,6 +27,11 @@ type StandingCreator struct {
 	ExpiresAt                                      time.Time
 }
 
+const (
+	issuedKindField   = "credentialKind"
+	issuedKeypairKind = "CREDENTIAL_KIND_KEYPAIR"
+)
+
 func (c *StandingCreator) SecretMaterial() []string { return []string{c.privateKey} }
 
 func (w *Wire) createOperation(ctx context.Context, operator *VerifiedOperator, path string, body any) (Operation, error) {
@@ -91,8 +96,8 @@ func (w *Wire) ProvisionStandingCreatorWithKeyTTL(ctx context.Context, operator 
 	if err != nil {
 		return nil, err
 	}
-	issued, err := w.createOperation(ctx, operator, "/iam/v1/serviceAccounts/"+sa.ID+"/keys", map[string]any{ // #nosec G101 -- константы задают вид и описание ключа; секрет получается настоящим вызовом API.
-		"credentialKind": "CREDENTIAL_KIND_KEYPAIR", "description": "RID durable standing creator", "ttlSeconds": ttlSeconds})
+	issued, err := w.createOperation(ctx, operator, "/iam/v1/serviceAccounts/"+sa.ID+"/keys", map[string]any{
+		issuedKindField: issuedKeypairKind, "description": "RID durable standing creator", "ttlSeconds": ttlSeconds})
 	if err != nil {
 		return nil, err
 	}

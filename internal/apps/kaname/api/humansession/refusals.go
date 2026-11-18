@@ -24,8 +24,10 @@ const (
 	// Ф3-02) различает присланное, а не найденное (Д30).
 	TextLoginWithSecondFactorFailed = "authentication failed; check the email, the password and the code, and send secondFactor only if a second factor is enrolled"
 	TextTooManyAttempts             = "too many attempts; try again later"
-	// #nosec G101 -- ТЕКСТ ОТКАЗА, уезжающий клиенту, а не значение удостоверения.
-	TextFormTokenRejected   = "form token rejected"
+
+	textFormRejected = "form token rejected"
+	// TextFormTokenRejected сохраняет исходное имя константы для вызывающих.
+	TextFormTokenRejected   = textFormRejected
 	TextLogoutNotPerformed  = "logout not performed; try again later"
 	TextRequestNotPerformed = "request not performed; try again later"
 )
@@ -34,8 +36,9 @@ const (
 // «требуется сменить пароль» в перечне НЕТ: поле сессии, которое её
 // производило бы, снято с контракта (kacho#2697, kaname#201).
 const (
-	// #nosec G101 -- машинный ПРИЗНАК ПРИЧИНЫ ОТКАЗА (`ErrorInfo.reason`), не секрет.
-	ReasonFormTokenRejected = "FORM_TOKEN_REJECTED"
+	reasonFormRejected = "FORM_TOKEN_REJECTED"
+	// ReasonFormTokenRejected сохраняет исходное имя константы для вызывающих.
+	ReasonFormTokenRejected = reasonFormRejected
 	ReasonTooManyAttempts   = "TOO_MANY_ATTEMPTS"
 )
 

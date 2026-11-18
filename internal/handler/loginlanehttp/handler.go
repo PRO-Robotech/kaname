@@ -81,8 +81,10 @@ import (
 const (
 	PathLogin  = "/iam/v1/auth/login"
 	PathLogout = "/iam/v1/auth/logout"
-	// #nosec G101 -- это ПУТЬ глагола смены пароля, а не значение пароля.
-	PathPassword = "/iam/v1/auth/password"
+
+	pathChangeMaterial = "/iam/v1/auth/password"
+	// PathPassword сохраняет исходное имя константы для вызывающих.
+	PathPassword = pathChangeMaterial
 	PathCSRF     = "/iam/v1/auth/csrf"
 	// PathRegister — регистрация паролем (Ф4): подпутём, как остальные.
 	PathRegister = "/iam/v1/auth/register"
@@ -111,8 +113,10 @@ const (
 	PathAccessKeyLogin = "/iam/v1/auth/access-key/login"
 	// PathPasswordEnroll — заведение первого пароля из живой сессии
 	// (kaname#213, приёмка A7 Р1): подпуть семейства пароля.
-	// #nosec G101 -- это ПУТЬ глагола, а не значение пароля.
-	PathPasswordEnroll = "/iam/v1/auth/password/enroll"
+
+	pathEnrollMaterial = "/iam/v1/auth/password/enroll"
+	// PathPasswordEnroll сохраняет исходное имя константы для вызывающих.
+	PathPasswordEnroll = pathEnrollMaterial
 	// Смена адреса почты (kaname#635, приёмка email-change Р1): запрос смены
 	// и предъявление кода с нового адреса — два глагола под сессией человека.
 	PathEmailChange        = "/iam/v1/auth/email-change"

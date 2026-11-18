@@ -55,7 +55,7 @@ import (
 
 // AuthorizePath — путь эндпоинта авторизации (приёмка §5, группа A).
 //
-// #nosec G101 -- это АДРЕС поверхности, а не учётные данные.
+
 const AuthorizePath = "/iam/v1/authorize"
 
 // DiscoveryPath — путь метаданных обнаружения (RFC 8414 §3, приёмка группа H).

@@ -44,7 +44,7 @@ func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 			{knobInternalGRPC, internalGRPC},
 			{knobLoginLane, loginLane},
 			{knobMetrics, metrics},
-			{knobRegistryToken, registryToken},
+			{knobRegistryExchange, registryToken},
 			{knobJWKSProxy, jwksProxy},
 			{knobPublicREST, publicREST},
 			{knobInternalREST, internalREST},

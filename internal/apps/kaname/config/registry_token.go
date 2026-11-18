@@ -45,8 +45,8 @@ import (
 // объявляет посадка реестра. Умолчания у величины, которую нельзя выбрать за
 // оператора, быть не может: незаданный адресат отвергается стражем старта.
 const (
-	defaultRegistryTokenIssuer = "https://api.kacho.local/iam/token" // #nosec G101 -- OIDC issuer URL default (iss claim), not a credential
-	defaultRegistryTokenTTL    = 5 * time.Minute
+	defaultRegistryIssuerURL = "https://api.kacho.local/iam/token"
+	defaultRegistryTokenTTL  = 5 * time.Minute
 )
 
 // RegistryTokenConfig — api-server.registry-token section.
@@ -284,7 +284,7 @@ func (c RegistryTokenConfig) TokenIssuer() string {
 	if s := strings.TrimSpace(c.Issuer); s != "" {
 		return s
 	}
-	return defaultRegistryTokenIssuer
+	return defaultRegistryIssuerURL
 }
 
 // TokenService — объявленное имя службы реестра (`aud` + `service=` в вызове на

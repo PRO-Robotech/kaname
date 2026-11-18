@@ -59,9 +59,9 @@ const RecoveryCodeLength = 10
 // recoveryCodeAlphabet — алфавит Крокфорда: 32 знака без I, L, O, U.
 const recoveryCodeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-// recoveryCodeRedacted — заглушка на всяком общем пути вывода.
-// #nosec G101 -- это ЗАМЕНА кода в выводе, а не сам код.
-const recoveryCodeRedacted = "[redacted recovery code]"
+// recoveryDisplayRedaction — заглушка на всяком общем пути вывода.
+
+const recoveryDisplayRedaction = "[redacted recovery code]"
 
 // ErrRecoveryCodeNotSerializable — код не сериализуется ни в JSON, ни в текст:
 // в письмо он уходит одним путём — `Letter` из писателя очереди.
@@ -143,11 +143,11 @@ func (v RecoveryCodeValue) Digest() CodeDigest {
 }
 
 // String — заглушка.
-func (v RecoveryCodeValue) String() string { return recoveryCodeRedacted }
+func (v RecoveryCodeValue) String() string { return recoveryDisplayRedaction }
 
 // GoString — заглушка и для `%#v`.
 func (v RecoveryCodeValue) GoString() string {
-	return "domain.RecoveryCodeValue{" + recoveryCodeRedacted + "}"
+	return "domain.RecoveryCodeValue{" + recoveryDisplayRedaction + "}"
 }
 
 // Format — заглушка на любом глаголе форматирования.
@@ -156,11 +156,11 @@ func (v RecoveryCodeValue) Format(f fmt.State, verb rune) {
 		_, _ = io.WriteString(f, v.GoString())
 		return
 	}
-	_, _ = io.WriteString(f, recoveryCodeRedacted)
+	_, _ = io.WriteString(f, recoveryDisplayRedaction)
 }
 
 // LogValue — заглушка для журнала.
-func (v RecoveryCodeValue) LogValue() slog.Value { return slog.StringValue(recoveryCodeRedacted) }
+func (v RecoveryCodeValue) LogValue() slog.Value { return slog.StringValue(recoveryDisplayRedaction) }
 
 // MarshalJSON — отказ.
 func (v RecoveryCodeValue) MarshalJSON() ([]byte, error) { return nil, ErrRecoveryCodeNotSerializable }

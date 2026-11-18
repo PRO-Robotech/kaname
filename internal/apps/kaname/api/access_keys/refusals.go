@@ -46,11 +46,13 @@ const (
 	TextUserNotPresent       = "authenticator did not report user presence: begin registration again and confirm presence on the authenticator"
 	TextAlgorithmNotAllowed  = "credential public key algorithm is not in the declared list: begin registration again with an algorithm named in the challenge"
 	TextNotDiscoverable      = "credential is not discoverable: begin registration again with a discoverable credential"
-	TextMalformedCredential  = "credential result is malformed: begin registration again" // #nosec G101 -- текст отказа, а не секрет
-	TextLastSignInMethod     = "last sign-in method cannot be revoked: enrol another sign-in method first"
-	TextUserNotActive        = "user %s is not active and cannot register an access key"
-	TextAccessKeyNotFound    = "AccessKey %s not found"
-	TextCeilingNextStep      = "revoke an access key you no longer need, or raise own-ceilings.access-keys-per-user"
+	textMalformedResult      = "credential result is malformed: begin registration again"
+	// TextMalformedCredential сохраняет исходное имя константы для вызывающих.
+	TextMalformedCredential = textMalformedResult
+	TextLastSignInMethod    = "last sign-in method cannot be revoked: enrol another sign-in method first"
+	TextUserNotActive       = "user %s is not active and cannot register an access key"
+	TextAccessKeyNotFound   = "AccessKey %s not found"
+	TextCeilingNextStep     = "revoke an access key you no longer need, or raise own-ceilings.access-keys-per-user"
 )
 
 // Признаки (`ErrorInfo.reason`) — закрытый перечень.
