@@ -56,13 +56,16 @@ import (
 var sessionRowDoors = map[string]bool{
 	"InsertSession": true, "EndSession": true, "EndOtherSessions": true,
 	"RotateBearer": true, "PresentInSession": true,
-	"IssueSession": true, "SweepUnservableSessions": true,
+	"IssueSession": true, "IssueSessionPrepared": true, "SweepUnservableSessions": true,
 	"presentInSession": true,
 }
 
 // writerSceneLedger — писатель → сцена внахлёст с удалением личности либо
 // причина, по которой её нет. Ключ — «пакет.Получатель.функция».
 var writerSceneLedger = map[string]string{
+	// Общая функция выдачи исполняется при завершении восстановления
+	// существующей личности в сцене одновременно с её удалением.
+	"humansession.IssueSessionPrepared":                 "TestIntegration_SessionWriterRecoveryCompletionAndIdentityDeletionDoNotDeadlock",
 	"access_keys.RevokeUseCase.endSessionsOf":           "TestIntegration_SessionWriterAccessKeyRevokeAndIdentityDeletionDoNotDeadlock",
 	"humansession.AccessKeyLoginUseCase.issue":          "TestIntegration_SessionWriterAccessKeyLoginAndIdentityDeletionDoNotDeadlock",
 	"humansession.StepUpUseCase.presentKey":             "TestIntegration_SessionWriterStepUpWithKeyAndIdentityDeletionDoNotDeadlock",
@@ -314,6 +317,8 @@ func TestSessionRowWriterCensusKnowsEveryForm(t *testing.T) {
 		{"вызов метода", "type U struct{}\nfunc (u *U) Run(w interface{ EndSession() }) { w.EndSession() }\n", "probe.U.Run"},
 		{"функция другого пакета", "import hs \"x/humansession\"\nfunc Run() { hs.IssueSession() }\n", "probe.Run"},
 		{"функция своего пакета", "func IssueSession() {}\nfunc Run() { IssueSession() }\n", "probe.Run"},
+		{"подготовленная функция другого пакета", "import hs \"x/humansession\"\nfunc Run() { hs.IssueSessionPrepared() }\n", "probe.Run"},
+		{"подготовленная функция своего пакета", "func IssueSessionPrepared() {}\nfunc Run() { IssueSessionPrepared() }\n", "probe.Run"},
 		{"метод значением", "type R struct{ S interface{ SweepUnservableSessions() } }\nfunc With(r R) any { return r.S.SweepUnservableSessions }\n", "probe.With"},
 		// Две формы объявления уровня пакета (круг 1 сборки 435, опыт b382_1
 		// проверяющего): у писателя нет объявления функции, и обход одних тел
