@@ -2,8 +2,8 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 =======================================================================
 
 ПРОВЕНАНС
-  снято               2026-11-17 20:55:36 MSK
-  ревизия дерева      be000028c90ebba6a375ad8ef0a7f904796f6a26
+  снято               2026-11-18 14:55:35 MSK
+  ревизия дерева      17615806b08f5a870e17d19e137d04f4046d1a86
   состояние дерева    чистое по предмету замера: несохранённых правок среди
                       файлов под отпечатком нет — ревизия описывает
                       исполнявшийся КОД целиком.
@@ -16,7 +16,7 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 
 ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
   отпечаток состава     1604e0ba3a88eca5
-  отпечаток содержимого b0eca111abe0c05f
+  отпечаток содержимого dc7496be8525c8e3
   файлов под отпечатком 30, таблиц выведено 1 (kaname.resource_mirror)
   предикат отпечатка    все не-тестовые .go каталога services/iam/internal/apps/kaname/api/access_binding/reconcile; те .sql каталога services/iam/internal/migrations, у которых хотя бы один оператор определения имеет СУБЪЕКТОМ таблицу, которую пишет материализатор: оператор РАЗБИРАЕТСЯ (глагол, вид объекта, имена в грамматически определённых позициях), а не ищется подстрокой; границы операторов тоже разбираются — точка с запятой внутри литерала (обычного и с экранированием E'…\'…'), внутри имени в кавычках и внутри тела в долларовых кавычках оператора не кончает; комментарий не исполняется и субъектом не бывает; DDL над временным объектом, над функцией и над последовательностью субъектом ТАБЛИЦЫ не является by construction, а безвредность вида объекта НЕ ОБЪЯВЛЯЕТСЯ, а доказывается парой операторов с положительным контролем; СВЕРХ ОПРЕДЕЛЕНИЯ судятся формы, меняющие план не будучи им, — расширенная статистика, политика построчной безопасности, наследование, ANALYZE/REINDEX/CLUSTER/VACUUM; исполняемый SQL (EXECUTE) разбирается ТЕМ ЖЕ разбором, второго перечня глаголов нет — выписанный оператор судится ТОЧНО по своему субъекту, а подстановка format(%I) делает имя подстановочным и совпадает с любой измеряемой таблицей В ТОМ ПОЛЕ, где стоит; индекс и расширенная статистика, названные по имени, связываются с таблицей по словарю, ВЫВЕДЕННОМУ обходом того же каталога, а неизвестное имя и незнакомый вид объекта судятся ОСТОРОЖНО — «задевает», потому что молчание на них было бы слепотой; ОТБОР ЧИТАЕТ ФАЙЛ ЦЕЛИКОМ, включая раздел ОТКАТА, который в работе не исполняется: миграция попадает под отпечаток и за оператор, стоящий только там; СВЕРХ ТОГО сюда идут триггер на такой таблице и ВХОДЯЩИЙ внешний ключ на неё — оба исполняются на ЗАПИСИ, то есть ровно на том пути, стоимость которого этот отчёт и меряет (у отпечатка ЧТЕНИЯ этих двух форм нет: план чтения они не меняют); имена таблиц ВЫВЕДЕНЫ из его кода по приставке "kaname.", а не выписаны; у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; строковая лексема, называющая КООРДИНАТУ собственного дерева (путь импорта своего модуля, координата модуля в дереве платформы либо путь, начинающийся с каталога верхнего уровня ПОСТАВКИ МОДУЛЯ), заменяется постоянной меткой — адрес кода не есть его поведение, поэтому переезд каталога замер тоже НЕ обесценивает, а словарь координат выведен из поставки модуля и потому ОДИН В ОБЕИХ ПОСАДКАХ; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала; файл опознаётся ТОЖДЕСТВОМ «роль каталога/имя файла», а не путём, и в этом же порядке считается содержимое — поэтому оба плеча неподвижны при переименовании каталога by construction
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (хэш · тождество · путь на момент замера)
@@ -49,7 +49,7 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
     6df6c0d619cadb7c  миграции/20261115120000_role_prelock_admission_before_catalog_locks.sql  services/iam/internal/migrations/20261115120000_role_prelock_admission_before_catalog_locks.sql
     de2953e575d416a0  миграции/20261115130000_service_account_state_prepares_all_cutoff_waits.sql  services/iam/internal/migrations/20261115130000_service_account_state_prepares_all_cutoff_waits.sql
     a077db61572f9a79  миграции/20261115140000_parent_prelock_admission_before_row_locks.sql  services/iam/internal/migrations/20261115140000_parent_prelock_admission_before_row_locks.sql
-    903900cfcf76276d  миграции/20261115150000_full_crud_commands_compile_before_clock.sql  services/iam/internal/migrations/20261115150000_full_crud_commands_compile_before_clock.sql
+    46c9ae8ce9aa3cce  миграции/20261115150000_full_crud_commands_compile_before_clock.sql  services/iam/internal/migrations/20261115150000_full_crud_commands_compile_before_clock.sql
 
 СЕТКА (константа в коде, ниоткуда не переопределяется)
   полосы: аддитивная (создание выдачи) · полная (правка роли) · удаление истечением срока · веер выдач
@@ -82,24 +82,24 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 
 полоса                     членов      исход                                       время   стейтм.     ACTIVE     реестр очер.движ.
 ------------------------------------------------------------------------------------------------------------------------------------
-аддитивная (создание)      100         СОШЁЛСЯ                                     742ms        12        100        400       105
-аддитивная (создание)      1000        СОШЁЛСЯ                                    2.975s        12       1000       4000      1005
-аддитивная (создание)      10000       СОШЁЛСЯ                                   25.756s        14      10000      40000     10005
-аддитивная (создание)      65536       СОШЁЛСЯ                                   12.283s        90      65536       4096      1029
-аддитивная (создание)      655360*     СОШЁЛСЯ                                 1m59.982s       234     655360      40960     10245
-полная (правка роли)       100         СОШЁЛСЯ                                     813ms        13        100        400       105
-полная (правка роли)       1000        СОШЁЛСЯ                                     3.33s        13       1000       4000      1005
-полная (правка роли)       10000       СОШЁЛСЯ                                   36.537s        40      10000      40000     10005
-полная (правка роли)       65536       СОШЁЛСЯ                                   29.134s       202      65536       4096      1029
-полная (правка роли)       655360*     ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)         2m0.001s       482          0          0         5
-удаление истечением срока  100         СОШЁЛСЯ                                     446ms       115          0          0       205
-удаление истечением срока  1000        СОШЁЛСЯ                                    3.582s      1015          0          0      2005
-удаление истечением срока  10000       СОШЁЛСЯ                                   35.519s     10015          0          0     20005
-удаление истечением срока  65536       СОШЁЛСЯ                                  1m3.384s     65551          0          0      2053
-полная, ВЕЕР выдач         1×100       СОШЁЛСЯ                                     790ms        13        100        400       105
-полная, ВЕЕР выдач         9×100       СОШЁЛСЯ                                    6.114s       117        100        400       905
-полная, ВЕЕР выдач         227×100     ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)         2m0.001s      2287          0          0     17505
-полная, ВЕЕР выдач         512×100*    ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)         2m0.001s      2301          0          0     17605
+аддитивная (создание)      100         СОШЁЛСЯ                                     744ms        12        100        400       105
+аддитивная (создание)      1000        СОШЁЛСЯ                                    3.009s        12       1000       4000      1005
+аддитивная (создание)      10000       СОШЁЛСЯ                                   25.609s        14      10000      40000     10005
+аддитивная (создание)      65536       СОШЁЛСЯ                                   12.416s        90      65536       4096      1029
+аддитивная (создание)      655360*     СОШЁЛСЯ                                 1m59.872s       234     655360      40960     10245
+полная (правка роли)       100         СОШЁЛСЯ                                     803ms        13        100        400       105
+полная (правка роли)       1000        СОШЁЛСЯ                                    3.268s        13       1000       4000      1005
+полная (правка роли)       10000       СОШЁЛСЯ                                   37.032s        40      10000      40000     10005
+полная (правка роли)       65536       СОШЁЛСЯ                                   29.689s       202      65536       4096      1029
+полная (правка роли)       655360*     ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)             2m0s       482          0          0         5
+удаление истечением срока  100         СОШЁЛСЯ                                     456ms       115          0          0       205
+удаление истечением срока  1000        СОШЁЛСЯ                                    3.598s      1015          0          0      2005
+удаление истечением срока  10000       СОШЁЛСЯ                                   35.038s     10015          0          0     20005
+удаление истечением срока  65536       СОШЁЛСЯ                                  1m3.432s     65551          0          0      2053
+полная, ВЕЕР выдач         1×100       СОШЁЛСЯ                                     805ms        13        100        400       105
+полная, ВЕЕР выдач         9×100       СОШЁЛСЯ                                    6.127s       117        100        400       905
+полная, ВЕЕР выдач         227×100     ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)             2m0s      2313          0          0     17705
+полная, ВЕЕР выдач         512×100*    ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)             2m0s      2300          0          0     17605
 
 СТЕЙТМЕНТОВ НА ЧЛЕНА — ЭТО И ЕСТЬ РАЗЛИЧИЕ ПАКЕТНОЙ И ПОШТУЧНОЙ ПОЛОС
   Знаменатель — члены ВСЕГО (веер × членов на выдачу), а не члены одной выдачи:
@@ -107,24 +107,24 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
   другого предиката.
 полоса                     членов всего     стейтментов         на члена три самых частых
 ------------------------------------------------------------------------------------------------------------------------------------
-аддитивная (создание)      100                       12           0.1200 SELECT id, cluster_id,×1 · SELECT m.object_type, m.object_id×1 · SELECT kaname.authority_forward_emit_v4($1::jsonb[])×1
-аддитивная (создание)      1000                      12           0.0120 begin×1 · SELECT kaname.authority_reconcile_enter_v3()×1 · SELECT id, subject_type,×1
-аддитивная (создание)      10000                     14           0.0014 INSERT INTO kaname.access_binding_target_members×3 · SELECT kaname.authority_forward_emit_v4($1::jsonb[])×1 · begin×1
-аддитивная (создание)      65536                     90           0.0014 SELECT m.object_type, m.object_id,×64 · INSERT INTO kaname.access_binding_target_members×16 · SELECT kaname.authority_reconcile_enter_v3()×1
+аддитивная (создание)      100                       12           0.1200 SELECT kaname.authority_forward_emit_v4($1::jsonb[])×1 · INSERT INTO kaname.access_binding_emitted_tuples×1 · begin×1
+аддитивная (создание)      1000                      12           0.0120 SELECT subject_type, subject_id×1 · SELECT id, cluster_id,×1 · SELECT m.object_type, m.object_id×1
+аддитивная (создание)      10000                     14           0.0014 INSERT INTO kaname.access_binding_target_members×3 · SELECT kaname.authority_forward_emit_v4($1::jsonb[])×1 · INSERT INTO kaname.access_binding_emitted_tuples×1
+аддитивная (создание)      65536                     90           0.0014 SELECT m.object_type, m.object_id,×64 · INSERT INTO kaname.access_binding_target_members×16 · SELECT m.object_type, m.object_id×1
 аддитивная (создание)      655360                   234           0.0004 INSERT INTO kaname.access_binding_target_members×160 · SELECT m.object_type, m.object_id,×64 · SELECT id, subject_type,×1
-полная (правка роли)       100                       13           0.1300 begin×1 · SELECT pg_advisory_xact_lock(hashtext($1))×1 · SELECT id, subject_type,×1
-полная (правка роли)       1000                      13           0.0130 SELECT kaname.authority_reconcile_enter_v3()×1 · SELECT id, subject_type,×1 · SELECT subject_type, subject_id×1
+полная (правка роли)       100                       13           0.1300 INSERT INTO kaname.access_binding_emitted_tuples×1 · begin×1 · SELECT kaname.authority_reconcile_enter_v3()×1
+полная (правка роли)       1000                      13           0.0130 SELECT binding_id, role_id,×1 · SELECT kaname.authority_forward_emit_v4($1::jsonb[])×1 · commit×1
 полная (правка роли)       10000                     40           0.0040 INSERT INTO kaname.access_binding_target_members×10 · SELECT kaname.authority_forward_emit_v4($1::jsonb[])×10 · INSERT INTO kaname.access_binding_emitted_tuples×10
 полная (правка роли)       65536                    202           0.0031 SELECT m.object_type, m.object_id,×64 · INSERT INTO kaname.access_binding_target_members×64 · INSERT INTO kaname.access_binding_emitted_tuples×64
 полная (правка роли)       655360                   482           0.0007 INSERT INTO kaname.access_binding_target_members×200 · INSERT INTO kaname.access_binding_emitted_tuples×199 · SELECT m.object_type, m.object_id,×64
-удаление истечением срока  100                      115           1.1500 DELETE FROM kaname.access_binding_target_members×100 · SELECT id, subject_type,×2 · INSERT INTO kaname.subject_change_outbox×1
-удаление истечением срока  1000                    1015           1.0150 DELETE FROM kaname.access_binding_target_members×1000 · SELECT id, subject_type,×2 · begin×1
-удаление истечением срока  10000                  10015           1.0015 DELETE FROM kaname.access_binding_target_members×10000 · SELECT id, subject_type,×2 · SELECT subject_type, subject_id×1
-удаление истечением срока  65536                  65551           1.0002 DELETE FROM kaname.access_binding_target_members×65536 · SELECT id, subject_type,×2 · SELECT kaname.authority_reconcile_enter_v3()×1
-полная, ВЕЕР выдач         100                       13           0.1300 SELECT subject_type, subject_id×1 · SELECT m.object_type, m.object_id,×1 · SELECT binding_id, role_id,×1
-полная, ВЕЕР выдач         900                      117           0.1300 SELECT kaname.authority_reconcile_enter_v3()×9 · SELECT pg_advisory_xact_lock(hashtext($1))×9 · SELECT subject_type, subject_id×9
-полная, ВЕЕР выдач         22700                   2287           0.1007 SELECT kaname.authority_reconcile_enter_v3()×176 · SELECT pg_advisory_xact_lock(hashtext($1))×176 · SELECT id, subject_type,×176
-полная, ВЕЕР выдач         51200                   2301           0.0449 begin×177 · SELECT kaname.authority_reconcile_enter_v3()×177 · SELECT pg_advisory_xact_lock(hashtext($1))×177
+удаление истечением срока  100                      115           1.1500 DELETE FROM kaname.access_binding_target_members×100 · SELECT id, subject_type,×2 · SELECT id, cluster_id,×1
+удаление истечением срока  1000                    1015           1.0150 DELETE FROM kaname.access_binding_target_members×1000 · SELECT id, subject_type,×2 · INSERT INTO kaname.subject_change_outbox×1
+удаление истечением срока  10000                  10015           1.0015 DELETE FROM kaname.access_binding_target_members×10000 · SELECT id, subject_type,×2 · INSERT INTO kaname.subject_change_outbox×1
+удаление истечением срока  65536                  65551           1.0002 DELETE FROM kaname.access_binding_target_members×65536 · SELECT id, subject_type,×2 · commit×1
+полная, ВЕЕР выдач         100                       13           0.1300 SELECT id, cluster_id,×1 · SELECT m.object_type, m.object_id,×1 · SELECT binding_id, role_id,×1
+полная, ВЕЕР выдач         900                      117           0.1300 SELECT kaname.authority_reconcile_enter_v3()×9 · INSERT INTO kaname.access_binding_target_members×9 · SELECT kaname.authority_forward_emit_v4($1::jsonb[])×9
+полная, ВЕЕР выдач         22700                   2313           0.1019 SELECT subject_type, subject_id×178 · SELECT id, cluster_id,×178 · SELECT m.object_type, m.object_id,×178
+полная, ВЕЕР выдач         51200                   2300           0.0449 begin×177 · SELECT id, subject_type,×177 · SELECT subject_type, subject_id×177
 
 НАСЫЩЕНИЕ ШТАТНОГО ПРИБОРА
   Корзины `kaname_binding_materialization_tuples` кончаются на 5000. Точка,
@@ -159,7 +159,7 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 удаление истечением срока  65536                   2053                    0
 полная, ВЕЕР выдач         100                      105                    0
 полная, ВЕЕР выдач         900                      905                    0
-полная, ВЕЕР выдач         22700                  17505                    0
+полная, ВЕЕР выдач         22700                  17705                    0
 полная, ВЕЕР выдач         51200                  17605                    0
 
 
