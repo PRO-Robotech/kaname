@@ -12,122 +12,120 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kaname/internal/check"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 	"gopkg.in/yaml.v3"
 )
 
-const deferredRequiredPass = "github.com/PRO-Robotech/kaname/internal/check::TestNoDeferredWorkInTheTree"
-
-// deferredUnitBody берёт исполняемый шаг unit из настоящего YAML. Комментарий
-// с командой, отдельный необязательный шаг и другой job не заменяют этот шаг.
-func deferredUnitBody(raw string) (string, error) {
+// Проверяем настоящий DAG и исполняем shell обязательного агрегата. Аргументы
+// Go и потоки canonical verifier отдельно проверяет TestRunUnitPartition.
+func deferredUnitBodies(raw string) (map[string]string, error) {
 	var doc struct {
 		Jobs map[string]struct {
-			Steps []struct {
-				Run      string `yaml:"run"`
-				If       any    `yaml:"if"`
-				Continue any    `yaml:"continue-on-error"`
+			Needs   []string `yaml:"needs"`
+			If      string   `yaml:"if"`
+			Name    string   `yaml:"name"`
+			Timeout int      `yaml:"timeout-minutes"`
+			Steps   []struct {
+				Run      string            `yaml:"run"`
+				If       any               `yaml:"if"`
+				Continue any               `yaml:"continue-on-error"`
+				Env      map[string]string `yaml:"env"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
-		return "", err
+		return nil, err
 	}
-	var selected []string
-	for _, step := range doc.Jobs["unit"].Steps {
-		wrapped, err := yaml.Marshal(map[string]any{"jobs": map[string]any{"unit": map[string]any{"steps": []map[string]string{{"run": step.Run}}}}})
-		if err != nil {
-			return "", err
+	selected := make(map[string]string)
+	condition := "${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit') }}"
+	for _, part := range []string{"main", "census", "aggregate"} {
+		jobID := "unit" + part
+		if part == "aggregate" {
+			jobID = "unit"
 		}
-		bodies, _, err := check.ExecutableRunBodies(string(wrapped))
-		if err != nil {
-			return "", err
+		job := doc.Jobs[jobID]
+		wantNeeds, wantIf := "changes", strings.Replace(condition, "'unit'", "'"+jobID+"'", 1)
+		if part == "aggregate" {
+			wantNeeds = "changes,unitmain,unitcensus"
+			wantIf = "${{ always() && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit')) }}"
+			if job.Name != "пробы -race -short (числовой вердикт)" {
+				return nil, fmt.Errorf("потерян обязательный контекст unit")
+			}
 		}
-		for _, body := range bodies {
-			if !strings.Contains(body, "go test ") {
+		if strings.Join(job.Needs, ",") != wantNeeds || job.If != wantIf || job.Timeout != 90 {
+			return nil, fmt.Errorf("неверные зависимости, условие или бюджет %s", jobID)
+		}
+		for _, step := range job.Steps {
+			if !strings.Contains(step.Run, "run-unit.py") {
 				continue
 			}
-			if step.If != nil || step.Continue != nil {
-				return "", fmt.Errorf("шаг unit обязан быть без if и continue-on-error")
+			if selected[part] != "" || step.Continue != nil {
+				return nil, fmt.Errorf("повтор/необязательный шаг %s", jobID)
 			}
-			selected = append(selected, body)
+			if part != "aggregate" {
+				want := "python3 .github/scripts/run-unit.py " + part + " ci-test-evidence/unit/" + part
+				if step.If != nil || step.Run != want {
+					return nil, fmt.Errorf("изменён обязательный запуск %s", jobID)
+				}
+			} else if step.If != "always()" || step.Env["MAIN_RESULT"] != "${{ needs.unitmain.result }}" || step.Env["CENSUS_RESULT"] != "${{ needs.unitcensus.result }}" {
+				return nil, fmt.Errorf("агрегат не получает фактические результаты обеих частей")
+			}
+			selected[part] = step.Run
+		}
+		if selected[part] == "" {
+			return nil, fmt.Errorf("нет обязательного запуска %s", jobID)
 		}
 	}
-	if len(selected) != 1 {
-		return "", fmt.Errorf("ожидался один общий обязательный шаг unit, найдено %d", len(selected))
-	}
-	return selected[0], nil
+	return selected, nil
 }
 
-// Запускается только shell настоящего шага с подставными go/python3. Подмена
-// записывает реальные аргументы и вход прогонщика; сборка дочернего Go не нужна.
-// Каждый из четырёх отказов обязан покрасить итог, но не снять соседнюю перепись.
 func deferredPartitionFailure(t *testing.T, raw string) error {
 	t.Helper()
-	body, err := deferredUnitBody(raw)
+	bodies, err := deferredUnitBodies(raw)
 	if err != nil {
 		return err
 	}
 	dir := t.TempDir()
-	// Настоящий шаг unit получает этот каталог от предыдущего шага оснастки.
-	if err := os.MkdirAll(filepath.Join(dir, "ci-test-evidence", "unit"), 0700); err != nil {
+	script := "#!/bin/bash\nprintf '%s\\n' \"$*\" >> \"$TRACE\"\nexit \"$ACTUAL_RC\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "python3"), []byte(script), 0700); err != nil {
 		return err
 	}
-	scripts := map[string]string{
-		"go": `#!/bin/bash
-printf 'go %s\n' "$*" >> "$TRACE"
-if [ "$2" = ./internal/check ]; then
- printf 'tree\n'
- exit "$TREE_GO"
-fi
-printf 'race\n'
-exit "$RACE_GO"
-`,
-		"python3": `#!/bin/bash
-input=$(cat)
-printf 'verdict %s input=%s\n' "$*" "$input" >> "$TRACE"
-if [ "$input" = tree ]; then exit "$TREE_VERDICT"; fi
-exit "$RACE_VERDICT"
-`,
+	cases := []struct {
+		main, census, aggregate  int
+		mainStatus, censusStatus string
+	}{
+		{0, 0, 0, "success", "success"}, {7, 0, 0, "failure", "success"},
+		{0, 8, 0, "success", "failure"}, {0, 0, 9, "success", "success"},
+		{7, 8, 9, "failure", "failure"}, {0, 0, 0, "skipped", "success"},
+		{0, 0, 0, "success", "cancelled"}, {0, 0, 0, "", "success"},
 	}
-	for name, script := range scripts {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0700); err != nil {
-			return err
-		}
-	}
-	wantTrace := "go test ./internal/check -run ^TestNoDeferredWorkInTheTree$ -short -count=1 -timeout 4m -json\n" +
-		"verdict .github/scripts/go-test-verdict.py --require-pass " + deferredRequiredPass + " input=tree\n" +
-		"go test ./... -race -short -count=1 -timeout 45m -skip ^TestNoDeferredWorkInTheTree$ -json\n" +
-		"verdict .github/scripts/go-test-verdict.py input=race\n"
-	cases := [][4]int{{0, 0, 0, 0}, {7, 0, 0, 0}, {0, 8, 0, 0}, {0, 0, 9, 0}, {0, 0, 0, 10}, {7, 8, 9, 10}}
-	for _, rc := range cases {
+	for _, tc := range cases {
 		trace := filepath.Join(dir, "trace")
 		if err := os.WriteFile(trace, nil, 0600); err != nil {
 			return err
 		}
-		cmd := exec.Command("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", body)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "TRACE="+trace,
-			fmt.Sprintf("TREE_GO=%d", rc[0]), fmt.Sprintf("TREE_VERDICT=%d", rc[1]), fmt.Sprintf("RACE_GO=%d", rc[2]), fmt.Sprintf("RACE_VERDICT=%d", rc[3]))
-		output, runErr := cmd.CombinedOutput()
+		for i, part := range []string{"main", "census", "aggregate"} {
+			codes := []int{tc.main, tc.census, tc.aggregate}
+			cmd := exec.Command("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", bodies[part])
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "TRACE="+trace,
+				fmt.Sprintf("ACTUAL_RC=%d", codes[i]), "MAIN_RESULT="+tc.mainStatus, "CENSUS_RESULT="+tc.censusStatus)
+			output, runErr := cmd.CombinedOutput()
+			wantOK := codes[i] == 0
+			if part == "aggregate" {
+				wantOK = wantOK && tc.mainStatus == "success" && tc.censusStatus == "success"
+			}
+			if (runErr == nil) != wantOK {
+				return fmt.Errorf("часть %s, коды %+v: %v; %s", part, tc, runErr, output)
+			}
+		}
 		got, err := os.ReadFile(trace)
 		if err != nil {
 			return err
 		}
-		if string(got) != wantTrace {
-			return fmt.Errorf("коды %v: команды/аргументы/входы переписей расходятся:\n%s", rc, got)
-		}
-		if (runErr == nil) != (rc == [4]int{}) {
-			return fmt.Errorf("коды %v: итог shell=%v; %s", rc, runErr, output)
-		}
-		tree, err := os.ReadFile(filepath.Join(dir, "deferred-tree.json"))
-		if err != nil || string(tree) != "tree\n" {
-			return fmt.Errorf("отдельный deferred-tree.json не сохранён: %v", err)
-		}
-		race, err := os.ReadFile(filepath.Join(dir, "test.json"))
-		if err != nil || string(race) != "race\n" {
-			return fmt.Errorf("отдельный test.json не сохранён: %v", err)
+		want := ".github/scripts/run-unit.py main ci-test-evidence/unit/main\n.github/scripts/run-unit.py census ci-test-evidence/unit/census\n.github/scripts/run-unit.py aggregate ci-test-evidence/unit\n"
+		if string(got) != want {
+			return fmt.Errorf("запуски потеряны или подменены: %s", got)
 		}
 	}
 	return nil
@@ -172,22 +170,22 @@ func TestDeferredWorkCIShortPartition(t *testing.T) {
 	if !universal {
 		t.Fatal("unit обязан выбираться для любого пути через **")
 	}
-	t.Log("перепись: обязательный шаг unit 1; группы 2; сочетаний кодов 6; отдельные JSON 2; выбор unit для ** подтверждён")
+	t.Log("перепись: независимые части 2; обязательный агрегат 1; сочетаний кодов/статусов 8; выбор unit для ** подтверждён")
 }
 
 func TestDeferredWorkCIShortPartitionInjections(t *testing.T) {
 	raw := deferredCIWorkflow(t)
 	cases := []struct{ name, old, new string }{
-		{"нет полного обхода", "go test ./internal/check", "echo test ./internal/check"},
-		{"неверный пакет", "go test ./internal/check", "go test ./internal/other"},
-		{"расширенный пропуск", "-skip '^TestNoDeferredWorkInTheTree$'", "-skip 'TestNoDeferredWork'"},
-		{"нет обязательного прохода", " --require-pass '" + deferredRequiredPass + "'", ""},
-		{"код Go скрыт", "|| tree_go_rc=$?", "|| true"},
-		{"код вердикта скрыт", "|| race_verdict_rc=$?", "|| true"},
-		{"один код не влияет на итог", `[ "$tree_verdict_rc" -ne 0 ]`, `[ 0 -ne 0 ]`},
-		{"обход ошибочно под race", "go test ./internal/check", "go test ./internal/check -race"},
-		{"шаг необязателен", "- name: пробы (-race -short и отдельный полный обход дерева)", "- if: success()\n        name: пробы (-race -short и отдельный полный обход дерева)"},
-		{"отказ шага разрешён", "- name: пробы (-race -short и отдельный полный обход дерева)", "- continue-on-error: true\n        name: пробы (-race -short и отдельный полный обход дерева)"},
+		{"нет основной части", "python3 .github/scripts/run-unit.py main", "echo .github/scripts/run-unit.py main"},
+		{"нет Census", "python3 .github/scripts/run-unit.py census", "echo .github/scripts/run-unit.py census"},
+		{"часть зависит от соседа", "needs: [changes]\n    name: unit — Census 11", "needs: [changes, unitmain]\n    name: unit — Census 11"},
+		{"агрегат теряет часть", "needs: [changes, unitmain, unitcensus]", "needs: [changes, unitmain]"},
+		{"код переписи скрыт", "python3 .github/scripts/run-unit.py aggregate ci-test-evidence/unit || rc=$?", "python3 .github/scripts/run-unit.py aggregate ci-test-evidence/unit || true"},
+		{"результат main скрыт", `[ "$MAIN_RESULT" != success ]`, `[ success != success ]`},
+		{"результат Census скрыт", `[ "$CENSUS_RESULT" != success ]`, `[ success != success ]`},
+		{"неверный результат job", "MAIN_RESULT: ${{ needs.unitmain.result }}", "MAIN_RESULT: success"},
+		{"агрегат необязателен", "- name: обязательное объединение compiled inventory и фактических событий", "- continue-on-error: true\n        name: обязательное объединение compiled inventory и фактических событий"},
+		{"подмена обязательного имени", "name: пробы -race -short (числовой вердикт)", "name: необязательная перепись"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
