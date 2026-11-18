@@ -77,6 +77,12 @@ type preparedConflict struct{ cause error }
 
 func (e preparedConflict) Error() string { return iamerr.SerializationConflictSyncText }
 func (e preparedConflict) Unwrap() error { return e.cause }
+
+// Только исчерпание полного budget получает этот marker. Одиночный конфликт
+// из mapErr сохраняет причину и закрытый текст, но не удостоверяет повтор.
+type preparedAttemptsExhausted struct{ preparedConflict }
+
+func (preparedAttemptsExhausted) PreparedAttemptsExhausted() bool { return true }
 func preparedNil[T preparedTransaction](tx T) bool {
 	v := reflect.ValueOf(tx)
 	if !v.IsValid() {
@@ -153,7 +159,7 @@ func executePreparedAttempts[T preparedTransaction](ctx context.Context, open fu
 			return last
 		}
 	}
-	return iamerr.Wrapf(iamerr.ErrAborted, "%w", preparedConflict{last})
+	return iamerr.Wrapf(iamerr.ErrAborted, "%w", preparedAttemptsExhausted{preparedConflict{cause: last}})
 }
 
 func (p *MetadataMutationWriters) ExecutePreparedWrite(ctx context.Context, open func(context.Context) (kaname.Writer, error), action func(context.Context, kaname.Writer) error) error {

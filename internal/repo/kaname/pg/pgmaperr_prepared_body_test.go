@@ -5,6 +5,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
@@ -48,6 +49,8 @@ func TestPreparedAuditBodyConflictPreservesCauseWithoutPublicSQL(t *testing.T) {
 				opened++
 				last = &pgconn.PgError{Code: code, Message: "private SQL message", Detail: "private account row", Where: "private query context", Routine: "private server routine", InternalQuery: "SELECT private_secret FROM private_table"}
 				mapped := mapErr(last, "", "")
+				var exhausted interface { PreparedAttemptsExhausted() bool }
+				require.False(t, errors.As(mapped, &exhausted), "одиночный legacy конфликт не означает исчерпание prepared budget")
 				var cause *pgconn.PgError
 				require.ErrorAs(t, mapped, &cause)
 				require.Same(t, last, cause)
@@ -63,6 +66,9 @@ func TestPreparedAuditBodyConflictPreservesCauseWithoutPublicSQL(t *testing.T) {
 			require.Equal(t, opened, queries)
 			require.Equal(t, opened, rollbacks)
 			require.ErrorIs(t, err, iamerr.ErrAborted)
+			var exhausted interface { PreparedAttemptsExhausted() bool }
+			require.ErrorAs(t, err, &exhausted)
+			require.True(t, exhausted.PreparedAttemptsExhausted(), "marker допустим только после всех трёх попыток")
 			var cause *pgconn.PgError
 			require.ErrorAs(t, err, &cause)
 			require.Same(t, last, cause, "исчерпание сохраняет последнюю реальную причину body")
