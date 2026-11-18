@@ -129,6 +129,11 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 	// отвергаются; bootstrap/reconcile требуют owner receipt и прежние locks.
 	// Binding-ветка идёт в уже закреплённый _authority_binding_mirror_store_v3,
 	// проверяет точную active audit row/preheld key, затем потребляет эту row.
+	// Corrective 181200 переносит прежнее чтение store в private zero-arg probe:
+	// proof и metadata получены одной свежей attestation, без межвызовного кэша.
+	// Store возвращает только metadata; BEFORE сохраняет clock/sequence/images.
+	// Probe не пишет mirror/parent и не добавляет dynamic SQL; его record ABI,
+	// owner и закрытый ACL дополнительно закреплены production storage closure.
 	// Ordinary audit не получает нового admission; UPDATE/DELETE/TRUNCATE
 	// при binding program запрещены. Старый Resource exact-step guard сохранён.
 	for _, f := range []struct {
@@ -136,8 +141,9 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 		definer                                                 bool
 	}{
 		{"_authority_audit_binding_store_v3", "_authority_audit_binding_store_v3()", "77412a99e3ea64432ee6ffe551d84ae7eae02bc2e0be1cbbe8e15941b407f595", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
-		{"_authority_binding_mirror_before_write_v3", "_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)", "91ee46ad24bb6267178100747185c18546bd1f01566e7b2780403f60c8995854", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
-		{"_authority_binding_mirror_store_v3", "_authority_binding_mirror_store_v3()", "94398fb5e832f685ced7c84e6975e21e04729db15a39893977cce3dc32809b61", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
+		{"_authority_binding_mirror_before_write_v3", "_authority_binding_mirror_before_write_v3(text,text,jsonb,jsonb)", "f87132c83a55eac79fa1b0a3153e3213549e9a44291a596992c3709d8d3698ae", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
+		{"_authority_binding_mirror_probe_v4", "_authority_binding_mirror_probe_v4()", "559eb1c2cf31d22bdee76608090856e37e2c2c902334ba4e60a83fff3119b678", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
+		{"_authority_binding_mirror_store_v3", "_authority_binding_mirror_store_v3()", "9a915a6d11fea000ff5e4875b6b1c4e6302c8e0ec2f8879302aa76c9719e6412", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_crud_aux_statement_v3", "_authority_crud_aux_statement_v3()", "8d2c6a5f46066b400d9c42c158a337eb784a405c895145beedc7205133be7bc6", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_crud_aux_write_v3", "_authority_crud_aux_write_v3()", "5b549be379610152a2c2efc86836606fb82c298d885be0125cee3b535cf8cd32", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_crud_intent_v3", "_authority_crud_intent_v3(jsonb)", "e62f470c0c69a980308bec36a35f515609cb8fea56c79ec7632ac654a43e0f49", "plpgsql", "i", "search_path=pg_catalog,pg_temp", true},

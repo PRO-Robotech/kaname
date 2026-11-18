@@ -379,12 +379,33 @@ func TestBindingMirrorLocalityClosureRejectsTriggerAndPrivateHelperTamper(t *tes
 		require.NoError(t, err)
 		parts := strings.Split(string(raw), "-- +goose Down")
 		require.Len(t, parts, 2)
-		tx, err := r.admin.Begin(ctx)
-		require.NoError(t, err)
-		defer mirrorLocalityRollback(t, tx)
+		// Каждый drain — первое выражение своей свежей TX. DDL Down получает
+		// XID, поэтому следующий Up выполняется только после реального COMMIT.
+		apply := func(callCtx context.Context, sql string) error {
+			tx, e := r.admin.Begin(callCtx)
+			if e != nil {
+				return e
+			}
+			defer mirrorLocalityRollback(t, tx)
+			if _, e = tx.Exec(callCtx, sql); e != nil {
+				return e
+			}
+			return tx.Commit(callCtx)
+		}
+		restoreUp := false
+		// Cleanup subtest выполняется до проверок родителя и закрытия private DB.
+		// После committed Down любой Fatal ниже восстанавливает Up в свежей TX,
+		// с отдельным cleanup-контекстом даже при отмене исходного ctx.
+		t.Cleanup(func() {
+			if restoreUp {
+				cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer stop()
+				require.NoError(t, apply(cleanup, parts[0]), "восстановить Up после committed Down")
+			}
+		})
 		state := func() string {
 			var value string
-			require.NoError(t, tx.QueryRow(ctx, `SELECT jsonb_agg(jsonb_build_object(
+			require.NoError(t, r.admin.QueryRow(ctx, `SELECT jsonb_agg(jsonb_build_object(
  'signature',p.oid::regprocedure::text,'oid',CASE WHEN p.proname='_authority_binding_mirror_probe_v4' THEN NULL ELSE p.oid END,
  'definition',pg_get_functiondef(p.oid),'owner',p.proowner,'acl',p.proacl) ORDER BY p.proname)::text
  FROM pg_catalog.pg_proc p WHERE p.pronamespace='kaname'::regnamespace AND p.proname IN (
@@ -393,16 +414,16 @@ func TestBindingMirrorLocalityClosureRejectsTriggerAndPrivateHelperTamper(t *tes
 			return value
 		}
 		before := state()
-		_, err = tx.Exec(ctx, parts[1])
-		require.NoError(t, err)
+		require.NoError(t, apply(ctx, parts[1]))
+		restoreUp = true
 		var absent bool
-		require.NoError(t, tx.QueryRow(ctx, `SELECT to_regprocedure('kaname._authority_binding_mirror_probe_v4()') IS NULL`).Scan(&absent))
+		require.NoError(t, r.admin.QueryRow(ctx, `SELECT to_regprocedure('kaname._authority_binding_mirror_probe_v4()') IS NULL`).Scan(&absent))
 		require.True(t, absent)
-		_, err = tx.Exec(ctx, parts[0])
-		require.NoError(t, err)
+		require.NoError(t, apply(ctx, parts[0]))
+		restoreUp = false
 		require.JSONEq(t, before, state())
 		var good bool
-		require.NoError(t, tx.QueryRow(ctx, `SELECT kaname._authority_full_contract_storage_v3()`).Scan(&good))
+		require.NoError(t, r.admin.QueryRow(ctx, `SELECT kaname._authority_full_contract_storage_v3()`).Scan(&good))
 		require.True(t, good)
 	})
 	var good bool
