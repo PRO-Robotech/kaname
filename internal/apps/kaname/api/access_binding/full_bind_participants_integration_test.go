@@ -31,7 +31,7 @@ import (
 )
 
 // Фабрика наблюдает настоящий материализатор только у выбранной тестовой пробы.
-// Без фабрики все прежние вызовы получают прежний указатель напрямую.
+// После активации без фабрики сохраняется прямой указатель на материализатор.
 type fullBindSelectorObserverFactory func(*reconcile.Reconciler) accessbindingapp.SelectorReconciler
 
 type fullBindSetupAwaiter interface {
@@ -52,16 +52,26 @@ func (w *fullBindWorld) installFullBindParticipantsWithRegistrationExceptions(di
 	w.t.Helper()
 	ownerPool, ownerRepo := w.pool, w.repo
 	require.LessOrEqual(w.t, len(observers), 1)
-	var bootstrapAwaiter fullBindSetupAwaiter
 	if len(observers) == 1 {
 		require.NotNil(w.t, observers[0])
-		// Авто-выдача владельца тоже создаётся публичным Create до activation.
-		// Сохраняем его исходные зависимости, но наблюдаем и этот ранний хвост.
-		selector := observers[0](w.rec)
-		require.NotNil(w.t, selector)
-		var ok bool
-		bootstrapAwaiter, ok = selector.(fullBindSetupAwaiter)
-		require.True(w.t, ok, "наблюдатель настройки должен ожидать настоящий callback")
+	}
+	var bootstrapAwaiter fullBindSetupAwaiter
+	var bootstrapCallbacks *fb11SetupCallbacks
+	// FB13/14 уже создали владельца и дождались его callback до входа сюда.
+	// Повторный ownerMayRemove тогда ничего не создаёт: ждать нового события нельзя.
+	if !w.ownerSeeded {
+		var selector accessbindingapp.SelectorReconciler = w.rec
+		if len(observers) == 1 {
+			selector = observers[0](w.rec)
+			require.NotNil(w.t, selector)
+			var ok bool
+			bootstrapAwaiter, ok = selector.(fullBindSetupAwaiter)
+			require.True(w.t, ok, "наблюдатель настройки должен ожидать настоящий callback")
+		}
+		// Внутренний наблюдатель оборачивает настоящий путь, включая внешний
+		// наблюдатель, если он задан. Operation.done не завершает detached-проходы.
+		bootstrapCallbacks = &fb11SetupCallbacks{}
+		selector = &fb11SetupReconciler{SelectorReconciler: selector, callbacks: bootstrapCallbacks}
 		bootstrapCreate := accessbindingapp.NewCreateAccessBindingUseCase(ownerRepo, w.ops, catalog.Fixed{F: w.facts}).
 			WithRelationStore(w.door, nil).WithReconciler(selector)
 		w.ab = accessbindingapp.NewHandler(bootstrapCreate, nil, nil, nil, nil, nil, nil)
@@ -74,6 +84,14 @@ func (w *fullBindWorld) installFullBindParticipantsWithRegistrationExceptions(di
 	require.Equal(w.t, string(w.accA), actualAccount)
 	w.ownerMayRemove("FB: структурная auto-binding владельца до activation")
 	require.NoError(w.t, ownerPool.QueryRow(w.ctx, `SELECT id FROM kaname.access_bindings WHERE role_id=$1 AND subject_type='user' AND subject_id=$2 AND resource_type='account' AND resource_id=$3 AND status='ACTIVE' AND revoked_at IS NULL`, domain.OwnerRoleID, string(w.usrA), string(w.accA)).Scan(&w.ownerBinding))
+	if bootstrapCallbacks != nil {
+		// Второй callback следует за binding-forward в том же настоящем проходе.
+		// Его завершение не скрывает ошибку первого, которую Create только логирует.
+		require.NoError(w.t, bootstrapCallbacks.awaitSetup(w.ctx, "iam.accessBinding", string(w.ownerBinding)))
+		forwardErr, completed := bootstrapCallbacks.bindingForwardResult(w.ownerBinding)
+		require.True(w.t, completed, "bootstrap владельца должен завершить настоящий binding-forward")
+		require.NoError(w.t, forwardErr)
+	}
 	if bootstrapAwaiter != nil {
 		require.NoError(w.t, bootstrapAwaiter.awaitSetup(w.ctx, "iam.accessBinding", string(w.ownerBinding)))
 	}
