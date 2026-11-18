@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ type operationCausalObserver struct {
 	activity     [8]string
 	activityN    uint64
 	unattributed uint64
+	functionCost *operationFunctionCost
 }
 
 func (o *operationCausalObserver) record(v string) {
@@ -196,6 +198,11 @@ func (r *operationCausalRepo) MarkError(ctx context.Context, id string, failure 
 }
 func (r *operationCausalRepo) operationWaitFailed(id string) {
 	r.observer.dump(r.t, "global_deadline op="+id)
+	if p := r.observer.functionCost; p != nil && !p.baselineAttempted {
+		// Соседняя preflight fixture не имеет revoke baseline: её счётчики
+		// помогают отличить cascade, но не выдаются за стоимость своей операции.
+		p.capture(r.t, "global_deadline_without_baseline", false)
+	}
 }
 
 // Включается только в трёх исследуемых GD TOP. Отсутствие предыдущего tracer
@@ -206,11 +213,30 @@ func operationCausalPool(t *testing.T, r protocolRig) (protocolRig, *operationCa
 	require.Nil(t, cfg.ConnConfig.Tracer, "нельзя скрывать существующий tracer")
 	o := &operationCausalObserver{workers: map[<-chan struct{}]string{}}
 	cfg.ConnConfig.Tracer = o
+	if os.Getenv("KANAME_GD_FUNCTION_COST_DIAGNOSTIC") == "1" {
+		// Только LOGIN собственной fixture; права владельца ему не передаются.
+		_, err := r.admin.Exec(r.ctx, "GRANT SET ON PARAMETER track_functions TO "+pgx.Identifier{cfg.ConnConfig.User}.Sanitize())
+		require.NoError(t, err)
+		if cfg.ConnConfig.RuntimeParams == nil {
+			cfg.ConnConfig.RuntimeParams = map[string]string{}
+		}
+		cfg.ConnConfig.RuntimeParams["track_functions"] = "all"
+		o.functionCost = &operationFunctionCost{admin: r.admin}
+	}
 	r.runtime.Close()
 	pool, err := pgxpool.NewWithConfig(r.ctx, cfg)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	r.runtime, r.repo = pool, kanamepg.New(pool, nil)
+	if o.functionCost != nil {
+		var effective, session, setting string
+		require.NoError(t, pool.QueryRow(r.ctx, "SELECT current_user,session_user,current_setting('track_functions')").Scan(&effective, &session, &setting))
+		require.Equal(t, cfg.ConnConfig.User, effective)
+		require.Equal(t, cfg.ConnConfig.User, session)
+		require.Equal(t, "all", setting)
+		t.Logf("GD_FUNCTION_COST runtime_login=%s session_user=%s track_functions=%s", effective, session, setting)
+		t.Cleanup(func() { o.functionCost.capture(t, "cleanup", false) })
+	}
 	operationActivityRing(t, r.admin, o)
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -218,6 +244,101 @@ func operationCausalPool(t *testing.T, r protocolRig) (protocolRig, *operationCa
 		}
 	})
 	return r, o
+}
+
+// Счётчики общие для БД и публикуются PostgreSQL с задержкой. Даже пустой
+// active-набор не доказывает flush; активные function frames не наблюдаемы.
+// Никакого SQL из tracer, принудительного flush или вмешательства в worker TX.
+type operationFunctionCost struct {
+	admin             *pgxpool.Pool
+	captures          int
+	baselineAttempted bool
+	baseline          map[uint32]operationFunctionCounter
+}
+
+type operationFunctionCounter struct {
+	OID      uint32   `json:"oid"`
+	Function string   `json:"function"`
+	Calls    *int64   `json:"calls"`
+	Total    *float64 `json:"total_ms"`
+	Self     *float64 `json:"self_ms"`
+}
+
+func (p *operationFunctionCost) capture(t *testing.T, point string, baseline bool) {
+	t.Helper()
+	if p.captures >= 3 {
+		t.Logf("GD_FUNCTION_COST point=%s status=UNKNOWN capture_limit=3", point)
+		return
+	}
+	p.captures++
+	if baseline {
+		p.baselineAttempted = true
+	}
+	// Отдельный ограниченный read сохраняет исходный deadline операции.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var raw []byte
+	err := p.admin.QueryRow(ctx, `SELECT jsonb_build_object(
+ 'functions',coalesce((SELECT jsonb_agg(to_jsonb(f) ORDER BY f.oid) FROM (
+  SELECT p.oid,p.oid::regprocedure::text AS "function",s.calls,s.total_time AS total_ms,s.self_time AS self_ms
+  FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+  LEFT JOIN pg_catalog.pg_stat_user_functions s ON s.funcid=p.oid
+  WHERE n.nspname='kaname' ORDER BY p.oid LIMIT 2049
+ ) f),'[]'::jsonb),
+ 'active_backends',(SELECT count(*) FROM pg_catalog.pg_stat_activity
+  WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active'),
+ 'open_transactions',(SELECT count(*) FROM pg_catalog.pg_stat_activity
+  WHERE datname=current_database() AND pid<>pg_backend_pid() AND xact_start IS NOT NULL))`).Scan(&raw)
+	if err != nil {
+		t.Logf("GD_FUNCTION_COST point=%s status=UNKNOWN read_error=%v", point, err)
+		return
+	}
+	var snapshot struct {
+		Functions    []operationFunctionCounter `json:"functions"`
+		Active       int                        `json:"active_backends"`
+		Transactions int                        `json:"open_transactions"`
+	}
+	if err = json.Unmarshal(raw, &snapshot); err != nil {
+		t.Logf("GD_FUNCTION_COST point=%s status=UNKNOWN decode_error=%v", point, err)
+		return
+	}
+	overflow := len(snapshot.Functions) > 2048
+	if overflow {
+		snapshot.Functions = snapshot.Functions[:2048]
+	}
+	if baseline && !overflow {
+		p.baseline = make(map[uint32]operationFunctionCounter, len(snapshot.Functions))
+		for _, row := range snapshot.Functions {
+			p.baseline[row.OID] = row
+		}
+	}
+	t.Logf("GD_FUNCTION_COST point=%s at=%s rows=%d overflow=%t active_backends=%d open_transactions=%d flush=UNKNOWN active_frames=UNKNOWN baseline_available=%t scope=database_cumulative_not_operation_attribution", point, time.Now().UTC().Format(time.RFC3339Nano), len(snapshot.Functions), overflow, snapshot.Active, snapshot.Transactions, p.baseline != nil)
+	for _, row := range snapshot.Functions {
+		value, _ := json.Marshal(row)
+		old, known := p.baseline[row.OID]
+		if baseline || !known || old.Function != row.Function || old.Calls == nil || row.Calls == nil || old.Total == nil || row.Total == nil || old.Self == nil || row.Self == nil || *row.Calls < *old.Calls || *row.Total < *old.Total || *row.Self < *old.Self {
+			t.Logf("GD_FUNCTION_COST point=%s counter=%s delta=UNKNOWN", point, value)
+			continue
+		}
+		t.Logf("GD_FUNCTION_COST point=%s counter=%s observed_delta_calls=%d observed_delta_total_ms=%g observed_delta_self_ms=%g completeness=UNKNOWN", point, value, *row.Calls-*old.Calls, *row.Total-*old.Total, *row.Self-*old.Self)
+	}
+}
+
+// Baseline снимается после всех 257 carriers непосредственно перед исходным
+// revoke. Один deferred снимок срабатывает и при FailNow; повторный вызов после
+// успешного await не дублирует его. Cleanup не означает join worker.
+func operationFunctionCostBeforeRevoke(t *testing.T, w delegationUCWorld) func() {
+	t.Helper()
+	if os.Getenv("KANAME_GD_FUNCTION_COST_DIAGNOSTIC") != "1" {
+		return func() {}
+	}
+	r, ok := w.ops.(*operationCausalRepo)
+	require.True(t, ok, "для function-cost нужен настоящий observer repo")
+	require.NotNil(t, r.observer.functionCost)
+	p := r.observer.functionCost
+	p.capture(t, "before_revoke", true)
+	var once sync.Once
+	return func() { once.Do(func() { p.capture(t, "after_wait_or_failure", false) }) }
 }
 
 // Только отдельная читающая admin connection. Никаких запросов внутри tracer,

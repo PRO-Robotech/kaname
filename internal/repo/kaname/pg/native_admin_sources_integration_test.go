@@ -5,6 +5,7 @@ package pg_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -24,19 +25,27 @@ import (
 
 // Проверка всегда идёт настоящим runtime LOGIN через participant и его Check.
 // Прежний read door используется только как явно stale-positive counterpart.
-func checkLiveAdministrative(t *testing.T, w delegationUCWorld, subject, relation, object string) (bool, error) {
+func checkLiveAdministrative(t *testing.T, w delegationUCWorld, subject, relation, object string) (allowed bool, err error) {
 	t.Helper()
 	d := administrativeCheckerIntent(w)
 	typ, id, _ := strings.Cut(subject, ":")
 	writer, err := w.participant.GrantDelegationWriter(operations.WithPrincipal(w.r.ctx, operations.Principal{Type: typ, ID: id}), kaname.GrantDelegationCreate, d)
-	require.NoError(t, err)
+	if err != nil {
+		return false, err
+	}
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(w.r.ctx), 5*time.Second)
 		defer cancel()
-		require.NoError(t, writer.Rollback(ctx))
+		// Ошибка очистки не должна скрывать первичную ошибку записи или проверки.
+		// Обе причины возвращаются вызывающему без FailNow внутри defer.
+		if cleanupErr := writer.Rollback(ctx); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("очистка административной проверки: %w", cleanupErr))
+		}
 	}()
 	checker, err := writer.TransactionRelationChecker(nil)
-	require.NoError(t, err)
+	if err != nil {
+		return false, err
+	}
 	return checker.Check(w.r.ctx, subject, relation, object)
 }
 
