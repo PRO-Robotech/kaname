@@ -106,3 +106,15 @@ func emailChangeLevel(ctx context.Context, resolved Resolved, read loginMethodRe
 	}
 	return &StepUpRequiredError{Required: required, Presented: presented}
 }
+
+// guaranteedRank — наивысшая ступень, которую множество способов гарантирует
+// по правилу уровня; 0 — правило не назвало ни одной.
+func guaranteedRank(methods []assurance.Method) int {
+	rank := 0
+	for _, l := range assurance.GuaranteedLevels(methods) {
+		if r := acrlevel.Rank(l.String()); r > rank {
+			rank = r
+		}
+	}
+	return rank
+}
