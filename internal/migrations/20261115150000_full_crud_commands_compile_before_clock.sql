@@ -5349,8 +5349,9 @@ CREATE FUNCTION kaname.authority_prepared_journal_value_v3(p_origin jsonb,p_row 
 RETURNS bigint LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE proof jsonb;program jsonb;matches integer;matched_ordinal integer;actual jsonb;
 BEGIN
- proof:=kaname.authority_protocol_attestation();
- IF proof IS NOT NULL THEN program:=kaname._authority_sequence_header_v3();END IF;
+ -- Свежая attestation на каждом публичном входе, затем прежние custody READS.
+ -- Compatibility NULL по-прежнему не читает private sequence storage.
+ SELECT q.proof,q.header INTO STRICT proof,program FROM kaname._authority_sequence_probe_v3() q;
  IF program IS NULL THEN RETURN kaname.authority_resource_crud_journal_value_v3(p_origin,p_row);END IF;
  IF pg_trigger_depth()<1 OR jsonb_typeof(program->'selected') IS DISTINCT FROM 'array' THEN
   RAISE EXCEPTION 'journal allocator lacks actual source trigger' USING ERRCODE='42501';END IF;
@@ -5363,7 +5364,68 @@ BEGIN
  IF matches<>1 OR NOT EXISTS(SELECT 1 FROM pg_temp.kaname_authority_sequence_effects e
   WHERE e.nonce=(program->>'nonce')::uuid AND e.ordinal=matched_ordinal AND e.registered) THEN
   RAISE EXCEPTION 'journal source origin was not registered by actual statement' USING ERRCODE='42501';END IF;
- RETURN kaname._authority_sequence_claim_v3('resource_journal',p_origin,actual);
+ -- Exact claim остаётся после actual-origin проверки. До него были только
+ -- builtin JSON и READS уже удерживаемых private tables, без DML/callback/wait.
+ -- Как в DEFAULT/applied, proof локален этому frame, а custody читается снова
+ -- на прежнем header locus. Самостоятельный private claim сохраняет attestation.
+ DECLARE program jsonb;matches integer;matched_ordinal integer;identifier bigint;key_namespace integer;changed integer;
+  p_table text:='resource_journal';claim_row jsonb:=actual;
+ BEGIN
+  DECLARE storage oid;effects oid;result jsonb;owner_oid oid;relation_id oid;
+  BEGIN
+   IF proof IS NULL THEN RAISE EXCEPTION 'sequence program requires signed transaction' USING ERRCODE='42501';END IF;
+   program:=NULL;
+   storage:=to_regclass('pg_temp.kaname_authority_sequence_program');
+   IF storage IS NOT NULL THEN
+    effects:=to_regclass('pg_temp.kaname_authority_sequence_effects');
+    SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+    FOREACH relation_id IN ARRAY ARRAY[storage,effects] LOOP
+     IF relation_id IS NULL OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=relation_id
+      AND c.relowner=owner_oid AND c.relpersistence='t' AND c.relkind='r')
+     OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c
+      CROSS JOIN LATERAL aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
+      WHERE c.oid=relation_id AND a.grantee<>owner_oid) THEN
+      RAISE EXCEPTION 'untrusted sequence program storage' USING ERRCODE='42501';END IF;
+    END LOOP;
+    SELECT jsonb_build_object('backend',s.backend,'transaction_id',s.transaction_id,
+     'invoker_oid',s.invoker_oid,'nonce',s.nonce,'family',s.family,'effects_oid',s.effects_oid,
+     'maximum_count',s.maximum_count,'selected_count',s.selected_count,
+     'selected',CASE WHEN s.selected_count IS NULL THEN NULL ELSE '[]'::jsonb END,
+     'frozen',jsonb_build_object('mode',s.frozen_mode)) INTO result
+    FROM pg_temp.kaname_authority_sequence_program s WHERE s.singleton;
+    IF result IS NOT NULL THEN
+     IF result->>'backend' IS DISTINCT FROM proof->>'backend'
+     OR result->>'transaction_id' IS DISTINCT FROM proof->>'transaction_id'
+     OR result->>'invoker_oid' IS DISTINCT FROM proof->>'invoker_oid'
+     OR result->>'nonce' IS DISTINCT FROM proof->>'nonce'
+     OR (result->>'maximum_count')::integer NOT BETWEEN 0 AND 100000
+     OR ((result->>'selected_count') IS NOT NULL AND
+      (result->>'selected_count')::integer NOT BETWEEN 0 AND (result->>'maximum_count')::integer)
+     OR (result->>'effects_oid')::oid IS DISTINCT FROM effects THEN
+      RAISE EXCEPTION 'sequence program transaction changed' USING ERRCODE='42501';END IF;
+    END IF;
+    program:=result;
+   END IF;
+  END;
+  IF program IS NULL OR jsonb_typeof(program->'selected') IS DISTINCT FROM 'array'
+  OR p_table NOT IN ('resource_journal','fga_outbox') OR p_table IS NULL THEN
+   RAISE EXCEPTION 'final sequence program missing' USING ERRCODE='42501';END IF;
+  SELECT count(*)::integer,min(e.ordinal) INTO matches,matched_ordinal
+  FROM pg_temp.kaname_authority_sequence_effects e
+  WHERE e.nonce=(program->>'nonce')::uuid AND e.table_name=p_table AND e.selected AND NOT e.claimed
+   AND e.origin_digest=sha256(convert_to(p_origin::text,'UTF8')) AND e.row_digest=sha256(convert_to(claim_row::text,'UTF8'))
+   AND e.origin=p_origin AND e.row_value=claim_row;
+  IF matches<>1 THEN RAISE EXCEPTION 'sequence origin or multiplicity differs from selected program' USING ERRCODE='42501';END IF;
+  SELECT e.reserved_id INTO STRICT identifier FROM pg_temp.kaname_authority_sequence_effects e
+   WHERE e.nonce=(program->>'nonce')::uuid AND e.ordinal=matched_ordinal;
+  key_namespace:=CASE p_table WHEN 'resource_journal' THEN 1262569304 ELSE 1262569305 END;
+  PERFORM kaname._authority_resource_preheld_key_v2(key_namespace,identifier::text,true);
+  UPDATE pg_temp.kaname_authority_sequence_effects e SET claimed=true
+   WHERE e.nonce=(program->>'nonce')::uuid AND e.ordinal=matched_ordinal AND e.selected AND NOT e.claimed;
+  GET DIAGNOSTICS changed=ROW_COUNT;
+  IF changed<>1 THEN RAISE EXCEPTION 'sequence origin or multiplicity differs from selected program' USING ERRCODE='42501';END IF;
+  RETURN identifier;
+ END;
 END $$;
 -- +goose StatementEnd
 
@@ -9086,7 +9148,7 @@ BEGIN
  ('resource_journal_emit()','76c8f397a387cb6699642e1d3aa56c2c61f371245eb28f56b14ed19c1d1faeba',false,'v',false,'preserve'),
  ('resource_journal_emit_member()','4dfca2c401a428e6b4ad984b99aae3a34404999ea36ed26b14c70b2ceb1d4053',false,'v',false,'preserve'),
  ('authority_sequence_origin_v3()','d1b7a54b0cf83d53d416b6cc2bbcb1c20e60d985356931a45a6804ebf2f27df3',true,'v',true,'private'),
- ('authority_prepared_journal_value_v3(jsonb,jsonb)','ec8e01085af732139c0478e82abd29817d25ca342afa4963d96491f8daca4017',true,'v',true,'export'),
+ ('authority_prepared_journal_value_v3(jsonb,jsonb)','b1e7156bf7176c0d30be0f64476e3b81748ff4a15dd27db29db17bca70598f46',true,'v',true,'export'),
  ('_authority_sequence_excluded_v3(oid)','eb4872a7f8c5bb7c40564e17fcc1928eac64bdbd8ac2e5609d261bd9ad36594b',true,'s',true,'private'),
  ('_authority_sequence_shape_v3()','614125faa823e6f14b0d2f58f2a6ed7ea9a5239febef2dd83b7ba4508f0f9014',true,'v',true,'private'),
  ('_authority_protocol_snapshot_v3()','f994c63975e86be78b2854a4f51aed55e615ad2c380b0f58fc1e0390662fc30a',true,'v',true,'private'),
@@ -9637,7 +9699,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','117d174e3a2baae3b026c60ffb274c199537079ec58869ec068593b0fee64c8f',true),
+ ('_authority_crud_storage_v3()','77b1538646754ceca8eb824bd1c6eef92c83b89879b0a8baa52c2f9df4273e12',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
