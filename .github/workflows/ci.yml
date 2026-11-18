@@ -1133,6 +1133,8 @@ jobs:
     needs:
       - build
       - unit
+      - unitmain
+      - unitcensus
       - lint
       - proto
       - standalone
@@ -1174,6 +1176,8 @@ jobs:
           .github/scripts/trunk-verdict-holder.sh \
             "${{ needs.build.result }}" \
             "${{ needs.unit.result }}" \
+            "${{ needs.unitmain.result }}" \
+            "${{ needs.unitcensus.result }}" \
             "${{ needs.lint.result }}" \
             "${{ needs.proto.result }}" \
             "${{ needs.standalone.result }}" \
