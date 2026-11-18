@@ -149,11 +149,13 @@ type delegationUCWorld struct {
 	input         gdapp.CreateInput
 }
 
-func delegationUCFixture(t *testing.T) delegationUCWorld {
+func delegationUCFixture(t *testing.T, observe ...bool) delegationUCWorld {
 	t.Helper()
 	// Как в bootstrap: catalog/roles устанавливаются при uninitialized,
 	// затем существующий Prepare ниже фиксирует фактическую полную модель.
 	r, _ := writerProtocolRigBeforePreparation(t)
+	var observer *operationCausalObserver
+	if len(observe) != 0 && observe[0] { r, observer = operationCausalPool(t, r) }
 	raw, err := publicreadfixture.Read("registry.delegation-fixture.yaml")
 	require.NoError(t, err)
 	raw, err = publicreadfixture.WithWrites(raw)
@@ -211,7 +213,14 @@ func delegationUCFixture(t *testing.T) delegationUCWorld {
 	require.NoError(t, err)
 	sa := seedSAID(t, r.ctx, r.admin, r.a, "delegation-native-recipient")
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT id FROM kaname.roles WHERE name='registry.puller' AND owner_module='registry'`).Scan(&role))
-	return delegationUCWorld{r: r, source: catalog.Fixed{F: facts}, door: delegationNativeDoor{r: r}, participant: participant, ops: operations.NewRepo(r.runtime, "kaname"), owner: owner, member: member, input: gdapp.CreateInput{AccountID: r.a, DelegateType: "SUBJECT_TYPE_SERVICE_ACCOUNT", DelegateID: sa, RoleIDs: []string{role}, TargetTypes: []string{"registry.registries"}, SubjectTypes: []string{"SUBJECT_TYPE_SERVICE_ACCOUNT"}}}
+	var ops operations.Repo = operations.NewRepo(r.runtime, "kaname")
+	if observer != nil {
+		full := ops.(operations.FullRepo)
+		_, claimed := full.(interface { ClaimForExecution(context.Context, string) (bool, error) })
+		require.True(t, claimed, "реальный repo обязан сохранять execution claim")
+		ops = &operationCausalRepo{FullRepo: full, observer: observer, t: t}
+	}
+	return delegationUCWorld{r: r, source: catalog.Fixed{F: facts}, door: delegationNativeDoor{r: r}, participant: participant, ops: ops, owner: owner, member: member, input: gdapp.CreateInput{AccountID: r.a, DelegateType: "SUBJECT_TYPE_SERVICE_ACCOUNT", DelegateID: sa, RoleIDs: []string{role}, TargetTypes: []string{"registry.registries"}, SubjectTypes: []string{"SUBJECT_TYPE_SERVICE_ACCOUNT"}}}
 }
 
 // Только читающий test adapter к реальному relverdict/admission, без своих

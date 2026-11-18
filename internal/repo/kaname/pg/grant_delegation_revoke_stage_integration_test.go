@@ -71,7 +71,7 @@ func delegationRevokeCounts(t *testing.T, w delegationUCWorld, id string) (activ
 func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "commit", true: "last_page_failure"}[fail], func(t *testing.T) {
-			w := delegationUCFixture(t)
+			w := delegationUCFixture(t, true)
 			delegationRevokeWaitDiagnosticsOnFailure(t, w)
 			id := w.create(t, w.owner, false)
 			bs := delegationRevokeBindings(t, w, id, 257)
@@ -127,7 +127,7 @@ func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 // kaname#1034: прежний explicit cascade снимает все nonrevoked carriers,
 // включая PENDING за первой страницей, вместе с их фактической проекцией.
 func TestGrantDelegationStagedRevokeIncludesPendingLastPage(t *testing.T) {
-	w := delegationUCFixture(t)
+	w := delegationUCFixture(t, true)
 	delegationRevokeWaitDiagnosticsOnFailure(t, w)
 	t.Cleanup(func() { authorityWaitReleased(t, w.r.runtime) })
 	id := w.create(t, w.owner, false)

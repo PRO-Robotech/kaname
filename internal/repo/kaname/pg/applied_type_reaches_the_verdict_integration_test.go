@@ -263,6 +263,7 @@ func awaitOperation(t *testing.T, ctx context.Context, ops operations.Repo, opID
 	defer cancel()
 	waitErr := operations.Wait(waitCtx)
 	if waitErr != nil {
+		if observer, ok := ops.(interface { operationWaitFailed(string) }); ok { observer.operationWaitFailed(opID) }
 		// Очередь общая для пакета. Состояние своей операции отличает её
 		// незавершённую работу от чужого worker, но не заменяет полный drain.
 		readCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

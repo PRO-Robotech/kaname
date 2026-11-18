@@ -50,7 +50,7 @@ func TestGrantDelegationCreateMutationPreflightWait(t *testing.T) {
 	for _, surface := range []string{"table", "delegate_fk"} {
 		for _, expired := range []bool{false, true} {
 			t.Run(surface+map[bool]string{false: "_live", true: "_expired"}[expired], func(t *testing.T) {
-				w := delegationUCFixture(t)
+				w := delegationUCFixture(t, true)
 				authority := w.grantAdmin(t)
 				deadline := grantPreflightDeadline(t, w, authority, expired)
 				require.NoError(t, lifecycleOwner(w.r).ActivateAuthorityBundle(w.r.ctx, w.r.bundle))

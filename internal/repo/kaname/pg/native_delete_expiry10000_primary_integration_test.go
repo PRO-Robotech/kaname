@@ -23,7 +23,7 @@ func TestNativeDeleteExpiry10000_OriginalPrimaryConverges(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, matches, "исходная точка expiry10000 должна быть единственной")
-	r := runBandPoint(t, context.Background(), "удаление истечением срока", point, bandExpire)
+	r := runBandPoint(t, context.WithValue(context.Background(), expiryActivityKey{}, true), "удаление истечением срока", point, bandExpire)
 	require.Equal(t, passConverged, r.outcome, "первичная ошибка/тайм-аут сохраняет RED: %s", r.detail)
 	require.Zero(t, r.census.MembersActive)
 	require.Zero(t, r.census.MembersRejected)
