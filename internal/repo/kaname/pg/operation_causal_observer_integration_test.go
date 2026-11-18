@@ -280,7 +280,7 @@ func (p *operationFunctionCost) capture(t *testing.T, point string, baseline boo
 	var raw []byte
 	err := p.admin.QueryRow(ctx, `SELECT jsonb_build_object(
  'functions',coalesce((SELECT jsonb_agg(to_jsonb(f) ORDER BY f.oid) FROM (
-  SELECT p.oid,p.oid::regprocedure::text AS "function",s.calls,s.total_time AS total_ms,s.self_time AS self_ms
+  SELECT p.oid::bigint AS oid,p.oid::regprocedure::text AS "function",s.calls,s.total_time AS total_ms,s.self_time AS self_ms
   FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
   LEFT JOIN pg_catalog.pg_stat_user_functions s ON s.funcid=p.oid
   WHERE n.nspname='kaname' ORDER BY p.oid LIMIT 2049
