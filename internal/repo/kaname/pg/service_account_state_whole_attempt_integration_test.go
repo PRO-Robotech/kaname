@@ -25,6 +25,8 @@ import (
 )
 
 const saWholeCommitMessage = "fixture SA deferred commit serialization"
+const saWholeBodyMessage = "fixture SA audit body serialization"
+const saWholeAuditSQLPrefix = "INSERT INTO kaname.audit_outbox ("
 
 type saWholeSQLKey struct{}
 type saWholeTransaction struct {
@@ -38,6 +40,9 @@ type saWholeTrace struct {
 	once                      sync.Once
 	mu                        sync.Mutex
 	active                    bool
+	bodyAbort                 bool
+	pendingRollbackPID        uint32
+	rollbacks, commits        int
 	captures, entries, bodies int
 	conflicts                 int
 	transactions              []saWholeTransaction
@@ -57,9 +62,11 @@ func (tr *saWholeTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, dat
 		tr.entries++
 		tr.mu.Unlock()
 	}
-	if strings.EqualFold(strings.TrimSpace(data.SQL), "commit") {
+	if (!tr.bodyAbort && strings.EqualFold(strings.TrimSpace(data.SQL), "commit")) ||
+		(tr.bodyAbort && strings.HasPrefix(strings.TrimSpace(data.SQL), saWholeAuditSQLPrefix)) {
 		// Только наблюдение через ДРУГОЕ соединение. XID создаёт реальный body,
 		// прибор не выделяет его и не меняет состояние проверяемой транзакции.
+		// BODY-ветка снимает identity перед audit INSERT после успешного SA UPDATE.
 		identity := saWholeTransaction{pid: conn.PgConn().PID()}
 		err := tr.admin.QueryRow(ctx, `SELECT backend_xid::text,xact_start FROM pg_stat_activity WHERE pid=$1 AND datname=current_database()`, identity.pid).Scan(&identity.xid, &identity.start)
 		tr.mu.Lock()
@@ -71,7 +78,7 @@ func (tr *saWholeTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, dat
 	}
 	return context.WithValue(ctx, saWholeSQLKey{}, data.SQL)
 }
-func (tr *saWholeTrace) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+func (tr *saWholeTrace) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
 	sql, observed := ctx.Value(saWholeSQLKey{}).(string)
 	if !observed {
 		return
@@ -85,20 +92,48 @@ func (tr *saWholeTrace) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx
 			tr.bodies++
 		}
 	}
+	commit := strings.EqualFold(strings.TrimSpace(sql), "commit")
+	rollback := strings.EqualFold(strings.TrimSpace(sql), "rollback")
+	if commit && data.Err == nil {
+		tr.commits++
+	}
 	var pe *pgconn.PgError
-	failedCommit := strings.EqualFold(strings.TrimSpace(sql), "commit") && errors.As(data.Err, &pe) && pe.Code == "40001" && pe.Message == saWholeCommitMessage
+	failedCommit := !tr.bodyAbort && commit && errors.As(data.Err, &pe) && pe.Code == "40001" && pe.Message == saWholeCommitMessage
+	failedBody := tr.bodyAbort && strings.HasPrefix(strings.TrimSpace(sql), saWholeAuditSQLPrefix) && errors.As(data.Err, &pe) && pe.Code == "40001" && pe.Message == saWholeBodyMessage
 	first := false
 	if failedCommit {
 		tr.conflicts++
 		first = tr.conflicts == 1
 	}
+	if failedBody {
+		tr.conflicts++
+		tr.pendingRollbackPID = conn.PgConn().PID()
+		if conn.PgConn().TxStatus() != 'E' {
+			tr.observationErrors = append(tr.observationErrors, fmt.Errorf("audit 40001 не оставил aborted TX: status=%q", conn.PgConn().TxStatus()))
+		}
+		// Здесь НЕТ барьера: aborted TX ещё держит locks. Возвращаем raw error
+		// продукту, чтобы он выполнил настоящий rollback перед конкурирующим revoke.
+	}
+	if tr.bodyAbort && rollback && data.Err == nil && tr.pendingRollbackPID == conn.PgConn().PID() {
+		tr.pendingRollbackPID = 0
+		tr.rollbacks++
+		if conn.PgConn().TxStatus() != 'I' || data.CommandTag.String() != "ROLLBACK" {
+			tr.observationErrors = append(tr.observationErrors, fmt.Errorf("rollback body TX не подтверждён: status=%q tag=%s", conn.PgConn().TxStatus(), data.CommandTag.String()))
+		} else {
+			first = tr.conflicts == 1
+		}
+	}
 	tr.mu.Unlock()
 	if first {
-		// Сервер уже отверг COMMIT и откатил body; runner ещё не получил ошибку.
+		// COMMIT уже откатил TX либо BODY-отказ прошёл успешный ROLLBACK.
+		// Барьер никогда не удерживает aborted TX с бизнес-замками.
 		close(tr.first)
 		select {
 		case <-tr.release:
 		case <-ctx.Done():
+			tr.mu.Lock()
+			tr.observationErrors = append(tr.observationErrors, fmt.Errorf("барьер отпущен контекстом вместо контроллера: %w", ctx.Err()))
+			tr.mu.Unlock()
 		}
 	}
 }
@@ -133,6 +168,17 @@ func saWholeSnapshot(t *testing.T, w saStateWorld) string {
 // Настоящий deferred server 40001 — тестовая инъекция ошибки COMMIT, а не
 // утверждение естественной carrier race у SA. Порты и ошибки Go не подменяются.
 func TestFullServiceAccountStateWholeAttemptInjectedCommitOutcomes(t *testing.T) {
+	runSAWholeInjectedOutcomes(t, false)
+}
+
+// Audit INSERT падает после успешного SA UPDATE. Повтор обязан включать весь
+// body, а отзыв между rollback и новой попыткой должен отменить прежнее решение.
+func TestFullServiceAccountStateWholeAttemptInjectedBodyOutcomes(t *testing.T) {
+	runSAWholeInjectedOutcomes(t, true)
+}
+
+func runSAWholeInjectedOutcomes(t *testing.T, bodyAbort bool) {
+	t.Helper()
 	for _, enabled := range []bool{false, true} {
 		name, event := "Disable", "iam.service_account.disabled"
 		if enabled {
@@ -147,7 +193,7 @@ func TestFullServiceAccountStateWholeAttemptInjectedCommitOutcomes(t *testing.T)
 					require.Nil(t, awaitOperation(t, w.r.ctx, w.ops, op.ID).Error)
 				}
 				require.Equal(t, !enabled, saStateEnabled(t, w))
-				trace := &saWholeTrace{admin: w.r.admin, first: make(chan struct{}), release: make(chan struct{})}
+				trace := &saWholeTrace{admin: w.r.admin, bodyAbort: bodyAbort, first: make(chan struct{}), release: make(chan struct{})}
 				cfg := w.r.runtime.Config()
 				previous := cfg.ConnConfig.Tracer
 				combined := multitracer.New(trace)
@@ -173,23 +219,35 @@ func TestFullServiceAccountStateWholeAttemptInjectedCommitOutcomes(t *testing.T)
 				require.NoError(t, err)
 				// Инъектор установлен владельцем только в собственной test DB.
 				// Аргументы trigger привязывают его к одной SA и одному audit event.
+				message := saWholeCommitMessage
+				triggerKind := "CONSTRAINT TRIGGER"
+				triggerTiming := "AFTER INSERT ON kaname.audit_outbox DEFERRABLE INITIALLY DEFERRED"
+				queryGuard := "lower(btrim(current_query())) NOT IN ('commit','commit;')"
+				returnRow := "NULL"
+				if bodyAbort {
+					message = saWholeBodyMessage
+					triggerKind = "TRIGGER"
+					triggerTiming = "BEFORE INSERT ON kaname.audit_outbox"
+					queryGuard = "lower(ltrim(current_query(), E' \t\n\r')) NOT LIKE 'insert into kaname.audit_outbox (%'"
+					returnRow = "NEW"
+				}
 				_, err = w.r.admin.Exec(w.r.ctx, fmt.Sprintf(`CREATE SEQUENCE kaname.sa_whole_retry_seq;
 CREATE FUNCTION kaname.sa_whole_commit_retry() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE attempt bigint;
 BEGIN
  IF NEW.event_payload->>'resource_id'=TG_ARGV[0] AND NEW.event_type=TG_ARGV[1] THEN
-  IF lower(btrim(current_query())) NOT IN ('commit','commit;') THEN
-   RAISE EXCEPTION 'SA injection must run at actual COMMIT' USING ERRCODE='P0001';
+  IF %s THEN
+   RAISE EXCEPTION 'SA injection reached unexpected SQL phase' USING ERRCODE='P0001';
   END IF;
   attempt:=nextval('kaname.sa_whole_retry_seq');
   IF attempt=1 OR TG_ARGV[2]='exhausted' THEN
    RAISE EXCEPTION '%s' USING ERRCODE='40001';
   END IF;
  END IF;
- RETURN NULL;
+ RETURN %s;
 END $$;
 REVOKE ALL ON FUNCTION kaname.sa_whole_commit_retry() FROM PUBLIC;
-CREATE CONSTRAINT TRIGGER sa_whole_commit_retry AFTER INSERT ON kaname.audit_outbox DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION kaname.sa_whole_commit_retry('%s','%s','%s')`, saWholeCommitMessage, w.sa.ID, event, outcome))
+CREATE %s sa_whole_commit_retry %s FOR EACH ROW EXECUTE FUNCTION kaname.sa_whole_commit_retry('%s','%s','%s')`, queryGuard, message, returnRow, triggerKind, triggerTiming, w.sa.ID, event, outcome))
 				require.NoError(t, err)
 				t.Cleanup(func() {
 					_, err := w.r.admin.Exec(w.r.ctx, `DROP TRIGGER IF EXISTS sa_whole_commit_retry ON kaname.audit_outbox; DROP FUNCTION IF EXISTS kaname.sa_whole_commit_retry(); DROP SEQUENCE IF EXISTS kaname.sa_whole_retry_seq`)
@@ -197,7 +255,7 @@ CREATE CONSTRAINT TRIGGER sa_whole_commit_retry AFTER INSERT ON kaname.audit_out
 				})
 				var deferred bool
 				require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT tgdeferrable AND tginitdeferred FROM pg_trigger WHERE tgrelid='kaname.audit_outbox'::regclass AND tgname='sa_whole_commit_retry'`).Scan(&deferred))
-				require.True(t, deferred)
+				require.Equal(t, !bodyAbort, deferred)
 				before := saWholeSnapshot(t, w)
 				var cutoffBefore string
 				require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT coalesce((SELECT to_jsonb(c) FROM kaname.minted_token_revocations c WHERE subject=$1),'null'::jsonb)::text`, string(w.sa.ID)).Scan(&cutoffBefore))
@@ -219,13 +277,18 @@ CREATE CONSTRAINT TRIGGER sa_whole_commit_retry AFTER INSERT ON kaname.audit_out
 				select {
 				case <-trace.first:
 				case <-w.r.ctx.Done():
-					t.Fatalf("не наблюдался injected server COMMIT 40001: %v", w.r.ctx.Err())
+					t.Fatalf("не наблюдался откат injected server 40001 (body=%t): %v", bodyAbort, w.r.ctx.Err())
 				}
-				require.Equal(t, before, saWholeSnapshot(t, w), "неуспешный COMMIT откатил state/cutoff/audit/проекции/поколения")
+				require.Equal(t, before, saWholeSnapshot(t, w), "отказ откатил state/cutoff/audit/проекции/поколения до барьера")
 				trace.mu.Lock()
 				captures, entries, bodies, conflicts := trace.captures, trace.entries, trace.bodies, trace.conflicts
+				firstRollbacks := trace.rollbacks
 				trace.mu.Unlock()
+				if bodyAbort {
+					require.Equal(t, 1, firstRollbacks, "отзыв допустим только после actual ROLLBACK failed body")
+				}
 				require.Equal(t, []int{1, 1, 1, 1}, []int{captures, entries, bodies, conflicts})
+				t.Logf("SA_WHOLE_INJECTED_ABORT body=%t captures=%d entries=%d completed_updates=%d server40001=%d completed_rollbacks=%d; barrier_after_rollback=true", bodyAbort, captures, entries, bodies, conflicts, firstRollbacks)
 				expected := before
 				if outcome == "revoked" {
 					// Другой настоящий writer фиксирует отзыв, пока первая SA TX уже
@@ -256,7 +319,17 @@ CREATE CONSTRAINT TRIGGER sa_whole_commit_retry AFTER INSERT ON kaname.audit_out
 				captures, entries, bodies, conflicts = trace.captures, trace.entries, trace.bodies, trace.conflicts
 				transactions := append([]saWholeTransaction(nil), trace.transactions...)
 				observationErrors := append([]error(nil), trace.observationErrors...)
+				rollbacks, commits, pendingRollbackPID := trace.rollbacks, trace.commits, trace.pendingRollbackPID
 				trace.mu.Unlock()
+				if bodyAbort {
+					require.Equal(t, conflicts, rollbacks, "каждый body40001 должен закончиться настоящим rollback")
+					require.Zero(t, pendingRollbackPID)
+					if outcome == "live" {
+						require.Equal(t, 1, commits)
+					} else {
+						require.Zero(t, commits)
+					}
+				}
 				require.Empty(t, observationErrors)
 				seen := map[string]bool{}
 				for _, tx := range transactions {
