@@ -12,6 +12,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -318,7 +319,7 @@ func TestBindingMirrorLocalityClosureRejectsTriggerAndPrivateHelperTamper(t *tes
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.ctx), 30*time.Second)
 	defer cancel()
 	const signature = `kaname._authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)`
-	for _, fault := range []string{"missing_trigger", "disabled_trigger", "extra_trigger", "body", "public_acl", "nonowner_acl", "search_path", "owner", "strict", "apply_body", "receipt_acl", "epoch_lock_body"} {
+	for _, fault := range []string{"missing_trigger", "disabled_trigger", "extra_trigger", "body", "public_acl", "nonowner_acl", "search_path", "owner", "strict", "apply_body", "receipt_acl", "epoch_lock_body", "probe_body", "probe_public_acl", "probe_nonowner_acl", "probe_owner", "probe_strict", "probe_path"} {
 		t.Run(fault, func(t *testing.T) {
 			tx, err := r.admin.Begin(ctx)
 			require.NoError(t, err)
@@ -350,6 +351,18 @@ func TestBindingMirrorLocalityClosureRejectsTriggerAndPrivateHelperTamper(t *tes
 				sql = `CREATE OR REPLACE FUNCTION kaname._authority_binding_mirror_before_write_v3(p_table text,p_operation text,p_old jsonb,p_new jsonb) RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fault$ BEGIN RETURN true;END $fault$`
 			case "receipt_acl":
 				sql = `GRANT EXECUTE ON FUNCTION kaname._authority_binding_mirror_epoch_v3(text[],jsonb,timestamptz) TO PUBLIC`
+			case "probe_body":
+				sql = `CREATE OR REPLACE FUNCTION kaname._authority_binding_mirror_probe_v4() RETURNS TABLE(proof jsonb,metadata jsonb) LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fault$ BEGIN RETURN NEXT;END $fault$`
+			case "probe_public_acl":
+				sql = `GRANT EXECUTE ON FUNCTION kaname._authority_binding_mirror_probe_v4() TO PUBLIC`
+			case "probe_nonowner_acl":
+				sql = `GRANT EXECUTE ON FUNCTION kaname._authority_binding_mirror_probe_v4() TO ` + pgx.Identifier{r.role}.Sanitize()
+			case "probe_owner":
+				sql = `ALTER FUNCTION kaname._authority_binding_mirror_probe_v4() OWNER TO ` + pgx.Identifier{r.role}.Sanitize()
+			case "probe_strict":
+				sql = `ALTER FUNCTION kaname._authority_binding_mirror_probe_v4() STRICT`
+			case "probe_path":
+				sql = `ALTER FUNCTION kaname._authority_binding_mirror_probe_v4() SET search_path=pg_catalog,kaname,pg_temp`
 			case "epoch_lock_body":
 				sql = `CREATE OR REPLACE FUNCTION kaname.authority_binding_epoch_lock(p_accounts text[],p_expected jsonb) RETURNS timestamptz LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fault$ BEGIN RETURN clock_timestamp();END $fault$`
 			}
@@ -359,6 +372,39 @@ func TestBindingMirrorLocalityClosureRejectsTriggerAndPrivateHelperTamper(t *tes
 			require.False(t, good, fault)
 		})
 	}
+	// Исполняемые Down/Up обязаны восстановить точные тела, старые OID/ACL
+	// и закрыть новый helper. Исторические migrations/reports не переписываются.
+	t.Run("corrective_down_up", func(t *testing.T) {
+		raw, err := migrations.FS.ReadFile("20261118120000_binding_mirror_reuses_invocation_attestation.sql")
+		require.NoError(t, err)
+		parts := strings.Split(string(raw), "-- +goose Down")
+		require.Len(t, parts, 2)
+		tx, err := r.admin.Begin(ctx)
+		require.NoError(t, err)
+		defer mirrorLocalityRollback(t, tx)
+		state := func() string {
+			var value string
+			require.NoError(t, tx.QueryRow(ctx, `SELECT jsonb_agg(jsonb_build_object(
+ 'signature',p.oid::regprocedure::text,'oid',CASE WHEN p.proname='_authority_binding_mirror_probe_v4' THEN NULL ELSE p.oid END,
+ 'definition',pg_get_functiondef(p.oid),'owner',p.proowner,'acl',p.proacl) ORDER BY p.proname)::text
+ FROM pg_catalog.pg_proc p WHERE p.pronamespace='kaname'::regnamespace AND p.proname IN (
+ '_authority_binding_mirror_probe_v4','_authority_binding_mirror_store_v3','_authority_binding_mirror_before_write_v3',
+ '_authority_crud_storage_v3','_authority_full_contract_storage_v3','_authority_protocol_snapshot_v3','authority_protocol_attestation')`).Scan(&value))
+			return value
+		}
+		before := state()
+		_, err = tx.Exec(ctx, parts[1])
+		require.NoError(t, err)
+		var absent bool
+		require.NoError(t, tx.QueryRow(ctx, `SELECT to_regprocedure('kaname._authority_binding_mirror_probe_v4()') IS NULL`).Scan(&absent))
+		require.True(t, absent)
+		_, err = tx.Exec(ctx, parts[0])
+		require.NoError(t, err)
+		require.JSONEq(t, before, state())
+		var good bool
+		require.NoError(t, tx.QueryRow(ctx, `SELECT kaname._authority_full_contract_storage_v3()`).Scan(&good))
+		require.True(t, good)
+	})
 	var good bool
 	require.NoError(t, r.admin.QueryRow(ctx, `SELECT kaname._authority_full_contract_storage_v3()`).Scan(&good))
 	require.True(t, good, "rollback восстанавливает точный closure")
@@ -375,6 +421,39 @@ func TestBindingMirrorLocalityPreparedApplyRejectsForgedImages(t *testing.T) {
 	setup.ctx = ctx
 	other := groupLifecycleBinding(t, setup, r.a, uid, "other_"+ids.NewID("rol"), domain.Rule{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get"}})
 	r.repo, _ = fullContractActivate(t, setup)
+	// Owner-only дверь меняет настоящий prepared witness после успешной проверки.
+	// Probe не получает caller proof: каждый вызов заново читает protected storage.
+	_, err := r.admin.Exec(ctx, `CREATE FUNCTION kaname.test_binding_mirror_invocation_v4(p_fault text) RETURNS boolean
+ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $probe$
+ DECLARE actual_proof jsonb;actual_metadata jsonb;
+ BEGIN
+  SELECT p.proof,p.metadata INTO STRICT actual_proof,actual_metadata FROM kaname._authority_binding_mirror_probe_v4() p;
+  IF actual_proof IS NULL OR actual_metadata IS NULL
+   OR actual_proof IS DISTINCT FROM kaname.authority_protocol_attestation()
+   OR actual_metadata IS DISTINCT FROM kaname._authority_binding_mirror_store_v3() THEN
+   RAISE EXCEPTION 'test requires actual paired mirror proof';END IF;
+  CASE p_fault
+   WHEN 'pair' THEN RETURN true;
+   WHEN 'root' THEN UPDATE pg_temp.kaname_authority_attestation SET mode='global';
+   WHEN 'account' THEN UPDATE pg_temp.kaname_authority_attestation SET accounts=accounts||ARRAY['mirror_invocation_missing'];
+   WHEN 'consumer' THEN UPDATE pg_temp.kaname_authority_consumer SET nonce='00000000-0000-0000-0000-000000000000'::uuid;
+   WHEN 'mirror_nonce' THEN UPDATE pg_temp.kaname_binding_mirror_program SET nonce='00000000-0000-0000-0000-000000000000';
+   WHEN 'clock' THEN UPDATE pg_temp.kaname_authority_attestation SET decision_at=decision_at+interval '1 second';
+   WHEN 'population' THEN LOCK TABLE kaname.authority_producer_population_latch IN EXCLUSIVE MODE;
+   ELSE RAISE EXCEPTION 'unknown mirror invocation fault';
+  END CASE;
+  RETURN kaname._authority_binding_mirror_before_write_v3('access_binding_target_members','INSERT',NULL,'{}'::jsonb);
+ END $probe$;
+ REVOKE ALL ON FUNCTION kaname.test_binding_mirror_invocation_v4(text) FROM PUBLIC`)
+	require.NoError(t, err)
+	_, err = r.admin.Exec(ctx, `GRANT EXECUTE ON FUNCTION kaname.test_binding_mirror_invocation_v4(text) TO `+pgx.Identifier{r.role}.Sanitize())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		_, e := r.admin.Exec(cleanup, `DROP FUNCTION kaname.test_binding_mirror_invocation_v4(text)`)
+		require.NoError(t, e)
+	})
 	kanamepg.BindingMirrorPreparedApplyForTest(t, ctx, r.repo, r.bundle, binding, other, r.a)
 	var members int
 	require.NoError(t, r.runtime.QueryRow(ctx, `SELECT count(*) FROM kaname.access_binding_target_members WHERE binding_id=$1`, string(binding)).Scan(&members))

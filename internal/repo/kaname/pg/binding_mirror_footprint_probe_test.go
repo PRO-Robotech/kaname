@@ -280,6 +280,33 @@ func BindingMirrorPreparedApplyForTest(t *testing.T, ctx context.Context, repo *
 	store.decisionAt = at.UTC()
 	_, err = w.tx.Exec(ctx, `SELECT kaname.authority_binding_stage_sequence_finalize_v3($1)`, string(id))
 	require.NoError(t, err)
+	// Та же настоящая RC-программа: positive, повреждение, новый BEFORE отказ,
+	// rollback повреждения и снова positive без смены backend или TX.
+	var paired bool
+	require.NoError(t, w.tx.QueryRow(ctx, `SELECT kaname.test_binding_mirror_invocation_v4('pair')`).Scan(&paired))
+	require.True(t, paired)
+	for _, fault := range []struct{ mode, message string }{
+		{"root", "authority cluster barrier missing"},
+		{"account", "authority account barrier missing"},
+		{"consumer", "authority consumer v2 witness mismatch"},
+		{"mirror_nonce", "binding mirror program identity changed"},
+		{"clock", "binding mirror write before final held proof"},
+		{"population", "authority population latch mode mismatch"},
+	} {
+		tryDenied("fresh_"+fault.mode, func() error {
+			_, e := w.tx.Exec(ctx, `SELECT kaname.test_binding_mirror_invocation_v4($1)`, fault.mode)
+			var pgerr *pgconn.PgError
+			require.ErrorAs(t, e, &pgerr, fault.mode)
+			require.Equal(t, fault.message, pgerr.Message, fault.mode)
+			return e
+		})
+		require.NoError(t, w.tx.QueryRow(ctx, `SELECT kaname.test_binding_mirror_invocation_v4('pair')`).Scan(&paired))
+		require.True(t, paired)
+	}
+	tryDenied("private_probe", func() error {
+		_, e := w.tx.Exec(ctx, `SELECT * FROM kaname._authority_binding_mirror_probe_v4()`)
+		return e
+	})
 	tryDenied("wrong_binding", func() error { return writeMember(other, member.ObjectType, member.ObjectID) })
 	tryDenied("wrong_coordinate", func() error { return writeMember(id, member.ObjectType, member.ObjectID+"-forged") })
 	tryDenied("forged_owner_program", func() error {
