@@ -140,12 +140,21 @@ func waitDeactivationOutcome(t *testing.T, ctx context.Context, pool *pgxpool.Po
 				 WHERE a.datname = current_database() AND a.wait_event_type = 'Lock'
 				 AND $1::integer=ANY(pg_catalog.pg_blocking_pids(a.pid))
 				 AND (a.query ILIKE '%access_bindings%' OR
-				  (a.query IN ('SELECT kaname.authority_parent_prelock_admit_v3()', 'SELECT kaname.authority_reconcile_enter_v3()')
+				  (a.query IN ('SELECT kaname.authority_parent_prelock_admit_v3()', 'SELECT kaname.authority_reconcile_enter_v3()',
+                    'SELECT pg_advisory_xact_lock(1262569292,0)')
 				   AND EXISTS(SELECT 1 FROM pg_catalog.pg_locks l
+				    JOIN pg_catalog.pg_locks h ON h.pid=$1 AND h.granted
+                     AND h.locktype=l.locktype AND h.database=l.database
+                     AND h.classid=l.classid AND h.objid=l.objid AND h.objsubid=l.objsubid
+                     AND h.mode='ExclusiveLock'
 				    WHERE l.pid=a.pid AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database())
 				    AND l.locktype='advisory' AND l.classid=1262569292::oid
-				    AND l.objid=0::oid AND l.objsubid=2 AND l.mode='ExclusiveLock' AND NOT l.granted)))`, forwardHolderPID).Scan(&n))
-			if n > 0 {
+				    AND l.objid=0::oid AND l.objsubid=2 AND l.mode='ExclusiveLock' AND NOT l.granted)
+                   AND (a.query<>'SELECT pg_advisory_xact_lock(1262569292,0)' OR
+                    NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks held WHERE held.pid=a.pid AND held.granted
+                     AND held.locktype IN ('advisory','relation','tuple')))))`, forwardHolderPID).Scan(&n))
+			require.LessOrEqual(t, n, 1, "ПРЕДПОСЫЛКА: единственный backend снятия за точным PID форварда")
+			if n == 1 {
 				return false, nil
 			}
 		}

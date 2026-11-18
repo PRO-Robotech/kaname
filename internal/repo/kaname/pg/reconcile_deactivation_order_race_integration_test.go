@@ -61,7 +61,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
@@ -105,9 +104,11 @@ func runDeactivationFirstRace(t *testing.T, kind forwardKind, suffix string, dea
 		return runExpiryDeactivationEntryPauseRace(t, kind, suffix)
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, setupTestDB(t))
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
+	firstError := &raceFirstPGError{}
+	pool = raceTracingPool(t, ctx, firstError)
+	// Снимок первой исходной ошибки печатается до pool.Close. Он не меняет
+	// результат операции и не подменяет прежние assertions кодом SQLSTATE.
+	t.Cleanup(func() { firstError.report(t) })
 	fx := setupGamma(t, ctx, pool, suffix)
 	forwarder, adapter := newReconciler(pool)
 	expirer := reconcile.New(adapter, nil, catalogfixture.Source())
@@ -121,7 +122,7 @@ func runDeactivationFirstRace(t *testing.T, kind forwardKind, suffix string, dea
 	_, err = holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, string(bid))
 	require.NoError(t, err, "ПРЕДПОСЫЛКА: проба держит advisory-замок выдачи")
 
-	done := startDeactivation(t, ctx, pool, expirer, fx, bid, deact)
+	done := startDeactivation(t, context.WithValue(ctx, raceFirstPGErrorKey{}, firstError), pool, expirer, fx, bid, deact)
 	waitAdvisoryWaiter(t, ctx, pool, done, deact)
 
 	if kind == bindingForward {
@@ -151,7 +152,7 @@ func runExpiryDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix 
 	ctx := context.Background()
 	setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer setupCancel()
-	pause := &accountEntryPause{entered: make(chan struct{}), release: make(chan struct{})}
+	pause := &accountEntryPause{sql: "SELECT kaname.authority_reconcile_enter_v3()", entered: make(chan struct{}), release: make(chan struct{})}
 	pool := accountEntryPausePool(t, setupCtx, pause)
 	fx := setupGamma(t, setupCtx, pool, suffix)
 	forwarder, adapter := newReconciler(pool)
@@ -187,27 +188,21 @@ func runExpiryDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix 
 	}
 
 	observeCtx, observeCancel := context.WithTimeout(ctx, expiryRaceBudget)
+	// Трассировщик видит внешний reconcile entry ДО отправки: вложенный
+	// parent-prelock внутри серверной функции не является pgx callback.
 	var expiryStart time.Time
-	var idle, rootHeld, noOtherLocks bool
+	var idle, noOtherLocks bool
 	err := pool.QueryRow(observeCtx, `SELECT a.xact_start,
  a.state='idle in transaction',
- EXISTS(SELECT 1 FROM pg_catalog.pg_locks l WHERE l.pid=a.pid
-  AND l.locktype='advisory' AND l.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
-  AND l.classid=1262569283::oid AND l.objid=0::oid AND l.objsubid=2
-  AND l.mode='ShareLock' AND l.granted),
  NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks l WHERE l.pid=a.pid
-  AND (l.locktype IN ('relation','tuple') OR (l.locktype='advisory'
-   AND NOT (l.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
-    AND l.classid=1262569283::oid AND l.objid=0::oid AND l.objsubid=2
-    AND l.mode='ShareLock' AND l.granted))))
+  AND l.locktype IN ('advisory','relation','tuple'))
  FROM pg_catalog.pg_stat_activity a
  WHERE a.pid=$1 AND a.datname=current_database() AND a.xact_start IS NOT NULL`,
-		pause.pid.Load()).Scan(&expiryStart, &idle, &rootHeld, &noOtherLocks)
+		pause.pid.Load()).Scan(&expiryStart, &idle, &noOtherLocks)
 	observeCancel()
 	require.NoError(t, err)
 	require.True(t, idle, "ПРЕДПОСЫЛКА: настоящая expiry TX уже началась")
-	require.True(t, rootHeld, "ПРЕДПОСЫЛКА: реальный adapter уже взял shared lifecycle root")
-	require.True(t, noOtherLocks, "ПРЕДПОСЫЛКА: expiry TX ещё не держит admission9292 или бизнес-замки")
+	require.True(t, noOtherLocks, "ПРЕДПОСЫЛКА: до внешнего reconcile entry нет root, compat или бизнес-замков")
 
 	forward := func() error {
 		requestCtx, cancel := context.WithTimeout(ctx, expiryRaceBudget)

@@ -27,6 +27,7 @@ type accountEntryPauseKey struct{}
 // CAS захватывает вызов без мьютекса, который мог бы задержать другие запросы.
 // Внутри tracer нет SQL; PID читается из уже открытого соединения.
 type accountEntryPause struct {
+	sql     string
 	claimed atomic.Bool
 	pid     atomic.Uint32
 	entered chan struct{}
@@ -38,7 +39,7 @@ func (p *accountEntryPause) let() { p.once.Do(func() { close(p.release) }) }
 
 func (p *accountEntryPause) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	if ctx.Value(accountEntryPauseKey{}) != p ||
-		data.SQL != "SELECT kaname.authority_parent_prelock_admit_v3()" ||
+		data.SQL != p.sql ||
 		!p.claimed.CompareAndSwap(false, true) {
 		return ctx
 	}
@@ -57,6 +58,14 @@ func (*accountEntryPause) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQue
 // corelib/db.NewPool v1.16.1: оба server timeout, CancelRequest watcher и Ping.
 func accountEntryPausePool(t *testing.T, ctx context.Context, pause *accountEntryPause) *pgxpool.Pool {
 	t.Helper()
+	pool := raceTracingPool(t, ctx, pause)
+	// LIFO: release всегда идёт до закрытия пула, включая отказ предпосылки.
+	t.Cleanup(pause.let)
+	return pool
+}
+
+func raceTracingPool(t *testing.T, ctx context.Context, tracer pgx.QueryTracer) *pgxpool.Pool {
+	t.Helper()
 	cfg, err := pgxpool.ParseConfig(setupTestDB(t))
 	require.NoError(t, err)
 	if cfg.ConnConfig.RuntimeParams == nil {
@@ -69,12 +78,10 @@ func accountEntryPausePool(t *testing.T, ctx context.Context, pause *accountEntr
 			Conn: c, CancelRequestDelay: 0, DeadlineDelay: 500 * time.Millisecond,
 		}
 	}
-	cfg.ConnConfig.Tracer = pause
+	cfg.ConnConfig.Tracer = tracer
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	// LIFO: release всегда идёт до закрытия пула, включая отказ предпосылки.
-	t.Cleanup(pause.let)
 	require.NoError(t, pool.Ping(ctx))
 	return pool
 }
@@ -85,7 +92,7 @@ func accountEntryPausePool(t *testing.T, ctx context.Context, pause *accountEntr
 func runAccountDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix string) (*pgxpool.Pool, domain.AccessBindingID, string) {
 	t.Helper()
 	ctx := context.Background()
-	pause := &accountEntryPause{entered: make(chan struct{}), release: make(chan struct{})}
+	pause := &accountEntryPause{sql: "SELECT pg_advisory_xact_lock(1262569292,0)", entered: make(chan struct{}), release: make(chan struct{})}
 	pool := accountEntryPausePool(t, ctx, pause)
 	fx := setupGamma(t, ctx, pool, suffix)
 	forwarder, _ := newReconciler(pool)
@@ -101,7 +108,9 @@ func runAccountDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix
 	}
 
 	// Административное наблюдение только чтением, на отдельном соединении.
-	// BEGIN уже виден, SELECT admission ещё не отправлен, бизнес-замков нет.
+	// BEGIN уже виден, внешний SELECT compatibility admission ещё не отправлен.
+	// Пауза в последующем parent-prelock была бы слишком поздней: Writer уже
+	// держал бы EXCL compat и не дал бы форварду закоммититься в этом окне.
 	adminCtx, cancel := context.WithTimeout(ctx, expiryRaceBudget)
 	defer cancel()
 	admin, err := pool.BeginTx(adminCtx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
