@@ -28,32 +28,32 @@ type fullStartupDiagnosticQuery struct{}
 // Только наблюдение: PID и TxStatus читаются из клиента, без SQL/XID/новых locks.
 // Счётчик запроса связывает START/END; это не номер product attempt или транзакции.
 type fullStartupDiagnosticEvent struct {
-	Sequence uint64 `json:"query_sequence"`
-	ElapsedNS int64 `json:"elapsed_ns"`
-	Phase string `json:"phase"`
-	Operation string `json:"operation"`
-	PID uint32 `json:"pid"`
-	TxStatus string `json:"tx_status"`
-	Family string `json:"family"`
-	SQL string `json:"sql,omitempty"`
-	SQLHash string `json:"sql_sha256"`
-	ErrorType string `json:"error_type,omitempty"`
-	Code string `json:"sqlstate,omitempty"`
-	Message string `json:"message,omitempty"`
-	MessageHash string `json:"message_sha256,omitempty"`
-	Where []string `json:"where_frames,omitempty"`
-	WhereHash string `json:"where_sha256,omitempty"`
-	Routine string `json:"routine,omitempty"`
-	Command string `json:"command,omitempty"`
+	Sequence    uint64   `json:"query_sequence"`
+	ElapsedNS   int64    `json:"elapsed_ns"`
+	Phase       string   `json:"phase"`
+	Operation   string   `json:"operation"`
+	PID         uint32   `json:"pid"`
+	TxStatus    string   `json:"tx_status"`
+	Family      string   `json:"family"`
+	SQL         string   `json:"sql,omitempty"`
+	SQLHash     string   `json:"sql_sha256"`
+	ErrorType   string   `json:"error_type,omitempty"`
+	Code        string   `json:"sqlstate,omitempty"`
+	Message     string   `json:"message,omitempty"`
+	MessageHash string   `json:"message_sha256,omitempty"`
+	Where       []string `json:"where_frames,omitempty"`
+	WhereHash   string   `json:"where_sha256,omitempty"`
+	Routine     string   `json:"routine,omitempty"`
+	Command     string   `json:"command,omitempty"`
 }
 
 type fullStartupDiagnostic struct {
-	mu sync.Mutex
-	started time.Time
-	sequence uint64
-	events [256]fullStartupDiagnosticEvent
-	next uint64
-	failures []fullStartupDiagnosticEvent
+	mu            sync.Mutex
+	started       time.Time
+	sequence      uint64
+	events        [256]fullStartupDiagnosticEvent
+	next          uint64
+	failures      []fullStartupDiagnosticEvent
 	failureCounts [3]uint64
 	omittedErrors uint64
 }
@@ -68,7 +68,7 @@ type fullStartupDiagnosticNonBatch interface {
 	pgxpool.AcquireTracer
 	pgxpool.ReleaseTracer
 }
-type fullStartupDiagnosticQueryOnly struct { fullStartupDiagnosticNonBatch }
+type fullStartupDiagnosticQueryOnly struct{ fullStartupDiagnosticNonBatch }
 
 func (q *fullStartupDiagnostic) combine(previous pgx.QueryTracer) pgx.QueryTracer {
 	if previous == nil {
