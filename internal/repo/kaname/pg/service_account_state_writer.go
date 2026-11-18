@@ -95,7 +95,12 @@ func (p *ServiceAccountStateWriters) open(ctx context.Context, request serviceAc
 			conn.Release()
 		}
 	}()
-	{
+	// Повторяется только подготовка до возврата writer: новый RR stage и новый RC.
+	// Тело UC и Commit остаются у вызывающего и здесь не повторяются.
+	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		snapshot, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 		if err != nil {
 			return nil, err
@@ -104,7 +109,13 @@ func (p *ServiceAccountStateWriters) open(ctx context.Context, request serviceAc
 		if cleanup := policyRollback(ctx, snapshot); cleanup != nil {
 			return nil, errors.Join(err, cleanup)
 		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if err != nil {
+			if policyRetry(err) {
+				continue
+			}
 			return nil, err
 		}
 		intent := stage.plan.intent(p.policy.bundle)
@@ -165,8 +176,11 @@ func (p *ServiceAccountStateWriters) open(ctx context.Context, request serviceAc
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, err
+		if !policyRetry(err) {
+			return nil, err
+		}
 	}
+	return nil, iamerr.Wrapf(iamerr.ErrAborted, "%s: %w", iamerr.SerializationConflictSyncText, kaname.ErrAuthorityClassificationChanged)
 }
 
 var _ kaname.ServiceAccountStateWriterFactory = (*ServiceAccountStateWriters)(nil)
