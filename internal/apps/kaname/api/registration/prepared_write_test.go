@@ -118,28 +118,31 @@ func TestPreparedRegistrationKeepsMaterialsAndPublishesOnce(t *testing.T) {
 	require.Equal(t, 1, hashes)
 }
 
-type registrationExhaustedOutcome struct { error }
+type registrationExhaustedOutcome struct{ error }
+
 func (registrationExhaustedOutcome) PreparedAttemptsExhausted() bool { return true }
-func (e registrationExhaustedOutcome) Unwrap() error { return e.error }
-type registrationCleanupOutcome struct { error }
+func (e registrationExhaustedOutcome) Unwrap() error                 { return e.error }
+
+type registrationCleanupOutcome struct{ error }
+
 func (registrationCleanupOutcome) PreparedCleanupFailed() bool { return true }
-func (e registrationCleanupOutcome) Unwrap() error { return e.error }
+func (e registrationCleanupOutcome) Unwrap() error             { return e.error }
 
 func TestRegistrationPreservesTerminalWriteOutcome(t *testing.T) {
 	exhausted := registrationExhaustedOutcome{errors.Join(iamerr.ErrAborted, errors.New("private-schema-secret"))}
 	for name, failure := range map[string]error{
-		"exhausted": exhausted,
-		"cancel": errors.Join(exhausted, context.Canceled),
+		"exhausted":      exhausted,
+		"cancel":         errors.Join(exhausted, context.Canceled),
 		"unknown-commit": errors.New("private-connection-secret"),
 		"legacy-aborted": errors.Join(iamerr.ErrAborted, errors.New("private-legacy-secret")),
-		"cleanup": errors.Join(exhausted, registrationCleanupOutcome{errors.New("private-cleanup-secret")}),
+		"cleanup":        errors.Join(exhausted, registrationCleanupOutcome{errors.New("private-cleanup-secret")}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			u := newUnit(t, func(store *unitStore) { store.commitErr = failure })
 			_, err := u.register(t, "outcome@example.invalid")
 			if name == "exhausted" {
 				require.ErrorIs(t, err, iamerr.ErrAborted)
-				require.EqualError(t, err, "aborted: " + iamerr.SerializationConflictSyncText)
+				require.EqualError(t, err, "aborted: "+iamerr.SerializationConflictSyncText)
 				require.NotErrorIs(t, err, humansession.ErrStoreUnavailable)
 			} else {
 				require.ErrorIs(t, err, humansession.ErrStoreUnavailable)

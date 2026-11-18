@@ -15,22 +15,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type admissionExhaustedOutcome struct { error }
-func (admissionExhaustedOutcome) PreparedAttemptsExhausted() bool { return true }
-func (e admissionExhaustedOutcome) Unwrap() error { return e.error }
+type admissionExhaustedOutcome struct{ error }
 
-type admissionCleanupOutcome struct { error }
+func (admissionExhaustedOutcome) PreparedAttemptsExhausted() bool { return true }
+func (e admissionExhaustedOutcome) Unwrap() error                 { return e.error }
+
+type admissionCleanupOutcome struct{ error }
+
 func (admissionCleanupOutcome) PreparedCleanupFailed() bool { return true }
-func (e admissionCleanupOutcome) Unwrap() error { return e.error }
+func (e admissionCleanupOutcome) Unwrap() error             { return e.error }
 
 func admissionFailureCases() map[string]error {
 	exhausted := admissionExhaustedOutcome{errors.Join(iamerr.ErrAborted, errors.New("private-schema-secret"))}
 	return map[string]error{
-		"exhausted": exhausted,
-		"cancel": errors.Join(exhausted, context.Canceled),
-		"deadline": errors.Join(exhausted, context.DeadlineExceeded),
+		"exhausted":      exhausted,
+		"cancel":         errors.Join(exhausted, context.Canceled),
+		"deadline":       errors.Join(exhausted, context.DeadlineExceeded),
 		"unknown-commit": errors.New("private-connection-secret"),
-		"cleanup": errors.Join(exhausted, admissionCleanupOutcome{errors.New("private-cleanup-secret")}),
+		"cleanup":        errors.Join(exhausted, admissionCleanupOutcome{errors.New("private-cleanup-secret")}),
 		"legacy-aborted": errors.Join(iamerr.ErrAborted, errors.New("private-legacy-secret")),
 	}
 }
@@ -38,7 +40,7 @@ func assertAdmissionOutcome(t *testing.T, name string, err error) {
 	t.Helper()
 	if name == "exhausted" {
 		require.ErrorIs(t, err, iamerr.ErrAborted)
-		require.EqualError(t, err, "aborted: " + iamerr.SerializationConflictSyncText)
+		require.EqualError(t, err, "aborted: "+iamerr.SerializationConflictSyncText)
 		require.NotErrorIs(t, err, humansession.ErrStoreUnavailable)
 	} else {
 		require.ErrorIs(t, err, humansession.ErrStoreUnavailable)
@@ -51,20 +53,31 @@ type admissionOutcomeStore struct {
 	*ecStore
 	humansession.VerificationStore
 	failure error
-	calls int
+	calls   int
 }
+
 func (s *admissionOutcomeStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
 	return s.ecStore.Resolve(ctx, digest, now)
 }
-func (s *admissionOutcomeStore) RunVerificationWrite(context.Context, domain.UserID, func(context.Context, humansession.VerificationWriter) error) error { s.calls++; return s.failure }
-func (s *admissionOutcomeStore) RunEmailChangeWrite(context.Context, domain.UserID, func(context.Context, humansession.EmailChangeWriter) error) error { s.calls++; return s.failure }
+func (s *admissionOutcomeStore) RunVerificationWrite(context.Context, domain.UserID, func(context.Context, humansession.VerificationWriter) error) error {
+	s.calls++
+	return s.failure
+}
+func (s *admissionOutcomeStore) RunEmailChangeWrite(context.Context, domain.UserID, func(context.Context, humansession.EmailChangeWriter) error) error {
+	s.calls++
+	return s.failure
+}
 
 type recoveryOutcomeStore struct {
 	humansession.RecoveryCompletionStore
 	failure error
-	calls int
+	calls   int
 }
-func (s *recoveryOutcomeStore) RunRecoveryCompletionWrite(context.Context, domain.UserID, func(context.Context, humansession.RecoveryCompletionWriter) error) error { s.calls++; return s.failure }
+
+func (s *recoveryOutcomeStore) RunRecoveryCompletionWrite(context.Context, domain.UserID, func(context.Context, humansession.RecoveryCompletionWriter) error) error {
+	s.calls++
+	return s.failure
+}
 
 // Ошибка поступает из завершённого backend executor: UC не повторяет его и
 // сохраняет различие исчерпанного abort и неопределённого терминального исхода.

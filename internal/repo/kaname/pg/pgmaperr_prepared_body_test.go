@@ -18,15 +18,17 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type preparedAuditFaultRow struct { cause error }
+type preparedAuditFaultRow struct{ cause error }
+
 func (r preparedAuditFaultRow) Scan(...any) error { return r.cause }
 
 type preparedAuditFaultTx struct {
 	pgx.Tx
-	t *testing.T
-	cause *pgconn.PgError
+	t                  *testing.T
+	cause              *pgconn.PgError
 	queries, rollbacks *int
 }
+
 func (tx *preparedAuditFaultTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
 	require.Contains(tx.t, sql, "INSERT INTO kaname.audit_outbox")
 	(*tx.queries)++
@@ -49,7 +51,7 @@ func TestPreparedAuditBodyConflictPreservesCauseWithoutPublicSQL(t *testing.T) {
 				opened++
 				last = &pgconn.PgError{Code: code, Message: "private SQL message", Detail: "private account row", Where: "private query context", Routine: "private server routine", InternalQuery: "SELECT private_secret FROM private_table"}
 				mapped := mapErr(last, "", "")
-				var exhausted interface { PreparedAttemptsExhausted() bool }
+				var exhausted interface{ PreparedAttemptsExhausted() bool }
 				require.False(t, errors.As(mapped, &exhausted), "одиночный legacy конфликт не означает исчерпание prepared budget")
 				var cause *pgconn.PgError
 				require.ErrorAs(t, mapped, &cause)
@@ -66,7 +68,7 @@ func TestPreparedAuditBodyConflictPreservesCauseWithoutPublicSQL(t *testing.T) {
 			require.Equal(t, opened, queries)
 			require.Equal(t, opened, rollbacks)
 			require.ErrorIs(t, err, iamerr.ErrAborted)
-			var exhausted interface { PreparedAttemptsExhausted() bool }
+			var exhausted interface{ PreparedAttemptsExhausted() bool }
 			require.ErrorAs(t, err, &exhausted)
 			require.True(t, exhausted.PreparedAttemptsExhausted(), "marker допустим только после всех трёх попыток")
 			var cause *pgconn.PgError

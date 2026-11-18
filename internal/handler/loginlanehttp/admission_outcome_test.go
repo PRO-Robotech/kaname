@@ -14,21 +14,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type admissionExhaustedHTTPOutcome struct { error }
+type admissionExhaustedHTTPOutcome struct{ error }
+
 func (admissionExhaustedHTTPOutcome) PreparedAttemptsExhausted() bool { return true }
-func (e admissionExhaustedHTTPOutcome) Unwrap() error { return e.error }
-type admissionCleanupHTTPOutcome struct { error }
+func (e admissionExhaustedHTTPOutcome) Unwrap() error                 { return e.error }
+
+type admissionCleanupHTTPOutcome struct{ error }
+
 func (admissionCleanupHTTPOutcome) PreparedCleanupFailed() bool { return true }
-func (e admissionCleanupHTTPOutcome) Unwrap() error { return e.error }
+func (e admissionCleanupHTTPOutcome) Unwrap() error             { return e.error }
 
 func TestAdmissionTerminalOutcomeHTTPContract(t *testing.T) {
 	exhausted := admissionExhaustedHTTPOutcome{errors.Join(iamerr.ErrAborted, errors.New("private-schema-secret"))}
 	for name, failure := range map[string]error{
-		"exhausted": exhausted,
-		"cancel": errors.Join(exhausted, context.Canceled),
+		"exhausted":      exhausted,
+		"cancel":         errors.Join(exhausted, context.Canceled),
 		"unknown-commit": errors.New("private-connection-secret"),
 		"legacy-aborted": errors.Join(iamerr.ErrAborted, errors.New("private-legacy-secret")),
-		"cleanup": errors.Join(exhausted, admissionCleanupHTTPOutcome{errors.New("private-cleanup-secret")}),
+		"cleanup":        errors.Join(exhausted, admissionCleanupHTTPOutcome{errors.New("private-cleanup-secret")}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := httptest.NewRecorder()
