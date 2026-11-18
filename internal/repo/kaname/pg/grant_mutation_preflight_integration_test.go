@@ -156,10 +156,15 @@ func TestBindingExpiryChildPreflightLastPageCancellation(t *testing.T) {
 	for _, table := range []string{"access_binding_emitted_tuples", "access_binding_target_members"} {
 		t.Run(table, func(t *testing.T) {
 			r := writerProtocolRig(t)
+			fixtureBase := context.WithoutCancel(r.ctx)
+			r = bindingFunctionalRequestRig(t, r, fixtureBase)
 			stageSeedGroups(t, r, r.a, 259, "blue")
+			r = bindingFunctionalRequestRig(t, r, fixtureBase)
 			id := stageBinding(t, r, r.a, false)
+			r = bindingFunctionalRequestRig(t, r, fixtureBase)
 			require.NoError(t, bindingStageEngine(t, r, nil).ReconcileBinding(r.ctx, id))
 			require.Equal(t, 259, stageCount(t, r, id))
+			r = bindingFunctionalRequestRig(t, r, fixtureBase)
 			expireBindingFixture(t, r, id)
 			p := withdrawalParticipant(t, r, nil)
 			var before string
@@ -169,6 +174,9 @@ func TestBindingExpiryChildPreflightLastPageCancellation(t *testing.T) {
 				return s
 			}
 			before = snapshot()
+			// Весь исследуемый prelock/cancel/rollback использует один прежний
+			// бюджет; новый контекст внутри удерживаемого ожидания не выдаётся.
+			r = bindingFunctionalRequestRig(t, r, fixtureBase)
 			blocker, err := r.admin.Begin(r.ctx)
 			if blocker != nil {
 				roleFinalCleanup(t, blocker)
@@ -208,6 +216,9 @@ func TestBindingExpiryChildPreflightLastPageCancellation(t *testing.T) {
 			}
 			require.NoError(t, blocker.Rollback(r.ctx))
 			require.Equal(t, before, snapshot(), "rollback сохраняет parent и весь child census")
+			// Повтор после завершённой отмены — самостоятельный запрос, а не
+			// продолжение уже исчерпанного времени посева и первого запроса.
+			r = bindingFunctionalRequestRig(t, r, fixtureBase)
 			require.NoError(t, p.ExpireStagedBinding(r.ctx, id))
 			var n int
 			require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT (SELECT count(*) FROM kaname.access_binding_emitted_tuples WHERE binding_id=$1)+(SELECT count(*) FROM kaname.access_binding_target_members WHERE binding_id=$1)`, id).Scan(&n))
