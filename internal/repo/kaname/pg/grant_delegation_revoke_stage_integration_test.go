@@ -72,6 +72,7 @@ func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "commit", true: "last_page_failure"}[fail], func(t *testing.T) {
 			w := delegationUCFixture(t)
+			delegationRevokeWaitDiagnosticsOnFailure(t, w)
 			id := w.create(t, w.owner, false)
 			bs := delegationRevokeBindings(t, w, id, 257)
 			var producedBefore []byte
@@ -127,6 +128,7 @@ func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 // включая PENDING за первой страницей, вместе с их фактической проекцией.
 func TestGrantDelegationStagedRevokeIncludesPendingLastPage(t *testing.T) {
 	w := delegationUCFixture(t)
+	delegationRevokeWaitDiagnosticsOnFailure(t, w)
 	t.Cleanup(func() { authorityWaitReleased(t, w.r.runtime) })
 	id := w.create(t, w.owner, false)
 	bindings := delegationRevokeBindings(t, w, id, 257)
@@ -185,6 +187,7 @@ func TestGrantDelegationStagedRevokeNativeExpiryAfterLegacyWait(t *testing.T) {
 	for _, expired := range []bool{false, true} {
 		t.Run(map[bool]string{false: "live", true: "expired"}[expired], func(t *testing.T) {
 			w := delegationUCFixture(t)
+			delegationRevokeWaitDiagnosticsOnFailure(t, w)
 			id := w.create(t, w.owner, false)
 			authority := w.grantAdmin(t)
 			var deadline time.Time

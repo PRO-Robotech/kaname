@@ -49,6 +49,7 @@ type fullMeasurementAcquire struct {
 	Error      string
 }
 type fullMeasurementQuery struct {
+	Batch                            int // Start/End для batch — общий envelope, не per-query duration.
 	Label                            string
 	SQL                              string
 	Args                             []any
@@ -66,6 +67,7 @@ type fullMeasurementTrace struct {
 	queries     []*fullMeasurementQuery
 	acquires    []*fullMeasurementAcquire
 	connections map[*pgx.Conn]int
+	batches     []*fullMeasurementBatch
 }
 
 func (tr *fullMeasurementTrace) TraceAcquireStart(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireStartData) context.Context {
@@ -300,6 +302,7 @@ var fullMeasurementFunction = regexp.MustCompile(`(?i)kaname\.([a-z_][a-z_0-9]*)
 type fullMeasurementSQLCost struct {
 	SQL                        string
 	Calls, Errors, MissingEnds int
+	BatchCalls                 int // Индивидуальное время этих SQL не наблюдается.
 	ClientNS, DirectRows       int64
 }
 
@@ -385,6 +388,8 @@ func fullMeasurementReport(t *testing.T, trace *fullMeasurementTrace, label stri
 			c.DirectRows += q.RowsAffected
 			if q.End.IsZero() {
 				c.MissingEnds++
+			} else if q.Batch != 0 {
+				c.BatchCalls++
 			} else {
 				c.ClientNS += q.End.Sub(q.Start).Nanoseconds()
 			}
@@ -409,6 +414,7 @@ func fullMeasurementReport(t *testing.T, trace *fullMeasurementTrace, label stri
 		}
 	}
 	fullMeasurementLog(t, "operation", map[string]any{"label": label, "elapsed_ns": elapsed.Nanoseconds(), "client_sql": len(qs), "stage_temp_direct_rows": stageRows, "domain_direct_rows": domainRows, "unclassified_direct_rows": unknownRows, "statement_costs": costs, "stage_create_attempts": stages, "observed_stage_restarts": max(stages-1, 0), "coordinator_entry_calls": entries, "coordinator_tx_attempts": len(writers), "observed_writer_restarts": max(len(writers)-1, 0), "pool_acquire_intervals": trace.acquisitions(label), "private_function_rows_measured": false, "private_function_internal_time_measured": false, "pure_lock_wait_measured": false, "private_row_work_gap": "nested private SQL/trigger rows and churn are not separately observed; actual enclosing SQL cost is measured"})
+	fullMeasurementLog(t, "batch_intervals", map[string]any{"label": label, "batches": trace.batchIntervals(label), "individual_statement_time_measured": false, "query_start_end_are_batch_envelope": true})
 	// Не скрываем ошибку stage/capture assertion о ещё не достигнутом entry.
 	// Успешный run по-прежнему обязан реально вызвать coordinator.
 	if succeeded {

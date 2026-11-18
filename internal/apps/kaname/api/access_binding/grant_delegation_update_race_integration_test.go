@@ -11,7 +11,6 @@ import (
 
 	operationpb "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	"github.com/PRO-Robotech/corelib/operations"
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -25,10 +24,11 @@ import (
 // задвижку; существующие Create/Revoke и фоновые операции не задерживаются.
 type gduClaimGate struct {
 	operations.Repo
-	mu      sync.Mutex
-	gates   map[string]chan struct{}
-	entered chan string
-	armed   bool
+	mu       sync.Mutex
+	gates    map[string]chan struct{}
+	entered  chan string
+	armed    bool
+	recorded []string
 }
 
 func (g *gduClaimGate) Create(ctx context.Context, op operations.Operation) error {
@@ -49,6 +49,7 @@ func (g *gduClaimGate) record(id string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.armed {
+		g.recorded = append(g.recorded, id)
 		g.gates[id] = make(chan struct{})
 	}
 }
@@ -161,24 +162,39 @@ func TestGrantDelegation_GDU14_ConcurrentDisjointAndIdentical(t *testing.T) {
 			u := newGDUWorld(t, false)
 			u.subject()
 			var rendezvous *gduWriterRendezvous
+			var g *gduClaimGate
 			if mode == "disjoint_small_pool" {
+				lifetime, cancelWorkers := context.WithCancel(u.ctx)
+				t.Cleanup(cancelWorkers)
 				cfg := u.pool.Config()
+				cfg.ConnConfig.Tracer = &gduWorkerCancelTrace{lifetime: lifetime}
 				cfg.MaxConns = 2
 				cfg.MinConns = 0
+				cfg.ConnConfig.RuntimeParams["application_name"] = "gdu14-small-pool"
 				p, err := pgxpool.NewWithConfig(u.ctx, cfg)
 				require.NoError(t, err)
-				t.Cleanup(p.Close)
-				rendezvous = &gduWriterRendezvous{Repository: kanamepg.New(p, nil), entered: make(chan struct{}, 2), release: make(chan struct{})}
+				rendezvous = &gduWriterRendezvous{lifetime: lifetime, pool: p, Repository: kanamepg.New(p, nil), entered: make(chan struct{}, 2), release: make(chan struct{}), firstReady: make(chan struct{}), continueFirst: make(chan struct{})}
 				u.updateRepo = rendezvous
 				t.Cleanup(func() {
+					// Caller cancel отрезан corelib worker. Отменяем реальные SQL
+					// и Acquire только этого пула, затем дренируем лишь его две LRO.
+					cancelWorkers()
 					select {
 					case <-rendezvous.release:
 					default:
 						close(rendezvous.release)
 					}
+					select {
+					case <-rendezvous.continueFirst:
+					default:
+						close(rendezvous.continueFirst)
+					}
+					if gdDrainOwnedUpdates(u.gdWorld, g, p) {
+						p.Close()
+					}
 				})
 			}
-			g := u.claimGate()
+			g = u.claimGate()
 			a := u.body(gduMask("roleIds"), map[string]any{"roleIds": u.all()["roleIds"]})
 			b := u.body(gduMask("targetTypes"), map[string]any{"targetTypes": u.all()["targetTypes"]})
 			if mode == "identical" {
@@ -189,19 +205,32 @@ func TestGrantDelegation_GDU14_ConcurrentDisjointAndIdentical(t *testing.T) {
 			opB := u.accepted(g, b)
 			g.disarm()
 			// Два уже принятых запроса основаны на одном снимке; выпускаем обе
-			// горутины. При малом пуле два Writer захватывают оба соединения прежде
-			// продолжения; authority recheck не должен просить третье соединение.
+			// горутины. Rendezvous до Writer допускает настоящий legacy compat
+			// порядок; затем exact queue доказывает занятость обоих соединений.
+			// Authority recheck первого Writer не должен просить третье.
 			g.release(opA.GetId())
 			g.release(opB.GetId())
 			if rendezvous != nil {
+				setupCtx, cancel := context.WithTimeout(u.ctx, gduBarrierDeadline)
+				defer cancel()
 				for i := 0; i < 2; i++ {
 					select {
 					case <-rendezvous.entered:
-					case <-time.After(gduBarrierDeadline):
-						t.Fatal("два Writer не дошли до барьера")
+					case <-setupCtx.Done():
+						t.Fatal("две горутины не дошли до барьера перед Writer")
 					}
 				}
 				close(rendezvous.release)
+				select {
+				case <-rendezvous.firstReady:
+				case <-setupCtx.Done():
+					t.Fatal("первый Writer не получил compat fence")
+				}
+				holder := gdCompatOwner(u.gdWorld)
+				waiter := gdAwaitCompatWaiterUntil(setupCtx, u.gdWorld, holder, "gdu14-small-pool")
+				require.NotEqual(t, holder, waiter)
+				require.EqualValues(t, 2, rendezvous.pool.Stat().AcquiredConns(), "оба соединения малого пула реально заняты")
+				close(rendezvous.continueFirst)
 			}
 			u.awaitSuccess(opA)
 			u.awaitSuccess(opB)
@@ -222,33 +251,58 @@ func TestGrantDelegation_GDU14_ConcurrentDisjointAndIdentical(t *testing.T) {
 
 type gduWriterRendezvous struct {
 	kanamerepo.Repository
-	entered chan struct{}
-	release chan struct{}
+	pool          *pgxpool.Pool
+	lifetime      context.Context
+	entered       chan struct{}
+	release       chan struct{}
+	firstReady    chan struct{}
+	continueFirst chan struct{}
+	once          sync.Once
 }
 
 func (r *gduWriterRendezvous) Writer(ctx context.Context) (kanamerepo.Writer, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(r.lifetime, cancel)
+	defer stop()
+	defer cancel()
+	if r.lifetime.Err() != nil {
+		cancel()
+	}
+	select {
+	case <-r.release:
+		return r.Repository.Writer(ctx)
+	default:
+	}
+	// Обе настоящие горутины встречаются до сериализующего Writer.
+	select {
+	case r.entered <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	w, err := r.Repository.Writer(ctx)
 	if err != nil {
 		return nil, err
 	}
-	select {
-	case <-r.release:
-		return w, nil
-	default:
+	first := false
+	r.once.Do(func() { first = true; close(r.firstReady) })
+	if first {
+		// Первое соединение удерживается до доказанного ожидания второго
+		// на его точном compat key. Оба заняты во время первого recheck.
+		select {
+		case <-r.continueFirst:
+		case <-ctx.Done():
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = w.Rollback(cleanup)
+			return nil, ctx.Err()
+		}
 	}
-	select {
-	case r.entered <- struct{}{}:
-	case <-ctx.Done():
-		_ = w.Rollback(ctx)
-		return nil, ctx.Err()
-	}
-	select {
-	case <-r.release:
-		return w, nil
-	case <-ctx.Done():
-		_ = w.Rollback(ctx)
-		return nil, ctx.Err()
-	}
+	return w, nil
 }
 
 type gduCommitGateRepo struct {
@@ -311,9 +365,10 @@ func TestGrantDelegation_GDU15_GrantAndRevokeOrdering(t *testing.T) {
 		}
 		requireDenied(t, u.tryGrant(asSA(u.ctx, u.svaIss), u.grant("role", true)), "до реального Commit новая роль ещё запрещена")
 		old.Subjects = []*iamv1.Subject{svaSubject(u.svaA3)}
+		holderPID := gdCompatOwner(u.gdWorld)
 		grantOp, err := u.abx.Create(asSA(u.ctx, u.svaIss), old)
 		require.NoError(t, err)
-		u.awaitLockWaiter("grant_delegations", gduBarrierDeadline, "HoldActive старой выдачи ждёт Update row lock")
+		gdAwaitCompatWaiter(u.gdWorld, holderPID, "")
 		close(gate.release)
 		u.finish(op)
 		done := awaitOp(t, u.ctx, u.ops, grantOp.GetId())
@@ -347,23 +402,23 @@ func TestGrantDelegation_GDU15_GrantAndRevokeOrdering(t *testing.T) {
 	t.Run("share_lock_and_pair_before_row", func(t *testing.T) {
 		u := newGDUWorld(t, false)
 		u.subject()
-		writer, err := u.repo.Writer(u.ctx)
-		require.NoError(t, err)
-		defer func() { _ = writer.Rollback(u.ctx) }()
-		_, active, err := writer.AccessBindingsW().GrantDelegationsW().HoldActive(u.ctx, domain.GrantDelegationID(u.d))
-		require.NoError(t, err)
-		require.True(t, active)
+		gdRequirePairBeforeRow(u)
+		// Read-only держатель оставляет compat fence доступным настоящему
+		// Update: эта стадия проверяет его реальное FOR UPDATE ожидание.
+		holder, holderPID := gdRowHolder(u.gdWorld, `SELECT id FROM kaname.grant_delegations WHERE id=$1 AND status='ACTIVE' FOR SHARE`, u.d)
 		_, msg, err := u.gdCall(asUser(u.ctx, u.usrA), "Update", u.body(gduMask("roleIds"), map[string]any{"roleIds": u.all()["roleIds"]}))
 		require.NoError(t, err)
 		op := msg.(*operationpb.Operation)
-		u.awaitLockWaiter("grant_delegations", gduBarrierDeadline, "Update обязан конфликтовать с HoldActive FOR SHARE")
-		// Настоящий Revoke вступает в тот же порядок блокировок. При row→pair
-		// вместо pair→row сочетание должно проявить deadlock/неуспех, не тишину.
+		updatePID := gdAwaitRowWaiter(u.gdWorld, 0, holderPID, "grant_delegations")
+		require.Equal(t, updatePID, gdCompatOwner(u.gdWorld))
+		// Настоящий Revoke встаёт за этим конкретным Update; pair→row oracle
+		// выше отдельно отвергает обратный порядок production замков.
 		_, rmsg, err := u.gdCall(asUser(u.ctx, u.usrA), "Revoke", fmt.Sprintf(`{"grantDelegationId":%q}`, u.d))
 		require.NoError(t, err)
 		rop := rmsg.(*operationpb.Operation)
-		u.waitLockCount(2)
-		require.NoError(t, writer.Commit(u.ctx))
+		revokePID := gdAwaitCompatWaiter(u.gdWorld, updatePID, "")
+		require.NotEqual(t, updatePID, revokePID)
+		require.NoError(t, holder.Rollback(u.ctx))
 		u.awaitSuccess(op)
 		done := awaitOp(t, u.ctx, u.ops, rop.GetId())
 		require.Nil(t, done.Error)
@@ -381,23 +436,4 @@ func (u *gduWorld) awaitSuccess(op *operationpb.Operation) {
 	require.Nil(u.t, done.Error)
 	require.NotNil(u.t, done.Response)
 	require.Equal(u.t, u.d, anyField(u.t, done.Response, "id"))
-}
-
-func (u *gduWorld) waitLockCount(want int) {
-	u.t.Helper()
-	ctx, cancel := context.WithTimeout(u.ctx, gduBarrierDeadline)
-	defer cancel()
-	for {
-		var n int
-		err := u.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND (query ILIKE '%grant_delegations%' OR query ILIKE '%pg_advisory_xact_lock%')`).Scan(&n)
-		require.NoError(u.t, err)
-		if n >= want {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			u.t.Fatalf("порядок не создан: ожидающих %d, нужно %d", n, want)
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
 }

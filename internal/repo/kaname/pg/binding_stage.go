@@ -242,7 +242,7 @@ func (p *BindingStageParticipant) once(ctx context.Context, id domain.AccessBind
 				return e
 			}
 			for _, command := range commands {
-				if e = command.Apply(ctx, &preparedBindingStageStore{reconcileStore: store, at: at.UTC()}); e != nil {
+				if e = applyBindingCommand(ctx, &preparedBindingStageStore{reconcileStore: store, at: at.UTC()}, command); e != nil {
 					return e
 				}
 			}
@@ -609,6 +609,107 @@ func (*bindingSnapshotStore) LoadBindingsForForward(context.Context, []domain.Ac
 type preparedBindingStageStore struct {
 	*reconcileStore
 	at time.Time
+}
+
+// Только один неизменённый Begin/body за сетевое обращение. End зависит от
+// настоящего ответа Begin и выполняется после чтения и Close обоих результатов.
+// QueryTracer без BatchTracer сохраняет прежние callbacks, в том числе wait hooks.
+func applyBindingCommand(ctx context.Context, store *preparedBindingStageStore, command reconcile.BindingCommand) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if tracer := store.tx.Conn().Config().Tracer; tracer != nil {
+		if _, supported := tracer.(pgx.BatchTracer); !supported {
+			return command.Apply(ctx, store)
+		}
+	}
+	statement, args, label, supported, err := bindingCommandBatchBody(command)
+	if err != nil {
+		return err
+	}
+	if !supported {
+		return command.Apply(ctx, store)
+	}
+	encoded, err := json.Marshal(command)
+	if err != nil {
+		return err
+	}
+	batch := &pgx.Batch{}
+	batch.Queue(`SELECT kaname.authority_binding_command_begin_v3($1::jsonb)`, encoded)
+	batch.Queue(statement, args...)
+	results := store.tx.SendBatch(ctx, batch)
+	var active bool
+	if err = results.QueryRow().Scan(&active); err != nil {
+		_ = results.Close()
+		return err
+	}
+	_, bodyErr := results.Exec()
+	closeErr := results.Close()
+	if bodyErr != nil {
+		return fmt.Errorf("%s: %w", label, bodyErr)
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if active {
+		return store.EndBindingCommand(ctx, command)
+	}
+	return nil
+}
+
+// SQL дословно повторяет исходные stores. За пределами одного bounded body
+// остаётся literal Apply: в частности FGA, audit и chunked members не меняются.
+func bindingCommandBatchBody(command reconcile.BindingCommand) (string, []any, string, bool, error) {
+	switch command.Kind {
+	case "members":
+		if len(command.Members) == 0 || len(command.Members) > 4096 {
+			return "", nil, "", false, nil
+		}
+		var bindings, roles, fps, types, ids, statuses []string
+		seen := make(map[[5]string]struct{}, len(command.Members))
+		for _, m := range command.Members {
+			key := [5]string{string(m.BindingID), string(m.RoleID), m.RuleFP, m.ObjectType, m.ObjectID}
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			bindings = append(bindings, key[0])
+			roles = append(roles, key[1])
+			fps = append(fps, key[2])
+			types = append(types, key[3])
+			ids = append(ids, key[4])
+			statuses = append(statuses, string(m.VerificationStatus))
+		}
+		return `INSERT INTO kaname.access_binding_target_members
+			   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
+			 SELECT b, r, f, ot, oi, vs, now(), now()
+			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+			        AS t(b, r, f, ot, oi, vs)
+			 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
+			    SET verification_status = EXCLUDED.verification_status,
+			        updated_at          = now()`,
+			[]any{bindings, roles, fps, types, ids, statuses}, fmt.Sprintf("target_members: upsert many (%d)", len(bindings)), true, nil
+	case "record":
+		if len(command.Refs) == 0 || len(command.Refs) > 4096 {
+			return "", nil, "", false, nil
+		}
+		cols := newLedgerColumns(len(command.Refs))
+		for _, ref := range command.Refs {
+			if err := cols.add(ref.BindingID, ref.Member, ref.Tuple); err != nil {
+				// Прежний Begin должен предшествовать и этой ошибке валидации.
+				return "", nil, "", false, nil
+			}
+		}
+		return `INSERT INTO kaname.access_binding_emitted_tuples
+		        (binding_id, member_object_type, member_object_id, fga_user, relation, object, source)
+		 SELECT b, mt, mi, u, r, o, 'member'
+		   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+		        AS t(b, mt, mi, u, r, o)
+		 ON CONFLICT (binding_id, member_object_type, member_object_id, fga_user, relation, object) DO NOTHING`,
+			[]any{cols.binds, cols.types, cols.ids, cols.users, cols.rels, cols.objs}, "reconcile: record emitted tuples batch", true, nil
+	default:
+		return "", nil, "", false, nil
+	}
 }
 
 func (s *preparedBindingStageStore) EmitTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error {
