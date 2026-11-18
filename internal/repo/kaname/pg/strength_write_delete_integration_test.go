@@ -426,6 +426,11 @@ func runWDPass(t *testing.T, counter *stmtCounter, fn func(ctx context.Context) 
 	t0 := time.Now()
 	err := fn(ctx)
 	r.elapsed = time.Since(t0)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		t.Logf("WD_PRIMARY_PG_ERROR code=%q where=%q routine=%q position=%d internal_position=%d chain=%v",
+			pgErr.Code, pgErr.Where, pgErr.Routine, pgErr.Position, pgErr.InternalPosition, err)
+	}
 	r.stmts = counter.count()
 	r.topStmt = counter.top(3)
 	r.outcome, r.detail = classifyPass(err, ctx.Err())
