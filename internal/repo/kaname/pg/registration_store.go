@@ -60,7 +60,7 @@ func NewRegistrationStore(pool *pgxpool.Pool) *RegistrationStore {
 func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, error) {
 	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
-		if s.participantConfigured { return nil, err }
+		if s != nil && s.participantConfigured { return nil, err }
 		return nil, mapErr(err, "Registration.Writer", "")
 	}
 	return &RegistrationWriter{
@@ -79,7 +79,7 @@ func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, er
 func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
 	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
-		if s.participantConfigured { return nil, err }
+		if s != nil && s.participantConfigured { return nil, err }
 		return nil, mapErr(err, "Verification.Writer", "")
 	}
 	return holdPersonOf(ctx, w, userID)
@@ -96,7 +96,7 @@ func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domai
 func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
 	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
-		if s.participantConfigured { return nil, err }
+		if s != nil && s.participantConfigured { return nil, err }
 		return nil, mapErr(err, "EmailChange.Writer", "")
 	}
 	if err := w.holdPersonAgainstEnrollment(ctx, userID); err != nil {
