@@ -23,7 +23,7 @@ func (u *UpdateServiceAccountUseCase) WithServiceAccountMetadataWriter(f kaname.
 type metadataUpdateRepo struct {
 	Repo
 	factory any
-	open func(context.Context) (Writer, error)
+	open    func(context.Context) (Writer, error)
 }
 
 func (r metadataUpdateRepo) Writer(ctx context.Context) (Writer, error) { return r.open(ctx) }

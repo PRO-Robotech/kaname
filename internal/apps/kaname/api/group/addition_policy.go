@@ -48,7 +48,9 @@ func (u *AddMemberUseCase) runAddition(ctx context.Context, m domain.GroupMember
 	return shared.ExecuteConfiguredPreparedWrite(ctx, u.policy.factory, func(attempt context.Context) (kaname.Writer, error) {
 		return u.policy.factory.GroupAdditionAuthorityWriter(attempt, m, actor)
 	}, func(attempt context.Context, w kaname.Writer) error {
-		if err := grantpolicy.RequireGroupAddition(attempt, w, actor, m); err != nil { return err }
+		if err := grantpolicy.RequireGroupAddition(attempt, w, actor, m); err != nil {
+			return err
+		}
 		return body(attempt, w)
 	})
 }

@@ -19,21 +19,31 @@ type preparedDispatchWriter struct {
 	kaname.Writer
 	commits, rollbacks int
 }
-func (w *preparedDispatchWriter) Commit(context.Context) error { w.commits++; return nil }
+
+func (w *preparedDispatchWriter) Commit(context.Context) error   { w.commits++; return nil }
 func (w *preparedDispatchWriter) Rollback(context.Context) error { w.rollbacks++; return nil }
+
 type preparedDispatchRepo struct {
 	kaname.Repository
 	writer *preparedDispatchWriter
-	opens int
+	opens  int
 }
-func (r *preparedDispatchRepo) Writer(context.Context) (kaname.Writer, error) { r.opens++; return r.writer, nil }
+
+func (r *preparedDispatchRepo) Writer(context.Context) (kaname.Writer, error) {
+	r.opens++
+	return r.writer, nil
+}
+
 type preparedDispatchCapability struct {
 	*preparedDispatchRepo
 	calls int
 }
+
 func (r *preparedDispatchCapability) RunPreparedWrite(ctx context.Context, fn func(context.Context, kaname.Writer) error) error {
 	r.calls++
-	if err := fn(ctx, r.writer); err != nil { return err }
+	if err := fn(ctx, r.writer); err != nil {
+		return err
+	}
 	// Первый результат относится к незакоммиченной попытке. Второй отказ
 	// не должен выпускать этот результат вызывающему.
 	return fn(ctx, r.writer)
@@ -51,7 +61,9 @@ func TestPreparedWriteDispatchKeepsLegacySinglePassAndDiscardsFailedResult(t *te
 	calls = 0
 	out, err = DoWithWriteTx(context.Background(), prepared, func(context.Context, kaname.Writer) (int, error) {
 		calls++
-		if calls == 1 { return 42, nil }
+		if calls == 1 {
+			return 42, nil
+		}
 		return 99, iamerr.ErrPermissionDenied
 	})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))

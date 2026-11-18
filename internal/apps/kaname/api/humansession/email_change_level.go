@@ -74,7 +74,9 @@ type EnrolledMethodsReader interface {
 // (шапка файла).
 func requireEmailChangeLevel(ctx context.Context, d EmailChangeDeps, resolved Resolved, read loginMethodRead, keys accessKeyRead) error {
 	err := emailChangeLevel(ctx, resolved, read, keys)
-	if err == nil { return nil }
+	if err == nil {
+		return nil
+	}
 	var step *StepUpRequiredError
 	if errors.As(err, &step) {
 		d.Observer.EmailChangeObserved(EmailChangeStepUpRequired)
@@ -87,12 +89,20 @@ func requireEmailChangeLevel(ctx context.Context, d EmailChangeDeps, resolved Re
 
 func emailChangeLevel(ctx context.Context, resolved Resolved, read loginMethodRead, keys accessKeyRead) error {
 	ceiling := guaranteedRank(assurance.Methods())
-	if ceiling == 0 { return ErrStoreUnavailable }
+	if ceiling == 0 {
+		return ErrStoreUnavailable
+	}
 	presented := acrlevel.Rank(resolved.Session.AssuranceLevel)
-	if presented >= ceiling { return nil }
+	if presented >= ceiling {
+		return nil
+	}
 	enrolled, err := enrolledForCompletion(ctx, read, keys, resolved.User.ID)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	required := guaranteedRank(enrolled)
-	if presented >= required { return nil }
+	if presented >= required {
+		return nil
+	}
 	return &StepUpRequiredError{Required: required, Presented: presented}
 }

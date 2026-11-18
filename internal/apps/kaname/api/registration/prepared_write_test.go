@@ -3,9 +3,9 @@
 package registration_test
 
 import (
-	"testing"
 	"context"
 	"log/slog"
+	"testing"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
@@ -32,6 +32,7 @@ type replayRegistrationWriter struct {
 	registration.Writer
 	store *replayRegistrationStore
 }
+
 func (w replayRegistrationWriter) Mirror(ctx context.Context, in registration.MirrorInput) (registration.MirrorResult, error) {
 	w.store.inputs = append(w.store.inputs, in)
 	out, err := w.Writer.Mirror(ctx, in)
@@ -41,19 +42,34 @@ func (w replayRegistrationWriter) Mirror(ctx context.Context, in registration.Mi
 func (s *replayRegistrationStore) RunRegistrationWrite(ctx context.Context, body func(context.Context, registration.Writer) error) error {
 	for attempt := 0; attempt < 2; attempt++ {
 		w, err := s.Writer(ctx)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		if err := body(ctx, replayRegistrationWriter{Writer: w, store: s}); err != nil {
 			_ = w.Rollback(ctx)
 			return err
 		}
-		if attempt == 0 { if err := w.Rollback(ctx); err != nil { return err }; continue }
+		if attempt == 0 {
+			if err := w.Rollback(ctx); err != nil {
+				return err
+			}
+			continue
+		}
 		return w.Commit(ctx)
 	}
 	return nil
 }
-type registrationOnceEffects struct { charges, reconciles int }
-func (e *registrationOnceEffects) ChargeSource(context.Context, humansession.SourceLane, string, time.Time, humansession.SourcePace) (bool, error) { e.charges++; return true, nil }
-func (e *registrationOnceEffects) ReconcileBinding(context.Context, domain.AccessBindingID) error { e.reconciles++; return nil }
+
+type registrationOnceEffects struct{ charges, reconciles int }
+
+func (e *registrationOnceEffects) ChargeSource(context.Context, humansession.SourceLane, string, time.Time, humansession.SourcePace) (bool, error) {
+	e.charges++
+	return true, nil
+}
+func (e *registrationOnceEffects) ReconcileBinding(context.Context, domain.AccessBindingID) error {
+	e.reconciles++
+	return nil
+}
 
 func TestPreparedRegistrationKeepsMaterialsAndPublishesOnce(t *testing.T) {
 	rec := &recorder{}
@@ -70,10 +86,10 @@ func TestPreparedRegistrationKeepsMaterialsAndPublishesOnce(t *testing.T) {
 	uc, err := registration.NewRegisterUseCase(registration.Deps{
 		RequirePreparedWrite: true, Store: store, Rule: rule,
 		Hasher: &recordingHasher{rec: rec, inner: inner}, Lane: lane,
-		TTL: 24*time.Hour, Observer: obs, Reconciler: effects,
+		TTL: 24 * time.Hour, Observer: obs, Reconciler: effects,
 		Now: func() time.Time { return unitBase }, Logger: slog.New(slog.DiscardHandler),
 		CutoffClock: momentclock.Func(func() time.Time { clockReads++; return unitBase }),
-		Letter: unitLetterPace, Sources: effects, SourcePace: unitSourcePace,
+		Letter:      unitLetterPace, Sources: effects, SourcePace: unitSourcePace,
 	})
 	require.NoError(t, err)
 	out, err := uc.Execute(context.Background(), registration.Input{Email: "once@example.invalid", Password: goodPassword, Source: "203.0.113.7"})
@@ -92,6 +108,10 @@ func TestPreparedRegistrationKeepsMaterialsAndPublishesOnce(t *testing.T) {
 	require.Equal(t, 1, effects.reconciles)
 	require.Equal(t, 1, clockReads)
 	hashes := 0
-	for _, step := range rec.steps { if step == "hash" { hashes++ } }
+	for _, step := range rec.steps {
+		if step == "hash" {
+			hashes++
+		}
+	}
 	require.Equal(t, 1, hashes)
 }

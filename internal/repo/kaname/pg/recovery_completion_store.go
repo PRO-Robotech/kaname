@@ -72,7 +72,9 @@ func (s *RecoveryCompletionStore) WithHumanAdmissionParticipant(p *HumanAdmissio
 func (s *RecoveryCompletionStore) RecoveryCompletionWriter(ctx context.Context, userID domain.UserID) (humansession.RecoveryCompletionWriter, error) {
 	w, err := s.registration.beginAdmissionSession(ctx)
 	if err != nil {
-		if s.registration.participantConfigured { return nil, err }
+		if s.registration.participantConfigured {
+			return nil, err
+		}
 		return nil, mapErr(err, "RecoveryCompletion.Writer", "")
 	}
 	held, err := holdPersonOf(ctx, w, userID)
@@ -134,8 +136,14 @@ func (w *recoveryCompletionTx) ActivateInviteOnVerification(ctx context.Context,
 }
 
 func (s *RecoveryCompletionStore) RunRecoveryCompletionWrite(ctx context.Context, id domain.UserID, body func(context.Context, humansession.RecoveryCompletionWriter) error) error {
-	if s == nil || s.registration == nil || body == nil { return kaname.ErrInvalidAuthorityFencePlan }
-	open := func(ctx context.Context) (humansession.RecoveryCompletionWriter, error) { return s.RecoveryCompletionWriter(ctx, id) }
-	if s.registration.participantConfigured { return executePreparedAttempts(ctx, open, body) }
+	if s == nil || s.registration == nil || body == nil {
+		return kaname.ErrInvalidAuthorityFencePlan
+	}
+	open := func(ctx context.Context) (humansession.RecoveryCompletionWriter, error) {
+		return s.RecoveryCompletionWriter(ctx, id)
+	}
+	if s.registration.participantConfigured {
+		return executePreparedAttempts(ctx, open, body)
+	}
 	return runLegacyAdmission(ctx, open, body)
 }

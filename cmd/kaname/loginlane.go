@@ -620,7 +620,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	}
 	registerUC, err := registration.NewRegisterUseCase(registration.Deps{
 		RequirePreparedWrite: cfg.AuthorityProtocol.Participant(),
-		Store: registrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
+		Store:                registrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler),
 		Letter: letterPace, Sources: sessions, SourcePace: sourcePace, Now: time.Now, Logger: logger,
 		CutoffClock: sharedClock,
@@ -646,7 +646,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	// подтверждения адреса.
 	completeUC, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
 		RequirePreparedWrite: cfg.AuthorityProtocol.Participant(),
-		Store: sessions, Completion: completionStore, Reconciler: ownerReconcilerOrNone(reconciler),
+		Store:                sessions, Completion: completionStore, Reconciler: ownerReconcilerOrNone(reconciler),
 		Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
 		Observer: rec, Now: time.Now, Logger: logger, CutoffClock: sharedClock,
 	})
@@ -708,7 +708,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	// положение сессии, читаемое из текущей отметки на каждом запросе.
 	verificationDeps := humansession.VerificationDeps{
 		RequirePreparedWrite: cfg.AuthorityProtocol.Participant(),
-		Store: verificationStore{sessions: sessions, inner: registrationPG}, Pace: letterPace,
+		Store:                verificationStore{sessions: sessions, inner: registrationPG}, Pace: letterPace,
 		Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler), Now: time.Now, Logger: logger,
 	}
 	requestVerificationUC, err := humansession.NewRequestVerificationUseCase(verificationDeps)
@@ -726,7 +726,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	// хранилище способов входа: условие уровня Р2 (kaname#770).
 	emailChangeDeps := humansession.EmailChangeDeps{
 		RequirePreparedWrite: cfg.AuthorityProtocol.Participant(),
-		Store: emailChangeStore{sessions: sessions, inner: registrationPG}, Methods: methods, Pace: letterPace,
+		Store:                emailChangeStore{sessions: sessions, inner: registrationPG}, Methods: methods, Pace: letterPace,
 		Freshness: cfg.AuthN.SelfServiceFreshness, MailLimit: inviteMailRateLimit(cfg),
 		Observer: rec, Now: time.Now, Logger: logger,
 	}

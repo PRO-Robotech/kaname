@@ -60,7 +60,9 @@ func NewRegistrationStore(pool *pgxpool.Pool) *RegistrationStore {
 func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, error) {
 	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
-		if s != nil && s.participantConfigured { return nil, err }
+		if s != nil && s.participantConfigured {
+			return nil, err
+		}
 		return nil, mapErr(err, "Registration.Writer", "")
 	}
 	return &RegistrationWriter{
@@ -79,7 +81,9 @@ func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, er
 func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
 	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
-		if s != nil && s.participantConfigured { return nil, err }
+		if s != nil && s.participantConfigured {
+			return nil, err
+		}
 		return nil, mapErr(err, "Verification.Writer", "")
 	}
 	return holdPersonOf(ctx, w, userID)
@@ -96,7 +100,9 @@ func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domai
 func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
 	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
-		if s != nil && s.participantConfigured { return nil, err }
+		if s != nil && s.participantConfigured {
+			return nil, err
+		}
 		return nil, mapErr(err, "EmailChange.Writer", "")
 	}
 	if err := w.holdPersonAgainstEnrollment(ctx, userID); err != nil {
@@ -153,20 +159,30 @@ func (s *RegistrationStore) RunEmailChangeWrite(ctx context.Context, id domain.U
 	return s.runAdmissionWrite(ctx, func(ctx context.Context) (*RegistrationWriter, error) { return s.EmailChangeWriter(ctx, id) }, body)
 }
 func (s *RegistrationStore) runAdmissionWrite(ctx context.Context, open func(context.Context) (*RegistrationWriter, error), body func(context.Context, *RegistrationWriter) error) error {
-	if s == nil || body == nil { return kaname.ErrInvalidAuthorityFencePlan }
-	if s.participantConfigured { return executePreparedAttempts(ctx, open, body) }
+	if s == nil || body == nil {
+		return kaname.ErrInvalidAuthorityFencePlan
+	}
+	if s.participantConfigured {
+		return executePreparedAttempts(ctx, open, body)
+	}
 	return runLegacyAdmission(ctx, open, body)
 }
 
 // Legacy не получает retry budget; отмена запроса не мешает ограниченной уборке.
 func runLegacyAdmission[T preparedTransaction](ctx context.Context, open func(context.Context) (T, error), body func(context.Context, T) error) (err error) {
 	w, err := open(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if cleanupErr := w.Rollback(cleanup); cleanupErr != nil && cleanupErr != pgx.ErrTxClosed { err = errors.Join(err, cleanupErr) }
+		if cleanupErr := w.Rollback(cleanup); cleanupErr != nil && cleanupErr != pgx.ErrTxClosed {
+			err = errors.Join(err, cleanupErr)
+		}
 	}()
-	if err = body(ctx, w); err != nil { return err }
+	if err = body(ctx, w); err != nil {
+		return err
+	}
 	return w.Commit(ctx)
 }

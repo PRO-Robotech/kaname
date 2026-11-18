@@ -61,7 +61,13 @@ func (s lifecycleWriterSelection) run(ctx context.Context, repo Repo, kind kanam
 
 // kaname#1034: direct mutation и postcommit reconcile имеют разные TX.
 func withGroupLifecycleTx[T any](ctx context.Context, s lifecycleWriterSelection, repo Repo, kind kaname.GroupMutation, g domain.Group, body func(context.Context, Writer) (T, error)) (out T, err error) {
-	err = s.run(ctx, repo, kind, g, func(ctx context.Context, w Writer) error { var e error; var zero T; out = zero; out, e = body(ctx, w); return e })
+	err = s.run(ctx, repo, kind, g, func(ctx context.Context, w Writer) error {
+		var e error
+		var zero T
+		out = zero
+		out, e = body(ctx, w)
+		return e
+	})
 	if err != nil {
 		var zero T
 		return zero, err

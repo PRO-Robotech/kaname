@@ -160,7 +160,7 @@ type CompleteRecoveryUseCase struct {
 type CompleteRecoveryDeps struct {
 	// RequirePreparedWrite запрещает сборку full режима без callback capability.
 	RequirePreparedWrite bool
-	Store Store
+	Store                Store
 	// Completion — транзакция исхода (kaname#458): операторы обычного
 	// восстановления и перехода записи над одной транзакцией. Обязательна:
 	// глагол без неё перехода не исполнил бы и молча не деградирует.
@@ -289,17 +289,25 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	err = runRecoveryCompletionWrite(ctx, uc.completion, user.ID, func(ctx context.Context, w RecoveryCompletionWriter) error {
 		res = completion{}
 		code, ok, err := w.ConsumeRecoveryCode(ctx, user.ID, presented.Digest(), now)
-		if err != nil { return err }
-		if !ok { return errRecoveryCodeNotConsumed }
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errRecoveryCodeNotConsumed
+		}
 		verified, err := w.AddressVerified(ctx, user.ID)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		res, err = uc.complete(ctx, w, user, code, fresh, now, at, verified, in.Client, &material)
 		return err
 	})
 	switch {
 	case errors.Is(err, errRecoveryCodeNotConsumed):
 		outcome := RecoveryCompletionCodeRejected
-		if !found { outcome = RecoveryCompletionNoRow }
+		if !found {
+			outcome = RecoveryCompletionNoRow
+		}
 		return CompleteRecoveryOutput{}, uc.refuse(ctx, outcome, addressKey, in.Source, now)
 	case errors.Is(err, ErrInviteNotValid):
 		// Приглашение под строкой `PENDING` негодно (Р6): исход откатан целиком

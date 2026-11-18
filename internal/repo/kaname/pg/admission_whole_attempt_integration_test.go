@@ -43,11 +43,15 @@ CREATE CONSTRAINT TRIGGER whole_attempt_commit_fault AFTER INSERT ON kaname.%s D
 		var called bool
 		err := r.admin.QueryRow(r.ctx, `SELECT last_value,is_called FROM kaname.whole_attempt_commit_count`).Scan(&attempts, &called)
 		t.Logf("actual deferred COMMIT fault: attempts=%d called=%t deferrable=%t initially_deferred=%t readback=%v", attempts, called, deferrable, deferred, err)
-		if err != nil { t.Error(err) }
+		if err != nil {
+			t.Error(err)
+		}
 		var durable int
 		err = r.admin.QueryRow(r.ctx, "SELECT count(*) FROM kaname."+table+" WHERE event_type=$1", event).Scan(&durable)
 		t.Logf("durable event rows after operation: before=%d after=%d readback=%v", before, durable, err)
-		if err != nil { t.Error(err) }
+		if err != nil {
+			t.Error(err)
+		}
 	})
 	return func() {
 		var attempts int
@@ -144,7 +148,7 @@ func TestHumanAdmissionWholeAttemptCommitRetry(t *testing.T) {
 			check := wholeAttemptCommitFault(t, r, "audit_outbox", humansession.AuditEmailChanged)
 			changed, err := change.Execute(r.ctx, humansession.ConfirmEmailChangeInput{Bearer: verified.Bearer, Code: code})
 			require.NoError(t, err)
-			require.Equal(t, "changed-" + email, string(changed.View.User.Email))
+			require.Equal(t, "changed-"+email, string(changed.View.User.Email))
 			check()
 		})
 	}

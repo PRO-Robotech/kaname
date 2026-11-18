@@ -255,7 +255,7 @@ type OwnerBindingReconciler interface {
 // письма — на транзакции вызывающего. Зовут регистрация и запрос письма.
 // VerificationLetterMaterial сохраняет код и идентификатор одного запроса.
 type VerificationLetterMaterial struct {
-	id domain.VerificationCodeID
+	id    domain.VerificationCodeID
 	value domain.VerificationCodeValue
 }
 
@@ -265,10 +265,14 @@ func EnqueueVerificationLetter(ctx context.Context, w VerificationLetterWriter, 
 }
 
 func EnqueuePreparedVerificationLetter(ctx context.Context, w VerificationLetterWriter, user domain.User, at time.Time, pace VerificationPace, material *VerificationLetterMaterial) (LetterRefusal, error) {
-	if material == nil { return LetterRefusal{}, fmt.Errorf("verification letter: material required") }
+	if material == nil {
+		return LetterRefusal{}, fmt.Errorf("verification letter: material required")
+	}
 	if material.id == "" {
 		value, err := domain.NewVerificationCodeValue()
-		if err != nil { return LetterRefusal{}, fmt.Errorf("verification letter: code not minted: %w", err) }
+		if err != nil {
+			return LetterRefusal{}, fmt.Errorf("verification letter: code not minted: %w", err)
+		}
 		material.value = value
 		material.id = domain.VerificationCodeID(ids.NewHyphenID(verificationCodeIDPrefix))
 	}
@@ -297,12 +301,12 @@ func EnqueuePreparedVerificationLetter(ctx context.Context, w VerificationLetter
 type VerificationDeps struct {
 	// RequirePreparedWrite запрещает сборку full режима без callback capability.
 	RequirePreparedWrite bool
-	Store      VerificationStore
-	Pace       VerificationPace
-	Observer   AddressVerificationObserver
-	Reconciler OwnerBindingReconciler
-	Now        func() time.Time
-	Logger     *slog.Logger
+	Store                VerificationStore
+	Pace                 VerificationPace
+	Observer             AddressVerificationObserver
+	Reconciler           OwnerBindingReconciler
+	Now                  func() time.Time
+	Logger               *slog.Logger
 }
 
 func (d VerificationDeps) complete() (VerificationDeps, error) {
@@ -381,8 +385,12 @@ func (uc *RequestVerificationUseCase) Execute(ctx context.Context, bearer domain
 	var material VerificationLetterMaterial
 	err = runVerificationWrite(ctx, uc.d.Store, resolved.User.ID, func(ctx context.Context, w VerificationWriter) error {
 		refusal, err := EnqueuePreparedVerificationLetter(ctx, w, resolved.User, now, uc.d.Pace, &material)
-		if err != nil { return err }
-		if refusal.Refused { return &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter} }
+		if err != nil {
+			return err
+		}
+		if refusal.Refused {
+			return &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
+		}
 		return nil
 	})
 	if err != nil {
@@ -448,11 +456,15 @@ func (uc *ConfirmVerificationUseCase) Execute(ctx context.Context, in ConfirmVer
 		user, ownerBinding = resolved.User, ""
 		cell, rejected = VerificationConfirmed, false
 		outcome, email, err := w.PresentVerificationCode(ctx, user.ID, presented.Digest(), now, uc.d.Pace.Attempts)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		switch outcome {
 		case CodeMismatched, CodeExhausted:
 			cell, rejected = VerificationCodeMismatched, true
-			if outcome == CodeExhausted { cell = VerificationCodeExhausted }
+			if outcome == CodeExhausted {
+				cell = VerificationCodeExhausted
+			}
 			return nil // Счётчик неверного предъявления обязан зафиксироваться.
 		case CodeMatched:
 		default:
@@ -460,17 +472,30 @@ func (uc *ConfirmVerificationUseCase) Execute(ctx context.Context, in ConfirmVer
 			return ErrAuthenticationFailed
 		}
 		marked, err := w.MarkEmailVerified(ctx, user.ID, email, now)
-		if err != nil { return err }
-		if !marked { cell = VerificationCodeNotFound; return ErrAuthenticationFailed }
-		if err := w.RotateBearer(ctx, resolved.Session.ID, bearer.Digest(), now); err != nil { return err }
-		if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonEmailVerified); err != nil { return err }
+		if err != nil {
+			return err
+		}
+		if !marked {
+			cell = VerificationCodeNotFound
+			return ErrAuthenticationFailed
+		}
+		if err := w.RotateBearer(ctx, resolved.Session.ID, bearer.Digest(), now); err != nil {
+			return err
+		}
+		if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonEmailVerified); err != nil {
+			return err
+		}
 		if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
 			EventType: AuditEmailVerified, TenantAccountID: string(user.AccountID),
 			Payload: map[string]any{"user_id": string(user.ID), "session_id": string(resolved.Session.ID)},
-		}); err != nil { return err }
+		}); err != nil {
+			return err
+		}
 		if user.InviteStatus == domain.InviteStatusPending {
 			act, err := w.ActivateInviteOnVerification(ctx, user)
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 			user, ownerBinding = act.User, act.OwnerBindingID
 		}
 		return nil

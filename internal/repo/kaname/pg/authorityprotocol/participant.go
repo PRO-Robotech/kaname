@@ -78,7 +78,8 @@ func openParticipantProfile(ctx context.Context, begin func(context.Context, pgx
 }
 
 // Структурная отметка проходит границу пакета без раскрытия retry механизма.
-type participantCleanupFailure struct { cause error }
-func (e participantCleanupFailure) Error() string { return e.cause.Error() }
-func (e participantCleanupFailure) Unwrap() error { return e.cause }
+type participantCleanupFailure struct{ cause error }
+
+func (e participantCleanupFailure) Error() string               { return e.cause.Error() }
+func (e participantCleanupFailure) Unwrap() error               { return e.cause }
 func (e participantCleanupFailure) PreparedCleanupFailed() bool { return true }

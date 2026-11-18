@@ -13,14 +13,20 @@ type PreparedStore interface {
 }
 
 func runRegistrationWrite(ctx context.Context, store Store, body func(context.Context, Writer) error) (err error) {
-	if prepared, ok := store.(PreparedStore); ok { return prepared.RunRegistrationWrite(ctx, body) }
+	if prepared, ok := store.(PreparedStore); ok {
+		return prepared.RunRegistrationWrite(ctx, body)
+	}
 	w, err := store.Writer(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = w.Rollback(cleanup)
 	}()
-	if err = body(ctx, w); err != nil { return err }
+	if err = body(ctx, w); err != nil {
+		return err
+	}
 	return w.Commit(ctx)
 }

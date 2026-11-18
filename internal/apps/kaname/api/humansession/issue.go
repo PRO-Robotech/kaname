@@ -67,7 +67,7 @@ type IssueInput struct {
 // SessionMaterial сохраняет случайный материал одной операции между попытками.
 // Поля закрыты: вызывающий не может подменить идентификатор или носитель.
 type SessionMaterial struct {
-	id domain.HumanSessionID
+	id     domain.HumanSessionID
 	bearer domain.SessionBearer
 }
 
@@ -95,10 +95,14 @@ func IssueSessionPrepared(ctx context.Context, w Writer, in IssueInput, material
 	for _, p := range in.Presented {
 		methods = append(methods, p.Method().String())
 	}
-	if material == nil { return domain.HumanSession{}, domain.SessionBearer{}, fmt.Errorf("issue session: material required") }
+	if material == nil {
+		return domain.HumanSession{}, domain.SessionBearer{}, fmt.Errorf("issue session: material required")
+	}
 	if material.id == "" {
 		bearer, err := domain.NewSessionBearer()
-		if err != nil { return domain.HumanSession{}, domain.SessionBearer{}, err }
+		if err != nil {
+			return domain.HumanSession{}, domain.SessionBearer{}, err
+		}
 		material.bearer = bearer
 		material.id = domain.HumanSessionID(ids.NewHyphenID(sessionIDPrefix))
 	}

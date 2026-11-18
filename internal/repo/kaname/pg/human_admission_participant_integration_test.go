@@ -383,15 +383,21 @@ func (s regStore) RunRegistrationWrite(ctx context.Context, body func(context.Co
 	})
 }
 func (s admissionVerificationStore) RunVerificationWrite(ctx context.Context, id domain.UserID, body func(context.Context, humansession.VerificationWriter) error) error {
-	return s.inner.RunVerificationWrite(ctx, id, func(ctx context.Context, w *kanamepg.RegistrationWriter) error { return body(ctx, admissionVerificationWriter{w}) })
+	return s.inner.RunVerificationWrite(ctx, id, func(ctx context.Context, w *kanamepg.RegistrationWriter) error {
+		return body(ctx, admissionVerificationWriter{w})
+	})
 }
 func (s admissionEmailStore) RunEmailChangeWrite(ctx context.Context, id domain.UserID, body func(context.Context, humansession.EmailChangeWriter) error) error {
 	return s.inner.RunEmailChangeWrite(ctx, id, func(ctx context.Context, w *kanamepg.RegistrationWriter) error { return body(ctx, w) })
 }
 func (s admissionCommitFailureStore) RunRegistrationWrite(ctx context.Context, body func(context.Context, registration.Writer) error) error {
 	w, err := s.Writer(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer policyFixtureRollback(w)
-	if err := body(ctx, w); err != nil { return err }
+	if err := body(ctx, w); err != nil {
+		return err
+	}
 	return w.Commit(ctx)
 }

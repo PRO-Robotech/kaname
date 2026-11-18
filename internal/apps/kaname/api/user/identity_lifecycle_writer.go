@@ -22,7 +22,9 @@ type identityWriterSelection struct {
 // Reader и остальные порты остаются исходными. Настроенный participant
 // владеет повтором целой TX; shared отображает только конечную ошибку.
 func (s identityWriterSelection) repository(repo Repo, kind kaname.IdentityMutation, id domain.UserID) Repo {
-	if !s.configured { return repo }
+	if !s.configured {
+		return repo
+	}
 	return identityWriterRepository{Repository: repo, selection: s, kind: kind, id: id}
 }
 

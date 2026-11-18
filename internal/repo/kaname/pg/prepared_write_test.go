@@ -15,24 +15,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type preparedCommitControl struct { pgx.Tx; cause error }
+type preparedCommitControl struct {
+	pgx.Tx
+	cause error
+}
+
 func (t *preparedCommitControl) Commit(context.Context) error { return t.cause }
 
 type preparedControlTx struct {
-	commit func() error
+	commit   func() error
 	rollback func(context.Context) error
 }
-func (t *preparedControlTx) Commit(context.Context) error { return t.commit() }
+
+func (t *preparedControlTx) Commit(context.Context) error       { return t.commit() }
 func (t *preparedControlTx) Rollback(ctx context.Context) error { return t.rollback(ctx) }
 
 func TestPreparedAttemptsRestageAfterKnownCommitAbort(t *testing.T) {
 	opened, bodies, rolledBack, durable := 0, 0, 0, 0
 	var previousBudget any
 	err := executePreparedAttempts(context.Background(), func(ctx context.Context) (*preparedControlTx, error) {
-		if opened != 0 { require.Equal(t, 1, rolledBack, "повтор начинается только после cleanup") }
+		if opened != 0 {
+			require.Equal(t, 1, rolledBack, "повтор начинается только после cleanup")
+		}
 		require.Equal(t, 1, authorityEntryLimit(ctx), "внутренний stage не получает второй budget")
 		budget := preparedAdministrativeReadBudget(ctx)
-		if previousBudget != nil { require.Same(t, previousBudget, budget, "read cap нельзя обнулить при restage") }
+		if previousBudget != nil {
+			require.Same(t, previousBudget, budget, "read cap нельзя обнулить при restage")
+		}
 		previousBudget = budget
 		opened++
 		attempt := opened
@@ -58,7 +67,11 @@ func TestPreparedAttemptsRestageAfterKnownCommitAbort(t *testing.T) {
 func TestPreparedAttemptsRejectUnknownCommitAndFailedCleanup(t *testing.T) {
 	conflict := &pgconn.PgError{Code: "40001", Message: "private conflict"}
 	cleanup := errors.New("rollback failed")
-	for _, tc := range []struct { name string; body, commit, rollback error; uncertainDurable bool }{
+	for _, tc := range []struct {
+		name                   string
+		body, commit, rollback error
+		uncertainDurable       bool
+	}{
 		{"ambiguous_commit", nil, io.ErrUnexpectedEOF, pgx.ErrTxClosed, true},
 		{"commit_cleanup_failure", nil, conflict, cleanup, false},
 		{"body_cleanup_failure", conflict, nil, cleanup, false},
@@ -71,12 +84,21 @@ func TestPreparedAttemptsRejectUnknownCommitAndFailedCleanup(t *testing.T) {
 			opened, durable := 0, 0
 			err := executePreparedAttempts(context.Background(), func(context.Context) (*preparedControlTx, error) {
 				opened++
-				return &preparedControlTx{commit: func() error { if tc.uncertainDurable { durable++ }; return tc.commit }, rollback: func(context.Context) error { return tc.rollback }}, nil
+				return &preparedControlTx{commit: func() error {
+					if tc.uncertainDurable {
+						durable++
+					}
+					return tc.commit
+				}, rollback: func(context.Context) error { return tc.rollback }}, nil
 			}, func(context.Context, *preparedControlTx) error { return tc.body })
 			require.Error(t, err)
 			require.Equal(t, 1, opened)
-			if tc.uncertainDurable { require.Equal(t, 1, durable, "повтор после потерянного ответа удвоил бы commit") }
-			if tc.rollback != nil && tc.rollback != pgx.ErrTxClosed { require.ErrorIs(t, err, cleanup) }
+			if tc.uncertainDurable {
+				require.Equal(t, 1, durable, "повтор после потерянного ответа удвоил бы commit")
+			}
+			if tc.rollback != nil && tc.rollback != pgx.ErrTxClosed {
+				require.ErrorIs(t, err, cleanup)
+			}
 		})
 	}
 }
@@ -88,7 +110,10 @@ func TestPreparedAttemptsEntryCleanupAndCancellationAreTerminal(t *testing.T) {
 	err := executePreparedAttempts(context.Background(), func(context.Context) (*preparedControlTx, error) {
 		opened++
 		return nil, preparedEntryFailure(conflict, cleanup)
-	}, func(context.Context, *preparedControlTx) error { t.Fatal("неудачный entry не выдаёт body"); return nil })
+	}, func(context.Context, *preparedControlTx) error {
+		t.Fatal("неудачный entry не выдаёт body")
+		return nil
+	})
 	require.ErrorIs(t, err, conflict)
 	require.ErrorIs(t, err, cleanup)
 	require.Equal(t, 1, opened)
@@ -99,8 +124,10 @@ func TestPreparedAttemptsEntryCleanupAndCancellationAreTerminal(t *testing.T) {
 		opened++
 		return &preparedControlTx{commit: func() error { commits++; return nil }, rollback: func(clean context.Context) error {
 			require.NoError(t, clean.Err(), "cleanup не наследует отмену worker")
-			_, bounded := clean.Deadline(); require.True(t, bounded)
-			rollback++; return nil
+			_, bounded := clean.Deadline()
+			require.True(t, bounded)
+			rollback++
+			return nil
 		}}, nil
 	}, func(context.Context, *preparedControlTx) error { cancel(); return conflict })
 	require.ErrorIs(t, err, context.Canceled)
@@ -116,7 +143,10 @@ func TestPreparedAttemptsExhaustionPreservesLastCauseWithoutPublicLeak(t *testin
 		opened++
 		last = &pgconn.PgError{Code: "40001", Message: "secret database detail"}
 		return nil, last
-	}, func(context.Context, *preparedControlTx) error { t.Fatal("entry отказ не вызывает action"); return nil })
+	}, func(context.Context, *preparedControlTx) error {
+		t.Fatal("entry отказ не вызывает action")
+		return nil
+	})
 	require.Equal(t, authorityEntryAttempts, opened)
 	require.ErrorIs(t, err, iamerr.ErrAborted)
 	var primary *pgconn.PgError

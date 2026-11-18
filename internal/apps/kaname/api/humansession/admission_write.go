@@ -28,25 +28,37 @@ type admissionTransaction interface {
 // Старые stores сохраняют ровно одну попытку. Повторы принадлежат только PG.
 func runAdmissionOnce[T admissionTransaction](ctx context.Context, open func(context.Context) (T, error), body func(context.Context, T) error) (err error) {
 	w, err := open(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = w.Rollback(cleanup)
 	}()
-	if err = body(ctx, w); err != nil { return err }
+	if err = body(ctx, w); err != nil {
+		return err
+	}
 	return w.Commit(ctx)
 }
 
 func runVerificationWrite(ctx context.Context, store VerificationStore, id domain.UserID, body func(context.Context, VerificationWriter) error) error {
-	if prepared, ok := store.(PreparedVerificationStore); ok { return prepared.RunVerificationWrite(ctx, id, body) }
+	if prepared, ok := store.(PreparedVerificationStore); ok {
+		return prepared.RunVerificationWrite(ctx, id, body)
+	}
 	return runAdmissionOnce(ctx, func(ctx context.Context) (VerificationWriter, error) { return store.VerificationWriter(ctx, id) }, body)
 }
 func runEmailChangeWrite(ctx context.Context, store EmailChangeStore, id domain.UserID, body func(context.Context, EmailChangeWriter) error) error {
-	if prepared, ok := store.(PreparedEmailChangeStore); ok { return prepared.RunEmailChangeWrite(ctx, id, body) }
+	if prepared, ok := store.(PreparedEmailChangeStore); ok {
+		return prepared.RunEmailChangeWrite(ctx, id, body)
+	}
 	return runAdmissionOnce(ctx, func(ctx context.Context) (EmailChangeWriter, error) { return store.EmailChangeWriter(ctx, id) }, body)
 }
 func runRecoveryCompletionWrite(ctx context.Context, store RecoveryCompletionStore, id domain.UserID, body func(context.Context, RecoveryCompletionWriter) error) error {
-	if prepared, ok := store.(PreparedRecoveryCompletionStore); ok { return prepared.RunRecoveryCompletionWrite(ctx, id, body) }
-	return runAdmissionOnce(ctx, func(ctx context.Context) (RecoveryCompletionWriter, error) { return store.RecoveryCompletionWriter(ctx, id) }, body)
+	if prepared, ok := store.(PreparedRecoveryCompletionStore); ok {
+		return prepared.RunRecoveryCompletionWrite(ctx, id, body)
+	}
+	return runAdmissionOnce(ctx, func(ctx context.Context) (RecoveryCompletionWriter, error) {
+		return store.RecoveryCompletionWriter(ctx, id)
+	}, body)
 }

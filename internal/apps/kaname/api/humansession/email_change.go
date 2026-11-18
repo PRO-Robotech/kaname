@@ -230,7 +230,7 @@ func (NopObserver) EmailChangeObserved(EmailChangeOutcome) {}
 type EmailChangeDeps struct {
 	// RequirePreparedWrite запрещает сборку full режима без callback capability.
 	RequirePreparedWrite bool
-	Store EmailChangeStore
+	Store                EmailChangeStore
 	// Methods — чтение заведённого у личности для ПЕРВОГО суждения условия
 	// уровня (Р2), вне транзакции записи; решает второе — чтением транзакции
 	// (`email_change_level.go`).
@@ -370,72 +370,72 @@ func (uc *RequestEmailChangeUseCase) Execute(ctx context.Context, in RequestEmai
 	var cell EmailChangeOutcome
 	err = runEmailChangeWrite(ctx, uc.d.Store, user.ID, func(ctx context.Context, w EmailChangeWriter) error {
 		taken, cell = false, ""
-	// Уровень решает чтение ЭТОЙ транзакции под замком строки личности
-	// (`email_change_level.go`, kaname#770) — до первой записи.
-	if err := emailChangeLevel(ctx, resolved, w.LoginMethod, w.AccessKeyEnrolled); err != nil {
-		return err
-	}
+		// Уровень решает чтение ЭТОЙ транзакции под замком строки личности
+		// (`email_change_level.go`, kaname#770) — до первой записи.
+		if err := emailChangeLevel(ctx, resolved, w.LoginMethod, w.AccessKeyEnrolled); err != nil {
+			return err
+		}
 
-	var err error
-	taken, err = w.AddressTaken(ctx, newEmail)
-	if err != nil {
-		return err
-	}
-	code := domain.EmailChangeCode{
-		ID:       codeID,
-		UserID:   user.ID,
-		NewEmail: newEmail,
-		IssuedAt: now,
-		// Срок — ручка кода подтверждения (Р5): тот же предмет «код в ящик под
-		// сессией».
-		ExpiresAt: now.Add(uc.d.Pace.CodeTTL),
-	}
-	if !taken {
-		if !valuePrepared {
-			value, err = domain.NewVerificationCodeValue()
+		var err error
+		taken, err = w.AddressTaken(ctx, newEmail)
 		if err != nil {
 			return err
 		}
-			valuePrepared = true
+		code := domain.EmailChangeCode{
+			ID:       codeID,
+			UserID:   user.ID,
+			NewEmail: newEmail,
+			IssuedAt: now,
+			// Срок — ручка кода подтверждения (Р5): тот же предмет «код в ящик под
+			// сессией».
+			ExpiresAt: now.Add(uc.d.Pace.CodeTTL),
 		}
-		code.Digest = value.Digest()
-	}
-	// Вытеснение прежней отложенной смены и запись принятого запроса — в одной
-	// транзакции: отказ темпа ниже откатывает и вытеснение (Р6).
-	if _, err := w.SupersedeEmailChangeCodes(ctx, user.ID, now); err != nil {
-		return err
-	}
-	refusal, err := w.InsertEmailChangeCodePaced(ctx, code, uc.d.Pace)
-	switch {
-	case errors.Is(err, ErrNewEmailIsCurrent):
-		// Адрес стал текущим чужим исходом смены, зафиксированным после раннего
-		// суждения: решает оператор записи под замком строки (kaname#780).
-		cell = EmailChangeFieldRefused
-		return &FieldError{Field: fieldNewEmail, Rule: RuleMustDiffer}
-	case err != nil:
-		return err
-	}
-	if refusal.Refused {
-		cell = EmailChangePersonPaced
-		return &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
-	}
-	// Окно адресата списывается и на занятый адрес: иначе разница темпа была бы
-	// ответом на вопрос «занят ли адрес» (Р6).
-	refusal, err = w.ChargeEmailChangeWindow(ctx, newEmail, uc.d.MailLimit)
-	if err != nil {
-		return err
-	}
-	if refusal.Refused {
-		cell = EmailChangeRecipientPaced
-		return &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
-	}
-	if !taken {
-		if err := w.EmitEmailChangeMail(ctx, EmailChangeMailIntent{
-			UserID: user.ID, AccountID: user.AccountID, To: newEmail, Code: value, ValidFor: uc.d.Pace.CodeTTL,
-		}); err != nil {
+		if !taken {
+			if !valuePrepared {
+				value, err = domain.NewVerificationCodeValue()
+				if err != nil {
+					return err
+				}
+				valuePrepared = true
+			}
+			code.Digest = value.Digest()
+		}
+		// Вытеснение прежней отложенной смены и запись принятого запроса — в одной
+		// транзакции: отказ темпа ниже откатывает и вытеснение (Р6).
+		if _, err := w.SupersedeEmailChangeCodes(ctx, user.ID, now); err != nil {
 			return err
 		}
-	}
+		refusal, err := w.InsertEmailChangeCodePaced(ctx, code, uc.d.Pace)
+		switch {
+		case errors.Is(err, ErrNewEmailIsCurrent):
+			// Адрес стал текущим чужим исходом смены, зафиксированным после раннего
+			// суждения: решает оператор записи под замком строки (kaname#780).
+			cell = EmailChangeFieldRefused
+			return &FieldError{Field: fieldNewEmail, Rule: RuleMustDiffer}
+		case err != nil:
+			return err
+		}
+		if refusal.Refused {
+			cell = EmailChangePersonPaced
+			return &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
+		}
+		// Окно адресата списывается и на занятый адрес: иначе разница темпа была бы
+		// ответом на вопрос «занят ли адрес» (Р6).
+		refusal, err = w.ChargeEmailChangeWindow(ctx, newEmail, uc.d.MailLimit)
+		if err != nil {
+			return err
+		}
+		if refusal.Refused {
+			cell = EmailChangeRecipientPaced
+			return &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
+		}
+		if !taken {
+			if err := w.EmitEmailChangeMail(ctx, EmailChangeMailIntent{
+				UserID: user.ID, AccountID: user.AccountID, To: newEmail, Code: value, ValidFor: uc.d.Pace.CodeTTL,
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -543,79 +543,85 @@ func (uc *ConfirmEmailChangeUseCase) Execute(ctx context.Context, in ConfirmEmai
 	var newEmail domain.Email
 	err = runEmailChangeWrite(ctx, uc.d.Store, user.ID, func(ctx context.Context, w EmailChangeWriter) error {
 		cell, rejected, newEmail = EmailChangeConfirmed, false, ""
-		if err := emailChangeLevel(ctx, resolved, w.LoginMethod, w.AccessKeyEnrolled); err != nil { return err }
+		if err := emailChangeLevel(ctx, resolved, w.LoginMethod, w.AccessKeyEnrolled); err != nil {
+			return err
+		}
 		outcome, address, err := w.PresentEmailChangeCode(ctx, user.ID, presented.Digest(), now, uc.d.Pace.Attempts)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		newEmail = address
 		switch outcome {
 		case CodeMismatched, CodeExhausted:
 			cell, rejected = EmailChangeCodeMismatched, true
-			if outcome == CodeExhausted { cell = EmailChangeCodeExhausted }
+			if outcome == CodeExhausted {
+				cell = EmailChangeCodeExhausted
+			}
 			return nil
 		case CodeMatched:
 		default:
 			cell = EmailChangeCodeNotFound
 			return ErrAuthenticationFailed
 		}
-	// (1) Адрес — новый. Занятость решает ключ базы; отказ откатывает исход
-	// целиком, и код остаётся неприменённым (Р4).
-	previous, err := w.ChangeEmail(ctx, user.ID, newEmail)
-	switch {
-	case errors.Is(err, ErrEmailInUse):
-		cell = EmailChangeInUse
-		return ErrEmailInUse
-	case err != nil:
-		return err
-	}
-	// (2) Отметка — момент этого предъявления, существующим оператором: триггер
-	// снял её на смене значения той же транзакцией (Р8 п. 2).
-	marked, err := w.MarkEmailVerified(ctx, user.ID, newEmail, now)
-	if err != nil {
-		return err
-	}
-	if !marked {
-		// Адрес строки сменился в этой же транзакции на newEmail, и оператор
-		// отметки его не нашёл: это дефект хранилища, а не исход человека.
-		cell = EmailChangeMarkNotReapplied
-		return ErrStoreUnavailable
-	}
-	// (3) Новый носитель текущей сессии; прежний больше не годен.
-	if err := w.RotateBearer(ctx, resolved.Session.ID, bearer.Digest(), now); err != nil {
-		return err
-	}
-	// (4) Прочие сессии сняты причиной `email-changed`.
-	if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonEmailChanged); err != nil {
-		return err
-	}
-	// (5) Живые коды восстановления сняты: код, выданный на прежний адрес, после
-	// смены не подходит.
-	if _, err := w.SupersedeRecoveryCodes(ctx, user.ID); err != nil {
-		return err
-	}
-	// (6) Уведомление на прежний адрес — без нового адреса.
-	if err := w.EmitEmailChangedMail(ctx, EmailChangedMailIntent{
-		UserID: user.ID, AccountID: user.AccountID, To: previous, ChangedAt: now,
-	}); err != nil {
-		return err
-	}
-	// (7) Событие — без адресов.
-	if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
-		EventType:       AuditEmailChanged,
-		TenantAccountID: string(user.AccountID),
-		Payload: map[string]any{
-			"user_id":    string(user.ID),
-			"session_id": string(resolved.Session.ID),
-		},
-	}); err != nil {
-		return err
-	}
-	// (8) Строка очереди смены субъекта: край сбрасывает кеш решений о человеке
-	// тем же потоком, что на выдачах.
-	if err := w.EmitSubjectChangeEvent(ctx, SubjectChange{
-		SubjectID: string(user.ID), SubjectType: string(domain.SubjectTypeUser), Op: SubjectChangeUserEmail,
-	}); err != nil {
-		return err
-	}
+		// (1) Адрес — новый. Занятость решает ключ базы; отказ откатывает исход
+		// целиком, и код остаётся неприменённым (Р4).
+		previous, err := w.ChangeEmail(ctx, user.ID, newEmail)
+		switch {
+		case errors.Is(err, ErrEmailInUse):
+			cell = EmailChangeInUse
+			return ErrEmailInUse
+		case err != nil:
+			return err
+		}
+		// (2) Отметка — момент этого предъявления, существующим оператором: триггер
+		// снял её на смене значения той же транзакцией (Р8 п. 2).
+		marked, err := w.MarkEmailVerified(ctx, user.ID, newEmail, now)
+		if err != nil {
+			return err
+		}
+		if !marked {
+			// Адрес строки сменился в этой же транзакции на newEmail, и оператор
+			// отметки его не нашёл: это дефект хранилища, а не исход человека.
+			cell = EmailChangeMarkNotReapplied
+			return ErrStoreUnavailable
+		}
+		// (3) Новый носитель текущей сессии; прежний больше не годен.
+		if err := w.RotateBearer(ctx, resolved.Session.ID, bearer.Digest(), now); err != nil {
+			return err
+		}
+		// (4) Прочие сессии сняты причиной `email-changed`.
+		if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonEmailChanged); err != nil {
+			return err
+		}
+		// (5) Живые коды восстановления сняты: код, выданный на прежний адрес, после
+		// смены не подходит.
+		if _, err := w.SupersedeRecoveryCodes(ctx, user.ID); err != nil {
+			return err
+		}
+		// (6) Уведомление на прежний адрес — без нового адреса.
+		if err := w.EmitEmailChangedMail(ctx, EmailChangedMailIntent{
+			UserID: user.ID, AccountID: user.AccountID, To: previous, ChangedAt: now,
+		}); err != nil {
+			return err
+		}
+		// (7) Событие — без адресов.
+		if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
+			EventType:       AuditEmailChanged,
+			TenantAccountID: string(user.AccountID),
+			Payload: map[string]any{
+				"user_id":    string(user.ID),
+				"session_id": string(resolved.Session.ID),
+			},
+		}); err != nil {
+			return err
+		}
+		// (8) Строка очереди смены субъекта: край сбрасывает кеш решений о человеке
+		// тем же потоком, что на выдачах.
+		if err := w.EmitSubjectChangeEvent(ctx, SubjectChange{
+			SubjectID: string(user.ID), SubjectType: string(domain.SubjectTypeUser), Op: SubjectChangeUserEmail,
+		}); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {

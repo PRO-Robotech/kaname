@@ -50,10 +50,14 @@ func DoWithWriteTx[T any](
 		err := prepared.RunPreparedWrite(ctx, func(attempt context.Context, w kanamerepo.Writer) error {
 			result = zero
 			value, err := action(attempt, w)
-			if err == nil { result = value }
+			if err == nil {
+				result = value
+			}
 			return err
 		})
-		if err != nil { return zero, MapRepoErrAt(ctx, err) }
+		if err != nil {
+			return zero, MapRepoErrAt(ctx, err)
+		}
 		return result, nil
 	}
 	w, err := repo.Writer(ctx)
@@ -104,17 +108,29 @@ func DoWithWriteTxVoid(
 // ExecuteConfiguredPreparedWrite не выбирает legacy при отсутствующей capability.
 // Ошибки до конца executor остаются исходными; публичный mapper вызывается снаружи.
 func ExecuteConfiguredPreparedWrite(ctx context.Context, factory any, open func(context.Context) (kanamerepo.Writer, error), action func(context.Context, kanamerepo.Writer) error) error {
-	if err := ctx.Err(); err != nil { return err }
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	executor, ok := factory.(kanamerepo.PreparedWriteExecutor)
-	if !ok || executor == nil { return iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared transaction executor unavailable") }
+	if !ok || executor == nil {
+		return iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared transaction executor unavailable")
+	}
 	value := reflect.ValueOf(executor)
-	if value.Kind() == reflect.Pointer && value.IsNil() { return iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared transaction executor unavailable") }
+	if value.Kind() == reflect.Pointer && value.IsNil() {
+		return iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared transaction executor unavailable")
+	}
 	return executor.ExecutePreparedWrite(ctx, func(attempt context.Context) (kanamerepo.Writer, error) {
 		w, err := open(attempt)
-		if err != nil { return w, err }
-		if w == nil { return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared writer unavailable") }
+		if err != nil {
+			return w, err
+		}
+		if w == nil {
+			return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared writer unavailable")
+		}
 		value := reflect.ValueOf(w)
-		if value.Kind() == reflect.Pointer && value.IsNil() { return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared writer unavailable") }
+		if value.Kind() == reflect.Pointer && value.IsNil() {
+			return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared writer unavailable")
+		}
 		return w, nil
 	}, func(attempt context.Context, w kanamerepo.Writer) error {
 		return action(context.WithValue(attempt, preparedBodyContextKey{}, true), w)
@@ -122,7 +138,10 @@ func ExecuteConfiguredPreparedWrite(ctx context.Context, factory any, open func(
 }
 
 type preparedBodyContextKey struct{}
+
 func mapPreparedBodyError(ctx context.Context, err error) error {
-	if ctx.Value(preparedBodyContextKey{}) == true { return err }
+	if ctx.Value(preparedBodyContextKey{}) == true {
+		return err
+	}
 	return MapRepoErr(err)
 }
