@@ -25,13 +25,28 @@ func wholeAttemptCommitFault(t *testing.T, r protocolRig, table, event string) f
 	_, err := r.admin.Exec(r.ctx, fmt.Sprintf(`CREATE SEQUENCE kaname.whole_attempt_commit_count;
 CREATE FUNCTION kaname.whole_attempt_commit_fault() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 BEGIN
- IF NEW.event_type=%s AND nextval('kaname.whole_attempt_commit_count')=1 THEN
+ IF NEW.event_type=%s AND lower(trim(current_query())) IN ('commit', 'commit;') AND nextval('kaname.whole_attempt_commit_count')=1 THEN
   RAISE EXCEPTION 'fixture deferred commit failure' USING ERRCODE='40001';
  END IF;
  RETURN NULL;
 END $$;
 CREATE CONSTRAINT TRIGGER whole_attempt_commit_fault AFTER INSERT ON kaname.%s DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION kaname.whole_attempt_commit_fault();`, "'"+event+"'", table))
 	require.NoError(t, err)
+	var deferrable, deferred bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT tgdeferrable,tginitdeferred FROM pg_trigger WHERE tgname='whole_attempt_commit_fault'`).Scan(&deferrable, &deferred))
+	require.True(t, deferrable)
+	require.True(t, deferred)
+	t.Cleanup(func() {
+		var attempts int
+		var called bool
+		err := r.admin.QueryRow(r.ctx, `SELECT last_value,is_called FROM kaname.whole_attempt_commit_count`).Scan(&attempts, &called)
+		t.Logf("actual deferred COMMIT fault: attempts=%d called=%t deferrable=%t initially_deferred=%t readback=%v", attempts, called, deferrable, deferred, err)
+		if err != nil { t.Error(err) }
+		var durable int
+		err = r.admin.QueryRow(r.ctx, "SELECT count(*) FROM kaname."+table+" WHERE event_type=$1", event).Scan(&durable)
+		t.Logf("durable event rows after operation: %d readback=%v", durable, err)
+		if err != nil { t.Error(err) }
+	})
 	return func() {
 		var attempts int
 		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT last_value FROM kaname.whole_attempt_commit_count`).Scan(&attempts))
@@ -58,7 +73,7 @@ func TestHumanAdmissionWholeAttemptCommitRetry(t *testing.T) {
 				check()
 				admissionAssertBootstrap(t, r, out.View.User.ID)
 				var count int
-				require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.audit_outbox WHERE event_type=$1 AND payload->>'user_id'=$2`, registration.AuditUserRegistered, string(out.View.User.ID)).Scan(&count))
+				require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.audit_outbox WHERE event_type=$1 AND event_payload->>'user_id'=$2`, registration.AuditUserRegistered, string(out.View.User.ID)).Scan(&count))
 				require.Equal(t, 1, count)
 				return
 			}
