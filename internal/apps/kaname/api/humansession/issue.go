@@ -61,16 +61,16 @@ type IssueInput struct {
 	Client domain.ClientDescription
 }
 
-// IssueSession — запись, память первой аутентификации и (если просили)
-// событие — ОДНОЙ транзакцией writer'а вызывающего. Возвращает записанную
-// сессию и свежий носитель.
-// SessionMaterial сохраняет случайный материал одной операции между попытками.
+// SessionMaterial — случайный материал одной операции, сохраняемый между попытками.
 // Поля закрыты: вызывающий не может подменить идентификатор или носитель.
 type SessionMaterial struct {
 	id     domain.HumanSessionID
 	bearer domain.SessionBearer
 }
 
+// IssueSession — запись, память первой аутентификации и (если просили)
+// событие — ОДНОЙ транзакцией writer'а вызывающего. Возвращает записанную
+// сессию и свежий носитель.
 func IssueSession(ctx context.Context, w Writer, in IssueInput) (domain.HumanSession, domain.SessionBearer, error) {
 	var material SessionMaterial
 	return IssueSessionPrepared(ctx, w, in, &material)

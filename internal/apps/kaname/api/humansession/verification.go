@@ -250,15 +250,15 @@ type OwnerBindingReconciler interface {
 	ReconcileBinding(ctx context.Context, id domain.AccessBindingID) error
 }
 
-// EnqueueVerificationLetter — ЕДИНСТВЕННЫЙ производитель письма подтверждения:
-// вытеснить прежние коды, записать новый под пределом Р9, положить намерение
-// письма — на транзакции вызывающего. Зовут регистрация и запрос письма.
-// VerificationLetterMaterial сохраняет код и идентификатор одного запроса.
+// VerificationLetterMaterial — код и идентификатор одного запроса письма подтверждения.
 type VerificationLetterMaterial struct {
 	id    domain.VerificationCodeID
 	value domain.VerificationCodeValue
 }
 
+// EnqueueVerificationLetter — ЕДИНСТВЕННЫЙ производитель письма подтверждения:
+// вытеснить прежние коды, записать новый под пределом Р9, положить намерение
+// письма — на транзакции вызывающего. Зовут регистрация и запрос письма.
 func EnqueueVerificationLetter(ctx context.Context, w VerificationLetterWriter, user domain.User, at time.Time, pace VerificationPace) (LetterRefusal, error) {
 	var material VerificationLetterMaterial
 	return EnqueuePreparedVerificationLetter(ctx, w, user, at, pace, &material)
