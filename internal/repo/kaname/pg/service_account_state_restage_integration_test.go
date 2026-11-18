@@ -34,10 +34,14 @@ func saRestageAttemptBudget(t *testing.T) int {
 	require.NoError(t, err)
 	for _, declaration := range file.Decls {
 		decl, ok := declaration.(*ast.GenDecl)
-		if !ok || decl.Tok != token.CONST { continue }
+		if !ok || decl.Tok != token.CONST {
+			continue
+		}
 		for _, specification := range decl.Specs {
 			spec := specification.(*ast.ValueSpec)
-			if len(spec.Names) != 1 || spec.Names[0].Name != "authorityEntryAttempts" { continue }
+			if len(spec.Names) != 1 || spec.Names[0].Name != "authorityEntryAttempts" {
+				continue
+			}
 			require.Len(t, spec.Values, 1)
 			value, ok := spec.Values[0].(*ast.BasicLit)
 			require.True(t, ok, "бюджет должен оставаться явной production-константой")
@@ -54,22 +58,24 @@ func saRestageAttemptBudget(t *testing.T) int {
 type saRestageRequestKey struct{}
 type saRestageSQLKey struct{}
 type saRestageGate struct {
-	pid uint32
-	attempt int
+	pid                                 uint32
+	attempt                             int
 	captured, rolledBack, readCommitted bool
-	txStatus byte
-	release chan struct{}
+	txStatus                            byte
+	release                             chan struct{}
 }
 type saRestageTrace struct {
-	gates chan saRestageGate
-	stop <-chan struct{}
-	captures, entries, bodies int
+	gates                               chan saRestageGate
+	stop                                <-chan struct{}
+	captures, entries, bodies           int
 	captured, rolledBack, readCommitted bool
-	errors []error
+	errors                              []error
 }
 
 func (tr *saRestageTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if ctx.Value(saRestageRequestKey{}) == nil { return ctx }
+	if ctx.Value(saRestageRequestKey{}) == nil {
+		return ctx
+	}
 	if strings.HasPrefix(data.SQL, "SELECT kaname.authority_protocol_enter_full_v3(") {
 		tr.entries++
 		gate := saRestageGate{conn.PgConn().PID(), tr.entries, tr.captured, tr.rolledBack, tr.readCommitted, conn.PgConn().TxStatus(), make(chan struct{})}
@@ -77,18 +83,29 @@ func (tr *saRestageTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, d
 		// изменило бы предпосылку fresh admission. RR уже закончен.
 		select {
 		case tr.gates <- gate:
-			select { case <-gate.release: case <-tr.stop: case <-ctx.Done(): }
+			select {
+			case <-gate.release:
+			case <-tr.stop:
+			case <-ctx.Done():
+			}
 		case <-tr.stop:
 		case <-ctx.Done():
 		}
 	}
-	if strings.HasPrefix(data.SQL, "UPDATE service_accounts SET enabled = $2 WHERE id = $1 RETURNING ") { tr.bodies++ }
+	if strings.HasPrefix(data.SQL, "UPDATE service_accounts SET enabled = $2 WHERE id = $1 RETURNING ") {
+		tr.bodies++
+	}
 	return context.WithValue(ctx, saRestageSQLKey{}, data.SQL)
 }
 func (tr *saRestageTrace) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	sql, marked := ctx.Value(saRestageSQLKey{}).(string)
-	if !marked { return }
-	if data.Err != nil { tr.errors = append(tr.errors, data.Err); return }
+	if !marked {
+		return
+	}
+	if data.Err != nil {
+		tr.errors = append(tr.errors, data.Err)
+		return
+	}
 	switch sql {
 	case "begin isolation level repeatable read read only":
 		tr.captured, tr.rolledBack, tr.readCommitted = false, false, false
@@ -96,7 +113,9 @@ func (tr *saRestageTrace) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data p
 		tr.captures++
 		tr.captured = true
 	case "rollback":
-		if tr.captured { tr.rolledBack = true }
+		if tr.captured {
+			tr.rolledBack = true
+		}
 	case "begin isolation level read committed":
 		tr.readCommitted = true
 	}
@@ -113,11 +132,16 @@ type saRestageNonBatch interface {
 	pgxpool.ReleaseTracer
 }
 type saRestageQueryOnly struct{ saRestageNonBatch }
+
 func (tr *saRestageTrace) combine(previous pgx.QueryTracer) pgx.QueryTracer {
 	combined := multitracer.New(tr)
-	if previous == nil { return combined }
+	if previous == nil {
+		return combined
+	}
 	combined = multitracer.New(previous, tr)
-	if _, batch := previous.(pgx.BatchTracer); batch { return combined }
+	if _, batch := previous.(pgx.BatchTracer); batch {
+		return combined
+	}
 	return saRestageQueryOnly{combined}
 }
 
@@ -188,7 +212,9 @@ func TestFullServiceAccountStateRestagesCommittedConcurrentChanges(t *testing.T)
 				<-finished
 				if writer != nil {
 					err := writer.Rollback(context.WithoutCancel(w.r.ctx))
-					if !errors.Is(err, pgx.ErrTxClosed) { require.NoError(t, err) }
+					if !errors.Is(err, pgx.ErrTxClosed) {
+						require.NoError(t, err)
+					}
 				}
 			})
 			go func() {
