@@ -143,7 +143,7 @@ func sharedEntryStarted(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 	return start
 }
 
-func sharedWaitWriterFence(t *testing.T, ctx context.Context, pool *pgxpool.Pool, waiter, holder *sharedWriterEntry, start time.Time, done <-chan error) {
+func sharedWaitWriterFence(t *testing.T, ctx context.Context, pool *pgxpool.Pool, waiter *sharedWriterEntry, holderPID uint32, start time.Time, done <-chan error) {
 	t.Helper()
 	observe, cancel := context.WithTimeout(ctx, sharedRaceBudget)
 	defer cancel()
@@ -163,9 +163,9 @@ func sharedWaitWriterFence(t *testing.T, ctx context.Context, pool *pgxpool.Pool
   AND w.classid=1262569292::oid AND w.objid=0::oid AND w.objsubid=2
   AND w.mode='ExclusiveLock' AND h.pid=$2 AND h.granted
   AND h.mode='ExclusiveLock' AND $2=ANY(pg_catalog.pg_blocking_pids(a.pid)))`,
-			waiter.pid.Load(), holder.pid.Load(), start, sharedWriterEntrySQL).Scan(&waiting))
+			waiter.pid.Load(), holderPID, start, sharedWriterEntrySQL).Scan(&waiting))
 		if waiting {
-			t.Logf("Writer pid=%d xact_start=%s ждёт entry (1262569292,0), holder pid=%d", waiter.pid.Load(), start.Format(time.RFC3339Nano), holder.pid.Load())
+			t.Logf("Writer pid=%d xact_start=%s ждёт entry (1262569292,0), holder pid=%d", waiter.pid.Load(), start.Format(time.RFC3339Nano), holderPID)
 			return
 		}
 		select {
