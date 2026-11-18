@@ -46,7 +46,14 @@ func (o *operationCausalObserver) rememberWorker(ctx context.Context, id string)
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	owner, exists := o.workers[ctx.Done()]
-	if exists { return owner == id }
+	if exists {
+		if owner == id { return true }
+		// Неоднозначность необратима: реальный чужой claim продолжится,
+		// поэтому прежний opID больше нельзя приписывать этому Done.
+		// Пустая запись остаётся слотом cap16, а не удаляется ради нового owner.
+		o.workers[ctx.Done()] = ""
+		return false
+	}
 	if len(o.workers) >= 16 { return false }
 	o.workers[ctx.Done()] = id
 	return true
@@ -227,8 +234,12 @@ func TestOperationCausalObserverPreservesOnlyKnownCancellationIdentity(t *testin
 	type valueKey int
 	derived := context.WithValue(context.WithValue(worker, valueKey(1), true), valueKey(2), true)
 	require.Equal(t, "own-op", o.operation(derived))
-	require.False(t, o.rememberWorker(derived, "foreign-op"), "общий Done нельзя переназначить другой операции")
-	require.Equal(t, "own-op", o.operation(derived))
+	require.False(t, o.rememberWorker(derived, "foreign-op"), "общий Done становится неоднозначным")
+	require.Empty(t, o.operation(worker))
+	require.Empty(t, o.operation(derived), "WithValue не восстанавливает прежнего владельца после коллизии")
+	require.False(t, o.rememberWorker(worker, "own-op"), "повтор прежнего claim не снимает неоднозначность")
+	require.Empty(t, o.operation(context.WithValue(derived, valueKey(3), true)))
+	require.Len(t, o.workers, 1, "неоднозначный Done продолжает занимать слот cap16")
 	child, stop := context.WithCancel(derived)
 	defer stop()
 	require.Empty(t, o.operation(child))
