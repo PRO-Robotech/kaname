@@ -323,7 +323,9 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// терминальном исходе операции его подменяет надстройка над репозиторием
 		// операций. Литерала тут больше НЕТ: оба текста объявлены в одном месте,
 		// потому что две копии разошлись бы молча.
-		return iamerr.Wrapf(iamerr.ErrAborted, "%s", iamerr.SerializationConflictSyncText)
+		// Причина доступна backend executor через errors.As; собственный текст
+		// оболочки закрывает SQL и детали сервера для публичного mapper.
+		return iamerr.Wrapf(iamerr.ErrAborted, "%w", preparedConflict{cause: err})
 	}
 	// connection family 08xxx
 	if strings.HasPrefix(pgErr.Code, "08") {
