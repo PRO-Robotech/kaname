@@ -4,7 +4,6 @@ package pg
 
 import (
 	"context"
-	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -59,7 +58,7 @@ func (s *RegistrationStore) beginAdmissionSession(ctx context.Context) (*humanSe
 	// Только advisory drain: schema attestation и её fail-closed проверки
 	// остаются на прежних местах; чистые session writers сюда не входят.
 	if _, err := w.tx.Exec(ctx, "SELECT pg_advisory_xact_lock(1262569292,0)"); err != nil {
-		return nil, errors.Join(err, policyRollback(ctx, w.tx))
+		return nil, preparedEntryFailure(err, policyRollback(ctx, w.tx))
 	}
 	return w, nil
 }

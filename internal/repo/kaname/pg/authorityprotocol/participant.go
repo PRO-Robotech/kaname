@@ -72,7 +72,13 @@ func openParticipantProfile(ctx context.Context, begin func(context.Context, pgx
 	rollbackErr := tx.Rollback(cleanup)
 	cancel()
 	if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
-		err = errors.Join(err, rollbackErr)
+		err = participantCleanupFailure{cause: errors.Join(err, rollbackErr)}
 	}
 	return nil, err
 }
+
+// Структурная отметка проходит границу пакета без раскрытия retry механизма.
+type participantCleanupFailure struct { cause error }
+func (e participantCleanupFailure) Error() string { return e.cause.Error() }
+func (e participantCleanupFailure) Unwrap() error { return e.cause }
+func (e participantCleanupFailure) PreparedCleanupFailed() bool { return true }

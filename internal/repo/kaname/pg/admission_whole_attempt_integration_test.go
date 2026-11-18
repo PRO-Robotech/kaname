@@ -22,6 +22,8 @@ import (
 func wholeAttemptCommitFault(t *testing.T, r protocolRig, table, event string) func() {
 	t.Helper()
 	require.Contains(t, []string{"audit_outbox", "invite_mail_outbox"}, table)
+	var before int
+	require.NoError(t, r.admin.QueryRow(r.ctx, "SELECT count(*) FROM kaname."+table+" WHERE event_type=$1", event).Scan(&before))
 	_, err := r.admin.Exec(r.ctx, fmt.Sprintf(`CREATE SEQUENCE kaname.whole_attempt_commit_count;
 CREATE FUNCTION kaname.whole_attempt_commit_fault() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 BEGIN
@@ -44,13 +46,16 @@ CREATE CONSTRAINT TRIGGER whole_attempt_commit_fault AFTER INSERT ON kaname.%s D
 		if err != nil { t.Error(err) }
 		var durable int
 		err = r.admin.QueryRow(r.ctx, "SELECT count(*) FROM kaname."+table+" WHERE event_type=$1", event).Scan(&durable)
-		t.Logf("durable event rows after operation: %d readback=%v", durable, err)
+		t.Logf("durable event rows after operation: before=%d after=%d readback=%v", before, durable, err)
 		if err != nil { t.Error(err) }
 	})
 	return func() {
 		var attempts int
 		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT last_value FROM kaname.whole_attempt_commit_count`).Scan(&attempts))
 		require.Equal(t, 2, attempts, "повторяется вся попытка после реального COMMIT 40001")
+		var durable int
+		require.NoError(t, r.admin.QueryRow(r.ctx, "SELECT count(*) FROM kaname."+table+" WHERE event_type=$1", event).Scan(&durable))
+		require.Equal(t, before+1, durable, "ровно один исход опубликован после повторной попытки")
 		authorityWaitReleased(t, r.runtime)
 	}
 }
@@ -80,7 +85,7 @@ func TestHumanAdmissionWholeAttemptCommitRetry(t *testing.T) {
 			out, err := registrar.Execute(r.ctx, input)
 			require.NoError(t, err)
 			sessions := kanamepg.NewHumanSessionRepo(r.runtime)
-			verification := humansession.VerificationDeps{Store: admissionVerificationStore{sessions, store}, Pace: admissionPace()}
+			verification := humansession.VerificationDeps{RequirePreparedWrite: true, Store: admissionVerificationStore{sessions, store}, Pace: admissionPace()}
 			if name == "request-verification" {
 				verification.Now = func() time.Time { return time.Now().Add(2 * time.Minute) }
 				request, err := humansession.NewRequestVerificationUseCase(verification)
@@ -98,7 +103,7 @@ func TestHumanAdmissionWholeAttemptCommitRetry(t *testing.T) {
 				completion, err := kanamepg.NewRecoveryCompletionStore(r.runtime, userapp.ActivateInviteForLane)
 				require.NoError(t, err)
 				completion = completion.WithHumanAdmissionParticipant(participant)
-				complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{Store: sessions, Completion: completion, Hasher: hasher, Rule: rule, Limits: humansession.Limits{AddressAttempts: 50, AddressWindow: time.Hour, SourceAttempts: 500, SourceWindow: time.Hour}, TTL: 24 * time.Hour, CutoffClock: momentclock.Func(time.Now)})
+				complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{RequirePreparedWrite: true, Store: sessions, Completion: completion, Hasher: hasher, Rule: rule, Limits: humansession.Limits{AddressAttempts: 50, AddressWindow: time.Hour, SourceAttempts: 500, SourceWindow: time.Hour}, TTL: 24 * time.Hour, CutoffClock: momentclock.Func(time.Now)})
 				require.NoError(t, err)
 				code := admissionLetter(t, r, out.View.User.ID, "mail.recovery.send")
 				check := wholeAttemptCommitFault(t, r, "audit_outbox", humansession.AuditRecoveryCompleted)
@@ -121,7 +126,7 @@ func TestHumanAdmissionWholeAttemptCommitRetry(t *testing.T) {
 			}
 			verified, err := confirm.Execute(r.ctx, humansession.ConfirmVerificationInput{Bearer: out.Bearer, Code: code})
 			require.NoError(t, err)
-			deps := humansession.EmailChangeDeps{Store: admissionEmailStore{admissionVerificationStore{sessions, store}}, Methods: kanamepg.NewLoginMethodRepo(r.runtime), Pace: admissionPace(), Freshness: time.Hour, MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 20, Window: time.Hour}}
+			deps := humansession.EmailChangeDeps{RequirePreparedWrite: true, Store: admissionEmailStore{admissionVerificationStore{sessions, store}}, Methods: kanamepg.NewLoginMethodRepo(r.runtime), Pace: admissionPace(), Freshness: time.Hour, MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 20, Window: time.Hour}}
 			request, err := humansession.NewRequestEmailChangeUseCase(deps)
 			require.NoError(t, err)
 			if name == "request-email-change" {

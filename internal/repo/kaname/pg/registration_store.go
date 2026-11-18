@@ -28,6 +28,7 @@ package pg
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -59,6 +60,7 @@ func NewRegistrationStore(pool *pgxpool.Pool) *RegistrationStore {
 func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, error) {
 	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
+		if s.participantConfigured { return nil, err }
 		return nil, mapErr(err, "Registration.Writer", "")
 	}
 	return &RegistrationWriter{
@@ -77,6 +79,7 @@ func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, er
 func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
 	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
+		if s.participantConfigured { return nil, err }
 		return nil, mapErr(err, "Verification.Writer", "")
 	}
 	return holdPersonOf(ctx, w, userID)
@@ -93,10 +96,11 @@ func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domai
 func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
 	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
+		if s.participantConfigured { return nil, err }
 		return nil, mapErr(err, "EmailChange.Writer", "")
 	}
 	if err := w.holdPersonAgainstEnrollment(ctx, userID); err != nil {
-		return nil, errors.Join(err, policyRollback(ctx, w.tx))
+		return nil, preparedEntryFailure(err, policyRollback(ctx, w.tx))
 	}
 	return &RegistrationWriter{
 		humanSessionWriter: w,
@@ -110,7 +114,7 @@ func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain
 // той же `pgx.Tx`. Отказ замка откатывает транзакцию.
 func holdPersonOf(ctx context.Context, w *humanSessionWriter, userID domain.UserID) (*RegistrationWriter, error) {
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
-		return nil, errors.Join(err, policyRollback(ctx, w.tx))
+		return nil, preparedEntryFailure(err, policyRollback(ctx, w.tx))
 	}
 	return &RegistrationWriter{
 		humanSessionWriter: w,
@@ -137,4 +141,32 @@ func (w *RegistrationWriter) MirrorWriter() kaname.Writer { return w.mirror }
 func (w *RegistrationWriter) Commit(ctx context.Context) error { return w.mirror.Commit(ctx) }
 
 // Rollback — откат той же транзакции.
-func (w *RegistrationWriter) Rollback(ctx context.Context) error { return w.tx.Rollback(ctx) }
+func (w *RegistrationWriter) Rollback(ctx context.Context) error { return policyRollback(ctx, w.tx) }
+
+func (s *RegistrationStore) RunRegistrationWrite(ctx context.Context, body func(context.Context, *RegistrationWriter) error) error {
+	return s.runAdmissionWrite(ctx, s.Writer, body)
+}
+func (s *RegistrationStore) RunVerificationWrite(ctx context.Context, id domain.UserID, body func(context.Context, *RegistrationWriter) error) error {
+	return s.runAdmissionWrite(ctx, func(ctx context.Context) (*RegistrationWriter, error) { return s.VerificationWriter(ctx, id) }, body)
+}
+func (s *RegistrationStore) RunEmailChangeWrite(ctx context.Context, id domain.UserID, body func(context.Context, *RegistrationWriter) error) error {
+	return s.runAdmissionWrite(ctx, func(ctx context.Context) (*RegistrationWriter, error) { return s.EmailChangeWriter(ctx, id) }, body)
+}
+func (s *RegistrationStore) runAdmissionWrite(ctx context.Context, open func(context.Context) (*RegistrationWriter, error), body func(context.Context, *RegistrationWriter) error) error {
+	if s == nil || body == nil { return kaname.ErrInvalidAuthorityFencePlan }
+	if s.participantConfigured { return executePreparedAttempts(ctx, open, body) }
+	return runLegacyAdmission(ctx, open, body)
+}
+
+// Legacy не получает retry budget; отмена запроса не мешает ограниченной уборке.
+func runLegacyAdmission[T preparedTransaction](ctx context.Context, open func(context.Context) (T, error), body func(context.Context, T) error) (err error) {
+	w, err := open(ctx)
+	if err != nil { return err }
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if cleanupErr := w.Rollback(cleanup); cleanupErr != nil && !errors.Is(cleanupErr, pgx.ErrTxClosed) { err = errors.Join(err, cleanupErr) }
+	}()
+	if err = body(ctx, w); err != nil { return err }
+	return w.Commit(ctx)
+}

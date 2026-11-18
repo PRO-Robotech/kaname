@@ -70,7 +70,7 @@ func admissionRegistrar(t *testing.T, r protocolRig, s registration.Store) (*reg
 	require.NoError(t, err)
 	lane, ok := registration.LaneByName(registration.LanePassword)
 	require.True(t, ok)
-	uc, err := registration.NewRegisterUseCase(registration.Deps{Store: s, Rule: rule, Hasher: hasher, Lane: lane, TTL: 24 * time.Hour, Now: time.Now, Logger: slog.New(slog.DiscardHandler), CutoffClock: momentclock.Func(time.Now), Letter: admissionPace(), Sources: kanamepg.NewHumanSessionRepo(r.runtime), SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour}})
+	uc, err := registration.NewRegisterUseCase(registration.Deps{RequirePreparedWrite: true, Store: s, Rule: rule, Hasher: hasher, Lane: lane, TTL: 24 * time.Hour, Now: time.Now, Logger: slog.New(slog.DiscardHandler), CutoffClock: momentclock.Func(time.Now), Letter: admissionPace(), Sources: kanamepg.NewHumanSessionRepo(r.runtime), SourcePace: humansession.SourcePace{Limit: 10000, Window: time.Hour}})
 	require.NoError(t, err)
 	return uc, hasher, rule
 }
@@ -109,7 +109,7 @@ func TestHumanAdmissionActualRegistrationVerificationEmailAndRecovery(t *testing
 			require.False(t, out.View.EmailVerified)
 			admissionAssertBootstrap(t, r, out.View.User.ID)
 			sessions := kanamepg.NewHumanSessionRepo(r.runtime)
-			verify, err := humansession.NewConfirmVerificationUseCase(humansession.VerificationDeps{Store: admissionVerificationStore{sessions, store}, Pace: admissionPace()})
+			verify, err := humansession.NewConfirmVerificationUseCase(humansession.VerificationDeps{RequirePreparedWrite: true, Store: admissionVerificationStore{sessions, store}, Pace: admissionPace()})
 			require.NoError(t, err)
 			code := admissionLetter(t, r, out.View.User.ID, "mail.verification.send")
 			bad := "0" + code[1:]
@@ -124,7 +124,7 @@ func TestHumanAdmissionActualRegistrationVerificationEmailAndRecovery(t *testing
 			verified, err := verify.Execute(r.ctx, humansession.ConfirmVerificationInput{Bearer: out.Bearer, Code: code})
 			require.NoError(t, err)
 			require.True(t, verified.View.EmailVerified)
-			deps := humansession.EmailChangeDeps{Store: admissionEmailStore{admissionVerificationStore{sessions, store}}, Methods: kanamepg.NewLoginMethodRepo(r.runtime), Pace: admissionPace(), Freshness: time.Hour, MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 20, Window: time.Hour}}
+			deps := humansession.EmailChangeDeps{RequirePreparedWrite: true, Store: admissionEmailStore{admissionVerificationStore{sessions, store}}, Methods: kanamepg.NewLoginMethodRepo(r.runtime), Pace: admissionPace(), Freshness: time.Hour, MailLimit: outboxtypes.InviteMailRateLimit{MaxPerWindow: 20, Window: time.Hour}}
 			request, err := humansession.NewRequestEmailChangeUseCase(deps)
 			require.NoError(t, err)
 			newEmail := "changed-" + email
@@ -147,7 +147,7 @@ func TestHumanAdmissionActualRegistrationVerificationEmailAndRecovery(t *testing
 			completion, err := kanamepg.NewRecoveryCompletionStore(r.runtime, userapp.ActivateInviteForLane)
 			require.NoError(t, err)
 			completion = completion.WithHumanAdmissionParticipant(p)
-			complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{Store: sessions, Completion: completion, Hasher: hasher, Rule: rule, Limits: humansession.Limits{AddressAttempts: 50, AddressWindow: time.Hour, SourceAttempts: 500, SourceWindow: time.Hour}, TTL: 24 * time.Hour, CutoffClock: momentclock.Func(time.Now)})
+			complete, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{RequirePreparedWrite: true, Store: sessions, Completion: completion, Hasher: hasher, Rule: rule, Limits: humansession.Limits{AddressAttempts: 50, AddressWindow: time.Hour, SourceAttempts: 500, SourceWindow: time.Hour}, TTL: 24 * time.Hour, CutoffClock: momentclock.Func(time.Now)})
 			require.NoError(t, err)
 			recovered, err := complete.Execute(r.ctx, humansession.CompleteRecoveryInput{Email: secondEmail, Code: admissionLetter(t, r, second.View.User.ID, "mail.recovery.send"), NewPassword: "different-correct-horse-battery-7"})
 			require.NoError(t, err)
@@ -375,4 +375,23 @@ func TestHumanAdmissionRegistrationLateFailureRollsBackWholeOutcome(t *testing.T
 	require.NoError(t, err)
 	admissionAssertBootstrap(t, r, out.View.User.ID)
 	authorityWaitReleased(t, r.runtime)
+}
+
+func (s regStore) RunRegistrationWrite(ctx context.Context, body func(context.Context, registration.Writer) error) error {
+	return s.inner.RunRegistrationWrite(ctx, func(ctx context.Context, w *kanamepg.RegistrationWriter) error {
+		return body(ctx, regWriter{RegistrationWriter: w})
+	})
+}
+func (s admissionVerificationStore) RunVerificationWrite(ctx context.Context, id domain.UserID, body func(context.Context, humansession.VerificationWriter) error) error {
+	return s.inner.RunVerificationWrite(ctx, id, func(ctx context.Context, w *kanamepg.RegistrationWriter) error { return body(ctx, admissionVerificationWriter{w}) })
+}
+func (s admissionEmailStore) RunEmailChangeWrite(ctx context.Context, id domain.UserID, body func(context.Context, humansession.EmailChangeWriter) error) error {
+	return s.inner.RunEmailChangeWrite(ctx, id, func(ctx context.Context, w *kanamepg.RegistrationWriter) error { return body(ctx, w) })
+}
+func (s admissionCommitFailureStore) RunRegistrationWrite(ctx context.Context, body func(context.Context, registration.Writer) error) error {
+	w, err := s.Writer(ctx)
+	if err != nil { return err }
+	defer policyFixtureRollback(w)
+	if err := body(ctx, w); err != nil { return err }
+	return w.Commit(ctx)
 }

@@ -16,7 +16,7 @@ package pg
 // пулом, а не за `kaname.Reader`; писатель следует за ним.
 //
 // Транзакцию открывает общий typed protocol установки: GLOBAL берётся до
-// консультативных и строчных замков каталога. Тело и Commit исполняются один раз,
+// консультативных и строчных замков каталога. Full повторяет всю попытку,
 // а отказ освобождает соединение ограниченным cleanup независимо от отмены.
 //
 // # Отказы приходят СЫРЫМИ, и это решение
@@ -153,6 +153,7 @@ func (r *CatalogWriteRepo) RunInWriteTx(
 	}
 	if r.fullContract != nil {
 		ctx = r.fullContract.Context(ctx)
+		return runFullInstallationTx(ctx, r.pool, kaname.AuthorityCatalog, func(ctx context.Context, tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
 	}
 	return runInstallationTx(ctx, r.pool, kaname.AuthorityCatalog, func(tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
 }

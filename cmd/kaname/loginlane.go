@@ -619,6 +619,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	registerUC, err := registration.NewRegisterUseCase(registration.Deps{
+		RequirePreparedWrite: cfg.AuthorityProtocol.Participant(),
 		Store: registrationStore{inner: registrationPG}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler),
 		Letter: letterPace, Sources: sessions, SourcePace: sourcePace, Now: time.Now, Logger: logger,
@@ -644,6 +645,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	// транзакцией; активацию приглашения исполняет та же функция, что исход
 	// подтверждения адреса.
 	completeUC, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
+		RequirePreparedWrite: cfg.AuthorityProtocol.Participant(),
 		Store: sessions, Completion: completionStore, Reconciler: ownerReconcilerOrNone(reconciler),
 		Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
 		Observer: rec, Now: time.Now, Logger: logger, CutoffClock: sharedClock,
@@ -705,6 +707,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	// Подтверждение адреса (kaname#456, Р6–Р10): два глагола под сессией и
 	// положение сессии, читаемое из текущей отметки на каждом запросе.
 	verificationDeps := humansession.VerificationDeps{
+		RequirePreparedWrite: cfg.AuthorityProtocol.Participant(),
 		Store: verificationStore{sessions: sessions, inner: registrationPG}, Pace: letterPace,
 		Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler), Now: time.Now, Logger: logger,
 	}
@@ -722,6 +725,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	// писем адресата нашего отправителя (Р6). Заведённое у личности читает
 	// хранилище способов входа: условие уровня Р2 (kaname#770).
 	emailChangeDeps := humansession.EmailChangeDeps{
+		RequirePreparedWrite: cfg.AuthorityProtocol.Participant(),
 		Store: emailChangeStore{sessions: sessions, inner: registrationPG}, Methods: methods, Pace: letterPace,
 		Freshness: cfg.AuthN.SelfServiceFreshness, MailLimit: inviteMailRateLimit(cfg),
 		Observer: rec, Now: time.Now, Logger: logger,
@@ -1082,4 +1086,18 @@ func humanAdmissionStores(pool *pgxpool.Pool, mode config.AuthorityProtocolConfi
 		recovery = recovery.WithHumanAdmissionParticipant(participant)
 	}
 	return registration, recovery, nil
+}
+
+func (s registrationStore) RunRegistrationWrite(ctx context.Context, body func(context.Context, registration.Writer) error) error {
+	return s.inner.RunRegistrationWrite(ctx, func(ctx context.Context, w *kanamepg.RegistrationWriter) error {
+		return body(ctx, registrationWriter{RegistrationWriter: w})
+	})
+}
+func (s verificationStore) RunVerificationWrite(ctx context.Context, id domain.UserID, body func(context.Context, humansession.VerificationWriter) error) error {
+	return s.inner.RunVerificationWrite(ctx, id, func(ctx context.Context, w *kanamepg.RegistrationWriter) error {
+		return body(ctx, verificationWriter{RegistrationWriter: w})
+	})
+}
+func (s emailChangeStore) RunEmailChangeWrite(ctx context.Context, id domain.UserID, body func(context.Context, humansession.EmailChangeWriter) error) error {
+	return s.inner.RunEmailChangeWrite(ctx, id, func(ctx context.Context, w *kanamepg.RegistrationWriter) error { return body(ctx, w) })
 }

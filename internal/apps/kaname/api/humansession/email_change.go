@@ -228,6 +228,8 @@ func (NopObserver) EmailChangeObserved(EmailChangeOutcome) {}
 
 // EmailChangeDeps — зависимости глаголов смены.
 type EmailChangeDeps struct {
+	// RequirePreparedWrite запрещает сборку full режима без callback capability.
+	RequirePreparedWrite bool
 	Store EmailChangeStore
 	// Methods — чтение заведённого у личности для ПЕРВОГО суждения условия
 	// уровня (Р2), вне транзакции записи; решает второе — чтением транзакции
@@ -247,6 +249,11 @@ type EmailChangeDeps struct {
 }
 
 func (d EmailChangeDeps) complete() (EmailChangeDeps, error) {
+	if d.RequirePreparedWrite {
+		if _, ok := d.Store.(PreparedEmailChangeStore); !ok {
+			return d, fmt.Errorf("admission: prepared write capability required")
+		}
+	}
 	switch {
 	case d.Store == nil:
 		return d, fmt.Errorf("email change: store required")
@@ -357,24 +364,25 @@ func (uc *RequestEmailChangeUseCase) Execute(ctx context.Context, in RequestEmai
 	}
 	user := resolved.User
 
-	w, err := uc.d.Store.EmailChangeWriter(ctx, user.ID)
-	if err != nil {
-		uc.d.Observer.EmailChangeObserved(EmailChangeStoreFailed)
-		return RequestEmailChangeOutput{}, ErrStoreUnavailable
-	}
-	defer func() { _ = w.Rollback(ctx) }()
+	codeID := domain.EmailChangeCodeID(ids.NewHyphenID(emailChangeCodeIDPrefix))
+	var value domain.VerificationCodeValue
+	var valuePrepared, taken bool
+	var cell EmailChangeOutcome
+	err = runEmailChangeWrite(ctx, uc.d.Store, user.ID, func(ctx context.Context, w EmailChangeWriter) error {
+		taken, cell = false, ""
 	// Уровень решает чтение ЭТОЙ транзакции под замком строки личности
 	// (`email_change_level.go`, kaname#770) — до первой записи.
-	if err := requireEmailChangeLevel(ctx, uc.d, resolved, w.LoginMethod, w.AccessKeyEnrolled); err != nil {
-		return RequestEmailChangeOutput{}, err
+	if err := emailChangeLevel(ctx, resolved, w.LoginMethod, w.AccessKeyEnrolled); err != nil {
+		return err
 	}
 
-	taken, err := w.AddressTaken(ctx, newEmail)
+	var err error
+	taken, err = w.AddressTaken(ctx, newEmail)
 	if err != nil {
-		return RequestEmailChangeOutput{}, uc.storeFailed("address occupancy not read", user.ID, err)
+		return err
 	}
 	code := domain.EmailChangeCode{
-		ID:       domain.EmailChangeCodeID(ids.NewHyphenID(emailChangeCodeIDPrefix)),
+		ID:       codeID,
 		UserID:   user.ID,
 		NewEmail: newEmail,
 		IssuedAt: now,
@@ -382,52 +390,71 @@ func (uc *RequestEmailChangeUseCase) Execute(ctx context.Context, in RequestEmai
 		// сессией».
 		ExpiresAt: now.Add(uc.d.Pace.CodeTTL),
 	}
-	var value domain.VerificationCodeValue
 	if !taken {
-		value, err = domain.NewVerificationCodeValue()
+		if !valuePrepared {
+			value, err = domain.NewVerificationCodeValue()
 		if err != nil {
-			return RequestEmailChangeOutput{}, uc.storeFailed("code not minted", user.ID, err)
+			return err
+		}
+			valuePrepared = true
 		}
 		code.Digest = value.Digest()
 	}
 	// Вытеснение прежней отложенной смены и запись принятого запроса — в одной
 	// транзакции: отказ темпа ниже откатывает и вытеснение (Р6).
 	if _, err := w.SupersedeEmailChangeCodes(ctx, user.ID, now); err != nil {
-		return RequestEmailChangeOutput{}, uc.storeFailed("earlier change not superseded", user.ID, err)
+		return err
 	}
 	refusal, err := w.InsertEmailChangeCodePaced(ctx, code, uc.d.Pace)
 	switch {
 	case errors.Is(err, ErrNewEmailIsCurrent):
 		// Адрес стал текущим чужим исходом смены, зафиксированным после раннего
 		// суждения: решает оператор записи под замком строки (kaname#780).
-		uc.d.Observer.EmailChangeObserved(EmailChangeFieldRefused)
-		return RequestEmailChangeOutput{}, &FieldError{Field: fieldNewEmail, Rule: RuleMustDiffer}
+		cell = EmailChangeFieldRefused
+		return &FieldError{Field: fieldNewEmail, Rule: RuleMustDiffer}
 	case err != nil:
-		return RequestEmailChangeOutput{}, uc.storeFailed("request not recorded", user.ID, err)
+		return err
 	}
 	if refusal.Refused {
-		uc.d.Observer.EmailChangeObserved(EmailChangePersonPaced)
-		return RequestEmailChangeOutput{}, &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
+		cell = EmailChangePersonPaced
+		return &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
 	}
 	// Окно адресата списывается и на занятый адрес: иначе разница темпа была бы
 	// ответом на вопрос «занят ли адрес» (Р6).
 	refusal, err = w.ChargeEmailChangeWindow(ctx, newEmail, uc.d.MailLimit)
 	if err != nil {
-		return RequestEmailChangeOutput{}, uc.storeFailed("recipient window not charged", user.ID, err)
+		return err
 	}
 	if refusal.Refused {
-		uc.d.Observer.EmailChangeObserved(EmailChangeRecipientPaced)
-		return RequestEmailChangeOutput{}, &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
+		cell = EmailChangeRecipientPaced
+		return &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
 	}
 	if !taken {
 		if err := w.EmitEmailChangeMail(ctx, EmailChangeMailIntent{
 			UserID: user.ID, AccountID: user.AccountID, To: newEmail, Code: value, ValidFor: uc.d.Pace.CodeTTL,
 		}); err != nil {
-			return RequestEmailChangeOutput{}, uc.storeFailed("letter not queued", user.ID, err)
+			return err
 		}
 	}
-	if err := w.Commit(ctx); err != nil {
-		return RequestEmailChangeOutput{}, uc.storeFailed("request not committed", user.ID, err)
+		return nil
+	})
+	if err != nil {
+		var step *StepUpRequiredError
+		var paced *TooManyAttemptsError
+		var field *FieldError
+		switch {
+		case errors.As(err, &step):
+			uc.d.Observer.EmailChangeObserved(EmailChangeStepUpRequired)
+			return RequestEmailChangeOutput{}, step
+		case errors.As(err, &paced):
+			uc.d.Observer.EmailChangeObserved(cell)
+			return RequestEmailChangeOutput{}, paced
+		case errors.As(err, &field):
+			uc.d.Observer.EmailChangeObserved(EmailChangeFieldRefused)
+			return RequestEmailChangeOutput{}, field
+		default:
+			return RequestEmailChangeOutput{}, uc.storeFailed("request not committed", user.ID, err)
+		}
 	}
 	if taken {
 		uc.d.Observer.EmailChangeObserved(EmailChangeAddressTaken)
@@ -511,83 +538,65 @@ func (uc *ConfirmEmailChangeUseCase) Execute(ctx context.Context, in ConfirmEmai
 	}
 	user := resolved.User
 
-	w, err := uc.d.Store.EmailChangeWriter(ctx, user.ID)
-	if err != nil {
-		uc.d.Observer.EmailChangeObserved(EmailChangeStoreFailed)
-		return ConfirmEmailChangeOutput{}, ErrStoreUnavailable
-	}
-	defer func() { _ = w.Rollback(ctx) }()
-	// Уровень решает чтение ЭТОЙ транзакции под замком строки личности
-	// (`email_change_level.go`, kaname#770) — до предъявления кода.
-	if err := requireEmailChangeLevel(ctx, uc.d, resolved, w.LoginMethod, w.AccessKeyEnrolled); err != nil {
-		return ConfirmEmailChangeOutput{}, err
-	}
-
-	outcome, newEmail, err := w.PresentEmailChangeCode(ctx, user.ID, presented.Digest(), now, uc.d.Pace.Attempts)
-	if err != nil {
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("code application not answered", user.ID, err)
-	}
-	switch outcome {
-	case CodeMismatched, CodeExhausted:
-		// Попытка засчитана оператором предъявления и фиксируется: предел
-		// попыток — свойство кода, а не запроса.
-		if err := w.Commit(ctx); err != nil {
-			return ConfirmEmailChangeOutput{}, uc.storeFailed("attempt not committed", user.ID, err)
+	var cell EmailChangeOutcome
+	var rejected bool
+	var newEmail domain.Email
+	err = runEmailChangeWrite(ctx, uc.d.Store, user.ID, func(ctx context.Context, w EmailChangeWriter) error {
+		cell, rejected, newEmail = EmailChangeConfirmed, false, ""
+		if err := emailChangeLevel(ctx, resolved, w.LoginMethod, w.AccessKeyEnrolled); err != nil { return err }
+		outcome, address, err := w.PresentEmailChangeCode(ctx, user.ID, presented.Digest(), now, uc.d.Pace.Attempts)
+		if err != nil { return err }
+		newEmail = address
+		switch outcome {
+		case CodeMismatched, CodeExhausted:
+			cell, rejected = EmailChangeCodeMismatched, true
+			if outcome == CodeExhausted { cell = EmailChangeCodeExhausted }
+			return nil
+		case CodeMatched:
+		default:
+			cell = EmailChangeCodeNotFound
+			return ErrAuthenticationFailed
 		}
-		cell := EmailChangeCodeMismatched
-		if outcome == CodeExhausted {
-			cell = EmailChangeCodeExhausted
-		}
-		uc.d.Observer.EmailChangeObserved(cell)
-		return ConfirmEmailChangeOutput{}, ErrAuthenticationFailed
-	case CodeMatched:
-	default:
-		uc.d.Observer.EmailChangeObserved(EmailChangeCodeNotFound)
-		return ConfirmEmailChangeOutput{}, ErrAuthenticationFailed
-	}
-
 	// (1) Адрес — новый. Занятость решает ключ базы; отказ откатывает исход
 	// целиком, и код остаётся неприменённым (Р4).
 	previous, err := w.ChangeEmail(ctx, user.ID, newEmail)
 	switch {
 	case errors.Is(err, ErrEmailInUse):
-		uc.d.Observer.EmailChangeObserved(EmailChangeInUse)
-		return ConfirmEmailChangeOutput{}, ErrEmailInUse
+		cell = EmailChangeInUse
+		return ErrEmailInUse
 	case err != nil:
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("address not written", user.ID, err)
+		return err
 	}
 	// (2) Отметка — момент этого предъявления, существующим оператором: триггер
 	// снял её на смене значения той же транзакцией (Р8 п. 2).
 	marked, err := w.MarkEmailVerified(ctx, user.ID, newEmail, now)
 	if err != nil {
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("mark not written", user.ID, err)
+		return err
 	}
 	if !marked {
 		// Адрес строки сменился в этой же транзакции на newEmail, и оператор
 		// отметки его не нашёл: это дефект хранилища, а не исход человека.
-		uc.d.Observer.EmailChangeObserved(EmailChangeMarkNotReapplied)
-		uc.d.Logger.Error("email change confirm: the mark was not reapplied to the new address; outcome rolled back",
-			"user_id", string(user.ID))
-		return ConfirmEmailChangeOutput{}, ErrStoreUnavailable
+		cell = EmailChangeMarkNotReapplied
+		return ErrStoreUnavailable
 	}
 	// (3) Новый носитель текущей сессии; прежний больше не годен.
 	if err := w.RotateBearer(ctx, resolved.Session.ID, bearer.Digest(), now); err != nil {
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("bearer not rotated", user.ID, err)
+		return err
 	}
 	// (4) Прочие сессии сняты причиной `email-changed`.
 	if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonEmailChanged); err != nil {
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("other sessions not ended", user.ID, err)
+		return err
 	}
 	// (5) Живые коды восстановления сняты: код, выданный на прежний адрес, после
 	// смены не подходит.
 	if _, err := w.SupersedeRecoveryCodes(ctx, user.ID); err != nil {
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("recovery codes not withdrawn", user.ID, err)
+		return err
 	}
 	// (6) Уведомление на прежний адрес — без нового адреса.
 	if err := w.EmitEmailChangedMail(ctx, EmailChangedMailIntent{
 		UserID: user.ID, AccountID: user.AccountID, To: previous, ChangedAt: now,
 	}); err != nil {
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("notice not queued", user.ID, err)
+		return err
 	}
 	// (7) Событие — без адресов.
 	if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
@@ -598,21 +607,40 @@ func (uc *ConfirmEmailChangeUseCase) Execute(ctx context.Context, in ConfirmEmai
 			"session_id": string(resolved.Session.ID),
 		},
 	}); err != nil {
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("audit event not written", user.ID, err)
+		return err
 	}
 	// (8) Строка очереди смены субъекта: край сбрасывает кеш решений о человеке
 	// тем же потоком, что на выдачах.
 	if err := w.EmitSubjectChangeEvent(ctx, SubjectChange{
 		SubjectID: string(user.ID), SubjectType: string(domain.SubjectTypeUser), Op: SubjectChangeUserEmail,
 	}); err != nil {
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("subject change not written", user.ID, err)
+		return err
 	}
-	if err := w.Commit(ctx); err != nil {
-		if errors.Is(err, ErrEmailInUse) {
+		return nil
+	})
+	if err != nil {
+		var step *StepUpRequiredError
+		switch {
+		case errors.As(err, &step):
+			uc.d.Observer.EmailChangeObserved(EmailChangeStepUpRequired)
+			return ConfirmEmailChangeOutput{}, step
+		case errors.Is(err, ErrAuthenticationFailed):
+			uc.d.Observer.EmailChangeObserved(cell)
+			return ConfirmEmailChangeOutput{}, ErrAuthenticationFailed
+		case errors.Is(err, ErrEmailInUse):
 			uc.d.Observer.EmailChangeObserved(EmailChangeInUse)
 			return ConfirmEmailChangeOutput{}, ErrEmailInUse
+		case cell == EmailChangeMarkNotReapplied:
+			uc.d.Observer.EmailChangeObserved(cell)
+			uc.d.Logger.Error("email change confirm: the mark was not reapplied to the new address; outcome rolled back", "user_id", string(user.ID))
+			return ConfirmEmailChangeOutput{}, ErrStoreUnavailable
+		default:
+			return ConfirmEmailChangeOutput{}, uc.storeFailed("outcome not committed", user.ID, err)
 		}
-		return ConfirmEmailChangeOutput{}, uc.storeFailed("outcome not committed", user.ID, err)
+	}
+	if rejected {
+		uc.d.Observer.EmailChangeObserved(cell)
+		return ConfirmEmailChangeOutput{}, ErrAuthenticationFailed
 	}
 	uc.d.Observer.EmailChangeObserved(EmailChangeConfirmed)
 	user.Email = newEmail

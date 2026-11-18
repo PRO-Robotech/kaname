@@ -69,6 +69,8 @@ type Output struct {
 // Deps — зависимости глагола; все обязательны, кроме наблюдателя, журнала и
 // материализации.
 type Deps struct {
+	// RequirePreparedWrite запрещает сборку full режима без callback capability.
+	RequirePreparedWrite bool
 	Store      Store
 	Rule       PasswordJudge
 	Hasher     humansession.Hasher
@@ -113,6 +115,11 @@ type RegisterUseCase struct {
 // собирается только для полосы, объявившей все три следствия (Р4). Полоса без
 // выдачи сессии не собирается — и гейт дерева называет её раньше, в CI.
 func NewRegisterUseCase(d Deps) (*RegisterUseCase, error) {
+	if d.RequirePreparedWrite {
+		if _, ok := d.Store.(PreparedStore); !ok {
+			return nil, fmt.Errorf("admission: prepared write capability required")
+		}
+	}
 	switch {
 	case d.Store == nil:
 		return nil, fmt.Errorf("registration: store required")
@@ -218,18 +225,17 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 	at = at.Truncate(time.Microsecond)
 
 	// (3) Одна транзакция трёх следствий — в объявленном порядке полосы.
-	w, err := uc.store.Writer(ctx)
-	if err != nil {
-		uc.observer.RegistrationObserved(uc.lane.Name, OutcomeStoreFailed)
-		return Output{}, humansession.ErrStoreUnavailable
-	}
-	defer func() { _ = w.Rollback(ctx) }()
-
 	var (
-		mirror  MirrorResult
+		mirror MirrorResult
 		session domain.HumanSession
-		bearer  domain.SessionBearer
+		bearer domain.SessionBearer
+		sessionMaterial humansession.SessionMaterial
+		letterMaterial humansession.VerificationLetterMaterial
 	)
+	externalID := domain.NewOwnLaneSubject()
+	candidateID := domain.UserID(ids.NewID(domain.PrefixUser))
+	err = runRegistrationWrite(ctx, uc.store, func(ctx context.Context, w Writer) error {
+		mirror, session, bearer = MirrorResult{}, domain.HumanSession{}, domain.SessionBearer{}
 	for _, c := range Consequences() {
 		if !uc.lane.Produces(c) {
 			continue
@@ -237,8 +243,8 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 		switch c {
 		case ConsequenceMirror:
 			mirror, err = w.Mirror(ctx, MirrorInput{
-				Email: email, ExternalID: domain.NewOwnLaneSubject(),
-				CandidateUserID: domain.UserID(ids.NewID(domain.PrefixUser)), Actor: actorSelfService,
+				Email: email, ExternalID: externalID,
+				CandidateUserID: candidateID, Actor: actorSelfService,
 			})
 		case ConsequenceAddress:
 			err = w.InsertLoginMethod(ctx, domain.LoginMethod{
@@ -246,7 +252,7 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 				State: domain.LoginMethodStateActive,
 			})
 		case ConsequenceSession:
-			session, bearer, err = humansession.IssueSession(ctx, w, humansession.IssueInput{
+			session, bearer, err = humansession.IssueSessionPrepared(ctx, w, humansession.IssueInput{
 				User:      mirror.User,
 				Presented: []assurance.Presentation{assurance.PasswordPresented()},
 				At:        at,
@@ -254,7 +260,7 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 				// Своё событие — ниже; выдача его не дублирует (Ф3-47).
 				EmitAudit: false,
 				Client:    in.Client,
-			})
+			}, &sessionMaterial)
 			if err == nil {
 				err = w.EmitAudit(ctx, outboxtypes.AuditEvent{
 					EventType:       AuditUserRegistered,
@@ -274,21 +280,19 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 			// регистрации идёт в счёт предела писем.
 			if err == nil {
 				var refusal humansession.LetterRefusal
-				refusal, err = humansession.EnqueueVerificationLetter(ctx, w, mirror.User, now, uc.letter)
+				refusal, err = humansession.EnqueuePreparedVerificationLetter(ctx, w, mirror.User, now, uc.letter, &letterMaterial)
 				if err == nil && refusal.Refused {
 					err = fmt.Errorf("registration: verification letter refused by its pace for a person just registered")
 				}
 			}
 		}
 		if err != nil {
-			return Output{}, uc.refuse(err)
+			return err
 		}
 	}
-	// (4) Фиксация: потолок темпа заведения решается триггером ЗДЕСЬ — одним
-	// оператором базы, отложенным до фиксации (Р5).
-	if err := w.Commit(ctx); err != nil {
-		return Output{}, uc.refuse(err)
-	}
+		return nil
+	})
+	if err != nil { return Output{}, uc.refuse(err) }
 
 	// (5) Пост-коммитная материализация — не гейтит исход (Р2, ban #9):
 	// намерения уже лежат в очереди той же транзакцией, уборка доберёт.

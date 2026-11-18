@@ -60,3 +60,10 @@ func runInstallationTx(ctx context.Context, pool *pgxpool.Pool, kind kaname.Auth
 }
 
 var _ kaname.InstallationAuthorityWriterFactory = (*Repository)(nil)
+
+// Full использует общий budget всей попытки, включая entry, тело и Commit.
+func runFullInstallationTx(ctx context.Context, pool *pgxpool.Pool, kind kaname.AuthorityOperation, fn func(context.Context, pgx.Tx) error) error {
+	return executePreparedAttempts(ctx, func(ctx context.Context) (pgx.Tx, error) {
+		return authorityprotocol.OpenParticipant(ctx, pool, kind)
+	}, fn)
+}
