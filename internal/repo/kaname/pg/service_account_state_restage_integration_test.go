@@ -21,6 +21,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/multitracer"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -288,8 +289,12 @@ func TestFullServiceAccountStateRestagesCommittedConcurrentChanges(t *testing.T)
 				require.Nil(t, writer)
 				require.Equal(t, budget, trace.captures)
 				require.Equal(t, budget, gates)
-				require.ErrorIs(t, openErr, kaname.ErrAuthorityClassificationChanged)
-				require.Equal(t, codes.Aborted, status.Code(shared.MapRepoErrAt(ctx, openErr)))
+				var primary *pgconn.PgError
+				require.ErrorAs(t, openErr, &primary)
+				require.Equal(t, "40001", primary.Code)
+				public := status.Convert(shared.MapRepoErrAt(ctx, openErr))
+				require.Equal(t, codes.Aborted, public.Code())
+				require.Equal(t, iamerr.SerializationConflictSyncText, public.Message())
 			case "revoked_source":
 				require.Nil(t, writer)
 				require.ErrorIs(t, openErr, iamerr.ErrPermissionDenied)
