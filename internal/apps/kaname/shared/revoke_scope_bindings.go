@@ -131,7 +131,7 @@ func RevokeBindingsInScope(
 			abrepo.PageFilter{PageSize: ScopeBindingRevokePageSize},
 		)
 		if err != nil {
-			return nil, 0, MapRepoErr(err)
+			return nil, 0, mapPreparedBodyError(ctx, err)
 		}
 		if len(bindings) == 0 {
 			break
@@ -140,14 +140,14 @@ func RevokeBindingsInScope(
 		for _, b := range bindings {
 			// Замки снятия до чтения ведомости — см. шапку файла.
 			if lerr := w.AdvisoryXactLock(ctx, string(b.ID)); lerr != nil {
-				return nil, 0, MapRepoErr(lerr)
+				return nil, 0, mapPreparedBodyError(ctx, lerr)
 			}
 			if _, gerr := w.AccessBindingsW().GetForDeactivation(ctx, b.ID); gerr != nil {
-				return nil, 0, MapRepoErr(gerr)
+				return nil, 0, mapPreparedBodyError(ctx, gerr)
 			}
 			stored, serr := w.AccessBindings().SelectEmittedTuples(ctx, b.ID)
 			if serr != nil {
-				return nil, 0, MapRepoErr(serr)
+				return nil, 0, mapPreparedBodyError(ctx, serr)
 			}
 			for _, tp := range stored {
 				fgaDeletes = append(fgaDeletes, outboxtypes.RelationTuple{
@@ -155,7 +155,7 @@ func RevokeBindingsInScope(
 				})
 			}
 			if derr := w.AccessBindingsW().Delete(ctx, b.ID); derr != nil {
-				return nil, 0, MapRepoErr(derr)
+				return nil, 0, mapPreparedBodyError(ctx, derr)
 			}
 			// Отзыв того, что на ОБЪЕКТЕ выдачи материализовали ДРУГИЕ выдачи
 			// (собственническая `*.*` области над iam.accessBinding), — событием
@@ -163,7 +163,7 @@ func RevokeBindingsInScope(
 			// Ведомость выше снимает лишь выпущенное САМОЙ выдачей; без события
 			// право на объект выдачи переживало её (kaname#665).
 			if rerr := w.EmitReconcileEvent(ctx, ReconcileEventDelete, "iam.accessBinding", string(b.ID)); rerr != nil {
-				return nil, 0, MapRepoErr(rerr)
+				return nil, 0, mapPreparedBodyError(ctx, rerr)
 			}
 			revoked++
 		}

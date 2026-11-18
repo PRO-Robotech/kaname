@@ -93,7 +93,7 @@ func (p *GroupMembershipParticipant) GroupMembershipWriter(ctx context.Context, 
 	if m.GroupID == "" || m.MemberID == "" || strings.ContainsAny(string(m.GroupID)+string(m.MemberID), ":#* \t\r\n") || (m.MemberType != domain.SubjectTypeUser && m.MemberType != domain.SubjectTypeServiceAccount) {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
-	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
+	for attempt := 0; attempt < authorityEntryLimit(ctx); attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -122,8 +122,8 @@ func (p *GroupMembershipParticipant) GroupMembershipWriter(ctx context.Context, 
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		rollbackErr := w.Rollback(cleanup)
 		cancel()
-		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
-			return nil, errors.Join(err, rollbackErr)
+		if rollbackErr != nil && rollbackErr != pgx.ErrTxClosed {
+			return nil, preparedEntryFailure(err, rollbackErr)
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

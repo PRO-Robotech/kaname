@@ -247,3 +247,9 @@ func writerIdentityOtherPool(t *testing.T, r protocolRig) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 	return pool
 }
+
+func (f *identityAuditFailure) ExecutePreparedWrite(ctx context.Context, open func(context.Context) (kaname.Writer, error), action func(context.Context, kaname.Writer) error) error {
+	executor, ok := f.IdentityLifecycleWriterFactory.(kaname.PreparedWriteExecutor)
+	if !ok { return kaname.ErrInvalidAuthorityFencePlan }
+	return executor.ExecutePreparedWrite(ctx, open, action)
+}

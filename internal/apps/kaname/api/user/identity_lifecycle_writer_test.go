@@ -105,3 +105,13 @@ func TestIdentityLifecycleHandlerRoutesAllFourWorkers(t *testing.T) {
 		})
 	}
 }
+
+// Этот double проверяет выбор порта; retry/abort проверяются отдельными PG controls.
+func (p *identitySelectionFactory) ExecutePreparedWrite(ctx context.Context, open func(context.Context) (kaname.Writer, error), action func(context.Context, kaname.Writer) error) error {
+	w, err := open(ctx)
+	if err != nil { return err }
+	defer func() { _ = w.Rollback(context.WithoutCancel(ctx)) }()
+	if err = action(ctx, w); err != nil { return err }
+	if err = ctx.Err(); err != nil { return err }
+	return w.Commit(ctx)
+}

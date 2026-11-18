@@ -143,7 +143,7 @@ func (p *MetadataMutationWriters) open(ctx context.Context, request metadataMuta
 			conn.Release()
 		}
 	}()
-	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
+	for attempt := 0; attempt < authorityEntryLimit(ctx); attempt++ {
 		snapshot, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 		if err != nil {
 			return nil, err
@@ -214,7 +214,7 @@ func (p *MetadataMutationWriters) open(ctx context.Context, request metadataMuta
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if !policyRetry(err) {
+		if preparedSingleEntry(ctx) || !policyRetry(err) {
 			return nil, err
 		}
 	}

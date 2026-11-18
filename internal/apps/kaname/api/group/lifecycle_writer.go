@@ -23,25 +23,21 @@ type lifecycleWriterSelection struct {
 func (s lifecycleWriterSelection) run(ctx context.Context, repo Repo, kind kaname.GroupMutation, g domain.Group, body func(context.Context, Writer) error) (result error) {
 	defer func() {
 		if result != nil {
-			if errors.Is(result, kaname.ErrAuthorityClassificationChanged) {
+			if errors.Is(result, kaname.ErrAuthorityClassificationChanged) && !errors.Is(result, iamerr.ErrAborted) {
 				result = iamerr.Wrapf(iamerr.ErrAborted, "authority ownership changed during bounded writer entry")
 			}
 			result = shared.MapRepoErrAt(ctx, result)
 		}
 	}()
+	if s.configured {
+		return shared.ExecuteConfiguredPreparedWrite(ctx, s.factory, func(attempt context.Context) (kaname.Writer, error) {
+			return s.factory.GroupLifecycleWriter(attempt, kind, g)
+		}, body)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var w Writer
-	var err error
-	if s.configured {
-		if s.factory == nil || (reflect.ValueOf(s.factory).Kind() == reflect.Pointer && reflect.ValueOf(s.factory).IsNil()) {
-			return errors.New("group lifecycle participant is not wired")
-		}
-		w, err = s.factory.GroupLifecycleWriter(ctx, kind, g)
-	} else {
-		w, err = repo.Writer(ctx)
-	}
+	w, err := repo.Writer(ctx)
 	if err != nil {
 		return err
 	}
@@ -65,7 +61,7 @@ func (s lifecycleWriterSelection) run(ctx context.Context, repo Repo, kind kanam
 
 // kaname#1034: direct mutation и postcommit reconcile имеют разные TX.
 func withGroupLifecycleTx[T any](ctx context.Context, s lifecycleWriterSelection, repo Repo, kind kaname.GroupMutation, g domain.Group, body func(context.Context, Writer) (T, error)) (out T, err error) {
-	err = s.run(ctx, repo, kind, g, func(ctx context.Context, w Writer) error { var e error; out, e = body(ctx, w); return e })
+	err = s.run(ctx, repo, kind, g, func(ctx context.Context, w Writer) error { var e error; var zero T; out = zero; out, e = body(ctx, w); return e })
 	if err != nil {
 		var zero T
 		return zero, err

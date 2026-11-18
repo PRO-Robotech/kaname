@@ -23,7 +23,7 @@ func (u *setEnabledServiceAccountUseCase) stateRepo(id domain.ServiceAccountID) 
 	if !u.stateConfigured {
 		return u.repo
 	}
-	return metadataUpdateRepo{Repo: u.repo, open: func(ctx context.Context) (Writer, error) {
+	return metadataUpdateRepo{Repo: u.repo, factory: u.stateFactory, open: func(ctx context.Context) (Writer, error) {
 		if u.stateFactory == nil {
 			return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "Service account state writer unavailable")
 		}

@@ -98,7 +98,7 @@ func (p *ServiceAccountStateWriters) open(ctx context.Context, request serviceAc
 	// Повторяется только подготовка до возврата writer: новый RR stage и новый RC.
 	// Тело UC и Commit остаются у вызывающего и здесь не повторяются.
 	var last error
-	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
+	for attempt := 0; attempt < authorityEntryLimit(ctx); attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -114,7 +114,7 @@ func (p *ServiceAccountStateWriters) open(ctx context.Context, request serviceAc
 			return nil, ctx.Err()
 		}
 		if err != nil {
-			if policyRetry(err) {
+			if !preparedSingleEntry(ctx) && policyRetry(err) {
 				last = err
 				continue
 			}
@@ -178,7 +178,7 @@ func (p *ServiceAccountStateWriters) open(ctx context.Context, request serviceAc
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if !policyRetry(err) {
+		if preparedSingleEntry(ctx) || !policyRetry(err) {
 			return nil, err
 		}
 		last = err

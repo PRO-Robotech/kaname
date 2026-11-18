@@ -5,6 +5,8 @@ package project
 import (
 	"context"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/grantpolicy"
@@ -20,6 +22,7 @@ func (u *UpdateProjectUseCase) WithProjectMetadataWriter(f kaname.ProjectMetadat
 
 type metadataUpdateRepo struct {
 	Repo
+	factory any
 	open func(context.Context) (Writer, error)
 }
 
@@ -28,7 +31,7 @@ func (u *UpdateProjectUseCase) metadataRepo(target domain.Project, mask []string
 	if !u.metadataConfigured {
 		return u.repo
 	}
-	return metadataUpdateRepo{Repo: u.repo, open: func(ctx context.Context) (Writer, error) {
+	return metadataUpdateRepo{Repo: u.repo, factory: u.metadataFactory, open: func(ctx context.Context) (Writer, error) {
 		if u.metadataFactory == nil {
 			return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "Metadata authority writer unavailable")
 		}
@@ -41,4 +44,8 @@ func (u *UpdateProjectUseCase) metadataRepo(target domain.Project, mask []string
 		}
 		return w, nil
 	}}
+}
+
+func (r metadataUpdateRepo) RunPreparedWrite(ctx context.Context, action func(context.Context, kaname.Writer) error) error {
+	return shared.ExecuteConfiguredPreparedWrite(ctx, r.factory, r.open, action)
 }

@@ -196,9 +196,9 @@ func (p *CRUDWriters) openCRUD(ctx context.Context, command string, input any, a
 		return nil, err
 	}
 	intent := crudIntent{Kind: "crud", Command: command, Actor: subjectPolicyKey(actor), Input: encoded}
-	budget := &relverdict.AdministrativeReadBudget{}
+	budget := preparedAdministrativeReadBudget(ctx)
 	var last error
-	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
+	for attempt := 0; attempt < authorityEntryLimit(ctx); attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -210,7 +210,7 @@ func (p *CRUDWriters) openCRUD(ctx context.Context, command string, input any, a
 		// Только подтверждённое изменение preclock source требует нового RR.
 		// Native deny, body/commit и SQL deadlock здесь не маскируются retry.
 		var pgerr *pgconn.PgError
-		if errors.Is(attemptErr, errCRUDAttemptCleanup) || !errors.As(attemptErr, &pgerr) || pgerr.Code != "P1034" {
+		if preparedSingleEntry(ctx) || errors.Is(attemptErr, errCRUDAttemptCleanup) || !errors.As(attemptErr, &pgerr) || pgerr.Code != "P1034" {
 			return nil, attemptErr
 		}
 	}

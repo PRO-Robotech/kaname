@@ -328,17 +328,8 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	// Идентификатор входит в prepared intent и затем единожды потребляется телом.
 	ownerBindingID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
 	request := kanamerepo.AccountCreateAuthority{Account: a, DefaultProjectID: defaultProjID, OwnerBindingID: ownerBindingID, IDSource: idSource}
-	w, err := u.crudRepo(request).Writer(ctx)
-	if err != nil {
-		return nil, shared.MapRepoErr(err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = w.Rollback(ctx)
-		}
-	}()
-
+	type createdAccountAttempt struct { account domain.Account; binding domain.AccessBinding }
+	result, err := shared.DoWithWriteTx(ctx, u.crudRepo(request), func(ctx context.Context, w Writer) (createdAccountAttempt, error) {
 	// ПЕРВЫЙ ОПЕРАТОР — ключевой замок строки владельца (kaname#664, KN664-40).
 	// Снятие личности берёт ту же строку на изменение первым оператором, и две
 	// транзакции сериализуются на ней: создание, пришедшее после снятия,
@@ -350,11 +341,11 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	// DEFERRED, и его нарушение всплывает на COMMIT (см. writeTx.Commit), где
 	// мапится в тот же "User <id> not found" через constraint-aware bridge.
 	if lerr := w.AccountsW().LockOwner(ctx, a.OwnerUserID); lerr != nil {
-		return nil, shared.MapRepoErr(lerr)
+		return createdAccountAttempt{}, lerr
 	}
 	inserted, ierr := w.AccountsW().Insert(ctx, a)
 	if ierr != nil {
-		return nil, shared.MapRepoErr(ierr)
+		return createdAccountAttempt{}, ierr
 	}
 
 	// F2 one-shot saga: co-commit the default "default" Project in the SAME
@@ -371,18 +362,18 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 		Labels:    domain.Labels{},
 	}
 	if verr := defaultProject.Validate(); verr != nil {
-		return nil, shared.MapValidationErr(verr)
+		return createdAccountAttempt{}, shared.MapValidationErr(verr)
 	}
 	insertedProj, perr := w.ProjectsW().Insert(ctx, defaultProject)
 	if perr != nil {
-		return nil, shared.MapRepoErr(perr)
+		return createdAccountAttempt{}, perr
 	}
 	// Same single projection as ProjectService.Create — see ownerTuples above.
 	if ferr := w.EmitFGARelationWrite(ctx, projectStructuralTuples(insertedProj)); ferr != nil {
-		return nil, shared.MapRepoErr(ferr)
+		return createdAccountAttempt{}, ferr
 	}
 	if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.project", string(insertedProj.ID)); rerr != nil {
-		return nil, shared.MapRepoErr(rerr)
+		return createdAccountAttempt{}, rerr
 	}
 	// Durable audit_outbox compliance row in the SAME writer-tx (запрет #10).
 	if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
@@ -396,7 +387,7 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 			"id_source":     idSource,
 		},
 	}); aerr != nil {
-		return nil, shared.MapRepoErr(aerr)
+		return createdAccountAttempt{}, aerr
 	}
 	// FGA owner/hierarchy owner-tuple intent co-committed in the SAME writer-tx
 	// (SEC-D):
@@ -404,7 +395,7 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	//     reconstructible by the reconciler ⇒ in-tx emit is the ONLY guarantee).
 	//   cluster:cluster_root#cluster@account:<id> — SEC-L cluster pointer.
 	if ferr := w.EmitFGARelationWrite(ctx, ownerTuples(inserted)); ferr != nil {
-		return nil, shared.MapRepoErr(ferr)
+		return createdAccountAttempt{}, ferr
 	}
 
 	// RBAC explicit-model 2026 P6 (D-8 / C-01 / ВЗ-3): co-commit the owner
@@ -438,14 +429,14 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	// returning the error inside the worker-tx triggers Rollback (defer above),
 	// fail-closed.
 	if verr := ownerBinding.Validate(); verr != nil {
-		return nil, shared.MapValidationErr(verr)
+		return createdAccountAttempt{}, shared.MapValidationErr(verr)
 	}
 	createdBinding, berr := w.AccessBindingsW().Insert(ctx, ownerBinding)
 	if berr != nil {
-		return nil, shared.MapRepoErr(berr)
+		return createdAccountAttempt{}, berr
 	}
 	if serr := w.AccessBindingsW().InsertSubjects(ctx, createdBinding.ID, ownerBinding.Subjects); serr != nil {
-		return nil, shared.MapRepoErr(serr)
+		return createdAccountAttempt{}, serr
 	}
 	// Owner-binding OBJECT hierarchy parent-pointer co-committed in the SAME
 	// writer-tx (parity with a regular AccessBinding.Create, tuplesForBinding/
@@ -462,7 +453,7 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	// lineage parity (and so a future cascade re-introduction would not need a
 	// migration), not for access.
 	if ferr := w.EmitFGARelationWrite(ctx, ownerBindingHierarchyTuples(inserted, createdBinding.ID)); ferr != nil {
-		return nil, shared.MapRepoErr(ferr)
+		return createdAccountAttempt{}, ferr
 	}
 	// Record the OWNER-BINDING-lifecycle tuples in the emitted-tuple ledger in the SAME
 	// writer-tx (symmetric revoke). Without this the owner-binding's revoke
@@ -472,7 +463,7 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 	// cluster pointer is account-lifecycle and intentionally excluded (survives revoke).
 	if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, createdBinding.ID,
 		ownerBindingLedgerTuples(inserted, createdBinding.ID)); lerr != nil {
-		return nil, shared.MapRepoErr(lerr)
+		return createdAccountAttempt{}, lerr
 	}
 	// Per-subject audit_outbox grant event in the SAME tx (parity with
 	// AccessBinding.Create's grant audit).
@@ -487,13 +478,13 @@ func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, d
 		BindingID:       string(createdBinding.ID),
 		TenantAccountID: string(inserted.ID),
 	}); aerr != nil {
-		return nil, shared.MapRepoErr(aerr)
+		return createdAccountAttempt{}, aerr
 	}
 
-	if cerr := w.Commit(ctx); cerr != nil {
-		return nil, shared.MapRepoErr(cerr)
-	}
-	committed = true
+		return createdAccountAttempt{inserted, createdBinding}, nil
+	})
+	if err != nil { return nil, err }
+	inserted, createdBinding := result.account, result.binding
 
 	// Post-commit: materialize the owner-binding's per-object membership (scope-self
 	// verb-bearing on account:<A> + ARM_ANCHOR over content). nil-safe; the periodic

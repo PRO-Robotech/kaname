@@ -966,3 +966,9 @@ func TestFullBind_FB30_UnknownCustomImplicationNeedsCoverageOrKnownBind(t *testi
 		})
 	}
 }
+
+func (o *fb22FactoryObserver) ExecutePreparedWrite(ctx context.Context, open func(context.Context) (kanamerepo.Writer, error), action func(context.Context, kanamerepo.Writer) error) error {
+	executor, ok := o.delegate.(kanamerepo.PreparedWriteExecutor)
+	require.True(o.t, ok)
+	return executor.ExecutePreparedWrite(ctx, open, action)
+}

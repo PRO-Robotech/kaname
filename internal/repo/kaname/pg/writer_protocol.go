@@ -78,7 +78,7 @@ func (r *Repository) coordinatedAuthorityWriterWithBegin(ctx context.Context, in
 		return nil, err
 	}
 	mode := in.Plan.Mode
-	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
+	for attempt := 0; attempt < authorityEntryLimit(ctx); attempt++ {
 		tx, e := begin(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 		if e != nil {
 			return nil, e
@@ -90,14 +90,14 @@ func (r *Repository) coordinatedAuthorityWriterWithBegin(ctx context.Context, in
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		rollbackErr := tx.Rollback(cleanup)
 		cancel()
-		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
-			return nil, errors.Join(e, rollbackErr)
+		if rollbackErr != nil && rollbackErr != pgx.ErrTxClosed {
+			return nil, preparedEntryFailure(e, rollbackErr)
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		var pgerr *pgconn.PgError
-		if !errors.As(e, &pgerr) || pgerr.Code != "P1034" {
+		if preparedSingleEntry(ctx) || !errors.As(e, &pgerr) || pgerr.Code != "P1034" {
 			return nil, e
 		}
 	}

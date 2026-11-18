@@ -36,10 +36,10 @@ func policyRollback(ctx context.Context, tx pgx.Tx) error {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	err := tx.Rollback(cleanup)
-	if errors.Is(err, pgx.ErrTxClosed) {
+	if err == pgx.ErrTxClosed {
 		return nil
 	}
-	return err
+	return preparedEntryFailure(nil, err)
 }
 func policyRetry(err error) bool {
 	var pgerr *pgconn.PgError
@@ -60,7 +60,7 @@ func (p *GrantPolicyWriters) openPolicyWriter(ctx context.Context, in policyWrit
 			conn.Release()
 		}
 	}()
-	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
+	for attempt := 0; attempt < authorityEntryLimit(ctx); attempt++ {
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -73,7 +73,7 @@ func (p *GrantPolicyWriters) openPolicyWriter(ctx context.Context, in policyWrit
 			return nil, errors.Join(e, cleanup)
 		}
 		if e != nil {
-			if policyRetry(e) {
+			if !preparedSingleEntry(ctx) && policyRetry(e) {
 				continue
 			}
 			return nil, e
@@ -114,7 +114,7 @@ func (p *GrantPolicyWriters) openPolicyWriter(ctx context.Context, in policyWrit
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			if policyRetry(e) {
+			if !preparedSingleEntry(ctx) && policyRetry(e) {
 				continue
 			}
 			return nil, e

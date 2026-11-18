@@ -115,7 +115,7 @@ func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID
 			// (`ON DELETE SET NULL`, kaname#664, Р3) той же транзакцией; их
 			// указатели членства снимаются намерениями здесь же.
 			if perr := w.EmitFGARelationDelete(ctx, membershipPointersOf(id, members)); perr != nil {
-				return shared.MapRepoErr(perr)
+				return perr
 			}
 			// Симметрия созданию (kacho#2055): создание со-коммитит событие реконсайла,
 			// которым материализуется пообъектный кортеж владельца, — снятие обязано
@@ -207,7 +207,7 @@ func revokeAccountOwnerTuples(ctx context.Context, w Writer, id domain.AccountID
 		Object:   "account:" + string(id),
 	})
 	if emitErr := w.EmitFGARelationDelete(ctx, fgaDeletes); emitErr != nil {
-		return shared.MapRepoErr(emitErr)
+		return emitErr
 	}
 	return nil
 }

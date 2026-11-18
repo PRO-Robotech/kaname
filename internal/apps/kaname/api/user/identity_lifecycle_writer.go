@@ -8,6 +8,8 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
@@ -17,9 +19,10 @@ type identityWriterSelection struct {
 	factory    kaname.IdentityLifecycleWriterFactory
 }
 
-// Reader и остальные порты остаются исходными; меняется только открытие Writer.
-// Тело, commit и отображение ошибок по-прежнему принадлежат shared.DoWithWriteTx.
+// Reader и остальные порты остаются исходными. Настроенный participant
+// владеет повтором целой TX; shared отображает только конечную ошибку.
 func (s identityWriterSelection) repository(repo Repo, kind kaname.IdentityMutation, id domain.UserID) Repo {
+	if !s.configured { return repo }
 	return identityWriterRepository{Repository: repo, selection: s, kind: kind, id: id}
 }
 
@@ -90,4 +93,8 @@ func (h *Handler) WithIdentityLifecycleWriter(f kaname.IdentityLifecycleWriterFa
 		h.remove.WithIdentityLifecycleWriter(f)
 	}
 	return h
+}
+
+func (r identityWriterRepository) RunPreparedWrite(ctx context.Context, action func(context.Context, kaname.Writer) error) error {
+	return shared.ExecuteConfiguredPreparedWrite(ctx, r.selection.factory, r.Writer, action)
 }

@@ -23,25 +23,21 @@ type membershipWriterSelection struct {
 func (s membershipWriterSelection) run(ctx context.Context, repo Repo, m domain.GroupMember, body func(context.Context, Writer) error) (result error) {
 	defer func() {
 		if result != nil {
-			if errors.Is(result, kaname.ErrAuthorityClassificationChanged) {
+			if errors.Is(result, kaname.ErrAuthorityClassificationChanged) && !errors.Is(result, iamerr.ErrAborted) {
 				result = iamerr.Wrapf(iamerr.ErrAborted, "authority ownership changed during bounded writer entry")
 			}
 			result = shared.MapRepoErrAt(ctx, result)
 		}
 	}()
+	if s.configured {
+		return shared.ExecuteConfiguredPreparedWrite(ctx, s.factory, func(attempt context.Context) (kaname.Writer, error) {
+			return s.factory.GroupMembershipWriter(attempt, m)
+		}, body)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var w Writer
-	var err error
-	if s.configured {
-		if s.factory == nil || (reflect.ValueOf(s.factory).Kind() == reflect.Pointer && reflect.ValueOf(s.factory).IsNil()) {
-			return errors.New("group membership participant is not wired")
-		}
-		w, err = s.factory.GroupMembershipWriter(ctx, m)
-	} else {
-		w, err = repo.Writer(ctx)
-	}
+	w, err := repo.Writer(ctx)
 	if err != nil {
 		return err
 	}

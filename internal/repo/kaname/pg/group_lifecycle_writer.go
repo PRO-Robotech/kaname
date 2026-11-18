@@ -51,7 +51,7 @@ func (p *GroupMembershipParticipant) groupObjectWriter(ctx context.Context, kind
 		err := q.QueryRow(ctx, `SELECT accounts,global_scope FROM kaname.authority_group_object_scopes($1)`, string(g.ID)).Scan(&s.accounts, &s.global)
 		return s, err
 	}
-	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
+	for attempt := 0; attempt < authorityEntryLimit(ctx); attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -84,8 +84,8 @@ func (p *GroupMembershipParticipant) groupObjectWriter(ctx context.Context, kind
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		re := w.Rollback(cleanup)
 		cancel()
-		if re != nil && !errors.Is(re, pgx.ErrTxClosed) {
-			return nil, errors.Join(err, re)
+		if re != nil && re != pgx.ErrTxClosed {
+			return nil, preparedEntryFailure(err, re)
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
