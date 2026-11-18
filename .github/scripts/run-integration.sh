@@ -229,9 +229,13 @@ echo ""
 #
 # Раскладка ДЕТЕРМИНИРОВАНА и выводится из того же отбора на каждом шарде:
 # пакеты по убыванию замеренного веса (`.github/integration-shard-weights.txt`),
-# каждый — в наименее загруженный шард. Каждый шард строит ПОЛНЫЙ план и
-# проверяет его: каждый отобранный пакет ровно в одном шарде, ни один шард не
-# пуст. Иначе код 2 — выпавший пакет был бы ровно тем молчаливым выпадением,
+# каждый — в наименее загруженный шард. При пяти частях migrations занимает
+# index 2 отдельно: CI 44200178509 завершил этот пакет за 1443.775 с, но хвост
+# его шарда не поместился в прежние 30 минут. Остальные пакеты делятся между
+# четырьмя другими частями. Без migrations и при другом N прежний LPT сохранён.
+# Каждый шард строит ПОЛНЫЙ план и
+# проверяет его: каждый отобранный пакет имеет ровно одного владельца,
+# каждый шард имеет единицу исполнения (обычный пакет либо точную AB-пару). Иначе код 2 — выпавший пакет был бы ровно тем молчаливым выпадением,
 # против которого переписан отбор.
 #
 # Без `INTEGRATION_SHARD` прогон — весь отбор, как прежде (локально и в пробах).
@@ -241,9 +245,18 @@ if [ -n "$shard_total" ]; then
         echo "ведомость весов $weights не прочитана — раскладка не из чего, это отказ" >&2
         exit 2
     fi
+    # Дополнительная единица исполнения, а не второй владелец пакета:
+    # CI 44200178509, attempt 1, job integrationshard index 1/5,
+    # artifact 14382386840, checkout fd426c480:
+    # точная AB-пара завершилась PASS за 804.140 с (округление вверх).
+    partition_tail_weight=0
+    if [ "$shard_total" -eq 5 ] && printf '%s\n' "$pkgs" | grep -Fxq "github.com/PRO-Robotech/kaname/internal/migrations" &&
+        printf '%s\n' "$pkgs" | grep -Fxq "$partition_package"; then
+        partition_tail_weight=805
+    fi
     plan_err="$work/plan.err"
     plan_rc=0
-    plan="$(printf '%s\n' "$pkgs" | awk -v n="$shard_total" -v wf="$weights" -v dflt="$DEFAULT_WEIGHT" '
+    plan="$(printf '%s\n' "$pkgs" | awk -v n="$shard_total" -v wf="$weights" -v dflt="$DEFAULT_WEIGHT" -v tail_weight="$partition_tail_weight" '
         BEGIN {
             while ((getline line < wf) > 0) {
                 if (line ~ /^[[:space:]]*(#|$)/) continue
@@ -270,9 +283,15 @@ if [ -n "$shard_total" ]; then
                 p[j+1] = ki; pw[j+1] = kw
             }
             for (s = 0; s < n; s++) load[s] = 0
+            migration = "github.com/PRO-Robotech/kaname/internal/migrations"
+            isolate_migrations = n == 5 && (migration in sel)
+            # Получатель пары уже занят её измеренным временем.
+            if (tail_weight > 0) load[1] = tail_weight
             for (i = 1; i <= np; i++) {
                 best = 0
-                for (s = 1; s < n; s++) if (load[s] < load[best]) best = s
+                if (isolate_migrations && p[i] == migration) best = 2
+                else for (s = 1; s < n; s++)
+                    if ((!isolate_migrations || s != 2) && load[s] < load[best]) best = s
                 load[best] += pw[i]
                 print best "\t" pw[i] "\t" p[i]
             }
@@ -283,8 +302,9 @@ if [ -n "$shard_total" ]; then
         exit 2
     fi
 
-    # Проверка плана — отдельно от построения: каждый отобранный пакет ровно
-    # в одном шарде, ни один шард не пуст.
+    # Проверка владельцев отдельно от построения: каждый пакет ровно один раз.
+    # Получатель зарезервированной пары может не иметь обычных пакетов;
+    # непустоту всех единиц исполнения ниже независимо проверяет PYPLAN.
     planned="$(printf '%s\n' "$plan" | awk -F'\t' 'NF' | wc -l)"
     distinct="$(printf '%s\n' "$plan" | awk -F'\t' 'NF {print $3}' | sort -u | wc -l)"
     missing="$(comm -23 <(printf '%s\n' "$pkgs" | sort -u) <(printf '%s\n' "$plan" | awk -F'\t' 'NF {print $3}' | sort -u))"
@@ -302,7 +322,10 @@ if [ -n "$shard_total" ]; then
         mark=""
         [ "$s" = "$shard_index" ] && mark="  ← этот"
         echo "шард $s: пакетов $n_s · замеренный вес $sum_s с$mark"
-        if [ "$n_s" -eq 0 ]; then
+        if [ "$s" -eq 1 ] && [ "$partition_tail_weight" -gt 0 ]; then
+            echo "  дополнительно зарезервировано $partition_tail_weight с на точную AB-пару"
+        fi
+        if [ "$n_s" -eq 0 ] && ! { [ "$s" -eq 1 ] && [ "$partition_tail_weight" -gt 0 ]; }; then
             echo "шард $s пуст: шардов больше, чем пакетов, — это отказ" >&2
             exit 2
         fi
@@ -311,7 +334,8 @@ if [ -n "$shard_total" ]; then
     if [ -n "$evidence" ]; then
         printf '%s\n' "$plan" > "$evidence/shard-plan.tsv" || exit 2
     fi
-    # LPT и его проверка остаются пакетными. Исполнение делит только один пакет.
+    # Владельцы остаются пакетными; зарезервированная пара может быть единственной
+    # единицей получателя. Непустоту исполнения независимо проверяет PYPLAN.
     # Получатель — index 1: CI 44180113004, шард 2 SUCCESS за 10m22s;
     # минимальный старый вес шарда 5 скрывал фактические 25m53s.
     execution_plan="$work/execution-plan.tsv"
@@ -320,6 +344,7 @@ if [ -n "$shard_total" ]; then
 import pathlib, sys
 source, target, package, pattern, total = sys.argv[1:]
 total = int(total)
+migration = "github.com/PRO-Robotech/kaname/internal/migrations"
 original = [(int(s), p) for s, _, p in
             (line.split("\t") for line in pathlib.Path(source).read_text().splitlines())]
 owner = next((s for s, p in original if p == package), None)
@@ -332,6 +357,11 @@ if recipient is not None:
     rows.append((recipient, package, "run", pattern))
 # Отдельный валидатор проверяет полноту, владельцев, фильтры и отсутствие дублей.
 expected = {p: s for s, p in original}
+if total == 5 and migration in expected:
+    if package in expected and (expected[package] != 0 or recipient != 1):
+        raise SystemExit("AB: ожидались owner 0 и recipient 1")
+    if expected[migration] != 2 or any(s == 2 and p != migration for s, p in original):
+        raise SystemExit("migrations должен занимать index 2 без других пакетов")
 for p, owner_index in expected.items():
     actual = [(s, mode, regex) for s, pkg, mode, regex in rows if pkg == p]
     wanted = [(owner_index, "all", "-")]
@@ -341,6 +371,8 @@ for p, owner_index in expected.items():
         raise SystemExit("неполное или повторное исполнение пакета: " + p)
 if any(p not in expected or not 0 <= s < total for s, p, _, _ in rows):
     raise SystemExit("неизвестный пакет или шард в плане исполнения")
+if any(not any(s == index for s, _, _, _ in rows) for index in range(total)):
+    raise SystemExit("пустой шард исполнения")
 pathlib.Path(target).write_text("".join("\t".join(map(str, row)) + "\n" for row in rows))
 PYPLAN
     if [ -n "$evidence" ]; then

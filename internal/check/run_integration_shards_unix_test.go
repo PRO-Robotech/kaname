@@ -24,6 +24,7 @@ import (
 )
 
 const shardAccessBinding = "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
+const shardMigrations = "github.com/PRO-Robotech/kaname/internal/migrations"
 const shardSlowPattern = "^(TestFullBind_FB21_GroupAdditionChecksTheLastBindingPage|TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant)$"
 
 // Двойник исполняет контракт аргументов и событий; реальные БД и сроки он не судит.
@@ -108,6 +109,15 @@ func runShardFixture(t *testing.T, script, shard string, plan, moveOwner bool, e
 			weight = 12
 		}
 		weights += fmt.Sprintf("%d %s\n", weight, p)
+	}
+	for _, option := range extra {
+		if strings.HasPrefix(option, "FAKE_MIGRATIONS_WEIGHT=") {
+			weight, parseErr := strconv.Atoi(strings.TrimPrefix(option, "FAKE_MIGRATIONS_WEIGHT="))
+			require.NoError(t, parseErr)
+			require.Positive(t, weight)
+			packages = append(packages, shardMigrations)
+			weights += fmt.Sprintf("%d %s\n", weight, shardMigrations)
+		}
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".github/integration-shard-weights.txt"), []byte(weights), 0o600))
 	inventory := filepath.Join(box, "packages")
@@ -300,6 +310,113 @@ func TestRunIntegrationShardsPlanValidatorRejectsHolesDuplicatesAndForeignFilter
 			o := runShardFixture(t, script, "0/5", true, false)
 			require.Equal(t, 2, o.rc, o.output)
 			require.Empty(t, o.calls)
+		})
+	}
+}
+
+func TestRunIntegrationShardsMigrationsAreExclusiveWithoutLosingTail(t *testing.T) {
+	// Малый и большой вес: изоляция не должна зависеть от позиции в сортировке.
+	for _, weight := range []string{"1", "200"} {
+		t.Run(weight, func(t *testing.T) {
+			seen := make(map[string]int)
+			for shard := 0; shard < 5; shard++ {
+				o := runShardFixture(t, runIntegrationSource(t), fmt.Sprintf("%d/5", shard), false, false,
+					"FAKE_MIGRATIONS_WEIGHT="+weight)
+				require.Zero(t, o.rc, o.output)
+				plan := strings.Split(strings.TrimSpace(shardEvidence(t, o, "execution-plan.tsv")), "\n")
+				require.Len(t, plan, 13, "12 владельцев пакетов и одна дополнительная AB часть")
+				isolated := 0
+				for _, row := range plan {
+					fields := strings.Split(row, "\t")
+					require.Len(t, fields, 4)
+					if fields[0] == "2" {
+						require.Equal(t, []string{"2", shardMigrations, "all", "-"}, fields)
+						isolated++
+					}
+				}
+				require.Equal(t, 1, isolated)
+				if shard == 1 {
+					// В маленьком составе 805 с пары уже занимают получателя:
+					// обычные пакеты уходят в другие части, но шард не пуст.
+					require.Len(t, o.calls, 1)
+					require.Contains(t, o.calls[0], "-run")
+					require.Equal(t, shardAccessBinding, o.calls[0][len(o.calls[0])-1])
+					owners := shardEvidence(t, o, "shard-plan.tsv")
+					for _, row := range strings.Split(strings.TrimSpace(owners), "\n") {
+						require.False(t, strings.HasPrefix(row, "1\t"), row)
+					}
+				}
+				if shard == 2 {
+					require.Len(t, o.calls, 1)
+					require.Equal(t, shardMigrations, o.calls[0][len(o.calls[0])-1])
+				}
+				for _, call := range o.calls {
+					require.Contains(t, call, "-race")
+					require.Contains(t, strings.Join(call, " "), "-timeout 25m -p 1")
+					for i, arg := range call {
+						if arg == "-run" || arg == "-skip" {
+							require.Equal(t, map[int]string{0: "-skip", 1: "-run"}[shard], arg)
+							require.Equal(t, shardSlowPattern, call[i+1])
+							require.Equal(t, []string{shardAccessBinding}, call[i+2:])
+						}
+						if arg == shardAccessBinding || arg == shardMigrations || strings.HasPrefix(arg, "example.test/") {
+							seen[arg]++
+						}
+					}
+				}
+			}
+			want := map[string]int{shardAccessBinding: 2, shardMigrations: 1}
+			for i := 0; i < 10; i++ {
+				want[fmt.Sprintf("example.test/p%d", i)] = 1
+			}
+			require.Equal(t, want, seen, "хвост перенесён, а не потерян или повторён")
+		})
+	}
+}
+
+func TestRunIntegrationShardsRejectMigrationsWrongOwnerAndExtraTail(t *testing.T) {
+	marker := "# Отдельный валидатор проверяет полноту, владельцев, фильтры и отсутствие дублей."
+	for _, mutation := range []struct {
+		name string
+		code string
+		want string
+	}{
+		{"wrong-owner", "original = [(0 if p == migration else s, p) for s, p in original]\nrows = [(0 if p == migration else s, p, mode, regex) for s, p, mode, regex in rows]", "migrations должен занимать index 2"},
+		{"extra-tail", "original = [(2 if p == 'example.test/p0' else s, p) for s, p in original]\nrows = [(2 if p == 'example.test/p0' else s, p, mode, regex) for s, p, mode, regex in rows]", "migrations должен занимать index 2"},
+		{"missing-tail", "rows = [row for row in rows if row[1] != 'example.test/p0']", "неполное или повторное исполнение пакета"},
+		{"empty-recipient", "rows = [row for row in rows if row[0] != 1]", "неполное или повторное исполнение пакета"},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			script := runIntegrationSource(t)
+			require.Contains(t, script, marker)
+			// Первые две инъекции сохраняют обычную полноту/согласованность
+			// original и rows, но нарушают независимый контракт изоляции.
+			script = strings.Replace(script, marker, mutation.code+"\n"+marker, 1)
+			o := runShardFixture(t, script, "0/5", true, false, "FAKE_MIGRATIONS_WEIGHT=200")
+			require.Equal(t, 2, o.rc, o.output)
+			require.Contains(t, o.output, mutation.want)
+			require.Empty(t, o.calls)
+		})
+	}
+}
+
+func TestRunIntegrationShardsMigrationsOtherTotalsKeepLPT(t *testing.T) {
+	for _, total := range []int{1, 2, 3, 6} {
+		t.Run(strconv.Itoa(total), func(t *testing.T) {
+			o := runShardFixture(t, runIntegrationSource(t), fmt.Sprintf("0/%d", total), true, false,
+				"FAKE_MIGRATIONS_WEIGHT=200")
+			require.Zero(t, o.rc, o.output)
+			require.Empty(t, o.calls)
+			// При другом N самый тяжёлый пакет по-прежнему начинает LPT на 0.
+			plan := shardEvidence(t, o, "execution-plan.tsv")
+			require.Contains(t, plan, "0\t"+shardMigrations+"\tall\t-\n")
+			wantUnits := 13
+			if total == 1 {
+				wantUnits = 12
+				require.NotContains(t, plan, "\trun\t")
+				require.NotContains(t, plan, "\tskip\t")
+			}
+			require.Len(t, strings.Split(strings.TrimSpace(plan), "\n"), wantUnits)
 		})
 	}
 }
