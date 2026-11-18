@@ -240,7 +240,10 @@ func operationCausalPool(t *testing.T, r protocolRig) (protocolRig, *operationCa
 	r.runtime.Close()
 	pool, err := pgxpool.NewWithConfig(r.ctx, cfg)
 	require.NoError(t, err)
-	t.Cleanup(pool.Close)
+	// Наблюдаемые фикстуры GD используют общий исполнитель пакета и не идут
+	// параллельно. Срок проверки 20 секунд сохраняется, а репозиторий остаётся
+	// доступным до завершения terminalWrite даже после отказа этой проверки.
+	t.Cleanup(func() { closeOperationPoolAfterDrain(t, operations.Wait, pool.Close) })
 	r.runtime, r.repo = pool, kanamepg.New(pool, nil)
 	if o.functionCost != nil {
 		var effective, session, setting string
