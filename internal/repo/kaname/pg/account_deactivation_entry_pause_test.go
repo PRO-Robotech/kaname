@@ -19,7 +19,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// accountEntryPauseKey помечает только контекст настоящего Delete use-case.
+// accountEntryPauseKey помечает только контекст настоящего снятия.
 // operations.Run сохраняет Value через baggage.Extract/context.WithoutCancel.
 type accountEntryPauseKey struct{}
 
@@ -58,14 +58,6 @@ func (*accountEntryPause) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQue
 // corelib/db.NewPool v1.16.1: оба server timeout, CancelRequest watcher и Ping.
 func accountEntryPausePool(t *testing.T, ctx context.Context, pause *accountEntryPause) *pgxpool.Pool {
 	t.Helper()
-	pool := raceTracingPool(t, ctx, pause)
-	// LIFO: release всегда идёт до закрытия пула, включая отказ предпосылки.
-	t.Cleanup(pause.let)
-	return pool
-}
-
-func raceTracingPool(t *testing.T, ctx context.Context, tracer pgx.QueryTracer) *pgxpool.Pool {
-	t.Helper()
 	cfg, err := pgxpool.ParseConfig(setupTestDB(t))
 	require.NoError(t, err)
 	if cfg.ConnConfig.RuntimeParams == nil {
@@ -78,33 +70,35 @@ func raceTracingPool(t *testing.T, ctx context.Context, tracer pgx.QueryTracer) 
 			Conn: c, CancelRequestDelay: 0, DeadlineDelay: 500 * time.Millisecond,
 		}
 	}
-	cfg.ConnConfig.Tracer = tracer
+	cfg.ConnConfig.Tracer = pause
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
+	// LIFO: release всегда идёт до закрытия пула, включая отказ предпосылки.
+	t.Cleanup(pause.let)
 	require.NoError(t, pool.Ping(ctx))
 	return pool
 }
 
-// runAccountDeactivationEntryPauseRace ставит второй порядок без artificial
-// advisory holder: Delete уже открыл транзакцию, но ещё не взял admission или
-// бизнес-замки. Форвард коммитит более поздний факт, затем Delete его снимает.
-func runAccountDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix string) (*pgxpool.Pool, domain.AccessBindingID, string) {
+// runUseCaseDeactivationEntryPauseRace ставит второй порядок без artificial
+// advisory holder: настоящий use-case уже открыл TX, но ещё не взял admission
+// или бизнес-замки. Форвард коммитит более поздний факт, затем снятие его удаляет.
+func runUseCaseDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix string, deact deactivation) (*pgxpool.Pool, domain.AccessBindingID, string) {
 	t.Helper()
 	ctx := context.Background()
 	pause := &accountEntryPause{sql: "SELECT pg_advisory_xact_lock(1262569292,0)", entered: make(chan struct{}), release: make(chan struct{})}
 	pool := accountEntryPausePool(t, ctx, pause)
 	fx := setupGamma(t, ctx, pool, suffix)
 	forwarder, _ := newReconciler(pool)
-	bid, subj := seedRaceBinding(t, ctx, pool, fx, suffix, fixtureFor(accountDeleteDeactivation))
-	deleteCtx := context.WithValue(ctx, accountEntryPauseKey{}, pause)
-	done := startDeactivation(t, deleteCtx, pool, forwarder, fx, bid, accountDeleteDeactivation)
+	bid, subj := seedRaceBinding(t, ctx, pool, fx, suffix, fixtureFor(deact))
+	deactivationCtx := context.WithValue(ctx, accountEntryPauseKey{}, pause)
+	done := startDeactivation(t, deactivationCtx, pool, forwarder, fx, bid, deact)
 	select {
 	case <-pause.entered:
 	case err := <-done:
-		t.Fatalf("ПРЕДПОСЫЛКА: Delete завершился до остановки admission: %v", err)
+		t.Fatalf("ПРЕДПОСЫЛКА: снятие (%s) завершилось до остановки admission: %v", deact, err)
 	case <-time.After(expiryRaceBudget):
-		t.Fatalf("ПРЕДПОСЫЛКА: Delete не дошёл до admission за %s", expiryRaceBudget)
+		t.Fatalf("ПРЕДПОСЫЛКА: снятие (%s) не дошло до admission за %s", deact, expiryRaceBudget)
 	}
 
 	// Административное наблюдение только чтением, на отдельном соединении.
@@ -129,7 +123,7 @@ func runAccountDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix
  FROM pg_catalog.pg_stat_activity a
  WHERE a.pid=$1 AND a.datname=current_database() AND a.xact_start IS NOT NULL`,
 		pause.pid.Load()).Scan(&deletionStart, &idle, &noLocks))
-	require.True(t, idle, "ПРЕДПОСЫЛКА: настоящая Delete TX уже началась")
+	require.True(t, idle, "ПРЕДПОСЫЛКА: настоящая TX снятия уже началась")
 	require.True(t, noLocks, "ПРЕДПОСЫЛКА: до entry нет ни9292, ни бизнес-замков")
 	require.NoError(t, admin.Rollback(adminCtx))
 
@@ -143,11 +137,11 @@ func runAccountDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix
 	}()
 	select {
 	case err := <-fwdDone:
-		require.NoError(t, err, "форвард в паузе настоящей Delete TX")
+		require.NoError(t, err, "форвард в паузе настоящей TX снятия")
 	case err := <-done:
-		t.Fatalf("ПРЕДПОСЫЛКА: Delete завершился до отпускания admission: %v", err)
+		t.Fatalf("ПРЕДПОСЫЛКА: снятие (%s) завершилось до отпускания admission: %v", deact, err)
 	case <-time.After(expiryRaceBudget):
-		t.Fatalf("форвард не завершился в паузе Delete за %s", expiryRaceBudget)
+		t.Fatalf("форвард не завершился в паузе снятия (%s) за %s", deact, expiryRaceBudget)
 	}
 	_, _, facts := bindingResidue(t, ctx, pool, bid, subj, "compute_instance", "iRace")
 	require.Positive(t, facts, "БЛИЗНЕЦ В ПРОГОНЕ: форвард, зафиксированный раньше снятия, обязан дать прямой факт — иначе ноль после снятия ни о чём")
@@ -155,15 +149,15 @@ func runAccountDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*)>0 AND bool_and(created_at>$3)
  FROM kaname.fga_outbox WHERE event_type='fga.tuple.write'
  AND payload->>'user'=$1 AND payload->>'object'=$2`, subj, "compute_instance:iRace", deletionStart).Scan(&later))
-	require.True(t, later, "ПРЕДПОСЫЛКА: created_at durable записи форварда новее начала Delete TX")
-	unregisterRaceObjectFor(t, ctx, pool, accountDeleteDeactivation)
+	require.True(t, later, "ПРЕДПОСЫЛКА: created_at durable записи форварда новее начала TX снятия")
+	unregisterRaceObjectFor(t, ctx, pool, deact)
 
 	pause.let()
 	select {
 	case err := <-done:
-		require.NoError(t, err, "%s после коммита форварда", accountDeleteDeactivation)
+		require.NoError(t, err, "%s после коммита форварда", deact)
 	case <-time.After(2 * expiryRaceBudget):
-		t.Fatalf("снятие (%s) не завершилось за %s после отпускания entry", accountDeleteDeactivation, 2*expiryRaceBudget)
+		t.Fatalf("снятие (%s) не завершилось за %s после отпускания entry", deact, 2*expiryRaceBudget)
 	}
 	return pool, bid, subj
 }
