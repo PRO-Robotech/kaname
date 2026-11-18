@@ -239,7 +239,199 @@ echo ""
 # против которого переписан отбор.
 #
 # Без `INTEGRATION_SHARD` прогон — весь отбор, как прежде (локально и в пробах).
-if [ -n "$shard_total" ]; then
+# Двенадцать частей используют только известные тяжёлые TOP и точные дополнения.
+# Неизвестные будущие Test/Example/Fuzz остаются в дополнениях; перечня всего дерева нет.
+partition_units_file=""
+if [ "$shard_total" = 12 ]; then
+    printf '%s\n' "$pkgs" > "$work/selected-packages.txt" || exit 2
+    python3 - "$work/selected-packages.txt" "$ROOT/.github/integration-shard-weights.txt" "$work/shard-plan.tsv" "$work/execution-plan.tsv" "$DEFAULT_WEIGHT" <<'PYTWELVE' || exit 2
+import collections, pathlib, re, sys
+selected_file, weights_file, owner_file, execution_file = map(pathlib.Path, sys.argv[1:5])
+default_weight = int(sys.argv[5])
+selected = selected_file.read_text().splitlines()
+ab = "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
+pg = "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+migration = "github.com/PRO-Robotech/kaname/internal/migrations"
+if len(selected) != len(set(selected)) or not {ab, pg, migration} <= set(selected):
+    raise SystemExit("12 частей требуют неповторный отбор с AB, PG и migrations")
+weights = {}
+for line in weights_file.read_text().splitlines():
+    if not line.strip() or line.lstrip().startswith("#"):
+        continue
+    fields = line.split()
+    if len(fields) != 2 or not fields[0].isdigit() or fields[1] in weights or fields[1] not in selected:
+        raise SystemExit("некорректная или беспредметная строка весов")
+    weights[fields[1]] = int(fields[0])
+ab_core = [
+    "TestFullBindListener_CoverageRequiresScopedCreate",
+    "TestFullBind_FB01_CoverageNeedsSeparateCreateBinding",
+    "TestFullBind_FB02_OneMissingVerbPreventsWholeGrant",
+    "TestFullBind_FB03_CoverageUsesTheUnionOfActiveRoles",
+    "TestFullBind_FB04_BindNamesTheGrantedRole",
+    "TestFullBind_FB05_BindBelongsToTheActingSubject",
+    "TestFullBind_FB06_BindKeepsTheAccountAnchor",
+    "TestFullBind_FB07_CoverageKeepsTheProjectAnchor",
+    "TestFullBind_FB08_EveryNamedTargetNeedsCoverage",
+    "TestFullBind_FB09_CurrentObjectsDoNotCoverTheWholeScope",
+    "TestFullBind_FB10_ResourceNamesAreAuthorityCoordinates",
+    "TestFullBind_FB11_LabelImplicationCoversTheProposedRule",
+    "TestFullBind_FB12_FiniteVerbsDoNotCoverTheSymbolicWildcard",
+    "TestFullBind_FB13_ChildrenEffectCannotDisappearFromCoverage",
+    "TestFullBind_FB14_CreatorIdentityIsNotRenamedToRecipient",
+    "TestFullBind_FB15_CreateUnusedRoleRequiresDefinitionCoverage",
+    "TestFullBind_FB16_UpdateUnusedRoleRequiresDefinitionCoverage",
+    "TestFullBind_FB17_UsedAccountRoleNeedsEveryBindingScopeOnly",
+    "TestFullBind_FB18_BindDoesNotAuthorizeUncoveredRoleRules",
+    "TestFullBind_FB19_MetadataDoesNotRequireRulesCoverage",
+    "TestFullBind_FB20_RulesUpdateChecksActualResourceVersion",
+    "TestFullBind_FB22_ForeignAndMissingMemberHaveTheSameReferenceRefusal",
+    "TestFullBind_FB23_DelegatedAxesWithoutUseCoverage",
+    "TestFullBind_FB24_DelegationRechecksSavedCreator",
+    "TestFullBind_FB25a_DelegationCreatePreservesActorGate",
+    "TestFullBind_FB25b_DelegationUpdatePreservesActorGate",
+    "TestFullBind_FB25c_DelegationUpdatePreservesSavedCreatorGate",
+    "TestFullBind_FB26_GrantAndSourceRevokeSerialize",
+    "TestFullBind_FB27_RoleExpansionAndNewScopeBindingSerialize",
+    "TestFullBind_FB28_GroupAdditionAndBindingSerialize",
+    "TestFullBind_FB29_BackendOutageIsUnavailableAndCannotGrant",
+    "TestFullBind_FB30_UnknownCustomImplicationNeedsCoverageOrKnownBind",
+    "TestFullBind_FB32_BindRuleNeedsFiniteRoleIDsNotLabels",
+    "TestFullBind_FB33a_OrdinaryAuthorityWithdrawalKeepsOldBindings",
+    "TestFullBind_FB33b_CreatorWithdrawalKeepsDelegatedBindingsUntilExplicitRevoke",
+    "TestFullBind_FB34_AllDirectSARecipientsAreAtomicAndCreatorSpecific",
+    "TestFullBind_GroupAdditionPreparedCommandPreservesRepeatedEffects",
+    "TestFullBind_GroupAdditionPreparedCommandRefusesForeignBeforeRowLockRelease",
+    "TestGrantDelegation_GDU03_NarrowingRejected",
+    "TestGrantDelegation_GDU04_EmptySelectedAxisRejected",
+    "TestGrantDelegation_GDU06_WholeFinalComposition",
+    "TestGrantDelegation_GDU07_MaskIdentityAndAliases",
+    "TestGrantDelegation_GDU08_ActorAuthorityFirst"
+]
+pg_heavy = [
+    "TestFullProtocolReconcileDeltaMeasurements",
+    "TestSubjectFilterPlan",
+    "TestNativeDeleteExpiry10000_OriginalPrimaryConverges",
+    "TestBindingWithdrawalLastPageRollbackAndHeldFold",
+    "TestInviteDecisionWaitsBeforeFinalClock",
+    "TestBindingExpiryChildPreflightLastPageCancellation",
+    "TestClusterAdminFinalDecisionExpiryAfterActualMutationWait",
+    "TestBindingStageLegacyLatePageAndMovedSourceRestageAtomically",
+    "TestFullProtocolCheckerForeignPopulationMeasurements",
+    "TestBindingWithdrawalRestagesActualLastPageAndCancellationIsAtomic",
+    "TestGrantDelegationStagedRevokeLastPageAtomicRollback",
+    "TestFullProtocolPublicThroughputMeasurements",
+    "TestGrantDelegationNativeUpdateLateExpiryAfterRowWait"
+]
+pg_expiry = [
+    "TestBindingMetadataMutationPreflightWait",
+    "TestNativeMutationMaterializedTierAndVerbSources",
+    "TestBindingStageActualEntryPointsCoverLastPageAndStrict",
+    "TestModuleWithdrawalCompletesUnderTenantRolesAtScale",
+    "TestGrantDelegationStagedRevokeIncludesPendingLastPage",
+    "TestSevenCRUDGrantExpiresDuringActualParentAndJournalWaitBeforeFinalClock",
+    "TestFullMetadataSameKeyUncommittedInsertExpiresBeforeRename",
+    "TestGrantDelegationCreateMutationPreflightWait",
+    "TestInviteDecisionWholeAttemptRollbackAndCancellation",
+    "TestLiveAdministrativeAlternativeHolderAfterLedgerPage",
+    "TestLiveAdministrativeRoleUpdateReferenceObjectTier",
+    "TestBindingStageExpiryAndWitnessAfterEveryLegacyLockWait",
+    "TestLiveAdministrativeLateNativeFactPageAndClosedWriter",
+    "TestBindingCapturedGroupWholeAttemptBudgetAndActualSQLFamilies",
+    "TestPolicyCarrierPublicCreateWholeAttemptOutcomes",
+    "TestOAuthIssuanceOverlappingUserDeletion",
+    "TestNativeDeleteBatchPreservesRowwisePolicyMetadataAndBoundsDeleteWork",
+    "TestIntegration_ActiveProducerWithoutAWayInIsRefused",
+    "TestDelegatedBindingDecisionCreatorExpiryAfterActualGDWait",
+    "TestBindingCreateRecipientPreflightWait",
+    "TestInviteDecisionTypedOwnerAndServiceAccountOptional",
+    "TestIntegration_R914_MembersOfGroupsIsBoundedAndNamesTheTruncation",
+    "TestGrantDelegationOrdinaryCreateRechecksLiveAuthorityInsideParticipant",
+    "TestSevenCRUDPrivateCommandCannotCommitOmittedPartialReplayedOrWrongEffects",
+    "TestFullMetadataRenameWaitExpiresBeforeOldAuthorityDecision",
+    "TestInstallationSeedProductionEntriesPreparedStrict",
+    "TestInviteDecisionAdmissionIdentityRace",
+    "TestInviteDecisionFullContractPublicDoors",
+    "TestBindingWithdrawalExpiryAfterActualFoldWaitAndLiveTwin",
+    "TestBindingMirrorLocalityFullCurrentRetainedAndDeleted",
+    "TestFullSevenCRUDAccountDeletePublic",
+    "TestFullSevenCRUDAccountDeletePreservesForeignPending",
+    "TestGroup_RequireMemberOfGroupAccount_HoldsTheRowUntilCommit",
+    "TestProjectCreatePublicEditorGrantExpiresAfterActualPreclockWait"
+]
+fb21 = ["TestFullBind_FB21_GroupAdditionChecksTheLastBindingPage"]
+fb31 = ["TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant"]
+def pattern(names):
+    if not names or len(names) != len(set(names)) or any(re.fullmatch(r"Test[A-Za-z0-9_]+", n) is None for n in names):
+        raise SystemExit("непустые точные имена TOP обязательны")
+    return "^(" + "|".join(sorted(names)) + ")$"
+for groups in ((ab_core, fb21, fb31), (pg_heavy, pg_expiry)):
+    union = [name for group in groups for name in group]
+    if len(union) != len(set(union)):
+        raise SystemExit("части пересекаются по TOP")
+ab_union = pattern(ab_core + fb21 + fb31)
+pg_union = pattern(pg_heavy + pg_expiry)
+# CI 44217406803: AB core 928.69, FB21 786.35, PG heavy 659.82 с — PASS TOP.
+# PG expiry: 351.71 с других PASS TOP + незавершённый реальный TTL, резерв 700.
+# FB31 480 и оба дополнения 1200 — ПЛАНОВЫЕ резервы, не замер успеха.
+# 255 AB и 620 PG TOP ещё не наблюдались; их цена неизвестна, не равна нулю.
+parts = {
+    0: (ab, "run", pattern(ab_core), 929),
+    1: (ab, "run", pattern(fb21), 787),
+    3: (ab, "run", pattern(fb31), 480),
+    4: (ab, "skip", ab_union, 1200),
+    5: (pg, "run", pattern(pg_heavy), 660),
+    6: (pg, "run", pattern(pg_expiry), 700),
+    7: (pg, "skip", pg_union, 1200),
+}
+loads = {index: 0 for index in range(12)}
+for index, (_, _, _, reserve) in parts.items():
+    loads[index] = reserve
+loads[2] = weights.get(migration, default_weight)
+# Ведомость владельцев сохраняет исторический вес пакета; для специальных
+# частей LPT использует только резервы выше, а не повторно этот полный вес.
+owners = [(0, weights.get(ab, default_weight), ab), (5, weights.get(pg, default_weight), pg), (2, loads[2], migration)]
+for package in sorted(set(selected) - {ab, pg, migration}, key=lambda p: (-weights.get(p, default_weight), p)):
+    if package not in weights:
+        print(f"вес не замерен, взят по умолчанию {default_weight} с: {package}", file=sys.stderr)
+    index = min((i for i in range(12) if i != 2), key=lambda i: (loads[i], i))
+    weight = weights.get(package, default_weight)
+    owners.append((index, weight, package))
+    loads[index] += weight
+rows = [(index, package, "all", "-") for index, _, package in owners if package not in (ab, pg)]
+rows += [(index, package, mode, regex) for index, (package, mode, regex, _) in parts.items()]
+# Независимая проверка 12 частей: владельцы и единицы исполнения различаются.
+if collections.Counter(package for _, _, package in owners) != collections.Counter(selected):
+    raise SystemExit("потерян или повторён владелец пакета")
+if {package: index for index, _, package in owners}.get(ab) != 0 or {package: index for index, _, package in owners}.get(pg) != 5:
+    raise SystemExit("неверный исходный владелец AB или PG")
+if any(not 0 <= index < 12 for index, _, _ in owners):
+    raise SystemExit("неизвестный шард владельца")
+expected = [(index, package, "all", "-") for index, _, package in owners if package not in (ab, pg)]
+expected += [(index, package, mode, regex) for index, (package, mode, regex, _) in parts.items()]
+if collections.Counter(rows) != collections.Counter(expected) or len(rows) != len(selected) + 5:
+    raise SystemExit("потеря, повтор или чужой фильтр единицы исполнения")
+if [(index, package, mode, regex) for index, package, mode, regex in rows if index == 2] != [(2, migration, "all", "-")]:
+    raise SystemExit("migrations должен занимать index 2 без других пакетов")
+if any(not any(index == i for index, _, _, _ in rows) for i in range(12)):
+    raise SystemExit("пустой шард исполнения")
+owner_file.write_text("".join(f"{i}\t{weight}\t{package}\n" for i, weight, package in owners))
+execution_file.write_text("".join("\t".join(map(str, row)) + "\n" for row in rows))
+for index in range(12):
+    print(f"шард {index}: плановый вес {loads[index]} с; неизвестный хвост не принят", file=sys.stderr)
+PYTWELVE
+    execution_plan="$work/execution-plan.tsv"
+    if [ -n "$evidence" ]; then
+        cp "$work/shard-plan.tsv" "$evidence/shard-plan.tsv" || exit 2
+        cp "$execution_plan" "$evidence/execution-plan.tsv" || exit 2
+    fi
+    if [ "$plan_only" -eq 1 ]; then
+        cat "$execution_plan"
+        exit 0
+    fi
+    pkgs="$(awk -F'\t' -v s="$shard_index" '$1 == s && $3 == "all" {print $2}' "$execution_plan")"
+    partition_units_file="$work/partition-units.tsv"
+    awk -F'\t' -v s="$shard_index" '$1 == s && $3 != "all"' "$execution_plan" > "$partition_units_file"
+elif [ -n "$shard_total" ]; then
     weights="$ROOT/.github/integration-shard-weights.txt"
     if [ ! -r "$weights" ]; then
         echo "ведомость весов $weights не прочитана — раскладка не из чего, это отказ" >&2
@@ -389,7 +581,7 @@ PYPLAN
 fi
 
 if [ -n "$evidence" ]; then
-    { [ -z "$pkgs" ] || printf '%s\n' "$pkgs"; [ -z "$partition_mode" ] || printf '%s\n' "$partition_package"; } > "$evidence/executed-packages.txt" || exit 2
+    { [ -z "$pkgs" ] || printf '%s\n' "$pkgs"; [ -z "$partition_mode" ] || printf '%s\n' "$partition_package"; [ -z "$partition_units_file" ] || awk -F'\t' '{print $2}' "$partition_units_file"; } > "$evidence/executed-packages.txt" || exit 2
     # Последовательная склейка команд; их первичные коды лежат отдельно.
     : > "$evidence/test.json" || exit 2
     : > "$evidence/go-test.log" || exit 2
@@ -398,19 +590,20 @@ fi
 # Один вызов получает собственные сырой поток, текст и первичный код Go.
 # Обычный непартиционированный прогон сохраняет прежние имена свидетельств.
 run_tests() {
-    local packages="$1" mode="$2" label="$3" raw log rc out decode_rc verdict_rc
+    local packages="$1" mode="$2" label="$3" pattern="${4:-$partition_pattern}" part_package="${5:-$partition_package}"
+    local raw log rc out decode_rc verdict_rc
     local destination="${evidence:-$work}" filter=()
     command_red=0
-    [ -z "$mode" ] || filter=("-$mode" "$partition_pattern")
+    [ -z "$mode" ] || filter=("-$mode" "$pattern")
     raw="$destination/$label.json"
     log="$destination/$label.log"
-    if [ -n "$evidence" ] || [ -n "$partition_mode" ]; then
+    if [ -n "$evidence" ] || [ -n "$partition_mode" ] || [ -n "$partition_units_file" ]; then
         rc=0
         # shellcheck disable=SC2086
         go test -tags=integration -race -count=1 -timeout "$TIMEOUT" -p 1 -json "${filter[@]}" $packages > "$raw" 2>&1 || rc=$?
         printf '%s\n' "$rc" > "$destination/$label-exit-code.txt" || return 2
         decode_rc=0
-        python3 - "$raw" "$log" "$mode" "$partition_package" "$partition_pattern" <<'PYDECODE' || decode_rc=$?
+        python3 - "$raw" "$log" "$mode" "$part_package" "$pattern" <<'PYDECODE' || decode_rc=$?
 import collections, json, pathlib, re, sys
 raw, log, mode, package, pattern = sys.argv[1:]
 bad = False
@@ -422,7 +615,7 @@ with pathlib.Path(raw).open() as source, pathlib.Path(log).open("w") as target:
         except ValueError:
             target.write(line)
             # Обычная диагностика Go законна; оборванный JSON — потерянное событие.
-            if line.lstrip().startswith("{"):
+            if mode or line.lstrip().startswith("{"):
                 bad = True
             continue
         if not isinstance(event, dict):
@@ -431,6 +624,8 @@ with pathlib.Path(raw).open() as source, pathlib.Path(log).open("w") as target:
         text = event.get("Output")
         if isinstance(text, str):
             target.write(text)
+        if mode and event.get("Package") != package:
+            bad = True
         name = event.get("Test", "")
         action = event.get("Action")
         if mode and event.get("Package") == package and name and "/" not in name:
@@ -444,10 +639,12 @@ if mode:
             bad = True
     elif not any(actions == ["run", "pass"] for actions in tops.values()):
         bad = True
+    if any(actions not in (["run", "pass"], ["run", "skip"]) for actions in tops.values()):
+        bad = True
     if any(bool(re.fullmatch(pattern, name)) != (mode == "run") for name in tops):
         bad = True
     if bad:
-        print("часть access_binding не подтверждена именованными TOP", file=sys.stderr)
+        print("часть пакета не подтверждена именованными TOP", file=sys.stderr)
 sys.exit(2 if bad else 0)
 PYDECODE
         if [ -n "$evidence" ]; then
@@ -500,10 +697,20 @@ if [ -n "$partition_mode" ]; then
         result="$part_rc"
     fi
 fi
+if [ -n "$partition_units_file" ]; then
+    while IFS=$'\t' read -r index package mode regex; do
+        part_rc=0
+        run_tests "$package" "$mode" "go-test-partition-$index" "$regex" "$package" || part_rc=$?
+        if [ "$result" -eq 0 ] || { [ "$result_red" -eq 0 ] && [ "$command_red" -eq 1 ]; }; then
+            result="$part_rc"
+            result_red="$command_red"
+        fi
+    done < "$partition_units_file"
+fi
 if [ -n "$evidence" ]; then
     printf '%s\n' "$result" > "$evidence/runner-exit-code.txt" || exit 2
     # Обратная совместимость только там, где действительно был один вызов Go.
-    if [ -z "$partition_mode" ]; then
+    if [ -z "$partition_mode" ] && [ -z "$partition_units_file" ]; then
         cp "$evidence/go-test-packages-exit-code.txt" "$evidence/go-test-exit-code.txt" || exit 2
     fi
 fi

@@ -5,6 +5,7 @@ package pg_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
@@ -143,7 +145,11 @@ func legacyAdmissionWaitProbe(t *testing.T, pool, runtime *pgxpool.Pool, trace *
 		require.NoError(t, personRowLockAttempt(t, ctx, pool, string(uid), "UPDATE"))
 	}
 	if cancelWait {
+		require.NoError(t, ctx.Err(), "родительский предел не заменяет отмену запроса")
+		require.NoError(t, waiting.Err(), "запрос должен оставаться живым до явной отмены")
 		stop()
+		require.ErrorIs(t, waiting.Err(), context.Canceled)
+		require.NoError(t, ctx.Err(), "отменён только запрос, родительский контекст жив")
 	} else {
 		require.NoError(t, holder.Rollback(ctx))
 	}
@@ -152,7 +158,13 @@ func legacyAdmissionWaitProbe(t *testing.T, pool, runtime *pgxpool.Pool, trace *
 		joined = true
 		require.NoError(t, got.rollback)
 		if cancelWait {
-			require.ErrorIs(t, got.opening, context.Canceled)
+			require.NoError(t, ctx.Err(), "opener должен завершиться до родительского предела")
+			// coredb отменяет оператор на сервере; repo переводит 57014 в ErrInternal.
+			// Запасной путь через socket deadline сохраняет context.Canceled.
+			if !errors.Is(got.opening, context.Canceled) {
+				require.ErrorIs(t, got.opening, iamerr.ErrInternal)
+				require.EqualError(t, got.opening, "internal: database error: sqlstate 57014")
+			}
 		} else {
 			require.NoError(t, got.opening)
 		}
