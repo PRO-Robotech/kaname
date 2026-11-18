@@ -82,8 +82,8 @@ const (
 // digitsModulus — 10^Digits.
 const digitsModulus = 1000000
 
-// secretRedacted — заглушка на всяком общем пути вывода секрета.
-const secretRedacted = "[redacted totp secret]" // #nosec G101 -- текст заглушки, которым секрет ЗАМЕНЯЕТСЯ в выводе; самим секретом не является
+// displayRedaction — заглушка на всяком общем пути вывода секрета.
+const displayRedaction = "[redacted totp secret]"
 
 // Secret — секрет кода по времени в памяти процесса. Не печатается, не
 // сериализуется; клиенту уходит ответом заведения через `Base32`.
@@ -117,10 +117,10 @@ func (s Secret) Base32() string {
 }
 
 // String — заглушка.
-func (s Secret) String() string { return secretRedacted }
+func (s Secret) String() string { return displayRedaction }
 
 // GoString — заглушка и для `%#v`.
-func (s Secret) GoString() string { return "totpverify.Secret{" + secretRedacted + "}" }
+func (s Secret) GoString() string { return "totpverify.Secret{" + displayRedaction + "}" }
 
 // Format — заглушка на любом глаголе форматирования.
 func (s Secret) Format(f fmt.State, verb rune) {
@@ -128,11 +128,11 @@ func (s Secret) Format(f fmt.State, verb rune) {
 		_, _ = io.WriteString(f, s.GoString())
 		return
 	}
-	_, _ = io.WriteString(f, secretRedacted)
+	_, _ = io.WriteString(f, displayRedaction)
 }
 
 // LogValue — заглушка для журнала.
-func (s Secret) LogValue() slog.Value { return slog.StringValue(secretRedacted) }
+func (s Secret) LogValue() slog.Value { return slog.StringValue(displayRedaction) }
 
 // MarshalJSON — отказ.
 func (s Secret) MarshalJSON() ([]byte, error) {

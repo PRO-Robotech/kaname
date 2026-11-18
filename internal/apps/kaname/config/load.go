@@ -18,6 +18,12 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Имена настройки и переменной окружения принадлежат контракту оператора.
+const (
+	registryServiceSetting = "api-server.registry-token.service"
+	registryServiceEnv     = "KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE"
+)
+
 // Load reads configuration from a YAML file (if path != "") + applies
 // ENV-overrides.
 //
@@ -125,21 +131,20 @@ func load(path string) (Config, *viper.Viper, error) {
 	// ключа конфигурации в ИМЯ переменной окружения, а сама привязка значения НЕ
 	// назначает (BindEnv регистрирует ключ, умолчания не заводя, — см. выше). Ключ
 	// переименованию не подлежит: это контракт с оператором.
-	// #nosec G101 -- ключи и имена переменных окружения, ни одного значения.
 	for key, env := range map[string]string{
 		"manifests.dir":           "KANAME_MANIFESTS__DIR",
 		"manifests.required":      "KANAME_MANIFESTS__REQUIRED",
 		"manifests.compose-model": "KANAME_MANIFESTS__COMPOSE_MODEL",
 		"manifests.admission":     "KANAME_MANIFESTS__ADMISSION",
 
-		"authn.domain":                      "KANAME_AUTHN__DOMAIN",
-		"authn.self-service-freshness":      "KANAME_AUTHN__SELF_SERVICE_FRESHNESS",
-		"authn.trusted-forwarder-sans":      "KANAME_AUTHN__TRUSTED_FORWARDER_SANS",
-		"authn.trust-domain":                "KANAME_AUTHN__TRUST_DOMAIN",
-		"authn.module-identities":           "KANAME_AUTHN__MODULE_IDENTITIES",
-		"authn.client-issuers":              "KANAME_AUTHN__CLIENT_ISSUERS",
-		"authn.trust-any-forwarder":         "KANAME_AUTHN__TRUST_ANY_FORWARDER",
-		"api-server.registry-token.service": "KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE",
+		"authn.domain":                 "KANAME_AUTHN__DOMAIN",
+		"authn.self-service-freshness": "KANAME_AUTHN__SELF_SERVICE_FRESHNESS",
+		"authn.trusted-forwarder-sans": "KANAME_AUTHN__TRUSTED_FORWARDER_SANS",
+		"authn.trust-domain":           "KANAME_AUTHN__TRUST_DOMAIN",
+		"authn.module-identities":      "KANAME_AUTHN__MODULE_IDENTITIES",
+		"authn.client-issuers":         "KANAME_AUTHN__CLIENT_ISSUERS",
+		"authn.trust-any-forwarder":    "KANAME_AUTHN__TRUST_ANY_FORWARDER",
+		registryServiceSetting:         registryServiceEnv,
 	} {
 		if err := v.BindEnv(key, env); err != nil {
 			return Config{}, nil, fmt.Errorf("bind %s env: %w", key, err)
