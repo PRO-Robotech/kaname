@@ -7,6 +7,7 @@ package check_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,7 +64,7 @@ for package in (a for a in args if a in packages):
     emit("start")
     names = ["TestComplement", "ExampleComplement", "FuzzComplement"]
     if os.environ.get("FAKE_TWELVE") == "1":
-        names += ["TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit"]
+        names += ["TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit", "TestRoleRightsStayNamed_FutureAfterSplit", "TestGrantDelegation_FutureAfterSplit"]
     if mode == "run":
         names = args[args.index("-run") + 1][2:-2].split("|")
     defect = os.environ.get("FAKE_DEFECT", "")
@@ -469,6 +470,20 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 			if fields[0] == strconv.Itoa(shard) {
 				units++
 			}
+			// Отпечатки фиксируют полный reviewed exact set, а не разрешают весь prefix.
+			if fields[1] == shardAccessBinding && (fields[0] == "1" || fields[0] == "3") {
+				require.Equal(t, "run", fields[2])
+				wantCount, wantHash := 21, "e382e381f8274d0083b49fc83a6393c1d1430478ca66a3cae19d924f29aa50fd"
+				if fields[0] == "3" {
+					wantCount, wantHash = 65, "dda2da13c8d30fb257c96d884f25b945787e8885cb3648c87252b5b94daac310"
+				}
+				require.Len(t, strings.Split(fields[3][2:len(fields[3])-2], "|"), wantCount)
+				require.Equal(t, wantHash, fmt.Sprintf("%x", sha256.Sum256([]byte(fields[3]))), "точный состав перенесённой части")
+			}
+			if fields[1] == shardAccessBinding && fields[0] == "4" {
+				require.Equal(t, "skip", fields[2])
+				require.Regexp(t, fields[3], "TestRoleRights_S1P8_ActualGrantReadPlans", "дополнение не повторяет перенесённый TOP")
+			}
 			if fields[0] == "2" || fields[1] == shardMigrations {
 				require.Equal(t, []string{"2", shardMigrations, "all", "-"}, fields)
 			}
@@ -486,7 +501,11 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 		}
 		if shard != 2 && shard < 8 {
 			raw := shardEvidence(t, o, fmt.Sprintf("go-test-partition-%d.json", shard))
-			for _, future := range []string{"TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit"} {
+			if shard == 3 {
+				require.Contains(t, raw, "TestRoleRights_S1P8_ActualGrantReadPlans")
+				require.Contains(t, raw, "TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant")
+			}
+			for _, future := range []string{"TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit", "TestRoleRightsStayNamed_FutureAfterSplit", "TestGrantDelegation_FutureAfterSplit"} {
 				if shard == 4 || shard == 7 {
 					require.Contains(t, raw, future)
 				} else {
@@ -503,7 +522,7 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 	for _, pkg := range []string{shardAccessBinding, shardPG} {
 		var selectors []*regexp.Regexp
 		var modes []string
-		candidates := []string{"TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit"}
+		candidates := []string{"TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit", "TestRoleRights_S1P8_ActualGrantReadPlans", "TestRoleRights_S1P8_ActualGrantReadPlansFuture", "TestRoleRightsStayNamed_FutureAfterSplit", "TestGrantDelegation_FutureAfterSplit"}
 		for _, row := range strings.Split(strings.TrimSpace(execution), "\n") {
 			fields := strings.Split(row, "\t")
 			if fields[1] != pkg {
@@ -533,7 +552,7 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 }
 
 func TestRunIntegrationShardsTwelveNamedPartsFailClosed(t *testing.T) {
-	for _, shard := range []int{0, 5} {
+	for _, shard := range []int{0, 1, 3, 5} {
 		for _, defect := range []string{"run-empty", "run-missing", "run-renamed", "run-skipped", "run-one-skipped", "run-duplicate", "run-nonjson", "run-wrong-package"} {
 			t.Run(fmt.Sprintf("%d/%s", shard, defect), func(t *testing.T) {
 				o := runShardFixture(t, runIntegrationSource(t), fmt.Sprintf("%d/12", shard), false, false,

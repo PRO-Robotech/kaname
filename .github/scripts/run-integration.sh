@@ -358,27 +358,126 @@ pg_expiry = [
     "TestGroup_RequireMemberOfGroupAccount_HoldsTheRowUntilCommit",
     "TestProjectCreatePublicEditorGrantExpiresAfterActualPreclockWait"
 ]
-fb21 = ["TestFullBind_FB21_GroupAdditionChecksTheLastBindingPage"]
-fb31 = ["TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant"]
+# Переносим только завершённые TOP из c39 part5 / artifact14396800440.
+# Первичный go-test-partition-4.json SHA256:
+# 641b52e2d050be7562039d954f6805383c6f29cdeb4f4510c40e25d506bb60e9.
+# Это точные20 RoleRightsStayNamed и63 GrantDelegation, не prefix selectors:
+# будущие имена этих семейств остаются в дополнении.
+ab_named_rights = [
+    "TestRoleRightsStayNamed_AddMemberAndNewScopeGrantSerialize",
+    "TestRoleRightsStayNamed_ESC01_DeleteOnProjectGivesNoGrantAuthority",
+    "TestRoleRightsStayNamed_ESC02_DeleteOnAccountGivesNothingBeyondDeletion",
+    "TestRoleRightsStayNamed_ESC03_ProjectTierIsNotDerivedFromDeletion",
+    "TestRoleRightsStayNamed_ESC04_DeletionOnALeafOpensNoChange",
+    "TestRoleRightsStayNamed_ESC05_DeletionStaysDeletion",
+    "TestRoleRightsStayNamed_ESC06_WhoMayDeleteAgreesWithCheck",
+    "TestRoleRightsStayNamed_ESC10_RulesEditNeedsGrantAuthorityOnItsScope",
+    "TestRoleRightsStayNamed_ESC11_NoActiveBindingsNoGrantAuthorityAsked",
+    "TestRoleRightsStayNamed_ESC12_NonRulesEditNeedsNoGrantAuthority",
+    "TestRoleRightsStayNamed_ESC13_GrantAuthorityOnEveryScope",
+    "TestRoleRightsStayNamed_ESC14_RelationStoreOutageRefusesTheEdit",
+    "TestRoleRightsStayNamed_ESC20_AddMemberNeedsGrantAuthorityOnTheGroupScope",
+    "TestRoleRightsStayNamed_ESC21_GroupWithoutBindingsNeedsNoGrantAuthority",
+    "TestRoleRightsStayNamed_ESC22_GrantAuthorityOnEveryGroupScope",
+    "TestRoleRightsStayNamed_ESC23_MemberOnlyFromTheGroupAccount",
+    "TestRoleRightsStayNamed_ESC24_RemoveMemberNeedsNoGrantAuthority",
+    "TestRoleRightsStayNamed_ESC25_RelationStoreOutageRefusesTheAdd",
+    "TestRoleRightsStayNamed_ESC30_PriorDeleteTierConvergesWithoutRevocation",
+    "TestRoleRightsStayNamed_RulesEditAndNewScopeGrantSerialize"
+]
+ab_delegations = [
+    "TestGrantDelegation_CE01_GrantAuthorityWithoutVDeleteCannotRevokeOrDelete",
+    "TestGrantDelegation_CE02_VDeleteQuestionOutageIsUnavailable",
+    "TestGrantDelegation_CE03_DelegatePathStaysOutOfExpandAccessAndListByRole",
+    "TestGrantDelegation_CE05_EverySubjectOfAMultiSubjectGrantIsChecked",
+    "TestGrantDelegation_CE06_DelegatorAuthorityOutageIsUnavailable",
+    "TestGrantDelegation_CE09_GrantWriteRechecksTheCapturedDelegation",
+    "TestGrantDelegation_CE09_GrantWriteWaitsForAnUncommittedRevoke",
+    "TestGrantDelegation_CE10_DelayedProjectionKeepsThePositiveControl",
+    "TestGrantDelegation_CE10_DelegationRevokeRemovesEmittedFacts",
+    "TestGrantDelegation_CE13_AccountDeleteOutcomeIsUnchangedByADelegation",
+    "TestGrantDelegation_CE15_ListCarriesTheDelegationReference",
+    "TestGrantDelegation_CE16_DeleteAuditCarriesTheDelegationReference",
+    "TestGrantDelegation_D4_GroupHoldingTheDelegateIsRefused",
+    "TestGrantDelegation_DoD9_DelegationReadsGoByIndex",
+    "TestGrantDelegation_GD01_AccountOwnerCreatesADelegation",
+    "TestGrantDelegation_GD02_AccountAdminCreatesADelegation",
+    "TestGrantDelegation_GD03_NoGrantAuthorityNoDelegation",
+    "TestGrantDelegation_GD04_RequestFormIsCheckedSynchronously",
+    "TestGrantDelegation_GD05_FormBeforeAuthorityCompositionAfter",
+    "TestGrantDelegation_GD06_RolesAndTypesOfOneModuleNotIAM",
+    "TestGrantDelegation_GD07_OneActiveDelegationPerAccountAndDelegate",
+    "TestGrantDelegation_GD10_DelegateGrantsAModuleRoleOnAModuleObject",
+    "TestGrantDelegation_GD11_GrantBeyondTheDelegationIsRefused",
+    "TestGrantDelegation_GD12_TargetTypeAxis",
+    "TestGrantDelegation_GD13_DelegateGrantsToAnonymous",
+    "TestGrantDelegation_GD14_GrantOnSeveralObjects",
+    "TestGrantDelegation_GD15_DelegationGivesNoDataAccess",
+    "TestGrantDelegation_GD16_PersonAndGroupOnlyFromTheDelegationAccount",
+    "TestGrantDelegation_GD20_DelegatorLostAuthorityDelegateNoLongerGrants",
+    "TestGrantDelegation_GD21_DelegateDoesNotDelegateFurther",
+    "TestGrantDelegation_GD22_DelegateDoesNotUpdateAGrant",
+    "TestGrantDelegation_GD25_DelegateDoesNotTouchProjectsGroupsRolesAccounts",
+    "TestGrantDelegation_GD26_DelegationGivesNoModelRelations",
+    "TestGrantDelegation_GD30_DelegateRevokesOnlyWhatItsDelegationGranted",
+    "TestGrantDelegation_GD31_DelegateCleansUpAfterDelegatorLostAuthority",
+    "TestGrantDelegation_GD32_ListenerDoorPassesRevokeAndDeleteButNotUpdate",
+    "TestGrantDelegation_GD40_RevokingTheDelegationRevokesWhatItGranted",
+    "TestGrantDelegation_GD41_DeletionProtectionDoesNotStopDelegationRevoke",
+    "TestGrantDelegation_GD42_DelegateCannotGrantAfterRevoke",
+    "TestGrantDelegation_GD43_RepeatedRevokeAndRevokeOfTheAbsent",
+    "TestGrantDelegation_GD44_WhoMayRevoke",
+    "TestGrantDelegation_GD45_DelegateAccountCannotBeDeletedWhileDelegationActive",
+    "TestGrantDelegation_GD45_DeleteFKBackstopRejectsLateDelegation",
+    "TestGrantDelegation_GD45_DeleteRacingAnInsertNamesTheDelegation",
+    "TestGrantDelegation_GD45_KeyRefusesADelegationToAMissingAccountWithItsText",
+    "TestGrantDelegation_GD50_ConcurrentCreatesOfOnePair",
+    "TestGrantDelegation_GD51_GrantDuringDelegationRevoke",
+    "TestGrantDelegation_GD60_Get",
+    "TestGrantDelegation_GD61_ListByAccount",
+    "TestGrantDelegation_GD62_GrantCarriesTheDelegationReference",
+    "TestGrantDelegation_GD70_EveryStepIsAudited",
+    "TestGrantDelegation_GDU01_SingleAxisEffectiveAccess",
+    "TestGrantDelegation_GDU02_AllAxesAtomic",
+    "TestGrantDelegation_GDU05_SetsBoundsAndNoop",
+    "TestGrantDelegation_GDU09_PublicDoorAndInvalidID",
+    "TestGrantDelegation_GDU10_OriginalCreatorRechecked",
+    "TestGrantDelegation_GDU11_RevokedAndExpiredBindings",
+    "TestGrantDelegation_GDU12_FailureAtomicity",
+    "TestGrantDelegation_GDU13_ConcurrentSameAxis",
+    "TestGrantDelegation_GDU14_ConcurrentDisjointAndIdentical",
+    "TestGrantDelegation_GDU15_GrantAndRevokeOrdering",
+    "TestGrantDelegation_GDU16_AuditExactlyOnceOnExpansion",
+    "TestGrantDelegation_GDU17_ReplacementWithExplicitGap"
+]
+fb21_and_rights = ["TestFullBind_FB21_GroupAdditionChecksTheLastBindingPage"] + ab_named_rights
+ab_clock_and_plans = [
+    "TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant",
+    "TestRoleRights_S1P8_ActualGrantReadPlans"
+] + ab_delegations
 def pattern(names):
     if not names or len(names) != len(set(names)) or any(re.fullmatch(r"Test[A-Za-z0-9_]+", n) is None for n in names):
         raise SystemExit("непустые точные имена TOP обязательны")
     return "^(" + "|".join(sorted(names)) + ")$"
-for groups in ((ab_core, fb21, fb31), (pg_heavy, pg_expiry)):
+for groups in ((ab_core, fb21_and_rights, ab_clock_and_plans), (pg_heavy, pg_expiry)):
     union = [name for group in groups for name in group]
     if len(union) != len(set(union)):
         raise SystemExit("части пересекаются по TOP")
-ab_union = pattern(ab_core + fb21 + fb31)
+ab_union = pattern(ab_core + fb21_and_rights + ab_clock_and_plans)
 pg_union = pattern(pg_heavy + pg_expiry)
-# CI 44217406803: AB core 928.69, FB21 786.35, PG heavy 659.82 с — PASS TOP.
-# PG expiry: 351.71 с других PASS TOP + незавершённый реальный TTL, резерв 700.
-# FB31 480 и оба дополнения 1200 — ПЛАНОВЫЕ резервы, не замер успеха.
-# 255 AB и 620 PG TOP ещё не наблюдались; их цена неизвестна, не равна нулю.
+# Плановые резервы LPT ниже не являются временем успешного прогона частей.
+# c39: AB core1139.09 с завершился RED; FB21 package819.668 с PASS.
+# Переносимые20 TOP PASS =258.75 с,63 TOP PASS =622.72 с.
+# FB31 package325.426 с PASS; отдельный S1P8 =183.33 с.
+# Дополнение: прежний PASS prefix472.71 + tail139 PASS509.75 =982.46 с.
+# Tail150 на R4 завершился139 PASS/11 FAIL: успешная цена11 пока неизвестна.
+# Резервы1200/1300 оставляют AB отдельно от обычных пакетов;25m не меняется.
+# PG heavy659.82 с — прежние PASS TOP; expiry700 и complement1200 — резервы.
 parts = {
-    0: (ab, "run", pattern(ab_core), 929),
-    1: (ab, "run", pattern(fb21), 787),
-    3: (ab, "run", pattern(fb31), 480),
-    4: (ab, "skip", ab_union, 1200),
+    0: (ab, "run", pattern(ab_core), 1200),
+    1: (ab, "run", pattern(fb21_and_rights), 1200),
+    3: (ab, "run", pattern(ab_clock_and_plans), 1300),
+    4: (ab, "skip", ab_union, 1300),
     5: (pg, "run", pattern(pg_heavy), 660),
     6: (pg, "run", pattern(pg_expiry), 700),
     7: (pg, "skip", pg_union, 1200),
