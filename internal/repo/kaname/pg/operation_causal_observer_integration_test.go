@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -213,7 +214,7 @@ func operationCausalPool(t *testing.T, r protocolRig) (protocolRig, *operationCa
 	require.Nil(t, cfg.ConnConfig.Tracer, "нельзя скрывать существующий tracer")
 	o := &operationCausalObserver{workers: map[<-chan struct{}]string{}}
 	cfg.ConnConfig.Tracer = o
-	if os.Getenv("KANAME_GD_FUNCTION_COST_DIAGNOSTIC") == "1" {
+	if operationCostEnabled() {
 		// Только LOGIN собственной fixture; права владельца ему не передаются.
 		_, err := r.admin.Exec(r.ctx, "GRANT SET ON PARAMETER track_functions TO "+pgx.Identifier{cfg.ConnConfig.User}.Sanitize())
 		require.NoError(t, err)
@@ -222,6 +223,19 @@ func operationCausalPool(t *testing.T, r protocolRig) (protocolRig, *operationCa
 		}
 		cfg.ConnConfig.RuntimeParams["track_functions"] = "all"
 		o.functionCost = &operationFunctionCost{admin: r.admin}
+		if os.Getenv("KANAME_GD_SQL_COST_DIAGNOSTIC") == "1" {
+			var preload, computeID, adminTracking string
+			require.NoError(t, r.admin.QueryRow(r.ctx, "SELECT current_setting('shared_preload_libraries'),current_setting('compute_query_id'),current_setting('pg_stat_statements.track')").Scan(&preload, &computeID, &adminTracking))
+			require.Equal(t, "pg_stat_statements", preload, "нужна owned диагностическая копия pgtest")
+			require.Equal(t, "on", computeID)
+			require.Equal(t, "none", adminTracking, "наблюдатель не должен добавлять свой SQL в статистику")
+			_, err = r.admin.Exec(r.ctx, "CREATE SCHEMA gd_sql_cost_diagnostic; REVOKE ALL ON SCHEMA gd_sql_cost_diagnostic FROM PUBLIC; CREATE EXTENSION pg_stat_statements WITH SCHEMA gd_sql_cost_diagnostic")
+			require.NoError(t, err, "отсутствующий preload/extension не является нулевой стоимостью")
+			_, err = r.admin.Exec(r.ctx, "GRANT SET ON PARAMETER pg_stat_statements.track TO "+pgx.Identifier{cfg.ConnConfig.User}.Sanitize())
+			require.NoError(t, err)
+			cfg.ConnConfig.RuntimeParams["pg_stat_statements.track"] = "all"
+			o.functionCost.sql = &operationSQLCost{admin: r.admin}
+		}
 	}
 	r.runtime.Close()
 	pool, err := pgxpool.NewWithConfig(r.ctx, cfg)
@@ -235,6 +249,13 @@ func operationCausalPool(t *testing.T, r protocolRig) (protocolRig, *operationCa
 		require.Equal(t, cfg.ConnConfig.User, session)
 		require.Equal(t, "all", setting)
 		t.Logf("GD_FUNCTION_COST runtime_login=%s session_user=%s track_functions=%s", effective, session, setting)
+		if o.functionCost.sql != nil {
+			var tracking, version string
+			require.NoError(t, pool.QueryRow(r.ctx, "SELECT current_setting('pg_stat_statements.track')").Scan(&tracking))
+			require.Equal(t, "all", tracking)
+			require.NoError(t, r.admin.QueryRow(r.ctx, "SELECT extversion FROM pg_catalog.pg_extension WHERE extname='pg_stat_statements'").Scan(&version))
+			t.Logf("GD_SQL_COST mode=DIAGNOSTIC_NOT_PERF_ACCEPTANCE track=%s extension=%s nested_userids=all_owned_database", tracking, version)
+		}
 		t.Cleanup(func() { o.functionCost.capture(t, "cleanup", false) })
 	}
 	operationActivityRing(t, r.admin, o)
@@ -249,7 +270,12 @@ func operationCausalPool(t *testing.T, r protocolRig) (protocolRig, *operationCa
 // Счётчики общие для БД и публикуются PostgreSQL с задержкой. Даже пустой
 // active-набор не доказывает flush; активные function frames не наблюдаемы.
 // Никакого SQL из tracer, принудительного flush или вмешательства в worker TX.
+func operationCostEnabled() bool {
+	return os.Getenv("KANAME_GD_FUNCTION_COST_DIAGNOSTIC") == "1" || os.Getenv("KANAME_GD_SQL_COST_DIAGNOSTIC") == "1"
+}
+
 type operationFunctionCost struct {
+	sql               *operationSQLCost
 	admin             *pgxpool.Pool
 	captures          int
 	baselineAttempted bool
@@ -289,6 +315,9 @@ func (p *operationFunctionCost) capture(t *testing.T, point string, baseline boo
   WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active'),
  'open_transactions',(SELECT count(*) FROM pg_catalog.pg_stat_activity
   WHERE datname=current_database() AND pid<>pg_backend_pid() AND xact_start IS NOT NULL))`).Scan(&raw)
+	if p.sql != nil {
+		p.sql.capture(t, ctx, point, baseline)
+	}
 	if err != nil {
 		t.Logf("GD_FUNCTION_COST point=%s status=UNKNOWN read_error=%v", point, err)
 		return
@@ -324,12 +353,114 @@ func (p *operationFunctionCost) capture(t *testing.T, point string, baseline boo
 	}
 }
 
+// SQL counters принадлежат только fixture DB, включая SECURITY DEFINER
+// userid. Они не являются self-time функции: nested totals нельзя складывать.
+// Сбор делит исходный секундный read deadline с function snapshot.
+type operationSQLCost struct {
+	admin    *pgxpool.Pool
+	baseline map[string]operationSQLCounter
+	reset    string
+	dealloc  int64
+}
+
+type operationSQLCounter struct {
+	Database  uint32  `json:"dbid"`
+	User      uint32  `json:"userid"`
+	QueryID   int64   `json:"queryid"`
+	TopLevel  bool    `json:"toplevel"`
+	Query     string  `json:"query"`
+	Truncated bool    `json:"query_truncated"`
+	Calls     int64   `json:"calls"`
+	Total     float64 `json:"total_exec_ms"`
+	Rows      int64   `json:"rows"`
+}
+
+func (r operationSQLCounter) key() string {
+	return fmt.Sprintf("%d/%d/%d/%t", r.Database, r.User, r.QueryID, r.TopLevel)
+}
+
+func (p *operationSQLCost) capture(t *testing.T, ctx context.Context, point string, baseline bool) {
+	t.Helper()
+	var raw []byte
+	err := p.admin.QueryRow(ctx, `SELECT jsonb_build_object(
+ 'stats_reset',i.stats_reset::text,'dealloc',i.dealloc,
+ 'queries',coalesce((SELECT jsonb_agg(to_jsonb(q) ORDER BY q.total_exec_ms DESC,q.queryid) FROM (
+  SELECT s.dbid::bigint AS dbid,s.userid::bigint AS userid,s.queryid,s.toplevel,
+   left(s.query,2000) AS query,length(s.query)>2000 AS query_truncated,
+   s.calls,s.total_exec_time AS total_exec_ms,s.rows
+  FROM gd_sql_cost_diagnostic.pg_stat_statements s
+  WHERE s.dbid=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+  ORDER BY s.total_exec_time DESC,s.userid,s.queryid,s.toplevel LIMIT 2049
+ ) q),'[]'::jsonb)) FROM gd_sql_cost_diagnostic.pg_stat_statements_info i`).Scan(&raw)
+	if err != nil {
+		t.Logf("GD_SQL_COST point=%s status=UNKNOWN read_error=%v", point, err)
+		return
+	}
+	var snapshot struct {
+		Reset   string                `json:"stats_reset"`
+		Dealloc *int64                `json:"dealloc"`
+		Queries []operationSQLCounter `json:"queries"`
+	}
+	if err = json.Unmarshal(raw, &snapshot); err != nil || snapshot.Reset == "" || snapshot.Dealloc == nil {
+		t.Logf("GD_SQL_COST point=%s status=UNKNOWN decode_error=%v reset_present=%t dealloc_present=%t", point, err, snapshot.Reset != "", snapshot.Dealloc != nil)
+		return
+	}
+	overflow := len(snapshot.Queries) > 2048
+	if overflow {
+		snapshot.Queries = snapshot.Queries[:2048]
+	}
+	if baseline && !overflow {
+		p.baseline = make(map[string]operationSQLCounter, len(snapshot.Queries))
+		for _, row := range snapshot.Queries {
+			p.baseline[row.key()] = row
+		}
+		p.reset, p.dealloc = snapshot.Reset, *snapshot.Dealloc
+	}
+	stable := p.baseline != nil && !overflow && p.reset == snapshot.Reset && p.dealloc == *snapshot.Dealloc
+	type ranked struct {
+		row   operationSQLCounter
+		known bool
+		calls int64
+		total float64
+		rows  int64
+	}
+	values := make([]ranked, 0, len(snapshot.Queries))
+	for _, row := range snapshot.Queries {
+		v := ranked{row: row}
+		old, present := p.baseline[row.key()]
+		if !baseline && stable && present && old.Query == row.Query && old.Truncated == row.Truncated && row.Calls >= old.Calls && row.Total >= old.Total && row.Rows >= old.Rows {
+			v.known, v.calls, v.total, v.rows = true, row.Calls-old.Calls, row.Total-old.Total, row.Rows-old.Rows
+		}
+		values = append(values, v)
+	}
+	// При неизвестном baseline cumulative остаётся cumulative. Top30
+	// ранжируется по total; никогда не вычитаем выдуманный нулевой baseline.
+	sort.Slice(values, func(i, j int) bool {
+		if values[i].row.Total != values[j].row.Total {
+			return values[i].row.Total > values[j].row.Total
+		}
+		return values[i].row.key() < values[j].row.key()
+	})
+	t.Logf("GD_SQL_COST point=%s at=%s inventory=%d overflow=%t stats_reset=%s dealloc=%d baseline_available=%t reset_dealloc_stable=%t output_limit=30 active_statements=UNKNOWN completeness=UNKNOWN mode=DIAGNOSTIC_NOT_PERF_ACCEPTANCE", point, time.Now().UTC().Format(time.RFC3339Nano), len(snapshot.Queries), overflow, snapshot.Reset, *snapshot.Dealloc, p.baseline != nil, stable)
+	for i, v := range values {
+		if i == 30 {
+			break
+		}
+		encoded, _ := json.Marshal(v.row)
+		if !v.known {
+			t.Logf("GD_SQL_COST point=%s rank=%d counter=%s delta=UNKNOWN", point, i+1, encoded)
+		} else {
+			t.Logf("GD_SQL_COST point=%s rank=%d counter=%s observed_delta_calls=%d observed_delta_exec_ms=%g observed_delta_rows=%d completeness=UNKNOWN", point, i+1, encoded, v.calls, v.total, v.rows)
+		}
+	}
+}
+
 // Baseline снимается после всех 257 carriers непосредственно перед исходным
 // revoke. Один deferred снимок срабатывает и при FailNow; повторный вызов после
 // успешного await не дублирует его. Cleanup не означает join worker.
 func operationFunctionCostBeforeRevoke(t *testing.T, w delegationUCWorld) func() {
 	t.Helper()
-	if os.Getenv("KANAME_GD_FUNCTION_COST_DIAGNOSTIC") != "1" {
+	if !operationCostEnabled() {
 		return func() {}
 	}
 	r, ok := w.ops.(*operationCausalRepo)
