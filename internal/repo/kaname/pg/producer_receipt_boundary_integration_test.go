@@ -29,6 +29,32 @@ func receiptWaitForBlocker(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 	return pid
 }
 
+// Наблюдаем настоящий Unregister внутри parent prelock: его TX уже началась,
+// но до registration fence он ждёт G конкретной producer TX.
+func receiptWaitForAdmission(t *testing.T, ctx context.Context, pool *pgxpool.Pool, blocker int) (int, time.Time) {
+	t.Helper()
+	var pid int
+	var start time.Time
+	require.Eventually(t, func() bool {
+		err := pool.QueryRow(ctx, `SELECT a.pid,a.xact_start
+ FROM pg_catalog.pg_stat_activity a
+ JOIN pg_catalog.pg_locks w ON w.pid=a.pid
+ JOIN pg_catalog.pg_locks h ON h.locktype=w.locktype
+  AND h.database=w.database AND h.classid=w.classid
+  AND h.objid=w.objid AND h.objsubid=w.objsubid
+ WHERE a.datname=current_database() AND a.state='active'
+  AND a.wait_event_type='Lock' AND a.wait_event='advisory'
+  AND a.query='SELECT kaname.authority_parent_prelock_admit_v3()'
+  AND a.xact_start IS NOT NULL
+  AND w.locktype='advisory' AND NOT w.granted
+  AND w.classid=1262569292::oid AND w.objid=0::oid AND w.objsubid=2
+  AND w.mode='ExclusiveLock' AND h.pid=$1 AND h.granted
+  AND h.mode='ExclusiveLock' AND $1=ANY(pg_catalog.pg_blocking_pids(a.pid))`, blocker).Scan(&pid, &start)
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond, "Unregister должен ждать G своей producer TX до registration fence")
+	return pid, start
+}
+
 func TestProducerReceiptZeroUnregisterAfterWriterFence(t *testing.T) {
 	uc, pool := publicReadRig(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -39,18 +65,28 @@ func TestProducerReceiptZeroUnregisterAfterWriterFence(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT owner_user_id FROM kaname.accounts WHERE id=$1`, scene.Account).Scan(&uid))
 	old := time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond)
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{SubjectId: "project:" + scene.Project, Relation: "project", Object: object, ParentProjectId: scene.Project, ParentAccountId: scene.Account, ParentChain: scene.ProjectChain(), SourceVersion: timestamppb.New(old)}))
-	holder, err := pool.Begin(ctx)
+	holderTx, err := kanamepg.NewRegistrationTxBeginner(pool).Begin(ctx)
 	require.NoError(t, err)
-	defer holder.Rollback(ctx)
+	holder := holderTx.(pgx.Tx)
+	defer holder.Rollback(context.WithoutCancel(ctx))
 	_, err = holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('kaname.resource_registration_writers',0))`)
 	require.NoError(t, err)
 	done := make(chan error, 1)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		done <- uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{SubjectId: "user:" + uid, Relation: "owner", Object: object})
 	}()
-	waiter := receiptWaitForBlocker(t, ctx, pool, int(holder.Conn().PgConn().PID()))
-	var start, version time.Time
-	require.NoError(t, pool.QueryRow(ctx, `SELECT xact_start FROM pg_stat_activity WHERE pid=$1`, waiter).Scan(&start))
+	// При любом FailNow освобождаем собственный fence и дожидаемся операции
+	// до закрытия пула, чтобы cleanup не скрывал первичную ошибку.
+	defer func() {
+		_ = holder.Rollback(context.WithoutCancel(ctx))
+		cancel()
+		<-finished
+	}()
+	waiter, start := receiptWaitForAdmission(t, ctx, pool, int(holder.Conn().PgConn().PID()))
+	t.Logf("Unregister pid=%d xact_start=%s ждёт G producer pid=%d", waiter, start.Format(time.RFC3339Nano), holder.Conn().PgConn().PID())
+	var version time.Time
 	require.NoError(t, holder.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&version))
 	require.True(t, version.After(start))
 	// Это applied producer в удерживающей fence TX, после начала снимающей TX.
