@@ -69,6 +69,9 @@ func fullStartupRuntimePool(t *testing.T, ctx context.Context, owner *pgxpool.Po
 	require.NoError(t, err)
 	cfg := owner.Config()
 	cfg.ConnConfig.User, cfg.ConnConfig.Password, cfg.AfterConnect = login, password, nil
+	if trace, ok := ctx.Value(fullStartupDiagnosticScope{}).(*fullStartupDiagnostic); ok {
+		cfg.ConnConfig.Tracer = trace.combine(cfg.ConnConfig.Tracer)
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
@@ -156,6 +159,10 @@ func fullStartupCompositionConfig(t *testing.T) config.Config {
 func TestFullStartupProductionCompositionGrantsOnlyWithSeparateCreate(t *testing.T) {
 	cfg := fullStartupCompositionConfig(t)
 	ctx, ownerPool, _, logger := bootRolesOnLiveBase(t)
+	trace := &fullStartupDiagnostic{started: time.Now()}
+	ctx = context.WithValue(ctx, fullStartupDiagnosticScope{}, trace)
+	// Зарегистрировано до runtime pool: LIFO печатает только после его Close.
+	t.Cleanup(func() { trace.report(t) })
 	ownerID, accountID := fullStartupSeedPerson(t, ctx, ownerPool, "owner")
 	actorID, _ := fullStartupSeedPerson(t, ctx, ownerPool, "actor")
 	recipientID, _ := fullStartupSeedPerson(t, ctx, ownerPool, "recipient")
@@ -379,13 +386,13 @@ func TestFullStartupProductionCompositionGrantsOnlyWithSeparateCreate(t *testing
 		accountID, string(project.ID), string(serviceAccount.ID), description).Scan(&durableDescriptions))
 	require.Equal(t, 3, durableDescriptions, "все три handler завершили durable metadata запись")
 	// Оба state RPC используют сохранённые UC из той же production composition.
-	disabled, err := svcs.serviceAccountHandler.Disable(as(recipientID), &iamv1.DisableServiceAccountRequest{ServiceAccountId: string(serviceAccount.ID)})
+	disabled, err := svcs.serviceAccountHandler.Disable(context.WithValue(as(recipientID), fullStartupDiagnosticOperation{}, "disable"), &iamv1.DisableServiceAccountRequest{ServiceAccountId: string(serviceAccount.ID)})
 	require.NoError(t, err)
 	fullStartupAwait(t, ctx, ops, disabled.GetId())
 	var enabled bool
 	require.NoError(t, runtime.QueryRow(ctx, `SELECT enabled FROM kaname.service_accounts WHERE id=$1`, string(serviceAccount.ID)).Scan(&enabled))
 	require.False(t, enabled)
-	enabledOp, err := svcs.serviceAccountHandler.Enable(as(recipientID), &iamv1.EnableServiceAccountRequest{ServiceAccountId: string(serviceAccount.ID)})
+	enabledOp, err := svcs.serviceAccountHandler.Enable(context.WithValue(as(recipientID), fullStartupDiagnosticOperation{}, "enable"), &iamv1.EnableServiceAccountRequest{ServiceAccountId: string(serviceAccount.ID)})
 	require.NoError(t, err)
 	fullStartupAwait(t, ctx, ops, enabledOp.GetId())
 	require.NoError(t, runtime.QueryRow(ctx, `SELECT enabled FROM kaname.service_accounts WHERE id=$1`, string(serviceAccount.ID)).Scan(&enabled))
