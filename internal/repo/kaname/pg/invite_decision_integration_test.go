@@ -616,10 +616,15 @@ func TestInviteDecisionGroupAndServiceAccountEditorSources(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			f := newInviteDecisionFixture(t)
 			role := bindingRow(t, f.r, f.editor).RoleID
+			var actor domain.Subject
+			if mode == "service_account_live" || mode == "service_account_disabled" {
+				// Подготовка через другое соединение должна завершиться до Writer:
+				// он сразу удерживает общий compatibility fence, даже до первой записи.
+				actor = domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: domain.SubjectID(seedSAID(t, f.r.ctx, f.r.admin, f.r.a, "invite-editor-sa"))}
+			}
 			w, err := lifecycleOwner(f.r).Writer(f.r.ctx)
 			require.NoError(t, err)
 			defer policyFixtureRollback(w)
-			var actor domain.Subject
 			var groupID domain.GroupID
 			if mode == "group_live" || mode == "group_removed" {
 				groupID = domain.GroupID(ids.NewID("grp"))
@@ -627,9 +632,6 @@ func TestInviteDecisionGroupAndServiceAccountEditorSources(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, w.GroupsW().AddMember(f.r.ctx, domain.GroupMember{GroupID: groupID, MemberType: domain.SubjectTypeUser, MemberID: domain.SubjectID(f.actor)}))
 				actor = domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(f.actor)}
-			} else {
-				// Seed на owner pool: runtime writer ещё не писал и не удерживает row locks.
-				actor = domain.Subject{Type: domain.SubjectTypeServiceAccount, ID: domain.SubjectID(seedSAID(t, f.r.ctx, f.r.admin, f.r.a, "invite-editor-sa"))}
 			}
 			holder := actor
 			if groupID != "" {

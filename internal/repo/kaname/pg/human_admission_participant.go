@@ -4,6 +4,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -48,7 +49,19 @@ func (s *RegistrationStore) beginAdmissionSession(ctx context.Context) (*humanSe
 	if s.participantConfigured {
 		return s.participant.begin(ctx, s.pool)
 	}
-	return beginHumanSessionWriter(ctx, s.pool)
+	w, err := beginHumanSessionWriter(ctx, s.pool)
+	if err != nil {
+		return nil, err
+	}
+	// Legacy admission пишет users после person/code locks. Поэтому общий
+	// fence должен предшествовать им, как у Repository.Writer: иначе DELETE
+	// держит compat и ждёт person, а поздний users statement guard — наоборот.
+	// Только advisory drain: schema attestation и её fail-closed проверки
+	// остаются на прежних местах; чистые session writers сюда не входят.
+	if _, err := w.tx.Exec(ctx, "SELECT pg_advisory_xact_lock(1262569292,0)"); err != nil {
+		return nil, errors.Join(err, policyRollback(ctx, w.tx))
+	}
+	return w, nil
 }
 
 // Параметры церемонии названы явно: координатор передаёт RC и начинает

@@ -582,7 +582,7 @@ func admissionCeremonyChain(srcs map[string]string) []string {
 		}
 	}
 	selectFn := funcs["RegistrationStore.beginAdmissionSession"]
-	if selectFn == nil || len(selectFn.Body.List) != 3 || calls(selectFn, "s.participant.begin") != 1 || calls(selectFn, sessionWriterOpener) != 1 {
+	if selectFn == nil || len(selectFn.Body.List) != 6 || calls(selectFn, "s.participant.begin") != 1 || calls(selectFn, sessionWriterOpener) != 1 {
 		fail("explicit configured selector")
 	} else {
 		branch, ok := selectFn.Body.List[1].(*ast.IfStmt)
