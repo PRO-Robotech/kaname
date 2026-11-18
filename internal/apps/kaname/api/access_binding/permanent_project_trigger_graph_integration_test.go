@@ -8,6 +8,7 @@ package access_binding_test
 // Это детектор изменений, не общий парсер SQL и не песочница DDL администратора.
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -48,10 +49,6 @@ func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T) {
 	stripComments := regexp.MustCompile(`(?s)/\*.*?\*/|(?m)--[^\n]*`)
 	calls := regexp.MustCompile(`(?i)\b([a-z_][a-z0-9_]*)\s*\(`)
 	writes := regexp.MustCompile(`(?i)\b(?:insert\s+into|update|delete\s+from|merge\s+into)\s+(?:only\s+)?(?:kaname\.)?resource_(?:mirror|parent_edge)\b`)
-	// Единственный проверенный динамический SQL, достижимый из существующих триггеров: чтения
-	// фиксированных отношений из аргументов триггера. Каждый новый EXECUTE требует явного ревью.
-	dynamicReads := regexp.MustCompile(`(?is)EXECUTE\s+format\(\s*'(?:SELECT to_jsonb\(t\) FROM kaname\.%I t WHERE t\.id = \$1|SELECT count\(\*\) FROM %I\.%I WHERE %I = \$1 AND id <> \$2)'[^;]*;`)
-	dynamic := regexp.MustCompile(`(?i)\bEXECUTE\b`)
 	seen := map[uint32]bool{}
 	for len(roots) > 0 {
 		oid := roots[0]
@@ -68,7 +65,9 @@ func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T) {
 		if writes.MatchString(body) {
 			require.Equal(t, "resource_registration_command_apply", f.name, "unchecked incoming physical writer")
 		}
-		require.False(t, dynamic.MatchString(dynamicReads.ReplaceAllString(body, "")), "unreviewed dynamic callback in "+f.name)
+		unreviewed, lexicalErr := ppTriggerHasUnreviewedExecute(f.body)
+		require.NoError(t, lexicalErr, "неразобранное тело callback "+f.name)
+		require.False(t, unreviewed, "unreviewed dynamic callback in "+f.name)
 		for _, call := range calls.FindAllStringSubmatch(body, -1) {
 			roots = append(roots, byName[strings.ToLower(call[1])]...)
 		}
@@ -146,4 +145,122 @@ func TestPermanentProjectCommand_InstalledTriggerGraphIsClosed(t *testing.T) {
         AND conrelid IN ('kaname.catalog_resource'::regclass,'kaname.registration_catalog_fence'::regclass)
         AND pg_get_constraintdef(oid) LIKE '%kaname.%'`).Scan(&bad))
 	require.Zero(t, bad, "catalog/witness checks cannot hide custom callbacks")
+}
+
+// ppTriggerExecuteTokens распознаёт только незаключённое в кавычки слово EXECUTE.
+// Смещения относятся к исходному телу; комментарии заменяются пробелами, чтобы
+// две прежние одобренные формы проверялись с настоящего начала оператора.
+// Незакрытая строка либо комментарий — ошибка, а не доказательство отсутствия SQL.
+func ppTriggerExecuteTokens(body string) (string, []int, error) {
+	clean := []byte(body)
+	var executes []int
+	ident := func(c byte) bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '$' || c >= 0x80
+	}
+	blank := func(start, end int) {
+		for j := start; j < end; j++ {
+			if clean[j] != '\n' && clean[j] != '\r' {
+				clean[j] = ' '
+			}
+		}
+	}
+	for i := 0; i < len(body); {
+		start := i
+		switch {
+		case strings.HasPrefix(body[i:], "--"):
+			for i < len(body) && body[i] != '\n' && body[i] != '\r' {
+				i++
+			}
+			blank(start, i)
+		case strings.HasPrefix(body[i:], "/*"):
+			i += 2
+			depth := 1
+			for i < len(body) && depth > 0 {
+				switch {
+				case strings.HasPrefix(body[i:], "/*"):
+					depth++
+					i += 2
+				case strings.HasPrefix(body[i:], "*/"):
+					depth--
+					i += 2
+				default:
+					i++
+				}
+			}
+			if depth != 0 {
+				return "", nil, fmt.Errorf("незакрытый SQL-комментарий на позиции %d", start)
+			}
+			blank(start, i)
+		case body[i] == '\'' || body[i] == '"':
+			quote := body[i]
+			escaped := quote == '\'' && i > 0 && (body[i-1] == 'E' || body[i-1] == 'e') && (i < 2 || !ident(body[i-2]))
+			i++
+			closed := false
+			for i < len(body) {
+				if escaped && body[i] == '\\' {
+					i += 2
+					continue
+				}
+				if body[i] == quote {
+					i++
+					if i < len(body) && body[i] == quote {
+						i++
+						continue
+					}
+					closed = true
+					break
+				}
+				i++
+			}
+			if !closed {
+				return "", nil, fmt.Errorf("незакрытая SQL-кавычка на позиции %d", start)
+			}
+		case body[i] == '$':
+			j := i + 1
+			for j < len(body) && (body[j] == '_' || body[j] >= 'a' && body[j] <= 'z' || body[j] >= 'A' && body[j] <= 'Z' || body[j] >= 0x80 || j > i+1 && body[j] >= '0' && body[j] <= '9') {
+				j++
+			}
+			if j < len(body) && body[j] == '$' {
+				tag := body[i : j+1]
+				end := strings.Index(body[j+1:], tag)
+				if end < 0 {
+					return "", nil, fmt.Errorf("незакрытая dollar-строка на позиции %d", start)
+				}
+				i = j + 1 + end + len(tag)
+			} else {
+				i++
+			}
+		case ident(body[i]):
+			for i < len(body) && ident(body[i]) {
+				i++
+			}
+			if strings.EqualFold(body[start:i], "execute") {
+				executes = append(executes, start)
+			}
+		default:
+			if strings.HasPrefix(body[i:], "*/") || body[i] == 0 {
+				return "", nil, fmt.Errorf("неожиданный SQL-токен на позиции %d", start)
+			}
+			i++
+		}
+	}
+	return string(clean), executes, nil
+}
+
+// Одобрение применяется только с начала настоящей executable-лексемы, а не
+// с похожего текста внутри литерала. Неизвестный EXECUTE по-прежнему запрещён.
+func ppTriggerHasUnreviewedExecute(body string) (bool, error) {
+	// Единственный проверенный динамический SQL, достижимый из существующих триггеров: чтения
+	// фиксированных отношений из аргументов триггера. Каждый новый EXECUTE требует явного ревью.
+	dynamicReads := regexp.MustCompile(`(?is)^EXECUTE\s+format\(\s*'(?:SELECT to_jsonb\(t\) FROM kaname\.%I t WHERE t\.id = \$1|SELECT count\(\*\) FROM %I\.%I WHERE %I = \$1 AND id <> \$2)'[^;]*;`)
+	dynamicBody, executes, err := ppTriggerExecuteTokens(body)
+	if err != nil {
+		return true, err
+	}
+	for _, at := range executes {
+		if !dynamicReads.MatchString(dynamicBody[at:]) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
