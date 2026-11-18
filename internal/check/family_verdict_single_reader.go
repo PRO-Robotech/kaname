@@ -115,6 +115,9 @@ var familyVerdictRuleFuncs = map[string]bool{"Revoked": true, "FamilyRevoked": t
 // принимается и со схемой, и без неё.
 var issuanceTableMarkers = []string{"kaname.access_tokens", " access_tokens"}
 
+// familyUserGrantField — имя утверждения о клиенте пользовательского токена.
+const familyUserGrantField = "kaname_user_token_id"
+
 // familyVerdictFieldDecisions — ЗАКРЫТЫЙ перечень утверждений, которые правило
 // вправе читать, с решением по каждому. Утверждение, заведённое в правиле без
 // записи здесь, — находка: оно могло бы нести семейство.
@@ -122,8 +125,6 @@ var issuanceTableMarkers = []string{"kaname.access_tokens", " access_tokens"}
 // ключи — ИМЕНА утверждений токена (они же контракт подписанта
 // и переименованию не подлежат), значения — проза решения для текста находки;
 // ни одно не участвует в проверке подлинности.
-const familyUserGrantField = "kaname_user_token_id"
-
 var familyVerdictFieldDecisions = map[string]string{
 	"sub":                "ключ отсечки: субъект",
 	familyUserGrantField: "ключ отсечки: клиент пользовательского токена",

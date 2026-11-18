@@ -138,3 +138,55 @@ func TestNativeDeleteReceiptStampSavepointAndNestedCommand(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit(r.ctx))
 }
+
+// TestNativeDeleteRowValidationWorkGrowsOncePerTriggerEntry проверяет настоящий
+// native caller: каждый BEFORE/AFTER row frame сохраняет свежую проверку,
+// не повторяя private program/custody внутри того же frame. Счётчики снимаются
+// до отложенных COMMIT-проверок; каждая команда откатывается к исходному состоянию.
+func TestNativeDeleteRowValidationWorkGrowsOncePerTriggerEntry(t *testing.T) {
+	r := writerProtocolRig(t)
+	_, err := r.admin.Exec(r.ctx, `GRANT SET ON PARAMETER track_functions TO `+pgx.Identifier{r.role}.Sanitize())
+	require.NoError(t, err)
+	tx, err := r.runtime.Begin(r.ctx)
+	require.NoError(t, err)
+	defer attestationLocksetRollback(tx)
+	_, err = tx.Exec(r.ctx, `SET LOCAL track_functions='all'`)
+	require.NoError(t, err)
+	read := func() [3]int64 {
+		var counts [3]int64
+		for i, name := range []string{"_authority_forward_row_v4(bigint,jsonb,boolean)", "_authority_forward_program_v4(uuid)", "_authority_forward_custody_v4()"} {
+			require.NoError(t, tx.QueryRow(r.ctx, `SELECT coalesce((SELECT calls FROM pg_stat_xact_user_functions WHERE funcid=('kaname.'||$1)::regprocedure),0)`, name).Scan(&counts[i]))
+		}
+		return counts
+	}
+	var costs [2][3]int64
+	for n := 1; n <= 2; n++ {
+		_, err = tx.Exec(r.ctx, `SAVEPOINT row_validation_work`)
+		require.NoError(t, err)
+		var baseline int
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT count(*) FROM kaname.fga_outbox`).Scan(&baseline))
+		before := read()
+		_, err = tx.Exec(r.ctx, `SELECT kaname.authority_native_delete_emit_v4(ARRAY(
+ SELECT jsonb_build_object('object','account:'||$1::text,'user','user:usr_row_work_'||i::text,'relation','v_get')
+ FROM generate_series(1,$2::integer) i ORDER BY i))`, r.a, n)
+		require.NoError(t, err)
+		after := read()
+		for i := range after {
+			costs[n-1][i] = after[i] - before[i]
+			require.Positive(t, costs[n-1][i], "должны наблюдаться счётчики завершённых вызовов функций")
+		}
+		var actual int
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT count(*) FROM kaname.fga_outbox`).Scan(&actual))
+		require.Equal(t, baseline+n, actual, "каждый исходный payload сохраняется как отдельный эффект журнала")
+		_, err = tx.Exec(r.ctx, `SET CONSTRAINTS ALL IMMEDIATE`)
+		require.NoError(t, err, "настоящий native caller завершает receipts и программу")
+		_, err = tx.Exec(r.ctx, `ROLLBACK TO SAVEPOINT row_validation_work`)
+		require.NoError(t, err)
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT count(*) FROM kaname.fga_outbox`).Scan(&actual))
+		require.Equal(t, baseline, actual)
+	}
+	require.Equal(t, int64(2), costs[1][0]-costs[0][0], "дополнительный эффект проходит свежие BEFORE и AFTER row entry")
+	require.Equal(t, int64(1), costs[1][1]-costs[0][1], "самостоятельная проверка программы остаётся в каждом stamp без повторения внутри row entry")
+	require.Equal(t, int64(3), costs[1][2]-costs[0][2], "свежая custody проверяется для stamp и обоих row entry")
+	require.NoError(t, tx.Rollback(r.ctx))
+}

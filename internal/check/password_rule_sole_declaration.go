@@ -63,15 +63,15 @@ type PasswordRuleForm string
 // ИМЕНА ФОРМ ОБЪЯВЛЕНИЯ для текста находки гейта: слово «пароль»
 // здесь — предмет проверки, а не значение удостоверения.
 const (
-	// PasswordRuleFormName — конструктор либо тип по имени.
+	// ruleFormName — конструктор либо тип по имени.
 	ruleFormName PasswordRuleForm = "объявление по имени"
 	// PasswordRuleFormName сохраняет исходное имя константы для вызывающих.
 	PasswordRuleFormName = ruleFormName
-	// PasswordRuleFormVerb — метод `Judge` над паролем.
+	// ruleFormVerb — метод `Judge` над паролем.
 	ruleFormVerb PasswordRuleForm = "метод Judge над паролем"
 	// PasswordRuleFormVerb сохраняет исходное имя константы для вызывающих.
 	PasswordRuleFormVerb = ruleFormVerb
-	// PasswordRuleFormLength — сравнение длины пароля в рунах.
+	// ruleFormLength — сравнение длины пароля в рунах.
 	ruleFormLength PasswordRuleForm = "сравнение длины пароля в рунах"
 	// PasswordRuleFormLength сохраняет исходное имя константы для вызывающих.
 	PasswordRuleFormLength = ruleFormLength

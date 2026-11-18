@@ -150,7 +150,7 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 		{"_authority_forward_context_v4", "_authority_forward_context_v4()", "67a9f0c6d896048f52b3eeb396250c7e33e16ab3170b874734154197d247dd5c", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_forward_custody_v4", "_authority_forward_custody_v4()", "a8007133abaae4f51966e623c6a515988e637ec2f0579838578602be2572801a", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_forward_program_v4", "_authority_forward_program_v4(uuid)", "d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
-		{"_authority_forward_row_v4", "_authority_forward_row_v4(bigint,jsonb,boolean)", "73e2e71c8a8eab73463ab36c58a5534333ba1ff88f308ac13d472e9be700888f", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
+		{"_authority_forward_row_v4", "_authority_forward_row_v4(bigint,jsonb,boolean)", "0ae65da0fe1a7da978b3c872092400e19d6774b9548cc7d8be3d5bbda6a66cfe", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_forward_shape_v4", "_authority_forward_shape_v4()", "ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_group_add_complete_v3", "_authority_group_add_complete_v3()", "158eca8cc62068a844f08ce5f746ad909a504fb429567d11c30d6f496dcd17eb", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_group_add_program_v3", "_authority_group_add_program_v3()", "e78556f1ccd014face052206b727651ce7e238bc9c3706f5a8d65f1f6559cce4", "plpgsql", "v", "search_path=pg_catalog,pg_temp", true},
