@@ -155,7 +155,9 @@ func delegationUCFixture(t *testing.T, observe ...bool) delegationUCWorld {
 	// затем существующий Prepare ниже фиксирует фактическую полную модель.
 	r, _ := writerProtocolRigBeforePreparation(t)
 	var observer *operationCausalObserver
-	if len(observe) != 0 && observe[0] { r, observer = operationCausalPool(t, r) }
+	if len(observe) != 0 && observe[0] {
+		r, observer = operationCausalPool(t, r)
+	}
 	raw, err := publicreadfixture.Read("registry.delegation-fixture.yaml")
 	require.NoError(t, err)
 	raw, err = publicreadfixture.WithWrites(raw)
@@ -216,7 +218,9 @@ func delegationUCFixture(t *testing.T, observe ...bool) delegationUCWorld {
 	var ops operations.Repo = operations.NewRepo(r.runtime, "kaname")
 	if observer != nil {
 		full := ops.(operations.FullRepo)
-		_, claimed := full.(interface { ClaimForExecution(context.Context, string) (bool, error) })
+		_, claimed := full.(interface {
+			ClaimForExecution(context.Context, string) (bool, error)
+		})
 		require.True(t, claimed, "реальный repo обязан сохранять execution claim")
 		ops = &operationCausalRepo{FullRepo: full, observer: observer, t: t}
 	}

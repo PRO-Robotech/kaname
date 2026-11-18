@@ -24,37 +24,46 @@ import (
 // terminal row не доказывает join. Прежний global Wait остаётся oracle.
 // Кольцо ограничено; tracer не исполняет SQL и не читает args.
 type operationCausalObserver struct {
-	mu sync.Mutex
-	workers map[<-chan struct{}]string
-	rows [128]string
-	n uint64
-	activity [8]string
-	activityN uint64
+	mu           sync.Mutex
+	workers      map[<-chan struct{}]string
+	rows         [128]string
+	n            uint64
+	activity     [8]string
+	activityN    uint64
 	unattributed uint64
 }
+
 func (o *operationCausalObserver) record(v string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.rows[o.n%uint64(len(o.rows))] = time.Now().UTC().Format(time.RFC3339Nano)+" "+v
+	o.rows[o.n%uint64(len(o.rows))] = time.Now().UTC().Format(time.RFC3339Nano) + " " + v
 	o.n++
 }
+
 // WithValue сохраняет Done исходного worker. Новые cancel/timeout и
 // WithoutCancel не получают чужой opID по совпадению deadline, actor или PID.
 type operationCausalOwnerKey struct{}
+
 func (o *operationCausalObserver) rememberWorker(ctx context.Context, id string) bool {
-	if ctx == nil || ctx.Done() == nil || id == "" { return false }
+	if ctx == nil || ctx.Done() == nil || id == "" {
+		return false
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	owner, exists := o.workers[ctx.Done()]
 	if exists {
-		if owner == id { return true }
+		if owner == id {
+			return true
+		}
 		// Неоднозначность необратима: реальный чужой claim продолжится,
 		// поэтому прежний opID больше нельзя приписывать этому Done.
 		// Пустая запись остаётся слотом cap16, а не удаляется ради нового owner.
 		o.workers[ctx.Done()] = ""
 		return false
 	}
-	if len(o.workers) >= 16 { return false }
+	if len(o.workers) >= 16 {
+		return false
+	}
 	o.workers[ctx.Done()] = id
 	return true
 }
@@ -64,9 +73,13 @@ func (o *operationCausalObserver) operation(ctx context.Context) string {
 	if ctx != nil {
 		// Этот ключ добавляет только wrapper конкретной terminal-записи,
 		// которая уже получила opID явным аргументом.
-		if op, ok := ctx.Value(operationCausalOwnerKey{}).(string); ok && op != "" { return op }
+		if op, ok := ctx.Value(operationCausalOwnerKey{}).(string); ok && op != "" {
+			return op
+		}
 		if done := ctx.Done(); done != nil {
-			if op := o.workers[done]; op != "" { return op }
+			if op := o.workers[done]; op != "" {
+				return op
+			}
 		}
 	}
 	o.unattributed++
@@ -76,61 +89,93 @@ func (o *operationCausalObserver) operation(ctx context.Context) string {
 func (o *operationCausalObserver) dump(t *testing.T, point string) {
 	o.mu.Lock()
 	start := uint64(0)
-	if o.n > uint64(len(o.rows)) { start = o.n-uint64(len(o.rows)) }
+	if o.n > uint64(len(o.rows)) {
+		start = o.n - uint64(len(o.rows))
+	}
 	rows := make([]string, 0, o.n-start)
-	for i := start; i < o.n; i++ { rows = append(rows, o.rows[i%uint64(len(o.rows))]) }
+	for i := start; i < o.n; i++ {
+		rows = append(rows, o.rows[i%uint64(len(o.rows))])
+	}
 	activityStart := uint64(0)
-	if o.activityN > uint64(len(o.activity)) { activityStart = o.activityN-uint64(len(o.activity)) }
-	for i := activityStart; i < o.activityN; i++ { rows = append(rows, o.activity[i%uint64(len(o.activity))]) }
+	if o.activityN > uint64(len(o.activity)) {
+		activityStart = o.activityN - uint64(len(o.activity))
+	}
+	for i := activityStart; i < o.activityN; i++ {
+		rows = append(rows, o.activity[i%uint64(len(o.activity))])
+	}
 	total, unattributed := o.n, o.unattributed
 	o.mu.Unlock()
 	t.Logf("OWNED_OPERATION_CAUSAL %s recorded_events=%d unattributed_contexts=%d ring_limit=128 activity_limit=8", point, total, unattributed)
-	for _, row := range rows { t.Logf("OWNED_OPERATION_CAUSAL %s %s", point, row) }
+	for _, row := range rows {
+		t.Logf("OWNED_OPERATION_CAUSAL %s %s", point, row)
+	}
 }
 
-type operationCausalQuery struct { op string; pid uint32; start time.Time }
+type operationCausalQuery struct {
+	op    string
+	pid   uint32
+	start time.Time
+}
 type operationCausalQueryKey struct{}
+
 func (o *operationCausalObserver) TraceQueryStart(ctx context.Context, c *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
 	op := o.operation(ctx)
-	if op == "" { return ctx }
+	if op == "" {
+		return ctx
+	}
 	sql := d.SQL
-	if len(sql) > 600 { sql = sql[:600] }
+	if len(sql) > 600 {
+		sql = sql[:600]
+	}
 	q := operationCausalQuery{op, c.PgConn().PID(), time.Now()}
 	o.record(fmt.Sprintf("op=%s pid=%d tx=%c query_start sql=%q", op, q.pid, c.PgConn().TxStatus(), sql))
 	return context.WithValue(ctx, operationCausalQueryKey{}, q)
 }
 func (o *operationCausalObserver) TraceQueryEnd(ctx context.Context, c *pgx.Conn, d pgx.TraceQueryEndData) {
 	q, ok := ctx.Value(operationCausalQueryKey{}).(operationCausalQuery)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	o.record(fmt.Sprintf("op=%s pid=%d tx=%c query_end elapsed=%s tag=%q err=%v", q.op, q.pid, c.PgConn().TxStatus(), time.Since(q.start), d.CommandTag.String(), d.Err))
 }
 func (o *operationCausalObserver) TraceBatchStart(ctx context.Context, c *pgx.Conn, _ pgx.TraceBatchStartData) context.Context {
 	op := o.operation(ctx)
-	if op == "" { return ctx }
+	if op == "" {
+		return ctx
+	}
 	o.record(fmt.Sprintf("op=%s pid=%d tx=%c batch_start", op, c.PgConn().PID(), c.PgConn().TxStatus()))
 	return context.WithValue(ctx, operationCausalQueryKey{}, operationCausalQuery{op: op, pid: c.PgConn().PID()})
 }
 func (o *operationCausalObserver) TraceBatchQuery(ctx context.Context, _ *pgx.Conn, d pgx.TraceBatchQueryData) {
 	q, ok := ctx.Value(operationCausalQueryKey{}).(operationCausalQuery)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	sql := d.SQL
-	if len(sql) > 600 { sql = sql[:600] }
+	if len(sql) > 600 {
+		sql = sql[:600]
+	}
 	// Callback отмечает прочитанный результат, а не серверное время команды.
 	o.record(fmt.Sprintf("op=%s pid=%d batch_result sql=%q tag=%q err=%v", q.op, q.pid, sql, d.CommandTag.String(), d.Err))
 }
 func (o *operationCausalObserver) TraceBatchEnd(ctx context.Context, c *pgx.Conn, d pgx.TraceBatchEndData) {
 	q, ok := ctx.Value(operationCausalQueryKey{}).(operationCausalQuery)
-	if ok { o.record(fmt.Sprintf("op=%s pid=%d tx=%c batch_end err=%v", q.op, q.pid, c.PgConn().TxStatus(), d.Err)) }
+	if ok {
+		o.record(fmt.Sprintf("op=%s pid=%d tx=%c batch_end err=%v", q.op, q.pid, c.PgConn().TxStatus(), d.Err))
+	}
 }
 
 type operationCausalRepo struct {
 	operations.FullRepo
 	observer *operationCausalObserver
-	t *testing.T
+	t        *testing.T
 }
+
 func (r *operationCausalRepo) ClaimForExecution(ctx context.Context, id string) (bool, error) {
 	// Сохраняем настоящий optional claim, не превращаем wrapper в обход gate.
-	claimer := r.FullRepo.(interface { ClaimForExecution(context.Context, string) (bool, error) })
+	claimer := r.FullRepo.(interface {
+		ClaimForExecution(context.Context, string) (bool, error)
+	})
 	attributed := r.observer.rememberWorker(ctx, id)
 	r.observer.record(fmt.Sprintf("op=%s claim_start attributed=%t", id, attributed))
 	live, err := claimer.ClaimForExecution(ctx, id)
@@ -138,7 +183,7 @@ func (r *operationCausalRepo) ClaimForExecution(ctx context.Context, id string) 
 	return live, err
 }
 func (r *operationCausalRepo) MarkDone(ctx context.Context, id string, response *anypb.Any) error {
-	r.observer.record("op="+id+" mark_done_start")
+	r.observer.record("op=" + id + " mark_done_start")
 	err := r.FullRepo.MarkDone(context.WithValue(ctx, operationCausalOwnerKey{}, id), id, response)
 	r.observer.record(fmt.Sprintf("op=%s mark_done_end err=%v", id, err))
 	return err
@@ -149,7 +194,9 @@ func (r *operationCausalRepo) MarkError(ctx context.Context, id string, failure 
 	r.observer.record(fmt.Sprintf("op=%s mark_error_end err=%v", id, err))
 	return err
 }
-func (r *operationCausalRepo) operationWaitFailed(id string) { r.observer.dump(r.t, "global_deadline op="+id) }
+func (r *operationCausalRepo) operationWaitFailed(id string) {
+	r.observer.dump(r.t, "global_deadline op="+id)
+}
 
 // Включается только в трёх исследуемых GD TOP. Отсутствие предыдущего tracer
 // проверяется до подмены pool; Query+Batch сохраняют прежний batch-путь.
@@ -165,7 +212,11 @@ func operationCausalPool(t *testing.T, r protocolRig) (protocolRig, *operationCa
 	t.Cleanup(pool.Close)
 	r.runtime, r.repo = pool, kanamepg.New(pool, nil)
 	operationActivityRing(t, r.admin, o)
-	t.Cleanup(func() { if t.Failed() { o.dump(t, "cleanup_before_pool_close") } })
+	t.Cleanup(func() {
+		if t.Failed() {
+			o.dump(t, "cleanup_before_pool_close")
+		}
+	})
 	return r, o
 }
 
@@ -182,7 +233,8 @@ func operationActivityRing(t *testing.T, admin *pgxpool.Pool, o *operationCausal
 		defer tick.Stop()
 		for {
 			select {
-			case <-ctx.Done(): return
+			case <-ctx.Done():
+				return
 			case <-tick.C:
 				read, stop := context.WithTimeout(ctx, time.Second)
 				var data json.RawMessage
@@ -193,10 +245,12 @@ func operationActivityRing(t *testing.T, admin *pgxpool.Pool, o *operationCausal
  FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state<>'idle'
  ORDER BY pid LIMIT 32) a`).Scan(&data)
 				stop()
-				row := "activity="+string(data)
-				if err != nil { row = fmt.Sprintf("activity err=%v", err) }
+				row := "activity=" + string(data)
+				if err != nil {
+					row = fmt.Sprintf("activity err=%v", err)
+				}
 				o.mu.Lock()
-				o.activity[o.activityN%uint64(len(o.activity))] = time.Now().UTC().Format(time.RFC3339Nano)+" "+row
+				o.activity[o.activityN%uint64(len(o.activity))] = time.Now().UTC().Format(time.RFC3339Nano) + " " + row
 				o.activityN++
 				o.mu.Unlock()
 			}
@@ -208,6 +262,7 @@ func operationActivityRing(t *testing.T, admin *pgxpool.Pool, o *operationCausal
 // Только primary expiry TOP включает этот ключ; исторические report calls
 // остаются без наблюдателя. Рабочий pool, counter и его batch-выбор неизменны.
 type expiryActivityKey struct{}
+
 func expiryActivityPool(t *testing.T, cfg *pgxpool.Config) {
 	t.Helper()
 	observe := cfg.Copy()
@@ -221,7 +276,11 @@ func expiryActivityPool(t *testing.T, cfg *pgxpool.Config) {
 	t.Cleanup(pool.Close)
 	o := &operationCausalObserver{}
 	operationActivityRing(t, pool, o)
-	t.Cleanup(func() { if t.Failed() { o.dump(t, "expiry10000_failure") } })
+	t.Cleanup(func() {
+		if t.Failed() {
+			o.dump(t, "expiry10000_failure")
+		}
+	})
 }
 
 // Проверка использует настоящие деревья context, без синтетических PID или

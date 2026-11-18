@@ -651,7 +651,9 @@ func wdPool(t *testing.T, ctx context.Context, counter *stmtCounter) *pgxpool.Po
 	}
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = wdStatementTimeoutMS
 	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = wdIdleInTxTimeoutMS
-	if ctx.Value(expiryActivityKey{}) == true { expiryActivityPool(t, cfg) }
+	if ctx.Value(expiryActivityKey{}) == true {
+		expiryActivityPool(t, cfg)
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	require.NoError(t, err)
 	return pool
