@@ -48,33 +48,11 @@ const probeMethod = "PROPFIND"
 // записью, выпал бы из сличения молча.
 func registeredLanePaths(src string) (paths []string, findings []string) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "handler.go", src, parser.SkipObjectResolution)
+	f, err := parser.ParseFile(fset, "handler.go", src, 0)
 	if err != nil {
 		return nil, []string{"разбор handler.go: " + err.Error()}
 	}
-	consts := map[string]string{}
-	for _, d := range f.Decls {
-		gd, ok := d.(*ast.GenDecl)
-		if !ok || gd.Tok != token.CONST {
-			continue
-		}
-		for _, sp := range gd.Specs {
-			vs, ok := sp.(*ast.ValueSpec)
-			if !ok {
-				continue
-			}
-			for i, n := range vs.Names {
-				if i >= len(vs.Values) {
-					continue
-				}
-				if bl, ok := vs.Values[i].(*ast.BasicLit); ok && bl.Kind == token.STRING {
-					if v, err := strconv.Unquote(bl.Value); err == nil {
-						consts[n.Name] = v
-					}
-				}
-			}
-		}
-	}
+	constantString := laneFileStringConstant(f)
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -87,7 +65,7 @@ func registeredLanePaths(src string) (paths []string, findings []string) {
 		at := fset.Position(call.Pos())
 		switch a := call.Args[0].(type) {
 		case *ast.Ident:
-			v, known := consts[a.Name]
+			v, known := constantString(a)
 			if !known {
 				findings = append(findings, "регистрация handler.go:"+strconv.Itoa(at.Line)+": путь "+a.Name+" — не строковая константа файла")
 				return true
