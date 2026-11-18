@@ -15,18 +15,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type admissionExhaustedOutcome struct { error }
+func (admissionExhaustedOutcome) PreparedAttemptsExhausted() bool { return true }
+func (e admissionExhaustedOutcome) Unwrap() error { return e.error }
+
 type admissionCleanupOutcome struct { error }
 func (admissionCleanupOutcome) PreparedCleanupFailed() bool { return true }
 func (e admissionCleanupOutcome) Unwrap() error { return e.error }
 
 func admissionFailureCases() map[string]error {
-	exhausted := errors.Join(iamerr.ErrAborted, errors.New("private-schema-secret"))
+	exhausted := admissionExhaustedOutcome{errors.Join(iamerr.ErrAborted, errors.New("private-schema-secret"))}
 	return map[string]error{
 		"exhausted": exhausted,
 		"cancel": errors.Join(exhausted, context.Canceled),
 		"deadline": errors.Join(exhausted, context.DeadlineExceeded),
 		"unknown-commit": errors.New("private-connection-secret"),
-		"cleanup": admissionCleanupOutcome{exhausted},
+		"cleanup": errors.Join(exhausted, admissionCleanupOutcome{errors.New("private-cleanup-secret")}),
+		"legacy-aborted": errors.Join(iamerr.ErrAborted, errors.New("private-legacy-secret")),
 	}
 }
 func assertAdmissionOutcome(t *testing.T, name string, err error) {

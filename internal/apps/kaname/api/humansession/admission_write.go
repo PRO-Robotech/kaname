@@ -73,7 +73,8 @@ func AdmissionWriteFailure(err error) error {
 		(errors.As(err, &cleanup) && cleanup.PreparedCleanupFailed()) {
 		return ErrStoreUnavailable
 	}
-	if errors.Is(err, iamerr.ErrAborted) {
+	var exhausted interface{ PreparedAttemptsExhausted() bool }
+	if errors.Is(err, iamerr.ErrAborted) && errors.As(err, &exhausted) && exhausted.PreparedAttemptsExhausted() {
 		return iamerr.Wrapf(iamerr.ErrAborted, "%s", iamerr.SerializationConflictSyncText)
 	}
 	return ErrStoreUnavailable
