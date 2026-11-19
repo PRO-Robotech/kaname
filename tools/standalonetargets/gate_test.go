@@ -127,7 +127,7 @@ func TestStandaloneTargetsWorkInAStandaloneClone(t *testing.T) {
 		"записи ведомости, которым больше нечего прощать: %v — послабление живёт, пока у него есть предмет",
 		census.StaleWaiv)
 
-	findings, unmet, err := standalonetargets.RunTargetsWithCapture(clone, judged, makeCaptureRunner(t))
+	findings, unmet, err := standalonetargets.RunTargetsWithCapture(clone, judged, makeCaptureRunner(t, "-short", "-p=1"))
 	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ")
 
 	// Перепись печатается ПОСЛЕ прогона и несёт ТРИ величины, а не две: без
@@ -231,16 +231,16 @@ func makeRunner(t *testing.T) func(dir, target string) (int, string, error) {
 	}
 }
 
-func makeCaptureRunner(t *testing.T) func(dir, target string) (standalonetargets.TargetResult, error) {
+func makeCaptureRunner(t *testing.T, standaloneArgs ...string) func(dir, target string) (standalonetargets.TargetResult, error) {
 	t.Helper()
 	return func(dir, target string) (standalonetargets.TargetResult, error) {
 		var root *os.Root
-		code, output, err := makeRunnerOwned(t, &root)(dir, target)
+		code, output, err := makeRunnerOwned(t, &root, standaloneArgs...)(dir, target)
 		return standalonetargets.TargetResult{Code: code, Output: output, Capture: root}, err
 	}
 }
 
-func makeRunnerOwned(t *testing.T, captureRoot **os.Root) func(dir, target string) (int, string, error) {
+func makeRunnerOwned(t *testing.T, captureRoot **os.Root, standaloneArgs ...string) func(dir, target string) (int, string, error) {
 	t.Helper()
 	return func(dir, target string) (int, string, error) {
 		base := os.Getenv("STANDALONE_DIAGNOSTICS_DIR")
@@ -292,7 +292,13 @@ func makeRunnerOwned(t *testing.T, captureRoot **os.Root) func(dir, target strin
 		if err := writeState(); err != nil {
 			return 0, "", err
 		}
-		cmd := exec.Command("make", target)
+		argv := []string{target}
+		// Только реальный гейт задаёт последовательный запуск пакетов вложенной
+		// цели; обычный make и соседние цели сохраняют свои аргументы.
+		if target == "test-standalone" && len(standaloneArgs) != 0 {
+			argv = append(argv, "ARGS="+strings.Join(standaloneArgs, " "))
+		}
+		cmd := exec.Command("make", argv...)
 		cmd.Dir = dir
 		env := nestedEnv(gitenv.Env())
 		for _, item := range env {

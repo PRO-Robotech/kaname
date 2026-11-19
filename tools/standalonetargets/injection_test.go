@@ -458,6 +458,35 @@ func TestRunner_NestedMakeDoesNotInheritTheOuterArgs(t *testing.T) {
 		"вложенный уровень не объявлен — повторный вход отсечь нечем:\n%s", out)
 }
 
+// Явные аргументы гейта принадлежат только вложенной цели проб; внешние
+// ARGS не наследуются ни ею, ни соседней целью, ни раннером по умолчанию.
+func TestRunner_StandaloneArgsAreExplicitAndTargetScoped(t *testing.T) {
+	t.Setenv("ARGS", "-race")
+	t.Setenv("MAKEFLAGS", " -- ARGS=-race")
+	for _, tc := range []struct {
+		name, target, want string
+		args               []string
+	}{
+		{"explicit", "test-standalone", "-short -p=1", []string{"-short", "-p=1"}},
+		{"neighbour", "show", "", []string{"-short", "-p=1"}},
+		{"default", "test-standalone", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			recipe := nestedProbeRecipe + "test-standalone: show\n"
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"), []byte(recipe), 0o600))
+			result, err := makeCaptureRunner(t, tc.args...)(dir, tc.target)
+			if result.Capture != nil {
+				defer result.Capture.Close()
+			}
+			require.NoError(t, err)
+			require.Zero(t, result.Code, result.Output)
+			require.Contains(t, result.Output, "recipe-args=["+tc.want+"]")
+			require.NotContains(t, result.Output, "-race")
+		})
+	}
+}
+
 // TestRunner_NeighbourVariableStillReachesTheNestedMake — законный близнец:
 // очистка снимает ТОЛЬКО переменные, несущие флаги внешнего make, а не всё
 // окружение (иначе клон потерял бы PATH, GOPATH и кэш сборки). Отличается от
