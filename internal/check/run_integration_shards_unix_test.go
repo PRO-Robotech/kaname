@@ -556,17 +556,24 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 }
 
 func TestRunIntegrationShardsTwelveNamedPartsFailClosed(t *testing.T) {
+	script := runIntegrationSource(t)
+	// Двойники используют отдельные песочницы. Держим не больше двух
+	// одновременно, включая их очистку.
+	slots := make(chan struct{}, 2)
 	for _, shard := range []int{0, 1, 3, 5, 11} {
 		for _, defect := range []string{"run-empty", "run-missing", "run-renamed", "run-skipped", "run-one-skipped", "run-duplicate", "run-nonjson", "run-wrong-package"} {
 			t.Run(fmt.Sprintf("%d/%s", shard, defect), func(t *testing.T) {
-				o := runShardFixture(t, runIntegrationSource(t), fmt.Sprintf("%d/12", shard), false, false,
+				t.Parallel()
+				slots <- struct{}{}
+				t.Cleanup(func() { <-slots })
+				o := runShardFixture(t, script, fmt.Sprintf("%d/12", shard), false, false,
 					"FAKE_TWELVE=1", "FAKE_DEFECT="+defect)
 				require.Equal(t, 2, o.rc, o.output)
 			})
 		}
 	}
 	for _, shard := range []int{4, 7} {
-		o := runShardFixture(t, runIntegrationSource(t), fmt.Sprintf("%d/12", shard), false, false,
+		o := runShardFixture(t, script, fmt.Sprintf("%d/12", shard), false, false,
 			"FAKE_TWELVE=1", "FAKE_DEFECT=skip-selected")
 		require.Equal(t, 2, o.rc, o.output)
 	}
