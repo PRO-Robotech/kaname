@@ -1709,11 +1709,16 @@ func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, 
 			}
 		}
 		d.Tuples = tuples
+		if pending == 0 {
+			// Успешно записанные ключи уже учтены тем же collector.
+			// Повторный член требует строки члена, его кортежи уже записаны.
+			d.Tuples = nil
+		}
 		ledgerStart := len(writes.ledger)
 		if err := r.materializeForwardMember(ctx, s, bs, d, col, &writes); err != nil {
 			return err
 		}
-		if len(recorded) > 0 {
+		if len(recorded) > 0 && pending > 0 {
 			// Предыдущий flush мог записать часть ключей этого члена.
 			ledger := writes.ledger[:ledgerStart]
 			for _, ref := range writes.ledger[ledgerStart:] {
