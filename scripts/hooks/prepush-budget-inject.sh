@@ -45,6 +45,13 @@
 #     осей 1–4, — прогнаны на входах с заранее известным ответом: форма
 #     дефекта обязана дать красное, законная форма записи — зелёное.
 #
+#  6. REDUCED=1: hostile GOFLAGS перекрыт у каждого тяжёлого вызова; все семь
+#     групп и lint исполнены; упавшая проба сохраняет красный вердикт.
+#  7. INTERNAL-ARG: зелёный/красный исходы, настоящий stdin стража, семь групп,
+#     systemd не звался и журнал не заявляет выставленного потолка.
+#     Это проверка поведения хука, а НЕ доказательство runtime caps.
+#  8. INVALID: 0, 5, пустое, -1, строка дают код 2 до Go/lint/systemd.
+#
 # Контроль и близнецы гоняются со СНЯТЫМ внешним GOFLAGS, кроме оси 4: иначе
 # окружение того, кто гоняет опыт, решало бы исход вместо хука.
 #
@@ -92,8 +99,8 @@ ok()  { checks=$((checks + 1)); note_check; echo "  ok   — $1"; }
 bad() { checks=$((checks + 1)); note_check; failed=$((failed + 1)); echo "  БЕДА — $1" >&2; }
 
 # Ведомость осей — единственный источник перечня и числа утверждений КАЖДОЙ оси.
-AXIS_NAME=(1 2 3 4 5)
-AXIS_CHECKS=(9 4 3 2 15)
+AXIS_NAME=(1 2 3 4 5 6 7 8)
+AXIS_CHECKS=(9 4 3 2 15 10 14 15)
 AXES_DECLARED=${#AXIS_CHECKS[@]}
 axes_executed=0
 expected_checks=0
@@ -205,6 +212,12 @@ build_module() {
     # Хук первым зовёт страж правила ветки и коммита — без него он отказывает.
     cp "$RULE_LIB" "$d/scripts/hooks/branch-rule.sh" || return 1
     cp "$RULE_GUARD" "$d/scripts/hooks/prepush-rule.sh" || return 1
+    mv "$d/scripts/hooks/prepush-rule.sh" "$d/scripts/hooks/prepush-rule.real.sh"
+    cat > "$d/scripts/hooks/prepush-rule.sh" <<GUARD
+#!/usr/bin/env bash
+cat > "$d/.git/guard.stdin"
+exec bash "$d/scripts/hooks/prepush-rule.real.sh" "\$@" < "$d/.git/guard.stdin"
+GUARD
     chmod +x "$d/scripts/hooks/pre-push" "$d/scripts/hooks/prepush-classify.sh"
     printf 'module probe.invalid/budget\n\ngo 1.21\n' > "$d/go.mod"
     cat > "$d/budget_test.go" <<GO
@@ -239,10 +252,20 @@ MK
 # ровно одним фактом — внешним GOFLAGS.
 push_case() {
     d="$work/$1"; b="$work/$1.bin"
+    unset KANAME_PREPUSH_GO_PARALLEL KANAME_SKIP_PREPUSH
     if [ "$#" -ge 4 ]; then export GOFLAGS="$4"; else unset GOFLAGS; fi
+    if [ "$#" -ge 5 ]; then export KANAME_PREPUSH_GO_PARALLEL="$5"; fi
     make_bin "$b" "$2" || return 1
     build_module "$d" "$3" || return 1
-    out="$(PATH="$b:$PATH" git -C "$d" push origin HEAD:refs/heads/1 2>&1)"
+    if [ "${6:-}" = internal ] || [ "${6:-}" = direct ]; then
+        local input
+        input="$(printf 'refs/heads/1 %s refs/heads/1 %s' "$(git -C "$d" rev-parse HEAD)" 0000000000000000000000000000000000000000)"
+        local -a hook_args=()
+        [ "${6:-}" != internal ] || hook_args+=(--kaname-prepush-in-memory-scope)
+        out="$(cd "$d" && PATH="$b:$PATH" bash scripts/hooks/pre-push "${hook_args[@]}" origin "$d.git" <<< "$input" 2>&1)"
+    else
+        out="$(PATH="$b:$PATH" git -C "$d" push origin HEAD:refs/heads/1 2>&1)"
+    fi
     rc=$?
 }
 
@@ -366,7 +389,7 @@ current_axis=1
 if ! push_case control ok '	_ = t'; then
     axis_unmet 1 "фикстура не собрана"
 else
-    if [ "$rc" -eq 0 ]; then ok "контроль: отправка зелёного модуля прошла"
+    if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'зелёное — исполнено 7 из 7'; then ok "контроль: отправка зелёного модуля прошла, все семь групп исполнены"
     else bad "контроль: отправка отказана (код $rc), хотя модуль зелёный: $(printf '%s' "$out" | tail -5)"; fi
 
     heavy="$(go_heavy_lines "$b/go.log")"
@@ -533,6 +556,77 @@ cap_case отказ 'потолки стоят ПОСЛЕ --: это довод�
     "$TRIAL" "--user --scope -- bash $H --kaname-prepush-in-memory-scope -p MemoryMax=10G -p MemorySwapMax=0"
 axis_done 5
 
+# Оси 6–8 гоняют настоящий хук; internal-arg здесь не доказывает caps ядра.
+reduced_checks() {
+    local expected_rc="$1" heavy line wide=0 n
+    if { [ "$expected_rc" = green ] && [ "$rc" -eq 0 ]; } || { [ "$expected_rc" = red ] && [ "$rc" -ne 0 ]; }; then
+        ok "reduced $expected_rc: нужный исход $rc"
+    else bad "reduced $expected_rc: неожиданный исход $rc"; fi
+    heavy="$(go_heavy_lines "$b/go.log")"
+    n="$(printf '%s' "$heavy" | grep -c . || true)"
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        [ "$(effective_p "$line")" = 1 ] || wide=$((wide + 1))
+    done <<< "$heavy"
+    if [ "$n" -gt 0 ] && [ "$wide" -eq 0 ]; then ok "reduced: непустой журнал, каждый build/vet/test effective-p=1"
+    else bad "reduced: журнал $n, неверный -p у $wide вызовов"; fi
+    if grep -q 'args=run ' "$b/lint.log"; then ok "reduced: lint исполнен"
+    else bad "reduced: lint не исполнен"; fi
+    if printf '%s' "$out" | grep -q 'исполнено групп проверок: 7'; then ok "reduced: исполнены все семь групп"
+    else bad "reduced: нет переписи семи групп"; fi
+    if [ "$expected_rc" = green ]; then
+        if printf '%s' "$out" | grep -q 'зелёное — исполнено 7 из 7'; then ok "reduced: итог семи групп зелёный"
+        else bad "reduced: нет зелёного итога семи групп"; fi
+    else
+        if printf '%s' "$out" | grep -q 'красные.*пробы'; then ok "reduced: красной названа группа проб"
+        else bad "reduced: отказ не от группы проб"; fi
+    fi
+}
+
+current_axis=6
+echo "── ось 6: reduced=1 перекрывает hostile GOFLAGS, зелёный и красный"
+for color in green red; do
+    body='_ = t'; [ "$color" = green ] || body='t.Errorf("reduced red probe")'
+    if push_case "reduced-$color" ok "$body" '-p=32' 1; then
+        reduced_checks "$color"
+    else axis_unmet 6 "фикстура $color не собрана"; fi
+done
+axis_done 6
+
+current_axis=7
+echo "── ось 7: internal-arg сохраняет проверки, caps здесь НЕ доказываются"
+for color in green red; do
+    body='_ = t'; [ "$color" = green ] || body='t.Errorf("internal red probe")'
+    if push_case "internal-$color" ok "$body" '-p=32' 1 internal; then
+        reduced_checks "$color"
+        if [ ! -s "$b/systemd-run.log" ] && [ -s "$d/.git/guard.stdin" ]; then
+            ok "internal: systemd не звался, настоящий непустой stdin дошёл до стража"
+        else bad "internal: systemd звался либо вход стража пуст"; fi
+        if printf '%s' "$out" | grep -q 'хук не выставлял и не проверял потолок памяти' && ! printf '%s' "$out" | grep -q 'MemoryMax=10G'; then
+            ok "internal: память названа честно, 10G не заявлены"
+        else bad "internal: неверное описание потолка"; fi
+    else axis_unmet 7 "фикстура $color не собрана"; fi
+done
+axis_done 7
+
+current_axis=8
+echo "── ось 8: неверный knob отказывает до Go, lint и systemd"
+invalid_index=0
+for value in 0 5 '' -1 string; do
+    invalid_index=$((invalid_index + 1))
+    if push_case "invalid-$invalid_index" ok '_ = t' '-p=32' "$value" direct; then
+        if [ "$rc" -eq 2 ]; then ok "invalid [$value]: код 2"
+        else bad "invalid [$value]: ожидался код 2, получен $rc"; fi
+        if [ ! -s "$b/go.log" ] && [ ! -s "$b/lint.log" ] && [ ! -s "$b/systemd-run.log" ]; then
+            ok "invalid [$value]: Go, lint, systemd не звались"
+        else bad "invalid [$value]: остались следы запрещённого вызова"; fi
+        if ! printf '%s' "$out" | grep -q 'зелёное — исполнено'; then ok "invalid [$value]: зелёного итога нет"
+        else bad "invalid [$value]: ложный зелёный итог"; fi
+    else axis_unmet 8 "invalid [$value]: фикстура не собрана"; fi
+done
+axis_done 8
+unset KANAME_PREPUSH_GO_PARALLEL
+
 echo
 echo "=== prepush-budget-inject: перепись ==="
 echo "осей объявлено        : $AXES_DECLARED"
@@ -555,4 +649,4 @@ if [ "${#unmet_reasons[@]}" -gt 0 ] || [ "$axes_executed" -ne "$AXES_DECLARED" ]
     || [ "${#axis_short[@]}" -gt 0 ] || [ "$orphan_checks" -gt 0 ] || [ "$checks" -ne "$expected_checks" ]; then
     echo "НЕ ИСПОЛНЯЛОСЬ: объём исполненного разошёлся с ведомостью — вердикта нет." >&2; exit 2
 fi
-echo "ЗЕЛЁНОЕ: детектора гонок нет, bounded lint вызван, параллелизм Go — 4, прогон под потолком памяти, когда он доступен."
+echo "ЗЕЛЁНОЕ: детектора гонок нет, bounded lint вызван, параллелизм Go — default 4 / reduced 1; internal-arg caps ядра не доказывает."
