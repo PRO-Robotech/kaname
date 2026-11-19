@@ -1667,22 +1667,13 @@ const (
 func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, bs BindingScope, desired []DesiredMember, col *syncFGACollector) error {
 	var writes forwardWriteSet
 	var recorded map[EmittedTupleRef]struct{}
-	if _, legacy := s.(forwardTupleWriter); legacy {
+	if _, legacy := s.(forwardTupleWriter); legacy && col != nil {
 		// Legacy WithTx удерживает допуск compatibility и замок выдачи;
-		// холодный проход только добавляет записи реестра. Подготовленные signed
-		// writers сохраняют прежний состав команд и квитанций.
+		// холодный проход только добавляет записи реестра. Общий collector
+		// исключает повторную публикацию уже записанного ключа.
 		recorded = make(map[EmittedTupleRef]struct{})
 	}
 	flush := func() error {
-		if recorded != nil {
-			ledger := writes.ledger[:0]
-			for _, ref := range writes.ledger {
-				if _, alreadyRecorded := recorded[ref]; !alreadyRecorded {
-					ledger = append(ledger, ref)
-				}
-			}
-			writes.ledger = ledger
-		}
 		if err := writes.writeLive(ctx, s); err != nil {
 			return err
 		}
@@ -1702,15 +1693,35 @@ func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, 
 		if !ok {
 			return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
 		}
-		// Проверка до collectNew сохраняет границы партий и порядок первых tuples.
-		if len(writes.members) > 0 && (len(writes.members) == coldActiveBatchMembers || len(tuples) > coldActiveBatchTuples-len(writes.ledger)) {
+		pending := len(tuples)
+		if len(recorded) > 0 {
+			coord := desiredCoord(d)
+			for _, t := range tuples {
+				ref := EmittedTupleRef{BindingID: bs.BindingID, Member: coord, Tuple: t}
+				if _, alreadyRecorded := recorded[ref]; alreadyRecorded {
+					pending--
+				}
+			}
+		}
+		if len(writes.members) > 0 && (len(writes.members) == coldActiveBatchMembers || pending > coldActiveBatchTuples-len(writes.ledger)) {
 			if err := flush(); err != nil {
 				return err
 			}
 		}
 		d.Tuples = tuples
+		ledgerStart := len(writes.ledger)
 		if err := r.materializeForwardMember(ctx, s, bs, d, col, &writes); err != nil {
 			return err
+		}
+		if len(recorded) > 0 {
+			// Предыдущий flush мог записать часть ключей этого члена.
+			ledger := writes.ledger[:ledgerStart]
+			for _, ref := range writes.ledger[ledgerStart:] {
+				if _, alreadyRecorded := recorded[ref]; !alreadyRecorded {
+					ledger = append(ledger, ref)
+				}
+			}
+			writes.ledger = ledger
 		}
 		if len(writes.members) == coldActiveBatchMembers || len(writes.ledger) >= coldActiveBatchTuples {
 			// Исходный keepLiveDesired уже отфильтровал весь набор под замками этой tx.
