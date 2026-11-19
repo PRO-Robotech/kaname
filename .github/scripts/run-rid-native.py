@@ -270,8 +270,24 @@ def cleanup(evidence, env, before, root_test):
     return result
 
 
+# Только публичные исходники существующих native fixture/bridge, не пути из Output.
+ASSERTION_FILES = (
+    "cmd/kaname/installation_native_fixture_test.go",
+    "cmd/kaname/installation_native_baseline_test.go",
+    "cmd/kaname/installation_native_stock_premise_test.go",
+    "cmd/kaname/installation_public_lifecycle_fixture_test.go",
+    "cmd/kaname/installation_native_renewal_test.go",
+    "cmd/kaname/installation_newman_install_test.go",
+    "cmd/kaname/installation_creator_retirement_native_test.go",
+    "cmd/kaname/installation_newman_retirement_test.go",
+    "cmd/kaname/installation_newman_bridge_test.go",
+    "cmd/kaname/installation_owned_child_driver_test.go",
+    "internal/testsupport/installruntime/stand.go",
+)
+
+
 def test_diagnostics(path, root_test, predicates):
-    # Только имена из CASES и известные режимы RID-04; Output не проецируется.
+    # Только имена из CASES и известные режимы RID-04; строки Output не проецируются.
     names = {root_test, *(root_test + "/" + name for name in predicates)}
     if root_test == CASES["registry-installation-rid04"][0]:
         names.update(root_test + "/" + name + "/" + mode
@@ -279,7 +295,13 @@ def test_diagnostics(path, root_test, predicates):
     known = {name: name for name in names}
     actions = {action: action for action in ("run", "pass", "fail", "skip")}
     result = {"status": "complete", "events": []}
-    seen = set()
+    seen, fragmented, sites = set(), set(), {}
+    bounds = {}
+    for relative in ASSERTION_FILES:
+        try:
+            bounds[relative] = len((ROOT / relative).read_text(encoding="utf-8").splitlines())
+        except (OSError, UnicodeError):
+            continue
     total = 0
     try:
         with path.open("rb") as stream:
@@ -295,6 +317,21 @@ def test_diagnostics(path, root_test, predicates):
                 if not isinstance(event, dict) or event.get("Package") != PACKAGE:
                     continue
                 name, action = event.get("Test"), event.get("Action")
+                if (action == "output" and isinstance(name, str) and name in known and name not in sites
+                        and (name, "run") in seen
+                        and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
+                    output = event.get("Output")
+                    # Никакой сборки фрагментов: потеря координаты безопаснее ложной склейки.
+                    if not isinstance(output, str) or output.count("\n") != 1 or not output.endswith("\n"):
+                        fragmented.add(name)
+                    elif re.match(r"^[ \t]*Error Trace:", output):
+                        sites[name] = {"status": "unrecognized-trace"}
+                        for relative, limit in bounds.items():
+                            match = re.fullmatch(r"[ \t]*Error Trace:[ \t]+" +
+                                re.escape(str(ROOT / relative)) + r":([1-9][0-9]{0,6})\n", output)
+                            if match and int(match[1]) <= limit:
+                                sites[name] = {"status": "matched", "file": relative, "line": int(match[1])}
+                                break
                 if not isinstance(action, str) or action not in actions:
                     continue
                 if name is None:
@@ -314,6 +351,16 @@ def test_diagnostics(path, root_test, predicates):
         result["status"] = "malformed"
     except OSError:
         result["status"] = "unavailable"
+    first = next((row["test"] for row in result["events"]
+                  if row["scope"] == "test" and row["action"] == "fail"), None)
+    if first is not None:
+        if result["status"] != "complete":
+            site = {"status": "incomplete-scan"}
+        elif first in fragmented:
+            site = {"status": "fragmented-output"}
+        else:
+            site = sites.get(first, {"status": "not-observed"})
+        result["firstFailureSite"] = {"test": first, **site}
     return result
 
 
