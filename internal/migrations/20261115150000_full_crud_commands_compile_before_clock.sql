@@ -139,7 +139,11 @@ BEGIN
    IF TG_OP='DELETE' THEN RETURN OLD;END IF;RETURN NEW;
   END IF;
  END IF;
- manifest:=kaname._authority_producer_resource_v2();
+ -- Без временной таблицы потребителя селектор возвращает NULL.
+ IF TG_TABLE_NAME<>'access_binding_target_members'
+ OR to_regclass('pg_temp.kaname_authority_consumer') IS NOT NULL THEN
+  manifest:=kaname._authority_producer_resource_v2();
+ END IF;
  IF manifest IS NOT NULL THEN
   IF TG_OP<>'INSERT' THEN old_image:=to_jsonb(OLD); END IF;
   IF TG_OP<>'DELETE' THEN new_image:=to_jsonb(NEW); END IF;
@@ -9069,7 +9073,7 @@ BEGIN
  ('authority_audit_statement_guard_v2()','cc9fd152b1c8fa68a65eb6451baf977a12b0866cc52668254280265f10f9271c',true,'v',true,'preserve'),
  ('membership_mirror_from_user()','d763127654c0d5852aee7f86d8c5f5ea4fa89464c7f1e3c7df9efbace4e6c405',false,'v',false,'preserve'),
  ('_authority_resource_before_write_v3(jsonb,text,text,jsonb,jsonb)','10cfd5fcbe108b1f0b62f688d7ae80b72e34a536593fae3343c730cc0cb82da5',true,'v',true,'private'),
- ('_authority_resource_effect_applied_v2()','83057896665db04f47bf5837ca0f14cdbd83d187cba4d86c7aa40c11075d855a',true,'v',true,'private'),
+ ('_authority_resource_effect_applied_v2()','52e1c2a3bee44dc61e42c85bf439e766c7335167af16eb77fb60cf85b63a12a9',true,'v',true,'private'),
  ('_authority_resource_write_v2(jsonb,text,text,jsonb,jsonb)','cdb26211660f6fc89ee193516c9bc7cfa3e3bdcd427d3cf71c17c4a047272c2f',true,'v',true,'private'),
  ('_authority_resource_side_v2(jsonb,text,text,text,jsonb)','09f8a713bf8e2a59ec0051910a49f5df93dec5bc5c776271c2f1a54dbb1eb8f1',true,'v',true,'private'),
  ('_authority_crud_anchor_capture_v3(jsonb,integer,integer)','2dee8b172ebd3b228b5c6cc4dec189feae30db2c1c9a4bc98752525025d823c7',true,'s',true,'private'),
@@ -9744,7 +9748,7 @@ BEGIN
  ('authority_protocol_activate_full_v3(text,text,text)','646328a2433e1d31d17a9c178ac3ab59a5a65d8252accf5295a20d22705d31cf',false),
  ('authority_protocol_attestation()','130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502',true),
  ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true),
- ('authority_protocol_row_guard()','f3bf13a93e62817874ad98101cd8a916c2561be5cdefe7feb8f74b86bd8ea85d',true),
+ ('authority_protocol_row_guard()','5cd5770a23750c6aa0669ba2bac17120dd106be74c79fb0eb283fbd7690c35c5',true),
  ('_authority_protocol_stage_generation1(text,bytea,text,text,text)','7ffb942af742bff4b556f07b00d9d8f75fefba3aa1f00445073140b5c8072bde',false),
  ('_authority_protocol_activate_generation1(text,text,text)','00d97c37e2ab533c232e4cffb975e8d71c3eefa98228e0f39d90249526bf041c',false),
  ('authority_protocol_drain()','f0e36bb29e96ba0417e9143821391b9df518541a017dcd9b171c037e167bc500',false),
@@ -9912,7 +9916,11 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS
 DECLARE manifest jsonb; old_image jsonb; new_image jsonb; matched jsonb;
  ordinal integer;v_old_image jsonb;v_new_image jsonb;
 BEGIN
- manifest:=kaname._authority_producer_resource_v2();
+ -- После записи заново проверяем наличие временной таблицы потребителя.
+ IF TG_TABLE_NAME<>'access_binding_target_members'
+ OR to_regclass('pg_temp.kaname_authority_consumer') IS NOT NULL THEN
+  manifest:=kaname._authority_producer_resource_v2();
+ END IF;
  IF manifest IS NULL THEN
   IF TG_TABLE_NAME NOT IN ('access_binding_target_members','access_binding_emitted_tuples','fga_outbox','relation_fact')
    OR kaname._authority_binding_mirror_store_v3() IS NULL THEN RETURN NULL;END IF;
