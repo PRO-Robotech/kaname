@@ -334,6 +334,28 @@ def test_what_the_pipeline_runs_the_census_calls_runnable():
         + ", ".join(f"{s} — {'; '.join(blocked[s])}" for s in clash))
 
 
+def test_native_rid_census_keeps_producer_inputs_separate():
+    mod = _debt_module()
+    stem = "registry-installation-rid01"
+    newman = ROOT / "tests" / "newman"
+    text = (newman / "collections" / f"{stem}.postman_collection.json").read_text(encoding="utf-8")
+    keys = mod.used_keys(text)
+    surface = mod.surface_of(text, keys)
+    declared = mod.template_keys(newman)
+    own = set(mod.OWN_KEY_RE.findall(text))
+    native = mod._native_declared(ROOT)
+    native_step = [("native step", "native")]
+    missing_key = "unexpectedNativeInput"
+
+    blocked, _ = mod._route_blockers(stem, surface, keys | {missing_key}, declared, own,
+                                     {surface: {missing_key}}, native_step, native, text)
+    assert any(missing_key in reason for reason in blocked)
+
+    mixed_steps = native_step + [("native step", "generic")]
+    blocked, _ = mod._route_blockers(stem, surface, keys, declared, own, {}, mixed_steps, native, text)
+    assert blocked
+
+
 # ── ИНЪЕКЦИЯ: ОБЕ СТОРОНЫ, И РАЗБОР ПРОТИВ ГРЕПА ────────────────────────────
 
 _WF_WITH_RUN = """\

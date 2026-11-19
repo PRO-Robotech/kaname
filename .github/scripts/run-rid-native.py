@@ -270,6 +270,53 @@ def cleanup(evidence, env, before, root_test):
     return result
 
 
+def test_diagnostics(path, root_test, predicates):
+    # Только имена из CASES и известные режимы RID-04; Output не проецируется.
+    names = {root_test, *(root_test + "/" + name for name in predicates)}
+    if root_test == CASES["registry-installation-rid04"][0]:
+        names.update(root_test + "/" + name + "/" + mode
+                     for name in predicates for mode in ("S1", "S2"))
+    known = {name: name for name in names}
+    actions = {action: action for action in ("run", "pass", "fail", "skip")}
+    result = {"status": "complete", "events": []}
+    seen = set()
+    total = 0
+    try:
+        with path.open("rb") as stream:
+            while True:
+                line = stream.readline(1048577)
+                if not line:
+                    break
+                total += len(line)
+                if len(line) > 1048576 or total > 64 * 1048576:
+                    result["status"] = "limit-exceeded"
+                    break
+                event = json.loads(line)
+                if not isinstance(event, dict) or event.get("Package") != PACKAGE:
+                    continue
+                name, action = event.get("Test"), event.get("Action")
+                if not isinstance(action, str) or action not in actions:
+                    continue
+                if name is None:
+                    if action == "run":
+                        continue
+                    key = (None, action)
+                    row = {"scope": "package", "action": actions[action]}
+                elif isinstance(name, str) and name in known:
+                    key = (name, action)
+                    row = {"scope": "test", "test": known[name], "action": actions[action]}
+                else:
+                    continue
+                if key not in seen:
+                    seen.add(key)
+                    result["events"].append(row)
+    except (ValueError, RecursionError):
+        result["status"] = "malformed"
+    except OSError:
+        result["status"] = "unavailable"
+    return result
+
+
 def judge_test(path, root_test, predicates):
     running, passed, terminal = set(), set(), []
     with path.open() as stream:
@@ -378,12 +425,21 @@ def main():
                   "volumes": frozenset(docker(["volume", "ls", "-q"], env))}
         need(all(re.fullmatch(r"[a-f0-9]{64}", cid) for cid in before["containers"]))
         write_json(private / "docker-before.json", {key: sorted(value) for key, value in before.items()})
+        summary["status"] = "native-test-command-failed"
         rc = command(["go", "tool", "test2json", "-t", "-p", PACKAGE, str(bins / "rid-tests"),
                       "-test.v=test2json", "-test.parallel=1", "-test.run=^" + root_test + "$",
                       "-test.count=1", "-test.timeout=20m"], env, private / "test.jsonl",
                      cwd=ROOT / "cmd/kaname", timeout=OUTER_SECONDS)
+        summary["testExitCode"] = rc if type(rc) is int and -255 <= rc <= 255 else None
+        if rc != 0:
+            summary["testDiagnostics"] = test_diagnostics(private / "test.jsonl", root_test, predicates)
         need(rc == 0)
-        summary["test"] = judge_test(private / "test.jsonl", root_test, predicates)
+        summary["status"] = "native-test-verdict-failed"
+        try:
+            summary["test"] = judge_test(private / "test.jsonl", root_test, predicates)
+        except (Rejected, ValueError, OSError, TypeError, RecursionError):
+            summary["testDiagnostics"] = test_diagnostics(private / "test.jsonl", root_test, predicates)
+            raise
         summary["status"] = "receipt-proof-failed"
         need(sha(node) == expected["nodeSHA256"] and tree_sha(module) == expected["toolTreeSHA256"])
         need(sha(runner) == expected["runnerSHA256"] and sha(collector) == collector_sha)
