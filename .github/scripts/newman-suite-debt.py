@@ -685,6 +685,15 @@ def runner_stems(argv: list[str]) -> list[str]:
                 return [st for sub in shell_commands(argv[k + 1])
                         for st in runner_stems(sub)]
             k += 1
+    if (k + 1 < len(argv) and argv[k].rsplit("/", 1)[-1] == "python3" and
+            argv[k + 1].removeprefix("./") == ".github/scripts/run-rid-native.py"):
+        # Засчитывается только вызов конкретной поддержанной коллекции с двумя путями вывода.
+        options = argv[k + 2:]
+        if len(options) == 6 and set(options[::2]) == {"--suite", "--private-dir", "--out"}:
+            stem = options[options.index("--suite") + 1]
+            if stem in {"registry-installation-rid01", "registry-installation-rid04"}:
+                return [stem]
+        return []
     if k >= len(argv) or not RUNNER_RE.search(argv[k]):
         return []
     out: list[str] = []
@@ -1016,10 +1025,10 @@ _HOLDER_EDGE_HALF = (
 # Чёрный ящик доходит до этих глаголов только через край.
 
 PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
-    "registry-installation-rid01": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID01, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid01 с публичной коллекцией и подтверждённой очисткой"),
+    "registry-installation-rid01": ("A", "Нативная фикстура Kaname выдаёт окружение и восемь публичных фаз. Их выполняет задание rid01, которое проверяет уборку ресурсов своего запуска", ""),
     "registry-installation-rid02": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID02, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid02 с публичной коллекцией и подтверждённой очисткой"),
     "registry-installation-rid03": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID03, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid03 с публичной коллекцией и подтверждённой очисткой"),
-    "registry-installation-rid04": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID04, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid04 с публичной коллекцией и подтверждённой очисткой"),
+    "registry-installation-rid04": ("A", "Нативная фикстура Kaname выдаёт окружение и четырнадцать публичных фаз вывода создателя из эксплуатации. Их выполняет задание rid04 с проверкой уборки ресурсов своего запуска", ""),
     "registry-installation-rid05": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID05, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid05 с публичной коллекцией и подтверждённой очисткой"),
     "registry-installation-rid06": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID06, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid06 с публичной коллекцией и подтверждённой очисткой"),
     "registry-installation-rid07": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID07, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid07 с публичной коллекцией и подтверждённой очисткой"),
@@ -2536,6 +2545,21 @@ def self_test() -> int:
                bool(parsed.get("own-only")) == runs_it
                and f"гоняется здесь:    {want}" in out,
                f"разборщик: {parsed}; перепись: {out[:300]}")
+
+        native = ("python3 .github/scripts/run-rid-native.py --suite registry-installation-rid01 "
+                  "--private-dir \"$PRIVATE\" --out \"$PUBLIC\"")
+        for index, (body, wanted) in enumerate((
+            (native, {"registry-installation-rid01"}),
+            (native.replace("rid01", "rid04"), {"registry-installation-rid04"}),
+            (f"echo '{native}'", set()),
+            (native.replace("rid01", "rid02"), set()),
+            (native.replace("registry-installation-rid01", '"$RID"'), set()),
+            ("python3 .github/scripts/run-rid-native.py --out public.json", set()),
+        )):
+            parsed = pipeline_runs(_wf_body(tmp / f"rid-producer-{index}", body))
+            _c(f"Нативный RID требует известную коллекцию, приватный вывод и сводку ({index})",
+               set(parsed) == wanted,
+               f"разборщик: {parsed}")
 
         # Ось 6д: тело шага с ИНОЙ оболочкой — не программа bash, и её строка,
         # похожая на команду прогонщика, прогоном не засчитывается. Близнец —

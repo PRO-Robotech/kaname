@@ -26,6 +26,50 @@
  },
  "groups": [
   {
+   "id": "rid01-native",
+   "why": "нативная установка и обновление токена с публичными фазами RID-01",
+   "jobs": [
+    "e2e-newman.yml:rid01"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid01.py",
+    "tests/newman/collections/registry-installation-rid01.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid04-native",
+   "why": "нативная проверка вывода создателя из эксплуатации с публичными фазами RID-04",
+   "jobs": [
+    "e2e-newman.yml:rid04"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid04.py",
+    "tests/newman/collections/registry-installation-rid04.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
    "id": "go-build",
    "why": "сборка, vet, gofmt, линтер, gosec; хуки отправки и записи ревью — в задании сборки",
    "jobs": [
