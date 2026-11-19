@@ -154,6 +154,43 @@ func TestApplyDiff_ColdActiveLegacyRecordsSharedLedgerKeyOnce(t *testing.T) {
 	require.Equal(t, []EmittedTupleRef{{BindingID: coldScope().BindingID, Member: desiredCoord(otherRule), Tuple: newTuple}}, store.refs[1])
 }
 
+func TestApplyDiff_ColdActiveLegacyBatchSizeCountsOnlyOutstandingLedgerKeys(t *testing.T) {
+	desired, store := coldDesired(coldActiveBatchTuples / 2)
+	for i := range desired {
+		other := desired[i].Tuples[0]
+		other.Relation = "v_update"
+		desired[i].Tuples = append(desired[i].Tuples, other)
+	}
+	firstRule := desired
+	for _, rule := range []string{"second-rule", "third-rule"} {
+		for _, member := range firstRule {
+			member.RuleFP = rule
+			desired = append(desired, member)
+		}
+	}
+	newMember := firstRule[0]
+	newMember.RuleFP = "fourth-rule"
+	newTuple := newMember.Tuples[0]
+	newTuple.Relation = "v_delete"
+	newMember.Tuples = []domain.MembershipTuple{newTuple}
+	desired = append(desired, newMember)
+	legacy := coldLegacyBatchStore{store}
+	r := New(fakeRunner{s: legacy}, nil, catalogfixture.Source())
+
+	require.NoError(t, r.applyDiff(context.Background(), legacy, coldScope(), desired, nil, nil, &syncFGACollector{}))
+	require.Len(t, store.batches, 3)
+	require.Len(t, store.batches[0], coldActiveBatchTuples/2)
+	require.Len(t, store.batches[1], coldActiveBatchMembers)
+	require.Len(t, store.batches[2], 1)
+	require.Len(t, store.upserts, len(desired))
+	require.Len(t, store.refs[0], coldActiveBatchTuples)
+	require.Empty(t, store.refs[1])
+	require.Equal(t, []EmittedTupleRef{{BindingID: coldScope().BindingID, Member: desiredCoord(newMember), Tuple: newTuple}}, store.refs[2])
+	writes := allWrites(store.fakeStore)
+	require.Len(t, writes, coldActiveBatchTuples+1)
+	require.Equal(t, newTuple, writes[len(writes)-1])
+}
+
 func TestApplyDiff_ColdActiveKeepsGlobalCollectorAndBindingLedger(t *testing.T) {
 	desired, store := coldDesired(1)
 	r := New(fakeRunner{s: store}, nil, catalogfixture.Source())
