@@ -358,6 +358,19 @@ pg_expiry = [
     "TestGroup_RequireMemberOfGroupAccount_HoldsTheRowUntilCommit",
     "TestProjectCreatePublicEditorGrantExpiresAfterActualPreclockWait"
 ]
+# CI 44529872540, шард 8: дополнение PG прервано общим пределом 25m.
+# Шесть завершённых проб ниже заняли 302.31 с вместе; прерванная проба
+# запускается в этой же отдельной части, чтобы получить собственный исход.
+# Новые и остальные имена по-прежнему исполняются в дополнении PG.
+pg_long_tail = [
+    "TestFullServiceAccountStateExpiryAfterRealRowAndCutoffWaits",
+    "TestFullServiceAccountStateWholeAttemptInjectedBodyOutcomes",
+    "TestLoginVerifierContainmentGateInjection",
+    "TestReconcileColdBatch_SecondLedgerFailureRollsBackWholeCallerTx",
+    "TestReconcileForward_10_FanOutLatencyProfileAtTreeSizes",
+    "TestRoleActualUpdateFinalDecisionAfterLegacyWait",
+    "TestRoleMutationForeignRecipientAccountBoundary",
+]
 # Переносим только завершённые TOP из c39 part5 / artifact14396800440.
 # Первичный go-test-partition-4.json SHA256:
 # 641b52e2d050be7562039d954f6805383c6f29cdeb4f4510c40e25d506bb60e9.
@@ -459,12 +472,12 @@ def pattern(names):
     if not names or len(names) != len(set(names)) or any(re.fullmatch(r"Test[A-Za-z0-9_]+", n) is None for n in names):
         raise SystemExit("непустые точные имена TOP обязательны")
     return "^(" + "|".join(sorted(names)) + ")$"
-for groups in ((ab_core, fb21_and_rights, ab_clock_and_plans), (pg_heavy, pg_expiry)):
+for groups in ((ab_core, fb21_and_rights, ab_clock_and_plans), (pg_heavy, pg_expiry, pg_long_tail)):
     union = [name for group in groups for name in group]
     if len(union) != len(set(union)):
         raise SystemExit("части пересекаются по TOP")
 ab_union = pattern(ab_core + fb21_and_rights + ab_clock_and_plans)
-pg_union = pattern(pg_heavy + pg_expiry)
+pg_union = pattern(pg_heavy + pg_expiry + pg_long_tail)
 # Плановые резервы LPT ниже не являются временем успешного прогона частей.
 # c39: AB core1139.09 с завершился RED; FB21 package819.668 с PASS.
 # Переносимые20 TOP PASS =258.75 с,63 TOP PASS =622.72 с.
@@ -472,7 +485,8 @@ pg_union = pattern(pg_heavy + pg_expiry)
 # Дополнение: прежний PASS prefix472.71 + tail139 PASS509.75 =982.46 с.
 # Tail150 на R4 завершился139 PASS/11 FAIL: успешная цена11 пока неизвестна.
 # Резервы1200/1300 оставляют AB отдельно от обычных пакетов;25m не меняется.
-# PG heavy659.82 с — прежние PASS TOP; expiry700 и complement1200 — резервы.
+# PG heavy659.82 с — прежние PASS TOP; expiry700, complement1200 и
+# long_tail400 — резервы планировщика, включая ещё не принятый TOP.
 parts = {
     0: (ab, "run", pattern(ab_core), 1200),
     1: (ab, "run", pattern(fb21_and_rights), 1200),
@@ -481,6 +495,7 @@ parts = {
     5: (pg, "run", pattern(pg_heavy), 660),
     6: (pg, "run", pattern(pg_expiry), 700),
     7: (pg, "skip", pg_union, 1200),
+    11: (pg, "run", pattern(pg_long_tail), 400),
 }
 loads = {index: 0 for index in range(12)}
 for index, (_, _, _, reserve) in parts.items():
@@ -507,7 +522,7 @@ if any(not 0 <= index < 12 for index, _, _ in owners):
     raise SystemExit("неизвестный шард владельца")
 expected = [(index, package, "all", "-") for index, _, package in owners if package not in (ab, pg)]
 expected += [(index, package, mode, regex) for index, (package, mode, regex, _) in parts.items()]
-if collections.Counter(rows) != collections.Counter(expected) or len(rows) != len(selected) + 5:
+if collections.Counter(rows) != collections.Counter(expected) or len(rows) != len(selected) + 6:
     raise SystemExit("потеря, повтор или чужой фильтр единицы исполнения")
 if [(index, package, mode, regex) for index, package, mode, regex in rows if index == 2] != [(2, migration, "all", "-")]:
     raise SystemExit("migrations должен занимать index 2 без других пакетов")

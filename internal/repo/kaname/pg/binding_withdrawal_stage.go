@@ -34,6 +34,9 @@ type bindingWithdrawalStage struct {
 	policyOwner *GrantPolicyWriters
 }
 
+// Ограничивает опережающее чтение 16 записями по bindingStagePage кортежей.
+const bindingWithdrawalFetchPages = 16
+
 func (p *BindingStageParticipant) stageWithdrawal(ctx context.Context, selection bindingWithdrawalSelection) (out *bindingWithdrawalStage, err error) {
 	if p == nil || p.owner == nil || (selection.BindingID == "") == (selection.DelegationID == "") {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
@@ -355,6 +358,20 @@ func (s *bindingWithdrawalStage) visitBindings(ctx context.Context, w *authority
 	if visit == nil {
 		return kaname.ErrInvalidAuthorityFencePlan
 	}
+	return s.visitBindingPages(ctx, w, func(bindings []domain.AccessBinding) error {
+		for _, b := range bindings {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := visit(ctx, b); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *bindingWithdrawalStage) visitBindingPages(ctx context.Context, w *authorityWriteTx, visit func([]domain.AccessBinding) error) error {
 	after := ""
 	for {
 		rows, err := w.tx.Query(ctx, `SELECT binding_id,body FROM pg_temp.kaname_binding_withdrawal_headers WHERE binding_id>$1 ORDER BY binding_id LIMIT $2`, after, bindingStagePage)
@@ -380,11 +397,8 @@ func (s *bindingWithdrawalStage) visitBindings(ctx context.Context, w *authority
 		if err != nil {
 			return err
 		}
-		for _, b := range bindings {
-			if err = ctx.Err(); err != nil {
-				return err
-			}
-			if err = visit(ctx, b); err != nil {
+		if len(bindings) > 0 {
+			if err = visit(bindings); err != nil {
 				return err
 			}
 		}
@@ -404,7 +418,13 @@ func (s *bindingWithdrawalStage) lockBindings(ctx context.Context, w *authorityW
 	store := &reconcileStore{tx: w.tx}
 	// Все advisory сначала, затем все deactivation rows. Сортировка ID одинакова
 	// для всех проходов; под fence обходим только заранее построенный spool.
-	if err := s.visitBindings(ctx, w, func(ctx context.Context, b domain.AccessBinding) error { return store.AcquireBindingLock(ctx, b.ID) }); err != nil {
+	if err := s.visitBindingPages(ctx, w, func(bindings []domain.AccessBinding) error {
+		ids := make([]domain.AccessBindingID, 0, len(bindings))
+		for _, b := range bindings {
+			ids = append(ids, b.ID)
+		}
+		return store.AcquireBindingLocks(ctx, ids)
+	}); err != nil {
 		return err
 	}
 	if err := s.visitBindings(ctx, w, func(ctx context.Context, b domain.AccessBinding) error {
@@ -448,24 +468,43 @@ func (s *bindingWithdrawalStage) emitDeletes(ctx context.Context, w *authorityWr
 func (s *bindingWithdrawalStage) visitTuplePages(ctx context.Context, w *authorityWriteTx, visit func(context.Context, []ab.RelationTuple) error) error {
 	var after int64
 	for {
-		// Одна запись spool уже содержит не более bindingStagePage tuples.
-		var raw []byte
-		err := w.tx.QueryRow(ctx, `SELECT seq,body FROM pg_temp.kaname_binding_withdrawal_tuples WHERE seq>$1 ORDER BY seq LIMIT 1`, after).Scan(&after, &raw)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
+		// Читаем готовые записи пачкой. Посетитель по-прежнему получает каждую
+		// запись отдельно и в порядке seq, поэтому границы команд отзыва прежние.
+		rows, err := w.tx.Query(ctx, `SELECT seq,body FROM pg_temp.kaname_binding_withdrawal_tuples WHERE seq>$1 ORDER BY seq LIMIT $2`, after, bindingWithdrawalFetchPages)
 		if err != nil {
 			return err
 		}
-		var tuples []ab.RelationTuple
-		if err = json.Unmarshal(raw, &tuples); err != nil {
+		var pages [][]byte
+		for rows.Next() {
+			var raw []byte
+			if err = rows.Scan(&after, &raw); err != nil {
+				rows.Close()
+				return err
+			}
+			pages = append(pages, raw)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
 			return err
 		}
-		if len(tuples) > bindingStagePage {
-			return errors.New("oversized withdrawal spool page")
+		for _, raw := range pages {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			var tuples []ab.RelationTuple
+			if err = json.Unmarshal(raw, &tuples); err != nil {
+				return err
+			}
+			if len(tuples) > bindingStagePage {
+				return errors.New("oversized withdrawal spool page")
+			}
+			if err = visit(ctx, tuples); err != nil {
+				return err
+			}
 		}
-		if err = visit(ctx, tuples); err != nil {
-			return err
+		if len(pages) < bindingWithdrawalFetchPages {
+			return nil
 		}
 	}
 }

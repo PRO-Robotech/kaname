@@ -452,7 +452,7 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 		}
 		require.Equal(t, execution, plan, "все задания строят один полный план")
 		rows := strings.Split(strings.TrimSpace(plan), "\n")
-		require.Len(t, rows, 18, "13 владельцев и пять дополнительных единиц")
+		require.Len(t, rows, 19, "13 владельцев и шесть дополнительных единиц")
 		owners := make(map[string]int)
 		for _, row := range strings.Split(strings.TrimSpace(shardEvidence(t, o, "shard-plan.tsv")), "\n") {
 			fields := strings.Split(row, "\t")
@@ -499,11 +499,15 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 				}
 			}
 		}
-		if shard != 2 && shard < 8 {
+		if (shard != 2 && shard < 8) || shard == 11 {
 			raw := shardEvidence(t, o, fmt.Sprintf("go-test-partition-%d.json", shard))
 			if shard == 3 {
 				require.Contains(t, raw, "TestRoleRights_S1P8_ActualGrantReadPlans")
 				require.Contains(t, raw, "TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant")
+			}
+			if shard == 11 {
+				require.Contains(t, raw, "TestFullServiceAccountStateWholeAttemptInjectedBodyOutcomes")
+				require.Contains(t, raw, "TestRoleActualUpdateFinalDecisionAfterLegacyWait")
 			}
 			for _, future := range []string{"TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit", "TestRoleRightsStayNamed_FutureAfterSplit", "TestGrantDelegation_FutureAfterSplit"} {
 				if shard == 4 || shard == 7 {
@@ -514,7 +518,7 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 			}
 		}
 	}
-	want := map[string]int{shardAccessBinding: 4, shardPG: 3, shardMigrations: 1}
+	want := map[string]int{shardAccessBinding: 4, shardPG: 4, shardMigrations: 1}
 	for i := 0; i < 10; i++ {
 		want[fmt.Sprintf("example.test/p%d", i)] = 1
 	}
@@ -552,7 +556,7 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 }
 
 func TestRunIntegrationShardsTwelveNamedPartsFailClosed(t *testing.T) {
-	for _, shard := range []int{0, 1, 3, 5} {
+	for _, shard := range []int{0, 1, 3, 5, 11} {
 		for _, defect := range []string{"run-empty", "run-missing", "run-renamed", "run-skipped", "run-one-skipped", "run-duplicate", "run-nonjson", "run-wrong-package"} {
 			t.Run(fmt.Sprintf("%d/%s", shard, defect), func(t *testing.T) {
 				o := runShardFixture(t, runIntegrationSource(t), fmt.Sprintf("%d/12", shard), false, false,
