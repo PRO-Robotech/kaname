@@ -31,7 +31,7 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 }) {
 	t.Helper()
 	for _, f := range []struct{ name, digest, volatility string }{
-		{"authority_binding_epoch_changed", "38ea9bd9f48943d6d093e4218fbc0e5a1184459719b89743e20cfb7089c7d614", "v"},
+		{"authority_binding_epoch_changed", "bcf0e606baaa81d738d99f2dfb8882f9723c37ccb59f70fb0785e2507119ccef", "v"},
 		{"authority_binding_epoch_scope", "ae4b14d1640a4473eb8852512b1722b6439a178b2f1fde5fdc76dcc637e2fb30", "s"},
 		{"authority_binding_mutation_scopes", "520582c7dca0731080b562c1f7dcc948391f722bf6779e7b64c7e30898518fd5", "s"},
 		{"authority_group_member_row_scopes", "892302f4e4f38e2c9c016749bd6a10cadbcfa01d98ea19214500f9d6105ae6de", "s"},

@@ -7795,6 +7795,60 @@ BEGIN
    )
    SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM scopes;
   END IF;
+ ELSIF TG_TABLE_NAME='access_binding_emitted_tuples' AND TG_OP IN ('INSERT','UPDATE','DELETE') THEN
+  -- Для области нужны привязка и координаты группы у члена или кортежа.
+  -- Тип члена сохраняется при NULL ID: для группы он исключает поиск по кортежу.
+  IF TG_OP='UPDATE' THEN
+   WITH dependencies AS MATERIALIZED (
+    SELECT DISTINCT d.binding_id,d.member_object_type,d.group_object_id,d.group_object FROM (
+    SELECT o.binding_id COLLATE "C" AS binding_id,o.member_object_type COLLATE "C" AS member_object_type,
+     (CASE WHEN o.member_object_type COLLATE "default"='iam.group' THEN o.member_object_id END) COLLATE "C" AS group_object_id,
+     (CASE WHEN o.object COLLATE "default" LIKE 'iam_group:%' THEN o.object END) COLLATE "C" AS group_object
+    FROM old_epoch_rows o
+    UNION ALL
+    SELECT n.binding_id COLLATE "C" AS binding_id,n.member_object_type COLLATE "C" AS member_object_type,
+     (CASE WHEN n.member_object_type COLLATE "default"='iam.group' THEN n.member_object_id END) COLLATE "C" AS group_object_id,
+     (CASE WHEN n.object COLLATE "default" LIKE 'iam_group:%' THEN n.object END) COLLATE "C" AS group_object
+    FROM new_epoch_rows n
+    ) d
+   ), scopes AS MATERIALIZED (
+    SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,
+     pg_catalog.jsonb_build_object('binding_id',d.binding_id,'member_object_type',d.member_object_type,
+      'member_object_id',d.group_object_id,'object',d.group_object)) AS x
+    FROM dependencies d
+   )
+   SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM scopes;
+  ELSIF TG_OP='INSERT' THEN
+   WITH dependencies AS MATERIALIZED (
+    SELECT DISTINCT d.binding_id,d.member_object_type,d.group_object_id,d.group_object FROM (
+    SELECT n.binding_id COLLATE "C" AS binding_id,n.member_object_type COLLATE "C" AS member_object_type,
+     (CASE WHEN n.member_object_type COLLATE "default"='iam.group' THEN n.member_object_id END) COLLATE "C" AS group_object_id,
+     (CASE WHEN n.object COLLATE "default" LIKE 'iam_group:%' THEN n.object END) COLLATE "C" AS group_object
+    FROM new_epoch_rows n
+    ) d
+   ), scopes AS MATERIALIZED (
+    SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,
+     pg_catalog.jsonb_build_object('binding_id',d.binding_id,'member_object_type',d.member_object_type,
+      'member_object_id',d.group_object_id,'object',d.group_object)) AS x
+    FROM dependencies d
+   )
+   SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM scopes;
+  ELSE
+   WITH dependencies AS MATERIALIZED (
+    SELECT DISTINCT d.binding_id,d.member_object_type,d.group_object_id,d.group_object FROM (
+    SELECT o.binding_id COLLATE "C" AS binding_id,o.member_object_type COLLATE "C" AS member_object_type,
+     (CASE WHEN o.member_object_type COLLATE "default"='iam.group' THEN o.member_object_id END) COLLATE "C" AS group_object_id,
+     (CASE WHEN o.object COLLATE "default" LIKE 'iam_group:%' THEN o.object END) COLLATE "C" AS group_object
+    FROM old_epoch_rows o
+    ) d
+   ), scopes AS MATERIALIZED (
+    SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,
+     pg_catalog.jsonb_build_object('binding_id',d.binding_id,'member_object_type',d.member_object_type,
+      'member_object_id',d.group_object_id,'object',d.group_object)) AS x
+    FROM dependencies d
+   )
+   SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM scopes;
+  END IF;
  ELSIF TG_OP='UPDATE' THEN
   SELECT pg_catalog.array_agg(DISTINCT x ORDER BY x) INTO keys FROM (
    SELECT kaname.authority_binding_epoch_scope(TG_TABLE_NAME,pg_catalog.to_jsonb(o)) x FROM old_epoch_rows o
@@ -9341,7 +9395,7 @@ BEGIN
  ('_authority_resource_withdrawal_rules_v2(jsonb,text,text)','7bf6058618cf10048a6cb7671342c222e6dd24ff4825d6743990dd2a8c50e29c',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_split_v2(jsonb)','27da9c2fbe328e2cd4013f991dc62e7ee75ee1031a5bd5e42dd86bcd1fac7282',true,'i',true,'preserve'),
  ('_authority_resource_without_name_v2(jsonb,text,text,text,boolean,boolean)','d97ead12d3586dac0380d636ddfeb73100ddcf5310211834371babd3f3d0468a',true,'i',true,'preserve'),
- ('authority_binding_epoch_changed()','38ea9bd9f48943d6d093e4218fbc0e5a1184459719b89743e20cfb7089c7d614',true,'v',true,'preserve'),
+ ('authority_binding_epoch_changed()','bcf0e606baaa81d738d99f2dfb8882f9723c37ccb59f70fb0785e2507119ccef',true,'v',true,'preserve'),
  ('authority_binding_epoch_read(text[])','37c8fcd579b297a3c7a749b2889ad95a95561341c63bfa4eb3355284ed583b05',true,'s',true,'preserve'),
  ('authority_binding_epoch_scope(text,jsonb)','ae4b14d1640a4473eb8852512b1722b6439a178b2f1fde5fdc76dcc637e2fb30',true,'s',true,'preserve'),
  ('authority_group_object_scopes(text,text)','ed9f62070e461be31342d7c4e3cfcbbb2e3542f2309b63f9592b80a46bd3cc60',true,'s',true,'preserve'),
@@ -9724,7 +9778,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','f5dd4341a6308e6b6d1bdffe389346a5a59739a39751c1f5e1b87f816fb721bb',true),
+ ('_authority_crud_storage_v3()','60b8dacf0b2dfe6db94bdfaabd684159f625775553542122d1f1aeee4c7f639b',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
