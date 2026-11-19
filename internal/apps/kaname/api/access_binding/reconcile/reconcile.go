@@ -1656,6 +1656,9 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 const (
 	coldActiveBatchMembers = 4096
 	coldActiveBatchTuples  = 4096
+
+	// После заполнения запоминаемого набора новые ключи идут прежним путём.
+	coldActiveLedgerKeys = 16 * coldActiveBatchTuples
 )
 
 // applyColdActiveDiff вызывается после общего замка и фильтра keepLiveDesired.
@@ -1663,18 +1666,47 @@ const (
 // и реестр каждой полной координаты сохраняются между партиями и правилами.
 func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, bs BindingScope, desired []DesiredMember, col *syncFGACollector) error {
 	var writes forwardWriteSet
+	var recorded map[EmittedTupleRef]struct{}
+	if _, legacy := s.(forwardTupleWriter); legacy {
+		// Legacy WithTx удерживает допуск compatibility и замок выдачи;
+		// холодный проход только добавляет записи реестра. Подготовленные signed
+		// writers сохраняют прежний состав команд и квитанций.
+		recorded = make(map[EmittedTupleRef]struct{})
+	}
+	flush := func() error {
+		if recorded != nil {
+			ledger := writes.ledger[:0]
+			for _, ref := range writes.ledger {
+				if _, alreadyRecorded := recorded[ref]; !alreadyRecorded {
+					ledger = append(ledger, ref)
+				}
+			}
+			writes.ledger = ledger
+		}
+		if err := writes.writeLive(ctx, s); err != nil {
+			return err
+		}
+		if recorded != nil {
+			for _, ref := range writes.ledger {
+				if len(recorded) == coldActiveLedgerKeys {
+					break
+				}
+				recorded[ref] = struct{}{}
+			}
+		}
+		writes = forwardWriteSet{}
+		return nil
+	}
 	for _, d := range desired {
 		tuples, ok := r.memberTuples(d)
 		if !ok {
 			return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
 		}
-		// Проверка до collectNew не меняет общий collector и порядок первых tuples.
-		// Ledger содержит все tuples члена, fresh — только их подмножество.
+		// Проверка до collectNew сохраняет границы партий и порядок первых tuples.
 		if len(writes.members) > 0 && (len(writes.members) == coldActiveBatchMembers || len(tuples) > coldActiveBatchTuples-len(writes.ledger)) {
-			if err := writes.writeLive(ctx, s); err != nil {
+			if err := flush(); err != nil {
 				return err
 			}
-			writes = forwardWriteSet{}
 		}
 		d.Tuples = tuples
 		if err := r.materializeForwardMember(ctx, s, bs, d, col, &writes); err != nil {
@@ -1682,16 +1714,15 @@ func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, 
 		}
 		if len(writes.members) == coldActiveBatchMembers || len(writes.ledger) >= coldActiveBatchTuples {
 			// Исходный keepLiveDesired уже отфильтровал весь набор под замками этой tx.
-			if err := writes.writeLive(ctx, s); err != nil {
+			if err := flush(); err != nil {
 				return err
 			}
-			writes = forwardWriteSet{}
 		}
 	}
 	if len(writes.members) == 0 {
 		return nil
 	}
-	return writes.writeLive(ctx, s)
+	return flush()
 }
 
 // mirrorFed — объект питается зеркалом регистраций: его строку удаляет снятие
