@@ -126,6 +126,34 @@ func TestApplyDiff_ColdActiveMatchesOriginalDiffAcrossChunks(t *testing.T) {
 	}
 }
 
+type coldLegacyBatchStore struct {
+	*coldBatchStore
+}
+
+func (s coldLegacyBatchStore) EmitForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return s.EmitTupleWrite(ctx, tuples)
+}
+
+func TestApplyDiff_ColdActiveLegacyRecordsSharedLedgerKeyOnce(t *testing.T) {
+	desired, store := coldDesired(coldActiveBatchMembers)
+	otherRule := desired[0]
+	otherRule.RuleFP = "other-rule"
+	newTuple := otherRule.Tuples[0]
+	newTuple.Relation = "v_update"
+	otherRule.Tuples = append(append([]domain.MembershipTuple(nil), otherRule.Tuples...), newTuple)
+	desired = append(desired, otherRule)
+	legacy := coldLegacyBatchStore{store}
+	r := New(fakeRunner{s: legacy}, nil, catalogfixture.Source())
+
+	require.NoError(t, r.applyDiff(context.Background(), legacy, coldScope(), desired, nil, nil, &syncFGACollector{}))
+	require.Len(t, store.batches, 2)
+	require.Len(t, store.batches[0], coldActiveBatchMembers)
+	require.Equal(t, "other-rule", store.batches[1][0].RuleFP)
+	require.Len(t, allWrites(store.fakeStore), coldActiveBatchMembers+1)
+	require.Len(t, store.refs, 2)
+	require.Equal(t, []EmittedTupleRef{{BindingID: coldScope().BindingID, Member: desiredCoord(otherRule), Tuple: newTuple}}, store.refs[1])
+}
+
 func TestApplyDiff_ColdActiveKeepsGlobalCollectorAndBindingLedger(t *testing.T) {
 	desired, store := coldDesired(1)
 	r := New(fakeRunner{s: store}, nil, catalogfixture.Source())
