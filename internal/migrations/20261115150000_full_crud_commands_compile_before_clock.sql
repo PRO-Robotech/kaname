@@ -9399,7 +9399,7 @@ BEGIN
     =ARRAY['account_id','invite_status','invited_by']::text[]) THEN RETURN false;END IF;
  -- Точная схема вызовов: нельзя снять guard, сделать deferred или добавить
  -- второй вызов того же emitter вне скомпилированного eventset.
- FOR expected IN SELECT * FROM (VALUES
+ IF EXISTS(SELECT 1 FROM (VALUES
  ('accounts','authority_crud_unique','authority_crud_unique_guard_v3()',23,0,'',false,NULL,NULL),
  ('projects','authority_crud_unique','authority_crud_unique_guard_v3()',23,0,'',false,NULL,NULL),
  ('service_accounts','authority_crud_unique','authority_crud_unique_guard_v3()',23,0,'',false,NULL,NULL),
@@ -9573,22 +9573,20 @@ BEGIN
  ('grant_delegations','binding_epoch_update','authority_binding_epoch_changed()',16,0,'',false,'old_epoch_rows','new_epoch_rows'),
  ('grant_delegations','binding_epoch_delete','authority_binding_epoch_changed()',8,0,'',false,'old_epoch_rows',NULL),
  ('grant_delegations','binding_epoch_truncate','authority_binding_epoch_changed()',32,0,'',false,NULL,NULL)
- ) graph(table_name,trigger_name,signature,trigger_type,nargs,argument_hex,has_qual,old_table,new_table) LOOP
-  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=to_regclass('kaname.'||expected.table_name)
-   AND c.relowner=owner_oid AND c.relkind='r' AND c.relpersistence='p') THEN RETURN false;END IF;
-  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid=to_regclass('kaname.'||expected.table_name)
-   AND t.tgname=expected.trigger_name AND t.tgfoid=to_regprocedure('kaname.'||expected.signature)
-   AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgtype::integer=expected.trigger_type
+ ) graph_expected(table_name,trigger_name,signature,trigger_type,nargs,argument_hex,has_qual,old_table,new_table)
+ WHERE NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid=to_regclass('kaname.'||graph_expected.table_name)
+   AND c.relowner=owner_oid AND c.relkind='r' AND c.relpersistence='p')
+ OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid=to_regclass('kaname.'||graph_expected.table_name)
+   AND t.tgname=graph_expected.trigger_name AND t.tgfoid=to_regprocedure('kaname.'||graph_expected.signature)
+   AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgtype::integer=graph_expected.trigger_type
    AND t.tgconstraint=0 AND NOT t.tgdeferrable AND NOT t.tginitdeferred
-   AND t.tgnargs=expected.nargs AND encode(t.tgargs,'hex')=expected.argument_hex AND t.tgattr=''::int2vector
-   AND t.tgoldtable::text IS NOT DISTINCT FROM expected.old_table AND t.tgnewtable::text IS NOT DISTINCT FROM expected.new_table
+   AND t.tgnargs=graph_expected.nargs AND encode(t.tgargs,'hex')=graph_expected.argument_hex AND t.tgattr=''::int2vector
+   AND t.tgoldtable::text IS NOT DISTINCT FROM graph_expected.old_table AND t.tgnewtable::text IS NOT DISTINCT FROM graph_expected.new_table
    -- Trigger qual имеет две range-table записи OLD/NEW; pg_get_expr для него
    -- неприменим. Сравнивается вся WHEN-clause trigger-aware deparser, не подстрока.
-   AND CASE WHEN expected.has_qual THEN t.tgqual IS NOT NULL
+   AND CASE WHEN graph_expected.has_qual THEN t.tgqual IS NOT NULL
     AND substring(pg_get_triggerdef(t.oid,false) FROM ' WHEN (.*) EXECUTE FUNCTION ')='((old.* IS DISTINCT FROM new.*))'
-    ELSE t.tgqual IS NULL END)
-  THEN RETURN false;END IF;
- END LOOP;
+    ELSE t.tgqual IS NULL END)) THEN RETURN false;END IF;
  IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname._authority_crud_aux_statement_v3()'::regprocedure)<>6 THEN RETURN false;END IF;
  IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname._authority_crud_aux_write_v3()'::regprocedure)<>10 THEN RETURN false;END IF;
  IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_binding_epoch_changed()'::regprocedure)<>96 THEN RETURN false;END IF;
@@ -9717,7 +9715,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','dd6790f91dcf3dd7fa09565e1c648e7cf179aed71734406196ae2d4e7af80507',true),
+ ('_authority_crud_storage_v3()','04fa2b025db1293532841a78548aada0943800b4ddb49b8f3f55e9cf54cd6a2e',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
