@@ -270,6 +270,9 @@ def partial_producer(directory, index):
         build = event["Action"] in ("build-output", "build-fail")
         package = event.get("ImportPath", event.get("Package")) if build else event["Package"]
         safe = {"index": event_index, "action": event["Action"], "package": package}
+        # Длительность отказа пакета помогает отличить его собственный таймаут от лимита задания.
+        if event["Action"] == "fail" and "Test" not in event and "Elapsed" in event:
+            safe["elapsedSeconds"] = event["Elapsed"]
         if "Test" in event:
             key = (package, event["Test"])
             if key not in aliases:
@@ -359,13 +362,19 @@ def validate_partial_report(report):
         if not isinstance(record["events"], list) or len(record["events"]) != c["events"]:
             raise ValueError("неполный event index")
         for number, event in enumerate(record["events"]):
-            if (not isinstance(event, dict) or set(event) not in ({"index", "action", "package"}, {"index", "action", "package", "testAlias"}) or
+            if (not isinstance(event, dict) or
+                    set(event) - {"testAlias", "elapsedSeconds"} != {"index", "action", "package"} or
                     type(event["index"]) is not int or event["index"] != number or not isinstance(event["action"], str) or
                     event["action"] not in (*protocol.ACTIONS, "build-output", "build-fail")):
                 raise ValueError("неизвестное partial событие")
             partial_package(event["package"], allow_empty=event["action"] in ("build-output", "build-fail"))
             if "testAlias" in event and (not isinstance(event["testAlias"], str) or aliases.get(event["testAlias"]) != event["package"]):
                 raise ValueError("неизвестный event alias")
+            if "elapsedSeconds" in event:
+                elapsed = event["elapsedSeconds"]
+                if (event["action"] != "fail" or "testAlias" in event or
+                        type(elapsed) not in (int, float) or not 0 <= elapsed < float("inf")):
+                    raise ValueError("нетипизированная длительность отказа пакета")
     if not incomplete:
         raise ValueError("partial без незавершённого producer")
 

@@ -624,6 +624,35 @@ class ExportControls(unittest.TestCase):
                 if any(e["Action"] == "fail" for e in events):
                     self.assertEqual(report["captures"][0]["census"]["packageOnlyFailures"], [package])
 
+    def test_partial_keeps_only_package_failure_duration(self):
+        package = "example.test/diagnostics"
+        events = [
+            {"Action": "start", "Package": package},
+            {"Action": "run", "Package": package, "Test": "TestFinished"},
+            {"Action": "pass", "Package": package, "Test": "TestFinished", "Elapsed": 0.1},
+            {"Action": "run", "Package": package, "Test": "TestPrivate"},
+            {"Action": "output", "Package": package, "Output": "private-timeout-detail\n"},
+            {"Action": "fail", "Package": package, "Elapsed": 600.125},
+        ]
+        self.partial_fixture(events, rc=1)
+        self.assertEqual(exporter.export(self.src, self.dst), 2)
+        public = self.published()
+        self.assertNotIn("private-timeout-detail", public)
+        self.assertNotIn("TestPrivate", public)
+        report = json.loads((self.dst / "export.json").read_text())
+        self.assertEqual(report["outcome"], "unknown")
+        self.assertIs(report["testAccepted"], False)
+        exported = report["captures"][0]["events"]
+        self.assertEqual([e["elapsedSeconds"] for e in exported if "elapsedSeconds" in e], [600.125])
+        exported[-1]["elapsedSeconds"] = True
+        with self.assertRaisesRegex(ValueError, "длительность отказа пакета"):
+            exporter.validate_partial_report(report)
+        del exported[-1]["elapsedSeconds"]
+        exporter.validate_partial_report(report)
+        exported[2]["elapsedSeconds"] = 0.1
+        with self.assertRaisesRegex(ValueError, "длительность отказа пакета"):
+            exporter.validate_partial_report(report)
+
     def test_partial_invalid_bytes_schema_types_and_paths_are_rejected(self):
         modes = ("missing", "hash", "symlink", "nonJSON", "unknown-event", "unknown-manifest", "unknown-runner",
                  "absolute-package", "traversal-package", "bracket-private-path", "secret-package", "bool-rc", "bool-census", "bool-hash-bytes",
