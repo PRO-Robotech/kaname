@@ -9013,7 +9013,7 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a
   WHERE a.attrelid='kaname.users'::regclass AND a.attname='expected_login_kind'
    AND NOT a.attisdropped AND a.attgenerated='s' AND a.atttypid='pg_catalog.name'::regtype) THEN RETURN false;END IF;
- FOR expected IN SELECT * FROM (VALUES
+ IF EXISTS(SELECT 1 FROM (VALUES
  ('_authority_native_write_weights_v4(jsonb)','907111b7e806c46a660311a6a97fcc2ab2f86ea0430260fb501306f0e2ef522e',true,'s',true,'private'),
  ('_authority_native_write_closure_v4()','a6da6a23e1899bf23d71ba4c5969f66cdfe15a4038fb9a89223df803b74c0e14',true,'s',true,'private'),
  ('authority_native_write_arm_v4(uuid)','ec1e1600c2673f4d02947f7dca7b4a719abc794a91d0045bad38fc2c642e5638',true,'v',true,'export'),
@@ -9338,22 +9338,21 @@ BEGIN
  ('authority_protocol_row_account(text,jsonb)','36453c01ccca68634dcf0aac077f00cb17a82cb6fe9bb2406ac633380c4b4a9e',true,'s',true,'preserve'),
  ('resource_journal_project(text,jsonb)','a792cf1d91d0d5b16d01f530109ad7b08559e1bea98632d30fbeadec4bfbdbb7',false,'i',false,'preserve'),
  ('resource_journal_scope(text,jsonb)','22deae6b397c11f7558bd7e10c64400e06ea0f765f5b7f17ba03fe1d00aa1da9',false,'s',false,'preserve')
- ) pinned(signature,digest,definer,volatility,fixed_path,access_mode) LOOP
-  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p WHERE p.oid=to_regprocedure('kaname.'||expected.signature)
-   AND p.proowner=owner_oid AND p.prosecdef=expected.definer AND p.provolatile::text=expected.volatility
-   AND CASE WHEN expected.fixed_path THEN p.proconfig=ARRAY['search_path=pg_catalog, pg_temp'] ELSE p.proconfig IS NULL END
-   AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')=expected.digest) THEN RETURN false;END IF;
-  IF expected.access_mode='private' AND EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
+ ) pin_expected(signature,digest,definer,volatility,fixed_path,access_mode)
+ WHERE NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p WHERE p.oid=to_regprocedure('kaname.'||pin_expected.signature)
+   AND p.proowner=owner_oid AND p.prosecdef=pin_expected.definer AND p.provolatile::text=pin_expected.volatility
+   AND CASE WHEN pin_expected.fixed_path THEN p.proconfig=ARRAY['search_path=pg_catalog, pg_temp'] ELSE p.proconfig IS NULL END
+   AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')=pin_expected.digest)
+ OR (pin_expected.access_mode='private' AND EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
    CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
-   WHERE p.oid=to_regprocedure('kaname.'||expected.signature) AND a.grantee<>owner_oid) THEN RETURN false;END IF;
-  IF expected.access_mode='export' AND EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
+   WHERE p.oid=to_regprocedure('kaname.'||pin_expected.signature) AND a.grantee<>owner_oid))
+ OR (pin_expected.access_mode='export' AND EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
    CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
-   WHERE p.oid=to_regprocedure('kaname.'||expected.signature) AND a.grantee<>owner_oid
+   WHERE p.oid=to_regprocedure('kaname.'||pin_expected.signature) AND a.grantee<>owner_oid
    AND (a.grantee=0 OR a.is_grantable OR a.privilege_type<>'EXECUTE' OR NOT EXISTS(
     SELECT 1 FROM pg_catalog.pg_proc e CROSS JOIN LATERAL aclexplode(e.proacl) g
     WHERE e.oid='kaname.authority_protocol_enter_typed_v3(text,text[],jsonb,text,text,text,text,text)'::regprocedure
-     AND g.grantee=a.grantee AND g.privilege_type='EXECUTE'))) THEN RETURN false;END IF;
- END LOOP;
+     AND g.grantee=a.grantee AND g.privilege_type='EXECUTE'))))) THEN RETURN false;END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
   WHERE p.oid='kaname._authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)'::regprocedure
    AND p.prokind='f' AND p.prorettype='boolean'::regtype AND NOT p.proretset AND NOT p.proisstrict
@@ -9715,7 +9714,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','04fa2b025db1293532841a78548aada0943800b4ddb49b8f3f55e9cf54cd6a2e',true),
+ ('_authority_crud_storage_v3()','c5095ea24e4fc72f304da4941b19d02a8dee2e500664a881439edd5b58f6d59a',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
