@@ -130,8 +130,14 @@ BEGIN
   IF TG_OP<>'INSERT' THEN old_image:=to_jsonb(OLD);END IF;
   IF TG_OP<>'DELETE' THEN new_image:=to_jsonb(NEW);END IF;
  END IF;
- IF kaname._authority_group_add_row_v3(TG_TABLE_NAME,TG_OP,old_image,new_image) THEN
-  IF TG_OP='DELETE' THEN RETURN OLD;END IF;RETURN NEW;
+ -- При отсутствии обеих временных таблиц программа Group Add пуста.
+ -- Наличие любой таблицы требует полной проверки хранения и команды.
+ IF TG_TABLE_NAME<>'access_binding_target_members'
+ OR to_regclass('pg_temp.kaname_group_add_command') IS NOT NULL
+ OR to_regclass('pg_temp.kaname_authority_sequence_program') IS NOT NULL THEN
+  IF kaname._authority_group_add_row_v3(TG_TABLE_NAME,TG_OP,old_image,new_image) THEN
+   IF TG_OP='DELETE' THEN RETURN OLD;END IF;RETURN NEW;
+  END IF;
  END IF;
  manifest:=kaname._authority_producer_resource_v2();
  IF manifest IS NOT NULL THEN
@@ -9738,7 +9744,7 @@ BEGIN
  ('authority_protocol_activate_full_v3(text,text,text)','646328a2433e1d31d17a9c178ac3ab59a5a65d8252accf5295a20d22705d31cf',false),
  ('authority_protocol_attestation()','130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502',true),
  ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true),
- ('authority_protocol_row_guard()','0207ee81f4012cabec1fccbf6e816763b4889d064bf896e7455be9a35e5417a1',true),
+ ('authority_protocol_row_guard()','f3bf13a93e62817874ad98101cd8a916c2561be5cdefe7feb8f74b86bd8ea85d',true),
  ('_authority_protocol_stage_generation1(text,bytea,text,text,text)','7ffb942af742bff4b556f07b00d9d8f75fefba3aa1f00445073140b5c8072bde',false),
  ('_authority_protocol_activate_generation1(text,text,text)','00d97c37e2ab533c232e4cffb975e8d71c3eefa98228e0f39d90249526bf041c',false),
  ('authority_protocol_drain()','f0e36bb29e96ba0417e9143821391b9df518541a017dcd9b171c037e167bc500',false),
