@@ -167,6 +167,9 @@ make_bin() {
     cat > "$b/go" <<GO
 #!/usr/bin/env bash
 printf 'sub=%s scoped=%s goflags=[%s] args=[%s]\n' "\${1:-}" "\${BUDGET_PROBE_SCOPED:-0}" "\${GOFLAGS:-}" "\$*" >> "$b/go.log"
+if [ "\${KANAME_PREPUSH_GO_PARALLEL+x}" = x ]; then
+    printf '%s\n' "\${1:-}" >> "$b/hook-input-leaked.log"
+fi
 if [ "\${1:-}" = env ] && [ "\${2:-}" = CGO_ENABLED ] && [ "\$#" -eq 2 ]; then echo 1; exit 0; fi
 exec "$REAL_GO" "\$@"
 GO
@@ -568,8 +571,9 @@ reduced_checks() {
         [ -n "$line" ] || continue
         [ "$(effective_p "$line")" = 1 ] || wide=$((wide + 1))
     done <<< "$heavy"
-    if [ "$n" -gt 0 ] && [ "$wide" -eq 0 ]; then ok "reduced: непустой журнал, каждый build/vet/test effective-p=1"
-    else bad "reduced: журнал $n, неверный -p у $wide вызовов"; fi
+    if [ "$n" -gt 0 ] && [ "$wide" -eq 0 ] && [ ! -s "$b/hook-input-leaked.log" ]; then
+        ok "reduced: каждый build/vet/test получил -p=1, ввод хука не унаследован"
+    else bad "reduced: журнал $n, неверный -p у $wide вызовов либо унаследован ввод хука"; fi
     if grep -q 'args=run ' "$b/lint.log"; then ok "reduced: lint исполнен"
     else bad "reduced: lint не исполнен"; fi
     if printf '%s' "$out" | grep -q 'исполнено групп проверок: 7'; then ok "reduced: исполнены все семь групп"

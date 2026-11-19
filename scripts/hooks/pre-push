@@ -188,6 +188,9 @@ else
     exec systemd-run --user --scope --quiet -p MemoryMax="$MEMORY_MAX" -p MemorySwapMax=0 -- \
         bash "$0" "$SCOPE_ARG" "$@"
 fi
+# Ввод относится к хуку и нужен при перезапуске области, но не самим проверкам.
+# Передаём им только вычисленный -p через GOFLAGS.
+unset KANAME_PREPUSH_GO_PARALLEL
 echo "pre-push: память — $memory_cap" >&2
 
 ROOT="$(git rev-parse --show-toplevel)" || ROOT=""
