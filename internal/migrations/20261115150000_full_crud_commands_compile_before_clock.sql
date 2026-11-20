@@ -8128,29 +8128,40 @@ END $$;
 
 CREATE FUNCTION kaname._authority_forward_row_v4(p_id bigint,p_row jsonb,p_applied boolean) RETURNS boolean
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE effect record;receipt record;effect_found boolean;receipt_found boolean;program record;anchor kaname.authority_forward_emit_anchor_v4%ROWTYPE;invoker oid;changed integer;
+DECLARE effect record;receipt record;program record;anchor kaname.authority_forward_emit_anchor_v4%ROWTYPE;
+ allocation_rows record;command_rows record;invoker oid;changed integer;
 BEGIN
  -- Этот helper private; оба actual trigger caller уже получили свежий NULL
  -- proof. Нет active anchor — прежний произвольный SQL идёт в прежний guard.
  IF NOT EXISTS(SELECT 1 FROM kaname.authority_forward_emit_anchor_v4 a
   WHERE a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id_if_assigned()) THEN RETURN false;END IF;
  PERFORM kaname._authority_forward_custody_v4();
- SELECT e.* INTO effect FROM pg_temp.kaname_forward_effects_v4 e WHERE e.reserved_id=p_id;effect_found:=FOUND;
- SELECT r.* INTO receipt FROM pg_temp.kaname_forward_receipts_v4 r WHERE r.reserved_id=p_id;receipt_found:=FOUND;
+ -- Оба ряда ищутся независимо по ID. Несовпадение nonce или ordinal
+ -- проверяется ниже и не может превратить повреждённый receipt в отсутствие.
+ SELECT e AS effect,r AS receipt,e.reserved_id IS NOT NULL AS effect_found,r.reserved_id IS NOT NULL AS receipt_found
+ INTO allocation_rows
+ FROM (VALUES (p_id)) requested(id)
+ LEFT JOIN pg_temp.kaname_forward_effects_v4 e ON e.reserved_id=requested.id
+ LEFT JOIN pg_temp.kaname_forward_receipts_v4 r ON r.reserved_id=requested.id;
  -- Непокрытый explicit ID сохраняет свежую старую проверку. Удаление обеих
  -- строк owner fault не закрывает anchor: finish/COMMIT сверяют полный count.
- IF NOT effect_found AND NOT receipt_found THEN RETURN false;END IF;
- IF NOT effect_found OR NOT receipt_found THEN
+ IF NOT allocation_rows.effect_found AND NOT allocation_rows.receipt_found THEN RETURN false;END IF;
+ IF NOT allocation_rows.effect_found OR NOT allocation_rows.receipt_found THEN
   RAISE EXCEPTION 'forward allocation exact receipt missing' USING ERRCODE='42501';END IF;
+ effect:=allocation_rows.effect;
+ receipt:=allocation_rows.receipt;
  -- Свежая проверка custody выше охватывает только два чтения столбцов встроенных типов в этом вызове.
  -- Граница DML/обратного вызова не пересекается; каждый новый вход в триггер строки проверяет custody заново.
  SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles
  WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
- SELECT a.* INTO anchor FROM kaname.authority_forward_emit_anchor_v4 a
+ SELECT a AS anchor,p AS program,p.nonce IS NOT NULL AS program_found INTO command_rows
+ FROM kaname.authority_forward_emit_anchor_v4 a
+ LEFT JOIN pg_temp.kaname_forward_program_v4 p ON p.nonce=a.nonce
  WHERE a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id() AND a.nonce=effect.nonce;
  IF NOT FOUND THEN RAISE EXCEPTION 'forward allocation anchor missing or foreign' USING ERRCODE='42501';END IF;
- SELECT p.* INTO program FROM pg_temp.kaname_forward_program_v4 p WHERE p.nonce=effect.nonce;
- IF NOT FOUND THEN RAISE EXCEPTION 'forward allocation program missing' USING ERRCODE='42501';END IF;
+ IF NOT command_rows.program_found THEN RAISE EXCEPTION 'forward allocation program missing' USING ERRCODE='42501';END IF;
+ anchor:=command_rows.anchor;
+ program:=command_rows.program;
  IF program.backend IS DISTINCT FROM anchor.backend OR program.transaction_id IS DISTINCT FROM anchor.transaction_id
  OR program.invoker_oid IS DISTINCT FROM invoker OR program.invoker_oid IS DISTINCT FROM anchor.invoker_oid
  OR anchor.program_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_program_v4')
@@ -9102,7 +9113,7 @@ BEGIN
  ('_authority_forward_custody_v4()','a8007133abaae4f51966e623c6a515988e637ec2f0579838578602be2572801a',true,'v',true,'private'),
  ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
  ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
- ('_authority_forward_row_v4(bigint,jsonb,boolean)','0ae65da0fe1a7da978b3c872092400e19d6774b9548cc7d8be3d5bbda6a66cfe',true,'v',true,'private'),
+ ('_authority_forward_row_v4(bigint,jsonb,boolean)','cf8db469ecc7f27de4c3328b8cbfa25816dca6e06601689bfb552a527e99db20',true,'v',true,'private'),
  ('_authority_forward_complete_v4(uuid)','06cfcd8f144243fc529aacba57f452b0913cc6d5b1ab6bf2daf7c4e6a9a38290',true,'v',true,'private'),
  ('_authority_forward_anchor_complete_v4()','0d9fdf6c02abe69e333b5584eee4628cafb7ec37849b7820e33aba4bea4396f1',true,'v',true,'private'),
  ('_authority_forward_storage_v4()','e8a9cd61f6ee6cc4fbde7361210cf493c8df166cdf3bfd8c49ed47190aa4ef0c',true,'s',true,'private'),
@@ -9835,7 +9846,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','9a9a21f8f128023bd3d5a677d8a29eff3d38da6b045ddcf41aa5764946ed221f',true),
+ ('_authority_crud_storage_v3()','a9a0f235558c9574bb6452d54bc5fd5c0012e8bd932bbac0fc6541e9206d8af1',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
