@@ -134,6 +134,46 @@ func (s coldLegacyBatchStore) EmitForwardTupleWrite(ctx context.Context, tuples 
 	return s.EmitTupleWrite(ctx, tuples)
 }
 
+type coldEmitterBatchStore struct {
+	coldLegacyBatchStore
+	coldWriteCalls int
+}
+
+func (s *coldEmitterBatchStore) EmitColdForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
+	s.coldWriteCalls++
+	return s.EmitTupleWrite(ctx, tuples)
+}
+
+func TestApplyDiff_ColdEmitterOnlyForSingleBoundedBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		members       int
+		tuples        int
+		wantBatches   int
+		wantColdCalls int
+	}{
+		{name: "single", members: 100, wantBatches: 1, wantColdCalls: 1},
+		{name: "at limit", members: coldActiveBatchMembers, wantBatches: 1, wantColdCalls: 1},
+		{name: "multiple", members: coldActiveBatchMembers + 1, wantBatches: 2},
+		{name: "excess tuples", members: 1, tuples: coldActiveBatchTuples + 1, wantBatches: 1},
+		{name: "early tuple flush", members: 2, tuples: coldActiveBatchTuples - 1, wantBatches: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desired, store := coldDesired(tc.members)
+			for i := 0; i < tc.tuples; i++ {
+				tuple := desired[0].Tuples[0]
+				tuple.Relation = fmt.Sprintf("v_%d", i)
+				desired[0].Tuples = append(desired[0].Tuples, tuple)
+			}
+			s := &coldEmitterBatchStore{coldLegacyBatchStore: coldLegacyBatchStore{store}}
+			r := New(fakeRunner{s: s}, nil, catalogfixture.Source())
+			require.NoError(t, r.applyDiff(context.Background(), s, coldScope(), desired, nil, nil, &syncFGACollector{}))
+			require.Equal(t, tc.wantBatches, store.writeCalls)
+			require.Equal(t, tc.wantColdCalls, s.coldWriteCalls)
+		})
+	}
+}
+
 func TestApplyDiff_ColdActiveLegacyRecordsSharedLedgerKeyOnce(t *testing.T) {
 	desired, store := coldDesired(coldActiveBatchMembers)
 	otherRule := desired[0]
