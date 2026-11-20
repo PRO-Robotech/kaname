@@ -470,11 +470,27 @@ def startup_diagnostics(evidence, root_test, predicates, diagnostics, binary_sha
             lines = raw.splitlines(keepends=True)
             need(len(lines) <= 1024)
             found = []
-            for line in lines:
+            origins = []
+            origin_message = "kaname startup error origin"
+            origin_source = "cmd/kaname/serve.go"
+            origin_classes = {"other", "context-canceled", "context-deadline", "address-in-use",
+                              "connection-refused", "permission", "not-exist", "file", "database", "network"}
+            for event_index, line in enumerate(lines):
                 need(len(line) <= 32768 and line.endswith(b"\n"))
                 event = json.loads(line, object_pairs_hook=unique)
                 need(type(event) is dict)
                 message = event.get("msg")
+                if message == origin_message:
+                    need(set(event) == {"time", "level", "msg", "source", "line", "class"})
+                    need(isinstance(event["time"], str) and event["level"] == "ERROR")
+                    need(event["source"] == origin_source and type(event["line"]) is int)
+                    need(isinstance(event["class"], str) and event["class"] in origin_classes)
+                    source_lines = (ROOT / origin_source).read_text(encoding="utf-8").splitlines()
+                    need(1 <= event["line"] <= len(source_lines))
+                    need(re.fullmatch(r"\s*return startupFailureAt\(.+", source_lines[event["line"] - 1]))
+                    origins.append(({"source": origin_source, "line": event["line"],
+                                     "class": event["class"]}, event_index))
+                    continue
                 if not isinstance(message, str) or message not in messages:
                     continue
                 need(set(event) == {"time", "level", "msg", "err"})
@@ -491,9 +507,14 @@ def startup_diagnostics(evidence, root_test, predicates, diagnostics, binary_sha
                 ):
                     cause = "registration-writer-declaration"
                 found.append({"stage": messages[message], "cause": cause})
-            need(len(found) <= 1)
+                fatal_index = event_index
+            need(len(found) <= 1 and len(origins) <= 1)
+            if origins:
+                need(found and found[0]["stage"] == "serve" and origins[0][1] < fatal_index)
             if found and terminal is not None and terminal["exitCode"] == 1:
                 result["bootstrap"] = {"status": "fatal-exit-matched", **found[0]}
+                result["startupOrigin"] = ({"status": "matched-return", **origins[0][0]}
+                                           if origins else {"status": "not-observed"})
             elif found:
                 result["bootstrap"] = {"status": "event-without-matching-exit"}
             else:

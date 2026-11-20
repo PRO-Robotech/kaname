@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -118,7 +119,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// построение подставляет молча, предметом стража быть не может (задача
 	// продукта kacho#2099, сценарий WIRE-3-03 приёмки WIRE-1).
 	if err := refusaldomain.Require(); err != nil {
-		return fmt.Errorf("refusal domain: %w", err)
+		return startupFailureAt(fmt.Errorf("refusal domain: %w", err))
 	}
 
 	// logger.level проверен в main (cfg.Validate); SlogLevel здесь не может отказать.
@@ -139,12 +140,12 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// `sslmode=disable` открытый канал успел бы состояться.
 	posture, perr := describePosture(cfg, logger)
 	if perr != nil {
-		return fmt.Errorf("посадка процесса: %w", perr)
+		return startupFailureAt(fmt.Errorf("посадка процесса: %w", perr))
 	}
 
 	pool, err := coredb.NewPool(ctx, cfg.DSN())
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	defer pool.Close()
 
@@ -156,7 +157,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// завёл бы пустую схему рядом, оставив прежние строки невидимыми. Отказ,
 	// отложенный за другие проверки, пришёл бы позже и назвал бы не тот предмет.
 	if err := assertNoRetiredSchema(ctx, pool); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// Загрузочный страж: посадка не вправе обещать базе больше соединений, чем
@@ -164,7 +165,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// открывать соединения по работе: проверка, отложенная дальше, узнаёт о
 	// расхождении тогда же, когда о нём узнаёт арендатор.
 	if err := assertConnBudgetFits(ctx, pool, cfg.Repository.Postgres.ReplicaBudget); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// ПРОЕКЦИЯ СОБСТВЕННЫХ ПОТОЛКОВ — до любого слушателя (приёмка `KAN-QUOTA-1`,
@@ -179,13 +180,13 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// окно, в котором действует величина ПРЕДЫДУЩЕГО пуска, а журнал уже сообщил
 	// новую.
 	if err := projectOwnCeilings(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg.OwnCeilings); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// ПРОЕКЦИЯ ТЕМПА ЗАВЕДЕНИЯ (Ф4 Р5, kacho#1270) — тем же местом и по той же
 	// причине: триггер читает величину из строки авторитета, и её объявляет
 	// профиль (незаданная — отказ старта стражем полосы).
 	if err := projectAdmissionRate(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// slave-pool wiring (read-replica). Если slave-url
@@ -195,7 +196,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if slaveDSN := cfg.SlaveDSN(); slaveDSN != "" {
 		slavePool, err = coredb.NewPool(ctx, slaveDSN)
 		if err != nil {
-			return fmt.Errorf("new slave pool: %w", err)
+			return startupFailureAt(fmt.Errorf("new slave pool: %w", err))
 		}
 		defer slavePool.Close()
 		logger.Info("kaname CQRS slave-pool enabled (read-replica)",
@@ -229,7 +230,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		ctx, opsRepo, operations.DefaultRetentionConfig(),
 		logger,
 	); err != nil {
-		return fmt.Errorf("фоновая уборка таблицы операций: %w", err)
+		return startupFailureAt(fmt.Errorf("фоновая уборка таблицы операций: %w", err))
 	}
 
 	// Межсервисные соединения gRPC: kaname — конечный владелец Account/Project,
@@ -304,7 +305,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// расхождение каталога и пойдёт чинить не то.
 	deliveredManifests, mErr := loadDeliveredManifests(logger, cfg.Manifests)
 	if mErr != nil {
-		return mErr
+		return startupFailureAt(mErr)
 	}
 
 	// ОПОРА ПАРИТЕТА — сразу за чтением доставки и ДО первой записи (kacho#1861).
@@ -322,7 +323,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// которому выдаются права.
 	catalogAnchor, anErr := modulecatalog.AnchorOfDelivery(deliveredManifests)
 	if anErr != nil {
-		return anErr
+		return startupFailureAt(anErr)
 	}
 	// Расширение опоры называется ПОИМЁННО, а не одним счётчиком: оно законно,
 	// но молчаливым быть не вправе — по той же причине, по какой поимённо
@@ -352,32 +353,32 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// (kaname#865, Д10) — второй композиции для этого не заводится.
 	preparedModel, cErr := prepareComposedModel(logger, deliveredManifests)
 	if cErr != nil {
-		return cErr
+		return startupFailureAt(cErr)
 	}
 
 	// Предварительная проверка всей поставки идёт до установки модели и всех записей поставки.
 	ownManifest, omErr := loadOwnManifest(logger)
 	if omErr != nil {
-		return omErr
+		return startupFailureAt(omErr)
 	}
 	if err := moduleseed.Preflight(ownManifest, deliveredManifests); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if hasInstallationDelegations(deliveredManifests) {
 		if err := validateInstallationInput(cfg.ModuleSeedInstaller); err != nil {
-			return failInstallation(logger, "input", "tenantAccountId", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "input", "tenantAccountId", "", "", 0, err))
 		}
 		if _, _, err := loadInstallationCredential(cfg.ModuleSeedInstaller.CredentialFile); err != nil {
-			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "input", "credentialFile", "", "", 0, err))
 		}
 	}
 	signingKeystore, tokenSigner, err := buildTokenSigning(ctx, pool, cfg, logger)
 	if err != nil {
-		return fmt.Errorf("shared issuance preparation: %w", err)
+		return startupFailureAt(fmt.Errorf("shared issuance preparation: %w", err))
 	}
 	presentedReader, err := preparePresentedReader(pool, cfg, signingKeystore, logger)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	var installationRelations authzguard.RelationChecker = authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(pool, preparedModel.plans), personmarks.New(pool))
 	if installationDependencies.decorateInstallationRelations != nil {
@@ -396,7 +397,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if hasInstallationDelegations(deliveredManifests) {
 		installationAuthn, err = prepareInstallationAuthentication(pool, cfg, tokenSigner, presentedReader, logger)
 		if err != nil {
-			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "input", "credentialFile", "", "", 0, err))
 		}
 		// Только неизменяемые копии: наблюдение не может заменить удостоверения,
 		// субъекта, издателя, проверяющего или любое решение о полномочиях.
@@ -404,19 +405,19 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		installationAuthn.observeMaterial("")
 		verified, err := installationAuthn.Authenticate(ctx)
 		if err != nil {
-			return failInstallation(logger, "authentication", "", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "authentication", "", "", "", 0, err))
 		}
 		if err := authzguard.RequireClusterAdmin(verified, installationRelations); err != nil {
-			return failInstallation(logger, "preflight-authority", "moduleSeedInstaller.credentialFile", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "preflight-authority", "moduleSeedInstaller.credentialFile", "", "", 0, err))
 		}
 		if installationTarget(cfg.ModuleSeedInstaller) != "" {
 			if _, _, err := installationReader.InstallationAccounts(ctx, installationTarget(cfg.ModuleSeedInstaller), installationPageSize); err != nil {
-				return failInstallation(logger, "input", "tenantAccountId", "", "", 0, shared.MapRepoErrAt(ctx, err))
+				return startupFailureAt(failInstallation(logger, "input", "tenantAccountId", "", "", 0, shared.MapRepoErrAt(ctx, err)))
 			}
 		}
 	}
 	if err := authzmodel.Install(preparedModel.text); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	composedReport := preparedModel.report
 
@@ -446,7 +447,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// и страж ниже судят доставку целиком, как прежде.
 	appliedManifests, notAppliedManifests, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
 	if aErr != nil {
-		return aErr
+		return startupFailureAt(aErr)
 	}
 
 	// МОДЕЛЬ ПРОТИВ КАТАЛОГА — сразу за применителем каталога и ДО стража
@@ -457,7 +458,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// — шапка `model_catalog_agreement.go`; порядок и доводы держит гейт
 	// `model_catalog_agreement_wiring_test.go`.
 	if mcErr := assertModelAgreesWithCatalog(logger, notAppliedManifests, composedReport); mcErr != nil {
-		return mcErr
+		return startupFailureAt(mcErr)
 	}
 
 	catalogRepo := kanamepg.NewCatalogRepo(pool)
@@ -488,7 +489,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			slog.Any("rows", catalogCensus.WithdrawnRows))
 	}
 	if catErr != nil {
-		return fmt.Errorf("каталог модуля: %w", catErr)
+		return startupFailureAt(fmt.Errorf("каталог модуля: %w", catErr))
 	}
 	// Снимок наполняется ТЕМИ ЖЕ строками, которые прочитал страж, — своего
 	// чтения не заводит. ОБЕИМИ половинами: снятые строки страж читает и так, и
@@ -500,7 +501,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		logger.With(slog.String("component", "catalog_snapshot")),
 		metricsReg.NewCatalogSnapshotRecorder())
 	if csErr != nil {
-		return fmt.Errorf("снимок каталога модуля: %w", csErr)
+		return startupFailureAt(fmt.Errorf("снимок каталога модуля: %w", csErr))
 	}
 
 	// Каталог прав — ОДНО чтение на процесс, и оно здесь, потому что первым его
@@ -514,7 +515,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// молча на четвёртом.
 	permRegistry, err := seed.LoadPermissionRegistry(ctx, logger)
 	if err != nil {
-		return fmt.Errorf("load permission catalog: %w", err)
+		return startupFailureAt(fmt.Errorf("load permission catalog: %w", err))
 	}
 
 	// ПРИМЕНЕНИЕ РОЛЕЙ ДОСТАВЛЕННОГО — ПОСЛЕ стража паритета каталога
@@ -535,18 +536,18 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		slog.Int("catalog_actions", rightsActions),
 		slog.Int("unattributed_entries", rightsUnattributed))
 	if rrErr != nil {
-		return fmt.Errorf("роли модуля: %w", rrErr)
+		return startupFailureAt(fmt.Errorf("роли модуля: %w", rrErr))
 	}
 	rolesApplier := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanameRepo), rolesRights)
 	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
-		return raErr
+		return startupFailureAt(raErr)
 	}
 	// Роли СВОЕГО манифеста службы (kaname#1003) — тем же применителем, после
 	// доставленных: новая роль модуля iam заводится объявлением манифеста образа,
 	// а не миграцией. Довод — шапка `applyImageModuleRoles`. Свой манифест читается
 	// здесь и тот же связанный идентификатор уходит ниже применителю посева.
 	if riErr := applyImageModuleRoles(ctx, logger, rolesApplier, ownManifest); riErr != nil {
-		return riErr
+		return startupFailureAt(riErr)
 	}
 
 	// ПРИМЕНЕНИЕ ПОСЕВА — ПОСЛЕ применения ролей (задачи kacho#2452, kaname#106).
@@ -575,7 +576,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// разных входа.
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
 	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
-		return seErr
+		return startupFailureAt(seErr)
 	}
 
 	// Подключаем Prometheus-Recorder и логгер к default-registry LRO-worker'а и
@@ -592,7 +593,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		operations.WithRecorder(lroRec),
 		operations.WithLogger(logger),
 	); err != nil {
-		return fmt.Errorf("configure LRO default-registry: %w", err)
+		return startupFailureAt(fmt.Errorf("configure LRO default-registry: %w", err))
 	}
 	operations.Start()
 	var installationRepo kanamerepo.Repository = kanamepg.New(pool, nil)
@@ -600,7 +601,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		installationRepo = installationDependencies.decorateInstallationRepository(installationRepo)
 	}
 	if err := applyInstallationDelegations(ctx, logger, installationAuthn, installationRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), installationPageSize, appliedManifests, installationDependencies.afterCompletedInstallationPair); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// Orphan-reconciler backstop: разрешает осиротевшие done=false операции умершего
@@ -612,7 +613,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// Работник выше не покрывает их: его захват требует done=false, а
 	// эти строки к моменту помещения секрета уже имеют done=true.
 	if err := startSecretBackstop(ctx, pool, cfg, logger); err != nil {
-		return fmt.Errorf("secret backstop: %w", err)
+		return startupFailureAt(fmt.Errorf("secret backstop: %w", err))
 	}
 
 	// Снятие истёкших удостоверений (задача kacho#1264). Провязка ОБЯЗАТЕЛЬНА и
@@ -641,18 +642,18 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// признающий меньше, чем объявила установка.
 	moduleRoster, err := cfg.AuthN.LoadModuleRoster()
 	if err != nil {
-		return fmt.Errorf("module identities: %w", err)
+		return startupFailureAt(fmt.Errorf("module identities: %w", err))
 	}
 
 	// Явный план установки применяется атомарно до открытия обоих
 	// слушателей регистрации. Ранее отозванные назначения остаются окончательно закрытыми.
 	if err := cfg.ValidateRegistrationAccountWriters(); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if cfg.RegistrationAccountWriters != nil {
 		plan := seed.RegistrationWriterPlan{Assignments: cfg.RegistrationAccountWriters.Assignments, Disabled: cfg.RegistrationAccountWriters.Disabled, RetireClusterWriter: cfg.RegistrationAccountWriters.RetireClusterWriter}
 		if err := seed.ApplyRegistrationAccountWriters(ctx, kanamepg.NewRegistrationAccountWriterStore(pool), moduleRoster, plan); err != nil {
-			return fmt.Errorf("registration-account-writers: %w", err)
+			return startupFailureAt(fmt.Errorf("registration-account-writers: %w", err))
 		}
 	}
 
@@ -670,7 +671,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// потому что её таблицы — предметы той же петли.
 	lane, err := buildLoginLane(ctx, cfg, moduleRoster, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// Фоновая уборка таблиц, чей рост задаёт внешний (задача kacho#1292). Три
@@ -679,7 +680,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// отказа старта (`startRetentionSweeps`, #253).
 	retentionSweeper, err := buildRetentionSweeper(pool, cfg, metricsReg, lane.retentionReapers(), logger)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// `InternalHumanSessionService.Resolve` — внутренний слушатель, исполнитель
 	// от полосы (Ф3-45).
@@ -698,7 +699,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// же хранилищами, что полоса.
 	svcs.accessKeyHandler, err = lane.accessKeyHandler(cfg, opsRepo, metricsReg, logger)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// Серверы gRPC. Перехватчик PrincipalExtract читает
@@ -716,15 +717,15 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// из KANAME_{PUBLIC,INTERNAL}_SERVER_MTLS_* (как в vpc).
 	mtlsCfg, err := config.LoadMTLS()
 	if err != nil {
-		return fmt.Errorf("load server mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("load server mTLS config: %w", err))
 	}
 	publicServerCreds, err := mtlsCfg.PublicServerCreds()
 	if err != nil {
-		return fmt.Errorf("public listener mTLS creds: %w", err)
+		return startupFailureAt(fmt.Errorf("public listener mTLS creds: %w", err))
 	}
 	internalServerCreds, err := mtlsCfg.InternalServerCreds()
 	if err != nil {
-		return fmt.Errorf("internal listener mTLS creds: %w", err)
+		return startupFailureAt(fmt.Errorf("internal listener mTLS creds: %w", err))
 	}
 
 	// Серверный TLS слушателя HTTP: слушатель Prometheus /metrics (:9095)
@@ -737,11 +738,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// отклоняет запуск, если ЛЮБАЯ грань включена с неполным набором сертификатов для
 	// своего режима или с неизвестным clientAuthMode.
 	if verr := mtlsCfg.Validate(); verr != nil {
-		return fmt.Errorf("listener mTLS config invalid: %w", verr)
+		return startupFailureAt(fmt.Errorf("listener mTLS config invalid: %w", verr))
 	}
 	metricsTLSConfig, err := mtlsCfg.MetricsServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("metrics listener mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("metrics listener mTLS config: %w", err))
 	}
 	// Серверный TLS слушателя jwks-proxy: ОДНОСТОРОННИЙ (по умолчанию server-tls-only,
 	// registry-verifier предъявляет только доверие серверу, никогда клиентский сертификат; mutual
@@ -749,7 +750,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// слушатель остаётся нешифрованным (в dev байты прежние).
 	jwksProxyTLSConfig, err := mtlsCfg.JWKSProxyServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("jwks-proxy listener mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("jwks-proxy listener mTLS config: %w", err))
 	}
 	// docker-token listener (:9096) server-TLS: ONE-WAY. По нему едет HTTP Basic,
 	// чей пароль — приватный ключ ключа служебной учётки (сервер его не хранит,
@@ -757,15 +758,15 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// requireRegistryTokenTLS ниже.
 	registryTokenTLSConfig, err := mtlsCfg.RegistryTokenServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("registry-token listener mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("registry-token listener mTLS config: %w", err))
 	}
 	restTLSConfig, err := mtlsCfg.RESTServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("public REST front mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("public REST front mTLS config: %w", err))
 	}
 	internalRESTTLSConfig, err := mtlsCfg.InternalRESTServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("internal REST front mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("internal REST front mTLS config: %w", err))
 	}
 
 	// ОБЪЯВЛЕНИЕ собственных REST-фронтов — единственное, и читают его двое:
@@ -779,17 +780,17 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	}
 
 	if err := requireGRPCListenerMTLS(productionMode, mtlsCfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if err := requireRegistryTokenTLS(productionMode,
 		cfg.APIServer.RegistryToken.ListenAddress(), mtlsCfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if err := requireIssuingListenerAsksForACertificate(cfg, mtlsCfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if err := requireLoginLaneTLS(productionMode, cfg, mtlsCfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Транспорт остальных HTTP-рёбер. Их ручки задавал ЗОНТИЧНЫЙ чарт монорепо;
 	// у отдельно поставленной службы его нет, а адреса всех трёх приходят
@@ -802,7 +803,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		cfg.APIServer.InternalRESTListenAddress(),
 		mtlsCfg,
 	)); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Раздельность поверхностей есть свойство СОКЕТА: «внутреннее не
 	// опубликовано наружу» проверяемо ровно тогда, когда оно недосягаемо.
@@ -813,7 +814,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		cfg.APIServer.InternalRESTListenAddress(),
 		mtlsCfg,
 	); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Рубеж внутреннего фронта бывает только транспортным: своего он не заводит,
 	// а к собственному слушателю идёт СВОИМ удостоверением — значит «кому позволено
@@ -821,7 +822,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if err := requireInternalRESTMutualClientAuth(productionMode,
 		cfg.APIServer.InternalRESTListenAddress(), mtlsCfg,
 	); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// А ЧЕМ фронт называется дальше — предмет отдельный, и решается он здесь.
 	// Рукопожатие выше отвечает «кому позволено дотянуться»; пер-RPC политика
@@ -830,14 +831,14 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// фактически предъявляет (см. ownfronthop.go).
 	ownFrontSAN, err := ownFrontHopSAN(mtlsCfg, cfg.AuthN.TrustDomain())
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if err := requireOwnFrontHopIdentity(productionMode,
 		cfg.APIServer.InternalRESTListenAddress(),
 		cfg.APIServer.RESTListenAddress(),
 		mtlsCfg, cfg.AuthN.TrustDomain(), ownFrontSAN,
 	); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Различимость адресов поверхностей судится НЕ ЗДЕСЬ, а там, где собран срез
 	// подъёма: сверять надо ВСЕ поверхности, а адреса не-gRPC приходят профилем
@@ -860,7 +861,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	laneWiring := observeLaneWiring(ctx, tokenSigner, lane.signInMethods(), lane, logger)
 	logger.Info("identity posture lane wiring", laneWiringCensus(laneWiring)...)
 	if err := config.ValidateLaneWiring(cfg, laneWiring); err != nil {
-		return fmt.Errorf("identity posture lane: %w", err)
+		return startupFailureAt(fmt.Errorf("identity posture lane: %w", err))
 	}
 
 	observability.LogBootPosture(logger,
@@ -1019,7 +1020,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		PositiveTTL: cfg.AuthZ.CacheTTL,
 	})
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// Измеритель задержки — ОДИН на процесс, полос у него две.
@@ -1040,7 +1041,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// диагностическую поверхность без семейства, которого на ней не будет никогда.
 	latency, err := grpcsrv.NewServerLatency(metricsReg.Registerer())
 	if err != nil {
-		return fmt.Errorf("измеритель задержки обслуженного вызова: %w", err)
+		return startupFailureAt(fmt.Errorf("измеритель задержки обслуженного вызова: %w", err))
 	}
 
 	// Читатель удостоверения, ПРЕДЪЯВЛЕННОГО самим вызывающим (kacho#2077).
@@ -1219,7 +1220,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// готовности означал бы перезапуск пода из-за нагрузки на API.
 	publicAdmissionLimits, internalAdmissionLimits, err := admissionLimits(cfg)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Ключи у слушателей РАЗНЫЕ, и это не деталь: публичный ключуется личностью
 	// конечного пользователя (за краем сидит арендатор, и предел объявлен на
@@ -1232,14 +1233,14 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	publicAdmission, err := grpcsrv.NewAdmission("public", publicAdmissionLimits,
 		publicAdmissionSubject(ownFrontSAN), publicAdmissionOptions()...)
 	if err != nil {
-		return fmt.Errorf("ограничитель допуска публичного слушателя: %w", err)
+		return startupFailureAt(fmt.Errorf("ограничитель допуска публичного слушателя: %w", err))
 	}
 	// Внутренний слушатель — ДВА уровня (kaname#992): экземпляр вызывающего
 	// (личность и адрес) и модуль в целом (SAN, прежние величины посадки).
 	// Шумный экземпляр выбирает не больше своего ведра и соседа не душит.
 	internalAdmissions, err := newInternalAdmissions(internalAdmissionLimits, instanceAdmissionLimits(internalAdmissionLimits))
 	if err != nil {
-		return fmt.Errorf("ограничитель допуска внутреннего слушателя: %w", err)
+		return startupFailureAt(fmt.Errorf("ограничитель допуска внутреннего слушателя: %w", err))
 	}
 	admission := listenerAdmission{public: publicAdmission,
 		internal: internalAdmissions.internal, internalInstance: internalAdmissions.internalInstance}
@@ -1252,12 +1253,12 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	internalAddr := cfg.APIServer.InternalListenAddress()
 	listener, err := net.Listen("tcp", publicAddr)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	internalListener, err := net.Listen("tcp", internalAddr)
 	if err != nil {
 		_ = listener.Close()
-		return err
+		return startupFailureAt(err)
 	}
 
 	// ── НЕ-gRPC ПОВЕРХНОСТИ: четыре профиля ТОЙ ЖЕ функции ──────────────────
@@ -1276,7 +1277,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// триггере и четыре набора одних и тех же сроков, выписанных по месту.
 	surfaceMode, merr := servicecontract.ParseMode(cfg.AuthN.Mode.String())
 	if merr != nil {
-		return fmt.Errorf("посадка процесса для профиля поверхностей: %w", merr)
+		return startupFailureAt(fmt.Errorf("посадка процесса для профиля поверхностей: %w", merr))
 	}
 
 	// Контекст не-gRPC поверхностей. Отдельный от корневого: гасить их надо по
@@ -1316,7 +1317,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS: metricsTLSConfig,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности диагностики: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности диагностики: %w", err))
 	}
 
 	// (2) Выдача токена Docker (`/iam/token`, сервер аутентификации Registry v2).
@@ -1364,7 +1365,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		basicCredentialTimeout: credentialLanePeerTimeout,
 	})
 	if rtErr != nil {
-		return fmt.Errorf("registry token shim: %w", rtErr)
+		return startupFailureAt(fmt.Errorf("registry token shim: %w", rtErr))
 	}
 	if registryTokenKeyMaterialWindow := registryTokenBuild.KeyMaterialWindowUntil; !registryTokenKeyMaterialWindow.IsZero() {
 		// Открытое окно — ОСЛАБЛЕНИЕ ПОСАДКИ, и оно обязано быть заметно в
@@ -1383,7 +1384,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if registryTokenAddr != "" {
 		mux, berr := registrytokenwire.Build(pool, registryTokenBuild)
 		if berr != nil {
-			return fmt.Errorf("registry token shim: %w", berr)
+			return startupFailureAt(fmt.Errorf("registry token shim: %w", berr))
 		}
 		// Перепись точки анонимной выдачи правила адреса источника — вплотную
 		// к сборке полосы (kaname#930): рост её клетки отличает неверно
@@ -1412,11 +1413,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			ceremonyKeySource(signingKeystore), lane.secretChecker(), lane.secretCheckCost(),
 			metricsReg.LoginLaneRecorder(), issuingSource, logger)
 		if cerr != nil {
-			return fmt.Errorf("ceremony: %w", cerr)
+			return startupFailureAt(fmt.Errorf("ceremony: %w", cerr))
 		}
 		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger, ceremony, issuingSource)
 		if cterr != nil {
-			return fmt.Errorf("client token endpoint: %w", cterr)
+			return startupFailureAt(fmt.Errorf("client token endpoint: %w", cterr))
 		}
 		if clientTokenHandler != nil {
 			mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)
@@ -1460,7 +1461,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS: registryTokenTLSConfig,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err))
 	}
 
 	// (3а) Полоса входа паролем — глаголы формы (перечень —
@@ -1469,7 +1470,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// поднимается вместе с ней.
 	loginLaneSurface, err := loginLaneSurface(cfg, surfaceMode, logger, lane, mtlsCfg)
 	if err != nil {
-		return fmt.Errorf("профиль поверхности полосы входа: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности полосы входа: %w", err))
 	}
 
 	// (3) Публикатор ПУБЛИЧНЫХ ключей проверки — наша запись набора на пути
@@ -1531,12 +1532,12 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			// Издатель без записи источника, вторая запись рядом с нашей или
 			// слушатель без единой записи — ОТКАЗ В СТАРТЕ, а не молчаливый
 			// перебор записей и не путь, выведенный из самого издателя.
-			return fmt.Errorf("привязка «издатель → источник набора» (слушатель %s=%q, своя чеканка включена: %t): %w",
-				knobJWKSProxy, jwksProxyAddr, signingKeystore != nil, berr)
+			return startupFailureAt(fmt.Errorf("привязка «издатель → источник набора» (слушатель %s=%q, своя чеканка включена: %t): %w",
+				knobJWKSProxy, jwksProxyAddr, signingKeystore != nil, berr))
 		}
 		jwksMux, merr := jwksproxyhttp.NewMux(binding)
 		if merr != nil {
-			return fmt.Errorf("маршруты публикации набора: %w", merr)
+			return startupFailureAt(fmt.Errorf("маршруты публикации набора: %w", merr))
 		}
 		// (4б) Авторитет отзыва НАШИХ токенов — на том же внутреннем
 		// слушателе. Отзыв, который читается только на выдаче, отзывом не
@@ -1555,7 +1556,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			// не исполнялось для условия без имени (задача kacho#2476).
 			if err := requireRevocationAuthorityCallerAuth(
 				signingKeystore != nil, jwksProxyAddr, mtlsCfg); err != nil {
-				return err
+				return startupFailureAt(err)
 			}
 			introspect := tokenintrospecthttp.NewHandler(tokenintrospecthttp.Config{
 				Issuer:            cfg.AuthN.TokenSigning.Issuer,
@@ -1588,7 +1589,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS: jwksProxyTLSConfig,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности публикатора набора ключей: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности публикатора набора ключей: %w", err))
 	}
 
 	// (4) и (5) Собственные REST-фронты службы — публичный и внутренний.
@@ -1602,7 +1603,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// одному обработчику вели бы два пути с разными решениями по дороге.
 	restUpstream, err := mtlsCfg.RESTUpstreamDialOption()
 	if err != nil {
-		return fmt.Errorf("удостоверение REST-фронта для собственного слушателя: %w", err)
+		return startupFailureAt(fmt.Errorf("удостоверение REST-фронта для собственного слушателя: %w", err))
 	}
 	restDialOpts := []grpc.DialOption{restUpstream}
 
@@ -1615,7 +1616,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		logRESTFrontLimits(logger, limits)
 		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts, limits)
 		if err != nil {
-			return fmt.Errorf("публичный REST-фронт: %w", err)
+			return startupFailureAt(fmt.Errorf("публичный REST-фронт: %w", err))
 		}
 	}
 	restSurface, err := iamHTTPSurface(servicecontract.Surface{
@@ -1635,7 +1636,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS:  restFront.tls,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности публичного REST-фронта: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности публичного REST-фронта: %w", err))
 	}
 
 	internalRESTAddr := internalRESTFront.addr
@@ -1646,7 +1647,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			// (SEC-1017-1). Тот же перечень личностей, что у политик вызывающего.
 			authzguard.InternalFrontAdmission(productionMode, moduleRoster, cfg.AuthN.TrustDomain()))
 		if err != nil {
-			return fmt.Errorf("внутренний REST-фронт: %w", err)
+			return startupFailureAt(fmt.Errorf("внутренний REST-фронт: %w", err))
 		}
 	}
 	internalRESTSurface, err := iamHTTPSurface(servicecontract.Surface{
@@ -1666,7 +1667,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS:  internalRESTFront.tls,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности внутреннего REST-фронта: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности внутреннего REST-фронта: %w", err))
 	}
 
 	// Срез подъёма несёт ПАРУ «ручка профиля + принятый профиль»: ручку не
@@ -1697,7 +1698,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		surfaceAddrsOfRaised(httpSurfaces)...,
 	))
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Перепись печатается и на успешном старте: «ноль совпадений» обязано быть
 	// отличимо от «ничего не сверяли».
@@ -1827,8 +1828,8 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		wait, serr := servicehost.ServeSurface(surfaceCtx, surface.desc)
 		if serr != nil {
 			stopSurfaces()
-			return fmt.Errorf("поверхность %q (%s): %w",
-				surface.desc.Spec().Name, surface.knob, serr)
+			return startupFailureAt(fmt.Errorf("поверхность %q (%s): %w",
+				surface.desc.Spec().Name, surface.knob, serr))
 		}
 		tasks = append(tasks, func() error {
 			if werr := wait(); werr != nil {
@@ -1899,7 +1900,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if imerr != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
-		return fmt.Errorf("invite mail drainer wiring: %w", imerr)
+		return startupFailureAt(fmt.Errorf("invite mail drainer wiring: %w", imerr))
 	}
 	tasks = append(tasks, func() (err error) {
 		defer func() {
@@ -1920,7 +1921,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		taskCtx, pool, cfg, metricsReg.OutboxRecorder(), logger); berr != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
-		return fmt.Errorf("invite mail backstop wiring: %w", berr)
+		return startupFailureAt(fmt.Errorf("invite mail backstop wiring: %w", berr))
 	}
 	// СКАНА ЖУРНАЛА СМЕНЫ СУБЪЕКТА ЗДЕСЬ НЕТ — у него больше нет предмета.
 	//
@@ -1958,7 +1959,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if err != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
-		return fmt.Errorf("audit shipper wiring: %w", err)
+		return startupFailureAt(fmt.Errorf("audit shipper wiring: %w", err))
 	}
 	tasks = append(tasks, func() error {
 		return auditShipper.Run(taskCtx)
@@ -2046,7 +2047,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// меняли между вызовами. Разбор — `reconcile_window.go`.
 	reconcileWindows := readReconcileWindows()
 	if err := reconcileWindows.validate(authz.RevocationPolicy.MaterializationCeiling); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	reconcileWorker := seed.NewReconcileWorker(reconcileEngine, reconcileAdapter, seed.ReconcileWorkerConfig{
 		SweepInterval: reconcileWindows.Sweep,
@@ -2432,7 +2433,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// последнего отказа старта и на корневом контексте задач (#253, шапка
 	// `startRetentionSweeps`).
 	if err := startRetentionSweeps(taskCtx, retentionSweeper, pool, cfg, logger); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	var group errgroup.Group
@@ -2441,7 +2442,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	}
 	err = group.Wait()
 	cancel()
-	return err
+	return startupFailureAt(err)
 }
 
 // identityUnary / identityStream — цепочка извлечения личности вызывающего,
@@ -2656,4 +2657,44 @@ func registryTokenBuildConfig(rt config.RegistryTokenConfig, run registryTokenRu
 		CredentialKindObserver:   run.credentialKindObserver,
 		BasicCredentialTimeout:   run.basicCredentialTimeout,
 	}, nil
+}
+
+// startupFailureAt фиксирует место возврата из runServe и класс отказа.
+// Вызывающий получает исходную ошибку, а в диагностическую запись попадают
+// только координата в исходнике и класс отказа.
+func startupFailureAt(err error) error {
+	if err == nil {
+		return err
+	}
+	_, file, line, ok := runtime.Caller(1)
+	if !ok || !strings.HasSuffix(file, "/cmd/kaname/serve.go") {
+		return err
+	}
+	class := "other"
+	var networkError net.Error
+	var pathError *os.PathError
+	var databaseError interface{ SQLState() string }
+	switch {
+	case errors.Is(err, context.Canceled):
+		class = "context-canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		class = "context-deadline"
+	case errors.Is(err, syscall.EADDRINUSE):
+		class = "address-in-use"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		class = "connection-refused"
+	case errors.Is(err, os.ErrPermission):
+		class = "permission"
+	case errors.Is(err, os.ErrNotExist):
+		class = "not-exist"
+	case errors.As(err, &pathError):
+		class = "file"
+	case errors.As(err, &databaseError):
+		class = "database"
+	case errors.As(err, &networkError):
+		class = "network"
+	}
+	observability.NewSlogger(os.Stderr).Error("kaname startup error origin",
+		slog.String("source", "cmd/kaname/serve.go"), slog.Int("line", line), slog.String("class", class))
+	return err
 }
