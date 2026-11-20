@@ -8136,8 +8136,7 @@ END $$;
 
 CREATE FUNCTION kaname._authority_forward_row_v4(p_id bigint,p_row jsonb,p_applied boolean) RETURNS boolean
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE effect record;receipt record;program record;
- allocation_rows record;command_rows record;invoker oid;changed integer;ignored_result boolean;
+DECLARE allocation_rows record;command_rows record;changed integer;ignored_result boolean;
 BEGIN
  -- Этот helper private; оба actual trigger caller уже получили свежий NULL
  -- proof. Нет active anchor — прежний произвольный SQL идёт в прежний guard.
@@ -8146,7 +8145,15 @@ BEGIN
  ignored_result:=kaname._authority_forward_custody_v4() IS NULL;
  -- Оба ряда ищутся независимо по ID. Несовпадение nonce или ordinal
  -- проверяется ниже и не может превратить повреждённый receipt в отсутствие.
- SELECT e AS effect,r AS receipt,e.reserved_id IS NOT NULL AS effect_found,r.reserved_id IS NOT NULL AS receipt_found
+ -- Читаем только встроенные типы: тип строки временной таблицы исчезает
+ -- при откате её создания, а план функции может сохраниться до конца сеанса.
+ SELECT e.reserved_id IS NOT NULL AS effect_found,r.reserved_id IS NOT NULL AS receipt_found,
+  e.nonce AS effect_nonce,e.ordinal AS effect_ordinal,e.row_value AS effect_row_value,e.row_digest AS effect_row_digest,
+  r.nonce AS receipt_nonce,r.ordinal AS receipt_ordinal,r.backend AS receipt_backend,
+  r.transaction_id AS receipt_transaction_id,r.invoker_oid AS receipt_invoker_oid,r.program_oid AS receipt_program_oid,
+  r.effects_oid AS receipt_effects_oid,r.table_oid AS receipt_table_oid,r.key_namespace AS receipt_key_namespace,
+  r.key_hash AS receipt_key_hash,r.objsubid AS receipt_objsubid,r.lock_mode AS receipt_lock_mode,
+  r.claimed AS receipt_claimed,r.guarded AS receipt_guarded,r.consumed AS receipt_consumed
  INTO allocation_rows
  FROM (VALUES (p_id)) requested(id)
  LEFT JOIN pg_temp.kaname_forward_effects_v4 e ON e.reserved_id=requested.id
@@ -8156,57 +8163,55 @@ BEGIN
  IF NOT allocation_rows.effect_found AND NOT allocation_rows.receipt_found THEN RETURN false;END IF;
  IF NOT allocation_rows.effect_found OR NOT allocation_rows.receipt_found THEN
   RAISE EXCEPTION 'forward allocation exact receipt missing' USING ERRCODE='42501';END IF;
- effect:=allocation_rows.effect;
- receipt:=allocation_rows.receipt;
  -- Свежая проверка custody выше охватывает только два чтения столбцов встроенных типов в этом вызове.
  -- Граница DML/обратного вызова не пересекается; каждый новый вход в триггер строки проверяет custody заново.
  -- Роль определяется только после раздельной проверки существования effect/receipt.
  -- JOIN оставляет строку роли даже при отсутствии anchor или program.
  -- Подтверждению строки нужны только поля anchor, участвующие в проверках.
  -- Большие batch/write_batch читает их собственный обработчик.
- SELECT actor.oid AS invoker,p AS program,a.nonce IS NOT NULL AS anchor_found,
-  p.nonce IS NOT NULL AS program_found,a.backend AS anchor_backend,
+ SELECT actor.oid AS invoker,a.nonce IS NOT NULL AS anchor_found,p.nonce IS NOT NULL AS program_found,
+  p.backend AS program_backend,p.transaction_id AS program_transaction_id,p.invoker_oid AS program_invoker_oid,
+  p.effects_oid AS program_effects_oid,p.receipts_oid AS program_receipts_oid,p.effect_count AS program_effect_count,
+  p.phase AS program_phase,a.backend AS anchor_backend,
   a.transaction_id AS anchor_transaction_id,a.invoker_oid AS anchor_invoker_oid,
   a.program_oid AS anchor_program_oid,a.effects_oid AS anchor_effects_oid,
   a.receipts_oid AS anchor_receipts_oid,a.effect_count AS anchor_effect_count,
   a.finished AS anchor_finished INTO STRICT command_rows
  FROM pg_catalog.pg_roles actor
  LEFT JOIN kaname.authority_forward_emit_anchor_v4 a
-  ON a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id() AND a.nonce=effect.nonce
+  ON a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id() AND a.nonce=allocation_rows.effect_nonce
  LEFT JOIN pg_temp.kaname_forward_program_v4 p ON p.nonce=a.nonce
  WHERE actor.rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
  IF NOT command_rows.anchor_found THEN RAISE EXCEPTION 'forward allocation anchor missing or foreign' USING ERRCODE='42501';END IF;
  IF NOT command_rows.program_found THEN RAISE EXCEPTION 'forward allocation program missing' USING ERRCODE='42501';END IF;
- program:=command_rows.program;
- invoker:=command_rows.invoker;
- IF program.backend IS DISTINCT FROM command_rows.anchor_backend OR program.transaction_id IS DISTINCT FROM command_rows.anchor_transaction_id
- OR program.invoker_oid IS DISTINCT FROM invoker OR program.invoker_oid IS DISTINCT FROM command_rows.anchor_invoker_oid
+ IF command_rows.program_backend IS DISTINCT FROM command_rows.anchor_backend OR command_rows.program_transaction_id IS DISTINCT FROM command_rows.anchor_transaction_id
+ OR command_rows.program_invoker_oid IS DISTINCT FROM command_rows.invoker OR command_rows.program_invoker_oid IS DISTINCT FROM command_rows.anchor_invoker_oid
  OR command_rows.anchor_program_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_program_v4')
  OR command_rows.anchor_effects_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_effects_v4')
  OR command_rows.anchor_receipts_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_receipts_v4')
- OR program.effects_oid IS DISTINCT FROM command_rows.anchor_effects_oid OR program.receipts_oid IS DISTINCT FROM command_rows.anchor_receipts_oid
- OR program.effect_count IS DISTINCT FROM command_rows.anchor_effect_count OR program.effect_count<0
- OR program.phase NOT IN ('prepared','claimed','finished')
- OR (program.phase='finished') IS DISTINCT FROM command_rows.anchor_finished THEN
+ OR command_rows.program_effects_oid IS DISTINCT FROM command_rows.anchor_effects_oid OR command_rows.program_receipts_oid IS DISTINCT FROM command_rows.anchor_receipts_oid
+ OR command_rows.program_effect_count IS DISTINCT FROM command_rows.anchor_effect_count OR command_rows.program_effect_count<0
+ OR command_rows.program_phase NOT IN ('prepared','claimed','finished')
+ OR (command_rows.program_phase='finished') IS DISTINCT FROM command_rows.anchor_finished THEN
   RAISE EXCEPTION 'forward allocation program scope changed' USING ERRCODE='42501';END IF;
- IF program.phase IS DISTINCT FROM 'claimed' OR receipt.nonce IS DISTINCT FROM effect.nonce
- OR receipt.ordinal IS DISTINCT FROM effect.ordinal OR effect.ordinal<1 OR effect.ordinal>program.effect_count
- OR receipt.backend IS DISTINCT FROM pg_backend_pid() OR receipt.transaction_id IS DISTINCT FROM pg_current_xact_id()
- OR receipt.invoker_oid IS DISTINCT FROM program.invoker_oid
- OR receipt.program_oid IS DISTINCT FROM command_rows.anchor_program_oid
- OR receipt.effects_oid IS DISTINCT FROM program.effects_oid
- OR receipt.table_oid IS DISTINCT FROM 'kaname.fga_outbox'::regclass::oid
- OR receipt.key_namespace IS DISTINCT FROM 1262569305 OR receipt.key_hash IS DISTINCT FROM hashtext(p_id::text)
- OR receipt.objsubid IS DISTINCT FROM 2 OR receipt.lock_mode IS DISTINCT FROM 'ExclusiveLock'
- OR NOT receipt.claimed OR receipt.consumed OR receipt.guarded IS DISTINCT FROM p_applied
- OR effect.row_digest IS DISTINCT FROM sha256(convert_to(p_row::text,'UTF8')) OR effect.row_value IS DISTINCT FROM p_row THEN
+ IF command_rows.program_phase IS DISTINCT FROM 'claimed' OR allocation_rows.receipt_nonce IS DISTINCT FROM allocation_rows.effect_nonce
+ OR allocation_rows.receipt_ordinal IS DISTINCT FROM allocation_rows.effect_ordinal OR allocation_rows.effect_ordinal<1 OR allocation_rows.effect_ordinal>command_rows.program_effect_count
+ OR allocation_rows.receipt_backend IS DISTINCT FROM pg_backend_pid() OR allocation_rows.receipt_transaction_id IS DISTINCT FROM pg_current_xact_id()
+ OR allocation_rows.receipt_invoker_oid IS DISTINCT FROM command_rows.program_invoker_oid
+ OR allocation_rows.receipt_program_oid IS DISTINCT FROM command_rows.anchor_program_oid
+ OR allocation_rows.receipt_effects_oid IS DISTINCT FROM command_rows.program_effects_oid
+ OR allocation_rows.receipt_table_oid IS DISTINCT FROM 'kaname.fga_outbox'::regclass::oid
+ OR allocation_rows.receipt_key_namespace IS DISTINCT FROM 1262569305 OR allocation_rows.receipt_key_hash IS DISTINCT FROM hashtext(p_id::text)
+ OR allocation_rows.receipt_objsubid IS DISTINCT FROM 2 OR allocation_rows.receipt_lock_mode IS DISTINCT FROM 'ExclusiveLock'
+ OR NOT allocation_rows.receipt_claimed OR allocation_rows.receipt_consumed OR allocation_rows.receipt_guarded IS DISTINCT FROM p_applied
+ OR allocation_rows.effect_row_digest IS DISTINCT FROM sha256(convert_to(p_row::text,'UTF8')) OR allocation_rows.effect_row_value IS DISTINCT FROM p_row THEN
   RAISE EXCEPTION 'forward allocation receipt scope or exact row changed' USING ERRCODE='42501';END IF;
  IF p_applied THEN
   UPDATE pg_temp.kaname_forward_receipts_v4 SET consumed=true
-  WHERE nonce=effect.nonce AND ordinal=effect.ordinal AND claimed AND guarded AND NOT consumed;
+  WHERE nonce=allocation_rows.effect_nonce AND ordinal=allocation_rows.effect_ordinal AND claimed AND guarded AND NOT consumed;
  ELSE
   UPDATE pg_temp.kaname_forward_receipts_v4 SET guarded=true
-  WHERE nonce=effect.nonce AND ordinal=effect.ordinal AND claimed AND NOT guarded AND NOT consumed;
+  WHERE nonce=allocation_rows.effect_nonce AND ordinal=allocation_rows.effect_ordinal AND claimed AND NOT guarded AND NOT consumed;
  END IF;
  GET DIAGNOSTICS changed=ROW_COUNT;
  IF changed<>1 THEN RAISE EXCEPTION 'forward allocation receipt replay' USING ERRCODE='42501';END IF;
@@ -9130,7 +9135,7 @@ BEGIN
  ('_authority_forward_custody_v4()','2df75aefd9b91dd9f91e1efe6249fab835307aa6cccb603de564ceb0b2f17470',true,'v',true,'private'),
  ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
  ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
- ('_authority_forward_row_v4(bigint,jsonb,boolean)','994bead7d79ab342e55a161d71700e8348d3f8079075d08ca74a5e8cf73a3daa',true,'v',true,'private'),
+ ('_authority_forward_row_v4(bigint,jsonb,boolean)','31eb7a5ae8eec2af1f31d7aa9e55d49c80e787838ec3a34130de6db4b3dcc56f',true,'v',true,'private'),
  ('_authority_forward_complete_v4(uuid)','06cfcd8f144243fc529aacba57f452b0913cc6d5b1ab6bf2daf7c4e6a9a38290',true,'v',true,'private'),
  ('_authority_forward_anchor_complete_v4()','0d9fdf6c02abe69e333b5584eee4628cafb7ec37849b7820e33aba4bea4396f1',true,'v',true,'private'),
  ('_authority_forward_storage_v4()','e8a9cd61f6ee6cc4fbde7361210cf493c8df166cdf3bfd8c49ed47190aa4ef0c',true,'s',true,'private'),
@@ -9863,7 +9868,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','695afaae4853f1d091011e5dfaf92e5075b6405db04c34f50838659fb418c709',true),
+ ('_authority_crud_storage_v3()','25cfe999c1ae2e5e5b961948216391bc4355ae2d13496779a69752763e7f76a0',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
