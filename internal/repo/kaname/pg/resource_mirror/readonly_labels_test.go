@@ -130,10 +130,25 @@ func (r *labelReaderRows) Scan(dest ...any) error {
 
 type labelReaderQuery struct {
 	querier
-	raw  []byte
-	sql  []string
-	args [][]any
-	err  error
+	raw      []byte
+	sql      []string
+	args     [][]any
+	err      error
+	rowCount int
+	rowsErr  error
+}
+
+type repeatingLabelReaderRows struct {
+	*labelReaderRows
+	remaining int
+}
+
+func (r *repeatingLabelReaderRows) Next() bool {
+	if r.remaining == 0 {
+		return false
+	}
+	r.remaining--
+	return true
 }
 
 func (q *labelReaderQuery) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
@@ -142,7 +157,54 @@ func (q *labelReaderQuery) Query(_ context.Context, sql string, args ...any) (pg
 	if q.err != nil {
 		return nil, q.err
 	}
-	return &labelReaderRows{raw: q.raw}, nil
+	rows := &labelReaderRows{raw: q.raw, rowsErr: q.rowsErr}
+	if q.rowCount > 0 {
+		return &repeatingLabelReaderRows{labelReaderRows: rows, remaining: q.rowCount}, nil
+	}
+	return rows, nil
+}
+
+func TestLabelSelectorUnionKeepsParametersAndDiscardsPartialResults(t *testing.T) {
+	ctx := context.Background()
+	filters := []LabelSelector{
+		{ObjectTypes: []string{"compute.instance"}, Labels: map[string]string{"env": "prod"}},
+		{ObjectTypes: []string{"compute.instance", "vpc.network"}, Labels: map[string]string{"team": ""}},
+	}
+	decode := NewReadOnlyLabelDecoder()
+	q := &labelReaderQuery{raw: []byte(`{"env":"prod","team":""}`)}
+	rows, complete, err := MatchLabelSelectorUnionReadOnly(ctx, q, filters, decode)
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Len(t, rows, 1)
+	require.Equal(t, "account", rows[0].ParentAccountID)
+	require.Contains(t, q.sql[0], "(m.object_type = ANY($1) AND m.labels @> $2::jsonb) OR (m.object_type = ANY($3) AND m.labels @> $4::jsonb)")
+	require.Contains(t, q.sql[0], "ORDER BY m.object_type ASC, m.object_id ASC")
+	require.Contains(t, q.sql[0], fmt.Sprintf("LIMIT %d", labelSelectorUnionMaxRows+1))
+	require.Equal(t, []any{filters[0].ObjectTypes, []byte(`{"env":"prod"}`), filters[1].ObjectTypes, []byte(`{"team":""}`)}, q.args[0])
+
+	q.rowCount = labelSelectorUnionMaxRows
+	rows, complete, err = MatchLabelSelectorUnionReadOnly(ctx, q, filters, decode)
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Len(t, rows, labelSelectorUnionMaxRows)
+
+	q.rowCount++
+	rows, complete, err = MatchLabelSelectorUnionReadOnly(ctx, q, filters, decode)
+	require.NoError(t, err)
+	require.False(t, complete)
+	require.Nil(t, rows)
+
+	q.rowsErr = errors.New("ошибка потока строк")
+	_, _, err = MatchLabelSelectorUnionReadOnly(ctx, q, filters, decode)
+	require.ErrorIs(t, err, q.rowsErr)
+
+	q.rowsErr = nil
+	q.rowCount = labelSelectorUnionMaxRows
+	q.raw = make([]byte, labelSelectorUnionMaxLabelBytes/labelSelectorUnionMaxRows+1)
+	rows, complete, err = MatchLabelSelectorUnionReadOnly(ctx, q, filters, func([]byte) (map[string]string, error) { return nil, nil })
+	require.NoError(t, err)
+	require.False(t, complete)
+	require.Nil(t, rows)
 }
 
 func TestLabelReaderPublicIndependenceAndPrivateFreshRows(t *testing.T) {

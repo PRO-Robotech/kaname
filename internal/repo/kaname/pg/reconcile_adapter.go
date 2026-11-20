@@ -127,6 +127,25 @@ func (s *readOnlyRuleMemberView) MatchSelector(ctx context.Context, types []stri
 	return out, nil
 }
 
+func (s *readOnlyRuleMemberView) MatchMirrorLabelSelectorUnion(ctx context.Context, selectors []domain.RuleSelector) ([]domain.MirrorObject, bool, error) {
+	filters := make([]resource_mirror.LabelSelector, 0, len(selectors))
+	for _, selector := range selectors {
+		filters = append(filters, resource_mirror.LabelSelector{
+			ObjectTypes: selector.ObjectTypes,
+			Labels:      selector.MatchLabels,
+		})
+	}
+	rows, complete, err := resource_mirror.MatchLabelSelectorUnionReadOnly(ctx, s.tx, filters, s.decode)
+	if err != nil || !complete {
+		return nil, complete, err
+	}
+	objects := make([]domain.MirrorObject, 0, len(rows))
+	for _, row := range rows {
+		objects = append(objects, mirrorRowToDomain(row))
+	}
+	return objects, true, nil
+}
+
 func (s *legacyForwardStore) EmitForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
 	return fga_outbox.EmitForwardWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
 }

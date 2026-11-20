@@ -17,11 +17,16 @@ type readonlyRuleProviderProbe struct {
 	ReconcileStore
 	views int
 	reads int
+	union *readonlyUnionProbe
 }
 
 func (p *readonlyRuleProviderProbe) ReadOnlyRuleMemberStore() ReconcileStore {
 	p.views++
-	return &readonlyRuleViewProbe{ReconcileStore: p.ReconcileStore, owner: p}
+	view := &readonlyRuleViewProbe{ReconcileStore: p.ReconcileStore, owner: p}
+	if p.union != nil {
+		return &readonlyUnionViewProbe{readonlyRuleViewProbe: view, union: p.union}
+	}
+	return view
 }
 
 type readonlyRuleViewProbe struct {
@@ -32,6 +37,23 @@ type readonlyRuleViewProbe struct {
 func (v *readonlyRuleViewProbe) MatchSelector(ctx context.Context, types []string, labels map[string]string) ([]domain.MirrorObject, error) {
 	v.owner.reads++
 	return v.ReconcileStore.MatchSelector(ctx, types, labels)
+}
+
+type readonlyUnionProbe struct {
+	objects   []domain.MirrorObject
+	selectors []domain.RuleSelector
+	complete  bool
+	err       error
+}
+
+type readonlyUnionViewProbe struct {
+	*readonlyRuleViewProbe
+	union *readonlyUnionProbe
+}
+
+func (v *readonlyUnionViewProbe) MatchMirrorLabelSelectorUnion(_ context.Context, selectors []domain.RuleSelector) ([]domain.MirrorObject, bool, error) {
+	v.union.selectors = append(v.union.selectors, selectors...)
+	return v.union.objects, v.union.complete, v.union.err
 }
 
 // Общие maps здесь намеренны: расчёт не вправе менять входы или сохранять их
@@ -70,6 +92,33 @@ func TestReadOnlyRuleMemberViewPreservesOrderedMembersAndInputs(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, expected, again)
 				require.Equal(t, 2, provider.views)
+
+				// В объединение входят и чужой объект, и объект, совпавший
+				// только с одним правилом. Проверяем прежний порядок и все статусы.
+				f.mirror["compute.instance"] = append(f.mirror["compute.instance"], domain.MirrorObject{
+					ObjectType: "compute.instance", ObjectID: "three", ParentProjectID: "p",
+					ParentAccountIDs: []string{"a"}, Labels: map[string]string{"env": "prod"},
+				})
+				expected, err = r.desiredRuleMembers(ctx, f, bs)
+				require.NoError(t, err)
+				batch := &readonlyUnionProbe{objects: f.mirror["compute.instance"], complete: true}
+				provider = &readonlyRuleProviderProbe{ReconcileStore: f, union: batch}
+				actual, err = r.desiredRuleMembers(ctx, provider, bs)
+				require.NoError(t, err)
+				require.Equal(t, expected, actual)
+				require.Equal(t, bs.Selectors, batch.selectors)
+				require.Zero(t, provider.reads)
+
+				batch.complete = false
+				result, err := r.desiredRuleMembers(ctx, provider, bs)
+				require.NoError(t, err)
+				require.Equal(t, expected, result)
+				require.Equal(t, 2, provider.reads)
+
+				batch.err = errors.New("ошибка объединённого чтения")
+				_, err = r.desiredRuleMembers(ctx, provider, bs)
+				require.ErrorIs(t, err, batch.err)
+				require.Equal(t, 2, provider.reads)
 			})
 		}
 	}
