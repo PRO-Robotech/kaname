@@ -162,10 +162,10 @@ def verify_tools(data):
 
 class World:
     """Изолированные пути и install peers; исполняется сам RUNNER_POD_SH."""
-    def __init__(self, base, payload, env=None, ships=None):
+    def __init__(self, base, payload, env=None, ships=None, *, work_name="kaname-runner"):
         self.base = base
         self.payload = payload
-        self.work = base / "kaname-runner"
+        self.work = base / work_name
         self.src = base / "src"
         self.prefix = base / "usr/local"
         self.bin = base / "fixture-bin"
@@ -687,7 +687,8 @@ def step_checks(objects, ships):
     env = {entry["name"]: entry["value"] for entry in container["env"]}
     payload = container["command"][2]
     with tempfile.TemporaryDirectory(prefix="stand-parity-steps-") as temp:
-        world = World(Path(temp), payload, env=env, ships=ships)
+        # Производитель pod экспортирует пути относительно work/out.
+        world = World(Path(temp), payload, env=env, ships=ships, work_name="work")
         result = world.run(env.get("RUNNER_CMD", ""))
         print(result.stdout, flush=True)
         if result.returncode != 0 or not (world.src / "step-file").is_file():
@@ -696,7 +697,7 @@ def step_checks(objects, ships):
         print("PARITY-AXIS steps: actual producer payload исполнен, root cwd и files сохранены", flush=True)
         anchor = '( cd /src && bash -- "/work/ship/$step" )'
         assert payload.count(anchor) == 1, "граница step cwd не единственна"
-        mutant = World(Path(temp) / "cwd-mutant", payload, env=env, ships=ships)
+        mutant = World(Path(temp) / "cwd-mutant", payload, env=env, ships=ships, work_name="work")
         bad = mutant.run(env.get("RUNNER_CMD", ""), payload=payload.replace(anchor, '( cd /src/sub && bash -- "/work/ship/$step" )', 1))
         assert bad.returncode != 0, "steps self-test не увидел wrong-cwd mutant"
         print("PARITY-MUTANT steps rejected=wrong-cwd", flush=True)
@@ -704,7 +705,7 @@ def step_checks(objects, ships):
         failure_ships.mkdir()
         (failure_ships / "first.sh").write_text('printf "failure nonce=1042\\n" > "$PARITY_OUT/summary.txt"\nexit 23\n')
         (failure_ships / "second.sh").write_text('touch "$PARITY_OUT/not-run"\n')
-        failed = World(Path(temp) / "first-failure", payload, env=env, ships=failure_ships)
+        failed = World(Path(temp) / "first-failure", payload, env=env, ships=failure_ships, work_name="work")
         failed.env["PARITY_OUT"] = str(failed.work / "out")
         outcome = failed.run(env.get("RUNNER_CMD", ""))
         assert outcome.returncode == 23 and not (failed.work / "out/not-run").exists(), "первый код/остановка steps не сохранены"
@@ -716,7 +717,8 @@ def step_checks(objects, ships):
         code = "set -uo pipefail\n" + os.environ["PARITY_EXPORT_FUNCTIONS"] + '\nrunner_exec() { shift; "$@"; }\nrunner_fetch fixture "$1"\n'
         fetch = subprocess.run(["bash", "-c", code, "fetch", str(receiver)], env=exported, capture_output=True, text=True, timeout=30)
         print(fetch.stdout + fetch.stderr, flush=True)
-        assert fetch.returncode == 0 and (receiver / "work/out/summary.txt").read_bytes() == b"failure nonce=1042\n", "summary после реальной ошибки шага не экспортирован"
+        summary = receiver / "work/out/summary.txt"
+        assert fetch.returncode == 0 and summary.is_file() and summary.read_bytes() == b"failure nonce=1042\n", "summary после реальной ошибки шага не экспортирован"
         print("PARITY-STEP-FAILURE code=23 following=not-run summary=exported-exact-bytes", flush=True)
     return 0
 
