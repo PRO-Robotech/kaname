@@ -165,7 +165,7 @@ class World:
     def __init__(self, base, payload, env=None, ships=None):
         self.base = base
         self.payload = payload
-        self.work = base / "work"
+        self.work = base / "kaname-runner"
         self.src = base / "src"
         self.prefix = base / "usr/local"
         self.bin = base / "fixture-bin"
@@ -203,7 +203,8 @@ class World:
                         RUNNER_SHA="fixture-source", RUNNER_REPO="PRO-Robotech/kaname",
                         RUNNER_NODE=self.provider["KANAME_RUNNER_NODE"], RUNNER_KUBECTL=self.provider["KANAME_RUNNER_KUBECTL"], RUNNER_GO=self.env["KANAME_RUNNER_GO"],
                         RUNNER_GH_SH="#!/bin/sh\nexit 4\n", GITHUB_PATH=str(self.work / "github-path"), GITHUB_ENV=str(self.work / "github-env"),
-                        FIXTURE_WORLD=str(base), FIXTURE_PY=sys.executable,
+                        RUNNER_TEMP=str(base), FIXTURE_WORLD=str(base), FIXTURE_WORK=str(self.work),
+                        FIXTURE_PY=sys.executable,
                         KANAME_STAND_IN_POD="inherited-after-world-cleanup", KEEP_SENTINEL="retained",
                         GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
         # Операционная оболочка полезной нагрузки/экспорта, отдельно от ожидаемого набора инструментов процесса.
@@ -298,7 +299,7 @@ if name == "go":
 elif name == "npm":
     if args == ["--version"]: print(os.environ["FIXTURE_NPM"]); sys.exit(0)
     if args[:2] != ["install", "-g"]: sys.exit(72)
-    tool, version=args[2].rsplit("@",1); target=root/"work/provider/node/bin"/tool
+    tool, version=args[2].rsplit("@",1); target=pathlib.Path(os.environ["FIXTURE_WORK"])/"provider/node/bin"/tool
 else: sys.exit(73)
 with (root/"install-argv").open("a") as out: out.write(json.dumps([name,*args])+"\\n")
 target.parent.mkdir(parents=True,exist_ok=True)
@@ -373,11 +374,13 @@ sys.stdout.buffer.write(lzma.decompress(sys.stdin.buffer.read()))
         # Эти соседи должны остаться доступны после намеренного сброса PATH в bootstrap.
         provider_bin = self.work / "provider/bin"
         provider_bin.mkdir(parents=True)
-        for name in ("python3",):
+        # Штатный provider меняет PATH. Повторный bootstrap из workflow
+        # должен снова использовать тех же локальных установочных соседей.
+        for name in ("python3", "apt-get", "id", "sudo"):
             (provider_bin / name).symlink_to(self.bin / name)
         executable(provider_bin / "curl", r'''#!/usr/bin/env python3
 import hashlib, os, pathlib, shutil, sys
-a=sys.argv[1:]; url=next(x for x in a if x.startswith("https://")); work=pathlib.Path(os.environ["FIXTURE_WORLD"])/"work"
+a=sys.argv[1:]; url=next(x for x in a if x.startswith("https://")); work=pathlib.Path(os.environ["FIXTURE_WORK"])
 if "go.dev/dl/?mode=json" in url:
  import json
  pin=os.environ["KANAME_RUNNER_GO"]
@@ -464,7 +467,7 @@ def payload_checks(root, payload, axis="all"):
         apt_fixture_checks(root, payload, base / "apt-fixture-world")
         if axis == "apt-fixture":
             return 0
-        roots = {"/usr/local": base / "workflow-lawful/usr/local", "/work": base / "workflow-lawful/work", "/src": base / "workflow-lawful/src"}
+        roots = {"/usr/local": base / "workflow-lawful/usr/local", "/work": base / "workflow-lawful/kaname-runner", "/src": base / "workflow-lawful/src"}
         sample = "'/usr/local/bin/kubectl' /work/out /src/root /workflow-lawful/bin"
         expected = f"'{roots['/usr/local']}/bin/kubectl' {roots['/work']}/out {roots['/src']}/root /workflow-lawful/bin"
         assert remap_roots(sample, roots) == expected, "remap lawful boundary не сохранена"
