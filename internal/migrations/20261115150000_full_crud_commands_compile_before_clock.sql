@@ -9403,20 +9403,19 @@ BEGIN
  ('resource_journal_project(text,jsonb)','a792cf1d91d0d5b16d01f530109ad7b08559e1bea98632d30fbeadec4bfbdbb7',false,'i',false,'preserve'),
  ('resource_journal_scope(text,jsonb)','22deae6b397c11f7558bd7e10c64400e06ea0f765f5b7f17ba03fe1d00aa1da9',false,'s',false,'preserve')
  ) pin_expected(signature,digest,definer,volatility,fixed_path,access_mode)
- WHERE NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p WHERE p.oid=to_regprocedure('kaname.'||pin_expected.signature)
-   AND p.proowner=owner_oid AND p.prosecdef=pin_expected.definer AND p.provolatile::text=pin_expected.volatility
+ LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||pin_expected.signature)
+ WHERE CASE WHEN p.oid IS NULL THEN true ELSE
+  (p.proowner=owner_oid AND p.prosecdef=pin_expected.definer AND p.provolatile::text=pin_expected.volatility
    AND CASE WHEN pin_expected.fixed_path THEN p.proconfig=ARRAY['search_path=pg_catalog, pg_temp'] ELSE p.proconfig IS NULL END
-   AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')=pin_expected.digest)
- OR (pin_expected.access_mode='private' AND EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
-   CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
-   WHERE p.oid=to_regprocedure('kaname.'||pin_expected.signature) AND a.grantee<>owner_oid))
- OR (pin_expected.access_mode='export' AND EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
-   CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
-   WHERE p.oid=to_regprocedure('kaname.'||pin_expected.signature) AND a.grantee<>owner_oid
+   AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')=pin_expected.digest) IS NOT TRUE
+ OR (pin_expected.access_mode='private' AND EXISTS(
+   SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee<>owner_oid))
+ OR (pin_expected.access_mode='export' AND EXISTS(
+   SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee<>owner_oid
    AND (a.grantee=0 OR a.is_grantable OR a.privilege_type<>'EXECUTE' OR NOT EXISTS(
     SELECT 1 FROM pg_catalog.pg_proc e CROSS JOIN LATERAL aclexplode(e.proacl) g
     WHERE e.oid='kaname.authority_protocol_enter_typed_v3(text,text[],jsonb,text,text,text,text,text)'::regprocedure
-     AND g.grantee=a.grantee AND g.privilege_type='EXECUTE'))))) THEN RETURN false;END IF;
+     AND g.grantee=a.grantee AND g.privilege_type='EXECUTE')))) END) THEN RETURN false;END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
   WHERE p.oid='kaname._authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)'::regprocedure
    AND p.prokind='f' AND p.prorettype='boolean'::regtype AND NOT p.proretset AND NOT p.proisstrict
@@ -9778,7 +9777,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','60b8dacf0b2dfe6db94bdfaabd684159f625775553542122d1f1aeee4c7f639b',true),
+ ('_authority_crud_storage_v3()','89e37659c3c0261b30ba820da9e6231bc34e32fa6941cb37f273dae4d62a340e',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
