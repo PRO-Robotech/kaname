@@ -7959,25 +7959,28 @@ END $$;
 
 CREATE FUNCTION kaname._authority_forward_custody_v4() RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE owner_oid oid;
+DECLARE invalid_storage boolean;
 BEGIN
- SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
  -- Каждый вызов заново проверяет три OID; LEFT JOIN сохраняет отказ при отсутствии storage.
- IF EXISTS(SELECT 1 FROM (VALUES
+ -- OID владельца и формы таблиц получаем одним свежим чтением каталога.
+ SELECT EXISTS(SELECT 1 FROM (VALUES
   (to_regclass('pg_temp.kaname_forward_program_v4')),
   (to_regclass('pg_temp.kaname_forward_effects_v4')),
   (to_regclass('pg_temp.kaname_forward_receipts_v4'))
  ) expected(relation_id) LEFT JOIN pg_catalog.pg_class c ON c.oid=expected.relation_id
  WHERE expected.relation_id IS NULL OR c.oid IS NULL
-  OR NOT (c.relowner=owner_oid AND c.relkind='r' AND c.relpersistence='t'
+  OR NOT (c.relowner=owner_role.oid AND c.relkind='r' AND c.relpersistence='t'
    AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT c.relhasrules AND NOT c.relhassubclass)
   OR (SELECT t.oid FROM pg_catalog.pg_trigger t WHERE t.tgrelid=expected.relation_id LIMIT 1) IS NOT NULL
   OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=expected.relation_id OR inhparent=expected.relation_id)
   -- Стандартный ACL таблицы выдаёт права только её владельцу.
   OR CASE WHEN c.relacl IS NULL OR c.relacl=acldefault('r',c.relowner) THEN false
-   ELSE EXISTS(SELECT 1 FROM aclexplode(c.relacl) a WHERE a.grantee<>owner_oid) END
+   ELSE EXISTS(SELECT 1 FROM aclexplode(c.relacl) a WHERE a.grantee<>owner_role.oid) END
   OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl) x
-   WHERE a.attrelid=expected.relation_id AND a.attacl IS NOT NULL AND x.grantee<>owner_oid)) THEN
+   WHERE a.attrelid=expected.relation_id AND a.attacl IS NOT NULL AND x.grantee<>owner_role.oid))
+ INTO STRICT invalid_storage
+ FROM pg_catalog.pg_roles owner_role WHERE owner_role.rolname=current_user;
+ IF invalid_storage THEN
   RAISE EXCEPTION 'untrusted forward allocation storage' USING ERRCODE='42501';END IF;
 END $$;
 
@@ -9116,7 +9119,7 @@ BEGIN
  ('authority_forward_claim_v4(uuid)','8a7c8ee8eae47a467c0d3370ef6185e93f3db6138aa14319563990fabd3b7be7',true,'v',true,'export'),
  ('authority_forward_finish_v4(uuid)','75683ffd52d23834a7e28814676b67a06d47cfa5a4fd2c2049d5f299f4c00199',true,'v',true,'export'),
  ('_authority_forward_context_v4()','67a9f0c6d896048f52b3eeb396250c7e33e16ab3170b874734154197d247dd5c',true,'v',true,'private'),
- ('_authority_forward_custody_v4()','14c2d0c9c92bda07f96280bf8d9ea4b76f1820f556b1336d71bb915c00ccda85',true,'v',true,'private'),
+ ('_authority_forward_custody_v4()','66375e75dfbecad4b47ab74636163107a3e8a525a3e11f24f8429d792021a65c',true,'v',true,'private'),
  ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
  ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
  ('_authority_forward_row_v4(bigint,jsonb,boolean)','b8eb06573f2d6301aca309767def5e2bc406f7fa20628483c2c724cc070454b7',true,'v',true,'private'),
@@ -9852,7 +9855,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','961b7bd8df95cd4d35c9a3aa43d58b44dccc3fcddca9436d715e3d4779c084d7',true),
+ ('_authority_crud_storage_v3()','f15bd81a71efa28f3b834b47a449112e59ffc5c747d334762bfd7ee34908500b',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
