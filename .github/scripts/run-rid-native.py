@@ -29,13 +29,20 @@ CASES = {
         "expired_standing_key_refusal_and_valid-time-only_twin",
         "pace1_and_pace5_large_repeated_concurrent_authentication_and_cancellation",
     }), 8),
+    "registry-installation-rid02": ("TestRID_02_ConcurrentAndRepeat", frozenset({
+        "axis_reorder_sequential_repeat_preserves_IDs_and_createdAt",
+        "two_real_absent-pair_arrivals_->_one_GD_and_two_successful_Operations",
+        "raw_Any_metadata_index_and_response_identities_agree_on_both_Operations",
+        "stop_before_writer_before_commit_after_commit_before_terminal;_primary_recovery",
+        "cancellation_and_reconciler_overlap_preserve_terminal_refusal",
+    }), 4),
     "registry-installation-rid04": ("TestRID_04_CreatorRetirement", frozenset({
         "independent_verified_O_gateway_RevokeAdmin_materialized_before_I_grant_and_apply",
         "new_grant_and_apply_denied;_old_G_and_GD_ACTIVE_and_no_self-restoration",
         "O_explicit_GrantAdmin_only_->_same_request_succeeds_with_same_delegationId",
     }), 14),
 }
-# Исходный бюджет полных RID-01 и RID-04 сохраняется.
+# Исходный бюджет полного нативного теста сохраняется.
 TEST_SECONDS = 1200
 OUTER_SECONDS = 1320
 
