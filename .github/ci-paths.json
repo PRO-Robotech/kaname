@@ -41,6 +41,7 @@
     "tests/newman/scripts/run-rid-native.cjs",
     "tests/newman/scripts/selftest_rid_native_bridge.py",
     ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
     ".github/scripts/stand-runner-bootstrap.sh",
     "go.mod",
     "go.sum"
@@ -63,6 +64,7 @@
     "tests/newman/scripts/run-rid-native.cjs",
     "tests/newman/scripts/selftest_rid_native_bridge.py",
     ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
     ".github/scripts/stand-runner-bootstrap.sh",
     "go.mod",
     "go.sum"

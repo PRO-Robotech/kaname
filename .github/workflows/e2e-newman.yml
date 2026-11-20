@@ -1941,7 +1941,7 @@ jobs:
         run: |
           export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
           export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
-          python3 .github/scripts/run-rid-native.py \
+          bash .github/scripts/run-rid-native-hosted.sh \
             --suite registry-installation-rid01 \
             --private-dir "$RUNNER_TEMP/rid01-private" \
             --out "$RUNNER_TEMP/rid01-summary.json"
@@ -1986,7 +1986,7 @@ jobs:
         run: |
           export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
           export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
-          python3 .github/scripts/run-rid-native.py \
+          bash .github/scripts/run-rid-native-hosted.sh \
             --suite registry-installation-rid04 \
             --private-dir "$RUNNER_TEMP/rid04-private" \
             --out "$RUNNER_TEMP/rid04-summary.json"

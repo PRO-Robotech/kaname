@@ -454,6 +454,8 @@ def startup_diagnostics(evidence, root_test, predicates, diagnostics, binary_sha
         prefixes = {"registration-account-writers: ": "registration-writer-plan",
                     "module identities: ": "module-identities", "refusal domain: ": "refusal-domain",
                     "посадка процесса: ": "process-posture",
+                    "sign-in lane: authn.login.verifier-capacity: предел памяти средой не наложен": "sign-in-memory-limit-missing",
+                    "sign-in lane: authn.login.verifier-capacity =": "sign-in-memory-budget",
                     "предел соединений базы не прочитан: ": "database-connection-limit-read",
                     "KANAME_REPOSITORY__POSTGRES__MAX_CONNS / KANAME_REPOSITORY__POSTGRES__REPLICA_BUDGET: ": "database-connection-budget",
                     "состояние схем базы не прочитано: ": "database-schema-read",
@@ -552,11 +554,29 @@ def judge_test(path, root_test, predicates):
             "directPredicates": sorted(direct)}
 
 
+def hosted_memory_scope():
+    # Читаем предел области процесса из ядра. GOMEMLIMIT не ограничивает RSS
+    # и не подтверждает условие запуска полосы входа.
+    need(os.geteuid() != 0)
+    rows = Path("/proc/self/cgroup").read_text().splitlines()
+    memberships = [row.removeprefix("0::") for row in rows if row.startswith("0::")]
+    need(len(memberships) == 1)
+    member = Path(memberships[0])
+    need(member.is_absolute() and member.as_posix() == memberships[0]
+         and member != Path("/") and ".." not in member.parts)
+    group = Path("/sys/fs/cgroup").joinpath(*member.parts[1:])
+    memory = (group / "memory.max").read_text().strip()
+    swap = (group / "memory.swap.max").read_text().strip()
+    need(memory == "4294967296" and swap == "0")
+    return {"memoryMaxBytes": int(memory), "memorySwapMaxBytes": int(swap), "unprivileged": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=CASES, required=True)
     parser.add_argument("--private-dir", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--require-hosted-memory-scope", action="store_true")
     args = parser.parse_args()
     os.umask(0o077)
     root_test, predicates, phase_count = CASES[args.suite]
@@ -578,6 +598,10 @@ def main():
     started = False
     before = None
     try:
+        if args.require_hosted_memory_scope:
+            summary["status"] = "hosted-memory-scope-invalid"
+            summary["nativeProcessScope"] = hosted_memory_scope()
+            summary["status"] = "precondition-failed"
         need(sys.platform == "linux" and ctypes.CDLL(None).prctl(36, 1, 0, 0, 0) == 0)
         started = True
         def interrupted(_signum, _frame):

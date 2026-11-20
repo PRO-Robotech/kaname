@@ -686,10 +686,12 @@ def _runner_routes(argv: list[str]) -> list[tuple[str, str]]:
                 return [route for sub in shell_commands(argv[k + 1])
                         for route in _runner_routes(sub)]
             k += 1
-    if (k + 1 < len(argv) and argv[k].rsplit("/", 1)[-1] == "python3" and
-            argv[k + 1].removeprefix("./") == ".github/scripts/run-rid-native.py"):
+    hosted_native = k < len(argv) and argv[k].removeprefix("./") == ".github/scripts/run-rid-native-hosted.sh"
+    direct_native = (k + 1 < len(argv) and argv[k].rsplit("/", 1)[-1] == "python3" and
+                     argv[k + 1].removeprefix("./") == ".github/scripts/run-rid-native.py")
+    if hosted_native or direct_native:
         # Засчитывается только вызов конкретной поддержанной коллекции с двумя путями вывода.
-        options = argv[k + 2:]
+        options = argv[k + (1 if hosted_native else 2):]
         if len(options) == 6 and set(options[::2]) == {"--suite", "--private-dir", "--out"}:
             stem = options[options.index("--suite") + 1]
             if stem in {"registry-installation-rid01", "registry-installation-rid04"}:
@@ -2407,6 +2409,11 @@ def _native_census_self_test(tmp: pathlib.Path, make_workflow) -> None:
         command = native.format(stem=stem)
         wf = make_workflow(tmp / (stem + "-routes"), command)
         entries = _pipeline_routes(wf).get(stem, [])
+        hosted = command.replace("python3 .github/scripts/run-rid-native.py",
+                                 "bash .github/scripts/run-rid-native-hosted.sh")
+        hosted_wf = make_workflow(tmp / (stem + "-hosted-routes"), hosted)
+        _c("native census: точный скрипт области памяти " + stem,
+           _pipeline_routes(hosted_wf).get(stem) == entries)
         _c("native census: API меток сохранён " + stem,
            pipeline_runs(wf).get(stem) == [label for label, _ in entries]
            and entries and all(kind == "native" for _, kind in entries))
