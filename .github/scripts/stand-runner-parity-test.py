@@ -32,6 +32,7 @@ def declarations(root):
     modules = {}
     checks, blocks, inspected = set(), [], 0
     for job, body in workflow["jobs"].items():
+        block_occurrences = {}
         for index, step in enumerate(body.get("steps", [])):
             inspected += 1
             if str(step.get("uses", "")).startswith("actions/setup-go@"):
@@ -75,14 +76,24 @@ def declarations(root):
                 if match:
                     checks.update(shlex.split(match[1]))
             if found:
-                blocks.append(run)
+                # Явные повторные шаги одного job остаются разными наблюдениями.
+                occurrence = block_occurrences.get(run, 0) + 1
+                block_occurrences[run] = occurrence
+                blocks.append((run, occurrence))
     assert inspected and installs and blocks, "пустой обход workflow tools"
     print(f"PARITY-CENSUS workflow jobs={len(workflow['jobs'])} steps={inspected} installs={len(installs)} checks={len(checks)}", flush=True)
     for name, (version, coordinate) in sorted(installs.items()):
         print(f"PARITY-DECL {coordinate} {name} version={version or 'workflow-unpinned'}", flush=True)
     assert not checks.difference(installs), ("missing expected versions", sorted(checks.difference(installs)))
     assert all(version for version, _ in installs.values()), "missing exact expected version"
-    return installs, checks, blocks, modules
+    # Все декларации уже проверены. Между jobs объединяем только точные копии
+    # полного run-блока с одинаковым номером его повторения внутри job.
+    # Второе/третье исполнение, явно объявленное в job, остаётся в lawful-мире;
+    # разные байты и порядок первых вхождений не меняются.
+    unique_blocks = [run for run, _ in dict.fromkeys(blocks)]
+    print(f"PARITY-INSTALL-CENSUS total={len(blocks)} unique={len(unique_blocks)} "
+          f"duplicates={len(blocks) - len(unique_blocks)}", flush=True)
+    return installs, checks, unique_blocks, modules
 
 
 def executable(path, text):
