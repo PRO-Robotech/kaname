@@ -216,6 +216,19 @@ func TestSevenCRUDReadinessRejectsEveryRemovedTriggerAndPrivateGrant(t *testing.
 			require.True(t, ready)
 		})
 	}
+	t.Run("extra-attachment", func(t *testing.T) {
+		tx, err := r.admin.Begin(r.ctx)
+		require.NoError(t, err)
+		defer tx.Rollback(r.ctx)
+		// Все обязательные связи остаются на месте. Проверка должна увидеть
+		// дополнительную привязку той же функции.
+		_, err = tx.Exec(r.ctx, `CREATE TRIGGER extra_epoch_attachment AFTER TRUNCATE ON kaname.accounts
+ FOR EACH STATEMENT EXECUTE FUNCTION kaname.authority_binding_epoch_changed()`)
+		require.NoError(t, err)
+		var ready bool
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_crud_storage_v3()`).Scan(&ready))
+		require.False(t, ready)
+	})
 	for _, name := range []string{"resource_journal", "fga_outbox"} {
 		t.Run("default/"+name, func(t *testing.T) {
 			column, sequence := "sequence_no", "resource_journal_sequence_no_seq"
@@ -289,6 +302,46 @@ func TestSevenCRUDReadinessRejectsEveryRemovedTriggerAndPrivateGrant(t *testing.
   OR p.proname LIKE '\_authority\_sequence\_%' ESCAPE '\'
   OR p.proname LIKE '\_authority\_binding\_stage\_%' ESCAPE '\') AND has_function_privilege(current_user,p.oid,'EXECUTE'))`).Scan(&exposed))
 	require.False(t, exposed)
+}
+
+func TestSevenCRUDReadinessPreservesExportACL(t *testing.T) {
+	r := writerProtocolRig(t)
+	var ready bool
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT kaname._authority_crud_storage_v3()`).Scan(&ready))
+	require.True(t, ready)
+
+	const baseline = "kaname.authority_protocol_enter_typed_v3(text,text[],jsonb,text,text,text,text,text)"
+	const exported = "kaname.authority_forward_prepare_v4(jsonb[])"
+	grantee := pgx.Identifier{r.role + "_extra"}.Sanitize()
+	cases := []struct {
+		name        string
+		withEntry   bool
+		exportGrant string
+		ready       bool
+	}{
+		{name: "разрешённый исполнитель", withEntry: true, exportGrant: grantee, ready: true},
+		{name: "нет разрешения на входе", exportGrant: grantee},
+		{name: "право передать EXECUTE", withEntry: true, exportGrant: grantee + " WITH GRANT OPTION"},
+		{name: "разрешение для PUBLIC", exportGrant: "PUBLIC"},
+	}
+	for _, sc := range cases {
+		t.Run(sc.name, func(t *testing.T) {
+			tx, err := r.admin.Begin(r.ctx)
+			require.NoError(t, err)
+			defer tx.Rollback(r.ctx)
+			_, err = tx.Exec(r.ctx, "CREATE ROLE "+grantee+" NOLOGIN")
+			require.NoError(t, err)
+			if sc.withEntry {
+				_, err = tx.Exec(r.ctx, "GRANT EXECUTE ON FUNCTION "+baseline+" TO "+grantee)
+				require.NoError(t, err)
+			}
+			_, err = tx.Exec(r.ctx, "GRANT EXECUTE ON FUNCTION "+exported+" TO "+sc.exportGrant)
+			require.NoError(t, err)
+			var ready bool
+			require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_crud_storage_v3()`).Scan(&ready))
+			require.Equal(t, sc.ready, ready)
+		})
+	}
 }
 
 // Составной live FK сохраняет реальную ссылочную целостность и каскад, когда
