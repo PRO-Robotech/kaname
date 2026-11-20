@@ -7971,7 +7971,9 @@ BEGIN
  WHERE expected.relation_id IS NULL OR c.oid IS NULL
   OR NOT (c.relowner=owner_oid AND c.relkind='r' AND c.relpersistence='t'
    AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT c.relhasrules AND NOT c.relhassubclass)
-  OR (SELECT t.oid FROM pg_catalog.pg_trigger t WHERE t.tgrelid=expected.relation_id LIMIT 1) IS NOT NULL
+  -- Флаг каталога обязателен при наличии триггера; после DROP он может остаться true.
+  OR CASE WHEN c.relhastriggers IS FALSE THEN false
+   ELSE EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid=expected.relation_id) END
   OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=expected.relation_id OR inhparent=expected.relation_id)
   -- Стандартный ACL таблицы выдаёт права только её владельцу.
   OR CASE WHEN c.relacl IS NULL OR c.relacl=acldefault('r',c.relowner) THEN false
@@ -9125,7 +9127,7 @@ BEGIN
  ('authority_forward_claim_v4(uuid)','8a7c8ee8eae47a467c0d3370ef6185e93f3db6138aa14319563990fabd3b7be7',true,'v',true,'export'),
  ('authority_forward_finish_v4(uuid)','75683ffd52d23834a7e28814676b67a06d47cfa5a4fd2c2049d5f299f4c00199',true,'v',true,'export'),
  ('_authority_forward_context_v4()','67a9f0c6d896048f52b3eeb396250c7e33e16ab3170b874734154197d247dd5c',true,'v',true,'private'),
- ('_authority_forward_custody_v4()','14c2d0c9c92bda07f96280bf8d9ea4b76f1820f556b1336d71bb915c00ccda85',true,'v',true,'private'),
+ ('_authority_forward_custody_v4()','2df75aefd9b91dd9f91e1efe6249fab835307aa6cccb603de564ceb0b2f17470',true,'v',true,'private'),
  ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
  ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
  ('_authority_forward_row_v4(bigint,jsonb,boolean)','994bead7d79ab342e55a161d71700e8348d3f8079075d08ca74a5e8cf73a3daa',true,'v',true,'private'),
@@ -9861,7 +9863,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','1bd8b20e9a32b9ffb1c040c6c790483e80a38f2a58cd501c92eabde73acfe7ef',true),
+ ('_authority_crud_storage_v3()','695afaae4853f1d091011e5dfaf92e5075b6405db04c34f50838659fb418c709',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
