@@ -604,7 +604,7 @@ func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
 	if err := w.keepLive(ctx, s); err != nil {
 		return err
 	}
-	return w.writeLive(ctx, s, false)
+	return w.writeLive(ctx, s)
 }
 
 // forwardTupleWriter — дополнительная возможность pg legacy adapter. Основной
@@ -619,7 +619,11 @@ type coldForwardTupleWriter interface {
 
 // writeLive пишет только накопленное: вызывающий уже отфильтровал members
 // и удерживает их строки зеркала в той же транзакции (keepLive либо keepLiveDesired).
-func (w *forwardWriteSet) writeLive(ctx context.Context, s ReconcileStore, singleColdBatch bool) error {
+func (w *forwardWriteSet) writeLive(ctx context.Context, s ReconcileStore) error {
+	return w.writeLiveBatch(ctx, s, false)
+}
+
+func (w *forwardWriteSet) writeLiveBatch(ctx context.Context, s ReconcileStore, singleColdBatch bool) error {
 	if err := s.UpsertMembers(ctx, w.members); err != nil {
 		return fmt.Errorf("forward: upsert members (%d): %w", len(w.members), err)
 	}

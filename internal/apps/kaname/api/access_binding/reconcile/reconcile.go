@@ -1729,7 +1729,7 @@ func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, 
 		// с несколькими партиями использует прежний emitter во всех партиях.
 		singleBatch := last && !flushed &&
 			len(writes.members) <= coldActiveBatchMembers && len(writes.ledger) <= coldActiveBatchTuples
-		if err := writes.writeLive(ctx, s, singleBatch); err != nil {
+		if err := writes.writeLiveBatch(ctx, s, singleBatch); err != nil {
 			return err
 		}
 		flushed = true
