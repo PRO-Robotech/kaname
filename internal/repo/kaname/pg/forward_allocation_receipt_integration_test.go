@@ -66,6 +66,7 @@ func TestForwardAllocationReceiptExactRowsAndCompletion(t *testing.T) {
 	}
 	tx, err := r.runtime.Begin(r.ctx)
 	require.NoError(t, err)
+	defer attestationLocksetRollback(tx)
 	_, err = tx.Exec(r.ctx, `SELECT kaname.authority_forward_emit_v4(ARRAY[`+forwardReceiptPayload+`])`, r.a)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit(r.ctx), "deferred anchor проверяет завершение после actual statement triggers")
