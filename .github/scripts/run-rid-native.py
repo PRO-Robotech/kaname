@@ -600,8 +600,60 @@ class NativeFailureMarkers:
         return {"kind": "unknown", "reason": "no-recognized-marker"}
 
 
+# Закрытая проекция RID03: ни значения столбцов, ни произвольные строки не сохраняются.
+RID03_OPERATION_COLUMNS = frozenset({
+    "id", "description", "created_at", "created_by", "principal_type", "principal_id",
+    "principal_display_name", "modified_at", "done", "metadata_type", "metadata_data",
+    "resource_id", "error_code", "error_message", "error_details", "response_type",
+    "response_data", "account_id", "other",
+})
+RID03_OPERATION_MARKER_LIMIT = 16
+
+
+def rid03_old_operation_diff(output, line_limit):
+    # Маркер обязан быть одной полной строкой штатного t.Logf из известного файла.
+    if not isinstance(output, str) or len(output) > 2048:
+        return None
+    source = "installation_newman_delegated_grant_test.go"
+    match = re.fullmatch(
+        r"[ \t]+(?:" + re.escape(str(ROOT / "cmd/kaname") + "/") + r")?" +
+        re.escape(source) + r":([1-9][0-9]{0,6}): RID03_OLD_OPERATION_DIFF ([^\r\n]{1,1024})\n",
+        output)
+    if match is None or int(match[1]) > line_limit:
+        return None
+
+    def unique_fields(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate field")
+            value[key] = item
+        return value
+
+    try:
+        value = json.loads(match[2], object_pairs_hook=unique_fields)
+    except (ValueError, RecursionError):
+        return None
+    if (type(value) is not dict or set(value) != {
+            "missing", "columns", "beforeDone", "afterDone", "kind"}
+            or type(value["missing"]) is not bool
+            or type(value["columns"]) is not list
+            or len(value["columns"]) > len(RID03_OPERATION_COLUMNS)
+            or any(type(column) is not str or column not in RID03_OPERATION_COLUMNS
+                   for column in value["columns"])
+            or value["columns"] != sorted(set(value["columns"]))
+            or type(value["beforeDone"]) is not str
+            or value["beforeDone"] not in ("done", "pending", "unknown")
+            or type(value["afterDone"]) is not str
+            or value["afterDone"] not in ("done", "pending", "unknown")
+            or type(value["kind"]) is not str
+            or value["kind"] not in ("service-account-key", "user-token", "other", "unknown")):
+        return None
+    return value
+
+
 def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
-    # Только имена из CASES и известные режимы RID-04; строки Output не проецируются.
+    # Только известные имена; из Output допускается лишь закрытая проекция RID03.
     names = {root_test, *(root_test + "/" + name for name in predicates)}
     if root_test == CASES["registry-installation-rid04"][0]:
         names.update(root_test + "/" + name + "/" + mode
@@ -623,6 +675,10 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
             bounds[relative] = len((ROOT / relative).read_text(encoding="utf-8").splitlines())
         except (OSError, UnicodeError):
             continue
+    rid03_names = set()
+    if root_test == CASES["registry-installation-rid03"][0]:
+        rid03_names = {root_test + "/" + name for name in RID_MATRIX_NESTED[root_test]}
+    old_operation_diffs, old_operation_counts = {}, {}
     total = 0
     try:
         with path.open("rb") as stream:
@@ -641,6 +697,19 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                 if (markers is not None and action == "output" and (root_test, "run") in seen
                         and (name is None or isinstance(name, str) and name in known)):
                     markers.observe(event.get("Output"))
+                if (action == "output" and isinstance(name, str) and name in rid03_names
+                        and (root_test, "run") in seen and (name, "run") in seen
+                        and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
+                    diff = rid03_old_operation_diff(event.get("Output"), bounds.get(
+                        "cmd/kaname/installation_newman_delegated_grant_test.go", 0))
+                    if diff is not None:
+                        count = old_operation_counts.get(name, 0) + 1
+                        old_operation_counts[name] = count
+                        if count <= RID03_OPERATION_MARKER_LIMIT:
+                            old_operation_diffs.setdefault(name, []).append(diff)
+                        else:
+                            # Переполнение не должно оставлять правдоподобный неполный список.
+                            old_operation_diffs.pop(name, None)
                 if (action == "output" and isinstance(name, str) and name in known and name not in sites
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
@@ -685,6 +754,13 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
         else:
             site = sites.get(first, {"status": "not-observed"})
         result["firstFailureSite"] = {"test": first, **site}
+    if result["status"] == "complete":
+        failures = [{"test": name, "diffs": old_operation_diffs[name]}
+                    for name in sorted(old_operation_diffs)
+                    if (name, "fail") in seen and not any(
+                        (name, end) in seen for end in ("pass", "skip"))]
+        if failures:
+            result["oldOperationDiffs"] = failures
     if markers is not None:
         result["failureMarker"] = markers.verdict(result["status"], result.get("firstFailureSite", {}))
     return result
