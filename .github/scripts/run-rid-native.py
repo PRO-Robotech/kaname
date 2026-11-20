@@ -364,6 +364,148 @@ def test_diagnostics(path, root_test, predicates):
     return result
 
 
+def startup_diagnostics(evidence, root_test, predicates, diagnostics, binary_sha):
+    # Только первый fail, уже связанный с точным require.NoError после StartBase.
+    site = diagnostics.get("firstFailureSite", {})
+    fixture_source = "cmd/kaname/installation_native_fixture_test.go"
+    names = {root_test + "/" + name for name in predicates}
+    if root_test == CASES["registry-installation-rid04"][0]:
+        names = {name + "/" + mode for name in names for mode in ("S1", "S2")}
+    if (diagnostics.get("status") != "complete" or site.get("status") != "matched"
+            or site.get("file") != fixture_source or site.get("test") not in names):
+        return {"status": "not-first-startbase-failure"}
+    try:
+        source_lines = (ROOT / fixture_source).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return {"status": "unavailable-fixture-source"}
+    location = site.get("line")
+    if (type(location) is not int or not 2 <= location <= len(source_lines)
+            or source_lines[location - 2].strip() != "base, err := session.StartBase(ctx, f.writerPlan)"
+            or source_lines[location - 1].strip() != "require.NoError(t, err)"):
+        return {"status": "not-first-startbase-failure"}
+    name = site["test"]
+    events = diagnostics.get("events", [])
+    first = next((i for i, row in enumerate(events) if row.get("action") == "fail"), None)
+    if (first is None or events[first].get("test") != name
+            or not any(row.get("test") == name and row.get("action") == "run" for row in events[:first])
+            or any(row.get("test") == name and row.get("action") in ("pass", "skip") for row in events[:first])):
+        return {"status": "unbound-failure"}
+    fixture = "case-" + hashlib.sha256(name.encode()).hexdigest()
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            need(key not in result)
+            result[key] = value
+        return result
+
+    def read(parts, limit):
+        # Каждый каталог и файл открывается относительно fd без следования ссылкам.
+        fd = os.open(evidence, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            for part in (fixture, *parts[:-1]):
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = child
+            leaf = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+            with os.fdopen(leaf, "rb") as stream:
+                before = os.fstat(stream.fileno())
+                need(stat.S_ISREG(before.st_mode) and before.st_size <= limit)
+                raw = stream.read(limit + 1)
+                after = os.fstat(stream.fileno())
+                need(len(raw) <= limit and len(raw) == before.st_size == after.st_size)
+                need(before.st_mtime_ns == after.st_mtime_ns and before.st_ctime_ns == after.st_ctime_ns)
+                return raw
+        except FileNotFoundError:
+            return None
+        finally:
+            os.close(fd)
+
+    def receipt(parts):
+        raw = read(parts, 4096)
+        return None if raw is None else json.loads(raw, object_pairs_hook=unique)
+
+    try:
+        need(receipt(("test-identity.json",)) == {"testIdentity": name})
+        process = receipt(("serve-001", "process", "process.json"))
+        terminal = receipt(("serve-001", "process", "terminal.json"))
+        result = {"status": "observed", "process": "receipt-absent", "terminal": "receipt-absent"}
+        if process is None:
+            need(terminal is None)
+            return result  # Не утверждаем, что exec точно не происходил без process receipt.
+        need(type(process) is dict and set(process) == {"pid", "binarySHA256", "configSHA256"})
+        need(type(process["pid"]) is int and 0 < process["pid"] <= 2147483647)
+        need(isinstance(binary_sha, str) and re.fullmatch(r"[a-f0-9]{64}", binary_sha))
+        need(process["binarySHA256"] == binary_sha)
+        need(isinstance(process["configSHA256"], str) and re.fullmatch(r"[a-f0-9]{64}", process["configSHA256"]))
+        config = read(("serve-001", "config.yaml"), 65536)
+        need(config is not None and hashlib.sha256(config).hexdigest() == process["configSHA256"])
+        result["process"] = "matched-binary-and-config"
+        if terminal is not None:
+            need(type(terminal) is dict and set(terminal) == {"pid", "exited", "exitCode"})
+            need(type(terminal["pid"]) is int and terminal["pid"] == process["pid"] and terminal["exited"] is True)
+            need(type(terminal["exitCode"]) is int and -1 <= terminal["exitCode"] <= 255)
+            result.update(terminal="matched-process", exitCode=terminal["exitCode"])
+        # main.go bootstrap logger пишет эти четыре сообщения только в stderr.
+        messages = {"refusal domain declaration failed": "refusal-domain",
+                    "config load failed": "config-load", "config validation failed": "config-validation",
+                    "kaname exited with error": "serve"}
+        # Только фиксированные префиксы ошибок запуска. Суффикс не выходит наружу.
+        prefixes = {"registration-account-writers: ": "registration-writer-plan",
+                    "module identities: ": "module-identities", "refusal domain: ": "refusal-domain",
+                    "посадка процесса: ": "process-posture",
+                    "предел соединений базы не прочитан: ": "database-connection-limit-read",
+                    "KANAME_REPOSITORY__POSTGRES__MAX_CONNS / KANAME_REPOSITORY__POSTGRES__REPLICA_BUDGET: ": "database-connection-budget",
+                    "состояние схем базы не прочитано: ": "database-schema-read",
+                    "load server mTLS config: ": "server-mtls",
+                    "public listener mTLS creds: ": "public-listener-mtls",
+                    "internal listener mTLS creds: ": "internal-listener-mtls",
+                    "metrics listener mTLS config: ": "metrics-listener-mtls"}
+        try:
+            raw = read(("serve-001", "process", "stderr.jsonl"), 262144)
+            if raw is None:
+                result["bootstrap"] = {"status": "log-absent"}
+                return result
+            need(not raw or raw.endswith(b"\n"))  # Фрагменты не склеиваются и не признаются событием.
+            lines = raw.splitlines(keepends=True)
+            need(len(lines) <= 1024)
+            found = []
+            for line in lines:
+                need(len(line) <= 32768 and line.endswith(b"\n"))
+                event = json.loads(line, object_pairs_hook=unique)
+                need(type(event) is dict)
+                message = event.get("msg")
+                if not isinstance(message, str) or message not in messages:
+                    continue
+                need(set(event) == {"time", "level", "msg", "err"})
+                need(isinstance(event["time"], str) and event["level"] == "ERROR" and isinstance(event["err"], str))
+                cause = "unclassified"
+                if messages[message] == "serve":
+                    for prefix, value in prefixes.items():
+                        if event["err"].startswith(prefix):
+                            cause = value
+                            break
+                elif messages[message] == "config-validation" and event["err"] in (
+                    "registration-account-writers must be explicitly declared",
+                    "registration-account-writers.assignments must be explicitly declared (an empty list disables registrars)",
+                ):
+                    cause = "registration-writer-declaration"
+                found.append({"stage": messages[message], "cause": cause})
+            need(len(found) <= 1)
+            if found and terminal is not None and terminal["exitCode"] == 1:
+                result["bootstrap"] = {"status": "fatal-exit-matched", **found[0]}
+            elif found:
+                result["bootstrap"] = {"status": "event-without-matching-exit"}
+            else:
+                # terminal после cleanup сам по себе не отличает ранний выход от остановки по readiness timeout.
+                result["bootstrap"] = {"status": "no-known-fatal-event"}
+        except (OSError, ValueError, TypeError, Rejected, RecursionError):
+            result["bootstrap"] = {"status": "invalid-or-unavailable"}
+        return result
+    except (OSError, ValueError, TypeError, Rejected, RecursionError):
+        return {"status": "invalid-or-unavailable"}
+
+
 def judge_test(path, root_test, predicates):
     running, passed, terminal = set(), set(), []
     with path.open() as stream:
@@ -527,6 +669,9 @@ def main():
             except Exception:
                 summary["cleanup"] = {"ok": False}
     finally:
+        if not summary["ok"] and "testDiagnostics" in summary:
+            summary["startupDiagnostics"] = startup_diagnostics(
+                evidence, root_test, predicates, summary["testDiagnostics"], summary["artifactSHA256"]["kaname"])
         write_json(output, summary)
     print(json.dumps({"ok": summary["ok"], "status": summary["status"]}))
     return 0 if summary["ok"] else 1
