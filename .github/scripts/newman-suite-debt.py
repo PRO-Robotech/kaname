@@ -138,6 +138,7 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import pathlib
 import re
@@ -673,7 +674,7 @@ def shell_commands(body: str) -> list[list[str]]:
     return _shell_list(body, 0, None)[0]
 
 
-def runner_stems(argv: list[str]) -> list[str]:
+def _runner_routes(argv: list[str]) -> list[tuple[str, str]]:
     """Коллекции, которые называет ОДНА простая команда, — если она прогонщик."""
     k = 0
     while k < len(argv) and (argv[k] in _PREFIX_WORDS or _ASSIGN_RE.match(argv[k])):
@@ -682,23 +683,39 @@ def runner_stems(argv: list[str]) -> list[str]:
         k += 1
         while k < len(argv) and argv[k].startswith("-"):
             if argv[k] == "-c" and k + 1 < len(argv):
-                return [st for sub in shell_commands(argv[k + 1])
-                        for st in runner_stems(sub)]
+                return [route for sub in shell_commands(argv[k + 1])
+                        for route in _runner_routes(sub)]
             k += 1
+    hosted_native = k < len(argv) and argv[k].removeprefix("./") == ".github/scripts/run-rid-native-hosted.sh"
+    direct_native = (k + 1 < len(argv) and argv[k].rsplit("/", 1)[-1] == "python3" and
+                     argv[k + 1].removeprefix("./") == ".github/scripts/run-rid-native.py")
+    if hosted_native or direct_native:
+        # Засчитывается только вызов конкретной поддержанной коллекции с двумя путями вывода.
+        options = argv[k + (1 if hosted_native else 2):]
+        if len(options) == 6 and set(options[::2]) == {"--suite", "--private-dir", "--out"}:
+            stem = options[options.index("--suite") + 1]
+            if stem in {"registry-installation-rid01", "registry-installation-rid04"}:
+                return [(stem, "native")]
+        return []
     if k >= len(argv) or not RUNNER_RE.search(argv[k]):
         return []
-    out: list[str] = []
+    out: list[tuple[str, str]] = []
     j = k + 1
     while j < len(argv):
         # Та же грамматика, что у разбора прогонщика: `--service` берёт следующее
         # слово целиком. Имя, собранное во время прогона, не литерал — и не счёт.
         if argv[j] == "--service" and j + 1 < len(argv):
             if STEM_RE.match(argv[j + 1]):
-                out.append(argv[j + 1])
+                out.append((argv[j + 1], "generic"))
             j += 2
             continue
         j += 1
     return out
+
+
+def runner_stems(argv: list[str]) -> list[str]:
+    """Сохраняет публичный API; вид маршрута читает перепись производителя."""
+    return [stem for stem, _ in _runner_routes(argv)]
 
 
 def _step_shell(step: dict, job: dict, doc: dict) -> str:
@@ -713,15 +730,15 @@ def _step_shell(step: dict, job: dict, doc: dict) -> str:
     return "bash"
 
 
-def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
-    """{stem: [«задание/шаг», …]} — какие коллекции гоняет объявление конвейера.
+def _pipeline_routes(workflows: pathlib.Path) -> dict[str, list[tuple[str, str]]]:
+    """{stem: [(«задание/шаг», вид маршрута), …]} — вызовы в конвейере.
 
     Читается РАЗОБРАННЫЙ YAML: ключи `jobs:`, их `steps[]`, тело `run:`. Имя
     коллекции стоит в комментариях объявления десятки раз, поэтому подстрочный
     предикат считал бы собственное объяснение — тот же порядок, что требует ban #17
     от гейта на кириллический ключ задания. Тело `run:` тоже читается РАЗОБРАННЫМ —
     как программа bash (`shell_commands`), и прогоном засчитывается только
-    команда прогонщика (`runner_stems`), а не упоминание флага в её тексте.
+    команда прогонщика (`_runner_routes`), а не упоминание флага в её тексте.
 
     Пустой словарь означает РОВНО «ни один шаг не гоняет ни одной коллекции».
     Отличить это от «объявлений не прочитано» — забота вызывающего: он спрашивает
@@ -729,7 +746,7 @@ def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
     """
     import yaml  # локально: его отсутствие — третий исход, а не отказ разбора
 
-    out: dict[str, list[str]] = {}
+    out: dict[str, list[tuple[str, str]]] = {}
     for f in workflow_files(workflows):
         try:
             doc = yaml.safe_load(f.read_text(encoding="utf-8"))
@@ -754,9 +771,15 @@ def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
                     continue
                 label = f"{f.name}:{job_id}/{stepv.get('name') or f'шаг {i + 1}'}"
                 for argv in shell_commands(body):
-                    for stem in runner_stems(argv):
-                        out.setdefault(stem, []).append(label)
+                    for stem, route in _runner_routes(argv):
+                        out.setdefault(stem, []).append((label, route))
     return out
+
+
+def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
+    """Прежняя публичная проекция: stem -> метки шагов, без смены API."""
+    return {stem: [label for label, _ in entries]
+            for stem, entries in _pipeline_routes(workflows).items()}
 
 
 def workflow_files(workflows: pathlib.Path) -> list[pathlib.Path]:
@@ -864,6 +887,104 @@ def ceremony_need(newman: pathlib.Path) -> dict[str, list[str]]:
             for col in cols}
 
 
+# Входы настоящего производителя: installation_newman_bridge_test.go,
+# installation_newman_install_test.go, installation_native_renewal_test.go и
+# installation_newman_retirement_test.go. Контракт относится только к native-маршруту.
+_NATIVE_INPUTS = {
+    "registry-installation-rid01": frozenset({
+        "jwtRIDOperator", "jwtRIDCreator", "jwtRIDExpiredCreator",
+        "rid01Expected", "rid01ClientAssertion", "rid01IssuanceOrigin"}),
+    "registry-installation-rid04": frozenset({
+        "jwtRIDOperator", "jwtRIDIssuer", "rid04Expected"}),
+}
+_NATIVE_TESTS = {
+    "registry-installation-rid01": ("TestRID_01_CleanInstallAndRenewal", 8),
+    "registry-installation-rid04": ("TestRID_04_CreatorRetirement", 14),
+}
+# Конкретные читаемые слоты keys.forEach из _CONFIG этих двух коллекций.
+# Не префикс: новый rid10* ключ не считается произведённым автоматически.
+_NATIVE_DERIVED = frozenset(
+    "rid10" + field + "_" + kind
+    for field in ("GetId", "Page")
+    for kind in ("accounts", "serviceAccounts", "groups", "roles", "bindings", "delegations")
+) | frozenset({"rid10Account_serviceAccounts", "rid10Account_groups", "rid10Account_delegations"})
+
+
+def _native_declared(root: pathlib.Path) -> set[str]:
+    """Поддержанная suite должна оставаться объявленной самим producer; без исполнения."""
+    try:
+        tree = ast.parse((root / ".github/scripts/run-rid-native.py").read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeError):
+        return set()
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "CASES"
+                and isinstance(node.value, ast.Dict)):
+            out = set()
+            for key, value in zip(node.value.keys, node.value.values):
+                if (isinstance(key, ast.Constant) and isinstance(key.value, str)
+                        and key.value in _NATIVE_TESTS and isinstance(value, ast.Tuple)
+                        and len(value.elts) == 3 and isinstance(value.elts[0], ast.Constant)
+                        and isinstance(value.elts[2], ast.Constant)
+                        and (value.elts[0].value, value.elts[2].value) == _NATIVE_TESTS[key.value]):
+                    out.add(key.value)
+            return out
+    return set()
+
+
+def _native_unused_preamble(text: str) -> set[str]:
+    # Эти два чтения общего preamble лишь сохраняют неиспользуемые alias.
+    # Зачёт исчезает при любой правке строки или повторном упоминании input/output.
+    try:
+        doc = json.loads(text)
+    except (ValueError, TypeError):
+        return set()
+    if not isinstance(doc, dict):
+        return set()
+    events = doc.get("event")
+    if not isinstance(events, list):
+        return set()
+    lines = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("listen") != "prerequest":
+            continue
+        script = event.get("script")
+        if (isinstance(script, dict) and script.get("type") == "text/javascript"
+                and isinstance(script.get("exec"), list)):
+            lines.extend(script["exec"])
+    return {source for source, target in (
+        ("existingProjectId", "_suiteProjectId"),
+        ("existingProjectCrossId", "_suiteFolderCrossId"))
+        if text.count(source) == text.count(target) == 1 and
+        lines.count(f"pm.environment.set('{target}', pm.environment.get('{source}'));") == 1}
+
+
+def _route_blockers(stem, surface, keys, declared, own, minted, entries, native_declared, text=""):
+    # Каждому виду вызова нужен свой producer. Native не снабжает generic даже
+    # в одном шаге: объединение препятствий, а не объединение возможностей.
+    kinds = {kind for _, kind in entries} or {"generic"}
+    blocked, states = [], {}
+    for kind in sorted(kinds):
+        route_own, route_minted = own, minted
+        if kind == "native":
+            if stem not in native_declared:
+                blocked.append("нативный производитель не объявляет поддержанную коллекцию")
+            else:
+                route_own = own | _NATIVE_DERIVED | _native_unused_preamble(text)
+                # Native не запускает generic seeds; origin даёт run-rid-native.cjs.
+                route_minted = {surface: _NATIVE_INPUTS[stem] | {"ownRestBaseUrl"}}
+        bl, counts = blockers(surface, keys, declared, route_own, route_minted,
+                              [label for label, route in entries if route == kind])
+        blocked.extend(b for b in bl if b not in blocked)
+        for state in counts:
+            states.setdefault(state, set())
+        for key in keys:
+            state = key_state(key, declared, route_own)
+            if state is not None and key not in route_minted.get(surface, set()):
+                states[state].add(key)
+    return blocked, {state: len(missing) for state, missing in states.items()}
+
+
 def survey(newman: pathlib.Path, workflows: pathlib.Path):
     """Разрез дерева: (гоняемые, заблокированные, по поверхности, по препятствию, …).
 
@@ -883,7 +1004,9 @@ def survey(newman: pathlib.Path, workflows: pathlib.Path):
     if not wfs:
         raise Unmet(f"в {workflows} не прочитано ни одного объявления конвейера — "
                     f"величина «гоняется» НЕ ИЗМЕРЕНА, и ноль вместо неё был бы ложью")
-    runs = pipeline_runs(workflows)
+    routes = _pipeline_routes(workflows)
+    runs = {stem: [label for label, _ in entries] for stem, entries in routes.items()}
+    native_declared = _native_declared(newman.parent.parent)
 
     seed_dir = newman.parent / "authz-fixtures"
     scripts = seed_scripts(seed_dir)
@@ -905,8 +1028,8 @@ def survey(newman: pathlib.Path, workflows: pathlib.Path):
         stem = col.name[: -len(".postman_collection.json")]
         own = set(OWN_KEY_RE.findall(text))
         ceremony_need[stem] = ceremony_need_of(text, declared)
-        bl, states = blockers(surface, keys, declared, own, minted,
-                              runs.get(stem, []))
+        bl, states = _route_blockers(stem, surface, keys, declared, own, minted,
+                                     routes.get(stem, []), native_declared, text)
         for state, n in states.items():
             by_state[state] += n
         if bl:
@@ -1016,10 +1139,10 @@ _HOLDER_EDGE_HALF = (
 # Чёрный ящик доходит до этих глаголов только через край.
 
 PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
-    "registry-installation-rid01": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID01, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid01 с публичной коллекцией и подтверждённой очисткой"),
+    "registry-installation-rid01": ("A", "Нативная фикстура Kaname выдаёт окружение и восемь публичных фаз. Их выполняет задание rid01, которое проверяет уборку ресурсов своего запуска", ""),
     "registry-installation-rid02": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID02, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid02 с публичной коллекцией и подтверждённой очисткой"),
     "registry-installation-rid03": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID03, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid03 с публичной коллекцией и подтверждённой очисткой"),
-    "registry-installation-rid04": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID04, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid04 с публичной коллекцией и подтверждённой очисткой"),
+    "registry-installation-rid04": ("A", "Нативная фикстура Kaname выдаёт окружение и четырнадцать публичных фаз вывода создателя из эксплуатации. Их выполняет задание rid04 с проверкой уборки ресурсов своего запуска", ""),
     "registry-installation-rid05": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID05, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid05 с публичной коллекцией и подтверждённой очисткой"),
     "registry-installation-rid06": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID06, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid06 с публичной коллекцией и подтверждённой очисткой"),
     "registry-installation-rid07": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID07, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid07 с публичной коллекцией и подтверждённой очисткой"),
@@ -2267,6 +2390,81 @@ def _st_run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
                ledger=_st_ledger(newman, workflows) if ledger is None else ledger)
 
 
+def _native_census_self_test(tmp: pathlib.Path, make_workflow) -> None:
+    """Лёгкая инъекция только разбора/контракта; не исполняет посевы или RID."""
+    native = ("python3 .github/scripts/run-rid-native.py --suite {stem} "
+              "--private-dir \"$PRIVATE\" --out \"$PUBLIC\"")
+    surface = "служба (собственный REST-фронт)"
+    declared = {"ownRestBaseUrl": "https://own"}
+    root = tmp / "native-contract"
+    producer = root / ".github/scripts/run-rid-native.py"
+    producer.parent.mkdir(parents=True)
+    _c("native census: отсутствующий producer не объявляет suites", not _native_declared(root))
+    producer.write_text("CASES = {" + ",".join(
+        repr(stem) + ": (" + repr(test) + ", frozenset(), " + str(count) + ")"
+        for stem, (test, count) in _NATIVE_TESTS.items()) + "}\n", encoding="utf-8")
+    supported = _native_declared(root)
+    _c("native census: producer объявляет обе точные suites", supported == set(_NATIVE_INPUTS))
+    for stem, inputs in _NATIVE_INPUTS.items():
+        command = native.format(stem=stem)
+        wf = make_workflow(tmp / (stem + "-routes"), command)
+        entries = _pipeline_routes(wf).get(stem, [])
+        hosted = command.replace("python3 .github/scripts/run-rid-native.py",
+                                 "bash .github/scripts/run-rid-native-hosted.sh")
+        hosted_wf = make_workflow(tmp / (stem + "-hosted-routes"), hosted)
+        _c("native census: точный скрипт области памяти " + stem,
+           _pipeline_routes(hosted_wf).get(stem) == entries)
+        _c("native census: API меток сохранён " + stem,
+           pipeline_runs(wf).get(stem) == [label for label, _ in entries]
+           and entries and all(kind == "native" for _, kind in entries))
+        keys = inputs | _NATIVE_DERIVED | {"ownRestBaseUrl"}
+        def blocked(route_entries=entries, accepted=supported, checked=keys):
+            return _route_blockers(stem, surface, checked, declared, set(), {},
+                                   route_entries, accepted)[0]
+        _c("native census: подтверждённые inputs и конкретные slots " + stem, not blocked())
+        _c("native census: unknown input остаётся blocked " + stem,
+           bool(blocked(checked=keys | {"unproducedInput"})))
+        _c("native census: unknown derived slot остаётся blocked " + stem,
+           bool(blocked(checked=keys | {"rid10Page_notInSnapshot"})))
+        _c("native census: generic seed не снабжает native unknown " + stem,
+           bool(_route_blockers(stem, surface, keys | {"genericOnlyKey"}, declared, set(),
+                                {surface: {"genericOnlyKey"}}, entries, supported)[0]))
+        aliases = {"existingProjectId", "existingProjectCrossId"}
+        preamble = json.dumps({"event": [{"listen": "prerequest", "script": {
+            "type": "text/javascript", "exec": [
+                "pm.environment.set('_suiteProjectId', pm.environment.get('existingProjectId'));",
+                "pm.environment.set('_suiteFolderCrossId', pm.environment.get('existingProjectCrossId'));"]}}]})
+        def alias_blocked(text):
+            return _route_blockers(stem, surface, keys | aliases, declared, set(),
+                                   {}, entries, supported, text)[0]
+        _c("native census: точный unused preamble " + stem, not alias_blocked(preamble))
+        _c("native census: использованный input не исключается " + stem,
+           bool(alias_blocked(preamble.replace('"event":', '"existingProjectId": 1, "event":'))))
+        _c("native census: использованный output не исключается " + stem,
+           bool(alias_blocked(preamble.replace('"event":', '"_suiteProjectId": 1, "event":'))))
+        _c("native census: изменённый preamble не исключается " + stem,
+           bool(alias_blocked(preamble.replace("pm.environment.set(", "altered.set(", 1))))
+        _c("native census: исчезнувшее объявление producer " + stem,
+           bool(blocked(accepted=set())))
+        _c("native census: исчезнувший workflow route " + stem,
+           bool(blocked(route_entries=[])))
+        generic = [("same-step", "generic")]
+        _c("native census: generic не получает native inputs " + stem,
+           bool(blocked(route_entries=generic)))
+        mixed = _pipeline_routes(make_workflow(tmp / (stem + "-mixed"),
+            command + "\n./scripts/run.sh --service " + stem))[stem]
+        _c("native census: mixed в одном шаге сохраняет generic отказ " + stem,
+           {kind for _, kind in mixed} == {"native", "generic"} and bool(blocked(route_entries=mixed)))
+        _, missing = _route_blockers(stem, surface, keys | {"genericOnlyKey"}, declared, set(),
+                                     {surface: {"genericOnlyKey"}}, mixed, supported)
+        _c("native census: mixed считает объединение разных пробелов " + stem,
+           missing[KEY_STATE_ABSENT] == len(inputs | _NATIVE_DERIVED) + 1)
+        _c("native census: UNKNOWN native suite не распознана " + stem,
+           not runner_stems(shell_commands(command.replace(stem, "registry-installation-rid99"))[0]))
+    producer.write_text("CASES = {}\n", encoding="utf-8")
+    _c("native census: пустое объявление не поддерживает suites", not _native_declared(root))
+
+
 def self_test() -> int:
     import io
     import contextlib
@@ -2536,6 +2734,23 @@ def self_test() -> int:
                bool(parsed.get("own-only")) == runs_it
                and f"гоняется здесь:    {want}" in out,
                f"разборщик: {parsed}; перепись: {out[:300]}")
+
+        native = ("python3 .github/scripts/run-rid-native.py --suite registry-installation-rid01 "
+                  "--private-dir \"$PRIVATE\" --out \"$PUBLIC\"")
+        for index, (body, wanted) in enumerate((
+            (native, {"registry-installation-rid01"}),
+            (native.replace("rid01", "rid04"), {"registry-installation-rid04"}),
+            (f"echo '{native}'", set()),
+            (native.replace("rid01", "rid02"), set()),
+            (native.replace("registry-installation-rid01", '"$RID"'), set()),
+            ("python3 .github/scripts/run-rid-native.py --out public.json", set()),
+        )):
+            parsed = pipeline_runs(_wf_body(tmp / f"rid-producer-{index}", body))
+            _c(f"Нативный RID требует известную коллекцию, приватный вывод и сводку ({index})",
+               set(parsed) == wanted,
+               f"разборщик: {parsed}")
+
+        _native_census_self_test(tmp, _wf_body)
 
         # Ось 6д: тело шага с ИНОЙ оболочкой — не программа bash, и её строка,
         # похожая на команду прогонщика, прогоном не засчитывается. Близнец —
