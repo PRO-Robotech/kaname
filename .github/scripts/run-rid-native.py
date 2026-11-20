@@ -22,6 +22,38 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "github.com/PRO-Robotech/kaname/cmd/kaname"
 # Имена прямых подтестов после замены пробелов на подчёркивания в testing.T.Run.
 CASES = {
+    'registry-installation-rid11': ('TestRID_11_InputAuthnAuthorityBackend', frozenset({
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair',
+        'exact_exit_stage_field_pair_completedPairs;_no_bootstrap_I_fallback_or_self-provision',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes',
+        'real_structured_stdout_stderr_and_absence_of_raw_or_JSON-escaped_credential_key_token_values',
+    }), 128),
+    'registry-installation-rid12': ('TestRID_12_ClosedShapeAndBounds', frozenset({
+        'absent_and_empty_GD_field_normal_full_seed_success_zero_GD',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes',
+        'UNSPECIFIED_unknown_enum_iam_module_role_type_rejected_exact_fields',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs',
+        'single-bad-field-only_repair_twins;_array_reorder_idempotence',
+    }), 65),
+    'registry-installation-rid03': ('TestRID_03_DelegatedGrantAndIssuerBounds', frozenset({
+        'explicit_account_registration_writer_authority,_missing/revoked/wildcard_refusals_and_lawful_twins',
+        'real_production_listener_grant_Operation_Get_ACTIVE_with_installation_delegationId',
+        'out-of-axis_role_denial_and_same-subject_legal_role_twin',
+        'I_Create_denied_without_Operation;_caller-only_C_twin_succeeds',
+        'allowed_anonymous_system-class_succeeds;_authenticated_refused',
+    }), 44),
+    'registry-installation-rid05': ('TestRID_05_CreatorDeletionAndNewID', frozenset({
+        'normal_full_key_revoke_and_reference_census;_Delete_and_Get_NOT_FOUND',
+        'old_creator_credentials_unauthenticated;_new_same-name_C2_does_not_resurrect_GD',
+        'active_delegate_reference_blocks_Delete;_revoke-only_twin_permits_Delete',
+        'O_explicitly_grants_C2;_old_GD_revoked;_explicit_new_Create_restores_issuance',
+    }), 30),
+    'registry-installation-rid06': ('TestRID_06_RevokeDuringApply', frozenset({
+        'apply_at_real_before-pair_barrier;_O_commits_revoke_before_release',
+        'overlap_and_sequential_reinstall_refuse;_old_G_and_GD_revoked;_replacement_zero',
+        'no-revoke_overlap_twin_preserves_original_ID',
+        'explicit_C_Create_recovery_preserves_revoked_history_and_new_issuer_grant_works',
+    }), 30),
     "registry-installation-rid01": ("TestRID_01_CleanInstallAndRenewal", frozenset({
         "real_standalone_F0_->_verified_O_->_standing_C_->_full_serve_delivery",
         "exact_creator_and_axes;_C_I_A_distinct;_I_not_admin",
@@ -41,6 +73,14 @@ CASES = {
         "new_grant_and_apply_denied;_old_G_and_GD_ACTIVE_and_no_self-restoration",
         "O_explicit_GrantAdmin_only_->_same_request_succeeds_with_same_delegationId",
     }), 14),
+    "registry-installation-rid08": ("TestRID_08_SnapshotPagesAndFutureAccount", frozenset({
+        "same_verified_O_initial_A_plus_normal_B_T;_actual_admission1+2_of3/hour",
+        "actual_window_expiry_then_same_O_creates_D_only_after_frozen_N3_pageSize2_snapshot",
+        "first_run_N3_includes_system-tenant_excludes_canonical_SYS_and_D;_repeat_N4_stable_IDs",
+        "full_pages_compared_to_canonical_primary_census",
+        "actual_empty_census_success;_second-page_BeginTx_unknown_fault_INTERNAL_before_Operations",
+        "fault-only_removed_twin_and_retry_converge_without_duplicates",
+    }), 6),
     "registry-installation-rid10": ("TestRID_10_MidRunFaultAndRetirement", frozenset({
         "first_pair_committed_observed;_unknown_Writer_BeginTx_only_after_normal_second_Operation_Create",
         "second_Operation_done_INTERNAL_internal_error;_first_kept;_no_later_pairs",
@@ -70,6 +110,138 @@ RID10_NESTED = frozenset({
 
 # Полные матрицы существующих фикстур: slash в t.Run не создаёт промежуточных узлов.
 RID_MATRIX_NESTED = {
+    'TestRID_11_InputAuthnAuthorityBackend': frozenset({
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-missing/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-missing/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-missing/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-missing/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-unreadable/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-unreadable/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-unreadable/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-unreadable/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/deleted-creator/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/deleted-creator/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/deleted-creator/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/deleted-creator/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/revoked-key/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/revoked-key/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/revoked-key/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/revoked-key/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/bad-signature/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/bad-signature/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/bad-signature/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/bad-signature/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/backend/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/backend/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/backend/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/backend/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/account/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/census/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/census/S2/ACTIVE/negative',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-missing/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-missing/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-missing/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-missing/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-unreadable/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-unreadable/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-unreadable/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-unreadable/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/deleted-creator/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/deleted-creator/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/deleted-creator/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/deleted-creator/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/bad-signature/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/bad-signature/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/bad-signature/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/bad-signature/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/authority/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/authority/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/authority/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/authority/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/backend/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/backend/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/backend/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/backend/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/account/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/census/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/census/S2/ACTIVE/lawful-control',
+    }),
+    'TestRID_12_ClosedShapeAndBounds': frozenset({
+        'absent_and_empty_GD_field_normal_full_seed_success_zero_GD/absent/no-GD',
+        'absent_and_empty_GD_field_normal_full_seed_success_zero_GD/empty/no-GD',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/unknown-field/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/empty-roleIds/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/duplicate-roleIds/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/empty-targetTypes/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/duplicate-targetTypes/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/empty-subjectTypes/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/duplicate-subjectTypes/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/roles17/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/types17/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/subjects5/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/subject-unspecified/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/subject-unknown/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/iam-role/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/iam-type/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/iam-module/negative',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/unknown-field/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/empty-roleIds/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/duplicate-roleIds/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/empty-targetTypes/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/duplicate-targetTypes/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/empty-subjectTypes/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/duplicate-subjectTypes/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/roles17/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/types17/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/subjects5/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/subject-unspecified/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/subject-unknown/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/iam-role/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/iam-type/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/iam-module/lawful-twin',
+    }),
+    'TestRID_03_DelegatedGrantAndIssuerBounds': frozenset({
+        'real_production_listener_grant_Operation_Get_ACTIVE_with_installation_delegationId/S1',
+        'real_production_listener_grant_Operation_Get_ACTIVE_with_installation_delegationId/S2',
+        'out-of-axis_role_denial_and_same-subject_legal_role_twin/S1',
+        'out-of-axis_role_denial_and_same-subject_legal_role_twin/S2',
+        'I_Create_denied_without_Operation;_caller-only_C_twin_succeeds/S1',
+        'I_Create_denied_without_Operation;_caller-only_C_twin_succeeds/S2',
+        'allowed_anonymous_system-class_succeeds;_authenticated_refused/S1',
+        'allowed_anonymous_system-class_succeeds;_authenticated_refused/S2',
+    }),
+    'TestRID_05_CreatorDeletionAndNewID': frozenset({
+        'normal_full_key_revoke_and_reference_census;_Delete_and_Get_NOT_FOUND/S1',
+        'normal_full_key_revoke_and_reference_census;_Delete_and_Get_NOT_FOUND/S2',
+        'old_creator_credentials_unauthenticated;_new_same-name_C2_does_not_resurrect_GD/S1',
+        'old_creator_credentials_unauthenticated;_new_same-name_C2_does_not_resurrect_GD/S2',
+        'active_delegate_reference_blocks_Delete;_revoke-only_twin_permits_Delete/S1',
+        'active_delegate_reference_blocks_Delete;_revoke-only_twin_permits_Delete/S2',
+        'O_explicitly_grants_C2;_old_GD_revoked;_explicit_new_Create_restores_issuance/S1',
+        'O_explicitly_grants_C2;_old_GD_revoked;_explicit_new_Create_restores_issuance/S2',
+    }),
+    'TestRID_06_RevokeDuringApply': frozenset({
+        'apply_at_real_before-pair_barrier;_O_commits_revoke_before_release/S1',
+        'apply_at_real_before-pair_barrier;_O_commits_revoke_before_release/S2',
+        'overlap_and_sequential_reinstall_refuse;_old_G_and_GD_revoked;_replacement_zero/S1',
+        'overlap_and_sequential_reinstall_refuse;_old_G_and_GD_revoked;_replacement_zero/S2',
+        'no-revoke_overlap_twin_preserves_original_ID/S1',
+        'no-revoke_overlap_twin_preserves_original_ID/S2',
+        'explicit_C_Create_recovery_preserves_revoked_history_and_new_issuer_grant_works/S1',
+        'explicit_C_Create_recovery_preserves_revoked_history_and_new_issuer_grant_works/S2',
+    }),
+    "TestRID_08_SnapshotPagesAndFutureAccount": frozenset({
+        "actual_empty_census_success;_second-page_BeginTx_unknown_fault_INTERNAL_before_Operations/normal-delete-real-empty",
+        "actual_empty_census_success;_second-page_BeginTx_unknown_fault_INTERNAL_before_Operations/real-second-page-fault-twin-retry",
+    }),
     'TestRID_07_ExistingPairConflict': frozenset({
         'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/role/S1',
         'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/role/S2',
@@ -111,6 +283,8 @@ RID_MATRIX_NESTED = {
 # Исходный бюджет полного нативного теста сохраняется.
 TEST_SECONDS = 1200
 OUTER_SECONDS = 1320
+# RID-08 подтверждает час допуска по реальным часам.
+RID08_WINDOW_SECONDS = 3600
 
 
 class Rejected(Exception):
@@ -636,13 +810,17 @@ def judge_test(path, root_test, predicates):
             elif action in ("pass", "fail"):
                 terminal.append(action)
     need(root_test in passed and passed == running and terminal == ["pass"])
-    direct = {name.split("/", 1)[1] for name in passed if name.count("/") == 1}
-    need(direct == predicates)
+    if root_test in RID_MATRIX_NESTED:
+        # Литеральный slash внутри имени t.Run не создаёт промежуточного узла.
+        # Засчитываем предикаты только после равенства полного множества узлов.
+        expected = {root_test, *(root_test + "/" + name for name in predicates | RID_MATRIX_NESTED[root_test])}
+        need(running == expected)
+        direct = set(predicates)
+    else:
+        direct = {name.split("/", 1)[1] for name in passed if name.count("/") == 1}
+        need(direct == predicates)
     if root_test == CASES["registry-installation-rid10"][0]:
         expected = {root_test, *(root_test + "/" + name for name in predicates | RID10_NESTED)}
-        need(running == expected)
-    if root_test in RID_MATRIX_NESTED:
-        expected = {root_test, *(root_test + "/" + name for name in predicates | RID_MATRIX_NESTED[root_test])}
         need(running == expected)
     return {"ok": True, "passedTests": len(passed), "skippedTests": 0, "failedTests": 0,
             "directPredicates": sorted(direct)}
@@ -674,6 +852,9 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     root_test, predicates, phase_count = CASES[args.suite]
+    extra = RID08_WINDOW_SECONDS if args.suite == "registry-installation-rid08" else 0
+    test_seconds = TEST_SECONDS + extra
+    outer_seconds = OUTER_SECONDS + extra
     summary = {"schemaVersion": 1, "ok": False, "suite": args.suite, "status": "precondition-failed"}
     need(args.private_dir.is_absolute() and args.out.is_absolute())
     private, output = args.private_dir.resolve(), args.out.resolve()
@@ -748,7 +929,7 @@ def main():
                    KANAME_RID_MIGRATOR=str(bins / "kaname-migrator"))
         summary.update(status="native-test-failed", expectedIdentities=expected, artifactSHA256=artifact_hashes,
                        collectorSHA256=collector_sha, runIdSHA256=hashlib.sha256(run_id.encode()).hexdigest(),
-                       testDeadlineSeconds=TEST_SECONDS, outerDeadlineSeconds=OUTER_SECONDS)
+                       testDeadlineSeconds=test_seconds, outerDeadlineSeconds=outer_seconds)
         before = {"containers": frozenset(docker(["ps", "-aq", "--no-trunc"], env)),
                   "volumes": frozenset(docker(["volume", "ls", "-q"], env))}
         need(all(re.fullmatch(r"[a-f0-9]{64}", cid) for cid in before["containers"]))
@@ -756,8 +937,8 @@ def main():
         summary["status"] = "native-test-command-failed"
         rc = command(["go", "tool", "test2json", "-t", "-p", PACKAGE, str(bins / "rid-tests"),
                       "-test.v=test2json", "-test.parallel=1", "-test.run=^" + root_test + "$",
-                      "-test.count=1", "-test.timeout=20m"], env, private / "test.jsonl",
-                     cwd=ROOT / "cmd/kaname", timeout=OUTER_SECONDS)
+                      "-test.count=1", f"-test.timeout={test_seconds}s"], env, private / "test.jsonl",
+                     cwd=ROOT / "cmd/kaname", timeout=outer_seconds)
         summary["testExitCode"] = rc if type(rc) is int and -255 <= rc <= 255 else None
         if rc != 0:
             summary["testDiagnostics"] = test_diagnostics(private / "test.jsonl", root_test, predicates)
