@@ -730,6 +730,70 @@ def _step_shell(step: dict, job: dict, doc: dict) -> str:
     return "bash"
 
 
+def _rid11_grouped_route(jobs: dict, doc: dict) -> int | None:
+    """Замкнутые четыре группы и успешное сведение дают полный нативный маршрут.
+
+    Одна группа не доказывает исполнение 128 фаз. Проверяем связь заданий
+    целиком, чтобы --rid11-group не разрешал произвольное сужение набора.
+    """
+    shards, aggregate = jobs.get("rid11-shards"), jobs.get("rid11")
+    if not isinstance(shards, dict) or not isinstance(aggregate, dict):
+        return None
+    strategy = shards.get("strategy")
+    if strategy != {"fail-fast": False, "matrix": {"group": ["input", "identity", "proof-authority", "availability"]}}:
+        return None
+    if aggregate.get("needs") != ["changes", "rid11-shards"]:
+        return None
+    native = ["bash", ".github/scripts/run-rid-native-hosted.sh", "--suite", "registry-installation-rid11",
+              "--private-dir", "$RUNNER_TEMP/rid11-private", "--out", "$RUNNER_TEMP/rid11-summary.json",
+              "--rid11-group", "$RID11_GROUP"]
+    aggregate_command = ["python3", ".github/scripts/aggregate-rid11-native.py", "--source-revision", "$GITHUB_SHA",
+                         "--source-tree", "$tree", "--collection",
+                         "tests/newman/collections/registry-installation-rid11.postman_collection.json",
+                         "--input-dir", "$RUNNER_TEMP/rid11-shards", "--out", "$RUNNER_TEMP/rid11-summary.json"]
+    def steps(job):
+        return [step for step in job.get("steps", []) if isinstance(step, dict)]
+    def commands(step, job):
+        shell = _step_shell(step, job, doc).split()
+        return shell_commands(step["run"]) if (isinstance(step.get("run"), str) and shell and
+               shell[0].rsplit("/", 1)[-1] in _SHELLS) else []
+    producers = [step for step in steps(shards) if native in commands(step, shards)]
+    if len(producers) != 1 or producers[0].get("continue-on-error") or shards.get("continue-on-error"):
+        return None
+    env = {**(doc.get("env") or {}), **(shards.get("env") or {}), **(producers[0].get("env") or {})}
+    if env.get("RID11_GROUP") != "${{ matrix.group }}":
+        return None
+    uploads = [step for step in steps(shards) if str(step.get("uses", "")).startswith("actions/upload-artifact@") and
+               step.get("with", {}).get("name") == "registry-installation-rid11-${{ matrix.group }}" and
+               step.get("with", {}).get("path") == "${{ runner.temp }}/rid11-summary.json"]
+    if len(uploads) != 1:
+        return None
+    download = ["gh", "run", "download", "$GITHUB_RUN_ID", "--repo", "$GITHUB_REPOSITORY",
+                "--pattern", "registry-installation-rid11-*", "--dir", "$RUNNER_TEMP/rid11-shards"]
+    guarded_commands = [["test", "$RID11_SHARDS_RESULT", "=", "success"],
+                        ["git", "rev-parse", "HEAD^{tree}"], ["tree=$(…)"], download, aggregate_command]
+    consumers = []
+    for i, step in enumerate(aggregate.get("steps", [])):
+        if not isinstance(step, dict) or commands(step, aggregate) != guarded_commands:
+            continue
+        env = {**(doc.get("env") or {}), **(aggregate.get("env") or {}), **(step.get("env") or {})}
+        # Команды исполняются последовательно с немедленным отказом bash;
+        # операторы оболочки не должны обходить проверку результата групп.
+        body = step.get("run", "")
+        if any(op in body for op in (";", "|", "&&", "\nif ", "\nexit ")):
+            continue
+        if _step_shell(step, aggregate, doc) != "bash":
+            continue
+        if step.get("continue-on-error") or aggregate.get("continue-on-error"):
+            continue
+        if env.get("RID11_SHARDS_RESULT") != "${{ needs.rid11-shards.result }}":
+            continue
+        if env.get("GH_TOKEN") != "${{ github.token }}":
+            continue
+        consumers.append(i)
+    return consumers[0] if len(consumers) == 1 else None
+
+
 def _pipeline_routes(workflows: pathlib.Path) -> dict[str, list[tuple[str, str]]]:
     """{stem: [(«задание/шаг», вид маршрута), …]} — вызовы в конвейере.
 
@@ -757,6 +821,7 @@ def _pipeline_routes(workflows: pathlib.Path) -> dict[str, list[tuple[str, str]]
         jobs = doc.get("jobs")
         if not isinstance(jobs, dict):
             continue
+        rid11_aggregate_step = _rid11_grouped_route(jobs, doc)
         for job_id, job in jobs.items():
             if not isinstance(job, dict):
                 continue
@@ -770,6 +835,8 @@ def _pipeline_routes(workflows: pathlib.Path) -> dict[str, list[tuple[str, str]]
                 if not shell or shell[0].rsplit("/", 1)[-1] not in _SHELLS:
                     continue
                 label = f"{f.name}:{job_id}/{stepv.get('name') or f'шаг {i + 1}'}"
+                if job_id == "rid11" and i == rid11_aggregate_step:
+                    out.setdefault("registry-installation-rid11", []).append((label, "native"))
                 for argv in shell_commands(body):
                     for stem, route in _runner_routes(argv):
                         out.setdefault(stem, []).append((label, route))
@@ -2532,6 +2599,58 @@ def _native_census_self_test(tmp: pathlib.Path, make_workflow) -> None:
     _c("native census: пустое объявление не поддерживает suites", not _native_declared(root))
 
 
+def _rid11_grouped_census_self_test(tmp: pathlib.Path) -> None:
+    """Синтетический разбор конвейера без нативных прогонов и внешних вызовов."""
+    import copy
+    import yaml
+
+    producer = ("bash .github/scripts/run-rid-native-hosted.sh --suite registry-installation-rid11 "
+                '--private-dir "$RUNNER_TEMP/rid11-private" --out "$RUNNER_TEMP/rid11-summary.json" '
+                '--rid11-group "$RID11_GROUP"')
+    consumer = ('test "$RID11_SHARDS_RESULT" = success\n'
+                'tree="$(git rev-parse HEAD^{tree})"\n'
+                'gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" '
+                '--pattern registry-installation-rid11-* --dir "$RUNNER_TEMP/rid11-shards"\n'
+                'python3 .github/scripts/aggregate-rid11-native.py --source-revision "$GITHUB_SHA" '
+                '--source-tree "$tree" --collection tests/newman/collections/registry-installation-rid11.postman_collection.json '
+                '--input-dir "$RUNNER_TEMP/rid11-shards" --out "$RUNNER_TEMP/rid11-summary.json"')
+    doc = {"jobs": {
+        "rid11-shards": {"strategy": {"fail-fast": False, "matrix": {"group": ["input", "identity", "proof-authority", "availability"]}},
+                         "steps": [{"run": producer, "env": {"RID11_GROUP": "${{ matrix.group }}"}},
+                                   {"uses": "actions/upload-artifact@pin", "with": {"name": "registry-installation-rid11-${{ matrix.group }}", "path": "${{ runner.temp }}/rid11-summary.json"}}]},
+        "rid11": {"needs": ["changes", "rid11-shards"], "steps": [
+            {"run": consumer, "env": {"RID11_SHARDS_RESULT": "${{ needs.rid11-shards.result }}", "GH_TOKEN": "${{ github.token }}"}}]}}}
+    wf = tmp / "rid11-grouped-census"
+    wf.mkdir()
+    def routes(value):
+        (wf / "proof.yml").write_text(yaml.safe_dump(value), encoding="utf-8")
+        return _pipeline_routes(wf).get("registry-installation-rid11", [])
+    _c("RID11 grouped: complete four-group aggregate is native", routes(doc) == [("proof.yml:rid11/шаг 1", "native")])
+    mutations = [
+        ("subset", lambda d: d["jobs"]["rid11-shards"]["strategy"]["matrix"]["group"].pop()),
+        ("duplicate", lambda d: d["jobs"]["rid11-shards"]["strategy"]["matrix"]["group"].append("input")),
+        ("matrix include", lambda d: d["jobs"]["rid11-shards"]["strategy"]["matrix"].update(include=[{"group": "input"}])),
+        ("fail fast", lambda d: d["jobs"]["rid11-shards"]["strategy"].update({"fail-fast": True})),
+        ("literal group", lambda d: d["jobs"]["rid11-shards"]["steps"][0]["env"].update(RID11_GROUP="input")),
+        ("direct group", lambda d: d["jobs"]["rid11-shards"]["steps"][0].update(run=producer.replace("bash .github/scripts/run-rid-native-hosted.sh", "python3 .github/scripts/run-rid-native.py"))),
+        ("wrong upload", lambda d: d["jobs"]["rid11-shards"]["steps"][1]["with"].update(name="other")),
+        ("missing dependency", lambda d: d["jobs"]["rid11"].update(needs=["changes"])),
+        ("no aggregate", lambda d: d["jobs"].pop("rid11")),
+        ("no success guard", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.split("\n", 1)[1])),
+        ("guard bypass", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.replace("= success", "= success || true"))),
+        ("forged success", lambda d: d["jobs"]["rid11"]["steps"][0]["env"].update(RID11_SHARDS_RESULT="success")),
+        ("wrong download", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.replace("registry-installation-rid11-*", "*"))),
+        ("wrong revision", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.replace("$GITHUB_SHA", "stale"))),
+        ("continue error", lambda d: d["jobs"]["rid11"]["steps"][0].update({"continue-on-error": True})),
+        ("shell no errexit", lambda d: d["jobs"]["rid11"]["steps"][0].update(shell="bash {0}")),
+    ]
+    for label, mutate in mutations:
+        changed = copy.deepcopy(doc)
+        mutate(changed)
+        _c("RID11 grouped refuses " + label, not routes(changed))
+    _c("RID11 grouped invocation alone is not a full native route", not _runner_routes(shell_commands(producer)[0]))
+
+
 def self_test() -> int:
     import io
     import contextlib
@@ -2828,6 +2947,7 @@ def self_test() -> int:
                f"разборщик: {parsed}")
 
         _native_census_self_test(tmp, _wf_body)
+        _rid11_grouped_census_self_test(tmp)
 
         # Ось 6д: тело шага с ИНОЙ оболочкой — не программа bash, и её строка,
         # похожая на команду прогонщика, прогоном не засчитывается. Близнец —

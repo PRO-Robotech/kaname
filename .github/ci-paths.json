@@ -628,6 +628,7 @@
     ".github/scripts/run-rid-native.py",
     ".github/scripts/run-rid-native-hosted.sh",
     ".github/scripts/stand-runner-bootstrap.sh",
+    ".github/scripts/aggregate-rid11-native.py",
     "go.mod",
     "go.sum"
    ],

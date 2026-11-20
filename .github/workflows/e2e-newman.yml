@@ -2369,11 +2369,15 @@ jobs:
   # ревизией, поэтому второй покрасневший процесс той же ревизии ДОПОЛНЯЕТ уже
   # заведённого, а не заводит второго. Две задачи об одном предмете расходятся
   # молча, и расходится та, которую не читают.
-  rid11:
+  rid11-shards:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid11') }}
     needs: [changes]
-    name: установка Kaname — RID-11, полная матрица входов и полномочий
+    name: установка Kaname — RID-11, группа ${{ matrix.group }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [input, identity, proof-authority, availability]
     # Три сборки имеют предел по 15 минут, нативный тест вместе с внешним ожиданием — 22 минуты.
     timeout-minutes: 75
     permissions:
@@ -2393,24 +2397,61 @@ jobs:
           runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner"
           npm install -g newman@6.2.2
           go mod download
-      - name: 128 публичные фазы и уборка
+      - name: парные сценарии группы, публичные фазы и уборка
         id: rid11-native
         env:
           PYTHONDONTWRITEBYTECODE: '1'
+          RID11_GROUP: ${{ matrix.group }}
         run: |
           export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
           export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
           bash .github/scripts/run-rid-native-hosted.sh \
             --suite registry-installation-rid11 \
             --private-dir "$RUNNER_TEMP/rid11-private" \
-            --out "$RUNNER_TEMP/rid11-summary.json"
-      - name: подтверждённая сводка RID-11
+            --out "$RUNNER_TEMP/rid11-summary.json" \
+            --rid11-group "$RID11_GROUP"
+      - name: сводка группы RID-11
         if: ${{ !cancelled() && steps.rid11-native.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: registry-installation-rid11-${{ matrix.group }}
+          path: ${{ runner.temp }}/rid11-summary.json
+          if-no-files-found: error
+          overwrite: true
+
+  rid11:
+    if: ${{ !cancelled() && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid11')) }}
+    needs: [changes, rid11-shards]
+    name: установка Kaname — RID-11, полная матрица входов и полномочий
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - name: свести четыре группы в полный вердикт RID-11
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RID11_SHARDS_RESULT: ${{ needs.rid11-shards.result }}
+        run: |
+          test "$RID11_SHARDS_RESULT" = success
+          tree="$(git rev-parse HEAD^{tree})"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'registry-installation-rid11-*' --dir "$RUNNER_TEMP/rid11-shards"
+          python3 .github/scripts/aggregate-rid11-native.py \
+            --source-revision "$GITHUB_SHA" --source-tree "$tree" \
+            --collection tests/newman/collections/registry-installation-rid11.postman_collection.json \
+            --input-dir "$RUNNER_TEMP/rid11-shards" --out "$RUNNER_TEMP/rid11-summary.json"
+      - name: подтверждённая сводка RID-11
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: registry-installation-rid11
           path: ${{ runner.temp }}/rid11-summary.json
           if-no-files-found: error
+          overwrite: true
 
   rid12:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid12') }}
