@@ -399,6 +399,7 @@
     "e2e-newman.yml:rid03",
     "e2e-newman.yml:rid05",
     "e2e-newman.yml:rid06",
+    "e2e-newman.yml:rid11-shards",
     "e2e-newman.yml:rid11",
     "e2e-newman.yml:rid12"
    ],
@@ -614,6 +615,7 @@
    "id": "rid11-native",
    "why": "нативная проверка RID-11 с 128 публичными фазами",
    "jobs": [
+    "e2e-newman.yml:rid11-shards",
     "e2e-newman.yml:rid11"
    ],
    "paths": [

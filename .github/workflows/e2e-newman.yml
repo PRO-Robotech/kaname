@@ -2370,7 +2370,7 @@ jobs:
   # заведённого, а не заводит второго. Две задачи об одном предмете расходятся
   # молча, и расходится та, которую не читают.
   rid11-shards:
-    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid11') }}
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid11-shards') }}
     needs: [changes]
     name: установка Kaname — RID-11, группа ${{ matrix.group }}
     runs-on: ubuntu-24.04
@@ -2533,6 +2533,7 @@ jobs:
       - rid07
       - rid08
       - rid09
+      - rid11-shards
       - rid11
       - rid12
       - changes
@@ -2615,6 +2616,7 @@ jobs:
             "${{ needs.rid07.result == 'skipped' && 'rid07-not-run' || needs.rid07.result }}" \
             "${{ needs.rid08.result == 'skipped' && 'rid08-not-run' || needs.rid08.result }}" \
             "${{ needs.rid09.result == 'skipped' && 'rid09-not-run' || needs.rid09.result }}" \
+            "${{ needs.rid11-shards.result == 'skipped' && 'rid11-shards-not-run' || needs.rid11-shards.result }}" \
             "${{ needs.rid11.result == 'skipped' && 'rid11-not-run' || needs.rid11.result }}" \
             "${{ needs.rid12.result == 'skipped' && 'rid12-not-run' || needs.rid12.result }}" \
             "${{ needs.chart-own.result }}" || rc=$?
@@ -2632,7 +2634,7 @@ jobs:
   prverdict:
     name: сводный вердикт запроса (e2e-newman)
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    needs: [changes, chart-own, edgeselftests, rid01, rid02, rid03, rid04, rid05, rid06, rid07, rid08, rid09, rid10, rid11, rid12, stand, stand-ceremony, suite]
+    needs: [changes, chart-own, edgeselftests, rid01, rid02, rid03, rid04, rid05, rid06, rid07, rid08, rid09, rid10, rid11-shards, rid11, rid12, stand, stand-ceremony, suite]
     runs-on: ubuntu-24.04
     # Полный поставщик сохранён: до 420 с на индекс снимка и конечный общий бюджет остальных стадий.
     timeout-minutes: 15
