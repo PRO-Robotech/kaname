@@ -7331,6 +7331,9 @@ DECLARE
     -- Версия ВЛАДЕЛЬЦА. Есть только у строки, которую владелец упорядочил сам.
     v_owner     text := p_payload ->> 'source_version';
     v_version   timestamptz;
+    v_relation_set jsonb;
+    v_has_set   boolean;
+    v_scalar    text;
     v_relations text[];
     v_relation  text;
     v_type      text;
@@ -7346,19 +7349,14 @@ BEGIN
     -- holder lookup/clock/lock; legacy семантика ниже сохранена дословно.
     IF kaname.authority_group_add_fold_v3(p_event_type,p_payload,p_created_at) THEN RETURN;END IF;
     IF kaname.authority_resource_fold_body_v2(p_event_type,p_payload,p_created_at) THEN RETURN;END IF;
-    -- Набор ВЫИГРЫВАЕТ у скаляра: на выдаче набора присутствуют оба поля, и
-    -- скаляр там — эхо для пода прежнего выпуска, а не весь предмет строки.
-    IF jsonb_array_length(coalesce(p_payload -> 'relations', '[]'::jsonb)) > 0 THEN
-        -- Отношения набора — в ОБЩЕМ порядке, а не в порядке писателя: строка
-        -- факта ключуется отношением, и два набора одного субъекта на одном
-        -- объекте, перечисленные встречно, брали бы их блокировки встречно.
-        SELECT array_agg(value ORDER BY value COLLATE "C") INTO v_relations
-          FROM jsonb_array_elements_text(p_payload -> 'relations') AS value;
-    ELSIF p_payload ->> 'relation' IS NOT NULL THEN
-        v_relations := ARRAY[p_payload ->> 'relation'];
+    -- Набор выигрывает у скаляра: последний нужен старому писателю.
+    v_relation_set := p_payload -> 'relations';
+    v_has_set := jsonb_array_length(coalesce(v_relation_set, '[]'::jsonb)) > 0;
+    IF NOT v_has_set THEN
+        v_scalar := p_payload ->> 'relation';
     END IF;
 
-    IF v_user IS NULL OR v_relations IS NULL OR v_object IS NULL THEN
+    IF v_user IS NULL OR (NOT v_has_set AND v_scalar IS NULL) OR v_object IS NULL THEN
         RAISE EXCEPTION
             'fga_outbox: строка без user/relation/object (%). Прямой факт складывается из этого журнала, и строка, которую нельзя спроецировать, дала бы движку право, о котором своя БД не знает.',
             p_payload;
@@ -7378,11 +7376,17 @@ BEGIN
     -- ИСКЛЮЧЕНИЕ ОДНО: строка, упорядоченная владельцем, — публикация для
     -- анонимного чтения. Её не выводит ни одна выдача, и отброшенная здесь, она
     -- не существовала бы нигде (kaname#107).
-    IF v_owner IS NULL THEN
-        v_relations := ARRAY(SELECT r FROM unnest(v_relations) AS r WHERE r NOT LIKE 'v\_%');
-        IF array_length(v_relations, 1) IS NULL THEN
-            RETURN;
-        END IF;
+    IF v_has_set THEN
+        -- Отбрасываем выведенные глаголы при том же чтении, которое сортирует
+        -- ключи блокировки. Версия владельца сохраняет весь набор.
+        SELECT array_agg(value ORDER BY value COLLATE "C") INTO v_relations
+          FROM jsonb_array_elements_text(v_relation_set) AS value
+         WHERE v_owner IS NOT NULL OR value NOT LIKE 'v\_%';
+    ELSIF v_owner IS NOT NULL OR v_scalar NOT LIKE 'v\_%' THEN
+        v_relations := ARRAY[v_scalar];
+    END IF;
+    IF v_relations IS NULL THEN
+        RETURN;
     END IF;
 
     v_colon := position(':' in v_object);
@@ -9147,7 +9151,7 @@ BEGIN
  ('_authority_group_add_subject_v3(text,text,jsonb)','93f1e1147874032a6e7f4e1c08ad7651148e6ec5f25da7ffc2486d234ae14a8c',true,'v',true,'private'),
  ('_authority_group_add_complete_v3()','158eca8cc62068a844f08ce5f746ad909a504fb429567d11c30d6f496dcd17eb',true,'v',true,'private'),
  ('_authority_group_add_storage_v3()','123966ac8ae04e91375122a48bc6c07c8c48bda2791a763d779f00e506ff81fc',true,'s',true,'private'),
- ('relation_fact_fold_row(text,jsonb,timestamptz)','7f7b25757447007572b06ef18edbf60b3256b5ca218484ef98fefaf0f338e635',false,'v',false,'preserve'),
+ ('relation_fact_fold_row(text,jsonb,timestamptz)','f06e9b6aa6df9c97e4bb9f9d65cf9d65d50ce7bd58d1139ce10ffd4d03055a01',false,'v',false,'preserve'),
  ('authority_subject_change_id_guard_v2()','aa4bc39730f137bdf11491afaf41d9c8451c88e2cda40358fc0e33be2f29cb53',true,'v',true,'private'),
  ('authority_subject_change_applied_v2()','fa776df6d3b95dadb13fa1684424b2db105b21f5b8862bd045680fb8129d094e',true,'v',true,'private'),
  ('authority_subject_change_statement_guard_v2()','600129602604e3cac17840ff155738e5c886677cd8be781b62b9b29f2fe785b0',true,'v',true,'private'),
@@ -9866,7 +9870,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','a3c9f8bade9129a20d82bc1e6d14999e32228f66366846c933d6f7cbcad99827',true),
+ ('_authority_crud_storage_v3()','e40734be0bc76714e627d554eac977330d0ee7ed3732453793eb6a417d7abcd7',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),

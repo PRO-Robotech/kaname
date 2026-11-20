@@ -99,7 +99,7 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 		{"authority_resource_registration_command_values_v2", "f578c73b8e09ea4f03c4510507f1a7d47dd14b8e0e5defff8c96086e6857101b", "v", "search_path=pg_catalog,pg_temp", true},
 		{"resource_registration_command_apply", "164e53f2d7b9c9aff2b0c474a9782ef278c4b0cfd0aa1a2b101f9a7f9c2553fe", "v", "search_path=pg_catalog,kaname", false},
 		{"resource_registration_locks_writers", "296db8b4f26f47e0189ce71b01295d5e2ff8e5a8f40b8cdf9807fac347a787c0", "v", "search_path=pg_catalog,pg_temp", true},
-		{"relation_fact_fold_row", "7f7b25757447007572b06ef18edbf60b3256b5ca218484ef98fefaf0f338e635", "v", "", false},
+		{"relation_fact_fold_row", "f06e9b6aa6df9c97e4bb9f9d65cf9d65d50ce7bd58d1139ce10ffd4d03055a01", "v", "", false},
 		{"authority_resource_fold_body_v2", "3eb8735862b7643f353c9e10312c2fe9ca251489f875c1faf30289f3d166b5d9", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_resource_unregistration_operation_acl_v2", "075c20b7bb9f2d06dec73df64186da0b9d4bcc500b99fcbc28ef9b4f21ce7fea", "i", "search_path=pg_catalog,pg_temp", true},
 	} {
