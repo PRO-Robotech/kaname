@@ -694,7 +694,7 @@ def _runner_routes(argv: list[str]) -> list[tuple[str, str]]:
         options = argv[k + (1 if hosted_native else 2):]
         if len(options) == 6 and set(options[::2]) == {"--suite", "--private-dir", "--out"}:
             stem = options[options.index("--suite") + 1]
-            if stem in {"registry-installation-rid01", "registry-installation-rid02", "registry-installation-rid04"}:
+            if stem in {"registry-installation-rid01", "registry-installation-rid02", "registry-installation-rid04", "registry-installation-rid07", "registry-installation-rid09", "registry-installation-rid10"}:
                 return [(stem, "native")]
         return []
     if k >= len(argv) or not RUNNER_RE.search(argv[k]):
@@ -890,6 +890,7 @@ def ceremony_need(newman: pathlib.Path) -> dict[str, list[str]]:
 # Входы настоящего производителя: installation_newman_bridge_test.go,
 # installation_newman_install_test.go, installation_native_renewal_test.go и
 # installation_newman_repeat_test.go и installation_newman_retirement_test.go.
+# RID07/09/10 получают входы из собственных Newman adapters и общего моста.
 # Контракт относится только к native-маршруту.
 _NATIVE_INPUTS = {
     "registry-installation-rid01": frozenset({
@@ -899,11 +900,18 @@ _NATIVE_INPUTS = {
         "jwtRIDOperator", "rid02Expected", "ridSystemId"}),
     "registry-installation-rid04": frozenset({
         "jwtRIDOperator", "jwtRIDIssuer", "rid04Expected"}),
+    "registry-installation-rid07": frozenset({"jwtRIDOperator", "rid07Expected"}),
+    "registry-installation-rid09": frozenset({"jwtRIDOperator", "rid09Expected"}),
+    "registry-installation-rid10": frozenset({
+        "jwtRIDOperator", "jwtRIDCreator", "rid10Expected"}),
 }
 _NATIVE_TESTS = {
     "registry-installation-rid01": ("TestRID_01_CleanInstallAndRenewal", 8),
     "registry-installation-rid02": ("TestRID_02_ConcurrentAndRepeat", 4),
     "registry-installation-rid04": ("TestRID_04_CreatorRetirement", 14),
+    "registry-installation-rid07": ("TestRID_07_ExistingPairConflict", 32),
+    "registry-installation-rid09": ("TestRID_09_WholeDeliveryPreflight", 32),
+    "registry-installation-rid10": ("TestRID_10_MidRunFaultAndRetirement", 6),
 }
 # Конкретные читаемые слоты keys.forEach из _CONFIG этих двух коллекций.
 # Не префикс: новый rid10* ключ не считается произведённым автоматически.
@@ -913,8 +921,25 @@ _NATIVE_DERIVED = frozenset(
     for kind in ("accounts", "serviceAccounts", "groups", "roles", "bindings", "delegations")
 ) | frozenset({"rid10Account_serviceAccounts", "rid10Account_groups", "rid10Account_delegations"})
 
-# Только точные слоты, записываемые публичной коллекцией RID02; другим suites они не выдаются.
+# Только точные слоты публичных коллекций RID02/09; другим suites они не выдаются.
 _NATIVE_SUITE_DERIVED = {
+    "registry-installation-rid09": frozenset({
+        'rid09GetId_accounts',
+        'rid09GetId_serviceAccounts',
+        'rid09GetId_groups',
+        'rid09GetId_roles',
+        'rid09GetId_bindings',
+        'rid09GetId_delegations',
+        'rid09Page_accounts',
+        'rid09Page_serviceAccounts',
+        'rid09Page_groups',
+        'rid09Page_roles',
+        'rid09Page_bindings',
+        'rid09Page_delegations',
+        'rid09Account_serviceAccounts',
+        'rid09Account_groups',
+        'rid09Account_delegations',
+    }),
     "registry-installation-rid02": frozenset({
         'rid02Account',
         'rid02AccountIndex',
@@ -1174,10 +1199,10 @@ PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "registry-installation-rid04": ("A", "Нативная фикстура Kaname выдаёт окружение и четырнадцать публичных фаз вывода создателя из эксплуатации. Их выполняет задание rid04 с проверкой уборки ресурсов своего запуска", ""),
     "registry-installation-rid05": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID05, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid05 с публичной коллекцией и подтверждённой очисткой"),
     "registry-installation-rid06": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID06, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid06 с публичной коллекцией и подтверждённой очисткой"),
-    "registry-installation-rid07": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID07, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid07 с публичной коллекцией и подтверждённой очисткой"),
+    "registry-installation-rid07": ("A", "Нативная фикстура Kaname выдаёт окружение и 32 публичные фазы. Их выполняет задание rid07 с проверкой полной матрицы и уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
     "registry-installation-rid08": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID08, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid08 с публичной коллекцией и подтверждённой очисткой"),
-    "registry-installation-rid09": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID09, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid09 с публичной коллекцией и подтверждённой очисткой"),
-    "registry-installation-rid10": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID10, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid10 с публичной коллекцией и подтверждённой очисткой"),
+    "registry-installation-rid09": ("A", "Нативная фикстура Kaname выдаёт окружение и 32 публичные фазы. Их выполняет задание rid09 с проверкой полной матрицы и уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
+    "registry-installation-rid10": ("A", "Нативная фикстура Kaname выдаёт окружение и шесть публичных фаз сбоя и восстановления посреди установки. Их выполняет задание rid10 с проверкой уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
     "registry-installation-rid11": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID11, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid11 с публичной коллекцией и подтверждённой очисткой"),
     "registry-installation-rid12": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID12, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid12 с публичной коллекцией и подтверждённой очисткой"),
     "iam-service-account-creator": ("A", "SAC-E1…E5: собственный публичный REST; машинный creator из seed_own_stand, client_credentials; kaname#1003", ""),
@@ -2769,6 +2794,9 @@ def self_test() -> int:
         for index, (body, wanted) in enumerate((
             (native, {"registry-installation-rid01"}),
             (native.replace("rid01", "rid04"), {"registry-installation-rid04"}),
+            (native.replace("rid01", "rid07"), {"registry-installation-rid07"}),
+            (native.replace("rid01", "rid09"), {"registry-installation-rid09"}),
+            (native.replace("rid01", "rid10"), {"registry-installation-rid10"}),
             (f"echo '{native}'", set()),
             (native.replace("rid01", "rid02"), {"registry-installation-rid02"}),
             (native.replace("rid01", "rid03"), set()),
