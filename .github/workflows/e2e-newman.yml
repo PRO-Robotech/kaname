@@ -2443,7 +2443,7 @@ jobs:
             --pattern 'registry-installation-rid11-*' --dir "$RUNNER_TEMP/rid11-shards"
           python3 .github/scripts/aggregate-rid11-native.py \
             --source-revision "$GITHUB_SHA" --source-tree "$tree" \
-            --collection tests/newman/collections/registry-installation-rid11.postman_collection.json \
+            --collection "$GITHUB_WORKSPACE/tests/newman/collections/registry-installation-rid11.postman_collection.json" \
             --input-dir "$RUNNER_TEMP/rid11-shards" --out "$RUNNER_TEMP/rid11-summary.json"
       - name: подтверждённая сводка RID-11
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7

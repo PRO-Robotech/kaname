@@ -749,7 +749,7 @@ def _rid11_grouped_route(jobs: dict, doc: dict) -> int | None:
               "--rid11-group", "$RID11_GROUP"]
     aggregate_command = ["python3", ".github/scripts/aggregate-rid11-native.py", "--source-revision", "$GITHUB_SHA",
                          "--source-tree", "$tree", "--collection",
-                         "tests/newman/collections/registry-installation-rid11.postman_collection.json",
+                         "$GITHUB_WORKSPACE/tests/newman/collections/registry-installation-rid11.postman_collection.json",
                          "--input-dir", "$RUNNER_TEMP/rid11-shards", "--out", "$RUNNER_TEMP/rid11-summary.json"]
     def steps(job):
         return [step for step in job.get("steps", []) if isinstance(step, dict)]
@@ -2612,7 +2612,7 @@ def _rid11_grouped_census_self_test(tmp: pathlib.Path) -> None:
                 'gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" '
                 '--pattern registry-installation-rid11-* --dir "$RUNNER_TEMP/rid11-shards"\n'
                 'python3 .github/scripts/aggregate-rid11-native.py --source-revision "$GITHUB_SHA" '
-                '--source-tree "$tree" --collection tests/newman/collections/registry-installation-rid11.postman_collection.json '
+                '--source-tree "$tree" --collection "$GITHUB_WORKSPACE/tests/newman/collections/registry-installation-rid11.postman_collection.json" '
                 '--input-dir "$RUNNER_TEMP/rid11-shards" --out "$RUNNER_TEMP/rid11-summary.json"')
     doc = {"jobs": {
         "rid11-shards": {"strategy": {"fail-fast": False, "matrix": {"group": ["input", "identity", "proof-authority", "availability"]}},
@@ -2636,6 +2636,8 @@ def _rid11_grouped_census_self_test(tmp: pathlib.Path) -> None:
         ("wrong upload", lambda d: d["jobs"]["rid11-shards"]["steps"][1]["with"].update(name="other")),
         ("missing dependency", lambda d: d["jobs"]["rid11"].update(needs=["changes"])),
         ("no aggregate", lambda d: d["jobs"].pop("rid11")),
+        ("relative collection", lambda d: d["jobs"]["rid11"]["steps"][0].update(
+            run=consumer.replace("$GITHUB_WORKSPACE/", ""))),
         ("no success guard", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.split("\n", 1)[1])),
         ("guard bypass", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.replace("= success", "= success || true"))),
         ("forged success", lambda d: d["jobs"]["rid11"]["steps"][0]["env"].update(RID11_SHARDS_RESULT="success")),
