@@ -9070,14 +9070,20 @@ END $$;
 
 CREATE FUNCTION kaname._authority_crud_storage_v3() RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE expected record;owner_oid oid;
+DECLARE expected record;owner_oid oid;trigger_counts jsonb;trigger_count bigint;
 BEGIN
  SELECT relowner INTO owner_oid FROM pg_catalog.pg_class WHERE oid='kaname.authority_writer_protocol'::regclass;
  IF owner_oid IS DISTINCT FROM (SELECT oid FROM pg_catalog.pg_roles WHERE rolname=current_user) THEN RETURN false;END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a
   WHERE a.attrelid='kaname.users'::regclass AND a.attname='expected_login_kind'
    AND NOT a.attisdropped AND a.attgenerated='s' AND a.atttypid='pg_catalog.name'::regtype) THEN RETURN false;END IF;
- IF EXISTS(SELECT 1 FROM (VALUES
+ -- ACL typed-entry читается в том же statement и только при обращении к CTE;
+ -- строгая подпись и правила экспортного EXECUTE остаются прежними.
+ IF EXISTS(WITH typed_entry_exec_acl AS MATERIALIZED (
+  SELECT g.grantee FROM pg_catalog.pg_proc e CROSS JOIN LATERAL aclexplode(e.proacl) g
+  WHERE e.oid='kaname.authority_protocol_enter_typed_v3(text,text[],jsonb,text,text,text,text,text)'::regprocedure
+   AND g.privilege_type='EXECUTE'
+ ) SELECT 1 FROM (VALUES
  ('_authority_native_write_weights_v4(jsonb)','907111b7e806c46a660311a6a97fcc2ab2f86ea0430260fb501306f0e2ef522e',true,'s',true,'private'),
  ('_authority_native_write_closure_v4()','a6da6a23e1899bf23d71ba4c5969f66cdfe15a4038fb9a89223df803b74c0e14',true,'s',true,'private'),
  ('authority_native_write_arm_v4(uuid)','ec1e1600c2673f4d02947f7dca7b4a719abc794a91d0045bad38fc2c642e5638',true,'v',true,'export'),
@@ -9413,9 +9419,7 @@ BEGIN
  OR (pin_expected.access_mode='export' AND EXISTS(
    SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee<>owner_oid
    AND (a.grantee=0 OR a.is_grantable OR a.privilege_type<>'EXECUTE' OR NOT EXISTS(
-    SELECT 1 FROM pg_catalog.pg_proc e CROSS JOIN LATERAL aclexplode(e.proacl) g
-    WHERE e.oid='kaname.authority_protocol_enter_typed_v3(text,text[],jsonb,text,text,text,text,text)'::regprocedure
-     AND g.grantee=a.grantee AND g.privilege_type='EXECUTE')))) END) THEN RETURN false;END IF;
+    SELECT 1 FROM typed_entry_exec_acl g WHERE g.grantee=a.grantee)))) END) THEN RETURN false;END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
   WHERE p.oid='kaname._authority_binding_mirror_locality_v3(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)'::regprocedure
    AND p.prokind='f' AND p.prorettype='boolean'::regtype AND NOT p.proretset AND NOT p.proisstrict
@@ -9649,18 +9653,71 @@ BEGIN
    AND CASE WHEN graph_expected.has_qual THEN t.tgqual IS NOT NULL
     AND substring(pg_get_triggerdef(t.oid,false) FROM ' WHEN (.*) EXECUTE FUNCTION ')='((old.* IS DISTINCT FROM new.*))'
     ELSE t.tgqual IS NULL END)) THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname._authority_crud_aux_statement_v3()'::regprocedure)<>6 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname._authority_crud_aux_write_v3()'::regprocedure)<>10 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_binding_epoch_changed()'::regprocedure)<>96 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_crud_fga_id_applied_v3()'::regprocedure)<>1 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_crud_fga_id_guard_v3()'::regprocedure)<>1 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_crud_journal_applied_v3()'::regprocedure)<>1 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_crud_sequence_guard_v3()'::regprocedure)<>2 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_crud_unique_guard_v3()'::regprocedure)<>6 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_sequence_origin_v3()'::regprocedure)<>24 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.authority_sequence_program_applied_v3()'::regprocedure)<>2 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.resource_journal_emit()'::regprocedure)<>21 THEN RETURN false;END IF;
- IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid='kaname.resource_journal_emit_member()'::regprocedure)<>3 THEN RETURN false;END IF;
+ -- STABLE: все counts используют снимок вызывающего запроса. Карта содержит
+ -- не более 12 OID; посторонние trigger-функции не увеличивают её размер.
+ -- Предварительный lookup не бросает ошибку для отсутствующей функции.
+ -- Каждый строгий cast остаётся на прежней границе проверки; если он видит
+ -- другой OID, ленивый fallback считает исходный каталог, а не подставляет 0.
+ WITH requested AS MATERIALIZED (
+  SELECT DISTINCT to_regprocedure(signature)::oid AS oid FROM (VALUES
+   ('kaname._authority_crud_aux_statement_v3()'),
+   ('kaname._authority_crud_aux_write_v3()'),
+   ('kaname.authority_binding_epoch_changed()'),
+   ('kaname.authority_crud_fga_id_applied_v3()'),
+   ('kaname.authority_crud_fga_id_guard_v3()'),
+   ('kaname.authority_crud_journal_applied_v3()'),
+   ('kaname.authority_crud_sequence_guard_v3()'),
+   ('kaname.authority_crud_unique_guard_v3()'),
+   ('kaname.authority_sequence_origin_v3()'),
+   ('kaname.authority_sequence_program_applied_v3()'),
+   ('kaname.resource_journal_emit()'),
+   ('kaname.resource_journal_emit_member()')
+  ) names(signature)
+ ), counts AS MATERIALIZED (
+  SELECT t.tgfoid AS oid,count(t.oid) AS n FROM pg_catalog.pg_trigger t
+  WHERE t.tgfoid=ANY(ARRAY(SELECT oid FROM requested)) GROUP BY t.tgfoid
+ ), snapshot AS MATERIALIZED (
+  SELECT coalesce(jsonb_object_agg(r.oid::text,coalesce(c.n,0)),'{}'::jsonb) AS counts
+  FROM requested r LEFT JOIN counts c ON c.oid=r.oid WHERE r.oid IS NOT NULL
+ )
+ SELECT s.counts,coalesce((s.counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+ INTO trigger_counts,trigger_count
+ FROM snapshot s CROSS JOIN (SELECT 'kaname._authority_crud_aux_statement_v3()'::regprocedure::oid AS oid) r;
+ IF trigger_count<>6 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname._authority_crud_aux_write_v3()'::regprocedure::oid AS oid) r)<>10 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.authority_binding_epoch_changed()'::regprocedure::oid AS oid) r)<>96 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.authority_crud_fga_id_applied_v3()'::regprocedure::oid AS oid) r)<>1 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.authority_crud_fga_id_guard_v3()'::regprocedure::oid AS oid) r)<>1 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.authority_crud_journal_applied_v3()'::regprocedure::oid AS oid) r)<>1 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.authority_crud_sequence_guard_v3()'::regprocedure::oid AS oid) r)<>2 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.authority_crud_unique_guard_v3()'::regprocedure::oid AS oid) r)<>6 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.authority_sequence_origin_v3()'::regprocedure::oid AS oid) r)<>24 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.authority_sequence_program_applied_v3()'::regprocedure::oid AS oid) r)<>2 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.resource_journal_emit()'::regprocedure::oid AS oid) r)<>21 THEN RETURN false;END IF;
+ IF (SELECT coalesce((trigger_counts->>r.oid::text)::bigint,
+  (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgfoid=r.oid))
+  FROM (SELECT 'kaname.resource_journal_emit_member()'::regprocedure::oid AS oid) r)<>3 THEN RETURN false;END IF;
  -- Defaults принадлежат ровно тем же owned sequences; свободный nextval
  -- вместо wrapper вновь открыл бы after-clock unique arbitration.
  FOR expected IN SELECT * FROM (VALUES
@@ -9777,7 +9834,7 @@ BEGIN
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
  FOR expected IN SELECT * FROM (VALUES
- ('_authority_crud_storage_v3()','89e37659c3c0261b30ba820da9e6231bc34e32fa6941cb37f273dae4d62a340e',true),
+ ('_authority_crud_storage_v3()','aa0d0fbfb3225c0ea87774463a08004f581337e080494b16ba5355c685857fc9',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
