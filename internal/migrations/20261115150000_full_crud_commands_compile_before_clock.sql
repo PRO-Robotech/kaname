@@ -2007,7 +2007,7 @@ END $$;
 
 CREATE FUNCTION kaname.authority_crud_sequence_guard_v3() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE key_namespace integer;column_name text;new_key text;old_key text;manifest jsonb;proof jsonb;program jsonb;prepared boolean:=false;
+DECLARE key_namespace integer;column_name text;new_key text;old_key text;manifest jsonb;proof jsonb;program jsonb;new_image jsonb;prepared boolean:=false;
 BEGIN
  IF TG_TABLE_SCHEMA<>'kaname' OR TG_WHEN<>'BEFORE' OR TG_LEVEL<>'ROW'
  OR TG_OP NOT IN ('INSERT','UPDATE') THEN
@@ -2017,14 +2017,15 @@ BEGIN
  WHEN 'fga_outbox' THEN key_namespace:=1262569305;column_name:='id';
  ELSE RAISE EXCEPTION 'unsupported CRUD sequence guard relation' USING ERRCODE='42501';
  END CASE;
- new_key:=to_jsonb(NEW)->>column_name;
+ new_image:=to_jsonb(NEW);
+ new_key:=new_image->>column_name;
  IF new_key IS NULL THEN RAISE EXCEPTION 'missing CRUD sequence identity' USING ERRCODE='42501';END IF;
  IF TG_OP='INSERT' THEN
   SELECT q.proof,q.header INTO STRICT proof,program FROM kaname._authority_sequence_probe_v3() q;
   -- Только положительный receipt точного allocation-only INSERT. Свежий proof
   -- выше сохранён; scalar DEFAULT и обе ветви UPDATE ниже не меняются.
   IF proof IS NULL AND TG_TABLE_NAME='fga_outbox'
-   AND kaname._authority_forward_row_v4((new_key)::bigint,to_jsonb(NEW)-'id',false) THEN RETURN NEW;END IF;
+   AND kaname._authority_forward_row_v4((new_key)::bigint,new_image-'id',false) THEN RETURN NEW;END IF;
   IF proof IS NOT NULL THEN
    prepared:=program IS NOT NULL OR (proof->>'consumer_finalized'='true' AND proof->>'writer_contract'='2') OR kaname._authority_sequence_expected_v3();
   END IF;
@@ -3278,7 +3279,10 @@ BEGIN
  IF to_regclass('pg_temp.kaname_authority_attestation') IS NULL THEN
   SELECT enforcement='strict' INTO STRICT strict_mode FROM kaname.authority_writer_protocol WHERE singleton FOR SHARE;
   IF NOT strict_mode THEN
-   ignored_result := kaname._authority_compare_legacy_write_allowed_v2() IS NULL;
+   -- При отсутствии хранилища compare проверка больше ничего не читает.
+   IF to_regclass('pg_temp.kaname_authority_compare') IS NOT NULL THEN
+    ignored_result := kaname._authority_compare_legacy_write_allowed_v2() IS NULL;
+   END IF;
    ignored_result := pg_advisory_xact_lock(1262569292,0) IS NULL;
    RETURN NULL;
   END IF;
@@ -5058,7 +5062,7 @@ $$;
 
 CREATE FUNCTION kaname.authority_sequence_program_applied_v3() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE proof jsonb;program jsonb;row_value jsonb;identifier bigint;
+DECLARE proof jsonb;program jsonb;row_value jsonb;identifier bigint;ignored_result boolean;
 BEGIN
  IF TG_TABLE_SCHEMA<>'kaname' OR TG_TABLE_NAME NOT IN ('resource_journal','fga_outbox')
  OR TG_OP<>'INSERT' OR TG_WHEN<>'AFTER' OR TG_LEVEL<>'ROW' THEN
@@ -5066,7 +5070,8 @@ BEGIN
  SELECT q.proof,q.header INTO STRICT proof,program FROM kaname._authority_sequence_probe_v3() q;
  IF proof IS NULL THEN
   IF TG_TABLE_NAME='fga_outbox' THEN
-   PERFORM kaname._authority_forward_row_v4((to_jsonb(NEW)->>'id')::bigint,to_jsonb(NEW)-'id',true);
+   row_value:=to_jsonb(NEW);
+   ignored_result:=kaname._authority_forward_row_v4((row_value->>'id')::bigint,row_value-'id',true);
   END IF;
   RETURN NULL;
  END IF;
@@ -7968,8 +7973,9 @@ BEGIN
    AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT c.relhasrules AND NOT c.relhassubclass)
   OR (SELECT t.oid FROM pg_catalog.pg_trigger t WHERE t.tgrelid=expected.relation_id LIMIT 1) IS NOT NULL
   OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=expected.relation_id OR inhparent=expected.relation_id)
-  OR EXISTS(SELECT 1 FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
-   WHERE a.grantee<>owner_oid)
+  -- Стандартный ACL таблицы выдаёт права только её владельцу.
+  OR CASE WHEN c.relacl IS NULL OR c.relacl=acldefault('r',c.relowner) THEN false
+   ELSE EXISTS(SELECT 1 FROM aclexplode(c.relacl) a WHERE a.grantee<>owner_oid) END
   OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl) x
    WHERE a.attrelid=expected.relation_id AND a.attacl IS NOT NULL AND x.grantee<>owner_oid)) THEN
   RAISE EXCEPTION 'untrusted forward allocation storage' USING ERRCODE='42501';END IF;
@@ -8129,13 +8135,13 @@ END $$;
 CREATE FUNCTION kaname._authority_forward_row_v4(p_id bigint,p_row jsonb,p_applied boolean) RETURNS boolean
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE effect record;receipt record;program record;anchor kaname.authority_forward_emit_anchor_v4%ROWTYPE;
- allocation_rows record;command_rows record;invoker oid;changed integer;
+ allocation_rows record;command_rows record;invoker oid;changed integer;ignored_result boolean;
 BEGIN
  -- Этот helper private; оба actual trigger caller уже получили свежий NULL
  -- proof. Нет active anchor — прежний произвольный SQL идёт в прежний guard.
  IF NOT EXISTS(SELECT 1 FROM kaname.authority_forward_emit_anchor_v4 a
   WHERE a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id_if_assigned()) THEN RETURN false;END IF;
- PERFORM kaname._authority_forward_custody_v4();
+ ignored_result:=kaname._authority_forward_custody_v4() IS NULL;
  -- Оба ряда ищутся независимо по ID. Несовпадение nonce или ordinal
  -- проверяется ниже и не может превратить повреждённый receipt в отсутствие.
  SELECT e AS effect,r AS receipt,e.reserved_id IS NOT NULL AS effect_found,r.reserved_id IS NOT NULL AS receipt_found
@@ -9110,10 +9116,10 @@ BEGIN
  ('authority_forward_claim_v4(uuid)','8a7c8ee8eae47a467c0d3370ef6185e93f3db6138aa14319563990fabd3b7be7',true,'v',true,'export'),
  ('authority_forward_finish_v4(uuid)','75683ffd52d23834a7e28814676b67a06d47cfa5a4fd2c2049d5f299f4c00199',true,'v',true,'export'),
  ('_authority_forward_context_v4()','67a9f0c6d896048f52b3eeb396250c7e33e16ab3170b874734154197d247dd5c',true,'v',true,'private'),
- ('_authority_forward_custody_v4()','a8007133abaae4f51966e623c6a515988e637ec2f0579838578602be2572801a',true,'v',true,'private'),
+ ('_authority_forward_custody_v4()','14c2d0c9c92bda07f96280bf8d9ea4b76f1820f556b1336d71bb915c00ccda85',true,'v',true,'private'),
  ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
  ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
- ('_authority_forward_row_v4(bigint,jsonb,boolean)','cf8db469ecc7f27de4c3328b8cbfa25816dca6e06601689bfb552a527e99db20',true,'v',true,'private'),
+ ('_authority_forward_row_v4(bigint,jsonb,boolean)','b8eb06573f2d6301aca309767def5e2bc406f7fa20628483c2c724cc070454b7',true,'v',true,'private'),
  ('_authority_forward_complete_v4(uuid)','06cfcd8f144243fc529aacba57f452b0913cc6d5b1ab6bf2daf7c4e6a9a38290',true,'v',true,'private'),
  ('_authority_forward_anchor_complete_v4()','0d9fdf6c02abe69e333b5584eee4628cafb7ec37849b7820e33aba4bea4396f1',true,'v',true,'private'),
  ('_authority_forward_storage_v4()','e8a9cd61f6ee6cc4fbde7361210cf493c8df166cdf3bfd8c49ed47190aa4ef0c',true,'s',true,'private'),
@@ -9186,7 +9192,7 @@ BEGIN
  ('_authority_crud_unique_key_v3(text,jsonb)','b7407a60f467821e6fe19c697ea37079807dbd5bed88c51a4ad645de731cf5b3',true,'i',true,'private'),
  ('authority_crud_unique_guard_v3()','5e8dbb8ba000bde51e8aa64c8e2fb708666f4822bb677a059adc623b0b45eb7d',true,'v',true,'private'),
  ('_authority_crud_sequence_wait_v3(text,integer,integer)','3b40419c3cbb8e156a2926933f7d7075a93129fa34c2294122dcd04f9cf76edf',true,'v',true,'private'),
- ('authority_crud_sequence_guard_v3()','e7622cb38a1d1e6b81f01767a8071e9c46ab98e8f183aa2d05dde95c3740940b',true,'v',true,'private'),
+ ('authority_crud_sequence_guard_v3()','4132523d01f6ddd5e893fa0c21ad9c2c944009dc8e968dc7228e5de3e8bf9ce0',true,'v',true,'private'),
  ('_authority_crud_key_maximum_v3(jsonb,jsonb,jsonb,jsonb,timestamptz)','e3ad0cc2300061a6630225ec8956cee4b552f4ff8d9c1804f0dbfb5af0b12692',true,'i',true,'private'),
  ('_authority_crud_lock_rows_v3(jsonb)','e04ceccbff7121da453fc79b071db7d7c3f54b8425cda74f53520143641a22d9',true,'i',true,'private'),
  ('_authority_crud_lock_plan_v3(jsonb,jsonb,jsonb,timestamptz)','85bef48d34921afb7fd0659fe6554288f47db763cd0c872dcaa92cb713065d85',true,'i',true,'private'),
@@ -9238,7 +9244,7 @@ BEGIN
  ('_authority_sequence_default_v3(text)','55bbb442c7aefc7e080eb6dc33b7255444438eb653d9d1f493986315aa8c3196',true,'v',true,'private'),
  ('authority_resource_journal_id_v3()','1890af3f773bb503aa2d4324c56ed4925c1ffac60d36181cc0d7c579f1e8ae18',true,'v',true,'export'),
  ('authority_fga_outbox_id_v3()','75b2ab0cad8f6111bca3dc5bd119f87dbbffa0dbed74480f172aa0f465b672bb',true,'v',true,'export'),
- ('authority_sequence_program_applied_v3()','008b3f5a88844e5708f4ec8c2c7cf7c105d2e1748f988b5945e65fa5800e9062',true,'v',true,'private'),
+ ('authority_sequence_program_applied_v3()','6ccad306aa7cd3524f1d2f5e172efdac14f2df3fdde38569d022b5a95a555ccc',true,'v',true,'private'),
  ('authority_sequence_program_completion_v3()','055164a539031177a7605113484f5667702c9074b84d03ab1a827cd614b66e35',true,'v',true,'private'),
  ('_authority_sequence_expect_v3(text)','52e5bda884d0c1cec7bff0ae4843cd1490747432d1a44ee11a5648d6e905bcc2',true,'v',true,'private'),
  ('_authority_sequence_expected_v3()','e318cafb455438dd9a40e3c2cec7cc2d88daedf4307dd1e43248175005ab045b',true,'v',true,'private'),
@@ -9846,7 +9852,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','a9a0f235558c9574bb6452d54bc5fd5c0012e8bd932bbac0fc6541e9206d8af1',true),
+ ('_authority_crud_storage_v3()','961b7bd8df95cd4d35c9a3aa43d58b44dccc3fcddca9436d715e3d4779c084d7',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -9868,7 +9874,7 @@ BEGIN
  ('authority_staged_contract_validate_v3()','0438c79b89809642700ab1d12a3dee84f8a0432c3b33589d47d16e8d9ce885b8',true),
  ('authority_protocol_stage_full_v3(text,bytea,text,text,text)','1f7a9c17af7a4c3ec041405fa9f0dddc69cdf3fa666ba72db47247cde8447037',false),
  ('authority_protocol_activate_full_v3(text,text,text)','646328a2433e1d31d17a9c178ac3ab59a5a65d8252accf5295a20d22705d31cf',false),
- ('authority_protocol_attestation()','130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502',true),
+ ('authority_protocol_attestation()','3d30d03549dba92d9274e1bf5dd3b392e59e89d93f2a0cba85a77e6dda4cbc6e',true),
  ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true),
  ('authority_protocol_row_guard()','cb90a95df9b7105f053ae0c8652407335ef82745a2e749dc395b1c82e8435d12',true),
  ('_authority_protocol_stage_generation1(text,bytea,text,text,text)','7ffb942af742bff4b556f07b00d9d8f75fefba3aa1f00445073140b5c8072bde',false),
