@@ -7339,9 +7339,6 @@ DECLARE
     v_type      text;
     v_id        text;
     v_colon     int;
-    -- Условие, которое модель объявляет на прямом списке этого отношения для
-    -- типа субъекта строки (`[user with mfa_fresh]`); пусто — безусловно.
-    v_condition text;
     -- Хранимый субъект строки снятия (п. 4 шапки миграции kaname#829).
     v_stored    text;
 BEGIN
@@ -7413,17 +7410,19 @@ BEGIN
             -- `TestConditionedRelationHasAProducer` сверяет его с моделью в обе
             -- стороны (запись модели без строки и строка без записи модели —
             -- находки).
-            SELECT c.condition_name INTO v_condition
-              FROM (VALUES
-                    ('compute_instance', 'console', 'user', 'mfa_fresh'),
-                    ('compute_instance', 'ssh',     'user', 'mfa_fresh')
-                   ) AS c(object_type, relation, subject_type, condition_name)
-             WHERE c.object_type = v_type AND c.relation = v_relation
-               AND c.subject_type = split_part(v_user, ':', 1);
-
             INSERT INTO kaname.relation_fact
                    (object_type, object_id, relation, subject, source_version, created_at, condition_name)
-            VALUES (v_type, v_id, v_relation, v_user, v_version, now(), coalesce(v_condition, ''))
+            VALUES (v_type, v_id, v_relation, v_user, v_version, now(),
+                    coalesce((
+                        SELECT c.condition_name
+                          FROM (VALUES
+                                ('compute_instance', 'console', 'user', 'mfa_fresh'),
+                                ('compute_instance', 'ssh',     'user', 'mfa_fresh')
+                               ) AS c(object_type, relation, subject_type, condition_name)
+                         WHERE c.object_type = v_type AND c.relation = v_relation
+                           AND c.subject_type = split_part(v_user, ':', 1)
+                         LIMIT 1
+                    ), ''))
             ON CONFLICT (object_type, object_id, relation, subject) DO UPDATE
                SET source_version = EXCLUDED.source_version,
                    condition_name = EXCLUDED.condition_name
@@ -9151,7 +9150,7 @@ BEGIN
  ('_authority_group_add_subject_v3(text,text,jsonb)','93f1e1147874032a6e7f4e1c08ad7651148e6ec5f25da7ffc2486d234ae14a8c',true,'v',true,'private'),
  ('_authority_group_add_complete_v3()','158eca8cc62068a844f08ce5f746ad909a504fb429567d11c30d6f496dcd17eb',true,'v',true,'private'),
  ('_authority_group_add_storage_v3()','123966ac8ae04e91375122a48bc6c07c8c48bda2791a763d779f00e506ff81fc',true,'s',true,'private'),
- ('relation_fact_fold_row(text,jsonb,timestamptz)','f06e9b6aa6df9c97e4bb9f9d65cf9d65d50ce7bd58d1139ce10ffd4d03055a01',false,'v',false,'preserve'),
+ ('relation_fact_fold_row(text,jsonb,timestamptz)','d22d72ceba1dabe7edc7ff3c197c42ed92beacd87aed68add50aa99150a1d067',false,'v',false,'preserve'),
  ('authority_subject_change_id_guard_v2()','aa4bc39730f137bdf11491afaf41d9c8451c88e2cda40358fc0e33be2f29cb53',true,'v',true,'private'),
  ('authority_subject_change_applied_v2()','fa776df6d3b95dadb13fa1684424b2db105b21f5b8862bd045680fb8129d094e',true,'v',true,'private'),
  ('authority_subject_change_statement_guard_v2()','600129602604e3cac17840ff155738e5c886677cd8be781b62b9b29f2fe785b0',true,'v',true,'private'),
@@ -9870,7 +9869,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','e40734be0bc76714e627d554eac977330d0ee7ed3732453793eb6a417d7abcd7',true),
+ ('_authority_crud_storage_v3()','6326dbbe95ddb1ccaf50e2f59eda2a2072a2dbdbe253db6263c2a9073f717b42',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
