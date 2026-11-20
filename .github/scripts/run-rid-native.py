@@ -545,6 +545,9 @@ ASSERTION_FILES = (
     "cmd/kaname/installation_newman_midrun_test.go",
     "cmd/kaname/installation_input_authn_native_test.go",
     "cmd/kaname/installation_closed_shape_start_test.go",
+    "cmd/kaname/installation_closed_shape_native_test.go",
+    "cmd/kaname/installation_closed_shape_public_test.go",
+    "cmd/kaname/installation_newman_closed_shape_test.go",
     "internal/testsupport/installruntime/stand.go",
 )
 
