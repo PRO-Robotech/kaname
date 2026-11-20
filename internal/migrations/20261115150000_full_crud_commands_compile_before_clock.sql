@@ -3279,10 +3279,7 @@ BEGIN
  IF to_regclass('pg_temp.kaname_authority_attestation') IS NULL THEN
   SELECT enforcement='strict' INTO STRICT strict_mode FROM kaname.authority_writer_protocol WHERE singleton FOR SHARE;
   IF NOT strict_mode THEN
-   -- При отсутствии хранилища compare проверка больше ничего не читает.
-   IF to_regclass('pg_temp.kaname_authority_compare') IS NOT NULL THEN
-    ignored_result := kaname._authority_compare_legacy_write_allowed_v2() IS NULL;
-   END IF;
+   ignored_result := kaname._authority_compare_legacy_write_allowed_v2() IS NULL;
    ignored_result := pg_advisory_xact_lock(1262569292,0) IS NULL;
    RETURN NULL;
   END IF;
@@ -7974,7 +7971,8 @@ BEGIN
   -- Флаг каталога обязателен при наличии триггера; после DROP он может остаться true.
   OR CASE WHEN c.relhastriggers IS FALSE THEN false
    ELSE EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid=expected.relation_id) END
-  OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=expected.relation_id OR inhparent=expected.relation_id)
+  -- relhassubclass выше отклоняет родителя; здесь проверяем, что таблица не является потомком.
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=expected.relation_id)
   -- Стандартный ACL таблицы выдаёт права только её владельцу.
   OR CASE WHEN c.relacl IS NULL OR c.relacl=acldefault('r',c.relowner) THEN false
    ELSE EXISTS(SELECT 1 FROM aclexplode(c.relacl) a WHERE a.grantee<>owner_oid) END
@@ -9132,7 +9130,7 @@ BEGIN
  ('authority_forward_claim_v4(uuid)','8a7c8ee8eae47a467c0d3370ef6185e93f3db6138aa14319563990fabd3b7be7',true,'v',true,'export'),
  ('authority_forward_finish_v4(uuid)','75683ffd52d23834a7e28814676b67a06d47cfa5a4fd2c2049d5f299f4c00199',true,'v',true,'export'),
  ('_authority_forward_context_v4()','67a9f0c6d896048f52b3eeb396250c7e33e16ab3170b874734154197d247dd5c',true,'v',true,'private'),
- ('_authority_forward_custody_v4()','2df75aefd9b91dd9f91e1efe6249fab835307aa6cccb603de564ceb0b2f17470',true,'v',true,'private'),
+ ('_authority_forward_custody_v4()','c5d84795becb1a5b12efc89bb553ac12db864c5ce31c90272041b15a09cd59b4',true,'v',true,'private'),
  ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
  ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
  ('_authority_forward_row_v4(bigint,jsonb,boolean)','31eb7a5ae8eec2af1f31d7aa9e55d49c80e787838ec3a34130de6db4b3dcc56f',true,'v',true,'private'),
@@ -9868,7 +9866,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','25cfe999c1ae2e5e5b961948216391bc4355ae2d13496779a69752763e7f76a0',true),
+ ('_authority_crud_storage_v3()','e1f69dd0800014407db311fb994db1ff7c8221a6a00ebd9e3e5d776a87cb25db',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -9890,7 +9888,7 @@ BEGIN
  ('authority_staged_contract_validate_v3()','0438c79b89809642700ab1d12a3dee84f8a0432c3b33589d47d16e8d9ce885b8',true),
  ('authority_protocol_stage_full_v3(text,bytea,text,text,text)','1f7a9c17af7a4c3ec041405fa9f0dddc69cdf3fa666ba72db47247cde8447037',false),
  ('authority_protocol_activate_full_v3(text,text,text)','646328a2433e1d31d17a9c178ac3ab59a5a65d8252accf5295a20d22705d31cf',false),
- ('authority_protocol_attestation()','3d30d03549dba92d9274e1bf5dd3b392e59e89d93f2a0cba85a77e6dda4cbc6e',true),
+ ('authority_protocol_attestation()','130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502',true),
  ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true),
  ('authority_protocol_row_guard()','cb90a95df9b7105f053ae0c8652407335ef82745a2e749dc395b1c82e8435d12',true),
  ('_authority_protocol_stage_generation1(text,bytea,text,text,text)','7ffb942af742bff4b556f07b00d9d8f75fefba3aa1f00445073140b5c8072bde',false),
