@@ -9157,7 +9157,7 @@ BEGIN
  ('authority_binding_command_end_v3(jsonb)','2c9ee43be689f773c543fc800645f2aae482ec02d392fd28937efa50558915b2',true,'v',true,'export'),
  ('authority_binding_command_audit_v3(jsonb)','93c1bfc6bd6b753868e68ff6e408089f701d189ed6e7c30a32c7998baade872f',true,'v',true,'export'),
  ('_authority_binding_mirror_policy_prepare_v3(jsonb)','62483d22c74491cc60dcbc011c5517f743b3a764dc91a48fa8628ce31bfadcd4',true,'v',true,'private'),
- ('authority_policy_changed()','d11c7b0992c5c8ddaa323fc03bfbc1822b52edbae5a181fa449589500e6440fe',true,'v',true,'preserve'),
+ ('authority_policy_changed()','46a479262309d1ab8cd6efd41ea519921eb57c13ca7b5054ce6550aba366371d',true,'v',true,'preserve'),
  ('authority_audit_id_guard_v2()','a349a4a051b336afdec4cb5422edf5738fe4e354acec98163abc0d4a2c70d8f2',true,'v',true,'preserve'),
  ('authority_audit_applied_v2()','b43a45a017d3b646301d3b0eb746d46ae7ee7d3a0539b2c8b91600c5a4c697a3',true,'v',true,'preserve'),
  ('authority_audit_statement_guard_v2()','cc9fd152b1c8fa68a65eb6451baf977a12b0866cc52668254280265f10f9271c',true,'v',true,'preserve'),
@@ -9866,7 +9866,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','e1f69dd0800014407db311fb994db1ff7c8221a6a00ebd9e3e5d776a87cb25db',true),
+ ('_authority_crud_storage_v3()','a3c9f8bade9129a20d82bc1e6d14999e32228f66366846c933d6f7cbcad99827',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -10305,7 +10305,7 @@ BEGIN
  IF TG_OP='UPDATE' THEN
   SELECT pg_catalog.array_agg(DISTINCT q.k COLLATE "C" ORDER BY q.k COLLATE "C") INTO keys FROM (
    SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(o))) k FROM old_policy_rows o
-   UNION SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(n))) FROM new_policy_rows n) q;
+   UNION ALL SELECT unnest(kaname.authority_policy_keys(TG_TABLE_NAME,to_jsonb(n))) FROM new_policy_rows n) q;
   -- Смена родителя меняет ownership уже известного источника. Это редкая
   -- неоднозначная структурная мутация, заранее требующая GLOBAL writer.
   IF TG_TABLE_NAME IN ('projects','roles') THEN

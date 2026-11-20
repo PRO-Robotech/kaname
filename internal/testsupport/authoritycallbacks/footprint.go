@@ -39,7 +39,7 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 		{"authority_group_object_scopes", "ed9f62070e461be31342d7c4e3cfcbbb2e3542f2309b63f9592b80a46bd3cc60", "s"},
 		{"authority_group_object_subject", "a264aedc8a97a6e60b92af1c14c043a27bb41e7aa0241948056b757f5bb57493", "s"},
 		{"authority_policy_carrier_flush", "a7c37c306eab607cb0946ec362223ac2e7a3aef89eab24adec452287a84c546c", "v"},
-		{"authority_policy_changed", "d11c7b0992c5c8ddaa323fc03bfbc1822b52edbae5a181fa449589500e6440fe", "v"},
+		{"authority_policy_changed", "46a479262309d1ab8cd6efd41ea519921eb57c13ca7b5054ce6550aba366371d", "v"},
 		{"authority_policy_keys", "5bed24d2efa4e9dd3eadd3224d06031b5eeebf6785e7461ece8a4830adb46e86", "s"},
 		{"authority_policy_object_account", "ae235eb8c5286d375d830c4d86f9f52d956035c49af8119d1b175173e81d7337", "s"},
 		{"authority_protocol_attestation", "130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502", "v"},
