@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -69,6 +70,85 @@ func MatchByLabels(ctx context.Context, q querier, types []string, matchLabels m
 // Публичный MatchByLabels по-прежнему возвращает независимые изменяемые maps.
 func MatchByLabelsReadOnly(ctx context.Context, q querier, types []string, matchLabels map[string]string, decode func([]byte) (map[string]string, error)) ([]MirrorRow, error) {
 	return matchByLabels(ctx, q, types, matchLabels, decode)
+}
+
+// LabelSelector задаёт один предикат по типам и меткам зеркала.
+type LabelSelector struct {
+	ObjectTypes []string
+	Labels      map[string]string
+}
+
+const (
+	labelSelectorUnionMaxRows       = 16 * 1024
+	labelSelectorUnionMaxLabelBytes = 32 * 1024 * 1024
+)
+
+var errLabelSelectorUnionPayloadLimit = errors.New("resource_mirror: label selector union payload limit")
+
+// MatchLabelSelectorUnionReadOnly читает объект, подходящий хотя бы одному
+// селектору, один раз. Проекция и порядок те же, что у MatchByLabels.
+// Чужие объекты остаются кандидатами для REJECTED и аудита.
+// Лимиты строк и байтов меток задают границу пакетного чтения.
+// При превышении весь частичный результат отбрасывается.
+func MatchLabelSelectorUnionReadOnly(ctx context.Context, q querier, selectors []LabelSelector, decode func([]byte) (map[string]string, error)) ([]MirrorRow, bool, error) {
+	if q == nil || decode == nil || len(selectors) == 0 {
+		return nil, false, errors.New("resource_mirror: invalid label selector union input")
+	}
+	args := make([]any, 0, 2*len(selectors))
+	predicates := make([]string, 0, len(selectors))
+	for _, selector := range selectors {
+		if len(selector.ObjectTypes) == 0 || len(selector.Labels) == 0 {
+			return nil, false, errors.New("resource_mirror: invalid label selector union predicate")
+		}
+		for _, objectType := range selector.ObjectTypes {
+			if objectType == "" {
+				return nil, false, errors.New("resource_mirror: empty label selector union object type")
+			}
+		}
+		payload, err := json.Marshal(selector.Labels)
+		if err != nil {
+			return nil, false, fmt.Errorf("resource_mirror: marshal union matchLabels: %w", err)
+		}
+		predicates = append(predicates, fmt.Sprintf("(m.object_type = ANY($%d) AND m.labels @> $%d::jsonb)", len(args)+1, len(args)+2))
+		args = append(args, selector.ObjectTypes, payload)
+	}
+	rows, err := q.Query(ctx,
+		`SELECT m.object_type, m.object_id, m.parent_project_id,
+		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
+		        m.labels
+		   FROM kaname.resource_mirror m
+		   LEFT JOIN kaname.projects pj ON pj.id = m.parent_project_id
+		  WHERE `+strings.Join(predicates, " OR ")+`
+		  ORDER BY m.object_type ASC, m.object_id ASC
+		  LIMIT `+fmt.Sprint(labelSelectorUnionMaxRows+1),
+		args...,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("resource_mirror: match label selector union: %w", err)
+	}
+	defer rows.Close()
+	remainingLabelBytes := labelSelectorUnionMaxLabelBytes
+	out, err := scanRowsWithDecoder(rows, func(raw []byte) (map[string]string, error) {
+		if len(raw) > remainingLabelBytes {
+			return nil, errLabelSelectorUnionPayloadLimit
+		}
+		remainingLabelBytes -= len(raw)
+		return decode(raw)
+	})
+	if errors.Is(err, errLabelSelectorUnionPayloadLimit) {
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, false, fmt.Errorf("resource_mirror: rows: %w", err)
+		}
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if len(out) > labelSelectorUnionMaxRows {
+		return nil, false, nil
+	}
+	return out, true, nil
 }
 
 func matchByLabels(ctx context.Context, q querier, types []string, matchLabels map[string]string, decode func([]byte) (map[string]string, error)) ([]MirrorRow, error) {

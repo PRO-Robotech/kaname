@@ -1345,6 +1345,44 @@ type readOnlyRuleMemberStore interface {
 	ReadOnlyRuleMemberStore() ReconcileStore
 }
 
+type mirrorLabelSelectorUnion interface {
+	// Полные кандидаты хотя бы одного селектора, в порядке обычного чтения.
+	// complete=false означает превышение границы памяти, а не ошибку запроса.
+	MatchMirrorLabelSelectorUnion(context.Context, []domain.RuleSelector) (objects []domain.MirrorObject, complete bool, err error)
+}
+
+func readMirrorLabelSelectorUnion(ctx context.Context, s ReconcileStore, cat *catalog.Facts, bs BindingScope) ([]domain.MirrorObject, bool, error) {
+	store, ok := s.(mirrorLabelSelectorUnion)
+	if !ok || len(bs.Selectors) < 2 || len(bs.Selectors) > domain.MaxRules {
+		return nil, false, nil
+	}
+	selectors := make([]domain.RuleSelector, 0, len(bs.Selectors))
+	for _, sel := range bs.Selectors {
+		if len(selectorGrantees(bs, sel)) == 0 {
+			continue
+		}
+		if sel.Container != nil {
+			return nil, false, nil
+		}
+		if !selectorWritesObjects(cat, sel) {
+			continue
+		}
+		if sel.Arm != domain.ArmLabels || sel.CreatedBySubject || len(sel.MatchLabels) == 0 || len(sel.ObjectTypes) == 0 {
+			return nil, false, nil
+		}
+		for _, typ := range sel.ObjectTypes {
+			if typ == "" || domain.FeedSourceForType(typ) != domain.FeedMirror {
+				return nil, false, nil
+			}
+		}
+		selectors = append(selectors, sel)
+	}
+	if len(selectors) < 2 {
+		return nil, false, nil
+	}
+	return store.MatchMirrorLabelSelectorUnion(ctx, selectors)
+}
+
 func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, bs BindingScope) ([]DesiredMember, error) {
 	var selectorStore ReconcileStore = s
 	if provider, ok := s.(readOnlyRuleMemberStore); ok {
@@ -1361,6 +1399,13 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	// Выдача на якоре собственной области подавляется; совпадения каждого селектора
 	// пересекаются ниже с набором цели.
 	perObject := len(bs.Target.Resources) > 0
+
+	// Все зеркальные селекторы одной выдачи читаются из одного снимка запроса.
+	// Объединение сохраняет кандидатов из чужой области для отказа и аудита.
+	union, complete, err := readMirrorLabelSelectorUnion(ctx, selectorStore, cat, bs)
+	if err != nil {
+		return nil, fmt.Errorf("match mirror label selectors: %w", err)
+	}
 
 	// Член собственной области: ярус роли (+ глагольные v_*) НА
 	// СОБСТВЕННОМ ОБЪЕКТЕ ОБЛАСТИ ВЫДАЧИ (`account:<X>`/`project:<X>`). Это
@@ -1418,6 +1463,8 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// субъектами-учётками выдачи, отбором по индексу (аккаунт, создатель),
 			// а не перебором объектов области (§3 приёмки, «производительность»).
 			matched, err = r.matchCreatorObjects(ctx, s, sel, bs)
+		} else if complete {
+			matched = union
 		} else {
 			// Передаём область и цель привязки, чтобы ветвь ANCHOR разрешила набор кандидатов
 			// по цели (по id для пообъектной; иначе O(scope) с проталкиванием фильтра), а совпадения
@@ -1429,6 +1476,9 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			return nil, err
 		}
 		for _, o := range matched {
+			if complete && (!selectorMatchesObject(sel, o) || (perObject && !bs.Target.Contains(o.ObjectType, o.ObjectID))) {
+				continue
+			}
 			// Пообъектное решение ОБЩЕЕ с быстрым прямым путём
 			// (desiredMemberForObject), поэтому полный пересчёт и прямой путь
 			// выводят ПОБАЙТОВО ОДИНАКОВЫЕ кортежи (идемпотентность: прямой и асинхронный полный
