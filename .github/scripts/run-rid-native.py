@@ -355,6 +355,17 @@ ASSERTION_FILES = (
     "cmd/kaname/installation_newman_retirement_test.go",
     "cmd/kaname/installation_newman_bridge_test.go",
     "cmd/kaname/installation_owned_child_driver_test.go",
+    "cmd/kaname/installation_rid_integration_test.go",
+    "cmd/kaname/installation_revoke_full_startup_test.go",
+    "cmd/kaname/installation_pair_conflict_native_test.go",
+    "cmd/kaname/installation_newman_conflict_test.go",
+    "cmd/kaname/installation_snapshot_runtime_test.go",
+    "cmd/kaname/installation_whole_delivery_native_test.go",
+    "cmd/kaname/installation_newman_whole_phase_test.go",
+    "cmd/kaname/installation_midrun_runtime_test.go",
+    "cmd/kaname/installation_newman_midrun_test.go",
+    "cmd/kaname/installation_input_authn_native_test.go",
+    "cmd/kaname/installation_closed_shape_start_test.go",
     "internal/testsupport/installruntime/stand.go",
 )
 
@@ -443,12 +454,13 @@ def test_diagnostics(path, root_test, predicates):
 def startup_diagnostics(evidence, root_test, predicates, diagnostics, binary_sha):
     # Только первый fail, уже связанный с точным require.NoError после StartBase.
     site = diagnostics.get("firstFailureSite", {})
+    if diagnostics.get("status") != "complete" or site.get("status") != "matched":
+        return {"status": "first-failure-site-unavailable"}
     fixture_source = "cmd/kaname/installation_native_fixture_test.go"
     names = {root_test + "/" + name for name in predicates}
     if root_test == CASES["registry-installation-rid04"][0]:
         names = {name + "/" + mode for name in names for mode in ("S1", "S2")}
-    if (diagnostics.get("status") != "complete" or site.get("status") != "matched"
-            or site.get("file") != fixture_source or site.get("test") not in names):
+    if site.get("file") != fixture_source or site.get("test") not in names:
         return {"status": "not-first-startbase-failure"}
     try:
         source_lines = (ROOT / fixture_source).read_text(encoding="utf-8").splitlines()
