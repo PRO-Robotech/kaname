@@ -694,7 +694,7 @@ def _runner_routes(argv: list[str]) -> list[tuple[str, str]]:
         options = argv[k + (1 if hosted_native else 2):]
         if len(options) == 6 and set(options[::2]) == {"--suite", "--private-dir", "--out"}:
             stem = options[options.index("--suite") + 1]
-            if stem in {"registry-installation-rid01", "registry-installation-rid02", "registry-installation-rid04", "registry-installation-rid07", "registry-installation-rid09", "registry-installation-rid10"}:
+            if stem in _NATIVE_TESTS:
                 return [(stem, "native")]
         return []
     if k >= len(argv) or not RUNNER_RE.search(argv[k]):
@@ -730,6 +730,70 @@ def _step_shell(step: dict, job: dict, doc: dict) -> str:
     return "bash"
 
 
+def _rid11_grouped_route(jobs: dict, doc: dict) -> int | None:
+    """Замкнутые четыре группы и успешное сведение дают полный нативный маршрут.
+
+    Одна группа не доказывает исполнение 128 фаз. Проверяем связь заданий
+    целиком, чтобы --rid11-group не разрешал произвольное сужение набора.
+    """
+    shards, aggregate = jobs.get("rid11-shards"), jobs.get("rid11")
+    if not isinstance(shards, dict) or not isinstance(aggregate, dict):
+        return None
+    strategy = shards.get("strategy")
+    if strategy != {"fail-fast": False, "matrix": {"group": ["input", "identity", "proof-authority", "availability"]}}:
+        return None
+    if aggregate.get("needs") != ["changes", "rid11-shards"]:
+        return None
+    native = ["bash", ".github/scripts/run-rid-native-hosted.sh", "--suite", "registry-installation-rid11",
+              "--private-dir", "$RUNNER_TEMP/rid11-private", "--out", "$RUNNER_TEMP/rid11-summary.json",
+              "--rid11-group", "$RID11_GROUP"]
+    aggregate_command = ["python3", ".github/scripts/aggregate-rid11-native.py", "--source-revision", "$GITHUB_SHA",
+                         "--source-tree", "$tree", "--collection",
+                         "$GITHUB_WORKSPACE/tests/newman/collections/registry-installation-rid11.postman_collection.json",
+                         "--input-dir", "$RUNNER_TEMP/rid11-shards", "--out", "$RUNNER_TEMP/rid11-summary.json"]
+    def steps(job):
+        return [step for step in job.get("steps", []) if isinstance(step, dict)]
+    def commands(step, job):
+        shell = _step_shell(step, job, doc).split()
+        return shell_commands(step["run"]) if (isinstance(step.get("run"), str) and shell and
+               shell[0].rsplit("/", 1)[-1] in _SHELLS) else []
+    producers = [step for step in steps(shards) if native in commands(step, shards)]
+    if len(producers) != 1 or producers[0].get("continue-on-error") or shards.get("continue-on-error"):
+        return None
+    env = {**(doc.get("env") or {}), **(shards.get("env") or {}), **(producers[0].get("env") or {})}
+    if env.get("RID11_GROUP") != "${{ matrix.group }}":
+        return None
+    uploads = [step for step in steps(shards) if str(step.get("uses", "")).startswith("actions/upload-artifact@") and
+               step.get("with", {}).get("name") == "registry-installation-rid11-${{ matrix.group }}" and
+               step.get("with", {}).get("path") == "${{ runner.temp }}/rid11-summary.json"]
+    if len(uploads) != 1:
+        return None
+    download = ["gh", "run", "download", "$GITHUB_RUN_ID", "--repo", "$GITHUB_REPOSITORY",
+                "--pattern", "registry-installation-rid11-*", "--dir", "$RUNNER_TEMP/rid11-shards"]
+    guarded_commands = [["test", "$RID11_SHARDS_RESULT", "=", "success"],
+                        ["git", "rev-parse", "HEAD^{tree}"], ["tree=$(…)"], download, aggregate_command]
+    consumers = []
+    for i, step in enumerate(aggregate.get("steps", [])):
+        if not isinstance(step, dict) or commands(step, aggregate) != guarded_commands:
+            continue
+        env = {**(doc.get("env") or {}), **(aggregate.get("env") or {}), **(step.get("env") or {})}
+        # Команды исполняются последовательно с немедленным отказом bash;
+        # операторы оболочки не должны обходить проверку результата групп.
+        body = step.get("run", "")
+        if any(op in body for op in (";", "|", "&&", "\nif ", "\nexit ")):
+            continue
+        if _step_shell(step, aggregate, doc) != "bash":
+            continue
+        if step.get("continue-on-error") or aggregate.get("continue-on-error"):
+            continue
+        if env.get("RID11_SHARDS_RESULT") != "${{ needs.rid11-shards.result }}":
+            continue
+        if env.get("GH_TOKEN") != "${{ github.token }}":
+            continue
+        consumers.append(i)
+    return consumers[0] if len(consumers) == 1 else None
+
+
 def _pipeline_routes(workflows: pathlib.Path) -> dict[str, list[tuple[str, str]]]:
     """{stem: [(«задание/шаг», вид маршрута), …]} — вызовы в конвейере.
 
@@ -757,6 +821,7 @@ def _pipeline_routes(workflows: pathlib.Path) -> dict[str, list[tuple[str, str]]
         jobs = doc.get("jobs")
         if not isinstance(jobs, dict):
             continue
+        rid11_aggregate_step = _rid11_grouped_route(jobs, doc)
         for job_id, job in jobs.items():
             if not isinstance(job, dict):
                 continue
@@ -770,6 +835,8 @@ def _pipeline_routes(workflows: pathlib.Path) -> dict[str, list[tuple[str, str]]
                 if not shell or shell[0].rsplit("/", 1)[-1] not in _SHELLS:
                     continue
                 label = f"{f.name}:{job_id}/{stepv.get('name') or f'шаг {i + 1}'}"
+                if job_id == "rid11" and i == rid11_aggregate_step:
+                    out.setdefault("registry-installation-rid11", []).append((label, "native"))
                 for argv in shell_commands(body):
                     for stem, route in _runner_routes(argv):
                         out.setdefault(stem, []).append((label, route))
@@ -890,9 +957,14 @@ def ceremony_need(newman: pathlib.Path) -> dict[str, list[str]]:
 # Входы настоящего производителя: installation_newman_bridge_test.go,
 # installation_newman_install_test.go, installation_native_renewal_test.go и
 # installation_newman_repeat_test.go и installation_newman_retirement_test.go.
-# RID07/09/10 получают входы из собственных Newman adapters и общего моста.
+# RID03/05/06/07/09/10 получают входы из собственных Newman adapters и общего моста.
 # Контракт относится только к native-маршруту.
 _NATIVE_INPUTS = {
+    'registry-installation-rid11': frozenset({'jwtRIDOperator', 'rid11Expected', 'rid11ClientAssertion', 'rid11IssuanceOrigin'}),
+    'registry-installation-rid12': frozenset({'jwtRIDOperator', 'rid12Expected'}),
+    'registry-installation-rid03': frozenset({'jwtRIDOperator', 'jwtRIDIssuer', 'jwtRIDCreator', 'rid03Expected'}),
+    'registry-installation-rid05': frozenset({'jwtRIDOperator', 'jwtRIDIssuer', 'rid05Expected', 'rid05ClientAssertion', 'rid05IssuanceOrigin'}),
+    'registry-installation-rid06': frozenset({'jwtRIDOperator', 'jwtRIDIssuer', 'jwtRIDCreator', 'rid06Expected'}),
     "registry-installation-rid01": frozenset({
         "jwtRIDOperator", "jwtRIDCreator", "jwtRIDExpiredCreator",
         "rid01Expected", "rid01ClientAssertion", "rid01IssuanceOrigin"}),
@@ -901,19 +973,26 @@ _NATIVE_INPUTS = {
     "registry-installation-rid04": frozenset({
         "jwtRIDOperator", "jwtRIDIssuer", "rid04Expected"}),
     "registry-installation-rid07": frozenset({"jwtRIDOperator", "rid07Expected"}),
+    "registry-installation-rid08": frozenset({"jwtRIDOperator", "rid08Expected", "ridSystemId", "ridDeletedAccountId"}),
     "registry-installation-rid09": frozenset({"jwtRIDOperator", "rid09Expected"}),
     "registry-installation-rid10": frozenset({
         "jwtRIDOperator", "jwtRIDCreator", "rid10Expected"}),
 }
 _NATIVE_TESTS = {
+    'registry-installation-rid11': ('TestRID_11_InputAuthnAuthorityBackend', 128),
+    'registry-installation-rid12': ('TestRID_12_ClosedShapeAndBounds', 65),
+    'registry-installation-rid03': ('TestRID_03_DelegatedGrantAndIssuerBounds', 44),
+    'registry-installation-rid05': ('TestRID_05_CreatorDeletionAndNewID', 30),
+    'registry-installation-rid06': ('TestRID_06_RevokeDuringApply', 30),
     "registry-installation-rid01": ("TestRID_01_CleanInstallAndRenewal", 8),
     "registry-installation-rid02": ("TestRID_02_ConcurrentAndRepeat", 4),
     "registry-installation-rid04": ("TestRID_04_CreatorRetirement", 14),
     "registry-installation-rid07": ("TestRID_07_ExistingPairConflict", 32),
+    "registry-installation-rid08": ("TestRID_08_SnapshotPagesAndFutureAccount", 6),
     "registry-installation-rid09": ("TestRID_09_WholeDeliveryPreflight", 32),
     "registry-installation-rid10": ("TestRID_10_MidRunFaultAndRetirement", 6),
 }
-# Конкретные читаемые слоты keys.forEach из _CONFIG этих двух коллекций.
+# Конкретные читаемые слоты keys.forEach из общего _CONFIG нативных коллекций.
 # Не префикс: новый rid10* ключ не считается произведённым автоматически.
 _NATIVE_DERIVED = frozenset(
     "rid10" + field + "_" + kind
@@ -923,6 +1002,7 @@ _NATIVE_DERIVED = frozenset(
 
 # Только точные слоты публичных коллекций RID02/09; другим suites они не выдаются.
 _NATIVE_SUITE_DERIVED = {
+    "registry-installation-rid11": frozenset({"rid10Listed_serviceAccounts"}),
     "registry-installation-rid09": frozenset({
         'rid09GetId_accounts',
         'rid09GetId_serviceAccounts',
@@ -1195,16 +1275,16 @@ _HOLDER_EDGE_HALF = (
 PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "registry-installation-rid01": ("A", "Нативная фикстура Kaname выдаёт окружение и восемь публичных фаз. Их выполняет задание rid01, которое проверяет уборку ресурсов своего запуска", ""),
     "registry-installation-rid02": ("A", "Нативная фикстура Kaname выдаёт окружение и четыре публичные фазы повторной установки. Их выполняет задание rid02 с проверкой уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
-    "registry-installation-rid03": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID03, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid03 с публичной коллекцией и подтверждённой очисткой"),
+    'registry-installation-rid03': ("A", "Нативная фикстура Kaname выдаёт окружение и 44 публичных фаз. Их выполняет задание rid03 с проверкой всех именованных узлов и уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
     "registry-installation-rid04": ("A", "Нативная фикстура Kaname выдаёт окружение и четырнадцать публичных фаз вывода создателя из эксплуатации. Их выполняет задание rid04 с проверкой уборки ресурсов своего запуска", ""),
-    "registry-installation-rid05": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID05, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid05 с публичной коллекцией и подтверждённой очисткой"),
-    "registry-installation-rid06": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID06, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid06 с публичной коллекцией и подтверждённой очисткой"),
+    'registry-installation-rid05': ("A", "Нативная фикстура Kaname выдаёт окружение и 30 публичных фаз. Их выполняет задание rid05 с проверкой всех именованных узлов и уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
+    'registry-installation-rid06': ("A", "Нативная фикстура Kaname выдаёт окружение и 30 публичных фаз. Их выполняет задание rid06 с проверкой всех именованных узлов и уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
     "registry-installation-rid07": ("A", "Нативная фикстура Kaname выдаёт окружение и 32 публичные фазы. Их выполняет задание rid07 с проверкой полной матрицы и уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
-    "registry-installation-rid08": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID08, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid08 с публичной коллекцией и подтверждённой очисткой"),
+    "registry-installation-rid08": ("A", "Нативная фикстура Kaname выдаёт окружение и шесть публичных фаз. Задание rid08 подтверждает полный час допуска по реальным часам и уборку своего запуска", ""),
     "registry-installation-rid09": ("A", "Нативная фикстура Kaname выдаёт окружение и 32 публичные фазы. Их выполняет задание rid09 с проверкой полной матрицы и уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
     "registry-installation-rid10": ("A", "Нативная фикстура Kaname выдаёт окружение и шесть публичных фаз сбоя и восстановления посреди установки. Их выполняет задание rid10 с проверкой уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
-    "registry-installation-rid11": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID11, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid11 с публичной коллекцией и подтверждённой очисткой"),
-    "registry-installation-rid12": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID12, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid12 с публичной коллекцией и подтверждённой очисткой"),
+    'registry-installation-rid11': ("A", "Нативная фикстура Kaname выдаёт окружение и 128 публичных фаз. Их выполняет задание rid11 с проверкой всех именованных узлов и уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
+    'registry-installation-rid12': ("A", "Нативная фикстура Kaname выдаёт окружение и 65 публичных фаз. Их выполняет задание rid12 с проверкой всех именованных узлов и уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
     "iam-service-account-creator": ("A", "SAC-E1…E5: собственный публичный REST; машинный creator из seed_own_stand, client_credentials; kaname#1003", ""),
     "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек без выдач, его куёт волна церемонии автономного стенда (`seed_ceremony.py --wave`); цели привязки `userPA1Id`/`userPureNoBindingsId` — строки людей машинного посева; гоняет задание `stand-ceremony` (kaname#398)", ""),
     "authz-failclosed": ("A", "отказ без вердикта на собственном фронте автономного стенда: при свёрнутой базе удостоверение со свежим вердиктом об отзыве получает 503/14 фиксированным текстом рубежа, которому нужна база, на чтении объекта и на семи списках — никогда 200 с пустой страницей; близнец с чужим `kid` — 401 рубежа предъявителя; производитель всех утверждений — служба; гоняет шаг волны свёртки базы задания `stand` (kaname#415)", ""),
@@ -2519,6 +2599,60 @@ def _native_census_self_test(tmp: pathlib.Path, make_workflow) -> None:
     _c("native census: пустое объявление не поддерживает suites", not _native_declared(root))
 
 
+def _rid11_grouped_census_self_test(tmp: pathlib.Path) -> None:
+    """Синтетический разбор конвейера без нативных прогонов и внешних вызовов."""
+    import copy
+    import yaml
+
+    producer = ("bash .github/scripts/run-rid-native-hosted.sh --suite registry-installation-rid11 "
+                '--private-dir "$RUNNER_TEMP/rid11-private" --out "$RUNNER_TEMP/rid11-summary.json" '
+                '--rid11-group "$RID11_GROUP"')
+    consumer = ('test "$RID11_SHARDS_RESULT" = success\n'
+                'tree="$(git rev-parse HEAD^{tree})"\n'
+                'gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" '
+                '--pattern registry-installation-rid11-* --dir "$RUNNER_TEMP/rid11-shards"\n'
+                'python3 .github/scripts/aggregate-rid11-native.py --source-revision "$GITHUB_SHA" '
+                '--source-tree "$tree" --collection "$GITHUB_WORKSPACE/tests/newman/collections/registry-installation-rid11.postman_collection.json" '
+                '--input-dir "$RUNNER_TEMP/rid11-shards" --out "$RUNNER_TEMP/rid11-summary.json"')
+    doc = {"jobs": {
+        "rid11-shards": {"strategy": {"fail-fast": False, "matrix": {"group": ["input", "identity", "proof-authority", "availability"]}},
+                         "steps": [{"run": producer, "env": {"RID11_GROUP": "${{ matrix.group }}"}},
+                                   {"uses": "actions/upload-artifact@pin", "with": {"name": "registry-installation-rid11-${{ matrix.group }}", "path": "${{ runner.temp }}/rid11-summary.json"}}]},
+        "rid11": {"needs": ["changes", "rid11-shards"], "steps": [
+            {"run": consumer, "env": {"RID11_SHARDS_RESULT": "${{ needs.rid11-shards.result }}", "GH_TOKEN": "${{ github.token }}"}}]}}}
+    wf = tmp / "rid11-grouped-census"
+    wf.mkdir()
+    def routes(value):
+        (wf / "proof.yml").write_text(yaml.safe_dump(value), encoding="utf-8")
+        return _pipeline_routes(wf).get("registry-installation-rid11", [])
+    _c("RID11 grouped: complete four-group aggregate is native", routes(doc) == [("proof.yml:rid11/шаг 1", "native")])
+    mutations = [
+        ("subset", lambda d: d["jobs"]["rid11-shards"]["strategy"]["matrix"]["group"].pop()),
+        ("duplicate", lambda d: d["jobs"]["rid11-shards"]["strategy"]["matrix"]["group"].append("input")),
+        ("matrix include", lambda d: d["jobs"]["rid11-shards"]["strategy"]["matrix"].update(include=[{"group": "input"}])),
+        ("fail fast", lambda d: d["jobs"]["rid11-shards"]["strategy"].update({"fail-fast": True})),
+        ("literal group", lambda d: d["jobs"]["rid11-shards"]["steps"][0]["env"].update(RID11_GROUP="input")),
+        ("direct group", lambda d: d["jobs"]["rid11-shards"]["steps"][0].update(run=producer.replace("bash .github/scripts/run-rid-native-hosted.sh", "python3 .github/scripts/run-rid-native.py"))),
+        ("wrong upload", lambda d: d["jobs"]["rid11-shards"]["steps"][1]["with"].update(name="other")),
+        ("missing dependency", lambda d: d["jobs"]["rid11"].update(needs=["changes"])),
+        ("no aggregate", lambda d: d["jobs"].pop("rid11")),
+        ("relative collection", lambda d: d["jobs"]["rid11"]["steps"][0].update(
+            run=consumer.replace("$GITHUB_WORKSPACE/", ""))),
+        ("no success guard", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.split("\n", 1)[1])),
+        ("guard bypass", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.replace("= success", "= success || true"))),
+        ("forged success", lambda d: d["jobs"]["rid11"]["steps"][0]["env"].update(RID11_SHARDS_RESULT="success")),
+        ("wrong download", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.replace("registry-installation-rid11-*", "*"))),
+        ("wrong revision", lambda d: d["jobs"]["rid11"]["steps"][0].update(run=consumer.replace("$GITHUB_SHA", "stale"))),
+        ("continue error", lambda d: d["jobs"]["rid11"]["steps"][0].update({"continue-on-error": True})),
+        ("shell no errexit", lambda d: d["jobs"]["rid11"]["steps"][0].update(shell="bash {0}")),
+    ]
+    for label, mutate in mutations:
+        changed = copy.deepcopy(doc)
+        mutate(changed)
+        _c("RID11 grouped refuses " + label, not routes(changed))
+    _c("RID11 grouped invocation alone is not a full native route", not _runner_routes(shell_commands(producer)[0]))
+
+
 def self_test() -> int:
     import io
     import contextlib
@@ -2795,11 +2929,17 @@ def self_test() -> int:
             (native, {"registry-installation-rid01"}),
             (native.replace("rid01", "rid04"), {"registry-installation-rid04"}),
             (native.replace("rid01", "rid07"), {"registry-installation-rid07"}),
+            (native.replace("rid01", "rid08"), {"registry-installation-rid08"}),
             (native.replace("rid01", "rid09"), {"registry-installation-rid09"}),
             (native.replace("rid01", "rid10"), {"registry-installation-rid10"}),
             (f"echo '{native}'", set()),
             (native.replace("rid01", "rid02"), {"registry-installation-rid02"}),
-            (native.replace("rid01", "rid03"), set()),
+            (native.replace("rid01", "rid03"), {"registry-installation-rid03"}),
+            (native.replace("rid01", "rid05"), {"registry-installation-rid05"}),
+            (native.replace("rid01", "rid06"), {"registry-installation-rid06"}),
+            (native.replace("rid01", "rid11"), {"registry-installation-rid11"}),
+            (native.replace("rid01", "rid12"), {"registry-installation-rid12"}),
+            (native.replace("rid01", "rid99"), set()),
             (native.replace("registry-installation-rid01", '"$RID"'), set()),
             ("python3 .github/scripts/run-rid-native.py --out public.json", set()),
         )):
@@ -2809,6 +2949,7 @@ def self_test() -> int:
                f"разборщик: {parsed}")
 
         _native_census_self_test(tmp, _wf_body)
+        _rid11_grouped_census_self_test(tmp)
 
         # Ось 6д: тело шага с ИНОЙ оболочкой — не программа bash, и её строка,
         # похожая на команду прогонщика, прогоном не засчитывается. Близнец —

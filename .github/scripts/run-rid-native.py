@@ -22,6 +22,38 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "github.com/PRO-Robotech/kaname/cmd/kaname"
 # Имена прямых подтестов после замены пробелов на подчёркивания в testing.T.Run.
 CASES = {
+    'registry-installation-rid11': ('TestRID_11_InputAuthnAuthorityBackend', frozenset({
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair',
+        'exact_exit_stage_field_pair_completedPairs;_no_bootstrap_I_fallback_or_self-provision',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes',
+        'real_structured_stdout_stderr_and_absence_of_raw_or_JSON-escaped_credential_key_token_values',
+    }), 128),
+    'registry-installation-rid12': ('TestRID_12_ClosedShapeAndBounds', frozenset({
+        'absent_and_empty_GD_field_normal_full_seed_success_zero_GD',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes',
+        'UNSPECIFIED_unknown_enum_iam_module_role_type_rejected_exact_fields',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs',
+        'single-bad-field-only_repair_twins;_array_reorder_idempotence',
+    }), 65),
+    'registry-installation-rid03': ('TestRID_03_DelegatedGrantAndIssuerBounds', frozenset({
+        'explicit_account_registration_writer_authority,_missing/revoked/wildcard_refusals_and_lawful_twins',
+        'real_production_listener_grant_Operation_Get_ACTIVE_with_installation_delegationId',
+        'out-of-axis_role_denial_and_same-subject_legal_role_twin',
+        'I_Create_denied_without_Operation;_caller-only_C_twin_succeeds',
+        'allowed_anonymous_system-class_succeeds;_authenticated_refused',
+    }), 44),
+    'registry-installation-rid05': ('TestRID_05_CreatorDeletionAndNewID', frozenset({
+        'normal_full_key_revoke_and_reference_census;_Delete_and_Get_NOT_FOUND',
+        'old_creator_credentials_unauthenticated;_new_same-name_C2_does_not_resurrect_GD',
+        'active_delegate_reference_blocks_Delete;_revoke-only_twin_permits_Delete',
+        'O_explicitly_grants_C2;_old_GD_revoked;_explicit_new_Create_restores_issuance',
+    }), 30),
+    'registry-installation-rid06': ('TestRID_06_RevokeDuringApply', frozenset({
+        'apply_at_real_before-pair_barrier;_O_commits_revoke_before_release',
+        'overlap_and_sequential_reinstall_refuse;_old_G_and_GD_revoked;_replacement_zero',
+        'no-revoke_overlap_twin_preserves_original_ID',
+        'explicit_C_Create_recovery_preserves_revoked_history_and_new_issuer_grant_works',
+    }), 30),
     "registry-installation-rid01": ("TestRID_01_CleanInstallAndRenewal", frozenset({
         "real_standalone_F0_->_verified_O_->_standing_C_->_full_serve_delivery",
         "exact_creator_and_axes;_C_I_A_distinct;_I_not_admin",
@@ -41,6 +73,14 @@ CASES = {
         "new_grant_and_apply_denied;_old_G_and_GD_ACTIVE_and_no_self-restoration",
         "O_explicit_GrantAdmin_only_->_same_request_succeeds_with_same_delegationId",
     }), 14),
+    "registry-installation-rid08": ("TestRID_08_SnapshotPagesAndFutureAccount", frozenset({
+        "same_verified_O_initial_A_plus_normal_B_T;_actual_admission1+2_of3/hour",
+        "actual_window_expiry_then_same_O_creates_D_only_after_frozen_N3_pageSize2_snapshot",
+        "first_run_N3_includes_system-tenant_excludes_canonical_SYS_and_D;_repeat_N4_stable_IDs",
+        "full_pages_compared_to_canonical_primary_census",
+        "actual_empty_census_success;_second-page_BeginTx_unknown_fault_INTERNAL_before_Operations",
+        "fault-only_removed_twin_and_retry_converge_without_duplicates",
+    }), 6),
     "registry-installation-rid10": ("TestRID_10_MidRunFaultAndRetirement", frozenset({
         "first_pair_committed_observed;_unknown_Writer_BeginTx_only_after_normal_second_Operation_Create",
         "second_Operation_done_INTERNAL_internal_error;_first_kept;_no_later_pairs",
@@ -70,6 +110,138 @@ RID10_NESTED = frozenset({
 
 # Полные матрицы существующих фикстур: slash в t.Run не создаёт промежуточных узлов.
 RID_MATRIX_NESTED = {
+    'TestRID_11_InputAuthnAuthorityBackend': frozenset({
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-missing/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-missing/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-missing/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-missing/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-unreadable/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-unreadable/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-unreadable/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/credential-unreadable/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/deleted-creator/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/deleted-creator/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/deleted-creator/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/deleted-creator/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/revoked-key/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/revoked-key/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/revoked-key/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/revoked-key/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/bad-signature/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/bad-signature/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/bad-signature/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/bad-signature/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/backend/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/backend/S1/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/backend/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/backend/S2/ACTIVE/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/account/S1/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/census/S2/absent/negative',
+        'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/census/S2/ACTIVE/negative',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-missing/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-missing/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-missing/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-missing/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-unreadable/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-unreadable/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-unreadable/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/credential-unreadable/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/deleted-creator/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/deleted-creator/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/deleted-creator/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/deleted-creator/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/bad-signature/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/bad-signature/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/bad-signature/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/bad-signature/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/authority/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/authority/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/authority/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/authority/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/backend/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/backend/S1/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/backend/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/backend/S2/ACTIVE/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/account/S1/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/census/S2/absent/lawful-control',
+        'each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/census/S2/ACTIVE/lawful-control',
+    }),
+    'TestRID_12_ClosedShapeAndBounds': frozenset({
+        'absent_and_empty_GD_field_normal_full_seed_success_zero_GD/absent/no-GD',
+        'absent_and_empty_GD_field_normal_full_seed_success_zero_GD/empty/no-GD',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/unknown-field/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/empty-roleIds/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/duplicate-roleIds/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/empty-targetTypes/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/duplicate-targetTypes/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/empty-subjectTypes/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/duplicate-subjectTypes/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/roles17/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/types17/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/subjects5/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/subject-unspecified/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/subject-unknown/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/iam-role/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/iam-type/negative',
+        'unknown_field_each_empty_or_duplicate_axis_and17roles17types5subjects_rejected_before_all_writes/iam-module/negative',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/unknown-field/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/empty-roleIds/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/duplicate-roleIds/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/empty-targetTypes/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/duplicate-targetTypes/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/empty-subjectTypes/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/duplicate-subjectTypes/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/roles17/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/types17/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/subjects5/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/subject-unspecified/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/subject-unknown/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/iam-role/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/iam-type/lawful-twin',
+        'all17_lawful_catalog_types_and_roles_retained;_legal16/16/4_N_pairs/iam-module/lawful-twin',
+    }),
+    'TestRID_03_DelegatedGrantAndIssuerBounds': frozenset({
+        'real_production_listener_grant_Operation_Get_ACTIVE_with_installation_delegationId/S1',
+        'real_production_listener_grant_Operation_Get_ACTIVE_with_installation_delegationId/S2',
+        'out-of-axis_role_denial_and_same-subject_legal_role_twin/S1',
+        'out-of-axis_role_denial_and_same-subject_legal_role_twin/S2',
+        'I_Create_denied_without_Operation;_caller-only_C_twin_succeeds/S1',
+        'I_Create_denied_without_Operation;_caller-only_C_twin_succeeds/S2',
+        'allowed_anonymous_system-class_succeeds;_authenticated_refused/S1',
+        'allowed_anonymous_system-class_succeeds;_authenticated_refused/S2',
+    }),
+    'TestRID_05_CreatorDeletionAndNewID': frozenset({
+        'normal_full_key_revoke_and_reference_census;_Delete_and_Get_NOT_FOUND/S1',
+        'normal_full_key_revoke_and_reference_census;_Delete_and_Get_NOT_FOUND/S2',
+        'old_creator_credentials_unauthenticated;_new_same-name_C2_does_not_resurrect_GD/S1',
+        'old_creator_credentials_unauthenticated;_new_same-name_C2_does_not_resurrect_GD/S2',
+        'active_delegate_reference_blocks_Delete;_revoke-only_twin_permits_Delete/S1',
+        'active_delegate_reference_blocks_Delete;_revoke-only_twin_permits_Delete/S2',
+        'O_explicitly_grants_C2;_old_GD_revoked;_explicit_new_Create_restores_issuance/S1',
+        'O_explicitly_grants_C2;_old_GD_revoked;_explicit_new_Create_restores_issuance/S2',
+    }),
+    'TestRID_06_RevokeDuringApply': frozenset({
+        'apply_at_real_before-pair_barrier;_O_commits_revoke_before_release/S1',
+        'apply_at_real_before-pair_barrier;_O_commits_revoke_before_release/S2',
+        'overlap_and_sequential_reinstall_refuse;_old_G_and_GD_revoked;_replacement_zero/S1',
+        'overlap_and_sequential_reinstall_refuse;_old_G_and_GD_revoked;_replacement_zero/S2',
+        'no-revoke_overlap_twin_preserves_original_ID/S1',
+        'no-revoke_overlap_twin_preserves_original_ID/S2',
+        'explicit_C_Create_recovery_preserves_revoked_history_and_new_issuer_grant_works/S1',
+        'explicit_C_Create_recovery_preserves_revoked_history_and_new_issuer_grant_works/S2',
+    }),
+    "TestRID_08_SnapshotPagesAndFutureAccount": frozenset({
+        "actual_empty_census_success;_second-page_BeginTx_unknown_fault_INTERNAL_before_Operations/normal-delete-real-empty",
+        "actual_empty_census_success;_second-page_BeginTx_unknown_fault_INTERNAL_before_Operations/real-second-page-fault-twin-retry",
+    }),
     'TestRID_07_ExistingPairConflict': frozenset({
         'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/role/S1',
         'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/role/S2',
@@ -111,6 +283,8 @@ RID_MATRIX_NESTED = {
 # Исходный бюджет полного нативного теста сохраняется.
 TEST_SECONDS = 1200
 OUTER_SECONDS = 1320
+# RID-08 подтверждает час допуска по реальным часам.
+RID08_WINDOW_SECONDS = 3600
 
 
 class Rejected(Exception):
@@ -345,6 +519,11 @@ def cleanup(evidence, env, before, root_test):
 
 # Только публичные исходники существующих native fixture/bridge, не пути из Output.
 ASSERTION_FILES = (
+    "cmd/kaname/installation_delegated_grant_native_test.go",
+    "cmd/kaname/installation_newman_delegated_grant_test.go",
+    "cmd/kaname/installation_newman_delegated_delta_test.go",
+    "cmd/kaname/installation_newman_delegated_evidence_test.go",
+    "cmd/kaname/installation_newman_delegated_observation_test.go",
     "cmd/kaname/installation_native_fixture_test.go",
     "cmd/kaname/installation_native_baseline_test.go",
     "cmd/kaname/installation_native_stock_premise_test.go",
@@ -366,11 +545,62 @@ ASSERTION_FILES = (
     "cmd/kaname/installation_newman_midrun_test.go",
     "cmd/kaname/installation_input_authn_native_test.go",
     "cmd/kaname/installation_closed_shape_start_test.go",
+    "cmd/kaname/installation_closed_shape_native_test.go",
+    "cmd/kaname/installation_closed_shape_public_test.go",
+    "cmd/kaname/installation_newman_closed_shape_test.go",
     "internal/testsupport/installruntime/stand.go",
 )
 
 
-def test_diagnostics(path, root_test, predicates):
+class NativeFailureMarkers:
+    """Распознаёт только форму закрытого вывода; текст сообщений не сохраняется."""
+
+    def __init__(self, seconds):
+        hours, rest = divmod(seconds, 3600)
+        minutes, seconds = divmod(rest, 60)
+        duration = (f"{hours}h{minutes}m{seconds}s" if hours else
+                    f"{minutes}m{seconds}s" if minutes else f"{seconds}s")
+        self.timeout_header = f"panic: test timed out after {duration}\n"
+        self.timeout = False
+        self.alarm = False
+        self.panic = False
+        self.ambiguous = False
+
+    def observe(self, output):
+        # Не склеиваем фрагменты и не выводим ни сообщение panic, ни стек.
+        if not isinstance(output, str):
+            self.ambiguous = True
+            return
+        if output.count("\n") != 1 or not output.endswith("\n"):
+            self.ambiguous = True
+            return
+        if output == self.timeout_header:
+            self.timeout = True
+        elif output.startswith("panic: test timed out after "):
+            self.ambiguous = True
+        elif re.fullmatch(r"panic: [^\r\n]+\n", output):
+            self.panic = True
+        elif output == "testing.(*M).startAlarm.func1()\n" and self.timeout:
+            self.alarm = True
+
+    def verdict(self, scan_status, site):
+        # Это классификация наблюдённых маркеров, не доказательство первопричины.
+        if scan_status != "complete":
+            return {"kind": "unknown", "reason": "incomplete-scan"}
+        if self.ambiguous or (self.timeout and self.panic):
+            return {"kind": "unknown", "reason": "ambiguous-output"}
+        if self.timeout:
+            if self.alarm:
+                return {"kind": "go-timeout", "reason": "configured-deadline-and-alarm"}
+            return {"kind": "unknown", "reason": "timeout-without-alarm"}
+        if self.panic:
+            return {"kind": "panic", "reason": "panic-header"}
+        if site.get("status") == "matched":
+            return {"kind": "assertion", "reason": "allowlisted-error-trace"}
+        return {"kind": "unknown", "reason": "no-recognized-marker"}
+
+
+def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     # Только имена из CASES и известные режимы RID-04; строки Output не проецируются.
     names = {root_test, *(root_test + "/" + name for name in predicates)}
     if root_test == CASES["registry-installation-rid04"][0]:
@@ -382,6 +612,10 @@ def test_diagnostics(path, root_test, predicates):
     known = {name: name for name in names}
     actions = {action: action for action in ("run", "pass", "fail", "skip")}
     result = {"status": "complete", "events": []}
+    markers = None
+    if (root_test == CASES["registry-installation-rid11"][0]
+            and type(timeout_seconds) is int and timeout_seconds > 0):
+        markers = NativeFailureMarkers(timeout_seconds)
     seen, fragmented, sites = set(), set(), {}
     bounds = {}
     for relative in ASSERTION_FILES:
@@ -404,6 +638,9 @@ def test_diagnostics(path, root_test, predicates):
                 if not isinstance(event, dict) or event.get("Package") != PACKAGE:
                     continue
                 name, action = event.get("Test"), event.get("Action")
+                if (markers is not None and action == "output" and (root_test, "run") in seen
+                        and (name is None or isinstance(name, str) and name in known)):
+                    markers.observe(event.get("Output"))
                 if (action == "output" and isinstance(name, str) and name in known and name not in sites
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
@@ -448,6 +685,8 @@ def test_diagnostics(path, root_test, predicates):
         else:
             site = sites.get(first, {"status": "not-observed"})
         result["firstFailureSite"] = {"test": first, **site}
+    if markers is not None:
+        result["failureMarker"] = markers.verdict(result["status"], result.get("firstFailureSite", {}))
     return result
 
 
@@ -617,7 +856,8 @@ def startup_diagnostics(evidence, root_test, predicates, diagnostics, binary_sha
         return {"status": "invalid-or-unavailable"}
 
 
-def judge_test(path, root_test, predicates):
+def judge_test(path, root_test, predicates, *, rid11_nested=None):
+    need(rid11_nested is None or root_test == CASES["registry-installation-rid11"][0])
     running, passed, terminal = set(), set(), []
     with path.open() as stream:
         for line in stream:
@@ -636,13 +876,18 @@ def judge_test(path, root_test, predicates):
             elif action in ("pass", "fail"):
                 terminal.append(action)
     need(root_test in passed and passed == running and terminal == ["pass"])
-    direct = {name.split("/", 1)[1] for name in passed if name.count("/") == 1}
-    need(direct == predicates)
+    if root_test in RID_MATRIX_NESTED:
+        # Литеральный slash внутри имени t.Run не создаёт промежуточного узла.
+        # Засчитываем предикаты только после равенства полного множества узлов.
+        nested = RID_MATRIX_NESTED[root_test] if rid11_nested is None else rid11_nested
+        expected = {root_test, *(root_test + "/" + name for name in predicates | nested)}
+        need(running == expected)
+        direct = set(predicates)
+    else:
+        direct = {name.split("/", 1)[1] for name in passed if name.count("/") == 1}
+        need(direct == predicates)
     if root_test == CASES["registry-installation-rid10"][0]:
         expected = {root_test, *(root_test + "/" + name for name in predicates | RID10_NESTED)}
-        need(running == expected)
-    if root_test in RID_MATRIX_NESTED:
-        expected = {root_test, *(root_test + "/" + name for name in predicates | RID_MATRIX_NESTED[root_test])}
         need(running == expected)
     return {"ok": True, "passedTests": len(passed), "skippedTests": 0, "failedTests": 0,
             "directPredicates": sorted(direct)}
@@ -671,9 +916,15 @@ def main():
     parser.add_argument("--private-dir", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--require-hosted-memory-scope", action="store_true")
+    parser.add_argument("--rid11-group", choices=("input", "identity", "proof-authority", "availability"))
     args = parser.parse_args()
     os.umask(0o077)
     root_test, predicates, phase_count = CASES[args.suite]
+    group = args.rid11_group
+    need(group is None or args.suite == "registry-installation-rid11")
+    extra = RID08_WINDOW_SECONDS if args.suite == "registry-installation-rid08" else 0
+    test_seconds = TEST_SECONDS + extra
+    outer_seconds = OUTER_SECONDS + extra
     summary = {"schemaVersion": 1, "ok": False, "suite": args.suite, "status": "precondition-failed"}
     need(args.private_dir.is_absolute() and args.out.is_absolute())
     private, output = args.private_dir.resolve(), args.out.resolve()
@@ -737,6 +988,25 @@ def main():
                     "testExecutableSHA256": sha(bins / "rid-tests")}
         artifact_hashes = {name: sha(bins / name) for name in ("kaname", "kaname-migrator", "rid-tests")}
         collector_sha = sha(collector)
+        spec = importlib.util.spec_from_file_location("rid_native_collector", collector)
+        impl = importlib.util.module_from_spec(spec)
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(impl)
+        rid11_nested = None
+        if group is not None:
+            groups = impl.rid11_phase_groups(json.loads(collection.read_bytes()))
+            need(group in groups and sha(collection) == expected["collectionSHA256"])
+            phase_count = len(groups[group])
+            variants = frozenset(variant.lower() for variant in impl.RID11_GROUP_VARIANTS[group])
+            rid11_nested = frozenset(
+                name for name in RID_MATRIX_NESTED[root_test] if name.split("/")[1] in variants
+            )
+            # Два публичных этапа на мир и ещё четыре после отзыва ключа
+            # перед удалением создателя в отрицательных сценариях.
+            need(2 * len(rid11_nested) + (4 if "deleted-creator" in variants else 0) == phase_count)
+            env["KANAME_RID11_CASE_GROUP"] = group
+            summary["rid11Group"] = group
+            summary["producerSHA256"] = sha(Path(__file__).resolve())
         identity_file = private / "expected-identities.json"
         write_json(identity_file, expected)
         run_id = args.suite.removeprefix("registry-installation-") + "-ci-" + uuid.uuid4().hex
@@ -748,37 +1018,46 @@ def main():
                    KANAME_RID_MIGRATOR=str(bins / "kaname-migrator"))
         summary.update(status="native-test-failed", expectedIdentities=expected, artifactSHA256=artifact_hashes,
                        collectorSHA256=collector_sha, runIdSHA256=hashlib.sha256(run_id.encode()).hexdigest(),
-                       testDeadlineSeconds=TEST_SECONDS, outerDeadlineSeconds=OUTER_SECONDS)
+                       testDeadlineSeconds=test_seconds, outerDeadlineSeconds=outer_seconds)
         before = {"containers": frozenset(docker(["ps", "-aq", "--no-trunc"], env)),
                   "volumes": frozenset(docker(["volume", "ls", "-q"], env))}
         need(all(re.fullmatch(r"[a-f0-9]{64}", cid) for cid in before["containers"]))
         write_json(private / "docker-before.json", {key: sorted(value) for key, value in before.items()})
         summary["status"] = "native-test-command-failed"
-        rc = command(["go", "tool", "test2json", "-t", "-p", PACKAGE, str(bins / "rid-tests"),
-                      "-test.v=test2json", "-test.parallel=1", "-test.run=^" + root_test + "$",
-                      "-test.count=1", "-test.timeout=20m"], env, private / "test.jsonl",
-                     cwd=ROOT / "cmd/kaname", timeout=OUTER_SECONDS)
+        test_started = time.monotonic_ns()
+        try:
+            rc = command(["go", "tool", "test2json", "-t", "-p", PACKAGE, str(bins / "rid-tests"),
+                          "-test.v=test2json", "-test.parallel=1", "-test.run=^" + root_test + "$",
+                          "-test.count=1", f"-test.timeout={test_seconds}s"], env, private / "test.jsonl",
+                         cwd=ROOT / "cmd/kaname", timeout=outer_seconds)
+        finally:
+            if args.suite == "registry-installation-rid11":
+                # Только длительность команды по монотонным часам, без абсолютного времени.
+                summary["testElapsedMilliseconds"] = max(0, (time.monotonic_ns() - test_started) // 1000000)
+                if sys.exc_info()[0] is not None:
+                    summary["testDiagnostics"] = test_diagnostics(
+                        private / "test.jsonl", root_test, predicates, timeout_seconds=test_seconds)
         summary["testExitCode"] = rc if type(rc) is int and -255 <= rc <= 255 else None
         if rc != 0:
-            summary["testDiagnostics"] = test_diagnostics(private / "test.jsonl", root_test, predicates)
+            summary["testDiagnostics"] = test_diagnostics(
+                private / "test.jsonl", root_test, predicates, timeout_seconds=test_seconds)
         need(rc == 0)
         summary["status"] = "native-test-verdict-failed"
         try:
-            summary["test"] = judge_test(private / "test.jsonl", root_test, predicates)
+            summary["test"] = judge_test(private / "test.jsonl", root_test, predicates, rid11_nested=rid11_nested)
         except (Rejected, ValueError, OSError, TypeError, RecursionError):
-            summary["testDiagnostics"] = test_diagnostics(private / "test.jsonl", root_test, predicates)
+            summary["testDiagnostics"] = test_diagnostics(
+                private / "test.jsonl", root_test, predicates, timeout_seconds=test_seconds)
             raise
         summary["status"] = "receipt-proof-failed"
         need(sha(node) == expected["nodeSHA256"] and tree_sha(module) == expected["toolTreeSHA256"])
         need(sha(runner) == expected["runnerSHA256"] and sha(collector) == collector_sha)
+        if group is not None:
+            need(sha(Path(__file__).resolve()) == summary["producerSHA256"])
         need(all(sha(bins / name) == value for name, value in artifact_hashes.items()))
-        spec = importlib.util.spec_from_file_location("rid_native_collector", collector)
-        impl = importlib.util.module_from_spec(spec)
-        sys.dont_write_bytecode = True
-        spec.loader.exec_module(impl)
         reports = sorted(evidence.glob("**/newman/stdout"))
         need(len(reports) == phase_count)
-        merged = impl.combine(collection, reports, run_id, expected["testExecutableSHA256"], expected)
+        merged = impl.combine(collection, reports, run_id, expected["testExecutableSHA256"], expected, rid11_group=group)
         need(len(merged["sources"]) == phase_count)
         write_json(private / "combined.json", merged)
         # Проецируются только проверенные числовые поля и хеши, ни один HTTP-запрос/ответ.

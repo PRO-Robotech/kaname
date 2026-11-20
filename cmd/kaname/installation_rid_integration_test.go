@@ -285,22 +285,54 @@ func TestRID_10_MidRunFaultAndRetirement(t *testing.T) {
 		}})
 }
 func TestRID_11_InputAuthnAuthorityBackend(t *testing.T) {
+	cases := rid11Cases(false)
+	require.Len(t, cases, 31, "complete RID11 case census changed")
+	if group, present := os.LookupEnv("KANAME_RID11_CASE_GROUP"); present {
+		var err error
+		cases, err = rid11CasesInGroup(false, group)
+		require.NoError(t, err, "RID11 case group must be a declared nonempty ID")
+	}
+	keys := make(map[string]bool, len(cases))
+	for _, c := range cases {
+		require.False(t, c.Twin)
+		require.False(t, keys[c.key()], "duplicate RID11 case key")
+		keys[c.key()] = true
+	}
+	selected := func(twin bool) []rid11Case {
+		out := append([]rid11Case(nil), cases...)
+		for i := range out {
+			out[i].Twin = twin
+		}
+		return out
+	}
+	check := func(t *testing.T, proofs []rid11Proof, twin bool) {
+		t.Helper()
+		require.Len(t, proofs, len(keys), "earlier matrix failed; no replacement worlds")
+		seen := make(map[string]bool, len(proofs))
+		for _, p := range proofs {
+			require.Equal(t, twin, p.Case.Twin)
+			require.True(t, keys[p.Case.key()], "unselected RID11 case key")
+			require.False(t, seen[p.Case.key()], "duplicate RID11 proof key")
+			seen[p.Case.key()] = true
+		}
+		require.Equal(t, keys, seen, "RID11 proof key set must match the declared group")
+	}
 	var negatives, twins []rid11Proof
 	var negativeAttempted, twinAttempted bool
 	ensure := func(t *testing.T, twin bool) []rid11Proof {
 		if twin {
 			if !twinAttempted {
 				twinAttempted = true
-				twins = rid11Matrix(t, true, nil)
+				twins = rid11MatrixCases(t, selected(true), nil)
 			}
-			require.Len(t, twins, 31)
+			check(t, twins, true)
 			return twins
 		}
 		if !negativeAttempted {
 			negativeAttempted = true
-			negatives = rid11Matrix(t, false, nil)
+			negatives = rid11MatrixCases(t, selected(false), nil)
 		}
-		require.Len(t, negatives, 31)
+		check(t, negatives, false)
 		return negatives
 	}
 	runInstallationRID(t,
