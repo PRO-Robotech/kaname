@@ -544,7 +544,55 @@ ASSERTION_FILES = (
 )
 
 
-def test_diagnostics(path, root_test, predicates):
+class NativeFailureMarkers:
+    """Распознаёт только форму закрытого вывода; текст сообщений не сохраняется."""
+
+    def __init__(self, seconds):
+        hours, rest = divmod(seconds, 3600)
+        minutes, seconds = divmod(rest, 60)
+        duration = (f"{hours}h{minutes}m{seconds}s" if hours else
+                    f"{minutes}m{seconds}s" if minutes else f"{seconds}s")
+        self.timeout_header = f"panic: test timed out after {duration}\n"
+        self.timeout = False
+        self.alarm = False
+        self.panic = False
+        self.ambiguous = False
+
+    def observe(self, output):
+        # Не склеиваем фрагменты и не выводим ни сообщение panic, ни стек.
+        if not isinstance(output, str):
+            self.ambiguous = True
+            return
+        if output.count("\n") != 1 or not output.endswith("\n"):
+            self.ambiguous = True
+            return
+        if output == self.timeout_header:
+            self.timeout = True
+        elif output.startswith("panic: test timed out after "):
+            self.ambiguous = True
+        elif re.fullmatch(r"panic: [^\r\n]+\n", output):
+            self.panic = True
+        elif output == "testing.(*M).startAlarm.func1()\n" and self.timeout:
+            self.alarm = True
+
+    def verdict(self, scan_status, site):
+        # Это классификация наблюдённых маркеров, не доказательство первопричины.
+        if scan_status != "complete":
+            return {"kind": "unknown", "reason": "incomplete-scan"}
+        if self.ambiguous or (self.timeout and self.panic):
+            return {"kind": "unknown", "reason": "ambiguous-output"}
+        if self.timeout:
+            if self.alarm:
+                return {"kind": "go-timeout", "reason": "configured-deadline-and-alarm"}
+            return {"kind": "unknown", "reason": "timeout-without-alarm"}
+        if self.panic:
+            return {"kind": "panic", "reason": "panic-header"}
+        if site.get("status") == "matched":
+            return {"kind": "assertion", "reason": "allowlisted-error-trace"}
+        return {"kind": "unknown", "reason": "no-recognized-marker"}
+
+
+def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     # Только имена из CASES и известные режимы RID-04; строки Output не проецируются.
     names = {root_test, *(root_test + "/" + name for name in predicates)}
     if root_test == CASES["registry-installation-rid04"][0]:
@@ -556,6 +604,10 @@ def test_diagnostics(path, root_test, predicates):
     known = {name: name for name in names}
     actions = {action: action for action in ("run", "pass", "fail", "skip")}
     result = {"status": "complete", "events": []}
+    markers = None
+    if (root_test == CASES["registry-installation-rid11"][0]
+            and type(timeout_seconds) is int and timeout_seconds > 0):
+        markers = NativeFailureMarkers(timeout_seconds)
     seen, fragmented, sites = set(), set(), {}
     bounds = {}
     for relative in ASSERTION_FILES:
@@ -578,6 +630,9 @@ def test_diagnostics(path, root_test, predicates):
                 if not isinstance(event, dict) or event.get("Package") != PACKAGE:
                     continue
                 name, action = event.get("Test"), event.get("Action")
+                if (markers is not None and action == "output" and (root_test, "run") in seen
+                        and (name is None or isinstance(name, str) and name in known)):
+                    markers.observe(event.get("Output"))
                 if (action == "output" and isinstance(name, str) and name in known and name not in sites
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
@@ -622,6 +677,8 @@ def test_diagnostics(path, root_test, predicates):
         else:
             site = sites.get(first, {"status": "not-observed"})
         result["firstFailureSite"] = {"test": first, **site}
+    if markers is not None:
+        result["failureMarker"] = markers.verdict(result["status"], result.get("firstFailureSite", {}))
     return result
 
 
@@ -935,19 +992,30 @@ def main():
         need(all(re.fullmatch(r"[a-f0-9]{64}", cid) for cid in before["containers"]))
         write_json(private / "docker-before.json", {key: sorted(value) for key, value in before.items()})
         summary["status"] = "native-test-command-failed"
-        rc = command(["go", "tool", "test2json", "-t", "-p", PACKAGE, str(bins / "rid-tests"),
-                      "-test.v=test2json", "-test.parallel=1", "-test.run=^" + root_test + "$",
-                      "-test.count=1", f"-test.timeout={test_seconds}s"], env, private / "test.jsonl",
-                     cwd=ROOT / "cmd/kaname", timeout=outer_seconds)
+        test_started = time.monotonic_ns()
+        try:
+            rc = command(["go", "tool", "test2json", "-t", "-p", PACKAGE, str(bins / "rid-tests"),
+                          "-test.v=test2json", "-test.parallel=1", "-test.run=^" + root_test + "$",
+                          "-test.count=1", f"-test.timeout={test_seconds}s"], env, private / "test.jsonl",
+                         cwd=ROOT / "cmd/kaname", timeout=outer_seconds)
+        finally:
+            if args.suite == "registry-installation-rid11":
+                # Только длительность команды по монотонным часам, без абсолютного времени.
+                summary["testElapsedMilliseconds"] = max(0, (time.monotonic_ns() - test_started) // 1000000)
+                if sys.exc_info()[0] is not None:
+                    summary["testDiagnostics"] = test_diagnostics(
+                        private / "test.jsonl", root_test, predicates, timeout_seconds=test_seconds)
         summary["testExitCode"] = rc if type(rc) is int and -255 <= rc <= 255 else None
         if rc != 0:
-            summary["testDiagnostics"] = test_diagnostics(private / "test.jsonl", root_test, predicates)
+            summary["testDiagnostics"] = test_diagnostics(
+                private / "test.jsonl", root_test, predicates, timeout_seconds=test_seconds)
         need(rc == 0)
         summary["status"] = "native-test-verdict-failed"
         try:
             summary["test"] = judge_test(private / "test.jsonl", root_test, predicates)
         except (Rejected, ValueError, OSError, TypeError, RecursionError):
-            summary["testDiagnostics"] = test_diagnostics(private / "test.jsonl", root_test, predicates)
+            summary["testDiagnostics"] = test_diagnostics(
+                private / "test.jsonl", root_test, predicates, timeout_seconds=test_seconds)
             raise
         summary["status"] = "receipt-proof-failed"
         need(sha(node) == expected["nodeSHA256"] and tree_sha(module) == expected["toolTreeSHA256"])
