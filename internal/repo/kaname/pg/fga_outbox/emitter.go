@@ -403,6 +403,33 @@ func EmitForwardWriteTx(ctx context.Context, tx pgx.Tx, tuples []clients.Relatio
 	return nil
 }
 
+// EmitColdForwardWriteTx резервирует и подтверждает строки штатными этапами
+// unsigned forward. INSERT выполняет обычную операторную свёртку в той же tx.
+func EmitColdForwardWriteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {
+	if tx == nil {
+		return fmt.Errorf("fga_outbox: tx must not be nil")
+	}
+	if len(tuples) == 0 {
+		return nil
+	}
+	payloads, err := compilePayloads(EventTypeWrite, tuples)
+	if err != nil {
+		return err
+	}
+	var nonce string
+	if err := tx.QueryRow(ctx, `SELECT kaname.authority_forward_prepare_v4($1::jsonb[])`, payloads).Scan(&nonce); err != nil {
+		return fmt.Errorf("fga_outbox: prepare %s: %w", EventTypeWrite, err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO kaname.fga_outbox(id,event_type,payload,created_at)
+SELECT id,event_type,payload,created_at FROM kaname.authority_forward_claim_v4($1::uuid)`, nonce); err != nil {
+		return fmt.Errorf("fga_outbox: insert %s: %w", EventTypeWrite, err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT kaname.authority_forward_finish_v4($1::uuid)`, nonce); err != nil {
+		return fmt.Errorf("fga_outbox: finish %s: %w", EventTypeWrite, err)
+	}
+	return nil
+}
+
 // EmitNativeDeleteTx использует отдельную unsigned дверь снятия. Общая сборка
 // сохраняет payload и группировку, а БД ставит часы в строке actual INSERT.
 func EmitNativeDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {

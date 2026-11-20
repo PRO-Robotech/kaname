@@ -150,6 +150,10 @@ func (s *legacyForwardStore) EmitForwardTupleWrite(ctx context.Context, tuples [
 	return fga_outbox.EmitForwardWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
 }
 
+func (s *legacyForwardStore) EmitColdForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return fga_outbox.EmitColdForwardWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
+}
+
 func (s *legacyForwardStore) EmitNativeTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error {
 	return fga_outbox.EmitNativeDeleteTx(ctx, s.tx, membershipTuplesToClients(tuples))
 }

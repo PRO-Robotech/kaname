@@ -1723,10 +1723,16 @@ func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, 
 		// исключает повторную публикацию уже записанного ключа.
 		recorded = make(map[EmittedTupleRef]struct{})
 	}
-	flush := func() error {
-		if err := writes.writeLive(ctx, s); err != nil {
+	flushed := false
+	flush := func(last bool) error {
+		// Один небольшой холодный проход использует обычную свёртку. Веер
+		// с несколькими партиями использует прежний emitter во всех партиях.
+		singleBatch := last && !flushed &&
+			len(writes.members) <= coldActiveBatchMembers && len(writes.ledger) <= coldActiveBatchTuples
+		if err := writes.writeLive(ctx, s, singleBatch); err != nil {
 			return err
 		}
+		flushed = true
 		if recorded != nil {
 			for _, ref := range writes.ledger {
 				if len(recorded) == coldActiveLedgerKeys {
@@ -1738,7 +1744,7 @@ func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, 
 		writes = forwardWriteSet{}
 		return nil
 	}
-	for _, d := range desired {
+	for i, d := range desired {
 		tuples, ok := r.memberTuples(d)
 		if !ok {
 			return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
@@ -1754,7 +1760,7 @@ func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, 
 			}
 		}
 		if len(writes.members) > 0 && (len(writes.members) == coldActiveBatchMembers || pending > coldActiveBatchTuples-len(writes.ledger)) {
-			if err := flush(); err != nil {
+			if err := flush(false); err != nil {
 				return err
 			}
 		}
@@ -1775,7 +1781,7 @@ func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, 
 		}
 		if len(writes.members) == coldActiveBatchMembers || len(writes.ledger) >= coldActiveBatchTuples {
 			// Исходный keepLiveDesired уже отфильтровал весь набор под замками этой tx.
-			if err := flush(); err != nil {
+			if err := flush(i == len(desired)-1); err != nil {
 				return err
 			}
 		}
@@ -1783,7 +1789,7 @@ func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, 
 	if len(writes.members) == 0 {
 		return nil
 	}
-	return flush()
+	return flush(true)
 }
 
 // mirrorFed — объект питается зеркалом регистраций: его строку удаляет снятие
