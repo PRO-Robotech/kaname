@@ -9757,7 +9757,7 @@ END $$;
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname._authority_full_contract_storage_v3() RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE expected record; owner_oid oid; target text;
+DECLARE owner_oid oid; target text;
 BEGIN
  SELECT relowner INTO owner_oid FROM pg_catalog.pg_class WHERE oid='kaname.authority_writer_protocol'::regclass;
  IF owner_oid IS DISTINCT FROM (SELECT oid FROM pg_catalog.pg_roles WHERE rolname=current_user)
@@ -9833,7 +9833,9 @@ BEGIN
   WHERE p.oid='kaname.authority_parent_prelock_admit_v3()'::regprocedure
   AND p.prorettype='void'::regtype AND p.provolatile='v'
   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']) THEN RETURN false; END IF;
- FOR expected IN SELECT * FROM (VALUES
+ -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
+ -- тела и параметров приватной функции.
+ IF EXISTS(SELECT 1 FROM (VALUES
  ('_authority_crud_storage_v3()','aa0d0fbfb3225c0ea87774463a08004f581337e080494b16ba5355c685857fc9',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
@@ -9863,14 +9865,16 @@ BEGIN
  ('_authority_protocol_activate_generation1(text,text,text)','00d97c37e2ab533c232e4cffb975e8d71c3eefa98228e0f39d90249526bf041c',false),
  ('authority_protocol_drain()','f0e36bb29e96ba0417e9143821391b9df518541a017dcd9b171c037e167bc500',false),
  ('authority_protocol_require_drain()','61686507d75a6352d1f0fd97c9e3886c5c361af00778bdf3513693ee2dd6468b',false)
- ) AS pinned(signature,digest,definer) LOOP
-  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p WHERE p.oid=to_regprocedure('kaname.'||expected.signature)
-   AND p.proowner=owner_oid AND p.prosecdef=expected.definer
+ ) AS pinned(signature,digest,definer)
+ LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||pinned.signature)
+ WHERE CASE
+  WHEN (p.proowner=owner_oid AND p.prosecdef=pinned.definer
    AND p.proconfig @> ARRAY['search_path=pg_catalog, pg_temp']
-   AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')=expected.digest) THEN RETURN false; END IF;
-  IF left(expected.signature,1)='_' AND EXISTS(SELECT 1 FROM pg_catalog.pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
-   WHERE p.oid=to_regprocedure('kaname.'||expected.signature) AND a.grantee<>owner_oid) THEN RETURN false; END IF;
- END LOOP;
+   AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')=pinned.digest) IS NOT TRUE THEN true
+  WHEN left(pinned.signature,1)='_' THEN
+   EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee<>owner_oid)
+  ELSE false
+ END) THEN RETURN false; END IF;
  RETURN kaname._authority_crud_storage_v3();
 END $$;
 -- +goose StatementEnd
