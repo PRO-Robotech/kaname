@@ -519,6 +519,11 @@ def cleanup(evidence, env, before, root_test):
 
 # Только публичные исходники существующих native fixture/bridge, не пути из Output.
 ASSERTION_FILES = (
+    "cmd/kaname/installation_delegated_grant_native_test.go",
+    "cmd/kaname/installation_newman_delegated_grant_test.go",
+    "cmd/kaname/installation_newman_delegated_delta_test.go",
+    "cmd/kaname/installation_newman_delegated_evidence_test.go",
+    "cmd/kaname/installation_newman_delegated_observation_test.go",
     "cmd/kaname/installation_native_fixture_test.go",
     "cmd/kaname/installation_native_baseline_test.go",
     "cmd/kaname/installation_native_stock_premise_test.go",
