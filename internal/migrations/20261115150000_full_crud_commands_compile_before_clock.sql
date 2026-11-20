@@ -8134,7 +8134,7 @@ END $$;
 
 CREATE FUNCTION kaname._authority_forward_row_v4(p_id bigint,p_row jsonb,p_applied boolean) RETURNS boolean
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-DECLARE effect record;receipt record;program record;anchor kaname.authority_forward_emit_anchor_v4%ROWTYPE;
+DECLARE effect record;receipt record;program record;
  allocation_rows record;command_rows record;invoker oid;changed integer;ignored_result boolean;
 BEGIN
  -- Этот helper private; оба actual trigger caller уже получили свежий NULL
@@ -8160,8 +8160,14 @@ BEGIN
  -- Граница DML/обратного вызова не пересекается; каждый новый вход в триггер строки проверяет custody заново.
  -- Роль определяется только после раздельной проверки существования effect/receipt.
  -- JOIN оставляет строку роли даже при отсутствии anchor или program.
- SELECT actor.oid AS invoker,a AS anchor,p AS program,
-  a.nonce IS NOT NULL AS anchor_found,p.nonce IS NOT NULL AS program_found INTO STRICT command_rows
+ -- Подтверждению строки нужны только поля anchor, участвующие в проверках.
+ -- Большие batch/write_batch читает их собственный обработчик.
+ SELECT actor.oid AS invoker,p AS program,a.nonce IS NOT NULL AS anchor_found,
+  p.nonce IS NOT NULL AS program_found,a.backend AS anchor_backend,
+  a.transaction_id AS anchor_transaction_id,a.invoker_oid AS anchor_invoker_oid,
+  a.program_oid AS anchor_program_oid,a.effects_oid AS anchor_effects_oid,
+  a.receipts_oid AS anchor_receipts_oid,a.effect_count AS anchor_effect_count,
+  a.finished AS anchor_finished INTO STRICT command_rows
  FROM pg_catalog.pg_roles actor
  LEFT JOIN kaname.authority_forward_emit_anchor_v4 a
   ON a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id() AND a.nonce=effect.nonce
@@ -8169,24 +8175,23 @@ BEGIN
  WHERE actor.rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
  IF NOT command_rows.anchor_found THEN RAISE EXCEPTION 'forward allocation anchor missing or foreign' USING ERRCODE='42501';END IF;
  IF NOT command_rows.program_found THEN RAISE EXCEPTION 'forward allocation program missing' USING ERRCODE='42501';END IF;
- anchor:=command_rows.anchor;
  program:=command_rows.program;
  invoker:=command_rows.invoker;
- IF program.backend IS DISTINCT FROM anchor.backend OR program.transaction_id IS DISTINCT FROM anchor.transaction_id
- OR program.invoker_oid IS DISTINCT FROM invoker OR program.invoker_oid IS DISTINCT FROM anchor.invoker_oid
- OR anchor.program_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_program_v4')
- OR anchor.effects_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_effects_v4')
- OR anchor.receipts_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_receipts_v4')
- OR program.effects_oid IS DISTINCT FROM anchor.effects_oid OR program.receipts_oid IS DISTINCT FROM anchor.receipts_oid
- OR program.effect_count IS DISTINCT FROM anchor.effect_count OR program.effect_count<0
+ IF program.backend IS DISTINCT FROM command_rows.anchor_backend OR program.transaction_id IS DISTINCT FROM command_rows.anchor_transaction_id
+ OR program.invoker_oid IS DISTINCT FROM invoker OR program.invoker_oid IS DISTINCT FROM command_rows.anchor_invoker_oid
+ OR command_rows.anchor_program_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_program_v4')
+ OR command_rows.anchor_effects_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_effects_v4')
+ OR command_rows.anchor_receipts_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_receipts_v4')
+ OR program.effects_oid IS DISTINCT FROM command_rows.anchor_effects_oid OR program.receipts_oid IS DISTINCT FROM command_rows.anchor_receipts_oid
+ OR program.effect_count IS DISTINCT FROM command_rows.anchor_effect_count OR program.effect_count<0
  OR program.phase NOT IN ('prepared','claimed','finished')
- OR (program.phase='finished') IS DISTINCT FROM anchor.finished THEN
+ OR (program.phase='finished') IS DISTINCT FROM command_rows.anchor_finished THEN
   RAISE EXCEPTION 'forward allocation program scope changed' USING ERRCODE='42501';END IF;
  IF program.phase IS DISTINCT FROM 'claimed' OR receipt.nonce IS DISTINCT FROM effect.nonce
  OR receipt.ordinal IS DISTINCT FROM effect.ordinal OR effect.ordinal<1 OR effect.ordinal>program.effect_count
  OR receipt.backend IS DISTINCT FROM pg_backend_pid() OR receipt.transaction_id IS DISTINCT FROM pg_current_xact_id()
  OR receipt.invoker_oid IS DISTINCT FROM program.invoker_oid
- OR receipt.program_oid IS DISTINCT FROM anchor.program_oid
+ OR receipt.program_oid IS DISTINCT FROM command_rows.anchor_program_oid
  OR receipt.effects_oid IS DISTINCT FROM program.effects_oid
  OR receipt.table_oid IS DISTINCT FROM 'kaname.fga_outbox'::regclass::oid
  OR receipt.key_namespace IS DISTINCT FROM 1262569305 OR receipt.key_hash IS DISTINCT FROM hashtext(p_id::text)
@@ -9123,7 +9128,7 @@ BEGIN
  ('_authority_forward_custody_v4()','14c2d0c9c92bda07f96280bf8d9ea4b76f1820f556b1336d71bb915c00ccda85',true,'v',true,'private'),
  ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
  ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
- ('_authority_forward_row_v4(bigint,jsonb,boolean)','e40b9f10689a489b73504b8c1619342d62ad4a564f06bd02cf2979c540e30495',true,'v',true,'private'),
+ ('_authority_forward_row_v4(bigint,jsonb,boolean)','994bead7d79ab342e55a161d71700e8348d3f8079075d08ca74a5e8cf73a3daa',true,'v',true,'private'),
  ('_authority_forward_complete_v4(uuid)','06cfcd8f144243fc529aacba57f452b0913cc6d5b1ab6bf2daf7c4e6a9a38290',true,'v',true,'private'),
  ('_authority_forward_anchor_complete_v4()','0d9fdf6c02abe69e333b5584eee4628cafb7ec37849b7820e33aba4bea4396f1',true,'v',true,'private'),
  ('_authority_forward_storage_v4()','e8a9cd61f6ee6cc4fbde7361210cf493c8df166cdf3bfd8c49ed47190aa4ef0c',true,'s',true,'private'),
@@ -9856,7 +9861,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','b87251d024b5ad86d86b5a0980c34e78046862050de059475323e2f4604fa66e',true),
+ ('_authority_crud_storage_v3()','1bd8b20e9a32b9ffb1c040c6c790483e80a38f2a58cd501c92eabde73acfe7ef',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
