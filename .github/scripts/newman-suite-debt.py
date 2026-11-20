@@ -694,7 +694,7 @@ def _runner_routes(argv: list[str]) -> list[tuple[str, str]]:
         options = argv[k + (1 if hosted_native else 2):]
         if len(options) == 6 and set(options[::2]) == {"--suite", "--private-dir", "--out"}:
             stem = options[options.index("--suite") + 1]
-            if stem in {"registry-installation-rid01", "registry-installation-rid04"}:
+            if stem in {"registry-installation-rid01", "registry-installation-rid02", "registry-installation-rid04"}:
                 return [(stem, "native")]
         return []
     if k >= len(argv) or not RUNNER_RE.search(argv[k]):
@@ -889,16 +889,20 @@ def ceremony_need(newman: pathlib.Path) -> dict[str, list[str]]:
 
 # Входы настоящего производителя: installation_newman_bridge_test.go,
 # installation_newman_install_test.go, installation_native_renewal_test.go и
-# installation_newman_retirement_test.go. Контракт относится только к native-маршруту.
+# installation_newman_repeat_test.go и installation_newman_retirement_test.go.
+# Контракт относится только к native-маршруту.
 _NATIVE_INPUTS = {
     "registry-installation-rid01": frozenset({
         "jwtRIDOperator", "jwtRIDCreator", "jwtRIDExpiredCreator",
         "rid01Expected", "rid01ClientAssertion", "rid01IssuanceOrigin"}),
+    "registry-installation-rid02": frozenset({
+        "jwtRIDOperator", "rid02Expected", "ridSystemId"}),
     "registry-installation-rid04": frozenset({
         "jwtRIDOperator", "jwtRIDIssuer", "rid04Expected"}),
 }
 _NATIVE_TESTS = {
     "registry-installation-rid01": ("TestRID_01_CleanInstallAndRenewal", 8),
+    "registry-installation-rid02": ("TestRID_02_ConcurrentAndRepeat", 4),
     "registry-installation-rid04": ("TestRID_04_CreatorRetirement", 14),
 }
 # Конкретные читаемые слоты keys.forEach из _CONFIG этих двух коллекций.
@@ -908,6 +912,31 @@ _NATIVE_DERIVED = frozenset(
     for field in ("GetId", "Page")
     for kind in ("accounts", "serviceAccounts", "groups", "roles", "bindings", "delegations")
 ) | frozenset({"rid10Account_serviceAccounts", "rid10Account_groups", "rid10Account_delegations"})
+
+# Только точные слоты, записываемые публичной коллекцией RID02; другим suites они не выдаются.
+_NATIVE_SUITE_DERIVED = {
+    "registry-installation-rid02": frozenset({
+        'rid02Account',
+        'rid02AccountIndex',
+        'rid02AccountTokens',
+        'rid02AccountsPage',
+        'rid02AccountsSeen',
+        'rid02DetailIndex',
+        'rid02GDGetSeen',
+        'rid02GDId',
+        'rid02GDList',
+        'rid02GDPage',
+        'rid02GDSeen',
+        'rid02GDTokens',
+        'rid02SADetailIndex',
+        'rid02SAGetSeen',
+        'rid02SAId',
+        'rid02SAList',
+        'rid02SAPage',
+        'rid02SASeen',
+        'rid02SATokens',
+    }),
+}
 
 
 def _native_declared(root: pathlib.Path) -> set[str]:
@@ -970,7 +999,7 @@ def _route_blockers(stem, surface, keys, declared, own, minted, entries, native_
             if stem not in native_declared:
                 blocked.append("нативный производитель не объявляет поддержанную коллекцию")
             else:
-                route_own = own | _NATIVE_DERIVED | _native_unused_preamble(text)
+                route_own = own | _NATIVE_DERIVED | _NATIVE_SUITE_DERIVED.get(stem, frozenset()) | _native_unused_preamble(text)
                 # Native не запускает generic seeds; origin даёт run-rid-native.cjs.
                 route_minted = {surface: _NATIVE_INPUTS[stem] | {"ownRestBaseUrl"}}
         bl, counts = blockers(surface, keys, declared, route_own, route_minted,
@@ -1140,7 +1169,7 @@ _HOLDER_EDGE_HALF = (
 
 PRODUCER_LEDGER: dict[str, tuple[str, str, str]] = {
     "registry-installation-rid01": ("A", "Нативная фикстура Kaname выдаёт окружение и восемь публичных фаз. Их выполняет задание rid01, которое проверяет уборку ресурсов своего запуска", ""),
-    "registry-installation-rid02": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID02, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid02 с публичной коллекцией и подтверждённой очисткой"),
+    "registry-installation-rid02": ("A", "Нативная фикстура Kaname выдаёт окружение и четыре публичные фазы повторной установки. Их выполняет задание rid02 с проверкой уборки ресурсов своего запуска; реальный потребитель Registry не подставляется", ""),
     "registry-installation-rid03": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID03, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid03 с публичной коллекцией и подтверждённой очисткой"),
     "registry-installation-rid04": ("A", "Нативная фикстура Kaname выдаёт окружение и четырнадцать публичных фаз вывода создателя из эксплуатации. Их выполняет задание rid04 с проверкой уборки ресурсов своего запуска", ""),
     "registry-installation-rid05": ("A", "Публичные запросы проверяют доверенности и установку модуля самой службы Kaname; окружение, первичные снимки и фазы выдаёт нативная фикстура RID05, реальный потребитель Registry не подставляется", "PRO-Robotech/kaname#1040 — добавить штатный CI producer для registry-installation-rid05 с публичной коллекцией и подтверждённой очисткой"),
@@ -2404,7 +2433,7 @@ def _native_census_self_test(tmp: pathlib.Path, make_workflow) -> None:
         repr(stem) + ": (" + repr(test) + ", frozenset(), " + str(count) + ")"
         for stem, (test, count) in _NATIVE_TESTS.items()) + "}\n", encoding="utf-8")
     supported = _native_declared(root)
-    _c("native census: producer объявляет обе точные suites", supported == set(_NATIVE_INPUTS))
+    _c("native census: producer объявляет точные поддержанные suites", supported == set(_NATIVE_INPUTS))
     for stem, inputs in _NATIVE_INPUTS.items():
         command = native.format(stem=stem)
         wf = make_workflow(tmp / (stem + "-routes"), command)
@@ -2417,7 +2446,7 @@ def _native_census_self_test(tmp: pathlib.Path, make_workflow) -> None:
         _c("native census: API меток сохранён " + stem,
            pipeline_runs(wf).get(stem) == [label for label, _ in entries]
            and entries and all(kind == "native" for _, kind in entries))
-        keys = inputs | _NATIVE_DERIVED | {"ownRestBaseUrl"}
+        keys = inputs | _NATIVE_DERIVED | _NATIVE_SUITE_DERIVED.get(stem, frozenset()) | {"ownRestBaseUrl"}
         def blocked(route_entries=entries, accepted=supported, checked=keys):
             return _route_blockers(stem, surface, checked, declared, set(), {},
                                    route_entries, accepted)[0]
@@ -2458,7 +2487,7 @@ def _native_census_self_test(tmp: pathlib.Path, make_workflow) -> None:
         _, missing = _route_blockers(stem, surface, keys | {"genericOnlyKey"}, declared, set(),
                                      {surface: {"genericOnlyKey"}}, mixed, supported)
         _c("native census: mixed считает объединение разных пробелов " + stem,
-           missing[KEY_STATE_ABSENT] == len(inputs | _NATIVE_DERIVED) + 1)
+           missing[KEY_STATE_ABSENT] == len(inputs | _NATIVE_DERIVED | _NATIVE_SUITE_DERIVED.get(stem, frozenset())) + 1)
         _c("native census: UNKNOWN native suite не распознана " + stem,
            not runner_stems(shell_commands(command.replace(stem, "registry-installation-rid99"))[0]))
     producer.write_text("CASES = {}\n", encoding="utf-8")
@@ -2741,7 +2770,8 @@ def self_test() -> int:
             (native, {"registry-installation-rid01"}),
             (native.replace("rid01", "rid04"), {"registry-installation-rid04"}),
             (f"echo '{native}'", set()),
-            (native.replace("rid01", "rid02"), set()),
+            (native.replace("rid01", "rid02"), {"registry-installation-rid02"}),
+            (native.replace("rid01", "rid03"), set()),
             (native.replace("registry-installation-rid01", '"$RID"'), set()),
             ("python3 .github/scripts/run-rid-native.py --out public.json", set()),
         )):

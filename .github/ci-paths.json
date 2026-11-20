@@ -49,6 +49,29 @@
    "local": []
   },
   {
+   "id": "rid02-native",
+   "why": "нативная повторная установка и конкурентные операции с четырьмя публичными фазами RID-02",
+   "jobs": [
+    "e2e-newman.yml:rid02"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid02.py",
+    "tests/newman/collections/registry-installation-rid02.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
    "id": "rid04-native",
    "why": "нативная проверка вывода создателя из эксплуатации с публичными фазами RID-04",
    "jobs": [
