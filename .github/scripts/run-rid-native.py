@@ -853,7 +853,8 @@ def startup_diagnostics(evidence, root_test, predicates, diagnostics, binary_sha
         return {"status": "invalid-or-unavailable"}
 
 
-def judge_test(path, root_test, predicates):
+def judge_test(path, root_test, predicates, *, rid11_nested=None):
+    need(rid11_nested is None or root_test == CASES["registry-installation-rid11"][0])
     running, passed, terminal = set(), set(), []
     with path.open() as stream:
         for line in stream:
@@ -875,7 +876,8 @@ def judge_test(path, root_test, predicates):
     if root_test in RID_MATRIX_NESTED:
         # Литеральный slash внутри имени t.Run не создаёт промежуточного узла.
         # Засчитываем предикаты только после равенства полного множества узлов.
-        expected = {root_test, *(root_test + "/" + name for name in predicates | RID_MATRIX_NESTED[root_test])}
+        nested = RID_MATRIX_NESTED[root_test] if rid11_nested is None else rid11_nested
+        expected = {root_test, *(root_test + "/" + name for name in predicates | nested)}
         need(running == expected)
         direct = set(predicates)
     else:
@@ -911,9 +913,12 @@ def main():
     parser.add_argument("--private-dir", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--require-hosted-memory-scope", action="store_true")
+    parser.add_argument("--rid11-group", choices=("input", "identity", "proof-authority", "availability"))
     args = parser.parse_args()
     os.umask(0o077)
     root_test, predicates, phase_count = CASES[args.suite]
+    group = args.rid11_group
+    need(group is None or args.suite == "registry-installation-rid11")
     extra = RID08_WINDOW_SECONDS if args.suite == "registry-installation-rid08" else 0
     test_seconds = TEST_SECONDS + extra
     outer_seconds = OUTER_SECONDS + extra
@@ -980,6 +985,25 @@ def main():
                     "testExecutableSHA256": sha(bins / "rid-tests")}
         artifact_hashes = {name: sha(bins / name) for name in ("kaname", "kaname-migrator", "rid-tests")}
         collector_sha = sha(collector)
+        spec = importlib.util.spec_from_file_location("rid_native_collector", collector)
+        impl = importlib.util.module_from_spec(spec)
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(impl)
+        rid11_nested = None
+        if group is not None:
+            groups = impl.rid11_phase_groups(json.loads(collection.read_bytes()))
+            need(group in groups and sha(collection) == expected["collectionSHA256"])
+            phase_count = len(groups[group])
+            variants = frozenset(variant.lower() for variant in impl.RID11_GROUP_VARIANTS[group])
+            rid11_nested = frozenset(
+                name for name in RID_MATRIX_NESTED[root_test] if name.split("/")[1] in variants
+            )
+            # Два публичных этапа на мир и ещё четыре после отзыва ключа
+            # перед удалением создателя в отрицательных сценариях.
+            need(2 * len(rid11_nested) + (4 if "deleted-creator" in variants else 0) == phase_count)
+            env["KANAME_RID11_CASE_GROUP"] = group
+            summary["rid11Group"] = group
+            summary["producerSHA256"] = sha(Path(__file__).resolve())
         identity_file = private / "expected-identities.json"
         write_json(identity_file, expected)
         run_id = args.suite.removeprefix("registry-installation-") + "-ci-" + uuid.uuid4().hex
@@ -1017,7 +1041,7 @@ def main():
         need(rc == 0)
         summary["status"] = "native-test-verdict-failed"
         try:
-            summary["test"] = judge_test(private / "test.jsonl", root_test, predicates)
+            summary["test"] = judge_test(private / "test.jsonl", root_test, predicates, rid11_nested=rid11_nested)
         except (Rejected, ValueError, OSError, TypeError, RecursionError):
             summary["testDiagnostics"] = test_diagnostics(
                 private / "test.jsonl", root_test, predicates, timeout_seconds=test_seconds)
@@ -1025,14 +1049,12 @@ def main():
         summary["status"] = "receipt-proof-failed"
         need(sha(node) == expected["nodeSHA256"] and tree_sha(module) == expected["toolTreeSHA256"])
         need(sha(runner) == expected["runnerSHA256"] and sha(collector) == collector_sha)
+        if group is not None:
+            need(sha(Path(__file__).resolve()) == summary["producerSHA256"])
         need(all(sha(bins / name) == value for name, value in artifact_hashes.items()))
-        spec = importlib.util.spec_from_file_location("rid_native_collector", collector)
-        impl = importlib.util.module_from_spec(spec)
-        sys.dont_write_bytecode = True
-        spec.loader.exec_module(impl)
         reports = sorted(evidence.glob("**/newman/stdout"))
         need(len(reports) == phase_count)
-        merged = impl.combine(collection, reports, run_id, expected["testExecutableSHA256"], expected)
+        merged = impl.combine(collection, reports, run_id, expected["testExecutableSHA256"], expected, rid11_group=group)
         need(len(merged["sources"]) == phase_count)
         write_json(private / "combined.json", merged)
         # Проецируются только проверенные числовые поля и хеши, ни один HTTP-запрос/ответ.
