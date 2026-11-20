@@ -8158,16 +8158,20 @@ BEGIN
  receipt:=allocation_rows.receipt;
  -- Свежая проверка custody выше охватывает только два чтения столбцов встроенных типов в этом вызове.
  -- Граница DML/обратного вызова не пересекается; каждый новый вход в триггер строки проверяет custody заново.
- SELECT oid INTO STRICT invoker FROM pg_catalog.pg_roles
- WHERE rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
- SELECT a AS anchor,p AS program,p.nonce IS NOT NULL AS program_found INTO command_rows
- FROM kaname.authority_forward_emit_anchor_v4 a
+ -- Роль определяется только после раздельной проверки существования effect/receipt.
+ -- JOIN оставляет строку роли даже при отсутствии anchor или program.
+ SELECT actor.oid AS invoker,a AS anchor,p AS program,
+  a.nonce IS NOT NULL AS anchor_found,p.nonce IS NOT NULL AS program_found INTO STRICT command_rows
+ FROM pg_catalog.pg_roles actor
+ LEFT JOIN kaname.authority_forward_emit_anchor_v4 a
+  ON a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id() AND a.nonce=effect.nonce
  LEFT JOIN pg_temp.kaname_forward_program_v4 p ON p.nonce=a.nonce
- WHERE a.backend=pg_backend_pid() AND a.transaction_id=pg_current_xact_id() AND a.nonce=effect.nonce;
- IF NOT FOUND THEN RAISE EXCEPTION 'forward allocation anchor missing or foreign' USING ERRCODE='42501';END IF;
+ WHERE actor.rolname=coalesce(nullif(current_setting('role'),'none'),session_user);
+ IF NOT command_rows.anchor_found THEN RAISE EXCEPTION 'forward allocation anchor missing or foreign' USING ERRCODE='42501';END IF;
  IF NOT command_rows.program_found THEN RAISE EXCEPTION 'forward allocation program missing' USING ERRCODE='42501';END IF;
  anchor:=command_rows.anchor;
  program:=command_rows.program;
+ invoker:=command_rows.invoker;
  IF program.backend IS DISTINCT FROM anchor.backend OR program.transaction_id IS DISTINCT FROM anchor.transaction_id
  OR program.invoker_oid IS DISTINCT FROM invoker OR program.invoker_oid IS DISTINCT FROM anchor.invoker_oid
  OR anchor.program_oid IS DISTINCT FROM to_regclass('pg_temp.kaname_forward_program_v4')
@@ -9119,7 +9123,7 @@ BEGIN
  ('_authority_forward_custody_v4()','14c2d0c9c92bda07f96280bf8d9ea4b76f1820f556b1336d71bb915c00ccda85',true,'v',true,'private'),
  ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
  ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
- ('_authority_forward_row_v4(bigint,jsonb,boolean)','b8eb06573f2d6301aca309767def5e2bc406f7fa20628483c2c724cc070454b7',true,'v',true,'private'),
+ ('_authority_forward_row_v4(bigint,jsonb,boolean)','e40b9f10689a489b73504b8c1619342d62ad4a564f06bd02cf2979c540e30495',true,'v',true,'private'),
  ('_authority_forward_complete_v4(uuid)','06cfcd8f144243fc529aacba57f452b0913cc6d5b1ab6bf2daf7c4e6a9a38290',true,'v',true,'private'),
  ('_authority_forward_anchor_complete_v4()','0d9fdf6c02abe69e333b5584eee4628cafb7ec37849b7820e33aba4bea4396f1',true,'v',true,'private'),
  ('_authority_forward_storage_v4()','e8a9cd61f6ee6cc4fbde7361210cf493c8df166cdf3bfd8c49ed47190aa4ef0c',true,'s',true,'private'),
@@ -9852,7 +9856,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','961b7bd8df95cd4d35c9a3aa43d58b44dccc3fcddca9436d715e3d4779c084d7',true),
+ ('_authority_crud_storage_v3()','b87251d024b5ad86d86b5a0980c34e78046862050de059475323e2f4604fa66e',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
