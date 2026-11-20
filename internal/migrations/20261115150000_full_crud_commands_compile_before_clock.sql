@@ -7959,33 +7959,25 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS
 DECLARE owner_oid oid;
 BEGIN
  SELECT oid INTO STRICT owner_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
- -- Все три OID сверяются заново в одном запросе. Отсутствие любой таблицы
- -- уменьшает число подходящих записей pg_class и сохраняет прежний отказ.
- IF EXISTS(
-  WITH storage AS MATERIALIZED (
-   SELECT ARRAY[
-    to_regclass('pg_temp.kaname_forward_program_v4')::oid,
-    to_regclass('pg_temp.kaname_forward_effects_v4')::oid,
-    to_regclass('pg_temp.kaname_forward_receipts_v4')::oid
-   ] AS ids
-  )
-  SELECT 1 FROM storage s
-  WHERE (SELECT count(*) FROM pg_catalog.pg_class c
-         WHERE c.oid=ANY(s.ids)
-           AND c.relowner=owner_oid AND c.relkind='r' AND c.relpersistence='t'
-           AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT c.relhasrules AND NOT c.relhassubclass
-           AND (c.relacl IS NULL OR c.relacl=acldefault('r',c.relowner)
-            OR NOT EXISTS(SELECT 1 FROM aclexplode(c.relacl) a WHERE a.grantee<>owner_oid))
-        ) <> cardinality(s.ids)
-   -- После DROP флаг relhastriggers может остаться true.
-   OR EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t
-    JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
-    WHERE t.tgrelid=ANY(s.ids) AND c.relhastriggers IS NOT FALSE)
-   OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits i WHERE i.inhrelid=ANY(s.ids))
-   OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a
-    CROSS JOIN LATERAL aclexplode(a.attacl) x
-    WHERE a.attrelid=ANY(s.ids) AND a.attacl IS NOT NULL AND x.grantee<>owner_oid)
- ) THEN
+ -- Каждый вызов заново проверяет три OID; LEFT JOIN сохраняет отказ при отсутствии storage.
+ IF EXISTS(SELECT 1 FROM (VALUES
+  (to_regclass('pg_temp.kaname_forward_program_v4')),
+  (to_regclass('pg_temp.kaname_forward_effects_v4')),
+  (to_regclass('pg_temp.kaname_forward_receipts_v4'))
+ ) expected(relation_id) LEFT JOIN pg_catalog.pg_class c ON c.oid=expected.relation_id
+ WHERE expected.relation_id IS NULL OR c.oid IS NULL
+  OR NOT (c.relowner=owner_oid AND c.relkind='r' AND c.relpersistence='t'
+   AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT c.relhasrules AND NOT c.relhassubclass)
+  -- Флаг каталога обязателен при наличии триггера; после DROP он может остаться true.
+  OR CASE WHEN c.relhastriggers IS FALSE THEN false
+   ELSE EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid=expected.relation_id) END
+  -- relhassubclass выше отклоняет родителя; здесь проверяем, что таблица не является потомком.
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_inherits WHERE inhrelid=expected.relation_id)
+  -- Стандартный ACL таблицы выдаёт права только её владельцу.
+  OR CASE WHEN c.relacl IS NULL OR c.relacl=acldefault('r',c.relowner) THEN false
+   ELSE EXISTS(SELECT 1 FROM aclexplode(c.relacl) a WHERE a.grantee<>owner_oid) END
+  OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl) x
+   WHERE a.attrelid=expected.relation_id AND a.attacl IS NOT NULL AND x.grantee<>owner_oid)) THEN
   RAISE EXCEPTION 'untrusted forward allocation storage' USING ERRCODE='42501';END IF;
 END $$;
 
@@ -9138,7 +9130,7 @@ BEGIN
  ('authority_forward_claim_v4(uuid)','8a7c8ee8eae47a467c0d3370ef6185e93f3db6138aa14319563990fabd3b7be7',true,'v',true,'export'),
  ('authority_forward_finish_v4(uuid)','75683ffd52d23834a7e28814676b67a06d47cfa5a4fd2c2049d5f299f4c00199',true,'v',true,'export'),
  ('_authority_forward_context_v4()','67a9f0c6d896048f52b3eeb396250c7e33e16ab3170b874734154197d247dd5c',true,'v',true,'private'),
- ('_authority_forward_custody_v4()','4a2006ef3f467c7757c3cfde4e530c0ffafd005924656a5f7871412b286260ac',true,'v',true,'private'),
+ ('_authority_forward_custody_v4()','c5d84795becb1a5b12efc89bb553ac12db864c5ce31c90272041b15a09cd59b4',true,'v',true,'private'),
  ('_authority_forward_shape_v4()','ef281d009e6201f0c03e49cfc049b4950290fe1953bb05b3638536b45b0d66aa',true,'v',true,'private'),
  ('_authority_forward_program_v4(uuid)','d1100eb62bfc267ed7cc58d4d0cd0194f42b6285f8f465939381b60161607cca',true,'v',true,'private'),
  ('_authority_forward_row_v4(bigint,jsonb,boolean)','31eb7a5ae8eec2af1f31d7aa9e55d49c80e787838ec3a34130de6db4b3dcc56f',true,'v',true,'private'),
@@ -9874,7 +9866,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','f27b752bc8165d4e97a62f70e407858962081041078b06434b3f0fee103d90e6',true),
+ ('_authority_crud_storage_v3()','a3c9f8bade9129a20d82bc1e6d14999e32228f66366846c933d6f7cbcad99827',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
