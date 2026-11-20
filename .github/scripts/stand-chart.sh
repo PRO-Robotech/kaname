@@ -389,6 +389,28 @@ check_alert_rules_kind() {
 	exit "$RC_UNMET"
 }
 
+# Только поля состояния: без describe, окружения и свободного текста событий.
+rollout_diagnostics() {
+	local deployment="$1" app pods
+	ROLLOUT_IMAGE_PULL_UNMET=0
+	app="$("${KCTL[@]}" --request-timeout=10s -n "$NS" get deploy "$deployment" \
+		-o 'jsonpath={.spec.selector.matchLabels.app}' 2>/dev/null || true)"
+	[ -n "$app" ] || return 0
+	pods="$("${KCTL[@]}" --request-timeout=10s -n "$NS" get pods -l "app=$app" \
+		-o 'jsonpath={range .items[*]}{"pod "}{.metadata.name}{" phase="}{.status.phase}{"\n"}{range .status.initContainerStatuses[*]}{" init="}{.name}{" waiting="}{.state.waiting.reason}{"\n"}{end}{range .status.containerStatuses[*]}{" container="}{.name}{" waiting="}{.state.waiting.reason}{"\n"}{end}{end}' 2>/dev/null || true)"
+	[ -n "$pods" ] || return 0
+	# Вывод и вердикт опираются на один снимок выбранных подов.
+	if grep -Eq ' waiting=(ErrImagePull|ImagePullBackOff)$' <<< "$pods"; then
+		ROLLOUT_IMAGE_PULL_UNMET=1
+	fi
+	head -n 80 <<< "$pods"
+	"${KCTL[@]}" --request-timeout=10s -n "$NS" get events \
+		--field-selector involvedObject.kind=Pod \
+		-o 'jsonpath={range .items[*]}{.involvedObject.name}{" event="}{.reason}{" count="}{.count}{" last="}{.lastTimestamp}{"\n"}{end}' 2>/dev/null \
+		| awk 'NR == FNR {if ($1 == "pod") pods[$2] = 1; next} $1 in pods' <(printf '%s\n' "$pods") - \
+		| head -n 80 || true
+}
+
 start_pg() {
 	"${KCTL[@]}" create namespace "$NS" >/dev/null 2>&1 || true
 	"${KCTL[@]}" -n "$NS" delete secret "$RELEASE-pg-tls" >/dev/null 2>&1 || true
@@ -400,7 +422,7 @@ start_pg() {
 	# отношения не имеющей. Приватная половина копируется в emptyDir и
 	# перекладывается под пользователя базы: секрет монтируется от root, а
 	# Postgres отвергает ключ с групповым и мировым доступом.
-	"${KCTL[@]}" apply -f - <<EOF >/dev/null
+	if python3 "$SCRIPT_DIR/stand-chart-preload.py" "$CLUSTER" "$WORK/image-preload-unmet" <<EOF | "${KCTL[@]}" apply -f - >/dev/null; then
 apiVersion: v1
 kind: Service
 metadata: { name: $RELEASE-postgres, namespace: $NS }
@@ -446,7 +468,17 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
 EOF
+		:
+	else
+		# Сохраняем отдельно исход фильтра и прежний исход kubectl apply.
+		local -a apply_status=("${PIPESTATUS[@]}")
+		if [ "${apply_status[0]}" -ne 0 ]; then
+			exit "${apply_status[0]}"
+		fi
+		exit "${apply_status[1]}"
+	fi
 	"${KCTL[@]}" -n "$NS" rollout status "deploy/$RELEASE-postgres" --timeout=180s >/dev/null || {
+		rollout_diagnostics "$RELEASE-postgres"
 		unmet "узел базы не поднялся за 180 с"
 		exit "$RC_UNMET"
 	}
@@ -472,7 +504,7 @@ start_mailbox() {
 	"${KCTL[@]}" -n "$NS" delete configmap "$MAIL_SVC-script" >/dev/null 2>&1 || true
 	"${KCTL[@]}" -n "$NS" create configmap "$MAIL_SVC-script" \
 		--from-file=stand-mailbox.py="$SCRIPT_DIR/stand-mailbox.py" >/dev/null
-	"${KCTL[@]}" apply -f - <<EOF >/dev/null
+	if python3 "$SCRIPT_DIR/stand-chart-preload.py" "$CLUSTER" "$WORK/image-preload-unmet" <<EOF | "${KCTL[@]}" apply -f - >/dev/null; then
 apiVersion: v1
 kind: Service
 metadata: { name: $MAIL_SVC, namespace: $NS }
@@ -507,7 +539,17 @@ spec:
             httpGet: { path: /healthz, port: 8025 }
             periodSeconds: 2
 EOF
+		:
+	else
+		# Сохраняем отдельно исход фильтра и прежний исход kubectl apply.
+		local -a apply_status=("${PIPESTATUS[@]}")
+		if [ "${apply_status[0]}" -ne 0 ]; then
+			exit "${apply_status[0]}"
+		fi
+		exit "${apply_status[1]}"
+	fi
 	"${KCTL[@]}" -n "$NS" rollout status "deploy/$MAIL_SVC" --timeout=180s >/dev/null || {
+		rollout_diagnostics "$MAIL_SVC"
 		unmet "приёмник писем стенда не поднялся за 180 с"
 		exit "$RC_UNMET"
 	}
@@ -715,18 +757,30 @@ EOF
 
 install_chart() {
 	local extra=()
+	rm -f "$WORK/image-preload-unmet"
 	[ "$ALERT_RULES" = "off" ] && extra+=(--set alertRules.enabled=false)
 	helm upgrade --install "$RELEASE" "$ROOT/deploy" \
 		-f "$ROOT/deploy/values.yaml" \
 		-f "$ROOT/deploy/values.prod.yaml" \
 		-f "$WORK/values.stand.yaml" \
 		-f "$WORK/values.stand-own.yaml" \
+		--post-renderer "$SCRIPT_DIR/stand-chart-preload.py" \
+		--post-renderer-args "$CLUSTER" --post-renderer-args "$WORK/image-preload-unmet" \
 		--kube-context "kind-$CLUSTER" -n "$NS" "${extra[@]}" || {
+		if [ -f "$WORK/image-preload-unmet" ]; then
+			unmet "образы окончательного рендера не подготовлены"
+			exit "$RC_UNMET"
+		fi
 		fail "чарт не поставился — вердикт о дереве"
 		exit 1
 	}
 	say "стенд: чарт поставлен"
 	"${KCTL[@]}" -n "$NS" rollout status "deploy/$RELEASE" --timeout=300s || {
+		rollout_diagnostics "$RELEASE"
+		if [ "$ROLLOUT_IMAGE_PULL_UNMET" = 1 ]; then
+			unmet "выкат ожидает загрузки образа: ErrImagePull/ImagePullBackOff"
+			exit "$RC_UNMET"
+		fi
 		fail "выкат не дошёл до готовности за 300 с — вердикт о дереве"
 		"${KCTL[@]}" -n "$NS" logs "deploy/$RELEASE" -c migrate --tail=20 2>&1 | sed 's/^/  накат: /' || true
 		"${KCTL[@]}" -n "$NS" logs "deploy/$RELEASE" -c "$RELEASE" --tail=40 2>&1 | sed 's/^/  служба: /' || true
@@ -1491,7 +1545,7 @@ case "${1:-}" in
 	up)
 		say "===== стенд чартом: подъём ====="
 		need_tool openssl; need_tool docker; need_tool kind
-		need_tool kubectl; need_tool helm
+		need_tool kubectl; need_tool helm; need_tool python3
 		mkdir -p "$WORK"
 		start_cluster
 		check_alert_rules_kind
