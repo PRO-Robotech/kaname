@@ -41,7 +41,73 @@ CASES = {
         "new_grant_and_apply_denied;_old_G_and_GD_ACTIVE_and_no_self-restoration",
         "O_explicit_GrantAdmin_only_->_same_request_succeeds_with_same_delegationId",
     }), 14),
+    "registry-installation-rid10": ("TestRID_10_MidRunFaultAndRetirement", frozenset({
+        "first_pair_committed_observed;_unknown_Writer_BeginTx_only_after_normal_second_Operation_Create",
+        "second_Operation_done_INTERNAL_internal_error;_first_kept;_no_later_pairs",
+        "independent_O_RevokeAdmin_at_same_boundary;_denial_before_next_Operation",
+        "remove_only_fault_or_restore_only_admin;_retry_N_stable_first_ID;_no-fault_twins",
+    }), 6),
+    'registry-installation-rid07': ('TestRID_07_ExistingPairConflict', frozenset({
+        'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION',
+        'each_failure_preserves_complete_pair_and_grants_without_update_or_revoke',
+        'one-axis-only_twin_for_each_conflict_is_idempotent_exact_match',
+    }), 32),
+    'registry-installation-rid09': ('TestRID_09_WholeDeliveryPreflight', frozenset({
+        'complete_M1_M2_fresh_worlds_both_orders_for_foreign_role_target_subject_delegate',
+        'every_invalid_axis_preserves_catalog_roles_own_seed_SA_groups_joins_grants_GD_snapshots',
+        'single-field_legal_twin_writes_both_full_manifests_and_every_N_pair',
+    }), 32),
 }
+# Все шесть вложенных узлов обязательны в полном RID10.
+RID10_NESTED = frozenset({
+    "first_pair_committed_observed;_unknown_Writer_BeginTx_only_after_normal_second_Operation_Create/fault",
+    "independent_O_RevokeAdmin_at_same_boundary;_denial_before_next_Operation/retirement",
+    "remove_only_fault_or_restore_only_admin;_retry_N_stable_first_ID;_no-fault_twins/fault-independent-twin",
+    "remove_only_fault_or_restore_only_admin;_retry_N_stable_first_ID;_no-fault_twins/fault-independent-twin/fault-lawful-twin",
+    "remove_only_fault_or_restore_only_admin;_retry_N_stable_first_ID;_no-fault_twins/retirement-independent-twin",
+    "remove_only_fault_or_restore_only_admin;_retry_N_stable_first_ID;_no-fault_twins/retirement-independent-twin/retirement-lawful-twin",
+})
+
+# Полные матрицы существующих фикстур: slash в t.Run не создаёт промежуточных узлов.
+RID_MATRIX_NESTED = {
+    'TestRID_07_ExistingPairConflict': frozenset({
+        'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/role/S1',
+        'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/role/S2',
+        'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/target/S1',
+        'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/target/S2',
+        'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/subject/S1',
+        'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/subject/S2',
+        'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/creator/S1',
+        'independent_lawful_role_target_subject_creator_conflicts_each_FAILED_PRECONDITION/creator/S2',
+        'one-axis-only_twin_for_each_conflict_is_idempotent_exact_match/role/S1',
+        'one-axis-only_twin_for_each_conflict_is_idempotent_exact_match/role/S2',
+        'one-axis-only_twin_for_each_conflict_is_idempotent_exact_match/target/S1',
+        'one-axis-only_twin_for_each_conflict_is_idempotent_exact_match/target/S2',
+        'one-axis-only_twin_for_each_conflict_is_idempotent_exact_match/subject/S1',
+        'one-axis-only_twin_for_each_conflict_is_idempotent_exact_match/subject/S2',
+        'one-axis-only_twin_for_each_conflict_is_idempotent_exact_match/creator/S1',
+        'one-axis-only_twin_for_each_conflict_is_idempotent_exact_match/creator/S2',
+    }),
+    'TestRID_09_WholeDeliveryPreflight': frozenset({
+        'complete_M1_M2_fresh_worlds_both_orders_for_foreign_role_target_subject_delegate/roleIds/M1-M2/negative',
+        'complete_M1_M2_fresh_worlds_both_orders_for_foreign_role_target_subject_delegate/targetTypes/M1-M2/negative',
+        'complete_M1_M2_fresh_worlds_both_orders_for_foreign_role_target_subject_delegate/subjectTypes/M1-M2/negative',
+        'complete_M1_M2_fresh_worlds_both_orders_for_foreign_role_target_subject_delegate/delegate/M1-M2/negative',
+        'complete_M1_M2_fresh_worlds_both_orders_for_foreign_role_target_subject_delegate/roleIds/M2-M1/negative',
+        'complete_M1_M2_fresh_worlds_both_orders_for_foreign_role_target_subject_delegate/targetTypes/M2-M1/negative',
+        'complete_M1_M2_fresh_worlds_both_orders_for_foreign_role_target_subject_delegate/subjectTypes/M2-M1/negative',
+        'complete_M1_M2_fresh_worlds_both_orders_for_foreign_role_target_subject_delegate/delegate/M2-M1/negative',
+        'single-field_legal_twin_writes_both_full_manifests_and_every_N_pair/roleIds/M1-M2/lawful-twin',
+        'single-field_legal_twin_writes_both_full_manifests_and_every_N_pair/targetTypes/M1-M2/lawful-twin',
+        'single-field_legal_twin_writes_both_full_manifests_and_every_N_pair/subjectTypes/M1-M2/lawful-twin',
+        'single-field_legal_twin_writes_both_full_manifests_and_every_N_pair/delegate/M1-M2/lawful-twin',
+        'single-field_legal_twin_writes_both_full_manifests_and_every_N_pair/roleIds/M2-M1/lawful-twin',
+        'single-field_legal_twin_writes_both_full_manifests_and_every_N_pair/targetTypes/M2-M1/lawful-twin',
+        'single-field_legal_twin_writes_both_full_manifests_and_every_N_pair/subjectTypes/M2-M1/lawful-twin',
+        'single-field_legal_twin_writes_both_full_manifests_and_every_N_pair/delegate/M2-M1/lawful-twin',
+    }),
+}
+
 # Исходный бюджет полного нативного теста сохраняется.
 TEST_SECONDS = 1200
 OUTER_SECONDS = 1320
@@ -289,6 +355,17 @@ ASSERTION_FILES = (
     "cmd/kaname/installation_newman_retirement_test.go",
     "cmd/kaname/installation_newman_bridge_test.go",
     "cmd/kaname/installation_owned_child_driver_test.go",
+    "cmd/kaname/installation_rid_integration_test.go",
+    "cmd/kaname/installation_revoke_full_startup_test.go",
+    "cmd/kaname/installation_pair_conflict_native_test.go",
+    "cmd/kaname/installation_newman_conflict_test.go",
+    "cmd/kaname/installation_snapshot_runtime_test.go",
+    "cmd/kaname/installation_whole_delivery_native_test.go",
+    "cmd/kaname/installation_newman_whole_phase_test.go",
+    "cmd/kaname/installation_midrun_runtime_test.go",
+    "cmd/kaname/installation_newman_midrun_test.go",
+    "cmd/kaname/installation_input_authn_native_test.go",
+    "cmd/kaname/installation_closed_shape_start_test.go",
     "internal/testsupport/installruntime/stand.go",
 )
 
@@ -299,6 +376,9 @@ def test_diagnostics(path, root_test, predicates):
     if root_test == CASES["registry-installation-rid04"][0]:
         names.update(root_test + "/" + name + "/" + mode
                      for name in predicates for mode in ("S1", "S2"))
+    if root_test == CASES["registry-installation-rid10"][0]:
+        names.update(root_test + "/" + name for name in RID10_NESTED)
+    names.update(root_test + "/" + name for name in RID_MATRIX_NESTED.get(root_test, frozenset()))
     known = {name: name for name in names}
     actions = {action: action for action in ("run", "pass", "fail", "skip")}
     result = {"status": "complete", "events": []}
@@ -374,12 +454,13 @@ def test_diagnostics(path, root_test, predicates):
 def startup_diagnostics(evidence, root_test, predicates, diagnostics, binary_sha):
     # Только первый fail, уже связанный с точным require.NoError после StartBase.
     site = diagnostics.get("firstFailureSite", {})
+    if diagnostics.get("status") != "complete" or site.get("status") != "matched":
+        return {"status": "first-failure-site-unavailable"}
     fixture_source = "cmd/kaname/installation_native_fixture_test.go"
     names = {root_test + "/" + name for name in predicates}
     if root_test == CASES["registry-installation-rid04"][0]:
         names = {name + "/" + mode for name in names for mode in ("S1", "S2")}
-    if (diagnostics.get("status") != "complete" or site.get("status") != "matched"
-            or site.get("file") != fixture_source or site.get("test") not in names):
+    if site.get("file") != fixture_source or site.get("test") not in names:
         return {"status": "not-first-startbase-failure"}
     try:
         source_lines = (ROOT / fixture_source).read_text(encoding="utf-8").splitlines()
@@ -557,6 +638,12 @@ def judge_test(path, root_test, predicates):
     need(root_test in passed and passed == running and terminal == ["pass"])
     direct = {name.split("/", 1)[1] for name in passed if name.count("/") == 1}
     need(direct == predicates)
+    if root_test == CASES["registry-installation-rid10"][0]:
+        expected = {root_test, *(root_test + "/" + name for name in predicates | RID10_NESTED)}
+        need(running == expected)
+    if root_test in RID_MATRIX_NESTED:
+        expected = {root_test, *(root_test + "/" + name for name in predicates | RID_MATRIX_NESTED[root_test])}
+        need(running == expected)
     return {"ok": True, "passedTests": len(passed), "skippedTests": 0, "failedTests": 0,
             "directPredicates": sorted(direct)}
 
