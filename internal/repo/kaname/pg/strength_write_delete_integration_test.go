@@ -39,10 +39,9 @@ package pg_test
 //
 // # Первой строкой — бинарная величина, а не миллисекунды
 //
-// Проход имеет ТРИ исхода: сошёлся · оборван по сроку отсоединённого прохода
-// (2 минуты) · откатился по сроку одного стейтмента (30 секунд). «Ноль
-// записанных строк за быстро» — запрещённое прочтение, и различает эти исходы
-// только флаг, печатаемый раньше всякого времени.
+// Проход может сойтись, оборваться по сроку отсоединённого прохода либо
+// откатиться по сроку одного стейтмента (30 секунд). Исход печатается до времени
+// выполнения, чтобы быстрая остановка с нулём строк не выглядела успехом.
 
 import (
 	"context"
@@ -62,6 +61,7 @@ import (
 	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/scalegrid"
@@ -158,8 +158,8 @@ type passOutcome string
 const (
 	// passConverged — проход сошёлся.
 	passConverged passOutcome = "СОШЁЛСЯ"
-	// passDeadline — оборван по сроку отсоединённого прохода (2 минуты).
-	passDeadline passOutcome = "ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)"
+	// passDeadline — оборван по сроку отсоединённого прохода.
+	passDeadline passOutcome = "ОБОРВАН ПО СРОКУ ПРОХОДА"
 	// passStatement — откатился по сроку одного стейтмента (30 секунд, 57014).
 	passStatement passOutcome = "ОТКАТИЛСЯ ПО СРОКУ СТЕЙТМЕНТА (57014)"
 	// passOther — иной отказ; называется дословно, а не сводится к предыдущим.
@@ -412,20 +412,21 @@ func seedWDObjects(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	require.NoError(t, err)
 }
 
-// runWDPass — проход под ТЕМ ЖЕ сроком, что действует у продукта.
-//
-// Срок берётся из `shared.PostCommitTimeout`, а не выписывается числом: копия
-// разошлась бы с оригиналом молча, и замер утверждал бы про потолок, которого
-// в дереве нет.
-func runWDPass(t *testing.T, counter *stmtCounter, fn func(ctx context.Context) error) wdResult {
+// runWDPass измеряет проход с заданным штатным сроком сценария.
+func runWDPass(t *testing.T, counter *stmtCounter, timeout time.Duration, fn func(ctx context.Context) error) wdResult {
 	t.Helper()
 	var r wdResult
-	ctx, cancel := context.WithTimeout(context.Background(), shared.PostCommitTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	counter.reset()
 	t0 := time.Now()
 	err := fn(ctx)
 	r.elapsed = time.Since(t0)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		t.Logf("WD_PRIMARY_PG_ERROR code=%q where=%q routine=%q position=%d internal_position=%d chain=%v",
+			pgErr.Code, pgErr.Where, pgErr.Routine, pgErr.Position, pgErr.InternalPosition, err)
+	}
 	r.stmts = counter.count()
 	r.topStmt = counter.top(3)
 	r.outcome, r.detail = classifyPass(err, ctx.Err())
@@ -514,11 +515,11 @@ func runBandPoint(t *testing.T, ctx context.Context, band string, p wdPoint, kin
 	var r wdResult
 	switch kind {
 	case bandAdditive:
-		r = runWDPass(t, counter, func(c context.Context) error {
+		r = runWDPass(t, counter, shared.PostCommitTimeout, func(c context.Context) error {
 			return rec.ReconcileBindingForward(c, bid)
 		})
 	case bandFull:
-		r = runWDPass(t, counter, func(c context.Context) error {
+		r = runWDPass(t, counter, shared.PostCommitTimeout, func(c context.Context) error {
 			return rec.ReconcileBinding(c, bid)
 		})
 	case bandExpire:
@@ -540,7 +541,7 @@ func runBandPoint(t *testing.T, ctx context.Context, band string, p wdPoint, kin
 			    SET expires_at = created_at + interval '1 millisecond'
 			  WHERE id = $1`, string(bid))
 		require.NoError(t, err)
-		r = runWDPass(t, counter, func(c context.Context) error {
+		r = runWDPass(t, counter, shared.PostCommitTimeout, func(c context.Context) error {
 			return rec.ExpireBinding(c, bid)
 		})
 	}
@@ -588,7 +589,7 @@ func runFanoutPoint(t *testing.T, ctx context.Context, p wdPoint) wdResult {
 	}
 	seedFor := time.Since(t0)
 
-	r := runWDPass(t, counter, func(c context.Context) error {
+	r := runWDPass(t, counter, role.RulesFanoutTimeout, func(c context.Context) error {
 		for _, bid := range bids {
 			if err := rec.ReconcileBinding(c, bid); err != nil {
 				return fmt.Errorf("выдача %s из веера %d: %w", bid, p.Fanout, err)
@@ -646,6 +647,9 @@ func wdPool(t *testing.T, ctx context.Context, counter *stmtCounter) *pgxpool.Po
 	}
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = wdStatementTimeoutMS
 	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = wdIdleInTxTimeoutMS
+	if ctx.Value(expiryActivityKey{}) == true {
+		expiryActivityPool(t, cfg)
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	require.NoError(t, err)
 	return pool
@@ -732,8 +736,8 @@ func wdGridText() string {
 		}
 	}
 	fmt.Fprintf(&b, "\n  «*» — состояние, объявленное продуктом невозможным либо им не производимое\n")
-	fmt.Fprintf(&b, "  срок отсоединённого прохода: %s (shared.PostCommitTimeout, читается из кода)\n",
-		shared.PostCommitTimeout)
+	fmt.Fprintf(&b, "  сроки отсоединённого прохода: обычный %s, веер выдач роли %s\n",
+		shared.PostCommitTimeout, role.RulesFanoutTimeout)
 	return b.String()
 }
 

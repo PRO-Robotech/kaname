@@ -163,7 +163,7 @@ func newP2(t *testing.T) *p2 {
 	w.reg = internaliam.NewRegisterResourceUseCase(
 		kanamepg.NewFGAOutboxEmitter(),
 		kanamepg.NewResourceMirrorEmitter(),
-		kanamepg.NewPoolTxBeginner(pool),
+		kanamepg.NewRegistrationTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
 		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же

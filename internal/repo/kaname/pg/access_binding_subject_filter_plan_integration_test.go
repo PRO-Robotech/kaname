@@ -45,10 +45,13 @@ package pg_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -96,6 +99,29 @@ type subjectPlanFixture struct {
 	expected []string
 }
 
+// Один batch — самостоятельный bounded Given. Binding и оба его субъекта
+// commit вместе; все существующие guards, journal и deferred constraints живы.
+func subjectPlanSeedTransaction(t *testing.T, pool *pgxpool.Pool, label string, body func(context.Context, pgx.Tx) error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tx, err := pool.Begin(ctx)
+	if tx != nil {
+		defer func() {
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer stop()
+			rollbackErr := tx.Rollback(cleanup)
+			if !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+				require.NoError(t, rollbackErr, "cleanup %s", label)
+			}
+		}()
+	}
+	require.NoError(t, err, "begin %s", label)
+	require.NotNil(t, tx)
+	require.NoError(t, body(ctx, tx), label)
+	require.NoError(t, tx.Commit(ctx), "commit %s", label)
+}
+
 func seedSubjectPlanFixture(t *testing.T) subjectPlanFixture {
 	t.Helper()
 	if testing.Short() {
@@ -114,41 +140,54 @@ func seedSubjectPlanFixture(t *testing.T) subjectPlanFixture {
 		roles[r] = string(seedAccountRole(t, ctx, pool, acc.ID, fmt.Sprintf("sbjpln_role_%02d", r)))
 	}
 
-	// Посев — одной транзакцией без потолка исполнения оператора: потолок пула
-	// (30 с) — предел запроса продукта, а не посадки, и 40000 строк набора под
-	// триггерами существования его не обязаны помещать.
-	tx, err := pool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(ctx) }()
-	_, err = tx.Exec(ctx, `SET LOCAL statement_timeout = 0`)
-	require.NoError(t, err)
-
 	const userPrefix, bindingPrefix = "usr-sbjpln-", "acb-sbjpln-"
-	_, err = tx.Exec(ctx, activewayin.WithWayIn(`
+	// Люди фиксируются отдельно: journal keys не живут до конца всего посева.
+	subjectPlanSeedTransaction(t, pool, "посев людей", func(batchCtx context.Context, tx pgx.Tx) error {
+		_, seedErr := tx.Exec(batchCtx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		SELECT $1 || lpad(i::text, 6, '0'), $2, $1 || lpad(i::text, 6, '0'),
 		       $1 || lpad(i::text, 6, '0') || '@kacho.local', 'p', 'ACTIVE'
 		  FROM generate_series(1, $3::int) AS i`), userPrefix, string(acc.ID), subjectPlanPeople)
-	require.NoError(t, err, "посев людей")
+		return seedErr
+	})
 
-	// Выдача i: человек (i-1) mod 2000 + 1, роль (i-1) div 2000.
-	_, err = tx.Exec(ctx, `
+	// Общий объём прежний. Короткая TX ограничивает удерживаемые journal locks;
+	// statement_timeout пула не отключается. Глобальный i сохраняет IDs и роли.
+	const bindingBatch = 128
+	for first := 1; first <= subjectPlanBindings; first += bindingBatch {
+		last := min(first+bindingBatch-1, subjectPlanBindings)
+		subjectPlanSeedTransaction(t, pool, fmt.Sprintf("посев выдач %d–%d", first, last), func(batchCtx context.Context, tx pgx.Tx) error {
+			// Выдача i: человек (i-1) mod 2000 + 1, роль (i-1) div 2000.
+			_, seedErr := tx.Exec(batchCtx, `
 		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 		SELECT $1 || lpad(i::text, 6, '0'), 'user', $2 || lpad(((i - 1) % $5::int + 1)::text, 6, '0'),
 		       ($3::text[])[(i - 1) / $5::int + 1], 'account', $4, 'ACTIVE'
-		  FROM generate_series(1, $6::int) AS i`,
-		bindingPrefix, userPrefix, roles, string(acc.ID), subjectPlanPeople, subjectPlanBindings)
-	require.NoError(t, err, "посев выдач")
-
-	_, err = tx.Exec(ctx, `
+		  FROM generate_series($6::int, $7::int) AS i`,
+				bindingPrefix, userPrefix, roles, string(acc.ID), subjectPlanPeople, first, last)
+			if seedErr != nil {
+				return seedErr
+			}
+			_, seedErr = tx.Exec(batchCtx, `
 		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
 		SELECT $1 || lpad(i::text, 6, '0'), 'user',
 		       $2 || lpad(((i - 1 + k) % $3::int + 1)::text, 6, '0'), k
-		  FROM generate_series(1, $4::int) AS i, generate_series(0, 1) AS k`,
-		bindingPrefix, userPrefix, subjectPlanPeople, subjectPlanBindings)
-	require.NoError(t, err, "посев набора")
-	require.NoError(t, tx.Commit(ctx))
+		  FROM generate_series($4::int, $5::int) AS i, generate_series(0, 1) AS k`,
+				bindingPrefix, userPrefix, subjectPlanPeople, first, last)
+			return seedErr
+		})
+	}
+
+	// Финальная плотность посадки обязательна независимо от числа batch.
+	func() {
+		countCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		var peopleRows, bindingRows int
+		require.NoError(t, pool.QueryRow(countCtx, `SELECT count(*) FROM kaname.users WHERE account_id=$1 AND id LIKE $2 || '%'`, string(acc.ID), userPrefix).Scan(&peopleRows))
+		require.Equal(t, subjectPlanPeople, peopleRows)
+		require.NoError(t, pool.QueryRow(countCtx, `SELECT count(*) FROM kaname.access_bindings WHERE resource_type='account' AND resource_id=$1 AND id LIKE $2 || '%'`, string(acc.ID), bindingPrefix).Scan(&bindingRows))
+		require.Equal(t, subjectPlanBindings, bindingRows)
+	}()
 
 	_, err = pool.Exec(ctx, `ANALYZE kaname.access_bindings`)
 	require.NoError(t, err)

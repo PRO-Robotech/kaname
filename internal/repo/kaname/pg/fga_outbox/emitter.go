@@ -75,6 +75,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -302,13 +303,155 @@ func EmitOwnerOrderedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples
 // них ничего не меняется. Лишь настоящий НАБОР принимает форму `relations`, и только набор ВЫДАЧИ
 // дополнительно несёт эхо совместимости — ниже объяснено, почему два
 // направления различаются.
+// EmitDecisionTx связывает обычный tuple payload с защищённым final decision.
+// Метка приходит от coordinated writer, а не из запроса. Ordered registration
+// использует свои отдельные отправители и через этот путь не проходит.
+func EmitDecisionTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, at time.Time) error {
+	if at.IsZero() || (eventType != EventTypeWrite && eventType != EventTypeDelete) {
+		return fmt.Errorf("fga_outbox: invalid decision coordinate")
+	}
+	return emitStampedTx(ctx, tx, eventType, tuples, at)
+}
+
 func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple) error {
+	return emitStampedTx(ctx, tx, eventType, tuples, time.Time{})
+}
+
+// EmitReservedDecisionTx потребляет ровно предварительно зарезервированные ID.
+// Порядок групп и форма payload общие со штатным emitter; один INSERT сохраняет
+// операторную свёртку и её canonical порядок, callback/произвольного SQL нет.
+func EmitReservedDecisionTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, at time.Time, ids []int64) error {
+	if at.IsZero() || ids == nil || (eventType != EventTypeWrite && eventType != EventTypeDelete) {
+		return fmt.Errorf("fga_outbox: invalid reserved decision coordinate")
+	}
+	for i, id := range ids {
+		if id <= 0 || (i > 0 && id <= ids[i-1]) {
+			return fmt.Errorf("fga_outbox: invalid reserved ID order")
+		}
+	}
+	return emitReservedStampedTx(ctx, tx, eventType, tuples, at, ids)
+}
+
+func emitStampedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, at time.Time) error {
+	return emitReservedStampedTx(ctx, tx, eventType, tuples, at, nil)
+}
+
+func emitReservedStampedTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.RelationTuple, at time.Time, ids []int64) error {
+	if tx == nil {
+		return fmt.Errorf("fga_outbox: tx must not be nil")
+	}
+	if len(tuples) == 0 {
+		if len(ids) != 0 {
+			return fmt.Errorf("fga_outbox: unused reserved IDs")
+		}
+		return nil
+	}
+	payloads, err := compilePayloads(eventType, tuples)
+	if err != nil {
+		return err
+	}
+	if ids != nil && len(ids) != len(payloads) {
+		return fmt.Errorf("fga_outbox: reserved ID count differs from effects")
+	}
+	if ids != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO kaname.fga_outbox(id,event_type,payload,created_at)
+SELECT i,$1,p::jsonb,$3::timestamptz FROM unnest($4::bigint[],$2::text[]) AS prepared(i,p)`, eventType, payloads, at.UTC(), ids); err != nil {
+			return fmt.Errorf("fga_outbox: insert reserved %s: %w", eventType, err)
+		}
+		return nil
+	}
+	// ОДИН стейтмент на все строки вместо одного на строку: свёртка журнала в
+	// прямой факт — операторная (kaname#568), и порядок захвата строк факта
+	// внутри оператора задаёт она сама — по (объект, субъект), строки одного ключа
+	// по id. Порядок МЕЖДУ вызовами сохраняется: выдача и отзыв одного ключа НЕ
+	// коммутативны, и id второго вызова всегда больше id первого.
+	stamp := writeStamp
+	if eventType == EventTypeDelete {
+		stamp = deleteStamp
+	}
+	args := []any{eventType, payloads}
+	if !at.IsZero() {
+		stamp = "$3::timestamptz"
+		args = append(args, at.UTC())
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
+   SELECT $1, p::jsonb, `+stamp+` FROM unnest($2::text[]) AS p`, args...,
+	); err != nil {
+		return fmt.Errorf("fga_outbox: insert %s: %w", eventType, err)
+	}
+	return nil
+}
+
+// EmitForwardWriteTx использует allocation-only путь unsigned forward. Форма
+// payload общая со штатным emitter; ID, метка транзакции и прежние стражи — в БД.
+// Один вызов пишет весь набор одним INSERT и сохраняет операторную свёртку.
+func EmitForwardWriteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {
 	if tx == nil {
 		return fmt.Errorf("fga_outbox: tx must not be nil")
 	}
 	if len(tuples) == 0 {
 		return nil
 	}
+	payloads, err := compilePayloads(EventTypeWrite, tuples)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT kaname.authority_forward_emit_v4($1::jsonb[])`, payloads); err != nil {
+		return fmt.Errorf("fga_outbox: insert %s: %w", EventTypeWrite, err)
+	}
+	return nil
+}
+
+// EmitColdForwardWriteTx резервирует и подтверждает строки штатными этапами
+// unsigned forward. INSERT выполняет обычную операторную свёртку в той же tx.
+func EmitColdForwardWriteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {
+	if tx == nil {
+		return fmt.Errorf("fga_outbox: tx must not be nil")
+	}
+	if len(tuples) == 0 {
+		return nil
+	}
+	payloads, err := compilePayloads(EventTypeWrite, tuples)
+	if err != nil {
+		return err
+	}
+	var nonce string
+	if err := tx.QueryRow(ctx, `SELECT kaname.authority_forward_prepare_v4($1::jsonb[])`, payloads).Scan(&nonce); err != nil {
+		return fmt.Errorf("fga_outbox: prepare %s: %w", EventTypeWrite, err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO kaname.fga_outbox(id,event_type,payload,created_at)
+SELECT id,event_type,payload,created_at FROM kaname.authority_forward_claim_v4($1::uuid)`, nonce); err != nil {
+		return fmt.Errorf("fga_outbox: insert %s: %w", EventTypeWrite, err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT kaname.authority_forward_finish_v4($1::uuid)`, nonce); err != nil {
+		return fmt.Errorf("fga_outbox: finish %s: %w", EventTypeWrite, err)
+	}
+	return nil
+}
+
+// EmitNativeDeleteTx использует отдельную unsigned дверь снятия. Общая сборка
+// сохраняет payload и группировку, а БД ставит часы в строке actual INSERT.
+func EmitNativeDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {
+	if tx == nil {
+		return fmt.Errorf("fga_outbox: tx must not be nil")
+	}
+	if len(tuples) == 0 {
+		return nil
+	}
+	payloads, err := compilePayloads(EventTypeDelete, tuples)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT kaname.authority_native_delete_emit_v4($1::jsonb[])`, payloads); err != nil {
+		return fmt.Errorf("fga_outbox: insert %s: %w", EventTypeDelete, err)
+	}
+	return nil
+}
+
+// compilePayloads — единственная сборка отсортированных, дедуплицированных
+// групп (объект, субъект), включая эхо совместимости только для выдачи.
+func compilePayloads(eventType string, tuples []clients.RelationTuple) ([]string, error) {
 	groups := groupByGrant(tuples)
 	payloads := make([]string, 0, len(groups))
 	for _, g := range groups {
@@ -341,27 +484,11 @@ func emitTx(ctx context.Context, tx pgx.Tx, eventType string, tuples []clients.R
 		}
 		payload, err := json.Marshal(fields)
 		if err != nil {
-			return fmt.Errorf("fga_outbox: marshal payload: %w", err)
+			return nil, fmt.Errorf("fga_outbox: marshal payload: %w", err)
 		}
 		payloads = append(payloads, string(payload))
 	}
-	// ОДИН стейтмент на все строки вместо одного на строку: свёртка журнала в
-	// прямой факт — операторная (kaname#568), и порядок захвата строк факта
-	// внутри оператора задаёт она сама — по (объект, субъект), строки одного ключа
-	// по id. Порядок МЕЖДУ вызовами сохраняется: выдача и отзыв одного ключа НЕ
-	// коммутативны, и id второго вызова всегда больше id первого.
-	stamp := writeStamp
-	if eventType == EventTypeDelete {
-		stamp = deleteStamp
-	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
-		 SELECT $1, p::jsonb, `+stamp+` FROM unnest($2::text[]) AS p`,
-		eventType, payloads,
-	); err != nil {
-		return fmt.Errorf("fga_outbox: insert %s: %w", eventType, err)
-	}
-	return nil
+	return payloads, nil
 }
 
 // writeStamp / deleteStamp — метка created_at строки журнала, она же ВЕРСИЯ строки

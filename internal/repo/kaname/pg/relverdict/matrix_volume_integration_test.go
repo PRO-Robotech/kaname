@@ -373,8 +373,8 @@ func openMatrixPool(t *testing.T, ctx context.Context) (*pgxpool.Pool, *verdictC
 func seedMatrixSubject(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	t.Helper()
 	exec(t, ctx, tx,
-		`INSERT INTO kaname.users (id, external_id, email, account_id)
-		 VALUES ($1, 'ext-mx', 'usr-mx@kacho.local', 'acc-1')`, matrixUserID)
+		activewayin.WithWayIn(`INSERT INTO kaname.users (id, external_id, email, account_id)
+		 VALUES ($1, 'ext-mx', 'usr-mx@kacho.local', 'acc-1')`), matrixUserID)
 	seedProbeRole(t, ctx, tx, matrixRoleID, matrixRoleName)
 }
 
@@ -921,49 +921,54 @@ func runMatrix(t *testing.T, ctx context.Context, points []matrixPoint) []matrix
 	repo := kanamepg.New(pool, nil)
 
 	results := make([]matrixResult, 0, len(points))
-	var f *gridFixture
+	h := &r7CostSeed{pool: pool}
 	seq := 0
 
 	for i, p := range points {
-		// Посев КОММИТИТСЯ: продуктовый писатель открывает свою транзакцию и
-		// незакоммиченного не увидит. Точки растут ПРИРАЩЕНИЕМ — иначе четыре
-		// точки посадили бы 1.11·10⁶ объектов вместо миллиона.
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("транзакция посева: %v", err)
-		}
-		if i == 0 {
-			f = newGridFixture(t, ctx, tx)
-			seedMatrixSubject(t, ctx, tx)
-		} else {
-			f.tx = tx
-		}
+		// Только Given: полная матрица растёт на той же базе, но каждый COMMIT
+		// освобождает journal-ключи не более 128 новых объектов/выдач. Метрики
+		// операций, четыре точки и 11 циклов остаются прежними. Таймер включает
+		// bootstrap, все новые транзакции и заключительный ANALYZE.
 		t0 := time.Now()
-		f.seedPoint(t, ctx, p.grid())
-		activewayin.Seed(t, ctx, tx)
-		if err := tx.Commit(ctx); err != nil {
-			t.Fatalf("фиксация посева точки %s: %v", p, err)
+		if i == 0 {
+			h.transaction(t, true, func(seedCtx context.Context, tx pgx.Tx) {
+				h.fixture = newR7CostGridFixture(t, seedCtx, tx)
+				seedMatrixSubject(t, seedCtx, tx)
+			})
 		}
+		for h.fixture.seedN < p.N {
+			next := min(h.fixture.seedN+r7CostSeedBatch, p.N)
+			h.transaction(t, true, func(seedCtx context.Context, tx pgx.Tx) {
+				h.fixture.growN(t, seedCtx, next)
+			})
+		}
+		h.growB(t, p.B)
+		h.transaction(t, true, func(seedCtx context.Context, tx pgx.Tx) {
+			h.fixture.setR(t, seedCtx, p.R, recruitForR(p.grid()))
+			h.fixture.setF(t, seedCtx, p.F, recruitForF(p.grid()))
+		})
+		h.transaction(t, true, func(seedCtx context.Context, tx pgx.Tx) {
+			h.fixture.analyze(t, seedCtx)
+		})
 		seedIn := time.Since(t0)
 
-		// Перепись — ДО операций: она описывает объём, ПРОТИВ которого они
-		// исполнялись. Снятая после, она включала бы строки самого замера.
-		ctx1, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("транзакция переписи: %v", err)
-		}
-		census, err := scalegrid.TakeCensus(ctx, ctx1, probeSpeakers)
-		if err != nil {
-			_ = ctx1.Rollback(ctx)
-			t.Fatalf("перепись в точке %s: %v", p, err)
-		}
-		census.VerdictsAsked = int64(matrixRepeats * 2)
-		if err := census.Verify(p.grid()); err != nil {
-			_ = ctx1.Rollback(ctx)
-			t.Fatalf("%v", err)
-		}
-		tables, dbRows, dbBytes := takeMatrixTables(t, ctx, ctx1)
-		_ = ctx1.Rollback(ctx)
+		// Перепись — после полного committed Given и ДО операций. Здесь нет
+		// R7 h.census: её N=200/R=1 не описывают четыре точки этой матрицы.
+		var census scalegrid.Census
+		var tables []tableCount
+		var dbRows, dbBytes int64
+		h.transaction(t, false, func(censusCtx context.Context, tx pgx.Tx) {
+			var err error
+			census, err = scalegrid.TakeCensus(censusCtx, tx, probeSpeakers)
+			if err != nil {
+				t.Fatalf("перепись в точке %s: %v", p, err)
+			}
+			census.VerdictsAsked = int64(matrixRepeats * 2)
+			if err := census.Verify(p.grid()); err != nil {
+				t.Fatalf("%v", err)
+			}
+			tables, dbRows, dbBytes = takeMatrixTables(t, censusCtx, tx)
+		})
 
 		res := measureMatrixPoint(t, ctx, pool, repo, capture, notices, p, &seq)
 		res.census, res.tables = census, tables

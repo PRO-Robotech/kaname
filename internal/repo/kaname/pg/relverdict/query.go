@@ -97,20 +97,19 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
+	"github.com/jackc/pgx/v5"
 )
 
 // MaxAncestorDepth — предел обхода цепи предков.
 //
-// Совпадает с ограничением таблицы рёбер и с пределом компилятора модели. Здесь
-// он повторён НЕ как вторая истина, а как страховка обхода: рекурсивный запрос
-// без предела на данных с циклом не завершается, и полагаться на то, что цикла
-// нет, — значит полагаться на ограничение, которое проверяет другая сторона.
-const MaxAncestorDepth = 4
+// Считает переходы обхода, а не позиции сохранённой цепи и не число
+// родителей одного узла. Общая граница совпадает с компилятором модели.
+const MaxAncestorDepth = hierarchy.MaxPointerHops
 
 // Verdict — исход вопроса. Три состояния, а не два: «не знаю» отличимо от «нет».
 type Verdict int
@@ -142,7 +141,10 @@ func (v Verdict) String() string {
 // Query — вопрос к форме E.
 type Query struct {
 	// PreparedPlans разрешает предварительную проверку запуска с аутентификацией до установки модели процесса.
-	PreparedPlans *authzmodel.Plans
+	PreparedPlans PlanSource
+	// DecisionAt задаётся после всех ожиданий writer. При ненулевом времени
+	// прямой Ask проверяет срок ordinary и meta carriers на одной границе.
+	DecisionAt time.Time
 	// Subject — целиком, в форме `"user:usr-1"`: подстановочный и групповой
 	// субъекты на пару не раскладываются.
 	Subject string
@@ -201,6 +203,7 @@ const maxConditionRows = 256
 // сборкой, о типе, заведённом применением манифеста в работающем процессе, не
 // знает (kacho#1986). Двух словарей в одном соединении быть не должно —
 // соединение по разным написаниям не совпадает НИКОГДА и молча.
+// $12 — независимый предел родителей одного шага; explicit clock использует $13.
 const verdictSQL = `
 WITH RECURSIVE
 -- scope — ОБЛАСТИ, на которые может быть сделана действующая выдача: сам объект
@@ -266,16 +269,11 @@ WITH RECURSIVE
 -- каждом шаге: измерено 2412 строк за один вердикт при трёх рёбрах у объекта.
 -- Соединение вбок с пределом заставляет ходить указателем по ключу.
 --
--- ПРЕДЕЛ НЕ УСЕКАЕТ — ДОВОД ЧИСЛОМ, А НЕ РАВЕНСТВОМ. Прежний довод («рёбер у
--- объекта не больше глубин, ключ таблицы уникален по глубине») отменён 781001: у
--- проекта указателей ДВА — аккаунт и кластер, — и оба лежат на глубине 1.
--- Действующий довод: звеньев у объекта столько, сколько у его типа РАЗНЫХ
--- отношений-указателей, и каждая достроенная ветвь даёт объекту ровно одно звено
--- (ветви взаимоисключающи: NOT EXISTS отменяет вывод там, где владелец цепь
--- назвал, а две ветви роли разведены ограничением схемы). Максимум по дереву —
--- 2 при пределе 4, и это число ПРОВЕРЯЕТСЯ переписью источников, а не выводится:
--- объект, у которого звеньев столько же, сколько предел, усекался бы МОЛЧА, а
--- отказ по усечённой цепи неотличим от честного.
+-- Предел числа родителей и глубина пути независимы: первый остаётся 4,
+-- второй включает 5 переходов до cluster. Сохранённая цепь имеет до 4 позиций;
+-- выведенные ветви resource_scope_edge требуют собственной проверки полноты.
+-- Captured writer дочитывает страницы и отвергает graph с fanout>4 либо
+-- продолжающийся после предельной глубины; LIMIT сам полноту не доказывает.
 -- Та же форма и по той же причине стоит на пути перечисления — одна семантика
 -- области на обе точки входа.
 scope(s_type, s_id, depth) AS (
@@ -288,7 +286,7 @@ scope(s_type, s_id, depth) AS (
                FROM kaname.resource_scope_edge pe
               WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
               ORDER BY pe.depth
-              LIMIT $7::int
+              LIMIT $12::int
            ) e
      WHERE s.depth < $7::int
 ),
@@ -317,43 +315,7 @@ scope(s_type, s_id, depth) AS (
 scope_distinct(s_type, s_id, depth) AS (
     SELECT s_type, s_id, min(depth) FROM scope GROUP BY s_type, s_id
 ),
-speaker_pair(s_type, s_id, via) AS (
-    -- СУБЪЕКТ ВЫДАЧИ — ПАРОЙ КОЛОНОК, а не склейкой.
-    --
-    -- Склейка subject_type || ':' || subject_id выводит колонки из-под любого
-    -- индекса: сравнивать приходится вычисленное значение, а вычисленное
-    -- значение отбирает строки только ПОСЛЕ того, как они прочитаны. Пара
-    -- колонок сужает набор ДО чтения. Паритет, а не новое устройство: соседнее
-    -- соединение того же запроса читает членство парой колонок и обслуживается
-    -- индексом (member_type, member_id) с самого начала.
-    --
-    -- Колонка via называет, ОТКУДА взялась пара, и существует ради текстовой
-    -- формы ниже: хвост #member раскрывает ЧЛЕНСТВО, и приписать его группе,
-    -- которая сама является вызывающим, значило бы расширить ответ на факты,
-    -- которых вызывающему не выдавали.
-    SELECT split_part($1::text, ':', 1),
-           substr($1::text, length(split_part($1::text, ':', 1)) + 2),
-           'self'
-  UNION ALL
-    SELECT 'group', gm.group_id, 'member'
-      FROM kaname.group_members gm
-     WHERE gm.member_type = split_part($1::text, ':', 1)
-       AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
-  UNION ALL
-    -- КЛАССЫ ГОВОРЯЩЕГО (Р2) — значением запроса, а не выводом по месту: их
-    -- вычисляет ОДИН производитель (domain.SpeakerClasses) для всех трёх форм
-    -- вопроса, и разойтись форме перечня с формой вопроса негде. Безусловной
-    -- подстановки «любой» здесь больше нет: аноним выданного вошедшим не
-    -- получает (SC-10), группа — ничего (SC-11). Классов у говорящего не больше
-    -- двух, и они приходят двумя скалярами. Строк здесь от этого становится
-    -- больше, и порядок соединения с субъектами выдач держит не оценка числа
-    -- строк, а обращение вбок в ветви выдач (довод — там). Пустое имя класса не
-    -- совпадает ни с одной строкой: у субъекта выдачи пустого идентификатора нет.
-    SELECT 'system_class', $10::text, 'class' WHERE ` + speakerExistsSQL + `
-  UNION ALL
-    SELECT 'system_class', $11::text, 'class' WHERE ` + speakerExistsSQL + `
-),
-speaker(subject) AS (
+` + directSpeakerPairsSQL + `speaker(subject) AS (
     -- ТЕКСТОВАЯ форма — для прямых фактов: их субъект хранится строкой, и она
     -- не разбирается на пару нигде в дереве. Обе формы имени группы, и это не
     -- перестраховка: канонический производитель кортежей пишет
@@ -646,11 +608,14 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 		// Выдавать второе за первое запрещено (см. ветвь Unknown ниже), но и
 		// отвечать ошибкой на первое неверно: вызывающий перестаёт отличать «нет
 		// прав» от «сломалось», а снятый тип отвечает пятисоткой вместо «нет».
-		if errors.Is(err, authzplan.ErrTypeNotDeclared) {
+		if errors.Is(err, authzplan.ErrTypeNotDeclared) && !isGrantCapabilityType(in.ObjectType) {
 			g.TypeNotDeclared = true
 			return Deny, g, nil
 		}
 		return Unknown, g, err
+	}
+	if isGrantCapabilityType(in.ObjectType) {
+		return askGrantCapability(ctx, q, in)
 	}
 	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
 	// (kacho#2036), и второго чтения каталога ради неё не заводится.
@@ -669,11 +634,21 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	if err != nil {
 		return Unknown, g, err
 	}
-	rows, err := q.Query(ctx, sql,
+	args := []any{
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
-	)
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), hierarchy.MaxImmediateParents,
+	}
+	if !in.DecisionAt.IsZero() {
+		// Общую ветвь используют также списки. Меняем только прямой Ask нового
+		// writer; прежние вызовы без времени сохраняют now() своей транзакции.
+		sql, err = replaceOnce(sql, "b.expires_at > now()", "b.expires_at > $13::timestamptz")
+		if err != nil {
+			return Unknown, g, err
+		}
+		args = append(args, in.DecisionAt)
+	}
+	rows, err := q.Query(ctx, sql, args...)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
 	}
@@ -866,7 +841,7 @@ scope(object_id, s_type, s_id, depth) AS (
                FROM kaname.resource_scope_edge pe
               WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
               ORDER BY pe.depth
-              LIMIT $7::int
+              LIMIT $12::int
            ) e
      WHERE s.depth < $7::int
 ),
@@ -1020,7 +995,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, in.ObjectIDs,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1),
+		catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), hierarchy.MaxImmediateParents,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relverdict: запрос о странице: %w", err)
@@ -1142,7 +1117,10 @@ func sourcesOf(objectType, relation string) (parents, relations, verbs []string,
 	return sourcesOfPrepared(nil, objectType, relation)
 }
 
-func sourcesOfPrepared(plans *authzmodel.Plans, objectType, relation string) (parents, relations, verbs []string, err error) {
+func sourcesOfPrepared(plans PlanSource, objectType, relation string) (parents, relations, verbs []string, err error) {
+	if old, ok := plans.(*authzmodel.Plans); ok && old == nil {
+		plans = nil
+	}
 	if plans == nil {
 		plans, err = authzmodel.Shared()
 		if err != nil {

@@ -252,29 +252,36 @@ func TestR7_1_10_ForeignBindingsDoNotEnterVerdictCost(t *testing.T) {
 	}
 	const foreign = 10000
 
-	ctx := context.Background()
-	tx, cap := openProbeTx(t, ctx)
-	f := newGridFixture(t, ctx, tx)
-	f.growN(t, ctx, 200)
-	f.setR(t, ctx, 1, scalegrid.RecruitDirect)
-	f.analyze(t, ctx)
-
-	vCtl, mCtl := askAndExplain(t, ctx, tx, cap, probeObjectID)
+	h := newR7CostSeed(t)
+	f, cap := h.fixture, h.capture
+	h.census(t, 0, 0)
+	var vCtl, v1, v2 relverdict.Verdict
+	var mCtl, m1, m2 planrows.Measurement
+	h.transaction(t, false, func(ctx context.Context, tx pgx.Tx) {
+		f.analyze(t, ctx)
+		vCtl, mCtl = askAndExplain(t, ctx, tx, cap, probeObjectID)
+	})
 	ctl := mCtl.Rows
 	t.Logf("контрольная раскладка: одна выдача, называющая спрашиваемого · вердикт %s · строк %d",
 		vCtl, ctl)
 
 	// ── сторона-1: чужие выдачи НА ТОЙ ЖЕ области ────────────────────────────
-	f.growB(t, ctx, foreign)
-	f.analyze(t, ctx)
-	v1, m1 := askAndExplain(t, ctx, tx, cap, probeObjectID)
+	h.growB(t, foreign)
+	h.census(t, foreign, 0)
+	h.transaction(t, false, func(ctx context.Context, tx pgx.Tx) {
+		f.analyze(t, ctx)
+		v1, m1 = askAndExplain(t, ctx, tx, cap, probeObjectID)
+	})
 	t.Logf("сторона-1 (%d чужих выдач на цепи областей): вердикт %s · строк %d · прирост %d",
 		foreign, v1, m1.Rows, m1.Rows-ctl)
 
 	// ── сторона-2: выдачи ТОМУ ЖЕ субъекту в ДРУГИХ областях ────────────────
-	seedElsewhereBindings(t, ctx, tx, f, foreign)
-	f.analyze(t, ctx)
-	v2, m2 := askAndExplain(t, ctx, tx, cap, probeObjectID)
+	h.elsewhere(t, foreign)
+	h.census(t, foreign, foreign)
+	h.transaction(t, false, func(ctx context.Context, tx pgx.Tx) {
+		f.analyze(t, ctx)
+		v2, m2 = askAndExplain(t, ctx, tx, cap, probeObjectID)
+	})
 	t.Logf("сторона-2 (%d выдач спрашиваемому ВНЕ цепи областей): вердикт %s · строк %d · прирост %d",
 		foreign, v2, m2.Rows, m2.Rows-ctl)
 
@@ -349,62 +356,62 @@ func TestR7_1_12_SubjectAndScopeResolveOnOneIndex(t *testing.T) {
 	}
 	const foreign = 10000
 
-	ctx := context.Background()
-	tx, cap := openProbeTx(t, ctx)
-	f := newGridFixture(t, ctx, tx)
-	f.growN(t, ctx, 200)
-	f.setR(t, ctx, 1, scalegrid.RecruitDirect)
-	f.growB(t, ctx, foreign)
-	f.analyze(t, ctx)
+	h := newR7CostSeed(t)
+	h.growB(t, foreign)
+	h.census(t, foreign, 0)
+	h.transaction(t, false, func(ctx context.Context, tx pgx.Tx) {
+		f, cap := h.fixture, h.capture
+		f.analyze(t, ctx)
 
-	// ПРЕДПОСЫЛКА: оба предиката стоят на ОДНОМ отношении. Иначе одного индекса,
-	// обслуживающего оба, не существует by construction, и «свойство есть»
-	// означало бы «план сегодня удобен».
-	var carried int
-	if err := tx.QueryRow(ctx, `
+		// ПРЕДПОСЫЛКА: оба предиката стоят на ОДНОМ отношении. Иначе одного индекса,
+		// обслуживающего оба, не существует by construction, и «свойство есть»
+		// означало бы «план сегодня удобен».
+		var carried int
+		if err := tx.QueryRow(ctx, `
 		SELECT count(*)::int FROM information_schema.columns
 		 WHERE table_schema = 'kaname' AND table_name = 'access_binding_subjects'
 		   AND column_name IN ('subject_type','subject_id','resource_type','resource_id')`).Scan(&carried); err != nil {
-		t.Fatalf("состав колонок: %v", err)
-	}
-	if carried != 4 {
-		t.Fatalf("на строке субъекта выдачи %d из четырёх колонок пары «субъект + область»: "+
-			"предикаты стоят на разных отношениях, и утверждать свойство не о чем", carried)
-	}
+			t.Fatalf("состав колонок: %v", err)
+		}
+		if carried != 4 {
+			t.Fatalf("на строке субъекта выдачи %d из четырёх колонок пары «субъект + область»: "+
+				"предикаты стоят на разных отношениях, и утверждать свойство не о чем", carried)
+		}
 
-	vWith, mWith := askAndExplain(t, ctx, tx, cap, probeObjectID)
-	if vWith != relverdict.Allow {
-		t.Fatalf("вердикт %s: мерилась бы стоимость неверного ответа", vWith)
-	}
-	subjWith := touchedOf(mWith, "access_binding_subjects")
-	t.Logf("с индексом: строк за вердикт %d, тронуто строк субъектов выдач %d "+
-		"(в облаке %d чужих выдач)", mWith.Rows, subjWith, foreign)
+		vWith, mWith := askAndExplain(t, ctx, tx, cap, probeObjectID)
+		if vWith != relverdict.Allow {
+			t.Fatalf("вердикт %s: мерилась бы стоимость неверного ответа", vWith)
+		}
+		subjWith := touchedOf(mWith, "access_binding_subjects")
+		t.Logf("с индексом: строк за вердикт %d, тронуто строк субъектов выдач %d "+
+			"(в облаке %d чужих выдач)", mWith.Rows, subjWith, foreign)
 
-	// ── ИНЪЕКЦИЯ: индекс снят, всё прочее не тронуто ─────────────────────────
-	if _, err := tx.Exec(ctx,
-		`DROP INDEX kaname.access_binding_subjects_subject_scope_idx`); err != nil {
-		t.Fatalf("снятие индекса: имя изменилось или индекса нет — инъекция не воспроизводит "+
-			"состояние «объявлен, но не применяется»: %v", err)
-	}
-	f.analyze(t, ctx)
-	vNo, mNo := askAndExplain(t, ctx, tx, cap, probeObjectID)
-	subjNo := touchedOf(mNo, "access_binding_subjects")
-	t.Logf("без индекса: строк за вердикт %d, тронуто строк субъектов выдач %d", mNo.Rows, subjNo)
+		// ── ИНЪЕКЦИЯ: индекс снят, всё прочее не тронуто ─────────────────────────
+		if _, err := tx.Exec(ctx,
+			`DROP INDEX kaname.access_binding_subjects_subject_scope_idx`); err != nil {
+			t.Fatalf("снятие индекса: имя изменилось или индекса нет — инъекция не воспроизводит "+
+				"состояние «объявлен, но не применяется»: %v", err)
+		}
+		f.analyze(t, ctx)
+		vNo, mNo := askAndExplain(t, ctx, tx, cap, probeObjectID)
+		subjNo := touchedOf(mNo, "access_binding_subjects")
+		t.Logf("без индекса: строк за вердикт %d, тронуто строк субъектов выдач %d", mNo.Rows, subjNo)
 
-	// Ответ обязан совпасть: инъекция меняет СТОИМОСТЬ, а не смысл.
-	if vNo != vWith {
-		t.Errorf("снятие индекса изменило ответ (%s против %s): инъекция сравнивала бы "+
-			"разные вопросы", vNo, vWith)
-	}
-	if subjNo <= subjWith {
-		t.Errorf("без индекса по строкам субъектов выдач прочитано %d, с индексом %d — "+
-			"инъекция не воспроизвела дефекта, и зелёное с индексом ничего не доказывает: "+
-			"оно означало бы «строк мало», а не «мало ИЗ-ЗА индекса»", subjNo, subjWith)
-	}
-	if subjWith > foreignBindingsCeiling {
-		t.Errorf("с индексом по строкам субъектов выдач прочитано %d при потолке %d: "+
-			"индекс объявлен, но набор им не сужается", subjWith, foreignBindingsCeiling)
-	}
+		// Ответ обязан совпасть: инъекция меняет СТОИМОСТЬ, а не смысл.
+		if vNo != vWith {
+			t.Errorf("снятие индекса изменило ответ (%s против %s): инъекция сравнивала бы "+
+				"разные вопросы", vNo, vWith)
+		}
+		if subjNo <= subjWith {
+			t.Errorf("без индекса по строкам субъектов выдач прочитано %d, с индексом %d — "+
+				"инъекция не воспроизвела дефекта, и зелёное с индексом ничего не доказывает: "+
+				"оно означало бы «строк мало», а не «мало ИЗ-ЗА индекса»", subjNo, subjWith)
+		}
+		if subjWith > foreignBindingsCeiling {
+			t.Errorf("с индексом по строкам субъектов выдач прочитано %d при потолке %d: "+
+				"индекс объявлен, но набор им не сужается", subjWith, foreignBindingsCeiling)
+		}
+	})
 }
 
 // ── R7-1-13 / R7-1-14: РАННИЙ ВЫХОД И УСЕЧЕНИЕ ──────────────────────────────

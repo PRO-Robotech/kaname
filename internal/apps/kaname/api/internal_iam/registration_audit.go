@@ -11,6 +11,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -63,6 +64,14 @@ func hierarchyAuditFields(h domain.ParentHierarchy) map[string]any {
 func (uc *RegisterResourceUseCase) RecordRefusal(ctx context.Context, in unregisterInput, unregister bool, outcome string) error {
 	if _, _, verified := authzguard.ModuleActor(ctx); !verified {
 		return nil
+	}
+	if uc.resourceDecisionConfigured {
+		typ, id, _ := strings.Cut(in.GetObject(), ":")
+		_, err := uc.runResourceDecision(ctx, kanamerepo.ResourceDecisionIntent{Action: kanamerepo.ResourceDecisionRecordRefusal,
+			Tuple:          service.RelationTuple{User: in.GetSubjectId(), Relation: in.GetRelation(), Object: in.GetObject()},
+			Mirror:         service.ResourceMirrorRow{ObjectType: typ, ObjectID: id, SourceVersion: sourceVersion(in)},
+			RefusalOutcome: kanamerepo.ResourceRefusalOutcome(outcome), RefusalUnregister: unregister})
+		return err
 	}
 	t := tupleIntent{subject: in.GetSubjectId(), relation: in.GetRelation(), object: in.GetObject()}
 	typ, id, _ := strings.Cut(t.object, ":")

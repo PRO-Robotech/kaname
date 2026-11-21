@@ -544,6 +544,8 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 	reason := "не объявлен манифестом модуля " + declared.Module
 
 	err = a.tx.RunInWriteTx(ctx, func(ctx context.Context, w CatalogWriter) error {
+		// Каждая попытка считает только собственные записи.
+		rep = Report{Module: declared.Module, DeclaredResources: len(declared.Resources), DeclaredVerbs: len(declared.Verbs)}
 		// Замок — ПЕРВЫМ оператором транзакции. Взятый позже, он оставил бы окно,
 		// в котором два применения уже прочитали каталог и оба считают свой снимок
 		// действительным.

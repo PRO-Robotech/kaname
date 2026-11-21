@@ -192,6 +192,11 @@ import (
 // (desiredMemberForObject через desiredMembers), поэтому оба пути выводят ПОБАЙТНО ОДИНАКОВЫЕ кортежи
 // (без избыточной/недостающей выдачи; идемпотентное перекрытие форварда и асинхронной страховки).
 func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID domain.AccessBindingID) error {
+	// kaname#1034: participant rollout использует полный staged diff; прежний
+	// additive путь ниже сохраняется только в legacy mode. Цена измеряется отдельно.
+	if r.stagedBindings != nil {
+		return r.stagedBindings.ReconcileStagedBinding(ctx, bindingID, false, r.size)
+	}
 	col := &syncFGACollector{}
 	w := &forwardWriteSet{}
 	// needsFull устанавливается в чтении ниже, если у привязки уже материализованы
@@ -311,6 +316,21 @@ func (r *Reconciler) ReconcileBindingForward(ctx context.Context, bindingID doma
 // (удаление устаревшего, аудит вложенности REJECTED, PENDING, обход), запускаемой совместно коммитимым
 // событием очереди сверки; форвард — лишь ускоритель успешного пути.
 func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, objectID string) error {
+	if objectType == "iam.group" && r.groupObjects != nil {
+		return r.groupObjects.ReconcileObjectForward(ctx, objectType, objectID)
+	}
+	if r.objectConfigured {
+		if r.objectObjects == nil {
+			return errObjectParticipantAbsent
+		}
+		if r.objectObjects.objectDecisions != nil {
+			return r.objectObjects.runObjectDecision(ctx, objectType, objectID, ObjectDecisionForward, r.size)
+		}
+		return r.objectObjects.ReconcileObjectForward(ctx, objectType, objectID)
+	}
+	if r.objectDecisions != nil {
+		return r.runObjectDecision(ctx, objectType, objectID, ObjectDecisionForward, r.size)
+	}
 	return r.reconcileObjectForward(ctx, objectType, objectID, false /* не доказано — сохранить страж удаления устаревшего */)
 }
 
@@ -358,6 +378,21 @@ func (r *Reconciler) ReconcileObjectForward(ctx context.Context, objectType, obj
 // видимости кортежей (запрет #9): материализация остаётся согласованной в конечном счёте, это лишь удерживает её
 // на быстром пути.
 func (r *Reconciler) ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error {
+	if objectType == "iam.group" && r.groupObjects != nil {
+		return r.groupObjects.ReconcileObjectForwardNoStale(ctx, objectType, objectID)
+	}
+	if r.objectConfigured {
+		if r.objectObjects == nil {
+			return errObjectParticipantAbsent
+		}
+		if r.objectObjects.objectDecisions != nil {
+			return r.objectObjects.runObjectDecision(ctx, objectType, objectID, ObjectDecisionForwardNoStale, r.size)
+		}
+		return r.objectObjects.ReconcileObjectForwardNoStale(ctx, objectType, objectID)
+	}
+	if r.objectDecisions != nil {
+		return r.runObjectDecision(ctx, objectType, objectID, ObjectDecisionForwardNoStale, r.size)
+	}
 	return r.reconcileObjectForward(ctx, objectType, objectID, true /* доказано — устаревшего быть не может */)
 }
 
@@ -374,7 +409,7 @@ func (r *Reconciler) reconcileObjectForward(ctx context.Context, objectType, obj
 	// участники (ПОВТОРНАЯ РЕГИСТРАЦИЯ / ОБНОВЛЕНИЕ меток), что требует ПОЛНОГО сравнения удаления устаревшего,
 	// намеренно отсутствующего у добавляющего пути (см. СТРАЖ УДАЛЕНИЯ УСТАРЕВШЕГО).
 	needsFull := false
-	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
+	if err := r.withObjectTx(ctx, objectType, objectID, func(ctx context.Context, s ReconcileStore) error {
 		// СТРАЖ УДАЛЕНИЯ УСТАРЕВШЕГО (исправление регрессии T31 отзыва по метке `post-revoke-deny`).
 		// Добавляющий прямой путь лишь ДОБАВЛЯЕТ кортежи объекта и НИКОГДА не отзывает. Это
 		// верно ТОЛЬКО для НОВОГО объекта (создание — удалять устаревшее нечего). Но
@@ -529,7 +564,11 @@ func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileSto
 	if err != nil {
 		return fmt.Errorf("forward: %w", err)
 	}
-	for _, dm := range desiredMembersForObject(r.cat.Facts(), bs, obj, anc) {
+	desired, err := desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
+	if err != nil {
+		return fmt.Errorf("forward object compiler: %w", err)
+	}
+	for _, dm := range desired {
 		if dm.Status != domain.VerificationActive {
 			// Вердикт вложенности REJECTED: добавляющий прямой путь материализует только
 			// выдачи ACTIVE; полной асинхронной страховке принадлежат строка участника REJECTED и
@@ -568,13 +607,34 @@ func (w *forwardWriteSet) flush(ctx context.Context, s ReconcileStore) error {
 	return w.writeLive(ctx, s)
 }
 
+// forwardTupleWriter — дополнительная возможность pg legacy adapter. Основной
+// порт остаётся совместимым с signed participant и существующими хранилищами.
+type forwardTupleWriter interface {
+	EmitForwardTupleWrite(context.Context, []domain.MembershipTuple) error
+}
+
+type coldForwardTupleWriter interface {
+	EmitColdForwardTupleWrite(context.Context, []domain.MembershipTuple) error
+}
+
 // writeLive пишет только накопленное: вызывающий уже отфильтровал members
 // и удерживает их строки зеркала в той же транзакции (keepLive либо keepLiveDesired).
 func (w *forwardWriteSet) writeLive(ctx context.Context, s ReconcileStore) error {
+	return w.writeLiveBatch(ctx, s, false)
+}
+
+func (w *forwardWriteSet) writeLiveBatch(ctx context.Context, s ReconcileStore, singleColdBatch bool) error {
 	if err := s.UpsertMembers(ctx, w.members); err != nil {
 		return fmt.Errorf("forward: upsert members (%d): %w", len(w.members), err)
 	}
-	if err := s.EmitTupleWrite(ctx, w.fresh); err != nil {
+	emit := s.EmitTupleWrite
+	if forward, ok := s.(forwardTupleWriter); ok {
+		emit = forward.EmitForwardTupleWrite
+	}
+	if cold, ok := s.(coldForwardTupleWriter); singleColdBatch && ok {
+		emit = cold.EmitColdForwardTupleWrite
+	}
+	if err := emit(ctx, w.fresh); err != nil {
 		return fmt.Errorf("forward: emit tuple write (%d): %w", len(w.fresh), err)
 	}
 	if err := s.RecordEmittedTuplesBatch(ctx, w.ledger); err != nil {

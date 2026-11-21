@@ -62,13 +62,14 @@ var visibilityEntryPoints = map[string]int{
 // surface that never calls these functions at all is invisible to it, and a
 // surface that does call them is invisible to nothing except a count that
 // changed.
-const wantVisibilityCallSites = 8
+const wantVisibilityCallSites = 9
 
 type visibilityCallSite struct {
-	file    string
-	dir     string // the package the site lives in; port declarations are scoped to it
-	fn      string
-	checker string // the argument expression, as written
+	file      string
+	dir       string // the package the site lives in; port declarations are scoped to it
+	fn        string
+	checker   string // the argument expression, as written
+	singleton bool   // kaname#1034: статически ровно один locked reference, не страница
 }
 
 // portKey scopes a declared name to its package. A bare name would be satisfied
@@ -103,7 +104,7 @@ func TestVisibilityCallSitesAllHoldABatchCapableChecker(t *testing.T) {
 
 	var uncertain []string
 	for _, s := range sites {
-		if ports[portKey(s.dir, checkerBaseName(s.checker))] {
+		if s.singleton || ports[portKey(s.dir, checkerBaseName(s.checker))] {
 			continue
 		}
 		uncertain = append(uncertain, s.file+": "+s.fn+" passes "+s.checker)
@@ -187,7 +188,7 @@ func (u *useCase) visibleIDs(ctx context.Context, subject string, ids []string) 
 
 			flagged := 0
 			for _, s := range sites {
-				if !ports[portKey(s.dir, checkerBaseName(s.checker))] {
+				if !s.singleton && !ports[portKey(s.dir, checkerBaseName(s.checker))] {
 					flagged++
 				}
 			}
@@ -246,15 +247,37 @@ func scanVisibilityCallSites(t *testing.T, root string) ([]visibilityCallSite, i
 				return true
 			}
 			sites = append(sites, visibilityCallSite{
-				file:    path,
-				dir:     filepath.Dir(path),
-				fn:      enclosing,
-				checker: exprText(call.Args[argIdx]),
+				file:      path,
+				dir:       filepath.Dir(path),
+				fn:        enclosing,
+				checker:   exprText(call.Args[argIdx]),
+				singleton: sel.Sel.Name == "VisibleSet" && len(call.Args) == 5 && singletonVisibilityIDs(call.Args[4]),
 			})
 			return true
 		})
 	})
 	return sites, files, ports
+}
+
+// singletonVisibilityIDs допускает только безындексный []string{one}.
+// Проверка reference выполняется после его row lock внутри одной TX. Она не
+// является list/page filter и не может распараллелить native checker этой TX.
+// Динамический slice, два ID и keyed literal с дырками требуют batch-порт.
+func singletonVisibilityIDs(expr ast.Expr) bool {
+	literal, ok := expr.(*ast.CompositeLit)
+	if !ok || len(literal.Elts) != 1 {
+		return false
+	}
+	typ, ok := literal.Type.(*ast.ArrayType)
+	if !ok || typ.Len != nil {
+		return false
+	}
+	name, ok := typ.Elt.(*ast.Ident)
+	if !ok || name.Name != "string" {
+		return false
+	}
+	_, keyed := literal.Elts[0].(*ast.KeyValueExpr)
+	return !keyed
 }
 
 // collectPortDeclarations records every field or parameter name declared with the
@@ -388,7 +411,7 @@ func (u *useCase) visibleIDs(ctx context.Context, subject string, ids []string) 
 
 	var flagged []string
 	for _, s := range sites {
-		if !ports[portKey(s.dir, checkerBaseName(s.checker))] {
+		if !s.singleton && !ports[portKey(s.dir, checkerBaseName(s.checker))] {
 			flagged = append(flagged, s.file)
 		}
 	}
@@ -396,4 +419,34 @@ func (u *useCase) visibleIDs(ctx context.Context, subject string, ids []string) 
 		"exactly the package that declares the narrow port must be flagged; a name declared "+
 			"correctly in a SIBLING package must not vouch for it")
 	require.Contains(t, flagged[0], "bad", "and it must be the right one")
+}
+
+// kaname#1034: новая форма не скрывает сам callsite и не разрешает страницу.
+func TestVisibilitySingletonAdmissionRequiresLiteralOneElement(t *testing.T) {
+	for _, tc := range []struct {
+		ids  string
+		want bool
+	}{
+		{`[]string{string(id)}`, true},
+		{`[]string{first,second}`, false},
+		{`[]string{50:id}`, false},
+		{`[1]string{id}`, false},
+		{`ids`, false},
+		{`[]string{}`, false},
+	} {
+		t.Run(tc.ids, func(t *testing.T) {
+			dir := t.TempDir()
+			source := `package probe
+import "github.com/PRO-Robotech/kaname/internal/authzfilter"
+func visible(ctx context.Context, checker narrowChecker, subject string, ids []string) {
+ _, _ = authzfilter.VisibleSet(ctx,checker,subject,"iam_role",` + tc.ids + `)
+}`
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "probe.go"), []byte(source), 0o600))
+			sites, files, ports := scanVisibilityCallSites(t, dir)
+			require.Equal(t, 1, files)
+			require.Len(t, sites, 1)
+			require.Empty(t, ports)
+			require.Equal(t, tc.want, sites[0].singleton)
+		})
+	}
 }

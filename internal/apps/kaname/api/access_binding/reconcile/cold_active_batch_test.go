@@ -126,6 +126,111 @@ func TestApplyDiff_ColdActiveMatchesOriginalDiffAcrossChunks(t *testing.T) {
 	}
 }
 
+type coldLegacyBatchStore struct {
+	*coldBatchStore
+}
+
+func (s coldLegacyBatchStore) EmitForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return s.EmitTupleWrite(ctx, tuples)
+}
+
+type coldEmitterBatchStore struct {
+	coldLegacyBatchStore
+	coldWriteCalls int
+}
+
+func (s *coldEmitterBatchStore) EmitColdForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
+	s.coldWriteCalls++
+	return s.EmitTupleWrite(ctx, tuples)
+}
+
+func TestApplyDiff_ColdEmitterOnlyForSingleBoundedBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		members       int
+		tuples        int
+		wantBatches   int
+		wantColdCalls int
+	}{
+		{name: "single", members: 100, wantBatches: 1, wantColdCalls: 1},
+		{name: "at limit", members: coldActiveBatchMembers, wantBatches: 1, wantColdCalls: 1},
+		{name: "multiple", members: coldActiveBatchMembers + 1, wantBatches: 2},
+		{name: "excess tuples", members: 1, tuples: coldActiveBatchTuples + 1, wantBatches: 1},
+		{name: "early tuple flush", members: 2, tuples: coldActiveBatchTuples - 1, wantBatches: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desired, store := coldDesired(tc.members)
+			for i := 0; i < tc.tuples; i++ {
+				tuple := desired[0].Tuples[0]
+				tuple.Relation = fmt.Sprintf("v_%d", i)
+				desired[0].Tuples = append(desired[0].Tuples, tuple)
+			}
+			s := &coldEmitterBatchStore{coldLegacyBatchStore: coldLegacyBatchStore{store}}
+			r := New(fakeRunner{s: s}, nil, catalogfixture.Source())
+			require.NoError(t, r.applyDiff(context.Background(), s, coldScope(), desired, nil, nil, &syncFGACollector{}))
+			require.Equal(t, tc.wantBatches, store.writeCalls)
+			require.Equal(t, tc.wantColdCalls, s.coldWriteCalls)
+		})
+	}
+}
+
+func TestApplyDiff_ColdActiveLegacyRecordsSharedLedgerKeyOnce(t *testing.T) {
+	desired, store := coldDesired(coldActiveBatchMembers)
+	otherRule := desired[0]
+	otherRule.RuleFP = "other-rule"
+	newTuple := otherRule.Tuples[0]
+	newTuple.Relation = "v_update"
+	otherRule.Tuples = append(append([]domain.MembershipTuple(nil), otherRule.Tuples...), newTuple)
+	desired = append(desired, otherRule)
+	legacy := coldLegacyBatchStore{store}
+	r := New(fakeRunner{s: legacy}, nil, catalogfixture.Source())
+
+	require.NoError(t, r.applyDiff(context.Background(), legacy, coldScope(), desired, nil, nil, &syncFGACollector{}))
+	require.Len(t, store.batches, 2)
+	require.Len(t, store.batches[0], coldActiveBatchMembers)
+	require.Equal(t, "other-rule", store.batches[1][0].RuleFP)
+	require.Len(t, allWrites(store.fakeStore), coldActiveBatchMembers+1)
+	require.Len(t, store.refs, 2)
+	require.Equal(t, []EmittedTupleRef{{BindingID: coldScope().BindingID, Member: desiredCoord(otherRule), Tuple: newTuple}}, store.refs[1])
+}
+
+func TestApplyDiff_ColdActiveLegacyBatchSizeCountsOnlyOutstandingLedgerKeys(t *testing.T) {
+	desired, store := coldDesired(coldActiveBatchTuples / 2)
+	for i := range desired {
+		other := desired[i].Tuples[0]
+		other.Relation = "v_update"
+		desired[i].Tuples = append(desired[i].Tuples, other)
+	}
+	firstRule := desired
+	for _, rule := range []string{"second-rule", "third-rule"} {
+		for _, member := range firstRule {
+			member.RuleFP = rule
+			desired = append(desired, member)
+		}
+	}
+	newMember := firstRule[0]
+	newMember.RuleFP = "fourth-rule"
+	newTuple := newMember.Tuples[0]
+	newTuple.Relation = "v_delete"
+	newMember.Tuples = []domain.MembershipTuple{newTuple}
+	desired = append(desired, newMember)
+	legacy := coldLegacyBatchStore{store}
+	r := New(fakeRunner{s: legacy}, nil, catalogfixture.Source())
+
+	require.NoError(t, r.applyDiff(context.Background(), legacy, coldScope(), desired, nil, nil, &syncFGACollector{}))
+	require.Len(t, store.batches, 3)
+	require.Len(t, store.batches[0], coldActiveBatchTuples/2)
+	require.Len(t, store.batches[1], coldActiveBatchMembers)
+	require.Len(t, store.batches[2], 1)
+	require.Len(t, store.upserts, len(desired))
+	require.Len(t, store.refs[0], coldActiveBatchTuples)
+	require.Empty(t, store.refs[1])
+	require.Equal(t, []EmittedTupleRef{{BindingID: coldScope().BindingID, Member: desiredCoord(newMember), Tuple: newTuple}}, store.refs[2])
+	writes := allWrites(store.fakeStore)
+	require.Len(t, writes, coldActiveBatchTuples+1)
+	require.Equal(t, newTuple, writes[len(writes)-1])
+}
+
 func TestApplyDiff_ColdActiveKeepsGlobalCollectorAndBindingLedger(t *testing.T) {
 	desired, store := coldDesired(1)
 	r := New(fakeRunner{s: store}, nil, catalogfixture.Source())

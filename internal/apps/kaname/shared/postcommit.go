@@ -55,13 +55,17 @@ const PostCommitTimeout = 2 * time.Minute
 // The caller MUST NOT rely on fn having completed when GoPostCommit returns — that is
 // the entire point. Use it only for work whose durable record is already committed.
 func GoPostCommit(callerCtx context.Context, logger *slog.Logger, what string, fn func(context.Context)) {
+	GoPostCommitWithTimeout(callerCtx, logger, what, PostCommitTimeout, fn)
+}
+
+// GoPostCommitWithTimeout запускает такой же фоновый проход с заданным сроком.
+func GoPostCommitWithTimeout(callerCtx context.Context, logger *slog.Logger, what string, timeout time.Duration, fn func(context.Context)) {
 	if fn == nil {
 		return
 	}
 	// G118 is suppressed deliberately: the pass must outlive the operation worker-fn
 	// that schedules it, because binding it to that ctx is precisely the gate this
-	// helper exists to remove. The goroutine is bounded (PostCommitTimeout) and
-	// panic-guarded below.
+	// helper exists to remove. The goroutine is bounded and panic-guarded below.
 	go func() { //nolint:contextcheck // deliberate lifetime detach; baggage kept via WithoutCancel.
 		defer func() {
 			if r := recover(); r != nil && logger != nil {
@@ -69,7 +73,7 @@ func GoPostCommit(callerCtx context.Context, logger *slog.Logger, what string, f
 					slog.String("pass", what), slog.Any("panic", r))
 			}
 		}()
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(callerCtx), PostCommitTimeout)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(callerCtx), timeout)
 		defer cancel()
 		fn(ctx)
 	}()

@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/resourceeffect"
 )
 
 // BindingScope — минимальные факты выдачи, нужные сведению для материализации
@@ -99,6 +100,8 @@ type BindingScope struct {
 // чтобы applyDiff не выводил его заново). В модели RBAC на правилах
 // нет прежней ветви selector/byName — каждый член выведен из правила.
 type DesiredMember struct {
+	// Derivation используется только сертификатом protected Resource runner.
+	Derivation string
 	RuleFP     string
 	ObjectType string
 	ObjectID   string
@@ -476,8 +479,13 @@ type TxRunner interface {
 
 // Reconciler — сценарий сведения селекторов и включения в область.
 type Reconciler struct {
-	tx     TxRunner
-	logger *slog.Logger
+	objectDecisions  ObjectDecisionRunner
+	stagedBindings   StagedBindingReconciler
+	groupObjects     *Reconciler
+	objectObjects    *Reconciler
+	objectConfigured bool
+	tx               TxRunner
+	logger           *slog.Logger
 	// cat — источник КАТАЛОЖНОГО ФАКТА: какие глаголы объявлены живым типом.
 	//
 	// Обязателен, а не опционален, как `size` ниже: без него проход не может
@@ -646,6 +654,12 @@ func (c *syncFGACollector) collectNew(tuples []domain.MembershipTuple) []domain.
 	return fresh
 }
 
+// nativeTupleDeleter доступен только unsigned compatibility store. Signed и
+// staged хранилища сохраняют свой emitter и окончательную метку.
+type nativeTupleDeleter interface {
+	EmitNativeTupleDelete(context.Context, []domain.MembershipTuple) error
+}
+
 // flushDeletes кладёт ОТЛОЖЕННЫЕ строки снятия прохода в его пишущую транзакцию —
 // ПОСЛЕ сверки всех выдач прохода, когда записанное им известно целиком. Из каждого
 // набора вычитаются кортежи, ЗАПИСАННЫЕ любым членом этого же прохода (соседняя
@@ -664,6 +678,10 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 	if c == nil || len(c.pendingDeletes) == 0 {
 		return nil
 	}
+	emit := s.EmitTupleDelete
+	if native, ok := s.(nativeTupleDeleter); ok {
+		emit = native.EmitNativeTupleDelete
+	}
 	for _, pd := range c.pendingDeletes {
 		// Кандидаты, не записанные этим проходом заново.
 		var revoke []domain.MembershipTuple
@@ -676,7 +694,7 @@ func (r *Reconciler) flushDeletes(ctx context.Context, s ReconcileStore, c *sync
 		if len(revoke) == 0 {
 			continue
 		}
-		if err := s.EmitTupleDelete(ctx, revoke); err != nil {
+		if err := emit(ctx, revoke); err != nil {
 			return fmt.Errorf("flush deletes: emit tuple delete for %s: %w", pd.binding, err)
 		}
 	}
@@ -701,6 +719,9 @@ func (r *Reconciler) ConvergeBinding(ctx context.Context, bindingID domain.Acces
 }
 
 func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindingID, converge bool) error {
+	if r.stagedBindings != nil {
+		return r.stagedBindings.ReconcileStagedBinding(ctx, bindingID, converge, r.size)
+	}
 	col := &syncFGACollector{}
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
 		if err := r.reconcileBinding(ctx, s, bindingID, converge, col); err != nil {
@@ -763,8 +784,23 @@ func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindin
 // поэтому весь желаемый набор действительно нужно вывести заново. Они также остаются
 // страховкой доставки хотя бы один раз, сводящей всё, что мог пропустить пообъектный проход.
 func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID string) error {
+	if objectType == "iam.group" && r.groupObjects != nil {
+		return r.groupObjects.ReconcileObject(ctx, objectType, objectID)
+	}
+	if r.objectConfigured {
+		if r.objectObjects == nil {
+			return errObjectParticipantAbsent
+		}
+		if r.objectObjects.objectDecisions != nil {
+			return r.objectObjects.runObjectDecision(ctx, objectType, objectID, ObjectDecisionFull, r.size)
+		}
+		return r.objectObjects.ReconcileObject(ctx, objectType, objectID)
+	}
+	if r.objectDecisions != nil {
+		return r.runObjectDecision(ctx, objectType, objectID, ObjectDecisionFull, r.size)
+	}
 	col := &syncFGACollector{}
-	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
+	if err := r.withObjectTx(ctx, objectType, objectID, func(ctx context.Context, s ReconcileStore) error {
 		// (1) Выдачи, УЖЕ имеющие строку члена со ссылкой на объект: смена
 		// метки / родителя / уход объекта из зеркала отражается
 		// полным пересчётом ниже.
@@ -911,6 +947,15 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 // сбрасывает кэш решений субъекта и закрывает его открытые потоки, вторая
 // закрывает в следе соответствия выдачу, которую туда положило создание.
 func (r *Reconciler) ExpireBinding(ctx context.Context, bindingID domain.AccessBindingID) error {
+	if r.stagedBindings != nil {
+		staged, ok := r.stagedBindings.(interface {
+			ExpireStagedBinding(context.Context, domain.AccessBindingID) error
+		})
+		if !ok {
+			return fmt.Errorf("binding stage has no atomic expiry adapter")
+		}
+		return staged.ExpireStagedBinding(ctx, bindingID)
+	}
 	col := &syncFGACollector{}
 	if err := r.tx.WithTx(ctx, func(ctx context.Context, s ReconcileStore) error {
 		if err := s.AcquireBindingLock(ctx, bindingID); err != nil {
@@ -1122,7 +1167,10 @@ func (r *Reconciler) reconcileBindingForObject(
 		if err != nil {
 			return err
 		}
-		desired = desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
+		desired, err = desiredMembersForObject(r.cat.Facts(), bs, obj, anc)
+		if err != nil {
+			return err
+		}
 	}
 
 	// УЗКАЯ база сравнения: члены этой выдачи только НА ЭТОМ ОБЪЕКТЕ.
@@ -1158,50 +1206,21 @@ func (r *Reconciler) reconcileBindingForObject(
 // пообъектной цели, как в desiredRuleMembers (выдача на всём якоре области
 // противоречит пообъектной выдаче минимальных привилегий).
 func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject,
-	ancestors []domain.MirrorObject) []DesiredMember {
-	perObject := len(bs.Target.Resources) > 0
-
-	var out []DesiredMember
-	if len(bs.ScopeSelfVerbs) > 0 && !perObject &&
-		o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
-		if sm, ok := scopeSelfMember(cat, grantees(bs, bs.ScopeSelfVerbs, false), bs.Scope.Type, bs.Scope.ID); ok {
-			out = append(out, sm)
-		}
+	ancestors []domain.MirrorObject) ([]DesiredMember, error) {
+	compiled, err := resourceeffect.CompileObjectDesired(cat, resourceeffect.ObjectBinding{
+		BindingID: bs.BindingID, Scope: bs.Scope, Subjects: bs.Subjects,
+		RoleID: bs.RoleID, Policy: bs.Policy, Selectors: bs.Selectors,
+		ScopeSelfVerbs: bs.ScopeSelfVerbs, Target: bs.Target, Active: bs.Active,
+	}, o, ancestors)
+	if err != nil {
+		return nil, err
 	}
-	// Контейнерные действия правил (kaname#1003, creator.go) — члены на объекте
-	// ОБЛАСТИ: путь по объекту обязан их выводить, иначе событие аккаунта сняло бы
-	// их как устаревшие.
-	if o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
-		out = append(out, containerMembers(cat, bs)...)
+	var desired []DesiredMember
+	for _, member := range compiled {
+		desired = append(desired, DesiredMember{Derivation: member.Derivation, RuleFP: member.RuleFP, ObjectType: member.ObjectType,
+			ObjectID: member.ObjectID, Status: member.Status, Tuples: member.Tuples})
 	}
-	// Минимальные привилегии пообъектной цели (F8, IAM-1-21): правило даёт объект лишь тогда,
-	// когда цель выдачи тоже его называет. Едино для всех ветвей, ровно как
-	// matchSelectorObjects пересекает совпавший набор. Вложенное правило (kaname#874)
-	// судит цель по КОНТЕЙНЕРУ среди предков объекта, а не по самому объекту.
-	inTarget := !perObject || bs.Target.Contains(o.ObjectType, o.ObjectID)
-	for _, sel := range bs.Selectors {
-		gs := selectorGrantees(bs, sel)
-		if len(gs) == 0 {
-			continue
-		}
-		if sel.Container != nil {
-			if !nestedCoversObject(sel, bs, o, ancestors) {
-				continue
-			}
-		} else if !inTarget || !selectorMatchesObject(sel, o) {
-			continue
-		}
-		dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
-		if !ok {
-			// У типа нет объекта FGA в модели → нет кортежа → пропускаем объект
-			// (отказ по умолчанию: опечатка в типе ничего не выдаёт).
-			continue
-		}
-		out = append(out, dm)
-	}
-	// Публичное чтение детям (kaname#856): тот же вывод, что у полного прохода
-	// (desiredRuleMembers), — иначе два пути разошлись бы в составе.
-	return withPublicReaders(cat, bs, out)
+	return desired, nil
 }
 
 // desiredMembers вычисляет желаемый набор членов и решения о включении для
@@ -1319,7 +1338,56 @@ func filterMatchedToTarget(matched []domain.MirrorObject, target domain.AccessTa
 // ярус — те же доменные функции, что у прежнего пути выпуска). Совпавший чужой
 // объект получает REJECTED (без кортежа + аудит, защита границ области). ОДИН объект
 // под двумя правилами даёт двух желаемых членов с разными rule_fp.
+// readOnlyRuleMemberStore создаёт отдельный view на один расчёт. Labels из него
+// только читаются внутри обычного matchSelectorObjects и не выходят в DesiredMember.
+// Creator/nested пути сохраняют исходный store и его дополнительные возможности.
+type readOnlyRuleMemberStore interface {
+	ReadOnlyRuleMemberStore() ReconcileStore
+}
+
+type mirrorLabelSelectorUnion interface {
+	// Полные кандидаты хотя бы одного селектора, в порядке обычного чтения.
+	// complete=false означает превышение границы памяти, а не ошибку запроса.
+	MatchMirrorLabelSelectorUnion(context.Context, []domain.RuleSelector) (objects []domain.MirrorObject, complete bool, err error)
+}
+
+func readMirrorLabelSelectorUnion(ctx context.Context, s ReconcileStore, cat *catalog.Facts, bs BindingScope) ([]domain.MirrorObject, bool, error) {
+	store, ok := s.(mirrorLabelSelectorUnion)
+	if !ok || len(bs.Selectors) < 2 || len(bs.Selectors) > domain.MaxRules {
+		return nil, false, nil
+	}
+	selectors := make([]domain.RuleSelector, 0, len(bs.Selectors))
+	for _, sel := range bs.Selectors {
+		if len(selectorGrantees(bs, sel)) == 0 {
+			continue
+		}
+		if sel.Container != nil {
+			return nil, false, nil
+		}
+		if !selectorWritesObjects(cat, sel) {
+			continue
+		}
+		if sel.Arm != domain.ArmLabels || sel.CreatedBySubject || len(sel.MatchLabels) == 0 || len(sel.ObjectTypes) == 0 {
+			return nil, false, nil
+		}
+		for _, typ := range sel.ObjectTypes {
+			if typ == "" || domain.FeedSourceForType(typ) != domain.FeedMirror {
+				return nil, false, nil
+			}
+		}
+		selectors = append(selectors, sel)
+	}
+	if len(selectors) < 2 {
+		return nil, false, nil
+	}
+	return store.MatchMirrorLabelSelectorUnion(ctx, selectors)
+}
+
 func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, bs BindingScope) ([]DesiredMember, error) {
+	var selectorStore ReconcileStore = s
+	if provider, ok := s.(readOnlyRuleMemberStore); ok {
+		selectorStore = provider.ReadOnlyRuleMemberStore()
+	}
 	var out []DesiredMember
 	// Каталожный факт берётся ОДИН раз на проход: обновление снимка подменяет
 	// указатель, и три чтения могли бы увидеть два разных каталога — член
@@ -1331,6 +1399,13 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	// Выдача на якоре собственной области подавляется; совпадения каждого селектора
 	// пересекаются ниже с набором цели.
 	perObject := len(bs.Target.Resources) > 0
+
+	// Все зеркальные селекторы одной выдачи читаются из одного снимка запроса.
+	// Объединение сохраняет кандидатов из чужой области для отказа и аудита.
+	union, complete, err := readMirrorLabelSelectorUnion(ctx, selectorStore, cat, bs)
+	if err != nil {
+		return nil, fmt.Errorf("match mirror label selectors: %w", err)
+	}
 
 	// Член собственной области: ярус роли (+ глагольные v_*) НА
 	// СОБСТВЕННОМ ОБЪЕКТЕ ОБЛАСТИ ВЫДАЧИ (`account:<X>`/`project:<X>`). Это
@@ -1388,17 +1463,22 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// субъектами-учётками выдачи, отбором по индексу (аккаунт, создатель),
 			// а не перебором объектов области (§3 приёмки, «производительность»).
 			matched, err = r.matchCreatorObjects(ctx, s, sel, bs)
+		} else if complete {
+			matched = union
 		} else {
 			// Передаём область и цель привязки, чтобы ветвь ANCHOR разрешила набор кандидатов
 			// по цели (по id для пообъектной; иначе O(scope) с проталкиванием фильтра), а совпадения
 			// каждой ветви пересекаются с целью. IsContainedIn ниже остаётся
 			// окончательной повторной проверкой включения.
-			matched, err = r.matchSelectorObjects(ctx, s, sel, bs.Scope, bs.Target)
+			matched, err = r.matchSelectorObjects(ctx, selectorStore, sel, bs.Scope, bs.Target)
 		}
 		if err != nil {
 			return nil, err
 		}
 		for _, o := range matched {
+			if complete && (!selectorMatchesObject(sel, o) || (perObject && !bs.Target.Contains(o.ObjectType, o.ObjectID))) {
+				continue
+			}
 			// Пообъектное решение ОБЩЕЕ с быстрым прямым путём
 			// (desiredMemberForObject), поэтому полный пересчёт и прямой путь
 			// выводят ПОБАЙТОВО ОДИНАКОВЫЕ кортежи (идемпотентность: прямой и асинхронный полный
@@ -1626,6 +1706,9 @@ func (r *Reconciler) applyDiff(ctx context.Context, s ReconcileStore, bs Binding
 const (
 	coldActiveBatchMembers = 4096
 	coldActiveBatchTuples  = 4096
+
+	// После заполнения запоминаемого набора новые ключи идут прежним путём.
+	coldActiveLedgerKeys = 16 * coldActiveBatchTuples
 )
 
 // applyColdActiveDiff вызывается после общего замка и фильтра keepLiveDesired.
@@ -1633,35 +1716,80 @@ const (
 // и реестр каждой полной координаты сохраняются между партиями и правилами.
 func (r *Reconciler) applyColdActiveDiff(ctx context.Context, s ReconcileStore, bs BindingScope, desired []DesiredMember, col *syncFGACollector) error {
 	var writes forwardWriteSet
-	for _, d := range desired {
+	var recorded map[EmittedTupleRef]struct{}
+	if _, legacy := s.(forwardTupleWriter); legacy && col != nil {
+		// Legacy WithTx удерживает допуск compatibility и замок выдачи;
+		// холодный проход только добавляет записи реестра. Общий collector
+		// исключает повторную публикацию уже записанного ключа.
+		recorded = make(map[EmittedTupleRef]struct{})
+	}
+	flushed := false
+	flush := func(last bool) error {
+		// Один небольшой холодный проход использует обычную свёртку. Веер
+		// с несколькими партиями использует прежний emitter во всех партиях.
+		singleBatch := last && !flushed &&
+			len(writes.members) <= coldActiveBatchMembers && len(writes.ledger) <= coldActiveBatchTuples
+		if err := writes.writeLiveBatch(ctx, s, singleBatch); err != nil {
+			return err
+		}
+		flushed = true
+		if recorded != nil {
+			for _, ref := range writes.ledger {
+				if len(recorded) == coldActiveLedgerKeys {
+					break
+				}
+				recorded[ref] = struct{}{}
+			}
+		}
+		writes = forwardWriteSet{}
+		return nil
+	}
+	for i, d := range desired {
 		tuples, ok := r.memberTuples(d)
 		if !ok {
 			return fmt.Errorf("membership tuple inconsistent for %s/%s:%s (role coverage desync)", d.RuleFP, d.ObjectType, d.ObjectID)
 		}
-		// Проверка до collectNew не меняет общий collector и порядок первых tuples.
-		// Ledger содержит все tuples члена, fresh — только их подмножество.
-		if len(writes.members) > 0 && (len(writes.members) == coldActiveBatchMembers || len(tuples) > coldActiveBatchTuples-len(writes.ledger)) {
-			if err := writes.writeLive(ctx, s); err != nil {
+		pending := len(tuples)
+		if len(recorded) > 0 {
+			coord := desiredCoord(d)
+			for _, t := range tuples {
+				ref := EmittedTupleRef{BindingID: bs.BindingID, Member: coord, Tuple: t}
+				if _, alreadyRecorded := recorded[ref]; alreadyRecorded {
+					pending--
+				}
+			}
+		}
+		if len(writes.members) > 0 && (len(writes.members) == coldActiveBatchMembers || pending > coldActiveBatchTuples-len(writes.ledger)) {
+			if err := flush(false); err != nil {
 				return err
 			}
-			writes = forwardWriteSet{}
 		}
 		d.Tuples = tuples
+		ledgerStart := len(writes.ledger)
 		if err := r.materializeForwardMember(ctx, s, bs, d, col, &writes); err != nil {
 			return err
 		}
+		if len(recorded) > 0 {
+			// Предыдущий flush мог записать часть ключей этого члена.
+			ledger := writes.ledger[:ledgerStart]
+			for _, ref := range writes.ledger[ledgerStart:] {
+				if _, alreadyRecorded := recorded[ref]; !alreadyRecorded {
+					ledger = append(ledger, ref)
+				}
+			}
+			writes.ledger = ledger
+		}
 		if len(writes.members) == coldActiveBatchMembers || len(writes.ledger) >= coldActiveBatchTuples {
 			// Исходный keepLiveDesired уже отфильтровал весь набор под замками этой tx.
-			if err := writes.writeLive(ctx, s); err != nil {
+			if err := flush(i == len(desired)-1); err != nil {
 				return err
 			}
-			writes = forwardWriteSet{}
 		}
 	}
 	if len(writes.members) == 0 {
 		return nil
 	}
-	return writes.writeLive(ctx, s)
+	return flush(true)
 }
 
 // mirrorFed — объект питается зеркалом регистраций: его строку удаляет снятие

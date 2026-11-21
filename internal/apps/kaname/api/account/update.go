@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -82,8 +83,10 @@ type ObjectReconciler interface {
 
 // UpdateAccountUseCase.
 type UpdateAccountUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	metadataConfigured bool
+	metadataFactory    kanamerepo.AccountMetadataWriterFactory
+	repo               Repo
+	opsRepo            operations.Repo
 	// Optional door to the rights decision, used by the defense-in-depth
 	// scope-relation authority check. When nil, the guard falls back to owner-only
 	// (fail-closed).
@@ -202,7 +205,9 @@ func (u *UpdateAccountUseCase) Execute(ctx context.Context, in UpdateAccountInpu
 
 	maskCopy := append([]string{}, in.UpdateMask...)
 	changedCopy := append([]string{}, changed...)
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		return u.doUpdate(ctx, target, maskCopy, actor, changedCopy)
 	})
 	return &op, nil
@@ -230,7 +235,7 @@ func (u *UpdateAccountUseCase) Execute(ctx context.Context, in UpdateAccountInpu
 // reconcile event above and the periodic sweep stay the at-least-once backstop, so this
 // changes WHEN the revoke is observed, not WHETHER it happens.
 func (u *UpdateAccountUseCase) doUpdate(ctx context.Context, a domain.Account, mask []string, actor string, changed []string) (*anypb.Any, error) {
-	updated, err := shared.DoWithWriteTx(ctx, u.repo,
+	updated, err := shared.DoWithWriteTx(ctx, u.metadataRepo(a, mask),
 		func(ctx context.Context, w Writer) (domain.Account, error) {
 			upd, uerr := w.AccountsW().Update(ctx, a, mask)
 			if uerr != nil {

@@ -45,6 +45,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   config.yaml: |
+    authority-protocol:
+      participation: {{ default "legacy" (.Values.authorityProtocol | default dict).participation | quote }}
+
     logger:
       level: {{ default "INFO" .Values.logger.level | quote }}
 

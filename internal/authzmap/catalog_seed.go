@@ -173,6 +173,14 @@ func CatalogSeedVerbs() []CatalogSeedVerb {
 				Module: r.Module, Resource: r.Resource, Verb: v, PerObject: true,
 			})
 		}
+		// kaname#1034: явные authoring axes, без пообъектных отношений.
+		for _, v := range GrantAuthoringVerbs(r.Module, r.Resource) {
+			if !declared[v] {
+				out = append(out, CatalogSeedVerb{Module: r.Module, Resource: r.Resource, Verb: v})
+				declared[v] = true
+			}
+		}
+
 		for _, v := range tierOnlyVerbClasses {
 			// Тип, объявивший этот класс ПООБЪЕКТНО, второй строки не получает:
 			// у пары (модуль, ресурс, глагол) первичный ключ один, а живость
@@ -184,4 +192,19 @@ func CatalogSeedVerbs() []CatalogSeedVerb {
 		}
 	}
 	return out
+}
+
+// GrantAuthoringVerbs — закрытые пары синтаксиса управления выдачами kaname#1034.
+// Это не набор leaf-действий; wildcard его не раскрывает.
+func GrantAuthoringVerbs(module, resource string) []string {
+	if module != "iam" {
+		return nil
+	}
+	switch resource {
+	case "role":
+		return []string{"bind"}
+	case "accessBinding":
+		return []string{"create"}
+	}
+	return nil
 }

@@ -50,11 +50,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
 type DeleteAccessBindingUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	withdrawal kanamerepo.BindingWithdrawalRunner
+	repo       Repo
+	opsRepo    operations.Repo
 	// relations — ДВЕРЬ РЕШЕНИЯ, и только на READ-стороне: `requireGrantAuthority`
 	// спрашивает, вправе ли вызывающий снимать эту выдачу.
 	//
@@ -168,7 +170,9 @@ func (u *DeleteAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 	if err := u.opsRepo.Create(ctx, op); err != nil {
 		return nil, err
 	}
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		return u.doDelete(ctx, id, actor)
 	})
 	return &op, nil
@@ -234,6 +238,9 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 // статус: признак повтора (`iamerr.ErrAborted`) читает [doDelete], а перевод в
 // gRPC-код делается там один раз — статус признака уже не несёт.
 func (u *DeleteAccessBindingUseCase) deleteOnce(ctx context.Context, id domain.AccessBindingID, actor string) error {
+	if u.withdrawal != nil {
+		return u.withdrawStaged(ctx, id, actor)
+	}
 	w, err := u.repo.Writer(ctx)
 	if err != nil {
 		return err

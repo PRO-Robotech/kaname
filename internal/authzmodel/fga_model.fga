@@ -1433,6 +1433,16 @@ type storage_image
 # Conditions catalog — 7 frozen built-ins (acceptance §4.5).
 # ---------------------------------------------------------------------------
 
+# Внутренние точные координаты выдачи: без предков, подстановок субъектов и надзора.
+type iam_grant_scope
+  relations
+    define create_binding: [user, service_account, group#member]
+
+type iam_grant_role
+  relations
+    define bind: [user, service_account, group#member]
+
+
 condition mfa_fresh(amr_claims: list<string>, acr_value: string, current_time: timestamp, mfa_at: timestamp) {
   acr_value == "3" &&
   "webauthn" in amr_claims &&

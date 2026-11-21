@@ -181,7 +181,7 @@ const idleFactor = 10
 // очереди — одной транзакцией. Снятая либо удалённая роль строк селекторов не
 // имеет: пересчитывать нечего, и транзакция лишь снимает её из очереди.
 func regrainOneRole(ctx context.Context, repo kanamerepo.Repository, cat *catalog.Facts, id string) error {
-	if err := shared.DoWithWriteTxVoid(ctx, repo,
+	if err := shared.DoWithInstallationWriteTxVoid(ctx, repo, kanamerepo.AuthorityRole,
 		func(ctx context.Context, w kanamerepo.Writer) error {
 			rules, policy, live, err := w.RolesW().RulesForRegrain(ctx, domain.RoleID(id))
 			if err != nil {
@@ -189,7 +189,7 @@ func regrainOneRole(ctx context.Context, repo kanamerepo.Repository, cat *catalo
 			}
 			var sels []domain.RuleSelector
 			if live {
-				sels = cat.GrantSelectors(rules.MaterializingSelectors(), policy)
+				sels = cat.GrantSelectors(domain.RegrainSelectors(rules), policy)
 			}
 			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(id), sels)
 		}); err != nil {

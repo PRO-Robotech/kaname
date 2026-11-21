@@ -133,10 +133,11 @@ func TestAccountID04_UseCaseDefaultNameIsTheSuppliedID(t *testing.T) {
 }
 
 // TestAccountID16_ConcurrentDeleteAndCreateOfOneIDNeverReissues — заказ П2.
-// Удаление X держит транзакцию открытой; создание X в это время стоит на
-// первичном ключе. Удаление фиксируется — ключ аккаунта свободен, и единственное,
-// что отказывает создание, — реестр выданных. Барьер — видимое ожидание замка
-// в pg_stat_activity, а не время.
+// Удаление X держит транзакцию открытой; создание X в это время ждёт её
+// compatibility fence, который Repository.Writer берёт до бизнес-замков.
+// Удаление фиксируется — ключ аккаунта свободен, и единственное, что отказывает
+// создание, — реестр выданных. Барьер — точное ребро блокировки в pg_locks
+// и pg_blocking_pids, а не текст INSERT, до которого writer ещё не дошёл.
 func TestAccountID16_ConcurrentDeleteAndCreateOfOneIDNeverReissues(t *testing.T) {
 	env := newProbeEnv(t)
 	ctx := context.Background()
@@ -155,19 +156,31 @@ func TestAccountID16_ConcurrentDeleteAndCreateOfOneIDNeverReissues(t *testing.T)
 	require.NoError(t, w.ProjectsW().Delete(ctx, domain.ProjectID(md.GetDefaultProjectId())))
 	require.NoError(t, w.AccountsW().Delete(ctx, domain.AccountID(x)))
 
+	// В этой отдельной базе единственный holder compatibility fence — открытое
+	// удаление. Запоминаем его до запуска создания: чужой waiter сцену не строит.
+	var deletionPIDs []int32
+	require.NoError(t, env.pool.QueryRow(ctx, `
+		SELECT coalesce(array_agg(pid), ARRAY[]::integer[]) FROM pg_locks
+		 WHERE database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		   AND locktype = 'advisory' AND classid = 1262569292 AND objid = 0
+		   AND objsubid = 2 AND mode = 'ExclusiveLock' AND granted`).Scan(&deletionPIDs))
+	require.Len(t, deletionPIDs, 1, "удаление X должно быть единственным владельцем compatibility fence")
+
 	again, _ := supplyAndCreate(t, env, uc, owner, x, "aid16-again")
 
-	// Вставка создания стоит на замке строки X, пока удаление не зафиксировано.
+	// Создание действительно началось и ждёт именно удерживаемое удаление.
 	require.Eventually(t, func() bool {
 		var waiting int
 		if qerr := env.pool.QueryRow(ctx, `
-			SELECT count(*) FROM pg_stat_activity
-			 WHERE datname = current_database() AND wait_event_type = 'Lock'
-			   AND query ILIKE '%INSERT INTO accounts%'`).Scan(&waiting); qerr != nil {
+			SELECT count(*) FROM pg_locks
+			 WHERE database = (SELECT oid FROM pg_database WHERE datname = current_database())
+			   AND locktype = 'advisory' AND classid = 1262569292 AND objid = 0
+			   AND objsubid = 2 AND mode = 'ExclusiveLock' AND NOT granted
+			   AND $1 = ANY(pg_blocking_pids(pid))`, deletionPIDs[0]).Scan(&waiting); qerr != nil {
 			return false
 		}
 		return waiting == 1
-	}, 20*time.Second, 50*time.Millisecond, "вставка создания X не встала на замок удаления X")
+	}, 20*time.Second, 50*time.Millisecond, "создание X не встало на compatibility fence удаления X")
 
 	require.NoError(t, w.Commit(ctx))
 	awaitWorkers(t)
