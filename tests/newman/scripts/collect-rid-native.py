@@ -40,7 +40,51 @@ def flatten(items):
             yield from flatten(item.get("item", []))
 
 
-def combine(collection_path, reports, run_id, executable_sha, expected):
+RID11_GROUP_VARIANTS = {
+    "input": ("CREDENTIAL-MISSING", "CREDENTIAL-UNREADABLE"),
+    "identity": ("DELETED-CREATOR", "REVOKED-KEY"),
+    "proof-authority": ("BAD-SIGNATURE", "AUTHORITY"),
+    "availability": ("BACKEND", "ACCOUNT", "CENSUS"),
+}
+RID11_GROUP_PHASE_COUNTS = {"input": 32, "identity": 36, "proof-authority": 32, "availability": 28}
+
+
+def rid11_phase_groups(collection):
+    """Возвращает группы только для полной канонической коллекции RID11.
+
+    У каждого из 62 сценариев два этапа. У четырёх отрицательных сценариев
+    удаления создателя есть дополнительный этап KEY-REVOKED-C-LIVE.
+    Вызывающая сторона отдельно сверяет контрольную сумму всей коллекции.
+    """
+    groups = {}
+    for group, variants in RID11_GROUP_VARIANTS.items():
+        ids = set()
+        for variant in variants:
+            modes = ("S1",) if variant == "ACCOUNT" else (("S2",) if variant == "CENSUS" else ("S1", "S2"))
+            states = ("ABSENT",) if variant == "ACCOUNT" else ("ABSENT", "ACTIVE")
+            for mode in modes:
+                for state in states:
+                    for side in ("NEGATIVE", "TWIN"):
+                        stages = ("BEFORE", "AFTER")
+                        if variant == "DELETED-CREATOR" and side == "NEGATIVE":
+                            stages += ("KEY-REVOKED-C-LIVE",)
+                        for stage in stages:
+                            ids.add(f"registry-installation-rid11-{variant}-{mode}-{state}-{side}-{stage}")
+        need(len(ids) == RID11_GROUP_PHASE_COUNTS[group], "invalid canonical RID11 group census")
+        groups[group] = frozenset(ids)
+    all_ids = set().union(*groups.values())
+    need(len(all_ids) == 128 and sum(map(len, groups.values())) == 128,
+         "RID11 groups do not partition all 128 phases")
+    actual = []
+    for folder in collection.get("item", []):
+        need("request" not in folder and " — " in folder.get("name", ""), "unnamed RID11 source phase")
+        actual.append(folder["name"].split(" — ", 1)[0])
+    need(len(actual) == 128 and len(set(actual)) == 128 and set(actual) == all_ids,
+         "source is not the complete canonical RID11 phase census")
+    return groups
+
+
+def combine(collection_path, reports, run_id, executable_sha, expected, *, rid11_group=None):
     required = {"nodeSHA256", "runnerSHA256", "toolTreeSHA256", "collectionSHA256", "testExecutableSHA256"}
     need(isinstance(expected, dict) and set(expected) == required and
          all(isinstance(v, str) and re.fullmatch(r"[a-f0-9]{64}", v) for v in expected.values()),
@@ -65,6 +109,13 @@ def combine(collection_path, reports, run_id, executable_sha, expected):
         need(phase_names, "source phase has no requests")
         phases[case_id] = phase_names
     need(set().union(*phases.values()) == set(names), "incomplete source phase membership")
+    required_phases = set(phases)
+    required_names = set(names)
+    if rid11_group is not None:
+        need(stem == "registry-installation-rid11" and isinstance(rid11_group, str) and
+             rid11_group in RID11_GROUP_VARIANTS, "invalid closed RID11 group selection")
+        required_phases = rid11_phase_groups(collection)[rid11_group]
+        required_names = set().union(*(phases[case_id] for case_id in required_phases))
     seen_phases = set()
     executions, sources = [], []
     assertions = 0
@@ -73,7 +124,7 @@ def combine(collection_path, reports, run_id, executable_sha, expected):
         report_raw = report.read_bytes()
         doc = json.loads(report_raw)
         case_id = doc.get("caseId")
-        need(case_id in phases and case_id not in seen_phases, "unknown or duplicated phase report")
+        need(case_id in required_phases and case_id not in seen_phases, "unknown or duplicated phase report")
         need(doc.get("ok") is True and doc.get("schemaVersion") == 1, "phase did not succeed")
         need(doc.get("producer") == {"runId": run_id, "testExecutableSHA256": executable_sha},
              "different owned invocation or test executable")
@@ -127,9 +178,9 @@ def combine(collection_path, reports, run_id, executable_sha, expected):
         assertions += phase_assertions
         sources.append({"phase": case_id, "reportSHA256": digest(report_raw),
                         "requests": len(actual), "uniqueRequests": len(seen), "assertions": phase_assertions})
-    need(seen_phases == set(phases), "not every required phase report is present")
-    need({ex["item"]["name"] for ex in executions} == set(names), "whole collection has missing execution")
-    return {
+    need(seen_phases == required_phases, "not every required phase report is present")
+    need({ex["item"]["name"] for ex in executions} == required_names, "required collection phases have missing execution")
+    result = {
         "schemaVersion": 1, "ok": True,
         "producer": {"runId": run_id, "testExecutableSHA256": executable_sha},
         "collectionSHA256": digest(raw), "collection": collection, "expectedIdentities": expected,
@@ -139,6 +190,9 @@ def combine(collection_path, reports, run_id, executable_sha, expected):
                           "assertions": {"total": assertions, "failed": 0, "skipped": 0}},
                 "failures": [], "executions": executions},
     }
+    if rid11_group is not None:
+        result["rid11Group"] = rid11_group
+    return result
 
 
 def main():
@@ -148,11 +202,12 @@ def main():
     ap.add_argument("--test-executable-sha256", required=True)
     ap.add_argument("--expected-identities", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--rid11-group", choices=tuple(RID11_GROUP_VARIANTS))
     ap.add_argument("reports", nargs="+", type=Path)
     args = ap.parse_args()
     need(re.fullmatch(r"[A-Za-z0-9-]{16,80}", args.run_id), "invalid owned invocation ID")
     need(re.fullmatch(r"[a-f0-9]{64}", args.test_executable_sha256), "invalid executable identity")
-    result = combine(args.collection, args.reports, args.run_id, args.test_executable_sha256, json.loads(args.expected_identities.read_bytes()))
+    result = combine(args.collection, args.reports, args.run_id, args.test_executable_sha256, json.loads(args.expected_identities.read_bytes()), rid11_group=args.rid11_group)
     # Exclusive fresh output: stale reports are never silently replaced/reused.
     fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as out:
