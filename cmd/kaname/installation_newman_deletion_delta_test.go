@@ -540,7 +540,13 @@ func rid05RequireDeleteOperation(t *testing.T, w *ridLifecycleWorld, a, b rid05S
 	require.Equal(t, len(old)+1, len(now))
 	id := ""
 	for previous, row := range old {
-		require.True(t, reflect.DeepEqual(row, now[previous]), "every old Operation raw field/history must remain exact")
+		unchanged := reflect.DeepEqual(row, now[previous])
+		if !unchanged {
+			note, err := json.Marshal(rid03DescribeOldOperationDiff(row, now[previous]))
+			require.NoError(t, err)
+			t.Logf("RID05_OLD_OPERATION_DIFF %s", note)
+		}
+		require.True(t, unchanged, "every old Operation raw field/history must remain exact")
 	}
 	for added := range now {
 		if old[added] == nil {

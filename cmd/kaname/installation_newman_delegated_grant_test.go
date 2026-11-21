@@ -155,6 +155,51 @@ func rid03RequireReadOnly(t *testing.T, a, b rid03NewmanSnapshot) {
 	t.Helper()
 	require.True(t, rid03SnapshotEqual(a, b), "full public/raw/history/Operation/own-ceilings ledger changed during read-only phase")
 }
+
+func rid03RequirePublicPhaseReadOnly(t *testing.T, f *installationNativeWorld, caseID string, a, b rid03NewmanSnapshot) {
+	t.Helper()
+	if rid03SnapshotEqual(a, b) {
+		return
+	}
+	changed := []string{}
+	for _, field := range []struct {
+		name string
+		a, b any
+	}{
+		{"business_audit", a.BusinessAudit, b.BusinessAudit},
+		{"delivery", a.Whole.Delivery, b.Whole.Delivery},
+		{"operations", a.Whole.Bookkeeping["operations"], b.Whole.Bookkeeping["operations"]},
+		{"own_ceilings", a.Whole.OwnCeilings, b.Whole.OwnCeilings},
+		{"projection", a.Projection, b.Projection},
+		{"raw", a.Raw, b.Raw},
+	} {
+		if !reflect.DeepEqual(field.a, field.b) {
+			changed = append(changed, field.name)
+		}
+	}
+	// В публичную сводку уходят только имя штатной фазы и признаки изменений.
+	// В закрытом каталоге сохраняется подробная перепись без значений полей.
+	note, err := json.Marshal(struct {
+		CaseID string   `json:"caseId"`
+		Fields []string `json:"fields"`
+	}{caseID, changed})
+	require.NoError(t, err)
+	t.Logf("RID03_READ_ONLY_DIFF %s", note)
+	if strings.HasSuffix(caseID, "-VERIFY") {
+		rid03WriteRawDeltaCensus(t, f, caseID, a, b)
+	}
+	if !reflect.DeepEqual(a.Raw["operations"], b.Raw["operations"]) {
+		old, now := rid03RowsByID(t, a.Raw["operations"]), rid03RowsByID(t, b.Raw["operations"])
+		for id, row := range old {
+			if !reflect.DeepEqual(row, now[id]) {
+				note, err := json.Marshal(rid03DescribeOldOperationDiff(row, now[id]))
+				require.NoError(t, err)
+				t.Logf("RID03_OLD_OPERATION_DIFF %s", note)
+			}
+		}
+	}
+	t.Fatal("full public/raw/history/Operation/own-ceilings ledger changed during read-only phase")
+}
 func rid03Mode(t *testing.T, w *ridLifecycleWorld) string {
 	t.Helper()
 	require.Contains(t, []int{1, 3}, len(w.accounts))
@@ -301,7 +346,7 @@ func rid03PublicActionPair(t *testing.T, w *ridLifecycleWorld, scenario string, 
 	func() {
 		defer func() {
 			end := rid03PhaseSnapshot(t, w)
-			rid03RequireReadOnly(t, after, end)
+			rid03RequirePublicPhaseReadOnly(t, w.f, e.CaseID, after, end)
 			proof, proofOK := rid03BuildTechnicalReceipt(&e, after, end, nil)
 			require.True(t, proofOK, "closed VERIFY zero technical/business delta receipt required")
 			require.True(t, verifyReceipt.OK, "actual VERIFY receipt required before primary proof publication")
@@ -516,7 +561,11 @@ func rid03RequireActionDeltaWithReceipt(t *testing.T, w *ridLifecycleWorld, e *r
 	rid03WriteRawDeltaCensus(t, f, e.CaseID, a, b)
 	require.Equal(t, a.Whole.OwnCeilings, b.Whole.OwnCeilings)
 	if e.Denied {
-		rid03RequireReadOnly(t, a, b)
+		if strings.HasPrefix(e.CaseID, "registry-installation-rid03-") {
+			rid03RequirePublicPhaseReadOnly(t, w.f, e.CaseID, a, b)
+		} else {
+			rid03RequireReadOnly(t, a, b)
+		}
 		proof, ok := build(e, a, b, nil)
 		require.True(t, ok, "closed denied zero technical/business delta receipt required")
 		e.TechnicalEvidence = &proof

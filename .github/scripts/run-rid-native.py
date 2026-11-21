@@ -628,14 +628,30 @@ RID03_OPERATION_COLUMNS = frozenset({
 RID03_OPERATION_MARKER_LIMIT = 16
 
 
-def rid03_old_operation_diff(output, line_limit):
+RID03_READ_ONLY_FIELDS = frozenset({
+    "business_audit", "projection", "delivery", "own_ceilings", "operations", "raw",
+})
+RID03_CASE_IDS = frozenset(
+    f"registry-installation-rid03-{mode}-{category}-{phase}"
+    for mode in ("S1", "S2")
+    for category in ("GRANT", "ROLE-DENIED", "ROLE-TWIN", "TARGET-DENIED", "TARGET-TWIN",
+                     "SUBJECT-DENIED", "SUBJECT-TWIN", "ISSUER-GD-DENIED", "CREATOR-GD-TWIN",
+                     "AUTHENTICATED-DENIED", "ANONYMOUS-TWIN")
+    for phase in ("ACT", "VERIFY")
+)
+DIFF_MARKER_SOURCES = {
+    "RID03_READ_ONLY_DIFF": "cmd/kaname/installation_newman_delegated_grant_test.go",
+    "RID05_OLD_OPERATION_DIFF": "cmd/kaname/installation_newman_deletion_delta_test.go",
+}
+
+
+def native_diff_json(output, line_limit, marker, source):
     # Маркер обязан быть одной полной строкой штатного t.Logf из известного файла.
     if not isinstance(output, str) or len(output) > 2048:
         return None
-    source = "installation_newman_delegated_grant_test.go"
     match = re.fullmatch(
         r"[ \t]+(?:" + re.escape(str(ROOT / "cmd/kaname") + "/") + r")?" +
-        re.escape(source) + r":([1-9][0-9]{0,6}): RID03_OLD_OPERATION_DIFF ([^\r\n]{1,1024})\n",
+        re.escape(Path(source).name) + r":([1-9][0-9]{0,6}): " + marker + r" ([^\r\n]{1,1024})\n",
         output)
     if match is None or int(match[1]) > line_limit:
         return None
@@ -652,6 +668,27 @@ def rid03_old_operation_diff(output, line_limit):
         value = json.loads(match[2], object_pairs_hook=unique_fields)
     except (ValueError, RecursionError):
         return None
+    return value
+
+
+def rid03_read_only_diff(output, line_limit):
+    value = native_diff_json(output, line_limit, "RID03_READ_ONLY_DIFF",
+                             DIFF_MARKER_SOURCES["RID03_READ_ONLY_DIFF"])
+    if (type(value) is not dict or set(value) != {"caseId", "fields"}
+            or type(value["caseId"]) is not str or value["caseId"] not in RID03_CASE_IDS
+            or type(value["fields"]) is not list or not value["fields"]
+            or len(value["fields"]) > len(RID03_READ_ONLY_FIELDS)
+            or any(type(field) is not str or field not in RID03_READ_ONLY_FIELDS
+                   for field in value["fields"])
+            or value["fields"] != sorted(set(value["fields"]))):
+        return None
+    return value
+
+
+def rid03_old_operation_diff(output, line_limit, *, marker="RID03_OLD_OPERATION_DIFF"):
+    source = (DIFF_MARKER_SOURCES[marker] if marker == "RID05_OLD_OPERATION_DIFF"
+              else "cmd/kaname/installation_newman_delegated_grant_test.go")
+    value = native_diff_json(output, line_limit, marker, source)
     if (type(value) is not dict or set(value) != {
             "missing", "columns", "beforeDone", "afterDone", "kind"}
             or type(value["missing"]) is not bool
@@ -738,6 +775,11 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     projection_changes, ambiguous_projection = {}, set()
     binding_premise, ambiguous_premise = {}, set()
     bounded_markers, invalid_bounded_markers = {}, set()
+    safe_diffs = {}
+    safe_diff_leaves, safe_diff_kind = set(), None
+    if root_test in (CASES["registry-installation-rid03"][0], CASES["registry-installation-rid05"][0]):
+        safe_diff_leaves = {root_test + "/" + name for name in RID_MATRIX_NESTED[root_test]}
+        safe_diff_kind = ("RID03_READ_ONLY_DIFF" if rid03_names else "RID05_OLD_OPERATION_DIFF")
     bounded_leaves, bounded_kinds = set(), ()
     if root_test == CASES["registry-installation-rid02"][0]:
         bounded_leaves = {name for name in names if name.endswith(("/S1", "/S2"))}
@@ -792,6 +834,25 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                             invalid_bounded_markers.add(key)
                         elif key not in invalid_bounded_markers:
                             bounded_markers[key] = value
+                if action == "output" and isinstance(name, str) and name in safe_diff_leaves:
+                    output = event.get("Output")
+                    if isinstance(output, str) and safe_diff_kind in output:
+                        key = (name, safe_diff_kind)
+                        active = ((root_test, "run") in seen and (name, "run") in seen
+                                  and not any((subject, end) in seen for subject in (root_test, name)
+                                              for end in ("pass", "fail", "skip")))
+                        limit = bounds.get(DIFF_MARKER_SOURCES[safe_diff_kind], 0)
+                        value = None
+                        if active:
+                            value = (rid03_read_only_diff(output, limit)
+                                     if safe_diff_kind == "RID03_READ_ONLY_DIFF" else
+                                     rid03_old_operation_diff(output, limit, marker=safe_diff_kind))
+                        prior = safe_diffs.get(key, [])
+                        if (value is None or value in prior
+                                or len(prior) >= RID03_OPERATION_MARKER_LIMIT):
+                            invalid_bounded_markers.add(key)
+                        elif key not in invalid_bounded_markers:
+                            safe_diffs.setdefault(key, []).append(value)
                 if (markers is not None and action == "output" and (root_test, "run") in seen
                         and (name is None or isinstance(name, str) and name in known)):
                     markers.observe(event.get("Output"))
@@ -922,8 +983,21 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                     for name in sorted(old_operation_diffs)
                     if (name, "fail") in seen and not any(
                         (name, end) in seen for end in ("pass", "skip"))]
+        read_only_failures = []
+        for (name, kind), diffs in sorted(safe_diffs.items()):
+            site = sites.get(name, {})
+            if ((name, kind) in invalid_bounded_markers or name in fragmented
+                    or (name, "fail") not in seen
+                    or any((name, end) in seen for end in ("pass", "skip"))
+                    or site.get("status") != "matched"
+                    or site.get("file") != DIFF_MARKER_SOURCES[kind]):
+                continue
+            record = {"test": name, "diffs": diffs}
+            (read_only_failures if kind == "RID03_READ_ONLY_DIFF" else failures).append(record)
         if failures:
             result["oldOperationDiffs"] = failures
+        if read_only_failures:
+            result["readOnlyDiffs"] = read_only_failures
     if markers is not None:
         result["failureMarker"] = markers.verdict(result["status"], result.get("firstFailureSite", {}))
     return result
