@@ -14,6 +14,7 @@ import (
 // ChildRegistrationPolicy связывает форму ID и пределы с именованной
 // записью действия на родителе из того же снимка каталога.
 type ChildRegistrationPolicy struct {
+	Verb          string
 	Path          domain.UserChildPathPolicy
 	MaxChildren   int32
 	MaxCreates    int32
@@ -27,6 +28,37 @@ func (f *Facts) ChildRegistration(dotted string) (ChildRegistrationPolicy, bool)
 	}
 	policy, ok := f.childRegistrations[dotted]
 	return policy, ok
+}
+
+// ChildRegistrationActions возвращает только действия, которые явно названы
+// вложенным правилом на точном типе родителя. Отбор самого родителя и субъекта
+// остаётся у применителя. Фильтр по ещё не созданному потомку нельзя расширять
+// до права создать произвольного потомка.
+func (f *Facts) ChildRegistrationActions(sel domain.RuleSelector) []ContainerGrant {
+	if f == nil || len(f.childRegistrations) == 0 || sel.Container == nil ||
+		sel.Arm != domain.ArmAnchor || sel.CreatedBySubject ||
+		len(sel.ResourceNames) != 0 || len(sel.MatchLabels) != 0 {
+		return nil
+	}
+	parentType, live := f.FGAObjectType(sel.Container.Type)
+	if !live {
+		return nil
+	}
+	var out []ContainerGrant
+	for _, dotted := range sel.ObjectTypes {
+		policy, enabled := f.ChildRegistration(dotted)
+		if !enabled || policy.Path.ParentType != parentType ||
+			!slices.ContainsFunc(sel.Verbs, func(verb string) bool {
+				return domain.NormalizeVerb(verb) == policy.Verb
+			}) {
+			continue
+		}
+		grant := ContainerGrant{Verb: policy.Verb, ParentType: parentType, Relation: policy.Path.ParentAction}
+		if !slices.Contains(out, grant) {
+			out = append(out, grant)
+		}
+	}
+	return out
 }
 
 func childRegistrationPolicies(rows []ResourceRow, actions map[string]map[string]ContainerGrant) (map[string]ChildRegistrationPolicy, error) {
@@ -62,7 +94,8 @@ func childRegistrationPolicies(rows []ResourceRow, actions map[string]map[string
 			return nil, fmt.Errorf("каталог %s: несогласованная политика регистрации потомков", dotted)
 		}
 		policies[dotted] = ChildRegistrationPolicy{
-			Path: path, MaxChildren: rule.MaxChildren, MaxCreates: rule.MaxCreates, WindowSeconds: rule.WindowSeconds,
+			Verb: rule.Verb, Path: path, MaxChildren: rule.MaxChildren,
+			MaxCreates: rule.MaxCreates, WindowSeconds: rule.WindowSeconds,
 		}
 	}
 	return policies, nil

@@ -52,6 +52,9 @@ func New(modelSource string, halves catalog.Halves) (*Compiler, error) {
 	if err != nil {
 		return nil, err
 	}
+	// При сортировке ресурсы меняют позиции. Декодирование в прежний срез
+	// сохранило бы значение поля omitempty от ресурса на старой позиции.
+	copy = catalog.Halves{}
 	if err = json.Unmarshal(raw, &copy); err != nil {
 		return nil, err
 	}
