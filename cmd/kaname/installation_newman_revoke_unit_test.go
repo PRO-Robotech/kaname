@@ -150,11 +150,21 @@ func rid06UnitRevoke(t *testing.T, held bool) (rid03NewmanSnapshot, rid03NewmanS
 	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	at := base.Add(time.Second)
 	row := func(v map[string]any) rid09PrimaryRow { return rid03UnitRow(t, v) }
-	gd := row(map[string]any{"id": "GD", "account_id": "A", "delegate_id": "I", "active_delegate_id": "I", "status": "ACTIVE", "revoked_at": nil, "revoked_by_type": nil, "revoked_by_id": nil, "created_at": base.Add(-time.Minute), "future": "preserved"})
+	gd := row(map[string]any{"id": "GD", "account_id": "A", "delegate_id": "I", "delegated_by_type": "service_account", "delegated_by_id": "C", "active_delegate_id": "I", "status": "ACTIVE", "revoked_at": nil, "revoked_by_type": nil, "revoked_by_id": nil, "created_at": base.Add(-time.Minute), "future": "preserved"})
 	g := row(map[string]any{"id": "G", "delegation_id": "GD", "subject_type": "service_account", "subject_id": "U", "role_id": "role", "resource_type": "account", "resource_id": "A", "status": "ACTIVE", "revoked_at": nil, "revoked_by_user_id": nil, "revocation_reason": nil, "created_at": base.Add(-time.Minute), "future": "preserved"})
 	ledger := row(map[string]any{"binding_id": "G", "source": "member", "member_object_type": "registry.registries", "member_object_id": "R", "fga_user": "service_account:U", "relation": "viewer", "object": "registry_registry:R"})
 	fact := row(map[string]any{"object_type": "registry_registry", "object_id": "R", "relation": "viewer", "subject": "service_account:U", "source_version": base.Add(-time.Second), "created_at": base.Add(-time.Minute), "condition_name": "", "condition_params": map[string]any{}})
 	a := rid03NewmanSnapshot{Raw: map[string][]rid09PrimaryRow{"grant_delegations": {gd}, "access_bindings": {g}, "access_binding_subjects": {row(map[string]any{"binding_id": "G", "subject_type": "service_account", "subject_id": "U"})}, "access_binding_emitted_tuples": {ledger}, "relation_fact": {fact}, "fga_outbox": {}, "subject_change_outbox": {}, "resource_journal": {}, "access_binding_target_members": {}, "cluster_admin_grants": {}, "operations": {}, "future_table": {}}}
+	a.Raw["projects"] = []rid09PrimaryRow{}
+	a.Raw["role_rule_selectors"] = []rid09PrimaryRow{row(map[string]any{"role_id": "role", "arm": "anchor", "container_type": nil})}
+	a.Raw["catalog_resource"] = []rid09PrimaryRow{row(map[string]any{"object_type": "registry_registry", "dotted": "registry.registries"})}
+	a.Raw["resource_mirror"] = []rid09PrimaryRow{row(map[string]any{"object_type": "registry.registries", "object_id": "R", "parent_account_id": "A", "parent_project_id": nil})}
+	for _, key := range []string{"scope:A", "service_account:I", "service_account:C", "service_account:U", "carriers:role:role", "carrier_latch:role:role", "*", "scope:other"} {
+		a.Raw["authority_policy_epoch"] = append(a.Raw["authority_policy_epoch"], row(map[string]any{"key": key, "generation": "42", "revision": int64(7)}))
+	}
+	for _, scope := range []string{"A", "", "other"} {
+		a.Raw["authority_binding_epoch"] = append(a.Raw["authority_binding_epoch"], row(map[string]any{"scope": scope, "generation": "42", "revision": int64(7)}))
+	}
 	a.Whole.PrimaryFinishedAt = base
 	a.Projection = rid09NewmanProjection{Accounts: []map[string]any{{"id": "A"}}, Bindings: []map[string]any{{"id": "G", "status": "ACTIVE", "revokedAt": nil, "revokedByUserId": "", "revocationReason": "REVOCATION_REASON_UNSPECIFIED", "materializedAt": "before", "createdAt": "before", "delegationId": "GD"}}, Delegations: []map[string]any{{"id": "GD", "status": "ACTIVE", "revokedAt": nil, "revokedBy": nil, "createdAt": "before"}}, Materialization: "unchanged"}
 	if held {
@@ -171,6 +181,14 @@ func rid06UnitRevoke(t *testing.T, held bool) (rid03NewmanSnapshot, rid03NewmanS
 	require.NoError(t, json.Unmarshal(raw, &b.Projection))
 	b.Projection.Materialization = a.Projection.Materialization
 	b.Whole.PrimaryStartedAt = base.Add(2 * time.Second)
+	// Independent fixture expectation: GD, binding and deferred carrier flush.
+	for _, epoch := range b.Raw["authority_policy_epoch"] {
+		switch rid03S(epoch, "key") {
+		case "scope:A", "service_account:I", "service_account:C", "service_account:U", "carriers:role:role":
+			epoch["revision"] = json.RawMessage(`8`)
+		}
+	}
+	b.Raw["authority_binding_epoch"][0]["revision"] = json.RawMessage(`9`)
 	b.Raw["grant_delegations"][0]["status"] = json.RawMessage(`"REVOKED"`)
 	b.Raw["grant_delegations"][0]["active_delegate_id"] = json.RawMessage(`null`)
 	b.Raw["grant_delegations"][0]["revoked_by_type"] = json.RawMessage(`"user"`)
@@ -513,6 +531,109 @@ func TestRID06RevokeCreatedByIdentity(t *testing.T) {
 				op.Principal.DisplayName = "C"
 			}
 			require.Equal(t, name == "legal", rid06RevokeCreatorValid(op, raw, "O"))
+		})
+	}
+}
+
+func TestRID06ClosedRevokeEpochDelta(t *testing.T) {
+	for _, table := range []string{"authority_policy_epoch", "authority_binding_epoch"} {
+		for _, name := range []string{"legal", "missing-change", "revision-regressed", "revision-malformed", "generation-changed", "unrelated-key-changed", "root-changed", "row-added", "row-removed", "row-duplicated", "unknown-column", "missing-table"} {
+			t.Run(table+"/"+name, func(t *testing.T) {
+				a, b := rid06UnitRevoke(t, false)
+				rows := b.Raw[table]
+				switch name {
+				case "missing-change":
+					rows[0]["revision"] = json.RawMessage(`7`)
+				case "revision-regressed":
+					rows[0]["revision"] = json.RawMessage(`6`)
+				case "revision-malformed":
+					rows[0]["revision"] = json.RawMessage(`"8"`)
+				case "generation-changed":
+					rows[0]["generation"] = json.RawMessage(`"43"`)
+				case "unrelated-key-changed":
+					rows[len(rows)-1]["revision"] = json.RawMessage(`8`)
+				case "root-changed":
+					for _, row := range rows {
+						if rid03S(row, "key") == "*" || (table == "authority_binding_epoch" && rid03S(row, "scope") == "") {
+							row["revision"] = json.RawMessage(`8`)
+						}
+					}
+				case "row-added":
+					key := "key"
+					if table == "authority_binding_epoch" {
+						key = "scope"
+					}
+					b.Raw[table] = append(rows, rid03UnitRow(t, map[string]any{key: "unexpected", "generation": "42", "revision": int64(1)}))
+				case "row-removed":
+					b.Raw[table] = rows[:len(rows)-1]
+				case "row-duplicated":
+					rows[len(rows)-1] = rows[0]
+				case "unknown-column":
+					rows[0]["future"] = json.RawMessage(`true`)
+				case "missing-table":
+					delete(b.Raw, table)
+				}
+				_, ok := rid06RevokeRawDelta(a, b, "GD", "O")
+				require.Equal(t, name == "legal", ok)
+			})
+		}
+	}
+	t.Run("carrier-latch-is-read-only", func(t *testing.T) {
+		a, b := rid06UnitRevoke(t, false)
+		for _, row := range b.Raw["authority_policy_epoch"] {
+			if rid03S(row, "key") == "carrier_latch:role:role" {
+				row["revision"] = json.RawMessage(`8`)
+			}
+		}
+		_, ok := rid06RevokeRawDelta(a, b, "GD", "O")
+		require.False(t, ok)
+	})
+}
+
+func TestRID06RevokeEpochKeysComeFromBeforeMutations(t *testing.T) {
+	for _, name := range []string{"removed-fact", "held-fact", "virtual-intent", "absent-fact", "broad-selector", "project-owner", "missing-owner"} {
+		t.Run(name, func(t *testing.T) {
+			a, _ := rid06UnitRevoke(t, false)
+			// A distinct fact subject and owner make its invalidations observable
+			// independently of the GD/binding invalidations.
+			a.Raw["relation_fact"][0]["subject"] = json.RawMessage(`"group:readers#member"`)
+			a.Raw["resource_mirror"][0]["parent_account_id"] = json.RawMessage(`"fact-owner"`)
+			tuple := rid03Tuple{"group:readers#member", "viewer", "registry_registry", "R"}
+			held := map[rid03Tuple]bool{}
+			switch name {
+			case "held-fact":
+				held[tuple] = true
+			case "virtual-intent":
+				tuple.Relation = "v_get"
+				a.Raw["relation_fact"][0]["relation"] = json.RawMessage(`"v_get"`)
+			case "absent-fact":
+				a.Raw["relation_fact"] = nil
+			case "broad-selector":
+				a.Raw["role_rule_selectors"][0]["arm"] = json.RawMessage(`"names"`)
+			case "project-owner":
+				a.Raw["projects"] = []rid09PrimaryRow{rid03UnitRow(t, map[string]any{"id": "P", "account_id": "fact-owner"})}
+				a.Raw["resource_mirror"][0]["parent_account_id"] = json.RawMessage(`null`)
+				a.Raw["resource_mirror"][0]["parent_project_id"] = json.RawMessage(`"P"`)
+			case "missing-owner":
+				a.Raw["resource_mirror"] = nil
+			}
+			policy, scopes, ok := rid06RevokeEpochKeys(a, a.Raw["grant_delegations"][0], map[string]rid09PrimaryRow{"G": a.Raw["access_bindings"][0]}, map[rid03Tuple]bool{tuple: true}, held)
+			if name == "missing-owner" {
+				require.False(t, ok)
+				return
+			}
+			require.True(t, ok)
+			want := map[string]bool{"scope:A": true, "service_account:I": true, "service_account:C": true, "service_account:U": true, "carriers:role:role": true}
+			if name != "held-fact" && name != "virtual-intent" && name != "absent-fact" {
+				want["group:readers"] = true
+				want["scope:fact-owner"] = true
+			}
+			require.Equal(t, want, policy)
+			wantScopes := map[string]bool{"A": true}
+			if name == "broad-selector" {
+				wantScopes[""] = true
+			}
+			require.Equal(t, wantScopes, scopes)
 		})
 	}
 }
