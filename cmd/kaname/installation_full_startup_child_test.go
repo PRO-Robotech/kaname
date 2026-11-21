@@ -26,10 +26,11 @@ import (
 const rid06ChildInputEnv = "KANAME_RID06_FULL_STARTUP_CHILD_INPUT"
 
 type rid06ChildInput struct {
-	ConfigPath  string `json:"configPath"`
-	Creator     string `json:"creator"`
-	Account     string `json:"account"`
-	PairOrdinal int64  `json:"pairOrdinal"`
+	ConfigPath     string `json:"configPath"`
+	Creator        string `json:"creator"`
+	Account        string `json:"account"`
+	PairOrdinal    int64  `json:"pairOrdinal"`
+	ConcurrentPair bool   `json:"concurrentPair,omitempty"`
 }
 
 // Инструментированный ТЕСТОВЫЙ исполняемый файл выполняет настоящий полный корень запуска. Это
@@ -113,9 +114,17 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 			}
 			pendingCtx, cancel := context.WithDeadline(ctx, deadline)
 			defer cancel()
-			operation, err := rid06PendingBeforeWriter(pendingCtx, cfg.SingleConnDSN(), input.Creator, input.Account)
-			if err != nil {
-				return err
+			stage, operation := "before-pair", ""
+			if input.ConcurrentPair && ordinal == 1 {
+				// Родитель независимо проверяет ровно две committed Operation до release.
+				// Здесь singleton-чтение неоднозначно, а Writer/global fence ещё не взяты.
+				stage = "before-concurrent-pair"
+			} else {
+				var err error
+				operation, err = rid06PendingBeforeWriter(pendingCtx, cfg.SingleConnDSN(), input.Creator, input.Account)
+				if err != nil {
+					return err
+				}
 			}
 			if err := events.SetWriteDeadline(deadline); err != nil {
 				return err
@@ -125,7 +134,7 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 			}
 			stop := context.AfterFunc(ctx, func() { _ = control.SetReadDeadline(time.Now()) })
 			defer stop()
-			if err := json.NewEncoder(events).Encode(rid02ChildEvent{Stage: "before-pair", Operation: operation, PID: os.Getpid()}); err != nil {
+			if err := json.NewEncoder(events).Encode(rid02ChildEvent{Stage: stage, Operation: operation, PID: os.Getpid()}); err != nil {
 				return err
 			}
 			var action string
