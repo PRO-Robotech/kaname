@@ -288,7 +288,7 @@ func (w catalogWriter) ReadModule(ctx context.Context, module string) (catalog.R
 	}
 
 	resRows, err := w.tx.Query(ctx,
-		`SELECT `+liveCatalogResourceColumns+`
+		`SELECT `+liveCatalogResourceColumns+`, child_registration
 		   FROM kaname.catalog_resource
 		  WHERE module = $1 AND live
 		  ORDER BY resource`, module)
