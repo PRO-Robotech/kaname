@@ -90,7 +90,7 @@ func compileResourceObjectEffectProposal(ctx context.Context, p *resourceObjectP
 		}
 		for _, desired := range input.Desired {
 			switch desired.Derivation {
-			case "ordinary", "nested", "container", "scope_self", "public_reader":
+			case "ordinary", "nested", "container", "scope_self", "public_reader", "child_registration":
 			default:
 				return nil, kaname.ErrSourceUnconfirmed
 			}
