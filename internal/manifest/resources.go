@@ -479,6 +479,8 @@ type Resource struct {
 	// действия, которые авторизуются отношением на РОДИТЕЛЕ. В набор глаголов типа
 	// не входят, классом и подстановкой не достигаются, модели не порождают.
 	ContainerVerbs []ContainerVerb `yaml:"containerVerbs"`
+	// ChildRegistration включает пользовательскую регистрацию этого типа.
+	ChildRegistration *ChildRegistration `yaml:"childRegistration,omitempty"`
 	// kaname#1034: авторские meta-пары, без RPC/v_* и раскрытия wildcard.
 	GrantVerbs []string `yaml:"grantVerbs"`
 	// BaseRoles — ресурс порождает БАЗОВЫЕ ЯРУСНЫЕ РОЛИ.

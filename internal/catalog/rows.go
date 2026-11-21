@@ -111,6 +111,25 @@ type ResourceRow struct {
 	// (`permanentProject: true` манифеста, kaname#983). Колонка
 	// `catalog_resource.permanent_project`.
 	PermanentProject bool
+	// ChildRegistration сохраняет декларацию пользовательской регистрации.
+	// Пустое значение отключает механизм и сохраняет прежние байты каталога.
+	ChildRegistration *ChildRegistrationRule `json:",omitempty"`
+}
+
+// ChildRegistrationRule ссылается на именованную строку глагола ресурса.
+type ChildRegistrationRule struct {
+	Verb           string
+	ParentSegments int32
+	MaxChildren    int32
+	MaxCreates     int32
+	WindowSeconds  int32
+}
+
+func sameChildRegistration(a, b *ChildRegistrationRule) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // sameStrings — два перечня равны поэлементно и по порядку.
@@ -136,7 +155,8 @@ func sameStrings(a, b []string) bool {
 func (r ResourceRow) SameForm(o ResourceRow) bool {
 	return r.ObjectType == o.ObjectType && r.PublicReadToChildren == o.PublicReadToChildren &&
 		sameStrings(r.ParentTypes, o.ParentTypes) && sameStrings(r.ParentNames, o.ParentNames) &&
-		sameStrings(r.Writes, o.Writes) && r.PermanentProject == o.PermanentProject
+		sameStrings(r.Writes, o.Writes) && r.PermanentProject == o.PermanentProject &&
+		sameChildRegistration(r.ChildRegistration, o.ChildRegistration)
 }
 
 // VerbRow — одна ЖИВАЯ строка `kaname.catalog_verb`.

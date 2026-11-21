@@ -108,6 +108,42 @@ func TestCanonicalCatalogRetainsEveryRowFieldAndManifestOrder(t *testing.T) {
 	}
 }
 
+func TestCanonicalCatalogIncludesChildRegistrationPolicy(t *testing.T) {
+	legacy := canonicalFixture()
+	if bytes.Contains(mustCanonical(t, legacy), []byte(`"ChildRegistration"`)) {
+		t.Fatal("пустая политика изменила прежнюю форму каталога")
+	}
+
+	rule := ChildRegistrationRule{Verb: "registerchild", ParentSegments: 1, MaxChildren: 24, MaxCreates: 4, WindowSeconds: 60}
+	withRule := canonicalFixture()
+	withRule.Live.Resources[0].ChildRegistration = &rule
+	base := mustCanonical(t, withRule)
+	if bytes.Equal(base, mustCanonical(t, legacy)) || withRule.Live.Resources[0].SameForm(legacy.Live.Resources[0]) {
+		t.Fatal("каталог не различает ресурс с политикой регистрации и без неё")
+	}
+	changes := map[string]func(*ChildRegistrationRule){
+		"verb":            func(r *ChildRegistrationRule) { r.Verb = "create" },
+		"parent_segments": func(r *ChildRegistrationRule) { r.ParentSegments++ },
+		"max_children":    func(r *ChildRegistrationRule) { r.MaxChildren++ },
+		"max_creates":     func(r *ChildRegistrationRule) { r.MaxCreates++ },
+		"window_seconds":  func(r *ChildRegistrationRule) { r.WindowSeconds++ },
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			other := canonicalFixture()
+			copyOfRule := rule
+			other.Live.Resources[0].ChildRegistration = &copyOfRule
+			if !withRule.Live.Resources[0].SameForm(other.Live.Resources[0]) {
+				t.Fatal("равные политики хранятся в разных указателях")
+			}
+			change(&copyOfRule)
+			if withRule.Live.Resources[0].SameForm(other.Live.Resources[0]) || bytes.Equal(base, mustCanonical(t, other)) {
+				t.Fatal("изменение политики потеряно")
+			}
+		})
+	}
+}
+
 func TestCanonicalCatalogRejectsAmbiguousRowKeys(t *testing.T) {
 	for _, half := range []string{"live", "retired"} {
 		for _, kind := range []string{"resource", "verb"} {

@@ -211,6 +211,18 @@ func validateContainerRelation(m *Manifest, r *Resource, cv ContainerVerb, label
 		return nil
 	}
 	decl, ok := oracle.RelationDeclaration(parentType, cv.Relation)
+	if child := r.ChildRegistration; child != nil && child.Verb == cv.Name {
+		if !ok || !decl.IsDirect() || !decl.AcceptsKind(childRegistrationSubjectKind) {
+			return []error{linkFault{kind: ErrChildRegistrationDeclaration, coord: at("relation"),
+				detail: fmt.Sprintf("%s: отношение %q типа %q должно прямо принимать человека",
+					label, cv.Relation, parentType)}}
+		}
+		// Действие create используется также механизмом выбора по создателю.
+		// Оно сохраняет свой допуск для служебных учётных записей.
+		if cv.Name != creatorContainerVerb {
+			return nil
+		}
+	}
 	if !ok || !decl.IsDirect() || !decl.AcceptsKind(creatorSubjectKind) {
 		accepted := "—"
 		if ok {
