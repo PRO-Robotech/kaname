@@ -693,11 +693,8 @@ BEGIN
       RAISE EXCEPTION 'registration limit out of range' USING ERRCODE='42501';END IF;
     END LOOP;
     parent_segments:=(registration->>'ParentSegments')::integer;
-    IF parent_segments>254 OR octet_length(model_type)+2::bigint*parent_segments>512
-     OR octet_length(resource->>'ObjectType')+2::bigint*parent_segments+2>512 THEN
-     RAISE EXCEPTION 'registration path limits invalid' USING ERRCODE='42501';END IF;
     IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(authored->'verbs') v
-      WHERE lower(btrim(v))=registration->>'Verb') THEN CONTINUE;END IF;
+      WHERE translate(btrim(v),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=registration->>'Verb') THEN CONTINUE;END IF;
     IF jsonb_typeof(resource->'ParentNames') IS DISTINCT FROM 'array'
      OR jsonb_typeof(resource->'ParentTypes') IS DISTINCT FROM 'array' THEN
      RAISE EXCEPTION 'registration pointer form invalid' USING ERRCODE='42501';END IF;
@@ -707,6 +704,9 @@ BEGIN
     SELECT resource->'ParentTypes'->>((pn.ordinal-1)::integer) INTO registration_parent
      FROM jsonb_array_elements_text(resource->'ParentNames') WITH ORDINALITY AS pn(pointer,ordinal) WHERE pn.pointer='parent';
     IF registration_parent IS DISTINCT FROM model_type THEN CONTINUE;END IF;
+    IF parent_segments>254 OR octet_length(model_type)+2::bigint*parent_segments>512
+     OR octet_length(resource->>'ObjectType')+2::bigint*parent_segments+2>512 THEN
+     RAISE EXCEPTION 'registration path limits invalid' USING ERRCODE='42501';END IF;
     SELECT count(*),min(v->>'ContainerRelation') INTO action_count,registration_relation
      FROM jsonb_array_elements(p_catalog#>'{Live,Verbs}') v
      WHERE v->>'Module'=resource->>'Module' AND v->>'Resource'=resource->>'Resource'
@@ -1140,7 +1140,7 @@ BEGIN
  ('_authority_resource_selector_rows_v2(jsonb,integer,integer)','d7da86929ecc720bfd1f617a1c02ae074a487c8280e931a91cba0f008c8060ef',true,'v',true,'preserve'),
  ('_authority_resource_selector_shape_v2(jsonb,integer,integer)','c044631ad4287271aa8540488883ec06983a5abb85f484388a25cba713191a3c',true,'v',true,'preserve'),
  ('_authority_resource_source_wait_v2(jsonb,boolean,integer,integer)','1ce9b16ec596aa1521e295cadb310ea5680c69ba5ea12ee995f186adeb5bd654',true,'v',true,'preserve'),
- ('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','ebaa093833e85baf5499016354d2c59bfe811b373b744fd48aad3a293fcae294',true,'i',true,'private'),
+ ('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','a7009eb3fc759ba72f73579f72a23b6078174b556fbcbbcadc91b2e95bb4013c',true,'i',true,'private'),
  ('_authority_resource_special_member_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','9415be5436a7ed74e97131d996f346df3f1b02d23c7f5b108fa7788629a0c6ed',true,'i',true,'preserve'),
  ('_authority_resource_subject_change_wait_v2(integer,integer)','bb5f61c161012d21fe2480ffbdc61fc8095ceb1d9d265a13b26530b22b568632',true,'v',true,'preserve'),
  ('_authority_resource_target_contains_v2(jsonb,text,text)','5c3e97459a3935ec873831692d25cf522a7ca8447a97fbb376a1be6aa9fd8186',true,'i',true,'preserve'),
@@ -1613,7 +1613,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','0734551163dd0f745e37a8f72c7b636010a7016b85efea8a350847b18a1d68ca',true),
+ ('_authority_crud_storage_v3()','62d45446ad94410d718dea89036229c648a6cec5f3fd1bd09393cf3919691f34',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
