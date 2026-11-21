@@ -101,7 +101,9 @@ func rid06PublicConsumer(t *testing.T, w *ridLifecycleWorld, owner string) *rid0
 }
 func rid06Primary(t *testing.T, w *ridLifecycleWorld, stable bool) rid03NewmanSnapshot {
 	if stable {
-		return rid05SnapshotRead(t, w, true).Core
+		// Для отзыва достаточно полного основного снимка. Перепись аудита
+		// удаления создателя используется только сценариями RID-05.
+		return rid03StableNewmanSnapshot(t, w)
 	}
 	return rid03PhaseSnapshot(t, w)
 }

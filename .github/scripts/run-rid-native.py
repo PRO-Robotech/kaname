@@ -525,6 +525,12 @@ ASSERTION_FILES = (
     "cmd/kaname/installation_newman_delegated_evidence_test.go",
     "cmd/kaname/installation_newman_delegated_observation_test.go",
     "cmd/kaname/installation_native_fixture_test.go",
+    "cmd/kaname/installation_native_concurrency_test.go",
+    "cmd/kaname/installation_operation_observation_test.go",
+    "cmd/kaname/installation_creator_deletion_native_test.go",
+    "cmd/kaname/installation_newman_deletion_test.go",
+    "cmd/kaname/installation_newman_deletion_wire_test.go",
+    "cmd/kaname/installation_newman_deletion_delta_test.go",
     "cmd/kaname/installation_native_baseline_test.go",
     "cmd/kaname/installation_native_stock_premise_test.go",
     "cmd/kaname/installation_public_lifecycle_fixture_test.go",
@@ -540,10 +546,18 @@ ASSERTION_FILES = (
     "cmd/kaname/installation_newman_conflict_test.go",
     "cmd/kaname/installation_snapshot_runtime_test.go",
     "cmd/kaname/installation_whole_delivery_native_test.go",
+    "cmd/kaname/installation_newman_whole_projection_test.go",
+    "cmd/kaname/installation_whole_delivery_snapshot_test.go",
     "cmd/kaname/installation_newman_whole_phase_test.go",
     "cmd/kaname/installation_midrun_runtime_test.go",
     "cmd/kaname/installation_newman_midrun_test.go",
     "cmd/kaname/installation_input_authn_native_test.go",
+    "cmd/kaname/installation_input_authn_child_test.go",
+    "cmd/kaname/installation_newman_input_authn_test.go",
+    "cmd/kaname/installation_newman_input_authn_admission_test.go",
+    "cmd/kaname/installation_newman_input_authn_restore_test.go",
+    "cmd/kaname/installation_newman_input_authn_binding_restore_test.go",
+    "cmd/kaname/installation_snapshot_child_test.go",
     "cmd/kaname/installation_closed_shape_start_test.go",
     "cmd/kaname/installation_closed_shape_native_test.go",
     "cmd/kaname/installation_closed_shape_public_test.go",
@@ -658,6 +672,11 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     if root_test == CASES["registry-installation-rid04"][0]:
         names.update(root_test + "/" + name + "/" + mode
                      for name in predicates for mode in ("S1", "S2"))
+    if root_test == CASES["registry-installation-rid02"][0]:
+        names.update(root_test + "/" + name + "/" + mode for name in (
+            "two_real_absent-pair_arrivals_->_one_GD_and_two_successful_Operations",
+            "raw_Any_metadata_index_and_response_identities_agree_on_both_Operations",
+        ) for mode in ("S1", "S2"))
     if root_test == CASES["registry-installation-rid10"][0]:
         names.update(root_test + "/" + name for name in RID10_NESTED)
     names.update(root_test + "/" + name for name in RID_MATRIX_NESTED.get(root_test, frozenset()))

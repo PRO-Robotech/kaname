@@ -156,7 +156,8 @@ func rid07DefaultNewmanConsumer(t *testing.T, w *ridLifecycleWorld, in rid07Newm
 		calls++
 		id := rid07NewmanCaseID(t, in, phase)
 		var snapshot rid07NewmanSnapshot
-		if phase == "before" {
+		// После успешной повторной установки принимаем новую устойчивую базу до Newman.
+		if phase == "before" || in.Exact {
 			snapshot = rid07NewmanBaseline(t, w, in)
 		} else {
 			snapshot = rid07ReadNewmanSnapshot(t, f)

@@ -672,6 +672,9 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 		base, err := f.session.StartBase(f.given.ctx, f.writerPlan)
 		require.NoError(t, err)
 		require.NoError(t, base.OwnsListeners(installruntime.DefaultNativePorts().All()...))
+		if public != nil {
+			rid09AwaitBaseRoleProjections(t, f.given.ctx, base)
+		}
 		f.renewOperator(t, f.given.ctx)
 		if c.Variant == "deleted-creator" {
 			p.DeletedAfterRun = rid11RequireCreatorAbsent(t, f)
