@@ -670,6 +670,38 @@ def rid03_old_operation_diff(output, line_limit):
     return value
 
 
+def rid02_rid10_marker(output, marker, bounds):
+    # Только полная строка из точного исходника; никаких значений из журнала в ключах.
+    sources = {
+        "RID02_OPERATION_CENSUS": "cmd/kaname/installation_native_concurrency_test.go",
+        "RID10_SNAPSHOT": "cmd/kaname/installation_newman_midrun_test.go",
+        "RID_PROJECTION": "cmd/kaname/installation_newman_whole_projection_test.go",
+    }
+    source = sources[marker]
+    if not isinstance(output, str) or len(output) > 512:
+        return None
+    match = re.fullmatch(
+        r"[ \t]+(?:" + re.escape(str(ROOT / "cmd/kaname") + "/") + r")?" +
+        re.escape(Path(source).name) + r":([1-9][0-9]{0,6}): " + marker +
+        r" ([^\r\n]{1,350})\n", output)
+    if match is None or int(match[1]) > bounds.get(source, 0):
+        return None
+    if marker == "RID02_OPERATION_CENSUS":
+        fields = ("matched", "scoped_pending", "scoped_terminal", "other_pending", "other_terminal")
+        number = r"(0|[1-9][0-9]{0,6})"
+        unavailable = re.fullmatch(r"status=unavailable matched=" + number, match[2])
+        if unavailable:
+            return {"status": "unavailable", "matched": int(unavailable[1])}
+        value = re.fullmatch("status=complete " + " ".join(field + "=" + number for field in fields), match[2])
+        return {"status": "complete", **dict(zip(fields, map(int, value.groups())))} if value else None
+    fields = (("pull_role", "public_operations", "raw_delegations", "raw_bindings", "raw_operations")
+              if marker == "RID10_SNAPSHOT" else
+              ("accounts", "service_accounts", "groups", "members", "roles", "bindings",
+               "delegations", "catalog", "materialization"))
+    value = re.fullmatch(" ".join(field + "=(true|false)" for field in fields), match[2])
+    return dict(zip(fields, (item == "true" for item in value.groups()))) if value else None
+
+
 def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     # Только известные имена и ограниченные структурные проекции отдельных RID.
     names = {root_test, *(root_test + "/" + name for name in predicates)}
@@ -705,6 +737,15 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     rid05_cleanup, ambiguous_cleanup = {}, set()
     projection_changes, ambiguous_projection = {}, set()
     binding_premise, ambiguous_premise = {}, set()
+    bounded_markers, invalid_bounded_markers = {}, set()
+    bounded_leaves, bounded_kinds = set(), ()
+    if root_test == CASES["registry-installation-rid02"][0]:
+        bounded_leaves = {name for name in names if name.endswith(("/S1", "/S2"))}
+        bounded_kinds = ("RID02_OPERATION_CENSUS",)
+    elif root_test == CASES["registry-installation-rid10"][0]:
+        bounded_leaves = {root_test + "/" + name for name in RID10_NESTED
+                          if not name.endswith("-independent-twin")}
+        bounded_kinds = ("RID10_SNAPSHOT", "RID_PROJECTION")
     premise_reasons = {
         "budget-or-facts", "retired-history", "inventory", "role-index", "user-index", "subject-census",
         "member-census", "duplicate-member", "member-clock", "binding-status", "binding-lifecycle",
@@ -737,6 +778,20 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                 if not isinstance(event, dict) or event.get("Package") != PACKAGE:
                     continue
                 name, action = event.get("Test"), event.get("Action")
+                if action == "output" and isinstance(name, str) and name in bounded_leaves:
+                    output = event.get("Output")
+                    for kind in bounded_kinds:
+                        if not isinstance(output, str) or kind not in output:
+                            continue
+                        key = (name, kind)
+                        active = ((root_test, "run") in seen and (name, "run") in seen
+                                  and not any((subject, end) in seen for subject in (root_test, name)
+                                              for end in ("pass", "fail", "skip")))
+                        value = rid02_rid10_marker(output, kind, bounds) if active else None
+                        if value is None or key in bounded_markers:
+                            invalid_bounded_markers.add(key)
+                        elif key not in invalid_bounded_markers:
+                            bounded_markers[key] = value
                 if (markers is not None and action == "output" and (root_test, "run") in seen
                         and (name is None or isinstance(name, str) and name in known)):
                     markers.observe(event.get("Output"))
@@ -840,6 +895,18 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
         else:
             site = sites.get(first, {"status": "not-observed"})
         result["firstFailureSite"] = {"test": first, **site}
+        if (result["status"] == "complete" and site.get("status") == "matched"
+                and first in bounded_leaves
+                and not any((first, end) in seen for end in ("pass", "skip"))):
+            for kind, source, field in (
+                    ("RID02_OPERATION_CENSUS", "cmd/kaname/installation_native_concurrency_test.go", "operationCensus"),
+                    ("RID10_SNAPSHOT", "cmd/kaname/installation_newman_midrun_test.go", "snapshotChanges"),
+                    ("RID_PROJECTION", "cmd/kaname/installation_newman_midrun_test.go", "changedProjectionFields")):
+                key = (first, kind)
+                if site.get("file") == source and key in bounded_markers and key not in invalid_bounded_markers:
+                    value = bounded_markers[key]
+                    result[field] = ([name for name, changed in value.items() if changed]
+                                     if kind == "RID_PROJECTION" else value)
         if (site.get("file") == "cmd/kaname/installation_newman_deletion_delta_test.go"
                 and first in rid05_cleanup and first not in ambiguous_cleanup):
             result["deleteCleanup"] = rid05_cleanup[first]
