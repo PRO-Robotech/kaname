@@ -80,6 +80,9 @@ const upsertManySQL = `INSERT INTO kaname.access_binding_target_members
 			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
 			        AS t(b, r, f, ot, oi, vs)` + upsertConflict
 
+// PreparedUpsertManySQL сохраняет время из подписанного образа PostgreSQL.
+const PreparedUpsertManySQL = upsertManySQL + plannedUpdateClock
+
 // UpsertManyTx — тот же UPSERT, что UpsertTx, ограниченными наборами в той же tx.
 //
 // ЗАЧЕМ. Аддитивный проход материализации пишет по строке члена на КАЖДУЮ выдачу,
@@ -93,15 +96,15 @@ const upsertManySQL = `INSERT INTO kaname.access_binding_target_members
 // набор с дублем Postgres отверг бы целиком (поштучная вставка этого не требовала,
 // потому что каждая строка ехала своим стейтментом). Пустой набор — no-op.
 func UpsertManyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
-	return upsertMany(ctx, tx, members, plannedUpdateClock)
+	return upsertMany(ctx, tx, members, PreparedUpsertManySQL)
 }
 
 // UpsertManyLegacyTx сохраняет то же монотонное время пакетной материализации.
 func UpsertManyLegacyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
-	return upsertMany(ctx, tx, members, legacyUpdateClock)
+	return upsertMany(ctx, tx, members, upsertManySQL+legacyUpdateClock)
 }
 
-func upsertMany(ctx context.Context, tx pgx.Tx, members []Member, updateClock string) error {
+func upsertMany(ctx context.Context, tx pgx.Tx, members []Member, statement string) error {
 	if len(members) == 0 {
 		return nil
 	}
@@ -117,7 +120,7 @@ func upsertMany(ctx context.Context, tx pgx.Tx, members []Member, updateClock st
 			return nil
 		}
 		if _, err := tx.Exec(ctx,
-			upsertManySQL+updateClock,
+			statement,
 			bindings, roles, fps, objTypes, objIDs, statuses,
 		); err != nil {
 			return fmt.Errorf("target_members: upsert many (%d): %w", len(bindings), err)
