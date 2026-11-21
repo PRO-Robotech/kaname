@@ -36,6 +36,14 @@ type Member struct {
 	VerificationStatus domain.VerificationStatus
 }
 
+// При конфликте строка могла быть вставлена транзакцией, начавшейся позже
+// текущей. now() этой транзакции не годится для сохранённой даты изменения.
+const upsertConflict = `
+		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
+		    SET verification_status = EXCLUDED.verification_status,
+		        updated_at = GREATEST(access_binding_target_members.created_at,
+		                              access_binding_target_members.updated_at, clock_timestamp())`
+
 // UpsertTx вставляет или обновляет строку членства до status по полной координате
 // правила (binding, role, rule_fp, object) в транзакции вызывающего. Идемпотентен по
 // первичному ключу; при конфликте статус заменяется (повторная проверка
@@ -44,10 +52,7 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, m Member) error {
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kaname.access_binding_target_members
 		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, now(), now())
-		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
-		    SET verification_status = EXCLUDED.verification_status,
-		        updated_at          = now()`,
+		 VALUES ($1, $2, $3, $4, $5, $6, now(), now())`+upsertConflict,
 		m.BindingID, m.RoleID, m.RuleFP, m.ObjectType, m.ObjectID, string(m.VerificationStatus),
 	); err != nil {
 		return fmt.Errorf("target_members: upsert: %w", err)
@@ -57,6 +62,14 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, m Member) error {
 
 // upsertBatchRows ограничивает один SQL, не размер атомарного прохода.
 const upsertBatchRows = 4096
+
+// UpsertManySQL используется пакетной записью и подготовленным исполнителем.
+// Оба пути пишут одни и те же часы и проверяют тот же ключ конфликта.
+const UpsertManySQL = `INSERT INTO kaname.access_binding_target_members
+			   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
+			 SELECT b, r, f, ot, oi, vs, now(), now()
+			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+			        AS t(b, r, f, ot, oi, vs)` + upsertConflict
 
 // UpsertManyTx — тот же UPSERT, что UpsertTx, ограниченными наборами в той же tx.
 //
@@ -86,14 +99,7 @@ func UpsertManyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
 			return nil
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO kaname.access_binding_target_members
-			   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
-			 SELECT b, r, f, ot, oi, vs, now(), now()
-			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
-			        AS t(b, r, f, ot, oi, vs)
-			 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
-			    SET verification_status = EXCLUDED.verification_status,
-			        updated_at          = now()`,
+			UpsertManySQL,
 			bindings, roles, fps, objTypes, objIDs, statuses,
 		); err != nil {
 			return fmt.Errorf("target_members: upsert many (%d): %w", len(bindings), err)

@@ -21,6 +21,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/target_members"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -680,14 +681,7 @@ func bindingCommandBatchBody(command reconcile.BindingCommand) (string, []any, s
 			ids = append(ids, key[4])
 			statuses = append(statuses, string(m.VerificationStatus))
 		}
-		return `INSERT INTO kaname.access_binding_target_members
-			   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
-			 SELECT b, r, f, ot, oi, vs, now(), now()
-			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
-			        AS t(b, r, f, ot, oi, vs)
-			 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
-			    SET verification_status = EXCLUDED.verification_status,
-			        updated_at          = now()`,
+		return target_members.UpsertManySQL,
 			[]any{bindings, roles, fps, types, ids, statuses}, fmt.Sprintf("target_members: upsert many (%d)", len(bindings)), true, nil
 	case "record":
 		if len(command.Refs) == 0 || len(command.Refs) > 4096 {

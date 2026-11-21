@@ -31,12 +31,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/target_members"
 )
 
 func TestAB_MA_MaterializedAtFromMemberLedger(t *testing.T) {
@@ -112,6 +114,61 @@ func TestAB_MA_MaterializedAtFromMemberLedger(t *testing.T) {
 
 	// MA-4 — batch call, exactly one entry.
 	assert.Len(t, got, 1, "MA-4: one batched read, no cross-attribution between bindings")
+}
+
+// Писатель мог начать транзакцию до создания строки другим писателем.
+// Повторная материализация сохраняет created_at и не сдвигает время назад.
+func TestTargetMemberUpdateDoesNotBackdateLaterInsert(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, setupTestDB(t))
+	require.NoError(t, err)
+	defer pool.Close()
+	repo := kanamepg.New(pool, nil)
+	owner := mustSeedUser(t, ctx, pool, "matime-owner")
+	account := seedAccount(t, ctx, repo, "acc-matime", owner)
+	role := seedCustomRole(t, ctx, repo, account.ID, "matime_role")
+	binding := insertAB(t, ctx, repo, domain.AccessBinding{
+		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(owner),
+		RoleID: role.ID, ResourceType: "account", ResourceID: string(account.ID),
+		GrantedByUserID: owner,
+	})
+	for _, tc := range []struct {
+		name   string
+		upsert func(context.Context, pgx.Tx, target_members.Member) error
+	}{
+		{"single", target_members.UpsertTx},
+		{"batch", func(ctx context.Context, tx pgx.Tx, m target_members.Member) error {
+			return target_members.UpsertManyTx(ctx, tx, []target_members.Member{m})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			earlier, err := pool.Begin(ctx)
+			require.NoError(t, err)
+			defer func() { _ = earlier.Rollback(ctx) }()
+			var before, inserted time.Time
+			require.NoError(t, earlier.QueryRow(ctx, `SELECT transaction_timestamp()`).Scan(&before))
+			require.NoError(t, pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&inserted))
+			require.True(t, inserted.After(before))
+			m := target_members.Member{
+				BindingID: string(binding.ID), RoleID: string(role.ID), RuleFP: tc.name,
+				ObjectType: "compute.instance", ObjectID: "ins-1", VerificationStatus: domain.VerificationActive,
+			}
+			seedTargetMember(t, ctx, pool, m.BindingID, m.RoleID, m.RuleFP, m.ObjectType, m.ObjectID, "PENDING_VERIFICATION", inserted)
+			require.NoError(t, tc.upsert(ctx, earlier, m))
+			var created, updated time.Time
+			var status string
+			require.NoError(t, earlier.QueryRow(ctx, `SELECT created_at, updated_at, verification_status
+				FROM kaname.access_binding_target_members WHERE binding_id=$1 AND rule_fp=$2`,
+				m.BindingID, m.RuleFP).Scan(&created, &updated, &status))
+			require.True(t, inserted.Equal(created), "сохраняется исходное время создания")
+			require.False(t, updated.Before(created), "запись не должна предшествовать созданию")
+			require.Equal(t, "ACTIVE", status)
+			require.NoError(t, earlier.Commit(ctx))
+		})
+	}
 }
 
 // seedTargetMember inserts one reconciler-ledger row with a controlled updated_at
