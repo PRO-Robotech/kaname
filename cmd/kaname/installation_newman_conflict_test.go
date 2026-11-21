@@ -167,7 +167,21 @@ func rid07DefaultNewmanConsumer(t *testing.T, w *ridLifecycleWorld, in rid07Newm
 		if phase == "after" {
 			require.NotNil(t, before)
 			e.Previous = &before.Projection
-			require.Equal(t, before.Projection, e.Snapshot.Projection, "full public object/history/materializedAt preserved across conflict or exact twin apply")
+			previous, current := before.Projection, e.Snapshot.Projection
+			if !reflect.DeepEqual(previous, current) {
+				// В сводку нужны только категории дельты, без значений строк.
+				t.Logf("RID07_PROJECTION accounts=%t service_accounts=%t groups=%t members=%t roles=%t bindings=%t delegations=%t catalog=%t materialization=%t",
+					!reflect.DeepEqual(previous.Accounts, current.Accounts),
+					!reflect.DeepEqual(previous.ServiceAccounts, current.ServiceAccounts),
+					!reflect.DeepEqual(previous.Groups, current.Groups),
+					!reflect.DeepEqual(previous.Members, current.Members),
+					!reflect.DeepEqual(previous.Roles, current.Roles),
+					!reflect.DeepEqual(previous.Bindings, current.Bindings),
+					!reflect.DeepEqual(previous.Delegations, current.Delegations),
+					!reflect.DeepEqual(previous.Catalog, current.Catalog),
+					previous.Materialization != current.Materialization)
+			}
+			require.Equal(t, previous, current, "full public object/history/materializedAt preserved across conflict or exact twin apply")
 			for table, rows := range before.Whole.Delivery {
 				if table == "grant_delegations" || strings.HasPrefix(table, "access_binding") {
 					require.Contains(t, e.Snapshot.Whole.Delivery, table)

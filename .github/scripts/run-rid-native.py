@@ -542,6 +542,10 @@ ASSERTION_FILES = (
     "cmd/kaname/installation_owned_child_driver_test.go",
     "cmd/kaname/installation_rid_integration_test.go",
     "cmd/kaname/installation_revoke_full_startup_test.go",
+    "cmd/kaname/installation_full_startup_child_test.go",
+    "cmd/kaname/installation_newman_revoke_test.go",
+    "cmd/kaname/installation_newman_revoke_delta_test.go",
+    "cmd/kaname/installation_revoke_failed_startup_test.go",
     "cmd/kaname/installation_pair_conflict_native_test.go",
     "cmd/kaname/installation_newman_conflict_test.go",
     "cmd/kaname/installation_snapshot_runtime_test.go",
@@ -667,7 +671,7 @@ def rid03_old_operation_diff(output, line_limit):
 
 
 def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
-    # Только известные имена и ограниченные структурные проекции RID03/RID05.
+    # Только известные имена и ограниченные структурные проекции отдельных RID.
     names = {root_test, *(root_test + "/" + name for name in predicates)}
     if root_test == CASES["registry-installation-rid04"][0]:
         names.update(root_test + "/" + name + "/" + mode
@@ -699,6 +703,12 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
         rid03_names = {root_test + "/" + name for name in RID_MATRIX_NESTED[root_test]}
     old_operation_diffs, old_operation_counts = {}, {}
     rid05_cleanup, ambiguous_cleanup = {}, set()
+    rid07_projection, ambiguous_projection = {}, set()
+    projection_fields = ("accounts", "service_accounts", "groups", "members", "roles",
+                         "bindings", "delegations", "catalog", "materialization")
+    projection_marker = re.compile(
+        r"[ 	]*installation_newman_conflict_test\.go:[1-9][0-9]{0,5}: RID07_PROJECTION "
+        + " ".join(field + "=(true|false)" for field in projection_fields) + r"\n")
     total = 0
     try:
         with path.open("rb") as stream:
@@ -752,6 +762,18 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                                                  (7, "resource_journal"), (9, "resource_reconcile_outbox"))
                             },
                         }
+                if (root_test == CASES["registry-installation-rid07"][0]
+                        and action == "output" and isinstance(name, str) and name in known
+                        and (name, "run") in seen
+                        and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
+                    output = event.get("Output")
+                    marker = projection_marker.fullmatch(output) if isinstance(output, str) and len(output) <= 260 else None
+                    if marker:
+                        if name in rid07_projection:
+                            ambiguous_projection.add(name)
+                        rid07_projection[name] = [
+                            field for field, changed in zip(projection_fields, marker.groups()) if changed == "true"
+                        ]
                 if (action == "output" and isinstance(name, str) and name in known and name not in sites
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
@@ -799,6 +821,9 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
         if (site.get("file") == "cmd/kaname/installation_newman_deletion_delta_test.go"
                 and first in rid05_cleanup and first not in ambiguous_cleanup):
             result["deleteCleanup"] = rid05_cleanup[first]
+        if (site.get("file") == "cmd/kaname/installation_newman_conflict_test.go"
+                and first not in ambiguous_projection and rid07_projection.get(first)):
+            result["changedProjectionFields"] = rid07_projection[first]
     if result["status"] == "complete":
         failures = [{"test": name, "diffs": old_operation_diffs[name]}
                     for name in sorted(old_operation_diffs)
