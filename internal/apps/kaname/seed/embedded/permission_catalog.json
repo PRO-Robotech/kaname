@@ -2741,6 +2741,17 @@
     "exempt_reason": "SELF_SERVICE"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.ChildRegistrationService/Register",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1",
+    "exempt_reason": "HANDLER_DECIDES"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.ClusterService/Get",
     "permission": "iam.cluster_admins.get",
     "required_relation": "system_admin",

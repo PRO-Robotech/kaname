@@ -250,6 +250,12 @@ type CatalogPendingEntry struct {
 // не открыто (fail-closed).
 var catalogPendingEntries = []CatalogPendingEntry{
 	{
+		OwnFQN:  "kaname.cloud.iam.v1.ChildRegistrationService/Register",
+		Why:     "канонический вход регистрации потомка объявлен в Kaname (kaname#1045); край строит свой каталог после обновления пина службы",
+		Removal: "копия края на стволе платформы содержит этот RPC после обновления пина Kaname и генерации каталога",
+		Refs:    "PRO-Robotech/kaname#1045",
+	},
+	{
 		OwnFQN:  "kaname.cloud.iam.v1.GrantDelegationService/Create",
 		Why:     grantDelegationPendingWhy,
 		Removal: grantDelegationPendingRemoval,
