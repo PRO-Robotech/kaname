@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
@@ -290,6 +292,7 @@ func TestRID11RestorationEpochTransitionIsClosed(t *testing.T) {
 
 func TestRID11RestorationEpochFootprintComesFromBeforeProducers(t *testing.T) {
 	r := rid11RestoreRow
+	groupID := ids.NewID(domain.PrefixGroup)
 	raw := map[string][]rid09PrimaryRow{
 		"roles": {
 			r(map[string]any{"id": "rol_one1", "account_id": "tenant", "project_id": nil}),
@@ -297,7 +300,7 @@ func TestRID11RestorationEpochFootprintComesFromBeforeProducers(t *testing.T) {
 			r(map[string]any{"id": "rol_empty", "account_id": "unwritten", "project_id": nil}),
 		},
 		"projects":            {r(map[string]any{"id": "prj_main", "account_id": "project-tenant"})},
-		"groups":              {r(map[string]any{"id": "grp_main", "account_id": "tenant"})},
+		"groups":              {r(map[string]any{"id": groupID, "account_id": "tenant"})},
 		"service_accounts":    {r(map[string]any{"id": "sva_main", "account_id": "tenant"})},
 		"access_bindings":     {r(map[string]any{"id": "acb_main", "role_id": "rol_one1", "resource_type": "account", "resource_id": "tenant"})},
 		"role_verb":           {r(map[string]any{"role_id": "rol_one1"})},
@@ -309,8 +312,8 @@ func TestRID11RestorationEpochFootprintComesFromBeforeProducers(t *testing.T) {
 		"two-names":  r(map[string]any{"role_id": "rol_two2", "arm": "names", "container_type": nil}),
 	}}
 	bindings := rid11BindingRestorePlan{Policy: rid03DeltaPolicy{
-		Members:      map[rid03Member]bool{{Binding: "acb_main", Role: "rol_one1", Type: "iam.group", ID: "grp_main"}: true},
-		DirectTuples: map[rid03Tuple]bool{{Subject: "user:owner", Relation: "viewer", Type: "iam_group", ID: "grp_main"}: true},
+		Members:      map[rid03Member]bool{{Binding: "acb_main", Role: "rol_one1", Type: "iam.group", ID: groupID}: true},
+		DirectTuples: map[rid03Tuple]bool{{Subject: "user:owner", Relation: "viewer", Type: "iam_group", ID: groupID}: true},
 	}}
 	for _, key := range []string{"role:rol_one1", "role:rol_two2", "user:owner", "scope:tenant", "role:untouched"} {
 		raw["authority_policy_epoch"] = append(raw["authority_policy_epoch"], r(map[string]any{"key": key, "generation": "17", "revision": 2}))
