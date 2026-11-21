@@ -5,6 +5,7 @@ package internal_iam
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 type userChildRegistrationTxStub struct {
 	steps    []string
 	input    UserChildRegistrationInput
+	intent   UserChildRegistrationInput
+	caller   operations.Principal
 	policy   domain.UserChildPathPolicy
 	target   domain.UserChildRegistrationTarget
 	question [3]string
@@ -26,12 +29,19 @@ type userChildRegistrationTxStub struct {
 	version  time.Time
 	allowed  bool
 	applyErr error
+	commits  int
 }
 
 func (s *userChildRegistrationTxStub) RunUserChildRegistration(
-	ctx context.Context, run func(context.Context, UserChildRegistrationTx) (time.Time, error),
+	ctx context.Context, input UserChildRegistrationInput, caller operations.Principal,
+	run func(context.Context, UserChildRegistrationTx) (time.Time, error),
 ) (time.Time, error) {
-	return run(ctx, s)
+	s.intent, s.caller = input, caller
+	version, err := run(ctx, s)
+	if err == nil {
+		s.commits++
+	}
+	return version, err
 }
 
 func (s *userChildRegistrationTxStub) ResolveUserChildRegistration(
@@ -76,8 +86,11 @@ func TestUserChildRegistrationAuthorizesServerParentBeforeApplying(t *testing.T)
 	require.Equal(t, fixture.version, version)
 	require.Equal(t, []string{"resolve", "check", "apply"}, fixture.steps)
 	require.Equal(t, input, fixture.input)
+	require.Equal(t, input, fixture.intent)
+	require.Equal(t, p, fixture.caller)
 	require.Equal(t, [3]string{"user:usr-actor", "v_create", "registry_registry:container"}, fixture.question)
 	require.Equal(t, p, fixture.actor)
+	require.Equal(t, 1, fixture.commits)
 }
 
 func TestUserChildRegistrationUsesOnePublicRefusal(t *testing.T) {
@@ -109,6 +122,20 @@ func TestUserChildRegistrationUsesOnePublicRefusal(t *testing.T) {
 	require.Empty(t, fixture.steps)
 }
 
+func TestUserChildRegistrationMissingVersionAbortsBeforeCommit(t *testing.T) {
+	ctx := operations.WithPrincipal(t.Context(), operations.Principal{Type: "user", ID: "usr-actor"})
+	input := UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "parent/child"}
+	fixture := &userChildRegistrationTxStub{
+		policy:  domain.UserChildPathPolicy{ChildType: "registry_repository", ParentType: "registry_registry", ParentAction: "v_create", ParentSegments: 1},
+		allowed: true,
+	}
+	version, err := NewUserChildRegistration(fixture).Register(ctx, input)
+	require.True(t, version.IsZero())
+	require.Equal(t, status.Convert(authzguard.AuthzBackendUnavailable()).Proto(), status.Convert(err).Proto())
+	require.Equal(t, []string{"resolve", "check", "apply"}, fixture.steps)
+	require.Zero(t, fixture.commits)
+}
+
 func TestUserChildRegistrationPathUsesDeclaredParentBoundary(t *testing.T) {
 	policy := domain.UserChildPathPolicy{
 		ChildType: "example_item", ParentType: "example_container", ParentAction: "v_create", ParentSegments: 2,
@@ -125,4 +152,12 @@ func TestUserChildRegistrationPathUsesDeclaredParentBoundary(t *testing.T) {
 		_, err := policy.Resolve(malformed)
 		require.ErrorIs(t, err, domain.ErrUserChildRegistrationRefused, malformed)
 	}
+
+	prefix := "tenant/container/"
+	id := prefix + strings.Repeat("a", domain.MaxUserChildObjectKeyBytes-len(policy.ChildType)-1-len(prefix))
+	target, err = policy.Resolve(id)
+	require.NoError(t, err)
+	require.Len(t, target.ChildObject, domain.MaxUserChildObjectKeyBytes)
+	_, err = policy.Resolve(id + "a")
+	require.ErrorIs(t, err, domain.ErrUserChildRegistrationRefused)
 }

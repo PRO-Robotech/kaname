@@ -11,6 +11,10 @@ import (
 
 var userChildPathComponent = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`)
 
+// MaxUserChildObjectKeyBytes ограничивает полный ключ типа и ID. В индексе
+// фактов одной строкой хранятся ключи потомка и родителя вместе.
+const MaxUserChildObjectKeyBytes = 512
+
 // ErrUserChildRegistrationRefused обозначает предметный отказ регистрации.
 // Внутреннюю причину сохраняет владелец транзакции.
 var ErrUserChildRegistrationRefused = errors.New("user child registration refused")
@@ -36,7 +40,8 @@ type UserChildPathPolicy struct {
 // Resolve разбирает канонический путь, не нормализуя и не декодируя его.
 // Применитель вызывает этот разбор только для типов, явно принявших эту форму.
 func (p UserChildPathPolicy) Resolve(id string) (UserChildRegistrationTarget, error) {
-	if p.ParentSegments <= 0 || !IsWellFormedObjectTypeName(p.ChildType) ||
+	if len(p.ChildType)+1+len(id) > MaxUserChildObjectKeyBytes ||
+		p.ParentSegments <= 0 || !IsWellFormedObjectTypeName(p.ChildType) ||
 		!IsWellFormedObjectTypeName(p.ParentType) ||
 		!IsWellFormedObjectTypeName(p.ParentAction) {
 		return UserChildRegistrationTarget{}, ErrUserChildRegistrationRefused
@@ -54,7 +59,7 @@ func (p UserChildPathPolicy) Resolve(id string) (UserChildRegistrationTarget, er
 		}
 		index++
 	}
-	if segments <= p.ParentSegments {
+	if segments <= p.ParentSegments || len(p.ParentType)+1+parentEnd > MaxUserChildObjectKeyBytes {
 		return UserChildRegistrationTarget{}, ErrUserChildRegistrationRefused
 	}
 	return UserChildRegistrationTarget{

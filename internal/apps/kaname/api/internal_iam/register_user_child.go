@@ -34,9 +34,13 @@ type UserChildRegistrationTx interface {
 }
 
 type UserChildRegistrationTransactions interface {
-	// RunUserChildRegistration возвращает версию после фиксации транзакции.
-	// При повторе транзакции выполняется и проверка права на родителе.
-	RunUserChildRegistration(context.Context, func(context.Context, UserChildRegistrationTx) (time.Time, error)) (time.Time, error)
+	// RunUserChildRegistration получает неизменяемый запрос для подготовки до
+	// callback. При подготовке право проверяется до раскрытия состояния
+	// родителя. Callback исполняется после ожиданий под ограждениями записи
+	// и повторно проверяет право. Версия возвращается после успешного коммита.
+	RunUserChildRegistration(context.Context, UserChildRegistrationInput, operations.Principal,
+		func(context.Context, UserChildRegistrationTx) (time.Time, error),
+	) (time.Time, error)
 }
 
 type UserChildRegistration struct {
@@ -58,7 +62,7 @@ func (uc *UserChildRegistration) Register(ctx context.Context, input UserChildRe
 		return time.Time{}, authzguard.AuthzBackendUnavailable()
 	}
 
-	version, err := uc.tx.RunUserChildRegistration(ctx, func(ctx context.Context, tx UserChildRegistrationTx) (time.Time, error) {
+	version, err := uc.tx.RunUserChildRegistration(ctx, input, principal, func(ctx context.Context, tx UserChildRegistrationTx) (time.Time, error) {
 		target, err := tx.ResolveUserChildRegistration(ctx, input)
 		if err != nil {
 			return time.Time{}, err
@@ -74,7 +78,14 @@ func (uc *UserChildRegistration) Register(ctx context.Context, input UserChildRe
 		if !allowed {
 			return time.Time{}, domain.ErrUserChildRegistrationRefused
 		}
-		return tx.ApplyUserChildRegistration(ctx, target, principal)
+		version, err := tx.ApplyUserChildRegistration(ctx, target, principal)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if version.IsZero() {
+			return time.Time{}, authzguard.AuthzBackendUnavailable()
+		}
+		return version, nil
 	})
 	if errors.Is(err, domain.ErrUserChildRegistrationRefused) {
 		return time.Time{}, authzguard.PermissionDenied()
