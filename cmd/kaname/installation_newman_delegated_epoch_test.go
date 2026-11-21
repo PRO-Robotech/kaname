@@ -16,7 +16,7 @@ import (
 // выведенных кортежей. Множество допустимых ключей не берётся из дельты БД.
 func (p rid03DeltaPolicy) epochKeys() (policy, binding map[string]bool) {
 	policy = map[string]bool{"scope:" + p.Account: true}
-	binding = map[string]bool{}
+	binding = map[string]bool{p.Account: true}
 	if p.Path == "/iam/v1/grantDelegations" {
 		policy["service_account:"+p.GDDelegate] = true
 		policy["service_account:"+p.Creator] = true
@@ -45,7 +45,6 @@ func (p rid03DeltaPolicy) epochKeys() (policy, binding map[string]bool) {
 			policy["*"] = true
 		}
 	}
-	binding[p.Account] = true
 	if p.GlobalBindingEpoch {
 		binding[""] = true
 	}
@@ -118,4 +117,34 @@ func TestRID03EpochTransitionIsClosed(t *testing.T) {
 	} {
 		require.False(t, rid03EpochTransitionValid(before, rejected, "key", expected))
 	}
+}
+
+func TestRID03EpochKeysFromClosedGrantPolicy(t *testing.T) {
+	p := rid03DeltaPolicy{
+		Path: "/iam/v1/accessBindings", Account: "tenant", Role: "pull",
+		SubjectType: "service_account", SubjectID: "grantee", GlobalBindingEpoch: true,
+		DirectTuples: map[rid03Tuple]bool{
+			{Subject: "service_account:owner"}: true,
+			{Subject: "account:tenant"}:        true,
+		},
+	}
+	policy, binding := p.epochKeys()
+	require.Equal(t, map[string]bool{
+		"scope:tenant": true, "carriers:role:pull": true,
+		"service_account:grantee": true, "service_account:owner": true,
+	}, policy)
+	require.Equal(t, map[string]bool{"tenant": true, "": true}, binding)
+
+	p.Path, p.GDDelegate, p.Creator = "/iam/v1/grantDelegations", "delegate", "creator"
+	policy, binding = p.epochKeys()
+	require.Equal(t, map[string]bool{"scope:tenant": true, "service_account:delegate": true, "service_account:creator": true}, policy)
+	require.Equal(t, map[string]bool{"tenant": true}, binding)
+
+	p.Path, p.SubjectType, p.SubjectID = "/iam/v1/accessBindings", "system_class", "anonymous"
+	policy, binding = p.epochKeys()
+	require.Equal(t, map[string]bool{
+		"scope:tenant": true, "carriers:role:pull": true, "*": true,
+		"system_class:anonymous": true, "service_account:owner": true,
+	}, policy)
+	require.Equal(t, map[string]bool{"tenant": true, "": true}, binding)
 }
