@@ -31,6 +31,7 @@ type rid03DeltaPolicy struct {
 	FactVersions                                                                                              map[rid03Tuple]time.Time
 	FactCreated                                                                                               map[rid03Tuple][]time.Time
 	Main                                                                                                      rid09PrimaryRow
+	GlobalBindingEpoch                                                                                        bool
 }
 
 func rid03Cell[T any](row rid09PrimaryRow, key string) (T, bool) {
@@ -202,6 +203,7 @@ func rid03BuildDeltaPolicy(t *testing.T, e *rid03NewmanExpectation, a, b rid03Ne
 	p.TargetType, p.TargetID = targetType, targetID
 	selectors := rid03Selectors(t, a, p.Role)
 	for _, sel := range selectors {
+		p.GlobalBindingEpoch = p.GlobalBindingEpoch || sel.Container != nil || sel.Arm != domain.ArmAnchor
 		require.True(t, sel.Arm == domain.ArmAnchor && !sel.CreatedBySubject, "fixture delivered role selector unsupported")
 		if sel.Container == nil {
 			if rid03Has(sel.ObjectTypes, targetType) {
@@ -432,8 +434,13 @@ func rid03RequireClosedDelta(t *testing.T, a, b rid03NewmanSnapshot, p rid03Delt
 	memberSeen := map[rid03Member]bool{}
 	ledgerSeen := map[rid03Ledger]bool{}
 	tupleSeen := map[rid03Tuple]bool{}
+	policyKeys, bindingScopes := p.epochKeys()
+	require.True(t, rid03EpochTransitionValid(a.Raw["authority_policy_epoch"], b.Raw["authority_policy_epoch"], "key", policyKeys),
+		"пересчёт ревизий политики должен затронуть ровно выведенные ключи")
+	require.True(t, rid03EpochTransitionValid(a.Raw["authority_binding_epoch"], b.Raw["authority_binding_epoch"], "scope", bindingScopes),
+		"пересчёт ревизий привязок должен затронуть ровно выведенные области")
 	for table, oldRows := range a.Raw {
-		if table == "operations" {
+		if table == "operations" || table == "authority_policy_epoch" || table == "authority_binding_epoch" {
 			continue
 		}
 		now, exists := b.Raw[table]
