@@ -259,7 +259,12 @@ func declarerCtx(ctx context.Context, userID string) context.Context {
 // дожидается СОБЫТИЯ, а не срока.
 func awaitOperation(t *testing.T, ctx context.Context, ops operations.Repo, opID string) *operations.Operation {
 	t.Helper()
-	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	return awaitOperationWithin(t, ctx, ops, opID, 20*time.Second)
+}
+
+func awaitOperationWithin(t *testing.T, ctx context.Context, ops operations.Repo, opID string, timeout time.Duration) *operations.Operation {
+	t.Helper()
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	waitErr := operations.Wait(waitCtx)
 	if waitErr != nil {

@@ -155,7 +155,9 @@ func TestGrantDelegationStagedRevokeIncludesPendingLastPage(t *testing.T) {
 	defer finishFunctionCost()
 	op, err := uc.Execute(declarerCtx(w.r.ctx, w.owner), domain.GrantDelegationID(id))
 	require.NoError(t, err)
-	require.Nil(t, awaitOperation(t, w.r.ctx, w.ops, op.ID).Error)
+	// Сторожевой таймер фикстуры с 257 привязками. Тест проверяет
+	// полноту отзыва через границу страницы, включая PENDING, и сохранность истории.
+	require.Nil(t, awaitOperationWithin(t, w.r.ctx, w.ops, op.ID, 30*time.Second).Error)
 	finishFunctionCost()
 	active, revoked, audit := delegationRevokeCounts(t, w, id)
 	require.Zero(t, active)

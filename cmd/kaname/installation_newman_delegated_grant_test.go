@@ -106,24 +106,7 @@ func rid03StableNewmanSnapshot(t *testing.T, w *ridLifecycleWorld) rid03NewmanSn
 	for {
 		require.NoError(t, ctx.Err(), "RID03 aggregate primary readiness deadline")
 		s, composed := rid03CaptureNewmanSnapshot(t, ctx, w.f)
-		materialized := true
-		for _, g := range s.Projection.Bindings {
-			if g["delegationId"] != nil && g["delegationId"] != "" && g["status"] == "ACTIVE" && g["materializedAt"] == nil {
-				materialized = false
-			}
-		}
-		// Завершаем штатную подготовку/прямое сведение до принятия
-		// базы; без записей и повторного запуска настоящего действия Newman.
-		for _, r := range s.Raw["resource_reconcile_outbox"] {
-			if string(r["sent_at"]) == "null" {
-				materialized = false
-			}
-		}
-		for _, r := range s.Raw["access_binding_target_members"] {
-			if rid03S(r, "verification_status") == "PENDING_VERIFICATION" {
-				materialized = false
-			}
-		}
+		materialized := rid03MaterializationReady(s)
 		if composed && materialized && previous != nil && rid03SnapshotEqual(*previous, s) {
 			require.NoError(t, ctx.Err())
 			return s
@@ -138,6 +121,26 @@ func rid03StableNewmanSnapshot(t *testing.T, w *ridLifecycleWorld) rid03NewmanSn
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+// Готовность определяется по публичной проекции и независимому состоянию PRIMARY.
+func rid03MaterializationReady(s rid03NewmanSnapshot) bool {
+	for _, binding := range s.Projection.Bindings {
+		if binding["delegationId"] != nil && binding["delegationId"] != "" && binding["status"] == "ACTIVE" && binding["materializedAt"] == nil {
+			return false
+		}
+	}
+	for _, row := range s.Raw["resource_reconcile_outbox"] {
+		if string(row["sent_at"]) == "null" {
+			return false
+		}
+	}
+	for _, row := range s.Raw["access_binding_target_members"] {
+		if rid03S(row, "verification_status") == "PENDING_VERIFICATION" {
+			return false
+		}
+	}
+	return true
 }
 func rid03PhaseSnapshot(t *testing.T, w *ridLifecycleWorld) rid03NewmanSnapshot {
 	t.Helper()

@@ -198,7 +198,7 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 	// Производственный таймаут оператора пары — 30s; завершаем раньше, не скрывая
 	// пропущенное пересечение повторными попытками. Оба процесса уже работают.
 	overlap, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)
-	pids, err := barrier.AwaitTwo(overlap)
+	pids, err := barrier.AwaitTwo(overlap, []string{participants[0].label, participants[1].label})
 	cancel()
 	require.NoError(t, err)
 	require.Len(t, pids, 2)
@@ -230,7 +230,7 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 	require.Len(t, opIDs, 2)
 	require.NotEqual(t, opIDs[0], opIDs[1])
 	require.NotEqual(t, proposed[0], proposed[1])
-	observation, err := json.Marshal(map[string]any{"pairAccount": accounts[0], "delegate": delegate, "waitingBackendPIDs": pids, "applications": labels, "operations": opIDs, "proposedIDs": proposed})
+	observation, err := json.Marshal(map[string]any{"pairAccount": accounts[0], "delegate": delegate, "waitingBackendPIDs": pids, "pairAnchoredWaitGraph": true, "applications": labels, "operations": opIDs, "proposedIDs": proposed})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(f.session.Root, "actual-two-arrivals.json"), observation, 0600))
 	require.NoError(t, barrier.Release(f.given.ctx))
