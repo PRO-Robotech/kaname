@@ -66,20 +66,6 @@ func containerSelected(sel domain.RuleSelector, bs BindingScope, a domain.Mirror
 	return a.IsContainedIn(bs.Scope)
 }
 
-// nestedCoversObject — путь по объекту: вложенный селектор охватывает объект `o`
-// с предками `ancestors`.
-func nestedCoversObject(sel domain.RuleSelector, bs BindingScope, o domain.MirrorObject, ancestors []domain.MirrorObject) bool {
-	if !hasNonClassSubject(bs) || !selectorMatchesObject(sel, o) {
-		return false
-	}
-	for _, a := range ancestors {
-		if containerSelected(sel, bs, a) {
-			return true
-		}
-	}
-	return false
-}
-
 // matchNestedObjects — полный проход: объекты, которые вложенный селектор
 // охватывает в выдаче `bs`.
 func (r *Reconciler) matchNestedObjects(ctx context.Context, s ReconcileStore, sel domain.RuleSelector, bs BindingScope) ([]domain.MirrorObject, error) {

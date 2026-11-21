@@ -74,6 +74,7 @@ type Facts struct {
 	// (kaname#1003, Р2а). Читается из тех же строк `catalog_verb`, что набор
 	// глаголов типа, и в него не входит: строка контейнерного действия ярусная.
 	containerVerbs map[string]map[string]ContainerGrant
+	grantVerbs     map[string]map[string]bool
 }
 
 // ContainerGrant — отношение на родителе, которое даёт поимённо названное
@@ -204,6 +205,7 @@ func NewFacts(h Halves) (*Facts, error) {
 	})
 
 	containerVerbs := make(map[string]map[string]ContainerGrant)
+	grantVerbs := make(map[string]map[string]bool)
 	byDotted := make(map[string][]string, len(rows.Resources))
 	for _, v := range rows.Verbs {
 		dotted := v.Module + "." + v.Resource
@@ -233,6 +235,16 @@ func NewFacts(h Halves) (*Facts, error) {
 		// Строка при этом ОСТАЁТСЯ в `rows.Verbs` и остаётся живой: по ней
 		// резолвится ключ объявления правила, и в этом смысл разделения — ключ
 		// судит авторский словарь, набор типа остаётся пообъектным.
+		if !v.PerObject && !v.IsContainer() {
+			for _, named := range authzmap.GrantAuthoringVerbs(v.Module, v.Resource) {
+				if named == v.Verb {
+					if grantVerbs[dotted] == nil {
+						grantVerbs[dotted] = map[string]bool{}
+					}
+					grantVerbs[dotted][named] = true
+				}
+			}
+		}
 		if !v.PerObject {
 			continue
 		}
@@ -272,6 +284,7 @@ func NewFacts(h Halves) (*Facts, error) {
 		retired:         retired,
 		containers:      containersOf(rows.Resources),
 		containerVerbs:  containerVerbs,
+		grantVerbs:      grantVerbs,
 	}
 	for dotted, verbs := range byDotted {
 		// Имя типа есть у КАЖДОЙ живой строки: строка без него отвергнута выше,
@@ -658,4 +671,9 @@ func (f *Facts) ContainerGrants(module string, resources, verbs []string) []Cont
 		}
 	}
 	return out
+}
+
+// GrantVerb подтверждает живую каталожную authoring пару, не leaf-отношение.
+func (f *Facts) GrantVerb(dotted, verb string) bool {
+	return f != nil && f.grantVerbs[dotted][domain.NormalizeVerb(verb)]
 }

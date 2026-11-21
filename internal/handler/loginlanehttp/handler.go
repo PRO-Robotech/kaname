@@ -70,6 +70,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/handler/methodrefusal"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/webauthnverify"
@@ -1550,6 +1551,8 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 		// выпуск набора) её пишет `sf_present.go` (kaname#700). Край второй
 		// записи не пишет — она удвоила бы счёт.
 		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextSecondFactorUnavailable, nil)
+	case errors.Is(err, iamerr.ErrAborted):
+		writeRefusal(w, http.StatusConflict, codeAborted, iamerr.SerializationConflictSyncText, nil)
 	case errors.Is(err, humansession.ErrStoreUnavailable), errors.Is(err, humansession.ErrBreachAuthorityMisconfigured):
 		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, unavailableText, nil)
 	default:
@@ -1582,6 +1585,7 @@ const (
 	codePermissionDenied   = 7
 	codeResourceExhausted  = 8
 	codeFailedPrecondition = 9
+	codeAborted            = 10
 	codeUnimplemented      = 12
 	codeUnavailable        = 14
 	codeUnauthenticated    = 16

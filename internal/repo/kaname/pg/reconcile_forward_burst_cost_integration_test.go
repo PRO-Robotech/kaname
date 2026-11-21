@@ -15,6 +15,15 @@ package pg_test
 // проход идёт своей писательской транзакцией после коммита. Вторая половина
 // сегодня НЕ верна: форвард пути создания advisory-блокировки не берёт вовсе.
 //
+// # Историческая граница этой пробы
+//
+// Фикстура исполняет неизменённый алгоритм reconciler на схеме20261113210000,
+// до поколений staged binding (миграция20261113220000). Это прежний throughput-контракт
+// kacho#2059/kaname#771, а не замер текущего full-contract1034: там signed writers
+// одного account законно разделяют EXCLUSIVE account fence; ещё до ABI2
+// триггеры поколений сериализуют запись членов на общей строке account epoch. Ни guard текущей
+// схемы, ни его требование не отключаются; создаётся отдельная историческая БД.
+//
 // # Два ответа, и оба — без часов
 //
 // ПЕРВЫЙ — счётчик операторов `pg_advisory*`, ушедших НА СЕРВЕР, отдельно на
@@ -57,6 +66,8 @@ package pg_test
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -65,13 +76,17 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/pgtest"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // advisoryStatementCounter — наблюдатель операторов, считающий ОТДЕЛЬНО те, что
@@ -231,14 +246,14 @@ type burstWorld struct {
 	pool    *pgxpool.Pool
 	counter *advisoryStatementCounter
 	rec     *reconcile.Reconciler
-	adapter *kanamepg.ReconcileAdapter
+	adapter reconcile.TxRunner
 	bid     domain.AccessBindingID
 	objects []string
 }
 
 func newBurstWorld(t *testing.T, ctx context.Context, suffix string, count int) burstWorld {
 	t.Helper()
-	cfg, err := pgxpool.ParseConfig(setupTestDB(t))
+	cfg, err := pgxpool.ParseConfig(legacyBurstDB(t, ctx))
 	require.NoError(t, err)
 	counter := &advisoryStatementCounter{}
 	cfg.ConnConfig.Tracer = counter
@@ -251,7 +266,7 @@ func newBurstWorld(t *testing.T, ctx context.Context, suffix string, count int) 
 	pgtest.ClosePoolAtEnd(t, pool)
 
 	fx := setupGamma(t, ctx, pool, suffix)
-	roleID := seedRulesRole(t, ctx, pool, fx.repo, fx.prj, suffix+"role", domain.Rules{forwardAnchorRule()})
+	roleID := seedLegacyBurstRole(t, ctx, pool, fx.repo, fx.prj, suffix+"role")
 	// ОДНА привязка на всех — ровно та посадка, о которой задача: владельческая
 	// привязка в аккаунте одна, и все создания области идут через неё.
 	bid := insertThinBinding(t, ctx, fx.repo, fx.member, roleID, fx.prj)
@@ -263,8 +278,80 @@ func newBurstWorld(t *testing.T, ctx context.Context, suffix string, count int) 
 		seedMirrorRow(t, ctx, pool, "compute.instance", id, string(fx.prj), string(fx.accID), nil, now)
 		objects = append(objects, id)
 	}
-	rec, adapter := newReconciler(pool)
+	adapter, err := kanamepg.NewHistoricalPreEpochReconcileRunner(ctx, pool, catalogfixture.Source())
+	require.NoError(t, err)
+	rec := reconcile.New(adapter, nil, catalogfixture.Source())
 	return burstWorld{pool: pool, counter: counter, rec: rec, adapter: adapter, bid: bid, objects: objects}
+}
+
+// legacyBurstDB поднимает реальную цепочку Goose ровно до последней схемы
+// перед поколениями staged binding. Состояние identity не подделывается, guards не снимаются.
+func legacyBurstDB(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	dsn := pgtest.NewEmptyDB(t)
+	db, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	defer db.Close()
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS,
+		goose.WithTableName("public.goose_db_version"))
+	require.NoError(t, err)
+	_, err = provider.UpTo(ctx, 20261113210000)
+	require.NoError(t, err)
+	version, err := provider.GetDBVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(20261113210000), version)
+	return pgtest.WithSearchPath(dsn, "kaname,public")
+}
+
+// seedLegacyBurstRole кладёт только данные одного фиксированного anchor-правила.
+// Текущий ReplaceRuleSelectors требует добавленный позже1512 prelock, поэтому
+// здесь используется канонический компилятор данных, а не копия writer/reconcile.
+func seedLegacyBurstRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, repo *kanamepg.Repository, prj domain.ProjectID, name string) domain.RoleID {
+	t.Helper()
+	rules := domain.Rules{forwardAnchorRule()}
+	compiled, err := domain.CompileRules(rules)
+	require.NoError(t, err)
+	selectors := catalogfixture.Facts().GrantSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())
+	require.Len(t, selectors, 1)
+	sel := selectors[0]
+	require.Equal(t, domain.ArmAnchor, sel.Arm)
+	require.Equal(t, []string{"compute.instance"}, sel.ObjectTypes)
+	require.Empty(t, sel.ResourceNames)
+	require.Empty(t, sel.MatchLabels)
+	require.False(t, sel.CreatedBySubject)
+	require.NotEmpty(t, sel.Grants)
+	grants, err := json.Marshal(sel.Grants)
+	require.NoError(t, err)
+	writer, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	defer func() { _ = writer.Rollback(ctx) }()
+	role, err := writer.RolesW().Insert(ctx, domain.Role{
+		ID: domain.RoleID(ids.NewID(domain.PrefixRole)), ProjectID: prj, Name: domain.RoleName(name),
+		Description: domain.Description("legacy burst " + name), Rules: rules, Permissions: compiled,
+	})
+	require.NoError(t, err)
+	require.NoError(t, writer.Commit(ctx))
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `INSERT INTO kaname.role_rule_selectors
+ (role_id,rule_fp,arm,object_types,resource_names,match_labels,verbs_by_type)
+ VALUES($1,$2,'anchor',$3::text[],ARRAY[]::text[],'{}'::jsonb,$4::jsonb)`,
+		string(role.ID), sel.RuleFP, sel.ObjectTypes, grants)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, tag.RowsAffected())
+	_, err = tx.Exec(ctx, `DELETE FROM kaname.role_selector_verbs_pending WHERE role_id=$1`, string(role.ID))
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+	var exact bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*)=1 AND bool_and(
+ rule_fp=$2 AND arm='anchor' AND object_types=$3::text[] AND resource_names=ARRAY[]::text[]
+ AND match_labels='{}'::jsonb AND verbs_by_type=$4::jsonb AND NOT created_by_subject
+ AND container_type IS NULL AND container_arm IS NULL)
+ AND NOT EXISTS(SELECT 1 FROM kaname.role_selector_verbs_pending WHERE role_id=$1)
+ FROM kaname.role_rule_selectors WHERE role_id=$1`, string(role.ID), sel.RuleFP, sel.ObjectTypes, grants).Scan(&exact))
+	require.True(t, exact, "посев хранит точный результат канонического anchor-компилятора")
+	return role.ID
 }
 
 const (
@@ -312,8 +399,16 @@ func TestReconcileForward_BurstOnOneOwnerBindingDoesNotSerialize(t *testing.T) {
 			"и предметом становится очередь на ключе привязки")
 
 	// ── ОПЫТ 2: встреча 2N проходов у коммита ─────────────────────────────────
+	// Счётчики первого опыта уже сняты. Только SELECT-наблюдение во время
+	// исходного ожидания; прежние порог встречи и assertions не меняются.
+	stopTrace := accountDeleteLockTrace(t, ctx, w.pool)
+	defer func() { stopTrace(t.Failed()) }()
 	r := rendezvousWave(t, ctx, w.rec, wave, meetLimit)
 	peak, arrived, met := r.outcome()
+	if !met {
+		t.Log("burst lock diagnostic: снимки до исходного отказа встречи; используется общий ограниченный observer")
+	}
+	stopTrace(!met)
 	t.Logf("встреча у коммита: одновременно у точки %d из %d проходов (дошли до коммита %d)",
 		peak, len(wave), arrived)
 	requireMaterialized(t, ctx, w.pool, w.bid, wave)

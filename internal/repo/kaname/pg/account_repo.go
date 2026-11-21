@@ -226,11 +226,15 @@ func splitAccountInsertHint(hint string) (id, name string) {
 // зависят вовсе. Довод «UTC ради детерминированности» самодостаточен и в чужом
 // подтверждении не нуждается (kacho#1951).
 func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Account, error) {
+	return w.insertAt(ctx, a, time.Now().UTC())
+}
+
+// Prepared CRUD передаёт время из закрытой программы. Старый Insert сохраняет свои часы.
+func (w *accountWriter) insertAt(ctx context.Context, a domain.Account, now time.Time) (domain.Account, error) {
 	labelsJSON, err := marshalLabels(a.Labels)
 	if err != nil {
 		return domain.Account{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
-	now := time.Now().UTC()
 	// ON CONFLICT DO NOTHING БЕЗ ЦЕЛИ — арбитрами служат ОБА ключа вставки
 	// (`accounts_pkey` и `accounts_name_unique`; других уникальных ключей у
 	// таблицы нет), и столкновение по любому из них возвращает НОЛЬ строк, не
@@ -421,11 +425,15 @@ func (w *accountWriter) Delete(ctx context.Context, id domain.AccountID) error {
 	})
 }
 
-// LockForRemoval — см. порт. Замок строки аккаунта — ПЕРВЫМ оператором
-// транзакции, перечень участников — после него: вставка членства берёт ключевой
+// LockForRemoval — см. порт. После consumer admission берём строку аккаунта,
+// затем перечень участников: вставка членства берёт ключевой
 // замок той же строки (`memberships_account_fk`) и сериализуется со снятием
 // (kaname#664, Р6).
 func (w *accountWriter) LockForRemoval(ctx context.Context, id domain.AccountID) ([]domain.UserID, error) {
+	// Admission предшествует parent row: FK writer уже входит до своего row wait.
+	if _, err := w.tx.Exec(ctx, `SELECT kaname.authority_parent_prelock_admit_v3()`); err != nil {
+		return nil, mapErr(err, "", string(id))
+	}
 	var one int
 	err := w.tx.QueryRow(ctx, `SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE`, string(id)).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -459,6 +467,10 @@ func (w *accountWriter) LockForRemoval(ctx context.Context, id domain.AccountID)
 // отсутствие строки отвечает «User <id> not found» с кодом предусловия, тем же
 // текстом, что отказ ключа `accounts_owner_fk` на фиксации.
 func (w *accountWriter) LockOwner(ctx context.Context, owner domain.UserID) error {
+	// Admission предшествует parent row: FK writer уже входит до своего row wait.
+	if _, err := w.tx.Exec(ctx, `SELECT kaname.authority_parent_prelock_admit_v3()`); err != nil {
+		return mapErr(err, "", string(owner))
+	}
 	var one int
 	err := w.tx.QueryRow(ctx, `SELECT 1 FROM users WHERE id = $1 FOR KEY SHARE`, string(owner)).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {

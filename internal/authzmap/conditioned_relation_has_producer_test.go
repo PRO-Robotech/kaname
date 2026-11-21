@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // conditionSite — one `<subject type> with <condition>` entry in the canonical
@@ -124,12 +125,14 @@ func (r foldConditionRow) key() string {
 	return r.Type + "#" + r.Relation + " [" + r.Subject + " with " + r.Condition + "]"
 }
 
-// reFoldDef — the writer's definition; reFoldValues — its condition list;
-// reFoldRow — one row of it.
+// Перечень условий состоит из соседних четвёрок литералов. Произвольный текст
+// между VALUES и alias захватил бы чужие функции и их списки IN как факты.
+const foldConditionRowPattern = `\(\s*'(\w+)'\s*,\s*'(\w+)'\s*,\s*'(\w+)'\s*,\s*'(\w+)'\s*\)`
+
 var (
 	reFoldDef    = regexp.MustCompile(`(?i)CREATE (OR REPLACE )?FUNCTION kaname\.relation_fact_fold_row\(`)
-	reFoldValues = regexp.MustCompile(`(?s)FROM \(VALUES(.*?)\)\s*AS c\(object_type, relation, subject_type, condition_name\)`)
-	reFoldRow    = regexp.MustCompile(`\('(\w+)',\s*'(\w+)',\s*'(\w+)',\s*'(\w+)'\)`)
+	reFoldValues = regexp.MustCompile(`(?i)\bFROM\s*\(\s*VALUES\s*(` + foldConditionRowPattern + `(?:\s*,\s*` + foldConditionRowPattern + `)*)\s*\)\s*AS\s+c\s*\(\s*object_type\s*,\s*relation\s*,\s*subject_type\s*,\s*condition_name\s*\)`)
+	reFoldRow    = regexp.MustCompile(foldConditionRowPattern)
 )
 
 // foldConditionRowsOfTree reads the CURRENT definition of the fact writer: the
@@ -145,7 +148,7 @@ func foldConditionRowsOfTree(t *testing.T) ([]foldConditionRow, string) {
 	for _, n := range names {
 		raw, err := os.ReadFile(n)
 		require.NoError(t, err)
-		up, _, _ := strings.Cut(string(raw), "-- +goose Down")
+		up := migrations.MigrationUpSection(string(raw))
 		if reFoldDef.MatchString(up) {
 			lastFile, lastUp = filepath.Base(n), up
 		}
@@ -158,12 +161,51 @@ func foldConditionRowsOfTree(t *testing.T) ([]foldConditionRow, string) {
 // foldConditionRowsOf parses the condition list out of one definition text.
 func foldConditionRowsOf(up string) []foldConditionRow {
 	var rows []foldConditionRow
-	for _, block := range reFoldValues.FindAllStringSubmatch(up, -1) {
+	for _, block := range reFoldValues.FindAllStringSubmatch(migrations.SQLBlankComments(up), -1) {
 		for _, m := range reFoldRow.FindAllStringSubmatch(block[1], -1) {
 			rows = append(rows, foldConditionRow{Type: m[1], Relation: m[2], Subject: m[3], Condition: m[4]})
 		}
 	}
 	return rows
+}
+
+func TestConditionedRelationHasAProducer_SQLListBoundaries(t *testing.T) {
+	const first = "('compute_instance', 'console', 'user', 'mfa_fresh')"
+	const second = "('compute_instance', 'ssh', 'user', 'mfa_fresh')"
+	const alias = ") AS c(object_type, relation, subject_type, condition_name)"
+	writer := func(rows string) string {
+		return "SELECT c.condition_name INTO v_condition FROM (VALUES " + rows + alias + ";"
+	}
+	lawful := writer(first + ", " + second)
+	// Чужой VALUES раньше настоящего перечня не должен протянуться до его alias.
+	// Четвёрки IN и комментарий — те же ложные источники, что в полной миграции.
+	noise := `SELECT * FROM (VALUES ('access_bindings','id'),('roles','id')) q(name,key);
+IF action IN ('1','2','3','4') THEN RETURN; END IF;
+IF mode IN ('delete','revoke','expiry','delegation') THEN RETURN; END IF;
+IF profile IN ('typed','full','resource_pending','resource_source_pending') THEN RETURN; END IF;
+IF table_name IN ('accounts','projects','service_accounts','issued_account_ids') THEN RETURN; END IF;
+/* SELECT * FROM (VALUES ('comment','relation','user','condition'))
+   AS c(object_type, relation, subject_type, condition_name); */
+`
+	expected := []foldConditionRow{
+		{Type: "compute_instance", Relation: "console", Subject: "user", Condition: "mfa_fresh"},
+		{Type: "compute_instance", Relation: "ssh", Subject: "user", Condition: "mfa_fresh"},
+	}
+	sites, _ := conditionSitesOf("type compute_instance\n  relations\n    define console: [user with mfa_fresh]\n    define ssh: [user with mfa_fresh]\n")
+	require.Len(t, sites, 2)
+	require.Equal(t, expected, foldConditionRowsOf(lawful), "чистый законный близнец")
+	require.Equal(t, expected, foldConditionRowsOf(noise+lawful+noise), "чужие списки не являются условиями факта")
+	require.Equal(t, expected, foldConditionRowsOf(writer(first+", /* пояснение /* вложенное */ */ "+second)))
+	require.Empty(t, conditionProducerFindings(sites, foldConditionRowsOf(noise+lawful)))
+
+	// Меняется именно строка настоящего перечня: оба направления канона остаются строгими.
+	missing := conditionProducerFindings(sites, foldConditionRowsOf(noise+writer(second)))
+	require.Len(t, missing, 1)
+	require.Contains(t, missing[0], expected[0].key())
+	extra := conditionProducerFindings(sites, foldConditionRowsOf(noise+writer(first+", "+second+
+		", ('compute_instance','ssh','service_account','mfa_fresh')")))
+	require.Len(t, extra, 1)
+	require.Contains(t, extra[0], "service_account with mfa_fresh")
 }
 
 // conditionProducerFindings — the comparison itself, both directions.

@@ -228,9 +228,10 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 
 	// ── первый вход: строка человека ПРАВИТСЯ, триггер зеркала срабатывает ───
 	{
+		markAddressVerified(t, ctx, pool, excluded)
 		w, werr := repo.Writer(ctx)
 		require.NoError(t, werr)
-		markAddressVerified(t, ctx, pool, excluded)
+		defer func() { _ = w.Rollback(ctx) }()
 		_, err = w.UsersW().ActivateInvite(ctx, excluded,
 			domain.ExternalSubject("ext-rmres-activated"), domain.DisplayName("Excluded"))
 		require.NoError(t, err)
@@ -257,9 +258,10 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 
 	// ── ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — зеркало по-прежнему ПРАВИТ существующее ─────
 	{
+		markAddressVerified(t, ctx, pool, kept)
 		w, werr := repo.Writer(ctx)
 		require.NoError(t, werr)
-		markAddressVerified(t, ctx, pool, kept)
+		defer func() { _ = w.Rollback(ctx) }()
 		_, err = w.UsersW().ActivateInvite(ctx, kept,
 			domain.ExternalSubject("ext-rmres-kept"), domain.DisplayName("Kept"))
 		require.NoError(t, err)

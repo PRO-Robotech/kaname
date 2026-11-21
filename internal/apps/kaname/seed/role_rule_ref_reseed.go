@@ -196,7 +196,7 @@ func replaceRuleRefsInOwnTx(
 	roleID string,
 	refs []domain.RoleRuleRef,
 ) error {
-	if err := shared.DoWithWriteTxVoid(ctx, repo,
+	if err := shared.DoWithInstallationWriteTxVoid(ctx, repo, kanamerepo.AuthorityRole,
 		func(ctx context.Context, w kanamerepo.Writer) error {
 			return w.RolesW().ReplaceRuleRefs(ctx, domain.RoleID(roleID), refs)
 		}); err != nil {

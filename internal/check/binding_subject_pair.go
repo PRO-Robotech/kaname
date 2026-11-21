@@ -73,7 +73,9 @@ package check
 // каталогов радиуса. SQL-комментарий снимается от `--` до конца строки и
 // внутри строки SQL `'…--…'` тоже — колонка за ним в той строке не судится.
 // Замена одного доступа другим при том же числе внутри места из ведомости не
-// видна: ведомость судит число и наличие ветви набора, а не какую ветвь.
+// видна для прежних классов: ведомость судит число и наличие ветви набора.
+// Класс канонической нормализации дополнительно доказывает точный вызов
+// domain.NormalizeSubjects(b.Subjects, b.SubjectType, b.SubjectID) по типам.
 
 import (
 	"context"
@@ -134,6 +136,14 @@ const (
 	// BindingPairFallback — откат к прежней форме: строка, у которой набор не
 	// прочитан или пуст, читается по паре; рядом обязан стоять разбор набора.
 	BindingPairFallback BindingPairClass = "откат к прежней форме"
+	// BindingPairCanonicalFallback — оба чтения пары служат только входом
+	// доменного NormalizeSubjects вместе с полным полем Subjects той же выдачи.
+	BindingPairCanonicalFallback BindingPairClass = "каноническая нормализация"
+	// Строгие structural proof классы новых полных наборов.
+	BindingPairSingleton      BindingPairClass = "проекция того же singleton"
+	BindingPairGuardedFanout  BindingPairClass = "полный fanout с пустым fallback"
+	BindingPairStagedSet      BindingPairClass = "канонизация полного SQL набора"
+	BindingPairCompleteSetSQL BindingPairClass = "полная SQL программа набора"
 	// BindingPairUniqueAnchor — якорь уникальности действующей выдачи: частный
 	// UNIQUE базы стоит на паре, и текст отказа называет то, на чём он стоит.
 	BindingPairUniqueAnchor BindingPairClass = "якорь уникальности"
@@ -144,7 +154,8 @@ const (
 
 // BindingPairClasses — словарь целиком; основание вне него — находка.
 var BindingPairClasses = []BindingPairClass{
-	BindingPairProjection, BindingPairFallback, BindingPairUniqueAnchor, BindingPairLegacyInput,
+	BindingPairProjection, BindingPairFallback, BindingPairCanonicalFallback, BindingPairUniqueAnchor, BindingPairLegacyInput,
+	BindingPairSingleton, BindingPairGuardedFanout, BindingPairStagedSet, BindingPairCompleteSetSQL,
 }
 
 // BindingPairEntry — законное место: точное число доступов и основание.
@@ -165,6 +176,10 @@ type BindingPairAccess struct {
 	Pos   string
 	Form  string
 	What  string
+	// CanonicalNormalize — поле пары передано канонической функции вместе
+	// с Subjects и второй частью пары того же типизированного receiver.
+	CanonicalNormalize bool
+	ClosedProof        BindingPairClass
 }
 
 // BindingPairCensus — исход обхода радиуса.
@@ -263,7 +278,7 @@ func CollectBindingSubjectPair(ctx context.Context, spec BindingPairSpec) (Bindi
 			continue
 		}
 		census.Packages++
-		pp := &bindingPairPkg{fset: prog.fset, c: &census}
+		pp := &bindingPairPkg{fset: prog.fset, c: &census, receiptOrigins: bindingPairSQLConstantOrigins(sp.files, sp.info), groupSQL: bindingPairGroupSQLProofs(sp.files, sp.info)}
 		for _, f := range sp.files {
 			name := prog.fset.Position(f.Pos()).Filename
 			seen[name] = true
@@ -351,16 +366,19 @@ type bindingPairLit struct {
 	pos   token.Pos
 	place string
 	sql   string
+	raw   string
 }
 
 // bindingPairPkg — разбор одного пакета: доступы Go и литералы SQL, которые
 // разрешаются после обхода всех файлов (псевдоним таблицы бывает объявлен в
 // литерале другой функции того же пакета).
 type bindingPairPkg struct {
-	fset  *token.FileSet
-	c     *BindingPairCensus
-	lits  []bindingPairLit
-	spans map[string][]bindingPairSpan
+	fset           *token.FileSet
+	c              *BindingPairCensus
+	lits           []bindingPairLit
+	spans          map[string][]bindingPairSpan
+	receiptOrigins bindingPairSQLOrigins
+	groupSQL       map[token.Pos]bool
 }
 
 // collectFile — доступы Go одного файла и его литералы SQL.
@@ -393,13 +411,17 @@ func (pp *bindingPairPkg) collectFile(f *ast.File, info *types.Info, fields map[
 			}
 		}
 	}
+	normalized := bindingPairCanonicalCalls(f, info, fields)
+	proofs := bindingPairGoProofs(f, info, fields, subjectT)
 	add := func(pos token.Pos, form, what string) {
 		p := fset.Position(pos)
 		c.Accesses = append(c.Accesses, BindingPairAccess{
-			Place: placeOf(spans, file, pos),
-			Pos:   fmt.Sprintf("%s:%d", p.Filename, p.Line),
-			Form:  form,
-			What:  what,
+			Place:              placeOf(spans, file, pos),
+			Pos:                fmt.Sprintf("%s:%d", p.Filename, p.Line),
+			Form:               form,
+			What:               what,
+			CanonicalNormalize: normalized[pos],
+			ClosedProof:        proofs[pos],
 		})
 	}
 	subjectsT := types.NewSlice(subjectT)
@@ -450,13 +472,105 @@ func (pp *bindingPairPkg) collectFile(f *ast.File, info *types.Info, fields map[
 		if err != nil {
 			continue
 		}
+		raw := text
 		text = asciiLower(stripSQLComments(text))
-		if !sqlMarker.MatchString(text) {
+		// Закрытый qualified subject fragment не содержит SQL keyword или
+		// сравнения. Он всё равно должен дойти до lineage-проверки: отсутствие
+		// доказанного terminal use означает два доступа пары, а не пустой census.
+		if !sqlMarker.MatchString(text) && !bindingPairReceiptFragment(raw) {
 			continue
 		}
 		c.Literals++
-		pp.lits = append(pp.lits, bindingPairLit{pos: lit.Pos(), place: placeOf(spans, file, lit.Pos()), sql: text})
+		pp.lits = append(pp.lits, bindingPairLit{pos: lit.Pos(), place: placeOf(spans, file, lit.Pos()), sql: text, raw: raw})
 	}
+}
+
+// bindingPairCanonicalCalls доказывает только прямую каноническую форму.
+// Имя импорта, имя receiver и наличие произвольного []Subject недостаточны:
+// функция и поля — те же объекты go/types, что у проверяемого AccessBinding;
+// три receiver — одна переменная. Срез, nil, чужой binding, присваивание функции
+// переменной и локальный одноимённый helper намеренно не получают доказательства.
+func bindingPairCanonicalCalls(f *ast.File, info *types.Info, fields map[types.Object]string) map[token.Pos]bool {
+	out := map[token.Pos]bool{}
+	var pkg *types.Package
+	for field := range fields {
+		pkg = field.Pkg()
+		break
+	}
+	if pkg == nil {
+		return out
+	}
+	normalizer, ok := pkg.Scope().Lookup("NormalizeSubjects").(*types.Func)
+	if !ok {
+		return out
+	}
+	binding := pkg.Scope().Lookup(BindingPairType)
+	if binding == nil {
+		return out
+	}
+	st, ok := binding.Type().Underlying().(*types.Struct)
+	if !ok {
+		return out
+	}
+	var subjects types.Object
+	for i := 0; i < st.NumFields(); i++ {
+		if st.Field(i).Name() == "Subjects" {
+			subjects = st.Field(i)
+		}
+	}
+	if subjects == nil {
+		return out
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) != 3 || call.Ellipsis.IsValid() {
+			return true
+		}
+		var callee types.Object
+		switch fn := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			callee = info.Uses[fn.Sel]
+		case *ast.Ident:
+			callee = info.Uses[fn]
+		}
+		if callee != normalizer {
+			return true
+		}
+		var receiver *types.Var
+		var pair [2]token.Pos
+		for i, arg := range call.Args {
+			sel, ok := arg.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			selection := info.Selections[sel]
+			if selection == nil || selection.Kind() != types.FieldVal || len(selection.Index()) != 1 {
+				return true
+			}
+			if (i == 0 && selection.Obj() != subjects) ||
+				(i == 1 && fields[selection.Obj()] != "SubjectType") ||
+				(i == 2 && fields[selection.Obj()] != "SubjectID") {
+				return true
+			}
+			base, ok := sel.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			object, ok := info.Uses[base].(*types.Var)
+			if !ok || (i > 0 && object != receiver) {
+				return true
+			}
+			receiver = object
+			if i > 0 {
+				pair[i-1] = sel.Sel.Pos()
+			}
+		}
+		for _, pos := range pair {
+			out[pos] = true
+		}
+		return true
+	})
+	return out
 }
 
 // resolve — колонки пары в литералах пакета: псевдоним ищется в самом
@@ -493,13 +607,28 @@ func (pp *bindingPairPkg) resolve() {
 	}
 	for i, l := range pp.lits {
 		for _, r := range bindingPairColRefs(l.sql) {
-			if bindingPairRefIsPair(r, infos[i], byPlace[l.place], pkgAliases) {
+			isPair := bindingPairRefIsPair(r, infos[i], byPlace[l.place], pkgAliases)
+			origin := pp.receiptOrigins[l.pos][bindingPairSQLRawOffset(l.raw, r.at)]
+			if bindingPairReceiptFragment(l.raw) {
+				// Неизвестное употребление не может воспользоваться package-wide alias.
+				isPair = origin != "producer_source_receipt"
+			} else if r.qualifier == "r" && origin == "producer_source_receipt" {
+				// То же полное lineage-доказательство относится к qualified
+				// predicate/SELECT, а не только к семипольному JSON ключу.
+				isPair = false
+			}
+			if isPair {
+				var proof BindingPairClass
+				if pp.groupSQL[l.pos] || pp.receiptOrigins[l.pos][bindingPairSQLRawOffset(l.raw, r.at)] == "<complete-set>" {
+					proof = BindingPairCompleteSetSQL
+				}
 				p := pp.fset.Position(l.pos)
 				c.Accesses = append(c.Accesses, BindingPairAccess{
-					Place: l.place,
-					Pos:   fmt.Sprintf("%s:%d", p.Filename, p.Line),
-					Form:  BindingPairFormSQL,
-					What:  r.String(),
+					Place:       l.place,
+					Pos:         fmt.Sprintf("%s:%d", p.Filename, p.Line),
+					Form:        BindingPairFormSQL,
+					What:        r.String(),
+					ClosedProof: proof,
 				})
 			} else {
 				c.SetRefs++
@@ -990,13 +1119,20 @@ func JudgeBindingSubjectPair(census BindingPairCensus, ledger map[string]Binding
 	sort.Strings(keys)
 	for _, place := range keys {
 		acc := places[place]
-		goN, sqlN := 0, 0
+		goN, sqlN, normalizedN := 0, 0, 0
+		proofN := map[BindingPairClass]int{}
 		var where []string
 		for _, a := range acc {
 			if a.Form == BindingPairFormSQL {
 				sqlN++
 			} else {
 				goN++
+			}
+			if a.CanonicalNormalize {
+				normalizedN++
+			}
+			if a.ClosedProof != "" {
+				proofN[a.ClosedProof]++
 			}
 			where = append(where, a.Pos+" "+a.Form+" "+a.What)
 		}
@@ -1008,6 +1144,14 @@ func JudgeBindingSubjectPair(census BindingPairCensus, ledger map[string]Binding
 				"видит одного из них. Перевести место на весь набор (Subjects / access_binding_subjects) либо внести "+
 				"в BindingSubjectPairLedger с основанием из закрытого словаря и точным числом.",
 				place, goN, sqlN, strings.Join(where, "\n    ")))
+		case (entry.Class == BindingPairSingleton || entry.Class == BindingPairGuardedFanout || entry.Class == BindingPairStagedSet || entry.Class == BindingPairCompleteSetSQL) && proofN[entry.Class] != len(acc):
+			findings = append(findings, fmt.Sprintf("%s — полное структурное доказательство %q не выполнено: доказано %d из %d доступов:\n    %s", place, entry.Class, proofN[entry.Class], len(acc), strings.Join(where, "\n    ")))
+		case entry.Class == BindingPairCanonicalFallback &&
+			(entry.Go != 2 || entry.SQL != 0 || goN != 2 || sqlN != 0 || normalizedN != 2):
+			findings = append(findings, fmt.Sprintf("%s — каноническая нормализация не доказана: нужны ровно два "+
+				"доступа пары в domain.NormalizeSubjects(b.Subjects, b.SubjectType, b.SubjectID) той же выдачи; "+
+				"ведомость Go %d, SQL %d; дерево Go %d, SQL %d, доказано %d:\n    %s",
+				place, entry.Go, entry.SQL, goN, sqlN, normalizedN, strings.Join(where, "\n    ")))
 		case entry.Class == BindingPairFallback && !census.SetEvidence[place]:
 			findings = append(findings, fmt.Sprintf("%s — место записано откатом к прежней форме, но набор субъектов "+
 				"в нём не читается (нет значения типа Subject/[]Subject и таблицы %s):\n    %s\nОткат без ветви "+

@@ -150,7 +150,11 @@ func rid07MatrixWithPublic(t *testing.T, exact bool, consumer rid07LivePublicCon
 					publicConsumer(t, w, publicInput, "before")
 				}
 				if exact {
-					requireNativeOK(t, f.apply(t, w.delivery), len(w.accounts))
+					process := f.apply(t, w.delivery)
+					requireNativeOK(t, process, len(w.accounts))
+					if publicConsumer != nil {
+						rid09AwaitBaseRoleProjections(t, f.given.ctx, process)
+					}
 					f.renewOperator(t, f.given.ctx)
 				} else {
 					completed := 0

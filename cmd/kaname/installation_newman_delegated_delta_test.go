@@ -31,6 +31,7 @@ type rid03DeltaPolicy struct {
 	FactVersions                                                                                              map[rid03Tuple]time.Time
 	FactCreated                                                                                               map[rid03Tuple][]time.Time
 	Main                                                                                                      rid09PrimaryRow
+	GlobalBindingEpoch                                                                                        bool
 }
 
 func rid03Cell[T any](row rid09PrimaryRow, key string) (T, bool) {
@@ -202,6 +203,7 @@ func rid03BuildDeltaPolicy(t *testing.T, e *rid03NewmanExpectation, a, b rid03Ne
 	p.TargetType, p.TargetID = targetType, targetID
 	selectors := rid03Selectors(t, a, p.Role)
 	for _, sel := range selectors {
+		p.GlobalBindingEpoch = p.GlobalBindingEpoch || sel.Container != nil || sel.Arm != domain.ArmAnchor
 		require.True(t, sel.Arm == domain.ArmAnchor && !sel.CreatedBySubject, "fixture delivered role selector unsupported")
 		if sel.Container == nil {
 			if rid03Has(sel.ObjectTypes, targetType) {
@@ -359,7 +361,7 @@ func (p rid03DeltaPolicy) allows(table string, r rid09PrimaryRow) bool {
 	}
 	switch table {
 	case "access_bindings":
-		return rid03Columns(r, "id subject_type subject_id role_id resource_type resource_id created_at status expires_at granted_by_user_id revoked_at revoked_by_user_id scope deletion_protection labels target target_digest granted_relation is_system revocation_reason narrowed_at delegation_id") && reflect.DeepEqual(r, p.Main) && rid03S(r, "id") == p.NewID && rid03S(r, "subject_type") == p.SubjectType && rid03S(r, "subject_id") == p.SubjectID && rid03S(r, "role_id") == p.Role && rid03S(r, "resource_type") == "account" && rid03S(r, "resource_id") == p.Account && rid03S(r, "delegation_id") == p.Delegation && rid03S(r, "status") == "ACTIVE" && rid03SameCell(r, "scope", 2) && rid03SameCell(r, "expires_at", nil) && rid03SameCell(r, "revoked_at", nil) && rid03SameCell(r, "revoked_by_user_id", nil) && rid03SameCell(r, "revocation_reason", nil) && rid03SameCell(r, "narrowed_at", nil) && rid03S(r, "granted_by_user_id") == "" && rid03S(r, "granted_relation") == "" && rid03SameCell(r, "is_system", false) && rid03SameCell(r, "deletion_protection", false) && rid03SameCell(r, "labels", map[string]any{}) && rid03SameCell(r, "target", map[string]any{"resources": []any{map[string]any{"type": p.TargetType, "id": p.TargetID}}}) && rid03S(r, "target_digest") == (domain.AccessTarget{Resources: []domain.ResourceRef{{Type: p.TargetType, ID: p.TargetID}}}).Digest() && p.bounded(r, "created_at")
+		return rid03Columns(r, "id subject_type subject_id role_id resource_type resource_id created_at status expires_at granted_by_user_id revoked_at revoked_by_user_id scope deletion_protection labels target target_digest granted_relation is_system revocation_reason narrowed_at delegation_id grant_capability_version") && rid03SameCell(r, "grant_capability_version", 0) && reflect.DeepEqual(r, p.Main) && rid03S(r, "id") == p.NewID && rid03S(r, "subject_type") == p.SubjectType && rid03S(r, "subject_id") == p.SubjectID && rid03S(r, "role_id") == p.Role && rid03S(r, "resource_type") == "account" && rid03S(r, "resource_id") == p.Account && rid03S(r, "delegation_id") == p.Delegation && rid03S(r, "status") == "ACTIVE" && rid03SameCell(r, "scope", 2) && rid03SameCell(r, "expires_at", nil) && rid03SameCell(r, "revoked_at", nil) && rid03SameCell(r, "revoked_by_user_id", nil) && rid03SameCell(r, "revocation_reason", nil) && rid03SameCell(r, "narrowed_at", nil) && rid03S(r, "granted_by_user_id") == "" && rid03S(r, "granted_relation") == "" && rid03SameCell(r, "is_system", false) && rid03SameCell(r, "deletion_protection", false) && rid03SameCell(r, "labels", map[string]any{}) && rid03SameCell(r, "target", map[string]any{"resources": []any{map[string]any{"type": p.TargetType, "id": p.TargetID}}}) && rid03S(r, "target_digest") == (domain.AccessTarget{Resources: []domain.ResourceRef{{Type: p.TargetType, ID: p.TargetID}}}).Digest() && p.bounded(r, "created_at")
 	case "access_binding_subjects":
 		return rid03Columns(r, "binding_id subject_type subject_id ordinal resource_type resource_id") && rid03S(r, "binding_id") == p.NewID && rid03S(r, "subject_type") == p.SubjectType && rid03S(r, "subject_id") == p.SubjectID && rid03SameCell(r, "ordinal", 0) && rid03S(r, "resource_type") == "account" && rid03S(r, "resource_id") == p.Account
 	case "access_binding_target_members":
@@ -432,8 +434,13 @@ func rid03RequireClosedDelta(t *testing.T, a, b rid03NewmanSnapshot, p rid03Delt
 	memberSeen := map[rid03Member]bool{}
 	ledgerSeen := map[rid03Ledger]bool{}
 	tupleSeen := map[rid03Tuple]bool{}
+	policyKeys, bindingScopes := p.epochKeys()
+	require.True(t, rid03EpochTransitionValid(a.Raw["authority_policy_epoch"], b.Raw["authority_policy_epoch"], "key", policyKeys),
+		"пересчёт ревизий политики должен затронуть ровно выведенные ключи")
+	require.True(t, rid03EpochTransitionValid(a.Raw["authority_binding_epoch"], b.Raw["authority_binding_epoch"], "scope", bindingScopes),
+		"пересчёт ревизий привязок должен затронуть ровно выведенные области")
 	for table, oldRows := range a.Raw {
-		if table == "operations" {
+		if table == "operations" || table == "authority_policy_epoch" || table == "authority_binding_epoch" {
 			continue
 		}
 		now, exists := b.Raw[table]

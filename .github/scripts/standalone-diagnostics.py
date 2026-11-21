@@ -169,6 +169,245 @@ def clean_census(census, aliases):
     return safe
 
 
+# Partial никогда не пропускает текст через redactor: публикуется только закрытая схема.
+PARTIAL_STATUS = "PARTIAL_DIAGNOSTIC"
+PARTIAL_COUNTERS = {"events", "nonJSON", "passedTests", "failedTests", "testExecutions",
+                    "otherSkips", "passedPackages", "skippedPackages"}
+PARTIAL_TEST_LISTS = {"namedFailures", "unterminatedTests", "unmetSkips"}
+PARTIAL_PACKAGE_LISTS = {"unterminatedPackages", "failedPackages", "packageOnlyFailures"}
+PARTIAL_MAPS = {"packages", "builds", "failedBuilds"}
+PARTIAL_CATEGORIES = {"unterminated-tests", "unterminated-packages", "interrupted", "complete-sibling"}
+
+
+def strict_equal(left, right):
+    # В том числе bool != int, NaN не является JSON числом протокола.
+    return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(right, sort_keys=True, allow_nan=False)
+
+
+def partial_package(value, allow_empty=False):
+    package_identity(value, allow_unscoped_build=allow_empty)
+    if value == "" and allow_empty:
+        return value
+    # Абсолютный/private путь и traversal не являются canonical import identity.
+    identities = value[:-1].split(" [", 1) if " [" in value else [value]
+    if any(part in ("", ".", "..") for identity in identities for part in identity.split("/")):
+        raise ValueError("неканонический пакет")
+    return value
+
+
+def partial_events(raw):
+    events = []
+    for line in raw.decode("utf-8").splitlines():
+        event = protocol.event_from_line(line)
+        if set(event) - {"Time", "Action", "Package", "ImportPath", "Test", "Output", "Elapsed", "FailedBuild"}:
+            raise ValueError("неизвестная схема события")
+        if "Elapsed" in event and (type(event["Elapsed"]) not in (int, float) or event["Elapsed"] < 0):
+            raise ValueError("нетипизированная длительность")
+        # Числа проверяются и на NaN/Infinity; Time не экспортируется.
+        json.dumps(event, allow_nan=False)
+        if "Time" in event and (not isinstance(event["Time"], str) or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})", event["Time"]) is None):
+            raise ValueError("нетипизированное время")
+        build = event["Action"] in ("build-output", "build-fail")
+        for key in ("Package", "ImportPath", "FailedBuild"):
+            if key in event:
+                partial_package(event[key], allow_empty=build and key == "ImportPath")
+        if "ImportPath" in event and not build or "Test" in event and not event["Test"]:
+            raise ValueError("противоречивая форма события")
+        events.append(event)
+    return events
+
+
+def partial_producer(directory, index):
+    manifest_raw = (directory / "manifest.json").read_bytes()
+    m = json.loads(manifest_raw.decode("utf-8"), object_pairs_hook=protocol.unique_members)
+    allowed = {"version", "kind", "source", "target", "args", "complete", "captureStatus", "censusStatus",
+               "goRC", "parseRC", "captureRC", "helperRC", "outcome", "files"}
+    if (not isinstance(m, dict) or set(m) - allowed or type(m.get("version")) is not int or
+            m["version"] != 1 or m.get("kind") != "producer" or type(m.get("complete")) is not bool):
+        raise ValueError("неизвестная схема producer")
+    if "source" in m and (not isinstance(m["source"], dict) or set(m["source"]) - {"commit", "tree"} or
+                           any(not isinstance(v, str) for v in m["source"].values())):
+        raise ValueError("неизвестная source схема")
+    if "target" in m and not isinstance(m["target"], str) or "args" in m and (not isinstance(m["args"], list) or any(not isinstance(a, str) for a in m["args"])):
+        raise ValueError("нетипизированный producer")
+    if not isinstance(m.get("files"), dict) or set(m["files"]) != PRODUCER_FILES - {"manifest.json"}:
+        raise ValueError("неполные hashes producer")
+    # Перепись разбирается из тех же байтов, чьи hashes проверены, без повторного read.
+    payload = {name: (directory / name).read_bytes() for name in PRODUCER_FILES - {"manifest.json"}}
+    for name, raw in payload.items():
+        if not strict_equal(m["files"][name], digest(raw)):
+            raise ValueError("байты producer изменились")
+    for field in ("goRC", "parseRC", "captureRC", "helperRC"):
+        if type(m.get(field)) is not int:
+            raise ValueError("нет подтверждённого RC")
+    if payload["go.rc"] != (str(m["goRC"]) + "\n").encode("ascii"):
+        raise ValueError("исход Go расходится")
+    c = json.loads(payload["census.json"].decode("utf-8"), object_pairs_hook=protocol.unique_members)
+    events = partial_events(payload["stdout.jsonl"])
+    expected = protocol.summarize(events)
+    if not strict_equal(c, expected) or expected["nonJSON"] != 0:
+        raise ValueError("перепись расходится с событиями")
+    categories = []
+    if m["complete"]:
+        protocol.validate(m, c, events)
+        categories.append("complete-sibling")
+    else:
+        if (m.get("captureStatus") not in ("complete", "interrupted") or m.get("censusStatus") != "incomplete" or
+                m["parseRC"] != 2 or m["helperRC"] != 2 or m.get("outcome") != "unknown" or
+                m["captureRC"] != (2 if m["captureStatus"] == "interrupted" else 0)):
+            raise ValueError("неподтверждённый незавершённый producer")
+        if c["unterminatedTests"]:
+            categories.append("unterminated-tests")
+        if c["unterminatedPackages"]:
+            categories.append("unterminated-packages")
+        if m["captureStatus"] == "interrupted":
+            categories.append("interrupted")
+        if not categories or m["goRC"] == 0 and (c["namedFailures"] or c["failedPackages"] or "fail" in c["builds"].values()):
+            raise ValueError("противоречивый исход вместо interruption")
+    capture = "capture-%04d" % index
+    aliases, names, safe_events = {}, [], []
+    for event_index, event in enumerate(events):
+        build = event["Action"] in ("build-output", "build-fail")
+        package = event.get("ImportPath", event.get("Package")) if build else event["Package"]
+        safe = {"index": event_index, "action": event["Action"], "package": package}
+        # Длительность отказа пакета помогает отличить его собственный таймаут от лимита задания.
+        if event["Action"] == "fail" and "Test" not in event and "Elapsed" in event:
+            safe["elapsedSeconds"] = event["Elapsed"]
+        if "Test" in event:
+            key = (package, event["Test"])
+            if key not in aliases:
+                alias = capture + "-test-%06d" % (len(aliases) + 1)
+                aliases[key] = alias
+                names.append({"package": package, "alias": alias})
+            safe["testAlias"] = aliases[key]
+        safe_events.append(safe)
+    safe_census = clean_census(c, aliases)
+    # Ни первоначальное статическое имя, ни динамический суффикс не выходят наружу.
+    record = {"capture": capture, "kind": "producer", "categories": categories,
+              "verifiedRC": {key: m[key] for key in ("goRC", "parseRC", "captureRC", "helperRC")},
+              "census": safe_census, "aliases": names, "events": safe_events,
+              "rawFiles": {name: digest(raw) for name, raw in {"manifest.json": manifest_raw, **payload}.items()},
+              "source": {key: value if re.fullmatch(r"[0-9a-f]{40}", value) else "unknown"
+                         for key in ("commit", "tree") for value in (m.get("source", {}).get(key, "unknown"),)}}
+    return record, not m["complete"]
+
+
+def validate_partial_report(report):
+    # Этот же whitelist судит публикацию и право удалить прежнюю производную.
+    if (not isinstance(report, dict) or set(report) != {"version", "complete", "status", "testAccepted", "outcome", "captures"} or
+            type(report["version"]) is not int or report["version"] != 1 or report["complete"] is not False or
+            report["testAccepted"] is not False or report["status"] != PARTIAL_STATUS or report["outcome"] != "unknown" or
+            not isinstance(report["captures"], list) or not report["captures"]):
+        raise ValueError("неизвестный partial экспорт")
+    all_aliases = set()
+    incomplete = False
+    for index, record in enumerate(report["captures"]):
+        if not isinstance(record, dict) or set(record) != {"capture", "kind", "categories", "verifiedRC", "census", "aliases", "events", "rawFiles", "source"}:
+            raise ValueError("неизвестная partial запись")
+        if record["capture"] != "capture-%04d" % index or record["kind"] != "producer":
+            raise ValueError("неканоническая partial запись")
+        raw_files = record["rawFiles"]
+        if not isinstance(raw_files, dict) or set(raw_files) != PRODUCER_FILES:
+            raise ValueError("неполная raw provenance")
+        for item in raw_files.values():
+            if (not isinstance(item, dict) or set(item) != {"bytes", "sha256"} or type(item["bytes"]) is not int or
+                    item["bytes"] < 0 or not isinstance(item["sha256"], str) or re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is None):
+                raise ValueError("нетипизированная raw provenance")
+        source = record["source"]
+        if (not isinstance(source, dict) or set(source) != {"commit", "tree"} or
+                any(not isinstance(v, str) or v != "unknown" and re.fullmatch(r"[0-9a-f]{40}", v) is None for v in source.values())):
+            raise ValueError("нетипизированная source provenance")
+        categories = record["categories"]
+        if (not isinstance(categories, list) or not categories or any(not isinstance(v, str) or v not in PARTIAL_CATEGORIES for v in categories) or
+                len(categories) != len(set(categories)) or "complete-sibling" in categories and len(categories) != 1):
+            raise ValueError("неизвестная категория")
+        incomplete |= "complete-sibling" not in categories
+        rc = record["verifiedRC"]
+        if not isinstance(rc, dict) or set(rc) != {"goRC", "parseRC", "captureRC", "helperRC"} or any(type(v) is not int for v in rc.values()):
+            raise ValueError("нетипизированные RC")
+        aliases = {}
+        if not isinstance(record["aliases"], list):
+            raise ValueError("нетипизированные aliases")
+        for number, entry in enumerate(record["aliases"], 1):
+            if not isinstance(entry, dict) or set(entry) != {"package", "alias"} or entry["alias"] != record["capture"] + "-test-%06d" % number:
+                raise ValueError("неканонический alias")
+            partial_package(entry["package"])
+            if entry["alias"] in all_aliases:
+                raise ValueError("повтор alias")
+            all_aliases.add(entry["alias"]); aliases[entry["alias"]] = entry["package"]
+        c = record["census"]
+        if not isinstance(c, dict) or set(c) != PARTIAL_COUNTERS | PARTIAL_TEST_LISTS | PARTIAL_PACKAGE_LISTS | PARTIAL_MAPS:
+            raise ValueError("неизвестная partial перепись")
+        if any(type(c[k]) is not int or c[k] < 0 for k in PARTIAL_COUNTERS) or c["nonJSON"] != 0:
+            raise ValueError("нетипизированные счётчики")
+        for key in PARTIAL_TEST_LISTS:
+            if not isinstance(c[key], list):
+                raise ValueError("нетипизированные пробы")
+            for item in c[key]:
+                if (not isinstance(item, dict) or set(item) != {"package", "test"} or
+                        not isinstance(item["test"], str) or aliases.get(item["test"]) != item["package"]):
+                    raise ValueError("неизвестный alias переписи")
+        for key in PARTIAL_PACKAGE_LISTS:
+            if not isinstance(c[key], list):
+                raise ValueError("нетипизированные пакеты")
+            for value in c[key]: partial_package(value)
+        for key in PARTIAL_MAPS:
+            if not isinstance(c[key], dict):
+                raise ValueError("нетипизированная карта пакетов")
+            for name, value in c[key].items():
+                partial_package(name, allow_empty=key == "builds")
+                if key == "failedBuilds": partial_package(value, allow_empty=True)
+                elif not isinstance(value, str) or value not in (("pass", "fail", "skip") if key == "packages" else ("fail", "output")):
+                    raise ValueError("неизвестный статус пакета")
+        if not isinstance(record["events"], list) or len(record["events"]) != c["events"]:
+            raise ValueError("неполный event index")
+        for number, event in enumerate(record["events"]):
+            if (not isinstance(event, dict) or
+                    set(event) - {"testAlias", "elapsedSeconds"} != {"index", "action", "package"} or
+                    type(event["index"]) is not int or event["index"] != number or not isinstance(event["action"], str) or
+                    event["action"] not in (*protocol.ACTIONS, "build-output", "build-fail")):
+                raise ValueError("неизвестное partial событие")
+            partial_package(event["package"], allow_empty=event["action"] in ("build-output", "build-fail"))
+            if "testAlias" in event and (not isinstance(event["testAlias"], str) or aliases.get(event["testAlias"]) != event["package"]):
+                raise ValueError("неизвестный event alias")
+            if "elapsedSeconds" in event:
+                elapsed = event["elapsedSeconds"]
+                if (event["action"] != "fail" or "testAlias" in event or
+                        type(elapsed) not in (int, float) or not 0 <= elapsed < float("inf")):
+                    raise ValueError("нетипизированная длительность отказа пакета")
+    if not incomplete:
+        raise ValueError("partial без незавершённого producer")
+
+
+def partial_export(groups, stage, dst, max_bytes):
+    records = []
+    has_incomplete = False
+    for directory, kind in groups:
+        if kind == "runner":
+            # Runner не имеет producer hash-протокола: его текст/argv/RC не публикуются.
+            m = read_json(directory / "runner.json")
+            if (not isinstance(m, dict) or set(m) - {"version", "kind", "complete", "rc", "target"} or
+                    type(m.get("version")) is not int or m["version"] != 1 or m.get("kind") != "runner" or m.get("complete") is not True or type(m.get("rc")) is not int):
+                raise ValueError("неполный runner")
+            if "target" in m and not isinstance(m["target"], str):
+                raise ValueError("нетипизированный runner")
+            continue
+        record, incomplete = partial_producer(directory, len(records))
+        records.append(record); has_incomplete |= incomplete
+    if not has_incomplete:
+        raise ValueError("нет незавершённого producer")
+    report = {"version": 1, "complete": False, "status": PARTIAL_STATUS, "testAccepted": False,
+              "outcome": "unknown", "captures": records}
+    validate_partial_report(report)
+    raw = (json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode()
+    if len(raw) > max_bytes:
+        raise ValueError("partial превышает предел")
+    (stage / "export.json").write_bytes(raw)
+    validate_partial_report(read_json(stage / "export.json"))
+    stage.rename(dst)
+    return 2
+
+
 def remove_previous_export(dst):
     if not dst.exists():
         return
@@ -195,6 +434,8 @@ def remove_previous_export(dst):
                 path = directory / filename
                 if not path.is_file() or record["files"][filename]["public"] != digest(path.read_bytes()):
                     raise ValueError("повреждён прежний экспорт")
+    elif report.get("status") == PARTIAL_STATUS:
+        validate_partial_report(report)
     elif set(report) != {"version", "complete", "error"} or report["error"] != EXPORT_ERROR:
         raise ValueError("чужое назначение экспорта")
     if {p.name for p in dst.iterdir()} != expected:
@@ -251,6 +492,12 @@ def export(src, dst, max_bytes=MAX_BYTES):
             raise ValueError("capture пуст")
         # Имена из producer очищают также строки обрамляющего runner.
         groups.sort(key=lambda group: group[1] == "runner")
+        # Complete-only идёт по прежней строгой ветке без изменения её verdict.
+        producer_manifests = [read_json(directory / "manifest.json") for directory, kind in groups if kind == "producer"]
+        if any(not isinstance(m, dict) for m in producer_manifests):
+            raise ValueError("manifest не объект")
+        if any(m.get("complete") is False for m in producer_manifests):
+            return partial_export(groups, stage, dst, max_bytes)
         redactor = load_redactor()
         records = []
         public_aliases = {}
@@ -341,7 +588,7 @@ def main():
             with open(output, "a", encoding="utf-8") as stream:
                 stream.write("ready=false\n")
         code = export(args.source, args.destination)
-        if code == 0 and output:
+        if code in (0, 2) and output:
             with open(output, "a", encoding="utf-8") as stream:
                 stream.write("path=" + str(args.destination) + "\nready=true\n")
         return code

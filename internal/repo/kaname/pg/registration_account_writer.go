@@ -9,13 +9,16 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/PRO-Robotech/corelib/platformmodules"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	ab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/authorityprotocol"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -33,12 +36,21 @@ type writerAssignment struct {
 	removed                      bool
 }
 
-func (r *RegistrationAccountWriterStore) ApplyRegistrationAccountWriters(ctx context.Context, plan seed.RegistrationWriterPlan) error {
-	tx, err := r.pool.Begin(ctx)
+func (r *RegistrationAccountWriterStore) ApplyRegistrationAccountWriters(ctx context.Context, plan seed.RegistrationWriterPlan) (resultErr error) {
+	// Установка меняет SOURCE для всех module/account назначений. GLOBAL выбран
+	// до старого plan advisory, не после ожидания или первой guarded mutation.
+	tx, err := authorityprotocol.OpenParticipant(ctx, r.pool, kaname.AuthorityBinding)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		rollbackErr := tx.Rollback(cleanup)
+		cancel()
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			resultErr = errors.Join(resultErr, rollbackErr)
+		}
+	}()
 	// Сериализуем полные планы параллельных стартов HA до чтения их журнала.
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('kaname.registration_account_writer_plan',0))`); err != nil {
 		return err

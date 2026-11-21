@@ -174,6 +174,7 @@ func postureValuePaths(tree map[string]any) [][]string {
 
 var configBridge = []bridged{
 	{configKey: "logger.level", valuePath: []string{"logger", "level"}},
+	{configKey: "authority-protocol.participation", valuePath: []string{"authorityProtocol", "participation"}},
 	// СОБСТВЕННЫЕ ПОТОЛКИ (приёмка `KAN-QUOTA-1`, `П25`; задача kacho#2117; перечень —
 	// таблица `config.OwnCeilingKnobs`).
 	//

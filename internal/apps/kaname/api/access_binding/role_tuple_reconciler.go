@@ -59,6 +59,9 @@ func NewRoleTupleReconciler() *RoleTupleReconciler { return &RoleTupleReconciler
 // yields removed=added=∅ (no fga_outbox rows, the ledger replace is a no-op
 // swap) — so a re-run / replayed Operation does not double-emit.
 func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamerepo.Writer, roleID domain.RoleID, newRole domain.Role) error {
+	if prepared, ok := w.(kanamerepo.PreparedRoleTupleWriter); ok {
+		return prepared.ApplyPreparedRoleTuples(ctx, roleID)
+	}
 	bindings, err := w.AccessBindings().ListActiveByRole(ctx, roleID)
 	if err != nil {
 		return fmt.Errorf("list active bindings of role %s: %w", roleID, err)
@@ -145,3 +148,10 @@ func diffTuples(oldT, newT []abrepo.RelationTuple) (removed, added []abrepo.Rela
 	}
 	return removed, added
 }
+
+// BuildRoleTuples сохраняет один построитель для обычного и staged прохода.
+func (r *RoleTupleReconciler) BuildRoleTuples(b domain.AccessBinding, subjects []domain.Subject, role domain.Role) []abrepo.RelationTuple {
+	return buildSubjectsBindingTuples(b, subjects, role)
+}
+
+var _ kanamerepo.RoleTupleBuilder = (*RoleTupleReconciler)(nil)

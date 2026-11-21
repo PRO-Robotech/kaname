@@ -568,6 +568,10 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 	if c.Active {
 		require.Equal(t, p.HistoryBeforeMutation, w.snapshot(t), "the single changed authentication/input fact must preserve prior GD/G history")
 	}
+	if public != nil && !c.Twin && c.Variant == "deleted-creator" {
+		// Дожидаемся записи отложенных изменений удаления до остановки обработчика.
+		rid03StableNewmanSnapshot(t, w)
+	}
 	rid09StopBase(t, f)
 	p.Before = ridReadWholeDelivery(t, f)
 	p.PairRowsBefore = rid08PrimaryGD(t, f)
@@ -668,6 +672,9 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 		base, err := f.session.StartBase(f.given.ctx, f.writerPlan)
 		require.NoError(t, err)
 		require.NoError(t, base.OwnsListeners(installruntime.DefaultNativePorts().All()...))
+		if public != nil {
+			rid09AwaitBaseRoleProjections(t, f.given.ctx, base)
+		}
 		f.renewOperator(t, f.given.ctx)
 		if c.Variant == "deleted-creator" {
 			p.DeletedAfterRun = rid11RequireCreatorAbsent(t, f)

@@ -115,22 +115,18 @@ func rid05SnapshotRead(t *testing.T, w *ridLifecycleWorld, stable bool) rid05Sna
 		require.True(t, ok, "primary moved within phase capture")
 		return s
 	}
-	// Один бюджет вызывающего покрывает полную нативную готовность материализации и ВЕСЬ SQL.
-	view, fixture, given := *w, *w.f, *w.f.given
-	given.ctx = ctx
-	fixture.given = &given
-	view.f = &fixture
-	rid03StableNewmanSnapshot(t, &view)
+	// Готовность и перепись удаления проверяются в двух одинаковых полных снимках.
 	var previous *rid05Snapshot
 	for {
 		require.NoError(t, ctx.Err())
-		s, ok := rid05Capture(t, ctx, &view)
-		if ok && previous != nil && rid05Equal(*previous, s) {
+		s, composed := rid05Capture(t, ctx, w)
+		ready := composed && rid03MaterializationReady(s.Core)
+		if ready && previous != nil && rid05Equal(*previous, s) {
 			require.NoError(t, ctx.Err())
 			return s
 		}
 		previous = nil
-		if ok {
+		if ready {
 			previous = &s
 		}
 		select {

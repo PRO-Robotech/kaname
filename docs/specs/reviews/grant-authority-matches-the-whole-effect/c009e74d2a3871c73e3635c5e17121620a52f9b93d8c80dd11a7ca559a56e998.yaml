@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_review",
+  "subject": {
+    "repository": "PRO-Robotech/kaname",
+    "path": "docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md",
+    "sha256": "c009e74d2a3871c73e3635c5e17121620a52f9b93d8c80dd11a7ca559a56e998",
+    "revision": 2,
+    "static_status": "DRAFT",
+    "static_status_note": "Шапка автора сохранена. Этот SOURCE review оценивает требования, не реализацию и не runtime.",
+    "lines": 444,
+    "round": "independent_full_source_review",
+    "base_commit": "8455a9a2c997d16b3c026ac2c9fbc01457e68fba",
+    "content_commit_note": "Текущий файл проверен чтением и SHA-256; Git и remote не запускались."
+  },
+  "verdict": "CHANGES_REQUESTED",
+  "reviewer_role": "acceptance-reviewer",
+  "reviewed_at": "2026-11-13T19:58:38.588165+00:00",
+  "effective_approval": {
+    "issued": false,
+    "ban1_lifted": false,
+    "why": "Один blocking дефект порядка final decision clock. Внешнее событие не публиковалось."
+  },
+  "blocking": [
+    {
+      "id": "WE-ACC-F1",
+      "kind": "PRODUCER",
+      "path": "docs/engineering/acceptance/grant-authority-matches-the-whole-effect.md",
+      "lines": "367-371",
+      "finding": "Общий протокол фиксирует decision_at до прежних внутренних row/advisory locks. Позднее ожидание роли/каталога/ledger может пережить срок источника, а последующий gate использует старое время. Post-wait refresh в строке 386 ограничен абзацем Binding reconcile и не задаёт общий контракт Role/Create/Update/Group/Delegation.",
+      "required_change": "Для всех авторизуемых mutation: подготовить весь actual wait footprint; получить legacy locks; перепроверить защищённые source поколения; взять final clock_timestamp; проверить OLD authority; атомарно применить запись. Любой новый неучтённый wait требует whole-operation rollback/restart, а не postbody selfproof. Добавить row-only lock live/expired twin как обязательную охрану хотя бы Role.Update metadata/rules и catalog wait."
+    }
+  ],
+  "important_nonblocking": [
+    "Performance budgets и реальные измерения остаются обязательными §8.3; SOURCE review не подтверждает их прохождение.",
+    "Generic/children/creator Given описаны конкретными production fixtures и ограничениями; здесь не выполнялись. Ошибка построения мира остаётся отдельным исходом, а не deny.",
+    "Полный FB набор и listener holders ещё не выполнены/не завершены; принятие требований не заменяет их."
+  ],
+  "constructibility": {
+    "seeded": 0,
+    "by_named_fixture": "probemod.public-read-fixture.yaml; probemod.children-fixture.yaml; штатная iam.service_account.creator для direct SA; текущие GD/GDU/ESC. Вручную разрешающие tuples запрещены.",
+    "not_executed": "SOURCE-only запрет Root: никаких Go/tests/PG/network. Наличие источников проверено чтением; новый Given не сеялся."
+  },
+  "review_coverage": [
+    "D1 Create AND (bind OR coverage), exact anchors и meta effect",
+    "D3 old administrative sources и D4 used-role population/fallback",
+    "D5 no inherited expiry/no retroactive revoke/GD explicit revoke",
+    "FB01–34, одиночные Given twins и отдельно названные payload/race сценарии",
+    "Durable Operation и real lower Allow/Deny nil-error oracle",
+    "Actor typed admission/all subjects/full pages/model/catalog/source provenance",
+    "Bounded stage/sameTX/retry/audit/cutover/all writers/legacy version0",
+    "Performance measurements and Kacho/Terraform/Registry/svc exclusions"
+  ],
+  "event": {
+    "type": "issue_comment",
+    "target": "PRO-Robotech/kaname#1034",
+    "status": "not_performed",
+    "published": false
+  },
+  "attribution": {
+    "reviewer_kind": "codex_agent",
+    "assigned_agent": "/root/1034_delegated_decision_critical_review",
+    "assigned_role_for_this_task": "acceptance-reviewer",
+    "publication_mode": "pending_root_courier",
+    "personal_review_by_publishing_actor_claimed": false,
+    "history_is_appended_not_rewritten": true
+  }
+}

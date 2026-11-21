@@ -741,6 +741,8 @@ resources:
       - delete
 
   - name: role
+    # kaname#1034: authoring axis, не обычный глагол и не право из wildcard.
+    grantVerbs: [bind]
     objectType: iam_role
     parents: [account]
     producer: derived
@@ -758,6 +760,8 @@ resources:
       - delete
 
   - name: accessBinding
+    # kaname#1034: исторические carrier version 0 это право не получают.
+    grantVerbs: [create]
     objectType: iam_access_binding
     parents: [project, account, cluster]
     producer: derived

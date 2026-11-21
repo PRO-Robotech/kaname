@@ -156,13 +156,27 @@ func TestNamedPointer_ZeroActivationWithdrawalRollbackAndStructuralCascade(t *te
 	}
 }
 
-func r3WaitWriterWaiters(t *testing.T, w *p2, want int) {
+func r3WaitRegistrationWaiters(t *testing.T, ctx context.Context, w *p2, holder int32, want int) []int32 {
 	t.Helper()
+	var pids []int32
 	require.Eventually(t, func() bool {
-		var n int
-		err := w.pool.QueryRow(w.ctx, `SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND NOT granted`).Scan(&n)
-		return err == nil && n >= want
+		err := w.pool.QueryRow(ctx, `SELECT coalesce(array_agg(pid ORDER BY pid),ARRAY[]::integer[])
+ FROM pg_locks WHERE locktype='advisory'
+ AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+ AND classid=1262569292::oid AND objid=0::oid AND objsubid=2
+ AND mode='ExclusiveLock' AND NOT granted AND $1=ANY(pg_blocking_pids(pid))`, holder).Scan(&pids)
+		return err == nil && len(pids) == want
 	}, 10*time.Second, 10*time.Millisecond)
+	// Пока admission не получен, ни одна сторона не должна держать старый writer
+	// fence. Иначе новый gate скрыл бы прежнюю инверсию W → D против D → W.
+	var premature int
+	require.NoError(t, w.pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks
+ WHERE locktype='advisory' AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+ AND pid=ANY($1::integer[]) AND granted AND objsubid=1
+ AND classid=((hashtextextended('kaname.resource_registration_writers',0)>>32)&4294967295)::oid
+ AND objid=(hashtextextended('kaname.resource_registration_writers',0)&4294967295)::oid`, pids).Scan(&premature))
+	require.Zero(t, premature, "writer fence не предшествует compatibility admission")
+	return pids
 }
 
 func TestNamedPointer_QueuedZeroActivationAndFiniteWithdrawal(t *testing.T) {
@@ -186,8 +200,9 @@ func TestNamedPointer_QueuedZeroActivationAndFiniteWithdrawal(t *testing.T) {
 					gate, err := w.pool.Begin(ctx)
 					require.NoError(t, err)
 					defer func() { _ = gate.Rollback(context.Background()) }()
-					_, err = gate.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('kaname.resource_registration_writers',0))`)
+					_, err = gate.Exec(ctx, `SELECT pg_advisory_xact_lock(1262569292,0)`)
 					require.NoError(t, err)
+					holderPID := int32(gate.Conn().PgConn().PID())
 					start := func(zero bool) <-chan error {
 						done := make(chan error, 1)
 						go func() {
@@ -204,9 +219,17 @@ func TestNamedPointer_QueuedZeroActivationAndFiniteWithdrawal(t *testing.T) {
 						return done
 					}
 					first := start(zeroFirst)
-					r3WaitWriterWaiters(t, w, 1)
+					firstPID := r3WaitRegistrationWaiters(t, ctx, w, holderPID, 1)[0]
 					second := start(!zeroFirst)
-					r3WaitWriterWaiters(t, w, 2)
+					queued := r3WaitRegistrationWaiters(t, ctx, w, holderPID, 2)
+					require.Contains(t, queued, firstPID, "первая сторона остаётся в очереди перед второй")
+					for _, pid := range queued {
+						if pid != firstPID {
+							var behindFirst bool
+							require.NoError(t, w.pool.QueryRow(ctx, `SELECT $1=ANY(pg_blocking_pids($2))`, firstPID, pid).Scan(&behindFirst))
+							require.True(t, behindFirst, "вторая сторона ждёт первую в очереди admission")
+						}
+					}
 					require.NoError(t, gate.Commit(ctx))
 					a, b := <-first, <-second
 					zeroErr, withdrawErr := a, b

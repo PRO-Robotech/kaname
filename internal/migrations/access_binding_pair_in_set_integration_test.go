@@ -24,10 +24,11 @@
 //  3. СМЕНА ПАРЫ на субъекта вне набора отказывает; смена на субъекта набора —
 //     близнец — проходит.
 //  4. КОНКУРИРУЮЩИЕ ТРАНЗАКЦИИ: одна переводит пару на второго субъекта набора,
-//     другая снимает строку этого субъекта; обе операторы исполнены до
-//     коммитов, коммиты идут одновременно. Фиксируется ровно одна, вторая
-//     отказывает ограничением, взаимной блокировки нет, и пара остаётся в
-//     наборе. Без испытуемого обе фиксируются и пара уходит из набора.
+//     другая снимает строку этого субъекта. На текущей голове второй оператор
+//     ждёт epoch первой: это ожидание подтверждается backend PID, затем первая
+//     коммитится. Фиксируется ровно одна, вторая отказывает ограничением.
+//     Близнец снимает другую строку: обе фиксируются. Отмена второго оператора
+//     во время подтверждённого ожидания возвращается до освобождения первой.
 //  5. НАКАТ на лежащие строки: перепись выдач, чья пара вне набора, на цепи
 //     посева — ноль (печатается числом); близнец — база с такой выдачей: накат
 //     отказывает и проверки не заводит.
@@ -43,6 +44,8 @@ package migrations_test
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"io/fs"
 	"strconv"
 	"strings"
@@ -58,7 +61,7 @@ import (
 // apsCreate — оператор заведения, по которому опознаётся испытуемый.
 const apsCreate = "CREATE CONSTRAINT TRIGGER access_bindings_pair_change_carries_a_subject"
 
-// apsWaitBudget — предел ожидания коммитов конкурирующих сторон.
+// apsWaitBudget — предел всего расписания после посева, включая BeginTx, DML и commit.
 const apsWaitBudget = 20 * time.Second
 
 // apsCostRows — выдач на сторону замера цены.
@@ -225,57 +228,158 @@ func TestAccessBindingPairInSet_PairMovesOnlyInsideTheSet(t *testing.T) {
 	require.True(t, apsPairInSet(t, db, b.id), "пара осталась в наборе")
 }
 
+// apsPendingDrop сохраняет результат до закрытия done: получение done означает,
+// что SQL уже вернулся, а не только что goroutine собралась его вызвать.
+type apsPendingDrop struct {
+	done chan struct{}
+	err  error
+}
+
+// apsWaitForMover проверяет настоящее ребро ожидания PostgreSQL. Ранний ответ
+// DML тоже собирается: он не подменяется таймером или сигналом перед входом в SQL.
+func apsWaitForMover(ctx context.Context, db *sql.DB, moverPID, removerPID int, pending *apsPendingDrop) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-pending.done:
+			return fmt.Errorf("DELETE завершился до подтверждённого ожидания mover: %v", pending.err)
+		default:
+		}
+		var blocked bool
+		if err := db.QueryRowContext(ctx, `SELECT $1::integer = ANY(pg_blocking_pids($2::integer))`, moverPID, removerPID).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return nil
+		}
+		select {
+		case <-pending.done:
+			return fmt.Errorf("DELETE завершился до подтверждённого ожидания mover: %v", pending.err)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 // TestAccessBindingPairInSet_ConcurrentPairMoveAndRowRemovalKeepThePairInTheSet — проба 4.
+// На текущей голове statement epoch уже сериализует записи одной области.
+// Поэтому контроллер не ждёт второй DML перед commit первой транзакции.
 func TestAccessBindingPairInSet_ConcurrentPairMoveAndRowRemovalKeepThePairInTheSet(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
-	ctx := context.Background()
 	c := apsReadCatalog(t)
+	apsRequireSubject(t, c)
 	db := serOpenAt(t, c.head())
 
-	b := absSeed(t, db, "aps9079")
-	second := serSeedPerson(t, db, "aps9080")
-	absWithSet(t, db, b, second)
-
-	mover, err := db.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = mover.Rollback() })
-	remover, err := db.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = remover.Rollback() })
-
-	// Оба оператора исполнены до коммитов: каждая сторона видит набор и пару
-	// такими, какими они были до соседки.
-	require.NoError(t, apsSetPair(ctx, mover, b.id, second), "сторона пары переводит пару на второго субъекта")
-	require.NoError(t, apsDropRow(ctx, remover, b.id, second), "сторона набора снимает строку второго субъекта")
-
-	results := make(chan error, 2)
-	for _, tx := range []*sql.Tx{mover, remover} {
-		go func(tx *sql.Tx) { results <- tx.Commit() }(tx)
-	}
-	committed, refused := 0, 0
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-results:
-			if err == nil {
-				committed++
-				continue
+	for i, tc := range []struct {
+		name       string
+		dropOther  bool
+		cancelWait bool
+	}{
+		{name: "pair_row_refused"},
+		{name: "other_row_both_commit", dropOther: true},
+		{name: "cancel_during_epoch_wait", cancelWait: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := absSeed(t, db, fmt.Sprintf("aps9079%d", i))
+			second := serSeedPerson(t, db, fmt.Sprintf("aps9080%d", i))
+			third := serSeedPerson(t, db, fmt.Sprintf("aps9081%d", i))
+			absWithSet(t, db, b, second, third)
+			dropped := second
+			if tc.dropOther {
+				dropped = third
 			}
-			require.NotEqualf(t, "40P01", a458SQLState(err),
-				"конкурирующие стороны разошлись взаимной блокировкой, а не ограничением: %v", err)
-			absRequireRefusal(t, err, "коммит конкурирующей стороны")
-			refused++
-		case <-time.After(apsWaitBudget):
-			t.Fatalf("коммиты сторон не вернулись за %s", apsWaitBudget)
-		}
+
+			ctx, cancel := context.WithTimeout(context.Background(), apsWaitBudget)
+			defer cancel()
+			removerCtx, cancelRemover := context.WithCancel(ctx)
+			defer cancelRemover()
+			mover, err := db.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			defer func() { _ = mover.Rollback() }()
+			remover, err := db.BeginTx(removerCtx, nil)
+			require.NoError(t, err)
+			defer func() { _ = remover.Rollback() }()
+			// pgx stdlib сохраняет BeginTx context также для Commit/Rollback.
+			// Server budget — дополнительная граница SQL, включая deferred trigger.
+			for _, tx := range []*sql.Tx{mover, remover} {
+				_, err = tx.ExecContext(ctx, `SET LOCAL statement_timeout = '15s'`)
+				require.NoError(t, err)
+			}
+			var moverPID, removerPID int
+			require.NoError(t, mover.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&moverPID))
+			require.NoError(t, remover.QueryRowContext(removerCtx, `SELECT pg_backend_pid()`).Scan(&removerPID))
+			require.NotEqual(t, moverPID, removerPID)
+			require.NoError(t, apsSetPair(ctx, mover, b.id, second))
+
+			pending := &apsPendingDrop{done: make(chan struct{})}
+			go func() {
+				pending.err = apsDropRow(removerCtx, remover, b.id, dropped)
+				close(pending.done)
+			}()
+			// При любом Fatal обе транзакции отменяются до сборки worker. Вызов
+			// Rollback после этого безопасен и закрывает незафиксированные записи.
+			defer func() {
+				cancelRemover()
+				cancel()
+				_ = mover.Rollback()
+				_ = remover.Rollback()
+				select {
+				case <-pending.done:
+				case <-time.After(5 * time.Second):
+					t.Error("DELETE worker не вернулся после отмены; cleanup не подтверждён")
+				}
+			}()
+			waitCtx, cancelWait := context.WithTimeout(ctx, 5*time.Second)
+			waitErr := apsWaitForMover(waitCtx, db, moverPID, removerPID, pending)
+			cancelWait()
+			// Даже ранний ответ/отказ observer не оставляет holder открытым до
+			// ожидания worker: defer отменяет оба BeginTx context.
+			require.NoError(t, waitErr, "наблюдаемое ожидание DELETE на mover")
+
+			if tc.cancelWait {
+				cancelRemover()
+				select {
+				case <-pending.done:
+				case <-ctx.Done():
+					t.Fatal("отменённый DELETE не вернулся в пределах расписания")
+				}
+				require.Error(t, pending.err, "отмена не должна выглядеть как успешный DELETE")
+				require.True(t, errors.Is(pending.err, context.Canceled) || a458SQLState(pending.err) == "57014",
+					"ожидается отмена, не constraint/deadlock: %v", pending.err)
+				// Освобождение mover не было условием возврата отменённого DML.
+				require.NoError(t, mover.Commit())
+			} else {
+				require.NoError(t, mover.Commit(), "первая сторона коммитится, пока DELETE ещё ждёт")
+				select {
+				case <-pending.done:
+				case <-ctx.Done():
+					t.Fatal("DELETE не вернулся после commit mover")
+				}
+				require.NoError(t, pending.err, "DML возвращается после освобождения epoch")
+				err = remover.Commit()
+				if tc.dropOther {
+					require.NoError(t, err, "близнец: обе стороны фиксируются")
+				} else {
+					require.NotEqual(t, "40P01", a458SQLState(err), "не принимать deadlock за constraint refusal")
+					absRequireRefusal(t, err, "ровно вторая сторона отказывает на commit")
+				}
+			}
+
+			var inSet, rowRetained bool
+			require.NoError(t, db.QueryRowContext(ctx, `SELECT
+			 EXISTS (SELECT 1 FROM kaname.access_bindings b
+			 JOIN kaname.access_binding_subjects s ON s.binding_id=b.id
+			 AND s.subject_type=b.subject_type AND s.subject_id=b.subject_id WHERE b.id=$1),
+			 EXISTS (SELECT 1 FROM kaname.access_binding_subjects
+			 WHERE binding_id=$1 AND subject_type='user' AND subject_id=$2)`, b.id, dropped).Scan(&inSet, &rowRetained))
+			require.True(t, inSet, "пара остаётся в наборе после обеих сторон")
+			require.Equal(t, !tc.dropOther, rowRetained, "refusal/отмена не оставляет частичного DELETE")
+		})
 	}
-	if !apsPairInSet(t, db, b.id) {
-		t.Fatalf("база на версии %d зафиксировала обе конкурирующие транзакции (зафиксировано %d, отказано %d): "+
-			"пара выдачи %s ушла из набора", c.head(), committed, refused, b.id)
-	}
-	require.Equal(t, 1, committed, "фиксируется ровно одна сторона")
-	require.Equal(t, 1, refused, "вторая сторона отказывает ограничением")
 }
 
 // TestAccessBindingPairInSet_MigrationJudgesLyingRows — проба 5.

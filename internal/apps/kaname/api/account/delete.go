@@ -12,23 +12,23 @@ import (
 	"context"
 	"fmt"
 
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/PRO-Robotech/corelib/operations"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // DeleteAccountUseCase.
 type DeleteAccountUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	crudConfigured bool
+	crudFactory    kanamerepo.AccountDeleteWriterFactory
+	repo           Repo
+	opsRepo        operations.Repo
 }
 
 // NewDeleteAccountUseCase.
@@ -78,14 +78,16 @@ func (u *DeleteAccountUseCase) Execute(ctx context.Context, id domain.AccountID)
 	}
 
 	actor := authzguard.PrincipalUserID(ctx)
+	crudPrincipal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, crudPrincipal)
 		return u.doDelete(ctx, id, actor)
 	})
 	return &op, nil
 }
 
 func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID, actor string) (*anypb.Any, error) {
-	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
+	if err := shared.DoWithWriteTxVoid(ctx, u.crudRepo(id),
 		func(ctx context.Context, w Writer) error {
 			// ПЕРВЫЙ ОПЕРАТОР — замок строки аккаунта и перечень его участников
 			// (kaname#664, Р6). Членства уходят каскадом ключа
@@ -113,7 +115,7 @@ func (u *DeleteAccountUseCase) doDelete(ctx context.Context, id domain.AccountID
 			// (`ON DELETE SET NULL`, kaname#664, Р3) той же транзакцией; их
 			// указатели членства снимаются намерениями здесь же.
 			if perr := w.EmitFGARelationDelete(ctx, membershipPointersOf(id, members)); perr != nil {
-				return shared.MapRepoErr(perr)
+				return perr
 			}
 			// Симметрия созданию (kacho#2055): создание со-коммитит событие реконсайла,
 			// которым материализуется пообъектный кортеж владельца, — снятие обязано
@@ -205,7 +207,7 @@ func revokeAccountOwnerTuples(ctx context.Context, w Writer, id domain.AccountID
 		Object:   "account:" + string(id),
 	})
 	if emitErr := w.EmitFGARelationDelete(ctx, fgaDeletes); emitErr != nil {
-		return shared.MapRepoErr(emitErr)
+		return emitErr
 	}
 	return nil
 }

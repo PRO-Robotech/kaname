@@ -82,6 +82,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 )
 
 // XC-3 S1Ф2: прежде здесь лежал литеральный список `v_*`, продублированный ради
@@ -141,12 +142,14 @@ var tierOnlyObjectTypes = map[string]bool{}
 //     (kacho#914 их снял), но выдают его уже ПРИМЕНЁННЫЕ миграции, а применённую
 //     миграцию не правят: тип обязан оставаться объявленным, пока они в цепи.
 var nonGrantableModelTypes = map[string]string{
-	"user":            "subject type (left side of a tuple, never an authz object)",
-	"service_account": "subject type (left side of a tuple, never an authz object)",
-	"group":           "subject-set type for group#member usersets (the grantable resource is iam_group)",
-	"cluster":         "platform singleton cluster:cluster_root — super-admin ladder anchor, not a grantable resource",
-	"iam_fgaproxy":    "исторический якорь права писать кортежи: живых фактов нет (kacho#914), но его выдают уже применённые миграции",
-	"system_class":    "вид субъекта «системный класс» (anonymous|authenticated, kaname#829): стоит слева в факте, объектом прав не бывает",
+	grantcapability.ScopeObjectType: "внутренняя координата права создавать выдачу; не ресурс и не доступна регистрации или публичному решателю",
+	grantcapability.RoleObjectType:  "внутренняя координата права выдавать именованную роль; не ресурс и не доступна регистрации или публичному решателю",
+	"user":                          "subject type (left side of a tuple, never an authz object)",
+	"service_account":               "subject type (left side of a tuple, never an authz object)",
+	"group":                         "subject-set type for group#member usersets (the grantable resource is iam_group)",
+	"cluster":                       "platform singleton cluster:cluster_root — super-admin ladder anchor, not a grantable resource",
+	"iam_fgaproxy":                  "исторический якорь права писать кортежи: живых фактов нет (kacho#914), но его выдают уже применённые миграции",
+	"system_class":                  "вид субъекта «системный класс» (anonymous|authenticated, kaname#829): стоит слева в факте, объектом прав не бывает",
 }
 
 // canonicalModelRelPath — the canonical authorization model, relative to the

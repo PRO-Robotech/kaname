@@ -21,10 +21,11 @@
 //  2. СНЯТИЕ последней строки набора живой выдачи отказывает; снятие одной из
 //     двух — близнец — проходит.
 //  3. КОНКУРИРУЮЩИЕ СНЯТИЯ: две транзакции снимают разные строки набора из
-//     двух, коммитятся одновременно. Фиксируется ровно одна, вторая отказывает
+//     двух, запускаются одновременно. Фиксируется ровно одна, вторая отказывает
 //     ограничением; у выдачи остаётся одна строка. Одновременность создаёт
-//     держатель строки выдачи: обе проверки обязаны встать за ним (это
-//     утверждается) и проходят после его отката. Без замка в проверке стороны
+//     держатель строки выдачи: первая проверка ждёт его, вторая сторона ждёт
+//     admission первой (граф утверждается). После отката держателя обе завершаются.
+//     Без замка в проверке стороны
 //     не ждут держателя, и исход решает порядок коммитов — проба краснеет на
 //     этом, а не на случайном исходе гонки.
 //  4. СНЯТИЕ ВЫДАЧИ ЦЕЛИКОМ (каскад внешнего ключа на набор) фиксируется.
@@ -262,39 +263,56 @@ func TestAccessBindingSubjectSet_ConcurrentRemovalsLeaveOneRow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
-	ctx := context.Background()
 	c := absReadCatalog(t)
 	db := serOpenAt(t, c.head())
 
 	b := absSeed(t, db, "abs9024")
 	second := serSeedPerson(t, db, "abs9025")
 	absWithSet(t, db, b, second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*absWaitBudget)
+	defer cancel()
 
-	// Держатель строки выдачи: проверки обеих сторон встают за ним.
+	// Первая проверка ждёт строку выдачи; другая сторона ждёт её admission.
 	holder, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = holder.Rollback() }()
 	_, err = holder.ExecContext(ctx, `SELECT 1 FROM kaname.access_bindings WHERE id = $1 FOR SHARE`, b.id)
 	require.NoError(t, err, "Дано: держатель строки выдачи")
+	var holderPID int
+	require.NoError(t, holder.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID))
 
 	sides := make([]*sql.Tx, 2)
-	for i, subject := range []string{b.person, second} {
+	pids := make([]int, 2)
+	for i := range sides {
 		tx, err := db.BeginTx(ctx, nil)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = tx.Rollback() })
-		_, err = tx.ExecContext(ctx, `DELETE FROM kaname.access_binding_subjects WHERE binding_id = $1 AND subject_id = $2`, b.id, subject)
-		require.NoError(t, err, "сторона %d снимает свою строку набора", i)
+		require.NoError(t, tx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pids[i]))
 		sides[i] = tx
 	}
 
-	results := make(chan error, 2)
-	for _, tx := range sides {
-		go func(tx *sql.Tx) { results <- tx.Commit() }(tx)
+	type removalResult struct {
+		deleteErr error
+		commitErr error
+	}
+	results := make(chan removalResult, 2)
+	for i, subject := range []string{b.person, second} {
+		// DELETE тоже может ждать admission: обе полные транзакции запускаются
+		// независимо, иначе второй DELETE не даст запустить commit первой.
+		go func(tx *sql.Tx, subject string) {
+			defer func() { _ = tx.Rollback() }()
+			_, err := tx.ExecContext(ctx, `DELETE FROM kaname.access_binding_subjects WHERE binding_id = $1 AND subject_id = $2`, b.id, subject)
+			if err != nil {
+				results <- removalResult{deleteErr: err}
+				return
+			}
+			results <- removalResult{commitErr: tx.Commit()}
+		}(sides[i], subject)
 	}
 
-	// Обе проверки обязаны встать за держателем. Если коммиты вернулись раньше —
-	// проверки нет либо она без замка; исход судится ниже по строкам набора.
-	var got []error
+	// Обе стороны должны зависеть от держателя: одна непосредственно, другая
+	// через общий drain. Ранний исход остаётся отрицательным контролем row lock.
+	var got []removalResult
 	bothWaited := false
 	deadline := time.Now().Add(absWaitBudget)
 	for len(got) < 2 && time.Now().Before(deadline) {
@@ -304,7 +322,7 @@ func TestAccessBindingSubjectSet_ConcurrentRemovalsLeaveOneRow(t *testing.T) {
 			continue
 		default:
 		}
-		if absLockWaiters(t, db) >= 2 {
+		if absRemovalWaitGraph(t, ctx, db, holderPID, pids[0], pids[1]) {
 			bothWaited = true
 			break
 		}
@@ -322,7 +340,9 @@ func TestAccessBindingSubjectSet_ConcurrentRemovalsLeaveOneRow(t *testing.T) {
 	}
 
 	committed, refused := 0, 0
-	for _, err := range got {
+	for _, result := range got {
+		require.NoError(t, result.deleteErr, "DELETE проходит; ограничение проверяется на commit")
+		err := result.commitErr
 		if err == nil {
 			committed++
 			continue
@@ -335,12 +355,11 @@ func TestAccessBindingSubjectSet_ConcurrentRemovalsLeaveOneRow(t *testing.T) {
 		t.Fatalf("база на версии %d зафиксировала обе конкурирующие транзакции (зафиксировано %d, отказано %d): "+
 			"у выдачи %s не осталось ни одной строки набора", c.head(), committed, refused, b.id)
 	}
-	// Исход держится не совпадением порядка коммитов: обе проверки обязаны были
-	// встать за держателем строки выдачи. Без замка в проверке стороны
-	// фиксируются, не дожидаясь, и исход решает, чья проверка успела раньше
-	// коммита соседки.
+	// Без замка в constraint первая сторона завершится до снятия holder,
+	// и цепочка holder → владелец drain → ожидающий drain не образуется.
+	require.Zero(t, returnedBeforeRelease, "ни одна сторона не завершается до отпускания строки выдачи")
 	require.True(t, bothWaited,
-		"проверки сторон не встали за держателем строки выдачи %s: до его отпускания вернулось коммитов %d из 2 "+
+		"стороны не образовали цепочку ожидания строки выдачи %s: до её отпускания вернулось исходов %d из 2 "+
 			"— проверка набора не берёт замок строки выдачи, и исход гонки решает порядок, а не база",
 		b.id, returnedBeforeRelease)
 	require.Equal(t, 1, committed, "фиксируется ровно одна сторона")
@@ -348,13 +367,24 @@ func TestAccessBindingSubjectSet_ConcurrentRemovalsLeaveOneRow(t *testing.T) {
 	require.Equal(t, 1, rows, "у выдачи остаётся одна строка набора")
 }
 
-// absLockWaiters — сеансов этой базы, ждущих замок.
-func absLockWaiters(t *testing.T, db *sql.DB) int {
+// absRemovalWaitGraph проверяет конкретных участников, а не посторонние waits
+// этой базы. Любая сторона может первой получить общий compatibility drain.
+func absRemovalWaitGraph(t *testing.T, ctx context.Context, db *sql.DB, holder, left, right int) bool {
 	t.Helper()
-	var n int
-	require.NoError(t, db.QueryRow(`SELECT count(*) FROM pg_stat_activity
-	  WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n))
-	return n
+	var waiting bool
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT EXISTS (
+ SELECT 1 FROM pg_locks owner JOIN pg_locks waiter
+ ON waiter.database=owner.database AND waiter.classid=owner.classid
+ AND waiter.objid=owner.objid AND waiter.objsubid=owner.objsubid
+ WHERE owner.locktype='advisory' AND waiter.locktype='advisory'
+ AND owner.database=(SELECT oid FROM pg_database WHERE datname=current_database())
+ AND owner.classid=1262569292::oid AND owner.objid=0::oid AND owner.objsubid=2
+ AND owner.mode='ExclusiveLock' AND waiter.mode='ExclusiveLock'
+ AND owner.granted AND NOT waiter.granted
+ AND ((owner.pid=$2 AND waiter.pid=$3) OR (owner.pid=$3 AND waiter.pid=$2))
+ AND $1=ANY(pg_blocking_pids(owner.pid))
+ AND owner.pid=ANY(pg_blocking_pids(waiter.pid)))`, holder, left, right).Scan(&waiting))
+	return waiting
 }
 
 // TestAccessBindingSubjectSet_RemovingTheBindingCascades — проба 4.

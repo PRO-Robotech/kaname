@@ -110,6 +110,8 @@ const (
 	RuleD5 Rule = "Д5′"
 	// RuleD8 — у типа не больше одного указателя на каждый тип-предок.
 	RuleD8 Rule = "Д8"
+	// RuleGrantCapability сохраняет внутренние координаты недоступными доставленным типам.
+	RuleGrantCapability Rule = "grant-capability-reserved"
 )
 
 // ФОРМА ИМЕНИ ТИПА ОБЪЯВЛЕНА НЕ ЗДЕСЬ (задача kacho#2015).
@@ -381,6 +383,7 @@ func judge(canon, composed string, keyTerms []KeyTerm) (AdmissionReport, error) 
 	rep.Findings = append(rep.Findings, d3...)
 	rep.ComputedOnlyWildcards = premise
 
+	rep.Findings = append(rep.Findings, grantCapabilityReferenceFindings(m, newNames)...)
 	rep.Findings = append(rep.Findings, subjectFindings(m, newNames, canonConditions)...)
 	rep.Findings = append(rep.Findings, inexpressiblePlanFindings(m, newOrder)...)
 

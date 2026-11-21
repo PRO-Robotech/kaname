@@ -8,10 +8,11 @@ package grant_delegation
 // Отзыв делегирования в ОДНОЙ транзакции переводит делегирование в REVOKED и
 // каждую его действующую выдачу — в REVOKED с причиной DELEGATION_REVOKED, со
 // всеми следствиями отзыва (`accessbindingapp.WithdrawDelegatedBindings`).
-// Порядок замков: строка делегирования `FOR UPDATE` первой — запись выдачи
-// делегатом держит её `FOR SHARE` и, дождавшись фиксации отзыва, выдачу по
-// отозванному делегированию не пишет (Т-D1); затем выдачи делегирования
-// `FOR UPDATE` по возрастанию id.
+// Настроенный participant готовит полный каскад в RR до authority fences,
+// затем в одной свежей RC TX удерживает pair/строку делегирования и строки
+// выдач, повторно проверяет protected epochs и native authority. Запись выдачи
+// делегатом держит GD `FOR SHARE` и после отзыва не пишет (Т-D1). Без настройки
+// остаётся прежний legacy writer; явный отказ participant его не включает.
 
 import (
 	"context"
@@ -35,14 +36,17 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
 // RevokeGrantDelegationUseCase — отзыв делегирования.
 type RevokeGrantDelegationUseCase struct {
-	repo      Repo
-	opsRepo   operations.Repo
-	relations clients.RelationStore
-	logger    *slog.Logger
+	repo                      Repo
+	opsRepo                   operations.Repo
+	relations                 clients.RelationStore
+	logger                    *slog.Logger
+	revokeAuthorityWriter     kaname.GrantDelegationRevokeWriterFactory
+	revokeAuthorityConfigured bool
 }
 
 // NewRevokeGrantDelegationUseCase — над хранилищем и операциями службы.
@@ -105,7 +109,8 @@ func (u *RevokeGrantDelegationUseCase) Execute(ctx context.Context, id domain.Gr
 
 // revokeAttempts — сколько раз тело отзыва исполняет СВОЮ транзакцию, если база
 // откатила её как сторону взаимной блокировки либо конфликта сериализации
-// (находка ревью SD-986-I1). Отзыв не берёт advisory-замков выдач (CE-10) и
+// (находка ревью SD-986-I1). Staged путь также повторяет весь RR snapshot при
+// смене protected epochs. Legacy путь не берёт advisory-замков выдач (CE-10) и
 // делит строки выдач и прямых фактов с фоновой материализацией; цикл ожиданий
 // база разрывает откатом одной стороны ЦЕЛИКОМ, и отзыв права у делегата не
 // обязан проигрывать фоновой работе. Повтор безопасен по построению: тело — одна
@@ -148,6 +153,9 @@ func (u *RevokeGrantDelegationUseCase) doRevoke(ctx context.Context, id domain.G
 // статус: признак повтора читает [RevokeGrantDelegationUseCase.doRevoke], перевод
 // в gRPC-код — там же, один раз.
 func (u *RevokeGrantDelegationUseCase) revokeOnce(ctx context.Context, id domain.GrantDelegationID, by domain.GrantDelegationActor, actor string) (domain.GrantDelegation, error) {
+	if u.revokeAuthorityConfigured {
+		return u.stagedRevokeOnce(ctx, id, by, actor)
+	}
 	w, err := u.repo.Writer(ctx)
 	if err != nil {
 		return domain.GrantDelegation{}, err
@@ -171,7 +179,19 @@ func (u *RevokeGrantDelegationUseCase) revokeOnce(ctx context.Context, id domain
 	if err != nil {
 		return domain.GrantDelegation{}, err
 	}
-	if err := w.EmitAuditEvent(ctx, outboxtypes.AuditEvent{
+	if err := emitDelegationRevoked(ctx, w, d, actor, count); err != nil {
+		return domain.GrantDelegation{}, err
+	}
+	if err := w.Commit(ctx); err != nil {
+		return domain.GrantDelegation{}, err
+	}
+	committed = true
+	return d, nil
+}
+
+// emitDelegationRevoked сохраняет actor вызывающего и счётчик успешных CAS.
+func emitDelegationRevoked(ctx context.Context, w Writer, d domain.GrantDelegation, actor string, count int) error {
+	return w.EmitAuditEvent(ctx, outboxtypes.AuditEvent{
 		EventType:       auditEventRevoked,
 		TenantAccountID: string(d.AccountID),
 		Payload: map[string]any{
@@ -180,12 +200,5 @@ func (u *RevokeGrantDelegationUseCase) revokeOnce(ctx context.Context, id domain
 			"account_id":            string(d.AccountID),
 			"revoked_binding_count": count,
 		},
-	}); err != nil {
-		return domain.GrantDelegation{}, err
-	}
-	if err := w.Commit(ctx); err != nil {
-		return domain.GrantDelegation{}, err
-	}
-	committed = true
-	return d, nil
+	})
 }
