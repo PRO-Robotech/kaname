@@ -110,6 +110,15 @@ func (b *Bundle) ChildRegistration(dotted string) (catalog.ChildRegistrationPoli
 	return b.compiler.facts.ChildRegistration(dotted)
 }
 
+// ChildRegistrationParentDotted возвращает точечное имя родителя из того же
+// допущенного каталога, из которого проверены модель и политика потомка.
+func (b *Bundle) ChildRegistrationParentDotted(parentType, action string) (string, bool) {
+	if b.Validate() != nil {
+		return "", false
+	}
+	return b.compiler.facts.ChildRegistrationParentDotted(parentType, action)
+}
+
 func (b *Bundle) Compile(in Binding) Set {
 	if b.Validate() != nil {
 		return Set{}

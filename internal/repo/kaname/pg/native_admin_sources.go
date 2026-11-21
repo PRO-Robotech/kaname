@@ -104,18 +104,18 @@ func administrativeRelation(relation string) bool {
 	return false
 }
 
-// Только закрытая таблица типов producer и канонический cluster. Имя
-// admin у iam_role — tier объекта, но его source проверяется тем же producer,
-// а не принимается как account-admin и не отвергается из-за одного префикса.
-func administrativeObjectType(typ string) bool {
-	if typ == "cluster" {
-		return true
+// Типы из каталога допускаются только для точного действия на родителе
+// запроса. Остальные источники используют существующую таблицу типов.
+func (s *nativeAdministrativeSources) objectDotted(f relverdict.AdministrativeFact) (string, bool) {
+	if dotted, ok := authzmap.DottedType(f.ObjectType); ok && dotted != "" {
+		return dotted, true
 	}
-	dotted, ok := authzmap.DottedType(typ)
-	if !ok {
-		return false
+	if f.Relation != f.QuestionRelation || f.ObjectType != f.QuestionObjectType ||
+		f.ObjectID != f.QuestionObjectID || !strings.HasPrefix(f.QuestionSubject, "user:") {
+		return "", false
 	}
-	return dotted != ""
+	dotted, ok := s.bundle.ChildRegistrationParentDotted(f.ObjectType, f.Relation)
+	return dotted, ok && domain.FeedSourceForType(dotted) == domain.FeedMirror
 }
 
 func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.AdministrativeFact, budget *relverdict.AdministrativeReadBudget) (bool, error) {
@@ -130,7 +130,8 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 		}
 		return true, nil
 	}
-	if !administrativeObjectType(f.ObjectType) {
+	dotted, supported := s.objectDotted(f)
+	if f.ObjectType != "cluster" && !supported {
 		return false, relverdict.ErrAdministrativeSourceUnconfirmed
 	}
 	if f.ConditionName != "" || len(f.ConditionParameters) != 0 {
@@ -167,10 +168,6 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 	case "cluster":
 		err = s.w.tx.QueryRow(ctx, `SELECT ''::text FROM kaname.clusters WHERE id=$1`, f.ObjectID).Scan(&account)
 	default:
-		dotted, known := authzmap.DottedType(f.ObjectType)
-		if !known {
-			return false, relverdict.ErrAdministrativeSourceUnconfirmed
-		}
 		store := &reconcileStore{tx: s.w.tx, decisionAt: s.w.fence.decisionAt}
 		object, found, readErr := s.currentObject(ctx, store, dotted, f.ObjectID, budget)
 		if readErr != nil || !found {
@@ -401,7 +398,7 @@ func (s *nativeAdministrativeSources) bindingProduces(ctx context.Context, id do
 		return false, err
 	}
 	store := &reconcileStore{tx: s.w.tx, cat: facts, decisionAt: s.w.fence.decisionAt}
-	dotted, ok := authzmap.DottedType(f.ObjectType)
+	dotted, ok := s.objectDotted(f)
 	if !ok {
 		return false, relverdict.ErrAdministrativeSourceUnconfirmed
 	}

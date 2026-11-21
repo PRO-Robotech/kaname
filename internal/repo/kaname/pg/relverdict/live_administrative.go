@@ -54,6 +54,7 @@ func (b *AdministrativeReadBudget) Charge(rows, reads int) error {
 type AdministrativeFact struct {
 	ObjectType, ObjectID, Relation, Subject, ConditionName string
 	QuestionRelation, QuestionSubject                      string
+	QuestionObjectType, QuestionObjectID                   string
 	ConditionParameters                                    map[string]any
 }
 type AdministrativeVerifier func(context.Context, AdministrativeFact, *AdministrativeReadBudget) (bool, error)
@@ -231,6 +232,8 @@ func askAdministrativeBound(ctx context.Context, tx pgx.Tx, in Query, verify Adm
 			}
 			c.fact.QuestionRelation = in.Relation
 			c.fact.QuestionSubject = in.Subject
+			c.fact.QuestionObjectType = in.ObjectType
+			c.fact.QuestionObjectID = in.ObjectID
 			ok, e := checkAdministrativeCandidate(ctx, c.fact, in.Context, budget, verify)
 			var unknownCondition errUnknownCondition
 			if errors.Is(e, ErrAdministrativeSourceUnconfirmed) || errors.As(e, &unknownCondition) {

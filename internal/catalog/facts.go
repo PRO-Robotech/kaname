@@ -73,9 +73,10 @@ type Facts struct {
 	// containerVerbs — точечный тип → контейнерные действия ЖИВОГО типа по имени
 	// (kaname#1003, Р2а). Читается из тех же строк `catalog_verb`, что набор
 	// глаголов типа, и в него не входит: строка контейнерного действия ярусная.
-	containerVerbs     map[string]map[string]ContainerGrant
-	grantVerbs         map[string]map[string]bool
-	childRegistrations map[string]ChildRegistrationPolicy
+	containerVerbs           map[string]map[string]ContainerGrant
+	grantVerbs               map[string]map[string]bool
+	childRegistrations       map[string]ChildRegistrationPolicy
+	childRegistrationParents map[[2]string]string
 }
 
 // ContainerGrant — отношение на родителе, которое даёт поимённо названное
@@ -277,21 +278,22 @@ func NewFacts(h Halves) (*Facts, error) {
 		return retired[i].Resource < retired[j].Resource
 	})
 
-	childRegistrations, err := childRegistrationPolicies(rows.Resources, containerVerbs)
+	childRegistrations, childRegistrationParents, err := childRegistrationPolicies(rows.Resources, containerVerbs)
 	if err != nil {
 		return nil, err
 	}
 	f := &Facts{
-		verbsByFGAType:     make(map[string][]string, len(byDotted)),
-		modules:            modules,
-		moduleOrder:        moduleOrder,
-		fgaTypeByDotted:    fgaTypeByDotted,
-		resources:          resources,
-		retired:            retired,
-		containers:         containersOf(rows.Resources),
-		containerVerbs:     containerVerbs,
-		grantVerbs:         grantVerbs,
-		childRegistrations: childRegistrations,
+		verbsByFGAType:           make(map[string][]string, len(byDotted)),
+		modules:                  modules,
+		moduleOrder:              moduleOrder,
+		fgaTypeByDotted:          fgaTypeByDotted,
+		resources:                resources,
+		retired:                  retired,
+		containers:               containersOf(rows.Resources),
+		containerVerbs:           containerVerbs,
+		grantVerbs:               grantVerbs,
+		childRegistrations:       childRegistrations,
+		childRegistrationParents: childRegistrationParents,
 	}
 	for dotted, verbs := range byDotted {
 		// Имя типа есть у КАЖДОЙ живой строки: строка без него отвергнута выше,

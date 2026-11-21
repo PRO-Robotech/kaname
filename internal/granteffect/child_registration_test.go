@@ -73,6 +73,13 @@ func TestChildRegistrationBundleBindsLivePathAndModel(t *testing.T) {
 	require.Equal(t, "example_child:container-1/child-2", target.ChildObject)
 	require.Equal(t, "example_container:container-1", target.ParentObject)
 	require.Equal(t, "child_registrar", target.ParentAction)
+	dotted, ok := bundle.ChildRegistrationParentDotted("example_container", target.ParentAction)
+	require.True(t, ok)
+	require.Equal(t, "example.container", dotted)
+	_, ok = bundle.ChildRegistrationParentDotted("example_container", "v_get")
+	require.False(t, ok)
+	_, ok = bundle.ChildRegistrationParentDotted("example_child", target.ParentAction)
+	require.False(t, ok)
 
 	rows.Live.Resources[1].ChildRegistration.MaxCreates = 12
 	same, ok := bundle.ChildRegistration("example.child")
@@ -89,6 +96,8 @@ func TestChildRegistrationBundleBindsLivePathAndModel(t *testing.T) {
 	require.NoError(t, err)
 	_, ok = retired.ChildRegistration("example.child")
 	require.False(t, ok, "снятая декларация не открывает регистрацию")
+	_, ok = retired.ChildRegistrationParentDotted("example_container", target.ParentAction)
+	require.False(t, ok)
 }
 
 func TestChildRegistrationBundleRefusesUnconfirmedPolicy(t *testing.T) {

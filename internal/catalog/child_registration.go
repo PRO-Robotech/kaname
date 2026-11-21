@@ -30,6 +30,16 @@ func (f *Facts) ChildRegistration(dotted string) (ChildRegistrationPolicy, bool)
 	return policy, ok
 }
 
+// ChildRegistrationParentDotted разрешает тип родителя только для точного
+// действия, включённого политикой регистрации в этом снимке.
+func (f *Facts) ChildRegistrationParentDotted(parentType, action string) (string, bool) {
+	if f == nil {
+		return "", false
+	}
+	dotted, ok := f.childRegistrationParents[[2]string{parentType, action}]
+	return dotted, ok
+}
+
 // ChildRegistrationActions возвращает только действия, которые явно названы
 // вложенным правилом на точном типе родителя. Отбор самого родителя и субъекта
 // остаётся у применителя. Фильтр по ещё не созданному потомку нельзя расширять
@@ -61,19 +71,20 @@ func (f *Facts) ChildRegistrationActions(sel domain.RuleSelector) []ContainerGra
 	return out
 }
 
-func childRegistrationPolicies(rows []ResourceRow, actions map[string]map[string]ContainerGrant) (map[string]ChildRegistrationPolicy, error) {
+func childRegistrationPolicies(rows []ResourceRow, actions map[string]map[string]ContainerGrant) (map[string]ChildRegistrationPolicy, map[[2]string]string, error) {
 	if !slices.ContainsFunc(rows, func(r ResourceRow) bool { return r.ChildRegistration != nil }) {
-		return nil, nil
+		return nil, nil, nil
 	}
-	typeOwners := make(map[string]string, len(rows))
+	typeOwners := make(map[string]ResourceRow, len(rows))
 	for _, row := range rows {
 		if _, duplicate := typeOwners[row.ObjectType]; duplicate {
-			typeOwners[row.ObjectType] = ""
+			typeOwners[row.ObjectType] = ResourceRow{}
 		} else {
-			typeOwners[row.ObjectType] = row.Module
+			typeOwners[row.ObjectType] = row
 		}
 	}
 	policies := make(map[string]ChildRegistrationPolicy)
+	parents := make(map[[2]string]string)
 	for _, row := range rows {
 		rule := row.ChildRegistration
 		if rule == nil {
@@ -87,17 +98,19 @@ func childRegistrationPolicies(rows []ResourceRow, actions map[string]map[string
 			ParentSegments: int(rule.ParentSegments),
 		}
 		parent := slices.Index(row.ParentNames, "parent")
-		if !declared || row.Module == "" || typeOwners[path.ChildType] != row.Module ||
-			typeOwners[path.ParentType] != row.Module || strings.HasPrefix(action.Relation, "v_") ||
+		parentRow := typeOwners[path.ParentType]
+		if !declared || row.Module == "" || typeOwners[path.ChildType].Module != row.Module ||
+			parentRow.Module != row.Module || strings.HasPrefix(action.Relation, "v_") ||
 			len(row.ParentNames) != len(row.ParentTypes) || parent < 0 ||
 			row.ParentTypes[parent] != path.ParentType || slices.Contains(row.ParentNames[parent+1:], "parent") ||
 			!path.IsValid() || rule.MaxChildren <= 0 || rule.MaxCreates <= 0 || rule.WindowSeconds <= 0 {
-			return nil, fmt.Errorf("каталог %s: несогласованная политика регистрации потомков", dotted)
+			return nil, nil, fmt.Errorf("каталог %s: несогласованная политика регистрации потомков", dotted)
 		}
 		policies[dotted] = ChildRegistrationPolicy{
 			Verb: verb, Path: path, MaxChildren: rule.MaxChildren,
 			MaxCreates: rule.MaxCreates, WindowSeconds: rule.WindowSeconds,
 		}
+		parents[[2]string{path.ParentType, path.ParentAction}] = parentRow.Module + "." + parentRow.Resource
 	}
-	return policies, nil
+	return policies, parents, nil
 }
