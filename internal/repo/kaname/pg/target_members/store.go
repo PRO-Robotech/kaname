@@ -37,8 +37,8 @@ type Member struct {
 }
 
 // Подписанный план ожидает зафиксированное начало транзакции. Обычная
-// материализация использует часы записи: она может встретить привязку или
-// участника, созданных уже после начала её транзакции.
+// материализация сохраняет часы транзакции вместе с outbox. Если привязка
+// стала видна позднее начала транзакции, первая отметка не старше её создания.
 // Каждый запрос целиком называет таблицу и список записи для статического гейта.
 const upsertSQL = `INSERT INTO kaname.access_binding_target_members
 		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
@@ -50,7 +50,7 @@ const upsertSQL = `INSERT INTO kaname.access_binding_target_members
 const upsertLegacySQL = `INSERT INTO kaname.access_binding_target_members
 		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
 		 SELECT $1, $2, $3, $4, $5, $6, stamp.at, stamp.at
-		   FROM (SELECT clock_timestamp() AS at) AS stamp
+		   FROM (SELECT GREATEST(now(), (SELECT created_at FROM kaname.access_bindings WHERE id = $1)) AS at) AS stamp
 		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
 		    SET verification_status = EXCLUDED.verification_status,
 		        updated_at = GREATEST(access_binding_target_members.created_at, access_binding_target_members.updated_at, clock_timestamp());`
@@ -96,7 +96,8 @@ const upsertManyLegacySQL = `INSERT INTO kaname.access_binding_target_members
 			 SELECT b, r, f, ot, oi, vs, stamp.at, stamp.at
 			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
 			        AS t(b, r, f, ot, oi, vs)
-			  CROSS JOIN (SELECT clock_timestamp() AS at) AS stamp
+			  LEFT JOIN kaname.access_bindings AS binding ON binding.id = t.b
+			  CROSS JOIN LATERAL (SELECT GREATEST(now(), binding.created_at) AS at) AS stamp
 		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
 		    SET verification_status = EXCLUDED.verification_status,
 		        updated_at = GREATEST(access_binding_target_members.created_at, access_binding_target_members.updated_at, clock_timestamp());`

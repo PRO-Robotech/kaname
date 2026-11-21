@@ -227,6 +227,25 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 	}
 	require.NoError(t, rows.Err())
 	rows.Close()
+	if len(opIDs) != 2 {
+		// Только счётчики штатных операций создателя: идентификаторы, SQL и ошибки
+		// остаются вне диагностического маркера. Барьер и исходный вердикт неизменны.
+		var scopedPending, scopedTerminal, otherPending, otherTerminal int64
+		censusErr := f.given.pool.QueryRow(f.given.ctx, `SELECT
+ count(*) FILTER (WHERE account_id=$1 AND NOT done),
+ count(*) FILTER (WHERE account_id=$1 AND done),
+ count(*) FILTER (WHERE account_id IS DISTINCT FROM $1 AND NOT done),
+ count(*) FILTER (WHERE account_id IS DISTINCT FROM $1 AND done)
+ FROM kaname.operations
+ WHERE principal_type='service_account' AND principal_id=$2 AND metadata_type=$3`,
+			accounts[0], f.creator.ID, meta.TypeUrl).Scan(&scopedPending, &scopedTerminal, &otherPending, &otherTerminal)
+		if censusErr != nil {
+			t.Logf("RID02_OPERATION_CENSUS status=unavailable matched=%d", len(opIDs))
+		} else {
+			t.Logf("RID02_OPERATION_CENSUS status=complete matched=%d scoped_pending=%d scoped_terminal=%d other_pending=%d other_terminal=%d",
+				len(opIDs), scopedPending, scopedTerminal, otherPending, otherTerminal)
+		}
+	}
 	require.Len(t, opIDs, 2)
 	require.NotEqual(t, opIDs[0], opIDs[1])
 	require.NotEqual(t, proposed[0], proposed[1])

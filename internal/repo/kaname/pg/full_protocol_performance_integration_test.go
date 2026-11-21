@@ -171,7 +171,10 @@ func (tr *fullMeasurementTrace) get(label string) []fullMeasurementQuery {
 	return out
 }
 func fullMeasurementContext(base context.Context, label string) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithValue(context.WithoutCancel(base), fullMeasurementLabel{}, label), 30*time.Second)
+	return fullMeasurementContextWithin(base, label, 30*time.Second)
+}
+func fullMeasurementContextWithin(base context.Context, label string, limit time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithValue(context.WithoutCancel(base), fullMeasurementLabel{}, label), limit)
 }
 func fullMeasurementRigContext(t *testing.T, r protocolRig) protocolRig {
 	t.Helper()
@@ -537,7 +540,14 @@ func TestFullProtocolReconcileDeltaMeasurements(t *testing.T) {
 			r.repo, _ = fullContractActivate(t, r)
 			engine := bindingStageEngine(t, r, nil)
 			run := func(label string) {
-				ctx, cancel := fullMeasurementContext(r.ctx, label)
+				limit := 30 * time.Second
+				if size == 513 && label == "baseline" {
+					// Две проверки CI прерывали это измерение на 30 с, пока
+					// SQL продолжал писать результат. Измеряем полный baseline
+					// с конечным watchdog; фактическое время всё так же в отчёте.
+					limit = 45 * time.Second
+				}
+				ctx, cancel := fullMeasurementContextWithin(r.ctx, label, limit)
 				defer cancel()
 				start := time.Now()
 				err := engine.ReconcileBinding(ctx, binding)

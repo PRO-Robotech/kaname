@@ -93,7 +93,14 @@ func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 			uc := gdapp.NewRevokeGrantDelegationUseCase(w.r.repo, w.ops).WithRelationStore(w.door, nil).WithRevokeAuthorityWriter(p)
 			op, err := uc.Execute(declarerCtx(w.r.ctx, w.owner), domain.GrantDelegationID(id))
 			require.NoError(t, err)
-			done := awaitOperation(t, w.r.ctx, w.ops, op.ID)
+			wait := 20 * time.Second
+			if !fail {
+				// Успешный путь коммитит 257 отзывов и сверяет все эффекты.
+				// Даём им завершиться под нагрузкой CI; это watchdog пробы
+				// атомарного отзыва, а не бюджет рабочего пересчёта роли.
+				wait = 35 * time.Second
+			}
+			done := awaitOperationWithin(t, w.r.ctx, w.ops, op.ID, wait)
 			active, revoked, audit := delegationRevokeCounts(t, w, id)
 			var st string
 			require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT status FROM kaname.grant_delegations WHERE id=$1`, id).Scan(&st))
