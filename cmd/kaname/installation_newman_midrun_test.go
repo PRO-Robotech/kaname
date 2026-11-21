@@ -253,6 +253,13 @@ func rid10NewmanPhase(t *testing.T, x *rid10World, p *rid10Proof, history *rid10
 			state := "PRIMARY_STABLE"
 			if !stable {
 				state = "FIXTURE_NOT_ACCEPTED"
+				rid09LogProjectionDelta(t, e.Snapshot.Projection, after.Projection)
+				t.Logf("RID10_SNAPSHOT pull_role=%t public_operations=%t raw_delegations=%t raw_bindings=%t raw_operations=%t",
+					e.Snapshot.PullRole != after.PullRole,
+					!reflect.DeepEqual(e.Snapshot.Operations, after.Operations),
+					!reflect.DeepEqual(e.Snapshot.GDRows, after.GDRows),
+					!reflect.DeepEqual(e.Snapshot.BindingRows, after.BindingRows),
+					!reflect.DeepEqual(e.Snapshot.OperationRows, after.OperationRows))
 			}
 			rid08Write(t, f.session.Root, "newman-"+label+"-primary-bracket", map[string]any{"state": state, "caseId": caseID, "fullPrimarySnapshotUnchangedDuringPhase": stable, "wholeDoDAccepted": false})
 			require.Equal(t, e.Snapshot, after, "fixture NOT_ACCEPTED: full primary snapshot/materialization/Operation ledger moved during single Newman phase; no retry")
