@@ -9,6 +9,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/resourceeffect"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
@@ -64,6 +65,8 @@ func TestChildRegistrationParentSQL_ZeroChildrenExactAndClosed(t *testing.T) {
 				Subjects: []domain.Subject{{Type: domain.SubjectTypeUser, ID: "u"}},
 				Target:   domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "probe.boxes", ID: "one"}}},
 			}
+			targetJSON, err := relverdict.EncodeTarget(binding.Target)
+			require.NoError(t, err)
 			parent := domain.MirrorObject{ObjectType: "probe.boxes", ObjectID: "one",
 				ParentAccountIDs: []string{"account_one"}, Labels: map[string]string{"team": "red"}}
 			desired, err := resourceeffect.CompileObjectDesired(facts, binding, parent, nil)
@@ -93,7 +96,7 @@ func TestChildRegistrationParentSQL_ZeroChildrenExactAndClosed(t *testing.T) {
 			capture(8, "binding", "acb_parent", map[string]any{
 				"id": "acb_parent", "role_id": "rol_parent", "status": "ACTIVE",
 				"subject_type": "user", "subject_id": "u", "resource_type": "account", "resource_id": "account_one",
-				"scope": int(domain.ScopeAccount), "target": binding.Target,
+				"scope": int(domain.ScopeAccount), "target": json.RawMessage(targetJSON),
 			})
 			capture(9, "binding", "acb_parent") // Используется основной субъект выдачи.
 			capture(12, "role", "rol_parent", map[string]any{
