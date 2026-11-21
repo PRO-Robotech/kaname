@@ -32,6 +32,7 @@ def declarations(root):
     modules = {}
     checks, blocks, inspected = set(), [], 0
     for job, body in workflow["jobs"].items():
+        block_occurrences = {}
         for index, step in enumerate(body.get("steps", [])):
             inspected += 1
             if str(step.get("uses", "")).startswith("actions/setup-go@"):
@@ -75,14 +76,24 @@ def declarations(root):
                 if match:
                     checks.update(shlex.split(match[1]))
             if found:
-                blocks.append(run)
+                # Явные повторные шаги одного job остаются разными наблюдениями.
+                occurrence = block_occurrences.get(run, 0) + 1
+                block_occurrences[run] = occurrence
+                blocks.append((run, occurrence))
     assert inspected and installs and blocks, "пустой обход workflow tools"
     print(f"PARITY-CENSUS workflow jobs={len(workflow['jobs'])} steps={inspected} installs={len(installs)} checks={len(checks)}", flush=True)
     for name, (version, coordinate) in sorted(installs.items()):
         print(f"PARITY-DECL {coordinate} {name} version={version or 'workflow-unpinned'}", flush=True)
     assert not checks.difference(installs), ("missing expected versions", sorted(checks.difference(installs)))
     assert all(version for version, _ in installs.values()), "missing exact expected version"
-    return installs, checks, blocks, modules
+    # Все декларации уже проверены. Между jobs объединяем только точные копии
+    # полного run-блока с одинаковым номером его повторения внутри job.
+    # Второе/третье исполнение, явно объявленное в job, остаётся в lawful-мире;
+    # разные байты и порядок первых вхождений не меняются.
+    unique_blocks = [run for run, _ in dict.fromkeys(blocks)]
+    print(f"PARITY-INSTALL-CENSUS total={len(blocks)} unique={len(unique_blocks)} "
+          f"duplicates={len(blocks) - len(unique_blocks)}", flush=True)
+    return installs, checks, unique_blocks, modules
 
 
 def executable(path, text):
@@ -151,10 +162,10 @@ def verify_tools(data):
 
 class World:
     """Изолированные пути и install peers; исполняется сам RUNNER_POD_SH."""
-    def __init__(self, base, payload, env=None, ships=None):
+    def __init__(self, base, payload, env=None, ships=None, *, work_name="kaname-runner"):
         self.base = base
         self.payload = payload
-        self.work = base / "work"
+        self.work = base / work_name
         self.src = base / "src"
         self.prefix = base / "usr/local"
         self.bin = base / "fixture-bin"
@@ -192,7 +203,8 @@ class World:
                         RUNNER_SHA="fixture-source", RUNNER_REPO="PRO-Robotech/kaname",
                         RUNNER_NODE=self.provider["KANAME_RUNNER_NODE"], RUNNER_KUBECTL=self.provider["KANAME_RUNNER_KUBECTL"], RUNNER_GO=self.env["KANAME_RUNNER_GO"],
                         RUNNER_GH_SH="#!/bin/sh\nexit 4\n", GITHUB_PATH=str(self.work / "github-path"), GITHUB_ENV=str(self.work / "github-env"),
-                        FIXTURE_WORLD=str(base), FIXTURE_PY=sys.executable,
+                        RUNNER_TEMP=str(base), FIXTURE_WORLD=str(base), FIXTURE_WORK=str(self.work),
+                        FIXTURE_PY=sys.executable,
                         KANAME_STAND_IN_POD="inherited-after-world-cleanup", KEEP_SENTINEL="retained",
                         GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
         # Операционная оболочка полезной нагрузки/экспорта, отдельно от ожидаемого набора инструментов процесса.
@@ -287,7 +299,7 @@ if name == "go":
 elif name == "npm":
     if args == ["--version"]: print(os.environ["FIXTURE_NPM"]); sys.exit(0)
     if args[:2] != ["install", "-g"]: sys.exit(72)
-    tool, version=args[2].rsplit("@",1); target=root/"work/provider/node/bin"/tool
+    tool, version=args[2].rsplit("@",1); target=pathlib.Path(os.environ["FIXTURE_WORK"])/"provider/node/bin"/tool
 else: sys.exit(73)
 with (root/"install-argv").open("a") as out: out.write(json.dumps([name,*args])+"\\n")
 target.parent.mkdir(parents=True,exist_ok=True)
@@ -362,11 +374,13 @@ sys.stdout.buffer.write(lzma.decompress(sys.stdin.buffer.read()))
         # Эти соседи должны остаться доступны после намеренного сброса PATH в bootstrap.
         provider_bin = self.work / "provider/bin"
         provider_bin.mkdir(parents=True)
-        for name in ("python3",):
+        # Штатный provider меняет PATH. Повторный bootstrap из workflow
+        # должен снова использовать тех же локальных установочных соседей.
+        for name in ("python3", "apt-get", "id", "sudo"):
             (provider_bin / name).symlink_to(self.bin / name)
         executable(provider_bin / "curl", r'''#!/usr/bin/env python3
 import hashlib, os, pathlib, shutil, sys
-a=sys.argv[1:]; url=next(x for x in a if x.startswith("https://")); work=pathlib.Path(os.environ["FIXTURE_WORLD"])/"work"
+a=sys.argv[1:]; url=next(x for x in a if x.startswith("https://")); work=pathlib.Path(os.environ["FIXTURE_WORK"])
 if "go.dev/dl/?mode=json" in url:
  import json
  pin=os.environ["KANAME_RUNNER_GO"]
@@ -453,7 +467,7 @@ def payload_checks(root, payload, axis="all"):
         apt_fixture_checks(root, payload, base / "apt-fixture-world")
         if axis == "apt-fixture":
             return 0
-        roots = {"/usr/local": base / "workflow-lawful/usr/local", "/work": base / "workflow-lawful/work", "/src": base / "workflow-lawful/src"}
+        roots = {"/usr/local": base / "workflow-lawful/usr/local", "/work": base / "workflow-lawful/kaname-runner", "/src": base / "workflow-lawful/src"}
         sample = "'/usr/local/bin/kubectl' /work/out /src/root /workflow-lawful/bin"
         expected = f"'{roots['/usr/local']}/bin/kubectl' {roots['/work']}/out {roots['/src']}/root /workflow-lawful/bin"
         assert remap_roots(sample, roots) == expected, "remap lawful boundary не сохранена"
@@ -673,7 +687,8 @@ def step_checks(objects, ships):
     env = {entry["name"]: entry["value"] for entry in container["env"]}
     payload = container["command"][2]
     with tempfile.TemporaryDirectory(prefix="stand-parity-steps-") as temp:
-        world = World(Path(temp), payload, env=env, ships=ships)
+        # Производитель pod экспортирует пути относительно work/out.
+        world = World(Path(temp), payload, env=env, ships=ships, work_name="work")
         result = world.run(env.get("RUNNER_CMD", ""))
         print(result.stdout, flush=True)
         if result.returncode != 0 or not (world.src / "step-file").is_file():
@@ -682,7 +697,7 @@ def step_checks(objects, ships):
         print("PARITY-AXIS steps: actual producer payload исполнен, root cwd и files сохранены", flush=True)
         anchor = '( cd /src && bash -- "/work/ship/$step" )'
         assert payload.count(anchor) == 1, "граница step cwd не единственна"
-        mutant = World(Path(temp) / "cwd-mutant", payload, env=env, ships=ships)
+        mutant = World(Path(temp) / "cwd-mutant", payload, env=env, ships=ships, work_name="work")
         bad = mutant.run(env.get("RUNNER_CMD", ""), payload=payload.replace(anchor, '( cd /src/sub && bash -- "/work/ship/$step" )', 1))
         assert bad.returncode != 0, "steps self-test не увидел wrong-cwd mutant"
         print("PARITY-MUTANT steps rejected=wrong-cwd", flush=True)
@@ -690,7 +705,7 @@ def step_checks(objects, ships):
         failure_ships.mkdir()
         (failure_ships / "first.sh").write_text('printf "failure nonce=1042\\n" > "$PARITY_OUT/summary.txt"\nexit 23\n')
         (failure_ships / "second.sh").write_text('touch "$PARITY_OUT/not-run"\n')
-        failed = World(Path(temp) / "first-failure", payload, env=env, ships=failure_ships)
+        failed = World(Path(temp) / "first-failure", payload, env=env, ships=failure_ships, work_name="work")
         failed.env["PARITY_OUT"] = str(failed.work / "out")
         outcome = failed.run(env.get("RUNNER_CMD", ""))
         assert outcome.returncode == 23 and not (failed.work / "out/not-run").exists(), "первый код/остановка steps не сохранены"
@@ -702,7 +717,8 @@ def step_checks(objects, ships):
         code = "set -uo pipefail\n" + os.environ["PARITY_EXPORT_FUNCTIONS"] + '\nrunner_exec() { shift; "$@"; }\nrunner_fetch fixture "$1"\n'
         fetch = subprocess.run(["bash", "-c", code, "fetch", str(receiver)], env=exported, capture_output=True, text=True, timeout=30)
         print(fetch.stdout + fetch.stderr, flush=True)
-        assert fetch.returncode == 0 and (receiver / "work/out/summary.txt").read_bytes() == b"failure nonce=1042\n", "summary после реальной ошибки шага не экспортирован"
+        summary = receiver / "work/out/summary.txt"
+        assert fetch.returncode == 0 and summary.is_file() and summary.read_bytes() == b"failure nonce=1042\n", "summary после реальной ошибки шага не экспортирован"
         print("PARITY-STEP-FAILURE code=23 following=not-run summary=exported-exact-bytes", flush=True)
     return 0
 

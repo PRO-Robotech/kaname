@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -425,6 +426,79 @@ func rid03RowsByID(t *testing.T, rows []rid09PrimaryRow) map[string]rid09Primary
 }
 func rid03RawDigest(t *testing.T, r rid09PrimaryRow) string { t.Helper(); return ridWholeDigest(t, r) }
 
+type rid03OldOperationDiff struct {
+	Missing    bool     `json:"missing"`
+	Columns    []string `json:"columns"`
+	BeforeDone string   `json:"beforeDone"`
+	AfterDone  string   `json:"afterDone"`
+	Kind       string   `json:"kind"`
+}
+
+func rid03OperationStage(row rid09PrimaryRow) string {
+	var done *bool
+	if json.Unmarshal(row["done"], &done) != nil || done == nil {
+		return "unknown"
+	}
+	if *done {
+		return "done"
+	}
+	return "pending"
+}
+
+// В отчёт об отказе попадают только известные имена столбцов и закрытые признаки.
+// Значения ячеек, ID операции, типы не из списка и секреты не выводятся.
+func rid03DescribeOldOperationDiff(before, after rid09PrimaryRow) rid03OldOperationDiff {
+	diff := rid03OldOperationDiff{
+		Missing:    after == nil,
+		Columns:    []string{},
+		BeforeDone: rid03OperationStage(before),
+		AfterDone:  rid03OperationStage(after),
+		Kind:       "unknown",
+	}
+	var typeURL string
+	if json.Unmarshal(before["response_type"], &typeURL) == nil && typeURL != "" {
+		switch typeURL {
+		case "type.googleapis.com/" + string((&iamv1.IssueSAKeyResponse{}).ProtoReflect().Descriptor().FullName()):
+			diff.Kind = "service-account-key"
+		case "type.googleapis.com/" + string((&iamv1.IssueUserTokenResponse{}).ProtoReflect().Descriptor().FullName()):
+			diff.Kind = "user-token"
+		default:
+			diff.Kind = "other"
+		}
+	}
+	if diff.Missing {
+		return diff
+	}
+
+	columns := map[string]bool{}
+	note := func(name string) {
+		switch name {
+		case "id", "description", "created_at", "created_by", "principal_type", "principal_id",
+			"principal_display_name", "modified_at", "done", "metadata_type", "metadata_data",
+			"resource_id", "error_code", "error_message", "error_details", "response_type",
+			"response_data", "account_id":
+			columns[name] = true
+		default:
+			columns["other"] = true
+		}
+	}
+	for name, oldValue := range before {
+		if value, present := after[name]; !present || !reflect.DeepEqual(oldValue, value) {
+			note(name)
+		}
+	}
+	for name := range after {
+		if _, present := before[name]; !present {
+			note(name)
+		}
+	}
+	for name := range columns {
+		diff.Columns = append(diff.Columns, name)
+	}
+	slices.Sort(diff.Columns)
+	return diff
+}
+
 // У ACT одно заявленное изменение; все таблицы/столбцы/история остаются захваченными.
 // Неизменённые физические строки должны сохраниться побайтно. Аддитивные строки прямой материализации
 // привязаны к новому G как объекту либо запрошенным субъекту/цели; неизвестные
@@ -460,7 +534,13 @@ func rid03RequireActionDeltaWithReceipt(t *testing.T, w *ridLifecycleWorld, e *r
 	oldOps, newOps := rid03RowsByID(t, a.Raw["operations"]), rid03RowsByID(t, b.Raw["operations"])
 	require.Equal(t, len(oldOps)+1, len(newOps), "exactly one new Operation")
 	for id, row := range oldOps {
-		require.True(t, reflect.DeepEqual(row, newOps[id]), "complete old Operation including Any/index/principal/times unchanged; safe per-column census retained")
+		unchanged := reflect.DeepEqual(row, newOps[id])
+		if !unchanged {
+			note, err := json.Marshal(rid03DescribeOldOperationDiff(row, newOps[id]))
+			require.NoError(t, err, "safe RID03 diagnostic encoding")
+			t.Logf("RID03_OLD_OPERATION_DIFF %s", note)
+		}
+		require.True(t, unchanged, "complete old Operation including Any/index/principal/times unchanged; safe per-column census retained")
 	}
 	opID := ""
 	for id := range newOps {

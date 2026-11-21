@@ -2165,6 +2165,51 @@ jobs:
           path: ${{ runner.temp }}/rid07-summary.json
           if-no-files-found: error
 
+  # RID-08 ждёт полного окна допуска по штатным часам в собственной фикстуре.
+  # В артефакт попадает только сводка проверенного запуска.
+  rid08:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid08') }}
+    needs: [changes]
+    name: установка Kaname — RID-08, снимок и реальное окно допуска
+    runs-on: ubuntu-24.04
+    # Из прежнего бюджета job добавляется только обязательное ожидание реального часа.
+    timeout-minutes: 135
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: инструменты нативной фикстуры
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner"
+          npm install -g newman@6.2.2
+          go mod download
+      - name: Шесть публичных фаз и уборка
+        id: rid08-native
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
+          export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
+          bash .github/scripts/run-rid-native-hosted.sh \
+            --suite registry-installation-rid08 \
+            --private-dir "$RUNNER_TEMP/rid08-private" \
+            --out "$RUNNER_TEMP/rid08-summary.json"
+      - name: подтверждённая сводка RID-08
+        if: ${{ !cancelled() && steps.rid08-native.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: registry-installation-rid08
+          path: ${{ runner.temp }}/rid08-summary.json
+          if-no-files-found: error
+
   # RID-09 поднимает собственную нативную фикстуру установки Kaname.
   # В артефакт попадает только сводка проверенного запуска.
   rid09:
@@ -2210,6 +2255,141 @@ jobs:
           path: ${{ runner.temp }}/rid09-summary.json
           if-no-files-found: error
 
+  # RID-03 поднимает собственную нативную фикстуру установки Kaname.
+  # В артефакт попадает только сводка проверенного запуска.
+  rid03:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid03') }}
+    needs: [changes]
+    name: установка Kaname — RID-03, делегированная выдача и границы издателя
+    runs-on: ubuntu-24.04
+    # Три сборки имеют предел по 15 минут, нативный тест вместе с внешним ожиданием — 22 минуты.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: инструменты нативной фикстуры
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner"
+          npm install -g newman@6.2.2
+          go mod download
+      - name: 44 публичные фазы и уборка
+        id: rid03-native
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
+          export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
+          bash .github/scripts/run-rid-native-hosted.sh \
+            --suite registry-installation-rid03 \
+            --private-dir "$RUNNER_TEMP/rid03-private" \
+            --out "$RUNNER_TEMP/rid03-summary.json"
+      - name: подтверждённая сводка RID-03
+        if: ${{ !cancelled() && steps.rid03-native.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: registry-installation-rid03
+          path: ${{ runner.temp }}/rid03-summary.json
+          if-no-files-found: error
+
+  # RID-05 поднимает собственную нативную фикстуру установки Kaname.
+  # В артефакт попадает только сводка проверенного запуска.
+  rid05:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid05') }}
+    needs: [changes]
+    name: установка Kaname — RID-05, удаление создателя и новый идентификатор
+    runs-on: ubuntu-24.04
+    # Три сборки имеют предел по 15 минут, нативный тест вместе с внешним ожиданием — 22 минуты.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: инструменты нативной фикстуры
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner"
+          npm install -g newman@6.2.2
+          go mod download
+      - name: 30 публичные фазы и уборка
+        id: rid05-native
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
+          export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
+          bash .github/scripts/run-rid-native-hosted.sh \
+            --suite registry-installation-rid05 \
+            --private-dir "$RUNNER_TEMP/rid05-private" \
+            --out "$RUNNER_TEMP/rid05-summary.json"
+      - name: подтверждённая сводка RID-05
+        if: ${{ !cancelled() && steps.rid05-native.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: registry-installation-rid05
+          path: ${{ runner.temp }}/rid05-summary.json
+          if-no-files-found: error
+
+  # RID-06 поднимает собственную нативную фикстуру установки Kaname.
+  # В артефакт попадает только сводка проверенного запуска.
+  rid06:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid06') }}
+    needs: [changes]
+    name: установка Kaname — RID-06, отзыв при установке
+    runs-on: ubuntu-24.04
+    # Три сборки имеют предел по 15 минут, нативный тест вместе с внешним ожиданием — 22 минуты.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: инструменты нативной фикстуры
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner"
+          npm install -g newman@6.2.2
+          go mod download
+      - name: 30 публичные фазы и уборка
+        id: rid06-native
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
+          export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
+          bash .github/scripts/run-rid-native-hosted.sh \
+            --suite registry-installation-rid06 \
+            --private-dir "$RUNNER_TEMP/rid06-private" \
+            --out "$RUNNER_TEMP/rid06-summary.json"
+      - name: подтверждённая сводка RID-06
+        if: ${{ !cancelled() && steps.rid06-native.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: registry-installation-rid06
+          path: ${{ runner.temp }}/rid06-summary.json
+          if-no-files-found: error
+
   # ── ВЕРДИКТ СТВОЛА ──────────────────────────────────────────────────────────
   #
   # Держатель живёт в КАЖДОМ процессе, идущем на ствол, а не в одном из них.
@@ -2221,6 +2401,133 @@ jobs:
   # ревизией, поэтому второй покрасневший процесс той же ревизии ДОПОЛНЯЕТ уже
   # заведённого, а не заводит второго. Две задачи об одном предмете расходятся
   # молча, и расходится та, которую не читают.
+  rid11-shards:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid11-shards') }}
+    needs: [changes]
+    name: установка Kaname — RID-11, группа ${{ matrix.group }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [input, identity, proof-authority, availability]
+    # Три сборки имеют предел по 15 минут, нативный тест вместе с внешним ожиданием — 22 минуты.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: инструменты нативной фикстуры
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner"
+          npm install -g newman@6.2.2
+          go mod download
+      - name: парные сценарии группы, публичные фазы и уборка
+        id: rid11-native
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          RID11_GROUP: ${{ matrix.group }}
+        run: |
+          export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
+          export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
+          bash .github/scripts/run-rid-native-hosted.sh \
+            --suite registry-installation-rid11 \
+            --private-dir "$RUNNER_TEMP/rid11-private" \
+            --out "$RUNNER_TEMP/rid11-summary.json" \
+            --rid11-group "$RID11_GROUP"
+      - name: сводка группы RID-11
+        if: ${{ !cancelled() && steps.rid11-native.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: registry-installation-rid11-${{ matrix.group }}
+          path: ${{ runner.temp }}/rid11-summary.json
+          if-no-files-found: error
+          overwrite: true
+
+  rid11:
+    if: ${{ !cancelled() && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid11')) }}
+    needs: [changes, rid11-shards]
+    name: установка Kaname — RID-11, полная матрица входов и полномочий
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - name: свести четыре группы в полный вердикт RID-11
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RID11_SHARDS_RESULT: ${{ needs.rid11-shards.result }}
+        run: |
+          test "$RID11_SHARDS_RESULT" = success
+          tree="$(git rev-parse HEAD^{tree})"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'registry-installation-rid11-*' --dir "$RUNNER_TEMP/rid11-shards"
+          python3 .github/scripts/aggregate-rid11-native.py \
+            --source-revision "$GITHUB_SHA" --source-tree "$tree" \
+            --collection "$GITHUB_WORKSPACE/tests/newman/collections/registry-installation-rid11.postman_collection.json" \
+            --input-dir "$RUNNER_TEMP/rid11-shards" --out "$RUNNER_TEMP/rid11-summary.json"
+      - name: подтверждённая сводка RID-11
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: registry-installation-rid11
+          path: ${{ runner.temp }}/rid11-summary.json
+          if-no-files-found: error
+          overwrite: true
+
+  rid12:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'rid12') }}
+    needs: [changes]
+    name: установка Kaname — RID-12, закрытая форма и границы входов
+    runs-on: ubuntu-24.04
+    # Три сборки имеют предел по 15 минут, нативный тест вместе с внешним ожиданием — 22 минуты.
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: инструменты нативной фикстуры
+        run: |
+          export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
+          . .github/scripts/stand-runner-bootstrap.sh
+          runner_bootstrap "$PWD" "$RUNNER_TEMP/kaname-runner"
+          npm install -g newman@6.2.2
+          go mod download
+      - name: 65 публичные фазы и уборка
+        id: rid12-native
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          export KANAME_RID_NODE_BINARY="$(readlink -f "$(command -v node)")"
+          export KANAME_RID_NEWMAN_MODULE="$(realpath "$(npm root -g)/newman")"
+          bash .github/scripts/run-rid-native-hosted.sh \
+            --suite registry-installation-rid12 \
+            --private-dir "$RUNNER_TEMP/rid12-private" \
+            --out "$RUNNER_TEMP/rid12-summary.json"
+      - name: подтверждённая сводка RID-12
+        if: ${{ !cancelled() && steps.rid12-native.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: registry-installation-rid12
+          path: ${{ runner.temp }}/rid12-summary.json
+          if-no-files-found: error
+
   trunkverdict:
     name: вердикт ствола — красное не остаётся без читателя
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -2250,10 +2557,17 @@ jobs:
       - chart-own
       - rid01
       - rid02
+      - rid03
+      - rid05
+      - rid06
       - rid04
       - rid10
       - rid07
+      - rid08
       - rid09
+      - rid11-shards
+      - rid11
+      - rid12
       - changes
       - prverdict
     runs-on: ubuntu-24.04
@@ -2315,7 +2629,7 @@ jobs:
           TRUNK_VERDICT_PROCESS: ${{ github.workflow }}
           TRUNK_VERDICT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # На main RID-01, RID-02, RID-04, RID-07, RID-09 и RID-10 обязательны. Пропуск передаём держателю как исход без вердикта.
+          # На main RID-01–12 обязательны. Пропуск передаём держателю как исход без вердикта.
           rc=0
           .github/scripts/trunk-verdict-holder.sh \
             "${{ needs.suite.result }}" \
@@ -2326,10 +2640,17 @@ jobs:
             "${{ needs.prverdict.result }}" \
             "${{ needs.rid01.result == 'skipped' && 'rid01-not-run' || needs.rid01.result }}" \
             "${{ needs.rid02.result == 'skipped' && 'rid02-not-run' || needs.rid02.result }}" \
+            "${{ needs.rid03.result == 'skipped' && 'rid03-not-run' || needs.rid03.result }}" \
+            "${{ needs.rid05.result == 'skipped' && 'rid05-not-run' || needs.rid05.result }}" \
+            "${{ needs.rid06.result == 'skipped' && 'rid06-not-run' || needs.rid06.result }}" \
             "${{ needs.rid04.result == 'skipped' && 'rid04-not-run' || needs.rid04.result }}" \
             "${{ needs.rid10.result == 'skipped' && 'rid10-not-run' || needs.rid10.result }}" \
             "${{ needs.rid07.result == 'skipped' && 'rid07-not-run' || needs.rid07.result }}" \
+            "${{ needs.rid08.result == 'skipped' && 'rid08-not-run' || needs.rid08.result }}" \
             "${{ needs.rid09.result == 'skipped' && 'rid09-not-run' || needs.rid09.result }}" \
+            "${{ needs.rid11-shards.result == 'skipped' && 'rid11-shards-not-run' || needs.rid11-shards.result }}" \
+            "${{ needs.rid11.result == 'skipped' && 'rid11-not-run' || needs.rid11.result }}" \
+            "${{ needs.rid12.result == 'skipped' && 'rid12-not-run' || needs.rid12.result }}" \
             "${{ needs.chart-own.result }}" || rc=$?
           case "$rc" in
             0) echo "ствол зелен — держателя заводить не из чего" ;;
@@ -2345,7 +2666,7 @@ jobs:
   prverdict:
     name: сводный вердикт запроса (e2e-newman)
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    needs: [changes, chart-own, edgeselftests, rid01, rid02, rid04, rid07, rid09, rid10, stand, stand-ceremony, suite]
+    needs: [changes, chart-own, edgeselftests, rid01, rid02, rid03, rid04, rid05, rid06, rid07, rid08, rid09, rid10, rid11-shards, rid11, rid12, stand, stand-ceremony, suite]
     runs-on: ubuntu-24.04
     # Полный поставщик сохранён: до 420 с на индекс снимка и конечный общий бюджет остальных стадий.
     timeout-minutes: 15

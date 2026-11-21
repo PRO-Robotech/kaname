@@ -57,6 +57,41 @@ func rid11Cases(twin bool) []rid11Case {
 	out = append(out, rid11Case{"account", "S1", false, twin}, rid11Case{"census", "S2", false, twin}, rid11Case{"census", "S2", true, twin})
 	return out
 }
+
+// rid11CasesInGroup выбирает одну из объявленных групп полной матрицы RID11.
+// Отсутствующий параметр означает полную матрицу, пустой параметр недопустим.
+func rid11CasesInGroup(twin bool, group string) ([]rid11Case, error) {
+	var variants []string
+	want := 8
+	switch group {
+	case "input":
+		variants = []string{"credential-missing", "credential-unreadable"}
+	case "identity":
+		variants = []string{"deleted-creator", "revoked-key"}
+	case "proof-authority":
+		variants = []string{"bad-signature", "authority"}
+	case "availability":
+		variants = []string{"backend", "account", "census"}
+		want = 7
+	default:
+		return nil, fmt.Errorf("invalid RID11 case group")
+	}
+	allowed := make(map[string]bool, len(variants))
+	for _, variant := range variants {
+		allowed[variant] = true
+	}
+	var selected []rid11Case
+	for _, c := range rid11Cases(twin) {
+		if allowed[c.Variant] {
+			selected = append(selected, c)
+		}
+	}
+	if len(selected) != want {
+		return nil, fmt.Errorf("RID11 case group census changed")
+	}
+	return selected, nil
+}
+
 func (c rid11Case) expected() installationResult {
 	if c.Twin {
 		n := 1
@@ -684,10 +719,14 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 	return p
 }
 func rid11Matrix(t *testing.T, twin bool, consumer rid11LivePublicConsumer) []rid11Proof {
+	return rid11MatrixCases(t, rid11Cases(twin), consumer)
+}
+
+func rid11MatrixCases(t *testing.T, cases []rid11Case, consumer rid11LivePublicConsumer) []rid11Proof {
 	var out []rid11Proof
-	for _, c := range rid11Cases(twin) {
+	for _, c := range cases {
 		kind := "negative"
-		if twin {
+		if c.Twin {
 			kind = "lawful-control"
 		}
 		t.Run(c.key()+"/"+kind, func(t *testing.T) { out = append(out, rid11World(t, c, consumer)) })
