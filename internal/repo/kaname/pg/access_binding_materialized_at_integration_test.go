@@ -139,9 +139,9 @@ func TestTargetMemberUpdateDoesNotBackdateLaterInsert(t *testing.T) {
 		name   string
 		upsert func(context.Context, pgx.Tx, target_members.Member) error
 	}{
-		{"single", target_members.UpsertTx},
+		{"single", target_members.UpsertLegacyTx},
 		{"batch", func(ctx context.Context, tx pgx.Tx, m target_members.Member) error {
-			return target_members.UpsertManyTx(ctx, tx, []target_members.Member{m})
+			return target_members.UpsertManyLegacyTx(ctx, tx, []target_members.Member{m})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

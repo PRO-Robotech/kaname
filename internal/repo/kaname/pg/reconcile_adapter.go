@@ -1430,36 +1430,42 @@ func (s *reconcileStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Con
 	return out, rows.Err()
 }
 
-// UpsertMember materializes/updates a membership row (full rule coordinate).
+// Обычный reconcile обновляет часы после возможного ожидания записи. Подписанные
+// исполнители используют базовый store и время из точного подготовленного плана.
+func (s *legacyForwardStore) UpsertMember(ctx context.Context, m domain.TargetMember) error {
+	return target_members.UpsertLegacyTx(ctx, s.tx, targetMemberRow(m))
+}
+
+func (s *legacyForwardStore) UpsertMembers(ctx context.Context, members []domain.TargetMember) error {
+	return target_members.UpsertManyLegacyTx(ctx, s.tx, targetMemberRows(members))
+}
+
 func (s *reconcileStore) UpsertMember(ctx context.Context, m domain.TargetMember) error {
-	return target_members.UpsertTx(ctx, s.tx, target_members.Member{
+	return target_members.UpsertTx(ctx, s.tx, targetMemberRow(m))
+}
+
+// UpsertMembers пишет тот же ключ и статус набором, сохраняя подписанные часы.
+func (s *reconcileStore) UpsertMembers(ctx context.Context, members []domain.TargetMember) error {
+	return target_members.UpsertManyTx(ctx, s.tx, targetMemberRows(members))
+}
+
+func targetMemberRow(m domain.TargetMember) target_members.Member {
+	return target_members.Member{
 		BindingID:          string(m.BindingID),
 		RoleID:             string(m.RoleID),
 		RuleFP:             m.RuleFP,
 		ObjectType:         m.ObjectType,
 		ObjectID:           m.ObjectID,
 		VerificationStatus: m.VerificationStatus,
-	})
+	}
 }
 
-// UpsertMembers — тот же UPSERT, что UpsertMember, но НАБОРОМ: одно обращение к базе на
-// весь веер прохода вместо одного на выдачу. Тот же ON CONFLICT, та же идемпотентность.
-func (s *reconcileStore) UpsertMembers(ctx context.Context, members []domain.TargetMember) error {
-	if len(members) == 0 {
-		return nil
-	}
+func targetMemberRows(members []domain.TargetMember) []target_members.Member {
 	rows := make([]target_members.Member, 0, len(members))
 	for _, m := range members {
-		rows = append(rows, target_members.Member{
-			BindingID:          string(m.BindingID),
-			RoleID:             string(m.RoleID),
-			RuleFP:             m.RuleFP,
-			ObjectType:         m.ObjectType,
-			ObjectID:           m.ObjectID,
-			VerificationStatus: m.VerificationStatus,
-		})
+		rows = append(rows, targetMemberRow(m))
 	}
-	return target_members.UpsertManyTx(ctx, s.tx, rows)
+	return rows
 }
 
 // RecordEmittedTuplesBatch — тот же реестр, что RecordEmittedTuples, но набором,

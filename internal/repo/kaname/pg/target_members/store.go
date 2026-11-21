@@ -36,23 +36,34 @@ type Member struct {
 	VerificationStatus domain.VerificationStatus
 }
 
-// При конфликте строка могла быть вставлена транзакцией, начавшейся позже
-// текущей. now() этой транзакции не годится для сохранённой даты изменения.
+// Подписанный план ожидает зафиксированное начало транзакции. Обычная
+// материализация допускает строку, созданную более поздней транзакцией.
+const plannedUpdateClock = "now()"
+const legacyUpdateClock = "GREATEST(access_binding_target_members.created_at, access_binding_target_members.updated_at, clock_timestamp())"
+
 const upsertConflict = `
 		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
 		    SET verification_status = EXCLUDED.verification_status,
-		        updated_at = GREATEST(access_binding_target_members.created_at,
-		                              access_binding_target_members.updated_at, clock_timestamp())`
+		        updated_at = `
 
 // UpsertTx вставляет или обновляет строку членства до status по полной координате
 // правила (binding, role, rule_fp, object) в транзакции вызывающего. Идемпотентен по
 // первичному ключу; при конфликте статус заменяется (повторная проверка
 // PENDING→ACTIVE/REJECTED). updated_at продвигается при записи.
 func UpsertTx(ctx context.Context, tx pgx.Tx, m Member) error {
+	return upsert(ctx, tx, m, plannedUpdateClock)
+}
+
+// UpsertLegacyTx сохраняет монотонное время обычной материализации.
+func UpsertLegacyTx(ctx context.Context, tx pgx.Tx, m Member) error {
+	return upsert(ctx, tx, m, legacyUpdateClock)
+}
+
+func upsert(ctx context.Context, tx pgx.Tx, m Member, updateClock string) error {
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO kaname.access_binding_target_members
 		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, now(), now())`+upsertConflict,
+		 VALUES ($1, $2, $3, $4, $5, $6, now(), now())`+upsertConflict+updateClock,
 		m.BindingID, m.RoleID, m.RuleFP, m.ObjectType, m.ObjectID, string(m.VerificationStatus),
 	); err != nil {
 		return fmt.Errorf("target_members: upsert: %w", err)
@@ -63,9 +74,7 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, m Member) error {
 // upsertBatchRows ограничивает один SQL, не размер атомарного прохода.
 const upsertBatchRows = 4096
 
-// UpsertManySQL используется пакетной записью и подготовленным исполнителем.
-// Оба пути пишут одни и те же часы и проверяют тот же ключ конфликта.
-const UpsertManySQL = `INSERT INTO kaname.access_binding_target_members
+const upsertManySQL = `INSERT INTO kaname.access_binding_target_members
 			   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
 			 SELECT b, r, f, ot, oi, vs, now(), now()
 			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
@@ -84,6 +93,15 @@ const UpsertManySQL = `INSERT INTO kaname.access_binding_target_members
 // набор с дублем Postgres отверг бы целиком (поштучная вставка этого не требовала,
 // потому что каждая строка ехала своим стейтментом). Пустой набор — no-op.
 func UpsertManyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
+	return upsertMany(ctx, tx, members, plannedUpdateClock)
+}
+
+// UpsertManyLegacyTx сохраняет то же монотонное время пакетной материализации.
+func UpsertManyLegacyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
+	return upsertMany(ctx, tx, members, legacyUpdateClock)
+}
+
+func upsertMany(ctx context.Context, tx pgx.Tx, members []Member, updateClock string) error {
 	if len(members) == 0 {
 		return nil
 	}
@@ -99,7 +117,7 @@ func UpsertManyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
 			return nil
 		}
 		if _, err := tx.Exec(ctx,
-			UpsertManySQL,
+			upsertManySQL+updateClock,
 			bindings, roles, fps, objTypes, objIDs, statuses,
 		); err != nil {
 			return fmt.Errorf("target_members: upsert many (%d): %w", len(bindings), err)
