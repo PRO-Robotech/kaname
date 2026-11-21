@@ -177,20 +177,25 @@ func rid09Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
 			t.Fatal("actual complete delivery exited before readiness")
 		default:
 		}
-		attempt, stop := context.WithTimeout(ctx, time.Second)
-		err := f.wire.ProductionReady(attempt)
-		stop()
-		if err == nil {
+		if !c.seenEvent {
+			attempt, stop := context.WithTimeout(ctx, time.Second)
+			err := f.wire.ProductionReady(attempt)
+			stop()
+			// Успешная аутентификация требует аудита реально выданного токена FD5.
+			c.seenEvent = err == nil
+		}
+		// Снимок после успешной поставки снимается по завершённым
+		// проекциям этого процесса.
+		if c.seenEvent && ridCatalogRoleProjectionsReady(filepath.Join(c.dir, "stdout")) == nil {
 			require.NoError(t, ctx.Err())
 			break
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("full delivery readiness deadline")
+			t.Fatal("полная поставка или пересчёт проекций ролей не завершились в срок")
 		case <-ticker.C:
 		}
 	}
-	c.seenEvent = true // успешная настоящая аутентификация требует непустого аудита настоящего токена FD5.
 	require.NoError(t, installruntime.CheckOwnedListeners(c.cmd.Process.Pid, c.dir, installruntime.DefaultNativePorts().All()...))
 	rid06ReadResult(t, c, installationResult{Stage: "delegation", Code: "OK", CompletedPairs: 6})
 }
