@@ -37,18 +37,22 @@ func TestChildRegistrationParentSQL_ZeroChildrenExactAndClosed(t *testing.T) {
 							Verb: "registerchild", ParentSegments: 1, MaxChildren: 8, MaxCreates: 2, WindowSeconds: 60,
 						}},
 				},
-				Verbs: []catalog.VerbRow{{Module: "probe", Resource: "items", Verb: catalogVerb,
-					ContainerParent: "odd_box", ContainerRelation: "child_registrar"}},
+				Verbs: []catalog.VerbRow{
+					{Module: "probe", Resource: "boxes", Verb: "get", PerObject: true},
+					{Module: "probe", Resource: "items", Verb: catalogVerb,
+						ContainerParent: "odd_box", ContainerRelation: "child_registrar"},
+				},
 			}}
 			facts, err := catalog.NewFacts(halves)
 			require.NoError(t, err)
 			catalogJSON, err := catalog.CanonicalJSON(halves)
 			require.NoError(t, err)
-			// У правила-владельца нет обычных глаголов. Потомок ещё не создан.
-			rules := domain.Rules{{Module: "probe", Resources: []string{"boxes"},
-				MatchLabels: map[string]string{"team": "red"},
-				Children:    []domain.Rule{{Resources: []string{"items"}, Verbs: []string{"registerChild"}}},
+			// Роль выбирает родителя и отдельно даёт действие создания потомка.
+			// Сам потомок ещё не создан.
+			rules := domain.Rules{{Module: "probe", Resources: []string{"boxes"}, Verbs: []string{"get"},
+				Children: []domain.Rule{{Resources: []string{"items"}, Verbs: []string{"registerChild"}}},
 			}}
+			require.NoError(t, rules.Validate(domain.TenantPolicy(), facts))
 			rulesJSON, err := domain.EncodeRules(rules)
 			require.NoError(t, err)
 			selectors := rules.MaterializingSelectors()
@@ -64,9 +68,19 @@ func TestChildRegistrationParentSQL_ZeroChildrenExactAndClosed(t *testing.T) {
 				ParentAccountIDs: []string{"account_one"}, Labels: map[string]string{"team": "red"}}
 			desired, err := resourceeffect.CompileObjectDesired(facts, binding, parent, nil)
 			require.NoError(t, err)
-			require.Len(t, desired, 1)
-			require.Equal(t, "child_registration", desired[0].Derivation)
-			require.Equal(t, []domain.MembershipTuple{{User: "user:u", Relation: "child_registrar", Object: "odd_box:one"}}, desired[0].Tuples)
+			require.Len(t, desired, 2)
+			var ordinary, registration resourceeffect.ObjectDesiredMember
+			for _, member := range desired {
+				switch member.Derivation {
+				case "ordinary":
+					ordinary = member
+				case "child_registration":
+					registration = member
+				}
+			}
+			require.Equal(t, "ordinary", ordinary.Derivation)
+			require.Equal(t, "child_registration", registration.Derivation)
+			require.Equal(t, []domain.MembershipTuple{{User: "user:u", Relation: "child_registrar", Object: "odd_box:one"}}, registration.Tuples)
 
 			var sources []map[string]any
 			capture := func(kind int, typ, id string, rows ...map[string]any) {
@@ -127,16 +141,16 @@ SELECT kaname._authority_resource_coordinate_certificate_v2(idx,$2::jsonb,$3,gra
 			require.NoError(t, json.Unmarshal(certificate, &result))
 			require.Equal(t, desired, result.Desired)
 
-			_, err = verify("one", []resourceeffect.ObjectDesiredMember{})
+			_, err = verify("one", []resourceeffect.ObjectDesiredMember{ordinary})
 			var pgErr *pgconn.PgError
 			require.ErrorAs(t, err, &pgErr)
 			require.Equal(t, "42501", pgErr.Code)
 			require.Contains(t, pgErr.Message, "unproven special member absence")
 
-			wrong := append([]resourceeffect.ObjectDesiredMember(nil), desired...)
-			wrong[0].ObjectID = "two"
-			wrong[0].Tuples = []domain.MembershipTuple{{User: "user:u", Relation: "child_registrar", Object: "odd_box:two"}}
-			_, err = verify("two", wrong) // Метки и область те же, цель другая.
+			wrong := registration
+			wrong.ObjectID = "two"
+			wrong.Tuples = []domain.MembershipTuple{{User: "user:u", Relation: "child_registrar", Object: "odd_box:two"}}
+			_, err = verify("two", []resourceeffect.ObjectDesiredMember{wrong}) // Область та же, цель другая.
 			require.ErrorAs(t, err, &pgErr)
 			require.Equal(t, "42501", pgErr.Code)
 			require.Contains(t, pgErr.Message, "special member status or fingerprint mismatch")
