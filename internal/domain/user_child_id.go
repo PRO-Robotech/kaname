@@ -37,13 +37,24 @@ type UserChildPathPolicy struct {
 	ParentSegments int
 }
 
+// IsValid проверяет, что оба модельных ключа могут уместить хотя бы
+// минимальный допустимый идентификатор с заданной границей родителя.
+func (p UserChildPathPolicy) IsValid() bool {
+	if p.ParentSegments <= 0 || p.ParentSegments > MaxUserChildObjectKeyBytes/2 ||
+		!IsWellFormedObjectTypeName(p.ChildType) ||
+		!IsWellFormedObjectTypeName(p.ParentType) ||
+		!IsWellFormedObjectTypeName(p.ParentAction) {
+		return false
+	}
+	minParentID := 2*p.ParentSegments - 1
+	return len(p.ParentType)+1+minParentID <= MaxUserChildObjectKeyBytes &&
+		len(p.ChildType)+3+minParentID <= MaxUserChildObjectKeyBytes
+}
+
 // Resolve разбирает канонический путь, не нормализуя и не декодируя его.
 // Применитель вызывает этот разбор только для типов, явно принявших эту форму.
 func (p UserChildPathPolicy) Resolve(id string) (UserChildRegistrationTarget, error) {
-	if len(p.ChildType)+1+len(id) > MaxUserChildObjectKeyBytes ||
-		p.ParentSegments <= 0 || !IsWellFormedObjectTypeName(p.ChildType) ||
-		!IsWellFormedObjectTypeName(p.ParentType) ||
-		!IsWellFormedObjectTypeName(p.ParentAction) {
+	if len(p.ChildType)+1+len(id) > MaxUserChildObjectKeyBytes || !p.IsValid() {
 		return UserChildRegistrationTarget{}, ErrUserChildRegistrationRefused
 	}
 

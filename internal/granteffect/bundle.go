@@ -100,6 +100,16 @@ func (b *Bundle) CanonicalCatalog() []byte {
 	}
 	return slices.Clone(b.canonicalCatalog)
 }
+
+// ChildRegistration возвращает политику каталожного типа из принятого
+// bundle. Вызывающий удерживает этот bundle на всём протяжении решения.
+func (b *Bundle) ChildRegistration(dotted string) (catalog.ChildRegistrationPolicy, bool) {
+	if b.Validate() != nil {
+		return catalog.ChildRegistrationPolicy{}, false
+	}
+	return b.compiler.facts.ChildRegistration(dotted)
+}
+
 func (b *Bundle) Compile(in Binding) Set {
 	if b.Validate() != nil {
 		return Set{}

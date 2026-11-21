@@ -75,12 +75,7 @@ func validateChildRegistration(m *Manifest, doc *yaml.Node) []error {
 				coord:  locate(doc, "resources", i, childRegistrationKey, "verb"),
 				detail: "нужно именованное контейнерное действие на указателе parent"})
 		} else if segments := mapValue(node, "parentSegments"); segments != nil && segments.ShortTag() == "!!int" {
-			// Минимальный ключ родителя занимает один байт на каждый сегмент
-			// и разделитель между ними. У потомка есть ещё свой сегмент.
-			minParentID := 2*int64(path.ParentSegments) - 1
-			limit := int64(domain.MaxUserChildObjectKeyBytes)
-			if path.ParentSegments <= 0 || int64(len(path.ParentType)+1)+minParentID > limit ||
-				int64(len(path.ChildType)+3)+minParentID > limit {
+			if !path.IsValid() {
 				faults = append(faults, linkFault{kind: ErrChildRegistrationDeclaration,
 					coord:  locate(doc, "resources", i, childRegistrationKey, "parentSegments"),
 					detail: "граница родителя должна быть положительной и позволять записать полный ключ"})
