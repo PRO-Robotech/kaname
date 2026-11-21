@@ -80,7 +80,8 @@ func childRegistrationPolicies(rows []ResourceRow, actions map[string]map[string
 			continue
 		}
 		dotted := row.Module + "." + row.Resource
-		action, declared := actions[dotted][rule.Verb]
+		verb := domain.NormalizeVerb(rule.Verb)
+		action, declared := actions[dotted][verb]
 		path := domain.UserChildPathPolicy{
 			ChildType: row.ObjectType, ParentType: action.ParentType, ParentAction: action.Relation,
 			ParentSegments: int(rule.ParentSegments),
@@ -94,7 +95,7 @@ func childRegistrationPolicies(rows []ResourceRow, actions map[string]map[string
 			return nil, fmt.Errorf("каталог %s: несогласованная политика регистрации потомков", dotted)
 		}
 		policies[dotted] = ChildRegistrationPolicy{
-			Verb: rule.Verb, Path: path, MaxChildren: rule.MaxChildren,
+			Verb: verb, Path: path, MaxChildren: rule.MaxChildren,
 			MaxCreates: rule.MaxCreates, WindowSeconds: rule.WindowSeconds,
 		}
 	}

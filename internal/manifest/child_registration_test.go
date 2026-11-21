@@ -55,7 +55,12 @@ type service_account
 
 type example_container
   relations
-    define child_registrar: [` + subjects + "]\n"
+    define child_registrar: [` + subjects + `]
+
+condition fresh(at: timestamp) {
+  true
+}
+`
 	plans, err := authzmodel.New(model)
 	require.NoError(t, err)
 	return manifestoracle.FromPlans(plans)
@@ -92,6 +97,9 @@ func TestChildRegistrationRequiresDirectHumanAndKeepsOtherActionsServiceOnly(t *
 	sa := manifest.WithRelationOracle(childRegistrationOracle(t, "service_account"))
 	user := manifest.WithRelationOracle(childRegistrationOracle(t, "user"))
 	_, err := manifest.LoadWithReferent(data, manifest.ReferentCanon, sa)
+	require.ErrorIs(t, err, manifest.ErrChildRegistrationDeclaration)
+	conditioned := manifest.WithRelationOracle(childRegistrationOracle(t, "user with fresh"))
+	_, err = manifest.LoadWithReferent(data, manifest.ReferentCanon, conditioned)
 	require.ErrorIs(t, err, manifest.ErrChildRegistrationDeclaration)
 
 	// Без объявления это прежнее контейнерное действие для служебной учётки.

@@ -225,8 +225,13 @@ func TestChildRegistrationRoleFailsClosedIfModelDoesNotAcceptHuman(t *testing.T)
 		Verb: "registerchild", ParentSegments: 1, MaxChildren: 24, MaxCreates: 4, WindowSeconds: 60,
 	}
 	h.Live.Verbs = append(h.Live.Verbs, catalog.VerbRow{Module: "probemod", Resource: "items", Verb: "registerchild", ContainerParent: "strange_box", ContainerRelation: "child_registrar"})
-	model := strings.Replace(modelFixture, "type strange_box\n  relations\n", "type strange_box\n  relations\n    define child_registrar: [service_account]\n", 1)
-	c, err := New(model, h)
-	require.Error(t, err)
-	require.Nil(t, c)
+	for _, subject := range []string{"service_account", "user with fresh"} {
+		t.Run(subject, func(t *testing.T) {
+			model := strings.Replace(modelFixture, "type strange_box\n  relations\n",
+				"type strange_box\n  relations\n    define child_registrar: ["+subject+"]\n", 1)
+			c, err := New(model, h)
+			require.ErrorContains(t, err, "модель не подтверждает право пользователя")
+			require.Nil(t, c)
+		})
+	}
 }

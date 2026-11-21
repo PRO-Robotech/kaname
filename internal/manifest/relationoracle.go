@@ -80,6 +80,10 @@ type RelationDeclaration interface {
 	// называется В НАПИСАНИИ МАНИФЕСТА (`serviceAccount`).
 	AcceptsKind(kind string) bool
 
+	// AcceptsUnconditionedKind проверяет форму обычного прямого кортежа
+	// без заданного объекта, подстановки и условия.
+	AcceptsUnconditionedKind(kind string) bool
+
 	// AcceptedKinds — виды, принимаемые прямо, в написании канона. Ради ТЕКСТА
 	// отказа; решения по ним не принимаются — для этого есть [AcceptsKind].
 	AcceptedKinds() []string

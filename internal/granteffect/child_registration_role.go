@@ -4,7 +4,6 @@
 package granteffect
 
 import (
-	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
@@ -38,8 +37,8 @@ func (c *Compiler) compileChildRegistration(s *Set, b Binding, sel domain.RuleSe
 	scope := b.Scope
 	constraints := []Constraint{{Type: parentType, Region: region, Within: &scope}}
 	for _, action := range actions {
-		decl, declared := c.plans.RelationSubjects(parentType, action.Relation)
-		if action.ParentType != parentType || !declared || !decl.IsDirect() || !decl.AcceptsKind(authzmodel.KindUser) {
+		if action.ParentType != parentType ||
+			!c.plans.EffectDirectAccepts(parentType, action.Relation, "user", "", "") {
 			s.obligations = append(s.obligations, Obligation{"child_registration_model", parentType + "." + action.Relation, p})
 			continue
 		}

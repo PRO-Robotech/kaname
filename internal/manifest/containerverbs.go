@@ -211,10 +211,12 @@ func validateContainerRelation(m *Manifest, r *Resource, cv ContainerVerb, label
 		return nil
 	}
 	decl, ok := oracle.RelationDeclaration(parentType, cv.Relation)
-	if child := r.ChildRegistration; child != nil && child.Verb == cv.Name {
-		if !ok || !decl.IsDirect() || !decl.AcceptsKind(childRegistrationSubjectKind) {
+	child := r.ChildRegistration
+	userRegistration := child != nil && child.Verb == cv.Name
+	if userRegistration {
+		if !ok || !decl.IsDirect() || !decl.AcceptsUnconditionedKind(childRegistrationSubjectKind) {
 			return []error{linkFault{kind: ErrChildRegistrationDeclaration, coord: at("relation"),
-				detail: fmt.Sprintf("%s: отношение %q типа %q должно прямо принимать человека",
+				detail: fmt.Sprintf("%s: отношение %q типа %q должно допускать прямую безусловную запись пользователя",
 					label, cv.Relation, parentType)}}
 		}
 		// Действие create используется также механизмом выбора по создателю.
@@ -223,7 +225,8 @@ func validateContainerRelation(m *Manifest, r *Resource, cv ContainerVerb, label
 			return nil
 		}
 	}
-	if !ok || !decl.IsDirect() || !decl.AcceptsKind(creatorSubjectKind) {
+	if !ok || !decl.IsDirect() || !decl.AcceptsKind(creatorSubjectKind) ||
+		(userRegistration && !decl.AcceptsUnconditionedKind(creatorSubjectKind)) {
 		accepted := "—"
 		if ok {
 			accepted = strings.Join(decl.AcceptedKinds(), ", ")

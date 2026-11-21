@@ -222,8 +222,9 @@ func NewFacts(h Halves) (*Facts, error) {
 			if containerVerbs[dotted] == nil {
 				containerVerbs[dotted] = map[string]ContainerGrant{}
 			}
-			containerVerbs[dotted][v.Verb] = ContainerGrant{
-				Verb: v.Verb, ParentType: v.ContainerParent, Relation: v.ContainerRelation,
+			verb := domain.NormalizeVerb(v.Verb)
+			containerVerbs[dotted][verb] = ContainerGrant{
+				Verb: verb, ParentType: v.ContainerParent, Relation: v.ContainerRelation,
 			}
 		}
 		// ЯРУСНАЯ строка в набор типа НЕ ВХОДИТ, и это несущее место, а не
@@ -656,7 +657,7 @@ func (f *Facts) ContainerVerb(dotted, verb string) (ContainerGrant, bool) {
 	if f == nil {
 		return ContainerGrant{}, false
 	}
-	g, ok := f.containerVerbs[dotted][verb]
+	g, ok := f.containerVerbs[dotted][domain.NormalizeVerb(verb)]
 	return g, ok
 }
 
