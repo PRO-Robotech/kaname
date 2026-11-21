@@ -30,20 +30,18 @@ import (
 	"fmt"
 	"log/slog"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // OwnerBindingReconciler — narrow port (P6 C-01/C-01b): materialize the owner
@@ -135,8 +133,10 @@ const (
 // Скоупный гэп с kacho-vpc-pattern: kaname НЕ имеет folder/parent peer-check
 // на request-path (Account — top-level), поэтому FolderClient-аналога нет.
 type CreateAccountUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	crudConfigured bool
+	crudFactory    kanamerepo.AccountCreateWriterFactory
+	repo           Repo
+	opsRepo        operations.Repo
 	// relations — порт модели прав. Создание спрашивает его ровно об одном:
 	// вправе ли вызывающий задать идентификатор аккаунта (администратор облака),
 	// и только когда идентификатор указан. Неподключённый порт — отказ права,
@@ -309,7 +309,9 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 	// the principal, so it is resolved here and passed into doCreate.
 	actor := authzguard.PrincipalUserID(ctx)
 
+	crudPrincipal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, crudPrincipal)
 		return u.doCreate(ctx, a, domain.ProjectID(defaultProjID), actor, idSource)
 	})
 	return &op, nil
@@ -323,173 +325,171 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 // над содержимым — C-01/C-01b; единый materialization-путь). Возвращает anypb с
 // финальным state Account'а.
 func (u *CreateAccountUseCase) doCreate(ctx context.Context, a domain.Account, defaultProjID domain.ProjectID, actor, idSource string) (*anypb.Any, error) {
-	w, err := u.repo.Writer(ctx)
-	if err != nil {
-		return nil, shared.MapRepoErr(err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = w.Rollback(ctx)
-		}
-	}()
-
-	// ПЕРВЫЙ ОПЕРАТОР — ключевой замок строки владельца (kaname#664, KN664-40).
-	// Снятие личности берёт ту же строку на изменение первым оператором, и две
-	// транзакции сериализуются на ней: создание, пришедшее после снятия,
-	// отвечает «User <id> not found» (FailedPrecondition) здесь, одним текстом.
-	// Без замка отсутствие владельца первой находила вставка собственнической
-	// выдачи (её триггер существования субъекта) — с другим текстом.
-	//
-	// Ключ accounts_owner_fk (23503) остаётся рубежом: он DEFERRABLE INITIALLY
-	// DEFERRED, и его нарушение всплывает на COMMIT (см. writeTx.Commit), где
-	// мапится в тот же "User <id> not found" через constraint-aware bridge.
-	if lerr := w.AccountsW().LockOwner(ctx, a.OwnerUserID); lerr != nil {
-		return nil, shared.MapRepoErr(lerr)
-	}
-	inserted, ierr := w.AccountsW().Insert(ctx, a)
-	if ierr != nil {
-		return nil, shared.MapRepoErr(ierr)
-	}
-
-	// F2 one-shot saga: co-commit the default "default" Project in the SAME
-	// writer-tx (ban #10 — either Account+Project+owner-binding all commit, or
-	// nothing; no phantom Account). FK projects_account_fk resolves against the
-	// account inserted just above (same tx). The project is wired into the FGA
-	// hierarchy exactly as ProjectService.Create does (account→project + cluster
-	// pointer + reconcile event) so the owner `*.*` ARM_ANCHOR forward
-	// (ReconcileBinding post-commit) materializes access to it.
-	defaultProject := domain.Project{
-		ID:        defaultProjID,
-		AccountID: inserted.ID,
-		Name:      domain.ProjectName("default"),
-		Labels:    domain.Labels{},
-	}
-	if verr := defaultProject.Validate(); verr != nil {
-		return nil, shared.MapValidationErr(verr)
-	}
-	insertedProj, perr := w.ProjectsW().Insert(ctx, defaultProject)
-	if perr != nil {
-		return nil, shared.MapRepoErr(perr)
-	}
-	// Same single projection as ProjectService.Create — see ownerTuples above.
-	if ferr := w.EmitFGARelationWrite(ctx, projectStructuralTuples(insertedProj)); ferr != nil {
-		return nil, shared.MapRepoErr(ferr)
-	}
-	if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.project", string(insertedProj.ID)); rerr != nil {
-		return nil, shared.MapRepoErr(rerr)
-	}
-	// Durable audit_outbox compliance row in the SAME writer-tx (запрет #10).
-	if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
-		EventType:       auditEventAccountCreated,
-		TenantAccountID: string(inserted.ID),
-		Payload: map[string]any{
-			"actor":         actor,
-			"resource_type": "account",
-			"resource_id":   string(inserted.ID),
-			"name":          string(inserted.Name),
-			"id_source":     idSource,
-		},
-	}); aerr != nil {
-		return nil, shared.MapRepoErr(aerr)
-	}
-	// FGA owner/hierarchy owner-tuple intent co-committed in the SAME writer-tx
-	// (SEC-D):
-	//   user:<owner>#owner@account:<id>          — owner self-grant (D-4: NOT
-	//     reconstructible by the reconciler ⇒ in-tx emit is the ONLY guarantee).
-	//   cluster:cluster_root#cluster@account:<id> — SEC-L cluster pointer.
-	if ferr := w.EmitFGARelationWrite(ctx, ownerTuples(inserted)); ferr != nil {
-		return nil, shared.MapRepoErr(ferr)
-	}
-
-	// RBAC explicit-model 2026 P6 (D-8 / C-01 / ВЗ-3): co-commit the owner
-	// AccessBinding (subject=creator, role=owner, scope=ACCOUNT:<A>,
-	// deletion_protection=true) in the SAME writer-tx. The FK
-	// access_bindings_role_fk references the `owner` system-role (seeded by
-	// migration 0035); a missing role rolls the whole tx back (account included).
-	// Per-object access tuples (scope-self + content) are materialized FORWARD by
-	// the reconciler after commit (the account is empty at Create, D-8a) — the
-	// single materialization path; no binding-time scope_grant emission.
+	// Идентификатор входит в prepared intent и затем единожды потребляется телом.
 	ownerBindingID := domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding))
-	ownerBinding := domain.AccessBinding{
-		ID:                 ownerBindingID,
-		SubjectType:        domain.SubjectTypeUser,
-		SubjectID:          domain.SubjectID(inserted.OwnerUserID),
-		RoleID:             domain.OwnerRoleID,
-		ResourceType:       "account",
-		ResourceID:         string(inserted.ID),
-		Scope:              domain.ScopeAccount,
-		GrantedByUserID:    domain.UserID(actor),
-		DeletionProtection: true,
-		Subjects:           []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(inserted.OwnerUserID)}},
-		// F8: the owner grant is whole-account (all objects under the account
-		// anchor, incl. future) — the explicit allInScope opt-in, mirroring the
-		// public AccessBinding.Create least-priv contract.
-		Target: domain.AccessTarget{AllInScope: true},
+	request := kanamerepo.AccountCreateAuthority{Account: a, DefaultProjectID: defaultProjID, OwnerBindingID: ownerBindingID, IDSource: idSource}
+	type createdAccountAttempt struct {
+		account domain.Account
+		binding domain.AccessBinding
 	}
-	// Self-validating-domain: assert the internally-built
-	// owner-binding is well-formed BEFORE Insert — parity with the public
-	// AccessBinding.Create path (which calls b.Validate()). All fields are
-	// internally constructed, so a failure here means field drift, not bad input;
-	// returning the error inside the worker-tx triggers Rollback (defer above),
-	// fail-closed.
-	if verr := ownerBinding.Validate(); verr != nil {
-		return nil, shared.MapValidationErr(verr)
-	}
-	createdBinding, berr := w.AccessBindingsW().Insert(ctx, ownerBinding)
-	if berr != nil {
-		return nil, shared.MapRepoErr(berr)
-	}
-	if serr := w.AccessBindingsW().InsertSubjects(ctx, createdBinding.ID, ownerBinding.Subjects); serr != nil {
-		return nil, shared.MapRepoErr(serr)
-	}
-	// Owner-binding OBJECT hierarchy parent-pointer co-committed in the SAME
-	// writer-tx (parity with a regular AccessBinding.Create, tuplesForBinding/
-	// hierarchyParentTuple): account:<A>#account@iam_access_binding:<id>.
-	// rbac-contract-a-fix: under the FLAT rights model (Contract-A) the
-	// `viewer/editor from account` ACCESS cascade on iam_access_binding was REMOVED,
-	// so this pointer is the hierarchy/lineage edge only — it no longer by itself
-	// grants the scope owner a path to the binding OBJECT. The owner's Get/List/Delete
-	// access on its OWN owner-binding object is MATERIALIZED per-object by the
-	// reconciler: the owner `*.*` ARM_ANCHOR over iam.accessBinding (now in
-	// AllMaterializableTypes, iam-direct scan of the access_bindings table within the
-	// account scope) covers the owner-binding row itself, emitted by the post-commit
-	// ReconcileBinding below (and the periodic sweep). The pointer is retained for
-	// lineage parity (and so a future cascade re-introduction would not need a
-	// migration), not for access.
-	if ferr := w.EmitFGARelationWrite(ctx, ownerBindingHierarchyTuples(inserted, createdBinding.ID)); ferr != nil {
-		return nil, shared.MapRepoErr(ferr)
-	}
-	// Record the OWNER-BINDING-lifecycle tuples in the emitted-tuple ledger in the SAME
-	// writer-tx (symmetric revoke). Without this the owner-binding's revoke
-	// (delete.go SelectEmittedTuples) finds no rows for the owner self-grant + hierarchy
-	// pointer and orphans them → standing admin via the FGA `or owner` derivation. This
-	// mirrors what a regular AccessBinding.Create records (source='binding'). The SEC-L
-	// cluster pointer is account-lifecycle and intentionally excluded (survives revoke).
-	if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, createdBinding.ID,
-		ownerBindingLedgerTuples(inserted, createdBinding.ID)); lerr != nil {
-		return nil, shared.MapRepoErr(lerr)
-	}
-	// Per-subject audit_outbox grant event in the SAME tx (parity with
-	// AccessBinding.Create's grant audit).
-	if aerr := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
-		EventType:       abrepo.AuditEventTypeGranted,
-		Actor:           actor,
-		SubjectType:     string(domain.SubjectTypeUser),
-		SubjectID:       string(inserted.OwnerUserID),
-		ResourceType:    "account",
-		ResourceID:      string(inserted.ID),
-		RoleID:          domain.OwnerRoleID,
-		BindingID:       string(createdBinding.ID),
-		TenantAccountID: string(inserted.ID),
-	}); aerr != nil {
-		return nil, shared.MapRepoErr(aerr)
-	}
+	result, err := shared.DoWithWriteTx(ctx, u.crudRepo(request), func(ctx context.Context, w Writer) (createdAccountAttempt, error) {
+		// ПЕРВЫЙ ОПЕРАТОР — ключевой замок строки владельца (kaname#664, KN664-40).
+		// Снятие личности берёт ту же строку на изменение первым оператором, и две
+		// транзакции сериализуются на ней: создание, пришедшее после снятия,
+		// отвечает «User <id> not found» (FailedPrecondition) здесь, одним текстом.
+		// Без замка отсутствие владельца первой находила вставка собственнической
+		// выдачи (её триггер существования субъекта) — с другим текстом.
+		//
+		// Ключ accounts_owner_fk (23503) остаётся рубежом: он DEFERRABLE INITIALLY
+		// DEFERRED, и его нарушение всплывает на COMMIT (см. writeTx.Commit), где
+		// мапится в тот же "User <id> not found" через constraint-aware bridge.
+		if lerr := w.AccountsW().LockOwner(ctx, a.OwnerUserID); lerr != nil {
+			return createdAccountAttempt{}, lerr
+		}
+		inserted, ierr := w.AccountsW().Insert(ctx, a)
+		if ierr != nil {
+			return createdAccountAttempt{}, ierr
+		}
 
-	if cerr := w.Commit(ctx); cerr != nil {
-		return nil, shared.MapRepoErr(cerr)
+		// F2 one-shot saga: co-commit the default "default" Project in the SAME
+		// writer-tx (ban #10 — either Account+Project+owner-binding all commit, or
+		// nothing; no phantom Account). FK projects_account_fk resolves against the
+		// account inserted just above (same tx). The project is wired into the FGA
+		// hierarchy exactly as ProjectService.Create does (account→project + cluster
+		// pointer + reconcile event) so the owner `*.*` ARM_ANCHOR forward
+		// (ReconcileBinding post-commit) materializes access to it.
+		defaultProject := domain.Project{
+			ID:        defaultProjID,
+			AccountID: inserted.ID,
+			Name:      domain.ProjectName("default"),
+			Labels:    domain.Labels{},
+		}
+		if verr := defaultProject.Validate(); verr != nil {
+			return createdAccountAttempt{}, shared.MapValidationErr(verr)
+		}
+		insertedProj, perr := w.ProjectsW().Insert(ctx, defaultProject)
+		if perr != nil {
+			return createdAccountAttempt{}, perr
+		}
+		// Same single projection as ProjectService.Create — see ownerTuples above.
+		if ferr := w.EmitFGARelationWrite(ctx, projectStructuralTuples(insertedProj)); ferr != nil {
+			return createdAccountAttempt{}, ferr
+		}
+		if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.project", string(insertedProj.ID)); rerr != nil {
+			return createdAccountAttempt{}, rerr
+		}
+		// Durable audit_outbox compliance row in the SAME writer-tx (запрет #10).
+		if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
+			EventType:       auditEventAccountCreated,
+			TenantAccountID: string(inserted.ID),
+			Payload: map[string]any{
+				"actor":         actor,
+				"resource_type": "account",
+				"resource_id":   string(inserted.ID),
+				"name":          string(inserted.Name),
+				"id_source":     idSource,
+			},
+		}); aerr != nil {
+			return createdAccountAttempt{}, aerr
+		}
+		// FGA owner/hierarchy owner-tuple intent co-committed in the SAME writer-tx
+		// (SEC-D):
+		//   user:<owner>#owner@account:<id>          — owner self-grant (D-4: NOT
+		//     reconstructible by the reconciler ⇒ in-tx emit is the ONLY guarantee).
+		//   cluster:cluster_root#cluster@account:<id> — SEC-L cluster pointer.
+		if ferr := w.EmitFGARelationWrite(ctx, ownerTuples(inserted)); ferr != nil {
+			return createdAccountAttempt{}, ferr
+		}
+
+		// RBAC explicit-model 2026 P6 (D-8 / C-01 / ВЗ-3): co-commit the owner
+		// AccessBinding (subject=creator, role=owner, scope=ACCOUNT:<A>,
+		// deletion_protection=true) in the SAME writer-tx. The FK
+		// access_bindings_role_fk references the `owner` system-role (seeded by
+		// migration 0035); a missing role rolls the whole tx back (account included).
+		// Per-object access tuples (scope-self + content) are materialized FORWARD by
+		// the reconciler after commit (the account is empty at Create, D-8a) — the
+		// single materialization path; no binding-time scope_grant emission.
+		ownerBinding := domain.AccessBinding{
+			ID:                 ownerBindingID,
+			SubjectType:        domain.SubjectTypeUser,
+			SubjectID:          domain.SubjectID(inserted.OwnerUserID),
+			RoleID:             domain.OwnerRoleID,
+			ResourceType:       "account",
+			ResourceID:         string(inserted.ID),
+			Scope:              domain.ScopeAccount,
+			GrantedByUserID:    domain.UserID(actor),
+			DeletionProtection: true,
+			Subjects:           []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(inserted.OwnerUserID)}},
+			// F8: the owner grant is whole-account (all objects under the account
+			// anchor, incl. future) — the explicit allInScope opt-in, mirroring the
+			// public AccessBinding.Create least-priv contract.
+			Target: domain.AccessTarget{AllInScope: true},
+		}
+		// Self-validating-domain: assert the internally-built
+		// owner-binding is well-formed BEFORE Insert — parity with the public
+		// AccessBinding.Create path (which calls b.Validate()). All fields are
+		// internally constructed, so a failure here means field drift, not bad input;
+		// returning the error inside the worker-tx triggers Rollback (defer above),
+		// fail-closed.
+		if verr := ownerBinding.Validate(); verr != nil {
+			return createdAccountAttempt{}, shared.MapValidationErr(verr)
+		}
+		createdBinding, berr := w.AccessBindingsW().Insert(ctx, ownerBinding)
+		if berr != nil {
+			return createdAccountAttempt{}, berr
+		}
+		if serr := w.AccessBindingsW().InsertSubjects(ctx, createdBinding.ID, ownerBinding.Subjects); serr != nil {
+			return createdAccountAttempt{}, serr
+		}
+		// Owner-binding OBJECT hierarchy parent-pointer co-committed in the SAME
+		// writer-tx (parity with a regular AccessBinding.Create, tuplesForBinding/
+		// hierarchyParentTuple): account:<A>#account@iam_access_binding:<id>.
+		// rbac-contract-a-fix: under the FLAT rights model (Contract-A) the
+		// `viewer/editor from account` ACCESS cascade on iam_access_binding was REMOVED,
+		// so this pointer is the hierarchy/lineage edge only — it no longer by itself
+		// grants the scope owner a path to the binding OBJECT. The owner's Get/List/Delete
+		// access on its OWN owner-binding object is MATERIALIZED per-object by the
+		// reconciler: the owner `*.*` ARM_ANCHOR over iam.accessBinding (now in
+		// AllMaterializableTypes, iam-direct scan of the access_bindings table within the
+		// account scope) covers the owner-binding row itself, emitted by the post-commit
+		// ReconcileBinding below (and the periodic sweep). The pointer is retained for
+		// lineage parity (and so a future cascade re-introduction would not need a
+		// migration), not for access.
+		if ferr := w.EmitFGARelationWrite(ctx, ownerBindingHierarchyTuples(inserted, createdBinding.ID)); ferr != nil {
+			return createdAccountAttempt{}, ferr
+		}
+		// Record the OWNER-BINDING-lifecycle tuples in the emitted-tuple ledger in the SAME
+		// writer-tx (symmetric revoke). Without this the owner-binding's revoke
+		// (delete.go SelectEmittedTuples) finds no rows for the owner self-grant + hierarchy
+		// pointer and orphans them → standing admin via the FGA `or owner` derivation. This
+		// mirrors what a regular AccessBinding.Create records (source='binding'). The SEC-L
+		// cluster pointer is account-lifecycle and intentionally excluded (survives revoke).
+		if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, createdBinding.ID,
+			ownerBindingLedgerTuples(inserted, createdBinding.ID)); lerr != nil {
+			return createdAccountAttempt{}, lerr
+		}
+		// Per-subject audit_outbox grant event in the SAME tx (parity with
+		// AccessBinding.Create's grant audit).
+		if aerr := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
+			EventType:       abrepo.AuditEventTypeGranted,
+			Actor:           actor,
+			SubjectType:     string(domain.SubjectTypeUser),
+			SubjectID:       string(inserted.OwnerUserID),
+			ResourceType:    "account",
+			ResourceID:      string(inserted.ID),
+			RoleID:          domain.OwnerRoleID,
+			BindingID:       string(createdBinding.ID),
+			TenantAccountID: string(inserted.ID),
+		}); aerr != nil {
+			return createdAccountAttempt{}, aerr
+		}
+
+		return createdAccountAttempt{inserted, createdBinding}, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	committed = true
+	inserted, createdBinding := result.account, result.binding
 
 	// Post-commit: materialize the owner-binding's per-object membership (scope-self
 	// verb-bearing on account:<A> + ARM_ANCHOR over content). nil-safe; the periodic

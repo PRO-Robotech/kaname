@@ -134,7 +134,7 @@ func (r *roleReader) UnresolvedSegments(
 		)
 		SELECT d.role_id, d.object_type, d.verb
 		  FROM d
-		 WHERE NOT EXISTS (
+		 WHERE ((d.object_type='iam.role' AND d.verb='bind') OR (d.object_type='iam.accessBinding' AND d.verb='create')) OR NOT EXISTS (
 		   SELECT 1 FROM kaname.role_verb rv
 		    WHERE rv.role_id     = d.role_id
 		      AND rv.object_type = d.object_type
@@ -153,6 +153,10 @@ func (r *roleReader) UnresolvedSegments(
 	}
 	if rerr := rows.Err(); rerr != nil {
 		return nil, mapErr(rerr, "", "")
+	}
+	rows.Close()
+	if err := r.resolveGrantSegments(ctx, declared, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -550,6 +554,9 @@ type roleWriter struct {
 // the roles_definition_tier_xor CHECK and the roles_acc/prj_custom_unique partial indexes,
 // and by the account_id/project_id FK (an ” would dangle).
 func (w *roleWriter) Insert(ctx context.Context, r domain.Role) (domain.Role, error) {
+	return w.insertAt(ctx, r, time.Now().UTC())
+}
+func (w *roleWriter) insertAt(ctx context.Context, r domain.Role, now time.Time) (domain.Role, error) {
 	if err := holdRoleNames(ctx, w.tx, r.HeldNames); err != nil {
 		return domain.Role{}, err
 	}
@@ -567,7 +574,6 @@ func (w *roleWriter) Insert(ctx context.Context, r domain.Role) (domain.Role, er
 	if err != nil {
 		return domain.Role{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
-	now := time.Now().UTC()
 	// redesign-2026 F4: is_system is a GENERATED column (derived from cluster_id) —
 	// it is NEVER inserted explicitly (Postgres rejects a non-DEFAULT value into a
 	// generated column). Custom roles set account_id XOR project_id, cluster_id NULL,
@@ -752,6 +758,41 @@ func (w *roleWriter) UpdateCAS(ctx context.Context, r domain.Role, updateMask []
 	out, err := scanRole(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			// Stable contract text — capital "Role" to match
+			// the use-case OCC text in role.update.go (register unified).
+			return domain.Role{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+				"Role was modified concurrently, retry")
+		}
+		return domain.Role{}, mapErr(err, "", string(r.Name))
+	}
+	return out, nil
+}
+
+func (w *roleWriter) updateCASAt(ctx context.Context, r domain.Role, updateMask []string, expectedVersion string, stamp time.Time) (domain.Role, error) {
+	if err := holdRoleNames(ctx, w.tx, r.HeldNames); err != nil {
+		return domain.Role{}, err
+	}
+	args, changed, err := roleUpdateArgs(r, updateMask)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	// Пустая маска НЕ выводит из-под сторожа: оператор исполняется с ложными
+	// признаками применимости, то есть переписывает строку теми же значениями.
+	// Это и есть прежний «re-touch» — версия сверяется, xmin двигается для
+	// наблюдателей, а метка правки НЕ трогается (её признак тоже ложен), потому
+	// что правки не было.
+	args[12] = stamp
+	query := roleUpdateQ
+	if expectedVersion != "" {
+		args = append(args, expectedVersion)
+		query = roleUpdateCASQ
+	} else if !changed {
+		return w.Get(ctx, r.ID)
+	}
+	row := w.tx.QueryRow(ctx, query, args...)
+	out, err := scanRole(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) && expectedVersion != "" {
 			// Stable contract text — capital "Role" to match
 			// the use-case OCC text in role.update.go (register unified).
 			return domain.Role{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
@@ -961,21 +1002,40 @@ func (w *roleWriter) Delete(ctx context.Context, id domain.RoleID) error {
 // какой слой ответил. Поэтому проверка, заведённая здесь снова и отвечающая
 // иначе, покраснеет.
 func (w *roleWriter) ReplaceRoleVerbs(ctx context.Context, roleID domain.RoleID, pairs []domain.RoleVerb) error {
-	if _, err := w.tx.Exec(ctx,
-		`DELETE FROM kaname.role_verb WHERE role_id = $1`, string(roleID)); err != nil {
+	id := string(roleID)
+	if err := writeRoleVerbProjection(ctx, w.tx, id, nil); err != nil {
 		return mapErr(err, "", string(roleID))
 	}
 	for _, pv := range pairs {
-		if _, err := w.tx.Exec(ctx,
-			`INSERT INTO kaname.role_verb (role_id, object_type, verb)
-			 VALUES ($1, $2, $3)
-			 ON CONFLICT (role_id, object_type, verb) DO NOTHING`,
-			string(roleID), pv.ObjectType, pv.Verb,
-		); err != nil {
+		row := roleVerbProjectionRow{RoleID: &id, ObjectType: &pv.ObjectType, Verb: &pv.Verb}
+		if err := writeRoleVerbProjection(ctx, w.tx, id, &row); err != nil {
 			return mapErr(err, "", string(roleID))
 		}
 	}
 	return nil
+}
+
+// roleVerbProjectionRow — физический образ общей формы записи проекции роли.
+// nil row снимает проекцию; иначе выполняется ровно одна вставка, даже для
+// повторной строки. Nullable поля сохраняют физический NULL подготовленного
+// образа; здесь нет повторной компиляции правил или проверки каталога.
+type roleVerbProjectionRow struct {
+	RoleID     *string `json:"role_id"`
+	ObjectType *string `json:"object_type"`
+	Verb       *string `json:"verb"`
+}
+
+func writeRoleVerbProjection(ctx context.Context, tx pgx.Tx, roleID string, row *roleVerbProjectionRow) error {
+	if row == nil {
+		_, err := tx.Exec(ctx, `DELETE FROM ONLY kaname.role_verb WHERE role_id = $1`, roleID)
+		return err
+	}
+	_, err := tx.Exec(ctx,
+		`INSERT INTO kaname.role_verb (role_id, object_type, verb)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (role_id, object_type, verb) DO NOTHING`,
+		row.RoleID, row.ObjectType, row.Verb)
+	return err
 }
 
 // LockOwnerModule берёт строку `catalog_module` модуля-владельца ключевым
@@ -987,7 +1047,20 @@ func (w *roleWriter) ReplaceRoleVerbs(ctx context.Context, roleID domain.RoleID,
 // РАНЬШЕ строк ресурсов. Применитель каталога берёт ту же строку `FOR UPDATE`
 // до строк ресурсов (`catalogWriter.LockModuleRow`), и встретившиеся стороны
 // ждут друг друга на строке модуля, ничего ещё не держа из строк ресурсов.
+// admitPrelock проверяет прежний admission до строчного замка роли/каталога.
+// Compatibility берёт свой существующий consumer barrier; signed writer только
+// проверяет уже выданный claim. Proof/nonce наружу не возвращаются, часы не меняются.
+func (w *roleWriter) admitPrelock(ctx context.Context, id string) error {
+	if _, err := w.tx.Exec(ctx, `SELECT kaname.authority_role_prelock_admit_v3()`); err != nil {
+		return mapErr(err, "", id)
+	}
+	return nil
+}
+
 func (w *roleWriter) LockOwnerModule(ctx context.Context, module string) error {
+	if err := w.admitPrelock(ctx, module); err != nil {
+		return err
+	}
 	if _, err := w.tx.Exec(ctx, `
 		SELECT 1 FROM kaname.catalog_module
 		 WHERE module = $1
@@ -1026,21 +1099,17 @@ func (w *roleWriter) LockOwnerModule(ctx context.Context, module string) error {
 // IMMEDIATE`, миграция 20260901113757): при отложенной оператор уже завершился успехом,
 // и подсказывать некому.
 func (w *roleWriter) ReplaceRuleRefs(ctx context.Context, roleID domain.RoleID, refs []domain.RoleRuleRef) error {
-	if _, err := w.tx.Exec(ctx,
-		`DELETE FROM kaname.role_rule_ref WHERE role_id = $1`, string(roleID)); err != nil {
+	id := string(roleID)
+	if err := writeRoleRuleRefProjection(ctx, w.tx, id, nil); err != nil {
 		return mapErr(err, "", string(roleID))
 	}
 	for _, ref := range refs {
-		var verb any
+		var verb *string
 		if !ref.IsAnchor() {
-			verb = ref.Verb
+			verb = &ref.Verb
 		}
-		if _, err := w.tx.Exec(ctx,
-			`INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb)
-			 VALUES ($1, $2, $3, $4)
-			 ON CONFLICT DO NOTHING`,
-			string(roleID), ref.Module, ref.Resource, verb,
-		); err != nil {
+		row := roleRuleRefProjectionRow{RoleID: &id, Module: &ref.Module, Resource: &ref.Resource, Verb: verb}
+		if err := writeRoleRuleRefProjection(ctx, w.tx, id, &row); err != nil {
 			// Подсказка — ТОТ САМЫЙ токен, на котором отказал оператор. Какой
 			// сегмент назвать, решает ветвь `fkText` по имени ограничения; здесь
 			// подаются оба, потому что писатель не знает, который из двух ключей
@@ -1049,6 +1118,26 @@ func (w *roleWriter) ReplaceRuleRefs(ctx context.Context, roleID domain.RoleID, 
 		}
 	}
 	return nil
+}
+
+type roleRuleRefProjectionRow struct {
+	RoleID   *string `json:"role_id"`
+	Module   *string `json:"module"`
+	Resource *string `json:"resource"`
+	Verb     *string `json:"verb"`
+}
+
+func writeRoleRuleRefProjection(ctx context.Context, tx pgx.Tx, roleID string, row *roleRuleRefProjectionRow) error {
+	if row == nil {
+		_, err := tx.Exec(ctx, `DELETE FROM ONLY kaname.role_rule_ref WHERE role_id = $1`, roleID)
+		return err
+	}
+	_, err := tx.Exec(ctx,
+		`INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT DO NOTHING`,
+		row.RoleID, row.Module, row.Resource, row.Verb)
+	return err
 }
 
 // ruleRefHint — подсказка вида «resource\x1fverb» для одного оператора вставки.
@@ -1119,6 +1208,9 @@ func splitRuleRefHint(hint string) (resource, verb string) {
 // (`catalog_applier_lock_order_integration_test.go`), — прочитать порядок
 // нельзя, он есть свойство исполнения.
 func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
+	if err := w.admitPrelock(ctx, string(roleID)); err != nil {
+		return err
+	}
 	if types := lockedCatalogTypesOf(selectors); len(types) > 0 {
 		if _, err := w.tx.Exec(ctx, `
 			SELECT 1 FROM kaname.catalog_resource
@@ -1260,6 +1352,9 @@ func (w *roleWriter) RegrainSelectorVerbs(ctx context.Context, roleID domain.Rol
 // роли зависит, влечёт ли правка удаление (kaname#1006), и пересчёт по правилам
 // без владельца дал бы роли модуля удаление, которого её манифест не объявлял.
 func (w *roleWriter) RulesForRegrain(ctx context.Context, roleID domain.RoleID) (domain.Rules, domain.RulePolicy, bool, error) {
+	if err := w.admitPrelock(ctx, string(roleID)); err != nil {
+		return nil, domain.RulePolicy{}, false, err
+	}
 	var (
 		raw         []byte
 		isSystem    bool

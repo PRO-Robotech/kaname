@@ -96,7 +96,7 @@ const (
 // единственным вызывающим `presentInSession` (kaname#343). Ими выводится
 // ПОПУЛЯЦИЯ гейта — полосы, завершающие вход, — вместо перечня, выписанного по
 // памяти.
-var sessionLevelWriters = map[string]bool{"IssueSession": true, "PresentInSession": true, "presentInSession": true}
+var sessionLevelWriters = map[string]bool{"IssueSession": true, "IssueSessionPrepared": true, "PresentInSession": true, "presentInSession": true}
 
 // FailureResetUseKind — род обращения к порту обнуления.
 type FailureResetUseKind string
@@ -289,6 +289,75 @@ var failureResetRefsRe = regexp.MustCompile(`^PRO-Robotech/[A-Za-z0-9._-]+#[1-9]
 // FailureResetHomeCall — имя, которым полоса зовёт дом.
 const FailureResetHomeCall = "resetFailuresOnCompletedLogin"
 
+// sessionLevelForwardingCall — только передача известной двери другой известной
+// двери: нулевой материал и единственный return с прежними параметрами по порядку.
+// Потребители имени обёртки входят в тот же закрытый словарь и считаются сами.
+// Неизвестное имя либо любое вычисление/действие оставляет вызов в популяции.
+// Обращения к ResetFailures этот разбор не исключает: их судит полный обход.
+func sessionLevelForwardingCall(fn *ast.FuncDecl) *ast.CallExpr {
+	if fn.Recv != nil || fn.Type.TypeParams != nil || !sessionLevelWriters[fn.Name.Name] || fn.Body == nil || len(fn.Body.List) != 2 {
+		return nil
+	}
+	decl, ok := fn.Body.List[0].(*ast.DeclStmt)
+	if !ok {
+		return nil
+	}
+	gen, ok := decl.Decl.(*ast.GenDecl)
+	if !ok || gen.Tok != token.VAR || len(gen.Specs) != 1 {
+		return nil
+	}
+	value, ok := gen.Specs[0].(*ast.ValueSpec)
+	if !ok || len(value.Names) != 1 || len(value.Values) != 0 || value.Names[0].Name == "_" {
+		return nil
+	}
+	kind, ok := value.Type.(*ast.Ident)
+	if !ok || kind.Name != "SessionMaterial" {
+		return nil
+	}
+	ret, ok := fn.Body.List[1].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return nil
+	}
+	call, ok := ret.Results[0].(*ast.CallExpr)
+	if !ok || call.Ellipsis.IsValid() {
+		return nil
+	}
+	callee, ok := call.Fun.(*ast.Ident)
+	if !ok || !sessionLevelWriters[callee.Name] || callee.Name == fn.Name.Name || callee.Name == value.Names[0].Name || len(call.Args) != len(fn.Type.Params.List)+1 {
+		return nil
+	}
+	// Имя двери не должно обозначать параметр, результат или переменную.
+	// nil Obj допустим для функции из другого файла того же пакета.
+	if callee.Obj != nil && callee.Obj.Kind != ast.Fun {
+		return nil
+	}
+	if fn.Type.Results != nil {
+		for _, field := range fn.Type.Results.List {
+			for _, name := range field.Names {
+				if name.Name == callee.Name || name.Name == value.Names[0].Name {
+					return nil
+				}
+			}
+		}
+	}
+	for i, field := range fn.Type.Params.List {
+		arg, ok := call.Args[i].(*ast.Ident)
+		_, variadic := field.Type.(*ast.Ellipsis)
+		if !ok || variadic || len(field.Names) != 1 || arg.Name == "_" || arg.Name != field.Names[0].Name || arg.Name == value.Names[0].Name || arg.Name == callee.Name || arg.Obj == nil || arg.Obj != field.Names[0].Obj {
+			return nil
+		}
+	}
+	address, ok := call.Args[len(call.Args)-1].(*ast.UnaryExpr)
+	if !ok || address.Op != token.AND {
+		return nil
+	}
+	material, ok := address.X.(*ast.Ident)
+	if !ok || material.Name != value.Names[0].Name || material.Obj == nil || material.Obj != value.Names[0].Obj {
+		return nil
+	}
+	return call
+}
+
 // ScanSessionLevelWrites — вызовы, которыми файл пишет уровень сессии, и вызовы
 // дома. Оба судятся по УЗЛУ вызова, а не по слову в тексте: имя дома стоит и в
 // прозе, объясняющей его, и гейт по подстроке краснел бы на собственном
@@ -298,6 +367,14 @@ func ScanSessionLevelWrites(path string, src []byte) (writes []FailureResetUse, 
 	f, perr := parser.ParseFile(fset, path, src, parser.ParseComments)
 	if perr != nil {
 		return nil, 0, perr
+	}
+	forwarded := map[*ast.CallExpr]bool{}
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			if call := sessionLevelForwardingCall(fn); call != nil {
+				forwarded[call] = true
+			}
+		}
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -312,7 +389,7 @@ func ScanSessionLevelWrites(path string, src []byte) (writes []FailureResetUse, 
 			name = fun.Name
 		}
 		switch {
-		case sessionLevelWriters[name]:
+		case sessionLevelWriters[name] && !forwarded[call]:
 			writes = append(writes, FailureResetUse{
 				File: path, Line: fset.Position(call.Pos()).Line,
 				Kind: FailureResetLevelWrite, Func: name,

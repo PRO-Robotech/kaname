@@ -36,6 +36,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // dictionary — словарь имён типа. Именно ДВА: третьего в дереве нет, и появление
@@ -172,19 +174,63 @@ func stripSQLComments(sql string) string {
 	return strings.Join(out, "\n")
 }
 
-// aliasesOf — какая таблица стоит за каждым алиасом запроса.
-func aliasesOf(sql string) map[string]string {
-	out := map[string]string{}
-	for _, m := range reAlias.FindAllStringSubmatch(sql, -1) {
-		table, alias := m[1], m[2]
-		// Ключевые слова после имени таблицы алиасом не являются.
+// Области скобок и ветви UNION разделяют алиасы; вложенный запрос может
+// читать алиас родителя, но соседние запросы не переписывают его таблицу.
+type typeAliasScope struct {
+	parent *typeAliasScope
+	tables map[string]string
+}
+
+type typeAliases struct {
+	at    []*typeAliasScope
+	count int
+}
+
+var reAliasBoundary = regexp.MustCompile(`\(|\)|\b(?:UNION|INTERSECT|EXCEPT)\b`)
+
+func aliasesOf(sql string) typeAliases {
+	code := migrations.SQLBlankStrings(migrations.SQLBlankComments(sql))
+	out := typeAliases{at: make([]*typeAliasScope, len(code)+1)}
+	scope := &typeAliasScope{tables: map[string]string{}}
+	start := 0
+	for _, boundary := range reAliasBoundary.FindAllStringIndex(code, -1) {
+		for i := start; i < boundary[1]; i++ {
+			out.at[i] = scope
+		}
+		switch code[boundary[0]:boundary[1]] {
+		case "(":
+			scope = &typeAliasScope{parent: scope, tables: map[string]string{}}
+		case ")":
+			if scope.parent != nil {
+				scope = scope.parent
+			}
+		default:
+			scope = &typeAliasScope{parent: scope.parent, tables: map[string]string{}}
+		}
+		start = boundary[1]
+	}
+	for i := start; i < len(out.at); i++ {
+		out.at[i] = scope
+	}
+	for _, m := range reAlias.FindAllStringSubmatchIndex(code, -1) {
+		table, alias := code[m[2]:m[3]], code[m[4]:m[5]]
 		switch strings.ToUpper(alias) {
 		case "ON", "WHERE", "GROUP", "ORDER", "LIMIT", "UNION", "JOIN", "CROSS", "LEFT":
 			continue
 		}
-		out[alias] = table
+		out.at[m[0]].tables[alias] = table
+		out.count++
 	}
 	return out
+}
+
+func (a typeAliases) resolve(alias string, position int) (string, bool) {
+	for scope := a.at[position]; scope != nil; scope = scope.parent {
+		if table, ok := scope.tables[alias]; ok {
+			return table, true
+		}
+	}
+	return "", false
 }
 
 // side — одна сторона сравнения: её словарь и как её назвать в отказе.
@@ -192,6 +238,116 @@ type side struct {
 	dict  dictionary
 	label string
 	known bool
+}
+
+// Тот же суд для собранных production-запросов и инъекций границ областей.
+func typeDictionaryFindings(sql string, params paramDictionary) (comparisons int, undeclared, mismatched []string) {
+	sql = migrations.SQLBlankStrings(migrations.SQLBlankComments(sql))
+	aliases := aliasesOf(sql)
+
+	// Словарь стороны: колонка — по перечню, параметр — по объявлению
+	// запроса, столбец цепи областей — словарь модели (её несёт seed и
+	// её же несёт `parent_type`).
+	classify := func(token string, position int) side {
+		switch token {
+		case params.model:
+			return side{dictModel, "параметр " + token, true}
+		case params.catalog:
+			return side{dictCatalog, "параметр " + token, true}
+		}
+		if strings.HasSuffix(token, ".s_type") || token == "s_type" {
+			return side{dictModel, "цепь областей (" + token + ")", true}
+		}
+		alias, column, ok := strings.Cut(token, ".")
+		if !ok {
+			return side{}
+		}
+		table, ok := aliases.resolve(alias, position)
+		if !ok || !reTypeColumn.MatchString(column) {
+			return side{}
+		}
+		key := table + "." + column
+		d, declared := dictionaryOfColumn[key]
+		if !declared {
+			undeclared = append(undeclared, key)
+			return side{}
+		}
+		return side{d, key, true}
+	}
+
+	check := func(left, right string, position int) {
+		l, r := classify(left, position), classify(right, position)
+		if !l.known || !r.known {
+			return
+		}
+		comparisons++
+		if l.dict != r.dict {
+			mismatched = append(mismatched, l.label+" ("+l.dict.String()+") соединён с "+
+				r.label+" ("+r.dict.String()+")")
+		}
+	}
+
+	for _, m := range reCompare.FindAllStringSubmatchIndex(sql, -1) {
+		left, column, right := sql[m[2]:m[3]]+"."+sql[m[4]:m[5]], sql[m[4]:m[5]], sql[m[6]:m[7]]
+		if !reTypeColumn.MatchString(column) {
+			continue
+		}
+		check(left, strings.TrimSuffix(right, "::text"), m[0])
+	}
+	for _, m := range reAnyOf.FindAllStringSubmatchIndex(sql, -1) {
+		check(strings.TrimSuffix(sql[m[2]:m[3]], "::text"), sql[m[4]:m[5]]+"."+sql[m[6]:m[7]], m[0])
+	}
+	return comparisons, undeclared, mismatched
+}
+
+func TestTypeDictionaryGateScopedAliases(t *testing.T) {
+	const siblings = `WITH candidates AS (
+ SELECT m.object_id FROM kaname.resource_mirror m WHERE m.object_type = $9
+), fallback AS (
+ SELECT m.account_id FROM kaname.memberships m WHERE m.user_id = $1
+) SELECT * FROM candidates`
+	for _, tc := range []struct {
+		name        string
+		sql         string
+		comparisons int
+		unknown     string
+		mismatch    string
+	}{
+		{"соседние CTE повторяют m", siblings, 1, "", ""},
+		{"вложенный m затеняет родителя", `SELECT m.object_id FROM kaname.resource_mirror m
+ WHERE m.object_type = $9 AND EXISTS (
+ SELECT 1 FROM kaname.relation_fact m WHERE m.object_type = $2)`, 2, "", ""},
+		{"коррелированный запрос читает родительский m", `SELECT m.object_id FROM kaname.resource_mirror m
+ WHERE EXISTS (SELECT 1 WHERE m.object_type = $9)`, 1, "", ""},
+		{"ветви UNION не делят m", `SELECT m.object_id FROM kaname.resource_mirror m WHERE m.object_type = $9
+ UNION ALL SELECT m.object_id FROM kaname.relation_fact m WHERE m.object_type = $2`, 2, "", ""},
+		{"необъявленная колонка остаётся отказом", strings.Replace(siblings,
+			"m.user_id = $1", "m.object_type = $9", 1), 1, "memberships.object_type", ""},
+		{"неверный словарь остаётся отказом", strings.Replace(siblings,
+			"m.object_type = $9", "m.object_type = $2", 1), 1, "", "resource_mirror.object_type"},
+		{"ANY внутри скобок сохраняет область", `SELECT 1 FROM kaname.role_rule_selectors m
+ WHERE ($9::text = ANY (m.object_types))`, 1, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, unknown, mismatch := typeDictionaryFindings(tc.sql, paramDictionary{model: "$2", catalog: "$9"})
+			if n != tc.comparisons {
+				t.Errorf("сравнений %d, ожидалось %d", n, tc.comparisons)
+			}
+			for _, finding := range []struct {
+				name string
+				got  []string
+				want string
+			}{{"необъявленные колонки", unknown, tc.unknown}, {"разные словари", mismatch, tc.mismatch}} {
+				if finding.want == "" {
+					if len(finding.got) != 0 {
+						t.Errorf("%s: %v", finding.name, finding.got)
+					}
+				} else if len(finding.got) != 1 || !strings.Contains(finding.got[0], finding.want) {
+					t.Errorf("%s: %v, ожидалась одна находка %q", finding.name, finding.got, finding.want)
+				}
+			}
+		})
+	}
 }
 
 // Гейт: обе стороны каждого сравнения имён типа говорят ОДНИМ словарём.
@@ -207,60 +363,13 @@ func TestEveryTypeColumnIsReadInItsOwnDictionary(t *testing.T) {
 		for _, axis := range axesUnderGate() {
 			queries++
 			sql := stripSQLComments(q.build(axis.table))
-			aliases := aliasesOf(sql)
-
-			// Словарь стороны: колонка — по перечню, параметр — по объявлению
-			// запроса, столбец цепи областей — словарь модели (её несёт seed и
-			// её же несёт `parent_type`).
-			classify := func(token string) side {
-				switch token {
-				case q.params.model:
-					return side{dictModel, "параметр " + token, true}
-				case q.params.catalog:
-					return side{dictCatalog, "параметр " + token, true}
-				}
-				if strings.HasSuffix(token, ".s_type") || token == "s_type" {
-					return side{dictModel, "цепь областей (" + token + ")", true}
-				}
-				alias, column, ok := strings.Cut(token, ".")
-				if !ok {
-					return side{}
-				}
-				table, ok := aliases[alias]
-				if !ok || !reTypeColumn.MatchString(column) {
-					return side{}
-				}
-				key := table + "." + column
-				d, declared := dictionaryOfColumn[key]
-				if !declared {
-					undeclared = append(undeclared, q.name+"/"+axis.name+": "+key)
-					return side{}
-				}
-				return side{d, key, true}
+			n, unknown, wrong := typeDictionaryFindings(sql, q.params)
+			comparisons += n
+			for _, finding := range unknown {
+				undeclared = append(undeclared, q.name+"/"+axis.name+": "+finding)
 			}
-
-			check := func(left, right string) {
-				l, r := classify(left), classify(right)
-				if !l.known || !r.known {
-					return
-				}
-				comparisons++
-				if l.dict != r.dict {
-					mismatched = append(mismatched, q.name+" / "+axis.name+": "+
-						l.label+" ("+l.dict.String()+") соединён с "+
-						r.label+" ("+r.dict.String()+")")
-				}
-			}
-
-			for _, m := range reCompare.FindAllStringSubmatch(sql, -1) {
-				left, column, right := m[1]+"."+m[2], m[2], m[3]
-				if !reTypeColumn.MatchString(column) {
-					continue
-				}
-				check(left, strings.TrimSuffix(right, "::text"))
-			}
-			for _, m := range reAnyOf.FindAllStringSubmatch(sql, -1) {
-				check(strings.TrimSuffix(m[1], "::text"), m[2]+"."+m[3])
+			for _, finding := range wrong {
+				mismatched = append(mismatched, q.name+" / "+axis.name+": "+finding)
 			}
 		}
 	}
@@ -295,7 +404,7 @@ func TestTypeDictionaryGateSeesBothComparisonFormsOnBothAxes(t *testing.T) {
 	for _, q := range queriesUnderGate() {
 		for _, axis := range axesUnderGate() {
 			sql := stripSQLComments(q.build(axis.table))
-			if len(aliasesOf(sql)) == 0 {
+			if aliasesOf(sql).count == 0 {
 				t.Errorf("%s / %s: ни одного алиаса таблицы не разобрано", q.name, axis.name)
 			}
 			if !strings.Contains(sql, q.params.catalog) {

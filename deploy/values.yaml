@@ -199,6 +199,10 @@ db:
   name: kaname
   passwordSecretName: ""
   passwordSecretKey: ""
+  # kaname#1034: DSN владельца схемы доступен только migrator init-container.
+  # Пара пуста для прежней посадки; strict rollout требует отдельного runtime.
+  migrationDSNSecretName: ""
+  migrationDSNSecretKey: ""
 
 # ─── Config sections (viper YAML, parity с kacho-vpc) ───────────────────
 # Все ключи ниже рендерятся в /etc/kaname/config.yaml через
@@ -793,3 +797,7 @@ moduleSeedInstaller: {}
 # Назначение: {assignment_id: <новый-постоянный-id>, account_id: <существующий-id>, module: registry}.
 # disabled — явное исключение переписи первого обновления: {account_id, module, reason}.
 registrationAccountWriters: null
+
+# kaname#1034: staged participation; не включает strict или semantic gates.
+authorityProtocol:
+  participation: legacy

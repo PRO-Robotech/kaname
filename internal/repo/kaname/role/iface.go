@@ -248,6 +248,13 @@ type WriterIface interface {
 	// есть дефект, который ключ закрывает.
 	ReplaceRuleRefs(ctx context.Context, roleID domain.RoleID, refs []domain.RoleRuleRef) error
 
+	// ReplaceGrantCapabilities заменяет обе проекции управляющих прав в этой
+	// транзакции. Вызывающий заранее проверяет полномочия, видимость ссылок
+	// и жизненный цикл; порт проверяет только форму проекции и целостность FK.
+	// При ошибке вызывающий обязан откатить всю транзакцию записи.
+	// Авторинг использует порт; активация carrier отдельно (kaname#1034).
+	ReplaceGrantCapabilities(ctx context.Context, ownerRoleID domain.RoleID, specs []domain.GrantCapabilityRule) error
+
 	// LiveSystemRoles — живые системные роли, какими их видит ЭТА транзакция
 	// (kacho#1913).
 	//

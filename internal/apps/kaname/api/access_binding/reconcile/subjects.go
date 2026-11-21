@@ -35,52 +35,17 @@ type grantee struct {
 	verbs   []string
 }
 
-// isClassSubject — субъект — системный класс.
-func isClassSubject(s domain.Subject) bool {
-	return s.Type == domain.SubjectTypeSystemClass
-}
-
-// subjectRef — субъект в форме кортежа.
-func subjectRef(s domain.Subject) string {
-	return domain.FGASubjectRef(string(s.Type), string(s.ID))
-}
-
-// classReadVerbs — только глаголы чтения (Р4); `*` чтением не считается: он
-// раскрывается в набор типа, а набор растёт.
-func classReadVerbs(verbs []string) []string {
-	out := make([]string, 0, len(verbs))
-	for _, v := range verbs {
-		if domain.IsClassReadVerb(v) {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-// subjectVerbs — глаголы из `verbs`, которые выдача даёт субъекту `s`: классу —
-// только чтение, какими бы ни были правила роли СЕЙЧАС (роль может получить
-// пишущий глагол поставкой модуля, мимо стража правки).
-func subjectVerbs(s domain.Subject, verbs []string) []string {
-	if isClassSubject(s) {
-		return classReadVerbs(verbs)
-	}
-	return verbs
-}
-
 // grantees — субъекты выдачи, которым набор `verbs` даёт хоть один глагол,
 // каждый со своими глаголами. `nested` — набор принадлежит вложенному правилу:
 // классу оно не применяется (Р5, ND-10).
 func grantees(bs BindingScope, verbs []string, nested bool) []grantee {
-	out := make([]grantee, 0, len(bs.Subjects))
-	for _, s := range bs.Subjects {
-		if nested && isClassSubject(s) {
-			continue
-		}
-		v := subjectVerbs(s, verbs)
-		if len(v) == 0 {
-			continue
-		}
-		out = append(out, grantee{subject: subjectRef(s), verbs: v})
+	recipients := domain.GrantRecipients(bs.Subjects, verbs, nested)
+	out := make([]grantee, 0, len(recipients))
+	for _, recipient := range recipients {
+		out = append(out, grantee{
+			subject: domain.FGASubjectRef(string(recipient.Subject.Type), string(recipient.Subject.ID)),
+			verbs:   recipient.Verbs,
+		})
 	}
 	return out
 }
@@ -90,24 +55,8 @@ func selectorGrantees(bs BindingScope, sel domain.RuleSelector) []grantee {
 	return grantees(bs, sel.Verbs, sel.Container != nil)
 }
 
-// classSubjects — классы выдачи в форме кортежа, в порядке перечня.
-func classSubjects(bs BindingScope) []string {
-	var out []string
-	for _, s := range bs.Subjects {
-		if isClassSubject(s) {
-			out = append(out, subjectRef(s))
-		}
-	}
-	return out
-}
-
 // hasNonClassSubject — среди субъектов выдачи есть не-класс: вложенное правило
 // ей применяется.
 func hasNonClassSubject(bs BindingScope) bool {
-	for _, s := range bs.Subjects {
-		if !isClassSubject(s) {
-			return true
-		}
-	}
-	return false
+	return domain.HasNonClassSubject(bs.Subjects)
 }

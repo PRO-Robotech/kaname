@@ -19,6 +19,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -45,8 +46,10 @@ var saImmutableFields = map[string]string{
 }
 
 type UpdateServiceAccountUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	metadataConfigured bool
+	metadataFactory    kanamerepo.ServiceAccountMetadataWriterFactory
+	repo               Repo
+	opsRepo            operations.Repo
 	// Optional post-commit per-object materializer (same port the create-path uses).
 	// A LABEL change flips iam-direct selector membership, so the object must be
 	// re-materialized; nil-safe, the co-committed reconcile event + periodic sweep
@@ -131,7 +134,9 @@ func (u *UpdateServiceAccountUseCase) Execute(ctx context.Context, in UpdateServ
 	}
 	maskCopy := append([]string{}, in.UpdateMask...)
 	changedCopy := append([]string{}, changed...)
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		return u.doUpdate(ctx, target, maskCopy, actor, changedCopy)
 	})
 	return &op, nil
@@ -159,7 +164,7 @@ func (u *UpdateServiceAccountUseCase) Execute(ctx context.Context, in UpdateServ
 // co-committed reconcile event above and the periodic sweep stay the at-least-once
 // backstop, so this changes WHEN the revoke is observed, not WHETHER it happens.
 func (u *UpdateServiceAccountUseCase) doUpdate(ctx context.Context, sa domain.ServiceAccount, mask []string, actor string, changed []string) (*anypb.Any, error) {
-	updated, err := shared.DoWithWriteTx(ctx, u.repo,
+	updated, err := shared.DoWithWriteTx(ctx, u.metadataRepo(sa, mask),
 		func(ctx context.Context, w Writer) (domain.ServiceAccount, error) {
 			upd, uerr := w.ServiceAccountsW().Update(ctx, sa, mask)
 			if uerr != nil {

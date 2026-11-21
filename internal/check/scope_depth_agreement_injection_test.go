@@ -1,18 +1,6 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// scope_depth_agreement_injection_test.go — доказательство в ОБЕ стороны
-// (порт одноимённой пробы репозитория платформы, снят там вынесением службы
-// доступа — `kacho#2597`).
-//
-// (а) верни дефект — сверка краснеет и НАЗЫВАЕТ ОБЕ координаты;
-// (б) поставь рядом ЗАКОННУЮ конструкцию той же формы — сверка молчит.
-//
-// # Почему сверка вызывается напрямую, а не через настоящее дерево
-//
-// Уронить настоящее дерево нарочно нельзя, а гейт, который нельзя уронить, не
-// отличается от гейта, который не может упасть. Поэтому суждение отделено от
-// добычи (adjudicateScopeDepth) и здесь получает величины на вход.
 package check_test
 
 import (
@@ -26,96 +14,86 @@ import (
 
 func TestScopeDepthAgreement_ProvenByInjection(t *testing.T) {
 	t.Parallel()
-	root, prefix := platformtree.RequireCorpus(t)
-
-	// ── КОНТРОЛЬ. Без него краснота ниже неотличима от красноты дерева ──────
-	planDepth, planFound := findScopeDepthPlan(t, root, prefix)
-	if !planFound {
-		t.Fatal("предел компилятора модели в дереве НЕ НАЙДЕН — доказывать нечего.\n" +
-			"    Либо величину сняли (тогда снимите и эту пробу вместе с предметом), " +
-			"либо обход снова смотрит не туда.")
+	base := scopeDepthTriple{
+		goDepth: 5, sqlDepth: 4, planDepth: 5, pointerDepth: 5, storedDepth: 4, fanout: 4,
+		constPath: scopeDepthConstRel, migrationPath: scopeDepthMigrationRel,
+		planPath: scopeDepthPlanFileRel, sharedPath: scopeDepthSharedRel,
 	}
-	t.Logf("контроль: предел компилятора модели найден, значение %d", planDepth)
-
-	constPath := platformtree.Under(prefix, scopeDepthConstRel)
-	migrationPath := platformtree.Under(prefix, scopeDepthMigrationRel)
-	planPath := platformtree.Under(prefix, scopeDepthPlanFileRel)
-
-	t.Run("расхождение третьей величины краснеет и называет ОБЕ координаты", func(t *testing.T) {
-		found := adjudicateScopeDepth(scopeDepthTriple{
-			goDepth: 4, sqlDepth: 4, planDepth: 3, planFound: true,
-			constPath: constPath, migrationPath: migrationPath, planPath: planPath,
-		})
-		if len(found) != 1 {
-			t.Fatalf("ожидалась 1 находка, получено %d: %v", len(found), found)
-		}
-		for _, want := range []string{planPath, constPath, "3", "4"} {
-			if !strings.Contains(found[0], want) {
-				t.Fatalf("находка не называет %q — по ней не видно, что чинить:\n%s", want, found[0])
+	for _, tc := range []struct {
+		name        string
+		change      func(*scopeDepthTriple)
+		want        int
+		coordinates []string
+	}{
+		{"independent_axes", func(_ *scopeDepthTriple) {}, 0, nil},
+		{"model_mismatch", func(v *scopeDepthTriple) { v.planDepth = 3 }, 1, []string{scopeDepthPlanFileRel, scopeDepthSharedRel, "3", "5"}},
+		{"traversal_mismatch", func(v *scopeDepthTriple) { v.goDepth = 4 }, 1, []string{scopeDepthConstRel, scopeDepthSharedRel}},
+		{"schema_mismatch", func(v *scopeDepthTriple) { v.sqlDepth = 2 }, 1, []string{scopeDepthMigrationRel, scopeDepthSharedRel}},
+		{"all_mismatches", func(v *scopeDepthTriple) { v.goDepth = 3; v.planDepth = 2; v.sqlDepth = 1 }, 3, nil},
+		{"both_consumers_drift", func(v *scopeDepthTriple) { v.goDepth = 4; v.planDepth = 4 }, 2, nil},
+		{"other_consistent_values", func(v *scopeDepthTriple) {
+			v.goDepth = 7
+			v.planDepth = 7
+			v.pointerDepth = 7
+			v.storedDepth = 6
+			v.sqlDepth = 6
+			v.fanout = 2
+		}, 0, nil},
+		{"zero_hops", func(v *scopeDepthTriple) { v.goDepth = 0; v.planDepth = 0; v.pointerDepth = 0 }, 1, nil},
+		{"zero_fanout", func(v *scopeDepthTriple) { v.fanout = 0 }, 1, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value := base
+			tc.change(&value)
+			found := adjudicateScopeDepth(value)
+			if len(found) != tc.want {
+				t.Fatalf("находок %d, нужно %d: %v", len(found), tc.want, found)
 			}
-		}
-	})
-
-	t.Run("расхождение первых двух краснеет и называет ОБЕ координаты", func(t *testing.T) {
-		found := adjudicateScopeDepth(scopeDepthTriple{
-			goDepth: 4, sqlDepth: 2, planDepth: 4, planFound: true,
-			constPath: constPath, migrationPath: migrationPath, planPath: planPath,
-		})
-		if len(found) != 1 {
-			t.Fatalf("ожидалась 1 находка, получено %d: %v", len(found), found)
-		}
-		for _, want := range []string{constPath, migrationPath} {
-			if !strings.Contains(found[0], want) {
-				t.Fatalf("находка не называет %q:\n%s", want, found[0])
+			for _, coordinate := range tc.coordinates {
+				if !strings.Contains(strings.Join(found, "\n"), coordinate) {
+					t.Errorf("находка не называет %s: %v", coordinate, found)
+				}
 			}
-		}
-	})
-
-	t.Run("расходятся все три — названы обе пары, а не первая попавшаяся", func(t *testing.T) {
-		found := adjudicateScopeDepth(scopeDepthTriple{
-			goDepth: 4, sqlDepth: 2, planDepth: 3, planFound: true,
-			constPath: constPath, migrationPath: migrationPath, planPath: planPath,
 		})
-		if len(found) != 2 {
-			t.Fatalf("ожидались 2 находки, получено %d: %v", len(found), found)
-		}
-	})
-
-	// ── ЗАКОННЫЕ БЛИЗНЕЦЫ. Без них отрицание зеленело бы на всём сломанном ──
-	t.Run("согласие трёх величин — сверка молчит", func(t *testing.T) {
-		if found := adjudicateScopeDepth(scopeDepthTriple{
-			goDepth: 4, sqlDepth: 4, planDepth: 4, planFound: true,
-			constPath: constPath, migrationPath: migrationPath, planPath: planPath,
-		}); len(found) != 0 {
-			t.Fatalf("ложное срабатывание на согласии: %v", found)
-		}
-	})
-
-	t.Run("ненайденная третья величина НЕ выдумывает расхождения", func(t *testing.T) {
-		if found := adjudicateScopeDepth(scopeDepthTriple{
-			goDepth: 4, sqlDepth: 4, planFound: false,
-			constPath: constPath, migrationPath: migrationPath, planPath: planPath,
-		}); len(found) != 0 {
-			t.Fatalf("ненайденная величина принята за расхождение: %v", found)
-		}
-	})
-
-	t.Run("согласие на ДРУГОМ числе — сверка по равенству, а не по литералу 4", func(t *testing.T) {
-		if found := adjudicateScopeDepth(scopeDepthTriple{
-			goDepth: 7, sqlDepth: 7, planDepth: 7, planFound: true,
-			constPath: constPath, migrationPath: migrationPath, planPath: planPath,
-		}); len(found) != 0 {
-			t.Fatalf("сверка привязана к литералу, а не к равенству: %v", found)
-		}
-	})
+	}
 }
 
-// TestScopeDepthPlanFileCoordinateIsAlive — координата в тексте находки
-// обязана существовать.
-//
-// Она не участвует в обходе (тот ищет по всему дереву модуля), поэтому её
-// устаревание ничего не роняет само по себе: находка просто начнёт посылать
-// читателя в несуществующий файл.
+// Настоящий extractor проверяется отдельно от суждения: отсутствие, подмена
+// import, комментарий и дубли не становятся ложным согласием чисел.
+func TestScopeDepthAliasesAndMalformedDeclarations(t *testing.T) {
+	t.Parallel()
+	shared := "package hierarchy\nconst MaxPointerHops = 5\n"
+	alias := "package p\nimport h \"" + scopeDepthSharedImport + "\"\nconst MaxAncestorDepth = h.MaxPointerHops\n"
+	for _, tc := range []struct {
+		name, body, source string
+		want               int
+		fail               bool
+	}{
+		{"literal", "package p\nconst MaxAncestorDepth = 5", shared, 5, false},
+		{"alias", alias, shared, 5, false},
+		{"default_import", strings.ReplaceAll(strings.Replace(alias, "import h ", "import ", 1), "h.MaxPointerHops", "hierarchy.MaxPointerHops"), shared, 5, false},
+		{"different_literal_is_extracted", "package p\nconst MaxAncestorDepth = 3", shared, 3, false},
+		{"missing", "package p", shared, 0, true},
+		{"comment_only", "package p\n// const MaxAncestorDepth = 5", shared, 0, true},
+		{"duplicate", "package p\nconst MaxAncestorDepth = 5\nconst MaxAncestorDepth = 5", shared, 0, true},
+		{"var_not_const", "package p\nvar MaxAncestorDepth = 5", shared, 0, true},
+		{"foreign_import", strings.Replace(alias, scopeDepthSharedImport, "example.org/hierarchy", 1), shared, 0, true},
+		{"wrong_axis", strings.Replace(alias, "h.MaxPointerHops", "h.MaxStoredParentLinks", 1), shared, 0, true},
+		{"missing_import", "package p\nconst MaxAncestorDepth = h.MaxPointerHops", shared, 0, true},
+		{"missing_shared", alias, "package hierarchy", 0, true},
+		{"duplicate_shared", alias, shared + "const MaxPointerHops = 5\n", 0, true},
+		{"expression_not_understood", "package p\nconst MaxAncestorDepth = 4 + 1", shared, 0, true},
+		{"implicit_value", "package p\nconst (x = 5; MaxAncestorDepth)", shared, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveScopeDepth(tc.body, "MaxAncestorDepth", tc.source, "MaxPointerHops")
+			if (err != nil) != tc.fail || !tc.fail && got != tc.want {
+				t.Fatalf("получено %d / %v, нужно %d / error=%v", got, err, tc.want, tc.fail)
+			}
+		})
+	}
+}
+
 func TestScopeDepthPlanFileCoordinateIsAlive(t *testing.T) {
 	t.Parallel()
 	root, prefix := platformtree.RequireCorpus(t)
@@ -197,4 +175,48 @@ func TestScopeDepthRecogniserKnowsBothLegalFormsOfTheBound(t *testing.T) {
 	if len(ms) != 1 {
 		t.Fatalf("в %s совпадений %d, ожидалось ровно 1", migrationPath, len(ms))
 	}
+}
+
+// Вторая координата принципиальна: single-file extractor не видит такой drift.
+func TestScopeDepthGlobalCensusSecondFileInjections(t *testing.T) {
+	t.Parallel()
+	const second = "tools/probe/limits.go"
+	const samePackage = "internal/authzplan/other.go"
+	shared := "package hierarchy\nconst MaxPointerHops = 5\n"
+	canonical := "package authzplan\nimport h \"" + scopeDepthSharedImport + "\"\nconst MaxPointerDepth = h.MaxPointerHops\n"
+	alias := "package probe\nimport p \"github.com/PRO-Robotech/kaname/internal/authzplan\"\nconst MaxPointerDepth = p.MaxPointerDepth\n"
+	for _, tc := range []struct {
+		name, path, body string
+		fail             bool
+		count            int
+	}{
+		{"actual_tools_alias", second, alias, false, 2},
+		{"equal_independent_literal", second, "package probe; const MaxPointerDepth = 5", false, 2},
+		{"equal_shared_alias", second, strings.Replace(canonical, "package authzplan", "package probe", 1), false, 2},
+		{"comment_is_not_declaration", second, "package probe\n// const MaxPointerDepth = 3", false, 1},
+		{"conflicting_second_file", second, "package probe; const MaxPointerDepth = 3", true, 0},
+		{"same_package_duplicate_equal", samePackage, "package authzplan; const MaxPointerDepth = 5", true, 0},
+		{"same_package_duplicate_conflicting", samePackage, "package authzplan; const MaxPointerDepth = 3", true, 0},
+		{"second_file_unknown_expression", second, "package probe; const MaxPointerDepth = unknown()", true, 0},
+		{"second_file_foreign_alias", second, strings.Replace(alias, "github.com/PRO-Robotech/kaname/internal/authzplan", "example.org/authzplan", 1), true, 0},
+		{"second_file_parse_failure", second, "package probe; func broken(", true, 0},
+		{"second_file_var", second, "package probe; var MaxPointerDepth = 5", true, 0},
+		{"second_file_local_shadow", second, "package probe; func f() { const MaxPointerDepth = 3 }", true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			corpus := map[string]string{scopeDepthPlanFileRel: canonical, tc.path: tc.body}
+			n, count, err := scopeDepthPlanCensus(corpus, shared)
+			if (err != nil) != tc.fail || !tc.fail && (n != 5 || count != tc.count) {
+				t.Fatalf("получено n=%d count=%d error=%v, нужно fail=%v count=%d", n, count, err, tc.fail, tc.count)
+			}
+			if tc.fail && !strings.Contains(err.Error(), tc.path) {
+				t.Fatalf("отказ не называет второй файл %s: %v", tc.path, err)
+			}
+		})
+	}
+	t.Run("missing_canonical", func(t *testing.T) {
+		if _, _, err := scopeDepthPlanCensus(map[string]string{second: alias}, shared); err == nil {
+			t.Fatal("отсутствие canonical compiler молча принято")
+		}
+	})
 }

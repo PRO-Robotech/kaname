@@ -3,8 +3,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
@@ -627,7 +629,52 @@ func (w *ridLifecycleWorld) catalogOnly(t *testing.T) {
 	results, err := p.Results()
 	require.NoError(t, err)
 	require.Empty(t, results, "no delegation stage was requested")
+	// Слушатели поднимаются до фонового восстановления проекций. Снимок
+	// фазы чтения берём после завершения записи проекций этого процесса.
+	ready, cancel := context.WithTimeout(w.f.given.ctx, 90*time.Second)
+	defer cancel()
+	require.NoError(t, p.AwaitReady(ready, func(context.Context) error {
+		return ridCatalogRoleProjectionsReady(p.StdoutPath)
+	}), "восстановленный процесс не завершил пересчёт проекций ролей")
 	w.f.renewOperator(t, w.f.given.ctx)
+}
+
+func ridCatalogRoleProjectionsReady(path string) error {
+	stream, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	var verbsReady, refsReady bool
+	lines := bufio.NewScanner(stream)
+	lines.Buffer(make([]byte, 4096), 1024*1024)
+	for lines.Scan() {
+		var record struct {
+			Message   string `json:"msg"`
+			Completed *bool  `json:"completed"`
+			Examined  *int   `json:"roles_examined"`
+			Reseeded  *int   `json:"roles_reseeded"`
+			Failed    *int   `json:"roles_failed"`
+		}
+		if json.Unmarshal(lines.Bytes(), &record) != nil || record.Completed == nil || !*record.Completed ||
+			record.Examined == nil || record.Reseeded == nil || record.Failed == nil ||
+			*record.Failed != 0 || *record.Examined != *record.Reseeded {
+			continue
+		}
+		switch record.Message {
+		case "перепись пересчёта проекции глаголов роли":
+			verbsReady = true
+		case "перепись пересчёта проекции сегментов правила":
+			refsReady = true
+		}
+		if verbsReady && refsReady {
+			return nil
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("стартовый пересчёт проекций ролей ещё не завершился")
 }
 
 // Регистрируется конструктором явного включения до первого Start и подготовки.

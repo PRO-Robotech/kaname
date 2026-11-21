@@ -72,6 +72,10 @@ var _ clients.RelationStore = ownerRemovalOnlyRelations{}
 // операции.
 func startUseCaseDeactivation(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fx gammaFixture, bid domain.AccessBindingID, deact deactivation) <-chan error {
 	t.Helper()
+	stopTrace := func(bool) {}
+	if deact == accountDeleteDeactivation {
+		stopTrace = accountDeleteLockTrace(t, ctx, pool)
+	}
 	opsRepo := operations.NewRepo(pool, "kaname")
 	asOwner := operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(fx.owner)})
 	var (
@@ -94,7 +98,11 @@ func startUseCaseDeactivation(t *testing.T, ctx context.Context, pool *pgxpool.P
 	}
 	require.NoError(t, err, "синхронный путь %s (право владельца, защита от удаления) обязан пройти", deact)
 	done := make(chan error, 1)
-	go func() { done <- awaitOperationOutcome(ctx, opsRepo, op.ID) }()
+	go func() {
+		result := awaitOperationOutcome(ctx, opsRepo, op.ID)
+		stopTrace(result != nil)
+		done <- result
+	}()
 	return done
 }
 

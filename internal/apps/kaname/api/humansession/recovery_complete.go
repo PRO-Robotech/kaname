@@ -158,7 +158,9 @@ type CompleteRecoveryUseCase struct {
 // ось «заведено» места решения о счёте по адресу читается транзакцией записи
 // (`Writer.LoginMethod`), после применения кода.
 type CompleteRecoveryDeps struct {
-	Store Store
+	// RequirePreparedWrite запрещает сборку full режима без callback capability.
+	RequirePreparedWrite bool
+	Store                Store
 	// Completion — транзакция исхода (kaname#458): операторы обычного
 	// восстановления и перехода записи над одной транзакцией. Обязательна:
 	// глагол без неё перехода не исполнил бы и молча не деградирует.
@@ -182,6 +184,11 @@ type CompleteRecoveryDeps struct {
 
 // NewCompleteRecoveryUseCase — построение с проверкой зависимостей.
 func NewCompleteRecoveryUseCase(d CompleteRecoveryDeps) (*CompleteRecoveryUseCase, error) {
+	if d.RequirePreparedWrite {
+		if _, ok := d.Completion.(PreparedRecoveryCompletionStore); !ok {
+			return nil, fmt.Errorf("admission: prepared write capability required")
+		}
+	}
 	switch {
 	case d.Store == nil:
 		return nil, fmt.Errorf("recovery completion: session store required")
@@ -277,52 +284,44 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	// способа входа (`SessionSetWriter`, kaname#340). У адреса без личности
 	// строки нет, а оператор замка исполняется так же: до точки решения обе
 	// полосы делают одну и ту же работу хранилища (шапка).
-	w, err := uc.completion.RecoveryCompletionWriter(ctx, user.ID)
-	if err != nil {
-		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
-		return CompleteRecoveryOutput{}, ErrStoreUnavailable
-	}
-	defer func() { _ = w.Rollback(ctx) }()
-	code, ok, err := w.ConsumeRecoveryCode(ctx, user.ID, presented.Digest(), now)
-	if err != nil {
-		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
-		return CompleteRecoveryOutput{}, ErrStoreUnavailable
-	}
-	if !ok {
-		_ = w.Rollback(ctx)
+	var res completion
+	var material SessionMaterial
+	err = runRecoveryCompletionWrite(ctx, uc.completion, user.ID, func(ctx context.Context, w RecoveryCompletionWriter) error {
+		res = completion{}
+		code, ok, err := w.ConsumeRecoveryCode(ctx, user.ID, presented.Digest(), now)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errRecoveryCodeNotConsumed
+		}
+		verified, err := w.AddressVerified(ctx, user.ID)
+		if err != nil {
+			return err
+		}
+		res, err = uc.complete(ctx, w, user, code, fresh, now, at, verified, in.Client, &material)
+		return err
+	})
+	switch {
+	case errors.Is(err, errRecoveryCodeNotConsumed):
 		outcome := RecoveryCompletionCodeRejected
 		if !found {
 			outcome = RecoveryCompletionNoRow
 		}
 		return CompleteRecoveryOutput{}, uc.refuse(ctx, outcome, addressKey, in.Source, now)
-	}
-
-	// Код применён. Ветвь исхода — по отметке подтверждения, прочитанной этой
-	// транзакцией после захвата строки личности (kaname#458, Р4).
-	verified, err := w.AddressVerified(ctx, user.ID)
-	if err != nil {
-		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
-		return CompleteRecoveryOutput{}, ErrStoreUnavailable
-	}
-	// Учётные данные сменяются у ЛЮБОЙ личности, включая заблокированную
-	// (Ф5-17); сессия выдаётся только действующей (Ф1-59).
-	res, err := uc.complete(ctx, w, user, code, fresh, now, at, verified, in.Client)
-	switch {
 	case errors.Is(err, ErrInviteNotValid):
 		// Приглашение под строкой `PENDING` негодно (Р6): исход откатан целиком
 		// — код годен, пароль прежний, сессии прежнего держателя живы, отметки
 		// нет. Попыткой не считается: код предъявлен верно.
-		_ = w.Rollback(ctx)
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionInviteNotValid)
 		return CompleteRecoveryOutput{}, ErrInviteNotValid
 	case errors.Is(err, errClaimAddressMoved):
 		// Адрес строки сменился после выдачи кода (Р3 п. 1): исход откатан
 		// целиком, наружу — единый отказ завершения.
-		_ = w.Rollback(ctx)
 		return CompleteRecoveryOutput{}, uc.refuse(ctx, RecoveryCompletionCodeRejected, addressKey, in.Source, now)
 	case err != nil:
 		uc.observer.RecoveryCompletionObserved(RecoveryCompletionStoreFailed)
-		return CompleteRecoveryOutput{}, ErrStoreUnavailable
+		return CompleteRecoveryOutput{}, AdmissionWriteFailure(err)
 	}
 	uc.reconcileOwnerBinding(ctx, res)
 	if res.blocked {
@@ -333,6 +332,9 @@ func (uc *CompleteRecoveryUseCase) Execute(ctx context.Context, in CompleteRecov
 	uc.observer.RecoveryCompletionObserved(res.outcome)
 	return res.out, nil
 }
+
+// Отказ предъявления публикуется после завершения отката admission попытки.
+var errRecoveryCodeNotConsumed = errors.New("recovery completion: code not consumed")
 
 // errClaimAddressMoved — отметка перехода не легла: адрес строки уже не то
 // значение, на которое выдан код (Р3 п. 1). Наружу не выходит.
@@ -379,7 +381,7 @@ func (uc *CompleteRecoveryUseCase) reconcileOwnerBinding(ctx context.Context, re
 // процесса для отметок, которые с ней не сравниваются.
 func (uc *CompleteRecoveryUseCase) complete(
 	ctx context.Context, w RecoveryCompletionWriter, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
-	now, at time.Time, emailVerified bool, client domain.ClientDescription,
+	now, at time.Time, emailVerified bool, client domain.ClientDescription, material *SessionMaterial,
 ) (completion, error) {
 	// Материал — «заменить либо завести» одним оператором (Р5 ветвь «строки
 	// нет», Ф5-34): у личности без строки пароля завершение заводит первый
@@ -494,13 +496,13 @@ func (uc *CompleteRecoveryUseCase) complete(
 		// Сессия аутентифицирована на единицу разрешения ПОЗЖЕ отсечки: иначе
 		// при включающей границе она была бы негодна (Ф5-19, Ф1 §4.2).
 		methods := []string{assurance.MethodRecoveryCode.String()}
-		s, bearer, err := IssueSession(ctx, w, IssueInput{
+		s, bearer, err := IssueSessionPrepared(ctx, w, IssueInput{
 			User:      user,
 			Presented: presentationsOf(methods),
 			At:        at.Add(time.Microsecond),
 			TTL:       uc.ttl,
 			Client:    client,
-		})
+		}, material)
 		if err != nil {
 			return completion{}, err
 		}
@@ -521,9 +523,6 @@ func (uc *CompleteRecoveryUseCase) complete(
 	if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
 		EventType: AuditRecoveryCompleted, TenantAccountID: string(user.AccountID), Payload: payload,
 	}); err != nil {
-		return completion{}, err
-	}
-	if err := w.Commit(ctx); err != nil {
 		return completion{}, err
 	}
 	return completion{out: out, blocked: blocked, outcome: outcome, user: user, ownerBinding: ownerBinding}, nil

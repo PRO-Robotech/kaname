@@ -211,6 +211,56 @@ func requireDirectFixture(t *testing.T, corpus map[string][]byte) {
 	require.Equal(t, map[string]bool{"fixture/fixture": true}, got)
 }
 
+// Нулевая настройка runner доказана на constructor→fluent→Register, а не
+// угадана по имени guard. Включённый runner не свидетельствует legacy Upsert.
+func TestCensusDirectProducerDecisionConfiguration(t *testing.T) {
+	corpus := directRouteCorpus(t)
+	const uc = "internal/apps/kaname/api/internal_iam/register_resource.go"
+	for _, tc := range []struct {
+		name, file, receiver, function, old, replacement, appended string
+		admitted                                                   bool
+	}{
+		{"нулевой guard в скобках twin", uc, "RegisterResourceUseCase", "emit", "if uc.resourceDecisionConfigured {", "if (uc.resourceDecisionConfigured) {", "", true},
+		{"constructor включает runner", uc, "", "NewRegisterResourceUseCase", "scopes: scopes}", "scopes: scopes, resourceDecisionConfigured: true}", "", false},
+		{"Register включает runner", uc, "RegisterResourceUseCase", "Register", "t, err := validateTuple(in)", "uc.resourceDecisionConfigured = true; t, err := validateTuple(in)", "", false},
+		{"helper включает runner", uc, "RegisterResourceUseCase", "emit", "hints := make", "uc.enableDecision(); hints := make", "func(uc *RegisterResourceUseCase)enableDecision(){uc.resourceDecisionConfigured=true}", false},
+		{"неизвестный selector guard", uc, "RegisterResourceUseCase", "emit", "if uc.resourceDecisionConfigured {", "if uc.otherConfigured {", "", false},
+		{"отрицание нулевого guard", uc, "RegisterResourceUseCase", "emit", "if uc.resourceDecisionConfigured {", "if !uc.resourceDecisionConfigured {", "", false},
+		{"guard с исполняемым init", uc, "RegisterResourceUseCase", "emit", "if uc.resourceDecisionConfigured {", "if stop(); uc.resourceDecisionConfigured {", "", false},
+		{"guard с выходом в else", uc, "RegisterResourceUseCase", "emit", "return result.CatalogType, result.Changed, result.ProjectionUnchanged, err\n\t}", "return result.CatalogType, result.Changed, result.ProjectionUnchanged, err\n\t} else {return \"\", false, false, nil}", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			copy := directRouteFixture(corpus)
+			requireDirectFixture(t, copy)
+			copy[tc.file] = []byte(mutateRouteFunction(t, tc.file, string(copy[tc.file]), tc.receiver, tc.function, func(declaration string) string {
+				require.Equal(t, 1, strings.Count(declaration, tc.old))
+				return strings.Replace(declaration, tc.old, tc.replacement, 1)
+			}) + "\n" + tc.appended)
+			got, count, err := check.CensusDirectProducers(copy)
+			require.NoError(t, err)
+			if tc.admitted {
+				require.Equal(t, 1, count)
+				require.True(t, got["fixture/fixture"])
+			} else {
+				require.Zero(t, count)
+				require.Empty(t, got)
+			}
+		})
+	}
+	t.Run("factory fluent включает runner", func(t *testing.T) {
+		copy := directRouteFixture(corpus)
+		requireDirectFixture(t, copy)
+		const initial = "nil,nil,nil,nil,nil,nil)"
+		require.Equal(t, 1, strings.Count(string(copy["fixture/world_test.go"]), initial))
+		copy["fixture/world_test.go"] = []byte(strings.Replace(string(copy["fixture/world_test.go"]), initial, initial+".WithEnabledDecision(true)", 1))
+		copy[uc] = append(copy[uc], []byte("\nfunc(uc *RegisterResourceUseCase)WithEnabledDecision(enabled bool)*RegisterResourceUseCase{uc.resourceDecisionConfigured=enabled;return uc}\n")...)
+		got, count, err := check.CensusDirectProducers(copy)
+		require.NoError(t, err)
+		require.Zero(t, count)
+		require.Empty(t, got)
+	})
+}
+
 func TestCensusDirectProducerTerminalBranches(t *testing.T) {
 	corpus := directRouteCorpus(t)
 	for _, tc := range []struct {

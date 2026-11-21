@@ -98,7 +98,13 @@ func ridReadWholeDelivery(t *testing.T, f *installationNativeWorld) ridWholeDeli
 		}
 		require.NoError(t, col.Err())
 		col.Close()
-		require.NotEmpty(t, entry.Columns)
+		// Замок популяции — таблица без пользовательских столбцов. Саму
+		// таблицу и все её строки включаем в снимок на общих основаниях.
+		if table == "authority_producer_population_latch" {
+			require.Empty(t, entry.Columns, "у таблицы замка нет пользовательских столбцов")
+		} else {
+			require.NotEmptyf(t, entry.Columns, "у таблицы %s нет пользовательских столбцов", table)
+		}
 		// Кавычки идентификаторов определяются настоящими именами каталога; предикат не фильтрует
 		// учётную запись, статус, живые/выведенные строки, происхождение посева, создателя или модуль.
 		rows, err := tx.Query(ctx, `SELECT to_jsonb(r)::text FROM `+pgx.Identifier{"kaname", table}.Sanitize()+` r ORDER BY to_jsonb(r)::text`)

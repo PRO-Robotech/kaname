@@ -56,6 +56,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -121,6 +122,7 @@ const DefaultPageSize = 500
 // сборкой, о типе, заведённом применением манифеста в работающем процессе, не
 // знает (kacho#1986). Двух словарей в одном соединении быть не должно —
 // соединение по разным написаниям не совпадает НИКОГДА и молча.
+// $12 — предел родителей одного шага; $5 ограничивает только глубину обхода.
 const listSQL = `
 WITH RECURSIVE speaker_pair(s_type, s_id, via) AS (
     -- СУБЪЕКТ ВЫДАЧИ — ПАРОЙ КОЛОНОК, а не склейкой.
@@ -178,7 +180,7 @@ speaker(subject) AS (
     -- бы класс учётке, которой нет.
     SELECT 'system_class:' || sp.s_id FROM speaker_pair sp WHERE sp.via = 'class'
 ),
-candidate(object_id, labels) AS (
+candidate(object_id, labels) AS MATERIALIZED (
     -- ЗДЕСЬ СХОДЯТСЯ ДВА СВОЙСТВА, И НИ ОДНО ИЗ НИХ НЕ ВЫВОДИТСЯ ИЗ ДРУГОГО.
     --
     -- (1) ОСЬ. Откуда берутся кандидаты — свойство ТИПА: у ресурса чужого
@@ -210,69 +212,184 @@ candidate(object_id, labels) AS (
     -- обеих осях.
     {{candidate_from}}
 ),
-scope(object_id, s_type, s_id, depth) AS (
-    SELECT c.object_id, $2::text, c.object_id, 0 FROM candidate c
-  UNION
-    -- Цепь берётся ПО ОДНОМУ объекту, соединением вбок, а не общим соединением с
-    -- таблицей рёбер. Разница не стилистическая: у вопроса про ОДИН объект
-    -- (вердикт, субъекты, разворот) внешняя сторона — одна строка, и
-    -- планировщик сам ходит указателем; здесь внешняя сторона — целая страница,
-    -- и на ней он выбирает построить хеш по ВСЕЙ таблице рёбер. Тогда стоимость
-    -- страницы снова становится стоимостью набора — только уже не через
-    -- кандидатов, а через рёбра, и предел на кандидатах этого не ловит.
-    -- Измерено: страница из 50 объектов читала все рёбра типа.
-    --
-    -- Предел внутри — НЕ усечение и не может им стать: у объекта не бывает
-    -- больше рёбер, чем глубин, потому что первичный ключ таблицы уникален по
-    -- глубине, а сама глубина ограничена проверкой схемы тем же числом
-    -- (миграция 0082). Выведенное схемой звено этого равенства не нарушает:
-    -- представление выводит предка ТОЛЬКО там, где владелец объекта своей цепи
-    -- не назвал (миграция 740001), поэтому строки не складываются. То есть предел
-    -- равен собственной границе строки объекта, а порядок по глубине делает
-    -- выборку определённой на случай, если границы когда-нибудь разойдутся:
-    -- ближние предки останутся, дальние — те, до которых обход всё равно не
-    -- доходит.
-    SELECT s.object_id, e.parent_type, e.parent_id, s.depth + 1
-      FROM scope s
-      CROSS JOIN LATERAL (
-             SELECT pe.parent_type, pe.parent_id
-               FROM kaname.resource_scope_edge pe
-              WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
-              ORDER BY pe.depth
-              LIMIT $5::int
-           ) e
-     WHERE s.depth < $5::int
-),
--- scope_distinct — ОБЛАСТИ БЕЗ ПОВТОРОВ, и это ЕДИНСТВЕННОЕ, что читают армы.
---
--- Обход выше несёт в кортеже ГЛУБИНУ ШАГА, поэтому UNION не схлопывает предка,
--- достигнутого разными путями. Форма цепи, которую пишет производитель для
--- compute и nlb (ownerregister.ParentChain — проект И аккаунт сразу), даёт
--- аккаунт на глубинах 1 и 2, а стоящий над ним кластер — на 2 и 3: шесть строк
--- при четырёх различных областях.
---
--- Каждая лишняя строка УМНОЖАЕТ ОБА АРМА: ветвь выдач соединена с набором
--- CROSS JOIN, ветвь фактов — по паре колонок. Отбор различных над ОТВЕТОМ
--- прячет это в ответе и не трогает СТОИМОСТЬ, а на отказном вопросе короткого
--- замыкания нет, и цена платится целиком. Измерено пробой
--- scopedistinct_integration_test.go: 6 строк при 4 различных областях.
---
--- ОБХОД СОХРАНЯЕТСЯ ЦЕЛИКОМ — снимается только повтор. Это НЕ переход на одно
--- чтение таблицы рёбер: тот переход опровергнут (таблица хранит присланную
--- цепь, а не замыкание), и здесь его нет.
---
--- Наименьшая глубина БЕЗОПАСНА, и это проверяемо: единственное употребление
--- глубины ниже по запросу — дискриминатор якоря sc.depth = 0, а якорь
--- засевается нулём и по построению остаётся минимумом (выведенная строка даёт
--- s.depth + 1 при s.depth не меньше нуля, то есть нуля дать не может).
-scope_distinct(object_id, s_type, s_id, depth) AS (
-    SELECT object_id, s_type, s_id, min(depth) FROM scope GROUP BY object_id, s_type, s_id
-),
 fact_atom(parent_type, relation) AS (
     SELECT * FROM unnest($6::text[], $7::text[])
-)
+),
+-- Предварительное условие никогда не разрешает доступ. Оно лишь исключает
+-- корни, для которых нет ни потенциального факта, ни подходящей выдачи.
+-- Все источники и окончательный суд читаются одним снимком этого оператора.
+fact_possible AS MATERIALIZED (
+    SELECT EXISTS (
+        SELECT 1 FROM speaker sp CROSS JOIN fact_atom fa
+        CROSS JOIN LATERAL (
+            SELECT 1 FROM kaname.relation_fact f
+             WHERE f.subject = sp.subject AND f.relation = fa.relation
+             LIMIT 1
+        ) found
+    ) AS possible
+),
+-- Ограничиваем СЫРЫЕ строки до фильтров: Pg+1 означает неполноту разведки,
+-- поэтому в таком случае все кандидаты уходят в прежний полный суд.
+-- Это предел дополнительной работы, а не предел прав или результата.
+binding_seed AS MATERIALIZED (
+    SELECT bs.binding_id, bs.subject_type, bs.subject_id
+      FROM speaker_pair sp
+      CROSS JOIN LATERAL (
+          SELECT s.binding_id, s.subject_type, s.subject_id
+            FROM kaname.access_binding_subjects s
+           WHERE s.subject_type = sp.s_type AND s.subject_id = sp.s_id
+           OFFSET 0
+      ) bs
+     LIMIT ($4::bigint + 1)
+),
+selector_seed AS MATERIALIZED (
+    SELECT rs.arm, rs.resource_names, rs.match_labels, rs.verbs_by_type,
+           rs.container_type, rs.object_types, rv.verb
+      FROM binding_seed bs
+      JOIN kaname.access_bindings b ON b.id = bs.binding_id
+      JOIN kaname.role_verb rv
+        ON rv.role_id = b.role_id AND rv.object_type = $9::text
+       AND rv.verb = ANY ($8::text[])
+       AND ` + classVerbFilterSQL + `
+      CROSS JOIN LATERAL (
+          SELECT s.arm, s.resource_names, s.match_labels, s.verbs_by_type,
+                 s.container_type, s.object_types
+            FROM kaname.role_rule_selectors s
+           WHERE s.role_id = b.role_id
+           OFFSET 0
+      ) rs
+     WHERE b.status = 'ACTIVE'
+       AND (b.expires_at IS NULL OR b.expires_at > now())
+       AND b.revoked_at IS NULL
+     LIMIT ($4::bigint + 1)
+),
+eligible_grant AS MATERIALIZED (
+    SELECT * FROM selector_seed rs WHERE $9::text = ANY (rs.object_types)
+),
+needed_candidate AS MATERIALIZED (
+    SELECT c.object_id, c.labels FROM candidate c
+     WHERE (SELECT possible FROM fact_possible)
+        OR (SELECT count(*) FROM binding_seed) > $4::bigint
+        OR (SELECT count(*) FROM selector_seed) > $4::bigint
+        OR EXISTS (
+            SELECT 1 FROM eligible_grant rs
+            CROSS JOIN LATERAL (SELECT rs.verb AS verb) rv
+             -- Метки ВЛАДЕЛЬЦА принадлежат контейнеру, не дочернему объекту
+             -- (ND-08). Любая вложенная строка здесь консервативно проходит.
+             WHERE rs.container_type IS NOT NULL OR ({{necessary_object_predicate}})
+        )
+),
+adjudicated AS MATERIALIZED (
 SELECT c.object_id,
-       EXISTS (
+       (
+        -- Цепь и устранение повторов принадлежат ОДНОМУ кандидату: обе ветви
+        -- читают только его области. Общий набор областей страницы потребовал
+        -- бы снова отбирать корень при каждом коррелированном вопросе.
+        WITH RECURSIVE scope(s_type, s_id, depth) AS (
+            SELECT $2::text, c.object_id, 0
+          UNION
+            -- Каждый шаг цепи берётся соединением вбок с пределом родителей,
+            -- а не общим соединением с таблицей рёбер. Эта ограда сохраняется
+            -- и внутри одного кандидата: ограничение кандидатов само по себе
+            -- не ограничивает чтение рёбер. В прежней форме с общей цепью
+            -- страницы измерялось чтение всех рёбер типа уже на 50 объектах.
+            --
+            -- Число родителей одного шага ограничено отдельно от числа переходов.
+            -- LIMIT не доказывает полноту произвольного графа: captured writer
+            -- проверяет её полным чтением до native dispatch. Предел fanout прежний.
+            SELECT e.parent_type, e.parent_id, s.depth + 1
+              FROM scope s
+              CROSS JOIN LATERAL (
+                     -- Наличие присланной цепи вычисляется один раз для
+                     -- текущей пары type/id. Любое её ребро отменяет ВСЮ
+                     -- достройку, а не дополняется родителями из строк iam.
+                     WITH physical(parent_type, parent_id, depth) AS MATERIALIZED (
+                         SELECT pe.parent_type, pe.parent_id, pe.depth
+                           FROM kaname.resource_parent_edge pe
+                          WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
+                     ),
+                     fallback(parent_type, parent_id, depth) AS (
+                         SELECT split_part(f.subject, ':'::text, 1),
+                                substr(f.subject, (POSITION((':'::text) IN (f.subject)) + 1)), 1
+                           FROM kaname.relation_fact f
+                          WHERE s.s_type = 'project'::text
+                            AND f.object_type = 'project'::text AND f.object_id = s.s_id
+                            AND f.relation = split_part(f.subject, ':'::text, 1)
+                            AND POSITION(('#'::text) IN (f.subject)) = 0
+                       UNION ALL
+                         SELECT 'cluster'::text, c.id, 1
+                           FROM kaname.accounts a CROSS JOIN kaname.clusters c
+                          WHERE s.s_type = 'account'::text AND a.id = s.s_id
+                       UNION ALL
+                         SELECT 'account'::text, m.account_id, 1
+                           FROM kaname.memberships m
+                          WHERE s.s_type = 'iam_user'::text AND m.user_id = s.s_id
+                            AND COALESCE(m.account_id, ''::text) <> ''::text
+                       UNION ALL
+                         SELECT 'account'::text, o.account_id, 1
+                           FROM kaname.groups o
+                          WHERE s.s_type = 'iam_group'::text AND o.id = s.s_id
+                            AND COALESCE(o.account_id, ''::text) <> ''::text
+                       UNION ALL
+                         SELECT 'account'::text, o.account_id, 1
+                           FROM kaname.service_accounts o
+                          WHERE s.s_type = 'iam_service_account'::text AND o.id = s.s_id
+                            AND COALESCE(o.account_id, ''::text) <> ''::text
+                       UNION ALL
+                         SELECT 'account'::text, o.account_id, 1
+                           FROM kaname.roles o
+                          WHERE s.s_type = 'iam_role'::text AND o.id = s.s_id
+                            AND COALESCE(o.account_id, ''::text) <> ''::text
+                       UNION ALL
+                         SELECT 'project'::text, o.project_id, 1
+                           FROM kaname.roles o
+                          WHERE s.s_type = 'iam_role'::text AND o.id = s.s_id
+                            AND COALESCE(o.project_id, ''::text) <> ''::text
+                       UNION ALL
+                         SELECT lower(o.resource_type), o.resource_id, 1
+                           FROM kaname.access_bindings o
+                          WHERE s.s_type = 'iam_access_binding'::text AND o.id = s.s_id
+                            AND lower(o.resource_type) = ANY (ARRAY['project'::text, 'account'::text, 'cluster'::text])
+                            AND COALESCE(o.resource_id, ''::text) <> ''::text
+                     )
+                     SELECT pe.parent_type, pe.parent_id
+                       FROM (
+                             SELECT parent_type, parent_id, depth FROM physical
+                           UNION ALL
+                             SELECT parent_type, parent_id, depth FROM fallback
+                              WHERE NOT EXISTS (SELECT 1 FROM physical)
+                            ) pe
+                      ORDER BY pe.depth
+                      LIMIT $12::int
+                   ) e
+             WHERE s.depth < $5::int
+        ),
+        -- scope_distinct — ОБЛАСТИ БЕЗ ПОВТОРОВ, и это ЕДИНСТВЕННОЕ, что читают армы.
+        --
+        -- Обход выше несёт в кортеже ГЛУБИНУ ШАГА, поэтому UNION не схлопывает предка,
+        -- достигнутого разными путями. Форма цепи, которую пишет производитель для
+        -- compute и nlb (ownerregister.ParentChain — проект И аккаунт сразу), даёт
+        -- аккаунт на глубинах 1 и 2, а стоящий над ним кластер — на 2 и 3: шесть строк
+        -- при четырёх различных областях.
+        --
+        -- Каждая лишняя строка УМНОЖАЕТ ОБА АРМА: ветвь выдач соединена с набором
+        -- CROSS JOIN, ветвь фактов — по паре колонок. Отбор различных над ОТВЕТОМ
+        -- прячет это в ответе и не трогает СТОИМОСТЬ, а на отказном вопросе короткого
+        -- замыкания нет, и цена платится целиком. Измерено пробой
+        -- scopedistinct_integration_test.go: 6 строк при 4 различных областях.
+        --
+        -- ОБХОД СОХРАНЯЕТСЯ ЦЕЛИКОМ — снимается только повтор. Это НЕ переход на одно
+        -- чтение таблицы рёбер: тот переход опровергнут (таблица хранит присланную
+        -- цепь, а не замыкание), и здесь его нет.
+        --
+        -- Наименьшая глубина БЕЗОПАСНА, и это проверяемо: единственное употребление
+        -- глубины ниже по запросу — дискриминатор якоря sc.depth = 0, а якорь
+        -- засевается нулём и по построению остаётся минимумом (выведенная строка даёт
+        -- s.depth + 1 при s.depth не меньше нуля, то есть нуля дать не может).
+        scope_distinct(s_type, s_id, depth) AS (
+            SELECT s_type, s_id, min(depth) FROM scope GROUP BY s_type, s_id
+        )
+        SELECT EXISTS (
         -- (1) прямой факт — на самом объекте ЛИБО на предке названного планом
         -- типа. Без второго администратор облака не увидел бы НИ ОДНОГО объекта:
         -- его строка лежит на кластере и под другим именем.
@@ -280,8 +397,7 @@ SELECT c.object_id,
           FROM kaname.relation_fact f
           JOIN speaker sp ON sp.subject = f.subject
           JOIN scope_distinct sc
-            ON sc.object_id = c.object_id
-           AND sc.s_type = f.object_type AND sc.s_id = f.object_id
+            ON sc.s_type = f.object_type AND sc.s_id = f.object_id
           JOIN fact_atom fa
             ON fa.relation = f.relation
            AND CASE WHEN fa.parent_type = ''
@@ -300,7 +416,7 @@ SELECT c.object_id,
           -- Обращение ВБОК — по паре «субъект + область» на строку, с оградой
           -- OFFSET 0: довод у ветви выдач прямого вопроса (grantArmSQL).
           FROM speaker_pair sp
-          JOIN scope_distinct sc ON sc.object_id = c.object_id
+          CROSS JOIN scope_distinct sc
           CROSS JOIN LATERAL (
                  SELECT s.binding_id, s.subject_type, s.subject_id
                    FROM kaname.access_binding_subjects s
@@ -321,8 +437,19 @@ SELECT c.object_id,
            -- Ветвь правила роли и цель привязки — ОБЩИМ предикатом всех форм
            -- вопроса (grantArmPredicate, grantarm.go).
            AND ({{arm_predicate}})
+       )
        ) AS allowed
+  FROM (
+        -- Точный размер ТОГО ЖЕ материализованного набора: ни один корень не
+        -- отсекается. Метки остаются исходными строками, без упаковки страницы
+        -- в один массив/JSON и без нового ограничения размера значений.
+        SELECT object_id, labels FROM needed_candidate
+         LIMIT (SELECT count(*) FROM needed_candidate)
+       ) c
+)
+SELECT c.object_id, COALESCE(a.allowed, false) AS allowed
   FROM candidate c
+  LEFT JOIN adjudicated a ON a.object_id = c.object_id
  ORDER BY c.object_id`
 
 // listQuerySQL — ГОТОВЫЙ запрос перечисления для выбранной оси кандидатов
@@ -330,6 +457,11 @@ SELECT c.object_id,
 func listQuerySQL(labelTable string, nesting bool) (string, error) {
 	sql, err := replaceOnce(listSQL, armPredicateMark,
 		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", nesting))
+	if err != nil {
+		return "", err
+	}
+	sql, err = replaceOnce(sql, "{{necessary_object_predicate}}",
+		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", nesting, true))
 	if err != nil {
 		return "", err
 	}
@@ -442,7 +574,7 @@ func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after st
 ) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1))
+		factParents, factRelations, bindVerbs, catalogType, classSlot(in.Subject, 0), classSlot(in.Subject, 1), hierarchy.MaxImmediateParents)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

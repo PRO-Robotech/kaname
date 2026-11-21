@@ -40,6 +40,8 @@ import (
 	"github.com/PRO-Robotech/corelib/db/pgfault"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/authorityprotocol"
 )
 
 // BootstrapAdminInput — bootstrap-run parameters.
@@ -127,7 +129,7 @@ func BootstrapAddressAttr(email string) slog.Attr {
 // Pool — kaname master pgxpool (post-migration). Logger — slog.Default-
 // compatible. Returns nil error in all graceful-skip / happy / 23505-race
 // cases; error only on unexpected DB-failure (fail-closed for unknown state).
-func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger, in BootstrapAdminInput) (BootstrapAdminResult, error) {
+func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger, in BootstrapAdminInput) (result BootstrapAdminResult, err error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -176,11 +178,11 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 	var fgaOutboxID string
 	auditOutboxID := newULIDLikeID(domain.PrefixAuditEvent + "_")
 
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := authorityprotocol.OpenParticipant(ctx, pool, kaname.AuthorityCluster)
 	if err != nil {
 		return BootstrapAdminResult{}, fmt.Errorf("bootstrap admin: begin tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }() //nolint:errcheck // best-effort rollback on error path
+	defer func() { err = errors.Join(err, rollbackSeedAuthority(ctx, tx)) }()
 
 	var (
 		userID   string

@@ -46,7 +46,7 @@ import (
 func (r *Repository) MembershipReader(ctx context.Context) (membership.Session, error) {
 	tx, err := r.readPool().BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, err
+		return nil, mapErr(err, "", "")
 	}
 	return &membershipSession{tx: tx}, nil
 }

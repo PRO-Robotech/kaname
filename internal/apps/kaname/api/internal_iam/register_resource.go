@@ -37,17 +37,16 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
-
-	corevalidate "github.com/PRO-Robotech/corelib/validate"
-
 	"github.com/PRO-Robotech/corelib/authz/proxytuple"
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // relationOutboxEmitter — узкий порт записи: кортежи иерархии, которые пишет
@@ -299,21 +298,23 @@ func admitsPublication(modelType string) bool {
 // общий коммит resource_mirror (метки и родительская область объекта владельца),
 // постановку события согласования и заполнение parent_account_id.
 type RegisterResourceUseCase struct {
-	authority    registrationAuthority
-	emitter      relationOutboxEmitter
-	mirror       resourceMirrorEmitter
-	txb          service.TxBeginner
-	catalogTypes catalogTypeReader       // ОБЯЗАТЕЛЕН, см. конструктор
-	publications publicReadPublisher     // ОБЯЗАТЕЛЕН, см. конструктор
-	withdrawal   keyWithdrawal           // ОБЯЗАТЕЛЕН, см. конструктор
-	audit        registrationAudit       // ОБЯЗАТЕЛЕН, см. конструктор
-	scopes       registrationScopeReader // ОБЯЗАТЕЛЕН, см. конструктор
-	reconcile    reconcileEventEmitter   // необязателен, безопасен при nil
-	accounts     accountResolver         // необязателен, безопасен при nil
-	objRecon     objectReconciler        // синхронно после коммита, необязателен, безопасен при nil
-	residual     residualTupleReader     // называет оставшиеся для снятия отношения, необязателен, безопасен при nil
-	metrics      materializationRecorder
-	logger       *slog.Logger
+	resourceDecisionConfigured bool
+	resourceDecision           ResourceDecisionRunner
+	authority                  registrationAuthority
+	emitter                    relationOutboxEmitter
+	mirror                     resourceMirrorEmitter
+	txb                        service.TxBeginner
+	catalogTypes               catalogTypeReader       // ОБЯЗАТЕЛЕН, см. конструктор
+	publications               publicReadPublisher     // ОБЯЗАТЕЛЕН, см. конструктор
+	withdrawal                 keyWithdrawal           // ОБЯЗАТЕЛЕН, см. конструктор
+	audit                      registrationAudit       // ОБЯЗАТЕЛЕН, см. конструктор
+	scopes                     registrationScopeReader // ОБЯЗАТЕЛЕН, см. конструктор
+	reconcile                  reconcileEventEmitter   // необязателен, безопасен при nil
+	accounts                   accountResolver         // необязателен, безопасен при nil
+	objRecon                   objectReconciler        // синхронно после коммита, необязателен, безопасен при nil
+	residual                   residualTupleReader     // называет оставшиеся для снятия отношения, необязателен, безопасен при nil
+	metrics                    materializationRecorder
+	logger                     *slog.Logger
 }
 
 // NewRegisterResourceUseCase — конструктор. `mirror` записывает
@@ -681,10 +682,15 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	// здесь превращает лишь ДОСТАВЛЕННОЕ снятие в снятие, которое
 	// подействовало. Читаем ДО транзакции: это внешний вызов, нельзя удерживать
 	// соединение базы во время его выполнения.
-	residual, err := uc.residualTuples(ctx, t)
-	if err != nil {
-		return err
+	var residual []service.RelationTuple
+	if !uc.resourceDecisionConfigured {
+		residual, err = uc.residualTuples(ctx, t)
+		if err != nil {
+			return err
+		}
 	}
+	// В final runner остатки входят в RR-подготовку той же lease, а не являются
+	// отдельным pool-backed наблюдением до полной транзакционной попытки.
 	// SourceVersion несёт версию метки снятия: DELETE зеркала
 	// выполняется, только если она >= сохранённой регистрации (перестановка Delete после Update
 	// не может стереть более свежую строку).
@@ -907,6 +913,17 @@ func validateRelationString(field, v string) error {
 // одинаково для каждого производителя; второй писатель здесь создал бы второе
 // место об одном предмете.
 func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, published bool, version time.Time) error {
+	if uc.resourceDecisionConfigured {
+		action := kanamerepo.ResourceDecisionUnpublish
+		if published {
+			action = kanamerepo.ResourceDecisionPublish
+		}
+		typ, id := t.splitObject()
+		_, err := uc.runResourceDecision(ctx, kanamerepo.ResourceDecisionIntent{Action: action,
+			Tuple:  service.RelationTuple{User: t.subject, Relation: t.relation, Object: t.object},
+			Mirror: service.ResourceMirrorRow{ObjectType: typ, ObjectID: id, SourceVersion: version}})
+		return err
+	}
 	module, err := uc.authorizeIntent(ctx, t)
 	if err != nil {
 		return err
@@ -918,7 +935,8 @@ func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, p
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // ничего не делает после Commit
 
-	if _, err := uc.authorizeCatalogType(ctx, tx, module, t); err != nil {
+	catalogType, err := uc.authorizeCatalogType(ctx, tx, module, t)
+	if err != nil {
 		return err
 	}
 	hs, err := uc.savedAuthorityScopes(ctx, tx, t)
@@ -929,8 +947,15 @@ func (uc *RegisterResourceUseCase) publish(ctx context.Context, t tupleIntent, p
 		return err
 	}
 	objType, objID := t.splitObject()
-	if _, err := uc.publications.ApplyTx(ctx, tx, objType, objID, published, version); err != nil {
+	applied, err := uc.publications.ApplyTx(ctx, tx, objType, objID, published, version)
+	if err != nil {
 		return fmt.Errorf("apply public-read publication: %w", err)
+	}
+	if applied && published {
+		canonical := tupleIntent{subject: domain.PublicationSubject, relation: domain.PublicationRelation, object: t.object}
+		if err := uc.saveProducerReceipt(ctx, tx, domain.PublicationReceipt, module, catalogType, canonical, hs, version); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
@@ -965,6 +990,15 @@ type descendantClosureExpanded struct {
 func (*descendantClosureExpanded) Error() string { return "unregistration descendant closure expanded" }
 
 func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, extra ...service.RelationTuple) (string, bool, bool, error) {
+	if uc.resourceDecisionConfigured {
+		action := kanamerepo.ResourceDecisionUnregister
+		if write {
+			action = kanamerepo.ResourceDecisionRegister
+		}
+		result, err := uc.runResourceDecision(ctx, kanamerepo.ResourceDecisionIntent{Action: action,
+			Tuple: service.RelationTuple{User: t.subject, Relation: t.relation, Object: t.object}, Mirror: row})
+		return result.CatalogType, result.Changed, result.ProjectionUnchanged, err
+	}
 	hints := make(map[domain.ResourceRef]struct{})
 	for attempt := 0; attempt < unregisterClosureAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -1028,6 +1062,8 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 		}
 		row.ObjectType = admission.catalogType
 		canonical = admission.authorities
+		// Полный H уже проверен admission: сохраняем его для аудита успешной
+		// регистрации, не пересчитывая через legacy helper снятия/отказа.
 		hierarchy = admission.hierarchies[0]
 	} else {
 		if row.ObjectType, err = uc.authorizeCatalogType(ctx, tx, module, t); err != nil {
@@ -1126,6 +1162,16 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 			changed = true
 			projectionUnchanged = false
 		}
+		if projectionReplaced {
+			if err := uc.invalidateRegistrationReceipts(ctx, tx, t.object, row.SourceVersion, "projection_replaced"); err != nil {
+				return "", false, false, err
+			}
+		}
+		if changed && t.relation == "owner" {
+			if err := uc.saveProducerReceipt(ctx, tx, domain.RegistrationOwnerReceipt, module, row.ObjectType, t, canonical, row.SourceVersion); err != nil {
+				return "", false, false, err
+			}
+		}
 		if changed && !legacyRegistrationRelation(t.relation) {
 			owned, ok := uc.scopes.(registrationPointerStore)
 			if !ok {
@@ -1212,6 +1258,11 @@ func (uc *RegisterResourceUseCase) emitAttempt(ctx context.Context, t tupleInten
 		}
 		if derr != nil {
 			return "", false, false, fmt.Errorf("delete resource mirror: %w", derr)
+		}
+		if deleted {
+			if err := uc.invalidateRegistrationReceipts(ctx, tx, t.object, row.SourceVersion, "withdrawn"); err != nil {
+				return "", false, false, err
+			}
 		}
 		// ПОТОМКИ УХОДЯТ ВМЕСТЕ С РОДИТЕЛЕМ (kaname#1002) — под тем же условием,
 		// что отзыв выдач: только снятие, удалившее строку регистрации родителя.
@@ -1498,6 +1549,11 @@ func (uc *RegisterResourceUseCase) dropRegistrations(ctx context.Context, tx ser
 		dropped, version, err := uc.mirror.DropRegistrationTx(ctx, tx, d.catalogType, d.ModelType, d.ID)
 		if err != nil {
 			return nil, fmt.Errorf("drop descendant registration: %w", err)
+		}
+		if dropped {
+			if err := uc.invalidateRegistrationReceipts(ctx, tx, d.ModelType+":"+d.ID, version, "withdrawn"); err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, droppedDescendant{unregisteredDescendant: d, dropped: dropped, version: version})
 	}

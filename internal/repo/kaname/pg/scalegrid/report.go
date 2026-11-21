@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -285,15 +286,51 @@ func ParsePorcelainPaths(out []byte) []string {
 // отпечаток СОСТАВА: он посчитан по тому же диску и разойдётся с деревом на
 // первом же прогоне гейта свежести.
 func (p Provenance) splitDirtyBySubject() (inSubject, outside []string, judged bool) {
-	if len(p.DirtyPathList) == 0 || len(p.Fingerprint.Files) == 0 {
+	if len(p.DirtyPathList) == 0 || len(p.Fingerprint.Files) == 0 || !filepath.IsAbs(p.treeRoot) {
 		return nil, nil, false
+	}
+	// Состав отпечатка хранит исторические координаты services/iam, а git
+	// в самостоятельном клоне называет пути от корня модуля. Обе стороны
+	// приводятся одним действующим resolver, без собственного снятия префикса.
+	marker, err := treeposture.PathUnder(p.treeRoot, treeposture.ModuleDirInPlatform()+"/go.mod")
+	if err != nil {
+		return nil, nil, false
+	}
+	st, err := os.Stat(marker)
+	if err != nil || !st.Mode().IsRegular() {
+		return nil, nil, false
+	}
+	coordinate := func(rel string) (string, error) {
+		if filepath.IsAbs(rel) {
+			return "", fmt.Errorf("absolute subject coordinate")
+		}
+		abs, err := treeposture.PathUnder(p.treeRoot, rel)
+		if err != nil {
+			return "", err
+		}
+		local, err := filepath.Rel(p.treeRoot, abs)
+		if err != nil {
+			return "", err
+		}
+		if local == "." || local == ".." || strings.HasPrefix(local, ".."+string(filepath.Separator)) || filepath.IsAbs(local) {
+			return "", fmt.Errorf("subject coordinate outside named tree")
+		}
+		return filepath.ToSlash(local), nil
 	}
 	under := make(map[string]bool, len(p.Fingerprint.Files))
 	for _, rel := range p.Fingerprint.Files {
-		under[rel] = true
+		key, err := coordinate(rel)
+		if err != nil {
+			return nil, nil, false
+		}
+		under[key] = true
 	}
 	for _, rel := range p.DirtyPathList {
-		if under[rel] {
+		key, err := coordinate(rel)
+		if err != nil {
+			return nil, nil, false
+		}
+		if under[key] {
 			inSubject = append(inSubject, rel)
 			continue
 		}

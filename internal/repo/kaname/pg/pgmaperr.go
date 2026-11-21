@@ -58,6 +58,12 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	if err == nil {
 		return nil
 	}
+	// Оболочка открытия соединения первична: серверный отказ LOGIN тоже
+	// содержит PgError, но не является отказом бизнес-оператора.
+	var connectErr *pgconn.ConnectError
+	if stderrors.As(err, &connectErr) {
+		return &databaseConnectionError{cause: err}
+	}
 	var pgErr *pgconn.PgError
 	if !stderrors.As(err, &pgErr) {
 		// Отказ БЕЗ строки состояния — сервер не ответил вовсе. Единственный его
@@ -66,7 +72,7 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// «временное»: обещание повтора там, где повторять нечего, хуже
 		// молчания.
 		if isConnectionFailure(err) {
-			return iamerr.Wrapf(iamerr.ErrUnavailable, "database unavailable")
+			return &databaseConnectionError{cause: err}
 		}
 		return err
 	}
@@ -317,7 +323,9 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// терминальном исходе операции его подменяет надстройка над репозиторием
 		// операций. Литерала тут больше НЕТ: оба текста объявлены в одном месте,
 		// потому что две копии разошлись бы молча.
-		return iamerr.Wrapf(iamerr.ErrAborted, "%s", iamerr.SerializationConflictSyncText)
+		// Причина доступна backend executor через errors.As; собственный текст
+		// оболочки закрывает SQL и детали сервера для публичного mapper.
+		return iamerr.Wrapf(iamerr.ErrAborted, "%w", preparedConflict{cause: err})
 	}
 	// connection family 08xxx
 	if strings.HasPrefix(pgErr.Code, "08") {
@@ -361,7 +369,17 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	return iamerr.Wrapf(iamerr.ErrInternal, "database error: sqlstate %s", pgErr.Code)
 }
 
-// isConnectionFailure — отказ, случившийся ДО того, как сервер что-либо сказал.
+// databaseConnectionError сохраняет причину для errors.Is/As, включая конец
+// контекста, но не раскрывает адрес, учётную запись или сообщение PostgreSQL.
+type databaseConnectionError struct {
+	cause error
+}
+
+func (e *databaseConnectionError) Error() string        { return "unavailable: database unavailable" }
+func (e *databaseConnectionError) Unwrap() error        { return e.cause }
+func (e *databaseConnectionError) Is(target error) bool { return target == iamerr.ErrUnavailable }
+
+// isConnectionFailure распознаёт отказ транспорта без отдельного SQLSTATE.
 //
 // Три формы, и каждая встречается в этом дереве: собственный тип драйвера
 // (`ConnectError`), сетевая операция (`net.OpError` — так приходит «в

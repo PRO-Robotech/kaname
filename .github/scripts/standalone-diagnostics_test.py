@@ -529,5 +529,271 @@ class ExportControls(unittest.TestCase):
         self.assertIn("безопасная причина", self.published())
 
 
+    def partial_fixture(self, events=None, interrupted=False, directory=None, rc=2):
+        package = "example.test/diagnostics"
+        if events is None:
+            events = [{"Action": "start", "Package": package},
+                      {"Action": "run", "Package": package, "Test": "TestPrivateStatic/token=s3cr"},
+                      {"Action": "output", "Package": package, "Test": "TestPrivateStatic/token=s3cr",
+                       "Output": 'secret-output {"password":"s3cr"} /private/credential\n'}]
+        if directory is None:
+            directory = self.capture()
+        (directory / "stdout.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+        (directory / "stderr.log").write_text("opaque-stderr-private /home/private credential=s3cr\n")
+        (directory / "go.rc").write_text(str(rc) + "\n")
+        c = producer.census(directory / "stdout.jsonl")
+        (directory / "census.json").write_text(json.dumps(c))
+        m = json.loads((directory / "manifest.json").read_text())
+        m.update(complete=False, captureStatus="interrupted" if interrupted else "complete", censusStatus="incomplete",
+                 goRC=rc, parseRC=2, captureRC=2 if interrupted else 0, helperRC=2, outcome="unknown",
+                 args=["go", "secret-argv"], target="secret-target")
+        self.critical_rehash(directory, m)
+        return directory
+
+    def reset_partial(self):
+        for path in (self.src, self.dst):
+            if path.exists(): shutil.rmtree(path)
+        self.src.mkdir()
+
+    def test_partial_verified_metadata_never_exports_any_text_or_original_test_name(self):
+        directory = self.partial_fixture()
+        self.critical_runner("opaque-runner-private /private/path secret-target\n")
+        # Complete sibling также обязан стать metadata-only в общем partial export.
+        sibling = self.src / "complete-sibling"
+        shutil.copytree(directory, sibling)
+        events = self.critical_events(["secret-complete-output\n"], test="TestOtherPrivate/s4cr")
+        (sibling / "stdout.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+        (sibling / "go.rc").write_text("1\n")
+        (sibling / "census.json").write_text(json.dumps(producer.census(sibling / "stdout.jsonl")))
+        m = json.loads((sibling / "manifest.json").read_text())
+        m.update(complete=True, captureStatus="complete", censusStatus="complete", goRC=1,
+                 parseRC=0, captureRC=0, helperRC=1, outcome="named")
+        self.critical_rehash(sibling, m)
+        self.assertEqual(exporter.export(self.src, self.dst), 2)
+        self.assertEqual([p.name for p in self.dst.iterdir()], ["export.json"])
+        public = self.published()
+        for secret in ("TestPrivateStatic", "TestOtherPrivate", "s3cr", "s4cr", "secret-output", "secret-complete-output",
+                       "opaque-stderr-private", "opaque-runner-private", "secret-argv", "secret-target", "/private", "/home/private"):
+            self.assertNotIn(secret, public)
+        report = json.loads((self.dst / "export.json").read_text())
+        self.assertEqual(report["status"], "PARTIAL_DIAGNOSTIC")
+        self.assertIs(report["complete"], False)
+        self.assertIs(report["testAccepted"], False)
+        self.assertEqual(report["outcome"], "unknown")
+        self.assertEqual(len(report["captures"]), 2)
+        aliases = [a["alias"] for r in report["captures"] for a in r["aliases"]]
+        self.assertEqual(len(aliases), len(set(aliases)))
+        pending = next(r for r in report["captures"] if "unterminated-tests" in r["categories"])
+        self.assertEqual(pending["verifiedRC"], {"goRC": 2, "parseRC": 2, "captureRC": 0, "helperRC": 2})
+        self.assertEqual(pending["census"]["unterminatedPackages"], ["example.test/diagnostics"])
+        self.assertEqual([e["index"] for e in pending["events"]], [0, 1, 2])
+        self.assertEqual([e["action"] for e in pending["events"]], ["start", "run", "output"])
+        self.assertEqual(pending["rawFiles"], {name: exporter.digest((directory / name).read_bytes()) for name in exporter.PRODUCER_FILES})
+        self.assertEqual(pending["source"], {"commit": "a" * 40, "tree": "b" * 40})
+        for source in ({"commit": "c" * 40, "tree": "/private/source-secret"},
+                       {"commit": "d" * 64, "tree": "E" * 40}, {}):
+            with self.subTest(source_fields=sorted(source)):
+                m = json.loads((directory / "manifest.json").read_text())
+                m["source"] = source
+                (directory / "manifest.json").write_text(json.dumps(m))
+                self.assertEqual(exporter.export(self.src, self.dst), 2)
+                report = json.loads((self.dst / "export.json").read_text())
+                pending = next(r for r in report["captures"] if "unterminated-tests" in r["categories"])
+                self.assertEqual(pending["rawFiles"]["manifest.json"], exporter.digest((directory / "manifest.json").read_bytes()))
+                self.assertEqual(pending["source"], {"commit": "c" * 40 if source.get("commit") == "c" * 40 else "unknown", "tree": "unknown"})
+                self.assertNotIn("source-secret", self.published())
+
+    def test_partial_lawful_package_failure_and_interruption_boundaries(self):
+        package = "example.test/diagnostics"
+        cases = [
+            ([{"Action": "start", "Package": package}], False, ["unterminated-packages"]),
+            ([{"Action": "run", "Package": package, "Test": "TestPrivate"},
+              {"Action": "fail", "Package": package}], False, ["unterminated-tests"]),
+            (self.critical_events(action="pass"), True, ["interrupted"]),
+            ([], True, ["interrupted"]),
+        ]
+        for events, interrupted, categories in cases:
+            with self.subTest(categories=categories, events=len(events)):
+                self.reset_partial()
+                self.partial_fixture(events, interrupted=interrupted)
+                self.assertEqual(exporter.export(self.src, self.dst), 2)
+                report = json.loads((self.dst / "export.json").read_text())
+                self.assertEqual(report["captures"][0]["categories"], categories)
+                self.assertIs(report["testAccepted"], False)
+                self.assertEqual(report["outcome"], "unknown")
+                if any(e["Action"] == "fail" for e in events):
+                    self.assertEqual(report["captures"][0]["census"]["packageOnlyFailures"], [package])
+
+    def test_partial_keeps_only_package_failure_duration(self):
+        package = "example.test/diagnostics"
+        events = [
+            {"Action": "start", "Package": package},
+            {"Action": "run", "Package": package, "Test": "TestFinished"},
+            {"Action": "pass", "Package": package, "Test": "TestFinished", "Elapsed": 0.1},
+            {"Action": "run", "Package": package, "Test": "TestPrivate"},
+            {"Action": "output", "Package": package, "Output": "private-timeout-detail\n"},
+            {"Action": "fail", "Package": package, "Elapsed": 600.125},
+        ]
+        self.partial_fixture(events, rc=1)
+        self.assertEqual(exporter.export(self.src, self.dst), 2)
+        public = self.published()
+        self.assertNotIn("private-timeout-detail", public)
+        self.assertNotIn("TestPrivate", public)
+        report = json.loads((self.dst / "export.json").read_text())
+        self.assertEqual(report["outcome"], "unknown")
+        self.assertIs(report["testAccepted"], False)
+        exported = report["captures"][0]["events"]
+        self.assertEqual([e["elapsedSeconds"] for e in exported if "elapsedSeconds" in e], [600.125])
+        exported[-1]["elapsedSeconds"] = True
+        with self.assertRaisesRegex(ValueError, "длительность отказа пакета"):
+            exporter.validate_partial_report(report)
+        del exported[-1]["elapsedSeconds"]
+        exporter.validate_partial_report(report)
+        exported[2]["elapsedSeconds"] = 0.1
+        with self.assertRaisesRegex(ValueError, "длительность отказа пакета"):
+            exporter.validate_partial_report(report)
+
+    def test_partial_invalid_bytes_schema_types_and_paths_are_rejected(self):
+        modes = ("missing", "hash", "symlink", "nonJSON", "unknown-event", "unknown-manifest", "unknown-runner",
+                 "absolute-package", "traversal-package", "bracket-private-path", "secret-package", "bool-rc", "bool-census", "bool-hash-bytes",
+                 "unknown-census", "event-elapsed-bool", "event-time-secret", "nan")
+        for mode in modes:
+            with self.subTest(mode=mode):
+                self.reset_partial()
+                directory = self.partial_fixture()
+                m = json.loads((directory / "manifest.json").read_text())
+                c = json.loads((directory / "census.json").read_text())
+                events = [json.loads(line) for line in (directory / "stdout.jsonl").read_text().splitlines()]
+                rehash = True
+                if mode == "missing":
+                    (directory / "stderr.log").unlink(); rehash = False
+                elif mode == "hash":
+                    (directory / "stderr.log").write_text("changed-private"); rehash = False
+                elif mode == "symlink":
+                    (directory / "stderr.log").unlink(); (directory / "stderr.log").symlink_to(directory / "stdout.jsonl"); rehash = False
+                elif mode == "nonJSON":
+                    (directory / "stdout.jsonl").write_text('secret-raw {"password":"s3cr"}\n')
+                    (directory / "census.json").write_text(json.dumps(producer.census(directory / "stdout.jsonl")))
+                elif mode == "unknown-manifest": m["privateField"] = "secret-extra"
+                elif mode == "unknown-runner":
+                    self.critical_runner("secret-runner")
+                    path = self.src / "runner-test" / "runner.json"
+                    value = json.loads(path.read_text()); value["privateField"] = "secret-extra"; path.write_text(json.dumps(value))
+                elif mode == "bool-rc": m["captureRC"] = False
+                elif mode == "bool-census": c["nonJSON"] = False
+                elif mode == "unknown-census": c["privateField"] = "secret-extra"
+                elif mode == "bool-hash-bytes":
+                    self.critical_rehash(directory, m)
+                    m = json.loads((directory / "manifest.json").read_text()); m["files"]["stderr.log"]["bytes"] = True
+                    (directory / "manifest.json").write_text(json.dumps(m)); rehash = False
+                else:
+                    if mode == "unknown-event": events[0]["privateField"] = "secret-extra"
+                    elif mode in ("absolute-package", "traversal-package", "bracket-private-path", "secret-package"):
+                        for e in events: e["Package"] = {"absolute-package": "/home/private", "traversal-package": "example.test/../private", "bracket-private-path": "example.test/pkg [/home/private]", "secret-package": "Bearer private credential"}[mode]
+                    elif mode == "event-elapsed-bool": events[0]["Elapsed"] = True
+                    elif mode == "event-time-secret": events[0]["Time"] = "secret-time"
+                    elif mode == "nan": events[0]["Elapsed"] = float("nan")
+                    (directory / "stdout.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+                    c = producer.census(directory / "stdout.jsonl")
+                if mode != "nonJSON": (directory / "census.json").write_text(json.dumps(c))
+                if rehash: self.critical_rehash(directory, m)
+                self.rejected()
+                self.assertNotIn("secret-", self.published())
+
+    def test_partial_rehashed_semantic_contradictions_still_fail_closed(self):
+        modes = ("parseRC", "captureRC", "helperRC", "outcome", "captureStatus", "censusStatus", "goRC-file",
+                 "census-events", "census-unfinished", "hidden-event", "complete-stream", "zero-rc-with-failure")
+        for mode in modes:
+            with self.subTest(mode=mode):
+                self.reset_partial()
+                events = self.critical_events() if mode == "complete-stream" else None
+                if mode == "zero-rc-with-failure":
+                    events = [{"Action": "run", "Package": "example.test/diagnostics", "Test": "TestPrivate"},
+                              {"Action": "fail", "Package": "example.test/diagnostics"}]
+                directory = self.partial_fixture(events, rc=0 if mode == "zero-rc-with-failure" else 2)
+                m = json.loads((directory / "manifest.json").read_text())
+                c = json.loads((directory / "census.json").read_text())
+                if mode in ("parseRC", "helperRC"): m[mode] = 0
+                elif mode == "captureRC": m[mode] = 2
+                elif mode == "outcome": m[mode] = "pass"
+                elif mode == "captureStatus": m[mode] = "error"
+                elif mode == "censusStatus": m[mode] = "complete"
+                elif mode == "goRC-file": (directory / "go.rc").write_text("1\n")
+                elif mode == "census-events": c["events"] += 1
+                elif mode == "census-unfinished": c["unterminatedPackages"] = []
+                elif mode == "hidden-event":
+                    with (directory / "stdout.jsonl").open("a") as out:
+                        out.write(json.dumps({"Action": "start", "Package": "example.test/hidden"}) + "\n")
+                (directory / "census.json").write_text(json.dumps(c)); self.critical_rehash(directory, m)
+                self.rejected()
+
+    def test_partial_duplicate_keys_reject_even_after_rehash(self):
+        for mode in ("manifest", "census", "event"):
+            with self.subTest(mode=mode):
+                self.reset_partial(); directory = self.partial_fixture()
+                if mode == "manifest":
+                    path = directory / "manifest.json"; path.write_text(path.read_text().replace('"complete": false', '"complete": true, "complete": false'))
+                else:
+                    path = directory / ("census.json" if mode == "census" else "stdout.jsonl")
+                    old, new = ('"nonJSON": 0', '"nonJSON": 1, "nonJSON": 0') if mode == "census" else ('"Action": "start"', '"Action": "fail", "Action": "start"')
+                    path.write_text(path.read_text().replace(old, new)); self.critical_rehash(directory)
+                self.rejected()
+
+    def test_partial_cli_replaces_stale_complete_then_rejected_export(self):
+        directory = self.capture()
+        self.assertEqual(exporter.export(self.src, self.dst), 0)
+        previous = (self.dst / "export.json").read_bytes()
+        self.partial_fixture(directory=directory)
+        readiness = self.base / "partial-readiness"
+        command = [sys.executable, str(pathlib.Path(exporter.__file__)), str(self.src), str(self.dst)]
+        result = subprocess.run(command, env={**os.environ, "GITHUB_OUTPUT": str(readiness)}, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(readiness.read_text().splitlines(), ["ready=false", "path=" + str(self.dst), "ready=true"])
+        self.assertNotEqual((self.dst / "export.json").read_bytes(), previous)
+        self.assertEqual(json.loads((self.dst / "export.json").read_text())["status"], "PARTIAL_DIAGNOSTIC")
+        (directory / "stderr.log").write_text("contradictory-new-secret")
+        readiness.write_text("")
+        result = subprocess.run(command, env={**os.environ, "GITHUB_OUTPUT": str(readiness)}, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(readiness.read_text(), "ready=false\n")
+        self.assertEqual(json.loads((self.dst / "export.json").read_text()), {"version": 1, "complete": False, "error": exporter.EXPORT_ERROR})
+
+    def test_partial_cleanup_whitelist_and_size_preserve_foreign_bytes(self):
+        directory = self.partial_fixture()
+        raw_size = sum(p.stat().st_size for p in self.src.rglob("*") if p.is_file())
+        self.rejected(raw_size - 1)
+        self.assertEqual(exporter.export(self.src, self.dst, raw_size * 4), 2)
+        report = json.loads((self.dst / "export.json").read_text())
+        report["captures"][0]["events"][0]["Output"] = "foreign-private"
+        (self.dst / "export.json").write_text(json.dumps(report))
+        with self.assertRaises(ValueError): exporter.export(self.src, self.dst)
+        self.assertIn("foreign-private", (self.dst / "export.json").read_text())
+        # Whitelist не разрешает удалить подложную provenance даже без raw текста.
+        for mode in ("missing-file", "extra-file", "bool-bytes", "negative-bytes", "bad-hash", "extra-digest-key", "bad-source", "extra-source-key"):
+            with self.subTest(provenance=mode):
+                shutil.rmtree(self.dst)
+                self.assertEqual(exporter.export(self.src, self.dst), 2)
+                report = json.loads((self.dst / "export.json").read_text())
+                record = report["captures"][0]
+                if mode == "missing-file": del record["rawFiles"]["manifest.json"]
+                elif mode == "extra-file": record["rawFiles"]["private-path"] = {"bytes": 0, "sha256": "a" * 64}
+                elif mode == "bool-bytes": record["rawFiles"]["manifest.json"]["bytes"] = True
+                elif mode == "negative-bytes": record["rawFiles"]["manifest.json"]["bytes"] = -1
+                elif mode == "bad-hash": record["rawFiles"]["manifest.json"]["sha256"] = "private-hash-text"
+                elif mode == "extra-digest-key": record["rawFiles"]["manifest.json"]["path"] = "/private/path"
+                elif mode == "bad-source": record["source"]["tree"] = "/private/tree"
+                elif mode == "extra-source-key": record["source"]["path"] = "/private/path"
+                (self.dst / "export.json").write_text(json.dumps(report))
+                original = (self.dst / "export.json").read_bytes()
+                with self.assertRaises(ValueError): exporter.export(self.src, self.dst)
+                self.assertEqual((self.dst / "export.json").read_bytes(), original)
+        # Законный прежний partial удаляется и заменяется complete своей новой переписью.
+        shutil.rmtree(self.dst)
+        self.assertEqual(exporter.export(self.src, self.dst), 2)
+        shutil.rmtree(directory); self.capture()
+        self.assertEqual(exporter.export(self.src, self.dst), 0)
+        self.assertTrue(json.loads((self.dst / "export.json").read_text())["complete"])
+
+
 if __name__ == "__main__":
     unittest.main()

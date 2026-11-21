@@ -141,3 +141,73 @@ func TestSeedScopeGateRefusesAVerdictWithoutASubject(t *testing.T) {
 		}
 	})
 }
+
+// Чтение SA другой записью не является посевом. Смена только цели превращает
+// каждый lawful twin в неизвестную WRITE-форму, которая обязана краснеть.
+func TestSeededServiceAccountsDMLTargetAndReadTwins(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, sql        string
+		unknown, touched int
+		deleted          bool
+	}{
+		{"actual_policy_epoch_seed", `INSERT INTO kaname.authority_policy_epoch(key)
+ SELECT '*' UNION SELECT 'user:'||id FROM kaname.users UNION SELECT 'service_account:'||id FROM kaname.service_accounts
+ UNION SELECT 'group:'||id FROM kaname.groups UNION SELECT 'role:'||id FROM kaname.roles
+ UNION SELECT 'scope:'||id FROM kaname.accounts UNION SELECT 'carriers:role:'||id FROM kaname.roles
+ UNION SELECT 'carrier_latch:role:'||id FROM kaname.roles`, 0, 0, false},
+		{"insert_select_read", "INSERT INTO kaname.authority_policy_epoch(key) SELECT 'service_account:'||id FROM kaname.service_accounts", 0, 0, false},
+		{"insert_select_write", "INSERT INTO kaname.service_accounts(id) SELECT id FROM kaname.authority_policy_epoch", 1, 1, false},
+		{"update_from_read", "UPDATE kaname.authority_policy_epoch AS e SET key=s.id FROM kaname.service_accounts AS s", 0, 0, false},
+		{"update_from_write", "UPDATE kaname.service_accounts AS s SET name=e.key FROM kaname.authority_policy_epoch AS e", 1, 1, false},
+		{"delete_using_read", "DELETE FROM kaname.authority_policy_epoch AS e USING kaname.service_accounts AS s WHERE e.key=s.id", 0, 0, false},
+		{"delete_using_write", "DELETE FROM kaname.service_accounts AS s USING kaname.authority_policy_epoch AS e WHERE e.key=s.id", 1, 1, false},
+		{"unknown_update_write", "UPDATE kaname.service_accounts SET enabled=false", 1, 1, false},
+		{"unknown_delete_write", "DELETE FROM kaname.service_accounts", 1, 1, false},
+		{"known_delete_id", "DELETE FROM kaname.service_accounts WHERE id='" + injectedSAID + "'", 0, 1, true},
+		{"known_delete_name", "DELETE FROM kaname.service_accounts WHERE name IN ('" + injectedSAName + "')", 0, 1, true},
+		{"upper_unquoted_target", "UPDATE KANAME.SERVICE_ACCOUNTS SET enabled=false", 1, 1, false},
+		{"quoted_insert_unknown", `INSERT INTO "kaname"."service_accounts"(id) VALUES ('x')`, 1, 1, false},
+		{"quoted_delete_unknown", `DELETE FROM "kaname"."service_accounts" WHERE id='x'`, 1, 1, false},
+		{"unicode_escaped_target", `UPDATE U&"kaname".U&"service\005faccounts" SET enabled=false`, 1, 1, false},
+		{"quoted_target", `UPDATE "kaname"."service_accounts" SET enabled=false`, 1, 1, false},
+		{"quoted_foreign_read", `UPDATE "kaname"."authority_policy_epoch" SET key=(SELECT id FROM "kaname"."service_accounts" LIMIT 1)`, 0, 0, false},
+		{"quoted_upper_different_table", `UPDATE kaname."SERVICE_ACCOUNTS" SET name='kaname.service_accounts'`, 0, 0, false},
+		{"foreign_schema", "UPDATE other.service_accounts SET name=(SELECT name FROM kaname.service_accounts LIMIT 1)", 0, 0, false},
+		{"qualified_spaces", "UPDATE kaname . service_accounts SET enabled=false", 1, 1, false},
+		{"unqualified_target_unknown", "UPDATE service_accounts SET enabled=false", 1, 1, false},
+		{"only_target_unknown", "UPDATE ONLY kaname.service_accounts SET enabled=false", 1, 1, false},
+		{"only_parenthesized_target", "DELETE FROM ONLY (kaname.service_accounts) WHERE id='x'", 1, 1, false},
+		{"only_other_reads_sa", "UPDATE ONLY kaname.authority_policy_epoch SET key=(SELECT id FROM kaname.service_accounts LIMIT 1)", 0, 0, false},
+		{"suffix_identifier", "UPDATE kaname.service_accounts_backup SET name='kaname.service_accounts'", 0, 0, false},
+		{"dollar_identifier", "UPDATE kaname.service_accounts$backup SET name='kaname.service_accounts'", 0, 0, false},
+		{"unicode_identifier_suffix", "UPDATE kaname.service_accountsя SET name='kaname.service_accounts'", 0, 0, false},
+		{"dot_inside_quoted_identifier", `UPDATE "kaname.service_accounts" SET enabled=false`, 0, 0, false},
+		{"literal_only", "INSERT INTO kaname.authority_policy_epoch(key) VALUES ('kaname.service_accounts')", 0, 0, false},
+		{"select_only", "SELECT id FROM kaname.service_accounts", 0, 0, false},
+		{"unknown_insert_prefix", "INSERT OR REPLACE INTO kaname.service_accounts(id) VALUES ('x')", 1, 1, false},
+		{"unknown_three_part_target", "UPDATE db.kaname.service_accounts SET enabled=false", 1, 1, false},
+		{"unknown_insert_target", "INSERT INTO (SELECT id FROM kaname.service_accounts) VALUES ('x')", 1, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bodies := map[string]string{
+				injectedBaseline: injectedModuleSARow(injectedSAID, injectedSAName, injectedSADesc),
+				injectedLater:    tc.sql + ";",
+			}
+			alive, unknown, touched := check.FoldSeededServiceAccounts([]string{injectedBaseline, injectedLater}, bodies)
+			if len(unknown) != tc.unknown || touched != 1+tc.touched {
+				t.Fatalf("unknown=%v touched=%d, нужно %d/%d", unknown, touched, tc.unknown, 1+tc.touched)
+			}
+			if len(unknown) != 0 && !strings.Contains(unknown[0], injectedLater) {
+				t.Fatalf("находка не называет миграцию: %v", unknown)
+			}
+			_, present := alive[injectedSAID]
+			if present == tc.deleted || len(alive) > 1 {
+				t.Fatalf("посев изменён чтением/неизвестной формой: deleted=%v alive=%+v", tc.deleted, alive)
+			}
+			if present && (alive[injectedSAID].Where != injectedBaseline || !alive[injectedSAID].IsModule()) {
+				t.Fatalf("утрачены происхождение или Module SA: %+v", alive[injectedSAID])
+			}
+		})
+	}
+}

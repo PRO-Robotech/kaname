@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -434,11 +435,11 @@ func TestRelationQuestionsStayInsideTheMeasuredPath(t *testing.T) {
 
 	t.Logf("scanned %d files under %s (client: %d files, guard: %d files, %d entry-point names, "+
 		"%d resolved local wrappers); relation questions seen=%d, inside a loop=%d "+
-		"(cleared as relation cascades=%d), blind spot 1 — loop without an iteration variable=%d; "+
+		"(bounded ErrAborted retries=%d, cleared as relation cascades=%d), blind spot 1 — loop without an iteration variable=%d; "+
 		"findings=%d",
 		scan.filesParsed, useCaseTreeRoot, filesByRoot[relationClientRoot], filesByRoot[relationGuardRoot],
 		len(relationQuestionEntryPoints), scan.localWrappersResolved,
-		scan.callsSeen, scan.callsInLoop, scan.callsInLoop-len(scan.findings),
+		scan.callsSeen, scan.callsInLoop, scan.callsInBoundedRetry, scan.callsInLoop-scan.callsInBoundedRetry-len(scan.findings),
 		scan.callsInVarlessLoop, len(scan.findings))
 
 	var undeclared []string
@@ -540,6 +541,10 @@ type scanResult struct {
 	filesParsed int
 	callsSeen   int // matched calls anywhere
 	callsInLoop int // matched calls inside a loop that HAS an iteration variable
+	// Ограниченная внешняя попытка учитывается отдельно от relation cascade.
+	// Это не предел SQL-вопросов внутри staged writer.
+	callsInBoundedRetry int
+	boundedRetrySites   []string
 	// callsInVarlessLoop — matched calls inside `for {}` / `for cond {}`, where the
 	// repetition count is not syntactically visible and this scan classifies nothing.
 	// Blind spot 1. Reported, never silently dropped: the size of a blind spot has
@@ -564,6 +569,10 @@ type scanResult struct {
 // nowhere in its arguments is also a finding, because then the same question is
 // being repeated per iteration — which covers the case of the loop variable being
 // copied into a local first, where a syntactic scan cannot follow the value.
+//
+// Ограниченный ErrAborted retry классифицируется отдельно по AST всего
+// внешнего цикла. Его callee и staged wrappers продолжают участвовать в census;
+// вызов из другого collection loop не наследует этот результат.
 //
 // No type information is used: the shape is visible without it, and requiring a
 // full type-check would make the gate expensive enough to be dropped.
@@ -632,6 +641,7 @@ func scanForPerRowRelationQuestions(t *testing.T, root string, entryPoints map[s
 
 		for _, file := range files {
 			loops := loopSpansOf(file)
+			retries := boundedAbortedRetryCalls(file, files, entryPoints, local)
 
 			ast.Inspect(file, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
@@ -668,6 +678,12 @@ func scanForPerRowRelationQuestions(t *testing.T, root string, entryPoints map[s
 					return true
 				}
 				res.callsInLoop++
+				if retries[call] {
+					res.callsInBoundedRetry++
+					pos := fset.Position(call.Pos())
+					res.boundedRetrySites = append(res.boundedRetrySites, filepath.ToSlash(pos.Filename)+": "+name)
+					return true
+				}
 
 				why := perRowReason(call, shape, iter)
 				if why == "" {
@@ -752,6 +768,300 @@ func bodyReachesEntryPoint(body *ast.BlockStmt, entryPoints map[string]entryPoin
 			return false
 		}
 		return true
+	})
+	return found
+}
+
+// boundedAbortedRetryCalls распознаёт только одну ограниченную внешнюю попытку
+// над неизменными параметрами метода. Имена use-case/callee не являются допуском:
+// нужны top-level цикл, начальный счётчик 1, ++, compile-time cap <= 3, немедленный
+// выход на success и любом отказе, кроме errors.Is(err, iamerr.ErrAborted).
+// Transitive local-wrapper resolution остаётся прежним: staged recheck виден.
+// Классифицируется один call, не метод целиком: тот же call внутри page loop,
+// другая relation question или цикл внутри callee продолжают давать finding.
+// Это предел внешних попыток, не доказательство атомарности или числа SQL внутри.
+func boundedAbortedRetryCalls(file *ast.File, files []*ast.File, entryPoints map[string]entryPointShape, local localWrappers) map[*ast.CallExpr]bool {
+	accepted := map[*ast.CallExpr]bool{}
+	errorsName := retryImportName(file, "errors")
+	iamErrorsName := retryImportName(file, "github.com/PRO-Robotech/kaname/internal/errors")
+	if errorsName == "" || iamErrorsName == "" {
+		return accepted
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil || len(fn.Body.List) != 1 || fn.Recv == nil || len(fn.Recv.List) != 1 || len(fn.Recv.List[0].Names) != 1 {
+			continue
+		}
+		loop, ok := fn.Body.List[0].(*ast.ForStmt)
+		if !ok || loop.Cond != nil || loop.Body == nil || len(loop.Body.List) < 3 {
+			continue
+		}
+		initial, ok := loop.Init.(*ast.AssignStmt)
+		if !ok || initial.Tok != token.DEFINE || len(initial.Lhs) != 1 || len(initial.Rhs) != 1 || retryInteger(initial.Rhs[0]) != 1 {
+			continue
+		}
+		counter, ok := initial.Lhs[0].(*ast.Ident)
+		if !ok || counter.Name == "_" {
+			continue
+		}
+		post, ok := loop.Post.(*ast.IncDecStmt)
+		if !ok || post.Tok != token.INC || !retryIdent(post.X, counter.Name) {
+			continue
+		}
+		assignment, ok := loop.Body.List[0].(*ast.AssignStmt)
+		if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) == 0 || len(assignment.Rhs) != 1 {
+			continue
+		}
+		call, ok := assignment.Rhs[0].(*ast.CallExpr)
+		if !ok || call.Ellipsis.IsValid() {
+			continue
+		}
+		callee, ok := call.Fun.(*ast.SelectorExpr)
+		receiver := fn.Recv.List[0].Names[0].Name
+		if !ok || !retryIdent(callee.X, receiver) || !local.methods[callee.Sel.Name] {
+			continue
+		}
+		if _, directEntry := entryPoints[callee.Sel.Name]; directEntry || !retryLocalMethod(files, fn, callee.Sel.Name) {
+			continue
+		}
+		params := map[string]bool{}
+		for _, field := range fn.Type.Params.List {
+			for _, name := range field.Names {
+				params[name.Name] = true
+			}
+		}
+		invariant := len(call.Args) > 0
+		for _, arg := range call.Args {
+			id, plain := arg.(*ast.Ident)
+			if !plain || !params[id.Name] || id.Name == counter.Name {
+				invariant = false
+			}
+		}
+		errName, ok := assignment.Lhs[len(assignment.Lhs)-1].(*ast.Ident)
+		if !ok || errName.Name == "_" || !invariant {
+			continue
+		}
+		success, ok := loop.Body.List[1].(*ast.IfStmt)
+		if !ok || !retryReturningIf(success) {
+			continue
+		}
+		equal, ok := success.Cond.(*ast.BinaryExpr)
+		if !ok || equal.Op != token.EQL || !retryIdent(equal.X, errName.Name) || !retryIdent(equal.Y, "nil") {
+			continue
+		}
+		failure, ok := loop.Body.List[2].(*ast.IfStmt)
+		if !ok || !retryReturningIf(failure) {
+			continue
+		}
+		condition, ok := failure.Cond.(*ast.BinaryExpr)
+		if !ok || condition.Op != token.LOR || !retryAborted(condition.X, errName.Name, errorsName, iamErrorsName) {
+			continue
+		}
+		limit, ok := condition.Y.(*ast.BinaryExpr)
+		if !ok || limit.Op != token.EQL || !retryIdent(limit.X, counter.Name) {
+			continue
+		}
+		capName := ""
+		capValue := retryInteger(limit.Y)
+		if id, named := limit.Y.(*ast.Ident); named {
+			capName = id.Name
+			capValue = retryPackageConstant(files, capName)
+		}
+		if capValue < 1 || capValue > 3 || retryShadows(fn, errorsName, iamErrorsName, capName) {
+			continue
+		}
+		// Нельзя сбросить счётчик/параметры, добавить другую question, спрятать
+		// управление в closure, goto, дополнительном цикле или async call.
+		protected := map[string]bool{counter.Name: true, receiver: true}
+		for name := range params {
+			protected[name] = true
+		}
+		valid, questions := true, 0
+		ast.Inspect(loop.Body, func(n ast.Node) bool {
+			switch s := n.(type) {
+			case *ast.ForStmt, *ast.RangeStmt, *ast.FuncLit, *ast.BranchStmt, *ast.GoStmt, *ast.DeferStmt:
+				valid = false
+			case *ast.AssignStmt:
+				for _, lhs := range s.Lhs {
+					for name := range identsOfExpr(lhs) {
+						if protected[name] {
+							valid = false
+						}
+					}
+				}
+			case *ast.IncDecStmt:
+				for name := range identsOfExpr(s.X) {
+					if protected[name] {
+						valid = false
+					}
+				}
+			case *ast.UnaryExpr:
+				if s.Op == token.AND {
+					for name := range identsOfExpr(s.X) {
+						if protected[name] {
+							valid = false
+						}
+					}
+				}
+			case *ast.CallExpr:
+				if _, _, matched := matchEntryPoint(s, entryPoints, local); matched {
+					questions++
+				}
+			}
+			return true
+		})
+		if valid && questions == 1 {
+			accepted[call] = true
+		}
+	}
+	return accepted
+}
+
+func retryImportName(file *ast.File, path string) string {
+	for _, spec := range file.Imports {
+		value, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || value != path {
+			continue
+		}
+		if spec.Name != nil {
+			if spec.Name.Name == "." || spec.Name.Name == "_" {
+				return ""
+			}
+			return spec.Name.Name
+		}
+		return filepath.Base(path)
+	}
+	return ""
+}
+
+func retryIdent(e ast.Expr, name string) bool {
+	id, ok := e.(*ast.Ident)
+	return ok && id.Name == name
+}
+
+func retryInteger(e ast.Expr) int {
+	lit, ok := e.(*ast.BasicLit)
+	if !ok || lit.Kind != token.INT {
+		return 0
+	}
+	v, err := strconv.Atoi(lit.Value)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+func retryPackageConstant(files []*ast.File, name string) int {
+	value, count := 0, 0
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				v, ok := spec.(*ast.ValueSpec)
+				if ok && len(v.Names) == 1 && v.Names[0].Name == name {
+					count++
+					if len(v.Values) == 1 {
+						value = retryInteger(v.Values[0])
+					}
+				}
+			}
+		}
+	}
+	if count != 1 {
+		return 0
+	}
+	return value
+}
+
+func retryReturningIf(s *ast.IfStmt) bool {
+	if s.Init != nil || s.Else != nil || s.Body == nil || len(s.Body.List) != 1 {
+		return false
+	}
+	_, ok := s.Body.List[0].(*ast.ReturnStmt)
+	return ok
+}
+
+func retryAborted(e ast.Expr, errName, errorsName, iamErrorsName string) bool {
+	not, ok := e.(*ast.UnaryExpr)
+	if !ok || not.Op != token.NOT {
+		return false
+	}
+	call, ok := not.X.(*ast.CallExpr)
+	if !ok || len(call.Args) != 2 {
+		return false
+	}
+	fun, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || !retryIdent(fun.X, errorsName) || fun.Sel.Name != "Is" || !retryIdent(call.Args[0], errName) {
+		return false
+	}
+	sentinel, ok := call.Args[1].(*ast.SelectorExpr)
+	return ok && retryIdent(sentinel.X, iamErrorsName) && sentinel.Sel.Name == "ErrAborted"
+}
+
+func retryReceiverType(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) != 1 {
+		return ""
+	}
+	value := fn.Recv.List[0].Type
+	if ptr, ok := value.(*ast.StarExpr); ok {
+		value = ptr.X
+	}
+	id, ok := value.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return id.Name
+}
+
+func retryLocalMethod(files []*ast.File, owner *ast.FuncDecl, name string) bool {
+	receiverType := retryReceiverType(owner)
+	if receiverType == "" {
+		return false
+	}
+	count := 0
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if ok && fn.Body != nil && fn.Name.Name == name && retryReceiverType(fn) == receiverType {
+				count++
+			}
+		}
+	}
+	return count == 1
+}
+
+// Import aliases и cap не должны означать локальные переменные с тем же именем.
+func retryShadows(fn *ast.FuncDecl, names ...string) bool {
+	wanted := map[string]bool{}
+	for _, name := range names {
+		if name != "" {
+			wanted[name] = true
+		}
+	}
+	found := false
+	ast.Inspect(fn, func(n ast.Node) bool {
+		var ids []*ast.Ident
+		switch s := n.(type) {
+		case *ast.Field:
+			ids = s.Names
+		case *ast.ValueSpec:
+			ids = s.Names
+		case *ast.AssignStmt:
+			if s.Tok == token.DEFINE {
+				for _, lhs := range s.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok {
+						ids = append(ids, id)
+					}
+				}
+			}
+		}
+		for _, id := range ids {
+			found = found || wanted[id.Name]
+		}
+		return !found
 	})
 	return found
 }

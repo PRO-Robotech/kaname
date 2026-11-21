@@ -27,6 +27,8 @@ package pg
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,7 +39,9 @@ import (
 
 // RegistrationStore — хранилище регистрации на пуле.
 type RegistrationStore struct {
-	pool *pgxpool.Pool
+	pool                  *pgxpool.Pool
+	participantConfigured bool
+	participant           *HumanAdmissionParticipant
 }
 
 // NewRegistrationStore — адаптер поверх пула.
@@ -47,13 +51,18 @@ func NewRegistrationStore(pool *pgxpool.Pool) *RegistrationStore {
 
 // Writer — одна транзакция трёх следствий.
 //
-// Транзакцию открывает открытие писателя сессии (`beginHumanSessionWriter`),
-// а не эта дверь: писатель сессии встроен сюда целиком, снятие записи с
+// Транзакцию открывает beginAdmissionSession: по умолчанию ceremony TX
+// с compatibility fence, при явной настройке — GLOBAL participant. Обе
+// двери входят до бизнес-замков; чистые session writers не расширяются.
+// Писатель сессии встроен сюда целиком, снятие записи с
 // отзывом выданного в ней этой транзакции представимо, и уровень её назван
 // там же, где у остальных дверей писателя сессии (kaname#316).
 func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, error) {
-	w, err := beginHumanSessionWriter(ctx, s.pool)
+	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
+		if s != nil && s.participantConfigured {
+			return nil, err
+		}
 		return nil, mapErr(err, "Registration.Writer", "")
 	}
 	return &RegistrationWriter{
@@ -66,12 +75,15 @@ func (s *RegistrationStore) Writer(ctx context.Context) (*RegistrationWriter, er
 // VerificationWriter — транзакция исхода подтверждения адреса (kaname#456,
 // Р10): тот же состав, что у регистрации (писатель сессии и писатель зеркала
 // над ОДНОЙ `pgx.Tx`, — активация приглашения идёт тем же исходом), но ПЕРВЫМ
-// оператором взята строка человека замком писателя нескольких сессий:
+// бизнес-оператором взята строка человека замком писателя нескольких сессий:
 // подтверждение снимает прочие сессии человека, а запрос письма судит предел
 // писем, и одновременные обращения одного человека сериализованы этим замком.
 func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
-	w, err := beginHumanSessionWriter(ctx, s.pool)
+	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
+		if s != nil && s.participantConfigured {
+			return nil, err
+		}
 		return nil, mapErr(err, "Verification.Writer", "")
 	}
 	return holdPersonOf(ctx, w, userID)
@@ -80,18 +92,21 @@ func (s *RegistrationStore) VerificationWriter(ctx context.Context, userID domai
 // EmailChangeWriter — транзакция глаголов смены адреса (kaname#635, Р6, Р8):
 // тот же состав, что у подтверждения адреса. Исход смены снимает прочие сессии
 // человека, а запрос смены судит темп человека, и одновременные обращения
-// одного человека сериализованы замком строки человека, взятым первым. Сила
+// одного человека сериализованы замком строки человека, взятым первым
+// бизнес-оператором после admission entry (legacy fence либо participant). Сила
 // замка — глагола, решающего по заведённому (`holdPersonAgainstEnrollment`,
 // kaname#770): условие уровня (Р2) читает заведённое этой транзакцией, и
 // заведение способа «2», идущее одновременно, с ним не разминётся.
 func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain.UserID) (*RegistrationWriter, error) {
-	w, err := beginHumanSessionWriter(ctx, s.pool)
+	w, err := s.beginAdmissionSession(ctx)
 	if err != nil {
+		if s != nil && s.participantConfigured {
+			return nil, err
+		}
 		return nil, mapErr(err, "EmailChange.Writer", "")
 	}
 	if err := w.holdPersonAgainstEnrollment(ctx, userID); err != nil {
-		_ = w.tx.Rollback(ctx)
-		return nil, err
+		return nil, preparedEntryFailure(err, policyRollback(ctx, w.tx))
 	}
 	return &RegistrationWriter{
 		humanSessionWriter: w,
@@ -100,13 +115,12 @@ func (s *RegistrationStore) EmailChangeWriter(ctx context.Context, userID domain
 	}, nil
 }
 
-// holdPersonOf — ПЕРВЫМ оператором открытой транзакции строка человека взята
+// holdPersonOf — ПЕРВЫМ бизнес-оператором открытой транзакции строка человека взята
 // замком писателя нескольких сессий; писатель сессии и писатель зеркала — над
 // той же `pgx.Tx`. Отказ замка откатывает транзакцию.
 func holdPersonOf(ctx context.Context, w *humanSessionWriter, userID domain.UserID) (*RegistrationWriter, error) {
 	if err := w.holdPersonForSessionSet(ctx, userID); err != nil {
-		_ = w.tx.Rollback(ctx)
-		return nil, err
+		return nil, preparedEntryFailure(err, policyRollback(ctx, w.tx))
 	}
 	return &RegistrationWriter{
 		humanSessionWriter: w,
@@ -133,4 +147,42 @@ func (w *RegistrationWriter) MirrorWriter() kaname.Writer { return w.mirror }
 func (w *RegistrationWriter) Commit(ctx context.Context) error { return w.mirror.Commit(ctx) }
 
 // Rollback — откат той же транзакции.
-func (w *RegistrationWriter) Rollback(ctx context.Context) error { return w.tx.Rollback(ctx) }
+func (w *RegistrationWriter) Rollback(ctx context.Context) error { return policyRollback(ctx, w.tx) }
+
+func (s *RegistrationStore) RunRegistrationWrite(ctx context.Context, body func(context.Context, *RegistrationWriter) error) error {
+	return s.runAdmissionWrite(ctx, s.Writer, body)
+}
+func (s *RegistrationStore) RunVerificationWrite(ctx context.Context, id domain.UserID, body func(context.Context, *RegistrationWriter) error) error {
+	return s.runAdmissionWrite(ctx, func(ctx context.Context) (*RegistrationWriter, error) { return s.VerificationWriter(ctx, id) }, body)
+}
+func (s *RegistrationStore) RunEmailChangeWrite(ctx context.Context, id domain.UserID, body func(context.Context, *RegistrationWriter) error) error {
+	return s.runAdmissionWrite(ctx, func(ctx context.Context) (*RegistrationWriter, error) { return s.EmailChangeWriter(ctx, id) }, body)
+}
+func (s *RegistrationStore) runAdmissionWrite(ctx context.Context, open func(context.Context) (*RegistrationWriter, error), body func(context.Context, *RegistrationWriter) error) error {
+	if s == nil || body == nil {
+		return kaname.ErrInvalidAuthorityFencePlan
+	}
+	if s.participantConfigured {
+		return executePreparedAttempts(ctx, open, body)
+	}
+	return runLegacyAdmission(ctx, open, body)
+}
+
+// Legacy не получает retry budget; отмена запроса не мешает ограниченной уборке.
+func runLegacyAdmission[T preparedTransaction](ctx context.Context, open func(context.Context) (T, error), body func(context.Context, T) error) (err error) {
+	w, err := open(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if cleanupErr := w.Rollback(cleanup); cleanupErr != nil && cleanupErr != pgx.ErrTxClosed {
+			err = errors.Join(err, cleanupErr)
+		}
+	}()
+	if err = body(ctx, w); err != nil {
+		return err
+	}
+	return w.Commit(ctx)
+}

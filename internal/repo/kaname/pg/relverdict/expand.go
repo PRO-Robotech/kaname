@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -69,6 +70,7 @@ type Source struct {
 // сборкой, о типе, заведённом применением манифеста в работающем процессе, не
 // знает (kacho#1986). Двух словарей в одном соединении быть не должно —
 // соединение по разным написаниям не совпадает НИКОГДА и молча.
+// $8 — предел родителей одного шага; $3 ограничивает только глубину обхода.
 const expandSQL = `
 WITH RECURSIVE
 -- scope — ОБЛАСТИ, на которые может быть сделана действующая выдача: сам объект
@@ -92,12 +94,10 @@ WITH RECURSIVE
 -- ЦЕНА ОБХОДА ЗАПЛАЧЕНА СОЕДИНЕНИЕМ ВБОК, А НЕ ОБЫЧНЫМ. Рекурсивная ветвь с
 -- обычным соединением даёт планировщику право прочитать таблицу рёбер ЦЕЛИКОМ на
 -- каждом шаге: измерено 2412 строк за один вердикт при трёх рёбрах у объекта.
--- Соединение вбок с пределом заставляет ходить указателем по ключу. Предел НЕ
--- УСЕКАЕТ и усечь не может: у объекта не бывает больше рёбер, чем глубин (ключ
--- таблицы уникален по глубине), а сама глубина ограничена проверкой схемы тем же
--- числом. Выведенное звено этого равенства не нарушает: представление выводит
--- предка ТОЛЬКО там, где владелец объекта своей цепи не назвал, поэтому строки
--- не складываются.
+-- Соединение вбок ограничивает число родителей одним параметром, а глубину
+-- обхода — другим. Полная сохранённая цепь из 4 строк читается без усечения;
+-- продолжение сверх границы не становится доказанным отсутствием. Captured
+-- writer отдельно проверяет полноту графа до исполнения native вопроса.
 -- Та же форма и по той же причине стоит на пути перечисления — одна семантика
 -- области на обе точки входа.
 scope(s_type, s_id, depth) AS (
@@ -110,7 +110,7 @@ scope(s_type, s_id, depth) AS (
                FROM kaname.resource_scope_edge pe
               WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
               ORDER BY pe.depth
-              LIMIT $3::int
+              LIMIT $8::int
            ) e
      WHERE s.depth < $3::int
 ),
@@ -238,7 +238,7 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 		return nil, err
 	}
 	rows, err := q.Query(ctx, sql, objectType, objectID, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, catalogType)
+		factParents, factRelations, bindVerbs, catalogType, hierarchy.MaxImmediateParents)
 	if err != nil {
 		return nil, fmt.Errorf("relverdict: разбор: %w", err)
 	}

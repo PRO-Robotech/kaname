@@ -185,13 +185,9 @@ func TestRenderRefusalPathsAreDerivedFromTheTemplate(t *testing.T) {
 		start := strings.Index(b, `{{- define "kaname-svc.requireOperatorSuppliedNames" -}}`)
 		require.GreaterOrEqual(t, start, 0)
 		head, body := b[:start], b[start:]
-		// ФОРМ ВЕТВИ ДВЕ, и обезврежены обязаны быть ОБЕ: безусловная
-		// (`if not <ключ>`) и условная — «обязательна от антецедента»
-		// (`if and <антецедент> (not <ключ>)`, задача kacho#2488). Оставив вторую,
-		// инъекция подменяла бы не тот факт: распознаватель по-прежнему находил
-		// бы ветви, и проба зеленела бы, ничего не доказав.
-		body = strings.ReplaceAll(body, "{{- if not ", "{{- unless ")
-		body = strings.ReplaceAll(body, "{{- if and ", "{{- unless and ")
+		// Распознаватель читает любой if, включая новые проверки режима БД.
+		// Снимаем все такие ветви; сохранённый if сделал бы пробу беспредметной.
+		body = strings.ReplaceAll(body, "{{- if ", "{{- unless ")
 		writeChartFile(t, chartDir, "templates/_helpers.tpl", head+body)
 
 		_, _, injErr := renderRefusalPaths(chartDir)

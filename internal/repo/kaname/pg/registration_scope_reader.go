@@ -18,10 +18,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -56,6 +58,12 @@ const (
 		SELECT subject FROM kaname.relation_fact
 		 WHERE object_type = $1 AND object_id = $2 AND relation = ANY ($3)
 		 ORDER BY subject`
+	// BoundedPointerSubjectsQuery — страница только строгого admission. Пятая
+	// строка означает переполнение; до sentinel нет сортировки всего набора.
+	BoundedPointerSubjectsQuery = `
+		SELECT subject FROM kaname.relation_fact
+		 WHERE object_type = $1 AND object_id = $2 AND relation = ANY ($3)
+		 LIMIT 5`
 )
 
 // RegistrationScopeReader — адаптер порта чтений вывода родителя. Без состояния.
@@ -121,6 +129,33 @@ func (RegistrationScopeReader) PointerSubjectsTx(
 	if err != nil {
 		return nil, fmt.Errorf("relation_fact: факты указателя %s:%s: %w", modelType, id, err)
 	}
+	return out, nil
+}
+
+// BoundedPointerSubjectsTx — полное ограниченное чтение только для admission.
+// Порядок — по субъекту после sentinel; пятая строка не становится успешным
+// частичным ответом. Исторические audit/cleanup используют PointerSubjectsTx.
+func (RegistrationScopeReader) BoundedPointerSubjectsTx(
+	ctx context.Context, tx service.Tx, modelType, id string, pointers []string,
+) ([]string, error) {
+	if len(pointers) > hierarchy.MaxImmediateParents {
+		return nil, fmt.Errorf("%w: pointer names budget", domain.ErrParentHierarchyInvalid)
+	}
+	if len(pointers) == 0 {
+		return nil, nil
+	}
+	rows, err := txAsPgx(tx).Query(ctx, BoundedPointerSubjectsQuery, modelType, id, pointers)
+	if err != nil {
+		return nil, fmt.Errorf("relation_fact: факты указателя %s:%s: %w", modelType, id, err)
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("relation_fact: факты указателя %s:%s: %w", modelType, id, err)
+	}
+	if len(out) > hierarchy.MaxImmediateParents {
+		return nil, fmt.Errorf("%w: pointer subjects exceed %d", domain.ErrParentHierarchyInvalid, hierarchy.MaxImmediateParents)
+	}
+	sort.Strings(out)
 	return out, nil
 }
 

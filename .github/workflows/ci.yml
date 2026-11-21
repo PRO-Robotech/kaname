@@ -242,7 +242,7 @@ jobs:
             exit 1
           fi
           echo "прочитано файлов Go: $(printf '%s\n' "$files" | wc -l)"
-          unformatted=$(gofmt -l $files || true)
+          unformatted=$(gofmt -l $files) || exit 1
           if [ -n "$unformatted" ]; then
             echo "требуется gofmt:"; echo "$unformatted"; exit 1
           fi
@@ -264,15 +264,12 @@ jobs:
         run: python3 .github/scripts/review-event-silence.py
 
   # ── ЮНИТЫ ───────────────────────────────────────────────────────────────────
-  unit:
-    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit') }}
+  # Две независимые части сохраняют прежние бюджеты и детектор гонок.
+  unitmain:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unitmain') }}
     needs: [changes]
-    name: пробы -race -short (числовой вердикт)
+    name: unit — основной набор
     runs-on: ubuntu-latest
-    # -timeout 45m ограничивает отдельный тестовый пакет, а не весь go test ./...:
-    # общий бюджет включает сборку и исполнение множества пакетов. Лимит 55m
-    # отменил полный прогон до числового вердикта (kaname#986). Даём завершить весь набор;
-    # Два обязательных прогона ниже сохраняют отдельные числовые вердикты.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -283,40 +280,92 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go mod download
-
-      # ПРОГОНЩИК ВЫНОСИТ ЧАСТЬ ВЕРДИКТА, значит его способность УПАСТЬ обязана
-      # быть доказана ДО того, как его вердикту поверят: иначе он сам стал бы
-      # формой без содержания — тем самым классом, ради которого заведён.
-      # Инъекция идёт по каждой оси в ОБЕ стороны, включая законных близнецов.
-      - name: прогонщик вердикта способен упасть (самопроба инъекцией)
+      - name: прогонщик вердикта способен упасть
         run: python3 .github/scripts/go-test-verdict.py --self-test
+      - name: отдельные сырые потоки и числовые вердикты
+        run: python3 .github/scripts/run-unit.py main ci-test-evidence/unit/main
+      - name: сырые события части, включая отказ и прерывание
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-test-unit-main-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/unit/main
+          if-no-files-found: error
 
-      # `-short` ОБЯЗАТЕЛЕН: без него сюда затягиваются контейнерные пробы,
-      # поднимающие Postgres на каждом пакете, и задание упирается в предел
-      # времени. Контейнерные гоняет отдельное задание ниже.
-      #
-      # Полный обход дерева читает тот же корпус без детектора гонок: его
-      # парсер и инъекции остаются в общем -race прогоне. Исключено ровно одно
-      # имя, которое обязательно отдельно исполняется и проходит один раз.
-      # Потоки JSON раздельны: стенд читает test.json как один общий прогон.
-      # Все четыре кода берутся данными, чтобы обе группы дали перепись даже
-      # при отказе первой. Итог требует и сырого кода Go, и числового вердикта.
-      - name: пробы (-race -short и отдельный полный обход дерева)
+  unitcensus:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unitcensus') }}
+    needs: [changes]
+    name: unit — Census 11
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+      - name: прогонщик вердикта способен упасть
+        run: python3 .github/scripts/go-test-verdict.py --self-test
+      - name: отдельные сырые потоки и числовые вердикты
+        run: python3 .github/scripts/run-unit.py census ci-test-evidence/unit/census
+      - name: сырые события части, включая отказ и прерывание
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-test-unit-census-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/unit/census
+          if-no-files-found: error
+
+  # Прежний обязательный контекст принимает только обе полные части того же SHA.
+  # RED одной части не отменяет другую; отсутствие/skip части не является успехом.
+  unit:
+    if: ${{ always() && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit')) }}
+    needs: [changes, unitmain, unitcensus]
+    name: пробы -race -short (числовой вердикт)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - name: получить основной сырой поток
+        if: always()
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: go-test-unit-main-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/unit/main
+      - name: получить сырой поток Census
+        if: always()
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: go-test-unit-census-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/unit/census
+      - name: обязательное объединение compiled inventory и фактических событий
+        if: always()
+        env:
+          MAIN_RESULT: ${{ needs.unitmain.result }}
+          CENSUS_RESULT: ${{ needs.unitcensus.result }}
         run: |
-          tree_go_rc=0
-          tree_verdict_rc=0
-          race_go_rc=0
-          race_verdict_rc=0
-          go test ./internal/check -run '^TestNoDeferredWorkInTheTree$' -short -count=1 -timeout 4m -json > deferred-tree.json 2>&1 || tree_go_rc=$?
-          echo "Полный обход дерева без -race: go test код $tree_go_rc; отдельная перепись:"
-          python3 .github/scripts/go-test-verdict.py --require-pass 'github.com/PRO-Robotech/kaname/internal/check::TestNoDeferredWorkInTheTree' < deferred-tree.json || tree_verdict_rc=$?
-          go test ./... -race -short -count=1 -timeout 45m -skip '^TestNoDeferredWorkInTheTree$' -json > test.json 2>&1 || race_go_rc=$?
-          echo "Общий прогон -race: go test код $race_go_rc; отдельная перепись:"
-          python3 .github/scripts/go-test-verdict.py < test.json || race_verdict_rc=$?
-          echo "Коды: дерево Go=$tree_go_rc вердикт=$tree_verdict_rc; -race Go=$race_go_rc вердикт=$race_verdict_rc"
-          if [ "$tree_go_rc" -ne 0 ] || [ "$tree_verdict_rc" -ne 0 ] || [ "$race_go_rc" -ne 0 ] || [ "$race_verdict_rc" -ne 0 ]; then
+          rc=0
+          python3 .github/scripts/run-unit.py aggregate ci-test-evidence/unit || rc=$?
+          if [ "$MAIN_RESULT" != success ] || [ "$CENSUS_RESULT" != success ]; then
             exit 1
           fi
+          exit "$rc"
+      - name: сырые события unit (включая отказ и прерывание)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-test-unit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            deferred-tree.json
+            test.json
+            census-test.json
+            ci-test-evidence/unit
+          if-no-files-found: error
 
   # ── ЛИНТ ────────────────────────────────────────────────────────────────────
   lint:
@@ -639,13 +688,16 @@ jobs:
   #
   # ШАРДЫ, А НЕ ПОДНЯТЫЙ ПРЕДЕЛ (kaname#840, kaname#990, kaname#1020).
   # Пакеты идут по одному (-p 1), раскладка использует измеренные веса и их
-  # provenance из integration-shard-weights.txt. Пять частей сохраняют прежние
-  # предел 30 мин и ресурсы; отбор выводится из текущего дерева, а не из весов.
-  # Исторические замеры не означают PASS или гарантию срока новой композиции.
-  #
-  # Число шардов берётся у матрицы (`strategy.job-total`), а не выписано вторым
-  # местом: матрица из двух при «/3» оставила бы треть пакетов без прогона.
-  # Каждый шард сам проверяет полный план — каждый пакет ровно в одном шарде.
+  # provenance из integration-shard-weights.txt. Двенадцать независимых частей
+  # сохраняют предел 30 мин и ресурсы каждого задания; отбор пакетов по импортам.
+  # Исторические замеры и плановые резервы не означают PASS или гарантию срока.
+  # Число частей передаёт сама матрица через strategy.job-total.
+  # Migrations занимает index 2 отдельно. AccessBinding исполняется четырьмя,
+  # PG — четырьмя взаимодополняющими частями; неизвестные будущие пробы остаются
+  # в дополнениях. Остальные пакеты получают одного владельца по LPT.
+  # План проверяет всех владельцев и все единицы исполнения без потерь/дублей;
+  # выбранные TOP требуют точного RUN→PASS, дополнения сохраняют полный хвост.
+
   integrationshard:
     if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'integrationshard') }}
     needs: [changes]
@@ -657,9 +709,9 @@ jobs:
       # первом упавшем.
       fail-fast: false
       matrix:
-        # kaname#1020, kaname#1034: обе поставки используют пять частей.
+        # kaname#1034: восемь специальных единиц и LPT обычных пакетов на 12 частях.
         # Прежние job30m и Go25m сохранены; полный план проверяет каждый шард.
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -688,6 +740,25 @@ jobs:
       - uses: ./.github/actions/platform-tree
         id: platform-tree
 
+      - name: контекст сырых событий проб
+        env:
+          EVIDENCE_KIND: integration
+        run: |
+          mkdir -p ci-test-evidence/integration
+          git rev-parse HEAD > ci-test-evidence/integration/checkout-sha.txt
+          python3 - <<'PYMETA'
+          import json, os, pathlib
+          keys = ("GITHUB_SHA", "GITHUB_WORKFLOW", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+                  "GITHUB_EVENT_NAME", "GITHUB_JOB", "RUNNER_OS", "RUNNER_ARCH",
+                  "TESTCONTAINERS_RYUK_DISABLED", "TESTCONTAINERS_HOST_OVERRIDE", "KANAME_REQUIRE_INTEGRATION",
+                  "KACHO_DERIVE_PARENT_COST", "KACHO_PERMANENT_PROJECT_COST", "KACHO_MATRIX_VOLUME",
+                  "KACHO_SCALEGRID_FULL", "KACHO_STRENGTH_FULL", "KACHO_STRENGTH_WRITE", "KACHO_RECOVERY_TIMING")
+          data = {key: os.environ.get(key) for key in keys}
+          data["kind"] = os.environ["EVIDENCE_KIND"]
+          pathlib.Path("ci-test-evidence/integration/context.json").write_text(
+              json.dumps(data, indent=2, sort_keys=True) + "\n")
+          PYMETA
+
       - name: контейнерные пробы
         env:
           # Уборщик контейнеров на ЭФЕМЕРНОМ исполнителе не нужен: машина
@@ -696,6 +767,7 @@ jobs:
           # которых вердикта не было вовсе.
           TESTCONTAINERS_RYUK_DISABLED: "true"
           INTEGRATION_TIMEOUT: 25m
+          INTEGRATION_EVIDENCE_DIR: ci-test-evidence/integration
           INTEGRATION_SHARD: ${{ strategy.job-index }}/${{ strategy.job-total }}
           PLATFORM_TREE: ${{ steps.platform-tree.outputs.root }}
         run: |
@@ -711,6 +783,14 @@ jobs:
             exit 1
           fi
           exit "$rc"
+
+      - name: сырые события и план integration (включая отказ и прерывание)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-test-integration-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/integration
+          if-no-files-found: error
 
   # Сводный исход шардов под ПРЕЖНИМ именем контекста: «интеграция (Postgres в
   # контейнерах)» — обязательный контекст защиты ствола (`.github/TRUNK-VERDICT.md`),
@@ -1053,6 +1133,8 @@ jobs:
     needs:
       - build
       - unit
+      - unitmain
+      - unitcensus
       - lint
       - proto
       - standalone
@@ -1094,6 +1176,8 @@ jobs:
           .github/scripts/trunk-verdict-holder.sh \
             "${{ needs.build.result }}" \
             "${{ needs.unit.result }}" \
+            "${{ needs.unitmain.result }}" \
+            "${{ needs.unitcensus.result }}" \
             "${{ needs.lint.result }}" \
             "${{ needs.proto.result }}" \
             "${{ needs.standalone.result }}" \
@@ -1120,7 +1204,7 @@ jobs:
   prverdict:
     name: сводный вердикт запроса (ci)
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    needs: [changes, authzartifacts, build, catalogparity, gosec, govulncheck, integration, integrationshard, lint, listfilter, proto, standalone, unit]
+    needs: [changes, authzartifacts, build, catalogparity, gosec, govulncheck, integration, integrationshard, lint, listfilter, proto, standalone, unit, unitmain, unitcensus]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

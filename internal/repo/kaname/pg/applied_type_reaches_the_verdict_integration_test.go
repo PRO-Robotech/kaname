@@ -261,7 +261,25 @@ func awaitOperation(t *testing.T, ctx context.Context, ops operations.Repo, opID
 	t.Helper()
 	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	require.NoError(t, operations.Wait(waitCtx), "исполнитель операций не завершил очередь")
+	waitErr := operations.Wait(waitCtx)
+	if waitErr != nil {
+		if observer, ok := ops.(interface{ operationWaitFailed(string) }); ok {
+			observer.operationWaitFailed(opID)
+		}
+		// Очередь общая для пакета. Состояние своей операции отличает её
+		// незавершённую работу от чужого worker, но не заменяет полный drain.
+		readCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		got, readErr := ops.Get(readCtx, opID)
+		stop()
+		if readErr != nil {
+			t.Logf("очередь не завершилась: операция %s не прочитана: %v", opID, readErr)
+		} else if got == nil {
+			t.Logf("очередь не завершилась: операция %s отсутствует", opID)
+		} else {
+			t.Logf("очередь не завершилась: собственная операция %s done=%t error=%v; global_wait=%v", opID, got.Done, got.Error, waitErr)
+		}
+	}
+	require.NoError(t, waitErr, "исполнитель операций не завершил очередь")
 	got, err := ops.Get(ctx, opID)
 	require.NoErrorf(t, err, "операция %s не прочитана — это «не выполнилось», а не отказ", opID)
 	require.Truef(t, got.Done, "операция %s не терминальна", opID)
