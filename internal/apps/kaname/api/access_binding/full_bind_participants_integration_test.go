@@ -31,7 +31,7 @@ import (
 )
 
 // Фабрика наблюдает настоящий материализатор только у выбранной тестовой пробы.
-// После активации без фабрики сохраняется прямой указатель на материализатор.
+// Наблюдатель источников мира имеет отдельные уведомления от внешней фабрики.
 type fullBindSelectorObserverFactory func(*reconcile.Reconciler) accessbindingapp.SelectorReconciler
 
 type fullBindSetupAwaiter interface {
@@ -161,6 +161,10 @@ func (w *fullBindWorld) installFullBindParticipantsWithRegistrationExceptions(di
 		selector = observers[0](rec)
 		require.NotNil(w.t, selector)
 	}
+	// Общий source ждёт собственные уведомления: внешний observer сохраняет
+	// свои одноразовые await и принятые барьеры. Оба вызывают настоящий путь.
+	w.sourceCallbacks = &fb11SetupCallbacks{}
+	selector = &fb11SetupReconciler{SelectorReconciler: selector, callbacks: w.sourceCallbacks}
 	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, ops, source).
 		WithRelationStore(door, slog.Default()).WithRegisteredKeys(keys).
 		WithBindingDecisions(writers).WithReconciler(selector)

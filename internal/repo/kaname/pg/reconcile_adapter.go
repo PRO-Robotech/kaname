@@ -1614,6 +1614,12 @@ func (s *reconcileStore) RecordEmittedTuples(ctx context.Context, bindingID doma
 	return s.RecordEmittedTuplesBatch(ctx, refs)
 }
 
+const forgetEmittedTuplesSQL = `DELETE FROM kaname.access_binding_emitted_tuples et
+		  USING unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[]) AS k(mt, mi, u, r, o)
+		  WHERE et.binding_id = $1
+		    AND et.member_object_type = k.mt AND et.member_object_id = k.mi
+		    AND et.fga_user = k.u AND et.relation = k.r AND et.object = k.o`
+
 // ForgetEmittedTuples снимает ровно названные строки реестра — по ПОЛНОМУ ключу
 // (выдача, координата члена, кортеж) — на пишущей транзакции (eager-revoke /
 // выпадение / истечение), сохраняя журнал в соответствии с живым набором кортежей FGA, чтобы
@@ -1632,11 +1638,7 @@ func (s *reconcileStore) ForgetEmittedTuples(ctx context.Context, bindingID doma
 		}
 	}
 	if _, err := s.tx.Exec(ctx,
-		`DELETE FROM kaname.access_binding_emitted_tuples et
-		  USING unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[]) AS k(mt, mi, u, r, o)
-		  WHERE et.binding_id = $1
-		    AND et.member_object_type = k.mt AND et.member_object_id = k.mi
-		    AND et.fga_user = k.u AND et.relation = k.r AND et.object = k.o`,
+		forgetEmittedTuplesSQL,
 		string(bindingID), cols.types, cols.ids, cols.users, cols.rels, cols.objs,
 	); err != nil {
 		return fmt.Errorf("reconcile: forget emitted tuple: %w", err)
