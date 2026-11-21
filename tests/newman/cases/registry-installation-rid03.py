@@ -114,13 +114,6 @@ function retryMaterialization() {
  pm.execution.setNextRequest(pm.info.requestName);
 }
 pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));
-if(status===403 || status===404) {
- pm.test('only transient access and visibility errors can be retried',()=>{
-  pm.expect(pm.response.json().code).to.eql(status===403?7:5);
- });
- retryMaterialization();
- return;
-}
 pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));
 if(status!==200) return;
 """.strip(), _GET_CONTEXT, _GET_IDENTITY, r"""
@@ -213,8 +206,12 @@ for case_id, mode, scenario, phase in _PHASES:
                 steps.append(Step(name='await-action-materialization', method='GET', path=route+'/{{rid03ActionResourceId}}',
                     auth='jwtRIDOperator',
                     pre_script=[
-                        "if(!pm.environment.get('rid03MaterializationDeadline'))",
+                        "const opId=pm.environment.get('rid03ActionOperationId');",
+                        "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                        " pm.environment.set('rid03MaterializationOperationId',opId);",
                         " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                        " pm.environment.set('rid03MaterializationRetries','0');",
+                        "}",
                     ],
                     test_script=_WAIT_MATERIALIZATION.splitlines()))
             steps.append(Step(name='actual-action-resource-Get', method='GET', path=route+'/{{rid03ActionResourceId}}',
