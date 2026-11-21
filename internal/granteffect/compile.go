@@ -265,6 +265,7 @@ func (c *Compiler) Compile(b Binding) Set {
 		ep.AuthoredRuleFP = origins[sel.RuleFP]
 		ep.ProjectedRuleFP = sel.RuleFP
 		ep.Primitive = "object_rule"
+		c.compileChildRegistration(&s, b, sel, ep)
 		for _, dotted := range sel.ObjectTypes {
 			typ, ok := c.facts.FGAObjectType(dotted)
 			if !ok {
