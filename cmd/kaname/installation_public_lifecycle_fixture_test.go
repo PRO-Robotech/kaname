@@ -43,6 +43,7 @@ type ridLifecycleOperation struct {
 type ridLifecycleWorld struct {
 	f                                       *installationNativeWorld
 	delivery                                installruntime.DeliveryInput
+	deliveryProcess                         *installruntime.Process
 	accounts                                []string
 	issuer                                  *installruntime.StandingCreator
 	issuerToken                             string
@@ -257,9 +258,10 @@ func newRIDLifecycleWorldConfigured(t *testing.T, mode string, systemClass bool,
 	if mode == "S1" {
 		in.TenantAccountID = &f.tenantID
 	}
-	requireNativeOK(t, f.apply(t, in), len(accounts))
+	deliveryProcess := f.apply(t, in)
+	requireNativeOK(t, deliveryProcess, len(accounts))
 	f.renewOperator(t, f.given.ctx)
-	w := &ridLifecycleWorld{f: f, delivery: in, accounts: accounts}
+	w := &ridLifecycleWorld{f: f, delivery: in, deliveryProcess: deliveryProcess, accounts: accounts}
 	var issuerID, writerID string
 	for _, raw := range f.ridList(t, "/iam/v1/serviceAccounts", "serviceAccounts", url.Values{"accountId": {f.baseline.SystemID}}) {
 		var sa iamv1.ServiceAccount

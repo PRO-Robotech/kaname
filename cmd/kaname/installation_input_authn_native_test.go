@@ -168,6 +168,8 @@ func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
 	var w *ridLifecycleWorld
 	if c.Active {
 		w = newRIDLifecycleWorldAccounts(t, c.Mode, false, setup)
+		// Исходный снимок ACTIVE требует тех же завершённых проекций ролей, что восстановление.
+		rid09AwaitBaseRoleProjections(t, w.f.given.ctx, w.deliveryProcess)
 		subject := w.f.ridSA(t, w.f.tenantID, "rid11-existing-grantee")
 		g := w.grant(t, w.bindingInput("service_account", subject, w.pull, "registry.registries", w.object))
 		require.Equal(t, w.gd.Id, g.DelegationId)
