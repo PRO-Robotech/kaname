@@ -67,11 +67,12 @@ if(!op.done){pm.execution.setNextRequest(pm.info.requestName);}else{
  pm.environment.set('rid03ActionResponse',JSON.stringify(op.response));pm.environment.set('rid03ActionResourceId',op.response.id);
 }
 """.strip()
-_GET = r"""
+_GET_CONTEXT = r"""
 const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();
 const response=JSON.parse(pm.environment.get('rid03ActionResponse'));
 const expected={...response};delete expected['@type'];
-
+""".strip()
+_GET_IDENTITY = r"""
 pm.test('own Operation/Get full equality active exact delegation',()=>{
  if(e.path==='/iam/v1/accessBindings'){
   pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());
@@ -83,6 +84,8 @@ pm.test('own Operation/Get full equality active exact delegation',()=>{
   pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);
  }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}
 });
+""".strip()
+_GET_MATERIALIZATION = r"""
 if(e.path==='/iam/v1/accessBindings'){
  pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{
   pm.expect(j.materializedAt).to.be.a('string').and.not.empty;
@@ -91,8 +94,41 @@ if(e.path==='/iam/v1/accessBindings'){
   if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));
  });
 }
-
 """.strip()
+_GET = _GET_CONTEXT + '\n\n' + '\n'.join((_GET_IDENTITY, _GET_MATERIALIZATION))
+_WAIT_MATERIALIZATION = '\n'.join((r"""
+const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));
+const status=pm.response.code;
+function retryMaterialization() {
+ const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');
+ pm.test('materialization retry remains within 15 attempts',()=>{
+  pm.expect(retries).to.be.below(15);
+ });
+ if(retries>=15 || Date.now()+400>=deadline) {
+  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));
+  return;
+ }
+ pm.environment.set('rid03MaterializationRetries',String(retries+1));
+ const until=Date.now()+400;
+ while(Date.now()<until) { /* Интервал опроса материализации. */ }
+ pm.execution.setNextRequest(pm.info.requestName);
+}
+pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));
+if(status===403 || status===404) {
+ pm.test('only transient access and visibility errors can be retried',()=>{
+  pm.expect(pm.response.json().code).to.eql(status===403?7:5);
+ });
+ retryMaterialization();
+ return;
+}
+pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));
+if(status!==200) return;
+""".strip(), _GET_CONTEXT, _GET_IDENTITY, r"""
+if(j.materializedAt===null) {
+ retryMaterialization();
+ return;
+}
+""".strip(), _GET_MATERIALIZATION))
 
 # Frozen explicit literal census: 22 phases in each of the existing two modes.
 _PHASES = [
@@ -173,6 +209,14 @@ for case_id, mode, scenario, phase in _PHASES:
         if not denied:
             steps.append(Step(name='actual-action-Operation-Get', method='GET', path='/operations/{{rid03ActionOperationId}}',
                 auth=auth, test_script=[*assert_status(200), *_POLL.splitlines()]))
+            if route == '/iam/v1/accessBindings':
+                steps.append(Step(name='await-action-materialization', method='GET', path=route+'/{{rid03ActionResourceId}}',
+                    auth='jwtRIDOperator',
+                    pre_script=[
+                        "if(!pm.environment.get('rid03MaterializationDeadline'))",
+                        " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                    ],
+                    test_script=_WAIT_MATERIALIZATION.splitlines()))
             steps.append(Step(name='actual-action-resource-Get', method='GET', path=route+'/{{rid03ActionResourceId}}',
                 auth='jwtRIDOperator', test_script=[*assert_status(200), *_GET.splitlines()]))
     elif not denied:
