@@ -41,6 +41,7 @@ type installationNativeWorld struct {
 	lastPublic         nativePublicReceipt
 	publicReadSequence int
 	writerPlan         *installruntime.RegistrationWriterPlan
+	settleIssuedKeys   bool
 	stockLegacyGroup   json.RawMessage
 	stockCatalog       json.RawMessage
 }
@@ -76,7 +77,17 @@ func newInstallationNativeWorldLifecycle(t *testing.T, keyTTL int64, accessTTL s
 // трёх допусков за настоящий час. Ноль сохраняет каждый прежний профиль стенда;
 // фикстура не переписывает строку политики БД или идентичность/носитель.
 func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool, accountCapacity int64) *installationNativeWorld {
+	return newInstallationNativeWorldConfigured(t, keyTTL, accessTTL, moduleWriter, earlyLifecycle, nativeWorldOptions{accountCapacity: accountCapacity})
+}
+
+type nativeWorldOptions struct {
+	accountCapacity  int64
+	settleIssuedKeys bool
+}
+
+func newInstallationNativeWorldConfigured(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool, options nativeWorldOptions) *installationNativeWorld {
 	t.Helper()
+	accountCapacity := options.accountCapacity
 	require.True(t, accountCapacity == 0 || accountCapacity == 4, "only the explicit RID08 N4 count profile is permitted")
 	// Объявляем согласованный краткоживущий производственный профиль до создания фикстуры PG.
 	// Считыватель отзывов остаётся включённым; его штатное окно кеша
@@ -84,6 +95,11 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	overrides := map[string]string{}
 	if accountCapacity != 0 {
 		overrides["KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY"] = fmt.Sprint(accountCapacity)
+	}
+	if options.settleIssuedKeys {
+		// RID03 и RID05 успевают получить ключ через штатный API, затем
+		// ждут его очистки до начала сравнения полных снимков.
+		overrides["KANAME_AUTHN__SAKEY_REDACT_GRACE"] = ridKeyResponseGrace.String()
 	}
 	if accessTTL != "" {
 		ttl, err := time.ParseDuration(accessTTL)
@@ -109,7 +125,7 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(evidenceRoot, 0700))
 	stand := installruntime.PrepareNativeStand(t, ctx, root, evidence, moduleWriter)
-	f := &installationNativeWorld{stand: stand, writerPlan: installruntime.EmptyRegistrationWriterPlan()}
+	f := &installationNativeWorld{stand: stand, writerPlan: installruntime.EmptyRegistrationWriterPlan(), settleIssuedKeys: options.settleIssuedKeys}
 	if earlyLifecycle {
 		// Регистрируем до любого нативного Start, начальной настройки или выдачи ключа.
 		// Замыкание допускает любой частично инициализированный мир и никогда не вызывает Fatal.
@@ -221,6 +237,11 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	require.NoError(t, err)
 	require.NoError(t, pool.QueryRow(ctx, `SELECT expires_at FROM kaname.service_account_oauth_clients WHERE id=$1 AND sva_id=$2`, f.creator.KeyID, f.creator.ID).Scan(&f.creator.ExpiresAt))
 	f.secrets = append(f.secrets, f.creator.SecretMaterial()...)
+	if f.settleIssuedKeys {
+		// Первый serve выдаёт ключ C и сам удаляет секрет из Operation до
+		// остановки при поставке. Файл для следующего запуска уже сохранён.
+		f.awaitIssuedKeyResponseRedaction(t, f.creator)
+	}
 	credential, err := os.ReadFile(f.creator.CredentialFile)
 	require.NoError(t, err)
 	f.credentialDigest = sha256.Sum256(credential)

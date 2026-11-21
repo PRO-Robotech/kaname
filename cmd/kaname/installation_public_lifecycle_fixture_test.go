@@ -175,6 +175,9 @@ func (f *installationNativeWorld) ridKey(t *testing.T, id, account, label string
 	raw, err := os.ReadFile(key.CredentialFile)
 	require.NoError(t, err)
 	f.secrets = append(f.secrets, string(raw))
+	if f.settleIssuedKeys {
+		f.awaitIssuedKeyResponseRedaction(t, key)
+	}
 	return key
 }
 func (f *installationNativeWorld) ridAdmin(t *testing.T, id string, grant bool) {
@@ -230,9 +233,13 @@ func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifec
 
 // Необязательная подготовка фикстуры использует ту же полную нативную установку и публичные F7-F10.
 func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, setup func(*testing.T, *installationNativeWorld) []string) *ridLifecycleWorld {
+	return newRIDLifecycleWorldConfigured(t, mode, systemClass, setup, nativeWorldOptions{})
+}
+
+func newRIDLifecycleWorldConfigured(t *testing.T, mode string, systemClass bool, setup func(*testing.T, *installationNativeWorld) []string, options nativeWorldOptions) *ridLifecycleWorld {
 	t.Helper()
 	manifests := ridLifecycleDelivery(t, systemClass)
-	f := newInstallationNativeWorldProfile(t, 7200, "", true)
+	f := newInstallationNativeWorldConfigured(t, 7200, "", true, true, options)
 
 	// Конструктор уже сравнил полный штатный каталог до/после базы,
 	// записал настоящие квитанции отсутствия поставки и проверил нулевую поставку I/W/GD.
