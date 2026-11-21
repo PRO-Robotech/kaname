@@ -166,6 +166,27 @@ func rid06RevokeEpochKeys(before rid03NewmanSnapshot, gd rid09PrimaryRow, bindin
 		default:
 			policy["*"] = true
 		}
+		if tuple.Type == "iam_access_binding" {
+			// Штатный отзыв удаляет и parent tuple самой выдачи. SQL
+			// authority_policy_object_account берёт её owner из access_bindings,
+			// а не resource_mirror. Историческая строка переживает отзыв.
+			binding := bindings[tuple.ID]
+			if binding == nil || rid03S(binding, "id") != tuple.ID {
+				return nil, nil, false
+			}
+			owner := ""
+			switch rid03S(binding, "resource_type") {
+			case "account":
+				owner = rid03S(binding, "resource_id")
+			case "project":
+				owner = projects[rid03S(binding, "resource_id")]
+			}
+			if owner == "" {
+				return nil, nil, false
+			}
+			policy["scope:"+owner] = true
+			continue
+		}
 		// У ресурсов RID-06 отзыв не меняет владельца. Неизвестный объект
 		// не даёт права сдвигать общий счётчик или счётчик чужого аккаунта.
 		dotted := ""

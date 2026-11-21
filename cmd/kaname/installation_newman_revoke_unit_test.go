@@ -637,3 +637,44 @@ func TestRID06RevokeEpochKeysComeFromBeforeMutations(t *testing.T) {
 		})
 	}
 }
+
+func TestRID06RevokeEpochsIncludeBindingParentFact(t *testing.T) {
+	for _, name := range []string{"revoked-binding-parent", "unknown-binding-parent", "unexpected-root-change"} {
+		t.Run(name, func(t *testing.T) {
+			a, b := rid06UnitRevoke(t, false)
+			binding := "G"
+			if name == "unknown-binding-parent" {
+				binding = "unknown"
+			}
+			// The emitted parent fact has a core object; it has no mirror row.
+			// Its deletion invalidates only the existing binding owner's scope.
+			fact := rid09PrimaryRow{}
+			for k, v := range a.Raw["relation_fact"][0] {
+				fact[k] = v
+			}
+			for k, v := range map[string]string{"subject": "account:A", "relation": "account", "object_type": "iam_access_binding", "object_id": binding} {
+				fact[k], _ = json.Marshal(v)
+			}
+			a.Raw["relation_fact"] = append(a.Raw["relation_fact"], fact)
+			ledger := rid03UnitRow(t, map[string]any{"binding_id": "G", "source": "binding", "member_object_type": "", "member_object_id": "", "fga_user": "account:A", "relation": "account", "object": "iam_access_binding:" + binding})
+			a.Raw["access_binding_emitted_tuples"] = append(a.Raw["access_binding_emitted_tuples"], ledger)
+			b.Raw["access_binding_emitted_tuples"] = append(b.Raw["access_binding_emitted_tuples"], ledger)
+			intent := rid09PrimaryRow{}
+			for k, v := range b.Raw["fga_outbox"][0] {
+				intent[k] = v
+			}
+			intent["id"] = json.RawMessage(`2`)
+			intent["payload"], _ = json.Marshal(map[string]any{"user": "account:A", "relation": "account", "object": "iam_access_binding:" + binding})
+			b.Raw["fga_outbox"] = append(b.Raw["fga_outbox"], intent)
+			if name == "unexpected-root-change" {
+				for _, row := range b.Raw["authority_policy_epoch"] {
+					if rid03S(row, "key") == "*" {
+						row["revision"] = json.RawMessage(`8`)
+					}
+				}
+			}
+			_, ok := rid06RevokeRawDelta(a, b, "GD", "O")
+			require.Equal(t, name == "revoked-binding-parent", ok)
+		})
+	}
+}
