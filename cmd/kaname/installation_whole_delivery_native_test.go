@@ -227,6 +227,7 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 	require.Len(t, accounts, 3)
 	require.EqualValues(t, 1, initial.Admitted)
 	require.EqualValues(t, 3, full.Admitted)
+	rid09AwaitBaseRoleProjections(t, f.given.ctx, f.base)
 	rid09RequireNoDelivery(t, f, accounts)
 	beforePublic := rid09ReadPublic(t, f)
 	if consumer != nil {
@@ -270,6 +271,7 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 		p, err := f.session.StartBase(f.given.ctx, f.writerPlan)
 		require.NoError(t, err)
 		require.NoError(t, p.OwnsListeners(installruntime.DefaultNativePorts().All()...))
+		rid09AwaitBaseRoleProjections(t, f.given.ctx, p)
 		rid09RequireNoDelivery(t, f, accounts)
 		out.PublicAfter = rid09ReadPublic(t, f)
 		require.Equal(t, beforePublic, out.PublicAfter, "all existing public catalog/roles/groups/joins/grants remain unchanged")
@@ -300,6 +302,16 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 	}
 	rid08Write(t, f.session.Root, "rid09-completed-proof", out)
 	return out
+}
+
+// До полной переписи List/Get должны видеть завершённые проекции своего запуска.
+func rid09AwaitBaseRoleProjections(t *testing.T, ctx context.Context, p *installruntime.Process) {
+	t.Helper()
+	ready, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	require.NoError(t, p.AwaitReady(ready, func(context.Context) error {
+		return ridCatalogRoleProjectionsReady(p.StdoutPath)
+	}), "стартовый пересчёт проекций ролей не завершён")
 }
 func rid09Matrix(t *testing.T, twin bool, consumer rid09LivePublicConsumer) []rid09Observation {
 	t.Helper()
