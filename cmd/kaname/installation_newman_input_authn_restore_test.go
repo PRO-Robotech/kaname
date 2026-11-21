@@ -584,6 +584,9 @@ func rid11RequireCensusRestoration(t *testing.T, w *ridLifecycleWorld, a, b rid0
 	if bindingChanged {
 		var valid bool
 		bp, valid = rid11BuildBindingRestore(a, facts, b.Whole.PrimaryStartedAt)
+		if !valid {
+			t.Logf("RID11_BINDING_PREMISE reason=%s", bp.PremiseReason)
+		}
 		require.True(t, valid, "FIXTURE_NOT_ACCEPTED: closed BEFORE binding restoration premise")
 		bindingProof, valid = rid11ValidateBindingRestore(a, b, bp)
 		require.True(t, valid, "closed primary binding restoration coordinates and producer clocks")

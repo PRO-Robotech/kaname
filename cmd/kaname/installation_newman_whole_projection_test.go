@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -34,6 +35,23 @@ type rid09NewmanProjection struct {
 	Delegations     []map[string]any            `json:"delegations"`
 	Catalog         map[string]any              `json:"catalog"`
 	Materialization string                      `json:"-"`
+}
+
+// Печатает только закрытые категории отличий, без строк или идентификаторов.
+func rid09LogProjectionDelta(t *testing.T, previous, current rid09NewmanProjection) {
+	if reflect.DeepEqual(previous, current) {
+		return
+	}
+	t.Logf("RID_PROJECTION accounts=%t service_accounts=%t groups=%t members=%t roles=%t bindings=%t delegations=%t catalog=%t materialization=%t",
+		!reflect.DeepEqual(previous.Accounts, current.Accounts),
+		!reflect.DeepEqual(previous.ServiceAccounts, current.ServiceAccounts),
+		!reflect.DeepEqual(previous.Groups, current.Groups),
+		!reflect.DeepEqual(previous.Members, current.Members),
+		!reflect.DeepEqual(previous.Roles, current.Roles),
+		!reflect.DeepEqual(previous.Bindings, current.Bindings),
+		!reflect.DeepEqual(previous.Delegations, current.Delegations),
+		!reflect.DeepEqual(previous.Catalog, current.Catalog),
+		previous.Materialization != current.Materialization)
 }
 
 func rid09PrimaryValue[T any](t *testing.T, r rid09PrimaryRow, key string) T {

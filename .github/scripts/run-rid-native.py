@@ -703,11 +703,24 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
         rid03_names = {root_test + "/" + name for name in RID_MATRIX_NESTED[root_test]}
     old_operation_diffs, old_operation_counts = {}, {}
     rid05_cleanup, ambiguous_cleanup = {}, set()
-    rid07_projection, ambiguous_projection = {}, set()
+    projection_changes, ambiguous_projection = {}, set()
+    binding_premise, ambiguous_premise = {}, set()
+    premise_reasons = {
+        "budget-or-facts", "retired-history", "inventory", "role-index", "user-index", "subject-census",
+        "member-census", "duplicate-member", "member-clock", "binding-status", "binding-lifecycle",
+        "binding-subject", "roleless-binding", "role-live", "role-rules", "role-policy", "binding-scope",
+        "iam-target", "iam-selector", "subject-type", "subject-user", "subject-reference",
+        "account-reference", "desired-tuples", "duplicate-desired", "old-member-state", "missing-object-type",
+        "scope-self-member", "scope-self-tuples", "old-member-desired", "ledger-shape", "ledger-object",
+        "duplicate-ledger", "ledger-census",
+    }
+    premise_marker = re.compile(
+        r"[ \t]*[a-z0-9_]+_test\.go:[1-9][0-9]{0,5}: "
+        r"RID11_BINDING_PREMISE reason=([a-z-]{1,32})\n")
     projection_fields = ("accounts", "service_accounts", "groups", "members", "roles",
                          "bindings", "delegations", "catalog", "materialization")
     projection_marker = re.compile(
-        r"[ 	]*installation_newman_conflict_test\.go:[1-9][0-9]{0,5}: RID07_PROJECTION "
+        r"[ \t]*installation_newman_whole_projection_test\.go:[1-9][0-9]{0,5}: RID_PROJECTION "
         + " ".join(field + "=(true|false)" for field in projection_fields) + r"\n")
     total = 0
     try:
@@ -762,18 +775,27 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                                                  (7, "resource_journal"), (9, "resource_reconcile_outbox"))
                             },
                         }
-                if (root_test == CASES["registry-installation-rid07"][0]
+                if (root_test in (CASES["registry-installation-rid07"][0], CASES["registry-installation-rid11"][0])
                         and action == "output" and isinstance(name, str) and name in known
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
                     output = event.get("Output")
                     marker = projection_marker.fullmatch(output) if isinstance(output, str) and len(output) <= 260 else None
                     if marker:
-                        if name in rid07_projection:
+                        if name in projection_changes:
                             ambiguous_projection.add(name)
-                        rid07_projection[name] = [
+                        projection_changes[name] = [
                             field for field, changed in zip(projection_fields, marker.groups()) if changed == "true"
                         ]
+                if (markers is not None and action == "output" and isinstance(name, str) and name in known
+                        and (name, "run") in seen
+                        and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
+                    output = event.get("Output")
+                    marker = premise_marker.fullmatch(output) if isinstance(output, str) and len(output) <= 180 else None
+                    if marker and marker[1] in premise_reasons:
+                        if name in binding_premise:
+                            ambiguous_premise.add(name)
+                        binding_premise[name] = marker[1]
                 if (action == "output" and isinstance(name, str) and name in known and name not in sites
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
@@ -821,9 +843,13 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
         if (site.get("file") == "cmd/kaname/installation_newman_deletion_delta_test.go"
                 and first in rid05_cleanup and first not in ambiguous_cleanup):
             result["deleteCleanup"] = rid05_cleanup[first]
-        if (site.get("file") == "cmd/kaname/installation_newman_conflict_test.go"
-                and first not in ambiguous_projection and rid07_projection.get(first)):
-            result["changedProjectionFields"] = rid07_projection[first]
+        if (site.get("file") in ("cmd/kaname/installation_newman_conflict_test.go",
+                                "cmd/kaname/installation_newman_retirement_test.go")
+                and first not in ambiguous_projection and projection_changes.get(first)):
+            result["changedProjectionFields"] = projection_changes[first]
+        if (site.get("file") == "cmd/kaname/installation_newman_input_authn_restore_test.go"
+                and first not in ambiguous_premise and first in binding_premise):
+            result["bindingRestorationPremise"] = binding_premise[first]
     if result["status"] == "complete":
         failures = [{"test": name, "diffs": old_operation_diffs[name]}
                     for name in sorted(old_operation_diffs)
