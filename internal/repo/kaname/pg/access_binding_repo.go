@@ -9,7 +9,7 @@ package pg
 // Строгая вставка:
 //
 //   `INSERT INTO kaname.access_bindings (...)`
-//   `VALUES ($newID, $st, $sid, $rid, $rt, $rid2, $status, $cond, $exp, $grb, $rva, $rvb, now())`
+//   `VALUES ($newID, $st, $sid, $rid, $rt, $rid2, $status, $cond, $exp, $grb, $rva, $rvb, clock_timestamp())`
 //   `RETURNING id, ..., created_at;`
 //
 // На дубле (subject_id, subject_type, role_id, resource_type, resource_id)
@@ -871,11 +871,12 @@ type abWriter struct {
 // revoked_at, revoked_by_user_id) передаются через
 // nullableString/nullableTimePtr хелперы.
 func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
-	return w.insertAt(ctx, b, time.Now().UTC())
+	return w.insertAt(ctx, b, nil)
 }
 
-// Prepared CRUD передаёт время из закрытой программы. Старый Insert сохраняет свои часы.
-func (w *abWriter) insertAt(ctx context.Context, b domain.AccessBinding, now time.Time) (domain.AccessBinding, error) {
+// Подписанная запись передаёт время из программы владельца. Остальные вставки
+// используют часы того же PostgreSQL, который материализует выдачу.
+func (w *abWriter) insertAt(ctx context.Context, b domain.AccessBinding, signedAt *time.Time) (domain.AccessBinding, error) {
 	// Scope: явное значение, когда оно не Unspecified, иначе область выводит из
 	// resource_type триггер access_bindings_scope_default_trg (миграция 0005).
 	// SMALLINT NULL нарушил бы NOT NULL ПОСЛЕ триггера лишь тогда, когда триггер
@@ -916,7 +917,7 @@ func (w *abWriter) insertAt(ctx context.Context, b domain.AccessBinding, now tim
 			-- ключ и дала бы отказ ссылочной целостности на несуществующую роль.
 			NULLIF($4, ''), $5, $6,
 			COALESCE(NULLIF($7, ''), 'ACTIVE'),
-			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+			$8, $9, $10, $11, COALESCE($12::timestamptz, clock_timestamp()), $13, $14, $15, $16, $17, $18, $19,
 			-- Ссылку на делегирование ставит только делегированный путь права
 			-- выдавать (kaname#986); у выдачи держателя права колонка NULL.
 			NULLIF($20, '')
@@ -936,7 +937,7 @@ func (w *abWriter) insertAt(ctx context.Context, b domain.AccessBinding, now tim
 		string(b.GrantedByUserID),
 		nullableTimePtr(b.RevokedAt),
 		nullableUserIDPtr(b.RevokedByUserID),
-		now,
+		signedAt,
 		scopeArg,
 		b.DeletionProtection,
 		labelsJSON,

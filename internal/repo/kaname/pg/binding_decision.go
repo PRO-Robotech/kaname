@@ -354,7 +354,7 @@ func (w *capabilityBindingWriter) Insert(ctx context.Context, b domain.AccessBin
 		if !ok {
 			return domain.AccessBinding{}, kaname.ErrInvalidAuthorityFencePlan
 		}
-		created, err = raw.insertAt(ctx, b, stamp.Time)
+		created, err = raw.insertAt(ctx, b, &stamp.Time)
 	} else {
 		created, err = w.WriterIface.Insert(ctx, b)
 	}

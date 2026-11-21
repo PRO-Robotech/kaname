@@ -37,7 +37,8 @@ type Member struct {
 }
 
 // Подписанный план ожидает зафиксированное начало транзакции. Обычная
-// материализация допускает строку, созданную более поздней транзакцией.
+// материализация использует часы записи: она может встретить привязку или
+// участника, созданных уже после начала её транзакции.
 // Каждый запрос целиком называет таблицу и список записи для статического гейта.
 const upsertSQL = `INSERT INTO kaname.access_binding_target_members
 		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
@@ -48,7 +49,8 @@ const upsertSQL = `INSERT INTO kaname.access_binding_target_members
 
 const upsertLegacySQL = `INSERT INTO kaname.access_binding_target_members
 		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, now(), now())
+		 SELECT $1, $2, $3, $4, $5, $6, stamp.at, stamp.at
+		   FROM (SELECT clock_timestamp() AS at) AS stamp
 		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
 		    SET verification_status = EXCLUDED.verification_status,
 		        updated_at = GREATEST(access_binding_target_members.created_at, access_binding_target_members.updated_at, clock_timestamp());`
@@ -91,9 +93,10 @@ const PreparedUpsertManySQL = `INSERT INTO kaname.access_binding_target_members
 
 const upsertManyLegacySQL = `INSERT INTO kaname.access_binding_target_members
 			   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
-			 SELECT b, r, f, ot, oi, vs, now(), now()
+			 SELECT b, r, f, ot, oi, vs, stamp.at, stamp.at
 			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
 			        AS t(b, r, f, ot, oi, vs)
+			  CROSS JOIN (SELECT clock_timestamp() AS at) AS stamp
 		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
 		    SET verification_status = EXCLUDED.verification_status,
 		        updated_at = GREATEST(access_binding_target_members.created_at, access_binding_target_members.updated_at, clock_timestamp());`

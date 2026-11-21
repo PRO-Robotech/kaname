@@ -116,8 +116,8 @@ func TestAB_MA_MaterializedAtFromMemberLedger(t *testing.T) {
 	assert.Len(t, got, 1, "MA-4: one batched read, no cross-attribution between bindings")
 }
 
-// Писатель мог начать транзакцию до создания строки другим писателем.
-// Повторная материализация сохраняет created_at и не сдвигает время назад.
+// Писатель мог начать транзакцию до создания привязки и строки участника.
+// Первая материализация не предшествует привязке, повторная не сдвигает часы назад.
 func TestTargetMemberUpdateDoesNotBackdateLaterInsert(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -129,12 +129,6 @@ func TestTargetMemberUpdateDoesNotBackdateLaterInsert(t *testing.T) {
 	repo := kanamepg.New(pool, nil)
 	owner := mustSeedUser(t, ctx, pool, "matime-owner")
 	account := seedAccount(t, ctx, repo, "acc-matime", owner)
-	role := seedCustomRole(t, ctx, repo, account.ID, "matime_role")
-	binding := insertAB(t, ctx, repo, domain.AccessBinding{
-		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(owner),
-		RoleID: role.ID, ResourceType: "account", ResourceID: string(account.ID),
-		GrantedByUserID: owner,
-	})
 	for _, tc := range []struct {
 		name   string
 		upsert func(context.Context, pgx.Tx, target_members.Member) error
@@ -145,13 +139,19 @@ func TestTargetMemberUpdateDoesNotBackdateLaterInsert(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			role := seedCustomRole(t, ctx, repo, account.ID, "matime_role_"+tc.name)
 			earlier, err := pool.Begin(ctx)
 			require.NoError(t, err)
 			defer func() { _ = earlier.Rollback(ctx) }()
 			var before, inserted time.Time
 			require.NoError(t, earlier.QueryRow(ctx, `SELECT transaction_timestamp()`).Scan(&before))
+			binding := insertAB(t, ctx, repo, domain.AccessBinding{
+				SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(owner),
+				RoleID: role.ID, ResourceType: "account", ResourceID: string(account.ID),
+				GrantedByUserID: owner,
+			})
+			require.True(t, binding.CreatedAt.After(before), "привязка создана после начала reconcile")
 			require.NoError(t, pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&inserted))
-			require.True(t, inserted.After(before))
 			m := target_members.Member{
 				BindingID: string(binding.ID), RoleID: string(role.ID), RuleFP: tc.name,
 				ObjectType: "compute.instance", ObjectID: "ins-1", VerificationStatus: domain.VerificationActive,
@@ -166,6 +166,16 @@ func TestTargetMemberUpdateDoesNotBackdateLaterInsert(t *testing.T) {
 			require.True(t, inserted.Equal(created), "сохраняется исходное время создания")
 			require.False(t, updated.Before(created), "запись не должна предшествовать созданию")
 			require.Equal(t, "ACTIVE", status)
+
+			m.ObjectID = "ins-2"
+			require.NoError(t, tc.upsert(ctx, earlier, m))
+			var observed time.Time
+			require.NoError(t, earlier.QueryRow(ctx, `SELECT created_at, updated_at, clock_timestamp()
+				FROM kaname.access_binding_target_members WHERE binding_id=$1 AND rule_fp=$2 AND object_id=$3`,
+				m.BindingID, m.RuleFP, m.ObjectID).Scan(&created, &updated, &observed))
+			require.False(t, created.Before(binding.CreatedAt), "первая материализация предшествует привязке")
+			require.True(t, updated.Equal(created), "первая вставка использует одну отметку времени")
+			require.False(t, updated.After(observed), "материализация не должна опережать часы базы")
 			require.NoError(t, earlier.Commit(ctx))
 		})
 	}

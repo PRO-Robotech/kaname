@@ -212,7 +212,7 @@ func (b *crudBindingBody) Insert(ctx context.Context, a domain.AccessBinding) (d
 	if _, err := b.w.claim(ctx, "binding.insert", a.ID); err != nil {
 		return domain.AccessBinding{}, err
 	}
-	return b.abWriter.insertAt(ctx, a, b.w.transactionAt)
+	return b.abWriter.insertAt(ctx, a, &b.w.transactionAt)
 }
 func (b *crudBindingBody) Delete(ctx context.Context, id domain.AccessBindingID) error {
 	if _, err := b.w.claim(ctx, "binding.delete", id); err != nil {
