@@ -4,6 +4,7 @@
 package granteffect
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,17 +14,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func childRegistrationRoleRows() catalog.Halves {
+	h := rows()
+	// Родитель поддерживает фильтр по меткам в действующем реестре источников.
+	h.Live.Modules[1] = "registry"
+	resourceNames := map[string]string{"boxes": "registries", "items": "repositories", "tags": "tags"}
+	for i, r := range h.Live.Resources {
+		if r.Module == "probemod" {
+			h.Live.Resources[i].Module = "registry"
+			h.Live.Resources[i].Resource = resourceNames[r.Resource]
+		}
+	}
+	// У типа strange_item модель объявляет только v_get.
+	h.Live.Verbs = slices.DeleteFunc(h.Live.Verbs, func(v catalog.VerbRow) bool {
+		return v.Module == "probemod" && v.Resource == "items" && v.Verb != "get"
+	})
+	for i, v := range h.Live.Verbs {
+		if v.Module == "probemod" {
+			h.Live.Verbs[i].Module = "registry"
+			h.Live.Verbs[i].Resource = resourceNames[v.Resource]
+		}
+	}
+	return h
+}
+
 func childRegistrationRoleFixture(t *testing.T, declared bool) *Compiler {
 	t.Helper()
-	h := rows()
+	h := childRegistrationRoleRows()
 	if declared {
 		h.Live.Resources[1].ChildRegistration = &catalog.ChildRegistrationRule{
 			Verb: "registerchild", ParentSegments: 1, MaxChildren: 24, MaxCreates: 4, WindowSeconds: 60,
 		}
 	}
 	h.Live.Verbs = append(h.Live.Verbs,
-		catalog.VerbRow{Module: "probemod", Resource: "items", Verb: "registerchild", ContainerParent: "strange_box", ContainerRelation: "child_registrar"},
-		catalog.VerbRow{Module: "probemod", Resource: "items", Verb: "servicecreate", ContainerParent: "strange_box", ContainerRelation: "service_creator"},
+		catalog.VerbRow{Module: "registry", Resource: "repositories", Verb: "registerchild", ContainerParent: "strange_box", ContainerRelation: "child_registrar"},
+		catalog.VerbRow{Module: "registry", Resource: "repositories", Verb: "servicecreate", ContainerParent: "strange_box", ContainerRelation: "service_creator"},
 	)
 	model := strings.Replace(modelFixture, "type strange_box\n  relations\n", "type strange_box\n  relations\n"+
 		"    define child_registrar: [user]\n"+
@@ -37,8 +62,8 @@ func childRegistrationRoleFixture(t *testing.T, declared bool) *Compiler {
 }
 
 func childRegistrationRoleBinding() Binding {
-	return binding(domain.Rule{Module: "probemod", Resources: []string{"boxes"}, Verbs: []string{"get"},
-		Children: []domain.Rule{{Resources: []string{"items"}, Verbs: []string{"registerChild"}}}})
+	return binding(domain.Rule{Module: "registry", Resources: []string{"registries"}, Verbs: []string{"get"},
+		Children: []domain.Rule{{Resources: []string{"repositories"}, Verbs: []string{"registerChild"}}}})
 }
 
 func childRegistrationRoleEffects(s Set) []Effect {
@@ -54,7 +79,7 @@ func childRegistrationRoleEffects(s Set) []Effect {
 func TestChildRegistrationRoleProjectsSelectedParentThroughActualModel(t *testing.T) {
 	c := childRegistrationRoleFixture(t, true)
 	b := childRegistrationRoleBinding()
-	b.Target = domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "probemod.boxes", ID: "parent-a"}}}
+	b.Target = domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "registry.registries", ID: "parent-a"}}}
 	// Право должно появиться до регистрации первого потомка.
 	effects := childRegistrationRoleEffects(complete(t, c.Compile(b)))
 	require.NotEmpty(t, effects)
@@ -109,14 +134,14 @@ func TestChildRegistrationRoleIntersectsParentSelectionTargetAndScope(t *testing
 		{"named-parent", func(b *Binding) { b.Role.Rules[0].ResourceNames = []string{"parent-a"} }, true},
 		{"other-name", func(b *Binding) { b.Role.Rules[0].ResourceNames = []string{"parent-b"} }, false},
 		{"child-target", func(b *Binding) {
-			b.Target.Resources[0] = domain.ResourceRef{Type: "probemod.items", ID: "parent-a/child-a"}
+			b.Target.Resources[0] = domain.ResourceRef{Type: "registry.repositories", ID: "parent-a/child-a"}
 		}, false},
-		{"other-parent-type", func(b *Binding) { b.Target.Resources[0].Type = "probemod.tags" }, false},
+		{"other-parent-type", func(b *Binding) { b.Target.Resources[0].Type = "registry.tags" }, false},
 		{"labels", func(b *Binding) { b.Role.Rules[0].MatchLabels = map[string]string{"team": "a"} }, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			b := childRegistrationRoleBinding()
-			b.Target = domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "probemod.boxes", ID: "parent-a"}}}
+			b.Target = domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "registry.registries", ID: "parent-a"}}}
 			test.prepare(&b)
 			effects := childRegistrationRoleEffects(complete(t, c.Compile(b)))
 			require.Equal(t, test.want, len(effects) > 0)
@@ -184,7 +209,7 @@ func TestChildRegistrationRoleDoesNotWidenChildSelectorsOrAncestorOwner(t *testi
 		{"child-labels", func(b *Binding) { b.Role.Rules[0].Children[0].MatchLabels = map[string]string{"team": "a"} }},
 		{"wrong-owner", func(b *Binding) { b.Role.Rules[0].Resources = []string{"tags"} }},
 		{"flat-child", func(b *Binding) {
-			b.Role.Rules = domain.Rules{{Module: "probemod", Resources: []string{"items"}, Verbs: []string{"registerChild"}}}
+			b.Role.Rules = domain.Rules{{Module: "registry", Resources: []string{"repositories"}, Verbs: []string{"registerChild"}}}
 		}},
 		{"child-wildcard", func(b *Binding) { b.Role.Rules[0].Children[0].Resources = []string{"*"} }},
 	} {
@@ -200,7 +225,7 @@ func TestChildRegistrationRoleDoesNotWidenChildSelectorsOrAncestorOwner(t *testi
 func TestChildRegistrationRoleKeepsOrdinaryChildRightsOnChildren(t *testing.T) {
 	c := childRegistrationRoleFixture(t, true)
 	b := childRegistrationRoleBinding()
-	b.Target = domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "probemod.boxes", ID: "parent-a"}}}
+	b.Target = domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "registry.registries", ID: "parent-a"}}}
 	b.Role.Rules[0].Children[0].Verbs = []string{"registerChild", "get"}
 	set := complete(t, c.Compile(b))
 	require.NotEmpty(t, childRegistrationRoleEffects(set))
@@ -220,11 +245,11 @@ func TestChildRegistrationRoleKeepsOrdinaryChildRightsOnChildren(t *testing.T) {
 }
 
 func TestChildRegistrationRoleFailsClosedIfModelDoesNotAcceptHuman(t *testing.T) {
-	h := rows()
+	h := childRegistrationRoleRows()
 	h.Live.Resources[1].ChildRegistration = &catalog.ChildRegistrationRule{
 		Verb: "registerchild", ParentSegments: 1, MaxChildren: 24, MaxCreates: 4, WindowSeconds: 60,
 	}
-	h.Live.Verbs = append(h.Live.Verbs, catalog.VerbRow{Module: "probemod", Resource: "items", Verb: "registerchild", ContainerParent: "strange_box", ContainerRelation: "child_registrar"})
+	h.Live.Verbs = append(h.Live.Verbs, catalog.VerbRow{Module: "registry", Resource: "repositories", Verb: "registerchild", ContainerParent: "strange_box", ContainerRelation: "child_registrar"})
 	for _, subject := range []string{"service_account", "user with fresh"} {
 		t.Run(subject, func(t *testing.T) {
 			model := strings.Replace(modelFixture, "type strange_box\n  relations\n",
