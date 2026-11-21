@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
@@ -52,27 +53,31 @@ import (
 // failingFanout — a fan-out whose pass always fails, the way a lock wait that
 // outruns the statement timeout does under concurrent load.
 type failingFanout struct {
-	mu     sync.Mutex
-	count  int
-	calls  int
-	failed error
+	mu              sync.Mutex
+	count           int
+	calls           int
+	failed          error
+	remainingBudget time.Duration
 }
 
 func (f *failingFanout) CountActiveBindings(context.Context, domain.RoleID) (int, error) {
 	return f.count, nil
 }
 
-func (f *failingFanout) ReconcileActiveBindings(context.Context, domain.RoleID) error {
+func (f *failingFanout) ReconcileActiveBindings(ctx context.Context, _ domain.RoleID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	if deadline, ok := ctx.Deadline(); ok {
+		f.remainingBudget = time.Until(deadline)
+	}
 	return f.failed
 }
 
-func (f *failingFanout) called() int {
+func (f *failingFanout) observation() (int, time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.calls
+	return f.calls, f.remainingBudget
 }
 
 // A failing membership pass must not turn a committed rules change into a failed
@@ -106,8 +111,13 @@ func TestRoleUpdate_FailingMembershipPass_StillReportsTheCommittedChangeAsDone(t
 			"resource version its own committed update has already moved")
 
 	// The pass still runs: moving it off the reported path must not delete it.
-	assert.Eventually(t, func() bool { return fan.called() > 0 }, 2*time.Second, 10*time.Millisecond,
-		"the membership pass must still be attempted, just not on the reported path")
+	require.Eventually(t, func() bool {
+		calls, _ := fan.observation()
+		return calls > 0
+	}, 2*time.Second, 10*time.Millisecond, "фоновый пересчёт должен запуститься")
+	_, budget := fan.observation()
+	require.Greater(t, budget, shared.PostCommitTimeout)
+	require.LessOrEqual(t, budget, roleapp.RulesFanoutTimeout)
 }
 
 // ── the pass covers EVERY binding, not the ones before the first failure ─────

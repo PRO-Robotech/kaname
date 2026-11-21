@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/PRO-Robotech/corelib/operations"
 	"google.golang.org/grpc/codes"
@@ -26,6 +27,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
+
+// RulesFanoutTimeout ограничивает пересчёт активных выдач после правки правил роли.
+const RulesFanoutTimeout = 150 * time.Second
 
 type UpdateRoleInput struct {
 	ID          domain.RoleID
@@ -488,7 +492,7 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 	// reconcile event and the 30s periodic sweep remain the at-least-once backstop.
 	if u.membership != nil && slices.Contains(changed, "rules") {
 		id := updated.ID
-		shared.GoPostCommit(ctx, u.logger, "role rules membership fan-out", func(ctx context.Context) {
+		shared.GoPostCommitWithTimeout(ctx, u.logger, "role rules membership fan-out", RulesFanoutTimeout, func(ctx context.Context) {
 			if ferr := u.membership.ReconcileActiveBindings(ctx, id); ferr != nil && u.logger != nil {
 				u.logger.Error("role update: rules membership fan-out failed (reconcile event + sweep will retry)",
 					"role_id", string(id), "err", ferr)
