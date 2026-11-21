@@ -167,7 +167,7 @@ func rid06Start(t *testing.T, w *ridLifecycleWorld, label string) *rid02OwnedChi
 	ridRegistrationStartupProof(t, root, raw, w.delivery.RegistrationWriters)
 	ordinal := int64(rid06Result(w).CompletedPairs + 1)
 	digest := rid06HashExecutable(t)
-	c := startRIDInstallationChild(t, f, label, rid06ChildInput{ConfigPath: configPath, Creator: f.creator.ID, PairOrdinal: ordinal}, nativeConcurrentEnvironment(t, f, installruntime.SecondNativePorts(), "rid06-full-root"), rid06ChildInputEnv, "TestRID06OwnedFullStartupChild", "2m")
+	c := startRIDInstallationChild(t, f, label, rid06ChildInput{ConfigPath: configPath, Creator: f.creator.ID, Account: f.tenantID, PairOrdinal: ordinal}, nativeConcurrentEnvironment(t, f, installruntime.SecondNativePorts(), "rid06-full-root"), rid06ChildInputEnv, "TestRID06OwnedFullStartupChild", "2m")
 	parentGroup, err := os.ReadFile("/proc/self/cgroup")
 	require.NoError(t, err)
 	childGroup, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", c.cmd.Process.Pid))
@@ -224,11 +224,21 @@ func rid06CheckPending(t *testing.T, w *ridLifecycleWorld, c *rid02OwnedChild, e
 	require.Equal(t, op.Metadata.Value, data)
 	require.Equal(t, meta.GrantDelegationId, resource)
 	require.Equal(t, meta.AccountId, account)
-	var backend int32
-	require.NoError(t, w.f.given.pool.QueryRow(ctx, `SELECT pid FROM pg_stat_activity WHERE application_name='rid06-full-root' AND state='idle in transaction' AND query LIKE '%FROM kaname.operations%' AND query LIKE '%FOR UPDATE%'`).Scan(&backend))
-	require.Positive(t, backend)
+	// Изолированный child остановлен перед настоящим Writer: его соединения
+	// не должны держать admission/advisory или business write locks.
+	var childBackends int
+	require.NoError(t, w.f.given.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+ WHERE datname=current_database() AND application_name='rid06-full-root' AND backend_type='client backend'`).Scan(&childBackends))
+	require.Positive(t, childBackends, "actual isolated child database identity must remain visible")
+	var productionLocks int
+	require.NoError(t, w.f.given.pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks l
+ JOIN pg_stat_activity a ON a.pid=l.pid
+ WHERE a.datname=current_database() AND a.application_name='rid06-full-root' AND l.granted
+ AND (l.locktype IN ('advisory','transactionid','tuple')
+ OR (l.locktype='relation' AND l.mode<>'AccessShareLock'))`).Scan(&productionLocks))
+	require.Zero(t, productionLocks, "paused full startup must not hold production writer/advisory locks")
 	require.NoError(t, w.f.wire.ProductionReady(ctx), "independent ordinary O listener remains live")
-	proof, err := json.Marshal(map[string]any{"childPID": c.cmd.Process.Pid, "writerBackendPID": backend, "operation": event.Operation, "account": account, "proposedID": resource, "boundary": "pending Operation locked, before pair advisory acquisition"})
+	proof, err := json.Marshal(map[string]any{"childPID": c.cmd.Process.Pid, "databaseBackends": childBackends, "productionWriterLocks": productionLocks, "operation": event.Operation, "account": account, "proposedID": resource, "boundary": "pending Operation committed, before production writer admission and pair create/re-read"})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(c.dir, "pending-before-pair.json"), proof, 0600))
 }

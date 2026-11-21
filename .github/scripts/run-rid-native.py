@@ -667,7 +667,7 @@ def rid03_old_operation_diff(output, line_limit):
 
 
 def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
-    # Только известные имена; из Output допускается лишь закрытая проекция RID03.
+    # Только известные имена и ограниченные структурные проекции RID03/RID05.
     names = {root_test, *(root_test + "/" + name for name in predicates)}
     if root_test == CASES["registry-installation-rid04"][0]:
         names.update(root_test + "/" + name + "/" + mode
@@ -698,6 +698,7 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     if root_test == CASES["registry-installation-rid03"][0]:
         rid03_names = {root_test + "/" + name for name in RID_MATRIX_NESTED[root_test]}
     old_operation_diffs, old_operation_counts = {}, {}
+    rid05_cleanup, ambiguous_cleanup = {}, set()
     total = 0
     try:
         with path.open("rb") as stream:
@@ -729,6 +730,28 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                         else:
                             # Переполнение не должно оставлять правдоподобный неполный список.
                             old_operation_diffs.pop(name, None)
+                if (root_test == CASES["registry-installation-rid05"][0]
+                        and action == "output" and isinstance(name, str) and name in known
+                        and (name, "run") in seen and (name, "fail") not in seen):
+                    output = event.get("Output")
+                    marker = re.fullmatch(
+                        r"[ \t]*installation_newman_deletion_delta_test\.go:[1-9][0-9]{0,5}: "
+                        r"RID05_CLEANUP policy=(true|false) binding=(true|false)"
+                        r" facts=([0-9]{1,7})/([0-9]{1,7}) fga=([0-9]{1,7})/([0-9]{1,7})"
+                        r" journal=([0-9]{1,7})/([0-9]{1,7}) reconcile=([0-9]{1,7})/([0-9]{1,7})\n",
+                        output) if isinstance(output, str) and len(output) <= 240 else None
+                    if marker:
+                        if name in rid05_cleanup:
+                            ambiguous_cleanup.add(name)
+                        rid05_cleanup[name] = {
+                            "policyEpochChanged": marker[1] == "true",
+                            "bindingEpochChanged": marker[2] == "true",
+                            "rowCountsBeforeAfter": {
+                                table: [int(marker[i]), int(marker[i + 1])]
+                                for i, table in ((3, "relation_fact"), (5, "fga_outbox"),
+                                                 (7, "resource_journal"), (9, "resource_reconcile_outbox"))
+                            },
+                        }
                 if (action == "output" and isinstance(name, str) and name in known and name not in sites
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
@@ -773,6 +796,9 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
         else:
             site = sites.get(first, {"status": "not-observed"})
         result["firstFailureSite"] = {"test": first, **site}
+        if (site.get("file") == "cmd/kaname/installation_newman_deletion_delta_test.go"
+                and first in rid05_cleanup and first not in ambiguous_cleanup):
+            result["deleteCleanup"] = rid05_cleanup[first]
     if result["status"] == "complete":
         failures = [{"test": name, "diffs": old_operation_diffs[name]}
                     for name in sorted(old_operation_diffs)

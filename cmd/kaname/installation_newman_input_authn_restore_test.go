@@ -140,6 +140,7 @@ type rid11RestorePlan struct {
 	Selectors         map[string]rid09PrimaryRow
 	ExistingSelectors map[string]rid09PrimaryRow
 	Facts             *catalog.Facts
+	Epochs            *rid11RestoreEpochPlan
 }
 
 var rid11RestoreSchemas = map[string][]string{
@@ -469,10 +470,16 @@ func rid11RestoreRawValid(p rid11RestorePlan, a rid03NewmanSnapshot, b rid03Newm
 	if len(p.Raw) != len(b.Raw) || !reflect.DeepEqual(a.Whole.Separation, b.Whole.Separation) || len(a.Whole.Delivery) != len(b.Whole.Delivery) {
 		return false
 	}
+	if p.Epochs != nil && !rid11RestoreEpochsValid(*p.Epochs, a, b) {
+		return false
+	}
 	for table, rows := range p.Raw {
 		actual, ok := b.Raw[table]
 		if !ok {
 			return false
+		}
+		if p.Epochs != nil && rid11RestoreEpochSchemas[table] != nil {
+			continue // Проверено независимо по BEFORE и полным хешам обеих ведомостей.
 		}
 		if table == "role_rule_selectors" {
 			if !rid11RestoreSelectorsValid(p, actual, a.Whole.PrimaryFinishedAt, b.Whole.PrimaryStartedAt) {
@@ -488,6 +495,9 @@ func rid11RestoreRawValid(p rid11RestorePlan, a rid03NewmanSnapshot, b rid03Newm
 			return false
 		}
 		keys, allowed := rid11RestoreSchemas[table]
+		if !allowed && p.Epochs != nil {
+			keys, allowed = rid11RestoreEpochSchemas[table]
+		}
 		if !allowed && len(bindingProof) == 1 && bindingProof[0].Enabled {
 			keys, allowed = rid11BindingSchemas[table]
 		}
@@ -567,10 +577,13 @@ func rid11RequireCensusRestoration(t *testing.T, w *ridLifecycleWorld, a, b rid0
 	for table := range rid11BindingSchemas {
 		bindingChanged = bindingChanged || !rid11RestoreRowsEqual(a.Raw[table], b.Raw[table])
 	}
+	require.True(t, rid11LegacyRestorationEnvironment(w.f.session.Environment), "FIXTURE_NOT_ACCEPTED: restoration epoch contract requires legacy startup")
+	bp := rid11BindingRestorePlan{}
 	bindingProof := rid11BindingRestoreProof{}
 	expected := a.Projection
 	if bindingChanged {
-		bp, valid := rid11BuildBindingRestore(a, facts, b.Whole.PrimaryStartedAt)
+		var valid bool
+		bp, valid = rid11BuildBindingRestore(a, facts, b.Whole.PrimaryStartedAt)
 		require.True(t, valid, "FIXTURE_NOT_ACCEPTED: closed BEFORE binding restoration premise")
 		bindingProof, valid = rid11ValidateBindingRestore(a, b, bp)
 		require.True(t, valid, "closed primary binding restoration coordinates and producer clocks")
@@ -580,6 +593,9 @@ func rid11RequireCensusRestoration(t *testing.T, w *ridLifecycleWorld, a, b rid0
 		expected, valid = rid11BindingProjection(a, bindingProof.Raw["access_binding_target_members"])
 		require.True(t, valid, "complete BEFORE-derived materialization projection")
 	}
+	epochs, valid := rid11BuildRestoreEpochPlan(a.Raw, p, bp)
+	require.True(t, valid, "FIXTURE_NOT_ACCEPTED: closed BEFORE restoration epoch footprint")
+	p.Epochs = &epochs
 	require.True(t, rid11RestoreRawValid(p, a, b, bindingProof), "exact source-derived restoration raw delta; safe all-column diagnostics retained")
 	expected.Roles = rid11RestoreRoles(t, p.Raw, facts)
 	require.True(t, reflect.DeepEqual(expected, b.Projection), "complete independently derived restoration projection")

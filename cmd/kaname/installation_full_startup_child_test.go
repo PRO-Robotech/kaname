@@ -17,7 +17,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 const rid06ChildInputEnv = "KANAME_RID06_FULL_STARTUP_CHILD_INPUT"
@@ -25,6 +28,7 @@ const rid06ChildInputEnv = "KANAME_RID06_FULL_STARTUP_CHILD_INPUT"
 type rid06ChildInput struct {
 	ConfigPath  string `json:"configPath"`
 	Creator     string `json:"creator"`
+	Account     string `json:"account"`
 	PairOrdinal int64  `json:"pairOrdinal"`
 }
 
@@ -63,6 +67,7 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 	var input rid06ChildInput
 	require.NoError(t, json.Unmarshal(raw, &input))
 	require.Positive(t, input.PairOrdinal)
+	require.NotEmpty(t, input.Account)
 	cfg, err := config.Load(input.ConfigPath)
 	require.NoError(t, err)
 	require.NoError(t, cfg.Validate())
@@ -88,8 +93,8 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 	}
 	decorator := func(real kanamerepo.Repository) kanamerepo.Repository {
 		r := &rid06FullStartupRepo{ridBoundaryRepo: &ridBoundaryRepo{Repository: real}}
-		r.beforePair = func(ctx context.Context, arrival ridArrival) error {
-			if arrival.Writer != input.PairOrdinal {
+		r.beforeWriter = func(ctx context.Context, ordinal int64) error {
+			if ordinal != input.PairOrdinal {
 				return nil
 			}
 			if err := observationError(); err != nil {
@@ -99,11 +104,18 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 			if !ok || principal.Type != "service_account" || principal.ID != input.Creator {
 				return fmt.Errorf("full startup boundary lacks actual creator identity")
 			}
-			// Здесь не удерживается блокировка пары. Настоящая запись блокирует лишь строку ожидающей Operation
-			// этой попытки, поэтому независимый O может зафиксировать штатный Revoke.
+			// Operation уже создана настоящим use-case, но writer ещё не открыт.
+			// Пауза после Writer удерживала бы compatibility fence и не дала бы O
+			// зафиксировать Revoke. После release все штатные locks берутся без изменений.
 			deadline := time.Now().Add(20 * time.Second)
 			if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 				deadline = d
+			}
+			pendingCtx, cancel := context.WithDeadline(ctx, deadline)
+			defer cancel()
+			operation, err := rid06PendingBeforeWriter(pendingCtx, cfg.SingleConnDSN(), input.Creator, input.Account)
+			if err != nil {
+				return err
 			}
 			if err := events.SetWriteDeadline(deadline); err != nil {
 				return err
@@ -113,7 +125,7 @@ func TestRID06OwnedFullStartupChild(t *testing.T) {
 			}
 			stop := context.AfterFunc(ctx, func() { _ = control.SetReadDeadline(time.Now()) })
 			defer stop()
-			if err := json.NewEncoder(events).Encode(rid02ChildEvent{Stage: "before-pair", Operation: arrival.OperationID, PID: os.Getpid()}); err != nil {
+			if err := json.NewEncoder(events).Encode(rid02ChildEvent{Stage: "before-pair", Operation: operation, PID: os.Getpid()}); err != nil {
 				return err
 			}
 			var action string
@@ -147,4 +159,52 @@ func (r *rid06FullStartupRepo) ReaderFromPrimary(ctx context.Context) (kanamerep
 		return nil, fmt.Errorf("actual repository lacks primary reader")
 	}
 	return p.ReaderFromPrimary(ctx)
+}
+
+// Независимое PRIMARY-чтение только наблюдает уже committed Operation. Соединение
+// закрывается до сигнала родителю; ни writer TX, ни блокировка строки не создаются.
+func rid06PendingBeforeWriter(ctx context.Context, dsn, creator, account string) (string, error) {
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return "", fmt.Errorf("pending Operation primary connection failed")
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = conn.Close(cleanup)
+	}()
+	var recovery bool
+	if err := conn.QueryRow(ctx, "SELECT pg_is_in_recovery()").Scan(&recovery); err != nil || recovery {
+		return "", fmt.Errorf("pending Operation requires actual PRIMARY")
+	}
+	meta, err := anypb.New(&iamv1.CreateGrantDelegationMetadata{})
+	if err != nil {
+		return "", err
+	}
+	rows, err := conn.Query(ctx, `SELECT id,metadata_data,resource_id FROM kaname.operations
+ WHERE NOT done AND principal_type='service_account' AND principal_id=$1
+ AND account_id=$2 AND metadata_type=$3 ORDER BY id LIMIT 2`, creator, account, meta.TypeUrl)
+	if err != nil {
+		return "", fmt.Errorf("pending Operation primary census failed")
+	}
+	defer rows.Close()
+	operation := ""
+	for rows.Next() {
+		var id, resource string
+		var data []byte
+		if err := rows.Scan(&id, &data, &resource); err != nil {
+			return "", fmt.Errorf("pending Operation primary row invalid")
+		}
+		var decoded iamv1.CreateGrantDelegationMetadata
+		if operation != "" || id == "" || resource == "" ||
+			(&anypb.Any{TypeUrl: meta.TypeUrl, Value: data}).UnmarshalTo(&decoded) != nil ||
+			decoded.AccountId != account || decoded.GrantDelegationId != resource {
+			return "", fmt.Errorf("pending Operation exact identity is missing or ambiguous")
+		}
+		operation = id
+	}
+	if rows.Err() != nil || operation == "" || ctx.Err() != nil {
+		return "", fmt.Errorf("pending Operation primary census incomplete")
+	}
+	return operation, nil
 }
