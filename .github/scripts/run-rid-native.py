@@ -525,6 +525,12 @@ ASSERTION_FILES = (
     "cmd/kaname/installation_newman_delegated_evidence_test.go",
     "cmd/kaname/installation_newman_delegated_observation_test.go",
     "cmd/kaname/installation_native_fixture_test.go",
+    "cmd/kaname/installation_native_concurrency_test.go",
+    "cmd/kaname/installation_operation_observation_test.go",
+    "cmd/kaname/installation_creator_deletion_native_test.go",
+    "cmd/kaname/installation_newman_deletion_test.go",
+    "cmd/kaname/installation_newman_deletion_wire_test.go",
+    "cmd/kaname/installation_newman_deletion_delta_test.go",
     "cmd/kaname/installation_native_baseline_test.go",
     "cmd/kaname/installation_native_stock_premise_test.go",
     "cmd/kaname/installation_public_lifecycle_fixture_test.go",
@@ -536,14 +542,26 @@ ASSERTION_FILES = (
     "cmd/kaname/installation_owned_child_driver_test.go",
     "cmd/kaname/installation_rid_integration_test.go",
     "cmd/kaname/installation_revoke_full_startup_test.go",
+    "cmd/kaname/installation_full_startup_child_test.go",
+    "cmd/kaname/installation_newman_revoke_test.go",
+    "cmd/kaname/installation_newman_revoke_delta_test.go",
+    "cmd/kaname/installation_revoke_failed_startup_test.go",
     "cmd/kaname/installation_pair_conflict_native_test.go",
     "cmd/kaname/installation_newman_conflict_test.go",
     "cmd/kaname/installation_snapshot_runtime_test.go",
     "cmd/kaname/installation_whole_delivery_native_test.go",
+    "cmd/kaname/installation_newman_whole_projection_test.go",
+    "cmd/kaname/installation_whole_delivery_snapshot_test.go",
     "cmd/kaname/installation_newman_whole_phase_test.go",
     "cmd/kaname/installation_midrun_runtime_test.go",
     "cmd/kaname/installation_newman_midrun_test.go",
     "cmd/kaname/installation_input_authn_native_test.go",
+    "cmd/kaname/installation_input_authn_child_test.go",
+    "cmd/kaname/installation_newman_input_authn_test.go",
+    "cmd/kaname/installation_newman_input_authn_admission_test.go",
+    "cmd/kaname/installation_newman_input_authn_restore_test.go",
+    "cmd/kaname/installation_newman_input_authn_binding_restore_test.go",
+    "cmd/kaname/installation_snapshot_child_test.go",
     "cmd/kaname/installation_closed_shape_start_test.go",
     "cmd/kaname/installation_closed_shape_native_test.go",
     "cmd/kaname/installation_closed_shape_public_test.go",
@@ -610,14 +628,30 @@ RID03_OPERATION_COLUMNS = frozenset({
 RID03_OPERATION_MARKER_LIMIT = 16
 
 
-def rid03_old_operation_diff(output, line_limit):
+RID03_READ_ONLY_FIELDS = frozenset({
+    "business_audit", "projection", "delivery", "own_ceilings", "operations", "raw",
+})
+RID03_CASE_IDS = frozenset(
+    f"registry-installation-rid03-{mode}-{category}-{phase}"
+    for mode in ("S1", "S2")
+    for category in ("GRANT", "ROLE-DENIED", "ROLE-TWIN", "TARGET-DENIED", "TARGET-TWIN",
+                     "SUBJECT-DENIED", "SUBJECT-TWIN", "ISSUER-GD-DENIED", "CREATOR-GD-TWIN",
+                     "AUTHENTICATED-DENIED", "ANONYMOUS-TWIN")
+    for phase in ("ACT", "VERIFY")
+)
+DIFF_MARKER_SOURCES = {
+    "RID03_READ_ONLY_DIFF": "cmd/kaname/installation_newman_delegated_grant_test.go",
+    "RID05_OLD_OPERATION_DIFF": "cmd/kaname/installation_newman_deletion_delta_test.go",
+}
+
+
+def native_diff_json(output, line_limit, marker, source):
     # Маркер обязан быть одной полной строкой штатного t.Logf из известного файла.
     if not isinstance(output, str) or len(output) > 2048:
         return None
-    source = "installation_newman_delegated_grant_test.go"
     match = re.fullmatch(
         r"[ \t]+(?:" + re.escape(str(ROOT / "cmd/kaname") + "/") + r")?" +
-        re.escape(source) + r":([1-9][0-9]{0,6}): RID03_OLD_OPERATION_DIFF ([^\r\n]{1,1024})\n",
+        re.escape(Path(source).name) + r":([1-9][0-9]{0,6}): " + marker + r" ([^\r\n]{1,1024})\n",
         output)
     if match is None or int(match[1]) > line_limit:
         return None
@@ -634,6 +668,27 @@ def rid03_old_operation_diff(output, line_limit):
         value = json.loads(match[2], object_pairs_hook=unique_fields)
     except (ValueError, RecursionError):
         return None
+    return value
+
+
+def rid03_read_only_diff(output, line_limit):
+    value = native_diff_json(output, line_limit, "RID03_READ_ONLY_DIFF",
+                             DIFF_MARKER_SOURCES["RID03_READ_ONLY_DIFF"])
+    if (type(value) is not dict or set(value) != {"caseId", "fields"}
+            or type(value["caseId"]) is not str or value["caseId"] not in RID03_CASE_IDS
+            or type(value["fields"]) is not list or not value["fields"]
+            or len(value["fields"]) > len(RID03_READ_ONLY_FIELDS)
+            or any(type(field) is not str or field not in RID03_READ_ONLY_FIELDS
+                   for field in value["fields"])
+            or value["fields"] != sorted(set(value["fields"]))):
+        return None
+    return value
+
+
+def rid03_old_operation_diff(output, line_limit, *, marker="RID03_OLD_OPERATION_DIFF"):
+    source = (DIFF_MARKER_SOURCES[marker] if marker == "RID05_OLD_OPERATION_DIFF"
+              else "cmd/kaname/installation_newman_delegated_grant_test.go")
+    value = native_diff_json(output, line_limit, marker, source)
     if (type(value) is not dict or set(value) != {
             "missing", "columns", "beforeDone", "afterDone", "kind"}
             or type(value["missing"]) is not bool
@@ -652,12 +707,49 @@ def rid03_old_operation_diff(output, line_limit):
     return value
 
 
+def rid02_rid10_marker(output, marker, bounds):
+    # Только полная строка из точного исходника; никаких значений из журнала в ключах.
+    sources = {
+        "RID02_OPERATION_CENSUS": "cmd/kaname/installation_native_concurrency_test.go",
+        "RID10_SNAPSHOT": "cmd/kaname/installation_newman_midrun_test.go",
+        "RID_PROJECTION": "cmd/kaname/installation_newman_whole_projection_test.go",
+    }
+    source = sources[marker]
+    if not isinstance(output, str) or len(output) > 512:
+        return None
+    match = re.fullmatch(
+        r"[ \t]+(?:" + re.escape(str(ROOT / "cmd/kaname") + "/") + r")?" +
+        re.escape(Path(source).name) + r":([1-9][0-9]{0,6}): " + marker +
+        r" ([^\r\n]{1,350})\n", output)
+    if match is None or int(match[1]) > bounds.get(source, 0):
+        return None
+    if marker == "RID02_OPERATION_CENSUS":
+        fields = ("matched", "scoped_pending", "scoped_terminal", "other_pending", "other_terminal")
+        number = r"(0|[1-9][0-9]{0,6})"
+        unavailable = re.fullmatch(r"status=unavailable matched=" + number, match[2])
+        if unavailable:
+            return {"status": "unavailable", "matched": int(unavailable[1])}
+        value = re.fullmatch("status=complete " + " ".join(field + "=" + number for field in fields), match[2])
+        return {"status": "complete", **dict(zip(fields, map(int, value.groups())))} if value else None
+    fields = (("pull_role", "public_operations", "raw_delegations", "raw_bindings", "raw_operations")
+              if marker == "RID10_SNAPSHOT" else
+              ("accounts", "service_accounts", "groups", "members", "roles", "bindings",
+               "delegations", "catalog", "materialization"))
+    value = re.fullmatch(" ".join(field + "=(true|false)" for field in fields), match[2])
+    return dict(zip(fields, (item == "true" for item in value.groups()))) if value else None
+
+
 def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
-    # Только известные имена; из Output допускается лишь закрытая проекция RID03.
+    # Только известные имена и ограниченные структурные проекции отдельных RID.
     names = {root_test, *(root_test + "/" + name for name in predicates)}
     if root_test == CASES["registry-installation-rid04"][0]:
         names.update(root_test + "/" + name + "/" + mode
                      for name in predicates for mode in ("S1", "S2"))
+    if root_test == CASES["registry-installation-rid02"][0]:
+        names.update(root_test + "/" + name + "/" + mode for name in (
+            "two_real_absent-pair_arrivals_->_one_GD_and_two_successful_Operations",
+            "raw_Any_metadata_index_and_response_identities_agree_on_both_Operations",
+        ) for mode in ("S1", "S2"))
     if root_test == CASES["registry-installation-rid10"][0]:
         names.update(root_test + "/" + name for name in RID10_NESTED)
     names.update(root_test + "/" + name for name in RID_MATRIX_NESTED.get(root_test, frozenset()))
@@ -679,6 +771,40 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     if root_test == CASES["registry-installation-rid03"][0]:
         rid03_names = {root_test + "/" + name for name in RID_MATRIX_NESTED[root_test]}
     old_operation_diffs, old_operation_counts = {}, {}
+    rid05_cleanup, ambiguous_cleanup = {}, set()
+    projection_changes, ambiguous_projection = {}, set()
+    binding_premise, ambiguous_premise = {}, set()
+    bounded_markers, invalid_bounded_markers = {}, set()
+    safe_diffs = {}
+    safe_diff_leaves, safe_diff_kind = set(), None
+    if root_test in (CASES["registry-installation-rid03"][0], CASES["registry-installation-rid05"][0]):
+        safe_diff_leaves = {root_test + "/" + name for name in RID_MATRIX_NESTED[root_test]}
+        safe_diff_kind = ("RID03_READ_ONLY_DIFF" if rid03_names else "RID05_OLD_OPERATION_DIFF")
+    bounded_leaves, bounded_kinds = set(), ()
+    if root_test == CASES["registry-installation-rid02"][0]:
+        bounded_leaves = {name for name in names if name.endswith(("/S1", "/S2"))}
+        bounded_kinds = ("RID02_OPERATION_CENSUS",)
+    elif root_test == CASES["registry-installation-rid10"][0]:
+        bounded_leaves = {root_test + "/" + name for name in RID10_NESTED
+                          if not name.endswith("-independent-twin")}
+        bounded_kinds = ("RID10_SNAPSHOT", "RID_PROJECTION")
+    premise_reasons = {
+        "budget-or-facts", "retired-history", "inventory", "role-index", "user-index", "subject-census",
+        "member-census", "duplicate-member", "member-clock", "binding-status", "binding-lifecycle",
+        "binding-subject", "roleless-binding", "role-live", "role-rules", "role-policy", "binding-scope",
+        "iam-target", "iam-selector", "subject-type", "subject-user", "subject-reference",
+        "account-reference", "desired-tuples", "duplicate-desired", "old-member-state", "missing-object-type",
+        "scope-self-member", "scope-self-tuples", "old-member-desired", "ledger-shape", "ledger-object",
+        "duplicate-ledger", "ledger-census",
+    }
+    premise_marker = re.compile(
+        r"[ \t]*[a-z0-9_]+_test\.go:[1-9][0-9]{0,5}: "
+        r"RID11_BINDING_PREMISE reason=([a-z-]{1,32})\n")
+    projection_fields = ("accounts", "service_accounts", "groups", "members", "roles",
+                         "bindings", "delegations", "catalog", "materialization")
+    projection_marker = re.compile(
+        r"[ \t]*installation_newman_whole_projection_test\.go:[1-9][0-9]{0,5}: RID_PROJECTION "
+        + " ".join(field + "=(true|false)" for field in projection_fields) + r"\n")
     total = 0
     try:
         with path.open("rb") as stream:
@@ -694,6 +820,39 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                 if not isinstance(event, dict) or event.get("Package") != PACKAGE:
                     continue
                 name, action = event.get("Test"), event.get("Action")
+                if action == "output" and isinstance(name, str) and name in bounded_leaves:
+                    output = event.get("Output")
+                    for kind in bounded_kinds:
+                        if not isinstance(output, str) or kind not in output:
+                            continue
+                        key = (name, kind)
+                        active = ((root_test, "run") in seen and (name, "run") in seen
+                                  and not any((subject, end) in seen for subject in (root_test, name)
+                                              for end in ("pass", "fail", "skip")))
+                        value = rid02_rid10_marker(output, kind, bounds) if active else None
+                        if value is None or key in bounded_markers:
+                            invalid_bounded_markers.add(key)
+                        elif key not in invalid_bounded_markers:
+                            bounded_markers[key] = value
+                if action == "output" and isinstance(name, str) and name in safe_diff_leaves:
+                    output = event.get("Output")
+                    if isinstance(output, str) and safe_diff_kind in output:
+                        key = (name, safe_diff_kind)
+                        active = ((root_test, "run") in seen and (name, "run") in seen
+                                  and not any((subject, end) in seen for subject in (root_test, name)
+                                              for end in ("pass", "fail", "skip")))
+                        limit = bounds.get(DIFF_MARKER_SOURCES[safe_diff_kind], 0)
+                        value = None
+                        if active:
+                            value = (rid03_read_only_diff(output, limit)
+                                     if safe_diff_kind == "RID03_READ_ONLY_DIFF" else
+                                     rid03_old_operation_diff(output, limit, marker=safe_diff_kind))
+                        prior = safe_diffs.get(key, [])
+                        if (value is None or value in prior
+                                or len(prior) >= RID03_OPERATION_MARKER_LIMIT):
+                            invalid_bounded_markers.add(key)
+                        elif key not in invalid_bounded_markers:
+                            safe_diffs.setdefault(key, []).append(value)
                 if (markers is not None and action == "output" and (root_test, "run") in seen
                         and (name is None or isinstance(name, str) and name in known)):
                     markers.observe(event.get("Output"))
@@ -710,6 +869,49 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                         else:
                             # Переполнение не должно оставлять правдоподобный неполный список.
                             old_operation_diffs.pop(name, None)
+                if (root_test == CASES["registry-installation-rid05"][0]
+                        and action == "output" and isinstance(name, str) and name in known
+                        and (name, "run") in seen and (name, "fail") not in seen):
+                    output = event.get("Output")
+                    marker = re.fullmatch(
+                        r"[ \t]*installation_newman_deletion_delta_test\.go:[1-9][0-9]{0,5}: "
+                        r"RID05_CLEANUP policy=(true|false) binding=(true|false)"
+                        r" facts=([0-9]{1,7})/([0-9]{1,7}) fga=([0-9]{1,7})/([0-9]{1,7})"
+                        r" journal=([0-9]{1,7})/([0-9]{1,7}) reconcile=([0-9]{1,7})/([0-9]{1,7})\n",
+                        output) if isinstance(output, str) and len(output) <= 240 else None
+                    if marker:
+                        if name in rid05_cleanup:
+                            ambiguous_cleanup.add(name)
+                        rid05_cleanup[name] = {
+                            "policyEpochChanged": marker[1] == "true",
+                            "bindingEpochChanged": marker[2] == "true",
+                            "rowCountsBeforeAfter": {
+                                table: [int(marker[i]), int(marker[i + 1])]
+                                for i, table in ((3, "relation_fact"), (5, "fga_outbox"),
+                                                 (7, "resource_journal"), (9, "resource_reconcile_outbox"))
+                            },
+                        }
+                if (root_test in (CASES["registry-installation-rid07"][0], CASES["registry-installation-rid11"][0])
+                        and action == "output" and isinstance(name, str) and name in known
+                        and (name, "run") in seen
+                        and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
+                    output = event.get("Output")
+                    marker = projection_marker.fullmatch(output) if isinstance(output, str) and len(output) <= 260 else None
+                    if marker:
+                        if name in projection_changes:
+                            ambiguous_projection.add(name)
+                        projection_changes[name] = [
+                            field for field, changed in zip(projection_fields, marker.groups()) if changed == "true"
+                        ]
+                if (markers is not None and action == "output" and isinstance(name, str) and name in known
+                        and (name, "run") in seen
+                        and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
+                    output = event.get("Output")
+                    marker = premise_marker.fullmatch(output) if isinstance(output, str) and len(output) <= 180 else None
+                    if marker and marker[1] in premise_reasons:
+                        if name in binding_premise:
+                            ambiguous_premise.add(name)
+                        binding_premise[name] = marker[1]
                 if (action == "output" and isinstance(name, str) and name in known and name not in sites
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
@@ -754,13 +956,48 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
         else:
             site = sites.get(first, {"status": "not-observed"})
         result["firstFailureSite"] = {"test": first, **site}
+        if (result["status"] == "complete" and site.get("status") == "matched"
+                and first in bounded_leaves
+                and not any((first, end) in seen for end in ("pass", "skip"))):
+            for kind, source, field in (
+                    ("RID02_OPERATION_CENSUS", "cmd/kaname/installation_native_concurrency_test.go", "operationCensus"),
+                    ("RID10_SNAPSHOT", "cmd/kaname/installation_newman_midrun_test.go", "snapshotChanges"),
+                    ("RID_PROJECTION", "cmd/kaname/installation_newman_midrun_test.go", "changedProjectionFields")):
+                key = (first, kind)
+                if site.get("file") == source and key in bounded_markers and key not in invalid_bounded_markers:
+                    value = bounded_markers[key]
+                    result[field] = ([name for name, changed in value.items() if changed]
+                                     if kind == "RID_PROJECTION" else value)
+        if (site.get("file") == "cmd/kaname/installation_newman_deletion_delta_test.go"
+                and first in rid05_cleanup and first not in ambiguous_cleanup):
+            result["deleteCleanup"] = rid05_cleanup[first]
+        if (site.get("file") in ("cmd/kaname/installation_newman_conflict_test.go",
+                                "cmd/kaname/installation_newman_retirement_test.go")
+                and first not in ambiguous_projection and projection_changes.get(first)):
+            result["changedProjectionFields"] = projection_changes[first]
+        if (site.get("file") == "cmd/kaname/installation_newman_input_authn_restore_test.go"
+                and first not in ambiguous_premise and first in binding_premise):
+            result["bindingRestorationPremise"] = binding_premise[first]
     if result["status"] == "complete":
         failures = [{"test": name, "diffs": old_operation_diffs[name]}
                     for name in sorted(old_operation_diffs)
                     if (name, "fail") in seen and not any(
                         (name, end) in seen for end in ("pass", "skip"))]
+        read_only_failures = []
+        for (name, kind), diffs in sorted(safe_diffs.items()):
+            site = sites.get(name, {})
+            if ((name, kind) in invalid_bounded_markers or name in fragmented
+                    or (name, "fail") not in seen
+                    or any((name, end) in seen for end in ("pass", "skip"))
+                    or site.get("status") != "matched"
+                    or site.get("file") != DIFF_MARKER_SOURCES[kind]):
+                continue
+            record = {"test": name, "diffs": diffs}
+            (read_only_failures if kind == "RID03_READ_ONLY_DIFF" else failures).append(record)
         if failures:
             result["oldOperationDiffs"] = failures
+        if read_only_failures:
+            result["readOnlyDiffs"] = read_only_failures
     if markers is not None:
         result["failureMarker"] = markers.verdict(result["status"], result.get("firstFailureSite", {}))
     return result

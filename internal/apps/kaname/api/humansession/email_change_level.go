@@ -51,6 +51,7 @@ package humansession
 
 import (
 	"context"
+	"errors"
 
 	"github.com/PRO-Robotech/corelib/acrlevel"
 
@@ -72,13 +73,23 @@ type EnrolledMethodsReader interface {
 // читателем заведённого read/keys: пулом до транзакции либо транзакцией записи
 // (шапка файла).
 func requireEmailChangeLevel(ctx context.Context, d EmailChangeDeps, resolved Resolved, read loginMethodRead, keys accessKeyRead) error {
+	err := emailChangeLevel(ctx, resolved, read, keys)
+	if err == nil {
+		return nil
+	}
+	var step *StepUpRequiredError
+	if errors.As(err, &step) {
+		d.Observer.EmailChangeObserved(EmailChangeStepUpRequired)
+		return step
+	}
+	d.Observer.EmailChangeObserved(EmailChangeStoreFailed)
+	d.Logger.ErrorContext(ctx, "email change: enrolled login methods unreadable — the verb is not performed", "user_id", string(resolved.User.ID), "err", err.Error())
+	return ErrStoreUnavailable
+}
+
+func emailChangeLevel(ctx context.Context, resolved Resolved, read loginMethodRead, keys accessKeyRead) error {
 	ceiling := guaranteedRank(assurance.Methods())
 	if ceiling == 0 {
-		// Правило не назвало уровня ни одному способу — сравнение было бы
-		// проходом без условия: глагол не выполняется (fail-closed).
-		d.Observer.EmailChangeObserved(EmailChangeStoreFailed)
-		d.Logger.ErrorContext(ctx, "email change: the rule names no level for any login method — the verb is not performed",
-			"user_id", string(resolved.User.ID))
 		return ErrStoreUnavailable
 	}
 	presented := acrlevel.Rank(resolved.Session.AssuranceLevel)
@@ -87,17 +98,12 @@ func requireEmailChangeLevel(ctx context.Context, d EmailChangeDeps, resolved Re
 	}
 	enrolled, err := enrolledForCompletion(ctx, read, keys, resolved.User.ID)
 	if err != nil {
-		// Причина — в журнал, наружу — отказ хранилища фиксированным текстом.
-		d.Observer.EmailChangeObserved(EmailChangeStoreFailed)
-		d.Logger.ErrorContext(ctx, "email change: enrolled login methods unreadable — the verb is not performed",
-			"user_id", string(resolved.User.ID), "err", err.Error())
-		return ErrStoreUnavailable
+		return err
 	}
 	required := guaranteedRank(enrolled)
 	if presented >= required {
 		return nil
 	}
-	d.Observer.EmailChangeObserved(EmailChangeStepUpRequired)
 	return &StepUpRequiredError{Required: required, Presented: presented}
 }
 

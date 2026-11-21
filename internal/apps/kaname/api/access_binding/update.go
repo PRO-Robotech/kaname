@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
 // fieldDeletionProtection / fieldLabels — the mutable AccessBinding fields (T3.3-IMM-01).
@@ -96,6 +97,7 @@ type ObjectForwardReconciler interface {
 }
 
 type UpdateAccessBindingUseCase struct {
+	decisions kanamerepo.BindingDecisionRunner
 	repo      Repo
 	opsRepo   operations.Repo
 	relations clients.RelationStore
@@ -164,7 +166,11 @@ func (u *UpdateAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 	}
 	// Same grant-authority gate as Create/Delete (owner-of-account OR FGA admin on
 	// the scope): only a grant authority may mutate the binding.
-	if err := requireGrantAuthority(ctx, u.repo, u.relations,
+	if u.decisions != nil {
+		if err := u.checkUpdateDecision(ctx, binding); err != nil {
+			return nil, err
+		}
+	} else if err := requireGrantAuthority(ctx, u.repo, u.relations,
 		string(binding.ResourceType), binding.ResourceID); err != nil {
 		return nil, err
 	}
@@ -188,7 +194,9 @@ func (u *UpdateAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 		return nil, err
 	}
 	labelsCopy := newLabels
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		return u.doUpdate(ctx, id, applyDP, deletionProtection, labelsChanged, labelsCopy)
 	})
 	return &op, nil
@@ -223,35 +231,15 @@ func (u *UpdateAccessBindingUseCase) Execute(ctx context.Context, id domain.Acce
 // event above and the periodic sweep stay the at-least-once backstop, so this changes WHEN
 // the revoke is observed, not WHETHER it happens.
 func (u *UpdateAccessBindingUseCase) doUpdate(ctx context.Context, id domain.AccessBindingID, applyDP, deletionProtection, labelsChanged bool, labels domain.Labels) (*anypb.Any, error) {
-	updated, err := shared.DoWithWriteTx(ctx, u.repo,
-		func(ctx context.Context, w Writer) (domain.AccessBinding, error) {
-			out, derr := w.AccessBindings().Get(ctx, id)
-			if derr != nil {
-				return domain.AccessBinding{}, derr
-			}
-			if applyDP {
-				out, derr = w.AccessBindingsW().SetDeletionProtection(ctx, id, deletionProtection)
-				if derr != nil {
-					return domain.AccessBinding{}, derr
-				}
-			}
-			if labelsChanged {
-				out, derr = w.AccessBindingsW().UpdateLabels(ctx, id, labels)
-				if derr != nil {
-					return domain.AccessBinding{}, derr
-				}
-				// T3.3 / D-6: own-resource label change may flip iam-direct selector
-				// membership (a rule selecting iam.accessBinding by label). Co-commit a
-				// reconcile-event in THIS writer-tx (ban #10, parity with user/SA/role
-				// Update) so the reconciler re-evaluates the affected iam.accessBinding
-				// selector bindings (≤2s): label add → grant appears, label remove/change
-				// → eager fall-out. Only on a labels change.
-				if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.accessBinding", string(id)); rerr != nil {
-					return domain.AccessBinding{}, rerr
-				}
-			}
-			return out, nil
+	var updated domain.AccessBinding
+	var err error
+	if u.decisions != nil {
+		updated, err = u.updateDecision(ctx, id, applyDP, deletionProtection, labelsChanged, labels)
+	} else {
+		updated, err = shared.DoWithWriteTx(ctx, u.repo, func(ctx context.Context, w Writer) (domain.AccessBinding, error) {
+			return u.writeBindingMetadata(ctx, w, id, applyDP, deletionProtection, labelsChanged, labels)
 		})
+	}
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
@@ -270,4 +258,33 @@ func (u *UpdateAccessBindingUseCase) doUpdate(ctx context.Context, id domain.Acc
 		})
 	}
 	return marshalAB(updated)
+}
+
+func (u *UpdateAccessBindingUseCase) writeBindingMetadata(ctx context.Context, w Writer, id domain.AccessBindingID, applyDP, deletionProtection, labelsChanged bool, labels domain.Labels) (domain.AccessBinding, error) {
+	out, derr := w.AccessBindings().Get(ctx, id)
+	if derr != nil {
+		return domain.AccessBinding{}, derr
+	}
+	if applyDP {
+		out, derr = w.AccessBindingsW().SetDeletionProtection(ctx, id, deletionProtection)
+		if derr != nil {
+			return domain.AccessBinding{}, derr
+		}
+	}
+	if labelsChanged {
+		out, derr = w.AccessBindingsW().UpdateLabels(ctx, id, labels)
+		if derr != nil {
+			return domain.AccessBinding{}, derr
+		}
+		// T3.3 / D-6: own-resource label change may flip iam-direct selector
+		// membership (a rule selecting iam.accessBinding by label). Co-commit a
+		// reconcile-event in THIS writer-tx (ban #10, parity with user/SA/role
+		// Update) so the reconciler re-evaluates the affected iam.accessBinding
+		// selector bindings (≤2s): label add → grant appears, label remove/change
+		// → eager fall-out. Only on a labels change.
+		if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.accessBinding", string(id)); rerr != nil {
+			return domain.AccessBinding{}, rerr
+		}
+	}
+	return out, nil
 }

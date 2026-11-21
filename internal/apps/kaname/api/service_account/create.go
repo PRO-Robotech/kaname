@@ -10,19 +10,17 @@ import (
 	"fmt"
 	"log/slog"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // ObjectReconciler — narrow port (rbac-contract-a-fix, C-01b): SYNCHRONOUSLY
@@ -53,8 +51,10 @@ type ObjectReconciler interface {
 }
 
 type CreateServiceAccountUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	crudConfigured bool
+	crudFactory    kanamerepo.ServiceAccountCreateWriterFactory
+	repo           Repo
+	opsRepo        operations.Repo
 	// Optional FGA hierarchy-tuple writer. Writes
 	// `iam_service_account:<id>#account@account:<acc>` after a successful
 	// INSERT so iam_service_account-scoped authz cascades resolve.
@@ -120,14 +120,16 @@ func (u *CreateServiceAccountUseCase) Execute(ctx context.Context, sa domain.Ser
 	// кто вызвал. Ведение по роли создателя получает только учётка, но факт
 	// пишется на каждом создании.
 	sa.CreatedBy = creatorOf(operations.PrincipalFromContext(ctx))
+	crudPrincipal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, crudPrincipal)
 		return u.doCreate(ctx, sa, actor)
 	})
 	return &op, nil
 }
 
 func (u *CreateServiceAccountUseCase) doCreate(ctx context.Context, sa domain.ServiceAccount, actor string) (*anypb.Any, error) {
-	created, err := shared.DoWithWriteTx(ctx, u.repo,
+	created, err := shared.DoWithWriteTx(ctx, u.crudRepo(sa),
 		func(ctx context.Context, w Writer) (domain.ServiceAccount, error) {
 			inserted, ierr := w.ServiceAccountsW().Insert(ctx, sa)
 			if ierr != nil {

@@ -36,18 +36,41 @@ type Member struct {
 	VerificationStatus domain.VerificationStatus
 }
 
+// Подписанный план ожидает зафиксированное начало транзакции. Обычная
+// материализация сохраняет часы транзакции вместе с outbox. Если привязка
+// стала видна позднее начала транзакции, первая отметка не старше её создания.
+// Каждый запрос целиком называет таблицу и список записи для статического гейта.
+const upsertSQL = `INSERT INTO kaname.access_binding_target_members
+		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, now(), now())
+		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
+		    SET verification_status = EXCLUDED.verification_status,
+		        updated_at = now();`
+
+const upsertLegacySQL = `INSERT INTO kaname.access_binding_target_members
+		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
+		 SELECT $1, $2, $3, $4, $5, $6, stamp.at, stamp.at
+		   FROM (SELECT GREATEST(now(), (SELECT created_at FROM kaname.access_bindings WHERE id = $1)) AS at) AS stamp
+		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
+		    SET verification_status = EXCLUDED.verification_status,
+		        updated_at = GREATEST(access_binding_target_members.created_at, access_binding_target_members.updated_at, clock_timestamp());`
+
 // UpsertTx вставляет или обновляет строку членства до status по полной координате
 // правила (binding, role, rule_fp, object) в транзакции вызывающего. Идемпотентен по
 // первичному ключу; при конфликте статус заменяется (повторная проверка
 // PENDING→ACTIVE/REJECTED). updated_at продвигается при записи.
 func UpsertTx(ctx context.Context, tx pgx.Tx, m Member) error {
+	return upsert(ctx, tx, m, upsertSQL)
+}
+
+// UpsertLegacyTx сохраняет монотонное время обычной материализации.
+func UpsertLegacyTx(ctx context.Context, tx pgx.Tx, m Member) error {
+	return upsert(ctx, tx, m, upsertLegacySQL)
+}
+
+func upsert(ctx context.Context, tx pgx.Tx, m Member, statement string) error {
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO kaname.access_binding_target_members
-		   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, now(), now())
-		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
-		    SET verification_status = EXCLUDED.verification_status,
-		        updated_at          = now()`,
+		statement,
 		m.BindingID, m.RoleID, m.RuleFP, m.ObjectType, m.ObjectID, string(m.VerificationStatus),
 	); err != nil {
 		return fmt.Errorf("target_members: upsert: %w", err)
@@ -57,6 +80,27 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, m Member) error {
 
 // upsertBatchRows ограничивает один SQL, не размер атомарного прохода.
 const upsertBatchRows = 4096
+
+// PreparedUpsertManySQL сохраняет время из подписанного образа PostgreSQL.
+const PreparedUpsertManySQL = `INSERT INTO kaname.access_binding_target_members
+			   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
+			 SELECT b, r, f, ot, oi, vs, now(), now()
+			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+			        AS t(b, r, f, ot, oi, vs)
+		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
+		    SET verification_status = EXCLUDED.verification_status,
+		        updated_at = now();`
+
+const upsertManyLegacySQL = `INSERT INTO kaname.access_binding_target_members
+			   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
+			 SELECT b, r, f, ot, oi, vs, stamp.at, stamp.at
+			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+			        AS t(b, r, f, ot, oi, vs)
+			  LEFT JOIN kaname.access_bindings AS binding ON binding.id = t.b
+			  CROSS JOIN LATERAL (SELECT GREATEST(now(), binding.created_at) AS at) AS stamp
+		 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
+		    SET verification_status = EXCLUDED.verification_status,
+		        updated_at = GREATEST(access_binding_target_members.created_at, access_binding_target_members.updated_at, clock_timestamp());`
 
 // UpsertManyTx — тот же UPSERT, что UpsertTx, ограниченными наборами в той же tx.
 //
@@ -71,6 +115,15 @@ const upsertBatchRows = 4096
 // набор с дублем Postgres отверг бы целиком (поштучная вставка этого не требовала,
 // потому что каждая строка ехала своим стейтментом). Пустой набор — no-op.
 func UpsertManyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
+	return upsertMany(ctx, tx, members, PreparedUpsertManySQL)
+}
+
+// UpsertManyLegacyTx сохраняет то же монотонное время пакетной материализации.
+func UpsertManyLegacyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
+	return upsertMany(ctx, tx, members, upsertManyLegacySQL)
+}
+
+func upsertMany(ctx context.Context, tx pgx.Tx, members []Member, statement string) error {
 	if len(members) == 0 {
 		return nil
 	}
@@ -86,14 +139,7 @@ func UpsertManyTx(ctx context.Context, tx pgx.Tx, members []Member) error {
 			return nil
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO kaname.access_binding_target_members
-			   (binding_id, role_id, rule_fp, object_type, object_id, verification_status, created_at, updated_at)
-			 SELECT b, r, f, ot, oi, vs, now(), now()
-			   FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
-			        AS t(b, r, f, ot, oi, vs)
-			 ON CONFLICT (binding_id, role_id, rule_fp, object_type, object_id) DO UPDATE
-			    SET verification_status = EXCLUDED.verification_status,
-			        updated_at          = now()`,
+			statement,
 			bindings, roles, fps, objTypes, objIDs, statuses,
 		); err != nil {
 			return fmt.Errorf("target_members: upsert many (%d): %w", len(bindings), err)

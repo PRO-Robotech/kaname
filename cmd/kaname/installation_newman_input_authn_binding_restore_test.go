@@ -26,6 +26,7 @@ var rid11BindingSchemas = map[string][]string{
 }
 
 type rid11BindingRestorePlan struct {
+	PremiseReason        string `json:"-"`
 	Policy               rid03DeltaPolicy
 	Desired              map[rid03Member][]rid03Tuple
 	RetiredLegacyBinding string
@@ -414,42 +415,47 @@ func rid11RetiredLegacyHistory(a rid03NewmanSnapshot) (string, bool) {
 
 func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper time.Time) (rid11BindingRestorePlan, bool) {
 	p := rid11BindingRestorePlan{Desired: map[rid03Member][]rid03Tuple{}, Policy: rid03DeltaPolicy{Path: "/iam/v1/accessBindings", Start: a.Whole.PrimaryFinishedAt, End: upper, Members: map[rid03Member]bool{}, Ledger: map[rid03Ledger]bool{}, Tuples: map[rid03Tuple]bool{}, DirectTuples: map[rid03Tuple]bool{}}}
-	if facts == nil || p.Policy.Start.IsZero() || upper.Before(p.Policy.Start) {
+	// Только закрытые коды стадий; содержимое BEFORE не попадает в диагностику.
+	fail := func(reason string) (rid11BindingRestorePlan, bool) {
+		p.PremiseReason = reason
 		return p, false
+	}
+	if facts == nil || p.Policy.Start.IsZero() || upper.Before(p.Policy.Start) {
+		return fail("budget-or-facts")
 	}
 	retired, valid := rid11RetiredLegacyHistory(a)
 	if !valid {
-		return p, false
+		return fail("retired-history")
 	}
 	p.RetiredLegacyBinding = retired
 	objects, ok := rid11BindingInventory(a.Raw)
 	if !ok {
-		return p, false
+		return fail("inventory")
 	}
 	roles, ok := rid11BindingIndex(a.Raw, "roles")
 	if !ok {
-		return p, false
+		return fail("role-index")
 	}
 	users, ok := rid11BindingIndex(a.Raw, "users")
 	if !ok {
-		return p, false
+		return fail("user-index")
 	}
 	if len(a.Raw["access_binding_subjects"]) != len(a.Raw["access_bindings"]) || !rid11BindingUnique(a.Raw, "access_binding_subjects") {
-		return p, false
+		return fail("subject-census")
 	}
 	if !rid11BindingUnique(a.Raw, "access_binding_target_members") {
-		return p, false
+		return fail("member-census")
 	}
 	oldMembers := map[rid03Member]rid09PrimaryRow{}
 	for _, r := range a.Raw["access_binding_target_members"] {
 		m := rid11BindingMember(r)
 		if _, ok := oldMembers[m]; ok {
-			return p, false
+			return fail("duplicate-member")
 		}
 		created, cok := rid03Cell[time.Time](r, "created_at")
 		updated, uok := rid03Cell[time.Time](r, "updated_at")
 		if !cok || !uok || created.IsZero() || updated.Before(created) || updated.After(p.Policy.Start) {
-			return p, false
+			return fail("member-clock")
 		}
 		oldMembers[m] = r
 	}
@@ -461,11 +467,11 @@ func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper
 			continue
 		}
 		if rid03S(binding, "status") != "ACTIVE" || !rid03SameCell(binding, "revoked_at", nil) {
-			return p, false
+			return fail("binding-status")
 		}
 		for _, k := range []string{"expires_at", "narrowed_at", "delegation_id"} {
 			if !rid03SameCell(binding, k, nil) {
-				return p, false
+				return fail("binding-lifecycle")
 			}
 		}
 		subjects := []rid09PrimaryRow{}
@@ -475,30 +481,30 @@ func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper
 			}
 		}
 		if len(subjects) != 1 || rid03S(subjects[0], "subject_type") != rid03S(binding, "subject_type") || rid03S(subjects[0], "subject_id") != rid03S(binding, "subject_id") || !rid03SameCell(subjects[0], "ordinal", 0) || rid03S(subjects[0], "resource_type") != rid03S(binding, "resource_type") || rid03S(subjects[0], "resource_id") != rid03S(binding, "resource_id") {
-			return p, false
+			return fail("binding-subject")
 		}
 		if roleID == "" {
 			if !rid03SameCell(binding, "role_id", nil) || rid03S(binding, "resource_type") != "cluster" || !rid03SameCell(binding, "is_system", true) {
-				return p, false
+				return fail("roleless-binding")
 			}
 			continue
 		}
 		role, exists := roles[roleID]
 		if !exists || !rid03SameCell(role, "live", true) {
-			return p, false
+			return fail("role-live")
 		}
 		rules, err := domain.DecodeRules(role["rules"])
 		if err != nil {
-			return p, false
+			return fail("role-rules")
 		}
 		system, valid := rid03Cell[bool](role, "is_system")
 		if !valid {
-			return p, false
+			return fail("role-policy")
 		}
 		policy := domain.PolicyOfRole(system, rid03S(role, "owner_module"))
 		scope, valid := rid03Cell[domain.Scope](binding, "scope")
 		if !valid {
-			return p, false
+			return fail("binding-scope")
 		}
 		sels := facts.GrantSelectors(rules.MaterializingSelectorsInScope(scope), policy)
 		for _, sel := range sels {
@@ -513,24 +519,24 @@ func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper
 				continue
 			}
 			if rid03S(binding, "resource_type") != "account" || scope != domain.ScopeAccount || !rid03SameCell(binding, "target", map[string]any{"allInScope": true}) || rid03S(binding, "target_digest") != (domain.AccessTarget{AllInScope: true}).Digest() {
-				return p, false
+				return fail("iam-target")
 			}
 			if sel.Arm != domain.ArmAnchor || sel.Container != nil || sel.CreatedBySubject || len(sel.MatchLabels) > 0 || len(sel.ResourceNames) > 0 {
-				return p, false
+				return fail("iam-selector")
 			}
 			if rid03S(subjects[0], "subject_type") != "user" {
-				return p, false
+				return fail("subject-type")
 			}
 			if _, exists := users[rid03S(subjects[0], "subject_id")]; !exists {
-				return p, false
+				return fail("subject-user")
 			}
 			subject := domain.FGASubjectRef("user", rid03S(subjects[0], "subject_id"))
 			if subject == "user:" {
-				return p, false
+				return fail("subject-reference")
 			}
 			account := rid03S(binding, "resource_id")
 			if account == "" {
-				return p, false
+				return fail("account-reference")
 			}
 			for _, o := range objects {
 				if o.Account != account || !rid03Has(sel.ObjectTypes, o.Type) {
@@ -538,22 +544,22 @@ func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper
 				}
 				tuples, valid := rid11BindingTuples(facts, policy, sel, subject, o.Type, o.ID)
 				if !valid {
-					return p, false
+					return fail("desired-tuples")
 				}
 				m := rid03Member{id, roleID, sel.RuleFP, o.Type, o.ID}
 				if _, dup := p.Desired[m]; dup {
-					return p, false
+					return fail("duplicate-desired")
 				}
 				p.Desired[m] = tuples
 				if old, exists := oldMembers[m]; exists {
 					if rid03S(old, "verification_status") != "ACTIVE" || !rid03SameCell(old, "live", true) {
-						return p, false
+						return fail("old-member-state")
 					}
 					continue
 				}
 				// Холодная поставка создаёт новые SA/группы; иной пропуск требует отдельного объяснения.
 				if o.Type != "iam.serviceAccount" && o.Type != "iam.group" {
-					return p, false
+					return fail("missing-object-type")
 				}
 				p.Policy.Members[m] = true
 				for _, tuple := range tuples {
@@ -568,7 +574,7 @@ func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper
 			sm := rid03Member{id, roleID, "scope_self", "iam.account", account}
 			old, exists := oldMembers[sm]
 			if !exists || rid03S(old, "verification_status") != "ACTIVE" || !rid03SameCell(old, "live", true) {
-				return p, false
+				return fail("scope-self-member")
 			}
 			scopeVerbs := facts.VerbsOfType("account")
 			if len(scopeVerbs) == 0 {
@@ -588,7 +594,7 @@ func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper
 				scopeTuples = append(scopeTuples, rid03Tuple{subject, tier, "account", account})
 			}
 			if len(scopeTuples) == 0 {
-				return p, false
+				return fail("scope-self-tuples")
 			}
 			p.Desired[sm] = scopeTuples
 		}
@@ -599,7 +605,7 @@ func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper
 	for member, row := range oldMembers {
 		tuples, exists := p.Desired[member]
 		if !exists || rid03S(row, "verification_status") != "ACTIVE" || !rid03SameCell(row, "live", true) {
-			return p, false
+			return fail("old-member-desired")
 		}
 		for _, tuple := range tuples {
 			expectedOld[rid03Ledger{member.Binding, "member", member.Type, member.ID, tuple}] = true
@@ -611,20 +617,20 @@ func rid11BuildBindingRestore(a rid03NewmanSnapshot, facts *catalog.Facts, upper
 			continue
 		}
 		if !rid03Columns(r, "binding_id fga_user relation object source member_object_type member_object_id") || rid03S(r, "source") != "member" {
-			return p, false
+			return fail("ledger-shape")
 		}
 		object := strings.SplitN(rid03S(r, "object"), ":", 2)
 		if len(object) != 2 {
-			return p, false
+			return fail("ledger-object")
 		}
 		key := rid03Ledger{rid03S(r, "binding_id"), "member", rid03S(r, "member_object_type"), rid03S(r, "member_object_id"), rid03Tuple{rid03S(r, "fga_user"), rid03S(r, "relation"), object[0], object[1]}}
 		if actualOld[key] {
-			return p, false
+			return fail("duplicate-ledger")
 		}
 		actualOld[key] = true
 	}
 	if !reflect.DeepEqual(expectedOld, actualOld) {
-		return p, false
+		return fail("ledger-census")
 	}
 	return p, true
 }

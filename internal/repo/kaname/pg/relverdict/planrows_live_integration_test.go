@@ -40,6 +40,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/planrows"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
@@ -164,12 +165,30 @@ func TestPlanRows_InstrumentReadsTheProductsOwnStatement(t *testing.T) {
 			"и точка мерит два вопроса вместо одного.", len(got))
 	}
 	stmt := got[0]
-	const wantArgs = 11
+	// Обычный Ask передаёт независимый fanout в $12. Часы $13 относятся
+	// только к explicit DecisionAt, которого у этого вопроса нет.
+	const wantArgs = 12
 	if len(stmt.args) != wantArgs {
 		t.Fatalf("у захваченного оператора %d параметров, ожидалось %d "+
 			"(субъект, тип, id, типы предков, отношения, глаголы, глубина, предел условий=%d, тип каталога, "+
-			"два системных класса говорящего)",
+			"два системных класса говорящего, независимый предел родителей шага)",
 			len(stmt.args), wantArgs, relverdict.MaxConditionRowsForTest)
+	}
+	// Одного числа параметров недостаточно: перестановка глубины и fanout
+	// сохранила бы длину, но прибор измерял бы запрос с другими границами.
+	for _, bound := range []struct {
+		position int
+		want     int
+	}{
+		{7, relverdict.MaxAncestorDepth},
+		{8, relverdict.MaxConditionRowsForTest},
+		{12, hierarchy.MaxImmediateParents},
+	} {
+		gotBound, ok := stmt.args[bound.position-1].(int)
+		if !ok || gotBound != bound.want {
+			t.Fatalf("захваченная граница $%d: %v (%T), ожидался int %d",
+				bound.position, stmt.args[bound.position-1], stmt.args[bound.position-1], bound.want)
+		}
 	}
 
 	// ── 2. План снимается с ЗАХВАЧЕННОГО оператора и его же параметров ───────

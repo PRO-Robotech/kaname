@@ -85,16 +85,8 @@ func FoldSeededServiceAccounts(ordered []string, bodies map[string]string) (
 		code := migrations.MigrationUpSection(bodies[name])
 		for _, raw := range strings.Split(code, ";") {
 			stmt := strings.TrimSpace(reSQLSpaceRun.ReplaceAllString(raw, " "))
-			if stmt == "" || !strings.Contains(stmt, "kaname.service_accounts") {
+			if !seededServiceAccountWrite(stmt) {
 				continue
-			}
-			fields := strings.Fields(stmt)
-			if len(fields) == 0 {
-				continue
-			}
-			verb := strings.ToUpper(fields[0])
-			if verb != "INSERT" && verb != "UPDATE" && verb != "DELETE" {
-				continue // объявление таблицы, комментарий столбца, индекс — не посев
 			}
 			stmtsTouched++
 			if m := reSAInsert.FindStringSubmatch(stmt); m != nil {
@@ -122,6 +114,69 @@ func FoldSeededServiceAccounts(ordered []string, bodies map[string]string) (
 		}
 	}
 	return alive, unknownForms, stmtsTouched
+}
+
+// Судится цель leading INSERT/UPDATE/DELETE, а не таблица в SELECT/FROM/USING
+// или строковом значении. Имена читает общий sqlTokens: регистр без кавычек,
+// кавычки и границы идентификаторов не получают второго распознавателя.
+// Это не полный SQL parser: прежний semicolon/PLpgSQL предел остаётся.
+// Неразобранный DML-префикс с именем SA передаётся как unknown в старый fold.
+func seededServiceAccountWrite(stmt string) bool {
+	tokens := sqlTokens(stmt)
+	word := func(i int, name string) bool {
+		return i < len(tokens) && tokens[i].kind == sqlTokName &&
+			tokens[i].form == SQLFormBare && tokens[i].name == name
+	}
+	unknown := func() bool { return SQLNamesRelation(stmt, "service_accounts") }
+	i := 1
+	switch {
+	case word(0, "insert"):
+		if !word(i, "into") {
+			return unknown()
+		}
+		i++
+	case word(0, "delete"):
+		if !word(i, "from") {
+			return unknown()
+		}
+		i++
+		if word(i, "only") {
+			i++
+		}
+	case word(0, "update"):
+		if word(i, "only") {
+			i++
+		}
+	default:
+		return false // DDL/SELECT и оболочки PLpgSQL не были предметом fold
+	}
+	// ONLY (table) законен у UPDATE/DELETE. Если цель SA, row-fold ниже
+	// всё равно откажет как на неизвестной форме, пока её явно не поддержат.
+	parenthesized := i < len(tokens) && tokens[i].kind == sqlTokOther && tokens[i].op == '('
+	if parenthesized {
+		i++
+	}
+	if i >= len(tokens) || tokens[i].kind != sqlTokName {
+		return unknown()
+	}
+	first := tokens[i].name
+	i++
+	schema, table := "", first
+	if i < len(tokens) && tokens[i].kind == sqlTokOther && tokens[i].op == '.' {
+		i++
+		if i >= len(tokens) || tokens[i].kind != sqlTokName {
+			return unknown()
+		}
+		schema, table = first, tokens[i].name
+		i++
+	}
+	if i < len(tokens) && tokens[i].kind == sqlTokOther && tokens[i].op == '.' {
+		return unknown() // трёхчастное имя не доказано как чужая цель
+	}
+	if parenthesized && (i >= len(tokens) || tokens[i].kind != sqlTokOther || tokens[i].op != ')') {
+		return unknown()
+	}
+	return table == "service_accounts" && (schema == "" || schema == "kaname")
 }
 
 func headOf(s string) string {

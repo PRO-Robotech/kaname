@@ -12,19 +12,18 @@ import (
 	"fmt"
 	"log/slog"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // ObjectReconciler — narrow port (rbac-contract-a-fix, C-01b): SYNCHRONOUSLY
@@ -56,8 +55,10 @@ type ObjectReconciler interface {
 }
 
 type CreateRoleUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	policy         rolePolicySelection
+	referencePlans *authzmodel.Plans
+	repo           Repo
+	opsRepo        operations.Repo
 	// cat — источник КАТАЛОЖНОГО ФАКТА: какие глаголы объявлены живым типом
 	// (kacho#1816). Обязателен: проекция «роль → тип × глагол» без него пуста, а
 	// пустая проекция — это не «наблюдение выключено», а вердикт, определённый
@@ -164,11 +165,11 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	if verr := validateRuleCatalog(r.Rules, r.IsSystem, facts); verr != nil {
 		return nil, shared.MapValidationErr(verr)
 	}
-	compiled, cerr := domain.CompileRules(r.Rules)
+	projection, cerr := facts.ProjectGrantRules(r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
 	if cerr != nil {
 		return nil, shared.MapValidationErr(cerr)
 	}
-	r.Permissions = compiled
+	r.Permissions = projection.Permissions
 	if err := r.Validate(facts); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
@@ -192,15 +193,31 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	}
 	actor := authzguard.PrincipalUserID(ctx)
 	r.ID = domain.RoleID(roleID)
+	// kaname#1034: worker отделяет request context; сохраняем именно typed
+	// principal, допущенный до принятия операции, для same-TX проверки ссылок.
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		return u.doCreate(ctx, r, actor)
 	})
 	return &op, nil
 }
 
 func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor string) (*anypb.Any, error) {
-	created, err := shared.DoWithWriteTx(ctx, u.repo,
+	created, err := u.policy.run(ctx, u.repo, r, true, true,
 		func(ctx context.Context, w Writer) (domain.Role, error) {
+			facts, ferr := writerRoleFacts(w, u.cat)
+			if ferr != nil {
+				return domain.Role{}, ferr
+			}
+			projection, perr := facts.ProjectGrantRules(r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
+			if perr != nil {
+				return domain.Role{}, shared.MapValidationErr(perr)
+			}
+			if perr = checkGrantReferences(ctx, w, r, projection.Capabilities, true, u.referencePlans); perr != nil {
+				return domain.Role{}, perr
+			}
+			r.Permissions = projection.Permissions
 			inserted, ierr := w.RolesW().Insert(ctx, r)
 			if ierr != nil {
 				return domain.Role{}, ierr
@@ -214,12 +231,10 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			// Каталожный факт берётся ОДИН на обе стороны: глаголы правил в
 			// селекторах и проекция роли — объединение тех же наборов (kaname#878),
 			// и два снимка каталога развели бы их.
-			facts := u.cat.Facts()
 			// Политика — та же, которой правила судились выше: от владельца роли
 			// зависит, влечёт ли правка удаление (kaname#1006).
-			policy := domain.PolicyOfRole(r.IsSystem, r.OwnerModule)
 			if serr := w.RolesW().ReplaceRuleSelectors(ctx, inserted.ID,
-				facts.GrantSelectors(inserted.Rules.MaterializingSelectors(), policy)); serr != nil {
+				projection.Selectors); serr != nil {
 				return domain.Role{}, serr
 			}
 			// Проекция глаголов — ВТОРАЯ сторона того же правила, и пишется она в
@@ -228,8 +243,11 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			// вердикт наполовину определённым, а расхождение проявится не отказом,
 			// а неверным ответом.
 			if verr := w.RolesW().ReplaceRoleVerbs(ctx, inserted.ID,
-				facts.RoleVerbsFromSelectors(inserted.Rules.MaterializingSelectors(), policy)); verr != nil {
+				projection.Verbs); verr != nil {
 				return domain.Role{}, verr
+			}
+			if err := w.RolesW().ReplaceGrantCapabilities(ctx, inserted.ID, projection.Capabilities); err != nil {
+				return domain.Role{}, err
 			}
 			// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и
 			// пишется она в той же транзакции по той же причине. Отличие от двух

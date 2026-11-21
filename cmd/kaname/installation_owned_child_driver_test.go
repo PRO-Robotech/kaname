@@ -284,22 +284,26 @@ func (c *rid02OwnedChild) kill() error {
 }
 func (c *rid02OwnedChild) await(t *testing.T, ctx context.Context, stage string) rid02ChildEvent {
 	t.Helper()
-	select {
-	case e := <-c.events:
+	validate := func(e rid02ChildEvent) rid02ChildEvent {
+		t.Helper()
 		c.seenEvent = true
 		require.Equal(t, stage, e.Stage)
 		require.Equal(t, c.cmd.Process.Pid, e.PID)
-		require.NotEmpty(t, e.Operation)
+		if stage == "before-concurrent-pair" {
+			require.Empty(t, e.Operation)
+		} else {
+			require.NotEmpty(t, e.Operation)
+		}
 		return e
+	}
+	select {
+	case e := <-c.events:
+		return validate(e)
 	case err := <-c.decodeError:
 		// Декодер может увидеть EOF сразу после последнего буферизованного события.
 		select {
 		case e := <-c.events:
-			c.seenEvent = true
-			require.Equal(t, stage, e.Stage)
-			require.Equal(t, c.cmd.Process.Pid, e.PID)
-			require.NotEmpty(t, e.Operation)
-			return e
+			return validate(e)
 		default:
 		}
 		t.Fatalf("child IPC failed before %s: %v; private stderr retained", stage, err)

@@ -68,14 +68,17 @@ func TestRegistrationCatalogWitness_MetadataCannotGrantAuthority(t *testing.T) {
 			_, _ = admin.Exec(context.Background(), "DROP ROLE "+role)
 		})
 		// Только существующий DML команды/таблиц и DML новых метаданных. Без выдачи CREATE,
-		// TRIGGER, владения схемой, членства в роли или SECURITY DEFINER.
+		// TRIGGER, владения схемой или членства в роли. Два точных EXECUTE —
+		// текущие runtime-входы canonical command/fence, а не право на каталог.
+		// Они есть и у отрицательных близнецов: отказ обязан прийти от его ACL.
 		catalogSelect := "GRANT SELECT ON kaname.catalog_resource TO " + role + "; "
 		if role == noSelect {
 			catalogSelect = "GRANT SELECT(module,resource,object_type,dotted,live,permanent_project) ON kaname.catalog_resource TO " + role + "; "
 		}
 		_, err = admin.Exec(ctx, "GRANT USAGE ON SCHEMA kaname TO "+role+"; "+catalogSelect+
 			"GRANT SELECT,INSERT,UPDATE,DELETE ON kaname.resource_mirror,kaname.resource_parent_edge,kaname.object_project_binding,kaname.registration_catalog_fence TO "+role+"; "+
-			"GRANT INSERT ON kaname.resource_registration_command TO "+role)
+			"GRANT INSERT ON kaname.resource_registration_command TO "+role+"; "+
+			"GRANT EXECUTE ON FUNCTION kaname.authority_resource_registration_command_values_v2(jsonb),kaname.authority_resource_catalog_held_v2(text,text) TO "+role)
 		require.NoError(t, err)
 	}
 	_, err := admin.Exec(ctx, "GRANT UPDATE(project_bindings_held) ON kaname.catalog_resource TO "+allowed+","+noSelect)
@@ -121,6 +124,7 @@ func TestRegistrationCatalogWitness_MetadataCannotGrantAuthority(t *testing.T) {
 			}
 			require.Error(t, err)
 			require.Equal(t, "42501", registrationRRState(err), "existing marker and metadata DML cannot replace catalog UPDATE authority")
+			require.Contains(t, err.Error(), "catalog_resource", "отказ обязан назвать защищаемый каталог, а не недостающий EXECUTE другого helper")
 		})
 	}
 }
@@ -163,6 +167,11 @@ func TestRegistrationCatalogWitness_IdentityAndCardinality(t *testing.T) {
 				require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM kaname.object_project_binding WHERE object_id='fresh-flags' AND project_id='registrationRR-P'`).Scan(&n))
 				require.Equal(t, 1, n, "witness does not cache declaration fields")
 			case "truncate":
+				// INSERT/UPDATE каталога оставили законный deferred callback.
+				// Исполняем его до TRUNCATE: PostgreSQL запрещает TRUNCATE с
+				// pending events; отключение стража исказило бы проверяемый мир.
+				_, err = tx.Exec(ctx, `SET CONSTRAINTS kaname.authority_catalog_changed IMMEDIATE`)
+				require.NoError(t, err)
 				_, err = tx.Exec(ctx, `TRUNCATE kaname.catalog_resource CASCADE`)
 				require.NoError(t, err)
 				require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM kaname.registration_catalog_fence`).Scan(&n))

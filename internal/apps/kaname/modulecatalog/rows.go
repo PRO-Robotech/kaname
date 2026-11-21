@@ -103,6 +103,9 @@ type Declared struct {
 // бы недетерминированный порядок операторов и сделал бы отказ на конкурентном
 // применении зависящим от прогона.
 func RowsOf(m *manifest.Manifest) (Declared, error) {
+	if faults := manifest.ValidateGrantVerbs(m); len(faults) > 0 {
+		return Declared{}, errors.Join(faults...)
+	}
 	out := Declared{Module: m.Module}
 
 	resources := make([]manifest.Resource, len(m.Resources))
@@ -213,6 +216,16 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 				ContainerParent: r.ParentTypeOf(cv), ContainerRelation: cv.Relation,
 			})
 		}
+		// kaname#1034: metadata пары не входят в tokens/пообъектный словарь.
+		for _, verb := range r.GrantVerbs {
+			token := canonicalVerb(verb)
+			if _, dup := declaredBy[token]; dup || container[token] {
+				return Declared{}, fmt.Errorf("%w: grant verb %s.%s.%s", ErrVerbTokenCollision, m.Module, r.Name, token)
+			}
+			declaredBy[token] = verb
+			out.Verbs = append(out.Verbs, catalog.VerbRow{Module: m.Module, Resource: r.Name, Verb: token})
+		}
+
 		// Ресурс, не объявивший ни одного действия, ярусных строк НЕ получает:
 		// у него нет ни одного отношения `v_*`, правило на него не резолвится
 		// ничем, и ярусная строка обещала бы автору выдачу, которой не будет.

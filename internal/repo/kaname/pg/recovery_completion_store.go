@@ -10,8 +10,9 @@ package pg
 //
 // # Одна транзакция — обычное восстановление и переход записи
 //
-// Транзакция открывается дверью писателя нескольких сессий: строка человека
-// взята замком `FOR NO KEY UPDATE` ПЕРВЫМ оператором (`holdPersonOf`), и
+// Транзакция открывается дверью admission: при явной настройке сначала
+// GLOBAL participant, затем строка человека замком `FOR NO KEY UPDATE`
+// первым бизнес-оператором (`holdPersonOf`), и
 // писатель сессии, писатель зеркала и операторы перехода работают над ОДНОЙ
 // `pgx.Tx`. Порядок «личность → всё прочее» общий с удалением личности, сменой
 // пароля и сбросами администратора облака; захват выдачи входа (`FOR SHARE`)
@@ -59,10 +60,21 @@ func NewRecoveryCompletionStore(pool *pgxpool.Pool, activate InviteActivatorTx) 
 	return &RecoveryCompletionStore{registration: NewRegistrationStore(pool), activate: activate}, nil
 }
 
+// WithHumanAdmissionParticipant сохраняет explicit configuration, включая nil,
+// в собственном registration store: recovery не открывает legacy TX мимо него.
+func (s *RecoveryCompletionStore) WithHumanAdmissionParticipant(p *HumanAdmissionParticipant) *RecoveryCompletionStore {
+	copy := *s
+	copy.registration = s.registration.WithHumanAdmissionParticipant(p)
+	return &copy
+}
+
 // RecoveryCompletionWriter — см. порт.
 func (s *RecoveryCompletionStore) RecoveryCompletionWriter(ctx context.Context, userID domain.UserID) (humansession.RecoveryCompletionWriter, error) {
-	w, err := beginHumanSessionWriter(ctx, s.registration.pool)
+	w, err := s.registration.beginAdmissionSession(ctx)
 	if err != nil {
+		if s.registration.participantConfigured {
+			return nil, err
+		}
 		return nil, mapErr(err, "RecoveryCompletion.Writer", "")
 	}
 	held, err := holdPersonOf(ctx, w, userID)
@@ -121,4 +133,17 @@ func (w *recoveryCompletionTx) RetireStartedEnrolmentsOf(ctx context.Context, us
 // зеркала той же транзакции.
 func (w *recoveryCompletionTx) ActivateInviteOnVerification(ctx context.Context, pending domain.User) (humansession.InviteActivation, error) {
 	return w.activate(ctx, w.MirrorWriter(), pending)
+}
+
+func (s *RecoveryCompletionStore) RunRecoveryCompletionWrite(ctx context.Context, id domain.UserID, body func(context.Context, humansession.RecoveryCompletionWriter) error) error {
+	if s == nil || s.registration == nil || body == nil {
+		return kaname.ErrInvalidAuthorityFencePlan
+	}
+	open := func(ctx context.Context) (humansession.RecoveryCompletionWriter, error) {
+		return s.RecoveryCompletionWriter(ctx, id)
+	}
+	if s.registration.participantConfigured {
+		return executePreparedAttempts(ctx, open, body)
+	}
+	return runLegacyAdmission(ctx, open, body)
 }

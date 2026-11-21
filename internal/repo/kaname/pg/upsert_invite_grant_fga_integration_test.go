@@ -204,9 +204,10 @@ func TestUpsertInviteGrant_TI3_RC2_RollbackDiscardsBoth(t *testing.T) {
 
 	// Повторяем форму транзакции записи активации и ОТКАТЫВАЕМ: активация + аудит + fga
 	// member-tuple, all on one tx, abandoned.
+	markAddressVerified(t, ctx, pool, inviteeID)
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, inviteeID)
+	defer func() { _ = w.Rollback(ctx) }()
 	_, err = w.UsersW().ActivateInvite(ctx, inviteeID,
 		domain.ExternalSubject("ext_INV_ti3rb"), domain.DisplayName("Rolled Back"))
 	require.NoError(t, err)

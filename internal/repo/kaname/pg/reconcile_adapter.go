@@ -25,9 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
@@ -39,6 +37,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/target_members"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ReconcileAdapter — composition-root adapter for the reconciler. Holds the
@@ -62,7 +62,7 @@ func NewReconcileAdapter(pool *pgxpool.Pool, cat catalog.Source) *ReconcileAdapt
 
 // WithTx runs fn inside a single writer-tx (reconcile.TxRunner). Commit on
 // success, rollback on error/panic.
-func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Context, s reconcile.ReconcileStore) error) error {
+func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Context, s reconcile.ReconcileStore) error) (err error) {
 	tx, err := a.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("reconcile: begin tx: %w", err)
@@ -70,10 +70,22 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 	committed := false
 	defer func() {
 		if !committed {
-			_ = tx.Rollback(ctx)
+			// Отмена запроса не должна отменить освобождение самой транзакции.
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			rollbackErr := tx.Rollback(cleanup)
+			stop()
+			if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+				err = errors.Join(err, fmt.Errorf("reconcile: rollback: %w", rollbackErr))
+			}
 		}
 	}()
-	store := &reconcileStore{tx: tx, cat: a.cat.Facts()}
+	// Свежий unsigned entry получает shared root до protocol row и D, затем
+	// выдаёт owner-квитанцию аудита до callback и его row/advisory locks.
+	// Отсутствие ABI/EXECUTE и strict завершают вход без вызова callback.
+	if _, err := tx.Exec(ctx, `SELECT kaname.authority_reconcile_enter_v3()`); err != nil {
+		return fmt.Errorf("reconcile: admit writer transaction: %w", err)
+	}
+	store := &legacyForwardStore{reconcileStore: &reconcileStore{tx: tx, cat: a.cat.Facts()}}
 	if err := fn(ctx, store); err != nil {
 		return err
 	}
@@ -84,6 +96,68 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 	return nil
 }
 
+// legacyForwardStore принадлежит только unsigned compatibility WithTx. Signed
+// participant создаёт reconcileStore напрямую и сохраняет свой emitter/clock.
+// Выбор оболочки не выдаёт authority: допуск и receipt проверяет сама база.
+type legacyForwardStore struct {
+	*reconcileStore
+}
+
+// ReadOnlyRuleMemberStore выдаёт новый function-scoped view, а не меняет обычный
+// MatchSelector. Его Labels нельзя изменять или удерживать после расчёта правил.
+func (s *legacyForwardStore) ReadOnlyRuleMemberStore() reconcile.ReconcileStore {
+	return &readOnlyRuleMemberView{ReconcileStore: s, tx: s.tx, decode: resource_mirror.NewReadOnlyLabelDecoder()}
+}
+
+type readOnlyRuleMemberView struct {
+	reconcile.ReconcileStore
+	tx     pgx.Tx
+	decode func([]byte) (map[string]string, error)
+}
+
+func (s *readOnlyRuleMemberView) MatchSelector(ctx context.Context, types []string, matchLabels map[string]string) ([]domain.MirrorObject, error) {
+	rows, err := resource_mirror.MatchByLabelsReadOnly(ctx, s.tx, types, matchLabels, s.decode)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.MirrorObject, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, mirrorRowToDomain(row))
+	}
+	return out, nil
+}
+
+func (s *readOnlyRuleMemberView) MatchMirrorLabelSelectorUnion(ctx context.Context, selectors []domain.RuleSelector) ([]domain.MirrorObject, bool, error) {
+	filters := make([]resource_mirror.LabelSelector, 0, len(selectors))
+	for _, selector := range selectors {
+		filters = append(filters, resource_mirror.LabelSelector{
+			ObjectTypes: selector.ObjectTypes,
+			Labels:      selector.MatchLabels,
+		})
+	}
+	rows, complete, err := resource_mirror.MatchLabelSelectorUnionReadOnly(ctx, s.tx, filters, s.decode)
+	if err != nil || !complete {
+		return nil, complete, err
+	}
+	objects := make([]domain.MirrorObject, 0, len(rows))
+	for _, row := range rows {
+		objects = append(objects, mirrorRowToDomain(row))
+	}
+	return objects, true, nil
+}
+
+func (s *legacyForwardStore) EmitForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return fga_outbox.EmitForwardWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
+}
+
+func (s *legacyForwardStore) EmitColdForwardTupleWrite(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return fga_outbox.EmitColdForwardWriteTx(ctx, s.tx, membershipTuplesToClients(tuples))
+}
+
+func (s *legacyForwardStore) EmitNativeTupleDelete(ctx context.Context, tuples []domain.MembershipTuple) error {
+	return fga_outbox.EmitNativeDeleteTx(ctx, s.tx, membershipTuplesToClients(tuples))
+}
+
 // reconcileStore — tx-scoped reconcile.ReconcileStore implementation.
 //
 // roleCache — памятка ролей на ЖИЗНЬ ОДНОГО прохода (одна транзакция). Веер прохода
@@ -92,8 +166,9 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 // измениться не может; роль, изменённая в середине прохода, доводится своим собственным
 // веером Role.Update — как и до памятки.
 type reconcileStore struct {
-	tx        pgx.Tx
-	roleCache map[domain.RoleID]domain.Role
+	decisionAt time.Time
+	tx         pgx.Tx
+	roleCache  map[domain.RoleID]domain.Role
 	// cat — каталожный факт, взятый ОДИН раз на весь проход. Брать его заново
 	// на каждой выдаче значило бы допустить проход, собранный из разных
 	// моментов времени.
@@ -238,7 +313,7 @@ func (s *reconcileStore) LoadBindingsForForward(ctx context.Context, ids []domai
 	for _, b := range bindings {
 		// Роль, удалённая из-под выдачи, — «нет покрытия» (пустая доменная роль), тот же
 		// исход, что у одиночного чтения: реконсайлер не эмитит кортежей, а не падает.
-		out[b.ID] = bindingScopeFrom(s.cat, b, roles[b.RoleID])
+		out[b.ID] = s.bindingScope(b, roles[b.RoleID])
 	}
 	return out, nil
 }
@@ -290,7 +365,7 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 		}
 	}
 
-	return bindingScopeFrom(s.cat, b, role), true, nil
+	return s.bindingScope(b, role), true, nil
 }
 
 // role reads a role inside the tx, memoized for the lifetime of THIS pass. The per-binding
@@ -344,22 +419,32 @@ func (s *reconcileStore) role(ctx context.Context, id domain.RoleID) (domain.Rol
 func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
 	map[domain.RoleID]domain.Role, error,
 ) {
+	return loadRolesWithLifecycleMode(ctx, tx, ids, lockKeyShare)
+}
+
+// kaname#1034: snapshot staging читает без прежних row locks; apply защищён epochs.
+func loadRolesWithLifecycleMode(ctx context.Context, tx pgx.Tx, ids []string, lock rowLock) (map[domain.RoleID]domain.Role, error) {
 	out := make(map[domain.RoleID]domain.Role, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
 	rows, err := tx.Query(ctx,
-		fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1) ORDER BY id %s`, roleCols, lockKeyShare), ids)
+		fmt.Sprintf(`SELECT %s, live, ARRAY(SELECT rule_fp FROM kaname.role_rule_selectors s WHERE s.role_id=roles.id LIMIT 4097) FROM roles WHERE id = ANY($1) ORDER BY id %s`, roleCols, lock), ids)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: load roles: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var live bool
-		ro, serr := scanRoleWithTrailing(rows, &live)
+		var storedFPs []string
+		ro, serr := scanRoleWithTrailing(rows, &live, &storedFPs)
 		if serr != nil {
 			return nil, fmt.Errorf("reconcile: scan role row: %w", serr)
 		}
+		if len(storedFPs) > 4096 {
+			return nil, fmt.Errorf("reconcile: selector read limit")
+		}
+		ro.Rules = domain.RulesForStoredSelectorLayout(ro.Rules, storedFPs)
 		ro.Lifecycle.State = domain.RoleLifecycleDeclared
 		if !live {
 			ro.Lifecycle.State = domain.RoleLifecycleWithdrawn
@@ -1345,36 +1430,42 @@ func (s *reconcileStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Con
 	return out, rows.Err()
 }
 
-// UpsertMember materializes/updates a membership row (full rule coordinate).
+// Обычный reconcile обновляет часы после возможного ожидания записи. Подписанные
+// исполнители используют базовый store и время из точного подготовленного плана.
+func (s *legacyForwardStore) UpsertMember(ctx context.Context, m domain.TargetMember) error {
+	return target_members.UpsertLegacyTx(ctx, s.tx, targetMemberRow(m))
+}
+
+func (s *legacyForwardStore) UpsertMembers(ctx context.Context, members []domain.TargetMember) error {
+	return target_members.UpsertManyLegacyTx(ctx, s.tx, targetMemberRows(members))
+}
+
 func (s *reconcileStore) UpsertMember(ctx context.Context, m domain.TargetMember) error {
-	return target_members.UpsertTx(ctx, s.tx, target_members.Member{
+	return target_members.UpsertTx(ctx, s.tx, targetMemberRow(m))
+}
+
+// UpsertMembers пишет тот же ключ и статус набором, сохраняя подписанные часы.
+func (s *reconcileStore) UpsertMembers(ctx context.Context, members []domain.TargetMember) error {
+	return target_members.UpsertManyTx(ctx, s.tx, targetMemberRows(members))
+}
+
+func targetMemberRow(m domain.TargetMember) target_members.Member {
+	return target_members.Member{
 		BindingID:          string(m.BindingID),
 		RoleID:             string(m.RoleID),
 		RuleFP:             m.RuleFP,
 		ObjectType:         m.ObjectType,
 		ObjectID:           m.ObjectID,
 		VerificationStatus: m.VerificationStatus,
-	})
+	}
 }
 
-// UpsertMembers — тот же UPSERT, что UpsertMember, но НАБОРОМ: одно обращение к базе на
-// весь веер прохода вместо одного на выдачу. Тот же ON CONFLICT, та же идемпотентность.
-func (s *reconcileStore) UpsertMembers(ctx context.Context, members []domain.TargetMember) error {
-	if len(members) == 0 {
-		return nil
-	}
+func targetMemberRows(members []domain.TargetMember) []target_members.Member {
 	rows := make([]target_members.Member, 0, len(members))
 	for _, m := range members {
-		rows = append(rows, target_members.Member{
-			BindingID:          string(m.BindingID),
-			RoleID:             string(m.RoleID),
-			RuleFP:             m.RuleFP,
-			ObjectType:         m.ObjectType,
-			ObjectID:           m.ObjectID,
-			VerificationStatus: m.VerificationStatus,
-		})
+		rows = append(rows, targetMemberRow(m))
 	}
-	return target_members.UpsertManyTx(ctx, s.tx, rows)
+	return rows
 }
 
 // RecordEmittedTuplesBatch — тот же реестр, что RecordEmittedTuples, но набором,

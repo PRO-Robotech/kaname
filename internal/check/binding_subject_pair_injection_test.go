@@ -490,7 +490,7 @@ func bindingPairCensuses(t *testing.T) (control, injected check.BindingPairCensu
 			bindingPairOverlayErr = err
 			return
 		}
-		extra := map[string]string{bindingPairProbePkg + "/" + bindingPairProbeFile: bindingPairProbeSrc}
+		extra := map[string]string{bindingPairProbePkg + "/" + bindingPairProbeFile: bindingPairProbeSrc + bindingPairCanonicalProbeSrc}
 		var onDisk []string
 		for rel, src := range bindingPairOtherFiles {
 			extra[rel] = src

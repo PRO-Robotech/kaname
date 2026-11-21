@@ -932,23 +932,70 @@ func TestUnregistrationLookupUsesIndexes(t *testing.T) {
 	// Набор субъектов каждой выдачи — копия набора шаблона в ТОЙ ЖЕ инструкции:
 	// выдача без строки набора к фиксации не допускается (миграция 20261018214804),
 	// пара выдачи обязана быть в её наборе (миграция 20261019194800).
-	_, err := w.pool.Exec(w.ctx,
-		`WITH vol AS (
-		   INSERT INTO kaname.access_bindings
-		   SELECT (jsonb_populate_record(NULL::kaname.access_bindings, to_jsonb(b) || jsonb_build_object(
-		             'id', 'acbvol' || lpad(g::text, 14, '0'),
-		             'target_digest', 'vol' || g,
-		             'target', jsonb_build_object('resources', jsonb_build_array(
-		                 jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
-		     FROM kaname.access_bindings b, generate_series(1, 5000) g
-		    WHERE b.id = $2
-		   RETURNING id)
-		 INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
-		 SELECT vol.id, s.subject_type, s.subject_id, s.ordinal
-		   FROM vol, kaname.access_binding_subjects s
-		  WHERE s.binding_id = $2`,
-		pcrRegTgt, tmpl)
-	require.NoError(t, err, "п.10: объём выдач")
+	// Посев не является замером bulk-записи: каждая инструкция сохраняет прежний
+	// statement_timeout, а все 5000 выдач и их субъекты фиксируются одной TX.
+	seedTx, err := w.pool.Begin(w.ctx)
+	require.NoError(t, err)
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(w.ctx), 5*time.Second)
+		defer cancel()
+		_ = seedTx.Rollback(cleanup)
+	}()
+	for lo := 1; lo <= 5000; lo += 250 {
+		hi := lo + 249
+		_, err = seedTx.Exec(w.ctx,
+			`WITH vol AS (
+			   INSERT INTO kaname.access_bindings
+			   SELECT (jsonb_populate_record(NULL::kaname.access_bindings, to_jsonb(b) || jsonb_build_object(
+			             'id', 'acbvol' || lpad(g::text, 14, '0'),
+			             'target_digest', 'vol' || g,
+			             'target', jsonb_build_object('resources', jsonb_build_array(
+			                 jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
+			     FROM kaname.access_bindings b, generate_series($3::integer, $4::integer) g
+			    WHERE b.id = $2
+			   RETURNING id)
+			 INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
+			 SELECT vol.id, s.subject_type, s.subject_id, s.ordinal
+			   FROM vol, kaname.access_binding_subjects s
+			  WHERE s.binding_id = $2`,
+			pcrRegTgt, tmpl, lo, hi)
+		require.NoError(t, err, "п.10: объём выдач, порция %d–%d", lo, hi)
+	}
+	require.NoError(t, seedTx.Commit(w.ctx), "п.10: единая фиксация 5000 выдач с субъектами")
+
+	// До статистики доказываем точный объём, полный payload исходной JSONB-копии
+	// и равенство наборов субъектов каждой копии шаблону, включая ordinal.
+	var volume, exactCopies int
+	require.NoError(t, w.pool.QueryRow(w.ctx, `
+		WITH expected AS (
+		 SELECT (jsonb_populate_record(NULL::kaname.access_bindings, to_jsonb(b) || jsonb_build_object(
+		           'id', 'acbvol' || lpad(g::text, 14, '0'),
+		           'target_digest', 'vol' || g,
+		           'target', jsonb_build_object('resources', jsonb_build_array(
+		               jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
+		   FROM kaname.access_bindings b, generate_series(1, 5000) g WHERE b.id=$2)
+		SELECT (SELECT count(*) FROM kaname.access_bindings WHERE id LIKE 'acbvol%'),
+		       count(*) FILTER (WHERE actual.status='ACTIVE' AND to_jsonb(actual)=to_jsonb(expected))
+		  FROM expected JOIN kaname.access_bindings actual USING(id)`, pcrRegTgt, tmpl).Scan(&volume, &exactCopies))
+	require.Equal(t, 5000, volume, "п.10: ровно 5000 целевых ids")
+	require.Equal(t, 5000, exactCopies, "п.10: все 5000 live payload дословно скопированы из шаблона")
+	var templateSubjects, volumeSubjects, subjectDifferences int
+	require.NoError(t, w.pool.QueryRow(w.ctx, `
+		WITH ids AS (SELECT 'acbvol' || lpad(g::text,14,'0') AS id FROM generate_series(1,5000) g),
+		expected AS (
+		 SELECT ids.id AS binding_id,s.subject_type,s.subject_id,s.ordinal
+		   FROM ids CROSS JOIN kaname.access_binding_subjects s WHERE s.binding_id=$1),
+		actual AS (
+		 SELECT s.binding_id,s.subject_type,s.subject_id,s.ordinal
+		   FROM kaname.access_binding_subjects s JOIN ids ON ids.id=s.binding_id),
+		differences AS (
+		 (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+		 UNION ALL (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected))
+		SELECT (SELECT count(*) FROM kaname.access_binding_subjects WHERE binding_id=$1),
+		       (SELECT count(*) FROM actual), (SELECT count(*) FROM differences)`, tmpl).Scan(&templateSubjects, &volumeSubjects, &subjectDifferences))
+	require.Positive(t, templateSubjects, "п.10: непустой набор субъектов шаблона")
+	require.Equal(t, 5000*templateSubjects, volumeSubjects, "п.10: набор субъектов каждой из 5000 выдач")
+	require.Zero(t, subjectDifferences, "п.10: нет потерь, замен и лишних строк набора")
 	_, err = w.pool.Exec(w.ctx, `ANALYZE kaname.access_bindings`)
 	require.NoError(t, err, "п.10: статистика выдач")
 	explain("выдачи по ключу", "access_bindings_target_resources_live_idx", kanamepg.BindingsNamingKeySQL, pcrRegTgt, pcrX)

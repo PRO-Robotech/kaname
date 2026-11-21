@@ -99,6 +99,132 @@ func rid05DeleteAuditDelta(before, after []rid09PrimaryRow, creator, account, ac
 	return rid03S(row, "id"), ok && !at.Before(start) && !at.After(end) && rid03Columns(row, "id event_type tenant_account_id event_payload created_at") && rid03AuditIDPattern.MatchString(rid03S(row, "id")) && rid03S(row, "event_type") == "iam.service_account.deleted" && rid03S(row, "tenant_account_id") == account && rid03SameCell(row, "event_payload", map[string]any{"actor": actor, "resource_type": "service_account", "resource_id": creator, "account_id": account})
 }
 
+// Нативный стенд работает в legacy-профиле: после commit удаления владелец
+// факта уже отсутствует, а scope строки членства определяется её привязкой.
+func rid05DeleteEpochKeys(before rid03NewmanSnapshot, creator, account string, tuples map[rid03Tuple]bool) (policy, scopes map[string]bool, valid bool) {
+	policy = map[string]bool{"service_account:" + creator: true}
+	scopes = map[string]bool{account: true}
+	creatorFound := false
+	for _, row := range before.Raw["service_accounts"] {
+		if rid03S(row, "id") != creator {
+			continue
+		}
+		if creatorFound || rid03S(row, "account_id") != account {
+			return nil, nil, false
+		}
+		creatorFound = true
+		if actor := rid03S(row, "created_by_id"); actor != "" {
+			kind := rid03S(row, "created_by_type")
+			if kind != "user" && kind != "service_account" {
+				return nil, nil, false
+			}
+			policy[kind+":"+actor] = true
+		}
+	}
+	if !creatorFound || creator == "" || account == "" {
+		return nil, nil, false
+	}
+
+	for _, row := range before.Raw["relation_fact"] {
+		subject := rid03S(row, "subject")
+		if !tuples[rid03Tuple{subject, rid03S(row, "relation"), rid03S(row, "object_type"), rid03S(row, "object_id")}] {
+			continue
+		}
+		// Объекта больше нет, поэтому legacy-триггер меняет и корневую ревизию.
+		policy["*"] = true
+		kind, id, ok := strings.Cut(subject, ":")
+		if !ok {
+			continue
+		}
+		switch {
+		case (kind == "user" || kind == "service_account") && id != "" && !strings.ContainsAny(id, "#*"):
+			policy[subject] = true
+		case kind == "group" || kind == "iam_group":
+			group, member := strings.CutSuffix(id, "#member")
+			if member && group != "" && !strings.ContainsAny(group, "#*") {
+				policy["group:"+group] = true
+			}
+		}
+	}
+
+	holders := map[string]bool{}
+	for _, row := range before.Raw["access_binding_target_members"] {
+		if rid03S(row, "object_type") == "iam.serviceAccount" && rid03S(row, "object_id") == creator {
+			holders[rid03S(row, "binding_id")] = true
+		}
+	}
+	for _, row := range before.Raw["access_binding_emitted_tuples"] {
+		if rid03S(row, "source") == "member" && rid03S(row, "member_object_type") == "iam.serviceAccount" && rid03S(row, "member_object_id") == creator {
+			holders[rid03S(row, "binding_id")] = true
+		}
+	}
+	if holders[""] {
+		return nil, nil, false
+	}
+	if len(holders) == 0 {
+		return policy, scopes, true
+	}
+
+	projects := map[string]string{}
+	for _, row := range before.Raw["projects"] {
+		id, owner := rid03S(row, "id"), rid03S(row, "account_id")
+		if id == "" || owner == "" || projects[id] != "" {
+			return nil, nil, false
+		}
+		projects[id] = owner
+	}
+	broadRoles := map[string]bool{}
+	for _, row := range before.Raw["role_rule_selectors"] {
+		if rid03S(row, "arm") != "anchor" || !rid03SameCell(row, "container_type", nil) {
+			broadRoles[rid03S(row, "role_id")] = true
+		}
+	}
+	seen := map[string]bool{}
+	for _, row := range before.Raw["access_bindings"] {
+		id := rid03S(row, "id")
+		if !holders[id] {
+			continue
+		}
+		resource, role := rid03S(row, "resource_id"), rid03S(row, "role_id")
+		scope, ok := rid03Cell[int](row, "scope")
+		if seen[id] || resource == "" || role == "" || !ok {
+			return nil, nil, false
+		}
+		seen[id] = true
+		owner := ""
+		switch {
+		case scope == int(domain.ScopeCluster) && rid03S(row, "resource_type") == "cluster":
+		case scope == int(domain.ScopeAccount) && rid03S(row, "resource_type") == "account":
+			owner = resource
+		case scope == int(domain.ScopeProject) && rid03S(row, "resource_type") == "project" && projects[resource] != "":
+			owner = projects[resource]
+		default:
+			return nil, nil, false
+		}
+		if broadRoles[role] {
+			owner = ""
+		}
+		scopes[owner] = true
+	}
+	return policy, scopes, len(holders) == len(seen)
+}
+
+func rid05DeleteEpochsValid(a, b rid03NewmanSnapshot, creator, account string, failed bool, tuples map[rid03Tuple]bool) bool {
+	policyBefore, hasPolicy := a.Raw["authority_policy_epoch"]
+	bindingBefore, hasBinding := a.Raw["authority_binding_epoch"]
+	policyAfter, policyAfterOK := b.Raw["authority_policy_epoch"]
+	bindingAfter, bindingAfterOK := b.Raw["authority_binding_epoch"]
+	if !hasPolicy || !hasBinding || !policyAfterOK || !bindingAfterOK {
+		return false
+	}
+	if failed {
+		return reflect.DeepEqual(policyBefore, policyAfter) && reflect.DeepEqual(bindingBefore, bindingAfter)
+	}
+	policy, scopes, ok := rid05DeleteEpochKeys(a, creator, account, tuples)
+	return ok && rid03EpochTransitionValid(policyBefore, policyAfter, "key", policy) &&
+		rid03EpochTransitionValid(bindingBefore, bindingAfter, "scope", scopes)
+}
+
 // Только точные координаты BEFORE удаляемого объекта разрешают очистку.
 // Без рекурсивного поиска ID и исключений неизвестных таблиц/столбцов.
 func rid05DeleteRawDelta(a, b rid03NewmanSnapshot, creator, account string, failed bool) (rid05DeleteProof, bool) {
@@ -139,11 +265,11 @@ func rid05DeleteRawDelta(a, b rid03NewmanSnapshot, creator, account string, fail
 	}
 	actualUnion := map[rid03Tuple]bool{}
 	deletedFacts := []rid09PrimaryRow{}
-	if len(a.Raw) != len(b.Raw) {
+	if len(a.Raw) != len(b.Raw) || !rid05DeleteEpochsValid(a, b, creator, account, failed, expected) {
 		return proof, false
 	}
 	for table, old := range a.Raw {
-		if table == "operations" {
+		if table == "operations" || table == "authority_policy_epoch" || table == "authority_binding_epoch" {
 			continue
 		}
 		current, present := b.Raw[table]
@@ -368,6 +494,9 @@ func (p *rid05PublicContext) deleteAction(t *testing.T, w *ridLifecycleWorld, sc
 			auditID, ok := rid05DeleteAuditDelta(a.DeletedAudit, b.DeletedAudit, w.f.creator.ID, w.f.creator.AccountID, w.f.operator.UserID(), a.Core.Whole.PrimaryFinishedAt, b.Core.Whole.PrimaryStartedAt, failed)
 			require.True(t, ok, "exact immutable Delete business audit delta required")
 			proof, ok := rid05DeleteRawDelta(a.Core, b.Core, w.f.creator.ID, w.f.creator.AccountID, failed)
+			if !ok {
+				rid05LogCleanupDiagnosis(t, a.Core, b.Core)
+			}
 			require.True(t, ok, "closed BEFORE-derived delete cleanup delta required")
 			proof.CaseID = e.CaseID
 			proof.OperationID = op.ID
@@ -411,7 +540,13 @@ func rid05RequireDeleteOperation(t *testing.T, w *ridLifecycleWorld, a, b rid05S
 	require.Equal(t, len(old)+1, len(now))
 	id := ""
 	for previous, row := range old {
-		require.True(t, reflect.DeepEqual(row, now[previous]), "every old Operation raw field/history must remain exact")
+		unchanged := reflect.DeepEqual(row, now[previous])
+		if !unchanged {
+			note, err := json.Marshal(rid03DescribeOldOperationDiff(row, now[previous]))
+			require.NoError(t, err)
+			t.Logf("RID05_OLD_OPERATION_DIFF %s", note)
+		}
+		require.True(t, unchanged, "every old Operation raw field/history must remain exact")
 	}
 	for added := range now {
 		if old[added] == nil {
@@ -463,6 +598,18 @@ func rid05TypedDeleteValid(op *operations.Operation, creator, account, actor str
 	return op.Response.UnmarshalTo(&got) == nil && proto.Equal(&got, &emptypb.Empty{})
 }
 
+// Наружу выходят только числа строк и признаки изменения известных таблиц.
+func rid05LogCleanupDiagnosis(t *testing.T, a, b rid03NewmanSnapshot) {
+	policyChanged := !reflect.DeepEqual(a.Raw["authority_policy_epoch"], b.Raw["authority_policy_epoch"])
+	bindingChanged := !reflect.DeepEqual(a.Raw["authority_binding_epoch"], b.Raw["authority_binding_epoch"])
+	t.Logf("RID05_CLEANUP policy=%t binding=%t facts=%d/%d fga=%d/%d journal=%d/%d reconcile=%d/%d",
+		policyChanged, bindingChanged,
+		len(a.Raw["relation_fact"]), len(b.Raw["relation_fact"]),
+		len(a.Raw["fga_outbox"]), len(b.Raw["fga_outbox"]),
+		len(a.Raw["resource_journal"]), len(b.Raw["resource_journal"]),
+		len(a.Raw["resource_reconcile_outbox"]), len(b.Raw["resource_reconcile_outbox"]))
+}
+
 // Нативный DELETE остаётся штатным запросом API в трёх мирах подготовки удаления.
 // Эта независимая контрольная точка сохраняет полное доказательство через настоящее
 // изменение без увеличения счётчика публичных фаз или подмены RPC.
@@ -487,6 +634,9 @@ func (p *rid05PublicContext) nativeDeleted(t *testing.T, w *ridLifecycleWorld) {
 	auditID, ok := rid05DeleteAuditDelta(a.DeletedAudit, b.DeletedAudit, w.f.creator.ID, w.f.creator.AccountID, w.f.operator.UserID(), a.Core.Whole.PrimaryFinishedAt, b.Core.Whole.PrimaryStartedAt, false)
 	require.True(t, ok, "native Delete exact business audit required")
 	proof, ok := rid05DeleteRawDelta(a.Core, b.Core, w.f.creator.ID, w.f.creator.AccountID, false)
+	if !ok {
+		rid05LogCleanupDiagnosis(t, a.Core, b.Core)
+	}
 	require.True(t, ok, "native Delete closed full raw cleanup required")
 	proof.OperationID = op.ID
 	proof.NewDeleteAuditID = auditID

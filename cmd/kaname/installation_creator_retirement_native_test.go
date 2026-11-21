@@ -60,6 +60,20 @@ func rid04RetireObserved(t *testing.T, w *ridLifecycleWorld, public *rid04Public
 	u2 := f.ridSA(t, f.tenantID, "rid-after-retirement")
 	body := w.bindingInput("service_account", u2, w.pull, "registry.registries", w.object)
 	public.prepare(t, w, g)
+	// До отзыва фиксируем полную привязку после штатной материализации.
+	// Эта подготовка общая для проверок вывода и удаления создателя.
+	materialized := w.primaryBindingMaterializedAt(t, f.given.ctx, g.Id)
+	if materialized == nil {
+		rid03StableNewmanSnapshot(t, w)
+		materialized = w.primaryBindingMaterializedAt(t, f.given.ctx, g.Id)
+	}
+	require.NotNil(t, materialized)
+	expected := proto.Clone(g).(*iamv1.AccessBinding)
+	expected.MaterializedAt = materialized
+	var ready iamv1.AccessBinding
+	f.publicRead(t, "/iam/v1/accessBindings/"+g.Id, &ready)
+	require.True(t, proto.Equal(expected, &ready), "materialized grant must keep every field")
+	g = &ready
 	before := w.snapshot(t)
 	f.ridAdmin(t, f.creator.ID, false)
 	f.ridAuthorityMaterialized(t, f.creator.ID, false)

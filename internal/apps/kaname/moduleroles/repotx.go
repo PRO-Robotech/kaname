@@ -16,7 +16,7 @@ import (
 //
 // Порт `TxRunner` описывает потребность use-case: «исполни это под одной
 // транзакцией записи». Репозиторий сервиса даёт её через единственное в дереве
-// объявление паттерна писательской транзакции — `shared.DoWithWriteTx`. Своя
+// объявление паттерна писательской транзакции — `shared.DoWithInstallationWriteTxVoid`. Своя
 // последовательность begin→commit→rollback здесь была бы вторым местом об одном
 // предмете и разошлась бы с первым молча.
 //
@@ -28,7 +28,7 @@ import (
 // # Что мост НЕ прячет
 //
 // Отказы приезжают уже приведёнными к gRPC-статусу — это свойство
-// `shared.DoWithWriteTx`, единственного объявления паттерна. Применитель их не
+// `shared.DoWithInstallationWriteTxVoid`, единственного объявления паттерна. Применитель их не
 // перетолковывает: тексты отказов базы суть часть контракта, и своя проза
 // поверх них скрыла бы имя нарушенного ограничения.
 
@@ -43,7 +43,7 @@ func NewRepoTxRunner(repo kanamerepo.Repository) TxRunner { return repoTxRunner{
 // RunInWriteTx исполняет fn под одной писательской транзакцией. Строка роли и
 // её проекция сегментов ложатся вместе либо не ложатся вовсе.
 func (r repoTxRunner) RunInWriteTx(ctx context.Context, fn func(context.Context, RoleWriter) error) error {
-	return shared.DoWithWriteTxVoid(ctx, r.repo, func(ctx context.Context, w kanamerepo.Writer) error {
+	return shared.DoWithInstallationWriteTxVoid(ctx, r.repo, kanamerepo.AuthorityRole, func(ctx context.Context, w kanamerepo.Writer) error {
 		return fn(ctx, w.RolesW())
 	})
 }

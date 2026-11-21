@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 )
 
 // Разбор БОЕВОЙ модели прав и компиляция её в план вердикта формы E.
@@ -513,7 +515,7 @@ func (m *Model) Compile(typeName, relation string) (Plan, error) {
 // объявляет, сколько уровней иерархии областей вообще может быть пройдено, и
 // потребитель (в том числе прибор замера) обязан видеть ту же величину, иначе
 // два места разойдутся в том, что считают «слишком глубоко».
-const MaxPointerDepth = 4
+const MaxPointerDepth = hierarchy.MaxPointerHops
 
 func (m *Model) walk(p *Plan, cur *ModelType, relation string, path []string, seen map[string]bool) error {
 	if len(path) > MaxPointerDepth {

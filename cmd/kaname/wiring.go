@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -71,10 +72,26 @@ type services struct {
 	accessKeyHandler *access_keys.Handler
 	// humanSessionHandler — InternalHumanSessionService.Resolve (Ф3). Ставится
 	// корнем ПОСЛЕ сборки: полоса входа строится отдельно, на каждом старте.
-	humanSessionHandler   *humansession.Handler
-	accountHandler        *accountapp.Handler
-	projectHandler        *projectapp.Handler
-	userHandler           *userapp.Handler
+	humanSessionHandler *humansession.Handler
+	accountHandler      *accountapp.Handler
+	// Те же Update UC, которые уже переданы публичным handlers.
+	// Эти же семь UC уже переданы actual public handlers.
+	accountCreate                *accountapp.CreateAccountUseCase
+	accountDelete                *accountapp.DeleteAccountUseCase
+	projectCreate                *projectapp.CreateProjectUseCase
+	projectDelete                *projectapp.DeleteProjectUseCase
+	serviceAccountCreate         *serviceaccountapp.CreateServiceAccountUseCase
+	serviceAccountDelete         *serviceaccountapp.DeleteServiceAccountUseCase
+	roleDelete                   *roleapp.DeleteRoleUseCase
+	accountMetadataUpdate        *accountapp.UpdateAccountUseCase
+	projectMetadataUpdate        *projectapp.UpdateProjectUseCase
+	serviceAccountMetadataUpdate *serviceaccountapp.UpdateServiceAccountUseCase
+	serviceAccountEnable         *serviceaccountapp.EnableServiceAccountUseCase
+	serviceAccountDisable        *serviceaccountapp.DisableServiceAccountUseCase
+	projectHandler               *projectapp.Handler
+	userHandler                  *userapp.Handler
+	// Общий UC обеих дверей приглашения; корень подключает один decision runner.
+	userInvite            *userapp.InviteUserUseCase
 	internalUserHandler   *userapp.InternalHandler
 	serviceAccountHandler *serviceaccountapp.Handler
 	groupHandler          *groupapp.Handler
@@ -87,9 +104,18 @@ type services struct {
 	// grantDelegationHandler — GrantDelegationService (kaname#986): только
 	// публичный (арендаторский) слушатель.
 	grantDelegationHandler *grantdelegationapp.Handler
+	// ТЕ ЖЕ UC, которые зарегистрированы handler; full startup подключает их без пересборки.
+	grantDelegationCreate *grantdelegationapp.CreateGrantDelegationUseCase
+	grantDelegationUpdate *grantdelegationapp.UpdateGrantDelegationUseCase
+	grantDelegationRevoke *grantdelegationapp.RevokeGrantDelegationUseCase
 	// internalIAMHandler — InternalIAMService (LookupSubject для
 	// перехватчика аутентификации api-gateway; Check делегирует AuthorizeService).
 	internalIAMHandler *internaliamapp.Handler
+	// Тот же UC регистрации, который уже передан обработчику и модулю.
+	resourceRegistrar *internaliamapp.RegisterResourceUseCase
+	resourceGate      *authzguard.RelationWriteGate
+	// Единственный recorder запроса: новые object engines получают тот же instance.
+	bindingSizeRecorder reconcileapp.SizeRecorder
 
 	// Обработчики ядра авторизации.
 	authorizeHandler *authorizeapp.Handler
@@ -128,6 +154,9 @@ type services struct {
 	// авторизацией этой поверхности: ступень подтверждения личности к ней
 	// сегодня не применяется — решение записано в приёмке, а не умолчание.
 	moduleHandler *moduleapp.Handler
+	// Full composition пересобирает этот handler из retained catalog writer copy.
+	// Независимый RPC context не обязан наследовать startup Context profile.
+	fullModuleHandler func(*kanamepg.FullWriterContract) (*moduleapp.Handler, error)
 
 	// bindingReconciler — ТОТ ЖЕ экземпляр материализации привязки, вынесенный
 	// наружу для полосы своего входа: регистрация человека материализует его
@@ -263,7 +292,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// отношений и допуск пира у службы решений судят по тому же значению, что
 	// политики вызывающего.
 	moduleRoster moduleidentity.Roster,
-	tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
+	tokenSigner *tokensigner.Signer, logger *slog.Logger, referencePlans ...*authzmodel.Plans) *services {
+	var rolePlans *authzmodel.Plans
+	if len(referencePlans) == 1 {
+		rolePlans = referencePlans[0]
+	}
 	_ = slavePool // kanameRepo собирается и передаётся из main()
 
 	// sharedClock — ОДИН источник моментов, сравниваемых с отсечкой отзыва-всех,
@@ -334,12 +367,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// о том, должны ли они туда попадать, не принималось — предмет заведён
 	// задачей #157.
 	rsabReconciler := reconcileapp.New(kanamepg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
+	var bindingSizeRecorder reconcileapp.SizeRecorder
 	if metricsReg != nil {
 		// Размер материализации привязки — измерение, не потолок. Он ничего не
 		// отвергает: величина, которой привязка может достичь, не измерена, а предел,
 		// назначенный до замера, либо отвергнет законную выдачу, либо не отвергнет
 		// ничего, оставаясь на вид контролем.
-		rsabReconciler = rsabReconciler.WithSizeRecorder(metricsReg.NewBindingMaterializationRecorder())
+		bindingSizeRecorder = metricsReg.NewBindingMaterializationRecorder()
+		rsabReconciler = rsabReconciler.WithSizeRecorder(bindingSizeRecorder)
 	}
 
 	// AccountService.
@@ -523,6 +558,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 	// RoleService.
 	roleCreate := roleapp.NewCreateRoleUseCase(kanameRepo, opsRepo, catalogSource).
+		WithGrantReferencePlans(rolePlans).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler).
 		// Роль, принятая до снятия регистрации названного ключа и записанная после,
@@ -542,6 +578,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ПРИМЕЧАНИЕ: rsabReconciler создаётся один раз в начале buildServices (общий
 	// с материализацией автоматической привязки владельца Account.Create).
 	roleUpdate := roleapp.NewUpdateRoleUseCase(kanameRepo, opsRepo, catalogSource).
+		WithGrantReferencePlans(rolePlans).
 		WithRegisteredKeys(kanamepg.NewRegisteredKeys(pool)).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(kanameRepo, rsabReconciler)).
@@ -677,13 +714,16 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	abDelete.WithDelegatedGrantPath(abDelegated)
 	// GrantDelegationService (kaname#986, Р1): делегирования права выдавать. Право
 	// на каждом глаголе решает обработчик (`HANDLER_DECIDES`).
+	grantDelegationCreate := grantdelegationapp.NewCreateGrantDelegationUseCase(kanameRepo, opsRepo, catalogSource).WithRelationStore(relationStore, logger)
+	grantDelegationUpdate := grantdelegationapp.NewUpdateGrantDelegationUseCase(kanameRepo, opsRepo, catalogSource).WithRelationStore(relationStore, logger)
+	grantDelegationRevoke := grantdelegationapp.NewRevokeGrantDelegationUseCase(kanameRepo, opsRepo).WithRelationStore(relationStore, logger)
 	grantDelegationHandler := grantdelegationapp.NewHandler(
-		grantdelegationapp.NewCreateGrantDelegationUseCase(kanameRepo, opsRepo, catalogSource).
-			WithRelationStore(relationStore, logger),
+		grantDelegationCreate,
 		grantdelegationapp.NewGetGrantDelegationUseCase(kanameRepo).WithRelationStore(relationStore),
 		grantdelegationapp.NewListGrantDelegationsUseCase(kanameRepo).WithRelationStore(relationStore),
-		grantdelegationapp.NewRevokeGrantDelegationUseCase(kanameRepo, opsRepo).WithRelationStore(relationStore, logger),
-	).WithUpdate(grantdelegationapp.NewUpdateGrantDelegationUseCase(kanameRepo, opsRepo, catalogSource).WithRelationStore(relationStore, logger))
+		grantDelegationRevoke,
+	).WithUpdate(grantDelegationUpdate)
+
 	abHandler := accessbindingapp.NewHandler(abCreate, abDelete, abGet, abListByScope, abListBySub, abListByAcc,
 		abListSubjPriv).
 		WithUpdate(abUpdate).
@@ -1012,42 +1052,69 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// показанный планом, читался бы из другой базы, чем сверяет CAS применения.
 	// Оценка последствий при этом идёт читающей транзакцией (`READ ONLY`), а её
 	// предикаты — те же, что вставляет в свои операторы писатель.
-	moduleApplier := modulecatalog.NewVerbApplier(kanamepg.NewCatalogWriteRepo(pool))
 	modulePlanState := kanamepg.NewCatalogPlanRepo(pool)
 	moduleDelivery := newManifestDeliverySource(cfg.Manifests)
-	// Применённая пара редакции модуля (kaname#865) — над ТЕМ ЖЕ пулом, что
-	// писатель: `Get` показывает то, что записал оператор сравнения-и-записи.
 	moduleEditions := kanamepg.NewCatalogRepo(pool)
-	moduleHandler := moduleapp.NewHandler(
-		moduleapp.NewPlanUseCase(moduleDelivery, catalogRows, modulePlanState).
-			WithAdminChecker(relationStore),
-		moduleapp.NewApplyUseCase(moduleDelivery, moduleApplier, opsRepo, logger).
-			WithAdminChecker(relationStore),
-		moduleapp.NewGetUseCase(catalogRows, moduleEditions).WithAdminChecker(relationStore),
-		moduleapp.NewListUseCase(catalogRows).WithAdminChecker(relationStore),
-	)
+	makeModuleHandler := func(writer *kanamepg.CatalogWriteRepo) *moduleapp.Handler {
+		moduleApplier := modulecatalog.NewVerbApplier(writer)
+		return moduleapp.NewHandler(
+			moduleapp.NewPlanUseCase(moduleDelivery, catalogRows, modulePlanState).WithAdminChecker(relationStore),
+			moduleapp.NewApplyUseCase(moduleDelivery, moduleApplier, opsRepo, logger).WithAdminChecker(relationStore),
+			moduleapp.NewGetUseCase(catalogRows, moduleEditions).WithAdminChecker(relationStore),
+			moduleapp.NewListUseCase(catalogRows).WithAdminChecker(relationStore),
+		)
+	}
+	moduleHandler := makeModuleHandler(kanamepg.NewCatalogWriteRepo(pool))
+	fullModuleHandler := func(contract *kanamepg.FullWriterContract) (*moduleapp.Handler, error) {
+		writer, err := kanamepg.NewCatalogWriteRepo(pool).WithFullWriterContract(contract)
+		if err != nil {
+			return nil, fmt.Errorf("full module catalog writer: %w", err)
+		}
+		// Используется возвращённая копия: исходный CatalogWriteRepo остаётся staged.
+		return makeModuleHandler(writer), nil
+	}
 
 	return &services{
-		subscriptionDoor:       relationStore,
-		accountHandler:         accountHandler,
-		projectHandler:         projectHandler,
-		userHandler:            userHandler,
-		internalUserHandler:    internalUserHandler,
-		serviceAccountHandler:  saHandler,
-		groupHandler:           groupHandler,
-		membershipHandler:      membershipHandler,
-		roleHandler:            roleHandler,
-		accessBindingHandler:   abHandler,
-		grantDelegationHandler: grantDelegationHandler,
-		internalIAMHandler:     internalIAMHandler,
-		internalClusterHandler: internalClusterHandler,
-		publicClusterHandler:   publicClusterHandler,
+		subscriptionDoor:             relationStore,
+		accountHandler:               accountHandler,
+		accountCreate:                accountCreate,
+		accountDelete:                accountDelete,
+		projectCreate:                projectCreate,
+		projectDelete:                projectDelete,
+		serviceAccountCreate:         saCreate,
+		serviceAccountDelete:         saDelete,
+		roleDelete:                   roleDelete,
+		accountMetadataUpdate:        accountUpdate,
+		projectMetadataUpdate:        projectUpdate,
+		serviceAccountMetadataUpdate: saUpdate,
+		serviceAccountEnable:         saEnable,
+		serviceAccountDisable:        saDisable,
+		projectHandler:               projectHandler,
+		userHandler:                  userHandler,
+		userInvite:                   userInvite,
+		internalUserHandler:          internalUserHandler,
+		serviceAccountHandler:        saHandler,
+		groupHandler:                 groupHandler,
+		membershipHandler:            membershipHandler,
+		roleHandler:                  roleHandler,
+		accessBindingHandler:         abHandler,
+		grantDelegationHandler:       grantDelegationHandler,
+		grantDelegationCreate:        grantDelegationCreate,
+		grantDelegationUpdate:        grantDelegationUpdate,
+		grantDelegationRevoke:        grantDelegationRevoke,
+		internalIAMHandler:           internalIAMHandler,
+		resourceRegistrar:            registerResourceUC,
+		resourceGate:                 regGate,
+		bindingSizeRecorder:          bindingSizeRecorder,
+		internalClusterHandler:       internalClusterHandler,
+		publicClusterHandler:         publicClusterHandler,
 
 		// Жизненный цикл клиента интерактивного входа.
 		interactiveClientHandler: interactiveClientHandler,
 
 		// каталог прав одного модуля — план, применение, два чтения.
-		moduleHandler: moduleHandler,
+		moduleHandler:     moduleHandler,
+		fullModuleHandler: fullModuleHandler,
 
 		// квоты личности — единственная поверхность, читаемая о себе самом.
 		identityQuotaHandler: identityQuotaHandler,

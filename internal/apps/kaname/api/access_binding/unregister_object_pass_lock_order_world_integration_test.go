@@ -81,6 +81,8 @@ func (w *urxWorld) ringFixtureOn(key string) ringFixture {
 	w.t.Helper()
 	w.registerRegistry(key)
 	b1 := w.grantTo(w.usrD, w.rolRegGet, urTarget(key), false, "974: выдача B1 на K")
+	// Перед гонкой подтверждаем запись факта, который снятие обязано убрать.
+	require.NoError(w.t, w.rec.ConvergeBinding(w.ctx, domain.AccessBindingID(b1)))
 	w.pollAsk(w.usr(w.usrD), "v_get", pcrRegType, key, true, "974 контроль фикстуры: B1 материализована в v_get на K")
 	r2 := w.seedRole("uo_names_"+key, domain.Rules{namesRule(key)})
 	b2 := w.unmaterializedGrant(r2, ndAllInScope(), "974: выдача B2 роли с именем K")

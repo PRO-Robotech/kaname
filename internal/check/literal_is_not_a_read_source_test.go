@@ -188,6 +188,9 @@ var catalogFactSymbols = map[string]bool{
 var typeDictionarySymbols = []string{
 	"CatalogTypeName", "ModelTypeName", "DottedType", "FGAObjectType", "ObjectType",
 	"PermissionsCoveringType",
+	// kaname#1034: обе оболочки читают литерал только через обратный словарь
+	// PermissionsCoveringType(account); это не вопрос о live/grantable каталоге.
+	"BindingScopeRelations", "LegacyScopeTierRelations",
 }
 
 // catalogFactExemptFiles — ПУСТ, и это ЦЕЛЬ ведомости, а не её поломка (kacho#1816).

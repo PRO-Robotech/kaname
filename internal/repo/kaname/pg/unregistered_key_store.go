@@ -132,6 +132,12 @@ func keyColumns(keys []domain.ResourceRef) (types, ids []string) {
 
 // LockBindingsNamingKeys — замок выдач, называющих любой из ключей (kaname#1019).
 func (s *UnregisteredKeyStore) LockBindingsNamingKeys(ctx context.Context, tx service.Tx, keys []domain.ResourceRef) error {
+	// Admission предшествует registration fence и строкам выдач: иначе снятие
+	// ждёт compatibility, уже удерживая строки, нужные вошедшему Writer.
+	// Helper проверяет signed witness без изменения proof, clock или режима.
+	if _, err := txAsPgx(tx).Exec(ctx, "SELECT kaname.authority_parent_prelock_admit_v3()"); err != nil {
+		return mapErr(err, "", "")
+	}
 	// Каталог и регистрация входят в тот же fence до строк каталога/зеркала.
 	// Он нужен до выдач и ролей: применение каталога затем проверяет FK ролей.
 	if _, err := txAsPgx(tx).Exec(ctx, registrationWriterLockSQL); err != nil {

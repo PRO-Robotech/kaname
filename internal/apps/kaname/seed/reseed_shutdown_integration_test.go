@@ -29,9 +29,13 @@ type reseedShutdownRepo struct {
 	arrived chan struct{}
 }
 
-func (r *reseedShutdownRepo) Writer(ctx context.Context) (kanamerepo.Writer, error) {
+func (r *reseedShutdownRepo) InstallationAuthorityWriter(ctx context.Context, kind kanamerepo.AuthorityOperation) (kanamerepo.Writer, error) {
 	call := r.calls.Add(1)
-	writer, err := r.Repository.Writer(ctx)
+	factory, ok := r.Repository.(kanamerepo.InstallationAuthorityWriterFactory)
+	if !ok {
+		return nil, kanamerepo.ErrInvalidAuthorityFencePlan
+	}
+	writer, err := factory.InstallationAuthorityWriter(ctx, kind)
 	if err != nil {
 		return nil, err
 	}

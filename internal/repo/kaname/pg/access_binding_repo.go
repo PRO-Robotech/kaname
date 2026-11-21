@@ -9,7 +9,7 @@ package pg
 // Строгая вставка:
 //
 //   `INSERT INTO kaname.access_bindings (...)`
-//   `VALUES ($newID, $st, $sid, $rid, $rt, $rid2, $status, $cond, $exp, $grb, $rva, $rvb, now())`
+//   `VALUES ($newID, $st, $sid, $rid, $rt, $rid2, $status, $cond, $exp, $grb, $rva, $rvb, clock_timestamp())`
 //   `RETURNING id, ..., created_at;`
 //
 // На дубле (subject_id, subject_type, role_id, resource_type, resource_id)
@@ -871,7 +871,12 @@ type abWriter struct {
 // revoked_at, revoked_by_user_id) передаются через
 // nullableString/nullableTimePtr хелперы.
 func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.AccessBinding, error) {
-	now := time.Now().UTC()
+	return w.insertAt(ctx, b, nil)
+}
+
+// Подписанная запись передаёт время из программы владельца. Остальные вставки
+// используют часы того же PostgreSQL, который материализует выдачу.
+func (w *abWriter) insertAt(ctx context.Context, b domain.AccessBinding, signedAt *time.Time) (domain.AccessBinding, error) {
 	// Scope: явное значение, когда оно не Unspecified, иначе область выводит из
 	// resource_type триггер access_bindings_scope_default_trg (миграция 0005).
 	// SMALLINT NULL нарушил бы NOT NULL ПОСЛЕ триггера лишь тогда, когда триггер
@@ -912,7 +917,7 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 			-- ключ и дала бы отказ ссылочной целостности на несуществующую роль.
 			NULLIF($4, ''), $5, $6,
 			COALESCE(NULLIF($7, ''), 'ACTIVE'),
-			$8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+			$8, $9, $10, $11, COALESCE($12::timestamptz, clock_timestamp()), $13, $14, $15, $16, $17, $18, $19,
 			-- Ссылку на делегирование ставит только делегированный путь права
 			-- выдавать (kaname#986); у выдачи держателя права колонка NULL.
 			NULLIF($20, '')
@@ -932,7 +937,7 @@ func (w *abWriter) Insert(ctx context.Context, b domain.AccessBinding) (domain.A
 		string(b.GrantedByUserID),
 		nullableTimePtr(b.RevokedAt),
 		nullableUserIDPtr(b.RevokedByUserID),
-		now,
+		signedAt,
 		scopeArg,
 		b.DeletionProtection,
 		labelsJSON,
@@ -1009,6 +1014,9 @@ func (w *abWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID)
 // FailedPrecondition. revoked_at проставляется, чтобы частичная UNIQUE
 // действующей выдачи (`WHERE revoked_at IS NULL`) освободила место повторной выдаче.
 func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID, revokedBy domain.UserID) (domain.AccessBinding, error) {
+	return w.revokeGuardedAt(ctx, id, revokedBy, time.Now().UTC())
+}
+func (w *abWriter) revokeGuardedAt(ctx context.Context, id domain.AccessBindingID, revokedBy domain.UserID, now time.Time) (domain.AccessBinding, error) {
 	if revokedBy == "" {
 		// CHECK access_bindings_revoked_consistency_ck требует, чтобы revoked_at
 		// менялся вместе со status='REVOKED'; строка REVOKED без отозвавшего
@@ -1016,7 +1024,6 @@ func (w *abWriter) RevokeGuarded(ctx context.Context, id domain.AccessBindingID,
 		return domain.AccessBinding{}, iamerr.Wrapf(iamerr.ErrInvalidArg,
 			"revoked_by_user_id is required for REVOKED transition")
 	}
-	now := time.Now().UTC()
 	row := w.tx.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE access_bindings
 		   SET status             = 'REVOKED',

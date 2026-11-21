@@ -17,6 +17,7 @@ import (
 const directAppDir = "internal/apps/kaname/api/internal_iam"
 const directAppImport = "github.com/PRO-Robotech/kaname/" + directAppDir
 const directPGImport = "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+const directDecisionField = "resourceDecisionConfigured"
 
 // CensusDirectProducers доказывает отдельную ограниченную форму посева:
 // Test → factory, возвращающий свой world → concrete use-case в typed поле →
@@ -82,6 +83,7 @@ func directProductionProof(files map[string]*ast.File, uc, adapter *ast.File) bo
 		!routeConstructor(adapter, "NewResourceMirrorEmitter", "ResourceMirrorEmitter", "", -1) ||
 		!routeFieldType(uc, "RegisterResourceUseCase", "mirror", "", "resourceMirrorEmitter") ||
 		!routeMethodsPreserve(files, directAppDir, "RegisterResourceUseCase", "Register", "mirror", map[string]bool{}) ||
+		!directLegacyDecisionProof(files, uc) ||
 		!directWriteIntentProof(uc) {
 		return false
 	}
@@ -92,6 +94,36 @@ func directProductionProof(files map[string]*ast.File, uc, adapter *ast.File) bo
 	return directStraightCalls(method.Body, func(c *ast.CallExpr) bool {
 		return routeImportedCall(adapter, c, "github.com/PRO-Robotech/kaname/"+EdgeProducerImport, EdgeProducerCall)
 	})
+}
+
+// Этот direct-путь создаёт UC без runner. Нулевой bool должен происходить
+// из самого конструктора и сохраняться во всей достижимой цепи Register.
+// Включённый runner требует отдельного доказательства его producer-пути.
+func directLegacyDecisionProof(files map[string]*ast.File, file *ast.File) bool {
+	if !routeFieldType(file, "RegisterResourceUseCase", directDecisionField, "", "bool") ||
+		!routeMethodsPreserve(files, directAppDir, "RegisterResourceUseCase", "Register", directDecisionField, map[string]bool{}) {
+		return false
+	}
+	constructor := routeFunction(file, "NewRegisterResourceUseCase")
+	// Форму единственного return &UC{...} уже проверил routeConstructor.
+	if constructor == nil || constructor.Body == nil || len(constructor.Body.List) != 1 {
+		return false
+	}
+	ret, ok := constructor.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return false
+	}
+	literal := routeReturnedLiteral(ret.Results[0], "RegisterResourceUseCase")
+	if literal == nil {
+		return false
+	}
+	for _, element := range literal.Elts {
+		field, ok := element.(*ast.KeyValueExpr)
+		if !ok || routeIdent(field.Key, directDecisionField) {
+			return false
+		}
+	}
+	return true
 }
 
 // Имя Test само по себе недостаточно: требуется сигнатура testing.T и
@@ -208,7 +240,10 @@ func directFactoryProof(files, pkg map[string]*ast.File, file *ast.File, fn *ast
 		if !ok || !routeIdent(lhs.X, world.Name) || !directFieldType(pkg, typ.Name, lhs.Sel.Name) {
 			continue
 		}
-		base, ok := routeUnwrapChain(files, file, a.Rhs[0], directAppDir, "RegisterResourceUseCase", "mirror", false, nil)
+		base, ok := routeUnwrapChain(files, file, a.Rhs[0], directAppDir, "RegisterResourceUseCase", "mirror", false, func(call *ast.CallExpr) bool {
+			selector, ok := routeUnparen(call.Fun).(*ast.SelectorExpr)
+			return ok && routeFluentPreserves(files, directAppDir, "RegisterResourceUseCase", selector.Sel.Name, directDecisionField, false)
+		})
 		if !ok || !routeImportedCall(file, base, directAppImport, "NewRegisterResourceUseCase") || len(base.Args) < 2 {
 			continue
 		}
@@ -690,6 +725,12 @@ func directWriteIntentProof(file *ast.File) bool {
 	// Поддерживается ровно один retry-for с ненулевой константой и direct call.
 	var forward *ast.CallExpr
 	for _, stmt := range emit.Body.List {
+		// Только точный guard доказанного нулевого поля: без init/else,
+		// вычисляемых условий или допуска произвольного selector bool.
+		// Constructor, receiver helpers и factory fluent chain проверены отдельно.
+		if branch, ok := stmt.(*ast.IfStmt); ok && branch.Init == nil && branch.Else == nil && routeSelector(branch.Cond, routeReceiver(emit), directDecisionField) {
+			continue
+		}
 		if loop, ok := stmt.(*ast.ForStmt); ok {
 			if forward != nil || !directPositiveLoop(file, emit, loop) {
 				return false

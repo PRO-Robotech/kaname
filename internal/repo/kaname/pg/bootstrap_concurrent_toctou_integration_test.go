@@ -74,9 +74,12 @@ func TestBootstrapConcurrent_TOCTOU_SingleOwnedAccount(t *testing.T) {
 	// (no bootstrap) so we have an ACTIVE user owning ZERO accounts — the exact
 	// newIdentity=false path the TOCTOU exposes.
 	_, _, inviteeID := seedInviterAndPendingInvite(t, ctx, repo, "conc", email)
+	// Подтверждение адреса — отдельная законченная транзакция до writer:
+	// его общий fence иначе удерживается, пока pool UPDATE ждёт тот же fence.
+	markAddressVerified(t, ctx, pool, inviteeID)
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	markAddressVerified(t, ctx, pool, inviteeID)
+	defer func() { _ = w.Rollback(ctx) }()
 	_, err = w.UsersW().ActivateInvite(ctx, inviteeID,
 		domain.ExternalSubject(ext), domain.DisplayName("Bootstrap Concurrent"))
 	require.NoError(t, err)

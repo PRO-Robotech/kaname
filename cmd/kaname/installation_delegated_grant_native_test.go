@@ -9,13 +9,21 @@ import (
 )
 
 func rid03BothModes(t *testing.T, systemClass bool, run func(*testing.T, *ridLifecycleWorld)) {
+	ridLifecycleBothModes(t, systemClass, nativeWorldOptions{}, run)
+}
+
+func ridBothModesWithSettledKeys(t *testing.T, systemClass bool, run func(*testing.T, *ridLifecycleWorld)) {
+	ridLifecycleBothModes(t, systemClass, nativeWorldOptions{settleIssuedKeys: true}, run)
+}
+
+func ridLifecycleBothModes(t *testing.T, systemClass bool, options nativeWorldOptions, run func(*testing.T, *ridLifecycleWorld)) {
 	t.Helper()
 	for _, mode := range []string{"S1", "S2"} {
-		t.Run(mode, func(t *testing.T) { run(t, newRIDLifecycleWorld(t, mode, systemClass)) })
+		t.Run(mode, func(t *testing.T) { run(t, newRIDLifecycleWorldConfigured(t, mode, systemClass, nil, options)) })
 	}
 }
 func ridNativeDelegatedGrant(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+	ridBothModesWithSettledKeys(t, false, func(t *testing.T, w *ridLifecycleWorld) {
 		u := w.f.ridSA(t, w.f.tenantID, "rid-grantee")
 		g := w.grant(t, w.bindingInput("service_account", u, w.pull, "registry.registries", w.object))
 		require.Equal(t, w.gd.Id, g.DelegationId)
@@ -24,7 +32,7 @@ func ridNativeDelegatedGrant(t *testing.T) {
 	})
 }
 func ridNativeDelegatedAxes(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+	ridBothModesWithSettledKeys(t, false, func(t *testing.T, w *ridLifecycleWorld) {
 		// Обе роли законно поставлены и покрывают оба целевых типа. Единственное
 		// изменение роли между отрицательным/положительным запросами — роль вне оси.
 		u := w.f.ridSA(t, w.f.tenantID, "rid-role-twin")
@@ -49,7 +57,7 @@ func ridNativeDelegatedAxes(t *testing.T) {
 	})
 }
 func ridNativeIssuerCannotDelegate(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+	ridBothModesWithSettledKeys(t, false, func(t *testing.T, w *ridLifecycleWorld) {
 		f := w.f
 		other := ""
 		if len(w.accounts) > 1 {
@@ -85,7 +93,7 @@ func ridNativeIssuerCannotDelegate(t *testing.T) {
 	})
 }
 func ridNativeAnonymousClass(t *testing.T) {
-	rid03BothModes(t, true, func(t *testing.T, w *ridLifecycleWorld) {
+	ridBothModesWithSettledKeys(t, true, func(t *testing.T, w *ridLifecycleWorld) {
 		// Та же допустимая ось SYSTEM_CLASS, цель, роль, область и вызывающий. Меняется только
 		// имя существующего класса. Издатель аутентифицирован в обоих запросах.
 		body := w.bindingInput("system_class", "authenticated", w.pull, "registry.registries", w.object)

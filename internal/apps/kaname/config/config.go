@@ -31,6 +31,7 @@ import (
 // Каждый раздел имеет метки `mapstructure` (viper по умолчанию использует mapstructure для
 // Unmarshal). Значения по умолчанию — в defaults.go.
 type Config struct {
+	AuthorityProtocol          AuthorityProtocolConfig           `mapstructure:"authority-protocol"`
 	ModuleSeedInstaller        ModuleSeedInstallerConfig         `mapstructure:"moduleSeedInstaller"`
 	RegistrationAccountWriters *RegistrationAccountWritersConfig `mapstructure:"registration-account-writers"`
 	Logger                     LoggerConfig                      `mapstructure:"logger"`

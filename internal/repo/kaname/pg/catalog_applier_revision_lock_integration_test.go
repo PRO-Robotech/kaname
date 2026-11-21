@@ -81,16 +81,15 @@ func revLockDoc(t *testing.T, rev int64, names ...string) *manifest.Manifest {
 }
 
 // TestCatalogApplierRevisionWriteKeepsTheLockOrderOfTheRoleWriter — гонка
-// kacho#2012 (применитель против писателя роли на двух типах в обратном
-// порядке) при ОБЪЯВЛЕННОЙ редакции: шаг 2р пишет пару, то есть держит строку
+// kacho#2012 (снятие aaa против записи роли по сохраняемым mmm/zzz) при ОБЪЯВЛЕННОЙ редакции: шаг 2р пишет пару, то есть держит строку
 // модуля всё время гонки. Взаимной блокировки нет, и пара записана.
 func TestCatalogApplierRevisionWriteKeepsTheLockOrderOfTheRoleWriter(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: требует Postgres")
 	}
 	ctx, pool := raceApplierAgainstRoleWriter(t, "revlock865",
-		revLockDoc(t, 1, crossEarlyName, crossLateName),
-		revLockDoc(t, 2, crossLateName))
+		revLockDoc(t, 1, crossEarlyName, crossMiddleName, crossLateName),
+		revLockDoc(t, 2, crossMiddleName, crossLateName))
 
 	// Без этого утверждения гонка выше выполнима мимо предмета: применитель,
 	// не записавший пары, не держал бы строки модуля вовсе.

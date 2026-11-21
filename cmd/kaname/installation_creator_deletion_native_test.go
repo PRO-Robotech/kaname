@@ -146,7 +146,7 @@ func rid05NewSameName(t *testing.T, w *ridLifecycleWorld) string {
 	return id
 }
 func ridNativeCreatorDelete(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+	ridBothModesWithSettledKeys(t, false, func(t *testing.T, w *ridLifecycleWorld) {
 		public := rid05PublicConsumer(t, w, "deleted")
 		rid05DeletedWorldObserved(t, w, public)
 		w.oldCredentialRefusedObserved(t, public)
@@ -154,7 +154,7 @@ func ridNativeCreatorDelete(t *testing.T) {
 	})
 }
 func ridNativeSameNameDoesNotRestore(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+	ridBothModesWithSettledKeys(t, false, func(t *testing.T, w *ridLifecycleWorld) {
 		public := rid05PublicConsumer(t, w, "same-name")
 		g, body := rid05DeletedWorldObserved(t, w, public)
 		w.oldCredentialRefusedObserved(t, public)
@@ -170,7 +170,7 @@ func ridNativeSameNameDoesNotRestore(t *testing.T) {
 	})
 }
 func ridNativeActiveDelegateDeleteGuard(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+	ridBothModesWithSettledKeys(t, false, func(t *testing.T, w *ridLifecycleWorld) {
 		public := rid05PublicConsumer(t, w, "delete-guard")
 		g, _ := rid04Retire(t, w)
 		public.prepare(t, w, g, nil)
@@ -198,7 +198,7 @@ func ridNativeActiveDelegateDeleteGuard(t *testing.T) {
 	})
 }
 func ridNativeCreatorExplicitReplacement(t *testing.T) {
-	rid03BothModes(t, false, func(t *testing.T, w *ridLifecycleWorld) {
+	ridBothModesWithSettledKeys(t, false, func(t *testing.T, w *ridLifecycleWorld) {
 		public := rid05PublicConsumer(t, w, "recovery")
 		g, body := rid05DeletedWorldObserved(t, w, public)
 		w.oldCredentialRefusedObserved(t, public)

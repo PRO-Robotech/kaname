@@ -14,9 +14,12 @@ package internal_iam
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -37,7 +40,13 @@ type sceneScopes struct {
 // unitScopes — сцена по умолчанию: проекты, под которыми регистрируют пробы на
 // подставных портах, каждый в своём аккаунте.
 func unitScopes() sceneScopes {
-	return sceneScopes{containers: map[string]domain.ContainerScope{
+	return sceneScopes{pointers: map[string][]string{
+		"vpc_network:net-1":       {"project:prj-1"},
+		"vpc_network:vpcn_new":    {"project:" + unitProject},
+		"vpc_network:enp_1":       {"project:" + unitProject},
+		"registry_registry:rep-1": {"project:prj-1"},
+		"registry_registry:reg1":  {"project:prj_a"},
+	}, containers: map[string]domain.ContainerScope{
 		"vpc_network:net-1":       {Registered: true, ProjectID: "prj-1", AccountID: "acc-1"},
 		"vpc_network:vpcn_new":    {Registered: true, ProjectID: unitProject, AccountID: unitAccount},
 		"vpc_network:enp_1":       {Registered: true, ProjectID: unitProject, AccountID: unitAccount},
@@ -45,6 +54,7 @@ func unitScopes() sceneScopes {
 		"registry_registry:reg1":  {Registered: true, ProjectID: "prj_a", AccountID: "acc_a"},
 	}, projects: map[string]string{
 		unitProject:            unitAccount,
+		"prj_a":                "acc_a",
 		"prj-1":                "acc-1",
 		"prj-2":                "acc-2",
 		"prj_1":                "acc_1",
@@ -87,6 +97,18 @@ func (s sceneScopes) PointerSubjectsTx(_ context.Context, _ service.Tx, modelTyp
 	return s.pointers[modelType+":"+id], nil
 }
 
+// BoundedPointerSubjectsTx явно моделирует новый admission port сцены.
+func (s sceneScopes) BoundedPointerSubjectsTx(ctx context.Context, tx service.Tx, typ, id string, names []string) ([]string, error) {
+	rows, err := s.PointerSubjectsTx(ctx, tx, typ, id, names)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) > hierarchy.MaxImmediateParents || len(rows) > hierarchy.MaxImmediateParents {
+		return nil, fmt.Errorf("%w: pointer page overflow", domain.ErrParentHierarchyInvalid)
+	}
+	return rows, nil
+}
+
 // BindingRefusesTx — привязок у сцены проб на подставных портах нет: их держит
 // база (kaname#983), и судят их пробы на живой базе.
 func (s sceneScopes) BindingRefusesTx(context.Context, service.Tx, string, string, string, []string) (bool, error) {
@@ -120,5 +142,13 @@ func (s sceneScopes) SavedRegistrationScopesTx(ctx context.Context, tx service.T
 	return []domain.ContainerScope{c}, nil
 }
 func (sceneScopes) SaveRegistrationScopesTx(context.Context, service.Tx, string, string, []domain.ContainerScope) error {
+	return nil
+}
+
+// Общая сцена сохраняет прежний маршрут; отдельный receipt probe проверяет данные.
+func (sceneScopes) SaveProducerReceiptTx(context.Context, service.Tx, domain.ProducerReceipt) error {
+	return nil
+}
+func (sceneScopes) InvalidateRegistrationReceiptsTx(context.Context, service.Tx, string, time.Time, string) error {
 	return nil
 }

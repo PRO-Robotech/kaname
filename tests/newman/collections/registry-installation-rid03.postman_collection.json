@@ -2086,6 +2086,139 @@
           ]
         },
         {
+          "name": "registry-installation-rid03-S1-GRANT-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "registry-installation-rid03-S1-GRANT-ACT :: actual-action-resource-Get",
           "request": {
             "method": "GET",
@@ -9824,6 +9957,139 @@
                   "  }else{pm.expect(op.metadata.grantDelegationId).to.eql(op.response.id);pm.expect(op.metadata.accountId).to.eql(e.request.accountId);}",
                   " });",
                   " pm.environment.set('rid03ActionResponse',JSON.stringify(op.response));pm.environment.set('rid03ActionResourceId',op.response.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "registry-installation-rid03-S1-ROLE-TWIN-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
                   "}"
                 ]
               }
@@ -17576,6 +17842,139 @@
           ]
         },
         {
+          "name": "registry-installation-rid03-S1-TARGET-TWIN-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "registry-installation-rid03-S1-TARGET-TWIN-ACT :: actual-action-resource-Get",
           "request": {
             "method": "GET",
@@ -25314,6 +25713,139 @@
                   "  }else{pm.expect(op.metadata.grantDelegationId).to.eql(op.response.id);pm.expect(op.metadata.accountId).to.eql(e.request.accountId);}",
                   " });",
                   " pm.environment.set('rid03ActionResponse',JSON.stringify(op.response));pm.environment.set('rid03ActionResourceId',op.response.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "registry-installation-rid03-S1-SUBJECT-TWIN-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
                   "}"
                 ]
               }
@@ -40811,6 +41343,139 @@
           ]
         },
         {
+          "name": "registry-installation-rid03-S1-ANONYMOUS-TWIN-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "registry-installation-rid03-S1-ANONYMOUS-TWIN-ACT :: actual-action-resource-Get",
           "request": {
             "method": "GET",
@@ -44838,6 +45503,139 @@
                   "  }else{pm.expect(op.metadata.grantDelegationId).to.eql(op.response.id);pm.expect(op.metadata.accountId).to.eql(e.request.accountId);}",
                   " });",
                   " pm.environment.set('rid03ActionResponse',JSON.stringify(op.response));pm.environment.set('rid03ActionResourceId',op.response.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "registry-installation-rid03-S2-GRANT-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
                   "}"
                 ]
               }
@@ -52590,6 +53388,139 @@
           ]
         },
         {
+          "name": "registry-installation-rid03-S2-ROLE-TWIN-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "registry-installation-rid03-S2-ROLE-TWIN-ACT :: actual-action-resource-Get",
           "request": {
             "method": "GET",
@@ -60335,6 +61266,139 @@
           ]
         },
         {
+          "name": "registry-installation-rid03-S2-TARGET-TWIN-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "registry-installation-rid03-S2-TARGET-TWIN-ACT :: actual-action-resource-Get",
           "request": {
             "method": "GET",
@@ -68073,6 +69137,139 @@
                   "  }else{pm.expect(op.metadata.grantDelegationId).to.eql(op.response.id);pm.expect(op.metadata.accountId).to.eql(e.request.accountId);}",
                   " });",
                   " pm.environment.set('rid03ActionResponse',JSON.stringify(op.response));pm.environment.set('rid03ActionResourceId',op.response.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "registry-installation-rid03-S2-SUBJECT-TWIN-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
                   "}"
                 ]
               }
@@ -83563,6 +84760,139 @@
                   "  }else{pm.expect(op.metadata.grantDelegationId).to.eql(op.response.id);pm.expect(op.metadata.accountId).to.eql(e.request.accountId);}",
                   " });",
                   " pm.environment.set('rid03ActionResponse',JSON.stringify(op.response));pm.environment.set('rid03ActionResourceId',op.response.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "registry-installation-rid03-S2-ANONYMOUS-TWIN-ACT :: await-action-materialization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings/{{rid03ActionResourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings",
+                "{{rid03ActionResourceId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtRIDOperator'",
+                  "const __t = pm.environment.get('jwtRIDOperator') || pm.variables.get('jwtRIDOperator') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtRIDOperator is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtRIDOperator is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// HARNESS-CONFIG GUARD — ownRestBaseUrl is injected by the newman runner (--env-var).",
+                  "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
+                  "const __cfgUrl = pm.environment.get('ownRestBaseUrl') || pm.variables.get('ownRestBaseUrl') || '';",
+                  "if (__cfgUrl) {",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/iam/v1/accessBindings/{{rid03ActionResourceId}}');",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: ownRestBaseUrl is set — RID03 same isolated standalone Kaname public HTTPS origin', () => {",
+                  "    pm.expect.fail('ownRestBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const opId=pm.environment.get('rid03ActionOperationId');",
+                  "if(opId!==pm.environment.get('rid03MaterializationOperationId')) {",
+                  " pm.environment.set('rid03MaterializationOperationId',opId);",
+                  " pm.environment.set('rid03MaterializationDeadline',String(Date.now()+8000));",
+                  " pm.environment.set('rid03MaterializationRetries','0');",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const deadline=Number(pm.environment.get('rid03MaterializationDeadline'));",
+                  "const status=pm.response.code;",
+                  "function retryMaterialization() {",
+                  " const retries=Number(pm.environment.get('rid03MaterializationRetries')||'0');",
+                  " pm.test('materialization retry remains within 15 attempts',()=>{",
+                  "  pm.expect(retries).to.be.below(15);",
+                  " });",
+                  " if(retries>=15 || Date.now()+400>=deadline) {",
+                  "  pm.test('materialization reached before deadline',()=>pm.expect.fail('materialization still pending'));",
+                  "  return;",
+                  " }",
+                  " pm.environment.set('rid03MaterializationRetries',String(retries+1));",
+                  " const until=Date.now()+400;",
+                  " while(Date.now()<until) { /* Интервал опроса материализации. */ }",
+                  " pm.execution.setNextRequest(pm.info.requestName);",
+                  "}",
+                  "pm.test('materialization read remains within 8 seconds',()=>pm.expect(Date.now()).to.be.below(deadline));",
+                  "pm.test('materialization read returns 200',()=>pm.expect(status).to.eql(200));",
+                  "if(status!==200) return;",
+                  "const e=JSON.parse(pm.environment.get('rid03Expected')),j=pm.response.json();",
+                  "const response=JSON.parse(pm.environment.get('rid03ActionResponse'));",
+                  "const expected={...response};delete expected['@type'];",
+                  "pm.test('own Operation/Get full equality active exact delegation',()=>{",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(Object.keys(j).sort()).to.eql(Object.keys(expected).sort());",
+                  "  Object.keys(expected).filter(k=>k!=='materializedAt').forEach(k=>pm.expect(j[k]).to.eql(expected[k]));",
+                  " }else pm.expect(j).to.eql(expected);",
+                  " pm.expect(j.status).to.eql('ACTIVE');pm.expect(j.id).to.eql(pm.environment.get('rid03ActionResourceId'));",
+                  " if(e.path==='/iam/v1/accessBindings'){",
+                  "  pm.expect(j.delegationId).to.eql(e.installationDelegationId);pm.expect(j.subjectType).to.eql(e.request.subjectType);pm.expect(j.subjectId).to.eql(e.request.subjectId);pm.expect(j.roleId).to.eql(e.request.roleId);",
+                  "  pm.expect(j.scopeType).to.eql(e.request.scopeType);pm.expect(j.scopeId).to.eql(e.request.scopeId);",
+                  " }else{pm.expect(j.accountId).to.eql(e.request.accountId);pm.expect(j.delegate).to.eql(e.request.delegate);pm.expect(j.delegatedBy).to.eql({type:'service_account',id:e.creatorId});}",
+                  "});",
+                  "if(j.materializedAt===null) {",
+                  " retryMaterialization();",
+                  " return;",
+                  "}",
+                  "if(e.path==='/iam/v1/accessBindings'){",
+                  " pm.test('single actual Get enrichment is nonempty bounded data; independent primary acceptance follows',()=>{",
+                  "  pm.expect(j.materializedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.least(Date.parse(j.createdAt));",
+                  "  pm.expect(Date.parse(j.materializedAt)).to.be.at.most(Date.now());",
+                  "  if(response.materializedAt)pm.expect(Date.parse(response.materializedAt)).to.be.at.most(Date.parse(j.materializedAt));",
+                  " });",
                   "}"
                 ]
               }

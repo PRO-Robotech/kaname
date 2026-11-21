@@ -31,8 +31,9 @@ type RemoveMemberInput struct {
 }
 
 type RemoveMemberUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	membershipWriter membershipWriterSelection
+	repo             Repo
+	opsRepo          operations.Repo
 }
 
 func NewRemoveMemberUseCase(r Repo, opsRepo operations.Repo) *RemoveMemberUseCase {
@@ -91,7 +92,7 @@ func (u *RemoveMemberUseCase) doRemove(ctx context.Context, in RemoveMemberInput
 		MemberType: in.MemberType,
 		MemberID:   in.MemberID,
 	}
-	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
+	if err := u.membershipWriter.run(ctx, u.repo, m,
 		func(ctx context.Context, w Writer) error {
 			if err := w.GroupsW().RemoveMember(ctx, in.GroupID, in.MemberType, in.MemberID); err != nil {
 				return err

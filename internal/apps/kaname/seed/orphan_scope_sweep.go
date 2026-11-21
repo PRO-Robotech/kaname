@@ -233,7 +233,7 @@ func (s *OrphanScopeSweeper) revokeScope(ctx context.Context, sc OrphanScope) (b
 		return 0, 0, false, fmt.Errorf("orphan-scope sweep: refusing to judge scope type %q — iam does not own its rows",
 			sc.ResourceType)
 	}
-	terr := shared.DoWithWriteTxVoid(ctx, s.repo, func(ctx context.Context, w kanamerepo.Writer) error {
+	terr := shared.DoWithInstallationWriteTxVoid(ctx, s.repo, kanamerepo.AuthorityBinding, func(ctx context.Context, w kanamerepo.Writer) error {
 		alive, aerr := orphanScopeStillAlive(ctx, w, sc)
 		if aerr != nil {
 			return aerr

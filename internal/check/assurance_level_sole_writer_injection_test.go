@@ -190,6 +190,11 @@ CREATE TABLE kaname.sign_in_methods (
 );
 ALTER TABLE kaname.other ADD CONSTRAINT other_state_ck CHECK (state IN ('1', '2'));
 ALTER TABLE kaname.third ADD CONSTRAINT third_kind_ck CHECK (kind IN ('1', '2', '3', '4'));
+CREATE FUNCTION kaname.route_guard(p_route text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+ IF p_route NOT IN ('1','2','3') THEN RETURN; END IF;
+ IF p_route IN ('1','2','3') THEN RETURN; END IF;
+END $$;
 `
 	// Накат подаётся ЗАБЕЛЁННЫМ тем же средством, что у гейта: комментарии
 	// снимает вызывающий, а не разбор.

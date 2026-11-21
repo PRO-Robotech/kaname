@@ -3,8 +3,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
@@ -173,6 +175,9 @@ func (f *installationNativeWorld) ridKey(t *testing.T, id, account, label string
 	raw, err := os.ReadFile(key.CredentialFile)
 	require.NoError(t, err)
 	f.secrets = append(f.secrets, string(raw))
+	if f.settleIssuedKeys {
+		f.awaitIssuedKeyResponseRedaction(t, key)
+	}
 	return key
 }
 func (f *installationNativeWorld) ridAdmin(t *testing.T, id string, grant bool) {
@@ -228,9 +233,13 @@ func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifec
 
 // Необязательная подготовка фикстуры использует ту же полную нативную установку и публичные F7-F10.
 func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, setup func(*testing.T, *installationNativeWorld) []string) *ridLifecycleWorld {
+	return newRIDLifecycleWorldConfigured(t, mode, systemClass, setup, nativeWorldOptions{})
+}
+
+func newRIDLifecycleWorldConfigured(t *testing.T, mode string, systemClass bool, setup func(*testing.T, *installationNativeWorld) []string, options nativeWorldOptions) *ridLifecycleWorld {
 	t.Helper()
 	manifests := ridLifecycleDelivery(t, systemClass)
-	f := newInstallationNativeWorldProfile(t, 7200, "", true)
+	f := newInstallationNativeWorldConfigured(t, 7200, "", true, true, options)
 
 	// Конструктор уже сравнил полный штатный каталог до/после базы,
 	// записал настоящие квитанции отсутствия поставки и проверил нулевую поставку I/W/GD.
@@ -627,7 +636,52 @@ func (w *ridLifecycleWorld) catalogOnly(t *testing.T) {
 	results, err := p.Results()
 	require.NoError(t, err)
 	require.Empty(t, results, "no delegation stage was requested")
+	// Слушатели поднимаются до фонового восстановления проекций. Снимок
+	// фазы чтения берём после завершения записи проекций этого процесса.
+	ready, cancel := context.WithTimeout(w.f.given.ctx, 90*time.Second)
+	defer cancel()
+	require.NoError(t, p.AwaitReady(ready, func(context.Context) error {
+		return ridCatalogRoleProjectionsReady(p.StdoutPath)
+	}), "восстановленный процесс не завершил пересчёт проекций ролей")
 	w.f.renewOperator(t, w.f.given.ctx)
+}
+
+func ridCatalogRoleProjectionsReady(path string) error {
+	stream, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	var verbsReady, refsReady bool
+	lines := bufio.NewScanner(stream)
+	lines.Buffer(make([]byte, 4096), 1024*1024)
+	for lines.Scan() {
+		var record struct {
+			Message   string `json:"msg"`
+			Completed *bool  `json:"completed"`
+			Examined  *int   `json:"roles_examined"`
+			Reseeded  *int   `json:"roles_reseeded"`
+			Failed    *int   `json:"roles_failed"`
+		}
+		if json.Unmarshal(lines.Bytes(), &record) != nil || record.Completed == nil || !*record.Completed ||
+			record.Examined == nil || record.Reseeded == nil || record.Failed == nil ||
+			*record.Failed != 0 || *record.Examined != *record.Reseeded {
+			continue
+		}
+		switch record.Message {
+		case "перепись пересчёта проекции глаголов роли":
+			verbsReady = true
+		case "перепись пересчёта проекции сегментов правила":
+			refsReady = true
+		}
+		if verbsReady && refsReady {
+			return nil
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("стартовый пересчёт проекций ролей ещё не завершился")
 }
 
 // Регистрируется конструктором явного включения до первого Start и подготовки.

@@ -22,31 +22,24 @@ package access_binding_test
 // снят (снятие действительно сработало), а снятие второй, последней, выдачи
 // снимает и общий факт (наблюдение способно увидеть снятие).
 //
-// DB-919-A — гонка: вторая выдача того же кортежа ФИКСИРУЕТСЯ между проверкой
-// «ещё держит» у снятия первой и вставкой его строки снятия. Проверка второй
-// выдачи не видит (она не зафиксирована), и строка снятия несёт общий кортеж.
-// Утверждается исход после обеих транзакций: вторая выдача действует, её строка
-// реестра есть, И ПРЯМОЙ ФАКТ ЕСТЬ — иначе действующая выдача не даёт доступа.
-// Порядков начала транзакций два, оба ставятся:
-//   - revoke-first: снятие открыло транзакцию раньше выдачи;
-//   - grant-first:  выдача открыла транзакцию раньше снятия и держит коммит,
-//     пока снятие не пройдёт проверку.
+// DB-919-A — сериализация настоящих Writer: транзакция второй выдачи
+// фиксируется раньше строк снятия первой. Проверяются оба порядка BEGIN:
+//   - revoke-first: снятие уже открыло TX, но стоит перед compatibility entry;
+//   - grant-first: выдача уже держит compatibility fence перед Commit.
+// В обоих случаях снятие действительно ждёт этот fence, пока выдача держит его.
+// После её коммита снятие доходит до EmitRelationDelete и называет общий кортеж.
+// Проверяются действующая выдача B, её реестр и прямой факт до и после снятия.
 //
 // # Как поставлена остановка
 //
-// Обе стороны — НАСТОЯЩИЕ use-case (Create, Revoke, Delete) на настоящем
-// pg-репозитории. Остановку даёт обёртка порта Repository, которая не меняет ни
-// одного ответа: у снятия она останавливает транзакцию ПЕРЕД вставкой строк снятия
-// (EmitRelationDelete) — снятие к этому моменту решило, что снимает, и всё, что
-// оно спросило о соседях, уже спрошено; у выдачи — перед Commit. Набор строк
-// снятия записывается: снятие, не назвавшее общий кортеж, — отказ ПРЕДПОСЫЛКИ
-// (гонке не о чем), а не исход.
-//
-// Прежде остановка стояла после проверки приложения «ещё держит»
-// (SelectTuplesClaimedByOtherActiveBindings). Проверка снята: вопрос о держателях
-// задаёт свёртка строки снятия под замком строки факта (миграция
-// 20261019180000). Точка «решено, что снимать, строки снятия ещё нет» от этого не
-// сдвинулась — она стоит там же относительно гонки на обеих ревизиях.
+// Обе стороны — настоящие use-case (Create, Revoke, Delete) и Repo.Writer.
+// QueryTracer останавливает только внешний entry SELECT до отправки серверу;
+// PID, xact_start и ожидание advisory (1262569292,0) читаются на другом соединении.
+// Обёртка порта ставит прежние остановки перед EmitRelationDelete и Commit,
+// не меняя ответы. Отсутствие общего кортежа в строках снятия — отказ предпосылки.
+// Writer держит общий EXCLUSIVE fence до конца TX: две поздние остановки до
+// первого коммита недостижимы. Старое пересечение «между проверкой и вставкой»
+// здесь больше не заявляется; проверяется текущая сериализация и её бизнес-исход.
 //
 // # Остальные писатели того же кортежа (kaname#919)
 //
@@ -54,9 +47,9 @@ package access_binding_test
 // роли (RoleTupleReconciler), снос области, истечение срока, отзыв
 // администратора кластера, полный проход — и все они пишут её одной функцией,
 // а свёртка у неё одна. Пробы ниже:
-//   - DB-919-B — два снятия двух держателей общего кортежа, оба решили, что
-//     снимать, до коммита соседа: после обоих факта нет (ни один держатель не
-//     остался — факт без держателя был бы доступом без выдачи);
+//   - DB-919-B — TX обоих снятий начались до первого коммита; второй Writer
+//     ждёт fence первого. Общий факт сохраняется до второго снятия, после обоих
+//     факта нет: ни один держатель не остался, факт был бы доступом без выдачи;
 //   - SD-919-R — смена роли выводит общий кортеж из реестра выдачи A: факт,
 //     который держит B, остаётся; без B тот же шаг его снимает (близнец: свой
 //     реестр писатель убирает ДО строки снятия);
@@ -159,9 +152,13 @@ type pausingRepo struct {
 	accessbindingapp.Repo
 	beforeDeleteRows *pausePoint // перед вставкой строк снятия
 	beforeCommit     *pausePoint // перед фиксацией пишущей транзакции
+	entry            *sharedWriterEntry
 }
 
 func (r pausingRepo) Writer(ctx context.Context) (kanamerepo.Writer, error) {
+	if r.entry != nil {
+		ctx = context.WithValue(ctx, sharedWriterEntryKey{}, r.entry)
+	}
 	w, err := r.Repo.Writer(ctx)
 	if err != nil {
 		return nil, err
@@ -467,9 +464,9 @@ func TestAccessBinding_SD919N1_TeardownKeepsFactHeldBySecondGrant(t *testing.T) 
 	}
 }
 
-// ── DB-919-A: вторая выдача фиксируется между «ещё держит» и строкой снятия ──
+// ── DB-919-A: BEGIN в обоих порядках, commit выдачи до снятия ──────────────
 
-func TestAccessBinding_DB919A_SecondGrantCommittedBetweenClaimCheckAndDelete(t *testing.T) {
+func TestAccessBinding_DB919A_WriterSerializationKeepsSecondGrant(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -481,30 +478,36 @@ func TestAccessBinding_DB919A_SecondGrantCommittedBetweenClaimCheckAndDelete(t *
 			mustDone(t, startGrant(t, ctx, fx, fx.repo, fx.roleA), "выдача A")
 			idA := activeBindingOf(t, ctx, fx, fx.roleA)
 
-			checkPause := newPausePoint()
-			t.Cleanup(checkPause.let)
-			revokeRepo := pausingRepo{Repo: fx.repo, beforeDeleteRows: checkPause}
-
+			run := newSharedWriterRace(t, ctx, &fx)
+			checkPause, commitPause := run.pause(), run.pause()
+			entryA, entryB := run.entry(), run.entry()
+			revokeRepo := pausingRepo{Repo: fx.repo, beforeDeleteRows: checkPause, entry: entryA}
+			grantRepo := pausingRepo{Repo: fx.repo, beforeCommit: commitPause, entry: entryB}
 			var revokeDone, grantDone <-chan error
+			var startA, startB time.Time
 			switch order {
 			case "revoke-first":
-				// Снятие открывает транзакцию и решает, что снимать; выдача B начинается
-				// и фиксируется целиком, пока снятие стоит перед строками снятия.
-				revokeDone = startRevoke(t, ctx, fx, revokeRepo, idA)
-				waitReached(t, checkPause, "отзыв A перед строками снятия", revokeDone)
-				mustDone(t, startGrant(t, ctx, fx, fx.repo, fx.roleB), "выдача B в паузе отзыва")
+				revokeDone = run.track(startRevoke(t, ctx, fx, revokeRepo, idA))
+				startA = sharedEntryStarted(t, ctx, fx.pool, entryA, revokeDone)
+				grantDone = run.track(startGrant(t, ctx, fx, grantRepo, fx.roleB))
+				startB = sharedEntryStarted(t, ctx, fx.pool, entryB, grantDone)
+				require.True(t, startA.Before(startB), "TX снятия началась раньше TX выдачи")
 			case "grant-first":
-				// Выдача B открывает транзакцию первой и держит коммит; снятие решает,
-				// что снимать, не видя её; затем выдача фиксируется.
-				commitPause := newPausePoint()
-				t.Cleanup(commitPause.let)
-				grantDone = startGrant(t, ctx, fx, pausingRepo{Repo: fx.repo, beforeCommit: commitPause}, fx.roleB)
-				waitReached(t, commitPause, "выдача B перед коммитом", grantDone)
-				revokeDone = startRevoke(t, ctx, fx, revokeRepo, idA)
-				waitReached(t, checkPause, "отзыв A перед строками снятия", revokeDone)
-				commitPause.let()
-				mustDone(t, grantDone, "выдача B после решения отзыва")
+				grantDone = run.track(startGrant(t, ctx, fx, grantRepo, fx.roleB))
+				startB = sharedEntryStarted(t, ctx, fx.pool, entryB, grantDone)
 			}
+			entryB.let()
+			waitReached(t, commitPause, "выдача B перед коммитом", grantDone)
+			if order == "grant-first" {
+				revokeDone = run.track(startRevoke(t, ctx, fx, revokeRepo, idA))
+				startA = sharedEntryStarted(t, ctx, fx.pool, entryA, revokeDone)
+				require.True(t, startB.Before(startA), "TX выдачи началась раньше TX снятия")
+			}
+			entryA.let()
+			sharedWaitWriterFence(t, ctx, fx.pool, entryA, entryB.pid.Load(), startA, revokeDone)
+			commitPause.let()
+			mustDone(t, grantDone, "выдача B зафиксирована до строк снятия A")
+			waitReached(t, checkPause, "отзыв A после коммита B перед строками снятия", revokeDone)
 
 			idB := activeBindingOf(t, ctx, fx, fx.roleB)
 			ledgerB := ledgerOf(t, ctx, fx.pool, idB)
@@ -535,9 +538,9 @@ func TestAccessBinding_DB919A_SecondGrantCommittedBetweenClaimCheckAndDelete(t *
 	}
 }
 
-// ── DB-919-B: оба держателя сняты, каждый решил до коммита соседа ────────────
+// ── DB-919-B: две начатые TX, оба порядка допуска и commit ────────────────
 
-func TestAccessBinding_DB919B_BothHoldersTornDownBeforeEitherCommits(t *testing.T) {
+func TestAccessBinding_DB919B_WriterSerializationRemovesLastHolder(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -568,26 +571,42 @@ func TestAccessBinding_DB919B_BothHoldersTornDownBeforeEitherCommits(t *testing.
 				require.True(t, factPresent(t, ctx, fx.pool, k), "ПРЕДПОСЫЛКА: прямого факта %v нет до снятия", k)
 			}
 
-			pA, pB := newPausePoint(), newPausePoint()
-			t.Cleanup(pA.let)
-			t.Cleanup(pB.let)
-			doneA := startRevoke(t, ctx, fx, pausingRepo{Repo: fx.repo, beforeDeleteRows: pA}, idA)
-			waitReached(t, pA, "снятие A перед строками снятия", doneA)
-			doneB := tc.startB(t, ctx, fx, pausingRepo{Repo: fx.repo, beforeDeleteRows: pB}, idB)
-			waitReached(t, pB, "снятие B перед строками снятия", doneB)
-			t.Logf("перепись: общих фактов %d, строк снятия A %d, B %d", len(shared), len(pA.deleteSet()), len(pB.deleteSet()))
-
-			if tc.aFirst {
-				pA.let()
-				mustDone(t, doneA, "снятие A")
-				pB.let()
-				mustDone(t, doneB, "снятие B")
-			} else {
-				pB.let()
-				mustDone(t, doneB, "снятие B")
-				pA.let()
-				mustDone(t, doneA, "снятие A")
+			run := newSharedWriterRace(t, ctx, &fx)
+			pA, pB := run.pause(), run.pause()
+			entryA, entryB := run.entry(), run.entry()
+			doneA := run.track(startRevoke(t, ctx, fx, pausingRepo{Repo: fx.repo, beforeDeleteRows: pA, entry: entryA}, idA))
+			startA := sharedEntryStarted(t, ctx, fx.pool, entryA, doneA)
+			doneB := run.track(tc.startB(t, ctx, fx, pausingRepo{Repo: fx.repo, beforeDeleteRows: pB, entry: entryB}, idB))
+			startB := sharedEntryStarted(t, ctx, fx.pool, entryB, doneB)
+			firstEntry, secondEntry := entryA, entryB
+			firstPause, secondPause := pA, pB
+			firstDone, secondDone := doneA, doneB
+			secondStart, remainingID := startB, idB
+			if !tc.aFirst {
+				firstEntry, secondEntry = entryB, entryA
+				firstPause, secondPause = pB, pA
+				firstDone, secondDone = doneB, doneA
+				secondStart, remainingID = startA, idA
 			}
+			firstEntry.let()
+			waitReached(t, firstPause, "первое снятие перед строками", firstDone)
+			secondEntry.let()
+			sharedWaitWriterFence(t, ctx, fx.pool, secondEntry, firstEntry.pid.Load(), secondStart, secondDone)
+			firstPause.let()
+			mustDone(t, firstDone, "первое снятие зафиксировано")
+			waitReached(t, secondPause, "второе снятие после первого commit", secondDone)
+			assert.Equal(t, string(domain.AccessBindingStatusActive), bindingStatusOf(t, ctx, fx.pool, remainingID), "второй держатель ещё действует в committed состоянии")
+			remainingLedger := ledgerOf(t, ctx, fx.pool, remainingID)
+			for _, k := range shared {
+				_, held := remainingLedger[k]
+				require.True(t, held, "после первого commit общий кортеж удерживается вторым реестром")
+				require.True(t, factPresent(t, ctx, fx.pool, k), "после первого commit общий факт обязан остаться")
+				require.True(t, containsTuple(firstPause.deleteSet(), k), "первое снятие назвало общий кортеж")
+				require.True(t, containsTuple(secondPause.deleteSet(), k), "второе снятие назвало общий кортеж")
+			}
+			t.Logf("перепись: общих фактов %d, строк снятия A %d, B %d", len(shared), len(pA.deleteSet()), len(pB.deleteSet()))
+			secondPause.let()
+			mustDone(t, secondDone, "второе снятие зафиксировано")
 
 			assert.NotEqual(t, string(domain.AccessBindingStatusActive), bindingStatusOf(t, ctx, fx.pool, idA), "выдача A снята")
 			for _, k := range ownA {
