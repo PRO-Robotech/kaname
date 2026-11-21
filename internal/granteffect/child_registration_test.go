@@ -98,6 +98,17 @@ func TestChildRegistrationBundleBindsLivePathAndModel(t *testing.T) {
 	require.False(t, ok, "снятая декларация не открывает регистрацию")
 	_, ok = retired.ChildRegistrationParentDotted("example_container", target.ParentAction)
 	require.False(t, ok)
+
+	// То же именованное действие create может принимать служебную учётку
+	// для прежнего сценария и пользователя для регистрации потомка.
+	createRows := childRegistrationBundleRows()
+	createRows.Live.Resources[1].ChildRegistration.Verb = "create"
+	createRows.Live.Verbs[2].Verb = "create"
+	createModel := strings.Replace(source, "define child_registrar: [user]",
+		"define child_registrar: [user, service_account]", 1)
+	require.NotEqual(t, source, createModel)
+	_, err = New(createModel, createRows)
+	require.NoError(t, err)
 }
 
 func TestChildRegistrationBundleRefusesUnconfirmedPolicy(t *testing.T) {
@@ -113,6 +124,13 @@ func TestChildRegistrationBundleRefusesUnconfirmedPolicy(t *testing.T) {
 	require.NoError(t, err)
 	_, err = New(saOnly, childRegistrationBundleRows())
 	require.ErrorContains(t, err, "модель не подтверждает право пользователя")
+	alias := strings.Replace(source, "define child_registrar: [user]",
+		"define child_reader: [user]\n    define child_registrar: [user] or child_reader", 1)
+	require.NotEqual(t, source, alias)
+	_, err = authzmodel.New(alias)
+	require.NoError(t, err)
+	_, err = New(alias, childRegistrationBundleRows())
+	require.ErrorContains(t, err, "право регистрации должно выводиться только из объявленного отношения на родителе")
 
 	for name, alter := range map[string]func(*catalog.Halves){
 		"absent named action": func(rows *catalog.Halves) {
