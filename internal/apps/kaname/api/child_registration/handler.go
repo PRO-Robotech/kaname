@@ -16,6 +16,7 @@ import (
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -42,7 +43,7 @@ func (h *Handler) Register(ctx context.Context, req *iamv1.RegisterChildRequest)
 	if h == nil {
 		return nil, authzguard.AuthzBackendUnavailable()
 	}
-	version, err := h.register.Register(ctx, internaliam.UserChildRegistrationInput{
+	version, err := h.register.Register(ctx, kaname.UserChildRegistrationInput{
 		ResourceType: req.GetResourceType(),
 		ResourceID:   req.GetResourceId(),
 	})

@@ -15,12 +15,13 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
 type userChildRegistrationTxStub struct {
 	steps    []string
-	input    UserChildRegistrationInput
-	intent   UserChildRegistrationInput
+	input    kaname.UserChildRegistrationInput
+	intent   kaname.UserChildRegistrationInput
 	caller   operations.Principal
 	policy   domain.UserChildPathPolicy
 	target   domain.UserChildRegistrationTarget
@@ -33,8 +34,8 @@ type userChildRegistrationTxStub struct {
 }
 
 func (s *userChildRegistrationTxStub) RunUserChildRegistration(
-	ctx context.Context, input UserChildRegistrationInput, caller operations.Principal,
-	run func(context.Context, UserChildRegistrationTx) (time.Time, error),
+	ctx context.Context, input kaname.UserChildRegistrationInput, caller operations.Principal,
+	run func(context.Context, kaname.UserChildRegistrationTx) (time.Time, error),
 ) (time.Time, error) {
 	s.intent, s.caller = input, caller
 	version, err := run(ctx, s)
@@ -45,7 +46,7 @@ func (s *userChildRegistrationTxStub) RunUserChildRegistration(
 }
 
 func (s *userChildRegistrationTxStub) ResolveUserChildRegistration(
-	_ context.Context, input UserChildRegistrationInput,
+	_ context.Context, input kaname.UserChildRegistrationInput,
 ) (domain.UserChildRegistrationTarget, error) {
 	s.steps = append(s.steps, "resolve")
 	s.input = input
@@ -74,7 +75,7 @@ func (s *userChildRegistrationTxStub) ApplyUserChildRegistration(
 func TestUserChildRegistrationAuthorizesServerParentBeforeApplying(t *testing.T) {
 	p := operations.Principal{Type: "user", ID: "usr-actor"}
 	ctx := operations.WithPrincipal(t.Context(), p)
-	input := UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "container/namespace/child"}
+	input := kaname.UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "container/namespace/child"}
 	fixture := &userChildRegistrationTxStub{
 		policy:  domain.UserChildPathPolicy{ChildType: "registry_repository", ParentType: "registry_registry", ParentAction: "v_create", ParentSegments: 1},
 		version: time.Unix(100, 0),
@@ -95,7 +96,7 @@ func TestUserChildRegistrationAuthorizesServerParentBeforeApplying(t *testing.T)
 
 func TestUserChildRegistrationUsesOnePublicRefusal(t *testing.T) {
 	ctx := operations.WithPrincipal(t.Context(), operations.Principal{Type: "user", ID: "usr-actor"})
-	input := UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "parent/child"}
+	input := kaname.UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "parent/child"}
 	fixture := &userChildRegistrationTxStub{
 		policy:   domain.UserChildPathPolicy{ChildType: "registry_repository", ParentType: "registry_registry", ParentAction: "v_create", ParentSegments: 1},
 		applyErr: domain.ErrUserChildRegistrationRefused,
@@ -124,7 +125,7 @@ func TestUserChildRegistrationUsesOnePublicRefusal(t *testing.T) {
 
 func TestUserChildRegistrationMissingVersionAbortsBeforeCommit(t *testing.T) {
 	ctx := operations.WithPrincipal(t.Context(), operations.Principal{Type: "user", ID: "usr-actor"})
-	input := UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "parent/child"}
+	input := kaname.UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "parent/child"}
 	fixture := &userChildRegistrationTxStub{
 		policy:  domain.UserChildPathPolicy{ChildType: "registry_repository", ParentType: "registry_registry", ParentAction: "v_create", ParentSegments: 1},
 		allowed: true,
