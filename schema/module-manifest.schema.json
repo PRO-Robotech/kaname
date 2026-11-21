@@ -264,7 +264,7 @@
             "required": ["verb", "parentSegments", "maxChildren", "maxCreates", "windowSeconds"],
             "description": "Явно включает пользовательскую регистрацию потомков этого типа через именованное контейнерное действие с указателем parent. Модель должна прямо допускать пользователя на отношении действия.",
             "properties": {
-              "verb": {"type": "string", "minLength": 1, "description": "Имя уже объявленного контейнерного действия."},
+              "verb": {"type": "string", "pattern": "^[a-z][a-zA-Z0-9]*$", "description": "Имя уже объявленного контейнерного действия."},
               "parentSegments": {"type": "integer", "minimum": 1, "maximum": 254, "description": "Число начальных сегментов идентификатора, составляющих ключ родителя. Оба полных ключа должны укладываться в предел формата."},
               "maxChildren": {"type": "integer", "minimum": 1, "maximum": 2147483647, "description": "Предельное число живых потомков этого типа у одного родителя."},
               "maxCreates": {"type": "integer", "minimum": 1, "maximum": 2147483647, "description": "Предельное число новых пользовательских регистраций за окно."},

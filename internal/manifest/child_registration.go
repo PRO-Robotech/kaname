@@ -5,6 +5,7 @@ package manifest
 
 import (
 	"errors"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 
@@ -15,6 +16,8 @@ const (
 	childRegistrationKey         = "childRegistration"
 	childRegistrationSubjectKind = "user"
 )
+
+var childRegistrationVerbName = regexp.MustCompile(`^[a-z][a-zA-Z0-9]*$`)
 
 // ErrChildRegistrationDeclaration обозначает неполное или неверно связанное
 // объявление пользовательской регистрации потомка.
@@ -67,7 +70,7 @@ func validateChildRegistration(m *Manifest, doc *yaml.Node) []error {
 		}
 		path, ok := resource.UserChildPathPolicy()
 		verb := mapValue(node, "verb")
-		if !ok || verb == nil || verb.ShortTag() != "!!str" {
+		if !ok || verb == nil || verb.ShortTag() != "!!str" || !childRegistrationVerbName.MatchString(resource.ChildRegistration.Verb) {
 			faults = append(faults, linkFault{kind: ErrChildRegistrationDeclaration,
 				coord:  locate(doc, "resources", i, childRegistrationKey, "verb"),
 				detail: "нужно именованное контейнерное действие на указателе parent"})

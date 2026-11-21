@@ -260,7 +260,7 @@ const producerSourcesTail = ` AND (r.kind,r.module,r.object_type,r.object_id,r.r
  ORDER BY r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id LIMIT $5
 ) SELECT actor.present,source.* FROM actor LEFT JOIN LATERAL (SELECT r.kind,r.module,r.catalog_type,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id,r.condition_name,r.condition_parameters,r.scopes,r.source_version,r.versionless,
  coalesce(sc.data,'[]'::jsonb),
- jsonb_build_object('Module',c.module,'Resource',c.resource,'ObjectType',c.object_type,'ParentTypes',c.parent_types,'ParentNames',c.parent_names,'Writes',c.writes,'PublicReadToChildren',c.public_read_to_children,'PermanentProject',c.permanent_project),
+ jsonb_build_object('Module',c.module,'Resource',c.resource,'ObjectType',c.object_type,'ParentTypes',c.parent_types,'ParentNames',c.parent_names,'Writes',c.writes,'PublicReadToChildren',c.public_read_to_children,'PermanentProject',c.permanent_project,'ChildRegistration',c.child_registration),
  coalesce(cv.data,'[]'::jsonb),
  CASE WHEN r.invalidation<>'' OR r.receipt_version<>1 THEN 'producer_receipt'
  WHEN c.dotted IS NULL OR NOT c.live OR NOT cm.live THEN 'producer_catalog'
