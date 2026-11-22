@@ -59,7 +59,7 @@ func (s *nativeAdministrativeSources) producerFact(ctx context.Context, fact rel
 		return false, false, err
 	}
 	var known bool
-	err := s.w.tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.producer_source_receipt WHERE object_type=$1 AND object_id=$2 AND relation=$3 AND subject_type||':'||subject_id=$4 AND kind IN ('registration_owner','publication'))`, fact.ObjectType, fact.ObjectID, fact.Relation, fact.Subject).Scan(&known)
+	err := s.transaction().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.producer_source_receipt WHERE object_type=$1 AND object_id=$2 AND relation=$3 AND subject_type||':'||subject_id=$4 AND kind IN ('registration_owner','publication'))`, fact.ObjectType, fact.ObjectID, fact.Relation, fact.Subject).Scan(&known)
 	if err != nil || !known {
 		return false, known, err
 	}
