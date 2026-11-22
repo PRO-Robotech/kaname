@@ -9,12 +9,16 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/operations"
+	childregistration "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/child_registration"
+	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Полный публичный runner работает через ordinary LOGIN из production grant
@@ -101,14 +105,17 @@ func TestUserChildRuntimeRunnerFullCommitReplayAndUniformRefusal(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, version.Equal(replay))
 	require.JSONEq(t, string(after), string(snapshot()), "replay сохраняет точный committed набор эффектов")
+	handler := childregistration.NewHandler(internaliam.NewUserChildRegistration(runner))
 	for _, refused := range []kaname.UserChildRegistrationInput{
 		{ResourceType: "childstage.child", ResourceID: "unregistered-container/candidate"},
 		{ResourceType: "childstage.container", ResourceID: "container-one/candidate"},
 	} {
-		got, callErr := runner.RunUserChildRegistration(ctx, refused, principal)
-		require.ErrorIs(t, callErr, domain.ErrUserChildRegistrationRefused)
-		require.Equal(t, domain.ErrUserChildRegistrationRefused.Error(), callErr.Error(), "родитель и правило дают единый предметный отказ")
-		require.True(t, got.IsZero())
+		got, callErr := handler.Register(ctx, &iamv1.RegisterChildRequest{ResourceType: refused.ResourceType, ResourceId: refused.ResourceID})
+		require.Nil(t, got)
+		answer := status.Convert(callErr)
+		require.Equal(t, codes.PermissionDenied, answer.Code())
+		require.Equal(t, "permission denied", answer.Message())
+		require.Empty(t, answer.Details())
 		require.JSONEq(t, string(after), string(snapshot()), "отказ не добавляет audit/reconcile/FGA/receipt effects")
 	}
 	authorityWaitReleased(t, r.runtime)
