@@ -47,17 +47,17 @@ func (r *ResourceDecisionRunner) captureUserChildAuthorization(ctx context.Conte
 	}
 	policy, ok := r.bundle.ChildRegistration(input.ResourceType)
 	if !ok {
-		return nil, domain.ErrUserChildRegistrationRefused
+		return nil, childPolicyUnavailable
 	}
 	target, err := policy.Path.Resolve(input.ResourceID)
 	if err != nil {
-		return nil, err
+		return nil, childInvalidCoordinates
 	}
 	parentType, parentID, _ := strings.Cut(target.ParentObject, ":")
 	questions := newNativePolicyQuestions()
 	actor := domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(verified.ID)}
 	if err := questions.add(actor, target.ParentAction, parentType, parentID); err != nil {
-		return nil, domain.ErrUserChildRegistrationRefused
+		return nil, childInvalidCoordinates
 	}
 
 	if err := chargeNativePolicyBudget(budget, 0, 1); err != nil {
@@ -87,7 +87,7 @@ func (r *ResourceDecisionRunner) captureUserChildAuthorization(ctx context.Conte
 		return nil, err
 	}
 	if !allowed {
-		return nil, domain.ErrUserChildRegistrationRefused
+		return nil, childPermissionDenied
 	}
 
 	boundary, err := discoverNativeReadBoundary(ctx, tx, r.bundle, questions, &nativeReadBudget{shared: budget})

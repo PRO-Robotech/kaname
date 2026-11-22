@@ -57,7 +57,7 @@ func TestUserChildRuntimeRunnerFullCommitReplayAndUniformRefusal(t *testing.T) {
    'facts',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY object_type,object_id,relation,subject),'[]') FROM kaname.relation_fact x),
    'receipts',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY to_jsonb(x)::text),'[]') FROM kaname.authority_child_creation x),
    'parent_state',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY to_jsonb(x)::text),'[]') FROM kaname.authority_child_parent_state x),
-   'audits',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY id),'[]') FROM kaname.audit_outbox x),
+   'audits',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY id),'[]') FROM kaname.audit_outbox x WHERE event_type<>'iam.child_registration.refused'),
    'reconcile',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY id),'[]') FROM kaname.resource_reconcile_outbox x),
    'outbox',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY id),'[]') FROM kaname.fga_outbox x)
   )`).Scan(&raw))
@@ -106,17 +106,29 @@ func TestUserChildRuntimeRunnerFullCommitReplayAndUniformRefusal(t *testing.T) {
 	require.True(t, version.Equal(replay))
 	require.JSONEq(t, string(after), string(snapshot()), "replay сохраняет точный committed набор эффектов")
 	handler := childregistration.NewHandler(internaliam.NewUserChildRegistration(runner))
-	for _, refused := range []kaname.UserChildRegistrationInput{
-		{ResourceType: "childstage.child", ResourceID: "unregistered-container/candidate"},
-		{ResourceType: "childstage.container", ResourceID: "container-one/candidate"},
+	for i, refused := range []struct {
+		input  kaname.UserChildRegistrationInput
+		reason string
+	}{
+		{kaname.UserChildRegistrationInput{ResourceType: "childstage.child", ResourceID: "unregistered-container/candidate"}, "permission_denied"},
+		{kaname.UserChildRegistrationInput{ResourceType: "childstage.container", ResourceID: "container-one/candidate"}, "policy_unavailable"},
+		{kaname.UserChildRegistrationInput{ResourceType: "childstage.child", ResourceID: "container-one/INVALID"}, "invalid_coordinates"},
 	} {
-		got, callErr := handler.Register(ctx, &iamv1.RegisterChildRequest{ResourceType: refused.ResourceType, ResourceId: refused.ResourceID})
+		got, callErr := handler.Register(ctx, &iamv1.RegisterChildRequest{ResourceType: refused.input.ResourceType, ResourceId: refused.input.ResourceID})
 		require.Nil(t, got)
 		answer := status.Convert(callErr)
 		require.Equal(t, codes.PermissionDenied, answer.Code())
 		require.Equal(t, "permission denied", answer.Message())
 		require.Empty(t, answer.Details())
-		require.JSONEq(t, string(after), string(snapshot()), "отказ не добавляет audit/reconcile/FGA/receipt effects")
+		require.JSONEq(t, string(after), string(snapshot()), "отказ меняет только отдельный reason audit")
+		var refusalCount, exactCount int
+		expected, err := json.Marshal(map[string]string{"actor": "user:" + principal.ID, "outcome": "permission_denied", "reason": refused.reason})
+		require.NoError(t, err)
+		require.NoError(t, r.admin.QueryRow(ctx, `SELECT count(*),count(*) FILTER (
+ WHERE tenant_account_id IS NULL AND event_payload=$1::jsonb AND status='pending' AND attempts=0)
+ FROM kaname.audit_outbox WHERE event_type='iam.child_registration.refused'`, expected).Scan(&refusalCount, &exactCount))
+		require.Equal(t, i+1, refusalCount, "один отказ создаёт ровно одну durable строку после rollback")
+		require.Equal(t, 1, exactCount, "payload не содержит координат запроса или дополнительных причин")
 	}
 	authorityWaitReleased(t, r.runtime)
 }

@@ -18,33 +18,14 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
 	"github.com/stretchr/testify/require"
 )
 
 // Снятие module-owned родителя идёт прежним public Unregister под FULL;
 // ребёнок и его квитанция получены настоящим runtime child runner.
 func TestUserChildRuntimeParentUnregisterCascadePrewaitAndReceiptRetention(t *testing.T) {
-	r, owner, scene, principal := childStageFixture(t)
-	roster, err := moduleidentity.Parse([]string{"modules/kacho-childstage=module-writer"})
-	require.NoError(t, err)
-	writer, err := owner.Writer(r.ctx)
-	require.NoError(t, err)
-	defer policyFixtureRollback(writer)
-	_, err = writer.ServiceAccountsW().Insert(r.ctx, domain.ServiceAccount{
-		ID:        domain.ServiceAccountID(authzguard.ServiceAccountIDForService("childstage")),
-		AccountID: domain.AccountID(r.a), Name: "kacho-childstage", Description: "child cascade module identity",
-	})
-	require.NoError(t, err)
-	require.NoError(t, writer.Commit(r.ctx))
-	require.NoError(t, seed.ApplyRegistrationAccountWriters(r.ctx, kanamepg.NewRegistrationAccountWriterStore(r.admin), roster,
-		seed.RegistrationWriterPlan{Assignments: []domain.RegistrationAccountWriter{{AssignmentID: "childstage-cascade", AccountID: scene.Account, Module: "childstage"}}}))
-	require.NoError(t, owner.PrepareAuthorityBundle(r.ctx, r.bundle))
-	full, _ := fullContractActivate(t, r)
-	gate := authzguard.NewRelationWriteGate(delegationNativeDoor{r}).WithModuleRoster(roster)
-	moduleCtx := grpcsrv.WithCertIdentityIn(r.ctx, grpcsrv.NewTrustDomain("kacho.cloud"), "spiffe://kacho.cloud/ns/modules/sa/kacho-childstage", true)
-	require.NoError(t, gate.AuthorizeAccount(moduleCtx, scene.Account), "installer дал account-scoped fga_writer настоящему module SA")
-	runner, err := kanamepg.NewResourceDecisionRunner(moduleCtx, full, r.bundle, gate)
-	require.NoError(t, err)
+	r, runner, moduleCtx, scene, principal := childRuntimeModuleFixture(t)
 	child := kaname.UserChildRegistrationInput{ResourceType: "childstage.child", ResourceID: "container-one/cascade-child"}
 	childVersion, err := runner.RunUserChildRegistration(operations.WithPrincipal(r.ctx, principal), child, principal)
 	resourcePublicEntryCause(t, err)
@@ -128,4 +109,31 @@ func TestUserChildRuntimeParentUnregisterCascadePrewaitAndReceiptRetention(t *te
 	require.JSONEq(t, string(beforeScope.Scopes), string(afterScope.Scopes), "сохранённая область используется для авторизованного повтора снятия")
 	require.JSONEq(t, string(immutable), string(receipt()), "историческая квитанция создания неизменна после cascade")
 	authorityWaitReleased(t, r.runtime)
+}
+
+// Один и тот же installation/module admission для close и ordinary cascade.
+func childRuntimeModuleFixture(t *testing.T) (protocolRig, *kanamepg.ResourceDecisionRunner, context.Context, registrationscene.Scene, operations.Principal) {
+	t.Helper()
+	r, owner, scene, principal := childStageFixture(t)
+	roster, err := moduleidentity.Parse([]string{"modules/kacho-childstage=module-writer"})
+	require.NoError(t, err)
+	writer, err := owner.Writer(r.ctx)
+	require.NoError(t, err)
+	defer policyFixtureRollback(writer)
+	_, err = writer.ServiceAccountsW().Insert(r.ctx, domain.ServiceAccount{
+		ID:        domain.ServiceAccountID(authzguard.ServiceAccountIDForService("childstage")),
+		AccountID: domain.AccountID(r.a), Name: "kacho-childstage", Description: "child cascade module identity",
+	})
+	require.NoError(t, err)
+	require.NoError(t, writer.Commit(r.ctx))
+	require.NoError(t, seed.ApplyRegistrationAccountWriters(r.ctx, kanamepg.NewRegistrationAccountWriterStore(r.admin), roster,
+		seed.RegistrationWriterPlan{Assignments: []domain.RegistrationAccountWriter{{AssignmentID: "childstage-cascade", AccountID: scene.Account, Module: "childstage"}}}))
+	require.NoError(t, owner.PrepareAuthorityBundle(r.ctx, r.bundle))
+	full, _ := fullContractActivate(t, r)
+	gate := authzguard.NewRelationWriteGate(delegationNativeDoor{r}).WithModuleRoster(roster)
+	moduleCtx := grpcsrv.WithCertIdentityIn(r.ctx, grpcsrv.NewTrustDomain("kacho.cloud"), "spiffe://kacho.cloud/ns/modules/sa/kacho-childstage", true)
+	require.NoError(t, gate.AuthorizeAccount(moduleCtx, scene.Account), "installer дал account-scoped fga_writer настоящему module SA")
+	runner, err := kanamepg.NewResourceDecisionRunner(moduleCtx, full, r.bundle, gate)
+	require.NoError(t, err)
+	return r, runner, moduleCtx, scene, principal
 }

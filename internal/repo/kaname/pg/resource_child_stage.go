@@ -58,7 +58,7 @@ func (r *ResourceDecisionRunner) stageUserChildRegistration(ctx context.Context,
 	}
 	selected, known := captured.selected()
 	if !known || !selected.live {
-		return nil, domain.ErrUserChildRegistrationRefused
+		return nil, childTypeUnavailable
 	}
 	policy, enabled := r.bundle.ChildRegistration(input.ResourceType)
 	if !enabled || selected.identity.Dotted != input.ResourceType || selected.identity.ObjectType != policy.Path.ChildType {
@@ -78,7 +78,7 @@ func (r *ResourceDecisionRunner) stageUserChildRegistration(ctx context.Context,
 	}
 	parent, known := parentCatalog.selected()
 	if !known || !parent.live {
-		return nil, domain.ErrUserChildRegistrationRefused
+		return nil, childParentUnavailable
 	}
 	if parent.identity.Dotted != parentDotted || parent.identity.ObjectType != parentType || parent.identity.Module != selected.identity.Module {
 		return nil, kaname.ErrSourceUnconfirmed

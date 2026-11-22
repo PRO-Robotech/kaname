@@ -26,12 +26,14 @@ func (r *ResourceDecisionRunner) RunUserChildRegistration(ctx context.Context, i
 	}
 	verified, ok := operations.PrincipalFromContextOK(ctx)
 	_, named := authzguard.SubjectFromPrincipal(verified)
-	if !ok || !named || verified.Type != "user" || verified.IsAnonymous() || verified != principal ||
-		input.ResourceType == "" || input.ResourceID == "" {
+	if !ok || !named || verified.Type != "user" || verified.IsAnonymous() || verified != principal {
 		return time.Time{}, domain.ErrUserChildRegistrationRefused
 	}
 	if r == nil || r.repo == nil || r.repo.master == nil || r.bundle == nil {
 		return time.Time{}, resourceChildError(ctx, kaname.ErrSourceUnconfirmed)
+	}
+	if input.ResourceType == "" || input.ResourceID == "" {
+		return time.Time{}, r.childRefusalAfterAttempt(ctx, principal, childInvalidCoordinates)
 	}
 	// Эта полоса существует только под FULL: отсутствие startup contract
 	// не разрешает enterResource выбрать прежний v2-вход.
@@ -48,7 +50,7 @@ func (r *ResourceDecisionRunner) RunUserChildRegistration(ctx context.Context, i
 		return r.runUserChildRegistrationOnce(ctx, lease.Conn(), input, principal, budget)
 	})
 	if err != nil {
-		return time.Time{}, resourceChildError(ctx, err)
+		return time.Time{}, r.childRefusalAfterAttempt(ctx, principal, err)
 	}
 	return version, nil
 }
@@ -95,7 +97,7 @@ func (r *ResourceDecisionRunner) runUserChildRegistrationOnce(ctx context.Contex
 	// Только подтверждённое отсутствие после допуска даёт предметный отказ.
 	// Ошибка чтения выше не превращается в отсутствие родителя.
 	if !stage.parentRegistered {
-		return time.Time{}, domain.ErrUserChildRegistrationRefused
+		return time.Time{}, childParentMissing
 	}
 	proposal, err := stage.proposal()
 	if err != nil {

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -67,7 +66,7 @@ func (s *resourceChildStage) applyChildBody(ctx context.Context, tx *resourceDec
 		return time.Time{}, err
 	}
 	if !allowed {
-		return time.Time{}, domain.ErrUserChildRegistrationRefused
+		return time.Time{}, childFinalDenied
 	}
 	var encoded []byte
 	if err := tx.QueryRow(ctx, `SELECT kaname.authority_child_registration_begin_body_v1($1::jsonb)`, proposal.intent).Scan(&encoded); err != nil {
@@ -79,8 +78,16 @@ func (s *resourceChildStage) applyChildBody(ctx context.Context, tx *resourceDec
 	}
 	switch values.Outcome {
 	case "create", "replay":
-	case "parent_missing", "parent_closed", "child_occupied", "capacity", "rate":
-		return time.Time{}, domain.ErrUserChildRegistrationRefused
+	case "parent_missing":
+		return time.Time{}, childParentMissing
+	case "parent_closed":
+		return time.Time{}, childParentClosed
+	case "child_occupied":
+		return time.Time{}, childOccupied
+	case "capacity":
+		return time.Time{}, childCapacity
+	case "rate":
+		return time.Time{}, childRate
 	default:
 		return time.Time{}, kaname.ErrSourceUnconfirmed
 	}

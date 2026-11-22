@@ -172,7 +172,8 @@ BEGIN
  -- После полной поставки выдаём runtime только узкие входы тела потомка.
  IF to_regprocedure('kaname._authority_child_runtime_storage_v1()') IS NOT NULL THEN
   FOREACH signature IN ARRAY ARRAY['authority_child_registration_begin_body_v1(jsonb)',
-   'authority_child_registration_step_v1(integer)','authority_child_registration_complete_v1()'] LOOP
+   'authority_child_registration_step_v1(integer)','authority_child_registration_complete_v1()',
+   'authority_child_parent_close_apply_v1(jsonb)'] LOOP
    EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,runtime_name);
   END LOOP;
  END IF;
@@ -185,7 +186,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS
 DECLARE manifest jsonb;
 BEGIN
  manifest:=kaname._authority_resource_manifest_v2();
- IF manifest->'intent'->>'kind'='child_registration' THEN
+ IF manifest->'intent'->>'kind' IN ('child_registration','child_parent_close') THEN
   RAISE EXCEPTION 'child registration body requires its own authorization path' USING ERRCODE='42501';
  END IF;
  IF manifest->>'state' IS DISTINCT FROM 'final' OR p_intent IS DISTINCT FROM manifest->'intent'
@@ -260,8 +261,8 @@ BEGIN
   PERFORM kaname._authority_crud_require_completion_v3(manifest);
   physical:=manifest->'registration_physical';
  ELSIF manifest->'intent'->>'Action' IN ('1','2','3','4','5')
-  OR manifest->'intent'->>'kind'='child_registration' THEN
-  IF manifest->'intent'->>'kind'='child_registration'
+  OR manifest->'intent'->>'kind' IN ('child_registration','child_parent_close') THEN
+  IF manifest->'intent'->>'kind' IN ('child_registration','child_parent_close')
    AND manifest#>'{registration_body,private_effects_done}' IS DISTINCT FROM 'true'::jsonb THEN
    RAISE EXCEPTION 'child registration private effects were omitted' USING ERRCODE='42501';END IF;
   IF manifest->>'registration_program_claimed' IS DISTINCT FROM 'true'
@@ -473,7 +474,7 @@ BEGIN
    allowed:=manifest->>'registration_program_claimed'='true'
     AND coalesce(step->'operations'->TG_TABLE_NAME,'[]'::jsonb) ? TG_OP;
   ELSIF manifest->'intent'->>'Action' IN ('1','2','3','4')
-   OR manifest->'intent'->>'kind'='child_registration' THEN
+   OR manifest->'intent'->>'kind' IN ('child_registration','child_parent_close') THEN
    step:=manifest#>'{registration_program,commands}'->((manifest->>'object_command')::integer-1);
    allowed:=manifest->>'registration_program_claimed'='true'
     AND coalesce(step->'operations'->TG_TABLE_NAME,'[]'::jsonb) ? TG_OP;
@@ -541,7 +542,12 @@ BEGIN
  OR current_setting('transaction_isolation')<>'read committed'
  OR to_regclass('pg_temp.kaname_authority_resource_manifest') IS NOT NULL THEN
   RAISE EXCEPTION 'resource prewait requires fresh typed participant' USING ERRCODE='42501';END IF;
- IF p_envelope->'intent'->>'kind'='child_registration' THEN
+ IF p_envelope->'intent'->>'kind'='child_parent_close' THEN
+  IF proof->>'consumer_profile' IS DISTINCT FROM 'resource_source_pending'
+   OR proof->>'writer_contract' IS DISTINCT FROM '2' THEN
+   RAISE EXCEPTION 'child parent close requires exact full source participant' USING ERRCODE='42501';END IF;
+  SELECT * INTO STRICT prepared FROM kaname._authority_child_parent_close_prepare_v1(p_envelope,p_rows,p_reads);
+ ELSIF p_envelope->'intent'->>'kind'='child_registration' THEN
   IF p_envelope->'intent' ? 'Action'
   OR proof->>'consumer_profile' IS DISTINCT FROM 'resource_source_pending'
   OR proof->>'writer_contract' IS DISTINCT FROM '2' THEN
@@ -607,7 +613,9 @@ BEGIN
   RAISE EXCEPTION 'resource native source changed' USING ERRCODE='P1034';
  END IF;
  at_time:=clock_timestamp();
- IF manifest->'intent'->>'kind'='object' THEN
+ IF manifest->'intent'->>'kind'='child_parent_close' THEN
+  PERFORM kaname._authority_resource_registration_authority_final_v2(manifest->'registration_authority',at_time);
+ ELSIF manifest->'intent'->>'kind'='object' THEN
   materialized:=kaname._authority_resource_object_materialize_v2(manifest->'object_certificate',
    manifest->'object_effects',manifest->'object_sources',manifest->'object_audit_reservations',
    (manifest->>'transaction_at')::timestamptz,at_time);
@@ -883,7 +891,7 @@ BEGIN
  ('authority_subject_change_applied_v2()','fa776df6d3b95dadb13fa1684424b2db105b21f5b8862bd045680fb8129d094e',true,'v',true,'private'),
  ('authority_subject_change_statement_guard_v2()','600129602604e3cac17840ff155738e5c886677cd8be781b62b9b29f2fe785b0',true,'v',true,'private'),
  ('relation_fact_from_journal()','604d827358eab2f756c0c53d9a65cfbaf31b3f5d19ff8adc6e3dab944e8fa70a',false,'v',false,'preserve'),
- ('authority_protocol_grant_runtime(regrole)','a0bb61100e92a4f94dece2489fbacad79402c94f0cb8f950b923d495703367d8',false,'v',true,'preserve'),
+ ('authority_protocol_grant_runtime(regrole)','d754231dce790f01596d86b4e2d3e0d4c5fd0672ab5bbd0bf9443687bc960df6',false,'v',true,'preserve'),
  ('authority_binding_command_begin_v3(jsonb)','39696919bfed78731817c77a37920e661801933c5ac544bc26ea5603a7fa39b1',true,'v',true,'export'),
  ('authority_binding_command_end_v3(jsonb)','2c9ee43be689f773c543fc800645f2aae482ec02d392fd28937efa50558915b2',true,'v',true,'export'),
  ('authority_binding_command_audit_v3(jsonb)','93c1bfc6bd6b753868e68ff6e408089f701d189ed6e7c30a32c7998baade872f',true,'v',true,'export'),
@@ -916,10 +924,10 @@ BEGIN
  ('_authority_crud_structural_v3(text,text,text,text)','00d37afb9a7b7c9d4534df79f313c14e13fc16a1756d368d85ca2e5f4d939c13',true,'i',true,'private'),
  ('_authority_crud_command_plan_v3(jsonb,jsonb)','ea252acb7bcebc7c96da591416609deb3b606d01eeda6a3a32e911a0e77af3d1',true,'i',true,'private'),
  ('authority_resource_registration_command_values_v2(jsonb)','ba55237e2826a2f425437d0993210204ab578a04decf5f7bbdf91fbf3c45aa3b',true,'v',true,'preserve'),
- ('authority_resource_assert_body_v2(jsonb)','4c7219a426a0bb4682fc85dea9806123101be986db4adf98844f1f416b997eb4',true,'v',true,'preserve'),
- ('_authority_resource_require_completion_v2()','31855e0f86620b4cc69389b4a7da1055108ca98741fa61b7948d0ba5773da223',true,'v',true,'preserve'),
+ ('authority_resource_assert_body_v2(jsonb)','6aeb29fc8290e51a32a03b5902b485305bd2736b80f9a328fac55cea738ac3a1',true,'v',true,'preserve'),
+ ('_authority_resource_require_completion_v2()','e1c6b94cd3542ce6e1055c70a7ef067675ebbd3826084e24c04d21b3df29f203',true,'v',true,'preserve'),
  ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','6be8def5de6ed9a89e95f50764835b8da6baa06ca26a053b84bb4d6279b38282',true,'v',true,'preserve'),
- ('authority_resource_prewait_v2(jsonb,integer,integer)','224490a4e9371702c568fe4395729446cacd25003fd911865ae8735c77e1710c',true,'v',true,'preserve'),
+ ('authority_resource_prewait_v2(jsonb,integer,integer)','6db93afbea0e41ec3015366f85a71fd440bbeeac259424e982556df55ed41522',true,'v',true,'preserve'),
  ('_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','967a84fb10617c3a5f376d63aaf2903538edc5fe1548150b307bae33a70ee3f9',true,'i',true,'private'),
  ('_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','2e4cf1562674897a696483469505925ba5862b6fe0422f663b330eb96f237b9e',true,'i',true,'private'),
  ('_authority_crud_intent_v3(jsonb)','e62f470c0c69a980308bec36a35f515609cb8fea56c79ec7632ac654a43e0f49',true,'i',true,'private'),
@@ -951,7 +959,7 @@ BEGIN
  ('_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','424927c26adc58d65a55a4567766054c378f1340662d0401146e5e2dac2f0bad',true,'v',true,'private'),
  ('_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','a9e7a60de752dcf436571f457c67de751439e77276005238dab9abed9ef9049b',true,'v',true,'private'),
  ('_authority_crud_scope_capture_v3(jsonb,integer,integer)','7cd250c6e17d5c41737c1afebca7576744bae05ec46af01136678c515e23f5e5',true,'s',true,'private'),
- ('authority_protocol_statement_guard()','53554846c85e31f40b16c788e36527bba3fff4e4c57be01c0bad5ce8c36f45a6',true,'v',true,'preserve'),
+ ('authority_protocol_statement_guard()','7608e2d0a1b1ce2bb11182a349150e5369e2bd97c5fb8abc3da84b3d2e0c229a',true,'v',true,'preserve'),
  ('_authority_resource_crud_store_v3(jsonb)','b3c4cf46195b7a32a2454911b29c8ea51a0e37741ca98380890e911f4e765135',true,'v',true,'private'),
  ('_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','8ebecbc122a5558910017569ac3ea927ad37ea4066dec179a253807b4c5d9574',true,'v',true,'private'),
  ('_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','ded94e6b1bf461dfaf9753a2e71dc73f45f474826b1d7a2f950e097c455629b0',true,'v',true,'private'),
@@ -1011,7 +1019,7 @@ BEGIN
  ('_authority_sequence_claim_v3(text,jsonb,jsonb)','18cdb51c9e44fa944b355cadf1abcb291eba062ca09f3221118bcd60d736c740',true,'v',true,'private'),
  ('_authority_sequence_applied_v3(text,bigint,jsonb)','0a4c24ded6b6aad09fd077e4a1ad8d40dee440c4e27e44dc20e4300bfc0a5a7d',true,'v',true,'private'),
  ('_authority_sequence_complete_v3()','c9f728c4492acf65f92ea6a6f411b3af85e63e765c5226bbf3ea1e80fd9291d1',true,'v',true,'private'),
- ('authority_resource_finalize_v2(jsonb,integer,integer)','2c8421272fd0b088d7e650291e7922efc146d777606dcc8a8d0e12fa8caf2bab',true,'v',true,'preserve'),
+ ('authority_resource_finalize_v2(jsonb,integer,integer)','20a9e6ee2af213a514ca21399d62cdb981a399ad7e96cbae330c152d0ecf837d',true,'v',true,'preserve'),
  ('_authority_resource_object_prepare_v2(jsonb,integer,integer)','47aae35f146c1d05bf9f5f52f9f7b929d69d91f64b39844fd697530c467af440',true,'v',true,'preserve'),
  ('_authority_resource_object_program_v2(jsonb,timestamptz)','97f643954fbef4036c37240711c9ce9650045102c77bce1d5e8396d89a4c8464',true,'i',true,'preserve'),
  ('_authority_resource_object_sequence_prepare_v3(jsonb,integer)','bbf639e8b58fee3ee80ce322a7946cd5ae4a3f0a84804270117a369914fc5153',true,'v',true,'private'),
@@ -1609,7 +1617,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','bc18c9d0bd00bd804a33857b1dd170fc2936d33ccf3a752811793dc2ebb7dc3f',true),
+ ('_authority_crud_storage_v3()','36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -1632,7 +1640,7 @@ BEGIN
  ('authority_protocol_stage_full_v3(text,bytea,text,text,text)','1f7a9c17af7a4c3ec041405fa9f0dddc69cdf3fa666ba72db47247cde8447037',false),
  ('authority_protocol_activate_full_v3(text,text,text)','646328a2433e1d31d17a9c178ac3ab59a5a65d8252accf5295a20d22705d31cf',false),
  ('authority_protocol_attestation()','130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502',true),
- ('authority_protocol_statement_guard()','53554846c85e31f40b16c788e36527bba3fff4e4c57be01c0bad5ce8c36f45a6',true),
+ ('authority_protocol_statement_guard()','7608e2d0a1b1ce2bb11182a349150e5369e2bd97c5fb8abc3da84b3d2e0c229a',true),
  ('authority_protocol_row_guard()','cb90a95df9b7105f053ae0c8652407335ef82745a2e749dc395b1c82e8435d12',true),
  ('_authority_protocol_stage_generation1(text,bytea,text,text,text)','7ffb942af742bff4b556f07b00d9d8f75fefba3aa1f00445073140b5c8072bde',false),
  ('_authority_protocol_activate_generation1(text,text,text)','00d97c37e2ab533c232e4cffb975e8d71c3eefa98228e0f39d90249526bf041c',false),

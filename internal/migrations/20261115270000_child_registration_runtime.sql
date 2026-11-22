@@ -30,6 +30,214 @@ LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 $$;
 -- +goose StatementEnd
 
+-- Закрытие связывается с текущей версией зарегистрированного родителя.
+-- Общий авторитет модуля проверяется по удержанным установке и факту fga_writer.
+-- +goose StatementBegin
+CREATE FUNCTION kaname._authority_child_parent_close_prepare_v1(p_envelope jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE
+ proof jsonb; intent jsonb; parent_row jsonb; index_value jsonb; scopes jsonb; accounts jsonb;
+ required jsonb; predicate jsonb; policy jsonb; native_epochs jsonb; mirror jsonb;
+ parent_type text; parent_model text; parent_id text; module_value text; parent_key text;
+ version_value timestamptz; captured_state jsonb; incarnation uuid; relation_id oid;
+ locks jsonb; relations jsonb; authority_result record; bundle_result record;
+ catalog_result record; epoch_result record; current_result record; audit_result record;
+BEGIN
+ PERFORM kaname.authority_protocol_require_owner();
+ proof:=kaname.authority_protocol_attestation();
+ intent:=p_envelope->'intent';
+ parent_type:=intent->>'resource_type';
+ parent_id:=intent->>'resource_id';
+ IF proof->>'writer_contract' IS DISTINCT FROM '2'
+  OR proof->>'kind' IS DISTINCT FROM 'resource' OR proof->>'purpose' IS DISTINCT FROM 'participant'
+  OR proof->>'consumer_profile' IS DISTINCT FROM 'resource_source_pending'
+  OR proof->>'consumer_abi' IS DISTINCT FROM '2' OR proof->>'consumer_finalized' IS DISTINCT FROM 'false'
+  OR current_setting('transaction_isolation')<>'read committed'
+  OR to_regclass('pg_temp.kaname_authority_resource_manifest') IS NOT NULL
+  OR p_envelope->>'abi' IS DISTINCT FROM '2'
+  OR intent->>'kind' IS DISTINCT FROM 'child_parent_close'
+  OR intent-ARRAY['kind','resource_type','resource_id','source_version','actor','audit_id']<>'{}'::jsonb
+  OR jsonb_typeof(intent->'resource_type') IS DISTINCT FROM 'string'
+  OR jsonb_typeof(intent->'resource_id') IS DISTINCT FROM 'string'
+  OR jsonb_typeof(intent->'source_version') IS DISTINCT FROM 'string'
+  OR coalesce(parent_type,'')='' OR coalesce(parent_id,'')=''
+  OR octet_length(parent_type)+1+octet_length(parent_id)>512
+  OR parent_type ~ '[[:space:][:cntrl:]:#*]' OR parent_id ~ '[[:space:][:cntrl:]:#*]'
+  OR intent->'actor' IS DISTINCT FROM p_envelope->'actor'
+  OR coalesce(intent->>'audit_id','') !~ '^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$'
+  OR p_envelope ?| ARRAY['object_effects','registration_effects','refusal_effects']
+  OR coalesce(nullif(p_envelope->'source_effects','null'::jsonb),'[]'::jsonb)<>'[]'::jsonb THEN
+  RAISE EXCEPTION 'child parent close requires an exact pending full participant' USING ERRCODE='42501';
+ END IF;
+ version_value:=(intent->>'source_version')::timestamptz;
+ IF NOT isfinite(version_value) THEN
+  RAISE EXCEPTION 'child parent close source version must be finite' USING ERRCODE='42501';
+ END IF;
+ SELECT * INTO STRICT bundle_result FROM kaname._authority_resource_bundle_catalog_v2(p_rows,p_reads);
+ logical_rows:=bundle_result.logical_rows;
+ logical_reads:=bundle_result.logical_reads;
+ SELECT * INTO STRICT catalog_result FROM kaname._authority_resource_catalog_wait_v2(
+  p_envelope->'catalogs',p_rows-logical_rows,p_reads-logical_reads);
+ logical_rows:=logical_rows+catalog_result.logical_rows;
+ logical_reads:=logical_reads+catalog_result.logical_reads;
+ SELECT (item->>'state')::jsonb->2 INTO parent_row FROM jsonb_array_elements(catalog_result.catalog_rows) item
+ WHERE item->>'dotted'=parent_type AND ((item->>'state')::jsonb #>'{2,live}')='true'::jsonb;
+ parent_model:=parent_row->>'object_type';
+ module_value:=parent_row->>'module';
+ IF parent_model IS NULL OR NOT EXISTS(
+  SELECT 1 FROM jsonb_array_elements(coalesce(nullif(bundle_result.catalog#>'{Live,Resources}','null'::jsonb),'[]'::jsonb)) p
+  WHERE p->>'ObjectType'=parent_model AND p->>'Module'=module_value
+   AND (p->>'Module')||'.'||(p->>'Resource')=parent_type
+ ) OR NOT EXISTS(
+  SELECT 1 FROM jsonb_array_elements(catalog_result.catalog_rows) item
+  CROSS JOIN LATERAL (SELECT (item->>'state')::jsonb->2 AS image) c
+  CROSS JOIN LATERAL jsonb_array_elements_text(c.image->'parent_names') WITH ORDINALITY edge(name,n)
+  JOIN LATERAL jsonb_array_elements(coalesce(nullif(bundle_result.catalog#>'{Live,Resources}','null'::jsonb),'[]'::jsonb)) b
+   ON b->>'ObjectType'=c.image->>'object_type' AND b->>'Module'=module_value
+  WHERE c.image->>'module'=module_value AND c.image->'live'='true'::jsonb
+   AND (b->>'Module')||'.'||(b->>'Resource')=c.image->>'dotted'
+   AND jsonb_typeof(b->'ChildRegistration')='object' AND b->'ChildRegistration'=c.image->'child_registration'
+   AND edge.name='parent' AND c.image->'parent_types'->>((edge.n-1)::integer)=parent_model
+   AND b->'ParentNames'->>((edge.n-1)::integer)='parent' AND b->'ParentTypes'->>((edge.n-1)::integer)=parent_model
+ ) THEN
+  RAISE EXCEPTION 'child parent close requires an active parent policy' USING ERRCODE='42501';
+ END IF;
+ index_value:=kaname._authority_resource_capture_index_v2(p_envelope->'sources',100000);
+ parent_key:=jsonb_build_array(2,parent_type,parent_id,'')::text;
+ mirror:=kaname._authority_resource_require_capture_v2(index_value,2,parent_type,parent_id)->'states';
+ IF jsonb_array_length(mirror)<>1 OR (mirror#>>'{0,2,source_version}')::timestamptz IS DISTINCT FROM version_value THEN
+  RAISE EXCEPTION 'child parent close snapshot version differs' USING ERRCODE='P1034';
+ END IF;
+ scopes:=kaname._authority_resource_registration_saved_scopes_v2(index_value,bundle_result.catalog,parent_model,parent_id);
+ SELECT jsonb_object_agg(scope->>'AccountID',true) INTO accounts FROM jsonb_array_elements(scopes->'scopes') scope;
+ IF accounts IS NULL THEN RAISE EXCEPTION 'child parent close ownership unavailable' USING ERRCODE='42501';END IF;
+ required:=(scopes->'required')||jsonb_build_object(parent_key,true);
+ predicate:=kaname._authority_resource_predicate_maximum_v2(index_value,required);
+ IF (proof->>'mode'='global') IS DISTINCT FROM (predicate->>'global')::boolean OR
+  (proof->>'mode'='accounts' AND proof->'accounts' IS DISTINCT FROM
+   (SELECT jsonb_agg(k ORDER BY k COLLATE "C") FROM jsonb_object_keys(accounts) k)) THEN
+  RAISE EXCEPTION 'child parent close scope fence differs' USING ERRCODE='P1034';
+ END IF;
+ SELECT jsonb_object_agg(k,'share') INTO policy FROM jsonb_array_elements_text(p_envelope->'native_guards') k;
+ policy:=coalesce(policy,'{}'::jsonb)||(predicate->'policy_epochs')
+  ||jsonb_build_object('object:'||jsonb_build_array(parent_type,parent_id)::text,'write');
+ SELECT * INTO STRICT epoch_result FROM kaname._authority_resource_epoch_wait_v2(
+  '{}'::jsonb,policy,'{}'::jsonb,p_rows-logical_rows,p_reads-logical_reads);
+ logical_rows:=logical_rows+epoch_result.logical_rows;
+ logical_reads:=logical_reads+epoch_result.logical_reads;
+ SELECT * INTO STRICT current_result FROM kaname._authority_resource_required_reread_v2(
+  index_value,required,'{}'::jsonb,p_rows-logical_rows,p_reads-logical_reads);
+ logical_rows:=logical_rows+current_result.logical_rows;
+ logical_reads:=logical_reads+current_result.logical_reads;
+ IF current_result.predicate_protections IS DISTINCT FROM predicate->'protections' THEN
+  RAISE EXCEPTION 'child parent close predicates changed' USING ERRCODE='P1034';
+ END IF;
+ SELECT * INTO STRICT authority_result FROM kaname._authority_resource_registration_authority_wait_v2(
+  p_envelope,jsonb_build_object('module',module_value,'registration_accounts',accounts),
+  bundle_result.model_source,epoch_result.lock_witness,p_rows-logical_rows,p_reads-logical_reads);
+ logical_rows:=logical_rows+authority_result.logical_rows;
+ logical_reads:=logical_reads+authority_result.logical_reads;
+ IF logical_rows+1>p_rows OR logical_reads+2>p_reads THEN
+  RAISE EXCEPTION 'child parent close state exceeds budget' USING ERRCODE='54000';
+ END IF;
+ -- Общий object WRITE защищает также отсутствие строки у открытого родителя.
+ -- FK на mirror уже удерживается через перечитанный parent source.
+ LOCK TABLE ONLY kaname.authority_child_parent_state IN ROW EXCLUSIVE MODE;
+ SELECT to_jsonb(p) INTO captured_state FROM ONLY kaname.authority_child_parent_state p
+  WHERE p.object_type=parent_type AND p.object_id=parent_id FOR UPDATE OF p;
+ logical_rows:=logical_rows+1;
+ logical_reads:=logical_reads+2;
+ incarnation:=coalesce((captured_state->>'incarnation')::uuid,gen_random_uuid());
+ relations:=jsonb_build_array(jsonb_build_object(
+  'oid','kaname.authority_child_parent_state'::regclass::oid,'mode','RowExclusiveLock'));
+ locks:=epoch_result.lock_witness->'held_advisory';
+ IF captured_state->>'closed_at' IS NULL THEN
+  SELECT * INTO STRICT audit_result FROM kaname._authority_resource_audit_wait_v2(
+   jsonb_build_object(intent->>'audit_id',true),p_rows-logical_rows,p_reads-logical_reads);
+  logical_reads:=logical_reads+audit_result.logical_reads;
+  locks:=locks||audit_result.lock_witness;
+  relations:=relations||jsonb_build_array(jsonb_build_object(
+   'oid','kaname.audit_outbox'::regclass::oid,'mode','RowExclusiveLock'));
+ END IF;
+ SELECT jsonb_object_agg(k,epoch_result.lock_witness->'policy_after'->k) INTO native_epochs
+ FROM jsonb_object_keys(authority_result.authority->'native_epochs') k;
+ relation_id:=kaname._authority_resource_manifest_create_v2();
+ INSERT INTO pg_temp.kaname_authority_resource_manifest(
+  abi,backend,transaction_id,invoker_oid,nonce,model_id,catalog_id,projector_version,mode,consumer_profile,accounts,
+  intent,state,transaction_at,held_relations,held_advisory,catalog_rows,native_epochs,
+  epoch_write_keys,epoch_share_keys,source_guard_write_keys,source_guard_read_keys,binding_epoch_write_scopes,binding_epoch_share_scopes,
+  deferred_carrier_roles,epoch_lock_witness,writes,object_certificate,object_effects,object_sources,object_audit_reservations,
+  registration_authority,registration_body)
+ VALUES(2,proof->>'backend',proof->>'transaction_id',(proof->>'invoker_oid')::oid,proof->>'nonce',
+  proof->>'model_id',proof->>'catalog_id',proof->>'projector_version',proof->>'mode',proof->>'consumer_profile',proof->'accounts',
+  intent,'prepared',transaction_timestamp(),relations||jsonb_build_array(jsonb_build_object('oid',relation_id,'mode','AccessExclusiveLock')),
+  locks,catalog_result.catalog_rows,native_epochs,
+  to_jsonb(ARRAY(SELECT key FROM jsonb_each_text(policy) WHERE value='write' ORDER BY key COLLATE "C")),
+  to_jsonb(ARRAY(SELECT key FROM jsonb_each_text(policy) WHERE value='share' ORDER BY key COLLATE "C")),
+  '[]','[]','[]','[]','[]',epoch_result.lock_witness,'[]','{}','{}','{}','{}',authority_result.authority,
+  jsonb_build_object('parent_state',captured_state,'incarnation',incarnation,'module',module_value));
+ PERFORM kaname._authority_resource_manifest_v2();
+ RETURN NEXT;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE FUNCTION kaname.authority_child_parent_close_apply_v1(p_intent jsonb) RETURNS timestamptz
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE
+ manifest jsonb; previous jsonb; audit_row jsonb; audits jsonb:='[]'; commands jsonb:='[]';
+ closed timestamptz; at_time timestamptz; tx_at timestamptz; token uuid; tenant text;
+BEGIN
+ manifest:=kaname._authority_resource_manifest_v2();
+ IF manifest->>'state' IS DISTINCT FROM 'final' OR manifest->'intent'->>'kind' IS DISTINCT FROM 'child_parent_close'
+  OR p_intent IS DISTINCT FROM manifest->'intent' OR manifest->'writes' IS DISTINCT FROM '[]'::jsonb THEN
+  RAISE EXCEPTION 'child parent close requires its final private manifest' USING ERRCODE='42501';
+ END IF;
+ previous:=manifest#>'{registration_body,parent_state}';
+ token:=(manifest#>>'{registration_body,incarnation}')::uuid;
+ at_time:=(manifest->>'decision_at')::timestamptz;
+ tx_at:=(manifest->>'transaction_at')::timestamptz;
+ closed:=(previous->>'closed_at')::timestamptz;
+ IF token IS NULL OR at_time IS NULL OR tx_at IS NULL OR closed>at_time THEN
+  RAISE EXCEPTION 'child parent close prepared state invalid' USING ERRCODE='42501';
+ END IF;
+ IF closed IS NULL THEN
+  SELECT CASE WHEN count(*)=1 THEN min(k) END INTO tenant
+   FROM jsonb_object_keys(manifest#>'{registration_authority,accounts}') k;
+  audit_row:=jsonb_build_object('id',p_intent->>'audit_id','event_type','iam.resource_registration.parent_closed',
+   'tenant_account_id',tenant,'event_payload',jsonb_build_object(
+    'actor','service_account:'||(p_intent->>'actor'),'module',manifest#>>'{registration_body,module}',
+    'object',jsonb_build_object('type',p_intent->>'resource_type','id',p_intent->>'resource_id'),
+    'source_version',p_intent->'source_version','closed_at',at_time,'outcome','closed'),
+   'status','pending','attempts',0,'created_at',tx_at,'next_attempt_at',tx_at,'sent_at',NULL,'last_error',NULL);
+  audits:=jsonb_build_array(jsonb_build_object('command',1,'row',audit_row));
+  commands:='[{"kind":"close_parent_audit","operations":{"audit_outbox":["INSERT"]}}]';
+ END IF;
+ UPDATE pg_temp.kaname_authority_resource_manifest SET state='body',registration_program_claimed=true,
+  object_command=jsonb_array_length(commands),registration_program=jsonb_build_object('commands',commands),
+  registration_physical=jsonb_build_object('audits',audits,'outboxes','[]'::jsonb,'bindings','[]'::jsonb,
+   'reconcile','[]'::jsonb,'subject_changes','[]'::jsonb);
+ IF closed IS NULL THEN
+  IF previous='null'::jsonb THEN
+   INSERT INTO kaname.authority_child_parent_state(object_type,object_id,incarnation,closed_at)
+   VALUES(p_intent->>'resource_type',p_intent->>'resource_id',token,at_time);
+  ELSE
+   UPDATE ONLY kaname.authority_child_parent_state
+   SET closed_at=at_time WHERE object_type=p_intent->>'resource_type' AND object_id=p_intent->>'resource_id'
+     AND incarnation=token AND closed_at IS NULL;
+   IF NOT FOUND THEN RAISE EXCEPTION 'child parent close state escaped prewait' USING ERRCODE='42501';END IF;
+  END IF;
+  INSERT INTO kaname.audit_outbox(id,event_type,tenant_account_id,event_payload,status,attempts,created_at,next_attempt_at)
+  VALUES(audit_row->>'id',audit_row->>'event_type',tenant,audit_row->'event_payload','pending',0,tx_at,tx_at);
+  closed:=at_time;
+ END IF;
+ UPDATE pg_temp.kaname_authority_resource_manifest
+ SET registration_body=registration_body||'{"private_effects_done":true}'::jsonb;
+ RETURN closed;
+END $$;
+-- +goose StatementEnd
+
 -- +goose StatementBegin
 CREATE FUNCTION kaname._authority_child_runtime_storage_v1() RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
@@ -56,6 +264,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
   ('_authority_child_registration_complete_v1()','17686473c29efe97fb787cf2a1495997240719a5913a272404c9b87823f997bb',false,'v','plpgsql'),
   ('authority_child_registration_begin_body_v1(jsonb)','bf7b041190118779c428cbd9bb6a6be6fed8f840f5c571c54f057115343425f9',true,'v','sql'),
   ('authority_child_registration_step_v1(integer)','7ba85ac77d2ac21e1d2afa3ff50738d4547062f850490d20e3f9bf0b9ec7abbc',true,'v','sql'),
+  ('_authority_child_parent_close_prepare_v1(jsonb,integer,integer)','305e9fc3c923435b9afb79b4b41fdde5a59f0f529dade4ac17df7ce55712d7d1',false,'v','plpgsql'),
+  ('authority_child_parent_close_apply_v1(jsonb)','2f373544a8215634f5222896c93b74416c5c2e9718346553fc9107486d32e8cf',true,'v','plpgsql'),
   ('authority_child_registration_complete_v1()','4f44ebad4a5aea644f7180b9ae686edc411ef1c7f0262bd12ba6c1064fe5ac23',true,'v','sql')
  )
  SELECT EXISTS(SELECT 1 FROM owner_role o JOIN pg_catalog.pg_roles r ON r.oid=o.oid WHERE r.rolname=current_user)
@@ -167,8 +377,8 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_child_runtime_storage_v1()','3c62af588f9e5de90587a615a27fb0d89b32576f6c228a471eff954ed11494e1',true),
- ('_authority_crud_storage_v3()','bc18c9d0bd00bd804a33857b1dd170fc2936d33ccf3a752811793dc2ebb7dc3f',true),
+ ('_authority_child_runtime_storage_v1()','7ac364c7e27045f5dcfabafbac9f3394b3c646cb54c514509db656fc5c2b32af',true),
+ ('_authority_crud_storage_v3()','36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -218,6 +428,8 @@ DO $$ DECLARE signature text; owner_oid oid; principal record; BEGIN
    'authority_child_registration_begin_body_v1(jsonb)',
    'authority_child_registration_step_v1(integer)',
    'authority_child_registration_complete_v1()',
+   'authority_child_parent_close_apply_v1(jsonb)',
+   '_authority_child_parent_close_prepare_v1(jsonb,integer,integer)',
    '_authority_child_runtime_storage_v1()'
  ] LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION kaname.%s FROM PUBLIC',signature);
@@ -343,7 +555,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','bc18c9d0bd00bd804a33857b1dd170fc2936d33ccf3a752811793dc2ebb7dc3f',true),
+ ('_authority_crud_storage_v3()','36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -387,6 +599,8 @@ END $$;
 -- +goose StatementEnd
 
 DROP FUNCTION kaname._authority_child_runtime_storage_v1();
+DROP FUNCTION kaname.authority_child_parent_close_apply_v1(jsonb);
+DROP FUNCTION kaname._authority_child_parent_close_prepare_v1(jsonb,integer,integer);
 DROP FUNCTION kaname.authority_child_registration_complete_v1();
 DROP FUNCTION kaname.authority_child_registration_step_v1(integer);
 DROP FUNCTION kaname.authority_child_registration_begin_body_v1(jsonb);
