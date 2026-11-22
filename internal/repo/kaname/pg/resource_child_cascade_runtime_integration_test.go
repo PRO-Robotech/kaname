@@ -104,16 +104,21 @@ func TestUserChildRuntimeParentUnregisterCascadePrewaitAndReceiptRetention(t *te
 	callErr := resourcePublicAwait(t, call)
 	resourcePublicEntryCause(t, callErr)
 	require.NoError(t, callErr)
-	var mirrors, states, edges, facts int
+	var mirrors, states, edges, hierarchyFacts, reconcileEvents int
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT
  (SELECT count(*) FROM kaname.resource_mirror WHERE (object_type='childstage.container' AND object_id='container-one') OR (object_type=$1 AND object_id=$2)),
  (SELECT count(*) FROM kaname.authority_child_parent_state WHERE object_type='childstage.container' AND object_id='container-one'),
  (SELECT count(*) FROM kaname.resource_parent_edge WHERE (object_type='childstage_container' AND object_id='container-one') OR (object_type='childstage_child' AND object_id=$2)),
- (SELECT count(*) FROM kaname.relation_fact WHERE (object_type='childstage_container' AND object_id='container-one') OR (object_type='childstage_child' AND object_id=$2))`, child.ResourceType, child.ResourceID).Scan(&mirrors, &states, &edges, &facts))
+ (SELECT count(*) FROM kaname.relation_fact WHERE relation IN ('project','parent','owner')
+  AND ((object_type='childstage_container' AND object_id='container-one') OR (object_type='childstage_child' AND object_id=$2))),
+ (SELECT count(DISTINCT (object_type,object_id)) FROM kaname.resource_reconcile_outbox WHERE event_type='mirror.delete'
+  AND ((object_type='childstage.container' AND object_id='container-one') OR (object_type=$1 AND object_id=$2)))`,
+		child.ResourceType, child.ResourceID).Scan(&mirrors, &states, &edges, &hierarchyFacts, &reconcileEvents))
 	require.Zero(t, mirrors, "родитель и потомок сняты одним commit")
 	require.Zero(t, states, "FK cascade удалил инкарнацию родителя")
 	require.Zero(t, edges)
-	require.Zero(t, facts)
+	require.Zero(t, hierarchyFacts, "каскад снял структурные отношения родителя и потомка")
+	require.Equal(t, 2, reconcileEvents, "обе записи поставлены на пересчёт широких выдач")
 	var beforeScope, afterScope struct {
 		Scopes json.RawMessage `json:"scopes"`
 	}
