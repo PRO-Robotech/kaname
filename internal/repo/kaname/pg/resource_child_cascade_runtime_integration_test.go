@@ -104,18 +104,23 @@ func TestUserChildRuntimeParentUnregisterCascadePrewaitAndReceiptRetention(t *te
 	callErr := resourcePublicAwait(t, call)
 	resourcePublicEntryCause(t, callErr)
 	require.NoError(t, callErr)
-	var mirrors, states, scopes, edges, facts int
+	var mirrors, states, edges, facts int
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT
  (SELECT count(*) FROM kaname.resource_mirror WHERE (object_type='childstage.container' AND object_id='container-one') OR (object_type=$1 AND object_id=$2)),
  (SELECT count(*) FROM kaname.authority_child_parent_state WHERE object_type='childstage.container' AND object_id='container-one'),
- (SELECT count(*) FROM kaname.resource_registration_scope WHERE (object_type='childstage_container' AND object_id='container-one') OR (object_type='childstage_child' AND object_id=$2)),
  (SELECT count(*) FROM kaname.resource_parent_edge WHERE (object_type='childstage_container' AND object_id='container-one') OR (object_type='childstage_child' AND object_id=$2)),
- (SELECT count(*) FROM kaname.relation_fact WHERE (object_type='childstage_container' AND object_id='container-one') OR (object_type='childstage_child' AND object_id=$2))`, child.ResourceType, child.ResourceID).Scan(&mirrors, &states, &scopes, &edges, &facts))
+ (SELECT count(*) FROM kaname.relation_fact WHERE (object_type='childstage_container' AND object_id='container-one') OR (object_type='childstage_child' AND object_id=$2))`, child.ResourceType, child.ResourceID).Scan(&mirrors, &states, &edges, &facts))
 	require.Zero(t, mirrors, "родитель и потомок сняты одним commit")
 	require.Zero(t, states, "FK cascade удалил инкарнацию родителя")
-	require.Zero(t, scopes)
 	require.Zero(t, edges)
 	require.Zero(t, facts)
+	var beforeScope, afterScope struct {
+		Scopes json.RawMessage `json:"scopes"`
+	}
+	require.NoError(t, json.Unmarshal(before, &beforeScope))
+	require.NoError(t, json.Unmarshal(active(), &afterScope))
+	require.NotEqual(t, "null", string(beforeScope.Scopes))
+	require.JSONEq(t, string(beforeScope.Scopes), string(afterScope.Scopes), "сохранённая область используется для авторизованного повтора снятия")
 	require.JSONEq(t, string(immutable), string(receipt()), "историческая квитанция создания неизменна после cascade")
 	authorityWaitReleased(t, r.runtime)
 }
