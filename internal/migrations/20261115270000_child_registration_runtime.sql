@@ -168,7 +168,7 @@ BEGIN
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
  ('_authority_child_runtime_storage_v1()','3c62af588f9e5de90587a615a27fb0d89b32576f6c228a471eff954ed11494e1',true),
- ('_authority_crud_storage_v3()','bf385f1f32a62688c84f8fe02190aeda68d0ed7b8514a19a8e8d1344412e2df8',true),
+ ('_authority_crud_storage_v3()','7ee06c748759eddba957013bf64512059e198b37a85f4a46755802b02cd38e5b',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -289,7 +289,7 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-DO $$ DECLARE signature text; owner_oid oid; principal record; BEGIN
+DO $$ DECLARE signature text; owner_oid oid; principal record; mismatches jsonb; BEGIN
  SELECT relowner INTO STRICT owner_oid FROM pg_catalog.pg_class WHERE oid='kaname.authority_writer_protocol'::regclass;
  FOREACH signature IN ARRAY ARRAY[
    'authority_child_registration_begin_body_v1(jsonb)',
@@ -313,7 +313,48 @@ DO $$ DECLARE signature text; owner_oid oid; principal record; BEGIN
   END LOOP;
  END LOOP;
  IF NOT kaname._authority_full_contract_storage_v3() THEN
-  RAISE EXCEPTION 'child registration runtime closure incomplete' USING ERRCODE='55000';
+ WITH owner_role AS (
+  SELECT relowner AS oid FROM pg_catalog.pg_class WHERE oid='kaname.authority_writer_protocol'::regclass
+ ), approved AS (
+  SELECT a.grantee FROM pg_catalog.pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a, owner_role o
+  WHERE p.oid='kaname.authority_resource_source_enter_v3(text,text[],jsonb,text,text,text)'::regprocedure
+   AND a.grantee NOT IN (0,o.oid) AND a.privilege_type='EXECUTE' AND NOT a.is_grantable
+ ), expected(signature,digest,definer,volatility,language) AS (VALUES
+  ('_authority_child_registration_capture_v1(text,text,integer,integer)','13726c6180cfc4c7c9bb7001f0363f06d64bad31035ed845821fb9fd2c8257dc',false,'s','plpgsql'),
+  ('_authority_child_registration_recheck_v1(text,text,jsonb,jsonb,jsonb,integer,integer)','5472c35ce47f678131d75e938ceffafecef57c1fcf7630f8b3ae70f1349e1c82',false,'v','plpgsql'),
+  ('_authority_child_registration_outcome_v1(jsonb,timestamptz)','868d3dcfd39cdbbcec87e550e8504472db5aa9cec700ed74ca50111f2db9a2fa',false,'s','plpgsql'),
+  ('_authority_child_registration_sources_v1(jsonb,jsonb,jsonb,jsonb)','b9a7213485e415a32ad2d71f2b2a47c93b236e0617f2934dd76017e7c884e7be',false,'s','plpgsql'),
+  ('_authority_child_registration_program_v1(jsonb,jsonb,jsonb,jsonb,text,text,timestamptz,timestamptz,uuid)','1cb416806c3d5123b4aacc5676e5cc58c9b7c7ab6eaf18d0b5be1b77686549b7',false,'s','plpgsql'),
+  ('_authority_child_registration_maximum_v1(jsonb,jsonb,jsonb)','21f54ca5cea648271cde409fc8cab9175cf1cc69d712bd14395f9a32aa378ded',false,'s','plpgsql'),
+  ('_authority_child_registration_hold_v1(jsonb,integer,integer)','546f11cf9b517b00d48c050df26637da333f7dc5016610738ac2081677a9c29b',false,'v','plpgsql'),
+  ('_authority_child_registration_select_v1(jsonb,timestamptz)','1a6505db61eda4a1447c3e8c837604a308adb74387da25dc4f63e2428c53ccb3',false,'v','plpgsql'),
+  ('_authority_child_registration_prepare_v1(jsonb,integer,integer)','d5f65b20fa5af6ea25a043ec99696c488f00521741413e833216e678608cb089',false,'v','plpgsql'),
+  ('_authority_child_registration_finalize_v1(jsonb,integer,integer)','9007c266ff5ad31f8cf44cc94b0a1ba6529f8d02ba4ee54f6507e7b102076353',false,'v','plpgsql'),
+  ('_authority_child_registration_begin_body_v1(jsonb)','23d1cf16c9baaafb585de00185a2c73dbcb72a6e0b59f6373fed171a838aa578',false,'v','plpgsql'),
+  ('_authority_child_registration_step_done_v1(jsonb,integer)','9f7888e6001f38328963d17053bf6d7640688e0a16c09fb82cc10c7971f30586',false,'s','plpgsql'),
+  ('_authority_child_registration_step_v1(integer)','2602fe97ef81b1a242b322c697e90b63d005dd30454010fa64abebb0387893eb',false,'v','plpgsql'),
+  ('_authority_child_registration_complete_v1()','17686473c29efe97fb787cf2a1495997240719a5913a272404c9b87823f997bb',false,'v','plpgsql'),
+  ('authority_child_registration_begin_body_v1(jsonb)','bf7b041190118779c428cbd9bb6a6be6fed8f840f5c571c54f057115343425f9',true,'v','sql'),
+  ('authority_child_registration_step_v1(integer)','7ba85ac77d2ac21e1d2afa3ff50738d4547062f850490d20e3f9bf0b9ec7abbc',true,'v','sql'),
+  ('authority_child_registration_complete_v1()','4f44ebad4a5aea644f7180b9ae686edc411ef1c7f0262bd12ba6c1064fe5ac23',true,'v','sql')
+ )
+ SELECT coalesce(jsonb_agg(to_jsonb(mismatched)),'[]') INTO mismatches FROM (
+  SELECT e.signature AS signature, p.proowner AS owner_oid, p.prosecdef AS definer, p.provolatile::text AS volatility,
+   p.proconfig AS config, l.lanname AS language, encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') AS actual_digest,
+   e.digest AS expected_digest, p.proacl AS acl FROM expected e CROSS JOIN owner_role o
+  LEFT JOIN pg_catalog.pg_proc p ON p.oid=to_regprocedure('kaname.'||e.signature)
+  LEFT JOIN pg_catalog.pg_language l ON l.oid=p.prolang
+  WHERE (p.proowner=o.oid AND p.prosecdef=e.definer AND p.provolatile::text=e.volatility
+   AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp'] AND l.lanname=e.language
+   AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')=e.digest) IS NOT TRUE
+  OR EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+   WHERE a.grantee<>o.oid AND (NOT e.definer OR a.is_grantable OR a.privilege_type<>'EXECUTE'
+    OR NOT EXISTS(SELECT 1 FROM approved r WHERE r.grantee=a.grantee)))
+  OR (e.definer AND EXISTS(SELECT 1 FROM approved r
+   WHERE NOT EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=r.grantee AND a.privilege_type='EXECUTE')))
+ ) mismatched;
+  RAISE EXCEPTION 'child registration runtime closure incomplete' USING ERRCODE='55000',
+   DETAIL=format('crud=%s child=%s mismatches=%s',kaname._authority_crud_storage_v3(),kaname._authority_child_runtime_storage_v1(),mismatches);
  END IF;
 END $$;
 -- +goose StatementEnd
@@ -494,7 +535,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','bf385f1f32a62688c84f8fe02190aeda68d0ed7b8514a19a8e8d1344412e2df8',true),
+ ('_authority_crud_storage_v3()','7ee06c748759eddba957013bf64512059e198b37a85f4a46755802b02cd38e5b',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),

@@ -36,6 +36,55 @@ CREATE INDEX authority_child_creation_rate
 CREATE INDEX resource_parent_edge_direct_children
  ON kaname.resource_parent_edge(parent_type,parent_id,object_type,object_id) WHERE depth=1;
 
+-- FK не должен ждать закрытое состояние родителя впервые после DecisionAt.
+-- В закрытый план попадают только фактические удаления зеркала.
+-- +goose StatementBegin
+CREATE FUNCTION kaname._authority_child_parent_cascade_prewait_v1(p_direct jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(held_relations jsonb,logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE keys jsonb;
+BEGIN
+ PERFORM kaname.authority_protocol_require_owner();
+ IF jsonb_typeof(p_direct->'steps') IS DISTINCT FROM 'array' OR jsonb_array_length(p_direct->'steps')>100000
+  OR p_rows IS NULL OR p_reads IS NULL THEN
+  RAISE EXCEPTION 'child parent cascade plan invalid' USING ERRCODE='42501';
+ END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('object_type',coordinate.dotted_type,'object_id',coordinate.object_id)),'[]'::jsonb)
+ INTO keys FROM (
+  SELECT DISTINCT step->>'dotted_type' dotted_type,step->>'object_id' object_id
+  FROM jsonb_array_elements(p_direct->'steps') step
+  WHERE step->>'kind'='cleanup_mirror_delete' AND step->'deleted'='true'::jsonb
+ ) coordinate;
+ logical_rows:=jsonb_array_length(keys);
+ held_relations:='[]'::jsonb;
+ logical_reads:=0;
+ IF logical_rows=0 THEN RETURN NEXT;RETURN;END IF;
+ IF logical_rows>p_rows OR p_reads<2 THEN
+  RAISE EXCEPTION 'child parent cascade lock budget exceeded' USING ERRCODE='54000';
+ END IF;
+ LOCK TABLE ONLY kaname.authority_child_parent_state IN ROW EXCLUSIVE MODE;
+ PERFORM 1 FROM jsonb_to_recordset(keys) AS item(object_type text,object_id text)
+  JOIN ONLY kaname.authority_child_parent_state p USING(object_type,object_id)
+  ORDER BY p.object_type COLLATE "C",p.object_id COLLATE "C" FOR UPDATE OF p;
+ held_relations:=jsonb_build_array(jsonb_build_object(
+  'oid','kaname.authority_child_parent_state'::regclass::oid,'mode','RowExclusiveLock'));
+ logical_reads:=2;
+ RETURN NEXT;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+DO $$ DECLARE principal record; BEGIN
+ REVOKE ALL ON FUNCTION kaname._authority_child_parent_cascade_prewait_v1(jsonb,integer,integer) FROM PUBLIC;
+ FOR principal IN SELECT DISTINCT r.rolname FROM pg_catalog.pg_proc p
+  CROSS JOIN LATERAL aclexplode(p.proacl) a JOIN pg_catalog.pg_roles r ON r.oid=a.grantee
+  WHERE p.oid='kaname._authority_child_parent_cascade_prewait_v1(jsonb,integer,integer)'::regprocedure
+   AND a.grantee<>p.proowner LOOP
+  EXECUTE format('REVOKE ALL ON FUNCTION kaname._authority_child_parent_cascade_prewait_v1(jsonb,integer,integer) FROM %I',principal.rolname);
+ END LOOP;
+END $$;
+-- +goose StatementEnd
+
 -- +goose StatementBegin
 DO $$ DECLARE target text;r record;BEGIN
  FOREACH target IN ARRAY ARRAY['authority_child_parent_state','authority_child_creation'] LOOP
@@ -666,6 +715,113 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname._authority_resource_unregistration_prepare_v2(p_envelope jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;source_index jsonb;verified jsonb;certificate jsonb;direct jsonb;plan jsonb;maximum jsonb;predicates jsonb;policy jsonb;
+ current_state jsonb;reservations jsonb;body jsonb;compiled jsonb;required jsonb;operations jsonb;expected_accounts jsonb;expected_sources jsonb;
+ audit_ids jsonb:='{}';audit_id text;key_value text;global_required boolean;source_required boolean;
+ bundle_result record;catalog_result record;epoch_result record;current_result record;authority_result record;
+ audit_result record;reconcile_result record;subject_result record;relation_result record;lifecycle_result record;
+ sequence_body jsonb;used_rows integer:=0;used_reads integer:=0;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'resource' OR proof->>'purpose' IS DISTINCT FROM 'participant'
+ OR proof->>'consumer_abi' IS DISTINCT FROM '2' OR proof->>'consumer_profile' NOT IN ('resource_pending','resource_source_pending')
+ OR proof->>'consumer_finalized' IS DISTINCT FROM 'false' OR current_setting('transaction_isolation')<>'read committed'
+ OR to_regclass('pg_temp.kaname_authority_resource_manifest') IS NOT NULL THEN
+  RAISE EXCEPTION 'cleanup compiler requires fresh pending RC admission' USING ERRCODE='42501';END IF;
+ IF p_rows IS NULL OR p_rows<1 OR p_rows>100000 OR p_reads IS NULL OR p_reads<1 OR p_reads>4096
+ OR jsonb_typeof(p_envelope) IS DISTINCT FROM 'object' OR octet_length(p_envelope::text)>67108864
+ OR p_envelope#>>'{intent,Action}' IS DISTINCT FROM '2' THEN
+  RAISE EXCEPTION 'cleanup compiler input invalid' USING ERRCODE='42501';END IF;
+ SELECT * INTO STRICT bundle_result FROM kaname._authority_resource_bundle_catalog_v2(p_rows,p_reads);
+ used_rows:=used_rows+bundle_result.logical_rows;used_reads:=used_reads+bundle_result.logical_reads;
+ SELECT * INTO STRICT catalog_result FROM kaname._authority_resource_catalog_wait_v2(p_envelope->'catalogs',p_rows-used_rows,p_reads-used_reads);
+ used_rows:=used_rows+catalog_result.logical_rows;used_reads:=used_reads+catalog_result.logical_reads;
+ source_index:=kaname._authority_resource_capture_index_v2(p_envelope->'sources',100000);
+ verified:=kaname._authority_resource_unregistration_certificate_v2(source_index,bundle_result.catalog,catalog_result.catalog_rows,p_envelope->'catalogs',p_envelope);
+ certificate:=verified->'certificate';
+ direct:=kaname._authority_resource_unregistration_direct_program_v2(source_index,verified,transaction_timestamp());
+ plan:=kaname._authority_resource_unregistration_operation_maximum_v2(verified,direct);
+ source_required:=plan->'source_effects'='true'::jsonb;
+ IF (proof->>'consumer_profile'='resource_source_pending') IS DISTINCT FROM source_required THEN
+  RAISE EXCEPTION 'cleanup SOURCE classification changed' USING ERRCODE='P1034';END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('kind',effect.kind,'id',effect.id) ORDER BY effect.kind COLLATE "C",effect.id COLLATE "C"),'[]'::jsonb)
+ INTO expected_sources FROM (
+  SELECT 'binding'::text kind,k id FROM jsonb_object_keys(verified->'changed_bindings') k
+  UNION ALL SELECT 'role',k FROM jsonb_object_keys(verified->'changed_roles') k) effect;
+ IF coalesce(nullif(p_envelope->'source_effects','null'::jsonb),'[]'::jsonb) IS DISTINCT FROM expected_sources THEN
+  RAISE EXCEPTION 'cleanup SOURCE write census differs' USING ERRCODE='P1034';END IF;
+ maximum:=kaname._authority_resource_unregistration_maximum_v2(source_index,verified,direct,catalog_result.catalog_rows,plan,p_envelope->'native_guards');
+ required:=maximum->'required';predicates:=kaname._authority_resource_predicate_maximum_v2(source_index,required);
+ policy:=(predicates->'policy_epochs')||(maximum->'policy_epochs');maximum:=jsonb_set(maximum,'{policy_epochs}',policy);
+ global_required:=(maximum->>'global')::boolean OR (predicates->>'global')::boolean;
+ IF global_required IS NULL OR (proof->>'mode'='global') IS DISTINCT FROM global_required THEN
+  RAISE EXCEPTION 'cleanup complete mutation classification changed' USING ERRCODE='P1034';END IF;
+ SELECT coalesce(jsonb_agg(q.key ORDER BY q.key COLLATE "C"),'[]'::jsonb) INTO expected_accounts FROM jsonb_object_keys(maximum->'accounts') q(key);
+ IF NOT global_required AND (expected_accounts='[]'::jsonb OR proof->'accounts' IS DISTINCT FROM expected_accounts) THEN
+  RAISE EXCEPTION 'cleanup complete mutation accounts changed' USING ERRCODE='P1034';END IF;
+ SELECT * INTO STRICT epoch_result FROM kaname._authority_resource_epoch_wait_v2(maximum->'source_guards',policy,
+  maximum->'binding_epochs',p_rows-used_rows,p_reads-used_reads);
+ used_rows:=used_rows+epoch_result.logical_rows;used_reads:=used_reads+epoch_result.logical_reads;
+ SELECT * INTO STRICT current_result FROM kaname._authority_resource_required_reread_v2(source_index,required,
+  maximum->'write_sources',p_rows-used_rows,p_reads-used_reads);
+ used_rows:=used_rows+current_result.logical_rows;used_reads:=used_reads+current_result.logical_reads;
+ IF current_result.predicate_protections IS DISTINCT FROM predicates->'protections' THEN
+  RAISE EXCEPTION 'cleanup current predicate maximum changed' USING ERRCODE='P1034';END IF;
+ SELECT * INTO STRICT authority_result FROM kaname._authority_resource_registration_authority_wait_v2(
+  p_envelope,certificate,bundle_result.model_source,epoch_result.lock_witness,p_rows-used_rows,p_reads-used_reads);
+ used_rows:=used_rows+authority_result.logical_rows;used_reads:=used_reads+authority_result.logical_reads;
+ FOR audit_id IN SELECT jsonb_array_elements_text(verified->'withdrawal_audit_ids') LOOP
+  audit_ids:=audit_ids||jsonb_build_object(audit_id,true);
+ END LOOP;
+ audit_id:=NULL;
+ IF plan->'audit_possible'='true'::jsonb THEN
+  audit_id:=certificate->>'audit_id';
+  IF coalesce(audit_id,'') !~ '^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$' OR audit_ids ? audit_id THEN
+   RAISE EXCEPTION 'cleanup root audit reservation invalid' USING ERRCODE='42501';END IF;
+  audit_ids:=audit_ids||jsonb_build_object(audit_id,true);
+ END IF;
+ IF audit_ids<>'{}'::jsonb THEN
+  SELECT * INTO STRICT audit_result FROM kaname._authority_resource_audit_capture_wait_v2(audit_ids,p_rows-used_rows,p_reads-used_reads,true);
+ ELSE SELECT '[]'::jsonb lock_witness,0 logical_rows,0 logical_reads INTO audit_result;END IF;
+ used_rows:=used_rows+audit_result.logical_rows;used_reads:=used_reads+audit_result.logical_reads;
+ SELECT * INTO STRICT reconcile_result FROM kaname._authority_resource_reconcile_wait_v2((plan->>'reconcile_count')::integer,p_reads-used_reads);
+ used_reads:=used_reads+reconcile_result.logical_reads;
+ IF (verified->>'withdrawal_subject_count')::integer>0 THEN
+  SELECT * INTO STRICT subject_result FROM kaname._authority_resource_subject_change_wait_v2((verified->>'withdrawal_subject_count')::integer,p_reads-used_reads);
+ ELSE SELECT '[]'::jsonb reserved_ids,'[]'::jsonb held_relations,'[]'::jsonb held_advisory,0 logical_reads INTO subject_result;END IF;
+ used_reads:=used_reads+subject_result.logical_reads;
+ operations:=(maximum->'operations')-ARRAY['resource_reconcile_outbox','subject_change_outbox'];
+ SELECT * INTO STRICT relation_result FROM kaname._authority_resource_physical_relations_capture_v2(operations,p_reads-used_reads,true);
+ used_reads:=used_reads+relation_result.logical_reads;
+ SELECT * INTO STRICT lifecycle_result FROM kaname._authority_child_parent_cascade_prewait_v1(
+  direct,p_rows-used_rows,p_reads-used_reads);
+ used_rows:=used_rows+lifecycle_result.logical_rows;
+ used_reads:=used_reads+lifecycle_result.logical_reads;
+ reservations:=jsonb_build_object('audit_id',audit_id,'audit_ids',verified->'withdrawal_audit_ids',
+  'subject_ids',subject_result.reserved_ids,'reconcile_ids',reconcile_result.reserved_ids);
+ current_state:=kaname._authority_resource_unregistration_current_v2(source_index,maximum,direct);
+ body:=jsonb_build_object('source_index',source_index,'verified',verified,'catalog',bundle_result.catalog,'direct',direct,
+  'maximum',maximum,'current',current_state,'reservations',reservations,'acl',relation_result.acl_capabilities);
+ IF used_rows>p_rows OR used_reads>p_reads THEN RAISE EXCEPTION 'cleanup aggregate prewait exceeded' USING ERRCODE='54000';END IF;
+ compiled:=jsonb_build_object('intent',p_envelope->'intent','certificate',certificate,'sources',jsonb_build_object('required',required),
+  'program',plan,'authority',authority_result.authority,'body',body,'maximum',maximum,'epoch_witness',epoch_result.lock_witness,
+  'catalog_rows',catalog_result.catalog_rows,
+  'held_relations',relation_result.lock_witness||reconcile_result.held_relations||subject_result.held_relations||lifecycle_result.held_relations,
+  'held_advisory',(epoch_result.lock_witness->'held_advisory')||audit_result.lock_witness||reconcile_result.held_advisory||subject_result.held_advisory);
+ -- Только server-verified frozen inputs; предварительные часы — placeholder
+ -- для формы. Authority/fold decision остаётся у единственного finalizer.
+ sequence_body:=kaname._authority_resource_unregistration_materialize_v2(source_index,verified,bundle_result.catalog,direct,
+  maximum,current_state,reservations,transaction_timestamp(),transaction_timestamp());
+ used_reads:=used_reads+kaname._authority_resource_registration_sequence_prepare_v3(sequence_body,2,p_reads-used_reads);
+ PERFORM kaname._authority_resource_registration_store_v2(compiled);
+ RETURN QUERY SELECT used_rows,used_reads;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname._authority_crud_storage_v3() RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE expected record;owner_oid oid;trigger_counts jsonb;trigger_count bigint;
@@ -857,7 +1013,8 @@ BEGIN
  ('_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','0d6ab18cc9cac1395df175c0c91912737bf8e78464d46da0c385e31aa36c9b66',true,'v',true,'private'),
  ('_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','ca262446dbab831c80c933c45b0095f12ceaa10367477a696266217b44736911',true,'v',true,'private'),
  ('_authority_resource_registration_direct_prepare_v2(jsonb,integer,integer)','ad9230edf198624a3d9caa84ee5a5a9954b79cd9afa58b1e0b64b60eb3dd2807',true,'v',true,'preserve'),
- ('_authority_resource_unregistration_prepare_v2(jsonb,integer,integer)','3b4c2286943cb21eb7a8f3f9875bd43a9da46c92268bb2838c30c01102df681d',true,'v',true,'preserve'),
+ ('_authority_child_parent_cascade_prewait_v1(jsonb,integer,integer)','801ee44ba52ceb636e3ca820b560b33c4558f7a8e504c1b9047ede50183035d7',false,'v',true,'private'),
+ ('_authority_resource_unregistration_prepare_v2(jsonb,integer,integer)','ed2c4fcf57221f8687c3d086a286bb738add6cfa84cebfda2fc0a20a95a37ace',true,'v',true,'preserve'),
  ('authority_role_stage_epoch_lock(text[],jsonb)','2f4e6d4569577abe84313594f72e973d8b5fb63ac2adbd5605640751c7bc5021',true,'v',true,'preserve'),
  ('authority_role_sequence_prepare_v3(jsonb,integer,integer)','5d47e24c50baaa1619a6cfb2198255c248fec06d535e13febacf7078c6aeae64',true,'v',true,'export'),
  ('authority_role_sequence_finalize_v3()','4b1b5626bc90a7826a4bed308befc83c4e688b636f9dcd59d7446811f20ec891',true,'v',true,'export'),
@@ -1445,7 +1602,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','bf385f1f32a62688c84f8fe02190aeda68d0ed7b8514a19a8e8d1344412e2df8',true),
+ ('_authority_crud_storage_v3()','7ee06c748759eddba957013bf64512059e198b37a85f4a46755802b02cd38e5b',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -2091,6 +2248,109 @@ BEGIN
  UPDATE pg_temp.kaname_authority_attestation SET decision_at=at_time;
  UPDATE pg_temp.kaname_authority_consumer SET finalized=true;
  RETURN QUERY SELECT at_time,count_rows,1;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname._authority_resource_unregistration_prepare_v2(p_envelope jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;source_index jsonb;verified jsonb;certificate jsonb;direct jsonb;plan jsonb;maximum jsonb;predicates jsonb;policy jsonb;
+ current_state jsonb;reservations jsonb;body jsonb;compiled jsonb;required jsonb;operations jsonb;expected_accounts jsonb;expected_sources jsonb;
+ audit_ids jsonb:='{}';audit_id text;key_value text;global_required boolean;source_required boolean;
+ bundle_result record;catalog_result record;epoch_result record;current_result record;authority_result record;
+ audit_result record;reconcile_result record;subject_result record;relation_result record;
+ sequence_body jsonb;used_rows integer:=0;used_reads integer:=0;
+BEGIN
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'resource' OR proof->>'purpose' IS DISTINCT FROM 'participant'
+ OR proof->>'consumer_abi' IS DISTINCT FROM '2' OR proof->>'consumer_profile' NOT IN ('resource_pending','resource_source_pending')
+ OR proof->>'consumer_finalized' IS DISTINCT FROM 'false' OR current_setting('transaction_isolation')<>'read committed'
+ OR to_regclass('pg_temp.kaname_authority_resource_manifest') IS NOT NULL THEN
+  RAISE EXCEPTION 'cleanup compiler requires fresh pending RC admission' USING ERRCODE='42501';END IF;
+ IF p_rows IS NULL OR p_rows<1 OR p_rows>100000 OR p_reads IS NULL OR p_reads<1 OR p_reads>4096
+ OR jsonb_typeof(p_envelope) IS DISTINCT FROM 'object' OR octet_length(p_envelope::text)>67108864
+ OR p_envelope#>>'{intent,Action}' IS DISTINCT FROM '2' THEN
+  RAISE EXCEPTION 'cleanup compiler input invalid' USING ERRCODE='42501';END IF;
+ SELECT * INTO STRICT bundle_result FROM kaname._authority_resource_bundle_catalog_v2(p_rows,p_reads);
+ used_rows:=used_rows+bundle_result.logical_rows;used_reads:=used_reads+bundle_result.logical_reads;
+ SELECT * INTO STRICT catalog_result FROM kaname._authority_resource_catalog_wait_v2(p_envelope->'catalogs',p_rows-used_rows,p_reads-used_reads);
+ used_rows:=used_rows+catalog_result.logical_rows;used_reads:=used_reads+catalog_result.logical_reads;
+ source_index:=kaname._authority_resource_capture_index_v2(p_envelope->'sources',100000);
+ verified:=kaname._authority_resource_unregistration_certificate_v2(source_index,bundle_result.catalog,catalog_result.catalog_rows,p_envelope->'catalogs',p_envelope);
+ certificate:=verified->'certificate';
+ direct:=kaname._authority_resource_unregistration_direct_program_v2(source_index,verified,transaction_timestamp());
+ plan:=kaname._authority_resource_unregistration_operation_maximum_v2(verified,direct);
+ source_required:=plan->'source_effects'='true'::jsonb;
+ IF (proof->>'consumer_profile'='resource_source_pending') IS DISTINCT FROM source_required THEN
+  RAISE EXCEPTION 'cleanup SOURCE classification changed' USING ERRCODE='P1034';END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('kind',effect.kind,'id',effect.id) ORDER BY effect.kind COLLATE "C",effect.id COLLATE "C"),'[]'::jsonb)
+ INTO expected_sources FROM (
+  SELECT 'binding'::text kind,k id FROM jsonb_object_keys(verified->'changed_bindings') k
+  UNION ALL SELECT 'role',k FROM jsonb_object_keys(verified->'changed_roles') k) effect;
+ IF coalesce(nullif(p_envelope->'source_effects','null'::jsonb),'[]'::jsonb) IS DISTINCT FROM expected_sources THEN
+  RAISE EXCEPTION 'cleanup SOURCE write census differs' USING ERRCODE='P1034';END IF;
+ maximum:=kaname._authority_resource_unregistration_maximum_v2(source_index,verified,direct,catalog_result.catalog_rows,plan,p_envelope->'native_guards');
+ required:=maximum->'required';predicates:=kaname._authority_resource_predicate_maximum_v2(source_index,required);
+ policy:=(predicates->'policy_epochs')||(maximum->'policy_epochs');maximum:=jsonb_set(maximum,'{policy_epochs}',policy);
+ global_required:=(maximum->>'global')::boolean OR (predicates->>'global')::boolean;
+ IF global_required IS NULL OR (proof->>'mode'='global') IS DISTINCT FROM global_required THEN
+  RAISE EXCEPTION 'cleanup complete mutation classification changed' USING ERRCODE='P1034';END IF;
+ SELECT coalesce(jsonb_agg(q.key ORDER BY q.key COLLATE "C"),'[]'::jsonb) INTO expected_accounts FROM jsonb_object_keys(maximum->'accounts') q(key);
+ IF NOT global_required AND (expected_accounts='[]'::jsonb OR proof->'accounts' IS DISTINCT FROM expected_accounts) THEN
+  RAISE EXCEPTION 'cleanup complete mutation accounts changed' USING ERRCODE='P1034';END IF;
+ SELECT * INTO STRICT epoch_result FROM kaname._authority_resource_epoch_wait_v2(maximum->'source_guards',policy,
+  maximum->'binding_epochs',p_rows-used_rows,p_reads-used_reads);
+ used_rows:=used_rows+epoch_result.logical_rows;used_reads:=used_reads+epoch_result.logical_reads;
+ SELECT * INTO STRICT current_result FROM kaname._authority_resource_required_reread_v2(source_index,required,
+  maximum->'write_sources',p_rows-used_rows,p_reads-used_reads);
+ used_rows:=used_rows+current_result.logical_rows;used_reads:=used_reads+current_result.logical_reads;
+ IF current_result.predicate_protections IS DISTINCT FROM predicates->'protections' THEN
+  RAISE EXCEPTION 'cleanup current predicate maximum changed' USING ERRCODE='P1034';END IF;
+ SELECT * INTO STRICT authority_result FROM kaname._authority_resource_registration_authority_wait_v2(
+  p_envelope,certificate,bundle_result.model_source,epoch_result.lock_witness,p_rows-used_rows,p_reads-used_reads);
+ used_rows:=used_rows+authority_result.logical_rows;used_reads:=used_reads+authority_result.logical_reads;
+ FOR audit_id IN SELECT jsonb_array_elements_text(verified->'withdrawal_audit_ids') LOOP
+  audit_ids:=audit_ids||jsonb_build_object(audit_id,true);
+ END LOOP;
+ audit_id:=NULL;
+ IF plan->'audit_possible'='true'::jsonb THEN
+  audit_id:=certificate->>'audit_id';
+  IF coalesce(audit_id,'') !~ '^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$' OR audit_ids ? audit_id THEN
+   RAISE EXCEPTION 'cleanup root audit reservation invalid' USING ERRCODE='42501';END IF;
+  audit_ids:=audit_ids||jsonb_build_object(audit_id,true);
+ END IF;
+ IF audit_ids<>'{}'::jsonb THEN
+  SELECT * INTO STRICT audit_result FROM kaname._authority_resource_audit_capture_wait_v2(audit_ids,p_rows-used_rows,p_reads-used_reads,true);
+ ELSE SELECT '[]'::jsonb lock_witness,0 logical_rows,0 logical_reads INTO audit_result;END IF;
+ used_rows:=used_rows+audit_result.logical_rows;used_reads:=used_reads+audit_result.logical_reads;
+ SELECT * INTO STRICT reconcile_result FROM kaname._authority_resource_reconcile_wait_v2((plan->>'reconcile_count')::integer,p_reads-used_reads);
+ used_reads:=used_reads+reconcile_result.logical_reads;
+ IF (verified->>'withdrawal_subject_count')::integer>0 THEN
+  SELECT * INTO STRICT subject_result FROM kaname._authority_resource_subject_change_wait_v2((verified->>'withdrawal_subject_count')::integer,p_reads-used_reads);
+ ELSE SELECT '[]'::jsonb reserved_ids,'[]'::jsonb held_relations,'[]'::jsonb held_advisory,0 logical_reads INTO subject_result;END IF;
+ used_reads:=used_reads+subject_result.logical_reads;
+ operations:=(maximum->'operations')-ARRAY['resource_reconcile_outbox','subject_change_outbox'];
+ SELECT * INTO STRICT relation_result FROM kaname._authority_resource_physical_relations_capture_v2(operations,p_reads-used_reads,true);
+ used_reads:=used_reads+relation_result.logical_reads;
+ reservations:=jsonb_build_object('audit_id',audit_id,'audit_ids',verified->'withdrawal_audit_ids',
+  'subject_ids',subject_result.reserved_ids,'reconcile_ids',reconcile_result.reserved_ids);
+ current_state:=kaname._authority_resource_unregistration_current_v2(source_index,maximum,direct);
+ body:=jsonb_build_object('source_index',source_index,'verified',verified,'catalog',bundle_result.catalog,'direct',direct,
+  'maximum',maximum,'current',current_state,'reservations',reservations,'acl',relation_result.acl_capabilities);
+ IF used_rows>p_rows OR used_reads>p_reads THEN RAISE EXCEPTION 'cleanup aggregate prewait exceeded' USING ERRCODE='54000';END IF;
+ compiled:=jsonb_build_object('intent',p_envelope->'intent','certificate',certificate,'sources',jsonb_build_object('required',required),
+  'program',plan,'authority',authority_result.authority,'body',body,'maximum',maximum,'epoch_witness',epoch_result.lock_witness,
+  'catalog_rows',catalog_result.catalog_rows,
+  'held_relations',relation_result.lock_witness||reconcile_result.held_relations||subject_result.held_relations,
+  'held_advisory',(epoch_result.lock_witness->'held_advisory')||audit_result.lock_witness||reconcile_result.held_advisory||subject_result.held_advisory);
+ -- Только server-verified frozen inputs; предварительные часы — placeholder
+ -- для формы. Authority/fold decision остаётся у единственного finalizer.
+ sequence_body:=kaname._authority_resource_unregistration_materialize_v2(source_index,verified,bundle_result.catalog,direct,
+  maximum,current_state,reservations,transaction_timestamp(),transaction_timestamp());
+ used_reads:=used_reads+kaname._authority_resource_registration_sequence_prepare_v3(sequence_body,2,p_reads-used_reads);
+ PERFORM kaname._authority_resource_registration_store_v2(compiled);
+ RETURN QUERY SELECT used_rows,used_reads;
 END $$;
 -- +goose StatementEnd
 
@@ -2907,6 +3167,7 @@ END $$;
 -- +goose StatementEnd
 
 DROP INDEX kaname.resource_parent_edge_direct_children;
+DROP FUNCTION kaname._authority_child_parent_cascade_prewait_v1(jsonb,integer,integer);
 DROP TABLE kaname.authority_child_creation,kaname.authority_child_parent_state;
 
 -- +goose StatementBegin
