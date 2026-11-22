@@ -41,6 +41,13 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	}
 	delivery := childNativePublicDelivery(t)
 	f := newInstallationNativeWorldProfile(t, 7200, "", true)
+	// Второй человек — тот же начальный Given церемонии до FULL. Права
+	// не сеются: read-only привязку ниже выдаёт обычный публичный API.
+	readerGiven := &ceremonyWorld{t: t, id: "CHILD-PUBLIC-READER", ctx: f.given.ctx, pool: f.given.pool, logs: &lockedBuffer{}}
+	readerGiven.seedPerson()
+	readerGiven.markPerson()
+	readerGiven.session = readerGiven.seedSession("2")
+	f.secrets = append(f.secrets, readerGiven.session.bearer.CookieValue())
 	plan := installruntime.RegistryRegistrationWriterPlan([]string{f.tenantID})
 	input := installruntime.DeliveryInput{RegistrationWriters: plan, Manifests: delivery, CredentialFile: f.creator.CredentialFile}
 	process := f.apply(t, input)
@@ -48,6 +55,14 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	startChildNativeFull(t, f, process, input)
 	// Bearer действительно выдан ceremony после FULL запуска и принят /me.
 	f.renewOperator(t, f.given.ctx)
+	reader, err := f.wire.ExchangeOperator(f.given.ctx, installruntime.OperatorGiven{
+		UserID: string(readerGiven.user), SessionBearer: readerGiven.session.bearer.CookieValue(),
+		ClientID: f.given.ic1.rec.ClientID, ClientSecret: f.given.ic1.secret, RedirectURI: lineA1R,
+	})
+	require.NoError(t, err)
+	f.secrets = append(f.secrets, reader.Bearer())
+	require.NotEqual(t, f.operator.UserID(), reader.UserID())
+	requireNativeAuthority(t, f.given, "user", reader.UserID(), 0)
 	scenes := []nativeRegisteredChild{{parent: "public-parent"}, {parent: "other-parent"}}
 	moduleConn, err := f.wire.ModuleWriter(filepath.Join(f.session.Root, "pki"))
 	require.NoError(t, err)
@@ -70,16 +85,21 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 		targetParents = append(targetParents, map[string]any{"type": "registry.childProbeContainers", "id": scene.parent})
 	}
 	require.NotEqual(t, scenes[0].project, scenes[1].project)
-	var roleID string
+	var roleID, readerRoleID string
 	for _, raw := range f.ridList(t, "/iam/v1/roles", "roles", nil) {
 		var role iamv1.Role
 		require.NoError(t, protojson.Unmarshal(raw, &role))
+		if role.Name == "registry.child_public_reader" {
+			require.Empty(t, readerRoleID)
+			readerRoleID = role.Id
+		}
 		if role.Name == "registry.child_public_registrar" {
 			require.Empty(t, roleID)
 			roleID = role.Id
 		}
 	}
 	require.NotEmpty(t, roleID)
+	require.NotEmpty(t, readerRoleID)
 	binding := ridResponseID(t, f.ridOperation(t, http.MethodPost, "/iam/v1/accessBindings", f.operator.Bearer(), map[string]any{
 		"subjectType": "user", "subjectId": f.operator.UserID(), "roleId": roleID,
 		"scopeType": "iam.account", "scopeId": f.tenantID,
@@ -139,6 +159,96 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, first.version.Equal(replayed.GetVersion().AsTime()))
 	requireNativeRegisteredChild(t, f, first)
+	requireNativeChildReadOnlyDenials(t, f, reader, readerRoleID, scenes)
+}
+
+// 02/04 проверяют право чтения конкретного родителя через публичную авторизацию.
+// У синтетического модуля нет предметного Get; ответ Check не выдаётся за чтение.
+func requireNativeChildReadOnlyDenials(t *testing.T, f *installationNativeWorld, reader *installruntime.VerifiedOperator, role string, scenes []nativeRegisteredChild) {
+	t.Helper()
+	parent := scenes[0].parent
+	check := func(c require.TestingT, relation string) bool {
+		var raw json.RawMessage
+		ctx, cancel := context.WithTimeout(f.given.ctx, time.Second)
+		defer cancel()
+		code, err := f.wire.JSON(ctx, http.MethodPost, "/iam/v1/authorize:check", reader.Bearer(), map[string]any{
+			"subject":  "user:" + reader.UserID(),
+			"resource": map[string]any{"type": "registry_child_probe_container", "id": parent},
+			"action":   "registry.childProbeContainers.get", "requiredRelation": relation,
+		}, &raw)
+		require.NoError(c, err)
+		require.Equal(c, http.StatusOK, code)
+		var response iamv1.AuthorizeCheckResponse
+		require.NoError(c, protojson.Unmarshal(raw, &response))
+		return response.Allowed
+	}
+	require.False(t, check(t, ""), "до привязки у отдельного человека нет права чтения этого родителя")
+	binding := ridResponseID(t, f.ridOperation(t, http.MethodPost, "/iam/v1/accessBindings", f.operator.Bearer(), map[string]any{
+		"subjectType": "user", "subjectId": reader.UserID(), "roleId": role,
+		"scopeType": "iam.account", "scopeId": f.tenantID,
+		"target": map[string]any{"resources": map[string]any{"resources": []map[string]any{
+			{"type": "registry.childProbeContainers", "id": parent},
+		}}},
+	}, 0))
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		var materialized int
+		require.NoError(c, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*)
+ FROM kaname.access_binding_emitted_tuples e JOIN kaname.relation_fact f
+ ON f.object_type='registry_child_probe_container' AND f.object_id=$2
+ AND f.relation=e.relation AND f.subject=e.fga_user
+ WHERE e.binding_id=$1 AND e.fga_user=$3 AND e.relation='v_get'
+ AND e.object='registry_child_probe_container:'||$2 AND e.source='member'`,
+			binding, parent, "user:"+reader.UserID()).Scan(&materialized))
+		require.Positive(c, materialized, "право чтения материализовано именно публичной привязкой")
+		require.True(c, check(c, ""), "настоящий bearer получает get именно родителя")
+	}, 30*time.Second, 50*time.Millisecond)
+	require.False(t, check(t, "child_registrar"), "read-only не даёт отдельного глагола создания")
+	requireNativeAuthority(t, f.given, "user", reader.UserID(), 0)
+
+	candidates := []string{scenes[0].child, parent + "/reader-denied", "missing-parent/reader-denied"}
+	var missing int
+	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*) FROM kaname.resource_mirror
+ WHERE object_type='registry.childProbeContainers' AND object_id='missing-parent'`).Scan(&missing))
+	require.Zero(t, missing)
+	// Не сравниваем изменяемые статусы фоновых очередей. Неизменяемые receipts
+	// фиксируют весь расход успешных созданий, включая оба законных близнеца.
+	receipts := func() string {
+		var raw []byte
+		require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY child_id,source_version),'[]')
+ FROM kaname.authority_child_creation c WHERE child_type='registry.childProbeChildren'`).Scan(&raw))
+		return string(raw)
+	}
+	before := receipts()
+	for _, child := range candidates {
+		var response json.RawMessage
+		code, err := f.wire.JSON(f.given.ctx, http.MethodPost, "/iam/v1/childRegistrations:register", reader.Bearer(),
+			map[string]any{"resourceType": "registry.childProbeChildren", "resourceId": child}, &response)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusForbidden, code)
+		require.JSONEq(t, `{"code":7,"message":"permission denied","details":[]}`, string(response))
+		if child != scenes[0].child {
+			var effects int
+			require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT
+ (SELECT count(*) FROM kaname.resource_mirror WHERE object_type='registry.childProbeChildren' AND object_id=$1)+
+ (SELECT count(*) FROM kaname.resource_parent_edge WHERE object_type='registry_child_probe_child' AND object_id=$1)+
+ (SELECT count(*) FROM kaname.resource_registration_scope WHERE object_type='registry_child_probe_child' AND object_id=$1)+
+ (SELECT count(*) FROM kaname.relation_fact WHERE object_type='registry_child_probe_child' AND object_id=$1)+
+ (SELECT count(*) FROM kaname.authority_child_creation WHERE child_type='registry.childProbeChildren' AND child_id=$1)+
+ (SELECT count(*) FROM kaname.fga_outbox WHERE payload->>'object'='registry_child_probe_child:'||$1)+
+ (SELECT count(*) FROM kaname.resource_reconcile_outbox WHERE object_type='registry.childProbeChildren' AND object_id=$1)+
+ (SELECT count(*) FROM kaname.audit_outbox WHERE event_payload#>>'{object,id}'=$1)`, child).Scan(&effects))
+			require.Zero(t, effects, "отказ не создаёт регистрацию, версию, отношения или успешные эффекты")
+		}
+		require.JSONEq(t, before, receipts(), "отказ не расходует успешные создания")
+		for _, scene := range scenes {
+			requireNativeRegisteredChild(t, f, scene)
+		}
+	}
+	var denials int
+	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*) FROM kaname.audit_outbox
+ WHERE event_type='iam.child_registration.refused' AND event_payload=$1::jsonb`,
+		`{"actor":"user:`+reader.UserID()+`","outcome":"permission_denied","reason":"permission_denied"}`).Scan(&denials))
+	require.Equal(t, len(candidates), denials, "все запросы отвергнуты проверкой права без раскрытия координат")
 }
 
 type nativeRegisteredChild struct {
@@ -293,6 +403,13 @@ func childNativePublicDelivery(t *testing.T) installruntime.RIDDeliveryFixture {
       maxCreates: 4
       windowSeconds: 60
 roles:
+  - id: registry.child_public_reader
+    description: Read-only parent permission without child registration
+    tier: {tierType: iam.cluster, tierId: cluster_root}
+    rules:
+      - module: registry
+        resources: [childProbeContainers]
+        classes: [get]
   - id: registry.child_public_registrar
     description: Independent public child registration probe
     tier: {tierType: iam.cluster, tierId: cluster_root}
