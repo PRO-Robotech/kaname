@@ -125,6 +125,23 @@ resources:
 		err = json.Unmarshal(result, &value)
 		return value, err
 	}
+	t.Run("prepare sources before choosing a version", func(t *testing.T) {
+		var raw []byte
+		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT kaname._authority_child_registration_sources_v1(
+ $1::jsonb,$2::jsonb,$3::jsonb,$4::jsonb)`, witness, index, r.bundle.CanonicalCatalog(), catalogRows).Scan(&raw))
+		var prepared struct {
+			Certificate struct {
+				Command map[string]json.RawMessage `json:"command"`
+			} `json:"certificate"`
+			Sources struct {
+				Required map[string]bool `json:"required"`
+			} `json:"sources"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &prepared))
+		require.NotContains(t, prepared.Certificate.Command, "source_version")
+		require.Contains(t, prepared.Certificate.Command, "parent_chain")
+		require.NotEmpty(t, prepared.Sources.Required)
+	})
 	t.Run("create derives parent program without an owner tuple", func(t *testing.T) {
 		body, err := compile(witness, index, catalogRows)
 		require.NoError(t, err)

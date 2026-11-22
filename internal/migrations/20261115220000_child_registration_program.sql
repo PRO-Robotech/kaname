@@ -6,32 +6,21 @@
 DO $$ BEGIN PERFORM kaname.authority_protocol_drain(); END $$;
 -- +goose StatementEnd
 
--- Закрытый компилятор получает удержанные источники и время решения от
--- владельца транзакции. Полномочия пользователя проверяет вызывающий код.
--- Компилятор не читает состояние заново, не берёт блокировки и не пишет.
+-- План источников можно собрать до окончательного времени. Версия и исход
+-- операции появляются после ожиданий на основании закрытого снимка.
 -- +goose StatementBegin
-CREATE FUNCTION kaname._authority_child_registration_program_v1(
- p_witness jsonb,p_index jsonb,p_catalog jsonb,p_catalog_rows jsonb,
- p_user_id text,p_audit_id text,p_decision_at timestamptz,p_transaction_at timestamptz,p_reserved_incarnation uuid DEFAULT NULL)
+CREATE FUNCTION kaname._authority_child_registration_sources_v1(
+ p_witness jsonb,p_index jsonb,p_catalog jsonb,p_catalog_rows jsonb)
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE
- result record; child_type text; child_model text; child_id text; parent_ref text;
+ child_type text; child_model text; child_id text; parent_ref text;
  catalog_item jsonb; child_catalog jsonb; catalog_state jsonb; structural jsonb; project_held boolean:=false;
- scope_info jsonb; hierarchy jsonb; sources jsonb; certificate jsonb; command jsonb;
- tuple_value jsonb; program jsonb; parent_write jsonb; parent_fact jsonb; retired_parent jsonb;
- source_version_text text; incarnation uuid; parent_state jsonb; receipt jsonb; audit jsonb;
+ scope_info jsonb; hierarchy jsonb; sources jsonb; certificate jsonb; command jsonb; tuple_value jsonb;
 BEGIN
  PERFORM kaname.authority_protocol_require_owner();
- SELECT * INTO STRICT result FROM kaname._authority_child_registration_outcome_v1(p_witness,p_decision_at);
- IF result.outcome<>'create' THEN
-  RETURN jsonb_build_object('outcome',result.outcome,'source_version',result.source_version);
- END IF;
-
- IF coalesce(p_user_id,'')='' OR octet_length(p_user_id)>512 OR p_user_id ~ '[[:space:][:cntrl:]:#*]'
-  OR coalesce(p_audit_id,'') !~ '^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$'
-  OR p_transaction_at IS NULL OR NOT isfinite(p_transaction_at)
-  OR jsonb_typeof(p_catalog_rows) IS DISTINCT FROM 'array' THEN
-  RAISE EXCEPTION 'invalid child registration write inputs' USING ERRCODE='42501';
+ IF jsonb_typeof(p_witness) IS DISTINCT FROM 'object' OR jsonb_typeof(p_catalog_rows) IS DISTINCT FROM 'array'
+  OR p_witness->>'parent_version' IS NULL OR p_witness->>'closed_at' IS NOT NULL OR p_witness->>'child_version' IS NOT NULL THEN
+  RAISE EXCEPTION 'invalid child registration source inputs' USING ERRCODE='42501';
  END IF;
  IF jsonb_array_length(p_catalog_rows)>8192 OR octet_length(p_catalog_rows::text)>8388608
   OR octet_length(p_catalog::text)>8388608 THEN
@@ -77,7 +66,7 @@ BEGIN
  END IF;
  tuple_value:=jsonb_build_object('User',parent_ref,'Relation','parent','Object',child_model||':'||child_id);
  command:=jsonb_build_object('dotted_type',child_type,'object_id',child_id,'parent_project_id',hierarchy->>'ProjectID',
-  'parent_account_id',hierarchy->>'AccountID','labels','{}'::jsonb,'source_version',result.source_version,'parent_chain',hierarchy->'Links');
+  'parent_account_id',hierarchy->>'AccountID','labels','{}'::jsonb,'parent_chain',hierarchy->'Links');
  certificate:=jsonb_build_object('action',1,'model_type',child_model,'object_type',child_type,'object_id',child_id,
   'module',structural->>'Module','tuple',tuple_value,'versionless',false,'command',command,'catalog',child_catalog,
   'old_scopes',scope_info->'old_scopes','new_scopes',scope_info->'new_scopes','hierarchies',scope_info->'hierarchies',
@@ -86,6 +75,43 @@ BEGIN
  IF sources#>'{before,mirror}' IS DISTINCT FROM 'null'::jsonb THEN
   RAISE EXCEPTION 'child registration program requires a new object' USING ERRCODE='42501';
  END IF;
+ RETURN jsonb_build_object('certificate',certificate,'sources',sources);
+END $$;
+-- +goose StatementEnd
+
+-- Закрытый компилятор получает удержанные источники и время решения от
+-- владельца транзакции. Полномочия пользователя проверяет вызывающий код.
+-- Компилятор не читает состояние заново, не берёт блокировки и не пишет.
+-- +goose StatementBegin
+CREATE FUNCTION kaname._authority_child_registration_program_v1(
+ p_witness jsonb,p_index jsonb,p_catalog jsonb,p_catalog_rows jsonb,
+ p_user_id text,p_audit_id text,p_decision_at timestamptz,p_transaction_at timestamptz,p_reserved_incarnation uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE
+ result record; child_type text; child_id text; parent_ref text;
+ prepared jsonb; hierarchy jsonb; sources jsonb; certificate jsonb;
+ tuple_value jsonb; program jsonb; parent_write jsonb; parent_fact jsonb; retired_parent jsonb;
+ source_version_text text; incarnation uuid; parent_state jsonb; receipt jsonb; audit jsonb;
+BEGIN
+ PERFORM kaname.authority_protocol_require_owner();
+ SELECT * INTO STRICT result FROM kaname._authority_child_registration_outcome_v1(p_witness,p_decision_at);
+ IF result.outcome<>'create' THEN
+  RETURN jsonb_build_object('outcome',result.outcome,'source_version',result.source_version);
+ END IF;
+
+ IF coalesce(p_user_id,'')='' OR octet_length(p_user_id)>512 OR p_user_id ~ '[[:space:][:cntrl:]:#*]'
+  OR coalesce(p_audit_id,'') !~ '^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,30}$'
+  OR p_transaction_at IS NULL OR NOT isfinite(p_transaction_at) THEN
+  RAISE EXCEPTION 'invalid child registration write inputs' USING ERRCODE='42501';
+ END IF;
+ prepared:=kaname._authority_child_registration_sources_v1(p_witness,p_index,p_catalog,p_catalog_rows);
+ certificate:=jsonb_set(prepared->'certificate','{command,source_version}',to_jsonb(result.source_version));
+ sources:=prepared->'sources';
+ hierarchy:=certificate->'hierarchies'->0;
+ tuple_value:=certificate->'tuple';
+ child_type:=certificate->>'object_type';
+ child_id:=certificate->>'object_id';
+ parent_ref:=tuple_value->>'User';
  program:=kaname._authority_resource_registration_direct_program_v2(certificate,sources->'before',p_transaction_at);
  IF program->'physical_applied' IS DISTINCT FROM 'true'::jsonb OR program->'journal_required' IS DISTINCT FROM 'true'::jsonb THEN
   RAISE EXCEPTION 'child registration program did not create the object' USING ERRCODE='42501';
@@ -116,7 +142,7 @@ BEGIN
  source_version_text:=rtrim(rtrim(to_char(result.source_version AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US'),'0'),'.')||'Z';
  audit:=jsonb_build_object('id',p_audit_id,'event_type','iam.resource_registration.registered',
   'tenant_account_id',nullif(hierarchy->>'AccountID',''),
-  'event_payload',jsonb_build_object('actor','user:'||p_user_id,'module',structural->>'Module',
+  'event_payload',jsonb_build_object('actor','user:'||p_user_id,'module',certificate->>'module',
    'object',jsonb_build_object('type',child_type,'id',child_id),'relation','parent','subject',parent_ref,'outcome','registered',
    'parent_chain',hierarchy->'Links','parent',jsonb_build_object('type',p_witness->>'parent_model','id',p_witness->>'parent_id'),
    'source_version',source_version_text),
@@ -126,18 +152,21 @@ BEGIN
 END $$;
 -- +goose StatementEnd
 
-REVOKE ALL ON FUNCTION kaname._authority_child_registration_program_v1(jsonb,jsonb,jsonb,jsonb,text,text,timestamptz,timestamptz,uuid) FROM PUBLIC;
 -- +goose StatementBegin
-DO $$ DECLARE principal record; BEGIN
- FOR principal IN SELECT r.rolname FROM pg_catalog.pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
-  JOIN pg_catalog.pg_roles r ON r.oid=a.grantee
-  WHERE p.oid='kaname._authority_child_registration_program_v1(jsonb,jsonb,jsonb,jsonb,text,text,timestamptz,timestamptz,uuid)'::regprocedure
-   AND a.grantee<>p.proowner
+DO $$ DECLARE helper record; principal record; BEGIN
+ FOR helper IN SELECT oid,oid::regprocedure AS signature,proowner FROM pg_catalog.pg_proc
+ WHERE oid IN ('kaname._authority_child_registration_sources_v1(jsonb,jsonb,jsonb,jsonb)'::regprocedure,
+  'kaname._authority_child_registration_program_v1(jsonb,jsonb,jsonb,jsonb,text,text,timestamptz,timestamptz,uuid)'::regprocedure)
  LOOP
-  EXECUTE format('REVOKE ALL ON FUNCTION kaname._authority_child_registration_program_v1(jsonb,jsonb,jsonb,jsonb,text,text,timestamptz,timestamptz,uuid) FROM %I',principal.rolname);
+  EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC',helper.signature);
+  FOR principal IN SELECT DISTINCT r.rolname FROM pg_catalog.pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+   JOIN pg_catalog.pg_roles r ON r.oid=a.grantee WHERE p.oid=helper.oid AND a.grantee<>helper.proowner LOOP
+   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM %I',helper.signature,principal.rolname);
+  END LOOP;
  END LOOP;
 END $$;
 -- +goose StatementEnd
 
 -- +goose Down
 DROP FUNCTION kaname._authority_child_registration_program_v1(jsonb,jsonb,jsonb,jsonb,text,text,timestamptz,timestamptz,uuid);
+DROP FUNCTION kaname._authority_child_registration_sources_v1(jsonb,jsonb,jsonb,jsonb);
