@@ -205,7 +205,9 @@ func TestChildParentCloseRuntimeConcurrentChildSerializes(t *testing.T) {
 			} else {
 				childCall = startChild()
 			}
-			secondPID := resourcePublicWaitBlocked(t, r, firstPID, r.role, "authority_resource_prewait_v2")
+			// Второй может ждать на входе в протокол до вызова prewait.
+			// Доказательство очередности здесь даёт сам backend-блокировщик.
+			secondPID := resourcePublicWaitBlocked(t, r, firstPID, r.role, "")
 			require.NotEqual(t, firstPID, secondPID)
 			resourcePublicBlockedBy(t, r, firstPID, held.Conn().PgConn().PID())
 			resourcePublicBlockedBy(t, r, secondPID, firstPID)
