@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,8 +39,10 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	delivery := childNativePublicDelivery(t)
 	f := newInstallationNativeWorldProfile(t, 7200, "", true)
 	plan := installruntime.RegistryRegistrationWriterPlan([]string{f.tenantID})
-	process := f.apply(t, installruntime.DeliveryInput{RegistrationWriters: plan, Manifests: delivery, CredentialFile: f.creator.CredentialFile})
+	input := installruntime.DeliveryInput{RegistrationWriters: plan, Manifests: delivery, CredentialFile: f.creator.CredentialFile}
+	process := f.apply(t, input)
 	rid09AwaitBaseRoleProjections(t, f.given.ctx, process)
+	startChildNativeFull(t, f, process, input)
 	// Bearer действительно выдан ceremony после FULL запуска и принят /me.
 	f.renewOperator(t, f.given.ctx)
 	project := ridResponseID(t, f.ridOperation(t, http.MethodPost, "/iam/v1/projects", f.operator.Bearer(),
@@ -133,6 +137,65 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	require.Equal(t, 1, receipts)
 	require.Equal(t, 1, audits)
 	require.Equal(t, "user:"+f.operator.UserID(), actor)
+}
+
+// Начальный запуск доставляет каталог. Отдельный операторский переход
+// активирует его на той же базе до запуска службы под ограниченным LOGIN.
+func startChildNativeFull(t *testing.T, f *installationNativeWorld, staged *installruntime.Process, input installruntime.DeliveryInput) {
+	t.Helper()
+	var config struct {
+		Manifests struct {
+			Dir string `yaml:"dir"`
+		} `yaml:"manifests"`
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(staged.StdoutPath), "..", "config.yaml"))
+	require.NoError(t, err)
+	require.NoError(t, yaml.Unmarshal(raw, &config))
+	require.True(t, filepath.IsAbs(config.Manifests.Dir))
+	require.Equal(t, f.session.Root, filepath.Dir(config.Manifests.Dir))
+
+	ctx, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)
+	err = f.session.Stop(ctx)
+	cancel()
+	require.NoError(t, err)
+
+	runtimePool := fullStartupRuntimePool(t, f.given.ctx, f.given.pool)
+	runtime := runtimePool.Config().ConnConfig
+	f.secrets = append(f.secrets, runtime.Password)
+	t.Cleanup(func() {
+		stop, close := context.WithTimeout(context.Background(), 20*time.Second)
+		defer close()
+		require.NoError(t, f.session.Stop(stop))
+	})
+	ownerEnv, err := f.stand.Environment(nil)
+	require.NoError(t, err)
+	binary := os.Getenv("KANAME_RID_MIGRATOR")
+	require.True(t, filepath.IsAbs(binary))
+	for _, action := range []string{"stage-full", "activate-full", "verify-full"} {
+		// #nosec G204 -- путь артефакта и каталог созданы стендом, команды перечислены явно.
+		cmd := exec.CommandContext(f.given.ctx, binary, "authority-bundle", action, "--manifest-dir", config.Manifests.Dir)
+		cmd.Dir = f.session.Root
+		cmd.Env = append(append([]string{}, ownerEnv...), "KANAME_CONFIG_PATH="+filepath.Join(f.session.Root, "migrator.yaml"))
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, os.WriteFile(filepath.Join(f.session.Root, "native-"+action+".log"), out, 0600))
+		require.NoError(t, err, "операторский переход %s, см. закрытый журнал стенда", action)
+	}
+
+	for i, entry := range f.session.Environment {
+		name, _, _ := strings.Cut(entry, "=")
+		switch name {
+		case "KANAME_DB_USER":
+			f.session.Environment[i] = name + "=" + runtime.User
+		case "KANAME_DB_PASSWORD":
+			f.session.Environment[i] = name + "=" + runtime.Password
+		}
+	}
+	input.ExtraConfig = map[string]any{"authority-protocol": map[string]any{
+		"participation":  "participant",
+		"full-semantics": true,
+	}}
+	process := f.apply(t, input)
+	rid09AwaitBaseRoleProjections(t, f.given.ctx, process)
 }
 
 // Сохраняем существующий независимый registry fixture и добавляем только
