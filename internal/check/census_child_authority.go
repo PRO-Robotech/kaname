@@ -10,6 +10,7 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,9 +34,16 @@ var childAuthorityFiles = []string{
 // CensusChildRegistrationQuestion читает исходники от корня модуля. Пустое
 // свидетельство не разрешает RPC: вызывающая перепись сохраняет свой отказ.
 func CensusChildRegistrationQuestion(root string) (string, error) {
+	// Разрешаем имена только внутри открытого корня, включая ссылки.
+	source, err := os.OpenRoot(root)
+	if err != nil {
+		return "", fmt.Errorf("открыть корень исходников регистрации: %w", err)
+	}
+	defer func() { _ = source.Close() }()
+
 	corpus := make(map[string][]byte, len(childAuthorityFiles))
 	for _, name := range childAuthorityFiles {
-		body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		body, err := source.ReadFile(filepath.FromSlash(name))
 		if err != nil {
 			return "", fmt.Errorf("предмет child authority %s: %w", name, err)
 		}
@@ -43,7 +51,7 @@ func CensusChildRegistrationQuestion(root string) (string, error) {
 	}
 	// Дополнительный writer поля не должен исчезнуть за границей fixed list.
 	for _, dir := range childAuthorityOwnerDirs {
-		entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(dir)))
+		entries, err := fs.ReadDir(source.FS(), dir)
 		if err != nil {
 			return "", err
 		}
@@ -52,7 +60,10 @@ func CensusChildRegistrationQuestion(root string) (string, error) {
 				continue
 			}
 			name := dir + "/" + entry.Name()
-			body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+			if _, exists := corpus[name]; exists {
+				continue
+			}
+			body, err := source.ReadFile(filepath.FromSlash(name))
 			if err != nil {
 				return "", err
 			}
