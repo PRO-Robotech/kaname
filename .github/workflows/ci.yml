@@ -778,6 +778,74 @@ jobs:
           # Отказ сохранения вывода не может сделать нулевой producer зелёным.
           exit "$capture_rc"
 
+      - name: сверка скомпилированных и исполненных проб
+        run: |
+          out="$RUNNER_TEMP/integration-evidence-${{ strategy.job-index }}"
+          rc=0
+          python3 - "$out" <<'PY' || rc=$?
+          from collections import Counter
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path(sys.argv[1])
+          package_end = re.compile(r"ok[ \t]+(\S+)[ \t]+[^\n]+")
+          test_name = re.compile(r"(?:Test|Example|Fuzz)\w*")
+          start = re.compile(r"=== RUN +((?:Test|Example|Fuzz)\w*)")
+          terminal = re.compile(r"--- (PASS|SKIP|FAIL): ((?:Test|Example|Fuzz)\w*) \([^\n]+\)")
+
+          def lines(name):
+              return (root / name).read_text().splitlines()
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit("перепись проб: " + message)
+
+          packages = lines("shard.packages")
+          require(packages and len(set(packages)) == len(packages), "пустой или повторный пакет в плане")
+          require(lines("inventory-packages.txt") == [str(len(packages))], "неполная перепись пакетов")
+          expected = {}
+          for index, package in enumerate(packages, 1):
+              prefix = f"compiled-{index}"
+              require(lines(prefix + ".package") == [package], "чужой пакет в переписи: " + package)
+              require(lines(prefix + ".rc") == ["0"], "перепись завершилась с ошибкой: " + package)
+              compiled = lines(prefix + ".raw")
+              ends = [match[1] for line in compiled if (match := package_end.fullmatch(line))]
+              require(ends == [package], "нет единственного завершения переписи: " + package)
+              names = [line for line in compiled if test_name.fullmatch(line)]
+              require(names and len(set(names)) == len(names), "пустой или повторный список проб: " + package)
+              expected[package] = set(names)
+
+          # При -p 1 итог пакета завершает его блок. Пробы внутри t.Log и
+          # вложенные пробы не считаются самостоятельными верхнеуровневыми.
+          started, finished = Counter(), Counter()
+          seen = set()
+          skipped = 0
+          for line in lines("full.raw"):
+              if match := start.fullmatch(line):
+                  started[match[1]] += 1
+              elif match := terminal.fullmatch(line):
+                  require(match[1] != "FAIL", "исполненная проба упала: " + match[2])
+                  finished[match[2]] += 1
+                  skipped += match[1] == "SKIP"
+              elif match := package_end.fullmatch(line):
+                  package = match[1]
+                  require(package in expected and package not in seen, "чужой или повторный итог: " + package)
+                  wanted = Counter(expected[package])
+                  require(started == wanted and finished == wanted,
+                          f"{package}: нет запуска {sorted(wanted - started)}, "
+                          f"лишние запуски {sorted(started - wanted)}, "
+                          f"нет итога {sorted(wanted - finished)}, "
+                          f"лишние итоги {sorted(finished - wanted)}")
+                  seen.add(package)
+                  started.clear()
+                  finished.clear()
+          require(seen == set(expected) and not started and not finished, "неполные итоги пакетов")
+          print(f"Пакетов сверено {len(seen)}, проб {sum(map(len, expected.values()))}, пропусков {skipped}")
+          PY
+          printf '%s\n' "$rc" > "$out/inventory-runtime.rc"
+          exit "$rc"
+
       - name: полный вывод и перепись шарда
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
