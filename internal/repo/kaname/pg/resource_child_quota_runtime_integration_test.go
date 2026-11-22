@@ -73,6 +73,8 @@ func TestUserChildRuntimeCapacityLastSlotSerializesAndIsolatesParents(t *testing
 	raceCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	handler := childregistration.NewHandler(internaliam.NewUserChildRegistration(runner))
+	held := resourcePublicHold(t, r, `LOCK TABLE ONLY kaname.authority_child_parent_state IN SHARE MODE`)
+	blocker := held.Conn().PgConn().PID()
 	for i, input := range inputs {
 		go func(index int, in kaname.UserChildRegistrationInput) {
 			<-start
@@ -85,6 +87,22 @@ func TestUserChildRuntimeCapacityLastSlotSerializesAndIsolatesParents(t *testing
 		}(i, input)
 	}
 	close(start)
+	// Первый дошёл до prewait. Второй должен ждать непосредственно барьер
+	// либо первый backend, который уже удерживает ключ родителя.
+	resourcePublicWaitBlocked(t, r, blocker, r.role, "authority_resource_prewait_v2")
+	require.Eventually(t, func() bool {
+		var waiting int
+		err := r.admin.QueryRow(raceCtx, `WITH RECURSIVE chain(pid) AS (
+ SELECT $1::integer
+ UNION
+ SELECT a.pid FROM pg_catalog.pg_stat_activity a
+ JOIN chain c ON c.pid=ANY(pg_catalog.pg_blocking_pids(a.pid))
+ WHERE a.datname=current_database() AND a.usename=$2 AND a.wait_event_type='Lock'
+)
+SELECT count(*)-1 FROM chain`, blocker, r.role).Scan(&waiting)
+		return err == nil && waiting == len(inputs)
+	}, 5*time.Second, 20*time.Millisecond, "оба runtime backend дошли до блокировок допуска")
+	require.NoError(t, held.Rollback(r.ctx))
 	winner, loser := -1, -1
 	var winnerVersion time.Time
 	for range inputs {

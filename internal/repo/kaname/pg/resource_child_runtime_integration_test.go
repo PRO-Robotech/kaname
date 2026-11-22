@@ -130,6 +130,15 @@ func TestUserChildRuntimeRunnerFullCommitReplayAndUniformRefusal(t *testing.T) {
 		require.Equal(t, i+1, refusalCount, "один отказ создаёт ровно одну durable строку после rollback")
 		require.Equal(t, 1, exactCount, "payload не содержит координат запроса или дополнительных причин")
 	}
+	// После отказов штатный путь принимает допустимый новый ключ.
+	const acceptedID = "container-one/after-refusals"
+	accepted, err := handler.Register(ctx, &iamv1.RegisterChildRequest{ResourceType: input.ResourceType, ResourceId: acceptedID})
+	require.NoError(t, err)
+	require.NotNil(t, accepted.GetVersion())
+	var persisted time.Time
+	require.NoError(t, r.admin.QueryRow(ctx, `SELECT source_version FROM kaname.resource_mirror
+ WHERE object_type=$1 AND object_id=$2`, input.ResourceType, acceptedID).Scan(&persisted))
+	require.True(t, accepted.GetVersion().AsTime().Equal(persisted))
 	authorityWaitReleased(t, r.runtime)
 }
 
