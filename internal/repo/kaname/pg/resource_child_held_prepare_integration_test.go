@@ -151,6 +151,10 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		require.Positive(t, reads)
 		require.LessOrEqual(t, rows, 100000)
 		require.LessOrEqual(t, reads, 4096)
+		type relationLock struct {
+			OID  uint32 `json:"oid"`
+			Mode string `json:"mode"`
+		}
 		var state struct {
 			Witness       json.RawMessage `json:"witness"`
 			Intent        json.RawMessage `json:"intent"`
@@ -168,7 +172,12 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 				PolicyAfter  map[string]json.RawMessage `json:"policy_after"`
 				BindingAfter map[string]json.RawMessage `json:"binding_after"`
 			} `json:"epoch_witness"`
-			Required map[string]bool `json:"required"`
+			Required     map[string]bool `json:"required"`
+			Reservations struct {
+				AuditID      string  `json:"audit_id"`
+				ReconcileIDs []int64 `json:"reconcile_ids"`
+			} `json:"reservations"`
+			HeldRelations []relationLock `json:"held_relations"`
 		}
 		require.NoError(t, json.Unmarshal(prepared, &state))
 		require.NotEmpty(t, state.Witness)
@@ -179,6 +188,33 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		require.NoError(t, json.Unmarshal(envelope, &proposed))
 		require.JSONEq(t, string(proposed.Intent), string(state.Intent))
 		require.JSONEq(t, string(proposed.NativeEpochs), string(state.NativeEpochs))
+		var intent struct {
+			AuditID string `json:"audit_id"`
+		}
+		require.NoError(t, json.Unmarshal(proposed.Intent, &intent))
+		require.NotEmpty(t, intent.AuditID)
+		require.Equal(t, intent.AuditID, state.Reservations.AuditID)
+		require.Len(t, state.Reservations.ReconcileIDs, 1)
+		require.Positive(t, state.Reservations.ReconcileIDs[0])
+		for _, relation := range state.HeldRelations {
+			var held bool
+			require.NoError(t, tx.QueryRow(r.ctx, `SELECT EXISTS(
+ SELECT 1 FROM pg_catalog.pg_locks WHERE pid=pg_backend_pid() AND locktype='relation'
+ AND relation=$1 AND mode=$2 AND granted)`, relation.OID, relation.Mode).Scan(&held))
+			require.True(t, held, "зарезервированное отношение %d должно оставаться под %s", relation.OID, relation.Mode)
+		}
+		for _, name := range []string{"authority_child_parent_state", "authority_child_creation", "fga_outbox", "audit_outbox", "resource_reconcile_outbox"} {
+			var oid uint32
+			require.NoError(t, tx.QueryRow(r.ctx, `SELECT $1::text::regclass::oid`, "kaname."+name).Scan(&oid))
+			require.Contains(t, state.HeldRelations, relationLock{OID: oid, Mode: "RowExclusiveLock"})
+		}
+		var auditExists, reconcileExists bool
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT
+ EXISTS(SELECT 1 FROM kaname.audit_outbox WHERE id=$1),
+ EXISTS(SELECT 1 FROM kaname.resource_reconcile_outbox WHERE id=$2)`,
+			intent.AuditID, state.Reservations.ReconcileIDs[0]).Scan(&auditExists, &reconcileExists))
+		require.False(t, auditExists)
+		require.False(t, reconcileExists)
 		// После подготовки точные OUTPUT epoch keys удерживаются для записи.
 		// Scope берём из того же реального родителя, который проверил hold.
 		var account, project, childEpoch string

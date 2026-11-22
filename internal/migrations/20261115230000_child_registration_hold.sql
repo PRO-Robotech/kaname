@@ -41,9 +41,11 @@ LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS
 DECLARE
  proof jsonb; intent jsonb; guards jsonb; epochs jsonb; policy_guards jsonb; checked_epochs jsonb; predicates jsonb;
  epoch_result record; bundle_result record; catalog_result record; current_result record; captured record;
+ binding_result record; audit_result record; reconcile_result record; relations_result record;
  source_index jsonb; parent_row jsonb; child_row jsonb; parent_scope jsonb; child_scope jsonb;
  parent_state jsonb; child_state jsonb; required jsonb; scope jsonb; candidates jsonb; maximum jsonb;
  covered_accounts jsonb:='{}'::jsonb; parent_witness jsonb; held_source_index jsonb;
+ binding_plan jsonb; reservations jsonb:='{}'::jsonb; held_relations jsonb:='[]'::jsonb; held_advisory jsonb;
  parent_type text; parent_model text; parent_id text; child_type text; child_model text; child_id text;
  parts text[]; segments integer; kind integer; mirror_key text;
 BEGIN
@@ -184,6 +186,19 @@ BEGIN
  IF checked_epochs IS DISTINCT FROM epochs THEN
   RAISE EXCEPTION 'child registration native epochs changed' USING ERRCODE='P1034';
  END IF;
+ held_advisory:=epoch_result.lock_witness->'held_advisory';
+ IF candidates IS NOT NULL THEN
+  -- Уникальный ключ project binding резервируется перед reread kind 5.
+  binding_plan:='{"steps":[]}'::jsonb;
+  IF maximum->'operations' ? 'object_project_binding' THEN
+   binding_plan:='{"steps":[{"images":[{"table":"object_project_binding","operation":"INSERT"}]}]}'::jsonb;
+  END IF;
+  SELECT * INTO STRICT binding_result FROM kaname._authority_resource_registration_binding_wait_v2(
+   candidates->'certificate',binding_plan,p_reads-logical_reads);
+  logical_reads:=logical_reads+binding_result.logical_reads;
+  held_relations:=binding_result.held_relations;
+  held_advisory:=held_advisory||binding_result.held_advisory;
+ END IF;
  SELECT * INTO STRICT current_result FROM kaname._authority_resource_required_reread_v2(
   source_index,required,maximum->'write_sources',p_rows-logical_rows,p_reads-logical_reads);
  logical_rows:=logical_rows+current_result.logical_rows;
@@ -204,11 +219,37 @@ BEGIN
  END IF;
  logical_rows:=logical_rows+captured.logical_rows;
  logical_reads:=logical_reads+captured.logical_reads;
+ IF candidates IS NOT NULL AND captured.witness->>'closed_at' IS NULL THEN
+  -- Канонические helpers удерживают audit ID, очередь пересчёта и отношения
+  -- до выбора версии. Journal и outbox ещё требуют привязки к финальному payload.
+  SELECT * INTO STRICT audit_result FROM kaname._authority_resource_audit_wait_v2(
+   jsonb_build_object(intent->>'audit_id',true),p_rows-logical_rows,p_reads-logical_reads);
+  logical_rows:=logical_rows+audit_result.logical_rows;
+  logical_reads:=logical_reads+audit_result.logical_reads;
+  SELECT * INTO STRICT reconcile_result FROM kaname._authority_resource_reconcile_wait_v2(1,p_reads-logical_reads);
+  logical_reads:=logical_reads+reconcile_result.logical_reads;
+  SELECT * INTO STRICT relations_result FROM kaname._authority_resource_physical_relations_wait_v2(
+   (maximum->'operations')-'object_project_binding'-'resource_reconcile_outbox',p_reads-logical_reads);
+  logical_reads:=logical_reads+relations_result.logical_reads;
+  IF logical_reads+2>p_reads THEN
+   RAISE EXCEPTION 'child registration private relation budget exceeded' USING ERRCODE='54000';
+  END IF;
+  -- Таблицы не выданы runtime. Их запись остаётся закрытым шагом владельца.
+  LOCK TABLE ONLY kaname.authority_child_parent_state IN ROW EXCLUSIVE MODE;
+  LOCK TABLE ONLY kaname.authority_child_creation IN ROW EXCLUSIVE MODE;
+  logical_reads:=logical_reads+2;
+  held_relations:=held_relations||relations_result.lock_witness||reconcile_result.held_relations||jsonb_build_array(
+   jsonb_build_object('oid','kaname.authority_child_parent_state'::regclass::oid,'mode','RowExclusiveLock'),
+   jsonb_build_object('oid','kaname.authority_child_creation'::regclass::oid,'mode','RowExclusiveLock'));
+  held_advisory:=held_advisory||audit_result.lock_witness||reconcile_result.held_advisory;
+  reservations:=jsonb_build_object('audit_id',intent->'audit_id','reconcile_ids',reconcile_result.reserved_ids);
+ END IF;
  SELECT jsonb_object_agg(key,source_index->key) INTO held_source_index FROM jsonb_object_keys(required) key;
  prepared:=jsonb_build_object('intent',intent,'witness',captured.witness,'native_epochs',checked_epochs,
   'backend',proof->'backend','transaction_id',proof->'transaction_id','nonce',proof->'nonce',
   'maximum',maximum,'epoch_witness',epoch_result.lock_witness,'required',required,
-  'source_index',held_source_index,'catalog',bundle_result.catalog,'catalog_rows',catalog_result.catalog_rows);
+  'source_index',held_source_index,'catalog',bundle_result.catalog,'catalog_rows',catalog_result.catalog_rows,
+  'held_advisory',held_advisory,'held_relations',held_relations,'reservations',reservations);
  RETURN NEXT;
 END $$;
 -- +goose StatementEnd
