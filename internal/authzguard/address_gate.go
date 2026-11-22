@@ -89,7 +89,7 @@ const (
 	svcBootstrap   = "/kaname.cloud.iam.v1.InternalBootstrapTokenService/"
 )
 
-// internalAddressGateTable — таблицы Р4в: 17 строк круга и 13 вне круга.
+// internalAddressGateTable — таблицы Р4в с 17 строками круга и 14 вне круга.
 var internalAddressGateTable = map[string]InternalAddressGateRow{
 	// ── круг края (17) ──
 	svcRevocations + "Revoke": {GateAllowsSelfRevoke,
@@ -112,7 +112,7 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 	svcIAM + "ForceLogout":              {GateRefuses, "принудительный выход другого человека — действие распорядителя"},
 	svcOperations + "ListIamOperations": {GateRefuses, "операции службы — чтение распорядителя"},
 
-	// ── вне круга (13) ──
+	// ── вне круга (14) ──
 	svcIAM + "Check": {GateOutsideCircle,
 		"вопрос о праве субъекта, названного в запросе: ответ судит допуск под дверью решения — неподтверждённому «нет»"},
 	svcIAM + "LookupSubject": {GateOutsideCircle,
@@ -137,6 +137,8 @@ var internalAddressGateTable = map[string]InternalAddressGateRow{
 		"запись материализации модуля: ресурс, заведённый человеком, прошёл вопрос о праве у модуля; записанное отношение неподтверждённому права не даёт; рубеж остановил бы очередь модуля"},
 	svcIAM + "UnregisterResource": {GateOutsideCircle,
 		"запись материализации модуля: тот же довод, что у записи"},
+	svcIAM + "CloseChildParent": {GateOutsideCircle,
+		"модуль закрывает текущую версию родителя. Допуск определяют удостоверение модуля и его право в области ресурса"},
 	svcUser + "Get": {GateOutsideCircle,
 		"чтение строки человека краем: ответ — строка, а не право"},
 }
