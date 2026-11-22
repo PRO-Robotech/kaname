@@ -314,10 +314,31 @@ func rid09AwaitBaseRoleProjections(t *testing.T, ctx context.Context, p *install
 	t.Helper()
 	ready, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	require.NoError(t, p.AwaitReady(ready, func(context.Context) error {
-		return ridCatalogRoleProjectionsReady(p.StdoutPath)
-	}), "стартовый пересчёт проекций ролей не завершён")
+	state := ridRoleProjectionState{verbs: "unseen", refs: "unseen"}
+	err := p.AwaitReady(ready, func(context.Context) error {
+		var probeErr error
+		state, probeErr = ridCatalogRoleProjectionsProbe(p.StdoutPath)
+		return probeErr
+	})
+	if err != nil {
+		// Только закрытая классификация последней пробы. Ошибка
+		// процесса и исходные журналы могут содержать удостоверения.
+		reason := "process-exited"
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = "deadline"
+		} else if errors.Is(err, context.Canceled) {
+			reason = "canceled"
+		}
+		ridLogRoleReadiness(t, reason, state)
+	}
+	require.NoError(t, err, "стартовый пересчёт проекций ролей не завершён")
 }
+
+// Не t.Helper: маркер сохраняет точный источник для закрытого сборщика.
+func ridLogRoleReadiness(t *testing.T, reason string, state ridRoleProjectionState) {
+	t.Logf("RID_ROLE_READINESS reason=%s verbs=%s refs=%s", reason, state.verbs, state.refs)
+}
+
 func rid09Matrix(t *testing.T, twin bool, consumer rid09LivePublicConsumer) []rid09Observation {
 	t.Helper()
 	// Проверяем все точные порождённые байты для ОБОИХ порядков файлов до первого PG.

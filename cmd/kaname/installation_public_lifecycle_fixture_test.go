@@ -648,13 +648,22 @@ func (w *ridLifecycleWorld) catalogOnly(t *testing.T) {
 	w.f.renewOperator(t, w.f.given.ctx)
 }
 
+type ridRoleProjectionState struct {
+	verbs, refs string
+}
+
 func ridCatalogRoleProjectionsReady(path string) error {
+	_, err := ridCatalogRoleProjectionsProbe(path)
+	return err
+}
+
+func ridCatalogRoleProjectionsProbe(path string) (ridRoleProjectionState, error) {
+	state := ridRoleProjectionState{verbs: "unseen", refs: "unseen"}
 	stream, err := os.Open(path)
 	if err != nil {
-		return err
+		return state, err
 	}
 	defer stream.Close()
-	var verbsReady, refsReady bool
 	lines := bufio.NewScanner(stream)
 	lines.Buffer(make([]byte, 4096), 1024*1024)
 	for lines.Scan() {
@@ -665,25 +674,39 @@ func ridCatalogRoleProjectionsReady(path string) error {
 			Reseeded  *int   `json:"roles_reseeded"`
 			Failed    *int   `json:"roles_failed"`
 		}
-		if json.Unmarshal(lines.Bytes(), &record) != nil || record.Completed == nil || !*record.Completed ||
-			record.Examined == nil || record.Reseeded == nil || record.Failed == nil ||
-			*record.Failed != 0 || *record.Examined != *record.Reseeded {
+		if json.Unmarshal(lines.Bytes(), &record) != nil {
 			continue
 		}
+		var projection *string
 		switch record.Message {
 		case "перепись пересчёта проекции глаголов роли":
-			verbsReady = true
+			projection = &state.verbs
 		case "перепись пересчёта проекции сегментов правила":
-			refsReady = true
+			projection = &state.refs
+		default:
+			continue
 		}
-		if verbsReady && refsReady {
-			return nil
+		if *projection == "ready" {
+			continue
+		}
+		switch {
+		case record.Failed != nil && *record.Failed != 0:
+			*projection = "failed"
+		case record.Completed == nil || !*record.Completed ||
+			record.Examined == nil || record.Reseeded == nil || record.Failed == nil ||
+			*record.Examined != *record.Reseeded:
+			*projection = "incomplete"
+		default:
+			*projection = "ready"
+		}
+		if state.verbs == "ready" && state.refs == "ready" {
+			return state, nil
 		}
 	}
 	if err := lines.Err(); err != nil {
-		return err
+		return state, err
 	}
-	return fmt.Errorf("стартовый пересчёт проекций ролей ещё не завершился")
+	return state, fmt.Errorf("стартовый пересчёт проекций ролей ещё не завершился")
 }
 
 // Регистрируется конструктором явного включения до первого Start и подготовки.

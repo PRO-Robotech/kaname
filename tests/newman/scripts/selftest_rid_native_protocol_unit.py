@@ -238,6 +238,38 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
             path.write_text("".join(rows) + scan_suffix)
             return h.test_diagnostics(path, root, predicates), leaf
 
+    def test_rid11_role_readiness_keeps_only_closed_active_first_failure_marker(self):
+        h = self.hosted
+        root, predicates, _ = h.CASES["registry-installation-rid11"]
+        leaf = root + "/" + sorted(h.RID_MATRIX_NESTED[root])[0]
+        source = "cmd/kaname/installation_whole_delivery_native_test.go"
+        good = "    installation_whole_delivery_native_test.go:1: RID_ROLE_READINESS reason=deadline verbs=ready refs=failed\n"
+        def diagnose(outputs, *, end="fail", active=True, trace=source, suffix=""):
+            rows = [{"Action": "run", "Test": root}]
+            if active:
+                rows.append({"Action": "run", "Test": leaf})
+            rows += [{"Action": "output", "Test": leaf, "Output": value} for value in outputs]
+            rows += [{"Action": "output", "Test": leaf, "Output": "    Error Trace: " + str(h.ROOT / trace) + ":1\n"},
+                     {"Action": end, "Test": leaf}, {"Action": end, "Test": root}]
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "events.jsonl"
+                path.write_text("".join(json.dumps(dict(row, Package=h.PACKAGE)) + "\n" for row in rows) + suffix)
+                return h.test_diagnostics(path, root, predicates, timeout_seconds=1200)
+        self.assertEqual(diagnose([good])["roleReadiness"],
+                         {"reason": "deadline", "verbs": "ready", "refs": "failed"})
+        variants = [([good, good], {}), ([good.replace("deadline", "unit-secret")], {}),
+                    ([good.replace("refs=failed", "refs=unit-secret")], {}),
+                    ([good.rstrip() + " secret=unit-secret\n"], {}),
+                    ([good + "unit-secret\n"], {}), ([good], {"end": "pass"}),
+                    ([good], {"end": "skip"}), ([good], {"active": False}),
+                    ([good], {"trace": "cmd/kaname/installation_native_fixture_test.go"}),
+                    ([good], {"suffix": "invalid-json"})]
+        for outputs, options in variants:
+            with self.subTest(outputs=outputs, options=options):
+                result = diagnose(outputs, **options)
+                self.assertNotIn("roleReadiness", result)
+                self.assertNotIn("unit-secret", json.dumps(result))
+
     def test_valid_red_markers_keep_only_safe_schema(self):
         for rid, field in (("03", "readOnlyDiffs"), ("05", "oldOperationDiffs")):
             with self.subTest(rid=rid):
