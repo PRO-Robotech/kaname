@@ -6,6 +6,7 @@ package pg_test
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -409,6 +410,7 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 			ParentWrite struct {
 				Journal json.RawMessage `json:"journal"`
 			} `json:"parent_write"`
+			RegistrationBody json.RawMessage `json:"registration_body"`
 		}
 		require.NoError(t, json.Unmarshal(resultRaw, &result))
 		require.Equal(t, "create", result.Outcome)
@@ -420,6 +422,78 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		require.Equal(t, "user:"+intent.Actor, result.Audit.Payload.Actor)
 		require.NotEmpty(t, result.ParentWrite.Journal)
 		require.NotEqual(t, "null", string(result.ParentWrite.Journal))
+		type packedEntry struct {
+			Command int             `json:"command"`
+			Row     json.RawMessage `json:"row"`
+		}
+		type packedCommand struct {
+			Kind    string          `json:"kind"`
+			Row     json.RawMessage `json:"row"`
+			Journal json.RawMessage `json:"journal"`
+		}
+		var packed struct {
+			Physical struct {
+				Commands  []packedCommand `json:"commands"`
+				Audits    []packedEntry   `json:"audits"`
+				Outboxes  []packedEntry   `json:"outboxes"`
+				Reconcile []packedEntry   `json:"reconcile"`
+			} `json:"physical"`
+			StepObligations map[string]struct {
+				Audits    []string `json:"audits"`
+				Reconcile []int64  `json:"reconcile"`
+			} `json:"step_obligations"`
+			Writes  []json.RawMessage `json:"writes"`
+			Program struct {
+				Commands []packedCommand `json:"commands"`
+			} `json:"program"`
+			Result struct {
+				Outcome       string    `json:"outcome"`
+				SourceVersion time.Time `json:"source_version"`
+			} `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(result.RegistrationBody, &packed))
+		require.NotEmpty(t, packed.Writes)
+		require.Equal(t, packed.Physical.Commands, packed.Program.Commands)
+		require.Equal(t, "create", packed.Result.Outcome)
+		require.True(t, result.SourceVersion.Equal(packed.Result.SourceVersion))
+		require.Len(t, packed.Physical.Audits, 1)
+		audit := packed.Physical.Audits[0]
+		require.Positive(t, audit.Command)
+		require.LessOrEqual(t, audit.Command, len(packed.Physical.Commands))
+		var auditRow struct {
+			ID      string `json:"id"`
+			Payload struct {
+				Actor string `json:"actor"`
+			} `json:"event_payload"`
+		}
+		require.NoError(t, json.Unmarshal(audit.Row, &auditRow))
+		require.Equal(t, state.Reservations.AuditID, auditRow.ID)
+		require.Equal(t, "user:"+intent.Actor, auditRow.Payload.Actor)
+		require.Equal(t, "registration_audit", packed.Physical.Commands[audit.Command-1].Kind)
+		require.JSONEq(t, string(audit.Row), string(packed.Physical.Commands[audit.Command-1].Row))
+		require.Equal(t, []string{state.Reservations.AuditID}, packed.StepObligations[strconv.Itoa(audit.Command)].Audits)
+		auditCommands := 0
+		for _, command := range packed.Physical.Commands {
+			if command.Kind == "registration_audit" {
+				auditCommands++
+			}
+		}
+		require.Equal(t, 1, auditCommands, "дополнительного модульного аудита в программе нет")
+		require.Len(t, packed.Physical.Outboxes, 1)
+		outbox := packed.Physical.Outboxes[0]
+		require.Positive(t, outbox.Command)
+		require.LessOrEqual(t, outbox.Command, len(packed.Physical.Commands))
+		require.JSONEq(t, string(result.ParentWrite.Journal), string(outbox.Row))
+		require.Equal(t, "registration_journal", packed.Physical.Commands[outbox.Command-1].Kind)
+		require.JSONEq(t, string(outbox.Row), string(packed.Physical.Commands[outbox.Command-1].Journal))
+		require.Len(t, packed.Physical.Reconcile, 1)
+		reconcile := packed.Physical.Reconcile[0]
+		var reconcileRow struct {
+			ID int64 `json:"id"`
+		}
+		require.NoError(t, json.Unmarshal(reconcile.Row, &reconcileRow))
+		require.Equal(t, state.Reservations.ReconcileIDs[0], reconcileRow.ID)
+		require.Equal(t, []int64{reconcileRow.ID}, packed.StepObligations[strconv.Itoa(reconcile.Command)].Reconcile)
 		var selectedRaw []byte
 		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_sequence_store_v3()`).Scan(&selectedRaw))
 		var bound struct {
@@ -428,6 +502,9 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 				Ordinal    int             `json:"ordinal"`
 				ReservedID int64           `json:"reserved_id"`
 				Row        json.RawMessage `json:"row"`
+				Origin     struct {
+					Command int `json:"command"`
+				} `json:"origin"`
 			} `json:"selected"`
 		}
 		require.NoError(t, json.Unmarshal(selectedRaw, &bound))
@@ -436,8 +513,17 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		require.Equal(t, fga.Ordinal, bound.Selected[0].Ordinal)
 		require.Equal(t, fga.ReservedID, bound.Selected[0].ReservedID, "выбор сохраняет ранее зарезервированный ID")
 		require.JSONEq(t, string(result.ParentWrite.Journal), string(bound.Selected[0].Row))
+		require.Equal(t, outbox.Command, bound.Selected[0].Origin.Command, "sequence origin связан с фактической физической командой журнала")
 		require.NoError(t, tx.QueryRow(r.ctx, `SELECT EXISTS(SELECT 1 FROM kaname.fga_outbox WHERE id=$1)`, fga.ReservedID).Scan(&fgaExists))
 		require.False(t, fgaExists, "select связывает программу; dispatcher ещё не записывал journal")
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT
+ EXISTS(SELECT 1 FROM kaname.audit_outbox WHERE id=$1),
+ EXISTS(SELECT 1 FROM kaname.resource_reconcile_outbox WHERE id=$2),
+ EXISTS(SELECT 1 FROM kaname.resource_mirror WHERE object_type='childstage.child' AND object_id='container-one/candidate')`,
+			state.Reservations.AuditID, state.Reservations.ReconcileIDs[0]).Scan(&auditExists, &reconcileExists, &childExists))
+		require.False(t, auditExists)
+		require.False(t, reconcileExists)
+		require.False(t, childExists, "упаковка физических команд ещё не исполняет DML")
 		require.NoError(t, tx.Rollback(context.WithoutCancel(r.ctx)))
 	})
 }

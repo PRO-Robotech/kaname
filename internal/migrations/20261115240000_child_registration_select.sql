@@ -14,7 +14,8 @@ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_cata
 DECLARE
  proof jsonb; sequence_program jsonb; frozen jsonb; intent jsonb; reservations jsonb;
  body jsonb; chosen jsonb:='[]'::jsonb; journal jsonb; tuple_value jsonb;
- tx_at timestamptz:=transaction_timestamp(); command_ordinal integer; maximum_count integer;
+ physical jsonb; packed jsonb; audit_row jsonb; outbox jsonb;
+ tx_at timestamptz:=transaction_timestamp(); command_ordinal integer; audit_ordinal integer; maximum_count integer;
 BEGIN
  PERFORM kaname.authority_protocol_require_owner();
  proof:=kaname.authority_protocol_attestation();
@@ -62,8 +63,27 @@ BEGIN
    WHERE NOT coalesce((p_prepared#>'{maximum,operations}')->operation.key @> operation.value,false)) THEN
    RAISE EXCEPTION 'child registration final operations exceed the held maximum' USING ERRCODE='42501';
   END IF;
-  -- В штатной программе записи direct шаги предшествуют шагу journal.
-  command_ordinal:=jsonb_array_length(body#>'{program,steps}')+1;
+  -- Общий компилятор собирает образы зеркала, связей и журнала. Аудит
+  -- пользователя готовит child program, поэтому модульный аудит здесь выключен.
+  physical:=kaname._authority_resource_registration_physical_v2(body->'certificate',body->'sources',
+   jsonb_set(body->'program','{audit_required}','false'::jsonb),reservations,tx_at);
+  outbox:=physical#>'{outboxes,0}';
+  IF jsonb_array_length(physical->'outboxes') IS DISTINCT FROM 1
+   OR outbox->'row' IS DISTINCT FROM journal
+   OR jsonb_array_length(physical->'audits') IS DISTINCT FROM 0 THEN
+   RAISE EXCEPTION 'child registration final physical program differs from the journal' USING ERRCODE='42501';
+  END IF;
+  command_ordinal:=(outbox->>'command')::integer;
+  audit_row:=body->'audit';
+  audit_ordinal:=jsonb_array_length(physical->'commands')+1;
+  physical:=physical||jsonb_build_object(
+   'commands',(physical->'commands')||jsonb_build_array(jsonb_build_object(
+    'kind','registration_audit','row',audit_row,'operations','{"audit_outbox":["INSERT"]}'::jsonb)),
+   'audits',jsonb_build_array(jsonb_build_object('command',audit_ordinal,'row',audit_row)),
+   'work',(physical->>'work')::integer+2);
+  packed:=kaname._authority_resource_registration_pack_v2(p_prepared->'maximum',physical,
+   jsonb_build_object('outcome','create','source_version',body->'source_version'));
+  body:=body||jsonb_build_object('registration_body',packed);
   chosen:=jsonb_build_array(jsonb_build_object('ordinal',1,
    'origin',jsonb_build_object('family','resource.registration','command',command_ordinal,'ordinal',1),
    'row',journal-'created_at'));
