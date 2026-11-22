@@ -169,6 +169,13 @@ BEGIN
   'authority_sa_state_preflight_v3(text,boolean,text)'] LOOP
   EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,runtime_name);
  END LOOP;
+ -- После полной поставки выдаём runtime только узкие входы тела потомка.
+ IF to_regprocedure('kaname._authority_child_runtime_storage_v1()') IS NOT NULL THEN
+  FOREACH signature IN ARRAY ARRAY['authority_child_registration_begin_body_v1(jsonb)',
+   'authority_child_registration_step_v1(integer)','authority_child_registration_complete_v1()'] LOOP
+   EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,runtime_name);
+  END LOOP;
+ END IF;
 END $$;
 -- +goose StatementEnd
 
@@ -876,7 +883,7 @@ BEGIN
  ('authority_subject_change_applied_v2()','fa776df6d3b95dadb13fa1684424b2db105b21f5b8862bd045680fb8129d094e',true,'v',true,'private'),
  ('authority_subject_change_statement_guard_v2()','600129602604e3cac17840ff155738e5c886677cd8be781b62b9b29f2fe785b0',true,'v',true,'private'),
  ('relation_fact_from_journal()','604d827358eab2f756c0c53d9a65cfbaf31b3f5d19ff8adc6e3dab944e8fa70a',false,'v',false,'preserve'),
- ('authority_protocol_grant_runtime(regrole)','b49464c800300cbad1e7bea9acfbb889ef7c8d65fb217ee8c3a1ade0342e5549',false,'v',true,'preserve'),
+ ('authority_protocol_grant_runtime(regrole)','a0bb61100e92a4f94dece2489fbacad79402c94f0cb8f950b923d495703367d8',false,'v',true,'preserve'),
  ('authority_binding_command_begin_v3(jsonb)','39696919bfed78731817c77a37920e661801933c5ac544bc26ea5603a7fa39b1',true,'v',true,'export'),
  ('authority_binding_command_end_v3(jsonb)','2c9ee43be689f773c543fc800645f2aae482ec02d392fd28937efa50558915b2',true,'v',true,'export'),
  ('authority_binding_command_audit_v3(jsonb)','93c1bfc6bd6b753868e68ff6e408089f701d189ed6e7c30a32c7998baade872f',true,'v',true,'export'),
@@ -1602,7 +1609,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','7ee06c748759eddba957013bf64512059e198b37a85f4a46755802b02cd38e5b',true),
+ ('_authority_crud_storage_v3()','bc18c9d0bd00bd804a33857b1dd170fc2936d33ccf3a752811793dc2ebb7dc3f',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
