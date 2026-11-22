@@ -48,20 +48,28 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	startChildNativeFull(t, f, process, input)
 	// Bearer действительно выдан ceremony после FULL запуска и принят /me.
 	f.renewOperator(t, f.given.ctx)
-	project := ridResponseID(t, f.ridOperation(t, http.MethodPost, "/iam/v1/projects", f.operator.Bearer(),
-		map[string]any{"accountId": f.tenantID, "name": "child-public-project"}, 0))
-	const parentID = "public-parent"
-	const childID = parentID + "/candidate"
+	scenes := []nativeRegisteredChild{{parent: "public-parent"}, {parent: "other-parent"}}
 	moduleConn, err := f.wire.ModuleWriter(filepath.Join(f.session.Root, "pki"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = moduleConn.Close() })
 	module := iamv1.NewInternalIAMServiceClient(moduleConn)
-	_, err = module.RegisterResource(f.given.ctx, &iamv1.RegisterResourceRequest{
-		SubjectId: "project:" + project, Relation: "project", Object: "registry_child_probe_container:" + parentID,
-		ParentProjectId: project, ParentAccountId: f.tenantID,
-		ParentChain: []string{"project:" + project, "account:" + f.tenantID}, SourceVersion: timestamppb.Now(),
-	})
-	require.NoError(t, err)
+	var targetParents []map[string]any
+	var parentIDs []string
+	for i := range scenes {
+		scene := &scenes[i]
+		scene.project = ridResponseID(t, f.ridOperation(t, http.MethodPost, "/iam/v1/projects", f.operator.Bearer(),
+			map[string]any{"accountId": f.tenantID, "name": "project-" + scene.parent}, 0))
+		scene.child = scene.parent + "/candidate"
+		_, err = module.RegisterResource(f.given.ctx, &iamv1.RegisterResourceRequest{
+			SubjectId: "project:" + scene.project, Relation: "project", Object: "registry_child_probe_container:" + scene.parent,
+			ParentProjectId: scene.project, ParentAccountId: f.tenantID,
+			ParentChain: []string{"project:" + scene.project, "account:" + f.tenantID}, SourceVersion: timestamppb.Now(),
+		})
+		require.NoError(t, err)
+		parentIDs = append(parentIDs, scene.parent)
+		targetParents = append(targetParents, map[string]any{"type": "registry.childProbeContainers", "id": scene.parent})
+	}
+	require.NotEqual(t, scenes[0].project, scenes[1].project)
 	var roleID string
 	for _, raw := range f.ridList(t, "/iam/v1/roles", "roles", nil) {
 		var role iamv1.Role
@@ -75,43 +83,72 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	binding := ridResponseID(t, f.ridOperation(t, http.MethodPost, "/iam/v1/accessBindings", f.operator.Bearer(), map[string]any{
 		"subjectType": "user", "subjectId": f.operator.UserID(), "roleId": roleID,
 		"scopeType": "iam.account", "scopeId": f.tenantID,
-		"target": map[string]any{"resources": map[string]any{"resources": []any{
-			map[string]any{"type": "registry.childProbeContainers", "id": parentID},
-		}}},
+		"target": map[string]any{"resources": map[string]any{"resources": targetParents}},
 	}, 0))
 	// Ждём факт именно этой привязки. Проверка Check для cluster admin
 	// может дать доступ и без материализации нового правила.
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		ctx, cancel := context.WithTimeout(f.given.ctx, time.Second)
 		defer cancel()
-		var materialized bool
-		require.NoError(c, f.given.pool.QueryRow(ctx, `SELECT EXISTS (
- SELECT 1 FROM kaname.access_binding_emitted_tuples e
+		var materialized int
+		require.NoError(c, f.given.pool.QueryRow(ctx, `SELECT count(DISTINCT f.object_id)
+ FROM kaname.access_binding_emitted_tuples e
  JOIN kaname.relation_fact f ON f.object_type='registry_child_probe_container'
- AND f.object_id=$2 AND f.relation=e.relation AND f.subject=e.fga_user
+ AND f.object_id=ANY($2::text[]) AND f.relation=e.relation AND f.subject=e.fga_user
  WHERE e.binding_id=$1 AND e.fga_user=$3 AND e.relation='child_registrar'
- AND e.object='registry_child_probe_container:'||$2 AND e.source='member')`,
-			binding, parentID, "user:"+f.operator.UserID()).Scan(&materialized))
-		require.True(c, materialized, "штатный факт child_registrar должен принадлежать этой привязке")
+ AND e.object='registry_child_probe_container:'||f.object_id AND e.source='member'`,
+			binding, parentIDs, "user:"+f.operator.UserID()).Scan(&materialized))
+		require.Equal(c, len(scenes), materialized, "штатные факты обоих родителей должны принадлежать этой привязке")
 	}, 30*time.Second, 50*time.Millisecond)
-	var response json.RawMessage
-	code, err := f.wire.JSON(f.given.ctx, http.MethodPost, "/iam/v1/childRegistrations:register", f.operator.Bearer(),
-		map[string]any{"resourceType": "registry.childProbeChildren", "resourceId": childID}, &response)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, code)
-	var created iamv1.RegisterChildResponse
-	require.NoError(t, protojson.Unmarshal(response, &created))
-	require.NotNil(t, created.GetVersion())
-	require.NoError(t, created.GetVersion().CheckValid())
+	for i := range scenes {
+		scene := &scenes[i]
+		var response json.RawMessage
+		code, err := f.wire.JSON(f.given.ctx, http.MethodPost, "/iam/v1/childRegistrations:register", f.operator.Bearer(),
+			map[string]any{"resourceType": "registry.childProbeChildren", "resourceId": scene.child}, &response)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, code)
+		var created iamv1.RegisterChildResponse
+		require.NoError(t, protojson.Unmarshal(response, &created))
+		require.NotNil(t, created.GetVersion())
+		require.NoError(t, created.GetVersion().CheckValid())
+		scene.version = created.GetVersion().AsTime()
+		requireNativeRegisteredChild(t, f, *scene)
+	}
 
-	// Прямой публичный gRPC предъявляет только настоящий bearer. Здесь нет
-	// GatewayContext, metadata principal или допускающего interceptor-дублёра.
+	first, other := scenes[0], scenes[1]
+	for _, extra := range []map[string]any{
+		{"parentId": other.parent},
+		{"parentChain": []string{"registry_child_probe_container:" + other.parent, "project:" + other.project, "account:" + f.tenantID}},
+	} {
+		extra["resourceType"], extra["resourceId"] = "registry.childProbeChildren", first.child
+		var response json.RawMessage
+		code, err := f.wire.JSON(f.given.ctx, http.MethodPost, "/iam/v1/childRegistrations:register", f.operator.Bearer(), extra, &response)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusForbidden, code)
+		require.JSONEq(t, `{"code":7,"message":"permission denied","details":[]}`, string(response))
+		for _, scene := range scenes {
+			requireNativeRegisteredChild(t, f, scene)
+		}
+	}
+
+	// Прямой публичный gRPC предъявляет только настоящий bearer.
 	publicConn := childNativePublicGRPC(t, filepath.Join(f.session.Root, "pki"))
 	ctx := metadata.AppendToOutgoingContext(f.given.ctx, "authorization", "Bearer "+f.operator.Bearer())
 	replayed, err := iamv1.NewChildRegistrationServiceClient(publicConn).Register(ctx,
-		&iamv1.RegisterChildRequest{ResourceType: "registry.childProbeChildren", ResourceId: childID})
+		&iamv1.RegisterChildRequest{ResourceType: "registry.childProbeChildren", ResourceId: first.child})
 	require.NoError(t, err)
-	require.True(t, created.Version.AsTime().Equal(replayed.GetVersion().AsTime()))
+	require.True(t, first.version.Equal(replayed.GetVersion().AsTime()))
+	requireNativeRegisteredChild(t, f, first)
+}
+
+type nativeRegisteredChild struct {
+	parent, project, child string
+	version                time.Time
+}
+
+func requireNativeRegisteredChild(t *testing.T, f *installationNativeWorld, scene nativeRegisteredChild) {
+	t.Helper()
+	childID, parentID, project := scene.child, scene.parent, scene.project
 	var version time.Time
 	var account, actualProject, actor string
 	var chain []string
@@ -120,12 +157,13 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
  WHERE object_type='registry_child_probe_child' AND object_id=$1)
  FROM kaname.resource_mirror WHERE object_type='registry.childProbeChildren' AND object_id=$1`, childID).
 		Scan(&version, &account, &actualProject, &chain))
-	require.True(t, version.Equal(created.Version.AsTime()))
+	require.True(t, version.Equal(scene.version))
 	require.Equal(t, f.tenantID, account)
 	require.Equal(t, project, actualProject)
 	require.Equal(t, []string{"registry_child_probe_container:" + parentID, "project:" + project, "account:" + f.tenantID}, chain)
-	var scopes, facts, expectedFacts, receipts, audits int
+	var scopes, expectedScopes, facts, expectedFacts, receipts, audits int
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT
+ (SELECT count(*) FROM kaname.resource_registration_scope WHERE object_type='registry_child_probe_child' AND object_id=$1),
  (SELECT count(*) FROM kaname.resource_registration_scope WHERE object_type='registry_child_probe_child' AND object_id=$1 AND account_id=$2 AND project_id=$3),
  (SELECT count(*) FROM kaname.relation_fact WHERE object_type='registry_child_probe_child' AND object_id=$1),
  (SELECT count(*) FROM kaname.relation_fact WHERE object_type='registry_child_probe_child' AND object_id=$1 AND relation='parent' AND subject=$4 AND source_version=$5),
@@ -133,8 +171,9 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
  (SELECT count(*) FROM kaname.audit_outbox WHERE event_payload#>>'{object,id}'=$1),
  (SELECT event_payload->>'actor' FROM kaname.audit_outbox WHERE event_payload#>>'{object,id}'=$1 LIMIT 1)`,
 		childID, f.tenantID, project, "registry_child_probe_container:"+parentID, version, f.operator.UserID()).
-		Scan(&scopes, &facts, &expectedFacts, &receipts, &audits, &actor))
+		Scan(&scopes, &expectedScopes, &facts, &expectedFacts, &receipts, &audits, &actor))
 	require.Equal(t, 1, scopes)
+	require.Equal(t, 1, expectedScopes)
 	require.Equal(t, 1, facts)
 	require.Equal(t, 1, expectedFacts)
 	require.Equal(t, 1, receipts)
