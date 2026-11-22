@@ -135,6 +135,11 @@ func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 // включая PENDING за первой страницей, вместе с их фактической проекцией.
 func TestGrantDelegationStagedRevokeIncludesPendingLastPage(t *testing.T) {
 	w := delegationUCFixture(t, true)
+	// У подготовки стенда свой дедлайн. Для посева 257 привязок и проверки
+	// результата выделяем отдельный конечный бюджет, сохраняя 30 с на сам отзыв.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(w.r.ctx), 60*time.Second)
+	t.Cleanup(cancel)
+	w.r.ctx = ctx
 	delegationRevokeWaitDiagnosticsOnFailure(t, w)
 	t.Cleanup(func() { authorityWaitReleased(t, w.r.runtime) })
 	id := w.create(t, w.owner, false)
