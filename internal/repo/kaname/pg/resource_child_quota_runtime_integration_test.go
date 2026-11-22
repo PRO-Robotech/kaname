@@ -10,12 +10,16 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/operations"
+	childregistration "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/child_registration"
+	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
-	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func childQuotaRuntimeFixture(t *testing.T, rule catalog.ChildRegistrationRule) (protocolRig, *kanamepg.ResourceDecisionRunner, context.Context, operations.Principal) {
@@ -68,10 +72,15 @@ func TestUserChildRuntimeCapacityLastSlotSerializesAndIsolatesParents(t *testing
 	done := make(chan outcome, 2)
 	raceCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	handler := childregistration.NewHandler(internaliam.NewUserChildRegistration(runner))
 	for i, input := range inputs {
 		go func(index int, in kaname.UserChildRegistrationInput) {
 			<-start
-			version, callErr := runner.RunUserChildRegistration(raceCtx, in, principal)
+			reply, callErr := handler.Register(raceCtx, &iamv1.RegisterChildRequest{ResourceType: in.ResourceType, ResourceId: in.ResourceID})
+			var version time.Time
+			if callErr == nil {
+				version = reply.GetVersion().AsTime()
+			}
 			done <- outcome{index, version, callErr}
 		}(i, input)
 	}
@@ -90,8 +99,10 @@ func TestUserChildRuntimeCapacityLastSlotSerializesAndIsolatesParents(t *testing
 			winner, winnerVersion = got.index, got.version
 			require.False(t, got.version.IsZero())
 		} else {
-			require.ErrorIs(t, got.err, domain.ErrUserChildRegistrationRefused)
-			require.Equal(t, domain.ErrUserChildRegistrationRefused.Error(), got.err.Error())
+			answer := status.Convert(got.err)
+			require.Equal(t, codes.PermissionDenied, answer.Code())
+			require.Equal(t, "permission denied", answer.Message())
+			require.Empty(t, answer.Details())
 			require.True(t, got.version.IsZero())
 			require.Equal(t, -1, loser)
 			loser = got.index
@@ -144,10 +155,13 @@ func TestUserChildRuntimeRateUsesPostgresRollingWindowAndIsolatesParents(t *test
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT to_jsonb(c),created_at,created_at+make_interval(secs=>$4)
  FROM kaname.authority_child_creation c WHERE child_type=$1 AND child_id=$2 AND source_version=$3`, first.ResourceType, first.ResourceID, version, rule.WindowSeconds).Scan(&firstReceipt, &createdAt, &expiresAt))
 	candidate := childQuotaInput("container-one/rate-retry")
-	rejected, err := runner.RunUserChildRegistration(ctx, candidate, principal)
-	require.ErrorIs(t, err, domain.ErrUserChildRegistrationRefused)
-	require.Equal(t, domain.ErrUserChildRegistrationRefused.Error(), err.Error())
-	require.True(t, rejected.IsZero())
+	handler := childregistration.NewHandler(internaliam.NewUserChildRegistration(runner))
+	rejected, err := handler.Register(ctx, &iamv1.RegisterChildRequest{ResourceType: candidate.ResourceType, ResourceId: candidate.ResourceID})
+	answer := status.Convert(err)
+	require.Equal(t, codes.PermissionDenied, answer.Code())
+	require.Equal(t, "permission denied", answer.Message())
+	require.Empty(t, answer.Details())
+	require.Nil(t, rejected)
 	childQuotaRequireReason(t, r, principal, "rate", 1)
 	var absent bool
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT

@@ -123,7 +123,7 @@ BEGIN
  policy:=coalesce(policy,'{}'::jsonb)||(predicate->'policy_epochs')
   ||jsonb_build_object('object:'||jsonb_build_array(parent_type,parent_id)::text,'write');
  SELECT * INTO STRICT epoch_result FROM kaname._authority_resource_epoch_wait_v2(
-  '{}'::jsonb,policy,'{}'::jsonb,p_rows-logical_rows,p_reads-logical_reads);
+  '{}'::jsonb,policy,jsonb_build_object('','share'),p_rows-logical_rows,p_reads-logical_reads);
  logical_rows:=logical_rows+epoch_result.logical_rows;
  logical_reads:=logical_reads+epoch_result.logical_reads;
  SELECT * INTO STRICT current_result FROM kaname._authority_resource_required_reread_v2(
@@ -175,7 +175,7 @@ BEGIN
   locks,catalog_result.catalog_rows,native_epochs,
   to_jsonb(ARRAY(SELECT key FROM jsonb_each_text(policy) WHERE value='write' ORDER BY key COLLATE "C")),
   to_jsonb(ARRAY(SELECT key FROM jsonb_each_text(policy) WHERE value='share' ORDER BY key COLLATE "C")),
-  '[]','[]','[]','[]','[]',epoch_result.lock_witness,'[]','{}','{}','{}','{}',authority_result.authority,
+  '[]','[]','[]','[""]','[]',epoch_result.lock_witness,'[]','{}','{}','{}','{}',authority_result.authority,
   jsonb_build_object('parent_state',captured_state,'incarnation',incarnation,'module',module_value));
  PERFORM kaname._authority_resource_manifest_v2();
  RETURN NEXT;
@@ -264,7 +264,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
   ('_authority_child_registration_complete_v1()','17686473c29efe97fb787cf2a1495997240719a5913a272404c9b87823f997bb',false,'v','plpgsql'),
   ('authority_child_registration_begin_body_v1(jsonb)','bf7b041190118779c428cbd9bb6a6be6fed8f840f5c571c54f057115343425f9',true,'v','sql'),
   ('authority_child_registration_step_v1(integer)','7ba85ac77d2ac21e1d2afa3ff50738d4547062f850490d20e3f9bf0b9ec7abbc',true,'v','sql'),
-  ('_authority_child_parent_close_prepare_v1(jsonb,integer,integer)','305e9fc3c923435b9afb79b4b41fdde5a59f0f529dade4ac17df7ce55712d7d1',false,'v','plpgsql'),
+  ('_authority_child_parent_close_prepare_v1(jsonb,integer,integer)','b7cb1b8f7c976b8b42fc8b896fc9a6350d27ffa9d1b49de2ec03adc678eaa98f',false,'v','plpgsql'),
   ('authority_child_parent_close_apply_v1(jsonb)','2f373544a8215634f5222896c93b74416c5c2e9718346553fc9107486d32e8cf',true,'v','plpgsql'),
   ('authority_child_registration_complete_v1()','4f44ebad4a5aea644f7180b9ae686edc411ef1c7f0262bd12ba6c1064fe5ac23',true,'v','sql')
  )
@@ -377,7 +377,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_child_runtime_storage_v1()','7ac364c7e27045f5dcfabafbac9f3394b3c646cb54c514509db656fc5c2b32af',true),
+ ('_authority_child_runtime_storage_v1()','34e6b08a8a368a89f6c6afe61393a7b526b5ecc0482627c67005fa9db7c4fdf7',true),
  ('_authority_crud_storage_v3()','36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
