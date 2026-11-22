@@ -632,6 +632,8 @@ jobs:
     env:
       # Полный вывод проб без изменения текстового отбора go list.
       GOFLAGS: '-p=1 -test.v=true'
+      # Компиляция использует go.mod выбранной ревизии приложения.
+      GOWORK: 'off'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -680,9 +682,13 @@ jobs:
           git status --porcelain --untracked-files=all > "$out/checkout-status.txt"
           git status --porcelain --untracked-files=no > "$out/checkout-tracked-status.txt"
           source_guard_rc=0
-          if [ "$(cat "$out/checkout-head.txt")" != "d8b88c077d6ec7d68c3e275d6f0460ec6cf82dc8" ] || \
+          # Операнд platform-tree расположен рядом с исходниками приложения.
+          # Остальные файлы вне индекса учитываются даже при наличии .gitignore.
+          git ls-files --others -z --exclude='/upstream-kacho/' > "$out/checkout-untracked.zlist" || source_guard_rc=$?
+          if [ "$source_guard_rc" -eq 0 ] && { [ "$(cat "$out/checkout-head.txt")" != "d8b88c077d6ec7d68c3e275d6f0460ec6cf82dc8" ] || \
              [ "$(cat "$out/checkout-tree.txt")" != "c3056a6f388134a12a6515a1bca16a78a3d78847" ] || \
-             [ -s "$out/checkout-tracked-status.txt" ]; then source_guard_rc=1; fi
+             [ -s "$out/checkout-tracked-status.txt" ] || \
+             [ -s "$out/checkout-untracked.zlist" ]; }; then source_guard_rc=1; fi
           printf '%s\n' "$source_guard_rc" > "$out/source-inventory.rc"
           if [ "$source_guard_rc" -ne 0 ]; then
             echo "::error title=ИСХОДНИК НЕ СОВПАЛ::Требуется чистый checkout фиксированного d8b88c и его дерева; перепись не разрешена."
@@ -692,7 +698,7 @@ jobs:
             "$GITHUB_EVENT_NAME" "$GITHUB_REF" "$GITHUB_SHA" "$PR_HEAD_SHA" "$PR_BASE_SHA" > "$out/event.txt"
           command -v go > "$out/go-path.txt"
           go version > "$out/go-version.txt"
-          go env -json GOVERSION GOROOT GOTOOLCHAIN GOFLAGS CGO_ENABLED GOOS GOARCH > "$out/go-env.json"
+          go env -json GOVERSION GOROOT GOTOOLCHAIN GOFLAGS GOWORK CGO_ENABLED GOOS GOARCH > "$out/go-env.json"
           rc=0
           .github/scripts/run-integration.sh --plan > "$out/plan.raw" 2> "$out/plan.stderr" || rc=$?
           printf '%s\n' "$rc" > "$out/plan.rc"
@@ -750,11 +756,13 @@ jobs:
             git rev-parse HEAD > "$out/source-$1.head" &&
             git rev-parse 'HEAD^{tree}' > "$out/source-$1.tree" &&
             git status --porcelain --untracked-files=no > "$out/source-$1.tracked-status" &&
+            git ls-files --others -z --exclude='/upstream-kacho/' > "$out/source-$1.untracked.zlist" &&
             git diff --binary HEAD -- > "$out/source-$1.tracked.diff" &&
             sha256sum "$out/source-$1.tracked.diff" > "$out/source-$1.tracked-diff.sha256" &&
             [ "$(cat "$out/source-$1.head")" = "d8b88c077d6ec7d68c3e275d6f0460ec6cf82dc8" ] &&
             [ "$(cat "$out/source-$1.tree")" = "c3056a6f388134a12a6515a1bca16a78a3d78847" ] &&
-            [ ! -s "$out/source-$1.tracked-status" ]
+            [ ! -s "$out/source-$1.tracked-status" ] &&
+            [ ! -s "$out/source-$1.untracked.zlist" ]
           }
           observe_source before
           set +e
