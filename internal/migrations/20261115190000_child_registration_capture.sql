@@ -20,6 +20,7 @@ DECLARE
  parent_version timestamptz; incarnation uuid; closed_at timestamptz;
  child_version timestamptz; direct_parent boolean; replay_version timestamptz;
  live_children integer; candidate record; recent_creations timestamptz[]:=ARRAY[]::timestamptz[];
+ version_sources record; version_watermark timestamptz; parent_subject text;
 BEGIN
  PERFORM kaname.authority_protocol_require_owner();
  IF p_rows IS NULL OR p_rows NOT BETWEEN 0 AND 100000 OR p_reads IS NULL OR p_reads NOT BETWEEN 0 AND 4096 THEN
@@ -124,6 +125,33 @@ BEGIN
      ORDER BY c.created_at DESC LIMIT least(max_creates,p_rows-logical_rows+1)) INTO recent_creations;
     logical_rows:=logical_rows+cardinality(recent_creations);
    END IF;
+
+   IF live_children<max_children THEN
+    -- Повторная регистрация должна идти после сохранённых версий этого ключа.
+    -- Именованные указатели сюда не входят: они не могут хранить связь parent.
+    logical_reads:=logical_reads+4;
+    IF logical_rows>p_rows OR logical_reads>p_reads THEN
+     RAISE EXCEPTION 'child registration capture budget exceeded' USING ERRCODE='54000';
+    END IF;
+    parent_subject:=parent_model||':'||parent_key;
+    SELECT
+     (SELECT r.delete_through FROM kaname.resource_registration_retirement r
+      WHERE r.object_type=child_model AND r.object_id=p_child_id AND r.relation='parent' AND r.subject=parent_subject) AS retired_at,
+     (SELECT f.source_version FROM kaname.relation_fact f
+      WHERE f.object_type=child_model AND f.object_id=p_child_id AND f.relation='parent' AND f.subject=parent_subject) AS fact_version,
+     (SELECT c.source_version FROM kaname.authority_child_creation c
+      WHERE c.child_type=p_child_type AND c.child_id=p_child_id ORDER BY c.source_version DESC LIMIT 1) AS receipt_version,
+     e.latest_version AS edge_version,e.edge_count
+    INTO STRICT version_sources
+    FROM (SELECT max(e.source_version) AS latest_version,count(*)::integer AS edge_count
+     FROM kaname.resource_parent_edge e WHERE e.object_type=child_model AND e.object_id=p_child_id) e;
+    version_watermark:=greatest(version_sources.retired_at,version_sources.fact_version,
+     version_sources.receipt_version,version_sources.edge_version);
+    logical_rows:=logical_rows+version_sources.edge_count
+     +CASE WHEN version_sources.retired_at IS NULL THEN 0 ELSE 1 END
+     +CASE WHEN version_sources.fact_version IS NULL THEN 0 ELSE 1 END
+     +CASE WHEN version_sources.receipt_version IS NULL THEN 0 ELSE 1 END;
+   END IF;
   END IF;
  END IF;
  IF logical_rows>p_rows OR logical_reads>p_reads THEN
@@ -133,7 +161,8 @@ BEGIN
   'child_type',p_child_type,'child_model',child_model,'child_id',p_child_id,
   'parent_type',parent_dotted,'parent_model',parent_model,'parent_id',parent_key,'parent_action',parent_action,
   'policy',policy,'parent_version',parent_version,'parent_incarnation',incarnation,'closed_at',closed_at,
-  'child_version',child_version,'replay_version',replay_version,'live_children',live_children,'recent_creations',recent_creations);
+  'child_version',child_version,'replay_version',replay_version,'live_children',live_children,
+  'recent_creations',recent_creations,'version_watermark',version_watermark);
  RETURN NEXT;
 END $$;
 -- +goose StatementEnd

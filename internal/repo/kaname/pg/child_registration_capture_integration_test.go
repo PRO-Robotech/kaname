@@ -61,6 +61,7 @@ func TestChildRegistrationCaptureBoundsCurrentIncarnation(t *testing.T) {
 		ReplayVersion     *time.Time      `json:"replay_version"`
 		LiveChildren      *int            `json:"live_children"`
 		RecentCreations   []time.Time     `json:"recent_creations"`
+		VersionWatermark  *time.Time      `json:"version_watermark"`
 		Policy            json.RawMessage `json:"policy"`
 	}
 	read := func(id string) (capture, int64, int64) {
@@ -127,6 +128,27 @@ func TestChildRegistrationCaptureBoundsCurrentIncarnation(t *testing.T) {
 		require.ErrorAs(t, err, &pe)
 		require.Equal(t, "54000", pe.Code, "неполная квота не возвращается")
 	}
+	// История предыдущей регистрации может опережать текущее время решения.
+	require.Nil(t, got.VersionWatermark)
+	previousVersion := version.Add(time.Hour)
+	receipt(candidate, previousVersion, first, "00000000-0000-0000-0000-000000000001")
+	withReceipt, _, _ := read(candidate)
+	require.Equal(t, &previousVersion, withReceipt.VersionWatermark)
+	retiredThrough := previousVersion.Add(time.Second)
+	exec(`INSERT INTO kaname.resource_registration_retirement(object_type,object_id,relation,subject,delete_through)
+VALUES('odd_item',$1,'parent','odd_box:'||$2,$3)`, candidate, parent, retiredThrough)
+	withRetirement, _, _ := read(candidate)
+	require.Equal(t, &retiredThrough, withRetirement.VersionWatermark)
+	storedFact := retiredThrough.Add(time.Second)
+	exec(`INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version)
+VALUES('odd_item',$1,'parent','odd_box:'||$2,$3)`, candidate, parent, storedFact)
+	withFact, _, _ := read(candidate)
+	require.Equal(t, &storedFact, withFact.VersionWatermark)
+	storedEdge := storedFact.Add(time.Second)
+	exec(`INSERT INTO kaname.resource_parent_edge(object_type,object_id,parent_type,parent_id,depth,source_version)
+VALUES('odd_item',$1,'odd_box',$2,2,$3)`, candidate, parent, storedEdge)
+	withEdge, _, _ := read(candidate)
+	require.Equal(t, &storedEdge, withEdge.VersionWatermark)
 	// При избытке потомков результат ограничен порогом ёмкости.
 	mirror("probe.items", parent+"/module-two", version)
 	edge("odd_item", parent+"/module-two", 1)
