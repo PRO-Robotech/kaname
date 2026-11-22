@@ -72,7 +72,13 @@ func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "commit", true: "last_page_failure"}[fail], func(t *testing.T) {
 			w := delegationUCFixture(t, true)
+			// Обе ветви подтверждают атомарность по сохранённому исходу своей
+			// операции. Срок фикстуры не ограничивает отзыв всех страниц.
+			w.r.ctx = t.Context()
+			observer, ok := w.ops.(*operationCausalRepo)
+			require.True(t, ok, "для этого сценария нужен наблюдатель результата операции")
 			delegationRevokeWaitDiagnosticsOnFailure(t, w)
+			t.Cleanup(func() { authorityWaitReleased(t, w.r.runtime) })
 			id := w.create(t, w.owner, false)
 			bs := delegationRevokeBindings(t, w, id, 257)
 			var producedBefore []byte
@@ -93,14 +99,7 @@ func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 			uc := gdapp.NewRevokeGrantDelegationUseCase(w.r.repo, w.ops).WithRelationStore(w.door, nil).WithRevokeAuthorityWriter(p)
 			op, err := uc.Execute(declarerCtx(w.r.ctx, w.owner), domain.GrantDelegationID(id))
 			require.NoError(t, err)
-			wait := 20 * time.Second
-			if !fail {
-				// Успешный путь коммитит 257 отзывов и сверяет все эффекты.
-				// Даём им завершиться под нагрузкой CI; это watchdog пробы
-				// атомарного отзыва, а не бюджет рабочего пересчёта роли.
-				wait = 35 * time.Second
-			}
-			done := awaitOperationWithin(t, w.r.ctx, w.ops, op.ID, wait)
+			done := observer.awaitOwnOperation(t, w.r.ctx, op.ID)
 			active, revoked, audit := delegationRevokeCounts(t, w, id)
 			var st string
 			require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT status FROM kaname.grant_delegations WHERE id=$1`, id).Scan(&st))
@@ -126,7 +125,6 @@ func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 				require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT count(*) FROM kaname.relation_fact f WHERE jsonb_build_array(f.subject,f.relation,f.object_type,f.object_id) IN (SELECT value FROM jsonb_array_elements($1::jsonb))`, producedBefore).Scan(&residual))
 				require.Zero(t, residual, "сами факты отсутствуют по ключам до отзыва")
 			}
-			authorityWaitReleased(t, w.r.runtime)
 		})
 	}
 }
