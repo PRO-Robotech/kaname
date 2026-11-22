@@ -208,6 +208,18 @@ service InternalIAMService {
     option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
   }
 
+  // Закрывает приём новых потомков текущей регистрации до отдельного каскада
+  // UnregisterResource. Вызывает только модуль-владелец по mTLS; Kaname
+  // проверяет installation-право на канонических аккаунтах родителя.
+  // Повтор для той же регистрации возвращает первоначальный closed_at.
+  // Версия обязательна и должна точно совпадать с текущей source_version.
+  // Старый сервер отвечает UNIMPLEMENTED: заменять этот вызов удалением нельзя.
+  // Только внутренний слушатель; публичного HTTP-маршрута нет.
+  rpc CloseChildParent(CloseChildParentRequest) returns (CloseChildParentResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
+  }
+
   // UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
   // (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
   //
@@ -468,6 +480,23 @@ message RegisterResourceRequest {
 // RegisterResourceResponse — пусто; success implicit (gRPC OK). Идемпотентность
 // контракта (повтор → OK) опирается на пустой ответ без уникального id.
 message RegisterResourceResponse {}
+
+message CloseChildParentRequest {
+  // Обязательный точечный тип каталога родителя, например registry.registry.
+  string resource_type = 1;
+
+  // Обязательный точный идентификатор зарегистрированного родителя.
+  string resource_id = 2;
+
+  // Обязательная конечная ненулевая версия текущей регистрации. Сравнение
+  // точное: более новая версия не даёт права закрыть прежнюю регистрацию.
+  google.protobuf.Timestamp source_version = 3;
+}
+
+message CloseChildParentResponse {
+  // Первоначальное время закрытия. Возвращается после успешного commit.
+  google.protobuf.Timestamp closed_at = 1;
+}
 
 // UnregisterResourceRequest — Internal FGA-proxy unregister-owner-tuple payload.
 // Поля — те же, ЗА ИСКЛЮЧЕНИЕМ `parent_chain`: снятие адресуется объектом, и

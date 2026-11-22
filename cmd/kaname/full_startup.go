@@ -100,6 +100,9 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	if profile == nil || profile.contract == nil || repo == nil || svcs == nil || pool == nil {
 		return nil, fmt.Errorf("authority-protocol full service composition is incomplete")
 	}
+	if svcs.internalIAMHandler == nil {
+		return nil, fmt.Errorf("authority-protocol full internal IAM handler is absent")
+	}
 	if svcs.accessBindingHandler == nil || svcs.roleHandler == nil || svcs.groupHandler == nil ||
 		svcs.grantDelegationCreate == nil || svcs.grantDelegationUpdate == nil || svcs.grantDelegationRevoke == nil || svcs.fullModuleHandler == nil ||
 		svcs.accountMetadataUpdate == nil || svcs.projectMetadataUpdate == nil || svcs.serviceAccountMetadataUpdate == nil || svcs.serviceAccountEnable == nil || svcs.serviceAccountDisable == nil {
@@ -226,6 +229,8 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	// Публичная регистрация потомка получает тот же FULL runner и runtime repo.
 	// До завершения этой сборки поле пусто, поэтому слушатель не объявляет RPC.
 	svcs.childRegistrationHandler = childregistrationapp.NewHandler(internaliamapp.NewUserChildRegistration(resourceDecisions))
+	// Закрытие родителя получает тот же FULL runner только на внутренней службе.
+	svcs.internalIAMHandler.WithChildParentClose(resourceDecisions)
 	return &fullStartupParticipants{membership: membership, admission: admission, invites: invites,
 		cluster: cluster, resources: resources, objects: objects, groups: groups, bindings: stages}, nil
 }

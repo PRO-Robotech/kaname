@@ -6,6 +6,7 @@ package pg_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -29,8 +30,16 @@ import (
 
 func childStageFixture(t *testing.T) (protocolRig, *kanamepg.Repository, registrationscene.Scene, operations.Principal) {
 	t.Helper()
+	return childStageFixtureWithPolicy(t, catalog.ChildRegistrationRule{Verb: "registerchild", ParentSegments: 1, MaxChildren: 24, MaxCreates: 4, WindowSeconds: 60}, "container-one")
+}
+
+func childStageFixtureWithPolicy(t *testing.T, rule catalog.ChildRegistrationRule, parentIDs ...string) (protocolRig, *kanamepg.Repository, registrationscene.Scene, operations.Principal) {
+	t.Helper()
+	require.Equal(t, "registerchild", rule.Verb)
+	require.EqualValues(t, 1, rule.ParentSegments)
+	require.NotEmpty(t, parentIDs)
 	r, owner := writerProtocolRigBeforePreparation(t)
-	const declaration = `apiVersion: iam/v1
+	declaration := fmt.Sprintf(`apiVersion: iam/v1
 module: childstage
 resources:
   - name: container
@@ -48,8 +57,8 @@ resources:
     verbs: [get]
     containerVerbs:
       - {name: registerChild, parent: parent, relation: child_registrar}
-    childRegistration: {verb: registerChild, parentSegments: 1, maxChildren: 24, maxCreates: 4, windowSeconds: 60}
-`
+    childRegistration: {verb: registerChild, parentSegments: 1, maxChildren: %d, maxCreates: %d, windowSeconds: %d}
+`, rule.MaxChildren, rule.MaxCreates, rule.WindowSeconds)
 	m, err := manifest.LoadWithReferent([]byte(declaration), manifest.ReferentCanon)
 	require.NoError(t, err)
 	model, report, err := modelcompose.Compose(authzmodel.DSL, []*manifest.Manifest{m})
@@ -60,7 +69,7 @@ resources:
 		}
 		for _, row := range []catalog.ResourceRow{
 			{Module: "childstage", Resource: "container", ObjectType: "childstage_container", ParentNames: []string{"project"}, ParentTypes: []string{"project"}},
-			{Module: "childstage", Resource: "child", ObjectType: "childstage_child", ParentNames: []string{"parent"}, ParentTypes: []string{"childstage_container"}, ChildRegistration: &catalog.ChildRegistrationRule{Verb: "registerchild", ParentSegments: 1, MaxChildren: 24, MaxCreates: 4, WindowSeconds: 60}},
+			{Module: "childstage", Resource: "child", ObjectType: "childstage_child", ParentNames: []string{"parent"}, ParentTypes: []string{"childstage_container"}, ChildRegistration: &rule},
 		} {
 			if _, err := w.UpsertResource(ctx, row); err != nil {
 				return err
@@ -84,17 +93,18 @@ resources:
 	facts, err := catalog.NewFacts(halves)
 	require.NoError(t, err)
 	scene := registrationscene.Seed(t, r.ctx, r.admin)
-	const parentID = "container-one"
 	version := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
-	_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.resource_mirror(object_type,object_id,parent_account_id,parent_project_id,source_version)
+	for _, parentID := range parentIDs {
+		_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.resource_mirror(object_type,object_id,parent_account_id,parent_project_id,source_version)
  VALUES('childstage.container',$1,$2,$3,$4)`, parentID, scene.Account, scene.Project, version)
-	require.NoError(t, err)
-	_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.resource_registration_scope(object_type,object_id,project_id,account_id)
+		require.NoError(t, err)
+		_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.resource_registration_scope(object_type,object_id,project_id,account_id)
  VALUES('childstage_container',$1,$2,$3)`, parentID, scene.Project, scene.Account)
-	require.NoError(t, err)
-	_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version)
+		require.NoError(t, err)
+		_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version)
  VALUES('childstage_container',$1,'project','project:'||$2::text,$3)`, parentID, scene.Project, version)
-	require.NoError(t, err)
+		require.NoError(t, err)
+	}
 	actor := seedMemberUser(t, r.ctx, r.admin, scene.Account, "child-stage-registrar")
 	_, err = r.admin.Exec(r.ctx, `UPDATE kaname.users SET email_verified_at=clock_timestamp() WHERE id=$1`, actor)
 	require.NoError(t, err)
@@ -107,11 +117,13 @@ resources:
 	source := catalog.Fixed{F: facts}
 	engine := reconcile.New(kanamepg.NewReconcileAdapter(r.admin, source), slog.Default(), source)
 	require.NoError(t, engine.ReconcileBinding(r.ctx, binding))
-	var holders int
-	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.access_binding_emitted_tuples
+	for _, parentID := range parentIDs {
+		var holders int
+		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.access_binding_emitted_tuples
  WHERE binding_id=$1 AND member_object_type='childstage.container' AND member_object_id=$2
  AND fga_user=$3 AND relation='child_registrar' AND object=$4`, binding, parentID, "user:"+actor, "childstage_container:"+parentID).Scan(&holders))
-	require.Positive(t, holders, "предпосылка: настоящий producer подтвердил право на модульном родителе")
+		require.Positive(t, holders, "предпосылка: настоящий producer подтвердил право на модульном родителе")
+	}
 
 	return r, owner, scene, operations.Principal{Type: "user", ID: actor}
 }

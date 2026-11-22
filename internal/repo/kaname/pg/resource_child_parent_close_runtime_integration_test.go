@@ -14,6 +14,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func childParentCloseCurrentInput(t *testing.T, r protocolRig) kaname.ChildParentCloseInput {
@@ -60,13 +62,16 @@ func TestChildParentCloseRuntimeCurrentVersionReplayAndChildOrdering(t *testing.
 				require.False(t, childVersion.IsZero())
 			}
 			beforeInvalid := childParentCloseSnapshot(t, r)
-			for _, delta := range []time.Duration{-time.Microsecond, time.Microsecond} {
-				invalid := input
-				invalid.SourceVersion = input.SourceVersion.Add(delta)
+			for _, invalid := range []kaname.ChildParentCloseInput{
+				{ResourceType: input.ResourceType, ResourceID: input.ResourceID, SourceVersion: input.SourceVersion.Add(-time.Microsecond)},
+				{ResourceType: input.ResourceType, ResourceID: input.ResourceID, SourceVersion: input.SourceVersion.Add(time.Microsecond)},
+				{ResourceType: input.ResourceType, ResourceID: "missing-parent", SourceVersion: input.SourceVersion},
+			} {
 				at, callErr := runner.RunChildParentClose(moduleCtx, invalid)
-				var field *kaname.ResourceDecisionFieldError
-				require.ErrorAs(t, callErr, &field)
-				require.Equal(t, "source_version", field.Field)
+				answer := status.Convert(callErr)
+				require.Equal(t, codes.PermissionDenied, answer.Code())
+				require.Equal(t, "permission denied", answer.Message())
+				require.Empty(t, answer.Details())
 				require.True(t, at.IsZero())
 				require.JSONEq(t, string(beforeInvalid), string(childParentCloseSnapshot(t, r)), "stale/future close не меняет состояние")
 			}

@@ -41,6 +41,7 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/registrationpolicy"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/revocationpolicy"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/pkg/subjectchange"
@@ -106,6 +107,9 @@ type Handler struct {
 	// Unavailable, закрытый отказ.
 	registrar resourceRegistrar
 	regGate   relationWriteGate
+
+	// Только FULL runner. Незаполненный порт не допускает legacy-закрытия.
+	childParentClose kaname.ChildParentCloseTransactions
 
 	// basicCredentials — авторитет о предъявленном базовом секрете (kacho#1142).
 	// nil → глагол fail-closed Unavailable.

@@ -6,12 +6,15 @@ package pg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Одна попытка удерживает один lease от RR до Commit. FULL обязателен:
@@ -36,6 +39,11 @@ func (r *ResourceDecisionRunner) RunChildParentClose(ctx context.Context, input 
 		return r.runChildParentCloseOnce(ctx, lease.Conn(), input, budget)
 	})
 	if err != nil {
+		var failed *resourceAttemptError
+		if ctx.Err() == nil && status.Code(err) == codes.PermissionDenied &&
+			(!errors.As(err, &failed) || failed.cleanup == nil) {
+			return time.Time{}, authzguard.PermissionDenied()
+		}
 		return time.Time{}, resourceChildError(ctx, err)
 	}
 	return closedAt, nil

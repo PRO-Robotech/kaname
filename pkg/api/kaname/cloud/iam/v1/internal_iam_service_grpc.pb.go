@@ -28,6 +28,7 @@ const (
 	InternalIAMService_ForceLogout_FullMethodName              = "/kaname.cloud.iam.v1.InternalIAMService/ForceLogout"
 	InternalIAMService_PollSubjectChanges_FullMethodName       = "/kaname.cloud.iam.v1.InternalIAMService/PollSubjectChanges"
 	InternalIAMService_RegisterResource_FullMethodName         = "/kaname.cloud.iam.v1.InternalIAMService/RegisterResource"
+	InternalIAMService_CloseChildParent_FullMethodName         = "/kaname.cloud.iam.v1.InternalIAMService/CloseChildParent"
 	InternalIAMService_UnregisterResource_FullMethodName       = "/kaname.cloud.iam.v1.InternalIAMService/UnregisterResource"
 	InternalIAMService_ResolveBasicCredential_FullMethodName   = "/kaname.cloud.iam.v1.InternalIAMService/ResolveBasicCredential"
 	InternalIAMService_GetRoleCompiled_FullMethodName          = "/kaname.cloud.iam.v1.InternalIAMService/GetRoleCompiled"
@@ -162,6 +163,14 @@ type InternalIAMServiceClient interface {
 	// `account:<id>`. Нет relation → PermissionDenied. cluster-internal
 	// listener :9091 only — нет google.api.http.
 	RegisterResource(ctx context.Context, in *RegisterResourceRequest, opts ...grpc.CallOption) (*RegisterResourceResponse, error)
+	// Закрывает приём новых потомков текущей регистрации до отдельного каскада
+	// UnregisterResource. Вызывает только модуль-владелец по mTLS; Kaname
+	// проверяет installation-право на канонических аккаунтах родителя.
+	// Повтор для той же регистрации возвращает первоначальный closed_at.
+	// Версия обязательна и должна точно совпадать с текущей source_version.
+	// Старый сервер отвечает UNIMPLEMENTED: заменять этот вызов удалением нельзя.
+	// Только внутренний слушатель; публичного HTTP-маршрута нет.
+	CloseChildParent(ctx context.Context, in *CloseChildParentRequest, opts ...grpc.CallOption) (*CloseChildParentResponse, error)
 	// UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
 	// (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
 	//
@@ -292,6 +301,16 @@ func (c *internalIAMServiceClient) RegisterResource(ctx context.Context, in *Reg
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegisterResourceResponse)
 	err := c.cc.Invoke(ctx, InternalIAMService_RegisterResource_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *internalIAMServiceClient) CloseChildParent(ctx context.Context, in *CloseChildParentRequest, opts ...grpc.CallOption) (*CloseChildParentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CloseChildParentResponse)
+	err := c.cc.Invoke(ctx, InternalIAMService_CloseChildParent_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +485,14 @@ type InternalIAMServiceServer interface {
 	// `account:<id>`. Нет relation → PermissionDenied. cluster-internal
 	// listener :9091 only — нет google.api.http.
 	RegisterResource(context.Context, *RegisterResourceRequest) (*RegisterResourceResponse, error)
+	// Закрывает приём новых потомков текущей регистрации до отдельного каскада
+	// UnregisterResource. Вызывает только модуль-владелец по mTLS; Kaname
+	// проверяет installation-право на канонических аккаунтах родителя.
+	// Повтор для той же регистрации возвращает первоначальный closed_at.
+	// Версия обязательна и должна точно совпадать с текущей source_version.
+	// Старый сервер отвечает UNIMPLEMENTED: заменять этот вызов удалением нельзя.
+	// Только внутренний слушатель; публичного HTTP-маршрута нет.
+	CloseChildParent(context.Context, *CloseChildParentRequest) (*CloseChildParentResponse, error)
 	// UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
 	// (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
 	//
@@ -566,6 +593,9 @@ func (UnimplementedInternalIAMServiceServer) PollSubjectChanges(context.Context,
 }
 func (UnimplementedInternalIAMServiceServer) RegisterResource(context.Context, *RegisterResourceRequest) (*RegisterResourceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterResource not implemented")
+}
+func (UnimplementedInternalIAMServiceServer) CloseChildParent(context.Context, *CloseChildParentRequest) (*CloseChildParentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CloseChildParent not implemented")
 }
 func (UnimplementedInternalIAMServiceServer) UnregisterResource(context.Context, *UnregisterResourceRequest) (*UnregisterResourceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UnregisterResource not implemented")
@@ -690,6 +720,24 @@ func _InternalIAMService_RegisterResource_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InternalIAMService_CloseChildParent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CloseChildParentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InternalIAMServiceServer).CloseChildParent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InternalIAMService_CloseChildParent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InternalIAMServiceServer).CloseChildParent(ctx, req.(*CloseChildParentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _InternalIAMService_UnregisterResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UnregisterResourceRequest)
 	if err := dec(in); err != nil {
@@ -788,6 +836,10 @@ var InternalIAMService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterResource",
 			Handler:    _InternalIAMService_RegisterResource_Handler,
+		},
+		{
+			MethodName: "CloseChildParent",
+			Handler:    _InternalIAMService_CloseChildParent_Handler,
 		},
 		{
 			MethodName: "UnregisterResource",

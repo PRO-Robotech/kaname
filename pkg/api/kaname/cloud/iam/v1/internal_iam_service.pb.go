@@ -637,6 +637,115 @@ func (*RegisterResourceResponse) Descriptor() ([]byte, []int) {
 	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{5}
 }
 
+type CloseChildParentRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Обязательный точечный тип каталога родителя, например registry.registry.
+	ResourceType string `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
+	// Обязательный точный идентификатор зарегистрированного родителя.
+	ResourceId string `protobuf:"bytes,2,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
+	// Обязательная конечная ненулевая версия текущей регистрации. Сравнение
+	// точное: более новая версия не даёт права закрыть прежнюю регистрацию.
+	SourceVersion *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=source_version,json=sourceVersion,proto3" json:"source_version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseChildParentRequest) Reset() {
+	*x = CloseChildParentRequest{}
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseChildParentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseChildParentRequest) ProtoMessage() {}
+
+func (x *CloseChildParentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseChildParentRequest.ProtoReflect.Descriptor instead.
+func (*CloseChildParentRequest) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CloseChildParentRequest) GetResourceType() string {
+	if x != nil {
+		return x.ResourceType
+	}
+	return ""
+}
+
+func (x *CloseChildParentRequest) GetResourceId() string {
+	if x != nil {
+		return x.ResourceId
+	}
+	return ""
+}
+
+func (x *CloseChildParentRequest) GetSourceVersion() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SourceVersion
+	}
+	return nil
+}
+
+type CloseChildParentResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Первоначальное время закрытия. Возвращается после успешного commit.
+	ClosedAt      *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=closed_at,json=closedAt,proto3" json:"closed_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseChildParentResponse) Reset() {
+	*x = CloseChildParentResponse{}
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseChildParentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseChildParentResponse) ProtoMessage() {}
+
+func (x *CloseChildParentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseChildParentResponse.ProtoReflect.Descriptor instead.
+func (*CloseChildParentResponse) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *CloseChildParentResponse) GetClosedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ClosedAt
+	}
+	return nil
+}
+
 // UnregisterResourceRequest — Internal FGA-proxy unregister-owner-tuple payload.
 // Поля — те же, ЗА ИСКЛЮЧЕНИЕМ `parent_chain`: снятие адресуется объектом, и
 // цепь предков ему не нужна. Прежняя редакция говорила «идентичны», и это стало
@@ -674,7 +783,7 @@ type UnregisterResourceRequest struct {
 
 func (x *UnregisterResourceRequest) Reset() {
 	*x = UnregisterResourceRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -686,7 +795,7 @@ func (x *UnregisterResourceRequest) String() string {
 func (*UnregisterResourceRequest) ProtoMessage() {}
 
 func (x *UnregisterResourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -699,7 +808,7 @@ func (x *UnregisterResourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnregisterResourceRequest.ProtoReflect.Descriptor instead.
 func (*UnregisterResourceRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{6}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UnregisterResourceRequest) GetSubjectId() string {
@@ -769,7 +878,7 @@ type UnregisterResourceResponse struct {
 
 func (x *UnregisterResourceResponse) Reset() {
 	*x = UnregisterResourceResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[7]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -781,7 +890,7 @@ func (x *UnregisterResourceResponse) String() string {
 func (*UnregisterResourceResponse) ProtoMessage() {}
 
 func (x *UnregisterResourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[7]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -794,7 +903,7 @@ func (x *UnregisterResourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnregisterResourceResponse.ProtoReflect.Descriptor instead.
 func (*UnregisterResourceResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{7}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{9}
 }
 
 // ForceLogoutRequest — admin force-logout payload.
@@ -816,7 +925,7 @@ type ForceLogoutRequest struct {
 
 func (x *ForceLogoutRequest) Reset() {
 	*x = ForceLogoutRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[8]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -828,7 +937,7 @@ func (x *ForceLogoutRequest) String() string {
 func (*ForceLogoutRequest) ProtoMessage() {}
 
 func (x *ForceLogoutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[8]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -841,7 +950,7 @@ func (x *ForceLogoutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForceLogoutRequest.ProtoReflect.Descriptor instead.
 func (*ForceLogoutRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{8}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ForceLogoutRequest) GetUserId() string {
@@ -876,7 +985,7 @@ type ForceLogoutMetadata struct {
 
 func (x *ForceLogoutMetadata) Reset() {
 	*x = ForceLogoutMetadata{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[9]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -888,7 +997,7 @@ func (x *ForceLogoutMetadata) String() string {
 func (*ForceLogoutMetadata) ProtoMessage() {}
 
 func (x *ForceLogoutMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[9]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -901,7 +1010,7 @@ func (x *ForceLogoutMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForceLogoutMetadata.ProtoReflect.Descriptor instead.
 func (*ForceLogoutMetadata) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{9}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ForceLogoutMetadata) GetUserId() string {
@@ -931,7 +1040,7 @@ type ForceLogoutResult struct {
 
 func (x *ForceLogoutResult) Reset() {
 	*x = ForceLogoutResult{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[10]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -943,7 +1052,7 @@ func (x *ForceLogoutResult) String() string {
 func (*ForceLogoutResult) ProtoMessage() {}
 
 func (x *ForceLogoutResult) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[10]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -956,7 +1065,7 @@ func (x *ForceLogoutResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForceLogoutResult.ProtoReflect.Descriptor instead.
 func (*ForceLogoutResult) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{10}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ForceLogoutResult) GetRevokedCount() int32 {
@@ -985,7 +1094,7 @@ type PollSubjectChangesRequest struct {
 
 func (x *PollSubjectChangesRequest) Reset() {
 	*x = PollSubjectChangesRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[11]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -997,7 +1106,7 @@ func (x *PollSubjectChangesRequest) String() string {
 func (*PollSubjectChangesRequest) ProtoMessage() {}
 
 func (x *PollSubjectChangesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[11]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1010,7 +1119,7 @@ func (x *PollSubjectChangesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PollSubjectChangesRequest.ProtoReflect.Descriptor instead.
 func (*PollSubjectChangesRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{11}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *PollSubjectChangesRequest) GetSinceId() int64 {
@@ -1064,7 +1173,7 @@ type SubjectChange struct {
 
 func (x *SubjectChange) Reset() {
 	*x = SubjectChange{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[12]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1076,7 +1185,7 @@ func (x *SubjectChange) String() string {
 func (*SubjectChange) ProtoMessage() {}
 
 func (x *SubjectChange) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[12]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1089,7 +1198,7 @@ func (x *SubjectChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubjectChange.ProtoReflect.Descriptor instead.
 func (*SubjectChange) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{12}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SubjectChange) GetId() int64 {
@@ -1144,7 +1253,7 @@ type PollSubjectChangesResponse struct {
 
 func (x *PollSubjectChangesResponse) Reset() {
 	*x = PollSubjectChangesResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[13]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1156,7 +1265,7 @@ func (x *PollSubjectChangesResponse) String() string {
 func (*PollSubjectChangesResponse) ProtoMessage() {}
 
 func (x *PollSubjectChangesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[13]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1169,7 +1278,7 @@ func (x *PollSubjectChangesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PollSubjectChangesResponse.ProtoReflect.Descriptor instead.
 func (*PollSubjectChangesResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{13}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *PollSubjectChangesResponse) GetChanges() []*SubjectChange {
@@ -1197,7 +1306,7 @@ type GetRoleCompiledRequest struct {
 
 func (x *GetRoleCompiledRequest) Reset() {
 	*x = GetRoleCompiledRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[14]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1209,7 +1318,7 @@ func (x *GetRoleCompiledRequest) String() string {
 func (*GetRoleCompiledRequest) ProtoMessage() {}
 
 func (x *GetRoleCompiledRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[14]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1222,7 +1331,7 @@ func (x *GetRoleCompiledRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRoleCompiledRequest.ProtoReflect.Descriptor instead.
 func (*GetRoleCompiledRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{14}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetRoleCompiledRequest) GetRoleId() string {
@@ -1246,7 +1355,7 @@ type GetRoleCompiledResponse struct {
 
 func (x *GetRoleCompiledResponse) Reset() {
 	*x = GetRoleCompiledResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[15]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1258,7 +1367,7 @@ func (x *GetRoleCompiledResponse) String() string {
 func (*GetRoleCompiledResponse) ProtoMessage() {}
 
 func (x *GetRoleCompiledResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[15]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1271,7 +1380,7 @@ func (x *GetRoleCompiledResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRoleCompiledResponse.ProtoReflect.Descriptor instead.
 func (*GetRoleCompiledResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{15}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetRoleCompiledResponse) GetRoleId() string {
@@ -1303,7 +1412,7 @@ type ResolveBasicCredentialRequest struct {
 
 func (x *ResolveBasicCredentialRequest) Reset() {
 	*x = ResolveBasicCredentialRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[16]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1315,7 +1424,7 @@ func (x *ResolveBasicCredentialRequest) String() string {
 func (*ResolveBasicCredentialRequest) ProtoMessage() {}
 
 func (x *ResolveBasicCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[16]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1328,7 +1437,7 @@ func (x *ResolveBasicCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveBasicCredentialRequest.ProtoReflect.Descriptor instead.
 func (*ResolveBasicCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{16}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ResolveBasicCredentialRequest) GetPresented() string {
@@ -1363,7 +1472,7 @@ type ResolveBasicCredentialResponse struct {
 
 func (x *ResolveBasicCredentialResponse) Reset() {
 	*x = ResolveBasicCredentialResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[17]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1375,7 +1484,7 @@ func (x *ResolveBasicCredentialResponse) String() string {
 func (*ResolveBasicCredentialResponse) ProtoMessage() {}
 
 func (x *ResolveBasicCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[17]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1388,7 +1497,7 @@ func (x *ResolveBasicCredentialResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveBasicCredentialResponse.ProtoReflect.Descriptor instead.
 func (*ResolveBasicCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{17}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ResolveBasicCredentialResponse) GetPrincipalType() string {
@@ -1441,7 +1550,7 @@ type CheckBasicCredentialLiveRequest struct {
 
 func (x *CheckBasicCredentialLiveRequest) Reset() {
 	*x = CheckBasicCredentialLiveRequest{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[18]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1453,7 +1562,7 @@ func (x *CheckBasicCredentialLiveRequest) String() string {
 func (*CheckBasicCredentialLiveRequest) ProtoMessage() {}
 
 func (x *CheckBasicCredentialLiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[18]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1466,7 +1575,7 @@ func (x *CheckBasicCredentialLiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckBasicCredentialLiveRequest.ProtoReflect.Descriptor instead.
 func (*CheckBasicCredentialLiveRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{18}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CheckBasicCredentialLiveRequest) GetCredentialId() string {
@@ -1493,7 +1602,7 @@ type CheckBasicCredentialLiveResponse struct {
 
 func (x *CheckBasicCredentialLiveResponse) Reset() {
 	*x = CheckBasicCredentialLiveResponse{}
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[19]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1505,7 +1614,7 @@ func (x *CheckBasicCredentialLiveResponse) String() string {
 func (*CheckBasicCredentialLiveResponse) ProtoMessage() {}
 
 func (x *CheckBasicCredentialLiveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[19]
+	mi := &file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1518,7 +1627,7 @@ func (x *CheckBasicCredentialLiveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckBasicCredentialLiveResponse.ProtoReflect.Descriptor instead.
 func (*CheckBasicCredentialLiveResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{19}
+	return file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP(), []int{21}
 }
 
 var File_kaname_cloud_iam_v1_internal_iam_service_proto protoreflect.FileDescriptor
@@ -1564,7 +1673,14 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x1a\n" +
-	"\x18RegisterResourceResponse\"\xb3\x03\n" +
+	"\x18RegisterResourceResponse\"\xa2\x01\n" +
+	"\x17CloseChildParentRequest\x12#\n" +
+	"\rresource_type\x18\x01 \x01(\tR\fresourceType\x12\x1f\n" +
+	"\vresource_id\x18\x02 \x01(\tR\n" +
+	"resourceId\x12A\n" +
+	"\x0esource_version\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\rsourceVersion\"S\n" +
+	"\x18CloseChildParentResponse\x127\n" +
+	"\tclosed_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bclosedAt\"\xb3\x03\n" +
 	"\x19UnregisterResourceRequest\x12\x1d\n" +
 	"\n" +
 	"subject_id\x18\x01 \x01(\tR\tsubjectId\x12\x1a\n" +
@@ -1615,14 +1731,15 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"F\n" +
 	"\x1fCheckBasicCredentialLiveRequest\x12#\n" +
 	"\rcredential_id\x18\x01 \x01(\tR\fcredentialId\"\"\n" +
-	" CheckBasicCredentialLiveResponse2\xf3\v\n" +
+	" CheckBasicCredentialLiveResponse2\x88\r\n" +
 	"\x12InternalIAMService\x12\xb6\x01\n" +
 	"\rLookupSubject\x12).kaname.cloud.iam.v1.LookupSubjectRequest\x1a*.kaname.cloud.iam.v1.LookupSubjectResponse\"N\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x82\xd3\xe4\x93\x02':\x01*\"\"/iam/v1/internal/iam:lookupSubject\x12\x96\x01\n" +
 	"\x05Check\x12!.kaname.cloud.iam.v1.CheckRequest\x1a\".kaname.cloud.iam.v1.CheckResponse\"F\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/iam/v1/internal/iam:check\x12\xa3\x01\n" +
 	"\vForceLogout\x12'.kaname.cloud.iam.v1.ForceLogoutRequest\x1a\x1c.corelib.operation.Operation\"M\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*(\n" +
 	"\x13ForceLogoutMetadata\x12\x11ForceLogoutResult\x12\x98\x01\n" +
 	"\x12PollSubjectChanges\x12..kaname.cloud.iam.v1.PollSubjectChangesRequest\x1a/.kaname.cloud.iam.v1.PollSubjectChangesResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x92\x01\n" +
-	"\x10RegisterResource\x12,.kaname.cloud.iam.v1.RegisterResourceRequest\x1a-.kaname.cloud.iam.v1.RegisterResourceResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x98\x01\n" +
+	"\x10RegisterResource\x12,.kaname.cloud.iam.v1.RegisterResourceRequest\x1a-.kaname.cloud.iam.v1.RegisterResourceResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x92\x01\n" +
+	"\x10CloseChildParent\x12,.kaname.cloud.iam.v1.CloseChildParentRequest\x1a-.kaname.cloud.iam.v1.CloseChildParentResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x98\x01\n" +
 	"\x12UnregisterResource\x12..kaname.cloud.iam.v1.UnregisterResourceRequest\x1a/.kaname.cloud.iam.v1.UnregisterResourceResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xda\x01\n" +
 	"\x16ResolveBasicCredential\x122.kaname.cloud.iam.v1.ResolveBasicCredentialRequest\x1a3.kaname.cloud.iam.v1.ResolveBasicCredentialResponse\"W\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x82\xd3\xe4\x93\x020:\x01*\"+/iam/v1/internal/iam:resolveBasicCredential\x12\x8f\x01\n" +
 	"\x0fGetRoleCompiled\x12+.kaname.cloud.iam.v1.GetRoleCompiledRequest\x1a,.kaname.cloud.iam.v1.GetRoleCompiledResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xaa\x01\n" +
@@ -1641,7 +1758,7 @@ func file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP() []byte {
 }
 
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_goTypes = []any{
 	(CheckRequest_Consistency)(0),            // 0: kaname.cloud.iam.v1.CheckRequest.Consistency
 	(*LookupSubjectRequest)(nil),             // 1: kaname.cloud.iam.v1.LookupSubjectRequest
@@ -1650,60 +1767,66 @@ var file_kaname_cloud_iam_v1_internal_iam_service_proto_goTypes = []any{
 	(*CheckResponse)(nil),                    // 4: kaname.cloud.iam.v1.CheckResponse
 	(*RegisterResourceRequest)(nil),          // 5: kaname.cloud.iam.v1.RegisterResourceRequest
 	(*RegisterResourceResponse)(nil),         // 6: kaname.cloud.iam.v1.RegisterResourceResponse
-	(*UnregisterResourceRequest)(nil),        // 7: kaname.cloud.iam.v1.UnregisterResourceRequest
-	(*UnregisterResourceResponse)(nil),       // 8: kaname.cloud.iam.v1.UnregisterResourceResponse
-	(*ForceLogoutRequest)(nil),               // 9: kaname.cloud.iam.v1.ForceLogoutRequest
-	(*ForceLogoutMetadata)(nil),              // 10: kaname.cloud.iam.v1.ForceLogoutMetadata
-	(*ForceLogoutResult)(nil),                // 11: kaname.cloud.iam.v1.ForceLogoutResult
-	(*PollSubjectChangesRequest)(nil),        // 12: kaname.cloud.iam.v1.PollSubjectChangesRequest
-	(*SubjectChange)(nil),                    // 13: kaname.cloud.iam.v1.SubjectChange
-	(*PollSubjectChangesResponse)(nil),       // 14: kaname.cloud.iam.v1.PollSubjectChangesResponse
-	(*GetRoleCompiledRequest)(nil),           // 15: kaname.cloud.iam.v1.GetRoleCompiledRequest
-	(*GetRoleCompiledResponse)(nil),          // 16: kaname.cloud.iam.v1.GetRoleCompiledResponse
-	(*ResolveBasicCredentialRequest)(nil),    // 17: kaname.cloud.iam.v1.ResolveBasicCredentialRequest
-	(*ResolveBasicCredentialResponse)(nil),   // 18: kaname.cloud.iam.v1.ResolveBasicCredentialResponse
-	(*CheckBasicCredentialLiveRequest)(nil),  // 19: kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
-	(*CheckBasicCredentialLiveResponse)(nil), // 20: kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
-	nil,                                      // 21: kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
-	nil,                                      // 22: kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
-	(*User)(nil),                             // 23: kaname.cloud.iam.v1.User
-	(*ServiceAccount)(nil),                   // 24: kaname.cloud.iam.v1.ServiceAccount
-	(*timestamppb.Timestamp)(nil),            // 25: google.protobuf.Timestamp
-	(*operation.Operation)(nil),              // 26: corelib.operation.Operation
+	(*CloseChildParentRequest)(nil),          // 7: kaname.cloud.iam.v1.CloseChildParentRequest
+	(*CloseChildParentResponse)(nil),         // 8: kaname.cloud.iam.v1.CloseChildParentResponse
+	(*UnregisterResourceRequest)(nil),        // 9: kaname.cloud.iam.v1.UnregisterResourceRequest
+	(*UnregisterResourceResponse)(nil),       // 10: kaname.cloud.iam.v1.UnregisterResourceResponse
+	(*ForceLogoutRequest)(nil),               // 11: kaname.cloud.iam.v1.ForceLogoutRequest
+	(*ForceLogoutMetadata)(nil),              // 12: kaname.cloud.iam.v1.ForceLogoutMetadata
+	(*ForceLogoutResult)(nil),                // 13: kaname.cloud.iam.v1.ForceLogoutResult
+	(*PollSubjectChangesRequest)(nil),        // 14: kaname.cloud.iam.v1.PollSubjectChangesRequest
+	(*SubjectChange)(nil),                    // 15: kaname.cloud.iam.v1.SubjectChange
+	(*PollSubjectChangesResponse)(nil),       // 16: kaname.cloud.iam.v1.PollSubjectChangesResponse
+	(*GetRoleCompiledRequest)(nil),           // 17: kaname.cloud.iam.v1.GetRoleCompiledRequest
+	(*GetRoleCompiledResponse)(nil),          // 18: kaname.cloud.iam.v1.GetRoleCompiledResponse
+	(*ResolveBasicCredentialRequest)(nil),    // 19: kaname.cloud.iam.v1.ResolveBasicCredentialRequest
+	(*ResolveBasicCredentialResponse)(nil),   // 20: kaname.cloud.iam.v1.ResolveBasicCredentialResponse
+	(*CheckBasicCredentialLiveRequest)(nil),  // 21: kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
+	(*CheckBasicCredentialLiveResponse)(nil), // 22: kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
+	nil,                                      // 23: kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
+	nil,                                      // 24: kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
+	(*User)(nil),                             // 25: kaname.cloud.iam.v1.User
+	(*ServiceAccount)(nil),                   // 26: kaname.cloud.iam.v1.ServiceAccount
+	(*timestamppb.Timestamp)(nil),            // 27: google.protobuf.Timestamp
+	(*operation.Operation)(nil),              // 28: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_depIdxs = []int32{
-	23, // 0: kaname.cloud.iam.v1.LookupSubjectResponse.user:type_name -> kaname.cloud.iam.v1.User
-	24, // 1: kaname.cloud.iam.v1.LookupSubjectResponse.service_account:type_name -> kaname.cloud.iam.v1.ServiceAccount
+	25, // 0: kaname.cloud.iam.v1.LookupSubjectResponse.user:type_name -> kaname.cloud.iam.v1.User
+	26, // 1: kaname.cloud.iam.v1.LookupSubjectResponse.service_account:type_name -> kaname.cloud.iam.v1.ServiceAccount
 	0,  // 2: kaname.cloud.iam.v1.CheckRequest.consistency:type_name -> kaname.cloud.iam.v1.CheckRequest.Consistency
-	21, // 3: kaname.cloud.iam.v1.RegisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
-	25, // 4: kaname.cloud.iam.v1.RegisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
-	22, // 5: kaname.cloud.iam.v1.UnregisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
-	25, // 6: kaname.cloud.iam.v1.UnregisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
-	13, // 7: kaname.cloud.iam.v1.PollSubjectChangesResponse.changes:type_name -> kaname.cloud.iam.v1.SubjectChange
-	25, // 8: kaname.cloud.iam.v1.ResolveBasicCredentialResponse.expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 9: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:input_type -> kaname.cloud.iam.v1.LookupSubjectRequest
-	3,  // 10: kaname.cloud.iam.v1.InternalIAMService.Check:input_type -> kaname.cloud.iam.v1.CheckRequest
-	9,  // 11: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:input_type -> kaname.cloud.iam.v1.ForceLogoutRequest
-	12, // 12: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:input_type -> kaname.cloud.iam.v1.PollSubjectChangesRequest
-	5,  // 13: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:input_type -> kaname.cloud.iam.v1.RegisterResourceRequest
-	7,  // 14: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:input_type -> kaname.cloud.iam.v1.UnregisterResourceRequest
-	17, // 15: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:input_type -> kaname.cloud.iam.v1.ResolveBasicCredentialRequest
-	15, // 16: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:input_type -> kaname.cloud.iam.v1.GetRoleCompiledRequest
-	19, // 17: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:input_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
-	2,  // 18: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:output_type -> kaname.cloud.iam.v1.LookupSubjectResponse
-	4,  // 19: kaname.cloud.iam.v1.InternalIAMService.Check:output_type -> kaname.cloud.iam.v1.CheckResponse
-	26, // 20: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:output_type -> corelib.operation.Operation
-	14, // 21: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:output_type -> kaname.cloud.iam.v1.PollSubjectChangesResponse
-	6,  // 22: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:output_type -> kaname.cloud.iam.v1.RegisterResourceResponse
-	8,  // 23: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:output_type -> kaname.cloud.iam.v1.UnregisterResourceResponse
-	18, // 24: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:output_type -> kaname.cloud.iam.v1.ResolveBasicCredentialResponse
-	16, // 25: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:output_type -> kaname.cloud.iam.v1.GetRoleCompiledResponse
-	20, // 26: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:output_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
-	18, // [18:27] is the sub-list for method output_type
-	9,  // [9:18] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	23, // 3: kaname.cloud.iam.v1.RegisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
+	27, // 4: kaname.cloud.iam.v1.RegisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
+	27, // 5: kaname.cloud.iam.v1.CloseChildParentRequest.source_version:type_name -> google.protobuf.Timestamp
+	27, // 6: kaname.cloud.iam.v1.CloseChildParentResponse.closed_at:type_name -> google.protobuf.Timestamp
+	24, // 7: kaname.cloud.iam.v1.UnregisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
+	27, // 8: kaname.cloud.iam.v1.UnregisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
+	15, // 9: kaname.cloud.iam.v1.PollSubjectChangesResponse.changes:type_name -> kaname.cloud.iam.v1.SubjectChange
+	27, // 10: kaname.cloud.iam.v1.ResolveBasicCredentialResponse.expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 11: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:input_type -> kaname.cloud.iam.v1.LookupSubjectRequest
+	3,  // 12: kaname.cloud.iam.v1.InternalIAMService.Check:input_type -> kaname.cloud.iam.v1.CheckRequest
+	11, // 13: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:input_type -> kaname.cloud.iam.v1.ForceLogoutRequest
+	14, // 14: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:input_type -> kaname.cloud.iam.v1.PollSubjectChangesRequest
+	5,  // 15: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:input_type -> kaname.cloud.iam.v1.RegisterResourceRequest
+	7,  // 16: kaname.cloud.iam.v1.InternalIAMService.CloseChildParent:input_type -> kaname.cloud.iam.v1.CloseChildParentRequest
+	9,  // 17: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:input_type -> kaname.cloud.iam.v1.UnregisterResourceRequest
+	19, // 18: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:input_type -> kaname.cloud.iam.v1.ResolveBasicCredentialRequest
+	17, // 19: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:input_type -> kaname.cloud.iam.v1.GetRoleCompiledRequest
+	21, // 20: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:input_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
+	2,  // 21: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:output_type -> kaname.cloud.iam.v1.LookupSubjectResponse
+	4,  // 22: kaname.cloud.iam.v1.InternalIAMService.Check:output_type -> kaname.cloud.iam.v1.CheckResponse
+	28, // 23: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:output_type -> corelib.operation.Operation
+	16, // 24: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:output_type -> kaname.cloud.iam.v1.PollSubjectChangesResponse
+	6,  // 25: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:output_type -> kaname.cloud.iam.v1.RegisterResourceResponse
+	8,  // 26: kaname.cloud.iam.v1.InternalIAMService.CloseChildParent:output_type -> kaname.cloud.iam.v1.CloseChildParentResponse
+	10, // 27: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:output_type -> kaname.cloud.iam.v1.UnregisterResourceResponse
+	20, // 28: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:output_type -> kaname.cloud.iam.v1.ResolveBasicCredentialResponse
+	18, // 29: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:output_type -> kaname.cloud.iam.v1.GetRoleCompiledResponse
+	22, // 30: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:output_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
+	21, // [21:31] is the sub-list for method output_type
+	11, // [11:21] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_internal_iam_service_proto_init() }
@@ -1729,7 +1852,7 @@ func file_kaname_cloud_iam_v1_internal_iam_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

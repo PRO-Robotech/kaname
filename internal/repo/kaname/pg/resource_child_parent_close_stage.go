@@ -93,13 +93,13 @@ func (r *ResourceDecisionRunner) stageChildParentClose(ctx context.Context, tx p
 		return nil, err
 	}
 	if len(mirrors) == 0 {
-		return nil, &kaname.ResourceDecisionFieldError{Field: "resource_id", Description: "parent resource is not registered"}
+		return nil, authzguard.PermissionDenied()
 	}
 	if len(mirrors) != 1 || mirrors[0].ObjectType != input.ResourceType || mirrors[0].ObjectID != input.ResourceID {
 		return nil, kaname.ErrSourceUnconfirmed
 	}
 	if !mirrors[0].SourceVersion.Equal(input.SourceVersion) {
-		return nil, &kaname.ResourceDecisionFieldError{Field: "source_version", Description: "parent registration version does not match"}
+		return nil, authzguard.PermissionDenied()
 	}
 	// Включаем и пустые прямые предикаты: ветвление savedScopes не должно
 	// превращать непрочитанный источник в доказательство его отсутствия.
