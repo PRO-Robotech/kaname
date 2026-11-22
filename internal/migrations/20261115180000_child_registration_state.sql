@@ -163,6 +163,284 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname._authority_resource_require_completion_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb; physical jsonb; storage oid; consumed integer[]; required_count integer; consumed_count integer;
+BEGIN
+ storage:=to_regclass('pg_temp.kaname_authority_resource_manifest');
+ IF TG_RELID IS DISTINCT FROM storage OR TG_OP<>'INSERT' OR TG_WHEN<>'AFTER'
+ OR TG_LEVEL<>'ROW' OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c
+  WHERE c.oid=storage AND c.relowner=current_user::regrole::oid AND c.relpersistence='t' AND c.relkind='r') THEN
+  RAISE EXCEPTION 'resource completion trigger target invalid' USING ERRCODE='42501';
+ END IF;
+ manifest:=kaname._authority_resource_manifest_v2();
+ IF manifest->>'state' IS DISTINCT FROM 'body'
+ OR jsonb_typeof(manifest->'writes') IS DISTINCT FROM 'array'
+ OR jsonb_array_length(manifest->'writes')>100000 THEN
+  RAISE EXCEPTION 'resource body did not complete' USING ERRCODE='42501';
+ END IF;
+ SELECT consumed_required_writes INTO STRICT consumed FROM pg_temp.kaname_authority_resource_manifest;
+ IF consumed IS NULL OR cardinality(consumed)>100000
+ OR EXISTS(SELECT 1 FROM unnest(consumed) n WHERE n IS NULL OR n<1 OR n>jsonb_array_length(manifest->'writes'))
+ OR EXISTS(SELECT 1 FROM unnest(consumed) n GROUP BY n HAVING count(*)<>1)
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(manifest->'writes') w WHERE jsonb_typeof(w->'required') IS DISTINCT FROM 'boolean') THEN
+  RAISE EXCEPTION 'resource completion inventory is invalid' USING ERRCODE='42501';
+ END IF;
+ SELECT count(*)::integer INTO required_count FROM jsonb_array_elements(manifest->'writes') w WHERE w->>'required'='true';
+ SELECT count(*)::integer INTO consumed_count FROM unnest(consumed) n
+  WHERE manifest->'writes'->(n-1)->>'required'='true';
+ IF required_count<>consumed_count THEN
+  RAISE EXCEPTION 'resource mandatory effect was omitted' USING ERRCODE='42501';
+ END IF;
+ -- Audit и вспомогательные очереди не входят в authority32; их точное
+ -- применение и завершение последней команды проверяются отдельно.
+ IF manifest->'intent'->>'kind'='object' THEN
+  IF manifest->>'object_program_claimed' IS DISTINCT FROM 'true'
+   OR (manifest->>'object_command')::integer IS DISTINCT FROM jsonb_array_length(manifest#>'{object_program,commands}') THEN
+   RAISE EXCEPTION 'resource object program did not complete' USING ERRCODE='42501';END IF;
+  physical:=manifest->'object_physical';
+ ELSIF manifest->'intent'->>'kind'='crud' THEN
+  PERFORM kaname._authority_crud_manifest_domain_v3(manifest);
+  PERFORM kaname._authority_crud_require_completion_v3(manifest);
+  physical:=manifest->'registration_physical';
+ ELSIF manifest->'intent'->>'Action' IN ('1','2','3','4','5')
+  OR manifest->'intent'->>'kind'='child_registration' THEN
+  IF manifest->'intent'->>'kind'='child_registration'
+   AND manifest#>'{registration_body,private_effects_done}' IS DISTINCT FROM 'true'::jsonb THEN
+   RAISE EXCEPTION 'child registration private effects were omitted' USING ERRCODE='42501';END IF;
+  IF manifest->>'registration_program_claimed' IS DISTINCT FROM 'true'
+   OR (manifest->>'object_command')::integer IS DISTINCT FROM jsonb_array_length(manifest#>'{registration_program,commands}') THEN
+   RAISE EXCEPTION 'resource registration program did not complete' USING ERRCODE='42501';END IF;
+  physical:=manifest->'registration_physical';
+  IF jsonb_typeof(physical->'bindings') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(physical->'reconcile') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(manifest->'consumed_registration_bindings') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(manifest->'consumed_reconcile_ids') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(physical->'subject_changes') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(manifest->'consumed_subject_change_ids') IS DISTINCT FROM 'array'
+   OR jsonb_array_length(physical->'subject_changes')<>jsonb_array_length(manifest->'consumed_subject_change_ids')
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(physical->'subject_changes') r
+    WHERE NOT (manifest->'consumed_subject_change_ids') @> jsonb_build_array(r->'row'->'id'))
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_subject_change_ids') n GROUP BY n HAVING count(*)<>1)
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(physical->'bindings') WITH ORDINALITY e(value,ordinality)
+    WHERE e.value->>'required'='true' AND NOT (manifest->'consumed_registration_bindings') @> jsonb_build_array(e.ordinality))
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_registration_bindings') n
+    WHERE n::integer<1 OR n::integer>jsonb_array_length(physical->'bindings')
+     OR physical->'bindings'->(n::integer-1)->>'required' IS DISTINCT FROM 'true')
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_registration_bindings') n GROUP BY n HAVING count(*)<>1)
+   OR jsonb_array_length(physical->'reconcile')<>jsonb_array_length(manifest->'consumed_reconcile_ids')
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(physical->'reconcile') r
+    WHERE NOT (manifest->'consumed_reconcile_ids') @> jsonb_build_array(r->'row'->'id'))
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_reconcile_ids') n GROUP BY n HAVING count(*)<>1) THEN
+    RAISE EXCEPTION 'resource registration auxiliary effect omitted' USING ERRCODE='42501';END IF;
+ ELSE RAISE EXCEPTION 'resource completion intent unsupported' USING ERRCODE='42501';
+ END IF;
+ IF jsonb_typeof(physical->'audits') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(manifest->'consumed_audit_ids') IS DISTINCT FROM 'array'
+  OR jsonb_array_length(physical->'audits')<>jsonb_array_length(manifest->'consumed_audit_ids')
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(physical->'audits') a
+   WHERE NOT (manifest->'consumed_audit_ids') ? (a->'row'->>'id'))
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_audit_ids') identifier GROUP BY identifier HAVING count(*)<>1) THEN
+   RAISE EXCEPTION 'resource mandatory audit was omitted' USING ERRCODE='42501';END IF;
+ IF jsonb_typeof(manifest->'consumed_object_folds') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(physical->'outboxes') IS DISTINCT FROM 'array'
+  OR jsonb_array_length(manifest->'consumed_object_folds')<>jsonb_array_length(physical->'outboxes')
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_object_folds') n
+   WHERE n::integer<1 OR n::integer>jsonb_array_length(physical->'outboxes'))
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_object_folds') n GROUP BY n HAVING count(*)<>1) THEN
+   RAISE EXCEPTION 'resource mandatory journal fold was omitted' USING ERRCODE='42501';END IF;
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_resource_fold_body_v2(p_event_type text,p_payload jsonb,p_created_at timestamptz)
+RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;item jsonb;expected jsonb;row_value jsonb;image jsonb;invoker oid;
+ ordinal integer;write_ordinal integer;selected integer:=0;outboxes jsonb;fold_images jsonb;outbox_ordinals jsonb;requires_update boolean:=true;
+BEGIN
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN
+  IF kaname._authority_binding_mirror_store_v3() IS NULL THEN RETURN false;END IF;
+  expected:=jsonb_build_object('event_type',p_event_type,'payload',p_payload,'created_at',p_created_at);
+  SELECT i.image_no,i.outbox_no INTO write_ordinal,selected FROM pg_temp.kaname_binding_mirror_images i
+   WHERE i.table_name='fga_outbox' AND i.new_image=expected AND i.attempted AND i.consumed AND NOT i.folded
+   ORDER BY i.command_no,i.image_no LIMIT 1;
+  IF write_ordinal IS NULL THEN RAISE EXCEPTION 'binding mirror fold lacks actual journal' USING ERRCODE='42501';END IF;
+  UPDATE pg_temp.kaname_binding_mirror_program SET active_outbox=selected WHERE singleton;
+  invoker:=(kaname.authority_protocol_attestation()->>'invoker_oid')::oid;
+  FOR image IN SELECT jsonb_build_object('operation',i.operation,'old',i.old_image,'new',i.new_image)
+   FROM pg_temp.kaname_binding_mirror_images i WHERE i.table_name='relation_fact' AND i.outbox_no=selected ORDER BY i.image_no LOOP
+   IF image->>'operation'='UPDATE' THEN CONTINUE;END IF;
+   IF NOT has_table_privilege(invoker,'kaname.relation_fact','SELECT') THEN
+    RAISE EXCEPTION 'binding mirror fold requires original SELECT ACL' USING ERRCODE='42501';END IF;
+   IF image->>'operation'='INSERT' THEN
+    IF NOT has_table_privilege(invoker,'kaname.relation_fact','INSERT') OR NOT has_table_privilege(invoker,'kaname.relation_fact','UPDATE') THEN
+     RAISE EXCEPTION 'binding mirror fold requires original upsert ACL' USING ERRCODE='42501';END IF;
+    row_value:=image->'new';
+    INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version,created_at,condition_name,condition_params)
+    VALUES(row_value->>'object_type',row_value->>'object_id',row_value->>'relation',row_value->>'subject',
+     (row_value->>'source_version')::timestamptz,(row_value->>'created_at')::timestamptz,row_value->>'condition_name',row_value->'condition_params')
+    ON CONFLICT(object_type,object_id,relation,subject) DO UPDATE
+     SET source_version=EXCLUDED.source_version,condition_name=EXCLUDED.condition_name
+     WHERE relation_fact.source_version<EXCLUDED.source_version;
+   ELSE
+    IF NOT has_table_privilege(invoker,'kaname.relation_fact','DELETE') OR NOT has_any_column_privilege(invoker,'kaname.relation_fact','UPDATE') THEN
+     RAISE EXCEPTION 'binding mirror fold requires original delete ACL' USING ERRCODE='42501';END IF;
+    row_value:=image->'old';
+    DELETE FROM ONLY kaname.relation_fact WHERE object_type=row_value->>'object_type' AND object_id=row_value->>'object_id'
+     AND relation=row_value->>'relation' AND subject=row_value->>'subject';
+   END IF;
+  END LOOP;
+  UPDATE pg_temp.kaname_binding_mirror_program SET active_outbox=NULL WHERE singleton;
+  UPDATE pg_temp.kaname_binding_mirror_images SET folded=true WHERE image_no=write_ordinal;
+  RETURN true;
+ END IF;
+ IF manifest->'intent'->>'kind'='object' THEN
+  outboxes:=manifest#>'{object_physical,outboxes}';fold_images:=manifest#>'{object_fold,images}';
+  outbox_ordinals:=manifest->'object_outbox_write_ordinals';
+ ELSIF manifest->'intent'->>'kind'='crud' THEN
+  PERFORM kaname._authority_crud_manifest_domain_v3(manifest);
+  outboxes:=manifest#>'{registration_physical,outboxes}';fold_images:=manifest#>'{registration_physical,fold_images}';
+  outbox_ordinals:=manifest->'registration_outbox_write_ordinals';
+ ELSIF coalesce(manifest->'intent'->>'Action','') IN ('1','2','3','4')
+  OR manifest->'intent'->>'kind'='child_registration' THEN
+  outboxes:=manifest#>'{registration_physical,outboxes}';fold_images:=manifest#>'{registration_physical,fold_images}';
+  outbox_ordinals:=manifest->'registration_outbox_write_ordinals';
+ ELSE RAISE EXCEPTION 'resource fold intent unsupported' USING ERRCODE='42501';END IF;
+ IF jsonb_typeof(outboxes) IS DISTINCT FROM 'array' OR jsonb_typeof(fold_images) IS DISTINCT FROM 'array'
+ OR jsonb_typeof(outbox_ordinals) IS DISTINCT FROM 'array'
+ OR jsonb_typeof(manifest->'consumed_object_folds') IS DISTINCT FROM 'array'
+ OR jsonb_array_length(outboxes)>100000 OR jsonb_array_length(fold_images)>100000
+ OR jsonb_array_length(outbox_ordinals)<>jsonb_array_length(outboxes) THEN
+  RAISE EXCEPTION 'resource fold private program unavailable' USING ERRCODE='42501';END IF;
+ expected:=jsonb_build_object('event_type',p_event_type,'payload',p_payload,'created_at',p_created_at);
+ ordinal:=0;
+ FOR item IN SELECT value FROM jsonb_array_elements(outboxes) LOOP
+  ordinal:=ordinal+1;
+  IF item->'command' IS DISTINCT FROM manifest->'object_command'
+  OR item->'row' IS DISTINCT FROM expected OR (manifest->'consumed_object_folds') @> jsonb_build_array(ordinal) THEN CONTINUE;END IF;
+  write_ordinal:=(outbox_ordinals->>(ordinal-1))::integer;
+  IF write_ordinal IS NULL OR write_ordinal<1 OR write_ordinal>jsonb_array_length(manifest->'writes') THEN
+   RAISE EXCEPTION 'resource fold outbox linkage invalid' USING ERRCODE='42501';END IF;
+  -- BEFORE INSERT сопоставил exact image, AFTER ROW подтвердил actual INSERT.
+  -- Только обе отметки разрешают fold. Операторный journal trigger идёт
+  -- после row triggers; попытка ON CONFLICT DO NOTHING не даёт этого права.
+  IF NOT (manifest->'consumed_outbox_writes') @> jsonb_build_array(write_ordinal)
+  OR NOT (manifest->'consumed_required_writes') @> jsonb_build_array(write_ordinal) THEN CONTINUE;END IF;
+  IF selected=0 THEN selected:=ordinal;END IF;
+ END LOOP;
+ IF selected=0 THEN RAISE EXCEPTION 'resource fold without matching inserted journal' USING ERRCODE='42501';END IF;
+ IF manifest->'intent'->>'kind' IS DISTINCT FROM 'object' THEN
+  IF jsonb_typeof(outboxes->(selected-1)->'requires_update_acl') IS DISTINCT FROM 'boolean' THEN
+   RAISE EXCEPTION 'registration fold row-lock ACL proof missing' USING ERRCODE='42501';END IF;
+  requires_update:=(outboxes->(selected-1)->>'requires_update_acl')::boolean;
+ END IF;
+ invoker:=(manifest->>'invoker_oid')::oid;
+ IF manifest->'intent'->>'Action'='2' THEN
+  PERFORM kaname._authority_resource_unregistration_operation_acl_v2(manifest#>'{registration_body,acl}',invoker,
+   jsonb_build_object('steps',jsonb_build_array(manifest#>'{registration_program,commands}'->((manifest->>'object_command')::integer-1))));
+ END IF;
+ FOR image IN SELECT value FROM jsonb_array_elements(fold_images) LOOP
+  IF (image->>'outbox')::integer IS DISTINCT FROM selected THEN CONTINUE;END IF;
+  IF image->>'table' IS DISTINCT FROM 'relation_fact' OR image->>'operation' NOT IN ('INSERT','UPDATE','DELETE') THEN
+   RAISE EXCEPTION 'invalid resource folded physical action' USING ERRCODE='42501';END IF;
+  -- INSERT исполняет тот же ON CONFLICT UPDATE, поэтому UPDATE image ниже
+  -- является его проверяемым исходом, а не второй независимой командой.
+  IF image->>'operation'='UPDATE' THEN CONTINUE;END IF;
+  IF image->>'operation'='INSERT' THEN
+   IF manifest->'intent'->>'Action'='2' THEN
+    RAISE EXCEPTION 'cleanup cannot fold a fact write' USING ERRCODE='42501';END IF;
+   IF NOT has_table_privilege(invoker,'kaname.relation_fact','SELECT')
+   OR NOT has_table_privilege(invoker,'kaname.relation_fact','INSERT')
+   OR NOT has_table_privilege(invoker,'kaname.relation_fact','UPDATE') THEN
+    RAISE EXCEPTION 'resource fold requires caller fact upsert ACL' USING ERRCODE='42501';END IF;
+   row_value:=image->'new';
+   INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version,created_at,condition_name,condition_params)
+   VALUES(row_value->>'object_type',row_value->>'object_id',row_value->>'relation',row_value->>'subject',
+    (row_value->>'source_version')::timestamptz,(row_value->>'created_at')::timestamptz,
+    row_value->>'condition_name',row_value->'condition_params')
+   ON CONFLICT(object_type,object_id,relation,subject) DO UPDATE
+    SET source_version=EXCLUDED.source_version,condition_name=EXCLUDED.condition_name
+    WHERE relation_fact.source_version<EXCLUDED.source_version;
+  ELSE
+   IF manifest->'intent'->>'Action' IS DISTINCT FROM '2' THEN
+    IF NOT has_table_privilege(invoker,'kaname.relation_fact','SELECT')
+    OR NOT has_table_privilege(invoker,'kaname.relation_fact','DELETE')
+    OR (requires_update AND NOT has_any_column_privilege(invoker,'kaname.relation_fact','UPDATE')) THEN
+     RAISE EXCEPTION 'resource fold requires caller fact delete ACL' USING ERRCODE='42501';END IF;
+   END IF;
+   row_value:=image->'old';
+   DELETE FROM ONLY kaname.relation_fact WHERE object_type=row_value->>'object_type' AND object_id=row_value->>'object_id'
+    AND relation=row_value->>'relation' AND subject=row_value->>'subject';
+  END IF;
+ END LOOP;
+ UPDATE pg_temp.kaname_authority_resource_manifest SET consumed_object_folds=array_append(consumed_object_folds,selected);
+ RETURN true;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_protocol_statement_guard() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb; manifest jsonb; allowed boolean;step jsonb;sequence_program jsonb;
+BEGIN
+ -- Один свежий proof/header на этот вызов. Probe сохраняет unsigned NULL
+ -- и прежний порядок attestation перед owner/ACL/header проверками.
+ SELECT q.proof,q.header INTO STRICT proof,sequence_program FROM kaname._authority_sequence_probe_v3() q;
+ IF sequence_program#>>'{frozen,mode}'='authorize' THEN
+  RAISE EXCEPTION 'authorization-only callback cannot mutate persistent state' USING ERRCODE='42501';
+ END IF;
+ IF kaname._authority_group_add_statement_v3(TG_TABLE_NAME,TG_OP) THEN RETURN NULL;END IF;
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NOT NULL THEN
+  allowed:=false;
+  IF manifest->'intent'->>'kind'='object' THEN
+   step:=manifest#>'{object_program,commands}'->((manifest->>'object_command')::integer-1);
+   -- Проверяем только текущий выданный private command, не соседние шаги.
+   -- Два закрытых UPSERT: members и fact fold команды write. Оба вызывают
+   -- statement UPDATE даже без конфликтующей строки или при stale версии.
+   -- Синтаксическое UPDATE подтверждает attempted INSERT того же шага;
+   -- разрешённые actual row images и обязательность consumption не меняются.
+   SELECT manifest->>'object_program_claimed'='true' AND EXISTS(
+    SELECT 1 FROM jsonb_array_elements(manifest->'writes') w
+    WHERE w->'command'=manifest->'object_command' AND w->>'table'=TG_TABLE_NAME
+    AND (w->>'operation'=TG_OP OR
+     (TG_OP='UPDATE' AND w->>'operation'='INSERT'
+      AND ((step->>'Kind'='members' AND TG_TABLE_NAME='access_binding_target_members')
+       OR (step->>'Kind'='write' AND TG_TABLE_NAME='relation_fact'))))) INTO allowed;
+  ELSIF manifest->'intent'->>'kind'='crud' THEN
+   -- Новый маршрут читает только текущую закрытую owner-private команду.
+   -- Указание kind в caller JSON само по себе не создаёт ни proof, ни программу.
+   PERFORM kaname._authority_crud_manifest_domain_v3(manifest);
+   step:=manifest#>'{registration_program,commands}'->((manifest->>'object_command')::integer-1);
+   allowed:=manifest->>'registration_program_claimed'='true'
+    AND coalesce(step->'operations'->TG_TABLE_NAME,'[]'::jsonb) ? TG_OP;
+  ELSIF manifest->'intent'->>'Action' IN ('1','2','3','4')
+   OR manifest->'intent'->>'kind'='child_registration' THEN
+   step:=manifest#>'{registration_program,commands}'->((manifest->>'object_command')::integer-1);
+   allowed:=manifest->>'registration_program_claimed'='true'
+    AND coalesce(step->'operations'->TG_TABLE_NAME,'[]'::jsonb) ? TG_OP;
+  END IF;
+  IF TG_OP='TRUNCATE' OR NOT coalesce(allowed,false) THEN
+   RAISE EXCEPTION 'resource statement absent from current private command' USING ERRCODE='42501';
+  END IF;
+  RETURN NULL;
+ END IF;
+ -- В NULL-ветке producer выполнены только private consumer reads;
+ -- ни DML, ни callback, ни изменение clock/identity между proof и проверкой нет.
+ -- kaname#1034: после удаления parent каскадный child уже не обязан видеть
+ -- его anchor; role target cascade также может затронуть другой account.
+ -- До отдельной proven классификации adapter выбирает global ДО всех locks.
+ IF proof IS NOT NULL AND proof->>'mode'<>'global'
+ AND (TG_OP='TRUNCATE' OR (TG_OP='DELETE' AND TG_TABLE_NAME IN ('roles','groups','accounts'))) THEN
+  RAISE EXCEPTION 'authority truncate or parent cascade requires global intent' USING ERRCODE='42501';
+ END IF;
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname._authority_crud_storage_v3() RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE expected record;owner_oid oid;trigger_counts jsonb;trigger_count bigint;
@@ -250,8 +528,8 @@ BEGIN
  ('_authority_crud_structural_v3(text,text,text,text)','00d37afb9a7b7c9d4534df79f313c14e13fc16a1756d368d85ca2e5f4d939c13',true,'i',true,'private'),
  ('_authority_crud_command_plan_v3(jsonb,jsonb)','ea252acb7bcebc7c96da591416609deb3b606d01eeda6a3a32e911a0e77af3d1',true,'i',true,'private'),
  ('authority_resource_assert_body_v2(jsonb)','4c7219a426a0bb4682fc85dea9806123101be986db4adf98844f1f416b997eb4',true,'v',true,'preserve'),
- ('_authority_resource_require_completion_v2()','bbcfca0b3d5ff59ad273695dfed2451f1ff37bf4030f8f7083415396dafee0e6',true,'v',true,'preserve'),
- ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','3eb8735862b7643f353c9e10312c2fe9ca251489f875c1faf30289f3d166b5d9',true,'v',true,'preserve'),
+ ('_authority_resource_require_completion_v2()','31855e0f86620b4cc69389b4a7da1055108ca98741fa61b7948d0ba5773da223',true,'v',true,'preserve'),
+ ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','6be8def5de6ed9a89e95f50764835b8da6baa06ca26a053b84bb4d6279b38282',true,'v',true,'preserve'),
  ('authority_resource_prewait_v2(jsonb,integer,integer)','e835d0c4f015334d151c7a902e7cb5c10a8f7d5d2ee2c4d6fad478bd558e5f83',true,'v',true,'preserve'),
  ('_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','967a84fb10617c3a5f376d63aaf2903538edc5fe1548150b307bae33a70ee3f9',true,'i',true,'private'),
  ('_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','2e4cf1562674897a696483469505925ba5862b6fe0422f663b330eb96f237b9e',true,'i',true,'private'),
@@ -284,7 +562,7 @@ BEGIN
  ('_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','424927c26adc58d65a55a4567766054c378f1340662d0401146e5e2dac2f0bad',true,'v',true,'private'),
  ('_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','a9e7a60de752dcf436571f457c67de751439e77276005238dab9abed9ef9049b',true,'v',true,'private'),
  ('_authority_crud_scope_capture_v3(jsonb,integer,integer)','7cd250c6e17d5c41737c1afebca7576744bae05ec46af01136678c515e23f5e5',true,'s',true,'private'),
- ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true,'v',true,'preserve'),
+ ('authority_protocol_statement_guard()','53554846c85e31f40b16c788e36527bba3fff4e4c57be01c0bad5ce8c36f45a6',true,'v',true,'preserve'),
  ('_authority_resource_crud_store_v3(jsonb)','b3c4cf46195b7a32a2454911b29c8ea51a0e37741ca98380890e911f4e765135',true,'v',true,'private'),
  ('_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','8ebecbc122a5558910017569ac3ea927ad37ea4066dec179a253807b4c5d9574',true,'v',true,'private'),
  ('_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','ded94e6b1bf461dfaf9753a2e71dc73f45f474826b1d7a2f950e097c455629b0',true,'v',true,'private'),
@@ -941,7 +1219,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','5e6acf07a4311adcbfbd2a6b5c15b3b6174c209b8eca5873d32b8de5f9ee9763',true),
+ ('_authority_crud_storage_v3()','b3efa1dc5e04015eeef91c01115f174a6b4581c7f96c0553f0e2b24af2ae87d7',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -964,7 +1242,7 @@ BEGIN
  ('authority_protocol_stage_full_v3(text,bytea,text,text,text)','1f7a9c17af7a4c3ec041405fa9f0dddc69cdf3fa666ba72db47247cde8447037',false),
  ('authority_protocol_activate_full_v3(text,text,text)','646328a2433e1d31d17a9c178ac3ab59a5a65d8252accf5295a20d22705d31cf',false),
  ('authority_protocol_attestation()','130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502',true),
- ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true),
+ ('authority_protocol_statement_guard()','53554846c85e31f40b16c788e36527bba3fff4e4c57be01c0bad5ce8c36f45a6',true),
  ('authority_protocol_row_guard()','cb90a95df9b7105f053ae0c8652407335ef82745a2e749dc395b1c82e8435d12',true),
  ('_authority_protocol_stage_generation1(text,bytea,text,text,text)','7ffb942af742bff4b556f07b00d9d8f75fefba3aa1f00445073140b5c8072bde',false),
  ('_authority_protocol_activate_generation1(text,text,text)','00d97c37e2ab533c232e4cffb975e8d71c3eefa98228e0f39d90249526bf041c',false),
@@ -1106,6 +1384,278 @@ BEGIN
  -- касается только уже открытой private temp строки, новых waits нет.
  UPDATE pg_temp.kaname_authority_resource_manifest SET state='body';
  RETURN true;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname._authority_resource_require_completion_v2() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb; physical jsonb; storage oid; consumed integer[]; required_count integer; consumed_count integer;
+BEGIN
+ storage:=to_regclass('pg_temp.kaname_authority_resource_manifest');
+ IF TG_RELID IS DISTINCT FROM storage OR TG_OP<>'INSERT' OR TG_WHEN<>'AFTER'
+ OR TG_LEVEL<>'ROW' OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c
+  WHERE c.oid=storage AND c.relowner=current_user::regrole::oid AND c.relpersistence='t' AND c.relkind='r') THEN
+  RAISE EXCEPTION 'resource completion trigger target invalid' USING ERRCODE='42501';
+ END IF;
+ manifest:=kaname._authority_resource_manifest_v2();
+ IF manifest->>'state' IS DISTINCT FROM 'body'
+ OR jsonb_typeof(manifest->'writes') IS DISTINCT FROM 'array'
+ OR jsonb_array_length(manifest->'writes')>100000 THEN
+  RAISE EXCEPTION 'resource body did not complete' USING ERRCODE='42501';
+ END IF;
+ SELECT consumed_required_writes INTO STRICT consumed FROM pg_temp.kaname_authority_resource_manifest;
+ IF consumed IS NULL OR cardinality(consumed)>100000
+ OR EXISTS(SELECT 1 FROM unnest(consumed) n WHERE n IS NULL OR n<1 OR n>jsonb_array_length(manifest->'writes'))
+ OR EXISTS(SELECT 1 FROM unnest(consumed) n GROUP BY n HAVING count(*)<>1)
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(manifest->'writes') w WHERE jsonb_typeof(w->'required') IS DISTINCT FROM 'boolean') THEN
+  RAISE EXCEPTION 'resource completion inventory is invalid' USING ERRCODE='42501';
+ END IF;
+ SELECT count(*)::integer INTO required_count FROM jsonb_array_elements(manifest->'writes') w WHERE w->>'required'='true';
+ SELECT count(*)::integer INTO consumed_count FROM unnest(consumed) n
+  WHERE manifest->'writes'->(n-1)->>'required'='true';
+ IF required_count<>consumed_count THEN
+  RAISE EXCEPTION 'resource mandatory effect was omitted' USING ERRCODE='42501';
+ END IF;
+ -- Audit и вспомогательные очереди не входят в authority32; их точное
+ -- применение и завершение последней команды проверяются отдельно.
+ IF manifest->'intent'->>'kind'='object' THEN
+  IF manifest->>'object_program_claimed' IS DISTINCT FROM 'true'
+   OR (manifest->>'object_command')::integer IS DISTINCT FROM jsonb_array_length(manifest#>'{object_program,commands}') THEN
+   RAISE EXCEPTION 'resource object program did not complete' USING ERRCODE='42501';END IF;
+  physical:=manifest->'object_physical';
+ ELSIF manifest->'intent'->>'kind'='crud' THEN
+  PERFORM kaname._authority_crud_manifest_domain_v3(manifest);
+  PERFORM kaname._authority_crud_require_completion_v3(manifest);
+  physical:=manifest->'registration_physical';
+ ELSIF manifest->'intent'->>'Action' IN ('1','2','3','4','5') THEN
+  IF manifest->>'registration_program_claimed' IS DISTINCT FROM 'true'
+   OR (manifest->>'object_command')::integer IS DISTINCT FROM jsonb_array_length(manifest#>'{registration_program,commands}') THEN
+   RAISE EXCEPTION 'resource registration program did not complete' USING ERRCODE='42501';END IF;
+  physical:=manifest->'registration_physical';
+  IF jsonb_typeof(physical->'bindings') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(physical->'reconcile') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(manifest->'consumed_registration_bindings') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(manifest->'consumed_reconcile_ids') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(physical->'subject_changes') IS DISTINCT FROM 'array'
+   OR jsonb_typeof(manifest->'consumed_subject_change_ids') IS DISTINCT FROM 'array'
+   OR jsonb_array_length(physical->'subject_changes')<>jsonb_array_length(manifest->'consumed_subject_change_ids')
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(physical->'subject_changes') r
+    WHERE NOT (manifest->'consumed_subject_change_ids') @> jsonb_build_array(r->'row'->'id'))
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_subject_change_ids') n GROUP BY n HAVING count(*)<>1)
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(physical->'bindings') WITH ORDINALITY e(value,ordinality)
+    WHERE e.value->>'required'='true' AND NOT (manifest->'consumed_registration_bindings') @> jsonb_build_array(e.ordinality))
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_registration_bindings') n
+    WHERE n::integer<1 OR n::integer>jsonb_array_length(physical->'bindings')
+     OR physical->'bindings'->(n::integer-1)->>'required' IS DISTINCT FROM 'true')
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_registration_bindings') n GROUP BY n HAVING count(*)<>1)
+   OR jsonb_array_length(physical->'reconcile')<>jsonb_array_length(manifest->'consumed_reconcile_ids')
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(physical->'reconcile') r
+    WHERE NOT (manifest->'consumed_reconcile_ids') @> jsonb_build_array(r->'row'->'id'))
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_reconcile_ids') n GROUP BY n HAVING count(*)<>1) THEN
+    RAISE EXCEPTION 'resource registration auxiliary effect omitted' USING ERRCODE='42501';END IF;
+ ELSE RAISE EXCEPTION 'resource completion intent unsupported' USING ERRCODE='42501';
+ END IF;
+ IF jsonb_typeof(physical->'audits') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(manifest->'consumed_audit_ids') IS DISTINCT FROM 'array'
+  OR jsonb_array_length(physical->'audits')<>jsonb_array_length(manifest->'consumed_audit_ids')
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(physical->'audits') a
+   WHERE NOT (manifest->'consumed_audit_ids') ? (a->'row'->>'id'))
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_audit_ids') identifier GROUP BY identifier HAVING count(*)<>1) THEN
+   RAISE EXCEPTION 'resource mandatory audit was omitted' USING ERRCODE='42501';END IF;
+ IF jsonb_typeof(manifest->'consumed_object_folds') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(physical->'outboxes') IS DISTINCT FROM 'array'
+  OR jsonb_array_length(manifest->'consumed_object_folds')<>jsonb_array_length(physical->'outboxes')
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_object_folds') n
+   WHERE n::integer<1 OR n::integer>jsonb_array_length(physical->'outboxes'))
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(manifest->'consumed_object_folds') n GROUP BY n HAVING count(*)<>1) THEN
+   RAISE EXCEPTION 'resource mandatory journal fold was omitted' USING ERRCODE='42501';END IF;
+ RETURN NULL;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_resource_fold_body_v2(p_event_type text,p_payload jsonb,p_created_at timestamptz)
+RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;item jsonb;expected jsonb;row_value jsonb;image jsonb;invoker oid;
+ ordinal integer;write_ordinal integer;selected integer:=0;outboxes jsonb;fold_images jsonb;outbox_ordinals jsonb;requires_update boolean:=true;
+BEGIN
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NULL THEN
+  IF kaname._authority_binding_mirror_store_v3() IS NULL THEN RETURN false;END IF;
+  expected:=jsonb_build_object('event_type',p_event_type,'payload',p_payload,'created_at',p_created_at);
+  SELECT i.image_no,i.outbox_no INTO write_ordinal,selected FROM pg_temp.kaname_binding_mirror_images i
+   WHERE i.table_name='fga_outbox' AND i.new_image=expected AND i.attempted AND i.consumed AND NOT i.folded
+   ORDER BY i.command_no,i.image_no LIMIT 1;
+  IF write_ordinal IS NULL THEN RAISE EXCEPTION 'binding mirror fold lacks actual journal' USING ERRCODE='42501';END IF;
+  UPDATE pg_temp.kaname_binding_mirror_program SET active_outbox=selected WHERE singleton;
+  invoker:=(kaname.authority_protocol_attestation()->>'invoker_oid')::oid;
+  FOR image IN SELECT jsonb_build_object('operation',i.operation,'old',i.old_image,'new',i.new_image)
+   FROM pg_temp.kaname_binding_mirror_images i WHERE i.table_name='relation_fact' AND i.outbox_no=selected ORDER BY i.image_no LOOP
+   IF image->>'operation'='UPDATE' THEN CONTINUE;END IF;
+   IF NOT has_table_privilege(invoker,'kaname.relation_fact','SELECT') THEN
+    RAISE EXCEPTION 'binding mirror fold requires original SELECT ACL' USING ERRCODE='42501';END IF;
+   IF image->>'operation'='INSERT' THEN
+    IF NOT has_table_privilege(invoker,'kaname.relation_fact','INSERT') OR NOT has_table_privilege(invoker,'kaname.relation_fact','UPDATE') THEN
+     RAISE EXCEPTION 'binding mirror fold requires original upsert ACL' USING ERRCODE='42501';END IF;
+    row_value:=image->'new';
+    INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version,created_at,condition_name,condition_params)
+    VALUES(row_value->>'object_type',row_value->>'object_id',row_value->>'relation',row_value->>'subject',
+     (row_value->>'source_version')::timestamptz,(row_value->>'created_at')::timestamptz,row_value->>'condition_name',row_value->'condition_params')
+    ON CONFLICT(object_type,object_id,relation,subject) DO UPDATE
+     SET source_version=EXCLUDED.source_version,condition_name=EXCLUDED.condition_name
+     WHERE relation_fact.source_version<EXCLUDED.source_version;
+   ELSE
+    IF NOT has_table_privilege(invoker,'kaname.relation_fact','DELETE') OR NOT has_any_column_privilege(invoker,'kaname.relation_fact','UPDATE') THEN
+     RAISE EXCEPTION 'binding mirror fold requires original delete ACL' USING ERRCODE='42501';END IF;
+    row_value:=image->'old';
+    DELETE FROM ONLY kaname.relation_fact WHERE object_type=row_value->>'object_type' AND object_id=row_value->>'object_id'
+     AND relation=row_value->>'relation' AND subject=row_value->>'subject';
+   END IF;
+  END LOOP;
+  UPDATE pg_temp.kaname_binding_mirror_program SET active_outbox=NULL WHERE singleton;
+  UPDATE pg_temp.kaname_binding_mirror_images SET folded=true WHERE image_no=write_ordinal;
+  RETURN true;
+ END IF;
+ IF manifest->'intent'->>'kind'='object' THEN
+  outboxes:=manifest#>'{object_physical,outboxes}';fold_images:=manifest#>'{object_fold,images}';
+  outbox_ordinals:=manifest->'object_outbox_write_ordinals';
+ ELSIF manifest->'intent'->>'kind'='crud' THEN
+  PERFORM kaname._authority_crud_manifest_domain_v3(manifest);
+  outboxes:=manifest#>'{registration_physical,outboxes}';fold_images:=manifest#>'{registration_physical,fold_images}';
+  outbox_ordinals:=manifest->'registration_outbox_write_ordinals';
+ ELSIF coalesce(manifest->'intent'->>'Action','') IN ('1','2','3','4') THEN
+  outboxes:=manifest#>'{registration_physical,outboxes}';fold_images:=manifest#>'{registration_physical,fold_images}';
+  outbox_ordinals:=manifest->'registration_outbox_write_ordinals';
+ ELSE RAISE EXCEPTION 'resource fold intent unsupported' USING ERRCODE='42501';END IF;
+ IF jsonb_typeof(outboxes) IS DISTINCT FROM 'array' OR jsonb_typeof(fold_images) IS DISTINCT FROM 'array'
+ OR jsonb_typeof(outbox_ordinals) IS DISTINCT FROM 'array'
+ OR jsonb_typeof(manifest->'consumed_object_folds') IS DISTINCT FROM 'array'
+ OR jsonb_array_length(outboxes)>100000 OR jsonb_array_length(fold_images)>100000
+ OR jsonb_array_length(outbox_ordinals)<>jsonb_array_length(outboxes) THEN
+  RAISE EXCEPTION 'resource fold private program unavailable' USING ERRCODE='42501';END IF;
+ expected:=jsonb_build_object('event_type',p_event_type,'payload',p_payload,'created_at',p_created_at);
+ ordinal:=0;
+ FOR item IN SELECT value FROM jsonb_array_elements(outboxes) LOOP
+  ordinal:=ordinal+1;
+  IF item->'command' IS DISTINCT FROM manifest->'object_command'
+  OR item->'row' IS DISTINCT FROM expected OR (manifest->'consumed_object_folds') @> jsonb_build_array(ordinal) THEN CONTINUE;END IF;
+  write_ordinal:=(outbox_ordinals->>(ordinal-1))::integer;
+  IF write_ordinal IS NULL OR write_ordinal<1 OR write_ordinal>jsonb_array_length(manifest->'writes') THEN
+   RAISE EXCEPTION 'resource fold outbox linkage invalid' USING ERRCODE='42501';END IF;
+  -- BEFORE INSERT сопоставил exact image, AFTER ROW подтвердил actual INSERT.
+  -- Только обе отметки разрешают fold. Операторный journal trigger идёт
+  -- после row triggers; попытка ON CONFLICT DO NOTHING не даёт этого права.
+  IF NOT (manifest->'consumed_outbox_writes') @> jsonb_build_array(write_ordinal)
+  OR NOT (manifest->'consumed_required_writes') @> jsonb_build_array(write_ordinal) THEN CONTINUE;END IF;
+  IF selected=0 THEN selected:=ordinal;END IF;
+ END LOOP;
+ IF selected=0 THEN RAISE EXCEPTION 'resource fold without matching inserted journal' USING ERRCODE='42501';END IF;
+ IF manifest->'intent'->>'kind' IS DISTINCT FROM 'object' THEN
+  IF jsonb_typeof(outboxes->(selected-1)->'requires_update_acl') IS DISTINCT FROM 'boolean' THEN
+   RAISE EXCEPTION 'registration fold row-lock ACL proof missing' USING ERRCODE='42501';END IF;
+  requires_update:=(outboxes->(selected-1)->>'requires_update_acl')::boolean;
+ END IF;
+ invoker:=(manifest->>'invoker_oid')::oid;
+ IF manifest->'intent'->>'Action'='2' THEN
+  PERFORM kaname._authority_resource_unregistration_operation_acl_v2(manifest#>'{registration_body,acl}',invoker,
+   jsonb_build_object('steps',jsonb_build_array(manifest#>'{registration_program,commands}'->((manifest->>'object_command')::integer-1))));
+ END IF;
+ FOR image IN SELECT value FROM jsonb_array_elements(fold_images) LOOP
+  IF (image->>'outbox')::integer IS DISTINCT FROM selected THEN CONTINUE;END IF;
+  IF image->>'table' IS DISTINCT FROM 'relation_fact' OR image->>'operation' NOT IN ('INSERT','UPDATE','DELETE') THEN
+   RAISE EXCEPTION 'invalid resource folded physical action' USING ERRCODE='42501';END IF;
+  -- INSERT исполняет тот же ON CONFLICT UPDATE, поэтому UPDATE image ниже
+  -- является его проверяемым исходом, а не второй независимой командой.
+  IF image->>'operation'='UPDATE' THEN CONTINUE;END IF;
+  IF image->>'operation'='INSERT' THEN
+   IF manifest->'intent'->>'Action'='2' THEN
+    RAISE EXCEPTION 'cleanup cannot fold a fact write' USING ERRCODE='42501';END IF;
+   IF NOT has_table_privilege(invoker,'kaname.relation_fact','SELECT')
+   OR NOT has_table_privilege(invoker,'kaname.relation_fact','INSERT')
+   OR NOT has_table_privilege(invoker,'kaname.relation_fact','UPDATE') THEN
+    RAISE EXCEPTION 'resource fold requires caller fact upsert ACL' USING ERRCODE='42501';END IF;
+   row_value:=image->'new';
+   INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject,source_version,created_at,condition_name,condition_params)
+   VALUES(row_value->>'object_type',row_value->>'object_id',row_value->>'relation',row_value->>'subject',
+    (row_value->>'source_version')::timestamptz,(row_value->>'created_at')::timestamptz,
+    row_value->>'condition_name',row_value->'condition_params')
+   ON CONFLICT(object_type,object_id,relation,subject) DO UPDATE
+    SET source_version=EXCLUDED.source_version,condition_name=EXCLUDED.condition_name
+    WHERE relation_fact.source_version<EXCLUDED.source_version;
+  ELSE
+   IF manifest->'intent'->>'Action' IS DISTINCT FROM '2' THEN
+    IF NOT has_table_privilege(invoker,'kaname.relation_fact','SELECT')
+    OR NOT has_table_privilege(invoker,'kaname.relation_fact','DELETE')
+    OR (requires_update AND NOT has_any_column_privilege(invoker,'kaname.relation_fact','UPDATE')) THEN
+     RAISE EXCEPTION 'resource fold requires caller fact delete ACL' USING ERRCODE='42501';END IF;
+   END IF;
+   row_value:=image->'old';
+   DELETE FROM ONLY kaname.relation_fact WHERE object_type=row_value->>'object_type' AND object_id=row_value->>'object_id'
+    AND relation=row_value->>'relation' AND subject=row_value->>'subject';
+  END IF;
+ END LOOP;
+ UPDATE pg_temp.kaname_authority_resource_manifest SET consumed_object_folds=array_append(consumed_object_folds,selected);
+ RETURN true;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_protocol_statement_guard() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb; manifest jsonb; allowed boolean;step jsonb;sequence_program jsonb;
+BEGIN
+ -- Один свежий proof/header на этот вызов. Probe сохраняет unsigned NULL
+ -- и прежний порядок attestation перед owner/ACL/header проверками.
+ SELECT q.proof,q.header INTO STRICT proof,sequence_program FROM kaname._authority_sequence_probe_v3() q;
+ IF sequence_program#>>'{frozen,mode}'='authorize' THEN
+  RAISE EXCEPTION 'authorization-only callback cannot mutate persistent state' USING ERRCODE='42501';
+ END IF;
+ IF kaname._authority_group_add_statement_v3(TG_TABLE_NAME,TG_OP) THEN RETURN NULL;END IF;
+ manifest:=kaname._authority_producer_resource_v2();
+ IF manifest IS NOT NULL THEN
+  allowed:=false;
+  IF manifest->'intent'->>'kind'='object' THEN
+   step:=manifest#>'{object_program,commands}'->((manifest->>'object_command')::integer-1);
+   -- Проверяем только текущий выданный private command, не соседние шаги.
+   -- Два закрытых UPSERT: members и fact fold команды write. Оба вызывают
+   -- statement UPDATE даже без конфликтующей строки или при stale версии.
+   -- Синтаксическое UPDATE подтверждает attempted INSERT того же шага;
+   -- разрешённые actual row images и обязательность consumption не меняются.
+   SELECT manifest->>'object_program_claimed'='true' AND EXISTS(
+    SELECT 1 FROM jsonb_array_elements(manifest->'writes') w
+    WHERE w->'command'=manifest->'object_command' AND w->>'table'=TG_TABLE_NAME
+    AND (w->>'operation'=TG_OP OR
+     (TG_OP='UPDATE' AND w->>'operation'='INSERT'
+      AND ((step->>'Kind'='members' AND TG_TABLE_NAME='access_binding_target_members')
+       OR (step->>'Kind'='write' AND TG_TABLE_NAME='relation_fact'))))) INTO allowed;
+  ELSIF manifest->'intent'->>'kind'='crud' THEN
+   -- Новый маршрут читает только текущую закрытую owner-private команду.
+   -- Указание kind в caller JSON само по себе не создаёт ни proof, ни программу.
+   PERFORM kaname._authority_crud_manifest_domain_v3(manifest);
+   step:=manifest#>'{registration_program,commands}'->((manifest->>'object_command')::integer-1);
+   allowed:=manifest->>'registration_program_claimed'='true'
+    AND coalesce(step->'operations'->TG_TABLE_NAME,'[]'::jsonb) ? TG_OP;
+  ELSIF manifest->'intent'->>'Action' IN ('1','2','3','4') THEN
+   step:=manifest#>'{registration_program,commands}'->((manifest->>'object_command')::integer-1);
+   allowed:=manifest->>'registration_program_claimed'='true'
+    AND coalesce(step->'operations'->TG_TABLE_NAME,'[]'::jsonb) ? TG_OP;
+  END IF;
+  IF TG_OP='TRUNCATE' OR NOT coalesce(allowed,false) THEN
+   RAISE EXCEPTION 'resource statement absent from current private command' USING ERRCODE='42501';
+  END IF;
+  RETURN NULL;
+ END IF;
+ -- В NULL-ветке producer выполнены только private consumer reads;
+ -- ни DML, ни callback, ни изменение clock/identity между proof и проверкой нет.
+ -- kaname#1034: после удаления parent каскадный child уже не обязан видеть
+ -- его anchor; role target cascade также может затронуть другой account.
+ -- До отдельной proven классификации adapter выбирает global ДО всех locks.
+ IF proof IS NOT NULL AND proof->>'mode'<>'global'
+ AND (TG_OP='TRUNCATE' OR (TG_OP='DELETE' AND TG_TABLE_NAME IN ('roles','groups','accounts'))) THEN
+  RAISE EXCEPTION 'authority truncate or parent cascade requires global intent' USING ERRCODE='42501';
+ END IF;
+ RETURN NULL;
 END $$;
 -- +goose StatementEnd
 
