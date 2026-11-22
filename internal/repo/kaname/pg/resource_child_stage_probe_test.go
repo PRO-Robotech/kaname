@@ -135,14 +135,17 @@ func TestUserChildStageRRDeniesExistingAndAbsentParentBeforeRegistrationCapture(
 					require.NotContains(t, sql, forbidden)
 				}
 			}
-			var effects int
+			var registered bool
+			require.NoError(t, tx.QueryRow(ctx, `SELECT EXISTS (
+ SELECT 1 FROM kaname.resource_mirror WHERE object_type=$1 AND object_id=$2)`, input.ResourceType, input.ResourceID).Scan(&registered))
+			require.False(t, registered, "отказ не создал регистрацию и версию")
+			var effects bool
 			require.NoError(t, tx.QueryRow(ctx, `SELECT
- (SELECT count(*) FROM kaname.resource_mirror WHERE object_type=$1 AND object_id=$2)+
- (SELECT count(*) FROM kaname.resource_parent_edge WHERE object_type='stage_order_child' AND object_id=$2)+
- (SELECT count(*) FROM kaname.resource_registration_scope WHERE object_type='stage_order_child' AND object_id=$2)+
- (SELECT count(*) FROM kaname.relation_fact WHERE object_type='stage_order_child' AND object_id=$2)+
- (SELECT count(*) FROM kaname.authority_child_creation WHERE child_type=$1 AND child_id=$2)`, input.ResourceType, input.ResourceID).Scan(&effects))
-			require.Zero(t, effects, "отказ не создал регистрацию, версию, цепь, область, факты или расход")
+ EXISTS (SELECT 1 FROM kaname.resource_parent_edge WHERE object_type='stage_order_child' AND object_id=$2) OR
+ EXISTS (SELECT 1 FROM kaname.resource_registration_scope WHERE object_type='stage_order_child' AND object_id=$2) OR
+ EXISTS (SELECT 1 FROM kaname.relation_fact WHERE object_type='stage_order_child' AND object_id=$2) OR
+ EXISTS (SELECT 1 FROM kaname.authority_child_creation WHERE child_type=$1 AND child_id=$2)`, input.ResourceType, input.ResourceID).Scan(&effects))
+			require.False(t, effects, "отказ не создал цепь, область, факты или расход")
 		})
 	}
 }

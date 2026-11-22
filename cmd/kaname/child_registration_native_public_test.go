@@ -33,7 +33,7 @@ import (
 )
 
 // Отдельно включаемый исходный кандидат приёмки. Skip не является доказательством
-// #1045: запуск требует зафиксированных native binary/migrator и отдельного
+// kaname#1045: запуск требует зафиксированных native binary/migrator и отдельного
 // evidence root действующего installation harness. Подмена principal запрещена.
 func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	if testing.Short() || os.Getenv("KANAME_CHILD_PUBLIC_ACCEPTANCE") != "1" {

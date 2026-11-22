@@ -48,7 +48,7 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 		{"authority_protocol_row_guard", "cb90a95df9b7105f053ae0c8652407335ef82745a2e749dc395b1c82e8435d12", "v"},
 		{"authority_protocol_row_scopes", "e45ac0e22f60f4dfee2d813f29a43a63d9859dc2c3551a3f4eeacf1103ee5d1d", "s"},
 		{"authority_protocol_row_scopes_before_binding", "635a0ee4afa8490d61d3023caa6e15c5fc57f244e2ae4b66a2466b1714062f63", "s"},
-		{"authority_protocol_statement_guard", "e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad", "v"},
+		{"authority_protocol_statement_guard", "7608e2d0a1b1ce2bb11182a349150e5369e2bd97c5fb8abc3da84b3d2e0c229a", "v"},
 	} {
 		var source, language, volatility, settings string
 		var definer bool
@@ -82,7 +82,7 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 		{"_authority_resource_side_v2", "09f8a713bf8e2a59ec0051910a49f5df93dec5bc5c776271c2f1a54dbb1eb8f1", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_resource_consume_outbox_v2", "d91f9262b60ef7014532419fa24fd2531ed590212e37586aa32099dbd12c53f1", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_resource_consume_required_v2", "3072f2d4cb1c9b0991af2998f7317fd710f9ad86886b02ee146e3a74eefc51ba", "v", "search_path=pg_catalog,pg_temp", true},
-		{"_authority_resource_require_completion_v2", "bbcfca0b3d5ff59ad273695dfed2451f1ff37bf4030f8f7083415396dafee0e6", "v", "search_path=pg_catalog,pg_temp", true},
+		{"_authority_resource_require_completion_v2", "e1c6b94cd3542ce6e1055c70a7ef067675ebbd3826084e24c04d21b3df29f203", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_resource_effect_applied_v2", "759a821396ab5850fd5aac25756c0403129d685aec1aa7e7f63bf95c8126f136", "v", "search_path=pg_catalog,pg_temp", true},
 		{"authority_policy_epoch_monotonic_v2", "c8b62494628d305d0bc031154f07f1aef6dd3df936801a387e593ca4eb1f2d94", "v", "search_path=pg_catalog", false},
 		{"authority_audit_id_guard_v2", "a349a4a051b336afdec4cb5422edf5738fe4e354acec98163abc0d4a2c70d8f2", "v", "search_path=pg_catalog,pg_temp", true},
@@ -96,11 +96,11 @@ func AssertReviewedGraph(t testing.TB, ctx context.Context, q interface {
 		{"authority_subject_change_id_guard_v2", "aa4bc39730f137bdf11491afaf41d9c8451c88e2cda40358fc0e33be2f29cb53", "v", "search_path=pg_catalog,pg_temp", true},
 		{"authority_subject_change_applied_v2", "fa776df6d3b95dadb13fa1684424b2db105b21f5b8862bd045680fb8129d094e", "v", "search_path=pg_catalog,pg_temp", true},
 		{"authority_subject_change_statement_guard_v2", "600129602604e3cac17840ff155738e5c886677cd8be781b62b9b29f2fe785b0", "v", "search_path=pg_catalog,pg_temp", true},
-		{"authority_resource_registration_command_values_v2", "f578c73b8e09ea4f03c4510507f1a7d47dd14b8e0e5defff8c96086e6857101b", "v", "search_path=pg_catalog,pg_temp", true},
+		{"authority_resource_registration_command_values_v2", "ba55237e2826a2f425437d0993210204ab578a04decf5f7bbdf91fbf3c45aa3b", "v", "search_path=pg_catalog,pg_temp", true},
 		{"resource_registration_command_apply", "164e53f2d7b9c9aff2b0c474a9782ef278c4b0cfd0aa1a2b101f9a7f9c2553fe", "v", "search_path=pg_catalog,kaname", false},
 		{"resource_registration_locks_writers", "296db8b4f26f47e0189ce71b01295d5e2ff8e5a8f40b8cdf9807fac347a787c0", "v", "search_path=pg_catalog,pg_temp", true},
 		{"relation_fact_fold_row", "d22d72ceba1dabe7edc7ff3c197c42ed92beacd87aed68add50aa99150a1d067", "v", "", false},
-		{"authority_resource_fold_body_v2", "3eb8735862b7643f353c9e10312c2fe9ca251489f875c1faf30289f3d166b5d9", "v", "search_path=pg_catalog,pg_temp", true},
+		{"authority_resource_fold_body_v2", "6be8def5de6ed9a89e95f50764835b8da6baa06ca26a053b84bb4d6279b38282", "v", "search_path=pg_catalog,pg_temp", true},
 		{"_authority_resource_unregistration_operation_acl_v2", "075c20b7bb9f2d06dec73df64186da0b9d4bcc500b99fcbc28ef9b4f21ce7fea", "i", "search_path=pg_catalog,pg_temp", true},
 	} {
 		var source, language, volatility string

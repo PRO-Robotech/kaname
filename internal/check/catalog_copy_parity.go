@@ -287,6 +287,12 @@ var catalogPendingEntries = []CatalogPendingEntry{
 		Removal: grantDelegationPendingRemoval,
 		Refs:    "PRO-Robotech/kaname#1032",
 	},
+	{
+		OwnFQN:  "kaname.cloud.iam.v1.InternalIAMService/CloseChildParent",
+		Why:     "внутренний RPC закрытия регистрации родителя объявлен контрактом Kaname (kaname#1045)",
+		Removal: "копия края содержит этот RPC после обновления пина Kaname и генерации каталога",
+		Refs:    "PRO-Robotech/kaname#1045",
+	},
 }
 
 const (
