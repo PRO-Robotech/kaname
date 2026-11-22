@@ -540,15 +540,9 @@ func TestFullProtocolReconcileDeltaMeasurements(t *testing.T) {
 			r.repo, _ = fullContractActivate(t, r)
 			engine := bindingStageEngine(t, r, nil)
 			run := func(label string) {
-				limit := 30 * time.Second
-				if size == 513 && label == "baseline" {
-					// Две проверки CI прерывали это измерение на 30 с, пока
-					// SQL продолжал писать результат. Измеряем полный baseline
-					// с конечным watchdog; фактическое время всё так же в отчёте.
-					limit = 45 * time.Second
-				}
-				ctx, cancel := fullMeasurementContextWithin(r.ctx, label, limit)
-				defer cancel()
+				// Замер фиксирует время завершённой операции. От зависания
+				// защищает общий предел тестового процесса.
+				ctx := context.WithValue(t.Context(), fullMeasurementLabel{}, label)
 				start := time.Now()
 				err := engine.ReconcileBinding(ctx, binding)
 				fullMeasurementReport(t, trace, label, time.Since(start), err == nil)

@@ -303,6 +303,7 @@ func rid11Start(t *testing.T, w *ridLifecycleWorld, c rid11Case, credential stri
 	return child
 }
 func rid11Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(f.given.ctx, 60*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -313,19 +314,24 @@ func rid11Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
 			t.Fatal("RID11 lawful startup exited before readiness")
 		default:
 		}
-		attempt, stop := context.WithTimeout(ctx, time.Second)
-		err := f.wire.ProductionReady(attempt)
-		stop()
-		if err == nil {
+		if !c.seenEvent {
+			attempt, stop := context.WithTimeout(ctx, time.Second)
+			err := f.wire.ProductionReady(attempt)
+			stop()
+			c.seenEvent = err == nil
+		}
+		// Снимок публичной фазы берём после записи обеих проекций
+		// ролей именно этим запущенным процессом.
+		if c.seenEvent && ridCatalogRoleProjectionsReady(filepath.Join(c.dir, "stdout")) == nil {
+			require.NoError(t, ctx.Err())
 			break
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("RID11 readiness deadline")
+			t.Fatal("RID11: запуск или пересчёт проекций ролей не завершился")
 		case <-ticker.C:
 		}
 	}
-	c.seenEvent = true
 	require.NoError(t, installruntime.CheckOwnedListeners(c.cmd.Process.Pid, c.dir, installruntime.DefaultNativePorts().All()...))
 }
 
