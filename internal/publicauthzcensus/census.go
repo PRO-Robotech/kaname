@@ -79,6 +79,7 @@ import (
 	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/check"
 	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
@@ -548,6 +549,18 @@ func collectFromDirs(protoDirs []string, cmdDir, root string) (Census, error) {
 				if !deciderResolved {
 					c.Unresolved = append(c.Unresolved, rpc)
 					continue
+				}
+				if reason == reasonHandlerDecides && svc == "ChildRegistrationService" && m == "Register" {
+					// Вопрос о праве на родителе входит в транзакцию. Для этой
+					// операции проверяем провязку от слушателя до вопроса в RR.
+					deciderEvidence = ""
+					if relPkg == "internal/apps/kaname/api/child_registration" && filepath.Clean(cmdDir) == filepath.Join(root, "cmd", "kaname") {
+						proof, proofErr := check.CensusChildRegistrationQuestion(root)
+						if proofErr != nil {
+							return c, fmt.Errorf("путь регистрации потомка: %w", proofErr)
+						}
+						deciderEvidence = proof
+					}
 				}
 				if deciderEvidence == "" {
 					c.Verdicts = append(c.Verdicts, Verdict{
