@@ -216,9 +216,9 @@ func confirmResourceChildPolicy(row resourceCatalogRow, policy catalog.ChildRegi
 		physical.ObjectType != row.identity.ObjectType || physical.Rule == nil {
 		return kaname.ErrSourceUnconfirmed
 	}
-	expected := catalog.ChildRegistrationRule{Verb: policy.Verb, ParentSegments: int32(policy.Path.ParentSegments),
-		MaxChildren: policy.MaxChildren, MaxCreates: policy.MaxCreates, WindowSeconds: policy.WindowSeconds}
-	if *physical.Rule != expected {
+	rule := physical.Rule
+	if rule.Verb != policy.Verb || int(rule.ParentSegments) != policy.Path.ParentSegments ||
+		rule.MaxChildren != policy.MaxChildren || rule.MaxCreates != policy.MaxCreates || rule.WindowSeconds != policy.WindowSeconds {
 		return kaname.ErrSourceUnconfirmed
 	}
 	pointer, ok := row.policy.Pointer("parent")
