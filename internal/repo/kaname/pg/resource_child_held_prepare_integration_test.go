@@ -17,10 +17,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func childHeldPreparationFixture(t *testing.T) (protocolRig, json.RawMessage) {
+func childHeldPreparationFixture(t *testing.T, closed bool) (protocolRig, json.RawMessage) {
 	t.Helper()
 	r, owner, _, principal := childStageFixture(t)
 	ctx := operations.WithPrincipal(r.ctx, principal)
+	if closed {
+		_, err := r.admin.Exec(ctx, `INSERT INTO kaname.authority_child_parent_state(object_type,object_id,closed_at)
+ VALUES('childstage.container','container-one',clock_timestamp())`)
+		require.NoError(t, err)
+	}
 	require.NoError(t, owner.PrepareAuthorityBundle(ctx, r.bundle))
 	fullContractActivate(t, r)
 	tx, err := r.runtime.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
@@ -36,7 +41,7 @@ func childHeldPreparationFixture(t *testing.T) (protocolRig, json.RawMessage) {
 }
 
 func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing.T) {
-	r, envelope := childHeldPreparationFixture(t)
+	r, envelope := childHeldPreparationFixture(t, false)
 	identity := r.bundle.Identity()
 	open := func(t *testing.T, profile string) pgx.Tx {
 		t.Helper()
@@ -143,6 +148,41 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		})
 		refuses(t, "resource_source_pending", payload, "42501")
 	})
+	t.Run("select rejects changed private witness without binding a slot", func(t *testing.T) {
+		tx := open(t, "resource_source_pending")
+		prepared, _, _, err := hold(tx, envelope)
+		require.NoError(t, err)
+		var changed map[string]any
+		require.NoError(t, json.Unmarshal(prepared, &changed))
+		witness := changed["witness"].(map[string]any)
+		liveChildren, ok := witness["live_children"].(float64)
+		require.True(t, ok)
+		witness["live_children"] = liveChildren + 1
+		tampered, err := json.Marshal(changed)
+		require.NoError(t, err)
+		var before []byte
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_sequence_store_v3()`).Scan(&before))
+		var decisionAt time.Time
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT clock_timestamp()`).Scan(&decisionAt))
+		_, err = tx.Exec(r.ctx, `SAVEPOINT child_select_tamper`)
+		require.NoError(t, err)
+		var result []byte
+		err = tx.QueryRow(r.ctx, `SELECT kaname._authority_child_registration_select_v1($1::jsonb,$2)`, tampered, decisionAt).Scan(&result)
+		var pe *pgconn.PgError
+		require.ErrorAs(t, err, &pe)
+		require.Equal(t, "42501", pe.Code)
+		_, err = tx.Exec(r.ctx, `ROLLBACK TO SAVEPOINT child_select_tamper`)
+		require.NoError(t, err)
+		var after []byte
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_sequence_store_v3()`).Scan(&after))
+		require.JSONEq(t, string(before), string(after), "подменённый prepared не меняет зарезервированную программу")
+		var sequence struct {
+			Selected json.RawMessage `json:"selected"`
+		}
+		require.NoError(t, json.Unmarshal(after, &sequence))
+		require.JSONEq(t, "null", string(sequence.Selected))
+		require.NoError(t, tx.Rollback(context.WithoutCancel(r.ctx)))
+	})
 	t.Run("signed source owner preserves fresh private witness", func(t *testing.T) {
 		tx := open(t, "resource_source_pending")
 		prepared, rows, reads, err := hold(tx, envelope)
@@ -191,6 +231,7 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		require.JSONEq(t, string(proposed.NativeEpochs), string(state.NativeEpochs))
 		var intent struct {
 			AuditID string `json:"audit_id"`
+			Actor   string `json:"actor"`
 		}
 		require.NoError(t, json.Unmarshal(proposed.Intent, &intent))
 		require.NotEmpty(t, intent.AuditID)
@@ -345,6 +386,135 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		require.NoError(t, tx.QueryRow(r.ctx, `SELECT EXISTS(SELECT 1 FROM kaname.resource_mirror
  WHERE object_type='childstage.child' AND object_id='container-one/candidate')`).Scan(&childExists))
 		require.False(t, childExists, "hold готовит источники, но ещё не исполняет создание")
+		// Единственное время решения берём у PostgreSQL после всех проверок
+		// hold. Выбор программы связывает уже зарезервированный journal slot.
+		var decisionAt time.Time
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT clock_timestamp()`).Scan(&decisionAt))
+		var resultRaw []byte
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_child_registration_select_v1($1::jsonb,$2)`, prepared, decisionAt).Scan(&resultRaw))
+		var result struct {
+			Outcome       string    `json:"outcome"`
+			SourceVersion time.Time `json:"source_version"`
+			Receipt       struct {
+				UserID        string    `json:"user_id"`
+				CreatedAt     time.Time `json:"created_at"`
+				SourceVersion time.Time `json:"source_version"`
+			} `json:"receipt"`
+			Audit struct {
+				ID      string `json:"id"`
+				Payload struct {
+					Actor string `json:"actor"`
+				} `json:"event_payload"`
+			} `json:"audit"`
+			ParentWrite struct {
+				Journal json.RawMessage `json:"journal"`
+			} `json:"parent_write"`
+		}
+		require.NoError(t, json.Unmarshal(resultRaw, &result))
+		require.Equal(t, "create", result.Outcome)
+		require.True(t, decisionAt.Equal(result.SourceVersion), "новая версия этого ключа равна точному DecisionAt")
+		require.Equal(t, intent.Actor, result.Receipt.UserID)
+		require.True(t, decisionAt.Equal(result.Receipt.CreatedAt))
+		require.True(t, result.SourceVersion.Equal(result.Receipt.SourceVersion))
+		require.Equal(t, intent.AuditID, result.Audit.ID)
+		require.Equal(t, "user:"+intent.Actor, result.Audit.Payload.Actor)
+		require.NotEmpty(t, result.ParentWrite.Journal)
+		require.NotEqual(t, "null", string(result.ParentWrite.Journal))
+		var selectedRaw []byte
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_sequence_store_v3()`).Scan(&selectedRaw))
+		var bound struct {
+			Selected []struct {
+				Table      string          `json:"table"`
+				Ordinal    int             `json:"ordinal"`
+				ReservedID int64           `json:"reserved_id"`
+				Row        json.RawMessage `json:"row"`
+			} `json:"selected"`
+		}
+		require.NoError(t, json.Unmarshal(selectedRaw, &bound))
+		require.Len(t, bound.Selected, 1)
+		require.Equal(t, "fga_outbox", bound.Selected[0].Table)
+		require.Equal(t, fga.Ordinal, bound.Selected[0].Ordinal)
+		require.Equal(t, fga.ReservedID, bound.Selected[0].ReservedID, "выбор сохраняет ранее зарезервированный ID")
+		require.JSONEq(t, string(result.ParentWrite.Journal), string(bound.Selected[0].Row))
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT EXISTS(SELECT 1 FROM kaname.fga_outbox WHERE id=$1)`, fga.ReservedID).Scan(&fgaExists))
+		require.False(t, fgaExists, "select связывает программу; dispatcher ещё не записывал journal")
 		require.NoError(t, tx.Rollback(context.WithoutCancel(r.ctx)))
 	})
+}
+
+// Закрытый родитель остаётся зарегистрированным и имеет действующее право
+// пользователя. Отказ следует из owner-held состояния, а не из подмены RR.
+func TestUserChildHeldSelectionClosedParentHasNoCreationSlots(t *testing.T) {
+	r, envelope := childHeldPreparationFixture(t, true)
+	tx, err := r.admin.BeginTx(r.ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	require.NoError(t, err)
+	lifecycleRollback(t, tx)
+	identity := r.bundle.Identity()
+	_, err = tx.Exec(r.ctx, `SELECT kaname.authority_resource_source_enter_v3(
+ 'global',ARRAY[]::text[],'[]'::jsonb,$1,$2,$3)`, identity.ModelID, identity.CatalogID, identity.ProjectorVersion)
+	require.NoError(t, err)
+	var prepared []byte
+	var rows, reads int
+	require.NoError(t, tx.QueryRow(r.ctx, `SELECT prepared,logical_rows,logical_reads
+ FROM kaname._authority_child_registration_hold_v1($1::jsonb,100000,4096)`, envelope).Scan(&prepared, &rows, &reads))
+	require.Positive(t, rows)
+	require.Positive(t, reads)
+	require.LessOrEqual(t, rows, 100000)
+	require.LessOrEqual(t, reads, 4096)
+	var state struct {
+		Intent struct {
+			AuditID string `json:"audit_id"`
+		} `json:"intent"`
+		Witness struct {
+			ClosedAt *time.Time `json:"closed_at"`
+		} `json:"witness"`
+		Reservations struct {
+			AuditID string `json:"audit_id"`
+		} `json:"reservations"`
+	}
+	require.NoError(t, json.Unmarshal(prepared, &state))
+	require.NotNil(t, state.Witness.ClosedAt)
+	require.NotEmpty(t, state.Reservations.AuditID)
+	require.Equal(t, state.Intent.AuditID, state.Reservations.AuditID)
+	var auditHeld bool
+	require.NoError(t, tx.QueryRow(r.ctx, `SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_locks
+ WHERE pid=pg_backend_pid() AND locktype='relation' AND relation='kaname.audit_outbox'::regclass
+ AND mode='RowExclusiveLock' AND granted)`).Scan(&auditHeld))
+	require.True(t, auditHeld)
+	var before []byte
+	require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_sequence_store_v3()`).Scan(&before))
+	var sequence struct {
+		MaximumCount int             `json:"maximum_count"`
+		Maximum      json.RawMessage `json:"maximum"`
+		Selected     json.RawMessage `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal(before, &sequence))
+	require.Zero(t, sequence.MaximumCount)
+	require.JSONEq(t, "[]", string(sequence.Maximum))
+	require.JSONEq(t, "null", string(sequence.Selected))
+	var decisionAt time.Time
+	require.NoError(t, tx.QueryRow(r.ctx, `SELECT clock_timestamp()`).Scan(&decisionAt))
+	var resultRaw []byte
+	require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_child_registration_select_v1($1::jsonb,$2)`, prepared, decisionAt).Scan(&resultRaw))
+	var result map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(resultRaw, &result))
+	require.JSONEq(t, `"parent_closed"`, string(result["outcome"]))
+	require.JSONEq(t, "null", string(result["source_version"]))
+	require.NotContains(t, result, "receipt")
+	require.NotContains(t, result, "parent_write")
+	var after []byte
+	require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_sequence_store_v3()`).Scan(&after))
+	require.NoError(t, json.Unmarshal(after, &sequence))
+	require.Zero(t, sequence.MaximumCount)
+	require.JSONEq(t, "[]", string(sequence.Maximum))
+	require.JSONEq(t, "[]", string(sequence.Selected))
+	var fgaExists, receiptExists, auditExists bool
+	require.NoError(t, tx.QueryRow(r.ctx, `SELECT
+ EXISTS(SELECT 1 FROM kaname.fga_outbox WHERE payload->>'object'='childstage_child:container-one/candidate'),
+ EXISTS(SELECT 1 FROM kaname.authority_child_creation WHERE child_type='childstage.child' AND child_id='container-one/candidate'),
+ EXISTS(SELECT 1 FROM kaname.audit_outbox WHERE id=$1)`, state.Reservations.AuditID).Scan(&fgaExists, &receiptExists, &auditExists))
+	require.False(t, fgaExists)
+	require.False(t, receiptExists)
+	require.False(t, auditExists, "аудит пока только зарезервирован; dispatcher не исполнялся")
+	require.NoError(t, tx.Rollback(context.WithoutCancel(r.ctx)))
 }

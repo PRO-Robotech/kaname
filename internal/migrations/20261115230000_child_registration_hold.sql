@@ -45,7 +45,8 @@ DECLARE
  source_index jsonb; parent_row jsonb; child_row jsonb; parent_scope jsonb; child_scope jsonb;
  parent_state jsonb; child_state jsonb; required jsonb; scope jsonb; candidates jsonb; maximum jsonb;
  covered_accounts jsonb:='{}'::jsonb; parent_witness jsonb; held_source_index jsonb;
- binding_plan jsonb; reservations jsonb:='{}'::jsonb; held_relations jsonb:='[]'::jsonb; held_advisory jsonb;
+ binding_plan jsonb; reservations jsonb; held_relations jsonb:='[]'::jsonb; held_advisory jsonb;
+ sequence_maximum jsonb:='[]'::jsonb; incarnation uuid;
  parent_type text; parent_model text; parent_id text; child_type text; child_model text; child_id text;
  parts text[]; segments integer; kind integer; mirror_key text;
 BEGIN
@@ -219,13 +220,17 @@ BEGIN
  END IF;
  logical_rows:=logical_rows+captured.logical_rows;
  logical_reads:=logical_reads+captured.logical_reads;
+ -- Резервируем ID для внутреннего аудита отказа, даже если создание уже
+ -- недоступно. Успешный повтор оставит этот резерв неиспользованным.
+ SELECT * INTO STRICT audit_result FROM kaname._authority_resource_audit_wait_v2(
+  jsonb_build_object(intent->>'audit_id',true),p_rows-logical_rows,p_reads-logical_reads);
+ logical_rows:=logical_rows+audit_result.logical_rows;
+ logical_reads:=logical_reads+audit_result.logical_reads;
+ held_advisory:=held_advisory||audit_result.lock_witness;
+ reservations:=jsonb_build_object('audit_id',intent->'audit_id');
  IF candidates IS NOT NULL AND captured.witness->>'closed_at' IS NULL THEN
-  -- Канонические helpers удерживают audit ID, очередь пересчёта и отношения
+  -- Канонические helpers удерживают очередь пересчёта и отношения
   -- до выбора версии. Слот outbox получает точный payload после выбора версии.
-  SELECT * INTO STRICT audit_result FROM kaname._authority_resource_audit_wait_v2(
-   jsonb_build_object(intent->>'audit_id',true),p_rows-logical_rows,p_reads-logical_reads);
-  logical_rows:=logical_rows+audit_result.logical_rows;
-  logical_reads:=logical_reads+audit_result.logical_reads;
   SELECT * INTO STRICT reconcile_result FROM kaname._authority_resource_reconcile_wait_v2(1,p_reads-logical_reads);
   logical_reads:=logical_reads+reconcile_result.logical_reads;
   SELECT * INTO STRICT relations_result FROM kaname._authority_resource_physical_relations_wait_v2(
@@ -241,15 +246,15 @@ BEGIN
   held_relations:=held_relations||relations_result.lock_witness||reconcile_result.held_relations||jsonb_build_array(
    jsonb_build_object('oid','kaname.authority_child_parent_state'::regclass::oid,'mode','RowExclusiveLock'),
    jsonb_build_object('oid','kaname.authority_child_creation'::regclass::oid,'mode','RowExclusiveLock'));
-  held_advisory:=held_advisory||audit_result.lock_witness||reconcile_result.held_advisory;
-  logical_reads:=logical_reads+kaname._authority_sequence_reserve_v3('resource',
-   jsonb_build_array(jsonb_build_object('table','fga_outbox','ordinal',1,
+  held_advisory:=held_advisory||reconcile_result.held_advisory;
+  IF captured.witness->>'parent_incarnation' IS NULL THEN
+   incarnation:=gen_random_uuid();
+  END IF;
+  sequence_maximum:=jsonb_build_array(jsonb_build_object('table','fga_outbox','ordinal',1,
     'origin',jsonb_build_object('family','resource.registration','ordinal',1),
-    'row','{}'::jsonb,'stamp','transaction')),p_reads-logical_reads);
-  PERFORM kaname._authority_sequence_freeze_v3(jsonb_build_object('kind','child_registration',
-   'intent',intent,'tuple',candidates#>'{certificate,tuple}'));
-  reservations:=jsonb_build_object('audit_id',intent->'audit_id',
-   'reconcile_ids',reconcile_result.reserved_ids,'fga_slot',1);
+    'row','{}'::jsonb,'stamp','transaction'));
+  reservations:=reservations||jsonb_build_object(
+   'reconcile_ids',reconcile_result.reserved_ids,'fga_slot',1,'parent_incarnation',incarnation);
  END IF;
  SELECT jsonb_object_agg(key,source_index->key) INTO held_source_index FROM jsonb_object_keys(required) key;
  prepared:=jsonb_build_object('intent',intent,'witness',captured.witness,'native_epochs',checked_epochs,
@@ -257,6 +262,15 @@ BEGIN
   'maximum',maximum,'epoch_witness',epoch_result.lock_witness,'required',required,
   'source_index',held_source_index,'catalog',bundle_result.catalog,'catalog_rows',catalog_result.catalog_rows,
   'held_advisory',held_advisory,'held_relations',held_relations,'reservations',reservations);
+ IF octet_length(prepared::text)>67108864 THEN
+  RAISE EXCEPTION 'child registration held program exceeded' USING ERRCODE='54000';
+ END IF;
+ -- Закрытое хранилище того же backend/xid/nonce связывает весь результат
+ -- prewait, в том числе отказ или повтор без слота записи.
+ logical_reads:=logical_reads+kaname._authority_sequence_reserve_v3('resource',sequence_maximum,p_reads-logical_reads);
+ PERFORM kaname._authority_sequence_freeze_v3(jsonb_build_object('kind','child_registration',
+  'intent',intent,'tuple',candidates#>'{certificate,tuple}',
+  'prepared_digest',encode(sha256(convert_to(prepared::text,'UTF8')),'hex')));
  RETURN NEXT;
 END $$;
 -- +goose StatementEnd
