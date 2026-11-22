@@ -32,7 +32,7 @@
 # тип не резолвится краем — вопрос о нём не задаётся вовсе, а проверка выглядит
 # пройденной. Копией репозитория это НЕ является (ban #20): файл не лежит в дереве
 # платформы и не отслеживается им — он кладётся В ПРОГОНЕ, в выборку, которая
-# живёт минуты и никуда не отправляется. `git add` обязателен: перечень
+# живёт минуты и никуда не отправляется. Запись в индекс обязательна: перечень
 # манифестов сверка канона берёт у ИНДЕКСА, а не обходом диска, и
 # неотслеживаемый файл не был бы найден — молча.
 #
@@ -108,8 +108,12 @@ runs:
         OWN_MANIFEST: ${{ inputs.own-manifest }}
       run: |
         set -euo pipefail
+        manifest="services/$MODULE/manifest.yaml"
         mkdir -p "$TREE/services/$MODULE"
-        cp "$OWN_MANIFEST" "$TREE/services/$MODULE/manifest.yaml"
-        git -C "$TREE" add "services/$MODULE/manifest.yaml"
+        cp "$OWN_MANIFEST" "$TREE/$manifest"
+        # В индексе разрежённого клона могут оставаться ссылки на незагруженные
+        # blobs. Записываем точные байты своего файла без фильтров чужого дерева.
+        blob=$(git -C "$TREE" hash-object -w --no-filters -- "$manifest")
+        git -C "$TREE" update-index --add --cacheinfo 100644 "$blob" "$manifest"
         echo "манифестов в операнде: $(git -C "$TREE" ls-files 'services/*/manifest.yaml' | wc -l)"
         echo "root=$TREE" >> "$GITHUB_OUTPUT"
