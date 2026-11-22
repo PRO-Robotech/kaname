@@ -891,7 +891,8 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                                                  (7, "resource_journal"), (9, "resource_reconcile_outbox"))
                             },
                         }
-                if (root_test in (CASES["registry-installation-rid07"][0], CASES["registry-installation-rid11"][0])
+                if (root_test in (CASES["registry-installation-rid06"][0], CASES["registry-installation-rid07"][0],
+                                  CASES["registry-installation-rid11"][0])
                         and action == "output" and isinstance(name, str) and name in known
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):

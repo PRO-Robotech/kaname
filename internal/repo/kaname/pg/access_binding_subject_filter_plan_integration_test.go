@@ -141,15 +141,20 @@ func seedSubjectPlanFixture(t *testing.T) subjectPlanFixture {
 	}
 
 	const userPrefix, bindingPrefix = "usr-sbjpln-", "acb-sbjpln-"
-	// Люди фиксируются отдельно: journal keys не живут до конца всего посева.
-	subjectPlanSeedTransaction(t, pool, "посев людей", func(batchCtx context.Context, tx pgx.Tx) error {
-		_, seedErr := tx.Exec(batchCtx, activewayin.WithWayIn(`
+	// Люди, как и выдачи, фиксируются короткими TX: journal keys не живут
+	// до конца всего посева, а один INSERT не собирает guards всех 2000 людей.
+	const peopleBatch = 128
+	for first := 1; first <= subjectPlanPeople; first += peopleBatch {
+		last := min(first+peopleBatch-1, subjectPlanPeople)
+		subjectPlanSeedTransaction(t, pool, fmt.Sprintf("посев людей %d–%d", first, last), func(batchCtx context.Context, tx pgx.Tx) error {
+			_, seedErr := tx.Exec(batchCtx, activewayin.WithWayIn(`
 		INSERT INTO kaname.users (id, account_id, external_id, email, display_name, invite_status)
 		SELECT $1 || lpad(i::text, 6, '0'), $2, $1 || lpad(i::text, 6, '0'),
 		       $1 || lpad(i::text, 6, '0') || '@kacho.local', 'p', 'ACTIVE'
-		  FROM generate_series(1, $3::int) AS i`), userPrefix, string(acc.ID), subjectPlanPeople)
-		return seedErr
-	})
+		  FROM generate_series($3::int, $4::int) AS i`), userPrefix, string(acc.ID), first, last)
+			return seedErr
+		})
+	}
 
 	// Общий объём прежний. Короткая TX ограничивает удерживаемые journal locks;
 	// statement_timeout пула не отключается. Глобальный i сохраняет IDs и роли.
