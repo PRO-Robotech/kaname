@@ -441,6 +441,32 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_resource_registration_command_values_v2(p_input jsonb) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;certificate jsonb;step jsonb;expected jsonb;
+BEGIN
+ manifest:=kaname._authority_producer_resource_v2();IF manifest IS NULL THEN RETURN NULL;END IF;
+ IF manifest->'intent'->>'kind'='child_registration' THEN
+  certificate:=manifest#>'{registration_body,selected,certificate}';
+  expected:=certificate->'command';
+ ELSIF manifest->'intent'->>'Action'='1' THEN
+  certificate:=manifest->'registration_certificate';
+  expected:=certificate->'input_command';
+ END IF;
+ step:=manifest#>'{registration_program,commands}'->((manifest->>'object_command')::integer-1);
+ IF jsonb_typeof(expected) IS DISTINCT FROM 'object'
+ OR manifest->>'registration_program_claimed' IS DISTINCT FROM 'true'
+ OR step->>'kind' IS DISTINCT FROM 'mirror'
+ OR p_input IS DISTINCT FROM expected
+ OR jsonb_typeof(step->'applied') IS DISTINCT FROM 'boolean'
+ OR jsonb_typeof(step->'projection_unchanged') IS DISTINCT FROM 'boolean' THEN
+  RAISE EXCEPTION 'canonical registration command differs from current private step' USING ERRCODE='42501';END IF;
+ RETURN jsonb_build_object('command',certificate->'command','catalog',certificate->'catalog',
+  'applied',step->'applied','projection_unchanged',step->'projection_unchanged');
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname._authority_crud_storage_v3() RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE expected record;owner_oid oid;trigger_counts jsonb;trigger_count bigint;
@@ -527,6 +553,7 @@ BEGIN
  ('_authority_crud_command_v3(text,jsonb)','c5002541ff2bbabedbcd9d74b6adc04b13a6a36833eefd1631f875d47652eb75',true,'i',true,'private'),
  ('_authority_crud_structural_v3(text,text,text,text)','00d37afb9a7b7c9d4534df79f313c14e13fc16a1756d368d85ca2e5f4d939c13',true,'i',true,'private'),
  ('_authority_crud_command_plan_v3(jsonb,jsonb)','ea252acb7bcebc7c96da591416609deb3b606d01eeda6a3a32e911a0e77af3d1',true,'i',true,'private'),
+ ('authority_resource_registration_command_values_v2(jsonb)','ba55237e2826a2f425437d0993210204ab578a04decf5f7bbdf91fbf3c45aa3b',true,'v',true,'preserve'),
  ('authority_resource_assert_body_v2(jsonb)','4c7219a426a0bb4682fc85dea9806123101be986db4adf98844f1f416b997eb4',true,'v',true,'preserve'),
  ('_authority_resource_require_completion_v2()','31855e0f86620b4cc69389b4a7da1055108ca98741fa61b7948d0ba5773da223',true,'v',true,'preserve'),
  ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','6be8def5de6ed9a89e95f50764835b8da6baa06ca26a053b84bb4d6279b38282',true,'v',true,'preserve'),
@@ -1219,7 +1246,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','b3efa1dc5e04015eeef91c01115f174a6b4581c7f96c0553f0e2b24af2ae87d7',true),
+ ('_authority_crud_storage_v3()','70b259a8cd67efda198bd603b13dddd25fe91c0df5d8fceada0b39f2d1932a3b',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -1656,6 +1683,26 @@ BEGIN
   RAISE EXCEPTION 'authority truncate or parent cascade requires global intent' USING ERRCODE='42501';
  END IF;
  RETURN NULL;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_resource_registration_command_values_v2(p_input jsonb) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb;certificate jsonb;step jsonb;
+BEGIN
+ manifest:=kaname._authority_producer_resource_v2();IF manifest IS NULL THEN RETURN NULL;END IF;
+ certificate:=manifest->'registration_certificate';
+ step:=manifest#>'{registration_program,commands}'->((manifest->>'object_command')::integer-1);
+ IF manifest->'intent'->>'Action' IS DISTINCT FROM '1'
+ OR manifest->>'registration_program_claimed' IS DISTINCT FROM 'true'
+ OR step->>'kind' IS DISTINCT FROM 'mirror'
+ OR p_input IS DISTINCT FROM certificate->'input_command'
+ OR jsonb_typeof(step->'applied') IS DISTINCT FROM 'boolean'
+ OR jsonb_typeof(step->'projection_unchanged') IS DISTINCT FROM 'boolean' THEN
+  RAISE EXCEPTION 'canonical registration command differs from current private step' USING ERRCODE='42501';END IF;
+ RETURN jsonb_build_object('command',certificate->'command','catalog',certificate->'catalog',
+  'applied',step->'applied','projection_unchanged',step->'projection_unchanged');
 END $$;
 -- +goose StatementEnd
 

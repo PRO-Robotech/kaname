@@ -5,6 +5,7 @@ package pg
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
@@ -105,7 +107,21 @@ func AbortIncompleteUserChildBodyProbe(t *testing.T, ctx context.Context, conn *
 	t.Helper()
 	_, proposal, tx := prepareUserChildBodyProbe(t, ctx, conn, bundle, input, principal)
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	_, err := tx.Exec(ctx, `SELECT kaname._authority_child_registration_begin_body_v1($1::jsonb)`, proposal.intent)
+	var raw []byte
+	require.NoError(t, tx.QueryRow(ctx, `SELECT kaname._authority_child_registration_begin_body_v1($1::jsonb)`, proposal.intent).Scan(&raw))
+	var body resourceChildBodyValues
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.Equal(t, "create", body.Outcome)
+	require.NoError(t, tx.QueryRow(ctx, `SELECT kaname._authority_child_registration_step_v1(1)`).Scan(&raw))
+	var step resourceRegistrationCommand
+	require.NoError(t, json.Unmarshal(raw, &step))
+	require.Equal(t, "mirror", step.Kind)
+	row := body.Certificate.Command
+	applied, _, err := NewResourceMirrorEmitter().UpsertTx(ctx, tx, service.ResourceMirrorRow{
+		ObjectType: row.DottedType, ObjectID: row.ObjectID, ParentProjectID: row.ParentProjectID,
+		ParentAccountID: row.ParentAccountID, ParentChain: row.ParentChain, Labels: row.Labels, SourceVersion: row.SourceVersion,
+	})
 	require.NoError(t, err)
+	require.True(t, applied, "до попытки commit выполнена реальная запись зеркала")
 	require.Error(t, tx.Commit(ctx), "незавершённое тело обязано отвергать commit")
 }
