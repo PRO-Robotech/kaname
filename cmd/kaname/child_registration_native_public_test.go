@@ -191,15 +191,15 @@ func requireNativeChildReadOnlyDenials(t *testing.T, f *installationNativeWorld,
 		}}},
 	}, 0))
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
-		var materialized int
-		require.NoError(c, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*)
- FROM kaname.access_binding_emitted_tuples e JOIN kaname.relation_fact f
- ON f.object_type='registry_child_probe_container' AND f.object_id=$2
- AND f.relation=e.relation AND f.subject=e.fga_user
- WHERE e.binding_id=$1 AND e.fga_user=$3 AND e.relation='v_get'
- AND e.object='registry_child_probe_container:'||$2 AND e.source='member'`,
-			binding, parent, "user:"+reader.UserID()).Scan(&materialized))
-		require.Positive(c, materialized, "право чтения материализовано именно публичной привязкой")
+		var emitted bool
+		// Обычный v_get остаётся в журнале выдачи. Native Check разрешает
+		// его через живой источник права без прямой строки relation_fact.
+		require.NoError(c, f.given.pool.QueryRow(f.given.ctx, `SELECT EXISTS (
+ SELECT 1 FROM kaname.access_binding_emitted_tuples
+ WHERE binding_id=$1 AND fga_user=$3 AND relation='v_get'
+ AND object='registry_child_probe_container:'||$2 AND source='member')`,
+			binding, parent, "user:"+reader.UserID()).Scan(&emitted))
+		require.True(c, emitted, "выдача v_get относится именно к созданной публичной привязке")
 		require.True(c, check(c, ""), "настоящий bearer получает get именно родителя")
 	}, 30*time.Second, 50*time.Millisecond)
 	require.False(t, check(t, "child_registrar"), "read-only не даёт отдельного глагола создания")
