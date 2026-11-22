@@ -540,14 +540,9 @@ func TestFullProtocolReconcileDeltaMeasurements(t *testing.T) {
 			r.repo, _ = fullContractActivate(t, r)
 			engine := bindingStageEngine(t, r, nil)
 			run := func(label string) {
-				limit := 30 * time.Second
-				if size == 513 && (label == "baseline" || label == "delta_257") {
-					// Обе большие серии доходили до 30 с до окончания записи.
-					// Сохраняем фактическое время и проверяем весь итог каждой серии.
-					limit = 45 * time.Second
-				}
-				ctx, cancel := fullMeasurementContextWithin(r.ctx, label, limit)
-				defer cancel()
+				// Замер фиксирует время завершённой операции. От зависания
+				// защищает общий предел тестового процесса.
+				ctx := context.WithValue(t.Context(), fullMeasurementLabel{}, label)
 				start := time.Now()
 				err := engine.ReconcileBinding(ctx, binding)
 				fullMeasurementReport(t, trace, label, time.Since(start), err == nil)

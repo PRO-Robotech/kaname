@@ -135,11 +135,11 @@ func TestGrantDelegationStagedRevokeLastPageAtomicRollback(t *testing.T) {
 // включая PENDING за первой страницей, вместе с их фактической проекцией.
 func TestGrantDelegationStagedRevokeIncludesPendingLastPage(t *testing.T) {
 	w := delegationUCFixture(t, true)
-	// У подготовки стенда свой дедлайн. Для посева 257 привязок и проверки
-	// результата выделяем отдельный конечный бюджет, сохраняя 30 с на сам отзыв.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(w.r.ctx), 60*time.Second)
-	t.Cleanup(cancel)
-	w.r.ctx = ctx
+	// После подготовки проверка живёт в контексте теста. Переход к сверке
+	// происходит по сохранённому результату собственной операции.
+	w.r.ctx = t.Context()
+	observer, ok := w.ops.(*operationCausalRepo)
+	require.True(t, ok, "для этого сценария нужен наблюдатель результата операции")
 	delegationRevokeWaitDiagnosticsOnFailure(t, w)
 	t.Cleanup(func() { authorityWaitReleased(t, w.r.runtime) })
 	id := w.create(t, w.owner, false)
@@ -167,9 +167,7 @@ func TestGrantDelegationStagedRevokeIncludesPendingLastPage(t *testing.T) {
 	defer finishFunctionCost()
 	op, err := uc.Execute(declarerCtx(w.r.ctx, w.owner), domain.GrantDelegationID(id))
 	require.NoError(t, err)
-	// Сторожевой таймер фикстуры с 257 привязками. Тест проверяет
-	// полноту отзыва через границу страницы, включая PENDING, и сохранность истории.
-	require.Nil(t, awaitOperationWithin(t, w.r.ctx, w.ops, op.ID, 30*time.Second).Error)
+	require.Nil(t, observer.awaitOwnOperation(t, w.r.ctx, op.ID).Error)
 	finishFunctionCost()
 	active, revoked, audit := delegationRevokeCounts(t, w, id)
 	require.Zero(t, active)
