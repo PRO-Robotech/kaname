@@ -5,6 +5,7 @@ package internal_iam
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -15,126 +16,85 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
-type userChildRegistrationTxStub struct {
-	steps    []string
-	input    kaname.UserChildRegistrationInput
-	intent   kaname.UserChildRegistrationInput
-	caller   operations.Principal
-	policy   domain.UserChildPathPolicy
-	target   domain.UserChildRegistrationTarget
-	question [3]string
-	actor    operations.Principal
-	version  time.Time
-	allowed  bool
-	applyErr error
-	commits  int
+type userChildRegistrationRunnerStub struct {
+	input   kaname.UserChildRegistrationInput
+	caller  operations.Principal
+	version time.Time
+	err     error
+	calls   int
 }
 
-func (s *userChildRegistrationTxStub) RunUserChildRegistration(
-	ctx context.Context, input kaname.UserChildRegistrationInput, caller operations.Principal,
-	run func(context.Context, kaname.UserChildRegistrationTx) (time.Time, error),
-) (time.Time, error) {
-	s.intent, s.caller = input, caller
-	version, err := run(ctx, s)
-	if err == nil {
-		s.commits++
-	}
-	return version, err
+func (s *userChildRegistrationRunnerStub) RunUserChildRegistration(_ context.Context, input kaname.UserChildRegistrationInput, caller operations.Principal) (time.Time, error) {
+	s.input, s.caller = input, caller
+	s.calls++
+	return s.version, s.err
 }
 
-func (s *userChildRegistrationTxStub) ResolveUserChildRegistration(
-	_ context.Context, input kaname.UserChildRegistrationInput,
-) (domain.UserChildRegistrationTarget, error) {
-	s.steps = append(s.steps, "resolve")
-	s.input = input
-	target, err := s.policy.Resolve(input.ResourceID)
-	s.target = target
-	return target, err
-}
-
-func (s *userChildRegistrationTxStub) Check(_ context.Context, subject, relation, object string) (bool, error) {
-	s.steps = append(s.steps, "check")
-	s.question = [3]string{subject, relation, object}
-	return s.allowed, nil
-}
-
-func (s *userChildRegistrationTxStub) ApplyUserChildRegistration(
-	_ context.Context, target domain.UserChildRegistrationTarget, actor operations.Principal,
-) (time.Time, error) {
-	s.steps = append(s.steps, "apply")
-	s.actor = actor
-	if target != s.target {
-		return time.Time{}, domain.ErrUserChildRegistrationRefused
-	}
-	return s.version, s.applyErr
-}
-
-func TestUserChildRegistrationAuthorizesServerParentBeforeApplying(t *testing.T) {
+func TestUserChildRegistrationPassesOnlyImmutableIntentAndVerifiedHuman(t *testing.T) {
 	p := operations.Principal{Type: "user", ID: "usr-actor"}
 	ctx := operations.WithPrincipal(t.Context(), p)
 	input := kaname.UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "container/namespace/child"}
-	fixture := &userChildRegistrationTxStub{
-		policy:  domain.UserChildPathPolicy{ChildType: "registry_repository", ParentType: "registry_registry", ParentAction: "v_create", ParentSegments: 1},
-		version: time.Unix(100, 0),
-		allowed: true,
-	}
-	uc := NewUserChildRegistration(fixture)
-	version, err := uc.Register(ctx, input)
+	fixture := &userChildRegistrationRunnerStub{version: time.Unix(100, 0)}
+	version, err := NewUserChildRegistration(fixture).Register(ctx, input)
 	require.NoError(t, err)
 	require.Equal(t, fixture.version, version)
-	require.Equal(t, []string{"resolve", "check", "apply"}, fixture.steps)
 	require.Equal(t, input, fixture.input)
-	require.Equal(t, input, fixture.intent)
 	require.Equal(t, p, fixture.caller)
-	require.Equal(t, [3]string{"user:usr-actor", "v_create", "registry_registry:container"}, fixture.question)
-	require.Equal(t, p, fixture.actor)
-	require.Equal(t, 1, fixture.commits)
+	require.Equal(t, 1, fixture.calls)
 }
 
 func TestUserChildRegistrationUsesOnePublicRefusal(t *testing.T) {
 	ctx := operations.WithPrincipal(t.Context(), operations.Principal{Type: "user", ID: "usr-actor"})
 	input := kaname.UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "parent/child"}
-	fixture := &userChildRegistrationTxStub{
-		policy:   domain.UserChildPathPolicy{ChildType: "registry_repository", ParentType: "registry_registry", ParentAction: "v_create", ParentSegments: 1},
-		applyErr: domain.ErrUserChildRegistrationRefused,
-	}
+	fixture := &userChildRegistrationRunnerStub{version: time.Unix(100, 0), err: domain.ErrUserChildRegistrationRefused}
 	uc := NewUserChildRegistration(fixture)
 	want := status.Convert(authzguard.PermissionDenied()).Proto()
-
 	version, err := uc.Register(ctx, input)
 	require.True(t, version.IsZero())
 	require.Equal(t, want, status.Convert(err).Proto())
-	require.Equal(t, []string{"resolve", "check"}, fixture.steps)
+	require.Equal(t, 1, fixture.calls)
 
-	fixture.allowed, fixture.steps = true, nil
-	version, err = uc.Register(ctx, input)
-	require.True(t, version.IsZero())
-	require.Equal(t, want, status.Convert(err).Proto())
-	require.Equal(t, []string{"resolve", "check", "apply"}, fixture.steps)
-
-	fixture.steps = nil
-	service := operations.WithPrincipal(t.Context(), operations.Principal{Type: "service_account", ID: "sa-caller"})
-	version, err = uc.Register(service, input)
-	require.True(t, version.IsZero())
-	require.Equal(t, want, status.Convert(err).Proto())
-	require.Empty(t, fixture.steps)
+	for _, principal := range []operations.Principal{{}, {Type: "service_account", ID: "sa-caller"}} {
+		version, err = uc.Register(operations.WithPrincipal(t.Context(), principal), input)
+		require.True(t, version.IsZero())
+		require.Equal(t, want, status.Convert(err).Proto())
+	}
+	require.Equal(t, 1, fixture.calls, "непроверенный человек не открывает runner")
 }
 
-func TestUserChildRegistrationMissingVersionAbortsBeforeCommit(t *testing.T) {
+func TestUserChildRegistrationMissingCommittedVersionIsUnavailable(t *testing.T) {
 	ctx := operations.WithPrincipal(t.Context(), operations.Principal{Type: "user", ID: "usr-actor"})
-	input := kaname.UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "parent/child"}
-	fixture := &userChildRegistrationTxStub{
-		policy:  domain.UserChildPathPolicy{ChildType: "registry_repository", ParentType: "registry_registry", ParentAction: "v_create", ParentSegments: 1},
-		allowed: true,
-	}
-	version, err := NewUserChildRegistration(fixture).Register(ctx, input)
+	fixture := &userChildRegistrationRunnerStub{}
+	version, err := NewUserChildRegistration(fixture).Register(ctx, kaname.UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "parent/child"})
 	require.True(t, version.IsZero())
 	require.Equal(t, status.Convert(authzguard.AuthzBackendUnavailable()).Proto(), status.Convert(err).Proto())
-	require.Equal(t, []string{"resolve", "check", "apply"}, fixture.steps)
-	require.Zero(t, fixture.commits)
+	require.Equal(t, 1, fixture.calls)
+}
+
+func TestUserChildRegistrationPreservesBackendAndContextFailures(t *testing.T) {
+	ctx := operations.WithPrincipal(t.Context(), operations.Principal{Type: "user", ID: "usr-actor"})
+	input := kaname.UserChildRegistrationInput{ResourceType: "registry.repositories", ResourceID: "parent/child"}
+	backend := errors.New("backend failed")
+	for _, cause := range []error{backend, iamerr.ErrAborted,
+		errors.Join(iamerr.ErrUnavailable, domain.ErrUserChildRegistrationRefused, backend),
+		errors.Join(context.Canceled, domain.ErrUserChildRegistrationRefused),
+	} {
+		fixture := &userChildRegistrationRunnerStub{version: time.Unix(100, 0), err: cause}
+		version, err := NewUserChildRegistration(fixture).Register(ctx, input)
+		require.True(t, version.IsZero())
+		require.ErrorIs(t, err, cause)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	fixture := &userChildRegistrationRunnerStub{}
+	version, err := NewUserChildRegistration(fixture).Register(canceled, input)
+	require.True(t, version.IsZero())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, fixture.calls)
 }
 
 func TestUserChildRegistrationPathUsesDeclaredParentBoundary(t *testing.T) {

@@ -9,6 +9,8 @@ import (
 	"log/slog"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
+	childregistrationapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/child_registration"
+	internaliamapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
@@ -221,6 +223,9 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	svcs.grantDelegationCreate.WithAuthorityWriter(delegated)
 	svcs.grantDelegationUpdate.WithAuthorityWriter(delegated)
 	svcs.grantDelegationRevoke.WithRevokeAuthorityWriter(withdrawal)
+	// Публичная регистрация потомка получает тот же FULL runner и runtime repo.
+	// До завершения этой сборки поле пусто, поэтому слушатель не объявляет RPC.
+	svcs.childRegistrationHandler = childregistrationapp.NewHandler(internaliamapp.NewUserChildRegistration(resourceDecisions))
 	return &fullStartupParticipants{membership: membership, admission: admission, invites: invites,
 		cluster: cluster, resources: resources, objects: objects, groups: groups, bindings: stages}, nil
 }

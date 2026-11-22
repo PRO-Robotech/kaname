@@ -12,6 +12,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
@@ -24,8 +25,11 @@ func NewUserChildRegistration(tx kaname.UserChildRegistrationTransactions) *User
 }
 
 func (uc *UserChildRegistration) Register(ctx context.Context, input kaname.UserChildRegistrationInput) (time.Time, error) {
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
 	principal, verified := operations.PrincipalFromContextOK(ctx)
-	subject, named := authzguard.SubjectFromPrincipal(principal)
+	_, named := authzguard.SubjectFromPrincipal(principal)
 	if !verified || !named || principal.Type != "user" || principal.IsAnonymous() ||
 		input.ResourceType == "" || input.ResourceID == "" {
 		return time.Time{}, authzguard.PermissionDenied()
@@ -34,31 +38,18 @@ func (uc *UserChildRegistration) Register(ctx context.Context, input kaname.User
 		return time.Time{}, authzguard.AuthzBackendUnavailable()
 	}
 
-	version, err := uc.tx.RunUserChildRegistration(ctx, input, principal, func(ctx context.Context, tx kaname.UserChildRegistrationTx) (time.Time, error) {
-		target, err := tx.ResolveUserChildRegistration(ctx, input)
-		if err != nil {
-			return time.Time{}, err
-		}
-		if target.ChildObject == "" || target.ParentObject == "" || target.ParentAction == "" ||
-			target.ChildObject == target.ParentObject {
-			return time.Time{}, domain.ErrUserChildRegistrationRefused
-		}
-		allowed, err := tx.Check(ctx, subject, target.ParentAction, target.ParentObject)
-		if err != nil {
-			return time.Time{}, err
-		}
-		if !allowed {
-			return time.Time{}, domain.ErrUserChildRegistrationRefused
-		}
-		version, err := tx.ApplyUserChildRegistration(ctx, target, principal)
-		if err != nil {
-			return time.Time{}, err
-		}
-		if version.IsZero() {
-			return time.Time{}, authzguard.AuthzBackendUnavailable()
-		}
-		return version, nil
-	})
+	version, err := uc.tx.RunUserChildRegistration(ctx, input, principal)
+	// Конец запроса первичен: поздний отказ хранилища не выдаётся за решение
+	// о праве. Причина остаётся в цепочке для диагностики на границе сервиса.
+	if canceled := ctx.Err(); err != nil && canceled != nil {
+		return time.Time{}, errors.Join(canceled, err)
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return time.Time{}, err
+	}
+	if errors.Is(err, iamerr.ErrUnavailable) || errors.Is(err, iamerr.ErrAborted) || errors.Is(err, iamerr.ErrInternal) {
+		return time.Time{}, err
+	}
 	if errors.Is(err, domain.ErrUserChildRegistrationRefused) {
 		return time.Time{}, authzguard.PermissionDenied()
 	}

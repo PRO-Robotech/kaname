@@ -467,6 +467,205 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_resource_prewait_v2(p_envelope jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;prepared record;
+BEGIN
+ IF p_rows IS NULL OR p_rows<1 OR p_rows>100000 OR p_reads IS NULL OR p_reads<1 OR p_reads>4096
+ OR jsonb_typeof(p_envelope) IS DISTINCT FROM 'object' OR octet_length(p_envelope::text)>67108864 THEN
+  RAISE EXCEPTION 'resource prewait input budget exceeded' USING ERRCODE='54000';END IF;
+ IF p_envelope->'abi' IS DISTINCT FROM '2'::jsonb OR jsonb_typeof(p_envelope->'intent') IS DISTINCT FROM 'object' THEN
+  RAISE EXCEPTION 'resource prewait ABI mismatch' USING ERRCODE='42501';END IF;
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'resource'
+ OR proof->>'purpose' IS DISTINCT FROM 'participant' OR proof->>'consumer_abi' IS DISTINCT FROM '2'
+ OR proof->>'consumer_finalized' IS DISTINCT FROM 'false'
+ OR proof->>'consumer_profile' NOT IN ('resource_pending','resource_source_pending')
+ OR current_setting('transaction_isolation')<>'read committed'
+ OR to_regclass('pg_temp.kaname_authority_resource_manifest') IS NOT NULL THEN
+  RAISE EXCEPTION 'resource prewait requires fresh typed participant' USING ERRCODE='42501';END IF;
+ IF p_envelope->'intent'->>'kind'='child_registration' THEN
+  IF p_envelope->'intent' ? 'Action'
+  OR proof->>'consumer_profile' IS DISTINCT FROM 'resource_source_pending'
+  OR proof->>'writer_contract' IS DISTINCT FROM '2' THEN
+   RAISE EXCEPTION 'child registration requires exact full source participant' USING ERRCODE='42501';END IF;
+  SELECT * INTO STRICT prepared FROM kaname._authority_child_registration_prepare_v1(p_envelope,p_rows,p_reads);
+ ELSIF p_envelope->'intent'->>'kind'='crud' THEN
+  IF p_envelope->'intent' ? 'Action'
+  OR proof->>'consumer_profile' IS DISTINCT FROM 'resource_source_pending'
+  OR proof->>'writer_contract' IS DISTINCT FROM '2' THEN
+   RAISE EXCEPTION 'CRUD requires exact full source participant' USING ERRCODE='42501';END IF;
+  SELECT * INTO STRICT prepared FROM kaname._authority_resource_crud_prepare_v3(p_envelope,p_rows,p_reads);
+ ELSIF p_envelope->'intent' ? 'kind' THEN
+  IF p_envelope->'intent'->>'kind' IS DISTINCT FROM 'object'
+  OR p_envelope->'intent' ? 'Action'
+  OR proof->>'consumer_profile' IS DISTINCT FROM 'resource_pending' THEN
+   RAISE EXCEPTION 'object route requires exact pending object intent' USING ERRCODE='42501';END IF;
+  SELECT * INTO STRICT prepared FROM kaname._authority_resource_object_prepare_v2(p_envelope,p_rows,p_reads);
+ ELSE
+  -- The closed family dispatcher checks Action and delegates to the complete
+  -- direct, withdrawal or refusal compiler. Unknown intents never fall back.
+  SELECT * INTO STRICT prepared FROM kaname._authority_resource_registration_prepare_v2(p_envelope,p_rows,p_reads);
+ END IF;
+ IF prepared.logical_rows IS NULL OR prepared.logical_rows<0 OR prepared.logical_rows>p_rows
+ OR prepared.logical_reads IS NULL OR prepared.logical_reads<0 OR prepared.logical_reads>p_reads THEN
+  RAISE EXCEPTION 'resource compiler exceeded shared budget' USING ERRCODE='54000';END IF;
+ RETURN QUERY SELECT prepared.logical_rows::integer,prepared.logical_reads::integer;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_resource_finalize_v2(p_intent jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(decision_at timestamptz,logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb; expected jsonb; actual jsonb; keys text[]; at_time timestamptz; count_rows integer;
+ materialized jsonb;entry jsonb;field text;actual_keys text[];held_keys text[];
+BEGIN
+ IF p_rows IS NULL OR p_rows<0 OR p_rows>100000 OR p_reads IS NULL OR p_reads<1 OR p_reads>4096 THEN
+  RAISE EXCEPTION 'resource final budget exceeded' USING ERRCODE='54000';
+ END IF;
+ manifest:=kaname._authority_resource_manifest_v2();
+ IF manifest->>'state' IS DISTINCT FROM 'prepared' OR p_intent IS DISTINCT FROM manifest->'intent' THEN
+  RAISE EXCEPTION 'resource final intent mismatch or repeated final clock' USING ERRCODE='42501';
+ END IF;
+ IF manifest->'intent'->>'kind'='child_registration' THEN
+  RETURN QUERY SELECT * FROM kaname._authority_child_registration_finalize_v1(p_intent,p_rows,p_reads);
+  RETURN;
+ END IF;
+ expected:=manifest->'native_epochs';
+ IF jsonb_typeof(expected) IS DISTINCT FROM 'object' THEN
+  RAISE EXCEPTION 'resource native epoch manifest missing' USING ERRCODE='42501';
+ END IF;
+ SELECT coalesce(array_agg(k),ARRAY[]::text[]) INTO keys FROM jsonb_object_keys(expected) k;
+ count_rows:=cardinality(keys);
+ IF count_rows>4096 OR count_rows>p_rows THEN
+  RAISE EXCEPTION 'resource final epoch budget exceeded' USING ERRCODE='54000';
+ END IF;
+ -- Отсутствие exact epoch не превращается в нулевую revision. Prewait уже
+ -- закрепил каждый ключ и его gap; здесь не INSERT и не FOR SHARE/UPDATE.
+ SELECT coalesce(jsonb_object_agg(k,CASE WHEN e.key IS NULL THEN 'null'::jsonb
+  ELSE jsonb_build_array(e.generation,e.revision) END),'{}'::jsonb)
+ INTO actual FROM unnest(keys) k LEFT JOIN kaname.authority_policy_epoch e ON e.key=k;
+ IF actual IS DISTINCT FROM expected THEN
+  RAISE EXCEPTION 'resource native source changed' USING ERRCODE='P1034';
+ END IF;
+ at_time:=clock_timestamp();
+ IF manifest->'intent'->>'kind'='object' THEN
+  materialized:=kaname._authority_resource_object_materialize_v2(manifest->'object_certificate',
+   manifest->'object_effects',manifest->'object_sources',manifest->'object_audit_reservations',
+   (manifest->>'transaction_at')::timestamptz,at_time);
+  -- Чистая финальная сборка не расширяет preclock maximum: обе TTL ветви
+  -- заранее закрыли все logical/physical waits и возможные scope keys.
+  FOR entry IN SELECT value FROM jsonb_array_elements(materialized->'writes') LOOP
+   FOREACH field IN ARRAY ARRAY['epoch_write_keys','epoch_share_keys','source_guard_write_keys','source_guard_read_keys',
+    'binding_epoch_write_scopes','binding_epoch_share_scopes','deferred_carrier_roles'] LOOP
+    actual_keys:=kaname._authority_resource_key_array_v2(entry->field,field LIKE 'binding_epoch_%');
+    held_keys:=kaname._authority_resource_key_array_v2(manifest->field,field LIKE 'binding_epoch_%');
+    IF field IN ('epoch_share_keys','source_guard_read_keys','binding_epoch_share_scopes') THEN
+     held_keys:=held_keys||kaname._authority_resource_key_array_v2(manifest->(CASE field
+      WHEN 'epoch_share_keys' THEN 'epoch_write_keys' WHEN 'source_guard_read_keys' THEN 'source_guard_write_keys'
+      ELSE 'binding_epoch_write_scopes' END),field LIKE 'binding_epoch_%');
+    END IF;
+    IF NOT actual_keys<@held_keys THEN
+     RAISE EXCEPTION 'final object effect exceeds preclock physical maximum' USING ERRCODE='42501';END IF;
+   END LOOP;
+  END LOOP;
+  PERFORM kaname._authority_resource_object_sequence_final_v3(materialized,at_time);
+  UPDATE pg_temp.kaname_authority_resource_manifest SET writes=materialized->'writes',
+   object_program=materialized->'program',object_physical=materialized->'physical',object_fold=materialized->'fold',
+   object_outbox_write_ordinals=materialized->'object_outbox_write_ordinals',
+   object_step_obligations=materialized->'step_obligations';
+ ELSIF manifest->'intent'->>'kind'='crud' THEN
+  PERFORM kaname._authority_crud_manifest_domain_v3(manifest);
+  materialized:=kaname._authority_resource_crud_materialize_v3(manifest->'intent',
+   manifest->'registration_certificate',manifest->'registration_sources',
+   manifest->'registration_body',(manifest->>'transaction_at')::timestamptz,at_time);
+  IF jsonb_typeof(materialized->'writes') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(materialized->'physical') IS DISTINCT FROM 'object'
+  OR jsonb_typeof(materialized#>'{program,commands}') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(materialized->'step_obligations') IS DISTINCT FROM 'object' THEN
+   RAISE EXCEPTION 'CRUD private materialization missing' USING ERRCODE='42501';END IF;
+  FOR entry IN SELECT value FROM jsonb_array_elements(materialized->'writes') LOOP
+   FOREACH field IN ARRAY ARRAY['epoch_write_keys','epoch_share_keys','source_guard_write_keys','source_guard_read_keys',
+    'binding_epoch_write_scopes','binding_epoch_share_scopes','deferred_carrier_roles'] LOOP
+    actual_keys:=kaname._authority_resource_key_array_v2(entry->field,field LIKE 'binding_epoch_%');
+    held_keys:=kaname._authority_resource_key_array_v2(manifest->field,field LIKE 'binding_epoch_%');
+    IF field IN ('epoch_share_keys','source_guard_read_keys','binding_epoch_share_scopes') THEN
+     held_keys:=held_keys||kaname._authority_resource_key_array_v2(manifest->(CASE field
+      WHEN 'epoch_share_keys' THEN 'epoch_write_keys' WHEN 'source_guard_read_keys' THEN 'source_guard_write_keys'
+      ELSE 'binding_epoch_write_scopes' END),field LIKE 'binding_epoch_%');
+    END IF;
+    IF NOT actual_keys<@held_keys THEN
+     RAISE EXCEPTION 'final CRUD effect exceeds preclock physical maximum' USING ERRCODE='42501';END IF;
+   END LOOP;
+  END LOOP;
+  UPDATE pg_temp.kaname_authority_resource_manifest SET writes=materialized->'writes',registration_body=materialized,
+   registration_program=materialized->'program',registration_physical=materialized->'physical',
+   registration_step_obligations=materialized->'step_obligations',
+   registration_outbox_write_ordinals=materialized->'registration_outbox_write_ordinals';
+ ELSIF coalesce(manifest->'intent'->>'Action','') IN ('1','2','3','4','5') THEN
+  IF manifest->'intent'->>'Action'='5' THEN
+   -- A verified negative audit has no installation/native permission to grant.
+   -- Its exact one-row body was derived and protected before the final clock.
+   IF manifest#>'{registration_authority,refusal_only}' IS DISTINCT FROM 'true'::jsonb
+   OR manifest#>'{registration_authority,accounts}' IS DISTINCT FROM '{}'::jsonb
+   OR manifest#>'{registration_authority,native_epochs}' IS DISTINCT FROM '{}'::jsonb
+   OR manifest#>'{registration_body,writes}' IS DISTINCT FROM '[]'::jsonb
+   OR manifest#>>'{registration_certificate,action}' IS DISTINCT FROM '5'
+   OR manifest#>>'{registration_body,program,commands,0,kind}' IS DISTINCT FROM 'refusal_audit'
+   OR jsonb_array_length(manifest#>'{registration_body,program,commands}') IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'refusal final audit-only invariant invalid' USING ERRCODE='42501';END IF;
+  ELSE
+   PERFORM kaname._authority_resource_registration_authority_final_v2(manifest->'registration_authority',at_time);
+  END IF;
+  materialized:=manifest->'registration_body';
+  IF manifest->'intent'->>'Action'='2' THEN
+   materialized:=kaname._authority_resource_unregistration_materialize_v2(
+    materialized->'source_index',materialized->'verified',materialized->'catalog',materialized->'direct',
+    materialized->'maximum',materialized->'current',materialized->'reservations',
+    (manifest->>'transaction_at')::timestamptz,at_time);
+   PERFORM kaname._authority_resource_unregistration_operation_acl_v2(
+    manifest#>'{registration_body,acl}',(manifest->>'invoker_oid')::oid,materialized->'cleanup_program');
+   materialized:=materialized||jsonb_build_object('acl',manifest#>'{registration_body,acl}');
+  END IF;
+  IF jsonb_typeof(materialized->'writes') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(materialized->'physical') IS DISTINCT FROM 'object'
+  OR jsonb_typeof(materialized->'program'->'commands') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(materialized->'step_obligations') IS DISTINCT FROM 'object' THEN
+   RAISE EXCEPTION 'registration private materialization missing' USING ERRCODE='42501';END IF;
+  FOR entry IN SELECT value FROM jsonb_array_elements(materialized->'writes') LOOP
+   FOREACH field IN ARRAY ARRAY['epoch_write_keys','epoch_share_keys','source_guard_write_keys','source_guard_read_keys',
+    'binding_epoch_write_scopes','binding_epoch_share_scopes','deferred_carrier_roles'] LOOP
+    actual_keys:=kaname._authority_resource_key_array_v2(entry->field,field LIKE 'binding_epoch_%');
+    held_keys:=kaname._authority_resource_key_array_v2(manifest->field,field LIKE 'binding_epoch_%');
+    IF field IN ('epoch_share_keys','source_guard_read_keys','binding_epoch_share_scopes') THEN
+     held_keys:=held_keys||kaname._authority_resource_key_array_v2(manifest->(CASE field
+      WHEN 'epoch_share_keys' THEN 'epoch_write_keys' WHEN 'source_guard_read_keys' THEN 'source_guard_write_keys'
+      ELSE 'binding_epoch_write_scopes' END),field LIKE 'binding_epoch_%');
+    END IF;
+    IF NOT actual_keys<@held_keys THEN
+     RAISE EXCEPTION 'final registration effect exceeds preclock maximum' USING ERRCODE='42501';END IF;
+   END LOOP;
+  END LOOP;
+  IF manifest->'intent'->>'Action'<>'5' THEN
+   PERFORM kaname._authority_resource_registration_sequence_final_v3(materialized,at_time);
+  END IF;
+  UPDATE pg_temp.kaname_authority_resource_manifest SET writes=materialized->'writes',registration_body=materialized,
+   registration_program=materialized->'program',registration_physical=materialized->'physical',
+   registration_step_obligations=materialized->'step_obligations',
+   registration_outbox_write_ordinals=materialized->'registration_outbox_write_ordinals';
+ ELSE
+  RAISE EXCEPTION 'resource final intent compiler unavailable' USING ERRCODE='42501';
+ END IF;
+ UPDATE pg_temp.kaname_authority_resource_manifest SET state='final',decision_at=at_time;
+ UPDATE pg_temp.kaname_authority_attestation SET decision_at=at_time;
+ UPDATE pg_temp.kaname_authority_consumer SET finalized=true;
+ RETURN QUERY SELECT at_time,count_rows,1;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION kaname._authority_crud_storage_v3() RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE expected record;owner_oid oid;trigger_counts jsonb;trigger_count bigint;
@@ -557,7 +756,7 @@ BEGIN
  ('authority_resource_assert_body_v2(jsonb)','4c7219a426a0bb4682fc85dea9806123101be986db4adf98844f1f416b997eb4',true,'v',true,'preserve'),
  ('_authority_resource_require_completion_v2()','31855e0f86620b4cc69389b4a7da1055108ca98741fa61b7948d0ba5773da223',true,'v',true,'preserve'),
  ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','6be8def5de6ed9a89e95f50764835b8da6baa06ca26a053b84bb4d6279b38282',true,'v',true,'preserve'),
- ('authority_resource_prewait_v2(jsonb,integer,integer)','e835d0c4f015334d151c7a902e7cb5c10a8f7d5d2ee2c4d6fad478bd558e5f83',true,'v',true,'preserve'),
+ ('authority_resource_prewait_v2(jsonb,integer,integer)','224490a4e9371702c568fe4395729446cacd25003fd911865ae8735c77e1710c',true,'v',true,'preserve'),
  ('_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','967a84fb10617c3a5f376d63aaf2903538edc5fe1548150b307bae33a70ee3f9',true,'i',true,'private'),
  ('_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','2e4cf1562674897a696483469505925ba5862b6fe0422f663b330eb96f237b9e',true,'i',true,'private'),
  ('_authority_crud_intent_v3(jsonb)','e62f470c0c69a980308bec36a35f515609cb8fea56c79ec7632ac654a43e0f49',true,'i',true,'private'),
@@ -649,7 +848,7 @@ BEGIN
  ('_authority_sequence_claim_v3(text,jsonb,jsonb)','18cdb51c9e44fa944b355cadf1abcb291eba062ca09f3221118bcd60d736c740',true,'v',true,'private'),
  ('_authority_sequence_applied_v3(text,bigint,jsonb)','0a4c24ded6b6aad09fd077e4a1ad8d40dee440c4e27e44dc20e4300bfc0a5a7d',true,'v',true,'private'),
  ('_authority_sequence_complete_v3()','c9f728c4492acf65f92ea6a6f411b3af85e63e765c5226bbf3ea1e80fd9291d1',true,'v',true,'private'),
- ('authority_resource_finalize_v2(jsonb,integer,integer)','f68d6ef701f2e730fd10d2c65aec966d04aceaf54465ac87b684da8157985f0c',true,'v',true,'preserve'),
+ ('authority_resource_finalize_v2(jsonb,integer,integer)','2c8421272fd0b088d7e650291e7922efc146d777606dcc8a8d0e12fa8caf2bab',true,'v',true,'preserve'),
  ('_authority_resource_object_prepare_v2(jsonb,integer,integer)','47aae35f146c1d05bf9f5f52f9f7b929d69d91f64b39844fd697530c467af440',true,'v',true,'preserve'),
  ('_authority_resource_object_program_v2(jsonb,timestamptz)','97f643954fbef4036c37240711c9ce9650045102c77bce1d5e8396d89a4c8464',true,'i',true,'preserve'),
  ('_authority_resource_object_sequence_prepare_v3(jsonb,integer)','bbf639e8b58fee3ee80ce322a7946cd5ae4a3f0a84804270117a369914fc5153',true,'v',true,'private'),
@@ -1246,7 +1445,7 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','70b259a8cd67efda198bd603b13dddd25fe91c0df5d8fceada0b39f2d1932a3b',true),
+ ('_authority_crud_storage_v3()','bf385f1f32a62688c84f8fe02190aeda68d0ed7b8514a19a8e8d1344412e2df8',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -1703,6 +1902,195 @@ BEGIN
   RAISE EXCEPTION 'canonical registration command differs from current private step' USING ERRCODE='42501';END IF;
  RETURN jsonb_build_object('command',certificate->'command','catalog',certificate->'catalog',
   'applied',step->'applied','projection_unchanged',step->'projection_unchanged');
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_resource_prewait_v2(p_envelope jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE proof jsonb;prepared record;
+BEGIN
+ IF p_rows IS NULL OR p_rows<1 OR p_rows>100000 OR p_reads IS NULL OR p_reads<1 OR p_reads>4096
+ OR jsonb_typeof(p_envelope) IS DISTINCT FROM 'object' OR octet_length(p_envelope::text)>67108864 THEN
+  RAISE EXCEPTION 'resource prewait input budget exceeded' USING ERRCODE='54000';END IF;
+ IF p_envelope->'abi' IS DISTINCT FROM '2'::jsonb OR jsonb_typeof(p_envelope->'intent') IS DISTINCT FROM 'object' THEN
+  RAISE EXCEPTION 'resource prewait ABI mismatch' USING ERRCODE='42501';END IF;
+ proof:=kaname.authority_protocol_attestation();
+ IF proof IS NULL OR proof->>'kind' IS DISTINCT FROM 'resource'
+ OR proof->>'purpose' IS DISTINCT FROM 'participant' OR proof->>'consumer_abi' IS DISTINCT FROM '2'
+ OR proof->>'consumer_finalized' IS DISTINCT FROM 'false'
+ OR proof->>'consumer_profile' NOT IN ('resource_pending','resource_source_pending')
+ OR current_setting('transaction_isolation')<>'read committed'
+ OR to_regclass('pg_temp.kaname_authority_resource_manifest') IS NOT NULL THEN
+  RAISE EXCEPTION 'resource prewait requires fresh typed participant' USING ERRCODE='42501';END IF;
+ IF p_envelope->'intent'->>'kind'='crud' THEN
+  IF p_envelope->'intent' ? 'Action'
+  OR proof->>'consumer_profile' IS DISTINCT FROM 'resource_source_pending'
+  OR proof->>'writer_contract' IS DISTINCT FROM '2' THEN
+   RAISE EXCEPTION 'CRUD requires exact full source participant' USING ERRCODE='42501';END IF;
+  SELECT * INTO STRICT prepared FROM kaname._authority_resource_crud_prepare_v3(p_envelope,p_rows,p_reads);
+ ELSIF p_envelope->'intent' ? 'kind' THEN
+  IF p_envelope->'intent'->>'kind' IS DISTINCT FROM 'object'
+  OR p_envelope->'intent' ? 'Action'
+  OR proof->>'consumer_profile' IS DISTINCT FROM 'resource_pending' THEN
+   RAISE EXCEPTION 'object route requires exact pending object intent' USING ERRCODE='42501';END IF;
+  SELECT * INTO STRICT prepared FROM kaname._authority_resource_object_prepare_v2(p_envelope,p_rows,p_reads);
+ ELSE
+  -- The closed family dispatcher checks Action and delegates to the complete
+  -- direct, withdrawal or refusal compiler. Unknown intents never fall back.
+  SELECT * INTO STRICT prepared FROM kaname._authority_resource_registration_prepare_v2(p_envelope,p_rows,p_reads);
+ END IF;
+ IF prepared.logical_rows IS NULL OR prepared.logical_rows<0 OR prepared.logical_rows>p_rows
+ OR prepared.logical_reads IS NULL OR prepared.logical_reads<0 OR prepared.logical_reads>p_reads THEN
+  RAISE EXCEPTION 'resource compiler exceeded shared budget' USING ERRCODE='54000';END IF;
+ RETURN QUERY SELECT prepared.logical_rows::integer,prepared.logical_reads::integer;
+END $$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION kaname.authority_resource_finalize_v2(p_intent jsonb,p_rows integer,p_reads integer)
+RETURNS TABLE(decision_at timestamptz,logical_rows integer,logical_reads integer)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE manifest jsonb; expected jsonb; actual jsonb; keys text[]; at_time timestamptz; count_rows integer;
+ materialized jsonb;entry jsonb;field text;actual_keys text[];held_keys text[];
+BEGIN
+ IF p_rows IS NULL OR p_rows<0 OR p_rows>100000 OR p_reads IS NULL OR p_reads<1 OR p_reads>4096 THEN
+  RAISE EXCEPTION 'resource final budget exceeded' USING ERRCODE='54000';
+ END IF;
+ manifest:=kaname._authority_resource_manifest_v2();
+ IF manifest->>'state' IS DISTINCT FROM 'prepared' OR p_intent IS DISTINCT FROM manifest->'intent' THEN
+  RAISE EXCEPTION 'resource final intent mismatch or repeated final clock' USING ERRCODE='42501';
+ END IF;
+ expected:=manifest->'native_epochs';
+ IF jsonb_typeof(expected) IS DISTINCT FROM 'object' THEN
+  RAISE EXCEPTION 'resource native epoch manifest missing' USING ERRCODE='42501';
+ END IF;
+ SELECT coalesce(array_agg(k),ARRAY[]::text[]) INTO keys FROM jsonb_object_keys(expected) k;
+ count_rows:=cardinality(keys);
+ IF count_rows>4096 OR count_rows>p_rows THEN
+  RAISE EXCEPTION 'resource final epoch budget exceeded' USING ERRCODE='54000';
+ END IF;
+ -- Отсутствие exact epoch не превращается в нулевую revision. Prewait уже
+ -- закрепил каждый ключ и его gap; здесь не INSERT и не FOR SHARE/UPDATE.
+ SELECT coalesce(jsonb_object_agg(k,CASE WHEN e.key IS NULL THEN 'null'::jsonb
+  ELSE jsonb_build_array(e.generation,e.revision) END),'{}'::jsonb)
+ INTO actual FROM unnest(keys) k LEFT JOIN kaname.authority_policy_epoch e ON e.key=k;
+ IF actual IS DISTINCT FROM expected THEN
+  RAISE EXCEPTION 'resource native source changed' USING ERRCODE='P1034';
+ END IF;
+ at_time:=clock_timestamp();
+ IF manifest->'intent'->>'kind'='object' THEN
+  materialized:=kaname._authority_resource_object_materialize_v2(manifest->'object_certificate',
+   manifest->'object_effects',manifest->'object_sources',manifest->'object_audit_reservations',
+   (manifest->>'transaction_at')::timestamptz,at_time);
+  -- Чистая финальная сборка не расширяет preclock maximum: обе TTL ветви
+  -- заранее закрыли все logical/physical waits и возможные scope keys.
+  FOR entry IN SELECT value FROM jsonb_array_elements(materialized->'writes') LOOP
+   FOREACH field IN ARRAY ARRAY['epoch_write_keys','epoch_share_keys','source_guard_write_keys','source_guard_read_keys',
+    'binding_epoch_write_scopes','binding_epoch_share_scopes','deferred_carrier_roles'] LOOP
+    actual_keys:=kaname._authority_resource_key_array_v2(entry->field,field LIKE 'binding_epoch_%');
+    held_keys:=kaname._authority_resource_key_array_v2(manifest->field,field LIKE 'binding_epoch_%');
+    IF field IN ('epoch_share_keys','source_guard_read_keys','binding_epoch_share_scopes') THEN
+     held_keys:=held_keys||kaname._authority_resource_key_array_v2(manifest->(CASE field
+      WHEN 'epoch_share_keys' THEN 'epoch_write_keys' WHEN 'source_guard_read_keys' THEN 'source_guard_write_keys'
+      ELSE 'binding_epoch_write_scopes' END),field LIKE 'binding_epoch_%');
+    END IF;
+    IF NOT actual_keys<@held_keys THEN
+     RAISE EXCEPTION 'final object effect exceeds preclock physical maximum' USING ERRCODE='42501';END IF;
+   END LOOP;
+  END LOOP;
+  PERFORM kaname._authority_resource_object_sequence_final_v3(materialized,at_time);
+  UPDATE pg_temp.kaname_authority_resource_manifest SET writes=materialized->'writes',
+   object_program=materialized->'program',object_physical=materialized->'physical',object_fold=materialized->'fold',
+   object_outbox_write_ordinals=materialized->'object_outbox_write_ordinals',
+   object_step_obligations=materialized->'step_obligations';
+ ELSIF manifest->'intent'->>'kind'='crud' THEN
+  PERFORM kaname._authority_crud_manifest_domain_v3(manifest);
+  materialized:=kaname._authority_resource_crud_materialize_v3(manifest->'intent',
+   manifest->'registration_certificate',manifest->'registration_sources',
+   manifest->'registration_body',(manifest->>'transaction_at')::timestamptz,at_time);
+  IF jsonb_typeof(materialized->'writes') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(materialized->'physical') IS DISTINCT FROM 'object'
+  OR jsonb_typeof(materialized#>'{program,commands}') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(materialized->'step_obligations') IS DISTINCT FROM 'object' THEN
+   RAISE EXCEPTION 'CRUD private materialization missing' USING ERRCODE='42501';END IF;
+  FOR entry IN SELECT value FROM jsonb_array_elements(materialized->'writes') LOOP
+   FOREACH field IN ARRAY ARRAY['epoch_write_keys','epoch_share_keys','source_guard_write_keys','source_guard_read_keys',
+    'binding_epoch_write_scopes','binding_epoch_share_scopes','deferred_carrier_roles'] LOOP
+    actual_keys:=kaname._authority_resource_key_array_v2(entry->field,field LIKE 'binding_epoch_%');
+    held_keys:=kaname._authority_resource_key_array_v2(manifest->field,field LIKE 'binding_epoch_%');
+    IF field IN ('epoch_share_keys','source_guard_read_keys','binding_epoch_share_scopes') THEN
+     held_keys:=held_keys||kaname._authority_resource_key_array_v2(manifest->(CASE field
+      WHEN 'epoch_share_keys' THEN 'epoch_write_keys' WHEN 'source_guard_read_keys' THEN 'source_guard_write_keys'
+      ELSE 'binding_epoch_write_scopes' END),field LIKE 'binding_epoch_%');
+    END IF;
+    IF NOT actual_keys<@held_keys THEN
+     RAISE EXCEPTION 'final CRUD effect exceeds preclock physical maximum' USING ERRCODE='42501';END IF;
+   END LOOP;
+  END LOOP;
+  UPDATE pg_temp.kaname_authority_resource_manifest SET writes=materialized->'writes',registration_body=materialized,
+   registration_program=materialized->'program',registration_physical=materialized->'physical',
+   registration_step_obligations=materialized->'step_obligations',
+   registration_outbox_write_ordinals=materialized->'registration_outbox_write_ordinals';
+ ELSIF coalesce(manifest->'intent'->>'Action','') IN ('1','2','3','4','5') THEN
+  IF manifest->'intent'->>'Action'='5' THEN
+   -- A verified negative audit has no installation/native permission to grant.
+   -- Its exact one-row body was derived and protected before the final clock.
+   IF manifest#>'{registration_authority,refusal_only}' IS DISTINCT FROM 'true'::jsonb
+   OR manifest#>'{registration_authority,accounts}' IS DISTINCT FROM '{}'::jsonb
+   OR manifest#>'{registration_authority,native_epochs}' IS DISTINCT FROM '{}'::jsonb
+   OR manifest#>'{registration_body,writes}' IS DISTINCT FROM '[]'::jsonb
+   OR manifest#>>'{registration_certificate,action}' IS DISTINCT FROM '5'
+   OR manifest#>>'{registration_body,program,commands,0,kind}' IS DISTINCT FROM 'refusal_audit'
+   OR jsonb_array_length(manifest#>'{registration_body,program,commands}') IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'refusal final audit-only invariant invalid' USING ERRCODE='42501';END IF;
+  ELSE
+   PERFORM kaname._authority_resource_registration_authority_final_v2(manifest->'registration_authority',at_time);
+  END IF;
+  materialized:=manifest->'registration_body';
+  IF manifest->'intent'->>'Action'='2' THEN
+   materialized:=kaname._authority_resource_unregistration_materialize_v2(
+    materialized->'source_index',materialized->'verified',materialized->'catalog',materialized->'direct',
+    materialized->'maximum',materialized->'current',materialized->'reservations',
+    (manifest->>'transaction_at')::timestamptz,at_time);
+   PERFORM kaname._authority_resource_unregistration_operation_acl_v2(
+    manifest#>'{registration_body,acl}',(manifest->>'invoker_oid')::oid,materialized->'cleanup_program');
+   materialized:=materialized||jsonb_build_object('acl',manifest#>'{registration_body,acl}');
+  END IF;
+  IF jsonb_typeof(materialized->'writes') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(materialized->'physical') IS DISTINCT FROM 'object'
+  OR jsonb_typeof(materialized->'program'->'commands') IS DISTINCT FROM 'array'
+  OR jsonb_typeof(materialized->'step_obligations') IS DISTINCT FROM 'object' THEN
+   RAISE EXCEPTION 'registration private materialization missing' USING ERRCODE='42501';END IF;
+  FOR entry IN SELECT value FROM jsonb_array_elements(materialized->'writes') LOOP
+   FOREACH field IN ARRAY ARRAY['epoch_write_keys','epoch_share_keys','source_guard_write_keys','source_guard_read_keys',
+    'binding_epoch_write_scopes','binding_epoch_share_scopes','deferred_carrier_roles'] LOOP
+    actual_keys:=kaname._authority_resource_key_array_v2(entry->field,field LIKE 'binding_epoch_%');
+    held_keys:=kaname._authority_resource_key_array_v2(manifest->field,field LIKE 'binding_epoch_%');
+    IF field IN ('epoch_share_keys','source_guard_read_keys','binding_epoch_share_scopes') THEN
+     held_keys:=held_keys||kaname._authority_resource_key_array_v2(manifest->(CASE field
+      WHEN 'epoch_share_keys' THEN 'epoch_write_keys' WHEN 'source_guard_read_keys' THEN 'source_guard_write_keys'
+      ELSE 'binding_epoch_write_scopes' END),field LIKE 'binding_epoch_%');
+    END IF;
+    IF NOT actual_keys<@held_keys THEN
+     RAISE EXCEPTION 'final registration effect exceeds preclock maximum' USING ERRCODE='42501';END IF;
+   END LOOP;
+  END LOOP;
+  IF manifest->'intent'->>'Action'<>'5' THEN
+   PERFORM kaname._authority_resource_registration_sequence_final_v3(materialized,at_time);
+  END IF;
+  UPDATE pg_temp.kaname_authority_resource_manifest SET writes=materialized->'writes',registration_body=materialized,
+   registration_program=materialized->'program',registration_physical=materialized->'physical',
+   registration_step_obligations=materialized->'step_obligations',
+   registration_outbox_write_ordinals=materialized->'registration_outbox_write_ordinals';
+ ELSE
+  RAISE EXCEPTION 'resource final intent compiler unavailable' USING ERRCODE='42501';
+ END IF;
+ UPDATE pg_temp.kaname_authority_resource_manifest SET state='final',decision_at=at_time;
+ UPDATE pg_temp.kaname_authority_attestation SET decision_at=at_time;
+ UPDATE pg_temp.kaname_authority_consumer SET finalized=true;
+ RETURN QUERY SELECT at_time,count_rows,1;
 END $$;
 -- +goose StatementEnd
 

@@ -23,6 +23,7 @@ import (
 	accountapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/account"
 	authorizeapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	bootstraptoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
+	childregistrationapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/child_registration"
 	clusterapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster"
 	clusterpublicapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/clusterpublic"
 	grantdelegationapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/grant_delegation"
@@ -114,6 +115,8 @@ type services struct {
 	// Тот же UC регистрации, который уже передан обработчику и модулю.
 	resourceRegistrar *internaliamapp.RegisterResourceUseCase
 	resourceGate      *authzguard.RelationWriteGate
+	// Создаётся только после успешной FULL composition с тем же runner.
+	childRegistrationHandler *childregistrationapp.Handler
 	// Единственный recorder запроса: новые object engines получают тот же instance.
 	bindingSizeRecorder reconcileapp.SizeRecorder
 

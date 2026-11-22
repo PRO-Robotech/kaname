@@ -70,7 +70,7 @@ func (s *resourceChildStage) applyChildBody(ctx context.Context, tx *resourceDec
 		return time.Time{}, domain.ErrUserChildRegistrationRefused
 	}
 	var encoded []byte
-	if err := tx.QueryRow(ctx, `SELECT kaname._authority_child_registration_begin_body_v1($1::jsonb)`, proposal.intent).Scan(&encoded); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT kaname.authority_child_registration_begin_body_v1($1::jsonb)`, proposal.intent).Scan(&encoded); err != nil {
 		return time.Time{}, err
 	}
 	var values resourceChildBodyValues
@@ -112,7 +112,7 @@ func (s *resourceChildStage) applyChildBody(ctx context.Context, tx *resourceDec
 			if err := ctx.Err(); err != nil {
 				return time.Time{}, err
 			}
-			if err := tx.QueryRow(ctx, `SELECT kaname._authority_child_registration_step_v1($1)`, i+1).Scan(&encoded); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT kaname.authority_child_registration_step_v1($1)`, i+1).Scan(&encoded); err != nil {
 				return time.Time{}, err
 			}
 			// Оба образа приходят из PostgreSQL jsonb. Сравниваем весь JSON,
@@ -137,7 +137,7 @@ func (s *resourceChildStage) applyChildBody(ctx context.Context, tx *resourceDec
 		}
 	}
 	var complete bool
-	if err := tx.QueryRow(ctx, `SELECT kaname._authority_child_registration_complete_v1()`).Scan(&complete); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT kaname.authority_child_registration_complete_v1()`).Scan(&complete); err != nil {
 		return time.Time{}, err
 	}
 	if !complete {

@@ -15,6 +15,12 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// PublicServices отражает дополнительные службы уже собранного публичного
+// gRPC-слушателя. Пустой профиль не поднимает маршруты FULL-only служб.
+type PublicServices struct {
+	ChildRegistration bool
+}
+
 // NewPublic собирает публичный REST-фронт службы.
 //
 // grpcAddr — адрес СОБСТВЕННОГО публичного gRPC-слушателя. Через него и только
@@ -24,12 +30,12 @@ import (
 //
 // limits — потолки тела и одновременности (limits.go). Аргумент, а не опция:
 // фронт, опубликованный наружу, без них не собирается — забыть их негде.
-func NewPublic(ctx context.Context, grpcAddr string, opts []grpc.DialOption, limits Limits) (http.Handler, error) {
+func NewPublic(ctx context.Context, grpcAddr string, opts []grpc.DialOption, limits Limits, services PublicServices) (http.Handler, error) {
 	if grpcAddr == "" {
 		return nil, fmt.Errorf("публичный REST-фронт: адрес собственного gRPC-слушателя пуст")
 	}
 	mux := newPublicMux()
-	if err := registerPublicRESTServices(ctx, mux, grpcAddr, opts); err != nil {
+	if err := registerPublicRESTServices(ctx, mux, grpcAddr, opts, services); err != nil {
 		return nil, err
 	}
 	// Подсказка аутентификации — только здесь, и почему только здесь, сказано в

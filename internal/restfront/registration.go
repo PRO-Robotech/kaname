@@ -97,7 +97,7 @@ func registerInternalRESTServices(
 // побывавшая публичной, считается раскрытой — отката у такой ошибки нет.
 // Держится это не вниманием, а гейтом дерева.
 func registerPublicRESTServices(
-	ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption,
+	ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption, services PublicServices,
 ) error {
 	registrations := []struct {
 		service string
@@ -132,6 +132,13 @@ func registerPublicRESTServices(
 	for _, r := range registrations {
 		if err := r.bind(ctx, mux, endpoint, opts); err != nil {
 			return fmt.Errorf("публичный REST-фронт, служба %s: %w", r.service, err)
+		}
+	}
+	// FULL-only маршрут подключается к тому же публичному endpoint: личность
+	// и admission по-прежнему устанавливают перехватчики gRPC-слушателя.
+	if services.ChildRegistration {
+		if err := iamv1.RegisterChildRegistrationServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
+			return fmt.Errorf("публичный REST-фронт, служба ChildRegistrationService: %w", err)
 		}
 	}
 	return nil

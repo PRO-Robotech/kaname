@@ -48,7 +48,7 @@ func (h *Handler) Register(ctx context.Context, req *iamv1.RegisterChildRequest)
 		ResourceID:   req.GetResourceId(),
 	})
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		return nil, shared.MapRepoErrAt(ctx, err)
 	}
 	stamp := timestamppb.New(version)
 	if err := stamp.CheckValid(); err != nil {
