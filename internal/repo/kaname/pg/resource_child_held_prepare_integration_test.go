@@ -122,6 +122,27 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		})
 		refuses(t, "resource_source_pending", payload, "P1034")
 	})
+	t.Run("omitting captured output holder census is refused", func(t *testing.T) {
+		payload := mutate(t, func(value map[string]any) {
+			captures := value["sources"].([]any)
+			kept := make([]any, 0, len(captures))
+			removed := 0
+			for _, raw := range captures {
+				capture := raw.(map[string]any)
+				// kind 35 — все ledger holders, именующие объект; пустота
+				// тоже обязательный источник полного OUTPUT-графа.
+				if capture["kind"] == float64(35) && capture["type"] == "childstage_child" && capture["id"] == "container-one/candidate" {
+					require.Empty(t, capture["states"], "проверяется отсутствие нового потомка")
+					removed++
+					continue
+				}
+				kept = append(kept, raw)
+			}
+			require.Equal(t, 1, removed, "удаляем настоящий exact RR predicate, а не добавленный тестом ключ")
+			value["sources"] = kept
+		})
+		refuses(t, "resource_source_pending", payload, "42501")
+	})
 	t.Run("signed source owner preserves fresh private witness", func(t *testing.T) {
 		tx := open(t, "resource_source_pending")
 		prepared, rows, reads, err := hold(tx, envelope)
@@ -137,6 +158,17 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 			TransactionID json.RawMessage `json:"transaction_id"`
 			Nonce         json.RawMessage `json:"nonce"`
 			NativeEpochs  json.RawMessage `json:"native_epochs"`
+			Maximum       struct {
+				PolicyEpochs  map[string]string   `json:"policy_epochs"`
+				BindingEpochs map[string]string   `json:"binding_epochs"`
+				Operations    map[string][]string `json:"operations"`
+			} `json:"maximum"`
+			EpochWitness struct {
+				PolicyBefore map[string]json.RawMessage `json:"policy_before"`
+				PolicyAfter  map[string]json.RawMessage `json:"policy_after"`
+				BindingAfter map[string]json.RawMessage `json:"binding_after"`
+			} `json:"epoch_witness"`
+			Required map[string]bool `json:"required"`
 		}
 		require.NoError(t, json.Unmarshal(prepared, &state))
 		require.NotEmpty(t, state.Witness)
@@ -147,6 +179,69 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		require.NoError(t, json.Unmarshal(envelope, &proposed))
 		require.JSONEq(t, string(proposed.Intent), string(state.Intent))
 		require.JSONEq(t, string(proposed.NativeEpochs), string(state.NativeEpochs))
+		// После подготовки точные OUTPUT epoch keys удерживаются для записи.
+		// Scope берём из того же реального родителя, который проверил hold.
+		var account, project, childEpoch string
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT parent_account_id,parent_project_id,
+ 'object:'||jsonb_build_array('childstage.child','container-one/candidate')::text
+ FROM kaname.resource_mirror WHERE object_type='childstage.container' AND object_id='container-one'`).Scan(&account, &project, &childEpoch))
+		require.NotEmpty(t, account)
+		require.NotEmpty(t, project)
+		require.Equal(t, "write", state.Maximum.PolicyEpochs[childEpoch])
+		require.Equal(t, "write", state.Maximum.PolicyEpochs["scope:account:"+account])
+		require.Equal(t, "write", state.Maximum.BindingEpochs[account])
+		for table, operations := range map[string][]string{
+			"resource_mirror":         {"INSERT", "UPDATE"},
+			"fga_outbox":              {"INSERT"},
+			"producer_source_receipt": {"UPDATE"},
+			"audit_outbox":            {"INSERT"},
+		} {
+			for _, operation := range operations {
+				require.Contains(t, state.Maximum.Operations[table], operation, "maximum обязан покрывать %s %s", table, operation)
+			}
+		}
+		// RR сравнивается с policy_before по исходным native keys. Полный
+		// policy_after отдельно содержит созданные/удержанные OUTPUT epochs.
+		var nativeBefore map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(proposed.NativeEpochs, &nativeBefore))
+		require.NotEmpty(t, nativeBefore)
+		for key, value := range nativeBefore {
+			require.Contains(t, state.EpochWitness.PolicyBefore, key)
+			require.JSONEq(t, string(value), string(state.EpochWitness.PolicyBefore[key]))
+		}
+		for _, key := range []string{childEpoch, "scope:account:" + account} {
+			require.Contains(t, state.EpochWitness.PolicyAfter, key)
+			require.NotEqual(t, "null", string(state.EpochWitness.PolicyAfter[key]))
+		}
+		require.Contains(t, state.EpochWitness.BindingAfter, account)
+		require.NotEqual(t, "null", string(state.EpochWitness.BindingAfter[account]))
+		// JSON-ключи декодируются, чтобы проверка не зависела от пробелов
+		// PostgreSQL. 21/22 — object members/ledger; 35 — fact ledger holders.
+		type sourceKey struct {
+			Kind                 int
+			Type, ID, Projection string
+		}
+		required := make(map[sourceKey]bool, len(state.Required))
+		for key, enabled := range state.Required {
+			var parts []json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(key), &parts))
+			require.Len(t, parts, 4)
+			var decoded sourceKey
+			require.NoError(t, json.Unmarshal(parts[0], &decoded.Kind))
+			require.NoError(t, json.Unmarshal(parts[1], &decoded.Type))
+			require.NoError(t, json.Unmarshal(parts[2], &decoded.ID))
+			require.NoError(t, json.Unmarshal(parts[3], &decoded.Projection))
+			required[decoded] = enabled
+		}
+		for _, key := range []sourceKey{
+			{Kind: 4, Type: "childstage_container", ID: "container-one"},
+			{Kind: 1, Type: "project", ID: project},
+			{Kind: 21, Type: "childstage.child", ID: "container-one/candidate"},
+			{Kind: 22, Type: "childstage.child", ID: "container-one/candidate"},
+			{Kind: 35, Type: "childstage_child", ID: "container-one/candidate"},
+		} {
+			require.True(t, required[key], "required обязан включать scope и полный OUTPUT census: %+v", key)
+		}
 		var signed map[string]json.RawMessage
 		var attestation []byte
 		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname.authority_protocol_attestation()`).Scan(&attestation))
