@@ -59,7 +59,7 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	for _, raw := range f.ridList(t, "/iam/v1/roles", "roles", nil) {
 		var role iamv1.Role
 		require.NoError(t, protojson.Unmarshal(raw, &role))
-		if role.Name == "registry.child-public-registrar" {
+		if role.Name == "registry.child_public_registrar" {
 			require.Empty(t, roleID)
 			roleID = role.Id
 		}
@@ -165,7 +165,7 @@ func childNativePublicDelivery(t *testing.T) installruntime.RIDDeliveryFixture {
       maxCreates: 4
       windowSeconds: 60
 roles:
-  - id: registry.child-public-registrar
+  - id: registry.child_public_registrar
     description: Independent public child registration probe
     tier: {tierType: iam.cluster, tierId: cluster_root}
     rules:
