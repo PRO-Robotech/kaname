@@ -35,6 +35,9 @@ func NewPublic(ctx context.Context, grpcAddr string, opts []grpc.DialOption, lim
 		return nil, fmt.Errorf("публичный REST-фронт: адрес собственного gRPC-слушателя пуст")
 	}
 	mux := newPublicMux()
+	if services.ChildRegistration {
+		configureChildRegistrationJSON(mux)
+	}
 	if err := registerPublicRESTServices(ctx, mux, grpcAddr, opts, services); err != nil {
 		return nil, err
 	}
