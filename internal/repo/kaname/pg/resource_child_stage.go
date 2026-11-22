@@ -167,6 +167,7 @@ type resourceChildRegistrationIntent struct {
 	ResourceType string `json:"resource_type"`
 	ResourceID   string `json:"resource_id"`
 	Actor        string `json:"actor"`
+	AuditID      string `json:"audit_id"`
 }
 
 // Запрос компилятору использует личность и координату из захваченного
@@ -183,7 +184,7 @@ func (s *resourceChildStage) proposal() (*resourceDecisionProposal, error) {
 		return nil, kaname.ErrSourceUnconfirmed
 	}
 	intent, err := json.Marshal(resourceChildRegistrationIntent{
-		Kind: "child_registration", ResourceType: s.catalog.identity.Dotted, ResourceID: childID, Actor: actor,
+		Kind: "child_registration", ResourceType: s.catalog.identity.Dotted, ResourceID: childID, Actor: actor, AuditID: newAuditEventID(),
 	})
 	if err != nil {
 		return nil, err
