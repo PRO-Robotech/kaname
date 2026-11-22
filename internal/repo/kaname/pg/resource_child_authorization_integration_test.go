@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
@@ -114,5 +115,42 @@ func TestUserChildAuthorizationRRRequiresCurrentHumanGrant(t *testing.T) {
 		require.ErrorIs(t, err, domain.ErrUserChildRegistrationRefused)
 		assertNoRegistrationReads(t, queries)
 		require.True(t, strings.Contains(strings.Join(queries, "\n"), "access_bindings"), "the production helper checked the current binding source")
+	})
+}
+
+// Полный role-backed источник проходит тот же snapshot verifier, что child
+// admission. Прямой admin здесь лишь вход пробы: его составной план не меняет
+// ограничение child registration на единственное прямое отношение родителя.
+func TestUserChildAuthorizationRRSnapshotVerifiesRoleBackedSource(t *testing.T) {
+	w := delegationUCFixture(t)
+	binding := domain.AccessBindingID(ids.NewID("acb"))
+	materializeAdministrativeHolder(t, w, binding, domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(w.member)})
+	var roleID string
+	require.NoError(t, w.r.runtime.QueryRow(w.r.ctx, `SELECT role_id FROM kaname.access_bindings WHERE id=$1`, binding).Scan(&roleID))
+	require.Equal(t, domain.ClusterAdminRoleID, roleID, "источник обязан пройти role projection checkpoint")
+	subject, object := "user:"+w.member, "account:"+w.r.a
+	check := func(t *testing.T) (bool, []string, error) {
+		t.Helper()
+		tx, err := w.r.runtime.BeginTx(w.r.ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+		require.NoError(t, err)
+		defer func() { require.NoError(t, tx.Rollback(context.WithoutCancel(w.r.ctx))) }()
+		return kanamepg.ProbeSnapshotAdministrativeCheck(w.r.ctx, tx, w.r.bundle, subject, "admin", object)
+	}
+	t.Run("live role projection permits in read-only RR", func(t *testing.T) {
+		allowed, queries, err := check(t)
+		require.NoError(t, err)
+		require.True(t, allowed)
+		require.Contains(t, strings.Join(queries, "\n"), "FROM kaname.roles", "snapshot проверяет authored роль, а не только materialized факт")
+	})
+	t.Run("stale projection cannot confirm changed role", func(t *testing.T) {
+		tag, err := w.r.admin.Exec(w.r.ctx, `UPDATE kaname.roles SET rules='[]',permissions='[]' WHERE id=$1`, roleID)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, tag.RowsAffected())
+		ordinary, err := w.door.Check(w.r.ctx, subject, "admin", object)
+		require.NoError(t, err)
+		require.True(t, ordinary, "старая materialized projection ещё положительна")
+		allowed, _, err := check(t)
+		require.False(t, allowed)
+		require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed)
 	})
 }

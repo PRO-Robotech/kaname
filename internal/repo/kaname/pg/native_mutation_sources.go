@@ -68,7 +68,6 @@ func (s *nativeAdministrativeSources) producerFact(ctx context.Context, fact rel
 	if !ok || actor.Validate() != nil || (actor.Type != domain.SubjectTypeUser && actor.Type != domain.SubjectTypeServiceAccount) {
 		return false, known, relverdict.ErrAdministrativeSourceUnconfirmed
 	}
-	proof := &semanticAuthorityWriteTx{authorityWriteTx: s.w, bundle: s.bundle}
 	cursor := ""
 	var unconfirmed bool
 	for {
@@ -78,7 +77,8 @@ func (s *nativeAdministrativeSources) producerFact(ctx context.Context, fact rel
 		if err = budget.Charge(0, 1); err != nil {
 			return false, known, err
 		}
-		page, next, e := proof.producerSourcesQueryForFact(ctx, kaname.CanonicalSourceFilter{Actor: actor, After: cursor, Limit: 1}, nil, &fact)
+		page, next, e := readProducerSources(ctx, s.transaction(), s.bundle, s.requireAccountCoverage,
+			kaname.CanonicalSourceFilter{Actor: actor, After: cursor, Limit: 1}, nil, &fact)
 		if e != nil {
 			return false, known, e
 		}

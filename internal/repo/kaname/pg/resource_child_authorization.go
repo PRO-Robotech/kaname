@@ -5,6 +5,7 @@ package pg
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -66,8 +67,12 @@ func (r *ResourceDecisionRunner) captureUserChildAuthorization(ctx context.Conte
  AND current_setting('transaction_read_only')='on'`).Scan(&at); err != nil {
 		return nil, errors.Join(kaname.ErrSourceUnconfirmed, err)
 	}
+	var halves catalog.Halves
+	if err := json.Unmarshal(r.bundle.CanonicalCatalog(), &halves); err != nil {
+		return nil, errors.Join(kaname.ErrSourceUnconfirmed, err)
+	}
 	sources := &nativeAdministrativeSources{snapshot: tx, snapshotAt: at, bundle: r.bundle,
-		catalogRelations: map[[2]string]bool{{parentType, target.ParentAction}: true}}
+		catalogRelations: mutationCatalogRelations(halves)}
 	form := relverdict.NewAdministrativeAsker(tx, r.bundle, func() time.Time { return at }, sources.verify)
 	form.BindReadBudget(budget)
 	allowed, err := authzcascade.WrapAdmitted(form, personmarks.NewTransaction(tx)).Check(ctx, subject, target.ParentAction, target.ParentObject)

@@ -23,13 +23,17 @@ const maxProjectionRows = 4096
 // Никакой timestamp/boolean Ready не подменяет сравнение. Старые роли без
 // доказанной projection остаются ordinary компонентами с obligation.
 func (w *semanticAuthorityWriteTx) RoleProjectionCheckpoint(ctx context.Context, id domain.RoleID) (granteffect.ProjectionCheckpoint, kaname.SourceReadCost, error) {
+	return readRoleProjectionCheckpoint(ctx, w.tx, w.bundle, id)
+}
+
+func readRoleProjectionCheckpoint(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bundle, id domain.RoleID) (granteffect.ProjectionCheckpoint, kaname.SourceReadCost, error) {
 	cost := kaname.SourceReadCost{Reads: 1}
 	// Первый input нужен только для определения relevant modules. Полный снимок
 	// ниже перечитывает роль и сравнивает authored digest; смена правил закрыта.
 	var preliminary domain.Role
 	preliminary.ID = id
 	var perms, rules []byte
-	err := w.tx.QueryRow(ctx, `SELECT permissions,rules,is_system,coalesce(owner_module,'') FROM kaname.roles WHERE id=$1 AND live`, id).Scan(&perms, &rules, &preliminary.IsSystem, &preliminary.OwnerModule)
+	err := tx.QueryRow(ctx, `SELECT permissions,rules,is_system,coalesce(owner_module,'') FROM kaname.roles WHERE id=$1 AND live`, id).Scan(&perms, &rules, &preliminary.IsSystem, &preliminary.OwnerModule)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = kaname.ErrSourceUnconfirmed
@@ -40,7 +44,7 @@ func (w *semanticAuthorityWriteTx) RoleProjectionCheckpoint(ctx context.Context,
 	if err = scanRolePolicy(&preliminary, perms, rules); err != nil {
 		return granteffect.ProjectionCheckpoint{}, cost, err
 	}
-	expected, err := w.bundle.Projection(preliminary)
+	expected, err := bundle.Projection(preliminary)
 	if err != nil {
 		return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceUnconfirmed
 	}
@@ -48,7 +52,7 @@ func (w *semanticAuthorityWriteTx) RoleProjectionCheckpoint(ctx context.Context,
 	var pending bool
 	var snapshotRows int
 	cost.Reads++
-	err = w.tx.QueryRow(ctx, roleProjectionSnapshotSQL, id, expected.Modules, maxProjectionRows+1).Scan(&authored, &catalogRaw, &selectorRaw, &verbRaw, &capsRaw, &pending, &snapshotRows)
+	err = tx.QueryRow(ctx, roleProjectionSnapshotSQL, id, expected.Modules, maxProjectionRows+1).Scan(&authored, &catalogRaw, &selectorRaw, &verbRaw, &capsRaw, &pending, &snapshotRows)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = kaname.ErrSourceUnconfirmed
@@ -76,7 +80,7 @@ func (w *semanticAuthorityWriteTx) RoleProjectionCheckpoint(ctx context.Context,
 	if err = scanRolePolicy(&current, record.Permissions, record.Rules); err != nil {
 		return granteffect.ProjectionCheckpoint{}, cost, err
 	}
-	now, err := w.bundle.Projection(current)
+	now, err := bundle.Projection(current)
 	if err != nil || now.Checkpoint != expected.Checkpoint {
 		return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceUnconfirmed
 	}
