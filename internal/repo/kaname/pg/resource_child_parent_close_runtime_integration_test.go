@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/operations"
+	childregistration "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/child_registration"
+	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -99,10 +102,13 @@ func TestChildParentCloseRuntimeCurrentVersionReplayAndChildOrdering(t *testing.
 			if childFirst {
 				refused.ResourceID = "container-one/after-close"
 			}
-			rejected, err := runner.RunUserChildRegistration(userCtx, refused, principal)
-			require.ErrorIs(t, err, domain.ErrUserChildRegistrationRefused)
-			require.Equal(t, domain.ErrUserChildRegistrationRefused.Error(), err.Error())
-			require.True(t, rejected.IsZero())
+			handler := childregistration.NewHandler(internaliam.NewUserChildRegistration(runner))
+			rejected, err := handler.Register(userCtx, &iamv1.RegisterChildRequest{ResourceType: refused.ResourceType, ResourceId: refused.ResourceID})
+			require.Nil(t, rejected)
+			answer := status.Convert(err)
+			require.Equal(t, codes.PermissionDenied, answer.Code())
+			require.Equal(t, "permission denied", answer.Message())
+			require.Empty(t, answer.Details())
 			require.JSONEq(t, string(afterClose), string(childParentCloseSnapshot(t, r)), "закрытый родитель сохраняет состояние регистрации при durable refusal audit")
 			var denialAudits int
 			require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM kaname.audit_outbox
