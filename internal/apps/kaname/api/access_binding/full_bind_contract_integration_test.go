@@ -31,11 +31,12 @@ import (
 
 type fullBindWorld struct {
 	*atcWorld
-	roles        *roleapp.Handler
-	plans        *authzmodel.Plans
-	stages       *kanamepg.BindingStageParticipant
-	ownerBinding domain.AccessBindingID
-	observer     *pgxpool.Pool // Заимствован у fixture: закрывается существующим cleanup.
+	roles           *roleapp.Handler
+	plans           *authzmodel.Plans
+	stages          *kanamepg.BindingStageParticipant
+	ownerBinding    domain.AccessBindingID
+	sourceCallbacks *fb11SetupCallbacks
+	observer        *pgxpool.Pool // Заимствован у fixture: закрывается существующим cleanup.
 }
 
 func newFullBindWorld(t *testing.T, observers ...fullBindSelectorObserverFactory) *fullBindWorld {
@@ -90,8 +91,15 @@ func (w *fullBindWorld) request(subject domain.UserID, role domain.RoleID, targe
 func (w *fullBindWorld) source(role domain.RoleID, target *iamv1.AccessTarget) string {
 	w.t.Helper()
 	id := w.createDone(asUser(w.ctx, w.usrA), w.request(w.usrD, role, target), "FB: источник полномочий actor")
-	// Durable LRO не подменяет завершение materialization перед native Given.
-	require.NoError(w.t, w.rec.ReconcileBinding(w.ctx, domain.AccessBindingID(id)))
+	// Durable LRO не завершает detached materialization. Ждём оба настоящих
+	// прохода до следующего источника, не добавляя конкурирующий пересчёт.
+	require.NotNil(w.t, w.sourceCallbacks, "FB: источник требует наблюдателя штатной материализации")
+	require.NoError(w.t, w.sourceCallbacks.awaitSetup(w.ctx, "iam.accessBinding", id))
+	// Object callback следует за binding-forward, но его успех не скрывает
+	// ошибку первого прохода, которую Create только логирует.
+	forwardErr, completed := w.sourceCallbacks.bindingForwardResult(domain.AccessBindingID(id))
+	require.True(w.t, completed, "FB: первый binding-forward источника должен завершиться")
+	require.NoError(w.t, forwardErr, "FB: первый binding-forward источника должен материализовать выдачу")
 	return id
 }
 

@@ -29,6 +29,11 @@ import (
 
 const bindingStagePage = 256
 
+const (
+	bindingStageSpoolRows  = 64
+	bindingStageSpoolBytes = 256 * 1024
+)
+
 // BindingStageParticipant — bounded snapshot/atomic apply для настоящих full
 // binding entrypoints. kaname#1034: не D1/D2/D3 и не неявная активация carrier.
 type BindingStageParticipant struct {
@@ -351,6 +356,22 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 	}
 	store := &bindingSnapshotStore{reconcileStore: &reconcileStore{tx: tx, cat: p.facts}}
 	mirrorLocalSeen := false
+	phases := make([]int32, 0, bindingStageSpoolRows)
+	bodies := make([]string, 0, bindingStageSpoolRows)
+	bytes := 0
+	flush := func() error {
+		if len(bodies) == 0 {
+			return nil
+		}
+		// Ordinality сохраняет последовательность spool и назначаемых seq.
+		_, err := tx.Exec(ctx, `INSERT INTO pg_temp.kaname_binding_stage(phase,body)
+			SELECT item.phase, item.body::jsonb
+			FROM unnest($1::int[], $2::text[]) WITH ORDINALITY AS item(phase, body, ord)
+			ORDER BY item.ord`, phases, bodies)
+		clear(bodies)
+		phases, bodies, bytes = phases[:0], bodies[:0], 0
+		return err
+	}
 	emit := func(command reconcile.BindingCommand) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -359,12 +380,23 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 		if e != nil {
 			return e
 		}
-		phase := 0
+		var phase int32
 		if command.Kind == "delete" {
 			phase = 1
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO pg_temp.kaname_binding_stage(phase,body) VALUES($1,$2::jsonb)`, phase, data)
-		return e
+		if len(bodies) == bindingStageSpoolRows || bytes+len(data) > bindingStageSpoolBytes {
+			if e = flush(); e != nil {
+				return e
+			}
+		}
+		if len(data) > bindingStageSpoolBytes {
+			_, e = tx.Exec(ctx, `INSERT INTO pg_temp.kaname_binding_stage(phase,body) VALUES($1,$2::jsonb)`, phase, data)
+			return e
+		}
+		phases = append(phases, phase)
+		bodies = append(bodies, string(data))
+		bytes += len(data)
+		return nil
 	}
 	types := map[string]bool{}
 	for _, sel := range bs.Selectors {
@@ -487,6 +519,9 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 			}
 			after = ids[len(ids)-1]
 		}
+	}
+	if err = flush(); err != nil {
+		return nil, err
 	}
 	// Новая mirror ветвь остаётся singleton даже при смешанных IAM coordinates.
 	if mirrorLocalSeen && len(stage.accounts) != 1 {
@@ -701,6 +736,22 @@ func bindingCommandBatchBody(command reconcile.BindingCommand) (string, []any, s
 		        AS t(b, mt, mi, u, r, o)
 		 ON CONFLICT (binding_id, member_object_type, member_object_id, fga_user, relation, object) DO NOTHING`,
 			[]any{cols.binds, cols.types, cols.ids, cols.users, cols.rels, cols.objs}, "reconcile: record emitted tuples batch", true, nil
+	case "forget":
+		if len(command.Rows) == 0 || len(command.Rows) > 4096 {
+			return "", nil, "", false, nil
+		}
+		cols := newLedgerColumns(len(command.Rows))
+		for _, row := range command.Rows {
+			if err := cols.add(command.Binding, row.Member, row.Tuple); err != nil {
+				return "", nil, "", false, nil
+			}
+		}
+		return forgetEmittedTuplesSQL, []any{string(command.Binding), cols.types, cols.ids, cols.users, cols.rels, cols.objs},
+			"reconcile: forget emitted tuple", true, nil
+	case "member_delete":
+		return target_members.DeleteMemberSQL,
+			[]any{string(command.Binding), command.RuleFP, command.Member.ObjectType, command.Member.ObjectID},
+			"target_members: delete", true, nil
 	default:
 		return "", nil, "", false, nil
 	}

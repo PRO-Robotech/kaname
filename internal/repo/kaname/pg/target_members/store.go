@@ -171,6 +171,10 @@ func upsertMany(ctx context.Context, tx pgx.Tx, members []Member, statement stri
 	return flush()
 }
 
+// DeleteMemberSQL удаляет одного участника по координате правила и объекта.
+const DeleteMemberSQL = `DELETE FROM kaname.access_binding_target_members
+		  WHERE binding_id = $1 AND rule_fp = $2 AND object_type = $3 AND object_id = $4`
+
 // DeleteTx удаляет строку членства по полной координате правила (binding, role,
 // rule_fp, object) в транзакции вызывающего. Нужен при выпадении участника ACTIVE из
 // подходящего набора (сняли метку или правило): работник
@@ -179,8 +183,7 @@ func upsertMany(ctx context.Context, tx pgx.Tx, members []Member, statement stri
 // одного правила никогда не снимает участника того же объекта другого правила.
 func DeleteTx(ctx context.Context, tx pgx.Tx, bindingID, ruleFP, objectType, objectID string) error {
 	if _, err := tx.Exec(ctx,
-		`DELETE FROM kaname.access_binding_target_members
-		  WHERE binding_id = $1 AND rule_fp = $2 AND object_type = $3 AND object_id = $4`,
+		DeleteMemberSQL,
 		bindingID, ruleFP, objectType, objectID,
 	); err != nil {
 		return fmt.Errorf("target_members: delete: %w", err)

@@ -66,6 +66,28 @@ func TestBindingCommandBatchBodyMatchesOriginalStores(t *testing.T) {
 	}
 }
 
+func TestBindingCommandBatchDeleteMatchesOriginalStores(t *testing.T) {
+	member := reconcile.MemberCoord{ObjectType: "iam.group", ObjectID: "group"}
+	row := reconcile.LedgerRow{Member: member, Tuple: domain.MembershipTuple{User: "user:one", Relation: "viewer", Object: "iam_group:group"}}
+	other := row
+	other.Member.ObjectID = "other-group"
+	for _, command := range []reconcile.BindingCommand{
+		{Kind: "forget", Binding: "ab", Rows: []reconcile.LedgerRow{row, row, other}},
+		{Kind: "member_delete", Binding: "ab", RuleFP: "rule", Member: member},
+	} {
+		t.Run(command.Kind, func(t *testing.T) {
+			capture := &bindingBodyCapture{}
+			require.NoError(t, command.Apply(context.Background(), &reconcileStore{tx: capture}))
+			require.Equal(t, 1, capture.calls)
+			sql, args, _, supported, err := bindingCommandBatchBody(command)
+			require.NoError(t, err)
+			require.True(t, supported)
+			require.Equal(t, capture.statement, sql)
+			require.Equal(t, capture.args, args)
+		})
+	}
+}
+
 func TestBindingCommandBatchBodyKeepsWholeCommandBoundary(t *testing.T) {
 	for _, kind := range []string{"members", "record"} {
 		for _, size := range []int{0, 1, 4096, 4097} {
@@ -83,7 +105,7 @@ func TestBindingCommandBatchBodyKeepsWholeCommandBoundary(t *testing.T) {
 			require.Equal(t, size > 0 && size <= 4096, supported, "%s/%d", kind, size)
 		}
 	}
-	for _, kind := range []string{"write", "delete", "forget", "member_delete", "audit", "unknown"} {
+	for _, kind := range []string{"write", "delete", "forget", "audit", "unknown"} {
 		_, _, _, supported, err := bindingCommandBatchBody(reconcile.BindingCommand{Kind: kind})
 		require.NoError(t, err)
 		require.False(t, supported, kind)
@@ -91,4 +113,20 @@ func TestBindingCommandBatchBodyKeepsWholeCommandBoundary(t *testing.T) {
 	_, _, _, supported, err := bindingCommandBatchBody(reconcile.BindingCommand{Kind: "record", Refs: []reconcile.EmittedTupleRef{{}}})
 	require.NoError(t, err)
 	require.False(t, supported, "malformed record сохраняет прежний Begin перед ошибкой body")
+	row := reconcile.LedgerRow{
+		Member: reconcile.MemberCoord{ObjectType: "iam.group", ObjectID: "group"},
+		Tuple:  domain.MembershipTuple{User: "user:one", Relation: "viewer", Object: "iam_group:group"},
+	}
+	for _, size := range []int{0, 1, 4096, 4097} {
+		command := reconcile.BindingCommand{Kind: "forget", Binding: "ab", Rows: make([]reconcile.LedgerRow, size)}
+		for i := range command.Rows {
+			command.Rows[i] = row
+		}
+		_, _, _, supported, err := bindingCommandBatchBody(command)
+		require.NoError(t, err)
+		require.Equal(t, size > 0 && size <= 4096, supported, "forget/%d", size)
+	}
+	_, _, _, supported, err = bindingCommandBatchBody(reconcile.BindingCommand{Kind: "forget", Rows: []reconcile.LedgerRow{{}}})
+	require.NoError(t, err)
+	require.False(t, supported, "некорректный forget идёт через обычную последовательность Begin и проверки тела")
 }

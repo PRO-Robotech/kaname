@@ -172,6 +172,48 @@ type operationCausalRepo struct {
 	operations.FullRepo
 	observer *operationCausalObserver
 	t        *testing.T
+	terminal sync.Map
+}
+
+type operationCausalTerminal struct {
+	done chan struct{}
+	once sync.Once
+	err  error
+}
+
+func (r *operationCausalRepo) terminalFor(id string) *operationCausalTerminal {
+	if value, ok := r.terminal.Load(id); ok {
+		return value.(*operationCausalTerminal)
+	}
+	value, _ := r.terminal.LoadOrStore(id, &operationCausalTerminal{done: make(chan struct{})})
+	return value.(*operationCausalTerminal)
+}
+
+// Сигнал приходит после попытки записи результата в настоящую БД. Повторное
+// чтение по ID проверяет сохранённое состояние операции, а не событие очереди.
+func (r *operationCausalRepo) awaitOwnOperation(t *testing.T, ctx context.Context, id string) *operations.Operation {
+	t.Helper()
+	terminal := r.terminalFor(id)
+	select {
+	case <-ctx.Done():
+		r.observer.dump(t, "wait_cancelled op="+id)
+		require.NoError(t, ctx.Err())
+	case <-terminal.done:
+		require.NoError(t, terminal.err, "запись результата операции %s", id)
+	}
+	got, err := r.Get(ctx, id)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.True(t, got.Done, "операция %s не терминальна", id)
+	return got
+}
+
+func (r *operationCausalRepo) finishOperation(id string, err error) {
+	terminal := r.terminalFor(id)
+	terminal.once.Do(func() {
+		terminal.err = err
+		close(terminal.done)
+	})
 }
 
 func (r *operationCausalRepo) ClaimForExecution(ctx context.Context, id string) (bool, error) {
@@ -189,12 +231,14 @@ func (r *operationCausalRepo) MarkDone(ctx context.Context, id string, response 
 	r.observer.record("op=" + id + " mark_done_start")
 	err := r.FullRepo.MarkDone(context.WithValue(ctx, operationCausalOwnerKey{}, id), id, response)
 	r.observer.record(fmt.Sprintf("op=%s mark_done_end err=%v", id, err))
+	r.finishOperation(id, err)
 	return err
 }
 func (r *operationCausalRepo) MarkError(ctx context.Context, id string, failure *rpcstatus.Status) error {
 	r.observer.record(fmt.Sprintf("op=%s mark_error_start code=%d", id, failure.GetCode()))
 	err := r.FullRepo.MarkError(context.WithValue(ctx, operationCausalOwnerKey{}, id), id, failure)
 	r.observer.record(fmt.Sprintf("op=%s mark_error_end err=%v", id, err))
+	r.finishOperation(id, err)
 	return err
 }
 func (r *operationCausalRepo) operationWaitFailed(id string) {
