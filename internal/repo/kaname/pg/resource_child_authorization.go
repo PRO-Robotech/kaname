@@ -22,9 +22,10 @@ import (
 )
 
 type resourceChildAuthorization struct {
-	target  domain.UserChildRegistrationTarget
-	subject string
-	native  resourceNativeCapture
+	target    domain.UserChildRegistrationTarget
+	principal operations.Principal
+	subject   string
+	native    resourceNativeCapture
 }
 
 // Предварительный допуск читает текущее основание права на снимке RR.
@@ -93,7 +94,40 @@ func (r *ResourceDecisionRunner) captureUserChildAuthorization(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	return &resourceChildAuthorization{target: target, subject: subject, native: resourceNativeCapture{
+	return &resourceChildAuthorization{target: target, principal: verified, subject: subject, native: resourceNativeCapture{
 		lifetime: lifetime, boundary: boundary, budget: budget, guards: boundary.guardKeys(), epochs: boundary.epochs,
 	}}, nil
+}
+
+// Повторный допуск использует часы этой транзакции и точный вопрос из RR.
+// Смена цели или принципала не запускает новое чтение.
+func (a *resourceChildAuthorization) checkFinal(ctx context.Context, writer *authorityWriteTx, subject, relation, object string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if a == nil || a.native.lifetime == nil || a.native.boundary == nil || a.native.budget == nil ||
+		!a.native.lifetime.valid(writer, a.native.lifetime.bundle) {
+		return false, kaname.ErrSourceUnconfirmed
+	}
+	principal, ok := operations.PrincipalFromContextOK(ctx)
+	if !ok || principal != a.principal || subject != a.subject || relation != a.target.ParentAction || object != a.target.ParentObject {
+		return false, domain.ErrUserChildRegistrationRefused
+	}
+	budget := a.native.budget
+	writer.producerBudget = budget
+	writer.nativeRead = &protectedNativeRead{boundary: a.native.boundary, global: writer.fence.mode == kaname.AuthorityFenceGlobal, budget: budget}
+	semantic := newSemanticAuthorityWriter(writer, a.native.lifetime.bundle)
+	allowed, err := semantic.SemanticRelationChecker().Check(ctx, subject, relation, object)
+	if err != nil || !allowed {
+		return false, err
+	}
+	actor := domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(principal.ID)}
+	cost, err := semantic.AdmitSourceActor(ctx, actor)
+	if budgetErr := chargeNativePolicyBudget(budget, cost.Rows, cost.Reads); budgetErr != nil {
+		err = errors.Join(err, budgetErr)
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
