@@ -27,8 +27,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUserChildStageRRCapturesAuthorizedModuleParentAndAbsentChild(t *testing.T) {
-	r, _ := writerProtocolRigBeforePreparation(t)
+func childStageFixture(t *testing.T) (protocolRig, *kanamepg.Repository, registrationscene.Scene, operations.Principal) {
+	t.Helper()
+	r, owner := writerProtocolRigBeforePreparation(t)
 	const declaration = `apiVersion: iam/v1
 module: childstage
 resources:
@@ -83,7 +84,7 @@ resources:
 	facts, err := catalog.NewFacts(halves)
 	require.NoError(t, err)
 	scene := registrationscene.Seed(t, r.ctx, r.admin)
-	const parentID, childID = "container-one", "container-one/candidate"
+	const parentID = "container-one"
 	version := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 	_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.resource_mirror(object_type,object_id,parent_account_id,parent_project_id,source_version)
  VALUES('childstage.container',$1,$2,$3,$4)`, parentID, scene.Account, scene.Project, version)
@@ -112,7 +113,12 @@ resources:
  AND fga_user=$3 AND relation='child_registrar' AND object=$4`, binding, parentID, "user:"+actor, "childstage_container:"+parentID).Scan(&holders))
 	require.Positive(t, holders, "предпосылка: настоящий producer подтвердил право на модульном родителе")
 
-	principal := operations.Principal{Type: "user", ID: actor}
+	return r, owner, scene, operations.Principal{Type: "user", ID: actor}
+}
+
+func TestUserChildStageRRCapturesAuthorizedModuleParentAndAbsentChild(t *testing.T) {
+	const parentID, childID = "container-one", "container-one/candidate"
+	r, _, scene, principal := childStageFixture(t)
 	ctx := operations.WithPrincipal(r.ctx, principal)
 	tx, err := r.runtime.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	require.NoError(t, err)
@@ -151,7 +157,7 @@ resources:
 		} `json:"catalogs"`
 	}
 	require.NoError(t, json.Unmarshal(probe.Envelope, &envelope))
-	require.Equal(t, actor, envelope.Actor)
+	require.Equal(t, principal.ID, envelope.Actor)
 	require.Contains(t, envelope.NativeGuards, "*")
 	require.Contains(t, envelope.NativeEpochs, "*")
 	require.Equal(t, []domain.AccountID{domain.AccountID(scene.Account)}, envelope.Registration)
