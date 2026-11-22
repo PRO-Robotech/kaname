@@ -147,6 +147,8 @@ func rid07MatrixWithPublic(t *testing.T, exact bool, consumer rid07LivePublicCon
 					publicConsumer = rid07DefaultNewmanConsumer(t, w, publicInput)
 				}
 				if publicConsumer != nil {
+					// Исходный снимок требует завершённых проекций того же запуска.
+					rid09AwaitBaseRoleProjections(t, f.given.ctx, w.deliveryProcess)
 					publicConsumer(t, w, publicInput, "before")
 				}
 				if exact {
