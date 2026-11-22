@@ -148,6 +148,7 @@ var cvCallerValueSpec = map[string]struct{}{
 	"catalog_module_applied_revision_positive":             {},
 	"catalog_module_nonempty":                              {},
 	"catalog_module_undotted":                              {},
+	"catalog_resource_child_registration_form":             {},
 	"catalog_resource_module_undotted":                     {},
 	"catalog_resource_nonempty":                            {},
 	"catalog_resource_object_type_form":                    {},

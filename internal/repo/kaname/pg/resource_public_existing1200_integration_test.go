@@ -165,7 +165,24 @@ func TestResourcePublicCutoverUpgradesExisting1200(t *testing.T) {
 		require.NoError(t, runtime.QueryRow(ctx, `SELECT has_function_privilege(current_user,'kaname.'||$1,'EXECUTE')`, signature).Scan(&allowed))
 		require.False(t, allowed, "private compiler %s остаётся закрытым", signature)
 	}
-	require.JSONEq(t, string(before), string(resourceExisting1200State(t, ctx, db)), "tenant/catalog/bundle/phase/epochs сохранены без повторного seed/reset")
+	// Новая колонка не включает прежние ресурсы в пользовательскую регистрацию.
+	// Нормализуем проверенное добавление NULL и сравниваем все остальные поля
+	// и строки с состоянием до миграций.
+	var after map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(resourceExisting1200State(t, ctx, db), &after))
+	var resources []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(after["catalog_resources"], &resources))
+	require.NotEmpty(t, resources)
+	for _, resource := range resources {
+		require.Contains(t, resource, "child_registration", "upgrade добавил колонку политики")
+		require.JSONEq(t, "null", string(resource["child_registration"]), "прежний ресурс не получил неявный opt-in")
+		delete(resource, "child_registration")
+	}
+	after["catalog_resources"], err = json.Marshal(resources)
+	require.NoError(t, err)
+	normalizedAfter, err := json.Marshal(after)
+	require.NoError(t, err)
+	require.JSONEq(t, string(before), string(normalizedAfter), "tenant/catalog/bundle/phase/epochs сохранены без повторного seed/reset")
 	var retainedHistory json.RawMessage
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT jsonb_agg(to_jsonb(v) ORDER BY id)
  FROM public.goose_db_version v
