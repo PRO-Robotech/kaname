@@ -221,7 +221,7 @@ BEGIN
  logical_reads:=logical_reads+captured.logical_reads;
  IF candidates IS NOT NULL AND captured.witness->>'closed_at' IS NULL THEN
   -- Канонические helpers удерживают audit ID, очередь пересчёта и отношения
-  -- до выбора версии. Journal и outbox ещё требуют привязки к финальному payload.
+  -- до выбора версии. Слот outbox получает точный payload после выбора версии.
   SELECT * INTO STRICT audit_result FROM kaname._authority_resource_audit_wait_v2(
    jsonb_build_object(intent->>'audit_id',true),p_rows-logical_rows,p_reads-logical_reads);
   logical_rows:=logical_rows+audit_result.logical_rows;
@@ -242,7 +242,14 @@ BEGIN
    jsonb_build_object('oid','kaname.authority_child_parent_state'::regclass::oid,'mode','RowExclusiveLock'),
    jsonb_build_object('oid','kaname.authority_child_creation'::regclass::oid,'mode','RowExclusiveLock'));
   held_advisory:=held_advisory||audit_result.lock_witness||reconcile_result.held_advisory;
-  reservations:=jsonb_build_object('audit_id',intent->'audit_id','reconcile_ids',reconcile_result.reserved_ids);
+  logical_reads:=logical_reads+kaname._authority_sequence_reserve_v3('resource',
+   jsonb_build_array(jsonb_build_object('table','fga_outbox','ordinal',1,
+    'origin',jsonb_build_object('family','resource.registration','ordinal',1),
+    'row','{}'::jsonb,'stamp','transaction')),p_reads-logical_reads);
+  PERFORM kaname._authority_sequence_freeze_v3(jsonb_build_object('kind','child_registration',
+   'intent',intent,'tuple',candidates#>'{certificate,tuple}'));
+  reservations:=jsonb_build_object('audit_id',intent->'audit_id',
+   'reconcile_ids',reconcile_result.reserved_ids,'fga_slot',1);
  END IF;
  SELECT jsonb_object_agg(key,source_index->key) INTO held_source_index FROM jsonb_object_keys(required) key;
  prepared:=jsonb_build_object('intent',intent,'witness',captured.witness,'native_epochs',checked_epochs,

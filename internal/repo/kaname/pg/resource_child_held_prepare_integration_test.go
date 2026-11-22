@@ -152,7 +152,7 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		require.LessOrEqual(t, rows, 100000)
 		require.LessOrEqual(t, reads, 4096)
 		type relationLock struct {
-			OID  uint32 `json:"oid"`
+			OID  uint32 `json:"oid,string"`
 			Mode string `json:"mode"`
 		}
 		var state struct {
@@ -176,6 +176,7 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 			Reservations struct {
 				AuditID      string  `json:"audit_id"`
 				ReconcileIDs []int64 `json:"reconcile_ids"`
+				FGASlot      int     `json:"fga_slot"`
 			} `json:"reservations"`
 			HeldRelations []relationLock `json:"held_relations"`
 		}
@@ -196,6 +197,34 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 		require.Equal(t, intent.AuditID, state.Reservations.AuditID)
 		require.Len(t, state.Reservations.ReconcileIDs, 1)
 		require.Positive(t, state.Reservations.ReconcileIDs[0])
+		require.Equal(t, 1, state.Reservations.FGASlot)
+		var programRaw []byte
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname._authority_sequence_store_v3()`).Scan(&programRaw))
+		var sequence struct {
+			Family   string          `json:"family"`
+			Selected json.RawMessage `json:"selected"`
+			Frozen   struct {
+				Kind   string          `json:"kind"`
+				Intent json.RawMessage `json:"intent"`
+			} `json:"frozen"`
+			Maximum []struct {
+				Table      string          `json:"table"`
+				Ordinal    int             `json:"ordinal"`
+				ReservedID int64           `json:"reserved_id"`
+				Row        json.RawMessage `json:"row"`
+			} `json:"maximum"`
+		}
+		require.NoError(t, json.Unmarshal(programRaw, &sequence))
+		require.Equal(t, "resource", sequence.Family)
+		require.JSONEq(t, "null", string(sequence.Selected))
+		require.Equal(t, "child_registration", sequence.Frozen.Kind)
+		require.JSONEq(t, string(proposed.Intent), string(sequence.Frozen.Intent))
+		require.Len(t, sequence.Maximum, 1)
+		fga := sequence.Maximum[0]
+		require.Equal(t, "fga_outbox", fga.Table)
+		require.Equal(t, state.Reservations.FGASlot, fga.Ordinal)
+		require.Positive(t, fga.ReservedID)
+		require.JSONEq(t, "{}", string(fga.Row))
 		for _, relation := range state.HeldRelations {
 			var held bool
 			require.NoError(t, tx.QueryRow(r.ctx, `SELECT EXISTS(
@@ -208,13 +237,15 @@ func TestUserChildHeldPreparationRequiresSignedOwnerAndEqualRRSources(t *testing
 			require.NoError(t, tx.QueryRow(r.ctx, `SELECT $1::text::regclass::oid`, "kaname."+name).Scan(&oid))
 			require.Contains(t, state.HeldRelations, relationLock{OID: oid, Mode: "RowExclusiveLock"})
 		}
-		var auditExists, reconcileExists bool
+		var auditExists, reconcileExists, fgaExists bool
 		require.NoError(t, tx.QueryRow(r.ctx, `SELECT
  EXISTS(SELECT 1 FROM kaname.audit_outbox WHERE id=$1),
- EXISTS(SELECT 1 FROM kaname.resource_reconcile_outbox WHERE id=$2)`,
-			intent.AuditID, state.Reservations.ReconcileIDs[0]).Scan(&auditExists, &reconcileExists))
+ EXISTS(SELECT 1 FROM kaname.resource_reconcile_outbox WHERE id=$2),
+ EXISTS(SELECT 1 FROM kaname.fga_outbox WHERE id=$3)`,
+			intent.AuditID, state.Reservations.ReconcileIDs[0], fga.ReservedID).Scan(&auditExists, &reconcileExists, &fgaExists))
 		require.False(t, auditExists)
 		require.False(t, reconcileExists)
+		require.False(t, fgaExists)
 		// После подготовки точные OUTPUT epoch keys удерживаются для записи.
 		// Scope берём из того же реального родителя, который проверил hold.
 		var account, project, childEpoch string
