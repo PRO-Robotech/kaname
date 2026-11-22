@@ -1,0 +1,33 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/user-child-registration.md
+  task: PRO-Robotech/kaname#1045
+  sha256: ccc2e0fe781b05dbd4fda12bab5e654139b41299c9b4e64f371bf6f5d76d86fd
+  content_commit: d6a906b6eb81d39bc0cb175ebb5c64501160bbba
+  static_status: DRAFT
+reviewer_role: acceptance-reviewer
+reviewer_agent: /root/live_catalog_reader_audit
+reviewed_at: '2026-11-22T15:54:01.829319+00:00'
+verdict: APPROVED
+verdict_note: Независимое статическое ревью точной редакции. Все восемь условий безопасности
+  сопоставлены с 11 сценариями. Блокирующих замечаний к спецификации нет.
+blocking: []
+coverage:
+- 'Единственный источник родителя, запрет второго parent и перепривязки, серверный
+  вывод цепи: 1045-01 и 1045-03.'
+- 'Отдельный глагол, только связь parent, создатель в аудите: 1045-01 и 1045-02.'
+- 'Проверка права перед чтением состояния и единый отказ: 1045-04 и 1045-05.'
+- 'Пределы, счётчики, закрытие, оба порядка гонки и каскад: 1045-05–1045-08.'
+- 'Грамматика, серверная версия, предел пользовательской операции и совместимость:
+  1045-09–1045-11.'
+runtime_proof_performed: false
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  reason: Внешнее событие полномочия в задаче не публиковалось. Запись фиксирует независимый
+    вердикт о содержании документа.
+event:
+  status: not_performed
+  type: none

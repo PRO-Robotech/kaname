@@ -1,6 +1,7 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 -- kaname#1045: связывание зарезервированного FGA слота с программой создания.
+-- Приёмка: docs/engineering/acceptance/user-child-registration.md
 -- +goose Up
 -- +goose StatementBegin
 DO $$ BEGIN PERFORM kaname.authority_protocol_drain(); END $$;
