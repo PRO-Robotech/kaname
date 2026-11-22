@@ -28,6 +28,9 @@ effective_approval:
   ban1_lifted: false
   reason: Внешнее событие полномочия в задаче не публиковалось. Запись фиксирует независимый
     вердикт о содержании документа.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
 event:
   status: not_performed
   type: none
