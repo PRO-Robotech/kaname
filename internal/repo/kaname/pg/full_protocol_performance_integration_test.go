@@ -788,7 +788,7 @@ func TestFullProtocolPublicThroughputMeasurements(t *testing.T) {
 // Общего SQL parser, regex/function allowlist или разрешения по имени CTE нет.
 func fullMeasurementReadonly(sql string) (bool, string) {
 	switch fmt.Sprintf("%x", sha256.Sum256([]byte(sql))) {
-	case "05bb3146e66ddbf782475d0e7db9657248a5de49dcb956f1dc0fd2438fbc3556":
+	case "1a24b8cfceb824c559f63e79ffcc715410288d46dde8d36fa2c0e29187395fdb":
 		return true, "role projection checkpoint: readonly CTE aggregates"
 	case "119e3ced2574c25f01ae859f8091de69ca09b977e643d41905fe12bff48b77ae":
 		return true, "personmarks: bound user verification marks"
@@ -878,7 +878,7 @@ func TestFullMeasurementReadonlyBoundary(t *testing.T) {
 	// Фиксированные bytes всех двенадцати actual templates; ожидаемый hash
 	// независим от вычисления в gate. Никакого чтения evidence с runtime-диска.
 	positives := []struct{ hash, sql string }{
-		{"05bb3146e66ddbf782475d0e7db9657248a5de49dcb956f1dc0fd2438fbc3556", `
+		{"1a24b8cfceb824c559f63e79ffcc715410288d46dde8d36fa2c0e29187395fdb", `
 WITH module_rows AS (SELECT module,live FROM kaname.catalog_module WHERE module=ANY($2::text[]) LIMIT $3),
  resource_rows AS (SELECT * FROM kaname.catalog_resource WHERE module=ANY($2::text[]) LIMIT $3),
  verb_rows AS (SELECT * FROM kaname.catalog_verb WHERE module=ANY($2::text[]) LIMIT $3),
@@ -898,10 +898,10 @@ WITH module_rows AS (SELECT module,live FROM kaname.catalog_module WHERE module=
 SELECT jsonb_build_object('Permissions',r.permissions,'Rules',r.rules,'IsSystem',r.is_system,'OwnerModule',coalesce(r.owner_module,'')),
 jsonb_build_object(
  'Live',jsonb_build_object('Modules',coalesce((SELECT jsonb_agg(module) FROM module_rows WHERE live),'[]'),
- 'Resources',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'ObjectType',object_type,'ParentTypes',parent_types,'ParentNames',parent_names,'Writes',writes,'PublicReadToChildren',public_read_to_children,'PermanentProject',permanent_project)) FROM resource_rows WHERE live),'[]'),
+ 'Resources',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'ObjectType',object_type,'ParentTypes',parent_types,'ParentNames',parent_names,'Writes',writes,'PublicReadToChildren',public_read_to_children,'PermanentProject',permanent_project,'ChildRegistration',child_registration)) FROM resource_rows WHERE live),'[]'),
  'Verbs',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'Verb',verb,'PerObject',per_object,'ContainerParent',coalesce(container_parent,''),'ContainerRelation',coalesce(container_relation,''))) FROM verb_rows WHERE live),'[]')),
  'Retired',jsonb_build_object('Modules',coalesce((SELECT jsonb_agg(module) FROM module_rows WHERE NOT live),'[]'),
- 'Resources',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'ObjectType',object_type,'SupersededBy',coalesce(superseded_by,''))) FROM resource_rows WHERE NOT live),'[]'),
+ 'Resources',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'ObjectType',object_type,'SupersededBy',coalesce(superseded_by,''),'ChildRegistration',child_registration)) FROM resource_rows WHERE NOT live),'[]'),
  'Verbs',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'Verb',verb,'PerObject',per_object,'ContainerParent',coalesce(container_parent,''),'ContainerRelation',coalesce(container_relation,''))) FROM verb_rows WHERE NOT live),'[]'))),
 coalesce((SELECT jsonb_agg(jsonb_build_object('RuleFP',rule_fp,'Arm',CASE arm WHEN 'names' THEN 1 WHEN 'labels' THEN 2 ELSE 0 END,'ObjectTypes',object_types,'ResourceNames',resource_names,'MatchLabels',match_labels,'Grants',verbs_by_type,'CreatedBySubject',created_by_subject,
  'Container',CASE WHEN container_type IS NULL THEN NULL ELSE jsonb_build_object('Type',container_type,'Arm',CASE container_arm WHEN 'names' THEN 1 WHEN 'labels' THEN 2 ELSE 0 END,'ResourceNames',container_resource_names,'MatchLabels',container_match_labels) END)) FROM selector_rows),'[]'),
@@ -1370,7 +1370,7 @@ func fullMeasurementCheck(t *testing.T, r protocolRig, trace *fullMeasurementTra
 				reason = "unproven pg_catalog resolution or visible user overload"
 			}
 		}
-		if ok && fmt.Sprintf("%x", sha256.Sum256([]byte(q.SQL))) == "05bb3146e66ddbf782475d0e7db9657248a5de49dcb956f1dc0fd2438fbc3556" {
+		if ok && fmt.Sprintf("%x", sha256.Sum256([]byte(q.SQL))) == "1a24b8cfceb824c559f63e79ffcc715410288d46dde8d36fa2c0e29187395fdb" {
 			resolutionCtx := context.WithValue(ctx, fullMeasurementLabel{}, label+"_builtin_resolution")
 			var resolutionErr error
 			ok, resolutionErr = fullMeasurementProjectionBuiltinResolution(resolutionCtx, conn)

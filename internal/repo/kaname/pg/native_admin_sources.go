@@ -92,8 +92,36 @@ func newLiveAdministrativeChecker(w *authorityWriteTx, bundle *granteffect.Bundl
 
 type nativeAdministrativeSources struct {
 	w                *authorityWriteTx
+	snapshot         pgx.Tx
+	snapshotAt       time.Time
 	bundle           *granteffect.Bundle
 	catalogRelations map[[2]string]bool
+}
+
+func (s *nativeAdministrativeSources) transaction() pgx.Tx {
+	if s.w != nil {
+		return s.w.tx
+	}
+	return s.snapshot
+}
+
+func (s *nativeAdministrativeSources) decisionAt() time.Time {
+	if s.w != nil {
+		return s.w.fence.decisionAt
+	}
+	return s.snapshotAt
+}
+
+func (s *nativeAdministrativeSources) requireAccountCoverage(account domain.AccountID) error {
+	if s.w != nil {
+		return s.w.canonicalCoverage(account)
+	}
+	// Снимок RR используется только для предварительного чтения. Покрытие
+	// проверяется отдельно на фактически ограждённой транзакции записи.
+	if s.snapshot == nil || s.snapshotAt.IsZero() {
+		return kaname.ErrSourceUnconfirmed
+	}
+	return nil
 }
 
 func administrativeRelation(relation string) bool {
@@ -104,18 +132,18 @@ func administrativeRelation(relation string) bool {
 	return false
 }
 
-// Только закрытая таблица типов producer и канонический cluster. Имя
-// admin у iam_role — tier объекта, но его source проверяется тем же producer,
-// а не принимается как account-admin и не отвергается из-за одного префикса.
-func administrativeObjectType(typ string) bool {
-	if typ == "cluster" {
-		return true
+// Типы из каталога допускаются только для точного действия на родителе
+// запроса. Остальные источники используют существующую таблицу типов.
+func (s *nativeAdministrativeSources) objectDotted(f relverdict.AdministrativeFact) (string, bool) {
+	if dotted, ok := authzmap.DottedType(f.ObjectType); ok && dotted != "" {
+		return dotted, true
 	}
-	dotted, ok := authzmap.DottedType(typ)
-	if !ok {
-		return false
+	if f.Relation != f.QuestionRelation || f.ObjectType != f.QuestionObjectType ||
+		f.ObjectID != f.QuestionObjectID || !strings.HasPrefix(f.QuestionSubject, "user:") {
+		return "", false
 	}
-	return dotted != ""
+	dotted, ok := s.bundle.ChildRegistrationParentDotted(f.ObjectType, f.Relation)
+	return dotted, ok && domain.FeedSourceForType(dotted) == domain.FeedMirror
 }
 
 func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.AdministrativeFact, budget *relverdict.AdministrativeReadBudget) (bool, error) {
@@ -130,7 +158,8 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 		}
 		return true, nil
 	}
-	if !administrativeObjectType(f.ObjectType) {
+	dotted, supported := s.objectDotted(f)
+	if f.ObjectType != "cluster" && !supported {
 		return false, relverdict.ErrAdministrativeSourceUnconfirmed
 	}
 	if f.ConditionName != "" || len(f.ConditionParameters) != 0 {
@@ -149,7 +178,7 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 		return false, err
 	}
 	var exists bool
-	err := s.w.tx.QueryRow(ctx, `SELECT CASE $1 WHEN 'user' THEN EXISTS(SELECT 1 FROM kaname.users WHERE id=$2) WHEN 'service_account' THEN EXISTS(SELECT 1 FROM kaname.service_accounts WHERE id=$2) WHEN 'group' THEN EXISTS(SELECT 1 FROM kaname.groups WHERE id=$2) WHEN 'system_class' THEN $2 IN ('anonymous','authenticated') ELSE false END`, typ, id).Scan(&exists)
+	err := s.transaction().QueryRow(ctx, `SELECT CASE $1 WHEN 'user' THEN EXISTS(SELECT 1 FROM kaname.users WHERE id=$2) WHEN 'service_account' THEN EXISTS(SELECT 1 FROM kaname.service_accounts WHERE id=$2) WHEN 'group' THEN EXISTS(SELECT 1 FROM kaname.groups WHERE id=$2) WHEN 'system_class' THEN $2 IN ('anonymous','authenticated') ELSE false END`, typ, id).Scan(&exists)
 	if err != nil || !exists {
 		return false, err
 	}
@@ -161,23 +190,19 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 	var account string
 	switch f.ObjectType {
 	case "account":
-		err = s.w.tx.QueryRow(ctx, `SELECT id FROM kaname.accounts WHERE id=$1`, f.ObjectID).Scan(&account)
+		err = s.transaction().QueryRow(ctx, `SELECT id FROM kaname.accounts WHERE id=$1`, f.ObjectID).Scan(&account)
 	case "project":
-		err = s.w.tx.QueryRow(ctx, `SELECT account_id FROM kaname.projects WHERE id=$1`, f.ObjectID).Scan(&account)
+		err = s.transaction().QueryRow(ctx, `SELECT account_id FROM kaname.projects WHERE id=$1`, f.ObjectID).Scan(&account)
 	case "cluster":
-		err = s.w.tx.QueryRow(ctx, `SELECT ''::text FROM kaname.clusters WHERE id=$1`, f.ObjectID).Scan(&account)
+		err = s.transaction().QueryRow(ctx, `SELECT ''::text FROM kaname.clusters WHERE id=$1`, f.ObjectID).Scan(&account)
 	default:
-		dotted, known := authzmap.DottedType(f.ObjectType)
-		if !known {
-			return false, relverdict.ErrAdministrativeSourceUnconfirmed
-		}
-		store := &reconcileStore{tx: s.w.tx, decisionAt: s.w.fence.decisionAt}
+		store := &reconcileStore{tx: s.transaction(), decisionAt: s.decisionAt()}
 		object, found, readErr := s.currentObject(ctx, store, dotted, f.ObjectID, budget)
 		if readErr != nil || !found {
 			return false, readErr
 		}
 		for _, parent := range object.ParentAccountIDs {
-			if err = s.w.canonicalCoverage(domain.AccountID(parent)); err != nil {
+			if err = s.requireAccountCoverage(domain.AccountID(parent)); err != nil {
 				return false, err
 			}
 		}
@@ -190,13 +215,13 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 	if err != nil {
 		return false, err
 	}
-	if err = s.w.canonicalCoverage(domain.AccountID(account)); err != nil {
+	if err = s.requireAccountCoverage(domain.AccountID(account)); err != nil {
 		return false, err
 	}
 	known := false
 	var unconfirmed bool
 	if f.ObjectType == "account" {
-		if err = s.w.canonicalCoverage(domain.AccountID(f.ObjectID)); err != nil {
+		if err = s.requireAccountCoverage(domain.AccountID(f.ObjectID)); err != nil {
 			return false, err
 		}
 		if f.Relation == "owner" {
@@ -204,7 +229,7 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 				return false, err
 			}
 			var live bool
-			err = s.w.tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.accounts a JOIN kaname.users u ON u.id=a.owner_user_id WHERE a.id=$1 AND $2='user' AND a.owner_user_id=$3)`, f.ObjectID, typ, id).Scan(&live)
+			err = s.transaction().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.accounts a JOIN kaname.users u ON u.id=a.owner_user_id WHERE a.id=$1 AND $2='user' AND a.owner_user_id=$3)`, f.ObjectID, typ, id).Scan(&live)
 			if err != nil || live {
 				return live, err
 			}
@@ -216,7 +241,7 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 			return false, err
 		}
 		var live bool
-		err = s.w.tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.cluster_admin_grants WHERE cluster_id=$1 AND subject_type=$2 AND subject_id=$3 AND (granted_until IS NULL OR granted_until>$4))`, f.ObjectID, typ, id, s.w.fence.decisionAt).Scan(&live)
+		err = s.transaction().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.cluster_admin_grants WHERE cluster_id=$1 AND subject_type=$2 AND subject_id=$3 AND (granted_until IS NULL OR granted_until>$4))`, f.ObjectID, typ, id, s.decisionAt()).Scan(&live)
 		if err != nil || live {
 			return live, err
 		}
@@ -241,7 +266,7 @@ func (s *nativeAdministrativeSources) verify(ctx context.Context, f relverdict.A
 		if err = budget.Charge(0, 1); err != nil {
 			return false, err
 		}
-		rows, e := s.w.tx.Query(ctx, `SELECT binding_id,member_object_type,member_object_id FROM kaname.access_binding_emitted_tuples WHERE fga_user=$1 AND relation=$2 AND object=$3 AND (binding_id COLLATE "C",member_object_type COLLATE "C",member_object_id COLLATE "C")>($4::text COLLATE "C",$5::text COLLATE "C",$6::text COLLATE "C") ORDER BY binding_id COLLATE "C",member_object_type COLLATE "C",member_object_id COLLATE "C" LIMIT 256`, f.Subject, f.Relation, f.ObjectType+":"+f.ObjectID, cursor[0], cursor[1], cursor[2])
+		rows, e := s.transaction().Query(ctx, `SELECT binding_id,member_object_type,member_object_id FROM kaname.access_binding_emitted_tuples WHERE fga_user=$1 AND relation=$2 AND object=$3 AND (binding_id COLLATE "C",member_object_type COLLATE "C",member_object_id COLLATE "C")>($4::text COLLATE "C",$5::text COLLATE "C",$6::text COLLATE "C") ORDER BY binding_id COLLATE "C",member_object_type COLLATE "C",member_object_id COLLATE "C" LIMIT 256`, f.Subject, f.Relation, f.ObjectType+":"+f.ObjectID, cursor[0], cursor[1], cursor[2])
 		if e != nil {
 			return false, e
 		}
@@ -295,20 +320,20 @@ func (s *nativeAdministrativeSources) bindingProduces(ctx context.Context, id do
 	if err := budget.Charge(1, 1); err != nil {
 		return false, err
 	}
-	b, err := scanAB(s.w.tx.QueryRow(ctx, `SELECT `+abCols+` FROM kaname.access_bindings WHERE id=$1`, id))
+	b, err := scanAB(s.transaction().QueryRow(ctx, `SELECT `+abCols+` FROM kaname.access_bindings WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if b.Status != domain.AccessBindingStatusActive || b.RevokedAt != nil || (b.ExpiresAt != nil && !b.ExpiresAt.After(s.w.fence.decisionAt)) {
+	if b.Status != domain.AccessBindingStatusActive || b.RevokedAt != nil || (b.ExpiresAt != nil && !b.ExpiresAt.After(s.decisionAt())) {
 		return false, nil
 	}
 	if err = budget.Charge(0, 1); err != nil {
 		return false, err
 	}
-	rows, err := s.w.tx.Query(ctx, `SELECT subject_type,subject_id FROM kaname.access_binding_subjects WHERE binding_id=$1 ORDER BY subject_type,subject_id LIMIT 33`, id)
+	rows, err := s.transaction().Query(ctx, `SELECT subject_type,subject_id FROM kaname.access_binding_subjects WHERE binding_id=$1 ORDER BY subject_type,subject_id LIMIT 33`, id)
 	if err != nil {
 		return false, err
 	}
@@ -346,7 +371,7 @@ func (s *nativeAdministrativeSources) bindingProduces(ctx context.Context, id do
 		return false, err
 	}
 	var live bool
-	role, err := scanRoleWithTrailing(s.w.tx.QueryRow(ctx, `SELECT `+roleCols+`,live FROM kaname.roles WHERE id=$1`, b.RoleID), &live)
+	role, err := scanRoleWithTrailing(s.transaction().QueryRow(ctx, `SELECT `+roleCols+`,live FROM kaname.roles WHERE id=$1`, b.RoleID), &live)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -357,8 +382,7 @@ func (s *nativeAdministrativeSources) bindingProduces(ctx context.Context, id do
 		return false, nil
 	}
 	role.Lifecycle.State = domain.RoleLifecycleDeclared
-	proof := &semanticAuthorityWriteTx{authorityWriteTx: s.w, bundle: s.bundle}
-	checkpoint, cost, err := proof.RoleProjectionCheckpoint(ctx, role.ID)
+	checkpoint, cost, err := readRoleProjectionCheckpoint(ctx, s.transaction(), s.bundle, role.ID)
 	if charge := budget.Charge(cost.Rows, cost.Reads); charge != nil {
 		return false, charge
 	}
@@ -400,8 +424,8 @@ func (s *nativeAdministrativeSources) bindingProduces(ctx context.Context, id do
 	if err = budget.Charge(1, 1); err != nil {
 		return false, err
 	}
-	store := &reconcileStore{tx: s.w.tx, cat: facts, decisionAt: s.w.fence.decisionAt}
-	dotted, ok := authzmap.DottedType(f.ObjectType)
+	store := &reconcileStore{tx: s.transaction(), cat: facts, decisionAt: s.decisionAt()}
+	dotted, ok := s.objectDotted(f)
 	if !ok {
 		return false, relverdict.ErrAdministrativeSourceUnconfirmed
 	}
@@ -410,7 +434,7 @@ func (s *nativeAdministrativeSources) bindingProduces(ctx context.Context, id do
 		return false, err
 	}
 	for _, account := range object.ParentAccountIDs {
-		if err = s.w.canonicalCoverage(domain.AccountID(account)); err != nil {
+		if err = s.requireAccountCoverage(domain.AccountID(account)); err != nil {
 			return false, err
 		}
 	}
@@ -452,7 +476,7 @@ func (s *nativeAdministrativeSources) currentAncestors(ctx context.Context, dott
 		if err := budget.Charge(0, 1); err != nil {
 			return nil, err
 		}
-		rows, err := s.w.tx.Query(ctx, `SELECT pe.depth,m.object_type,m.object_id,m.parent_project_id,
+		rows, err := s.transaction().Query(ctx, `SELECT pe.depth,m.object_type,m.object_id,m.parent_project_id,
  COALESCE(NULLIF(m.parent_account_id,''),pj.account_id,''),m.labels
  FROM kaname.catalog_resource co
  JOIN kaname.resource_parent_edge pe ON pe.object_type=co.object_type AND pe.object_id=$2
@@ -482,7 +506,7 @@ func (s *nativeAdministrativeSources) currentAncestors(ctx context.Context, dott
 			if account != "" {
 				o.ParentAccountIDs = []string{account}
 			}
-			if err = s.w.canonicalCoverage(domain.AccountID(account)); err != nil {
+			if err = s.requireAccountCoverage(domain.AccountID(account)); err != nil {
 				break
 			}
 			typ, key = o.ObjectType, o.ObjectID
@@ -508,7 +532,7 @@ func (s *nativeAdministrativeSources) currentAncestors(ctx context.Context, dott
 func (s *nativeAdministrativeSources) currentUserObject(ctx context.Context, id string, budget *relverdict.AdministrativeReadBudget) (domain.MirrorObject, bool, error) {
 	o := domain.MirrorObject{ObjectType: "iam.user", ObjectID: id}
 	var labels []byte
-	err := s.w.tx.QueryRow(ctx, `SELECT labels FROM kaname.users WHERE id=$1`, id).Scan(&labels)
+	err := s.transaction().QueryRow(ctx, `SELECT labels FROM kaname.users WHERE id=$1`, id).Scan(&labels)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, false, nil
 	}
@@ -526,7 +550,7 @@ func (s *nativeAdministrativeSources) currentUserObject(ctx context.Context, id 
 		if err = budget.Charge(0, 1); err != nil {
 			return o, false, err
 		}
-		rows, e := s.w.tx.Query(ctx, `SELECT account_id FROM kaname.memberships WHERE user_id=$1 AND COALESCE(account_id,'')<>'' AND account_id COLLATE "C">$2 COLLATE "C" ORDER BY account_id COLLATE "C" LIMIT 256`, id, cursor)
+		rows, e := s.transaction().Query(ctx, `SELECT account_id FROM kaname.memberships WHERE user_id=$1 AND COALESCE(account_id,'')<>'' AND account_id COLLATE "C">$2 COLLATE "C" ORDER BY account_id COLLATE "C" LIMIT 256`, id, cursor)
 		if e != nil {
 			return o, false, e
 		}

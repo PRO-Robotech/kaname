@@ -80,6 +80,11 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	if svcs != nil && svcs.grantDelegationHandler != nil {
 		iamv1.RegisterGrantDelegationServiceServer(srv, svcs.grantDelegationHandler)
 	}
+	// Полномочие человека на родителе: обработчик появляется только после
+	// FULL startup. Внутренний слушатель эту службу не регистрирует.
+	if svcs != nil && svcs.childRegistrationHandler != nil {
+		iamv1.RegisterChildRegistrationServiceServer(srv, svcs.childRegistrationHandler)
+	}
 	// AuthZ — public RPCs.
 	if svcs != nil && svcs.authorizeHandler != nil {
 		iamv1.RegisterAuthorizeServiceServer(srv, svcs.authorizeHandler)

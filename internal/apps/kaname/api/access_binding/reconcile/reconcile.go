@@ -1436,6 +1436,16 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			continue
 		}
 		if sel.Container != nil {
+			registration, err := r.childRegistrationParents(ctx, s, cat, bs, sel)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, registration...)
+			// Именованное действие на родителе не требует существующих детей.
+			// Обычные вложенные права по-прежнему выбирают потомков ниже.
+			if len(cat.ChildRegistrationActions(sel)) != 0 && !selectorWritesObjects(cat, sel) {
+				continue
+			}
 			// Вложенное правило (kaname#874): потомки контейнеров, выбранных
 			// выдачей; классам выдачи — ни одного (ND-10, nested.go).
 			matched, err := r.matchNestedObjects(ctx, s, sel, bs)

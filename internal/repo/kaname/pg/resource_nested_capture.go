@@ -42,7 +42,7 @@ func resourceNestedDescendantsSQL(key resourceSourceKey, limit int) (string, []a
  WHERE cc.dotted=$1 AND cc.live AND m.object_type=$3 LIMIT $4`, []any{predicate.ContainerType, predicate.ContainerIDs, key.typ, limit}, nil
 }
 
-func (p *resourceParentCapture) captureNestedObjectCandidates(ctx context.Context, bs reconcile.BindingScope, selector domain.RuleSelector) ([]domain.MirrorObject, error) {
+func (p *resourceParentCapture) captureNestedObjectCandidates(ctx context.Context, bs reconcile.BindingScope, selector domain.RuleSelector, includeParents bool) ([]domain.MirrorObject, error) {
 	owner, err := reconcile.CapturedNestedOwnerSelector(selector)
 	if err != nil {
 		return nil, err
@@ -52,6 +52,7 @@ func (p *resourceParentCapture) captureNestedObjectCandidates(ctx context.Contex
 		return nil, err
 	}
 	var ids []string
+	var result []domain.MirrorObject
 	for _, container := range containers {
 		selected, err := reconcile.CapturedNestedContainerSelected(selector, bs, container)
 		if err != nil {
@@ -59,6 +60,11 @@ func (p *resourceParentCapture) captureNestedObjectCandidates(ctx context.Contex
 		}
 		if selected {
 			ids = append(ids, container.ObjectID)
+			// Именованное право регистрации лежит на выбранном родителе.
+			// Его координата нужна для сверки даже при пустом списке детей.
+			if includeParents {
+				result = append(result, container)
+			}
 		}
 	}
 	if len(ids) == 0 {
@@ -77,7 +83,6 @@ func (p *resourceParentCapture) captureNestedObjectCandidates(ctx context.Contex
 		return nil, err
 	}
 	seen := map[domain.ResourceRef]bool{}
-	var result []domain.MirrorObject
 	for _, typ := range types {
 		rows, err := p.source.read(ctx, p.tx, resourceSourceKey{kind: resourceSourceNestedDescendants, typ: typ, id: string(bs.BindingID), projection: string(raw)})
 		if err != nil {

@@ -73,8 +73,10 @@ type Facts struct {
 	// containerVerbs — точечный тип → контейнерные действия ЖИВОГО типа по имени
 	// (kaname#1003, Р2а). Читается из тех же строк `catalog_verb`, что набор
 	// глаголов типа, и в него не входит: строка контейнерного действия ярусная.
-	containerVerbs map[string]map[string]ContainerGrant
-	grantVerbs     map[string]map[string]bool
+	containerVerbs           map[string]map[string]ContainerGrant
+	grantVerbs               map[string]map[string]bool
+	childRegistrations       map[string]ChildRegistrationPolicy
+	childRegistrationParents map[[2]string]string
 }
 
 // ContainerGrant — отношение на родителе, которое даёт поимённо названное
@@ -221,8 +223,9 @@ func NewFacts(h Halves) (*Facts, error) {
 			if containerVerbs[dotted] == nil {
 				containerVerbs[dotted] = map[string]ContainerGrant{}
 			}
-			containerVerbs[dotted][v.Verb] = ContainerGrant{
-				Verb: v.Verb, ParentType: v.ContainerParent, Relation: v.ContainerRelation,
+			verb := domain.NormalizeVerb(v.Verb)
+			containerVerbs[dotted][verb] = ContainerGrant{
+				Verb: verb, ParentType: v.ContainerParent, Relation: v.ContainerRelation,
 			}
 		}
 		// ЯРУСНАЯ строка в набор типа НЕ ВХОДИТ, и это несущее место, а не
@@ -275,16 +278,22 @@ func NewFacts(h Halves) (*Facts, error) {
 		return retired[i].Resource < retired[j].Resource
 	})
 
+	childRegistrations, childRegistrationParents, err := childRegistrationPolicies(rows.Resources, containerVerbs)
+	if err != nil {
+		return nil, err
+	}
 	f := &Facts{
-		verbsByFGAType:  make(map[string][]string, len(byDotted)),
-		modules:         modules,
-		moduleOrder:     moduleOrder,
-		fgaTypeByDotted: fgaTypeByDotted,
-		resources:       resources,
-		retired:         retired,
-		containers:      containersOf(rows.Resources),
-		containerVerbs:  containerVerbs,
-		grantVerbs:      grantVerbs,
+		verbsByFGAType:           make(map[string][]string, len(byDotted)),
+		modules:                  modules,
+		moduleOrder:              moduleOrder,
+		fgaTypeByDotted:          fgaTypeByDotted,
+		resources:                resources,
+		retired:                  retired,
+		containers:               containersOf(rows.Resources),
+		containerVerbs:           containerVerbs,
+		grantVerbs:               grantVerbs,
+		childRegistrations:       childRegistrations,
+		childRegistrationParents: childRegistrationParents,
 	}
 	for dotted, verbs := range byDotted {
 		// Имя типа есть у КАЖДОЙ живой строки: строка без него отвергнута выше,
@@ -650,7 +659,7 @@ func (f *Facts) ContainerVerb(dotted, verb string) (ContainerGrant, bool) {
 	if f == nil {
 		return ContainerGrant{}, false
 	}
-	g, ok := f.containerVerbs[dotted][verb]
+	g, ok := f.containerVerbs[dotted][domain.NormalizeVerb(verb)]
 	return g, ok
 }
 

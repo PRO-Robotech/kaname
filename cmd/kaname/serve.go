@@ -1735,7 +1735,8 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		// поставленной службы нет, и держит их фронт сам.
 		limits := restFrontLimits(cfg)
 		logRESTFrontLimits(logger, limits)
-		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts, limits)
+		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts, limits,
+			restfront.PublicServices{ChildRegistration: fullStartup != nil && svcs.childRegistrationHandler != nil})
 		if err != nil {
 			return startupFailureAt(fmt.Errorf("публичный REST-фронт: %w", err))
 		}

@@ -774,6 +774,7 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     rid05_cleanup, ambiguous_cleanup = {}, set()
     projection_changes, ambiguous_projection = {}, set()
     binding_premise, ambiguous_premise = {}, set()
+    role_readiness, ambiguous_role_readiness = {}, set()
     bounded_markers, invalid_bounded_markers = {}, set()
     safe_diffs = {}
     safe_diff_leaves, safe_diff_kind = set(), None
@@ -908,6 +909,18 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
                     output = event.get("Output")
+                    if isinstance(output, str) and "RID_ROLE_READINESS" in output:
+                        role_marker = re.fullmatch(
+                            r"[ \t]+installation_whole_delivery_native_test\.go:([1-9][0-9]{0,6}): "
+                            r"RID_ROLE_READINESS reason=(deadline|canceled|process-exited)"
+                            r" verbs=(unseen|incomplete|failed|ready) refs=(unseen|incomplete|failed|ready)\n", output) if len(output) <= 200 else None
+                        if (role_marker is None or int(role_marker[1]) > bounds.get(
+                                "cmd/kaname/installation_whole_delivery_native_test.go", 0)
+                                or name in role_readiness):
+                            ambiguous_role_readiness.add(name)
+                        else:
+                            role_readiness[name] = {"reason": role_marker[2],
+                                "verbs": role_marker[3], "refs": role_marker[4]}
                     marker = premise_marker.fullmatch(output) if isinstance(output, str) and len(output) <= 180 else None
                     if marker and marker[1] in premise_reasons:
                         if name in binding_premise:
@@ -976,6 +989,11 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                                 "cmd/kaname/installation_newman_retirement_test.go")
                 and first not in ambiguous_projection and projection_changes.get(first)):
             result["changedProjectionFields"] = projection_changes[first]
+        if (result["status"] == "complete" and site.get("status") == "matched"
+                and site.get("file") == "cmd/kaname/installation_whole_delivery_native_test.go"
+                and first in role_readiness and first not in ambiguous_role_readiness
+                and not any((first, end) in seen for end in ("pass", "skip"))):
+            result["roleReadiness"] = role_readiness[first]
         if (site.get("file") == "cmd/kaname/installation_newman_input_authn_restore_test.go"
                 and first not in ambiguous_premise and first in binding_premise):
             result["bindingRestorationPremise"] = binding_premise[first]

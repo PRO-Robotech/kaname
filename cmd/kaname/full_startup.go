@@ -9,6 +9,8 @@ import (
 	"log/slog"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
+	childregistrationapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/child_registration"
+	internaliamapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
@@ -97,6 +99,9 @@ type fullStartupParticipants struct {
 func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, repo *kanamepg.Repository, svcs *services, pool *pgxpool.Pool) (*fullStartupParticipants, error) {
 	if profile == nil || profile.contract == nil || repo == nil || svcs == nil || pool == nil {
 		return nil, fmt.Errorf("authority-protocol full service composition is incomplete")
+	}
+	if svcs.internalIAMHandler == nil {
+		return nil, fmt.Errorf("authority-protocol full internal IAM handler is absent")
 	}
 	if svcs.accessBindingHandler == nil || svcs.roleHandler == nil || svcs.groupHandler == nil ||
 		svcs.grantDelegationCreate == nil || svcs.grantDelegationUpdate == nil || svcs.grantDelegationRevoke == nil || svcs.fullModuleHandler == nil ||
@@ -221,6 +226,11 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	svcs.grantDelegationCreate.WithAuthorityWriter(delegated)
 	svcs.grantDelegationUpdate.WithAuthorityWriter(delegated)
 	svcs.grantDelegationRevoke.WithRevokeAuthorityWriter(withdrawal)
+	// Публичная регистрация потомка получает тот же FULL runner и runtime repo.
+	// До завершения этой сборки поле пусто, поэтому слушатель не объявляет RPC.
+	svcs.childRegistrationHandler = childregistrationapp.NewHandler(internaliamapp.NewUserChildRegistration(resourceDecisions))
+	// Закрытие родителя получает тот же FULL runner только на внутренней службе.
+	svcs.internalIAMHandler.WithChildParentClose(resourceDecisions)
 	return &fullStartupParticipants{membership: membership, admission: admission, invites: invites,
 		cluster: cluster, resources: resources, objects: objects, groups: groups, bindings: stages}, nil
 }

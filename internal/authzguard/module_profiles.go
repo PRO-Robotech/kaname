@@ -42,6 +42,7 @@ const (
 	internalPollSubjectChangesMethod   = "/kaname.cloud.iam.v1.InternalIAMService/PollSubjectChanges"
 	internalRegisterResourceMethod     = "/kaname.cloud.iam.v1.InternalIAMService/RegisterResource"
 	internalUnregisterResourceMethod   = "/kaname.cloud.iam.v1.InternalIAMService/UnregisterResource"
+	internalCloseChildParentMethod     = "/kaname.cloud.iam.v1.InternalIAMService/CloseChildParent"
 	internalResolveBasicMethod         = "/kaname.cloud.iam.v1.InternalIAMService/ResolveBasicCredential"
 	internalGetRoleCompiledMethod      = "/kaname.cloud.iam.v1.InternalIAMService/GetRoleCompiled"
 	internalCheckBasicLiveMethod       = "/kaname.cloud.iam.v1.InternalIAMService/CheckBasicCredentialLive"
@@ -84,6 +85,7 @@ func ProfileMethods(p moduleidentity.Profile) []string {
 		return []string{
 			internalRegisterResourceMethod,
 			internalUnregisterResourceMethod,
+			internalCloseChildParentMethod,
 			internalCheckMethod,
 			authorizeCheckFullMethod,
 			authorizeBatchCheckFullMethod,

@@ -23,13 +23,17 @@ const maxProjectionRows = 4096
 // Никакой timestamp/boolean Ready не подменяет сравнение. Старые роли без
 // доказанной projection остаются ordinary компонентами с obligation.
 func (w *semanticAuthorityWriteTx) RoleProjectionCheckpoint(ctx context.Context, id domain.RoleID) (granteffect.ProjectionCheckpoint, kaname.SourceReadCost, error) {
+	return readRoleProjectionCheckpoint(ctx, w.tx, w.bundle, id)
+}
+
+func readRoleProjectionCheckpoint(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bundle, id domain.RoleID) (granteffect.ProjectionCheckpoint, kaname.SourceReadCost, error) {
 	cost := kaname.SourceReadCost{Reads: 1}
 	// Первый input нужен только для определения relevant modules. Полный снимок
 	// ниже перечитывает роль и сравнивает authored digest; смена правил закрыта.
 	var preliminary domain.Role
 	preliminary.ID = id
 	var perms, rules []byte
-	err := w.tx.QueryRow(ctx, `SELECT permissions,rules,is_system,coalesce(owner_module,'') FROM kaname.roles WHERE id=$1 AND live`, id).Scan(&perms, &rules, &preliminary.IsSystem, &preliminary.OwnerModule)
+	err := tx.QueryRow(ctx, `SELECT permissions,rules,is_system,coalesce(owner_module,'') FROM kaname.roles WHERE id=$1 AND live`, id).Scan(&perms, &rules, &preliminary.IsSystem, &preliminary.OwnerModule)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = kaname.ErrSourceUnconfirmed
@@ -40,7 +44,7 @@ func (w *semanticAuthorityWriteTx) RoleProjectionCheckpoint(ctx context.Context,
 	if err = scanRolePolicy(&preliminary, perms, rules); err != nil {
 		return granteffect.ProjectionCheckpoint{}, cost, err
 	}
-	expected, err := w.bundle.Projection(preliminary)
+	expected, err := bundle.Projection(preliminary)
 	if err != nil {
 		return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceUnconfirmed
 	}
@@ -48,7 +52,7 @@ func (w *semanticAuthorityWriteTx) RoleProjectionCheckpoint(ctx context.Context,
 	var pending bool
 	var snapshotRows int
 	cost.Reads++
-	err = w.tx.QueryRow(ctx, roleProjectionSnapshotSQL, id, expected.Modules, maxProjectionRows+1).Scan(&authored, &catalogRaw, &selectorRaw, &verbRaw, &capsRaw, &pending, &snapshotRows)
+	err = tx.QueryRow(ctx, roleProjectionSnapshotSQL, id, expected.Modules, maxProjectionRows+1).Scan(&authored, &catalogRaw, &selectorRaw, &verbRaw, &capsRaw, &pending, &snapshotRows)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = kaname.ErrSourceUnconfirmed
@@ -76,7 +80,7 @@ func (w *semanticAuthorityWriteTx) RoleProjectionCheckpoint(ctx context.Context,
 	if err = scanRolePolicy(&current, record.Permissions, record.Rules); err != nil {
 		return granteffect.ProjectionCheckpoint{}, cost, err
 	}
-	now, err := w.bundle.Projection(current)
+	now, err := bundle.Projection(current)
 	if err != nil || now.Checkpoint != expected.Checkpoint {
 		return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceUnconfirmed
 	}
@@ -140,10 +144,10 @@ WITH module_rows AS (SELECT module,live FROM kaname.catalog_module WHERE module=
 SELECT jsonb_build_object('Permissions',r.permissions,'Rules',r.rules,'IsSystem',r.is_system,'OwnerModule',coalesce(r.owner_module,'')),
 jsonb_build_object(
  'Live',jsonb_build_object('Modules',coalesce((SELECT jsonb_agg(module) FROM module_rows WHERE live),'[]'),
- 'Resources',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'ObjectType',object_type,'ParentTypes',parent_types,'ParentNames',parent_names,'Writes',writes,'PublicReadToChildren',public_read_to_children,'PermanentProject',permanent_project)) FROM resource_rows WHERE live),'[]'),
+ 'Resources',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'ObjectType',object_type,'ParentTypes',parent_types,'ParentNames',parent_names,'Writes',writes,'PublicReadToChildren',public_read_to_children,'PermanentProject',permanent_project,'ChildRegistration',child_registration)) FROM resource_rows WHERE live),'[]'),
  'Verbs',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'Verb',verb,'PerObject',per_object,'ContainerParent',coalesce(container_parent,''),'ContainerRelation',coalesce(container_relation,''))) FROM verb_rows WHERE live),'[]')),
  'Retired',jsonb_build_object('Modules',coalesce((SELECT jsonb_agg(module) FROM module_rows WHERE NOT live),'[]'),
- 'Resources',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'ObjectType',object_type,'SupersededBy',coalesce(superseded_by,''))) FROM resource_rows WHERE NOT live),'[]'),
+ 'Resources',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'ObjectType',object_type,'SupersededBy',coalesce(superseded_by,''),'ChildRegistration',child_registration)) FROM resource_rows WHERE NOT live),'[]'),
  'Verbs',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'Verb',verb,'PerObject',per_object,'ContainerParent',coalesce(container_parent,''),'ContainerRelation',coalesce(container_relation,''))) FROM verb_rows WHERE NOT live),'[]'))),
 coalesce((SELECT jsonb_agg(jsonb_build_object('RuleFP',rule_fp,'Arm',CASE arm WHEN 'names' THEN $ARM_NAMES WHEN 'labels' THEN $ARM_LABELS ELSE $ARM_ANCHOR END,'ObjectTypes',object_types,'ResourceNames',resource_names,'MatchLabels',match_labels,'Grants',verbs_by_type,'CreatedBySubject',created_by_subject,
  'Container',CASE WHEN container_type IS NULL THEN NULL ELSE jsonb_build_object('Type',container_type,'Arm',CASE container_arm WHEN 'names' THEN $ARM_NAMES WHEN 'labels' THEN $ARM_LABELS ELSE $ARM_ANCHOR END,'ResourceNames',container_resource_names,'MatchLabels',container_match_labels) END)) FROM selector_rows),'[]'),

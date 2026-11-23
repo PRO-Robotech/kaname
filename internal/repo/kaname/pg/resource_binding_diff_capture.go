@@ -49,6 +49,9 @@ func (c *resourceOutputCapture) captureWholeBindingDiff(ctx context.Context, par
 	if err != nil {
 		return empty, nil, err
 	}
+	hasHuman := slices.ContainsFunc(bs.Subjects, func(subject domain.Subject) bool {
+		return subject.Type == domain.SubjectTypeUser
+	})
 	for _, selector := range bs.Selectors {
 		// То же исключение классов и пустого набора глаголов, что у live traversal.
 		if len(domain.GrantRecipients(bs.Subjects, selector.Verbs, selector.Container != nil)) == 0 {
@@ -56,7 +59,8 @@ func (c *resourceOutputCapture) captureWholeBindingDiff(ctx context.Context, par
 		}
 		var objects []domain.MirrorObject
 		if selector.Container != nil {
-			objects, err = parents.captureNestedObjectCandidates(ctx, bs, selector)
+			includeParents := hasHuman && len(facts.ChildRegistrationActions(selector)) != 0
+			objects, err = parents.captureNestedObjectCandidates(ctx, bs, selector, includeParents)
 		} else {
 			objects, err = parents.captureSelectorObjects(ctx, bs.BindingID, selector, bs.Scope, bs.Target)
 		}

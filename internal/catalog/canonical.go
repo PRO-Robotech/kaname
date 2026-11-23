@@ -41,6 +41,10 @@ func canonicalRows(in Rows) (Rows, error) {
 		r.ParentTypes = append([]string(nil), r.ParentTypes...)
 		r.ParentNames = append([]string(nil), r.ParentNames...)
 		r.Writes = append([]string(nil), r.Writes...)
+		if r.ChildRegistration != nil {
+			rule := *r.ChildRegistration
+			r.ChildRegistration = &rule
+		}
 	}
 	slices.SortFunc(out.Resources, func(a, b ResourceRow) int {
 		if c := cmp.Compare(a.Module, b.Module); c != 0 {

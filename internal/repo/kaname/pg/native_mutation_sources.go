@@ -59,7 +59,7 @@ func (s *nativeAdministrativeSources) producerFact(ctx context.Context, fact rel
 		return false, false, err
 	}
 	var known bool
-	err := s.w.tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.producer_source_receipt WHERE object_type=$1 AND object_id=$2 AND relation=$3 AND subject_type||':'||subject_id=$4 AND kind IN ('registration_owner','publication'))`, fact.ObjectType, fact.ObjectID, fact.Relation, fact.Subject).Scan(&known)
+	err := s.transaction().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.producer_source_receipt WHERE object_type=$1 AND object_id=$2 AND relation=$3 AND subject_type||':'||subject_id=$4 AND kind IN ('registration_owner','publication'))`, fact.ObjectType, fact.ObjectID, fact.Relation, fact.Subject).Scan(&known)
 	if err != nil || !known {
 		return false, known, err
 	}
@@ -68,7 +68,6 @@ func (s *nativeAdministrativeSources) producerFact(ctx context.Context, fact rel
 	if !ok || actor.Validate() != nil || (actor.Type != domain.SubjectTypeUser && actor.Type != domain.SubjectTypeServiceAccount) {
 		return false, known, relverdict.ErrAdministrativeSourceUnconfirmed
 	}
-	proof := &semanticAuthorityWriteTx{authorityWriteTx: s.w, bundle: s.bundle}
 	cursor := ""
 	var unconfirmed bool
 	for {
@@ -78,7 +77,8 @@ func (s *nativeAdministrativeSources) producerFact(ctx context.Context, fact rel
 		if err = budget.Charge(0, 1); err != nil {
 			return false, known, err
 		}
-		page, next, e := proof.producerSourcesQueryForFact(ctx, kaname.CanonicalSourceFilter{Actor: actor, After: cursor, Limit: 1}, nil, &fact)
+		page, next, e := readProducerSources(ctx, s.transaction(), s.bundle, s.requireAccountCoverage,
+			kaname.CanonicalSourceFilter{Actor: actor, After: cursor, Limit: 1}, nil, &fact)
 		if e != nil {
 			return false, known, e
 		}

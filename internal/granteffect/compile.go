@@ -52,6 +52,9 @@ func New(modelSource string, halves catalog.Halves) (*Compiler, error) {
 	if err != nil {
 		return nil, err
 	}
+	// При сортировке ресурсы меняют позиции. Декодирование в прежний срез
+	// сохранило бы значение поля omitempty от ресурса на старой позиции.
+	copy = catalog.Halves{}
 	if err = json.Unmarshal(raw, &copy); err != nil {
 		return nil, err
 	}
@@ -66,6 +69,9 @@ func New(modelSource string, halves catalog.Halves) (*Compiler, error) {
 	c := &Compiler{plans: plans, facts: facts, identity: grantcoverage.Identity{ModelID: digest([]byte(modelSource)), CatalogID: digest(raw), ProjectorVersion: ProjectorVersion}}
 	c.parents = map[string][]authzmodel.EffectHop{}
 	for _, r := range copy.Live.Resources {
+		if err := validateChildRegistrationModel(plans, facts, r); err != nil {
+			return nil, err
+		}
 		if len(r.ParentTypes) != len(r.ParentNames) {
 			c.modelObligations = append(c.modelObligations, Obligation{Code: "catalog_parent", Detail: r.ObjectType + ": unpaired names/types"})
 			continue
@@ -259,6 +265,7 @@ func (c *Compiler) Compile(b Binding) Set {
 		ep.AuthoredRuleFP = origins[sel.RuleFP]
 		ep.ProjectedRuleFP = sel.RuleFP
 		ep.Primitive = "object_rule"
+		c.compileChildRegistration(&s, b, sel, ep)
 		for _, dotted := range sel.ObjectTypes {
 			typ, ok := c.facts.FGAObjectType(dotted)
 			if !ok {

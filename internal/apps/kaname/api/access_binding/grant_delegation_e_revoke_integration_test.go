@@ -246,12 +246,13 @@ func TestGrantDelegation_GD32_ListenerDoorPassesRevokeAndDeleteButNotUpdate(t *t
 
 	// База CE-21: 21 метод iam.v1 и 2 operation; kaname#986 добавил шесть.
 	// kaname#1032 добавляет ровно GrantDelegationService.Update, что держит строка e.
+	// kaname#1045 добавляет ChildRegistrationService.Register и InternalIAMService.CloseChildParent.
 	// AccessBinding.Update по-прежнему обязан отказать в строке c; ACR и
 	// бизнес-полномочия нового Update отдельно проверяют GDU-09 и TLS-близнецы.
 	iamExempt, opExempt := exemptCounts(t)
 	t.Logf("GD-32: освобождённых дверью методов — kaname.cloud.iam.v1 %d, corelib.operation %d (база 21 и 2)", iamExempt, opExempt)
-	row("число освобождённых", iamExempt == 21+6+1 && opExempt == 2,
-		fmt.Sprintf("iam.v1 %d (ожидается 28), operation %d (ожидается 2)", iamExempt, opExempt))
+	row("число освобождённых", iamExempt == 21+6+1+2 && opExempt == 2,
+		fmt.Sprintf("iam.v1 %d (ожидается 30), operation %d (ожидается 2)", iamExempt, opExempt))
 
 	if len(fails) > 0 {
 		t.Fatalf("GD-32: не сошлись строки %v — дверь слушателя судит Revoke/Delete по v_delete либо не знает GrantDelegationService", fails)

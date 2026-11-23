@@ -54,14 +54,15 @@ func resourceFailedAttempt(cause, cleanup error, commitStarted bool) error {
 
 // Один внешний budget включает stage, body и Commit. Callback private и
 // принадлежит runner; API не получает его, открытый writer или retry-флаг.
-func runResourceAttempts(ctx context.Context, once func() (kaname.ResourceDecisionResult, error)) (kaname.ResourceDecisionResult, error) {
+func runResourceAttempts[T any](ctx context.Context, once func() (T, error)) (T, error) {
+	var zero T
 	if once == nil {
-		return kaname.ResourceDecisionResult{}, kaname.ErrInvalidAuthorityFencePlan
+		return zero, kaname.ErrInvalidAuthorityFencePlan
 	}
 	var last error
 	for attempt := 0; attempt < authorityEntryAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return kaname.ResourceDecisionResult{}, err
+			return zero, err
 		}
 		result, err := once()
 		if err == nil {
@@ -71,13 +72,13 @@ func runResourceAttempts(ctx context.Context, once func() (kaname.ResourceDecisi
 		var failed *resourceAttemptError
 		if cancel := ctx.Err(); cancel != nil {
 			if errors.As(err, &failed) && failed.cleanup != nil {
-				return kaname.ResourceDecisionResult{}, errors.Join(cancel, err)
+				return zero, errors.Join(cancel, err)
 			}
-			return kaname.ResourceDecisionResult{}, cancel
+			return zero, cancel
 		}
 		if !errors.As(err, &failed) || !failed.retry {
-			return kaname.ResourceDecisionResult{}, err
+			return zero, err
 		}
 	}
-	return kaname.ResourceDecisionResult{}, errors.Join(iamerr.ErrAborted, last)
+	return zero, errors.Join(iamerr.ErrAborted, last)
 }

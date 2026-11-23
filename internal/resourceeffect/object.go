@@ -92,6 +92,9 @@ func desiredMembersForObject(cat *catalog.Facts, bs ObjectBinding, o domain.Mirr
 	// судит цель по КОНТЕЙНЕРУ среди предков объекта, а не по самому объекту.
 	inTarget := !perObject || bs.Target.Contains(o.ObjectType, o.ObjectID)
 	for _, sel := range bs.Selectors {
+		if registration, ok := childRegistrationMember(cat, bs, sel, o); ok {
+			out = append(out, registration)
+		}
 		gs := selectorGrantees(bs, sel)
 		if len(gs) == 0 {
 			continue

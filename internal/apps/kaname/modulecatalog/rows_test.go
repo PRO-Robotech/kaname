@@ -32,6 +32,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
@@ -223,6 +224,43 @@ func TestDeclaredCreateGetsNoSecondTierRow(t *testing.T) {
 	require.Len(t, withoutCreate.Verbs, 2, "ярусная строка не выведена: %v", withoutCreate.Verbs)
 	require.False(t, withoutCreate.Verbs[1].PerObject)
 	require.Equal(t, "create", withoutCreate.Verbs[1].Verb)
+}
+
+func TestRowsOfPreservesChildRegistrationAndNamedVerb(t *testing.T) {
+	data := []byte(`apiVersion: iam/v1
+module: example
+resources:
+  - name: container
+    objectType: example_container
+    parents: [project]
+    producer: authored
+    verbs: [get]
+    relations:
+      - {name: child_registrar, definition: "[user]"}
+  - name: child
+    objectType: example_child
+    parents:
+      - {name: parent, type: example_container}
+    producer: authored
+    verbs: [get]
+    containerVerbs:
+      - {name: registerChild, parent: parent, relation: child_registrar}
+    childRegistration: {verb: registerChild, parentSegments: 1, maxChildren: 24, maxCreates: 4, windowSeconds: 60}
+`)
+	m, err := manifest.LoadWithReferent(data, manifest.ReferentCanon)
+	require.NoError(t, err)
+	rows, err := modulecatalog.RowsOf(m)
+	require.NoError(t, err)
+	require.Len(t, rows.Resources, 2)
+	require.Equal(t, "child", rows.Resources[0].Resource)
+	require.Equal(t, &catalog.ChildRegistrationRule{
+		Verb: "registerchild", ParentSegments: 1, MaxChildren: 24, MaxCreates: 4, WindowSeconds: 60,
+	}, rows.Resources[0].ChildRegistration)
+	require.Nil(t, rows.Resources[1].ChildRegistration)
+	require.Contains(t, rows.Verbs, catalog.VerbRow{
+		Module: "example", Resource: "child", Verb: "registerchild",
+		ContainerParent: "example_container", ContainerRelation: "child_registrar",
+	})
 }
 
 // TestResourceWithoutVerbsYieldsNoTierRow — ресурс, не объявивший ни одного

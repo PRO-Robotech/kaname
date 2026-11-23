@@ -147,11 +147,18 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 				writes = append(writes, domain.WriteGrant{Relation: w.Relation, SubjectType: s}.Token())
 			}
 		}
-		out.Resources = append(out.Resources, catalog.ResourceRow{
+		row := catalog.ResourceRow{
 			Module: m.Module, Resource: r.Name, ObjectType: r.ObjectType,
 			ParentTypes: parentTypes, ParentNames: parentNames, Writes: writes,
 			PublicReadToChildren: r.PassesPublicRead(), PermanentProject: r.HoldsPermanentProject(),
-		})
+		}
+		if child := r.ChildRegistration; child != nil {
+			row.ChildRegistration = &catalog.ChildRegistrationRule{
+				Verb: canonicalVerb(child.Verb), ParentSegments: child.ParentSegments, MaxChildren: child.MaxChildren,
+				MaxCreates: child.MaxCreates, WindowSeconds: child.WindowSeconds,
+			}
+		}
+		out.Resources = append(out.Resources, row)
 
 		// declaredBy — токен → имя, каким его написал манифест. Нужен ИМЕННО для
 		// отказа: без исходного написания столкновение читалось бы как «два

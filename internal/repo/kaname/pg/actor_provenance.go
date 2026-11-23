@@ -12,9 +12,11 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/admission"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -68,12 +70,14 @@ func (w *semanticAuthorityWriteTx) ProducerSources(ctx context.Context, f kaname
 }
 
 func (w *semanticAuthorityWriteTx) producerSourcesQuery(ctx context.Context, f kaname.CanonicalSourceFilter, captured []byte) (kaname.ProducerSourcePage, string, error) {
-	return w.producerSourcesQueryForFact(ctx, f, captured, nil)
+	return readProducerSources(ctx, w.tx, w.bundle, w.canonicalCoverage, f, captured, nil)
 }
 
 // Точный native leaf использует тот же typed producer proof, но не читает
 // остальные объекты actor. Полный actor census сохраняет прежний запрос.
-func (w *semanticAuthorityWriteTx) producerSourcesQueryForFact(ctx context.Context, f kaname.CanonicalSourceFilter, captured []byte, fact *relverdict.AdministrativeFact) (kaname.ProducerSourcePage, string, error) {
+func readProducerSources(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bundle, requireCoverage func(domain.AccountID) error,
+	f kaname.CanonicalSourceFilter, captured []byte, fact *relverdict.AdministrativeFact,
+) (kaname.ProducerSourcePage, string, error) {
 	if _, err := canonicalPage(kaname.CanonicalSourceFilter{Actor: f.Actor, Limit: f.Limit}); err != nil {
 		return kaname.ProducerSourcePage{}, "", err
 	}
@@ -87,7 +91,7 @@ func (w *semanticAuthorityWriteTx) producerSourcesQueryForFact(ctx context.Conte
 			return kaname.ProducerSourcePage{}, "", kaname.ErrCanonicalSourceInvalid
 		}
 	}
-	if err := w.canonicalCoverage(""); err != nil {
+	if err := requireCoverage(""); err != nil {
 		return kaname.ProducerSourcePage{}, "", err
 	}
 	public := slices.Contains(domain.SpeakerClasses(string(f.Actor.Type)+":"+string(f.Actor.ID)), domain.SpeakerAnonymous)
@@ -105,14 +109,14 @@ func (w *semanticAuthorityWriteTx) producerSourcesQueryForFact(ctx context.Conte
 ` + producerSourcesTail
 		args = append(args, fact.ObjectType, fact.ObjectID, fact.Relation, fact.Subject)
 	}
-	rows, err := w.tx.Query(ctx, query, args...)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return kaname.ProducerSourcePage{}, "", err
 	}
 	defer rows.Close()
 	out := kaname.ProducerSourcePage{Cost: kaname.SourceReadCost{Reads: 1}}
 	var halves catalog.Halves
-	if err = json.Unmarshal(w.bundle.CanonicalCatalog(), &halves); err != nil {
+	if err = json.Unmarshal(bundle.CanonicalCatalog(), &halves); err != nil {
 		return kaname.ProducerSourcePage{}, "", err
 	}
 	actorCharged := false
@@ -157,7 +161,7 @@ func (w *semanticAuthorityWriteTx) producerSourcesQueryForFact(ctx context.Conte
 			return kaname.ProducerSourcePage{}, "", kaname.ErrCanonicalSourceInvalid
 		}
 		for _, scope := range r.Scopes {
-			if err = w.canonicalCoverage(domain.AccountID(scope.AccountID)); err != nil {
+			if err = requireCoverage(domain.AccountID(scope.AccountID)); err != nil {
 				return kaname.ProducerSourcePage{}, "", err
 			}
 		}
@@ -166,7 +170,7 @@ func (w *semanticAuthorityWriteTx) producerSourcesQueryForFact(ctx context.Conte
 			return kaname.ProducerSourcePage{}, "", kaname.ErrCanonicalSourceInvalid
 		}
 		for _, scope := range actual {
-			if err = w.canonicalCoverage(domain.AccountID(scope.AccountID)); err != nil {
+			if err = requireCoverage(domain.AccountID(scope.AccountID)); err != nil {
 				return kaname.ProducerSourcePage{}, "", err
 			}
 		}
@@ -224,7 +228,7 @@ func (w *semanticAuthorityWriteTx) producerSourcesQueryForFact(ctx context.Conte
 			problem = "producer_catalog"
 		}
 		s.Issue = problem
-		s.Identity = w.bundle.Identity()
+		s.Identity = bundle.Identity()
 		out.Sources = append(out.Sources, s)
 	}
 	if err = rows.Err(); err != nil {
@@ -260,7 +264,7 @@ const producerSourcesTail = ` AND (r.kind,r.module,r.object_type,r.object_id,r.r
  ORDER BY r.kind,r.module,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id LIMIT $5
 ) SELECT actor.present,source.* FROM actor LEFT JOIN LATERAL (SELECT r.kind,r.module,r.catalog_type,r.object_type,r.object_id,r.relation,r.subject_type,r.subject_id,r.condition_name,r.condition_parameters,r.scopes,r.source_version,r.versionless,
  coalesce(sc.data,'[]'::jsonb),
- jsonb_build_object('Module',c.module,'Resource',c.resource,'ObjectType',c.object_type,'ParentTypes',c.parent_types,'ParentNames',c.parent_names,'Writes',c.writes,'PublicReadToChildren',c.public_read_to_children,'PermanentProject',c.permanent_project),
+ jsonb_build_object('Module',c.module,'Resource',c.resource,'ObjectType',c.object_type,'ParentTypes',c.parent_types,'ParentNames',c.parent_names,'Writes',c.writes,'PublicReadToChildren',c.public_read_to_children,'PermanentProject',c.permanent_project,'ChildRegistration',c.child_registration),
  coalesce(cv.data,'[]'::jsonb),
  CASE WHEN r.invalidation<>'' OR r.receipt_version<>1 THEN 'producer_receipt'
  WHEN c.dotted IS NULL OR NOT c.live OR NOT cm.live THEN 'producer_catalog'

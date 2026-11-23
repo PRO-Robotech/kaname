@@ -124,6 +124,22 @@ func TestResourceStartupCanonicalRegistrationFullAndStaged(t *testing.T) {
 			require.True(t, mirror, "успех имеет durable зеркало")
 			require.True(t, retained, "сохранена каноническая область")
 			require.True(t, fact, "зафиксирован канонический родитель")
+
+			// Тип без childRegistration сохраняет прежний цикл записи и снятия.
+			removed, err := svcs.internalIAMHandler.UnregisterResource(moduleCtx, &iamv1.UnregisterResourceRequest{
+				SubjectId: req.SubjectId, Relation: req.Relation, Object: req.Object,
+				SourceVersion: timestamppb.New(req.SourceVersion.AsTime().Add(time.Microsecond)),
+			})
+			require.NoError(t, err, "канонический UnregisterResource через production %s", name)
+			require.NotNil(t, removed)
+			require.NoError(t, runtime.QueryRow(ctx, `SELECT
+ EXISTS(SELECT 1 FROM kaname.resource_mirror WHERE object_type='vpc.network' AND object_id=$1),
+ EXISTS(SELECT 1 FROM kaname.resource_registration_scope WHERE object_type='vpc_network' AND object_id=$1 AND project_id=$2 AND account_id=$3),
+ EXISTS(SELECT 1 FROM kaname.relation_fact WHERE object_type='vpc_network' AND object_id=$1 AND relation='project' AND subject=$4)`,
+				id, scene.Project, scene.Account, "project:"+scene.Project).Scan(&mirror, &retained, &fact))
+			require.False(t, mirror)
+			require.True(t, retained, "снятие сохраняет каноническую область для поздних событий")
+			require.False(t, fact)
 		})
 	}
 }

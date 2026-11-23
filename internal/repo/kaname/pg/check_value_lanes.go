@@ -82,6 +82,27 @@ type checkTableLanes struct {
 var checkValueLanes = map[string]*checkTableLanes{
 	// kaname#1034: закрытое поколение DB snapshot; caller его не присылает.
 	"authority_binding_epoch": nil,
+	// Закрытую квитанцию создаёт owner-программа после допуска: координата
+	// связана с точным образом регистрации, версия и время выбраны PostgreSQL,
+	// пользователь взят из подтверждённой личности.
+	"authority_child_creation": {
+		service: []string{
+			"authority_child_creation_child_id_check",
+			"authority_child_creation_child_type_check",
+			"authority_child_creation_created_at_check",
+			"authority_child_creation_source_version_check",
+			"authority_child_creation_user_id_check",
+		},
+	},
+	// Состояние инкарнации родителя выводится из удержанного зеркала.
+	// closed_at устанавливает закрытая программа на времени решения PostgreSQL.
+	"authority_child_parent_state": {
+		service: []string{
+			"authority_child_parent_state_closed_at_check",
+			"authority_child_parent_state_object_id_check",
+			"authority_child_parent_state_object_type_check",
+		},
+	},
 	// kaname#1034: закрытую строку команды Forward пишет служба; число эффектов
 	// вычисляет cardinality(payloads), вызывающий его и поля anchor не задаёт.
 	"authority_forward_emit_anchor_v4": nil,
@@ -220,12 +241,12 @@ var checkValueLanes = map[string]*checkTableLanes{
 			"catalog_module_live_matches_retired",
 		},
 	},
-	// Каталог ресурса: модуль, ресурс, тип модели, типы и имена указателей и
-	// записи сверх указателя (kaname#982) — из
-	// манифеста; точечное имя склеивает служба, живость, снятие и преемника
-	// ставит служба.
+	// Манифест задаёт модуль, ресурс, тип модели, типы и имена указателей,
+	// записи сверх указателя (kaname#982) и политику регистрации потомка (kaname#1045).
+	// Служба формирует точечное имя и устанавливает живость, снятие и преемника.
 	"catalog_resource": {
 		caller: []string{
+			"catalog_resource_child_registration_form",
 			"catalog_resource_module_undotted",
 			"catalog_resource_nonempty",
 			"catalog_resource_object_type_form",
