@@ -1,6 +1,7 @@
 -- Copyright (c) PRO-Robotech
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- Основание неизменяемости обеих редакций — п. 3 контракта docs/engineering/acceptance/live-business-catalog-publication.md.
 -- Журналы публикаций содержат исходные байты и их отпечатки. Эти строки
 -- исключены из обхода рабочих координат: транзакция смены якоря сохраняет
 -- историю и её запреты UPDATE, DELETE и TRUNCATE.
