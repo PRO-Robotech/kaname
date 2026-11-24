@@ -329,6 +329,43 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
             self.assertNotIn("roleReadiness", result)
             self.assertNotIn(unsafe_class, json.dumps(result))
 
+    def test_consumer_admission_observation_is_closed_and_matches_exact_failure(self):
+        source = "cmd/kaname/installation_whole_delivery_native_test.go"
+        prefix = (
+            "    installation_whole_delivery_native_test.go:1: RID_ROLE_READINESS reason=deadline"
+            " verbs=failed refs=ready phase=initial-delivery examined=56 reseeded=54 failed=2"
+            " completed=true stage=open-enter-v2 class=sql-query-canceled"
+            " cancel=statement-timeout context=active site=consumer-admission"
+        )
+
+        def diagnose(marker):
+            return self.diagnose_role_markers("registry-installation-rid11", [marker + "\n"], trace=source)
+
+        valid = prefix + " blocker=fixture waits=1 transaction-age=30s-to-60s"
+        self.assertEqual(diagnose(valid)["roleReadiness"]["consumerAdmission"],
+                         {"blocker": "fixture", "waits": 1, "transactionAge": "30s-to-60s"})
+        empty = prefix + " blocker=unknown waits=0 transaction-age=unknown"
+        self.assertEqual(diagnose(empty)["roleReadiness"]["consumerAdmission"],
+                         {"blocker": "unknown", "waits": 0, "transactionAge": "unknown"})
+        self.assertNotIn("consumerAdmission", diagnose(prefix)["roleReadiness"])
+
+        invalid = (
+            ("blocker=fixture", "blocker=fixture-secret"),
+            ("waits=1", "waits=65"),
+            ("waits=1", "waits=0"),
+            ("transaction-age=30s-to-60s", "transaction-age=fixture-secret"),
+            ("phase=initial-delivery", "phase=restored-base"),
+            ("stage=open-enter-v2", "stage=open-enter-v3"),
+            ("cancel=statement-timeout", "cancel=user-request"),
+            ("context=active", "context=deadline"),
+            ("site=consumer-admission", "site=global-coordinator"),
+        )
+        for before, after in invalid:
+            with self.subTest(before=before):
+                observed = diagnose(valid.replace(before, after))
+                self.assertNotIn("roleReadiness", observed)
+                self.assertNotIn("fixture-secret", json.dumps(observed))
+
     def test_role_delta_on_matched_roles_projection_rejects_other_content(self):
         source = "cmd/kaname/installation_newman_retirement_test.go"
         prefix = "    installation_newman_whole_projection_test.go:1: "
