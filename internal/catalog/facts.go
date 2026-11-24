@@ -77,6 +77,9 @@ type Facts struct {
 	grantVerbs               map[string]map[string]bool
 	childRegistrations       map[string]ChildRegistrationPolicy
 	childRegistrationParents map[[2]string]string
+	// materializableDotted — отсортированный набор для подстановок, вычисленный
+	// один раз из этого снимка. Наружу его срез не передаётся без копии.
+	materializableDotted []string
 }
 
 // ContainerGrant — отношение на родителе, которое даёт поимённо названное
@@ -305,6 +308,7 @@ func NewFacts(h Halves) (*Facts, error) {
 		f.verbsByFGAType[fgaType] = verbs
 	}
 	f.common, f.all = vocabularies(f.verbsByFGAType)
+	f.materializableDotted = f.buildMaterializableTypes()
 	return f, nil
 }
 

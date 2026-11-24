@@ -55,7 +55,7 @@
 // # ВЫВОД ПРИМЕНЯЮТ ВСЕ ЧЕТЫРЕ ВОПРОСА, И ОДНОЙ РАСКЛАДКОЙ
 //
 // `Ask` (можно ли), `List` (что мне доступно), `Subjects` (кто имеет право) и
-// `Expand` (из чего оно складывается) раскладываются ОДНОЙ функцией — `sourcesOf`
+// `Expand` (из чего оно складывается) раскладываются ОДНОЙ функцией — `sourcesOfPrepared`
 // ниже, — и потому не могут разойтись в том, что считают источником права.
 // Отличается только направление обхода: прямой вопрос идёт от объекта к
 // источникам, обратные — от источника к объектам и субъектам.
@@ -101,6 +101,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/jackc/pgx/v5"
 )
@@ -746,6 +747,8 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 // отношение и доводы условий общие, различаются ТОЛЬКО идентификаторы. Другой
 // формы у страницы не бывает by construction — страница списка однородна.
 type QueryMany struct {
+	// PreparedPlans — явная модель всей партии; nil сохраняет модель процесса, как у Query.
+	PreparedPlans PlanSource
 	// Subject — целиком, как у прямого вопроса.
 	Subject string
 	// ObjectType — тип в словаре МОДЕЛИ, один на всю партию.
@@ -960,7 +963,7 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		}
 	}
 
-	factParents, factRelations, bindVerbs, err := sourcesOf(in.ObjectType, in.Relation)
+	factParents, factRelations, bindVerbs, err := sourcesOfPrepared(in.PreparedPlans, in.ObjectType, in.Relation)
 	if err != nil {
 		// Тип, не объявленный моделью, — ОТКАЗ по ВСЕЙ партии, а не ошибка: тип
 		// один на партию, и «объектов такого типа не существует» есть ответ на
@@ -1101,22 +1104,19 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	return verdicts, grounds, nil
 }
 
-// sourcesOf раскладывает вопрос на источники, которые запрос обязан спросить.
-//
-// Раскладку делает КОМПИЛЯТОР МОДЕЛИ, а не это место: вывод отношений — свойство
-// модели, и второе место, знающее его, разошлось бы с первым молча и в сторону
-// отказа человеку с законным правом.
-//
-// Одна на все четыре вопроса — и это не экономия строк. Вторая раскладка «для
-// обратной стороны» была бы вторым местом об одном предмете: разойдясь, она дала
-// бы форму, где `Ask` говорит «право есть», а перечисление того же права не
-// показывает, — то есть расхождение внутри одного пакета, которое некому
-// заметить. Обе предпосылки-запрета ниже поэтому проверяются один раз и
-// действуют для всех четырёх.
-func sourcesOf(objectType, relation string) (parents, relations, verbs []string, err error) {
-	return sourcesOfPrepared(nil, objectType, relation)
+// Обратные вопросы используют ту же закреплённую редакцию, что прямой Check.
+// Явно подготовленная модель писателя имеет приоритет над снимком запроса.
+func sourcesOfRequest(ctx context.Context, plans PlanSource, objectType, relation string) (parents, relations, verbs []string, err error) {
+	if plans == nil {
+		if snapshot, ok := authzsnapshot.FromContext(ctx); ok {
+			plans = snapshot.Plans
+		}
+	}
+	return sourcesOfPrepared(plans, objectType, relation)
 }
 
+// sourcesOfPrepared раскладывает вопрос на источники по плану компилятора модели.
+// Предпосылки источников проверяются здесь для прямых и обратных вопросов.
 func sourcesOfPrepared(plans PlanSource, objectType, relation string) (parents, relations, verbs []string, err error) {
 	if old, ok := plans.(*authzmodel.Plans); ok && old == nil {
 		plans = nil

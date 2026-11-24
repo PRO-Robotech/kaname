@@ -18,8 +18,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
@@ -132,7 +134,20 @@ func (s *NativeStand) StartMailbox(t *testing.T, ctx context.Context, environmen
 	})
 }
 
+// NativeStandOptions включает отдельный ограниченный профиль PostgreSQL;
+// нулевое значение сохраняет прежний профиль остальных нативных сценариев.
+type NativeStandOptions struct {
+	BoundedPostgres bool
+}
+
 func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence string, deliveredRegistry bool) *NativeStand {
+	t.Helper()
+	return PrepareNativeStandWithOptions(t, ctx, repository, evidence, deliveredRegistry, NativeStandOptions{})
+}
+
+// PrepareNativeStandWithOptions готовит тот же стенд с явно выбранным профилем
+// ресурсов собственного PostgreSQL и проверяет его через Docker inspect.
+func PrepareNativeStandWithOptions(t *testing.T, ctx context.Context, repository, evidence string, deliveredRegistry bool, options NativeStandOptions) *NativeStand {
 	t.Helper()
 	registry := "0"
 	if deliveredRegistry {
@@ -159,8 +174,20 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	prepared, err := prepare.CombinedOutput()
 	require.NoError(t, os.WriteFile(filepath.Join(evidence, "prepare.log"), prepared, 0600))
 	require.NoError(t, err, "stand preparation failed; see private prepare.log")
-	pg, err := postgres.Run(ctx, "postgres:16-alpine", postgres.WithDatabase("kaname"),
-		postgres.WithUsername("kaname"), postgres.WithPassword("stand"), postgres.BasicWaitStrategies())
+	pgOptions := []testcontainers.ContainerCustomizer{postgres.WithDatabase("kaname"),
+		postgres.WithUsername("kaname"), postgres.WithPassword("stand"), postgres.BasicWaitStrategies()}
+	const pgMemory int64 = 1024 * 1024 * 1024
+	const pgNanoCPUs int64 = 1_000_000_000
+	if options.BoundedPostgres {
+		// Процессный предел не охватывает контейнер Docker. Ограничиваем
+		// именно собственный PostgreSQL; равенство MemorySwap и Memory запрещает swap.
+		pgOptions = append(pgOptions, testcontainers.WithHostConfigModifier(func(config *container.HostConfig) {
+			config.Memory = pgMemory
+			config.MemorySwap = pgMemory
+			config.NanoCPUs = pgNanoCPUs
+		}))
+	}
+	pg, err := postgres.Run(ctx, "postgres:16-alpine", pgOptions...)
 	require.NoError(t, err)
 	// Сразу регистрируем уборку; используем новый срок даже после отказа задания.
 	t.Cleanup(func() {
@@ -183,10 +210,22 @@ func PrepareNativeStand(t *testing.T, ctx context.Context, repository, evidence 
 	}()
 	inspect, err := cli.ContainerInspect(ctx, pg.GetContainerID(), client.ContainerInspectOptions{})
 	require.NoError(t, err)
-	// Фиксируем имена анонимных томов, пока точный контейнер задачи ещё существует.
+	// Фиксируем владение до проверок контейнера, чтобы отказ не мешал уборке.
 	ownership, err := json.Marshal(map[string]any{"containerId": pg.GetContainerID(), "mounts": inspect.Container.Mounts})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(evidence, "pg-ownership.json"), ownership, 0600))
+	if options.BoundedPostgres {
+		// Проверяем фактические параметры собственного контейнера до миграций.
+		require.NotNil(t, inspect.Container.HostConfig)
+		config := inspect.Container.HostConfig
+		require.Equal(t, pgMemory, config.Memory)
+		require.Equal(t, pgMemory, config.MemorySwap)
+		require.Equal(t, pgNanoCPUs, config.NanoCPUs)
+		caps, err := json.Marshal(map[string]any{"containerId": pg.GetContainerID(),
+			"memory": config.Memory, "memorySwap": config.MemorySwap, "nanoCPUs": config.NanoCPUs})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(evidence, "pg-resource-caps.json"), caps, 0600))
+	}
 	for _, suffix := range []string{"crt", "key"} {
 		material, err := os.ReadFile(filepath.Join(evidence, "pki", "pg."+suffix)) // #nosec G304 -- собственный каталог PKI и закрытый список расширений crt/key.
 		require.NoError(t, err)

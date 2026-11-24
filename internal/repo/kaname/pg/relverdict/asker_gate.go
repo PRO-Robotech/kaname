@@ -48,7 +48,8 @@ func (a *Asker) SubjectsPage(
 	defer func() { _ = rollback(ctx, tx) }()
 
 	return Subjects(ctx, tx, SubjectsQuery{
-		ObjectType: objectType, ObjectID: objectID, Relation: relation,
+		PreparedPlans: a.plansForContext(ctx),
+		ObjectType:    objectType, ObjectID: objectID, Relation: relation,
 		AfterID: afterID, Limit: limit,
 	})
 }

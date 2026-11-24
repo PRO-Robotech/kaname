@@ -41,6 +41,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -155,12 +156,10 @@ func targetTypeNotLiveTxMsg(typ string) string {
 // текст Т1. Снимок отстаёт от базы на окно обновления (П5), поэтому эта
 // половина не последняя: транзакция записи спрашивает строку каталога ещё раз
 // (`doCreate`).
-func (u *CreateAccessBindingUseCase) refuseNonLiveTargetType(t domain.AccessTarget) error {
+func (u *CreateAccessBindingUseCase) refuseNonLiveTargetType(ctx context.Context, t domain.AccessTarget) error {
 	var facts domain.TargetTypeCatalog
-	if u.cat != nil {
-		if f := u.cat.Facts(); f != nil {
-			facts = f
-		}
+	if f := authzsnapshot.FactsForRequest(ctx, u.cat); f != nil {
+		facts = f
 	}
 	if typ, bad := t.FirstNonLiveType(facts); bad {
 		return status.Error(codes.InvalidArgument, targetTypeNotLiveSyncMsg(typ))
@@ -207,7 +206,7 @@ func (u *CreateAccessBindingUseCase) Execute(ctx context.Context, b domain.Acces
 	// меняется (Р2). Перечень живых типов публичен (`GET /iam/v1/permissionCatalog`),
 	// поэтому отказ до права выдавать не сообщает ничего, чего вызывающий не мог
 	// бы прочесть.
-	if err := u.refuseNonLiveTargetType(b.Target); err != nil {
+	if err := u.refuseNonLiveTargetType(ctx, b.Target); err != nil {
 		return nil, err
 	}
 	// AccessBinding.Create grant-authority model.

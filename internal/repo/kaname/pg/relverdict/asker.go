@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -215,6 +216,19 @@ func NewTransactionAsker(tx pgx.Tx, plans *authzmodel.Plans, decisionAt ...time.
 	return a
 }
 
+// plansForContext сохраняет явно подготовленную модель писателя. Обычный
+// пул читает модель, закреплённую за запросом; без снимка остаётся прежний
+// выбор модели процесса через nil PreparedPlans.
+func (a *Asker) plansForContext(ctx context.Context) PlanSource {
+	if a.preparedPlans != nil {
+		return a.preparedPlans
+	}
+	if snapshot, ok := authzsnapshot.FromContext(ctx); ok {
+		return snapshot.Plans
+	}
+	return nil
+}
+
 // Allowed отвечает на прямой вопрос.
 //
 // Возвращает ОШИБКУ, а не false, когда ответа получить не удалось: сравнитель
@@ -236,7 +250,7 @@ func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, rela
 	}
 
 	v, grounds, err := Ask(ctx, tx, Query{
-		PreparedPlans: a.preparedPlans,
+		PreparedPlans: a.plansForContext(ctx),
 		DecisionAt:    a.decisionAt,
 		Subject:       subject, ObjectType: objectType, ObjectID: objectID, Relation: relation,
 		Context: condCtx,
@@ -330,7 +344,8 @@ func (a *Asker) AllowedMany(
 	defer func() { _ = rollback(ctx, tx) }()
 
 	verdicts, grounds, aerr := AskMany(ctx, tx, QueryMany{
-		Subject: subject, ObjectType: objectType, ObjectIDs: objectIDs, Relation: relation,
+		PreparedPlans: a.plansForContext(ctx),
+		Subject:       subject, ObjectType: objectType, ObjectIDs: objectIDs, Relation: relation,
 		Context: condCtx,
 	})
 	// Наблюдение засчитывается ДО разбора вердиктов и по КАЖДОЙ разобранной
@@ -393,7 +408,8 @@ func (a *Asker) Objects(ctx context.Context, subject, objectType string, relatio
 	out := make([]string, 0, limit)
 	for _, rel := range relations {
 		ids, next, err := List(ctx, tx, ListQuery{
-			Subject: subject, ObjectType: objectType, Relation: rel, Limit: limit,
+			PreparedPlans: a.plansForContext(ctx),
+			Subject:       subject, ObjectType: objectType, Relation: rel, Limit: limit,
 		})
 		if err != nil {
 			return nil, false, err
@@ -427,7 +443,8 @@ func (a *Asker) Subjects(ctx context.Context, objectType, objectID, relation str
 	defer func() { _ = rollback(ctx, tx) }()
 
 	subjects, next, err := Subjects(ctx, tx, SubjectsQuery{
-		ObjectType: objectType, ObjectID: objectID, Relation: relation, Limit: limit,
+		PreparedPlans: a.plansForContext(ctx),
+		ObjectType:    objectType, ObjectID: objectID, Relation: relation, Limit: limit,
 	})
 	if err != nil {
 		return nil, false, err
@@ -451,7 +468,7 @@ func (a *Asker) Sources(ctx context.Context, objectType, objectID, relation stri
 	}
 	defer func() { _ = rollback(ctx, tx) }()
 
-	sources, err := Expand(ctx, tx, objectType, objectID, relation)
+	sources, err := expandPrepared(ctx, tx, a.plansForContext(ctx), objectType, objectID, relation)
 	if err != nil {
 		return nil, err
 	}

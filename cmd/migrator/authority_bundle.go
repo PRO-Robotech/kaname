@@ -32,21 +32,39 @@ func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 	for _, action := range []string{"stage", "activate", "verify", "stage-full", "activate-full", "verify-full", "close"} {
 		var dir string
 		var imageOnly bool
+		var fromPublication bool
+		full := action == "stage-full" || action == "activate-full" || action == "verify-full"
 		cmd := &cobra.Command{Use: action, Args: cobraargs.NoExtraArguments, RunE: func(cmd *cobra.Command, _ []string) error {
-			if action != "close" && ((dir == "") == !imageOnly) {
-				return errors.New("укажите ровно один источник модели: --manifest-dir или --image-only")
+			if action != "close" {
+				sources := 0
+				for _, selected := range []bool{dir != "", imageOnly, fromPublication} {
+					if selected {
+						sources++
+					}
+				}
+				if sources != 1 {
+					if full {
+						return errors.New("укажите ровно один источник модели: --manifest-dir, --image-only или --publication")
+					}
+					return errors.New("укажите ровно один источник модели: --manifest-dir или --image-only")
+				}
 			}
 			var manifests []*manifest.Manifest
-			if action != "close" && !imageOnly {
+			if dir != "" {
 				delivery, err := manifest.LoadDelivered(dir)
 				if err != nil {
 					return err
 				}
 				manifests = delivery.Manifests
 			}
-			source, report, err := modelcompose.Compose(authzmodel.DSL, manifests)
-			if err != nil {
-				return err
+			var source string
+			var report modelcompose.Report
+			if !fromPublication {
+				var err error
+				source, report, err = modelcompose.Compose(authzmodel.DSL, manifests)
+				if err != nil {
+					return err
+				}
 			}
 			dsn, err := validatedMigrationDSN(opts)
 			if err != nil {
@@ -66,7 +84,11 @@ func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 				}
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{"action": action})
 			}
-			rows, err := kanamepg.NewCatalogRepo(pool).ReadCatalogHalves(ctx)
+			catalogReader := kanamepg.NewCatalogRepo(pool)
+			if fromPublication {
+				return publishedAuthorityAction(ctx, cmd, action, repository, catalogReader)
+			}
+			rows, err := catalogReader.ReadCatalogHalves(ctx)
 			if err != nil {
 				return err
 			}
@@ -105,9 +127,47 @@ func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 			cmd.Flags().StringVar(&dir, "manifest-dir", "", "Каталог фактически доставленных манифестов")
 			cmd.Flags().BoolVar(&imageOnly, "image-only", false, "Явно использовать только канон образа")
 		}
+		if full {
+			cmd.Flags().BoolVar(&fromPublication, "publication", false, "Использовать головную редакцию из журнала публикаций PostgreSQL")
+		}
 		root.AddCommand(cmd)
 	}
+	root.AddCommand(newFollowPublicationsCmd(opts))
+	root.AddCommand(newBootstrapPublicationCmd(opts))
 	return root
+}
+
+func publishedAuthorityAction(ctx context.Context, cmd *cobra.Command, action string, repo *kanamepg.Repository, catalogReader *kanamepg.CatalogRepo) error {
+	publication, err := repo.LoadPublicationAuthorityBundle(ctx)
+	if err != nil {
+		return err
+	}
+	identity := publication.Bundle.Identity()
+	switch action {
+	case "stage-full":
+		err = repo.StageFullPublicationAuthorityBundle(ctx, publication)
+	case "activate-full":
+		err = repo.ActivateFullPublicationAuthorityBundle(ctx, publication)
+	case "verify-full":
+		active, loadErr := catalogReader.LoadActivePublication(ctx)
+		if loadErr != nil {
+			return loadErr
+		}
+		if active.Revision != publication.Revision || active.Digest != publication.Digest || active.CatalogID != identity.CatalogID {
+			return kaname.ErrSemanticIdentityUnavailable
+		}
+	default:
+		return errors.New("источник --publication доступен только для действий с FULL-контрактом")
+	}
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+		Action   string `json:"action"`
+		Revision int64  `json:"revision"`
+		Digest   string `json:"digest"`
+		Identity any    `json:"identity"`
+	}{action, publication.Revision, publication.Digest, identity})
 }
 
 type authorityCatalogHalves struct{ catalog.Halves }

@@ -541,7 +541,6 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 		DeclaredResources: len(declared.Resources),
 		DeclaredVerbs:     len(declared.Verbs),
 	}
-	reason := "не объявлен манифестом модуля " + declared.Module
 
 	err = a.tx.RunInWriteTx(ctx, func(ctx context.Context, w CatalogWriter) error {
 		// Каждая попытка считает только собственные записи.
@@ -553,232 +552,7 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 			return fmt.Errorf("%w: замок каталога: %w", ErrWriteFailed, lerr)
 		}
 
-		// ПОДТВЕРЖДЕНИЕ — ВТОРЫМ оператором, сразу за замком и до первого чтения.
-		//
-		// Порядок несущий: между замком и сверкой второго писателя быть не может
-		// — он ждёт на замке, — поэтому вердикт сверки относится к состоянию,
-		// которое доживёт до коммита. Стой она до замка, это был бы обычный
-		// check-then-act с окном ровно там, где оно опасно.
-		if conf != nil {
-			same, cerr := w.ConfirmModuleState(ctx, declared.Module, conf.expectedState)
-			if cerr != nil {
-				return fmt.Errorf("%w: подтверждение состояния модуля %s: %w",
-					ErrWriteFailed, declared.Module, cerr)
-			}
-			if !same {
-				return fmt.Errorf("%w: модуль %s: каталог модуля сдвинулся с момента плана; "+
-					"повторите `Plan` и пришлите показанное им состояние (kacho#1034, IAM-MA-1-14)",
-					ErrStateMoved, declared.Module)
-			}
-		}
-
-		// Шаг 2р — СРАВНЕНИЕ-И-ЗАПИСЬ РЕДАКЦИИ (kaname#865), первым пишущим
-		// оператором транзакции.
-		//
-		// Решает ОПЕРАТОР (его `WHERE`), а решатель здесь пересчитывает, что он
-		// обязан был сделать: разошлись — значит предикат базы и решатель
-		// описывают разное, и выбрать одного молча нельзя.
-		declaredEdition := DeclaredEdition(m)
-		wr, rerr := w.AdvanceRevision(ctx, declared.Module, declaredEdition)
-		if rerr != nil {
-			return fmt.Errorf("%w: редакция модуля %s: %w", ErrWriteFailed, declared.Module, rerr)
-		}
-		outcome := JudgeRevision(wr.Previous, declaredEdition)
-		if outcome.Writes() != wr.Written {
-			return fmt.Errorf("%w: редакция модуля %s: решатель назвал исход %s, а оператор "+
-				"сравнения-и-записи записал пару: %t", ErrWriteFailed, declared.Module, outcome, wr.Written)
-		}
-		rep.Revision = RevisionReport{Outcome: outcome, Declared: declaredEdition, Previous: wr.Previous}
-		// Строка модуля, заведённая оператором редакции, — изменение каталога
-		// (условие CE-08): без этой строки модуля не было, и `UpsertModule`
-		// ниже найдёт её уже живой.
-		if wr.RowCreated {
-			rep.ModuleWritten = true
-		}
-		if outcome.Refused() {
-			// Младшая редакция либо конфликт содержимого: оператор не записал
-			// ничего, и дальше не пишется ничего. Транзакция закрывается пустой.
-			return nil
-		}
-
-		// Шаг 2а — ЗАМКИ НА СТРОКУ МОДУЛЯ И СТРОКИ РЕСУРСОВ, до первой записи
-		// строк ресурсов и глаголов (kacho#2012, kaname#913).
-		//
-		// Применение трогает строки каталога ДВУМЯ проходами — upsert объявленных
-		// (шаг 4) и retire снимаемых (шаг 7), — и каждый проход возрастающий, а их
-		// конкатенация нет: снимаемое имя, сортирующееся раньше сохраняемого,
-		// достаётся применению последним. Писатель роли берёт те же строки одним
-		// оператором по `ORDER BY dotted`; расходящиеся порядки давали взаимную
-		// блокировку, и отвергалась ею СТОРОНА ПРИМЕНЕНИЯ — то есть выкатка.
-		//
-		// Строка МОДУЛЯ — раньше строк ресурсов (kaname#913): транзакция ролей
-		// модуля берёт её первой (ключевым замком), а строки ресурсов — потом,
-		// записью проекции правил. Строку модуля применитель прежде брал лишь на
-		// шаге 4 (`UpsertModule`, `FOR UPDATE`), то есть ПОСЛЕ строк ресурсов, и
-		// обратный порядок давал взаимную блокировку с транзакцией ролей.
-		//
-		// Порядок между этими операторами и остальными несущий, поэтому он назван:
-		// раньше них транзакция держит из строк только строку модуля (шаг 2р,
-		// `FOR NO KEY UPDATE`, и лишь при объявленной редакции), а с ней писатели
-		// роли и выдачи не конфликтуют — они берут её только ключевым замком.
-		// Значит замок строки модуля — первый, за которым применитель может ЖДАТЬ
-		// другого писателя строк каталога, а строки ресурсов — второй; ни на
-		// одном из них применитель не держит того, чего ждёт писатель, стоящий за
-		// ним. Порядок целиком — шапка файла, «ПОРЯДОК СТРОЧНЫХ ЗАМКОВ».
-		if lerr := w.LockModuleRow(ctx, declared.Module); lerr != nil {
-			return fmt.Errorf("%w: замок строки модуля %s: %w",
-				ErrWriteFailed, declared.Module, lerr)
-		}
-		if lerr := w.LockModuleResources(ctx, declared.Module); lerr != nil {
-			return fmt.Errorf("%w: замок строк ресурсов модуля %s: %w",
-				ErrWriteFailed, declared.Module, lerr)
-		}
-
-		live, rerr := w.ReadModule(ctx, declared.Module)
-		if rerr != nil {
-			return fmt.Errorf("%w: чтение каталога модуля: %w", ErrWriteFailed, rerr)
-		}
-
-		if changed, uerr := w.UpsertModule(ctx, declared.Module); uerr != nil {
-			return fmt.Errorf("%w: модуль %s: %w", ErrWriteFailed, declared.Module, uerr)
-		} else if changed {
-			rep.ModuleWritten = true
-		}
-		for _, r := range declared.Resources {
-			changed, uerr := w.UpsertResource(ctx, r)
-			if uerr != nil {
-				return fmt.Errorf("%w: ресурс %s.%s: %w", ErrWriteFailed, r.Module, r.Resource, uerr)
-			}
-			if changed {
-				rep.WrittenResources++
-			} else {
-				rep.UnchangedResources++
-			}
-		}
-		for _, v := range declared.Verbs {
-			changed, uerr := w.UpsertVerb(ctx, v)
-			if uerr != nil {
-				return fmt.Errorf("%w: действие %s.%s.%s: %w",
-					ErrWriteFailed, v.Module, v.Resource, v.Verb, uerr)
-			}
-			if changed {
-				rep.WrittenVerbs++
-			} else {
-				rep.UnchangedVerbs++
-			}
-		}
-
-		staleResources, staleVerbs := Withdrawn(live, declared)
-		if len(staleResources) > 0 || len(staleVerbs) > 0 {
-			resettled, serr := w.ResettleTenantProjections(ctx, staleResources, staleVerbs, reason, who.id)
-			if serr != nil {
-				return fmt.Errorf("%w: переселение проекций: %w", ErrWriteFailed, serr)
-			}
-			rep.Resettled = resettled
-		}
-
-		// Вниз порядок обратный: глагол ссылается на живой ресурс, поэтому ресурс
-		// снимается ПОСЛЕ своих глаголов.
-		for _, v := range staleVerbs {
-			retired, terr := w.RetireVerb(ctx, v, reason)
-			if terr != nil {
-				return fmt.Errorf("%w: снятие действия %s.%s.%s: %w",
-					ErrWriteFailed, v.Module, v.Resource, v.Verb, terr)
-			}
-			if retired {
-				rep.RetiredVerbs++
-			}
-		}
-		for _, r := range staleResources {
-			retired, terr := w.RetireResource(ctx, r, reason)
-			if terr != nil {
-				return fmt.Errorf("%w: снятие ресурса %s.%s: %w",
-					ErrWriteFailed, r.Module, r.Resource, terr)
-			}
-			if retired {
-				rep.RetiredResources++
-			}
-		}
-
-		// Шаг 8 — ПОСЛЕ снятия, и это несущее: вырезание оставляет в массиве
-		// только элементы, называющие ЖИВУЮ строку каталога. Стой оно раньше,
-		// снимаемая строка была бы ещё жива и уцелела бы ровно та, ради которой
-		// вырезание и делается. Довод целиком — `prune.go`.
-		if len(staleResources) > 0 {
-			pruned, perr := w.PruneRetiredSelectorTypes(ctx, staleResources, who.id)
-			if perr != nil {
-				return fmt.Errorf("%w: вырезание снятых типов из селекторов: %w",
-					ErrWriteFailed, perr)
-			}
-			rep.PrunedSelectorRows = pruned.Rows
-			rep.PrunedSelectorRowsDropped = pruned.Dropped
-			rep.PrunedSelectorTypes = pruned.Elements
-		}
-
-		// Шаг 9 — ПОТОЛКИ последствий, до коммита и только на пути глагола.
-		//
-		// После переселения и до коммита: превышение обязано ОТКАТЫВАТЬ
-		// применение, а не сообщаться после того, как права уже отобраны.
-		// Популяции считаются порознь — довод в `confirm.go`.
-		if lerr := conf.checkCeilings(rep); lerr != nil {
-			return fmt.Errorf("модуль %s: %w", declared.Module, lerr)
-		}
-
-		// Шаг 10 — СВЕРКА ОПОРЫ, до коммита, и ТОЛЬКО на пути глагола.
-		//
-		// Судится состояние, которое применение ПРОИЗВЕЛО, а не предсказанное:
-		// строки читаются той же транзакцией, поэтому вердикт относится к тому,
-		// что ляжет.
-		//
-		// Пути старта шаг не нужен, и это не послабление: там сверка стоит
-		// сразу после применения и её отказ есть отказ пуска — то есть вред
-		// пойман тем же механизмом, только вторым рубежом. У глагола второго
-		// рубежа нет вовсе (см. `applyLane`).
-		if a.lane == laneVerbChecksAnchor {
-			state, cerr := w.ReadCatalog(ctx)
-			if cerr != nil {
-				return fmt.Errorf("%w: чтение каталога для сверки опоры: %w", ErrWriteFailed, cerr)
-			}
-			plan, aerr := AnchorVerdictOf(ctx, state, conf.anchor)
-			if aerr != nil {
-				return fmt.Errorf("%w: сверка опоры: %w", ErrWriteFailed, aerr)
-			}
-			if plan.Verdict != VerdictWouldApply {
-				return fmt.Errorf("%w: модуль %s: живыми остались бы строки, которых опора не "+
-					"знает [%s]; опора называет, а строки не было бы ни живой, ни снятой [%s]. "+
-					"Снято решением %d строк — они расхождением НЕ считаются. Пройди такое "+
-					"применение, следующий пуск отказал бы страж паритета, и починить это можно "+
-					"было бы только прямым SQL — поэтому оно отвергнуто ДО коммита "+
-					"(kacho#1034, IAM-MA-1-11)",
-					ErrBeyondAnchor, declared.Module,
-					strings.Join(plan.BeyondAnchorExtra, ", "),
-					strings.Join(plan.BeyondAnchorMissing, ", "),
-					len(plan.WithdrawnRows))
-			}
-		}
-
-		// Шаг 11 — СЛЕД, В ТОЙ ЖЕ транзакции и ПОСЛЕДНИМ.
-		//
-		// Последним, потому что след несёт ФАКТИЧЕСКИЕ числа последствий, а не
-		// обещанные: величины третьей популяции появляются на шаге 8, и запись,
-		// поставленная раньше, назвала бы нули там, где вырезано.
-		//
-		// Ровно когда транзакция ИЗМЕНИЛА хоть одну строку. Не «прошла без
-		// ошибки»: прошло бы и притворство, а след, означающий «нас звали», не
-		// означает ничего — по нему нельзя отличить починку от холостого пуска.
-		//
-		// Отката ждать не надо: запись идёт той же транзакцией, поэтому отказ
-		// любого шага выше уносит её вместе с применением. Второго пути записи
-		// (после коммита, отдельным соединением) не заводится — он и был бы тем
-		// самым dual-write, при котором след расходится с делом.
-		if !rep.Changed() {
-			return nil
-		}
-		if eerr := w.EmitApplied(ctx, appliedEventOf(who, rep, conf)); eerr != nil {
-			return fmt.Errorf("%w: след применения модуля %s: %w",
-				ErrWriteFailed, declared.Module, eerr)
-		}
-		return nil
+		return a.applyLocked(ctx, w, declared, m, who, conf, &rep)
 	})
 	// Доклад — ПОСЛЕ закрытия транзакции и на обоих исходах: строки, сосчитанные
 	// откаченной транзакцией, в базе не появились, а «отказов ноль» без
@@ -788,6 +562,277 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 		return rep, err
 	}
 	return rep, nil
+}
+
+// applyLocked исполняет изменения с удерживаемым замком каталога.
+// Владелец транзакции завершает её и сообщает результат после фиксации или отката.
+func (a *Applier) applyLocked(
+	ctx context.Context, w CatalogWriter, declared Declared, m *manifest.Manifest,
+	who actor, conf *confirmation, rep *Report,
+) error {
+	// ПОДТВЕРЖДЕНИЕ — ВТОРЫМ оператором, сразу за замком и до первого чтения.
+	//
+	// Порядок несущий: между замком и сверкой второго писателя быть не может
+	// — он ждёт на замке, — поэтому вердикт сверки относится к состоянию,
+	// которое доживёт до коммита. Стой она до замка, это был бы обычный
+	// check-then-act с окном ровно там, где оно опасно.
+	if conf != nil {
+		same, cerr := w.ConfirmModuleState(ctx, declared.Module, conf.expectedState)
+		if cerr != nil {
+			return fmt.Errorf("%w: подтверждение состояния модуля %s: %w",
+				ErrWriteFailed, declared.Module, cerr)
+		}
+		if !same {
+			return fmt.Errorf("%w: модуль %s: каталог модуля сдвинулся с момента плана; "+
+				"повторите `Plan` и пришлите показанное им состояние (kacho#1034, IAM-MA-1-14)",
+				ErrStateMoved, declared.Module)
+		}
+	}
+
+	// Шаг 2р — СРАВНЕНИЕ-И-ЗАПИСЬ РЕДАКЦИИ (kaname#865), первым пишущим
+	// оператором транзакции.
+	//
+	// Решает ОПЕРАТОР (его `WHERE`), а решатель здесь пересчитывает, что он
+	// обязан был сделать: разошлись — значит предикат базы и решатель
+	// описывают разное, и выбрать одного молча нельзя.
+	declaredEdition := DeclaredEdition(m)
+	wr, rerr := w.AdvanceRevision(ctx, declared.Module, declaredEdition)
+	if rerr != nil {
+		return fmt.Errorf("%w: редакция модуля %s: %w", ErrWriteFailed, declared.Module, rerr)
+	}
+	outcome := JudgeRevision(wr.Previous, declaredEdition)
+	if outcome.Writes() != wr.Written {
+		return fmt.Errorf("%w: редакция модуля %s: решатель назвал исход %s, а оператор "+
+			"сравнения-и-записи записал пару: %t", ErrWriteFailed, declared.Module, outcome, wr.Written)
+	}
+	rep.Revision = RevisionReport{Outcome: outcome, Declared: declaredEdition, Previous: wr.Previous}
+	// Строка модуля, заведённая оператором редакции, — изменение каталога
+	// (условие CE-08): без этой строки модуля не было, и `UpsertModule`
+	// ниже найдёт её уже живой.
+	if wr.RowCreated {
+		rep.ModuleWritten = true
+	}
+	if outcome.Refused() {
+		// Младшая редакция либо конфликт содержимого: оператор не записал
+		// ничего, и дальше не пишется ничего. Транзакция закрывается пустой.
+		return nil
+	}
+
+	if err := applyCatalogRowsLocked(ctx, w, declared, who, rep); err != nil {
+		return err
+	}
+
+	// Шаг 9 — ПОТОЛКИ последствий, до коммита и только на пути глагола.
+	//
+	// После переселения и до коммита: превышение обязано ОТКАТЫВАТЬ
+	// применение, а не сообщаться после того, как права уже отобраны.
+	// Популяции считаются порознь — довод в `confirm.go`.
+	if lerr := conf.checkCeilings(*rep); lerr != nil {
+		return fmt.Errorf("модуль %s: %w", declared.Module, lerr)
+	}
+
+	// Шаг 10 — СВЕРКА ОПОРЫ, до коммита, и ТОЛЬКО на пути глагола.
+	//
+	// Судится состояние, которое применение ПРОИЗВЕЛО, а не предсказанное:
+	// строки читаются той же транзакцией, поэтому вердикт относится к тому,
+	// что ляжет.
+	//
+	// Пути старта шаг не нужен, и это не послабление: там сверка стоит
+	// сразу после применения и её отказ есть отказ пуска — то есть вред
+	// пойман тем же механизмом, только вторым рубежом. У глагола второго
+	// рубежа нет вовсе (см. `applyLane`).
+	if a.lane == laneVerbChecksAnchor {
+		state, cerr := w.ReadCatalog(ctx)
+		if cerr != nil {
+			return fmt.Errorf("%w: чтение каталога для сверки опоры: %w", ErrWriteFailed, cerr)
+		}
+		plan, aerr := AnchorVerdictOf(ctx, state, conf.anchor)
+		if aerr != nil {
+			return fmt.Errorf("%w: сверка опоры: %w", ErrWriteFailed, aerr)
+		}
+		if plan.Verdict != VerdictWouldApply {
+			return fmt.Errorf("%w: модуль %s: живыми остались бы строки, которых опора не "+
+				"знает [%s]; опора называет, а строки не было бы ни живой, ни снятой [%s]. "+
+				"Снято решением %d строк — они расхождением НЕ считаются. Пройди такое "+
+				"применение, следующий пуск отказал бы страж паритета, и починить это можно "+
+				"было бы только прямым SQL — поэтому оно отвергнуто ДО коммита "+
+				"(kacho#1034, IAM-MA-1-11)",
+				ErrBeyondAnchor, declared.Module,
+				strings.Join(plan.BeyondAnchorExtra, ", "),
+				strings.Join(plan.BeyondAnchorMissing, ", "),
+				len(plan.WithdrawnRows))
+		}
+	}
+
+	// Шаг 11 — СЛЕД, В ТОЙ ЖЕ транзакции и ПОСЛЕДНИМ.
+	//
+	// Последним, потому что след несёт ФАКТИЧЕСКИЕ числа последствий, а не
+	// обещанные: величины третьей популяции появляются на шаге 8, и запись,
+	// поставленная раньше, назвала бы нули там, где вырезано.
+	//
+	// Ровно когда транзакция ИЗМЕНИЛА хоть одну строку. Не «прошла без
+	// ошибки»: прошло бы и притворство, а след, означающий «нас звали», не
+	// означает ничего — по нему нельзя отличить починку от холостого пуска.
+	//
+	// Отката ждать не надо: запись идёт той же транзакцией, поэтому отказ
+	// любого шага выше уносит её вместе с применением. Второго пути записи
+	// (после коммита, отдельным соединением) не заводится — он и был бы тем
+	// самым dual-write, при котором след расходится с делом.
+	if !rep.Changed() {
+		return nil
+	}
+	if eerr := w.EmitApplied(ctx, appliedEventOf(who, *rep, conf)); eerr != nil {
+		return fmt.Errorf("%w: след применения модуля %s: %w",
+			ErrWriteFailed, declared.Module, eerr)
+	}
+	return nil
+}
+
+// applyCatalogRowsLocked меняет строки каталога под уже взятым общим замком.
+// Решение о редакции, проверку последствий и аудит ведёт владелец транзакции.
+func applyCatalogRowsLocked(ctx context.Context, w CatalogWriter, declared Declared, who actor, rep *Report) error {
+	changes, err := prepareCatalogChangesLocked(ctx, w, declared)
+	if err != nil {
+		return err
+	}
+	return applyCatalogChanges(ctx, w, changes, who, rep)
+}
+
+// catalogChanges содержит те же снятия, которые выполнит запись каталога.
+// Значение используется до снятия замков строки модуля и строк её ресурсов.
+type catalogChanges struct {
+	declared       Declared
+	staleResources []catalog.ResourceRow
+	staleVerbs     []catalog.VerbRow
+}
+
+func prepareCatalogChangesLocked(ctx context.Context, w CatalogWriter, declared Declared) (catalogChanges, error) {
+	// Шаг 2а — ЗАМКИ НА СТРОКУ МОДУЛЯ И СТРОКИ РЕСУРСОВ, до первой записи
+	// строк ресурсов и глаголов (kacho#2012, kaname#913).
+	//
+	// Применение трогает строки каталога ДВУМЯ проходами — upsert объявленных
+	// (шаг 4) и retire снимаемых (шаг 7), — и каждый проход возрастающий, а их
+	// конкатенация нет: снимаемое имя, сортирующееся раньше сохраняемого,
+	// достаётся применению последним. Писатель роли берёт те же строки одним
+	// оператором по `ORDER BY dotted`; расходящиеся порядки давали взаимную
+	// блокировку, и отвергалась ею СТОРОНА ПРИМЕНЕНИЯ — то есть выкатка.
+	//
+	// Строка МОДУЛЯ — раньше строк ресурсов (kaname#913): транзакция ролей
+	// модуля берёт её первой (ключевым замком), а строки ресурсов — потом,
+	// записью проекции правил. Строку модуля применитель прежде брал лишь на
+	// шаге 4 (`UpsertModule`, `FOR UPDATE`), то есть ПОСЛЕ строк ресурсов, и
+	// обратный порядок давал взаимную блокировку с транзакцией ролей.
+	//
+	// Порядок между этими операторами и остальными несущий, поэтому он назван:
+	// раньше них транзакция держит из строк только строку модуля (шаг 2р,
+	// `FOR NO KEY UPDATE`, и лишь при объявленной редакции), а с ней писатели
+	// роли и выдачи не конфликтуют — они берут её только ключевым замком.
+	// Значит замок строки модуля — первый, за которым применитель может ЖДАТЬ
+	// другого писателя строк каталога, а строки ресурсов — второй; ни на
+	// одном из них применитель не держит того, чего ждёт писатель, стоящий за
+	// ним. Порядок целиком — шапка файла, «ПОРЯДОК СТРОЧНЫХ ЗАМКОВ».
+	if lerr := w.LockModuleRow(ctx, declared.Module); lerr != nil {
+		return catalogChanges{}, fmt.Errorf("%w: замок строки модуля %s: %w",
+			ErrWriteFailed, declared.Module, lerr)
+	}
+	if lerr := w.LockModuleResources(ctx, declared.Module); lerr != nil {
+		return catalogChanges{}, fmt.Errorf("%w: замок строк ресурсов модуля %s: %w",
+			ErrWriteFailed, declared.Module, lerr)
+	}
+
+	live, rerr := w.ReadModule(ctx, declared.Module)
+	if rerr != nil {
+		return catalogChanges{}, fmt.Errorf("%w: чтение каталога модуля: %w", ErrWriteFailed, rerr)
+	}
+
+	staleResources, staleVerbs := Withdrawn(live, declared)
+	return catalogChanges{
+		declared:       declared,
+		staleResources: staleResources,
+		staleVerbs:     staleVerbs,
+	}, nil
+}
+
+func applyCatalogChanges(ctx context.Context, w CatalogWriter, changes catalogChanges, who actor, rep *Report) error {
+	declared := changes.declared
+	reason := "не объявлен манифестом модуля " + declared.Module
+
+	if changed, uerr := w.UpsertModule(ctx, declared.Module); uerr != nil {
+		return fmt.Errorf("%w: модуль %s: %w", ErrWriteFailed, declared.Module, uerr)
+	} else if changed {
+		rep.ModuleWritten = true
+	}
+	for _, r := range declared.Resources {
+		changed, uerr := w.UpsertResource(ctx, r)
+		if uerr != nil {
+			return fmt.Errorf("%w: ресурс %s.%s: %w", ErrWriteFailed, r.Module, r.Resource, uerr)
+		}
+		if changed {
+			rep.WrittenResources++
+		} else {
+			rep.UnchangedResources++
+		}
+	}
+	for _, v := range declared.Verbs {
+		changed, uerr := w.UpsertVerb(ctx, v)
+		if uerr != nil {
+			return fmt.Errorf("%w: действие %s.%s.%s: %w",
+				ErrWriteFailed, v.Module, v.Resource, v.Verb, uerr)
+		}
+		if changed {
+			rep.WrittenVerbs++
+		} else {
+			rep.UnchangedVerbs++
+		}
+	}
+
+	staleResources, staleVerbs := changes.staleResources, changes.staleVerbs
+	if len(staleResources) > 0 || len(staleVerbs) > 0 {
+		resettled, serr := w.ResettleTenantProjections(ctx, staleResources, staleVerbs, reason, who.id)
+		if serr != nil {
+			return fmt.Errorf("%w: переселение проекций: %w", ErrWriteFailed, serr)
+		}
+		rep.Resettled = resettled
+	}
+
+	// Вниз порядок обратный: глагол ссылается на живой ресурс, поэтому ресурс
+	// снимается ПОСЛЕ своих глаголов.
+	for _, v := range staleVerbs {
+		retired, terr := w.RetireVerb(ctx, v, reason)
+		if terr != nil {
+			return fmt.Errorf("%w: снятие действия %s.%s.%s: %w",
+				ErrWriteFailed, v.Module, v.Resource, v.Verb, terr)
+		}
+		if retired {
+			rep.RetiredVerbs++
+		}
+	}
+	for _, r := range staleResources {
+		retired, terr := w.RetireResource(ctx, r, reason)
+		if terr != nil {
+			return fmt.Errorf("%w: снятие ресурса %s.%s: %w",
+				ErrWriteFailed, r.Module, r.Resource, terr)
+		}
+		if retired {
+			rep.RetiredResources++
+		}
+	}
+
+	// Шаг 8 — ПОСЛЕ снятия, и это несущее: вырезание оставляет в массиве
+	// только элементы, называющие ЖИВУЮ строку каталога. Стой оно раньше,
+	// снимаемая строка была бы ещё жива и уцелела бы ровно та, ради которой
+	// вырезание и делается. Довод целиком — `prune.go`.
+	if len(staleResources) > 0 {
+		pruned, perr := w.PruneRetiredSelectorTypes(ctx, staleResources, who.id)
+		if perr != nil {
+			return fmt.Errorf("%w: вырезание снятых типов из селекторов: %w",
+				ErrWriteFailed, perr)
+		}
+		rep.PrunedSelectorRows = pruned.Rows
+		rep.PrunedSelectorRowsDropped = pruned.Dropped
+		rep.PrunedSelectorTypes = pruned.Elements
+	}
+	return nil
 }
 
 // Withdrawn — живые строки модуля, которых манифест больше не объявляет.

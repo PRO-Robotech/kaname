@@ -45,6 +45,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/authorityprotocol"
@@ -181,6 +182,12 @@ WHERE b.role_id       = 'rol' || substr(md5('owner'), 1, 17)
 // снова без собственного уровня. Это держит гейт дерева
 // `internal/repohygiene/roleverbreseedwiring_test.go`.
 func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) (err error) {
+	return BackfillOwnerBindingsWithFacts(ctx, pool, nil)
+}
+
+// BackfillOwnerBindingsWithFacts использует факты закреплённой вызывающим
+// публикации. Самостоятельного чтения каталога нет; nil сохраняет legacy-путь.
+func BackfillOwnerBindingsWithFacts(ctx context.Context, pool *pgxpool.Pool, facts *catalog.Facts) (err error) {
 	tx, err := authorityprotocol.OpenParticipant(ctx, pool, kaname.AuthorityCluster)
 	if err != nil {
 		return fmt.Errorf("backfill owner-bindings: begin tx: %w", err)
@@ -195,7 +202,7 @@ func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) (err error) 
 	if _, err := tx.Exec(ctx, backfillOwnerHierarchyTuplesSQL); err != nil {
 		return fmt.Errorf("backfill owner-bindings: emit hierarchy tuples: %w", err)
 	}
-	if err := syncAllSystemRoleSelectorsTx(ctx, tx); err != nil {
+	if err := syncAllSystemRoleSelectorsWithFactsTx(ctx, tx, facts); err != nil {
 		return fmt.Errorf("backfill owner-bindings: sync system role selectors: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -229,12 +236,18 @@ func BackfillOwnerBindings(ctx context.Context, pool *pgxpool.Pool) (err error) 
 // у отказа пересчёта обязана быть собственная полоса, а вход у него —
 // порт записи, которого у этой функции нет.
 func SyncAllSystemRoleSelectors(ctx context.Context, pool *pgxpool.Pool) (err error) {
+	return SyncAllSystemRoleSelectorsWithFacts(ctx, pool, nil)
+}
+
+// SyncAllSystemRoleSelectorsWithFacts проецирует системные роли по уже
+// закреплённому каталогу; nil сохраняет прежний статический набор типов.
+func SyncAllSystemRoleSelectorsWithFacts(ctx context.Context, pool *pgxpool.Pool, facts *catalog.Facts) (err error) {
 	tx, err := authorityprotocol.OpenParticipant(ctx, pool, kaname.AuthorityRole)
 	if err != nil {
 		return fmt.Errorf("sync system role selectors: begin tx: %w", err)
 	}
 	defer func() { err = errors.Join(err, rollbackSeedAuthority(ctx, tx)) }()
-	if err := syncAllSystemRoleSelectorsTx(ctx, tx); err != nil {
+	if err := syncAllSystemRoleSelectorsWithFactsTx(ctx, tx, facts); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -278,6 +291,10 @@ type systemRoleRules struct {
 // preserved). A selector with empty ObjectTypes (a GLOBAL-only wildcard projection) is
 // skipped — role_rule_selectors_types_nonempty forbids a 0-type row.
 func syncAllSystemRoleSelectorsTx(ctx context.Context, tx pgxQuerierExecer) error {
+	return syncAllSystemRoleSelectorsWithFactsTx(ctx, tx, nil)
+}
+
+func syncAllSystemRoleSelectorsWithFactsTx(ctx context.Context, tx pgxQuerierExecer, facts *catalog.Facts) error {
 	// (1) Read every system role's authored rules. Fully drain the Rows BEFORE issuing
 	// any Exec on the same tx (pgx forbids interleaving a live Rows with another query
 	// on the same conn).
@@ -331,7 +348,12 @@ func syncAllSystemRoleSelectorsTx(ctx context.Context, tx pgxQuerierExecer) erro
 		if err != nil {
 			ordinary = rr.rules
 		}
-		selectors := ordinary.MaterializingSelectors()
+		var selectors []domain.RuleSelector
+		if facts == nil {
+			selectors = ordinary.MaterializingSelectors()
+		} else {
+			selectors = facts.MaterializingSelectors(ordinary)
+		}
 		currentFPs := make([]string, 0, len(selectors))
 		for _, sel := range selectors {
 			if len(sel.ObjectTypes) == 0 {
@@ -382,8 +404,9 @@ func upsertRoleSelectorTx(ctx context.Context, tx pgxExecer, roleID string, sel 
 	// `ReplaceRuleSelectors`: тип и ветвь NULL у правила верхнего уровня,
 	// модельное имя типа контейнера выводит страж базы.
 	//
-	// Глаголы правила (`verbs_by_type`, kaname#878) здесь НЕ вычисляются: у этого
-	// досева нет каталожного факта. Строка, чей охват новый (вставка либо смена
+	// Глаголы правила (`verbs_by_type`, kaname#878) здесь НЕ вычисляются:
+	// факты публикации меняют только раскрытие типов, а пересчёт глаголов
+	// остаётся отдельной полосой. Строка, чей охват новый (вставка либо смена
 	// `object_types`), ложится в состоянии «не вычислено»: карта — верхняя
 	// граница (живые глаголы типа, `role_selector_verbs_upper_bound`), роль — в
 	// очереди пересчёта. Пустая карта значила бы «правило не даёт ничего», и это

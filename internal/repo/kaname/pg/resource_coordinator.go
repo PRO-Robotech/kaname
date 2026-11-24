@@ -62,6 +62,11 @@ func (r *ResourceDecisionRunner) enterResource(ctx context.Context, tx pgx.Tx, l
 	if at.IsZero() {
 		return nil, kaname.ErrSourceUnconfirmed
 	}
+	if r.repo.fullContract != nil {
+		if err := r.repo.fullContract.profile.ConfirmPublication(ctx, tx); err != nil {
+			return nil, err
+		}
+	}
 	writer := &authorityWriteTx{writeTx: &writeTx{readTx: readTx{tx: tx}}, fence: authorityFence{mode: footprint.plan.Mode, accounts: slices.Clone(accounts), decisionAt: at.UTC()}}
 	if err = lifetime.prepare(writer); err != nil {
 		return nil, err

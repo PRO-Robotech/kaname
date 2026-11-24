@@ -19,6 +19,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -144,7 +145,7 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	// — начать приниматься без релиза (kacho#1927). Снимок один и тот же, что у
 	// проекции глаголов ниже, поэтому обе стороны правила судятся согласованным
 	// множеством, а не двумя моментами времени.
-	facts := u.cat.Facts()
+	facts := authzsnapshot.FactsForRequest(ctx, u.cat)
 	if verr := r.Rules.Validate(domain.PolicyOfRole(r.IsSystem, r.OwnerModule), facts); verr != nil {
 		return nil, shared.MapValidationErr(verr)
 	}
@@ -206,7 +207,7 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor string) (*anypb.Any, error) {
 	created, err := u.policy.run(ctx, u.repo, r, true, true,
 		func(ctx context.Context, w Writer) (domain.Role, error) {
-			facts, ferr := writerRoleFacts(w, u.cat)
+			facts, ferr := writerRoleFacts(ctx, w, u.cat)
 			if ferr != nil {
 				return domain.Role{}, ferr
 			}
@@ -336,7 +337,7 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 
 	// Эхо мутации проецируется тем же набором, что и чтение: иначе `Create`
 	// вернул бы превью, собранное другим источником, чем последующий `Get`.
-	created.TypeVerbs = u.cat.Facts().RolePreviewLookup()
+	created.TypeVerbs = authzsnapshot.FactsForRequest(ctx, u.cat).RolePreviewLookup()
 	return marshalRole(created)
 }
 

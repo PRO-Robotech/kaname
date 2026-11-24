@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -162,7 +163,7 @@ func (s rolePolicySelection) runPrepared(ctx context.Context, repo Repo, r domai
 
 // В active writer projection использует immutable catalog того же bundle;
 // горячий внешний cache не участвует в решении и последующей записи.
-func writerRoleFacts(w Writer, fallback catalog.Source) (*catalog.Facts, error) {
+func writerRoleFacts(ctx context.Context, w Writer, fallback catalog.Source) (*catalog.Facts, error) {
 	if semantic, ok := w.(kaname.SemanticAuthorityWriter); ok {
 		if err := semantic.SemanticBundle().Validate(); err != nil {
 			return nil, err
@@ -173,5 +174,5 @@ func writerRoleFacts(w Writer, fallback catalog.Source) (*catalog.Facts, error) 
 		}
 		return catalog.NewFacts(h)
 	}
-	return fallback.Facts(), nil
+	return authzsnapshot.FactsForRequest(ctx, fallback), nil
 }

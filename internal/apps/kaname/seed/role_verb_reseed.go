@@ -276,7 +276,7 @@ func replaceRoleVerbsInOwnTx(
 			if err != nil || !live {
 				return err
 			}
-			sels := cat.GrantSelectors(domain.RegrainSelectors(rules), policy)
+			sels := cat.GrantSelectors(cat.RegrainSelectors(rules), policy)
 			verbs := cat.RoleVerbsFromSelectors(sels, policy)
 			stage = "replace-verbs"
 			if err := w.RolesW().ReplaceRoleVerbs(ctx, domain.RoleID(roleID), verbs); err != nil {

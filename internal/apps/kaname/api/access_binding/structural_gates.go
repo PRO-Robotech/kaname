@@ -110,7 +110,7 @@ func (u *CreateAccessBindingUseCase) validateStructuralGatesIn(ctx context.Conte
 	}
 	// Роль создателя (kaname#1003, creator_gates.go): область, цель и субъекты —
 	// после права выдавать и видимости роли, до суждения о цели по правилам.
-	if err := u.validateCreatorRoleGates(role, b); err != nil {
+	if err := u.validateCreatorRoleGates(ctx, role, b); err != nil {
 		return err
 	}
 

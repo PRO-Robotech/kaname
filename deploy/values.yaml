@@ -199,7 +199,8 @@ db:
   name: kaname
   passwordSecretName: ""
   passwordSecretKey: ""
-  # kaname#1034: DSN владельца схемы доступен только migrator init-container.
+  # DSN владельца схемы доступен migrator init-container и, при явном включении,
+  # отдельному owner follower публикаций. Основной runtime его не получает.
   # Пара пуста для прежней посадки; strict rollout требует отдельного runtime.
   migrationDSNSecretName: ""
   migrationDSNSecretKey: ""
@@ -801,3 +802,15 @@ registrationAccountWriters: null
 # kaname#1034: staged participation; не включает strict или semantic gates.
 authorityProtocol:
   participation: legacy
+  # kaname#1142: отдельный владелец активирует опубликованные поколения.
+  # Не включается вместе с runtime автоматически; требует отдельный migration DSN.
+  publicationFollower:
+    enabled: false
+    interval: 2s
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1280Mi

@@ -319,7 +319,7 @@ func (p *pcrWorld) applyDelivered(what string, m *manifest.Manifest) {
 	require.NoErrorf(p.t, err, "%s — применение ролей (%s)", what, rep)
 	// Самолечение старта (`cmd/kaname/serve.go`): селекторы и проекция глаголов
 	// системных ролей — применитель ролей их не пишет (шапка `moduleroles`).
-	require.NoErrorf(p.t, seed.SyncAllSystemRoleSelectors(p.ctx, p.pool), "%s — селекторы системных ролей", what)
+	require.NoErrorf(p.t, seed.SyncAllSystemRoleSelectorsWithFacts(p.ctx, p.pool, facts), "%s — селекторы системных ролей", what)
 	_, err = seed.ReseedSystemRoleVerbs(p.ctx, p.repo, p.pool, facts, nil)
 	require.NoErrorf(p.t, err, "%s — проекция глаголов системных ролей", what)
 	p.facts = facts

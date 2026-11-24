@@ -34,7 +34,19 @@ func RulesForStoredSelectorLayout(rules Rules, stored []string) Rules {
 // ТОЛЬКО существующий FP и пересекает grants с уже сохранёнными типами.
 // Здесь нет восстановления retired selectors или активации meta (kaname#1034).
 func RegrainSelectors(rules Rules) []RuleSelector {
-	out := rules.MaterializingSelectors()
+	return regrainSelectors(rules, Rules.MaterializingSelectors)
+}
+
+// RegrainSelectorsForTypes сохраняет оба сохранённых формата FP, раскрывая
+// подстановки по одному явному снимку типов для исходных и ordinary правил.
+func RegrainSelectorsForTypes(rules Rules, types []string) []RuleSelector {
+	return regrainSelectors(rules, func(rules Rules) []RuleSelector {
+		return rules.MaterializingSelectorsForTypes(types)
+	})
+}
+
+func regrainSelectors(rules Rules, project func(Rules) []RuleSelector) []RuleSelector {
+	out := project(rules)
 	seen := map[string]bool{}
 	for _, s := range out {
 		seen[s.RuleFP] = true
@@ -43,7 +55,7 @@ func RegrainSelectors(rules Rules) []RuleSelector {
 	if err != nil {
 		return out
 	}
-	for _, s := range ordinary.MaterializingSelectors() {
+	for _, s := range project(ordinary) {
 		if !seen[s.RuleFP] {
 			out = append(out, s)
 			seen[s.RuleFP] = true

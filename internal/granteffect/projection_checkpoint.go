@@ -63,8 +63,8 @@ func (b *Bundle) Projection(role domain.Role) (RoleProjection, error) {
 			return RoleProjection{}, fmt.Errorf("grant catalog axis unavailable")
 		}
 	}
-	selectors := b.compiler.facts.GrantSelectors(ordinary.MaterializingSelectors(), policy)
-	verbs := b.compiler.facts.RoleVerbsFromSelectors(ordinary.MaterializingSelectors(), policy)
+	selectors := b.compiler.facts.GrantSelectors(b.compiler.facts.MaterializingSelectors(ordinary), policy)
+	verbs := b.compiler.facts.RoleVerbsFromSelectors(selectors, policy)
 	var halves catalog.Halves
 	if err = json.Unmarshal(b.canonicalCatalog, &halves); err != nil {
 		return RoleProjection{}, err

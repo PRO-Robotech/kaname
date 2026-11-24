@@ -41,12 +41,15 @@ package role
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -186,6 +189,33 @@ func TestIAM1993_CreateRole_OverAppliedType_Accepted(t *testing.T) {
 	}
 	if op == nil {
 		t.Fatalf("Execute вернул nil Operation без ошибки — исход создания не определён")
+	}
+	waitOps(t)
+}
+
+func TestCreateRoleUsesPublishedTypeBeforeBackgroundCatalogRefresh(t *testing.T) {
+	legacy, err := catalog.NewFacts(catalog.Halves{Live: seed.LiteralRows()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.IsKnownModule(appliedModule) {
+		t.Fatalf("модуль %q уже есть в старом снимке", appliedModule)
+	}
+	ctx, err := authzsnapshot.WithContext(authnCtx(), &authzsnapshot.Snapshot{
+		Revision: 2, CatalogID: "published-catalog", Digest: "published-model", ConfirmedAt: time.Now(),
+		Plans: &authzmodel.Plans{}, Facts: factsWithAppliedType(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc := NewCreateRoleUseCase(newRlUpdRepo(domain.Labels{}), newRlFakeOps(), catalog.Fixed{F: legacy})
+	op, err := uc.Execute(ctx, domain.Role{
+		AccountID: "acc0000000000000abcd",
+		Name:      "published_type_role",
+		Rules:     domain.Rules{{Module: appliedModule, Resources: []string{appliedResource}, Verbs: []string{"get"}}},
+	})
+	if err != nil || op == nil {
+		t.Fatalf("создание роли над типом из публикации не принято: %v", err)
 	}
 	waitOps(t)
 }

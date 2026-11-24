@@ -86,7 +86,7 @@ func svSQLState(err error) string {
 }
 
 // svSystemRole — системная роль модуля-пробы сырым SQL: путём миграции, мимо
-// пути роли. Применитель каталога её селекторы не укорачивает.
+// пути роли. У роли нет авторского правила, подтверждающего селектор.
 func svSystemRole(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id, segment string) domain.RoleID {
 	t.Helper()
 	_, err := pool.Exec(ctx,
@@ -167,8 +167,8 @@ func TestSelectorVerbs_CatalogPruneCutsTheMapKeys(t *testing.T) {
 
 // (з) Пересчёт глаголов строки, чей тип каталог снял после её записи, проходит
 // стража живости типов: запись карты ссылок на каталог не меняет. Строка
-// системной роли — применитель её не укорачивает. Пересчёт пересекает карту с
-// типами строки.
+// системной роли воспроизводит данные прежнего применителя. Пересчёт
+// пересекает карту с типами строки.
 func TestSelectorVerbs_RegrainOfARowWithARetiredTypePassesTheTypeGuard(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: требует Postgres")
@@ -182,7 +182,21 @@ func TestSelectorVerbs_RegrainOfARowWithARetiredTypePassesTheTypeGuard(t *testin
 	require.NoError(t, svWrite(ctx, pool, role, []domain.RuleSelector{{RuleFP: "fp-z", Arm: domain.ArmAnchor,
 		ObjectTypes: []string{live, gone}, Grants: map[string][]string{live: {"get"}, gone: {"get"}}}}))
 	_, err = applier.Apply(ctx, probeManifest(probeResource("svlive", "get")))
+	require.ErrorContains(t, err, "селектор системной роли rol-sv-sys-z на probemod.svgone не подтверждён подстановкой")
+	var active bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT live FROM kaname.catalog_resource WHERE dotted = $1`, gone).Scan(&active))
+	require.True(t, active, "отказ откатывает снятие типа")
+
+	// Старый применитель мог снять тип, оставив такой селектор. Воссоздаём
+	// это исходное состояние для проверки пересчёта после обновления.
+	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	require.NoError(t, retireResource(ctx, tx, applierProbeModule, "svgone", "проверка старого селектора"))
+	require.NoError(t, tx.Commit(ctx))
+	var retired bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT NOT live FROM kaname.catalog_resource WHERE dotted = $1`, gone).Scan(&retired))
+	require.True(t, retired)
 
 	require.NoError(t, svRegrain(ctx, pool, role, []domain.RuleSelector{{RuleFP: "fp-z", Arm: domain.ArmAnchor,
 		ObjectTypes: []string{live, gone}, Grants: map[string][]string{live: {"get"}}}}),

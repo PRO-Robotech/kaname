@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
@@ -49,10 +50,10 @@ func attachIntegrity(ctx context.Context, rd kanamerepo.Reader, cat catalog.Sour
 	// Источник НЕ провязан — отказ, а не роль без набора: проекция такую роль всё
 	// равно отвергнет, и отказать здесь значит назвать предмет, а не место, где
 	// он проявился.
-	if cat == nil {
+	facts := authzsnapshot.FactsForRequest(ctx, cat)
+	if facts == nil {
 		return status.Error(codes.Internal, "internal error")
 	}
-	facts := cat.Facts()
 	lookup := facts.RolePreviewLookup()
 	declared := make(map[domain.RoleID]int, len(roles))
 	segments := make([]domain.RoleSegment, 0, len(roles))

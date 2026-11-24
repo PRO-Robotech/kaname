@@ -25,6 +25,8 @@ func TestChildRegistrationQuestionRequiresBoundServingPath(t *testing.T) {
 		{"публичный mount снят", "cmd/kaname/grpc_register.go", "iamv1.RegisterChildRegistrationServiceServer(srv, svcs.childRegistrationHandler)", "_ = svcs.childRegistrationHandler"},
 		{"чужой import mount", "cmd/kaname/grpc_register.go", `"github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"`, `"example.invalid/iam/v1"`},
 		{"подменён runner", "cmd/kaname/full_startup.go", "kanamepg.NewResourceDecisionRunner(ctx, repo, profile.bundle, svcs.resourceGate)", "kanamepg.NewOtherRunner(ctx, repo, profile.bundle, svcs.resourceGate)"},
+		{"публикация теряет capability", "cmd/kaname/full_startup.go", "internaliamapp.NewUserChildRegistration(writers)", "internaliamapp.NewUserChildRegistration(otherRunner)"},
+		{"публикация теряет закреплённую редакцию", "cmd/kaname/catalog_publication_reconcile.go", "generation.resource.RunUserChildRegistration(pinned, in, principal)", "generation.resource.RunUserChildRegistration(ctx, in, principal)"},
 		{"иной capability", "cmd/kaname/full_startup.go", "internaliamapp.NewUserChildRegistration(resourceDecisions)", "internaliamapp.NewUserChildRegistration(otherRunner)"},
 		{"повторная запись handler", "cmd/kaname/full_startup.go", "svcs.internalIAMHandler.WithChildParentClose(resourceDecisions)", "svcs.childRegistrationHandler = nil\n svcs.internalIAMHandler.WithChildParentClose(resourceDecisions)"},
 		{"constructor теряет UC", app + "child_registration/handler.go", "return &Handler{register: register}", "return &Handler{register: nil}"},

@@ -29,7 +29,9 @@ import (
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	"github.com/PRO-Robotech/corelib/servicehost"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
+	authorizeapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	moduleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/module"
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
@@ -40,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/edgecredential"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
@@ -193,6 +196,10 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	ctx, fullStartup, err := prepareFullStartup(ctx, cfg, pool, logger)
 	if err != nil {
 		return startupFailureAt(err)
+	}
+	var publication *publishedStartupProfile
+	if fullStartup != nil {
+		publication = fullStartup.publication
 	}
 
 	if err := projectOwnCeilings(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg.OwnCeilings); err != nil {
@@ -391,20 +398,24 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		}
 	}
 
-	// Предварительная проверка всей поставки идёт до установки модели и всех записей поставки.
-	ownManifest, omErr := loadOwnManifest(logger)
-	if omErr != nil {
-		return startupFailureAt(omErr)
-	}
-	if err := moduleseed.Preflight(ownManifest, deliveredManifests); err != nil {
-		return startupFailureAt(err)
-	}
-	if hasInstallationDelegations(deliveredManifests) {
-		if err := validateInstallationInput(cfg.ModuleSeedInstaller); err != nil {
-			return startupFailureAt(failInstallation(logger, "input", "tenantAccountId", "", "", 0, err))
+	var ownManifest *manifest.Manifest
+	if publication == nil {
+		var omErr error
+		// Предварительная проверка всей поставки идёт до установки модели и всех записей поставки.
+		ownManifest, omErr = loadOwnManifest(logger)
+		if omErr != nil {
+			return startupFailureAt(omErr)
 		}
-		if _, _, err := loadInstallationCredential(cfg.ModuleSeedInstaller.CredentialFile); err != nil {
-			return startupFailureAt(failInstallation(logger, "input", "credentialFile", "", "", 0, err))
+		if err := moduleseed.Preflight(ownManifest, deliveredManifests); err != nil {
+			return startupFailureAt(err)
+		}
+		if hasInstallationDelegations(deliveredManifests) {
+			if err := validateInstallationInput(cfg.ModuleSeedInstaller); err != nil {
+				return startupFailureAt(failInstallation(logger, "input", "tenantAccountId", "", "", 0, err))
+			}
+			if _, _, err := loadInstallationCredential(cfg.ModuleSeedInstaller.CredentialFile); err != nil {
+				return startupFailureAt(failInstallation(logger, "input", "credentialFile", "", "", 0, err))
+			}
 		}
 	}
 	signingKeystore, tokenSigner, err := buildTokenSigning(ctx, pool, cfg, logger)
@@ -470,61 +481,74 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// Страж НИЖЕ судит то, что применитель ТОЛЬКО ЧТО записал: ConfigMap с
 	// манифестами — данные оператора, а не релиза, и в одиночку он не вправе
 	// расширить каталог за пределы того, что знает образ.
-	catalogApplier := modulecatalog.NewApplier(kanamepg.NewCatalogWriteRepo(pool))
-	// Наблюдатель — ОТДЕЛЬНЫМ оператором, а не цепочкой к конструктору: гейт
-	// провязки (`module_catalog_apply_wiring_test.go`) опознаёт связывание по
-	// вызову конструктора в правой части, и цепочка увела бы применителя
-	// из-под его наблюдения — молча.
-	catalogApplier = catalogApplier.WithObserver(metricsReg.NewModuleCatalogRecorder())
-	// Применённые ПОЛНОСТЬЮ — ровно они едут применителям ролей и посева ниже
-	// (kaname#865, Д3): модуль, пропущенный как младшая редакция либо
-	// отвергнутый конфликтом содержимого, не получает и их. Опора паритета выше
-	// и страж ниже судят доставку целиком, как прежде.
-	appliedManifests, notAppliedManifests, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
-	if aErr != nil {
-		return startupFailureAt(aErr)
-	}
-
-	// МОДЕЛЬ ПРОТИВ КАТАЛОГА — сразу за применителем каталога и ДО стража
-	// паритета, ролей и посева (kaname#865, Д10). Модель процесса выше собрана
-	// из всей доставки; модуль, документ которого каталог пропустил либо
-	// отверг и который принёс в модель тип вне канона, останавливает пуск:
-	// модель доступа не собирается из документа, который каталог отверг. Довод
-	// — шапка `model_catalog_agreement.go`; порядок и доводы держит гейт
-	// `model_catalog_agreement_wiring_test.go`.
-	if mcErr := assertModelAgreesWithCatalog(logger, notAppliedManifests, composedReport); mcErr != nil {
-		return startupFailureAt(mcErr)
-	}
-
+	var appliedManifests []*manifest.Manifest
+	var catalogCensus seed.CatalogParityCensus
 	catalogRepo := kanamepg.NewCatalogRepo(pool)
-	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo, catalogAnchor)
-	// Перепись печатается ВСЕГДА, независимо от исхода: без неё «ноль
-	// расхождений» неотличимо от «ноль прочитанного».
-	logger.Info("перепись каталога модуля",
-		slog.Int("anchor_modules", catalogCensus.AnchorModules),
-		slog.Int("anchor_resources", catalogCensus.AnchorResources),
-		slog.Int("anchor_verbs", catalogCensus.AnchorVerbs),
-		slog.Int("row_modules", catalogCensus.RowModules),
-		slog.Int("row_resources", catalogCensus.RowResources),
-		slog.Int("row_verbs", catalogCensus.RowVerbs),
-		slog.Int("retired_modules", catalogCensus.RetiredModules),
-		slog.Int("retired_resources", catalogCensus.RetiredResources),
-		slog.Int("retired_verbs", catalogCensus.RetiredVerbs),
-		slog.Int("missing", len(catalogCensus.MissingRows)),
-		slog.Int("withdrawn", len(catalogCensus.WithdrawnRows)),
-		slog.Int("extra", len(catalogCensus.ExtraRows)),
-		slog.Int("anchor_added_by_delivery", len(catalogCensus.AnchorAdded)))
-	// Снятое называется ПОИМЁННО, а не одним счётчиком. Счётчик отвечает на
-	// вопрос «сколько», а оператору, читающему журнал старта, нужен другой:
-	// ЧТО именно перестало выдаваться. Снятие проходит молча по построению —
-	// оно и заведено затем, чтобы не ронять пуск, — поэтому единственное место,
-	// где его видно, это здесь.
-	if len(catalogCensus.WithdrawnRows) > 0 {
-		logger.Info("строки каталога сняты решением — старт продолжается",
-			slog.Any("rows", catalogCensus.WithdrawnRows))
-	}
-	if catErr != nil {
-		return startupFailureAt(fmt.Errorf("каталог модуля: %w", catErr))
+	var catalogInput catalog.RowSource = catalogRepo
+	if publication == nil {
+		catalogApplier := modulecatalog.NewApplier(kanamepg.NewCatalogWriteRepo(pool))
+		// Наблюдатель — ОТДЕЛЬНЫМ оператором, а не цепочкой к конструктору: гейт
+		// провязки (`module_catalog_apply_wiring_test.go`) опознаёт связывание по
+		// вызову конструктора в правой части, и цепочка увела бы применителя
+		// из-под его наблюдения — молча.
+		catalogApplier = catalogApplier.WithObserver(metricsReg.NewModuleCatalogRecorder())
+		// Применённые ПОЛНОСТЬЮ — ровно они едут применителям ролей и посева ниже
+		// (kaname#865, Д3): модуль, пропущенный как младшая редакция либо
+		// отвергнутый конфликтом содержимого, не получает и их. Опора паритета выше
+		// и страж ниже судят доставку целиком, как прежде.
+		var notAppliedManifests []modulecatalog.RevisionSkip
+		var aErr error
+		appliedManifests, notAppliedManifests, aErr = applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
+		if aErr != nil {
+			return startupFailureAt(aErr)
+		}
+
+		// МОДЕЛЬ ПРОТИВ КАТАЛОГА — сразу за применителем каталога и ДО стража
+		// паритета, ролей и посева (kaname#865, Д10). Модель процесса выше собрана
+		// из всей доставки; модуль, документ которого каталог пропустил либо
+		// отверг и который принёс в модель тип вне канона, останавливает пуск:
+		// модель доступа не собирается из документа, который каталог отверг. Довод
+		// — шапка `model_catalog_agreement.go`; порядок и доводы держит гейт
+		// `model_catalog_agreement_wiring_test.go`.
+		if mcErr := assertModelAgreesWithCatalog(logger, notAppliedManifests, composedReport); mcErr != nil {
+			return startupFailureAt(mcErr)
+		}
+
+		var catErr error
+		catalogCensus, catErr = seed.AssertCatalogParity(ctx, catalogRepo, catalogAnchor)
+		// Перепись печатается ВСЕГДА, независимо от исхода: без неё «ноль
+		// расхождений» неотличимо от «ноль прочитанного».
+		logger.Info("перепись каталога модуля",
+			slog.Int("anchor_modules", catalogCensus.AnchorModules),
+			slog.Int("anchor_resources", catalogCensus.AnchorResources),
+			slog.Int("anchor_verbs", catalogCensus.AnchorVerbs),
+			slog.Int("row_modules", catalogCensus.RowModules),
+			slog.Int("row_resources", catalogCensus.RowResources),
+			slog.Int("row_verbs", catalogCensus.RowVerbs),
+			slog.Int("retired_modules", catalogCensus.RetiredModules),
+			slog.Int("retired_resources", catalogCensus.RetiredResources),
+			slog.Int("retired_verbs", catalogCensus.RetiredVerbs),
+			slog.Int("missing", len(catalogCensus.MissingRows)),
+			slog.Int("withdrawn", len(catalogCensus.WithdrawnRows)),
+			slog.Int("extra", len(catalogCensus.ExtraRows)),
+			slog.Int("anchor_added_by_delivery", len(catalogCensus.AnchorAdded)))
+		// Снятое называется ПОИМЁННО, а не одним счётчиком. Счётчик отвечает на
+		// вопрос «сколько», а оператору, читающему журнал старта, нужен другой:
+		// ЧТО именно перестало выдаваться. Снятие проходит молча по построению —
+		// оно и заведено затем, чтобы не ронять пуск, — поэтому единственное место,
+		// где его видно, это здесь.
+		if len(catalogCensus.WithdrawnRows) > 0 {
+			logger.Info("строки каталога сняты решением — старт продолжается",
+				slog.Any("rows", catalogCensus.WithdrawnRows))
+		}
+		if catErr != nil {
+			return startupFailureAt(fmt.Errorf("каталог модуля: %w", catErr))
+		}
+	} else {
+		catalogCensus.Live = publication.halves.Live
+		catalogCensus.Retired = publication.halves.Retired
+		catalogInput = publication.rows
+		logger.Info("каталог модуля загружен из подтверждённой публикации", slog.Int64("revision", publication.snapshot.Revision))
 	}
 	// Снимок наполняется ТЕМИ ЖЕ строками, которые прочитал страж, — своего
 	// чтения не заводит. ОБЕИМИ половинами: снятые строки страж читает и так, и
@@ -532,7 +556,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// отвечал арендатору пустым перечнем снятого до первого обновления
 	// (kacho#1814). Пара берётся одним методом переписи, чтобы её нельзя было
 	// разлучить по дороге.
-	catalogSnapshot, csErr := catalog.NewSnapshot(catalogCensus.Halves(), catalogRepo,
+	catalogSnapshot, csErr := catalog.NewSnapshot(catalogCensus.Halves(), catalogInput,
 		logger.With(slog.String("component", "catalog_snapshot")),
 		metricsReg.NewCatalogSnapshotRecorder())
 	if csErr != nil {
@@ -565,53 +589,56 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	//
 	// Каталожный факт берётся из ТЕХ ЖЕ живых строк, которые прочитал страж:
 	// третьего чтения каталога на старте не заводится.
-	rolesRights, rightsActions, rightsUnattributed, rrErr := buildModuleRoleRights(
-		catalogCensus.Live, permRegistry)
-	logger.Info("производитель правил роли модуля",
-		slog.Int("catalog_actions", rightsActions),
-		slog.Int("unattributed_entries", rightsUnattributed))
-	if rrErr != nil {
-		return startupFailureAt(fmt.Errorf("роли модуля: %w", rrErr))
-	}
-	rolesApplier := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanameRepo), rolesRights)
-	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
-		return startupFailureAt(raErr)
-	}
-	// Роли СВОЕГО манифеста службы (kaname#1003) — тем же применителем, после
-	// доставленных: новая роль модуля iam заводится объявлением манифеста образа,
-	// а не миграцией. Довод — шапка `applyImageModuleRoles`. Свой манифест читается
-	// здесь и тот же связанный идентификатор уходит ниже применителю посева.
-	if riErr := applyImageModuleRoles(ctx, logger, rolesApplier, ownManifest); riErr != nil {
-		return startupFailureAt(riErr)
-	}
+	if publication == nil {
+		rolesRights, rightsActions, rightsUnattributed, rrErr := buildModuleRoleRights(
+			catalogCensus.Live, permRegistry)
+		logger.Info("производитель правил роли модуля",
+			slog.Int("catalog_actions", rightsActions),
+			slog.Int("unattributed_entries", rightsUnattributed))
+		if rrErr != nil {
+			return startupFailureAt(fmt.Errorf("роли модуля: %w", rrErr))
+		}
+		rolesApplier := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanameRepo), rolesRights)
+		if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
+			return startupFailureAt(raErr)
+		}
+		// Роли СВОЕГО манифеста службы (kaname#1003) — тем же применителем, после
+		// доставленных: новая роль модуля iam заводится объявлением манифеста образа,
+		// а не миграцией. Довод — шапка `applyImageModuleRoles`. Свой манифест читается
+		// здесь и тот же связанный идентификатор уходит ниже применителю посева.
+		if riErr := applyImageModuleRoles(ctx, logger, rolesApplier, ownManifest); riErr != nil {
+			return startupFailureAt(riErr)
+		}
 
-	// ПРИМЕНЕНИЕ ПОСЕВА — ПОСЛЕ применения ролей (задачи kacho#2452, kaname#106).
-	//
-	// Сначала СВОЙ манифест службы, встроенный в образ: группу пишущих кортежи
-	// `module-relation-writers` и её выдачу заводит сама служба, на любой
-	// установке. Затем ДОСТАВЛЕННЫЕ манифесты: служебные учётки модулей
-	// платформы, их членства и выдачи заводит этот путь, а не миграция службы —
-	// миграция применяется везде, включая установку без платформы, и заводила
-	// там пять личностей чужого продукта. Условием доставленных служит ДОСТАВКА
-	// — её кладёт зонтичный чарт платформы и не кладёт чарт самостоятельной
-	// службы; своё доставкой не связано.
-	//
-	// Свой манифест читается ЗДЕСЬ и подаётся применителю посева ОТДЕЛЬНЫМ
-	// доводом — в перечень доставки он не подмешивается: доставку читают
-	// несколько потребителей старта, а получатель у своего манифеста ровно один
-	// (Р3 приёмки MRW-1). Довод о месте, порядке и о том, почему отказ фатален,
-	// — шапка `module_seed_apply.go`; порядок и раздельность доводов держит гейт
-	// `module_seed_apply_wiring_test.go`, а не этот комментарий.
-	//
-	// Доставленные едут сюда ПРИМЕНЁННЫМИ (kaname#865, Д3): модуль доставки,
-	// пропущенный как младшая редакция либо отвергнутый конфликтом, посева не
-	// получает. Свой манифест службы этим отбором НЕ сужается и подаётся всегда:
-	// он встроен в образ, доставкой не связан, и порядок редакций доставки о нём
-	// не говорит ничего — модуль `iam` доставки и встроенный документ суть два
-	// разных входа.
-	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
-	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
-		return startupFailureAt(seErr)
+		// ПРИМЕНЕНИЕ ПОСЕВА — ПОСЛЕ применения ролей (задачи kacho#2452, kaname#106).
+		//
+		// Сначала СВОЙ манифест службы, встроенный в образ: группу пишущих кортежи
+		// `module-relation-writers` и её выдачу заводит сама служба, на любой
+		// установке. Затем ДОСТАВЛЕННЫЕ манифесты: служебные учётки модулей
+		// платформы, их членства и выдачи заводит этот путь, а не миграция службы —
+		// миграция применяется везде, включая установку без платформы, и заводила
+		// там пять личностей чужого продукта. Условием доставленных служит ДОСТАВКА
+		// — её кладёт зонтичный чарт платформы и не кладёт чарт самостоятельной
+		// службы; своё доставкой не связано.
+		//
+		// Свой манифест читается ЗДЕСЬ и подаётся применителю посева ОТДЕЛЬНЫМ
+		// доводом — в перечень доставки он не подмешивается: доставку читают
+		// несколько потребителей старта, а получатель у своего манифеста ровно один
+		// (Р3 приёмки MRW-1). Довод о месте, порядке и о том, почему отказ фатален,
+		// — шапка `module_seed_apply.go`; порядок и раздельность доводов держит гейт
+		// `module_seed_apply_wiring_test.go`, а не этот комментарий.
+		//
+		// Доставленные едут сюда ПРИМЕНЁННЫМИ (kaname#865, Д3): модуль доставки,
+		// пропущенный как младшая редакция либо отвергнутый конфликтом, посева не
+		// получает. Свой манифест службы этим отбором НЕ сужается и подаётся всегда:
+		// он встроен в образ, доставкой не связан, и порядок редакций доставки о нём
+		// не говорит ничего — модуль `iam` доставки и встроенный документ суть два
+		// разных входа.
+		seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
+		if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
+			return startupFailureAt(seErr)
+		}
+
 	}
 
 	// Подключаем Prometheus-Recorder и логгер к default-registry LRO-worker'а и
@@ -655,7 +682,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	var resourceParticipant *kanamepg.ResourceObjectParticipant
 	var resourceObjectParticipant *reconcile.Reconciler
 	var groupObjectParticipant *reconcile.Reconciler
-	var bindingStageParticipant *kanamepg.BindingStageParticipant
+	var bindingStageParticipant reconcile.StagedBindingReconciler
 	if cfg.AuthorityProtocol.Participant() && fullStartup == nil {
 		bundle, loadErr := loadGroupParticipationBundle(ctx, cfg.AuthorityProtocol, kanameRepo, preparedModel)
 		if loadErr != nil {
@@ -749,6 +776,15 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
 		metricsReg, cfg, moduleRoster, tokenSigner, logger, preparedModel.plans)
+	if publication != nil && presentedReader != nil {
+		const manifestMaxBytes = 2 * 1024 * 1024
+		checker := authzcascade.WrapAdmitted(relverdict.NewAsker(pool), personmarks.New(pool))
+		uc, ucErr := moduleapp.NewPublicationUseCase(publication.store, publication.writers, checker, opsRepo, manifestMaxBytes, logger)
+		if ucErr != nil {
+			return startupFailureAt(ucErr)
+		}
+		svcs.catalogPublicationHandler = moduleapp.NewPublicationHandler(uc)
+	}
 	if cfg.AuthorityProtocol.Participant() && fullStartup == nil {
 		resourceBeginner, participantErr := resourceParticipant.RegistrationTxBeginner(pool)
 		if participantErr != nil {
@@ -790,7 +826,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// ПРИНИМАЕТ тот же реконсайлер материализации привязки, что путь запроса
 	// (`sign_in_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
 	// потому что её таблицы — предметы той же петли.
-	lane, err := buildLoginLane(ctx, cfg, moduleRoster, pool, kanameRepo, admissionParticipant, svcs.bindingReconciler, metricsReg, logger)
+	var publishedWriters []*publishedWriterGenerations
+	if publication != nil {
+		publishedWriters = append(publishedWriters, publication.writers)
+	}
+	lane, err := buildLoginLane(ctx, cfg, moduleRoster, pool, kanameRepo, admissionParticipant, svcs.bindingReconciler, metricsReg, logger, publishedWriters...)
 	if err != nil {
 		return startupFailureAt(err)
 	}
@@ -1143,6 +1183,13 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if err != nil {
 		return startupFailureAt(err)
 	}
+	var publicationPin grpc.UnaryServerInterceptor
+	if publication != nil {
+		publicationPin, err = authorizeapp.PublicationUnary(publication.store)
+		if err != nil {
+			return startupFailureAt(err)
+		}
+	}
 
 	// Измеритель задержки — ОДИН на процесс, полос у него две.
 	//
@@ -1216,6 +1263,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		publicCallerPolicy.Unary(),
 		addressGate.Unary(),
 		authzguard.AntiAnonymousUnary(logger),
+	)
+	if publicationPin != nil {
+		publicUnary = append(publicUnary, publicationPin)
+	}
+	publicUnary = append(publicUnary,
 		// Дверь — ПОСЛЕДНЕЙ: субъект к этому месту уже назван и уже отсечён,
 		// если он аноним, поэтому вопрос к модели задаётся только о том, кого
 		// есть о чём спрашивать. Обратный порядок тратил бы обращение к модели
@@ -1307,6 +1359,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	internalUnary = append(internalUnary,
 		internalCallerPolicy.Unary(),
 		addressGate.Unary(),
+	)
+	if publicationPin != nil {
+		internalUnary = append(internalUnary, publicationPin)
+	}
+	internalUnary = append(internalUnary,
 		internalSystemViewerFloor.Unary(),
 		internalACRFloor.Unary(),
 	)
@@ -1736,7 +1793,10 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		limits := restFrontLimits(cfg)
 		logRESTFrontLimits(logger, limits)
 		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts, limits,
-			restfront.PublicServices{ChildRegistration: fullStartup != nil && svcs.childRegistrationHandler != nil})
+			restfront.PublicServices{
+				ChildRegistration:  fullStartup != nil && svcs.childRegistrationHandler != nil,
+				CatalogPublication: svcs.catalogPublicationHandler != nil,
+			})
 		if err != nil {
 			return startupFailureAt(fmt.Errorf("публичный REST-фронт: %w", err))
 		}
@@ -2109,6 +2169,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		catalogSnapshot.Run(taskCtx, catalogSnapshotRefreshPeriod())
 		return nil
 	})
+	if publication != nil {
+		tasks = append(tasks, func() error {
+			return runPublishedAuthorization(taskCtx, publication.store, publication.poll, logger)
+		})
+	}
 
 	identityGrowth := newIdentityGrowthSampler(kanamepg.NewIdentityGrowthRepo(pool))
 	metricsReg.NewIdentityGrowthCollector(identityGrowth.Counts)
@@ -2128,6 +2193,13 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	bootstrapEmail := os.Getenv("KANAME_BOOTSTRAP_ROOT_EMAIL")
 	bootstrapReconciler := seed.NewBootstrapReconciler(
 		func(ctx context.Context) (seed.BootstrapAdminResult, error) {
+			if publication != nil {
+				pinned, generation, err := publication.writers.resolve(ctx)
+				if err != nil {
+					return seed.BootstrapAdminResult{}, err
+				}
+				ctx = generation.contract.Context(pinned)
+			}
 			return seed.RunBootstrapAdmin(ctx, pool, logger, seed.BootstrapAdminInput{Email: bootstrapEmail})
 		},
 		seed.BootstrapReconcilerConfig{
@@ -2153,7 +2225,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	reconcileAdapter := kanamepg.NewReconcileAdapter(pool, catalogSnapshot)
 	reconcileEngine := reconcile.New(reconcileAdapter,
 		logger.With(slog.String("component", "rsab_reconciler")), catalogSnapshot)
-	if cfg.AuthorityProtocol.Participant() {
+	if publication != nil {
+		if err := wireObjectAndBindingAuthorityParticipants(reconcileEngine, bindingStageParticipant, resourceObjectParticipant); err != nil {
+			return startupFailureAt(err)
+		}
+	} else if cfg.AuthorityProtocol.Participant() {
 		if err := wireBackgroundAuthorityParticipants(reconcileEngine, bindingStageParticipant, resourceObjectParticipant, groupObjectParticipant); err != nil {
 			return startupFailureAt(err)
 		}
@@ -2353,7 +2429,18 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		if err := startupCtx.Err(); err != nil {
 			return err
 		}
-		if oerr := seed.BackfillOwnerBindings(startupCtx, pool); oerr != nil {
+		var oerr error
+		if publication == nil {
+			oerr = seed.BackfillOwnerBindings(startupCtx, pool)
+		} else {
+			var pinned context.Context
+			var generation *publishedWriterGeneration
+			pinned, generation, oerr = publication.writers.resolve(startupCtx)
+			if oerr == nil {
+				oerr = seed.BackfillOwnerBindingsWithFacts(generation.contract.Context(pinned), pool, generation.snapshot.Facts)
+			}
+		}
+		if oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
 		}
 		// Страж расхождения литерала и строк каталога отработал РАНЬШЕ — в
@@ -2377,14 +2464,35 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		if err := startupCtx.Err(); err != nil {
 			return err
 		}
-		verbs, verr := seed.ReseedSystemRoleVerbs(startupCtx, kanameRepo, pool,
-			catalogSnapshot.Facts(), roleVerbReseed)
-		if verr != nil && (verbs.Completed || startupCtx.Err() == nil) {
-			logger.Error("пересчёт проекции глаголов роли отказал",
-				slog.Any("err", verr),
-				slog.Int("roles_examined", verbs.Examined),
-				slog.Int("roles_reseeded", verbs.Reseeded),
-				slog.Int("roles_failed", verbs.Failed))
+		var verbs seed.RoleVerbReseedCensus
+		var verr error
+		var verbsSnapshot *authzsnapshot.Snapshot
+		verbsCtx, verbsRepo, verbsFacts := startupCtx, kanameRepo, catalogSnapshot.Facts()
+		if publication != nil {
+			var generation *publishedWriterGeneration
+			verbsCtx, generation, verr = publication.writers.resolve(startupCtx)
+			if verr == nil {
+				verbsSnapshot = generation.snapshot
+				verbsRepo, verbsFacts = generation.repo, generation.snapshot.Facts
+			} else if startupCtx.Err() == nil {
+				logger.Error("пересчёт проекции глаголов роли отказал",
+					slog.Any("err", verr),
+					slog.Int("roles_examined", verbs.Examined),
+					slog.Int("roles_reseeded", verbs.Reseeded),
+					slog.Int("roles_failed", verbs.Failed))
+			}
+		}
+		// Обе полосы выбирают входы одного пересчёта. Неподтверждённая
+		// редакция не допускает отката к каталогу или писателю старого старта.
+		if verr == nil {
+			verbs, verr = seed.ReseedSystemRoleVerbs(verbsCtx, verbsRepo, pool, verbsFacts, roleVerbReseed)
+			if verr != nil && (verbs.Completed || startupCtx.Err() == nil) {
+				logger.Error("пересчёт проекции глаголов роли отказал",
+					slog.Any("err", verr),
+					slog.Int("roles_examined", verbs.Examined),
+					slog.Int("roles_reseeded", verbs.Reseeded),
+					slog.Int("roles_failed", verbs.Failed))
+			}
 		}
 		// Перепись печатается ВСЕГДА, независимо от исхода: без неё «ноль
 		// пересеянных» неотличимо от «ноль прочитанных».
@@ -2396,7 +2504,16 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			slog.String("first_failure_class", verbs.FirstFailureClass),
 			slog.Int("pairs", verbs.Pairs),
 			slog.Bool("completed", verbs.Completed))
-		if verbs.Structural() {
+		structuralVerbsFailure := verbs.Structural()
+		if structuralVerbsFailure && verbsSnapshot != nil {
+			// Смена редакции во время обхода может закрыть все транзакции роли.
+			// Структурный отказ подтверждается только действующей редакцией БД.
+			if _, err := publication.rows.repo.ConfirmActivePublication(startupCtx, verbsSnapshot); err != nil {
+				structuralVerbsFailure = false
+				logger.Warn("редакция пересчёта проекции глаголов больше не подтверждена", slog.Any("err", err))
+			}
+		}
+		if structuralVerbsFailure {
 			return fmt.Errorf("пересчёт проекции глаголов роли: осмотрено %d системных ролей, "+
 				"пересеяно 0 — повтор даст то же самое, и цепь вердикта собирает ответ "+
 				"«разрешено ли действие» из строк, которых нет: %w",
@@ -2427,7 +2544,18 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		if err := startupCtx.Err(); err != nil {
 			return err
 		}
-		refs, rerr := seed.ReseedSystemRoleRuleRefs(startupCtx, kanameRepo, pool, ruleRefReseed)
+		var refs seed.RuleRefReseedCensus
+		var rerr error
+		if publication == nil {
+			refs, rerr = seed.ReseedSystemRoleRuleRefs(startupCtx, kanameRepo, pool, ruleRefReseed)
+		} else {
+			pinned, generation, err := publication.writers.resolve(startupCtx)
+			if err != nil {
+				rerr = err
+			} else {
+				refs, rerr = seed.ReseedSystemRoleRuleRefs(pinned, generation.repo, pool, ruleRefReseed)
+			}
+		}
 		if rerr != nil && (refs.Completed || startupCtx.Err() == nil) {
 			logger.Error("пересчёт проекции сегментов правила отказал",
 				slog.Any("err", rerr),
@@ -2538,20 +2666,25 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// прохода, а не отнимает доступ. Снимается вместе с переходным стражем схемы
 	// при пустой очереди на всех установках (шапка `seed/selector_verbs_queue.go`).
 	tasks = append(tasks, func() error {
-		derr := seed.DrainSelectorVerbsQueue(taskCtx, kanameRepo, pool, catalogSnapshot,
-			selectorVerbsQueueRetry, func(c seed.SelectorVerbsCensus, perr error) {
-				attrs := []any{
-					slog.Int("roles_examined", c.Examined),
-					slog.Int("roles_regrained", c.Regrained),
-					slog.Int("roles_failed", c.Failed),
-					slog.Int("queue_pending", c.Pending),
-				}
-				if perr != nil {
-					logger.Error("пересчёт очереди глаголов правил отказал", append(attrs, slog.Any("err", perr))...)
-					return
-				}
-				logger.Info("перепись пересчёта очереди глаголов правил", attrs...)
-			})
+		report := func(c seed.SelectorVerbsCensus, perr error) {
+			attrs := []any{
+				slog.Int("roles_examined", c.Examined),
+				slog.Int("roles_regrained", c.Regrained),
+				slog.Int("roles_failed", c.Failed),
+				slog.Int("queue_pending", c.Pending),
+			}
+			if perr != nil {
+				logger.Error("пересчёт очереди глаголов правил отказал", append(attrs, slog.Any("err", perr))...)
+				return
+			}
+			logger.Info("перепись пересчёта очереди глаголов правил", attrs...)
+		}
+		var derr error
+		if publication != nil {
+			derr = seed.DrainPublishedSelectorVerbsQueue(taskCtx, pool, publication.writers.selectRoleProjection, selectorVerbsQueueRetry, report)
+		} else {
+			derr = seed.DrainSelectorVerbsQueue(taskCtx, kanameRepo, pool, catalogSnapshot, selectorVerbsQueueRetry, report)
+		}
 		if derr != nil && taskCtx.Err() == nil {
 			logger.Error("пересчёт очереди глаголов правил остановлен", slog.Any("err", derr))
 		}

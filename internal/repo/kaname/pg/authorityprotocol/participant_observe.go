@@ -69,5 +69,8 @@ func participantOpenCause(err error) string {
 	if errors.As(err, &scan) {
 		return "result-scan"
 	}
+	if errors.Is(err, kaname.ErrSourceUnconfirmed) {
+		return "source-unconfirmed"
+	}
 	return "other"
 }

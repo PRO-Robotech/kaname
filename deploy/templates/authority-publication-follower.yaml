@@ -1,0 +1,62 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+{{- $authority := .Values.authorityProtocol | default dict -}}
+{{- $follower := $authority.publicationFollower | default dict -}}
+{{- if include "kaname-svc.blockEnabled" (list $ "authorityProtocol.publicationFollower") }}
+{{- include "kaname-svc.requireOperatorSuppliedNames" . -}}
+{{- $secretName := required "authorityProtocol.publicationFollower.enabled требует db.migrationDSNSecretName" .Values.db.migrationDSNSecretName -}}
+{{- $secretKey := required "authorityProtocol.publicationFollower.enabled требует db.migrationDSNSecretKey" .Values.db.migrationDSNSecretKey -}}
+{{- $interval := required "authorityProtocol.publicationFollower.interval обязателен" $follower.interval -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}-authority-publications
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Один фоновый владелец, без одновременного старого и нового пода при rollout.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ .Values.name }}-authority-publications
+  template:
+    metadata:
+      labels:
+        # Основные Service выбирают app=<name>, этот под под них не попадает.
+        app: {{ .Values.name }}-authority-publications
+      {{- with .Values.imageId }}
+      annotations:
+        kaname.cloud/image-id: {{ . | quote }}
+      {{- end }}
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: authority-publications
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/usr/local/bin/kaname-migrator", "authority-bundle", "follow-publications"]
+          args: ["--interval", {{ $interval | quote }}]
+          env:
+            - name: MIGRATOR_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.migrationDSNSecretName | quote }}
+                  key: {{ .Values.db.migrationDSNSecretKey | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml $follower.resources | nindent 12 }}
+{{- end }}

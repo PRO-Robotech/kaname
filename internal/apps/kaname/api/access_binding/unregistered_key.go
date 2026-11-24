@@ -36,6 +36,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -237,7 +238,7 @@ func (u *UnregisteredKeyWithdrawal) withdrawRoleNames(ctx context.Context, tx se
 	if len(ids) == 0 {
 		return nil
 	}
-	facts := u.cat.Facts()
+	facts := authzsnapshot.FactsForRequest(ctx, u.cat)
 	for _, id := range ids {
 		role, err := w.Roles().Get(ctx, id)
 		if err != nil {
@@ -268,7 +269,7 @@ func (u *UnregisteredKeyWithdrawal) withdrawRoleNames(ctx context.Context, tx se
 		if err := u.store.RewriteRoleRules(ctx, tx, id, rules, perms); err != nil {
 			return fmt.Errorf("rewrite rules of role %s: %w", id, err)
 		}
-		sels := ordinary.MaterializingSelectors()
+		sels := facts.MaterializingSelectors(ordinary)
 		policy := domain.PolicyOfRole(role.IsSystem, role.OwnerModule)
 		if err := w.RolesW().ReplaceRuleSelectors(ctx, id, facts.GrantSelectors(sels, policy)); err != nil {
 			return fmt.Errorf("replace rule selectors of role %s: %w", id, err)

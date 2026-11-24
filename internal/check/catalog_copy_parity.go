@@ -250,6 +250,20 @@ type CatalogPendingEntry struct {
 // не открыто (fail-closed).
 var catalogPendingEntries = []CatalogPendingEntry{
 	{
+		OwnFQN: "kaname.cloud.iam.v1.CatalogPublicationService/ApplyPublication",
+		Why:    catalogPublicationPendingWhy,
+		Removal: "копия края несёт CatalogPublicationService/ApplyPublication после подъёма пина " +
+			"Kaname и регенерации каталога; тогда запись снимается",
+		Refs: "PRO-Robotech/kaname#1142",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.CatalogPublicationService/PlanPublication",
+		Why:    catalogPublicationPendingWhy,
+		Removal: "копия края несёт CatalogPublicationService/PlanPublication после подъёма пина " +
+			"Kaname и регенерации каталога; тогда запись снимается",
+		Refs: "PRO-Robotech/kaname#1142",
+	},
+	{
 		OwnFQN:  "kaname.cloud.iam.v1.ChildRegistrationService/Register",
 		Why:     "канонический вход регистрации потомка объявлен в Kaname (kaname#1045); край строит свой каталог после обновления пина службы",
 		Removal: "копия края на стволе платформы содержит этот RPC после обновления пина Kaname и генерации каталога",
@@ -296,6 +310,10 @@ var catalogPendingEntries = []CatalogPendingEntry{
 }
 
 const (
+	catalogPublicationPendingWhy = "публичная регистрация живого каталога добавила два RPC службы (kaname#1142); " +
+		"наша копия содержит строки из дескриптора текущего контракта, а край порождает " +
+		"свою копию по пину службы; до подъёма пина отсутствующая строка закрывает вызов на краю"
+
 	// grantDelegationPendingWhy — общая причина четырёх записей одного предмета.
 	grantDelegationPendingWhy = "глагол службы делегированных выдач заведён контрактом службы (kaname#986); " +
 		"край порождает свою копию из контракта службы по пину и назовёт глагол после подъёма пина " +

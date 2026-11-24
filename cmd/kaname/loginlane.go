@@ -456,7 +456,7 @@ func laneHasher(cfg config.Config) (*passwordverify.Hasher, error) {
 // ошибки (kaname#987): допуск края полосы судит по тому же значению, что
 // политики вызывающего.
 func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidentity.Roster, pool *pgxpool.Pool, repo kanamerepo.Repository, admission *kanamepg.HumanAdmissionParticipant,
-	reconciler *reconcileapp.Reconciler, reg *metrics.Registry, logger *slog.Logger,
+	reconciler *reconcileapp.Reconciler, reg *metrics.Registry, logger *slog.Logger, published ...*publishedWriterGenerations,
 ) (*loginLane, error) {
 	login := cfg.AuthN.Login
 	if err := login.ValidateAll(); err != nil {
@@ -614,7 +614,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 	// Окно обращений по источнику для регистрации и запроса восстановления —
 	// ось источника полосы входа, те же величины (kaname#456).
 	sourcePace := humansession.SourcePace{Limit: login.SourceAttempts, Window: login.SourceWindow}
-	registrationPG, completionStore, err := humanAdmissionStores(pool, cfg.AuthorityProtocol, admission)
+	registrationPG, completionStore, err := loginHumanAdmissionStores(pool, cfg.AuthorityProtocol, admission, published...)
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
@@ -816,7 +816,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, modules moduleidenti
 // отдаёт писатель зеркала своей транзакции; композицию зеркала (Р6) над ним
 // исполняет `user.RegisterMirrorTx` — здесь, в композиционном корне, где
 // соответствие порту закрепляется присваиванием.
-type registrationStore struct{ inner *kanamepg.RegistrationStore }
+type registrationStore struct{ inner humanRegistrationStore }
 
 func (s registrationStore) Writer(ctx context.Context) (registration.Writer, error) {
 	w, err := s.inner.Writer(ctx)
@@ -840,7 +840,7 @@ func (w registrationWriter) Mirror(ctx context.Context, in registration.MirrorIn
 // зеркало регистрации.
 type verificationStore struct {
 	sessions *kanamepg.HumanSessionRepo
-	inner    *kanamepg.RegistrationStore
+	inner    humanRegistrationStore
 }
 
 func (s verificationStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {
@@ -870,7 +870,7 @@ func (w verificationWriter) ActivateInviteOnVerification(ctx context.Context, pe
 // писателя нескольких сессий на строке человека (kaname#635).
 type emailChangeStore struct {
 	sessions *kanamepg.HumanSessionRepo
-	inner    *kanamepg.RegistrationStore
+	inner    humanRegistrationStore
 }
 
 func (s emailChangeStore) Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (humansession.Resolved, humansession.NoSessionReason, error) {

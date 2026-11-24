@@ -179,5 +179,5 @@ func (b *Bundle) GrantSelectors(rules domain.Rules, policy domain.RulePolicy, sc
 	if err != nil {
 		return nil, err
 	}
-	return b.compiler.facts.GrantSelectors(ordinary.MaterializingSelectorsInScope(domain.DeriveFromResourceType(scope.Type)), policy), nil
+	return b.compiler.facts.GrantSelectors(b.compiler.facts.MaterializingSelectorsInScope(ordinary, domain.DeriveFromResourceType(scope.Type)), policy), nil
 }

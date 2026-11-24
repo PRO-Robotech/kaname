@@ -47,6 +47,6 @@ func (f *Facts) ProjectGrantRules(rules domain.Rules, policy domain.RulePolicy) 
 	if err != nil {
 		return GrantProjection{}, err
 	}
-	selectors := f.GrantSelectors(ordinary.MaterializingSelectors(), policy)
+	selectors := f.GrantSelectors(f.MaterializingSelectors(ordinary), policy)
 	return GrantProjection{Ordinary: ordinary, Capabilities: caps, Permissions: permissions, Selectors: selectors, Verbs: f.RoleVerbsFromSelectors(selectors, policy)}, nil
 }

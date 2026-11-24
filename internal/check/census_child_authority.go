@@ -20,6 +20,7 @@ const childAuthorityModule = "github.com/PRO-Robotech/kaname/"
 
 var childAuthorityFiles = []string{
 	"cmd/kaname/wiring.go", "cmd/kaname/full_startup.go", "cmd/kaname/grpc_register.go", "cmd/kaname/serve.go",
+	"cmd/kaname/catalog_publication_runner.go", "cmd/kaname/catalog_publication_reconcile.go",
 	"internal/apps/kaname/api/child_registration/handler.go",
 	"internal/apps/kaname/api/internal_iam/register_user_child.go",
 	"internal/repo/kaname/pg/resource_decision_runner.go",
@@ -135,11 +136,12 @@ func CensusChildRegistrationQuestionProof(corpus map[string][]byte) (string, err
 		!childAuthorityImports(wire, map[string]string{"kanamepg": pg[:len(pg)-1], "childregistrationapp": app + "child_registration", "internaliamapp": app + "internal_iam"}) {
 		return "", nil
 	}
-	if !childAuthorityServingRoot(file("cmd/kaname/serve.go"), mount) {
+	if !childAuthorityPublishedBinding(build, wire, file("cmd/kaname/catalog_publication_runner.go"), file("cmd/kaname/catalog_publication_reconcile.go")) ||
+		!childAuthorityServingRoot(file("cmd/kaname/serve.go"), mount) {
 		return "", nil
 	}
 
-	// Единственная запись поля — именно проверенная композиция, не decoy.
+	// Поле назначается один раз в каждом из двух подтверждённых FULL-профилей.
 	writes := 0
 	for _, f := range files {
 		routeAny(f, func(n ast.Node) bool {
@@ -156,7 +158,7 @@ func CensusChildRegistrationQuestionProof(corpus map[string][]byte) (string, err
 			return false
 		})
 	}
-	if writes != 1 {
+	if writes != 2 {
 		return "", nil
 	}
 	constructor := routeFunction(file(pg+"resource_decision_runner.go"), "NewResourceDecisionRunner")
@@ -264,6 +266,22 @@ func CensusChildRegistrationQuestionProof(corpus map[string][]byte) (string, err
 		}
 	}
 	return "решатель: публичный gRPC → FULL UserChildRegistrationTransactions → проверка права на родителе в RR и в writer перед записью", nil
+}
+
+// Опубликованный профиль выбирает ресурсный runner по подтверждённой редакции
+// запроса. В обеих ветвях FULL решение остаётся у ResourceDecisionRunner.
+func childAuthorityPublishedBinding(build *ast.FuncDecl, wire, runner, router *ast.File) bool {
+	published := routeFunction(wire, "wirePublishedFullStartupServices")
+	register := routeMethod(router, "publishedWriterGenerations", "RunUserChildRegistration")
+	return childAuthorityStatements(build, `if profile.publication != nil { return wirePublishedFullStartupServices(ctx, profile.publication, svcs) }`) &&
+		published != nil && routeLocalBindings(published)["writers"] == 1 &&
+		childAuthorityStatements(published, `writers := publication.writers`, `if err := writers.installResourceGate(ctx, svcs.resourceGate); err != nil { return nil, err }`) &&
+		childAuthorityStatements(published, `svcs.childRegistrationHandler = childregistrationapp.NewHandler(internaliamapp.NewUserChildRegistration(writers))`) &&
+		routeFieldType(runner, "publishedWriterGeneration", "resource", childAuthorityModule+"internal/repo/kaname/pg", "ResourceDecisionRunner") &&
+		register != nil && register.Body != nil && len(register.Body.List) == 4 &&
+		childAuthorityStatements(register, `pinned, generation, err := r.resolve(ctx)`, `if err != nil { return time.Time{}, err }`,
+			`if generation.resource == nil { return time.Time{}, authzsnapshot.ErrUnconfirmed }`,
+			`return generation.resource.RunUserChildRegistration(pinned, in, principal)`)
 }
 
 // Сборка и регистрация должны использовать один экземпляр services. Обращение

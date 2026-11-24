@@ -300,7 +300,9 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
         self.assertNotIn("roleReadiness", diagnose([record, record]))
         for stage, cause in (("open-begin", "connection-open"), ("open-enter-v2", "sql-lock-unavailable"),
                              ("open-enter-v3", "sql-query-canceled"), ("open-abi-mismatch", "semantic-identity"),
-                             ("open-input", "invalid-fence"), ("open-context", "Canceled")):
+                             ("open-input", "invalid-fence"), ("open-context", "Canceled"),
+                             ("open-confirm-publication", "source-unconfirmed"),
+                             ("open-confirm-publication", "sql-undefined-table")):
             with self.subTest(stage=stage, cause=cause):
                 classified = record.replace("replace-verbs", stage).replace("deadlock", cause)
                 census = diagnose([classified])["roleReadiness"]["verbCensus"]

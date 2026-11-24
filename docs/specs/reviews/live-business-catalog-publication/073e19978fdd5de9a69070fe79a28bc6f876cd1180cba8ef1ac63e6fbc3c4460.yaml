@@ -1,0 +1,28 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/live-business-catalog-publication.md
+  task: PRO-Robotech/kaname#1142
+  sha256: 073e19978fdd5de9a69070fe79a28bc6f876cd1180cba8ef1ac63e6fbc3c4460
+reviewer_role: acceptance-reviewer
+reviewer_agent: /root/catalog1142_ci_source_audit
+reviewed_at: '2026-11-22T16:25:33.494814+00:00'
+verdict: APPROVED
+blocking: []
+coverage:
+- B1. Штатный Authorize.Check для sign и approve на обеих редакциях; неизвестный сосед
+  и отсутствие выдач.
+- 'B2. Предметный межмодульный отказ: erp-contract, занятый erp_contract_item и свободный
+  Plan-близнец.'
+runtime_proof_performed: false
+effective_approval:
+  issued: false
+  reason: Записано независимое статическое ревью документа. Внешнее событие одобрения
+    не опубликовано.
+  publication_pending:
+    required_for_sanction: true
+    expected_actor: pointpu
+event:
+  status: not_performed
+  type: none

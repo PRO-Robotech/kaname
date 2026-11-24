@@ -670,12 +670,12 @@ func ridReadRoleVerbFailure(raw []byte, examined, reseeded, failed *int, complet
 	}
 	var f ridRoleVerbFailure
 	if json.Unmarshal(raw, &f) != nil ||
-		!slices.Contains([]string{"open", "open-input", "open-begin", "open-enter-v2", "open-enter-v3", "open-abi-mismatch", "open-context",
+		!slices.Contains([]string{"open", "open-input", "open-begin", "open-enter-v2", "open-enter-v3", "open-abi-mismatch", "open-confirm-publication", "open-context",
 			"read-rules", "replace-verbs", "regrain-selectors", "commit"}, f.Stage) ||
 		!slices.Contains([]string{"deadlock", "serialization", "Aborted", "FailedPrecondition", "InvalidArgument", "Internal",
 			"Unavailable", "PermissionDenied", "Canceled", "DeadlineExceeded", "other", "invalid-fence", "semantic-identity",
 			"no-row", "transaction-closed", "sql-permission", "sql-undefined-function", "sql-undefined-table",
-			"sql-lock-unavailable", "sql-query-canceled", "sql-state", "sql-connection", "sql-other", "connection-open", "result-scan"}, f.Class) {
+			"sql-lock-unavailable", "sql-query-canceled", "sql-state", "sql-connection", "sql-other", "connection-open", "result-scan", "source-unconfirmed"}, f.Class) {
 		return nil
 	}
 	f.examined, f.reseeded, f.failed, f.completed = *examined, *reseeded, *failed, *completed
