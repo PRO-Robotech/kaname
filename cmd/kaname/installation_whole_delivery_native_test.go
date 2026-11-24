@@ -312,6 +312,11 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 // До полной переписи List/Get должны видеть завершённые проекции своего запуска.
 func rid09AwaitBaseRoleProjections(t *testing.T, ctx context.Context, p *installruntime.Process) {
 	t.Helper()
+	ridAwaitRoleProjectionsAt(t, ctx, p, "unspecified")
+}
+
+func ridAwaitRoleProjectionsAt(t *testing.T, ctx context.Context, p *installruntime.Process, phase string) {
+	t.Helper()
 	ready, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	state := ridRoleProjectionState{verbs: "unseen", refs: "unseen"}
@@ -329,14 +334,14 @@ func rid09AwaitBaseRoleProjections(t *testing.T, ctx context.Context, p *install
 		} else if errors.Is(err, context.Canceled) {
 			reason = "canceled"
 		}
-		ridLogRoleReadiness(t, reason, state)
+		ridLogRoleReadiness(t, phase, reason, state)
 	}
 	require.NoError(t, err, "стартовый пересчёт проекций ролей не завершён")
 }
 
 // Не t.Helper: маркер сохраняет точный источник для закрытого сборщика.
-func ridLogRoleReadiness(t *testing.T, reason string, state ridRoleProjectionState) {
-	t.Logf("RID_ROLE_READINESS reason=%s verbs=%s refs=%s", reason, state.verbs, state.refs)
+func ridLogRoleReadiness(t *testing.T, phase, reason string, state ridRoleProjectionState) {
+	t.Logf("RID_ROLE_READINESS reason=%s verbs=%s refs=%s phase=%s", reason, state.verbs, state.refs, phase)
 }
 
 func rid09Matrix(t *testing.T, twin bool, consumer rid09LivePublicConsumer) []rid09Observation {
