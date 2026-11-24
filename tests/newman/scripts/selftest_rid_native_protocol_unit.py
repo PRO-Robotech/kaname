@@ -238,9 +238,9 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
             path.write_text("".join(rows) + scan_suffix)
             return h.test_diagnostics(path, root, predicates), leaf
 
-    def test_rid11_role_readiness_keeps_only_closed_active_first_failure_marker(self):
+    def check_role_readiness_marker(self, suite):
         h = self.hosted
-        root, predicates, _ = h.CASES["registry-installation-rid11"]
+        root, predicates, _ = h.CASES[suite]
         leaf = root + "/" + sorted(h.RID_MATRIX_NESTED[root])[0]
         source = "cmd/kaname/installation_whole_delivery_native_test.go"
         good = "    installation_whole_delivery_native_test.go:1: RID_ROLE_READINESS reason=deadline verbs=ready refs=failed\n"
@@ -269,6 +269,11 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
                 result = diagnose(outputs, **options)
                 self.assertNotIn("roleReadiness", result)
                 self.assertNotIn("unit-secret", json.dumps(result))
+
+    def test_role_readiness_keeps_only_closed_active_first_failure_marker(self):
+        for suite in ("registry-installation-rid07", "registry-installation-rid11"):
+            with self.subTest(suite=suite):
+                self.check_role_readiness_marker(suite)
 
     def test_valid_red_markers_keep_only_safe_schema(self):
         for rid, field in (("03", "readOnlyDiffs"), ("05", "oldOperationDiffs")):

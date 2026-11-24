@@ -760,6 +760,7 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     if (root_test == CASES["registry-installation-rid11"][0]
             and type(timeout_seconds) is int and timeout_seconds > 0):
         markers = NativeFailureMarkers(timeout_seconds)
+    watch_role_readiness = markers is not None or root_test == CASES["registry-installation-rid07"][0]
     seen, fragmented, sites = set(), set(), {}
     bounds = {}
     for relative in ASSERTION_FILES:
@@ -905,7 +906,7 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                         projection_changes[name] = [
                             field for field, changed in zip(projection_fields, marker.groups()) if changed == "true"
                         ]
-                if (markers is not None and action == "output" and isinstance(name, str) and name in known
+                if (watch_role_readiness and action == "output" and isinstance(name, str) and name in known
                         and (name, "run") in seen
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
                     output = event.get("Output")
@@ -921,7 +922,8 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                         else:
                             role_readiness[name] = {"reason": role_marker[2],
                                 "verbs": role_marker[3], "refs": role_marker[4]}
-                    marker = premise_marker.fullmatch(output) if isinstance(output, str) and len(output) <= 180 else None
+                    marker = (premise_marker.fullmatch(output)
+                              if markers is not None and isinstance(output, str) and len(output) <= 180 else None)
                     if marker and marker[1] in premise_reasons:
                         if name in binding_premise:
                             ambiguous_premise.add(name)
