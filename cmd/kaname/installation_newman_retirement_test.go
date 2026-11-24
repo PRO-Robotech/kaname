@@ -298,6 +298,9 @@ func rid04RequireNormalBoundary(t *testing.T, w *ridLifecycleWorld, a, b rid03Ne
 	// Штатный нативный запуск может заново проецировать учёт каталога. Это отделено
 	// от полной необработанной контрольной точки отказавшего запуска и строгих скобок каждой публичной фазы.
 	rid09LogProjectionDelta(t, a.Projection, b.Projection)
+	if !reflect.DeepEqual(a.Projection.Roles, b.Projection.Roles) {
+		ridLogRoleDelta(t, a.Projection.Roles, b.Projection.Roles)
+	}
 	require.Equal(t, a.Projection, b.Projection)
 	rid04RequireGDGUnchanged(t, a, b)
 	require.Equal(t, a.BusinessAudit, b.BusinessAudit, "idempotent apply/catalog restore emits no new AB/GD business event")

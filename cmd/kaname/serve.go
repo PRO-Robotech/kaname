@@ -2392,6 +2392,8 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			slog.Int("roles_examined", verbs.Examined),
 			slog.Int("roles_reseeded", verbs.Reseeded),
 			slog.Int("roles_failed", verbs.Failed),
+			slog.String("first_failure_stage", verbs.FirstFailureStage),
+			slog.String("first_failure_class", verbs.FirstFailureClass),
 			slog.Int("pairs", verbs.Pairs),
 			slog.Bool("completed", verbs.Completed))
 		if verbs.Structural() {

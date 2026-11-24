@@ -9,7 +9,10 @@ import (
 	"testing"
 
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type installationBoundaryRepo struct {
@@ -83,4 +86,36 @@ func TestInstallationBoundaryDoesNotFallbackOrRetry(t *testing.T) {
 	require.Zero(t, r.legacy)
 	err = DoWithInstallationWriteTxVoid(context.Background(), nil, kaname.AuthorityRole, func(context.Context, kaname.Writer) error { t.Fatal("тело без typed factory"); return nil })
 	require.Error(t, err)
+}
+
+func TestInstallationObserverKeepsPrimaryFailure(t *testing.T) {
+	deadlock := &pgconn.PgError{Code: "40P01"}
+	serialization := &pgconn.PgError{Code: "40001"}
+	for _, tc := range []struct {
+		name                string
+		entry, body, commit error
+		want                error
+	}{
+		{name: "success"},
+		{name: "entry", entry: deadlock, want: deadlock},
+		{name: "body", body: deadlock, want: deadlock},
+		{name: "commit", commit: serialization, want: serialization},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &installationBoundaryWriter{commitErr: tc.commit, rollbackErr: errors.New("cleanup fault")}
+			r := &installationBoundaryRepo{writer: w, entryErr: tc.entry}
+			var observed []error
+			err := DoWithObservedInstallationWriteTxVoid(context.Background(), r, kaname.AuthorityRole,
+				func(context.Context, kaname.Writer) error { return tc.body },
+				func(err error) { observed = append(observed, err) })
+			if tc.want == nil {
+				require.NoError(t, err)
+				require.Empty(t, observed)
+				return
+			}
+			require.Equal(t, codes.Internal, status.Code(err))
+			require.Len(t, observed, 1)
+			require.Same(t, tc.want, observed[0])
+		})
+	}
 }

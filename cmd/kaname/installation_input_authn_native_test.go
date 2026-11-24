@@ -169,7 +169,7 @@ func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
 	if c.Active {
 		w = newRIDLifecycleWorldAccounts(t, c.Mode, false, setup)
 		// Исходный снимок ACTIVE требует тех же завершённых проекций ролей, что восстановление.
-		rid09AwaitBaseRoleProjections(t, w.f.given.ctx, w.deliveryProcess)
+		ridAwaitRoleProjectionsAt(t, w.f.given.ctx, w.deliveryProcess, "initial-delivery")
 		subject := w.f.ridSA(t, w.f.tenantID, "rid11-existing-grantee")
 		g := w.grant(t, w.bindingInput("service_account", subject, w.pull, "registry.registries", w.object))
 		require.Equal(t, w.gd.Id, g.DelegationId)
@@ -681,7 +681,7 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 		require.NoError(t, err)
 		require.NoError(t, base.OwnsListeners(installruntime.DefaultNativePorts().All()...))
 		if public != nil {
-			rid09AwaitBaseRoleProjections(t, f.given.ctx, base)
+			ridAwaitRoleProjectionsAt(t, f.given.ctx, base, "restored-base")
 		}
 		f.renewOperator(t, f.given.ctx)
 		if c.Variant == "deleted-creator" {

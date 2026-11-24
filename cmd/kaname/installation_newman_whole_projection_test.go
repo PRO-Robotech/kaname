@@ -5,7 +5,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +55,60 @@ func rid09LogProjectionDelta(t *testing.T, previous, current rid09NewmanProjecti
 		!reflect.DeepEqual(previous.Delegations, current.Delegations),
 		!reflect.DeepEqual(previous.Catalog, current.Catalog),
 		previous.Materialization != current.Materialization)
+}
+
+// Сопоставляем роли по первичному ключу. В маркер попадают только заранее
+// известные категории, включая смену порядка при том же составе ролей.
+func ridLogRoleDelta(t *testing.T, previous, current []map[string]any) {
+	byID := make(map[string]map[string]any, len(previous))
+	for _, row := range previous {
+		byID[row["id"].(string)] = row
+	}
+	inventory, order := len(previous) != len(current), false
+	changed := map[string]bool{}
+	for i, row := range current {
+		id := row["id"].(string)
+		before, found := byID[id]
+		if !found {
+			inventory = true
+			continue
+		}
+		if i < len(previous) && previous[i]["id"] != id {
+			order = true
+		}
+		// Учитываем в том числе добавленный или пропавший необязательный ключ.
+		keys := maps.Clone(before)
+		maps.Copy(keys, row)
+		for key := range keys {
+			a, had := before[key]
+			b, has := row[key]
+			if had == has && reflect.DeepEqual(a, b) {
+				continue
+			}
+			switch key {
+			case "updatedAt":
+				changed["updated_at"] = true
+			case "rules":
+				changed["rules"] = true
+			case "health", "declaredSegments", "unresolvedSegments":
+				changed["health"] = true
+			case "ruleStates":
+				changed["rule_states"] = true
+			case "authoredVerbs", "effectiveVerbs", "verbNotes":
+				changed["verbs"] = true
+			case "lifecycle", "prunedSelectorTypes", "withdrawnGrants":
+				changed["history"] = true
+			default:
+				changed["other"] = true
+			}
+		}
+	}
+	if inventory {
+		changed["inventory"] = true
+	} else if order {
+		changed["order"] = true
+	}
+	t.Logf("RID_ROLE_DELTA fields=%s", strings.Join(slices.Sorted(maps.Keys(changed)), ","))
 }
 
 func rid09PrimaryValue[T any](t *testing.T, r rid09PrimaryRow, key string) T {

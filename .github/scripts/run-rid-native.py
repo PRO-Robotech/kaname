@@ -707,12 +707,13 @@ def rid03_old_operation_diff(output, line_limit, *, marker="RID03_OLD_OPERATION_
     return value
 
 
-def rid02_rid10_marker(output, marker, bounds):
+def bounded_rid_marker(output, marker, bounds):
     # Только полная строка из точного исходника; никаких значений из журнала в ключах.
     sources = {
         "RID02_OPERATION_CENSUS": "cmd/kaname/installation_native_concurrency_test.go",
         "RID10_SNAPSHOT": "cmd/kaname/installation_newman_midrun_test.go",
         "RID_PROJECTION": "cmd/kaname/installation_newman_whole_projection_test.go",
+        "RID_ROLE_DELTA": "cmd/kaname/installation_newman_whole_projection_test.go",
     }
     source = sources[marker]
     if not isinstance(output, str) or len(output) > 512:
@@ -723,6 +724,13 @@ def rid02_rid10_marker(output, marker, bounds):
         r" ([^\r\n]{1,350})\n", output)
     if match is None or int(match[1]) > bounds.get(source, 0):
         return None
+    if marker == "RID_ROLE_DELTA":
+        allowed = ("health", "history", "inventory", "order", "other", "rule_states", "rules", "updated_at", "verbs")
+        categories = re.fullmatch(r"fields=([a-z_,]+)", match[2])
+        if categories is None:
+            return None
+        fields = categories[1].split(",")
+        return fields if fields == sorted(set(fields)) and set(fields) <= set(allowed) else None
     if marker == "RID02_OPERATION_CENSUS":
         fields = ("matched", "scoped_pending", "scoped_terminal", "other_pending", "other_terminal")
         number = r"(0|[1-9][0-9]{0,6})"
@@ -737,6 +745,36 @@ def rid02_rid10_marker(output, marker, bounds):
                "delegations", "catalog", "materialization"))
     value = re.fullmatch(" ".join(field + "=(true|false)" for field in fields), match[2])
     return dict(zip(fields, (item == "true" for item in value.groups()))) if value else None
+
+
+def role_readiness_marker(output, source_lines):
+    # Полная запись из функции фикстуры. В квитанции остаются только счётчики и закрытые классы.
+    if len(output) > 320:
+        return None
+    number = r"(0|[1-9][0-9]{0,5})"
+    marker = re.fullmatch(
+        r"[ \t]+installation_whole_delivery_native_test\.go:([1-9][0-9]{0,6}): "
+        r"RID_ROLE_READINESS reason=(deadline|canceled|process-exited)"
+        r" verbs=(unseen|incomplete|failed|ready) refs=(unseen|incomplete|failed|ready)"
+        r"(?: phase=(initial-delivery|restored-base|unspecified)"
+        r"(?: examined=" + number + r" reseeded=" + number + r" failed=" + number +
+        r" completed=(true|false) stage=(open|read-rules|replace-verbs|regrain-selectors|commit)"
+        r" class=(deadlock|serialization|Aborted|FailedPrecondition|InvalidArgument|Internal|"
+        r"Unavailable|PermissionDenied|Canceled|DeadlineExceeded|other))?)?\n", output)
+    if marker is None or int(marker[1]) > source_lines:
+        return None
+    result = {"reason": marker[2], "verbs": marker[3], "refs": marker[4]}
+    if marker[5] is not None:
+        result["phase"] = marker[5]
+    if marker[6] is not None:
+        examined, reseeded, failed = map(int, marker.group(6, 7, 8))
+        completed = marker[9] == "true"
+        if (marker[3] != "failed" or failed == 0 or reseeded + failed > examined
+                or (completed and reseeded + failed != examined)):
+            return None
+        result["verbCensus"] = {"examined": examined, "reseeded": reseeded, "failed": failed,
+                               "completed": completed, "firstFailureStage": marker[10], "firstFailureClass": marker[11]}
+    return result
 
 
 def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
@@ -786,6 +824,9 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     if root_test == CASES["registry-installation-rid02"][0]:
         bounded_leaves = {name for name in names if name.endswith(("/S1", "/S2"))}
         bounded_kinds = ("RID02_OPERATION_CENSUS",)
+    elif root_test == CASES["registry-installation-rid06"][0]:
+        bounded_leaves = {root_test + "/" + name for name in RID_MATRIX_NESTED[root_test]}
+        bounded_kinds = ("RID_ROLE_DELTA",)
     elif root_test == CASES["registry-installation-rid10"][0]:
         bounded_leaves = {root_test + "/" + name for name in RID10_NESTED
                           if not name.endswith("-independent-twin")}
@@ -831,7 +872,7 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                         active = ((root_test, "run") in seen and (name, "run") in seen
                                   and not any((subject, end) in seen for subject in (root_test, name)
                                               for end in ("pass", "fail", "skip")))
-                        value = rid02_rid10_marker(output, kind, bounds) if active else None
+                        value = bounded_rid_marker(output, kind, bounds) if active else None
                         if value is None or key in bounded_markers:
                             invalid_bounded_markers.add(key)
                         elif key not in invalid_bounded_markers:
@@ -911,17 +952,12 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
                     output = event.get("Output")
                     if isinstance(output, str) and "RID_ROLE_READINESS" in output:
-                        role_marker = re.fullmatch(
-                            r"[ \t]+installation_whole_delivery_native_test\.go:([1-9][0-9]{0,6}): "
-                            r"RID_ROLE_READINESS reason=(deadline|canceled|process-exited)"
-                            r" verbs=(unseen|incomplete|failed|ready) refs=(unseen|incomplete|failed|ready)\n", output) if len(output) <= 200 else None
-                        if (role_marker is None or int(role_marker[1]) > bounds.get(
-                                "cmd/kaname/installation_whole_delivery_native_test.go", 0)
-                                or name in role_readiness):
+                        observed = role_readiness_marker(output, bounds.get(
+                            "cmd/kaname/installation_whole_delivery_native_test.go", 0))
+                        if observed is None or name in role_readiness:
                             ambiguous_role_readiness.add(name)
                         else:
-                            role_readiness[name] = {"reason": role_marker[2],
-                                "verbs": role_marker[3], "refs": role_marker[4]}
+                            role_readiness[name] = observed
                     marker = (premise_marker.fullmatch(output)
                               if markers is not None and isinstance(output, str) and len(output) <= 180 else None)
                     if marker and marker[1] in premise_reasons:
@@ -991,6 +1027,12 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                                 "cmd/kaname/installation_newman_retirement_test.go")
                 and first not in ambiguous_projection and projection_changes.get(first)):
             result["changedProjectionFields"] = projection_changes[first]
+            key = (first, "RID_ROLE_DELTA")
+            if (site["file"] == "cmd/kaname/installation_newman_retirement_test.go"
+                    and "roles" in projection_changes[first] and key in bounded_markers
+                    and key not in invalid_bounded_markers and (first, "pass") not in seen
+                    and (first, "skip") not in seen):
+                result["changedRoleFields"] = bounded_markers[key]
         if (result["status"] == "complete" and site.get("status") == "matched"
                 and site.get("file") == "cmd/kaname/installation_whole_delivery_native_test.go"
                 and first in role_readiness and first not in ambiguous_role_readiness
