@@ -50,6 +50,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -314,6 +316,72 @@ func TestModuleCatalogApplierRefusesToStripASystemRole(t *testing.T) {
 	t.Logf("системная ссылка отвергнута: SQLSTATE %s, ограничение %s", code, constraint)
 	require.Equal(t, before, stateFingerprint(t, ctx, pool),
 		"отказ оставил след: применение не атомарно")
+}
+
+// Снятие типа после штатного пересева системных ролей сохраняет соседнее
+// право той же подстановки; в архив и отчёт попадает только выдача арендатора.
+func TestModuleCatalogApplierRetiresSystemWildcardProjection(t *testing.T) {
+	ctx, pool := catalogPool(t)
+	applier := applierOver(t, pool)
+	keep, drop := probeResource("kept", "get"), probeResource("dropped", "get")
+	_, err := applier.Apply(ctx, probeManifest(keep, drop))
+	require.NoError(t, err)
+	halves, err := kanamepg.NewCatalogRepo(pool).ReadCatalogHalves(ctx)
+	require.NoError(t, err)
+	facts, err := catalog.NewFacts(halves)
+	require.NoError(t, err)
+	repo := kanamepg.New(pool, nil)
+	require.NoError(t, seed.SyncAllSystemRoleSelectorsWithFacts(ctx, pool, facts))
+	_, err = seed.ReseedSystemRoleVerbs(ctx, repo, pool, facts, nil)
+	require.NoError(t, err)
+
+	dropped, kept := applierProbeModule+".dropped", applierProbeModule+".kept"
+	tenant := catalogRole(t, ctx, pool, "wildretire")
+	require.NoError(t, writeRoleVerbs(t, ctx, repo, tenant, []domain.RoleVerb{{ObjectType: dropped, Verb: "get"}}))
+	type population struct {
+		pairs, types, grants int
+	}
+	system := func(typ string) population {
+		t.Helper()
+		var v population
+		require.NoError(t, pool.QueryRow(ctx, `
+			SELECT (SELECT count(*) FROM kaname.role_verb v JOIN kaname.roles r ON r.id = v.role_id
+			         WHERE r.is_system AND v.object_type = $1 AND v.verb = 'get'),
+			       count(*) FILTER (WHERE $1 = ANY(s.object_types)),
+			       count(*) FILTER (WHERE (s.verbs_by_type -> $1) ? 'get')
+			  FROM kaname.role_rule_selectors s JOIN kaname.roles r ON r.id = s.role_id WHERE r.is_system`,
+			typ).Scan(&v.pairs, &v.types, &v.grants))
+		return v
+	}
+	before := system(kept)
+	require.Positive(t, before.pairs)
+	require.Positive(t, before.types)
+	require.Positive(t, before.grants)
+	require.Equal(t, before, system(dropped))
+
+	snapshot := stateFingerprint(t, ctx, pool)
+	_, err = verbApplierOver(t, pool).Apply(verbCallerCtx(ctx), modulecatalog.Request{
+		Manifest:              probeManifest(keep),
+		ExpectedState:         moduleStateOf(t, ctx, pool, applierProbeModule),
+		MaxResettledRuleRefs:  modulecatalog.Limit(0),
+		MaxResettledRoleVerbs: modulecatalog.Limit(0),
+	})
+	require.ErrorIs(t, err, modulecatalog.ErrResettleCeilingExceeded)
+	require.Equal(t, snapshot, stateFingerprint(t, ctx, pool))
+	require.Equal(t, before, system(dropped))
+
+	rep, err := applier.Apply(ctx, probeManifest(keep))
+	require.NoError(t, err)
+	require.Equal(t, 1, rep.RetiredResources)
+	require.Equal(t, 1, rep.Resettled.RoleVerbs)
+	require.Zero(t, rep.PrunedSelectorTypes)
+	require.Equal(t, population{}, system(dropped))
+	require.Equal(t, before, system(kept))
+	var archived []string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT ARRAY(SELECT role_id FROM kaname.role_grant_orphan WHERE object_type = $1 ORDER BY role_id)`,
+		dropped).Scan(&archived))
+	require.Equal(t, []string{string(tenant)}, archived)
 }
 
 // TestModuleCatalogApplierWaitsForTheCatalogLock — применение ЖДЁТ, пока каталог

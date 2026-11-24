@@ -39,6 +39,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -46,7 +47,9 @@ import (
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -541,11 +544,131 @@ func (w catalogWriter) RetireVerb(ctx context.Context, v catalog.VerbRow, reason
 
 // RetireResource помечает строку ресурса снятой. Повторное снятие — ноль строк.
 func (w catalogWriter) RetireResource(ctx context.Context, r catalog.ResourceRow, reason string) (bool, error) {
+	if err := w.retireSystemWildcardType(ctx, r); err != nil {
+		return false, err
+	}
 	return w.changed(ctx, `
 		UPDATE kaname.catalog_resource
 		   SET retired_at = now(), live = false, retired_reason = $3
 		 WHERE module = $1 AND resource = $2 AND live
 		RETURNING 1`, r.Module, r.Resource, reason)
+}
+
+// Системная подстановка меняет свою проекцию вместе с каталогом. Ссылка
+// role_rule_ref защищает именованный ресурс прежним FK. Роль с таким
+// свидетельством пропускаем целиком, чтобы отказ пришёл от самого ключа.
+func (w catalogWriter) retireSystemWildcardType(ctx context.Context, resource catalog.ResourceRow) error {
+	target := domain.RoleRuleRef{Module: resource.Module, Resource: resource.Resource}
+	dotted := target.Dotted()
+	rows, err := w.tx.Query(ctx, `
+		SELECT r.id, coalesce(r.owner_module, ''), r.rules
+		  FROM kaname.roles r
+		 WHERE r.is_system AND r.live
+		   AND (EXISTS (SELECT FROM kaname.role_verb v WHERE v.role_id = r.id AND v.object_type = $1)
+		     OR EXISTS (SELECT FROM kaname.role_rule_selectors s WHERE s.role_id = r.id
+		                 AND (s.object_types @> ARRAY[$1]::text[] OR s.container_type = $1)))
+		   AND NOT EXISTS (SELECT FROM kaname.role_rule_ref f WHERE f.role_id = r.id
+		                   AND f.module = $2 AND f.resource = $3)
+		 ORDER BY r.id FOR UPDATE OF r`, dotted, target.Module, target.Resource)
+	if err != nil {
+		return err
+	}
+	type affectedRole struct {
+		ID    domain.RoleID
+		Owner string
+		Rules []byte
+	}
+	roles, err := pgx.CollectRows(rows, pgx.RowToStructByPos[affectedRole])
+	if err != nil || len(roles) == 0 {
+		return err
+	}
+	// Глаголы этого типа уже сняты шагом RetireVerb. Их строки сохраняют
+	// авторский словарь, включая глаголы, снятые более ранней редакцией.
+	var verbs []string
+	if err := w.tx.QueryRow(ctx, `
+		SELECT ARRAY(SELECT verb FROM kaname.catalog_verb
+		             WHERE module = $1 AND resource = $2 AND per_object ORDER BY verb)`,
+		target.Module, target.Resource).Scan(&verbs); err != nil {
+		return err
+	}
+	for _, role := range roles {
+		rules, err := rulesFromJSON(role.Rules)
+		if err != nil {
+			return err
+		}
+		for _, ref := range domain.RuleRefsOf(rules) {
+			if ref.Module == target.Module && ref.Resource == target.Resource {
+				return fmt.Errorf("системная роль %s объявляет снимаемый тип %s без строки role_rule_ref", role.ID, dotted)
+			}
+		}
+		// При отсутствии именованного ресурса только подстановка может
+		// произвести этот тип. Учитываются сохранённые ordinary и legacy FP.
+		policy := domain.PolicyOfRole(true, role.Owner)
+		var fps, allowed []string
+		for _, sel := range domain.RegrainSelectorsForTypes(rules, []string{dotted}) {
+			if sel.Container == nil && slices.Contains(sel.ObjectTypes, dotted) {
+				fps = append(fps, sel.RuleFP)
+				allowed = append(allowed, authzmap.GrantedVerbsWithDeclared(resource.ObjectType, len(verbs) > 0, sel.Verbs, verbs, policy)...)
+			}
+		}
+		if err := w.retireSystemWildcardRows(ctx, role.ID, dotted, fps, allowed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w catalogWriter) retireSystemWildcardRows(ctx context.Context, roleID domain.RoleID, dotted string, fps, allowed []string) error {
+	rows, err := w.tx.Query(ctx, `
+		SELECT object_type, verb FROM kaname.role_verb
+		 WHERE role_id = $1 ORDER BY object_type, verb FOR UPDATE`, roleID)
+	if err != nil {
+		return err
+	}
+	pairs, err := pgx.CollectRows(rows, pgx.RowToStructByPos[domain.RoleVerb])
+	if err != nil {
+		return err
+	}
+	kept := make([]domain.RoleVerb, 0, len(pairs))
+	for _, pair := range pairs {
+		if pair.ObjectType != dotted {
+			kept = append(kept, pair)
+		} else if !slices.Contains(allowed, pair.Verb) {
+			return fmt.Errorf("глагол %s системной роли %s на %s не подтверждён подстановкой", pair.Verb, roleID, dotted)
+		}
+	}
+	if len(kept) != len(pairs) {
+		writer := roleWriter{roleReader{tx: w.tx}}
+		if err := writer.ReplaceRoleVerbs(ctx, roleID, kept); err != nil {
+			return err
+		}
+	}
+	// Редактируется сохранённый охват: укорачивание не восстанавливает
+	// ранее снятые типы, отпечатки или глаголы других типов.
+	var unproven bool
+	if err := w.tx.QueryRow(ctx, `
+		WITH touched AS (
+		  SELECT rule_fp, container_type, array_remove(object_types, $2) AS kept
+		    FROM kaname.role_rule_selectors
+		   WHERE role_id = $1 AND (object_types @> ARRAY[$2]::text[] OR container_type = $2)
+		   FOR UPDATE
+		), derived AS (
+		  SELECT * FROM touched WHERE container_type IS NULL AND rule_fp = ANY($3::text[])
+		), stripped AS (
+		  UPDATE kaname.role_rule_selectors s SET object_types = d.kept, verbs_by_type = s.verbs_by_type - $2::text
+		    FROM derived d WHERE s.role_id = $1 AND s.rule_fp = d.rule_fp AND cardinality(d.kept) > 0
+		), dropped AS (
+		  DELETE FROM kaname.role_rule_selectors s USING derived d
+		   WHERE s.role_id = $1 AND s.rule_fp = d.rule_fp AND cardinality(d.kept) = 0
+		)
+		SELECT EXISTS(SELECT rule_fp FROM touched EXCEPT SELECT rule_fp FROM derived)`,
+		roleID, dotted, fps).Scan(&unproven); err != nil {
+		return err
+	}
+	if unproven {
+		return fmt.Errorf("селектор системной роли %s на %s не подтверждён подстановкой", roleID, dotted)
+	}
+	return nil
 }
 
 // ResettleTenantProjections переселяет проекции АРЕНДАТОРСКИХ ролей, теряющие
