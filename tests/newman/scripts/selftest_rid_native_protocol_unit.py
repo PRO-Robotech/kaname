@@ -298,6 +298,18 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
             self.assertNotIn("roleReadiness", result)
             self.assertNotIn("fixture-secret", json.dumps(result))
         self.assertNotIn("roleReadiness", diagnose([record, record]))
+        for stage, cause in (("open-begin", "connection-open"), ("open-enter-v2", "sql-lock-unavailable"),
+                             ("open-enter-v3", "sql-query-canceled"), ("open-abi-mismatch", "semantic-identity"),
+                             ("open-input", "invalid-fence"), ("open-context", "Canceled")):
+            with self.subTest(stage=stage, cause=cause):
+                classified = record.replace("replace-verbs", stage).replace("deadlock", cause)
+                census = diagnose([classified])["roleReadiness"]["verbCensus"]
+                self.assertEqual((census["firstFailureStage"], census["firstFailureClass"]), (stage, cause))
+        open_record = record.replace("replace-verbs", "open-enter-v3")
+        for unsafe_class in ("57014", "sql-secret-detail", "sql-query-canceled secret=value"):
+            result = diagnose([open_record.replace("deadlock", unsafe_class)])
+            self.assertNotIn("roleReadiness", result)
+            self.assertNotIn(unsafe_class, json.dumps(result))
 
     def test_role_delta_on_matched_roles_projection_rejects_other_content(self):
         source = "cmd/kaname/installation_newman_retirement_test.go"

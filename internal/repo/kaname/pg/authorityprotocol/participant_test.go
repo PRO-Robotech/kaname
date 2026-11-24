@@ -11,6 +11,7 @@ import (
 
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type participantRow struct {
@@ -96,5 +97,71 @@ func TestParticipantEntryRejectsResourceBeforePool(t *testing.T) {
 	_, err := openParticipant(context.Background(), func(context.Context, pgx.TxOptions) (pgx.Tx, error) { calls++; return nil, nil }, kaname.AuthorityResource)
 	if !errors.Is(err, kaname.ErrInvalidAuthorityFencePlan) || calls != 0 {
 		t.Fatalf("calls=%d, err=%v", calls, err)
+	}
+}
+
+func TestParticipantOpenObservationPreservesPrimaryErrorAndCleanup(t *testing.T) {
+	secretDetail := "fixture-dsn-or-postgres-detail"
+	sqlErr := &pgconn.PgError{Code: "57014", Message: secretDetail, Detail: secretDetail}
+	unknownSQL := &pgconn.PgError{Code: "XX999", Message: secretDetail, Detail: secretDetail}
+	beginErr := errors.New(secretDetail)
+	cleanupErr := &pgconn.PgError{Code: "40P01", Message: secretDetail}
+	for _, tc := range []struct {
+		name, stage, class string
+		profile            *FullContract
+		beginErr, entryErr error
+		cleanupErr         error
+		abi                int
+		cancelAfterSQL     bool
+		want               error
+	}{
+		{name: "begin", stage: "open-begin", class: "other", beginErr: beginErr, want: beginErr},
+		{name: "v2", stage: "open-enter-v2", class: "sql-query-canceled", entryErr: sqlErr, want: sqlErr},
+		{name: "v3", stage: "open-enter-v3", class: "sql-other", profile: &FullContract{}, entryErr: unknownSQL, cleanupErr: cleanupErr, want: unknownSQL},
+		{name: "mismatch", stage: "open-abi-mismatch", class: "semantic-identity", profile: &FullContract{}, abi: 2, want: kaname.ErrSemanticIdentityUnavailable},
+		{name: "context", stage: "open-context", class: "Canceled", abi: 2, cancelAfterSQL: true, want: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var observed []kaname.InstallationOpenFailure
+			ctx = kaname.WithInstallationOpenObserver(ctx, func(failure kaname.InstallationOpenFailure) {
+				observed = append(observed, failure)
+			})
+			tx := &participantTx{row: participantRow{abi: tc.abi, err: tc.entryErr}, rollbackErr: tc.cleanupErr}
+			if tc.cancelAfterSQL {
+				tx.row.cancel = cancel
+			}
+			begins := 0
+			got, err := openParticipantProfile(ctx, func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+				begins++
+				if tc.beginErr != nil {
+					return nil, tc.beginErr
+				}
+				return tx, nil
+			}, kaname.AuthorityRole, tc.profile)
+			if got != nil || err == nil || begins != 1 || !errors.Is(err, tc.want) {
+				t.Fatalf("transaction=%v begins=%d primary=%t", got, begins, errors.Is(err, tc.want))
+			}
+			if tc.cleanupErr == nil && err != tc.want {
+				t.Fatal("observation changed raw error identity")
+			}
+			if tc.cleanupErr != nil {
+				var failure interface{ PreparedCleanupFailed() bool }
+				if !errors.As(err, &failure) || !failure.PreparedCleanupFailed() || !errors.Is(err, tc.cleanupErr) {
+					t.Fatal("cleanup cause or retry fence lost")
+				}
+			}
+			wantRollback := 1
+			if tc.beginErr != nil {
+				wantRollback = 0
+			}
+			if tx.rollbackCalls != wantRollback || tx.rollbackContextErr != nil {
+				t.Fatal("rollback or detached rollback context changed")
+			}
+			if len(observed) != 1 || observed[0] != (kaname.InstallationOpenFailure{Stage: tc.stage, Class: tc.class}) {
+				t.Fatalf("unexpected bounded observation: %+v", observed)
+			}
+		})
 	}
 }

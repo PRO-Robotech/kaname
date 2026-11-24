@@ -259,6 +259,10 @@ func replaceRoleVerbsInOwnTx(
 	pairs := 0
 	stage := "open"
 	var primaryErr error
+	var openFailure kanamerepo.InstallationOpenFailure
+	ctx = kanamerepo.WithInstallationOpenObserver(ctx, func(failure kanamerepo.InstallationOpenFailure) {
+		openFailure = failure
+	})
 	if err := shared.DoWithObservedInstallationWriteTxVoid(ctx, repo, kanamerepo.AuthorityRole,
 		func(ctx context.Context, w kanamerepo.Writer) (err error) {
 			// Если тело завершилось успешно, следующим шагом будет Commit.
@@ -282,7 +286,11 @@ func replaceRoleVerbsInOwnTx(
 			stage = "regrain-selectors"
 			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(roleID), sels)
 		}, func(err error) { primaryErr = err }); err != nil {
-		return 0, roleVerbFailure{stage, roleVerbFailureClass(primaryErr, err)}, fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
+		failure := roleVerbFailure{stage, roleVerbFailureClass(primaryErr, err)}
+		if stage == "open" && openFailure.Stage != "" {
+			failure = roleVerbFailure{openFailure.Stage, openFailure.Class}
+		}
+		return 0, failure, fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
 	}
 	return pairs, roleVerbFailure{}, nil
 }

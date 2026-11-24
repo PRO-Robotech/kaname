@@ -758,9 +758,12 @@ def role_readiness_marker(output, source_lines):
         r" verbs=(unseen|incomplete|failed|ready) refs=(unseen|incomplete|failed|ready)"
         r"(?: phase=(initial-delivery|restored-base|unspecified)"
         r"(?: examined=" + number + r" reseeded=" + number + r" failed=" + number +
-        r" completed=(true|false) stage=(open|read-rules|replace-verbs|regrain-selectors|commit)"
+        r" completed=(true|false) stage=(open|open-input|open-begin|open-enter-v2|open-enter-v3|"
+        r"open-abi-mismatch|open-context|read-rules|replace-verbs|regrain-selectors|commit)"
         r" class=(deadlock|serialization|Aborted|FailedPrecondition|InvalidArgument|Internal|"
-        r"Unavailable|PermissionDenied|Canceled|DeadlineExceeded|other))?)?\n", output)
+        r"Unavailable|PermissionDenied|Canceled|DeadlineExceeded|other|invalid-fence|semantic-identity|"
+        r"no-row|transaction-closed|sql-permission|sql-undefined-function|sql-undefined-table|sql-lock-unavailable|"
+        r"sql-query-canceled|sql-state|sql-connection|sql-other|connection-open|result-scan))?)?\n", output)
     if marker is None or int(marker[1]) > source_lines:
         return None
     result = {"reason": marker[2], "verbs": marker[3], "refs": marker[4]}
