@@ -344,6 +344,7 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
         valid = prefix + " blocker=fixture waits=1 transaction-age=30s-to-60s"
         cases = (
             "every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/census/S2/ACTIVE/negative",
+            "every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S1/ACTIVE/negative",
             "each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S1/ACTIVE/lawful-control",
         )
         for case in cases:

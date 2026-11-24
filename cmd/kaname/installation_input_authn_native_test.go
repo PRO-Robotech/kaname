@@ -167,11 +167,11 @@ func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
 	}
 	var w *ridLifecycleWorld
 	if c.Active {
-		// В обеих группах исходная доставка ACTIVE может ждать допуска к пересчёту
+		// В этих группах исходная доставка ACTIVE может ждать допуска к пересчёту
 		// ролей. Наблюдение завершается до изменения проверяемого факта сценария.
 		group := os.Getenv("KANAME_RID11_CASE_GROUP")
 		w = newRIDLifecycleWorldConfigured(t, c.Mode, false, setup, nativeWorldOptions{
-			watchRID11Admission: group == "availability" || group == "identity",
+			watchRID11Admission: group == "availability" || group == "identity" || group == "proof-authority",
 		})
 		// Исходный снимок ACTIVE требует тех же завершённых проекций ролей, что восстановление.
 		ridAwaitRoleProjectionsObservedAt(t, w.f.given.ctx, w.deliveryProcess, "initial-delivery", w.f.consumerAdmission)
