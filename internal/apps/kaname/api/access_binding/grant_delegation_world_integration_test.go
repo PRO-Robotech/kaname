@@ -403,13 +403,18 @@ func (w *gdWorld) buildHandlers() {
 // над хранилищем с задвижкой, а не вторую сборку руками.
 func (w *gdWorld) newGrantVerbs(ops operations.Repo) (*accessbindingapp.CreateAccessBindingUseCase,
 	*accessbindingapp.RevokeAccessBindingUseCase, *accessbindingapp.DeleteAccessBindingUseCase) {
+	return w.newGrantVerbsOn(w.repo, ops)
+}
+
+func (w *gdWorld) newGrantVerbsOn(repo kanamerepo.Repository, ops operations.Repo) (*accessbindingapp.CreateAccessBindingUseCase,
+	*accessbindingapp.RevokeAccessBindingUseCase, *accessbindingapp.DeleteAccessBindingUseCase) {
 	src := catalog.Fixed{F: w.facts}
-	create := accessbindingapp.NewCreateAccessBindingUseCase(w.repo, ops, src).
+	create := accessbindingapp.NewCreateAccessBindingUseCase(repo, ops, src).
 		WithRelationStore(w.door, nil).
 		WithReconciler(w.rec)
-	revoke := accessbindingapp.NewRevokeAccessBindingUseCase(w.repo, ops).WithRelationStore(w.door, nil)
-	del := accessbindingapp.NewDeleteAccessBindingUseCase(w.repo, ops).WithRelationStore(w.door, nil)
-	gdWireGrantPath(w, create, revoke, del)
+	revoke := accessbindingapp.NewRevokeAccessBindingUseCase(repo, ops).WithRelationStore(w.door, nil)
+	del := accessbindingapp.NewDeleteAccessBindingUseCase(repo, ops).WithRelationStore(w.door, nil)
+	gdWireGrantPath(w, repo, create, revoke, del)
 	return create, revoke, del
 }
 
