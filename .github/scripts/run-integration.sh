@@ -86,12 +86,33 @@ TIMEOUT="${INTEGRATION_TIMEOUT:-25m}"
 
 cd "$ROOT" || exit 2
 
+# Только CI включает сохранение событий; обычный локальный вызов остаётся прежним.
+evidence="${INTEGRATION_EVIDENCE_DIR:-}"
+if [ -n "$evidence" ]; then
+    mkdir -p -- "$evidence" || exit 2
+    python3 - "$evidence" <<'PYENV'
+import json, os, pathlib, sys
+keys = ("GITHUB_SHA", "INTEGRATION_TIMEOUT", "INTEGRATION_SHARD", "PLATFORM_TREE",
+        "TESTCONTAINERS_RYUK_DISABLED", "TESTCONTAINERS_HOST_OVERRIDE", "KANAME_REQUIRE_INTEGRATION",
+        "KACHO_DERIVE_PARENT_COST", "KACHO_PERMANENT_PROJECT_COST", "KACHO_MATRIX_VOLUME",
+        "KACHO_SCALEGRID_FULL", "KACHO_STRENGTH_FULL", "KACHO_STRENGTH_WRITE", "KACHO_RECOVERY_TIMING")
+# Отсутствующая ручка сохраняется как null: условие нельзя выводить из имени задания.
+pathlib.Path(sys.argv[1], "environment.json").write_text(
+    json.dumps({key: os.environ.get(key) for key in keys}, indent=2, sort_keys=True) + "\n")
+PYENV
+    [ "$?" -eq 0 ] || exit 2
+fi
+
 # ШАРД: `INTEGRATION_SHARD=<k>/<N>`, k от 0 — ровно `strategy.job-index` и
 # `strategy.job-total` задания, то есть число шардов берётся у самой матрицы и
 # разойтись с ней не может. `--plan` печатает раскладку всех N шардов и выходит,
 # не исполняя проб (`INTEGRATION_SHARD=0/4 run-integration.sh --plan`).
 # DEFAULT_WEIGHT — вес пакета, которого ведомость весов не знает (секунды).
 DEFAULT_WEIGHT=10
+# Два дорогих TOP делятся одним взаимодополняющим фильтром (kaname#1034).
+partition_package='github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding'
+partition_pattern='^(TestFullBind_FB21_GroupAdditionChecksTheLastBindingPage|TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant)$'
+partition_mode=''
 plan_only=0
 case "${1:-}" in
     "") ;;
@@ -181,6 +202,9 @@ if [ -z "$raised" ]; then
     exit 2
 fi
 pkgs="$raised"
+if [ -n "$evidence" ]; then
+    printf '%s\n' "$pkgs" > "$evidence/selected-packages.txt" || exit 2
+fi
 with_db="$(printf '%s\n' "$raised" | wc -l)"
 selected="$(printf '%s\n' "$pkgs" | wc -l)"
 
@@ -205,21 +229,340 @@ echo ""
 #
 # Раскладка ДЕТЕРМИНИРОВАНА и выводится из того же отбора на каждом шарде:
 # пакеты по убыванию замеренного веса (`.github/integration-shard-weights.txt`),
-# каждый — в наименее загруженный шард. Каждый шард строит ПОЛНЫЙ план и
-# проверяет его: каждый отобранный пакет ровно в одном шарде, ни один шард не
-# пуст. Иначе код 2 — выпавший пакет был бы ровно тем молчаливым выпадением,
+# каждый — в наименее загруженный шард. При пяти частях migrations занимает
+# index 2 отдельно: CI 44200178509 завершил этот пакет за 1443.775 с, но хвост
+# его шарда не поместился в прежние 30 минут. Остальные пакеты делятся между
+# четырьмя другими частями. Без migrations и при другом N прежний LPT сохранён.
+# Каждый шард строит ПОЛНЫЙ план и
+# проверяет его: каждый отобранный пакет имеет ровно одного владельца,
+# каждый шард имеет единицу исполнения (обычный пакет либо точную AB-пару). Иначе код 2 — выпавший пакет был бы ровно тем молчаливым выпадением,
 # против которого переписан отбор.
 #
 # Без `INTEGRATION_SHARD` прогон — весь отбор, как прежде (локально и в пробах).
-if [ -n "$shard_total" ]; then
+# Двенадцать частей используют только известные тяжёлые TOP и точные дополнения.
+# Неизвестные будущие Test/Example/Fuzz остаются в дополнениях; перечня всего дерева нет.
+partition_units_file=""
+if [ "$shard_total" = 12 ]; then
+    printf '%s\n' "$pkgs" > "$work/selected-packages.txt" || exit 2
+    python3 - "$work/selected-packages.txt" "$ROOT/.github/integration-shard-weights.txt" "$work/shard-plan.tsv" "$work/execution-plan.tsv" "$DEFAULT_WEIGHT" <<'PYTWELVE' || exit 2
+import collections, pathlib, re, sys
+selected_file, weights_file, owner_file, execution_file = map(pathlib.Path, sys.argv[1:5])
+default_weight = int(sys.argv[5])
+selected = selected_file.read_text().splitlines()
+ab = "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
+pg = "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+migration = "github.com/PRO-Robotech/kaname/internal/migrations"
+if len(selected) != len(set(selected)) or not {ab, pg, migration} <= set(selected):
+    raise SystemExit("12 частей требуют неповторный отбор с AB, PG и migrations")
+weights = {}
+for line in weights_file.read_text().splitlines():
+    if not line.strip() or line.lstrip().startswith("#"):
+        continue
+    fields = line.split()
+    if len(fields) != 2 or not fields[0].isdigit() or fields[1] in weights or fields[1] not in selected:
+        raise SystemExit("некорректная или беспредметная строка весов")
+    weights[fields[1]] = int(fields[0])
+ab_core = [
+    "TestFullBindListener_CoverageRequiresScopedCreate",
+    "TestFullBind_FB01_CoverageNeedsSeparateCreateBinding",
+    "TestFullBind_FB02_OneMissingVerbPreventsWholeGrant",
+    "TestFullBind_FB03_CoverageUsesTheUnionOfActiveRoles",
+    "TestFullBind_FB04_BindNamesTheGrantedRole",
+    "TestFullBind_FB05_BindBelongsToTheActingSubject",
+    "TestFullBind_FB06_BindKeepsTheAccountAnchor",
+    "TestFullBind_FB07_CoverageKeepsTheProjectAnchor",
+    "TestFullBind_FB08_EveryNamedTargetNeedsCoverage",
+    "TestFullBind_FB09_CurrentObjectsDoNotCoverTheWholeScope",
+    "TestFullBind_FB10_ResourceNamesAreAuthorityCoordinates",
+    "TestFullBind_FB11_LabelImplicationCoversTheProposedRule",
+    "TestFullBind_FB12_FiniteVerbsDoNotCoverTheSymbolicWildcard",
+    "TestFullBind_FB13_ChildrenEffectCannotDisappearFromCoverage",
+    "TestFullBind_FB14_CreatorIdentityIsNotRenamedToRecipient",
+    "TestFullBind_FB15_CreateUnusedRoleRequiresDefinitionCoverage",
+    "TestFullBind_FB16_UpdateUnusedRoleRequiresDefinitionCoverage",
+    "TestFullBind_FB17_UsedAccountRoleNeedsEveryBindingScopeOnly",
+    "TestFullBind_FB18_BindDoesNotAuthorizeUncoveredRoleRules",
+    "TestFullBind_FB19_MetadataDoesNotRequireRulesCoverage",
+    "TestFullBind_FB20_RulesUpdateChecksActualResourceVersion",
+    "TestFullBind_FB22_ForeignAndMissingMemberHaveTheSameReferenceRefusal",
+    "TestFullBind_FB23_DelegatedAxesWithoutUseCoverage",
+    "TestFullBind_FB24_DelegationRechecksSavedCreator",
+    "TestFullBind_FB25a_DelegationCreatePreservesActorGate",
+    "TestFullBind_FB25b_DelegationUpdatePreservesActorGate",
+    "TestFullBind_FB25c_DelegationUpdatePreservesSavedCreatorGate",
+    "TestFullBind_FB26_GrantAndSourceRevokeSerialize",
+    "TestFullBind_FB27_RoleExpansionAndNewScopeBindingSerialize",
+    "TestFullBind_FB28_GroupAdditionAndBindingSerialize",
+    "TestFullBind_FB29_BackendOutageIsUnavailableAndCannotGrant",
+    "TestFullBind_FB30_UnknownCustomImplicationNeedsCoverageOrKnownBind",
+    "TestFullBind_FB32_BindRuleNeedsFiniteRoleIDsNotLabels",
+    "TestFullBind_FB33a_OrdinaryAuthorityWithdrawalKeepsOldBindings",
+    "TestFullBind_FB33b_CreatorWithdrawalKeepsDelegatedBindingsUntilExplicitRevoke",
+    "TestFullBind_FB34_AllDirectSARecipientsAreAtomicAndCreatorSpecific",
+    "TestFullBind_GroupAdditionPreparedCommandPreservesRepeatedEffects",
+    "TestFullBind_GroupAdditionPreparedCommandRefusesForeignBeforeRowLockRelease",
+    "TestGrantDelegation_GDU03_NarrowingRejected",
+    "TestGrantDelegation_GDU04_EmptySelectedAxisRejected",
+    "TestGrantDelegation_GDU06_WholeFinalComposition",
+    "TestGrantDelegation_GDU07_MaskIdentityAndAliases",
+    "TestGrantDelegation_GDU08_ActorAuthorityFirst"
+]
+pg_heavy = [
+    "TestFullProtocolReconcileDeltaMeasurements",
+    "TestSubjectFilterPlan",
+    "TestNativeDeleteExpiry10000_OriginalPrimaryConverges",
+    "TestBindingWithdrawalLastPageRollbackAndHeldFold",
+    "TestInviteDecisionWaitsBeforeFinalClock",
+    "TestBindingExpiryChildPreflightLastPageCancellation",
+    "TestClusterAdminFinalDecisionExpiryAfterActualMutationWait",
+    "TestBindingStageLegacyLatePageAndMovedSourceRestageAtomically",
+    "TestFullProtocolCheckerForeignPopulationMeasurements",
+    "TestBindingWithdrawalRestagesActualLastPageAndCancellationIsAtomic",
+    "TestGrantDelegationStagedRevokeLastPageAtomicRollback",
+    "TestFullProtocolPublicThroughputMeasurements",
+    "TestGrantDelegationNativeUpdateLateExpiryAfterRowWait"
+]
+pg_expiry = [
+    "TestBindingMetadataMutationPreflightWait",
+    "TestNativeMutationMaterializedTierAndVerbSources",
+    "TestBindingStageActualEntryPointsCoverLastPageAndStrict",
+    "TestModuleWithdrawalCompletesUnderTenantRolesAtScale",
+    "TestGrantDelegationStagedRevokeIncludesPendingLastPage",
+    "TestSevenCRUDGrantExpiresDuringActualParentAndJournalWaitBeforeFinalClock",
+    "TestFullMetadataSameKeyUncommittedInsertExpiresBeforeRename",
+    "TestGrantDelegationCreateMutationPreflightWait",
+    "TestInviteDecisionWholeAttemptRollbackAndCancellation",
+    "TestLiveAdministrativeAlternativeHolderAfterLedgerPage",
+    "TestLiveAdministrativeRoleUpdateReferenceObjectTier",
+    "TestBindingStageExpiryAndWitnessAfterEveryLegacyLockWait",
+    "TestLiveAdministrativeLateNativeFactPageAndClosedWriter",
+    "TestBindingCapturedGroupWholeAttemptBudgetAndActualSQLFamilies",
+    "TestPolicyCarrierPublicCreateWholeAttemptOutcomes",
+    "TestOAuthIssuanceOverlappingUserDeletion",
+    "TestNativeDeleteBatchPreservesRowwisePolicyMetadataAndBoundsDeleteWork",
+    "TestIntegration_ActiveProducerWithoutAWayInIsRefused",
+    "TestDelegatedBindingDecisionCreatorExpiryAfterActualGDWait",
+    "TestBindingCreateRecipientPreflightWait",
+    "TestInviteDecisionTypedOwnerAndServiceAccountOptional",
+    "TestIntegration_R914_MembersOfGroupsIsBoundedAndNamesTheTruncation",
+    "TestGrantDelegationOrdinaryCreateRechecksLiveAuthorityInsideParticipant",
+    "TestSevenCRUDPrivateCommandCannotCommitOmittedPartialReplayedOrWrongEffects",
+    "TestFullMetadataRenameWaitExpiresBeforeOldAuthorityDecision",
+    "TestInstallationSeedProductionEntriesPreparedStrict",
+    "TestInviteDecisionAdmissionIdentityRace",
+    "TestInviteDecisionFullContractPublicDoors",
+    "TestBindingWithdrawalExpiryAfterActualFoldWaitAndLiveTwin",
+    "TestBindingMirrorLocalityFullCurrentRetainedAndDeleted",
+    "TestFullSevenCRUDAccountDeletePublic",
+    "TestFullSevenCRUDAccountDeletePreservesForeignPending",
+    "TestGroup_RequireMemberOfGroupAccount_HoldsTheRowUntilCommit",
+    "TestProjectCreatePublicEditorGrantExpiresAfterActualPreclockWait"
+]
+# CI 44529872540, шард 8: дополнение PG прервано общим пределом 25m.
+# Шесть завершённых проб ниже заняли 302.31 с вместе; прерванная проба
+# запускается в этой же отдельной части, чтобы получить собственный исход.
+# Новые и остальные имена по-прежнему исполняются в дополнении PG.
+pg_long_tail = [
+    "TestFullServiceAccountStateExpiryAfterRealRowAndCutoffWaits",
+    "TestFullServiceAccountStateWholeAttemptInjectedBodyOutcomes",
+    "TestLoginVerifierContainmentGateInjection",
+    "TestReconcileColdBatch_SecondLedgerFailureRollsBackWholeCallerTx",
+    "TestReconcileForward_10_FanOutLatencyProfileAtTreeSizes",
+    "TestRoleActualUpdateFinalDecisionAfterLegacyWait",
+    "TestRoleMutationForeignRecipientAccountBoundary",
+]
+# Переносим только завершённые TOP из c39 part5 / artifact14396800440.
+# Первичный go-test-partition-4.json SHA256:
+# 641b52e2d050be7562039d954f6805383c6f29cdeb4f4510c40e25d506bb60e9.
+# Это точные20 RoleRightsStayNamed и63 GrantDelegation, не prefix selectors:
+# будущие имена этих семейств остаются в дополнении.
+ab_named_rights = [
+    "TestRoleRightsStayNamed_AddMemberAndNewScopeGrantSerialize",
+    "TestRoleRightsStayNamed_ESC01_DeleteOnProjectGivesNoGrantAuthority",
+    "TestRoleRightsStayNamed_ESC02_DeleteOnAccountGivesNothingBeyondDeletion",
+    "TestRoleRightsStayNamed_ESC03_ProjectTierIsNotDerivedFromDeletion",
+    "TestRoleRightsStayNamed_ESC04_DeletionOnALeafOpensNoChange",
+    "TestRoleRightsStayNamed_ESC05_DeletionStaysDeletion",
+    "TestRoleRightsStayNamed_ESC06_WhoMayDeleteAgreesWithCheck",
+    "TestRoleRightsStayNamed_ESC10_RulesEditNeedsGrantAuthorityOnItsScope",
+    "TestRoleRightsStayNamed_ESC11_NoActiveBindingsNoGrantAuthorityAsked",
+    "TestRoleRightsStayNamed_ESC12_NonRulesEditNeedsNoGrantAuthority",
+    "TestRoleRightsStayNamed_ESC13_GrantAuthorityOnEveryScope",
+    "TestRoleRightsStayNamed_ESC14_RelationStoreOutageRefusesTheEdit",
+    "TestRoleRightsStayNamed_ESC20_AddMemberNeedsGrantAuthorityOnTheGroupScope",
+    "TestRoleRightsStayNamed_ESC21_GroupWithoutBindingsNeedsNoGrantAuthority",
+    "TestRoleRightsStayNamed_ESC22_GrantAuthorityOnEveryGroupScope",
+    "TestRoleRightsStayNamed_ESC23_MemberOnlyFromTheGroupAccount",
+    "TestRoleRightsStayNamed_ESC24_RemoveMemberNeedsNoGrantAuthority",
+    "TestRoleRightsStayNamed_ESC25_RelationStoreOutageRefusesTheAdd",
+    "TestRoleRightsStayNamed_ESC30_PriorDeleteTierConvergesWithoutRevocation",
+    "TestRoleRightsStayNamed_RulesEditAndNewScopeGrantSerialize"
+]
+ab_delegations = [
+    "TestGrantDelegation_CE01_GrantAuthorityWithoutVDeleteCannotRevokeOrDelete",
+    "TestGrantDelegation_CE02_VDeleteQuestionOutageIsUnavailable",
+    "TestGrantDelegation_CE03_DelegatePathStaysOutOfExpandAccessAndListByRole",
+    "TestGrantDelegation_CE05_EverySubjectOfAMultiSubjectGrantIsChecked",
+    "TestGrantDelegation_CE06_DelegatorAuthorityOutageIsUnavailable",
+    "TestGrantDelegation_CE09_GrantWriteRechecksTheCapturedDelegation",
+    "TestGrantDelegation_CE09_GrantWriteWaitsForAnUncommittedRevoke",
+    "TestGrantDelegation_CE10_DelayedProjectionKeepsThePositiveControl",
+    "TestGrantDelegation_CE10_DelegationRevokeRemovesEmittedFacts",
+    "TestGrantDelegation_CE13_AccountDeleteOutcomeIsUnchangedByADelegation",
+    "TestGrantDelegation_CE15_ListCarriesTheDelegationReference",
+    "TestGrantDelegation_CE16_DeleteAuditCarriesTheDelegationReference",
+    "TestGrantDelegation_D4_GroupHoldingTheDelegateIsRefused",
+    "TestGrantDelegation_DoD9_DelegationReadsGoByIndex",
+    "TestGrantDelegation_GD01_AccountOwnerCreatesADelegation",
+    "TestGrantDelegation_GD02_AccountAdminCreatesADelegation",
+    "TestGrantDelegation_GD03_NoGrantAuthorityNoDelegation",
+    "TestGrantDelegation_GD04_RequestFormIsCheckedSynchronously",
+    "TestGrantDelegation_GD05_FormBeforeAuthorityCompositionAfter",
+    "TestGrantDelegation_GD06_RolesAndTypesOfOneModuleNotIAM",
+    "TestGrantDelegation_GD07_OneActiveDelegationPerAccountAndDelegate",
+    "TestGrantDelegation_GD10_DelegateGrantsAModuleRoleOnAModuleObject",
+    "TestGrantDelegation_GD11_GrantBeyondTheDelegationIsRefused",
+    "TestGrantDelegation_GD12_TargetTypeAxis",
+    "TestGrantDelegation_GD13_DelegateGrantsToAnonymous",
+    "TestGrantDelegation_GD14_GrantOnSeveralObjects",
+    "TestGrantDelegation_GD15_DelegationGivesNoDataAccess",
+    "TestGrantDelegation_GD16_PersonAndGroupOnlyFromTheDelegationAccount",
+    "TestGrantDelegation_GD20_DelegatorLostAuthorityDelegateNoLongerGrants",
+    "TestGrantDelegation_GD21_DelegateDoesNotDelegateFurther",
+    "TestGrantDelegation_GD22_DelegateDoesNotUpdateAGrant",
+    "TestGrantDelegation_GD25_DelegateDoesNotTouchProjectsGroupsRolesAccounts",
+    "TestGrantDelegation_GD26_DelegationGivesNoModelRelations",
+    "TestGrantDelegation_GD30_DelegateRevokesOnlyWhatItsDelegationGranted",
+    "TestGrantDelegation_GD31_DelegateCleansUpAfterDelegatorLostAuthority",
+    "TestGrantDelegation_GD32_ListenerDoorPassesRevokeAndDeleteButNotUpdate",
+    "TestGrantDelegation_GD40_RevokingTheDelegationRevokesWhatItGranted",
+    "TestGrantDelegation_GD41_DeletionProtectionDoesNotStopDelegationRevoke",
+    "TestGrantDelegation_GD42_DelegateCannotGrantAfterRevoke",
+    "TestGrantDelegation_GD43_RepeatedRevokeAndRevokeOfTheAbsent",
+    "TestGrantDelegation_GD44_WhoMayRevoke",
+    "TestGrantDelegation_GD45_DelegateAccountCannotBeDeletedWhileDelegationActive",
+    "TestGrantDelegation_GD45_DeleteFKBackstopRejectsLateDelegation",
+    "TestGrantDelegation_GD45_DeleteRacingAnInsertNamesTheDelegation",
+    "TestGrantDelegation_GD45_KeyRefusesADelegationToAMissingAccountWithItsText",
+    "TestGrantDelegation_GD50_ConcurrentCreatesOfOnePair",
+    "TestGrantDelegation_GD51_GrantDuringDelegationRevoke",
+    "TestGrantDelegation_GD60_Get",
+    "TestGrantDelegation_GD61_ListByAccount",
+    "TestGrantDelegation_GD62_GrantCarriesTheDelegationReference",
+    "TestGrantDelegation_GD70_EveryStepIsAudited",
+    "TestGrantDelegation_GDU01_SingleAxisEffectiveAccess",
+    "TestGrantDelegation_GDU02_AllAxesAtomic",
+    "TestGrantDelegation_GDU05_SetsBoundsAndNoop",
+    "TestGrantDelegation_GDU09_PublicDoorAndInvalidID",
+    "TestGrantDelegation_GDU10_OriginalCreatorRechecked",
+    "TestGrantDelegation_GDU11_RevokedAndExpiredBindings",
+    "TestGrantDelegation_GDU12_FailureAtomicity",
+    "TestGrantDelegation_GDU13_ConcurrentSameAxis",
+    "TestGrantDelegation_GDU14_ConcurrentDisjointAndIdentical",
+    "TestGrantDelegation_GDU15_GrantAndRevokeOrdering",
+    "TestGrantDelegation_GDU16_AuditExactlyOnceOnExpansion",
+    "TestGrantDelegation_GDU17_ReplacementWithExplicitGap"
+]
+fb21_and_rights = ["TestFullBind_FB21_GroupAdditionChecksTheLastBindingPage"] + ab_named_rights
+ab_clock_and_plans = [
+    "TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant",
+    "TestRoleRights_S1P8_ActualGrantReadPlans"
+] + ab_delegations
+def pattern(names):
+    if not names or len(names) != len(set(names)) or any(re.fullmatch(r"Test[A-Za-z0-9_]+", n) is None for n in names):
+        raise SystemExit("непустые точные имена TOP обязательны")
+    return "^(" + "|".join(sorted(names)) + ")$"
+for groups in ((ab_core, fb21_and_rights, ab_clock_and_plans), (pg_heavy, pg_expiry, pg_long_tail)):
+    union = [name for group in groups for name in group]
+    if len(union) != len(set(union)):
+        raise SystemExit("части пересекаются по TOP")
+ab_union = pattern(ab_core + fb21_and_rights + ab_clock_and_plans)
+pg_union = pattern(pg_heavy + pg_expiry + pg_long_tail)
+# Плановые резервы LPT ниже не являются временем успешного прогона частей.
+# c39: AB core1139.09 с завершился RED; FB21 package819.668 с PASS.
+# Переносимые20 TOP PASS =258.75 с,63 TOP PASS =622.72 с.
+# FB31 package325.426 с PASS; отдельный S1P8 =183.33 с.
+# Дополнение: прежний PASS prefix472.71 + tail139 PASS509.75 =982.46 с.
+# Tail150 на R4 завершился139 PASS/11 FAIL: успешная цена11 пока неизвестна.
+# Резервы1200/1300 оставляют AB отдельно от обычных пакетов;25m не меняется.
+# PG heavy659.82 с — прежние PASS TOP; expiry700, complement1200 и
+# long_tail400 — резервы планировщика, включая ещё не принятый TOP.
+parts = {
+    0: (ab, "run", pattern(ab_core), 1200),
+    1: (ab, "run", pattern(fb21_and_rights), 1200),
+    3: (ab, "run", pattern(ab_clock_and_plans), 1300),
+    4: (ab, "skip", ab_union, 1300),
+    5: (pg, "run", pattern(pg_heavy), 660),
+    6: (pg, "run", pattern(pg_expiry), 700),
+    7: (pg, "skip", pg_union, 1200),
+    11: (pg, "run", pattern(pg_long_tail), 400),
+}
+loads = {index: 0 for index in range(12)}
+for index, (_, _, _, reserve) in parts.items():
+    loads[index] = reserve
+loads[2] = weights.get(migration, default_weight)
+# Ведомость владельцев сохраняет исторический вес пакета; для специальных
+# частей LPT использует только резервы выше, а не повторно этот полный вес.
+owners = [(0, weights.get(ab, default_weight), ab), (5, weights.get(pg, default_weight), pg), (2, loads[2], migration)]
+for package in sorted(set(selected) - {ab, pg, migration}, key=lambda p: (-weights.get(p, default_weight), p)):
+    if package not in weights:
+        print(f"вес не замерен, взят по умолчанию {default_weight} с: {package}", file=sys.stderr)
+    index = min((i for i in range(12) if i != 2), key=lambda i: (loads[i], i))
+    weight = weights.get(package, default_weight)
+    owners.append((index, weight, package))
+    loads[index] += weight
+rows = [(index, package, "all", "-") for index, _, package in owners if package not in (ab, pg)]
+rows += [(index, package, mode, regex) for index, (package, mode, regex, _) in parts.items()]
+# Независимая проверка 12 частей: владельцы и единицы исполнения различаются.
+if collections.Counter(package for _, _, package in owners) != collections.Counter(selected):
+    raise SystemExit("потерян или повторён владелец пакета")
+if {package: index for index, _, package in owners}.get(ab) != 0 or {package: index for index, _, package in owners}.get(pg) != 5:
+    raise SystemExit("неверный исходный владелец AB или PG")
+if any(not 0 <= index < 12 for index, _, _ in owners):
+    raise SystemExit("неизвестный шард владельца")
+expected = [(index, package, "all", "-") for index, _, package in owners if package not in (ab, pg)]
+expected += [(index, package, mode, regex) for index, (package, mode, regex, _) in parts.items()]
+if collections.Counter(rows) != collections.Counter(expected) or len(rows) != len(selected) + 6:
+    raise SystemExit("потеря, повтор или чужой фильтр единицы исполнения")
+if [(index, package, mode, regex) for index, package, mode, regex in rows if index == 2] != [(2, migration, "all", "-")]:
+    raise SystemExit("migrations должен занимать index 2 без других пакетов")
+if any(not any(index == i for index, _, _, _ in rows) for i in range(12)):
+    raise SystemExit("пустой шард исполнения")
+owner_file.write_text("".join(f"{i}\t{weight}\t{package}\n" for i, weight, package in owners))
+execution_file.write_text("".join("\t".join(map(str, row)) + "\n" for row in rows))
+for index in range(12):
+    print(f"шард {index}: плановый вес {loads[index]} с; неизвестный хвост не принят", file=sys.stderr)
+PYTWELVE
+    execution_plan="$work/execution-plan.tsv"
+    if [ -n "$evidence" ]; then
+        cp "$work/shard-plan.tsv" "$evidence/shard-plan.tsv" || exit 2
+        cp "$execution_plan" "$evidence/execution-plan.tsv" || exit 2
+    fi
+    if [ "$plan_only" -eq 1 ]; then
+        cat "$execution_plan"
+        exit 0
+    fi
+    pkgs="$(awk -F'\t' -v s="$shard_index" '$1 == s && $3 == "all" {print $2}' "$execution_plan")"
+    partition_units_file="$work/partition-units.tsv"
+    awk -F'\t' -v s="$shard_index" '$1 == s && $3 != "all"' "$execution_plan" > "$partition_units_file"
+elif [ -n "$shard_total" ]; then
     weights="$ROOT/.github/integration-shard-weights.txt"
     if [ ! -r "$weights" ]; then
         echo "ведомость весов $weights не прочитана — раскладка не из чего, это отказ" >&2
         exit 2
     fi
+    # Дополнительная единица исполнения, а не второй владелец пакета:
+    # CI 44200178509, attempt 1, job integrationshard index 1/5,
+    # artifact 14382386840, checkout fd426c480:
+    # точная AB-пара завершилась PASS за 804.140 с (округление вверх).
+    partition_tail_weight=0
+    if [ "$shard_total" -eq 5 ] && printf '%s\n' "$pkgs" | grep -Fxq "github.com/PRO-Robotech/kaname/internal/migrations" &&
+        printf '%s\n' "$pkgs" | grep -Fxq "$partition_package"; then
+        partition_tail_weight=805
+    fi
     plan_err="$work/plan.err"
     plan_rc=0
-    plan="$(printf '%s\n' "$pkgs" | awk -v n="$shard_total" -v wf="$weights" -v dflt="$DEFAULT_WEIGHT" '
+    plan="$(printf '%s\n' "$pkgs" | awk -v n="$shard_total" -v wf="$weights" -v dflt="$DEFAULT_WEIGHT" -v tail_weight="$partition_tail_weight" '
         BEGIN {
             while ((getline line < wf) > 0) {
                 if (line ~ /^[[:space:]]*(#|$)/) continue
@@ -246,9 +589,15 @@ if [ -n "$shard_total" ]; then
                 p[j+1] = ki; pw[j+1] = kw
             }
             for (s = 0; s < n; s++) load[s] = 0
+            migration = "github.com/PRO-Robotech/kaname/internal/migrations"
+            isolate_migrations = n == 5 && (migration in sel)
+            # Получатель пары уже занят её измеренным временем.
+            if (tail_weight > 0) load[1] = tail_weight
             for (i = 1; i <= np; i++) {
                 best = 0
-                for (s = 1; s < n; s++) if (load[s] < load[best]) best = s
+                if (isolate_migrations && p[i] == migration) best = 2
+                else for (s = 1; s < n; s++)
+                    if ((!isolate_migrations || s != 2) && load[s] < load[best]) best = s
                 load[best] += pw[i]
                 print best "\t" pw[i] "\t" p[i]
             }
@@ -259,8 +608,9 @@ if [ -n "$shard_total" ]; then
         exit 2
     fi
 
-    # Проверка плана — отдельно от построения: каждый отобранный пакет ровно
-    # в одном шарде, ни один шард не пуст.
+    # Проверка владельцев отдельно от построения: каждый пакет ровно один раз.
+    # Получатель зарезервированной пары может не иметь обычных пакетов;
+    # непустоту всех единиц исполнения ниже независимо проверяет PYPLAN.
     planned="$(printf '%s\n' "$plan" | awk -F'\t' 'NF' | wc -l)"
     distinct="$(printf '%s\n' "$plan" | awk -F'\t' 'NF {print $3}' | sort -u | wc -l)"
     missing="$(comm -23 <(printf '%s\n' "$pkgs" | sort -u) <(printf '%s\n' "$plan" | awk -F'\t' 'NF {print $3}' | sort -u))"
@@ -278,39 +628,204 @@ if [ -n "$shard_total" ]; then
         mark=""
         [ "$s" = "$shard_index" ] && mark="  ← этот"
         echo "шард $s: пакетов $n_s · замеренный вес $sum_s с$mark"
-        if [ "$n_s" -eq 0 ]; then
+        if [ "$s" -eq 1 ] && [ "$partition_tail_weight" -gt 0 ]; then
+            echo "  дополнительно зарезервировано $partition_tail_weight с на точную AB-пару"
+        fi
+        if [ "$n_s" -eq 0 ] && ! { [ "$s" -eq 1 ] && [ "$partition_tail_weight" -gt 0 ]; }; then
             echo "шард $s пуст: шардов больше, чем пакетов, — это отказ" >&2
             exit 2
         fi
     done
     echo "в плане пакетов       : $planned из $selected, каждый ровно в одном шарде"
+    if [ -n "$evidence" ]; then
+        printf '%s\n' "$plan" > "$evidence/shard-plan.tsv" || exit 2
+    fi
+    # Владельцы остаются пакетными; зарезервированная пара может быть единственной
+    # единицей получателя. Непустоту исполнения независимо проверяет PYPLAN.
+    # Получатель — index 1: CI 44180113004, шард 2 SUCCESS за 10m22s;
+    # минимальный старый вес шарда 5 скрывал фактические 25m53s.
+    execution_plan="$work/execution-plan.tsv"
+    printf '%s\n' "$plan" > "$work/shard-plan.tsv" || exit 2
+    python3 - "$work/shard-plan.tsv" "$execution_plan" "$partition_package" "$partition_pattern" "$shard_total" <<'PYPLAN' || exit 2
+import pathlib, sys
+source, target, package, pattern, total = sys.argv[1:]
+total = int(total)
+migration = "github.com/PRO-Robotech/kaname/internal/migrations"
+original = [(int(s), p) for s, _, p in
+            (line.split("\t") for line in pathlib.Path(source).read_text().splitlines())]
+owner = next((s for s, p in original if p == package), None)
+recipient = None
+if owner is not None and total > 1:
+    recipient = 1 if owner != 1 else next(s for s in range(total) if s != owner)
+rows = [(s, p, "skip" if p == package and recipient is not None else "all",
+         pattern if p == package and recipient is not None else "-") for s, p in original]
+if recipient is not None:
+    rows.append((recipient, package, "run", pattern))
+# Отдельный валидатор проверяет полноту, владельцев, фильтры и отсутствие дублей.
+expected = {p: s for s, p in original}
+if total == 5 and migration in expected:
+    if package in expected and (expected[package] != 0 or recipient != 1):
+        raise SystemExit("AB: ожидались owner 0 и recipient 1")
+    if expected[migration] != 2 or any(s == 2 and p != migration for s, p in original):
+        raise SystemExit("migrations должен занимать index 2 без других пакетов")
+for p, owner_index in expected.items():
+    actual = [(s, mode, regex) for s, pkg, mode, regex in rows if pkg == p]
+    wanted = [(owner_index, "all", "-")]
+    if p == package and recipient is not None:
+        wanted = [(owner_index, "skip", pattern), (recipient, "run", pattern)]
+    if sorted(actual) != sorted(wanted):
+        raise SystemExit("неполное или повторное исполнение пакета: " + p)
+if any(p not in expected or not 0 <= s < total for s, p, _, _ in rows):
+    raise SystemExit("неизвестный пакет или шард в плане исполнения")
+if any(not any(s == index for s, _, _, _ in rows) for index in range(total)):
+    raise SystemExit("пустой шард исполнения")
+pathlib.Path(target).write_text("".join("\t".join(map(str, row)) + "\n" for row in rows))
+PYPLAN
+    if [ -n "$evidence" ]; then
+        cp "$execution_plan" "$evidence/execution-plan.tsv" || exit 2
+    fi
     if [ "$plan_only" -eq 1 ]; then
-        printf '%s\n' "$plan" | awk -F'\t' 'NF {print "  " $1 "\t" $2 "\t" $3}'
+        cat "$execution_plan"
         exit 0
     fi
-    pkgs="$(printf '%s\n' "$plan" | awk -F'\t' -v s="$shard_index" '$1 == s {print $3}')"
+    pkgs="$(awk -F'\t' -v s="$shard_index" '$1 == s && $3 == "all" {print $2}' "$execution_plan")"
+    partition_mode="$(awk -F'\t' -v s="$shard_index" '$1 == s && $3 != "all" {print $3}' "$execution_plan")"
     echo "исполняется в шарде $shard_index: $(printf '%s\n' "$pkgs" | wc -l)"
     echo ""
 fi
 
-log="$work/go-test.log"
+if [ -n "$evidence" ]; then
+    { [ -z "$pkgs" ] || printf '%s\n' "$pkgs"; [ -z "$partition_mode" ] || printf '%s\n' "$partition_package"; [ -z "$partition_units_file" ] || awk -F'\t' '{print $2}' "$partition_units_file"; } > "$evidence/executed-packages.txt" || exit 2
+    # Последовательная склейка команд; их первичные коды лежат отдельно.
+    : > "$evidence/test.json" || exit 2
+    : > "$evidence/go-test.log" || exit 2
+fi
 
-# КОД ВОЗВРАТА БЕРЁТСЯ У `go test`, И ЭТО НЕ ПЕДАНТИЗМ — ОТ НЕГО ЗАВИСИТ ВЕРДИКТ.
-#
-# Здесь была форма `printf | xargs go test | tee`, и она давала классификатору
-# ЧУЖОЕ число сразу по двум причинам: `xargs` на упавшей команде возвращает СВОЙ
-# код 123, а не код `go test`, а труба отдаёт код ПРАВОЙ команды, то есть `tee`,
-# то есть ноль почти всегда. Классификатор при этом отработал бы честно — просто
-# не над тем числом: 123 не несёт признака третьего исхода и ушёл бы в красное,
-# а ноль от `tee` — в зелёное.
-#
-# Поэтому: без `xargs` (пути пакетов Go пробелов не содержат, разбиение по словам
-# здесь безопасно) и `PIPESTATUS[0]` снимается СРАЗУ после трубы, до любой другой
-# команды — иначе его затрёт даже присваивание.
-# shellcheck disable=SC2086
-go test -tags=integration -race -count=1 -timeout "$TIMEOUT" -p 1 $pkgs 2>&1 | tee "$log"
-rc="${PIPESTATUS[0]}"
+# Один вызов получает собственные сырой поток, текст и первичный код Go.
+# Обычный непартиционированный прогон сохраняет прежние имена свидетельств.
+run_tests() {
+    local packages="$1" mode="$2" label="$3" pattern="${4:-$partition_pattern}" part_package="${5:-$partition_package}"
+    local raw log rc out decode_rc verdict_rc
+    local destination="${evidence:-$work}" filter=()
+    command_red=0
+    [ -z "$mode" ] || filter=("-$mode" "$pattern")
+    raw="$destination/$label.json"
+    log="$destination/$label.log"
+    if [ -n "$evidence" ] || [ -n "$partition_mode" ] || [ -n "$partition_units_file" ]; then
+        rc=0
+        # shellcheck disable=SC2086
+        go test -tags=integration -race -count=1 -timeout "$TIMEOUT" -p 1 -json "${filter[@]}" $packages > "$raw" 2>&1 || rc=$?
+        printf '%s\n' "$rc" > "$destination/$label-exit-code.txt" || return 2
+        decode_rc=0
+        python3 - "$raw" "$log" "$mode" "$part_package" "$pattern" <<'PYDECODE' || decode_rc=$?
+import collections, json, pathlib, re, sys
+raw, log, mode, package, pattern = sys.argv[1:]
+bad = False
+tops = collections.defaultdict(list)
+with pathlib.Path(raw).open() as source, pathlib.Path(log).open("w") as target:
+    for line in source:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            target.write(line)
+            # Обычная диагностика Go законна; оборванный JSON — потерянное событие.
+            if mode or line.lstrip().startswith("{"):
+                bad = True
+            continue
+        if not isinstance(event, dict):
+            bad = True
+            continue
+        text = event.get("Output")
+        if isinstance(text, str):
+            target.write(text)
+        if mode and event.get("Package") != package:
+            bad = True
+        name = event.get("Test", "")
+        action = event.get("Action")
+        if mode and event.get("Package") == package and name and "/" not in name:
+            if action in ("run", "pass", "fail", "skip"):
+                tops[name].append(action)
+if mode:
+    # Package PASS без исполненного именованного TOP не свидетельствует о части.
+    if mode == "run":
+        required = pattern[2:-2].split("|")
+        if any(tops[name] != ["run", "pass"] for name in required):
+            bad = True
+    elif not any(actions == ["run", "pass"] for actions in tops.values()):
+        bad = True
+    if any(actions not in (["run", "pass"], ["run", "skip"]) for actions in tops.values()):
+        bad = True
+    if any(bool(re.fullmatch(pattern, name)) != (mode == "run") for name in tops):
+        bad = True
+    if bad:
+        print("часть пакета не подтверждена именованными TOP", file=sys.stderr)
+sys.exit(2 if bad else 0)
+PYDECODE
+        if [ -n "$evidence" ]; then
+            cat "$raw" >> "$evidence/test.json" || return 2
+            cat "$log" >> "$evidence/go-test.log" || return 2
+        fi
+        verdict_rc=0
+        python3 "$ROOT/.github/scripts/go-test-verdict.py" < "$raw" || verdict_rc=$?
+        out=0
+        "$ROOT/.github/scripts/classify-integration-outcome.sh" "$rc" "$log" || out=$?
+        # Настоящий отказ старше неполного свидетельства и отказа окружения.
+        if [ "$out" -ne 0 ]; then
+            [ "$out" -eq 75 ] || command_red=1
+            return "$out"
+        fi
+        if [ "$verdict_rc" -eq 1 ]; then
+            command_red=1
+            return 1
+        fi
+        [ "$decode_rc" -eq 0 ] || return "$decode_rc"
+        return "$verdict_rc"
+    else
+        log="$work/go-test.log"
+        # shellcheck disable=SC2086
+        go test -tags=integration -race -count=1 -timeout "$TIMEOUT" -p 1 $packages 2>&1 | tee "$log"
+        rc="${PIPESTATUS[0]}"
+        out=0
+        "$ROOT/.github/scripts/classify-integration-outcome.sh" "$rc" "$log" || out=$?
+        if [ "$out" -ne 0 ] && [ "$out" -ne 75 ]; then
+            command_red=1
+        fi
+        return "$out"
+    fi
+}
 
-out=0
-"$ROOT/.github/scripts/classify-integration-outcome.sh" "$rc" "$log" || out=$?
-exit "$out"
+# Первый отказ не отменяет вторую запланированную команду. Сигнал по-прежнему
+# завершает весь сценарий общей ловушкой, поэтому прерывание не даёт PASS.
+result=0
+result_red=0
+if [ -n "$pkgs" ]; then
+    run_tests "$pkgs" "" go-test-packages || result=$?
+    result_red="$command_red"
+fi
+if [ -n "$partition_mode" ]; then
+    part_rc=0
+    run_tests "$partition_package" "$partition_mode" go-test-access-binding || part_rc=$?
+    # Код 2 бывает и настоящим отказом Go, и неполным свидетельством:
+    # приоритет определяется происхождением, а первичные коды не переписываются.
+    if [ "$result" -eq 0 ] || { [ "$result_red" -eq 0 ] && [ "$command_red" -eq 1 ]; }; then
+        result="$part_rc"
+    fi
+fi
+if [ -n "$partition_units_file" ]; then
+    while IFS=$'\t' read -r index package mode regex; do
+        part_rc=0
+        run_tests "$package" "$mode" "go-test-partition-$index" "$regex" "$package" || part_rc=$?
+        if [ "$result" -eq 0 ] || { [ "$result_red" -eq 0 ] && [ "$command_red" -eq 1 ]; }; then
+            result="$part_rc"
+            result_red="$command_red"
+        fi
+    done < "$partition_units_file"
+fi
+if [ -n "$evidence" ]; then
+    printf '%s\n' "$result" > "$evidence/runner-exit-code.txt" || exit 2
+    # Обратная совместимость только там, где действительно был один вызов Go.
+    if [ -z "$partition_mode" ] && [ -z "$partition_units_file" ]; then
+        cp "$evidence/go-test-packages-exit-code.txt" "$evidence/go-test-exit-code.txt" || exit 2
+    fi
+fi
+exit "$result"

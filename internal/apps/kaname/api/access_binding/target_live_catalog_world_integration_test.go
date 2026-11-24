@@ -60,6 +60,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -86,9 +87,10 @@ func atcT2(typ string) string {
 // atcWorld — мир М2 одной базы.
 type atcWorld struct {
 	*pcrWorld
-	usrE domain.UserID
-	prjB domain.ProjectID
-	doc  []byte // фикстура probemod целиком
+	usrE                            domain.UserID
+	prjB                            domain.ProjectID
+	doc                             []byte          // фикстура probemod целиком
+	fullResourceRegistrationContext context.Context // только явно установленный FULL fixture
 
 	rolBoxGet, rolBoxRead, rolBoxUpd, rolItemGet, rolPoolGet, rolInstGet, rolInstBox domain.RoleID
 }
@@ -120,7 +122,7 @@ func newATCWorld(t *testing.T) *atcWorld {
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{p}),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	doc, err := atcProbemodDoc()
 	require.NoError(t, err, "М2: фикстура probemod без ключа публичного чтения")
 	a.doc = doc
@@ -225,13 +227,20 @@ func (a *atcWorld) itemsLiveInDB() bool {
 // нуждается (выдачи судят цель, а не владельца).
 func (a *atcWorld) registerBox(id string) {
 	a.t.Helper()
+	registrationContext := a.ctx
+	if a.fullResourceRegistrationContext != nil {
+		registrationContext = a.fullResourceRegistrationContext
+	} else {
+		a.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "probemod"})
+		defer a.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
+	}
 	obj := atcBoxType + ":" + id
 	for _, r := range []*iamv1.RegisterResourceRequest{
 		{SubjectId: "project:" + string(a.prjA), Relation: "project", Object: obj},
 	} {
 		r.ParentProjectId, r.ParentAccountId = string(a.prjA), string(a.accA)
 		r.ParentChain = []string{"project:" + string(a.prjA), "account:" + string(a.accA)}
-		require.NoErrorf(a.t, a.reg.Register(a.ctx, r), "регистрация %s (%s)", obj, r.GetRelation())
+		require.NoErrorf(a.t, a.reg.Register(registrationContext, r), "регистрация %s (%s)", obj, r.GetRelation())
 	}
 }
 
@@ -488,25 +497,50 @@ func (h holdingRunner) RunInWriteTx(ctx context.Context, fn func(context.Context
 	})
 }
 
-// waitCreateBlockedOnCatalog — запись выдачи стоит на замке строки каталога:
-// бэкенд этой базы ждёт замка оператором `FOR KEY SHARE` по `catalog_resource`.
-// Без этого наблюдения «запись дождалась исхода снятия» неотличимо от «запись
-// пришла после него».
-func (a *atcWorld) waitCreateBlockedOnCatalog(what string) {
+// withdrawalCompatHolder фиксирует PID удержанного применения после h.ran.
+// В отдельной базе мира только эта TX одновременно держит точный compatibility
+// fence и замок изменения catalog_resource; поиск выполняется ДО запуска Create.
+func (a *atcWorld) withdrawalCompatHolder(what string) int32 {
+	a.t.Helper()
+	var pids []int32
+	require.NoError(a.t, a.pool.QueryRow(a.ctx, `
+		SELECT COALESCE(array_agg(DISTINCT l.pid), ARRAY[]::integer[])
+		  FROM pg_locks l
+		 WHERE l.locktype='advisory'
+		   AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database())
+		   AND l.classid=1262569292::oid AND l.objid=0::oid AND l.objsubid=2
+		   AND l.mode='ExclusiveLock' AND l.granted
+		   AND EXISTS (SELECT 1 FROM pg_locks r WHERE r.pid=l.pid
+		     AND r.locktype='relation' AND r.relation='kaname.catalog_resource'::regclass
+		     AND r.mode='RowExclusiveLock' AND r.granted)`).Scan(&pids))
+	require.Len(a.t, pids, 1, "%s: удержанное применение должно владеть точным fence и таблицей каталога", what)
+	return pids[0]
+}
+
+// waitCreateBlockedOnCatalogAdmission наблюдает ранний вход настоящего Writer,
+// а не недостижимый при удержанном fence последующий FOR KEY SHARE. Предмет
+// ожидания задан PID применения и полным ключом; произвольный advisory не годится.
+func (a *atcWorld) waitCreateBlockedOnCatalogAdmission(holder int32, what string) {
 	a.t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		var n int
+		var pids []int32
 		require.NoError(a.t, a.pool.QueryRow(a.ctx, `
-			SELECT count(*) FROM pg_stat_activity
-			 WHERE datname = current_database() AND pid <> pg_backend_pid()
-			   AND wait_event_type = 'Lock'
-			   AND query LIKE '%catalog_resource%' AND query LIKE '%FOR KEY SHARE%'`).Scan(&n))
-		if n > 0 {
+			SELECT COALESCE(array_agg(DISTINCT a.pid), ARRAY[]::integer[])
+			  FROM pg_stat_activity a JOIN pg_locks l ON l.pid=a.pid
+			 WHERE a.datname=current_database() AND a.pid<>pg_backend_pid()
+			   AND $1=ANY(pg_blocking_pids(a.pid)) AND a.wait_event_type='Lock'
+			   AND a.query='SELECT pg_advisory_xact_lock(1262569292,0)'
+			   AND l.locktype='advisory'
+			   AND l.database=(SELECT oid FROM pg_database WHERE datname=current_database())
+			   AND l.classid=1262569292::oid AND l.objid=0::oid AND l.objsubid=2
+			   AND l.mode='ExclusiveLock' AND NOT l.granted`, holder).Scan(&pids))
+		if len(pids) > 0 {
+			require.Len(a.t, pids, 1, "%s: ожидается единственный Writer данной операции", what)
 			return
 		}
 		if time.Now().After(deadline) {
-			a.t.Fatalf("%s: за 10 с запись выдачи не встала на замок строки каталога — транзакция записи каталог не спрашивает", what)
+			a.t.Fatalf("%s: за 10 с Writer не встал на точный fence удержанного применения PID=%d", what, holder)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -553,8 +587,9 @@ func TestATC10_UncommittedWithdrawalDecidesTheWrite(t *testing.T) {
 				t.Fatalf("%s: применение не дошло до удержания за 30 с", what)
 			}
 
+			holder := a.withdrawalCompatHolder(what)
 			op, id := a.opOf(a.req(userSubject(user), role, a.prjA, target...), what)
-			a.waitCreateBlockedOnCatalog(what)
+			a.waitCreateBlockedOnCatalogAdmission(holder, what)
 			h.release <- commit
 			err := <-applied
 			if commit {

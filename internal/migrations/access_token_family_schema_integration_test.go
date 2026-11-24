@@ -243,7 +243,7 @@ func TestIntegration_LINE_A_1_28_IssuanceRacingRevocationLeavesNoLiveToken(t *te
 
 // TestIntegration_AccessTokenMigrationRollsBackAndForward — обратный ход.
 func TestIntegration_AccessTokenMigrationRollsBackAndForward(t *testing.T) {
-	db := acDB(t)
+	db := historicalRegistrationDB(t)
 	requireAccessTokensTable(t, db)
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
@@ -259,7 +259,7 @@ func TestIntegration_AccessTokenMigrationRollsBackAndForward(t *testing.T) {
 		`SELECT to_regclass('kaname.token_families') IS NOT NULL`).Scan(&present))
 	require.True(t, present, "откат обязан снять ТОЛЬКО свой предмет, семейства остаются")
 
-	require.NoError(t, goose.Up(db, "."), "цепочка обязана накатываться снова")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "цепочка обязана накатываться снова")
 	requireAccessTokensTable(t, db)
 
 	version, err := goose.GetDBVersion(db)

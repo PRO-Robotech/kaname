@@ -209,8 +209,8 @@ type guardedReport struct {
 
 func guardedReports() []guardedReport {
 	return []guardedReport{
-		{path: scalegrid.ReportPath, subject: scalegrid.ComputeFingerprint, hint: scaleGridRunHint},
-		{path: scalegrid.StrengthReportPath, subject: scalegrid.ComputeFingerprint,
+		{path: scalegrid.ReportPath, subject: scalegrid.ComputeFullGridFingerprint, hint: scaleGridRunHint},
+		{path: scalegrid.StrengthReportPath, subject: scalegrid.ComputeStrengthGridFingerprint,
 			hint: "KACHO_STRENGTH_FULL=1 go test ./internal/repo/kaname/pg/relverdict/ " +
 				"-run TestStrengthGrid_Report -count=1 -v -timeout 120m"},
 		{path: scalegrid.WriteDeleteReportPath, subject: scalegrid.ComputeWriteDeleteFingerprint,

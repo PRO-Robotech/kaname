@@ -45,6 +45,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -306,7 +307,7 @@ func (w *urxWorld) bareRegister() *internaliam.RegisterResourceUseCase {
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld}),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 }
 
 // nestedFixture — реестр-контейнер K, выдача роли с вложенным правилом над

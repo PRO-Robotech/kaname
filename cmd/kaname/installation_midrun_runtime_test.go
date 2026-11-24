@@ -21,7 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
-	"gopkg.in/yaml.v3"
 )
 
 type rid10FailureOperation struct {
@@ -54,10 +53,11 @@ func rid10Start(t *testing.T, x *rid10World, mode string) *rid02OwnedChild {
 	manifestDir := filepath.Join(configRoot, "delivery")
 	_, err := x.w.delivery.Manifests.Write(manifestDir, false)
 	require.NoError(t, err)
-	raw, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": manifestDir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}})
+	raw, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": manifestDir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}}, x.w.delivery.RegistrationWriters)
 	require.NoError(t, err)
 	configPath := filepath.Join(configRoot, "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, raw, 0600))
+	ridRegistrationStartupProof(t, configRoot, raw, x.w.delivery.RegistrationWriters)
 	digest := rid06HashExecutable(t)
 	child := startRIDInstallationChild(t, f, "rid10-child", rid10ChildInput{ConfigPath: configPath, EvidenceDir: filepath.Join(f.session.Root, "rid10-child"), Creator: f.creator.ID, Mode: mode}, nativeConcurrentEnvironment(t, f, installruntime.SecondNativePorts(), "rid10-full-root"), rid10ChildEnv, "TestRID10OwnedMidrunStartupChild", "4m")
 	parentCG, err := os.ReadFile("/proc/self/cgroup")
@@ -65,10 +65,11 @@ func rid10Start(t *testing.T, x *rid10World, mode string) *rid02OwnedChild {
 	childCG, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", child.cmd.Process.Pid))
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(parentCG, childCG))
-	memory, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	cgroupDir := ridOwnedCgroup(t, parentCG)
+	memory, err := os.ReadFile(filepath.Join(cgroupDir, "memory.max"))
 	require.NoError(t, err)
 	require.Equal(t, "4294967296", strings.TrimSpace(string(memory)))
-	swap, err := os.ReadFile("/sys/fs/cgroup/memory.swap.max")
+	swap, err := os.ReadFile(filepath.Join(cgroupDir, "memory.swap.max"))
 	require.NoError(t, err)
 	require.Equal(t, "0", strings.TrimSpace(string(swap)))
 	rid08Write(t, child.dir, "provenance", map[string]any{"instrumentedCompleteStartup": true, "testBinarySHA256": digest, "productionAppSHA256": f.session.BinarySHA256, "pid": child.cmd.Process.Pid, "starttime": child.start, "cgroup": string(childCG), "memoryMax": string(memory), "swapMax": string(swap)})

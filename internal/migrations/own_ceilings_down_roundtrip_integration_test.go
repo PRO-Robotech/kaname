@@ -44,7 +44,7 @@ func TestOwnCeilings_DownRestoresTheAuthorityAndTheReapplyConverges(t *testing.T
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 
 	var before int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.own_ceilings`).Scan(&before))
@@ -89,7 +89,7 @@ func TestOwnCeilings_DownRestoresTheAuthorityAndTheReapplyConverges(t *testing.T
 		 WHERE kind IN ('iam.account','iam.user.credential','iam.serviceAccount.credential')`).Scan(&restored))
 	require.Equal(t, 3, restored, "откат не вернул величины авторитету")
 
-	require.NoError(t, goose.Up(db, "."), "повторный накат обязан проходить")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат обязан проходить")
 	var after int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.own_ceilings`).Scan(&after))
 	require.Equal(t, 3, after)

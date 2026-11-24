@@ -203,7 +203,7 @@ func TestIntegration_ProviderCompensationNotifyRollsBackAndReapplies(t *testing.
 	require.Contains(t, notifyChannelsProducedBy(t, below), providerCompensationChannel,
 		"эталон не производит канал: сравнение отката с ним ничего не утверждало бы о канале")
 
-	db := freshIamSchema(t)
+	db := historicalRegistrationDB(t)
 
 	// Утверждение 1 — после наката строения нет.
 	assert.Empty(t, providerCompensationNotifyStructure(t, db),
@@ -218,7 +218,7 @@ func TestIntegration_ProviderCompensationNotifyRollsBackAndReapplies(t *testing.
 		"откат обязан вернуть строение уведомления дословно таким, каким его оставил свод")
 
 	// Утверждение 3 — повторный накат снимает строение снова и не трогает очередь.
-	require.NoError(t, goose.Up(db, "."), "повторный накат обязан проходить")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат обязан проходить")
 	assert.Empty(t, providerCompensationNotifyStructure(t, db),
 		"после повторного наката строение уведомления стоит снова")
 	assert.NotContains(t, notifyChannelsProducedBy(t, db), providerCompensationChannel,

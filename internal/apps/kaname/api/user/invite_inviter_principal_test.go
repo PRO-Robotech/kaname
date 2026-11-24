@@ -49,6 +49,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/operations"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -384,4 +385,9 @@ type mailIntent struct {
 	UserID    string
 	AccountID string
 	To        string
+}
+
+// Проверки доверенностей в этом дублёре не поддерживаются: отказ вместо фиктивного допуска.
+func (w *invPrincWriter) TransactionRelationChecker(*authzmodel.Plans) (kanamerepo.RelationChecker, error) {
+	return nil, iamerr.ErrUnavailable
 }

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -197,9 +198,9 @@ chain(s_type, s_id, depth) AS (
                FROM kaname.resource_scope_edge pe
               WHERE pe.object_type = c.s_type AND pe.object_id = c.s_id
               ORDER BY pe.depth
-              LIMIT 4
+              LIMIT $4::int
            ) e
-     WHERE c.depth < 4
+     WHERE c.depth < $3::int
 )
 SELECT EXISTS (SELECT 1 FROM kaname.resource_mirror m WHERE m.object_type = $1::text AND m.object_id = $2::text),
        COALESCE((SELECT p.account_id
@@ -214,7 +215,7 @@ func (r *gdReader) TargetObjectAccount(ctx context.Context, ref domain.ResourceR
 		registered bool
 		account    string
 	)
-	if err := r.tx.QueryRow(ctx, targetObjectAccountSQL, ref.Type, ref.ID).Scan(&registered, &account); err != nil {
+	if err := r.tx.QueryRow(ctx, targetObjectAccountSQL, ref.Type, ref.ID, hierarchy.MaxPointerHops, hierarchy.MaxImmediateParents).Scan(&registered, &account); err != nil {
 		return false, "", mapErr(err, "", ref.ID)
 	}
 	return registered, domain.AccountID(account), nil
@@ -273,6 +274,33 @@ func (w *gdWriter) LockForRevoke(ctx context.Context, id domain.GrantDelegationI
 		return domain.GrantDelegation{}, mapErr(err, "", string(id))
 	}
 	return d, nil
+}
+
+// UpdateAxes меняет только наборы под ранее захваченным замком строки.
+// ACTIVE в условии сохраняет конечность отзыва даже при ошибке вызывающего.
+func (w *gdWriter) UpdateAxes(ctx context.Context, d domain.GrantDelegation) (domain.GrantDelegation, error) {
+	d = domain.SortedGrantDelegationAxes(d)
+	roles := make([]string, len(d.RoleIDs))
+	for i, role := range d.RoleIDs {
+		roles[i] = string(role)
+	}
+	subjects := make([]string, len(d.SubjectTypes))
+	for i, subject := range d.SubjectTypes {
+		subjects[i] = string(subject)
+	}
+	out, err := scanGrantDelegation(w.tx.QueryRow(ctx, fmt.Sprintf(`
+		UPDATE kaname.grant_delegations
+		   SET role_ids = $2, target_types = $3, subject_types = $4
+		 WHERE id = $1 AND status = 'ACTIVE'
+		RETURNING %s`, gdCols), string(d.ID), roles, d.TargetTypes, subjects))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.GrantDelegation{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"grant delegation %s is already revoked", d.ID)
+	}
+	if err != nil {
+		return domain.GrantDelegation{}, mapErr(err, "GrantDelegation.Update", string(d.ID))
+	}
+	return out, nil
 }
 
 // MarkRevoked — CAS `ACTIVE → REVOKED`: ссылка на учётку-делегата снимается тем же

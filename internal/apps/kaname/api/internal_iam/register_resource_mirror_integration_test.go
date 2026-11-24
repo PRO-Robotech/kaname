@@ -1,18 +1,18 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// register_resource_mirror_integration_test.go — IAM (callee) side of
-// resource-scoped AccessBinding registration: RegisterResource UPSERTs a
-// kaname.resource_mirror row AND emits the owner-tuple intent into
-// kaname.fga_outbox in ONE writer-tx (atomic co-commit, ban #10);
-// UnregisterResource symmetrically DELETEs the mirror row + emits the tuple
-// revoke in one tx.
+// register_resource_mirror_integration_test.go — сторона IAM (принимающего) при
+// регистрации AccessBinding в области ресурса: RegisterResource выполняет UPSERT
+// строки kaname.resource_mirror И выпускает намерение кортежа владельца в
+// kaname.fga_outbox в ОДНОЙ транзакции записи (атомарная совместная фиксация, ban #10);
+// UnregisterResource симметрично УДАЛЯЕТ строку зеркала и выпускает отзыв кортежа
+// в одной транзакции.
 //
-// This path only FILLS the mirror — nothing here reads it for authz (that is the
-// reconciler). The owner-tuple path is unchanged (idempotent at-least-once via
-// the drainer).
+// Этот путь лишь ЗАПОЛНЯЕТ зеркало; здесь его не читают для авторизации (это делает
+// сведение). Путь кортежа владельца сохранён (идемпотентная доставка хотя бы один раз
+// через обработчик очереди).
 //
-// Skipped under `go test -short`.
+// Пропускается при `go test -short`.
 package internal_iam_test
 
 import (
@@ -36,10 +36,11 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
-// newRegisterUCWithMirror builds the RegisterResource use-case backed by a real
-// pool's fga_outbox emitter + resource_mirror emitter + tx beginner (no FGA dial).
+// newRegisterUCWithMirror создаёт сценарий RegisterResource на настоящем пуле с
+// выпуском fga_outbox + resource_mirror + открытием транзакции (без соединения FGA).
 func newRegisterUCWithMirror(t *testing.T) (*internaliam.RegisterResourceUseCase, *mirrorProbe) {
 	t.Helper()
 	ctx := context.Background()
@@ -55,12 +56,12 @@ func newRegisterUCWithMirror(t *testing.T) (*internaliam.RegisterResourceUseCase
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "compute"})
 	return uc, &mirrorProbe{pool: pool, scene: registrationscene.Seed(t, ctx, pool)}
 }
 
-// happy path — Create compute-instance with labels → mirror row appears,
-// owner-tuple co-committed in the same writer-tx.
+// Успешный путь: Create экземпляра compute с метками → появляется строка зеркала,
+// кортеж владельца фиксируется в той же транзакции записи.
 func TestRegisterResource_B01_MirrorRowAndTupleCoCommit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -85,11 +86,11 @@ func TestRegisterResource_B01_MirrorRowAndTupleCoCommit(t *testing.T) {
 	require.Equal(t, p.scene.Account, acc)
 	require.Equal(t, map[string]string{"env": "dev", "team": "core"}, labels)
 
-	// Owner-tuple co-committed in the SAME writer-tx.
+	// Кортеж владельца фиксируется В ТОЙ ЖЕ транзакции записи.
 	require.Equal(t, 1, p.outboxCount(t, ctx, obj), "owner-tuple emitted alongside mirror")
 }
 
-// payload with empty labels → mirror row with labels={}, parent filled.
+// Данные с пустыми метками → строка зеркала с labels={} и заполненным родителем.
 func TestRegisterResource_B02_EmptyLabelsGraceful(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -111,10 +112,10 @@ func TestRegisterResource_B02_EmptyLabelsGraceful(t *testing.T) {
 	require.Equal(t, map[string]string{}, labels)
 }
 
-// co-commit atomicity — owner-tuple and mirror row appear together.
-// A failure inside the writer-tx leaves NEITHER (verified by the rollback path
-// in the resource_mirror + fga_outbox emitter tests). Here we assert the
-// positive: after a successful Register, BOTH effects are present.
+// Атомарность совместной фиксации: кортеж владельца и строка зеркала появляются вместе.
+// Ошибка внутри транзакции записи не оставляет НИ ТОГО НИ ДРУГОГО (проверено путём отката
+// в пробах выпуска resource_mirror + fga_outbox). Здесь проверяем
+// положительный исход: после успешного Register присутствуют ОБА эффекта.
 func TestRegisterResource_B03_AtomicCoCommit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -134,7 +135,7 @@ func TestRegisterResource_B03_AtomicCoCommit(t *testing.T) {
 	require.Equal(t, 1, p.outboxCount(t, ctx, obj), "tuple present — both committed together")
 }
 
-// idempotency — repeat RegisterResource (drainer retry) → no mirror dup.
+// Идемпотентность: повтор RegisterResource (повтор обработчика) → без дубля зеркала.
 func TestRegisterResource_B06_IdempotentMirrorUpsert(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -153,8 +154,8 @@ func TestRegisterResource_B06_IdempotentMirrorUpsert(t *testing.T) {
 		"PK ⇒ exactly one mirror row on repeat (β-06)")
 }
 
-// concurrency — parallel Register of one object with different labels →
-// exactly one mirror row, deterministic last-write (no half-write, ban #10).
+// Конкурентность: параллельные Register одного объекта с разными метками →
+// ровно одна строка зеркала, детерминированная последняя запись (без частичной записи, ban #10).
 func TestRegisterResource_B05_ConcurrentUpsertOneRow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -193,7 +194,7 @@ func TestRegisterResource_B05_ConcurrentUpsertOneRow(t *testing.T) {
 		"final labels are one deterministic last-write, not a half-merge")
 }
 
-// Unregister → mirror row deleted AND tuple-revoke emitted in one tx.
+// Unregister → строка зеркала удалена И отзыв кортежа выпущен в одной транзакции.
 func TestRegisterResource_B07_UnregisterDeletesMirrorAndRevokesTuple(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -218,7 +219,7 @@ func TestRegisterResource_B07_UnregisterDeletesMirrorAndRevokesTuple(t *testing.
 		"tuple-revoke emitted in the same tx as the mirror delete")
 }
 
-// idempotent: Unregister of a never-registered object → OK, no panic.
+// Идемпотентно: Unregister никогда не зарегистрированного объекта → OK, без паники.
 func TestRegisterResource_B07b_UnregisterAbsentIsOK(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -226,13 +227,17 @@ func TestRegisterResource_B07b_UnregisterAbsentIsOK(t *testing.T) {
 	ctx := context.Background()
 	uc, p := newRegisterUCWithMirror(t)
 
-	require.NoError(t, uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
+	err := uc.Unregister(ctx, &iamv1.UnregisterResourceRequest{
 		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: "compute_instance:inst-never",
-	}), "unregister of absent object must be OK (β-07/D-β5)")
+	})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "AW-15 supersedes unknown-key cleanup: no saved scope means refusal")
+	var writes int
+	require.NoError(t, p.pool.QueryRow(ctx, `SELECT count(*) FROM kaname.fga_outbox WHERE payload->>'object'='compute_instance:inst-never'`).Scan(&writes))
+	require.Zero(t, writes)
 }
 
-// backward-compat — legacy caller sends only fields 1-4 → mirror row with
-// empty labels/parent (graceful), tuple emitted as before.
+// Обратная совместимость: прежний вызывающий передаёт только поля 1-4 → строка зеркала с
+// пустыми метками/родителем (допустимо), кортеж выпущен как прежде.
 func TestRegisterResource_B09_LegacyCallerEmptyMirror(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -244,7 +249,7 @@ func TestRegisterResource_B09_LegacyCallerEmptyMirror(t *testing.T) {
 
 	require.NoError(t, uc.Register(ctx, &iamv1.RegisterResourceRequest{
 		SubjectId: "project:" + p.scene.Project, Relation: "project", Object: obj,
-		// no labels / parent_* — old compute
+		// Без меток / parent_* — прежний compute.
 	}))
 
 	prj, acc, labels := p.readMirror(t, ctx, "compute.instance", "inst-legacy")
@@ -254,8 +259,8 @@ func TestRegisterResource_B09_LegacyCallerEmptyMirror(t *testing.T) {
 	require.Equal(t, 1, p.outboxCount(t, ctx, obj), "owner-tuple emitted as before")
 }
 
-// negative — invalid labels (uppercase key) → InvalidArgument, no mirror,
-// no outbox row (validation rejects before the writer-tx).
+// Отрицательная проба: неверные метки (ключ с заглавной буквой) → InvalidArgument, без зеркала
+// и строки outbox (проверка отвергает до транзакции записи).
 func TestRegisterResource_B15_InvalidLabelsRejected(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -279,8 +284,8 @@ func TestRegisterResource_B15_InvalidLabelsRejected(t *testing.T) {
 	require.Equal(t, before, p.totalRows(t, ctx), "no outbox row on validation failure — at all")
 }
 
-// mirror carries ONLY tenant-facing labels + parent-scope (no infra
-// fields); a stale row survives (dangling tolerated) — read does not panic.
+// Зеркало несёт ТОЛЬКО метки и родительскую область арендатора (без инфраструктурных
+// полей); устаревшая строка сохраняется (висячая допустима) — чтение не паникует.
 func TestRegisterResource_B16_MirrorShapeAndDanglingSurvives(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -293,18 +298,18 @@ func TestRegisterResource_B16_MirrorShapeAndDanglingSurvives(t *testing.T) {
 		Labels: map[string]string{"env": "dev"}, ParentProjectId: p.scene.Project, ParentAccountId: p.scene.Account,
 	}))
 
-	// Column set is exactly the tenant-facing projection (no infra columns).
+	// Набор столбцов точно равен проекции арендатора (без инфраструктурных столбцов).
 	cols := p.columns(t, ctx)
 	require.ElementsMatch(t,
 		[]string{"object_type", "object_id", "parent_project_id", "parent_account_id", "labels", "source_version", "updated_at"},
 		cols, "resource_mirror exposes only tenant-facing labels + parent-scope + monotonic source_version (β-16, β-hardening)")
 
-	// Stale row survives without an Unregister: re-reading is fine.
+	// Устаревшая строка без Unregister сохраняется: повторное чтение допустимо.
 	prj, _, _ := p.readMirror(t, ctx, "compute.instance", "inst-orphan")
 	require.Equal(t, p.scene.Project, prj)
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── Вспомогательные функции ───────────────────────────────────────────────
 
 // mirrorProbe — чтения проб и проект сцены: родителя регистрации kaname выводит
 // из своих данных (kaname#982), и регистрация под проектом, которого в kaname

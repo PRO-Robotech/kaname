@@ -101,7 +101,9 @@ func rid06PublicConsumer(t *testing.T, w *ridLifecycleWorld, owner string) *rid0
 }
 func rid06Primary(t *testing.T, w *ridLifecycleWorld, stable bool) rid03NewmanSnapshot {
 	if stable {
-		return rid05SnapshotRead(t, w, true).Core
+		// Для отзыва достаточно полного основного снимка. Перепись аудита
+		// удаления создателя используется только сценариями RID-05.
+		return rid03StableNewmanSnapshot(t, w)
 	}
 	return rid03PhaseSnapshot(t, w)
 }
@@ -270,11 +272,14 @@ func (p *rid06PublicContext) beforeRecoveryApply(t *testing.T, w *ridLifecycleWo
 	s := rid06Primary(t, w, true)
 	p.beforeApply = &s
 }
-func (p *rid06PublicContext) afterRecoveryApply(t *testing.T, w *ridLifecycleWorld) {
+func (p *rid06PublicContext) afterRecoveryApply(t *testing.T, w *ridLifecycleWorld, process *installruntime.Process) {
 	if p == nil {
 		return
 	}
 	require.NotNil(t, p.beforeApply)
+	// Готовность слушателей не подтверждает завершение обеих проекций.
+	// Сравнение использует снимок после их записи именно этим процессом.
+	rid09AwaitBaseRoleProjections(t, w.f.given.ctx, process)
 	s := rid06Primary(t, w, true)
 	rid04RequireNormalBoundary(t, w, *p.beforeApply, s, len(w.accounts))
 	p.read(t, w, "RECOVERY-REAPPLY", "REVOKED")

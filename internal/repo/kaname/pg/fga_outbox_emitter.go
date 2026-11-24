@@ -1,45 +1,52 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// fga_outbox_emitter.go — pg adapter for service.RelationOutboxEmitter.
+// fga_outbox_emitter.go — адаптер pg для service.RelationOutboxEmitter.
 //
-// Forwards emit-in-tx grant/revoke calls from governance code paths (JIT
-// auto-grant, JitPending Approve, JIT/BG expirers, BG.ApproveB) to the
-// internal helper package `fga_outbox` which performs the INSERT.
+// Пересылает вызовы выдачи/отзыва внутри транзакции из путей управления (автовыдача JIT,
+// JitPending Approve, исполнители истечения JIT/BG, BG.ApproveB) во
+// внутренний вспомогательный пакет `fga_outbox`, выполняющий INSERT.
 //
-// Stateless adapter: the actual INSERT runs on the supplied tx, never on a
-// pool-managed connection (otherwise the emit would no longer be atomic with
-// the domain mutation).
+// Адаптер без состояния: настоящий INSERT исполняется на переданной транзакции, никогда не на
+// соединении, управляемом пулом (иначе отправка перестала бы быть атомарной с
+// доменной мутацией).
 package pg
 
 import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// FGAOutboxEmitter — adapter implementing service.RelationOutboxEmitter on top of
-// the fga_outbox package. Stateless.
+// FGAOutboxEmitter — адаптер, реализующий service.RelationOutboxEmitter поверх
+// пакета fga_outbox. Без состояния.
 type FGAOutboxEmitter struct{}
 
-// NewFGAOutboxEmitter — composition root constructor.
+// NewFGAOutboxEmitter — конструктор корня композиции.
 func NewFGAOutboxEmitter() *FGAOutboxEmitter {
 	return &FGAOutboxEmitter{}
 }
 
-// EmitWriteTx — implements service.RelationOutboxEmitter. Recovers the concrete
-// pgx.Tx from the opaque handle and forwards to fga_outbox.EmitWriteTx.
+// EmitWriteTx — реализует service.RelationOutboxEmitter. Восстанавливает конкретный
+// pgx.Tx из непрозрачного дескриптора и пересылает в fga_outbox.EmitWriteTx.
 func (e *FGAOutboxEmitter) EmitWriteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+	// Только частный cluster wrapper несёт завершённый защищённый decision.
+	if held, ok := tx.(*clusterAdminParticipantTx); ok && !held.ClusterAdminDecisionAt().IsZero() {
+		return fga_outbox.EmitDecisionTx(ctx, txAsPgx(tx), fga_outbox.EventTypeWrite, serviceTuplesToClients(tuples), held.ClusterAdminDecisionAt())
+	}
 	return fga_outbox.EmitWriteTx(ctx, txAsPgx(tx), serviceTuplesToClients(tuples))
 }
 
-// EmitDeleteTx — symmetric revoke counterpart.
+// EmitDeleteTx — симметричная сторона отзыва.
 func (e *FGAOutboxEmitter) EmitDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple) error {
+	// Только частный cluster wrapper несёт завершённый защищённый decision.
+	if held, ok := tx.(*clusterAdminParticipantTx); ok && !held.ClusterAdminDecisionAt().IsZero() {
+		return fga_outbox.EmitDecisionTx(ctx, txAsPgx(tx), fga_outbox.EventTypeDelete, serviceTuplesToClients(tuples), held.ClusterAdminDecisionAt())
+	}
 	return fga_outbox.EmitDeleteTx(ctx, txAsPgx(tx), serviceTuplesToClients(tuples))
 }
 
@@ -58,11 +65,7 @@ func (e *FGAOutboxEmitter) EmitOrderedWriteTx(ctx context.Context, tx service.Tx
 // него остаются. Надгробие без версии упорядочить нечем, и снятие идёт прежней
 // формой — меткой момента вставки, то есть снимает всё, что видит (fail-closed).
 func (e *FGAOutboxEmitter) EmitOrderedDeleteTx(ctx context.Context, tx service.Tx, tuples []service.RelationTuple, tombstone time.Time) error {
-	if tombstone.IsZero() {
-		return e.EmitDeleteTx(ctx, tx, tuples)
-	}
-	return fga_outbox.EmitOwnerOrderedTx(ctx, txAsPgx(tx), fga_outbox.EventTypeDelete,
-		serviceTuplesToClients(tuples), pgtype.Timestamptz{Time: tombstone, Valid: true})
+	return fga_outbox.EmitRegistrationDeleteTx(ctx, txAsPgx(tx), serviceTuplesToClients(tuples), tombstone)
 }
 
 // ownerVersionOrMinusInfinity — версия владельца; нулевая — '-infinity'.
@@ -73,14 +76,20 @@ func ownerVersionOrMinusInfinity(v time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: v, Valid: true}
 }
 
-// serviceTuplesToClients — service-layer RelationTuple → clients.RelationTuple (the
-// shape the fga_outbox INSERT helper accepts). Both shapes are identical
-// triples; the conversion exists only to keep the service layer free of
-// the clients package import.
+// serviceTuplesToClients — RelationTuple слоя служб → clients.RelationTuple
+// (форма, принимаемая помощником INSERT fga_outbox). Обе формы — одинаковые
+// тройки; преобразование нужно лишь для освобождения слоя служб от
+// импорта пакета clients.
 func serviceTuplesToClients(tuples []service.RelationTuple) []clients.RelationTuple {
 	out := make([]clients.RelationTuple, len(tuples))
 	for i, t := range tuples {
 		out[i] = clients.RelationTuple{User: t.User, Relation: t.Relation, Object: t.Object}
 	}
 	return out
+}
+
+// EmitVersionedDeleteTx сохраняет индивидуальные версии и единый порядок
+// блокировок фактов для родителя и смешанных потомков в одной транзакции вызывающего.
+func (e *FGAOutboxEmitter) EmitVersionedDeleteTx(ctx context.Context, tx service.Tx, rows []service.VersionedRelationTuple) error {
+	return fga_outbox.EmitVersionedDeleteTx(ctx, txAsPgx(tx), rows)
 }

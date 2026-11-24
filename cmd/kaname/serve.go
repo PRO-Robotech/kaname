@@ -1,10 +1,10 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// serve.go — runServe: full lifecycle of the kaname binary.
-// Wires pools → repos → services → gRPC servers + HTTP listeners + drainers,
-// then runs them in parallel with a shared shutdown trigger driven by
-// SIGTERM / SIGINT or any task error.
+// serve.go — runServe: полный жизненный цикл исполняемого файла kaname.
+// Соединяет пулы → репозитории → сервисы → серверы gRPC, слушатели HTTP и исполнителей очередей,
+// затем запускает их параллельно с общим сигналом завершения от
+// SIGTERM / SIGINT или ошибки любой задачи.
 package main
 
 import (
@@ -16,14 +16,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
 
 	"github.com/PRO-Robotech/corelib/authz"
 	coredb "github.com/PRO-Robotech/corelib/db"
@@ -32,7 +28,6 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	"github.com/PRO-Robotech/corelib/servicehost"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
@@ -40,9 +35,12 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/edgecredential"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
@@ -50,8 +48,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
 	"github.com/PRO-Robotech/kaname/internal/issuingsource"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
+	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -60,11 +60,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
-
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
-	"github.com/PRO-Robotech/kaname/internal/catalog"
-	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
+	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 )
 
 // grpcStopper — поверхность graceful/forced остановки gRPC-сервера. *grpc.Server
@@ -75,9 +74,9 @@ type grpcStopper interface {
 	Stop()
 }
 
-// stopGRPCBounded gives the server gracefulTimeout to drain in-flight RPCs and
-// then forces Stop(): a stuck unary handler would otherwise hold GracefulStop
-// forever and the shutdown would never complete.
+// stopGRPCBounded даёт серверу gracefulTimeout на завершение текущих RPC,
+// затем принудительно вызывает Stop(): иначе зависший унарный обработчик удерживал бы GracefulStop
+// навсегда, и завершение процесса никогда бы не закончилось.
 func stopGRPCBounded(srv grpcStopper, timeout time.Duration) {
 	done := make(chan struct{})
 	go func() {
@@ -118,11 +117,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// построение подставляет молча, предметом стража быть не может (задача
 	// продукта kacho#2099, сценарий WIRE-3-03 приёмки WIRE-1).
 	if err := refusaldomain.Require(); err != nil {
-		return fmt.Errorf("refusal domain: %w", err)
+		return startupFailureAt(fmt.Errorf("refusal domain: %w", err))
 	}
 
-	// logger.level was validated in main (cfg.Validate); SlogLevel cannot fail
-	// here. Defensive fallback to INFO keeps the composition root total.
+	// logger.level проверен в main (cfg.Validate); SlogLevel здесь не может отказать.
+	// Защитный возврат к INFO оставляет корень сборки определённым для любого входа.
 	logLevel, _ := cfg.Logger.SlogLevel()
 	logger := observability.NewSloggerLevel(os.Stdout, logLevel)
 	slog.SetDefault(logger)
@@ -139,14 +138,25 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// `sslmode=disable` открытый канал успел бы состояться.
 	posture, perr := describePosture(cfg, logger)
 	if perr != nil {
-		return fmt.Errorf("посадка процесса: %w", perr)
+		return startupFailureAt(fmt.Errorf("посадка процесса: %w", perr))
 	}
 
 	pool, err := coredb.NewPool(ctx, cfg.DSN())
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	defer pool.Close()
+
+	// kaname#1034: проверка реального runtime LOGIN до первой startup-записи.
+	// Owner DSN допустим лишь прежнему режиму; participant не делает SET ROLE.
+	if err := cfg.AuthorityProtocol.Validate(); err != nil {
+		return startupFailureAt(err)
+	}
+	if cfg.AuthorityProtocol.Participant() {
+		if err := kanamepg.New(pool, nil).ValidateAuthorityRuntime(ctx); err != nil {
+			return startupFailureAt(fmt.Errorf("authority-protocol runtime LOGIN: %w", err))
+		}
+	}
 
 	// Загрузочный страж: служба не поднимается поверх базы прежней установки.
 	//
@@ -156,7 +166,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// завёл бы пустую схему рядом, оставив прежние строки невидимыми. Отказ,
 	// отложенный за другие проверки, пришёл бы позже и назвал бы не тот предмет.
 	if err := assertNoRetiredSchema(ctx, pool); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// Загрузочный страж: посадка не вправе обещать базе больше соединений, чем
@@ -164,7 +174,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// открывать соединения по работе: проверка, отложенная дальше, узнаёт о
 	// расхождении тогда же, когда о нём узнаёт арендатор.
 	if err := assertConnBudgetFits(ctx, pool, cfg.Repository.Postgres.ReplicaBudget); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// ПРОЕКЦИЯ СОБСТВЕННЫХ ПОТОЛКОВ — до любого слушателя (приёмка `KAN-QUOTA-1`,
@@ -178,14 +188,21 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// чей потолок эта проекция и объявляет. Слушатель, поднятый раньше, открыл бы
 	// окно, в котором действует величина ПРЕДЫДУЩЕГО пуска, а журнал уже сообщил
 	// новую.
+	// Full profile проверяется read-only ДО любых startup/maintenance writes.
+	// false-ветка также отказывает поверх уже активированного full2.
+	ctx, fullStartup, err := prepareFullStartup(ctx, cfg, pool, logger)
+	if err != nil {
+		return startupFailureAt(err)
+	}
+
 	if err := projectOwnCeilings(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg.OwnCeilings); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// ПРОЕКЦИЯ ТЕМПА ЗАВЕДЕНИЯ (Ф4 Р5, kacho#1270) — тем же местом и по той же
 	// причине: триггер читает величину из строки авторитета, и её объявляет
 	// профиль (незаданная — отказ старта стражем полосы).
 	if err := projectAdmissionRate(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// slave-pool wiring (read-replica). Если slave-url
@@ -195,7 +212,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if slaveDSN := cfg.SlaveDSN(); slaveDSN != "" {
 		slavePool, err = coredb.NewPool(ctx, slaveDSN)
 		if err != nil {
-			return fmt.Errorf("new slave pool: %w", err)
+			return startupFailureAt(fmt.Errorf("new slave pool: %w", err))
 		}
 		defer slavePool.Close()
 		logger.Info("kaname CQRS slave-pool enabled (read-replica)",
@@ -229,15 +246,21 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		ctx, opsRepo, operations.DefaultRetentionConfig(),
 		logger,
 	); err != nil {
-		return fmt.Errorf("фоновая уборка таблицы операций: %w", err)
+		return startupFailureAt(fmt.Errorf("фоновая уборка таблицы операций: %w", err))
 	}
 
-	// Cross-service gRPC dial — kaname is a leaf-owner of Account/Project,
-	// so it currently has no outbound peer-clients (other services dial in
-	// for `iam.v1.ProjectService.Get` etc.).
+	// Межсервисные соединения gRPC: kaname — конечный владелец Account/Project,
+	// поэтому исходящих клиентов соседей сейчас нет; другие сервисы обращаются сюда
+	// за `iam.v1.ProjectService.Get` и подобными вызовами.
 
-	// kanameRepo is shared by all per-resource use-cases.
+	// kanameRepo общий для всех сценариев отдельных ресурсов.
 	kanameRepo := kanamepg.New(pool, slavePool)
+	if fullStartup != nil {
+		kanameRepo, err = kanameRepo.WithFullWriterContract(fullStartup.contract)
+		if err != nil {
+			return startupFailureAt(err)
+		}
+	}
 
 	// ВЫБОРА ПОСТАВЩИКА РЕШЕНИЯ О ДОСТУПЕ ЗДЕСЬ БОЛЬШЕ НЕТ.
 	//
@@ -247,10 +270,10 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// решение вычисляет реляционная форма в базе самой службы, и собирается она там же,
 	// где всё остальное, что читает эту базу (см. buildServices).
 
-	// Prometheus registry — owns the /metrics collectors. Created once and
-	// shared by the metrics HTTP listener, the gRPC server interceptors (both
-	// listeners) and the authz-Check decorator. Clean Architecture: prometheus
-	// is imported only here (composition root) + the metrics adapter package.
+	// Реестр Prometheus владеет сборщиками /metrics. Создаётся один раз
+	// и используется HTTP-слушателем метрик, перехватчиками серверов gRPC обоих
+	// слушателей и декоратором проверки прав. Чистая архитектура: prometheus
+	// импортируется только здесь, в корне сборки, и в пакете адаптера метрик.
 	metricsReg := metrics.NewRegistry()
 
 	// ЧТО ЭТОТ ДВОИЧНЫЙ ФАЙЛ ГОВОРИТ О СЕБЕ — первым рядом витрины, до всего
@@ -302,9 +325,16 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// Сорванная доставка обязана назваться своим именем РАНЬШЕ, чем о
 	// расхождении заговорит страж: иначе оператор прочтёт отказ доставки как
 	// расхождение каталога и пойдёт чинить не то.
-	deliveredManifests, mErr := loadDeliveredManifests(logger, cfg.Manifests)
-	if mErr != nil {
-		return mErr
+	// Full mode использует те же immutable входы раннего read-only preflight.
+	var deliveredManifests []*manifest.Manifest
+	if fullStartup != nil {
+		deliveredManifests = fullStartup.manifests
+	} else {
+		var mErr error
+		deliveredManifests, mErr = loadDeliveredManifests(logger, cfg.Manifests)
+		if mErr != nil {
+			return startupFailureAt(mErr)
+		}
 	}
 
 	// ОПОРА ПАРИТЕТА — сразу за чтением доставки и ДО первой записи (kacho#1861).
@@ -322,7 +352,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// которому выдаются права.
 	catalogAnchor, anErr := modulecatalog.AnchorOfDelivery(deliveredManifests)
 	if anErr != nil {
-		return anErr
+		return startupFailureAt(anErr)
 	}
 	// Расширение опоры называется ПОИМЁННО, а не одним счётчиком: оно законно,
 	// но молчаливым быть не вправе — по той же причине, по какой поимённо
@@ -350,34 +380,40 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// Отчёт композиции корень сохраняет: из него шаг «модель против каталога»
 	// ниже узнаёт, какой модуль принёс в модель процесса тип вне канона
 	// (kaname#865, Д10) — второй композиции для этого не заводится.
-	preparedModel, cErr := prepareComposedModel(logger, deliveredManifests)
-	if cErr != nil {
-		return cErr
+	var preparedModel preparedModel
+	if fullStartup != nil {
+		preparedModel = fullStartup.model
+	} else {
+		var cErr error
+		preparedModel, cErr = prepareComposedModel(logger, deliveredManifests)
+		if cErr != nil {
+			return startupFailureAt(cErr)
+		}
 	}
 
 	// Предварительная проверка всей поставки идёт до установки модели и всех записей поставки.
 	ownManifest, omErr := loadOwnManifest(logger)
 	if omErr != nil {
-		return omErr
+		return startupFailureAt(omErr)
 	}
 	if err := moduleseed.Preflight(ownManifest, deliveredManifests); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if hasInstallationDelegations(deliveredManifests) {
 		if err := validateInstallationInput(cfg.ModuleSeedInstaller); err != nil {
-			return failInstallation(logger, "input", "tenantAccountId", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "input", "tenantAccountId", "", "", 0, err))
 		}
 		if _, _, err := loadInstallationCredential(cfg.ModuleSeedInstaller.CredentialFile); err != nil {
-			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "input", "credentialFile", "", "", 0, err))
 		}
 	}
 	signingKeystore, tokenSigner, err := buildTokenSigning(ctx, pool, cfg, logger)
 	if err != nil {
-		return fmt.Errorf("shared issuance preparation: %w", err)
+		return startupFailureAt(fmt.Errorf("shared issuance preparation: %w", err))
 	}
 	presentedReader, err := preparePresentedReader(pool, cfg, signingKeystore, logger)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	var installationRelations authzguard.RelationChecker = authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(pool, preparedModel.plans), personmarks.New(pool))
 	if installationDependencies.decorateInstallationRelations != nil {
@@ -396,7 +432,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if hasInstallationDelegations(deliveredManifests) {
 		installationAuthn, err = prepareInstallationAuthentication(pool, cfg, tokenSigner, presentedReader, logger)
 		if err != nil {
-			return failInstallation(logger, "input", "credentialFile", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "input", "credentialFile", "", "", 0, err))
 		}
 		// Только неизменяемые копии: наблюдение не может заменить удостоверения,
 		// субъекта, издателя, проверяющего или любое решение о полномочиях.
@@ -404,19 +440,19 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		installationAuthn.observeMaterial("")
 		verified, err := installationAuthn.Authenticate(ctx)
 		if err != nil {
-			return failInstallation(logger, "authentication", "", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "authentication", "", "", "", 0, err))
 		}
 		if err := authzguard.RequireClusterAdmin(verified, installationRelations); err != nil {
-			return failInstallation(logger, "preflight-authority", "moduleSeedInstaller.credentialFile", "", "", 0, err)
+			return startupFailureAt(failInstallation(logger, "preflight-authority", "moduleSeedInstaller.credentialFile", "", "", 0, err))
 		}
 		if installationTarget(cfg.ModuleSeedInstaller) != "" {
 			if _, _, err := installationReader.InstallationAccounts(ctx, installationTarget(cfg.ModuleSeedInstaller), installationPageSize); err != nil {
-				return failInstallation(logger, "input", "tenantAccountId", "", "", 0, shared.MapRepoErrAt(ctx, err))
+				return startupFailureAt(failInstallation(logger, "input", "tenantAccountId", "", "", 0, shared.MapRepoErrAt(ctx, err)))
 			}
 		}
 	}
 	if err := authzmodel.Install(preparedModel.text); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	composedReport := preparedModel.report
 
@@ -446,7 +482,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// и страж ниже судят доставку целиком, как прежде.
 	appliedManifests, notAppliedManifests, aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests)
 	if aErr != nil {
-		return aErr
+		return startupFailureAt(aErr)
 	}
 
 	// МОДЕЛЬ ПРОТИВ КАТАЛОГА — сразу за применителем каталога и ДО стража
@@ -457,7 +493,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// — шапка `model_catalog_agreement.go`; порядок и доводы держит гейт
 	// `model_catalog_agreement_wiring_test.go`.
 	if mcErr := assertModelAgreesWithCatalog(logger, notAppliedManifests, composedReport); mcErr != nil {
-		return mcErr
+		return startupFailureAt(mcErr)
 	}
 
 	catalogRepo := kanamepg.NewCatalogRepo(pool)
@@ -480,7 +516,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		slog.Int("anchor_added_by_delivery", len(catalogCensus.AnchorAdded)))
 	// Снятое называется ПОИМЁННО, а не одним счётчиком. Счётчик отвечает на
 	// вопрос «сколько», а оператору, читающему журнал старта, нужен другой:
-	// ЧТО именно перестало выдаваться. Снятие проходит молча by construction —
+	// ЧТО именно перестало выдаваться. Снятие проходит молча по построению —
 	// оно и заведено затем, чтобы не ронять пуск, — поэтому единственное место,
 	// где его видно, это здесь.
 	if len(catalogCensus.WithdrawnRows) > 0 {
@@ -488,7 +524,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			slog.Any("rows", catalogCensus.WithdrawnRows))
 	}
 	if catErr != nil {
-		return fmt.Errorf("каталог модуля: %w", catErr)
+		return startupFailureAt(fmt.Errorf("каталог модуля: %w", catErr))
 	}
 	// Снимок наполняется ТЕМИ ЖЕ строками, которые прочитал страж, — своего
 	// чтения не заводит. ОБЕИМИ половинами: снятые строки страж читает и так, и
@@ -500,7 +536,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		logger.With(slog.String("component", "catalog_snapshot")),
 		metricsReg.NewCatalogSnapshotRecorder())
 	if csErr != nil {
-		return fmt.Errorf("снимок каталога модуля: %w", csErr)
+		return startupFailureAt(fmt.Errorf("снимок каталога модуля: %w", csErr))
 	}
 
 	// Каталог прав — ОДНО чтение на процесс, и оно здесь, потому что первым его
@@ -514,7 +550,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// молча на четвёртом.
 	permRegistry, err := seed.LoadPermissionRegistry(ctx, logger)
 	if err != nil {
-		return fmt.Errorf("load permission catalog: %w", err)
+		return startupFailureAt(fmt.Errorf("load permission catalog: %w", err))
 	}
 
 	// ПРИМЕНЕНИЕ РОЛЕЙ ДОСТАВЛЕННОГО — ПОСЛЕ стража паритета каталога
@@ -535,18 +571,18 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		slog.Int("catalog_actions", rightsActions),
 		slog.Int("unattributed_entries", rightsUnattributed))
 	if rrErr != nil {
-		return fmt.Errorf("роли модуля: %w", rrErr)
+		return startupFailureAt(fmt.Errorf("роли модуля: %w", rrErr))
 	}
 	rolesApplier := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kanameRepo), rolesRights)
 	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, appliedManifests); raErr != nil {
-		return raErr
+		return startupFailureAt(raErr)
 	}
 	// Роли СВОЕГО манифеста службы (kaname#1003) — тем же применителем, после
 	// доставленных: новая роль модуля iam заводится объявлением манифеста образа,
 	// а не миграцией. Довод — шапка `applyImageModuleRoles`. Свой манифест читается
 	// здесь и тот же связанный идентификатор уходит ниже применителю посева.
 	if riErr := applyImageModuleRoles(ctx, logger, rolesApplier, ownManifest); riErr != nil {
-		return riErr
+		return startupFailureAt(riErr)
 	}
 
 	// ПРИМЕНЕНИЕ ПОСЕВА — ПОСЛЕ применения ролей (задачи kacho#2452, kaname#106).
@@ -575,7 +611,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// разных входа.
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
 	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, appliedManifests); seErr != nil {
-		return seErr
+		return startupFailureAt(seErr)
 	}
 
 	// Подключаем Prometheus-Recorder и логгер к default-registry LRO-worker'а и
@@ -584,35 +620,87 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// остается false до первого Run, поэтому readiness не отражает worker.
 	// ConfigureDefault обязан предшествовать Start.
 	lroRec := metricsReg.NewLRORecorder()
-	// AccessBinding.Create dispatches on this default-registry. Operation.done means
-	// the binding is durably committed; the binding's per-object access materializes
-	// eventually-consistent (synchronous post-commit reconcile + co-committed event +
-	// periodic sweep backstop), not gated on op.done.
+	// AccessBinding.Create направляет вызов через этот реестр по умолчанию. Operation.done означает,
+	// что привязка надёжно закоммичена; доступ к её объектам материализуется
+	// с конечной согласованностью (синхронное согласование после коммита, событие того же коммита
+	// и страховочный периодический обход) и не обусловлен op.done.
 	if err := operations.ConfigureDefault(
 		operations.WithRecorder(lroRec),
 		operations.WithLogger(logger),
 	); err != nil {
-		return fmt.Errorf("configure LRO default-registry: %w", err)
+		return startupFailureAt(fmt.Errorf("configure LRO default-registry: %w", err))
 	}
 	operations.Start()
 	var installationRepo kanamerepo.Repository = kanamepg.New(pool, nil)
+	if fullStartup != nil {
+		installationRepo = fullStartup.primary
+	}
 	if installationDependencies.decorateInstallationRepository != nil {
 		installationRepo = installationDependencies.decorateInstallationRepository(installationRepo)
 	}
 	if err := applyInstallationDelegations(ctx, logger, installationAuthn, installationRepo, installationReader, opsRepo, catalogSnapshot, installationRelations, preparedModel.plans, installationTarget(cfg.ModuleSeedInstaller), installationPageSize, appliedManifests, installationDependencies.afterCompletedInstallationPair); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// Orphan-reconciler backstop: разрешает осиротевшие done=false операции умершего
 	// процесса (kill-9 / истекший terminal-write budget) в терминал по
 	// committed-реальности ресурса. Boot-sweep + периодический фон; non-fatal.
+
+	// Целый handoff после реального catalog/seed, до фоновых LRO и API.
+	// Stage/activation принадлежат отдельному privileged command и здесь не запускаются.
+	var membershipParticipant *kanamepg.GroupMembershipParticipant
+	var admissionParticipant *kanamepg.HumanAdmissionParticipant
+	var inviteDecisions *kanamepg.InviteDecisions
+	var clusterAdminParticipant *kanamepg.ClusterAdminParticipant
+	var resourceParticipant *kanamepg.ResourceObjectParticipant
+	var resourceObjectParticipant *reconcile.Reconciler
+	var groupObjectParticipant *reconcile.Reconciler
+	var bindingStageParticipant *kanamepg.BindingStageParticipant
+	if cfg.AuthorityProtocol.Participant() && fullStartup == nil {
+		bundle, loadErr := loadGroupParticipationBundle(ctx, cfg.AuthorityProtocol, kanameRepo, preparedModel)
+		if loadErr != nil {
+			return startupFailureAt(loadErr)
+		}
+		clusterAdminParticipant, loadErr = kanamepg.NewClusterAdminParticipant(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return startupFailureAt(loadErr)
+		}
+		admissionParticipant, loadErr = kanamepg.NewHumanAdmissionParticipant(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return startupFailureAt(loadErr)
+		}
+		inviteDecisions, loadErr = kanamepg.NewInviteDecisionRunner(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return startupFailureAt(fmt.Errorf("invite authority participant: %w", loadErr))
+		}
+		resourceParticipant, loadErr = kanamepg.NewResourceObjectParticipant(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return startupFailureAt(loadErr)
+		}
+		resourceObjectParticipant, loadErr = resourceParticipant.NewObjectReconciler(logger)
+		if loadErr != nil {
+			return startupFailureAt(loadErr)
+		}
+		membershipParticipant, loadErr = kanamepg.NewGroupMembershipParticipant(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return startupFailureAt(loadErr)
+		}
+		bindingStageParticipant, loadErr = membershipParticipant.NewBindingStageParticipant(ctx, logger)
+		if loadErr != nil {
+			return startupFailureAt(loadErr)
+		}
+		groupObjectParticipant, loadErr = membershipParticipant.NewGroupObjectReconciler(logger)
+		if loadErr != nil {
+			return startupFailureAt(loadErr)
+		}
+	}
 	startLROReconciler(ctx, pool, kanameRepo, catalogSnapshot, lroRec, logger)
 
-	// Durable backstop for one-shot credentials staged in FINISHED operation
-	// responses. The reconciler above cannot cover them: its claim is done=false and
-	// these rows are done=true by the time the credential is staged.
+	// Надёжная страховка одноразовых секретов, помещённых в ответы ЗАВЕРШЁННЫХ операций.
+	// Работник выше не покрывает их: его захват требует done=false, а
+	// эти строки к моменту помещения секрета уже имеют done=true.
 	if err := startSecretBackstop(ctx, pool, cfg, logger); err != nil {
-		return fmt.Errorf("secret backstop: %w", err)
+		return startupFailureAt(fmt.Errorf("secret backstop: %w", err))
 	}
 
 	// Снятие истёкших удостоверений (задача kacho#1264). Провязка ОБЯЗАТЕЛЬНА и
@@ -641,14 +729,60 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// признающий меньше, чем объявила установка.
 	moduleRoster, err := cfg.AuthN.LoadModuleRoster()
 	if err != nil {
-		return fmt.Errorf("module identities: %w", err)
+		return startupFailureAt(fmt.Errorf("module identities: %w", err))
+	}
+
+	// Явный план установки применяется атомарно до открытия обоих
+	// слушателей регистрации. Ранее отозванные назначения остаются окончательно закрытыми.
+	if err := cfg.ValidateRegistrationAccountWriters(); err != nil {
+		return startupFailureAt(err)
+	}
+	if cfg.RegistrationAccountWriters != nil {
+		plan := seed.RegistrationWriterPlan{Assignments: cfg.RegistrationAccountWriters.Assignments, Disabled: cfg.RegistrationAccountWriters.Disabled, RetireClusterWriter: cfg.RegistrationAccountWriters.RetireClusterWriter}
+		if err := seed.ApplyRegistrationAccountWriters(ctx, kanamepg.NewRegistrationAccountWriterStore(pool), moduleRoster, plan); err != nil {
+			return startupFailureAt(fmt.Errorf("registration-account-writers: %w", err))
+		}
 	}
 
 	svcs := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
-		metricsReg, cfg, moduleRoster, tokenSigner, logger)
+		metricsReg, cfg, moduleRoster, tokenSigner, logger, preparedModel.plans)
+	if cfg.AuthorityProtocol.Participant() && fullStartup == nil {
+		resourceBeginner, participantErr := resourceParticipant.RegistrationTxBeginner(pool)
+		if participantErr != nil {
+			return startupFailureAt(participantErr)
+		}
+		svcs.resourceRegistrar.WithResourceTxBeginner(resourceBeginner)
+		resourceObjectParticipant.WithSizeRecorder(svcs.bindingSizeRecorder)
+		if err := svcs.bindingReconciler.WithObjectReconciler(resourceObjectParticipant); err != nil {
+			return startupFailureAt(err)
+		}
+		svcs.internalClusterHandler.WithAdminTxBeginner(clusterAdminParticipant)
+		svcs.userHandler.WithIdentityLifecycleWriter(admissionParticipant)
+		// UserService.Invite и MembershipService.Create уже делят этот UC.
+		// TTL, ограничение писем и post-commit callbacks заданы при его сборке.
+		svcs.userInvite.WithInviteDecisions(inviteDecisions)
+		svcs.groupHandler.WithMembershipWriter(membershipParticipant).WithLifecycleWriter(membershipParticipant)
+		if err := svcs.bindingReconciler.WithStagedBindingReconciler(bindingStageParticipant); err != nil {
+			return startupFailureAt(err)
+		}
+		if err := svcs.bindingReconciler.WithGroupObjectReconciler(groupObjectParticipant); err != nil {
+			return startupFailureAt(err)
+		}
+	}
+	if fullStartup != nil {
+		participants, composeErr := wireFullStartupServices(ctx, fullStartup, kanameRepo, svcs, pool)
+		if composeErr != nil {
+			return startupFailureAt(fmt.Errorf("authority-protocol full public composition: %w", composeErr))
+		}
+		// Публичные службы уже провязаны сборщиком; сохраняем тех же участников
+		// для полосы входа и фонового согласования.
+		admissionParticipant = participants.admission
+		resourceObjectParticipant = participants.objects
+		groupObjectParticipant, bindingStageParticipant = participants.groups, participants.bindings
+	}
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
 	// kacho#1270) — строится на каждом старте (kaname#363): отказ сборки есть
@@ -656,9 +790,9 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// ПРИНИМАЕТ тот же реконсайлер материализации привязки, что путь запроса
 	// (`sign_in_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
 	// потому что её таблицы — предметы той же петли.
-	lane, err := buildLoginLane(ctx, cfg, moduleRoster, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
+	lane, err := buildLoginLane(ctx, cfg, moduleRoster, pool, kanameRepo, admissionParticipant, svcs.bindingReconciler, metricsReg, logger)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// Фоновая уборка таблиц, чей рост задаёт внешний (задача kacho#1292). Три
@@ -667,7 +801,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// отказа старта (`startRetentionSweeps`, #253).
 	retentionSweeper, err := buildRetentionSweeper(pool, cfg, metricsReg, lane.retentionReapers(), logger)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// `InternalHumanSessionService.Resolve` — внутренний слушатель, исполнитель
 	// от полосы (Ф3-45).
@@ -686,74 +820,74 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// же хранилищами, что полоса.
 	svcs.accessKeyHandler, err = lane.accessKeyHandler(cfg, opsRepo, metricsReg, logger)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
-	// gRPC servers. PrincipalExtract-interceptor читает
-	// x-kacho-principal-* metadata-headers, которые api-gateway auth-interceptor
-	// прокидывает после JWT-валидации, и кладет в ctx через operations.WithPrincipal.
-	// Use-case'ы вызывают operations.NewFromContext(ctx, ...) → реальный principal
+	// Серверы gRPC. Перехватчик PrincipalExtract читает
+	// заголовки метаданных x-kacho-principal-*, которые перехватчик личности api-gateway
+	// передаёт после проверки JWT, и кладёт в контекст через operations.WithPrincipal.
+	// Сценарии вызывают operations.NewFromContext(ctx, ...) → настоящий субъект
 	// попадает в operations.principal_*.
 	productionMode := cfg.AuthN.Mode.IsProduction()
-	// SEC-H (corelib SEC-B): per-listener opt-in server-side mTLS creds.
-	// enable=false (default) → insecure (dev backward-compat, Сценарий
-	// SEC-H-01); enable=true → RequireAndVerifyClientCert (server-cert +
-	// client-CA), fail-closed на отсутствующем/мусорном cert-trio (no silent
-	// insecure downgrade, Сценарий SEC-H-02). Public и internal listener —
-	// два независимых per-edge ребра. Загружается отдельным envconfig-
-	// loader'ом из KANAME_{PUBLIC,INTERNAL}_SERVER_MTLS_* (mirror vpc).
+	// SEC-H (corelib SEC-B): серверные удостоверения mTLS включаются отдельно для каждого слушателя.
+	// enable=false (по умолчанию) → без защиты (обратная совместимость dev, сценарий
+	// SEC-H-01); enable=true → RequireAndVerifyClientCert (серверный сертификат +
+	// клиентский центр сертификации); закрытый отказ при отсутствующем или неверном наборе сертификатов (без молчаливого
+	// ослабления защиты, сценарий SEC-H-02). Публичный и внутренний слушатели —
+	// две независимые грани. Загружается отдельным загрузчиком envconfig
+	// из KANAME_{PUBLIC,INTERNAL}_SERVER_MTLS_* (как в vpc).
 	mtlsCfg, err := config.LoadMTLS()
 	if err != nil {
-		return fmt.Errorf("load server mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("load server mTLS config: %w", err))
 	}
 	publicServerCreds, err := mtlsCfg.PublicServerCreds()
 	if err != nil {
-		return fmt.Errorf("public listener mTLS creds: %w", err)
+		return startupFailureAt(fmt.Errorf("public listener mTLS creds: %w", err))
 	}
 	internalServerCreds, err := mtlsCfg.InternalServerCreds()
 	if err != nil {
-		return fmt.Errorf("internal listener mTLS creds: %w", err)
+		return startupFailureAt(fmt.Errorf("internal listener mTLS creds: %w", err))
 	}
 
-	// HTTP-listener server-side TLS: the Prometheus /metrics listener (:9095)
-	// was PLAINTEXT. Per-edge, default-off TLS (mirror SEC-H grpcsrv.TLSServer):
-	// enable=false → nil *tls.Config → net.Listener stays plaintext
-	// (byte-identical to today, dev/newman stand unchanged); enable=true →
-	// per-edge clientAuthMode, объявленный полем TLS профиля поверхности
-	// (server-tls-only = encryption only, the default for the no-scrape-cert
-	// metrics edge; mutual = RequireAndVerifyClientCert). mtlsCfg.Validate()
-	// fail-closes at boot if ANY edge is enabled with an incomplete cert-set for
-	// its mode, or with an unknown clientAuthMode.
+	// Серверный TLS слушателя HTTP: слушатель Prometheus /metrics (:9095)
+	// был НЕШИФРОВАННЫМ. TLS отдельно для каждой грани, по умолчанию выключен (как SEC-H grpcsrv.TLSServer):
+	// enable=false → nil *tls.Config → net.Listener остаётся нешифрованным
+	// (побайтово как прежде, стенд dev/newman прежний); enable=true →
+	// clientAuthMode отдельной грани, объявленный полем TLS профиля поверхности
+	// (server-tls-only = только шифрование, по умолчанию для грани метрик без
+	// сертификата сборщика; mutual = RequireAndVerifyClientCert). mtlsCfg.Validate()
+	// отклоняет запуск, если ЛЮБАЯ грань включена с неполным набором сертификатов для
+	// своего режима или с неизвестным clientAuthMode.
 	if verr := mtlsCfg.Validate(); verr != nil {
-		return fmt.Errorf("listener mTLS config invalid: %w", verr)
+		return startupFailureAt(fmt.Errorf("listener mTLS config invalid: %w", verr))
 	}
 	metricsTLSConfig, err := mtlsCfg.MetricsServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("metrics listener mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("metrics listener mTLS config: %w", err))
 	}
-	// jwks-proxy listener server-TLS: ONE-WAY (server-tls-only by default —
-	// registry-verifier presents only server-trust, never a client-cert; mutual
-	// would break the verifier's "untouched" property). Default-off → nil → the
-	// listener stays plaintext (dev byte-identical).
+	// Серверный TLS слушателя jwks-proxy: ОДНОСТОРОННИЙ (по умолчанию server-tls-only,
+	// registry-verifier предъявляет только доверие серверу, никогда клиентский сертификат; mutual
+	// нарушил бы свойство неизменности проверяющего). По умолчанию выключен → nil →
+	// слушатель остаётся нешифрованным (в dev байты прежние).
 	jwksProxyTLSConfig, err := mtlsCfg.JWKSProxyServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("jwks-proxy listener mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("jwks-proxy listener mTLS config: %w", err))
 	}
 	// docker-token listener (:9096) server-TLS: ONE-WAY. По нему едет HTTP Basic,
 	// чей пароль — приватный ключ ключа служебной учётки (сервер его не хранит,
-	// срок жизни не ограничен), поэтому в production plaintext здесь запрещён —
+	// срок жизни не ограничен), поэтому в боевом режиме нешифрованный транспорт здесь запрещён —
 	// requireRegistryTokenTLS ниже.
 	registryTokenTLSConfig, err := mtlsCfg.RegistryTokenServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("registry-token listener mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("registry-token listener mTLS config: %w", err))
 	}
 	restTLSConfig, err := mtlsCfg.RESTServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("public REST front mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("public REST front mTLS config: %w", err))
 	}
 	internalRESTTLSConfig, err := mtlsCfg.InternalRESTServerTLSConfig()
 	if err != nil {
-		return fmt.Errorf("internal REST front mTLS config: %w", err)
+		return startupFailureAt(fmt.Errorf("internal REST front mTLS config: %w", err))
 	}
 
 	// ОБЪЯВЛЕНИЕ собственных REST-фронтов — единственное, и читают его двое:
@@ -767,17 +901,17 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	}
 
 	if err := requireGRPCListenerMTLS(productionMode, mtlsCfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if err := requireRegistryTokenTLS(productionMode,
 		cfg.APIServer.RegistryToken.ListenAddress(), mtlsCfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if err := requireIssuingListenerAsksForACertificate(cfg, mtlsCfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if err := requireLoginLaneTLS(productionMode, cfg, mtlsCfg); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Транспорт остальных HTTP-рёбер. Их ручки задавал ЗОНТИЧНЫЙ чарт монорепо;
 	// у отдельно поставленной службы его нет, а адреса всех трёх приходят
@@ -790,18 +924,18 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		cfg.APIServer.InternalRESTListenAddress(),
 		mtlsCfg,
 	)); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Раздельность поверхностей есть свойство СОКЕТА: «внутреннее не
 	// опубликовано наружу» проверяемо ровно тогда, когда оно недосягаемо.
-	// Совпавшие адреса делают требование невыполнимым by construction, и делают
+	// Совпавшие адреса делают требование невыполнимым по построению и делают
 	// это МОЛЧА — порт занимает тот слушатель, что успел подняться первым.
 	if err := requireRESTUpstreamCredential(productionMode,
 		cfg.APIServer.RESTListenAddress(),
 		cfg.APIServer.InternalRESTListenAddress(),
 		mtlsCfg,
 	); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Рубеж внутреннего фронта бывает только транспортным: своего он не заводит,
 	// а к собственному слушателю идёт СВОИМ удостоверением — значит «кому позволено
@@ -809,7 +943,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if err := requireInternalRESTMutualClientAuth(productionMode,
 		cfg.APIServer.InternalRESTListenAddress(), mtlsCfg,
 	); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// А ЧЕМ фронт называется дальше — предмет отдельный, и решается он здесь.
 	// Рукопожатие выше отвечает «кому позволено дотянуться»; пер-RPC политика
@@ -818,14 +952,14 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// фактически предъявляет (см. ownfronthop.go).
 	ownFrontSAN, err := ownFrontHopSAN(mtlsCfg, cfg.AuthN.TrustDomain())
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	if err := requireOwnFrontHopIdentity(productionMode,
 		cfg.APIServer.InternalRESTListenAddress(),
 		cfg.APIServer.RESTListenAddress(),
 		mtlsCfg, cfg.AuthN.TrustDomain(), ownFrontSAN,
 	); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Различимость адресов поверхностей судится НЕ ЗДЕСЬ, а там, где собран срез
 	// подъёма: сверять надо ВСЕ поверхности, а адреса не-gRPC приходят профилем
@@ -848,33 +982,33 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	laneWiring := observeLaneWiring(ctx, tokenSigner, lane.signInMethods(), lane, logger)
 	logger.Info("identity posture lane wiring", laneWiringCensus(laneWiring)...)
 	if err := config.ValidateLaneWiring(cfg, laneWiring); err != nil {
-		return fmt.Errorf("identity posture lane: %w", err)
+		return startupFailureAt(fmt.Errorf("identity posture lane: %w", err))
 	}
 
 	observability.LogBootPosture(logger,
 		bootPosture(posture, cfg, mtlsCfg, svcs.ownGates.FormReachable(),
 			restFront, internalRESTFront))
 
-	// Per-RPC CALLER policy for the internal listener (audit C1/C3/H3/M1). iam
-	// does NOT re-ReBAC the end user here — the api-gateway is the platform's
-	// single authZ front door (it validates the JWT and runs per-user ReBAC via
-	// iam.Check). :9091 enforces only WHO MAY CALL each RPC:
-	//   - Floor: every internal RPC requires a verified mTLS module cert (prod
-	//     fail-closed; dev no-op, mirror RelationWriteGate).
-	//   - Gateway-only: the gateway-fronted privileged admin RPCs
-	//     (GatewayFrontedInternalRPCs) may ONLY be called by the api-gateway SA;
-	//     a direct call from any other module → DENY in prod (closes C1/C3 — a
-	//     compromised data-plane module cannot escalate via :9091).
-	//   - SAN-restricted: MintBootstrapToken (SANRestrictedInternalRPCs) admits ONLY
-	//     the client-certificate SPIFFE SANs an operator listed in
-	//     authn.bootstrap-mint.allowed-client-sans — enforced in EVERY mode, and an
-	//     empty list denies everyone (the cluster-admin mint has no default caller;
-	//     it is also unreachable via the api-gateway, which carries no REST route
-	//     for it). Config.Validate additionally refuses to boot a production binary
-	//     whose mint is enabled with an empty list.
-	// The fga-proxy writes (Register/Unregister) are NOT in the
-	// gateway-only set and stay gated in-handler by RelationWriteGate (fga_writer)
-	// — their callers are vpc/compute/nlb module SAs, not the gateway.
+	// Политика ВЫЗЫВАЮЩЕГО для каждого RPC внутреннего слушателя (аудит C1/C3/H3/M1). IAM
+	// здесь НЕ повторяет ReBAC конечного пользователя: api-gateway — единственный вход
+	// проверки прав платформы, который проверяет JWT и ReBAC пользователя через
+	// iam.Check. :9091 проверяет только, КОМУ МОЖНО ВЫЗЫВАТЬ каждый RPC:
+	// - Минимум: каждый внутренний RPC требует проверенный сертификат модуля mTLS (в боевом режиме
+	// закрытый отказ; в dev пропуск, как у RelationWriteGate).
+	// - Только gateway: привилегированные административные RPC за шлюзом
+	// (GatewayFrontedInternalRPCs) доступны ТОЛЬКО служебной учётной записи api-gateway;
+	// прямой вызов другого модуля → DENY в боевом режиме (закрывает C1/C3:
+	// скомпрометированный модуль плоскости данных не повышает права через :9091).
+	// - Ограничение SAN: MintBootstrapToken (SANRestrictedInternalRPCs) допускает ТОЛЬКО
+	// SPIFFE SAN клиентских сертификатов, перечисленные оператором в
+	// authn.bootstrap-mint.allowed-client-sans; действует в КАЖДОМ режиме,
+	// пустой список отказывает всем (у выпуска токена администратора кластера нет вызывающего по умолчанию;
+	// через api-gateway он тоже недоступен, поскольку REST-маршрута
+	// для него нет). Config.Validate дополнительно отказывает в запуске боевого процесса,
+	// если выпуск включён с пустым списком.
+	// Записи прокси FGA (Register/Unregister) НЕ входят в набор
+	// только для gateway; их обработчик проверяет RelationWriteGate (fga_writer):
+	// их вызывают служебные учётные записи модулей vpc/compute/nlb, а не шлюза.
 	//
 	// Хоп собственного REST-фронта объявляется ЗДЕСЬ и допускается ровно к полу:
 	// круг края он не проходит никогда, потому что краем не является и о том,
@@ -890,21 +1024,21 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		WithOwnFrontHop(ownFrontSAN).
 		WithModuleRoster(moduleRoster)
 
-	// Per-RPC `system_viewer`-FLOOR on the internal READ-RPC set
-	// (authN+authZ enforced everywhere: read-RPC gate viewer-tier). For
-	// ReadFloorRPCs it requires the CALLER MODULE-SA (derived from the verified
-	// mTLS SAN, same derivation as the fga-proxy gate) to hold the coarse cluster
-	// relation `system_viewer@cluster:cluster_root`, via the SAME
-	// RelationChecker port (the decision door) used by RelationWriteGate / iam.Check.
-	// Default-OFF: dev/newman (prod=false) → NO-OP pass-through (newman stand
-	// byte-identical). Prod fail-closed: no verified SAN → PermissionDenied;
-	// FGA backend error → Unavailable. EXEMPT (NOT in ReadFloorRPCs): the PDP
-	// Check (INV-FLOOR-5), the hot-path IsRevoked (INV-FLOOR-6), and all mutations (fga_writer / system_admin / gateway-only;
-	// INV-FLOOR-8). Chained AFTER internalCallerPolicy, mirroring its prod-mode
-	// gating. The legitimate reader SAs — api-gateway, vpc and compute, and those
-	// three only — are seeded system_viewer@cluster by migration 0014. The network
-	// operator held one too, from SEC-L 0010; migration 0081 revoked it together
-	// with the identity, so exactly three subjects can pass this floor.
+	// Минимум `system_viewer` для каждого внутреннего RPC ЧТЕНИЯ
+	// (аутентификация и права проверяются везде: уровень viewer для чтения). Для
+	// ReadFloorRPCs требует от ВЫЗЫВАЮЩЕЙ СЛУЖЕБНОЙ УЧЁТНОЙ ЗАПИСИ МОДУЛЯ, выведенной из проверенного
+	// SAN mTLS тем же способом, что у прокси FGA, общее отношение кластера
+	// `system_viewer@cluster:cluster_root` через ТОТ ЖЕ
+	// порт RelationChecker решателя, что у RelationWriteGate / iam.Check.
+	// По умолчанию ВЫКЛЮЧЕН: dev/newman (prod=false) → пропуск без действия (стенд newman
+	// побайтово прежний). В боевом режиме закрытый отказ: нет проверенного SAN → PermissionDenied;
+	// ошибка хранилища FGA → Unavailable. ИСКЛЮЧЕНЫ из ReadFloorRPCs: PDP
+	// Check (INV-FLOOR-5), быстрый IsRevoked (INV-FLOOR-6) и все изменения (fga_writer / system_admin / только gateway;
+	// INV-FLOOR-8). Включён ПОСЛЕ internalCallerPolicy с тем же условием
+	// боевого режима. Законные читатели — служебные учётные записи api-gateway, vpc и compute,
+	// и только эти три — получают system_viewer@cluster миграцией 0014. У сетевого
+	// оператора тоже было такое отношение из SEC-L 0010; миграция 0081 отозвала его вместе
+	// с личностью, поэтому этот минимум могут пройти ровно три субъекта.
 	//
 	// Порт получает `svcs.ownGates`, а НЕ голый транспорт. Здесь долго стоял
 	// транспорт, и это давало ровно тот класс, который под-фаза закрывает:
@@ -916,44 +1050,44 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		WithModuleRoster(moduleRoster).
 		WithProductionMode(productionMode)
 
-	// Per-RPC `required_acr_min` (step-up) FLOOR on the internal
-	// listener for the GATEWAY-FRONTED privileged RPCs (authN+authZ enforced
-	// everywhere; "Internal = trusted, mTLS достаточно" is a FORBIDDEN assumption).
-	// `required_acr_min` is enforced on the public path (gateway StepUpGate) but
-	// the gateway DROPS the acr on the :9091 re-dial — so a gateway-fronted RPC
-	// with acr_min>0 (InternalClusterService/{Get,GrantAdmin,RevokeAdmin,
-	// ListAdmins} already carry acr_min=2) is not acr-enforced internally. This
-	// floor closes that arm: for each gateway-fronted RPC whose catalog acr_min>0
-	// it enforces `acr >= acr_min` (the SAME acrlevel.Satisfies ranking the
-	// gateway uses), reading the acr from the FD-4-trusted ctx (forwarded only on
-	// the mTLS-verified gateway→iam edge). Service-caller module SAs (vpc/compute
-	// fgaproxy) are acr-EXEMPT (not user principals) — and internalCallerPolicy
-	// already DENIES a non-gateway SAN on a gateway-fronted RPC BEFORE this floor,
-	// so the exemption cannot be abused (5.4-06). Default-OFF: dev/newman
-	// (prod=false) → NO-OP pass-through (newman stand byte-identical, 5.4-07).
-	// Fail-closed in prod: absent/insufficient/untrusted acr on an acr-requiring
-	// RPC → PermissionDenied with an RFC-9470 step-up signal in the status
-	// details. FQN→acr_min comes from the embedded permission catalog. Chained
-	// AFTER UnaryTrustedPrincipalExtract (sets acr) + internalCallerPolicy.
+	// Минимум `required_acr_min` (повышение уровня) для каждого RPC внутреннего
+	// слушателя из набора привилегированных RPC ЗА ШЛЮЗОМ (проверки личности и прав
+	// везде; предположение «внутренний = доверенный, mTLS достаточно» ЗАПРЕЩЕНО).
+	// `required_acr_min` проверяется на публичном пути (StepUpGate шлюза), но
+	// шлюз ТЕРЯЕТ acr при новом соединении к :9091, поэтому RPC за шлюзом
+	// с acr_min>0 (InternalClusterService/{Get,GrantAdmin,RevokeAdmin,
+	// ListAdmins} уже несут acr_min=2) внутри не проверяет acr. Этот
+	// минимум закрывает ветку: для каждого RPC за шлюзом с acr_min>0 в каталоге
+	// проверяет `acr >= acr_min` (тем же порядком acrlevel.Satisfies, что и
+	// шлюз), читая acr из доверенного по FD-4 контекста, переданного только на
+	// проверенной mTLS грани gateway→iam. Служебные учётные записи модулей (vpc/compute
+	// fgaproxy) освобождены от acr как не пользовательские субъекты; internalCallerPolicy
+	// уже ОТКАЗЫВАЕТ чужому SAN на RPC за шлюзом ДО этого минимума,
+	// поэтому исключением нельзя злоупотребить (5.4-06). По умолчанию ВЫКЛЮЧЕН: dev/newman
+	// (prod=false) → пропуск без действия (стенд newman побайтово прежний, 5.4-07).
+	// В боевом режиме закрытый отказ: отсутствующий, недостаточный или недоверенный acr на требующем его
+	// RPC → PermissionDenied с сигналом повышения уровня RFC-9470 в деталях
+	// статуса. FQN→acr_min берётся из встроенного каталога разрешений. Включён
+	// ПОСЛЕ UnaryTrustedPrincipalExtract (ставит acr) и internalCallerPolicy.
 	// Реестр прав загружен ВЫШЕ, вместе с производителем правил роли: одно
 	// чтение встроенного каталога на процесс, три читателя.
 	internalACRFloor := authzguard.NewACRFloor(permRegistry, authzguard.GatewayFrontedInternalRPCs()).
 		WithProductionMode(productionMode)
 
-	// Per-RPC CALLER policy for the PUBLIC listener (:9090) — the sibling of
-	// internalCallerPolicy above, and for the same reason: iam does NOT re-ReBAC
-	// the end user on its own listeners (the api-gateway is the single authZ front
-	// door), so whoever reaches a public RPC with a forwarded identity acts with
-	// that identity's authority. :9090 is NOT gateway-only — five consumer modules
-	// dial ProjectService.Get on their request path and the namespace operator fans
-	// out over AccountService.List → ProjectService.List — but they need exactly
-	// those reads and nothing else. The policy admits the gateway everywhere and
-	// every other verified module only on the RPC that names it
-	// (PublicPeerCallableRPCs), so a compromised neighbour cannot reach the tenant
-	// CRUD, the grant writes or the credential mints at all. prod fail-closed; dev
-	// no-op (the newman stand has no mTLS, hence no verified certificate to decide
-	// on). This is the second half of the narrowing: the forwarder allow-list below
-	// decides WHO MAY SPEAK FOR A USER, this decides ON WHICH RPC.
+	// Политика ВЫЗЫВАЮЩЕГО для каждого RPC ПУБЛИЧНОГО слушателя (:9090) — сосед
+	// internalCallerPolicy выше по той же причине: IAM НЕ повторяет ReBAC
+	// конечного пользователя на своих слушателях; api-gateway — единственный вход проверки прав,
+	// поэтому достигший публичного RPC с пересланной личностью действует с
+	// её полномочиями. :9090 доступен НЕ только шлюзу: пять модулей-потребителей
+	// вызывают ProjectService.Get на пути запроса, а оператор пространств имён обходит
+	// AccountService.List → ProjectService.List, но им нужны только
+	// эти чтения. Политика допускает шлюз везде, а
+	// каждый другой проверенный модуль — только на называющий его RPC
+	// (PublicPeerCallableRPCs), поэтому скомпрометированный сосед не достигает CRUD
+	// арендаторов, записи выдач и выпуска секретов. В боевом режиме закрытый отказ; в dev
+	// пропуск без действия (у стенда newman нет mTLS, следовательно, нет проверенного сертификата для
+	// решения). Это вторая половина сужения: список доверенных пересыльщиков ниже
+	// решает, КТО МОЖЕТ ГОВОРИТЬ ОТ ИМЕНИ ПОЛЬЗОВОВАТЕЛЯ, а эта политика — НА КАКОМ RPC.
 	publicCallerPolicy := authzguard.NewPublicCallerPolicy(
 		productionMode, authzguard.PublicPeerCallableRPCs(), permRegistry,
 		// Реализация порта присутствия удостоверения: КЛЮЧ метаданных и
@@ -982,7 +1116,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// текстом: решение оставлено краю.
 	//
 	// Пока iam стоит за нашим краем, довод верен. Вынесенный в чужое облако iam
-	// края не имеет by construction — и тогда «дверь держит кто-то другой»
+	// края не имеет по построению — и тогда «дверь держит кто-то другой»
 	// означает, что её не держит никто: аутентифицированный арендатор читает
 	// чужой аккаунт и удаляет чужой проект. Разбор и замер — в шапке
 	// authzguard/own_door.go.
@@ -1007,7 +1141,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		PositiveTTL: cfg.AuthZ.CacheTTL,
 	})
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	// Измеритель задержки — ОДИН на процесс, полос у него две.
@@ -1028,7 +1162,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// диагностическую поверхность без семейства, которого на ней не будет никогда.
 	latency, err := grpcsrv.NewServerLatency(metricsReg.Registerer())
 	if err != nil {
-		return fmt.Errorf("измеритель задержки обслуженного вызова: %w", err)
+		return startupFailureAt(fmt.Errorf("измеритель задержки обслуженного вызова: %w", err))
 	}
 
 	// Читатель удостоверения, ПРЕДЪЯВЛЕННОГО самим вызывающим (kacho#2077).
@@ -1065,17 +1199,17 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		// Стоя внутри решения о доступе, он оставил бы неизмеренным каждый отказ
 		// по правам — то есть исход, ради которого метрику и смотрят.
 		latency.UnaryServerInterceptor(grpcsrv.ListenerPublic),
-		// Panic-recovery immediately inside metrics: a panic in any downstream
-		// interceptor or handler becomes a logged codes.Internal for that ONE
-		// request instead of crashing the whole PDP process (metrics still
-		// records the Internal code because recovery is inner of it).
+		// Перехват паники непосредственно внутри метрик: паника любого следующего
+		// перехватчика или обработчика превращается в записанный codes.Internal для ОДНОГО
+		// запроса вместо падения всего процесса PDP (метрики всё равно
+		// учитывают код Internal, поскольку восстановление находится внутри них).
 		grpcsrv.UnaryPanicRecovery(logger),
-		// Outermost of the authz interceptors so it sees the refusal produced by
-		// ANY of them and by the handler: attaches the machine-readable reason a
-		// client keys on. It matters most where iam decides authorization itself
-		// over the data (scope-filtered rows) — there the edge runs no per-RPC
-		// check, so nothing else on the path names the action, and a refusal by
-		// scope was byte-identical to a catalog miss. See deny_details.go.
+		// Внешний среди перехватчиков прав, чтобы видеть отказ
+		// ЛЮБОГО из них и обработчика: добавляет машиночитаемую причину,
+		// по которой действует клиент. Особенно нужен там, где IAM сам решает права
+		// по данным (строки, отфильтрованные областью): край не делает проверки
+		// для каждого RPC, поэтому больше ничто на пути не называет действие, и отказ
+		// по области прежде побайтово совпадал с промахом каталога. См. deny_details.go.
 		authzguard.DenyDetailUnary(permRegistry),
 	}, publicIdentityUnary(cfg, presentedReader)...)
 	publicUnary = append(publicUnary,
@@ -1112,62 +1246,62 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		grpc.ChainUnaryInterceptor(publicUnary...),
 		grpc.ChainStreamInterceptor(publicStream...),
 	)
-	// Internal listener (port 9091) — network-segregated, but NOT trusted:
-	// authN+authZ are enforced on EVERY internal RPC (§"authN+authZ
-	// everywhere"; closes audit C1/C3/H3/M1).
+	// Внутренний слушатель (порт 9091) изолирован сетью, но НЕ пользуется доверием:
+	// аутентификация и права проверяются на КАЖДОМ внутреннем RPC (§«проверки личности и прав
+	// везде»; закрывает аудит C1/C3/H3/M1).
 	//
-	// Interceptor chain order (each runs before the next):
-	//  1. UnaryCertIdentityExtract — verified mTLS client-cert SAN (module
-	//     identity) → ctx; insecure listener (dev) → no-op.
-	//  2. UnaryTrustedPrincipalExtract — x-kacho-principal-* metadata → ctx, but
-	//     trust-gated on the FD-4 invariant AND on the forwarder allow-list: the
-	//     forwarded end-user principal is exposed downstream
-	//     (operations.principal_* / audit / granted_by) ONLY when step 1 proved the
-	//     peer mTLS-verified AND its certificate identity is one the operator
-	//     listed in authn.trusted-forwarder-sans. On any other peer the metadata is
-	//     DROPPED (carrier falls back to SystemPrincipal) so neither a cert-less
-	//     caller nor a neighbouring module with its own legitimate certificate can
-	//     FORGE the audit principal (anti-spoof). On the insecure dev listener it
-	//     stays accepted (backward-compat). NOT trusted for authZ — the gateway
-	//     already did per-user authZ. MUST run after UnaryCertIdentityExtract.
-	//  3. internalCallerPolicy — per-RPC caller policy: floor (verified module
-	//     cert on EVERY RPC) + gateway-only (privileged admin RPCs only from the
-	//     api-gateway SA) — prod fail-closed, dev no-op — PLUS the SAN-restricted
-	//     arm for the cluster-admin token mint, which admits only the explicitly
-	//     allow-listed client-certificate SPIFFE SANs and is enforced in EVERY
-	//     mode (an empty list denies everyone).
-	//  4. internalSystemViewerFloor — per-RPC `system_viewer`-floor
-	//     on the READ-RPC set (ReadFloorRPCs): the caller module-SA must hold
-	//     `system_viewer@cluster:cluster_root` (relation-tier Check beyond
-	//     the coarse mTLS floor above). Prod fail-closed (PermissionDenied /
-	//     Unavailable); dev no-op. Exempt (absent from ReadFloorRPCs): PDP
-	//     Check, hot-path IsRevoked, all mutations. MUST run after
-	//     internalCallerPolicy (it needs the same verified-SAN floor to have
-	//     passed).
-	//  5. internalACRFloor — per-RPC `required_acr_min` (step-up)
-	//     floor on the GATEWAY-FRONTED set: for a gateway-fronted RPC whose catalog
-	//     acr_min>0, the FD-4-trusted forwarded acr must satisfy it (else
-	//     PermissionDenied + step-up signal). Module-SA callers / non-gateway RPCs
-	//     are acr-exempt. Prod fail-closed; dev no-op. MUST run after
-	//     UnaryTrustedPrincipalExtract (sets acr) + internalCallerPolicy (which
-	//     denies a non-gateway SAN on a gateway-fronted RPC first, so the SA
-	//     exemption cannot be abused).
+	// Порядок цепочки перехватчиков (каждый выполняется перед следующим):
+	// 1. UnaryCertIdentityExtract — SAN проверенного клиентского сертификата mTLS
+	// (личность модуля) → контекст; незащищённый слушатель dev → без действия.
+	// 2. UnaryTrustedPrincipalExtract — метаданные x-kacho-principal-* → контекст, но
+	// с доверием только по инварианту FD-4 И списку доверенных пересыльщиков:
+	// пересланный конечный пользователь доступен следующим слоям
+	// (operations.principal_* / аудит / granted_by) ТОЛЬКО если шаг 1 подтвердил
+	// проверенный mTLS узел И его сертификатную личность, которую оператор
+	// перечислил в authn.trusted-forwarder-sans. У остальных метаданные
+	// ОТБРАСЫВАЮТСЯ (носитель возвращается к SystemPrincipal), поэтому ни вызывающий без сертификата,
+	// ни соседний модуль со своим законным сертификатом не может
+	// ПОДДЕЛАТЬ субъект аудита (защита от подмены). На незащищённом слушателе dev
+	// они принимаются для обратной совместимости. НЕ источник доверия для прав: шлюз
+	// уже проверил права пользователя. ОБЯЗАТЕЛЬНО после UnaryCertIdentityExtract.
+	// 3. internalCallerPolicy — политика вызывающего для каждого RPC: минимум проверенного сертификата
+	// модуля на КАЖДОМ RPC и административные RPC только для
+	// учётной записи api-gateway; в боевом режиме закрытый отказ, в dev без действия. ПЛЮС ограничение SAN
+	// для выпуска токена администратора кластера: допускает только явно
+	// разрешённые SPIFFE SAN клиентских сертификатов и действует в КАЖДОМ
+	// режиме (пустой список отказывает всем).
+	// 4. internalSystemViewerFloor — минимум `system_viewer` для каждого
+	// RPC ЧТЕНИЯ (ReadFloorRPCs): служебная учётная запись модуля должна иметь
+	// `system_viewer@cluster:cluster_root` (проверка уровня отношения сверх
+	// общего минимума mTLS выше). В боевом режиме закрытый отказ (PermissionDenied /
+	// Unavailable); в dev без действия. Исключены из ReadFloorRPCs: PDP
+	// Check, быстрый IsRevoked, все изменения. ОБЯЗАТЕЛЬНО после
+	// internalCallerPolicy: нужен уже пройденный минимум проверенного SAN
+	// того же уровня.
+	// 5. internalACRFloor — минимум `required_acr_min` с повышением уровня для каждого RPC
+	// набора ЗА ШЛЮЗОМ: для такого RPC с каталожным
+	// acr_min>0 пересланный и доверенный по FD-4 acr должен удовлетворять минимуму, иначе
+	// PermissionDenied и сигнал повышения уровня. Служебные учётные записи и RPC вне шлюза
+	// освобождены от acr. В боевом режиме закрытый отказ, в dev без действия. ОБЯЗАТЕЛЬНО после
+	// UnaryTrustedPrincipalExtract (ставит acr) и internalCallerPolicy, который
+	// сначала отказывает чужому SAN на RPC за шлюзом, чтобы исключение для служебной учётной записи
+	// не позволяло злоупотребления.
 	internalUnary := append([]grpc.UnaryServerInterceptor{
 		// Измеритель задержки первым — здесь живёт горячий путь пер-RPC гейта
 		// прав (`InternalIAMService.Check`), и его задержка есть задержка КАЖДОГО
 		// вызова всей платформы: она входит слагаемым в чужие хвосты, поэтому
 		// собственный ряд у неё обязан быть.
 		latency.UnaryServerInterceptor(grpcsrv.ListenerInternal),
-		// Panic-recovery immediately inside metrics — same rationale as the
-		// public chain: a handler/interceptor panic on the PDP hot path must
-		// not crash the process (fail-closed cluster-wide); it degrades to a
-		// logged codes.Internal for that one request.
+		// Перехват паники непосредственно внутри метрик по той же причине, что у
+		// публичной цепочки: паника обработчика или перехватчика на горячем пути PDP
+		// не должна ронять процесс с закрытым отказом для всего кластера; вместо этого
+		// получаем записанный codes.Internal для одного запроса.
 		grpcsrv.UnaryPanicRecovery(logger),
-		// Same reason as on the public chain, and on the same terms: a refusal
-		// this listener produces carries the machine-readable reason too, so a
-		// client does not have to know which listener (or which layer) said no.
-		// It appends — the step-up PreconditionFailure raised by the acr floor
-		// below survives untouched. See deny_details.go.
+		// Та же причина и условия, что у публичной цепочки: отказ
+		// этого слушателя тоже несёт машиночитаемую причину, поэтому
+		// клиенту не нужно знать, какой слушатель или слой отказал.
+		// Детали добавляются: PreconditionFailure повышения уровня, созданный минимумом acr
+		// ниже, сохраняется как есть. См. deny_details.go.
 		authzguard.DenyDetailUnary(permRegistry),
 	}, identityUnary(cfg)...)
 	internalUnary = append(internalUnary,
@@ -1207,7 +1341,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// готовности означал бы перезапуск пода из-за нагрузки на API.
 	publicAdmissionLimits, internalAdmissionLimits, err := admissionLimits(cfg)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Ключи у слушателей РАЗНЫЕ, и это не деталь: публичный ключуется личностью
 	// конечного пользователя (за краем сидит арендатор, и предел объявлен на
@@ -1220,14 +1354,14 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	publicAdmission, err := grpcsrv.NewAdmission("public", publicAdmissionLimits,
 		publicAdmissionSubject(ownFrontSAN), publicAdmissionOptions()...)
 	if err != nil {
-		return fmt.Errorf("ограничитель допуска публичного слушателя: %w", err)
+		return startupFailureAt(fmt.Errorf("ограничитель допуска публичного слушателя: %w", err))
 	}
 	// Внутренний слушатель — ДВА уровня (kaname#992): экземпляр вызывающего
 	// (личность и адрес) и модуль в целом (SAN, прежние величины посадки).
 	// Шумный экземпляр выбирает не больше своего ведра и соседа не душит.
 	internalAdmissions, err := newInternalAdmissions(internalAdmissionLimits, instanceAdmissionLimits(internalAdmissionLimits))
 	if err != nil {
-		return fmt.Errorf("ограничитель допуска внутреннего слушателя: %w", err)
+		return startupFailureAt(fmt.Errorf("ограничитель допуска внутреннего слушателя: %w", err))
 	}
 	admission := listenerAdmission{public: publicAdmission,
 		internal: internalAdmissions.internal, internalInstance: internalAdmissions.internalInstance}
@@ -1240,12 +1374,12 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	internalAddr := cfg.APIServer.InternalListenAddress()
 	listener, err := net.Listen("tcp", publicAddr)
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	internalListener, err := net.Listen("tcp", internalAddr)
 	if err != nil {
 		_ = listener.Close()
-		return err
+		return startupFailureAt(err)
 	}
 
 	// ── НЕ-gRPC ПОВЕРХНОСТИ: четыре профиля ТОЙ ЖЕ функции ──────────────────
@@ -1264,7 +1398,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// триггере и четыре набора одних и тех же сроков, выписанных по месту.
 	surfaceMode, merr := servicecontract.ParseMode(cfg.AuthN.Mode.String())
 	if merr != nil {
-		return fmt.Errorf("посадка процесса для профиля поверхностей: %w", merr)
+		return startupFailureAt(fmt.Errorf("посадка процесса для профиля поверхностей: %w", merr))
 	}
 
 	// Контекст не-gRPC поверхностей. Отдельный от корневого: гасить их надо по
@@ -1304,10 +1438,10 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS: metricsTLSConfig,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности диагностики: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности диагностики: %w", err))
 	}
 
-	// (2) Выдача docker-токена (`/iam/token`, Registry v2 auth-server).
+	// (2) Выдача токена Docker (`/iam/token`, сервер аутентификации Registry v2).
 	//
 	// Единственная ВНЕШНЕ досягаемая поверхность iam: `docker login` приходит
 	// через вход кластера. Её аутентификация — предъявление БАЗОВОГО ТОКЕНА
@@ -1352,7 +1486,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		basicCredentialTimeout: credentialLanePeerTimeout,
 	})
 	if rtErr != nil {
-		return fmt.Errorf("registry token shim: %w", rtErr)
+		return startupFailureAt(fmt.Errorf("registry token shim: %w", rtErr))
 	}
 	if registryTokenKeyMaterialWindow := registryTokenBuild.KeyMaterialWindowUntil; !registryTokenKeyMaterialWindow.IsZero() {
 		// Открытое окно — ОСЛАБЛЕНИЕ ПОСАДКИ, и оно обязано быть заметно в
@@ -1371,7 +1505,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if registryTokenAddr != "" {
 		mux, berr := registrytokenwire.Build(pool, registryTokenBuild)
 		if berr != nil {
-			return fmt.Errorf("registry token shim: %w", berr)
+			return startupFailureAt(fmt.Errorf("registry token shim: %w", berr))
 		}
 		// Перепись точки анонимной выдачи правила адреса источника — вплотную
 		// к сборке полосы (kaname#930): рост её клетки отличает неверно
@@ -1400,11 +1534,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			ceremonyKeySource(signingKeystore), lane.secretChecker(), lane.secretCheckCost(),
 			metricsReg.LoginLaneRecorder(), issuingSource, logger)
 		if cerr != nil {
-			return fmt.Errorf("ceremony: %w", cerr)
+			return startupFailureAt(fmt.Errorf("ceremony: %w", cerr))
 		}
 		clientTokenHandler, cterr := buildClientTokenEndpoint(pool, cfg, tokenSigner, logger, ceremony, issuingSource)
 		if cterr != nil {
-			return fmt.Errorf("client token endpoint: %w", cterr)
+			return startupFailureAt(fmt.Errorf("client token endpoint: %w", cterr))
 		}
 		if clientTokenHandler != nil {
 			mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)
@@ -1440,7 +1574,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		Name:    "выдача токенов (/iam/token, /iam/v1/token)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(registryTokenAddr, knobRegistryToken+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
+		Addr:    addrAxis(registryTokenAddr, knobRegistryExchange+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
 		Auth:    issuingSurfaceAuthOf(registryTokenHandler),
@@ -1448,7 +1582,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS: registryTokenTLSConfig,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err))
 	}
 
 	// (3а) Полоса входа паролем — глаголы формы (перечень —
@@ -1457,7 +1591,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// поднимается вместе с ней.
 	loginLaneSurface, err := loginLaneSurface(cfg, surfaceMode, logger, lane, mtlsCfg)
 	if err != nil {
-		return fmt.Errorf("профиль поверхности полосы входа: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности полосы входа: %w", err))
 	}
 
 	// (3) Публикатор ПУБЛИЧНЫХ ключей проверки — наша запись набора на пути
@@ -1519,12 +1653,12 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			// Издатель без записи источника, вторая запись рядом с нашей или
 			// слушатель без единой записи — ОТКАЗ В СТАРТЕ, а не молчаливый
 			// перебор записей и не путь, выведенный из самого издателя.
-			return fmt.Errorf("привязка «издатель → источник набора» (слушатель %s=%q, своя чеканка включена: %t): %w",
-				knobJWKSProxy, jwksProxyAddr, signingKeystore != nil, berr)
+			return startupFailureAt(fmt.Errorf("привязка «издатель → источник набора» (слушатель %s=%q, своя чеканка включена: %t): %w",
+				knobJWKSProxy, jwksProxyAddr, signingKeystore != nil, berr))
 		}
 		jwksMux, merr := jwksproxyhttp.NewMux(binding)
 		if merr != nil {
-			return fmt.Errorf("маршруты публикации набора: %w", merr)
+			return startupFailureAt(fmt.Errorf("маршруты публикации набора: %w", merr))
 		}
 		// (4б) Авторитет отзыва НАШИХ токенов — на том же внутреннем
 		// слушателе. Отзыв, который читается только на выдаче, отзывом не
@@ -1543,7 +1677,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			// не исполнялось для условия без имени (задача kacho#2476).
 			if err := requireRevocationAuthorityCallerAuth(
 				signingKeystore != nil, jwksProxyAddr, mtlsCfg); err != nil {
-				return err
+				return startupFailureAt(err)
 			}
 			introspect := tokenintrospecthttp.NewHandler(tokenintrospecthttp.Config{
 				Issuer:            cfg.AuthN.TokenSigning.Issuer,
@@ -1576,13 +1710,13 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS: jwksProxyTLSConfig,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности публикатора набора ключей: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности публикатора набора ключей: %w", err))
 	}
 
 	// (4) и (5) Собственные REST-фронты службы — публичный и внутренний.
 	//
 	// Пока служба стоит за краем платформы, её HTTP-поверхность принадлежит
-	// краю. Вынесенная отдельным продуктом, края она не имеет by construction,
+	// краю. Вынесенная отдельным продуктом, края она не имеет по построению,
 	// и её REST обязан существовать сам.
 	//
 	// Оба фронта — обычные КЛИЕНТЫ собственных gRPC-слушателей: запрос по HTTP
@@ -1590,7 +1724,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// одному обработчику вели бы два пути с разными решениями по дороге.
 	restUpstream, err := mtlsCfg.RESTUpstreamDialOption()
 	if err != nil {
-		return fmt.Errorf("удостоверение REST-фронта для собственного слушателя: %w", err)
+		return startupFailureAt(fmt.Errorf("удостоверение REST-фронта для собственного слушателя: %w", err))
 	}
 	restDialOpts := []grpc.DialOption{restUpstream}
 
@@ -1601,9 +1735,10 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		// поставленной службы нет, и держит их фронт сам.
 		limits := restFrontLimits(cfg)
 		logRESTFrontLimits(logger, limits)
-		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts, limits)
+		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts, limits,
+			restfront.PublicServices{ChildRegistration: fullStartup != nil && svcs.childRegistrationHandler != nil})
 		if err != nil {
-			return fmt.Errorf("публичный REST-фронт: %w", err)
+			return startupFailureAt(fmt.Errorf("публичный REST-фронт: %w", err))
 		}
 	}
 	restSurface, err := iamHTTPSurface(servicecontract.Surface{
@@ -1623,7 +1758,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS:  restFront.tls,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности публичного REST-фронта: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности публичного REST-фронта: %w", err))
 	}
 
 	internalRESTAddr := internalRESTFront.addr
@@ -1634,7 +1769,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			// (SEC-1017-1). Тот же перечень личностей, что у политик вызывающего.
 			authzguard.InternalFrontAdmission(productionMode, moduleRoster, cfg.AuthN.TrustDomain()))
 		if err != nil {
-			return fmt.Errorf("внутренний REST-фронт: %w", err)
+			return startupFailureAt(fmt.Errorf("внутренний REST-фронт: %w", err))
 		}
 	}
 	internalRESTSurface, err := iamHTTPSurface(servicecontract.Surface{
@@ -1654,7 +1789,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		TLS:  internalRESTFront.tls,
 	})
 	if err != nil {
-		return fmt.Errorf("профиль поверхности внутреннего REST-фронта: %w", err)
+		return startupFailureAt(fmt.Errorf("профиль поверхности внутреннего REST-фронта: %w", err))
 	}
 
 	// Срез подъёма несёт ПАРУ «ручка профиля + принятый профиль»: ручку не
@@ -1662,7 +1797,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// отказе — иначе оператор знает, что не так, и не знает, где это чинить.
 	httpSurfaces := []raisedSurface{
 		{knobMetrics, metricsSurface},
-		{knobRegistryToken, registryTokenSurface},
+		{knobRegistryExchange, registryTokenSurface},
 		{knobLoginLane, loginLaneSurface},
 		{knobJWKSProxy, jwksProxySurface},
 		{knobPublicREST, restSurface},
@@ -1685,7 +1820,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		surfaceAddrsOfRaised(httpSurfaces)...,
 	))
 	if err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	// Перепись печатается и на успешном старте: «ноль совпадений» обязано быть
 	// отличимо от «ничего не сверяли».
@@ -1705,16 +1840,16 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		gracefulTimeout = 10 * time.Second
 	}
 
-	// Enterprise SSO HTTP listeners (SCIM + SAML) are not part of this service;
-	// sign-in, session and token minting are this service's own (no external
-	// identity provider).
+	// Слушатели HTTP корпоративного SSO (SCIM + SAML) не входят в этот сервис;
+	// вход, сессии и выпуск токенов принадлежат самому сервису, без внешнего
+	// поставщика личности.
 
 	// Параллельный запуск
-	// public-сервера + internal-сервера + shutdown-waiter через
+	// публичного сервера, внутреннего сервера и ожидания завершения через
 	// `errgroup.Group` (`golang.org/x/sync/errgroup`).
-	// Failure-isolation: первая ошибка / SIGTERM / SIGINT триггерит
-	// graceful-stop ОБОИХ серверов. sync.Once гарантирует, что параллельные
-	// триггеры (SIGTERM пришел одновременно с crash internal'а) не сделают
+	// Изоляция отказов: первая ошибка / SIGTERM / SIGINT запускает
+	// плавную остановку ОБОИХ серверов. sync.Once гарантирует, что параллельные
+	// сигналы (SIGTERM одновременно с падением внутреннего сервера) не сделают
 	// двойной GracefulStop.
 	// Собственная отмена счётчика допуска: он обязан вернуть управление и тогда,
 	// когда гашение начал крах слушателя, а не сигнал. Общего контекста для
@@ -1766,7 +1901,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			admission.report(admissionCtx, logger)
 			return nil
 		},
-		// public gRPC server
+		// публичный сервер gRPC
 		func() error {
 			err := grpcSrv.Serve(listener)
 			if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
@@ -1775,7 +1910,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			}
 			return nil
 		},
-		// internal gRPC server (admin, наружу не публикуется)
+		// внутренний сервер gRPC (административный, наружу не публикуется)
 		func() error {
 			err := internalSrv.Serve(internalListener)
 			if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
@@ -1815,8 +1950,8 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		wait, serr := servicehost.ServeSurface(surfaceCtx, surface.desc)
 		if serr != nil {
 			stopSurfaces()
-			return fmt.Errorf("поверхность %q (%s): %w",
-				surface.desc.Spec().Name, surface.knob, serr)
+			return startupFailureAt(fmt.Errorf("поверхность %q (%s): %w",
+				surface.desc.Spec().Name, surface.knob, serr))
 		}
 		tasks = append(tasks, func() error {
 			if werr := wait(); werr != nil {
@@ -1830,7 +1965,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			return nil
 		})
 	}
-	// Enterprise SSO (SCIM + SAML) is not served by this listener set.
+	// Корпоративное SSO (SCIM + SAML) этим набором слушателей не обслуживается.
 
 	// ДРЕНАЖА ЖУРНАЛА НАМЕРЕНИЙ ЗДЕСЬ НЕТ — снят вместе с адресатом.
 	//
@@ -1887,7 +2022,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if imerr != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
-		return fmt.Errorf("invite mail drainer wiring: %w", imerr)
+		return startupFailureAt(fmt.Errorf("invite mail drainer wiring: %w", imerr))
 	}
 	tasks = append(tasks, func() (err error) {
 		defer func() {
@@ -1908,7 +2043,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		taskCtx, pool, cfg, metricsReg.OutboxRecorder(), logger); berr != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
-		return fmt.Errorf("invite mail backstop wiring: %w", berr)
+		return startupFailureAt(fmt.Errorf("invite mail backstop wiring: %w", berr))
 	}
 	// СКАНА ЖУРНАЛА СМЕНЫ СУБЪЕКТА ЗДЕСЬ НЕТ — у него больше нет предмета.
 	//
@@ -1946,7 +2081,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	if err != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
-		return fmt.Errorf("audit shipper wiring: %w", err)
+		return startupFailureAt(fmt.Errorf("audit shipper wiring: %w", err))
 	}
 	tasks = append(tasks, func() error {
 		return auditShipper.Run(taskCtx)
@@ -1982,14 +2117,14 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		return nil
 	})
 
-	// Bootstrap-admin reconciler. Grants `system_admin@cluster_root` to
-	// the user identified by KANAME_BOOTSTRAP_ROOT_EMAIL and enqueues the
-	// FGA tuple into the transactional fga_outbox, out of which a trigger folds the
-	// direct fact in the same commit. The user row is mirrored only on first login /
-	// fixture upsert — which races startup — so a one-shot call would skip and the
-	// cluster-admin tuple would never be written at all (Bug B). The reconciler re-runs until the
-	// grant commits; it is non-fatal by contract (best-effort startup
-	// convenience, never a hard gate). No-op when the env is unset.
+	// Работник согласования начального администратора. Выдаёт `system_admin@cluster_root`
+	// пользователю из KANAME_BOOTSTRAP_ROOT_EMAIL и ставит
+	// кортеж FGA в транзакционную fga_outbox, откуда триггер складывает
+	// прямой факт тем же коммитом. Строка пользователя зеркалируется только при первом входе /
+	// UPSERT фикстуры, что состязается со стартом, поэтому одноразовый вызов пропустил бы её,
+	// и кортеж администратора кластера не записался бы вообще (дефект B). Работник повторяет попытки, пока
+	// выдача не закоммитится; по контракту нефатален (удобство запуска по возможности,
+	// никогда не жёсткий страж). Без действия, когда переменная окружения не задана.
 	bootstrapEmail := os.Getenv("KANAME_BOOTSTRAP_ROOT_EMAIL")
 	bootstrapReconciler := seed.NewBootstrapReconciler(
 		func(ctx context.Context) (seed.BootstrapAdminResult, error) {
@@ -2008,16 +2143,22 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		return bootstrapReconciler.Run(taskCtx)
 	}))
 
-	// γ reconciler-worker (epic «Resource-scoped AccessBinding», D7). Drains
-	// resource_reconcile_outbox (Q1=(c) event-driven, written atomically by
-	// RegisterResource) → re-evaluates the bindings referencing the changed
-	// object (selector membership / byName containment / PENDING→ACTIVE verify),
-	// AND periodically sweeps every selector binding (D12 defense-in-depth) +
-	// expires TTL-elapsed bindings (D9 eager-revoke). In-process worker (no new
-	// deploy); non-fatal by contract.
+	// γ — работник согласования (эпик «AccessBinding в области ресурса», D7). Вычитывает
+	// resource_reconcile_outbox (Q1=(c): события, атомарно записанные
+	// RegisterResource) → заново оценивает привязки, ссылающиеся на изменённый
+	// объект (принадлежность селектору / включение byName / проверка PENDING→ACTIVE),
+	// И периодически обходит все привязки с селектором (D12, дополнительная защита),
+	// а также снимает привязки с истёкшим TTL (D9, немедленный отзыв). Работник внутри процесса, без нового
+	// развёртывания; по контракту нефатален.
 	reconcileAdapter := kanamepg.NewReconcileAdapter(pool, catalogSnapshot)
 	reconcileEngine := reconcile.New(reconcileAdapter,
 		logger.With(slog.String("component", "rsab_reconciler")), catalogSnapshot)
+	if cfg.AuthorityProtocol.Participant() {
+		if err := wireBackgroundAuthorityParticipants(reconcileEngine, bindingStageParticipant, resourceObjectParticipant, groupObjectParticipant); err != nil {
+			return startupFailureAt(err)
+		}
+	}
+
 	// resource_reconcile_outbox дренажится NOTIFY-driven (паритет с fga_outbox drainer):
 	// AFTER INSERT триггер (миграция 0042) шлет pg_notify на канал
 	// kaname_resource_reconcile_outbox, reconcileAdapter LISTEN'ит его и будит worker —
@@ -2034,7 +2175,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// меняли между вызовами. Разбор — `reconcile_window.go`.
 	reconcileWindows := readReconcileWindows()
 	if err := reconcileWindows.validate(authz.RevocationPolicy.MaterializationCeiling); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 	reconcileWorker := seed.NewReconcileWorker(reconcileEngine, reconcileAdapter, seed.ReconcileWorkerConfig{
 		SweepInterval: reconcileWindows.Sweep,
@@ -2084,11 +2225,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	})
 	verifyGate := seed.NewVerifyGate(reconcileEngine, backfillAdapter,
 		logger.With(slog.String("component", "p8_verify_gate"))).
-		// Design-B cutover gate: a REAL FGA Check per active binding's
-		// required-relation triple — proves the materialized v_* tuple RESOLVES the
-		// enforcement relation the catalog gates on, not merely that the ledger is
-		// non-empty (the Design-A class-of-bug blind spot). nil-safe (degraded FGA →
-		// non-fatal skip).
+		// Страж перехода на Design-B: НАСТОЯЩИЙ FGA Check требуемой тройки отношения
+		// каждой активной привязки доказывает, что материализованный кортеж v_* РАЗРЕШАЕТ
+		// отношение контроля из каталога, а не просто что журнал
+		// не пуст (слепое пятно класса дефекта Design-A). Безопасен при nil: деградация FGA →
+		// нефатальный пропуск.
 		WithRelationChecker(svcs.ownGates)
 	// Разовая уборка выдач, чья область УЖЕ УДАЛЕНА (kacho#810, продолжение kacho#792).
 	//
@@ -2102,7 +2243,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// ПОЧЕМУ ЭТО БЕЗОПАСНО ЗАПУСКАТЬ САМО. Обе таблицы — и `access_bindings`, и
 	// `projects`/`accounts` — лежат в ОДНОЙ базе iam, то есть в одной единице
 	// снятия и восстановления копии. Состояния «проекты потерялись, выдачи
-	// остались» согласованное восстановление не производит by construction,
+	// остались» согласованное восстановление не производит по построению,
 	// поэтому порога вида «слишком много, отказываюсь» здесь нет: на живом стенде
 	// висячими были 145 выдач из 193, и любой правдоподобный порог отказал бы
 	// ровно там, где уборка и нужна. Радиус одного старта ограничен потолком
@@ -2420,7 +2561,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// последнего отказа старта и на корневом контексте задач (#253, шапка
 	// `startRetentionSweeps`).
 	if err := startRetentionSweeps(taskCtx, retentionSweeper, pool, cfg, logger); err != nil {
-		return err
+		return startupFailureAt(err)
 	}
 
 	var group errgroup.Group
@@ -2429,7 +2570,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	}
 	err = group.Wait()
 	cancel()
-	return err
+	return startupFailureAt(err)
 }
 
 // identityUnary / identityStream — цепочка извлечения личности вызывающего,
@@ -2527,11 +2668,11 @@ func publicIdentityStream(cfg config.Config, presented *presentedcred.Reader) []
 // requireGRPCListenerMTLS — оба gRPC-слушателя обязаны идти под TLS в боевом
 // режиме.
 //
-// M1 — startup invariant: production mode MUST run the cluster-internal listener
-// (:9091) under mTLS RequireAndVerifyClientCert. Without it the per-RPC caller
-// policy has no verified module SAN to enforce — anyone reaching :9091 would
-// bypass authN/authZ. No silent insecure downgrade in production. The
-// tenant-facing :9090 carries the same requirement.
+// M1 — инвариант старта: боевой режим ОБЯЗАН запускать внутренний слушатель кластера
+// (:9091) с mTLS RequireAndVerifyClientCert. Иначе политика вызывающего для каждого RPC
+// не имеет проверенного SAN модуля и любой достигший :9091
+// обходит проверки личности и прав. Молчаливого ослабления защиты в боевом режиме нет.
+// Клиентский слушатель арендаторов :9090 несёт то же требование.
 //
 // # ПОЧЕМУ ИМЕНОВАННЫЙ СТРАЖ, А НЕ ВСТРОЕННАЯ ВЕТВЬ (задача kacho#2514)
 //
@@ -2539,7 +2680,7 @@ func publicIdentityStream(cfg config.Config, presented *presentedcred.Reader) []
 // повторяла его СВОИМИ утверждениями — то есть два места об одном предмете,
 // расходящиеся молча: подъём обзаводится новым условием, а проба о нём не знает
 // и остаётся зелёной. Ровно этот класс закрыт для соседей тем, что проба зовёт
-// САМИ стражи; безымянное условие позвать нельзя by construction, поэтому оно
+// САМИ стражи; безымянное условие позвать нельзя по построению, поэтому оно
 // оставалось исключением, о котором никто не решал.
 //
 // Имя здесь — не косметика: гейт `TestEveryNamedStartupGuardIsJudgedByTheProductionProfile`
@@ -2644,4 +2785,44 @@ func registryTokenBuildConfig(rt config.RegistryTokenConfig, run registryTokenRu
 		CredentialKindObserver:   run.credentialKindObserver,
 		BasicCredentialTimeout:   run.basicCredentialTimeout,
 	}, nil
+}
+
+// startupFailureAt фиксирует место возврата из runServe и класс отказа.
+// Вызывающий получает исходную ошибку, а в диагностическую запись попадают
+// только координата в исходнике и класс отказа.
+func startupFailureAt(err error) error {
+	if err == nil {
+		return err
+	}
+	_, file, line, ok := runtime.Caller(1)
+	if !ok || !strings.HasSuffix(file, "/cmd/kaname/serve.go") {
+		return err
+	}
+	class := "other"
+	var networkError net.Error
+	var pathError *os.PathError
+	var databaseError interface{ SQLState() string }
+	switch {
+	case errors.Is(err, context.Canceled):
+		class = "context-canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		class = "context-deadline"
+	case errors.Is(err, syscall.EADDRINUSE):
+		class = "address-in-use"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		class = "connection-refused"
+	case errors.Is(err, os.ErrPermission):
+		class = "permission"
+	case errors.Is(err, os.ErrNotExist):
+		class = "not-exist"
+	case errors.As(err, &pathError):
+		class = "file"
+	case errors.As(err, &databaseError):
+		class = "database"
+	case errors.As(err, &networkError):
+		class = "network"
+	}
+	observability.NewSlogger(os.Stderr).Error("kaname startup error origin",
+		slog.String("source", "cmd/kaname/serve.go"), slog.Int("line", line), slog.String("class", class))
+	return err
 }

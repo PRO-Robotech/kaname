@@ -16,6 +16,7 @@ import (
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	fieldmaskpb "google.golang.org/protobuf/types/known/fieldmaskpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -330,6 +331,143 @@ func (x *CreateGrantDelegationMetadata) GetAccountId() string {
 	return ""
 }
 
+type UpdateGrantDelegationRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ID существующего GrantDelegation; не новое значение идентификатора.
+	GrantDelegationId string `protobuf:"bytes,1,opt,name=grant_delegation_id,json=grantDelegationId,proto3" json:"grant_delegation_id,omitempty"`
+	// Полный желаемый набор выбранной оси: 1..16 ролей без повторов.
+	RoleIds []string `protobuf:"bytes,2,rep,name=role_ids,json=roleIds,proto3" json:"role_ids,omitempty"`
+	// Полный желаемый набор выбранной оси: 1..16 живых типов того же модуля.
+	TargetTypes []string `protobuf:"bytes,3,rep,name=target_types,json=targetTypes,proto3" json:"target_types,omitempty"`
+	// Полный желаемый набор выбранной оси: 1..4 типа субъекта без повторов.
+	SubjectTypes []SubjectType `protobuf:"varint,4,rep,packed,name=subject_types,json=subjectTypes,proto3,enum=kaname.cloud.iam.v1.SubjectType" json:"subject_types,omitempty"`
+	// Выбор role_ids, target_types, subject_types. Пустая или отсутствующая
+	// маска выбирает все три оси. Выбранная пустая ось отвергается; значения
+	// невыбранных осей игнорируются. Наборы могут только сохраняться/расширяться.
+	UpdateMask    *fieldmaskpb.FieldMask `protobuf:"bytes,5,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateGrantDelegationRequest) Reset() {
+	*x = UpdateGrantDelegationRequest{}
+	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateGrantDelegationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateGrantDelegationRequest) ProtoMessage() {}
+
+func (x *UpdateGrantDelegationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateGrantDelegationRequest.ProtoReflect.Descriptor instead.
+func (*UpdateGrantDelegationRequest) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *UpdateGrantDelegationRequest) GetGrantDelegationId() string {
+	if x != nil {
+		return x.GrantDelegationId
+	}
+	return ""
+}
+
+func (x *UpdateGrantDelegationRequest) GetRoleIds() []string {
+	if x != nil {
+		return x.RoleIds
+	}
+	return nil
+}
+
+func (x *UpdateGrantDelegationRequest) GetTargetTypes() []string {
+	if x != nil {
+		return x.TargetTypes
+	}
+	return nil
+}
+
+func (x *UpdateGrantDelegationRequest) GetSubjectTypes() []SubjectType {
+	if x != nil {
+		return x.SubjectTypes
+	}
+	return nil
+}
+
+func (x *UpdateGrantDelegationRequest) GetUpdateMask() *fieldmaskpb.FieldMask {
+	if x != nil {
+		return x.UpdateMask
+	}
+	return nil
+}
+
+type UpdateGrantDelegationMetadata struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ID обновляемого GrantDelegation.
+	GrantDelegationId string `protobuf:"bytes,1,opt,name=grant_delegation_id,json=grantDelegationId,proto3" json:"grant_delegation_id,omitempty"`
+	// ID Account, которым ограничено делегирование.
+	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateGrantDelegationMetadata) Reset() {
+	*x = UpdateGrantDelegationMetadata{}
+	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateGrantDelegationMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateGrantDelegationMetadata) ProtoMessage() {}
+
+func (x *UpdateGrantDelegationMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateGrantDelegationMetadata.ProtoReflect.Descriptor instead.
+func (*UpdateGrantDelegationMetadata) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *UpdateGrantDelegationMetadata) GetGrantDelegationId() string {
+	if x != nil {
+		return x.GrantDelegationId
+	}
+	return ""
+}
+
+func (x *UpdateGrantDelegationMetadata) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
 type RevokeGrantDelegationRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID отзываемого ресурса GrantDelegation.
@@ -340,7 +478,7 @@ type RevokeGrantDelegationRequest struct {
 
 func (x *RevokeGrantDelegationRequest) Reset() {
 	*x = RevokeGrantDelegationRequest{}
-	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -352,7 +490,7 @@ func (x *RevokeGrantDelegationRequest) String() string {
 func (*RevokeGrantDelegationRequest) ProtoMessage() {}
 
 func (x *RevokeGrantDelegationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -365,7 +503,7 @@ func (x *RevokeGrantDelegationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeGrantDelegationRequest.ProtoReflect.Descriptor instead.
 func (*RevokeGrantDelegationRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDescGZIP(), []int{5}
+	return file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RevokeGrantDelegationRequest) GetGrantDelegationId() string {
@@ -387,7 +525,7 @@ type RevokeGrantDelegationMetadata struct {
 
 func (x *RevokeGrantDelegationMetadata) Reset() {
 	*x = RevokeGrantDelegationMetadata{}
-	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -399,7 +537,7 @@ func (x *RevokeGrantDelegationMetadata) String() string {
 func (*RevokeGrantDelegationMetadata) ProtoMessage() {}
 
 func (x *RevokeGrantDelegationMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -412,7 +550,7 @@ func (x *RevokeGrantDelegationMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeGrantDelegationMetadata.ProtoReflect.Descriptor instead.
 func (*RevokeGrantDelegationMetadata) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDescGZIP(), []int{6}
+	return file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RevokeGrantDelegationMetadata) GetGrantDelegationId() string {
@@ -433,7 +571,7 @@ var File_kaname_cloud_iam_v1_grant_delegation_service_proto protoreflect.FileDes
 
 const file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDesc = "" +
 	"\n" +
-	"2kaname/cloud/iam/v1/grant_delegation_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a(kaname/cloud/iam/v1/access_binding.proto\x1a*kaname/cloud/iam/v1/grant_delegation.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"K\n" +
+	"2kaname/cloud/iam/v1/grant_delegation_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a(kaname/cloud/iam/v1/access_binding.proto\x1a*kaname/cloud/iam/v1/grant_delegation.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"K\n" +
 	"\x19GetGrantDelegationRequest\x12.\n" +
 	"\x13grant_delegation_id\x18\x01 \x01(\tR\x11grantDelegationId\"x\n" +
 	"\x1bListGrantDelegationsRequest\x12\x1d\n" +
@@ -455,18 +593,31 @@ const file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDesc = "" +
 	"\x1dCreateGrantDelegationMetadata\x12.\n" +
 	"\x13grant_delegation_id\x18\x01 \x01(\tR\x11grantDelegationId\x12\x1d\n" +
 	"\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId\"\x90\x02\n" +
+	"\x1cUpdateGrantDelegationRequest\x12.\n" +
+	"\x13grant_delegation_id\x18\x01 \x01(\tR\x11grantDelegationId\x12\x19\n" +
+	"\brole_ids\x18\x02 \x03(\tR\aroleIds\x12!\n" +
+	"\ftarget_types\x18\x03 \x03(\tR\vtargetTypes\x12E\n" +
+	"\rsubject_types\x18\x04 \x03(\x0e2 .kaname.cloud.iam.v1.SubjectTypeR\fsubjectTypes\x12;\n" +
+	"\vupdate_mask\x18\x05 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
+	"updateMask\"n\n" +
+	"\x1dUpdateGrantDelegationMetadata\x12.\n" +
+	"\x13grant_delegation_id\x18\x01 \x01(\tR\x11grantDelegationId\x12\x1d\n" +
+	"\n" +
 	"account_id\x18\x02 \x01(\tR\taccountId\"N\n" +
 	"\x1cRevokeGrantDelegationRequest\x12.\n" +
 	"\x13grant_delegation_id\x18\x01 \x01(\tR\x11grantDelegationId\"n\n" +
 	"\x1dRevokeGrantDelegationMetadata\x12.\n" +
 	"\x13grant_delegation_id\x18\x01 \x01(\tR\x11grantDelegationId\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x02 \x01(\tR\taccountId2\xd6\x06\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId2\xc6\b\n" +
 	"\x16GrantDelegationService\x12\xb7\x01\n" +
 	"\x03Get\x12..kaname.cloud.iam.v1.GetGrantDelegationRequest\x1a$.kaname.cloud.iam.v1.GrantDelegation\"Z\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x011\xba\xb5\x18\x0fHANDLER_DECIDES\x82\xd3\xe4\x93\x020\x12./iam/v1/grantDelegations/{grant_delegation_id}\x12\xb1\x01\n" +
 	"\x04List\x120.kaname.cloud.iam.v1.ListGrantDelegationsRequest\x1a1.kaname.cloud.iam.v1.ListGrantDelegationsResponse\"D\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x011\xba\xb5\x18\x0fHANDLER_DECIDES\x82\xd3\xe4\x93\x02\x1a\x12\x18/iam/v1/grantDelegations\x12\xd6\x01\n" +
 	"\x06Create\x121.kaname.cloud.iam.v1.CreateGrantDelegationRequest\x1a\x1c.corelib.operation.Operation\"{\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x012\xba\xb5\x18\x0fHANDLER_DECIDES\xb2\xd2*0\n" +
-	"\x1dCreateGrantDelegationMetadata\x12\x0fGrantDelegation\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/iam/v1/grantDelegations\x12\xf4\x01\n" +
+	"\x1dCreateGrantDelegationMetadata\x12\x0fGrantDelegation\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/iam/v1/grantDelegations\x12\xed\x01\n" +
+	"\x06Update\x121.kaname.cloud.iam.v1.UpdateGrantDelegationRequest\x1a\x1c.corelib.operation.Operation\"\x91\x01\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x012\xba\xb5\x18\x0fHANDLER_DECIDES\xb2\xd2*0\n" +
+	"\x1dUpdateGrantDelegationMetadata\x12\x0fGrantDelegation\x82\xd3\xe4\x93\x023:\x01*2./iam/v1/grantDelegations/{grant_delegation_id}\x12\xf4\x01\n" +
 	"\x06Revoke\x121.kaname.cloud.iam.v1.RevokeGrantDelegationRequest\x1a\x1c.corelib.operation.Operation\"\x98\x01\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x012\xba\xb5\x18\x0fHANDLER_DECIDES\xb2\xd2*0\n" +
 	"\x1dRevokeGrantDelegationMetadata\x12\x0fGrantDelegation\x82\xd3\xe4\x93\x02::\x01*\"5/iam/v1/grantDelegations/{grant_delegation_id}:revokeBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
@@ -482,37 +633,44 @@ func file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDescGZIP() []byt
 	return file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_kaname_cloud_iam_v1_grant_delegation_service_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_kaname_cloud_iam_v1_grant_delegation_service_proto_goTypes = []any{
 	(*GetGrantDelegationRequest)(nil),     // 0: kaname.cloud.iam.v1.GetGrantDelegationRequest
 	(*ListGrantDelegationsRequest)(nil),   // 1: kaname.cloud.iam.v1.ListGrantDelegationsRequest
 	(*ListGrantDelegationsResponse)(nil),  // 2: kaname.cloud.iam.v1.ListGrantDelegationsResponse
 	(*CreateGrantDelegationRequest)(nil),  // 3: kaname.cloud.iam.v1.CreateGrantDelegationRequest
 	(*CreateGrantDelegationMetadata)(nil), // 4: kaname.cloud.iam.v1.CreateGrantDelegationMetadata
-	(*RevokeGrantDelegationRequest)(nil),  // 5: kaname.cloud.iam.v1.RevokeGrantDelegationRequest
-	(*RevokeGrantDelegationMetadata)(nil), // 6: kaname.cloud.iam.v1.RevokeGrantDelegationMetadata
-	(*GrantDelegation)(nil),               // 7: kaname.cloud.iam.v1.GrantDelegation
-	(*Subject)(nil),                       // 8: kaname.cloud.iam.v1.Subject
-	(SubjectType)(0),                      // 9: kaname.cloud.iam.v1.SubjectType
-	(*operation.Operation)(nil),           // 10: corelib.operation.Operation
+	(*UpdateGrantDelegationRequest)(nil),  // 5: kaname.cloud.iam.v1.UpdateGrantDelegationRequest
+	(*UpdateGrantDelegationMetadata)(nil), // 6: kaname.cloud.iam.v1.UpdateGrantDelegationMetadata
+	(*RevokeGrantDelegationRequest)(nil),  // 7: kaname.cloud.iam.v1.RevokeGrantDelegationRequest
+	(*RevokeGrantDelegationMetadata)(nil), // 8: kaname.cloud.iam.v1.RevokeGrantDelegationMetadata
+	(*GrantDelegation)(nil),               // 9: kaname.cloud.iam.v1.GrantDelegation
+	(*Subject)(nil),                       // 10: kaname.cloud.iam.v1.Subject
+	(SubjectType)(0),                      // 11: kaname.cloud.iam.v1.SubjectType
+	(*fieldmaskpb.FieldMask)(nil),         // 12: google.protobuf.FieldMask
+	(*operation.Operation)(nil),           // 13: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_grant_delegation_service_proto_depIdxs = []int32{
-	7,  // 0: kaname.cloud.iam.v1.ListGrantDelegationsResponse.grant_delegations:type_name -> kaname.cloud.iam.v1.GrantDelegation
-	8,  // 1: kaname.cloud.iam.v1.CreateGrantDelegationRequest.delegate:type_name -> kaname.cloud.iam.v1.Subject
-	9,  // 2: kaname.cloud.iam.v1.CreateGrantDelegationRequest.subject_types:type_name -> kaname.cloud.iam.v1.SubjectType
-	0,  // 3: kaname.cloud.iam.v1.GrantDelegationService.Get:input_type -> kaname.cloud.iam.v1.GetGrantDelegationRequest
-	1,  // 4: kaname.cloud.iam.v1.GrantDelegationService.List:input_type -> kaname.cloud.iam.v1.ListGrantDelegationsRequest
-	3,  // 5: kaname.cloud.iam.v1.GrantDelegationService.Create:input_type -> kaname.cloud.iam.v1.CreateGrantDelegationRequest
-	5,  // 6: kaname.cloud.iam.v1.GrantDelegationService.Revoke:input_type -> kaname.cloud.iam.v1.RevokeGrantDelegationRequest
-	7,  // 7: kaname.cloud.iam.v1.GrantDelegationService.Get:output_type -> kaname.cloud.iam.v1.GrantDelegation
-	2,  // 8: kaname.cloud.iam.v1.GrantDelegationService.List:output_type -> kaname.cloud.iam.v1.ListGrantDelegationsResponse
-	10, // 9: kaname.cloud.iam.v1.GrantDelegationService.Create:output_type -> corelib.operation.Operation
-	10, // 10: kaname.cloud.iam.v1.GrantDelegationService.Revoke:output_type -> corelib.operation.Operation
-	7,  // [7:11] is the sub-list for method output_type
-	3,  // [3:7] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	9,  // 0: kaname.cloud.iam.v1.ListGrantDelegationsResponse.grant_delegations:type_name -> kaname.cloud.iam.v1.GrantDelegation
+	10, // 1: kaname.cloud.iam.v1.CreateGrantDelegationRequest.delegate:type_name -> kaname.cloud.iam.v1.Subject
+	11, // 2: kaname.cloud.iam.v1.CreateGrantDelegationRequest.subject_types:type_name -> kaname.cloud.iam.v1.SubjectType
+	11, // 3: kaname.cloud.iam.v1.UpdateGrantDelegationRequest.subject_types:type_name -> kaname.cloud.iam.v1.SubjectType
+	12, // 4: kaname.cloud.iam.v1.UpdateGrantDelegationRequest.update_mask:type_name -> google.protobuf.FieldMask
+	0,  // 5: kaname.cloud.iam.v1.GrantDelegationService.Get:input_type -> kaname.cloud.iam.v1.GetGrantDelegationRequest
+	1,  // 6: kaname.cloud.iam.v1.GrantDelegationService.List:input_type -> kaname.cloud.iam.v1.ListGrantDelegationsRequest
+	3,  // 7: kaname.cloud.iam.v1.GrantDelegationService.Create:input_type -> kaname.cloud.iam.v1.CreateGrantDelegationRequest
+	5,  // 8: kaname.cloud.iam.v1.GrantDelegationService.Update:input_type -> kaname.cloud.iam.v1.UpdateGrantDelegationRequest
+	7,  // 9: kaname.cloud.iam.v1.GrantDelegationService.Revoke:input_type -> kaname.cloud.iam.v1.RevokeGrantDelegationRequest
+	9,  // 10: kaname.cloud.iam.v1.GrantDelegationService.Get:output_type -> kaname.cloud.iam.v1.GrantDelegation
+	2,  // 11: kaname.cloud.iam.v1.GrantDelegationService.List:output_type -> kaname.cloud.iam.v1.ListGrantDelegationsResponse
+	13, // 12: kaname.cloud.iam.v1.GrantDelegationService.Create:output_type -> corelib.operation.Operation
+	13, // 13: kaname.cloud.iam.v1.GrantDelegationService.Update:output_type -> corelib.operation.Operation
+	13, // 14: kaname.cloud.iam.v1.GrantDelegationService.Revoke:output_type -> corelib.operation.Operation
+	10, // [10:15] is the sub-list for method output_type
+	5,  // [5:10] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_grant_delegation_service_proto_init() }
@@ -528,7 +686,7 @@ func file_kaname_cloud_iam_v1_grant_delegation_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_grant_delegation_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

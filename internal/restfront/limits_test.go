@@ -254,7 +254,7 @@ func TestLimits_BodyRefusalReturnsTheSlot(t *testing.T) {
 // только на самой обёртке. Адрес слушателя произволен — привязки поднимаются,
 // не соединяясь, и отказ по телу наступает раньше обращения к слушателю.
 func TestLimits_PublicFrontIsBuiltWithItsLimits(t *testing.T) {
-	h, err := NewPublic(context.Background(), "127.0.0.1:1", dialOpts(), Limits{MaxBodyBytes: 8, MaxInFlight: 4})
+	h, err := NewPublic(context.Background(), "127.0.0.1:1", dialOpts(), Limits{MaxBodyBytes: 8, MaxInFlight: 4}, PublicServices{})
 	if err != nil {
 		t.Fatalf("сборка публичного фронта: %v", err)
 	}

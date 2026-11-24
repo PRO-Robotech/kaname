@@ -55,6 +55,10 @@ func TestInstallationCredentialPrivateClosedInput(t *testing.T) {
 			if err := os.WriteFile(path, tc.body, tc.mode); err != nil {
 				t.Fatal(err)
 			}
+			// Фикстура задаёт точные права: umask не должен скрывать публичное чтение.
+			if err := os.Chmod(path, tc.mode); err != nil {
+				t.Fatal(err)
+			}
 			_, _, err := loadInstallationCredential(path)
 			if (err == nil) != tc.valid {
 				t.Fatalf("valid=%v error=%v", tc.valid, err)

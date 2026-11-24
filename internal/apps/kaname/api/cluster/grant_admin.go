@@ -206,12 +206,17 @@ func (uc *GrantAdminUseCase) Execute(
 func (uc *GrantAdminUseCase) assertSubjectMayHoldGrant(
 	ctx context.Context, styp domain.GrantSubjectType, subjectID string,
 ) error {
+	return AssertAdminGrantTarget(ctx, uc.subjectState, styp, subjectID)
+}
+
+// AssertAdminGrantTarget сохраняет единый предикат для раннего отказа и final decision.
+func AssertAdminGrantTarget(ctx context.Context, reader AdminSubjectState, styp domain.GrantSubjectType, subjectID string) error {
 	// Непровязанная проверка — это отказ, а не разрешение (так же устроен
 	// соседний гейт ReBAC этого же RPC). Иначе композиция, забывшая её
 	// подключить, поднимает сервис, выдающий права уровня кластера кому угодно,
 	// и заметить это нечем. Текст называет основание — его читает оператор,
 	// поднимающий стенд.
-	if uc.subjectState == nil {
+	if reader == nil {
 		return shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"subject state is not verifiable"))
 	}
@@ -219,7 +224,7 @@ func (uc *GrantAdminUseCase) assertSubjectMayHoldGrant(
 	case domain.GrantSubjectTypeServiceAccount:
 		// `enabled` — и есть предикат domain.ServiceAccount.MayAuthenticate;
 		// колонка прочитана запросом выше, поэтому судить есть по чему.
-		enabled, err := uc.subjectState.ServiceAccountEnabled(ctx, subjectID)
+		enabled, err := reader.ServiceAccountEnabled(ctx, subjectID)
 		if err != nil {
 			return shared.MapRepoErr(err)
 		}
@@ -228,7 +233,7 @@ func (uc *GrantAdminUseCase) assertSubjectMayHoldGrant(
 				"ServiceAccount %s is disabled", subjectID))
 		}
 	default:
-		st, err := uc.subjectState.UserInviteStatus(ctx, subjectID)
+		st, err := reader.UserInviteStatus(ctx, subjectID)
 		if err != nil {
 			return shared.MapRepoErr(err)
 		}
@@ -274,12 +279,34 @@ func (uc *GrantAdminUseCase) doGrant(
 	subject domain.SubjectID,
 	grantedBy string,
 ) (domain.ClusterAdminGrant, error) {
+	if runner, ok := uc.txb.(AdminDecisionRunner); ok {
+		intent, err := adminMutationIntent(ctx, AdminActionGrant, subjectType, subject)
+		if err != nil {
+			return domain.ClusterAdminGrant{}, err
+		}
+		return runner.RunAdminDecision(ctx, intent, func(ctx context.Context, tx service.Tx) (domain.ClusterAdminGrant, error) {
+			return uc.grantInTx(ctx, tx, subjectType, subject, grantedBy)
+		})
+	}
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
 		return domain.ClusterAdminGrant{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
 
+	grant, err := uc.grantInTx(ctx, tx, subjectType, subject, grantedBy)
+	if err != nil {
+		return domain.ClusterAdminGrant{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.ClusterAdminGrant{}, fmt.Errorf("commit: %w", err)
+	}
+	return grant, nil
+}
+
+// grantInTx не завершает TX: configured runner повторяет всю попытку вместе с Commit.
+func (uc *GrantAdminUseCase) grantInTx(ctx context.Context, tx service.Tx, subjectType domain.GrantSubjectType, subject domain.SubjectID, grantedBy string) (domain.ClusterAdminGrant, error) {
 	grant, created, gerr := uc.writer.Grant(ctx, tx, subjectType, subject, grantedBy)
 	if gerr != nil {
 		return domain.ClusterAdminGrant{}, gerr
@@ -319,8 +346,5 @@ func (uc *GrantAdminUseCase) doGrant(
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return domain.ClusterAdminGrant{}, fmt.Errorf("commit: %w", err)
-	}
 	return grant, nil
 }

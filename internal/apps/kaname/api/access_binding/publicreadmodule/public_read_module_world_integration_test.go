@@ -63,6 +63,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/moduleroster"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -162,7 +163,7 @@ func newP2(t *testing.T) *p2 {
 	w.reg = internaliam.NewRegisterResourceUseCase(
 		kanamepg.NewFGAOutboxEmitter(),
 		kanamepg.NewResourceMirrorEmitter(),
-		kanamepg.NewPoolTxBeginner(pool),
+		kanamepg.NewRegistrationTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
 		kanamepg.NewPublicReadPublisher(),
 		// Снятие регистрации снимает выдачи объекта (kaname#963) — тем же
@@ -170,7 +171,9 @@ func newP2(t *testing.T) *p2 {
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), src),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	).WithObjectReconciler(w.rec, nil)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "probemod"}).
+		WithObjectReconciler(w.rec, nil).
+		WithResidualTupleReader(kanamepg.NewResidualTupleReader(pool))
 
 	w.box(pmB1)
 	w.box(pmB2)

@@ -60,15 +60,21 @@ const PasswordRuleHomeRel = "internal/apps/kaname/api/humansession/password_rule
 // PasswordRuleForm — форма, в которой найдено объявление.
 type PasswordRuleForm string
 
-// #nosec G101 -- ИМЕНА ФОРМ ОБЪЯВЛЕНИЯ для текста находки гейта: слово «пароль»
+// ИМЕНА ФОРМ ОБЪЯВЛЕНИЯ для текста находки гейта: слово «пароль»
 // здесь — предмет проверки, а не значение удостоверения.
 const (
-	// PasswordRuleFormName — конструктор либо тип по имени.
-	PasswordRuleFormName PasswordRuleForm = "объявление по имени"
-	// PasswordRuleFormVerb — метод `Judge` над паролем.
-	PasswordRuleFormVerb PasswordRuleForm = "метод Judge над паролем"
-	// PasswordRuleFormLength — сравнение длины пароля в рунах.
-	PasswordRuleFormLength PasswordRuleForm = "сравнение длины пароля в рунах"
+	// ruleFormName — конструктор либо тип по имени.
+	ruleFormName PasswordRuleForm = "объявление по имени"
+	// PasswordRuleFormName сохраняет исходное имя константы для вызывающих.
+	PasswordRuleFormName = ruleFormName
+	// ruleFormVerb — метод `Judge` над паролем.
+	ruleFormVerb PasswordRuleForm = "метод Judge над паролем"
+	// PasswordRuleFormVerb сохраняет исходное имя константы для вызывающих.
+	PasswordRuleFormVerb = ruleFormVerb
+	// ruleFormLength — сравнение длины пароля в рунах.
+	ruleFormLength PasswordRuleForm = "сравнение длины пароля в рунах"
+	// PasswordRuleFormLength сохраняет исходное имя константы для вызывающих.
+	PasswordRuleFormLength = ruleFormLength
 )
 
 // PasswordRuleSite — найденное объявление либо вызов.

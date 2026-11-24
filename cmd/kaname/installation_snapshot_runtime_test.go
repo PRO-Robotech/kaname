@@ -16,7 +16,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
-	"gopkg.in/yaml.v3"
 )
 
 func rid08Stage(t *testing.T, f *installationNativeWorld) {
@@ -31,7 +30,7 @@ func rid08Stage(t *testing.T, f *installationNativeWorld) {
 	requireNativeAuthority(t, f.given, "service_account", f.creator.ID, 1)
 	// Штатная подготовка поставляет точные каталог/I M1/M2, опуская ТОЛЬКО объявления GD.
 	// Проверяемая последующая полная нагрузка всегда содержит оба объявления GD.
-	p := f.apply(t, installruntime.DeliveryInput{Manifests: nativeWithoutDelegations(t, installruntime.NewRIDDeliveryFixture()), CredentialFile: f.creator.CredentialFile})
+	p := f.apply(t, installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: nativeWithoutDelegations(t, installruntime.NewRIDDeliveryFixture()), CredentialFile: f.creator.CredentialFile})
 	results, err := p.Results()
 	require.NoError(t, err)
 	require.Empty(t, results, "setup is not claimed as completed installation apply")
@@ -53,10 +52,11 @@ func rid08Start(t *testing.T, f *installationNativeWorld, label string, pause, f
 	deliveryDir := filepath.Join(configRoot, "delivery")
 	_, err := installruntime.NewRIDDeliveryFixture().Write(deliveryDir, false)
 	require.NoError(t, err)
-	raw, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": deliveryDir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}})
+	raw, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": deliveryDir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}}, f.writerPlan)
 	require.NoError(t, err)
 	configPath := filepath.Join(configRoot, "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, raw, 0600))
+	ridRegistrationStartupProof(t, configRoot, raw, f.writerPlan)
 	digest := rid06HashExecutable(t)
 	c := startRIDInstallationChild(t, f, label, rid08ChildInput{ConfigPath: configPath, EvidenceDir: filepath.Join(f.session.Root, label), PauseSnapshot: pause, FaultSecondPage: fault}, nativeConcurrentEnvironment(t, f, installruntime.SecondNativePorts(), "rid08-full-root"), rid08ChildInputEnv, "TestRID08OwnedSnapshotStartupChild", "3m")
 	parent, err := os.ReadFile("/proc/self/cgroup")
@@ -64,13 +64,14 @@ func rid08Start(t *testing.T, f *installationNativeWorld, label string, pause, f
 	child, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", c.cmd.Process.Pid))
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(parent, child))
-	memory, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	cgroupDir := ridOwnedCgroup(t, parent)
+	memory, err := os.ReadFile(filepath.Join(cgroupDir, "memory.max"))
 	require.NoError(t, err)
 	require.Equal(t, "4294967296", string(bytes.TrimSpace(memory)))
-	swap, err := os.ReadFile("/sys/fs/cgroup/memory.swap.max")
+	swap, err := os.ReadFile(filepath.Join(cgroupDir, "memory.swap.max"))
 	require.NoError(t, err)
 	require.Equal(t, "0", string(bytes.TrimSpace(swap)))
-	cpu, err := os.ReadFile("/sys/fs/cgroup/cpu.max")
+	cpu, err := os.ReadFile(filepath.Join(cgroupDir, "cpu.max"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.Equal(t, digest, rid06HashExecutable(t), "owned test executable changed during run") })
 	rid08Write(t, c.dir, "full-root-provenance", map[string]any{"instrumentedTestExecutableSHA256": digest, "productionAppSHA256": f.session.BinarySHA256, "pid": c.cmd.Process.Pid, "starttime": c.start, "cgroup": string(child), "pageSize": 2, "cpuMax": string(bytes.TrimSpace(cpu)), "faultSecondPage": fault, "pauseAfterCompletedRealSnapshot": pause})

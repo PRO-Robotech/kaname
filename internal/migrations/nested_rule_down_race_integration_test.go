@@ -56,7 +56,7 @@ func TestIntegration_NestedRuleRollbackDoesNotRaceItsWriter(t *testing.T) {
 		{name: "писатель вложенной роли отказался от транзакции, пока откат ждёт", commit: false},
 	} {
 		t.Run(sc.name, func(t *testing.T) {
-			db := freshIamSchema(t)
+			db := historicalRegistrationDB(t)
 			own, previous := versionsOf(t, nestedRuleMigration)
 			require.NoError(t, goose.DownTo(db, ".", own), "миграции новее предмета обязаны сняться ДО сцены")
 			ndSeedTenant(t, db)

@@ -250,6 +250,12 @@ type CatalogPendingEntry struct {
 // не открыто (fail-closed).
 var catalogPendingEntries = []CatalogPendingEntry{
 	{
+		OwnFQN:  "kaname.cloud.iam.v1.ChildRegistrationService/Register",
+		Why:     "канонический вход регистрации потомка объявлен в Kaname (kaname#1045); край строит свой каталог после обновления пина службы",
+		Removal: "копия края на стволе платформы содержит этот RPC после обновления пина Kaname и генерации каталога",
+		Refs:    "PRO-Robotech/kaname#1045",
+	},
+	{
 		OwnFQN:  "kaname.cloud.iam.v1.GrantDelegationService/Create",
 		Why:     grantDelegationPendingWhy,
 		Removal: grantDelegationPendingRemoval,
@@ -272,6 +278,20 @@ var catalogPendingEntries = []CatalogPendingEntry{
 		Why:     grantDelegationPendingWhy,
 		Removal: grantDelegationPendingRemoval,
 		Refs:    "PRO-Robotech/kaname#986",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.GrantDelegationService/Update",
+		Why: "расширение делегирования выдачи заведено контрактом службы (kaname#1032); " +
+			"край назовёт глагол после подъёма пина службы и регенерации каталога; " +
+			"до того край отвечает на глагол отказом «нет записи каталога»",
+		Removal: grantDelegationPendingRemoval,
+		Refs:    "PRO-Robotech/kaname#1032",
+	},
+	{
+		OwnFQN:  "kaname.cloud.iam.v1.InternalIAMService/CloseChildParent",
+		Why:     "внутренний RPC закрытия регистрации родителя объявлен контрактом Kaname (kaname#1045)",
+		Removal: "копия края содержит этот RPC после обновления пина Kaname и генерации каталога",
+		Refs:    "PRO-Robotech/kaname#1045",
 	},
 }
 

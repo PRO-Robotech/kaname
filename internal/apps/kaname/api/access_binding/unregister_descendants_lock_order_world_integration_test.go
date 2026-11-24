@@ -57,6 +57,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -199,7 +200,7 @@ func (w *urxWorld) heldRegister() (*internaliam.RegisterResourceUseCase, *mirror
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld}),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	), hold
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"}), hold
 }
 
 // TestUnregisterDescendantsVsObjectPass_HeldUnregisterNoDeadlock — снятие P

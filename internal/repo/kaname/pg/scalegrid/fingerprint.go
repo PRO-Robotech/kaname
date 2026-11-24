@@ -252,6 +252,9 @@ func fileIdentity(rel string) (string, error) {
 			return r.role + "/" + path.Base(rel), nil
 		}
 	}
+	if id, ok := reportFixtureIdentity(rel); ok {
+		return id, nil
+	}
 	return "", fmt.Errorf("scalegrid: у файла %s нет роли под отпечатком — тождество "+
 		"неопределимо; взять вместо него путь значило бы вернуть чувствительность "+
 		"отпечатка к переименованию каталога", rel)
@@ -679,9 +682,10 @@ func contentHash(root string, files []string) (string, error) {
 // вернётся под отпечаток сам, без чьей-либо памяти. Запись, которой больше
 // нечего исключать, тоже находка: отсутствующий файл — отказ, а не тишина.
 var fingerprintScaffolding = map[string]bool{
-	gridDir + "/fingerprint.go": true, // вычисляет отпечаток
-	gridDir + "/ddlsubject.go":  true, // разбирает оператор определения для отпечатка
-	gridDir + "/report.go":      true, // печатает отчёт
+	gridDir + "/report_fixture_fingerprint.go": true, // семейный отпечаток, без обращений к БД
+	gridDir + "/fingerprint.go":                true, // вычисляет отпечаток
+	gridDir + "/ddlsubject.go":                 true, // разбирает оператор определения для отпечатка
+	gridDir + "/report.go":                     true, // печатает отчёт
 }
 
 // scaffoldingStillHolds — остаётся ли файл ОСНАСТКОЙ, то есть неспособным

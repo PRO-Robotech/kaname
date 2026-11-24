@@ -15,3 +15,9 @@ resources:
   limits:
     cpu: 100m
     memory: 128Mi
+
+# Explicit installation authority for registration (kaname#1031). Required in
+# production. Omitted has no default; to intentionally disable all registrars use:
+# registrationAccountWriters: { assignments: [], disabled: [] }
+# Each assignment: {assignment_id: <new-stable-id>, account_id: <existing-id>, module: registry}
+# disabled is an explicit first-upgrade census exception: {account_id, module, reason}.

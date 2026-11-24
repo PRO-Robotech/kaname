@@ -51,6 +51,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
 // Тип, заведённый ПРИМЕНЕНИЕМ: словарь сборки о нём не знает by construction —
@@ -84,7 +85,7 @@ func newRegisterUCApplied(t *testing.T) (*internaliam.RegisterResourceUseCase, *
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "compute"})
 	return uc, pool
 }
 
@@ -146,6 +147,7 @@ func TestRegisterResource_AppliedTypeReachesTheMirror(t *testing.T) {
 		"живой сосед не лёг в зеркало точечным именем")
 
 	// ПРЕДМЕТ.
+	uc.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: appliedModule})
 	seedAppliedType(t, ctx, pool)
 	const appliedObj = appliedType + ":obj-1990"
 	err := uc.Register(ctx, &iamv1.RegisterResourceRequest{
@@ -178,6 +180,7 @@ func TestUnregisterResource_AppliedTypeLeavesNoMirrorRow(t *testing.T) {
 	}
 	ctx := context.Background()
 	uc, pool := newRegisterUCApplied(t)
+	uc.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: appliedModule})
 	scene := registrationscene.Seed(t, ctx, pool)
 	seedAppliedType(t, ctx, pool)
 

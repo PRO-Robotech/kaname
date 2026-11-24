@@ -336,26 +336,18 @@ func strSeedBinding(t *testing.T, ctx context.Context, tx pgx.Tx,
 func (f *strFixture) growN(t *testing.T, ctx context.Context, target, allowedShare int) {
 	t.Helper()
 	if allowedShare != f.shareSeeded {
-		// Нулевая доля относится ко ВСЕМ кандидатам List, включая объект Ask.
-		// При возврате к положительной доле восстанавливаются все метки оси K.
-		labels := strLabelKeys()
-		if allowedShare == 0 {
-			labels = map[string]string{"env": "dev"}
-		}
-		exec(t, ctx, f.tx, `UPDATE kaname.resource_mirror SET labels=$1::jsonb
-            WHERE object_type=$2 AND object_id=$3`, strJSON(t, labels), strCatalogType, f.allowObj)
-		// Смена раскраски переписывает метки УЖЕ посаженных: досыпать поверх
-		// значило бы получить смесь двух долей и назвать её одной.
+		f.recolorAllowObject(t, ctx, allowedShare)
 		if f.seedN > 0 {
-			exec(t, ctx, f.tx,
-				`UPDATE kaname.resource_mirror SET labels = CASE
-				    WHEN (substr(object_id, 6)::int % 100) < $1 THEN $2::jsonb ELSE $3::jsonb END
-				  WHERE object_type = $4 AND object_id LIKE 'bulk-%'`,
-				allowedShare, strJSON(t, strSelectorLabels(0)), strJSON(t, map[string]string{"env": "dev"}),
-				strCatalogType)
+			f.recolorBulkRange(t, ctx, allowedShare, "", "")
 		}
 		f.shareSeeded = allowedShare
 	}
+	f.growNObjects(t, ctx, target, allowedShare)
+}
+
+// Посадка новых объектов отделена от перекраски; SQL остаётся в одном месте.
+func (f *strFixture) growNObjects(t *testing.T, ctx context.Context, target, allowedShare int) {
+	t.Helper()
 	if target <= f.seedN {
 		return
 	}
@@ -382,6 +374,32 @@ func (f *strFixture) growN(t *testing.T, ctx context.Context, target, allowedSha
 	}
 	must(t, s.Flush(ctx))
 	f.seedN = target
+}
+
+// Та же раскраска используется прежним посевом и ограниченными Given отчёта.
+func (f *strFixture) recolorAllowObject(t *testing.T, ctx context.Context, allowedShare int) {
+	t.Helper()
+	labels := strLabelKeys()
+	if allowedShare == 0 {
+		labels = map[string]string{"env": "dev"}
+	}
+	exec(t, ctx, f.tx, `UPDATE kaname.resource_mirror SET labels=$1::jsonb
+            WHERE object_type=$2 AND object_id=$3`, strJSON(t, labels), strCatalogType, f.allowObj)
+}
+
+// Пустая нижняя граница сохраняет прежнее обновление всех bulk-объектов.
+// В отчёте границы — исходные дополненные нулями IDs; диапазон использует ключ.
+func (f *strFixture) recolorBulkRange(t *testing.T, ctx context.Context, allowedShare int, first, last string) int64 {
+	t.Helper()
+	tag, err := f.tx.Exec(ctx,
+		`UPDATE kaname.resource_mirror SET labels = CASE
+		    WHEN (substr(object_id, 6)::int % 100) < $1 THEN $2::jsonb ELSE $3::jsonb END
+		  WHERE object_type = $4 AND object_id LIKE 'bulk-%'
+		    AND ($5::text = '' OR (object_id >= $5 AND object_id < $6))`,
+		allowedShare, strJSON(t, strSelectorLabels(0)), strJSON(t, map[string]string{"env": "dev"}),
+		strCatalogType, first, last)
+	must(t, err)
+	return tag.RowsAffected()
 }
 
 // setM — членств спрашивающего ровно target.
@@ -747,10 +765,10 @@ func measureList(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictC
 		Subject: strSubject, ObjectType: strModelType, Relation: strRelation, Limit: p.Pg,
 	})
 	elapsed := time.Since(t0)
-	after := tuplesRead(t, ctx, tx)
 	if err != nil {
 		t.Fatalf("перечисление в точке %s: %v", p, err)
 	}
+	after := tuplesRead(t, ctx, tx)
 	res.tuples = after - before
 	res.calls = int64(capture.count())
 	res.listed = len(ids)
@@ -868,7 +886,10 @@ func TestStrengthGrid_Report(t *testing.T) {
 
 	runCommand := fmt.Sprintf("%s=1 go test ./internal/repo/kaname/pg/relverdict/ "+
 		"-run TestStrengthGrid_Report -count=1 -v -timeout 120m", strengthEnv)
-	prov := scalegrid.TakeProvenance(runCommand, nil)
+	prov, err := scalegrid.TakeStrengthGridProvenance(runCommand)
+	if err != nil {
+		t.Fatalf("происхождение сетки прочности: %v", err)
+	}
 	// Сетка у этого прибора СВОЯ, и провенанс обязан назвать именно её: шапка,
 	// напечатавшая соседнюю, описывала бы другой замер.
 	prov.GridDigest = scalegrid.StrengthDigest(grid)
@@ -878,7 +899,7 @@ func TestStrengthGrid_Report(t *testing.T) {
 	results := make([][]strPointResult, 0, len(grid))
 	for _, axis := range grid {
 		axisStart := time.Now()
-		results = append(results, runStrengthAxis(t, ctx, axis))
+		results = append(results, runBoundedStrengthReportAxis(t, axis))
 		t.Logf("ось %s прогнана за %s", axis[0].Axis, time.Since(axisStart).Round(time.Second))
 		// Отчёт пишется ПОСЛЕ КАЖДОЙ ОСИ, а не в конце: если дорогая ось
 		// сорвётся, дешёвые уже сняты и предъявлены файлом. Прежний порядок

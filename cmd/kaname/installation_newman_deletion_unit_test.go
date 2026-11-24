@@ -325,7 +325,15 @@ func rid05UnitDeleteSnapshots(t *testing.T) (rid03NewmanSnapshot, rid03NewmanSna
 	a.Raw["access_binding_target_members"] = []rid09PrimaryRow{rid03UnitRow(t, map[string]any{"binding_id": "ownerG", "role_id": "owner", "rule_fp": "fp", "object_type": "iam.serviceAccount", "object_id": "C", "verification_status": "ACTIVE", "updated_at": base.Add(-time.Second)})}
 	a.Raw["access_binding_emitted_tuples"] = []rid09PrimaryRow{rid03UnitRow(t, map[string]any{"binding_id": "ownerG", "role_id": "owner", "rule_fp": "fp", "member_object_type": "iam.serviceAccount", "member_object_id": "C", "source": "member", "fga_user": "service_account:I", "relation": "viewer", "object": "iam_service_account:C"})}
 	a.Raw["relation_fact"] = []rid09PrimaryRow{rid03UnitRow(t, map[string]any{"subject": "service_account:I", "relation": "viewer", "object_type": "iam_service_account", "object_id": "C", "source_version": base.Add(-time.Second), "created_at": base.Add(-2 * time.Second)})}
-	a.Raw["access_bindings"] = []rid09PrimaryRow{rid03UnitRow(t, map[string]any{"id": "oldG", "created_at": base.Add(-time.Minute), "status": "ACTIVE", "future": "retained"})}
+	a.Raw["access_bindings"] = []rid09PrimaryRow{
+		rid03UnitRow(t, map[string]any{"id": "oldG", "created_at": base.Add(-time.Minute), "status": "ACTIVE", "future": "retained"}),
+		rid03UnitRow(t, map[string]any{"id": "ownerG", "role_id": "owner", "scope": 2, "resource_type": "account", "resource_id": "SYS"}),
+	}
+	epoch := func(field, key string, revision int64) rid09PrimaryRow {
+		return rid03UnitRow(t, map[string]any{field: key, "generation": "57", "revision": revision})
+	}
+	a.Raw["authority_policy_epoch"] = []rid09PrimaryRow{epoch("key", "service_account:C", 1), epoch("key", "service_account:I", 2), epoch("key", "*", 9)}
+	a.Raw["authority_binding_epoch"] = []rid09PrimaryRow{epoch("scope", "SYS", 1), epoch("scope", "", 9)}
 	a.Raw["grant_delegations"] = []rid09PrimaryRow{rid03UnitRow(t, map[string]any{"id": "oldGD", "delegated_by_id": "C", "status": "ACTIVE"})}
 	for _, table := range []string{"fga_outbox", "resource_journal", "resource_reconcile_outbox", "operations", "future_history"} {
 		a.Raw[table] = []rid09PrimaryRow{}
@@ -336,6 +344,8 @@ func rid05UnitDeleteSnapshots(t *testing.T) (rid03NewmanSnapshot, rid03NewmanSna
 		b.Raw[table] = append([]rid09PrimaryRow{}, rows...)
 	}
 	b.Raw["service_accounts"] = b.Raw["service_accounts"][1:]
+	b.Raw["authority_policy_epoch"] = []rid09PrimaryRow{epoch("key", "service_account:C", 2), epoch("key", "service_account:I", 3), epoch("key", "*", 10)}
+	b.Raw["authority_binding_epoch"] = []rid09PrimaryRow{epoch("scope", "SYS", 3), a.Raw["authority_binding_epoch"][1]}
 	for _, table := range []string{"project_resource_quotas", "access_binding_target_members", "access_binding_emitted_tuples", "relation_fact"} {
 		b.Raw[table] = []rid09PrimaryRow{}
 	}
@@ -344,6 +354,30 @@ func rid05UnitDeleteSnapshots(t *testing.T) (rid03NewmanSnapshot, rid03NewmanSna
 	b.Raw["resource_reconcile_outbox"] = []rid09PrimaryRow{rid03UnitRow(t, map[string]any{"id": int64(1), "object_type": "iam.serviceAccount", "object_id": "C", "event_type": "mirror.delete", "created_at": base.Add(time.Second), "sent_at": base.Add(time.Second), "last_error": nil, "attempt_count": 0})}
 	return a, b
 }
+func TestRID05DeleteEpochScopeIsClosed(t *testing.T) {
+	a, b := rid05UnitDeleteSnapshots(t)
+	tuples := map[rid03Tuple]bool{{"service_account:I", "viewer", "iam_service_account", "C"}: true}
+	require.True(t, rid05DeleteEpochsValid(a, a, "C", "SYS", true, tuples))
+	require.True(t, rid05DeleteEpochsValid(a, b, "C", "SYS", false, tuples))
+	require.False(t, rid05DeleteEpochsValid(a, b, "C", "SYS", true, tuples))
+	require.False(t, rid05DeleteEpochsValid(a, b, "C", "SYS", false, nil), "корень policy меняется только из-за удалённого факта")
+
+	updated := b.Raw["authority_policy_epoch"]
+	for index := range updated {
+		invalid := append([]rid09PrimaryRow(nil), updated...)
+		invalid[index] = a.Raw["authority_policy_epoch"][index]
+		b.Raw["authority_policy_epoch"] = invalid
+		require.False(t, rid05DeleteEpochsValid(a, b, "C", "SYS", false, tuples))
+	}
+	b.Raw["authority_policy_epoch"] = updated
+	a.Raw["role_rule_selectors"] = []rid09PrimaryRow{
+		rid03UnitRow(t, map[string]any{"role_id": "owner", "arm": "labels", "container_type": nil}),
+	}
+	require.False(t, rid05DeleteEpochsValid(a, b, "C", "SYS", false, tuples), "selector требует глобальную область")
+	b.Raw["authority_binding_epoch"][1] = rid03UnitRow(t, map[string]any{"scope": "", "revision": 10, "generation": "57"})
+	require.True(t, rid05DeleteEpochsValid(a, b, "C", "SYS", false, tuples))
+}
+
 func TestRID05DeleteCleanupClosedFullRawDelta(t *testing.T) {
 	for _, name := range []string{"exact", "repeated-technical-intent", "missing-tuple", "wrong-binding", "wrong-role", "wrong-rule", "wrong-object-type", "wrong-status", "unknown-table", "unknown-new-column", "extra-oldG-edge", "oldG-changed", "oldGD-C2-retie", "C2-deleted", "C-not-deleted", "missing-journal", "extra-journal", "forged-clock", "false-fact-version"} {
 		t.Run(name, func(t *testing.T) {

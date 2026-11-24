@@ -32,6 +32,7 @@ def declarations(root):
     modules = {}
     checks, blocks, inspected = set(), [], 0
     for job, body in workflow["jobs"].items():
+        block_occurrences = {}
         for index, step in enumerate(body.get("steps", [])):
             inspected += 1
             if str(step.get("uses", "")).startswith("actions/setup-go@"):
@@ -75,14 +76,24 @@ def declarations(root):
                 if match:
                     checks.update(shlex.split(match[1]))
             if found:
-                blocks.append(run)
+                # Явные повторные шаги одного job остаются разными наблюдениями.
+                occurrence = block_occurrences.get(run, 0) + 1
+                block_occurrences[run] = occurrence
+                blocks.append((run, occurrence))
     assert inspected and installs and blocks, "пустой обход workflow tools"
     print(f"PARITY-CENSUS workflow jobs={len(workflow['jobs'])} steps={inspected} installs={len(installs)} checks={len(checks)}", flush=True)
     for name, (version, coordinate) in sorted(installs.items()):
         print(f"PARITY-DECL {coordinate} {name} version={version or 'workflow-unpinned'}", flush=True)
     assert not checks.difference(installs), ("missing expected versions", sorted(checks.difference(installs)))
     assert all(version for version, _ in installs.values()), "missing exact expected version"
-    return installs, checks, blocks, modules
+    # Все декларации уже проверены. Между jobs объединяем только точные копии
+    # полного run-блока с одинаковым номером его повторения внутри job.
+    # Второе/третье исполнение, явно объявленное в job, остаётся в lawful-мире;
+    # разные байты и порядок первых вхождений не меняются.
+    unique_blocks = [run for run, _ in dict.fromkeys(blocks)]
+    print(f"PARITY-INSTALL-CENSUS total={len(blocks)} unique={len(unique_blocks)} "
+          f"duplicates={len(blocks) - len(unique_blocks)}", flush=True)
+    return installs, checks, unique_blocks, modules
 
 
 def executable(path, text):
@@ -151,10 +162,10 @@ def verify_tools(data):
 
 class World:
     """Изолированные пути и install peers; исполняется сам RUNNER_POD_SH."""
-    def __init__(self, base, payload, env=None, ships=None):
+    def __init__(self, base, payload, env=None, ships=None, *, work_name="kaname-runner"):
         self.base = base
         self.payload = payload
-        self.work = base / "work"
+        self.work = base / work_name
         self.src = base / "src"
         self.prefix = base / "usr/local"
         self.bin = base / "fixture-bin"
@@ -174,16 +185,26 @@ class World:
                     shutil.copyfile(file, self.work / "ship" / file.name)
         self.provider = {k: str(v) for k, v in yaml.safe_load((source_root / ".github/workflows/e2e-newman.yml").read_text())["env"].items()}
         self.env = dict(os.environ)
+        # Подписывающий APT-peer моделируется отдельно; здесь фиксируем его точные
+        # байты индекса, чтобы проверка immutable source не становилась обходом.
+        self.provider["KANAME_RUNNER_RELEASES"] = "\n".join(
+            hashlib.sha256(("fixture-release:" + suite + "\n").encode()).hexdigest() + " " + suite
+            for suite in ("noble", "noble-updates", "noble-security"))
         self.env.update(self.provider)
         self.env["KANAME_RUNNER_GO"] = declarations(source_root)[0]["go"][0]
         self.env["FIXTURE_NPM"] = self.provider["KANAME_RUNNER_NPM"]
         self.env["FIXTURE_REAL_GOROOT"] = os.environ["GOROOT"]
         self.env.update(env or {})
+        # В step-мире env приходит из настоящего pod. Его реальные release pins
+        # не удостоверяют синтетический индекс APT-peer: окончательная привязка
+        # фикстуры ставится после переноса env. Остальной pod env сохраняется.
+        self.env["KANAME_RUNNER_RELEASES"] = self.provider["KANAME_RUNNER_RELEASES"]
         self.env.update(HOME=str(base / "home"), PATH=f"{self.bin}:{self.prefix}/bin:/usr/bin:/bin",
                         RUNNER_SHA="fixture-source", RUNNER_REPO="PRO-Robotech/kaname",
                         RUNNER_NODE=self.provider["KANAME_RUNNER_NODE"], RUNNER_KUBECTL=self.provider["KANAME_RUNNER_KUBECTL"], RUNNER_GO=self.env["KANAME_RUNNER_GO"],
                         RUNNER_GH_SH="#!/bin/sh\nexit 4\n", GITHUB_PATH=str(self.work / "github-path"), GITHUB_ENV=str(self.work / "github-env"),
-                        FIXTURE_WORLD=str(base), FIXTURE_PY=sys.executable,
+                        RUNNER_TEMP=str(base), FIXTURE_WORLD=str(base), FIXTURE_WORK=str(self.work),
+                        FIXTURE_PY=sys.executable,
                         KANAME_STAND_IN_POD="inherited-after-world-cleanup", KEEP_SENTINEL="retained",
                         GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
         # Операционная оболочка полезной нагрузки/экспорта, отдельно от ожидаемого набора инструментов процесса.
@@ -220,7 +241,7 @@ class World:
         executable(self.bin / "sudo", '''#!/usr/bin/env python3
 import json,os,pathlib,sys
 args=sys.argv[1:]
-assert args[0] == '--preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT'
+assert args[0] == '--preserve-env=KANAME_RUNNER_OS,KANAME_RUNNER_SNAPSHOT,KANAME_RUNNER_APT,KANAME_RUNNER_RELEASES'
 assert args[1:3] == ['bash','-c']
 with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'sudo-peer.jsonl').open('a') as out: out.write(json.dumps(args)+'\\n')
 os.execvpe('bash',args[1:],dict(os.environ,FIXTURE_UID='0'))
@@ -230,6 +251,15 @@ import json,os,pathlib,sys
 with (pathlib.Path(os.environ['FIXTURE_WORLD'])/'apt-peer.jsonl').open('a') as out: out.write(json.dumps({'peer':str(pathlib.Path(__file__).resolve()),'uid':os.environ['FIXTURE_UID'],'argv':sys.argv[1:]})+'\\n')
 if os.environ.get('FIXTURE_APT_FAIL'):
  print('controlled apt peer failure',file=sys.stderr);sys.exit(23)
+if 'update' in sys.argv:
+ options=[sys.argv[i+1] for i,a in enumerate(sys.argv[:-1]) if a=='-o']
+ lists=pathlib.Path(next(v.split('=',1)[1] for v in options if v.startswith('Dir::State::lists=')))
+ prefix=os.environ['KANAME_RUNNER_SNAPSHOT'].removeprefix('https://').replace('/','_')
+ for suite in ('noble','noble-updates','noble-security'):
+  (lists/(prefix+'dists_'+suite+'_InRelease')).write_text('fixture-release:'+suite+'\\n')
+  for component in ('main','universe'):
+   (lists/(prefix+'dists_'+suite+'_'+component+'_binary-amd64_Packages')).write_text('')
+
 ''')
         # Устаревший запасной файл остаётся: допустимый bootstrap должен выбрать своего
         # точного поставщика, не удаляя и не принимая этот старый исполняемый файл.
@@ -269,7 +299,7 @@ if name == "go":
 elif name == "npm":
     if args == ["--version"]: print(os.environ["FIXTURE_NPM"]); sys.exit(0)
     if args[:2] != ["install", "-g"]: sys.exit(72)
-    tool, version=args[2].rsplit("@",1); target=root/"work/provider/node/bin"/tool
+    tool, version=args[2].rsplit("@",1); target=pathlib.Path(os.environ["FIXTURE_WORK"])/"provider/node/bin"/tool
 else: sys.exit(73)
 with (root/"install-argv").open("a") as out: out.write(json.dumps([name,*args])+"\\n")
 target.parent.mkdir(parents=True,exist_ok=True)
@@ -344,11 +374,13 @@ sys.stdout.buffer.write(lzma.decompress(sys.stdin.buffer.read()))
         # Эти соседи должны остаться доступны после намеренного сброса PATH в bootstrap.
         provider_bin = self.work / "provider/bin"
         provider_bin.mkdir(parents=True)
-        for name in ("python3",):
+        # Штатный provider меняет PATH. Повторный bootstrap из workflow
+        # должен снова использовать тех же локальных установочных соседей.
+        for name in ("python3", "apt-get", "id", "sudo"):
             (provider_bin / name).symlink_to(self.bin / name)
         executable(provider_bin / "curl", r'''#!/usr/bin/env python3
 import hashlib, os, pathlib, shutil, sys
-a=sys.argv[1:]; url=next(x for x in a if x.startswith("https://")); work=pathlib.Path(os.environ["FIXTURE_WORLD"])/"work"
+a=sys.argv[1:]; url=next(x for x in a if x.startswith("https://")); work=pathlib.Path(os.environ["FIXTURE_WORK"])
 if "go.dev/dl/?mode=json" in url:
  import json
  pin=os.environ["KANAME_RUNNER_GO"]
@@ -403,12 +435,39 @@ else: sys.exit(74)
         return result
 
 
+def apt_fixture_checks(root, payload, base):
+    # Вход как у step_checks: полный env реально сгенерированного pod, включая
+    # настоящие pins workflow. Общий bootstrap проверяет байты APT-peer сам.
+    declared = {k: str(v) for k, v in yaml.safe_load((root / ".github/workflows/e2e-newman.yml").read_text())["env"].items()}
+    world = World(base, payload, env=declared)
+    aptdir = world.work / "apt-fixture"
+    (aptdir / "lists").mkdir(parents=True)
+    result = subprocess.run([str(world.bin / "apt-get"), "-o", "Dir::State::lists=" + str(aptdir / "lists"), "update"],
+                            env=world.env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    script = '. "$1"; runner_apt_cached_snapshot "$2" "$3"'
+    argv = ["bash", "-c", script, "fixture-proof", str(root / ".github/scripts/stand-runner-bootstrap.sh"), str(world.work), str(aptdir)]
+    positive = subprocess.run(argv, env=world.env, capture_output=True, text=True, timeout=10)
+    assert positive.returncode == 0, "pod env затенил индекс APT-peer: " + positive.stdout + positive.stderr
+    wrong_pins = dict(world.env, KANAME_RUNNER_RELEASES=declared["KANAME_RUNNER_RELEASES"])
+    mutant = subprocess.run(argv, env=wrong_pins, capture_output=True, text=True, timeout=10)
+    assert mutant.returncode != 0, "настоящие pins приняли синтетические байты"
+    release = next((aptdir / "lists").glob("*_noble_InRelease"))
+    release.write_text(release.read_text() + "changed")
+    damaged = subprocess.run(argv, env=world.env, capture_output=True, text=True, timeout=10)
+    assert damaged.returncode != 0, "изменённый индекс APT-peer принят"
+    print("PARITY-APT-FIXTURE pod-env=preserved peer-pins=bound wrong-pins=rejected changed-index=rejected controls=3", flush=True)
+
+
 def payload_checks(root, payload, axis="all"):
     installs, checks, blocks, modules = declarations(root)
     failures = 0
     with tempfile.TemporaryDirectory(prefix="stand-parity-") as temp:
         base = Path(temp)
-        roots = {"/usr/local": base / "workflow-lawful/usr/local", "/work": base / "workflow-lawful/work", "/src": base / "workflow-lawful/src"}
+        apt_fixture_checks(root, payload, base / "apt-fixture-world")
+        if axis == "apt-fixture":
+            return 0
+        roots = {"/usr/local": base / "workflow-lawful/usr/local", "/work": base / "workflow-lawful/kaname-runner", "/src": base / "workflow-lawful/src"}
         sample = "'/usr/local/bin/kubectl' /work/out /src/root /workflow-lawful/bin"
         expected = f"'{roots['/usr/local']}/bin/kubectl' {roots['/work']}/out {roots['/src']}/root /workflow-lawful/bin"
         assert remap_roots(sample, roots) == expected, "remap lawful boundary не сохранена"
@@ -498,7 +557,7 @@ def payload_checks(root, payload, axis="all"):
             repaired = existing.run("node --version")
             assert repaired.returncode == 0 and ("v" + existing.provider["KANAME_RUNNER_NODE"]) in repaired.stdout
             print("PARITY-MUTANT existing-version repaired=exact-workflow-pin", flush=True)
-            controls = ("fetch-failure", "PATH-shadowing", "python-package-version", "missing-stdlib", "missing-git-helper", "system-cli-version")
+            controls = ("fetch-failure", "PATH-shadowing", "python-package-version", "missing-stdlib", "missing-git-helper", "system-cli-version", "go-version")
             for label in controls:
                 world = World(base / label, payload)
                 if label == "fetch-failure":
@@ -515,6 +574,9 @@ def payload_checks(root, payload, axis="all"):
                     (world.base / "python-peers/lzma.py").write_text("raise ImportError('controlled missing stdlib')\n")
                 elif label == "missing-git-helper":
                     world.env["GIT_EXEC_PATH"] = str(world.base / "absent-git-helpers")
+                elif label == "go-version":
+                    # Один неверный факт поставщика: Go отличается от неизменённого go.mod.
+                    world.env["RUNNER_GO"] = "0.0.1042"
                 elif label == "system-cli-version":
                     declaration = world.src / ".github/workflows/e2e-newman.yml"
                     document = yaml.safe_load(declaration.read_text())
@@ -526,13 +588,14 @@ def payload_checks(root, payload, axis="all"):
                 assert rejected.returncode == 125 and not (world.work / "out/should-not-run").exists(), label
                 reasons = {"fetch-failure": "controlled provider fetch failure", "PATH-shadowing": "PATH shadowing: git",
                            "python-package-version": "Python package version disagrees:", "missing-stdlib": "controlled missing stdlib",
-                           "missing-git-helper": "Git helper closure missing or shadowed", "system-cli-version": "CLI version disagrees: jq"}
+                           "missing-git-helper": "Git helper closure missing or shadowed", "system-cli-version": "CLI version disagrees: jq",
+                           "go-version": "CLI version disagrees: go"}
                 assert reasons[label] in rejected.stdout, (label, rejected.stdout)
                 print("PARITY-MUTANT provider rejected=" + label + " stage=setup code=125 payload=not-run", flush=True)
         if axis in ("all", "prologue"):
             original = (root / ".github/scripts/stand-own.sh").read_text()
             prefix = original.split('if [ "${1:-}" = "--registry-self-test" ]; then', 1)[0]
-            dispatch_boundary = '\ncase "${1:-}" in\n  up|down|census|db-fold|db-unfold)\n'
+            dispatch_boundary = '\ncase "${1:-}" in\n  up|down|census|db-fold|db-unfold|registration-writer-plan)\n'
             assert original.count(dispatch_boundary) == 1, "граница защищённой диспетчеризации должна быть единственной"
             dispatch = original[original.index(dispatch_boundary) + 1:]
             cases = [(label, "chain") for label in ("lawful", "wrong-namespace", "missing-account", "partial-marker", "wrong-marker", "invalid-uid")]
@@ -624,7 +687,8 @@ def step_checks(objects, ships):
     env = {entry["name"]: entry["value"] for entry in container["env"]}
     payload = container["command"][2]
     with tempfile.TemporaryDirectory(prefix="stand-parity-steps-") as temp:
-        world = World(Path(temp), payload, env=env, ships=ships)
+        # Производитель pod экспортирует пути относительно work/out.
+        world = World(Path(temp), payload, env=env, ships=ships, work_name="work")
         result = world.run(env.get("RUNNER_CMD", ""))
         print(result.stdout, flush=True)
         if result.returncode != 0 or not (world.src / "step-file").is_file():
@@ -633,7 +697,7 @@ def step_checks(objects, ships):
         print("PARITY-AXIS steps: actual producer payload исполнен, root cwd и files сохранены", flush=True)
         anchor = '( cd /src && bash -- "/work/ship/$step" )'
         assert payload.count(anchor) == 1, "граница step cwd не единственна"
-        mutant = World(Path(temp) / "cwd-mutant", payload, env=env, ships=ships)
+        mutant = World(Path(temp) / "cwd-mutant", payload, env=env, ships=ships, work_name="work")
         bad = mutant.run(env.get("RUNNER_CMD", ""), payload=payload.replace(anchor, '( cd /src/sub && bash -- "/work/ship/$step" )', 1))
         assert bad.returncode != 0, "steps self-test не увидел wrong-cwd mutant"
         print("PARITY-MUTANT steps rejected=wrong-cwd", flush=True)
@@ -641,7 +705,7 @@ def step_checks(objects, ships):
         failure_ships.mkdir()
         (failure_ships / "first.sh").write_text('printf "failure nonce=1042\\n" > "$PARITY_OUT/summary.txt"\nexit 23\n')
         (failure_ships / "second.sh").write_text('touch "$PARITY_OUT/not-run"\n')
-        failed = World(Path(temp) / "first-failure", payload, env=env, ships=failure_ships)
+        failed = World(Path(temp) / "first-failure", payload, env=env, ships=failure_ships, work_name="work")
         failed.env["PARITY_OUT"] = str(failed.work / "out")
         outcome = failed.run(env.get("RUNNER_CMD", ""))
         assert outcome.returncode == 23 and not (failed.work / "out/not-run").exists(), "первый код/остановка steps не сохранены"
@@ -653,7 +717,8 @@ def step_checks(objects, ships):
         code = "set -uo pipefail\n" + os.environ["PARITY_EXPORT_FUNCTIONS"] + '\nrunner_exec() { shift; "$@"; }\nrunner_fetch fixture "$1"\n'
         fetch = subprocess.run(["bash", "-c", code, "fetch", str(receiver)], env=exported, capture_output=True, text=True, timeout=30)
         print(fetch.stdout + fetch.stderr, flush=True)
-        assert fetch.returncode == 0 and (receiver / "work/out/summary.txt").read_bytes() == b"failure nonce=1042\n", "summary после реальной ошибки шага не экспортирован"
+        summary = receiver / "work/out/summary.txt"
+        assert fetch.returncode == 0 and summary.is_file() and summary.read_bytes() == b"failure nonce=1042\n", "summary после реальной ошибки шага не экспортирован"
         print("PARITY-STEP-FAILURE code=23 following=not-run summary=exported-exact-bytes", flush=True)
     return 0
 
@@ -663,7 +728,7 @@ if __name__ == "__main__":
         if sys.argv[1] == "--steps":
             sys.exit(step_checks(Path(sys.argv[2]), Path(sys.argv[3])))
         if sys.argv[1] == "--axis":
-            assert sys.argv[2] in ("tools", "prologue", "opaque", "real-tool"), "неизвестная ось fixture"
+            assert sys.argv[2] in ("tools", "prologue", "opaque", "real-tool", "apt-fixture"), "неизвестная ось fixture"
             sys.exit(payload_checks(Path(sys.argv[3]), Path(sys.argv[4]).read_text(), sys.argv[2]))
         sys.exit(payload_checks(Path(sys.argv[1]), Path(sys.argv[2]).read_text()))
     except Exception as error:

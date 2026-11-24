@@ -630,3 +630,140 @@ func TestFailureRowRemovalPremiseNamesAnEmptyAdapter(t *testing.T) {
 			"(ожидалось 0, 0, 0, 1)", len(findings), census.ByKeyInPort, census.ByAgeInSweep, census.Files)
 	}
 }
+
+// frSessionForwarder — форма настоящей двери: потребители IssueSession видимы,
+// а передача её параметров prepared-двери не заводит новую полосу.
+const frSessionForwarder = `package humansession
+func IssueSession(ctx ctxT, w Writer, in IssueInput) (Session, Bearer, error) {
+	var material SessionMaterial
+	return IssueSessionPrepared(ctx, w, in, &material)
+}
+`
+
+// TestFailureResetPreparedIssuanceKeepsEveryConsumerInPopulation — обе формы
+// prepared-вызова и вызов через известную обёртку требуют дом; прежняя запись
+// регистрации остаётся про ту же выдачу и не прощает другие файлы.
+func TestFailureResetPreparedIssuanceKeepsEveryConsumerInPopulation(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, call         string
+		home, registration bool
+	}{
+		{"prepared своего пакета без дома", "IssueSessionPrepared", false, false},
+		{"prepared своего пакета через дом", "IssueSessionPrepared", true, false},
+		{"prepared другого пакета без дома", "humansession.IssueSessionPrepared", false, false},
+		{"prepared другого пакета через дом", "humansession.IssueSessionPrepared", true, false},
+		{"потребитель известной обёртки без дома", "IssueSession", false, false},
+		{"потребитель известной обёртки через дом", "IssueSession", true, false},
+		{"регистрация сохраняет прежнюю запись", "humansession.IssueSessionPrepared", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			corpus := frBaseCorpus()
+			corpus["internal/apps/kaname/api/humansession/issue.go"] = frSessionForwarder
+			rel := "internal/apps/kaname/api/humansession/new_lane.go"
+			var ledger map[string]check.FailureResetLedgerEntry
+			if tc.registration {
+				rel = "internal/apps/kaname/api/registration/register.go"
+				ledger = map[string]check.FailureResetLedgerEntry{rel: {
+					Resets: 0, Subject: "регистрация: впервые заведённый адрес",
+					Removal: "полоса начала решать счёт либо перестала выдавать сессию",
+				}}
+			}
+			reset := "return nil"
+			if tc.home {
+				reset = "return resetFailuresOnCompletedLogin(ctx, w, completedLogin{AddressKey: key})"
+			}
+			extra := ", nil"
+			if tc.call == "IssueSession" {
+				extra = ""
+			}
+			corpus[rel] = fmt.Sprintf(`package humansession
+func finish(ctx ctxT, w Writer, in IssueInput, key string) error {
+	_, _, err := %s(ctx, w, in%s)
+	if err != nil { return err }
+	%s
+}
+`, tc.call, extra, reset)
+			findings, census := frJudge(t, corpus, ledger)
+			wantHome, wantLedger := 1, 0
+			if tc.home {
+				wantHome++
+			}
+			if tc.registration {
+				wantLedger++
+			}
+			if census.LevelWritingFiles != 2 || census.LevelWritingCalls != 2 || census.ThroughHome != wantHome || census.InLedger != wantLedger {
+				t.Fatalf("потребитель потерян либо обёртка стала полосой: %+v", census)
+			}
+			if tc.home || tc.registration {
+				if len(findings) != 0 {
+					t.Fatalf("законный потребитель: %v", findings)
+				}
+			} else if len(findings) != 1 || !strings.Contains(findings[0], rel) || !strings.Contains(findings[0], "счёт по адресу не решает") {
+				t.Fatalf("потребитель без дома не найден: %v", findings)
+			}
+		})
+	}
+}
+
+// TestFailureResetForwardingRequiresExactKnownBody — близкие обёртки не
+// прозрачны: неизвестное имя, действие либо преобразование сохраняют finding.
+// Прямой ResetFailures даже в файле законной двери остаётся под полным обходом.
+func TestFailureResetForwardingRequiresExactKnownBody(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ name, old, replacement string }{
+		{"неизвестное имя обёртки", "func IssueSession(", "func hiddenIssue("},
+		{"дополнительное действие", "var material SessionMaterial", "var material SessionMaterial; observe()"},
+		{"инициализатор материала", "var material SessionMaterial", "var material SessionMaterial = makeMaterial()"},
+		{"преобразование аргумента", "Prepared(ctx, w, in,", "Prepared(ctx, w, convert(in),"},
+		{"перестановка аргументов", "Prepared(ctx, w, in,", "Prepared(w, ctx, in,"},
+		{"не тот материал", "&material)", "&other)"},
+		{"два локальных имени", "var material SessionMaterial", "var material, other SessionMaterial"},
+		{"другой тип материала", "var material SessionMaterial", "var material OtherMaterial"},
+		{"локальный материал затеняет дверь", frSessionForwarder, strings.ReplaceAll(frSessionForwarder, "material", "IssueSessionPrepared")},
+		{"параметр затеняет дверь", frSessionForwarder, strings.ReplaceAll(frSessionForwarder, "ctx", "IssueSessionPrepared")},
+		{"пустое имя параметра", frSessionForwarder, strings.ReplaceAll(frSessionForwarder, "ctx", "_")},
+		{"сгруппированные параметры", "ctx ctxT, w Writer", "ctx, w ctxT"},
+		{"безымянные параметры", "ctx ctxT, w Writer, in IssueInput", "ctxT, Writer, IssueInput"},
+		{"результат затеняет дверь", "(Session, Bearer, error)", "(IssueSessionPrepared Session, bearer Bearer, err error)"},
+		{"результат совпадает с материалом", "(Session, Bearer, error)", "(material Session, bearer Bearer, err error)"},
+		{"переменная пакета вместо двери", "func IssueSession(", "var IssueSessionPrepared = otherDoor\nfunc IssueSession("},
+		{"получатель", "func IssueSession(", "func (x Owner) IssueSession("},
+		{"вариадический параметр", "in IssueInput)", "in ...IssueInput)"},
+		{"ellipsis вызова", "&material)", "&material...)"},
+		{"рекурсивная передача", "func IssueSession(", "func IssueSessionPrepared("},
+		{"селектор вместо bare функции", "return IssueSessionPrepared(", "return humansession.IssueSessionPrepared("},
+		{"ветвление", "return IssueSessionPrepared(ctx, w, in, &material)", "if ready { return IssueSessionPrepared(ctx, w, in, &material) }; return empty()"},
+		{"прямой reset рядом с прозрачной дверью", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			corpus := frBaseCorpus()
+			const rel = "internal/apps/kaname/api/humansession/forwarder.go"
+			if tc.name == "прямой reset рядом с прозрачной дверью" {
+				corpus[rel] = frSessionForwarder + `
+func bypass(ctx ctxT, w Writer, key string) error { return w.ResetFailures(ctx, FailureByAddress, key) }
+`
+			} else {
+				if !strings.Contains(frSessionForwarder, tc.old) {
+					t.Fatal("инъекция не изменила форму")
+				}
+				corpus[rel] = strings.Replace(frSessionForwarder, tc.old, tc.replacement, 1)
+			}
+			findings, census := frJudge(t, corpus, nil)
+			if len(findings) != 1 || !strings.Contains(findings[0], rel) {
+				t.Fatalf("непрозрачный либо прямой путь потерян: %v; %+v", findings, census)
+			}
+			if tc.name == "прямой reset рядом с прозрачной дверью" {
+				if !strings.Contains(findings[0], "мимо единственного писателя") || census.LevelWritingFiles != 1 {
+					t.Fatalf("полный обход reset ослаблен: %v; %+v", findings, census)
+				}
+			} else if !strings.Contains(findings[0], "счёт по адресу не решает") || census.LevelWritingFiles != 2 || census.LevelWritingCalls != 2 {
+				t.Fatalf("непрозрачный forwarding исчез из популяции: %v; %+v", findings, census)
+			}
+		})
+	}
+}

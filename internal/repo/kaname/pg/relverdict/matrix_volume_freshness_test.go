@@ -36,12 +36,12 @@ package relverdict_test
 //
 // # ЧЕГО ЭТОТ ГЕЙТ НЕ СТОРОЖИТ — сказано вслух, а не оставлено на догадку
 //
-// Отпечаток считает `scalegrid.ComputeFingerprint`, и его предмет — путь ЧТЕНИЯ
+// Базовый отпечаток считает `scalegrid.ComputeFingerprint`: путь ЧТЕНИЯ
 // (не-тестовые файлы relverdict и scalegrid плюс миграции). Продуктовый писатель
 // выдач под него НЕ попадает. Значит правка пути записи НЕ сделает этот отчёт
-// несвежим, и молчание гейта неподвижности пути записи НЕ доказывает. Заводить
-// здесь второй отпечаток значило бы иметь два места об одном предмете, из
-// которых верно одно; поэтому предмет назван, а не удвоен.
+// несвежим, и молчание гейта неподвижности пути записи НЕ доказывает.
+// Отпечаток писателя сюда не добавляем. Matrix-local расширение ниже включает
+// оснастку Given/замера: её изменение тоже требует настоящей пересъёмки.
 //
 // # Способность упасть ДОКАЗАНА, а не заявлена
 //
@@ -52,8 +52,11 @@ package relverdict_test
 // молчание.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -62,6 +65,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/scalegrid"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // matrixReportMaxAge — предел возраста отчёта.
@@ -266,6 +270,259 @@ func matrixRepoRoot(t *testing.T) string {
 	return root
 }
 
+// matrixFixtureFiles — локальное замыкание Given/замера и конфигурация TestMain
+// сверх базового read-path отпечатка: общий ComputeFingerprint исключает *_test.go.
+// Включены вызываемые exec, capture, tuplesRead, мост к SQL/оси и определение
+// самого списка. Целиком файлы: изменение соседней пробы может дать лишнюю
+// пересъёмку, но изменение общего helper не останется невидимым.
+//
+// Граница TestMain явная: SearchPath/Name/Migrate здесь под отпечатком. Реализация
+// импортированного corelib/pgtest, pgx, migrations.FS и среда Postgres — внешняя
+// инфраструктура, не замыкание локальных тестовых функций. Версии зависимостей
+// определяет go.mod/go.sum; DDL покрывает прежний read-path предикат, а не все
+// миграции/триггеры записи. Это не отпечаток всего исполняемого бинаря/сервера.
+// Пути — координаты поставки; ContentOf сохраняет её переносимость. Этот список
+// влияет только на matrix report, не на соседние full-grid/strength reports.
+var matrixFixtureFiles = []struct{ identity, path string }{
+	{"матрица/matrix_volume_integration_test.go", "services/iam/internal/repo/kaname/pg/relverdict/matrix_volume_integration_test.go"},
+	{"матрица/matrix_volume_freshness_test.go", "services/iam/internal/repo/kaname/pg/relverdict/matrix_volume_freshness_test.go"},
+	{"матрица/matrix_volume_report_test.go", "services/iam/internal/repo/kaname/pg/relverdict/matrix_volume_report_test.go"},
+	{"матрица/r7_cost_bounded_seed_integration_test.go", "services/iam/internal/repo/kaname/pg/relverdict/r7_cost_bounded_seed_integration_test.go"},
+	{"матрица/scalegrid_probe_integration_test.go", "services/iam/internal/repo/kaname/pg/relverdict/scalegrid_probe_integration_test.go"},
+	{"матрица/activewayin.go", "services/iam/internal/testsupport/activewayin/activewayin.go"},
+	{"матрица/query_integration_test.go", "services/iam/internal/repo/kaname/pg/relverdict/query_integration_test.go"},
+	{"матрица/planrows_live_integration_test.go", "services/iam/internal/repo/kaname/pg/relverdict/planrows_live_integration_test.go"},
+	{"матрица/list_page_cost_integration_test.go", "services/iam/internal/repo/kaname/pg/relverdict/list_page_cost_integration_test.go"},
+	{"матрица/export_test.go", "services/iam/internal/repo/kaname/pg/relverdict/export_test.go"},
+	{"матрица/grantarm_assembly_test.go", "services/iam/internal/repo/kaname/pg/relverdict/grantarm_assembly_test.go"},
+	{"матрица/testmain_pgtest_test.go", "services/iam/internal/repo/kaname/pg/relverdict/testmain_pgtest_test.go"},
+}
+
+func matrixFingerprint(root string) (scalegrid.Fingerprint, error) {
+	fp, err := scalegrid.ComputeFingerprint(root)
+	if err != nil {
+		return fp, err
+	}
+	return matrixFingerprintWithFixtures(fp, func(path string) string {
+		return scalegrid.ContentOf(root, path)
+	})
+}
+
+// Базовый digest не пересчитываем своим разбором Go/SQL: сохраняем его целиком
+// и доменно отделённо дописываем тождества и те же ContentOf, что печатает Header.
+// Нечитаемая обязательная зависимость — ошибка, а не хэш строки «нечитаем».
+func matrixFingerprintWithFixtures(fp scalegrid.Fingerprint, contentOf func(string) string) (scalegrid.Fingerprint, error) {
+	if len(fp.Files) == 0 || len(fp.Files) != len(fp.Identities) || fp.Composition == "" || fp.Content == "" {
+		return fp, fmt.Errorf("матрица: неполный базовый отпечаток")
+	}
+	files := make(map[string]string, len(fp.Files)+len(matrixFixtureFiles))
+	for i, id := range fp.Identities {
+		if _, exists := files[id]; exists {
+			return fp, fmt.Errorf("матрица: повторное тождество %s", id)
+		}
+		files[id] = fp.Files[i]
+	}
+	composition := sha256.New()
+	content := sha256.New()
+	fmt.Fprintf(composition, "matrix-fixtures-v1\n%s\n", fp.Composition)
+	fmt.Fprintf(content, "matrix-fixtures-v1\n%s\n", fp.Content)
+	for _, file := range matrixFixtureFiles {
+		if _, exists := files[file.identity]; exists {
+			return fp, fmt.Errorf("матрица: повторное тождество %s", file.identity)
+		}
+		sum := contentOf(file.path)
+		if decoded, err := hex.DecodeString(sum); err != nil || len(decoded) != 8 {
+			return fp, fmt.Errorf("матрица: зависимость %s не прочитана: %s", file.identity, sum)
+		}
+		files[file.identity] = file.path
+		fmt.Fprintf(composition, "%s\n", file.identity)
+		fmt.Fprintf(content, "%s\n%s\n", file.identity, sum)
+	}
+	fp.Identities = make([]string, 0, len(files))
+	for id := range files {
+		fp.Identities = append(fp.Identities, id)
+	}
+	sort.Strings(fp.Identities)
+	fp.Files = make([]string, 0, len(files))
+	for _, id := range fp.Identities {
+		fp.Files = append(fp.Files, files[id])
+	}
+	fp.Composition = hex.EncodeToString(composition.Sum(nil))[:16]
+	fp.Content = hex.EncodeToString(content.Sum(nil))[:16]
+	fp.Predicate += "; дополнительно matrix-local замыкание оснастки: " + strings.Join(fp.Identities, ", ") +
+		"; matrix-fixtures-v1 сохраняет базовые digest и добавляет тождества/ContentOf обязательных fixture-файлов"
+	return fp, nil
+}
+
+// matrixFixturePath приводит обе записи координаты к явно названному корню.
+func matrixFixturePath(t *testing.T, root, rel string) string {
+	t.Helper()
+	path, err := treeposture.PathUnder(root, rel)
+	if err != nil {
+		t.Fatalf("координата %s: %v", rel, err)
+	}
+	return path
+}
+
+// Проверяется реальный путь matrixFingerprint -> ComputeFingerprint/ContentOf,
+// включая нормализацию координат и verdict. Только копии в t.TempDir: исходная
+// поставка читается, но ни одна инъекция не пишет в неё. SQL здесь лишь текст
+// для парсера отпечатка; подключений к базе и запуска полного замера нет.
+func TestMatrixVolumeFingerprintIncludesItsFixtureClosure(t *testing.T) {
+	sourceRoot := matrixRepoRoot(t)
+	moduleCoord := treeposture.ModuleDirInPlatform()
+	verdictDir := moduleCoord + "/internal/repo/kaname/pg/relverdict"
+	gridDir := moduleCoord + "/internal/repo/kaname/pg/scalegrid"
+	read := func(t *testing.T, root, rel string) []byte {
+		t.Helper()
+		body, err := os.ReadFile(matrixFixturePath(t, root, rel))
+		if err != nil {
+			t.Fatalf("чтение копируемой зависимости %s: %v", rel, err)
+		}
+		return body
+	}
+	write := func(t *testing.T, root, rel string, body []byte) {
+		t.Helper()
+		path := matrixFixturePath(t, root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Конечное дерево: один минимальный read-path/DDL, реальные не-тестовые
+	// файлы scalegrid (включая обязательную оснастку) и все реальные fixture-
+	// файлы. Ни обход всего репозитория, ни копия всей истории миграций не нужны.
+	bodies := map[string][]byte{
+		moduleCoord + "/go.mod":                               read(t, sourceRoot, moduleCoord+"/go.mod"),
+		verdictDir + "/query.go":                              []byte("package relverdict\nconst query = `SELECT id FROM kaname.access_bindings`\n"),
+		moduleCoord + "/internal/migrations/0001_initial.sql": []byte("CREATE TABLE kaname.access_bindings (id text PRIMARY KEY);\n"),
+	}
+	entries, err := os.ReadDir(matrixFixturePath(t, sourceRoot, gridDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") && !strings.HasSuffix(entry.Name(), "_test.go") {
+			rel := gridDir + "/" + entry.Name()
+			bodies[rel] = read(t, sourceRoot, rel)
+		}
+	}
+	for _, file := range matrixFixtureFiles {
+		bodies[file.path] = read(t, sourceRoot, file.path)
+	}
+	build := func(t *testing.T, platform bool) string {
+		t.Helper()
+		root := t.TempDir()
+		if platform {
+			if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(moduleCoord)), 0o750); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for rel, body := range bodies {
+			write(t, root, rel, body)
+		}
+		return root
+	}
+	root := build(t, false)
+	good, err := matrixFingerprint(root)
+	if err != nil {
+		t.Fatalf("реальное полное замыкание не принято: %v", err)
+	}
+	base, err := scalegrid.ComputeFingerprint(root)
+	if err != nil || len(good.Files) != len(base.Files)+len(matrixFixtureFiles) {
+		t.Fatalf("замыкание не добавлено к реальному базовому отпечатку: %v", err)
+	}
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	report := matrixReportDateMark + now.Format("2006-01-02 15:04:05 MST") + "\n" + good.FingerprintLines(root)
+	judge := func(root string, fp scalegrid.Fingerprint) []string {
+		return judgeMatrixReport(report, fp, func(rel string) string {
+			return scalegrid.ContentOf(root, rel)
+		}, now)
+	}
+	if got := judge(root, good); len(got) != 0 {
+		t.Fatalf("неподвижные файлы отвергнуты: %v", got)
+	}
+	platformRoot := build(t, true)
+	moved, err := matrixFingerprint(platformRoot)
+	if err != nil || moved.Composition != good.Composition || moved.Content != good.Content {
+		t.Fatalf("перенос того же модуля меняет отпечаток: %v", err)
+	}
+	if got := judge(platformRoot, moved); len(got) != 0 {
+		t.Fatalf("законный перенос модуля отвергнут: %v", got)
+	}
+
+	// По одному изменению поведения в каждом обязательном файле. Это
+	// независимый перечень controls: удаление зависимости из closure тоже
+	// роняет пробу, а не удаляет вместе с ней единственный отрицательный случай.
+	mutations := map[string]struct{ before, after string }{
+		"матрица/matrix_volume_integration_test.go":        {"const matrixRepeats = 11", "const matrixRepeats = 12"},
+		"матрица/matrix_volume_freshness_test.go":          {"const matrixReportMaxAge = 60 * 24 * time.Hour", "const matrixReportMaxAge = 61 * 24 * time.Hour"},
+		"матрица/matrix_volume_report_test.go":             {"const matrixFlatCeiling = 2.0", "const matrixFlatCeiling = 3.0"},
+		"матрица/r7_cost_bounded_seed_integration_test.go": {"const r7CostSeedBatch = 128", "const r7CostSeedBatch = 127"},
+		"матрица/scalegrid_probe_integration_test.go":      {"const probeRepeats = 21", "const probeRepeats = 22"},
+		"матрица/activewayin.go":                           {"fixture-password-row-without-a-known-password", "changed-fixture-password-row-without-a-known-password"},
+		"матрица/query_integration_test.go":                {"tx.Exec(ctx, sql, args...)", "tx.Exec(ctx, sql)"},
+		"матрица/planrows_live_integration_test.go":        {"args: d.Args", "args: nil"},
+		"матрица/list_page_cost_integration_test.go":       {"sum(seq_tup_read + coalesce(idx_tup_fetch, 0))", "sum(seq_tup_read + 1 + coalesce(idx_tup_fetch, 0))"},
+		"матрица/export_test.go":                           {"withNesting(verdictQuerySQL, false)", "withNesting(verdictQuerySQL, true)"},
+		"матрица/grantarm_assembly_test.go":                {"build(labelTable, nesting)", "build(labelTable, !nesting)"},
+		"матрица/testmain_pgtest_test.go":                  {`SearchPath: "kaname,public"`, `SearchPath: "public"`},
+	}
+	if len(mutations) != len(matrixFixtureFiles) {
+		t.Fatalf("controls/обязательные зависимости разошлись: %d/%d", len(mutations), len(matrixFixtureFiles))
+	}
+	for _, file := range matrixFixtureFiles {
+		t.Run(file.identity, func(t *testing.T) {
+			original := bodies[file.path]
+			t.Cleanup(func() { write(t, root, file.path, original) })
+			mutation, ok := mutations[file.identity]
+			if !ok || !strings.Contains(string(original), mutation.before) {
+				t.Fatalf("значащий control для %s отсутствует или устарел", file.identity)
+			}
+			// Оба написания читают ОДИН файл через настоящий ContentOf.
+			local := strings.TrimPrefix(file.path, moduleCoord+"/")
+			if a, b := scalegrid.ContentOf(root, file.path), scalegrid.ContentOf(root, local); a == "нечитаем" || a != b {
+				t.Fatalf("каноническая и модульная координаты разошлись: %s / %s", a, b)
+			}
+			write(t, root, file.path, append(append([]byte{}, original...), []byte("\n// matrix fingerprint comment-only control\n")...))
+			comment, err := matrixFingerprint(root)
+			if err != nil || comment.Content != good.Content || comment.Composition != good.Composition {
+				t.Fatalf("комментарий меняет отпечаток %s: %v", file.identity, err)
+			}
+			if got := judge(root, comment); len(got) != 0 {
+				t.Fatalf("комментарий отвергнут: %v", got)
+			}
+
+			// Значащий оператор меняется в настоящем Go-файле, а не в callback.
+			write(t, root, file.path, []byte(strings.Replace(string(original), mutation.before, mutation.after, 1)))
+			changed, err := matrixFingerprint(root)
+			if err != nil || changed.Content == good.Content || changed.Composition != good.Composition {
+				t.Fatalf("значащая правка %s не меняет только содержимое: %v", file.identity, err)
+			}
+			if got := judge(root, changed); len(got) == 0 || !strings.Contains(strings.Join(got, "\n"), file.identity) {
+				t.Fatalf("правка %s не отвергнута с именем виновника: %v", file.identity, got)
+			}
+			if err := os.Remove(matrixFixturePath(t, root, file.path)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := matrixFingerprint(root); err == nil || !strings.Contains(err.Error(), file.identity) {
+				t.Fatalf("пропавшая обязательная зависимость %s не отвергнута с именем: %v", file.identity, err)
+			}
+			write(t, root, file.path, original)
+		})
+	}
+	unchanged, err := matrixFingerprint(root)
+	if err != nil || unchanged.Content != good.Content || unchanged.Composition != good.Composition {
+		t.Fatalf("восстановленные файлы разошлись: %v", err)
+	}
+	if got := judge(root, unchanged); len(got) != 0 {
+		t.Fatalf("восстановленный законный близнец отвергнут: %v", got)
+	}
+}
+
 // ── ГЕЙТ НАД НАСТОЯЩИМ ОТЧЁТОМ ──────────────────────────────────────────────
 
 // TestMatrixVolumeReportIsFreshAndItsSubjectHasNotMoved — гейт свежести.
@@ -280,7 +537,7 @@ func TestMatrixVolumeReportIsFreshAndItsSubjectHasNotMoved(t *testing.T) {
 		t.Fatalf("отчёта %s нет (%v) — полный замер объёма не снят, и в конвейере его не "+
 			"делает никто.\nСнять: %s", matrixReportPath, err, matrixRunCommand)
 	}
-	fp, err := scalegrid.ComputeFingerprint(root)
+	fp, err := matrixFingerprint(root)
 	if err != nil {
 		t.Fatalf("отпечаток предмета замера не вычислен: %v", err)
 	}

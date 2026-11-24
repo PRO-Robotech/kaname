@@ -5,7 +5,16 @@
 // группу и её выдачу, и применитель приводит к объявленному живую базу
 // (приёмка MRW-1, стадия S1; задача kaname#106).
 //
-// # Почему против живой базы, поднятой ВСЕМИ миграциями дерева
+// # Исторический операнд движка MRW до перехода AW-14/1031
+//
+// Исторические строки сначала получены цепью до 20261031150000, затем схема
+// доведена ровно до 20261114130000: здесь впервые есть настоящий installation
+// entry текущего применителя. Retirement не выполняется; сохранность исходных
+// строк проверяется отдельно. Это не latest-схема и не проверка full activation.
+// Текущие начальные данные установки больше не объявляют общий доступ записи;
+// их снятие проверяет набор AW. Здесь сохранён контракт принятия и порядка.
+//
+// # Почему против живой базы исторической цепи
 //
 // Строка группы `module-relation-writers` и её выдача `fga_writer` живы на
 // каждой установке из свода (`0001_initial.sql`), а якорь кластера переименован
@@ -28,8 +37,12 @@ package pg_test
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/migrations"
+	"github.com/pressly/goose/v3"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -123,16 +136,93 @@ func seedPool(ctx context.Context, t *testing.T) *pgxpool.Pool {
 	if testing.Short() {
 		t.Skip("нужен Postgres: свойство утверждается прогоном против живой базы")
 	}
-	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
+	// Это явная фикстура движка MRW до снятия, а не текущие производственные начальные данные.
+	dsn := pgtest.NewEmptyDB(t)
+	db, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	require.NoError(t, goose.UpTo(db, ".", 20261031150000))
+	historical := historicalMRWSeedRows(ctx, t, db)
+	// Установка v2 требует этой полной упорядоченной цепи. Ни Prepare/Activate,
+	// ни retirement, ни подменная SQL-функция в фикстуре не вызываются.
+	require.NoError(t, goose.UpTo(db, ".", 20261114130000))
+	require.Equal(t, historical, historicalMRWSeedRows(ctx, t, db),
+		"обновление схемы изменило исторические группу, выдачу, субъектов или ведомость")
+	var uninitialized, compatibility, notRetired, installationEntry, noFullEntry bool
+	require.NoError(t, db.QueryRowContext(ctx, `
+ SELECT
+  (SELECT count(*)=1 AND coalesce(bool_and(phase='uninitialized' AND protocol_version=0
+    AND model_id IS NULL AND catalog_id IS NULL AND projector_version IS NULL),false)
+   FROM kaname.authority_semantic_identity),
+  (SELECT count(*)=1 AND coalesce(bool_and(enforcement='compatibility' AND protocol_version=1),false)
+   FROM kaname.authority_writer_protocol),
+  NOT EXISTS(SELECT 1 FROM kaname.registration_account_writer_switch WHERE cluster_writer_retired_at IS NOT NULL),
+  EXISTS(SELECT 1 FROM pg_catalog.pg_proc p
+   WHERE p.oid=to_regprocedure('kaname.authority_installation_enter_v2(text)')
+    AND p.prorettype='integer'::regtype AND p.prokind='f' AND p.prosecdef AND p.provolatile='v'
+    AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']
+    AND p.proowner=(SELECT relowner FROM pg_catalog.pg_class WHERE oid='kaname.authority_writer_protocol'::regclass)
+    AND has_function_privilege(current_user,p.oid,'EXECUTE')),
+  to_regprocedure('kaname.authority_installation_enter_v3(text,text,text,text)') IS NULL`).
+		Scan(&uninitialized, &compatibility, &notRetired, &installationEntry, &noFullEntry))
+	require.True(t, uninitialized, "историческая фикстура не активирует semantic identity")
+	require.True(t, compatibility, "историческая фикстура сохраняет compatibility")
+	require.True(t, notRetired, "операторский retirement исторической выдачи не выполнен")
+	require.True(t, installationEntry, "нет настоящего installation entry v2 текущего применителя")
+	require.True(t, noFullEntry, "фикстура не должна переходить за точный cutoff 1300 к full-contract v3")
+	require.NoError(t, db.Close())
+	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 	return pool
+}
+
+// Снимок использует прежние предметные поля: добавленные схемой metadata-колонки
+// не выдаются за изменение самой выдачи. Пустой снимок не может пройти как равный.
+func historicalMRWSeedRows(ctx context.Context, t *testing.T, db *sql.DB) string {
+	t.Helper()
+	var groupPresent, grantPresent, ledgerPresent bool
+	var rows string
+	require.NoError(t, db.QueryRowContext(ctx, `
+ SELECT
+  EXISTS(SELECT 1 FROM kaname.groups g JOIN kaname.accounts a ON a.id=g.account_id
+   WHERE g.id=$1 AND g.name=$3 AND a.name=$4),
+  EXISTS(SELECT 1 FROM kaname.access_bindings b WHERE b.id=$2 AND b.subject_type='group'
+   AND b.subject_id=$1 AND b.role_id IS NULL AND b.granted_relation=$5
+   AND b.resource_type='cluster' AND b.resource_id=$6 AND b.status='ACTIVE'
+   AND b.revoked_at IS NULL AND b.is_system AND b.deletion_protection),
+  (SELECT count(*)=1 AND coalesce(bool_and(fga_user='group:'||$1::text||'#member'
+   AND relation=$5 AND object='cluster:'||$6::text AND source='binding'),false)
+   FROM kaname.access_binding_emitted_tuples WHERE binding_id=$2),
+  jsonb_build_object(
+   'group',(SELECT jsonb_build_array(g.id,g.account_id,g.name,g.description,g.labels,g.created_at)
+    FROM kaname.groups g WHERE g.id=$1),
+   'grant',(SELECT jsonb_build_array(b.id,b.subject_type,b.subject_id,b.role_id,b.granted_relation,
+    b.resource_type,b.resource_id,b.status,b.revoked_at,b.is_system,b.deletion_protection)
+    FROM kaname.access_bindings b WHERE b.id=$2),
+   'subjects',(SELECT coalesce(jsonb_agg(jsonb_build_array(subject_type,subject_id,ordinal)
+    ORDER BY ordinal,subject_type,subject_id),'[]'::jsonb)
+    FROM kaname.access_binding_subjects WHERE binding_id=$2),
+   'ledger',(SELECT coalesce(jsonb_agg(jsonb_build_array(binding_id,member_object_type,member_object_id,
+    fga_user,relation,object,source) ORDER BY member_object_type,member_object_id,fga_user,relation,object),'[]'::jsonb)
+    FROM kaname.access_binding_emitted_tuples WHERE binding_id=$2))::text`,
+		writersGroupSeedID, writersGrantSeedID, writersGroupName, systemAccountName, writersRelation, clusterAnchor).
+		Scan(&groupPresent, &grantPresent, &ledgerPresent, &rows))
+	require.True(t, groupPresent, "исходная группа свода с прежним ID отсутствует")
+	require.True(t, grantPresent, "исходная активная системная выдача с прежним ID отсутствует")
+	require.True(t, ledgerPresent, "историческая выдача не имеет ровно своего emitted tuple")
+	return rows
 }
 
 func ownManifest(t *testing.T) *manifest.Manifest {
 	t.Helper()
 	m, err := servicemanifest.Load()
 	require.NoError(t, err, "встроенный манифест службы не разобран — вердикт беспредметен")
+	// Явный исторический операнд сохраняет общий контракт применения.
+	// Текущий производственный манифест намеренно не восстанавливает эти снятые начальные данные.
+	m.Seed.Groups = []manifest.Group{{Name: writersGroupName, Account: systemAccountName, Description: "Module service accounts allowed to write relation tuples through iam (issue kacho#914)"}}
+	m.Seed.AccessBindings = []manifest.AccessBinding{{Subjects: []manifest.Subject{{Type: "group", Name: writersGroupName}}, GrantedRelation: writersRelation, ScopeType: "iam.cluster", ScopeID: clusterAnchor, Target: "allInScope"}}
 	return m
 }
 
@@ -478,6 +568,10 @@ func TestMRW23_MissingGroupIsSeededByTheApplier(t *testing.T) {
 		census := applySeed(ctx, t, pool, own)
 		require.NotNil(t, census.Own)
 		require.Equal(t, 1, census.Own.WrittenGroups, "перепись групп не печатает «записано 1»")
+		require.Equal(t, 1, census.Own.WrittenGrants, "снятая вместе с группой выдача восстановлена")
+		declared, written := census.Totals()
+		require.Equal(t, 2, declared)
+		require.Equal(t, 2, written)
 
 		groupID, description, groups := writersGroup(ctx, t, pool)
 		require.Equal(t, 1, groups)
@@ -490,12 +584,43 @@ func TestMRW23_MissingGroupIsSeededByTheApplier(t *testing.T) {
 
 	t.Run("строка группы на месте — записано 0", func(t *testing.T) {
 		pool := seedPool(ctx, t)
+		beforeID, beforeDescription, beforeCount := writersGroup(ctx, t, pool)
+		require.Equal(t, 1, beforeCount)
+		require.NotEqual(t, own.Seed.Groups[0].Description, beforeDescription,
+			"историческая база несёт прежнее написание ссылки в назначении")
+		beforeGrant, beforeGrants := writersGrant(ctx, t, pool, beforeID)
+		require.Equal(t, 1, beforeGrants)
+		beforeJournal := writersJournalRows(ctx, t, pool)
+		// Первая сверка действительно меняет назначение: эта запись не теряется
+		// в общей переписи и не принимается за создание новой группы или выдачи.
+		aligned := applySeed(ctx, t, pool, own)
+		require.NotNil(t, aligned.Own)
+		require.Equal(t, 1, aligned.Own.WrittenGroups)
+		require.Zero(t, aligned.Own.WrittenGrants)
+		alignedDeclared, alignedWritten := aligned.Totals()
+		require.Equal(t, 2, alignedDeclared)
+		require.Equal(t, 1, alignedWritten)
+		alignedID, alignedDescription, alignedCount := writersGroup(ctx, t, pool)
+		require.Equal(t, beforeID, alignedID)
+		require.Equal(t, own.Seed.Groups[0].Description, alignedDescription)
+		require.Equal(t, beforeCount, alignedCount)
+		require.Equal(t, beforeJournal, writersJournalRows(ctx, t, pool))
 		census := applySeed(ctx, t, pool, own)
 		require.NotNil(t, census.Own)
 		require.Equal(t, 1, census.Own.DeclaredGroups)
 		require.Zero(t, census.Own.WrittenGroups)
-		groupID, _, _ := writersGroup(ctx, t, pool)
+		require.Zero(t, census.Own.WrittenGrants)
+		declared, written := census.Totals()
+		require.Equal(t, 2, declared)
+		require.Zero(t, written)
+		groupID, description, count := writersGroup(ctx, t, pool)
 		require.Equal(t, writersGroupSeedID, groupID, "идентификатор живой группы изменился")
+		require.Equal(t, alignedDescription, description)
+		require.Equal(t, beforeCount, count)
+		grantID, grants := writersGrant(ctx, t, pool, groupID)
+		require.Equal(t, beforeGrant, grantID)
+		require.Equal(t, beforeGrants, grants)
+		require.Equal(t, beforeJournal, writersJournalRows(ctx, t, pool))
 	})
 }
 

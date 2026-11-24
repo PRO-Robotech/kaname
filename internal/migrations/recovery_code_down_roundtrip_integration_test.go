@@ -31,7 +31,7 @@ func TestRecoveryCodeMigration_DownRestoresTheSingleKindAndTheReapplyConverges(t
 	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 
 	insertKind := func(kind, id string) error {
 		_, err := db.Exec(`INSERT INTO kaname.invite_mail_outbox (event_type, payload, resource_kind, resource_id)
@@ -70,7 +70,7 @@ func TestRecoveryCodeMigration_DownRestoresTheSingleKindAndTheReapplyConverges(t
 	require.Zero(t, ledgerRows, "строка нашего потока снята вместе со своим источником")
 
 	// Повторный накат сходится: словарь снова из двух видов, таблица есть.
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 	require.NoError(t, db.QueryRow(`SELECT to_regclass('kaname.recovery_codes') IS NOT NULL`).Scan(&exists))
 	require.True(t, exists)
 	require.NoError(t, insertKind("mail.recovery.send", "usr-rt-3"))

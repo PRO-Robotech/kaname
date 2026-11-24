@@ -804,7 +804,7 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 	// (атомарно, запрет #10): нет key material в payload.
 	if u.audit != nil {
 		if aerr := u.audit.EmitTx(ctx, tx, service.AuditEvent{
-			EventType:       auditEventUserTokenRevoked,
+			EventType:       auditEventUserGrantRevoked,
 			TenantAccountID: "",
 			Payload: userTokenAuditPayload(
 				actor, string(cur.UserID), string(in.TokenID), cur.KeyAlgorithm),

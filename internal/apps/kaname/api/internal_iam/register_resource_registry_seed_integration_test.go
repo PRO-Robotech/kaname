@@ -8,6 +8,7 @@ package internal_iam_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	"os/exec"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ func TestRegisterResource_RegistrySeedIntentMatchesParentHierarchy(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	uc, pool := newRegisterUCApplied(t)
+	uc.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	scene := registrationscene.Seed(t, ctx, pool)
 	values, err := json.Marshal(map[string]string{"accountAId": scene.Account, "projectA1Id": scene.Project})
 	require.NoError(t, err)

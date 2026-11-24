@@ -15,10 +15,9 @@ package pg
 // бы у всех. Читатель каталога (`catalog_repo.go`) по этой же причине живёт над
 // пулом, а не за `kaname.Reader`; писатель следует за ним.
 //
-// Транзакцию открывает `pkg/db.Transactor` — ЕДИНСТВЕННОЕ платформенное
-// объявление этого паттерна над пулом. Своя последовательность
-// begin→commit→rollback была бы вторым местом об одном предмете и разошлась бы
-// с первым молча.
+// Транзакцию открывает общий typed protocol установки: GLOBAL берётся до
+// консультативных и строчных замков каталога. Full повторяет всю попытку,
+// а отказ освобождает соединение ограниченным cleanup независимо от отмены.
 //
 // # Отказы приходят СЫРЫМИ, и это решение
 //
@@ -44,7 +43,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	coredb "github.com/PRO-Robotech/corelib/db"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
@@ -112,6 +111,7 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 	    SELECT 'r:' || resource || ':' || object_type || ':' || array_to_string(parent_types, ',')
 	           || ':' || array_to_string(parent_names, ',') || ':' || array_to_string(writes, ',')
 	           || ':' || public_read_to_children::text || ':' || permanent_project::text || ':' || live::text
+	           || COALESCE(':child_registration=' || child_registration::text, '')
 	      FROM kaname.catalog_resource WHERE module = $1
 	    UNION ALL
 	    SELECT 'v:' || resource || '.' || verb || ':' || live::text || ':' || per_object::text
@@ -122,12 +122,25 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 
 // CatalogWriteRepo — исполнитель транзакций применителя каталога над пулом.
 type CatalogWriteRepo struct {
-	tx *coredb.Transactor
+	pool         *pgxpool.Pool
+	fullContract *FullWriterContract
 }
 
 // NewCatalogWriteRepo собирает исполнителя транзакций поверх пула.
 func NewCatalogWriteRepo(pool *pgxpool.Pool) *CatalogWriteRepo {
-	return &CatalogWriteRepo{tx: coredb.NewTransactor(pool)}
+	return &CatalogWriteRepo{pool: pool}
+}
+
+// WithFullWriterContract retains the validated immutable profile on this
+// executor. RPC contexts do not inherit startup contexts. The returned copy
+// selects v3 at every transaction entry; the original stays generation1.
+func (r *CatalogWriteRepo) WithFullWriterContract(contract *FullWriterContract) (*CatalogWriteRepo, error) {
+	if r == nil || contract == nil || !contract.profile.UsesPool(r.pool) {
+		return nil, kaname.ErrInvalidAuthorityFencePlan
+	}
+	copy := *r
+	copy.fullContract = contract
+	return &copy, nil
 }
 
 // RunInWriteTx исполняет fn под ОДНОЙ писательской транзакцией: все шаги
@@ -136,7 +149,14 @@ func (r *CatalogWriteRepo) RunInWriteTx(
 	ctx context.Context,
 	fn func(context.Context, modulecatalog.CatalogWriter) error,
 ) error {
-	return r.tx.InTx(ctx, func(tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
+	if r == nil || r.pool == nil || fn == nil {
+		return kaname.ErrInvalidAuthorityFencePlan
+	}
+	if r.fullContract != nil {
+		ctx = r.fullContract.Context(ctx)
+		return runFullInstallationTx(ctx, r.pool, kaname.AuthorityCatalog, func(ctx context.Context, tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
+	}
+	return runInstallationTx(ctx, r.pool, kaname.AuthorityCatalog, func(tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
 }
 
 // registrationWriterLockSQL соответствует барьеру операторов миграции 31090000.
@@ -268,18 +288,14 @@ func (w catalogWriter) ReadModule(ctx context.Context, module string) (catalog.R
 	}
 
 	resRows, err := w.tx.Query(ctx,
-		`SELECT module, resource, object_type, parent_types, parent_names, writes, public_read_to_children, permanent_project
+		`SELECT `+liveCatalogResourceColumns+`, child_registration
 		   FROM kaname.catalog_resource
 		  WHERE module = $1 AND live
 		  ORDER BY resource`, module)
 	if err != nil {
 		return out, fmt.Errorf("прочитать ресурсы модуля %s: %w", module, err)
 	}
-	out.Resources, err = pgx.CollectRows(resRows, func(row pgx.CollectableRow) (catalog.ResourceRow, error) {
-		var r catalog.ResourceRow
-		return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.ParentTypes, &r.ParentNames, &r.Writes,
-			&r.PublicReadToChildren, &r.PermanentProject)
-	})
+	out.Resources, err = pgx.CollectRows(resRows, scanLiveCatalogResource)
 	if err != nil {
 		return out, fmt.Errorf("прочитать ресурсы модуля %s: %w", module, err)
 	}
@@ -448,12 +464,18 @@ func (w catalogWriter) UpsertModule(ctx context.Context, module string) (bool, e
 // выставленное строкой, привязывает зарегистрированные объекты типа триггером
 // той же транзакции, а снятое перестаёт заводить привязки новым объектам.
 func (w catalogWriter) UpsertResource(ctx context.Context, r catalog.ResourceRow) (bool, error) {
+	// Только SQL NULL представляет отсутствие политики.
+	var childRegistration any
+	if r.ChildRegistration != nil {
+		childRegistration = r.ChildRegistration
+	}
 	// Пустые перечни, а не NULL: колонки NOT NULL, и «нет» выражается в них одним
 	// способом.
 	return w.changed(ctx, `
 		INSERT INTO kaname.catalog_resource (module, resource, dotted, object_type, parent_types,
-		                                     parent_names, writes, public_read_to_children, permanent_project)
-		VALUES ($1, $2, $1 || '.' || $2, $3, $4, $5, $6, $7, $8)
+		                                     parent_names, writes, public_read_to_children, permanent_project,
+		                                     child_registration)
+		VALUES ($1, $2, $1 || '.' || $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
 		ON CONFLICT (module, resource) DO UPDATE
 		   SET retired_at = NULL, live = true, retired_reason = NULL, superseded_by = NULL,
 		       object_type = EXCLUDED.object_type,
@@ -461,7 +483,8 @@ func (w catalogWriter) UpsertResource(ctx context.Context, r catalog.ResourceRow
 		       parent_names = EXCLUDED.parent_names,
 		       writes = EXCLUDED.writes,
 		       public_read_to_children = EXCLUDED.public_read_to_children,
-		       permanent_project = EXCLUDED.permanent_project
+		       permanent_project = EXCLUDED.permanent_project,
+		       child_registration = EXCLUDED.child_registration
 		 WHERE catalog_resource.live IS DISTINCT FROM true
 		    OR catalog_resource.object_type IS DISTINCT FROM EXCLUDED.object_type
 		    OR catalog_resource.parent_types IS DISTINCT FROM EXCLUDED.parent_types
@@ -469,8 +492,9 @@ func (w catalogWriter) UpsertResource(ctx context.Context, r catalog.ResourceRow
 		    OR catalog_resource.writes IS DISTINCT FROM EXCLUDED.writes
 		    OR catalog_resource.public_read_to_children IS DISTINCT FROM EXCLUDED.public_read_to_children
 		    OR catalog_resource.permanent_project IS DISTINCT FROM EXCLUDED.permanent_project
+		    OR catalog_resource.child_registration IS DISTINCT FROM EXCLUDED.child_registration
 		RETURNING 1`, r.Module, r.Resource, r.ObjectType, nonNilStrings(r.ParentTypes),
-		nonNilStrings(r.ParentNames), nonNilStrings(r.Writes), r.PublicReadToChildren, r.PermanentProject)
+		nonNilStrings(r.ParentNames), nonNilStrings(r.Writes), r.PublicReadToChildren, r.PermanentProject, childRegistration)
 }
 
 // UpsertVerb заводит, оживляет либо приводит признак словаря.

@@ -21,6 +21,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -50,8 +51,10 @@ var projectImmutableFields = map[string]string{
 }
 
 type UpdateProjectUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	metadataConfigured bool
+	metadataFactory    kanamerepo.ProjectMetadataWriterFactory
+	repo               Repo
+	opsRepo            operations.Repo
 	// Optional door to the rights decision, used by the defense-in-depth
 	// scope-relation authority check. When nil, the guard falls back to owner-only
 	// (fail-closed).
@@ -156,7 +159,9 @@ func (u *UpdateProjectUseCase) Execute(ctx context.Context, in UpdateProjectInpu
 
 	maskCopy := append([]string{}, in.UpdateMask...)
 	changedCopy := append([]string{}, changed...)
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		return u.doUpdate(ctx, target, maskCopy, actor, changedCopy)
 	})
 	return &op, nil
@@ -184,7 +189,7 @@ func (u *UpdateProjectUseCase) Execute(ctx context.Context, in UpdateProjectInpu
 // reconcile event above and the periodic sweep stay the at-least-once backstop, so this
 // changes WHEN the revoke is observed, not WHETHER it happens.
 func (u *UpdateProjectUseCase) doUpdate(ctx context.Context, p domain.Project, mask []string, actor string, changed []string) (*anypb.Any, error) {
-	updated, err := shared.DoWithWriteTx(ctx, u.repo,
+	updated, err := shared.DoWithWriteTx(ctx, u.metadataRepo(p, mask),
 		func(ctx context.Context, w Writer) (domain.Project, error) {
 			upd, uerr := w.ProjectsW().Update(ctx, p, mask)
 			if uerr != nil {

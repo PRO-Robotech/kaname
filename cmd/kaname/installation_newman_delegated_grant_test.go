@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -105,24 +106,7 @@ func rid03StableNewmanSnapshot(t *testing.T, w *ridLifecycleWorld) rid03NewmanSn
 	for {
 		require.NoError(t, ctx.Err(), "RID03 aggregate primary readiness deadline")
 		s, composed := rid03CaptureNewmanSnapshot(t, ctx, w.f)
-		materialized := true
-		for _, g := range s.Projection.Bindings {
-			if g["delegationId"] != nil && g["delegationId"] != "" && g["status"] == "ACTIVE" && g["materializedAt"] == nil {
-				materialized = false
-			}
-		}
-		// Завершаем штатную подготовку/прямое сведение до принятия
-		// базы; без записей и повторного запуска настоящего действия Newman.
-		for _, r := range s.Raw["resource_reconcile_outbox"] {
-			if string(r["sent_at"]) == "null" {
-				materialized = false
-			}
-		}
-		for _, r := range s.Raw["access_binding_target_members"] {
-			if rid03S(r, "verification_status") == "PENDING_VERIFICATION" {
-				materialized = false
-			}
-		}
+		materialized := rid03MaterializationReady(s)
 		if composed && materialized && previous != nil && rid03SnapshotEqual(*previous, s) {
 			require.NoError(t, ctx.Err())
 			return s
@@ -138,6 +122,26 @@ func rid03StableNewmanSnapshot(t *testing.T, w *ridLifecycleWorld) rid03NewmanSn
 		}
 	}
 }
+
+// Готовность определяется по публичной проекции и независимому состоянию PRIMARY.
+func rid03MaterializationReady(s rid03NewmanSnapshot) bool {
+	for _, binding := range s.Projection.Bindings {
+		if binding["delegationId"] != nil && binding["delegationId"] != "" && binding["status"] == "ACTIVE" && binding["materializedAt"] == nil {
+			return false
+		}
+	}
+	for _, row := range s.Raw["resource_reconcile_outbox"] {
+		if string(row["sent_at"]) == "null" {
+			return false
+		}
+	}
+	for _, row := range s.Raw["access_binding_target_members"] {
+		if rid03S(row, "verification_status") == "PENDING_VERIFICATION" {
+			return false
+		}
+	}
+	return true
+}
 func rid03PhaseSnapshot(t *testing.T, w *ridLifecycleWorld) rid03NewmanSnapshot {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.f.given.ctx, 30*time.Second)
@@ -150,6 +154,51 @@ func rid03PhaseSnapshot(t *testing.T, w *ridLifecycleWorld) rid03NewmanSnapshot 
 func rid03RequireReadOnly(t *testing.T, a, b rid03NewmanSnapshot) {
 	t.Helper()
 	require.True(t, rid03SnapshotEqual(a, b), "full public/raw/history/Operation/own-ceilings ledger changed during read-only phase")
+}
+
+func rid03RequirePublicPhaseReadOnly(t *testing.T, f *installationNativeWorld, caseID string, a, b rid03NewmanSnapshot) {
+	t.Helper()
+	if rid03SnapshotEqual(a, b) {
+		return
+	}
+	changed := []string{}
+	for _, field := range []struct {
+		name string
+		a, b any
+	}{
+		{"business_audit", a.BusinessAudit, b.BusinessAudit},
+		{"delivery", a.Whole.Delivery, b.Whole.Delivery},
+		{"operations", a.Whole.Bookkeeping["operations"], b.Whole.Bookkeeping["operations"]},
+		{"own_ceilings", a.Whole.OwnCeilings, b.Whole.OwnCeilings},
+		{"projection", a.Projection, b.Projection},
+		{"raw", a.Raw, b.Raw},
+	} {
+		if !reflect.DeepEqual(field.a, field.b) {
+			changed = append(changed, field.name)
+		}
+	}
+	// В публичную сводку уходят только имя штатной фазы и признаки изменений.
+	// В закрытом каталоге сохраняется подробная перепись без значений полей.
+	note, err := json.Marshal(struct {
+		CaseID string   `json:"caseId"`
+		Fields []string `json:"fields"`
+	}{caseID, changed})
+	require.NoError(t, err)
+	t.Logf("RID03_READ_ONLY_DIFF %s", note)
+	if strings.HasSuffix(caseID, "-VERIFY") {
+		rid03WriteRawDeltaCensus(t, f, caseID, a, b)
+	}
+	if !reflect.DeepEqual(a.Raw["operations"], b.Raw["operations"]) {
+		old, now := rid03RowsByID(t, a.Raw["operations"]), rid03RowsByID(t, b.Raw["operations"])
+		for id, row := range old {
+			if !reflect.DeepEqual(row, now[id]) {
+				note, err := json.Marshal(rid03DescribeOldOperationDiff(row, now[id]))
+				require.NoError(t, err)
+				t.Logf("RID03_OLD_OPERATION_DIFF %s", note)
+			}
+		}
+	}
+	t.Fatal("full public/raw/history/Operation/own-ceilings ledger changed during read-only phase")
 }
 func rid03Mode(t *testing.T, w *ridLifecycleWorld) string {
 	t.Helper()
@@ -297,7 +346,7 @@ func rid03PublicActionPair(t *testing.T, w *ridLifecycleWorld, scenario string, 
 	func() {
 		defer func() {
 			end := rid03PhaseSnapshot(t, w)
-			rid03RequireReadOnly(t, after, end)
+			rid03RequirePublicPhaseReadOnly(t, w.f, e.CaseID, after, end)
 			proof, proofOK := rid03BuildTechnicalReceipt(&e, after, end, nil)
 			require.True(t, proofOK, "closed VERIFY zero technical/business delta receipt required")
 			require.True(t, verifyReceipt.OK, "actual VERIFY receipt required before primary proof publication")
@@ -425,6 +474,79 @@ func rid03RowsByID(t *testing.T, rows []rid09PrimaryRow) map[string]rid09Primary
 }
 func rid03RawDigest(t *testing.T, r rid09PrimaryRow) string { t.Helper(); return ridWholeDigest(t, r) }
 
+type rid03OldOperationDiff struct {
+	Missing    bool     `json:"missing"`
+	Columns    []string `json:"columns"`
+	BeforeDone string   `json:"beforeDone"`
+	AfterDone  string   `json:"afterDone"`
+	Kind       string   `json:"kind"`
+}
+
+func rid03OperationStage(row rid09PrimaryRow) string {
+	var done *bool
+	if json.Unmarshal(row["done"], &done) != nil || done == nil {
+		return "unknown"
+	}
+	if *done {
+		return "done"
+	}
+	return "pending"
+}
+
+// В отчёт об отказе попадают только известные имена столбцов и закрытые признаки.
+// Значения ячеек, ID операции, типы не из списка и секреты не выводятся.
+func rid03DescribeOldOperationDiff(before, after rid09PrimaryRow) rid03OldOperationDiff {
+	diff := rid03OldOperationDiff{
+		Missing:    after == nil,
+		Columns:    []string{},
+		BeforeDone: rid03OperationStage(before),
+		AfterDone:  rid03OperationStage(after),
+		Kind:       "unknown",
+	}
+	var typeURL string
+	if json.Unmarshal(before["response_type"], &typeURL) == nil && typeURL != "" {
+		switch typeURL {
+		case "type.googleapis.com/" + string((&iamv1.IssueSAKeyResponse{}).ProtoReflect().Descriptor().FullName()):
+			diff.Kind = "service-account-key"
+		case "type.googleapis.com/" + string((&iamv1.IssueUserTokenResponse{}).ProtoReflect().Descriptor().FullName()):
+			diff.Kind = "user-token"
+		default:
+			diff.Kind = "other"
+		}
+	}
+	if diff.Missing {
+		return diff
+	}
+
+	columns := map[string]bool{}
+	note := func(name string) {
+		switch name {
+		case "id", "description", "created_at", "created_by", "principal_type", "principal_id",
+			"principal_display_name", "modified_at", "done", "metadata_type", "metadata_data",
+			"resource_id", "error_code", "error_message", "error_details", "response_type",
+			"response_data", "account_id":
+			columns[name] = true
+		default:
+			columns["other"] = true
+		}
+	}
+	for name, oldValue := range before {
+		if value, present := after[name]; !present || !reflect.DeepEqual(oldValue, value) {
+			note(name)
+		}
+	}
+	for name := range after {
+		if _, present := before[name]; !present {
+			note(name)
+		}
+	}
+	for name := range columns {
+		diff.Columns = append(diff.Columns, name)
+	}
+	slices.Sort(diff.Columns)
+	return diff
+}
+
 // У ACT одно заявленное изменение; все таблицы/столбцы/история остаются захваченными.
 // Неизменённые физические строки должны сохраниться побайтно. Аддитивные строки прямой материализации
 // привязаны к новому G как объекту либо запрошенным субъекту/цели; неизвестные
@@ -439,7 +561,11 @@ func rid03RequireActionDeltaWithReceipt(t *testing.T, w *ridLifecycleWorld, e *r
 	rid03WriteRawDeltaCensus(t, f, e.CaseID, a, b)
 	require.Equal(t, a.Whole.OwnCeilings, b.Whole.OwnCeilings)
 	if e.Denied {
-		rid03RequireReadOnly(t, a, b)
+		if strings.HasPrefix(e.CaseID, "registry-installation-rid03-") {
+			rid03RequirePublicPhaseReadOnly(t, w.f, e.CaseID, a, b)
+		} else {
+			rid03RequireReadOnly(t, a, b)
+		}
 		proof, ok := build(e, a, b, nil)
 		require.True(t, ok, "closed denied zero technical/business delta receipt required")
 		e.TechnicalEvidence = &proof
@@ -460,7 +586,13 @@ func rid03RequireActionDeltaWithReceipt(t *testing.T, w *ridLifecycleWorld, e *r
 	oldOps, newOps := rid03RowsByID(t, a.Raw["operations"]), rid03RowsByID(t, b.Raw["operations"])
 	require.Equal(t, len(oldOps)+1, len(newOps), "exactly one new Operation")
 	for id, row := range oldOps {
-		require.True(t, reflect.DeepEqual(row, newOps[id]), "complete old Operation including Any/index/principal/times unchanged; safe per-column census retained")
+		unchanged := reflect.DeepEqual(row, newOps[id])
+		if !unchanged {
+			note, err := json.Marshal(rid03DescribeOldOperationDiff(row, newOps[id]))
+			require.NoError(t, err, "safe RID03 diagnostic encoding")
+			t.Logf("RID03_OLD_OPERATION_DIFF %s", note)
+		}
+		require.True(t, unchanged, "complete old Operation including Any/index/principal/times unchanged; safe per-column census retained")
 	}
 	opID := ""
 	for id := range newOps {

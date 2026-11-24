@@ -48,9 +48,9 @@ def main() -> int:
         "REST_ENDPOINT": 9098, "INTERNAL_REST_ENDPOINT": 9099, "LOGIN_LANE_ENDPOINT": 9100,
     }.items():
         env["KANAME_API_SERVER__" + key] = f"tcp://127.0.0.1:{port}"
-    # Явный пустой YAML и точное окружение стенда; унаследованной конфигурации нет.
+    # Первая фаза явно не включает регистраторов; унаследованной конфигурации нет.
     config = evidence / "config.yaml"
-    config.write_text("{}\n")
+    config.write_text(json.dumps({"registration-account-writers": {"assignments": [], "disabled": [], "retire-cluster-writer": False}}) + "\n")
     env["KANAME_CONFIG_PATH"] = str(config)
     processes = []
     files = []
@@ -58,8 +58,8 @@ def main() -> int:
     results["binaries"] = {name: hashlib.sha256(path.read_bytes()).hexdigest()
                            for name, path in (("kaname", args.binary), ("migrator", args.migrator))}
 
-    def start(name, command):
-        log = (evidence / (name + ".log")).open("xb")
+    def start(name, command, log_suffix=""):
+        log = (evidence / (name + log_suffix + ".log")).open("xb")
         files.append(log)
         proc = subprocess.Popen(command, cwd=ROOT, env=env, stdout=log,
                                 stderr=subprocess.STDOUT, start_new_session=True)
@@ -167,10 +167,36 @@ def main() -> int:
                 owned_environment = None
                 raise RuntimeError("public matrix requires a fresh environment; existing file preserved")
             step("seed-own", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--pki", str(pki)], timeout=240)
+            # kaname#1032 U — человек уровня 2 и владелец собственного аккаунта.
+            # Ceremony не требует registry; оба аккаунта существуют до единственного
+            # конечного плана и штатного restart. История исходного процесса сохраняется.
+            step("seed-ceremony", ["python3", "tests/authz-fixtures/seed_ceremony.py", "--wave",
+                                  "--lane-url", "https://localhost:9100",
+                                  "--issuance-url", "https://localhost:9096",
+                                  "--own-url", "https://localhost:9098",
+                                  "--grpc-addr", "localhost:9091", "--pki", str(pki),
+                                  "--mailbox-url", "http://127.0.0.1:18025"], timeout=300)
+            # Аккаунт создан службой. Его конечный план применяется настоящим новым стартом.
+            next_config = evidence / "registration-writers.next.json"
+            step("registration-writer-plan", ["python3", "tests/authz-fixtures/registration_writer_plan.py",
+                                            "--env-file", str(owned_environment), "--output", str(next_config)])
+            if service.poll() is not None:
+                raise RuntimeError("owned service exited before registration plan restart")
+            os.killpg(service.pid, signal.SIGTERM)
+            service.wait(timeout=15)
+            if service.returncode != 0:
+                raise RuntimeError("owned service did not stop cleanly for registration plan")
+            results["steps"].append({"name": "registration-plan-stop", "rc": service.returncode, "pid": service.pid})
+            processes.remove(("kaname", service))
+            os.replace(next_config, config)
+            service = start("kaname", [str(args.binary), "serve"], "-registration")
+            wait_probe(listeners_probe)
+            wait_probe(jwks_probe)
+            owned_loopback_listeners(service, PORTS)
+            results["steps"].append({"name": "registration-plan-restart", "rc": 0, "pid": service.pid})
             step("seed-resource", ["python3", "tests/authz-fixtures/seed_registry_resource.py", "--pki", str(pki),
                                    "--ledger", str(evidence / "registry-intent.json")])
-            # Эта матрица использует обычных машинных делегатов; слоты человеческой
-            # церемонии относятся к своей отдельной волне приёмки.
+            # Дано готово: машинные делегаты и реальные люди U/E/C своей ceremony.
             step("seed-delegates", ["python3", "tests/authz-fixtures/seed_delegation.py", "--pki", str(pki),
                                     "--ledger", str(evidence / "delegation-subjects.json")])
             step("remint-bootstrap", ["python3", "tests/authz-fixtures/seed_own_stand.py", "--remint-bootstrap", "--pki", str(pki)])
@@ -200,6 +226,15 @@ def main() -> int:
                     raise RuntimeError(f"GD-E{case} was not executed")
             for case in ("IAM-GD-1011-GROUP-CONTAINS-DELEGATE-DENIED", "IAM-GD-1011-GROUP-WITHOUT-DELEGATE-ALLOWED"):
                 if not any(name.startswith(case + " ::") and "-grant-group" in name for name in executed):
+                    raise RuntimeError(case + " was not executed")
+            for case in ("IAM-GDU-EXPAND-ROLE-ALLOWED", "IAM-GDU-NARROW-ROLE-DENIED",
+                         "IAM-GDU-EXPAND-TARGET-ALLOWED", "IAM-GDU-CROSS-MODULE-TARGET-DENIED",
+                         "IAM-GDU-EXPAND-SUBJECT-ALLOWED", "IAM-GDU-EMPTY-SUBJECT-DENIED",
+                         "IAM-GDU-OWNER-UPDATE-ALLOWED", "IAM-GDU-DELEGATE-UPDATE-DENIED",
+                         "IAM-GDU-REPEAT-UNCHANGED", "IAM-GDU-REVOKED-UPDATE-DENIED",
+                         "IAM-GDU-ANONYMOUS-DENIED", "IAM-GDU-ACR1-DENIED",
+                         "IAM-GDU-MACHINE-AUTHORITY-DENIED"):
+                if not any(name.startswith(case + " ::") for name in executed):
                     raise RuntimeError(case + " was not executed")
             results["newmanStats"] = run["stats"]
             results["newmanCoverage"] = {"expectedRequests": len(expected), "executedRequests": len(executed),

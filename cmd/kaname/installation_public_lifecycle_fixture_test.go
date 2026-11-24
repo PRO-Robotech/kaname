@@ -3,8 +3,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
@@ -41,6 +43,7 @@ type ridLifecycleOperation struct {
 type ridLifecycleWorld struct {
 	f                                       *installationNativeWorld
 	delivery                                installruntime.DeliveryInput
+	deliveryProcess                         *installruntime.Process
 	accounts                                []string
 	issuer                                  *installruntime.StandingCreator
 	issuerToken                             string
@@ -173,6 +176,9 @@ func (f *installationNativeWorld) ridKey(t *testing.T, id, account, label string
 	raw, err := os.ReadFile(key.CredentialFile)
 	require.NoError(t, err)
 	f.secrets = append(f.secrets, string(raw))
+	if f.settleIssuedKeys {
+		f.awaitIssuedKeyResponseRedaction(t, key)
+	}
 	return key
 }
 func (f *installationNativeWorld) ridAdmin(t *testing.T, id string, grant bool) {
@@ -228,9 +234,13 @@ func newRIDLifecycleWorld(t *testing.T, mode string, systemClass bool) *ridLifec
 
 // Необязательная подготовка фикстуры использует ту же полную нативную установку и публичные F7-F10.
 func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, setup func(*testing.T, *installationNativeWorld) []string) *ridLifecycleWorld {
+	return newRIDLifecycleWorldConfigured(t, mode, systemClass, setup, nativeWorldOptions{})
+}
+
+func newRIDLifecycleWorldConfigured(t *testing.T, mode string, systemClass bool, setup func(*testing.T, *installationNativeWorld) []string, options nativeWorldOptions) *ridLifecycleWorld {
 	t.Helper()
 	manifests := ridLifecycleDelivery(t, systemClass)
-	f := newInstallationNativeWorldProfile(t, 7200, "", true)
+	f := newInstallationNativeWorldConfigured(t, 7200, "", true, true, options)
 
 	// Конструктор уже сравнил полный штатный каталог до/после базы,
 	// записал настоящие квитанции отсутствия поставки и проверил нулевую поставку I/W/GD.
@@ -243,13 +253,15 @@ func newRIDLifecycleWorldAccounts(t *testing.T, mode string, systemClass bool, s
 			accounts = f.createRID02Accounts(t)
 		}
 	}
-	in := installruntime.DeliveryInput{Manifests: manifests, CredentialFile: f.creator.CredentialFile}
+	f.writerPlan = installruntime.RegistryRegistrationWriterPlan(accounts)
+	in := installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: manifests, CredentialFile: f.creator.CredentialFile}
 	if mode == "S1" {
 		in.TenantAccountID = &f.tenantID
 	}
-	requireNativeOK(t, f.apply(t, in), len(accounts))
+	deliveryProcess := f.apply(t, in)
+	requireNativeOK(t, deliveryProcess, len(accounts))
 	f.renewOperator(t, f.given.ctx)
-	w := &ridLifecycleWorld{f: f, delivery: in, accounts: accounts}
+	w := &ridLifecycleWorld{f: f, delivery: in, deliveryProcess: deliveryProcess, accounts: accounts}
 	var issuerID, writerID string
 	for _, raw := range f.ridList(t, "/iam/v1/serviceAccounts", "serviceAccounts", url.Values{"accountId": {f.baseline.SystemID}}) {
 		var sa iamv1.ServiceAccount
@@ -620,13 +632,81 @@ func (w *ridLifecycleWorld) catalogOnly(t *testing.T) {
 	delete(seed, "grantDelegations")
 	raw, err := yaml.Marshal(doc)
 	require.NoError(t, err)
-	p, err := w.f.session.StartCatalogOnly(w.f.given.ctx, installruntime.RIDDeliveryFixture{First: raw})
+	p, err := w.f.session.StartCatalogOnly(w.f.given.ctx, installruntime.RIDDeliveryFixture{First: raw}, w.delivery.RegistrationWriters)
 	require.NoError(t, err)
 	require.NoError(t, p.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
 	results, err := p.Results()
 	require.NoError(t, err)
 	require.Empty(t, results, "no delegation stage was requested")
+	// Слушатели поднимаются до фонового восстановления проекций. Снимок
+	// фазы чтения берём после завершения записи проекций этого процесса.
+	ready, cancel := context.WithTimeout(w.f.given.ctx, 90*time.Second)
+	defer cancel()
+	require.NoError(t, p.AwaitReady(ready, func(context.Context) error {
+		return ridCatalogRoleProjectionsReady(p.StdoutPath)
+	}), "восстановленный процесс не завершил пересчёт проекций ролей")
 	w.f.renewOperator(t, w.f.given.ctx)
+}
+
+type ridRoleProjectionState struct {
+	verbs, refs string
+}
+
+func ridCatalogRoleProjectionsReady(path string) error {
+	_, err := ridCatalogRoleProjectionsProbe(path)
+	return err
+}
+
+func ridCatalogRoleProjectionsProbe(path string) (ridRoleProjectionState, error) {
+	state := ridRoleProjectionState{verbs: "unseen", refs: "unseen"}
+	stream, err := os.Open(path)
+	if err != nil {
+		return state, err
+	}
+	defer stream.Close()
+	lines := bufio.NewScanner(stream)
+	lines.Buffer(make([]byte, 4096), 1024*1024)
+	for lines.Scan() {
+		var record struct {
+			Message   string `json:"msg"`
+			Completed *bool  `json:"completed"`
+			Examined  *int   `json:"roles_examined"`
+			Reseeded  *int   `json:"roles_reseeded"`
+			Failed    *int   `json:"roles_failed"`
+		}
+		if json.Unmarshal(lines.Bytes(), &record) != nil {
+			continue
+		}
+		var projection *string
+		switch record.Message {
+		case "перепись пересчёта проекции глаголов роли":
+			projection = &state.verbs
+		case "перепись пересчёта проекции сегментов правила":
+			projection = &state.refs
+		default:
+			continue
+		}
+		if *projection == "ready" {
+			continue
+		}
+		switch {
+		case record.Failed != nil && *record.Failed != 0:
+			*projection = "failed"
+		case record.Completed == nil || !*record.Completed ||
+			record.Examined == nil || record.Reseeded == nil || record.Failed == nil ||
+			*record.Examined != *record.Reseeded:
+			*projection = "incomplete"
+		default:
+			*projection = "ready"
+		}
+		if state.verbs == "ready" && state.refs == "ready" {
+			return state, nil
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return state, err
+	}
+	return state, fmt.Errorf("стартовый пересчёт проекций ролей ещё не завершился")
 }
 
 // Регистрируется конструктором явного включения до первого Start и подготовки.

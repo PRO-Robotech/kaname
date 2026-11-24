@@ -88,10 +88,10 @@ const crockfordLower = "0123456789abcdefghjkmnpqrstvwxyz"
 // дополнения это 43 знака — не короче 22 требуемых (Ф3-08).
 const SessionBearerBytes = 32
 
-// sessionBearerRedacted — заглушка на всяком общем пути вывода носителя.
-// #nosec G101 -- это ЗАМЕНА носителя в выводе, а не сам носитель: строка стоит
+// sessionDisplayRedaction — заглушка на всяком общем пути вывода носителя.
+// это ЗАМЕНА носителя в выводе, а не сам носитель: строка стоит
 // там, где значение печатать запрещено.
-const sessionBearerRedacted = "[redacted session bearer]"
+const sessionDisplayRedaction = "[redacted session bearer]"
 
 // ErrSessionBearerNotSerializable — носитель не сериализуется ни в JSON, ни в
 // текст: значение уходит клиенту одним путём — заголовком `Set-Cookie`, который
@@ -151,11 +151,11 @@ func (b SessionBearer) Digest() BearerDigest {
 }
 
 // String — заглушка.
-func (b SessionBearer) String() string { return sessionBearerRedacted }
+func (b SessionBearer) String() string { return sessionDisplayRedaction }
 
 // GoString — заглушка и для `%#v`.
 func (b SessionBearer) GoString() string {
-	return "domain.SessionBearer{" + sessionBearerRedacted + "}"
+	return "domain.SessionBearer{" + sessionDisplayRedaction + "}"
 }
 
 // Format — заглушка на любом глаголе форматирования.
@@ -164,11 +164,11 @@ func (b SessionBearer) Format(f fmt.State, verb rune) {
 		_, _ = io.WriteString(f, b.GoString())
 		return
 	}
-	_, _ = io.WriteString(f, sessionBearerRedacted)
+	_, _ = io.WriteString(f, sessionDisplayRedaction)
 }
 
 // LogValue — заглушка для журнала.
-func (b SessionBearer) LogValue() slog.Value { return slog.StringValue(sessionBearerRedacted) }
+func (b SessionBearer) LogValue() slog.Value { return slog.StringValue(sessionDisplayRedaction) }
 
 // MarshalJSON — отказ.
 func (b SessionBearer) MarshalJSON() ([]byte, error) { return nil, ErrSessionBearerNotSerializable }

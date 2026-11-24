@@ -112,7 +112,9 @@ package pg_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -120,11 +122,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
@@ -189,6 +193,8 @@ type lmContainment struct {
 	RoutinesRead       int
 	RoutinesSQL        int // из них судились грамматикой SQL (sql, plpgsql)
 	NamingRoutines     []string
+	ApprovedInviteLock int
+	InviteLockDefects  []string
 	Publications       []string
 }
 
@@ -217,6 +223,10 @@ func (c lmContainment) Findings() []string {
 	add(c.DomainColumns, "колонка таблицы секрета доменного типа (%s) — ограничения домена исполняются при записи со значением")
 	add(c.ColumnDependents, "от колонки материала зависит %s — он читает материал помимо адаптера")
 	add(c.RowtypeDependents, "тип строки таблицы секрета использует %s — значение этого типа несёт материал")
+	add(c.InviteLockDefects, "объявленный invite preflight не прошёл точную проверку: %s")
+	if c.ApprovedInviteLock != 1 {
+		out = append(out, fmt.Sprintf("объявленный invite preflight найден и допущен %d раз, требуется ровно один", c.ApprovedInviteLock))
+	}
 	add(c.NamingRoutines, "подпрограмма %s называет таблицу секрета — её исполняет тот, кто её зовёт, мимо писателя")
 	add(c.Publications, "публикация %q отдаёт таблицу секрета подписчику логической репликации")
 	sort.Strings(out)
@@ -236,12 +246,12 @@ func (c lmContainment) Census() string {
 		"строк статистики таблицы секрета %d, выборок с меткой %d; триггеров: пользовательских %d, ссылочной целостности %d; "+
 		"правил %d; политик %d; ограничений объявленных %d из %d, чужих %d; доменных колонок %d; зависимых от колонки материала "+
 		"сверх законного %d; использующих тип строки %d; подпрограмм прочитано %d (грамматикой SQL %d, без грамматики %d), "+
-		"называющих таблицу %d; публикаций %d",
+		"называющих таблицу %d; публикаций %d; точных invite preflight %d, нарушений его замыкания %d",
 		strings.Join(kinds, " "), len(c.Unpopulated), c.ScannedColumns, len(c.Hits),
 		c.StatRows, len(c.StatHits), len(c.UserTriggers), c.InternalTriggers,
 		len(c.Rules), len(c.Policies), c.DeclaredSeen, len(lmDeclaredConstraints), len(c.ForeignConstraints),
 		len(c.DomainColumns), len(c.ColumnDependents), len(c.RowtypeDependents),
-		c.RoutinesRead, c.RoutinesSQL, c.RoutinesRead-c.RoutinesSQL, len(c.NamingRoutines), len(c.Publications))
+		c.RoutinesRead, c.RoutinesSQL, c.RoutinesRead-c.RoutinesSQL, len(c.NamingRoutines), len(c.Publications), c.ApprovedInviteLock, len(c.InviteLockDefects))
 }
 
 // lmRequireCensus — премисы: каждое правило читало каталог. Без них «нарушений
@@ -438,8 +448,10 @@ func lmScanContainment(t *testing.T, pool *pgxpool.Pool, needle string) lmContai
 	// регистр имени без кавычек, имя в кавычках, U&, имя внутри строки
 	// динамического SQL и разбора имени. Язык выбирает грамматику: текст на
 	// языке, чья грамматика распознавателю неизвестна, судится без неё.
+	approvedOID, defects := lmInviteLockApproval(t, pool)
+	c.InviteLockDefects = defects
 	prows, err := pool.Query(ctx, `
-		SELECT p.oid::regprocedure::text, l.lanname::text,
+		SELECT p.oid, p.oid::regprocedure::text, l.lanname::text,
 		       coalesce(p.prosrc, ''), coalesce(pg_get_function_sqlbody(p.oid), '')
 		  FROM pg_proc p
 		  JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -448,15 +460,20 @@ func lmScanContainment(t *testing.T, pool *pgxpool.Pool, needle string) lmContai
 		 ORDER BY 1`)
 	require.NoError(t, err)
 	for prows.Next() {
+		var oid uint32
 		var name, lang, src, body string
-		require.NoError(t, prows.Scan(&name, &lang, &src, &body))
+		require.NoError(t, prows.Scan(&oid, &name, &lang, &src, &body))
 		c.RoutinesRead++
 		names, grammar := check.SQLRoutineNamesRelation(lang, src, lmSecretTable)
 		if grammar {
 			c.RoutinesSQL++
 		}
 		if names || check.SQLNamesRelation(body, lmSecretTable) {
-			c.NamingRoutines = append(c.NamingRoutines, name)
+			if oid == approvedOID {
+				c.ApprovedInviteLock++
+			} else {
+				c.NamingRoutines = append(c.NamingRoutines, name)
+			}
 		}
 	}
 	require.NoError(t, prows.Err())
@@ -896,6 +913,316 @@ func TestLoginVerifierContainmentGateInjection(t *testing.T) {
 				return
 			}
 			require.Contains(t, findings, sc.want, "находка обязана называть внесённое по имени")
+		})
+	}
+}
+
+// Единственное объявленное исключение: приёмка whole-effect §8.3.1. Это
+// точная программа блокировок, не разрешение именовать таблицу по имени функции.
+// Ожидаемые SHA взяты из Up-тел AS $$ миграций 20261114120000,
+// 20261114130000 и 20261115150000, а не из исполняемой базы. Первые три
+// функции имеют существующий PUBLIC EXECUTE; остальные четыре доступны
+// только владельцу. Snapshot v3 входит в замыкание обоих attestation ABI;
+// full-storage body сюда не входит.
+// SHA authority_protocol_attestation учитывает проверенную ветку без TEMP proof
+// из 20261115150000: прежние проверки strict/compare и compatibility fence.
+const lmInvitePreflight = "kaname.authority_invite_preflight(boolean)"
+
+var lmInviteLockPins = []struct {
+	signature, bodySHA, language, volatility, result string
+	publicExecute                                    bool
+}{
+	{lmInvitePreflight, "c5a09c380bcb3cb49dc148d73cf8dd2969d2a37a75703b05db132343837e4c6d", "plpgsql", "v", "void", true},
+	{"kaname.authority_invite_phase_held()", "493d418d468446b3d65e633dde33abc2bb6a4caf7fe93dac326d01a79945e069", "plpgsql", "v", "TABLE(phase text, enforcement text, protocol_version integer, model_id text, catalog_id text, projector_version text)", true},
+	{"kaname.authority_invite_phase_snapshot()", "1b843d8cf476609e0c61f0b392b9ff953a90049374f5f6368f67101423e9aba6", "sql", "s", "TABLE(phase text, enforcement text, protocol_version integer, model_id text, catalog_id text, projector_version text)", true},
+	{"kaname.authority_protocol_attestation()", "130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502", "plpgsql", "v", "jsonb", false},
+	{"kaname._authority_protocol_attestation_v1_body()", "2c6a618c91d3b7fff8a5e23734d8d7815d6c38cb9b82adacd2e472202584fc54", "plpgsql", "v", "jsonb", false},
+	{"kaname._authority_protocol_snapshot_v3()", "f994c63975e86be78b2854a4f51aed55e615ad2c380b0f58fc1e0390662fc30a", "plpgsql", "v", "TABLE(proof jsonb, compatibility_shared boolean, compatibility_exclusive boolean, population_oid oid, population_shared boolean, population_row_exclusive boolean, population_extra_shared boolean, population_extra_row_exclusive boolean)", false},
+	{"kaname._authority_compare_legacy_write_allowed_v2()", "03256f78ee7927bdaf33de3e3253638159353d55866f315ab0517f5e3f0ecbcc", "plpgsql", "v", "void", false},
+}
+
+// lmInviteLockApproval возвращает OID только при полном замыкании. Похожее имя,
+// перегрузка, заменённый callee или отсутствие объявленного тела не дают допуск.
+func lmInviteLockApproval(t *testing.T, pool *pgxpool.Pool) (uint32, []string) {
+	t.Helper()
+	var approved uint32
+	var defects []string
+	for _, pin := range lmInviteLockPins {
+		var oid uint32
+		var src string
+		var metadata bool
+		err := pool.QueryRow(context.Background(), `
+			SELECT p.oid, p.prosrc,
+			       coalesce(p.proowner = (SELECT relowner FROM pg_class WHERE oid='kaname.user_login_methods'::regclass)
+			       AND p.prokind='f' AND p.prosecdef AND NOT p.proleakproof AND NOT p.proisstrict
+			       AND p.proparallel='u' AND p.pronargdefaults=0 AND p.provariadic=0
+			       AND l.lanname=$3 AND p.provolatile::text=$4 AND pg_get_function_result(p.oid)=$5
+			       AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']::text[]
+			       AND coalesce(pg_get_function_sqlbody(p.oid),'')=''
+			       AND (SELECT count(*)=CASE WHEN $2::boolean THEN 2 ELSE 1 END
+			            AND bool_and(a.grantor=p.proowner AND a.privilege_type='EXECUTE'
+			                         AND NOT a.is_grantable
+			                         AND (a.grantee=p.proowner OR ($2::boolean AND a.grantee=0)))
+			              FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a),false)
+			  FROM pg_proc p JOIN pg_language l ON l.oid=p.prolang
+			 WHERE p.oid=to_regprocedure($1)`, pin.signature, pin.publicExecute, pin.language, pin.volatility, pin.result).Scan(&oid, &src, &metadata)
+		if errors.Is(err, pgx.ErrNoRows) {
+			defects = append(defects, pin.signature+": нет точной сигнатуры")
+			continue
+		}
+		require.NoError(t, err, "перепись объявления %s", pin.signature)
+		if !metadata || fmt.Sprintf("%x", sha256.Sum256([]byte(src))) != pin.bodySHA {
+			defects = append(defects, pin.signature+": тело, владелец, ABI, атрибуты или ACL не совпали")
+		}
+		if pin.signature == lmInvitePreflight {
+			approved = oid
+		}
+	}
+	if len(defects) != 0 {
+		return 0, defects
+	}
+	return approved, nil
+}
+
+func lmRequireApprovedContainment(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	c := lmScanContainment(t, pool, lmSentinel)
+	lmRequireCensus(t, c)
+	require.Equal(t, 1, c.ApprovedInviteLock, "допущена ровно одна точная программа")
+	require.Empty(t, c.Findings(), c.Census())
+}
+
+func lmInviteProof(t *testing.T, r protocolRig) pgx.Tx {
+	t.Helper()
+	tx, err := r.runtime.Begin(r.ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { policyFixtureRollback(tx) })
+	in := kaname.AuthorityWriteIntent{Kind: kaname.AuthorityIdentity, Bundle: r.bundle, Plan: kaname.AuthorityFencePlan{Mode: kaname.AuthorityFenceGlobal}}
+	_, err = protocolEnter(r.ctx, tx, in, "participant")
+	require.NoError(t, err, "настоящий GLOBAL participant обычного LOGIN")
+	return tx
+}
+
+func lmInviteHeldLocks(t *testing.T, pool *pgxpool.Pool, pid int) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM pg_locks WHERE pid=$1 AND granted AND locktype='relation'
+		AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+		AND mode='ExclusiveLock' AND relation=ANY(ARRAY[
+		 'kaname.user_login_methods'::regclass,'kaname.users'::regclass])`, pid).Scan(&n))
+	return n
+}
+
+// Наблюдатель не читает private proof. Блокирующий writer и pg_locks показывают
+// реальное ожидание secret relation раньше users; после завершения оба замка
+// удерживаются до Commit. Это не измерение длительности final-clock/fence hold.
+func lmExerciseInviteLock(t *testing.T, r protocolRig, binding bool) {
+	t.Helper()
+	tx := lmInviteProof(t, r)
+	var pid int
+	require.NoError(t, tx.QueryRow(r.ctx, `SELECT pg_backend_pid()`).Scan(&pid))
+	require.Zero(t, lmInviteHeldLocks(t, r.admin, pid))
+	blocker, err := r.admin.Begin(r.ctx)
+	require.NoError(t, err)
+	defer policyFixtureRollback(blocker)
+	_, err = blocker.Exec(r.ctx, `LOCK TABLE kaname.user_login_methods IN ROW EXCLUSIVE MODE`)
+	require.NoError(t, err)
+	var blockerPID int
+	require.NoError(t, blocker.QueryRow(r.ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID))
+	callCtx, cancel := context.WithTimeout(r.ctx, 15*time.Second)
+	type result struct {
+		value string
+		err   error
+	}
+	done := make(chan result, 1)
+	received := false
+	go func() {
+		var value string
+		err := tx.QueryRow(callCtx, `SELECT kaname.authority_invite_preflight($1)::text`, binding).Scan(&value)
+		done <- result{value, err}
+	}()
+	defer func() {
+		cancel()
+		if !received {
+			<-done
+		}
+		policyFixtureRollback(tx)
+	}()
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := r.admin.QueryRow(r.ctx, `SELECT
+		 EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='relation'
+		  AND relation='kaname.user_login_methods'::regclass AND mode='ExclusiveLock' AND NOT granted)
+		 AND $2=ANY(pg_blocking_pids($1))
+		 AND NOT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='relation'
+		  AND relation='kaname.users'::regclass AND mode='ExclusiveLock' AND granted)`, pid, blockerPID).Scan(&waiting)
+		return err == nil && waiting
+	}, 5*time.Second, 10*time.Millisecond, "secret lock должен ждать именно blocker, users ещё не захвачен")
+	require.NoError(t, blocker.Rollback(r.ctx))
+	got := <-done
+	received = true
+	require.NoError(t, got.err)
+	require.Empty(t, got.value, "scalar void не выдаёт содержимое таблицы")
+	require.Equal(t, 2, lmInviteHeldLocks(t, r.admin, pid))
+	require.NoError(t, tx.Commit(r.ctx))
+	require.Zero(t, lmInviteHeldLocks(t, r.admin, pid), "Commit освобождает оба relation locks")
+	authorityWaitReleased(t, r.runtime)
+}
+
+func TestLoginVerifierInvitePreflightApprovedLock(t *testing.T) {
+	r := identityLifecycleSingle(t, writerProtocolRig(t))
+	lmWriteSentinel(t, r.admin, "lminvite")
+	lmRequireApprovedContainment(t, r.admin)
+	before := lmQueryStrings(t, r.admin, `SELECT to_jsonb(m)::text FROM kaname.user_login_methods m ORDER BY user_id,kind`)
+	for _, strict := range []bool{false, true} {
+		if strict {
+			require.NoError(t, lifecycleOwner(r).ActivateAuthorityBundle(r.ctx, r.bundle))
+		}
+		t.Run(fmt.Sprintf("strict_%v", strict), func(t *testing.T) {
+			_, err := r.runtime.Exec(r.ctx, `SELECT kaname.authority_invite_preflight(false)`)
+			var pe *pgconn.PgError
+			require.ErrorAs(t, err, &pe)
+			require.Equal(t, "42501", pe.Code, "PUBLIC EXECUTE без private attestation не даёт preflight")
+			for _, binding := range []bool{false, true} {
+				t.Run(fmt.Sprintf("binding_%v", binding), func(t *testing.T) {
+					lmExerciseInviteLock(t, r, binding)
+				})
+			}
+			require.Equal(t, before, lmQueryStrings(t, r.admin, `SELECT to_jsonb(m)::text FROM kaname.user_login_methods m ORDER BY user_id,kind`))
+			lmRequireApprovedContainment(t, r.admin)
+		})
+	}
+}
+
+// Подмена выполняется владельцем только в изолированной базе негативной пробы.
+// Ожидаемый SHA gate остаётся SOURCE-константой: тело базы берётся лишь для
+// инъекции в настоящий ABI, а не становится новым основанием разрешения.
+func lmInjectInviteBody(t *testing.T, r protocolRig, callee bool) {
+	t.Helper()
+	name := lmInvitePreflight
+	header := `CREATE OR REPLACE FUNCTION kaname.authority_invite_preflight(p_binding boolean) RETURNS void`
+	needle := "PERFORM * FROM kaname.authority_invite_phase_held();"
+	if callee {
+		name = "kaname.authority_invite_phase_held()"
+		header = `CREATE OR REPLACE FUNCTION kaname.authority_invite_phase_held()
+		 RETURNS TABLE(phase text,enforcement text,protocol_version integer,model_id text,catalog_id text,projector_version text)`
+		needle = "proof:=kaname.authority_protocol_attestation();"
+	}
+	var body string
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure($1)`, name).Scan(&body))
+	require.Equal(t, 1, strings.Count(body, needle))
+	require.NotContains(t, body, "$lm_body$")
+	body = strings.Replace(body, needle, needle+`
+	 PERFORM pg_notify('lm_invite_approval',coalesce((SELECT string_agg(verifier,',') FROM kaname.user_login_methods),''));`, 1)
+	_, err := r.admin.Exec(r.ctx, header+` LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $lm_body$`+body+`$lm_body$;`)
+	require.NoError(t, err)
+}
+
+// Новый private callee проверяется через настоящий invite path: внешнее тело
+// preflight остаётся прежним, а уведомление доказывает выполненную инъекцию.
+// Как и выше, прочитанное тело служит только материалом отрицательной пробы.
+func lmInjectInviteSnapshotBody(t *testing.T, r protocolRig) {
+	t.Helper()
+	const name = "kaname._authority_protocol_snapshot_v3()"
+	const header = `CREATE OR REPLACE FUNCTION kaname._authority_protocol_snapshot_v3()
+	 RETURNS TABLE(proof jsonb,compatibility_shared boolean,compatibility_exclusive boolean,population_oid oid,
+	 population_shared boolean,population_row_exclusive boolean,population_extra_shared boolean,population_extra_row_exclusive boolean)`
+	const needle = "\n RETURN NEXT;\nEND"
+	var body string
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure($1)`, name).Scan(&body))
+	require.Equal(t, 1, strings.Count(body, needle))
+	require.NotContains(t, body, "$lm_snapshot_body$")
+	body = strings.Replace(body, needle, `
+	 PERFORM pg_notify('lm_invite_approval',coalesce((SELECT string_agg(verifier,',') FROM kaname.user_login_methods),''));`+needle, 1)
+	_, err := r.admin.Exec(r.ctx, header+` LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $lm_snapshot_body$`+body+`$lm_snapshot_body$;`)
+	require.NoError(t, err)
+}
+
+func TestLoginVerifierInvitePreflightApprovalInjection(t *testing.T) {
+	cases := []struct {
+		name, want string
+		mutate     func(*testing.T, protocolRig)
+		leak       bool
+	}{
+		{"то же имя и ABI, тело уносит материал", lmInvitePreflight, func(t *testing.T, r protocolRig) { lmInjectInviteBody(t, r, false) }, true},
+		{"неизменённое внешнее тело, подменённый callee уносит материал", "kaname.authority_invite_phase_held()", func(t *testing.T, r protocolRig) { lmInjectInviteBody(t, r, true) }, true},
+		{"SECURITY INVOKER", lmInvitePreflight, func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `ALTER FUNCTION kaname.authority_invite_preflight(boolean) SECURITY INVOKER`)
+			require.NoError(t, err)
+		}, false},
+		{"чужой search_path", lmInvitePreflight, func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `ALTER FUNCTION kaname.authority_invite_preflight(boolean) SET search_path=pg_catalog,public,pg_temp`)
+			require.NoError(t, err)
+		}, false},
+		{"дополнительный grantee", lmInvitePreflight, func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `GRANT EXECUTE ON FUNCTION kaname.authority_invite_preflight(boolean) TO `+pgx.Identifier{r.role}.Sanitize())
+			require.NoError(t, err)
+		}, false},
+		{"grant option", lmInvitePreflight, func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `GRANT EXECUTE ON FUNCTION kaname.authority_invite_preflight(boolean) TO `+pgx.Identifier{r.role}.Sanitize()+` WITH GRANT OPTION`)
+			require.NoError(t, err)
+		}, false},
+		{"другой владелец", lmInvitePreflight, func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `ALTER FUNCTION kaname.authority_invite_preflight(boolean) OWNER TO `+pgx.Identifier{r.role}.Sanitize())
+			require.NoError(t, err)
+		}, false},
+		{"private callee стал PUBLIC", "kaname._authority_protocol_attestation_v1_body()", func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `GRANT EXECUTE ON FUNCTION kaname._authority_protocol_attestation_v1_body() TO PUBLIC`)
+			require.NoError(t, err)
+		}, false},
+		{"отсутствующий callee", "kaname.authority_invite_phase_held()", func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `DROP FUNCTION kaname.authority_invite_phase_held()`)
+			require.NoError(t, err)
+		}, false},
+		{"неизменённое внешнее тело, snapshot v3 уносит материал", "kaname._authority_protocol_snapshot_v3()", func(t *testing.T, r protocolRig) { lmInjectInviteSnapshotBody(t, r) }, true},
+		{"snapshot v3 стал PUBLIC", "kaname._authority_protocol_snapshot_v3()", func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `GRANT EXECUTE ON FUNCTION kaname._authority_protocol_snapshot_v3() TO PUBLIC`)
+			require.NoError(t, err)
+		}, false},
+		{"snapshot v3 получил non-owner grantee", "kaname._authority_protocol_snapshot_v3()", func(t *testing.T, r protocolRig) {
+			_, err := r.admin.Exec(r.ctx, `GRANT EXECUTE ON FUNCTION kaname._authority_protocol_snapshot_v3() TO `+pgx.Identifier{r.role}.Sanitize())
+			require.NoError(t, err)
+		}, false},
+	}
+	for i, sc := range cases {
+		t.Run(sc.name, func(t *testing.T) {
+			r := identityLifecycleSingle(t, writerProtocolRig(t))
+			lmWriteSentinel(t, r.admin, fmt.Sprintf("lminvneg%d", i))
+			lmRequireApprovedContainment(t, r.admin)
+			var outerBefore, outerAfter string
+			require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure($1)`, lmInvitePreflight).Scan(&outerBefore))
+			sc.mutate(t, r)
+			if !sc.leak || sc.want != lmInvitePreflight {
+				require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure($1)`, lmInvitePreflight).Scan(&outerAfter))
+				require.Equal(t, outerBefore, outerAfter, "внешнее тело побайтово прежнее: отказ обязан судить также callee и metadata")
+			}
+			if sc.leak {
+				listener, err := r.admin.Acquire(r.ctx)
+				require.NoError(t, err)
+				defer listener.Release()
+				_, err = listener.Exec(r.ctx, `LISTEN lm_invite_approval`)
+				require.NoError(t, err)
+				tx := lmInviteProof(t, r)
+				var value string
+				require.NoError(t, tx.QueryRow(r.ctx, `SELECT kaname.authority_invite_preflight(false)::text`).Scan(&value))
+				require.Empty(t, value, "void сам по себе не предотвращает утечку через callee")
+				require.NoError(t, tx.Commit(r.ctx))
+				ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
+				defer cancel()
+				n, err := listener.Conn().WaitForNotification(ctx)
+				require.NoError(t, err, "инъекция должна действительно унести материал")
+				require.Contains(t, n.Payload, lmSentinel)
+			}
+			c := lmScanContainment(t, r.admin, lmSentinel)
+			lmRequireCensus(t, c)
+			require.Zero(t, c.ApprovedInviteLock, "подмена отменяет исключение, несмотря на прежнее имя")
+			require.Contains(t, strings.Join(c.InviteLockDefects, "\n"), sc.want)
+			require.Contains(t, strings.Join(c.Findings(), "\n"), sc.want)
+			for home := range c.Hits {
+				require.Equal(t, lmSecretHome, home, "утечка уведомлением не превращается в мнимую persisted копию")
+			}
+			authorityWaitReleased(t, r.runtime)
 		})
 	}
 }

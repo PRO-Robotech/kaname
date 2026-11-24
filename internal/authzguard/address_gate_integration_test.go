@@ -355,7 +355,7 @@ func TestInternalAddressGateTablesAreClosed(t *testing.T) {
 	t.Logf("перепись: круг края %d · методов внутренних служб %d · строк таблиц %d", len(circle), len(internal), len(table))
 	require.Empty(t, findings)
 	require.Len(t, circle, 17)
-	require.Len(t, internal, 30)
+	require.Len(t, internal, 31)
 }
 
 // TestInternalAddressGateTablesInjection — инъекция в обе стороны: метод круга

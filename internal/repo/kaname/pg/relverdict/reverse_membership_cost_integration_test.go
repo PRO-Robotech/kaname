@@ -118,9 +118,7 @@ func measureSubjectsRowsAtMembershipScale(t *testing.T, n int) int64 {
 	t.Helper()
 
 	var rows int64
-	withTx(t, func(ctx context.Context, tx pgx.Tx) {
-		seedMembershipNoise(t, ctx, tx, n)
-
+	withMembershipCostTx(t, n, func(ctx context.Context, tx pgx.Tx) {
 		before := tuplesRead(t, ctx, tx)
 		got, _, err := relverdict.Subjects(ctx, tx, relverdict.SubjectsQuery{
 			ObjectType: "vpc_network",
@@ -144,9 +142,7 @@ func measureExpandRowsAtMembershipScale(t *testing.T, n int) int64 {
 	t.Helper()
 
 	var rows int64
-	withTx(t, func(ctx context.Context, tx pgx.Tx) {
-		seedMembershipNoise(t, ctx, tx, n)
-
+	withMembershipCostTx(t, n, func(ctx context.Context, tx pgx.Tx) {
 		before := tuplesRead(t, ctx, tx)
 		got, err := relverdict.Expand(ctx, tx, "vpc_network", membershipCostObjectID, "v_get")
 		after := tuplesRead(t, ctx, tx)

@@ -61,6 +61,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -76,9 +77,11 @@ import (
 // `:disable` quietly becomes `:enable` — the one mistake that turns the control
 // into its own opposite. Distinct types make that a compile error.
 type setEnabledServiceAccountUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
-	enabled bool
+	stateConfigured bool
+	stateFactory    kanamerepo.ServiceAccountStateWriterFactory
+	repo            Repo
+	opsRepo         operations.Repo
+	enabled         bool
 }
 
 // DisableServiceAccountUseCase — the account may no longer authenticate.
@@ -149,7 +152,9 @@ func (u *setEnabledServiceAccountUseCase) Execute(ctx context.Context, id domain
 	}
 
 	actor := authzguard.PrincipalUserID(ctx)
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, principal)
 		return u.doSetEnabled(ctx, id, actor, eventType)
 	})
 	return &op, nil
@@ -180,7 +185,7 @@ func (u *setEnabledServiceAccountUseCase) metadata(id domain.ServiceAccountID, a
 // asked for it, and «who tried, and when» is precisely what the trail is for —
 // a repeat that leaves no trace is a repeat nobody can see.
 func (u *setEnabledServiceAccountUseCase) doSetEnabled(ctx context.Context, id domain.ServiceAccountID, actor, eventType string) (*anypb.Any, error) {
-	updated, err := shared.DoWithWriteTx(ctx, u.repo,
+	updated, err := shared.DoWithWriteTx(ctx, u.stateRepo(id),
 		func(ctx context.Context, w Writer) (domain.ServiceAccount, error) {
 			sa, serr := w.ServiceAccountsW().SetEnabled(ctx, id, u.enabled)
 			if serr != nil {

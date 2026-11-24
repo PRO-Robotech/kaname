@@ -56,7 +56,7 @@ func rid02StageCrashWorld(t *testing.T) (*installationNativeWorld, []rid02ChildI
 	f := newInstallationNativeWorld(t)
 	accounts := f.createRID02Accounts(t)
 	full := installruntime.NewRIDDeliveryFixture()
-	f.apply(t, installruntime.DeliveryInput{Manifests: nativeWithoutDelegations(t, full), CredentialFile: f.creator.CredentialFile})
+	f.apply(t, installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: nativeWithoutDelegations(t, full), CredentialFile: f.creator.CredentialFile})
 	var count int
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*) FROM kaname.grant_delegations`).Scan(&count))
 	require.Zero(t, count)

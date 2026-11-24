@@ -69,6 +69,17 @@ func (r *groupReader) List(ctx context.Context, f group.ListFilter) ([]domain.Gr
 		args = append(args, string(f.AccountID))
 		argIdx++
 	}
+	if f.Member != nil {
+		if f.Member.Validate() != nil || (f.Member.Type != domain.SubjectTypeUser && f.Member.Type != domain.SubjectTypeServiceAccount) {
+			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument group member")
+		}
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM group_members gm
+			WHERE gm.group_id = groups.id AND gm.member_type = $%d AND gm.member_id = $%d
+		)`, argIdx, argIdx+1))
+		args = append(args, string(f.Member.Type), string(f.Member.ID))
+		argIdx += 2
+	}
 	if f.Filter != "" {
 		// Whitelist `name="value"`; anything else is refused by name, never
 		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
@@ -470,7 +481,11 @@ func (w *groupWriter) RequireMemberOfGroupAccount(ctx context.Context, m domain.
 // users/service_accounts (23503 → FailedPrecondition). Принадлежность участника
 // аккаунту группы — RequireMemberOfGroupAccount, той же транзакцией до вставки.
 func (w *groupWriter) AddMember(ctx context.Context, m domain.GroupMember) error {
-	now := time.Now().UTC()
+	return w.addMemberAt(ctx, m, time.Now().UTC())
+}
+
+// Подготовленный путь передаёт окончательное время решения, обычный сохраняет прежние часы.
+func (w *groupWriter) addMemberAt(ctx context.Context, m domain.GroupMember, now time.Time) error {
 	_, err := w.tx.Exec(ctx, `
 		INSERT INTO group_members (group_id, member_type, member_id, added_at)
 		VALUES ($1, $2, $3, $4)

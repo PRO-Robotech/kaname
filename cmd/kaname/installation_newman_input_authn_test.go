@@ -297,7 +297,7 @@ func (p *rid11PublicContext) read(t *testing.T, w *ridLifecycleWorld, stage stri
 	func() {
 		defer func() {
 			after := rid03PhaseSnapshot(t, w)
-			rid03RequireReadOnly(t, s, after)
+			rid03RequirePublicPhaseReadOnly(t, w.f, id, s, after)
 			proof, valid := ridNewmanBuildClosedTechnicalReceipt(&e.rid03NewmanExpectation, s, after, nil)
 			require.True(t, valid)
 			if rule.Token401 {

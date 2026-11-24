@@ -3,23 +3,11 @@
 
 package access_binding_test
 
-// grant_delegation_ce09_hold_integration_test.go — детерминированный держатель
-// окна, которое закрывает `FOR SHARE` записи выдачи делегатом (условие CE-09
-// разбора классов; находка ревью SD-986-I2).
-//
-// Соседняя проба CE-09 (`grant_delegation_g_race_integration_test.go`) ставит
-// порядок «отзыв ЗАФИКСИРОВАН до записи»: его отвергает и запись без замка —
-// перепроверка `ACTIVE` видит зафиксированное. Окно замка — другое: отзыв взял
-// строку делегирования и ещё не зафиксирован, а запись выдачи уже идёт. Без
-// `FOR SHARE` запись читает прежнюю версию строки (`ACTIVE`), её внешний ключ
-// берёт `FOR KEY SHARE`, который с замком отзыва не конфликтует, и выдача по
-// отзываемому делегированию записывается действующей. С замком запись ждёт
-// фиксации отзыва и отказывает Т-D1.
-//
-// Расстановка — держателем: транзакция отзыва берёт строку тем же писателем,
-// что `GrantDelegationService.Revoke` (`LockForRevoke`, `MarkRevoked`), и не
-// фиксируется, пока запись выдачи не встанет на замке (`pg_stat_activity`).
-// Запись, не вставшая на замке за срок, — красное: окно не закрыто.
+// CE09 сохраняет оба доказательства: настоящая асинхронная выдача ждёт
+// незафиксированный отзыв и после commit отказывает Т-D1; отдельно настоящий
+// HoldActive обязан ждать read-only NO KEY UPDATE держателя того же D1.
+// Legacy Writer встаёт на compat fence до бизнес-SQL. Точный key/PID доказывает
+// API гонку, а row probe отличает нужный FOR SHARE от слабого FOR KEY SHARE.
 
 import (
 	"fmt"
@@ -37,6 +25,7 @@ func TestGrantDelegation_CE09_GrantWriteWaitsForAnUncommittedRevoke(t *testing.T
 	w := newGDWorld(t)
 	w.requireSubject("CE-09 замок")
 	d1 := w.d1()
+	gdRequireHoldActiveShareLock(w, d1)
 
 	rev, err := w.repo.Writer(w.ctx)
 	require.NoError(t, err)
@@ -53,11 +42,11 @@ func TestGrantDelegation_CE09_GrantWriteWaitsForAnUncommittedRevoke(t *testing.T
 		domain.GrantDelegationActor{Type: "user", ID: string(w.usrA)}, time.Now().UTC())
 	require.NoError(t, err, "Дано: отзыв перевёл D1 в REVOKED (не зафиксировано)")
 
+	holderPID := gdCompatOwner(w)
 	op, err := w.abx.Create(asSA(w.ctx, w.svaIss), w.v())
 	require.NoError(t, err, "синхронное решение видит D1 действующим: отзыв не зафиксирован")
 
-	w.awaitLockWaiter("grant_delegations", 30*time.Second,
-		"запись выдачи делегатом не ждала незафиксированного отзыва")
+	gdAwaitCompatWaiter(w, holderPID, "")
 	require.NoError(t, rev.Commit(w.ctx), "фиксация отзыва D1")
 	committed = true
 

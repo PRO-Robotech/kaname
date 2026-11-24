@@ -1,0 +1,44 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// ChildRegistrationService — регистрация потомка по праву человека на родителе.
+// Публичная служба. Родителя и область выводит Kaname из канонического ID;
+// отдельного источника родителя в запросе нет. Право проверяет сценарий
+// внутри транзакции по действующей политике каталожного типа.
+service ChildRegistrationService {
+  // Регистрирует потомка и возвращает назначенную Kaname версию записи.
+  // Повтор допустимого запроса возвращает сохранённую версию. Отказы по
+  // правилам регистрации — PERMISSION_DENIED, "permission denied", без деталей.
+  rpc Register (RegisterChildRequest) returns (RegisterChildResponse) {
+    option (google.api.http) = {
+      post: "/iam/v1/childRegistrations:register"
+      body: "*"
+    };
+    option (corelib.authz.v1.permission)       = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)    = "HANDLER_DECIDES";
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+}
+
+message RegisterChildRequest {
+  // Каталожный тип потомка с явно объявленной политикой регистрации.
+  string resource_type = 1;
+
+  // Канонический ID потомка. Грамматику проверяет Kaname без нормализации пути.
+  string resource_id = 2;
+}
+
+message RegisterChildResponse {
+  // Назначенная сервером версия успешно сохранённой регистрации.
+  google.protobuf.Timestamp version = 1;
+}

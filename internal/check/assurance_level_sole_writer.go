@@ -63,6 +63,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // LevelUseKind — род обращения к оси уровня.
@@ -341,6 +343,7 @@ func JudgeAssuranceAxisColumns(columns []AxisColumnSite, home string, copies map
 // не ось. Таблица — ближайшее слева `CREATE TABLE` либо `ALTER TABLE`.
 func ScanAssuranceAxisColumns(path, upSection string) []AxisColumnSite {
 	lower := strings.ToLower(upSection)
+	code := strings.ToLower(migrations.SQLBlankStrings(upSection))
 	var out []AxisColumnSite
 	for idx := 0; idx < len(lower); {
 		open, next, ok := nextValueListOpen(lower, idx)
@@ -349,7 +352,7 @@ func ScanAssuranceAxisColumns(path, upSection string) []AxisColumnSite {
 		}
 		idx = next
 		values, end := sqlQuotedListAt(upSection, open)
-		if end < 0 || !isAxisValueSet(values) {
+		if end < 0 || !isAxisValueSet(values) || !assuranceListInsideCheck(code, open) {
 			continue
 		}
 		out = append(out, AxisColumnSite{
@@ -361,6 +364,36 @@ func ScanAssuranceAxisColumns(path, upSection string) []AxisColumnSite {
 		idx = end
 	}
 	return out
+}
+
+// Только перечень внутри CHECK объявляет область значений хранимой колонки.
+// IF route [NOT] IN (...) в теле функции не относится к последней таблице DDL.
+// Строки забелены с сохранением координат: скобки сообщений не меняют вложенность.
+func assuranceListInsideCheck(code string, at int) bool {
+	depth := 0
+	for i := at - 1; i >= 0; i-- {
+		switch code[i] {
+		case ')':
+			depth++
+		case '(':
+			if depth > 0 {
+				depth--
+				continue
+			}
+			end := i
+			for end > 0 && isSQLSpace(code[end-1]) {
+				end--
+			}
+			start := end
+			for start > 0 && isSQLIdentCont(code[start-1]) {
+				start--
+			}
+			if code[start:end] == "check" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isAxisValueSet(values []string) bool {

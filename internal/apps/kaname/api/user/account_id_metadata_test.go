@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
@@ -361,4 +362,9 @@ func (w *fakeUsrWriter) EmitInviteMail(_ context.Context, intent outboxtypes.Inv
 		return false, fmt.Errorf("invite mail: rate limit must be positive — there is no «unlimited»")
 	}
 	return true, nil
+}
+
+// Проверки доверенностей в этом дублёре не поддерживаются: отказ вместо фиктивного допуска.
+func (w *fakeUsrWriter) TransactionRelationChecker(*authzmodel.Plans) (kanamerepo.RelationChecker, error) {
+	return nil, iamerr.ErrUnavailable
 }

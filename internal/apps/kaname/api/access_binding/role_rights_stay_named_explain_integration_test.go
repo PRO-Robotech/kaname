@@ -48,8 +48,9 @@ func TestRoleRights_S1P8_ActualGrantReadPlans(t *testing.T) {
 	for i := range users {
 		users[i] = mustSeedUser(t, w.ctx, w.pool, fmt.Sprintf("plan-%d", i))
 	}
-	wr, err := w.repo.Writer(w.ctx)
-	require.NoError(t, err)
+	seed := newS1P8BulkSeed(t, w.ctx, w.pool)
+	wr := seed.writer
+	var err error
 	defer func() { _ = wr.Rollback(w.ctx) }()
 	for i := 0; i < 12001; i++ {
 		st, sid, role := domain.SubjectTypeUser, domain.SubjectID(w.usrA), w.rolPusher

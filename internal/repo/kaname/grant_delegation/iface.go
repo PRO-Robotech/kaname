@@ -43,6 +43,10 @@ type WriterIface interface {
 	// транзакции отзыва делегирования (запись выдачи держит ту же строку
 	// `FOR SHARE`). Нет строки — ErrNotFound.
 	LockForRevoke(ctx context.Context, id domain.GrantDelegationID) (domain.GrantDelegation, error)
+	// UpdateAxes заменяет только три оси действующей строки, уже захваченной
+	// LockForRevoke. Порядок замков пары/строки общий с отзывом; исходные поля
+	// автора, аккаунта, делегата и жизненного цикла не входят в UPDATE.
+	UpdateAxes(ctx context.Context, d domain.GrantDelegation) (domain.GrantDelegation, error)
 	// MarkRevoked — CAS `ACTIVE → REVOKED`; 0 строк — ErrFailedPrecondition
 	// «already revoked».
 	MarkRevoked(ctx context.Context, id domain.GrantDelegationID, by domain.GrantDelegationActor, at time.Time) (domain.GrantDelegation, error)

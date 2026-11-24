@@ -143,12 +143,22 @@ func (s RelationSubjects) AcceptedKinds() []string { return s.Accepts }
 // У вычисляемого отношения ответ `false` сам по себе ничего не значит:
 // вызывающий обязан сперва спросить [RelationSubjects.Direct].
 func (rs RelationSubjects) AcceptsKind(manifestKind string) bool {
+	return rs.acceptsKind(manifestKind, false)
+}
+
+// AcceptsUnconditionedKind отвечает для обычной записи произвольного
+// субъекта данного вида без условия.
+func (rs RelationSubjects) AcceptsUnconditionedKind(manifestKind string) bool {
+	return rs.acceptsKind(manifestKind, true)
+}
+
+func (rs RelationSubjects) acceptsKind(manifestKind string, unconditioned bool) bool {
 	want, known := canonSubjectType[manifestKind]
 	if !known {
 		return false
 	}
 	for _, s := range rs.direct {
-		if s.Wildcard {
+		if s.Wildcard || (unconditioned && (s.Condition != "" || s.Object != "")) {
 			continue
 		}
 		if s.Type == want.typ && s.Userset == want.userset {

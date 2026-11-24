@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
 )
 
 // Путь RID09 владения/FD5/предварительной аутентификации с отдельными каталогами входов/доказательств для фаз.
@@ -23,10 +23,11 @@ func rid12Start(t *testing.T, f *installationNativeWorld, in rid09Input, phase s
 	dir := filepath.Join(root, "delivery")
 	_, err := in.Delivery.Write(dir, in.Reverse)
 	require.NoError(t, err)
-	body, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}})
+	body, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}}, f.writerPlan)
 	require.NoError(t, err)
 	config := filepath.Join(root, "config.yaml")
 	require.NoError(t, os.WriteFile(config, body, 0600))
+	ridRegistrationStartupProof(t, root, body, f.writerPlan)
 	executable := rid06HashExecutable(t)
 	child := startRIDInstallationChild(t, f, "rid12-startup-"+phase, ridWholeChildInput{ConfigPath: config, EvidenceDir: filepath.Join(f.session.Root, "rid12-startup-"+phase)}, f.session.Environment, ridWholeChildEnv, "TestRIDWholeDeliveryOwnedStartupChild", "3m")
 	parentCG, err := os.ReadFile("/proc/self/cgroup")
@@ -34,10 +35,11 @@ func rid12Start(t *testing.T, f *installationNativeWorld, in rid09Input, phase s
 	childCG, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", child.cmd.Process.Pid))
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(parentCG, childCG))
-	memory, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	cgroupDir := ridOwnedCgroup(t, parentCG)
+	memory, err := os.ReadFile(filepath.Join(cgroupDir, "memory.max"))
 	require.NoError(t, err)
 	require.Equal(t, "4294967296", strings.TrimSpace(string(memory)))
-	swap, err := os.ReadFile("/sys/fs/cgroup/memory.swap.max")
+	swap, err := os.ReadFile(filepath.Join(cgroupDir, "memory.swap.max"))
 	require.NoError(t, err)
 	require.Equal(t, "0", strings.TrimSpace(string(swap)))
 	t.Cleanup(func() { require.Equal(t, executable, rid06HashExecutable(t)) })

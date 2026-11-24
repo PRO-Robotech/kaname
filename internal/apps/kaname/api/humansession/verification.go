@@ -250,16 +250,35 @@ type OwnerBindingReconciler interface {
 	ReconcileBinding(ctx context.Context, id domain.AccessBindingID) error
 }
 
+// VerificationLetterMaterial — код и идентификатор одного запроса письма подтверждения.
+type VerificationLetterMaterial struct {
+	id    domain.VerificationCodeID
+	value domain.VerificationCodeValue
+}
+
 // EnqueueVerificationLetter — ЕДИНСТВЕННЫЙ производитель письма подтверждения:
 // вытеснить прежние коды, записать новый под пределом Р9, положить намерение
 // письма — на транзакции вызывающего. Зовут регистрация и запрос письма.
 func EnqueueVerificationLetter(ctx context.Context, w VerificationLetterWriter, user domain.User, at time.Time, pace VerificationPace) (LetterRefusal, error) {
-	value, err := domain.NewVerificationCodeValue()
-	if err != nil {
-		return LetterRefusal{}, fmt.Errorf("verification letter: code not minted: %w", err)
+	var material VerificationLetterMaterial
+	return EnqueuePreparedVerificationLetter(ctx, w, user, at, pace, &material)
+}
+
+func EnqueuePreparedVerificationLetter(ctx context.Context, w VerificationLetterWriter, user domain.User, at time.Time, pace VerificationPace, material *VerificationLetterMaterial) (LetterRefusal, error) {
+	if material == nil {
+		return LetterRefusal{}, fmt.Errorf("verification letter: material required")
 	}
+	if material.id == "" {
+		value, err := domain.NewVerificationCodeValue()
+		if err != nil {
+			return LetterRefusal{}, fmt.Errorf("verification letter: code not minted: %w", err)
+		}
+		material.value = value
+		material.id = domain.VerificationCodeID(ids.NewHyphenID(verificationCodeIDPrefix))
+	}
+	value := material.value
 	code := domain.VerificationCode{
-		ID:     domain.VerificationCodeID(ids.NewHyphenID(verificationCodeIDPrefix)),
+		ID:     material.id,
 		UserID: user.ID, Email: domain.Email(AddressKey(string(user.Email))), Digest: value.Digest(),
 		IssuedAt: at, ExpiresAt: at.Add(pace.CodeTTL),
 	}
@@ -280,15 +299,22 @@ func EnqueueVerificationLetter(ctx context.Context, w VerificationLetterWriter, 
 
 // VerificationDeps — зависимости глаголов подтверждения.
 type VerificationDeps struct {
-	Store      VerificationStore
-	Pace       VerificationPace
-	Observer   AddressVerificationObserver
-	Reconciler OwnerBindingReconciler
-	Now        func() time.Time
-	Logger     *slog.Logger
+	// RequirePreparedWrite запрещает сборку full режима без callback capability.
+	RequirePreparedWrite bool
+	Store                VerificationStore
+	Pace                 VerificationPace
+	Observer             AddressVerificationObserver
+	Reconciler           OwnerBindingReconciler
+	Now                  func() time.Time
+	Logger               *slog.Logger
 }
 
 func (d VerificationDeps) complete() (VerificationDeps, error) {
+	if d.RequirePreparedWrite {
+		if _, ok := d.Store.(PreparedVerificationStore); !ok {
+			return d, fmt.Errorf("admission: prepared write capability required")
+		}
+	}
 	if d.Store == nil {
 		return d, fmt.Errorf("verification: store required")
 	}
@@ -356,25 +382,26 @@ func (uc *RequestVerificationUseCase) Execute(ctx context.Context, bearer domain
 	if err != nil {
 		return RequestVerificationOutput{}, err
 	}
-	w, err := uc.d.Store.VerificationWriter(ctx, resolved.User.ID)
+	var material VerificationLetterMaterial
+	err = runVerificationWrite(ctx, uc.d.Store, resolved.User.ID, func(ctx context.Context, w VerificationWriter) error {
+		refusal, err := EnqueuePreparedVerificationLetter(ctx, w, resolved.User, now, uc.d.Pace, &material)
+		if err != nil {
+			return err
+		}
+		if refusal.Refused {
+			return &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
+		}
+		return nil
+	})
 	if err != nil {
-		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-		return RequestVerificationOutput{}, ErrStoreUnavailable
-	}
-	defer func() { _ = w.Rollback(ctx) }()
-	refusal, err := EnqueueVerificationLetter(ctx, w, resolved.User, now, uc.d.Pace)
-	if err != nil {
+		var paced *TooManyAttemptsError
+		if errors.As(err, &paced) {
+			uc.d.Observer.AddressVerificationObserved(VerificationLetterPaced)
+			return RequestVerificationOutput{}, paced
+		}
 		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
 		uc.d.Logger.Error("verification request: letter not recorded", "err", err.Error(), "user_id", string(resolved.User.ID))
-		return RequestVerificationOutput{}, ErrStoreUnavailable
-	}
-	if refusal.Refused {
-		uc.d.Observer.AddressVerificationObserved(VerificationLetterPaced)
-		return RequestVerificationOutput{}, &TooManyAttemptsError{Scope: FailureByAddress, RetryAfter: refusal.RetryAfter}
-	}
-	if err := w.Commit(ctx); err != nil {
-		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-		return RequestVerificationOutput{}, ErrStoreUnavailable
+		return RequestVerificationOutput{}, AdmissionWriteFailure(err)
 	}
 	uc.d.Observer.AddressVerificationObserved(VerificationLetterQueued)
 	return RequestVerificationOutput{NextAllowedIn: uc.d.Pace.Interval}, nil
@@ -422,93 +449,73 @@ func (uc *ConfirmVerificationUseCase) Execute(ctx context.Context, in ConfirmVer
 	}
 	user := resolved.User
 
-	w, err := uc.d.Store.VerificationWriter(ctx, user.ID)
-	if err != nil {
-		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-		return ConfirmVerificationOutput{}, ErrStoreUnavailable
-	}
-	defer func() { _ = w.Rollback(ctx) }()
-
-	outcome, email, err := w.PresentVerificationCode(ctx, user.ID, presented.Digest(), now, uc.d.Pace.Attempts)
-	if err != nil {
-		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-		return ConfirmVerificationOutput{}, ErrStoreUnavailable
-	}
-	switch outcome {
-	case CodeMismatched, CodeExhausted:
-		// Попытка засчитана оператором предъявления и фиксируется: предел
-		// попыток — свойство кода, а не запроса.
-		if err := w.Commit(ctx); err != nil {
-			uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-			return ConfirmVerificationOutput{}, ErrStoreUnavailable
-		}
-		cell := VerificationCodeMismatched
-		if outcome == CodeExhausted {
-			cell = VerificationCodeExhausted
-		}
-		uc.d.Observer.AddressVerificationObserved(cell)
-		return ConfirmVerificationOutput{}, ErrAuthenticationFailed
-	case CodeMatched:
-	default:
-		uc.d.Observer.AddressVerificationObserved(VerificationCodeNotFound)
-		return ConfirmVerificationOutput{}, ErrAuthenticationFailed
-	}
-
-	// (1) Отметка — момент этого подтверждения, на значение адреса, на которое
-	// выдан код.
-	marked, err := w.MarkEmailVerified(ctx, user.ID, email, now)
-	if err != nil {
-		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-		return ConfirmVerificationOutput{}, ErrStoreUnavailable
-	}
-	if !marked {
-		// Адрес строки сменился после выдачи кода: код не подходит (Р7).
-		uc.d.Observer.AddressVerificationObserved(VerificationCodeNotFound)
-		return ConfirmVerificationOutput{}, ErrAuthenticationFailed
-	}
-	// (2) Новый носитель той же сессии.
-	if err := w.RotateBearer(ctx, resolved.Session.ID, bearer.Digest(), now); err != nil {
-		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-		return ConfirmVerificationOutput{}, ErrStoreUnavailable
-	}
-	// (3) Прочие сессии человека сняты: обычное положение получает только та
-	// сессия, в которой код предъявлен.
-	if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonEmailVerified); err != nil {
-		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-		return ConfirmVerificationOutput{}, ErrStoreUnavailable
-	}
-	// (4) Событие — без адреса.
-	if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
-		EventType:       AuditEmailVerified,
-		TenantAccountID: string(user.AccountID),
-		Payload: map[string]any{
-			"user_id":    string(user.ID),
-			"session_id": string(resolved.Session.ID),
-		},
-	}); err != nil {
-		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-		return ConfirmVerificationOutput{}, ErrStoreUnavailable
-	}
-	// (5) Приглашение активируется подтверждением — и только живое.
 	var ownerBinding domain.AccessBindingID
-	if user.InviteStatus == domain.InviteStatusPending {
-		act, aerr := w.ActivateInviteOnVerification(ctx, user)
+	var cell VerificationOutcome
+	var rejected bool
+	err = runVerificationWrite(ctx, uc.d.Store, user.ID, func(ctx context.Context, w VerificationWriter) error {
+		user, ownerBinding = resolved.User, ""
+		cell, rejected = VerificationConfirmed, false
+		outcome, email, err := w.PresentVerificationCode(ctx, user.ID, presented.Digest(), now, uc.d.Pace.Attempts)
+		if err != nil {
+			return err
+		}
+		switch outcome {
+		case CodeMismatched, CodeExhausted:
+			cell, rejected = VerificationCodeMismatched, true
+			if outcome == CodeExhausted {
+				cell = VerificationCodeExhausted
+			}
+			return nil // Счётчик неверного предъявления обязан зафиксироваться.
+		case CodeMatched:
+		default:
+			cell = VerificationCodeNotFound
+			return ErrAuthenticationFailed
+		}
+		marked, err := w.MarkEmailVerified(ctx, user.ID, email, now)
+		if err != nil {
+			return err
+		}
+		if !marked {
+			cell = VerificationCodeNotFound
+			return ErrAuthenticationFailed
+		}
+		if err := w.RotateBearer(ctx, resolved.Session.ID, bearer.Digest(), now); err != nil {
+			return err
+		}
+		if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonEmailVerified); err != nil {
+			return err
+		}
+		if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
+			EventType: AuditEmailVerified, TenantAccountID: string(user.AccountID),
+			Payload: map[string]any{"user_id": string(user.ID), "session_id": string(resolved.Session.ID)},
+		}); err != nil {
+			return err
+		}
+		if user.InviteStatus == domain.InviteStatusPending {
+			act, err := w.ActivateInviteOnVerification(ctx, user)
+			if err != nil {
+				return err
+			}
+			user, ownerBinding = act.User, act.OwnerBindingID
+		}
+		return nil
+	})
+	if err != nil {
 		switch {
-		case errors.Is(aerr, ErrInviteNotValid):
+		case errors.Is(err, ErrAuthenticationFailed):
+			uc.d.Observer.AddressVerificationObserved(cell)
+			return ConfirmVerificationOutput{}, ErrAuthenticationFailed
+		case errors.Is(err, ErrInviteNotValid):
 			uc.d.Observer.AddressVerificationObserved(VerificationInviteNotValid)
 			return ConfirmVerificationOutput{}, ErrInviteNotValid
-		case aerr != nil:
-			uc.d.Logger.Error("verification confirm: invite not activated — store refused; outcome rolled back",
-				"err", aerr.Error(), "user_id", string(user.ID))
+		default:
 			uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-			return ConfirmVerificationOutput{}, ErrStoreUnavailable
+			return ConfirmVerificationOutput{}, AdmissionWriteFailure(err)
 		}
-		user = act.User
-		ownerBinding = act.OwnerBindingID
 	}
-	if err := w.Commit(ctx); err != nil {
-		uc.d.Observer.AddressVerificationObserved(VerificationStoreFailed)
-		return ConfirmVerificationOutput{}, ErrStoreUnavailable
+	if rejected {
+		uc.d.Observer.AddressVerificationObserved(cell)
+		return ConfirmVerificationOutput{}, ErrAuthenticationFailed
 	}
 	if uc.d.Reconciler != nil && ownerBinding != "" {
 		if rerr := uc.d.Reconciler.ReconcileBinding(ctx, ownerBinding); rerr != nil {

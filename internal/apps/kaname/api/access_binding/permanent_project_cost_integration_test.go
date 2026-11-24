@@ -29,6 +29,7 @@ import (
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -69,7 +70,7 @@ func TestPermanentProjectCost_RegisterLatency(t *testing.T) {
 	measure := func(what, module string, req func(i int) *iamv1.RegisterResourceRequest) {
 		t.Helper()
 		h := internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-			WithResourceRegistrar(p.reg, permanentCostGate{module: module})
+			WithResourceRegistrar(p.reg.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: module}), permanentCostGate{module: module})
 		durations := make([]time.Duration, 0, n)
 		for i := 0; i < n; i++ {
 			r := req(i)

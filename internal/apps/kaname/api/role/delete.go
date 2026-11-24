@@ -11,22 +11,22 @@ import (
 	"context"
 	"fmt"
 
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/PRO-Robotech/corelib/operations"
-
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type DeleteRoleUseCase struct {
-	repo    Repo
-	opsRepo operations.Repo
+	crudConfigured bool
+	crudFactory    kanamerepo.RoleDeleteWriterFactory
+	repo           Repo
+	opsRepo        operations.Repo
 }
 
 func NewDeleteRoleUseCase(r Repo, opsRepo operations.Repo) *DeleteRoleUseCase {
@@ -70,14 +70,16 @@ func (u *DeleteRoleUseCase) Execute(ctx context.Context, id domain.RoleID) (*ope
 	}
 	actor := authzguard.PrincipalUserID(ctx)
 	accountID := string(role.AccountID)
+	crudPrincipal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		ctx = operations.WithPrincipal(ctx, crudPrincipal)
 		return u.doDelete(ctx, id, actor, accountID)
 	})
 	return &op, nil
 }
 
 func (u *DeleteRoleUseCase) doDelete(ctx context.Context, id domain.RoleID, actor, accountID string) (*anypb.Any, error) {
-	if err := shared.DoWithWriteTxVoid(ctx, u.repo,
+	if err := shared.DoWithWriteTxVoid(ctx, u.crudRepo(id),
 		func(ctx context.Context, w Writer) error {
 			if derr := w.RolesW().Delete(ctx, id); derr != nil {
 				return derr

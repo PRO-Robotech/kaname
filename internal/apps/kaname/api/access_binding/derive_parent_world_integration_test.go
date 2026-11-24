@@ -90,12 +90,14 @@ func newDPWorld(t *testing.T) *dpWorld {
 // dpGate — заглушка порта личности: ворота отвечают доменом модуля.
 type dpGate struct{ module string }
 
-func (g dpGate) Authorize(context.Context) (string, error) { return g.module, nil }
+func (g dpGate) Authorize(context.Context) (string, error)              { return g.module, nil }
+func (g dpGate) AuthorizeCatalogModule(context.Context) (string, error) { return g.module, nil }
+func (g dpGate) AuthorizeAccount(context.Context, string) error         { return nil }
 
 // hReg — обработчик с воротами домена module поверх use-case мира.
 func (w *dpWorld) hReg(module string) *internaliam.Handler {
 	return internaliam.NewHandler(internaliam.NewLookupSubjectUseCase(nil), nil).
-		WithResourceRegistrar(w.reg, dpGate{module: module})
+		WithResourceRegistrar(w.reg.WithRegistrationAuthority(dpGate{module: module}), dpGate{module: module})
 }
 
 // register — `RegisterResource` через обработчик модуля.

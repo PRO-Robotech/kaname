@@ -86,14 +86,14 @@ func TestRuleGrainWindow_MigrationKeepsTheVerdictAndTheQueueClosesTheWindow(t *t
 		t.Skip("integration")
 	}
 	ctx := context.Background()
-	dsn := pgtest.NewDB(t)
+	dsn := pgtest.NewEmptyDB(t)
 	db, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
 	goose.SetLogger(goose.NopLogger())
-	require.NoError(t, goose.DownTo(db, ".", windowPreviousVersion), "цепь не сошла до версии прежде миграции")
+	require.NoError(t, goose.UpTo(db, ".", windowPreviousVersion), "цепь не дошла до версии прежде миграции")
 
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)

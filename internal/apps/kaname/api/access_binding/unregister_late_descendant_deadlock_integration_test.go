@@ -26,7 +26,27 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
+
+// Это внешний SQL настоящего ReconcileAdapter.WithTx, не raw lock-запрос.
+const lateReconcileEntrySQL = "SELECT kaname.authority_reconcile_enter_v3()"
+
+// Пул принадлежит единственному проходу R. Tracer только сообщает реальный PID
+// перед отправкой entry SQL; не задерживает запрос и не выполняет своих SQL.
+type lateReconcileTracer struct {
+	once sync.Once
+	pid  chan uint32
+}
+
+func (p *lateReconcileTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if data.SQL == lateReconcileEntrySQL {
+		p.once.Do(func() { p.pid <- conn.PgConn().PID() })
+	}
+	return ctx
+}
+
+func (*lateReconcileTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 type lateCensus struct {
 	pid         uint32
@@ -90,10 +110,11 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 
 	var rawMu sync.Mutex
 	var rawErrors []pgconn.PgError
-	newObservedPool := func(name string) *pgxpool.Pool {
+	newObservedPool := func(name string, tracer pgx.QueryTracer) *pgxpool.Pool {
 		cfg := w.pool.Config()
 		cfg.ConnConfig.RuntimeParams["application_name"] = name
 		cfg.ConnConfig.RuntimeParams["deadlock_timeout"] = "200ms"
+		cfg.ConnConfig.Tracer = tracer
 		cfg.ConnConfig.OnPgError = func(_ *pgconn.PgConn, e *pgconn.PgError) bool {
 			rawMu.Lock()
 			rawErrors = append(rawErrors, *e)
@@ -105,8 +126,9 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 		t.Cleanup(p.Close)
 		return p
 	}
-	upool := newObservedPool("kn1019-late-unregister")
-	rpool := newObservedPool("kn1019-late-reconcile")
+	rEntry := &lateReconcileTracer{pid: make(chan uint32, 1)}
+	upool := newObservedPool("kn1019-late-unregister", nil)
+	rpool := newObservedPool("kn1019-late-reconcile", rEntry)
 	var isolation string
 	require.NoError(t, rpool.QueryRow(ctx, "SHOW transaction_isolation").Scan(&isolation))
 	require.Equal(t, "read committed", isolation, "fixture: fresh late census isolation")
@@ -114,16 +136,25 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 	uc := internaliam.NewRegisterResourceUseCase(kanamepg.NewFGAOutboxEmitter(), h, kanamepg.NewPoolTxBeginner(upool),
 		kanamepg.NewCatalogTypeReader(), kanamepg.NewPublicReadPublisher(),
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld}),
-		kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader())
+		kanamepg.NewRegistrationAudit(), kanamepg.NewRegistrationScopeReader()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	first, releaseFirstRaw := h.first.arm()
 	beforeDelete, releaseDeleteRaw := h.beforeDelete.arm()
 	var firstOnce, deleteOnce sync.Once
 	releaseFirst := func() { firstOnce.Do(releaseFirstRaw) }
 	releaseDelete := func() { deleteOnce.Do(releaseDeleteRaw) }
-	defer releaseFirst()
-	defer releaseDelete()
+	var workers sync.WaitGroup
+	defer func() {
+		releaseFirst()
+		releaseDelete()
+		cancel()
+		workers.Wait()
+	}()
 	uDone := make(chan error, 1)
-	go func() { uDone <- w.withdrawWith(ctx, uc, fx.parent) }()
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		uDone <- w.withdrawWith(ctx, uc, fx.parent)
+	}()
 	select {
 	case <-first:
 	case e := <-uDone:
@@ -136,7 +167,20 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 	for _, d := range initial.descendants {
 		require.NotEqual(t, fx.child, d.ID, "fixture: child unexpectedly in first census")
 	}
+	// Generic beginner не берёт G до первой переписи. Публикация ребёнка
+	// проходит в настоящей паузе U до LockTx/admission, а не после его commit.
+	var uStart time.Time
+	var beforeAdmission bool
+	require.NoError(t, w.pool.QueryRow(ctx, `SELECT a.xact_start,
+ a.state='idle in transaction' AND NOT EXISTS(
+  SELECT 1 FROM pg_catalog.pg_locks l WHERE l.pid=a.pid AND l.locktype='advisory'
+   AND l.classid=1262569292::oid AND l.objid=0::oid AND l.objsubid=2)
+ FROM pg_catalog.pg_stat_activity a
+ WHERE a.pid=$1 AND a.datname=current_database() AND a.xact_start IS NOT NULL`,
+		initial.pid).Scan(&uStart, &beforeAdmission))
+	require.True(t, beforeAdmission, "fixture: U первой переписи ещё не вошёл в compatibility admission")
 	w.registerRepository(fx.parent, "app")
+	require.True(t, w.registered(pcrRepoType, fx.child), "fixture: поздний ребёнок закоммичен до admission U")
 	w.pollMember(fx.b1, fx.child, "fixture: B1 child member")
 	w.pollMember(fx.bx, fx.child, "fixture: BX child member")
 	require.True(t, w.ask(w.usr(w.usrD), "v_get", pcrRepoType, fx.child), "fixture: lawful child access")
@@ -150,28 +194,53 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 	}
 	r := reconcile.New(kanamepg.NewReconcileAdapter(rpool, catalog.Fixed{F: w.facts}), nil, catalog.Fixed{F: w.facts})
 	rDone := make(chan error, 1)
-	go func() { rDone <- r.ReconcileObject(ctx, dlRepoTgt, fx.child) }()
-	var rpid int
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		rDone <- r.ReconcileObject(ctx, dlRepoTgt, fx.child)
+	}()
+	var rpid uint32
+	var rStart time.Time
 	require.Eventually(t, func() bool {
-		var p int
-		err := w.pool.QueryRow(ctx, `SELECT pid FROM pg_stat_activity
-		 WHERE datname=current_database() AND application_name='kn1019-late-reconcile'
-		 AND $1::integer = ANY(pg_blocking_pids(pid)) AND query LIKE '%FOR NO KEY UPDATE%' LIMIT 1`, int(initial.pid)).Scan(&p)
-		if err == nil {
-			rpid = p
-			return true
+		if rpid == 0 {
+			select {
+			case rpid = <-rEntry.pid:
+			default:
+				return false
+			}
 		}
-		return false
-	}, 15*time.Second, 10*time.Millisecond, "fixture: R must block on U's BX after sorted binding lock begins")
-	// Третья транзакция доказывает, что B1 уже заперт до освобождения U.
+		return w.pool.QueryRow(ctx, `SELECT a.xact_start
+ FROM pg_catalog.pg_stat_activity a
+ JOIN pg_catalog.pg_locks w ON w.pid=a.pid
+ JOIN pg_catalog.pg_locks h ON h.locktype=w.locktype
+  AND h.database=w.database AND h.classid=w.classid
+  AND h.objid=w.objid AND h.objsubid=w.objsubid
+ WHERE a.pid=$1 AND a.datname=current_database() AND a.xact_start IS NOT NULL
+  AND a.application_name='kn1019-late-reconcile' AND a.query=$4
+  AND a.state='active' AND a.wait_event_type='Lock' AND a.wait_event='advisory'
+  AND w.locktype='advisory' AND NOT w.granted AND w.mode='ExclusiveLock'
+  AND w.classid=1262569292::oid AND w.objid=0::oid AND w.objsubid=2
+  AND h.pid=$2 AND h.granted AND h.mode='ExclusiveLock'
+  AND $2=ANY(pg_catalog.pg_blocking_pids(a.pid))
+  AND EXISTS(SELECT 1 FROM pg_catalog.pg_stat_activity u
+   WHERE u.pid=$2 AND u.datname=a.datname AND u.xact_start=$3)
+  AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks b WHERE b.pid=a.pid
+   AND b.relation IN ('kaname.access_bindings'::regclass, 'kaname.roles'::regclass,
+    'kaname.resource_mirror'::regclass, 'kaname.relation_fact'::regclass))`,
+			rpid, initial.pid, uStart, lateReconcileEntrySQL).Scan(&rStart) == nil
+	}, 15*time.Second, 10*time.Millisecond, "fixture: real R entry must wait on U's exact G before business locks")
+	// До admission R ещё не брал B1. U запирал только первоначальный план
+	// без позднего ребёнка: третья TX обязана найти B1 и свободно взять её.
 	probe, err := w.pool.Begin(ctx)
 	require.NoError(t, err)
-	_, err = probe.Exec(ctx, `SELECT id FROM kaname.access_bindings WHERE id=$1 FOR UPDATE NOWAIT`, fx.b1)
-	var lockError *pgconn.PgError
-	require.ErrorAs(t, err, &lockError, "fixture: B1 must already be locked")
-	require.Equal(t, "55P03", lockError.Code)
-	require.NoError(t, probe.Rollback(ctx))
-	t.Logf("1019 schedule established: U pid=%d holds BX=%s; R pid=%d locks B1=%s and pg_blocking_pids(R) contains U", initial.pid, fx.bx, rpid, fx.b1)
+	var unlockedB1 string
+	err = probe.QueryRow(ctx, `SELECT id FROM kaname.access_bindings WHERE id=$1 FOR UPDATE NOWAIT`, fx.b1).Scan(&unlockedB1)
+	rollbackErr := probe.Rollback(ctx)
+	require.NoError(t, err, "fixture: B1 is still unlocked before R admission and U's late rescan")
+	require.Equal(t, fx.b1, unlockedB1)
+	require.NoError(t, rollbackErr)
+	t.Logf("1019 late schedule: U pid=%d xact_start=%s; child published after first census; R pid=%d xact_start=%s waits on G before B1", initial.pid, uStart.Format(time.RFC3339Nano), rpid, rStart.Format(time.RFC3339Nano))
+
 	releaseDelete()
 	var ue, re error
 	select {
@@ -206,6 +275,7 @@ func TestUnregisterLateDescendantVsObjectPass_NoDeadlock(t *testing.T) {
 	if ue != nil || re != nil {
 		require.True(t, sawDeadlock, "not a valid baseline RED: failure without server SQLSTATE 40P01")
 	}
+	assert.False(t, sawDeadlock, "1019: ни одна сторона не получила raw 40P01")
 	assert.NoError(t, ue, "1019 U must complete without deadlock")
 	assert.NoError(t, re, "1019 R must complete without deadlock")
 	if ue != nil {

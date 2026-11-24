@@ -3,16 +3,16 @@
 
 package pg_test
 
-// migrations_iam_extensions_integration_test.go — testcontainers Postgres 16
-// integration tests for the iam-extension migrations.
+// migrations_iam_extensions_integration_test.go — интеграционные проверки миграций
+// расширений iam через testcontainers Postgres 16.
 //
-// Tested scenarios:
-// - Fresh apply: migrations succeed; schema_migrations records the baseline.
-// - Idempotent re-apply: second goose.Up == no-op (returns nil; no DDL re-runs).
-// - Down + Up round-trip: rollback then re-apply.
-// - clusters singleton: 1 row seeded; second INSERT → SQLSTATE 23514.
-// - multi-scope Role CHECK + partial UNIQUE per scope.
-// - access_bindings status / condition_id / expires_at / granted_by_user_id present.
+// Проверяемые сценарии:
+// - Чистое применение: миграции успешны; schema_migrations записывает базовую версию.
+// - Идемпотентный повтор: второй goose.Up ничего не меняет (nil; DDL не повторяется).
+// - Цикл Down + Up: откат и повторное применение.
+// - Единственная строка clusters: одна строка посеяна; второй INSERT → SQLSTATE 23514.
+// - Role нескольких областей: CHECK и частичный UNIQUE на область.
+// - У access_bindings есть status / condition_id / expires_at / granted_by_user_id.
 //
 // Запуск: `go test -tags=integration ./internal/repo/kaname/pg/... -run Kac127 -race`.
 // Skip с `-short`.
@@ -59,7 +59,7 @@ func setupKac127TestDB(t testing.TB) *sql.DB {
 	return db
 }
 
-// ── 6.1.1 — Fresh apply: 0011..0014 succeed; schema_migrations records new versions
+// ── 6.1.1 — Чистое применение: 0011..0014 успешны; schema_migrations записывает новые версии.
 func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -68,16 +68,16 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 	db := setupKac127TestDB(t)
 	ctx := context.Background()
 
-	// Squashed baseline (0001_initial.sql) — the entire pre-prune schema
-	// is collapsed into a single migration. Just assert that version 1 is
-	// applied and the seeded artefacts (cluster singleton + system roles)
-	// are present.
+	// Объединённая база (0001_initial.sql): вся схема до удаления
+	// свёрнута в одну миграцию. Проверяем лишь применение версии 1
+	// и наличие начальных артефактов (единственный кластер и системные роли)
+	// в схеме.
 	var applied bool
 	require.NoError(t, db.QueryRowContext(ctx,
 		"SELECT EXISTS(SELECT 1 FROM goose_db_version WHERE version_id = 1 AND is_applied = true)").Scan(&applied))
 	assert.True(t, applied, "squashed baseline migration 0001 must be applied")
 
-	// clusters singleton — exactly one row, id = cluster_root.
+	// Единственная строка clusters — ровно одна, id = cluster_root.
 	var clusterCount int
 	require.NoError(t, db.QueryRowContext(ctx,
 		"SELECT count(*) FROM kaname.clusters").Scan(&clusterCount))
@@ -88,7 +88,7 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 		"SELECT id FROM kaname.clusters").Scan(&clusterID))
 	assert.Equal(t, "cluster_root", clusterID)
 
-	// Two new system roles seeded by 0011.
+	// Две новые системные роли посеяны миграцией 0011.
 	var sysRoleCount int
 	require.NoError(t, db.QueryRowContext(ctx,
 		`SELECT count(*) FROM kaname.roles
@@ -96,7 +96,7 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 		 AND id IN ($1, $2)`, domain.SystemAdminRoleID, domain.SystemViewerRoleID).Scan(&sysRoleCount))
 	assert.Equal(t, 2, sysRoleCount, "two new system roles seeded")
 
-	// Verify expected tables exist after the extension migrations (sample check).
+	// Проверить наличие ожидаемых таблиц после миграций расширений (выборочная проверка).
 	for _, table := range []string{
 		"clusters", "cluster_admin_grants",
 		"service_account_oauth_clients",
@@ -113,23 +113,23 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 		assert.True(t, exists, "table kaname.%s must exist", table)
 	}
 
-	// Retired tables — must NOT come back.
+	// Снятые таблицы НЕ должны вернуться.
 	//
 	// 0065 drops `oidc_jwks_keys` — ПРЕЖНЕЕ хранилище подписных ключей: его
 	// единственные писатели умерли вместе с ночной ротацией (713f7e1), а на
 	// полностью рабочем стенде оно держало ноль строк, то есть выглядело
 	// исправным всю свою жизнь.
 	//
-	// Здесь стояло «iam owns no keyset (it mints nothing)» как ДОВОД в пользу
+	// Здесь стояло «iam не владеет набором ключей (ничего не чеканит)» как ДОВОД в пользу
 	// этого удаления. Довод пережил свой предмет и стал прямо ложным: ключница
 	// у платформы есть, живёт в `kaname.token_signing_keys` (0001) и читается
 	// подписантом. Снятая таблица — не «отсутствие ключницы», а её
 	// ПРЕДШЕСТВЕННИК; смешивать их особенно дорого именно здесь, где перечень
 	// снятого стоит рядом с живым.
 	//
-	// 0075 drops the tenant-facing condition surface: the resource table and the
-	// per-binding overlay, the latter with no production writer at any point in
-	// its life.
+	// 0075 удаляет арендаторскую поверхность условий: таблицу ресурса и
+	// наложение на привязку, у которого за всё время существования
+	// не было боевого писателя.
 	for _, table := range []string{
 		"oidc_jwks_keys",
 		"conditions",
@@ -145,7 +145,7 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 		assert.False(t, exists, "retired table kaname.%s must be gone", table)
 	}
 
-	// Verify new columns on extended tables.
+	// Проверить новые колонки расширенных таблиц.
 	for _, col := range []struct {
 		table, column string
 	}{
@@ -172,7 +172,7 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 	}
 }
 
-// ── 6.1.2 — Idempotent re-apply: second goose.Up returns nil; no DDL re-execution
+// ── 6.1.2 — Идемпотентный повтор: второй goose.Up возвращает nil, DDL не повторяется.
 func TestIamExt_Migrations_6_1_2_IdempotentReapply(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -181,13 +181,13 @@ func TestIamExt_Migrations_6_1_2_IdempotentReapply(t *testing.T) {
 	db := setupKac127TestDB(t)
 	ctx := context.Background()
 
-	// Capture cluster count + system role count BEFORE second up.
+	// Запомнить число кластеров и системных ролей ДО второго up.
 	var beforeClusters, beforeRoles int
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT count(*) FROM kaname.clusters").Scan(&beforeClusters))
 	require.NoError(t, db.QueryRowContext(ctx,
 		"SELECT count(*) FROM kaname.roles WHERE is_system=true").Scan(&beforeRoles))
 
-	// Second goose.Up — must be no-op.
+	// Второй goose.Up не должен ничего менять.
 	require.NoError(t, goose.Up(db, "."))
 
 	var afterClusters, afterRoles int
@@ -199,24 +199,30 @@ func TestIamExt_Migrations_6_1_2_IdempotentReapply(t *testing.T) {
 	assert.Equal(t, beforeRoles, afterRoles, "system role count unchanged after re-apply")
 }
 
-// ── Down + Up round-trip: rollback then re-apply.
+// ── Цикл Down + Up: откат, затем повторное применение.
 //
-// The squashed baseline (0001_initial.sql) collapses the whole history into a
-// single migration — the Down step drops the entire kaname schema, the Up
-// step recreates it. The round-trip therefore asserts on that single-shot
-// DROP / re-CREATE.
+// Объединённая база (0001_initial.sql) сворачивает всю историю в
+// одну миграцию: Down удаляет всю схему kaname, Up
+// воссоздаёт её. Поэтому цикл проверяет это однократное
+// удаление и воссоздание.
 func TestIamExt_Migrations_6_1_RoundTripDownUp(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 
-	db := setupKac127TestDB(t)
+	db, err := sql.Open("pgx", pgtest.NewEmptyDB(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	// Историческая обратимая цепочка заканчивается до неизменяемой истории установки AW.
+	require.NoError(t, goose.UpTo(db, ".", 20261031150000))
 	ctx := context.Background()
 
-	// Down to 0 — squashed baseline drops the whole kaname schema.
+	// Down до 0 — объединённая база удаляет всю схему kaname.
 	require.NoError(t, goose.DownTo(db, ".", 0))
 
-	// Verify tables are gone.
+	// Проверить отсутствие таблиц.
 	for _, table := range []string{
 		"clusters",
 		"audit_outbox",
@@ -231,11 +237,11 @@ func TestIamExt_Migrations_6_1_RoundTripDownUp(t *testing.T) {
 		assert.False(t, exists, "table kaname.%s must be gone after Down", table)
 	}
 
-	// Up again — re-apply the squashed baseline.
-	require.NoError(t, goose.Up(db, "."))
+	// Снова Up — повторно применить объединённую базу.
+	require.NoError(t, goose.UpTo(db, ".", 20261031150000))
 
-	// Verify tables back. oidc_jwks_keys is NOT in this set: 0065 retires it,
-	// so a full Down-to-0 + Up round-trip must leave it dropped.
+	// Проверить возвращение таблиц. oidc_jwks_keys НЕ входит в набор: 0065 снимает её,
+	// поэтому полный цикл Down до 0 и Up обязан оставить её удалённой.
 	for _, table := range []string{
 		"clusters",
 		"audit_outbox",
@@ -251,7 +257,7 @@ func TestIamExt_Migrations_6_1_RoundTripDownUp(t *testing.T) {
 	}
 }
 
-// ── 6.2.1 — clusters singleton: second INSERT rejected by CHECK
+// ── 6.2.1 — Единственная строка clusters: второй INSERT отвергается CHECK.
 func TestIamExt_Migrations_6_2_1_ClusterSingleton(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -263,7 +269,7 @@ func TestIamExt_Migrations_6_2_1_ClusterSingleton(t *testing.T) {
 	_, err := db.ExecContext(ctx,
 		"INSERT INTO kaname.clusters (id, name) VALUES ('cluster_other', 'other')")
 	require.Error(t, err)
-	// SQLSTATE 23514 (CHECK violation on clusters_id_singleton_ck).
+	// SQLSTATE 23514 (нарушение CHECK clusters_id_singleton_ck).
 	assert.Contains(t, err.Error(), "23514", "expected CHECK violation 23514")
 
 	var count int
@@ -272,7 +278,7 @@ func TestIamExt_Migrations_6_2_1_ClusterSingleton(t *testing.T) {
 	assert.Equal(t, 1, count, "clusters table still has exactly one row")
 }
 
-// ── 6.4.4 — Multi-scope Role: two non-NULL scope columns → CHECK violation
+// ── 6.4.4 — Role нескольких областей: две ненулевые колонки области → нарушение CHECK.
 func TestIamExt_Migrations_6_4_4_RoleScopeXor_TwoScopesInvalid(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -281,7 +287,7 @@ func TestIamExt_Migrations_6_4_4_RoleScopeXor_TwoScopesInvalid(t *testing.T) {
 	db := setupKac127TestDB(t)
 	ctx := context.Background()
 
-	// Создаем User → Account → Project (валидные scope target'ы).
+	// Создаём User → Account → Project (допустимые цели области).
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO kaname.users (id, external_id, email, account_id, invite_status)
 		VALUES ('usr_kac127test0001ab', 'ext_kac127_001', 'kac127@test.local', 'acc_kac127test001ab', 'ACTIVE')`)
@@ -315,7 +321,7 @@ func TestIamExt_Migrations_6_4_4_RoleScopeXor_TwoScopesInvalid(t *testing.T) {
 
 	require.NoError(t, tx.Commit())
 
-	// Теперь invalid INSERT: custom role с двумя non-NULL scope (account_id + project_id).
+	// Теперь неверный INSERT: пользовательская роль с двумя ненулевыми областями (account_id + project_id).
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO kaname.roles
 		 (id, account_id, project_id, name, permissions)
@@ -337,7 +343,7 @@ func TestIamExt_Migrations_6_4_4_RoleScopeXor_TwoScopesInvalid(t *testing.T) {
 	require.NoError(t, err, "valid project-scoped role insert must succeed")
 }
 
-// ── 6.5.0 — backward-compat: legacy access_bindings get default status='ACTIVE'.
+// ── 6.5.0 — Обратная совместимость: старые access_bindings получают status='ACTIVE' по умолчанию.
 func TestIamExt_Migrations_6_5_0_AccessBindingStatusDefault(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -358,5 +364,5 @@ func TestIamExt_Migrations_6_5_0_AccessBindingStatusDefault(t *testing.T) {
 	assert.Contains(t, columnDefault, "ACTIVE", "default must be 'ACTIVE'")
 }
 
-// JIT eligibility CHECK tests removed: the access_bindings_jit_eligibility
-// table was dropped alongside the JIT pipeline.
+// Проверки CHECK допустимости JIT удалены: таблица access_bindings_jit_eligibility
+// удалена вместе с конвейером JIT.

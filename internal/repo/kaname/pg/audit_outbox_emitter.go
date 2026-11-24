@@ -58,6 +58,10 @@ func (e *AuditOutboxEmitter) EmitTx(ctx context.Context, tx service.Tx, ev servi
 // (cluster/session/SAKey emit-in-tx) and writeTx.EmitAuditEvent (CRUD writer-tx)
 // so the emit logic is defined exactly once (no duplication, запрет #11).
 func insertAuditEventTx(ctx context.Context, tx pgx.Tx, ev service.AuditEvent) error {
+	return insertAuditEventWithIDTx(ctx, tx, ev, domain.AuditEventID(newAuditEventID()))
+}
+
+func insertAuditEventWithIDTx(ctx context.Context, tx pgx.Tx, ev service.AuditEvent, id domain.AuditEventID) error {
 	if ev.EventType == "" {
 		return fmt.Errorf("emit audit_outbox: event_type required")
 	}
@@ -70,7 +74,7 @@ func insertAuditEventTx(ctx context.Context, tx pgx.Tx, ev service.AuditEvent) e
 		return fmt.Errorf("emit audit_outbox: marshal payload: %w", err)
 	}
 	entry := domain.AuditOutboxEntry{
-		ID:           domain.AuditEventID(newAuditEventID()),
+		ID:           id,
 		EventType:    domain.EventTypeName(ev.EventType),
 		EventPayload: payloadJSON,
 		Status:       domain.AuditOutboxStatusPending,

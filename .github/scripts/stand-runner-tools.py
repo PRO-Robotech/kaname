@@ -22,7 +22,7 @@ def manifest(root):
     path = root / ".github/workflows/e2e-newman.yml"
     document = yaml.safe_load(path.read_text())
     provider = {k: str(v) for k, v in document.get("env", {}).items() if k.startswith("KANAME_RUNNER_")}
-    required = ("IMAGE", "OS", "SNAPSHOT", "APT", "SYSTEM_CLI", "NODE", "NPM", "HELM", "KUBECTL", "DOCKER", "DOCKER_SHA256", "PIP", "PYYAML")
+    required = ("IMAGE", "OS", "SNAPSHOT", "RELEASES", "APT", "SYSTEM_CLI", "NODE", "NPM", "HELM", "KUBECTL", "DOCKER", "DOCKER_SHA256", "PIP", "PYYAML")
     if set(provider) != {"KANAME_RUNNER_" + name for name in required}:
         raise ValueError("workflow provider: missing/unknown declaration")
     if provider["KANAME_RUNNER_OS"] != "ubuntu/24.04" or provider["KANAME_RUNNER_IMAGE"] != "ubuntu:24.04":
@@ -34,6 +34,14 @@ def manifest(root):
             raise ValueError("workflow provider: exact version required: " + name)
     if not re.fullmatch(r"[a-f0-9]{64}", provider["KANAME_RUNNER_DOCKER_SHA256"]):
         raise ValueError("workflow provider: Docker release digest required")
+    releases = {}
+    for line in provider["KANAME_RUNNER_RELEASES"].splitlines():
+        fields = line.split()
+        if len(fields) != 2 or not re.fullmatch(r"[a-f0-9]{64}", fields[0]) or fields[1] not in ("noble", "noble-updates", "noble-security") or fields[1] in releases:
+            raise ValueError("workflow provider: exact signed release hashes required")
+        releases[fields[1]] = fields[0]
+    if set(releases) != {"noble", "noble-updates", "noble-security"}:
+        raise ValueError("workflow provider: incomplete signed release hashes")
     packages = {}
     for spec in provider["KANAME_RUNNER_APT"].split():
         if not re.fullmatch(r"[a-z0-9.+-]+=[A-Za-z0-9:~.+-]+", spec):

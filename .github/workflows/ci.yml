@@ -242,7 +242,7 @@ jobs:
             exit 1
           fi
           echo "прочитано файлов Go: $(printf '%s\n' "$files" | wc -l)"
-          unformatted=$(gofmt -l $files || true)
+          unformatted=$(gofmt -l $files) || exit 1
           if [ -n "$unformatted" ]; then
             echo "требуется gofmt:"; echo "$unformatted"; exit 1
           fi
@@ -264,14 +264,13 @@ jobs:
         run: python3 .github/scripts/review-event-silence.py
 
   # ── ЮНИТЫ ───────────────────────────────────────────────────────────────────
-  unit:
-    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit') }}
+  # Две независимые части сохраняют прежние бюджеты и детектор гонок.
+  unitmain:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unitmain') }}
     needs: [changes]
-    name: пробы -race -short (числовой вердикт)
+    name: unit — основной набор
     runs-on: ubuntu-latest
-    # Предел задания — предел `go test` ниже (45m) плюс подготовка и прогонщик вердикта:
-    # иначе зависший пакет снял бы задание раньше паники `-timeout`, и вердикта не было бы.
-    timeout-minutes: 55
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -281,34 +280,92 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go mod download
-
-      # ПРОГОНЩИК ВЫНОСИТ ЧАСТЬ ВЕРДИКТА, значит его способность УПАСТЬ обязана
-      # быть доказана ДО того, как его вердикту поверят: иначе он сам стал бы
-      # формой без содержания — тем самым классом, ради которого заведён.
-      # Инъекция идёт по каждой оси в ОБЕ стороны, включая законных близнецов.
-      - name: прогонщик вердикта способен упасть (самопроба инъекцией)
+      - name: прогонщик вердикта способен упасть
         run: python3 .github/scripts/go-test-verdict.py --self-test
+      - name: отдельные сырые потоки и числовые вердикты
+        run: python3 .github/scripts/run-unit.py main ci-test-evidence/unit/main
+      - name: сырые события части, включая отказ и прерывание
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-test-unit-main-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/unit/main
+          if-no-files-found: error
 
-      # `-short` ОБЯЗАТЕЛЕН: без него сюда затягиваются контейнерные пробы,
-      # поднимающие Postgres на каждом пакете, и задание упирается в предел
-      # времени. Контейнерные гоняет отдельное задание ниже.
-      #
-      # Код `go test` берётся ДАННЫМИ: под `-e` ненулевой оборвал бы шаг до
-      # прогонщика, и вердикта — числа исполненного, отказов и пропущенного —
-      # не было бы вовсе. Роняет шаг ПРОГОНЩИК, а не `go test`.
-      #
-      # `-timeout 45m` — запас к самому долгому пакету (kaname#949): `internal/check`
-      # на d34eab3f7 под этой формой — 1723,754 с, код 0 (внешний кластер, 4 CPU);
-      # при 25m тот же пакет снят паникой на 1501 с. 45m — 2700 с: доля пакета 64 %,
-      # запас 57 %. Предел растёт вслед за пакетом, а не вместо его ускорения: доля
-      # выше 75 % — предмет задачи, а не новое число. Маршрут `ci.yml:unit` стенда
-      # воркспейса (`scripts/stand-report.sh`) берёт эту команду из этого шага.
-      - name: пробы (-race -short)
+  unitcensus:
+    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unitcensus') }}
+    needs: [changes]
+    name: unit — Census 11
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod download
+      - name: прогонщик вердикта способен упасть
+        run: python3 .github/scripts/go-test-verdict.py --self-test
+      - name: отдельные сырые потоки и числовые вердикты
+        run: python3 .github/scripts/run-unit.py census ci-test-evidence/unit/census
+      - name: сырые события части, включая отказ и прерывание
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-test-unit-census-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/unit/census
+          if-no-files-found: error
+
+  # Прежний обязательный контекст принимает только обе полные части того же SHA.
+  # RED одной части не отменяет другую; отсутствие/skip части не является успехом.
+  unit:
+    if: ${{ always() && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'unit')) }}
+    needs: [changes, unitmain, unitcensus]
+    name: пробы -race -short (числовой вердикт)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - name: получить основной сырой поток
+        if: always()
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: go-test-unit-main-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/unit/main
+      - name: получить сырой поток Census
+        if: always()
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: go-test-unit-census-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-test-evidence/unit/census
+      - name: обязательное объединение compiled inventory и фактических событий
+        if: always()
+        env:
+          MAIN_RESULT: ${{ needs.unitmain.result }}
+          CENSUS_RESULT: ${{ needs.unitcensus.result }}
         run: |
           rc=0
-          go test ./... -race -short -count=1 -timeout 45m -json > test.json 2>&1 || rc=$?
-          echo "go test завершился с кодом $rc (вердикт выносит прогонщик ниже)"
-          python3 .github/scripts/go-test-verdict.py < test.json
+          python3 .github/scripts/run-unit.py aggregate ci-test-evidence/unit || rc=$?
+          if [ "$MAIN_RESULT" != success ] || [ "$CENSUS_RESULT" != success ]; then
+            exit 1
+          fi
+          exit "$rc"
+      - name: сырые события unit (включая отказ и прерывание)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: go-test-unit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            deferred-tree.json
+            test.json
+            census-test.json
+            ci-test-evidence/unit
+          if-no-files-found: error
 
   # ── ЛИНТ ────────────────────────────────────────────────────────────────────
   lint:
@@ -505,10 +562,33 @@ jobs:
 
       - run: go mod download
 
+      - name: контроли публикации диагностики standalone
+        id: diagnostic_controls
+        run: python3 .github/scripts/standalone-diagnostics_test.py
+
       # `-short` НЕ ПЕРЕДАЁТСЯ намеренно: под ним проба пропускает себя, и
       # задание стало бы зелёным, ничего не спросив.
       - name: цели рецепта в самостоятельном клоне (без -short)
+        env:
+          STANDALONE_DIAGNOSTICS_DIR: ${{ runner.temp }}/standalone-private
         run: go test ./tools/standalonetargets/ -count=1 -v -timeout 25m
+
+      # В артефакт попадает только отдельная очищенная производная.
+      # Ошибка экспорта не заменяет исход тестов и не разрешает raw fallback.
+      - name: очистка диагностики standalone
+        id: diagnostic_export
+        if: ${{ always() && steps.diagnostic_controls.outcome == 'success' }}
+        env:
+          STANDALONE_DIAGNOSTICS_DIR: ${{ runner.temp }}/standalone-private
+        run: python3 .github/scripts/standalone-diagnostics.py "$STANDALONE_DIAGNOSTICS_DIR" "${{ runner.temp }}/standalone-public"
+      - name: очищенная диагностика standalone
+        if: ${{ always() && steps.diagnostic_export.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: standalone-diagnostics
+          path: ${{ steps.diagnostic_export.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
 
   # ── СТАТИЧЕСКИЙ АНАЛИЗ БЕЗОПАСНОСТИ ──────────────────────────────────────────
   gosec:
@@ -616,7 +696,7 @@ jobs:
   # местом: матрица из двух при «/3» оставила бы треть пакетов без прогона.
   # Каждый шард сам проверяет полный план — каждый пакет ровно в одном шарде.
   integrationshard:
-    if: ${{ needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'integrationshard') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/1109' && (needs.changes.outputs.full == 'true' || contains(fromJSON(needs.changes.outputs.jobs || '[]'), 'integrationshard')) }}
     needs: [changes]
     name: интеграция · шард ${{ matrix.shard }} из ${{ strategy.job-total }}
     runs-on: ubuntu-latest
@@ -634,6 +714,8 @@ jobs:
       GOFLAGS: '-p=1 -test.v=true'
       # Компиляция использует go.mod выбранной ревизии приложения.
       GOWORK: 'off'
+      # Фикстуры Python читают исходники; bytecode не должен попадать в checkout.
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -1202,6 +1284,8 @@ jobs:
     needs:
       - build
       - unit
+      - unitmain
+      - unitcensus
       - lint
       - proto
       - standalone
@@ -1243,6 +1327,8 @@ jobs:
           .github/scripts/trunk-verdict-holder.sh \
             "${{ needs.build.result }}" \
             "${{ needs.unit.result }}" \
+            "${{ needs.unitmain.result }}" \
+            "${{ needs.unitcensus.result }}" \
             "${{ needs.lint.result }}" \
             "${{ needs.proto.result }}" \
             "${{ needs.standalone.result }}" \
@@ -1269,7 +1355,7 @@ jobs:
   prverdict:
     name: сводный вердикт запроса (ci)
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    needs: [changes, authzartifacts, build, catalogparity, gosec, govulncheck, integration, integrationshard, lint, listfilter, proto, standalone, unit]
+    needs: [changes, authzartifacts, build, catalogparity, gosec, govulncheck, integration, integrationshard, lint, listfilter, proto, standalone, unit, unitmain, unitcensus]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

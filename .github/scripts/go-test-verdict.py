@@ -58,6 +58,7 @@
 виден вовсе, и этот прогонщик о нём ничего сказать не может.
 """
 
+import argparse
 import collections
 import json
 import re
@@ -108,8 +109,9 @@ def _failure_text(lines):
             + lines[-FAILURE_TEXT_TAIL:])
 
 
-def verdict(stream, out=sys.stdout):
+def verdict(stream, out=sys.stdout, require_pass=None):
     """Считает события `go test -json` и печатает перепись. Возвращает код исхода."""
+    required_events = collections.Counter()
     pkg = collections.Counter()
     test = collections.Counter()
     failed_top = []
@@ -152,6 +154,9 @@ def verdict(stream, out=sys.stdout):
         package = event.get("Package")
         name = event.get("Test")
         text = event.get("Output") or ""
+        if require_pass and (package, name) == require_pass:
+            if action in ("run", "pass", "fail", "skip"):
+                required_events[action] += 1
 
         # Вывод сборки адресован ImportPath, а не пакету: пакет ссылается на
         # него полем FailedBuild своего события `fail`.
@@ -269,6 +274,16 @@ def verdict(stream, out=sys.stdout):
         return 2
 
     print("", file=out)
+    if require_pass:
+        required_ok = (required_events == collections.Counter({"run": 1, "pass": 1})
+                       and require_pass not in running)
+        print("обязательная проба: %s :: %s; run=%d pass=%d fail=%d skip=%d"
+              % (*require_pass, *(required_events[a] for a in ("run", "pass", "fail", "skip"))),
+              file=out)
+        if not required_ok:
+            print("НЕ ВЫПОЛНИЛОСЬ: обязательная проба должна начаться и пройти ровно один раз.",
+                  file=out)
+            return 2
     print("ЗЕЛЁНЫЙ: отказов нет.", file=out)
     return 0
 
@@ -323,7 +338,7 @@ def self_test():
     probes = 0
     failed = 0
 
-    def run(want, title, payload):
+    def run(want, title, payload, require_pass=None):
         nonlocal probes, failed
         probes += 1
         buf = []
@@ -335,7 +350,7 @@ def self_test():
             def flush(self):
                 pass
 
-        got = verdict(iter(payload.splitlines()), out=Sink())
+        got = verdict(iter(payload.splitlines()), out=Sink(), require_pass=require_pass)
         text = "".join(buf)
         if got != want:
             print("  ПРОВАЛ %s — ждали код %d, получили %d" % (title, want, got),
@@ -561,6 +576,26 @@ def self_test():
         print("  ПРОВАЛ (−) время напечатано без события с Elapsed", file=sys.stderr)
         failed += 1
 
+    # Обязательное имя: пакет без проб законен по умолчанию, но не заменяет
+    # конкретную отдельно выбранную пробу. Повтор также не равен одному проходу.
+    required = ("p", "TestA")
+    run(0, "(−) обязательная проба прошла один раз", green, required)
+    run(2, "(+) обязательная проба отсутствует", ev("pass"), required)
+    run(2, "(+) обязательная проба переименована",
+        green.replace("TestA", "TestRenamed"), required)
+    run(2, "(+) обязательная проба пропущена",
+        ev("run", "TestA") + ev("skip", "TestA") + ev("pass"), required)
+    run(1, "(+) обязательная проба упала", one("fail"), required)
+    run(2, "(+) обязательная проба оборвана",
+        ev("run", "TestA") + ev("pass"), required)
+    run(2, "(+) обязательная проба повторена", green + green, required)
+    run(2, "(+) проход обязательной пробы без начала",
+        ev("pass", "TestA") + ev("pass"), required)
+    run(2, "(+) повторное начало обязательной пробы",
+        ev("run", "TestA") + green, required)
+    run(2, "(+) проход до начала обязательной пробы",
+        ev("start") + ev("pass", "TestA") + ev("run", "TestA") + ev("pass"), required)
+
     print("")
     print("go-test-verdict --self-test: проб исполнено %d, провалов %d" % (probes, failed))
     if probes == 0:
@@ -570,6 +605,17 @@ def self_test():
 
 
 if __name__ == "__main__":
-    if "--self-test" in sys.argv[1:]:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--require-pass", metavar="PACKAGE::TEST",
+                        help="требовать ровно одно начало и один проход указанной пробы")
+    args = parser.parse_args()
+    required = None
+    if args.require_pass:
+        parts = args.require_pass.split("::")
+        if len(parts) != 2 or not all(parts):
+            parser.error("--require-pass требует непустое PACKAGE::TEST")
+        required = tuple(parts)
+    if args.self_test:
         sys.exit(self_test())
-    sys.exit(verdict(sys.stdin))
+    sys.exit(verdict(sys.stdin, require_pass=required))

@@ -29,7 +29,8 @@ import (
 // ЕДИНИЦА здесь — из §0.7 приёмки (строка-комментарий с отступом внутри тела
 // `type`), а ЧИСЛО — свойство ревизии канона, и его переснимают вместе с ним.
 // §0.7 записала 720 на своей ревизии, и оба разборщика тогда сошлись; kacho#1820
-// сдвинул канон, `kacho#1281` сдвинул снова, и та же единица даёт сегодня 724. Число приёмки при этом НЕ
+// сдвинул канон, `kacho#1281` сдвинул снова; kaname#1031 добавил комментарий
+// права писателя аккаунта, и та же единица даёт сегодня 725. Число приёмки при этом НЕ
 // правится: она свидетельствует о замере, который был верен, — правка сделала
 // бы ложной верную запись. Сходится единица, а не число.
 //
@@ -44,8 +45,8 @@ func TestB06CanonBlockUnitIsTheBodyNotTheBanner(t *testing.T) {
 		t.Fatalf("канон не резолвится: %v", err)
 	}
 	blocks := modelrender.SplitCanon(dsl)
-	if len(blocks) != 33 {
-		t.Fatalf("блоков %d, ожидалось 33 (канон %s)", len(blocks), path)
+	if len(blocks) != 35 {
+		t.Fatalf("блоков %d, ожидалось 35 (канон %s)", len(blocks), path)
 	}
 
 	inner := 0
@@ -59,8 +60,8 @@ func TestB06CanonBlockUnitIsTheBodyNotTheBanner(t *testing.T) {
 			t.Errorf("блок %s несёт пустую строку — взята единица B, а не тело блока", b.Type)
 		}
 	}
-	if inner != 724 {
-		t.Errorf("внутриблочных комментариев %d, ожидалось 724 (перепись HEAD; единица — "+
+	if inner != 725 {
+		t.Errorf("внутриблочных комментариев %d, ожидалось 725 (перепись HEAD; единица — "+
 			"§0.7 приёмки: строка-комментарий с отступом внутри тела `type`); расхождение "+
 			"означает либо что единица блока не тело, либо что канон правился, а снимок "+
 			"здесь и шапка пакета не пересняты", inner)
@@ -79,7 +80,7 @@ func TestB06TypesOutsideModulesAreDerivedNotWritten(t *testing.T) {
 		t.Fatalf("канон не резолвится: %v", err)
 	}
 	got := modelrender.TypesOutsideModules(seed.LiteralRows().Resources, dsl)
-	want := []string{"cluster", "group", "iam_fgaproxy", "service_account", "system_class", "user"}
+	want := []string{"cluster", "group", "iam_fgaproxy", "iam_grant_role", "iam_grant_scope", "service_account", "system_class", "user"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("типы вне модулей = %v, ожидалось %v", got, want)
 	}

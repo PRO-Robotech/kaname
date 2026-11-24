@@ -123,6 +123,11 @@ func (w *writeTx) AccessBindingsW() access_binding.WriterIface {
 // "User <id> not found" FailedPrecondition text. mapErr(nil, …) is nil-safe.
 func (w *writeTx) Commit(ctx context.Context) error {
 	err := w.tx.Commit(ctx)
+	// Prepared executor сохраняет первичную причину подтверждённого abort до
+	// исчерпания общего budget; остальные constraint mappings не меняются.
+	if err != nil && preparedSingleEntry(ctx) && preparedRetryable(err, true) {
+		return err
+	}
 	// Отложенные проверки срабатывают ЗДЕСЬ, и подсказка выбирается по тому, кто
 	// её оставил. Две подсказки на одной транзакции взаимоисключающи по предмету:
 	// одна ставится вставкой аккаунта, другая — снятием членства, и ни один

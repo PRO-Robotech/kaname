@@ -54,10 +54,11 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
-// chainUp накатывает цепочку ТЕМ ЖЕ средством, которым её накатывает оператор.
+// chainUp накатывает обратимый префикс ТЕМ ЖЕ средством оператора.
+// Необратимая история назначений не является предметом исторического отката свода.
 func chainUp(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
-	_, _, err := runCommandFS(t, migrations.FS, []string{"up", "--dsn", dsn}, nil)
+	_, _, err := runCommandFS(t, migrations.FS, []string{"up", "--target", registrationReversibleTip, "--dsn", dsn}, nil)
 	require.NoError(t, err, "предмет сцены не создан: цепочка обязана накатиться")
 
 	db, err := sql.Open("pgx", dsn)

@@ -176,6 +176,15 @@ func TestCensusFixturesSeedThroughTheProducer(t *testing.T) {
 		byDir[dir] = append(byDir[dir], check.CensusFileFacts{Rel: fmt.Sprintf("RPC route %s", dir), Producer: true})
 	}
 	t.Logf("полный tracked корпус %d файлов; доказано typed RPC→registered handler→wired adapter→mirror путей %d", len(corpus), routes)
+	direct, directRoutes, err := check.CensusDirectProducers(corpus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for dir := range direct {
+		byDir[dir] = append(byDir[dir], check.CensusFileFacts{Rel: fmt.Sprintf("direct use-case route %s", dir), Producer: true})
+	}
+	t.Logf("тот же полный корпус: доказано Test→world factory→typed use-case→concrete adapter→mirror путей %d", directRoutes)
+
 	if findings := check.JudgeCensusFixtures(byDir); len(findings) > 0 {
 		t.Fatalf("перепись утверждает свойство собственной фикстуры:\n  %s",
 			strings.Join(findings, "\n  "))

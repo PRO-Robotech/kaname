@@ -372,18 +372,46 @@ delete Project P first (projects: 1)`
 исключения держат `IAM-USR-EXCL-NEG-LIVE-GRANT` и `remove_from_account_names_grants_test.go`
 (DoD п. 10). `ID` DRS-12 повторно не выдаётся.
 
-### DRS-13: держащий появился после снимка охраны — та же форма · I
+### DRS-13: конкурирующий держащий и независимый рубеж схемы — та же форма · I
 
 **ID:** DRS-13 (рубеж гонки, Р2)
 
-**Given** состояние DRS-06 до его «Когда» (`B` отозвана, `U` не снят); снятие `U` задержано после снимка охраны и до
-фиксации (однократная задержка на операторе снятия строки `users`), и в это окно `O` выдаёт `U`
-новую роль в `F` — выдача `B3`, зафиксирована
-**When** задержка отпущена
-**Then** снятие отвергнуто рубежом схемы (триггер), `error.message` = `User U has active access
+Ранее здесь требовалась фиксация `B3` после снимка guarded DELETE. Общий
+compatibility admission теперь сериализует обычные Writer до этого снимка:
+конкурирующий Writer не может зафиксировать выдачу внутри прежнего окна.
+Прежнее расписание не считается выполненным или пропущенным тестом. Его
+заменяют **оба обязательных доказательства** ниже: нормальная конкуренция
+при новом порядке и независимо достигнутый настоящий рубеж схемы. Р2 и Р3,
+включая чтение остатка после отказа, остаются неизменными.
+
+**Конкурентный admission.**
+
+**Given** состояние DRS-06 до его «Когда» (`B` отозвана, `U` не снят); обычный
+Writer `O` вставил новую выдачу `B3` на `U` в `F`, но ещё не зафиксировал её
+**When** обычный Writer снятия `U` ждёт именно PID вставки на точном
+compatibility key `(1262569292, 0)` в режиме `ExclusiveLock`, до начала DELETE;
+затем вставка `B3` зафиксирована
+**Then** тот же ожидавший Writer доходит до настоящего `UsersW().Delete`,
+снятие отвергнуто, `U` и действующая `B3` сохранены по одной строке.
+
+**Независимый рубеж схемы.**
+
+**Given** действующая `B3` на `U` в `F` уже зафиксирована
+**When** обычный Writer прошёл штатный admission; только тестовая точка входа
+выполняет настоящий plain DELETE строки `users`, без копии программного WHERE,
+через производственные `deleteUnderSavepoint`, `mapErr` и `nameHold`
+**Then** получен настоящий backend `23503` от `access_binding_subjects_subject_ref`,
+оператор откачен до savepoint, после него прочитан держащий; `U`, `B3` и её
+строка субъекта сохранены по одной. Guards, triggers, FK и admission включены.
+Эта проба не изображает конкурентную фиксацию после снимка `UsersW().Delete`.
+
+**В обоих доказательствах** `error.message` = `User U has active access
 bindings and cannot be deleted: AccessBinding B3 on account F is revoked by an administrator of that
-account (active bindings: 1)`, `ErrorInfo.reason` = `REFERENCE_IN_USE`, `metadata.resource_id` =
-`"B3"` — побайтово та же форма, что у рубежа охраны
+account (active bindings: 1)`, код = `9`, `ErrorInfo.reason` = `REFERENCE_IN_USE`,
+домен = `refusaldomain.For(ServiceIAM)`, metadata =
+`{resource_type: "access_binding", resource_id: "B3", remaining: "1"}`.
+Текст и все metadata рубежа схемы побайтово равны отказу обычной охраны на той
+же зафиксированной `B3`. DRS-14 и ветка Р2 «nothing holds it now» не меняются.
 
 ### DRS-14: держащий исчез до чтения остатка — «повторите» · U
 

@@ -829,11 +829,15 @@ func (w *userWriter) Delete(ctx context.Context, id domain.UserID) error {
 	})
 }
 
-// LockForRemoval — см. порт. Замок строки — ПЕРВЫМ оператором транзакции, перечень
-// членств — после него: вставка членства берёт ключевой замок той же строки
+// LockForRemoval — см. порт. После consumer admission берём строку, перечень
+// членств — после неё: вставка членства берёт ключевой замок той же строки
 // (`memberships_user_fk`) и сериализуется со снятием, поэтому перечень полон и
 // под гонкой (kaname#664, Р6, KN664-41).
 func (w *userWriter) LockForRemoval(ctx context.Context, id domain.UserID) ([]domain.AccountID, error) {
+	// Тот же порядок, что у Account.LockOwner: consumer раньше users row.
+	if _, err := w.tx.Exec(ctx, `SELECT kaname.authority_parent_prelock_admit_v3()`); err != nil {
+		return nil, mapErr(err, "User.Delete", string(id))
+	}
 	var one int
 	err := w.tx.QueryRow(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, string(id)).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {

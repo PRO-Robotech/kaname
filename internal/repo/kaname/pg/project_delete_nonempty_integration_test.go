@@ -159,25 +159,47 @@ func TestProjectDelete_PNE_1_10(t *testing.T) {
 
 // ── IAM-PNE-1-13 — регистрация, обогнавшая удаление, проект НЕ воскрешает ───
 
-// TestProjectDelete_PNE_1_13 — гонка двух сессий: регистрация на P открыта и не
-// закоммичена; удаление P исполняется и коммитится раньше; затем регистрация
-// коммитится без отказа. Занижение счёта окном доставки — ЗАКОННЫЙ исход
-// (приёмка §3.4, пункт 4, прочтение Б), и проба на нём не падает.
-//
-// Регистрация идёт настоящим `resource_mirror.UpsertTx` — подделка была бы
-// снисходительнее продукта: у настоящего приёма есть условие живости типа и
-// запись цепи предков.
+// TestProjectDelete_PNE_1_13 сохраняет порядок коммитов из IAM-PNE-1-13:
+// регистрация уже открыта и прочла P, удаление коммитится первым, затем
+// поздняя доставка пишет зеркало, не воскрешая P. Это объявленное окно доставки,
+// а не обещание full2 no-orphan. Отдельно проверены оба registration-first
+// порядка: незавершённая запись с точным compat wait и уже видимая запись.
 func TestProjectDelete_PNE_1_13(t *testing.T) {
 	env := newPNEWriterEnv(t, "pne113")
 	ctx := context.Background()
+	// Открытая регистрация ещё не начала писать и не владеет compat. Прочитанный
+	// родитель — реальный факт её TX; снимок не подменяется готовым значением.
+	lateProject := seedProject(t, ctx, env.repo, env.acc, "pne-1-13-late").ID
+	lateID := "obj-" + ids.NewID("pne")
+	lateTx, err := env.pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = lateTx.Rollback(ctx) }()
+	var observedParent string
+	require.NoError(t, lateTx.QueryRow(ctx, `SELECT id FROM kaname.projects WHERE id=$1`, string(lateProject)).Scan(&observedParent))
+	require.Equal(t, string(lateProject), observedParent)
+	require.NoError(t, env.deleteProject(t, ctx, lateProject), "DELETE коммитится до записи и коммита регистрации")
+	require.False(t, projectExists(t, ctx, env.pool, lateProject))
+	lateOutcome, err := resource_mirror.UpsertTx(ctx, lateTx, resource_mirror.Row{
+		ObjectType: "vpc.network", ObjectID: lateID, ParentProjectID: observedParent,
+		SourceVersion: time.Now().UTC(), ParentChain: []string{"project:" + observedParent},
+	})
+	require.NoError(t, err, "поздняя регистрация не отвергается")
+	require.True(t, lateOutcome.Applied)
+	require.NoError(t, lateTx.Commit(ctx))
+	var lateParent string
+	require.NoError(t, env.pool.QueryRow(ctx,
+		`SELECT parent_project_id FROM kaname.resource_mirror WHERE object_id=$1`, lateID).Scan(&lateParent))
+	require.Equal(t, string(lateProject), lateParent, "объявленное окно доставки сохраняет имя удалённого родителя")
+	require.False(t, projectExists(t, ctx, env.pool, lateProject), "поздняя доставка проект не воскрешает")
+
 	prj := seedProject(t, ctx, env.repo, env.acc, "pne-1-13").ID
 	objectID := "obj-" + ids.NewID("pne")
 
-	// Сессия А: регистрация открыта, не закоммичена.
+	// Сессия А принимает реальную команду зеркала, но ещё не коммитит её.
 	regTx, err := env.pool.Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = regTx.Rollback(ctx) }()
-	_, err = resource_mirror.UpsertTx(ctx, regTx, resource_mirror.Row{
+	outcome, err := resource_mirror.UpsertTx(ctx, regTx, resource_mirror.Row{
 		ObjectType:      "vpc.network",
 		ObjectID:        objectID,
 		ParentProjectID: string(prj),
@@ -185,23 +207,100 @@ func TestProjectDelete_PNE_1_13(t *testing.T) {
 		ParentChain:     []string{"project:" + string(prj)},
 	})
 	require.NoError(t, err, "приём регистрации")
+	require.True(t, outcome.Applied, "регистрация действительно записала новую проекцию")
 
-	// Сессия Б: удаление P исполняется и коммитится раньше регистрации. Оно не
-	// ждёт: у зеркала нет ключа на projects, строку проекта регистрация не
-	// трогает.
+	// Сессия Б ждёт compat в Writer ДО снимка DELETE. После коммита
+	// регистрации свежий снимок обязан увидеть объект и сохранить живой проект.
+	// Таймаут прежний; ждём точный lock/PID вместо предположения об отсутствии wait.
 	deleteCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	require.NoError(t, env.deleteProject(t, deleteCtx, prj), "удаление проходит: снимка регистрации у него нет")
-	require.False(t, projectExists(t, ctx, env.pool, prj))
-
-	// Сессия А коммитится без отказа — служба запись не отвергает.
-	require.NoError(t, regTx.Commit(ctx), "регистрация коммитится без отказа")
-
+	done := make(chan error, 1)
+	consumed := false
+	defer func() {
+		cancel()
+		if consumed {
+			return
+		}
+		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		select {
+		case <-done:
+		case <-cleanup.Done():
+			t.Error("удаление не завершилось после отмены")
+		}
+	}()
+	go func() {
+		writer, openErr := env.repo.Writer(deleteCtx)
+		if openErr != nil {
+			done <- openErr
+			return
+		}
+		defer func() {
+			cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stop()
+			_ = writer.Rollback(cleanup)
+		}()
+		if deleteErr := writer.ProjectsW().Delete(deleteCtx, prj); deleteErr != nil {
+			done <- deleteErr
+			return
+		}
+		done <- writer.Commit(deleteCtx)
+	}()
+	registrationPID := int(regTx.Conn().PgConn().PID())
+	deletePID := receiptWaitForBlocker(t, deleteCtx, env.pool, registrationPID)
+	var waitsForRegistration bool
+	require.NoError(t, env.pool.QueryRow(deleteCtx, `SELECT EXISTS(
+ SELECT 1 FROM pg_locks WHERE pid=$1 AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+ AND locktype='advisory' AND classid=1262569292::oid AND objid=0::oid
+ AND objsubid=2 AND mode='ExclusiveLock' AND NOT granted)
+ AND $2=ANY(pg_blocking_pids($1))
+ AND EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1
+  AND query='SELECT pg_advisory_xact_lock(1262569292,0)')
+ AND NOT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND granted
+  AND locktype IN ('advisory','relation','tuple'))`, deletePID, registrationPID).Scan(&waitsForRegistration))
+	require.True(t, waitsForRegistration, "Writer ждёт именно незавершённую регистрацию до снимка DELETE")
+	require.True(t, projectExists(t, ctx, env.pool, prj), "ожидающее удаление ещё не сняло проект")
+	require.NoError(t, regTx.Commit(ctx), "регистрация коммитится без отказа и освобождает guard")
+	select {
+	case deleteErr := <-done:
+		consumed = true
+		require.Error(t, deleteErr)
+		require.True(t, stderrors.Is(deleteErr, iamerr.ErrReferenceInUse), "регистрация перед снимком удерживает проект: %v", deleteErr)
+		require.Equal(t, fmt.Sprintf("Project %s is not empty (vpc.network: 1)", prj), iamerr.StripSentinel(deleteErr))
+	case <-deleteCtx.Done():
+		t.Fatal("удаление не завершилось после коммита регистрации")
+	}
+	require.True(t, projectExists(t, ctx, env.pool, prj), "закоммиченный ресурс не осиротел")
 	var parent string
 	require.NoError(t, env.pool.QueryRow(ctx,
 		`SELECT parent_project_id FROM kaname.resource_mirror WHERE object_id = $1`, objectID).Scan(&parent))
-	require.Equal(t, string(prj), parent, "строка зеркала называет родителя, которого нет")
-	require.False(t, projectExists(t, ctx, env.pool, prj), "проект не воскрешён")
+	require.Equal(t, string(prj), parent, "отказ сохранил регистрацию и её живого родителя")
+
+	// Законный близнец: меняется только порядок снимка DELETE относительно
+	// коммита той же реальной команды регистрации; видимая строка удерживает P.
+	twin := seedProject(t, ctx, env.repo, env.acc, "pne-1-13-visible").ID
+	twinID := "obj-" + ids.NewID("pne")
+	twinTx, err := env.pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = twinTx.Rollback(ctx) }()
+	outcome, err = resource_mirror.UpsertTx(ctx, twinTx, resource_mirror.Row{
+		ObjectType:      "vpc.network",
+		ObjectID:        twinID,
+		ParentProjectID: string(twin),
+		SourceVersion:   time.Now().UTC(),
+		ParentChain:     []string{"project:" + string(twin)},
+	})
+	require.NoError(t, err)
+	require.True(t, outcome.Applied)
+	require.NoError(t, twinTx.Commit(ctx))
+	err = env.deleteProject(t, ctx, twin)
+	require.Error(t, err)
+	require.True(t, stderrors.Is(err, iamerr.ErrReferenceInUse), "видимая регистрация удерживает проект: %v", err)
+	require.Equal(t, fmt.Sprintf("Project %s is not empty (vpc.network: 1)", twin), iamerr.StripSentinel(err))
+	require.True(t, projectExists(t, ctx, env.pool, twin))
+	require.NoError(t, env.pool.QueryRow(ctx,
+		`SELECT parent_project_id FROM kaname.resource_mirror WHERE object_id = $1`, twinID).Scan(&parent))
+	require.Equal(t, string(twin), parent, "отказ сохранил закоммиченную регистрацию")
 }
 
 // ── IAM-PNE-1-14 — «удалено» читается ПЕРВЫМ, зонд вторым ───────────────────

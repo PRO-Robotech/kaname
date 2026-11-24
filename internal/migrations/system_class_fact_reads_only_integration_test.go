@@ -150,13 +150,13 @@ func TestSystemClass_ClassReadsOnlyCheckRoundTrips(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
-	db, _ := scMovedP2(t)
+	db, _ := scHistoricalMovedP2(t)
 	_, beforeNarrowing := versionsOf(t, scNarrowingMigration)
 	require.NoError(t, goose.DownTo(db, ".", beforeNarrowing), "откат сужения")
 	require.NoError(t, scInsertFact(db, "vpc_network", "net-rod-1", "project", "system_class:anonymous"),
 		"после отката ограничения нет — прежняя схема принимала класс")
 
-	require.NoError(t, goose.Up(db, "."), "повторный накат")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат")
 	scClassFactRefused(t, scInsertFact(db, "vpc_network", "net-rod-1", "project", "system_class:anonymous"),
 		"после повторного наката")
 }

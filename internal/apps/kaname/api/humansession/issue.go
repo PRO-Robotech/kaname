@@ -61,10 +61,23 @@ type IssueInput struct {
 	Client domain.ClientDescription
 }
 
+// SessionMaterial — случайный материал одной операции, сохраняемый между попытками.
+// Поля закрыты: вызывающий не может подменить идентификатор или носитель.
+type SessionMaterial struct {
+	id     domain.HumanSessionID
+	bearer domain.SessionBearer
+}
+
 // IssueSession — запись, память первой аутентификации и (если просили)
 // событие — ОДНОЙ транзакцией writer'а вызывающего. Возвращает записанную
 // сессию и свежий носитель.
 func IssueSession(ctx context.Context, w Writer, in IssueInput) (domain.HumanSession, domain.SessionBearer, error) {
+	var material SessionMaterial
+	return IssueSessionPrepared(ctx, w, in, &material)
+}
+
+// IssueSessionPrepared повторно записывает тот же материал после отката попытки.
+func IssueSessionPrepared(ctx context.Context, w Writer, in IssueInput, material *SessionMaterial) (domain.HumanSession, domain.SessionBearer, error) {
 	if in.User.ID == "" {
 		return domain.HumanSession{}, domain.SessionBearer{}, fmt.Errorf("issue session: user required")
 	}
@@ -82,13 +95,21 @@ func IssueSession(ctx context.Context, w Writer, in IssueInput) (domain.HumanSes
 	for _, p := range in.Presented {
 		methods = append(methods, p.Method().String())
 	}
-	bearer, err := domain.NewSessionBearer()
-	if err != nil {
-		return domain.HumanSession{}, domain.SessionBearer{}, err
+	if material == nil {
+		return domain.HumanSession{}, domain.SessionBearer{}, fmt.Errorf("issue session: material required")
 	}
+	if material.id == "" {
+		bearer, err := domain.NewSessionBearer()
+		if err != nil {
+			return domain.HumanSession{}, domain.SessionBearer{}, err
+		}
+		material.bearer = bearer
+		material.id = domain.HumanSessionID(ids.NewHyphenID(sessionIDPrefix))
+	}
+	bearer := material.bearer
 	at := in.At.UTC()
 	s := domain.HumanSession{
-		ID:               domain.HumanSessionID(ids.NewHyphenID(sessionIDPrefix)),
+		ID:               material.id,
 		UserID:           in.User.ID,
 		AuthenticatedAt:  at,
 		LastPresentedAt:  at,

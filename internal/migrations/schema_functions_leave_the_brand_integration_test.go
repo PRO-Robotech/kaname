@@ -257,7 +257,7 @@ func TestSchemaFunctions_DownRestoresThePlatformNamesAndReapplyConverges(t *test
 	defer func() { _ = db.Close() }()
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 
 	steps := 0
 	for {
@@ -278,7 +278,7 @@ func TestSchemaFunctions_DownRestoresThePlatformNamesAndReapplyConverges(t *test
 		require.NotContains(t, names, tr.declared, "после отката осталось объявленное имя %q", tr.declared)
 	}
 
-	require.NoError(t, goose.Up(db, "."), "повторный накат обязан сходиться")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат обязан сходиться")
 	names = schemaFunctionNames(t, db)
 	_, findings := supplyhygiene.JudgeSchemaFunctionNames(names, schemaFunctionsDecidedToStay)
 	require.Empty(t, findings, "после повторного наката судья снова обязан молчать")

@@ -23,20 +23,22 @@ package pg_test
 //
 // # Как поставлен второй порядок
 //
-// Каждое снятие (отзыв, удаление, истечение срока, снос области) первым
-// блокирующим шагом по выдаче берёт её advisory-замок (тот же ключ, что у полного
-// прохода). Проба держит этот замок своей транзакцией, запускает НАСТОЯЩЕЕ снятие
-// и ждёт, пока его бэкенд встанет на замке, — транзакция снятия к этому моменту
-// открыта. В этой паузе форвард проходит целиком: берёт строку выдачи и
-// фиксируется. Затем замок отпускается, и снятие доходит до конца. Снятие, не
-// вставшее на замке, — отказ ПРЕДПОСЫЛКИ, а не исход: второй порядок тогда не
-// поставлен.
+// Настоящий use-case (отзыв, удаление выдачи, проекта или аккаунта) уже
+// открыл TX, но внешний SELECT compatibility admission ещё не отправлен.
+// Адресный tracer удерживает этот вызов только в контексте снятия; отдельный
+// observer подтверждает PID, xact_start, idle in transaction и отсутствие
+// advisory/relation/tuple locks. Форвард в этой паузе проходит целиком и
+// фиксирует факт новее начала TX снятия. После положительного наблюдения
+// факта пауза отпускается, и снятие завершается. Artificial binding holder
+// здесь создавал бы цикл: снятие держит EXCL compatibility, а форвард ждёт его.
+// Истечение сохраняет собственную паузу до actual reconcile entry и те же
+// доказательства порядка по данным БД.
 //
 // # Что утверждается
 //
 // ИСХОД, тот же, что у первого порядка: прямых фактов субъекта на объекте ноль;
 // у удалённой выдачи нет ни строки, ни членов, ни реестра. Законный близнец стоит
-// В САМОМ ПРОГОНЕ: после коммита форварда и до отпускания замка прямой факт обязан
+// В САМОМ ПРОГОНЕ: после коммита форварда и до отпускания паузы прямой факт обязан
 // быть — иначе ноль после снятия был бы неотличим от форварда, не написавшего
 // ничего.
 //
@@ -58,79 +60,122 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
-// waitAdvisoryWaiter — ждёт, пока снятие встанет на advisory-замке выдачи.
-// Завершившееся раньше снятие — отказ предпосылки: второй порядок не поставлен.
-func waitAdvisoryWaiter(t *testing.T, ctx context.Context, pool *pgxpool.Pool, done <-chan error, deact deactivation) {
-	t.Helper()
-	deadline := time.NewTimer(expiryRaceBudget)
-	defer deadline.Stop()
-	tick := time.NewTicker(20 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		select {
-		case err := <-done:
-			t.Fatalf("ПРЕДПОСЫЛКА: снятие (%s) завершилось (%v), не встав на advisory-замке выдачи, — второй порядок не поставлен", deact, err)
-		case <-deadline.C:
-			t.Fatalf("ПРЕДПОСЫЛКА: снятие (%s) не встало на advisory-замке выдачи за %s", deact, expiryRaceBudget)
-		case <-tick.C:
-			var n int
-			require.NoError(t, pool.QueryRow(ctx, `
-				SELECT count(*) FROM pg_stat_activity
-				 WHERE datname = current_database()
-				   AND wait_event_type = 'Lock' AND wait_event = 'advisory'`).Scan(&n))
-			if n > 0 {
-				return
-			}
-		}
-	}
-}
-
 // runDeactivationFirstRace — второй порядок: снятие открывает транзакцию раньше
 // форварда, форвард берёт строку выдачи и фиксируется раньше снятия.
 func runDeactivationFirstRace(t *testing.T, kind forwardKind, suffix string, deact deactivation) (pool *pgxpool.Pool, bid domain.AccessBindingID, subj string) {
 	t.Helper()
+	if deact == expiryDeactivation {
+		return runExpiryDeactivationEntryPauseRace(t, kind, suffix)
+	}
+	return runUseCaseDeactivationEntryPauseRace(t, kind, suffix, deact)
+}
+
+// runExpiryDeactivationEntryPauseRace сохраняет второй порядок НАЧАЛА TX,
+// не требуя обхода обязательного admission. Существующий адресный tracer
+// останавливает только контекст истечения; SQL в callback tracer не выполняется.
+func runExpiryDeactivationEntryPauseRace(t *testing.T, kind forwardKind, suffix string) (*pgxpool.Pool, domain.AccessBindingID, string) {
+	t.Helper()
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, setupTestDB(t))
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-	fx := setupGamma(t, ctx, pool, suffix)
+	setupCtx, setupCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer setupCancel()
+	pause := &accountEntryPause{sql: "SELECT kaname.authority_reconcile_enter_v3()", entered: make(chan struct{}), release: make(chan struct{})}
+	pool := accountEntryPausePool(t, setupCtx, pause)
+	fx := setupGamma(t, setupCtx, pool, suffix)
 	forwarder, adapter := newReconciler(pool)
 	expirer := reconcile.New(adapter, nil, catalogfixture.Source())
-	bid, subj = seedRaceBinding(t, ctx, pool, fx, suffix, fixtureFor(deact))
+	bid, subj := seedRaceBinding(t, setupCtx, pool, fx, suffix, fixtureFor(expiryDeactivation))
 
-	holder, err := pool.Begin(ctx)
-	require.NoError(t, err)
-	// Снятие регистрируется ПОСЛЕ закрытия пула и потому исполняется ДО него; после
-	// коммита откат — no-op.
-	t.Cleanup(func() { _ = holder.Rollback(context.Background()) })
-	_, err = holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, string(bid))
-	require.NoError(t, err, "ПРЕДПОСЫЛКА: проба держит advisory-замок выдачи")
-
-	done := startDeactivation(t, ctx, pool, expirer, fx, bid, deact)
-	waitAdvisoryWaiter(t, ctx, pool, done, deact)
-
-	if kind == bindingForward {
-		require.NoError(t, forwarder.ReconcileBindingForward(ctx, bid), "форвард создания в паузе снятия")
-	} else {
-		require.NoError(t, forwarder.ReconcileObjectForward(ctx, "compute.instance", "iRace"), "форвард объекта в паузе снятия")
+	expiryCtx, expiryCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer expiryCancel()
+	expiryCtx = context.WithValue(expiryCtx, accountEntryPauseKey{}, pause)
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	// Отмена, освобождение барьера и join установлены до старта worker и assertions.
+	// Cleanup исполняется до pool.Close, даже если предпосылка оказалась ложной.
+	t.Cleanup(func() {
+		expiryCancel()
+		pause.let()
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Second):
+			t.Error("истечение не завершилось после отмены и освобождения entry")
+		}
+	})
+	go func() {
+		defer close(finished)
+		done <- expirer.ExpireBinding(expiryCtx, bid)
+	}()
+	select {
+	case <-pause.entered:
+	case err := <-done:
+		t.Fatalf("ПРЕДПОСЫЛКА: истечение завершилось до остановки admission: %v", err)
+	case <-time.After(expiryRaceBudget):
+		t.Fatalf("ПРЕДПОСЫЛКА: истечение не дошло до admission за %s", expiryRaceBudget)
 	}
-	_, _, facts := bindingResidue(t, ctx, pool, bid, subj, "compute_instance", "iRace")
-	require.Positive(t, facts, "БЛИЗНЕЦ В ПРОГОНЕ: форвард, зафиксированный раньше снятия, обязан дать прямой факт — иначе ноль после снятия ни о чём")
-	unregisterRaceObjectFor(t, ctx, pool, deact)
 
-	require.NoError(t, holder.Commit(ctx))
+	observeCtx, observeCancel := context.WithTimeout(ctx, expiryRaceBudget)
+	// Трассировщик видит внешний reconcile entry ДО отправки: вложенный
+	// parent-prelock внутри серверной функции не является pgx callback.
+	var expiryStart time.Time
+	var idle, noOtherLocks bool
+	err := pool.QueryRow(observeCtx, `SELECT a.xact_start,
+ a.state='idle in transaction',
+ NOT EXISTS(SELECT 1 FROM pg_catalog.pg_locks l WHERE l.pid=a.pid
+  AND l.locktype IN ('advisory','relation','tuple'))
+ FROM pg_catalog.pg_stat_activity a
+ WHERE a.pid=$1 AND a.datname=current_database() AND a.xact_start IS NOT NULL`,
+		pause.pid.Load()).Scan(&expiryStart, &idle, &noOtherLocks)
+	observeCancel()
+	require.NoError(t, err)
+	require.True(t, idle, "ПРЕДПОСЫЛКА: настоящая expiry TX уже началась")
+	require.True(t, noOtherLocks, "ПРЕДПОСЫЛКА: до внешнего reconcile entry нет root, compat или бизнес-замков")
+
+	forward := func() error {
+		requestCtx, cancel := context.WithTimeout(ctx, expiryRaceBudget)
+		defer cancel()
+		if kind == bindingForward {
+			return forwarder.ReconcileBindingForward(requestCtx, bid)
+		}
+		return forwarder.ReconcileObjectForward(requestCtx, "compute.instance", "iRace")
+	}
+	require.NoError(t, forward(), "реальный форвард коммитит в паузе expiry TX")
 	select {
 	case err := <-done:
-		require.NoError(t, err, "%s после коммита форварда", deact)
-	case <-time.After(2 * expiryRaceBudget):
-		t.Fatalf("снятие (%s) не завершилось за %s после отпускания замка", deact, 2*expiryRaceBudget)
+		t.Fatalf("ПРЕДПОСЫЛКА: истечение завершилось до отпускания admission: %v", err)
+	default:
 	}
+	observeCtx, observeCancel = context.WithTimeout(ctx, expiryRaceBudget)
+	defer observeCancel()
+	_, _, facts := bindingResidue(t, observeCtx, pool, bid, subj, "compute_instance", "iRace")
+	require.Positive(t, facts, "БЛИЗНЕЦ В ПРОГОНЕ: до снятия форвард действительно создал прямой факт")
+	var later bool
+	err = pool.QueryRow(observeCtx, `SELECT count(*)>0 AND bool_and(created_at>$3)
+ FROM kaname.fga_outbox WHERE event_type='fga.tuple.write'
+ AND payload->>'user'=$1 AND payload->>'object'=$2`, subj, "compute_instance:iRace", expiryStart).Scan(&later)
+	observeCancel()
+	require.NoError(t, err)
+	require.True(t, later, "ПРЕДПОСЫЛКА: durable запись форварда новее начала expiry TX")
+
+	pause.let()
+	select {
+	case err := <-done:
+		require.NoError(t, err, "истечение после коммита форварда")
+	case <-time.After(2 * expiryRaceBudget):
+		t.Fatalf("истечение не завершилось за %s после отпускания entry", 2*expiryRaceBudget)
+	}
+	// Первый исход проверяется ДО повторов: они не вправе исправить ошибку гонки.
+	assertDeactivated(t, pool, bid, subj, expiryDeactivation)
+	retryCtx, retryCancel := context.WithTimeout(ctx, expiryRaceBudget)
+	err = expirer.ExpireBinding(retryCtx, bid)
+	retryCancel()
+	require.NoError(t, err, "повтор истечения остаётся идемпотентным")
+	require.NoError(t, forward(), "повтор форварда не воскрешает истёкшую выдачу")
+	assertDeactivated(t, pool, bid, subj, expiryDeactivation)
 	return pool, bid, subj
 }
 

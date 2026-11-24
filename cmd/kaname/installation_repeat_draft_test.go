@@ -57,7 +57,7 @@ func ridNativeSequentialAxisRepeatMode(t *testing.T, mode string) {
 	}
 	full, err := installruntime.BoundaryDelivery(2, 2)
 	require.NoError(t, err)
-	in := installruntime.DeliveryInput{Manifests: installruntime.RIDDeliveryFixture{First: full}, CredentialFile: f.creator.CredentialFile, TenantAccountID: &f.tenantID}
+	in := installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: installruntime.RIDDeliveryFixture{First: full}, CredentialFile: f.creator.CredentialFile, TenantAccountID: &f.tenantID}
 	if mode == "S2" {
 		in.TenantAccountID = nil
 	}

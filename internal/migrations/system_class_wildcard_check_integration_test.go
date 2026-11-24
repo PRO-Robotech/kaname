@@ -112,7 +112,7 @@ func TestSystemClass_DownLiftsTheWildcardChecksBeforeTheWildcardReturns(t *testi
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
-	db, _ := scMovedP2(t)
+	db, _ := scHistoricalMovedP2(t)
 	// Откат — ДО предшественницы миграции переезда, а не на один шаг: шаг
 	// снимал бы ту миграцию, что стоит в дереве последней, а она не обязана
 	// быть переездом.
@@ -122,11 +122,21 @@ func TestSystemClass_DownLiftsTheWildcardChecksBeforeTheWildcardReturns(t *testi
 	assert.Equal(t, 1, back["relation_fact"], "откат: факт системной выдачи вернулся на подстановку")
 	assert.Equal(t, 1, back["access_binding_emitted_tuples"], "откат: выпущенный факт вернулся на подстановку")
 
-	require.NoError(t, goose.Up(db, "."), "повторный накат")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат")
 	assert.Equal(t, map[string]int{
 		"access_bindings": 0, "access_binding_subjects": 0, "access_binding_emitted_tuples": 0, "relation_fact": 0,
 	}, wildcardCensus(t, db), "повторный накат: подстановки нет")
 	_, err := db.Exec(`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
 	                   VALUES ('registry_repository', 'r-ckd', 'v_get', 'user:*')`)
 	scWildcardRefused(t, err, "relation_fact_subject_not_wildcard", "после повторного наката")
+}
+
+// Исторический близнец отката использует ту же сцену до переноса, за которой идёт лишь
+// обратимый префикс. Откат текущей установки проверяется отдельно.
+func scHistoricalMovedP2(t *testing.T) (*sql.DB, string) {
+	t.Helper()
+	p := openP2(t)
+	person := "user:" + scSeedPerson(t, p.db, "scck")
+	require.NoError(t, goose.UpTo(p.db, ".", registrationReversibleTip))
+	return p.db, person
 }

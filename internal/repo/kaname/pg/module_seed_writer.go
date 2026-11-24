@@ -64,8 +64,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/ids"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -78,12 +78,12 @@ var ErrSeedRoleNotResolved = errors.New("pg: seed role grant names no live clust
 
 // ModuleSeedWriteRepo — исполнитель транзакций применителя посева над пулом.
 type ModuleSeedWriteRepo struct {
-	tx *coredb.Transactor
+	pool *pgxpool.Pool
 }
 
 // NewModuleSeedWriteRepo собирает исполнителя транзакций поверх пула.
 func NewModuleSeedWriteRepo(pool *pgxpool.Pool) *ModuleSeedWriteRepo {
-	return &ModuleSeedWriteRepo{tx: coredb.NewTransactor(pool)}
+	return &ModuleSeedWriteRepo{pool: pool}
 }
 
 // RunInWriteTx исполняет fn под ОДНОЙ писательской транзакцией: посев модуля
@@ -92,7 +92,7 @@ func (r *ModuleSeedWriteRepo) RunInWriteTx(
 	ctx context.Context,
 	fn func(context.Context, moduleseed.Writer) error,
 ) error {
-	return r.tx.InTx(ctx, func(tx pgx.Tx) error { return fn(ctx, moduleSeedWriter{tx: tx}) })
+	return runInstallationTx(ctx, r.pool, kaname.AuthorityCluster, func(tx pgx.Tx) error { return fn(ctx, moduleSeedWriter{tx: tx}) })
 }
 
 // moduleSeedWriter — `moduleseed.Writer` над одной транзакцией.

@@ -83,6 +83,142 @@ func rid06AuditDelta(a, b []rid09PrimaryRow, expected map[string]int, start, end
 	}
 	return len(fresh), reflect.DeepEqual(counts, expected)
 }
+
+// RID-06 использует legacy writer. Отзыв меняет только GD, её bindings и
+// фактически удаляемые relation facts; subjects, ledger и owners сохраняются.
+// Ключи выводятся из BEFORE, а не из наблюдаемого списка изменённых epochs.
+func rid06RevokeEpochKeys(before rid03NewmanSnapshot, gd rid09PrimaryRow, bindings map[string]rid09PrimaryRow, tuples, held map[rid03Tuple]bool) (policy, scopes map[string]bool, valid bool) {
+	account, delegate := rid03S(gd, "account_id"), rid03S(gd, "delegate_id")
+	creatorType, creator := rid03S(gd, "delegated_by_type"), rid03S(gd, "delegated_by_id")
+	if account == "" || delegate == "" || creator == "" || (creatorType != "user" && creatorType != "service_account") {
+		return nil, nil, false
+	}
+	policy = map[string]bool{"scope:" + account: true, "service_account:" + delegate: true, creatorType + ":" + creator: true}
+	scopes = map[string]bool{account: true}
+	projects := map[string]string{}
+	for _, row := range before.Raw["projects"] {
+		id, owner := rid03S(row, "id"), rid03S(row, "account_id")
+		if id == "" || owner == "" || projects[id] != "" {
+			return nil, nil, false
+		}
+		projects[id] = owner
+	}
+	selectors, selectorsPresent := before.Raw["role_rule_selectors"]
+	if !selectorsPresent {
+		return nil, nil, false
+	}
+	for id, row := range bindings {
+		role, resource := rid03S(row, "role_id"), rid03S(row, "resource_id")
+		kind, subject := rid03S(row, "subject_type"), rid03S(row, "subject_id")
+		if id == "" || role == "" || resource == "" || kind == "" || subject == "" {
+			return nil, nil, false
+		}
+		// authority_policy_changed удерживает замок, затем отложенная запись
+		// сдвигает carriers:role. Ревизия carrier_latch не меняется.
+		policy["carriers:role:"+role] = true
+		if subject == "*" || kind == "system_class" {
+			policy["*"] = true
+		} else {
+			policy[kind+":"+subject] = true
+		}
+		for _, secondary := range before.Raw["access_binding_subjects"] {
+			if rid03S(secondary, "binding_id") != id {
+				continue
+			}
+			kind, subject := rid03S(secondary, "subject_type"), rid03S(secondary, "subject_id")
+			if kind == "" || subject == "" {
+				return nil, nil, false
+			}
+			policy[kind+":"+subject] = true
+		}
+		owner := ""
+		switch rid03S(row, "resource_type") {
+		case "account":
+			owner = resource
+		case "project":
+			owner = projects[resource]
+			if owner == "" {
+				return nil, nil, false
+			}
+		case "cluster":
+		default:
+			return nil, nil, false
+		}
+		for _, selector := range selectors {
+			if rid03S(selector, "role_id") == role && (rid03S(selector, "arm") != "anchor" || !rid03SameCell(selector, "container_type", nil)) {
+				owner = ""
+			}
+		}
+		scopes[owner] = true
+	}
+	for _, row := range before.Raw["relation_fact"] {
+		tuple := rid03Tuple{rid03S(row, "subject"), rid03S(row, "relation"), rid03S(row, "object_type"), rid03S(row, "object_id")}
+		if !tuples[tuple] || held[tuple] || strings.HasPrefix(tuple.Relation, "v_") {
+			continue
+		}
+		kind, id, ok := strings.Cut(tuple.Subject, ":")
+		switch {
+		case ok && id != "" && !strings.ContainsAny(id, "#*") && (kind == "user" || kind == "service_account"):
+			policy[tuple.Subject] = true
+		case ok && (kind == "group" || kind == "iam_group") && strings.HasSuffix(id, "#member") && strings.TrimSuffix(id, "#member") != "" && !strings.ContainsAny(strings.TrimSuffix(id, "#member"), "#*"):
+			policy["group:"+strings.TrimSuffix(id, "#member")] = true
+		case ok && id != "" && !strings.ContainsAny(id, "#*") && (kind == "account" || kind == "project" || kind == "cluster"):
+		default:
+			policy["*"] = true
+		}
+		if tuple.Type == "iam_access_binding" {
+			// Штатный отзыв удаляет и parent tuple самой выдачи. SQL
+			// authority_policy_object_account берёт её owner из access_bindings,
+			// а не resource_mirror. Историческая строка переживает отзыв.
+			binding := bindings[tuple.ID]
+			if binding == nil || rid03S(binding, "id") != tuple.ID {
+				return nil, nil, false
+			}
+			owner := ""
+			switch rid03S(binding, "resource_type") {
+			case "account":
+				owner = rid03S(binding, "resource_id")
+			case "project":
+				owner = projects[rid03S(binding, "resource_id")]
+			}
+			if owner == "" {
+				return nil, nil, false
+			}
+			policy["scope:"+owner] = true
+			continue
+		}
+		// У ресурсов RID-06 отзыв не меняет владельца. Неизвестный объект
+		// не даёт права сдвигать общий счётчик или счётчик чужого аккаунта.
+		dotted := ""
+		for _, resource := range before.Raw["catalog_resource"] {
+			if rid03S(resource, "object_type") == tuple.Type {
+				if dotted != "" {
+					return nil, nil, false
+				}
+				dotted = rid03S(resource, "dotted")
+			}
+		}
+		owner, found := "", false
+		for _, mirror := range before.Raw["resource_mirror"] {
+			if dotted != "" && rid03S(mirror, "object_type") == dotted && rid03S(mirror, "object_id") == tuple.ID {
+				if found {
+					return nil, nil, false
+				}
+				found = true
+				owner = rid03S(mirror, "parent_account_id")
+				if owner == "" {
+					owner = projects[rid03S(mirror, "parent_project_id")]
+				}
+			}
+		}
+		if !found || owner == "" {
+			return nil, nil, false
+		}
+		policy["scope:"+owner] = true
+	}
+	return policy, scopes, true
+}
+
 func rid06RevokeRawDelta(a, b rid03NewmanSnapshot, gdID, actor string) (rid06RevokeProof, bool) {
 	proof := rid06RevokeProof{DelegationID: gdID, Actor: actor, PrimaryLower: a.Whole.PrimaryFinishedAt, PrimaryUpper: b.Whole.PrimaryStartedAt, ChangedRows: map[string]int{}, AddedRows: map[string]int{}, RemovedRows: map[string]int{}, Producers: []rid03ProducerEvidence{}, RemovedFacts: []rid03FactEvidence{}, BeforeRawSHA256: rid03EvidenceHash(a.Raw), AfterRawSHA256: rid03EvidenceHash(b.Raw)}
 	if len(a.Raw) != len(b.Raw) {
@@ -177,6 +313,13 @@ func rid06RevokeRawDelta(a, b rid03NewmanSnapshot, gdID, actor string) (rid06Rev
 			addAudit("iam.access_binding.delegation_revoked", map[string]any{"actor": actor, "subject_type": kind, "subject_id": subject, "resource_type": rid03S(g, "resource_type"), "resource_id": rid03S(g, "resource_id"), "role_id": rid03S(g, "role_id"), "binding_id": id, "delegation_id": gdID, "revocation_reason": "delegation_revoked"})
 		}
 	}
+	policy, scopes, epochsOK := rid06RevokeEpochKeys(a, gd, bindings, expectedTuples, held)
+	if !epochsOK || !rid03EpochTransitionValid(a.Raw["authority_policy_epoch"], b.Raw["authority_policy_epoch"], "key", policy) ||
+		!rid03EpochTransitionValid(a.Raw["authority_binding_epoch"], b.Raw["authority_binding_epoch"], "scope", scopes) {
+		return proof, false
+	}
+	proof.ChangedRows["authority_policy_epoch"] = len(policy)
+	proof.ChangedRows["authority_binding_epoch"] = len(scopes)
 	actualTuples := map[rid03Tuple]bool{}
 	subjectSeen := map[string]int{}
 	journalSeen := map[string]int{}
@@ -186,7 +329,7 @@ func rid06RevokeRawDelta(a, b rid03NewmanSnapshot, gdID, actor string) (rid06Rev
 		if !present {
 			return proof, false
 		}
-		if table == "operations" {
+		if table == "operations" || table == "authority_policy_epoch" || table == "authority_binding_epoch" {
 			continue
 		}
 		wanted := []rid09PrimaryRow{}

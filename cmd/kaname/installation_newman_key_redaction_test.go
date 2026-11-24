@@ -102,6 +102,8 @@ type rid01KeyRedactionProof struct {
 	Window                            string    `json:"window"`
 	EnvironmentSHA256                 string    `json:"actualSessionEnvironmentSHA256"`
 	ExtraConfigSHA256                 string    `json:"actualStartDeliveryExtraConfigSHA256"`
+	RestoringConfigSHA256             string    `json:"actualRestoringFullConfigSHA256"`
+	RegistrationWriterPlanSHA256      string    `json:"actualRegistrationWriterPlanSHA256"`
 	WholeDoDAccepted                  bool      `json:"wholeDoDAccepted"`
 }
 
@@ -256,6 +258,8 @@ func rid01AcceptedKeyRedaction(t *testing.T, h *rid01PublicContext, before, afte
 	t.Helper()
 	require.NotNil(t, h.RefusalBeforeRestore, "strict pre-restore capture mandatory")
 	require.NotNil(t, h.RestoreRedactionProfile, "actual restoring input profile mandatory")
+	require.Equal(t, h.RestoreWriterPlanSHA256, rid01RedactionHash(h.RestoreWriterPlan), "exact typed writer plan retained across restore")
+	require.Equal(t, h.RestoreWriterPlanSHA256, rid01RedactionHash(h.f.writerPlan), "actual restoring plan is unchanged")
 	profile, err := rid01ResolveRedactionProfile(h.f.session.Environment, h.RestoreExtraConfig)
 	require.True(t, err == nil, "fixture NOT_ACCEPTED: unsupported actual RID01 redaction profile")
 	require.True(t, reflect.DeepEqual(profile, *h.RestoreRedactionProfile), "fixture NOT_ACCEPTED: restoring profile changed")
@@ -268,6 +272,9 @@ func rid01AcceptedKeyRedaction(t *testing.T, h *rid01PublicContext, before, afte
 	}
 	proof, err := rid01ProveKeyRedaction(rid01KeyRedactionCase, keyID, before, after, *h.RefusalBeforeRestore, profile)
 	require.True(t, err == nil, "RID01 exact typed key redaction NOT_ACCEPTED; safe diagnostic retained")
+	require.NotEmpty(t, h.RestoreConfigSHA256, "actual restoring full YAML must be bound")
+	proof.RestoringConfigSHA256 = h.RestoreConfigSHA256
+	proof.RegistrationWriterPlanSHA256 = h.RestoreWriterPlanSHA256
 	return proof
 }
 
@@ -282,6 +289,8 @@ func rid01SealRestoreProfile(t *testing.T, f *installationNativeWorld, in instal
 	profile, err := rid01ResolveRedactionProfile(f.session.Environment, in.ExtraConfig)
 	require.True(t, err == nil, "fixture NOT_ACCEPTED: unsupported actual RID01 restoring profile")
 	h.RestoreRedactionProfile = &profile
+	h.RestoreWriterPlan = installruntime.CloneRegistrationWriterPlan(in.RegistrationWriters)
+	h.RestoreWriterPlanSHA256 = rid01RedactionHash(in.RegistrationWriters)
 	// Принимается только nil/пустой ExtraConfig, но его точная форма nil/пустого значения сохраняется,
 	// чтобы дайджест был привязан к тому же настоящему входу файла, а не реконструкции.
 	if in.ExtraConfig != nil {

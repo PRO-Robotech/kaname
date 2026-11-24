@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -493,3 +494,8 @@ func (w *fakeUWtr) EmitInviteMail(_ context.Context, intent outboxtypes.InviteMa
 // GrantDelegationsW — делегирований этот дублёр не несёт (kaname#986): пробы файла
 // делегированного пути права выдавать не касаются.
 func (fakeABW) GrantDelegationsW() gdrepo.WriterIface { return nil }
+
+// Проверки доверенностей в этом дублёре не поддерживаются: отказ вместо фиктивного допуска.
+func (w *fakeUWtr) TransactionRelationChecker(*authzmodel.Plans) (kanamerepo.RelationChecker, error) {
+	return nil, iamerr.ErrUnavailable
+}

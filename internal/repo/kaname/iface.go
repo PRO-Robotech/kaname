@@ -23,6 +23,7 @@ package kaname
 import (
 	"context"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
@@ -71,10 +72,21 @@ type Reader interface {
 	Rollback(ctx context.Context) error
 }
 
+// RelationChecker — узкий порт проверки отношения, без зависимости хранилища
+// от охранника API. Вопрос исполняется на удерживаемой транзакции писателя.
+type RelationChecker interface {
+	Check(ctx context.Context, subject, relation, object string) (bool, error)
+}
+
 // Writer — read-write TX. Включает все Reader-iface'ы (Writer-TX тоже умеет
 // читать в рамках своей snapshot'ы) + Writer-iface'ы для mutation.
 type Writer interface {
 	Reader
+
+	// TransactionRelationChecker задаёт обычные вопросы полномочий на ЭТОЙ
+	// транзакции с допущенной моделью процесса. Не занимает другое соединение
+	// и не завершает транзакцию; проверка прав и мутация используют один Writer.
+	TransactionRelationChecker(plans *authzmodel.Plans) (RelationChecker, error)
 
 	AccountsW() account.WriterIface
 	ProjectsW() project.WriterIface

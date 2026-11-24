@@ -39,7 +39,7 @@ func (w *Wire) IssueStandingKey(ctx context.Context, o *VerifiedOperator, id, ac
 	if observe == nil {
 		return nil, errors.New("private secret observer required")
 	}
-	op, err := w.createOperation(ctx, o, "/iam/v1/serviceAccounts/"+url.PathEscape(id)+"/keys", map[string]any{"credentialKind": "CREDENTIAL_KIND_KEYPAIR", "ttlSeconds": 7200, "description": "Generic RID lifecycle key"}) // #nosec G101 -- здесь только вид удостоверения и описание; сам закрытый ключ выдаётся API ниже.
+	op, err := w.createOperation(ctx, o, "/iam/v1/serviceAccounts/"+url.PathEscape(id)+"/keys", map[string]any{issuedKindField: issuedKeypairKind, "ttlSeconds": 7200, "description": "Generic RID lifecycle key"})
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func (w *Wire) StandingKeyRefusal(ctx context.Context, c *StandingCreator, issue
 // StartCatalogOnly открывает существующий путь запуска без объявлений, чтобы O мог
 // восстановить состояние через живые штатные API, пока старый C остаётся выведенным из обращения.
 // Он отклоняет любое объявление делегирования, не обходя его проверку аутентификации.
-func (s *Session) StartCatalogOnly(ctx context.Context, in RIDDeliveryFixture) (*Process, error) {
+func (s *Session) StartCatalogOnly(ctx context.Context, in RIDDeliveryFixture, plan *RegistrationWriterPlan) (*Process, error) {
 	if err := s.checkEnvironment(); err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func (s *Session) StartCatalogOnly(ctx context.Context, in RIDDeliveryFixture) (
 	if _, err := in.Write(dir, false); err != nil {
 		return nil, err
 	}
-	config, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}})
+	config, err := FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}}, plan)
 	if err != nil {
 		return nil, err
 	}

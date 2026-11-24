@@ -249,7 +249,7 @@ func TestIntegration_JournalMigrationRollsBack(t *testing.T) {
 		t.Skip("пропуск интеграционной пробы (нужен Docker)")
 	}
 	ctx := context.Background()
-	db := freshIamSchema(t)
+	db := historicalRegistrationDB(t)
 
 	countTriggers := func() int {
 		var n int
@@ -313,6 +313,6 @@ func TestIntegration_JournalMigrationRollsBack(t *testing.T) {
 
 	// Прямой ход применяется ЗАНОВО: отмена, после которой не накатить, есть
 	// отмена только по названию.
-	require.NoError(t, goose.Up(db, "."), "после отмены цепь обязана накатиться снова")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "после отмены цепь обязана накатиться снова")
 	assert.Equal(t, 7*3+3+1, countTriggers())
 }

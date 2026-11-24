@@ -331,6 +331,8 @@ type account
     # The account's OWN admin is deliberately absent: level 3 cascades WITHIN the
     # account, and the account object is the boundary of that scope, not inside it.
     define super_admin: any_admin from cluster
+    # Explicit installation assignment only; no inherited cluster/admin authority.
+    define fga_writer: [service_account]
     define owner: [user]
     define admin: [user, service_account, group#member] or owner or super_admin
     define editor: [user, service_account, group#member] or admin
@@ -1430,6 +1432,16 @@ type storage_image
 # ---------------------------------------------------------------------------
 # Conditions catalog — 7 frozen built-ins (acceptance §4.5).
 # ---------------------------------------------------------------------------
+
+# Внутренние точные координаты выдачи: без предков, подстановок субъектов и надзора.
+type iam_grant_scope
+  relations
+    define create_binding: [user, service_account, group#member]
+
+type iam_grant_role
+  relations
+    define bind: [user, service_account, group#member]
+
 
 condition mfa_fresh(amr_claims: list<string>, acr_value: string, current_time: timestamp, mfa_at: timestamp) {
   acr_value == "3" &&

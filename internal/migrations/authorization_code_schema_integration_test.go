@@ -596,7 +596,7 @@ func TestIntegration_RefreshTokenRotationIsOneStatement(t *testing.T) {
 
 // TestIntegration_AuthorizationCodeMigrationRollsBackAndForward — обратный ход.
 func TestIntegration_AuthorizationCodeMigrationRollsBackAndForward(t *testing.T) {
-	db := acDB(t)
+	db := historicalRegistrationDB(t)
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("postgres"))
 
@@ -610,7 +610,7 @@ func TestIntegration_AuthorizationCodeMigrationRollsBackAndForward(t *testing.T)
 		   AND table_name IN ('authorization_codes','refresh_tokens','token_families')`).Scan(&present))
 	require.Zero(t, present, "после отката таблиц предмета остаться не должно, осталось %d", present)
 
-	require.NoError(t, goose.Up(db, "."), "цепочка обязана накатываться снова")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "цепочка обязана накатываться снова")
 	require.NoError(t, db.QueryRow(`
 		SELECT count(*) FROM information_schema.tables
 		 WHERE table_schema = 'kaname'

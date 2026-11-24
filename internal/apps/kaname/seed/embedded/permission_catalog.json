@@ -2741,6 +2741,17 @@
     "exempt_reason": "SELF_SERVICE"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.ChildRegistrationService/Register",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1",
+    "exempt_reason": "HANDLER_DECIDES"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.ClusterService/Get",
     "permission": "iam.cluster_admins.get",
     "required_relation": "system_admin",
@@ -2815,6 +2826,17 @@
   },
   {
     "fqn": "kaname.cloud.iam.v1.GrantDelegationService/Revoke",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "2",
+    "exempt_reason": "HANDLER_DECIDES"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.GrantDelegationService/Update",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
     "scope_extractor": {
@@ -2997,6 +3019,16 @@
   },
   {
     "fqn": "kaname.cloud.iam.v1.InternalIAMService/CheckBasicCredentialLive",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.InternalIAMService/CloseChildParent",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
     "scope_extractor": {

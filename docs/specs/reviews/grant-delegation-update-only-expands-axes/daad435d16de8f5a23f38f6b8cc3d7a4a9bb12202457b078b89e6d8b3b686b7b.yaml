@@ -1,0 +1,127 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/grant-delegation-update-only-expands-axes.md
+  sha256: daad435d16de8f5a23f38f6b8cc3d7a4a9bb12202457b078b89e6d8b3b686b7b
+  revision: 3
+  static_status: DRAFT
+  static_status_note: >-
+    Статическая шапка не меняется этим review. Действующее одобрение возникает
+    только после публикации внешнего события на точный отпечаток и readback.
+  base_commit: 64aed41952ee767519e660328218cef5f400f22f
+  base_commit_note: База frozen W передана Root; Git не опрашивался.
+  content_commit: none
+  revision_provenance: >-
+    Точные SHA документа и теста сверены по байтам. Документ сопоставлен с
+    сохранённым SOURCE R2; обратная дельта теста совпала с prior census pin.
+    Изменения ещё не объявляются закоммиченными или исполненными.
+  task: PRO-Robotech/kaname#1032
+  lines: 297
+  round: 3
+  predecessor_record: docs/specs/reviews/grant-delegation-update-only-expands-axes/fcd2f43633032408952fc2c2f6a44c55d478d09352e9bfafacb4f6b5496687cb.yaml
+  predecessor_record_sha256: 7f26e44944f30c32a425e17e59d771f0bd3a31db56b4dd6847ab4cb27690dcb0
+  predecessor_subject_sha256: fcd2f43633032408952fc2c2f6a44c55d478d09352e9bfafacb4f6b5496687cb
+  fingerprint_predicate: sha256 exact document bytes
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-11-11T21:24:20.948738+00:00'
+review_mode: source_only
+blocking_count: 0
+blocking: []
+blocking_closed:
+  - id: F1
+    kind: COVERAGE
+    scenario: GDU-06 retired_selected
+    evidence: >-
+      good=bad сохраняет прежний no-op запрос. Оба retired-близнеца сравнивают
+      полное тело PATCH; selected проверяет неизменный полный Get и audit count.
+      Это закрытие в SOURCE, без переноса прежнего97PASS.
+    source_path: internal/apps/kaname/api/access_binding/grant_delegation_update_integration_test.go
+    source_sha256: 00dd25f81a67c47df72a0424525385d166333108e9478ec7948188d7668ad592
+    source_lines: '265-299'
+  - id: F2
+    kind: GIVEN_CONTRADICTION
+    scenario: GDU-06 selected/unselected retired target
+    evidence: >-
+      Вместо запрещённого живостными FK снятия registry.repositories при
+      неизменных ролях назван отдельный registry.gduRetired того же модуля.
+      Штатное снятие/восстановление и обновление снимка сохраняют роли/B0/FK;
+      полный итоговый набор, невыбранная ось и точный отказ остаются предметом.
+      Исправление противоречия R2 явно описано, история не переписана.
+    document_lines: '166-168'
+important_nonblocking: []
+producers:
+  scenarios_total: 17
+  scope_note: Состав17GDU не меняется; полный старый census здесь не повторялся.
+constructibility:
+  status: source_supported
+  seeded: 0
+  reason: SOURCE-only review; runtime не выполнялся.
+  basis: >-
+    retirementManifest/retireTarget используют штатный ApplyAll и refreshFacts;
+    исходный тип удерживают CHECK и живостные FK текущей схемы.
+route_signs:
+  proto: false
+  schema: false
+  public_rpc: false
+  security_surface: true
+  consumer_required: false
+  new_cross_service_edge: false
+  scope_note: Узкая дельта исправляет Given и oracle; продуктовый Update не меняется.
+effective_approval:
+  issued_at: "2026-11-11T23:07:37Z"
+  issued: true
+  ban1_lifted: true
+  why: "Внешнее APPROVED-событие acceptance-reviewer на exact SHA daad435d16de8f5a23f38f6b8cc3d7a4a9bb12202457b078b89e6d8b3b686b7b опубликовано pointpu и прочитано обратно: https://github.com/PRO-Robotech/kaname/issues/1032#issuecomment-6809312833; subject_revision=49fec6de00732879ebd87a32f2973b99581f417a; ID, тело, актор и время сверены с записью."
+authority:
+  mode: versioned_policy_authority
+  repository: PRO-Robotech/kacho-workspace
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+event:
+  type: issue_comment
+  target: PRO-Robotech/kaname#1032
+  status: performed
+  published: true
+  database_id: 6809312833
+  node_id: "IC_kwDOUO26pM8AAAABld3eQQ"
+  url: "https://github.com/PRO-Robotech/kaname/issues/1032#issuecomment-6809312833"
+  api_url: "https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/6809312833"
+  actor: "pointpu"
+  role: "acceptance-reviewer"
+  author_association: "MEMBER"
+  created_at: "2026-11-11T23:07:37Z"
+  body_sha256: "b1f17e4c336567f37c1d3a97769f04526a0d5a89ed000917993c88fb00445034"
+  subject_sha256: "daad435d16de8f5a23f38f6b8cc3d7a4a9bb12202457b078b89e6d8b3b686b7b"
+  subject_revision_commit: "49fec6de00732879ebd87a32f2973b99581f417a"
+  verdict: "APPROVED"
+  publication_mode: scripts/rituals/approval-event.sh
+attribution:
+  reviewer_kind: codex_agent
+  assigned_agent: acceptance-reviewer
+  publishing_actor: pointpu
+  publishing_actor_status: "performed_readback_verified"
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+  history_is_appended_not_rewritten: true
+  prior_records_untouched: true
+premise:
+  status: source_confirmed
+  predicate: >-
+    Exact document daad435d и test00dd25f8; дельта документа ограничена
+    header/history/date/GDU06, дельта теста двумя узкими hunks.
+  boundary: >-
+    F1/F2 закрыты в приёмочном SOURCE. Исторические97PASS относятся к64aed419;
+    они не доказывают текущий исправленный тест и новый отпечаток приёмки.
+next:
+  role: integration-tester
+  action: >-
+    Root публикует точный документ и courier event по обычному порядку;
+    затем текущие native/public проверки, полный старый GD01..70,
+    canonical full CI и доставка до main остаются обязательными.
+full_dod_ready: false
+main_accepted: false
+closure_ready: false
+owner_questions: []

@@ -126,7 +126,7 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 	full := installruntime.NewRIDDeliveryFixture()
 	// Штатный полный посев модуля устанавливает I через производственный код. Пара/история
 	// не подставляются подготовкой, и этот подготовительный запуск не считается приёмкой F6.
-	staging := f.apply(t, installruntime.DeliveryInput{Manifests: nativeWithoutDelegations(t, full), CredentialFile: f.creator.CredentialFile})
+	staging := f.apply(t, installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: nativeWithoutDelegations(t, full), CredentialFile: f.creator.CredentialFile})
 	results, err := staging.Results()
 	require.NoError(t, err)
 	require.Empty(t, results)
@@ -142,11 +142,10 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = barrier.Release(context.Background()) })
 	type participant struct {
-		session *installruntime.Session
-		wire    *installruntime.Wire
-		process *installruntime.Process
-		ports   installruntime.NativePorts
-		label   string
+		wire  *installruntime.Wire
+		child *rid02OwnedChild
+		ports installruntime.NativePorts
+		label string
 	}
 	participants := []participant{{ports: installruntime.DefaultNativePorts(), label: "rid02-a"}, {ports: installruntime.SecondNativePorts(), label: "rid02-b"}}
 	for i := range participants {
@@ -154,55 +153,53 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 		p.wire, err = installruntime.NewWireAtPorts(filepath.Join(f.session.Root, "pki"), p.ports)
 		require.NoError(t, err)
 		t.Cleanup(p.wire.Close)
-		root := filepath.Join(f.session.Root, p.label)
+		root := filepath.Join(f.session.Root, p.label+"-config")
 		require.NoError(t, os.Mkdir(root, 0700))
-		p.session = &installruntime.Session{Binary: f.session.Binary, BinarySHA256: f.session.BinarySHA256, Environment: nativeConcurrentEnvironment(t, f, p.ports, p.label), Root: root, Probe: p.wire.ProductionReady}
-		t.Cleanup(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			if err := p.session.Stop(ctx); err != nil {
-				t.Errorf("owned concurrent serve shutdown: %v", err)
-			}
-
-			// Очистка выполняется при успехе И любом фатальном утверждении; Stop дожидается
-			// процесса до проверки обоих полных необработанных потоков каждого запуска.
-			for _, process := range p.session.History {
-				// Stop может вернуться сразу после принудительного Kill. Отдельный Wait исключает
-				// гонку проверки отказа с оставшейся записью или дочерним процессом без ожидания завершения.
-				reapCtx, reapCancel := context.WithTimeout(context.Background(), 10*time.Second)
-				_ = process.Wait(reapCtx)
-				if reapCtx.Err() != nil {
-					t.Error("concurrent native reap incomplete; stream audit is not final")
-				}
-				reapCancel()
-
-			}
-			// При отказе Start после запуска ОС внутреннее ожидание может завершиться до добавления
-			// History в Session. Также перечисляем принадлежащие этому участнику каталоги процессов,
-			// чтобы потоки таких отказов не избежали того же аудита.
-			dirs, globErr := filepath.Glob(filepath.Join(p.session.Root, "serve-*", "process"))
-			if globErr != nil {
-				t.Error("concurrent stream census unavailable")
-			}
-			for _, dir := range dirs {
-				rid02CheckStreams(t, []string{filepath.Join(dir, "stdout.jsonl"), filepath.Join(dir, "stderr.jsonl")}, rid02WorldSecretMaterial(t, f))
-			}
-		})
-		in := installruntime.DeliveryInput{Manifests: full, CredentialFile: f.creator.CredentialFile}
-		if mode == "S1" {
-			in.TenantAccountID = &f.tenantID
-		}
-		p.process, err = p.session.StartDelivery(f.given.ctx, in)
+		manifestDir := filepath.Join(root, "delivery")
+		_, err := full.Write(manifestDir, false)
 		require.NoError(t, err)
+		installer := map[string]any{"credentialFile": f.creator.CredentialFile}
+		if mode == "S1" {
+			installer["tenantAccountId"] = f.tenantID
+		}
+		raw, err := installruntime.FullStartupConfig(map[string]any{
+			"manifests":           map[string]any{"dir": manifestDir, "required": true},
+			"moduleSeedInstaller": installer,
+		}, f.writerPlan)
+		require.NoError(t, err)
+		configPath := filepath.Join(root, "config.yaml")
+		require.NoError(t, os.WriteFile(configPath, raw, 0600))
+		ridRegistrationStartupProof(t, root, raw, f.writerPlan)
+		p.child = startRIDInstallationChild(t, f, p.label, rid06ChildInput{
+			ConfigPath: configPath, Creator: f.creator.ID, Account: accounts[0],
+			PairOrdinal: 1, ConcurrentPair: true,
+		}, nativeConcurrentEnvironment(t, f, p.ports, p.label), rid06ChildInputEnv, "TestRID06OwnedFullStartupChild", "4m")
+		parentGroup, err := os.ReadFile("/proc/self/cgroup")
+		require.NoError(t, err)
+		childGroup, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", p.child.cmd.Process.Pid))
+		require.NoError(t, err)
+		require.Equal(t, parentGroup, childGroup, "owned concurrent startup inherits bounded job cgroup")
 	}
-	// Производственный таймаут оператора пары — 30s; завершаем раньше, не скрывая
-	// пропущенное пересечение повторными попытками. Оба процесса уже работают.
-	overlap, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)
-	pids, err := barrier.AwaitTwo(overlap)
+	// Оба полных запуска должны зафиксировать Operation до открытия Writer. Иначе
+	// второй запуск может попасть в граф блокировок ещё на этапе посева модуля.
+	beforeWriter, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)
+	defer cancel()
+	for _, p := range participants {
+		p.child.await(t, beforeWriter, "before-concurrent-pair")
+	}
+	meta, err := anypb.New(&iamv1.CreateGrantDelegationMetadata{})
+	require.NoError(t, err)
+	opIDs, proposed := nativeConcurrentPendingPair(t, beforeWriter, f, accounts[0], meta.TypeUrl)
 	cancel()
+	for _, p := range participants {
+		p.child.release(t, "continue")
+	}
+	overlap, cancel := context.WithTimeout(f.given.ctx, 20*time.Second)
+	defer cancel()
+	pids, err := barrier.AwaitTwo(overlap, []string{participants[0].label, participants[1].label})
 	require.NoError(t, err)
 	require.Len(t, pids, 2)
-	rows, err := f.given.pool.Query(f.given.ctx, `SELECT application_name FROM pg_stat_activity WHERE pid=ANY($1::int[]) ORDER BY application_name`, pids)
+	rows, err := f.given.pool.Query(overlap, `SELECT application_name FROM pg_stat_activity WHERE pid=ANY($1::int[]) ORDER BY application_name`, pids)
 	require.NoError(t, err)
 	var labels []string
 	for rows.Next() {
@@ -213,34 +210,18 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 	require.NoError(t, rows.Err())
 	rows.Close()
 	require.Equal(t, []string{"rid02-a", "rid02-b"}, labels, "both exact serve participants arrived, not two helper connections")
-	meta, _ := anypb.New(&iamv1.CreateGrantDelegationMetadata{})
-	rows, err = f.given.pool.Query(f.given.ctx, `SELECT id,resource_id,done FROM kaname.operations WHERE account_id=$1 AND principal_type='service_account' AND principal_id=$2 AND metadata_type=$3 ORDER BY id`, accounts[0], f.creator.ID, meta.TypeUrl)
-	require.NoError(t, err)
-	var opIDs, proposed []string
-	for rows.Next() {
-		var id, resource string
-		var done bool
-		require.NoError(t, rows.Scan(&id, &resource, &done))
-		require.False(t, done)
-		opIDs = append(opIDs, id)
-		proposed = append(proposed, resource)
-	}
-	require.NoError(t, rows.Err())
-	rows.Close()
-	require.Len(t, opIDs, 2)
-	require.NotEqual(t, opIDs[0], opIDs[1])
-	require.NotEqual(t, proposed[0], proposed[1])
-	observation, err := json.Marshal(map[string]any{"pairAccount": accounts[0], "delegate": delegate, "waitingBackendPIDs": pids, "applications": labels, "operations": opIDs, "proposedIDs": proposed})
+	waitingOps, waitingProposed := nativeConcurrentPendingPair(t, overlap, f, accounts[0], meta.TypeUrl)
+	require.Equal(t, opIDs, waitingOps)
+	require.Equal(t, proposed, waitingProposed)
+	cancel()
+	observation, err := json.Marshal(map[string]any{"pairAccount": accounts[0], "delegate": delegate, "waitingBackendPIDs": pids, "pairAnchoredWaitGraph": true, "applications": labels, "operations": opIDs, "proposedIDs": proposed})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(f.session.Root, "actual-two-arrivals.json"), observation, 0600))
 	require.NoError(t, barrier.Release(f.given.ctx))
-	for i := range participants {
-		p := &participants[i]
-		ready, cancel := context.WithTimeout(f.given.ctx, 90*time.Second)
-		require.NoError(t, p.process.AwaitReady(ready, p.wire.ProductionReady))
-		cancel()
-		require.NoError(t, p.process.OwnsListeners(p.ports.All()...))
-		requireNativeOK(t, p.process, 2*len(accounts))
+	for _, p := range participants {
+		require.True(t, waitNativeConcurrentReady(f.given.ctx, p.child, p.wire), "owned concurrent startup did not reach readiness")
+		require.NoError(t, installruntime.CheckOwnedListeners(p.child.cmd.Process.Pid, p.child.dir, p.ports.All()...))
+		rid06ReadResult(t, p.child, installationResult{Stage: "delegation", Code: "OK", CompletedPairs: 2 * len(accounts)})
 	}
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT count(*) FROM kaname.grant_delegations`).Scan(&count))
 	require.Equal(t, 2*len(accounts), count)
@@ -280,12 +261,53 @@ func runNativeConcurrentAbsentPair(t *testing.T, mode string) []nativeInstallati
 	f.requireSameCredential(t)
 	// Явно останавливаем оба процесса, делая exit0 частью тела теста. Повторы очистки
 	// по-прежнему владеют процессами, если раннее утверждение прервёт выполнение.
-	for i := range participants {
-		p := &participants[i]
-		stop, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		require.NoError(t, p.session.Stop(stop))
-		cancel()
-		require.NoError(t, p.process.CheckSecretAbsence(f.secrets...))
+	for _, p := range participants {
+		rid06GracefulStop(t, p.child)
 	}
 	return observed
+}
+
+func nativeConcurrentPendingPair(t *testing.T, ctx context.Context, f *installationNativeWorld, account, metadataType string) ([]string, []string) {
+	t.Helper()
+	rows, err := f.given.pool.Query(ctx, `SELECT id,resource_id,done FROM kaname.operations WHERE account_id=$1 AND principal_type='service_account' AND principal_id=$2 AND metadata_type=$3 ORDER BY id`, account, f.creator.ID, metadataType)
+	require.NoError(t, err)
+	defer rows.Close()
+	var opIDs, proposed []string
+	for rows.Next() {
+		var id, resource string
+		var done bool
+		require.NoError(t, rows.Scan(&id, &resource, &done))
+		require.False(t, done)
+		require.NotEmpty(t, id)
+		require.NotEmpty(t, resource)
+		opIDs = append(opIDs, id)
+		proposed = append(proposed, resource)
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, opIDs, 2)
+	require.NotEqual(t, opIDs[0], opIDs[1])
+	require.NotEqual(t, proposed[0], proposed[1])
+	return opIDs, proposed
+}
+
+func waitNativeConcurrentReady(ctx context.Context, child *rid02OwnedChild, wire *installruntime.Wire) bool {
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		attempt, stop := context.WithTimeout(ctx, time.Second)
+		err := wire.ProductionReady(attempt)
+		stop()
+		if err == nil {
+			return ctx.Err() == nil
+		}
+		select {
+		case <-child.exited:
+			return false
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
 }

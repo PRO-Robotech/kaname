@@ -55,12 +55,14 @@ type CreateInput struct {
 
 // CreateGrantDelegationUseCase — заведение делегирования.
 type CreateGrantDelegationUseCase struct {
-	installationModel *authzmodel.Plans
-	repo              Repo
-	opsRepo           operations.Repo
-	cat               catalog.Source
-	relations         clients.RelationStore
-	logger            *slog.Logger
+	installationModel   *authzmodel.Plans
+	repo                Repo
+	authorityWriter     delegationWriterFactory
+	authorityConfigured bool
+	opsRepo             operations.Repo
+	cat                 catalog.Source
+	relations           clients.RelationStore
+	logger              *slog.Logger
 }
 
 // NewCreateGrantDelegationUseCase — над хранилищем, операциями и каталожным
@@ -268,44 +270,9 @@ func (u *CreateGrantDelegationUseCase) validateComposition(ctx context.Context, 
 		return "", shared.MapRepoErr(gerr)
 	}
 
-	modules := map[string]struct{}{}
-	for _, id := range d.RoleIDs {
-		role, gerr := rd.Roles().Get(ctx, id)
-		if gerr != nil {
-			if stderrors.Is(gerr, iamerr.ErrNotFound) {
-				return "", status.Errorf(codes.FailedPrecondition, "Role %s not found", id)
-			}
-			return "", shared.MapRepoErr(gerr)
-		}
-		m := domain.RoleDeclaringModule(role)
-		if m == "" {
-			return "", status.Errorf(codes.FailedPrecondition, "role %s is not declared by a module manifest", id)
-		}
-		modules[m] = struct{}{}
-		for _, rule := range role.Rules {
-			if rule.Module != "" {
-				modules[rule.Module] = struct{}{}
-			}
-		}
-	}
-	for _, t := range d.TargetTypes {
-		modules[domain.ModuleOfCatalogType(t)] = struct{}{}
-	}
-	if len(modules) != 1 {
-		found := make([]string, 0, len(modules))
-		for m := range modules {
-			found = append(found, m)
-		}
-		sort.Strings(found)
-		return "", status.Errorf(codes.FailedPrecondition,
-			"role_ids and target_types must belong to one module; found %s", strings.Join(found, ", "))
-	}
-	var module string
-	for m := range modules {
-		module = m
-	}
-	if module == "iam" {
-		return "", status.Error(codes.FailedPrecondition, "module iam cannot be delegated")
+	module, err := delegationModule(ctx, rd, d)
+	if err != nil {
+		return "", err
 	}
 	if _, gerr := rd.ServiceAccounts().Get(ctx, d.DelegateID); gerr != nil {
 		if stderrors.Is(gerr, iamerr.ErrNotFound) {
@@ -320,7 +287,8 @@ func (u *CreateGrantDelegationUseCase) validateComposition(ctx context.Context, 
 // (Р5). Второе действующее делегирование пары — 23505, `ALREADY_EXISTS` (Д1).
 func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.GrantDelegation, actor string, installation bool, opID string) (*anypb.Any, error) {
 	d.CreatedAt = time.Now().UTC()
-	created, err := shared.DoWithWriteTx(ctx, u.repo, func(ctx context.Context, w Writer) (domain.GrantDelegation, error) {
+	created, err := doDelegationWriteTx(ctx, delegationWriteRepo{Repo: u.repo, factory: u.authorityWriter, configured: u.authorityConfigured, mutation: delegationCreate, proposed: d}, func(ctx context.Context, w Writer) (domain.GrantDelegation, error) {
+		d.CreatedAt = delegationDecisionAt(w, d.CreatedAt)
 		var transaction installationTransaction
 		if installation {
 			var ok bool
@@ -332,6 +300,25 @@ func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.Gr
 				return domain.GrantDelegation{}, err
 			}
 		}
+		if !installation && u.authorityConfigured {
+			prepare, ok := w.(interface {
+				LockGrantDelegationCreate(context.Context, domain.GrantDelegation) error
+			})
+			if !ok {
+				return domain.GrantDelegation{}, authzguard.AuthzBackendUnavailable()
+			}
+			if err := prepare.LockGrantDelegationCreate(ctx, d); err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			checker, err := w.TransactionRelationChecker(nil)
+			if err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			if err := requireAccountGrantAuthorityWithOwner(ctx, checker, d.AccountID, func(ctx context.Context) (domain.UserID, error) { return accountOwnerFromReader(ctx, w, d.AccountID) }); err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			d.CreatedAt = delegationDecisionAt(w, d.CreatedAt)
+		}
 		gw := w.AccessBindingsW().GrantDelegationsW()
 		if installation {
 			installer, ok := gw.(interface {
@@ -342,6 +329,9 @@ func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.Gr
 			}
 			existing, found, err := installer.InstallationPair(ctx, d)
 			if err != nil {
+				return domain.GrantDelegation{}, err
+			}
+			if err := refreshDelegationDecision(ctx, w); err != nil {
 				return domain.GrantDelegation{}, err
 			}
 			if err := transaction.RequireInstallationAuthority(ctx, u.installationModel); err != nil {
@@ -388,4 +378,49 @@ func (u *CreateGrantDelegationUseCase) doCreate(ctx context.Context, d domain.Gr
 		return nil, err
 	}
 	return marshalGD(created)
+}
+
+// delegationModule проверяет декларации всех ролей, их правила и общий модуль
+// всех итоговых целей. Используется Create и Update на переданном читателе.
+func delegationModule(ctx context.Context, rd Reader, d domain.GrantDelegation) (string, error) {
+	modules := map[string]struct{}{}
+	for _, id := range d.RoleIDs {
+		role, gerr := rd.Roles().Get(ctx, id)
+		if gerr != nil {
+			if stderrors.Is(gerr, iamerr.ErrNotFound) {
+				return "", status.Errorf(codes.FailedPrecondition, "Role %s not found", id)
+			}
+			return "", shared.MapRepoErr(gerr)
+		}
+		m := domain.RoleDeclaringModule(role)
+		if m == "" {
+			return "", status.Errorf(codes.FailedPrecondition, "role %s is not declared by a module manifest", id)
+		}
+		modules[m] = struct{}{}
+		for _, rule := range role.Rules {
+			if rule.Module != "" {
+				modules[rule.Module] = struct{}{}
+			}
+		}
+	}
+	for _, t := range d.TargetTypes {
+		modules[domain.ModuleOfCatalogType(t)] = struct{}{}
+	}
+	if len(modules) != 1 {
+		found := make([]string, 0, len(modules))
+		for m := range modules {
+			found = append(found, m)
+		}
+		sort.Strings(found)
+		return "", status.Errorf(codes.FailedPrecondition,
+			"role_ids and target_types must belong to one module; found %s", strings.Join(found, ", "))
+	}
+	var module string
+	for m := range modules {
+		module = m
+	}
+	if module == "iam" {
+		return "", status.Error(codes.FailedPrecondition, "module iam cannot be delegated")
+	}
+	return module, nil
 }

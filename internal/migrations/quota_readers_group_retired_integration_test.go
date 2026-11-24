@@ -210,9 +210,12 @@ func TestMRW24_GroupWithoutMembersIsRetiredAndTheJournalGetsNothing(t *testing.T
 // позже строки записи; прямого факта не осталось; след — одна запись на группу.
 func TestMRW16_MembersFromTheApplierAreRetiredWithTheirTuplesAndATrace(t *testing.T) {
 	ctx := context.Background()
-	db, dsn, sink := retiredChain(t, quotaReadersGroupVersion-1)
+	db, _, sink := retiredChain(t, quotaReadersGroupVersion-1)
 
-	census, err := applyDelivered(ctx, t, dsn, nil, loadJoiners(t, quotaReadersGroupName))
+	// Историческая схема ещё не имеет authority entry современного PG repo.
+	// Настоящий применитель пишет её контракт через узкий писатель этой эпохи.
+	census, err := moduleseed.NewApplier(retiredSeedRunner{db: db}).Apply(ctx, nil, loadJoiners(t, quotaReadersGroupName))
+	t.Logf("перепись исторического применения: %s", census)
 	require.NoError(t, err, "применитель не построил дом")
 	n := 0
 	for _, r := range census.Reports {
@@ -277,7 +280,7 @@ func TestMRW17_GroupAbsentBeforeTheUpIsACensusNotARefusal(t *testing.T) {
 // аудита; повторный накат снимает снова, и записей аудита становится две.
 func TestMRW25_DownRestoresTheSeedGroupAndTheReapplyConverges(t *testing.T) {
 	db, _, sink := retiredChain(t, quotaReadersGroupVersion-1)
-	require.NoError(t, goose.Up(db, "."))
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip))
 	require.Zero(t, groupRows(t, db))
 	journalAfterUp, auditAfterUp := journalRows(t, db), allAuditRows(t, db)
 	require.Equal(t, 1, auditRows(t, db))
@@ -305,7 +308,7 @@ func TestMRW25_DownRestoresTheSeedGroupAndTheReapplyConverges(t *testing.T) {
 	require.Equal(t, journalAfterUp, journalRows(t, db), "откат написал в журнал прав")
 	require.Equal(t, auditAfterUp, allAuditRows(t, db), "откат написал в аудит")
 
-	require.NoError(t, goose.Up(db, "."), "повторный накат обязан сходиться")
+	require.NoError(t, goose.UpTo(db, ".", registrationReversibleTip), "повторный накат обязан сходиться")
 	require.Zero(t, groupRows(t, db), "повторный накат не снял возвращённую откатом группу")
 	require.Equal(t, 2, auditRows(t, db), "записей аудита о снятии группы не две — по одной на каждый прямой ход")
 	require.Contains(t, sink.text(), "членств 0 · группа 1")
@@ -320,7 +323,10 @@ func TestMRW18_DeliveryStillJoiningTheRetiredGroupGetsANamedRefusal(t *testing.T
 	require.NoError(t, err)
 
 	t.Run("вступление в снятую группу — названный отказ", func(t *testing.T) {
-		_, dsn, _ := retiredChain(t, quotaReadersGroupVersion)
+		db, dsn, _ := retiredChain(t, quotaReadersGroupVersion)
+		// Проверяется нынешняя доставка после снятия группы: ей нужна вся текущая схема.
+		require.NoError(t, goose.Up(db, "."))
+		require.Zero(t, groupRows(t, db), "снятая группа не должна вернуться в текущей схеме")
 		_, aerr := applyDelivered(ctx, t, dsn, own, loadJoiners(t, quotaReadersGroupName)[:1])
 		require.Error(t, aerr, "применитель принял вступление в снятую группу")
 		require.Contains(t, aerr.Error(), "system/"+quotaReadersGroupName, "отказ не называет пару (аккаунт, имя)")
@@ -328,7 +334,10 @@ func TestMRW18_DeliveryStillJoiningTheRetiredGroupGetsANamedRefusal(t *testing.T
 		t.Logf("отказ: %v", aerr)
 	})
 	t.Run("вступление в группу службы — применяется", func(t *testing.T) {
-		_, dsn, _ := retiredChain(t, quotaReadersGroupVersion)
+		db, dsn, _ := retiredChain(t, quotaReadersGroupVersion)
+		// Проверяется нынешняя доставка после снятия группы: ей нужна вся текущая схема.
+		require.NoError(t, goose.Up(db, "."))
+		require.Zero(t, groupRows(t, db), "снятая группа не должна вернуться в текущей схеме")
 		census, aerr := applyDelivered(ctx, t, dsn, own, loadJoiners(t, "module-relation-writers"))
 		require.NoError(t, aerr)
 		require.Equal(t, len(platformModulesWithoutIAM), census.Seeding)

@@ -26,7 +26,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"gopkg.in/yaml.v3"
 )
 
 func rid06Revoke(t *testing.T, w *ridLifecycleWorld, id string) string {
@@ -161,25 +160,27 @@ func rid06Start(t *testing.T, w *ridLifecycleWorld, label string) *rid02OwnedChi
 	if w.delivery.TenantAccountID != nil {
 		installer["tenantAccountId"] = *w.delivery.TenantAccountID
 	}
-	raw, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": manifestDir, "required": true}, "moduleSeedInstaller": installer})
+	raw, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": manifestDir, "required": true}, "moduleSeedInstaller": installer}, w.delivery.RegistrationWriters)
 	require.NoError(t, err)
 	configPath := filepath.Join(root, "config.yaml")
 	require.NoError(t, os.WriteFile(configPath, raw, 0600))
+	ridRegistrationStartupProof(t, root, raw, w.delivery.RegistrationWriters)
 	ordinal := int64(rid06Result(w).CompletedPairs + 1)
 	digest := rid06HashExecutable(t)
-	c := startRIDInstallationChild(t, f, label, rid06ChildInput{ConfigPath: configPath, Creator: f.creator.ID, PairOrdinal: ordinal}, nativeConcurrentEnvironment(t, f, installruntime.SecondNativePorts(), "rid06-full-root"), rid06ChildInputEnv, "TestRID06OwnedFullStartupChild", "2m")
+	c := startRIDInstallationChild(t, f, label, rid06ChildInput{ConfigPath: configPath, Creator: f.creator.ID, Account: f.tenantID, PairOrdinal: ordinal}, nativeConcurrentEnvironment(t, f, installruntime.SecondNativePorts(), "rid06-full-root"), rid06ChildInputEnv, "TestRID06OwnedFullStartupChild", "2m")
 	parentGroup, err := os.ReadFile("/proc/self/cgroup")
 	require.NoError(t, err)
 	childGroup, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", c.cmd.Process.Pid))
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(parentGroup, childGroup), "owned full root inherits bounded job cgroup")
-	memory, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	cgroupDir := ridOwnedCgroup(t, parentGroup)
+	memory, err := os.ReadFile(filepath.Join(cgroupDir, "memory.max"))
 	require.NoError(t, err)
 	require.Equal(t, "4294967296", strings.TrimSpace(string(memory)))
-	swap, err := os.ReadFile("/sys/fs/cgroup/memory.swap.max")
+	swap, err := os.ReadFile(filepath.Join(cgroupDir, "memory.swap.max"))
 	require.NoError(t, err)
 	require.Equal(t, "0", strings.TrimSpace(string(swap)))
-	cpu, err := os.ReadFile("/sys/fs/cgroup/cpu.max")
+	cpu, err := os.ReadFile(filepath.Join(cgroupDir, "cpu.max"))
 	require.NoError(t, err)
 	proof, err := json.Marshal(map[string]any{"provenance": "instrumented test executable running actual complete startup", "testExecutableSHA256": digest, "productionAppSHA256": f.session.BinarySHA256, "pid": c.cmd.Process.Pid, "starttime": c.start, "cgroup": strings.TrimSpace(string(childGroup)), "memoryMax": strings.TrimSpace(string(memory)), "swapMax": strings.TrimSpace(string(swap)), "cpuMax": strings.TrimSpace(string(cpu))})
 	require.NoError(t, err)
@@ -223,11 +224,21 @@ func rid06CheckPending(t *testing.T, w *ridLifecycleWorld, c *rid02OwnedChild, e
 	require.Equal(t, op.Metadata.Value, data)
 	require.Equal(t, meta.GrantDelegationId, resource)
 	require.Equal(t, meta.AccountId, account)
-	var backend int32
-	require.NoError(t, w.f.given.pool.QueryRow(ctx, `SELECT pid FROM pg_stat_activity WHERE application_name='rid06-full-root' AND state='idle in transaction' AND query LIKE '%FROM kaname.operations%' AND query LIKE '%FOR UPDATE%'`).Scan(&backend))
-	require.Positive(t, backend)
+	// Изолированный child остановлен перед настоящим Writer: его соединения
+	// не должны держать admission/advisory или business write locks.
+	var childBackends int
+	require.NoError(t, w.f.given.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+ WHERE datname=current_database() AND application_name='rid06-full-root' AND backend_type='client backend'`).Scan(&childBackends))
+	require.Positive(t, childBackends, "actual isolated child database identity must remain visible")
+	var productionLocks int
+	require.NoError(t, w.f.given.pool.QueryRow(ctx, `SELECT count(*) FROM pg_locks l
+ JOIN pg_stat_activity a ON a.pid=l.pid
+ WHERE a.datname=current_database() AND a.application_name='rid06-full-root' AND l.granted
+ AND (l.locktype IN ('advisory','transactionid','tuple')
+ OR (l.locktype='relation' AND l.mode<>'AccessShareLock'))`).Scan(&productionLocks))
+	require.Zero(t, productionLocks, "paused full startup must not hold production writer/advisory locks")
 	require.NoError(t, w.f.wire.ProductionReady(ctx), "independent ordinary O listener remains live")
-	proof, err := json.Marshal(map[string]any{"childPID": c.cmd.Process.Pid, "writerBackendPID": backend, "operation": event.Operation, "account": account, "proposedID": resource, "boundary": "pending Operation locked, before pair advisory acquisition"})
+	proof, err := json.Marshal(map[string]any{"childPID": c.cmd.Process.Pid, "databaseBackends": childBackends, "productionWriterLocks": productionLocks, "operation": event.Operation, "account": account, "proposedID": resource, "boundary": "pending Operation committed, before production writer admission and pair create/re-read"})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(c.dir, "pending-before-pair.json"), proof, 0600))
 }
@@ -528,7 +539,8 @@ func ridNativeRevokeExplicitRecovery(t *testing.T) {
 		history := w.snapshot(t)
 		_, ops := w.grantIdentityCensus(t)
 		public.beforeRecoveryApply(t, w)
-		requireNativeOK(t, w.f.apply(t, w.delivery), len(w.accounts))
+		process := w.f.apply(t, w.delivery)
+		requireNativeOK(t, process, len(w.accounts))
 		w.f.renewOperator(t, w.f.given.ctx)
 		require.Equal(t, history, w.snapshot(t))
 		rid07CheckApplyOperations(t, w, ops, true)
@@ -536,7 +548,7 @@ func ridNativeRevokeExplicitRecovery(t *testing.T) {
 		w.f.publicRead(t, "/iam/v1/grantDelegations/"+old.Id, &got)
 		require.True(t, proto.Equal(&revokedGD, &got))
 		rid07BindingUnchanged(t, w, &revokedG)
-		public.afterRecoveryApply(t, w)
+		public.afterRecoveryApply(t, w, process)
 		subject := w.f.ridSA(t, w.f.tenantID, "rid06-recovered-grantee")
 		w.issuerToken = w.f.ridToken(t, w.issuer)
 		public.recoveredGrant(t, w)

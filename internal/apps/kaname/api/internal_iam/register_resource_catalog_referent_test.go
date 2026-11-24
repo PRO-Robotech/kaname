@@ -34,6 +34,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
 // recordingEmitter — очередь намерений, которая ЗАПОМИНАЕТ положенное.
@@ -88,7 +89,7 @@ func TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument(t *te
 		&recordingWithdrawal{},
 		noAudit{},
 		unitScopes(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"})
 
 	err := uc.Register(context.Background(), &regReq{
 		subject: "project:prj_1", relation: "project", object: "vpc_totally_invented:x1",
@@ -139,7 +140,7 @@ func TestRegisterResource_LiveResourceType_StillRegisters(t *testing.T) {
 		&recordingWithdrawal{},
 		noAudit{},
 		unitScopes(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"})
 
 	err := uc.Register(context.Background(), &regReq{
 		subject: "project:prj_1", relation: "project", object: "vpc_network:net_1",

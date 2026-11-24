@@ -40,7 +40,10 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/hierarchy"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -66,6 +69,13 @@ type registrationScopeReader interface {
 	BindingRefusesTx(ctx context.Context, tx service.Tx, modelType, id, project string, chain []string) (bool, error)
 }
 
+// registrationParentGraphReader — отдельный bounded port строгого admission.
+// Отсутствие реализации закрывает допуск; исторический PointerSubjectsTx не
+// используется запасным путём и сохраняет прежние audit/cleanup semantics.
+type registrationParentGraphReader interface {
+	BoundedPointerSubjectsTx(ctx context.Context, tx service.Tx, modelType, id string, pointers []string) ([]string, error)
+}
+
 // anchorProjectType — тип опоры-проекта: его иерархию даёт строка проекта, а не
 // строка зеркала.
 const anchorProjectType = "project"
@@ -84,34 +94,56 @@ const anchorProjectType = "project"
 // [iamerr.ParentScopeMismatch]. Оба возвращаются НЕОБЁРНУТЫМИ: переводчик
 // узнаёт их по виду, а обёртка дописала бы в ответ имя внутреннего шага.
 func (uc *RegisterResourceUseCase) admitRegistration(
-	ctx context.Context, tx service.Tx, t tupleIntent, row service.ResourceMirrorRow,
-) (string, error) {
+	ctx context.Context, tx service.Tx, module string, t tupleIntent, row service.ResourceMirrorRow,
+) (registrationAdmission, error) {
 	dotted, policy, live, err := uc.catalogTypes.WritePolicyTx(ctx, tx, row.ObjectType)
 	if err != nil {
-		return "", fmt.Errorf("read write policy: %w", err)
+		return registrationAdmission{}, fmt.Errorf("read write policy: %w", err)
 	}
 	if !live {
 		catalogType, cerr := uc.catalogObjectType(ctx, tx, row.ObjectType)
 		if cerr != nil {
-			return "", fmt.Errorf("resolve catalog object type: %w", cerr)
+			return registrationAdmission{}, fmt.Errorf("resolve catalog object type: %w", cerr)
 		}
-		return catalogType, nil
+		return registrationAdmission{}, shared.InvalidArg("object", fmt.Sprintf("resource type %q is not a live entry of the platform resource catalog", catalogType))
+	}
+	if err := authorizeCatalogOwner(module, policy.Module); err != nil {
+		return registrationAdmission{}, err
+	}
+	_, id := t.splitObject()
+	if err := validateRegistrationShape(module, t.subject, t.relation, policy.ObjectType+":"+id); err != nil {
+		return registrationAdmission{}, err
 	}
 	if err := permanentProjectForm(policy, row); err != nil {
-		return "", err
+		return registrationAdmission{}, err
 	}
 	subjectType, _, _ := strings.Cut(t.subject, ":")
-	if !policy.Admits(t.relation, subjectType) {
-		return "", proxyWriteRefusal()
+	// Сверх прежних трёх отношений разрешён только точный указатель, не writes.
+	if !legacyRegistrationRelation(t.relation) {
+		pointer, ok := policy.Pointer(t.relation)
+		if !ok || pointer.Type != subjectType || !namedPointerSubjectType(subjectType) {
+			return registrationAdmission{}, proxyWriteRefusal()
+		}
+		if _, ok := uc.scopes.(registrationPointerStore); !ok {
+			return registrationAdmission{}, proxyWriteRefusal()
+		}
 	}
-	if err := uc.deriveParent(ctx, tx, t, policy, domain.ParentClaim{
+	if !policy.Admits(t.relation, subjectType) {
+		return registrationAdmission{}, proxyWriteRefusal()
+	}
+	hierarchies, err := uc.deriveParent(ctx, tx, t, policy, domain.ParentClaim{
 		ProjectID: row.ParentProjectID,
 		AccountID: row.ParentAccountID,
 		Chain:     row.ParentChain,
-	}); err != nil {
-		return "", uc.preferBindingRefusal(ctx, tx, t, policy, row, err)
+	})
+	if err != nil {
+		return registrationAdmission{}, uc.preferBindingRefusal(ctx, tx, t, policy, row, err)
 	}
-	return dotted, nil
+	authorities, err := uc.registrationAuthorities(ctx, tx, hierarchies)
+	if err != nil {
+		return registrationAdmission{}, uc.preferProjectBindingRefusal(ctx, tx, t, policy.ObjectType, row, err)
+	}
+	return registrationAdmission{catalogType: dotted, hierarchies: hierarchies, authorities: authorities}, nil
 }
 
 // permanentProjectForm — форма регистрации типа с неизменным проектом
@@ -150,15 +182,25 @@ func (uc *RegisterResourceUseCase) preferBindingRefusal(ctx context.Context, tx 
 	if !stderrors.Is(derr, iamerr.ErrParentScopeMismatch) {
 		return derr
 	}
+	return uc.preferProjectBindingRefusal(ctx, tx, t, policy.ObjectType, row, derr)
+}
+
+// preferProjectBindingRefusal сохраняет прежний отказ привязки перед отказом
+// вывода либо account authority. Читаем предикат только на отказном пути:
+// успешный Register по-прежнему проверяет привязку единственным чтением внутри
+// UpsertTx, без повторного вывода иерархии и без записи до account authority.
+func (uc *RegisterResourceUseCase) preferProjectBindingRefusal(ctx context.Context, tx service.Tx, t tupleIntent,
+	modelType string, row service.ResourceMirrorRow, refusal error,
+) error {
 	_, objID := t.splitObject()
-	refuses, err := uc.scopes.BindingRefusesTx(ctx, tx, policy.ObjectType, objID, row.ParentProjectID, row.ParentChain)
+	refuses, err := uc.scopes.BindingRefusesTx(ctx, tx, modelType, objID, row.ParentProjectID, row.ParentChain)
 	if err != nil {
 		return fmt.Errorf("derive parent: judge project binding: %w", err)
 	}
 	if refuses {
-		return iamerr.ObjectBoundToOtherProject(t.object, policy.ObjectType, objID)
+		return iamerr.ObjectBoundToOtherProject(t.object, modelType, objID)
 	}
-	return derr
+	return refusal
 }
 
 // deriveParent — вывод родителя (Р4) и сверка сведений модуля с ним (Р6).
@@ -175,29 +217,194 @@ func (uc *RegisterResourceUseCase) preferBindingRefusal(ctx context.Context, tx 
 // один (различие было бы оракулом иерархии).
 func (uc *RegisterResourceUseCase) deriveParent(
 	ctx context.Context, tx service.Tx, t tupleIntent, policy domain.WritePolicy, claim domain.ParentClaim,
-) error {
+) (admitted []domain.ParentHierarchy, err error) {
 	_, objID := t.splitObject()
+	// Сохраняем публичный Р8 для неизвестного/неполного родителя. Чистый port
+	// отдельно сохраняет причины для captured runner; ошибки чтения не скрываем.
+	defer func() {
+		if stderrors.Is(err, domain.ErrParentHierarchyIncomplete) || stderrors.Is(err, domain.ErrParentHierarchyInvalid) {
+			admitted = nil
+			err = iamerr.ParentScopeMismatch(t.object, policy.ObjectType, objID)
+		}
+	}()
+	if _, ok := uc.scopes.(registrationParentGraphReader); !ok {
+		return nil, fmt.Errorf("%w: bounded pointer reader is not configured", domain.ErrParentHierarchyIncomplete)
+	}
+	budget := new(parentHierarchyReadBudget)
 	anchors := []string{t.subject}
 	if _, isPointer := policy.Pointer(t.relation); !isPointer {
 		var err error
-		if anchors, err = uc.scopes.PointerSubjectsTx(ctx, tx, policy.ObjectType, objID, policy.PointerNames()); err != nil {
-			return fmt.Errorf("derive parent: read pointer facts: %w", err)
-		}
-	}
-	for _, anchor := range anchors {
-		h, ok, err := uc.hierarchyOf(ctx, tx, anchor)
+		anchors, err = uc.parentPointerSubjects(ctx, tx, policy.ObjectType, objID, policy, budget)
 		if err != nil {
-			return err
-		}
-		if ok && h.Admits(claim) {
-			return nil
+			return nil, err
 		}
 	}
-	return iamerr.ParentScopeMismatch(t.object, policy.ObjectType, objID)
+	graph, err := uc.parentHierarchyGraph(ctx, tx, anchors, budget)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, anchor := range anchors {
+		if seen[anchor] {
+			continue
+		}
+		seen[anchor] = true
+		hs, err := domain.BuildParentHierarchies(anchor, graph)
+		if err != nil {
+			return nil, err
+		}
+		for _, h := range hs {
+			if h.Admits(claim) {
+				admitted = append(admitted, h)
+			}
+		}
+	}
+	if len(admitted) > 0 {
+		return admitted, nil
+	}
+	return nil, iamerr.ParentScopeMismatch(t.object, policy.ObjectType, objID)
 }
 
-// hierarchyOf — иерархия kaname от опоры anchor (`<тип>:<id>`), Р5. ok=false —
-// иерархии нет: проекта в kaname нет либо контейнер не зарегистрирован.
+// Один бюджет охватывает все опоры, страницы указателей и ветви входа.
+// Каждый запрос возвращает точечную строку либо страницу с sentinel; ошибки
+// источника не превращаются в пустой набор и не оставляют частичный допуск.
+type parentHierarchyReadBudget struct{ reads, edges int }
+
+func (b *parentHierarchyReadBudget) read() error {
+	b.reads++
+	if b.reads > domain.MaxParentHierarchyReads {
+		return fmt.Errorf("%w: read budget", domain.ErrParentHierarchyInvalid)
+	}
+	return nil
+}
+
+func (uc *RegisterResourceUseCase) parentPointerSubjects(ctx context.Context, tx service.Tx, typ, id string, policy domain.WritePolicy, budget *parentHierarchyReadBudget) ([]string, error) {
+	if policy.ObjectType != typ || len(policy.Pointers) > hierarchy.MaxImmediateParents {
+		return nil, fmt.Errorf("%w: pointer policy", domain.ErrParentHierarchyInvalid)
+	}
+	reader, ok := uc.scopes.(registrationParentGraphReader)
+	if !ok {
+		return nil, fmt.Errorf("%w: bounded pointer reader is not configured", domain.ErrParentHierarchyIncomplete)
+	}
+	var out []string
+	names, subjects := map[string]bool{}, map[string]bool{}
+	for _, pointer := range policy.Pointers {
+		if pointer.Name == "" || names[pointer.Name] || !namedPointerSubjectType(pointer.Type) {
+			return nil, fmt.Errorf("%w: pointer declaration", domain.ErrParentHierarchyInvalid)
+		}
+		names[pointer.Name] = true
+		if err := budget.read(); err != nil {
+			return nil, err
+		}
+		// Отдельное чтение каждого отношения сохраняет точную пару relation/type.
+		// Чтение всех имён сразу потеряло бы эту связь для разных parent types.
+		rows, err := reader.BoundedPointerSubjectsTx(ctx, tx, typ, id, []string{pointer.Name})
+		if err != nil {
+			return nil, fmt.Errorf("derive parent: read pointer facts: %w", err)
+		}
+		budget.edges += len(rows)
+		if len(rows) > hierarchy.MaxImmediateParents || budget.edges > domain.MaxParentHierarchyEdges {
+			return nil, fmt.Errorf("%w: pointer row budget", domain.ErrParentHierarchyInvalid)
+		}
+		for _, ref := range rows {
+			parentType, parentID, ok := strings.Cut(ref, ":")
+			if !ok || parentType != pointer.Type || parentID == "" {
+				return nil, fmt.Errorf("%w: pointer subject %q", domain.ErrParentHierarchyInvalid, ref)
+			}
+			if !subjects[ref] {
+				subjects[ref] = true
+				out = append(out, ref)
+			}
+		}
+	}
+	if len(out) > hierarchy.MaxImmediateParents {
+		return nil, fmt.Errorf("%w: immediate parent budget", domain.ErrParentHierarchyInvalid)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// parentHierarchyGraph читает текущие указатели и owning rows той же TX.
+// Сохранённый project edge используется ContainerScopeTx только как ceiling;
+// он никогда не подменяет непосредственное ребро pointer graph.
+func (uc *RegisterResourceUseCase) parentHierarchyGraph(ctx context.Context, tx service.Tx, anchors []string, budget *parentHierarchyReadBudget) (domain.ParentHierarchyGraph, error) {
+	type pending struct {
+		ref   string
+		depth int
+	}
+	graph := domain.ParentHierarchyGraph{}
+	var queue []pending
+	queued := map[string]bool{}
+	enqueue := func(ref string, depth int) error {
+		if queued[ref] {
+			return nil
+		}
+		if len(queued) >= domain.MaxParentHierarchyNodes || depth > hierarchy.MaxStoredParentLinks {
+			return fmt.Errorf("%w: graph budget", domain.ErrParentHierarchyInvalid)
+		}
+		queued[ref] = true
+		queue = append(queue, pending{ref, depth})
+		return nil
+	}
+	for _, anchor := range anchors {
+		if err := enqueue(anchor, 1); err != nil {
+			return nil, err
+		}
+	}
+	for pos := 0; pos < len(queue); pos++ {
+		item := queue[pos]
+		typ, id, ok := strings.Cut(item.ref, ":")
+		if !ok || typ == "" || id == "" || !namedPointerSubjectType(typ) {
+			return nil, fmt.Errorf("%w: anchor %q", domain.ErrParentHierarchyInvalid, item.ref)
+		}
+		node := domain.ParentHierarchyNode{Ref: item.ref}
+		if err := budget.read(); err != nil {
+			return nil, err
+		}
+		if typ == anchorProjectType {
+			account, found, err := uc.scopes.ProjectAccountTx(ctx, tx, id)
+			if err != nil {
+				return nil, fmt.Errorf("derive parent: read project: %w", err)
+			}
+			node.Scope = domain.ContainerScope{Registered: found, ProjectID: id, AccountID: account}
+		} else {
+			scope, err := uc.scopes.ContainerScopeTx(ctx, tx, typ, id)
+			if err != nil {
+				return nil, fmt.Errorf("derive parent: read container: %w", err)
+			}
+			node.Scope = scope
+			// DP14 останавливает проецируемую иерархию здесь; saved authority читается
+			// отдельно и не может повысить этот ceiling.
+			if scope.Registered && scope.ProjectID != "" {
+				if err := budget.read(); err != nil {
+					return nil, err
+				}
+				_, policy, live, err := uc.catalogTypes.WritePolicyTx(ctx, tx, typ)
+				if err != nil {
+					return nil, fmt.Errorf("derive parent: read container policy: %w", err)
+				}
+				if !live {
+					return nil, fmt.Errorf("%w: container policy", domain.ErrParentHierarchyIncomplete)
+				}
+				node.Parents, err = uc.parentPointerSubjects(ctx, tx, typ, id, policy, budget)
+				if err != nil {
+					return nil, err
+				}
+				for _, parent := range node.Parents {
+					if err := enqueue(parent, item.depth+1); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+		graph[item.ref] = node
+	}
+	return graph, nil
+}
+
+// hierarchyOf сохранён только для исторического audit/cleanup. Снятие и
+// аудит отказа не требуют новой живой политики предков. Допуск Register выше
+// всегда строит полный граф и не вызывает этот сокращённый helper.
 func (uc *RegisterResourceUseCase) hierarchyOf(ctx context.Context, tx service.Tx, anchor string) (domain.ParentHierarchy, bool, error) {
 	typ, id, found := strings.Cut(anchor, ":")
 	if !found || id == "" {

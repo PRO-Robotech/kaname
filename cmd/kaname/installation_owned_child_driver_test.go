@@ -39,6 +39,32 @@ type rid02OwnedChild struct {
 	seenEvent       bool
 }
 
+// Лимиты принадлежат фактической области процесса, а не корню mount на hosted runner.
+// Используем штатное отображение proc; неизвестная карта и v1 не дают доказательства v2.
+func ridOwnedCgroupLeaf(cgroups, mounts []byte) (string, bool) {
+	mapping, ok := memoryCgroupMapping(cgroups, mounts)
+	if !ok || mapping.version != 2 {
+		return "", false
+	}
+	leaf := mapping.mount
+	if mapping.member != mapping.root {
+		relative := strings.TrimPrefix(mapping.member, mapping.root)
+		leaf = filepath.Join(mapping.mount, strings.TrimPrefix(relative, "/"))
+	}
+	return leaf, true
+}
+
+func ridOwnedCgroup(t *testing.T, membership []byte) string {
+	t.Helper()
+	mounts, err := os.ReadFile("/proc/self/mountinfo")
+	require.NoError(t, err)
+	leaf, ok := ridOwnedCgroupLeaf(membership, mounts)
+	require.True(t, ok, "owned child requires an unambiguous cgroup v2 mapping")
+	// В namespace корень может быть самой областью. Вызывающий по-прежнему обязан
+	// прочитать её явные memory.max=4GiB и memory.swap.max=0; наследование не заменяет их.
+	return leaf
+}
+
 func rid02ProcessStart(pid int) (string, error) {
 	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
@@ -258,22 +284,26 @@ func (c *rid02OwnedChild) kill() error {
 }
 func (c *rid02OwnedChild) await(t *testing.T, ctx context.Context, stage string) rid02ChildEvent {
 	t.Helper()
-	select {
-	case e := <-c.events:
+	validate := func(e rid02ChildEvent) rid02ChildEvent {
+		t.Helper()
 		c.seenEvent = true
 		require.Equal(t, stage, e.Stage)
 		require.Equal(t, c.cmd.Process.Pid, e.PID)
-		require.NotEmpty(t, e.Operation)
+		if stage == "before-concurrent-pair" {
+			require.Empty(t, e.Operation)
+		} else {
+			require.NotEmpty(t, e.Operation)
+		}
 		return e
+	}
+	select {
+	case e := <-c.events:
+		return validate(e)
 	case err := <-c.decodeError:
 		// Декодер может увидеть EOF сразу после последнего буферизованного события.
 		select {
 		case e := <-c.events:
-			c.seenEvent = true
-			require.Equal(t, stage, e.Stage)
-			require.Equal(t, c.cmd.Process.Pid, e.PID)
-			require.NotEmpty(t, e.Operation)
-			return e
+			return validate(e)
 		default:
 		}
 		t.Fatalf("child IPC failed before %s: %v; private stderr retained", stage, err)

@@ -11,10 +11,35 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/platformmodules"
 )
 
 // domain — домен доверия проб.
 var domain = grpcsrv.NewTrustDomain("kaname.test")
+
+func TestParseCatalogIdentityKeepsAuthenticatedService(t *testing.T) {
+	_, compiled := platformmodules.CatalogModuleOfService("probemod")
+	require.False(t, compiled, "контроль нового модуля должен отсутствовать во вшитом словаре")
+	for _, tc := range []struct{ service, module string }{
+		{"nlb", "loadbalancer"},
+		{"probemod", "probemod"},
+	} {
+		t.Run(tc.service, func(t *testing.T) {
+			r, err := Parse([]string{"modules/kacho-" + tc.service + "=module-writer"})
+			require.NoError(t, err)
+			id, ok := r.Lookup(domain, "spiffe://kaname.test/ns/modules/sa/kacho-"+tc.service)
+			require.True(t, ok)
+			require.Equal(t, tc.service, id.Service)
+			require.Equal(t, tc.module, id.CatalogModule)
+			// Снимок для самоотчёта не позволяет переписать доверенный перечень.
+			copy := r.Identities()
+			copy[0].CatalogModule = "foreign"
+			id, ok = r.Lookup(domain, "spiffe://kaname.test/ns/modules/sa/kacho-"+tc.service)
+			require.True(t, ok)
+			require.Equal(t, tc.module, id.CatalogModule)
+		})
+	}
+}
 
 // TestParse_DeclaredPairIsRecognizedWithItsProfile — объявленная пара
 // признаётся, и признание несёт профиль и имя службы, выведенное из учётки.
@@ -25,7 +50,7 @@ func TestParse_DeclaredPairIsRecognizedWithItsProfile(t *testing.T) {
 
 	id, ok := r.Lookup(domain, "spiffe://kaname.test/ns/kacho/sa/kacho-vpc")
 	require.True(t, ok)
-	require.Equal(t, Identity{Namespace: "kacho", Account: "kacho-vpc", Service: "vpc", Profile: ProfileModuleWriter}, id)
+	require.Equal(t, Identity{Namespace: "kacho", Account: "kacho-vpc", Service: "vpc", CatalogModule: "vpc", Profile: ProfileModuleWriter}, id)
 
 	id, ok = r.Lookup(domain, "spiffe://kaname.test/ns/edge-ns/sa/kacho-api-gateway")
 	require.True(t, ok)

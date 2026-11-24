@@ -316,21 +316,21 @@ func TestRun_TargetWhoseProbesFailedNamesTheProbesNotTheRecipe(t *testing.T) {
 	targets := []standalonetargets.Target{
 		{Name: "test-standalone", Desc: "пробы модуля в самостоятельном клоне"},
 	}
-	out := "  УПАЛИ:\n" +
-		"    github.com/PRO-Robotech/kaname/internal/check TestSomethingUnrelated\n" +
-		"ПРОБЫ УПАЛИ: см. перечень выше; полный вывод — go test ./... -short -count=1\n" +
-		"make: *** [Makefile:130: test-standalone] Error 1\n"
-	findings, unmet, err := standalonetargets.RunTargets("посадка", targets,
-		func(_, _ string) (int, string, error) { return 2, out, nil })
+	result := runDiagnosticProducer(t,
+		diagnosticEvent("fail", "example.test/check", "TestSomethingUnrelated", "")+
+			diagnosticEvent("fail", "example.test/check", "", ""), "", 1, false, false)
+	out := result.output
+	result.code, result.output = 2, out
+	findings, unmet, err := standalonetargets.RunTargetsWithCapture("посадка", targets,
+		diagnosticCaptureCallback(t, result, ""))
 	require.NoError(t, err)
 	require.Empty(t, unmet, "упавшие пробы подались третьим исходом — красное исчезло бы из вердикта")
 	require.Len(t, findings, 1, "упавшие пробы перестали быть находкой")
 
 	got := findings[0].String()
-	require.Contains(t, got, "ДОШЛА ДО КОНЦА",
-		"находка не сказала, что цель отработала, — читатель пойдёт чинить рецепт")
-	require.Contains(t, got, "НЕ в рецепте",
-		"находка не отвела предмет от рецепта")
+	require.Contains(t, got, "именованные отказы проб", "не назван наблюдаемый род отказа")
+	require.NotContains(t, got, "ДОШЛА ДО КОНЦА", "недоказанное завершение приписано цели")
+	require.NotContains(t, got, "те же пробы красны", "чужому запуску приписан исход текущего")
 	require.Contains(t, got, "исходом НЕ является",
 		"находка не запретила вредный исход: пометка цели монорепной сняла бы проверку клона")
 	require.NotContains(t, got, "исходов два",
@@ -340,9 +340,8 @@ func TestRun_TargetWhoseProbesFailedNamesTheProbesNotTheRecipe(t *testing.T) {
 // TestRun_SameTargetWithoutTheProbeMarkKeepsTheRecipeWording — ОСЬ 2, ЗАКОННЫЙ
 // БЛИЗНЕЦ.
 //
-// Отличается РОВНО ОДНИМ фактом: метки нет. Без этой половины разбор стал бы
-// маской — всякий отказ цели читался бы как «упали пробы», и настоящая
-// неработоспособность в клоне перестала бы называться своим именем.
+// Без подтверждённой переписи отказ запуска остаётся неизвестным исходом.
+// Само имя test-standalone не доказывает исполнение проб.
 func TestRun_SameTargetWithoutTheProbeMarkKeepsTheRecipeWording(t *testing.T) {
 	targets := []standalonetargets.Target{
 		{Name: "test-standalone", Desc: "пробы модуля в самостоятельном клоне"},
@@ -353,8 +352,8 @@ func TestRun_SameTargetWithoutTheProbeMarkKeepsTheRecipeWording(t *testing.T) {
 		func(_, _ string) (int, string, error) { return 2, out, nil })
 	require.NoError(t, err)
 	require.Len(t, findings, 1)
-	require.Contains(t, findings[0].String(), "исходов два",
-		"отказ САМОЙ цели потерял свой текст — вместе с ним потерян исход «пометить монорепной»")
+	require.Contains(t, findings[0].String(), "неизвестный исход standalone",
+		"отказ запуска получил выдуманную причину")
 	require.NotContains(t, findings[0].String(), "ДОШЛА ДО КОНЦА",
 		"цель, не дошедшая до проб, объявлена дошедшей")
 }
@@ -379,11 +378,8 @@ func TestRun_ProbeMarkInProseIsStillARecipeFinding(t *testing.T) {
 
 // TestProbeFailureMark_HasAProducerInTheTree — ОСЬ 3: ПРЕДПОСЫЛКА разбора.
 //
-// Метка различает род находки, а печатает её НЕ этот пакет, а рецепт
-// `scripts/test-standalone.sh`. Перестань он её печатать — различение вернётся
-// к прежнему поведению МОЛЧА: «не нашёл метку» и «метки не бывает» дают
-// одинаковый вывод. Отсутствие производителя — «проверка НЕ ИСПОЛНЯЛАСЬ», а не
-// ноль находок.
+// Читаемая метка имеет реального производителя. Полную классификацию отдельно
+// проверяют поведенческие controls с manifest и сохранёнными потоками.
 func TestProbeFailureMark_HasAProducerInTheTree(t *testing.T) {
 	// Корень берётся подъёмом от АБСОЛЮТНОГО каталога прогона, как это делает
 	// сам гейт: относительное "." подъёма не даёт — его родитель тоже ".".
@@ -393,13 +389,12 @@ func TestProbeFailureMark_HasAProducerInTheTree(t *testing.T) {
 	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не назван")
 
 	// Координата константна и берётся от корня модуля.
-	const producer = "scripts/test-standalone.sh"
+	const producer = "scripts/standalone-capture.py"
 	body, err := os.ReadFile(filepath.Join(root, producer))
 	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: производителя %s нет", producer)
 
 	require.Contains(t, string(body), standalonetargets.ProbeFailureMark,
-		"рецепт %s больше не печатает метку %q — род находки перестал различаться, "+
-			"и заметить это по вердикту нечем",
+		"производитель %s больше не содержит читаемую метку %q",
 		producer, standalonetargets.ProbeFailureMark)
 	t.Logf("осмотрено: производитель %s прочитан, %d байт · метка %q найдена",
 		producer, len(body), standalonetargets.ProbeFailureMark)
@@ -461,6 +456,35 @@ func TestRunner_NestedMakeDoesNotInheritTheOuterArgs(t *testing.T) {
 		"MAKEFLAGS внешнего уровня донёс ARGS до вложенного:\n%s", out)
 	require.Containsf(t, out, "gate-level=[1]",
 		"вложенный уровень не объявлен — повторный вход отсечь нечем:\n%s", out)
+}
+
+// Явные аргументы гейта принадлежат только вложенной цели проб; внешние
+// ARGS не наследуются ни ею, ни соседней целью, ни раннером по умолчанию.
+func TestRunner_StandaloneArgsAreExplicitAndTargetScoped(t *testing.T) {
+	t.Setenv("ARGS", "-race")
+	t.Setenv("MAKEFLAGS", " -- ARGS=-race")
+	for _, tc := range []struct {
+		name, target, want string
+		args               []string
+	}{
+		{"explicit", "test-standalone", "-short -p=1", []string{"-short", "-p=1"}},
+		{"neighbour", "show", "", []string{"-short", "-p=1"}},
+		{"default", "test-standalone", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			recipe := nestedProbeRecipe + "test-standalone: show\n"
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"), []byte(recipe), 0o600))
+			result, err := makeCaptureRunner(t, tc.args...)(dir, tc.target)
+			if result.Capture != nil {
+				defer result.Capture.Close()
+			}
+			require.NoError(t, err)
+			require.Zero(t, result.Code, result.Output)
+			require.Contains(t, result.Output, "recipe-args=["+tc.want+"]")
+			require.NotContains(t, result.Output, "-race")
+		})
+	}
 }
 
 // TestRunner_NeighbourVariableStillReachesTheNestedMake — законный близнец:

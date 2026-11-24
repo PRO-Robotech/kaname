@@ -105,7 +105,7 @@ func rid12Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild, no
 		attempt, stop := context.WithTimeout(ctx, time.Second)
 		err := f.wire.ProductionReady(attempt)
 		stop()
-		if err == nil {
+		if err == nil && ridCatalogRoleProjectionsReady(filepath.Join(c.dir, "stdout")) == nil {
 			require.NoError(t, ctx.Err())
 			break
 		}
@@ -171,6 +171,8 @@ func rid12World(t *testing.T, in rid12NativeInput, consumer rid12LivePublicConsu
 	require.Contains(t, accounts, named)
 	require.NotContains(t, accounts, f.baseline.SystemID)
 
+	// Снимок до установки снимаем после записи проекций базовых ролей.
+	rid09AwaitBaseRoleProjections(t, f.given.ctx, f.base)
 	rid09RequireNoDelivery(t, f, accounts)
 	var boundaryBefore int
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT (SELECT count(*) FROM kaname.catalog_module WHERE module='ridbounds')+(SELECT count(*) FROM kaname.roles WHERE owner_module='ridbounds')+(SELECT count(*) FROM kaname.service_accounts WHERE name='svc-ridbounds')`).Scan(&boundaryBefore))
@@ -212,9 +214,10 @@ func rid12World(t *testing.T, in rid12NativeInput, consumer rid12LivePublicConsu
 		if consumer != nil {
 			consumer(t, f, in, "refusal-before-restore")
 		}
-		p, err := f.session.StartBase(f.given.ctx)
+		p, err := f.session.StartBase(f.given.ctx, f.writerPlan)
 		require.NoError(t, err)
 		require.NoError(t, p.OwnsListeners(installruntime.DefaultNativePorts().All()...))
+		rid09AwaitBaseRoleProjections(t, f.given.ctx, p)
 		rid09RequireNoDelivery(t, f, accounts)
 		out.PublicAfter = rid09ReadPublic(t, f)
 		require.Equal(t, beforePublic, out.PublicAfter)

@@ -8,9 +8,9 @@ package pg_test
 // # Что здесь доказывается
 //
 // Номер строки `kaname.subject_change_outbox` выдаёт счётчик на ВСТАВКЕ
-// (умолчание колонки), а видимой строка становится на ФИКСАЦИИ. Выдачу здесь
-// ничто не сериализует — в отличие от `kaname.limits`, где ревизию штампует
-// триггер под транзакционной блокировкой, держащейся до коммита, — поэтому
+// (умолчание колонки), а видимой строка становится на ФИКСАЦИИ. Обычная ветка
+// журнала не сериализует выдачу номеров — в отличие от `kaname.limits`, где
+// ревизию штампует триггер под блокировкой до коммита, — поэтому
 // порядок номеров и порядок фиксаций НЕЗАВИСИМЫ.
 //
 // Потребитель (`pkg/subjectchange`.Watcher) хранит курсор между проходами и
@@ -36,24 +36,23 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/pgtest"
 
-	"github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
-// subjectChangeStand — журнал, читатель и писатель продукта над одной базой.
+// subjectChangeStand — продуктовые журнал, emitter и читатель над одной базой.
 type subjectChangeStand struct {
 	ctx  context.Context
 	pool *pgxpool.Pool
 	repo *kanamepg.SubjectChangeRepo
-	ab   *kanamepg.Repository
 }
 
 func newSubjectChangeStand(t *testing.T) *subjectChangeStand {
@@ -68,23 +67,26 @@ func newSubjectChangeStand(t *testing.T) *subjectChangeStand {
 		ctx:  ctx,
 		pool: pool,
 		repo: kanamepg.NewSubjectChangeRepo(pool, nil),
-		ab:   kanamepg.New(pool, nil),
 	}
 }
 
-// beginWrite открывает транзакцию писателя ПРОДУКТА и пишет в неё строку
-// журнала, НЕ фиксируя её. Возвращает саму транзакцию: сценарий потери строится
-// только тем, что писатель остаётся в полёте.
+// beginWrite открывает настоящую PG TX и вызывает продуктовый emitter журнала,
+// НЕ фиксируя строку. Generic Repository.Writer сериализует TX общим G;
+// ordinary subject-change INSERT допускает независимые TX без этого admission.
+// Поэтому здесь проверяется emitter и reader, а не конкурентность generic Writer.
+// Все SQL guards, выдача ID и блокировки таблицы остаются настоящими.
 //
 // Пишет `EmitSubjectChangeEvent` — тот же путь, каким пишет прод. Собственный
 // INSERT здесь был бы вторым местом об одном предмете: миграция 0097 требует от
 // строки нагрузку, и посев, не знающий об этом, стерёг бы форму, которой в
 // очереди не бывает.
-func (s *subjectChangeStand) beginWrite(t *testing.T, subjectID string) kaname.Writer {
+func (s *subjectChangeStand) beginWrite(t *testing.T, subjectID string) pgx.Tx {
 	t.Helper()
-	w, err := s.ab.Writer(s.ctx)
+	w, err := s.pool.Begin(s.ctx)
 	require.NoError(t, err)
-	require.NoError(t, w.AccessBindingsW().EmitSubjectChangeEvent(s.ctx,
+	// Регистрируем сразу, до emitter: FailNow также должен вернуть соединение.
+	t.Cleanup(func() { _ = w.Rollback(s.ctx) })
+	require.NoError(t, kanamepg.EmitSubjectChangeEventForTest(s.ctx, w,
 		access_binding.SubjectChangeEvent{
 			SubjectID: subjectID, SubjectType: "user", Op: "binding_upsert",
 		}))

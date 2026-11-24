@@ -585,7 +585,8 @@ func TestIntegration_MirrorLeavingRollsBackToTheSameStructure(t *testing.T) {
 	t.Logf("строение до наката: фактов %d, из них о столбце зеркала %d", len(want), mirrorLines)
 	require.NotZero(t, mirrorLines, "до наката строение обязано называть столбец — иначе откат сверять не с чем")
 
-	after := mirrorLeavesHead(t)
+	after := historicalRegistrationDB(t)
+	seedCredentialOwners(t, after)
 	require.NoError(t, insertSAHead(after, "soc_00000000000000r01", "KEYPAIR", noHash, testPEM, "ES256", "[]", 0))
 	require.NoError(t, insertSAHead(after, "soc_00000000000000r02", "FEDERATED", noHash, "", "", trustedOne, 0))
 	require.NoError(t, insertSAHead(after, "soc_00000000000000r03", "SECRET", secretHash32(9), "", "", "[]", 30))
@@ -610,7 +611,7 @@ func TestIntegration_MirrorLeavingRollsBackToTheSameStructure(t *testing.T) {
 		`SELECT hydra_client_id FROM kaname.user_oauth_clients WHERE id = 'uoc_00000000000000r04'`).Scan(&userMirror))
 	require.False(t, userMirror.Valid, "откат: у личности зеркала не было и нет")
 
-	require.NoError(t, goose.Up(after, "."), "цепочка обязана накатываться снова")
+	require.NoError(t, goose.UpTo(after, ".", registrationReversibleTip), "цепочка обязана накатываться снова")
 	for _, tb := range credentialTables {
 		require.False(t, columnPresent(t, after, tb, mirrorColumn), "после повторного наката столбца в %s быть не должно", tb)
 	}

@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Pure subprocess/pipe controls, never Kaname/API/public acceptance."""
 import importlib.util
+import json
+import tempfile
 import os
 from pathlib import Path
 import selectors
@@ -180,6 +182,159 @@ class ProtocolAdapterControls(unittest.TestCase):
         self.assertTrue(result.protocol_audit["stdoutEOF"])
         self.assertTrue(result.protocol_audit["stderrEOF"])
         self.assertEqual(result.protocol_audit["remainingFDs"], 0)
+
+class HostedDiffDiagnosticsControls(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "rid_hosted_driver", Path(__file__).resolve().parents[3] / ".github/scripts/run-rid-native.py")
+        cls.hosted = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.hosted)
+
+    def payload(self, rid):
+        if rid == "03":
+            return {"caseId": "registry-installation-rid03-S2-ROLE-DENIED-VERIFY",
+                    "fields": ["operations", "raw"]}
+        return {"missing": False, "columns": ["modified_at"], "beforeDone": "pending",
+                "afterDone": "done", "kind": "service-account-key"}
+
+    def diagnostics(self, rid, *, outputs=None, end="fail", source=None, before_run=False,
+                    after_end=False, root_run=True, assertion=True, scan_suffix="", unknown=False):
+        h = self.hosted
+        root, predicates, _ = h.CASES["registry-installation-rid" + rid]
+        leaf = root + "/" + sorted(h.RID_MATRIX_NESTED[root])[0]
+        if unknown:
+            leaf += "/unknown"
+        kind = "RID03_READ_ONLY_DIFF" if rid == "03" else "RID05_OLD_OPERATION_DIFF"
+        expected_source = h.DIFF_MARKER_SOURCES[kind]
+        source = source or expected_source
+        outputs = outputs if outputs is not None else [json.dumps(self.payload(rid))]
+        marker_outputs = ["    " + Path(source).name + ":1: " + kind + " " + value + "\n"
+                          for value in outputs]
+        rows = []
+        def add(action, name, output=None):
+            row = {"Package": h.PACKAGE, "Test": name, "Action": action}
+            if output is not None:
+                row["Output"] = output
+            rows.append(json.dumps(row) + "\n")
+        if root_run:
+            add("run", root)
+        if before_run:
+            for output in marker_outputs:
+                add("output", leaf, output)
+        add("run", leaf)
+        if not before_run and not after_end:
+            for output in marker_outputs:
+                add("output", leaf, output)
+        if assertion:
+            add("output", leaf, "    Error Trace: " + str(h.ROOT / expected_source) + ":1\n")
+        add(end, leaf)
+        if after_end:
+            for output in marker_outputs:
+                add("output", leaf, output)
+        add(end, root)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            path.write_text("".join(rows) + scan_suffix)
+            return h.test_diagnostics(path, root, predicates), leaf
+
+    def test_rid11_role_readiness_keeps_only_closed_active_first_failure_marker(self):
+        h = self.hosted
+        root, predicates, _ = h.CASES["registry-installation-rid11"]
+        leaf = root + "/" + sorted(h.RID_MATRIX_NESTED[root])[0]
+        source = "cmd/kaname/installation_whole_delivery_native_test.go"
+        good = "    installation_whole_delivery_native_test.go:1: RID_ROLE_READINESS reason=deadline verbs=ready refs=failed\n"
+        def diagnose(outputs, *, end="fail", active=True, trace=source, suffix=""):
+            rows = [{"Action": "run", "Test": root}]
+            if active:
+                rows.append({"Action": "run", "Test": leaf})
+            rows += [{"Action": "output", "Test": leaf, "Output": value} for value in outputs]
+            rows += [{"Action": "output", "Test": leaf, "Output": "    Error Trace: " + str(h.ROOT / trace) + ":1\n"},
+                     {"Action": end, "Test": leaf}, {"Action": end, "Test": root}]
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "events.jsonl"
+                path.write_text("".join(json.dumps(dict(row, Package=h.PACKAGE)) + "\n" for row in rows) + suffix)
+                return h.test_diagnostics(path, root, predicates, timeout_seconds=1200)
+        self.assertEqual(diagnose([good])["roleReadiness"],
+                         {"reason": "deadline", "verbs": "ready", "refs": "failed"})
+        variants = [([good, good], {}), ([good.replace("deadline", "unit-secret")], {}),
+                    ([good.replace("refs=failed", "refs=unit-secret")], {}),
+                    ([good.rstrip() + " secret=unit-secret\n"], {}),
+                    ([good + "unit-secret\n"], {}), ([good], {"end": "pass"}),
+                    ([good], {"end": "skip"}), ([good], {"active": False}),
+                    ([good], {"trace": "cmd/kaname/installation_native_fixture_test.go"}),
+                    ([good], {"suffix": "invalid-json"})]
+        for outputs, options in variants:
+            with self.subTest(outputs=outputs, options=options):
+                result = diagnose(outputs, **options)
+                self.assertNotIn("roleReadiness", result)
+                self.assertNotIn("unit-secret", json.dumps(result))
+
+    def test_valid_red_markers_keep_only_safe_schema(self):
+        for rid, field in (("03", "readOnlyDiffs"), ("05", "oldOperationDiffs")):
+            with self.subTest(rid=rid):
+                result, leaf = self.diagnostics(rid)
+                self.assertEqual(result[field], [{"test": leaf, "diffs": [self.payload(rid)]}])
+
+    def test_non_red_or_inactive_or_unrecognized_markers_are_omitted(self):
+        variants = ({"end": "pass"}, {"end": "skip"}, {"before_run": True},
+                    {"after_end": True}, {"root_run": False}, {"assertion": False},
+                    {"unknown": True}, {"scan_suffix": "invalid-json"},
+                    {"source": "cmd/kaname/installation_native_fixture_test.go"})
+        for rid, field in (("03", "readOnlyDiffs"), ("05", "oldOperationDiffs")):
+            for variant in variants:
+                with self.subTest(rid=rid, variant=variant):
+                    result, _ = self.diagnostics(rid, **variant)
+                    self.assertNotIn(field, result)
+
+    def test_duplicate_malformed_and_overflow_invalidate_leaf(self):
+        for rid, field in (("03", "readOnlyDiffs"), ("05", "oldOperationDiffs")):
+            good = json.dumps(self.payload(rid))
+            for outputs in ([good, good], [good, "{}"], ["{}", good],
+                            [good, good.replace("{", '{"extra":"secret",', 1)],
+                            [good] * (self.hosted.RID03_OPERATION_MARKER_LIMIT + 1)):
+                with self.subTest(rid=rid, outputs=outputs):
+                    result, _ = self.diagnostics(rid, outputs=outputs)
+                    self.assertNotIn(field, result)
+                    self.assertNotIn("secret", json.dumps(result))
+
+    def test_read_only_parser_rejects_unbounded_or_noncanonical_values(self):
+        h = self.hosted
+        good = self.payload("03")
+        invalid = [dict(good, caseId="registry-installation-rid03-S3-ROLE-DENIED-VERIFY"),
+                   dict(good, caseId="registry-installation-rid03-S2-UNKNOWN-VERIFY"),
+                   dict(good, fields=[]), dict(good, fields=["raw", "operations"]),
+                   dict(good, fields=["raw", "raw"]), dict(good, fields=["secret"]),
+                   dict(good, fields=[{}]), dict(good, extra="secret")]
+        prefix = "    installation_newman_delegated_grant_test.go:1: RID03_READ_ONLY_DIFF "
+        for value in invalid:
+            with self.subTest(value=value):
+                self.assertIsNone(h.rid03_read_only_diff(prefix + json.dumps(value) + "\n", 1))
+        raw = json.dumps(good)
+        for output, limit in ((prefix + raw + "\n", 0), (prefix + raw, 1),
+                              (prefix + raw + "\nextra\n", 1),
+                              (prefix + raw.replace("{", '{"fields":[],', 1) + "\n", 1),
+                              (prefix + " " * 2048 + raw + "\n", 1)):
+            self.assertIsNone(h.rid03_read_only_diff(output, limit))
+
+    def test_rid05_reuses_strict_old_operation_schema(self):
+        h = self.hosted
+        good = self.payload("05")
+        prefix = "    installation_newman_deletion_delta_test.go:1: RID05_OLD_OPERATION_DIFF "
+        for value in (dict(good, columns=["secret"]), dict(good, missing=1),
+                      dict(good, beforeDone="secret"), dict(good, kind="secret"),
+                      dict(good, columns=["modified_at", "modified_at"])):
+            self.assertIsNone(h.rid03_old_operation_diff(
+                prefix + json.dumps(value) + "\n", 1, marker="RID05_OLD_OPERATION_DIFF"))
+        duplicate = json.dumps(good).replace("{", '{"missing":true,', 1)
+        self.assertIsNone(h.rid03_old_operation_diff(
+            prefix + duplicate + "\n", 1, marker="RID05_OLD_OPERATION_DIFF"))
+
+    def test_original_rid03_old_operation_parser_is_preserved(self):
+        h = self.hosted
+        value = self.payload("05")
+        output = "    installation_newman_delegated_grant_test.go:1: RID03_OLD_OPERATION_DIFF "
+        self.assertEqual(h.rid03_old_operation_diff(output + json.dumps(value) + "\n", 1), value)
 
 if __name__ == "__main__":
     unittest.main()

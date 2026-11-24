@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -656,7 +657,12 @@ func TestURG29_UnregisterOfUnregisteredKeyLeavesGrant(t *testing.T) {
 	w := newURXWorld(t)
 	id := w.grantTo(w.usrD, w.rolRegGet, urTarget(urQ), false, "URG-29: выдача на Q")
 
-	w.withdraw(w.ctx, urQ)
+	before := registrationAccessSnapshot(t, w.ctx, w.pool)
+	err := w.reg.Unregister(w.ctx, &iamv1.UnregisterResourceRequest{
+		SubjectId: "project:" + string(w.prjA), Relation: "project", Object: pcrRegType + ":" + urQ, SourceVersion: w.nextVersion(),
+	})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "AW-15: unknown scope refuses cleanup")
+	require.Equal(t, before, registrationAccessSnapshot(t, w.ctx, w.pool))
 
 	b := w.get(id)
 	assert.Equal(t, iamv1.AccessBinding_ACTIVE, b.GetStatus(), "URG-29: выдача на Q отозвана")
@@ -687,15 +693,49 @@ func TestURG31_PublicationWithdrawalIsNotUnregistration(t *testing.T) {
 	w := newURXWorld(t)
 	w.deliverNewEdition("URG-31")
 	w.rewire()
+	const repoID = pcrX + "/publication-twin"
+	require.NoError(t, w.reg.Register(w.ctx, &iamv1.RegisterResourceRequest{
+		SubjectId: pcrRegType + ":" + pcrX, Relation: "parent", Object: pcrRepoType + ":" + repoID,
+		ParentProjectId: string(w.prjA), ParentAccountId: string(w.accA),
+		ParentChain: []string{pcrRegType + ":" + pcrX, "project:" + string(w.prjA), "account:" + string(w.accA)}, SourceVersion: w.nextVersion(),
+	}))
+	// Завести настоящую прямую выдачу на ТОМ ЖЕ репозитории, чья публикация
+	// снимается; пережившая выдача на родителе не доказала бы это свойство.
+	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, repoID, false, "URG-31: repository is private before its direct grant")
+	role := w.seedRole("urg31_repo_get", domain.Rules{{Module: "registry", Resources: []string{"repositories"}, Verbs: []string{"get"}}})
+	grant := w.grantTo(w.usrD, role, resourcesTarget(&iamv1.ResourceRef{Type: "registry.repositories", Id: repoID}), false, "URG-31: direct repository grant")
+	require.Equal(t, iamv1.AccessBinding_ACTIVE, w.get(grant).GetStatus())
+	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, repoID, true, "URG-31: direct grant works before publication")
+	var chain []string
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT coalesce(array_agg(parent_type||':'||parent_id ORDER BY depth),'{}'::text[]) FROM kaname.resource_parent_edge WHERE object_type=$1 AND object_id=$2`, pcrRepoType, repoID).Scan(&chain))
+	require.Equal(t, []string{pcrRegType + ":" + pcrX, "project:" + string(w.prjA), "account:" + string(w.accA)}, chain)
+	registration := func() string {
+		var state string
+		require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT jsonb_build_array(
+ (SELECT to_jsonb(m) FROM kaname.resource_mirror m WHERE object_type='registry.repositories' AND object_id=$1),
+ (SELECT jsonb_agg(to_jsonb(e) ORDER BY depth) FROM kaname.resource_parent_edge e WHERE object_type=$2 AND object_id=$1),
+ (SELECT jsonb_agg(to_jsonb(s) ORDER BY to_jsonb(s)::text) FROM kaname.resource_registration_scope s WHERE object_type=$2 AND object_id=$1),
+ (SELECT jsonb_agg(to_jsonb(f) ORDER BY to_jsonb(f)::text) FROM kaname.relation_fact f WHERE object_type=$2 AND object_id=$1 AND relation='parent'))::text`, repoID, pcrRepoType).Scan(&state))
+		return state
+	}
+	var registered bool
+	require.NoError(t, w.pool.QueryRow(w.ctx, `SELECT EXISTS(SELECT 1 FROM kaname.resource_mirror WHERE object_type='registry.repositories' AND object_id=$1)`, repoID).Scan(&registered))
+	require.True(t, registered, "URG-31: child registration exists before publication")
+	beforeRegistration := registration()
 	pub := &iamv1.RegisterResourceRequest{
-		SubjectId: pcrAnon, Relation: "v_get", Object: pcrRegType + ":" + pcrX, SourceVersion: w.nextVersion(),
+		SubjectId: pcrAnon, Relation: "v_get", Object: pcrRepoType + ":" + repoID, SourceVersion: w.nextVersion(),
 	}
 	require.NoError(t, w.reg.Register(w.ctx, pub), "URG-31: публикация X")
+	w.pollAsk(pcrAnon, "v_get", pcrRepoType, repoID, true, "URG-31: anonymous publication works on the repository")
 
 	require.NoError(t, w.reg.Unregister(w.ctx, &iamv1.UnregisterResourceRequest{
-		SubjectId: pcrAnon, Relation: "v_get", Object: pcrRegType + ":" + pcrX, SourceVersion: w.nextVersion(),
+		SubjectId: pcrAnon, Relation: "v_get", Object: pcrRepoType + ":" + repoID, SourceVersion: w.nextVersion(),
 	}), "URG-31: снятие публикации")
 
+	w.pollAsk(pcrAnon, "v_get", pcrRepoType, repoID, false, "URG-31: publication withdrawal closes anonymous repository access")
+	require.Equal(t, iamv1.AccessBinding_ACTIVE, w.get(grant).GetStatus(), "URG-31: repository grant survives publication withdrawal")
+	w.pollAsk(w.usr(w.usrD), "v_get", pcrRepoType, repoID, true, "URG-31: direct repository access survives publication withdrawal")
+	require.Equal(t, beforeRegistration, registration(), "URG-31: child mirror, chain, saved scope and parent fact must survive unchanged")
 	assert.Equal(t, iamv1.AccessBinding_ACTIVE, w.get(w.grantB).GetStatus(), "URG-31: снятие публикации отозвало A")
 	assert.True(t, w.ask(w.usr(w.usrB), "v_get", pcrRegType, pcrX), "URG-31: usr-B не читает X")
 }
@@ -835,7 +875,7 @@ func TestURG01_RevokeCommitsOnlyWithUnregistration(t *testing.T) {
 		failingWithdrawal{inner: accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), pcrFacts{w.pcrWorld})},
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	err := uc.Unregister(w.ctx, &iamv1.UnregisterResourceRequest{
 		SubjectId: "project:" + string(w.prjA), Relation: "project", Object: pcrRegType + ":" + pcrX,
 		SourceVersion: w.nextVersion(),
@@ -892,23 +932,70 @@ func TestUnregistrationLookupUsesIndexes(t *testing.T) {
 	// Набор субъектов каждой выдачи — копия набора шаблона в ТОЙ ЖЕ инструкции:
 	// выдача без строки набора к фиксации не допускается (миграция 20261018214804),
 	// пара выдачи обязана быть в её наборе (миграция 20261019194800).
-	_, err := w.pool.Exec(w.ctx,
-		`WITH vol AS (
-		   INSERT INTO kaname.access_bindings
-		   SELECT (jsonb_populate_record(NULL::kaname.access_bindings, to_jsonb(b) || jsonb_build_object(
-		             'id', 'acbvol' || lpad(g::text, 14, '0'),
-		             'target_digest', 'vol' || g,
-		             'target', jsonb_build_object('resources', jsonb_build_array(
-		                 jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
-		     FROM kaname.access_bindings b, generate_series(1, 5000) g
-		    WHERE b.id = $2
-		   RETURNING id)
-		 INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
-		 SELECT vol.id, s.subject_type, s.subject_id, s.ordinal
-		   FROM vol, kaname.access_binding_subjects s
-		  WHERE s.binding_id = $2`,
-		pcrRegTgt, tmpl)
-	require.NoError(t, err, "п.10: объём выдач")
+	// Посев не является замером bulk-записи: каждая инструкция сохраняет прежний
+	// statement_timeout, а все 5000 выдач и их субъекты фиксируются одной TX.
+	seedTx, err := w.pool.Begin(w.ctx)
+	require.NoError(t, err)
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(w.ctx), 5*time.Second)
+		defer cancel()
+		_ = seedTx.Rollback(cleanup)
+	}()
+	for lo := 1; lo <= 5000; lo += 250 {
+		hi := lo + 249
+		_, err = seedTx.Exec(w.ctx,
+			`WITH vol AS (
+			   INSERT INTO kaname.access_bindings
+			   SELECT (jsonb_populate_record(NULL::kaname.access_bindings, to_jsonb(b) || jsonb_build_object(
+			             'id', 'acbvol' || lpad(g::text, 14, '0'),
+			             'target_digest', 'vol' || g,
+			             'target', jsonb_build_object('resources', jsonb_build_array(
+			                 jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
+			     FROM kaname.access_bindings b, generate_series($3::integer, $4::integer) g
+			    WHERE b.id = $2
+			   RETURNING id)
+			 INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
+			 SELECT vol.id, s.subject_type, s.subject_id, s.ordinal
+			   FROM vol, kaname.access_binding_subjects s
+			  WHERE s.binding_id = $2`,
+			pcrRegTgt, tmpl, lo, hi)
+		require.NoError(t, err, "п.10: объём выдач, порция %d–%d", lo, hi)
+	}
+	require.NoError(t, seedTx.Commit(w.ctx), "п.10: единая фиксация 5000 выдач с субъектами")
+
+	// До статистики доказываем точный объём, полный payload исходной JSONB-копии
+	// и равенство наборов субъектов каждой копии шаблону, включая ordinal.
+	var volume, exactCopies int
+	require.NoError(t, w.pool.QueryRow(w.ctx, `
+		WITH expected AS (
+		 SELECT (jsonb_populate_record(NULL::kaname.access_bindings, to_jsonb(b) || jsonb_build_object(
+		           'id', 'acbvol' || lpad(g::text, 14, '0'),
+		           'target_digest', 'vol' || g,
+		           'target', jsonb_build_object('resources', jsonb_build_array(
+		               jsonb_build_object('type', $1::text, 'id', 'vol' || g)))))).*
+		   FROM kaname.access_bindings b, generate_series(1, 5000) g WHERE b.id=$2)
+		SELECT (SELECT count(*) FROM kaname.access_bindings WHERE id LIKE 'acbvol%'),
+		       count(*) FILTER (WHERE actual.status='ACTIVE' AND to_jsonb(actual)=to_jsonb(expected))
+		  FROM expected JOIN kaname.access_bindings actual USING(id)`, pcrRegTgt, tmpl).Scan(&volume, &exactCopies))
+	require.Equal(t, 5000, volume, "п.10: ровно 5000 целевых ids")
+	require.Equal(t, 5000, exactCopies, "п.10: все 5000 live payload дословно скопированы из шаблона")
+	var templateSubjects, volumeSubjects, subjectDifferences int
+	require.NoError(t, w.pool.QueryRow(w.ctx, `
+		WITH ids AS (SELECT 'acbvol' || lpad(g::text,14,'0') AS id FROM generate_series(1,5000) g),
+		expected AS (
+		 SELECT ids.id AS binding_id,s.subject_type,s.subject_id,s.ordinal
+		   FROM ids CROSS JOIN kaname.access_binding_subjects s WHERE s.binding_id=$1),
+		actual AS (
+		 SELECT s.binding_id,s.subject_type,s.subject_id,s.ordinal
+		   FROM kaname.access_binding_subjects s JOIN ids ON ids.id=s.binding_id),
+		differences AS (
+		 (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+		 UNION ALL (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected))
+		SELECT (SELECT count(*) FROM kaname.access_binding_subjects WHERE binding_id=$1),
+		       (SELECT count(*) FROM actual), (SELECT count(*) FROM differences)`, tmpl).Scan(&templateSubjects, &volumeSubjects, &subjectDifferences))
+	require.Positive(t, templateSubjects, "п.10: непустой набор субъектов шаблона")
+	require.Equal(t, 5000*templateSubjects, volumeSubjects, "п.10: набор субъектов каждой из 5000 выдач")
+	require.Zero(t, subjectDifferences, "п.10: нет потерь, замен и лишних строк набора")
 	_, err = w.pool.Exec(w.ctx, `ANALYZE kaname.access_bindings`)
 	require.NoError(t, err, "п.10: статистика выдач")
 	explain("выдачи по ключу", "access_bindings_target_resources_live_idx", kanamepg.BindingsNamingKeySQL, pcrRegTgt, pcrX)

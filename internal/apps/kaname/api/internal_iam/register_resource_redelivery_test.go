@@ -3,32 +3,32 @@
 
 package internal_iam
 
-// register_resource_redelivery_test.go — the producer-cost contract of
-// RegisterResource under the DUPLICATE delivery every consumer performs.
+// register_resource_redelivery_test.go — контракт цены производителя для
+// RegisterResource при ДУБЛИРУЮЩЕЙ доставке каждого потребителя.
 //
-// THE DUPLICATION. Every resource create in vpc/compute/nlb/storage/registry emits a
-// register intent into the service's own fga_register_outbox INSIDE the writer-tx and,
-// after the commit, ALSO calls iam.RegisterResource synchronously with the same intent.
-// The async register-drainer then delivers that durable row as well. So iam receives
-// each registration TWICE, and — before this gate — did the FULL materialisation work
-// both times: mirror UPSERT, owner-tuple enqueue, reconcile-event enqueue and a
-// synchronous forward reconcile that fans out over every matching binding. Measured on
-// the stand: two byte-identical 27-row fga_outbox batches 6.7 ms apart for one created
-// network; 2.21 outbox rows per distinct tuple table-wide.
+// ДУБЛИРОВАНИЕ. Каждое создание ресурса в vpc/compute/nlb/storage/registry выпускает
+// намерение регистрации в собственный fga_register_outbox сервиса ВНУТРИ транзакции записи и,
+// после фиксации, ТАКЖЕ синхронно вызывает iam.RegisterResource с тем же намерением.
+// Асинхронный обработчик регистраций затем доставляет и постоянную строку. Поэтому iam получает
+// каждую регистрацию ДВАЖДЫ и до этой проверки выполнял ПОЛНУЮ материализацию
+// оба раза: UPSERT зеркала, постановку кортежа владельца и события сведения, а также
+// синхронный прямой проход по всем совпавшим выдачам. На стенде измерены
+// два побайтово одинаковых пакета fga_outbox по 27 строк с интервалом 6,7 мс для одной созданной
+// сети; 2,21 строки outbox на различный кортеж по всей таблице.
 //
-// THE COORDINATION. The two paths already carry the discriminator — a monotonic
-// source_version. The sync registrar stamps time.Now() AFTER the commit; the drainer
-// replays the version the DB stamped INSIDE the writer-tx, i.e. strictly earlier. The
-// mirror UPSERT is already guarded `WHERE resource_mirror.source_version <
-// EXCLUDED.source_version`, so the drainer's replay updates ZERO rows — it is already a
-// detected no-op whose result the use-case discarded. Reading that result and skipping
-// the downstream work is the fix.
+// КООРДИНАЦИЯ. Два пути уже несут различитель — монотонный
+// source_version. Синхронный регистратор ставит time.Now() ПОСЛЕ фиксации; обработчик
+// воспроизводит версию, поставленную БД ВНУТРИ транзакции записи, то есть строго раньше.
+// UPSERT зеркала уже защищён условием `WHERE resource_mirror.source_version <
+// EXCLUDED.source_version`, поэтому повтор обработчика обновляет НОЛЬ строк: это уже
+// обнаруженное отсутствие изменения, чей результат сценарий отбрасывал. Чтение этого результата
+// и пропуск последующей работы устраняют дефект.
 //
-// WHY THIS AND NOT QUEUE DEDUP. Collapsing unsent outbox rows by (event type, payload)
-// silently drops a re-grant: grant → revoke → grant folds into grant → revoke, losing
-// the grant. This gate keys on APPLIED STATE via a MONOTONIC version, not on queue
-// contents, so a later re-registration always carries a newer version (and a revoke
-// removes the mirror row outright) and is therefore never swallowed — pinned below.
+// ПОЧЕМУ ТАК, А НЕ УСТРАНЕНИЕМ ПОВТОРОВ ОЧЕРЕДИ. Схлопывание неотправленных строк outbox по (тип события, данные)
+// молча теряет повторную выдачу: выдача → отзыв → выдача превращается в выдача → отзыв,
+// теряя выдачу. Проверка опирается на ПРИМЕНЁННОЕ СОСТОЯНИЕ и МОНОТОННУЮ версию, а не содержимое
+// очереди, поэтому более поздняя регистрация всегда несёт новую версию (отзыв же
+// удаляет строку зеркала целиком) и никогда не проглатывается — закреплено ниже.
 
 import (
 	"context"
@@ -42,20 +42,21 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
-// ── fakes modelling the monotonic mirror ────────────────────────────────────
+// ── Двойники, моделирующие монотонное зеркало ────────────────────────────────
 
-// versionedMirror models kaname.resource_mirror's monotonic UPSERT guard: a row is
-// written only when the incoming source_version is STRICTLY newer than the stored one,
-// and the emitter reports whether it changed anything.
+// versionedMirror моделирует монотонную защиту UPSERT kaname.resource_mirror: строка
+// пишется, лишь когда входящий source_version СТРОГО новее сохранённого,
+// а механизм выпуска сообщает, изменилось ли что-нибудь.
 type versionedMirror struct {
 	noDescendants
 	mu       sync.Mutex
 	stored   map[string]time.Time
-	upserts  int // UpsertTx calls
-	deletes  int // DeleteTx calls
-	mutated  int // calls that actually changed a row
+	upserts  int // Вызовы UpsertTx.
+	deletes  int // Вызовы DeleteTx.
+	mutated  int // Вызовы, действительно изменившие строку.
 	labelsOf map[string]map[string]string
 }
 
@@ -70,11 +71,11 @@ func (m *versionedMirror) UpsertTx(_ context.Context, _ service.Tx, row service.
 	key := row.ObjectType + ":" + row.ObjectID
 	prev, exists := m.stored[key]
 	if exists && !row.SourceVersion.After(prev) {
-		return false, false, nil // stale/equal replay — 0 rows updated
+		return false, false, nil // Устаревший/равный повтор — обновлено 0 строк.
 	}
-	// projectionUnchanged: the write advanced only the version. These cases vary labels
-	// and nothing else, so labels are what the fake compares (the SQL statement compares
-	// parent-scope too — see resource_mirror.UpsertTx).
+	// projectionUnchanged: запись продвинула лишь версию. Эти случаи меняют только метки,
+	// поэтому двойник сравнивает их (SQL-оператор также сравнивает
+	// родительскую область — см. resource_mirror.UpsertTx).
 	unchanged := exists && sameStringMap(m.labelsOf[key], row.Labels)
 	m.stored[key] = row.SourceVersion
 	m.labelsOf[key] = row.Labels
@@ -82,7 +83,7 @@ func (m *versionedMirror) UpsertTx(_ context.Context, _ service.Tx, row service.
 	return true, unchanged, nil
 }
 
-// sameStringMap — set equality of two label maps.
+// sameStringMap — равенство двух карт меток как множеств.
 func sameStringMap(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false
@@ -109,7 +110,7 @@ func (m *versionedMirror) DeleteTx(_ context.Context, _ service.Tx, ot, oid stri
 	return false, nil
 }
 
-// countingEmitter counts the owner-tuple rows enqueued into fga_outbox.
+// countingEmitter считает строки кортежей владельца, поставленные в fga_outbox.
 type countingEmitter struct {
 	mu      sync.Mutex
 	writes  int
@@ -130,7 +131,7 @@ func (e *countingEmitter) EmitOrderedDeleteTx(_ context.Context, _ service.Tx, t
 	return nil
 }
 
-// countingReconcileEvents counts resource_reconcile_outbox enqueues.
+// countingReconcileEvents считает постановки в resource_reconcile_outbox.
 type countingReconcileEvents struct {
 	mu     sync.Mutex
 	events []string // eventType
@@ -149,7 +150,7 @@ func (r *countingReconcileEvents) count() int {
 	return len(r.events)
 }
 
-// versionedReq is a registerInput carrying an explicit source_version + labels.
+// versionedReq — registerInput с явными source_version и метками.
 type versionedReq struct {
 	subject, relation, object string
 	labels                    map[string]string
@@ -180,28 +181,28 @@ func newRedeliveryRig() *redeliveryRig {
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
 	rec := &smObjectReconciler{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"}).
 		WithReconcile(ev).
 		WithObjectReconciler(rec, nil)
 	return &redeliveryRig{uc: uc, mirror: m, emitter: e, events: ev, recon: rec}
 }
 
-// TestRegisterResource_DrainerReplay_DoesNoDuplicateWork — the core contract. The sync
-// registrar delivers first with the post-commit wall-clock version; the drainer replays
-// the same registration with the DB version stamped inside the writer-tx (strictly
-// earlier). The replay must be recognised as a no-op: no owner-tuple row, no reconcile
-// event, no forward reconcile fan-out.
+// TestRegisterResource_DrainerReplay_DoesNoDuplicateWork — основной контракт. Синхронный
+// регистратор доставляет первым с версией часов после фиксации; обработчик повторяет
+// ту же регистрацию с версией БД, поставленной внутри транзакции записи (строго
+// раньше). Повтор должен распознаваться как отсутствие изменения: ни строки кортежа владельца,
+// ни события сведения, ни веера прямого прохода.
 //
-// RED before the gate: the use-case discarded the mirror UPSERT's result and re-ran the
-// whole materialisation — 2 tuple rows, 2 reconcile events, 2 forward passes.
+// До проверки КРАСНО: сценарий отбрасывал результат UPSERT зеркала и повторял
+// всю материализацию — 2 строки кортежей, 2 события сведения, 2 прямых прохода.
 func TestRegisterResource_DrainerReplay_DoesNoDuplicateWork(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
 
-	inTx := time.Now()                           // stamped by the DB inside the producer's writer-tx
-	postCommit := inTx.Add(3 * time.Millisecond) // stamped by the sync registrar after commit
+	inTx := time.Now()                           // Поставлена БД внутри транзакции записи производителя.
+	postCommit := inTx.Add(3 * time.Millisecond) // Поставлена синхронным регистратором после фиксации.
 
-	// (1) The synchronous registrar's delivery — this one does the work.
+	// (1) Доставка синхронного регистратора — она выполняет работу.
 	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
 		labels: map[string]string{"tier": "gold"}, version: postCommit,
@@ -210,8 +211,8 @@ func TestRegisterResource_DrainerReplay_DoesNoDuplicateWork(t *testing.T) {
 	require.Equal(t, 1, rig.events.count(), "the first delivery enqueues the reconcile event")
 	require.Len(t, rig.recon.snapshot(), 1, "the first delivery drives the forward reconcile")
 
-	// (2) The register-drainer's replay of the SAME registration, carrying the older
-	// in-writer-tx version. Nothing about the resource changed.
+	// (2) Повтор обработчиком ТОЙ ЖЕ регистрации с более ранней
+	// версией из транзакции записи. Ресурс никак не изменился.
 	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
 		labels: map[string]string{"tier": "gold"}, version: inTx,
@@ -226,9 +227,9 @@ func TestRegisterResource_DrainerReplay_DoesNoDuplicateWork(t *testing.T) {
 	assert.Equal(t, 1, rig.mirror.mutated, "exactly one delivery mutated the mirror")
 }
 
-// TestRegisterResource_IdenticalReplay_DoesNoDuplicateWork — the same contract for an
-// exactly-equal version (an at-least-once redelivery of the identical row, e.g. a
-// drainer retry after a transient error): equal is not newer, so it is a no-op.
+// TestRegisterResource_IdenticalReplay_DoesNoDuplicateWork — тот же контракт для
+// точно равной версии (повторная доставка той же строки хотя бы один раз, например
+// повтор обработчика после временной ошибки): равная не новее, значит изменения нет.
 func TestRegisterResource_IdenticalReplay_DoesNoDuplicateWork(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
@@ -249,9 +250,9 @@ func TestRegisterResource_IdenticalReplay_DoesNoDuplicateWork(t *testing.T) {
 	assert.Len(t, rig.recon.snapshot(), 1, "three identical deliveries drive one forward reconcile")
 }
 
-// TestRegisterResource_NewerVersion_StillMaterializes — the gate must not swallow real
-// change. A label UPDATE re-registers the object with a NEWER version; the rematerialise
-// path (the closed revoke defect) must still fire in full.
+// TestRegisterResource_NewerVersion_StillMaterializes — проверка не должна проглатывать настоящее
+// изменение. UPDATE меток повторно регистрирует объект с НОВЕЙШЕЙ версией; путь повторной
+// материализации (закрытый дефект отзыва) должен срабатывать целиком.
 func TestRegisterResource_NewerVersion_StillMaterializes(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
@@ -261,8 +262,8 @@ func TestRegisterResource_NewerVersion_StillMaterializes(t *testing.T) {
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
 		labels: map[string]string{"tier": "gold"}, version: v1,
 	}))
-	// Label UPDATE — the grant-matching label is removed. This MUST rematerialise, so a
-	// now-unmatched grant is revoked by the reconcile pass it drives.
+	// UPDATE меток — метка совпадения выдачи снята. Это ОБЯЗАНО вызвать повторную материализацию,
+	// чтобы запущенный проход сведения отозвал больше не совпадающую выдачу.
 	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
 		labels: map[string]string{"tier": "bronze"}, version: v1.Add(time.Second),
@@ -273,30 +274,30 @@ func TestRegisterResource_NewerVersion_StillMaterializes(t *testing.T) {
 	assert.Len(t, rig.recon.snapshot(), 2, "a newer version re-runs the forward reconcile")
 }
 
-// TestRegisterResource_GrantRevokeGrant_NotCollapsed — the anti-trap regression, at the
-// producer boundary. The trap the obvious dedup falls into is collapsing
-// grant → revoke → grant into grant → revoke. Because this gate keys on a MONOTONIC
-// version (and an unregister removes the mirror row outright) rather than on payload
-// equality, the second grant is always materialised.
+// TestRegisterResource_GrantRevokeGrant_NotCollapsed — проверка против ловушки на
+// границе производителя. Ловушка очевидного устранения повторов — схлопнуть
+// выдача → отзыв → выдача в выдача → отзыв. Здесь ключ — МОНОТОННАЯ
+// версия (а снятие регистрации удаляет строку зеркала целиком), а не равенство данных,
+// поэтому вторая выдача всегда материализуется.
 func TestRegisterResource_GrantRevokeGrant_NotCollapsed(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
 	base := time.Now()
 
-	// GRANT.
+	// ВЫДАЧА.
 	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
 		labels: map[string]string{"tier": "gold"}, version: base,
 	}))
-	// REVOKE (unregister — the resource is deleted).
+	// ОТЗЫВ (снятие регистрации — ресурс удалён).
 	require.NoError(t, rig.uc.Unregister(ctx, &unregReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
 		version: base.Add(time.Second),
 	}))
 	require.Equal(t, 1, rig.emitter.deletes, "the unregister enqueues the tuple delete")
 
-	// GRANT AGAIN — a re-created resource with the same identity coordinates. The
-	// producer-side de-dup must NOT swallow this.
+	// ПОВТОРНАЯ ВЫДАЧА — заново созданный ресурс с теми же координатами идентичности.
+	// Устранение повторов производителя НЕ должно проглотить её.
 	require.NoError(t, rig.uc.Register(ctx, &versionedReq{
 		subject: "project:prj-1", relation: "project", object: "vpc_network:net-1",
 		labels: map[string]string{"tier": "gold"}, version: base.Add(2 * time.Second),
@@ -304,19 +305,19 @@ func TestRegisterResource_GrantRevokeGrant_NotCollapsed(t *testing.T) {
 
 	assert.Equal(t, 2, rig.emitter.writes,
 		"the re-grant after a revoke must be re-emitted — never collapsed into grant → revoke")
-	// Three passes, one per step: both grants AND the revoke in between drive their
-	// materialisation in-process. The revoke's pass is what keeps withdrawal off the
-	// reconcile queue's critical path (see unregister_resource_sync_revoke_test.go);
-	// before it, this sequence produced two passes and the middle step's removal waited
-	// for the drainer.
+	// Три прохода, по одному на шаг: обе выдачи И промежуточный отзыв выполняют
+	// материализацию в процессе. Проход отзыва выводит снятие из
+	// критического пути очереди сведения (см. unregister_resource_sync_revoke_test.go);
+	// прежде последовательность давала два прохода, а удаление среднего шага ждало
+	// обработчика.
 	assert.Len(t, rig.recon.snapshot(), 3,
 		"grant, revoke and re-grant each drive their own post-commit pass")
 }
 
-// TestRegisterResource_UnregisterAlwaysMaterializes — revokes are never gated. An
-// unregister always enqueues the tuple delete and the reconcile event, even when the
-// mirror row is already gone: a swallowed revoke is an over-grant, and the asymmetry is
-// deliberate (fail-closed — the cost saving is taken only on the grant path).
+// TestRegisterResource_UnregisterAlwaysMaterializes — отзывы никогда не отсекаются. Снятие
+// регистрации всегда ставит удаление кортежа и событие сведения, даже если
+// строка зеркала уже исчезла: проглоченный отзыв — избыточная выдача, асимметрия
+// намеренна (отказ по умолчанию — цена сокращается только на пути выдачи).
 func TestRegisterResource_UnregisterAlwaysMaterializes(t *testing.T) {
 	rig := newRedeliveryRig()
 	ctx := context.Background()
@@ -333,7 +334,7 @@ func TestRegisterResource_UnregisterAlwaysMaterializes(t *testing.T) {
 	assert.Equal(t, 2, rig.events.count(), "every unregister enqueues the reconcile event")
 }
 
-// unregReq satisfies unregisterInput.
+// unregReq удовлетворяет unregisterInput.
 type unregReq struct {
 	subject, relation, object string
 	version                   time.Time
@@ -346,23 +347,24 @@ func (r *unregReq) GetSourceVersion() *timestamppb.Timestamp {
 	return timestamppb.New(r.version)
 }
 
-// TestRegisterResource_UnversionedProducer_IsNeverGated — the gate requires positive
-// proof of redelivery, and an unversioned producer supplies none.
+// TestRegisterResource_UnversionedProducer_IsNeverGated — проверка требует положительного
+// доказательства повторной доставки, которого производитель без версии не предоставляет.
 //
-// A caller that sends no source_version maps to '-infinity', which loses EVERY monotonic
-// comparison — so after the first write its registrations report `changed = false` for a
-// reason that has nothing to do with redelivery. Gating on that would suppress real
-// materialisation and push the caller onto the async drain, widening its read-your-writes
-// window instead of saving anything.
+// Отсутствующий source_version отображается в '-infinity', проигрывающий КАЖДОЕ монотонное
+// сравнение, поэтому после первой записи регистрации сообщают `changed = false`
+// по причине, не связанной с повторной доставкой. Отсечение здесь подавило бы настоящую
+// материализацию и отправило вызывающего в асинхронную очередь, расширяя окно чтения собственных
+// записей вместо какой-либо экономии.
 //
-// This is not hypothetical: registry's synchronous registrar sends no source_version, and
-// gating it stalled the registry-redesign suite on the live stand (6.8s → >10min of retry
-// looping) before this guard was added.
+// Это наблюдалось: синхронный регистратор registry не передаёт source_version, и
+// его отсечение остановило набор registry-redesign на живом стенде (6,8с → >10мин повторов)
+// до добавления этой защиты.
 func TestRegisterResource_UnversionedProducer_IsNeverGated(t *testing.T) {
 	rig := newRedeliveryRig()
+	rig.uc.WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "registry"})
 	ctx := context.Background()
 
-	// An unversioned producer: source_version is the zero time ⇒ '-infinity'.
+	// Производитель без версии: source_version — нулевое время ⇒ '-infinity'.
 	unversioned := func() *versionedReq {
 		return &versionedReq{
 			subject: "project:prj-1", relation: "project", object: "registry_registry:rep-1",

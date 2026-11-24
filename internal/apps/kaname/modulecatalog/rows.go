@@ -103,6 +103,9 @@ type Declared struct {
 // бы недетерминированный порядок операторов и сделал бы отказ на конкурентном
 // применении зависящим от прогона.
 func RowsOf(m *manifest.Manifest) (Declared, error) {
+	if faults := manifest.ValidateGrantVerbs(m); len(faults) > 0 {
+		return Declared{}, errors.Join(faults...)
+	}
 	out := Declared{Module: m.Module}
 
 	resources := make([]manifest.Resource, len(m.Resources))
@@ -144,11 +147,18 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 				writes = append(writes, domain.WriteGrant{Relation: w.Relation, SubjectType: s}.Token())
 			}
 		}
-		out.Resources = append(out.Resources, catalog.ResourceRow{
+		row := catalog.ResourceRow{
 			Module: m.Module, Resource: r.Name, ObjectType: r.ObjectType,
 			ParentTypes: parentTypes, ParentNames: parentNames, Writes: writes,
 			PublicReadToChildren: r.PassesPublicRead(), PermanentProject: r.HoldsPermanentProject(),
-		})
+		}
+		if child := r.ChildRegistration; child != nil {
+			row.ChildRegistration = &catalog.ChildRegistrationRule{
+				Verb: canonicalVerb(child.Verb), ParentSegments: child.ParentSegments, MaxChildren: child.MaxChildren,
+				MaxCreates: child.MaxCreates, WindowSeconds: child.WindowSeconds,
+			}
+		}
+		out.Resources = append(out.Resources, row)
 
 		// declaredBy — токен → имя, каким его написал манифест. Нужен ИМЕННО для
 		// отказа: без исходного написания столкновение читалось бы как «два
@@ -213,6 +223,16 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 				ContainerParent: r.ParentTypeOf(cv), ContainerRelation: cv.Relation,
 			})
 		}
+		// kaname#1034: metadata пары не входят в tokens/пообъектный словарь.
+		for _, verb := range r.GrantVerbs {
+			token := canonicalVerb(verb)
+			if _, dup := declaredBy[token]; dup || container[token] {
+				return Declared{}, fmt.Errorf("%w: grant verb %s.%s.%s", ErrVerbTokenCollision, m.Module, r.Name, token)
+			}
+			declaredBy[token] = verb
+			out.Verbs = append(out.Verbs, catalog.VerbRow{Module: m.Module, Resource: r.Name, Verb: token})
+		}
+
 		// Ресурс, не объявивший ни одного действия, ярусных строк НЕ получает:
 		// у него нет ни одного отношения `v_*`, правило на него не резолвится
 		// ничем, и ярусная строка обещала бы автору выдачу, которой не будет.

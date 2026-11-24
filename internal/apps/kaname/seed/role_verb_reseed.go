@@ -200,7 +200,7 @@ func ReseedSystemRoleVerbs(
 // вправе увидеть пустой промежуток, потому что в этом окне всякий вердикт по роли
 // отказывает, и отказывает молча.
 //
-// Транзакцию открывает и закрывает `shared.DoWithWriteTxVoid` — та же форма, что
+// Транзакцию открывает и закрывает `shared.DoWithInstallationWriteTxVoid` — та же форма, что
 // у соседнего досева этого пакета: одна транзакция на вызов, значит «на роль» —
 // это вызов в цикле по ролям, а не отдельный механизм.
 //
@@ -223,13 +223,13 @@ func replaceRoleVerbsInOwnTx(
 	roleID string,
 ) (int, error) {
 	pairs := 0
-	if err := shared.DoWithWriteTxVoid(ctx, repo,
+	if err := shared.DoWithInstallationWriteTxVoid(ctx, repo, kanamerepo.AuthorityRole,
 		func(ctx context.Context, w kanamerepo.Writer) error {
 			rules, policy, live, err := w.RolesW().RulesForRegrain(ctx, domain.RoleID(roleID))
 			if err != nil || !live {
 				return err
 			}
-			sels := cat.GrantSelectors(rules.MaterializingSelectors(), policy)
+			sels := cat.GrantSelectors(domain.RegrainSelectors(rules), policy)
 			verbs := cat.RoleVerbsFromSelectors(sels, policy)
 			if err := w.RolesW().ReplaceRoleVerbs(ctx, domain.RoleID(roleID), verbs); err != nil {
 				return err

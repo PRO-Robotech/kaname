@@ -1,0 +1,18 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Законный операнд контракта атрибуции, только для изолированной базы пробы.
+# Группа не имеет членов и не совпадает с защищённой прежней личностью установки.
+apiVersion: iam/v1
+module: iam
+seed:
+  groups:
+    - name: parity-owned-group
+      account: system
+      description: Группа явного владельца для проверки атрибуции посева.
+  accessBindings:
+    - subjects:
+        - {type: group, name: parity-owned-group}
+      grantedRelation: fga_writer
+      scopeType: iam.cluster
+      scopeId: cluster_root
+      target: allInScope

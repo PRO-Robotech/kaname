@@ -13,8 +13,9 @@ import (
 
 // Настоящая транзакция PostgreSQL владеет ТОЧНОЙ производственной блокировкой пары. Этот барьер не пишет строки GD,
 // удостоверений, полномочий, временных меток или допуска.
-// Двух ожидающих PID недостаточно: AwaitTwo проверяет тот же ключ блокировки,
-// разные настоящие серверные процессы и всё ещё отсутствующую полную историю пары до освобождения.
+// AwaitTwo связывает двух точных участников с удерживаемым ключом через настоящий
+// граф ожиданий: authority guards могут сериализовать их раньше legacy pair lock.
+// Полная история пары должна оставаться пустой до освобождения.
 type nativePairBarrier struct {
 	pool              *pgxpool.Pool
 	tx                pgx.Tx
@@ -51,27 +52,48 @@ func holdNativeAbsentPair(ctx context.Context, pool *pgxpool.Pool, account, dele
 	good = true
 	return b, nil
 }
-func (b *nativePairBarrier) AwaitTwo(ctx context.Context) ([]int32, error) {
+func (b *nativePairBarrier) AwaitTwo(ctx context.Context, applications []string) ([]int32, error) {
+	if len(applications) != 2 || applications[0] == "" || applications[1] == "" || applications[0] == applications[1] {
+		return nil, fmt.Errorf("two distinct exact participant applications required")
+	}
+	var lastPIDs []int32
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		rows, err := b.pool.Query(ctx, `SELECT DISTINCT waiting.pid FROM pg_locks waiting
+		rows, err := b.pool.Query(ctx, `WITH RECURSIVE participants AS MATERIALIZED (
+ SELECT pid,application_name,pg_blocking_pids(pid) AS blockers
+ FROM pg_stat_activity
+ WHERE datname=current_database() AND application_name=ANY($2::text[])
+ AND state='active' AND wait_event_type='Lock'
+), contenders(pid) AS (
+ SELECT DISTINCT waiting.pid FROM pg_locks waiting
  JOIN pg_locks held ON held.locktype='advisory' AND held.granted AND held.pid=$1
  AND waiting.database=held.database AND waiting.classid=held.classid
  AND waiting.objid=held.objid AND waiting.objsubid=held.objsubid
- JOIN pg_stat_activity a ON a.pid=waiting.pid
+ JOIN participants a ON a.pid=waiting.pid
  WHERE waiting.locktype='advisory' AND NOT waiting.granted
- AND a.wait_event_type='Lock' AND a.wait_event='advisory' ORDER BY waiting.pid`, b.pid)
+ AND $1=ANY(a.blockers)
+ UNION
+ SELECT a.pid FROM participants a JOIN contenders c ON c.pid=ANY(a.blockers)
+)
+SELECT c.pid,a.application_name FROM contenders c JOIN participants a ON a.pid=c.pid ORDER BY c.pid`, b.pid, applications)
 		if err != nil {
 			return nil, err
 		}
 		var pids []int32
+		seen := map[string]bool{}
 		for rows.Next() {
 			var pid int32
-			if err = rows.Scan(&pid); err != nil {
+			var application string
+			if err = rows.Scan(&pid, &application); err != nil {
 				rows.Close()
 				return nil, err
 			}
+			if seen[application] {
+				rows.Close()
+				return nil, fmt.Errorf("multiple blocked backends from the same participant %s", application)
+			}
+			seen[application] = true
 			pids = append(pids, pid)
 		}
 		err = rows.Err()
@@ -79,6 +101,7 @@ func (b *nativePairBarrier) AwaitTwo(ctx context.Context) ([]int32, error) {
 		if err != nil {
 			return nil, err
 		}
+		lastPIDs = pids
 		if len(pids) > 2 {
 			return nil, fmt.Errorf("unexpected extra pair contender: %d", len(pids))
 		}
@@ -94,7 +117,7 @@ func (b *nativePairBarrier) AwaitTwo(ctx context.Context) ([]int32, error) {
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("two exact participants did not reach the held pair through the lock graph (observed %d): %w", len(lastPIDs), ctx.Err())
 		case <-ticker.C:
 		}
 	}

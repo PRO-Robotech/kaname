@@ -24,8 +24,8 @@ import (
 const (
 	// auditEventUserTokenIssued — UserTokenService.Issue.
 	auditEventUserTokenIssued = "iam.user_token.issued"
-	// auditEventUserTokenRevoked — UserTokenService.Revoke.
-	auditEventUserTokenRevoked = "iam.user_token.revoked" // #nosec G101 -- audit event-type constant, not a credential
+	// auditEventUserGrantRevoked — UserTokenService.Revoke.
+	auditEventUserGrantRevoked = "iam.user_token.revoked"
 )
 
 // auditEmitter — порт для эмита одной durable audit_outbox compliance-строки

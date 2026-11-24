@@ -262,11 +262,20 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          {{- if not (or .Values.db.migrationDSNSecretName .Values.db.migrationDSNSecretKey) }}
           volumeMounts:
             - name: config
               mountPath: /etc/kaname
               readOnly: true
+          {{- end }}
           env:
+            {{- if or .Values.db.migrationDSNSecretName .Values.db.migrationDSNSecretKey }}
+            - name: MIGRATOR_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "db.migrationDSNSecretName обязателен для отдельного migrator DSN" .Values.db.migrationDSNSecretName | quote }}
+                  key: {{ required "db.migrationDSNSecretKey обязателен для отдельного migrator DSN" .Values.db.migrationDSNSecretKey | quote }}
+            {{- else }}
             - name: KANAME_CONFIG_PATH
               value: /etc/kaname/config.yaml
             - name: KANAME_DB_PASSWORD
@@ -274,6 +283,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.db.passwordSecretName }}
                   key: {{ .Values.db.passwordSecretKey }}
+            {{- end }}
       containers:
         - name: {{ .Values.name }}
           image: "{{ .Values.image }}"

@@ -26,6 +26,236 @@
  },
  "groups": [
   {
+   "id": "rid06-native",
+   "why": "нативная проверка RID-06 с 30 публичными фазами",
+   "jobs": [
+    "e2e-newman.yml:rid06"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid06.py",
+    "tests/newman/collections/registry-installation-rid06.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid05-native",
+   "why": "нативная проверка RID-05 с 30 публичными фазами",
+   "jobs": [
+    "e2e-newman.yml:rid05"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid05.py",
+    "tests/newman/collections/registry-installation-rid05.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid03-native",
+   "why": "нативная проверка RID-03 с 44 публичными фазами",
+   "jobs": [
+    "e2e-newman.yml:rid03"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid03.py",
+    "tests/newman/collections/registry-installation-rid03.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid01-native",
+   "why": "нативная установка и обновление токена с публичными фазами RID-01",
+   "jobs": [
+    "e2e-newman.yml:rid01"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid01.py",
+    "tests/newman/collections/registry-installation-rid01.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid02-native",
+   "why": "нативная повторная установка и конкурентные операции с четырьмя публичными фазами RID-02",
+   "jobs": [
+    "e2e-newman.yml:rid02"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid02.py",
+    "tests/newman/collections/registry-installation-rid02.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid04-native",
+   "why": "нативная проверка вывода создателя из эксплуатации с публичными фазами RID-04",
+   "jobs": [
+    "e2e-newman.yml:rid04"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid04.py",
+    "tests/newman/collections/registry-installation-rid04.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid07-native",
+   "why": "нативная полная матрица RID-07 с 32 публичными фазами",
+   "jobs": [
+    "e2e-newman.yml:rid07"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid07.py",
+    "tests/newman/collections/registry-installation-rid07.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid08-native",
+   "why": "нативная проверка RID-08 с шестью публичными фазами после реального окна допуска",
+   "jobs": [
+    "e2e-newman.yml:rid08"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid08.py",
+    "tests/newman/collections/registry-installation-rid08.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid09-native",
+   "why": "нативная полная матрица RID-09 с 32 публичными фазами",
+   "jobs": [
+    "e2e-newman.yml:rid09"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid09.py",
+    "tests/newman/collections/registry-installation-rid09.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid10-native",
+   "why": "нативная проверка сбоя и вывода создателя посреди поставки с шестью публичными фазами RID-10",
+   "jobs": [
+    "e2e-newman.yml:rid10"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid10.py",
+    "tests/newman/collections/registry-installation-rid10.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
    "id": "go-build",
    "why": "сборка, vet, gofmt, линтер, gosec; хуки отправки и записи ревью — в задании сборки",
    "jobs": [
@@ -63,7 +293,9 @@
    "id": "go-unit",
    "why": "пробы -race -short: пакеты и пробы, обходящие дерево (deploy/, tests/newman, миграции) — любой путь",
    "jobs": [
-    "ci.yml:unit"
+    "ci.yml:unit",
+    "ci.yml:unitmain",
+    "ci.yml:unitcensus"
    ],
    "paths": [
     "**"
@@ -78,7 +310,9 @@
    "id": "tree-gates-newman",
    "why": "Go-пробы, читающие tests/newman",
    "jobs": [
-    "ci.yml:unit"
+    "ci.yml:unit",
+    "ci.yml:unitmain",
+    "ci.yml:unitcensus"
    ],
    "paths": [
     "tests/**"
@@ -154,11 +388,24 @@
   },
   {
    "id": "stand",
-   "why": "бинарь службы, посев, стенд: автономный стенд, волна церемонии, посадка own, образ",
+   "why": "бинарь службы, посев, стенд и общие входы нативных RID: автономный стенд, волна церемонии, посадка own, образ",
    "jobs": [
     "e2e-newman.yml:stand",
     "e2e-newman.yml:stand-ceremony",
-    "e2e-newman.yml:chart-own"
+    "e2e-newman.yml:chart-own",
+    "e2e-newman.yml:rid01",
+    "e2e-newman.yml:rid02",
+    "e2e-newman.yml:rid04",
+    "e2e-newman.yml:rid07",
+    "e2e-newman.yml:rid08",
+    "e2e-newman.yml:rid09",
+    "e2e-newman.yml:rid10",
+    "e2e-newman.yml:rid03",
+    "e2e-newman.yml:rid05",
+    "e2e-newman.yml:rid06",
+    "e2e-newman.yml:rid11-shards",
+    "e2e-newman.yml:rid11",
+    "e2e-newman.yml:rid12"
    ],
    "paths": [
     "**/*.go",
@@ -367,6 +614,54 @@
      "title": "сборка образа (docker) — судит конвейер"
     }
    ]
+  },
+  {
+   "id": "rid11-native",
+   "why": "нативная проверка RID-11 с 128 публичными фазами",
+   "jobs": [
+    "e2e-newman.yml:rid11-shards",
+    "e2e-newman.yml:rid11"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid11.py",
+    "tests/newman/collections/registry-installation-rid11.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    ".github/scripts/aggregate-rid11-native.py",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
+  },
+  {
+   "id": "rid12-native",
+   "why": "нативная проверка RID-12 с 65 публичными фазами",
+   "jobs": [
+    "e2e-newman.yml:rid12"
+   ],
+   "paths": [
+    "cmd/kaname/installation_*.go",
+    "internal/testsupport/installruntime/**",
+    "internal/manifest/**",
+    "tests/newman/cases/registry-installation-rid12.py",
+    "tests/newman/collections/registry-installation-rid12.postman_collection.json",
+    "tests/newman/scripts/collect-rid-native.py",
+    "tests/newman/scripts/run-rid-native.cjs",
+    "tests/newman/scripts/selftest_rid_native_bridge.py",
+    ".github/scripts/run-rid-native.py",
+    ".github/scripts/run-rid-native-hosted.sh",
+    ".github/scripts/stand-runner-bootstrap.sh",
+    "go.mod",
+    "go.sum"
+   ],
+   "local": []
   }
  ]
 }

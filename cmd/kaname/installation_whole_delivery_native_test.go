@@ -20,7 +20,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
-	"gopkg.in/yaml.v3"
 )
 
 type rid09Input struct {
@@ -100,10 +99,11 @@ func rid09Start(t *testing.T, f *installationNativeWorld, in rid09Input) *rid02O
 	dir := filepath.Join(root, "delivery")
 	_, err := in.Delivery.Write(dir, in.Reverse)
 	require.NoError(t, err)
-	body, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}})
+	body, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": map[string]any{"credentialFile": f.creator.CredentialFile}}, f.writerPlan)
 	require.NoError(t, err)
 	config := filepath.Join(root, "config.yaml")
 	require.NoError(t, os.WriteFile(config, body, 0600))
+	ridRegistrationStartupProof(t, root, body, f.writerPlan)
 	executable := rid06HashExecutable(t)
 	child := startRIDInstallationChild(t, f, "whole-startup", ridWholeChildInput{ConfigPath: config, EvidenceDir: filepath.Join(f.session.Root, "whole-startup")}, f.session.Environment, ridWholeChildEnv, "TestRIDWholeDeliveryOwnedStartupChild", "3m")
 	parentCG, err := os.ReadFile("/proc/self/cgroup")
@@ -111,10 +111,11 @@ func rid09Start(t *testing.T, f *installationNativeWorld, in rid09Input) *rid02O
 	childCG, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", child.cmd.Process.Pid))
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(parentCG, childCG))
-	memory, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	cgroupDir := ridOwnedCgroup(t, parentCG)
+	memory, err := os.ReadFile(filepath.Join(cgroupDir, "memory.max"))
 	require.NoError(t, err)
 	require.Equal(t, "4294967296", strings.TrimSpace(string(memory)))
-	swap, err := os.ReadFile("/sys/fs/cgroup/memory.swap.max")
+	swap, err := os.ReadFile(filepath.Join(cgroupDir, "memory.swap.max"))
 	require.NoError(t, err)
 	require.Equal(t, "0", strings.TrimSpace(string(swap)))
 	t.Cleanup(func() { require.Equal(t, executable, rid06HashExecutable(t)) })
@@ -176,20 +177,25 @@ func rid09Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
 			t.Fatal("actual complete delivery exited before readiness")
 		default:
 		}
-		attempt, stop := context.WithTimeout(ctx, time.Second)
-		err := f.wire.ProductionReady(attempt)
-		stop()
-		if err == nil {
+		if !c.seenEvent {
+			attempt, stop := context.WithTimeout(ctx, time.Second)
+			err := f.wire.ProductionReady(attempt)
+			stop()
+			// Успешная аутентификация требует аудита реально выданного токена FD5.
+			c.seenEvent = err == nil
+		}
+		// Снимок после успешной поставки снимается по завершённым
+		// проекциям этого процесса.
+		if c.seenEvent && ridCatalogRoleProjectionsReady(filepath.Join(c.dir, "stdout")) == nil {
 			require.NoError(t, ctx.Err())
 			break
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("full delivery readiness deadline")
+			t.Fatal("полная поставка или пересчёт проекций ролей не завершились в срок")
 		case <-ticker.C:
 		}
 	}
-	c.seenEvent = true // успешная настоящая аутентификация требует непустого аудита настоящего токена FD5.
 	require.NoError(t, installruntime.CheckOwnedListeners(c.cmd.Process.Pid, c.dir, installruntime.DefaultNativePorts().All()...))
 	rid06ReadResult(t, c, installationResult{Stage: "delegation", Code: "OK", CompletedPairs: 6})
 }
@@ -226,6 +232,7 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 	require.Len(t, accounts, 3)
 	require.EqualValues(t, 1, initial.Admitted)
 	require.EqualValues(t, 3, full.Admitted)
+	rid09AwaitBaseRoleProjections(t, f.given.ctx, f.base)
 	rid09RequireNoDelivery(t, f, accounts)
 	beforePublic := rid09ReadPublic(t, f)
 	if consumer != nil {
@@ -266,9 +273,10 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 		require.Equal(t, ops, rid08GDOperations(t, f))
 		// Читаем публичные последствия только после авторитетного доказательства до/после
 		// остановленного процесса. Перезапуск — штатный запуск без поставки, а не починка.
-		p, err := f.session.StartBase(f.given.ctx)
+		p, err := f.session.StartBase(f.given.ctx, f.writerPlan)
 		require.NoError(t, err)
 		require.NoError(t, p.OwnsListeners(installruntime.DefaultNativePorts().All()...))
+		rid09AwaitBaseRoleProjections(t, f.given.ctx, p)
 		rid09RequireNoDelivery(t, f, accounts)
 		out.PublicAfter = rid09ReadPublic(t, f)
 		require.Equal(t, beforePublic, out.PublicAfter, "all existing public catalog/roles/groups/joins/grants remain unchanged")
@@ -300,6 +308,37 @@ func rid09World(t *testing.T, in rid09Input, consumer rid09LivePublicConsumer) r
 	rid08Write(t, f.session.Root, "rid09-completed-proof", out)
 	return out
 }
+
+// До полной переписи List/Get должны видеть завершённые проекции своего запуска.
+func rid09AwaitBaseRoleProjections(t *testing.T, ctx context.Context, p *installruntime.Process) {
+	t.Helper()
+	ready, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	state := ridRoleProjectionState{verbs: "unseen", refs: "unseen"}
+	err := p.AwaitReady(ready, func(context.Context) error {
+		var probeErr error
+		state, probeErr = ridCatalogRoleProjectionsProbe(p.StdoutPath)
+		return probeErr
+	})
+	if err != nil {
+		// Только закрытая классификация последней пробы. Ошибка
+		// процесса и исходные журналы могут содержать удостоверения.
+		reason := "process-exited"
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = "deadline"
+		} else if errors.Is(err, context.Canceled) {
+			reason = "canceled"
+		}
+		ridLogRoleReadiness(t, reason, state)
+	}
+	require.NoError(t, err, "стартовый пересчёт проекций ролей не завершён")
+}
+
+// Не t.Helper: маркер сохраняет точный источник для закрытого сборщика.
+func ridLogRoleReadiness(t *testing.T, reason string, state ridRoleProjectionState) {
+	t.Logf("RID_ROLE_READINESS reason=%s verbs=%s refs=%s", reason, state.verbs, state.refs)
+}
+
 func rid09Matrix(t *testing.T, twin bool, consumer rid09LivePublicConsumer) []rid09Observation {
 	t.Helper()
 	// Проверяем все точные порождённые байты для ОБОИХ порядков файлов до первого PG.

@@ -38,6 +38,10 @@ func seedDocument(t *testing.T, edit func(seed map[string]any)) []byte {
 	if !ok {
 		t.Fatalf("раздел `seed` у манифеста службы не объявлен — сценарии о его форме беспредметны (Р1)")
 	}
+	// Пробы изменения формы MRW всё равно используют полную допустимую пару группы и выдачи,
+	// явно созданную в памяти. Она не входит в поставляемый манифест.
+	seed["groups"] = []any{map[string]any{"name": "module-relation-writers", "account": "system", "description": "Compatibility module writer probe group"}}
+	seed["accessBindings"] = []any{map[string]any{"subjects": []any{map[string]any{"type": "group", "name": "module-relation-writers"}}, "grantedRelation": "fga_writer", "scopeType": "iam.cluster", "scopeId": "cluster_root", "target": "allInScope"}}
 	edit(seed)
 	out, err := yaml.Marshal(doc)
 	if err != nil {
@@ -178,4 +182,14 @@ func TestMRW10_RecipientKindTheRelationDoesNotAdmitIsRefused(t *testing.T) {
 			t.Fatalf("без оракула судья утверждает о виде получателя: %v", err)
 		}
 	})
+}
+
+func TestAccountWriterEmbeddedManifestHasNoBlanketOrUnbackedGroup(t *testing.T) {
+	m, err := Load()
+	if err != nil {
+		t.Fatalf("actual shipped manifest must load: %v", err)
+	}
+	if m.Seed != nil && (len(m.Seed.Groups) != 0 || len(m.Seed.AccessBindings) != 0) {
+		t.Fatalf("actual shipped seed still provisions legacy writer authority: %+v", m.Seed)
+	}
 }

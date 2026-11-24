@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
 // dfRecon — реконсайлер, который ДОКЛАДЫВАЕТ о состоянии полученного контекста:
@@ -90,7 +91,7 @@ func TestRegisterResource_ForwardSurvivesCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	txb := &dfCommitCancel{cancel: cancel}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithObjectReconciler(rec, nil)
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"}).WithObjectReconciler(rec, nil)
 
 	// Ровно та ситуация, что на стенде: дедлайн вызывающего истёк к моменту, когда
 	// writer-tx уже закоммичен и очередь дошла до пост-коммитного прохода.
@@ -112,7 +113,7 @@ func TestRegisterResource_ForwardSurvivesCallerCancellation(t *testing.T) {
 func TestRegisterResource_PreCanceledRequestDoesNotCommitOrForward(t *testing.T) {
 	rec := &dfRecon{}
 	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithObjectReconciler(rec, nil)
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"}).WithObjectReconciler(rec, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	err := uc.Register(ctx, &regReq{subject: "project:" + unitProject, relation: "project", object: "vpc_network:vpcn_canceled"})
@@ -127,7 +128,7 @@ func TestRegisterResource_PreCanceledRequestDoesNotCommitOrForward(t *testing.T)
 func TestRegisterResource_DetachedForwardKeepsItsOwnBudget(t *testing.T) {
 	rec := &dfRecon{}
 	txb2 := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb2, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithObjectReconciler(rec, nil)
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb2, seededCatalogTypes{}, &recordingPublisher{}, &recordingWithdrawal{}, noAudit{}, unitScopes()).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"}).WithObjectReconciler(rec, nil)
 
 	// Вызывающий жив и щедр — проба смотрит не на его отмену, а на то, что бюджет
 	// прохода СОБСТВЕННЫЙ, а не унаследованный.

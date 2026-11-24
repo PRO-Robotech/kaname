@@ -1,16 +1,16 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// register_resource_concurrency_integration_test.go — SEC-C A-06 (ban #10).
+// register_resource_concurrency_integration_test.go — SEC-C A-06 (запрет #10).
 //
-// Two concurrent RegisterResource calls with an identical tuple must BOTH
-// succeed (no INTERNAL leak, no panic). The owner-tuple is at-least-once via
-// transactional outbox + drainer: each call enqueues its own outbox row and the
-// drainer collapses duplicates through FGA already_exists→ErrAlreadyApplied
-// (fga_applier.go), yielding exactly one effective FGA tuple. The race-safety
-// invariant under test is "concurrent enqueue never errors / never double-applies".
+// Два одновременных вызова RegisterResource с одинаковым кортежем должны ОБА
+// успеть (без утечки INTERNAL и паники). Кортеж владельца доставляется хотя бы раз через
+// транзакционный outbox и выгрузчик: каждый вызов ставит свою строку outbox, а
+// выгрузчик сворачивает дубли через FGA already_exists→ErrAlreadyApplied
+// (fga_applier.go), получая ровно один действующий кортеж FGA. Проверяемый инвариант
+// безопасности гонки: «одновременная постановка никогда не ошибается и не применяется дважды».
 //
-// Skipped under `go test -short`.
+// Пропускается при `go test -short`.
 package internal_iam_test
 
 import (
@@ -30,6 +30,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationwriterfixture"
 )
 
 func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
@@ -50,7 +51,7 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 		accessbindingapp.NewUnregisteredKeyWithdrawal(kanamepg.NewUnregisteredKeyStore(), catalogfixture.Source()),
 		kanamepg.NewRegistrationAudit(),
 		kanamepg.NewRegistrationScopeReader(),
-	)
+	).WithRegistrationAuthority(registrationwriterfixture.Authority{Module: "vpc"})
 
 	// Проект, известный kaname: родителя регистрации kaname выводит сам
 	// (kaname#982), и под выдуманным проектом регистрация отвергается.
@@ -75,7 +76,7 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 		require.NoError(t, e, "concurrent register #%d must succeed (idempotent, no INTERNAL leak)", i)
 	}
 
-	// All N enqueued (at-least-once); the drainer idempotently collapses them.
+	// Все N поставлены (хотя бы раз); выгрузчик идемпотентно сворачивает их.
 	var count int
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM kaname.fga_outbox

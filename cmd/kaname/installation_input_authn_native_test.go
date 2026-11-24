@@ -31,7 +31,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"gopkg.in/yaml.v3"
 )
 
 type rid11Case struct {
@@ -58,6 +57,41 @@ func rid11Cases(twin bool) []rid11Case {
 	out = append(out, rid11Case{"account", "S1", false, twin}, rid11Case{"census", "S2", false, twin}, rid11Case{"census", "S2", true, twin})
 	return out
 }
+
+// rid11CasesInGroup выбирает одну из объявленных групп полной матрицы RID11.
+// Отсутствующий параметр означает полную матрицу, пустой параметр недопустим.
+func rid11CasesInGroup(twin bool, group string) ([]rid11Case, error) {
+	var variants []string
+	want := 8
+	switch group {
+	case "input":
+		variants = []string{"credential-missing", "credential-unreadable"}
+	case "identity":
+		variants = []string{"deleted-creator", "revoked-key"}
+	case "proof-authority":
+		variants = []string{"bad-signature", "authority"}
+	case "availability":
+		variants = []string{"backend", "account", "census"}
+		want = 7
+	default:
+		return nil, fmt.Errorf("invalid RID11 case group")
+	}
+	allowed := make(map[string]bool, len(variants))
+	for _, variant := range variants {
+		allowed[variant] = true
+	}
+	var selected []rid11Case
+	for _, c := range rid11Cases(twin) {
+		if allowed[c.Variant] {
+			selected = append(selected, c)
+		}
+	}
+	if len(selected) != want {
+		return nil, fmt.Errorf("RID11 case group census changed")
+	}
+	return selected, nil
+}
+
 func (c rid11Case) expected() installationResult {
 	if c.Twin {
 		n := 1
@@ -134,6 +168,8 @@ func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
 	var w *ridLifecycleWorld
 	if c.Active {
 		w = newRIDLifecycleWorldAccounts(t, c.Mode, false, setup)
+		// Исходный снимок ACTIVE требует тех же завершённых проекций ролей, что восстановление.
+		rid09AwaitBaseRoleProjections(t, w.f.given.ctx, w.deliveryProcess)
 		subject := w.f.ridSA(t, w.f.tenantID, "rid11-existing-grantee")
 		g := w.grant(t, w.bindingInput("service_account", subject, w.pull, "registry.registries", w.object))
 		require.Equal(t, w.gd.Id, g.DelegationId)
@@ -144,7 +180,7 @@ func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
 		if c.Mode == "S2" {
 			ids = setup(t, f)
 		}
-		in := installruntime.DeliveryInput{Manifests: ridLifecycleDelivery(t, false), CredentialFile: f.creator.CredentialFile}
+		in := installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: ridLifecycleDelivery(t, false), CredentialFile: f.creator.CredentialFile}
 		if c.Mode == "S1" {
 			in.TenantAccountID = &f.tenantID
 		}
@@ -242,10 +278,11 @@ func rid11Start(t *testing.T, w *ridLifecycleWorld, c rid11Case, credential stri
 	if w.delivery.TenantAccountID != nil {
 		installer["tenantAccountId"] = *w.delivery.TenantAccountID
 	}
-	raw, err := yaml.Marshal(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": installer})
+	raw, err := installruntime.FullStartupConfig(map[string]any{"manifests": map[string]any{"dir": dir, "required": true}, "moduleSeedInstaller": installer}, w.delivery.RegistrationWriters)
 	require.NoError(t, err)
 	config := filepath.Join(root, "config.yaml")
 	require.NoError(t, os.WriteFile(config, raw, 0600))
+	ridRegistrationStartupProof(t, root, raw, w.delivery.RegistrationWriters)
 	executable := rid06HashExecutable(t)
 	child := startRIDInstallationChild(t, f, "rid11-child", rid11ChildInput{ConfigPath: config, EvidenceDir: filepath.Join(f.session.Root, "rid11-child"), Creator: f.creator.ID, Variant: c.Variant, Twin: c.Twin}, f.session.Environment, rid11ChildEnv, "TestRID11OwnedInputAuthnStartupChild", "4m")
 	parentCG, err := os.ReadFile("/proc/self/cgroup")
@@ -253,10 +290,11 @@ func rid11Start(t *testing.T, w *ridLifecycleWorld, c rid11Case, credential stri
 	childCG, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", child.cmd.Process.Pid))
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(parentCG, childCG))
-	memory, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	cgroupDir := ridOwnedCgroup(t, parentCG)
+	memory, err := os.ReadFile(filepath.Join(cgroupDir, "memory.max"))
 	require.NoError(t, err)
 	require.Equal(t, "4294967296", strings.TrimSpace(string(memory)))
-	swap, err := os.ReadFile("/sys/fs/cgroup/memory.swap.max")
+	swap, err := os.ReadFile(filepath.Join(cgroupDir, "memory.swap.max"))
 	require.NoError(t, err)
 	require.Equal(t, "0", strings.TrimSpace(string(swap)))
 	rid08Write(t, child.dir, "provenance", map[string]any{"testBinarySHA256": executable, "baseProductionSHA256": f.session.BinarySHA256, "pid": child.cmd.Process.Pid, "starttime": child.start, "cgroup": string(childCG), "variant": c, "authorityFaultSelectableOnlyByOwnedTest": true})
@@ -265,6 +303,7 @@ func rid11Start(t *testing.T, w *ridLifecycleWorld, c rid11Case, credential stri
 	return child
 }
 func rid11Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(f.given.ctx, 60*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -275,19 +314,24 @@ func rid11Ready(t *testing.T, f *installationNativeWorld, c *rid02OwnedChild) {
 			t.Fatal("RID11 lawful startup exited before readiness")
 		default:
 		}
-		attempt, stop := context.WithTimeout(ctx, time.Second)
-		err := f.wire.ProductionReady(attempt)
-		stop()
-		if err == nil {
+		if !c.seenEvent {
+			attempt, stop := context.WithTimeout(ctx, time.Second)
+			err := f.wire.ProductionReady(attempt)
+			stop()
+			c.seenEvent = err == nil
+		}
+		// Снимок публичной фазы берём после записи обеих проекций
+		// ролей именно этим запущенным процессом.
+		if c.seenEvent && ridCatalogRoleProjectionsReady(filepath.Join(c.dir, "stdout")) == nil {
+			require.NoError(t, ctx.Err())
 			break
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("RID11 readiness deadline")
+			t.Fatal("RID11: запуск или пересчёт проекций ролей не завершился")
 		case <-ticker.C:
 		}
 	}
-	c.seenEvent = true
 	require.NoError(t, installruntime.CheckOwnedListeners(c.cmd.Process.Pid, c.dir, installruntime.DefaultNativePorts().All()...))
 }
 
@@ -532,6 +576,10 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 	if c.Active {
 		require.Equal(t, p.HistoryBeforeMutation, w.snapshot(t), "the single changed authentication/input fact must preserve prior GD/G history")
 	}
+	if public != nil && !c.Twin && c.Variant == "deleted-creator" {
+		// Дожидаемся записи отложенных изменений удаления до остановки обработчика.
+		rid03StableNewmanSnapshot(t, w)
+	}
 	rid09StopBase(t, f)
 	p.Before = ridReadWholeDelivery(t, f)
 	p.PairRowsBefore = rid08PrimaryGD(t, f)
@@ -629,9 +677,12 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 		// Публичные последствия наблюдаются только чтением после первичного доказательства остановленного процесса.
 		// Штатный запуск без поставки не может починить удалённый C или восстановить полномочия.
 		public.beforeRestore(t, w, p.Returned)
-		base, err := f.session.StartBase(f.given.ctx)
+		base, err := f.session.StartBase(f.given.ctx, f.writerPlan)
 		require.NoError(t, err)
 		require.NoError(t, base.OwnsListeners(installruntime.DefaultNativePorts().All()...))
+		if public != nil {
+			rid09AwaitBaseRoleProjections(t, f.given.ctx, base)
+		}
 		f.renewOperator(t, f.given.ctx)
 		if c.Variant == "deleted-creator" {
 			p.DeletedAfterRun = rid11RequireCreatorAbsent(t, f)
@@ -683,10 +734,14 @@ func rid11World(t *testing.T, c rid11Case, consumer rid11LivePublicConsumer) rid
 	return p
 }
 func rid11Matrix(t *testing.T, twin bool, consumer rid11LivePublicConsumer) []rid11Proof {
+	return rid11MatrixCases(t, rid11Cases(twin), consumer)
+}
+
+func rid11MatrixCases(t *testing.T, cases []rid11Case, consumer rid11LivePublicConsumer) []rid11Proof {
 	var out []rid11Proof
-	for _, c := range rid11Cases(twin) {
+	for _, c := range cases {
 		kind := "negative"
-		if twin {
+		if c.Twin {
 			kind = "lawful-control"
 		}
 		t.Run(c.key()+"/"+kind, func(t *testing.T) { out = append(out, rid11World(t, c, consumer)) })

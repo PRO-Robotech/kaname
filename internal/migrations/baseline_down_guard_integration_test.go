@@ -29,7 +29,6 @@ package migrations_test
 // SECRET тот же откат ПРОХОДИТ.
 
 import (
-	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -38,7 +37,6 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/activewayin"
 )
@@ -46,13 +44,7 @@ import (
 // baselineUp применяет свод к чистой базе и отдаёт соединение.
 func baselineUp(t *testing.T) *sql.DB {
 	t.Helper()
-	dsn := pgtest.NewEmptyDB(t)
-	require.NoError(t, pgtest.Goose(migrations.FS)(context.Background(), dsn),
-		"свод обязан примениться к чистой базе — иначе предмет пробы не создан")
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return historicalRegistrationDB(t)
 }
 
 // baselineDown зовёт обратный ход свода ТЕМ ЖЕ инструментом, каким его зовёт

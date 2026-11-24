@@ -26,9 +26,17 @@ func editorialRegistryFixture(t *testing.T, path string) *manifest.Manifest {
 	if err != nil {
 		t.Fatal("не прочитана закреплённая фикстура registry")
 	}
-	raw, err = publicreadfixture.WithWrites(raw)
-	if err != nil {
-		t.Fatal("не подготовлена обычная доставка с записью owner")
+	// Прежней фикстуре добавляем writes; собственный стенд уже объявляет оба блока.
+	switch bytes.Count(raw, []byte("\n    writes:\n")) {
+	case 0:
+		raw, err = publicreadfixture.WithWrites(raw)
+		if err != nil {
+			t.Fatal("не подготовлена обычная доставка с записью owner")
+		}
+	case 2:
+		// Читаем исходные байты без повторного добавления ключей YAML.
+	default:
+		t.Fatal("фикстура содержит неожиданный набор объявлений writes")
 	}
 	m, err := manifest.Load(raw)
 	if err != nil {

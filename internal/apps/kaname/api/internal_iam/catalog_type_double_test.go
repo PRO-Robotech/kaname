@@ -36,10 +36,11 @@ import (
 // seededCatalogTypes — читатель, стоящий за ПОСЕЯННЫЕ строки каталога.
 type seededCatalogTypes struct{}
 
-// DottedTypeTx — имя каталога у посеянной строки; `ok=false` у всего остального.
-func (seededCatalogTypes) DottedTypeTx(_ context.Context, _ service.Tx, modelType string) (string, bool, error) {
-	dotted, ok := authzmap.DottedType(modelType)
-	return dotted, ok, nil
+// CatalogTypeTx — имя каталога у посеянной строки; `ok=false` у всего остального.
+func (seededCatalogTypes) CatalogTypeTx(_ context.Context, _ service.Tx, modelType string) (domain.CatalogTypeIdentity, bool, error) {
+	dotted, ok := authzmap.DottedType(authzmap.ModelTypeName(modelType))
+	module, _, _ := authzmap.SplitObjectType(dotted)
+	return domain.CatalogTypeIdentity{Dotted: dotted, Module: module, ObjectType: authzmap.ModelTypeName(dotted)}, ok, nil
 }
 
 // seededPolicies — политика записи ПОСЕВА (kaname#982, миграция
@@ -71,5 +72,6 @@ func (seededCatalogTypes) WritePolicyTx(_ context.Context, _ service.Tx, typeNam
 	if !ok {
 		return "", domain.WritePolicy{}, false, fmt.Errorf("дублёр каталога: политика посеянного типа %q не задана", modelType)
 	}
+	policy.Module, _, _ = authzmap.SplitObjectType(dotted)
 	return dotted, policy, true, nil
 }

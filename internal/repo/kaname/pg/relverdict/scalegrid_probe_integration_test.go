@@ -971,13 +971,16 @@ func TestScaleGrid_FullGridReport(t *testing.T) {
 
 	runCommand := fmt.Sprintf("%s=1 go test ./internal/repo/kaname/pg/relverdict/ "+
 		"-run TestScaleGrid_FullGridReport -count=1 -v -timeout 120m", fullGridEnv)
-	prov := scalegrid.TakeProvenance(runCommand, grid)
+	prov, err := scalegrid.TakeFullGridProvenance(runCommand, grid)
+	if err != nil {
+		t.Fatalf("происхождение полной сетки: %v", err)
+	}
 
 	started := time.Now()
 	results := make([][]pointResult, 0, len(grid))
 	for _, axis := range grid {
 		axisStart := time.Now()
-		results = append(results, runAxis(t, ctx, axis))
+		results = append(results, runBoundedFullReportAxis(t, axis))
 		t.Logf("ось %s прогнана за %s", axis[0].Axis, time.Since(axisStart).Round(time.Second))
 	}
 	prov.Postgres = postgresVersion(t, ctx)
@@ -1257,7 +1260,6 @@ func TestScaleGrid_EveryRecruitVariantIsConstructible(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration")
 	}
-	ctx := context.Background()
 
 	full := scalegrid.Full()
 	// Оси R и F берутся ИЗ ТОЙ ЖЕ константы, что и полный прогон: своя копия
@@ -1275,11 +1277,17 @@ func TestScaleGrid_EveryRecruitVariantIsConstructible(t *testing.T) {
 	seenRecruits := map[scalegrid.Recruit]int{}
 	pointsRun := 0
 	for _, axis := range axes {
-		tx, capture := openProbeTx(t, ctx)
-		f := newGridFixture(t, ctx, tx)
+		h := newR7CostSeed(t)
 		for _, p := range axis {
-			f.seedPoint(t, ctx, p)
-			r := measurePoint(t, ctx, tx, capture, p)
+			seedRecruitConstructibilityPoint(t, h, p)
+			var r pointResult
+			h.transaction(t, false, func(ctx context.Context, tx pgx.Tx) {
+				h.fixture.analyze(t, ctx)
+				r = measurePoint(t, ctx, tx, h.capture, p)
+				if r.verdict != relverdict.Allow.String() {
+					t.Fatalf("точка %s дала %s вместо allow", p, r.verdict)
+				}
+			})
 			pointsRun++
 			seenRecruits[p.Recruit]++
 			t.Logf("точка %s: строк %d, тронуто %d, сверочная %d, вердикт %s, "+

@@ -171,6 +171,20 @@ type catalogHalf struct {
 	scanResource func(pgx.CollectableRow) (catalog.ResourceRow, error)
 }
 
+const liveCatalogResourceColumns = `module, resource, object_type, parent_types, parent_names, writes,
+    public_read_to_children, permanent_project`
+
+// Снимок каталога читают и после штатного отката миграции. На прежней схеме
+// политика отключена целиком. Текущий применитель пишет колонку явно.
+const catalogChildRegistrationSnapshot = `NULLIF(to_jsonb(c)->'child_registration', 'null'::jsonb)`
+
+func scanLiveCatalogResource(row pgx.CollectableRow) (catalog.ResourceRow, error) {
+	var r catalog.ResourceRow
+	err := row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.ParentTypes, &r.ParentNames, &r.Writes,
+		&r.PublicReadToChildren, &r.PermanentProject, &r.ChildRegistration)
+	return r, err
+}
+
 var (
 	// liveCatalogHalf — ЖИВОЕ множество. Отбор `WHERE live` — тот же, каким живое
 	// множество определено в схеме: `live` есть производная `retired_at IS NULL`,
@@ -178,18 +192,14 @@ var (
 	liveCatalogHalf = catalogHalf{
 		what:    "каталог",
 		modules: `SELECT module FROM kaname.catalog_module WHERE live`,
-		resources: `SELECT module, resource, object_type, parent_types, parent_names, writes, public_read_to_children, permanent_project
-		              FROM kaname.catalog_resource WHERE live`,
+		resources: `SELECT ` + liveCatalogResourceColumns + ", " + catalogChildRegistrationSnapshot + `
+		              FROM kaname.catalog_resource c WHERE live`,
 		verbs: `SELECT module, resource, verb, per_object, COALESCE(container_parent, ''), COALESCE(container_relation, '') FROM kaname.catalog_verb WHERE live`,
 		// Преемника живая половина НЕ выбирает: у живой строки он невыразим в
 		// базе, и колонка в выборке объявляла бы величину, которой не бывает.
 		// Указатели и признак контейнера — выбирает: по ним разворачивание
 		// выдачи классу решает о `public_reader` (kaname#856).
-		scanResource: func(row pgx.CollectableRow) (catalog.ResourceRow, error) {
-			var r catalog.ResourceRow
-			return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.ParentTypes, &r.ParentNames, &r.Writes,
-				&r.PublicReadToChildren, &r.PermanentProject)
-		},
+		scanResource: scanLiveCatalogResource,
 	}
 	// retiredCatalogHalf — СНЯТОЕ множество: `retired_at` проставлен, `live`
 	// ложен. Спрашивает его тот, кому нужно отличить снятую решением строку от
@@ -197,8 +207,8 @@ var (
 	retiredCatalogHalf = catalogHalf{
 		what:    "снятые строки каталога",
 		modules: `SELECT module FROM kaname.catalog_module WHERE NOT live`,
-		resources: `SELECT module, resource, object_type, COALESCE(superseded_by, '')
-		              FROM kaname.catalog_resource WHERE NOT live`,
+		resources: `SELECT module, resource, object_type, COALESCE(superseded_by, ''), ` + catalogChildRegistrationSnapshot + `
+		              FROM kaname.catalog_resource c WHERE NOT live`,
 		verbs: `SELECT module, resource, verb, per_object, COALESCE(container_parent, ''), COALESCE(container_relation, '') FROM kaname.catalog_verb WHERE NOT live`,
 		// Преемник читается ВМЕСТЕ со строкой — иначе он существует данными и не
 		// доезжает до арендатора ни одним путём чтения (kacho#1814).
@@ -209,7 +219,8 @@ var (
 		// читателя, сравнившего значение с "".
 		scanResource: func(row pgx.CollectableRow) (catalog.ResourceRow, error) {
 			var r catalog.ResourceRow
-			return r, row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.SupersededBy)
+			err := row.Scan(&r.Module, &r.Resource, &r.ObjectType, &r.SupersededBy, &r.ChildRegistration)
+			return r, err
 		},
 	}
 )

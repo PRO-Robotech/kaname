@@ -40,6 +40,9 @@ type installationNativeWorld struct {
 	credentialDigest   [32]byte
 	lastPublic         nativePublicReceipt
 	publicReadSequence int
+	writerPlan         *installruntime.RegistrationWriterPlan
+	settleIssuedKeys   bool
+	stockLegacyGroup   json.RawMessage
 	stockCatalog       json.RawMessage
 }
 
@@ -74,7 +77,17 @@ func newInstallationNativeWorldLifecycle(t *testing.T, keyTTL int64, accessTTL s
 // трёх допусков за настоящий час. Ноль сохраняет каждый прежний профиль стенда;
 // фикстура не переписывает строку политики БД или идентичность/носитель.
 func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool, accountCapacity int64) *installationNativeWorld {
+	return newInstallationNativeWorldConfigured(t, keyTTL, accessTTL, moduleWriter, earlyLifecycle, nativeWorldOptions{accountCapacity: accountCapacity})
+}
+
+type nativeWorldOptions struct {
+	accountCapacity  int64
+	settleIssuedKeys bool
+}
+
+func newInstallationNativeWorldConfigured(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool, options nativeWorldOptions) *installationNativeWorld {
 	t.Helper()
+	accountCapacity := options.accountCapacity
 	require.True(t, accountCapacity == 0 || accountCapacity == 4, "only the explicit RID08 N4 count profile is permitted")
 	// Объявляем согласованный краткоживущий производственный профиль до создания фикстуры PG.
 	// Считыватель отзывов остаётся включённым; его штатное окно кеша
@@ -82,6 +95,11 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	overrides := map[string]string{}
 	if accountCapacity != 0 {
 		overrides["KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY"] = fmt.Sprint(accountCapacity)
+	}
+	if options.settleIssuedKeys {
+		// RID03 и RID05 успевают получить ключ через штатный API, затем
+		// ждут его очистки до начала сравнения полных снимков.
+		overrides["KANAME_AUTHN__SAKEY_REDACT_GRACE"] = ridKeyResponseGrace.String()
 	}
 	if accessTTL != "" {
 		ttl, err := time.ParseDuration(accessTTL)
@@ -107,7 +125,7 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(evidenceRoot, 0700))
 	stand := installruntime.PrepareNativeStand(t, ctx, root, evidence, moduleWriter)
-	f := &installationNativeWorld{stand: stand}
+	f := &installationNativeWorld{stand: stand, writerPlan: installruntime.EmptyRegistrationWriterPlan(), settleIssuedKeys: options.settleIssuedKeys}
 	if earlyLifecycle {
 		// Регистрируем до любого нативного Start, начальной настройки или выдачи ключа.
 		// Замыкание допускает любой частично инициализированный мир и никогда не вызывает Fatal.
@@ -165,18 +183,8 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	// Адрес почты O и любой явный профиль сроков — штатные входы запуска.
 	// Аудитория, издатель, полномочия и политика шлюза сохраняют профиль стенда.
 	overrides["KANAME_BOOTSTRAP_ROOT_EMAIL"] = w.email
-	environment, err = stand.Environment(overrides)
+	environment, err = nativeSessionEnvironment(stand, overrides, moduleWriter)
 	require.NoError(t, err)
-	if moduleWriter {
-		filtered := environment[:0]
-		for _, entry := range environment {
-			name, _, _ := strings.Cut(entry, "=")
-			if name != "KANAME_MANIFESTS__DIR" && name != "KANAME_MANIFESTS__REQUIRED" {
-				filtered = append(filtered, entry)
-			}
-		}
-		environment = filtered
-	}
 	stand.StartMailbox(t, ctx, environment)
 	wire, err := installruntime.NewWire(filepath.Join(evidence, "pki"), "https://localhost:9098", "https://localhost:9096", "https://localhost:9097")
 	require.NoError(t, err)
@@ -200,12 +208,13 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	}
 	if moduleWriter {
 		beforeBase := readRIDStockPremise(t, w)
+		f.stockLegacyGroup = append(json.RawMessage{}, beforeBase.LegacyGroup...)
 		writeRIDStockPremise(t, evidence, "before-base", beforeBase, nil)
 		require.JSONEq(t, string(f.stockCatalog), string(beforeBase.Catalog), "Given must preserve the migration catalog")
 		requireRIDNoDeliveredIdentities(t, beforeBase, 0)
 		require.Equal(t, 1, beforeBase.AdminGrants, "O not bootstrapped before base")
 	}
-	base, err := session.StartBase(ctx)
+	base, err := session.StartBase(ctx, f.writerPlan)
 	require.NoError(t, err)
 	require.NoError(t, base.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
 	f.base = base
@@ -228,6 +237,11 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	require.NoError(t, err)
 	require.NoError(t, pool.QueryRow(ctx, `SELECT expires_at FROM kaname.service_account_oauth_clients WHERE id=$1 AND sva_id=$2`, f.creator.KeyID, f.creator.ID).Scan(&f.creator.ExpiresAt))
 	f.secrets = append(f.secrets, f.creator.SecretMaterial()...)
+	if f.settleIssuedKeys {
+		// Первый serve выдаёт ключ C и сам удаляет секрет из Operation до
+		// остановки при поставке. Файл для следующего запуска уже сохранён.
+		f.awaitIssuedKeyResponseRedaction(t, f.creator)
+	}
 	credential, err := os.ReadFile(f.creator.CredentialFile)
 	require.NoError(t, err)
 	f.credentialDigest = sha256.Sum256(credential)
@@ -255,6 +269,45 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 	return f
 }
 
+// nativeSessionEnvironment отделяет профиль подготовленного стенда от typed config Session.
+// Снимается только собственный точный config pointer; чужой путь или явный override — отказ.
+func nativeSessionEnvironment(stand *installruntime.NativeStand, overrides map[string]string, moduleWriter bool) ([]string, error) {
+	if !filepath.IsAbs(stand.Evidence) || filepath.Clean(stand.Evidence) != stand.Evidence {
+		return nil, fmt.Errorf("Session требует точный абсолютный Evidence подготовленного стенда")
+	}
+	for name := range overrides {
+		if strings.EqualFold(name, "KANAME_CONFIG_PATH") {
+			return nil, fmt.Errorf("явный override %s недопустим для Session", name)
+		}
+	}
+	environment, err := stand.Environment(overrides)
+	if err != nil {
+		return nil, err
+	}
+	expected := filepath.Join(stand.Evidence, "delivery", "registration-writers.json")
+	result := make([]string, 0, len(environment))
+	preparedConfig := false
+	for _, entry := range environment {
+		name, value, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, "KANAME_CONFIG_PATH") {
+			if name != "KANAME_CONFIG_PATH" || value != expected || preparedConfig {
+				return nil, fmt.Errorf("неожиданный config pointer подготовленного стенда для Session")
+			}
+			preparedConfig = true
+			continue
+		}
+		// Прежняя граница F0 для moduleWriter: поставка манифестов остаётся в typed config.
+		if moduleWriter && (name == "KANAME_MANIFESTS__DIR" || name == "KANAME_MANIFESTS__REQUIRED") {
+			continue
+		}
+		result = append(result, entry)
+	}
+	if !preparedConfig {
+		return nil, fmt.Errorf("нет собственного config pointer подготовленного стенда для Session")
+	}
+	return result, nil
+}
+
 func (f *installationNativeWorld) renewOperator(t *testing.T, ctx context.Context) {
 	t.Helper()
 	var err error
@@ -278,6 +331,9 @@ func (f *installationNativeWorld) apply(t *testing.T, input installruntime.Deliv
 	require.NoError(t, process.AwaitReady(ready, f.wire.ProductionReady))
 	require.NoError(t, process.OwnsListeners(9090, 9091, 9095, 9096, 9097, 9098, 9099, 9100))
 	require.NoError(t, process.CheckSecretAbsence(append(f.creator.SecretMaterial(), f.operator.Bearer())...))
+	f.writerPlan = installruntime.CloneRegistrationWriterPlan(input.RegistrationWriters)
+	f.requireRegistrationWriterPlan(t, input.RegistrationWriters)
+	rid08Write(t, filepath.Dir(process.StdoutPath), "registration-writer-input", map[string]any{"plan": input.RegistrationWriters, "planSHA256": rid01RedactionHash(input.RegistrationWriters), "fullStartupConfigSHA256": process.ConfigSHA256})
 	return process
 }
 
@@ -287,7 +343,7 @@ func ridNativeFirstInstall(t *testing.T) {
 	f := newInstallationNativeWorld(t)
 	public := rid01NewmanContext(t, f, "clean")
 	rid01NewmanPhase(t, public, "CLEAN-BEFORE", nil)
-	process := f.apply(t, installruntime.DeliveryInput{Manifests: installruntime.NewRIDDeliveryFixture(), CredentialFile: f.creator.CredentialFile})
+	process := f.apply(t, installruntime.DeliveryInput{RegistrationWriters: f.writerPlan, Manifests: installruntime.NewRIDDeliveryFixture(), CredentialFile: f.creator.CredentialFile})
 	results, err := process.Results()
 	require.NoError(t, err)
 	require.Len(t, results, 1, "actual full serve must publish exactly one structured installation result")

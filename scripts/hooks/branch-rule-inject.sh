@@ -45,7 +45,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
       GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE \
       GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL GIT_COMMITTER_DATE \
       GIT_CONFIG_GLOBAL GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
-unset KANAME_SKIP_PREPUSH GITHUB_REPOSITORY
+unset KANAME_SKIP_PREPUSH KANAME_PREPUSH_GO_PARALLEL GITHUB_REPOSITORY
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -449,7 +449,19 @@ hook_cases() {
     mv "$PP/scripts/hooks/prepush-rule.sh" "$tmp/guard.away"
     out="$(cd "$PP" && KANAME_SKIP_PREPUSH=1 git push origin issue-7 2>&1)"; rc=$?; [ "$rc" = 0 ] || rc=1
     expect "git push: стража нет — отказ, а не молчание" refuse "судить нечем" "$rc" "$out"
+    # Reduced/internal не снимает страж; вход — реальные непустые строки git.
+    local input
+    input="$(line issue-7)"
+    out="$(cd "$PP" && KANAME_PREPUSH_GO_PARALLEL=1 bash scripts/hooks/pre-push --kaname-prepush-in-memory-scope origin <<< "$input" 2>&1)"; rc=$?
+    expect "internal reduced: стража нет — отказ" refuse "судить нечем" "$rc" "$out"
     mv "$tmp/guard.away" "$PP/scripts/hooks/prepush-rule.sh"
+    out="$(cd "$PP" && KANAME_PREPUSH_GO_PARALLEL=1 bash scripts/hooks/pre-push --kaname-prepush-in-memory-scope origin <<< "$input" 2>&1)"; rc=$?
+    expect "internal reduced: незаконная ветка — отказ стража" refuse "новая ветка называется номером" "$rc" "$out"
+    input="$(line 21)"
+    out="$(cd "$PP" && KANAME_PREPUSH_GO_PARALLEL=1 bash scripts/hooks/pre-push --kaname-prepush-in-memory-scope origin <<< "$input" 2>&1)"; rc=$?
+    # У этой фикстуры нет Go-модуля: зелёное всего хука здесь не ожидается.
+    # Существующий budget-inject проверяет полный зелёный/красный путь.
+    expect_text "internal reduced: законный вход дошёл до обычных групп" "── сборка:" "$out"
     "${G[@]}" checkout -q main
 }
 

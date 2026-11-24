@@ -230,6 +230,8 @@ MINTED_WAVE = (
     # Тот же человек церемонии — повышенным уровнем, и аккаунт, которым он владеет
     # (личный аккаунт регистрации: известный id, не зависящий от порядка коллекций).
     "jwtHumanCeremonyStepUp", "ceremonyAccountId",
+    # Точный личный аккаунт H нужен для Дано после планового перезапуска.
+    "ceremonyEscAccountId",
     "jwtHumanGroupCeremony", "ceremonyGroupUserId", "ceremonyGroupEmail",
     # ВТОРОЙ человек, которому на арендаторах посева не выдано ничего.
     "jwtHumanCeremonyNoBindings", "ceremonyNoBindingsUserId",
@@ -1003,6 +1005,7 @@ def seed_wave(stand, lane, http, mailbox, suffix: str, domain: str,
     if len(accounts) != 1 or not all(binding.get("subjectId") == esc_user for binding in initial):
         raise Finding("Esc initial bindings do not identify its personal account")
     account = accounts.pop()
+    values["ceremonyEscAccountId"] = account
     owner_bindings = [binding for binding in initial if binding.get("scopeType") == "iam.account"]
     project_bindings = [binding for binding in initial if binding.get("scopeType") == "iam.project"]
     if len(owner_bindings) != 1 or len(project_bindings) + 1 != len(initial):

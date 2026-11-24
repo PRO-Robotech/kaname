@@ -134,7 +134,7 @@ func TestPublicReaderMember_KeyCarriesTheClassSet(t *testing.T) {
 			Selectors: ndReaderRules(nil, nil, "items").MaterializingSelectorsInScope(domain.ScopeProject),
 			Target:    ndBoxTarget("b1"),
 		}
-		for _, m := range desiredMembersForObject(ndFacts(t), bs, ndObj("probemod.boxes", "b1", map[string]string{"team": "a"}), nil) {
+		for _, m := range desiredObjectMembersForTest(t, ndFacts(t), bs, ndObj("probemod.boxes", "b1", map[string]string{"team": "a"}), nil) {
 			if strings.HasPrefix(m.RuleFP, publicReaderRuleFPPrefix) {
 				return m.RuleFP
 			}
