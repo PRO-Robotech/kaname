@@ -470,7 +470,7 @@ ab_clock_and_plans = [
     "TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant",
     "TestRoleRights_S1P8_ActualGrantReadPlans"
 ] + ab_delegations
-# #1153, CI 45315596389, шард 3, artifact 14886752537, checkout 17f2f8f8:
+# kaname#1153, CI 45315596389, шард 3, artifact 14886752537, checkout 17f2f8f8:
 # 55 самых долгих завершившихся TOP заняли 809.36 с из 1500.09 с до таймаута.
 # На зелёном прогоне 45282288758, artifact 14872085787, те же TOP заняли
 # 605.22 с, остальные — 624.05 с. Резервы 850/900 с — плановые.
