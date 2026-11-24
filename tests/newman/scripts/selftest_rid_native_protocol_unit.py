@@ -238,10 +238,10 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
             path.write_text("".join(rows) + scan_suffix)
             return h.test_diagnostics(path, root, predicates), leaf
 
-    def diagnose_role_markers(self, suite, outputs, *, trace, end="fail", active=True, suffix=""):
+    def diagnose_role_markers(self, suite, outputs, *, trace, case=None, end="fail", active=True, suffix=""):
         h = self.hosted
         root, predicates, _ = h.CASES[suite]
-        leaf = root + "/" + sorted(h.RID_MATRIX_NESTED[root])[0]
+        leaf = root + "/" + (case if case is not None else sorted(h.RID_MATRIX_NESTED[root])[0])
         rows = [{"Action": "run", "Test": root}]
         if active:
             rows.append({"Action": "run", "Test": leaf})
@@ -338,12 +338,19 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
             " cancel=statement-timeout context=active site=consumer-admission"
         )
 
-        def diagnose(marker):
-            return self.diagnose_role_markers("registry-installation-rid11", [marker + "\n"], trace=source)
+        def diagnose(marker, **options):
+            return self.diagnose_role_markers("registry-installation-rid11", [marker + "\n"], trace=source, **options)
 
         valid = prefix + " blocker=fixture waits=1 transaction-age=30s-to-60s"
-        self.assertEqual(diagnose(valid)["roleReadiness"]["consumerAdmission"],
-                         {"blocker": "fixture", "waits": 1, "transactionAge": "30s-to-60s"})
+        cases = (
+            "every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/census/S2/ACTIVE/negative",
+            "each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S1/ACTIVE/lawful-control",
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                self.assertEqual(diagnose(valid, case=case)["roleReadiness"]["consumerAdmission"],
+                                 {"blocker": "fixture", "waits": 1, "transactionAge": "30s-to-60s"})
+                self.assertNotIn("roleReadiness", diagnose(valid, case=case, end="pass"))
         empty = prefix + " blocker=unknown waits=0 transaction-age=unknown"
         self.assertEqual(diagnose(empty)["roleReadiness"]["consumerAdmission"],
                          {"blocker": "unknown", "waits": 0, "transactionAge": "unknown"})
