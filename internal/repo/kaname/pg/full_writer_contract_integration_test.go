@@ -6,11 +6,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/authorityprotocol"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,6 +56,28 @@ func fullContractActivateBeforePublication(t *testing.T, r protocolRig) (*kaname
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(r.ctx))
 	}
+
+	// Современный Go-писатель читает журнал даже при нулевой редакции.
+	// Пустое представление позволяет выполнить его штатный вход над старой
+	// схемой без применения поздней миграции или изменения Goose ledger.
+	var login string
+	require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT session_user::text`).Scan(&login))
+	require.NotEmpty(t, login)
+	tx, err := r.admin.Begin(r.ctx)
+	require.NoError(t, err)
+	lifecycleRollback(t, tx)
+	_, err = tx.Exec(r.ctx, `CREATE VIEW kaname.publication_model_revision AS
+SELECT NULL::bigint AS revision, NULL::text AS digest, NULL::text AS catalog_id WHERE false`)
+	require.NoError(t, err)
+	_, err = tx.Exec(r.ctx, `GRANT SELECT ON kaname.publication_model_revision TO `+pgx.Identifier{login}.Sanitize())
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(r.ctx))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.ctx), 5*time.Second)
+		defer cancel()
+		_, err := r.admin.Exec(ctx, `DROP VIEW kaname.publication_model_revision`)
+		require.NoError(t, err)
+	})
 	return fullContractRepository(t, r)
 }
 

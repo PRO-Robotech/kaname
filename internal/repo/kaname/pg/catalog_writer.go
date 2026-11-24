@@ -611,6 +611,16 @@ func (w catalogWriter) retireSystemWildcardType(ctx context.Context, resource ca
 				allowed = append(allowed, authzmap.GrantedVerbsWithDeclared(resource.ObjectType, len(verbs) > 0, sel.Verbs, verbs, policy)...)
 			}
 		}
+		// В 0001_initial у роли view остался FP подстановки до снятия
+		// глагола read. Подтверждаем только эту пару отпечатков у той же
+		// посеянной роли; глаголы для снятия уже выведены из текущих rules.
+		if role.ID == "rol1bda80f2be4d3658e" && role.Owner == "" && len(rules) == 1 {
+			view := domain.Rule{Module: "*", Resources: []string{"*"}, Verbs: []string{"get", "list"}}
+			if slices.Contains(fps, view.Fingerprint()) {
+				view.Verbs = append(view.Verbs, "read")
+				fps = append(fps, view.Fingerprint())
+			}
+		}
 		if err := w.retireSystemWildcardRows(ctx, role.ID, dotted, fps, allowed); err != nil {
 			return err
 		}
