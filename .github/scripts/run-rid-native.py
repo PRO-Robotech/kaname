@@ -756,6 +756,36 @@ def bounded_rid_marker(output, marker, bounds):
     return dict(zip(fields, (item == "true" for item in value.groups()))) if value else None
 
 
+def role_readiness_marker(output, source_lines):
+    # Полная запись из функции фикстуры. В квитанции остаются только счётчики и закрытые классы.
+    if len(output) > 320:
+        return None
+    number = r"(0|[1-9][0-9]{0,5})"
+    marker = re.fullmatch(
+        r"[ \t]+installation_whole_delivery_native_test\.go:([1-9][0-9]{0,6}): "
+        r"RID_ROLE_READINESS reason=(deadline|canceled|process-exited)"
+        r" verbs=(unseen|incomplete|failed|ready) refs=(unseen|incomplete|failed|ready)"
+        r"(?: phase=(initial-delivery|restored-base|unspecified)"
+        r"(?: examined=" + number + r" reseeded=" + number + r" failed=" + number +
+        r" completed=(true|false) stage=(open|read-rules|replace-verbs|regrain-selectors|commit)"
+        r" class=(deadlock|serialization|Aborted|FailedPrecondition|InvalidArgument|Internal|"
+        r"Unavailable|PermissionDenied|Canceled|DeadlineExceeded|other))?)?\n", output)
+    if marker is None or int(marker[1]) > source_lines:
+        return None
+    result = {"reason": marker[2], "verbs": marker[3], "refs": marker[4]}
+    if marker[5] is not None:
+        result["phase"] = marker[5]
+    if marker[6] is not None:
+        examined, reseeded, failed = map(int, marker.group(6, 7, 8))
+        completed = marker[9] == "true"
+        if (marker[3] != "failed" or failed == 0 or reseeded + failed > examined
+                or (completed and reseeded + failed != examined)):
+            return None
+        result["verbCensus"] = {"examined": examined, "reseeded": reseeded, "failed": failed,
+                               "completed": completed, "firstFailureStage": marker[10], "firstFailureClass": marker[11]}
+    return result
+
+
 def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
     # Только известные имена и ограниченные структурные проекции отдельных RID.
     names = {root_test, *(root_test + "/" + name for name in predicates)}
@@ -931,20 +961,12 @@ def test_diagnostics(path, root_test, predicates, *, timeout_seconds=None):
                         and not any((name, end) in seen for end in ("pass", "fail", "skip"))):
                     output = event.get("Output")
                     if isinstance(output, str) and "RID_ROLE_READINESS" in output:
-                        role_marker = re.fullmatch(
-                            r"[ \t]+installation_whole_delivery_native_test\.go:([1-9][0-9]{0,6}): "
-                            r"RID_ROLE_READINESS reason=(deadline|canceled|process-exited)"
-                            r" verbs=(unseen|incomplete|failed|ready) refs=(unseen|incomplete|failed|ready)"
-                            r"(?: phase=(initial-delivery|restored-base|unspecified))?\n", output) if len(output) <= 200 else None
-                        if (role_marker is None or int(role_marker[1]) > bounds.get(
-                                "cmd/kaname/installation_whole_delivery_native_test.go", 0)
-                                or name in role_readiness):
+                        observed = role_readiness_marker(output, bounds.get(
+                            "cmd/kaname/installation_whole_delivery_native_test.go", 0))
+                        if observed is None or name in role_readiness:
                             ambiguous_role_readiness.add(name)
                         else:
-                            role_readiness[name] = {"reason": role_marker[2],
-                                "verbs": role_marker[3], "refs": role_marker[4]}
-                            if role_marker[5] is not None:
-                                role_readiness[name]["phase"] = role_marker[5]
+                            role_readiness[name] = observed
                     marker = (premise_marker.fullmatch(output)
                               if markers is not None and isinstance(output, str) and len(output) <= 180 else None)
                     if marker and marker[1] in premise_reasons:

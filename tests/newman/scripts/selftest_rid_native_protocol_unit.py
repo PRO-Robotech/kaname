@@ -278,6 +278,27 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
                 self.assertNotIn("roleReadiness", result)
                 self.assertNotIn("unit-secret", json.dumps(result))
 
+    def test_failed_verb_census_keeps_closed_fields_and_consistent_counts(self):
+        source = "cmd/kaname/installation_whole_delivery_native_test.go"
+        record = ("    installation_whole_delivery_native_test.go:1: RID_ROLE_READINESS reason=deadline"
+                  " verbs=failed refs=ready phase=initial-delivery examined=9 reseeded=7 failed=2"
+                  " completed=true stage=replace-verbs class=deadlock\n")
+        def diagnose(outputs):
+            return self.diagnose_role_markers("registry-installation-rid11", outputs, trace=source)
+        self.assertEqual(diagnose([record])["roleReadiness"]["verbCensus"], {
+            "examined": 9, "reseeded": 7, "failed": 2, "completed": True,
+            "firstFailureStage": "replace-verbs", "firstFailureClass": "deadlock"})
+        partial = record.replace("examined=9", "examined=10").replace("completed=true", "completed=false")
+        self.assertFalse(diagnose([partial])["roleReadiness"]["verbCensus"]["completed"])
+        for before, after in (("examined=9", "examined=8"), ("examined=9", "examined=10"),
+                              ("examined=9", "examined=1000000"), ("failed=2", "failed=0"),
+                              ("verbs=failed", "verbs=ready"), ("replace-verbs", "fixture-secret"),
+                              ("deadlock", "fixture-secret")):
+            result = diagnose([record.replace(before, after)])
+            self.assertNotIn("roleReadiness", result)
+            self.assertNotIn("fixture-secret", json.dumps(result))
+        self.assertNotIn("roleReadiness", diagnose([record, record]))
+
     def test_role_delta_on_matched_roles_projection_rejects_other_content(self):
         source = "cmd/kaname/installation_newman_retirement_test.go"
         prefix = "    installation_newman_whole_projection_test.go:1: "

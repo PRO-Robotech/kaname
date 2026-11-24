@@ -66,6 +66,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
@@ -109,6 +111,9 @@ type RoleVerbReseedCensus struct {
 	Pairs int
 	// Failed — ролей, чья транзакция откачена.
 	Failed int
+	// Только этап и класс первого отказа транзакции роли. При нуле отказов оба пусты.
+	FirstFailureStage string
+	FirstFailureClass string
 }
 
 // Structural — полоса, на которой повтор даст то же самое: роли есть, пересеяна
@@ -161,12 +166,16 @@ func ReseedSystemRoleVerbs(
 		if err := ctx.Err(); err != nil {
 			return census, errors.Join(append(failures, err)...)
 		}
-		pairs, rerr := replaceRoleVerbsInOwnTx(ctx, repo, cat, rr.id)
+		pairs, failure, rerr := replaceRoleVerbsInOwnTx(ctx, repo, cat, rr.id)
 		if rerr != nil {
 			// Фиксируем исход работы до вызова наблюдателя: отмена после
 			// последней законченной роли уже не прерывает обход.
 			interrupted := ctx.Err()
 			census.Completed = i == len(roles)-1 && interrupted == nil
+			if census.Failed == 0 {
+				census.FirstFailureStage = failure.stage
+				census.FirstFailureClass = failure.class
+			}
 			census.Failed++
 			failures = append(failures, rerr)
 			if obs != nil {
@@ -195,6 +204,31 @@ func ReseedSystemRoleVerbs(
 		census.Examined, census.Reseeded, census.Failed, errors.Join(failures...))
 }
 
+type roleVerbFailure struct {
+	stage, class string
+}
+
+// Обёртка транзакции может превратить оба вида конфликта в один Aborted.
+// До отображения различаем их только по типизированной причине тела транзакции.
+func roleVerbFailureClass(bodyErr, mappedErr error) string {
+	var db interface{ SQLState() string }
+	if errors.As(bodyErr, &db) {
+		switch db.SQLState() {
+		case "40P01":
+			return "deadlock"
+		case "40001":
+			return "serialization"
+		}
+	}
+	switch code := status.Code(mappedErr); code {
+	case codes.Aborted, codes.FailedPrecondition, codes.InvalidArgument, codes.Internal,
+		codes.Unavailable, codes.PermissionDenied, codes.Canceled, codes.DeadlineExceeded:
+		return code.String()
+	default:
+		return "other"
+	}
+}
+
 // replaceRoleVerbsInOwnTx — одна роль, одна транзакция порта записи. Замена
 // «снять всё, положить текущее» обязана быть атомарной: читатель цепи вердикта не
 // вправе увидеть пустой промежуток, потому что в этом окне всякий вердикт по роли
@@ -221,25 +255,37 @@ func replaceRoleVerbsInOwnTx(
 	repo kanamerepo.Repository,
 	cat *catalog.Facts,
 	roleID string,
-) (int, error) {
+) (int, roleVerbFailure, error) {
 	pairs := 0
+	stage := "open"
+	var bodyErr error
 	if err := shared.DoWithInstallationWriteTxVoid(ctx, repo, kanamerepo.AuthorityRole,
-		func(ctx context.Context, w kanamerepo.Writer) error {
+		func(ctx context.Context, w kanamerepo.Writer) (err error) {
+			// Сохраняем результат до отображения и отдельно учитываем отказ фиксации.
+			defer func() {
+				bodyErr = err
+				if err == nil {
+					stage = "commit"
+				}
+			}()
+			stage = "read-rules"
 			rules, policy, live, err := w.RolesW().RulesForRegrain(ctx, domain.RoleID(roleID))
 			if err != nil || !live {
 				return err
 			}
 			sels := cat.GrantSelectors(cat.RegrainSelectors(rules), policy)
 			verbs := cat.RoleVerbsFromSelectors(sels, policy)
+			stage = "replace-verbs"
 			if err := w.RolesW().ReplaceRoleVerbs(ctx, domain.RoleID(roleID), verbs); err != nil {
 				return err
 			}
 			pairs = len(verbs)
+			stage = "regrain-selectors"
 			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(roleID), sels)
 		}); err != nil {
-		return 0, fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
+		return 0, roleVerbFailure{stage, roleVerbFailureClass(bodyErr, err)}, fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
 	}
-	return pairs, nil
+	return pairs, roleVerbFailure{}, nil
 }
 
 // listMaterializingSystemRoles читает системные роли с непустыми правилами —
