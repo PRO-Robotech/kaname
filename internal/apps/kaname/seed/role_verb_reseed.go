@@ -111,9 +111,10 @@ type RoleVerbReseedCensus struct {
 	Pairs int
 	// Failed — ролей, чья транзакция откачена.
 	Failed int
-	// Только этап и класс первого отказа транзакции роли. При нуле отказов оба пусты.
+	// Только первый отказ транзакции роли. Подробности отмены есть лишь при SQLSTATE 57014.
 	FirstFailureStage string
 	FirstFailureClass string
+	FirstQueryCancel  kanamerepo.InstallationQueryCancel
 }
 
 // Structural — полоса, на которой повтор даст то же самое: роли есть, пересеяна
@@ -175,6 +176,7 @@ func ReseedSystemRoleVerbs(
 			if census.Failed == 0 {
 				census.FirstFailureStage = failure.stage
 				census.FirstFailureClass = failure.class
+				census.FirstQueryCancel = failure.cancel
 			}
 			census.Failed++
 			failures = append(failures, rerr)
@@ -206,6 +208,7 @@ func ReseedSystemRoleVerbs(
 
 type roleVerbFailure struct {
 	stage, class string
+	cancel       kanamerepo.InstallationQueryCancel
 }
 
 // Обёртка транзакции может превратить оба вида конфликта в один Aborted.
@@ -286,9 +289,9 @@ func replaceRoleVerbsInOwnTx(
 			stage = "regrain-selectors"
 			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(roleID), sels)
 		}, func(err error) { primaryErr = err }); err != nil {
-		failure := roleVerbFailure{stage, roleVerbFailureClass(primaryErr, err)}
+		failure := roleVerbFailure{stage: stage, class: roleVerbFailureClass(primaryErr, err)}
 		if stage == "open" && openFailure.Stage != "" {
-			failure = roleVerbFailure{openFailure.Stage, openFailure.Class}
+			failure = roleVerbFailure{stage: openFailure.Stage, class: openFailure.Class, cancel: openFailure.Cancel}
 		}
 		return 0, failure, fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
 	}

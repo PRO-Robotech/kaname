@@ -159,9 +159,52 @@ func TestParticipantOpenObservationPreservesPrimaryErrorAndCleanup(t *testing.T)
 			if tx.rollbackCalls != wantRollback || tx.rollbackContextErr != nil {
 				t.Fatal("rollback or detached rollback context changed")
 			}
-			if len(observed) != 1 || observed[0] != (kaname.InstallationOpenFailure{Stage: tc.stage, Class: tc.class}) {
+			want := kaname.InstallationOpenFailure{Stage: tc.stage, Class: tc.class}
+			if tc.class == "sql-query-canceled" {
+				want.Cancel = kaname.InstallationQueryCancel{Reason: "other", Context: "active", Site: "unclassified"}
+			}
+			if len(observed) != 1 || observed[0] != want {
 				t.Fatalf("unexpected bounded observation: %+v", observed)
 			}
 		})
+	}
+}
+
+// These fixtures contain secondary SQL and detail that must never become labels.
+func TestParticipantQueryCancelClassifiesOnlyPrimaryBackendEvidence(t *testing.T) {
+	type detail = kaname.InstallationQueryCancel
+	const frame = "\nPL/pgSQL function kaname.authority_installation_enter_v2(text) line 35 at PERFORM"
+	const coordinator = `SQL statement "SELECT pg_advisory_xact_lock(1262569283,0)"`
+	const nextFrame = "\nSQL statement \"SELECT another_private_function()\"" + frame
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, stop := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer stop()
+	for _, tc := range []struct {
+		ctx            context.Context
+		message, where string
+		want           detail
+	}{
+		{context.Background(), "canceling statement due to statement timeout", coordinator + frame + nextFrame,
+			detail{Reason: "statement-timeout", Context: "active", Site: "global-coordinator"}},
+		{canceled, "canceling statement due to user request", `SQL statement "SELECT pg_advisory_xact_lock(1262569292,0)"` + frame,
+			detail{Reason: "user-request", Context: "canceled", Site: "consumer-admission"}},
+		{expired, "canceling statement due to user request", `SQL statement "SELECT *     FROM kaname.authority_writer_protocol WHERE singleton FOR SHARE"` + frame,
+			detail{Reason: "user-request", Context: "deadline", Site: "protocol-row"}},
+		{context.Background(), "canceling statement due to statement timeout", `SQL statement "SELECT * FROM kaname.authority_semantic_identity WHERE singleton FOR SHARE"` + frame,
+			detail{Reason: "statement-timeout", Context: "active", Site: "identity-row"}},
+		{context.Background(), "canceling statement due to statement timeout", `SQL statement "LOCK TABLE kaname.authority_producer_population_latch IN SHARE MODE"` + frame,
+			detail{Reason: "statement-timeout", Context: "active", Site: "population-latch"}},
+		{canceled, "canceling statement due to statement timeout", "private detail" + frame + "\n" + coordinator + frame,
+			detail{Reason: "statement-timeout", Context: "canceled", Site: "unclassified"}},
+		{context.Background(), "canceling statement due to user request PRIVATE", coordinator + " trailing PRIVATE" + frame,
+			detail{Reason: "other", Context: "active", Site: "unclassified"}},
+	} {
+		var got kaname.InstallationOpenFailure
+		ctx := kaname.WithInstallationOpenObserver(tc.ctx, func(f kaname.InstallationOpenFailure) { got = f })
+		observeParticipantOpen(ctx, "open-enter-v2", &pgconn.PgError{Code: "57014", Message: tc.message, Where: tc.where, Detail: "private detail"})
+		if got.Stage != "open-enter-v2" || got.Class != "sql-query-canceled" || got.Cancel != tc.want {
+			t.Fatalf("unexpected bounded fields %+v; want %+v", got, tc.want)
+		}
 	}
 }

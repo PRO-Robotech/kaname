@@ -17,8 +17,62 @@ import (
 // original error still returns unchanged through the existing transaction path.
 func observeParticipantOpen(ctx context.Context, stage string, err error) {
 	kaname.ObserveInstallationOpenFailure(ctx, func() kaname.InstallationOpenFailure {
-		return kaname.InstallationOpenFailure{Stage: stage, Class: participantOpenCause(err)}
+		failure := kaname.InstallationOpenFailure{Stage: stage, Class: participantOpenCause(err)}
+		if failure.Class == "sql-query-canceled" {
+			var db *pgconn.PgError
+			if errors.As(err, &db) {
+				failure.Cancel = participantQueryCancel(ctx, db)
+			}
+		}
+		return failure
 	})
+}
+
+// PostgreSQL uses the same SQLSTATE for a statement timeout and a CancelRequest.
+func participantQueryCancel(ctx context.Context, db *pgconn.PgError) kaname.InstallationQueryCancel {
+	d := kaname.InstallationQueryCancel{Reason: "other", Context: "active", Site: "unclassified"}
+	switch db.Message {
+	case "canceling statement due to statement timeout":
+		d.Reason = "statement-timeout"
+	case "canceling statement due to user request":
+		d.Reason = "user-request"
+	}
+	switch ctx.Err() {
+	case context.Canceled:
+		d.Context = "canceled"
+	case context.DeadlineExceeded:
+		d.Context = "deadline"
+	}
+	// An outer function frame only says that the call was on the stack. Match
+	// only the first SQL statement in a bounded PostgreSQL context.
+	if len(db.Where) > 4096 {
+		return d
+	}
+	line, rest, ok := strings.Cut(db.Where, "\n")
+	if !ok || len(line) > 256 || !strings.HasPrefix(rest, "PL/pgSQL function ") {
+		return d
+	}
+	stmt, ok := strings.CutPrefix(line, `SQL statement "`)
+	if !ok {
+		return d
+	}
+	stmt, ok = strings.CutSuffix(stmt, `"`)
+	if !ok {
+		return d
+	}
+	switch strings.ToLower(strings.Join(strings.Fields(stmt), " ")) {
+	case "select pg_advisory_xact_lock(1262569283,0)":
+		d.Site = "global-coordinator"
+	case "select pg_advisory_xact_lock(1262569292,0)":
+		d.Site = "consumer-admission"
+	case "select * from kaname.authority_writer_protocol where singleton for share":
+		d.Site = "protocol-row"
+	case "select * from kaname.authority_semantic_identity where singleton for share":
+		d.Site = "identity-row"
+	case "lock table kaname.authority_producer_population_latch in share mode":
+		d.Site = "population-latch"
+	}
+	return d
 }
 
 func participantOpenCause(err error) string {

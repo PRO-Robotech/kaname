@@ -772,7 +772,9 @@ def role_readiness_marker(output, source_lines):
         r" class=(deadlock|serialization|Aborted|FailedPrecondition|InvalidArgument|Internal|"
         r"Unavailable|PermissionDenied|Canceled|DeadlineExceeded|other|invalid-fence|semantic-identity|"
         r"no-row|transaction-closed|sql-permission|sql-undefined-function|sql-undefined-table|sql-lock-unavailable|"
-        r"sql-query-canceled|sql-state|sql-connection|sql-other|connection-open|result-scan|source-unconfirmed))?)?\n", output)
+        r"sql-query-canceled|sql-state|sql-connection|sql-other|connection-open|result-scan|source-unconfirmed)"
+        r"(?: cancel=(statement-timeout|user-request|other) context=(active|canceled|deadline)"
+        r" site=(unclassified|global-coordinator|consumer-admission|protocol-row|identity-row|population-latch))?)?)?\n", output)
     if marker is None or int(marker[1]) > source_lines:
         return None
     result = {"reason": marker[2], "verbs": marker[3], "refs": marker[4]}
@@ -786,6 +788,11 @@ def role_readiness_marker(output, source_lines):
             return None
         result["verbCensus"] = {"examined": examined, "reseeded": reseeded, "failed": failed,
                                "completed": completed, "firstFailureStage": marker[10], "firstFailureClass": marker[11]}
+        if marker[12] is not None:
+            if marker[11] != "sql-query-canceled" or marker[10] not in (
+                    "open-begin", "open-enter-v2", "open-enter-v3", "open-confirm-publication"):
+                return None
+            result["verbCensus"]["firstQueryCancel"] = {"reason": marker[12], "context": marker[13], "site": marker[14]}
     return result
 
 

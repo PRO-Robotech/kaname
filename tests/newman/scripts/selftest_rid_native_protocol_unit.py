@@ -307,6 +307,22 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
                 classified = record.replace("replace-verbs", stage).replace("deadlock", cause)
                 census = diagnose([classified])["roleReadiness"]["verbCensus"]
                 self.assertEqual((census["firstFailureStage"], census["firstFailureClass"]), (stage, cause))
+        canceled = record.replace("stage=replace-verbs class=deadlock", "stage=open-enter-v2 class=sql-query-canceled").rstrip("\n")
+        for reason, ctx, site in (("statement-timeout", "active", "global-coordinator"),
+                                  ("user-request", "deadline", "consumer-admission"),
+                                  ("other", "canceled", "unclassified")):
+            with self.subTest(reason=reason, ctx=ctx, site=site):
+                marker = f"{canceled} cancel={reason} context={ctx} site={site}\n"
+                census = diagnose([marker])["roleReadiness"]["verbCensus"]
+                self.assertEqual(census["firstFailureClass"], "sql-query-canceled")
+                self.assertEqual(census["firstQueryCancel"], {"reason": reason, "context": ctx, "site": site})
+        marker = canceled + " cancel=other context=active site=unclassified\n"
+        for original, invalid in (("open-enter-v2", "commit"), ("sql-query-canceled", "deadlock"),
+                                  ("cancel=other", "cancel=fixture-secret"), ("context=active", "context=fixture-secret"),
+                                  ("site=unclassified", "site=fixture-secret"), (" context=active", "")):
+            observed = diagnose([marker.replace(original, invalid)])
+            self.assertNotIn("roleReadiness", observed)
+            self.assertNotIn("fixture-secret", json.dumps(observed))
         open_record = record.replace("replace-verbs", "open-enter-v3")
         for unsafe_class in ("57014", "sql-secret-detail", "sql-query-canceled secret=value"):
             result = diagnose([open_record.replace("deadlock", unsafe_class)])

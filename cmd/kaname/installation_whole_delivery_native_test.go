@@ -342,8 +342,12 @@ func ridAwaitRoleProjectionsAt(t *testing.T, ctx context.Context, p *installrunt
 // Не t.Helper: маркер сохраняет точный источник для закрытого сборщика.
 func ridLogRoleReadiness(t *testing.T, phase, reason string, state ridRoleProjectionState) {
 	if f := state.failure; f != nil && state.verbs == "failed" {
-		t.Logf("RID_ROLE_READINESS reason=%s verbs=%s refs=%s phase=%s examined=%d reseeded=%d failed=%d completed=%t stage=%s class=%s",
-			reason, state.verbs, state.refs, phase, f.examined, f.reseeded, f.failed, f.completed, f.Stage, f.Class)
+		suffix := ""
+		if d := f.Cancel; d != nil {
+			suffix = fmt.Sprintf(" cancel=%s context=%s site=%s", d.Reason, d.Context, d.Site)
+		}
+		t.Logf("RID_ROLE_READINESS reason=%s verbs=%s refs=%s phase=%s examined=%d reseeded=%d failed=%d completed=%t stage=%s class=%s%s",
+			reason, state.verbs, state.refs, phase, f.examined, f.reseeded, f.failed, f.completed, f.Stage, f.Class, suffix)
 		return
 	}
 	t.Logf("RID_ROLE_READINESS reason=%s verbs=%s refs=%s phase=%s", reason, state.verbs, state.refs, phase)

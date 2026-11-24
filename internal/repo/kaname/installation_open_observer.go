@@ -8,8 +8,17 @@ import "context"
 // InstallationOpenFailure carries only closed classifications. The observer
 // receives neither a driver error nor SQL, query arguments or connection data.
 type InstallationOpenFailure struct {
-	Stage string
-	Class string
+	Stage  string
+	Class  string
+	Cancel InstallationQueryCancel
+}
+
+// InstallationQueryCancel is populated only for a backend SQLSTATE 57014.
+// Site identifies the innermost recognized statement, not a confirmed blocker.
+type InstallationQueryCancel struct {
+	Reason  string `json:"reason"`
+	Context string `json:"context"`
+	Site    string `json:"site"`
 }
 
 type installationOpenObserverKey struct{}

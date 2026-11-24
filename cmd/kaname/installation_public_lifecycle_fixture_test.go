@@ -20,6 +20,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/publicreadfixture"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -655,8 +656,9 @@ type ridRoleProjectionState struct {
 }
 
 type ridRoleVerbFailure struct {
-	Stage                      string `json:"first_failure_stage"`
-	Class                      string `json:"first_failure_class"`
+	Stage                      string                              `json:"first_failure_stage"`
+	Class                      string                              `json:"first_failure_class"`
+	Cancel                     *kanamerepo.InstallationQueryCancel `json:"first_query_cancel"`
 	examined, reseeded, failed int
 	completed                  bool
 }
@@ -678,8 +680,34 @@ func ridReadRoleVerbFailure(raw []byte, examined, reseeded, failed *int, complet
 			"sql-lock-unavailable", "sql-query-canceled", "sql-state", "sql-connection", "sql-other", "connection-open", "result-scan", "source-unconfirmed"}, f.Class) {
 		return nil
 	}
+	if d := f.Cancel; d != nil {
+		if f.Class != "sql-query-canceled" || !slices.Contains([]string{"open-begin", "open-enter-v2", "open-enter-v3", "open-confirm-publication"}, f.Stage) ||
+			!slices.Contains([]string{"statement-timeout", "user-request", "other"}, d.Reason) ||
+			!slices.Contains([]string{"active", "canceled", "deadline"}, d.Context) ||
+			!slices.Contains([]string{"unclassified", "global-coordinator", "consumer-admission", "protocol-row", "identity-row", "population-latch"}, d.Site) {
+			return nil
+		}
+	}
 	f.examined, f.reseeded, f.failed, f.completed = *examined, *reseeded, *failed, *completed
 	return &f
+}
+
+func TestRIDRoleVerbCancellationFields(t *testing.T) {
+	examined, reseeded, failed, completed := 56, 55, 1, true
+	read := func(raw string) *ridRoleVerbFailure {
+		return ridReadRoleVerbFailure([]byte(raw), &examined, &reseeded, &failed, &completed)
+	}
+	const base = `{"first_failure_stage":"open-enter-v2","first_failure_class":"sql-query-canceled"`
+	legacy := read(base + "}")
+	require.NotNil(t, legacy)
+	require.Nil(t, legacy.Cancel)
+	const raw = base + `,"first_query_cancel":{"reason":"statement-timeout","context":"active","site":"global-coordinator"}}`
+	extended := read(raw)
+	require.NotNil(t, extended)
+	require.Equal(t, &kanamerepo.InstallationQueryCancel{Reason: "statement-timeout", Context: "active", Site: "global-coordinator"}, extended.Cancel)
+	for _, key := range []string{"statement-timeout", "active", "global-coordinator", "sql-query-canceled", "open-enter-v2"} {
+		require.Nil(t, read(strings.Replace(raw, key, "private detail", 1)))
+	}
 }
 
 func ridCatalogRoleProjectionsReady(path string) error {

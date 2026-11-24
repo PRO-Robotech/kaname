@@ -2496,12 +2496,17 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		}
 		// Перепись печатается ВСЕГДА, независимо от исхода: без неё «ноль
 		// пересеянных» неотличимо от «ноль прочитанных».
+		var queryCancel slog.Attr
+		if verbs.FirstQueryCancel.Reason != "" {
+			queryCancel = slog.Any("first_query_cancel", verbs.FirstQueryCancel)
+		}
 		logger.Info("перепись пересчёта проекции глаголов роли",
 			slog.Int("roles_examined", verbs.Examined),
 			slog.Int("roles_reseeded", verbs.Reseeded),
 			slog.Int("roles_failed", verbs.Failed),
 			slog.String("first_failure_stage", verbs.FirstFailureStage),
 			slog.String("first_failure_class", verbs.FirstFailureClass),
+			queryCancel,
 			slog.Int("pairs", verbs.Pairs),
 			slog.Bool("completed", verbs.Completed))
 		structuralVerbsFailure := verbs.Structural()
