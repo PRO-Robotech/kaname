@@ -239,12 +239,12 @@ echo ""
 # против которого переписан отбор.
 #
 # Без `INTEGRATION_SHARD` прогон — весь отбор, как прежде (локально и в пробах).
-# Двенадцать частей используют только известные тяжёлые TOP и точные дополнения.
+# Матрица CI использует только известные тяжёлые TOP и точные дополнения.
 # Неизвестные будущие Test/Example/Fuzz остаются в дополнениях; перечня всего дерева нет.
 partition_units_file=""
-if [ "$shard_total" = 12 ]; then
+if [ "$shard_total" = 13 ]; then
     printf '%s\n' "$pkgs" > "$work/selected-packages.txt" || exit 2
-    python3 - "$work/selected-packages.txt" "$ROOT/.github/integration-shard-weights.txt" "$work/shard-plan.tsv" "$work/execution-plan.tsv" "$DEFAULT_WEIGHT" <<'PYTWELVE' || exit 2
+    python3 - "$work/selected-packages.txt" "$ROOT/.github/integration-shard-weights.txt" "$work/shard-plan.tsv" "$work/execution-plan.tsv" "$DEFAULT_WEIGHT" <<'PYMATRIX' || exit 2
 import collections, pathlib, re, sys
 selected_file, weights_file, owner_file, execution_file = map(pathlib.Path, sys.argv[1:5])
 default_weight = int(sys.argv[5])
@@ -252,8 +252,10 @@ selected = selected_file.read_text().splitlines()
 ab = "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 pg = "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 migration = "github.com/PRO-Robotech/kaname/internal/migrations"
+shards = range(13)
+migration_shards = (2, 12)
 if len(selected) != len(set(selected)) or not {ab, pg, migration} <= set(selected):
-    raise SystemExit("12 частей требуют неповторный отбор с AB, PG и migrations")
+    raise SystemExit("13 частей требуют неповторный отбор с AB, PG и migrations")
 weights = {}
 for line in weights_file.read_text().splitlines():
     if not line.strip() or line.lstrip().startswith("#"):
@@ -468,6 +470,67 @@ ab_clock_and_plans = [
     "TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant",
     "TestRoleRights_S1P8_ActualGrantReadPlans"
 ] + ab_delegations
+# #1153, CI 45315596389, шард 3, artifact 14886752537, checkout 17f2f8f8:
+# 55 самых долгих завершившихся TOP заняли 809.36 с из 1500.09 с до таймаута.
+# На зелёном прогоне 45282288758, artifact 14872085787, те же TOP заняли
+# 605.22 с, остальные — 624.05 с. Резервы 850/900 с — плановые.
+migration_heavy = [
+    "TestA197_06_ExistingWindowsAreCarriedOverWithoutReset",
+    "TestAccessBindingPairInSet_ConcurrentPairMoveAndRowRemovalKeepThePairInTheSet",
+    "TestAccessBindingPairInSet_InsertWithAForeignPairIsRefusedAtCommit",
+    "TestAccessBindingPairInSet_PairMovesOnlyInsideTheSet",
+    "TestAccessBindingPairInSet_PairRowIsNotRemoved",
+    "TestAccessBindingPairInSet_WritePathCostIsMeasured",
+    "TestAccessBindingSubjectSet_BindingWithoutSetIsRefusedAtCommit",
+    "TestAccessBindingSubjectSet_ConcurrentRemovalsLeaveOneRow",
+    "TestAccessBindingSubjectSet_LastSetRowIsNotRemoved",
+    "TestAccessBindingSubjectSet_RemovingTheBindingCascades",
+    "TestAccessBindingTargetForm_HeadRefusesTheFormOutsideTheContract",
+    "TestClusterAnchor_AdminKeepsAccessAcrossTheRename",
+    "TestClusterAnchor_InterruptedRenameIsNotHalfDone",
+    "TestClusterAnchor_OutsiderStaysDeniedAcrossTheRename",
+    "TestClusterAnchor_RelationsMoveWithTheAnchorAndAreCounted",
+    "TestClusterAnchor_ResidueIsZeroAfterTheRename",
+    "TestClusterAnchor_RestoreGivesTheAdminAccessBack",
+    "TestCredentialCeilingAnchor_CarrierIsNamedTheSameEverywhere",
+    "TestCredentialCeilingAnchor_TablesAndChargersExist",
+    "TestIntegration_AttachingALoginMethodWritesNothingToThePerson",
+    "TestIntegration_ContractNamesOnlyLiveSchemaMachinery",
+    "TestIntegration_EveryProducedNotifyChannelIsNamedByAConsumer",
+    "TestIntegration_IamChainNeverBringsBackTheSubscriptionCursorTable",
+    "TestIntegration_IamDropsAreMeasured",
+    "TestIntegration_LINE_A_1_28_IssuanceRacingRevocationLeavesNoLiveToken",
+    "TestIntegration_LoginMethodRollbackDoesNotRaceItsWriter",
+    "TestIntegration_MirrorLeavingRefusesWhileAMirrorOrLegacyRowLies",
+    "TestIntegration_ProducedChannelWithoutAConsumerIsFound",
+    "TestIntegration_RefreshTokenRotationIsOneStatement",
+    "TestIntegration_RoleCompositionIsObservableThroughTheRoleRow",
+    "TestIntegration_RoleOwnerModuleLivenessKeyHoldsBothDirections",
+    "TestIntegration_RoleSubtableEmissionWouldStormOnEveryBoot",
+    "TestIntegration_StandFormRowGetsInByTheProductPathAfterTransfer",
+    "TestIntegration_TheGuardAgainstOrphanedGrantsIsTheSubjectRef",
+    "TestIntegration_UnknownDottedTypeIsRefusedByTheSchemaNotMeasuredQuietly",
+    "TestLimitDropRefusal_EmptyTableIsNotRefused",
+    "TestLimitDropRefusal_NamesTheExportProcedureBeforeDestruction",
+    "TestMRW18_DeliveryStillJoiningTheRetiredGroupGetsANamedRefusal",
+    "TestObjectProjectBindingDown_ConcurrentWriter",
+    "TestRegistrationCatalogFence_DifferentTypesAndInvalidSecondCall",
+    "TestRegistrationCatalogFence_DownUpAndFullXid",
+    "TestRegistrationCatalogFence_PhysicalWrites",
+    "TestRegistrationCatalogFence_RawEdgeAllCatalogRows",
+    "TestRegistrationCatalogFence_SavepointsAndReuse",
+    "TestRegistrationCatalogWitness_EveryMintPhysicallyFences",
+    "TestRegistrationCatalogWitness_IdentityAndCardinality",
+    "TestRegistrationCatalogWitness_MetadataCannotGrantAuthority",
+    "TestRegistrationCatalogWitness_RejectsWrongKeyAndTruncate",
+    "TestRegistrationLineages_ProductMigratorReconcilesBothHistories",
+    "TestRegistrationRawUpdateVersusFirstBinding",
+    "TestRegistrationRepeatableRead_CatalogGateHasNoSemanticEffects",
+    "TestRegistrationRepeatableRead_EdgeAfterBinding",
+    "TestRegistrationRepeatableRead_FirstBindingAfterEdge",
+    "TestRegistrationRepeatableRead_MovedRawEdgeUpdate",
+    "TestReview983_RawEdgeVersusFirstBinding",
+]
 def pattern(names):
     if not names or len(names) != len(set(names)) or any(re.fullmatch(r"Test[A-Za-z0-9_]+", n) is None for n in names):
         raise SystemExit("непустые точные имена TOP обязательны")
@@ -478,6 +541,7 @@ for groups in ((ab_core, fb21_and_rights, ab_clock_and_plans), (pg_heavy, pg_exp
         raise SystemExit("части пересекаются по TOP")
 ab_union = pattern(ab_core + fb21_and_rights + ab_clock_and_plans)
 pg_union = pattern(pg_heavy + pg_expiry + pg_long_tail)
+migration_filter = pattern(migration_heavy)
 # Плановые резервы LPT ниже не являются временем успешного прогона частей.
 # c39: AB core1139.09 с завершился RED; FB21 package819.668 с PASS.
 # Переносимые20 TOP PASS =258.75 с,63 TOP PASS =622.72 с.
@@ -490,49 +554,60 @@ pg_union = pattern(pg_heavy + pg_expiry + pg_long_tail)
 parts = {
     0: (ab, "run", pattern(ab_core), 1200),
     1: (ab, "run", pattern(fb21_and_rights), 1200),
+    2: (migration, "run", migration_filter, 850),
     3: (ab, "run", pattern(ab_clock_and_plans), 1300),
     4: (ab, "skip", ab_union, 1300),
     5: (pg, "run", pattern(pg_heavy), 660),
     6: (pg, "run", pattern(pg_expiry), 700),
     7: (pg, "skip", pg_union, 1200),
     11: (pg, "run", pattern(pg_long_tail), 400),
+    12: (migration, "skip", migration_filter, 900),
 }
-loads = {index: 0 for index in range(12)}
+loads = {index: 0 for index in shards}
 for index, (_, _, _, reserve) in parts.items():
     loads[index] = reserve
-loads[2] = weights.get(migration, default_weight)
 # Ведомость владельцев сохраняет исторический вес пакета; для специальных
 # частей LPT использует только резервы выше, а не повторно этот полный вес.
-owners = [(0, weights.get(ab, default_weight), ab), (5, weights.get(pg, default_weight), pg), (2, loads[2], migration)]
-for package in sorted(set(selected) - {ab, pg, migration}, key=lambda p: (-weights.get(p, default_weight), p)):
+owners = [
+    (0, weights.get(ab, default_weight), ab),
+    (5, weights.get(pg, default_weight), pg),
+    (2, weights.get(migration, default_weight), migration),
+]
+partitioned = {ab, pg, migration}
+for package in sorted(set(selected) - partitioned, key=lambda p: (-weights.get(p, default_weight), p)):
     if package not in weights:
         print(f"вес не замерен, взят по умолчанию {default_weight} с: {package}", file=sys.stderr)
-    index = min((i for i in range(12) if i != 2), key=lambda i: (loads[i], i))
+    index = min((i for i in shards if i not in migration_shards), key=lambda i: (loads[i], i))
     weight = weights.get(package, default_weight)
     owners.append((index, weight, package))
     loads[index] += weight
-rows = [(index, package, "all", "-") for index, _, package in owners if package not in (ab, pg)]
+rows = [(index, package, "all", "-") for index, _, package in owners if package not in partitioned]
 rows += [(index, package, mode, regex) for index, (package, mode, regex, _) in parts.items()]
-# Независимая проверка 12 частей: владельцы и единицы исполнения различаются.
+# Независимая проверка матрицы: владельцы и единицы исполнения различаются.
 if collections.Counter(package for _, _, package in owners) != collections.Counter(selected):
     raise SystemExit("потерян или повторён владелец пакета")
-if {package: index for index, _, package in owners}.get(ab) != 0 or {package: index for index, _, package in owners}.get(pg) != 5:
-    raise SystemExit("неверный исходный владелец AB или PG")
-if any(not 0 <= index < 12 for index, _, _ in owners):
+owner_shards = {package: index for index, _, package in owners}
+if {package: owner_shards[package] for package in partitioned} != {ab: 0, pg: 5, migration: 2}:
+    raise SystemExit("неверный исходный владелец AB, PG или migrations")
+if any(index not in shards for index, _, _ in owners):
     raise SystemExit("неизвестный шард владельца")
-expected = [(index, package, "all", "-") for index, _, package in owners if package not in (ab, pg)]
+expected = [(index, package, "all", "-") for index, _, package in owners if package not in partitioned]
 expected += [(index, package, mode, regex) for index, (package, mode, regex, _) in parts.items()]
-if collections.Counter(rows) != collections.Counter(expected) or len(rows) != len(selected) + 6:
+if collections.Counter(rows) != collections.Counter(expected) or len(rows) != len(selected) + 7:
     raise SystemExit("потеря, повтор или чужой фильтр единицы исполнения")
-if [(index, package, mode, regex) for index, package, mode, regex in rows if index == 2] != [(2, migration, "all", "-")]:
-    raise SystemExit("migrations должен занимать index 2 без других пакетов")
-if any(not any(index == i for index, _, _, _ in rows) for i in range(12)):
+migration_units = [row for row in rows if row[0] in migration_shards or row[1] == migration]
+if collections.Counter(migration_units) != collections.Counter([
+    (2, migration, "run", migration_filter),
+    (12, migration, "skip", migration_filter),
+]):
+    raise SystemExit("migrations требует два отдельных шарда с точным выбором и его дополнением")
+if any(not any(index == i for index, _, _, _ in rows) for i in shards):
     raise SystemExit("пустой шард исполнения")
 owner_file.write_text("".join(f"{i}\t{weight}\t{package}\n" for i, weight, package in owners))
 execution_file.write_text("".join("\t".join(map(str, row)) + "\n" for row in rows))
-for index in range(12):
+for index in shards:
     print(f"шард {index}: плановый вес {loads[index]} с; неизвестный хвост не принят", file=sys.stderr)
-PYTWELVE
+PYMATRIX
     execution_plan="$work/execution-plan.tsv"
     if [ -n "$evidence" ]; then
         cp "$work/shard-plan.tsv" "$evidence/shard-plan.tsv" || exit 2
