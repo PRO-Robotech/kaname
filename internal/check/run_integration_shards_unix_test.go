@@ -63,7 +63,7 @@ for package in (a for a in args if a in packages):
         print(json.dumps(event))
     emit("start")
     names = ["TestComplement", "ExampleComplement", "FuzzComplement"]
-    if os.environ.get("FAKE_TWELVE") == "1":
+    if os.environ.get("FAKE_FULL_MATRIX") == "1":
         names += ["TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit", "TestRoleRightsStayNamed_FutureAfterSplit", "TestGrantDelegation_FutureAfterSplit"]
     if mode == "run":
         names = args[args.index("-run") + 1][2:-2].split("|")
@@ -125,7 +125,7 @@ func runShardFixture(t *testing.T, script, shard string, plan, moveOwner bool, e
 		weights += fmt.Sprintf("%d %s\n", weight, p)
 	}
 	for _, option := range extra {
-		if option == "FAKE_TWELVE=1" {
+		if option == "FAKE_FULL_MATRIX=1" {
 			packages = append(packages, shardPG, shardMigrations)
 			weights += "10 " + shardPG + "\n10 " + shardMigrations + "\n"
 		}
@@ -440,11 +440,11 @@ func TestRunIntegrationShardsMigrationsOtherTotalsKeepLPT(t *testing.T) {
 }
 
 // Каждый будущий неизвестный Test/Example/Fuzz обязан остаться только в дополнении.
-func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) {
+func TestRunIntegrationShardsMatrixPartsCoverOwnersAndFutureCases(t *testing.T) {
 	seen := make(map[string]int)
 	var execution string
-	for shard := 0; shard < 12; shard++ {
-		o := runShardFixture(t, runIntegrationSource(t), fmt.Sprintf("%d/12", shard), false, false, "FAKE_TWELVE=1")
+	for shard := 0; shard < 13; shard++ {
+		o := runShardFixture(t, runIntegrationSource(t), fmt.Sprintf("%d/13", shard), false, false, "FAKE_FULL_MATRIX=1")
 		require.Zero(t, o.rc, o.output)
 		plan := shardEvidence(t, o, "execution-plan.tsv")
 		if shard == 0 {
@@ -452,7 +452,7 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 		}
 		require.Equal(t, execution, plan, "все задания строят один полный план")
 		rows := strings.Split(strings.TrimSpace(plan), "\n")
-		require.Len(t, rows, 19, "13 владельцев и шесть дополнительных единиц")
+		require.Len(t, rows, 20, "13 владельцев и семь дополнительных единиц")
 		owners := make(map[string]int)
 		for _, row := range strings.Split(strings.TrimSpace(shardEvidence(t, o, "shard-plan.tsv")), "\n") {
 			fields := strings.Split(row, "\t")
@@ -484,8 +484,13 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 				require.Equal(t, "skip", fields[2])
 				require.Regexp(t, fields[3], "TestRoleRights_S1P8_ActualGrantReadPlans", "дополнение не повторяет перенесённый TOP")
 			}
-			if fields[0] == "2" || fields[1] == shardMigrations {
-				require.Equal(t, []string{"2", shardMigrations, "all", "-"}, fields)
+			if fields[0] == "2" || fields[0] == "12" || fields[1] == shardMigrations {
+				require.Equal(t, shardMigrations, fields[1])
+				mode, ok := map[string]string{"2": "run", "12": "skip"}[fields[0]]
+				require.True(t, ok, "для миграций выделены шарды 2 и 12")
+				require.Equal(t, mode, fields[2])
+				require.Equal(t, "c7df52e5541e1fc1d0a223d0a62801b50d557b929e8cb13e26bef6bcd254f9e4",
+					fmt.Sprintf("%x", sha256.Sum256([]byte(fields[3]))), "точный набор долгих проб миграций")
 			}
 		}
 		require.Positive(t, units, "непустота судится по исполнению")
@@ -499,8 +504,14 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 				}
 			}
 		}
-		if (shard != 2 && shard < 8) || shard == 11 {
+		if shard < 8 || shard == 11 || shard == 12 {
 			raw := shardEvidence(t, o, fmt.Sprintf("go-test-partition-%d.json", shard))
+			if shard == 2 || shard == 12 {
+				require.Len(t, o.calls, 1, "в задании миграций один вызов")
+				require.Equal(t, shardMigrations, o.calls[0][len(o.calls[0])-1])
+				require.Equal(t, "0\n", shardEvidence(t, o, fmt.Sprintf("go-test-partition-%d-exit-code.txt", shard)))
+				require.Contains(t, shardEvidence(t, o, "executed-packages.txt"), shardMigrations)
+			}
 			if shard == 3 {
 				require.Contains(t, raw, "TestRoleRights_S1P8_ActualGrantReadPlans")
 				require.Contains(t, raw, "TestFullBind_FB31_SourceExpiryAfterHeldWriterClockDoesNotShortenGrant")
@@ -510,7 +521,7 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 				require.Contains(t, raw, "TestRoleActualUpdateFinalDecisionAfterLegacyWait")
 			}
 			for _, future := range []string{"TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit", "TestRoleRightsStayNamed_FutureAfterSplit", "TestGrantDelegation_FutureAfterSplit"} {
-				if shard == 4 || shard == 7 {
+				if shard == 4 || shard == 7 || shard == 12 {
 					require.Contains(t, raw, future)
 				} else {
 					require.NotContains(t, raw, future)
@@ -518,12 +529,12 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 			}
 		}
 	}
-	want := map[string]int{shardAccessBinding: 4, shardPG: 4, shardMigrations: 1}
+	want := map[string]int{shardAccessBinding: 4, shardPG: 4, shardMigrations: 2}
 	for i := 0; i < 10; i++ {
 		want[fmt.Sprintf("example.test/p%d", i)] = 1
 	}
 	require.Equal(t, want, seen)
-	for _, pkg := range []string{shardAccessBinding, shardPG} {
+	for _, pkg := range []string{shardAccessBinding, shardPG, shardMigrations} {
 		var selectors []*regexp.Regexp
 		var modes []string
 		candidates := []string{"TestFutureAfterSplit", "ExampleFutureAfterSplit", "FuzzFutureAfterSplit", "TestRoleRights_S1P8_ActualGrantReadPlans", "TestRoleRights_S1P8_ActualGrantReadPlansFuture", "TestRoleRightsStayNamed_FutureAfterSplit", "TestGrantDelegation_FutureAfterSplit"}
@@ -555,32 +566,32 @@ func TestRunIntegrationShardsTwelvePartsCoverOwnersAndFutureCases(t *testing.T) 
 	}
 }
 
-func TestRunIntegrationShardsTwelveNamedPartsFailClosed(t *testing.T) {
+func TestRunIntegrationShardsMatrixNamedPartsFailClosed(t *testing.T) {
 	script := runIntegrationSource(t)
 	// Двойники используют отдельные песочницы. Держим не больше двух
 	// одновременно, включая их очистку.
 	slots := make(chan struct{}, 2)
-	for _, shard := range []int{0, 1, 3, 5, 11} {
+	for _, shard := range []int{0, 1, 2, 3, 5, 11} {
 		for _, defect := range []string{"run-empty", "run-missing", "run-renamed", "run-skipped", "run-one-skipped", "run-duplicate", "run-nonjson", "run-wrong-package"} {
 			t.Run(fmt.Sprintf("%d/%s", shard, defect), func(t *testing.T) {
 				t.Parallel()
 				slots <- struct{}{}
 				t.Cleanup(func() { <-slots })
-				o := runShardFixture(t, script, fmt.Sprintf("%d/12", shard), false, false,
-					"FAKE_TWELVE=1", "FAKE_DEFECT="+defect)
+				o := runShardFixture(t, script, fmt.Sprintf("%d/13", shard), false, false,
+					"FAKE_FULL_MATRIX=1", "FAKE_DEFECT="+defect)
 				require.Equal(t, 2, o.rc, o.output)
 			})
 		}
 	}
-	for _, shard := range []int{4, 7} {
-		o := runShardFixture(t, script, fmt.Sprintf("%d/12", shard), false, false,
-			"FAKE_TWELVE=1", "FAKE_DEFECT=skip-selected")
+	for _, shard := range []int{4, 7, 12} {
+		o := runShardFixture(t, script, fmt.Sprintf("%d/13", shard), false, false,
+			"FAKE_FULL_MATRIX=1", "FAKE_DEFECT=skip-selected")
 		require.Equal(t, 2, o.rc, o.output)
 	}
 }
 
-func TestRunIntegrationShardsTwelvePlanRejectsLostDuplicateAndForeignUnits(t *testing.T) {
-	marker := "# Независимая проверка 12 частей: владельцы и единицы исполнения различаются."
+func TestRunIntegrationShardsMatrixPlanRejectsLostDuplicateAndForeignUnits(t *testing.T) {
+	marker := "# Независимая проверка матрицы: владельцы и единицы исполнения различаются."
 	for i, mutation := range []string{
 		"rows.pop()",
 		"rows.append(rows[0])",
@@ -588,12 +599,14 @@ func TestRunIntegrationShardsTwelvePlanRejectsLostDuplicateAndForeignUnits(t *te
 		"owners[0] = (1, owners[0][1], owners[0][2])",
 		"rows = [(2 if p == ab else s, p, mode, regex) for s, p, mode, regex in rows]",
 		"rows[0] = (rows[0][0], rows[0][1], 'skip', '^(TestFutureAfterSplit)$')",
+		"parts[12] = (migration, 'skip', '^(TestFutureAfterSplit)$', 900)\nrows = [(s, p, m, parts[12][2] if s == 12 else r) for s, p, m, r in rows]",
+		"owners = [(12 if p == 'example.test/p0' else s, w, p) for s, w, p in owners]\nrows = [(12 if p == 'example.test/p0' else s, p, m, r) for s, p, m, r in rows]",
 	} {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			script := runIntegrationSource(t)
 			require.Contains(t, script, marker)
 			script = strings.Replace(script, marker, mutation+"\n"+marker, 1)
-			o := runShardFixture(t, script, "0/12", true, false, "FAKE_TWELVE=1")
+			o := runShardFixture(t, script, "0/13", true, false, "FAKE_FULL_MATRIX=1")
 			require.Equal(t, 2, o.rc, o.output)
 			require.Empty(t, o.calls)
 		})
