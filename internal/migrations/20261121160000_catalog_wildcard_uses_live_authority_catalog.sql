@@ -133,9 +133,18 @@ BEGIN
    ARRAY[$edit$kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer)$edit$,$edit$kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer,p_catalog)$edit$]
   ]),
  ('kaname._authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)'::regprocedure,
-  'e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305','3e8b2e7853afc40b94b57b0937b5ebfc7c1e183fcb2aa13b45db3aa379946f2b',
+  'e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305','12f63b57af5fb53abdaaf7695491a13443f4a709a38d2124a8cfd707c6ce573c',
   ARRAY[
-   ARRAY[$edit$kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer)$edit$,$edit$kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer,p_catalog)$edit$]
+   ARRAY[$edit$authored jsonb; rule_proof jsonb;$edit$,$edit$authored jsonb; materialized_types jsonb; rule_proof jsonb;$edit$],
+   ARRAY[$edit$ IF NOT (kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer) ? dotted) THEN$edit$,$edit$ materialized_types:=kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer,p_catalog);
+ IF NOT (materialized_types ? dotted) THEN$edit$],
+   ARRAY[$edit$ selector:=selector||jsonb_build_object('verbs',authored->'verbs',$edit$,$edit$ -- Индекс подтверждает fingerprint и форму сохранённой проекции. Состав типов
+ -- определяет то же authored правило и снимок каталога, что и в census.
+ IF jsonb_typeof(selector->'object_types') IS DISTINCT FROM 'array'
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(selector->'object_types') v WHERE jsonb_typeof(v)<>'string') THEN
+  RAISE EXCEPTION 'invalid captured selector proof' USING ERRCODE='22023';
+ END IF;
+ selector:=selector||jsonb_build_object('object_types',materialized_types,'verbs',authored->'verbs',$edit$]
   ]),
  ('kaname._authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)'::regprocedure,
   'a7009eb3fc759ba72f73579f72a23b6078174b556fbcbbcadc91b2e95bb4013c','2b2757872642bb61bb18ab2f6dc58e300a9d356c68490303fc7ce2562802826b',
@@ -202,10 +211,10 @@ $edit$,$edit$ used_reads:=used_reads+1;used_rows:=used_rows+1;
 $edit$]
   ]),
  ('kaname._authority_crud_storage_v3()'::regprocedure,
-  '36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64','aa7585fed2eaee3e602957d16260cb3f8074c836865ab13e092d91a6175dd73c',
+  '36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64','6b39ee6bf886b1ae0746093127e5b89264d32b88f01b3e3ff8bb79ebed51f259',
   ARRAY[
    ARRAY[$edit$('_authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)','0dd211dcb360329fa856f8c14692b50169668f73e2c03fd90aea3d3a0d7737b0'$edit$,$edit$('_authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)','827602df4b6c9590bdd3cbf94087a2ccbdb412f95736be0c3eda05e6cfba18ac'$edit$],
-   ARRAY[$edit$('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305'$edit$,$edit$('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','3e8b2e7853afc40b94b57b0937b5ebfc7c1e183fcb2aa13b45db3aa379946f2b'$edit$],
+   ARRAY[$edit$('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305'$edit$,$edit$('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','12f63b57af5fb53abdaaf7695491a13443f4a709a38d2124a8cfd707c6ce573c'$edit$],
    ARRAY[$edit$('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','a7009eb3fc759ba72f73579f72a23b6078174b556fbcbbcadc91b2e95bb4013c'$edit$,$edit$('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','2b2757872642bb61bb18ab2f6dc58e300a9d356c68490303fc7ce2562802826b'$edit$],
    ARRAY[$edit$('_authority_resource_withdrawal_role_projection_v2(jsonb,jsonb,jsonb,jsonb)','89c1b44eb9a74c42c2be80f3f395e05216636481893f47ac85b6696704689ab6'$edit$,$edit$('_authority_resource_withdrawal_role_projection_v2(jsonb,jsonb,jsonb,jsonb)','1a003c807a251a32fc1c07ab25f386c692ff8ff0104934684e515d343844ac57'$edit$],
    ARRAY[$edit$('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','de942f0c6c21834ac9ecb177f4dce25e5c66c83101aaaf78bd23805ab04952a6'$edit$,$edit$('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','e61e4cb14a0cbe97eaae4466df38f79e9996e0eff1eb8ed79421835733dc19f6'$edit$],
@@ -214,9 +223,9 @@ $edit$]
  ('_authority_binding_census_projection_v3(jsonb,jsonb,integer,jsonb)','36963e0529cbc6e5264d76b1d8aa88eea1f19839bfec61684821fac060f59478',true,'i',true,'private'),$edit$]
   ]),
  ('kaname._authority_full_contract_storage_v3()'::regprocedure,
-  '2aba8bcc57e9cb4b4d6bbe1241813c92b3e0cb70876d71e388401f6b8de11606','480e0f1a7dbd472f7ba31dc90e5308650dc2d291d6bbd9b2bfec2c6fcfb1bd2f',
+  '2aba8bcc57e9cb4b4d6bbe1241813c92b3e0cb70876d71e388401f6b8de11606','79b1e75ea5775a140b6debfe835833c4794284a6c1e9e0861fd04594da96d122',
   ARRAY[
-   ARRAY[$edit$36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64$edit$,$edit$aa7585fed2eaee3e602957d16260cb3f8074c836865ab13e092d91a6175dd73c$edit$]
+   ARRAY[$edit$36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64$edit$,$edit$6b39ee6bf886b1ae0746093127e5b89264d32b88f01b3e3ff8bb79ebed51f259$edit$]
   ])
  ) AS replacements(signature,old_digest,new_digest,edits)
  LOOP
@@ -270,12 +279,12 @@ DECLARE patch record;src text;updated text;definition text;edit text[];
 BEGIN
  FOR patch IN SELECT * FROM (VALUES
  ('kaname._authority_full_contract_storage_v3()'::regprocedure,
-  '480e0f1a7dbd472f7ba31dc90e5308650dc2d291d6bbd9b2bfec2c6fcfb1bd2f','2aba8bcc57e9cb4b4d6bbe1241813c92b3e0cb70876d71e388401f6b8de11606',
+  '79b1e75ea5775a140b6debfe835833c4794284a6c1e9e0861fd04594da96d122','2aba8bcc57e9cb4b4d6bbe1241813c92b3e0cb70876d71e388401f6b8de11606',
   ARRAY[
-   ARRAY[$edit$aa7585fed2eaee3e602957d16260cb3f8074c836865ab13e092d91a6175dd73c$edit$,$edit$36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64$edit$]
+   ARRAY[$edit$6b39ee6bf886b1ae0746093127e5b89264d32b88f01b3e3ff8bb79ebed51f259$edit$,$edit$36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64$edit$]
   ]),
  ('kaname._authority_crud_storage_v3()'::regprocedure,
-  'aa7585fed2eaee3e602957d16260cb3f8074c836865ab13e092d91a6175dd73c','36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64',
+  '6b39ee6bf886b1ae0746093127e5b89264d32b88f01b3e3ff8bb79ebed51f259','36bd005f8ee097ce2f71fb396bed20e968aa1c3f9f0baab4554e932e251a9a64',
   ARRAY[
    ARRAY[$edit$ ('_authority_resource_materialized_types_v2(jsonb,integer)','a1b18cbee25c6da9fa6cbd017b0dbcd69eaa5c692065d0856d6b65cadaad4bac',true,'i',true,'preserve'),
  ('_authority_resource_materialized_types_v2(jsonb,integer,jsonb)','c48f643efc4c37a7de9bc99b59feeae1c7c631c005ff8fc8fc2cc56ec83a4861',true,'i',true,'private'),
@@ -283,7 +292,7 @@ BEGIN
    ARRAY[$edit$('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','e61e4cb14a0cbe97eaae4466df38f79e9996e0eff1eb8ed79421835733dc19f6'$edit$,$edit$('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','de942f0c6c21834ac9ecb177f4dce25e5c66c83101aaaf78bd23805ab04952a6'$edit$],
    ARRAY[$edit$('_authority_resource_withdrawal_role_projection_v2(jsonb,jsonb,jsonb,jsonb)','1a003c807a251a32fc1c07ab25f386c692ff8ff0104934684e515d343844ac57'$edit$,$edit$('_authority_resource_withdrawal_role_projection_v2(jsonb,jsonb,jsonb,jsonb)','89c1b44eb9a74c42c2be80f3f395e05216636481893f47ac85b6696704689ab6'$edit$],
    ARRAY[$edit$('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','2b2757872642bb61bb18ab2f6dc58e300a9d356c68490303fc7ce2562802826b'$edit$,$edit$('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','a7009eb3fc759ba72f73579f72a23b6078174b556fbcbbcadc91b2e95bb4013c'$edit$],
-   ARRAY[$edit$('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','3e8b2e7853afc40b94b57b0937b5ebfc7c1e183fcb2aa13b45db3aa379946f2b'$edit$,$edit$('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305'$edit$],
+   ARRAY[$edit$('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','12f63b57af5fb53abdaaf7695491a13443f4a709a38d2124a8cfd707c6ce573c'$edit$,$edit$('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305'$edit$],
    ARRAY[$edit$('_authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)','827602df4b6c9590bdd3cbf94087a2ccbdb412f95736be0c3eda05e6cfba18ac'$edit$,$edit$('_authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)','0dd211dcb360329fa856f8c14692b50169668f73e2c03fd90aea3d3a0d7737b0'$edit$]
   ]),
  ('kaname.authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)'::regprocedure,
@@ -351,9 +360,18 @@ $edit$],
     materialized_types:=kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer);$edit$]
   ]),
  ('kaname._authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)'::regprocedure,
-  '3e8b2e7853afc40b94b57b0937b5ebfc7c1e183fcb2aa13b45db3aa379946f2b','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305',
+  '12f63b57af5fb53abdaaf7695491a13443f4a709a38d2124a8cfd707c6ce573c','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305',
   ARRAY[
-   ARRAY[$edit$kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer,p_catalog)$edit$,$edit$kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer)$edit$]
+   ARRAY[$edit$ -- Индекс подтверждает fingerprint и форму сохранённой проекции. Состав типов
+ -- определяет то же authored правило и снимок каталога, что и в census.
+ IF jsonb_typeof(selector->'object_types') IS DISTINCT FROM 'array'
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(selector->'object_types') v WHERE jsonb_typeof(v)<>'string') THEN
+  RAISE EXCEPTION 'invalid captured selector proof' USING ERRCODE='22023';
+ END IF;
+ selector:=selector||jsonb_build_object('object_types',materialized_types,'verbs',authored->'verbs',$edit$,$edit$ selector:=selector||jsonb_build_object('verbs',authored->'verbs',$edit$],
+   ARRAY[$edit$ materialized_types:=kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer,p_catalog);
+ IF NOT (materialized_types ? dotted) THEN$edit$,$edit$ IF NOT (kaname._authority_resource_materialized_types_v2(authored,(binding->>'scope')::integer) ? dotted) THEN$edit$],
+   ARRAY[$edit$authored jsonb; materialized_types jsonb; rule_proof jsonb;$edit$,$edit$authored jsonb; rule_proof jsonb;$edit$]
   ]),
  ('kaname._authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)'::regprocedure,
   '827602df4b6c9590bdd3cbf94087a2ccbdb412f95736be0c3eda05e6cfba18ac','0dd211dcb360329fa856f8c14692b50169668f73e2c03fd90aea3d3a0d7737b0',

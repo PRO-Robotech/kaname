@@ -12,6 +12,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -127,6 +128,62 @@ func TestCatalogWildcardGooseRoundTripKeepsExactBindingProjection(t *testing.T) 
 			}
 		}
 	}
+
+	t.Run("ordinary member from an older selector projection", func(t *testing.T) {
+		encoded, err := domain.EncodeRules(domain.Rules{module})
+		require.NoError(t, err)
+		witness := func(row any) map[string]any {
+			states := [][]any{}
+			if row != nil {
+				states = append(states, []any{nil, nil, row})
+			}
+			return map[string]any{"source": map[string]any{}, "states": states}
+		}
+		for _, tc := range []struct {
+			name, dotted, targetID, fingerprint, wantError string
+		}{
+			{"new live type", "warehouse.live", "item", module.Fingerprint(), ""},
+			{"other named target", "warehouse.live", "other", module.Fingerprint(), "selector or target does not cover proposed member"},
+			{"stale type outside catalog projection", "warehouse.levelOnly", "item", module.Fingerprint(), "authored rule does not cover object type"},
+			{"fingerprint outside authored role", "warehouse.live", "item", ordinary.Fingerprint(), "member fingerprint has no canonical authored rule"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				target, err := relverdict.EncodeTarget(domain.AccessTarget{Resources: []domain.ResourceRef{{Type: tc.dotted, ID: tc.targetID}}})
+				require.NoError(t, err)
+				role := map[string]any{"id": "role", "live": true, "rules": json.RawMessage(encoded), "is_system": false, "cluster_id": nil, "owner_module": nil}
+				binding := map[string]any{
+					"id": "binding", "role_id": "role", "scope": int(domain.ScopeAccount), "resource_type": "account", "resource_id": "home",
+					"subject_type": "user", "subject_id": "recipient", "target": json.RawMessage(target),
+				}
+				// Индекс содержит прежний тип и не содержит вновь доставленный.
+				selector := map[string]any{"role_id": "role", "rule_fp": tc.fingerprint, "object_types": []string{"warehouse.levelOnly"}}
+				index := map[string]any{
+					`[8, "binding", "binding", ""]`: witness(binding), `[9, "binding", "binding", ""]`: witness(nil),
+					`[12, "role", "role", ""]`: witness(role), `[13, "role", "role", ""]`: witness(selector),
+				}
+				graph := map[string]any{
+					"present": true, "current_accounts": []string{"home"},
+					"projection": map[string]any{"object_type": tc.dotted, "object_id": "item"},
+				}
+				desired := map[string]any{
+					"Derivation": "ordinary", "ObjectType": tc.dotted, "ObjectID": "item", "RuleFP": tc.fingerprint, "Status": "ACTIVE",
+					"Tuples": []map[string]string{
+						{"User": "user:recipient", "Relation": "v_get", "Object": "warehouse_live:item"},
+						{"User": "user:recipient", "Relation": "viewer", "Object": "warehouse_live:item"},
+					},
+				}
+				var accepted bool
+				err = db.QueryRow(`SELECT kaname._authority_resource_ordinary_member_v2($1::jsonb,$2::jsonb,'binding',$3::jsonb,$4::jsonb)`,
+					asJSON(index), canonical, asJSON(desired), asJSON(graph)).Scan(&accepted)
+				if tc.wantError != "" {
+					require.ErrorContains(t, err, tc.wantError)
+					return
+				}
+				require.NoError(t, err)
+				require.True(t, accepted)
+			})
+		}
+	})
 
 	require.NoError(t, goose.DownTo(db, ".", before))
 	require.Equal(t, priorStage, functionDefinition(stageCapture))
