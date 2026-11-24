@@ -118,6 +118,7 @@ jobs:
     outputs:
       full: ${{ steps.pick.outputs.full }}
       jobs: ${{ steps.pick.outputs.jobs }}
+      runner_apt_cache_key: ${{ steps.runner-apt-cache-key.outputs.key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -125,12 +126,21 @@ jobs:
             .github
             go.mod
           sparse-checkout-cone-mode: false
+      - name: вычислить ключ проверяемого APT-кэша
+        id: runner-apt-cache-key
+        run: |
+          . .github/scripts/stand-runner-bootstrap.sh
+          digest="$(runner_apt_cache_key)"
+          [[ "$digest" =~ ^[[:xdigit:]]{64}$ ]]
+          printf 'key=kaname-apt-v2-%s-%s-%s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$digest" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
         continue-on-error: true
         id: provider-apt-cache
         with:
           path: ${{ runner.temp }}/kaname-runner/apt-cache
-          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
+          key: ${{ steps.runner-apt-cache-key.outputs.key }}
+          restore-keys: |
+            kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: единый provider инструментов (native/hosted)
         id: runner-provider
         run: |
@@ -206,7 +216,7 @@ jobs:
         id: provider-apt-cache
         with:
           path: ${{ runner.temp }}/kaname-runner/apt-cache
-          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: единый provider инструментов (native/hosted)
         id: runner-provider
         run: |
@@ -565,7 +575,7 @@ jobs:
         id: provider-apt-cache
         with:
           path: ${{ runner.temp }}/kaname-runner/apt-cache
-          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: единый provider инструментов (native/hosted)
         id: runner-provider
         run: |
@@ -1064,7 +1074,7 @@ jobs:
         id: provider-apt-cache
         with:
           path: ${{ runner.temp }}/kaname-runner/apt-cache
-          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: единый provider инструментов (native/hosted)
         id: runner-provider
         run: |
@@ -1393,7 +1403,7 @@ jobs:
         id: provider-apt-cache
         with:
           path: ${{ runner.temp }}/kaname-runner/apt-cache
-          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: единый provider инструментов (native/hosted)
         id: runner-provider
         run: |
@@ -1574,7 +1584,7 @@ jobs:
         id: provider-apt-cache
         with:
           path: ${{ runner.temp }}/kaname-runner/apt-cache
-          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: единый provider инструментов (native/hosted)
         id: runner-provider
         run: |
@@ -1959,6 +1969,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2004,6 +2019,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2049,6 +2069,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2094,6 +2119,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2139,6 +2169,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2184,6 +2219,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2229,6 +2269,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2274,6 +2319,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2319,6 +2369,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2364,6 +2419,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2422,6 +2482,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2502,6 +2567,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/kaname-runner/apt-cache
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: инструменты нативной фикстуры
         run: |
           export KANAME_RUNNER_GO="$(sed -n 's/^toolchain go//p' go.mod)"
@@ -2588,7 +2658,7 @@ jobs:
         id: provider-apt-cache
         with:
           path: ${{ runner.temp }}/kaname-runner/apt-cache
-          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: единый provider инструментов (native/hosted)
         id: runner-provider
         run: |
@@ -2682,7 +2752,7 @@ jobs:
         id: provider-apt-cache
         with:
           path: ${{ runner.temp }}/kaname-runner/apt-cache
-          key: kaname-apt-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/e2e-newman.yml', '.github/scripts/stand-runner-bootstrap.sh') }}
+          key: ${{ needs.changes.outputs.runner_apt_cache_key }}
       - name: единый provider инструментов (native/hosted)
         id: runner-provider
         run: |
