@@ -62,6 +62,9 @@ var metadataDeclRe = regexp.MustCompile(`metadata:\s*"([A-Za-z0-9_]+)"`)
 // как отсутствующий (kindDelete), и убрать строку отсюда.
 var unresolvedMetadata = []string{
 	"AddGroupMemberMetadata",
+	// Публикация каталога завершается синхронно; новая редакция сохраняется
+	// в журнале, а отдельной строки ресурса для резолвера у операции нет.
+	"ApplyCatalogPublicationMetadata",
 	// ApplyModuleMetadata — то же основание, что у пары ClusterAdmin выше, и
 	// сильнее её: у применения каталога модулей воркера нет НЕ по стечению
 	// обстоятельств, а по форме контракта. `InternalModuleService.Apply`

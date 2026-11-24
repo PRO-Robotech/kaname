@@ -17,6 +17,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -226,8 +227,8 @@ func requireUpdateAuthority(ctx context.Context, d domain.GrantDelegation, autho
 // раньше монотонности. Снятый из живого каталога тип не оживает через другую ось.
 func (u *UpdateGrantDelegationUseCase) validateFinal(ctx context.Context, rd Reader, current, next domain.GrantDelegation) error {
 	var facts domain.TargetTypeCatalog
-	if u.cat != nil {
-		facts = u.cat.Facts()
+	if f := authzsnapshot.FactsForRequest(ctx, u.cat); f != nil {
+		facts = f
 	}
 	for _, target := range next.TargetTypes {
 		if !domain.ValidTargetType(facts, target) {

@@ -479,14 +479,14 @@ func TestServiceAccountStateMigrationGooseDownUpRestoresExact24(t *testing.T) {
 	require.True(t, public)
 	require.False(t, private)
 	require.NoError(t, lifecycleOwner(r).PrepareAuthorityBundle(r.ctx, r.bundle))
-	full, _ := fullContractActivate(t, r)
+	full, _ := fullContractActivateBeforePublication(t, r)
 	require.NoError(t, full.ValidateFullAuthorityBundle(r.ctx, r.bundle))
 }
 func TestServiceAccountStateMigrationGooseDownRefusesFullWithoutChanges(t *testing.T) {
 	r, _ := writerProtocolRigBeforePreparation(t)
 	db, own, _ := saStateMigrationDB(t, r)
 	require.NoError(t, lifecycleOwner(r).PrepareAuthorityBundle(r.ctx, r.bundle))
-	full, _ := fullContractActivate(t, r)
+	full, _ := fullContractActivateBeforePublication(t, r)
 	before := rolePrelockMigrationSnapshot(t, r)
 	err := goose.Down(db, ".")
 	var pe *pgconn.PgError

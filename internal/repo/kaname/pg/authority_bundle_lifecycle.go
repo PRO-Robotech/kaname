@@ -142,42 +142,191 @@ func (r *Repository) ActivateAuthorityBundle(ctx context.Context, b *granteffect
 	})
 }
 func (r *Repository) StageFullAuthorityBundle(ctx context.Context, b *granteffect.Bundle, editions ...kaname.AuthorityModuleEdition) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := b.Validate(); err != nil {
-		return err
-	}
 	editions = append([]kaname.AuthorityModuleEdition(nil), editions...)
-	return r.authorityLifecycle(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if err := authorityCatalogMatches(ctx, tx, b); err != nil {
+	return r.changeFullAuthorityBundle(ctx, b, false, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireUnpublishedAuthority(ctx, tx); err != nil {
 			return err
 		}
-		if err := authorityEditionsMatch(ctx, tx, editions); err != nil {
-			return err
-		}
-		id := b.Identity()
-		_, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_stage_full_v3($1,$2,$3,$4,$5)`, b.ModelSource(), b.CanonicalCatalog(), id.ModelID, id.CatalogID, id.ProjectorVersion)
-		return err
+		return authorityEditionsMatch(ctx, tx, editions)
 	})
 }
 func (r *Repository) ActivateFullAuthorityBundle(ctx context.Context, b *granteffect.Bundle, editions ...kaname.AuthorityModuleEdition) error {
+	editions = append([]kaname.AuthorityModuleEdition(nil), editions...)
+	return r.changeFullAuthorityBundle(ctx, b, true, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireUnpublishedAuthority(ctx, tx); err != nil {
+			return err
+		}
+		return authorityEditionsMatch(ctx, tx, editions)
+	})
+}
+
+// PublicationAuthorityBundle связывает данные владельца с точной редакцией
+// журнала. Одинаковые отпечатки модели могут принадлежать разным редакциям.
+type PublicationAuthorityBundle struct {
+	Bundle    *granteffect.Bundle
+	Revision  int64
+	Digest    string
+	CatalogID string
+}
+
+// После появления журнала старый путь активации больше не может поднять
+// полномочия только по отпечатку модели. Замок держится до фиксации drain.
+func requireUnpublishedAuthority(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `LOCK TABLE kaname.publication_model_revision IN SHARE MODE`); err != nil {
+		return err
+	}
+	var published bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.publication_model_revision)`).Scan(&published); err != nil {
+		return err
+	}
+	if published {
+		return kaname.ErrSemanticIdentityUnavailable
+	}
+	return nil
+}
+
+// StageFullPublicationAuthorityBundle готовит ровно прочитанную редакцию.
+func (r *Repository) StageFullPublicationAuthorityBundle(ctx context.Context, published PublicationAuthorityBundle) error {
+	return r.changeFullAuthorityBundle(ctx, published.Bundle, false, published.matchHead)
+}
+
+// ActivateFullPublicationAuthorityBundle повторяет проверку головы под drain.
+// Более новая публикация отменяет активацию даже при совпадении текста модели.
+func (r *Repository) ActivateFullPublicationAuthorityBundle(ctx context.Context, published PublicationAuthorityBundle) error {
+	if err := published.Bundle.Validate(); err != nil {
+		return err
+	}
+	return r.authorityLifecycle(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := authorityCatalogMatches(ctx, tx, published.Bundle); err != nil {
+			return err
+		}
+		if err := published.matchHead(ctx, tx); err != nil {
+			return err
+		}
+		return activatePublicationAndRecord(ctx, tx, published)
+	})
+}
+
+// AdvanceNextCatalogPublication продолжает только уже начатую владельцем цепь.
+// Drain, повторная сверка, Stage, Activate и watermark входят в одну транзакцию.
+// false означает отсутствие изменения; ошибка не подтверждает результат commit.
+func (r *Repository) AdvanceNextCatalogPublication(ctx context.Context, published PublicationAuthorityBundle) (bool, error) {
+	if err := published.Bundle.Validate(); err != nil {
+		return false, err
+	}
+	advanced := false
+	err := r.authorityLifecycle(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		// Callback может повториться после rollback: результат относится только
+		// к последней попытке, завершившейся подтверждённым commit.
+		advanced = false
+		if err := authorityCatalogMatches(ctx, tx, published.Bundle); err != nil {
+			return err
+		}
+		if err := published.matchHead(ctx, tx); err != nil {
+			return err
+		}
+		var watermark int64
+		var manualHold bool
+		var previousDigest, previousCatalog string
+		err := tx.QueryRow(ctx, `SELECT w.revision,w.manual_hold,p.digest,p.catalog_id
+ FROM kaname.authority_publication_activation w
+ JOIN kaname.publication_model_revision p ON p.revision=w.revision
+ WHERE w.singleton FOR UPDATE OF w`).Scan(&watermark, &manualHold, &previousDigest, &previousCatalog)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return kaname.ErrSemanticIdentityUnavailable
+		}
+		if err != nil {
+			return err
+		}
+		if manualHold || published.Revision == watermark {
+			// Ручной запрет сохраняется и для ещё не активированной редакции.
+			return nil
+		}
+		if published.Revision <= watermark || published.Revision-watermark != 1 {
+			return kaname.ErrSemanticIdentityUnavailable
+		}
+		var phase, modelID, catalogID, projector string
+		if err := tx.QueryRow(ctx, `SELECT phase,model_id,catalog_id,projector_version
+ FROM kaname.authority_semantic_identity WHERE singleton FOR UPDATE`).Scan(&phase, &modelID, &catalogID, &projector); err != nil {
+			return err
+		}
+		id := published.Bundle.Identity()
+		switch phase {
+		case "transition":
+			if "sha256:"+modelID != previousDigest || catalogID != previousCatalog || projector != id.ProjectorVersion {
+				return kaname.ErrSemanticIdentityUnavailable
+			}
+		case "prepared":
+			if modelID != id.ModelID || catalogID != id.CatalogID || projector != id.ProjectorVersion {
+				return kaname.ErrSemanticIdentityUnavailable
+			}
+		default:
+			return kaname.ErrSemanticIdentityUnavailable
+		}
+		if _, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_stage_full_v3($1,$2,$3,$4,$5)`,
+			published.Bundle.ModelSource(), published.Bundle.CanonicalCatalog(), id.ModelID, id.CatalogID, id.ProjectorVersion); err != nil {
+			return err
+		}
+		if err := activatePublicationAndRecord(ctx, tx, published); err != nil {
+			return err
+		}
+		advanced = true
+		return nil
+	})
+	return advanced && err == nil, err
+}
+
+func activatePublicationAndRecord(ctx context.Context, tx pgx.Tx, published PublicationAuthorityBundle) error {
+	id := published.Bundle.Identity()
+	if _, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_activate_full_v3($1,$2,$3)`, id.ModelID, id.CatalogID, id.ProjectorVersion); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO kaname.authority_publication_activation(singleton,revision,manual_hold)
+ VALUES (true,$1,false) ON CONFLICT(singleton) DO UPDATE SET revision=excluded.revision,manual_hold=false`, published.Revision)
+	return err
+}
+
+func (p PublicationAuthorityBundle) matchHead(ctx context.Context, tx pgx.Tx) error {
+	if p.Revision <= 0 || p.Digest != "sha256:"+p.Bundle.Identity().ModelID || p.CatalogID != p.Bundle.Identity().CatalogID {
+		return kaname.ErrSemanticIdentityUnavailable
+	}
+	// Под drain блокируем запись журнала до завершения передачи полномочий,
+	// включая первоначальную установку, когда прежней передачи ещё нет.
+	if _, err := tx.Exec(ctx, `LOCK TABLE kaname.publication_model_revision IN SHARE MODE`); err != nil {
+		return errors.Join(kaname.ErrSemanticIdentityUnavailable, err)
+	}
+	var revision int64
+	var digest, catalogID string
+	if err := tx.QueryRow(ctx, `SELECT revision,digest,catalog_id FROM kaname.publication_model_revision
+ WHERE NOT pg_is_in_recovery() ORDER BY revision DESC LIMIT 1`).Scan(&revision, &digest, &catalogID); err != nil {
+		return errors.Join(kaname.ErrSemanticIdentityUnavailable, err)
+	}
+	if revision != p.Revision || digest != p.Digest || catalogID != p.CatalogID {
+		return kaname.ErrSemanticIdentityUnavailable
+	}
+	return nil
+}
+
+func (r *Repository) changeFullAuthorityBundle(ctx context.Context, b *granteffect.Bundle, activate bool, matchSource func(context.Context, pgx.Tx) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := b.Validate(); err != nil {
 		return err
 	}
-	editions = append([]kaname.AuthorityModuleEdition(nil), editions...)
 	return r.authorityLifecycle(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := authorityCatalogMatches(ctx, tx, b); err != nil {
 			return err
 		}
-		if err := authorityEditionsMatch(ctx, tx, editions); err != nil {
+		if err := matchSource(ctx, tx); err != nil {
 			return err
 		}
 		id := b.Identity()
-		_, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_activate_full_v3($1,$2,$3)`, id.ModelID, id.CatalogID, id.ProjectorVersion)
+		if activate {
+			_, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_activate_full_v3($1,$2,$3)`, id.ModelID, id.CatalogID, id.ProjectorVersion)
+			return err
+		}
+		_, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_stage_full_v3($1,$2,$3,$4,$5)`, b.ModelSource(), b.CanonicalCatalog(), id.ModelID, id.CatalogID, id.ProjectorVersion)
 		return err
 	})
 }

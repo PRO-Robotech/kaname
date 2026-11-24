@@ -217,6 +217,18 @@ func (rs Rules) MaterializingSelectorsInScope(scope Scope) []RuleSelector {
 	return rs.materializingSelectors(scopeIsBounded(scope))
 }
 
+// MaterializingSelectorsForTypes строит индекс роли по явному снимку типов.
+// Расчёт отпечатков, ветвей и вложенных селекторов общий с прежним API.
+func (rs Rules) MaterializingSelectorsForTypes(types []string) []RuleSelector {
+	return rs.materializingSelectorsFrom(true, func() []string { return append([]string(nil), types...) })
+}
+
+// MaterializingSelectorsInScopeForTypes сохраняет подавление подстановок вне
+// account/project и не подменяет пустой снимок реестром сборки.
+func (rs Rules) MaterializingSelectorsInScopeForTypes(scope Scope, types []string) []RuleSelector {
+	return rs.materializingSelectorsFrom(scopeIsBounded(scope), func() []string { return append([]string(nil), types...) })
+}
+
 // scopeIsBounded reports whether a scope materializes wildcard content per-object
 // (ACCOUNT/PROJECT). CLUSTER (+ unspecified, fail-closed) does not.
 func scopeIsBounded(scope Scope) bool {
@@ -228,9 +240,13 @@ func scopeIsBounded(scope Scope) bool {
 // ObjectTypes (false — flat short-circuit). A selector with empty ObjectTypes matches
 // nothing in the reconciler (fail-closed — never a broad anchor).
 func (rs Rules) materializingSelectors(expandWildcard bool) []RuleSelector {
+	return rs.materializingSelectorsFrom(expandWildcard, AllMaterializableTypes)
+}
+
+func (rs Rules) materializingSelectorsFrom(expandWildcard bool, allTypes func() []string) []RuleSelector {
 	var out []RuleSelector
 	for _, r := range rs {
-		types := dottedTypes(r, expandWildcard)
+		types := r.projectMaterializedTypes(expandWildcard, allTypes).ObjectTypes
 		sel := RuleSelector{
 			RuleFP:           r.Fingerprint(),
 			Arm:              r.Arm(),
@@ -269,9 +285,13 @@ func dottedTypes(r Rule, expandWildcard bool) []string {
 // (the `concrete.*` half-wildcard expansion). Used by dottedTypes for a bounded-scope
 // `<module>.*` rule. Empty when the module has no materializable types (fail-closed).
 func materializableTypesForModule(module string) []string {
+	return materializableTypesFromModule(module, AllMaterializableTypes())
+}
+
+func materializableTypesFromModule(module string, types []string) []string {
 	prefix := module + "."
 	var out []string
-	for _, ty := range AllMaterializableTypes() {
+	for _, ty := range types {
 		if len(ty) > len(prefix) && ty[:len(prefix)] == prefix {
 			out = append(out, ty)
 		}

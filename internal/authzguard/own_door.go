@@ -71,12 +71,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
 
 	"github.com/PRO-Robotech/corelib/authz"
 	"github.com/PRO-Robotech/corelib/authz/catalogderive"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 )
 
 // OwnDoorProtoPackages — пакеты контракта, чьи службы iam поднимает на своих
@@ -300,15 +302,18 @@ func NewOwnDoor(opts OwnDoorOptions) (*OwnDoor, error) {
 	for _, method := range CallerAuthorityGatedMethods() {
 		bypass[method] = full[method].Extract
 	}
-	return &OwnDoor{inner: authz.NewInterceptor(authz.InterceptorOptions{
-		ServiceName:         "kaname",
-		Map:                 full,
-		Client:              checkAdapter{inner: opts.SelfCheck},
-		Cache:               authz.NewCache(opts.PositiveTTL),
-		Logger:              logger,
-		CheckTimeout:        opts.CheckTimeout,
-		DenyRateLimitPerSec: opts.DenyRateLimitPerSec,
-	}), bypass: bypass}, nil
+	newInner := func() *authz.Interceptor {
+		return authz.NewInterceptor(authz.InterceptorOptions{
+			ServiceName:         "kaname",
+			Map:                 full,
+			Client:              checkAdapter{inner: opts.SelfCheck},
+			Cache:               authz.NewCache(opts.PositiveTTL),
+			Logger:              logger,
+			CheckTimeout:        opts.CheckTimeout,
+			DenyRateLimitPerSec: opts.DenyRateLimitPerSec,
+		})
+	}
+	return &OwnDoor{inner: newInner(), newInner: newInner, bypass: bypass}, nil
 }
 
 // OwnDoor — собственная дверь iam вместе с поправкой на вопросы о правах.
@@ -317,13 +322,43 @@ func NewOwnDoor(opts OwnDoorOptions) (*OwnDoor, error) {
 // корень и пробы обязаны собирать её одинаково, иначе проба судила бы вторую
 // проводку, которой в проде нет.
 type OwnDoor struct {
-	inner *authz.Interceptor
+	inner     *authz.Interceptor
+	newInner  func() *authz.Interceptor
+	published atomic.Pointer[publicationDoor]
 	// bypass — методы, которыми у модели СПРАШИВАЮТ, а не действуют. Значение —
 	// извлекатель объекта, ВЫВЕДЕННЫЙ из аннотаций контракта: им дверь и решает,
 	// назвал ли запрос область, о которой можно спросить. Карта строится один
 	// раз: сравнение по срезу на каждом запросе было бы линейным поиском на
 	// горячем пути.
 	bypass map[string]authz.ObjectExtractor
+}
+
+type publicationDoor struct {
+	revision          int64
+	digest, catalogID string
+	unary             grpc.UnaryServerInterceptor
+}
+
+// Кеш содержит решения только одной редакции. Запрос, начавшийся раньше,
+// может держать старое звено, но не возвращает его в общий кеш.
+func (d *OwnDoor) unaryForPublication(snapshot *authzsnapshot.Snapshot) (grpc.UnaryServerInterceptor, error) {
+	var next *publicationDoor
+	for {
+		current := d.published.Load()
+		if current != nil && snapshot.Revision <= current.revision {
+			if snapshot.Revision != current.revision || snapshot.Digest != current.digest || snapshot.CatalogID != current.catalogID {
+				return nil, AuthzBackendUnavailable()
+			}
+			return current.unary, nil
+		}
+		if next == nil {
+			next = &publicationDoor{revision: snapshot.Revision, digest: snapshot.Digest, catalogID: snapshot.CatalogID,
+				unary: d.newInner().Unary()}
+		}
+		if d.published.CompareAndSwap(current, next) {
+			return next.unary, nil
+		}
+	}
 }
 
 // callerNamed — назван ли вызывающий арендатором.
@@ -384,7 +419,7 @@ func (d *OwnDoor) questionGoesToItsOwnDecider(ctx context.Context, method string
 
 // Unary — звено публичного слушателя.
 func (d *OwnDoor) Unary() grpc.UnaryServerInterceptor {
-	door := d.inner.Unary()
+	legacy := d.inner.Unary()
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if d.questionGoesToItsOwnDecider(ctx, info.FullMethod, req) {
 			// Вопрос о правах, у которого нет объекта: решает обработчик —
@@ -394,7 +429,14 @@ func (d *OwnDoor) Unary() grpc.UnaryServerInterceptor {
 			// остаётся за дверью — см. godoc CallerAuthorityGatedMethods.
 			return handler(ctx, req)
 		}
-		return door(ctx, req, info, handler)
+		if snapshot, ok := authzsnapshot.FromContext(ctx); ok {
+			door, err := d.unaryForPublication(snapshot)
+			if err != nil {
+				return nil, err
+			}
+			return door(ctx, req, info, handler)
+		}
+		return legacy(ctx, req, info, handler)
 	}
 }
 

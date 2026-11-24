@@ -1,0 +1,106 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "corelib/api/v1/operation.proto";
+import "corelib/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// CatalogPublicationService — публикация живой модели человеком-распорядителем.
+// Вызывающий предъявляет собственный Bearer Kaname; служебные личности модулей
+// и пересланная шлюзом личность здесь не заменяют удостоверение человека.
+// Право system_admin проверяется на синглтоне cluster, а Apply требует ACR2.
+service CatalogPublicationService {
+  // PlanPublication — проверяет документ публикации живой модели и возвращает
+  // непрозрачное подтверждение состояния для ApplyPublication. Не пишет модель.
+  // Документ передаёт человек-распорядитель через публичный REST Kaname.
+  rpc PlanPublication (PlanCatalogPublicationRequest) returns (PlanCatalogPublicationResponse) {
+    option (google.api.http) = {
+      post: "/iam/v1/catalog/modules/{module}:planPublication"
+      body: "*"
+    };
+    option (corelib.authz.v1.permission)        = "iam.modules.plan";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "1";
+  }
+
+  // ApplyPublication — публикует документ, подтверждённый PlanPublication.
+  // Возвращает завершённую Operation; ревизия и дайджест лежат в response.
+  // Изменение модели требует ступени подтверждения личности 2.
+  rpc ApplyPublication (ApplyCatalogPublicationRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/catalog/modules/{module}:applyPublication"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "ApplyCatalogPublicationMetadata"
+      response: "ApplyCatalogPublicationResponse"
+    };
+    option (corelib.authz.v1.permission)        = "iam.modules.apply";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+}
+
+// PlanCatalogPublicationRequest — документ живой модели, представленный
+// оператором для проверки и последующего подтверждения публикации.
+message PlanCatalogPublicationRequest {
+  // Имя модуля, которому принадлежит документ. Обязательно.
+  string module = 1;
+
+  // Исходный документ публикации. Обязателен; REST передаёт bytes в base64.
+  bytes document = 2;
+}
+
+// PlanCatalogPublicationResponse — подтверждение состояния и ожидаемая модель.
+message PlanCatalogPublicationResponse {
+  // Непрозрачный токен; передаётся в ApplyPublication без изменений.
+  string state_token = 1;
+
+  // Ревизия модели после подтверждённой публикации.
+  int64 model_revision = 2;
+
+  // Дайджест модели после подтверждённой публикации.
+  string model_digest = 3;
+}
+
+// ApplyCatalogPublicationRequest — тот же документ и подтверждение его плана.
+message ApplyCatalogPublicationRequest {
+  // Имя модуля, которому принадлежит документ. Обязательно.
+  string module = 1;
+
+  // Документ, проверенный PlanPublication. Обязателен.
+  bytes document = 2;
+
+  // Токен PlanCatalogPublicationResponse.state_token. Обязателен.
+  string state_token = 3;
+}
+
+// ApplyCatalogPublicationMetadata — предмет завершённой операции публикации.
+message ApplyCatalogPublicationMetadata {
+  // Модуль, документ которого опубликован.
+  string module = 1;
+}
+
+// ApplyCatalogPublicationResponse — модель после завершённой публикации.
+message ApplyCatalogPublicationResponse {
+  // Опубликованная ревизия модели.
+  int64 model_revision = 1;
+
+  // Дайджест опубликованной модели.
+  string model_digest = 2;
+}

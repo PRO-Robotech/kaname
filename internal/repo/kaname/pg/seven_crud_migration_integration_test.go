@@ -145,7 +145,7 @@ func TestSevenCRUDMigrationGooseRoundTripRestoresExactPreviousContract(t *testin
 	require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT kaname.authority_crud_storage_v3()`).Scan(&ordinaryReady))
 	require.True(t, ordinaryReady)
 	require.NoError(t, lifecycleOwner(r).PrepareAuthorityBundle(r.ctx, r.bundle))
-	full, _ := fullContractActivate(t, r)
+	full, _ := fullContractActivateBeforePublication(t, r)
 	require.NoError(t, full.ValidateFullAuthorityBundle(r.ctx, r.bundle))
 	writers, err := kanamepg.NewCRUDWriters(r.ctx, full, r.bundle)
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestSevenCRUDMigrationGooseDownRefusesActiveFullWithoutChanges(t *testing.T
 	r := writerProtocolRig(t)
 	db, own, _ := sevenCRUDMigrationDB(t, r)
 	require.NoError(t, lifecycleOwner(r).PrepareAuthorityBundle(r.ctx, r.bundle))
-	full, _ := fullContractActivate(t, r)
+	full, _ := fullContractActivateBeforePublication(t, r)
 	require.NoError(t, full.ValidateFullAuthorityBundle(r.ctx, r.bundle))
 	var contract int
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT required_contract FROM kaname.authority_writer_contract WHERE singleton`).Scan(&contract))

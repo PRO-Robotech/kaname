@@ -238,27 +238,35 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
             path.write_text("".join(rows) + scan_suffix)
             return h.test_diagnostics(path, root, predicates), leaf
 
-    def check_role_readiness_marker(self, suite):
+    def diagnose_role_markers(self, suite, outputs, *, trace, end="fail", active=True, suffix=""):
         h = self.hosted
         root, predicates, _ = h.CASES[suite]
         leaf = root + "/" + sorted(h.RID_MATRIX_NESTED[root])[0]
+        rows = [{"Action": "run", "Test": root}]
+        if active:
+            rows.append({"Action": "run", "Test": leaf})
+        rows += [{"Action": "output", "Test": leaf, "Output": value} for value in outputs]
+        rows += [{"Action": "output", "Test": leaf, "Output": "    Error Trace: " + str(h.ROOT / trace) + ":1\n"},
+                 {"Action": end, "Test": leaf}, {"Action": end, "Test": root}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            path.write_text("".join(json.dumps(dict(row, Package=h.PACKAGE)) + "\n" for row in rows) + suffix)
+            return h.test_diagnostics(path, root, predicates, timeout_seconds=1200)
+
+    def check_role_readiness_marker(self, suite):
         source = "cmd/kaname/installation_whole_delivery_native_test.go"
         good = "    installation_whole_delivery_native_test.go:1: RID_ROLE_READINESS reason=deadline verbs=ready refs=failed\n"
-        def diagnose(outputs, *, end="fail", active=True, trace=source, suffix=""):
-            rows = [{"Action": "run", "Test": root}]
-            if active:
-                rows.append({"Action": "run", "Test": leaf})
-            rows += [{"Action": "output", "Test": leaf, "Output": value} for value in outputs]
-            rows += [{"Action": "output", "Test": leaf, "Output": "    Error Trace: " + str(h.ROOT / trace) + ":1\n"},
-                     {"Action": end, "Test": leaf}, {"Action": end, "Test": root}]
-            with tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / "events.jsonl"
-                path.write_text("".join(json.dumps(dict(row, Package=h.PACKAGE)) + "\n" for row in rows) + suffix)
-                return h.test_diagnostics(path, root, predicates, timeout_seconds=1200)
+        def diagnose(outputs, *, trace=source, **options):
+            return self.diagnose_role_markers(suite, outputs, trace=trace, **options)
+        for phase in ("initial-delivery", "restored-base", "unspecified"):
+            with self.subTest(phase=phase):
+                observed = diagnose([good.rstrip() + " phase=" + phase + "\n"])
+                self.assertEqual(observed["roleReadiness"]["phase"], phase)
         self.assertEqual(diagnose([good])["roleReadiness"],
                          {"reason": "deadline", "verbs": "ready", "refs": "failed"})
         variants = [([good, good], {}), ([good.replace("deadline", "unit-secret")], {}),
                     ([good.replace("refs=failed", "refs=unit-secret")], {}),
+                    ([good.rstrip() + " phase=unit-secret\n"], {}),
                     ([good.rstrip() + " secret=unit-secret\n"], {}),
                     ([good + "unit-secret\n"], {}), ([good], {"end": "pass"}),
                     ([good], {"end": "skip"}), ([good], {"active": False}),
@@ -269,6 +277,45 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
                 result = diagnose(outputs, **options)
                 self.assertNotIn("roleReadiness", result)
                 self.assertNotIn("unit-secret", json.dumps(result))
+
+    def test_failed_verb_census_keeps_closed_fields_and_consistent_counts(self):
+        source = "cmd/kaname/installation_whole_delivery_native_test.go"
+        record = ("    installation_whole_delivery_native_test.go:1: RID_ROLE_READINESS reason=deadline"
+                  " verbs=failed refs=ready phase=initial-delivery examined=9 reseeded=7 failed=2"
+                  " completed=true stage=replace-verbs class=deadlock\n")
+        def diagnose(outputs):
+            return self.diagnose_role_markers("registry-installation-rid11", outputs, trace=source)
+        self.assertEqual(diagnose([record])["roleReadiness"]["verbCensus"], {
+            "examined": 9, "reseeded": 7, "failed": 2, "completed": True,
+            "firstFailureStage": "replace-verbs", "firstFailureClass": "deadlock"})
+        partial = record.replace("examined=9", "examined=10").replace("completed=true", "completed=false")
+        self.assertFalse(diagnose([partial])["roleReadiness"]["verbCensus"]["completed"])
+        for before, after in (("examined=9", "examined=8"), ("examined=9", "examined=10"),
+                              ("examined=9", "examined=1000000"), ("failed=2", "failed=0"),
+                              ("verbs=failed", "verbs=ready"), ("replace-verbs", "fixture-secret"),
+                              ("deadlock", "fixture-secret")):
+            result = diagnose([record.replace(before, after)])
+            self.assertNotIn("roleReadiness", result)
+            self.assertNotIn("fixture-secret", json.dumps(result))
+        self.assertNotIn("roleReadiness", diagnose([record, record]))
+
+    def test_role_delta_on_matched_roles_projection_rejects_other_content(self):
+        source = "cmd/kaname/installation_newman_retirement_test.go"
+        prefix = "    installation_newman_whole_projection_test.go:1: "
+        projection = prefix + ("RID_PROJECTION accounts=false service_accounts=false groups=false members=false "
+                               "roles=true bindings=false delegations=false catalog=false materialization=false\n")
+        delta = prefix + "RID_ROLE_DELTA fields=health,rule_states,updated_at\n"
+        def diagnose(outputs, **options):
+            return self.diagnose_role_markers("registry-installation-rid06", outputs, trace=source, **options)
+        result = diagnose([projection, delta])
+        self.assertEqual(result["changedProjectionFields"], ["roles"])
+        self.assertEqual(result["changedRoleFields"], ["health", "rule_states", "updated_at"])
+        for outputs in ([delta], [projection, delta, delta], [projection, delta.replace("health", "unit-secret")],
+                        [projection, delta.replace("health", "updated_at")],
+                        [projection.replace("roles=true", "roles=false"), delta]):
+            result = diagnose(outputs)
+            self.assertNotIn("changedRoleFields", result)
+            self.assertNotIn("unit-secret", json.dumps(result))
 
     def test_role_readiness_keeps_only_closed_active_first_failure_marker(self):
         for suite in ("registry-installation-rid07", "registry-installation-rid11"):

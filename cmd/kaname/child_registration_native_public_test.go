@@ -25,8 +25,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gopkg.in/yaml.v3"
@@ -36,11 +38,20 @@ import (
 // kaname#1045: запуск требует зафиксированных native binary/migrator и отдельного
 // evidence root действующего installation harness. Подмена principal запрещена.
 func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
+	runChildRegistrationNative(t, false)
+}
+
+func TestPublishedChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
+	runChildRegistrationNative(t, true)
+}
+
+func runChildRegistrationNative(t *testing.T, published bool) {
+	t.Helper()
 	if testing.Short() || os.Getenv("KANAME_CHILD_PUBLIC_ACCEPTANCE") != "1" {
 		t.Skip("child registration requires an explicit native stand")
 	}
 	delivery := childNativePublicDelivery(t)
-	f := newInstallationNativeWorldProfile(t, 7200, "", true)
+	f := newInstallationNativeWorldConfigured(t, 7200, "", true, true, nativeWorldOptions{boundedPostgres: published})
 	// Второй человек — тот же начальный Given церемонии до FULL. Права
 	// не сеются: read-only привязку ниже выдаёт обычный публичный API.
 	readerGiven := &ceremonyWorld{t: t, id: "CHILD-PUBLIC-READER", ctx: f.given.ctx, pool: f.given.pool, logs: &lockedBuffer{}}
@@ -52,7 +63,7 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	input := installruntime.DeliveryInput{RegistrationWriters: plan, Manifests: delivery, CredentialFile: f.creator.CredentialFile}
 	process := f.apply(t, input)
 	rid09AwaitBaseRoleProjections(t, f.given.ctx, process)
-	startChildNativeFull(t, f, process, input)
+	startChildNativeFull(t, f, process, input, published)
 	// Bearer действительно выдан ceremony после FULL запуска и принят /me.
 	f.renewOperator(t, f.given.ctx)
 	reader, err := f.wire.ExchangeOperator(f.given.ctx, installruntime.OperatorGiven{
@@ -75,10 +86,11 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 		scene.project = ridResponseID(t, f.ridOperation(t, http.MethodPost, "/iam/v1/projects", f.operator.Bearer(),
 			map[string]any{"accountId": f.tenantID, "name": "project-" + scene.parent}, 0))
 		scene.child = scene.parent + "/candidate"
+		scene.parentVersion = time.Now().UTC().Truncate(time.Microsecond)
 		_, err = module.RegisterResource(f.given.ctx, &iamv1.RegisterResourceRequest{
 			SubjectId: "project:" + scene.project, Relation: "project", Object: "registry_child_probe_container:" + scene.parent,
 			ParentProjectId: scene.project, ParentAccountId: f.tenantID,
-			ParentChain: []string{"project:" + scene.project, "account:" + f.tenantID}, SourceVersion: timestamppb.Now(),
+			ParentChain: []string{"project:" + scene.project, "account:" + f.tenantID}, SourceVersion: timestamppb.New(scene.parentVersion),
 		})
 		require.NoError(t, err)
 		parentIDs = append(parentIDs, scene.parent)
@@ -160,6 +172,92 @@ func TestChildRegistrationNativePublicRESTAndGRPC(t *testing.T) {
 	require.True(t, first.version.Equal(replayed.GetVersion().AsTime()))
 	requireNativeRegisteredChild(t, f, first)
 	requireNativeChildReadOnlyDenials(t, f, reader, readerRoleID, scenes)
+	if published {
+		requireNativeChildPublicationChange(t, f, ctx, iamv1.NewChildRegistrationServiceClient(publicConn), module, first)
+	}
+}
+
+func childNativeAuthorityAction(t *testing.T, f *installationNativeWorld, action string, source ...string) {
+	t.Helper()
+	env, err := f.stand.Environment(map[string]string{"KANAME_CONFIG_PATH": filepath.Join(f.session.Root, "migrator.yaml")})
+	require.NoError(t, err)
+	binary := os.Getenv("KANAME_RID_MIGRATOR")
+	require.True(t, filepath.IsAbs(binary))
+	args := append([]string{"authority-bundle", action}, source...)
+	command := startPublicationOwnerCommand(t, f.given.ctx, f.session.Root, "native-"+action, env, binary, args...)
+	command.await(t, 90*time.Second)
+}
+
+func requireNativeChildPublicationChange(t *testing.T, f *installationNativeWorld, userCtx context.Context,
+	children iamv1.ChildRegistrationServiceClient, module iamv1.InternalIAMServiceClient, first nativeRegisteredChild,
+) {
+	t.Helper()
+	ctx := f.given.ctx
+	const path = "/iam/v1/catalog/modules/erp:"
+	doc := map[string]any{"document": []byte(replicaPublicationDocument)}
+	code, raw := f.ridRequest(t, http.MethodPost, path+"planPublication", f.operator.Bearer(), doc)
+	require.Equal(t, http.StatusOK, code)
+	var plan, applied nativePublicationModel
+	require.NoError(t, json.Unmarshal(raw, &plan))
+	require.Equal(t, "2", plan.ModelRevision)
+	require.NotEmpty(t, plan.ModelDigest)
+	require.NotEmpty(t, plan.StateToken)
+	doc["stateToken"] = plan.StateToken
+	op := f.ridOperation(t, http.MethodPost, path+"applyPublication", f.operator.Bearer(), doc, 0)
+	require.NoError(t, json.Unmarshal(op.Response, &applied))
+	require.Equal(t, plan.ModelRevision, applied.ModelRevision)
+	require.Equal(t, plan.ModelDigest, applied.ModelDigest)
+
+	next := first
+	next.child = first.parent + "/after-publication"
+	child := &iamv1.RegisterChildRequest{ResourceType: "registry.childProbeChildren", ResourceId: next.child}
+	parent := &iamv1.CloseChildParentRequest{ResourceType: "registry.childProbeContainers", ResourceId: first.parent,
+		SourceVersion: timestamppb.New(first.parentVersion)}
+	// Владелец ещё не активировал редакцию. Ни один участник не может писать на прежней.
+	_, err := children.Register(userCtx, child)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	_, err = module.CloseChildParent(ctx, parent)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	var affected int
+	require.NoError(t, f.given.pool.QueryRow(ctx, `SELECT
+ (SELECT count(*) FROM kaname.authority_child_creation WHERE child_type=$1 AND child_id=$2) +
+ (SELECT count(*) FROM kaname.authority_child_parent_state WHERE object_type=$3 AND object_id=$4 AND closed_at IS NOT NULL)`,
+		child.ResourceType, child.ResourceId, parent.ResourceType, parent.ResourceId).Scan(&affected))
+	require.Zero(t, affected)
+
+	childNativeAuthorityAction(t, f, "stage-full", "--publication")
+	childNativeAuthorityAction(t, f, "activate-full", "--publication")
+	childNativeAuthorityAction(t, f, "verify-full", "--publication")
+	// Сходимость проверяем чтением, чтобы успешную запись исполнить ровно раз.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		attempt, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		var catalog nativePublicationCatalog
+		code, err := f.wire.JSON(attempt, http.MethodGet, "/iam/v1/permissionCatalog", f.operator.Bearer(), nil, &catalog)
+		require.NoError(c, err)
+		require.Equal(c, http.StatusOK, code)
+		require.ElementsMatch(c, []string{"get", "sign"}, catalog.erpContract())
+	}, 30*time.Second, 100*time.Millisecond)
+	created, err := children.Register(userCtx, child)
+	require.NoError(t, err)
+	require.NotNil(t, created.GetVersion())
+	require.NoError(t, created.GetVersion().CheckValid())
+	next.version = created.GetVersion().AsTime()
+	requireNativeRegisteredChild(t, f, next)
+	closed, err := module.CloseChildParent(ctx, parent)
+	require.NoError(t, err)
+	require.NotNil(t, closed.GetClosedAt())
+	require.NoError(t, closed.GetClosedAt().CheckValid())
+	replay, err := module.CloseChildParent(ctx, parent)
+	require.NoError(t, err)
+	require.True(t, closed.GetClosedAt().AsTime().Equal(replay.GetClosedAt().AsTime()))
+	var persisted time.Time
+	var audits int
+	require.NoError(t, f.given.pool.QueryRow(ctx, `SELECT closed_at,
+ (SELECT count(*) FROM kaname.audit_outbox WHERE event_type='iam.resource_registration.parent_closed' AND event_payload#>>'{object,id}'=$2)
+ FROM kaname.authority_child_parent_state WHERE object_type=$1 AND object_id=$2`, parent.ResourceType, parent.ResourceId).Scan(&persisted, &audits))
+	require.True(t, persisted.Equal(closed.GetClosedAt().AsTime()))
+	require.Equal(t, 1, audits)
 }
 
 // 02/04 проверяют право чтения конкретного родителя через публичную авторизацию.
@@ -253,7 +351,7 @@ func requireNativeChildReadOnlyDenials(t *testing.T, f *installationNativeWorld,
 
 type nativeRegisteredChild struct {
 	parent, project, child string
-	version                time.Time
+	version, parentVersion time.Time
 }
 
 func requireNativeRegisteredChild(t *testing.T, f *installationNativeWorld, scene nativeRegisteredChild) {
@@ -293,7 +391,7 @@ func requireNativeRegisteredChild(t *testing.T, f *installationNativeWorld, scen
 
 // Начальный запуск доставляет каталог. Отдельный операторский переход
 // активирует его на той же базе до запуска службы под ограниченным LOGIN.
-func startChildNativeFull(t *testing.T, f *installationNativeWorld, staged *installruntime.Process, input installruntime.DeliveryInput) {
+func startChildNativeFull(t *testing.T, f *installationNativeWorld, staged *installruntime.Process, input installruntime.DeliveryInput, published bool) {
 	t.Helper()
 	var config struct {
 		Manifests struct {
@@ -342,18 +440,12 @@ func startChildNativeFull(t *testing.T, f *installationNativeWorld, staged *inst
 		defer close()
 		require.NoError(t, f.session.Stop(stop))
 	})
-	ownerEnv, err := f.stand.Environment(nil)
-	require.NoError(t, err)
-	binary := os.Getenv("KANAME_RID_MIGRATOR")
-	require.True(t, filepath.IsAbs(binary))
-	for _, action := range []string{"stage-full", "activate-full", "verify-full"} {
-		// #nosec G204 -- путь артефакта и каталог созданы стендом, команды перечислены явно.
-		cmd := exec.CommandContext(f.given.ctx, binary, "authority-bundle", action, "--manifest-dir", config.Manifests.Dir)
-		cmd.Dir = f.session.Root
-		cmd.Env = append(append([]string{}, ownerEnv...), "KANAME_CONFIG_PATH="+filepath.Join(f.session.Root, "migrator.yaml"))
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, os.WriteFile(filepath.Join(f.session.Root, "native-"+action+".log"), out, 0600))
-		require.NoError(t, err, "операторский переход %s, см. закрытый журнал стенда", action)
+	if published {
+		childNativeAuthorityAction(t, f, "bootstrap-publication", "--manifest-dir", config.Manifests.Dir)
+	} else {
+		for _, action := range []string{"stage-full", "activate-full", "verify-full"} {
+			childNativeAuthorityAction(t, f, action, "--manifest-dir", config.Manifests.Dir)
+		}
 	}
 
 	for i, entry := range f.session.Environment {

@@ -111,6 +111,12 @@ func TestStandaloneTargetsWorkInAStandaloneClone(t *testing.T) {
 
 	clone := buildStandaloneClone(t, moduleRoot)
 	census.Posture = clone
+	moduleFiles := map[string][]byte{}
+	for _, name := range []string{"go.mod", "go.sum"} {
+		content, err := os.ReadFile(filepath.Join(clone, name))
+		require.NoError(t, err)
+		moduleFiles[name] = content
+	}
 
 	// Пустой обход — отказ, а не успех: «ноль находок» обязано быть отличимо от
 	// «ноль прочитанного».
@@ -129,6 +135,11 @@ func TestStandaloneTargetsWorkInAStandaloneClone(t *testing.T) {
 
 	findings, unmet, err := standalonetargets.RunTargetsWithCapture(clone, judged, makeCaptureRunner(t, "-short", "-p=1"))
 	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ")
+	for name, before := range moduleFiles {
+		after, err := os.ReadFile(filepath.Join(clone, name))
+		require.NoError(t, err)
+		require.Equal(t, before, after, "цели изменили зафиксированный файл %s", name)
+	}
 
 	// Перепись печатается ПОСЛЕ прогона и несёт ТРИ величины, а не две: без
 	// третьей «судимых 14 · находок 0» читалось бы как вердикт о четырнадцати
@@ -306,7 +317,9 @@ func makeRunnerOwned(t *testing.T, captureRoot **os.Root, standaloneArgs ...stri
 				cmd.Env = append(cmd.Env, item)
 			}
 		}
-		cmd.Env = append(cmd.Env, "GOFLAGS=-mod=mod", "STANDALONE_DIAGNOSTICS_DIR="+capture)
+		// Сверяем рецепты на зависимостях коммита. Вложенная команда не
+		// вправе менять go.mod между сборкой и проверкой отчётов.
+		cmd.Env = append(cmd.Env, "GOFLAGS=-mod=readonly", "GOWORK=off", "STANDALONE_DIAGNOSTICS_DIR="+capture)
 		// Оригинальная ревизия сохраняется отдельно от технического git commit клона.
 		for _, pair := range [][2]string{{"COMMIT", "HEAD"}, {"TREE", "HEAD^{tree}"}} {
 			if value, err := gitenv.Command(".", "rev-parse", pair[1]).Output(); err == nil {

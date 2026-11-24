@@ -32,6 +32,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -105,7 +106,7 @@ func (u *CreateGrantDelegationUseCase) execute(ctx context.Context, in CreateInp
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
-	d, err := u.validateForm(in)
+	d, err := u.validateForm(ctx, in)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +150,7 @@ func (u *CreateGrantDelegationUseCase) execute(ctx context.Context, in CreateInp
 // validateForm — форма запроса, синхронно и до права (GD-04). Отказ с полем —
 // `shared.InvalidArg` (`field_violations[0]` = {поле, текст}); форма
 // идентификатора — `shared.ValidateResourceID`, без деталей (Р6).
-func (u *CreateGrantDelegationUseCase) validateForm(in CreateInput) (domain.GrantDelegation, error) {
+func (u *CreateGrantDelegationUseCase) validateForm(ctx context.Context, in CreateInput) (domain.GrantDelegation, error) {
 	var d domain.GrantDelegation
 	if in.AccountID == "" {
 		return d, shared.InvalidArg("account_id", "account_id: required")
@@ -170,7 +171,7 @@ func (u *CreateGrantDelegationUseCase) validateForm(in CreateInput) (domain.Gran
 	if err := validateSet("target_types", "type", "types", in.TargetTypes, domain.MaxGrantDelegationTargetTypes); err != nil {
 		return d, err
 	}
-	facts := u.facts()
+	facts := u.facts(ctx)
 	for _, t := range in.TargetTypes {
 		if !domain.ValidTargetType(facts, t) {
 			return d, shared.InvalidArg("target_types", fmt.Sprintf(
@@ -194,11 +195,8 @@ func (u *CreateGrantDelegationUseCase) validateForm(in CreateInput) (domain.Gran
 
 // facts — каталожный факт; незаданный источник — ни одного годного типа (отказ,
 // а не всеразрешение).
-func (u *CreateGrantDelegationUseCase) facts() domain.TargetTypeCatalog {
-	if u.cat == nil {
-		return nil
-	}
-	if f := u.cat.Facts(); f != nil {
+func (u *CreateGrantDelegationUseCase) facts(ctx context.Context) domain.TargetTypeCatalog {
+	if f := authzsnapshot.FactsForRequest(ctx, u.cat); f != nil {
 		return f
 	}
 	return nil

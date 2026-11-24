@@ -47,6 +47,7 @@ import (
 	"fmt"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -160,15 +161,14 @@ func (u *ListPermissionCatalogUseCase) Execute(ctx context.Context) (Catalog, er
 	// цикла значило бы собрать витрину из двух снимков: перечень пар от одного,
 	// набор глаголов от другого — и в окне обновления арендатор получил бы
 	// ресурс без глаголов либо глаголы снятого ресурса.
-	if u.catalogSource == nil {
+	facts := authzsnapshot.FactsForRequest(ctx, u.catalogSource)
+	if facts == nil {
 		// Провязки НЕТ — отказ, а не пустая витрина. Пустой ответ здесь читался
 		// бы как «платформа не даёт выдать ничего», то есть как утверждение о
 		// каталоге, которого никто не делал.
 		return Catalog{}, fmt.Errorf("каталог разрешений: источник живых строк не провязан — " +
 			"ответить перечнем, порождённым сборкой, значило бы назвать снятые типы живыми (kacho#1976)")
 	}
-	facts := u.catalogSource.Facts()
-
 	var modules []Module
 	idxByModule := make(map[string]int)
 	for _, e := range facts.Resources() {

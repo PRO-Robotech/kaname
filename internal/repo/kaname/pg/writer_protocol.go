@@ -165,6 +165,11 @@ func (r *Repository) enterAuthority(ctx context.Context, tx pgx.Tx, in kaname.Au
 			return nil, err
 		}
 	}
+	if r.fullContract != nil {
+		if err := r.fullContract.profile.ConfirmPublication(ctx, tx); err != nil {
+			return nil, err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

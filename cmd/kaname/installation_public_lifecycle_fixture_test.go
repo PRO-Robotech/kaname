@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -650,6 +651,32 @@ func (w *ridLifecycleWorld) catalogOnly(t *testing.T) {
 
 type ridRoleProjectionState struct {
 	verbs, refs string
+	failure     *ridRoleVerbFailure
+}
+
+type ridRoleVerbFailure struct {
+	Stage                      string `json:"first_failure_stage"`
+	Class                      string `json:"first_failure_class"`
+	examined, reseeded, failed int
+	completed                  bool
+}
+
+// Дополнение к уже распознанному отказу. Ошибка формата не меняет оценку готовности.
+func ridReadRoleVerbFailure(raw []byte, examined, reseeded, failed *int, completed *bool) *ridRoleVerbFailure {
+	if examined == nil || reseeded == nil || failed == nil || completed == nil ||
+		*examined > 999999 || *reseeded < 0 || *failed <= 0 || *failed > *examined ||
+		*reseeded > *examined-*failed || (*completed && *reseeded != *examined-*failed) {
+		return nil
+	}
+	var f ridRoleVerbFailure
+	if json.Unmarshal(raw, &f) != nil ||
+		!slices.Contains([]string{"open", "read-rules", "replace-verbs", "regrain-selectors", "commit"}, f.Stage) ||
+		!slices.Contains([]string{"deadlock", "serialization", "Aborted", "FailedPrecondition", "InvalidArgument", "Internal",
+			"Unavailable", "PermissionDenied", "Canceled", "DeadlineExceeded", "other"}, f.Class) {
+		return nil
+	}
+	f.examined, f.reseeded, f.failed, f.completed = *examined, *reseeded, *failed, *completed
+	return &f
 }
 
 func ridCatalogRoleProjectionsReady(path string) error {
@@ -692,6 +719,9 @@ func ridCatalogRoleProjectionsProbe(path string) (ridRoleProjectionState, error)
 		switch {
 		case record.Failed != nil && *record.Failed != 0:
 			*projection = "failed"
+			if projection == &state.verbs {
+				state.failure = ridReadRoleVerbFailure(lines.Bytes(), record.Examined, record.Reseeded, record.Failed, record.Completed)
+			}
 		case record.Completed == nil || !*record.Completed ||
 			record.Examined == nil || record.Reseeded == nil || record.Failed == nil ||
 			*record.Examined != *record.Reseeded:

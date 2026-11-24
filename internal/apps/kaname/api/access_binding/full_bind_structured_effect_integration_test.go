@@ -187,7 +187,7 @@ func fbStructuredImageRoles(t *testing.T, a *atcWorld) {
 	require.NoError(t, err)
 	_, err = moduleroles.NewApplier(moduleroles.NewRepoTxRunner(a.repo), rights).ApplyImage(a.ctx, own, moduleroles.BootActorID)
 	require.NoError(t, err)
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(a.ctx, a.pool))
+	require.NoError(t, seed.SyncAllSystemRoleSelectorsWithFacts(a.ctx, a.pool, a.facts))
 	_, err = seed.ReseedSystemRoleVerbs(a.ctx, a.repo, a.pool, a.facts, nil)
 	require.NoError(t, err)
 }

@@ -4,15 +4,21 @@
 package service
 
 import (
+	"context"
 	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
-// catalogFacts — снимок каталога модулей; nil, когда каталог не провязан.
-func (s *AuthorizeService) catalogFacts() *catalog.Facts {
+// catalogFacts — факты закреплённой ревизии запроса. Без закрепления сохраняет
+// прежний источник каталога; nil, когда каталог не провязан.
+func (s *AuthorizeService) catalogFacts(ctx context.Context) *catalog.Facts {
+	if snapshot, ok := authzsnapshot.FromContext(ctx); ok {
+		return snapshot.Facts
+	}
 	if s.catalog == nil {
 		return nil
 	}

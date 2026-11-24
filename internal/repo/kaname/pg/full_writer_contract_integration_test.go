@@ -6,11 +6,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/authorityprotocol"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +20,69 @@ func fullContractActivate(t *testing.T, r protocolRig) (*kanamepg.Repository, *k
 	t.Helper()
 	require.NoError(t, lifecycleOwner(r).StageFullAuthorityBundle(r.ctx, r.bundle))
 	require.NoError(t, lifecycleOwner(r).ActivateFullAuthorityBundle(r.ctx, r.bundle))
+	return fullContractRepository(t, r)
+}
+
+// В тестах Down/Up база намеренно находится на версии до журнала публикаций.
+// Точный старый протокол активируется владельцем, а текущий production guard
+// остаётся обязательным для всех проверок на современной схеме.
+func fullContractActivateBeforePublication(t *testing.T, r protocolRig) (*kanamepg.Repository, *kanamepg.FullWriterContract) {
+	t.Helper()
+	require.NoError(t, r.bundle.Validate())
+	id := r.bundle.Identity()
+	steps := []struct {
+		query string
+		args  []any
+	}{
+		{
+			query: `SELECT kaname.authority_protocol_stage_full_v3($1,$2,$3,$4,$5)`,
+			args:  []any{r.bundle.ModelSource(), r.bundle.CanonicalCatalog(), id.ModelID, id.CatalogID, id.ProjectorVersion},
+		},
+		{
+			query: `SELECT kaname.authority_protocol_activate_full_v3($1,$2,$3)`,
+			args:  []any{id.ModelID, id.CatalogID, id.ProjectorVersion},
+		},
+	}
+	for _, step := range steps {
+		tx, err := r.admin.Begin(r.ctx)
+		require.NoError(t, err)
+		lifecycleRollback(t, tx)
+		_, err = tx.Exec(r.ctx, `SELECT kaname.authority_protocol_drain()`)
+		require.NoError(t, err)
+		var historical bool
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT to_regclass('kaname.publication_model_revision') IS NULL`).Scan(&historical))
+		require.True(t, historical, "старая SQL-активация допустима только до схемы публикации")
+		_, err = tx.Exec(r.ctx, step.query, step.args...)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(r.ctx))
+	}
+
+	// Современный Go-писатель читает журнал даже при нулевой редакции.
+	// Пустое представление позволяет выполнить его штатный вход над старой
+	// схемой без применения поздней миграции или изменения Goose ledger.
+	var login string
+	require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT session_user::text`).Scan(&login))
+	require.NotEmpty(t, login)
+	tx, err := r.admin.Begin(r.ctx)
+	require.NoError(t, err)
+	lifecycleRollback(t, tx)
+	_, err = tx.Exec(r.ctx, `CREATE VIEW kaname.publication_model_revision AS
+SELECT NULL::bigint AS revision, NULL::text AS digest, NULL::text AS catalog_id WHERE false`)
+	require.NoError(t, err)
+	_, err = tx.Exec(r.ctx, `GRANT SELECT ON kaname.publication_model_revision TO `+pgx.Identifier{login}.Sanitize())
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(r.ctx))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.ctx), 5*time.Second)
+		defer cancel()
+		_, err := r.admin.Exec(ctx, `DROP VIEW kaname.publication_model_revision`)
+		require.NoError(t, err)
+	})
+	return fullContractRepository(t, r)
+}
+
+func fullContractRepository(t *testing.T, r protocolRig) (*kanamepg.Repository, *kanamepg.FullWriterContract) {
+	t.Helper()
 	contract, err := kanamepg.NewFullWriterContract(r.ctx, r.repo, r.bundle)
 	require.NoError(t, err)
 	full, err := r.repo.WithFullWriterContract(contract)

@@ -62,6 +62,9 @@ func openParticipantProfile(ctx context.Context, begin func(context.Context, pgx
 	if err == nil && abi != wantABI {
 		err = kaname.ErrSemanticIdentityUnavailable
 	}
+	if err == nil && profile != nil {
+		err = profile.ConfirmPublication(ctx, tx)
+	}
 	if err == nil {
 		err = ctx.Err()
 	}

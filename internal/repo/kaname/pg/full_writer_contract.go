@@ -17,6 +17,19 @@ type FullWriterContract struct {
 }
 
 func NewFullWriterContract(ctx context.Context, repo *Repository, bundle *granteffect.Bundle) (*FullWriterContract, error) {
+	return newFullWriterContract(ctx, repo, bundle, 0, "")
+}
+
+// NewPublishedFullWriterContract связывает выбранную семантику с редакцией.
+func NewPublishedFullWriterContract(ctx context.Context, repo *Repository, publication PublicationAuthorityBundle) (*FullWriterContract, error) {
+	if publication.Revision <= 0 || publication.Bundle.Validate() != nil ||
+		publication.CatalogID != publication.Bundle.Identity().CatalogID {
+		return nil, kaname.ErrSourceUnconfirmed
+	}
+	return newFullWriterContract(ctx, repo, publication.Bundle, publication.Revision, publication.Digest)
+}
+
+func newFullWriterContract(ctx context.Context, repo *Repository, bundle *granteffect.Bundle, revision int64, digest string) (*FullWriterContract, error) {
 	if repo == nil {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
@@ -27,7 +40,13 @@ func NewFullWriterContract(ctx context.Context, repo *Repository, bundle *grante
 		return nil, err
 	}
 	id := bundle.Identity()
-	profile, err := authorityprotocol.NewFullContract(ctx, repo.master, id.ModelID, id.CatalogID, id.ProjectorVersion)
+	var profile *authorityprotocol.FullContract
+	var err error
+	if revision == 0 {
+		profile, err = authorityprotocol.NewFullContract(ctx, repo.master, id.ModelID, id.CatalogID, id.ProjectorVersion)
+	} else {
+		profile, err = authorityprotocol.NewPublishedFullContract(ctx, repo.master, id.ModelID, id.CatalogID, id.ProjectorVersion, revision, digest)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +91,5 @@ func (r *Repository) ValidateFullAuthorityBundle(ctx context.Context, bundle *gr
 		return kaname.ErrSemanticIdentityUnavailable
 	}
 	id := bundle.Identity()
-	_, err := authorityprotocol.NewFullContract(ctx, r.master, id.ModelID, id.CatalogID, id.ProjectorVersion)
-	return err
+	return authorityprotocol.ValidateFullIdentity(ctx, r.master, id.ModelID, id.CatalogID, id.ProjectorVersion)
 }

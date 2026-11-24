@@ -31,12 +31,18 @@ func TestAuthorityBundleCommandRequiresExplicitActionAndDelivery(t *testing.T) {
 		{[]string{"authority-bundle", "stage", "--image-only", "--manifest-dir", "somewhere"}, "ровно один источник"},
 		{[]string{"authority-bundle", "stage", "--image-only", "extra"}, "extra"},
 		{[]string{"authority-bundle", "close", "--image-only"}, "image-only"},
+		{[]string{"authority-bundle", "stage", "--publication"}, "publication"},
+		{[]string{"authority-bundle", "stage-full", "--publication", "--image-only"}, "ровно один источник"},
+		{[]string{"authority-bundle", "bootstrap-publication"}, "ровно один источник"},
+		{[]string{"authority-bundle", "bootstrap-publication", "--image-only", "--manifest-dir", "somewhere"}, "ровно один источник"},
+		{[]string{"authority-bundle", "follow-publications", "--interval", "0s"}, "должен быть положительным"},
 		// Законные формы доходят до настоящего DSN resolver; bogus гарантирует,
 		// что тест не открывает соединение даже при регрессии dispatch.
 		{[]string{"authority-bundle", "stage", "--image-only"}, "bogus"},
 		{[]string{"authority-bundle", "activate", "--image-only"}, "bogus"},
 		{[]string{"authority-bundle", "verify", "--image-only"}, "bogus"},
 		{[]string{"authority-bundle", "close"}, "bogus"},
+		{[]string{"authority-bundle", "bootstrap-publication", "--image-only"}, "bogus"},
 	} {
 		t.Run(testNameArgs(tc.args), func(t *testing.T) {
 			command := newRootCmd(fstest.MapFS{})

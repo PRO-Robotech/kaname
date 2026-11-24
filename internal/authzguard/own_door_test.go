@@ -17,6 +17,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -31,6 +32,9 @@ import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/quota/v1"
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 )
 
 // grantStore — модель прав пробы: разрешено ровно то, что перечислено.
@@ -127,6 +131,47 @@ func TestOwnDoor_GrantedCallerPasses(t *testing.T) {
 	}
 	if !hit {
 		t.Fatal("обработчик не достигнут при живой выдаче")
+	}
+}
+
+func TestOwnDoorPublishedRevisionDoesNotReusePreviousPositive(t *testing.T) {
+	const question = "user:" + ownerUser + "|v_get|project:" + victimProject
+	store := &grantStore{allow: map[string]bool{question: true}}
+	d, err := authzguard.NewOwnDoor(authzguard.OwnDoorOptions{SelfCheck: store, PositiveTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	door := d.Unary()
+	request := &iamv1.GetProjectRequest{ProjectId: victimProject}
+	info := &grpc.UnaryServerInfo{FullMethod: iamv1.ProjectService_Get_FullMethodName}
+	pin := func(revision int64) context.Context {
+		t.Helper()
+		ctx, err := authzsnapshot.WithContext(tenantCtx(ownerUser), &authzsnapshot.Snapshot{
+			Revision: revision, Digest: "model", CatalogID: "catalog", ConfirmedAt: time.Now(),
+			Plans: &authzmodel.Plans{}, Facts: &catalog.Facts{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	first := pin(1)
+	hit := false
+	if _, err := door(first, request, info, reached(&hit)); err != nil || !hit {
+		t.Fatalf("первая проверка не дала ожидаемое разрешение: reached=%t, err=%v", hit, err)
+	}
+	delete(store.allow, question)
+	before := len(store.asked)
+	hit = false
+	if _, err := door(first, request, info, reached(&hit)); err != nil || !hit || len(store.asked) != before {
+		t.Fatalf("своё разрешение не осталось в кеше редакции: reached=%t, err=%v", hit, err)
+	}
+	hit = false
+	if _, err := door(pin(2), request, info, reached(&hit)); err == nil || hit || len(store.asked) == before {
+		t.Fatalf("новая редакция не проверила право заново: reached=%t, err=%v", hit, err)
+	}
+	if _, err := door(first, request, info, reached(&hit)); status.Code(err) != codes.Unavailable || hit {
+		t.Fatalf("прежняя редакция снова получила допуск: reached=%t, err=%v", hit, err)
 	}
 }
 

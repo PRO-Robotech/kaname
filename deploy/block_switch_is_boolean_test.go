@@ -525,6 +525,8 @@ func TestBlockSwitchIsReadOnlyThroughTheBooleanRule(t *testing.T) {
 // выключателя в умолчаниях — находка (самоистечение), выключатель без записи
 // берёт пустые спутники.
 var blockSwitchCompanions = map[string]struct{ on, off []string }{
+	// Владелец публикаций никогда не использует runtime credential.
+	"authorityProtocol.publicationFollower": {on: []string{"db.migrationDSNSecretName=authority-migration", "db.migrationDSNSecretKey=dsn"}},
 	// Выключенный сбор обязан нести причину (`deployment.yaml`).
 	"metricsScrape": {off: []string{"metricsScrape.disabledBecause=проба выключателя"}},
 	// Включённый эндпоинт обязан нести четыре величины (`kaname-svc.requireClientTokenEndpoint`).

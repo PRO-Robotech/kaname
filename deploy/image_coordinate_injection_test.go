@@ -245,11 +245,33 @@ func TestImageCoordinateInjection(t *testing.T) {
 func TestImageCoordinateEmptyTraversalIsNotGreen(t *testing.T) {
 	t.Run("шаблоны без позиции образа", func(t *testing.T) {
 		chartDir := copyChartDeliveryFixture(t)
-		b := readChartFile(t, chartDir, "templates/deployment.yaml")
-		b = strings.ReplaceAll(b, `image: "{{ .Values.image }}"`, `image: "busybox:1.36"`)
-		writeChartFile(t, chartDir, "templates/deployment.yaml", b)
+		// Убираем позиции через значения во всех поставляемых шаблонах:
+		// отдельный follower тоже несёт образ, даже когда выключен по умолчанию.
+		// Меняется тот же факт — отсутствие координат образа через values,
+		// а не заранее выбранный файл или единственная форма Helm-выражения.
+		names, err := chartTemplateNames(chartDir)
+		if err != nil {
+			t.Fatalf("фикстура не собрана: %v", err)
+		}
+		changed := 0
+		for _, name := range names {
+			path := filepath.Join(templatesDir, name)
+			lines := strings.Split(readChartFile(t, chartDir, path), "\n")
+			for i, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "image:") || strings.HasPrefix(trimmed, "- image:") {
+					colon := strings.Index(line, ":")
+					lines[i] = line[:colon+1] + ` "busybox:1.36"`
+					changed++
+				}
+			}
+			writeChartFile(t, chartDir, path, strings.Join(lines, "\n"))
+		}
+		if changed == 0 {
+			t.Fatal("фикстура не изменила ни одной позиции образа")
+		}
 
-		_, _, err := auditImageCoordinate(chartDir)
+		_, _, err = auditImageCoordinate(chartDir)
 		if err == nil {
 			t.Fatal("обход без единой позиции образа через значения дал вердикт — " +
 				"беспредметное зелёное неотличимо от чистого чарта")

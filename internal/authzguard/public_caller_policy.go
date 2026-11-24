@@ -321,6 +321,13 @@ func NewPublicCallerPolicy(
 // два состояния ЗАПРОСА, известные самому вызывающему до ответа (он либо
 // приложил удостоверение, либо нет), а не два состояния сервера.
 func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error {
+	// Публикация модели принадлежит человеку с собственным удостоверением.
+	// Проверка обязательна и для доверенного пересыльщика, и вне боевого режима.
+	if _, publication := catalogPublicationACR(fullMethod); publication {
+		if err := RequireCatalogPublicationACR(ctx, fullMethod); err != nil {
+			return err
+		}
+	}
 	// Вызывающий, названный ПРЕДЪЯВЛЕННЫМ им удостоверением, — законный
 	// публичный вызывающий (задача продукта kacho#2077).
 	//
@@ -527,6 +534,11 @@ func namedPrincipal(ctx context.Context) bool {
 // Каталог ключуется полным именем без ведущей косой черты — та же нормализация,
 // что у порога внутреннего слушателя; своей копии разбора имени здесь нет.
 func (p *PublicCallerPolicy) requiredACRMin(fullMethod string) string {
+	// Канамэ владеет этой поверхностью целиком: её ступень берётся из
+	// собственного контракта, без обновления каталога соседнего шлюза.
+	if required, publication := catalogPublicationACR(fullMethod); publication {
+		return required
+	}
 	if p.acrCatalog == nil {
 		// Каталога нет ⇒ порог не объявлен ни у одного метода. Это состояние
 		// дев-посадки; в боевой каталог обязателен, и его отсутствие отвергает

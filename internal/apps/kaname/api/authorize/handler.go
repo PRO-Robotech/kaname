@@ -27,7 +27,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
-	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/authztypes"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -345,7 +345,7 @@ func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelation
 	// поэтому приём и разбор здесь судят один набор by construction. Поверхность
 	// НЕ сужается: это интроспекция графа прав, и машинерия модели (переносчики
 	// охвата, резолверы) остаётся законным вопросом, если тип её объявляет.
-	if plans, perr := authzmodel.Shared(); perr != nil {
+	if plans, perr := authzsnapshot.PlansForRequest(ctx); perr != nil {
 		slog.ErrorContext(ctx, "authz model unparsed", "op", "ExpandRelations", "err", perr.Error())
 		return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
 	} else if !plans.DeclaresType(req.GetResource().GetType()) {

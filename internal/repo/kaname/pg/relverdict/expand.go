@@ -212,11 +212,17 @@ func expandQuerySQL(labelTable string, nesting bool) (string, error) {
 
 // Expand перечисляет основания права на объекте.
 func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string) ([]Source, error) {
+	return expandPrepared(ctx, q, nil, objectType, objectID, relation)
+}
+
+// expandPrepared разбирает основания по той же явной модели, что прямой вопрос и партия.
+// nil сохраняет контракт Expand: используется модель процесса.
+func expandPrepared(ctx context.Context, q pgx.Tx, plans PlanSource, objectType, objectID, relation string) ([]Source, error) {
 	if objectType == "" || objectID == "" || relation == "" {
 		return nil, fmt.Errorf("relverdict: неполный вопрос разбора (%q,%q,%q) — пустой "+
 			"список за него неотличим от честного «оснований нет»", objectType, objectID, relation)
 	}
-	factParents, factRelations, bindVerbs, err := sourcesOf(objectType, relation)
+	factParents, factRelations, bindVerbs, err := sourcesOfPrepared(plans, objectType, relation)
 	if err != nil {
 		return nil, err
 	}

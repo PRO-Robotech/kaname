@@ -415,7 +415,7 @@ func (s *AuthorizeService) checkInPass(ctx context.Context, req CheckRequest, ca
 	now := s.now().UTC().Truncate(time.Second)
 	result = &CheckResult{CheckedAt: now}
 
-	p := planCheck(ctx, req, now, s.catalogFacts())
+	p := planCheck(ctx, req, now, s.catalogFacts(ctx))
 	if p.invalid != nil {
 		return result, p.invalid
 	}
@@ -643,7 +643,7 @@ func (s *AuthorizeService) formatDenyReason(ctx context.Context, subject, relati
 // нет»: записи о выдаче неподтверждённому, существующие у него, спросившему о
 // нём наружу не называются.
 func (s *AuthorizeService) NeutralDenyReasons(ctx context.Context, req CheckRequest) []string {
-	p := planCheck(ctx, req, s.now().UTC(), s.catalogFacts())
+	p := planCheck(ctx, req, s.now().UTC(), s.catalogFacts(ctx))
 	if p.invalid != nil {
 		return []string{p.invalid.Error()}
 	}
@@ -925,7 +925,7 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 	// прогонов: неподтверждённому «нет» на каждом его пункте, с причиной.
 	denied := make(map[string]bool, 1)
 	// Каталожный факт — один снимок на проход, как и часы.
-	facts := s.catalogFacts()
+	facts := s.catalogFacts(ctx)
 	for i, req := range reqs {
 		p := planCheck(ctx, req, now, facts)
 		plans[i] = p
@@ -1268,7 +1268,7 @@ func (s *AuthorizeService) ListSubjects(ctx context.Context, req ListSubjectsReq
 	if req.PageSize > 1000 {
 		return nil, fmt.Errorf("Illegal argument page_size %d > 1000", req.PageSize)
 	}
-	relation := listSubjectsRelation(s.catalogFacts(), req.Action, req.ResourceType)
+	relation := listSubjectsRelation(s.catalogFacts(ctx), req.Action, req.ResourceType)
 	if relation == "" {
 		return nil, fmt.Errorf("Illegal argument action %q", req.Action)
 	}

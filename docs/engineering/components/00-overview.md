@@ -224,6 +224,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `ChildRegistrationService`      | `Register` регистрирует потомка по полномочию пользователя на родителе. Сервис включается в режиме FULL (kaname#1045). |
 | `:9090`   | `AuthorizeService`              | Check / BatchCheck / ListSubjects / ExpandRelations / WhoAmI |
 | `:9090`   | `PermissionCatalogService`      | грантуемая таксономия прав                              |
+| `:9090`   | `CatalogPublicationService`     | планирование и публикация каталога оператором Kaname    |
 | `:9090`   | `OperationService`              | LRO Get / List / Cancel (corelib)                      |
 | `:9090`   | `MembershipService`             | Create + read Membership (Account ↔ User)              |
 | `:9090`   | `UserTokenService`              | Issue / List / Revoke пользовательских токенов         |

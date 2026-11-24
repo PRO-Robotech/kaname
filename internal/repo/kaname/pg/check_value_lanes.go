@@ -202,9 +202,10 @@ var checkValueLanes = map[string]*checkTableLanes{
 	"audit_outbox": nil,
 	// Сохранённый bundle, его фаза и режим записи выводятся службой из принятой
 	// модели и каталога. Их контрольные значения не являются полями запроса.
-	"authority_bundle_handoff":    nil,
-	"authority_semantic_identity": nil,
-	"authority_writer_protocol":   nil,
+	"authority_bundle_handoff":         nil,
+	"authority_publication_activation": nil,
+	"authority_semantic_identity":      nil,
+	"authority_writer_protocol":        nil,
 	// Owner-managed ACL recovery metadata and the fixed writer generation are
 	// produced by migrations/lifecycle, never supplied by a public caller.
 	"authority_producer_acl_restore_v2": nil,
@@ -367,6 +368,12 @@ var checkValueLanes = map[string]*checkTableLanes{
 		caller:  []string{"minted_token_revocations_reason_ck", "minted_token_revocations_subject_ck"},
 		service: []string{"minted_token_revocations_decider_ck"},
 	},
+	// Размер исходного документа и номер редакции приходят из декларации.
+	// Отпечаток канонического документа вычисляет загрузчик.
+	"module_part_revision": {
+		caller:  []string{"module_part_revision_document_size", "module_part_revision_positive"},
+		service: []string{"module_part_revision_digest_form"},
+	},
 	// Привязка объекта к проекту (kaname#983): id объекта и проект пришли
 	// регистрацией вызывающего (строкой зеркала), модельное имя типа выводит
 	// служба из строки каталога.
@@ -394,6 +401,8 @@ var checkValueLanes = map[string]*checkTableLanes{
 	// Receipt составляет адаптер из фактически принятого источника; формат,
 	// версия, область и связь с bundle принадлежат служебной проекции.
 	"producer_source_receipt": nil,
+	// Номер, собранный текст и отпечатки модели и каталога производит публикация.
+	"publication_model_revision": nil,
 	"public_read_publication": {caller: []string{
 		"public_read_publication_object_id_nonempty",
 		"public_read_publication_object_type_model_dictionary",

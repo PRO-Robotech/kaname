@@ -93,18 +93,48 @@ func (r CheckReport) Modules() []string {
 // опциями и ДОБАВЛЯЕТСЯ к объявлениям самой доставки — moduleset.go.
 func LoadDelivered(root string, opts ...LoadOption) (CheckReport, error) {
 	report := CheckDelivery(root, opts...)
+	return report, deliveredReportError(root, report)
+}
+
+// DeliveredDocument связывает разобранный манифест с точными байтами его
+// единственного чтения. Path относителен корню доставки; Bytes не нормализованы.
+type DeliveredDocument struct {
+	Manifest *Manifest
+	Bytes    []byte
+	Path     string
+}
+
+// LoadDeliveredDocuments проверяет доставку тем же обходом и загрузчиком,
+// что LoadDelivered. Старые документы без revision допустимы и возвращаются
+// без переписывания. Ссылки projected volume разрешаются только внутри root.
+// При любом отказе документы не возвращаются, даже если часть прошла проверку.
+// Согласованность байтов и Manifest обеспечивается одним чтением каждого файла;
+// атомарный снимок нескольких файлов при обновлении тома этот API не обещает.
+func LoadDeliveredDocuments(root string, opts ...LoadOption) ([]DeliveredDocument, error) {
+	var documents []DeliveredDocument
+	report := readAndJudgeWithDocuments(root, listManifestsOnDisk(root, isDeliveredManifestName), ReferentShippedTable,
+		func(path string, data []byte, m *Manifest) {
+			documents = append(documents, DeliveredDocument{Manifest: m, Bytes: data, Path: path})
+		}, opts...)
+	if err := deliveredReportError(root, report); err != nil {
+		return nil, err
+	}
+	return documents, nil
+}
+
+func deliveredReportError(root string, report CheckReport) error {
 	switch report.ExitCode() {
 	case CheckOK:
-		return report, nil
+		return nil
 	case CheckVoid:
-		return report, fmt.Errorf(
+		return fmt.Errorf(
 			"каталог доставки %s не дал НИ ОДНОГО манифеста (осмотрено файлов %d) — "+
 				"отсутствие манифеста снятием модуля НЕ является: причина отсутствия "+
 				"службе неизвестна, и сорванное монтирование выглядит отсюда так же, "+
 				"как снятие всех модулей разом; проверьте источник манифестов у посадки",
 			root, report.PathsSeen)
 	default:
-		return report, fmt.Errorf(
+		return fmt.Errorf(
 			"каталог доставки %s: манифестов прочитано %d, находок %d:\n\t%s",
 			root, report.ManifestsRead, len(report.Findings),
 			strings.Join(report.Findings, "\n\t"))

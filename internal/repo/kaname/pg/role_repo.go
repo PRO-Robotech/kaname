@@ -1232,63 +1232,70 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 		if len(sel.ObjectTypes) == 0 {
 			continue
 		}
-		labelsJSON, err := json.Marshal(sel.MatchLabels)
-		if err != nil {
-			return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument matchLabels: %s", err.Error())
-		}
-		if string(labelsJSON) == "null" {
-			labelsJSON = []byte("{}")
-		}
-		// pgx encodes a nil []string as SQL NULL, which violates the NOT NULL column
-		// (DEFAULT applies only when the column is OMITTED, not when NULL is passed
-		// explicitly). Normalize to an empty array so an anchor/labels selector (no
-		// names) stores '{}'.
-		resourceNames := sel.ResourceNames
-		if resourceNames == nil {
-			resourceNames = []string{}
-		}
-		cont, err := containerColumnsOf(sel)
-		if err != nil {
+		if err := w.upsertRuleSelector(ctx, roleID, sel); err != nil {
 			return err
-		}
-		grants, err := grantsColumnOf(roleID, sel)
-		if err != nil {
-			return err
-		}
-		// Контейнер вложенного правила (kaname#874) — четыре колонки; модельное
-		// имя типа контейнера выводит страж базы (`role_rule_selector_types_live`)
-		// из живой строки каталога, писатель его не пишет.
-		if _, err := w.tx.Exec(ctx,
-			`INSERT INTO kaname.role_rule_selectors
-			   (role_id, rule_fp, arm, object_types, resource_names, match_labels,
-			    container_type, container_arm, container_resource_names, container_match_labels,
-			    verbs_by_type, created_by_subject, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11::jsonb, $12, now(), now())
-			 ON CONFLICT (role_id, rule_fp) DO UPDATE
-			    SET arm                      = EXCLUDED.arm,
-			        object_types             = EXCLUDED.object_types,
-			        resource_names           = EXCLUDED.resource_names,
-			        match_labels             = EXCLUDED.match_labels,
-			        container_type           = EXCLUDED.container_type,
-			        container_arm            = EXCLUDED.container_arm,
-			        container_resource_names = EXCLUDED.container_resource_names,
-			        container_match_labels   = EXCLUDED.container_match_labels,
-			        verbs_by_type            = EXCLUDED.verbs_by_type,
-			        created_by_subject       = EXCLUDED.created_by_subject,
-			        updated_at               = now()`,
-			string(roleID), sel.RuleFP, armText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
-			cont.typ, cont.arm, cont.names, cont.labels, grants,
-			sel.CreatedBySubject,
-		); err != nil {
-			// A CHECK violation (23514 — e.g. match_labels fails labels_valid)
-			// must surface as InvalidArgument, not INTERNAL; mapErr also keeps the pgx
-			// constraint text from leaking to the caller.
-			return mapErr(err, "", string(roleID))
 		}
 	}
 	// Глаголы правил роли записаны ВЫЧИСЛЕННЫМИ — роль из очереди пересчёта
 	// снимается тем же оператором транзакции (kaname#878).
 	return w.dequeueSelectorVerbs(ctx, roleID)
+}
+
+func (w *roleWriter) upsertRuleSelector(ctx context.Context, roleID domain.RoleID, sel domain.RuleSelector) error {
+	labelsJSON, err := json.Marshal(sel.MatchLabels)
+	if err != nil {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument matchLabels: %s", err.Error())
+	}
+	if string(labelsJSON) == "null" {
+		labelsJSON = []byte("{}")
+	}
+	// pgx encodes a nil []string as SQL NULL, which violates the NOT NULL column
+	// (DEFAULT applies only when the column is OMITTED, not when NULL is passed
+	// explicitly). Normalize to an empty array so an anchor/labels selector (no
+	// names) stores '{}'.
+	resourceNames := sel.ResourceNames
+	if resourceNames == nil {
+		resourceNames = []string{}
+	}
+	cont, err := containerColumnsOf(sel)
+	if err != nil {
+		return err
+	}
+	grants, err := grantsColumnOf(roleID, sel)
+	if err != nil {
+		return err
+	}
+	// Контейнер вложенного правила (kaname#874) — четыре колонки; модельное
+	// имя типа контейнера выводит страж базы (`role_rule_selector_types_live`)
+	// из живой строки каталога, писатель его не пишет.
+	if _, err := w.tx.Exec(ctx,
+		`INSERT INTO kaname.role_rule_selectors
+		   (role_id, rule_fp, arm, object_types, resource_names, match_labels,
+		    container_type, container_arm, container_resource_names, container_match_labels,
+		    verbs_by_type, created_by_subject, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11::jsonb, $12, now(), now())
+		 ON CONFLICT (role_id, rule_fp) DO UPDATE
+		    SET arm                      = EXCLUDED.arm,
+		        object_types             = EXCLUDED.object_types,
+		        resource_names           = EXCLUDED.resource_names,
+		        match_labels             = EXCLUDED.match_labels,
+		        container_type           = EXCLUDED.container_type,
+		        container_arm            = EXCLUDED.container_arm,
+		        container_resource_names = EXCLUDED.container_resource_names,
+		        container_match_labels   = EXCLUDED.container_match_labels,
+		        verbs_by_type            = EXCLUDED.verbs_by_type,
+		        created_by_subject       = EXCLUDED.created_by_subject,
+		        updated_at               = now()`,
+		string(roleID), sel.RuleFP, armText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
+		cont.typ, cont.arm, cont.names, cont.labels, grants,
+		sel.CreatedBySubject,
+	); err != nil {
+		// A CHECK violation (23514 — e.g. match_labels fails labels_valid)
+		// must surface as InvalidArgument, not INTERNAL; mapErr also keeps the pgx
+		// constraint text from leaking to the caller.
+		return mapErr(err, "", string(roleID))
+	}
+	return nil
 }
 
 // RegrainSelectorVerbs пересчитывает глаголы правил (`verbs_by_type`) у
