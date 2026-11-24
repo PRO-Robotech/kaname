@@ -758,7 +758,7 @@ def bounded_rid_marker(output, marker, bounds):
 
 def role_readiness_marker(output, source_lines):
     # Полная запись из функции фикстуры. В квитанции остаются только счётчики и закрытые классы.
-    if len(output) > 320:
+    if len(output) > 400:
         return None
     number = r"(0|[1-9][0-9]{0,5})"
     marker = re.fullmatch(
@@ -774,7 +774,9 @@ def role_readiness_marker(output, source_lines):
         r"no-row|transaction-closed|sql-permission|sql-undefined-function|sql-undefined-table|sql-lock-unavailable|"
         r"sql-query-canceled|sql-state|sql-connection|sql-other|connection-open|result-scan|source-unconfirmed)"
         r"(?: cancel=(statement-timeout|user-request|other) context=(active|canceled|deadline)"
-        r" site=(unclassified|global-coordinator|consumer-admission|protocol-row|identity-row|population-latch))?)?)?\n", output)
+        r" site=(unclassified|global-coordinator|consumer-admission|protocol-row|identity-row|population-latch)"
+        r"(?: blocker=(fixture|serve|other|unknown) waits=(0|[1-9][0-9]?)"
+        r" transaction-age=(under-30s|30s-to-60s|60s-or-more|unknown))?)?)?)?\n", output)
     if marker is None or int(marker[1]) > source_lines:
         return None
     result = {"reason": marker[2], "verbs": marker[3], "refs": marker[4]}
@@ -793,6 +795,13 @@ def role_readiness_marker(output, source_lines):
                     "open-begin", "open-enter-v2", "open-enter-v3", "open-confirm-publication"):
                 return None
             result["verbCensus"]["firstQueryCancel"] = {"reason": marker[12], "context": marker[13], "site": marker[14]}
+            if marker[15] is not None:
+                waits = int(marker[16])
+                if (marker.group(5, 10, 12, 13, 14) != (
+                        "initial-delivery", "open-enter-v2", "statement-timeout", "active", "consumer-admission")
+                        or waits > 64 or (waits == 0 and marker.group(15, 17) != ("unknown", "unknown"))):
+                    return None
+                result["consumerAdmission"] = {"blocker": marker[15], "waits": waits, "transactionAge": marker[17]}
     return result
 
 

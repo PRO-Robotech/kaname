@@ -651,8 +651,9 @@ func (w *ridLifecycleWorld) catalogOnly(t *testing.T) {
 }
 
 type ridRoleProjectionState struct {
-	verbs, refs string
-	failure     *ridRoleVerbFailure
+	verbs, refs       string
+	failure           *ridRoleVerbFailure
+	consumerAdmission *rid11ConsumerAdmissionSample
 }
 
 type ridRoleVerbFailure struct {

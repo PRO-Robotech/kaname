@@ -167,9 +167,11 @@ func rid11Prepare(t *testing.T, c rid11Case) (*ridLifecycleWorld, string) {
 	}
 	var w *ridLifecycleWorld
 	if c.Active {
-		w = newRIDLifecycleWorldAccounts(t, c.Mode, false, setup)
+		w = newRIDLifecycleWorldConfigured(t, c.Mode, false, setup, nativeWorldOptions{
+			watchRID11Admission: os.Getenv("KANAME_RID11_CASE_GROUP") == "availability",
+		})
 		// Исходный снимок ACTIVE требует тех же завершённых проекций ролей, что восстановление.
-		ridAwaitRoleProjectionsAt(t, w.f.given.ctx, w.deliveryProcess, "initial-delivery")
+		ridAwaitRoleProjectionsObservedAt(t, w.f.given.ctx, w.deliveryProcess, "initial-delivery", w.f.consumerAdmission)
 		subject := w.f.ridSA(t, w.f.tenantID, "rid11-existing-grantee")
 		g := w.grant(t, w.bindingInput("service_account", subject, w.pull, "registry.registries", w.object))
 		require.Equal(t, w.gd.Id, g.DelegationId)

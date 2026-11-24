@@ -49,6 +49,7 @@ type installationNativeWorld struct {
 	settleIssuedKeys   bool
 	stockLegacyGroup   json.RawMessage
 	stockCatalog       json.RawMessage
+	consumerAdmission  *rid11ConsumerAdmissionWatch
 }
 
 func newInstallationNativeWorld(t *testing.T) *installationNativeWorld {
@@ -86,9 +87,10 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 }
 
 type nativeWorldOptions struct {
-	accountCapacity  int64
-	settleIssuedKeys bool
-	boundedPostgres  bool
+	accountCapacity     int64
+	settleIssuedKeys    bool
+	boundedPostgres     bool
+	watchRID11Admission bool
 }
 
 func newInstallationNativeWorldConfigured(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool, options nativeWorldOptions) *installationNativeWorld {
@@ -149,7 +151,12 @@ func newInstallationNativeWorldConfigured(t *testing.T, keyTTL int64, accessTTL 
 	environment, err := stand.Environment(nil)
 	require.NoError(t, err)
 	require.NoError(t, stand.RunMigrator(ctx, os.Getenv("KANAME_RID_MIGRATOR"), environment))
-	pool, err := coredb.NewPool(ctx, fmt.Sprintf("postgres://kaname:stand@127.0.0.1:%s/kaname?sslmode=require&options=-c%%20search_path%%3Dkaname%%2Cpublic&pool_max_conns=2", stand.PGPort))
+	fixtureDSN := fmt.Sprintf("postgres://kaname:stand@127.0.0.1:%s/kaname?sslmode=require&options=-c%%20search_path%%3Dkaname%%2Cpublic&pool_max_conns=2", stand.PGPort)
+	if options.watchRID11Admission {
+		fixtureDSN += "&application_name=" + rid11AdmissionFixtureApplication
+		f.consumerAdmission = &rid11ConsumerAdmissionWatch{}
+	}
+	pool, err := coredb.NewPool(ctx, fixtureDSN)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	// Повторно используем ровно установленные помощники записи Given церемонии, не создавая её
@@ -331,7 +338,7 @@ func (f *installationNativeWorld) apply(t *testing.T, input installruntime.Deliv
 	require.NoError(t, f.session.Stop(stop))
 	cancel()
 	require.NoError(t, f.base.CheckSecretAbsence(append(f.creator.SecretMaterial(), f.operator.Bearer(), f.given.ic1.secret, f.given.session.bearer.CookieValue())...))
-	process, err := f.session.StartDelivery(f.given.ctx, input)
+	process, err := f.startInitialDelivery(t, input)
 	require.NoError(t, err)
 	ready, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()

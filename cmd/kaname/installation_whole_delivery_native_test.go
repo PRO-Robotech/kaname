@@ -317,6 +317,11 @@ func rid09AwaitBaseRoleProjections(t *testing.T, ctx context.Context, p *install
 
 func ridAwaitRoleProjectionsAt(t *testing.T, ctx context.Context, p *installruntime.Process, phase string) {
 	t.Helper()
+	ridAwaitRoleProjectionsObservedAt(t, ctx, p, phase, nil)
+}
+
+func ridAwaitRoleProjectionsObservedAt(t *testing.T, ctx context.Context, p *installruntime.Process, phase string, watch *rid11ConsumerAdmissionWatch) {
+	t.Helper()
 	ready, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	state := ridRoleProjectionState{verbs: "unseen", refs: "unseen"}
@@ -325,6 +330,10 @@ func ridAwaitRoleProjectionsAt(t *testing.T, ctx context.Context, p *installrunt
 		state, probeErr = ridCatalogRoleProjectionsProbe(p.StdoutPath)
 		return probeErr
 	})
+	if watch != nil {
+		sample := watch.stop()
+		state.consumerAdmission = &sample
+	}
 	if err != nil {
 		// Только закрытая классификация последней пробы. Ошибка
 		// процесса и исходные журналы могут содержать удостоверения.
@@ -345,6 +354,10 @@ func ridLogRoleReadiness(t *testing.T, phase, reason string, state ridRoleProjec
 		suffix := ""
 		if d := f.Cancel; d != nil {
 			suffix = fmt.Sprintf(" cancel=%s context=%s site=%s", d.Reason, d.Context, d.Site)
+			if sample := state.consumerAdmission; sample != nil && phase == "initial-delivery" &&
+				f.Stage == "open-enter-v2" && d.Reason == "statement-timeout" && d.Context == "active" && d.Site == "consumer-admission" {
+				suffix += fmt.Sprintf(" blocker=%s waits=%d transaction-age=%s", sample.blocker, sample.waits, sample.transactionAge)
+			}
 		}
 		t.Logf("RID_ROLE_READINESS reason=%s verbs=%s refs=%s phase=%s examined=%d reseeded=%d failed=%d completed=%t stage=%s class=%s%s",
 			reason, state.verbs, state.refs, phase, f.examined, f.reseeded, f.failed, f.completed, f.Stage, f.Class, suffix)
