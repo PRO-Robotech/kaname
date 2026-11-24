@@ -18,6 +18,47 @@ func fullContractActivate(t *testing.T, r protocolRig) (*kanamepg.Repository, *k
 	t.Helper()
 	require.NoError(t, lifecycleOwner(r).StageFullAuthorityBundle(r.ctx, r.bundle))
 	require.NoError(t, lifecycleOwner(r).ActivateFullAuthorityBundle(r.ctx, r.bundle))
+	return fullContractRepository(t, r)
+}
+
+// В тестах Down/Up база намеренно находится на версии до журнала публикаций.
+// Точный старый протокол активируется владельцем, а текущий production guard
+// остаётся обязательным для всех проверок на современной схеме.
+func fullContractActivateBeforePublication(t *testing.T, r protocolRig) (*kanamepg.Repository, *kanamepg.FullWriterContract) {
+	t.Helper()
+	require.NoError(t, r.bundle.Validate())
+	id := r.bundle.Identity()
+	steps := []struct {
+		query string
+		args  []any
+	}{
+		{
+			query: `SELECT kaname.authority_protocol_stage_full_v3($1,$2,$3,$4,$5)`,
+			args:  []any{r.bundle.ModelSource(), r.bundle.CanonicalCatalog(), id.ModelID, id.CatalogID, id.ProjectorVersion},
+		},
+		{
+			query: `SELECT kaname.authority_protocol_activate_full_v3($1,$2,$3)`,
+			args:  []any{id.ModelID, id.CatalogID, id.ProjectorVersion},
+		},
+	}
+	for _, step := range steps {
+		tx, err := r.admin.Begin(r.ctx)
+		require.NoError(t, err)
+		lifecycleRollback(t, tx)
+		_, err = tx.Exec(r.ctx, `SELECT kaname.authority_protocol_drain()`)
+		require.NoError(t, err)
+		var historical bool
+		require.NoError(t, tx.QueryRow(r.ctx, `SELECT to_regclass('kaname.publication_model_revision') IS NULL`).Scan(&historical))
+		require.True(t, historical, "старая SQL-активация допустима только до схемы публикации")
+		_, err = tx.Exec(r.ctx, step.query, step.args...)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(r.ctx))
+	}
+	return fullContractRepository(t, r)
+}
+
+func fullContractRepository(t *testing.T, r protocolRig) (*kanamepg.Repository, *kanamepg.FullWriterContract) {
+	t.Helper()
 	contract, err := kanamepg.NewFullWriterContract(r.ctx, r.repo, r.bundle)
 	require.NoError(t, err)
 	full, err := r.repo.WithFullWriterContract(contract)

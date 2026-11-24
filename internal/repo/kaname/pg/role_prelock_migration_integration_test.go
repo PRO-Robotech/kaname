@@ -124,7 +124,7 @@ func TestRolePrelockMigrationGooseRoundTripRestoresExactPreviousContract(t *test
 		require.NoError(t, w.Rollback(r.ctx))
 	}
 	require.NoError(t, lifecycleOwner(r).PrepareAuthorityBundle(r.ctx, r.bundle))
-	full, _ := fullContractActivate(t, r)
+	full, _ := fullContractActivateBeforePublication(t, r)
 	require.NoError(t, full.ValidateFullAuthorityBundle(r.ctx, r.bundle))
 }
 
@@ -152,7 +152,7 @@ func TestRolePrelockMigrationGooseDownRefusesActiveFullWithoutChanges(t *testing
 	r, _ := rolePrelockRig(t)
 	db, own, _ := rolePrelockMigrationDB(t, r)
 	require.NoError(t, lifecycleOwner(r).PrepareAuthorityBundle(r.ctx, r.bundle))
-	full, _ := fullContractActivate(t, r)
+	full, _ := fullContractActivateBeforePublication(t, r)
 	require.NoError(t, full.ValidateFullAuthorityBundle(r.ctx, r.bundle))
 	var contract int
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT required_contract FROM kaname.authority_writer_contract WHERE singleton`).Scan(&contract))
