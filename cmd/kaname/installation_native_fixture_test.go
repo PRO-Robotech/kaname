@@ -9,16 +9,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
+	"github.com/PRO-Robotech/corelib/schemaguard"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,6 +88,7 @@ func newInstallationNativeWorldAccountCapacity(t *testing.T, keyTTL int64, acces
 type nativeWorldOptions struct {
 	accountCapacity  int64
 	settleIssuedKeys bool
+	boundedPostgres  bool
 }
 
 func newInstallationNativeWorldConfigured(t *testing.T, keyTTL int64, accessTTL string, moduleWriter, earlyLifecycle bool, options nativeWorldOptions) *installationNativeWorld {
@@ -124,7 +130,8 @@ func newInstallationNativeWorldConfigured(t *testing.T, keyTTL int64, accessTTL 
 	evidence, err := installruntime.EvidenceDirectory(evidenceRoot, t.Name())
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(evidenceRoot, 0700))
-	stand := installruntime.PrepareNativeStand(t, ctx, root, evidence, moduleWriter)
+	stand := installruntime.PrepareNativeStandWithOptions(t, ctx, root, evidence, moduleWriter,
+		installruntime.NativeStandOptions{BoundedPostgres: options.boundedPostgres})
 	f := &installationNativeWorld{stand: stand, writerPlan: installruntime.EmptyRegistrationWriterPlan(), settleIssuedKeys: options.settleIssuedKeys}
 	if earlyLifecycle {
 		// Регистрируем до любого нативного Start, начальной настройки или выдачи ключа.
@@ -360,4 +367,37 @@ func ridNativeFirstInstall(t *testing.T) {
 	// Сохраняем настоящий процесс/состояние для проверок идентичности, доказывая,
 	// что церемония O всё ещё работает после перезапуска с полной поставкой.
 	f.renewOperator(t, t.Context())
+}
+
+// provisionNativeRuntime применяет права штатного развёртывания и проверяет
+// минимальный доступ к журналу миграций до старта отдельно запущенной службы.
+func provisionNativeRuntime(t *testing.T, f *installationNativeWorld, grantsLog string) *pgx.ConnConfig {
+	t.Helper()
+	runtimePool := fullStartupRuntimePool(t, f.given.ctx, f.given.pool)
+	runtime := runtimePool.Config().ConnConfig
+	f.secrets = append(f.secrets, runtime.Password)
+	// Воспроизводим права оператора из штатного rollout на том же LOGIN.
+	owner := f.given.pool.Config().ConnConfig
+	// #nosec G204 -- используется локальный psql и штатный SQL из точного чекаута.
+	grant := exec.CommandContext(f.given.ctx, "psql", "-X", "--no-password",
+		"--set=runtime_role="+runtime.User, "--set=migration_role="+owner.User,
+		"--file="+filepath.Join(f.stand.Root, "deploy", "sql", "authority-runtime-role.sql"))
+	grant.Env = []string{
+		"PGHOST=" + owner.Host, "PGPORT=" + strconv.Itoa(int(owner.Port)),
+		"PGDATABASE=" + owner.Database, "PGUSER=" + owner.User,
+		"PGPASSWORD=" + owner.Password, "PGSSLMODE=require",
+	}
+	grantOut, err := grant.CombinedOutput()
+	require.NoError(t, os.WriteFile(grantsLog, grantOut, 0600))
+	require.NoError(t, err, "штатная настройка ограниченного LOGIN, см. закрытый журнал стенда")
+	require.NoError(t, schemaguard.CheckFromFS(migrations.FS, schemaguard.PgxVersionReader(runtimePool))(f.given.ctx),
+		"runtime LOGIN должен читать применённую версию")
+	var journalReadAll, journalWrite bool
+	require.NoError(t, runtimePool.QueryRow(f.given.ctx, `SELECT
+ has_table_privilege(current_user,'goose_db_version','SELECT'),
+ has_table_privilege(current_user,'goose_db_version','INSERT,UPDATE,DELETE,TRUNCATE')`).
+		Scan(&journalReadAll, &journalWrite))
+	require.False(t, journalReadAll)
+	require.False(t, journalWrite)
+	return runtime
 }

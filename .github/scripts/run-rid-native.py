@@ -21,7 +21,13 @@ import uuid
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "github.com/PRO-Robotech/kaname/cmd/kaname"
 # Имена прямых подтестов после замены пробелов на подчёркивания в testing.T.Run.
+CATALOG_PUBLICATION_SUITE = "catalog-publication-two-replicas"
+CATALOG_PUBLICATION_TEST = "TestCatalogPublicationTwoNativeReplicas"
 CASES = {
+    CATALOG_PUBLICATION_SUITE: (CATALOG_PUBLICATION_TEST, frozenset({
+        "anonymous", "non-operator", "invalid-document", "revision-collision", "type-ownership-collision",
+        "foreign-type-ownership-collision",
+    }), 0),
     'registry-installation-rid11': ('TestRID_11_InputAuthnAuthorityBackend', frozenset({
         'every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair',
         'exact_exit_stage_field_pair_completedPairs;_no_bootstrap_I_fallback_or_self-provision',
@@ -456,7 +462,9 @@ def cleanup(evidence, env, before, root_test):
     for path in ownerships:
         identity = read_receipt(path.parent / "test-identity.json")
         name = identity.get("testIdentity")
-        need(set(identity) == {"testIdentity"} and isinstance(name, str) and name.startswith(root_test + "/"))
+        need(set(identity) == {"testIdentity"} and isinstance(name, str) and
+             (name.startswith(root_test + "/") or
+              root_test == CATALOG_PUBLICATION_TEST and name == root_test))
         need(path.parent.name == "case-" + hashlib.sha256(name.encode()).hexdigest())
         owned = read_receipt(path)
         need(set(owned) == {"containerId", "mounts"})
@@ -519,6 +527,7 @@ def cleanup(evidence, env, before, root_test):
 
 # Только публичные исходники существующих native fixture/bridge, не пути из Output.
 ASSERTION_FILES = (
+    "cmd/kaname/catalog_publication_native_integration_test.go",
     "cmd/kaname/installation_delegated_grant_native_test.go",
     "cmd/kaname/installation_newman_delegated_grant_test.go",
     "cmd/kaname/installation_newman_delegated_delta_test.go",
@@ -1029,6 +1038,8 @@ def startup_diagnostics(evidence, root_test, predicates, diagnostics, binary_sha
         return {"status": "first-failure-site-unavailable"}
     fixture_source = "cmd/kaname/installation_native_fixture_test.go"
     names = {root_test + "/" + name for name in predicates}
+    if root_test == CATALOG_PUBLICATION_TEST:
+        names.add(root_test)
     if root_test == CASES["registry-installation-rid04"][0]:
         names = {name + "/" + mode for name in names for mode in ("S1", "S2")}
     if site.get("file") != fixture_source or site.get("test") not in names:
@@ -1218,11 +1229,84 @@ def judge_test(path, root_test, predicates, *, rid11_nested=None):
     else:
         direct = {name.split("/", 1)[1] for name in passed if name.count("/") == 1}
         need(direct == predicates)
+    if root_test == CATALOG_PUBLICATION_TEST:
+        need(running == {root_test, *(root_test + "/" + name for name in predicates)})
     if root_test == CASES["registry-installation-rid10"][0]:
         expected = {root_test, *(root_test + "/" + name for name in predicates | RID10_NESTED)}
         need(running == expected)
     return {"ok": True, "passedTests": len(passed), "skippedTests": 0, "failedTests": 0,
             "directPredicates": sorted(direct)}
+
+
+def judge_publication_receipt(evidence, artifact_hashes):
+    """Проверяет закрытую схему наблюдений без учётных данных."""
+    root = evidence / ("case-" + hashlib.sha256(CATALOG_PUBLICATION_TEST.encode()).hexdigest())
+    need(root.is_dir() and not root.is_symlink())
+    need(sorted(evidence.glob("**/publication-native-observations.json")) ==
+         [root / "publication-native-observations.json"])
+    need(not list(evidence.glob("**/newman/stdout")))
+
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            need(key not in value)
+            value[key] = item
+        return value
+
+    def read(*parts):
+        path = root
+        for part in parts:
+            path = path / part
+            need(not path.is_symlink())
+        need(path.is_file() and path.stat().st_size <= 16384)
+        value = json.loads(path.read_bytes(), object_pairs_hook=unique)
+        need(type(value) is dict)
+        return value
+
+    need(read("test-identity.json") == {"testIdentity": CATALOG_PUBLICATION_TEST})
+    pg_caps = read("pg-resource-caps.json")
+    pg_owner = read("pg-ownership.json")
+    expected_caps = {"memory": 1 << 30, "memorySwap": 1 << 30, "nanoCPUs": 10**9}
+    need(set(pg_caps) == {"containerId", *expected_caps})
+    need(type(pg_caps["containerId"]) is str and re.fullmatch(r"[a-f0-9]{64}", pg_caps["containerId"]))
+    need(pg_caps["containerId"] == pg_owner.get("containerId"))
+    need(all(type(pg_caps[key]) is int and pg_caps[key] == expected for key, expected in expected_caps.items()))
+    observed = read("publication-native-observations.json")
+    need(set(observed) == {
+        "test", "replicaPIDs", "binarySHA256", "migratorSHA256", "firstRevision",
+        "finalRevision", "finalDigest", "firstConvergenceMs", "secondConvergenceMs",
+        "configuredWindowMs", "unchangedMigrationHead", "migrationLedgerSHA256", "transport", "owner",
+    })
+    need(observed["test"] == CATALOG_PUBLICATION_TEST)
+    need(observed["binarySHA256"] == artifact_hashes["kaname"])
+    need(observed["migratorSHA256"] == artifact_hashes["kaname-migrator"])
+    need(observed["firstRevision"] == "2" and observed["finalRevision"] == "3")
+    need(type(observed["finalDigest"]) is str and re.fullmatch(r"sha256:[a-f0-9]{64}", observed["finalDigest"]))
+    need(type(observed["migrationLedgerSHA256"]) is str and re.fullmatch(r"[a-f0-9]{64}", observed["migrationLedgerSHA256"]))
+    need(type(observed["unchangedMigrationHead"]) is int and observed["unchangedMigrationHead"] > 0)
+    need(type(observed["configuredWindowMs"]) is int and observed["configuredWindowMs"] == 15000)
+    for field in ("firstConvergenceMs", "secondConvergenceMs"):
+        need(type(observed[field]) is int and 0 <= observed[field] <= observed["configuredWindowMs"])
+    need(observed["transport"] == "production REST TLS presented Bearer")
+    need(observed["owner"] == "migrator follow-publications")
+    pids = observed["replicaPIDs"]
+    need(type(pids) is list and len(pids) == 2 and all(type(pid) is int and pid > 0 for pid in pids))
+    need(pids[0] != pids[1])
+    for ordinal, pid in enumerate(pids, 1):
+        replica = "publication-replica-" + str(ordinal)
+        process = read(replica, "process", "process.json")
+        need(set(process) == {"pid", "binarySHA256", "configSHA256"})
+        need(type(process["pid"]) is int and process["pid"] == pid)
+        need(process["binarySHA256"] == artifact_hashes["kaname"])
+        config = root / replica / "config.yaml"
+        need(config.is_file() and not config.is_symlink())
+        need(process["configSHA256"] == sha(config))
+        terminal = read(replica, "process", "terminal.json")
+        need(set(terminal) == {"pid", "exited", "exitCode"})
+        need(type(terminal["pid"]) is int and terminal["pid"] == pid)
+        need(terminal["exited"] is True and type(terminal["exitCode"]) is int and terminal["exitCode"] == 0)
+    return {"ok": True, "receiptSHA256": sha(root / "publication-native-observations.json"),
+            "postgresResourceCaps": expected_caps, **observed}
 
 
 def hosted_memory_scope():
@@ -1252,6 +1336,7 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     root_test, predicates, phase_count = CASES[args.suite]
+    publication_suite = args.suite == CATALOG_PUBLICATION_SUITE
     group = args.rid11_group
     need(group is None or args.suite == "registry-installation-rid11")
     extra = RID08_WINDOW_SECONDS if args.suite == "registry-installation-rid08" else 0
@@ -1286,11 +1371,12 @@ def main():
         signal.signal(signal.SIGTERM, interrupted)
         for tool in ("go", "docker", "bash", "openssl", "python3"):
             need(shutil.which(tool))
-        node = Path(os.environ["KANAME_RID_NODE_BINARY"])
-        module = Path(os.environ["KANAME_RID_NEWMAN_MODULE"])
-        need(node.is_absolute() and module.is_absolute())
-        node, module = node.resolve(strict=True), module.resolve(strict=True)
-        need(json.loads((module / "package.json").read_bytes())["version"] == "6.2.2")
+        if not publication_suite:
+            node = Path(os.environ["KANAME_RID_NODE_BINARY"])
+            module = Path(os.environ["KANAME_RID_NEWMAN_MODULE"])
+            need(node.is_absolute() and module.is_absolute())
+            node, module = node.resolve(strict=True), module.resolve(strict=True)
+            need(json.loads((module / "package.json").read_bytes())["version"] == "6.2.2")
         # Пользовательские NODE_OPTIONS и отключение штатного сборщика контейнеров не наследуются.
         env.pop("TESTCONTAINERS_RYUK_DISABLED", None)
         env.update(GOMAXPROCS="2", GOMEMLIMIT="3GiB", CGO_ENABLED="0")
@@ -1312,18 +1398,21 @@ def main():
             argv = ["go", "test", "-c"] if test else ["go", "build"]
             need(command([*argv, "-p=1", "-o", str(bins / name), package], env,
                          private / (name + "-build.log")) == 0)
-        runner = ROOT / "tests/newman/scripts/run-rid-native.cjs"
-        collection = ROOT / "tests/newman/collections" / (args.suite + ".postman_collection.json")
-        collector = ROOT / "tests/newman/scripts/collect-rid-native.py"
-        expected = {"nodeSHA256": sha(node), "runnerSHA256": sha(runner),
-                    "toolTreeSHA256": tree_sha(module), "collectionSHA256": sha(collection),
-                    "testExecutableSHA256": sha(bins / "rid-tests")}
         artifact_hashes = {name: sha(bins / name) for name in ("kaname", "kaname-migrator", "rid-tests")}
-        collector_sha = sha(collector)
-        spec = importlib.util.spec_from_file_location("rid_native_collector", collector)
-        impl = importlib.util.module_from_spec(spec)
-        sys.dont_write_bytecode = True
-        spec.loader.exec_module(impl)
+        expected = {"testExecutableSHA256": artifact_hashes["rid-tests"]}
+        collector_sha = None
+        if not publication_suite:
+            runner = ROOT / "tests/newman/scripts/run-rid-native.cjs"
+            collection = ROOT / "tests/newman/collections" / (args.suite + ".postman_collection.json")
+            collector = ROOT / "tests/newman/scripts/collect-rid-native.py"
+            expected = {"nodeSHA256": sha(node), "runnerSHA256": sha(runner),
+                        "toolTreeSHA256": tree_sha(module), "collectionSHA256": sha(collection),
+                        "testExecutableSHA256": sha(bins / "rid-tests")}
+            collector_sha = sha(collector)
+            spec = importlib.util.spec_from_file_location("rid_native_collector", collector)
+            impl = importlib.util.module_from_spec(spec)
+            sys.dont_write_bytecode = True
+            spec.loader.exec_module(impl)
         rid11_nested = None
         if group is not None:
             groups = impl.rid11_phase_groups(json.loads(collection.read_bytes()))
@@ -1342,12 +1431,15 @@ def main():
         identity_file = private / "expected-identities.json"
         write_json(identity_file, expected)
         run_id = args.suite.removeprefix("registry-installation-") + "-ci-" + uuid.uuid4().hex
-        env.update(KANAME_RID_ACCEPTANCE="1", KANAME_RID_NEWMAN="1",
-                   KANAME_RID_NODE_BINARY=str(node), KANAME_RID_NEWMAN_MODULE=str(module),
-                   KANAME_RID_EXPECTED_IDENTITIES_FILE=str(identity_file), KANAME_RID_RUN_ID=run_id,
-                   KANAME_RID_EVIDENCE=str(evidence), KANAME_RID_BINARY=str(bins / "kaname"),
+        env.update(KANAME_RID_EVIDENCE=str(evidence), KANAME_RID_BINARY=str(bins / "kaname"),
                    KANAME_RID_BINARY_SHA256=artifact_hashes["kaname"],
                    KANAME_RID_MIGRATOR=str(bins / "kaname-migrator"))
+        if publication_suite:
+            env["KANAME_CATALOG_PUBLICATION_ACCEPTANCE"] = "1"
+        else:
+            env.update(KANAME_RID_ACCEPTANCE="1", KANAME_RID_NEWMAN="1",
+                       KANAME_RID_NODE_BINARY=str(node), KANAME_RID_NEWMAN_MODULE=str(module),
+                       KANAME_RID_EXPECTED_IDENTITIES_FILE=str(identity_file), KANAME_RID_RUN_ID=run_id)
         summary.update(status="native-test-failed", expectedIdentities=expected, artifactSHA256=artifact_hashes,
                        collectorSHA256=collector_sha, runIdSHA256=hashlib.sha256(run_id.encode()).hexdigest(),
                        testDeadlineSeconds=test_seconds, outerDeadlineSeconds=outer_seconds)
@@ -1382,23 +1474,26 @@ def main():
                 private / "test.jsonl", root_test, predicates, timeout_seconds=test_seconds)
             raise
         summary["status"] = "receipt-proof-failed"
-        need(sha(node) == expected["nodeSHA256"] and tree_sha(module) == expected["toolTreeSHA256"])
-        need(sha(runner) == expected["runnerSHA256"] and sha(collector) == collector_sha)
-        if group is not None:
-            need(sha(Path(__file__).resolve()) == summary["producerSHA256"])
         need(all(sha(bins / name) == value for name, value in artifact_hashes.items()))
-        reports = sorted(evidence.glob("**/newman/stdout"))
-        need(len(reports) == phase_count)
-        merged = impl.combine(collection, reports, run_id, expected["testExecutableSHA256"], expected, rid11_group=group)
-        need(len(merged["sources"]) == phase_count)
-        write_json(private / "combined.json", merged)
-        # Проецируются только проверенные числовые поля и хеши, ни один HTTP-запрос/ответ.
-        summary["phases"] = [{"phaseSHA256": hashlib.sha256(row["phase"].encode()).hexdigest(),
-                              "reportSHA256": row["reportSHA256"], "requests": row["requests"],
-                              "uniqueRequests": row["uniqueRequests"], "assertions": row["assertions"]}
-                             for row in merged["sources"]]
-        summary["counts"] = {"phases": phase_count, "requests": merged["run"]["stats"]["requests"]["total"],
-                             "assertions": merged["run"]["stats"]["assertions"]["total"]}
+        if publication_suite:
+            summary["publication"] = judge_publication_receipt(evidence, artifact_hashes)
+        else:
+            need(sha(node) == expected["nodeSHA256"] and tree_sha(module) == expected["toolTreeSHA256"])
+            need(sha(runner) == expected["runnerSHA256"] and sha(collector) == collector_sha)
+            if group is not None:
+                need(sha(Path(__file__).resolve()) == summary["producerSHA256"])
+            reports = sorted(evidence.glob("**/newman/stdout"))
+            need(len(reports) == phase_count)
+            merged = impl.combine(collection, reports, run_id, expected["testExecutableSHA256"], expected, rid11_group=group)
+            need(len(merged["sources"]) == phase_count)
+            write_json(private / "combined.json", merged)
+            # Проецируются только проверенные числовые поля и хеши, ни один HTTP-запрос/ответ.
+            summary["phases"] = [{"phaseSHA256": hashlib.sha256(row["phase"].encode()).hexdigest(),
+                                  "reportSHA256": row["reportSHA256"], "requests": row["requests"],
+                                  "uniqueRequests": row["uniqueRequests"], "assertions": row["assertions"]}
+                                 for row in merged["sources"]]
+            summary["counts"] = {"phases": phase_count, "requests": merged["run"]["stats"]["requests"]["total"],
+                                 "assertions": merged["run"]["stats"]["assertions"]["total"]}
         need(subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT,
                                      stderr=subprocess.DEVNULL).decode().strip() == source)
         need(not subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all"],

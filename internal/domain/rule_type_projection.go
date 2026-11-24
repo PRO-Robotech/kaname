@@ -21,13 +21,14 @@ type RuleTypeProjection struct {
 	WildcardKind       RuleTypeWildcard
 	WildcardModule     string
 	WildcardSuppressed bool
+	explicitTypes      bool
 }
 
 // UsesStaticRegistry сообщает, раскрыта ли подстановка по реестру сборки
 // AllMaterializableTypes. Живой каталог может уже содержать другие типы;
 // доказательство будущего эффекта требует отдельного обоснования замкнутости.
 func (p RuleTypeProjection) UsesStaticRegistry() bool {
-	return p.WildcardKind != RuleTypeWildcardNone && !p.WildcardSuppressed
+	return p.WildcardKind != RuleTypeWildcardNone && !p.WildcardSuppressed && !p.explicitTypes
 }
 
 // MaterializedTypeProjection — общий расчёт для материализатора и анализа
@@ -39,9 +40,22 @@ func (r Rule) MaterializedTypeProjection(scope Scope) RuleTypeProjection {
 	return r.materializedTypeProjection(scopeIsBounded(scope))
 }
 
+// MaterializedTypeProjectionForTypes раскрывает подстановки по явно переданному
+// снимку типов. Метаданные подстановки и граница области остаются прежними.
+// Пустой список не означает возврат к статическому реестру.
+func (r Rule) MaterializedTypeProjectionForTypes(scope Scope, types []string) RuleTypeProjection {
+	projection := r.projectMaterializedTypes(scopeIsBounded(scope), func() []string { return append([]string(nil), types...) })
+	projection.explicitTypes = projection.WildcardKind != RuleTypeWildcardNone && !projection.WildcardSuppressed
+	return projection
+}
+
 // materializedTypeProjection обслуживает также индекс роли: он раскрывает
 // подстановку независимо от области, как прежний MaterializingSelectors.
 func (r Rule) materializedTypeProjection(expandWildcard bool) RuleTypeProjection {
+	return r.projectMaterializedTypes(expandWildcard, AllMaterializableTypes)
+}
+
+func (r Rule) projectMaterializedTypes(expandWildcard bool, allTypes func() []string) RuleTypeProjection {
 	if r.Module == wildcard {
 		out := RuleTypeProjection{
 			WildcardKind:       RuleTypeWildcardAllModules,
@@ -49,7 +63,7 @@ func (r Rule) materializedTypeProjection(expandWildcard bool) RuleTypeProjection
 			WildcardSuppressed: !expandWildcard,
 		}
 		if expandWildcard {
-			out.ObjectTypes = AllMaterializableTypes()
+			out.ObjectTypes = allTypes()
 		}
 		return out
 	}
@@ -60,7 +74,7 @@ func (r Rule) materializedTypeProjection(expandWildcard bool) RuleTypeProjection
 			out.WildcardModule = r.Module
 			out.WildcardSuppressed = !expandWildcard
 			if expandWildcard {
-				out.ObjectTypes = materializableTypesForModule(r.Module)
+				out.ObjectTypes = materializableTypesFromModule(r.Module, allTypes())
 				return out
 			}
 			continue

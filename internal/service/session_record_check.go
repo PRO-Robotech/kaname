@@ -54,7 +54,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
-	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -101,8 +101,8 @@ type evidencePass struct {
 // conditionedQuestion — достигает ли план вопроса условного прямого списка.
 // Неразрешимый план — «нет»: вердикт по нему выносит форма, а доводы ему не
 // нужны.
-func conditionedQuestion(objectType, relation string) bool {
-	plans, err := authzmodel.Shared()
+func conditionedQuestion(ctx context.Context, objectType, relation string) bool {
+	plans, err := authzsnapshot.PlansForRequest(ctx)
 	if err != nil {
 		return false
 	}
@@ -117,7 +117,7 @@ func conditionedQuestion(objectType, relation string) bool {
 // сессии вопроса. Ничего не приложено — условие остаётся без доводов и ложно.
 func (s *AuthorizeService) withSessionEvidence(ctx context.Context, pass *evidencePass, p *checkPlan,
 	now time.Time) error {
-	if s.sessions == nil || p.condCtx == nil || !conditionedQuestion(p.objectType, p.relation) {
+	if s.sessions == nil || p.condCtx == nil || !conditionedQuestion(ctx, p.objectType, p.relation) {
 		return nil
 	}
 	principal, trusted := grpcsrv.TrustedPrincipalFromContext(ctx)

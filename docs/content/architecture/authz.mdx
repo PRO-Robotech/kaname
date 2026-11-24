@@ -164,6 +164,13 @@ gRPC службы ([форма указания](/api/rest-surface#step-up)).
 базовый токен человека (уровень `1` ниже порога `2`) — нет
 ([переход на базовый токен](/api/tokens#transition)).
 
+У публикации каталога действует отдельное ограничение вызывающего:
+`CatalogPublicationService.PlanPublication` и `CatalogPublicationService.ApplyPublication`
+принимают только собственный проверенный Bearer человека с `system_admin` на кластере.
+Для Plan нужен уровень не ниже `1`, для Apply — не ниже `2`.
+Переданная шлюзом личность и служебная учётка получают отказ независимо от уровня;
+машинное освобождение от порога эти два метода не открывает.
+
 Floor стоит на **узком наборе** RPC, а не на пользовательской поверхности целиком. Критерий —
 **операция меняет posture безопасности**. Перечень ниже **выведен из контракта** — из опции
 `required_acr_min = "2"` у RPC в `proto/kaname/cloud/iam/v1/*.proto` — и сверяется с ним
@@ -179,6 +186,7 @@ Floor стоит на **узком наборе** RPC, а не на пользо
     <tr><td>состав арендатора и его личностей</td><td><code>UserService.Invite</code>, <code>UserService.ResendInvite</code>, <code>MembershipService.Create</code>, <code>UserService.RemoveFromAccount</code>, <code>UserService.Block</code>, <code>UserService.Unblock</code>, <code>UserService.ResetSecondFactor</code>, <code>UserService.ResetAccessKeys</code>, <code>ServiceAccountService.Enable</code>, <code>ServiceAccountService.Disable</code></td></tr>
     <tr><td>регистрация интерактивного клиента</td><td><code>InternalInteractiveClientService.Create</code>, <code>InternalInteractiveClientService.Update</code>, <code>InternalInteractiveClientService.Delete</code></td></tr>
     <tr><td>применение модели доступов модуля</td><td><code>InternalModuleService.Apply</code></td></tr>
+    <tr><td>публикация живого каталога модуля</td><td><code>CatalogPublicationService.ApplyPublication</code></td></tr>
     <tr><td>необратимое удаление</td><td><code>AccountService.Delete</code>, <code>ProjectService.Delete</code>, <code>GroupService.Delete</code>, <code>RoleService.Delete</code>, <code>UserService.Delete</code>, <code>ServiceAccountService.Delete</code></td></tr>
   </tbody>
 </table>

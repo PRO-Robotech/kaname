@@ -62,8 +62,9 @@ import (
 
 // ListQuery — вопрос «какие объекты этого типа доступны субъекту».
 type ListQuery struct {
-	Subject    string
-	ObjectType string
+	PreparedPlans PlanSource
+	Subject       string
+	ObjectType    string
 	// Relation — отношение в том виде, в каком его называет МОДЕЛЬ (`v_get`,
 	// `ssh`, `admin`), — та же единица, что у прямого вопроса.
 	//
@@ -500,7 +501,7 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	}
 	// Отношение, которого модель не знает, — ОШИБКА, а не пустая страница: пустую
 	// страницу за опечатку в имени ищут в правах, где строки нет ни у кого.
-	factParents, factRelations, bindVerbs, err := sourcesOf(in.ObjectType, in.Relation)
+	factParents, factRelations, bindVerbs, err := sourcesOfRequest(ctx, in.PreparedPlans, in.ObjectType, in.Relation)
 	if err != nil {
 		return nil, "", err
 	}

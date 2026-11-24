@@ -240,19 +240,19 @@ func (c *Compiler) Compile(b Binding) Set {
 		if b.CapabilityVersion == 1 {
 			rr, _, _ = domain.SplitGrantCapabilityRules(rr)
 		}
-		for _, sel := range rr.MaterializingSelectorsInScope(domain.DeriveFromResourceType(b.Scope.Type)) {
+		for _, sel := range c.facts.MaterializingSelectorsInScope(rr, domain.DeriveFromResourceType(b.Scope.Type)) {
 			origins[sel.RuleFP] = r.Fingerprint()
 		}
 	}
 	for _, r := range rules {
-		projection := r.MaterializedTypeProjection(domain.DeriveFromResourceType(b.Scope.Type))
+		projection := c.facts.MaterializedTypeProjection(r, domain.DeriveFromResourceType(b.Scope.Type))
 		if projection.WildcardKind != domain.RuleTypeWildcardNone {
-			// Реальный producer использует статический реестр либо подавляет
-			// подстановку. Это ещё не доказательство полного будущего эффекта.
-			fail("wildcard_type_producer", "static type expansion or suppressed wildcard requires a whole-effect proof")
+			// Живой каталог раскрывает нынешние типы либо подавляет подстановку.
+			// Авторская подстановка всё ещё требует доказательства полного будущего эффекта.
+			fail("wildcard_type_producer", "type expansion or suppressed wildcard requires a whole-effect proof")
 		}
 	}
-	selectors := c.facts.GrantSelectors(rules.MaterializingSelectorsInScope(domain.DeriveFromResourceType(b.Scope.Type)), policy)
+	selectors := c.facts.GrantSelectors(c.facts.MaterializingSelectorsInScope(rules, domain.DeriveFromResourceType(b.Scope.Type)), policy)
 	if b.Recipient.IsSystemClass() {
 		c.compilePublicReaders(&s, b, selectors, origins, p)
 	}

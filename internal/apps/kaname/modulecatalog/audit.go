@@ -158,6 +158,8 @@ type AppliedEvent struct {
 	PrunedSelectorRows        int
 	PrunedSelectorRowsDropped int
 	PrunedSelectorTypes       int
+	partEdition               *Edition
+	modelEdition              *Edition
 }
 
 // appliedEventOf собирает след из переписи применения — ОДНИМ местом.
@@ -213,6 +215,12 @@ func (e AppliedEvent) Payload() map[string]any {
 	}
 	if e.MaxResettledRoleVerbs != nil {
 		p["max_resettled_role_verbs"] = *e.MaxResettledRoleVerbs
+	}
+	if e.partEdition != nil && e.modelEdition != nil {
+		p["part_revision"] = e.partEdition.Revision
+		p["part_digest"] = e.partEdition.Digest
+		p["model_revision"] = e.modelEdition.Revision
+		p["model_digest"] = e.modelEdition.Digest
 	}
 	return p
 }

@@ -487,7 +487,12 @@ func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Ro
 	if role.Lifecycle.State != domain.RoleLifecycleDeclared {
 		role = domain.Role{ID: role.ID}
 	}
-	selectors := role.Rules.MaterializingSelectorsInScope(b.Scope)
+	var selectors []domain.RuleSelector
+	if cat == nil {
+		selectors = role.Rules.MaterializingSelectorsInScope(b.Scope)
+	} else {
+		selectors = cat.MaterializingSelectorsInScope(role.Rules, b.Scope)
+	}
 	scopeSelf := role.Rules.ScopeSelfVerbs(string(b.ResourceType), scopeTypeVerbs(cat, string(b.ResourceType)))
 	// Сужение СИСТЕМНОМУ КЛАССУ до чтения (Р4, SC-23) делает разворачивание —
 	// по КАЖДОМУ субъекту выдачи (reconcile/subjects.go, kaname#880), той же

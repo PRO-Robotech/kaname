@@ -8,7 +8,7 @@ package relverdict
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ ЭТО НЕ ЗЕРКАЛО ВЕРДИКТА
 //
-// Вопрос тот же и раскладывается тем же планом модели (`sourcesOf`), но обход
+// Вопрос тот же и раскладывается тем же планом модели (`sourcesOfPrepared`), но обход
 // идёт в другую сторону, и две вещи вердикт делать не обязан.
 //
 // Вердикт спрашивает про ОДНОГО субъекта и волен опросить его группы по имени.
@@ -31,8 +31,9 @@ import (
 
 // SubjectsQuery — вопрос «кто может это над этим объектом».
 type SubjectsQuery struct {
-	ObjectType string
-	ObjectID   string
+	PreparedPlans PlanSource
+	ObjectType    string
+	ObjectID      string
 	// Relation — модельное имя отношения, та же единица, что у прямого вопроса
 	// (см. `ListQuery.Relation`).
 	Relation string
@@ -202,7 +203,7 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	if limit <= 0 {
 		limit = DefaultPageSize
 	}
-	factParents, factRelations, bindVerbs, err := sourcesOf(in.ObjectType, in.Relation)
+	factParents, factRelations, bindVerbs, err := sourcesOfRequest(ctx, in.PreparedPlans, in.ObjectType, in.Relation)
 	if err != nil {
 		return nil, "", err
 	}

@@ -18,7 +18,8 @@ import (
 // PublicServices отражает дополнительные службы уже собранного публичного
 // gRPC-слушателя. Пустой профиль не поднимает маршруты FULL-only служб.
 type PublicServices struct {
-	ChildRegistration bool
+	ChildRegistration  bool
+	CatalogPublication bool
 }
 
 // NewPublic собирает публичный REST-фронт службы.

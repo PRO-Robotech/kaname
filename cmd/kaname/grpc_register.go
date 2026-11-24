@@ -96,6 +96,11 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	if svcs != nil && svcs.permissionCatalogHandler != nil {
 		iamv1.RegisterPermissionCatalogServiceServer(srv, svcs.permissionCatalogHandler)
 	}
+	// Публичная публикация каталога появляется только с собранным сценарием.
+	// Старый InternalModuleService остаётся на внутреннем слушателе.
+	if svcs != nil && svcs.catalogPublicationHandler != nil {
+		iamv1.RegisterCatalogPublicationServiceServer(srv, svcs.catalogPublicationHandler)
+	}
 	// SAKey (Class A static service-account keys; токен чеканит наш подписант).
 	// Workload Identity Federation (FederationExchangeService) removed.
 	if svcs != nil && svcs.saKeysHandler != nil {

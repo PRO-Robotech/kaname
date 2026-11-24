@@ -161,6 +161,10 @@ type services struct {
 	// Независимый RPC context не обязан наследовать startup Context profile.
 	fullModuleHandler func(*kanamepg.FullWriterContract) (*moduleapp.Handler, error)
 
+	// Публикация живого каталога — отдельная публичная поверхность.
+	// Сценарий собирает startup публикаций; InternalModuleService не заменяется.
+	catalogPublicationHandler *moduleapp.PublicationHandler
+
 	// bindingReconciler — ТОТ ЖЕ экземпляр материализации привязки, вынесенный
 	// наружу для полосы своего входа: регистрация человека материализует его
 	// собственническую выдачу (`buildLoginLane`).

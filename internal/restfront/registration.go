@@ -141,5 +141,10 @@ func registerPublicRESTServices(
 			return fmt.Errorf("публичный REST-фронт, служба ChildRegistrationService: %w", err)
 		}
 	}
+	if services.CatalogPublication {
+		if err := iamv1.RegisterCatalogPublicationServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
+			return fmt.Errorf("публичный REST-фронт, служба CatalogPublicationService: %w", err)
+		}
+	}
 	return nil
 }

@@ -152,11 +152,22 @@ func (r *CatalogWriteRepo) RunInWriteTx(
 	if r == nil || r.pool == nil || fn == nil {
 		return kaname.ErrInvalidAuthorityFencePlan
 	}
-	if r.fullContract != nil {
-		ctx = r.fullContract.Context(ctx)
-		return runFullInstallationTx(ctx, r.pool, kaname.AuthorityCatalog, func(ctx context.Context, tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
+	apply := func(ctx context.Context, tx pgx.Tx) error {
+		// После глобальной ограды видна любая ранее завершённая публикация.
+		// Изменение строк теперь допускается только с записью новой редакции.
+		var published bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.publication_model_revision)`).Scan(&published); err != nil {
+			return err
+		}
+		if published {
+			return fmt.Errorf("изменение каталога требует публикации редакции: %w", kaname.ErrSemanticIdentityUnavailable)
+		}
+		return fn(ctx, catalogWriter{tx: tx})
 	}
-	return runInstallationTx(ctx, r.pool, kaname.AuthorityCatalog, func(tx pgx.Tx) error { return fn(ctx, catalogWriter{tx: tx}) })
+	if r.fullContract != nil {
+		return runFullInstallationTx(r.fullContract.Context(ctx), r.pool, kaname.AuthorityCatalog, apply)
+	}
+	return runInstallationTx(ctx, r.pool, kaname.AuthorityCatalog, func(tx pgx.Tx) error { return apply(ctx, tx) })
 }
 
 // registrationWriterLockSQL соответствует барьеру операторов миграции 31090000.

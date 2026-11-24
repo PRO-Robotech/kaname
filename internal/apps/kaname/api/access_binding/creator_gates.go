@@ -23,9 +23,12 @@ package access_binding
 // называет первое нарушенное.
 
 import (
+	"context"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -48,11 +51,8 @@ func isCreatorRole(facts *catalog.Facts, rules domain.Rules) bool {
 
 // validateCreatorRoleGates — три структурных условия роли создателя (Р2);
 // у прочих ролей — nil.
-func (u *CreateAccessBindingUseCase) validateCreatorRoleGates(role domain.Role, b domain.AccessBinding) error {
-	var facts *catalog.Facts
-	if u.cat != nil {
-		facts = u.cat.Facts()
-	}
+func (u *CreateAccessBindingUseCase) validateCreatorRoleGates(ctx context.Context, role domain.Role, b domain.AccessBinding) error {
+	facts := authzsnapshot.FactsForRequest(ctx, u.cat)
 	if !isCreatorRole(facts, role.Rules) {
 		return nil
 	}

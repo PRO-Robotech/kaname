@@ -176,6 +176,8 @@ var cvCallerValueSpec = map[string]struct{}{
 	"login_failures_key_check":                             {},
 	"minted_token_revocations_reason_ck":                   {},
 	"minted_token_revocations_subject_ck":                  {},
+	"module_part_revision_document_size":                   {},
+	"module_part_revision_positive":                        {},
 	"object_project_binding_object_id_nonempty":            {},
 	"object_project_binding_project_id_nonempty":           {},
 	"projects_description_check":                           {},

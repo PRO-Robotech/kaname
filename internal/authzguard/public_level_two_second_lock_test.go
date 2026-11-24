@@ -159,12 +159,15 @@ func TestKN747_ServiceHoldsLevelTwoOnKeyVerbsWithoutTheEdge(t *testing.T) {
 // Перепись берётся у НАСТОЯЩЕГО встроенного каталога службы: всякая запись
 // домена `kaname.cloud.iam.v1.`, чья служба смонтирована на публичном слушателе
 // (имя без префикса `Internal` — ban #6: внутренние на :9091), с полом выше «0».
-// По каждой записи переписи одно из двух, третьего нет:
+// По каждой записи проверяется разрешённый контрактом путь предъявления:
 //
 //   - второй замок держит пол: через край уровнем на ступень ниже пола —
 //     указание повысить уровень с вызовом, называющим пол и засчитанный уровень;
 //     уровнем, равным полу, — проход; машинный принципал — проход (освобождение
 //     решает общее правило платформы);
+//   - публикация каталога принимает только предъявленное удостоверение человека:
+//     тот же пол проверяется на нём, а переданная краем личность и машина
+//     отвергаются независимо от уровня;
 //   - глагол назван в изъятии [PublicGatewayFloorExemptRPCs] с основанием, и
 //     край на нём проходит без суждения о поле.
 //
@@ -237,9 +240,28 @@ func TestKN767_EveryFlooredPublicVerbIsHeldByTheServiceThroughTheEdge(t *testing
 		locked++
 		t.Run(verb, func(t *testing.T) {
 			below := kn767Below(floor)
-			err := p.allow(gatewayCallerCtx("user", below), verb)
+			caller := gatewayCallerCtx
+			declared, presentedOnly := catalogPublicationACR(verb)
+			if presentedOnly {
+				if declared != floor {
+					t.Fatalf("пол дескриптора %q расходится с каталогом %q", declared, floor)
+				}
+				// Это отдельный контракт происхождения, а не изъятие из пола:
+				// ниже проверяются настоящий отказ и положительный близнец.
+				caller = presentedCredentialCtx
+				for _, ctx := range []context.Context{
+					gatewayCallerCtx("user", below), gatewayCallerCtx("user", floor),
+					gatewayCallerCtx("service_account", ""),
+					presentedCredentialCtx("service_account", floor),
+				} {
+					if err := p.allow(ctx, verb); status.Code(err) != codes.PermissionDenied {
+						t.Fatalf("публикация допустила переданную личность или машину: %v", err)
+					}
+				}
+			}
+			err := p.allow(caller("user", below), verb)
 			if err == nil {
-				t.Fatalf("через край уровнем %q при поле %q: служба пропустила — пол держит только край", below, floor)
+				t.Fatalf("разрешённым путём с уровнем %q при поле %q: служба пропустила", below, floor)
 			}
 			st := status.Convert(err)
 			if st.Code() != codes.Unauthenticated || st.Message() != iamerr.TextStepUpRequired {
@@ -252,11 +274,13 @@ func TestKN767_EveryFlooredPublicVerbIsHeldByTheServiceThroughTheEdge(t *testing
 			if want := iamerr.StepUpChallenge(floor, below); su.challenge != want {
 				t.Fatalf("вызов %q, ожидался %q", su.challenge, want)
 			}
-			if err := p.allow(gatewayCallerCtx("user", floor), verb); err != nil {
-				t.Fatalf("через край уровнем, равным полу %q: отказ %v", floor, err)
+			if err := p.allow(caller("user", floor), verb); err != nil {
+				t.Fatalf("разрешённым путём с уровнем, равным полу %q: отказ %v", floor, err)
 			}
-			if err := p.allow(gatewayCallerCtx("service_account", ""), verb); err != nil {
-				t.Fatalf("через край, машинный принципал: отказ %v", err)
+			if !presentedOnly {
+				if err := p.allow(gatewayCallerCtx("service_account", ""), verb); err != nil {
+					t.Fatalf("через край, машинный принципал: отказ %v", err)
+				}
 			}
 		})
 	}

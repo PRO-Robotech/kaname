@@ -476,6 +476,13 @@ func walkManifestsOnDisk(root string, accept func(name string) bool, referent Ty
 // которыми ограничена ступень первая.
 func readAndJudge(root string, listing manifestListing, referent TypeReferent,
 	opts ...LoadOption) CheckReport {
+	return readAndJudgeWithDocuments(root, listing, referent, nil, opts...)
+}
+
+// collect получает те же байты, которые прошли Load, без повторного чтения.
+// Обычный отчёт обхода исходные документы не хранит и не раскрывает.
+func readAndJudgeWithDocuments(root string, listing manifestListing, referent TypeReferent,
+	collect func(string, []byte, *Manifest), opts ...LoadOption) CheckReport {
 	// Перепись перечисления переносится в отчёт ДО всякого отказа: без неё
 	// «перечислять было нечего» неотличимо от «перечисление сорвалось».
 	report := CheckReport{
@@ -536,6 +543,9 @@ func readAndJudge(root string, listing manifestListing, referent TypeReferent,
 			continue
 		}
 		report.Manifests = append(report.Manifests, m)
+		if collect != nil {
+			collect(report.Paths[i], data, m)
+		}
 	}
 
 	return report

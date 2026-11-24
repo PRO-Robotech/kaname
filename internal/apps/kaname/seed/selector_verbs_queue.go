@@ -80,6 +80,10 @@ type SelectorVerbsCensus struct {
 	Pending int
 }
 
+// RoleProjectionSource связывает факты каталога и писателя одной редакции
+// перед началом транзакции отдельной роли.
+type RoleProjectionSource func(context.Context) (context.Context, kanamerepo.Repository, *catalog.Facts, error)
+
 // RegrainQueuedSelectorVerbs — один проход по очереди: каждая роль своей
 // транзакцией писателя.
 //
@@ -94,6 +98,12 @@ func RegrainQueuedSelectorVerbs(
 	pool *pgxpool.Pool,
 	cat *catalog.Facts,
 ) (SelectorVerbsCensus, error) {
+	return regrainQueuedSelectorVerbs(ctx, pool, func(roleCtx context.Context) (context.Context, kanamerepo.Repository, *catalog.Facts, error) {
+		return roleCtx, repo, cat, nil
+	})
+}
+
+func regrainQueuedSelectorVerbs(ctx context.Context, pool *pgxpool.Pool, source RoleProjectionSource) (SelectorVerbsCensus, error) {
 	var census SelectorVerbsCensus
 	ids, err := queuedRoleIDs(ctx, pool)
 	if err != nil {
@@ -109,7 +119,13 @@ func RegrainQueuedSelectorVerbs(
 			failures = append(failures, fmt.Errorf("пересчёт очереди глаголов правил прерван: %w", cerr))
 			break
 		}
-		if rerr := regrainOneRole(ctx, repo, cat, id); rerr != nil {
+		roleCtx, roleRepo, roleCatalog, rerr := source(ctx)
+		if rerr == nil {
+			rerr = regrainOneRole(roleCtx, roleRepo, roleCatalog, id)
+		} else {
+			rerr = fmt.Errorf("выбрать редакцию для пересчёта глаголов роли %s: %w", id, rerr)
+		}
+		if rerr != nil {
 			census.Failed++
 			failures = append(failures, rerr)
 			continue
@@ -151,8 +167,28 @@ func DrainSelectorVerbsQueue(
 	every time.Duration,
 	report func(SelectorVerbsCensus, error),
 ) error {
+	return drainSelectorVerbsQueue(ctx, every, report, func(ctx context.Context) (SelectorVerbsCensus, error) {
+		return RegrainQueuedSelectorVerbs(ctx, repo, pool, src.Facts())
+	})
+}
+
+// DrainPublishedSelectorVerbsQueue выбирает подтверждённую редакцию для каждой роли.
+func DrainPublishedSelectorVerbsQueue(ctx context.Context, pool *pgxpool.Pool, source RoleProjectionSource,
+	every time.Duration, report func(SelectorVerbsCensus, error),
+) error {
+	if source == nil {
+		return fmt.Errorf("не настроен источник редакции для пересчёта глаголов правил")
+	}
+	return drainSelectorVerbsQueue(ctx, every, report, func(ctx context.Context) (SelectorVerbsCensus, error) {
+		return regrainQueuedSelectorVerbs(ctx, pool, source)
+	})
+}
+
+func drainSelectorVerbsQueue(ctx context.Context, every time.Duration, report func(SelectorVerbsCensus, error),
+	pass func(context.Context) (SelectorVerbsCensus, error),
+) error {
 	for {
-		census, err := RegrainQueuedSelectorVerbs(ctx, repo, pool, src.Facts())
+		census, err := pass(ctx)
 		if cerr := ctx.Err(); cerr != nil {
 			return fmt.Errorf("разбор очереди глаголов правил остановлен: %w", cerr)
 		}
@@ -189,7 +225,7 @@ func regrainOneRole(ctx context.Context, repo kanamerepo.Repository, cat *catalo
 			}
 			var sels []domain.RuleSelector
 			if live {
-				sels = cat.GrantSelectors(domain.RegrainSelectors(rules), policy)
+				sels = cat.GrantSelectors(cat.RegrainSelectors(rules), policy)
 			}
 			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(id), sels)
 		}); err != nil {

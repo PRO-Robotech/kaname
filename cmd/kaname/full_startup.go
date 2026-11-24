@@ -14,6 +14,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -24,11 +25,12 @@ import (
 // Ни этот сборщик, ни serve не выполняют Stage/Activate. Пустая/неактивная база
 // в full-режиме означает отказ старта, а не предложение запустить legacy.
 type fullStartupProfile struct {
-	contract  *kanamepg.FullWriterContract
-	primary   *kanamepg.Repository
-	bundle    *granteffect.Bundle
-	manifests []*manifest.Manifest
-	model     preparedModel
+	contract    *kanamepg.FullWriterContract
+	primary     *kanamepg.Repository
+	bundle      *granteffect.Bundle
+	manifests   []*manifest.Manifest
+	model       preparedModel
+	publication *publishedStartupProfile
 }
 
 func prepareFullStartup(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (context.Context, *fullStartupProfile, error) {
@@ -42,6 +44,13 @@ func prepareFullStartup(ctx context.Context, cfg config.Config, pool *pgxpool.Po
 			return ctx, nil, fmt.Errorf("authority-protocol staged startup: %w", err)
 		}
 		return ctx, nil, nil
+	}
+	var published bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.publication_model_revision)`).Scan(&published); err != nil {
+		return ctx, nil, fmt.Errorf("проверить наличие опубликованной редакции: %w", err)
+	}
+	if published {
+		return preparePublishedFullStartup(ctx, pool, repository)
 	}
 	manifests, err := loadDeliveredManifests(logger, cfg.Manifests)
 	if err != nil {
@@ -91,7 +100,7 @@ type fullStartupParticipants struct {
 	resources  *kanamepg.ResourceObjectParticipant
 	objects    *reconcile.Reconciler
 	groups     *reconcile.Reconciler
-	bindings   *kanamepg.BindingStageParticipant
+	bindings   reconcile.StagedBindingReconciler
 }
 
 // Единственная production composition полного public контракта. Каждая фабрика
@@ -119,6 +128,17 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	}
 	if svcs.resourceRegistrar == nil || svcs.resourceGate == nil {
 		return nil, fmt.Errorf("authority-protocol full resource composition is incomplete")
+	}
+	moduleHandler, err := svcs.fullModuleHandler(profile.contract)
+	if err != nil {
+		return nil, err
+	}
+	if moduleHandler == nil {
+		return nil, fmt.Errorf("authority-protocol full module handler is absent")
+	}
+	svcs.moduleHandler = moduleHandler
+	if profile.publication != nil {
+		return wirePublishedFullStartupServices(ctx, profile.publication, svcs)
 	}
 	// Те же участники, что staged serve; full-ветка строит их из fullRepo.
 	membership, err := kanamepg.NewGroupMembershipParticipant(ctx, repo, profile.bundle)
@@ -187,14 +207,6 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	if err != nil {
 		return nil, err
 	}
-	moduleHandler, err := svcs.fullModuleHandler(profile.contract)
-	if err != nil {
-		return nil, err
-	}
-	if moduleHandler == nil {
-		return nil, fmt.Errorf("authority-protocol full module handler is absent")
-	}
-	svcs.moduleHandler = moduleHandler
 	metadata, err := kanamepg.NewMetadataMutationWriters(ctx, repo, profile.bundle)
 	if err != nil {
 		return nil, err
@@ -235,19 +247,69 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 		cluster: cluster, resources: resources, objects: objects, groups: groups, bindings: stages}, nil
 }
 
+func wirePublishedFullStartupServices(ctx context.Context, publication *publishedStartupProfile, svcs *services) (*fullStartupParticipants, error) {
+	writers := publication.writers
+	if err := writers.installResourceGate(ctx, svcs.resourceGate); err != nil {
+		return nil, err
+	}
+	// Маршрутизатор сам выбирает движок одного поколения для ресурса или группы.
+	objects, err := reconcile.NewObjectDecisionReconciler(writers, slog.Default(), catalog.Fixed{F: publication.snapshot.Facts})
+	if err != nil {
+		return nil, err
+	}
+	if err := svcs.resourceRegistrar.WithResourceDecisionRunner(writers); err != nil {
+		return nil, err
+	}
+	if err := wireObjectAndBindingAuthorityParticipants(svcs.bindingReconciler, writers, objects); err != nil {
+		return nil, err
+	}
+	svcs.internalClusterHandler.WithAdminTxBeginner(writers)
+	svcs.userHandler.WithIdentityLifecycleWriter(writers)
+	svcs.userInvite.WithInviteDecisions(writers)
+	svcs.groupHandler.WithMembershipWriter(writers).WithLifecycleWriter(writers).WithGroupAdditionAuthorityWriter(writers)
+	svcs.accountMetadataUpdate.WithAccountMetadataWriter(writers)
+	svcs.projectMetadataUpdate.WithProjectMetadataWriter(writers)
+	svcs.serviceAccountMetadataUpdate.WithServiceAccountMetadataWriter(writers)
+	svcs.serviceAccountEnable.WithServiceAccountStateWriter(writers)
+	svcs.serviceAccountDisable.WithServiceAccountStateWriter(writers)
+	svcs.accountCreate.WithAccountCreateWriter(writers)
+	svcs.accountDelete.WithAccountDeleteWriter(writers)
+	svcs.projectCreate.WithProjectCreateWriter(writers)
+	svcs.projectDelete.WithProjectDeleteWriter(writers)
+	svcs.serviceAccountCreate.WithServiceAccountCreateWriter(writers)
+	svcs.serviceAccountDelete.WithServiceAccountDeleteWriter(writers)
+	svcs.roleDelete.WithRoleDeleteWriter(writers)
+	svcs.accessBindingHandler.WithBindingDecisions(writers).WithBindingWithdrawal(writers)
+	svcs.roleHandler.WithRoleAuthorityWriter(writers)
+	svcs.grantDelegationCreate.WithAuthorityWriter(writers)
+	svcs.grantDelegationUpdate.WithAuthorityWriter(writers)
+	svcs.grantDelegationRevoke.WithRevokeAuthorityWriter(writers)
+	svcs.childRegistrationHandler = childregistrationapp.NewHandler(internaliamapp.NewUserChildRegistration(writers))
+	svcs.internalIAMHandler.WithChildParentClose(writers)
+	return &fullStartupParticipants{objects: objects, bindings: writers}, nil
+}
+
 // Общая настоящая провязка фоновой очереди. Вызывается serve и native holder;
 // configured nil по-прежнему ошибка, не молчаливый legacy fallback.
-func wireBackgroundAuthorityParticipants(engine *reconcile.Reconciler, bindings *kanamepg.BindingStageParticipant,
+func wireBackgroundAuthorityParticipants(engine *reconcile.Reconciler, bindings reconcile.StagedBindingReconciler,
 	objects *reconcile.Reconciler, groups *reconcile.Reconciler) error {
-	if engine == nil || bindings == nil || objects == nil || groups == nil {
+	if groups == nil {
+		return fmt.Errorf("authority-protocol background group participant is absent")
+	}
+	if err := wireObjectAndBindingAuthorityParticipants(engine, bindings, objects); err != nil {
+		return err
+	}
+	return engine.WithGroupObjectReconciler(groups)
+}
+
+func wireObjectAndBindingAuthorityParticipants(engine *reconcile.Reconciler, bindings reconcile.StagedBindingReconciler,
+	objects *reconcile.Reconciler) error {
+	if engine == nil || bindings == nil || objects == nil {
 		return fmt.Errorf("authority-protocol background participants are incomplete")
 	}
 	if err := engine.WithStagedBindingReconciler(bindings); err != nil {
 		return err
 	}
 	// Повторно используем engine выбранного startup profile; FULL не откатывается к legacy factory.
-	if err := engine.WithObjectReconciler(objects); err != nil {
-		return err
-	}
-	return engine.WithGroupObjectReconciler(groups)
+	return engine.WithObjectReconciler(objects)
 }

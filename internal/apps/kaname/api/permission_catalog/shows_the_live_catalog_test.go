@@ -33,11 +33,49 @@ package permission_catalog
 import (
 	"sort"
 	"testing"
+	"time"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 )
+
+func TestCatalogReturnsTheConfirmedRevisionPinnedToThisRequest(t *testing.T) {
+	rows := liveRows()
+	prior, err := catalog.NewFacts(catalog.Halves{Live: catalog.Rows{
+		Modules: rows.Modules[1:], Resources: rows.Resources[1:], Verbs: rows.Verbs[3:],
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := catalog.NewFacts(catalog.Halves{Live: rows})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := authzmodel.New(authzmodel.DSL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err := authzsnapshot.WithContext(authedCtx(), &authzsnapshot.Snapshot{
+		Revision: 2, Digest: "sha256:catalog-fixture", ConfirmedAt: time.Now(), Plans: plans, Facts: published,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(NewListPermissionCatalogUseCase(catalog.Fixed{F: prior}))
+	resp, err := h.ListPermissionCatalog(ctx, &iamv1.ListPermissionCatalogRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range resp.GetModules() {
+		if m.GetModule() == "billing" && len(m.GetResources()) == 1 && m.GetResources()[0].GetResource() == "invoice" {
+			return
+		}
+	}
+	t.Fatal("подтверждённый тип billing.invoice отсутствует в ответе")
+}
 
 // liveRows — каталог из ДВУХ строк, ни одна из которых не совпадает с деревом:
 // пара `billing.invoice` сборке неизвестна вовсе (заведена применением), пара

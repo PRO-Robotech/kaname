@@ -2741,6 +2741,26 @@
     "exempt_reason": "SELF_SERVICE"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.CatalogPublicationService/ApplyPublication",
+    "permission": "iam.modules.apply",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.CatalogPublicationService/PlanPublication",
+    "permission": "iam.modules.plan",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.ChildRegistrationService/Register",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",

@@ -21,6 +21,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -200,7 +201,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	// Набор модулей — ЖИВЫЕ строки каталога (kacho#1927), тот же снимок, которым
 	// ниже строится проекция глаголов: обе стороны правила обязаны судиться
 	// согласованным множеством, а не двумя моментами времени.
-	facts := u.cat.Facts()
+	facts := authzsnapshot.FactsForRequest(ctx, u.cat)
 	if in.Rules != nil && shared.MaskAllows(in.UpdateMask, "rules") {
 		// Validate the new rules first (specific cardinality/wildcard/feed errors),
 		// then compile (enforces the ≤1024 compiled-cap).
@@ -321,7 +322,7 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			var projection catalog.GrantProjection
 			if slices.Contains(changed, "rules") {
 				var err error
-				facts, ferr := writerRoleFacts(w, u.cat)
+				facts, ferr := writerRoleFacts(ctx, w, u.cat)
 				if ferr != nil {
 					return domain.Role{}, ferr
 				}
@@ -501,7 +502,7 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 	}
 	// Эхо мутации проецируется тем же набором, что и чтение: иначе `Create`
 	// вернул бы превью, собранное другим источником, чем последующий `Get`.
-	updated.TypeVerbs = u.cat.Facts().RolePreviewLookup()
+	updated.TypeVerbs = authzsnapshot.FactsForRequest(ctx, u.cat).RolePreviewLookup()
 	return marshalRole(updated)
 }
 
