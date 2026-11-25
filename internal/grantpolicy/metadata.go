@@ -129,12 +129,7 @@ func metadataOldEffects(work *granteffect.ProofBudget, effects []metadataEffect,
 	}
 	var old granteffect.UnionBuilder
 	for _, prior := range effects {
-		// До активации чужая PENDING-привязка ещё ничего не гарантирует.
-		if prior.carrier.Pending && prior.carrier.Binding.SourceID != wanted.Binding.SourceID {
-			continue
-		}
-		expires := prior.carrier.ExpiresAt
-		if expires != nil && (wanted.ExpiresAt == nil || expires.Before(*wanted.ExpiresAt)) {
+		if !metadataOldCoverageEligible(prior.carrier, wanted) {
 			continue
 		}
 		count, _, _ := prior.delta.Before.Cost()
@@ -146,6 +141,16 @@ func metadataOldEffects(work *granteffect.ProofBudget, effects []metadataEffect,
 		}
 	}
 	return old.Build(), nil
+}
+
+// До активации чужая PENDING-привязка не даёт покрытия. OLD другой
+// привязки подходит, если его срок покрывает весь срок новой выдачи.
+func metadataOldCoverageEligible(prior, wanted MetadataBinding) bool {
+	if prior.Pending && prior.Binding.SourceID != wanted.Binding.SourceID {
+		return false
+	}
+	return prior.ExpiresAt == nil ||
+		(wanted.ExpiresAt != nil && !prior.ExpiresAt.Before(*wanted.ExpiresAt))
 }
 
 func requireMetadataExpansion(ctx context.Context, w kaname.SemanticAuthorityWriter, p WitnessedLowerBound, work *granteffect.ProofBudget, change metadataEffect, old granteffect.Set) error {

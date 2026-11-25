@@ -75,3 +75,18 @@ func (f *Facts) ObjectVerbs(dotted string, authored []string) []string {
 	}
 	return out
 }
+
+// SelectsMemberObjects определяет, ищет ли полный проход кандидатов на членство
+// по правилу. Вложенное правило без действия регистрации всегда отбирает
+// потомков. У остальных правил хотя бы один тип должен писать права на объекте.
+func (f *Facts) SelectsMemberObjects(sel domain.RuleSelector) bool {
+	if sel.Container != nil && len(f.ChildRegistrationActions(sel)) == 0 {
+		return true
+	}
+	for _, typ := range sel.ObjectTypes {
+		if len(f.ObjectVerbs(typ, sel.Verbs)) > 0 {
+			return true
+		}
+	}
+	return false
+}
