@@ -16,6 +16,7 @@ type CallerIdentityWork struct {
 	OriginTransferCapacityFallbacks, OriginTransferEvictions, OriginTransferCandidates    int
 	OriginTransferOwners, OriginTransferFieldRestores                                     int
 	OriginTransferRepeatReplays                                                           int // Полные повторные переводы, уже обеспеченные тем же live frame.
+	InitialNilFieldReturns                                                                int // Свернутые nil-возвраты в начальном обходе поля.
 	FieldQueryCandidates                                                                  int // Число реально посещённых активных кадров запроса поля.
 	EmbeddedLiteralHits                                                                   int // Раскрытия через неизменяемый индекс полей литерала.
 	Load, Collect, MayEdges, MayPropagation, Solve                                        time.Duration
