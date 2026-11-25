@@ -51,6 +51,8 @@ type Role struct {
 	CreatedByUserID UserID
 	// UpdatedAt — last-mutation timestamp. Zero until first Update.
 	UpdatedAt time.Time
+	// ResourceVersion — непрозрачная версия прочитанной строки для Role.Update.
+	ResourceVersion string `json:"-"`
 	// Labels — tenant-facing метки САМОГО ресурса Role (НЕ путать с
 	// Rule.MatchLabels, отбирающим объекты под грантом). Делают Role
 	// label-selectable наравне с account/project (ARM_LABELS-грант на iam.role →

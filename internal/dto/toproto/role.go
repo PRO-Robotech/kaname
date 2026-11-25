@@ -80,6 +80,7 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 			TierType: r.DefinitionTierType(),
 			TierId:   r.DefinitionTierID(),
 		},
+		ResourceVersion: r.ResourceVersion,
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 		CreatedByUserId: string(r.CreatedByUserID),
