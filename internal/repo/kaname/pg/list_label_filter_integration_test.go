@@ -14,6 +14,7 @@ import (
 	repoaccount "github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 func TestAccountListLabelFilterBeforePagination(t *testing.T) {
@@ -42,6 +43,15 @@ func TestAccountListLabelFilterBeforePagination(t *testing.T) {
 	second := insert(owner, "acc-l1043-second", "")
 	nonempty := insert(otherOwner, "acc-l1043-nonempty", "dev")
 	insert(otherOwner, "acc-l1043-outside", "")
+	// Фикстура вставляет аккаунт напрямую. Публикуем его структурные связи,
+	// чтобы проверка v_update увидела владельца, как после Account.Create.
+	protectedOwner := bindingPublicOwner(t, r)
+	protectedAccount := domain.Account{ID: domain.AccountID(r.a), OwnerUserID: domain.UserID(protectedOwner)}
+	var structural []service.RelationTuple
+	for _, fact := range protectedAccount.StructuralFacts() {
+		structural = append(structural, service.RelationTuple{User: fact.User, Relation: fact.Relation, Object: fact.Object})
+	}
+	require.NoError(t, wr.EmitFGARelationWrite(ctx, structural))
 	require.NoError(t, wr.Commit(ctx))
 
 	// Установщик объявляет точную пару и выдаёт Apply владельцу аккаунта.
@@ -52,6 +62,9 @@ func TestAccountListLabelFilterBeforePagination(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, installer.PrepareAuthorityBundle(ctx, r.bundle))
 	world := metadataFixtureModeWithRig(t, false, "full", r)
+	canUpdate, err := world.door.Check(ctx, "user:"+protectedOwner, "v_update", "account:"+r.a)
+	require.NoError(t, err)
+	require.True(t, canUpdate, "владелец аккаунта должен иметь v_update до выдачи Apply")
 	_, err = installer.IssueInitialAccessLabelApply(ctx, kanamepg.InitialAccessLabelApply{
 		Account: r.a, DefinitionID: domain.AccessLabelDefinitionID(definition.ID), ExpectedRevision: definition.Revision,
 	}, r.bundle)
@@ -60,7 +73,7 @@ func TestAccountListLabelFilterBeforePagination(t *testing.T) {
 	require.NoError(t, err)
 	update := accountapp.NewUpdateAccountUseCase(world.full, world.ops).
 		WithRelationStore(world.door, nil).WithAccountMetadataWriter(ports)
-	op, err := update.Execute(declarerCtx(ctx, bindingPublicOwner(t, r)), accountapp.UpdateAccountInput{
+	op, err := update.Execute(declarerCtx(ctx, protectedOwner), accountapp.UpdateAccountInput{
 		ID: world.account.ID, UpdateMask: []string{"access_labels"}, AccessLabels: domain.Labels{labelKey: ""},
 	})
 	require.NoError(t, err)
