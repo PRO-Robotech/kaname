@@ -32,7 +32,7 @@ func TestRoleSelectorMoveNestedProjectReadsProtectedNativePairs(t *testing.T) {
 	seedNestedProjectEdge(t, r, project.ID)
 	// Ребро с тем же ребёнком не вправе заимствовать метку у чужого аккаунта.
 	tag, err := r.admin.Exec(r.ctx, `INSERT INTO kaname.resource_parent_edge(object_type,object_id,parent_type,parent_id,depth)
-		SELECT p.object_type,$1,a.object_type,$2,1 FROM ONLY kaname.catalog_resource p CROSS JOIN ONLY kaname.catalog_resource a
+		SELECT p.object_type,$1,a.object_type,$2,2 FROM ONLY kaname.catalog_resource p CROSS JOIN ONLY kaname.catalog_resource a
 		WHERE p.dotted='iam.project' AND p.live AND a.dotted='iam.account' AND a.live`, project.ID, r.b)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, tag.RowsAffected())
