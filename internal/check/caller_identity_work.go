@@ -60,6 +60,7 @@ type CallerIdentityWork struct {
 	ObjectExecutionEvictions, ObjectExecutionEvictedValues                        int // Удалённые при допуске fresh answers и их собственные единицы, без scopes.
 	ObjectExecutionRetiredAnswers, ObjectExecutionReleasedScopes                  int // Реально освобождённые obsolete answers и scopes без ссылок.
 	ObjectScopeHandoffs                                                           int // Первые interior tickets без повторного полного scopeHash, после exact matches.
+	ObjectScopePrefixFrames                                                       int // Столько кадров закрытого префикса повторно не хешировалось.
 	ObjectScopeTrackedFrameVisits                                                 int // Реально прочитанные кадры полного structural tracked-доказательства.
 	ObjectRejectEpoch, ObjectRejectCut, ObjectRejectInitial, ObjectRejectCapacity int
 	// Только записи объединения through: baseline — прежний размер копируемого дочернего множества;

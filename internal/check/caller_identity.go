@@ -130,6 +130,7 @@ type callerGraph struct {
 	signatureBodies       map[callerSignatureShape][]callerNode
 
 	fieldQueryHeads        map[callerResolveKey]int   // Индексы с единицы; только активные кадры.
+	fieldQueryHashOwner    *callerGraph               // Только закрытый collect без observer; публикация полей только владельцем кадра.
 	fieldQueryIndexOwner   *callerGraph               // Только граф текущего закрытого collect.
 	fieldQueryIndexedDepth int                        // -1 сохраняет линейный поиск до полного снятия синтетического стека.
 	nilReturnPrefixes      map[*valueSrc]int          // Префиксы в неизменяемых срезах index.returns.
@@ -426,7 +427,10 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 	defer g.refuseCallerSemanticOverflow(&report)
 	g.ctx = ctx
 	g.claimCallerFieldQueryIndex()
-	defer func() { g.fieldQueryIndexOwner = nil }()
+	if g.fieldQueryIndexOwner == g && observer == nil {
+		g.fieldQueryHashOwner = g
+	}
+	defer func() { g.fieldQueryIndexOwner, g.fieldQueryHashOwner = nil, nil }()
 	g.safeExternal = proof
 	g.callerMayRead()
 	if g.analysisErr != nil {

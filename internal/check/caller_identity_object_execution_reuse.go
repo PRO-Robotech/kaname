@@ -67,6 +67,11 @@ type callerObjectExecutions struct {
 	originIndex     *callerOriginIndex
 	containerOwners [32]callerContainerAdmission
 	containerInputs [32]callerContainerAdmission
+
+	// Один скаляр на глубину, без ссылок на стек и без удержания снимков.
+	// prefixHashes[i] включает кадры [0, i], строго ниже активного владельца.
+	prefixHashes [32]uint64
+	prefixDepth  int
 }
 
 // В execution-снимке heads не удерживается: при полном tracked-доказательстве
@@ -344,9 +349,24 @@ func (h *callerExecutionBoolHashes) sum(seed maphash.Seed, value bool) uint64 {
 // порядок refs, поля и все значения непроизводных карт сравниваются точно.
 // XOR для карт не зависит от порядка их обхода; коллизия не даёт попадания.
 func (c *callerObjectExecutions) scopeHash(g *callerGraph) uint64 {
-	hash := uint64(0)
+	var hash uint64
 	booleans := callerExecutionBoolHashes{}
-	for i := range g.fieldQueries {
+	depth, cached, limit := len(g.fieldQueries), 0, 0
+	if c != nil && c.graph == g && g.objectExecutions == c {
+		// Только закрытый collect без пользовательского callback. Текущий
+		// владелец всегда читается заново: он публикует refs/unknown между
+		// дочерними запросами. При возврате leave освобождает и его префикс.
+		if g.fieldQueryHashOwner == g && g.fieldQueryIndexOwner == g && g.fieldQueryIndexedDepth == depth && callerFreshReplayContext(g.ctx) {
+			limit = min(len(c.prefixHashes), max(0, depth-1))
+		}
+		cached = min(c.prefixDepth, limit)
+		c.prefixDepth = cached
+		if cached > 0 {
+			hash = c.prefixHashes[cached-1]
+			g.work.ObjectScopePrefixFrames += cached
+		}
+	}
+	for i := cached; i < depth; i++ {
 		query := &g.fieldQueries[i]
 		hash = hash*1099511628211 + maphash.Comparable(c.seed, query.source)
 		hash = hash*1099511628211 + booleans.sum(c.seed, query.unknown)
@@ -356,6 +376,10 @@ func (c *callerObjectExecutions) scopeHash(g *callerGraph) uint64 {
 		}
 		for _, ref := range query.refs {
 			hash = hash*1099511628211 + maphash.Comparable(c.seed, ref)
+		}
+		if i < limit {
+			c.prefixHashes[i] = hash
+			c.prefixDepth = i + 1
 		}
 	}
 	for key, value := range g.containerScanning {

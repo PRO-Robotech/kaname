@@ -97,6 +97,11 @@ func (g *callerGraph) enterCallerFieldQuery(src valueSrc, fields []*types.Var) (
 
 // Кадр снимает только его владелец в прежней позиции defer, включая отмену и UNKNOWN.
 func (g *callerGraph) leaveCallerFieldQuery(index int) {
+	// С этого момента родитель снова может публиковать refs и unknown.
+	// Сохраняем только строгих предков родителя, включая при смене ветви.
+	if c := g.objectExecutions; c != nil && c.graph == g && c.prefixDepth >= index && c.prefixDepth > 0 {
+		c.prefixDepth = max(0, index-1)
+	}
 	if g.fieldQueryIndexedDepth != len(g.fieldQueries) || g.fieldQueryIndexOwner == g && index != len(g.fieldQueries)-1 {
 		g.fieldQueryIndexOwner = nil
 		g.fieldQueryIndexedDepth = -1
