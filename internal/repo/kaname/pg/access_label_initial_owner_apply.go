@@ -35,6 +35,20 @@ type InitialAccessLabelApplyResult struct {
 
 // IssueInitialAccessLabelApply вызывает закрытую операцию владельца миграций.
 func (r *Repository) IssueInitialAccessLabelApply(ctx context.Context, in InitialAccessLabelApply, expected *granteffect.Bundle) (InitialAccessLabelApplyResult, error) {
+	return r.issueInitialAccessLabelApply(ctx, in, expected, 0, "")
+}
+
+// IssueInitialPublishedAccessLabelApply удерживает точную редакцию журнала
+// при входе в ту же транзакцию выдачи владельца миграций.
+func (r *Repository) IssueInitialPublishedAccessLabelApply(ctx context.Context, in InitialAccessLabelApply, publication PublicationAuthorityBundle) (InitialAccessLabelApplyResult, error) {
+	if publication.Revision <= 0 || publication.Bundle == nil ||
+		publication.CatalogID != publication.Bundle.Identity().CatalogID {
+		return InitialAccessLabelApplyResult{}, kaname.ErrSemanticIdentityUnavailable
+	}
+	return r.issueInitialAccessLabelApply(ctx, in, publication.Bundle, publication.Revision, publication.Digest)
+}
+
+func (r *Repository) issueInitialAccessLabelApply(ctx context.Context, in InitialAccessLabelApply, expected *granteffect.Bundle, revision int64, digest string) (InitialAccessLabelApplyResult, error) {
 	if in.Account == "" || in.Account != strings.TrimSpace(in.Account) || in.Project != strings.TrimSpace(in.Project) {
 		return InitialAccessLabelApplyResult{}, errors.New("нужен точный аккаунт и, для определения в проекте, идентификатор его проекта")
 	}
@@ -56,7 +70,13 @@ func (r *Repository) IssueInitialAccessLabelApply(ctx context.Context, in Initia
 		return InitialAccessLabelApplyResult{}, err
 	}
 	identity := expected.Identity()
-	contract, err := authorityprotocol.NewFullContract(ctx, r.master, identity.ModelID, identity.CatalogID, identity.ProjectorVersion)
+	var contract *authorityprotocol.FullContract
+	var err error
+	if revision == 0 {
+		contract, err = authorityprotocol.NewFullContract(ctx, r.master, identity.ModelID, identity.CatalogID, identity.ProjectorVersion)
+	} else {
+		contract, err = authorityprotocol.NewPublishedFullContract(ctx, r.master, identity.ModelID, identity.CatalogID, identity.ProjectorVersion, revision, digest)
+	}
 	if err != nil {
 		return InitialAccessLabelApplyResult{}, err
 	}

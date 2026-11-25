@@ -46,6 +46,8 @@ func TestAuthorityBundleCommandRequiresExplicitActionAndDelivery(t *testing.T) {
 		{[]string{"authority-bundle", "issue-initial-access-label-apply", "--image-only"}, "required flag"},
 		{[]string{"authority-bundle", "issue-initial-access-label-apply", "--account", "acc_test", "--definition", "00000000-0000-4000-8000-000000000001", "--expected-revision", "2"}, "ровно один источник"},
 		{[]string{"authority-bundle", "issue-initial-access-label-apply", "--account", "acc_test", "--definition", "00000000-0000-4000-8000-000000000001", "--expected-revision", "2", "--image-only", "--manifest-dir", "somewhere"}, "ровно один источник"},
+		{[]string{"authority-bundle", "issue-initial-access-label-apply", "--account", "acc_test", "--definition", "00000000-0000-4000-8000-000000000001", "--expected-revision", "2", "--image-only", "--publication"}, "ровно один источник"},
+		{[]string{"authority-bundle", "issue-initial-access-label-apply", "--account", "acc_test", "--definition", "00000000-0000-4000-8000-000000000001", "--expected-revision", "2", "--manifest-dir", "somewhere", "--publication"}, "ровно один источник"},
 		{[]string{"authority-bundle", "issue-initial-access-label-apply", "--account", "acc_test", "--definition", "00000000-0000-4000-8000-000000000001", "--expected-revision", "2", "--image-only", "--project="}, "пустой идентификатор проекта"},
 		// Законные формы доходят до настоящего DSN resolver; bogus гарантирует,
 		// что тест не открывает соединение даже при регрессии dispatch.
@@ -57,6 +59,7 @@ func TestAuthorityBundleCommandRequiresExplicitActionAndDelivery(t *testing.T) {
 		{[]string{"authority-bundle", "bootstrap-publication", "--image-only"}, "bogus"},
 		{[]string{"authority-bundle", "add-access-label", "--account", "acc_test", "--module", "vpc", "--resource", "network", "--key", "team", "--value", "blue", "--value", "green"}, "bogus"},
 		{[]string{"authority-bundle", "issue-initial-access-label-apply", "--account", "acc_test", "--definition", "00000000-0000-4000-8000-000000000001", "--expected-revision", "2", "--image-only"}, "bogus"},
+		{[]string{"authority-bundle", "issue-initial-access-label-apply", "--account", "acc_test", "--definition", "00000000-0000-4000-8000-000000000001", "--expected-revision", "2", "--publication"}, "bogus"},
 	} {
 		t.Run(testNameArgs(tc.args), func(t *testing.T) {
 			command := newRootCmd(fstest.MapFS{})

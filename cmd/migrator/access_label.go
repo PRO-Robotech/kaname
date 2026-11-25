@@ -61,14 +61,20 @@ func newAddAccessLabelCmd(opts *rootOptions) *cobra.Command {
 func newIssueInitialAccessLabelApplyCmd(opts *rootOptions) *cobra.Command {
 	var initial kanamepg.InitialAccessLabelApply
 	var dir, definitionID string
-	var imageOnly bool
+	var imageOnly, fromPublication bool
 	cmd := &cobra.Command{
 		Use:   "issue-initial-access-label-apply",
 		Short: "Выдать владельцу аккаунта первое отзывное полномочие на одно определение accessLabels",
 		Args:  cobraargs.NoExtraArguments,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if (dir != "") == imageOnly {
-				return errors.New("укажите ровно один источник модели: --manifest-dir или --image-only")
+			sources := 0
+			for _, selected := range []bool{dir != "", imageOnly, fromPublication} {
+				if selected {
+					sources++
+				}
+			}
+			if sources != 1 {
+				return errors.New("укажите ровно один источник модели: --manifest-dir, --image-only или --publication")
 			}
 			if cmd.Flags().Changed("project") && initial.Project == "" {
 				return errors.New("передан пустой идентификатор проекта")
@@ -81,9 +87,14 @@ func newIssueInitialAccessLabelApplyCmd(opts *rootOptions) *cobra.Command {
 				}
 				manifests = delivery.Manifests
 			}
-			source, report, err := modelcompose.Compose(authzmodel.DSL, manifests)
-			if err != nil {
-				return err
+			var source string
+			var report modelcompose.Report
+			if !fromPublication {
+				var err error
+				source, report, err = modelcompose.Compose(authzmodel.DSL, manifests)
+				if err != nil {
+					return err
+				}
 			}
 			dsn, err := validatedMigrationDSN(opts)
 			if err != nil {
@@ -96,6 +107,19 @@ func newIssueInitialAccessLabelApplyCmd(opts *rootOptions) *cobra.Command {
 				return err
 			}
 			defer pool.Close()
+			repo := kanamepg.New(pool, nil)
+			initial.DefinitionID = domain.AccessLabelDefinitionID(definitionID)
+			if fromPublication {
+				publication, err := repo.LoadPublicationAuthorityBundle(ctx)
+				if err != nil {
+					return err
+				}
+				issued, err := repo.IssueInitialPublishedAccessLabelApply(ctx, initial, publication)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(issued)
+			}
 			rows, err := kanamepg.NewCatalogRepo(pool).ReadCatalogHalves(ctx)
 			if err != nil {
 				return err
@@ -104,8 +128,7 @@ func newIssueInitialAccessLabelApplyCmd(opts *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			initial.DefinitionID = domain.AccessLabelDefinitionID(definitionID)
-			issued, err := kanamepg.New(pool, nil).IssueInitialAccessLabelApply(ctx, initial, bundle)
+			issued, err := repo.IssueInitialAccessLabelApply(ctx, initial, bundle)
 			if err != nil {
 				return err
 			}
@@ -115,6 +138,7 @@ func newIssueInitialAccessLabelApplyCmd(opts *rootOptions) *cobra.Command {
 	flags := cmd.Flags()
 	flags.StringVar(&dir, "manifest-dir", "", "Каталог фактически доставленных манифестов")
 	flags.BoolVar(&imageOnly, "image-only", false, "Явно использовать только канон образа")
+	flags.BoolVar(&fromPublication, "publication", false, "Использовать активную редакцию журнала публикаций PostgreSQL")
 	flags.StringVar(&initial.Account, "account", "", "Аккаунт владельца и определения")
 	flags.StringVar(&initial.Project, "project", "", "Проект определения внутри аккаунта")
 	flags.StringVar(&definitionID, "definition", "", "UUID уже объявленного определения")

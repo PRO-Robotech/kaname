@@ -11,6 +11,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/authorityprotocol"
@@ -108,6 +109,53 @@ func TestCatalogActivePublicationRequiresActiveHeadEvenWhenModelIsUnchanged(t *t
 	require.ErrorIs(t, err, authzsnapshot.ErrUnconfirmed)
 	_, err = catalog.ConfirmActivePublication(ctx, &current)
 	require.NoError(t, err)
+}
+
+func TestInitialAccessLabelApplyRequiresActivePublication(t *testing.T) {
+	rig, owner := writerProtocolRigBeforePreparation(t)
+	ctx := rig.ctx
+	recipient := bindingPublicOwner(t, rig)
+	_, err := rig.admin.Exec(ctx, `UPDATE ONLY kaname.users SET email_verified_at=clock_timestamp(),invite_status='ACTIVE' WHERE id=$1`, recipient)
+	require.NoError(t, err)
+	seedMembership(t, ctx, rig.admin, domain.UserID(recipient), domain.AccountID(rig.a), "ACTIVE")
+	definition, err := owner.AddAccessLabelValues(ctx, kanamepg.AccessLabelDeclaration{
+		Account: rig.a, Module: "iam", Resource: "user", Key: "classification", Values: []string{"internal"},
+	})
+	require.NoError(t, err)
+	in := kanamepg.InitialAccessLabelApply{
+		Account: rig.a, DefinitionID: domain.AccessLabelDefinitionID(definition.ID), ExpectedRevision: definition.Revision,
+	}
+	_, err = owner.BootstrapCatalogPublication(ctx, rig.bundle, nil)
+	require.NoError(t, err)
+	first, err := owner.LoadPublicationAuthorityBundle(ctx)
+	require.NoError(t, err)
+	_, err = owner.IssueInitialAccessLabelApply(ctx, in, rig.bundle)
+	require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed, "статический контракт закрыт после публикации")
+
+	contract, err := kanamepg.NewPublishedFullWriterContract(ctx, rig.repo, first)
+	require.NoError(t, err)
+	second := appendActivationPublication(t, rig, contract, 2)
+	_, err = owner.IssueInitialPublishedAccessLabelApply(ctx, in, second)
+	require.ErrorIs(t, err, kaname.ErrSemanticIdentityUnavailable, "голова журнала ещё не активирована")
+	advanced, err := owner.AdvanceNextCatalogPublication(ctx, second)
+	require.NoError(t, err)
+	require.True(t, advanced)
+	_, err = owner.IssueInitialPublishedAccessLabelApply(ctx, in, first)
+	require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed, "те же модель и каталог не заменяют ревизию")
+	_, err = rig.repo.IssueInitialPublishedAccessLabelApply(ctx, in, second)
+	requireAccessDefinitionSQLState(t, err, "42501")
+	var count int
+	require.NoError(t, rig.admin.QueryRow(ctx, `SELECT count(*) FROM kaname.authority_initial_access_label_apply_issuance WHERE definition_id=$1::uuid`,
+		definition.ID).Scan(&count))
+	require.Zero(t, count)
+
+	issued, err := owner.IssueInitialPublishedAccessLabelApply(ctx, in, second)
+	require.NoError(t, err)
+	require.NotEmpty(t, issued.RoleID)
+	require.NotEmpty(t, issued.BindingID)
+	repeated, err := owner.IssueInitialPublishedAccessLabelApply(ctx, in, second)
+	require.NoError(t, err)
+	require.Equal(t, issued, repeated)
 }
 
 func TestPublicationCatalogBindingRefusesPostJournalDrift(t *testing.T) {
