@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
@@ -130,35 +131,44 @@ func TestNestedProtectedProjectRequiresSameAccount(t *testing.T) {
 	_, err = pool.Exec(ctx, `CREATE SCHEMA kaname;
  CREATE TABLE kaname.accounts(id text PRIMARY KEY, access_labels jsonb);
  CREATE TABLE kaname.projects(id text PRIMARY KEY, account_id text NOT NULL, access_labels jsonb);
- CREATE TABLE kaname.resource_mirror(object_type text, object_id text, parent_account_id text, parent_project_id text, labels jsonb);
- CREATE TABLE kaname.resource_parent_edge(object_id text, parent_id text);
+ CREATE TABLE kaname.resource_mirror(object_type text, object_id text, parent_account_id text, parent_project_id text, labels jsonb, access_labels jsonb DEFAULT '{}');
+ CREATE TABLE kaname.catalog_resource(dotted text, object_type text, live boolean);
+ INSERT INTO kaname.catalog_resource VALUES ('iam.project','project',true),('iam.account','account',true);
+ CREATE TABLE kaname.resource_parent_edge(object_id text, parent_id text, depth integer, object_type text DEFAULT 'project', parent_type text DEFAULT 'account');
  CREATE TABLE kaname.edge_copy() INHERITS (kaname.resource_parent_edge);
  INSERT INTO kaname.accounts VALUES ('own','{"trust":"yes"}'),('foreign','{"trust":"yes"}');
  INSERT INTO kaname.projects VALUES
  ('project','own','{"trust":"yes"}'),('outdated','own','{"trust":"yes"}'),
+ ('indirect','own','{"trust":"yes"}'),('repeated','own','{"trust":"yes"}'),
  ('ordinary','own','{}'),('fallback','own','{"trust":"yes"}'),('copied','own','{"trust":"yes"}');
  INSERT INTO kaname.resource_mirror VALUES
  ('iam.project','project','own','','{"trust":"yes"}'),
  ('iam.project','outdated','foreign','','{"trust":"yes"}'),
  ('iam.project','ordinary','own','','{"trust":"yes"}'),
  ('iam.project','fallback','','project','{"trust":"yes"}'),
- ('iam.project','copied','own','','{"trust":"yes"}');
- INSERT INTO kaname.resource_parent_edge VALUES
- ('project','own'),('project','foreign'),('outdated','own'),('outdated','foreign'),
- ('ordinary','own'),('fallback','own');
- INSERT INTO kaname.edge_copy VALUES ('copied','own');`)
+ ('iam.project','copied','own','','{"trust":"yes"}'),
+ ('iam.project','indirect','own','','{"trust":"yes"}'),('iam.project','repeated','own','','{"trust":"yes"}');
+ INSERT INTO kaname.resource_parent_edge(object_id,parent_id,depth) VALUES
+ ('project','own',1),('project','foreign',2),('outdated','own',1),('outdated','foreign',2),
+ ('ordinary','own',1),('fallback','own',1),('indirect','own',2),('repeated','own',1),('repeated','own',2);
+ INSERT INTO kaname.edge_copy(object_id,parent_id,depth) VALUES ('copied','own',1);`)
 	require.NoError(t, err)
 	query := `WITH rs AS (
  SELECT $4::text AS arm, $5::text AS container_type, $6::text AS container_arm,
         '{"trust":"yes"}'::jsonb AS match_access_labels, '{"trust":"yes"}'::jsonb AS container_match_access_labels
  ), b AS (SELECT $7::text AS resource_type, $8::text AS resource_id)
  SELECT EXISTS (SELECT 1 FROM kaname.resource_parent_edge ce,rs,b
- WHERE ce.object_id=$1 AND ce.parent_id=$2` + nestedProtectedProjectOwnerPredicate("$3::text") + `)`
+ WHERE ce.object_type='project' AND ce.parent_type='account' AND ce.object_id=$1 AND ce.parent_id=$2` + nestedProtectedProjectOwnerPredicate("$3::text") + `)`
 	for _, c := range []struct {
 		name, project, edge, objectType, childArm, container, containerArm, scope, scopeID string
 		want                                                                               bool
 	}{
 		{"same owner", "project", "own", "iam.project", "access_labels", "iam.account", "anchor", "account", "own", true},
+		{"owner only at depth two", "indirect", "own", "iam.project", "access_labels", "iam.account", "anchor", "account", "own", false},
+		{"protected container only at depth two", "indirect", "own", "iam.project", "labels", "iam.account", "access_labels", "account", "own", false},
+		{"owner repeated at two depths", "repeated", "own", "iam.project", "access_labels", "iam.account", "anchor", "account", "own", false},
+		{"protected container with repeated owner", "repeated", "own", "iam.project", "labels", "iam.account", "access_labels", "account", "own", false},
+		{"ordinary indirect owner", "indirect", "own", "iam.project", "labels", "iam.account", "anchor", "account", "own", true},
 		{"same owner through parent project", "fallback", "own", "iam.project", "access_labels", "iam.account", "anchor", "account", "own", true},
 		{"same protected container owner", "project", "own", "iam.project", "labels", "iam.account", "access_labels", "account", "own", true},
 		{"foreign edge", "project", "foreign", "iam.project", "access_labels", "iam.account", "anchor", "cluster", "root", false},
@@ -174,6 +184,30 @@ func TestNestedProtectedProjectRequiresSameAccount(t *testing.T) {
 			var got bool
 			require.NoError(t, pool.QueryRow(ctx, query, c.project, c.edge, c.objectType, c.childArm, c.container, c.containerArm, c.scope, c.scopeID).Scan(&got))
 			require.Equal(t, c.want, got)
+		})
+	}
+
+	for _, c := range []struct {
+		name        string
+		account     string
+		protected   bool
+		ownerLabels map[string]string
+		want        []string
+	}{
+		{"ordinary includes indirect and repeated", "own", false, nil, []string{"copied", "fallback", "indirect", "ordinary", "outdated", "project", "repeated"}},
+		{"protected child requires direct owner", "own", true, nil, []string{"fallback", "ordinary", "project"}},
+		{"protected owner requires direct edge", "own", true, map[string]string{"trust": "yes"}, []string{"fallback", "ordinary", "project"}},
+		{"physical owner lacks requested pair", "own", true, map[string]string{"trust": "no"}, nil},
+		{"foreign candidate cannot qualify", "foreign", true, map[string]string{"trust": "yes"}, nil},
+	} {
+		t.Run("legacy "+c.name, func(t *testing.T) {
+			rows, err := resource_mirror.DescendantsOf(ctx, pool, []string{"iam.project"}, "iam.account", []string{c.account}, c.protected, c.ownerLabels)
+			require.NoError(t, err)
+			var ids []string
+			for _, row := range rows {
+				ids = append(ids, row.ObjectID)
+			}
+			require.ElementsMatch(t, c.want, ids)
 		})
 	}
 }

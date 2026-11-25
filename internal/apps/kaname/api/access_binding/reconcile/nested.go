@@ -100,7 +100,14 @@ func (r *Reconciler) matchNestedObjects(ctx context.Context, s ReconcileStore, s
 		return nil, nil
 	}
 	protected := sel.Arm == domain.ArmAccessLabels || sel.Container.Arm == domain.ArmAccessLabels
-	desc, err := s.MatchDescendants(ctx, sel.ObjectTypes, sel.Container.Type, ids, protected)
+	var containerAccessLabels map[string]string
+	if sel.Container.Arm == domain.ArmAccessLabels {
+		containerAccessLabels = sel.Container.MatchAccessLabels
+		if len(containerAccessLabels) == 0 {
+			return nil, nil
+		}
+	}
+	desc, err := s.MatchDescendants(ctx, sel.ObjectTypes, sel.Container.Type, ids, protected, containerAccessLabels)
 	if err != nil {
 		return nil, fmt.Errorf("match nested selector %s: %w", sel.RuleFP, err)
 	}

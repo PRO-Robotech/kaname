@@ -406,9 +406,20 @@ func AncestorsSnapshot(ctx context.Context, q querier, objectType, objectID stri
 // Для проекта под аккаунтом зеркало подтверждает старые обычные метки и ребро.
 // Защищённые пары принадлежат собственной строке проекта в этом аккаунте.
 // Защищённый селектор контейнера или ребёнка требует эту строку и совпадение её владельца.
-func DescendantsOf(ctx context.Context, q querier, types []string, containerType string, containerIDs []string, protected bool) ([]MirrorRow, error) {
+func DescendantsOf(ctx context.Context, q querier, types []string, containerType string, containerIDs []string, protected bool, containerAccessLabels map[string]string) ([]MirrorRow, error) {
 	if len(types) == 0 || len(containerIDs) == 0 {
 		return nil, nil
+	}
+	var ownerLabels []byte
+	if containerAccessLabels != nil {
+		if len(containerAccessLabels) == 0 {
+			return nil, nil
+		}
+		var err error
+		ownerLabels, err = json.Marshal(containerAccessLabels)
+		if err != nil {
+			return nil, fmt.Errorf("resource_mirror: marshal container access labels: %w", err)
+		}
 	}
 	rows, err := q.Query(ctx,
 		`SELECT DISTINCT m.object_type, m.object_id, m.parent_project_id,
@@ -432,9 +443,22 @@ func DescendantsOf(ctx context.Context, q querier, types []string, containerType
 		           AND owner_edge.parent_type=cc.object_type AND owner_edge.parent_id=native_project.account_id)
 		    AND native_project.account_id=COALESCE(NULLIF(m.parent_account_id,''),pj.account_id,'')
 		  WHERE cc.dotted = $2 AND cc.live
-		    AND (NOT $4::boolean OR cc.dotted <> 'iam.account' OR co.dotted <> 'iam.project' OR native_project.id IS NOT NULL)
+		    AND (NOT $4::boolean OR cc.dotted <> 'iam.account' OR co.dotted <> 'iam.project' OR (
+		         native_project.account_id=pe.parent_id AND pe.depth=1
+		     AND pe.tableoid='kaname.resource_parent_edge'::regclass
+		     AND cc.tableoid='kaname.catalog_resource'::regclass AND co.tableoid='kaname.catalog_resource'::regclass
+		     AND EXISTS (SELECT FROM ONLY kaname.accounts native_owner
+	                  WHERE native_owner.id=native_project.account_id
+	                    AND ($5::jsonb IS NULL OR native_owner.access_labels @> $5::jsonb))
+		     AND m.tableoid='kaname.resource_mirror'::regclass
+		     AND (NULLIF(m.parent_account_id,'') IS NOT NULL OR pj.tableoid='kaname.projects'::regclass)
+		     AND (SELECT count(*)=1 FROM (
+		           SELECT 1 FROM ONLY kaname.resource_parent_edge owner_edge
+		            WHERE owner_edge.object_type=pe.object_type AND owner_edge.object_id=pe.object_id
+		              AND owner_edge.parent_type=pe.parent_type AND owner_edge.parent_id=pe.parent_id
+		            LIMIT 2) same_owner)))
 		  ORDER BY m.object_type ASC, m.object_id ASC`,
-		types, containerType, containerIDs, protected,
+		types, containerType, containerIDs, protected, ownerLabels,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resource_mirror: descendants of %s: %w", containerType, err)

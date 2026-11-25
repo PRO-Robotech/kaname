@@ -359,7 +359,13 @@ func nestedProtectedProjectOwnerPredicate(objectTypeExpr string) string {
                 AND CASE WHEN ` + objectTypeExpr + ` = 'iam.project'
                           AND rs.container_type = 'iam.account'
                           AND (rs.arm = 'access_labels' OR rs.container_arm = 'access_labels')
-                  THEN ce.tableoid = 'kaname.resource_parent_edge'::regclass AND EXISTS (
+                  THEN ce.tableoid = 'kaname.resource_parent_edge'::regclass AND ce.depth = 1
+                    AND (SELECT count(*) = 1 FROM (
+                          SELECT 1 FROM ONLY kaname.resource_parent_edge owner_edge
+                           WHERE owner_edge.object_type = ce.object_type AND owner_edge.object_id = ce.object_id
+                             AND owner_edge.parent_type = ce.parent_type AND owner_edge.parent_id = ce.parent_id
+                           LIMIT 2) same_owner)
+                    AND EXISTS (
                         SELECT 1
                           FROM ONLY kaname.projects protected_project
                           JOIN ONLY kaname.accounts protected_owner ON protected_owner.id = protected_project.account_id

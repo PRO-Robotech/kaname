@@ -404,7 +404,7 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 	for _, sel := range bs.Selectors {
 		if sel.Container != nil && sel.Container.Type == domain.ScopeTypeAccountDotted && slices.Contains(sel.ObjectTypes, domain.ScopeTypeProjectDotted) {
 			projectUnderAccount = true
-			protectedProjectUnderAccount = protectedProjectUnderAccount || sel.Arm == domain.ArmAccessLabels
+			protectedProjectUnderAccount = protectedProjectUnderAccount || sel.Arm == domain.ArmAccessLabels || sel.Container.Arm == domain.ArmAccessLabels
 		}
 		for _, typ := range sel.ObjectTypes {
 			types[typ] = true

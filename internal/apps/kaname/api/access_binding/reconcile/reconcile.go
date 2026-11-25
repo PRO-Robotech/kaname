@@ -329,7 +329,7 @@ type ReconcileStore interface {
 	// контейнер типа `containerType` с идентификатором из `containerIDs`, на любой
 	// глубине (kaname#874): кандидаты вложенного правила на полном проходе.
 	// Для защищённой ветви требуется подтверждённый родитель собственного проекта.
-	MatchDescendants(ctx context.Context, types []string, containerType string, containerIDs []string, protected bool) ([]domain.MirrorObject, error)
+	MatchDescendants(ctx context.Context, types []string, containerType string, containerIDs []string, protected bool, containerAccessLabels map[string]string) ([]domain.MirrorObject, error)
 
 	// GetIAMDirectObject возвращает проекцию СОБСТВЕННОЙ таблицы той же БД (родители
 	// включения + метки) ОДНОГО родного объекта iam (iam.project / iam.account + типы

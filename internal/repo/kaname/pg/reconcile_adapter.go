@@ -1108,8 +1108,8 @@ func (s *reconcileStore) AncestorObjects(ctx context.Context, objectType, object
 // MatchDescendants — объекты типов `types`, лежащие под контейнерами
 // `containerType` с идентификаторами `containerIDs` на любой глубине (kaname#874):
 // кандидаты вложенного правила на полном проходе выдачи.
-func (s *reconcileStore) MatchDescendants(ctx context.Context, types []string, containerType string, containerIDs []string, protected bool) ([]domain.MirrorObject, error) {
-	rows, err := resource_mirror.DescendantsOf(ctx, s.tx, types, containerType, containerIDs, protected)
+func (s *reconcileStore) MatchDescendants(ctx context.Context, types []string, containerType string, containerIDs []string, protected bool, containerAccessLabels map[string]string) ([]domain.MirrorObject, error) {
+	rows, err := resource_mirror.DescendantsOf(ctx, s.tx, types, containerType, containerIDs, protected, containerAccessLabels)
 	if err != nil {
 		return nil, err
 	}
