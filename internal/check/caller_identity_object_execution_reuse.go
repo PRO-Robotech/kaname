@@ -30,8 +30,10 @@ type callerObjectExecutionScope struct {
 	references int // Живые tickets и ключи удерживаемых answers; metadata входит в единицу node.
 }
 
+// source — неизменяемое имя точного callerResolveKey внутри одного графа.
+// Пространство answers принадлежит этому же графу; неизвестные ID сюда не входят.
 type callerObjectExecutionKey struct {
-	source callerResolveKey
+	source callerObjectSourceID
 	scope  *callerObjectExecutionScope
 	state  callerObjectExecutionState
 }
@@ -494,8 +496,7 @@ func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectS
 	}
 	// Холодная эпоха, неинтернированный источник и завершённый memo идут прежним
 	// путём. Новый слой не меняет публикацию или начальные marks обычного memo.
-	source := callerResolveKeyFor(src, true)
-	id := g.objectSourceIDs[source]
+	id := g.objectSourceIDs[callerResolveKeyFor(src, true)]
 	if id == 0 || g.objectMemo == nil || g.objectMemoEpoch != g.bindingEpoch || g.initialObjectMemo == nil {
 		return original()
 	}
@@ -520,7 +521,7 @@ func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectS
 	if g.objectExecutions != c || c.graph != g {
 		return original()
 	}
-	key := callerObjectExecutionKey{source, scope, state}
+	key := callerObjectExecutionKey{id, scope, state}
 	if answer, ok := c.answers[key]; ok {
 		if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 			return nil, true
@@ -569,9 +570,8 @@ func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectS
 		g.work.ObjectExecutionCapacityFallbacks++
 		return objects, unknown
 	}
-	if _, retained := c.answers[key]; retained {
-		return objects, unknown
-	}
+	// После проверки retained до этого места код только читал тот же cache.
+	// Допущенный Err не исполняет пользовательский код; контекст проверен выше.
 	copyObjects := maps.Clone(objects)
 	if c.answers == nil {
 		c.answers = map[callerObjectExecutionKey]callerObjectExecutionAnswer{}

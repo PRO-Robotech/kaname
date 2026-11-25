@@ -97,8 +97,12 @@ func callerFillFreshReclamation(t *testing.T) (*callerGraph, *callerGraph, [2]va
 			firstActual, firstExpected := fast.work.ObjectRawEvaluations-firstRaw, reference.work.ObjectRawEvaluations-firstReferenceRaw
 			demand += 1 + len(got)
 			stored := false
+			id := fast.objectSourceIDs[callerResolveKeyFor(root, true)]
+			if id == 0 {
+				t.Fatal("expanded source has no graph-local ID")
+			}
 			for key, answer := range c.answers {
-				if key.source == callerResolveKeyFor(root, true) && key.state == state && key.scope.snapshot.matches(fast) {
+				if key.source == id && key.state == state && key.scope.snapshot.matches(fast) {
 					stored = true
 					retained[key] = callerObjectAnswer{maps.Clone(answer.answer.objects), answer.answer.unknown}
 				}

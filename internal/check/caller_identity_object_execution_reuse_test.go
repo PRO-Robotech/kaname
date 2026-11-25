@@ -414,16 +414,15 @@ func TestCallerIdentityObjectExecutionRejectsNestedBinding(t *testing.T) {
 		t.Fatal("missing typed nested binding query")
 	}
 	g.callerObjects(refs["box"], map[callerObjectSourceID]bool{})
-	g.internObjectSource(field)
+	fieldID := g.internObjectSource(field)
 	epoch, queries := g.bindingEpoch, g.work.ObjectExecutionQueries
 	before := g.callerObjectExecutionState()
 	objects, unknown := g.callerObjects(field, map[callerObjectSourceID]bool{})
 	if unknown || len(objects) == 0 || g.bindingEpoch <= epoch || g.work.ObjectExecutionQueries <= queries || before == g.callerObjectExecutionState() || g.objectExecutions.active != 0 {
 		t.Fatal("fixture did not exercise a real nested binding inside eligible initial expansion")
 	}
-	key := callerResolveKeyFor(field, true)
 	for retained := range g.objectExecutions.answers {
-		if retained.source == key && retained.state == before {
+		if retained.source == fieldID && retained.state == before {
 			t.Fatal("unstable before/after execution was retained in its old state")
 		}
 	}
